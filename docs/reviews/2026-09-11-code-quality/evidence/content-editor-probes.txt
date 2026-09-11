@@ -1,0 +1,9 @@
+content-editor-probe.cpp
+after_insert_cached_draft_old_path=1
+after_insert_cached_draft_new_path=0
+wrong_occupant_disk_wall=0
+wrong_occupant_restored_draft_wall=1
+saved_raw_first_pixel=255
+restart_uses_compressed=1
+restart_compressed_is_old_black=1
+refreshed_package_validation_passed=1

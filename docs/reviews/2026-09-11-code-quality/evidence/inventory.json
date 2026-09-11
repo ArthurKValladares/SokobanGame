@@ -1,0 +1,1650 @@
+[
+  {
+    "path": "cmake/VerifyValidationTeardownExit.cmake",
+    "lines": 37
+  },
+  {
+    "path": "cmake/VerifyShippingPackageGate.ps1",
+    "lines": 156
+  },
+  {
+    "path": "cmake/SignWindowsArtifact.cmake",
+    "lines": 33
+  },
+  {
+    "path": "tools/check_core_is_vulkan_free.sh",
+    "lines": 83
+  },
+  {
+    "path": "tools/ContentTool.cpp",
+    "lines": 71
+  },
+  {
+    "path": "packaging/CollectReleaseValidationEvidence.ps1",
+    "lines": 248
+  },
+  {
+    "path": "src/main.cpp",
+    "lines": 188
+  },
+  {
+    "path": "packaging/ValidateShippingPackage.ps1",
+    "lines": 303
+  },
+  {
+    "path": ".github/workflows/required-tests.yml",
+    "lines": 394
+  },
+  {
+    "path": "shaders/fullscreen.vert.glsl",
+    "lines": 12
+  },
+  {
+    "path": "shaders/ground_splat.frag.glsl",
+    "lines": 263
+  },
+  {
+    "path": "tools/GenerateWindowsIcon.ps1",
+    "lines": 78
+  },
+  {
+    "path": "tools/make_push_animation.py",
+    "lines": 415
+  },
+  {
+    "path": "tools/make_ground_textures.py",
+    "lines": 590
+  },
+  {
+    "path": "tools/make_drag_loops.py",
+    "lines": 120
+  },
+  {
+    "path": "shaders/shadow.vert.glsl",
+    "lines": 21
+  },
+  {
+    "path": "shaders/model_shadow.vert.glsl",
+    "lines": 27
+  },
+  {
+    "path": "shaders/model.vert.glsl",
+    "lines": 97
+  },
+  {
+    "path": "shaders/mirror_energy.frag.glsl",
+    "lines": 122
+  },
+  {
+    "path": "shaders/world_transition.frag.glsl",
+    "lines": 62
+  },
+  {
+    "path": "shaders/water.frag.glsl",
+    "lines": 730
+  },
+  {
+    "path": "shaders/ui.frag.glsl",
+    "lines": 81
+  },
+  {
+    "path": "shaders/triangle.vert.glsl",
+    "lines": 87
+  },
+  {
+    "path": "shaders/triangle.frag.glsl",
+    "lines": 564
+  },
+  {
+    "path": "shaders/tonemap.frag.glsl",
+    "lines": 66
+  },
+  {
+    "path": "shaders/ssao_composite.frag.glsl",
+    "lines": 184
+  },
+  {
+    "path": "shaders/ssao.frag.glsl",
+    "lines": 142
+  },
+  {
+    "path": "shaders/skinned_model_shadow.vert.glsl",
+    "lines": 41
+  },
+  {
+    "path": "shaders/skinned_model.vert.glsl",
+    "lines": 132
+  },
+  {
+    "path": "tests/ActionPlanTests.cpp",
+    "lines": 707
+  },
+  {
+    "path": "shaders/include/Skinning.glsl",
+    "lines": 22
+  },
+  {
+    "path": "shaders/include/SceneFrame.glsl",
+    "lines": 22
+  },
+  {
+    "path": "shaders/include/PointShadow.glsl",
+    "lines": 121
+  },
+  {
+    "path": "shaders/include/Material.glsl",
+    "lines": 22
+  },
+  {
+    "path": "shaders/include/DrawMode.glsl",
+    "lines": 54
+  },
+  {
+    "path": "shaders/include/DrawInstance.glsl",
+    "lines": 35
+  },
+  {
+    "path": "shaders/include/AmbientMask.glsl",
+    "lines": 25
+  },
+  {
+    "path": "tests/ContentPipelineTests.cpp",
+    "lines": 1126
+  },
+  {
+    "path": "tests/CompressedTextureArtifactTests.cpp",
+    "lines": 168
+  },
+  {
+    "path": "tests/CommandLineOptionsTests.cpp",
+    "lines": 269
+  },
+  {
+    "path": "tests/CampaignSessionTests.cpp",
+    "lines": 317
+  },
+  {
+    "path": "tests/AtomicFileTests.cpp",
+    "lines": 167
+  },
+  {
+    "path": "tests/AssetRequirementsTests.cpp",
+    "lines": 390
+  },
+  {
+    "path": "tests/AssetManifestTests.cpp",
+    "lines": 602
+  },
+  {
+    "path": "tests/AssetManifestEditorTests.cpp",
+    "lines": 264
+  },
+  {
+    "path": "tests/AssetLoadStateTests.cpp",
+    "lines": 244
+  },
+  {
+    "path": "tests/AssetLoadSchedulerTests.cpp",
+    "lines": 181
+  },
+  {
+    "path": "tests/AnimationEventSequencerTests.cpp",
+    "lines": 62
+  },
+  {
+    "path": "tests/AnimationControllerTests.cpp",
+    "lines": 742
+  },
+  {
+    "path": "tests/AnimationCatalogTests.cpp",
+    "lines": 234
+  },
+  {
+    "path": "tests/ActionSchedulerTests.cpp",
+    "lines": 290
+  },
+  {
+    "path": "tests/FramePacingTests.cpp",
+    "lines": 86
+  },
+  {
+    "path": "tests/FrameDescriptorSyncTests.cpp",
+    "lines": 66
+  },
+  {
+    "path": "tests/FrameArenaTests.cpp",
+    "lines": 248
+  },
+  {
+    "path": "tests/EditorInteractionTests.cpp",
+    "lines": 136
+  },
+  {
+    "path": "tests/DrawModeTests.cpp",
+    "lines": 262
+  },
+  {
+    "path": "tests/DecorationMeshCatalogTests.cpp",
+    "lines": 400
+  },
+  {
+    "path": "tests/DecorationGizmoTests.cpp",
+    "lines": 88
+  },
+  {
+    "path": "tests/CrashDiagnosticsTests.cpp",
+    "lines": 74
+  },
+  {
+    "path": "tests/GameplayLoopTests.cpp",
+    "lines": 408
+  },
+  {
+    "path": "tests/fuzz/PlayerProfileFuzz.cpp",
+    "lines": 47
+  },
+  {
+    "path": "tests/FrameTimeTelemetryTests.cpp",
+    "lines": 131
+  },
+  {
+    "path": "tests/FrameResourceTrackerTests.cpp",
+    "lines": 149
+  },
+  {
+    "path": "tests/OverworldMapTests.cpp",
+    "lines": 583
+  },
+  {
+    "path": "tests/OverworldMapEditorTests.cpp",
+    "lines": 239
+  },
+  {
+    "path": "tests/OpaqueDrawSorterTests.cpp",
+    "lines": 103
+  },
+  {
+    "path": "tests/MathTests.cpp",
+    "lines": 276
+  },
+  {
+    "path": "tests/MaterialRangeAllocatorTests.cpp",
+    "lines": 276
+  },
+  {
+    "path": "tests/LogTests.cpp",
+    "lines": 302
+  },
+  {
+    "path": "tests/LevelTransitionTests.cpp",
+    "lines": 65
+  },
+  {
+    "path": "tests/LevelTests.cpp",
+    "lines": 449
+  },
+  {
+    "path": "tests/LevelProjectStoreTests.cpp",
+    "lines": 166
+  },
+  {
+    "path": "tests/LevelEditorTests.cpp",
+    "lines": 1247
+  },
+  {
+    "path": "tests/LevelCatalogTests.cpp",
+    "lines": 131
+  },
+  {
+    "path": "tests/IsoScenePreparerTests.cpp",
+    "lines": 1738
+  },
+  {
+    "path": "tests/InputTests.cpp",
+    "lines": 289
+  },
+  {
+    "path": "tests/InputRouterTests.cpp",
+    "lines": 378
+  },
+  {
+    "path": "tests/ImageDataTests.cpp",
+    "lines": 105
+  },
+  {
+    "path": "tests/GroundPickTests.cpp",
+    "lines": 325
+  },
+  {
+    "path": "tests/GpuSkinningTests.cpp",
+    "lines": 312
+  },
+  {
+    "path": "tests/GpuMaterialTests.cpp",
+    "lines": 114
+  },
+  {
+    "path": "tests/GpuAbiTests.cpp",
+    "lines": 696
+  },
+  {
+    "path": "tests/GltfDependencyTests.cpp",
+    "lines": 572
+  },
+  {
+    "path": "tests/GeometryTests.cpp",
+    "lines": 298
+  },
+  {
+    "path": "tests/GeometrySuballocatorTests.cpp",
+    "lines": 90
+  },
+  {
+    "path": "tests/GameplaySessionTests.cpp",
+    "lines": 1219
+  },
+  {
+    "path": "tests/ScopedTestDirectory.hpp",
+    "lines": 62
+  },
+  {
+    "path": "tests/SceneDrawLanesTests.cpp",
+    "lines": 312
+  },
+  {
+    "path": "tests/SaveSlotManagerTests.cpp",
+    "lines": 730
+  },
+  {
+    "path": "tests/RuntimeTextureCatalogTests.cpp",
+    "lines": 620
+  },
+  {
+    "path": "tests/RulesTests.cpp",
+    "lines": 1192
+  },
+  {
+    "path": "tests/ResidencyBudgetTests.cpp",
+    "lines": 633
+  },
+  {
+    "path": "tests/ReservationTests.cpp",
+    "lines": 493
+  },
+  {
+    "path": "tests/RendererReconfigurationTests.cpp",
+    "lines": 99
+  },
+  {
+    "path": "tests/PresentationTests.cpp",
+    "lines": 2323
+  },
+  {
+    "path": "tests/PngWriterTests.cpp",
+    "lines": 326
+  },
+  {
+    "path": "tests/PlayerProfileTests.cpp",
+    "lines": 1910
+  },
+  {
+    "path": "tests/PbrMaterialTests.cpp",
+    "lines": 364
+  },
+  {
+    "path": "tests/ParticleSystemTests.cpp",
+    "lines": 97
+  },
+  {
+    "path": "tests/PackageValidationFixture.cpp",
+    "lines": 62
+  },
+  {
+    "path": "tests/TextureDescriptorSpaceTests.cpp",
+    "lines": 280
+  },
+  {
+    "path": "tests/TestHarness.hpp",
+    "lines": 89
+  },
+  {
+    "path": "tests/TestAssetRoot.hpp",
+    "lines": 30
+  },
+  {
+    "path": "tests/TaskSystemTests.cpp",
+    "lines": 286
+  },
+  {
+    "path": "tests/StateDeltaTests.cpp",
+    "lines": 266
+  },
+  {
+    "path": "tests/SsaoMathTests.cpp",
+    "lines": 250
+  },
+  {
+    "path": "tests/SplatPainterTests.cpp",
+    "lines": 648
+  },
+  {
+    "path": "tests/SplatCanvasTests.cpp",
+    "lines": 536
+  },
+  {
+    "path": "tests/ShellFlowTests.cpp",
+    "lines": 222
+  },
+  {
+    "path": "tests/SettingsCoordinatorTests.cpp",
+    "lines": 177
+  },
+  {
+    "path": "tests/UiTests.cpp",
+    "lines": 993
+  },
+  {
+    "path": "tests/TonemapTests.cpp",
+    "lines": 84
+  },
+  {
+    "path": "tests/TitleScreenTests.cpp",
+    "lines": 506
+  },
+  {
+    "path": "tests/TileThumbnailBakeTests.cpp",
+    "lines": 411
+  },
+  {
+    "path": "tests/TextureUploadPlanTests.cpp",
+    "lines": 222
+  },
+  {
+    "path": "tests/VulkanDeviceSelectionTests.cpp",
+    "lines": 384
+  },
+  {
+    "path": "tests/UploadRingAllocatorTests.cpp",
+    "lines": 98
+  },
+  {
+    "path": "tests/VulkanDiagnosticsTests.cpp",
+    "lines": 131
+  },
+  {
+    "path": "tests/VulkanSmokeTests.cpp",
+    "lines": 836
+  },
+  {
+    "path": "src/engine/ActionScheduler.hpp",
+    "lines": 238
+  },
+  {
+    "path": "src/engine/ActionScheduler.cpp",
+    "lines": 230
+  },
+  {
+    "path": "src/engine/ActionPresentation.hpp",
+    "lines": 69
+  },
+  {
+    "path": "src/engine/ActionPlan.hpp",
+    "lines": 202
+  },
+  {
+    "path": "src/engine/ActionPlan.cpp",
+    "lines": 449
+  },
+  {
+    "path": "src/engine/AnimationCatalogDebugUi.hpp",
+    "lines": 63
+  },
+  {
+    "path": "src/engine/AnimationCatalogDebugUi.cpp",
+    "lines": 426
+  },
+  {
+    "path": "src/engine/AnimationCatalog.hpp",
+    "lines": 127
+  },
+  {
+    "path": "src/engine/AnimationCatalog.cpp",
+    "lines": 659
+  },
+  {
+    "path": "src/engine/AnimationCatalogEditor.hpp",
+    "lines": 62
+  },
+  {
+    "path": "src/engine/AnimationCatalogEditor.cpp",
+    "lines": 160
+  },
+  {
+    "path": "src/engine/AnimationEventSequencer.cpp",
+    "lines": 78
+  },
+  {
+    "path": "src/engine/Window.hpp",
+    "lines": 29
+  },
+  {
+    "path": "src/engine/Window.cpp",
+    "lines": 95
+  },
+  {
+    "path": "src/engine/UserSettingsConfig.hpp",
+    "lines": 39
+  },
+  {
+    "path": "src/engine/ui/UiLayout.hpp",
+    "lines": 97
+  },
+  {
+    "path": "src/engine/ui/UiLayout.cpp",
+    "lines": 271
+  },
+  {
+    "path": "src/engine/ui/UiControls.hpp",
+    "lines": 68
+  },
+  {
+    "path": "src/engine/ui/UiControls.cpp",
+    "lines": 214
+  },
+  {
+    "path": "src/engine/ui/UiConfig.hpp",
+    "lines": 23
+  },
+  {
+    "path": "src/engine/ui/Ui.hpp",
+    "lines": 124
+  },
+  {
+    "path": "src/engine/ui/Ui.cpp",
+    "lines": 201
+  },
+  {
+    "path": "src/engine/ui/TitleScreen.hpp",
+    "lines": 174
+  },
+  {
+    "path": "src/engine/ui/TitleScreen.cpp",
+    "lines": 643
+  },
+  {
+    "path": "src/engine/ui/SelectorPrompt.hpp",
+    "lines": 52
+  },
+  {
+    "path": "src/engine/ui/SelectorPrompt.cpp",
+    "lines": 241
+  },
+  {
+    "path": "src/engine/ui/OptionsMenu.hpp",
+    "lines": 271
+  },
+  {
+    "path": "src/engine/ui/OptionsMenu.cpp",
+    "lines": 1658
+  },
+  {
+    "path": "src/engine/ui/MenuKit.hpp",
+    "lines": 99
+  },
+  {
+    "path": "src/engine/ui/MenuKit.cpp",
+    "lines": 110
+  },
+  {
+    "path": "src/engine/ui/LevelCompleteOverlay.hpp",
+    "lines": 96
+  },
+  {
+    "path": "src/engine/ui/LevelCompleteOverlay.cpp",
+    "lines": 241
+  },
+  {
+    "path": "src/engine/ui/InputPrompts.hpp",
+    "lines": 73
+  },
+  {
+    "path": "src/engine/ui/InputPrompts.cpp",
+    "lines": 407
+  },
+  {
+    "path": "src/engine/ui/FontAtlas.hpp",
+    "lines": 51
+  },
+  {
+    "path": "src/engine/ui/FontAtlas.cpp",
+    "lines": 132
+  },
+  {
+    "path": "src/engine/Time.hpp",
+    "lines": 205
+  },
+  {
+    "path": "src/engine/TileTypes.hpp",
+    "lines": 126
+  },
+  {
+    "path": "src/engine/TileTypes.cpp",
+    "lines": 124
+  },
+  {
+    "path": "src/engine/TileThumbnailBake.hpp",
+    "lines": 91
+  },
+  {
+    "path": "src/engine/TileThumbnailBake.cpp",
+    "lines": 210
+  },
+  {
+    "path": "src/engine/TextureSource.hpp",
+    "lines": 107
+  },
+  {
+    "path": "src/engine/TextureSource.cpp",
+    "lines": 65
+  },
+  {
+    "path": "src/engine/TaskSystem.hpp",
+    "lines": 85
+  },
+  {
+    "path": "src/engine/TaskSystem.cpp",
+    "lines": 263
+  },
+  {
+    "path": "src/engine/StateDelta.hpp",
+    "lines": 76
+  },
+  {
+    "path": "src/engine/StateDelta.cpp",
+    "lines": 187
+  },
+  {
+    "path": "src/engine/SplatPainter.hpp",
+    "lines": 153
+  },
+  {
+    "path": "src/engine/SplatPainter.cpp",
+    "lines": 385
+  },
+  {
+    "path": "src/engine/SplatCanvas.hpp",
+    "lines": 138
+  },
+  {
+    "path": "src/engine/SplatCanvas.cpp",
+    "lines": 320
+  },
+  {
+    "path": "src/engine/ShellFlow.hpp",
+    "lines": 121
+  },
+  {
+    "path": "src/engine/ShellFlow.cpp",
+    "lines": 136
+  },
+  {
+    "path": "src/engine/SettingsTypes.hpp",
+    "lines": 47
+  },
+  {
+    "path": "src/engine/SettingsTypes.cpp",
+    "lines": 63
+  },
+  {
+    "path": "src/engine/SettingsCoordinator.hpp",
+    "lines": 57
+  },
+  {
+    "path": "src/engine/SettingsCoordinator.cpp",
+    "lines": 120
+  },
+  {
+    "path": "src/engine/ScreenSelectorState.hpp",
+    "lines": 19
+  },
+  {
+    "path": "src/engine/SaveStore.hpp",
+    "lines": 114
+  },
+  {
+    "path": "src/engine/SaveStore.cpp",
+    "lines": 541
+  },
+  {
+    "path": "src/engine/SaveSlotState.hpp",
+    "lines": 24
+  },
+  {
+    "path": "src/engine/SaveSlotManager.hpp",
+    "lines": 136
+  },
+  {
+    "path": "src/engine/SaveSlotManager.cpp",
+    "lines": 483
+  },
+  {
+    "path": "src/engine/RuntimeContent.hpp",
+    "lines": 11
+  },
+  {
+    "path": "src/engine/RuntimeContent.cpp",
+    "lines": 23
+  },
+  {
+    "path": "src/engine/Rules.hpp",
+    "lines": 213
+  },
+  {
+    "path": "src/engine/Rules.cpp",
+    "lines": 1471
+  },
+  {
+    "path": "src/engine/Reservation.hpp",
+    "lines": 96
+  },
+  {
+    "path": "src/engine/Reservation.cpp",
+    "lines": 299
+  },
+  {
+    "path": "src/engine/RenderFrameParts.hpp",
+    "lines": 435
+  },
+  {
+    "path": "src/engine/RenderFrameParts.cpp",
+    "lines": 501
+  },
+  {
+    "path": "src/engine/RenderFrameBuilderEditor.cpp",
+    "lines": 812
+  },
+  {
+    "path": "src/engine/RenderFrameBuilder.hpp",
+    "lines": 124
+  },
+  {
+    "path": "src/engine/RenderFrameBuilder.cpp",
+    "lines": 1127
+  },
+  {
+    "path": "src/engine/ContentPipeline.cpp",
+    "lines": 1382
+  },
+  {
+    "path": "src/engine/AnimationPreviewDebugUi.cpp",
+    "lines": 507
+  },
+  {
+    "path": "src/engine/AnimationEventSequencer.hpp",
+    "lines": 46
+  },
+  {
+    "path": "src/engine/AssetManifestDebugUi.hpp",
+    "lines": 32
+  },
+  {
+    "path": "src/engine/CommandLineOptions.hpp",
+    "lines": 254
+  },
+  {
+    "path": "src/engine/CampaignSession.hpp",
+    "lines": 149
+  },
+  {
+    "path": "src/engine/CampaignSession.cpp",
+    "lines": 419
+  },
+  {
+    "path": "src/engine/BoardLayout.hpp",
+    "lines": 23
+  },
+  {
+    "path": "src/engine/BoardLayout.cpp",
+    "lines": 59
+  },
+  {
+    "path": "src/engine/AudioSystem.hpp",
+    "lines": 127
+  },
+  {
+    "path": "src/engine/AudioSystem.cpp",
+    "lines": 375
+  },
+  {
+    "path": "src/engine/AudioConfig.hpp",
+    "lines": 18
+  },
+  {
+    "path": "src/engine/AtomicFile.hpp",
+    "lines": 34
+  },
+  {
+    "path": "src/engine/AtomicFile.cpp",
+    "lines": 240
+  },
+  {
+    "path": "src/engine/AssetManifestDebugUi.cpp",
+    "lines": 677
+  },
+  {
+    "path": "src/engine/AssetManifest.hpp",
+    "lines": 235
+  },
+  {
+    "path": "src/engine/AsyncSaveStore.hpp",
+    "lines": 163
+  },
+  {
+    "path": "src/engine/AssetManifest.cpp",
+    "lines": 843
+  },
+  {
+    "path": "src/engine/AsyncSaveStore.cpp",
+    "lines": 314
+  },
+  {
+    "path": "src/engine/ArenaArray.hpp",
+    "lines": 127
+  },
+  {
+    "path": "src/engine/InputRouter.hpp",
+    "lines": 102
+  },
+  {
+    "path": "src/engine/InputRouter.cpp",
+    "lines": 175
+  },
+  {
+    "path": "src/engine/InputBindings.hpp",
+    "lines": 112
+  },
+  {
+    "path": "src/engine/InputBindings.cpp",
+    "lines": 278
+  },
+  {
+    "path": "src/engine/Input.hpp",
+    "lines": 124
+  },
+  {
+    "path": "src/engine/Input.cpp",
+    "lines": 448
+  },
+  {
+    "path": "src/engine/Geometry.hpp",
+    "lines": 404
+  },
+  {
+    "path": "src/engine/GameplaySession.hpp",
+    "lines": 339
+  },
+  {
+    "path": "src/engine/GameplaySession.cpp",
+    "lines": 894
+  },
+  {
+    "path": "src/engine/GameplayPresentation.hpp",
+    "lines": 111
+  },
+  {
+    "path": "src/engine/GameplayPresentation.cpp",
+    "lines": 788
+  },
+  {
+    "path": "src/engine/GameplayLoop.hpp",
+    "lines": 62
+  },
+  {
+    "path": "src/engine/GameplayLoop.cpp",
+    "lines": 263
+  },
+  {
+    "path": "src/engine/GameplayConfig.hpp",
+    "lines": 9
+  },
+  {
+    "path": "src/engine/FrameArray.hpp",
+    "lines": 180
+  },
+  {
+    "path": "src/engine/FrameArena.hpp",
+    "lines": 117
+  },
+  {
+    "path": "src/engine/FrameArena.cpp",
+    "lines": 50
+  },
+  {
+    "path": "src/engine/Flow.hpp",
+    "lines": 57
+  },
+  {
+    "path": "src/engine/ApplicationDebugUi.hpp",
+    "lines": 43
+  },
+  {
+    "path": "src/engine/EntityId.hpp",
+    "lines": 40
+  },
+  {
+    "path": "src/engine/EditorInteraction.hpp",
+    "lines": 64
+  },
+  {
+    "path": "src/engine/EditorInteraction.cpp",
+    "lines": 209
+  },
+  {
+    "path": "src/engine/ApplicationDebugUi.cpp",
+    "lines": 1101
+  },
+  {
+    "path": "src/engine/DecorationMeshCatalog.hpp",
+    "lines": 43
+  },
+  {
+    "path": "src/engine/Application.hpp",
+    "lines": 270
+  },
+  {
+    "path": "src/engine/DecorationMeshCatalog.cpp",
+    "lines": 102
+  },
+  {
+    "path": "src/engine/Application.cpp",
+    "lines": 2131
+  },
+  {
+    "path": "src/engine/DecorationGizmo.hpp",
+    "lines": 68
+  },
+  {
+    "path": "src/engine/AnimationPreviewScene.hpp",
+    "lines": 27
+  },
+  {
+    "path": "src/engine/DecorationGizmo.cpp",
+    "lines": 187
+  },
+  {
+    "path": "src/engine/AnimationPreviewScene.cpp",
+    "lines": 75
+  },
+  {
+    "path": "src/engine/AssetManifestEditor.hpp",
+    "lines": 81
+  },
+  {
+    "path": "src/engine/AssetManifestEditor.cpp",
+    "lines": 524
+  },
+  {
+    "path": "src/engine/CrashDiagnostics.hpp",
+    "lines": 30
+  },
+  {
+    "path": "src/engine/CrashDiagnostics.cpp",
+    "lines": 153
+  },
+  {
+    "path": "src/engine/ContentPipeline.hpp",
+    "lines": 110
+  },
+  {
+    "path": "src/engine/DebugUi.hpp",
+    "lines": 56
+  },
+  {
+    "path": "src/engine/DebugUi.cpp",
+    "lines": 478
+  },
+  {
+    "path": "src/engine/DecorationAssetRegistry.cpp",
+    "lines": 368
+  },
+  {
+    "path": "src/engine/ApplicationTools.hpp",
+    "lines": 126
+  },
+  {
+    "path": "src/engine/ApplicationTools.cpp",
+    "lines": 828
+  },
+  {
+    "path": "src/engine/ApplicationEvidence.cpp",
+    "lines": 280
+  },
+  {
+    "path": "src/engine/PlayerProfileCodec.cpp",
+    "lines": 1352
+  },
+  {
+    "path": "src/engine/PlayerProfile.hpp",
+    "lines": 158
+  },
+  {
+    "path": "src/engine/PlayerProfile.cpp",
+    "lines": 223
+  },
+  {
+    "path": "src/engine/ParticleSystem.hpp",
+    "lines": 66
+  },
+  {
+    "path": "src/engine/ParticleSystem.cpp",
+    "lines": 125
+  },
+  {
+    "path": "src/engine/ParticleConfig.hpp",
+    "lines": 33
+  },
+  {
+    "path": "src/engine/OverworldView.hpp",
+    "lines": 42
+  },
+  {
+    "path": "src/engine/OverworldView.cpp",
+    "lines": 191
+  },
+  {
+    "path": "src/engine/OverworldMapEditor.hpp",
+    "lines": 110
+  },
+  {
+    "path": "src/engine/OverworldMapEditor.cpp",
+    "lines": 566
+  },
+  {
+    "path": "src/engine/OverworldMap.hpp",
+    "lines": 160
+  },
+  {
+    "path": "src/engine/OverworldMap.cpp",
+    "lines": 787
+  },
+  {
+    "path": "src/engine/MirrorParticleEffect.hpp",
+    "lines": 12
+  },
+  {
+    "path": "src/engine/MirrorParticleEffect.cpp",
+    "lines": 49
+  },
+  {
+    "path": "src/engine/MiniaudioImpl.cpp",
+    "lines": 12
+  },
+  {
+    "path": "src/engine/Math.hpp",
+    "lines": 754
+  },
+  {
+    "path": "src/engine/LogQueue.hpp",
+    "lines": 44
+  },
+  {
+    "path": "src/engine/LogQueue.cpp",
+    "lines": 59
+  },
+  {
+    "path": "src/engine/Log.hpp",
+    "lines": 144
+  },
+  {
+    "path": "src/engine/Log.cpp",
+    "lines": 615
+  },
+  {
+    "path": "src/engine/AnimationPreviewDebugUi.hpp",
+    "lines": 70
+  },
+  {
+    "path": "src/engine/LevelTransition.hpp",
+    "lines": 35
+  },
+  {
+    "path": "src/engine/render/FrameTimeTelemetry.cpp",
+    "lines": 53
+  },
+  {
+    "path": "src/engine/render/FrameRetirementQueue.hpp",
+    "lines": 73
+  },
+  {
+    "path": "src/engine/render/FrameResourceTracker.hpp",
+    "lines": 33
+  },
+  {
+    "path": "src/engine/render/FrameResourceTracker.cpp",
+    "lines": 92
+  },
+  {
+    "path": "src/engine/render/FrameDescriptorSync.hpp",
+    "lines": 57
+  },
+  {
+    "path": "src/engine/render/CompressedTextureArtifact.hpp",
+    "lines": 52
+  },
+  {
+    "path": "src/engine/render/CompressedTextureArtifact.cpp",
+    "lines": 455
+  },
+  {
+    "path": "src/engine/render/CameraConfig.hpp",
+    "lines": 29
+  },
+  {
+    "path": "src/engine/render/AssetLoadState.hpp",
+    "lines": 264
+  },
+  {
+    "path": "src/engine/render/AssetLoadScheduler.hpp",
+    "lines": 118
+  },
+  {
+    "path": "src/engine/render/AssetLoadScheduler.cpp",
+    "lines": 142
+  },
+  {
+    "path": "src/engine/render/AnimationController.hpp",
+    "lines": 84
+  },
+  {
+    "path": "src/engine/render/AnimationController.cpp",
+    "lines": 219
+  },
+  {
+    "path": "src/engine/render/AnimationConfig.hpp",
+    "lines": 10
+  },
+  {
+    "path": "src/engine/PresentationTransactionBuilder.hpp",
+    "lines": 75
+  },
+  {
+    "path": "src/engine/PresentationTransactionBuilder.cpp",
+    "lines": 214
+  },
+  {
+    "path": "src/engine/PresentationSettings.hpp",
+    "lines": 69
+  },
+  {
+    "path": "src/engine/PresentationSettings.cpp",
+    "lines": 228
+  },
+  {
+    "path": "src/engine/PresentationPolicy.hpp",
+    "lines": 43
+  },
+  {
+    "path": "src/engine/PlayerProfileMigrations.hpp",
+    "lines": 44
+  },
+  {
+    "path": "src/engine/PlayerProfileMigrations.cpp",
+    "lines": 936
+  },
+  {
+    "path": "src/engine/render/RendererConfig.hpp",
+    "lines": 16
+  },
+  {
+    "path": "src/engine/render/RenderAssetRequirements.hpp",
+    "lines": 51
+  },
+  {
+    "path": "src/engine/render/RenderAssetRequirements.cpp",
+    "lines": 238
+  },
+  {
+    "path": "src/engine/render/PointShadowFaceCache.hpp",
+    "lines": 55
+  },
+  {
+    "path": "src/engine/render/SsaoMath.hpp",
+    "lines": 57
+  },
+  {
+    "path": "src/engine/render/PointShadowFaceCache.cpp",
+    "lines": 61
+  },
+  {
+    "path": "src/engine/render/SsaoMath.cpp",
+    "lines": 136
+  },
+  {
+    "path": "src/engine/render/PngWriter.hpp",
+    "lines": 47
+  },
+  {
+    "path": "src/engine/LevelTransition.cpp",
+    "lines": 63
+  },
+  {
+    "path": "src/engine/LevelProjectStore.hpp",
+    "lines": 29
+  },
+  {
+    "path": "src/engine/LevelProjectStore.cpp",
+    "lines": 430
+  },
+  {
+    "path": "src/engine/LevelEditorDebugUi.hpp",
+    "lines": 108
+  },
+  {
+    "path": "src/engine/LevelEditorDebugUi.cpp",
+    "lines": 1559
+  },
+  {
+    "path": "src/engine/LevelEditor.hpp",
+    "lines": 322
+  },
+  {
+    "path": "src/engine/LevelEditor.cpp",
+    "lines": 2462
+  },
+  {
+    "path": "src/engine/LevelCatalog.hpp",
+    "lines": 73
+  },
+  {
+    "path": "src/engine/LevelCatalog.cpp",
+    "lines": 189
+  },
+  {
+    "path": "src/engine/Level.hpp",
+    "lines": 151
+  },
+  {
+    "path": "src/engine/Level.cpp",
+    "lines": 858
+  },
+  {
+    "path": "src/engine/render/ShaderCatalog.hpp",
+    "lines": 94
+  },
+  {
+    "path": "src/engine/render/SelectorRenderConfig.hpp",
+    "lines": 50
+  },
+  {
+    "path": "src/engine/render/SceneDrawLanes.hpp",
+    "lines": 123
+  },
+  {
+    "path": "src/engine/render/ResidencyBudget.hpp",
+    "lines": 322
+  },
+  {
+    "path": "src/engine/render/SceneConfig.hpp",
+    "lines": 28
+  },
+  {
+    "path": "src/engine/render/PngWriter.cpp",
+    "lines": 471
+  },
+  {
+    "path": "src/engine/render/RenderTypes.hpp",
+    "lines": 613
+  },
+  {
+    "path": "src/engine/render/RuntimeTextureCatalog.hpp",
+    "lines": 105
+  },
+  {
+    "path": "src/engine/render/PbrMaterial.hpp",
+    "lines": 55
+  },
+  {
+    "path": "src/engine/render/RenderResolution.hpp",
+    "lines": 23
+  },
+  {
+    "path": "src/engine/render/RuntimeTextureCatalog.cpp",
+    "lines": 408
+  },
+  {
+    "path": "src/engine/render/PbrMaterial.cpp",
+    "lines": 90
+  },
+  {
+    "path": "src/engine/render/RenderResolution.cpp",
+    "lines": 47
+  },
+  {
+    "path": "src/engine/render/ReusableScratchPool.hpp",
+    "lines": 41
+  },
+  {
+    "path": "src/engine/render/OpaqueDrawSorter.hpp",
+    "lines": 44
+  },
+  {
+    "path": "src/engine/render/RendererReconfiguration.hpp",
+    "lines": 54
+  },
+  {
+    "path": "src/engine/render/RendererReconfiguration.cpp",
+    "lines": 74
+  },
+  {
+    "path": "src/engine/render/OpaqueDrawSorter.cpp",
+    "lines": 32
+  },
+  {
+    "path": "src/engine/render/MirrorConfig.hpp",
+    "lines": 26
+  },
+  {
+    "path": "src/engine/render/MaterialRenderPolicy.hpp",
+    "lines": 56
+  },
+  {
+    "path": "src/engine/render/MaterialRenderPolicy.cpp",
+    "lines": 73
+  },
+  {
+    "path": "src/engine/render/Tonemap.cpp",
+    "lines": 57
+  },
+  {
+    "path": "src/engine/render/MaterialRangeAllocator.hpp",
+    "lines": 147
+  },
+  {
+    "path": "src/engine/render/TextureUploadPlan.hpp",
+    "lines": 157
+  },
+  {
+    "path": "src/engine/render/LightingConfig.hpp",
+    "lines": 54
+  },
+  {
+    "path": "src/engine/render/TextureSourceLoader.hpp",
+    "lines": 38
+  },
+  {
+    "path": "src/engine/render/IsoScenePreparer.hpp",
+    "lines": 338
+  },
+  {
+    "path": "src/engine/render/TextureSourceLoader.cpp",
+    "lines": 218
+  },
+  {
+    "path": "src/engine/render/IsoScenePreparer.cpp",
+    "lines": 1837
+  },
+  {
+    "path": "src/engine/render/TextureMipResidency.hpp",
+    "lines": 34
+  },
+  {
+    "path": "src/engine/render/ImageData.hpp",
+    "lines": 32
+  },
+  {
+    "path": "src/engine/render/TextureMipResidency.cpp",
+    "lines": 47
+  },
+  {
+    "path": "src/engine/render/TextureMipChain.hpp",
+    "lines": 57
+  },
+  {
+    "path": "src/engine/render/TextureDescriptorSpace.hpp",
+    "lines": 155
+  },
+  {
+    "path": "src/engine/render/VulkanDebugUtils.cpp",
+    "lines": 286
+  },
+  {
+    "path": "src/engine/render/UploadRingAllocator.hpp",
+    "lines": 63
+  },
+  {
+    "path": "src/engine/render/UploadRingAllocator.cpp",
+    "lines": 150
+  },
+  {
+    "path": "src/engine/render/Tonemap.hpp",
+    "lines": 40
+  },
+  {
+    "path": "src/engine/render/GltfMesh.hpp",
+    "lines": 410
+  },
+  {
+    "path": "src/engine/render/GltfMesh.cpp",
+    "lines": 1866
+  },
+  {
+    "path": "src/engine/render/GeometrySuballocator.hpp",
+    "lines": 45
+  },
+  {
+    "path": "src/engine/render/VulkanDeviceContext.cpp",
+    "lines": 666
+  },
+  {
+    "path": "src/engine/render/GeometrySuballocator.cpp",
+    "lines": 125
+  },
+  {
+    "path": "src/engine/render/ImageData.cpp",
+    "lines": 156
+  },
+  {
+    "path": "src/engine/render/VulkanDebugUtils.hpp",
+    "lines": 92
+  },
+  {
+    "path": "src/engine/render/GpuSkinning.hpp",
+    "lines": 67
+  },
+  {
+    "path": "src/engine/render/FrameTimeTelemetry.hpp",
+    "lines": 37
+  },
+  {
+    "path": "src/engine/DecorationAssetRegistry.hpp",
+    "lines": 34
+  },
+  {
+    "path": "src/engine/render/VulkanDeviceContext.hpp",
+    "lines": 99
+  },
+  {
+    "path": "src/engine/render/GpuSkinning.cpp",
+    "lines": 159
+  },
+  {
+    "path": "src/engine/render/VulkanDeviceSelection.cpp",
+    "lines": 245
+  },
+  {
+    "path": "src/engine/render/GpuMaterial.cpp",
+    "lines": 50
+  },
+  {
+    "path": "src/engine/render/GpuMappedBuffer.hpp",
+    "lines": 93
+  },
+  {
+    "path": "src/engine/render/VulkanDeviceSelection.hpp",
+    "lines": 101
+  },
+  {
+    "path": "src/engine/render/WaterConfig.hpp",
+    "lines": 90
+  },
+  {
+    "path": "src/engine/render/VulkanUploadRing.hpp",
+    "lines": 58
+  },
+  {
+    "path": "src/engine/render/VulkanUploadRing.cpp",
+    "lines": 105
+  },
+  {
+    "path": "src/engine/render/VulkanUiResources.hpp",
+    "lines": 44
+  },
+  {
+    "path": "src/engine/render/VulkanUiResources.cpp",
+    "lines": 248
+  },
+  {
+    "path": "src/engine/render/VulkanThumbnailPass.hpp",
+    "lines": 81
+  },
+  {
+    "path": "src/engine/render/VulkanThumbnailPass.cpp",
+    "lines": 280
+  },
+  {
+    "path": "src/engine/render/VulkanTextureUploader.hpp",
+    "lines": 147
+  },
+  {
+    "path": "src/engine/render/VulkanTextureUploader.cpp",
+    "lines": 575
+  },
+  {
+    "path": "src/engine/render/VulkanSwapchainResources.hpp",
+    "lines": 182
+  },
+  {
+    "path": "src/engine/render/VulkanSwapchainResources.cpp",
+    "lines": 1107
+  },
+  {
+    "path": "src/engine/render/VulkanSsaoPass.hpp",
+    "lines": 91
+  },
+  {
+    "path": "src/engine/render/VulkanSsaoPass.cpp",
+    "lines": 378
+  },
+  {
+    "path": "src/engine/render/VulkanShadowPass.hpp",
+    "lines": 66
+  },
+  {
+    "path": "src/engine/render/VulkanShadowPass.cpp",
+    "lines": 426
+  },
+  {
+    "path": "src/engine/render/VulkanSceneRecorder.hpp",
+    "lines": 132
+  },
+  {
+    "path": "src/engine/render/VulkanSceneRecorder.cpp",
+    "lines": 2768
+  },
+  {
+    "path": "src/engine/render/VulkanSceneDescriptors.hpp",
+    "lines": 97
+  },
+  {
+    "path": "src/engine/render/VulkanSceneDescriptors.cpp",
+    "lines": 659
+  },
+  {
+    "path": "src/engine/render/VulkanResourceUtils.hpp",
+    "lines": 134
+  },
+  {
+    "path": "src/engine/render/VulkanResourceUtils.cpp",
+    "lines": 232
+  },
+  {
+    "path": "src/engine/render/VulkanRenderer.hpp",
+    "lines": 403
+  },
+  {
+    "path": "src/engine/render/VulkanRenderer.cpp",
+    "lines": 1852
+  },
+  {
+    "path": "src/engine/render/VulkanRenderConstants.hpp",
+    "lines": 304
+  },
+  {
+    "path": "src/engine/render/VulkanPipelineFactory.hpp",
+    "lines": 168
+  },
+  {
+    "path": "src/engine/render/VulkanPipelineFactory.cpp",
+    "lines": 736
+  },
+  {
+    "path": "src/engine/render/VulkanPipelineCache.hpp",
+    "lines": 61
+  },
+  {
+    "path": "src/engine/render/VulkanPipelineCache.cpp",
+    "lines": 287
+  },
+  {
+    "path": "src/engine/render/VulkanModelResources.hpp",
+    "lines": 573
+  },
+  {
+    "path": "src/engine/render/VulkanModelResources.cpp",
+    "lines": 2214
+  },
+  {
+    "path": "src/engine/render/VulkanMemoryAllocatorImplementation.cpp",
+    "lines": 3
+  },
+  {
+    "path": "src/engine/render/VulkanMemoryAllocator.hpp",
+    "lines": 71
+  },
+  {
+    "path": "src/engine/render/VulkanMemoryAllocator.cpp",
+    "lines": 152
+  },
+  {
+    "path": "src/engine/render/VulkanGpuProfiler.hpp",
+    "lines": 90
+  },
+  {
+    "path": "src/engine/render/VulkanGpuProfiler.cpp",
+    "lines": 229
+  },
+  {
+    "path": "src/engine/render/VulkanGeometryArena.hpp",
+    "lines": 104
+  },
+  {
+    "path": "src/engine/render/VulkanGeometryArena.cpp",
+    "lines": 333
+  },
+  {
+    "path": "src/engine/render/VulkanFrameCapture.hpp",
+    "lines": 34
+  },
+  {
+    "path": "src/engine/render/VulkanFrameCapture.cpp",
+    "lines": 153
+  },
+  {
+    "path": "src/engine/render/VulkanDiagnostics.hpp",
+    "lines": 27
+  },
+  {
+    "path": "src/engine/render/VulkanDiagnostics.cpp",
+    "lines": 67
+  }
+]

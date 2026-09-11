@@ -1,0 +1,15 @@
+**********************************************************************
+** Visual Studio 2022 Developer PowerShell v17.14.36
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+UiReviewProbe.cpp
+idle_graphics_frame input_cap=60 emitted_choice=5 persisted_cap=0
+page=1 viewport_height=720 content_bottom=720 commands_outside=0
+page=1 viewport_height=600 content_bottom=676 commands_outside=28
+page=1 viewport_height=480 content_bottom=676 commands_outside=66
+page=3 viewport_height=720 content_bottom=720 commands_outside=0
+page=3 viewport_height=600 content_bottom=686 commands_outside=39
+page=3 viewport_height=480 content_bottom=686 commands_outside=114
+seconds=61.2 formatted=1:01.2
+seconds=2.14748e+08 formatted=0:00.0
+seconds=1e+100 formatted=0:00.0

@@ -1,0 +1,2 @@
+heap=128 supported=1 aggregateSampledImages=136 maxDescriptorSetSampledImages=128
+WAIT_ENTER models=2

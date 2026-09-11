@@ -1,0 +1,14 @@
+**********************************************************************
+** Visual Studio 2022 Developer PowerShell v17.14.36
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+CoreReviewProbe.cpp
+slide: dt=0.0625 player=0,0 visualBlockX=1.5 committedBlockX=1 inFlight=2
+slide: dt=0.0625 player=1,0 visualBlockX=2 committedBlockX=2 inFlight=1
+slide: dt=0.0625 player=1,0 visualBlockX=2.5 committedBlockX=2 inFlight=1
+slide: dt=0.0625 player=1,0 visualBlockX=3 committedBlockX=2 inFlight=1
+slide: dt=0.0625 player=1,0 visualBlockX=3.5 committedBlockX=2 inFlight=2
+slide: dt=0.0625 player=1,1 visualBlockX=2 committedBlockX=2 inFlight=1
+slide: dt=0.015625 player=1,1 visualBlockX=4.125 committedBlockX=2 inFlight=1
+recovery: expectedLevel=7 actualLevel=0 disposition=8 status=Player profile storage unavailable: profile artifact is not a regular file: C:\Users\arthu\Documents\Projects\Sokoban Game\out\code-quality-review\probes\core\run-ad0a0c7b677943e0b274be5e7f9cffb5\profile.backup.json
+recovery: primaryStillDecodesAs=7

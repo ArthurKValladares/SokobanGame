@@ -1,10 +1,10 @@
 # Sokoban 3D handoff
 
-Updated 2026-09-09. This file contains current operating guidance and enduring
+Updated 2026-09-11. This file contains current operating guidance and enduring
 contracts. The former chronological handoff is preserved at
 [`docs/history/HANDOFF-2026-09-09.md`](docs/history/HANDOFF-2026-09-09.md).
 The active code-quality assessment and its evidence are in
-[`docs/reviews/2026-09-03-code-quality/README.md`](docs/reviews/2026-09-03-code-quality/README.md).
+[`docs/reviews/2026-09-11-code-quality/README.md`](docs/reviews/2026-09-11-code-quality/README.md).
 
 ## Current status
 
@@ -18,7 +18,7 @@ suites, while the Windows-only shipping-package gate accounts for the eighth
 difference. Do not copy these counts into new scripts. CTest is the source of
 truth.
 
-The 14 actionable findings in the September code-quality review are resolved.
+The 14 actionable findings in the September 3 code-quality review are resolved.
 Subsequent maintainability work has:
 
 - introduced typed asynchronous persistence results and documented ownership;
@@ -29,10 +29,13 @@ Subsequent maintainability work has:
 - enabled warnings-as-errors for Linux and Windows CI; and
 - removed the obsolete undefined-member probe and stale shader commentary.
 
-The remaining review backlog is measured cleanup and investigation. The next
-useful work is to migrate older test suites to the shared harness in coherent
-groups, clarify or reduce `.clang-tidy` exclusions one category at a time, and
-measure the efficiency candidates before changing architecture.
+The September 11 review records 13 new recommendations with evidence,
+acceptance criteria, and an implementation order. These are suggestions, not
+implemented fixes. Start with document/draft identity and save usability, then
+follow its packet table. Fresh Windows Debug and Release warning builds and all
+80 suites passed for each configuration at the reviewed baseline; the additional
+probes expose cases missing from those suites. Broader refactoring or efficiency
+work still requires a concrete maintenance problem or measurement.
 
 ## Build and validation
 
