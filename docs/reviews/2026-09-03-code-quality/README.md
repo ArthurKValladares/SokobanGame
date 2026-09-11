@@ -26,8 +26,12 @@ internals and art-asset quality or licensing remain outside its scope.
 
 | ID | Priority | Work | Exit criteria |
 | --- | --- | --- | --- |
-| MQ-05 | Next | Extract cohesive ownership boundaries from large modules | Each extraction must reduce a specific lifetime or state-transition ambiguity and keep dependencies narrower than the source module |
 | MQ-06 | Ongoing | Expand platform and device evidence | Run the Linux toolchain, installer, controller, audio-device, and broader Vulkan device matrix described below and retain actionable failure diagnostics |
+
+No repository-internal defect, refactoring, or measured-efficiency item from
+this review remains open. Add a new item only when a concrete finding identifies
+an ownership ambiguity, correctness risk, maintenance cost, or measured
+regression with an acceptance criterion.
 
 ## Analyzer gate maintenance
 
@@ -67,30 +71,6 @@ definitions and include graph.
 Retain the existing frame arenas, scratch reuse, suballocators, draw sorting,
 shadow caching, compressed artifacts, upload scheduling, and residency tracking
 unless equivalent measurements identify a concrete regression.
-
-## MQ-05: ownership-focused refactoring
-
-Candidate boundaries, in preferred order:
-
-1. **Prepared asset publication:** make CPU-ready ownership, admission, upload,
-   retry, and retirement transitions visible in one small state machine.
-2. **Scene recording inputs:** replace long frame/pass argument lists with
-   cohesive immutable contexts whose lifetimes do not outlive the frame.
-3. **Editor publication orchestration:** isolate transaction coordination only
-   if it makes source commit, runtime mirror, and index publication outcomes
-   easier to prove.
-4. **Application flow:** extract persistent state only when a component can own
-   its lifecycle and tests without becoming a general-purpose application
-   context.
-
-Do not split renderer or model-resource files mechanically. An extraction is
-successful when state ownership is more explicit, the new interface exposes
-fewer unrelated dependencies, failure handling remains local, and focused
-tests cover the moved invariant.
-
-Prefer named option types where call sites contain several booleans with
-meaningful combinations. Keep independent booleans when their purpose is
-obvious at the call site.
 
 ## MQ-06: coverage expansion
 
@@ -132,11 +112,12 @@ checks need the device, driver, package identity, steps, and observed result.
 
 Keep the analyzer gate green as checks and first-party code evolve.
 
-1. Extract prepared-asset publication into a focused ownership boundary while
-   preserving its retry and retirement invariants.
-2. Continue with scene-recording inputs only if the first extraction leaves a
-   similarly concrete lifetime ambiguity.
-3. Expand platform and device validation alongside the code packets it covers.
+1. Run the Linux warning and sanitizer jobs on a Linux host or CI runner.
+2. Validate the Runtime ZIP and installer on a clean Windows account or VM.
+3. Complete controller, audio, integrated-GPU, multi-monitor, and editor matrix
+   rows on machines that provide the required devices and environment.
+4. Convert any reproducible first-party failure into a focused backlog item;
+   retain passing runs as release evidence rather than permanent code work.
 
 A roadmap item is complete only when its acceptance criteria, relevant tests,
 warning gate, and documentation all describe the resulting current state.

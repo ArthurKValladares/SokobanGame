@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 namespace sokoban {
 
@@ -22,7 +23,7 @@ class VulkanSsaoPass;
 class VulkanSwapchainResources;
 class SceneRecordingSession;
 
-// Owns Vulkan command encoding for one prepared scene. It does not own any
+// Owns Vulkan command encoding for one prepared frame. It does not own any
 // Vulkan handles; the renderer supplies the resources whose lifetimes bracket
 // each record() call.
 class VulkanSceneRecorder {
@@ -67,16 +68,26 @@ public:
         bool developerWorkspaceVisible = false;
     };
 
+    struct SceneInput {
+        const RenderFrameData& frameData;
+        const PreparedRenderScene& prepared;
+    };
+
+    // All values are borrowed for the duration of record(). Keeping the
+    // optional preview as one scene prevents callers from supplying frame
+    // data without the prepared draw lists that belong to it (or vice versa).
+    struct FrameInputs {
+        VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+        uint32_t imageIndex = 0;
+        SceneInput game;
+        std::optional<SceneInput> preview;
+        const UiDrawData& uiDrawData;
+    };
+
     [[nodiscard]] RenderStats record(
         Resources resources,
         const FrameConfiguration& configuration,
-        VkCommandBuffer commandBuffer,
-        uint32_t imageIndex,
-        const RenderFrameData& frameData,
-        const PreparedRenderScene& scene,
-        const RenderFrameData* previewFrameData,
-        const PreparedRenderScene* previewScene,
-        const UiDrawData& uiDrawData) const;
+        const FrameInputs& inputs) const;
 
     // Summaries sort the fixed timing histories. Keep that diagnostic work
     // out of the recording hot path and perform it only for a stats consumer.

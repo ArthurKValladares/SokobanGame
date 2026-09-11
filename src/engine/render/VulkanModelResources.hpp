@@ -29,9 +29,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <filesystem>
-#include <future>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -358,17 +356,13 @@ private:
     };
 
     struct ModelSlot {
-        LoadState state = LoadState::Unrequested;
+        PreparedAssetPublication<PreparedModel> publication;
         GpuMesh gpu {};
         GpuSkinnedMesh skinnedGpu {};
-        std::future<PreparedModel> future;
-        std::optional<PreparedModel> prepared;
         uint64_t estimatedPreparedBytes = 0;
-        uint64_t preparedBytes = 0;
         uint64_t sourceBytes = 0;
         AdmissionDeferral admissionDeferral {};
         std::shared_ptr<const SkinnedMeshData> skinnedSource;
-        std::exception_ptr failure;
         // Captured at upload, because the CPU mesh is released immediately
         // afterwards and nothing else keeps it.
         Aabb bounds {};
@@ -386,16 +380,12 @@ private:
     };
 
     struct TextureSlot {
-        LoadState state = LoadState::Unrequested;
+        PreparedAssetPublication<PreparedTextureSource> publication;
         TextureResource gpu {};
         PendingTextureUpload upload {};
-        std::future<PreparedTextureSource> future;
-        std::optional<PreparedTextureSource> prepared;
         uint64_t estimatedPreparedBytes = 0;
-        uint64_t preparedBytes = 0;
         uint64_t sourceBytes = 0;
         AdmissionDeferral admissionDeferral {};
-        std::exception_ptr failure;
         uint64_t lastRequested = 0;
         uint64_t gpuBytes = 0;
         uint64_t fullQualityBytes = 0;
@@ -404,13 +394,9 @@ private:
     };
 
     struct AnimationSlot {
-        LoadState state = LoadState::Unrequested;
-        std::future<GltfAnimationClip> future;
-        std::optional<GltfAnimationClip> prepared;
+        PreparedAssetPublication<GltfAnimationClip> publication;
         uint64_t estimatedPreparedBytes = 0;
-        uint64_t preparedBytes = 0;
         uint64_t sourceBytes = 0;
-        std::exception_ptr failure;
         uint64_t lastRequested = 0;
     };
 

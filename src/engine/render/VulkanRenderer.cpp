@@ -636,6 +636,19 @@ void VulkanRenderer::drawFrame(
         "vkResetFences failed");
     vkCheck(vkResetCommandBuffer(frame.commandBuffer, 0), "vkResetCommandBuffer failed");
 
+    if (prepared.previewFrameData.has_value() !=
+        prepared.previewScene.has_value()) {
+        throw std::logic_error(
+            "Prepared preview frame and scene must be published together");
+    }
+    std::optional<VulkanSceneRecorder::SceneInput> previewInput;
+    if (prepared.previewFrameData && prepared.previewScene) {
+        previewInput.emplace(
+            VulkanSceneRecorder::SceneInput {
+                *prepared.previewFrameData,
+                *prepared.previewScene,
+            });
+    }
     lastStats_ = sceneRecorder_.record(
         {
             .device = deviceContext_.device(),
@@ -672,15 +685,13 @@ void VulkanRenderer::drawFrame(
                     .has_value(),
             .developerWorkspaceVisible = developerWorkspaceVisible,
         },
-        frame.commandBuffer,
-        imageIndex,
-        frameData,
-        prepared.scene,
-        prepared.previewFrameData
-            ? &*prepared.previewFrameData
-            : nullptr,
-        prepared.previewScene ? &*prepared.previewScene : nullptr,
-        uiDrawData);
+        {
+            .commandBuffer = frame.commandBuffer,
+            .imageIndex = imageIndex,
+            .game = { frameData, prepared.scene },
+            .preview = previewInput,
+            .uiDrawData = uiDrawData,
+        });
     commandRecordingTimeTelemetry_.record(
         elapsedMilliseconds(commandRecordingStart));
     lastStats_.gpuTimestampsSupported = gpuProfiler_.supported();

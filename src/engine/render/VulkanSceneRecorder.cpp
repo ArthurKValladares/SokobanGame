@@ -239,19 +239,7 @@ public:
     SceneRecordingSession(
         VulkanSceneRecorder::Resources resources,
         const VulkanSceneRecorder::FrameConfiguration& configuration,
-        PointShadowFaceCache& pointShadowFaceCache,
-        std::array<std::vector<PointShadowModelState>,
-            RenderFrameData::pointLightCapacity>& pointShadowModelStateScratch,
-        bool pointShadowCacheEnabled,
-        VulkanSceneRecorder::Scratch& scratch,
-        bool scratchReuseEnabled,
-        FrameTimeTelemetry& setupTimeTelemetry,
-        FrameTimeTelemetry& gameTimeTelemetry,
-        FrameTimeTelemetry& shadowTimeTelemetry,
-        FrameTimeTelemetry& sceneTimeTelemetry,
-        FrameTimeTelemetry& ssaoTimeTelemetry,
-        FrameTimeTelemetry& previewTimeTelemetry,
-        FrameTimeTelemetry& outputTimeTelemetry)
+        const VulkanSceneRecorder& recorder)
         : device_(resources.device)
         , gpuProfiler_(resources.gpuProfiler)
         , swapchain_(resources.swapchain)
@@ -261,30 +249,35 @@ public:
         , pipelines_(resources.pipelines)
         , models_(resources.modelResources)
         , configuration_(configuration)
-        , pointShadowFaceCache_(pointShadowFaceCache)
-        , pointShadowModelStateScratch_(pointShadowModelStateScratch)
-        , pointShadowCacheEnabled_(pointShadowCacheEnabled)
-        , scratch_(scratch)
-        , scratchReuseEnabled_(scratchReuseEnabled)
-        , setupTimeTelemetry_(setupTimeTelemetry)
-        , gameTimeTelemetry_(gameTimeTelemetry)
-        , shadowTimeTelemetry_(shadowTimeTelemetry)
-        , sceneTimeTelemetry_(sceneTimeTelemetry)
-        , ssaoTimeTelemetry_(ssaoTimeTelemetry)
-        , previewTimeTelemetry_(previewTimeTelemetry)
-        , outputTimeTelemetry_(outputTimeTelemetry)
+        , pointShadowFaceCache_(recorder.pointShadowFaceCache_)
+        , pointShadowModelStateScratch_(
+              recorder.pointShadowModelStateScratch_)
+        , pointShadowCacheEnabled_(recorder.pointShadowCacheEnabled_)
+        , scratch_(*recorder.scratch_)
+        , scratchReuseEnabled_(recorder.scratchReuseEnabled_)
+        , setupTimeTelemetry_(recorder.setupTimeTelemetry_)
+        , gameTimeTelemetry_(recorder.gameTimeTelemetry_)
+        , shadowTimeTelemetry_(recorder.shadowTimeTelemetry_)
+        , sceneTimeTelemetry_(recorder.sceneTimeTelemetry_)
+        , ssaoTimeTelemetry_(recorder.ssaoTimeTelemetry_)
+        , previewTimeTelemetry_(recorder.previewTimeTelemetry_)
+        , outputTimeTelemetry_(recorder.outputTimeTelemetry_)
     {
     }
 
-    RenderStats record(
-        VkCommandBuffer commandBuffer,
-        uint32_t imageIndex,
-        const RenderFrameData& frameData,
-        const PreparedRenderScene& scene,
-        const RenderFrameData* previewFrameData,
-        const PreparedRenderScene* previewScene,
-        const UiDrawData& uiDrawData)
+    RenderStats record(const VulkanSceneRecorder::FrameInputs& inputs)
     {
+        const VkCommandBuffer commandBuffer = inputs.commandBuffer;
+        const uint32_t imageIndex = inputs.imageIndex;
+        const RenderFrameData& frameData = inputs.game.frameData;
+        const PreparedRenderScene& scene = inputs.game.prepared;
+        const auto* const preview =
+            inputs.preview ? &*inputs.preview : nullptr;
+        const RenderFrameData* const previewFrameData =
+            preview ? &preview->frameData : nullptr;
+        const PreparedRenderScene* const previewScene =
+            preview ? &preview->prepared : nullptr;
+        const UiDrawData& uiDrawData = inputs.uiDrawData;
         const VkExtent2D extent = swapchain_.extent();
         const VkExtent2D renderExtent = swapchain_.renderExtent();
         const VkExtent2D ssaoExtent = ssaoPass_.aoExtent();
@@ -2746,36 +2739,12 @@ private:
 RenderStats VulkanSceneRecorder::record(
     Resources resources,
     const FrameConfiguration& configuration,
-    VkCommandBuffer commandBuffer,
-    uint32_t imageIndex,
-    const RenderFrameData& frameData,
-    const PreparedRenderScene& scene,
-    const RenderFrameData* previewFrameData,
-    const PreparedRenderScene* previewScene,
-    const UiDrawData& uiDrawData) const
+    const FrameInputs& inputs) const
 {
     return SceneRecordingSession(
         resources,
         configuration,
-        pointShadowFaceCache_,
-        pointShadowModelStateScratch_,
-        pointShadowCacheEnabled_,
-        *scratch_,
-        scratchReuseEnabled_,
-        setupTimeTelemetry_,
-        gameTimeTelemetry_,
-        shadowTimeTelemetry_,
-        sceneTimeTelemetry_,
-        ssaoTimeTelemetry_,
-        previewTimeTelemetry_,
-        outputTimeTelemetry_).record(
-        commandBuffer,
-        imageIndex,
-        frameData,
-        scene,
-        previewFrameData,
-        previewScene,
-        uiDrawData);
+        *this).record(inputs);
 }
 
 void VulkanSceneRecorder::populateTimingStats(RenderStats& stats) const
