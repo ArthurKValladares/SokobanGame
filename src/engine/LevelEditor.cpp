@@ -1778,6 +1778,28 @@ void LevelEditor::addLevelAt(int levelIndex)
     }
 
     const std::vector<std::string> rows = defaultScreenRows();
+    ScreenIdentityRemaps identityRemaps;
+    for (const LevelDirectory& level : levels) {
+        if (level.index < levelIndex) {
+            continue;
+        }
+        const std::filesystem::path shiftedLevel = levelDirectoryPath(
+            document_.browserRoot, level.index + 1);
+        for (const ScreenFile& screen : level.screens) {
+            identityRemaps.push_back({
+                .sourcePath = screen.path,
+                .destinationPath = screenFilePath(shiftedLevel, screen.index),
+                .sourceLocation = LevelLocation {
+                    .level = level.index,
+                    .screen = screen.index,
+                },
+                .destinationLocation = LevelLocation {
+                    .level = level.index + 1,
+                    .screen = screen.index,
+                },
+            });
+        }
+    }
     if (!applyProjectMutation([=](const std::filesystem::path& root) {
             rewriteOverworldSelectors(
                 root,
@@ -1799,13 +1821,13 @@ void LevelEditor::addLevelAt(int levelIndex)
             writeScreenRows(
                 screenFilePath(levelDirectoryPath(root, levelIndex), 0),
                 rows);
-        })) {
+        }, identityRemaps)) {
         return;
     }
 
     const std::filesystem::path newLevelPath = levelDirectoryPath(document_.browserRoot, levelIndex);
     const std::filesystem::path newScreenPath = screenFilePath(newLevelPath, 0);
-    if (!loadDocument(newScreenPath)) {
+    if (!openDocument(newScreenPath)) {
         return;
     }
     document_.status = "Added " + newLevelPath.filename().string() + ".";
@@ -1847,6 +1869,36 @@ void LevelEditor::deleteLevel(const LevelDirectory& levelToDelete)
     const std::vector<LevelDirectory> levels = collectLevelDirectories();
     const std::filesystem::path deletedName =
         uniqueDeletedLevelPath(levelToDelete.path).filename();
+    ScreenIdentityRemaps identityRemaps;
+    const std::filesystem::path deletedLevel =
+        deletedLevelRoot() / deletedName;
+    for (const LevelDirectory& level : levels) {
+        if (level.index < levelToDelete.index) {
+            continue;
+        }
+        const std::filesystem::path destinationLevel =
+            level.index == levelToDelete.index
+            ? deletedLevel
+            : levelDirectoryPath(document_.browserRoot, level.index - 1);
+        for (const ScreenFile& screen : level.screens) {
+            std::optional<LevelLocation> destinationLocation;
+            if (level.index != levelToDelete.index) {
+                destinationLocation = LevelLocation {
+                    .level = level.index - 1,
+                    .screen = screen.index,
+                };
+            }
+            identityRemaps.push_back({
+                .sourcePath = screen.path,
+                .destinationPath = destinationLevel / screen.path.filename(),
+                .sourceLocation = LevelLocation {
+                    .level = level.index,
+                    .screen = screen.index,
+                },
+                .destinationLocation = destinationLocation,
+            });
+        }
+    }
     if (!applyProjectMutation([=](const std::filesystem::path& root) {
             rewriteOverworldSelectors(
                 root,
@@ -1875,7 +1927,7 @@ void LevelEditor::deleteLevel(const LevelDirectory& levelToDelete)
                     levelDirectoryPath(root, index),
                     levelDirectoryPath(root, index - 1));
             }
-        })) {
+        }, identityRemaps)) {
         return;
     }
     loadFirstAvailableScreen();
@@ -1895,6 +1947,24 @@ void LevelEditor::addScreenAt(const LevelDirectory& level, int screenIndex)
     }
 
     const std::vector<std::string> rows = defaultScreenRows();
+    ScreenIdentityRemaps identityRemaps;
+    for (const ScreenFile& screen : level.screens) {
+        if (screen.index < screenIndex) {
+            continue;
+        }
+        identityRemaps.push_back({
+            .sourcePath = screen.path,
+            .destinationPath = screenFilePath(level.path, screen.index + 1),
+            .sourceLocation = LevelLocation {
+                .level = level.index,
+                .screen = screen.index,
+            },
+            .destinationLocation = LevelLocation {
+                .level = level.index,
+                .screen = screen.index + 1,
+            },
+        });
+    }
     if (!applyProjectMutation([=](const std::filesystem::path& root) {
             rewriteOverworldSelectors(
                 root,
@@ -1924,11 +1994,11 @@ void LevelEditor::addScreenAt(const LevelDirectory& level, int screenIndex)
                 metadata.screenNames.begin() + screenIndex,
                 std::string {});
             writeLevelMetadata(levelRoot, metadata);
-        })) {
+        }, identityRemaps)) {
         return;
     }
     const std::filesystem::path newScreenPath = screenFilePath(level.path, screenIndex);
-    if (!loadDocument(newScreenPath)) {
+    if (!openDocument(newScreenPath)) {
         return;
     }
     document_.status = "Added " + newScreenPath.filename().string() + ".";
@@ -1986,6 +2056,34 @@ void LevelEditor::deleteScreen(const LevelDirectory& level, int screenIndex)
         return;
     }
 
+    ScreenIdentityRemaps identityRemaps {
+        {
+            .sourcePath = screen->path,
+            .destinationPath = std::nullopt,
+            .sourceLocation = LevelLocation {
+                .level = level.index,
+                .screen = screenIndex,
+            },
+            .destinationLocation = std::nullopt,
+        },
+    };
+    for (const ScreenFile& shifted : level.screens) {
+        if (shifted.index <= screenIndex) {
+            continue;
+        }
+        identityRemaps.push_back({
+            .sourcePath = shifted.path,
+            .destinationPath = screenFilePath(level.path, shifted.index - 1),
+            .sourceLocation = LevelLocation {
+                .level = level.index,
+                .screen = shifted.index,
+            },
+            .destinationLocation = LevelLocation {
+                .level = level.index,
+                .screen = shifted.index - 1,
+            },
+        });
+    }
     if (!applyProjectMutation([=](const std::filesystem::path& root) {
             rewriteOverworldSelectors(
                 root,
@@ -2021,11 +2119,11 @@ void LevelEditor::deleteScreen(const LevelDirectory& level, int screenIndex)
             metadata.screenNames.erase(
                 metadata.screenNames.begin() + screenIndex);
             writeLevelMetadata(levelRoot, metadata);
-        })) {
+        }, identityRemaps)) {
         return;
     }
     const int nextScreenIndex = std::min(screenIndex, static_cast<int>(level.screens.size()) - 2);
-    if (!loadDocument(screenFilePath(level.path, nextScreenIndex))) {
+    if (!openDocument(screenFilePath(level.path, nextScreenIndex))) {
         return;
     }
     document_.status = "Deleted screen.";
@@ -2045,17 +2143,34 @@ void LevelEditor::restoreDeletedLevel(const std::filesystem::path& deletedLevelP
     const std::vector<LevelDirectory> levels = collectLevelDirectories();
     const int restoredIndex = levels.empty() ? 0 : levels.back().index + 1;
     const std::filesystem::path deletedName = normalizedPath.filename();
+    ScreenIdentityRemaps identityRemaps;
+    const std::vector<LevelDirectory> deletedLevels = collectDeletedLevels();
+    const auto deletedLevel = std::ranges::find_if(
+        deletedLevels,
+        [&](const LevelDirectory& level) {
+            return normalizedAbsolutePath(level.path) == normalizedPath;
+        });
+    if (deletedLevel != deletedLevels.end()) {
+        const std::filesystem::path restoredLevel =
+            levelDirectoryPath(document_.browserRoot, restoredIndex);
+        for (const ScreenFile& screen : deletedLevel->screens) {
+            identityRemaps.push_back({
+                .sourcePath = screen.path,
+                .destinationPath = restoredLevel / screen.path.filename(),
+            });
+        }
+    }
     if (!applyProjectMutation([=](const std::filesystem::path& root) {
             std::filesystem::rename(
                 root / "Deleted" / deletedName,
                 levelDirectoryPath(root, restoredIndex));
-        })) {
+        }, identityRemaps)) {
         return;
     }
     const std::filesystem::path restoredPath = levelDirectoryPath(document_.browserRoot, restoredIndex);
     const std::filesystem::path firstScreen = screenFilePath(restoredPath, 0);
     if (std::filesystem::exists(firstScreen)) {
-        (void)loadDocument(firstScreen);
+        (void)openDocument(firstScreen);
     }
     document_.status = "Restored " + restoredPath.filename().string() + ".";
 }
@@ -2078,11 +2193,22 @@ bool LevelEditor::permanentlyDelete(const std::filesystem::path& path)
     const std::filesystem::path normalizedPath = normalizedAbsolutePath(path);
     const std::filesystem::path relative = normalizedPath.lexically_relative(
         normalizedAbsolutePath(document_.browserRoot));
+    ScreenIdentityRemaps identityRemaps;
+    for (const LevelDirectory& deletedLevel : collectDeletedLevels()) {
+        for (const ScreenFile& screen : deletedLevel.screens) {
+            if (pathStartsWith(screen.path, normalizedPath)) {
+                identityRemaps.push_back({
+                    .sourcePath = screen.path,
+                    .destinationPath = std::nullopt,
+                });
+            }
+        }
+    }
     if (!applyProjectMutation([=](const std::filesystem::path& root) {
             if (std::filesystem::remove_all(root / relative) == 0) {
                 throw std::runtime_error("path does not exist");
             }
-        })) {
+        }, identityRemaps)) {
         return false;
     }
 
@@ -2423,8 +2549,85 @@ std::filesystem::path LevelEditor::uniqueDeletedLevelPath(const std::filesystem:
     return candidate;
 }
 
+void LevelEditor::applyScreenIdentityRemaps(
+    const ScreenIdentityRemaps& remaps)
+{
+    const auto remapPath = [&](std::filesystem::path& path) {
+        if (path.empty()) {
+            return;
+        }
+        const std::filesystem::path normalizedPath =
+            normalizedAbsolutePath(path);
+        const auto remap = std::ranges::find_if(
+            remaps,
+            [&](const ScreenIdentityRemap& candidate) {
+                return normalizedAbsolutePath(candidate.sourcePath) ==
+                    normalizedPath;
+            });
+        if (remap == remaps.end()) {
+            return;
+        }
+        path = remap->destinationPath
+            ? normalizedAbsolutePath(*remap->destinationPath)
+            : std::filesystem::path {};
+    };
+    const auto remapSelectors =
+        [&](std::vector<Level::ScreenSelector>& selectors) {
+        for (Level::ScreenSelector& selector : selectors) {
+            if (!selector.target) {
+                continue;
+            }
+            const auto remap = std::ranges::find_if(
+                remaps,
+                [&](const ScreenIdentityRemap& candidate) {
+                    return candidate.sourceLocation &&
+                        *candidate.sourceLocation == *selector.target;
+                });
+            if (remap != remaps.end()) {
+                selector.target = remap->destinationLocation;
+            }
+        }
+    };
+    const auto remapSnapshot = [&](DocumentSnapshot& snapshot) {
+        remapPath(snapshot.filePath);
+        remapPath(snapshot.loadedPath);
+        remapSelectors(snapshot.selectors);
+    };
+    const auto remapHistory = [&](std::vector<EditActionRecord>& history) {
+        for (EditActionRecord& record : history) {
+            remapSnapshot(record.before);
+            remapSnapshot(record.after);
+        }
+    };
+    const auto remapDocument = [&](Document& document) {
+        remapPath(document.filePath);
+        remapPath(document.loadedPath);
+        remapSelectors(document.selectors);
+    };
+
+    remapDocument(document_);
+    remapHistory(editHistory_);
+    if (decorationTransformBefore_) {
+        remapSnapshot(*decorationTransformBefore_);
+    }
+
+    std::map<std::filesystem::path, DraftState> remappedDrafts;
+    for (auto& entry : drafts_) {
+        DraftState& draft = entry.second;
+        remapDocument(draft.document);
+        remapHistory(draft.editHistory);
+        const std::filesystem::path remappedKey =
+            draftKey(draft.document.loadedPath);
+        if (!remappedKey.empty()) {
+            remappedDrafts.insert_or_assign(remappedKey, std::move(draft));
+        }
+    }
+    drafts_ = std::move(remappedDrafts);
+}
+
 bool LevelEditor::applyProjectMutation(
-    const LevelProjectStore::Mutation& mutation)
+    const LevelProjectStore::Mutation& mutation,
+    const ScreenIdentityRemaps& screenIdentityRemaps)
 {
     std::optional<std::filesystem::path> runtimeRoot;
     if (normalizedAbsolutePath(document_.browserRoot) ==
@@ -2444,6 +2647,13 @@ bool LevelEditor::applyProjectMutation(
                 "were retained: " + result.message;
         return false;
     }
+    if (!screenIdentityRemaps.empty()) {
+        // The source/runtime transaction has committed, so paths now identify
+        // their post-renumber occupants. Preserve the active dirty document
+        // before switching to the newly inserted or adjacent screen.
+        cacheActiveDraft();
+        applyScreenIdentityRemaps(screenIdentityRemaps);
+    }
     return true;
 }
 
@@ -2451,7 +2661,7 @@ void LevelEditor::loadFirstAvailableScreen()
 {
     for (const LevelDirectory& level : collectLevelDirectories()) {
         if (!level.screens.empty()) {
-            (void)loadDocument(level.screens.front().path);
+            (void)openDocument(level.screens.front().path);
             return;
         }
     }

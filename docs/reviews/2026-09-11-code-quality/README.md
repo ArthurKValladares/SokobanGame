@@ -4,6 +4,12 @@ Reviewed September 10–11, 2026, at commit `d95324f9426907d606f1af302a95c1e7fe8
 
 This document records suggested changes, their evidence, and an implementation order. Production code was not changed. Reproduction programs and build/test logs accompany the review.
 
+## Implementation status
+
+Packet 1's code changes were implemented on September 14, 2026. The editor now applies an explicit screen-identity map to the active document, cached drafts, selector targets, and undo snapshots after a structural transaction commits. It covers insertion, deletion, level removal, and restoration; a focused failure test verifies that a rejected transaction leaves the original identities intact. CQ-01's splat/music association work remains grouped with packet 3 because it depends on that packet's asset-publication ownership.
+
+CQ-02 is implemented: a valid primary or another readable recovery candidate remains usable when artifact maintenance or promotion fails, with `LoadedWithPersistenceError` and retained files for retry. The implementation added focused editor/profile regressions and passed the complete 80-test Debug and Release registries in the warnings-as-errors configuration.
+
 ## Assessment
 
 The codebase has useful boundaries already: pure gameplay and menu logic, explicit persistence results, an SDK-independent core, shared GPU layouts, specialized rendering passes, and substantial regression coverage. The previous review's completed work should be retained.
@@ -47,6 +53,8 @@ The isolated build directory is `out/code-quality-review`. No Linux compiler/san
 
 **P1 · Reproduced · Correctness, maintainability**
 
+**Status:** document, draft, selector, and undo identity remapping implemented September 14, 2026. Splat/music associations remain in packet 3.
+
 **Location:** `LevelEditor` structural operations and its path-keyed draft cache; `LevelProjectStore` renumbering transactions. Exact anchors and the reproduction are in [content findings](content-findings.md).
 
 Inserting a screen renames existing files but leaves cached drafts indexed by their old paths. The probe dirties screen 1, inserts a new screen 0, then opens the new occupant of screen 1. The cached old screen-1 wall appears even though that occupant's file contains no wall. Saving that document can overwrite the wrong puzzle. A path is functioning as both a storage location and a document identity, but the renumber operation updates only the storage side.
@@ -60,6 +68,8 @@ The same operation boundary needs to account for positional content references: 
 ### CQ-02 — Load usable saves even when sibling-artifact maintenance fails
 
 **P2 · Reproduced · Correctness, recovery**
+
+**Status:** implemented September 14, 2026.
 
 **Location:** [SaveStore.cpp:195](../../../src/engine/SaveStore.cpp), `load`; lines 312–318, outer fallback; lines 322–368, interrupted-write recovery. Detailed reasoning: [core findings](core-findings.md).
 

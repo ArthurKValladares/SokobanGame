@@ -192,13 +192,71 @@ SaveStore::LoadResult SaveStore::load()
                 .message = status_,
             };
         }
-        const bool recoveredInterruptedWrite = recoverInterruptedWrites();
-
+        // Decode an authoritative primary before maintaining sibling
+        // artifacts. If that maintenance fails, the player's usable progress
+        // must remain available even though persistence needs attention.
+        std::optional<DecodedPlayerProfile> decodedPrimary;
         if (std::filesystem::is_regular_file(primaryPath_)) {
-            const std::string contents = readFile(primaryPath_);
-            std::optional<DecodedPlayerProfile> decoded;
             try {
-                decoded = decodePlayerProfile(contents);
+                decodedPrimary = decodePlayerProfile(readFile(primaryPath_));
+            } catch (const UnsupportedPlayerProfileFormat& error) {
+                status_ = "Player profile format is unsupported; the file was preserved: " +
+                    std::string(error.what());
+                return {
+                    .profile = {},
+                    .disposition = LoadDisposition::UnsupportedFormat,
+                    .message = status_,
+                };
+            } catch (const InvalidPlayerProfileData&) {
+                // Interrupted-write recovery may still have a newer valid
+                // temporary file or the displaced prior primary.
+            }
+        }
+
+        bool recoveredInterruptedWrite = false;
+        try {
+            recoveredInterruptedWrite = recoverInterruptedWrites();
+        } catch (const std::exception& error) {
+            if (!decodedPrimary) {
+                // Recovery may have found usable data but failed while
+                // promoting it, or it may have promoted the primary before a
+                // later sibling failed. Return the best still-readable
+                // candidate in memory and leave every artifact for retry.
+                for (const std::filesystem::path& candidate :
+                     recoverableArtifactPaths()) {
+                    std::error_code inspectionError;
+                    if (!std::filesystem::is_regular_file(
+                            candidate, inspectionError) ||
+                        inspectionError) {
+                        continue;
+                    }
+                    try {
+                        decodedPrimary =
+                            decodePlayerProfile(readFile(candidate));
+                        break;
+                    } catch (const std::exception&) {
+                        // This candidate is not readable by the current
+                        // process/build. A later backup may still be usable.
+                    }
+                }
+            }
+            if (!decodedPrimary) {
+                throw;
+            }
+            status_ =
+                "Loaded player profile, but save artifact maintenance failed: " +
+                std::string(error.what());
+            return {
+                .profile = std::move(decodedPrimary->profile),
+                .disposition = LoadDisposition::LoadedWithPersistenceError,
+                .message = status_,
+            };
+        }
+
+        if (!decodedPrimary &&
+            std::filesystem::is_regular_file(primaryPath_)) {
+            try {
+                decodedPrimary = decodePlayerProfile(readFile(primaryPath_));
             } catch (const UnsupportedPlayerProfileFormat& error) {
                 status_ = "Player profile format is unsupported; the file was preserved: " +
                     std::string(error.what());
@@ -210,38 +268,38 @@ SaveStore::LoadResult SaveStore::load()
             } catch (const InvalidPlayerProfileData&) {
                 archiveCorruptFile(primaryPath_);
             }
-            if (decoded) {
-                if (decoded->sourceFormat != currentPlayerProfileFormat) {
-                    try {
-                        writePrimary(decoded->profile, true);
-                    } catch (const std::exception& error) {
-                        status_ = "Loaded legacy player profile, but migration could not be saved: " +
-                            std::string(error.what());
-                        return {
-                            .profile = std::move(decoded->profile),
-                            .disposition = LoadDisposition::LoadedWithPersistenceError,
-                            .message = status_,
-                        };
-                    }
-                    status_ = "Migrated player profile from format " +
-                        std::to_string(decoded->sourceFormat) + ".";
+        }
+        if (decodedPrimary) {
+            if (decodedPrimary->sourceFormat != currentPlayerProfileFormat) {
+                try {
+                    writePrimary(decodedPrimary->profile, true);
+                } catch (const std::exception& error) {
+                    status_ = "Loaded legacy player profile, but migration could not be saved: " +
+                        std::string(error.what());
                     return {
-                        .profile = std::move(decoded->profile),
-                        .disposition = LoadDisposition::Migrated,
+                        .profile = std::move(decodedPrimary->profile),
+                        .disposition = LoadDisposition::LoadedWithPersistenceError,
                         .message = status_,
                     };
                 }
-                status_ = recoveredInterruptedWrite
-                    ? "Recovered interrupted player profile write."
-                    : "Loaded player profile.";
+                status_ = "Migrated player profile from format " +
+                    std::to_string(decodedPrimary->sourceFormat) + ".";
                 return {
-                    .profile = std::move(decoded->profile),
-                    .disposition = recoveredInterruptedWrite
-                        ? LoadDisposition::RecoveredInterruptedWrite
-                        : LoadDisposition::Loaded,
+                    .profile = std::move(decodedPrimary->profile),
+                    .disposition = LoadDisposition::Migrated,
                     .message = status_,
                 };
             }
+            status_ = recoveredInterruptedWrite
+                ? "Recovered interrupted player profile write."
+                : "Loaded player profile.";
+            return {
+                .profile = std::move(decodedPrimary->profile),
+                .disposition = recoveredInterruptedWrite
+                    ? LoadDisposition::RecoveredInterruptedWrite
+                    : LoadDisposition::Loaded,
+                .message = status_,
+            };
         }
 
         if (std::filesystem::is_regular_file(backupPath_)) {

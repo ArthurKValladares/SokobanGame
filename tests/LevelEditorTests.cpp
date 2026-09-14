@@ -383,6 +383,102 @@ void testOpeningScreensPreservesIndependentDraftsAndUndoHistory()
     CHECK(!editor.hasInProgressDraft(second));
 }
 
+void testScreenRenumberingPreservesDraftIdentity()
+{
+    TEST("screenRenumberingPreservesDraftIdentity");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+
+    editor.setRequestedSize(5, 4);
+    editor.addLevelAt(0);
+    std::vector<LevelEditor::LevelDirectory> levels =
+        editor.collectLevelDirectories();
+    editor.addScreenAt(levels[0], 1);
+    levels = editor.collectLevelDirectories();
+
+    const std::filesystem::path originalFirst = levels[0].screens[0].path;
+    const std::filesystem::path originalSecond = levels[0].screens[1].path;
+    CHECK(editor.openDocument(originalSecond));
+    editor.setCell({ 1, 1, 1 }, TileType::Wall);
+    CHECK(editor.openDocument(originalFirst));
+    CHECK(editor.hasInProgressDraft(originalSecond));
+
+    editor.addScreenAt(levels[0], 0);
+    levels = editor.collectLevelDirectories();
+    const std::filesystem::path shiftedFirst = levels[0].screens[1].path;
+    const std::filesystem::path shiftedSecond = levels[0].screens[2].path;
+
+    CHECK(!editor.hasInProgressDraft(shiftedFirst));
+    CHECK(editor.hasInProgressDraft(shiftedSecond));
+    CHECK(editor.openDocument(shiftedFirst));
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Air));
+    CHECK(editor.openDocument(shiftedSecond));
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Wall));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Air));
+    CHECK(editor.loadedDocumentPath() == shiftedSecond);
+}
+
+void testActiveDraftFollowsLevelRenumbering()
+{
+    TEST("activeDraftFollowsLevelRenumbering");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+
+    editor.setRequestedSize(5, 4);
+    editor.addLevelAt(0);
+    editor.addLevelAt(1);
+    std::vector<LevelEditor::LevelDirectory> levels =
+        editor.collectLevelDirectories();
+    CHECK(editor.openDocument(levels[1].screens[0].path));
+    editor.setCell({ 1, 1, 1 }, TileType::Wall);
+
+    editor.addLevelAt(0);
+    levels = editor.collectLevelDirectories();
+    const std::filesystem::path shifted = levels[2].screens[0].path;
+    CHECK(editor.hasInProgressDraft(shifted));
+    CHECK(editor.openDocument(shifted));
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Wall));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Air));
+    CHECK(editor.loadedDocumentPath() == shifted);
+}
+
+void testDeleteScreenRestoresShiftedDraft()
+{
+    TEST("deleteScreenRestoresShiftedDraft");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+
+    editor.setRequestedSize(5, 4);
+    editor.addLevelAt(0);
+    std::vector<LevelEditor::LevelDirectory> levels =
+        editor.collectLevelDirectories();
+    editor.addScreenAt(levels[0], 1);
+    levels = editor.collectLevelDirectories();
+    editor.addScreenAt(levels[0], 2);
+    levels = editor.collectLevelDirectories();
+
+    CHECK(editor.openDocument(levels[0].screens[2].path));
+    editor.setCell({ 1, 1, 1 }, TileType::Wall);
+    CHECK(editor.openDocument(levels[0].screens[0].path));
+    CHECK(editor.hasInProgressDraft(levels[0].screens[2].path));
+
+    editor.deleteScreen(levels[0], 0);
+    levels = editor.collectLevelDirectories();
+    CHECK(levels[0].screens.size() == 2);
+    const std::filesystem::path shiftedDraft = levels[0].screens[1].path;
+    CHECK(editor.hasInProgressDraft(shiftedDraft));
+    CHECK(editor.openDocument(shiftedDraft));
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Wall));
+}
+
 void testUndoRestoresTheLoadedDocumentPath()
 {
     TEST("undoRestoresTheLoadedDocumentPath");
@@ -490,6 +586,8 @@ void testProjectRenumberDeleteAndRestore()
     CHECK(levels[0].screens[0].name == "The Long Hall");
     CHECK(!std::filesystem::exists(levels[0].path / "screen1.scr"));
 
+    editor.setCell({ 1, 1, 1 }, TileType::Wall);
+    CHECK(editor.dirty());
     editor.deleteLevel(levels[0]);
     levels = editor.collectLevelDirectories();
     std::vector<LevelEditor::LevelDirectory> deleted = editor.collectDeletedLevels();
@@ -498,6 +596,10 @@ void testProjectRenumberDeleteAndRestore()
     CHECK(deleted.size() == 1);
     CHECK(deleted[0].name == "Clockwork Garden");
     CHECK(deleted[0].screens[0].name == "The Long Hall");
+    CHECK(editor.hasInProgressDraft(deleted[0].screens[0].path));
+    CHECK(editor.openDocument(deleted[0].screens[0].path));
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Wall));
 
     editor.restoreDeletedLevel(deleted[0].path);
     levels = editor.collectLevelDirectories();
@@ -505,10 +607,16 @@ void testProjectRenumberDeleteAndRestore()
     CHECK(levels[1].index == 1);
     CHECK(levels[1].name == "Clockwork Garden");
     CHECK(editor.collectDeletedLevels().empty());
+    CHECK(editor.loadedDocumentPath() == levels[1].screens[0].path);
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Wall));
 
     editor.deleteLevel(levels[1]);
     deleted = editor.collectDeletedLevels();
     CHECK(deleted.size() == 1);
+    const std::filesystem::path permanentlyDeletedScreen =
+        deleted[0].screens[0].path;
+    CHECK(editor.hasInProgressDraft(permanentlyDeletedScreen));
     const std::filesystem::path unrelated = project.root / "unrelated";
     std::filesystem::create_directories(unrelated);
     editor.restoreDeletedLevel(unrelated);
@@ -520,6 +628,7 @@ void testProjectRenumberDeleteAndRestore()
     CHECK(editor.canPermanentlyDelete(deleted[0].path));
     CHECK(editor.permanentlyDelete(deleted[0].path));
     CHECK(!std::filesystem::exists(deleted[0].path));
+    CHECK(!editor.hasInProgressDraft(permanentlyDeletedScreen));
     CHECK(!editor.permanentlyDelete(deleted[0].path));
 }
 
@@ -707,6 +816,9 @@ void testFailedRenumberPreservesSourceAndRuntimeTrees()
     LevelEditor editor = makeEditor(project);
     editor.setRequestedSize(4, 3);
     editor.addLevelAt(0);
+    const std::filesystem::path activePath = editor.loadedDocumentPath();
+    editor.setCell({ 1, 1, 1 }, TileType::Wall);
+    CHECK(editor.dirty());
 
     const std::filesystem::path invalidLevel = project.source / "level1";
     std::filesystem::create_directories(invalidLevel);
@@ -722,6 +834,9 @@ void testFailedRenumberPreservesSourceAndRuntimeTrees()
 
     CHECK(snapshotTree(project.source) == sourceBefore);
     CHECK(snapshotTree(project.runtime) == runtimeBefore);
+    CHECK(editor.loadedDocumentPath() == activePath);
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Wall));
     CHECK(std::filesystem::exists(project.source / "level0" / "screen0.scr"));
     CHECK(std::filesystem::exists(project.source / "level1" / "screen0.scr"));
     CHECK(!std::filesystem::exists(project.root / "source.editor-stage"));
@@ -937,6 +1052,8 @@ void testSelectorEditingPersistenceUndoAndProjectRemapping()
     CHECK(loaded.tryUndoEdit());
     CHECK(loaded.selectors()[0].target ==
         std::optional<LevelLocation>({ .level = 0, .screen = 0 }));
+    loaded.setCell({ 0, 1, 1 }, TileType::Wall);
+    CHECK(loaded.dirty());
 
     std::vector<LevelEditor::LevelDirectory> levels =
         loaded.collectLevelDirectories();
@@ -946,6 +1063,11 @@ void testSelectorEditingPersistenceUndoAndProjectRemapping()
     CHECK(shifted.selectors()[0].target ==
         std::optional<LevelLocation>({ .level = 0, .screen = 1 }));
     CHECK(std::filesystem::exists(project.runtime / "overworld.scr"));
+    CHECK(loaded.openDocument(overworld));
+    CHECK(loaded.selectors()[0].target ==
+        std::optional<LevelLocation>({ .level = 0, .screen = 1 }));
+    CHECK(loaded.documentLayers()[1][1][0] ==
+        tileTypeToChar(TileType::Wall));
 
     levels = loaded.collectLevelDirectories();
     loaded.deleteScreen(levels[0], 0);
@@ -1219,6 +1341,9 @@ int main()
     testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness();
     testSelectedPathIsSeparateFromTheLoadedDocument();
     testOpeningScreensPreservesIndependentDraftsAndUndoHistory();
+    testScreenRenumberingPreservesDraftIdentity();
+    testActiveDraftFollowsLevelRenumbering();
+    testDeleteScreenRestoresShiftedDraft();
     testUndoRestoresTheLoadedDocumentPath();
     testWaterLayerEditingPersistenceAndLayerRenumbering();
     testProjectRenumberDeleteAndRestore();

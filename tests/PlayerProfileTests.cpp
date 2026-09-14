@@ -1125,6 +1125,59 @@ void testInterruptedWriteRecovery()
         "valid live profile cleans stale artifacts");
 }
 
+void testUsableProfilesSurviveMaintenanceFailures()
+{
+    TemporaryDirectory temporary;
+    sokoban::SaveStore store(temporary.path());
+    sokoban::PlayerProfile expected;
+    expected.unlockedLevel = 7;
+    expected.setCurrentLevel(7);
+    expected.normalize();
+    CHECK_MESSAGE(store.save(expected),
+        "primary saves before auxiliary-artifact fault injection");
+    const std::string primaryContents = readFile(store.primaryPath());
+
+    std::filesystem::create_directory(store.backupPath());
+    const sokoban::SaveStore::LoadResult loaded = store.load();
+
+    CHECK_MESSAGE(loaded.disposition ==
+            sokoban::SaveStore::LoadDisposition::LoadedWithPersistenceError,
+        "auxiliary maintenance failure has a distinct load disposition");
+    CHECK_MESSAGE(loaded.profile == expected,
+        "auxiliary maintenance failure returns the valid primary profile");
+    CHECK_MESSAGE(readFile(store.primaryPath()) == primaryContents,
+        "auxiliary maintenance failure preserves the primary bytes");
+    CHECK_MESSAGE(std::filesystem::is_directory(store.backupPath()),
+        "failed auxiliary artifact remains available for later repair");
+    CHECK_MESSAGE(loaded.message.starts_with(
+              "Loaded player profile, but save artifact maintenance failed:"),
+        "auxiliary maintenance failure reports an accurate diagnostic");
+
+    TemporaryDirectory interruptedDirectory;
+    sokoban::SaveStore interruptedStore(interruptedDirectory.path());
+    sokoban::PlayerProfile interrupted;
+    interrupted.unlockedLevel = 5;
+    interrupted.setCurrentLevel(5);
+    interrupted.normalize();
+    writeFile(
+        interruptedStore.primaryPath().string() + ".tmp",
+        interrupted.serialize());
+    std::filesystem::create_directory(interruptedStore.primaryPath());
+
+    const sokoban::SaveStore::LoadResult pendingPromotion =
+        interruptedStore.load();
+    CHECK_MESSAGE(pendingPromotion.disposition ==
+            sokoban::SaveStore::LoadDisposition::LoadedWithPersistenceError,
+        "failed interrupted-write promotion has a distinct load disposition");
+    CHECK_MESSAGE(pendingPromotion.profile == interrupted,
+        "failed interrupted-write promotion returns the usable temporary profile");
+    CHECK_MESSAGE(std::filesystem::is_regular_file(
+              interruptedStore.primaryPath().string() + ".tmp"),
+        "failed interrupted-write promotion preserves its valid source");
+    CHECK_MESSAGE(std::filesystem::is_directory(interruptedStore.primaryPath()),
+        "failed interrupted-write promotion preserves the blocking artifact");
+}
+
 void testStorageFailuresPreserveCommittedProfile()
 {
     TemporaryDirectory temporary;
@@ -1886,6 +1939,7 @@ int main(int argc, char** argv)
         testFormat22UpdatesOverworldViewBinding();
         testStoreBackupsAndRecovery();
         testInterruptedWriteRecovery();
+        testUsableProfilesSurviveMaintenanceFailures();
         testStorageFailuresPreserveCommittedProfile();
         testSaveSlotStems();
         testMigrationAndDoubleCorruption();

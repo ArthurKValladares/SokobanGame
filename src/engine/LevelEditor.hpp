@@ -289,6 +289,14 @@ private:
         std::vector<EditActionRecord> editHistory;
     };
 
+    struct ScreenIdentityRemap {
+        std::filesystem::path sourcePath;
+        std::optional<std::filesystem::path> destinationPath;
+        std::optional<LevelLocation> sourceLocation;
+        std::optional<LevelLocation> destinationLocation;
+    };
+    using ScreenIdentityRemaps = std::vector<ScreenIdentityRemap>;
+
     void recordDocumentChange(const DocumentSnapshot& before);
     void cacheActiveDraft();
     [[nodiscard]] static std::filesystem::path draftKey(
@@ -302,8 +310,10 @@ private:
     [[nodiscard]] bool isActiveLevelDirectory(const LevelDirectory& level) const;
     [[nodiscard]] std::vector<std::string> defaultScreenRows() const;
     [[nodiscard]] std::filesystem::path uniqueDeletedLevelPath(const std::filesystem::path& levelPath) const;
+    void applyScreenIdentityRemaps(const ScreenIdentityRemaps& remaps);
     [[nodiscard]] bool applyProjectMutation(
-        const LevelProjectStore::Mutation& mutation);
+        const LevelProjectStore::Mutation& mutation,
+        const ScreenIdentityRemaps& screenIdentityRemaps = {});
     void loadFirstAvailableScreen();
     [[nodiscard]] bool validDecorationTransform(
         const Level::Decoration& decoration) const;

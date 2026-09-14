@@ -1,6 +1,6 @@
 # Sokoban 3D handoff
 
-Updated 2026-09-11. This file contains current operating guidance and enduring
+Updated 2026-09-14. This file contains current operating guidance and enduring
 contracts. The former chronological handoff is preserved at
 [`docs/history/HANDOFF-2026-09-09.md`](docs/history/HANDOFF-2026-09-09.md).
 The active code-quality assessment and its evidence are in
@@ -29,13 +29,15 @@ Subsequent maintainability work has:
 - enabled warnings-as-errors for Linux and Windows CI; and
 - removed the obsolete undefined-member probe and stale shader commentary.
 
-The September 11 review records 13 new recommendations with evidence,
-acceptance criteria, and an implementation order. These are suggestions, not
-implemented fixes. Start with document/draft identity and save usability, then
-follow its packet table. Fresh Windows Debug and Release warning builds and all
-80 suites passed for each configuration at the reviewed baseline; the additional
-probes expose cases missing from those suites. Broader refactoring or efficiency
-work still requires a concrete maintenance problem or measurement.
+The September 11 review records 13 recommendations with evidence, acceptance
+criteria, and an implementation order. Packet 1's document/draft/selector
+identity remapping and save-loading resilience were implemented on September 14;
+the remaining splat/music association portion of CQ-01 stays with packet 3. The
+full 80-test Debug and Release registries pass in the warnings-as-errors
+configuration. Next is packet 2: setting value/index mapping and
+concurrent-action presentation.
+Broader refactoring or efficiency work still requires a concrete maintenance
+problem or measurement.
 
 ## Build and validation
 
