@@ -228,6 +228,83 @@ void testChainedSlideIsDrawnTileByTile()
     CHECK(previous < 5.0f);
 }
 
+void testCompletingActionPreservesConcurrentPresentation()
+{
+    TEST("completingActionPreservesConcurrentPresentation");
+    const Level level = makeLevel({
+        { "..........", ".........." },
+        { "CI      # ", "          " },
+    });
+
+    const auto makeSession = [&] {
+        GameplaySession session;
+        session.reset(level);
+        session.setStepDurationSeconds(0.125f);
+        return session;
+    };
+    const GameplayLoop::InputFrame push {
+        .right = { .pressed = true, .down = true },
+    };
+    const GameplayLoop::InputFrame moveDown {
+        .down = { .pressed = true, .down = true },
+    };
+
+    GameplaySession session = makeSession();
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto update = [&](GameplayLoop::InputFrame input, float dt) {
+        static_cast<void>(GameplayLoop::update(
+            level, session, presentation, input, dt, false));
+    };
+
+    update(push, 0.0625f);
+    update({}, 0.0625f);
+    update({}, 0.0625f);
+    update({}, 0.0625f);
+    update(moveDown, 0.0625f);
+    CHECK(session.inFlight().size() == 2);
+    CHECK(std::abs(
+        presentation.movables().front().renderPosition.x - 3.5f) < 0.0001f);
+
+    // The player completes exactly at the frame boundary while the block's
+    // longer slide survives. Its visual must remain sampled at that boundary.
+    update({}, 0.0625f);
+    CHECK(session.state().players.front().cell == (GridPosition3 { 1, 1, 1 }));
+    CHECK(session.state().movables.front().cell == (GridPosition3 { 2, 0, 1 }));
+    CHECK(session.inFlight().size() == 1);
+    CHECK(std::abs(
+        presentation.movables().front().renderPosition.x - 4.0f) < 0.0001f);
+    CHECK(presentation.movables().front().moving);
+
+    update({}, 0.015625f);
+    CHECK(std::abs(
+        presentation.movables().front().renderPosition.x - 4.125f) < 0.0001f);
+    CHECK(presentation.movables().front().moving);
+
+    for (int frame = 0; frame < 100 && session.moving(); ++frame) {
+        update({}, 0.0625f);
+    }
+    CHECK(!session.moving());
+    CHECK(presentation.movables().front().renderPosition.x ==
+        static_cast<float>(session.state().movables.front().cell.x));
+    CHECK(!presentation.movables().front().moving);
+
+    // With time left in the frame, the loop must produce the same survivor
+    // sample after crossing the player's completion boundary.
+    session = makeSession();
+    presentation.resetEntities(session.state());
+    update(push, 0.0625f);
+    update({}, 0.0625f);
+    update({}, 0.0625f);
+    update({}, 0.0625f);
+    update(moveDown, 0.0625f);
+    update({}, 0.078125f);
+    CHECK(session.inFlight().size() == 1);
+    CHECK(std::abs(
+        presentation.movables().front().renderPosition.x - 4.125f) < 0.0001f);
+    CHECK(presentation.movables().front().moving);
+}
+
 void testMoveAdvancesSessionAndPresentation()
 {
     TEST("moveAdvancesSessionAndPresentation");
@@ -392,6 +469,7 @@ int main()
     testSimulationTimingObservesTransientSuspendCycle();
     testRenderedPlayerNeverGoesBackwards();
     testChainedSlideIsDrawnTileByTile();
+    testCompletingActionPreservesConcurrentPresentation();
     testMoveAdvancesSessionAndPresentation();
     testMirrorInputCommitsAnInstantAction();
     testRejectedMirrorInputDoesNotEmitActivation();

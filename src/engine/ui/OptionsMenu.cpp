@@ -1328,20 +1328,20 @@ void drawStepperChoiceRow(const OptionsRowDraw& d)
         row.label,
         { 0.83f, 0.86f, 0.83f, 1.0f },
         22.0f);
-    std::vector<std::string_view> labels;
-    labels.reserve(row.choices.size());
+    std::vector<uiControls::ChoiceOption> choices;
+    choices.reserve(row.choices.size());
     for (const OptionsMenuChoice& choice : row.choices) {
-        labels.push_back(choice.label);
+        choices.push_back({ choice.value, choice.label });
     }
-    int value = row.choiceValue;
+    int selectedValue = row.choiceValue;
     if (uiControls::choiceStepper(
             ui,
             layout.tree.rect(rowLayout.control),
-            labels,
-            value,
+            choices,
+            selectedValue,
             focused)) {
         intent = options::intent::SelectChoice {
-            row.id, value };
+            row.id, selectedValue };
     }
 }
 

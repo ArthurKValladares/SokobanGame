@@ -2,13 +2,15 @@
 
 Reviewed September 10–11, 2026, at commit `d95324f9426907d606f1af302a95c1e7fe8ff95c`.
 
-This document records suggested changes, their evidence, and an implementation order. Production code was not changed. Reproduction programs and build/test logs accompany the review.
+This document records suggested changes, their evidence, and an implementation order. Reproduction programs and build/test logs accompany the review; completed implementation packets are recorded below.
 
 ## Implementation status
 
 Packet 1's code changes were implemented on September 14, 2026. The editor now applies an explicit screen-identity map to the active document, cached drafts, selector targets, and undo snapshots after a structural transaction commits. It covers insertion, deletion, level removal, and restoration; a focused failure test verifies that a rejected transaction leaves the original identities intact. CQ-01's splat/music association work remains grouped with packet 3 because it depends on that packet's asset-publication ownership.
 
 CQ-02 is implemented: a valid primary or another readable recovery candidate remains usable when artifact maintenance or promotion fails, with `LoadedWithPersistenceError` and retained files for retry. The implementation added focused editor/profile regressions and passed the complete 80-test Debug and Release registries in the warnings-as-errors configuration.
+
+Packet 2's code changes were implemented on September 14, 2026. CQ-04 now gives steppers semantic value/label pairs, so every supported frame-rate value remains stable during an idle draw and arrow input returns an adjacent frame-rate value rather than an array index. CQ-05 now re-samples every surviving scheduler action immediately after completed-state synchronization, including an exact frame boundary. Focused regressions cover all six frame-rate choices, both stepper arrows, the contiguous display control, exact and non-exact concurrent-action completion, continued motion, and the final idle pose.
 
 ## Assessment
 

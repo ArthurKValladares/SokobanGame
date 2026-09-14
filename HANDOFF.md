@@ -30,12 +30,13 @@ Subsequent maintainability work has:
 - removed the obsolete undefined-member probe and stale shader commentary.
 
 The September 11 review records 13 recommendations with evidence, acceptance
-criteria, and an implementation order. Packet 1's document/draft/selector
-identity remapping and save-loading resilience were implemented on September 14;
-the remaining splat/music association portion of CQ-01 stays with packet 3. The
-full 80-test Debug and Release registries pass in the warnings-as-errors
-configuration. Next is packet 2: setting value/index mapping and
-concurrent-action presentation.
+criteria, and an implementation order. Packets 1 and 2 were implemented on
+September 14: document/draft/selector identity remapping, save-loading
+resilience, semantic setting-choice values, and completion-safe concurrent
+presentation. The remaining splat/music association portion of CQ-01 stays with
+packet 3. The full 80-test Debug and Release registries pass in the
+warnings-as-errors configuration. Next is packet 3: prepared-texture publication
+and the remaining asset associations.
 Broader refactoring or efficiency work still requires a concrete maintenance
 problem or measurement.
 
@@ -101,6 +102,9 @@ and the required real-device checks are recorded.
 - `StateDelta` owns canonical player, movable, and enemy entity order, append,
   and overlap interpretation. Scheduling and gameplay validation must use it
   instead of rebuilding changed-ID lists.
+- Completing one scheduled action synchronizes committed/structural presentation
+  state, then re-samples every surviving action at its existing elapsed time.
+  This must also happen when completion consumes the frame's remaining time.
 - Functional undo history is separate from the scalar completed-action
   diagnostic counter. Do not retain completed world-state actions for telemetry.
 - Binding capture continues forwarding physical state changes while suppressing

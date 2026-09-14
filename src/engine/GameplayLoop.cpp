@@ -212,6 +212,11 @@ GameplayLoop::UpdateResult GameplayLoop::update(
 
         session.completeActiveAction();
         presentation.finishAction(session.state());
+        // finishAction synchronizes structural changes and committed positions.
+        // The committed state deliberately excludes actions that are still in
+        // flight, so restore their exact samples before this frame is rendered.
+        // This is required even when the completion consumed all remaining time.
+        seekAllInFlight(session, presentation);
         if (rules::isAtUnlockedEnd(level, session.state())) {
             if (playingDraft) {
                 result.draftSolved = true;

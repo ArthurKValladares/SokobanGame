@@ -118,6 +118,33 @@ void testReusableControls()
         choices, selectedChoice));
     CHECK(selectedChoice == 10);
 
+    constexpr std::array frameRateChoices {
+        sokoban::uiControls::ChoiceOption { 0, "Unlimited" },
+        sokoban::uiControls::ChoiceOption { 30, "30 FPS" },
+        sokoban::uiControls::ChoiceOption { 60, "60 FPS" },
+        sokoban::uiControls::ChoiceOption { 120, "120 FPS" },
+        sokoban::uiControls::ChoiceOption { 144, "144 FPS" },
+        sokoban::uiControls::ChoiceOption { 240, "240 FPS" },
+    };
+    constexpr std::array frameRateValues { 0, 30, 60, 120, 144, 240 };
+    for (std::size_t index = 0; index < frameRateValues.size(); ++index) {
+        int selectedFrameRate = frameRateValues[index];
+        ui.beginFrame({ 400.0f, 200.0f }, { 20.0f, 130.0f }, true, true);
+        CHECK(sokoban::uiControls::choiceStepper(
+            ui, { { 10.0f, 110.0f }, { 300.0f, 40.0f } },
+            frameRateChoices, selectedFrameRate));
+        CHECK(selectedFrameRate == frameRateValues[
+            (index + frameRateValues.size() - 1) % frameRateValues.size()]);
+
+        selectedFrameRate = frameRateValues[index];
+        ui.beginFrame({ 400.0f, 200.0f }, { 290.0f, 130.0f }, true, true);
+        CHECK(sokoban::uiControls::choiceStepper(
+            ui, { { 10.0f, 110.0f }, { 300.0f, 40.0f } },
+            frameRateChoices, selectedFrameRate));
+        CHECK(selectedFrameRate ==
+            frameRateValues[(index + 1) % frameRateValues.size()]);
+    }
+
     bool checked = false;
     ui.beginFrame({ 400.0f, 200.0f }, { 20.0f, 135.0f }, true, true);
     CHECK(sokoban::uiControls::checkbox(
@@ -267,6 +294,64 @@ void testOptionsNavigationAndSettings()
     CHECK(quit.has_value() && std::holds_alternative<sokoban::options::Quit>(*quit));
     menu.back();
     CHECK(menu.page() == sokoban::OptionsMenu::Page::Main);
+}
+
+void testFrameRateStepperPreservesSemanticValues()
+{
+    TEST("frameRateStepperPreservesSemanticValues");
+    const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+    const sokoban::OptionsMenuView view;
+    sokoban::OptionsMenuState state {
+        .open = true,
+        .page = sokoban::OptionsMenuPage::Graphics,
+        .selectedRow = 3,
+    };
+    sokoban::UserSettings settings;
+    constexpr std::array frameRateValues { 0, 30, 60, 120, 144, 240 };
+
+    const auto draw = [&](const sokoban::UserSettings& current) {
+        ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+        const std::optional<sokoban::OptionsMenuIntent> intent = view.draw(
+            ui, { 1280.0f, 720.0f }, state, current);
+        ui.endFrame();
+        return intent;
+    };
+
+    for (std::size_t index = 0; index < frameRateValues.size(); ++index) {
+        settings.video.frameRateLimit = frameRateValues[index];
+        CHECK(!draw(settings).has_value());
+
+        for (const int direction : { -1, 1 }) {
+            const sokoban::OptionsMenuReduction reduction =
+                sokoban::reduceOptionsMenu(
+                    state,
+                    settings,
+                    sokoban::options::intent::AdjustSelected { direction });
+            const auto* changed = reduction.action
+                ? std::get_if<sokoban::options::SettingsChanged>(
+                      &*reduction.action)
+                : nullptr;
+            CHECK(changed != nullptr);
+            if (changed == nullptr) {
+                continue;
+            }
+            const std::size_t expectedIndex = direction < 0
+                ? (index + frameRateValues.size() - 1) % frameRateValues.size()
+                : (index + 1) % frameRateValues.size();
+            CHECK(changed->settings.video.frameRateLimit ==
+                frameRateValues[expectedIndex]);
+            CHECK(!draw(changed->settings).has_value());
+        }
+    }
+
+    // Display choices use contiguous values. Keep one here to ensure the same
+    // semantic stepper adapter still leaves their valid idle state untouched.
+    state.selectedRow = 9;
+    settings.video.fullscreen = false;
+    settings.video.windowWidth = 1280;
+    settings.video.windowHeight = 720;
+    CHECK(!draw(settings).has_value());
 }
 
 void testControlsRemapping()
@@ -976,6 +1061,7 @@ int main()
     testScreenPreviewOverlayUsesCenteredSeventyFivePercentInset();
     testLayoutTree();
     testOptionsNavigationAndSettings();
+    testFrameRateStepperPreservesSemanticValues();
     testControlsRemapping();
     testOptionsReducerAndDeclarativeRows();
     testOptionsReducerDraftAndBindingSemantics();

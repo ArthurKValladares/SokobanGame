@@ -181,19 +181,25 @@ bool segmentedControl(
 bool choiceStepper(
     UiContext& ui,
     UiRect rect,
-    std::span<const std::string_view> labels,
-    int& selected,
+    std::span<const ChoiceOption> choices,
+    int& selectedValue,
     bool focused)
 {
-    if (labels.empty()) {
+    if (choices.empty()) {
         return false;
     }
-    const int oldSelected = selected;
-    selected = std::clamp(selected, 0, static_cast<int>(labels.size()) - 1);
+    const int oldValue = selectedValue;
+    const auto selected = std::ranges::find(
+        choices, selectedValue, &ChoiceOption::value);
+    int selectedIndex = selected == choices.end()
+        ? 0
+        : static_cast<int>(selected - choices.begin());
     constexpr float arrowWidth = 52.0f;
     if (button(ui, {
             rect.position, { arrowWidth, rect.size.y } }, "<", { .focused = focused })) {
-        selected = (selected + static_cast<int>(labels.size()) - 1) % static_cast<int>(labels.size());
+        selectedIndex =
+            (selectedIndex + static_cast<int>(choices.size()) - 1) %
+            static_cast<int>(choices.size());
     }
     ui.rect({
         { rect.position.x + arrowWidth + 2.0f, rect.position.y },
@@ -202,13 +208,15 @@ bool choiceStepper(
     ui.centeredText({
         { rect.position.x + arrowWidth, rect.position.y },
         { rect.size.x - arrowWidth * 2.0f, rect.size.y },
-    }, labels[static_cast<size_t>(selected)], textColor, 22.0f);
+    }, choices[static_cast<size_t>(selectedIndex)].label, textColor, 22.0f);
     if (button(ui, {
             { rect.position.x + rect.size.x - arrowWidth, rect.position.y },
             { arrowWidth, rect.size.y } }, ">", { .focused = focused })) {
-        selected = (selected + 1) % static_cast<int>(labels.size());
+        selectedIndex =
+            (selectedIndex + 1) % static_cast<int>(choices.size());
     }
-    return selected != oldSelected;
+    selectedValue = choices[static_cast<size_t>(selectedIndex)].value;
+    return selectedValue != oldValue;
 }
 
 } // namespace sokoban::uiControls

@@ -61,8 +61,8 @@ struct SegmentedControlOptions {
 [[nodiscard]] bool choiceStepper(
     UiContext& ui,
     UiRect rect,
-    std::span<const std::string_view> labels,
-    int& selected,
+    std::span<const ChoiceOption> choices,
+    int& selectedValue,
     bool focused = false);
 
 } // namespace sokoban::uiControls
