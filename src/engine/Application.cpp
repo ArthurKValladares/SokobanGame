@@ -62,18 +62,17 @@ void appendEvidenceWaterFixture(RenderFrameData& frame)
         return;
     }
 
-    // One stable exterior strip is enough to exercise the complete water
-    // shader, depth sampling, opaque-color snapshot and translucent resolve
-    // path. Keeping it outside the board is important: authored water sits
-    // below the surrounding ground lip, so overlaying an ordinary solid
-    // floor would make a nominal water draw completely depth-occluded.
+    // Cross the board edge so one stable draw exercises water over both opaque
+    // geometry and the clear background. Lift this evidence-only surface above
+    // the ground; authored water sits below the surrounding lip and would be
+    // depth-occluded if it were placed directly over an ordinary floor.
     const RenderFrameData::CameraExtent fixtureExtent =
         frame.cameraExtent.value_or(RenderFrameData::CameraExtent {
             .width = frame.levelWidth,
             .height = frame.levelHeight,
             .depth = frame.levelDepth,
         });
-    constexpr float stripLeft = -3.0f;
+    constexpr float stripLeft = -1.0f;
     constexpr float stripWidth = 2.0f;
     const float stripTop = static_cast<float>(fixtureExtent.originY);
     const float stripHeight = std::max(
@@ -91,7 +90,7 @@ void appendEvidenceWaterFixture(RenderFrameData& frame)
         .position = { stripLeft, stripTop },
         .size = { stripWidth, stripHeight },
         .color = frame.waterRendering.surfaceColor,
-        .elevation = 1.0f - config::waterDepthBelowGround,
+        .elevation = 1.0f + config::waterDepthBelowGround,
         .shorelineMask = shorelineMask,
         .pickable = false,
     });

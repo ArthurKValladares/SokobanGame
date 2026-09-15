@@ -30,14 +30,15 @@ Subsequent maintainability work has:
 - removed the obsolete undefined-member probe and stale shader commentary.
 
 The September 11 review records 13 recommendations with evidence, acceptance
-criteria, and an implementation order. Packets 1 through 4 were implemented on
+criteria, and an implementation order. Packets 1 through 5 were implemented on
 September 14: document/draft/selector and asset-association identity remapping,
 save-loading resilience, semantic setting-choice values, completion-safe
 concurrent presentation, prepared-texture invalidation, complete Vulkan
 descriptor-limit accounting, bounded residency admission, and failure-safe
-painted-texture replacement. The full 80-test Debug and Release registries pass
-in the warnings-as-errors configuration. Next is packet 5: defined water-ripple
-derivatives with visual and GPU-time comparison at geometry boundaries.
+painted-texture replacement, plus defined water-ripple derivatives across
+depth-dependent geometry boundaries. The full 80-test Debug and Release
+registries pass in the warnings-as-errors configuration. Next is packet 6:
+small-window settings access and failure-safe new-game slot selection.
 Broader refactoring or efficiency work still requires a concrete maintenance
 problem or measurement.
 
@@ -158,6 +159,9 @@ and the required real-device checks are recorded.
 - Resized painted textures publish transactionally. A failed replacement keeps
   the old handles and residency accounting live, and the paint revision remains
   pending until the renderer reports a successful update.
+- Projected water-ripple screen derivatives execute before the depth-dependent
+  geometry branch. Conditional cellular searches may consume an analytically
+  propagated footprint, but must not invoke implicit derivatives themselves.
 - One-shot command-buffer and fence lifetime belongs to
   `vulkanResources::beginOneShotCommands` and `submitOneShotCommands`. Preserve
   their cleanup behavior and diagnostic labels.

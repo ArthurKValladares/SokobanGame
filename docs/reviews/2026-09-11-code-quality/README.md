@@ -16,6 +16,8 @@ Packet 3's code changes were implemented on September 14, 2026. CQ-03 now invali
 
 Packet 4's code changes were implemented on September 14, 2026. CQ-06 now sizes the combined-image-sampler heap against per-stage and aggregate sampled-image and sampler limits after reserving the scene bindings, and device selection carries every applicable limit explicitly. CQ-07 retries retained CPU-ready assets in the blocking path and reports a terminal admission error when queued work has no possible source of progress. CQ-08 constructs resized painted textures under temporary ownership, preserves the published texture and accounting through failure, retires the old resource only after commit, and advances the painted revision only after a successful renderer update. Synthetic limit boundaries, a bounded one-byte admission case, an injected partial texture-upload failure, unchanged-handle/accounting checks, false publication, and successful retry all pass with Vulkan validation in the complete 80-test Debug and Release warning builds.
 
+Packet 5's code changes were implemented on September 14, 2026. CQ-09 now evaluates the projected-pattern screen derivatives before the depth-dependent branch and propagates them analytically through the ripple warps and cellular-boundary distance. The expensive cellular searches remain conditional. The evidence fixture now crosses opaque geometry and clear background so it exercises the divergent edge directly. Matched 100%-scale/4x-MSAA and 50%-scale/1x-MSAA images differed by at most two channel values in 67 of 5,184,000 pixels and one channel value in 1 of 1,296,000 pixels, respectively; no edge artifact was visible. Three 600-frame matched runs showed overlapping GPU-time ranges and no measurable translucency regression. The shader passes SPIR-V validation, the 240-frame Debug validation run completes without Vulkan usage errors, and the complete 80-test Debug and Release warning builds pass. Detailed evidence and limits are recorded in [the packet 5 evidence note](evidence/packet5-water-derivatives.md).
+
 ## Assessment
 
 The codebase has useful boundaries already: pure gameplay and menu logic, explicit persistence results, an SDK-independent core, shared GPU layouts, specialized rendering passes, and substantial regression coverage. The previous review's completed work should be retained.
@@ -176,6 +178,8 @@ The replacement path destroys the current texture before all fallible work to co
 ### CQ-09 — Keep shader derivatives outside divergent water branches
 
 **P2 · Source/spec-confirmed · Correctness**
+
+**Status:** implemented September 14, 2026. Projected ripple derivatives are evaluated in uniform control flow and propagated analytically through conditional work; matched edge images and GPU measurements are recorded in [the packet 5 evidence note](evidence/packet5-water-derivatives.md).
 
 **Location:** `water.frag.glsl` conditional caustic/ripple evaluation and `cellularRippleBands` derivative calculation. Exact lines and the GLSL rule: [renderer findings](renderer-findings.md).
 

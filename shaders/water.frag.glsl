@@ -177,7 +177,10 @@ float cellDistanceWeight(vec2 cell)
         hash22(cell + vec2(19.17, 7.43)).x);
 }
 
-float irregularDistanceSquared(vec2 vectorToPoint, vec2 cell)
+float irregularDistanceSquaredAndGradient(
+    vec2 vectorToPoint,
+    vec2 cell,
+    out vec2 samplePositionGradient)
 {
     vec2 randomAxis =
         hash22(cell + vec2(41.73, 23.19)) * 2.0 - vec2(1.0);
@@ -189,18 +192,22 @@ float irregularDistanceSquared(vec2 vectorToPoint, vec2 cell)
         0.62,
         1.48,
         hash22(cell + vec2(3.11, 57.29)).y);
+    float alongAxis = dot(vectorToPoint, randomAxis);
+    float acrossAxis = dot(vectorToPoint, perpendicular);
     vec2 oriented = vec2(
-        dot(vectorToPoint, randomAxis) * aspect,
-        dot(vectorToPoint, perpendicular) / aspect);
-    return dot(oriented, oriented) *
-        cellDistanceWeight(cell);
+        alongAxis * aspect,
+        acrossAxis / aspect);
+    float weight = cellDistanceWeight(cell);
+    float aspectSquared = aspect * aspect;
+    // vectorToPoint is featurePoint - samplePosition, so this is the
+    // derivative with respect to samplePosition rather than vectorToPoint.
+    samplePositionGradient = -2.0 * weight * (
+        randomAxis * alongAxis * aspectSquared +
+        perpendicular * acrossAxis / aspectSquared);
+    return dot(oriented, oriented) * weight;
 }
 
-vec2 cellularRippleBands(
-    vec2 position,
-    float time,
-    float crestHalfWidth,
-    float haloWidth)
+vec2 cellularRippleSamplePosition(vec2 position, float time)
 {
     vec2 firstWarp = vec2(
         sin(dot(position, vec2(0.52, 0.81)) + time * 0.22) +
@@ -236,8 +243,153 @@ vec2 cellularRippleBands(
                 time * 0.29) *
                 0.98 -
             time * 0.39));
-    vec2 samplePosition =
-        warpedTwice + rippleWarp * 0.12;
+    return warpedTwice + rippleWarp * 0.12;
+}
+
+struct DifferentialFloat {
+    float value;
+    float dx;
+    float dy;
+};
+
+struct DifferentialVec2 {
+    vec2 value;
+    vec2 dx;
+    vec2 dy;
+};
+
+DifferentialFloat differentialDot(
+    DifferentialVec2 inputValue,
+    vec2 axis,
+    float constant)
+{
+    return DifferentialFloat(
+        dot(inputValue.value, axis) + constant,
+        dot(inputValue.dx, axis),
+        dot(inputValue.dy, axis));
+}
+
+DifferentialFloat differentialSin(DifferentialFloat angle)
+{
+    float derivative = cos(angle.value);
+    return DifferentialFloat(
+        sin(angle.value),
+        derivative * angle.dx,
+        derivative * angle.dy);
+}
+
+DifferentialFloat differentialCos(DifferentialFloat angle)
+{
+    float derivative = -sin(angle.value);
+    return DifferentialFloat(
+        cos(angle.value),
+        derivative * angle.dx,
+        derivative * angle.dy);
+}
+
+DifferentialFloat differentialAddScaled(
+    DifferentialFloat first,
+    DifferentialFloat second,
+    float secondScale)
+{
+    return DifferentialFloat(
+        first.value + second.value * secondScale,
+        first.dx + second.dx * secondScale,
+        first.dy + second.dy * secondScale);
+}
+
+DifferentialVec2 differentialVec2(
+    DifferentialFloat x,
+    DifferentialFloat y)
+{
+    return DifferentialVec2(
+        vec2(x.value, y.value),
+        vec2(x.dx, y.dx),
+        vec2(x.dy, y.dy));
+}
+
+DifferentialVec2 differentialAddScaled(
+    DifferentialVec2 first,
+    DifferentialVec2 second,
+    float secondScale)
+{
+    return DifferentialVec2(
+        first.value + second.value * secondScale,
+        first.dx + second.dx * secondScale,
+        first.dy + second.dy * secondScale);
+}
+
+DifferentialVec2 cellularRippleSamplePositionAndDerivatives(
+    vec2 position,
+    vec2 positionDx,
+    vec2 positionDy,
+    float time)
+{
+    DifferentialVec2 inputPosition = DifferentialVec2(
+        position,
+        positionDx,
+        positionDy);
+    DifferentialFloat firstWarpX = differentialAddScaled(
+        differentialSin(differentialDot(
+            inputPosition, vec2(0.52, 0.81), time * 0.22)),
+        differentialSin(differentialDot(
+            inputPosition, vec2(-0.91, 0.37), -time * 0.16)),
+        0.58);
+    DifferentialFloat firstWarpY = differentialAddScaled(
+        differentialCos(differentialDot(
+            inputPosition, vec2(0.76, -0.43), -time * 0.19)),
+        differentialCos(differentialDot(
+            inputPosition, vec2(0.31, 0.94), time * 0.14)),
+        0.58);
+    DifferentialVec2 warpedOnce = differentialAddScaled(
+        inputPosition,
+        differentialVec2(firstWarpX, firstWarpY),
+        0.27);
+
+    DifferentialFloat secondWarpX = differentialSin(
+        differentialAddScaled(
+            differentialDot(
+                warpedOnce, vec2(2.37, -1.61), time * 0.31),
+            differentialSin(differentialDot(
+                warpedOnce, vec2(0.83, 1.19), -time * 0.24)),
+            0.72));
+    DifferentialFloat secondWarpY = differentialCos(
+        differentialAddScaled(
+            differentialDot(
+                warpedOnce, vec2(1.47, 2.53), -time * 0.27),
+            differentialCos(differentialDot(
+                warpedOnce, vec2(-1.13, 0.71), time * 0.21)),
+            0.68));
+    DifferentialVec2 warpedTwice = differentialAddScaled(
+        warpedOnce,
+        differentialVec2(secondWarpX, secondWarpY),
+        0.15);
+
+    DifferentialFloat rippleWarpX = differentialSin(
+        differentialAddScaled(
+            differentialDot(
+                warpedTwice, vec2(5.13, 2.27), time * 0.43),
+            differentialSin(differentialDot(
+                warpedTwice, vec2(-2.11, 3.07), -time * 0.34)),
+            1.05));
+    DifferentialFloat rippleWarpY = differentialCos(
+        differentialAddScaled(
+            differentialDot(
+                warpedTwice, vec2(-2.53, 5.37), -time * 0.39),
+            differentialCos(differentialDot(
+                warpedTwice, vec2(3.23, 1.79), time * 0.29)),
+            0.98));
+    return differentialAddScaled(
+        warpedTwice,
+        differentialVec2(rippleWarpX, rippleWarpY),
+        0.12);
+}
+
+void cellularRippleBoundary(
+    vec2 samplePosition,
+    out float distanceToBoundary,
+    out vec2 distanceGradient)
+{
     vec2 baseCell =
         floor(
             triangularLatticeCoordinates(samplePosition) +
@@ -245,30 +397,49 @@ vec2 cellularRippleBands(
 
     float nearestDistanceSquared = 1e20;
     float secondDistanceSquared = 1e20;
+    vec2 nearestGradient = vec2(0.0);
+    vec2 secondGradient = vec2(0.0);
     for (int y = -1; y <= 1; ++y) {
         for (int x = -1; x <= 1; ++x) {
             vec2 cell = baseCell + vec2(x, y);
             vec2 vectorToPoint =
                 irregularCellPoint(cell) - samplePosition;
+            vec2 candidateGradient;
             float distanceSquared =
-                irregularDistanceSquared(vectorToPoint, cell);
+                irregularDistanceSquaredAndGradient(
+                    vectorToPoint,
+                    cell,
+                    candidateGradient);
             if (distanceSquared < nearestDistanceSquared) {
                 secondDistanceSquared = nearestDistanceSquared;
+                secondGradient = nearestGradient;
                 nearestDistanceSquared = distanceSquared;
+                nearestGradient = candidateGradient;
             } else if (distanceSquared < secondDistanceSquared) {
                 secondDistanceSquared = distanceSquared;
+                secondGradient = candidateGradient;
             }
         }
     }
 
-    float distanceToBoundary = 0.5 * max(
-        sqrt(secondDistanceSquared) -
-            sqrt(nearestDistanceSquared),
+    float nearestDistance = sqrt(nearestDistanceSquared);
+    float secondDistance = sqrt(secondDistanceSquared);
+    distanceToBoundary = 0.5 * max(
+        secondDistance - nearestDistance,
         0.0);
-    float antialiasWidth = clamp(
-        fwidth(distanceToBoundary) * 0.90,
-        0.003,
-        0.012);
+    distanceGradient = 0.25 * (
+        secondGradient / max(secondDistance, 0.0001) -
+        nearestGradient / max(nearestDistance, 0.0001));
+}
+
+vec2 cellularRippleBandsFromBoundary(
+    vec2 samplePosition,
+    float time,
+    float crestHalfWidth,
+    float haloWidth,
+    float distanceToBoundary,
+    float antialiasWidth)
+{
     float widthVariation = mix(
         0.72,
         1.28,
@@ -296,6 +467,54 @@ vec2 cellularRippleBands(
     return vec2(softHalo, brightCenter);
 }
 
+vec2 cellularRippleBands(
+    vec2 position,
+    float time,
+    float crestHalfWidth,
+    float haloWidth)
+{
+    vec2 samplePosition = cellularRippleSamplePosition(position, time);
+    float distanceToBoundary;
+    vec2 distanceGradient;
+    cellularRippleBoundary(
+        samplePosition,
+        distanceToBoundary,
+        distanceGradient);
+    return cellularRippleBandsFromBoundary(
+        samplePosition,
+        time,
+        crestHalfWidth,
+        haloWidth,
+        distanceToBoundary,
+        clamp(fwidth(distanceToBoundary) * 0.90, 0.003, 0.012));
+}
+
+vec2 projectedCellularRippleBands(
+    vec2 samplePosition,
+    vec2 samplePositionDx,
+    vec2 samplePositionDy,
+    float time,
+    float crestHalfWidth,
+    float haloWidth)
+{
+    float distanceToBoundary;
+    vec2 distanceGradient;
+    cellularRippleBoundary(
+        samplePosition,
+        distanceToBoundary,
+        distanceGradient);
+    float boundaryFootprint =
+        abs(dot(distanceGradient, samplePositionDx)) +
+        abs(dot(distanceGradient, samplePositionDy));
+    return cellularRippleBandsFromBoundary(
+        samplePosition,
+        time,
+        crestHalfWidth,
+        haloWidth,
+        distanceToBoundary,
+        clamp(boundaryFootprint * 0.90, 0.003, 0.012));
+}
+
 void waterRipplePatterns(
     vec2 worldPosition,
     float frequency,
@@ -319,6 +538,52 @@ void waterRipplePatterns(
         vec2(2.31, -1.73);
     secondary = cellularRippleBands(
         secondaryPatternPosition,
+        time + 1.40,
+        rippleCrestHalfWidth * secondaryThicknessScale,
+        rippleHaloWidth * secondaryThicknessScale);
+}
+
+void projectedWaterRipplePatterns(
+    vec2 patternPosition,
+    vec2 patternPositionDx,
+    vec2 patternPositionDy,
+    float time,
+    float rippleCrestHalfWidth,
+    float rippleHaloWidth,
+    float secondaryThicknessScale,
+    out vec2 primary,
+    out vec2 secondary)
+{
+    DifferentialVec2 primarySample =
+        cellularRippleSamplePositionAndDerivatives(
+            patternPosition,
+            patternPositionDx,
+            patternPositionDy,
+            time);
+    primary = projectedCellularRippleBands(
+        primarySample.value,
+        primarySample.dx,
+        primarySample.dy,
+        time,
+        rippleCrestHalfWidth,
+        rippleHaloWidth);
+    vec2 secondaryPatternPosition =
+        vec2(-patternPosition.y, patternPosition.x) +
+        vec2(2.31, -1.73);
+    vec2 secondaryPatternPositionDx =
+        vec2(-patternPositionDx.y, patternPositionDx.x);
+    vec2 secondaryPatternPositionDy =
+        vec2(-patternPositionDy.y, patternPositionDy.x);
+    DifferentialVec2 secondarySample =
+        cellularRippleSamplePositionAndDerivatives(
+            secondaryPatternPosition,
+            secondaryPatternPositionDx,
+            secondaryPatternPositionDy,
+            time + 1.40);
+    secondary = projectedCellularRippleBands(
+        secondarySample.value,
+        secondarySample.dx,
+        secondarySample.dy,
         time + 1.40,
         rippleCrestHalfWidth * secondaryThicknessScale,
         rippleHaloWidth * secondaryThicknessScale);
@@ -603,14 +868,23 @@ void main()
         geometryPresent;
     vec2 projectedCaustics = vec2(0.0);
     vec2 projectedSecondaryCaustics = vec2(0.0);
+    vec2 projectedPatternPosition =
+        (worldPosition + causticProjectionOffset) * frequency +
+        vec2(time * 0.10, -time * 0.075);
+    // These derivatives execute for every fragment before the depth-dependent
+    // branch. Conditional ripple evaluation propagates them through the warp
+    // analytically, then projects them onto the scalar boundary gradient.
+    vec2 projectedPatternPositionDx = dFdx(projectedPatternPosition);
+    vec2 projectedPatternPositionDy = dFdy(projectedPatternPosition);
     // Exterior water commonly has only the clear background behind it. The
     // projected pattern was still evaluated there even though the coverage
     // below is multiplied by zero. Keep the expensive second pattern only
     // for fragments where it can affect copied opaque geometry.
     if (geometryPresent > 0.0) {
-        waterRipplePatterns(
-            worldPosition + causticProjectionOffset,
-            frequency,
+        projectedWaterRipplePatterns(
+            projectedPatternPosition,
+            projectedPatternPositionDx,
+            projectedPatternPositionDy,
             time,
             rippleCrestHalfWidth,
             rippleHaloWidth,
