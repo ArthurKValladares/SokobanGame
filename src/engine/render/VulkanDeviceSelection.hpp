@@ -17,6 +17,8 @@ struct VulkanDeviceFeatureSupport {
     uint32_t maxPushConstantsSize = 0;
     uint32_t maxPerStageDescriptorSampledImages = 0;
     uint32_t maxDescriptorSetSampledImages = 0;
+    uint32_t maxPerStageDescriptorSamplers = 0;
+    uint32_t maxDescriptorSetSamplers = 0;
     bool dynamicRendering = false;
     bool synchronization2 = false;
     bool imageCubeArray = false;
@@ -36,6 +38,8 @@ enum class VulkanFeatureTierRejection {
     PushConstantCapacity,
     PerStageSampledImageCapacity,
     DescriptorSetSampledImageCapacity,
+    PerStageSamplerCapacity,
+    DescriptorSetSamplerCapacity,
     DynamicRendering,
     Synchronization2,
     ImageCubeArray,
@@ -72,7 +76,9 @@ struct VulkanTextureHeapCapacity {
     const VulkanDeviceFeatureSupport& support,
     uint32_t requiredPushConstantsSize,
     uint32_t requiredPerStageSampledImages,
-    uint32_t requiredDescriptorSetSampledImages);
+    uint32_t requiredDescriptorSetSampledImages,
+    uint32_t requiredPerStageSamplers,
+    uint32_t requiredDescriptorSetSamplers);
 [[nodiscard]] std::string_view vulkanFeatureTierRejectionMessage(
     VulkanFeatureTierRejection rejection);
 [[nodiscard]] VulkanTextureHeapCapacity chooseVulkanTextureHeapCapacity(
@@ -81,7 +87,7 @@ struct VulkanTextureHeapCapacity {
     uint32_t editorReserve,
     uint32_t importedReserve,
     uint32_t configuredCeiling,
-    uint32_t otherPerStageSampledImages);
+    uint32_t otherCombinedImageSamplers);
 [[nodiscard]] std::string vulkanTextureHeapCapacityFailureMessage(
     const VulkanTextureHeapCapacity& capacity);
 

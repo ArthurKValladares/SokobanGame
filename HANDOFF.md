@@ -30,13 +30,14 @@ Subsequent maintainability work has:
 - removed the obsolete undefined-member probe and stale shader commentary.
 
 The September 11 review records 13 recommendations with evidence, acceptance
-criteria, and an implementation order. Packets 1 through 3 were implemented on
+criteria, and an implementation order. Packets 1 through 4 were implemented on
 September 14: document/draft/selector and asset-association identity remapping,
 save-loading resilience, semantic setting-choice values, completion-safe
-concurrent presentation, and prepared-texture invalidation. The full 80-test
-Debug and Release registries pass in the warnings-as-errors configuration. Next
-is packet 4: descriptor limits, bounded residency admission, and failure-safe
-texture replacement.
+concurrent presentation, prepared-texture invalidation, complete Vulkan
+descriptor-limit accounting, bounded residency admission, and failure-safe
+painted-texture replacement. The full 80-test Debug and Release registries pass
+in the warnings-as-errors configuration. Next is packet 5: defined water-ripple
+derivatives with visual and GPU-time comparison at geometry boundaries.
 Broader refactoring or efficiency work still requires a concrete maintenance
 problem or measurement.
 
@@ -148,6 +149,15 @@ and the required real-device checks are recorded.
 - Prepared skinned meshes retain their source payload when residency admission
   is deferred. Ownership moves only after admission succeeds, so retry does not
   require decoding again.
+- Combined-image-sampler heap capacity is the minimum remaining capacity across
+  per-stage and aggregate sampled-image and sampler limits after scene bindings.
+  Every device-selection caller must provide all four descriptor requirements.
+- A blocking asset wait retries retained CPU-ready payloads. It throws when
+  queued work is blocked by retained data and no active operation can change
+  admission; it must never poll that terminal state indefinitely.
+- Resized painted textures publish transactionally. A failed replacement keeps
+  the old handles and residency accounting live, and the paint revision remains
+  pending until the renderer reports a successful update.
 - One-shot command-buffer and fence lifetime belongs to
   `vulkanResources::beginOneShotCommands` and `submitOneShotCommands`. Preserve
   their cleanup behavior and diagnostic labels.

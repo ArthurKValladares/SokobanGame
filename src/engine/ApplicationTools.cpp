@@ -229,10 +229,11 @@ void ApplicationTools::pushPaintedSplatMap(VulkanRenderer& renderer)
         splatPainter.revision() == uploadedSplatRevision) {
         return;
     }
-    uploadedSplatRevision = splatPainter.revision();
     try {
-        (void)renderer.updateTexture(
-            splatPainter.texture(), splatPainter.canvas().toImage());
+        if (renderer.updateTexture(
+                splatPainter.texture(), splatPainter.canvas().toImage())) {
+            uploadedSplatRevision = splatPainter.revision();
+        }
     } catch (const std::exception& error) {
         log::error(log::Category::Assets)
             << "Could not upload the painted splat map: " << error.what();

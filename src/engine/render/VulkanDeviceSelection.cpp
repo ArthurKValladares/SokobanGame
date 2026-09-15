@@ -11,7 +11,9 @@ VulkanFeatureTierRejection featureTierRejection(
     const VulkanDeviceFeatureSupport& support,
     uint32_t requiredPushConstantsSize,
     uint32_t requiredPerStageSampledImages,
-    uint32_t requiredDescriptorSetSampledImages)
+    uint32_t requiredDescriptorSetSampledImages,
+    uint32_t requiredPerStageSamplers,
+    uint32_t requiredDescriptorSetSamplers)
 {
     if (support.apiVersion < VK_API_VERSION_1_3) {
         return VulkanFeatureTierRejection::Vulkan13;
@@ -26,6 +28,12 @@ VulkanFeatureTierRejection featureTierRejection(
     if (support.maxDescriptorSetSampledImages <
         requiredDescriptorSetSampledImages) {
         return VulkanFeatureTierRejection::DescriptorSetSampledImageCapacity;
+    }
+    if (support.maxPerStageDescriptorSamplers < requiredPerStageSamplers) {
+        return VulkanFeatureTierRejection::PerStageSamplerCapacity;
+    }
+    if (support.maxDescriptorSetSamplers < requiredDescriptorSetSamplers) {
+        return VulkanFeatureTierRejection::DescriptorSetSamplerCapacity;
     }
     if (!support.dynamicRendering) {
         return VulkanFeatureTierRejection::DynamicRendering;
@@ -57,13 +65,17 @@ VulkanFeatureTier chooseVulkanFeatureTier(
     const VulkanDeviceFeatureSupport& support,
     uint32_t requiredPushConstantsSize,
     uint32_t requiredPerStageSampledImages,
-    uint32_t requiredDescriptorSetSampledImages)
+    uint32_t requiredDescriptorSetSampledImages,
+    uint32_t requiredPerStageSamplers,
+    uint32_t requiredDescriptorSetSamplers)
 {
     const VulkanFeatureTierRejection rejection = featureTierRejection(
         support,
         requiredPushConstantsSize,
         requiredPerStageSampledImages,
-        requiredDescriptorSetSampledImages);
+        requiredDescriptorSetSampledImages,
+        requiredPerStageSamplers,
+        requiredDescriptorSetSamplers);
     const bool releaseCompatible =
         rejection == VulkanFeatureTierRejection::None;
     return {
@@ -85,18 +97,19 @@ VulkanTextureHeapCapacity chooseVulkanTextureHeapCapacity(
     uint32_t editorReserve,
     uint32_t importedReserve,
     uint32_t configuredCeiling,
-    uint32_t otherPerStageSampledImages)
+    uint32_t otherCombinedImageSamplers)
 {
-    const uint32_t perStageAvailable =
-        support.maxPerStageDescriptorSampledImages >
-            otherPerStageSampledImages
-        ? support.maxPerStageDescriptorSampledImages -
-            otherPerStageSampledImages
-        : 0;
+    const auto remaining = [otherCombinedImageSamplers](uint32_t limit) {
+        return limit > otherCombinedImageSamplers
+            ? limit - otherCombinedImageSamplers
+            : 0U;
+    };
     const uint32_t available = std::min({
         configuredCeiling,
-        perStageAvailable,
-        support.maxDescriptorSetSampledImages,
+        remaining(support.maxPerStageDescriptorSampledImages),
+        remaining(support.maxDescriptorSetSampledImages),
+        remaining(support.maxPerStageDescriptorSamplers),
+        remaining(support.maxDescriptorSetSamplers),
     });
     const uint64_t requested = static_cast<uint64_t>(required) +
         editorReserve + importedReserve;
@@ -136,6 +149,10 @@ std::string_view vulkanFeatureTierRejectionMessage(
         return "insufficient per-stage sampled-image descriptor capacity";
     case VulkanFeatureTierRejection::DescriptorSetSampledImageCapacity:
         return "insufficient descriptor-set sampled-image capacity";
+    case VulkanFeatureTierRejection::PerStageSamplerCapacity:
+        return "insufficient per-stage sampler descriptor capacity";
+    case VulkanFeatureTierRejection::DescriptorSetSamplerCapacity:
+        return "insufficient descriptor-set sampler capacity";
     case VulkanFeatureTierRejection::DynamicRendering:
         return "requires dynamicRendering";
     case VulkanFeatureTierRejection::Synchronization2:

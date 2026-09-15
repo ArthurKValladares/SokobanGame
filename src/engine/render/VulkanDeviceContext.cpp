@@ -379,7 +379,9 @@ void VulkanDeviceContext::pickPhysicalDevice()
         support,
         sizeof(GpuDrawInstance),
         textureDescriptorCapacity_ + sceneSingleImageBindings,
-        textureDescriptorCapacity_);
+        textureDescriptorCapacity_ + sceneSingleImageBindings,
+        textureDescriptorCapacity_ + sceneSingleImageBindings,
+        textureDescriptorCapacity_ + sceneSingleImageBindings);
     log::info(log::Category::Rendering) << "Vulkan GPU: "
         << physicalDeviceProperties_.deviceName << " ("
         << vulkanDeviceTypeName(physicalDeviceProperties_.deviceType)
@@ -569,7 +571,9 @@ bool VulkanDeviceContext::isDeviceSuitable(VkPhysicalDevice device) const
         support,
         sizeof(GpuDrawInstance),
         textureHeap.capacity + sceneSingleImageBindings,
-        textureHeap.capacity);
+        textureHeap.capacity + sceneSingleImageBindings,
+        textureHeap.capacity + sceneSingleImageBindings,
+        textureHeap.capacity + sceneSingleImageBindings);
     if (!tier.releaseCompatible) {
         log::warning(log::Category::Rendering)
             << "Rejecting Vulkan GPU " << properties.deviceName << ": "
@@ -645,6 +649,10 @@ VulkanDeviceFeatureSupport VulkanDeviceContext::queryFeatureSupport(
             properties.limits.maxPerStageDescriptorSampledImages,
         .maxDescriptorSetSampledImages =
             properties.limits.maxDescriptorSetSampledImages,
+        .maxPerStageDescriptorSamplers =
+            properties.limits.maxPerStageDescriptorSamplers,
+        .maxDescriptorSetSamplers =
+            properties.limits.maxDescriptorSetSamplers,
         .dynamicRendering = vulkan13.dynamicRendering == VK_TRUE,
         .synchronization2 = vulkan13.synchronization2 == VK_TRUE,
         .imageCubeArray = features.features.imageCubeArray == VK_TRUE,

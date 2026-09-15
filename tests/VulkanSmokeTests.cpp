@@ -9,6 +9,7 @@
 #include "engine/render/VulkanDeviceContext.hpp"
 #include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanModelResources.hpp"
+#include "engine/render/VulkanTextureUploader.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -620,6 +621,164 @@ std::string pressureManifestJson()
     return result;
 }
 
+void exerciseBlockingAdmissionFailure(
+    sokoban::VulkanDeviceContext& deviceContext)
+{
+    const sokoban::AssetManifest manifest =
+        sokoban::AssetManifest::parse(pressureManifestJson());
+    const std::filesystem::path assetRoot =
+        std::filesystem::path(SOKOBAN_TEST_SOURCE_DIR) / "assets";
+    const sokoban::RuntimeTextureCatalog textureCatalog =
+        sokoban::collectRuntimeTextureCatalog(assetRoot, manifest);
+
+    sokoban::VulkanModelResources resources;
+    resources.create(
+        deviceContext.physicalDevice(),
+        deviceContext.memoryAllocator(),
+        deviceContext.device(),
+        deviceContext.commandPool(),
+        deviceContext.graphicsQueue(),
+        assetRoot,
+        manifest,
+        textureCatalog,
+        1,
+        1.0f,
+        {
+            .maxConcurrentCpuJobs = 1,
+            .maxPublicationsPerFrame = 1,
+            .preparedAssetBytes = 1,
+            .modelResidencyBytes = 1,
+        });
+
+    sokoban::RenderAssetRequirements requirements;
+    requirements.requireModel(sokoban::RenderModel { 1 });
+    requirements.requireModel(sokoban::RenderModel { 2 });
+
+    const Clock::time_point started = Clock::now();
+    std::string failure;
+    try {
+        (void)resources.waitForAssets(requirements);
+    } catch (const std::runtime_error& error) {
+        failure = error.what();
+    }
+    const auto elapsed = Clock::now() - started;
+    const sokoban::VulkanModelResources::LoadingStats stats =
+        resources.loadingStats();
+    if (failure.find("cannot make progress") == std::string::npos ||
+        elapsed >= std::chrono::seconds(10) ||
+        stats.modelStages.cpuReady == 0 ||
+        stats.modelStages.queued == 0 ||
+        stats.activeCpuJobs != 0 ||
+        stats.residencyOversizedBlocks == 0) {
+        throw std::runtime_error(
+            "Blocking asset admission did not report its terminal state: " +
+            failure);
+    }
+}
+
+void exerciseTextureReplacementRetry(
+    sokoban::VulkanDeviceContext& deviceContext)
+{
+    const std::filesystem::path assetRoot =
+        std::filesystem::path(SOKOBAN_TEST_SOURCE_DIR) / "assets";
+    const sokoban::AssetManifest manifest =
+        sokoban::AssetManifest::loadFromFile(assetRoot / "manifest.json");
+    const sokoban::RuntimeTextureCatalog textureCatalog =
+        sokoban::collectRuntimeTextureCatalog(assetRoot, manifest);
+    const sokoban::RenderTexture texture =
+        manifest.textureIdByName("GroundSplatMap");
+    const sokoban::ImageData source = sokoban::loadRgbaImage(
+        assetRoot / "custom/textures/ground_splat.png");
+    sokoban::ImageData replacement {
+        .width = source.width + 1,
+        .height = source.height,
+    };
+    replacement.rgba.assign(
+        static_cast<std::size_t>(replacement.width) * replacement.height * 4,
+        std::byte { 0x7f });
+
+    sokoban::VulkanModelResources resources;
+    resources.create(
+        deviceContext.physicalDevice(),
+        deviceContext.memoryAllocator(),
+        deviceContext.device(),
+        deviceContext.commandPool(),
+        deviceContext.graphicsQueue(),
+        assetRoot,
+        manifest,
+        textureCatalog,
+        deviceContext.textureDescriptorCapacity(),
+        deviceContext.maxSamplerAnisotropy());
+
+    const auto unpublished = resources.updateTexture(texture, replacement);
+    if (unpublished.updated || unpublished.descriptorsChanged) {
+        throw std::runtime_error(
+            "An unpublished painted texture reported a completed update");
+    }
+
+    sokoban::RenderAssetRequirements requirements;
+    requirements.requireTexture(texture);
+    (void)resources.waitForAssets(requirements);
+    if (vkDeviceWaitIdle(deviceContext.device()) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "Texture replacement test could not finish its initial upload");
+    }
+    resources.retireCompletedUploads();
+
+    const auto beforeView = resources.textures().at(texture.index());
+    const auto beforeStats = resources.loadingStats();
+    const sokoban::VulkanMemoryStatistics beforeMemory =
+        deviceContext.memoryAllocator().statistics();
+    if (!beforeView.valid() || beforeStats.loadedTextures != 1) {
+        throw std::runtime_error(
+            "Texture replacement test did not publish its initial texture");
+    }
+
+    sokoban::VulkanTextureUploader::failNextTextureUploadForTesting();
+    std::string failure;
+    try {
+        (void)resources.updateTexture(texture, replacement);
+    } catch (const std::runtime_error& error) {
+        failure = error.what();
+    }
+    const auto failedView = resources.textures().at(texture.index());
+    const auto failedStats = resources.loadingStats();
+    const sokoban::VulkanMemoryStatistics failedMemory =
+        deviceContext.memoryAllocator().statistics();
+    if (failure.find("test-injected texture upload failure") ==
+            std::string::npos ||
+        failedView.imageView != beforeView.imageView ||
+        failedView.sampler != beforeView.sampler ||
+        failedStats.textureResidencyBytes !=
+            beforeStats.textureResidencyBytes ||
+        failedStats.retiringTextures != beforeStats.retiringTextures ||
+        failedMemory.allocationCount != beforeMemory.allocationCount ||
+        failedMemory.allocationBytes != beforeMemory.allocationBytes) {
+        throw std::runtime_error(
+            "Failed texture replacement changed the published texture or "
+            "leaked its temporary Vulkan resources");
+    }
+
+    const auto retried = resources.updateTexture(texture, replacement);
+    const auto retriedView = resources.textures().at(texture.index());
+    const auto retriedStats = resources.loadingStats();
+    if (!retried.updated || !retried.descriptorsChanged ||
+        retriedView.imageView == beforeView.imageView ||
+        retriedView.sampler == beforeView.sampler ||
+        retriedStats.loadedTextures != 1 ||
+        retriedStats.retiringTextures != 1 ||
+        retriedStats.retiringTextureBytes !=
+            beforeStats.textureResidencyBytes) {
+        throw std::runtime_error(
+            "Texture replacement did not succeed cleanly after retry");
+    }
+    resources.completeFrame(0);
+    if (resources.loadingStats().retiringTextures != 0) {
+        throw std::runtime_error(
+            "Replaced texture was not released after frame retirement");
+    }
+}
+
 PressureMetrics exercisePreparedAssetPressure(
     sokoban::VulkanDeviceContext& deviceContext)
 {
@@ -801,6 +960,8 @@ int main(int argc, char** argv)
         sokoban::VulkanDeviceContext deviceContext(window.get());
         exerciseMemoryAllocator(deviceContext);
         exerciseSkinnedPublicationRetry(deviceContext);
+        exerciseBlockingAdmissionFailure(deviceContext);
+        exerciseTextureReplacementRetry(deviceContext);
         const PressureMetrics pressure =
             exercisePreparedAssetPressure(deviceContext);
         if (argc == 2 &&

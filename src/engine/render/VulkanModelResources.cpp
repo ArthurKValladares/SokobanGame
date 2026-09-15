@@ -452,27 +452,32 @@ bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirem
     // each completed job is published; gameplay never waits here.
     while (scheduler_.queuedCount() != 0 || scheduler_.activeCount() != 0) {
         startQueuedAssets();
+        bool published = false;
 
         for (uint32_t i = 0; i < animations_.size(); ++i) {
             const RenderAnimation animation { i + 1 };
-            if (animations_[i].publication.state() == LoadState::Loading) {
-                (void)publishAnimation(animation, true);
-                break;
+            if (animations_[i].publication.readyForPublication()) {
+                published = publishAnimation(animation, true) || published;
             }
         }
         for (uint32_t i = 0; i < models_.size(); ++i) {
             const RenderModel model { i + 1 };
-            if (models_[i].publication.state() == LoadState::Loading) {
-                (void)publishModel(model, true);
-                break;
+            if (models_[i].publication.readyForPublication()) {
+                published = publishModel(model, true) || published;
             }
         }
         for (uint32_t textureIndex : textureSpace_.active()) {
-            if (textures_[textureIndex].publication.state() ==
-                LoadState::Loading) {
-                (void)publishTexture(textureIndex, true);
-                break;
+            if (textures_[textureIndex].publication.readyForPublication()) {
+                published = publishTexture(textureIndex, true) || published;
             }
+        }
+        startQueuedAssets();
+        if (!published && scheduler_.activeCount() == 0 &&
+            scheduler_.queuedCount() != 0) {
+            throw std::runtime_error(
+                "Required render assets cannot make progress: queued work is "
+                "blocked by retained CPU-ready data that residency admission "
+                "cannot publish");
         }
     }
     retireCompletedGeometryUploads(true);
@@ -2134,23 +2139,39 @@ VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
         // sampler go with it, so descriptor sets pointing at them must be
         // rewritten - reported back rather than done here, because this class
         // does not own the descriptor sets.
-        textureUploader_.destroyTexture(slot.gpu.image, slot.gpu.sampler);
-        textureUploader_.createTextureBlocking(
-            image,
-            slot.gpu.image,
-            slot.gpu.sampler,
-            textureDefinitions_[texture.index()]->identity.interpretation);
-        slot.gpu.width = image.width;
-        slot.gpu.height = image.height;
-        slot.gpu.compressed = false;
-        const uint64_t previousBytes = slot.gpuBytes;
-        slot.gpuBytes = textureBytes(
+        const uint64_t replacementBytes = textureBytes(
             PreparedTextureSource { image },
             textureDefinitions_[texture.index()]->identity.interpretation);
-        slot.fullQualityBytes = slot.gpuBytes;
+        TextureResource replacement;
+        textureUploader_.createTextureBlocking(
+            image,
+            replacement.image,
+            replacement.sampler,
+            textureDefinitions_[texture.index()]->identity.interpretation);
+        replacement.width = image.width;
+        replacement.height = image.height;
+        replacement.compressed = false;
+        const uint64_t previousBytes = slot.gpuBytes;
+        try {
+            // Queue ownership of the previous handles before changing the
+            // slot. If queue growth throws, the slot still owns its original
+            // texture and the temporary replacement is destroyed below.
+            retiredTextures_.retire({
+                .gpu = slot.gpu,
+                .gpuBytes = previousBytes,
+            }, retirementFrameMask_);
+        } catch (...) {
+            textureUploader_.destroyTexture(
+                replacement.image, replacement.sampler);
+            throw;
+        }
+        slot.gpu = std::exchange(replacement, {});
+        slot.gpuBytes = replacementBytes;
+        slot.fullQualityBytes = replacementBytes;
         slot.sourceMipLevels = slot.gpu.image.mipLevels;
         slot.residentBaseMip = 0;
-        textureResidency_.replaceResident(previousBytes, slot.gpuBytes);
+        textureResidency_.beginRetiring(previousBytes);
+        textureResidency_.addResident(replacementBytes);
         return { .updated = true, .descriptorsChanged = true };
     }
 

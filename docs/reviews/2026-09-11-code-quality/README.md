@@ -14,6 +14,8 @@ Packet 2's code changes were implemented on September 14, 2026. CQ-04 now gives 
 
 Packet 3's code changes were implemented on September 14, 2026. CQ-03 now invalidates every prepared interpretation of an overwritten external texture before refreshing the runtime package index, so BC7-capable and raw reloads both observe newly painted pixels and failed invalidation remains retryable. CQ-01 is complete: structural level transactions apply the shared location remap to splat-map names and level music in source and runtime manifests, archive removed-level associations with the deleted level, and restore them at the level's new index. The level tree, runtime mirror, manifests, and index share one rollback result. Focused publication, association, restoration, and rollback regressions pass together with the complete 80-test Debug and Release warning builds.
 
+Packet 4's code changes were implemented on September 14, 2026. CQ-06 now sizes the combined-image-sampler heap against per-stage and aggregate sampled-image and sampler limits after reserving the scene bindings, and device selection carries every applicable limit explicitly. CQ-07 retries retained CPU-ready assets in the blocking path and reports a terminal admission error when queued work has no possible source of progress. CQ-08 constructs resized painted textures under temporary ownership, preserves the published texture and accounting through failure, retires the old resource only after commit, and advances the painted revision only after a successful renderer update. Synthetic limit boundaries, a bounded one-byte admission case, an injected partial texture-upload failure, unchanged-handle/accounting checks, false publication, and successful retry all pass with Vulkan validation in the complete 80-test Debug and Release warning builds.
+
 ## Assessment
 
 The codebase has useful boundaries already: pure gameplay and menu logic, explicit persistence results, an SDK-independent core, shared GPU layouts, specialized rendering passes, and substantial regression coverage. The previous review's completed work should be retained.
@@ -131,6 +133,8 @@ The probe pushes an ice block and moves the player independently. At the exact p
 
 **P2 · Reproduced arithmetic; source/spec-confirmed portability · Correctness**
 
+**Status:** implemented September 14, 2026.
+
 **Location:** `VulkanDeviceSelection` descriptor-capacity helper and capability collection, descriptor-layout construction, and the matching boundary tests. See [renderer findings](renderer-findings.md) for exact anchors and official Vulkan rules.
 
 The heap uses combined image samplers. Capacity selection considers sampled-image limits but omits sampler limits and fails to reserve scene descriptors from the aggregate descriptor-set sampled-image limit. The production helper accepts a 128-entry heap against an aggregate limit of 128 even though the layout includes eight additional scene image descriptors. Current tests encode that acceptance.
@@ -142,6 +146,8 @@ The heap uses combined image samplers. Capacity selection considers sampled-imag
 ### CQ-07 — Make blocking asset admission terminate or make progress
 
 **P2 · Reproduced under constrained budgets · Correctness, efficiency**
+
+**Status:** implemented September 14, 2026.
 
 **Location:** `VulkanModelResources::waitForAssets`, CPU-ready admission/retry, and `AssetLoadScheduler` prepared-byte gating. Exact anchors and logs: [renderer findings](renderer-findings.md).
 
@@ -156,6 +162,8 @@ The tiny budget makes the failure deterministic. It does not show ordinary defau
 ### CQ-08 — Publish replacement textures only after successful construction
 
 **P2 · Source-confirmed exception safety · Correctness, ownership**
+
+**Status:** implemented September 14, 2026.
 
 **Location:** texture replacement in `VulkanModelResources`, and [ApplicationTools.cpp:224](../../../src/engine/ApplicationTools.cpp), `pushPaintedSplatMap`. Full analysis: [renderer findings](renderer-findings.md).
 

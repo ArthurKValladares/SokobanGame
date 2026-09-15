@@ -98,6 +98,12 @@ public:
     void destroyTextureUpload(PendingTextureUpload& upload);
     void destroyTexture(OwnedImage& image, VkSampler& sampler);
 
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    // Fails after replacement image/view/sampler creation but before the copy
+    // is recorded, exercising cleanup of a partially constructed texture.
+    static void failNextTextureUploadForTesting();
+#endif
+
 private:
     // What the two upload paths disagree about. Everything after this - the
     // image, its view, its sampler and the four debug strings - is the same

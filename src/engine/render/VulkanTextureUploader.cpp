@@ -5,12 +5,17 @@
 #include "engine/render/VulkanResourceUtils.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <stdexcept>
 #include <vector>
 
 namespace sokoban {
 namespace {
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+std::atomic_bool failNextTextureUpload = false;
+#endif
 
 VkSamplerAddressMode vulkanAddressMode(TextureAddressMode mode)
 {
@@ -218,8 +223,21 @@ void VulkanTextureUploader::beginTextureUpload(
         textureImage,
         sampler);
 
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    if (failNextTextureUpload.exchange(false)) {
+        throw std::runtime_error("test-injected texture upload failure");
+    }
+#endif
+
     recordTextureCopy(image, textureImage, upload);
 }
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+void VulkanTextureUploader::failNextTextureUploadForTesting()
+{
+    failNextTextureUpload.store(true);
+}
+#endif
 
 void VulkanTextureUploader::beginTextureUpload(
     const CompressedTextureArtifact& texture,

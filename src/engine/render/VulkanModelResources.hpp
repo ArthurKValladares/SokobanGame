@@ -232,8 +232,10 @@ public:
     // Replaces a published texture's pixels, for maps painted in the level
     // editor. Same-size updates write into the existing image and leave
     // descriptors valid; a size change - the board was resized - recreates the
-    // image and requires the caller to refresh descriptors. Returns
-    // `updated = false` when the texture is not resident.
+    // image and requires the caller to refresh descriptors. Replacement is
+    // transactional: a creation failure leaves the published texture and its
+    // accounting unchanged. Returns `updated = false` when the texture is not
+    // resident.
     TextureUpdate updateTexture(RenderTexture texture, const ImageData& image);
     struct PublicationResult {
         std::size_t publications = 0;
