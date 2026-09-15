@@ -2,7 +2,6 @@
 
 #include "engine/GameplayLoop.hpp"
 #include "engine/Input.hpp"
-#include "engine/ui/LevelCompleteOverlay.hpp"
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/TitleScreen.hpp"
 
@@ -41,7 +40,6 @@ public:
     struct RoutingContext {
         bool optionsOpen = false;
         bool titleOpen = false;
-        bool overlayOpen = false;
         bool editorEditing = false;
         bool decorationPlacementReady = false;
         bool draftPlaying = false;
@@ -81,7 +79,6 @@ public:
         bool showOverworldMap = false;
         bool previewScreen = false;
         TitleScreenInput title;
-        LevelCompleteInput overlay;
         OptionsMenuInput options;
         PointerInput pointer;
         EditorInput editor;

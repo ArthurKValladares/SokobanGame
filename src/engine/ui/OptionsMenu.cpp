@@ -251,8 +251,6 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::EditorControls:
         setPage(state, OptionsMenuPage::EditorControls);
         break;
-    case OptionsMenuRowId::LevelSelect:
-        return options::OpenLevelSelect {};
     case OptionsMenuRowId::ExitToTitle:
         return options::ExitToTitle {};
     case OptionsMenuRowId::Quit:
@@ -838,8 +836,6 @@ OptionsMenuReduction reduceOptionsMenu(
         [&](const options::intent::Open& open) {
             result.state.open = true;
             result.state.allowTitleExit = open.allowTitleExit;
-            result.state.allowLevelSelect =
-                open.allowLevelSelect && open.allowTitleExit;
             setPage(result.state, OptionsMenuPage::Main);
         },
         [&](const options::intent::Close&) {
@@ -1026,11 +1022,10 @@ OptionsMenuReduction reduceOptionsMenu(
     return result;
 }
 
-void OptionsMenu::open(bool allowTitleExit, bool allowLevelSelect)
+void OptionsMenu::open(bool allowTitleExit)
 {
     (void)dispatch({}, options::intent::Open {
         .allowTitleExit = allowTitleExit,
-        .allowLevelSelect = allowLevelSelect,
     });
 }
 

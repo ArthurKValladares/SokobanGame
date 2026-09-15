@@ -26,7 +26,6 @@
 #include "engine/Window.hpp"
 #include "engine/render/VulkanRenderer.hpp"
 #include "engine/ui/FontAtlas.hpp"
-#include "engine/ui/LevelCompleteOverlay.hpp"
 #include "engine/ui/InputPrompts.hpp"
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/TitleScreen.hpp"
@@ -119,15 +118,10 @@ private:
     [[nodiscard]] bool switchSaveSlot(int slot);
     void deleteSaveSlot(int slot);
     void persistSettings(bool immediate);
-    [[nodiscard]] std::vector<TitleLevelInfo> titleLevelInfos() const;
     void startNewGame();
-    void startLevel(int level, int screen);
-    void resolveLevelComplete(bool toTitle);
-    void openStandaloneLevelSelect();
     [[nodiscard]] ShellFacts shellFacts() const;
     void handleShellEvent(const ShellEvent& event);
     void executeShellCommand(const ShellCommand& command);
-    [[nodiscard]] bool allLevelsCompleted() const;
     [[nodiscard]] bool shellMenuOpen() const;
     [[nodiscard]] bool applyLevel(
         Level level,
@@ -206,7 +200,6 @@ private:
     OptionsMenu optionsMenu_;
     OptionsMenuView optionsMenuView_;
     TitleScreen titleScreen_;
-    LevelCompleteOverlay levelCompleteOverlay_;
     // Pure shell routing; Application executes the commands it emits.
     ShellFlow shellFlow_;
     AudioSystem audioSystem_;

@@ -109,8 +109,7 @@ InputRouter::Frame InputRouter::routeFrame(
     const bool left = input.actionPressed(InputAction::MoveLeft);
     const bool right = input.actionPressed(InputAction::MoveRight);
     const bool confirm = input.actionPressed(InputAction::MenuConfirm);
-    const bool shellOpen =
-        context.optionsOpen || context.titleOpen || context.overlayOpen;
+    const bool shellOpen = context.optionsOpen || context.titleOpen;
     const bool gameplayActive = !shellOpen &&
         !context.editorEditing &&
         !context.draftExitConfirmationOpen;
@@ -136,9 +135,6 @@ InputRouter::Frame InputRouter::routeFrame(
     }
     if (context.titleOpen && !context.optionsOpen) {
         frame.title = { up, down, left, right, confirm };
-    }
-    if (context.overlayOpen && !context.optionsOpen) {
-        frame.overlay = { up, down, confirm };
     }
     if (context.optionsOpen) {
         frame.options = { up, down, left, right, confirm };

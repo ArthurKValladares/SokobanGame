@@ -209,7 +209,9 @@ The panel shrinks with the viewport, but the rows retain their fixed vertical si
 
 **P3 · Source-confirmed cleanup · Maintainability, readability, avoiding unnecessary work**
 
-**Location:** [LevelCompleteOverlay.cpp:39](../../../src/engine/ui/LevelCompleteOverlay.cpp); [Application.cpp:1053](../../../src/engine/Application.cpp), actual puzzle-completion behavior; [ShellFlow.cpp:86](../../../src/engine/ShellFlow.cpp); [OptionsMenu.cpp:565](../../../src/engine/ui/OptionsMenu.cpp), current main rows; [TitleScreen.cpp:270](../../../src/engine/ui/TitleScreen.cpp), dormant level/screen selection.
+**Status:** implemented September 15, 2026. The unreachable completion overlay, level/screen selector, option gate, shell and input routes, metadata preparation, duration formatter, source files, and feature-exclusive tests are removed. Active title, save-slot, options, input, gameplay-completion, campaign, and profile tests pass, and no removed route remains referenced.
+
+**Location:** the obsolete overlay files were deleted. The retained behavior lives in [Application.cpp](../../../src/engine/Application.cpp), [ShellFlow.cpp](../../../src/engine/ShellFlow.cpp), [OptionsMenu.cpp](../../../src/engine/ui/OptionsMenu.cpp), and [TitleScreen.cpp](../../../src/engine/ui/TitleScreen.cpp).
 
 No production caller opens either completion-overlay mode. Completing a puzzle saves and loads the overworld directly. The options menu never emits a LevelSelect row, and the remaining routes to level selection originate from that absent row or the unopened overlay. Unit tests can invoke these APIs directly, but that does not make the product routes reachable.
 

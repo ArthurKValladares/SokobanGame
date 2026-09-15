@@ -28,7 +28,6 @@ enum class OptionsMenuRowId {
     Graphics,
     Audio,
     Controls,
-    LevelSelect,
     ExitToTitle,
     Quit,
     AntiAliasing,
@@ -114,7 +113,6 @@ struct OptionsMenuRow {
 struct OptionsMenuState {
     bool open = false;
     bool allowTitleExit = false;
-    bool allowLevelSelect = false;
     OptionsMenuPage page = OptionsMenuPage::Main;
     int selectedRow = 0;
     BindingDeviceClass controlsBindingDevice =
@@ -140,13 +138,11 @@ struct SettingsChanged {
 };
 struct Quit {};
 struct ExitToTitle {};
-struct OpenLevelSelect {};
 
 namespace intent {
 
 struct Open {
     bool allowTitleExit = false;
-    bool allowLevelSelect = false;
 };
 struct Close {};
 struct Back {};
@@ -184,8 +180,7 @@ struct ProvideBinding {
 using OptionsAction = std::variant<
     options::SettingsChanged,
     options::Quit,
-    options::ExitToTitle,
-    options::OpenLevelSelect>;
+    options::ExitToTitle>;
 
 using OptionsMenuIntent = std::variant<
     options::intent::Open,
@@ -223,9 +218,7 @@ class OptionsMenu {
 public:
     using Page = OptionsMenuPage;
 
-    void open(
-        bool allowTitleExit = false,
-        bool allowLevelSelect = false);
+    void open(bool allowTitleExit = false);
     void close();
     void back();
     void requestQuitConfirmation();

@@ -9,10 +9,6 @@ void reduceBack(const ShellFacts& facts, std::vector<ShellCommand>& commands)
         commands.push_back(shell::OptionsBack {});
         return;
     }
-    if (facts.overlayOpen) {
-        // The completion overlays require an explicit choice.
-        return;
-    }
     if (facts.titleOpen) {
         if (facts.titleAtMainPage) {
             commands.push_back(shell::OpenOptions { .pauseContext = false });
@@ -21,10 +17,7 @@ void reduceBack(const ShellFacts& facts, std::vector<ShellCommand>& commands)
         }
         return;
     }
-    commands.push_back(shell::OpenOptions {
-        .pauseContext = true,
-        .allowLevelSelect = false,
-    });
+    commands.push_back(shell::OpenOptions { .pauseContext = true });
 }
 
 void reduceTitle(
@@ -51,10 +44,6 @@ void reduceTitle(
         [&](const title::DeleteSlot& deleteSlot) {
             commands.push_back(shell::DeleteSlot { deleteSlot.slot });
         },
-        [&](const title::StartLevel& start) {
-            commands.push_back(shell::StartLevel { start.level, start.screen });
-            commands.push_back(shell::CloseTitle {});
-        },
         [&](const title::OpenOptions&) {
             commands.push_back(shell::OpenOptions { .pauseContext = false });
         },
@@ -80,28 +69,6 @@ void reduceOptions(
             commands.push_back(shell::CloseOptions {});
             commands.push_back(shell::OpenTitle {});
         },
-        [&](const options::OpenLevelSelect&) {
-            commands.push_back(shell::CloseOptions {});
-            commands.push_back(shell::OpenStandaloneLevelSelect {});
-        },
-    }, action);
-}
-
-void reduceOverlay(
-    const OverlayAction& action,
-    std::vector<ShellCommand>& commands)
-{
-    std::visit(flow::Overloaded {
-        [&](const overlay::Continue&) {
-            commands.push_back(shell::ResolveLevelComplete { .toTitle = false });
-        },
-        [&](const overlay::ToTitle&) {
-            commands.push_back(shell::ResolveLevelComplete { .toTitle = true });
-        },
-        [&](const overlay::ToLevelSelect&) {
-            commands.push_back(shell::ResolveLevelComplete { .toTitle = false });
-            commands.push_back(shell::OpenStandaloneLevelSelect {});
-        },
     }, action);
 }
 
@@ -123,9 +90,6 @@ void ShellFlow::reduce(
         },
         [&](const ShellOptionsAction& optionsEvent) {
             reduceOptions(optionsEvent.action, commands);
-        },
-        [&](const ShellOverlayAction& overlayEvent) {
-            reduceOverlay(overlayEvent.action, commands);
         },
     }, event);
 }

@@ -97,21 +97,4 @@ void trailingText(
     }, text, color, size);
 }
 
-std::string formatDuration(double seconds, DurationStyle style)
-{
-    const int tenths = std::max(0, static_cast<int>(seconds * 10.0));
-    const int minutes = tenths / 600;
-    const int remainderTenths = tenths % 600;
-    std::string result = std::to_string(minutes) + ":";
-    if (remainderTenths < 100) {
-        result += '0';
-    }
-    result += std::to_string(remainderTenths / 10);
-    if (style == DurationStyle::MinutesSecondsTenths) {
-        result += '.';
-        result += std::to_string(remainderTenths % 10);
-    }
-    return result;
-}
-
 } // namespace sokoban::menuKit

@@ -1,5 +1,4 @@
-// Headless tests for the shell routing rules: menu precedence, Options
-// context, the new-game slot-pick operation, and completion resolution.
+// Headless tests for shell menu routing and the new-game slot-pick operation.
 
 #include "TestHarness.hpp"
 #include "ScopedTestDirectory.hpp"
@@ -43,16 +42,10 @@ void testBackRouting()
 {
     ShellFlow flow;
 
-    // Options wins over everything else that is open.
+    // Options wins over the title screen when both are open.
     CHECK(only<sokoban::shell::OptionsBack>(flow.handle(
         sokoban::ShellBackPressed {},
-        { .optionsOpen = true, .overlayOpen = true, .titleOpen = true })));
-
-    // The completion overlay swallows Back: an explicit choice is required.
-    CHECK(flow.handle(
-        sokoban::ShellBackPressed {},
-        { .overlayOpen = true, .titleOpen = true })
-        .empty());
+        { .optionsOpen = true, .titleOpen = true })));
 
     // Title sub-pages step back; the main page opens title-context Options.
     CHECK(only<sokoban::shell::TitleBack>(flow.handle(
@@ -64,23 +57,15 @@ void testBackRouting()
             { .titleOpen = true, .titleAtMainPage = true });
         const auto* open = commandAt<sokoban::shell::OpenOptions>(commands, 0);
         CHECK(commands.size() == 1 && open != nullptr);
-        CHECK(open != nullptr && !open->pauseContext && !open->allowLevelSelect);
+        CHECK(open != nullptr && !open->pauseContext);
     }
 
-    // In gameplay, Back opens the pause menu. Completion never enables a
-    // shortcut around the overworld.
+    // In gameplay, Back opens the pause menu.
     {
         const std::vector<ShellCommand> commands = flow.handle(
             sokoban::ShellBackPressed {}, { .gameLoaded = true });
         const auto* open = commandAt<sokoban::shell::OpenOptions>(commands, 0);
-        CHECK(open != nullptr && open->pauseContext && !open->allowLevelSelect);
-    }
-    {
-        const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellBackPressed {},
-            { .gameLoaded = true, .allLevelsCompleted = true });
-        const auto* open = commandAt<sokoban::shell::OpenOptions>(commands, 0);
-        CHECK(open != nullptr && open->pauseContext && !open->allowLevelSelect);
+        CHECK(open != nullptr && open->pauseContext);
     }
 
     // The window's close button always goes through the confirmation.
@@ -131,23 +116,13 @@ void testTitleResults()
         CHECK(commands.size() == 1 && deleteSlot != nullptr && deleteSlot->slot == 0);
     }
 
-    // Level-select starts close the title behind them.
-    {
-        const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellTitleAction { sokoban::title::StartLevel { 2, 1 } }, {});
-        CHECK(commands.size() == 2);
-        const auto* start = commandAt<sokoban::shell::StartLevel>(commands, 0);
-        CHECK(start != nullptr && start->level == 2 && start->screen == 1);
-        CHECK(commandAt<sokoban::shell::CloseTitle>(commands, 1) != nullptr);
-    }
-
-    // Options from the title never carries pause-only rows.
+    // Options from the title does not carry pause context.
     {
         const std::vector<ShellCommand> commands = flow.handle(
             sokoban::ShellTitleAction { sokoban::title::OpenOptions {} },
-            { .titleOpen = true, .allLevelsCompleted = true });
+            { .titleOpen = true });
         const auto* open = commandAt<sokoban::shell::OpenOptions>(commands, 0);
-        CHECK(open != nullptr && !open->pauseContext && !open->allowLevelSelect);
+        CHECK(open != nullptr && !open->pauseContext);
     }
     CHECK(only<sokoban::shell::RequestQuitConfirmation>(flow.handle(
         sokoban::ShellTitleAction { sokoban::title::Quit {} }, {})));
@@ -213,7 +188,7 @@ void testNewGameOnSlotStopsAfterSwitchFailure()
     CHECK(liveProfile == sokoban::PlayerProfile {});
 }
 
-void testOptionsAndOverlayResults()
+void testOptionsResults()
 {
     ShellFlow flow;
 
@@ -239,37 +214,6 @@ void testOptionsAndOverlayResults()
         CHECK(commandAt<sokoban::shell::CloseOptions>(commands, 0) != nullptr);
         CHECK(commandAt<sokoban::shell::OpenTitle>(commands, 1) != nullptr);
     }
-    {
-        const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellOptionsAction { sokoban::options::OpenLevelSelect {} }, {});
-        CHECK(commands.size() == 2);
-        CHECK(commandAt<sokoban::shell::CloseOptions>(commands, 0) != nullptr);
-        CHECK(commandAt<sokoban::shell::OpenStandaloneLevelSelect>(commands, 1) != nullptr);
-    }
-
-    {
-        const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellOverlayAction { sokoban::overlay::Continue {} }, {});
-        const auto* resolve =
-            commandAt<sokoban::shell::ResolveLevelComplete>(commands, 0);
-        CHECK(commands.size() == 1 && resolve != nullptr && !resolve->toTitle);
-    }
-    {
-        const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellOverlayAction { sokoban::overlay::ToTitle {} }, {});
-        const auto* resolve =
-            commandAt<sokoban::shell::ResolveLevelComplete>(commands, 0);
-        CHECK(commands.size() == 1 && resolve != nullptr && resolve->toTitle);
-    }
-    {
-        const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellOverlayAction { sokoban::overlay::ToLevelSelect {} }, {});
-        CHECK(commands.size() == 2);
-        const auto* resolve =
-            commandAt<sokoban::shell::ResolveLevelComplete>(commands, 0);
-        CHECK(resolve != nullptr && !resolve->toTitle);
-        CHECK(commandAt<sokoban::shell::OpenStandaloneLevelSelect>(commands, 1) != nullptr);
-    }
 }
 
 } // namespace
@@ -279,7 +223,7 @@ int main()
     testBackRouting();
     testTitleResults();
     testNewGameOnSlotStopsAfterSwitchFailure();
-    testOptionsAndOverlayResults();
+    testOptionsResults();
 
     if (failures == 0) {
         std::cout << "ShellFlowTests: " << checks << " checks passed\n";

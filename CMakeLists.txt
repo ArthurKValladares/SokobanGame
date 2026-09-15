@@ -534,7 +534,6 @@ add_library(sokoban_ui STATIC
     src/engine/ShellFlow.cpp
     src/engine/ui/FontAtlas.cpp
     src/engine/ui/InputPrompts.cpp
-    src/engine/ui/LevelCompleteOverlay.cpp
     src/engine/ui/MenuKit.cpp
     src/engine/ui/OptionsMenu.cpp
     src/engine/ui/SelectorPrompt.cpp

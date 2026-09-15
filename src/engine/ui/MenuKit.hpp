@@ -93,12 +93,5 @@ void trailingText(
     float size,
     float rightPadding = 0.0f);
 
-enum class DurationStyle {
-    MinutesSeconds, // 1:23
-    MinutesSecondsTenths, // 1:23.4
-};
-
-[[nodiscard]] std::string formatDuration(double seconds, DurationStyle style);
-
 } // namespace menuKit
 } // namespace sokoban

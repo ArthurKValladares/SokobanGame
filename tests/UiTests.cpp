@@ -927,7 +927,6 @@ void testOptionsReducerAndDeclarativeRows()
         settings,
         sokoban::options::intent::Open {
             .allowTitleExit = true,
-            .allowLevelSelect = true,
         });
     state = reduction.state;
     CHECK(state.open);

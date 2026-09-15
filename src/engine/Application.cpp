@@ -537,12 +537,6 @@ bool Application::drawUiFrame(
         handleShellEvent(ShellTitleAction { *titleAction });
     }
 
-    if (const std::optional<OverlayAction> overlayAction =
-            levelCompleteOverlay_.draw(
-                ui_, pixelSize, routedInput.overlay)) {
-        handleShellEvent(ShellOverlayAction { *overlayAction });
-    }
-
     if (const std::optional<OptionsAction> optionsAction =
             optionsMenu_.handleInput(
                 settingsCoordinator_.userSettings(),
@@ -1034,8 +1028,7 @@ void Application::advanceScreen()
 #if SOKOBAN_ENABLE_DEBUG_UI
 void Application::solveCurrentScreenForDebug()
 {
-    if (!campaign_.gameLoaded() || tools_->levelEditor.playingDraft() ||
-        levelCompleteOverlay_.isOpen()) {
+    if (!campaign_.gameLoaded() || tools_->levelEditor.playingDraft()) {
         return;
     }
     if (campaign_.inOverworld()) {
@@ -1343,19 +1336,10 @@ void Application::drawScreenPreviewOverlay(Vec2 viewport)
     ScreenPreviewOverlay::draw(ui_, viewport);
 }
 
-void Application::resolveLevelComplete(bool toTitle)
-{
-    levelCompleteOverlay_.close();
-    loadCurrentScreen();
-    if (toTitle) {
-        openTitleScreen();
-    }
-}
-
 void Application::openTitleScreen()
 {
     titleScreen_.setSaveSlots(saveSlotInfos(), saveSlots_.activeSlot());
-    titleScreen_.open(titleLevelInfos());
+    titleScreen_.open();
 }
 
 std::vector<SaveSlotInfo> Application::saveSlotInfos() const
@@ -1417,7 +1401,6 @@ bool Application::switchSaveSlot(int slot)
         << saveSlots_.progressStatus();
 
     // The new slot's world loads on Continue/New Game, like at boot.
-    levelCompleteOverlay_.close();
     campaign_.resetForProfile(playerProfile_);
     renderer_.preloadAssets(
         levelAssetRequirements(campaign_.currentLevel()));
@@ -1447,7 +1430,6 @@ void Application::deleteSaveSlot(int slot)
     if (slot == saveSlots_.activeSlot()) {
         // The file stays absent until the player starts playing again.
         playerProfile_.resetProgress();
-        levelCompleteOverlay_.close();
         campaign_.resetForProfile(playerProfile_);
     }
     titleScreen_.setSaveSlots(saveSlotInfos(), saveSlots_.activeSlot());
@@ -1464,20 +1446,13 @@ void Application::persistSettings(bool immediate)
     saveSlots_.saveSettings(playerProfile_, immediate);
 }
 
-void Application::openStandaloneLevelSelect()
-{
-    titleScreen_.openLevelSelect(titleLevelInfos());
-}
-
 ShellFacts Application::shellFacts() const
 {
     return {
         .gameLoaded = campaign_.gameLoaded(),
         .optionsOpen = optionsMenu_.isOpen(),
-        .overlayOpen = levelCompleteOverlay_.isOpen(),
         .titleOpen = titleScreen_.isOpen(),
         .titleAtMainPage = titleScreen_.page() == TitleScreen::Page::Main,
-        .allLevelsCompleted = allLevelsCompleted(),
     };
 }
 
@@ -1511,13 +1486,8 @@ void Application::executeShellCommand(const ShellCommand& command)
         [&](const shell::DeleteSlot& deleteSlot) {
             deleteSaveSlot(deleteSlot.slot);
         },
-        [&](const shell::StartLevel& start) {
-            startLevel(start.level, start.screen);
-        },
         [&](const shell::OpenOptions& open) {
-            optionsMenu_.open(
-                open.pauseContext,
-                open.allowLevelSelect);
+            optionsMenu_.open(open.pauseContext);
         },
         [&](const shell::CloseOptions&) { optionsMenu_.close(); },
         [&](const shell::OptionsBack&) { optionsMenu_.back(); },
@@ -1530,68 +1500,20 @@ void Application::executeShellCommand(const ShellCommand& command)
             optionsMenu_.requestQuitConfirmation();
         },
         [&](const shell::Quit&) { running_ = false; },
-        [&](const shell::ResolveLevelComplete& resolve) {
-            resolveLevelComplete(resolve.toTitle);
-        },
-        [&](const shell::OpenStandaloneLevelSelect&) {
-            openStandaloneLevelSelect();
-        },
     }, command);
-}
-
-bool Application::allLevelsCompleted() const
-{
-    return campaign_.allTargetsCompleted(playerProfile_);
 }
 
 bool Application::shellMenuOpen() const
 {
-    return optionsMenu_.isOpen() ||
-        titleScreen_.isOpen() ||
-        levelCompleteOverlay_.isOpen();
-}
-
-std::vector<TitleLevelInfo> Application::titleLevelInfos() const
-{
-    std::vector<TitleLevelInfo> result;
-    for (int level = 0; level < campaign_.levelCount(); ++level) {
-        const int screens = campaign_.screenCount(level);
-        const PlayerProfile::LevelProgress* progress =
-            playerProfile_.progressForLevel(level);
-        int reached = progress ? progress->reachedScreens : 0;
-        if (level == campaign_.currentLevel()) {
-            reached = std::max(reached, campaign_.currentScreen() + 1);
-        }
-        result.push_back({
-            .screenCount = screens,
-            .name = levelMetadata_[static_cast<std::size_t>(level)].name,
-            .screenNames =
-                levelMetadata_[static_cast<std::size_t>(level)].screenNames,
-            .unlocked = level <= playerProfile_.unlockedLevel,
-            .completed = progress && progress->completed,
-            .reachedScreens = reached,
-            .bestMoves = progress ? progress->bestMoves : std::nullopt,
-            .bestTimeSeconds = progress ? progress->bestTimeSeconds : std::nullopt,
-        });
-    }
-    return result;
+    return optionsMenu_.isOpen() || titleScreen_.isOpen();
 }
 
 void Application::startNewGame()
 {
     titleScreen_.close();
-    levelCompleteOverlay_.close();
     campaign_.startNewGame(playerProfile_);
     loadCurrentScreen();
     persistProfile(true);
-}
-
-void Application::startLevel(int level, int screen)
-{
-    if (campaign_.startPuzzle(
-            playerProfile_, LevelLocation { .level = level, .screen = screen })) {
-        loadCurrentScreen();
-    }
 }
 
 void Application::checkpointCurrentScreen(bool immediateSave)
@@ -1654,7 +1576,6 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
     InputRouter::RoutingContext context {
         .optionsOpen = optionsMenu_.isOpen(),
         .titleOpen = titleScreen_.isOpen(),
-        .overlayOpen = levelCompleteOverlay_.isOpen(),
         .keyboardCaptured = renderer_.wantsKeyboardCapture(),
         .mouseCaptured = renderer_.wantsMouseCapture(),
     };

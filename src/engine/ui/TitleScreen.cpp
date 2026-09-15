@@ -43,11 +43,9 @@ UiRect leftColumn(Vec2 viewport, float desiredWidth)
 
 } // namespace
 
-void TitleScreen::open(std::vector<TitleLevelInfo> levels)
+void TitleScreen::open()
 {
-    levels_ = std::move(levels);
     open_ = true;
-    levelSelectOnly_ = false;
     setPage(Page::Main);
 }
 
@@ -63,18 +61,9 @@ void TitleScreen::setSaveSlotError(std::string message)
     saveSlotError_ = std::move(message);
 }
 
-void TitleScreen::openLevelSelect(std::vector<TitleLevelInfo> levels)
-{
-    levels_ = std::move(levels);
-    open_ = true;
-    levelSelectOnly_ = true;
-    setPage(Page::LevelSelect);
-}
-
 void TitleScreen::close()
 {
     open_ = false;
-    levelSelectOnly_ = false;
     slotPickForNewGame_ = false;
     setPage(Page::Main);
 }
@@ -88,15 +77,6 @@ void TitleScreen::back()
         setPage(Page::SaveSlots);
         return;
     }
-    if (levelSelectOnly_ && page_ == Page::LevelSelect) {
-        close();
-        return;
-    }
-    if (page_ == Page::ScreenSelect) {
-        setPage(Page::LevelSelect);
-        selectedRow_ = selectedLevel_;
-        return;
-    }
     slotPickForNewGame_ = false;
     setPage(Page::Main);
 }
@@ -105,7 +85,6 @@ void TitleScreen::setPage(Page page)
 {
     page_ = page;
     selectedRow_ = 0;
-    selectedScreen_ = 0;
     deleteColumnFocused_ = false;
     if (page != Page::SlotDeleteConfirmation) {
         pendingDeleteSlot_ = -1;
@@ -119,20 +98,8 @@ void TitleScreen::setPage(Page page)
 void TitleScreen::navigate(const menuKit::RowList& rows, const TitleScreenInput& input)
 {
     if (rows.navigate(selectedRow_, input.up, input.down)) {
-        selectedScreen_ = 0;
         deleteColumnFocused_ = false;
     }
-}
-
-int TitleScreen::selectableScreens(const TitleLevelInfo& level) const
-{
-    if (!level.unlocked || level.screenCount <= 0) {
-        return 0;
-    }
-    if (level.completed) {
-        return level.screenCount;
-    }
-    return std::clamp(level.reachedScreens, 1, level.screenCount);
 }
 
 bool TitleScreen::activeSlotHasSave() const
@@ -165,16 +132,10 @@ std::optional<TitleAction> TitleScreen::draw(
     ui.rect(fullscreen, { 0.015f, 0.020f, 0.021f, 0.12f });
     const UiRect panel = page_ == Page::Main
         ? leftColumn(viewport, 520.0f)
-        : menuKit::centeredColumn(
-              viewport,
-              page_ == Page::LevelSelect || page_ == Page::ScreenSelect
-                  ? 640.0f
-                  : 520.0f);
+        : menuKit::centeredColumn(viewport, 520.0f);
 
     switch (page_) {
     case Page::Main: return drawMain(ui, panel, input);
-    case Page::LevelSelect: return drawLevelSelect(ui, panel, input);
-    case Page::ScreenSelect: return drawScreenSelect(ui, panel, input);
     case Page::SaveSlots: return drawSaveSlots(ui, panel, input);
     case Page::SlotDeleteConfirmation:
         return drawSlotDeleteConfirmation(ui, panel, input);
@@ -265,176 +226,6 @@ std::optional<TitleAction> TitleScreen::drawMain(
         action = title::Quit {};
     }
     return action;
-}
-
-std::optional<TitleAction> TitleScreen::drawLevelSelect(
-    UiContext& ui,
-    UiRect panel,
-    const TitleScreenInput& input)
-{
-    menuKit::RowList rows;
-    for (std::size_t i = 0; i < levels_.size(); ++i) {
-        (void)rows.add(); // level rows share their vector index
-    }
-    const int backRowIndex = rows.add();
-    navigate(rows, input);
-
-    menuKit::MenuPage page(26.0f, true);
-    UiLayoutTree& tree = page.tree;
-    std::vector<UiLayoutNode> levelRows;
-    levelRows.reserve(levels_.size());
-    for (std::size_t i = 0; i < levels_.size(); ++i) {
-        levelRows.push_back(tree.item(tree.root(), 54.0f));
-        tree.spacer(tree.root(), 10.0f);
-    }
-    tree.flexibleSpacer(tree.root());
-    const UiLayoutNode backRow = tree.item(tree.root(), 52.0f);
-    tree.arrange(panel);
-
-    page.drawHeader(ui, "LEVEL SELECT", 40.0f);
-
-    for (std::size_t i = 0; i < levels_.size(); ++i) {
-        const TitleLevelInfo& level = levels_[i];
-        const UiRect row = tree.rect(levelRows[i]);
-        const bool focused = selectedRow_ == static_cast<int>(i);
-        std::string label = "Level " + std::to_string(i + 1);
-        if (!level.name.empty()) {
-            label += ": " + level.name;
-        }
-
-        if (!level.unlocked) {
-            ui.panel(row);
-            ui.text({
-                row.position.x + 18.0f,
-                row.position.y + (row.size.y - 22.0f) * 0.5f,
-            }, label, { 0.45f, 0.48f, 0.47f, 0.7f }, 22.0f);
-            menuKit::trailingText(ui, row, "LOCKED",
-                { 0.45f, 0.48f, 0.47f, 0.7f }, 18.0f, 18.0f);
-            continue;
-        }
-
-        if (uiControls::button(
-                ui, row, label, {
-                .tone = level.completed ? ButtonTone::Normal : ButtonTone::Accent,
-                .focused = focused,
-                .activate = input.confirm && focused,
-            })) {
-            selectedLevel_ = static_cast<int>(i);
-            setPage(Page::ScreenSelect);
-        }
-
-        std::string status;
-        if (level.completed && level.bestMoves) {
-            status = "Best " + std::to_string(*level.bestMoves) + " moves";
-            if (level.bestTimeSeconds) {
-                status += " - " + menuKit::formatDuration(
-                    *level.bestTimeSeconds,
-                    menuKit::DurationStyle::MinutesSeconds);
-            }
-        } else {
-            const int screens = selectableScreens(level);
-            status = std::to_string(screens) +
-                (screens == 1 ? " screen" : " screens");
-        }
-        if (!status.empty()) {
-            menuKit::trailingText(ui, row, status,
-                focused
-                    ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
-                    : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f },
-                18.0f, 18.0f);
-        }
-    }
-
-    const bool backFocused = selectedRow_ == backRowIndex;
-    if (uiControls::button(
-            ui, tree.rect(backRow), "Back", {
-            .focused = backFocused,
-            .activate = input.confirm && backFocused,
-        })) {
-        if (levelSelectOnly_) {
-            close();
-        } else {
-            setPage(Page::Main);
-        }
-    }
-    return std::nullopt;
-}
-
-std::optional<TitleAction> TitleScreen::drawScreenSelect(
-    UiContext& ui,
-    UiRect panel,
-    const TitleScreenInput& input)
-{
-    if (selectedLevel_ < 0 ||
-        selectedLevel_ >= static_cast<int>(levels_.size())) {
-        setPage(Page::LevelSelect);
-        return std::nullopt;
-    }
-
-    const int screenCount = selectableScreens(
-        levels_[static_cast<std::size_t>(selectedLevel_)]);
-    menuKit::RowList rows;
-    for (int screen = 0; screen < screenCount; ++screen) {
-        (void)rows.add();
-    }
-    const int backRowIndex = rows.add();
-    navigate(rows, input);
-    selectedScreen_ = std::clamp(selectedRow_, 0, std::max(screenCount - 1, 0));
-
-    menuKit::MenuPage page(26.0f, true);
-    UiLayoutTree& tree = page.tree;
-    std::vector<UiLayoutNode> screenRows;
-    screenRows.reserve(static_cast<std::size_t>(screenCount));
-    for (int screen = 0; screen < screenCount; ++screen) {
-        screenRows.push_back(tree.item(tree.root(), 54.0f));
-        tree.spacer(tree.root(), 10.0f);
-    }
-    tree.flexibleSpacer(tree.root());
-    const UiLayoutNode backRow = tree.item(tree.root(), 52.0f);
-    tree.arrange(panel);
-
-    const TitleLevelInfo& selectedLevel =
-        levels_[static_cast<std::size_t>(selectedLevel_)];
-    std::string header = "LEVEL " + std::to_string(selectedLevel_ + 1);
-    if (!selectedLevel.name.empty()) {
-        header += ": " + selectedLevel.name;
-    }
-    page.drawHeader(ui, header, 40.0f);
-
-    for (int screen = 0; screen < screenCount; ++screen) {
-        const bool focused = selectedRow_ == screen;
-        std::string label = "Screen " + std::to_string(screen + 1);
-        if (screen < static_cast<int>(selectedLevel.screenNames.size()) &&
-            !selectedLevel.screenNames[static_cast<std::size_t>(screen)].empty()) {
-            label += ": " +
-                selectedLevel.screenNames[static_cast<std::size_t>(screen)];
-        }
-        if (uiControls::button(
-                ui,
-                tree.rect(screenRows[static_cast<std::size_t>(screen)]),
-                label,
-                {
-                    .tone = ButtonTone::Accent,
-                    .focused = focused,
-                    .activate = input.confirm && focused,
-                })) {
-            return title::StartLevel {
-                .level = selectedLevel_,
-                .screen = screen,
-            };
-        }
-    }
-
-    const bool backFocused = selectedRow_ == backRowIndex;
-    if (uiControls::button(
-            ui, tree.rect(backRow), "Back", {
-            .focused = backFocused,
-            .activate = input.confirm && backFocused,
-        })) {
-        setPage(Page::LevelSelect);
-        selectedRow_ = selectedLevel_;
-    }
-    return std::nullopt;
 }
 
 std::optional<TitleAction> TitleScreen::drawSaveSlots(
