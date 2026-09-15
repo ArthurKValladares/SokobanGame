@@ -12,6 +12,8 @@ CQ-02 is implemented: a valid primary or another readable recovery candidate rem
 
 Packet 2's code changes were implemented on September 14, 2026. CQ-04 now gives steppers semantic value/label pairs, so every supported frame-rate value remains stable during an idle draw and arrow input returns an adjacent frame-rate value rather than an array index. CQ-05 now re-samples every surviving scheduler action immediately after completed-state synchronization, including an exact frame boundary. Focused regressions cover all six frame-rate choices, both stepper arrows, the contiguous display control, exact and non-exact concurrent-action completion, continued motion, and the final idle pose.
 
+Packet 3's code changes were implemented on September 14, 2026. CQ-03 now invalidates every prepared interpretation of an overwritten external texture before refreshing the runtime package index, so BC7-capable and raw reloads both observe newly painted pixels and failed invalidation remains retryable. CQ-01 is complete: structural level transactions apply the shared location remap to splat-map names and level music in source and runtime manifests, archive removed-level associations with the deleted level, and restore them at the level's new index. The level tree, runtime mirror, manifests, and index share one rollback result. Focused publication, association, restoration, and rollback regressions pass together with the complete 80-test Debug and Release warning builds.
+
 ## Assessment
 
 The codebase has useful boundaries already: pure gameplay and menu logic, explicit persistence results, an SDK-independent core, shared GPU layouts, specialized rendering passes, and substantial regression coverage. The previous review's completed work should be retained.
@@ -55,7 +57,7 @@ The isolated build directory is `out/code-quality-review`. No Linux compiler/san
 
 **P1 · Reproduced · Correctness, maintainability**
 
-**Status:** document, draft, selector, and undo identity remapping implemented September 14, 2026. Splat/music associations remain in packet 3.
+**Status:** implemented September 14, 2026. Packet 1 completed document, draft, selector, and undo identity remapping; packet 3 completed transactional splat/music remapping and deleted-level restoration.
 
 **Location:** `LevelEditor` structural operations and its path-keyed draft cache; `LevelProjectStore` renumbering transactions. Exact anchors and the reproduction are in [content findings](content-findings.md).
 
@@ -86,6 +88,8 @@ The probe writes level-7 progress and creates a directory at `profile.backup.jso
 ### CQ-03 — Invalidate or rebuild prepared textures when publishing edited pixels
 
 **P2 · Reproduced · Correctness, derived-data ownership**
+
+**Status:** implemented September 14, 2026.
 
 **Location:** `SplatPainter::save`, content publication/index refresh, `TextureSourceLoader` prepared-BC7 selection, and compressed-artifact identity. Exact anchors: [content findings](content-findings.md).
 

@@ -147,6 +147,71 @@ void testInterruptedBackupIsRecoveredBeforeNextTransaction()
         project.project.string() + ".editor-stage"));
 }
 
+void testRuntimeIndexFailureRollsBackCompanionManifests()
+{
+    TemporaryProject project;
+    const std::filesystem::path runtimeAssets = project.root / "runtime-assets";
+    const std::filesystem::path runtimeLevels = runtimeAssets / "levels";
+    const std::filesystem::path sourceManifest = project.root / "manifest.json";
+    const std::filesystem::path runtimeManifest =
+        runtimeAssets / "manifest.json";
+    std::filesystem::create_directories(runtimeLevels / "level0");
+    std::filesystem::copy_file(
+        project.project / "level0/screen0.scr",
+        runtimeLevels / "level0/screen0.scr");
+    const std::string originalManifest = R"json({
+      "format": 1,
+      "textures": [{ "name": "GroundSplatMap0_0", "path": "maps/old.png" }],
+      "models": [{ "name": "Hero", "path": "hero.glb", "geometry": "skinned", "role": "player" }],
+      "animations": [
+        { "name": "Idle", "path": "hero.glb", "role": "player-idle" },
+        { "name": "Move", "path": "hero.glb", "role": "player-move" },
+        { "name": "Push", "path": "hero.glb", "role": "player-push" },
+        { "name": "Death", "path": "hero.glb", "role": "player-death" },
+        { "name": "DeadIdle", "path": "hero.glb", "role": "player-dead-idle" }
+      ]
+    })json";
+    TemporaryProject::write(sourceManifest, originalManifest);
+    TemporaryProject::write(runtimeManifest, originalManifest);
+    TemporaryProject::write(
+        runtimeAssets / "content.index",
+        "format 1\ngame-version transaction-test\n");
+
+    const auto result = sokoban::LevelProjectStore::transact(
+        project.project,
+        runtimeLevels,
+        [](const std::filesystem::path& stage) {
+            TemporaryProject::write(stage / "notes.txt", "changed-note");
+        },
+        sokoban::LevelProjectStore::ManifestTransaction {
+            .sourcePath = sourceManifest,
+            .runtimePath = runtimeManifest,
+            .mutation = [&](const std::filesystem::path& stagedManifest) {
+                std::string changed = originalManifest;
+                changed.replace(changed.find("maps/old.png"),
+                    std::string("maps/old.png").size(), "maps/new.png");
+                TemporaryProject::write(stagedManifest, changed);
+                std::filesystem::remove(runtimeAssets / "content.index");
+                std::filesystem::create_directory(
+                    runtimeAssets / "content.index");
+                TemporaryProject::write(
+                    runtimeAssets / "content.index/obstruction", "x");
+            },
+        });
+
+    CHECK(!result.succeeded);
+    CHECK(result.originalsPreserved);
+    CHECK(TemporaryProject::read(project.project / "notes.txt") ==
+        "original-note");
+    CHECK(TemporaryProject::read(sourceManifest) == originalManifest);
+    CHECK(TemporaryProject::read(runtimeManifest) == originalManifest);
+    CHECK(std::filesystem::exists(runtimeLevels / "level0/screen0.scr"));
+    CHECK(!std::filesystem::exists(
+        sourceManifest.string() + ".editor-stage"));
+    CHECK(!std::filesystem::exists(
+        sourceManifest.string() + ".editor-backup"));
+}
+
 } // namespace
 
 int main()
@@ -155,6 +220,7 @@ int main()
     testRejectedMutationPreservesBothOriginalTrees();
     testThrowingMutationIsContainedAndCleanedUp();
     testInterruptedBackupIsRecoveredBeforeNextTransaction();
+    testRuntimeIndexFailureRollsBackCompanionManifests();
 
     if (failures != 0) {
         std::cerr << "LevelProjectStoreTests: " << failures

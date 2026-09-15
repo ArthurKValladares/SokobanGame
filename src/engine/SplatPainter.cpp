@@ -4,6 +4,7 @@
 #include "engine/ContentPipeline.hpp"
 #include "engine/Log.hpp"
 #include "engine/render/ImageData.hpp"
+#include "engine/render/CompressedTextureArtifact.hpp"
 #include "engine/render/PngWriter.hpp"
 
 #include <exception>
@@ -82,6 +83,8 @@ CreatedSplatMap createBlankSplatMapAt(
                     runtimePath,
                     std::filesystem::copy_options::overwrite_existing);
             }
+            invalidateCompressedTextureArtifactsForSource(
+                runtimeAssetRoot, result.relativePath);
             (void)refreshContentPackageIndex(runtimeAssetRoot);
         } catch (const std::exception& failure) {
             result.message = "Created the splat map but could not stage it: " +
@@ -366,6 +369,9 @@ bool SplatPainter::save()
                 canvas_.width(),
                 canvas_.height(),
                 canvas_.weights());
+            invalidateCompressedTextureArtifactsForSource(
+                runtimeAssetRoot_,
+                runtimePath_.lexically_relative(runtimeAssetRoot_));
             (void)refreshContentPackageIndex(runtimeAssetRoot_);
         } catch (const std::exception& failure) {
             dirty_ = true;

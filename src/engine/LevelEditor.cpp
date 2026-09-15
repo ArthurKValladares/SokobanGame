@@ -1,4 +1,5 @@
 #include "engine/LevelEditor.hpp"
+#include "engine/LevelAssetAssociations.hpp"
 
 #include "engine/AtomicFile.hpp"
 #include "engine/ContentPipeline.hpp"
@@ -119,11 +120,15 @@ void LevelEditor::initialize(
     const std::filesystem::path& sourceLevelRoot,
     const std::filesystem::path& runtimeLevelRoot,
     int currentLevel,
-    int currentScreen)
+    int currentScreen,
+    const std::filesystem::path& sourceManifestPath,
+    const std::filesystem::path& runtimeManifestPath)
 {
     document_.sourceLevelRoot = sourceLevelRoot;
     document_.runtimeLevelRoot = runtimeLevelRoot;
     document_.browserRoot = sourceLevelRoot;
+    sourceManifestPath_ = sourceManifestPath;
+    runtimeManifestPath_ = runtimeManifestPath;
 
     const std::filesystem::path currentSourcePath = screenFilePath(
         levelDirectoryPath(document_.browserRoot, currentLevel),
@@ -1872,6 +1877,18 @@ void LevelEditor::deleteLevel(const LevelDirectory& levelToDelete)
     ScreenIdentityRemaps identityRemaps;
     const std::filesystem::path deletedLevel =
         deletedLevelRoot() / deletedName;
+    std::optional<DeletedLevelAssetAssociations> deletedAssociations;
+    if (!sourceManifestPath_.empty()) {
+        try {
+            deletedAssociations = captureLevelAssetAssociations(
+                sourceManifestPath_, levelToDelete.index);
+        } catch (const std::exception& error) {
+            document_.status =
+                "Could not inspect level asset associations: " +
+                std::string(error.what());
+            return;
+        }
+    }
     for (const LevelDirectory& level : levels) {
         if (level.index < levelToDelete.index) {
             continue;
@@ -1920,6 +1937,10 @@ void LevelEditor::deleteLevel(const LevelDirectory& levelToDelete)
             std::filesystem::rename(
                 levelDirectoryPath(root, levelToDelete.index),
                 deletedRoot / deletedName);
+            if (deletedAssociations) {
+                writeDeletedLevelAssetAssociations(
+                    deletedRoot / deletedName, *deletedAssociations);
+            }
             for (int index = levelToDelete.index + 1;
                  index < static_cast<int>(levels.size());
                  ++index) {
@@ -2143,6 +2164,15 @@ void LevelEditor::restoreDeletedLevel(const std::filesystem::path& deletedLevelP
     const std::vector<LevelDirectory> levels = collectLevelDirectories();
     const int restoredIndex = levels.empty() ? 0 : levels.back().index + 1;
     const std::filesystem::path deletedName = normalizedPath.filename();
+    std::optional<DeletedLevelAssetAssociations> deletedAssociations;
+    try {
+        deletedAssociations = readDeletedLevelAssetAssociations(normalizedPath);
+    } catch (const std::exception& error) {
+        document_.status =
+            "Could not read the deleted level's asset associations: " +
+            std::string(error.what());
+        return;
+    }
     ScreenIdentityRemaps identityRemaps;
     const std::vector<LevelDirectory> deletedLevels = collectDeletedLevels();
     const auto deletedLevel = std::ranges::find_if(
@@ -2164,7 +2194,15 @@ void LevelEditor::restoreDeletedLevel(const std::filesystem::path& deletedLevelP
             std::filesystem::rename(
                 root / "Deleted" / deletedName,
                 levelDirectoryPath(root, restoredIndex));
-        }, identityRemaps)) {
+            removeDeletedLevelAssetAssociations(
+                levelDirectoryPath(root, restoredIndex));
+        }, identityRemaps,
+        [=](const std::filesystem::path& manifestPath) {
+            if (deletedAssociations) {
+                restoreLevelAssetAssociations(
+                    manifestPath, *deletedAssociations, restoredIndex);
+            }
+        })) {
         return;
     }
     const std::filesystem::path restoredPath = levelDirectoryPath(document_.browserRoot, restoredIndex);
@@ -2627,7 +2665,8 @@ void LevelEditor::applyScreenIdentityRemaps(
 
 bool LevelEditor::applyProjectMutation(
     const LevelProjectStore::Mutation& mutation,
-    const ScreenIdentityRemaps& screenIdentityRemaps)
+    const ScreenIdentityRemaps& screenIdentityRemaps,
+    const LevelProjectStore::Mutation& manifestMutation)
 {
     std::optional<std::filesystem::path> runtimeRoot;
     if (normalizedAbsolutePath(document_.browserRoot) ==
@@ -2635,10 +2674,41 @@ bool LevelEditor::applyProjectMutation(
         runtimeRoot = document_.runtimeLevelRoot;
     }
 
+    std::optional<LevelProjectStore::ManifestTransaction> companion;
+    if (!sourceManifestPath_.empty() &&
+        (!screenIdentityRemaps.empty() || manifestMutation)) {
+        LevelProjectStore::Mutation associationMutation = manifestMutation;
+        if (!associationMutation) {
+            std::vector<LevelLocationAssociationRemap> locationRemaps;
+            for (const ScreenIdentityRemap& remap : screenIdentityRemaps) {
+                if (remap.sourceLocation) {
+                    locationRemaps.push_back({
+                        .source = *remap.sourceLocation,
+                        .destination = remap.destinationLocation,
+                    });
+                }
+            }
+            associationMutation = [locationRemaps = std::move(locationRemaps)](
+                                      const std::filesystem::path& path) {
+                remapLevelAssetAssociations(path, locationRemaps);
+            };
+        }
+        std::optional<std::filesystem::path> runtimeManifest;
+        if (runtimeRoot && !runtimeManifestPath_.empty()) {
+            runtimeManifest = runtimeManifestPath_;
+        }
+        companion = LevelProjectStore::ManifestTransaction {
+            .sourcePath = sourceManifestPath_,
+            .runtimePath = runtimeManifest,
+            .mutation = std::move(associationMutation),
+        };
+    }
+
     const LevelProjectStore::Result result = LevelProjectStore::transact(
         document_.browserRoot,
         runtimeRoot,
-        mutation);
+        mutation,
+        companion);
     if (!result.succeeded) {
         document_.status = result.originalsPreserved
             ? "Project change failed; original files were preserved: " +

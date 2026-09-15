@@ -16,6 +16,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 
 namespace sokoban {
 namespace {
@@ -252,6 +253,99 @@ std::filesystem::path compressedTextureArtifactPath(
     std::ostringstream name;
     name << std::hex << std::setfill('0') << std::setw(16) << hash << ".ktx2";
     return std::filesystem::path("compiled-textures") / name.str();
+}
+
+void invalidateCompressedTextureArtifactsForSource(
+    const std::filesystem::path& assetRoot,
+    const std::filesystem::path& relativeSourcePath)
+{
+    if (assetRoot.empty() || relativeSourcePath.empty() ||
+        relativeSourcePath.is_absolute()) {
+        throw std::invalid_argument(
+            "Prepared texture invalidation requires an asset-relative path");
+    }
+    for (const std::filesystem::path& component : relativeSourcePath) {
+        if (component == "..") {
+            throw std::invalid_argument(
+                "Prepared texture invalidation path escapes the asset root");
+        }
+    }
+
+    const std::filesystem::path artifactRoot =
+        assetRoot / "compiled-textures";
+    std::error_code inspectionError;
+    if (!std::filesystem::exists(artifactRoot, inspectionError)) {
+        if (inspectionError) {
+            throw std::runtime_error(
+                "Cannot inspect prepared textures: " +
+                inspectionError.message());
+        }
+        return;
+    }
+
+    constexpr std::array colorSpaces {
+        TextureColorSpace::Srgb,
+        TextureColorSpace::Linear,
+    };
+    constexpr std::array addressModes {
+        TextureAddressMode::ClampToEdge,
+        TextureAddressMode::MirroredRepeat,
+        TextureAddressMode::Repeat,
+    };
+    constexpr std::array magnificationFilters {
+        TextureMagnificationFilter::Nearest,
+        TextureMagnificationFilter::Linear,
+    };
+    constexpr std::array minificationFilters {
+        TextureMinificationFilter::Nearest,
+        TextureMinificationFilter::Linear,
+        TextureMinificationFilter::NearestMipmapNearest,
+        TextureMinificationFilter::LinearMipmapNearest,
+        TextureMinificationFilter::NearestMipmapLinear,
+        TextureMinificationFilter::LinearMipmapLinear,
+    };
+
+    std::unordered_set<std::string> artifactNames;
+    for (const TextureColorSpace colorSpace : colorSpaces) {
+        for (const TextureAddressMode wrapU : addressModes) {
+            for (const TextureAddressMode wrapV : addressModes) {
+                for (const TextureMagnificationFilter magFilter :
+                     magnificationFilters) {
+                    for (const TextureMinificationFilter minFilter :
+                         minificationFilters) {
+                        const TextureSourceIdentity identity {
+                            .source = ExternalTextureSource {
+                                .path = relativeSourcePath,
+                            },
+                            .interpretation = {
+                                .colorSpace = colorSpace,
+                                .wrapU = wrapU,
+                                .wrapV = wrapV,
+                                .magFilter = magFilter,
+                                .minFilter = minFilter,
+                            },
+                        };
+                        artifactNames.insert(
+                            compressedTextureArtifactPath(identity)
+                                .filename().string());
+                    }
+                }
+            }
+        }
+    }
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator(artifactRoot)) {
+        if (!artifactNames.contains(entry.path().filename().string())) {
+            continue;
+        }
+        std::error_code error;
+        (void)std::filesystem::remove(entry.path(), error);
+        if (error) {
+            throw std::runtime_error(
+                "Cannot invalidate prepared texture " +
+                entry.path().string() + ": " + error.message());
+        }
+    }
 }
 
 std::vector<std::byte> buildBc7Ktx2(

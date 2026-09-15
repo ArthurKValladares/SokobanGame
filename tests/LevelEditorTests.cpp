@@ -4,6 +4,7 @@
 #include "TestHarness.hpp"
 
 #include "engine/LevelEditor.hpp"
+#include "engine/AssetManifest.hpp"
 #include "engine/OverworldMapEditor.hpp"
 #include "engine/TileTypes.hpp"
 
@@ -477,6 +478,89 @@ void testDeleteScreenRestoresShiftedDraft()
     CHECK(editor.openDocument(shiftedDraft));
     CHECK(editor.documentLayers()[1][1][1] ==
         tileTypeToChar(TileType::Wall));
+}
+
+void testStructuralChangesPublishSplatAndMusicAssociations()
+{
+    TEST("structuralChangesPublishSplatAndMusicAssociations");
+    TemporaryProject project;
+    const std::filesystem::path sourceAssets = project.root / "source-assets";
+    const std::filesystem::path runtimeAssets = project.root / "runtime-assets";
+    const std::filesystem::path sourceLevels = sourceAssets / "levels";
+    const std::filesystem::path runtimeLevels = runtimeAssets / "levels";
+    std::filesystem::create_directories(sourceLevels);
+    std::filesystem::create_directories(runtimeLevels);
+
+    LevelEditor bootstrap;
+    bootstrap.initialize(sourceLevels, runtimeLevels, 0, 0);
+    bootstrap.setRequestedSize(4, 3);
+    bootstrap.addLevelAt(0);
+    auto levels = bootstrap.collectLevelDirectories();
+    bootstrap.addScreenAt(levels[0], 1);
+
+    const std::string manifestText = R"json({
+      "format": 1,
+      "textures": [
+        { "name": "GroundSplatMap0_0", "path": "maps/first.png", "colorSpace": "linear" },
+        { "name": "GroundSplatMap0_1", "path": "maps/second.png", "colorSpace": "linear" }
+      ],
+      "models": [{ "name": "Hero", "path": "hero.glb", "geometry": "skinned", "role": "player" }],
+      "animations": [
+        { "name": "Idle", "path": "hero.glb", "role": "player-idle" },
+        { "name": "Move", "path": "hero.glb", "role": "player-move" },
+        { "name": "Push", "path": "hero.glb", "role": "player-push" },
+        { "name": "Death", "path": "hero.glb", "role": "player-death" },
+        { "name": "DeadIdle", "path": "hero.glb", "role": "player-dead-idle" }
+      ],
+      "music": [{ "level": 0, "file": "music/first.ogg" }]
+    })json";
+    const std::filesystem::path sourceManifest = sourceAssets / "manifest.json";
+    const std::filesystem::path runtimeManifest = runtimeAssets / "manifest.json";
+    std::ofstream(sourceManifest, std::ios::binary) << manifestText;
+    std::ofstream(runtimeManifest, std::ios::binary) << manifestText;
+    std::ofstream(runtimeAssets / "content.index", std::ios::binary)
+        << "format 1\ngame-version editor-test\n";
+
+    LevelEditor editor;
+    editor.initialize(sourceLevels, runtimeLevels, 0, 0,
+        sourceManifest, runtimeManifest);
+    levels = editor.collectLevelDirectories();
+    editor.addScreenAt(levels[0], 0);
+    AssetManifest manifest = AssetManifest::loadFromFile(sourceManifest);
+    CHECK(manifest.findTextureIdByName("GroundSplatMap0_0").isNone());
+    CHECK(manifest.textureIdByName("GroundSplatMap0_1").index() == 0);
+    CHECK(manifest.textureIdByName("GroundSplatMap0_2").index() == 1);
+    CHECK(manifest.musicForLevel(0) != nullptr);
+    CHECK(readFile(sourceManifest) == readFile(runtimeManifest));
+
+    editor.addLevelAt(0);
+    manifest = AssetManifest::loadFromFile(sourceManifest);
+    CHECK(manifest.textureIdByName("GroundSplatMap1_1").index() == 0);
+    CHECK(manifest.textureIdByName("GroundSplatMap1_2").index() == 1);
+    CHECK(manifest.musicForLevel(1) != nullptr);
+    CHECK(manifest.musicForLevel(0) == nullptr);
+
+    levels = editor.collectLevelDirectories();
+    editor.deleteLevel(levels[0]);
+    manifest = AssetManifest::loadFromFile(sourceManifest);
+    CHECK(manifest.textureIdByName("GroundSplatMap0_1").index() == 0);
+    CHECK(manifest.musicForLevel(0) != nullptr);
+
+    levels = editor.collectLevelDirectories();
+    editor.deleteLevel(levels[0]);
+    manifest = AssetManifest::loadFromFile(sourceManifest);
+    CHECK(manifest.findTextureIdByName("GroundSplatMap0_1").isNone());
+    CHECK(manifest.musicForLevel(0) == nullptr);
+    const auto deleted = editor.collectDeletedLevels();
+    CHECK(!deleted.empty());
+    editor.restoreDeletedLevel(deleted.back().path);
+    manifest = AssetManifest::loadFromFile(sourceManifest);
+    const RenderTexture restored =
+        manifest.textureIdByName("GroundSplatMap0_1");
+    CHECK(manifest.textures()[restored.index()].path == "maps/first.png");
+    CHECK(manifest.musicForLevel(0) &&
+        *manifest.musicForLevel(0) == "music/first.ogg");
+    CHECK(readFile(sourceManifest) == readFile(runtimeManifest));
 }
 
 void testUndoRestoresTheLoadedDocumentPath()
@@ -1344,6 +1428,7 @@ int main()
     testScreenRenumberingPreservesDraftIdentity();
     testActiveDraftFollowsLevelRenumbering();
     testDeleteScreenRestoresShiftedDraft();
+    testStructuralChangesPublishSplatAndMusicAssociations();
     testUndoRestoresTheLoadedDocumentPath();
     testWaterLayerEditingPersistenceAndLayerRenumbering();
     testProjectRenumberDeleteAndRestore();

@@ -8,7 +8,9 @@
 #include "engine/ContentPipeline.hpp"
 #include "engine/SplatPainter.hpp"
 #include "engine/render/ImageData.hpp"
+#include "engine/render/CompressedTextureArtifact.hpp"
 #include "engine/render/PngWriter.hpp"
+#include "engine/render/TextureSourceLoader.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -92,6 +94,17 @@ const SplatCanvas::Brush solidWhite {
     .opacity = 1.0f,
     .color = SplatCanvas::BrushColor::White,
 };
+
+void writeBytes(
+    const std::filesystem::path& path,
+    const std::vector<std::byte>& bytes)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+    stream.write(
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<std::streamsize>(bytes.size()));
+}
 
 void testScreenPathParsing()
 {
@@ -412,6 +425,82 @@ void testSaveWritesBothTrees()
     CHECK(reopened.canvas().weights() == painter.canvas().weights());
 }
 
+void testSaveInvalidatesPreparedPixelsAndRemainsRetryable()
+{
+    TEST("saveInvalidatesPreparedPixelsAndRemainsRetryable");
+    const TemporaryDirectory directory;
+    const std::filesystem::path runtimeRoot = directory.path() / "staged";
+    std::filesystem::create_directories(runtimeRoot);
+    std::ofstream(runtimeRoot / "manifest.json", std::ios::binary) << "{}";
+    std::ofstream(runtimeRoot / "content.index", std::ios::binary)
+        << "format 1\ngame-version editor-test\n";
+
+    const std::filesystem::path relative =
+        "custom/textures/ground_splat_level2_screen1.png";
+    const uint32_t width = 13 * SplatCanvas::texelsPerTile;
+    const uint32_t height = 7 * SplatCanvas::texelsPerTile;
+    const std::vector<uint8_t> black(
+        static_cast<std::size_t>(width) * height, 0);
+    std::filesystem::create_directories(
+        (directory.path() / "assets" / relative).parent_path());
+    std::filesystem::create_directories(
+        (runtimeRoot / relative).parent_path());
+    writeGrayscalePng(directory.path() / "assets" / relative,
+        width, height, black);
+    writeGrayscalePng(runtimeRoot / relative, width, height, black);
+
+    const AssetManifest::Texture& texture = testManifest().textures().at(3);
+    const TextureSourceIdentity identity =
+        manifestTextureSourceIdentity(texture, texture.path);
+    TextureSourceIdentity alternate = identity;
+    alternate.interpretation.wrapU = TextureAddressMode::Repeat;
+    ImageData initial { .width = 4, .height = 4 };
+    initial.rgba.resize(4U * 4U * 4U, std::byte { 0 });
+    for (std::size_t alpha = 3; alpha < initial.rgba.size(); alpha += 4) {
+        initial.rgba[alpha] = std::byte { 255 };
+    }
+    const std::filesystem::path artifact =
+        runtimeRoot / compressedTextureArtifactPath(identity);
+    const std::filesystem::path alternateArtifact =
+        runtimeRoot / compressedTextureArtifactPath(alternate);
+    writeBytes(artifact, buildBc7Ktx2(initial, identity.interpretation));
+    writeBytes(alternateArtifact,
+        buildBc7Ktx2(initial, alternate.interpretation));
+
+    SplatPainter painter;
+    CHECK(painter.open(
+        requestFor(directory, "level2/screen1.scr"), testManifest()));
+    painter.brush() = solidWhite;
+    painter.beginStroke({ 6.0f, 3.0f });
+    painter.endStroke();
+    CHECK(painter.save());
+    CHECK(!std::filesystem::exists(artifact));
+    CHECK(!std::filesystem::exists(alternateArtifact));
+
+    const PreparedTextureSource bc7Load =
+        loadPreparedTextureSource(runtimeRoot, identity, true);
+    const PreparedTextureSource rawLoad =
+        loadPreparedTextureSource(runtimeRoot, identity, false);
+    CHECK(std::holds_alternative<ImageData>(bc7Load));
+    CHECK(std::holds_alternative<ImageData>(rawLoad));
+    const ImageData& published = std::get<ImageData>(bc7Load);
+    const std::size_t centre =
+        (static_cast<std::size_t>(3 * SplatCanvas::texelsPerTile) * width +
+            6 * SplatCanvas::texelsPerTile) * 4U;
+    CHECK(published.rgba.at(centre) == static_cast<std::byte>(255));
+
+    painter.beginStroke({ 3.0f, 3.0f });
+    painter.endStroke();
+    std::filesystem::create_directories(artifact);
+    std::ofstream(artifact / "obstruction", std::ios::binary) << "x";
+    CHECK(!painter.save());
+    CHECK(painter.dirty());
+    std::filesystem::remove_all(artifact);
+    CHECK(painter.save());
+    CHECK(!painter.dirty());
+    validateContentPackage(runtimeRoot, "editor-test");
+}
+
 void testOpenResizesAMapThatNoLongerMatchesTheBoard()
 {
     TEST("openResizesAMapThatNoLongerMatchesTheBoard");
@@ -630,6 +719,7 @@ int main()
     testInterruptedStrokeStillRecordsUndo();
     testPaintingRequiresAnOpenSessionAndAStroke();
     testSaveWritesBothTrees();
+    testSaveInvalidatesPreparedPixelsAndRemainsRetryable();
     testOpenResizesAMapThatNoLongerMatchesTheBoard();
     testFollowBoardResizeDuringASession();
     testCreateBlankSplatMapWritesBothTrees();

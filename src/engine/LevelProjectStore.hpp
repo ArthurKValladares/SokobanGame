@@ -11,6 +11,12 @@ class LevelProjectStore {
 public:
     using Mutation = std::function<void(const std::filesystem::path& stagingRoot)>;
 
+    struct ManifestTransaction {
+        std::filesystem::path sourcePath;
+        std::optional<std::filesystem::path> runtimePath;
+        Mutation mutation;
+    };
+
     struct Result {
         bool succeeded = false;
         bool originalsPreserved = true;
@@ -23,7 +29,9 @@ public:
     [[nodiscard]] static Result transact(
         const std::filesystem::path& projectRoot,
         const std::optional<std::filesystem::path>& runtimeRoot,
-        const Mutation& mutation);
+        const Mutation& mutation,
+        const std::optional<ManifestTransaction>& manifest =
+            std::nullopt);
 };
 
 } // namespace sokoban

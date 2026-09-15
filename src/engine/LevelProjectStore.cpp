@@ -1,6 +1,7 @@
 #include "engine/LevelProjectStore.hpp"
 
 #include "engine/ContentPipeline.hpp"
+#include "engine/AssetManifest.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/OverworldMap.hpp"
@@ -40,6 +41,16 @@ std::filesystem::path runtimeWorkingPath(
     }
     return packageRoot.parent_path() /
         (packageRoot.filename().string() + "." + root.filename().string() +
+         std::string(suffix));
+}
+
+std::filesystem::path runtimeFileWorkingPath(
+    const std::filesystem::path& file,
+    std::string_view suffix)
+{
+    const std::filesystem::path packageRoot = file.parent_path();
+    return packageRoot.parent_path() /
+        (packageRoot.filename().string() + "." + file.filename().string() +
          std::string(suffix));
 }
 
@@ -109,6 +120,22 @@ void copyDirectoryContents(
                 "cannot stage " + entry.path().string() + ": " +
                 error.message());
         }
+    }
+}
+
+void copyFile(
+    const std::filesystem::path& source,
+    const std::filesystem::path& destination)
+{
+    std::error_code error;
+    std::filesystem::copy_file(
+        source,
+        destination,
+        std::filesystem::copy_options::overwrite_existing,
+        error);
+    if (error) {
+        throw std::runtime_error(
+            "cannot stage " + source.string() + ": " + error.message());
     }
 }
 
@@ -332,7 +359,8 @@ std::string restoreBackup(
 LevelProjectStore::Result LevelProjectStore::transact(
     const std::filesystem::path& projectRoot,
     const std::optional<std::filesystem::path>& runtimeRoot,
-    const Mutation& mutation)
+    const Mutation& mutation,
+    const std::optional<ManifestTransaction>& manifest)
 {
     const std::filesystem::path projectStage =
         workingPath(projectRoot, ".editor-stage");
@@ -344,17 +372,49 @@ LevelProjectStore::Result LevelProjectStore::transact(
     const std::filesystem::path runtimeBackup = runtimeRoot
         ? runtimeWorkingPath(*runtimeRoot, ".editor-backup")
         : std::filesystem::path {};
+    const std::filesystem::path companionStage = manifest
+        ? workingPath(manifest->sourcePath, ".editor-stage")
+        : std::filesystem::path {};
+    const std::filesystem::path companionBackup = manifest
+        ? workingPath(manifest->sourcePath, ".editor-backup")
+        : std::filesystem::path {};
+    const std::filesystem::path runtimeCompanionStage =
+        manifest && manifest->runtimePath
+        ? runtimeFileWorkingPath(
+            *manifest->runtimePath, ".editor-stage")
+        : std::filesystem::path {};
+    const std::filesystem::path runtimeCompanionBackup =
+        manifest && manifest->runtimePath
+        ? runtimeFileWorkingPath(
+            *manifest->runtimePath, ".editor-backup")
+        : std::filesystem::path {};
     bool projectInstalled = false;
     bool projectBackedUp = false;
     bool runtimeInstalled = false;
     bool runtimeBackedUp = false;
     bool projectHadOriginal = false;
     bool runtimeHadOriginal = false;
+    bool companionInstalled = false;
+    bool companionBackedUp = false;
+    bool runtimeCompanionInstalled = false;
+    bool runtimeCompanionBackedUp = false;
+    bool companionHadOriginal = false;
+    bool runtimeCompanionHadOriginal = false;
 
     try {
         recoverWorkingTree(projectRoot, projectStage, projectBackup);
         if (runtimeRoot) {
             recoverWorkingTree(*runtimeRoot, runtimeStage, runtimeBackup);
+        }
+        if (manifest) {
+            recoverWorkingTree(
+                manifest->sourcePath, companionStage, companionBackup);
+            if (manifest->runtimePath) {
+                recoverWorkingTree(
+                    *manifest->runtimePath,
+                    runtimeCompanionStage,
+                    runtimeCompanionBackup);
+            }
         }
 
         copyDirectoryContents(projectRoot, projectStage);
@@ -362,6 +422,15 @@ LevelProjectStore::Result LevelProjectStore::transact(
         const std::vector<IndexedPath> levels = validateProject(projectStage);
         if (runtimeRoot) {
             prepareRuntimeMirror(levels, projectStage, runtimeStage);
+        }
+        if (manifest) {
+            copyFile(manifest->sourcePath, companionStage);
+            manifest->mutation(companionStage);
+            (void)AssetManifest::loadFromFile(companionStage);
+            if (manifest->runtimePath) {
+                copyFile(companionStage, runtimeCompanionStage);
+                (void)AssetManifest::loadFromFile(runtimeCompanionStage);
+            }
         }
 
         projectHadOriginal = std::filesystem::exists(projectRoot);
@@ -372,6 +441,17 @@ LevelProjectStore::Result LevelProjectStore::transact(
         renamePath(projectStage, projectRoot);
         projectInstalled = true;
 
+        if (manifest) {
+            companionHadOriginal =
+                std::filesystem::exists(manifest->sourcePath);
+            if (companionHadOriginal) {
+                renamePath(manifest->sourcePath, companionBackup);
+                companionBackedUp = true;
+            }
+            renamePath(companionStage, manifest->sourcePath);
+            companionInstalled = true;
+        }
+
         if (runtimeRoot) {
             runtimeHadOriginal = std::filesystem::exists(*runtimeRoot);
             if (runtimeHadOriginal) {
@@ -380,6 +460,19 @@ LevelProjectStore::Result LevelProjectStore::transact(
             }
             renamePath(runtimeStage, *runtimeRoot);
             runtimeInstalled = true;
+            if (manifest && manifest->runtimePath) {
+                runtimeCompanionHadOriginal =
+                    std::filesystem::exists(*manifest->runtimePath);
+                if (runtimeCompanionHadOriginal) {
+                    renamePath(
+                        *manifest->runtimePath,
+                        runtimeCompanionBackup);
+                    runtimeCompanionBackedUp = true;
+                }
+                renamePath(
+                    runtimeCompanionStage, *manifest->runtimePath);
+                runtimeCompanionInstalled = true;
+            }
             (void)refreshContentPackageIndex(runtimeRoot->parent_path());
         }
 
@@ -389,15 +482,44 @@ LevelProjectStore::Result LevelProjectStore::transact(
             ignored.clear();
             std::filesystem::remove_all(runtimeBackup, ignored);
         }
+        if (manifest) {
+            ignored.clear();
+            std::filesystem::remove_all(companionBackup, ignored);
+            if (manifest->runtimePath) {
+                ignored.clear();
+                std::filesystem::remove_all(
+                    runtimeCompanionBackup, ignored);
+            }
+        }
         return {
             .succeeded = true,
             .originalsPreserved = true,
         };
     } catch (const std::exception& error) {
         std::vector<std::string> rollbackFailures;
+        if (manifest && manifest->runtimePath &&
+            (runtimeCompanionInstalled || runtimeCompanionBackedUp)) {
+            std::string failure = restoreBackup(
+                *manifest->runtimePath,
+                runtimeCompanionBackup,
+                runtimeCompanionHadOriginal);
+            if (!failure.empty()) {
+                rollbackFailures.push_back(std::move(failure));
+            }
+        }
         if (runtimeRoot && (runtimeInstalled || runtimeBackedUp)) {
             std::string failure =
                 restoreBackup(*runtimeRoot, runtimeBackup, runtimeHadOriginal);
+            if (!failure.empty()) {
+                rollbackFailures.push_back(std::move(failure));
+            }
+        }
+        if (manifest &&
+            (companionInstalled || companionBackedUp)) {
+            std::string failure = restoreBackup(
+                manifest->sourcePath,
+                companionBackup,
+                companionHadOriginal);
             if (!failure.empty()) {
                 rollbackFailures.push_back(std::move(failure));
             }
@@ -414,6 +536,15 @@ LevelProjectStore::Result LevelProjectStore::transact(
         if (runtimeRoot) {
             ignored.clear();
             std::filesystem::remove_all(runtimeStage, ignored);
+        }
+        if (manifest) {
+            ignored.clear();
+            std::filesystem::remove_all(companionStage, ignored);
+            if (manifest->runtimePath) {
+                ignored.clear();
+                std::filesystem::remove_all(
+                    runtimeCompanionStage, ignored);
+            }
         }
         std::string message = error.what();
         for (const std::string& rollbackFailure : rollbackFailures) {

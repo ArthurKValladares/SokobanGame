@@ -4,6 +4,7 @@
 
 #include "engine/AssetManifestEditor.hpp"
 #include "engine/ContentPipeline.hpp"
+#include "engine/LevelAssetAssociations.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -12,6 +13,7 @@
 #include <optional>
 #include <sstream>
 #include <algorithm>
+#include <array>
 #include <string>
 
 namespace {
@@ -239,6 +241,111 @@ void testSavePublishesAStartupValidRuntimeManifest(
     sokoban::validateContentPackage(runtimeRoot, "editor-test");
 }
 
+void testLevelAssociationsFollowInsertDeleteAndRestore()
+{
+    ScopedTestDirectory directory("sokoban-level-association-tests");
+    const std::filesystem::path manifestPath =
+        directory.path() / "manifest.json";
+    std::ofstream(manifestPath, std::ios::binary) << R"json({
+      "format": 1,
+      "textures": [
+        { "name": "GroundSplatMap0_0", "path": "maps/first.png", "colorSpace": "linear" },
+        { "name": "GroundSplatMap0_1", "path": "maps/second.png", "colorSpace": "linear" },
+        { "name": "GroundSplatMap1_0", "path": "maps/third.png", "colorSpace": "linear" }
+      ],
+      "models": [
+        { "name": "Hero", "path": "hero.glb", "geometry": "skinned", "role": "player" }
+      ],
+      "animations": [
+        { "name": "Idle", "path": "hero.glb", "role": "player-idle" },
+        { "name": "Move", "path": "hero.glb", "role": "player-move" },
+        { "name": "Push", "path": "hero.glb", "role": "player-push" },
+        { "name": "Death", "path": "hero.glb", "role": "player-death" },
+        { "name": "DeadIdle", "path": "hero.glb", "role": "player-dead-idle" }
+      ],
+      "music": [
+        { "level": 0, "file": "music/first.ogg" },
+        { "level": 1, "file": "music/second.ogg" }
+      ]
+    })json";
+
+    const std::array insertRemaps {
+        sokoban::LevelLocationAssociationRemap {
+            .source = { .level = 0, .screen = 0 },
+            .destination = sokoban::LevelLocation { .level = 0, .screen = 1 },
+        },
+        sokoban::LevelLocationAssociationRemap {
+            .source = { .level = 0, .screen = 1 },
+            .destination = sokoban::LevelLocation { .level = 0, .screen = 2 },
+        },
+        sokoban::LevelLocationAssociationRemap {
+            .source = { .level = 1, .screen = 0 },
+            .destination = sokoban::LevelLocation { .level = 2, .screen = 0 },
+        },
+    };
+    sokoban::remapLevelAssetAssociations(manifestPath, insertRemaps);
+    sokoban::AssetManifest inserted =
+        sokoban::AssetManifest::loadFromFile(manifestPath);
+    CHECK_MESSAGE(inserted.textureIdByName("GroundSplatMap0_1").index() == 0,
+        "first map follows its logical screen during insertion");
+    CHECK_MESSAGE(inserted.textureIdByName("GroundSplatMap0_2").index() == 1,
+        "second map follows its logical screen during insertion");
+    CHECK_MESSAGE(inserted.textureIdByName("GroundSplatMap2_0").index() == 2,
+        "map follows its logical level during insertion");
+    CHECK_MESSAGE(inserted.musicForLevel(0) &&
+            *inserted.musicForLevel(0) == "music/first.ogg",
+        "screen insertion keeps the owning level's music");
+    CHECK_MESSAGE(inserted.musicForLevel(2) &&
+            *inserted.musicForLevel(2) == "music/second.ogg",
+        "music follows its logical level during insertion");
+
+    const sokoban::DeletedLevelAssetAssociations archived =
+        sokoban::captureLevelAssetAssociations(manifestPath, 0);
+    const std::filesystem::path deletedLevel = directory.path() / "DeletedLevel";
+    std::filesystem::create_directories(deletedLevel);
+    sokoban::writeDeletedLevelAssetAssociations(deletedLevel, archived);
+    const std::array deleteRemaps {
+        sokoban::LevelLocationAssociationRemap {
+            .source = { .level = 0, .screen = 1 },
+            .destination = std::nullopt,
+        },
+        sokoban::LevelLocationAssociationRemap {
+            .source = { .level = 0, .screen = 2 },
+            .destination = std::nullopt,
+        },
+        sokoban::LevelLocationAssociationRemap {
+            .source = { .level = 2, .screen = 0 },
+            .destination = sokoban::LevelLocation { .level = 1, .screen = 0 },
+        },
+    };
+    sokoban::remapLevelAssetAssociations(manifestPath, deleteRemaps);
+    const sokoban::AssetManifest deleted =
+        sokoban::AssetManifest::loadFromFile(manifestPath);
+    CHECK_MESSAGE(deleted.findTextureIdByName("GroundSplatMap0_1").isNone(),
+        "deleted level releases its active splat names");
+    CHECK_MESSAGE(deleted.textureIdByName("GroundSplatMap1_0").index() == 0,
+        "later map shifts down after level deletion");
+    CHECK_MESSAGE(deleted.musicForLevel(1) &&
+            *deleted.musicForLevel(1) == "music/second.ogg",
+        "later music shifts down after level deletion");
+
+    const auto restoredArchive =
+        sokoban::readDeletedLevelAssetAssociations(deletedLevel);
+    CHECK(restoredArchive.has_value());
+    sokoban::restoreLevelAssetAssociations(
+        manifestPath, *restoredArchive, 2);
+    const sokoban::AssetManifest restored =
+        sokoban::AssetManifest::loadFromFile(manifestPath);
+    const sokoban::RenderTexture restoredFirst =
+        restored.textureIdByName("GroundSplatMap2_1");
+    CHECK_MESSAGE(
+        restored.textures()[restoredFirst.index()].path == "maps/first.png",
+        "restored level recovers its original map path");
+    CHECK_MESSAGE(restored.musicForLevel(2) &&
+            *restored.musicForLevel(2) == "music/first.ogg",
+        "restored level recovers its original music");
+}
+
 } // namespace
 
 int main()
@@ -254,6 +361,7 @@ int main()
     testCollectionOperations(sourceManifest);
     testInvalidSavePreservesFile(sourceManifest);
     testSavePublishesAStartupValidRuntimeManifest(sourceManifest);
+    testLevelAssociationsFollowInsertDeleteAndRestore();
 
     if (failures != 0) {
         std::cerr << failures << " asset manifest editor checks failed\n";

@@ -93,7 +93,9 @@ public:
         const std::filesystem::path& sourceLevelRoot,
         const std::filesystem::path& runtimeLevelRoot,
         int currentLevel,
-        int currentScreen);
+        int currentScreen,
+        const std::filesystem::path& sourceManifestPath = {},
+        const std::filesystem::path& runtimeManifestPath = {});
 
     void setPlayingDraft(bool playingDraft);
     [[nodiscard]] bool playingDraft() const;
@@ -313,7 +315,8 @@ private:
     void applyScreenIdentityRemaps(const ScreenIdentityRemaps& remaps);
     [[nodiscard]] bool applyProjectMutation(
         const LevelProjectStore::Mutation& mutation,
-        const ScreenIdentityRemaps& screenIdentityRemaps = {});
+        const ScreenIdentityRemaps& screenIdentityRemaps = {},
+        const LevelProjectStore::Mutation& manifestMutation = {});
     void loadFirstAvailableScreen();
     [[nodiscard]] bool validDecorationTransform(
         const Level::Decoration& decoration) const;
@@ -327,6 +330,8 @@ private:
     std::optional<MoveObject> pendingMove_;
     std::optional<OverworldMap> draftOverworldMap_;
     bool showOverworldNeighbors_ = false;
+    std::filesystem::path sourceManifestPath_;
+    std::filesystem::path runtimeManifestPath_;
 };
 
 } // namespace sokoban

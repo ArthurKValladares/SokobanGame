@@ -441,6 +441,7 @@ add_library(sokoban_core STATIC
     src/engine/OverworldView.cpp
     src/engine/LevelEditor.cpp
     src/engine/LevelProjectStore.cpp
+    src/engine/LevelAssetAssociations.cpp
     src/engine/Log.cpp
     src/engine/LogQueue.cpp
     src/engine/MirrorParticleEffect.cpp

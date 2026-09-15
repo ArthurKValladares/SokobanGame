@@ -36,7 +36,9 @@ void ApplicationTools::initialize(
         sourceLevelRoot,
         runtimeAssetRoot / "levels",
         currentLevel,
-        currentScreen);
+        currentScreen,
+        sourceAssetRoot / "manifest.json",
+        runtimeAssetRoot / "manifest.json");
     overworldMapEditor.initialize(
         sourceLevelRoot,
         runtimeAssetRoot / "levels");

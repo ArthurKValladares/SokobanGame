@@ -30,13 +30,13 @@ Subsequent maintainability work has:
 - removed the obsolete undefined-member probe and stale shader commentary.
 
 The September 11 review records 13 recommendations with evidence, acceptance
-criteria, and an implementation order. Packets 1 and 2 were implemented on
-September 14: document/draft/selector identity remapping, save-loading
-resilience, semantic setting-choice values, and completion-safe concurrent
-presentation. The remaining splat/music association portion of CQ-01 stays with
-packet 3. The full 80-test Debug and Release registries pass in the
-warnings-as-errors configuration. Next is packet 3: prepared-texture publication
-and the remaining asset associations.
+criteria, and an implementation order. Packets 1 through 3 were implemented on
+September 14: document/draft/selector and asset-association identity remapping,
+save-loading resilience, semantic setting-choice values, completion-safe
+concurrent presentation, and prepared-texture invalidation. The full 80-test
+Debug and Release registries pass in the warnings-as-errors configuration. Next
+is packet 4: descriptor limits, bounded residency admission, and failure-safe
+texture replacement.
 Broader refactoring or efficiency work still requires a concrete maintenance
 problem or measurement.
 
@@ -91,6 +91,13 @@ and the required real-device checks are recorded.
   after the runtime tree is complete. Levels, overworld transactions, splat
   maps, manifests, decoration imports, animation catalogs, and thumbnail baking
   use this boundary.
+- Structural level publication commits the level tree and its splat/music
+  manifest associations together across source and runtime. Deleted levels keep
+  a private association archive so restoration preserves their map paths and
+  soundtrack at the newly assigned index.
+- Overwriting an external texture invalidates all prepared interpretations of
+  that source before `content.index` is refreshed. A failed invalidation leaves
+  the authoring session dirty and retryable.
 - Numbered puzzle paths are interpreted and constructed through `LevelCatalog`.
   Callers remain responsible for source/runtime root containment.
 - Decoration registration resolves structured GLTF/GLB dependencies, validates

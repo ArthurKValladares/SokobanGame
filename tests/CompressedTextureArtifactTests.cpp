@@ -5,6 +5,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -148,6 +151,50 @@ void testMipResidencyChoosesTheFinestCompleteTailThatFits()
         "empty texture cannot produce a residency plan");
 }
 
+void testInvalidationCoversEveryInterpretationOfOneSource()
+{
+    const std::filesystem::path root = std::filesystem::temp_directory_path() /
+        ("sokoban_artifact_invalidation_" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+    const std::filesystem::path source = "textures/authored.png";
+    const std::filesystem::path otherSource = "textures/other.png";
+    sokoban::TextureSourceIdentity first {
+        .source = sokoban::ExternalTextureSource { source },
+    };
+    sokoban::TextureSourceIdentity second = first;
+    second.interpretation.colorSpace = sokoban::TextureColorSpace::Linear;
+    second.interpretation.wrapU =
+        sokoban::TextureAddressMode::ClampToEdge;
+    sokoban::TextureSourceIdentity unrelated = first;
+    unrelated.source = sokoban::ExternalTextureSource { otherSource };
+
+    const auto createArtifact = [&](const sokoban::TextureSourceIdentity& id) {
+        const std::filesystem::path path =
+            root / sokoban::compressedTextureArtifactPath(id);
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path, std::ios::binary) << "prepared";
+        return path;
+    };
+    const std::filesystem::path firstPath = createArtifact(first);
+    const std::filesystem::path secondPath = createArtifact(second);
+    const std::filesystem::path unrelatedPath = createArtifact(unrelated);
+
+    sokoban::invalidateCompressedTextureArtifactsForSource(root, source);
+    CHECK_MESSAGE(!std::filesystem::exists(firstPath),
+        "default interpretation is invalidated");
+    CHECK_MESSAGE(!std::filesystem::exists(secondPath),
+        "alternate interpretation is invalidated");
+    CHECK_MESSAGE(std::filesystem::exists(unrelatedPath),
+        "an unrelated authored texture keeps its prepared artifact");
+    checkThrows([&] {
+        sokoban::invalidateCompressedTextureArtifactsForSource(
+            root, "../outside.png");
+    }, "source traversal is rejected");
+
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
+}
+
 } // namespace
 
 int main()
@@ -156,6 +203,7 @@ int main()
     testLinearNonMipmappedArtifactAndStableIdentityPath();
     testMalformedArtifactsAreRejected();
     testMipResidencyChoosesTheFinestCompleteTailThatFits();
+    testInvalidationCoversEveryInterpretationOfOneSource();
 
     if (failures == 0) {
         std::cout << "CompressedTextureArtifactTests: " << checks

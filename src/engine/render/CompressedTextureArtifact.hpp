@@ -37,6 +37,14 @@ struct CompressedTextureArtifact {
 [[nodiscard]] std::filesystem::path compressedTextureArtifactPath(
     const TextureSourceIdentity& identity);
 
+// Removes every prepared variant derived from one external source. Artifact
+// names include sampling and colour-space interpretation, so invalidating a
+// changed file must cover the finite interpretation domain rather than only
+// the interpretation used by the caller that performed the write.
+void invalidateCompressedTextureArtifactsForSource(
+    const std::filesystem::path& assetRoot,
+    const std::filesystem::path& relativeSourcePath);
+
 // Creates a little-endian KTX 2.0 file containing native BC7 blocks. The mip
 // pyramid is complete only when the authored minification filter uses mips.
 [[nodiscard]] std::vector<std::byte> buildBc7Ktx2(
