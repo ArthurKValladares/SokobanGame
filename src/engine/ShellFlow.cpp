@@ -43,10 +43,7 @@ void reduceTitle(
             commands.push_back(shell::StartNewGame {});
         },
         [&](const title::NewGameOnSlot& newGame) {
-            // Switching to the already-active slot no-ops in the executor,
-            // so one command pair covers both first-run cases.
-            commands.push_back(shell::SwitchSlot { newGame.slot });
-            commands.push_back(shell::StartNewGame {});
+            commands.push_back(shell::StartNewGameOnSlot { newGame.slot });
         },
         [&](const title::SwitchSlot& switchSlot) {
             commands.push_back(shell::SwitchSlot { switchSlot.slot });

@@ -18,6 +18,8 @@ Packet 4's code changes were implemented on September 14, 2026. CQ-06 now sizes 
 
 Packet 5's code changes were implemented on September 14, 2026. CQ-09 now evaluates the projected-pattern screen derivatives before the depth-dependent branch and propagates them analytically through the ripple warps and cellular-boundary distance. The expensive cellular searches remain conditional. The evidence fixture now crosses opaque geometry and clear background so it exercises the divergent edge directly. Matched 100%-scale/4x-MSAA and 50%-scale/1x-MSAA images differed by at most two channel values in 67 of 5,184,000 pixels and one channel value in 1 of 1,296,000 pixels, respectively; no edge artifact was visible. Three 600-frame matched runs showed overlapping GPU-time ranges and no measurable translucency regression. The shader passes SPIR-V validation, the 240-frame Debug validation run completes without Vulkan usage errors, and the complete 80-test Debug and Release warning builds pass. Detailed evidence and limits are recorded in [the packet 5 evidence note](evidence/packet5-water-derivatives.md).
 
+Packet 6's CQ-12 change was implemented on September 15, 2026. Selecting an empty slot for New Game now emits one dependent command whose executor starts the game only after the slot switch succeeds. A regression injects failure at the real active-slot-marker commit point and verifies that the active slot, live profile, title/error state, and start callback retain the failed state; removing the obstruction lets the same operation start on the requested slot. CQ-10's small-window layout work remains in progress.
+
 ## Assessment
 
 The codebase has useful boundaries already: pure gameplay and menu logic, explicit persistence results, an SDK-independent core, shared GPU layouts, specialized rendering passes, and substantial regression coverage. The previous review's completed work should be retained.
@@ -220,6 +222,8 @@ The probe also found overflow in `MenuKit::formatDuration` for very large accept
 ### CQ-12 — Stop a dependent New Game operation when selecting its slot fails
 
 **P2 · Source-confirmed failure path · Correctness, explicit outcomes**
+
+**Status:** implemented September 15, 2026. The route emits one `StartNewGameOnSlot` command, and its execution helper invokes New Game only after the slot switch reports success. The regression covers a failed marker commit and successful retry at the executor boundary.
 
 **Location:** [ShellFlow.cpp:45](../../../src/engine/ShellFlow.cpp), `NewGameOnSlot`; [Application.cpp:1399](../../../src/engine/Application.cpp), caught switch failure; line 1484, unconditional command iteration.
 

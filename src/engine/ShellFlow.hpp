@@ -5,6 +5,7 @@
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/TitleScreen.hpp"
 
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -52,6 +53,9 @@ struct CloseTitle {};
 struct OpenTitle {};
 struct TitleBack {};
 struct StartNewGame {};
+struct StartNewGameOnSlot {
+    int slot = 0;
+};
 struct SwitchSlot {
     int slot = 0;
 };
@@ -86,6 +90,7 @@ using ShellCommand = std::variant<
     shell::OpenTitle,
     shell::TitleBack,
     shell::StartNewGame,
+    shell::StartNewGameOnSlot,
     shell::SwitchSlot,
     shell::DeleteSlot,
     shell::StartLevel,
@@ -97,6 +102,22 @@ using ShellCommand = std::variant<
     shell::Quit,
     shell::ResolveLevelComplete,
     shell::OpenStandaloneLevelSelect>;
+
+// The slot switch is the prerequisite for starting the game. Keeping the two
+// effects in one command prevents a failed switch from leaving a later,
+// unconditional StartNewGame command in the execution queue.
+template <typename SwitchSlotFunction, typename StartNewGameFunction>
+[[nodiscard]] bool executeNewGameOnSlot(
+    const shell::StartNewGameOnSlot& command,
+    SwitchSlotFunction&& switchSlot,
+    StartNewGameFunction&& startNewGame)
+{
+    if (!std::forward<SwitchSlotFunction>(switchSlot)(command.slot)) {
+        return false;
+    }
+    std::forward<StartNewGameFunction>(startNewGame)();
+    return true;
+}
 
 struct ShellFlowState {
     // Reserved: the shell currently derives everything from facts and menu

@@ -1,11 +1,19 @@
 // Headless tests for the shell routing rules: menu precedence, Options
-// context, the new-game slot-pick chain, and completion resolution.
+// context, the new-game slot-pick operation, and completion resolution.
 
 #include "TestHarness.hpp"
+#include "ScopedTestDirectory.hpp"
 
+#include "engine/SaveSlotManager.hpp"
 #include "engine/ShellFlow.hpp"
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <optional>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace {
@@ -97,16 +105,16 @@ void testTitleResults()
         sokoban::ShellTitleAction { sokoban::title::Continue {} },
         { .gameLoaded = true, .titleOpen = true })));
 
-    // New game on the active slot, and the no-saves slot-pick chain.
+    // New game on the active slot, and the no-saves slot-pick operation.
     CHECK(only<sokoban::shell::StartNewGame>(flow.handle(
         sokoban::ShellTitleAction { sokoban::title::NewGame {} }, {})));
     {
         const std::vector<ShellCommand> commands = flow.handle(
             sokoban::ShellTitleAction { sokoban::title::NewGameOnSlot { 2 } }, {});
-        CHECK(commands.size() == 2);
-        const auto* switchSlot = commandAt<sokoban::shell::SwitchSlot>(commands, 0);
-        CHECK(switchSlot != nullptr && switchSlot->slot == 2);
-        CHECK(commandAt<sokoban::shell::StartNewGame>(commands, 1) != nullptr);
+        CHECK(commands.size() == 1);
+        const auto* start =
+            commandAt<sokoban::shell::StartNewGameOnSlot>(commands, 0);
+        CHECK(start != nullptr && start->slot == 2);
     }
 
     // Slot switching and deletion pass their indexes through.
@@ -143,6 +151,66 @@ void testTitleResults()
     }
     CHECK(only<sokoban::shell::RequestQuitConfirmation>(flow.handle(
         sokoban::ShellTitleAction { sokoban::title::Quit {} }, {})));
+}
+
+void testNewGameOnSlotStopsAfterSwitchFailure()
+{
+    ScopedTestDirectory directory("sokoban-new-game-slot");
+    sokoban::SaveSlotManager manager(
+        directory.path(), std::chrono::milliseconds(0));
+    sokoban::PlayerProfile liveProfile = manager.loadActiveProfile();
+    liveProfile.unlockedLevel = 2;
+    liveProfile.setCurrentScreen(2, 1);
+    const sokoban::PlayerProfile profileBeforeFailure = liveProfile;
+    bool titleOpen = true;
+    bool gameStarted = false;
+    std::string titleError;
+
+    // A non-empty directory at the marker writer's temporary path injects a
+    // deterministic failure at the slot-selection commit point.
+    const std::filesystem::path blockedTemporary =
+        directory.path() / "active-slot.txt.tmp";
+    std::filesystem::create_directories(blockedTemporary);
+    std::ofstream(blockedTemporary / "blocker.txt") << "blocked";
+
+    const sokoban::shell::StartNewGameOnSlot command { .slot = 1 };
+    const auto switchSlot = [&](int slot) {
+        try {
+            std::optional<sokoban::PlayerProfile> switched =
+                manager.switchTo(slot, liveProfile);
+            if (!switched) {
+                return slot == manager.activeSlot();
+            }
+            liveProfile = std::move(*switched);
+            titleError.clear();
+            return true;
+        } catch (const std::exception& error) {
+            titleError = error.what();
+            return false;
+        }
+    };
+    const auto startNewGame = [&] {
+        gameStarted = true;
+        titleOpen = false;
+        liveProfile.resetProgress();
+    };
+
+    CHECK(!sokoban::executeNewGameOnSlot(
+        command, switchSlot, startNewGame));
+    CHECK(manager.activeSlot() == 0);
+    CHECK(liveProfile == profileBeforeFailure);
+    CHECK(titleOpen);
+    CHECK(!titleError.empty());
+    CHECK(!gameStarted);
+
+    std::filesystem::remove_all(blockedTemporary);
+    CHECK(sokoban::executeNewGameOnSlot(
+        command, switchSlot, startNewGame));
+    CHECK(manager.activeSlot() == 1);
+    CHECK(gameStarted);
+    CHECK(!titleOpen);
+    CHECK(titleError.empty());
+    CHECK(liveProfile == sokoban::PlayerProfile {});
 }
 
 void testOptionsAndOverlayResults()
@@ -210,6 +278,7 @@ int main()
 {
     testBackRouting();
     testTitleResults();
+    testNewGameOnSlotStopsAfterSwitchFailure();
     testOptionsAndOverlayResults();
 
     if (failures == 0) {

@@ -1374,11 +1374,13 @@ std::vector<SaveSlotInfo> Application::saveSlotInfos() const
     return slots;
 }
 
-void Application::switchSaveSlot(int slot)
+bool Application::switchSaveSlot(int slot)
 {
-    if (slot < 0 || slot >= SaveSlotManager::slotCount ||
-        slot == saveSlots_.activeSlot()) {
-        return;
+    if (slot < 0 || slot >= SaveSlotManager::slotCount) {
+        return false;
+    }
+    if (slot == saveSlots_.activeSlot()) {
+        return true;
     }
 
     // Settle the outgoing slot on disk first. Not gated on the world being
@@ -1404,10 +1406,10 @@ void Application::switchSaveSlot(int slot)
             ": " + error.what();
         log::error(log::Category::Persistence) << message;
         titleScreen_.setSaveSlotError(message);
-        return;
+        return false;
     }
     if (!switched) {
-        return;
+        return false;
     }
     playerProfile_ = std::move(*switched);
     titleScreen_.setSaveSlotError({});
@@ -1420,6 +1422,7 @@ void Application::switchSaveSlot(int slot)
     renderer_.preloadAssets(
         levelAssetRequirements(campaign_.currentLevel()));
     openTitleScreen();
+    return true;
 }
 
 void Application::deleteSaveSlot(int slot)
@@ -1496,8 +1499,14 @@ void Application::executeShellCommand(const ShellCommand& command)
         [&](const shell::OpenTitle&) { openTitleScreen(); },
         [&](const shell::TitleBack&) { titleScreen_.back(); },
         [&](const shell::StartNewGame&) { startNewGame(); },
+        [&](const shell::StartNewGameOnSlot& start) {
+            (void)executeNewGameOnSlot(
+                start,
+                [&](int slot) { return switchSaveSlot(slot); },
+                [&] { startNewGame(); });
+        },
         [&](const shell::SwitchSlot& switchSlot) {
-            switchSaveSlot(switchSlot.slot);
+            (void)switchSaveSlot(switchSlot.slot);
         },
         [&](const shell::DeleteSlot& deleteSlot) {
             deleteSaveSlot(deleteSlot.slot);

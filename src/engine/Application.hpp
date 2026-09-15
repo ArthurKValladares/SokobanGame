@@ -116,7 +116,7 @@ private:
     void loadCurrentScreen();
     void openTitleScreen();
     [[nodiscard]] std::vector<SaveSlotInfo> saveSlotInfos() const;
-    void switchSaveSlot(int slot);
+    [[nodiscard]] bool switchSaveSlot(int slot);
     void deleteSaveSlot(int slot);
     void persistSettings(bool immediate);
     [[nodiscard]] std::vector<TitleLevelInfo> titleLevelInfos() const;

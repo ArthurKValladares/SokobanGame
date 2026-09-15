@@ -37,8 +37,10 @@ concurrent presentation, prepared-texture invalidation, complete Vulkan
 descriptor-limit accounting, bounded residency admission, and failure-safe
 painted-texture replacement, plus defined water-ripple derivatives across
 depth-dependent geometry boundaries. The full 80-test Debug and Release
-registries pass in the warnings-as-errors configuration. Next is packet 6:
-small-window settings access and failure-safe new-game slot selection.
+registries pass in the warnings-as-errors configuration. Packet 6's dependent
+new-game slot operation is also complete: a failed slot switch cannot run its
+start action against the previous slot. Next is packet 6's small-window
+settings access.
 Broader refactoring or efficiency work still requires a concrete maintenance
 problem or measurement.
 
@@ -119,6 +121,9 @@ and the required real-device checks are recorded.
 - Binding capture continues forwarding physical state changes while suppressing
   action edges. Releases and axis neutralization during capture must remain
   visible when capture completes or is cancelled.
+- Starting a new game on a selected slot is one dependent shell command. The
+  start action runs only after the slot switch commits successfully; a switch
+  failure preserves the current profile and title error state.
 - Static loading, CPU skinning, and GPU skinning share the source-to-model
   transform. Positions and tangents use the forward linear transform; normals
   use its inverse transpose. Tangent frames remain normalized, orthogonal, and
