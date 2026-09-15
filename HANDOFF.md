@@ -37,10 +37,11 @@ concurrent presentation, prepared-texture invalidation, complete Vulkan
 descriptor-limit accounting, bounded residency admission, and failure-safe
 painted-texture replacement, plus defined water-ripple derivatives across
 depth-dependent geometry boundaries. The full 80-test Debug and Release
-registries pass in the warnings-as-errors configuration. Packet 6's dependent
-new-game slot operation is also complete: a failed slot switch cannot run its
-start action against the previous slot. Next is packet 6's small-window
-settings access.
+registries pass in the warnings-as-errors configuration. Packet 6 is complete:
+options rows remain visible and interactive throughout the supported window
+range, and a failed slot switch cannot run its dependent new-game action against
+the previous slot. Next is packet 7's obsolete UI removal and local readability
+cleanup.
 Broader refactoring or efficiency work still requires a concrete maintenance
 problem or measurement.
 
@@ -124,6 +125,9 @@ and the required real-device checks are recorded.
 - Starting a new game on a selected slot is one dependent shell command. The
   start action runs only after the slot switch commits successfully; a switch
   failure preserves the current profile and title error state.
+- Options pages measure their required height from the declared layout rows.
+  When space is short, the page scaffold, row geometry, prompt glyphs, control
+  strokes, and type share one vertical scale so all rows and Back remain usable.
 - Static loading, CPU skinning, and GPU skinning share the source-to-model
   transform. Positions and tangents use the forward linear transform; normals
   use its inverse transpose. Tangent frames remain normalized, orthogonal, and

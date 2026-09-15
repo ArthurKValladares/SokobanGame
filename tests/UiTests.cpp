@@ -167,6 +167,7 @@ void testLayoutTree()
     layout.flexibleSpacer(layout.root());
     const sokoban::UiLayoutNode bottom = layout.item(layout.root(), 30.0f);
 
+    CHECK(layout.minimumSize().y == 120.0f);
     layout.arrange({ { 0.0f, 0.0f }, { 200.0f, 200.0f } });
     CHECK(!layout.overflowed());
     CHECK(layout.rect(first).position.y == 10.0f);
@@ -174,6 +175,7 @@ void testLayoutTree()
     CHECK(layout.rect(bottom).position.y == 160.0f);
 
     (void)layout.item(group, 10.0f);
+    CHECK(layout.minimumSize().y == 135.0f);
     layout.arrange({ { 0.0f, 0.0f }, { 200.0f, 200.0f } });
     CHECK(layout.rect(afterGroup).position.y == 75.0f);
     CHECK(layout.rect(bottom).position.y == 160.0f);
@@ -196,6 +198,161 @@ void testLayoutTree()
     (void)overflowing.item(overflowing.root(), 80.0f);
     overflowing.arrange({ { 0.0f, 0.0f }, { 100.0f, 100.0f } });
     CHECK(overflowing.overflowed());
+}
+
+[[nodiscard]] bool rectInsideViewport(
+    const sokoban::UiRect& rect,
+    sokoban::Vec2 viewport)
+{
+    constexpr float tolerance = 0.01f;
+    return rect.position.x >= -tolerance &&
+        rect.position.y >= -tolerance &&
+        rect.position.x + rect.size.x <= viewport.x + tolerance &&
+        rect.position.y + rect.size.y <= viewport.y + tolerance;
+}
+
+[[nodiscard]] bool isFocusedOptionsCommand(
+    const sokoban::UiDrawCommand& command)
+{
+    if (command.kind != sokoban::UiDrawKind::Solid) {
+        return false;
+    }
+    const sokoban::Vec4& color = command.color;
+    const bool focusedBorder = color.x == 0.30f && color.y == 0.80f &&
+        color.z == 0.72f && color.w == 1.0f;
+    const bool focusedSlider = color.x == 0.62f && color.y == 0.93f &&
+        color.z == 0.84f && color.w == 1.0f;
+    return focusedBorder || focusedSlider;
+}
+
+void testOptionsRemainReachableAtSupportedWindowSizes()
+{
+    TEST("optionsRemainReachableAtSupportedWindowSizes");
+    const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+    const sokoban::OptionsMenuView view;
+    sokoban::UserSettings settings;
+    settings.video.vsync = false;
+    settings.video.customRenderScale = true;
+    settings.video.ambientOcclusion = true;
+
+    constexpr std::array viewports {
+        sokoban::Vec2 { 640.0f, 480.0f },
+        sokoban::Vec2 { 960.0f, 600.0f },
+        sokoban::Vec2 { 1280.0f, 720.0f },
+        sokoban::Vec2 { 1920.0f, 1080.0f },
+    };
+    constexpr std::array pages {
+        sokoban::OptionsMenuPage::Graphics,
+        sokoban::OptionsMenuPage::Audio,
+        sokoban::OptionsMenuPage::Controls,
+        sokoban::OptionsMenuPage::EditorControls,
+    };
+
+    for (const sokoban::Vec2 viewport : viewports) {
+        sokoban::OptionsMenuState mainState {
+            .open = true,
+            .allowTitleExit = true,
+            .page = sokoban::OptionsMenuPage::Main,
+        };
+        constexpr std::array sectionRows {
+            sokoban::OptionsMenuRowId::Graphics,
+            sokoban::OptionsMenuRowId::Audio,
+            sokoban::OptionsMenuRowId::Controls,
+        };
+        for (std::size_t index = 0; index < sectionRows.size(); ++index) {
+            mainState.selectedRow = static_cast<int>(index);
+            ui.beginFrame(viewport, {}, false, false);
+            (void)view.draw(ui, viewport, mainState, settings);
+            ui.endFrame();
+            const auto focused = std::ranges::find_if(
+                ui.drawData().commands,
+                isFocusedOptionsCommand);
+            CHECK(focused != ui.drawData().commands.end());
+            if (focused == ui.drawData().commands.end()) {
+                continue;
+            }
+            const sokoban::Vec2 clickPosition {
+                focused->rect.position.x + focused->rect.size.x * 0.5f,
+                focused->rect.position.y + focused->rect.size.y * 0.5f,
+            };
+            ui.beginFrame(viewport, clickPosition, true, true);
+            const std::optional<sokoban::OptionsMenuIntent> clicked =
+                view.draw(ui, viewport, mainState, settings);
+            ui.endFrame();
+            const auto* activate = clicked
+                ? std::get_if<sokoban::options::intent::ActivateRow>(&*clicked)
+                : nullptr;
+            CHECK(activate != nullptr);
+            CHECK(activate != nullptr &&
+                activate->row == sectionRows[index]);
+        }
+
+        for (const sokoban::OptionsMenuPage page : pages) {
+            sokoban::OptionsMenuState state {
+                .open = true,
+                .page = page,
+            };
+            const std::vector<sokoban::OptionsMenuRow> rows =
+                sokoban::optionsMenuRows(state, settings);
+            for (std::size_t index = 0; index < rows.size(); ++index) {
+                state.selectedRow = static_cast<int>(index);
+                ui.beginFrame(viewport, {}, false, false);
+                CHECK(!view.draw(ui, viewport, state, settings).has_value());
+                ui.endFrame();
+                CHECK(std::ranges::all_of(
+                    ui.drawData().commands,
+                    [&](const sokoban::UiDrawCommand& command) {
+                        return rectInsideViewport(command.rect, viewport);
+                    }));
+                CHECK(std::ranges::any_of(
+                    ui.drawData().commands,
+                    isFocusedOptionsCommand));
+            }
+
+            // Keyboard and controller navigation share this semantic intent.
+            // Walking the complete row list proves focus does not strand an
+            // item outside the responsive layout.
+            state.selectedRow = 0;
+            for (std::size_t index = 1; index < rows.size(); ++index) {
+                const sokoban::OptionsMenuReduction reduction =
+                    sokoban::reduceOptionsMenu(
+                        state,
+                        settings,
+                        sokoban::options::intent::Navigate { 1 });
+                state = reduction.state;
+                CHECK(state.selectedRow == static_cast<int>(index));
+            }
+
+            // Back remains a visible pointer target at every supported size.
+            state.selectedRow = static_cast<int>(rows.size()) - 1;
+            CHECK(rows.back().id == sokoban::OptionsMenuRowId::Back);
+            ui.beginFrame(viewport, {}, false, false);
+            (void)view.draw(ui, viewport, state, settings);
+            ui.endFrame();
+            const auto focused = std::ranges::find_if(
+                ui.drawData().commands,
+                isFocusedOptionsCommand);
+            CHECK(focused != ui.drawData().commands.end());
+            if (focused == ui.drawData().commands.end()) {
+                continue;
+            }
+            const sokoban::Vec2 clickPosition {
+                focused->rect.position.x + focused->rect.size.x * 0.5f,
+                focused->rect.position.y + focused->rect.size.y * 0.5f,
+            };
+            ui.beginFrame(viewport, clickPosition, true, true);
+            const std::optional<sokoban::OptionsMenuIntent> clicked =
+                view.draw(ui, viewport, state, settings);
+            ui.endFrame();
+            const auto* activate = clicked
+                ? std::get_if<sokoban::options::intent::ActivateRow>(&*clicked)
+                : nullptr;
+            CHECK(activate != nullptr);
+            CHECK(activate != nullptr &&
+                activate->row == sokoban::OptionsMenuRowId::Back);
+        }
+    }
 }
 
 void testOptionsNavigationAndSettings()
@@ -1060,6 +1217,7 @@ int main()
     testInputPromptCatalogUsesKeyboardAndControllerSpecificGlyphs();
     testScreenPreviewOverlayUsesCenteredSeventyFivePercentInset();
     testLayoutTree();
+    testOptionsRemainReachableAtSupportedWindowSizes();
     testOptionsNavigationAndSettings();
     testFrameRateStepperPreservesSemanticValues();
     testControlsRemapping();

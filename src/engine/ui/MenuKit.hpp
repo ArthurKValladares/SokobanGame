@@ -54,7 +54,12 @@ private:
 // subtitle row, and a divider. Pages append their content nodes to `tree`
 // and call `tree.arrange(panel)` themselves.
 struct MenuPage {
-    explicit MenuPage(float afterHeader = 26.0f, bool withSubtitle = false);
+    // verticalScale compresses the header scaffold with its page rows while
+    // preserving the standard horizontal panel margins.
+    explicit MenuPage(
+        float afterHeader = 26.0f,
+        bool withSubtitle = false,
+        float verticalScale = 1.0f);
 
     void drawHeader(
         UiContext& ui,

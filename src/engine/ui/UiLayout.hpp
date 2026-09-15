@@ -70,6 +70,10 @@ public:
 
     void arrange(UiRect bounds);
     [[nodiscard]] UiRect rect(UiLayoutNode node) const;
+    // The smallest bounds that contain fixed/content children and insets.
+    // Fill spacers contribute no minimum, so callers can use this before
+    // arrange() to choose a responsive density from actual content.
+    [[nodiscard]] Vec2 minimumSize() const { return measuredSize(root()); }
     [[nodiscard]] bool overflowed() const { return overflowed_; }
 
 private:

@@ -21,17 +21,24 @@ bool RowList::navigateCount(int& selectedRow, int rowCount, bool up, bool down)
     return selectedRow != oldRow;
 }
 
-MenuPage::MenuPage(float afterHeader, bool withSubtitle)
-    : tree(UiLayoutAxis::Vertical, { 42.0f, 34.0f, 42.0f, 40.0f })
+MenuPage::MenuPage(
+    float afterHeader,
+    bool withSubtitle,
+    float verticalScale)
+    : tree(UiLayoutAxis::Vertical, {
+          42.0f,
+          34.0f * verticalScale,
+          42.0f,
+          40.0f * verticalScale })
     , hasSubtitle(withSubtitle)
 {
-    title = tree.item(tree.root(), 58.0f);
+    title = tree.item(tree.root(), 58.0f * verticalScale);
     if (withSubtitle) {
-        subtitle = tree.item(tree.root(), 24.0f);
+        subtitle = tree.item(tree.root(), 24.0f * verticalScale);
     }
-    tree.spacer(tree.root(), 12.0f);
-    divider = tree.item(tree.root(), 1.0f);
-    tree.spacer(tree.root(), afterHeader);
+    tree.spacer(tree.root(), 12.0f * verticalScale);
+    divider = tree.item(tree.root(), 1.0f * verticalScale);
+    tree.spacer(tree.root(), afterHeader * verticalScale);
 }
 
 void MenuPage::drawHeader(

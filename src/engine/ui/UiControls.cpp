@@ -33,6 +33,7 @@ bool button(
     std::string_view label,
     ButtonOptions options)
 {
+    const float scale = std::clamp(options.contentScale, 0.5f, 1.0f);
     const bool hovered = options.enabled && ui.hovered(rect);
     const bool pressed = hovered && ui.mouseDown();
     const Vec4 border = !options.enabled
@@ -42,14 +43,14 @@ bool button(
                 : Vec4 { 0.32f, 0.35f, 0.35f, 0.94f });
     ui.rect(rect, border);
     ui.rect({
-        { rect.position.x + 2.0f, rect.position.y + 2.0f },
-        { rect.size.x - 4.0f, rect.size.y - 4.0f },
+        { rect.position.x + 2.0f * scale, rect.position.y + 2.0f * scale },
+        { rect.size.x - 4.0f * scale, rect.size.y - 4.0f * scale },
     }, options.enabled
         ? buttonColor(options.tone, hovered, pressed)
         : Vec4 { 0.14f, 0.16f, 0.16f, 0.72f });
     ui.centeredText(rect, label,
         options.enabled ? textColor : Vec4 { 0.50f, 0.52f, 0.51f, 0.72f },
-        24.0f);
+        24.0f * scale);
     return options.enabled && (ui.clicked(rect) || options.activate);
 }
 
@@ -61,7 +62,8 @@ bool slider(
     float minimum,
     float maximum,
     bool focused,
-    bool enabled)
+    bool enabled,
+    float contentScale)
 {
     if (maximum <= minimum) {
         return false;
@@ -76,9 +78,11 @@ bool slider(
     }
     value = std::clamp(value, minimum, maximum);
     const float fraction = (value - minimum) / (maximum - minimum);
+    const float scale = std::clamp(contentScale, 0.5f, 1.0f);
+    const float trackHeight = 8.0f * scale;
     const UiRect track {
-        { rect.position.x, rect.position.y + (rect.size.y - 8.0f) * 0.5f },
-        { rect.size.x, 8.0f },
+        { rect.position.x, rect.position.y + (rect.size.y - trackHeight) * 0.5f },
+        { rect.size.x, trackHeight },
     };
     const Vec4 trackColor = enabled
         ? Vec4 { 0.20f, 0.23f, 0.23f, 1.0f }
@@ -89,9 +93,11 @@ bool slider(
     ui.rect(track, trackColor);
     ui.rect({ track.position, { track.size.x * fraction, track.size.y } }, fillColor);
     const float knobX = rect.position.x + rect.size.x * fraction;
+    const float knobWidth = 16.0f * scale;
+    const float knobInset = 3.0f * scale;
     ui.rect({
-        { knobX - 8.0f, rect.position.y + 3.0f },
-        { 16.0f, rect.size.y - 6.0f },
+        { knobX - knobWidth * 0.5f, rect.position.y + knobInset },
+        { knobWidth, rect.size.y - knobInset * 2.0f },
     }, !enabled
         ? Vec4 { 0.48f, 0.50f, 0.49f, 0.45f }
         : (focused
@@ -106,30 +112,38 @@ bool checkbox(
     std::string_view label,
     bool& value,
     bool focused,
-    bool activate)
+    bool activate,
+    float contentScale)
 {
+    const float scale = std::clamp(contentScale, 0.5f, 1.0f);
     const bool clicked = ui.clicked(rect) || activate;
     if (clicked) {
         value = !value;
     }
+    const float boxSize = 26.0f * scale;
     const UiRect box {
-        { rect.position.x, rect.position.y + (rect.size.y - 26.0f) * 0.5f },
-        { 26.0f, 26.0f },
+        { rect.position.x, rect.position.y + (rect.size.y - boxSize) * 0.5f },
+        { boxSize, boxSize },
     };
     ui.rect(box, focused
         ? Vec4 { 0.30f, 0.80f, 0.72f, 1.0f }
         : Vec4 { 0.38f, 0.41f, 0.40f, 1.0f });
     ui.rect({
-        { box.position.x + 2.0f, box.position.y + 2.0f },
-        { 22.0f, 22.0f },
+        { box.position.x + 2.0f * scale, box.position.y + 2.0f * scale },
+        { 22.0f * scale, 22.0f * scale },
     }, { 0.12f, 0.14f, 0.14f, 1.0f });
     if (value) {
         ui.rect({
-            { box.position.x + 6.0f, box.position.y + 6.0f },
-            { 14.0f, 14.0f },
+            { box.position.x + 6.0f * scale, box.position.y + 6.0f * scale },
+            { 14.0f * scale, 14.0f * scale },
         }, accentColor);
     }
-    ui.text({ rect.position.x + 40.0f, rect.position.y + 8.0f }, label, textColor, 23.0f);
+    const float textSize = 23.0f * scale;
+    const Vec2 textExtent = ui.measureText(label, textSize);
+    ui.text({
+        rect.position.x + 40.0f * scale,
+        rect.position.y + (rect.size.y - textExtent.y) * 0.5f,
+    }, label, textColor, textSize);
     return clicked;
 }
 
@@ -170,6 +184,7 @@ bool segmentedControl(
                     : ButtonTone::Normal,
                 .focused = options.focused &&
                     static_cast<int>(index) == selectedIndex,
+                .contentScale = options.contentScale,
             })) {
             selectedIndex = static_cast<int>(index);
             selectedValue = choices[index].value;
@@ -183,7 +198,8 @@ bool choiceStepper(
     UiRect rect,
     std::span<const ChoiceOption> choices,
     int& selectedValue,
-    bool focused)
+    bool focused,
+    float contentScale)
 {
     if (choices.empty()) {
         return false;
@@ -194,9 +210,13 @@ bool choiceStepper(
     int selectedIndex = selected == choices.end()
         ? 0
         : static_cast<int>(selected - choices.begin());
-    constexpr float arrowWidth = 52.0f;
+    const float scale = std::clamp(contentScale, 0.5f, 1.0f);
+    const float arrowWidth = 52.0f * scale;
     if (button(ui, {
-            rect.position, { arrowWidth, rect.size.y } }, "<", { .focused = focused })) {
+            rect.position, { arrowWidth, rect.size.y } }, "<", {
+                .focused = focused,
+                .contentScale = scale,
+            })) {
         selectedIndex =
             (selectedIndex + static_cast<int>(choices.size()) - 1) %
             static_cast<int>(choices.size());
@@ -208,10 +228,13 @@ bool choiceStepper(
     ui.centeredText({
         { rect.position.x + arrowWidth, rect.position.y },
         { rect.size.x - arrowWidth * 2.0f, rect.size.y },
-    }, choices[static_cast<size_t>(selectedIndex)].label, textColor, 22.0f);
+    }, choices[static_cast<size_t>(selectedIndex)].label, textColor, 22.0f * scale);
     if (button(ui, {
             { rect.position.x + rect.size.x - arrowWidth, rect.position.y },
-            { arrowWidth, rect.size.y } }, ">", { .focused = focused })) {
+            { arrowWidth, rect.size.y } }, ">", {
+                .focused = focused,
+                .contentScale = scale,
+            })) {
         selectedIndex =
             (selectedIndex + 1) % static_cast<int>(choices.size());
     }

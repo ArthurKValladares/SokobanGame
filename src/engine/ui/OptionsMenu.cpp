@@ -408,15 +408,6 @@ std::string_view pageTitle(OptionsMenuPage page)
     return "OPTIONS";
 }
 
-float pageHeight(OptionsMenuPage page)
-{
-    switch (page) {
-    case OptionsMenuPage::Graphics: return 740.0f;
-    case OptionsMenuPage::Controls: return 720.0f;
-    default: return 540.0f;
-    }
-}
-
 uiControls::ButtonTone buttonTone(OptionsMenuRowTone tone)
 {
     switch (tone) {
@@ -465,7 +456,8 @@ void drawBindingRowText(
     UiRect row,
     std::string_view label,
     std::string_view binding,
-    Vec4 bindingColor)
+    Vec4 bindingColor,
+    float contentScale)
 {
     constexpr float horizontalPadding = 16.0f;
     constexpr float columnGap = 12.0f;
@@ -483,7 +475,8 @@ void drawBindingRowText(
         { bindingWidth, row.size.y },
     };
 
-    const float labelSize = fittedTextSize(ui, label, 20.0f, labelRect.size.x);
+    const float labelSize = fittedTextSize(
+        ui, label, 20.0f * contentScale, labelRect.size.x);
     const Vec2 labelMeasure = ui.measureText(label, labelSize);
     ui.text({
         labelRect.position.x,
@@ -491,7 +484,7 @@ void drawBindingRowText(
     }, label, { 0.92f, 0.94f, 0.92f, 1.0f }, labelSize);
 
     const float bindingSize = fittedTextSize(
-        ui, binding, 16.0f, bindingRect.size.x);
+        ui, binding, 16.0f * contentScale, bindingRect.size.x);
     const Vec2 bindingMeasure = ui.measureText(binding, bindingSize);
     ui.text({
         bindingRect.position.x + bindingRect.size.x - bindingMeasure.x,
@@ -508,7 +501,8 @@ bool drawBindingRowPrompts(
     BindingDeviceClass device,
     const InputPromptCatalog& prompts,
     const GamepadPresentation& gamepad,
-    bool focused)
+    bool focused,
+    float contentScale)
 {
     std::vector<InputPromptGlyph> glyphs;
     for (const InputBinding& binding : bindings.forAction(action)) {
@@ -530,15 +524,20 @@ bool drawBindingRowPrompts(
         { row.position.x + horizontalPadding, row.position.y },
         { labelWidth, row.size.y },
     };
-    const float labelSize = fittedTextSize(ui, label, 20.0f, labelRect.size.x);
+    const float labelSize = fittedTextSize(
+        ui, label, 20.0f * contentScale, labelRect.size.x);
     const Vec2 labelMeasure = ui.measureText(label, labelSize);
     ui.text({
         labelRect.position.x,
         labelRect.position.y + (labelRect.size.y - labelMeasure.y) * 0.5f,
     }, label, { 0.92f, 0.94f, 0.92f, 1.0f }, labelSize);
 
-    constexpr float glyphSize = 36.0f;
-    constexpr float glyphGap = 5.0f;
+    const float glyphSize = std::max(
+        std::min(
+            36.0f * contentScale,
+            row.size.y - 4.0f * contentScale),
+        0.0f);
+    const float glyphGap = 5.0f * contentScale;
     const float glyphCount = static_cast<float>(glyphs.size());
     const float totalWidth = glyphCount * glyphSize +
         (glyphCount - 1.0f) * glyphGap;
@@ -1124,6 +1123,7 @@ struct OptionsRowDraw {
     bool focused;
     const std::string& controlId;
     std::optional<OptionsMenuIntent>& intent;
+    float contentScale = 1.0f;
 };
 
 // Where every row sits: one pass that adds each row's nodes to the layout
@@ -1136,7 +1136,8 @@ void layoutOptionsRows(
     std::vector<RowLayout>& rowLayouts,
     const OptionsMenuState& state,
     bool compactGraphics,
-    UiLayoutNode& controlsPrompt)
+    UiLayoutNode& controlsPrompt,
+    float verticalScale)
 {
     for (std::size_t index = 0; index < rows.size(); ++index) {
         const OptionsMenuRow& row = rows[index];
@@ -1145,20 +1146,22 @@ void layoutOptionsRows(
             if (state.page == OptionsMenuPage::Controls &&
                 row.id == OptionsMenuRowId::ResetBindings) {
                 controlsPrompt = layout.tree.item(
-                    layout.tree.root(), 22.0f);
-                layout.tree.spacer(layout.tree.root(), 4.0f);
+                    layout.tree.root(), 22.0f * verticalScale);
+                layout.tree.spacer(
+                    layout.tree.root(), 4.0f * verticalScale);
             }
             layout.tree.flexibleSpacer(layout.tree.root());
         }
         if (row.dividerBefore) {
             rowLayout.divider = layout.tree.item(
-                layout.tree.root(), 1.0f);
-            layout.tree.spacer(layout.tree.root(), 20.0f);
+                layout.tree.root(), 1.0f * verticalScale);
+            layout.tree.spacer(
+                layout.tree.root(), 20.0f * verticalScale);
         }
         switch (row.kind) {
         case OptionsMenuRowKind::Tabs:
             rowLayout.primary = layout.tree.item(
-                layout.tree.root(), 44.0f);
+                layout.tree.root(), 44.0f * verticalScale);
             break;
         case OptionsMenuRowKind::SegmentedChoice:
         case OptionsMenuRowKind::StepperChoice:
@@ -1166,26 +1169,32 @@ void layoutOptionsRows(
             const UiLayoutNode group = layout.tree.column(
                 layout.tree.root(), UiLayoutSize::content(),
                 row.kind == OptionsMenuRowKind::Slider
-                    ? (compactGraphics ? 4.0f : 8.0f)
-                    : 4.0f);
+                    ? (compactGraphics ? 4.0f : 8.0f) * verticalScale
+                    : 4.0f * verticalScale);
             rowLayout.primary = layout.tree.item(
-                group, compactGraphics ? 20.0f : 30.0f);
+                group,
+                (compactGraphics ? 20.0f : 30.0f) * verticalScale);
             rowLayout.control = layout.tree.item(
                 group,
                 row.kind == OptionsMenuRowKind::Slider
-                    ? (compactGraphics ? 24.0f : 34.0f)
-                    : (compactGraphics ? 28.0f : 52.0f));
+                    ? (compactGraphics ? 24.0f : 34.0f) * verticalScale
+                    : (compactGraphics ? 28.0f : 52.0f) * verticalScale);
             break;
         }
         case OptionsMenuRowKind::CustomRenderScale: {
             const UiLayoutNode group = layout.tree.column(
-                layout.tree.root(), UiLayoutSize::content(), 4.0f);
+                layout.tree.root(),
+                UiLayoutSize::content(),
+                4.0f * verticalScale);
             rowLayout.primary = layout.tree.item(
-                group, compactGraphics ? 32.0f : 44.0f);
+                group,
+                (compactGraphics ? 32.0f : 44.0f) * verticalScale);
             rowLayout.control = layout.tree.item(
-                group, compactGraphics ? 24.0f : 32.0f);
+                group,
+                (compactGraphics ? 24.0f : 32.0f) * verticalScale);
             rowLayout.detail = layout.tree.item(
-                group, compactGraphics ? 16.0f : 24.0f);
+                group,
+                (compactGraphics ? 16.0f : 24.0f) * verticalScale);
             break;
         }
         case OptionsMenuRowKind::Button:
@@ -1194,8 +1203,8 @@ void layoutOptionsRows(
             rowLayout.primary = layout.tree.item(
                 layout.tree.root(),
                 state.page == OptionsMenuPage::Controls
-                    ? 35.0f
-                    : (compactGraphics ? 32.0f : 52.0f));
+                    ? 35.0f * verticalScale
+                    : (compactGraphics ? 32.0f : 52.0f) * verticalScale);
             break;
         }
         if (index + 1 < rows.size() &&
@@ -1203,10 +1212,11 @@ void layoutOptionsRows(
             layout.tree.spacer(
                 layout.tree.root(),
                 state.page == OptionsMenuPage::Main
-                    ? 16.0f
+                    ? 16.0f * verticalScale
                     : (state.page == OptionsMenuPage::Controls
-                            ? 2.0f
-                            : (compactGraphics ? 3.0f : 10.0f)));
+                            ? 2.0f * verticalScale
+                            : (compactGraphics ? 3.0f : 10.0f) *
+                                verticalScale));
         }
     }
 }
@@ -1232,7 +1242,10 @@ void drawTabsRow(const OptionsRowDraw& d)
             layout.tree.rect(rowLayout.primary),
             choices,
             value,
-            { .focused = focused })) {
+            {
+                .focused = focused,
+                .contentScale = d.contentScale,
+            })) {
         intent = options::intent::SelectChoice {
             row.id, value };
     }
@@ -1255,6 +1268,7 @@ void drawButtonRow(const OptionsRowDraw& d)
             {
                 .tone = buttonTone(row.tone),
                 .focused = focused,
+                .contentScale = d.contentScale,
             })) {
         intent = options::intent::ActivateRow { row.id };
     }
@@ -1276,7 +1290,9 @@ void drawToggleRow(const OptionsRowDraw& d)
             layout.tree.rect(rowLayout.primary),
             row.label,
             value,
-            focused && row.enabled)) {
+            focused && row.enabled,
+            false,
+            d.contentScale)) {
         intent = options::intent::SetToggle { row.id, value };
     }
 }
@@ -1295,7 +1311,7 @@ void drawSegmentedChoiceRow(const OptionsRowDraw& d)
         layout.tree.rect(rowLayout.primary).position,
         row.label,
         { 0.83f, 0.86f, 0.83f, 1.0f },
-        22.0f);
+        22.0f * d.contentScale);
     std::vector<uiControls::ChoiceOption> choices;
     choices.reserve(row.choices.size());
     for (const OptionsMenuChoice& choice : row.choices) {
@@ -1307,7 +1323,10 @@ void drawSegmentedChoiceRow(const OptionsRowDraw& d)
             layout.tree.rect(rowLayout.control),
             choices,
             value,
-            { .focused = focused })) {
+            {
+                .focused = focused,
+                .contentScale = d.contentScale,
+            })) {
         intent = options::intent::SelectChoice {
             row.id, value };
     }
@@ -1327,7 +1346,7 @@ void drawStepperChoiceRow(const OptionsRowDraw& d)
         layout.tree.rect(rowLayout.primary).position,
         row.label,
         { 0.83f, 0.86f, 0.83f, 1.0f },
-        22.0f);
+        22.0f * d.contentScale);
     std::vector<uiControls::ChoiceOption> choices;
     choices.reserve(row.choices.size());
     for (const OptionsMenuChoice& choice : row.choices) {
@@ -1339,7 +1358,8 @@ void drawStepperChoiceRow(const OptionsRowDraw& d)
             layout.tree.rect(rowLayout.control),
             choices,
             selectedValue,
-            focused)) {
+            focused,
+            d.contentScale)) {
         intent = options::intent::SelectChoice {
             row.id, selectedValue };
     }
@@ -1363,7 +1383,7 @@ void drawSliderRow(const OptionsRowDraw& d)
         layout.tree.rect(rowLayout.primary).position,
         row.label,
         labelColor,
-        22.0f);
+        22.0f * d.contentScale);
     float value = row.sliderValue;
     if (uiControls::slider(
             ui,
@@ -1373,7 +1393,8 @@ void drawSliderRow(const OptionsRowDraw& d)
             row.sliderMinimum,
             row.sliderMaximum,
             focused && row.enabled,
-            row.enabled)) {
+            row.enabled,
+            d.contentScale)) {
         intent = options::intent::SetSlider {
             row.id, value, true };
     }
@@ -1397,7 +1418,7 @@ void drawSliderRow(const OptionsRowDraw& d)
         row.enabled
             ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
             : Vec4 { 0.50f, 0.52f, 0.51f, 0.45f },
-        20.0f);
+        20.0f * d.contentScale);
 }
 
 // The render-scale row, which is a slider plus the resolution it works out to.
@@ -1420,7 +1441,9 @@ void drawCustomRenderScaleRow(const OptionsRowDraw& d)
             layout.tree.rect(rowLayout.primary),
             row.label,
             enabled,
-            focused)) {
+            focused,
+            false,
+            d.contentScale)) {
         intent = options::intent::SetToggle {
             row.id, enabled };
     }
@@ -1433,7 +1456,8 @@ void drawCustomRenderScaleRow(const OptionsRowDraw& d)
         0.25f,
         1.0f,
         focused && row.enabled,
-        row.enabled);
+        row.enabled,
+        d.contentScale);
     if (sliderChanged) {
         intent = options::intent::SetSlider {
             row.id, value, !ui.mouseDown() };
@@ -1457,7 +1481,7 @@ void drawCustomRenderScaleRow(const OptionsRowDraw& d)
         row.enabled
             ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
             : Vec4 { 0.58f, 0.61f, 0.60f, 0.45f },
-        20.0f);
+        20.0f * d.contentScale);
     const int effectiveScale = row.enabled
         ? percentValue
         : settings.video.renderScalePercent;
@@ -1472,7 +1496,7 @@ void drawCustomRenderScaleRow(const OptionsRowDraw& d)
         layout.tree.rect(rowLayout.detail).position,
         resolution,
         { 0.58f, 0.63f, 0.62f, 1.0f },
-        18.0f);
+        18.0f * d.contentScale);
 }
 
 // One input binding, including the capture state while it is being rebound.
@@ -1499,6 +1523,7 @@ void drawBindingRow(const OptionsRowDraw& d)
             {
                 .tone = buttonTone(row.tone),
                 .focused = focused,
+                .contentScale = d.contentScale,
             })) {
         intent = options::intent::ActivateRow { row.id };
     }
@@ -1515,7 +1540,8 @@ void drawBindingRow(const OptionsRowDraw& d)
             state.controlsBindingDevice,
             *inputPrompts,
             gamepad ? *gamepad : noGamepad,
-            focused);
+            focused,
+            d.contentScale);
     if (!drewPrompts) {
         drawBindingRowText(
             ui,
@@ -1534,7 +1560,8 @@ void drawBindingRow(const OptionsRowDraw& d)
                 ? Vec4 { 0.98f, 0.84f, 0.42f, 1.0f }
                 : (focused
                         ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
-                        : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }));
+                        : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }),
+            d.contentScale);
     }
 }
 
@@ -1553,37 +1580,85 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
     ui.rect(
         { { 0.0f, 0.0f }, viewport },
         { 0.015f, 0.020f, 0.021f, 0.78f });
-    const UiRect panel = menuKit::centeredPanel(
-        viewport, 560.0f, pageHeight(state.page), 400.0f);
-    ui.panel(panel);
-
     const std::vector<OptionsMenuRow> rows =
         optionsMenuRows(state, settings);
     const bool compactGraphics =
         state.page == OptionsMenuPage::Graphics;
+    const float afterHeader = state.page == OptionsMenuPage::Controls
+        ? 16.0f
+        : (compactGraphics ? 16.0f : 28.0f);
+
+    // Measure the rows themselves before choosing the panel height. When the
+    // viewport is shorter than that content, all vertical metrics and control
+    // typography use one common scale, keeping every row and Back action in
+    // bounds without maintaining a second set of per-page height estimates.
+    menuKit::MenuPage measurement(afterHeader);
+    std::vector<RowLayout> measuredRows(rows.size());
+    UiLayoutNode measuredControlsPrompt {};
+    if (state.page == OptionsMenuPage::QuitConfirmation) {
+        measurement.tree.spacer(measurement.tree.root(), 20.0f);
+        (void)measurement.tree.item(measurement.tree.root(), 44.0f);
+        measurement.tree.spacer(measurement.tree.root(), 74.0f);
+    }
+    layoutOptionsRows(
+        measurement,
+        rows,
+        measuredRows,
+        state,
+        compactGraphics,
+        measuredControlsPrompt,
+        1.0f);
+    const float requiredHeight = measurement.tree.minimumSize().y;
+    const float maximumPanelHeight = std::max(viewport.y - 32.0f, 1.0f);
+    const float verticalScale = std::min(
+        1.0f,
+        maximumPanelHeight / std::max(requiredHeight, 1.0f));
+    constexpr float comfortablePanelHeight = 540.0f;
+    const float desiredPanelHeight = std::max(
+        requiredHeight * verticalScale,
+        std::min(comfortablePanelHeight, maximumPanelHeight));
+    const UiRect panel = menuKit::centeredPanel(
+        viewport,
+        560.0f,
+        desiredPanelHeight,
+        std::min(400.0f, maximumPanelHeight));
+    ui.panel(panel);
+
     menuKit::MenuPage layout(
-        state.page == OptionsMenuPage::Controls
-            ? 16.0f
-            : (compactGraphics ? 16.0f : 28.0f));
+        afterHeader,
+        false,
+        verticalScale);
     std::vector<RowLayout> rowLayouts(rows.size());
     UiLayoutNode message {};
     UiLayoutNode controlsPrompt {};
     if (state.page == OptionsMenuPage::QuitConfirmation) {
-        layout.tree.spacer(layout.tree.root(), 20.0f);
-        message = layout.tree.item(layout.tree.root(), 44.0f);
-        layout.tree.spacer(layout.tree.root(), 74.0f);
+        layout.tree.spacer(
+            layout.tree.root(), 20.0f * verticalScale);
+        message = layout.tree.item(
+            layout.tree.root(), 44.0f * verticalScale);
+        layout.tree.spacer(
+            layout.tree.root(), 74.0f * verticalScale);
     }
     layoutOptionsRows(
-        layout, rows, rowLayouts, state, compactGraphics, controlsPrompt);
+        layout,
+        rows,
+        rowLayouts,
+        state,
+        compactGraphics,
+        controlsPrompt,
+        verticalScale);
     layout.tree.arrange(panel);
-    layout.drawHeader(ui, pageTitle(state.page), 36.0f);
+    layout.drawHeader(
+        ui,
+        pageTitle(state.page),
+        36.0f * verticalScale);
 
     if (state.page == OptionsMenuPage::QuitConfirmation) {
         ui.centeredText(
             layout.tree.rect(message),
             "Are you sure you want to quit?",
             { 0.83f, 0.86f, 0.83f, 1.0f },
-            22.0f);
+            22.0f * verticalScale);
     }
     if (state.page == OptionsMenuPage::Controls) {
         ui.centeredText(
@@ -1592,7 +1667,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                 ? "Esc or Start cancels. Rebinding steals duplicates."
                 : "Choose a tab, then confirm a row to remap it.",
             { 0.58f, 0.63f, 0.62f, 1.0f },
-            17.0f);
+            17.0f * verticalScale);
     }
 
     std::optional<OptionsMenuIntent> intent;
@@ -1617,6 +1692,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             focused,
             controlId,
             intent,
+            verticalScale,
         };
         switch (row.kind) {
         case OptionsMenuRowKind::Tabs: {
