@@ -1486,10 +1486,8 @@ void orderIsoFaces(PreparedRenderScene& scene, bool opaqueFrontToBackSort)
 
 // Water surfaces: a plane footprint each, clipped to the visible board.
 //
-// The one isometric step that stays a member: it records renderables through
-// reconcileRenderable, which owns the per-kind caches and the identity
-// counter. The body is the block verbatim - scene and frameData arrive as
-// arguments under their own names.
+// This stays a member because it records water through reconcileRenderable,
+// which owns the per-kind caches and identity counter.
 void IsoScenePreparer::appendWaterFaces(
     PreparedRenderScene& scene,
     const RenderFrameData& frameData,

@@ -20,6 +20,8 @@ Packet 5's code changes were implemented on September 14, 2026. CQ-09 now evalua
 
 Packet 6's code changes were implemented on September 15, 2026. CQ-10 measures the options layout from its declared rows and applies one responsive vertical density to the page scaffold, row geometry, control strokes, prompt glyphs, and typography when the viewport cannot hold the natural content height. The fixed per-page height guesses are gone, every row remains present, and Back remains a pointer target. The interaction matrix covers every focusable row on Graphics, Audio, Controls, and Editor Controls at 640x480, 960x600, 1280x720, and 1920x1080, including complete keyboard/controller navigation, mouse entry from the main page, mouse Back, and command bounds. CQ-12 selects an empty slot for New Game through one dependent command whose executor starts the game only after the slot switch succeeds. Its regression injects failure at the real active-slot-marker commit point and verifies that the active slot, live profile, title/error state, and start callback retain the failed state; removing the obstruction lets the same operation start on the requested slot.
 
+Packet 7's code changes were implemented on September 15, 2026. CQ-11 removes the unreachable completion overlay and level/screen selector with their exclusive shell, input, options, metadata, formatting, build, and test code while preserving the active persistence and overworld completion flow. CQ-13 corrects the documented option, CI, persistence, and audio comments; restores nesting indentation in the mirror-preview builder; and replaces adjacent extraction history with present ownership descriptions. The application and affected active-flow suites build cleanly with warnings as errors.
+
 ## Assessment
 
 The codebase has useful boundaries already: pure gameplay and menu logic, explicit persistence results, an SDK-independent core, shared GPU layouts, specialized rendering passes, and substantial regression coverage. The previous review's completed work should be retained.
@@ -240,6 +242,8 @@ The probe also found overflow in `MenuKit::formatDuration` for very large accept
 ### CQ-13 — Correct misleading comments and broken indentation locally
 
 **P3 · Cleanup · Human readability**
+
+**Status:** implemented September 15, 2026. The misleading comments now match the option scope, CI coverage, asynchronous checkpoint semantics, and two-row audio page. The mirror-preview helpers use consistent function-body indentation, and adjacent extraction-history comments describe current responsibility instead.
 
 **Locations:** [Application.hpp:53](../../../src/engine/Application.hpp) says “Both fields” above a much larger options struct; line 248 says Linux CI never runs rendering although its Debug job does. [Application.cpp:1114](../../../src/engine/Application.cpp) calls an asynchronous checkpoint “durable” before the context change. [OptionsMenu.cpp:693](../../../src/engine/ui/OptionsMenu.cpp) describes three audio sliders but emits two. [RenderFrameBuilder.cpp:841](../../../src/engine/RenderFrameBuilder.cpp) through line 921 contains a function body flush with namespace indentation after extraction.
 

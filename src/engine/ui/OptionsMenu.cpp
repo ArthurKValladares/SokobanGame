@@ -687,7 +687,7 @@ void appendGraphicsRows(
     };
 }
 
-// The audio page: the three volume sliders.
+// The audio page's master and music volume sliders.
 void appendAudioRows(
     std::vector<OptionsMenuRow>& rows, const UserSettings& settings)
 {
@@ -1098,13 +1098,7 @@ std::optional<OptionsAction> OptionsMenu::provideBindingCandidate(
         options::intent::ProvideBinding { candidate });
 }
 
-// Everything one options row needs in order to draw itself.
-//
-// draw() was 385 lines whose centre was a 248-line switch over the eight row
-// kinds, and every case wanted the same handful of things. Bundling them lets
-// each kind be its own function instead of an eleven-parameter signature; each
-// binds the names back out of the bundle, so the bodies below are exactly what
-// was inside the switch.
+// Shared context for the row-kind drawing functions.
 struct OptionsRowDraw {
     UiContext& ui;
     menuKit::MenuPage& layout;

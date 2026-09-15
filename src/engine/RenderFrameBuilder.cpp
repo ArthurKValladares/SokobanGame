@@ -747,12 +747,8 @@ void appendGameplayEntities(
     }
 }
 
-// One previewed mirror entity, as the two steps below need it.
-//
-// Bundled because both of them want most of these and the loop that computes
-// them was 240 lines of a 279-line function. The two steps take the bundle and
-// bind the names back out of it, so their bodies read exactly as they did
-// inside the loop.
+// Shared state for building one previewed mirror entity's beam segments and
+// destination ghost.
 struct MirrorEntityPreviewContext {
     const rules::MirrorEntityPreview& entity;
     const rules::MirrorEntityPreview* matchingEndEntity = nullptr;
@@ -777,50 +773,49 @@ void appendMirrorEntitySegments(
     const float progress = preview.progress;
     const bool animatePreview = preview.animatePreview;
     const float previewOpacity = preview.previewOpacity;
-for (std::size_t segmentIndex = 0;
-     segmentIndex < entity.beamSegments.size();
-     ++segmentIndex) {
-    MirrorRenderSegment segment {
-        .from = toRenderPoint(
-            entity.beamSegments[segmentIndex].from),
-        .to = toRenderPoint(
-            entity.beamSegments[segmentIndex].to),
-        .opacity = previewOpacity,
-    };
-    if (animatePreview) {
-        segment.from = interpolate(
-            segment.from,
-            toRenderPoint(
-                matchingEndEntity
-                    ->beamSegments[segmentIndex].from),
-            progress);
-        segment.to = interpolate(
-            segment.to,
-            toRenderPoint(
-                matchingEndEntity
-                    ->beamSegments[segmentIndex].to),
-            progress);
+    for (std::size_t segmentIndex = 0;
+         segmentIndex < entity.beamSegments.size();
+         ++segmentIndex) {
+        MirrorRenderSegment segment {
+            .from = toRenderPoint(
+                entity.beamSegments[segmentIndex].from),
+            .to = toRenderPoint(
+                entity.beamSegments[segmentIndex].to),
+            .opacity = previewOpacity,
+        };
+        if (animatePreview) {
+            segment.from = interpolate(
+                segment.from,
+                toRenderPoint(
+                    matchingEndEntity
+                        ->beamSegments[segmentIndex].from),
+                progress);
+            segment.to = interpolate(
+                segment.to,
+                toRenderPoint(
+                    matchingEndEntity
+                        ->beamSegments[segmentIndex].to),
+                progress);
+        }
+        entitySegments.push_back(segment);
     }
-    entitySegments.push_back(segment);
-}
-if (animatePreview && !entitySegments.empty()) {
-    entitySegments.front().from = visual->renderPosition;
-}
-for (const MirrorRenderSegment& segment : entitySegments) {
-    const auto existing = std::ranges::find_if(
-        beamSegments,
-        [&](const MirrorRenderSegment& candidate) {
-            return sameUndirectedSegment(
-                candidate, segment);
-        });
-    if (existing == beamSegments.end()) {
-        beamSegments.push_back(segment);
-    } else {
-        existing->opacity = std::max(
-            existing->opacity, segment.opacity);
+    if (animatePreview && !entitySegments.empty()) {
+        entitySegments.front().from = visual->renderPosition;
     }
-}
-
+    for (const MirrorRenderSegment& segment : entitySegments) {
+        const auto existing = std::ranges::find_if(
+            beamSegments,
+            [&](const MirrorRenderSegment& candidate) {
+                return sameUndirectedSegment(
+                    candidate, segment);
+            });
+        if (existing == beamSegments.end()) {
+            beamSegments.push_back(segment);
+        } else {
+            existing->opacity = std::max(
+                existing->opacity, segment.opacity);
+        }
+    }
 }
 
 // The translucent ghost tile showing where the entity ends up.
@@ -838,87 +833,87 @@ void appendMirrorGhostTile(
     const float progress = preview.progress;
     const bool animatePreview = preview.animatePreview;
     const float previewOpacity = preview.previewOpacity;
-auto ghostRenderPosition =
-    [](const rules::MirrorEntityPreview& preview) {
-        Vec3 result = toRenderPoint(preview.destination);
-        if (preview.fallen) {
-            result.z -= preview.player
-                ? config::drownedPlayerDepthBelowGround
-                : config::waterDepthBelowGround;
+    auto ghostRenderPosition =
+        [](const rules::MirrorEntityPreview& preview) {
+            Vec3 result = toRenderPoint(preview.destination);
+            if (preview.fallen) {
+                result.z -= preview.player
+                    ? config::drownedPlayerDepthBelowGround
+                    : config::waterDepthBelowGround;
+            }
+            return result;
+        };
+    Vec3 ghostPosition = ghostRenderPosition(entity);
+    bool ghostFallen = entity.fallen;
+    GridPosition3 ghostCell = entity.destination;
+    if (animatePreview) {
+        ghostPosition = interpolate(
+            ghostPosition,
+            ghostRenderPosition(*matchingEndEntity),
+            progress);
+        if (progress >= 0.5f) {
+            ghostFallen = matchingEndEntity->fallen;
+            ghostCell = matchingEndEntity->destination;
         }
-        return result;
-    };
-Vec3 ghostPosition = ghostRenderPosition(entity);
-bool ghostFallen = entity.fallen;
-GridPosition3 ghostCell = entity.destination;
-if (animatePreview) {
-    ghostPosition = interpolate(
-        ghostPosition,
-        ghostRenderPosition(*matchingEndEntity),
-        progress);
-    if (progress >= 0.5f) {
-        ghostFallen = matchingEndEntity->fallen;
-        ghostCell = matchingEndEntity->destination;
     }
-}
-RenderFrameData::Tile ghost {
-    .cell = ghostCell,
-    .position = {
-        ghostPosition.x,
-        ghostPosition.y,
-    },
-    .color = {
-        config::mirrorGhostColor.x,
-        config::mirrorGhostColor.y,
-        config::mirrorGhostColor.z,
-        config::mirrorGhostColor.w * previewOpacity,
-    },
-    .baseElevation = ghostPosition.z,
-    .height = 1.0f,
-    .showGrid = false,
-    .affectsCameraFit = false,
-    .model = entity.player
-        ? input.manifest.playerModel()
-        : input.manifest.modelForTile(
-              state.movables[entity.movableIndex].type),
-    .animation = entity.player
-        ? (ghostFallen
-                ? animationFor(
-                      input.animations,
-                      AnimationUse::MirrorPreviewPlayerDeadIdle,
-                      input.manifest.playerDeadIdleAnimation())
-                : animationFor(
-                      input.animations,
-                      AnimationUse::MirrorPreviewPlayerIdle,
-                      input.manifest.playerIdleAnimation()))
-        : noAnimation,
-    .animationInstanceId = entity.player
-        ? mirrorGhostAnimationInstance(
-              entity.resultPlayerIndex)
-        : uint64_t { 0 },
-    .animationLoops = true,
-    .animationTimeSeconds = previewPlayer
-        ? animationTimeFor(
-              input.animations,
-              ghostFallen
-                  ? AnimationUse::MirrorPreviewPlayerDeadIdle
-                  : AnimationUse::MirrorPreviewPlayerIdle,
-              previewPlayer->clipTimeSeconds)
-        : 0.0f,
-    .modelRotationQuarterTurns = entity.player
-        ? (previewPlayer
-                ? previewPlayer->facingQuarterTurns
-                : 0U)
-        : 0U,
-    .effect = RenderSurfaceEffect::MirrorEnergy,
-};
-applyTileScale(
-    ghost,
-    input.settings.tileScale(
-        entity.player
-            ? TileType::Player
-            : state.movables[entity.movableIndex].type));
-frame.tiles.push_back(ghost);
+    RenderFrameData::Tile ghost {
+        .cell = ghostCell,
+        .position = {
+            ghostPosition.x,
+            ghostPosition.y,
+        },
+        .color = {
+            config::mirrorGhostColor.x,
+            config::mirrorGhostColor.y,
+            config::mirrorGhostColor.z,
+            config::mirrorGhostColor.w * previewOpacity,
+        },
+        .baseElevation = ghostPosition.z,
+        .height = 1.0f,
+        .showGrid = false,
+        .affectsCameraFit = false,
+        .model = entity.player
+            ? input.manifest.playerModel()
+            : input.manifest.modelForTile(
+                  state.movables[entity.movableIndex].type),
+        .animation = entity.player
+            ? (ghostFallen
+                    ? animationFor(
+                          input.animations,
+                          AnimationUse::MirrorPreviewPlayerDeadIdle,
+                          input.manifest.playerDeadIdleAnimation())
+                    : animationFor(
+                          input.animations,
+                          AnimationUse::MirrorPreviewPlayerIdle,
+                          input.manifest.playerIdleAnimation()))
+            : noAnimation,
+        .animationInstanceId = entity.player
+            ? mirrorGhostAnimationInstance(
+                  entity.resultPlayerIndex)
+            : uint64_t { 0 },
+        .animationLoops = true,
+        .animationTimeSeconds = previewPlayer
+            ? animationTimeFor(
+                  input.animations,
+                  ghostFallen
+                      ? AnimationUse::MirrorPreviewPlayerDeadIdle
+                      : AnimationUse::MirrorPreviewPlayerIdle,
+                  previewPlayer->clipTimeSeconds)
+            : 0.0f,
+        .modelRotationQuarterTurns = entity.player
+            ? (previewPlayer
+                    ? previewPlayer->facingQuarterTurns
+                    : 0U)
+            : 0U,
+        .effect = RenderSurfaceEffect::MirrorEnergy,
+    };
+    applyTileScale(
+        ghost,
+        input.settings.tileScale(
+            entity.player
+                ? TileType::Player
+                : state.movables[entity.movableIndex].type));
+    frame.tiles.push_back(ghost);
 }
 
 void appendMirrorPreview(

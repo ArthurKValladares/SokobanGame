@@ -11,9 +11,7 @@
 #include <array>
 #include <cmath>
 
-// Bodies moved verbatim from RenderFrameBuilder.cpp. The only edit is that
-// default arguments moved to the declarations in the header, where a
-// definition in another translation unit cannot repeat them.
+// Stateless frame-building helpers shared by gameplay and editor scene paths.
 
 namespace sokoban::renderFrameParts {
 

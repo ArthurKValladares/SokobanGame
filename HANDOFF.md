@@ -37,11 +37,12 @@ concurrent presentation, prepared-texture invalidation, complete Vulkan
 descriptor-limit accounting, bounded residency admission, and failure-safe
 painted-texture replacement, plus defined water-ripple derivatives across
 depth-dependent geometry boundaries. The full 80-test Debug and Release
-registries pass in the warnings-as-errors configuration. Packet 6 is complete:
-options rows remain visible and interactive throughout the supported window
-range, and a failed slot switch cannot run its dependent new-game action against
-the previous slot. Next is packet 7's obsolete UI removal and local readability
-cleanup.
+registries pass in the warnings-as-errors configuration. Packets 6 and 7 are
+complete: options remain usable throughout the supported window range, failed
+slot selection cannot start a game against the previous slot, unreachable
+completion/selection menus and their plumbing are gone, and the review's local
+comment and indentation defects are corrected. Next is packet 8's final
+supported validation matrix.
 Broader refactoring or efficiency work still requires a concrete maintenance
 problem or measurement.
 

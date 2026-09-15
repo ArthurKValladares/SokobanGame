@@ -1103,7 +1103,7 @@ void Application::tryEnterSelector()
         return;
     }
 
-    // Make the return point durable before changing the profile context.
+    // Queue the current return point before changing the profile context.
     checkpointCurrentScreen(true);
     const LevelLocation target = *sharedSelector->target;
     beginLevelTransition([this, target] {
@@ -1733,10 +1733,8 @@ FrameArena& Application::beginRenderFrameArena()
 }
 
 #if SOKOBAN_ENABLE_DEBUG_UI
-// The editor's own frame: level directories, the pending move, the overworld
-// neighbours around the edited screen, and the selector states the palette
-// draws. Lifted whole out of buildRenderFrame(), where it was 95 of that
-// function's 304 lines and had nothing to do with the gameplay path below it.
+// Builds the editor-only frame from the open document, pending move,
+// neighbouring overworld screens, and palette selector state.
 RenderFrameData Application::buildEditorRenderFrame(
     const InputRouter::EditorInput& editorInput, float beltScrollOffset)
 {

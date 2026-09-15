@@ -49,9 +49,8 @@
 
 namespace sokoban {
 
-// Non-default ways to start the process. Both fields exist for the headless
-// smoke run: CI needs the real frame loop to execute and then stop, and it
-// must not write into a real player profile to do it.
+// Non-default process configuration for automated smoke/evidence runs and
+// deterministic renderer validation. Ordinary play uses the defaults.
 struct ApplicationOptions {
     // Render this many frames through the ordinary loop, start a game so the
     // scene pass is actually exercised, and exit. Zero runs until quit.
@@ -238,7 +237,7 @@ private:
     // happened earlier in the loop than the reset buried inside
     // buildRenderFrame. Moving that reset to the top of the loop, which is the
     // natural place for it, would have turned it into a use-after-free that
-    // Linux CI cannot catch, because the render path never runs there.
+    // tests that do not run the application frame loop cannot catch.
     // Alternating means the arena being reset is never the one the previous
     // prepared frame points into, and the invariant stops being invisible.
     //
