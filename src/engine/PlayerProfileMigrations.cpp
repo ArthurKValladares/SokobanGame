@@ -892,6 +892,58 @@ void migrate27to28(Json& root)
     }
 }
 
+// Format 29 gives enemies a first-class death state. Older checkpoints only
+// knew about falling, so every persisted enemy begins alive.
+void migrate28to29(Json& root)
+{
+    const auto migrateState = [](Json& state) {
+        if (!state.is_object() || !state.contains("enemies") ||
+            !state["enemies"].is_array()) {
+            return;
+        }
+        for (Json& enemy : state["enemies"]) {
+            if (enemy.is_object() && !enemy.contains("dead")) {
+                enemy["dead"] = false;
+            }
+        }
+    };
+    const auto migrateSession = [&](Json& checkpoint) {
+        if (!checkpoint.is_object() || !checkpoint.contains("session") ||
+            !checkpoint["session"].is_object()) {
+            return;
+        }
+        Json& session = checkpoint["session"];
+        if (session.contains("state")) {
+            migrateState(session["state"]);
+        }
+        if (session.contains("undoBaseState") &&
+            !session["undoBaseState"].is_null()) {
+            migrateState(session["undoBaseState"]);
+        }
+        if (session.contains("undoStack") &&
+            session["undoStack"].is_array()) {
+            for (Json& action : session["undoStack"]) {
+                if (action.is_object() && action.contains("after")) {
+                    migrateState(action["after"]);
+                }
+            }
+        }
+    };
+
+    if (!root.contains("progress") || !root["progress"].is_object()) {
+        return;
+    }
+    Json& progress = root["progress"];
+    if (progress.contains("activeScreen") &&
+        !progress["activeScreen"].is_null()) {
+        migrateSession(progress["activeScreen"]);
+    }
+    if (progress.contains("overworldCheckpoint") &&
+        !progress["overworldCheckpoint"].is_null()) {
+        migrateSession(progress["overworldCheckpoint"]);
+    }
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -925,6 +977,7 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate25to26,
         migrate26to27,
         migrate27to28,
+        migrate28to29,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

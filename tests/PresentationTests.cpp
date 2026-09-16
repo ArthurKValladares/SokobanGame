@@ -78,6 +78,7 @@ const AssetManifest& testManifest()
           }
         },
         { "name": "Mirror", "path": "mirror.gltf" },
+        { "name": "Turret", "path": "turret.gltf" },
         {
           "name": "Decoration",
           "path": "decoration.gltf",
@@ -148,6 +149,10 @@ const AssetManifest& testManifest()
         { "tile": "Mirror North-East", "model": "Mirror" },
         { "tile": "Mirror South-West", "model": "Mirror" },
         { "tile": "Mirror South-East", "model": "Mirror" },
+        { "tile": "Turret North", "model": "Turret" },
+        { "tile": "Turret East", "model": "Turret" },
+        { "tile": "Turret South", "model": "Turret" },
+        { "tile": "Turret West", "model": "Turret" },
         { "tile": "Player", "model": "Hero" },
         { "tile": "Enemy", "model": "Enemy" }
       ]
@@ -1261,6 +1266,47 @@ void testMirrorTilesUseTheirModelAndOrientation()
     }
 }
 
+void testTurretMovablesUseTheirModelAndOrientation()
+{
+    TEST("turretMovablesUseTheirModelAndOrientation");
+    const Level level = Level::loadFromLayers({
+        { "....." },
+        { "Cnesw" },
+    }, "turret presentation frame");
+    const GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+
+    const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .moving = false,
+        .projectedState = {},
+        .presentation = presentation,
+        .settings = PresentationSettings {},
+    });
+
+    std::array<const RenderFrameData::Tile*, 4> turrets {};
+    for (const RenderFrameData::Tile& tile : frame.tiles) {
+        if (tile.model == testManifest().modelIdByName("Turret") &&
+            tile.cell.x >= 1 && tile.cell.x <= 4) {
+            turrets[static_cast<std::size_t>(tile.cell.x - 1)] = &tile;
+        }
+    }
+    constexpr std::array<uint32_t, 4> expectedRotations { 2, 3, 0, 1 };
+    for (std::size_t i = 0; i < turrets.size(); ++i) {
+        CHECK(turrets[i] != nullptr);
+        if (turrets[i]) {
+            CHECK(turrets[i]->modelRotationQuarterTurns ==
+                expectedRotations[i]);
+            CHECK(turrets[i]->color.x == 1.0f);
+            CHECK(turrets[i]->color.y == 1.0f);
+            CHECK(turrets[i]->color.z == 1.0f);
+        }
+    }
+}
+
 void testMirrorActivationBuildsBeamAndDestinationGhost()
 {
     TEST("mirrorActivationBuildsBeamAndDestinationGhost");
@@ -2293,6 +2339,7 @@ int main()
     testEditorFrameShowsReadOnlyOverworldNeighbors();
     testEditorSelectorMoveUsesFlagPreviews();
     testMirrorTilesUseTheirModelAndOrientation();
+    testTurretMovablesUseTheirModelAndOrientation();
     testMirrorActivationBuildsBeamAndDestinationGhost();
     testPlayerCopiesRenderAndInterpolateTogether();
     testPlayerCopiesShareTheInputFacing();

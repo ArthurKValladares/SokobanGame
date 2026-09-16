@@ -42,6 +42,7 @@ const AssetManifest& testManifest()
         { "name": "Glass", "path": "glass.gltf" },
         { "name": "Bricks", "path": "bricks.gltf" },
         { "name": "Conveyor", "path": "conveyor.gltf" },
+        { "name": "Turret", "path": "turret.gltf" },
         { "name": "ScreenSelectorAPlayable", "path": "flag-a-blue.gltf" },
         { "name": "ScreenSelectorASolved", "path": "flag-a-green.gltf" },
         { "name": "ScreenSelectorAUnavailable", "path": "flag-a-red.gltf" },
@@ -68,6 +69,10 @@ const AssetManifest& testManifest()
         { "tile": "Conveyor Down", "model": "Conveyor" },
         { "tile": "Conveyor Right", "model": "Conveyor" },
         { "tile": "Conveyor Left", "model": "Conveyor" },
+        { "tile": "Turret North", "model": "Turret" },
+        { "tile": "Turret East", "model": "Turret" },
+        { "tile": "Turret South", "model": "Turret" },
+        { "tile": "Turret West", "model": "Turret" },
         { "tile": "Player", "model": "Hero" },
         { "tile": "Enemy", "model": "Enemy" }
       ]
@@ -109,7 +114,7 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     TEST("levelRequirementsIncludeDynamicAndStaticAssets");
     const Level level = Level::loadFromLayers({
         { "........" },
-        { "C#W>RIN" },
+        { "C#W>RINe" },
     }, "asset requirements", std::nullopt, {
         Level::Decoration {
             .model = "Water",
@@ -128,6 +133,7 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.modelIdByName("Conveyor")));
     CHECK(requirements.contains(manifest.modelIdByName("Stone")));
     CHECK(requirements.contains(manifest.modelIdByName("Glass")));
+    CHECK(requirements.contains(manifest.modelIdByName("Turret")));
     CHECK(!requirements.contains(cubeModel));
     CHECK(requirements.contains(manifest.playerIdleAnimation()));
     CHECK(requirements.contains(manifest.playerMoveAnimation()));
@@ -136,7 +142,7 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.playerDeadIdleAnimation()));
     CHECK(requirements.contains(manifest.enemyModel()));
     CHECK(requirements.contains(manifest.enemyAttackAnimation()));
-    CHECK(requirements.modelCount() == 7);
+    CHECK(requirements.modelCount() == 8);
     CHECK(requirements.animationCount() == 6);
     // The three ground splat textures are always required.
     CHECK(requirements.textureCount() == 3);

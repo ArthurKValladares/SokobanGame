@@ -331,13 +331,17 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         const std::string enemyContext =
             std::string(context) + ".enemies[" + std::to_string(i) + "]";
         const Json& item = enemies[i];
-        rejectUnknownProperties(item, { "id", "cell", "fallen" }, enemyContext);
+        rejectUnknownProperties(
+            item,
+            { "id", "cell", "fallen", "dead" },
+            enemyContext);
         state.enemies.push_back({
             .id = unsignedIntegerProperty(item, "id", enemyContext),
             .cell = positionFromJson(
                 requiredProperty(item, "cell", enemyContext),
                 enemyContext + ".cell"),
             .fallen = boolProperty(item, "fallen", enemyContext),
+            .dead = boolProperty(item, "dead", enemyContext),
         });
     }
     return state;
@@ -375,6 +379,7 @@ OrderedJson gameStateToJson(const GameState& state)
             { "id", enemy.id },
             { "cell", positionToJson(enemy.cell) },
             { "fallen", enemy.fallen },
+            { "dead", enemy.dead },
         });
     }
     return {

@@ -752,7 +752,8 @@ RenderFrameData::Tile tileVisual(
     const float centeredOffset = (1.0f - tileSize) * 0.5f;
 
     Vec4 color = tileColor(tile);
-    if (tile == TileType::Player || tile == TileType::Enemy) {
+    if (tile == TileType::Player || tile == TileType::Enemy ||
+        tileTypeIsTurret(tile)) {
         color = { 1.0f, 1.0f, 1.0f, 1.0f };
     }
     if (tile == TileType::Ice) {
@@ -791,13 +792,14 @@ RenderFrameData::Tile tileVisual(
         .animationInstanceId = tile == TileType::Player || tile == TileType::Enemy
             ? authoredAnimationInstance(tile, cell)
             : uint64_t { 0 },
-        // Conveyors carry their direction in the tile type; mirrors carry an
-        // orientation. Both are rotations of one shared model, so dropping
-        // either collapses a whole family into identical-looking tiles.
+        // Conveyors, turrets, and mirrors each carry an orientation in their
+        // tile type. Each family rotates one shared model.
         .modelRotationQuarterTurns =
             rules::conveyorDirectionForTile(tile)
             ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
-            : mirrorOrientationQuarterTurns(tile).value_or(0),
+            : (rules::turretDirectionForTile(tile)
+                    ? facingQuarterTurns(*rules::turretDirectionForTile(tile))
+                    : mirrorOrientationQuarterTurns(tile).value_or(0)),
         .modelRotationOffsetRadians = tileTypeIsMirror(tile)
             ? config::mirrorModelRotationOffsetRadians
             : 0.0f,

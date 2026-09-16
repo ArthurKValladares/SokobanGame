@@ -43,7 +43,8 @@ std::string_view tileTypeName(TileType type)
 bool tileTypeOccupiesLevelCell(TileType type)
 {
     return type == TileType::Player || type == TileType::Rock ||
-        type == TileType::Ice || type == TileType::Enemy;
+        type == TileType::Ice || type == TileType::Enemy ||
+        tileTypeIsTurret(type);
 }
 
 bool tileTypeIsSolidBlock(TileType type)
@@ -85,6 +86,14 @@ bool tileTypeIsMirror(TileType type)
         type == TileType::MirrorNorthEast ||
         type == TileType::MirrorSouthWest ||
         type == TileType::MirrorSouthEast;
+}
+
+bool tileTypeIsTurret(TileType type)
+{
+    return type == TileType::TurretNorth ||
+        type == TileType::TurretEast ||
+        type == TileType::TurretSouth ||
+        type == TileType::TurretWest;
 }
 
 bool tileTypeIsDecorative(TileType type)

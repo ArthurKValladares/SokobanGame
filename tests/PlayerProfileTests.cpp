@@ -478,6 +478,9 @@ void testActiveScreenCheckpointRoundTrip()
     CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["state"]
             .contains("enemies"),
         "checkpoint state persists enemies");
+    CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["state"]
+            ["enemies"][0].contains("dead"),
+        "checkpoint state persists enemy death");
     CHECK_MESSAGE(!current["progress"]["activeScreen"]["session"]["state"]
             .contains("playerClones"),
         "checkpoint state has no primary/clone compatibility fields");
@@ -519,6 +522,33 @@ void testActiveScreenCheckpointRoundTrip()
         sokoban::decodePlayerProfile(format27.dump());
     CHECK_MESSAGE(migrated27.profile == profile,
         "format 27 duplicate-state undo history migrates exactly");
+
+    nlohmann::json format28 = current;
+    format28["format"] = 28;
+    nlohmann::json& format28Session =
+        format28["progress"]["activeScreen"]["session"];
+    const auto eraseEnemyDeath = [](nlohmann::json& state) {
+        if (!state.is_object() || !state.contains("enemies") ||
+            !state["enemies"].is_array()) {
+            return;
+        }
+        for (nlohmann::json& enemy : state["enemies"]) {
+            if (enemy.is_object()) {
+                enemy.erase("dead");
+            }
+        }
+    };
+    eraseEnemyDeath(format28Session["state"]);
+    eraseEnemyDeath(format28Session["undoBaseState"]);
+    for (nlohmann::json& action : format28Session["undoStack"]) {
+        eraseEnemyDeath(action["after"]);
+    }
+    const sokoban::DecodedPlayerProfile migrated28 =
+        sokoban::decodePlayerProfile(format28.dump());
+    CHECK_MESSAGE(migrated28.sourceFormat == 28,
+        "format 28 source is reported");
+    CHECK_MESSAGE(migrated28.profile == profile,
+        "format 28 enemies migrate as alive");
 
     nlohmann::json format15 = format27;
     format15["format"] = 15;

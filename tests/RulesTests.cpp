@@ -963,6 +963,109 @@ void testMovingBlockPushesEnemy()
     CHECK(!pushed.players[0].dead);
 }
 
+void testTurretsSpawnWithCardinalFacingAndCanBePushed()
+{
+    TEST("turretsSpawnWithCardinalFacingAndCanBePushed");
+    const Level directions = makeLevel({
+        { "....." },
+        { "Cnesw" },
+    });
+    const GameState directionalState = rules::initialState(directions);
+    CHECK(directionalState.movables.size() == 4);
+    CHECK(directionalState.movables[0].type == TileType::TurretNorth);
+    CHECK(directionalState.movables[1].type == TileType::TurretEast);
+    CHECK(directionalState.movables[2].type == TileType::TurretSouth);
+    CHECK(directionalState.movables[3].type == TileType::TurretWest);
+    CHECK(rules::turretDirectionForTile(TileType::TurretNorth) ==
+        MoveDirection::Up);
+    CHECK(rules::turretDirectionForTile(TileType::TurretEast) ==
+        MoveDirection::Right);
+    CHECK(rules::turretDirectionForTile(TileType::TurretSouth) ==
+        MoveDirection::Down);
+    CHECK(rules::turretDirectionForTile(TileType::TurretWest) ==
+        MoveDirection::Left);
+    CHECK(!rules::turretDirectionForTile(TileType::Rock));
+
+    const Level pushable = makeLevel({
+        { "..." },
+        { "Ce " },
+    });
+    const GameState pushed = rules::step(
+        pushable,
+        rules::initialState(pushable),
+        MoveDirection::Right);
+    CHECK(pushed.players[0].cell == cell(1, 0, 1));
+    CHECK(pushed.movables[0].cell == cell(2, 0, 1));
+    CHECK(pushed.movables[0].type == TileType::TurretEast);
+    CHECK(!pushed.players[0].dead);
+}
+
+void testTurretKillsAPlayerWhoMovesIntoLineOfSight()
+{
+    TEST("turretKillsAPlayerWhoMovesIntoLineOfSight");
+    const Level level = makeLevel({
+        { "...." },
+        { "e  C" },
+    });
+    const GameState initial = rules::initialState(level);
+
+    // Occupancy alone does not trigger a shot.
+    CHECK(rules::step(level, initial) == initial);
+
+    const GameState shot = rules::step(
+        level, initial, MoveDirection::Left);
+    CHECK(shot.players[0].cell == cell(2, 0, 1));
+    CHECK(shot.players[0].dead);
+    CHECK(!shot.players[0].drowned);
+}
+
+void testRockAndWallBlockTurretLineOfSight()
+{
+    TEST("rockAndWallBlockTurretLineOfSight");
+    const Level rockLevel = makeLevel({
+        { "....." },
+        { "e R C" },
+    });
+    const GameState behindRock = rules::step(
+        rockLevel,
+        rules::initialState(rockLevel),
+        MoveDirection::Left);
+    CHECK(behindRock.players[0].cell == cell(3, 0, 1));
+    CHECK(!behindRock.players[0].dead);
+
+    const Level wallLevel = makeLevel({
+        { "....." },
+        { "e # C" },
+    });
+    const GameState behindWall = rules::step(
+        wallLevel,
+        rules::initialState(wallLevel),
+        MoveDirection::Left);
+    CHECK(behindWall.players[0].cell == cell(3, 0, 1));
+    CHECK(!behindWall.players[0].dead);
+}
+
+void testTurretKillsAnEnemyMovedIntoLineOfSight()
+{
+    TEST("turretKillsAnEnemyMovedIntoLineOfSight");
+    const Level level = makeLevel({
+        { ".....", ".....", ".....", "....." },
+        { "     ", " CRN ", "     ", "    n" },
+    });
+    const GameState shot = rules::step(
+        level,
+        rules::initialState(level),
+        MoveDirection::Right);
+
+    CHECK(shot.players[0].cell == cell(2, 1, 1));
+    CHECK(shot.movables[0].cell == cell(3, 1, 1));
+    CHECK(shot.enemies[0].cell == cell(4, 1, 1));
+    CHECK(shot.enemies[0].dead);
+    CHECK(!shot.enemies[0].fallen);
+    CHECK(!shot.players[0].dead);
+    CHECK(rules::enemyAt(shot, cell(4, 1, 1)) == nullptr);
+}
+
 // A scope names the entities an action is allowed to move. These pin the two
 // halves of that: in-scope entities behave exactly as they always did, and
 // out-of-scope entities keep every passive role while never being written.
@@ -1174,6 +1277,10 @@ int main()
     testEnemySpawnsOutsideStaticGridAndKillsAdjacentPlayer();
     testEnemyDoesNotAttackDiagonallyAndBlocksDirectMovement();
     testMovingBlockPushesEnemy();
+    testTurretsSpawnWithCardinalFacingAndCanBePushed();
+    testTurretKillsAPlayerWhoMovesIntoLineOfSight();
+    testRockAndWallBlockTurretLineOfSight();
+    testTurretKillsAnEnemyMovedIntoLineOfSight();
     testEmptyScopeIsTheWholeWorldStep();
     testScopeLeavesAmbientMotionAlone();
     testOutOfScopeEntitiesStillBlock();

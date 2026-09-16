@@ -723,7 +723,8 @@ Level Level::loadFromLayers(
                     level.playerStart_ = position;
                 }
 
-                if (*tile == TileType::Rock || *tile == TileType::Ice) {
+                if (*tile == TileType::Rock || *tile == TileType::Ice ||
+                    tileTypeIsTurret(*tile)) {
                     level.movableTiles_.push_back({
                         .type = *tile,
                         .position = position,

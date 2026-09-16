@@ -199,7 +199,8 @@ void GameplayPresentation::advanceAnimations(float dt, const GameState& state)
     for (std::size_t enemyIndex = 0;
          enemyIndex < enemies_.size() && enemyIndex < state.enemies.size();
          ++enemyIndex) {
-        if (state.enemies[enemyIndex].fallen) {
+        if (state.enemies[enemyIndex].fallen ||
+            state.enemies[enemyIndex].dead) {
             continue;
         }
         const PlayerVisual* closest = nullptr;
@@ -401,7 +402,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
             const GameState::Player& playerBefore = action.before.players[playerIndex];
             const GameState::Player& playerAfter = action.after.players[playerIndex];
             if (playerBefore.dead || !playerAfter.dead || playerAfter.drowned ||
-                after.fallen || playerAfter.cell.z != after.cell.z) {
+                after.fallen || after.dead ||
+                playerAfter.cell.z != after.cell.z) {
                 continue;
             }
             const int distance =

@@ -31,6 +31,10 @@ enum class TileType {
     MirrorSouthEast,
     Decorative,
     Enemy,
+    TurretNorth,
+    TurretEast,
+    TurretSouth,
+    TurretWest,
     Count,
 };
 
@@ -64,6 +68,10 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::MirrorSouthEast, '4', "Mirror South-East", { 0.72f, 0.90f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::Decorative, 'D', "Decorative Block", { 0.32f, 0.58f, 0.48f, 1.0f } },
     TileTypeDefinition { TileType::Enemy, 'N', "Enemy", { 0.75f, 0.18f, 0.12f, 1.0f } },
+    TileTypeDefinition { TileType::TurretNorth, 'n', "Turret North", { 0.72f, 0.48f, 0.16f, 1.0f } },
+    TileTypeDefinition { TileType::TurretEast, 'e', "Turret East", { 0.72f, 0.48f, 0.16f, 1.0f } },
+    TileTypeDefinition { TileType::TurretSouth, 's', "Turret South", { 0.72f, 0.48f, 0.16f, 1.0f } },
+    TileTypeDefinition { TileType::TurretWest, 'w', "Turret West", { 0.72f, 0.48f, 0.16f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -77,6 +85,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeIsSurfaceEntity(TileType type);
 [[nodiscard]] bool tileTypeIsConveyor(TileType type);
 [[nodiscard]] bool tileTypeIsMirror(TileType type);
+[[nodiscard]] bool tileTypeIsTurret(TileType type);
 [[nodiscard]] bool tileTypeIsDecorative(TileType type);
 [[nodiscard]] bool tileTypeAffectsCameraFit(TileType type);
 // Clockwise quarter-turns from the north-west-facing model orientation.

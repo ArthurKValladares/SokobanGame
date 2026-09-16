@@ -103,7 +103,10 @@ StaticRenderCell staticRenderCellFor(
             ? playerFacingQuarterTurns
             : (rules::conveyorDirectionForTile(tile)
                     ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
-                    : mirrorOrientationQuarterTurns(tile).value_or(0)),
+                    : (rules::turretDirectionForTile(tile)
+                            ? facingQuarterTurns(
+                                  *rules::turretDirectionForTile(tile))
+                            : mirrorOrientationQuarterTurns(tile).value_or(0))),
     };
 }
 
@@ -650,7 +653,7 @@ void appendGameplayEntities(
          ++enemyIndex) {
         const GameState::Enemy& enemy = state.enemies[enemyIndex];
         const GameplayPresentation::EnemyVisual& visual = enemyVisuals[enemyIndex];
-        if (enemy.fallen && !visual.motion.moving) {
+        if (enemy.dead || (enemy.fallen && !visual.motion.moving)) {
             continue;
         }
         if (input.visibleCell && !input.visibleCell(enemy.cell)) {
@@ -722,7 +725,9 @@ void appendGameplayEntities(
             continue;
         }
 
-        Vec4 color = tileColor(movable.type);
+        Vec4 color = tileTypeIsTurret(movable.type)
+            ? Vec4 { 1.0f, 1.0f, 1.0f, 1.0f }
+            : tileColor(movable.type);
         if (movable.type == TileType::Ice) {
             color.w = config::iceTintAlpha;
         }
@@ -739,6 +744,11 @@ void appendGameplayEntities(
             .affectsCameraFit = false,
             .model = input.manifest.modelForTile(movable.type),
             .renderableId = visual.target.id,
+            .modelRotationQuarterTurns =
+                rules::turretDirectionForTile(movable.type)
+                ? facingQuarterTurns(
+                      *rules::turretDirectionForTile(movable.type))
+                : 0U,
         };
         applyTileScale(
             movableTile,

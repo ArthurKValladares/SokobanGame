@@ -52,6 +52,9 @@ struct GameState {
         EntityId id = invalidEntityId;
         GridPosition3 cell {};
         bool fallen = false;
+        // Killed enemies leave gameplay without masquerading as water falls.
+        // They no longer block, support, attack, occlude, or render.
+        bool dead = false;
 
         bool operator==(const Enemy&) const = default;
     };
@@ -93,6 +96,7 @@ struct StepRates {
 [[nodiscard]] GridPosition3 movementTarget(GridPosition3 origin, MoveDirection direction);
 [[nodiscard]] std::optional<MoveDirection> conveyorDirectionForTile(TileType tile);
 [[nodiscard]] std::optional<MoveDirection> conveyorDirectionAt(const Level& level, GridPosition3 position);
+[[nodiscard]] std::optional<MoveDirection> turretDirectionForTile(TileType tile);
 
 // A cell entities may occupy, ignoring movables. The plane directly above the
 // top layer (z == depth) is intentionally allowed so entities can stand on

@@ -207,6 +207,10 @@
     {
       "name": "DecorationTexture_block_bits_texture",
       "path": "KayKit Block Bits 1.0/Assets/gltf/block_bits_texture.png"
+    },
+    {
+      "name": "Engineer",
+      "path": "KayKit Adventurers 2.0/Assets/gltf/engineer_texture.png"
     }
   ],
   "models": [
@@ -291,6 +295,16 @@
         "texture": "BoardGameBits"
       },
       "preserveSourceScale": true
+    },
+    {
+      "name": "Turret",
+      "path": "KayKit Adventurers 2.0/Assets/gltf/turret_base.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "Engineer"
+      },
+      "preserveAspectRatio": true,
+      "rotateHalfTurn": true
     },
     {
       "name": "Rogue",
@@ -619,6 +633,26 @@
       "tile": "Enemy",
       "model": "Barbarian",
       "scale": 1.100000023841858
+    },
+    {
+      "tile": "Turret North",
+      "model": "Turret",
+      "scale": 0.9
+    },
+    {
+      "tile": "Turret East",
+      "model": "Turret",
+      "scale": 0.9
+    },
+    {
+      "tile": "Turret South",
+      "model": "Turret",
+      "scale": 0.9
+    },
+    {
+      "tile": "Turret West",
+      "model": "Turret",
+      "scale": 0.9
     },
     {
       "tile": "Player",

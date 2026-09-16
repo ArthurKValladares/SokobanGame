@@ -252,11 +252,16 @@ Common tile symbols:
 | `E` | End | `I` | Ice |
 | `L` | Ladder | `W` | Legacy explicit water |
 | `^ v > <` | Conveyors | `1 2 3 4` | Mirror orientations |
-| `D` | Decorative block | | |
+| `D` | Decorative block | `N` | Enemy |
+| `n e s w` | Turrets facing north/east/south/west | | |
 
 Decorative blocks render but have no gameplay, support, occupancy, camera-fit,
 or water-grid-bound semantics. New water layouts should use `@water N`; `W`
 remains supported for older screens.
+
+Turrets are pushable movables. A turret shoots a player or enemy whenever that
+unit moves into its cardinal line of sight; walls, rocks, and other live units
+block the shot.
 
 Mesh decoration positions are world-space tile coordinates, rotations are XYZ
 Euler degrees, and scales must be positive. Their `model` names must exist in
