@@ -22,6 +22,8 @@ Packet 6's code changes were implemented on September 15, 2026. CQ-10 measures t
 
 Packet 7's code changes were implemented on September 15, 2026. CQ-11 removes the unreachable completion overlay and level/screen selector with their exclusive shell, input, options, metadata, formatting, build, and test code while preserving the active persistence and overworld completion flow. CQ-13 corrects the documented option, CI, persistence, and audio comments; restores nesting indentation in the mirror-preview builder; and replaces adjacent extraction history with present ownership descriptions. The application and affected active-flow suites build cleanly with warnings as errors.
 
+Packet 8's automated validation completed on September 15, 2026, at `d660728593f3a90125e61819a9c3b87b884cab05`. Debug and Release warnings-as-errors builds and both 80-test registries pass. A fresh Vulkan-disabled headless build passes all 72 registered tests. The shipping preset produces matching Runtime and Symbols ZIPs; the runtime package passes index/license/PDB checks and renders 240 frames from a fresh extraction. A separate 240-frame Debug run requires and activates Vulkan validation on the local NVIDIA GPU and exits without validation errors. Exact commands, hashes, diagnostic warnings, device details, and manual release-signoff limits are recorded in [the packet 8 evidence note](evidence/packet8-final-validation.md).
+
 ## Assessment
 
 The codebase has useful boundaries already: pure gameplay and menu logic, explicit persistence results, an SDK-independent core, shared GPU layouts, specialized rendering passes, and substantial regression coverage. The previous review's completed work should be retained.
@@ -267,6 +269,8 @@ The probe also found overflow in `MenuKit::formatDuration` for very large accept
 | 8 | Full supported validation matrix | Cross-cutting changes need final Debug/Release warning builds, full registry and relevant real-device checks. | New logs for the implemented revision, not this baseline |
 
 Each packet should leave a reviewable result with its focused regression and a clear acceptance outcome. Do not batch all changes into an Application/renderer rewrite. Use the repository's existing production libraries and test harness rather than compiling a second implementation into permanent tests. The standalone programs here are investigation tools; integrate the meaningful assertions into their owning suites during implementation.
+
+Packet 8 is complete for the automated repository matrix. Manual multi-machine, installer-lifecycle, input-device, and display-transition acceptance remains a release-signoff activity rather than evidence produced by this code-quality implementation pass.
 
 ## Refactoring and optimization decisions
 

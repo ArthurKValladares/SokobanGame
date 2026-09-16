@@ -41,8 +41,14 @@ registries pass in the warnings-as-errors configuration. Packets 6 and 7 are
 complete: options remain usable throughout the supported window range, failed
 slot selection cannot start a game against the previous slot, unreachable
 completion/selection menus and their plumbing are gone, and the review's local
-comment and indentation defects are corrected. Next is packet 8's final
-supported validation matrix.
+comment and indentation defects are corrected. Packet 8's automated final
+matrix is also complete: Debug and Release pass all 80 tests, a fresh
+Vulkan-disabled build passes all 72 headless tests, the shipping ZIP passes its
+fresh-extraction 240-frame gate, and a required-validation Debug run completes
+240 frames on the local NVIDIA GPU without validation errors. The remaining
+manual hardware, display, controller, signing, upgrade, and uninstall rows in
+`packaging/ReleaseValidation.md` are release-signoff work, not unfinished code
+review packets.
 Broader refactoring or efficiency work still requires a concrete maintenance
 problem or measurement.
 
