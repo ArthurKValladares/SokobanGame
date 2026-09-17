@@ -53,8 +53,12 @@ namespace plans {
 // use for them.
 struct TurretShotCue {
     rules::TurretShot shot;
-    // Zero-based world-step leg whose end is the impact moment.
+    // Zero-based world-step leg that caused the shot.
     std::size_t legIndex = 0;
+    // Presentation-only delivery state. A movement-triggered shot is held
+    // until its leg has visibly landed; an ambient volley can fire as soon as
+    // its action starts. Cues are transient and never enter save history.
+    bool emitted = false;
 
     bool operator==(const TurretShotCue&) const = default;
 };

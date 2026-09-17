@@ -1877,8 +1877,6 @@ private:
         // point of that mode. A model containing a double-sided material also
         // disables whole-draw culling; the fragment shaders then discard back
         // faces only for single-sided primitives in that mixed mesh.
-        const bool cullingAllowed = configuration_.modelBackfaceCulling &&
-            !configuration_.wireframeEnabled;
         // recordScenePass left the command buffer on CULL_MODE_NONE and
         // COUNTER_CLOCKWISE for the tile quads drawn above. Tile quads are
         // unaffected by either: they are CPU-culled and never cull on the GPU.
@@ -1897,18 +1895,26 @@ private:
                         : VK_FALSE);
                 mirrorGhostState = draw.mirrorGhost;
             }
-            const VkCullModeFlags desiredCullMode =
-                cullingAllowed && !draw.materialPolicy.hasDoubleSided
+            const ModelRasterPolicy rasterPolicy = modelRasterPolicy(
+                configuration_.modelBackfaceCulling,
+                configuration_.wireframeEnabled,
+                draw.materialPolicy);
+            const VkCullModeFlags desiredCullMode = rasterPolicy.cullBackFaces
                 ? VK_CULL_MODE_BACK_BIT
                 : VK_CULL_MODE_NONE;
             if (desiredCullMode != boundCullMode) {
                 vkCmdSetCullMode(commandBuffer, desiredCullMode);
                 boundCullMode = desiredCullMode;
             }
+            // Front-face classification is shader input even when culling is
+            // off. In particular, double-sided glTF materials reverse their
+            // normals on !gl_FrontFacing. Leaving the board's CCW state in
+            // place made such a model go dark whenever no cull-enabled model
+            // happened to precede it in the batch list.
             const VkFrontFace desiredFrontFace =
-                desiredCullMode == VK_CULL_MODE_NONE
-                ? boundFrontFace
-                : modelFrontFace;
+                rasterPolicy.clockwiseFrontFace
+                ? modelFrontFace
+                : VK_FRONT_FACE_COUNTER_CLOCKWISE;
             if (desiredFrontFace != boundFrontFace) {
                 vkCmdSetFrontFace(commandBuffer, desiredFrontFace);
                 boundFrontFace = desiredFrontFace;

@@ -107,6 +107,7 @@ ActionScheduler::tryStart(
         .plan = plan,
         .legs = std::move(legs),
         .turretShots = std::move(turretShots),
+        .mechanicalDurationSeconds = plan.durationSeconds,
         // Counts up to zero first. The action is admitted and holds its claims
         // from now, so nothing can take the cells out from under it, but it
         // does not run until its cause has finished.

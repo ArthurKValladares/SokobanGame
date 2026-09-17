@@ -24,6 +24,28 @@ struct ModelMaterialPolicy {
     bool hasDoubleSided = false;
 };
 
+// Dynamic raster state for a model draw in the scene pass. The negative-height
+// viewport turns glTF's counter-clockwise winding into clockwise winding.
+// Front-face classification therefore stays clockwise even when culling is
+// disabled: double-sided material shading still reads gl_FrontFacing to decide
+// whether to reverse the final normal.
+struct ModelRasterPolicy {
+    bool cullBackFaces = false;
+    bool clockwiseFrontFace = true;
+};
+
+[[nodiscard]] constexpr ModelRasterPolicy modelRasterPolicy(
+    bool backfaceCullingEnabled,
+    bool wireframeEnabled,
+    ModelMaterialPolicy material)
+{
+    return {
+        .cullBackFaces = backfaceCullingEnabled && !wireframeEnabled &&
+            !material.hasDoubleSided,
+        .clockwiseFrontFace = true,
+    };
+}
+
 [[nodiscard]] ModelMaterialPolicy modelMaterialPolicy(
     std::span<const MeshMaterial> materials);
 [[nodiscard]] bool materialSelected(

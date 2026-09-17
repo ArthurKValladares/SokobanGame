@@ -64,6 +64,10 @@ public:
         // One-shot presentation events captured while the transient legs were
         // planned. They are consumed only by the live action admission path.
         std::vector<plans::TurretShotCue> turretShots;
+        // Duration assigned by rules before presentation clips are installed.
+        // Reaction cues use this clock so a long death animation cannot move
+        // the firing point past the end of the movement that caused it.
+        float mechanicalDurationSeconds = 0.0f;
         // Negative while the action is deferred - it has been admitted and
         // holds its claims, but has not begun. Zero is the moment it starts.
         // Readers that want a sampling time clamp to [0, duration]; the raw

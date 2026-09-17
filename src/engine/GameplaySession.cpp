@@ -14,6 +14,61 @@
 namespace sokoban {
 namespace {
 
+bool anyEntityChangedCell(const GameState& before, const GameState& after)
+{
+    const std::size_t playerCount = std::min(
+        before.players.size(), after.players.size());
+    for (std::size_t i = 0; i < playerCount; ++i) {
+        if (!(before.players[i].cell == after.players[i].cell)) {
+            return true;
+        }
+    }
+
+    const std::size_t movableCount = std::min(
+        before.movables.size(), after.movables.size());
+    for (std::size_t i = 0; i < movableCount; ++i) {
+        if (!(before.movables[i].cell == after.movables[i].cell)) {
+            return true;
+        }
+    }
+
+    const std::size_t enemyCount = std::min(
+        before.enemies.size(), after.enemies.size());
+    for (std::size_t i = 0; i < enemyCount; ++i) {
+        if (!(before.enemies[i].cell == after.enemies[i].cell)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+float turretShotTriggerSeconds(
+    const ActionScheduler::InFlight& action,
+    const plans::TurretShotCue& cue)
+{
+    if (action.legs.empty() || cue.legIndex >= action.legs.size()) {
+        return 0.0f;
+    }
+
+    const GameState& beforeLeg = cue.legIndex == 0
+        ? action.plan.before
+        : action.legs[cue.legIndex - 1];
+    const GameState& afterLeg = action.legs[cue.legIndex];
+    if (!anyEntityChangedCell(beforeLeg, afterLeg)) {
+        // A stationary mutual volley is the action, rather than a reaction to
+        // its movement, so it begins at the start of this leg.
+        return action.mechanicalDurationSeconds *
+            static_cast<float>(cue.legIndex) /
+            static_cast<float>(action.legs.size());
+    }
+
+    // Rule resolution observes the destination state, but presentation must
+    // not reveal that reaction while the entity is still travelling there.
+    return action.mechanicalDurationSeconds *
+        static_cast<float>(cue.legIndex + 1) /
+        static_cast<float>(action.legs.size());
+}
+
 // movementDirection, anyPlayerMoved and firstPlayerMovementDirection now live
 // in plans:: alongside the planners that need them.
 
@@ -412,6 +467,46 @@ void GameplaySession::completeActiveAction()
     for (const ActionScheduler::InFlight& finished : scheduler_.commitFinished()) {
         recordCompletion(finished.plan, finished.causalGroup);
     }
+}
+
+std::vector<GameplaySession::TurretShotEvent>
+GameplaySession::takeReadyTurretShots()
+{
+    std::vector<TurretShotEvent> ready;
+    std::vector<std::size_t> actionIds;
+    actionIds.reserve(scheduler_.inFlight().size());
+    for (const ActionScheduler::InFlight& action : scheduler_.inFlight()) {
+        actionIds.push_back(action.id);
+    }
+
+    for (const std::size_t actionId : actionIds) {
+        ActionScheduler::InFlight* action = scheduler_.find(actionId);
+        if (action == nullptr || action->elapsedSeconds < 0.0f) {
+            continue;
+        }
+        for (plans::TurretShotCue& cue : action->turretShots) {
+            if (cue.emitted) {
+                continue;
+            }
+            const float triggerSeconds = turretShotTriggerSeconds(*action, cue);
+            if (action->elapsedSeconds < triggerSeconds) {
+                continue;
+            }
+            cue.emitted = true;
+            // Stationary volleys retain the old wind-up to the end of their
+            // leg. A reaction released at a movement boundary begins now.
+            const float legEndSeconds = action->mechanicalDurationSeconds *
+                static_cast<float>(cue.legIndex + 1) /
+                static_cast<float>(std::max<std::size_t>(action->legs.size(), 1));
+            ready.push_back({
+                .shot = cue.shot,
+                .impactDelaySeconds = std::max(
+                    legEndSeconds - action->elapsedSeconds,
+                    0.0f),
+            });
+        }
+    }
+    return ready;
 }
 
 const GameState& GameplaySession::undoBaseState() const

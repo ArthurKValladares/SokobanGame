@@ -249,6 +249,25 @@ void testModelMaterialPolicyFindsEveryRequiredDrawProperty()
     CHECK(mixed.hasDoubleSided);
 }
 
+void testDoubleSidedModelsKeepClockwiseFrontFaceWithoutCulling()
+{
+    TEST("doubleSidedModelsKeepClockwiseFrontFaceWithoutCulling");
+    const ModelMaterialPolicy doubleSided {
+        .hasDoubleSided = true,
+    };
+    const ModelRasterPolicy raster = modelRasterPolicy(
+        true, false, doubleSided);
+
+    CHECK(!raster.cullBackFaces);
+    CHECK(raster.clockwiseFrontFace);
+
+    // Disabling culling globally or through wireframe must not also change
+    // gl_FrontFacing. Double-sided fragment shading still uses that value to
+    // decide whether its final normal represents a back face.
+    CHECK(modelRasterPolicy(false, false, {}).clockwiseFrontFace);
+    CHECK(modelRasterPolicy(true, true, {}).clockwiseFrontFace);
+}
+
 void testMaterialSelectionSplitsMixedMeshesAcrossExistingPasses()
 {
     TEST("materialSelectionSplitsMixedMeshesAcrossExistingPasses");
@@ -348,6 +367,7 @@ int main()
     testOcclusionStrengthIsClampedToTheAuthoredRange();
     testMaterialAndScreenSpaceOcclusionComposeOnAmbientOnly();
     testModelMaterialPolicyFindsEveryRequiredDrawProperty();
+    testDoubleSidedModelsKeepClockwiseFrontFaceWithoutCulling();
     testMaterialSelectionSplitsMixedMeshesAcrossExistingPasses();
     testOpaqueBaseColorIgnoresAuthoredAlpha();
     testMaskUsesCombinedAuthoredAlphaAndKeepsInstanceOpacity();

@@ -458,9 +458,9 @@ void testMirrorDuplicationRequiresEveryPlayerOnAnEnd()
     CHECK(!complete.stateCommitted);
 }
 
-void testTurretShotCueIsEmittedWhenTheFiringActionStarts()
+void testTurretShotCueWaitsForMovementToFinish()
 {
-    TEST("turretShotCueIsEmittedWhenTheFiringActionStarts");
+    TEST("turretShotCueWaitsForMovementToFinish");
     const Level level = makeLevel({
         { "...." },
         { "e  C" },
@@ -471,21 +471,59 @@ void testTurretShotCueIsEmittedWhenTheFiringActionStarts()
     GameplayPresentation presentation;
     presentation.resetEntities(session.state());
 
-    const GameplayLoop::UpdateResult result = GameplayLoop::update(
+    const GameplayLoop::UpdateResult moving = GameplayLoop::update(
         level,
         session,
         presentation,
         { .left = { .pressed = true, .down = true } },
         0.01f,
         false);
+    CHECK(moving.turretShots.empty());
+    CHECK(session.moving());
 
-    CHECK(result.turretShots.size() == 1);
-    if (!result.turretShots.empty()) {
+    const GameplayLoop::UpdateResult landed = GameplayLoop::update(
+        level, session, presentation, {}, 0.24f, false);
+
+    CHECK(landed.turretShots.size() == 1);
+    if (!landed.turretShots.empty()) {
         const GridPosition3 expectedTarget { 2, 0, 1 };
-        CHECK(result.turretShots[0].shot.target.kind == EntityKind::Player);
-        CHECK(result.turretShots[0].shot.targetCell == expectedTarget);
-        CHECK(result.turretShots[0].impactDelaySeconds > 0.0f);
+        CHECK(landed.turretShots[0].shot.target.kind == EntityKind::Player);
+        CHECK(landed.turretShots[0].shot.targetCell == expectedTarget);
+        CHECK(landed.turretShots[0].impactDelaySeconds == 0.0f);
     }
+}
+
+void testPushedTurretWaitsUntilItLandsBeforeVolleyStarts()
+{
+    TEST("pushedTurretWaitsUntilItLandsBeforeVolleyStarts");
+    const Level level = makeLevel({
+        { ".....", ".....", "....." },
+        { "e    ", "  n  ", "  C  " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.25f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+
+    const GameplayLoop::UpdateResult moving = GameplayLoop::update(
+        level,
+        session,
+        presentation,
+        { .up = { .pressed = true, .down = true } },
+        0.01f,
+        false);
+    const GridPosition3 start { 2, 1, 1 };
+    CHECK(moving.turretShots.empty());
+    CHECK(session.state().movables[1].cell == start);
+    CHECK(!session.state().movables[1].dead);
+
+    const GameplayLoop::UpdateResult landed = GameplayLoop::update(
+        level, session, presentation, {}, 0.24f, false);
+    const GridPosition3 destination { 2, 0, 1 };
+    CHECK(landed.turretShots.size() == 1);
+    CHECK(session.state().movables[1].cell == destination);
+    CHECK(session.state().movables[1].dead);
 }
 
 void testFacingTurretsStartAnAmbientMutualVolley()
@@ -536,7 +574,8 @@ int main()
     testRejectedMirrorInputDoesNotEmitActivation();
     testSolvedScreenAndDraftOutcomesDiffer();
     testMirrorDuplicationRequiresEveryPlayerOnAnEnd();
-    testTurretShotCueIsEmittedWhenTheFiringActionStarts();
+    testTurretShotCueWaitsForMovementToFinish();
+    testPushedTurretWaitsUntilItLandsBeforeVolleyStarts();
     testFacingTurretsStartAnAmbientMutualVolley();
 
     if (failures == 0) {

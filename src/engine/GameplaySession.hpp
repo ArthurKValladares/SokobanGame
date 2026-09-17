@@ -58,6 +58,15 @@ public:
     void advanceActiveAction(float dt);
     void completeActiveAction();
 
+    struct TurretShotEvent {
+        rules::TurretShot shot;
+        float impactDelaySeconds = 0.0f;
+    };
+    // Takes presentation events whose trigger point has been reached. Shots
+    // caused by movement become ready only after that movement leg has
+    // finished; stationary volleys remain ready at action start.
+    [[nodiscard]] std::vector<TurretShotEvent> takeReadyTurretShots();
+
     [[nodiscard]] const GameState& state() const { return scheduler_.state(); }
     [[nodiscard]] bool moving() const { return !scheduler_.idle(); }
     // The world as it will stand once everything in flight has committed.

@@ -102,9 +102,7 @@ std::size_t highestInFlightId(const GameplaySession& session)
 void startNewPresentations(
     GameplaySession& session,
     GameplayPresentation& presentation,
-    std::size_t& watermark,
-    std::vector<GameplayLoop::UpdateResult::TurretShotPresentation>&
-        turretShots)
+    std::size_t& watermark)
 {
     std::vector<std::size_t> fresh;
     for (const ActionScheduler::InFlight& action : session.inFlight()) {
@@ -117,20 +115,19 @@ void startNewPresentations(
     for (const std::size_t id : fresh) {
         watermark = std::max(watermark, id);
         startPresentation(session, presentation, id);
-        const ActionScheduler::InFlight* started = session.findInFlight(id);
-        if (started == nullptr) {
-            continue;
-        }
-        for (const plans::TurretShotCue& cue : started->turretShots) {
-            const float impactAt = static_cast<float>(cue.legIndex + 1) *
-                session.stepDurationSeconds();
-            turretShots.push_back({
-                .shot = cue.shot,
-                .impactDelaySeconds = std::max(
-                    impactAt - started->elapsedSeconds,
-                    0.0f),
-            });
-        }
+    }
+}
+
+void appendReadyTurretShots(
+    GameplaySession& session,
+    std::vector<GameplayLoop::UpdateResult::TurretShotPresentation>& into)
+{
+    for (GameplaySession::TurretShotEvent& event :
+         session.takeReadyTurretShots()) {
+        into.push_back({
+            .shot = std::move(event.shot),
+            .impactDelaySeconds = event.impactDelaySeconds,
+        });
     }
 }
 
@@ -214,9 +211,9 @@ GameplayLoop::UpdateResult GameplayLoop::update(
             startNewPresentations(
                 session,
                 presentation,
-                presentedThrough,
-                result.turretShots);
+                presentedThrough);
         }
+        appendReadyTurretShots(session, result.turretShots);
         if (!session.moving()) {
             return result;
         }
@@ -230,6 +227,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
                 shot.impactDelaySeconds - step,
                 0.0f);
         }
+        appendReadyTurretShots(session, result.turretShots);
         seekAllInFlight(session, presentation);
         if (!session.anyActionComplete()) {
             continue;
