@@ -488,6 +488,37 @@ void testTurretShotCueIsEmittedWhenTheFiringActionStarts()
     }
 }
 
+void testFacingTurretsStartAnAmbientMutualVolley()
+{
+    TEST("facingTurretsStartAnAmbientMutualVolley");
+    const Level level = makeLevel({
+        { ".....", "....." },
+        { "e   w", "  C  " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.25f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+
+    const GameplayLoop::UpdateResult fired = GameplayLoop::update(
+        level, session, presentation, {}, 0.01f, false);
+    CHECK(session.moving());
+    CHECK(!session.state().movables[0].dead);
+    CHECK(!session.state().movables[1].dead);
+    CHECK(fired.turretShots.size() == 2);
+    for (const auto& shot : fired.turretShots) {
+        CHECK(shot.shot.target.kind == EntityKind::Movable);
+        CHECK(shot.impactDelaySeconds > 0.0f);
+    }
+
+    static_cast<void>(GameplayLoop::update(
+        level, session, presentation, {}, 0.24f, false));
+    CHECK(!session.moving());
+    CHECK(session.state().movables[0].dead);
+    CHECK(session.state().movables[1].dead);
+}
+
 } // namespace
 
 int main()
@@ -506,6 +537,7 @@ int main()
     testSolvedScreenAndDraftOutcomesDiffer();
     testMirrorDuplicationRequiresEveryPlayerOnAnEnd();
     testTurretShotCueIsEmittedWhenTheFiringActionStarts();
+    testFacingTurretsStartAnAmbientMutualVolley();
 
     if (failures == 0) {
         std::cout << "GameplayLoopTests: " << checks << " checks passed\n";

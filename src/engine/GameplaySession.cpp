@@ -624,6 +624,26 @@ std::vector<EntityId> GameplaySession::withoutEntitiesInFlight(
 GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
     const Level& level)
 {
+    if (std::optional<plans::PlannedAction> volley = plans::planTurretVolley(
+            level,
+            state(),
+            withoutEntitiesInFlight(
+                rules::mutuallyFacingTurrets(level, state())),
+            stepRates_,
+            stepDurationSeconds_)) {
+        volley->action.playerMoveCountBefore = playerMoveCount_;
+        volley->action.playerMoveCountAfter = playerMoveCount_;
+        if (!actionAdmissionAllows(volley->action)) {
+            return StartOutcome::Impossible;
+        }
+        return beginAction(
+                   volley->action,
+                   std::move(volley->legs),
+                   std::move(volley->turretShots))
+            ? StartOutcome::Started
+            : StartOutcome::Refused;
+    }
+
     // Momentum before belts, matching the order the rules resolve intents in:
     // a slide overrides the belt under it, and an entity only becomes a rider
     // once it has stopped.
@@ -812,7 +832,11 @@ void GameplaySession::setActionPresentation(
         return;
     }
     action->plan.presentation = std::move(presentation);
-    if (!action->plan.presentation.empty()) {
+    // Initial/rest animation tracks can make a timeline structurally non-empty
+    // without giving it any playback time. Keep the mechanic's planned duration
+    // in that case; otherwise state-only actions (such as a turret volley) would
+    // commit immediately and their delayed effects would outlive the action.
+    if (action->plan.presentation.durationSeconds > 0.0f) {
         action->plan.durationSeconds =
             action->plan.presentation.durationSeconds;
         action->elapsedSeconds =

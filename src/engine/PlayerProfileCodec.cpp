@@ -308,7 +308,10 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         const std::string movableContext =
             std::string(context) + ".movables[" + std::to_string(i) + "]";
         const Json& item = movables[i];
-        rejectUnknownProperties(item, { "id", "type", "cell", "fallen", "sliding" }, movableContext);
+        rejectUnknownProperties(
+            item,
+            { "id", "type", "cell", "fallen", "dead", "sliding" },
+            movableContext);
         GameState::Movable movable;
         movable.id = unsignedIntegerProperty(item, "id", movableContext);
         movable.type = tileTypeFromName(
@@ -318,6 +321,11 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
             requiredProperty(item, "cell", movableContext),
             movableContext + ".cell");
         movable.fallen = boolProperty(item, "fallen", movableContext);
+        // `dead` was added when turrets became destructible. Older profiles
+        // predate that state and therefore load every movable alive.
+        movable.dead = item.contains("dead")
+            ? boolProperty(item, "dead", movableContext)
+            : false;
         movable.sliding = directionFromJson(
             requiredProperty(item, "sliding", movableContext),
             movableContext + ".sliding");
@@ -368,6 +376,7 @@ OrderedJson gameStateToJson(const GameState& state)
             { "type", tileTypeName(movable.type) },
             { "cell", positionToJson(movable.cell) },
             { "fallen", movable.fallen },
+            { "dead", movable.dead },
             { "sliding", movable.sliding
                 ? OrderedJson(directionName(*movable.sliding))
                 : OrderedJson(nullptr) },

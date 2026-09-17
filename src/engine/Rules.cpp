@@ -53,7 +53,9 @@ bool isIceFloor(const Level& level, const GameState& state, GridPosition3 positi
 bool movableBlocksAt(const GameState& state, GridPosition3 position, size_t ignoreIndex)
 {
     for (size_t i = 0; i < state.movables.size(); ++i) {
-        if (i != ignoreIndex && !state.movables[i].fallen && state.movables[i].cell == position) {
+        if (i != ignoreIndex && !state.movables[i].fallen &&
+            !state.movables[i].dead &&
+            state.movables[i].cell == position) {
             return true;
         }
     }
@@ -177,7 +179,8 @@ FallResult movableFallTarget(const Level& level, const GameState& state, size_t 
 {
     return fallTarget(level, state, position, [&](GridPosition3 below) {
         for (size_t i = 0; i < state.movables.size(); ++i) {
-            if (i != movableIndex && state.movables[i].cell == below) {
+            if (i != movableIndex && !state.movables[i].dead &&
+                state.movables[i].cell == below) {
                 return true;
             }
         }
@@ -405,7 +408,8 @@ bool staticCellAllowsEntity(const Level& level, GridPosition3 position)
 const GameState::Movable* movableAt(const GameState& state, GridPosition3 position)
 {
     const auto movable = std::ranges::find_if(state.movables, [position](const GameState::Movable& candidate) {
-        return !candidate.fallen && candidate.cell == position;
+        return !candidate.fallen && !candidate.dead &&
+            candidate.cell == position;
     });
 
     return movable != state.movables.end() ? &*movable : nullptr;
@@ -414,7 +418,8 @@ const GameState::Movable* movableAt(const GameState& state, GridPosition3 positi
 const GameState::Movable* fallenMovableAt(const GameState& state, GridPosition3 position)
 {
     const auto movable = std::ranges::find_if(state.movables, [position](const GameState::Movable& candidate) {
-        return candidate.fallen && candidate.cell == position;
+        return candidate.fallen && !candidate.dead &&
+            candidate.cell == position;
     });
 
     return movable != state.movables.end() ? &*movable : nullptr;
@@ -473,8 +478,93 @@ bool isAtUnlockedEnd(const Level& level, const GameState& state)
         }();
 }
 
+namespace {
+
+bool turretHasLineOfSight(
+    const Level& level,
+    const GameState& state,
+    GridPosition3 turret,
+    MoveDirection direction,
+    GridPosition3 target)
+{
+    if (turret.z != target.z) {
+        return false;
+    }
+    const GridPosition ray = directionOffset(direction);
+    const int dx = target.x - turret.x;
+    const int dy = target.y - turret.y;
+    int distance = 0;
+    if (ray.x != 0 && dy == 0 && dx * ray.x > 0) {
+        distance = std::abs(dx);
+    } else if (ray.y != 0 && dx == 0 && dy * ray.y > 0) {
+        distance = std::abs(dy);
+    } else {
+        return false;
+    }
+
+    for (int step = 1; step < distance; ++step) {
+        const GridPosition3 cell {
+            turret.x + ray.x * step,
+            turret.y + ray.y * step,
+            turret.z,
+        };
+        if (!staticCellAllowsEntity(level, cell) ||
+            movableAt(state, cell) != nullptr ||
+            playerBlocksAt(state, cell) ||
+            enemyAt(state, cell) != nullptr) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+std::vector<EntityId> mutuallyFacingTurrets(
+    const Level& level,
+    const GameState& state)
+{
+    std::vector<EntityId> participants;
+    for (std::size_t first = 0; first < state.movables.size(); ++first) {
+        const GameState::Movable& a = state.movables[first];
+        const std::optional<MoveDirection> aDirection =
+            turretDirectionForTile(a.type);
+        if (a.dead || a.fallen || !aDirection) {
+            continue;
+        }
+        for (std::size_t second = first + 1;
+             second < state.movables.size();
+             ++second) {
+            const GameState::Movable& b = state.movables[second];
+            const std::optional<MoveDirection> bDirection =
+                turretDirectionForTile(b.type);
+            if (b.dead || b.fallen || !bDirection ||
+                !turretHasLineOfSight(
+                    level, state, a.cell, *aDirection, b.cell) ||
+                !turretHasLineOfSight(
+                    level, state, b.cell, *bDirection, a.cell)) {
+                continue;
+            }
+            const EntityId aId = resolvedEntityId(
+                EntityKind::Movable, a.id, first);
+            const EntityId bId = resolvedEntityId(
+                EntityKind::Movable, b.id, second);
+            if (std::ranges::find(participants, aId) == participants.end()) {
+                participants.push_back(aId);
+            }
+            if (std::ranges::find(participants, bId) == participants.end()) {
+                participants.push_back(bId);
+            }
+        }
+    }
+    return participants;
+}
+
 bool hasPendingMotion(const Level& level, const GameState& state)
 {
+    if (!mutuallyFacingTurrets(level, state).empty()) {
+        return true;
+    }
     for (std::size_t i = 0; i < state.players.size(); ++i) {
         if (!playerDead(state, i) &&
             (playerSliding(state, i) ||
@@ -484,7 +574,7 @@ bool hasPendingMotion(const Level& level, const GameState& state)
     }
 
     return std::ranges::any_of(state.movables, [&](const GameState::Movable& movable) {
-        return !movable.fallen &&
+        return !movable.fallen && !movable.dead &&
             (movable.sliding || conveyorDirectionAt(level, movable.cell).has_value());
     });
 }
@@ -560,6 +650,7 @@ bool entityBlocksSight(
     }
     for (std::size_t i = 0; i < state.movables.size(); ++i) {
         if (i != ignoredEntity && !state.movables[i].fallen &&
+            !state.movables[i].dead &&
             state.movables[i].cell == cell) {
             return true;
         }
@@ -745,7 +836,7 @@ bool liveCellsAreUnique(const GameState& state)
         occupied.push_back(playerCell(state, i));
     }
     for (const GameState::Movable& movable : state.movables) {
-        if (movable.fallen) {
+        if (movable.fallen || movable.dead) {
             continue;
         }
         if (std::ranges::find(occupied, movable.cell) != occupied.end()) {
@@ -840,7 +931,7 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
     }
 
     for (std::size_t i = 0; i < state.movables.size(); ++i) {
-        if (state.movables[i].fallen) {
+        if (state.movables[i].fallen || state.movables[i].dead) {
             continue;
         }
         const std::optional<std::vector<ReflectedPath>> reflectedPaths =
@@ -979,10 +1070,18 @@ public:
         for (std::size_t i = 0; i < playerCount_; ++i) {
             status_[entityIndexForPlayer(i)].done = playerDead(after_, i);
         }
+        for (std::size_t i = 0; i < movableCount_; ++i) {
+            status_[i].done = after_.movables[i].fallen ||
+                after_.movables[i].dead;
+        }
     }
 
     void run()
     {
+        // A mutual face-off is itself an event; it does not need some unrelated
+        // actor to move before both turrets fire.
+        resolveTurretShots();
+        markDeadEntitiesDone();
         bool anyMovement = true;
         while (anyMovement) {
             deriveIntents();
@@ -992,11 +1091,7 @@ public:
             if (anyMovement) {
                 resolveTurretShots();
                 resolveAttacks();
-                for (std::size_t i = 0; i < playerCount_; ++i) {
-                    if (playerDead(after_, i)) {
-                        status_[entityIndexForPlayer(i)].done = true;
-                    }
-                }
+                markDeadEntitiesDone();
             }
         }
     }
@@ -1121,7 +1216,7 @@ private:
                     }
                 }
             } else {
-                if (after_.movables[i].fallen) {
+                if (after_.movables[i].fallen || after_.movables[i].dead) {
                     continue;
                 }
                 if (after_.movables[i].sliding) {
@@ -1359,50 +1454,16 @@ private:
         return true;
     }
 
-    [[nodiscard]] bool turretSees(
-        GridPosition3 turret,
-        MoveDirection direction,
-        GridPosition3 target) const
-    {
-        if (turret.z != target.z) {
-            return false;
-        }
-        const GridPosition ray = directionOffset(direction);
-        const int dx = target.x - turret.x;
-        const int dy = target.y - turret.y;
-        int distance = 0;
-        if (ray.x != 0 && dy == 0 && dx * ray.x > 0) {
-            distance = std::abs(dx);
-        } else if (ray.y != 0 && dx == 0 && dy * ray.y > 0) {
-            distance = std::abs(dy);
-        } else {
-            return false;
-        }
-
-        for (int step = 1; step < distance; ++step) {
-            const GridPosition3 cell {
-                turret.x + ray.x * step,
-                turret.y + ray.y * step,
-                turret.z,
-            };
-            if (!staticCellAllowsEntity(level_, cell) ||
-                movableAt(after_, cell) != nullptr ||
-                playerBlocksAt(after_, cell) ||
-                enemyAt(after_, cell) != nullptr) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    // A turret reacts to movement, not mere occupancy. Every live entity is
-    // still an occluder, so a rock between the turret and a moving actor keeps
-    // that actor safe. Kills are collected before they are applied to make a
-    // volley observe one consistent board rather than letting the first death
-    // open a ray for the next turret.
+    // A turret normally reacts to movement, while two turrets aimed directly
+    // at one another form an ambient volley without waiting for another actor.
+    // Every live entity is still an occluder, so a rock between a turret and a
+    // target keeps that target safe. Kills are collected before they are
+    // applied to make a volley observe one consistent board rather than
+    // letting the first death open a ray for the next turret.
     void resolveTurretShots()
     {
         std::vector<char> killedPlayers(playerCount_, 0);
+        std::vector<char> killedMovables(movableCount_, 0);
         std::vector<char> killedEnemies(after_.enemies.size(), 0);
         for (std::size_t turretIndex = 0;
              turretIndex < after_.movables.size();
@@ -1410,8 +1471,62 @@ private:
             const GameState::Movable& turret = after_.movables[turretIndex];
             const std::optional<MoveDirection> direction =
                 turretDirectionForTile(turret.type);
-            if (turret.fallen || !direction) {
+            if (turret.fallen || turret.dead || !direction) {
                 continue;
+            }
+            for (std::size_t targetIndex = 0;
+                 targetIndex < movableCount_;
+                 ++targetIndex) {
+                if (targetIndex == turretIndex) {
+                    continue;
+                }
+                const GameState::Movable& target =
+                    after_.movables[targetIndex];
+                const std::optional<MoveDirection> targetDirection =
+                    turretDirectionForTile(target.type);
+                if (target.fallen || target.dead || !targetDirection ||
+                    !turretHasLineOfSight(
+                        level_,
+                        after_,
+                        turret.cell,
+                        *direction,
+                        target.cell)) {
+                    continue;
+                }
+                const bool faceEachOther = turretHasLineOfSight(
+                    level_,
+                    after_,
+                    target.cell,
+                    *targetDirection,
+                    turret.cell);
+                if (!status_[targetIndex].movedThisMicro &&
+                    !(faceEachOther &&
+                        (status_[turretIndex].active ||
+                            status_[targetIndex].active))) {
+                    continue;
+                }
+                killedMovables[targetIndex] = true;
+                if (turretShots_ != nullptr) {
+                    turretShots_->push_back({
+                        .turret = {
+                            EntityKind::Movable,
+                            resolvedEntityId(
+                                EntityKind::Movable,
+                                turret.id,
+                                turretIndex),
+                        },
+                        .target = {
+                            EntityKind::Movable,
+                            resolvedEntityId(
+                                EntityKind::Movable,
+                                target.id,
+                                targetIndex),
+                        },
+                        .turretCell = turret.cell,
+                        .targetCell = target.cell,
+                        .direction = *direction,
+                    });
+                }
             }
             for (std::size_t playerIndex = 0;
                  playerIndex < playerCount_;
@@ -1421,7 +1536,8 @@ private:
                 const GameState::Player& player =
                     after_.players[playerIndex];
                 if (!player.dead && status_[entityIndex].movedThisMicro &&
-                    turretSees(turret.cell, *direction, player.cell)) {
+                    turretHasLineOfSight(
+                        level_, after_, turret.cell, *direction, player.cell)) {
                     killedPlayers[playerIndex] = true;
                     if (turretShots_ != nullptr) {
                         turretShots_->push_back({
@@ -1452,7 +1568,8 @@ private:
                 const GameState::Enemy& enemy = after_.enemies[enemyIndex];
                 if (!enemy.dead && !enemy.fallen &&
                     enemyMovedThisMicro_[enemyIndex] &&
-                    turretSees(turret.cell, *direction, enemy.cell)) {
+                    turretHasLineOfSight(
+                        level_, after_, turret.cell, *direction, enemy.cell)) {
                     killedEnemies[enemyIndex] = true;
                     if (turretShots_ != nullptr) {
                         turretShots_->push_back({
@@ -1495,6 +1612,30 @@ private:
              ++enemyIndex) {
             if (killedEnemies[enemyIndex]) {
                 after_.enemies[enemyIndex].dead = true;
+            }
+        }
+        for (std::size_t movableIndex = 0;
+             movableIndex < movableCount_;
+             ++movableIndex) {
+            if (!killedMovables[movableIndex]) {
+                continue;
+            }
+            GameState::Movable& movable = after_.movables[movableIndex];
+            movable.dead = true;
+            movable.sliding.reset();
+        }
+    }
+
+    void markDeadEntitiesDone()
+    {
+        for (std::size_t i = 0; i < movableCount_; ++i) {
+            if (after_.movables[i].dead) {
+                status_[i].done = true;
+            }
+        }
+        for (std::size_t i = 0; i < playerCount_; ++i) {
+            if (playerDead(after_, i)) {
+                status_[entityIndexForPlayer(i)].done = true;
             }
         }
     }
@@ -1613,8 +1754,9 @@ private:
     // Enemies never act on their own, so they need no Status - only whether
     // this step has shoved them, which is what decides who they may kill.
     std::vector<char> enemyMoved_;
-    // Unlike the attack closure above, turret triggers are edge events: only
-    // motion in the current micro-step counts.
+    // Unlike the attack closure above, ordinary turret triggers are edge
+    // events: only motion in the current micro-step counts. Mutual turret
+    // volleys are the deliberate exception resolved before movement begins.
     std::vector<char> enemyMovedThisMicro_;
     std::vector<TurretShot>* turretShots_ = nullptr;
 };

@@ -713,6 +713,13 @@ void appendGameplayEntities(
             movableIndex < input.projectedState.movables.size() &&
             movable.fallen &&
             !input.projectedState.movables[movableIndex].fallen;
+        const bool reviving =
+            input.moving && movable.dead &&
+            movableIndex < input.projectedState.movables.size() &&
+            !input.projectedState.movables[movableIndex].dead;
+        if (movable.dead && !reviving) {
+            continue;
+        }
         if (movable.fallen && !visual.moving && !movingOutOfWater) {
             continue;
         }

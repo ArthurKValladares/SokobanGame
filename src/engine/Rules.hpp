@@ -43,6 +43,9 @@ struct GameState {
         TileType type = TileType::Rock;
         GridPosition3 cell {};
         bool fallen = false;
+        // Destroyed turrets stay in the indexed state for stable identity and
+        // undo/save deltas, but no longer block, move, fire, or render.
+        bool dead = false;
         std::optional<MoveDirection> sliding;
 
         bool operator==(const Movable&) const = default;
@@ -119,6 +122,12 @@ struct StepResult {
 [[nodiscard]] std::optional<MoveDirection> conveyorDirectionAt(const Level& level, GridPosition3 position);
 [[nodiscard]] std::optional<MoveDirection> turretDirectionForTile(TileType tile);
 
+// Live turret ids participating in at least one unobstructed pair where both
+// barrels face the other turret. These pairs fire without requiring movement.
+[[nodiscard]] std::vector<EntityId> mutuallyFacingTurrets(
+    const Level& level,
+    const GameState& state);
+
 // A cell entities may occupy, ignoring movables. The plane directly above the
 // top layer (z == depth) is intentionally allowed so entities can stand on
 // top-layer blocks.
@@ -136,8 +145,8 @@ struct StepResult {
 [[nodiscard]] bool isEndUnlocked(const Level& level, const GameState& state);
 [[nodiscard]] bool isAtUnlockedEnd(const Level& level, const GameState& state);
 
-// True when the world would keep moving without player input: any surviving
-// entity has slide momentum or stands on a conveyor.
+// True when the world has an automatic action to resolve: a mutual turret
+// volley, slide momentum, or a surviving entity standing on a conveyor.
 [[nodiscard]] bool hasPendingMotion(const Level& level, const GameState& state);
 
 struct MirrorBeamSegment {

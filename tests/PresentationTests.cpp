@@ -1330,6 +1330,25 @@ void testTurretMovablesUseTheirModelAndOrientation()
         // North fires toward -Y, so recoil moves the model toward +Y.
         CHECK(recoiling->position.y > 0.0f);
     }
+
+    GameState destroyed = state;
+    destroyed.movables[0].dead = true;
+    presentation.resetEntities(destroyed);
+    const RenderFrameData destroyedFrame =
+        RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(),
+            .level = level,
+            .state = destroyed,
+            .moving = false,
+            .projectedState = {},
+            .presentation = presentation,
+            .settings = PresentationSettings {},
+        });
+    CHECK(std::ranges::none_of(
+        destroyedFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.renderableId == destroyed.movables[0].id;
+        }));
 }
 
 void testMirrorActivationBuildsBeamAndDestinationGhost()

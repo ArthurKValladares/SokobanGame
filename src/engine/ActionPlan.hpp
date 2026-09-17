@@ -168,8 +168,18 @@ inline constexpr int maxChainedSteps = 512;
     const rules::StepRates& rates,
     float stepDurationSeconds);
 
+// Resolves one stationary volley for turrets that have unobstructed, mutual
+// line of sight. This is an ambient action so it gets ordinary presentation,
+// history, save replay, and undo behavior.
+[[nodiscard]] std::optional<PlannedAction> planTurretVolley(
+    const Level& level,
+    const GameState& state,
+    std::vector<EntityId> turrets,
+    const rules::StepRates& rates,
+    float stepDurationSeconds);
+
 // Entities carrying slide momentum, and entities standing on a belt. What the
-// session needs in order to know which ambient actions to plan; the split
+// session needs in order to know which motion actions to plan; the split
 // between them matters because only the first may be chained.
 [[nodiscard]] std::vector<EntityId> slidingEntities(const GameState& state);
 [[nodiscard]] std::vector<EntityId> conveyorRiders(

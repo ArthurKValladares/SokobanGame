@@ -99,7 +99,7 @@ void addChanged(
         }
     }
     for (std::size_t i = 0; i < state.movables.size(); ++i) {
-        if (state.movables[i].sliding &&
+        if (!state.movables[i].dead && state.movables[i].sliding &&
             std::ranges::find(
                 closure,
                 resolvedEntityId(EntityKind::Movable, state.movables[i].id, i)) !=
@@ -251,7 +251,7 @@ bool anySlideMomentum(const GameState& state)
         }
     }
     for (const GameState::Movable& movable : state.movables) {
-        if (movable.sliding.has_value()) {
+        if (!movable.dead && movable.sliding.has_value()) {
             return true;
         }
     }
@@ -374,6 +374,27 @@ std::optional<PlannedAction> planConveyorRides(
         false);
 }
 
+std::optional<PlannedAction> planTurretVolley(
+    const Level& level,
+    const GameState& state,
+    std::vector<EntityId> turrets,
+    const rules::StepRates& rates,
+    float stepDurationSeconds)
+{
+    std::erase(turrets, invalidEntityId);
+    if (turrets.empty()) {
+        return std::nullopt;
+    }
+    return planScoped(
+        level,
+        state,
+        std::nullopt,
+        rates,
+        stepDurationSeconds,
+        rules::StepScope { .actors = std::move(turrets) },
+        false);
+}
+
 std::vector<EntityId> slidingEntities(const GameState& state)
 {
     std::vector<EntityId> ids;
@@ -384,7 +405,8 @@ std::vector<EntityId> slidingEntities(const GameState& state)
         }
     }
     for (std::size_t i = 0; i < state.movables.size(); ++i) {
-        if (!state.movables[i].fallen && state.movables[i].sliding) {
+        if (!state.movables[i].fallen && !state.movables[i].dead &&
+            state.movables[i].sliding) {
             ids.push_back(
                 resolvedEntityId(EntityKind::Movable, state.movables[i].id, i));
         }
@@ -407,7 +429,7 @@ std::vector<EntityId> conveyorRiders(
     }
     for (std::size_t i = 0; i < state.movables.size(); ++i) {
         const GameState::Movable& movable = state.movables[i];
-        if (!movable.fallen && !movable.sliding &&
+        if (!movable.fallen && !movable.dead && !movable.sliding &&
             rules::conveyorDirectionAt(level, movable.cell)) {
             ids.push_back(
                 resolvedEntityId(EntityKind::Movable, movable.id, i));

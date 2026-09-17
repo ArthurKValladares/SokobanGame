@@ -1078,6 +1078,68 @@ void testTurretKillsAnEnemyMovedIntoLineOfSight()
     CHECK(rules::enemyAt(shot, cell(4, 1, 1)) == nullptr);
 }
 
+void testTurretKillsAnotherTurretMovedIntoLineOfSight()
+{
+    TEST("turretKillsAnotherTurretMovedIntoLineOfSight");
+    const Level level = makeLevel({
+        { ".....", ".....", "....." },
+        { "e    ", "  n  ", "  C  " },
+    });
+    const GameState initial = rules::initialState(level);
+    const rules::StepResult result = rules::stepWithEvents(
+        level, initial, MoveDirection::Up);
+
+    CHECK(result.state.players[0].cell == cell(2, 1, 1));
+    CHECK(!result.state.movables[0].dead);
+    CHECK(result.state.movables[1].cell == cell(2, 0, 1));
+    CHECK(result.state.movables[1].dead);
+    CHECK(!result.state.movables[1].sliding);
+    CHECK(result.turretShots.size() == 1);
+    if (!result.turretShots.empty()) {
+        CHECK(result.turretShots[0].target.kind == EntityKind::Movable);
+        CHECK(result.turretShots[0].target.id == initial.movables[1].id);
+    }
+    CHECK(rules::movableAt(result.state, cell(2, 0, 1)) == nullptr);
+
+    // A destroyed turret has fully left the board rather than remaining an
+    // invisible collision object.
+    const GameState entered = rules::step(
+        level, result.state, MoveDirection::Up);
+    CHECK(entered.players[0].cell == cell(2, 0, 1));
+}
+
+void testMutuallyFacingTurretsDestroyEachOtherWithoutMovement()
+{
+    TEST("mutuallyFacingTurretsDestroyEachOtherWithoutMovement");
+    const Level level = makeLevel({
+        { ".....", "....." },
+        { "e   w", "  C  " },
+    });
+    const GameState initial = rules::initialState(level);
+    const std::vector<EntityId> participants =
+        rules::mutuallyFacingTurrets(level, initial);
+    CHECK(participants.size() == 2);
+    CHECK(rules::hasPendingMotion(level, initial));
+
+    const rules::StepResult result = rules::scopedStepWithEvents(
+        level,
+        initial,
+        std::nullopt,
+        {},
+        rules::StepScope { .actors = participants });
+    CHECK(result.state.movables[0].dead);
+    CHECK(result.state.movables[1].dead);
+    CHECK(result.turretShots.size() == 2);
+    CHECK(!rules::hasPendingMotion(level, result.state));
+
+    const Level blocked = makeLevel({
+        { ".....", "....." },
+        { "e R w", "  C  " },
+    });
+    CHECK(rules::mutuallyFacingTurrets(
+              blocked, rules::initialState(blocked)).empty());
+}
+
 // A scope names the entities an action is allowed to move. These pin the two
 // halves of that: in-scope entities behave exactly as they always did, and
 // out-of-scope entities keep every passive role while never being written.
@@ -1293,6 +1355,8 @@ int main()
     testTurretKillsAPlayerWhoMovesIntoLineOfSight();
     testRockAndWallBlockTurretLineOfSight();
     testTurretKillsAnEnemyMovedIntoLineOfSight();
+    testTurretKillsAnotherTurretMovedIntoLineOfSight();
+    testMutuallyFacingTurretsDestroyEachOtherWithoutMovement();
     testEmptyScopeIsTheWholeWorldStep();
     testScopeLeavesAmbientMotionAlone();
     testOutOfScopeEntitiesStillBlock();

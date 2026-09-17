@@ -386,7 +386,7 @@ void testActiveScreenCheckpointRoundTrip()
     before.players.push_back({ .id = 1, .cell = { 1, 0, 1 } });
     before.movables.push_back({
         .id = 2,
-        .type = sokoban::TileType::Rock,
+        .type = sokoban::TileType::TurretEast,
         .cell = { 2, 0, 1 },
     });
     before.enemies.push_back({ .id = 3, .cell = { 4, 0, 1 } });
@@ -399,6 +399,7 @@ void testActiveScreenCheckpointRoundTrip()
         .sliding = sokoban::MoveDirection::Left,
     });
     after.movables.front().cell = { 3, 0, 1 };
+    after.movables.front().dead = true;
     after.movables.front().sliding = sokoban::MoveDirection::Right;
     after.enemies.front().cell = { 5, 0, 1 };
 
@@ -481,6 +482,9 @@ void testActiveScreenCheckpointRoundTrip()
     CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["state"]
             ["enemies"][0].contains("dead"),
         "checkpoint state persists enemy death");
+    CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["state"]
+            ["movables"][0]["dead"].get<bool>(),
+        "checkpoint state persists turret death");
     CHECK_MESSAGE(!current["progress"]["activeScreen"]["session"]["state"]
             .contains("playerClones"),
         "checkpoint state has no primary/clone compatibility fields");
