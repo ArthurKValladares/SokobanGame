@@ -164,6 +164,8 @@ void checkPreparationOutputsMatch(
         CHECK(expected.particles[index].texture ==
               actual.particles[index].texture);
         CHECK(expected.particles[index].depth == actual.particles[index].depth);
+        CHECK(expected.particles[index].flipTextureV ==
+              actual.particles[index].flipTextureV);
         CHECK(expected.particles[index].drawOnTop ==
               actual.particles[index].drawOnTop);
     }
@@ -1637,8 +1639,9 @@ void testParticlesBecomeSortedTranslucentBillboardsOnly()
     frame.particles = {
         RenderFrameData::Particle {
             .position = { 1.5f, 1.5f, 1.0f },
-            .size = { 0.8f, 0.8f },
+            .size = { 0.8f, 0.2f },
             .rotationRadians = 0.3f,
+            .billboardAlignment = { 1.0f, 0.0f, 0.0f },
             .color = { 0.7f, 0.9f, 1.0f, 0.6f },
             .texture = RenderTexture { 5 },
             .drawOnTop = true,
@@ -1660,9 +1663,51 @@ void testParticlesBecomeSortedTranslucentBillboardsOnly()
         scene.particles[0].vertices[2].x);
     CHECK(scene.particles[0].vertices[0].y !=
         scene.particles[0].vertices[2].y);
+    const PreparedParticle& aligned = scene.particles[1];
+    const Vec3 longEdge = aligned.vertices[1] - aligned.vertices[0];
+    const Vec3 projectedWorldX =
+        scene.isoLayout.cameraRight *
+            dot(Vec3 { 1.0f, 0.0f, 0.0f }, scene.isoLayout.cameraRight) +
+        scene.isoLayout.cameraUp *
+            dot(Vec3 { 1.0f, 0.0f, 0.0f }, scene.isoLayout.cameraUp);
+    CHECK(near(length(longEdge), 0.8f));
+    CHECK(dot(normalize(longEdge), normalize(projectedWorldX)) > 0.999f);
     CHECK(scene.pickFaceIndices.empty());
     CHECK(scene.shadowFaces.empty());
     CHECK(scene.shadowModelIndices.empty());
+}
+
+void testParticleRibbonFollowsTheProjectedWorldPath()
+{
+    using namespace sokoban;
+
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 3;
+    frame.levelHeight = 3;
+    frame.levelDepth = 1;
+    frame.particles.push_back({
+        .position = { 1.5f, 1.5f, 1.0f },
+        .size = { 0.2f, 2.0f },
+        .billboardAlignment = { 1.0f, 0.0f, 0.0f },
+        .billboardAlignmentUsesY = true,
+        .flipTextureV = true,
+        .color = { 1.0f, 0.8f, 0.2f, 1.0f },
+        .texture = RenderTexture { 5 },
+    });
+
+    const PreparedRenderScene scene = prepareScene(frame, { 1280.0f, 720.0f });
+    CHECK(scene.particles.size() == 1);
+    const PreparedParticle& ribbon = scene.particles.front();
+    CHECK(ribbon.flipTextureV);
+    const Vec3 longEdge = ribbon.vertices[3] - ribbon.vertices[0];
+    const Vec3 projectedWorldPath =
+        scene.isoLayout.cameraRight *
+            dot(Vec3 { 2.0f, 0.0f, 0.0f }, scene.isoLayout.cameraRight) +
+        scene.isoLayout.cameraUp *
+            dot(Vec3 { 2.0f, 0.0f, 0.0f }, scene.isoLayout.cameraUp);
+    CHECK(near(length(longEdge), length(projectedWorldPath)));
+    CHECK(dot(normalize(longEdge), normalize(projectedWorldPath)) > 0.999f);
 }
 
 void testAuthoredModelTransformSupportsPivotRotationAndNonUniformScale()
@@ -1725,6 +1770,7 @@ int main()
     testMirrorEnergyIsTranslucentNonPickableAndShadowless();
     testAlphaTintedModelUsesTheTranslucentPass();
     testParticlesBecomeSortedTranslucentBillboardsOnly();
+    testParticleRibbonFollowsTheProjectedWorldPath();
     testAuthoredModelTransformSupportsPivotRotationAndNonUniformScale();
 
     if (failures == 0) {

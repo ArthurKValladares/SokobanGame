@@ -567,6 +567,8 @@ void testRealManifestFile()
         "real manifest has first mirror smoke texture");
     CHECK_MESSAGE(!manifest.textureIdByName("Smoke10").isNone(),
         "real manifest has last mirror smoke texture");
+    CHECK_MESSAGE(!manifest.textureIdByName("BulletTrace").isNone(),
+        "real manifest has the connected bullet-trace texture");
     CHECK_MESSAGE(manifest.musicForLevel(3) != nullptr, "real manifest level 3 music");
     CHECK_MESSAGE(!manifest.modelForTile(sokoban::TileType::Wall).isCube(), "real manifest wall model");
     CHECK_MESSAGE(manifest.modelForTile(sokoban::TileType::Decorative).isCube(),

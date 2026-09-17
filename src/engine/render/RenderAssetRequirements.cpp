@@ -185,8 +185,20 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
                 manifest.textureIdByName(textureName));
         }
     }
+    bool containsTurret = false;
     for (const Level::MovableTile& movable : level.movableTiles()) {
         requirements.requireModel(manifest.modelForTile(movable.type));
+        containsTurret |= tileTypeIsTurret(movable.type);
+    }
+    if (containsTurret) {
+        // Shot effects are too brief to wait for demand-driven streaming on
+        // their first frame. Warm all shot textures with the turret model.
+        requirements.requireTexture(
+            manifest.textureIdByName(config::turretMuzzleTextureName));
+        requirements.requireTexture(
+            manifest.textureIdByName(config::turretGlowTextureName));
+        requirements.requireTexture(
+            manifest.textureIdByName(config::turretTrailTextureName));
     }
     for (const Level::Decoration& decoration : level.decorations()) {
         requirements.requireModel(

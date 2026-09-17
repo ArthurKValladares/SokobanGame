@@ -34,7 +34,10 @@ const AssetManifest& testManifest()
         { "name": "GroundSplatMap0_1", "path": "splat0_1.png" },
         { "name": "GroundSplatMap2_0", "path": "splat2_0.png" },
         { "name": "GroundSplatMapOverworld1", "path": "overworld1.png" },
-        { "name": "GroundSplatMapOverworld2", "path": "overworld2.png" }
+        { "name": "GroundSplatMapOverworld2", "path": "overworld2.png" },
+        { "name": "Muzzle01", "path": "muzzle.png" },
+        { "name": "ParticleGlow", "path": "glow.png" },
+        { "name": "BulletTrace", "path": "trace.png" }
       ],
       "models": [
         { "name": "Stone", "path": "stone.gltf" },
@@ -134,6 +137,9 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.modelIdByName("Stone")));
     CHECK(requirements.contains(manifest.modelIdByName("Glass")));
     CHECK(requirements.contains(manifest.modelIdByName("Turret")));
+    CHECK(requirements.contains(manifest.textureIdByName("Muzzle01")));
+    CHECK(requirements.contains(manifest.textureIdByName("ParticleGlow")));
+    CHECK(requirements.contains(manifest.textureIdByName("BulletTrace")));
     CHECK(!requirements.contains(cubeModel));
     CHECK(requirements.contains(manifest.playerIdleAnimation()));
     CHECK(requirements.contains(manifest.playerMoveAnimation()));
@@ -144,8 +150,8 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.enemyAttackAnimation()));
     CHECK(requirements.modelCount() == 8);
     CHECK(requirements.animationCount() == 6);
-    // The three ground splat textures are always required.
-    CHECK(requirements.textureCount() == 3);
+    // Three ground splat textures plus muzzle, glow, and connected trace.
+    CHECK(requirements.textureCount() == 6);
 
     const Level mirrorLevel = Level::loadFromLayers({
         { ".....", ".....", ".....", ".....", "....." },

@@ -385,6 +385,13 @@ struct RenderFrameData {
         Vec3 position {};
         Vec2 size { 1.0f, 1.0f };
         float rotationRadians = 0.0f;
+        // Optional world-space direction for elongated particles. The scene
+        // preparer projects it into the billboard plane; zero uses rotation.
+        Vec3 billboardAlignment {};
+        // False aligns the quad's U/X axis; true aligns its V/Y axis. Ribbons
+        // use V so an authored tail-to-head texture runs along the shot path.
+        bool billboardAlignmentUsesY = false;
+        bool flipTextureV = false;
         Vec4 color {};
         RenderTexture texture = noTexture;
         bool drawOnTop = false;

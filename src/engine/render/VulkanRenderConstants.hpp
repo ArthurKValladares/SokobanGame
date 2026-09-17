@@ -153,7 +153,7 @@ inline constexpr float modelDrawMarkerAlpha = -1.0f;
 //   gridColor.w          grid line opacity               modelDrawMarkerAlpha
 //   textureOptions.y     procedural texture handle       editor highlight enum
 //   textureOptions.z     specular strength               specular strength
-//   textureOptions.w     unused                          alpha selection
+//   textureOptions.w     procedural flip-V flag          alpha selection
 //
 // materialOptions.y is the pair worth knowing about. gridMask() rejects a draw
 // whose grid cell size is not positive, and every model with a scrolling

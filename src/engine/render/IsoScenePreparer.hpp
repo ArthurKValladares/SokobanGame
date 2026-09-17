@@ -128,6 +128,7 @@ struct PreparedParticle {
     Vec4 color {};
     RenderTexture texture = noTexture;
     float depth = 0.0f;
+    bool flipTextureV = false;
     bool drawOnTop = false;
 };
 

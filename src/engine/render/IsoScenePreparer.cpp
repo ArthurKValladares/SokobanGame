@@ -969,8 +969,34 @@ static void prepareAuxiliaryGeometry(
                 source.size.x <= 0.0f || source.size.y <= 0.0f) {
                 continue;
             }
-            const float cosine = std::cos(source.rotationRadians);
-            const float sine = std::sin(source.rotationRadians);
+            float cosine = std::cos(source.rotationRadians);
+            float sine = std::sin(source.rotationRadians);
+            const float projectedAlignmentX =
+                dot(source.billboardAlignment, isoLayout.cameraRight);
+            const float projectedAlignmentY =
+                dot(source.billboardAlignment, isoLayout.cameraUp);
+            const float projectedAlignmentLength = std::sqrt(
+                projectedAlignmentX * projectedAlignmentX +
+                projectedAlignmentY * projectedAlignmentY);
+            float sizeYScale = 1.0f;
+            if (projectedAlignmentLength > 0.0001f) {
+                if (source.billboardAlignmentUsesY) {
+                    // up = cameraUp*cosine - cameraRight*sine
+                    cosine = projectedAlignmentY /
+                        projectedAlignmentLength;
+                    sine = -projectedAlignmentX /
+                        projectedAlignmentLength;
+                    // A ribbon's length is measured in world-space along its
+                    // shot path. Apply the same foreshortening as projecting
+                    // that path so its head and tail land on their endpoints.
+                    sizeYScale = projectedAlignmentLength;
+                } else {
+                    cosine = projectedAlignmentX /
+                        projectedAlignmentLength;
+                    sine = projectedAlignmentY /
+                        projectedAlignmentLength;
+                }
+            }
             const Vec3 right = add(
                 multiply(
                     isoLayout.cameraRight,
@@ -981,10 +1007,10 @@ static void prepareAuxiliaryGeometry(
             const Vec3 up = add(
                 multiply(
                     isoLayout.cameraUp,
-                    cosine * source.size.y * 0.5f),
+                    cosine * source.size.y * sizeYScale * 0.5f),
                 multiply(
                     isoLayout.cameraRight,
-                    -sine * source.size.y * 0.5f));
+                    -sine * source.size.y * sizeYScale * 0.5f));
             PreparedParticle particle {
                 .vertices = {
                     subtract(source.position, add(right, up)),
@@ -997,6 +1023,7 @@ static void prepareAuxiliaryGeometry(
                 .depth = dot(
                     subtract(source.position, isoLayout.cameraPosition),
                     isoLayout.cameraForward),
+                .flipTextureV = source.flipTextureV,
                 .drawOnTop = source.drawOnTop,
             };
             particles.push_back(particle);

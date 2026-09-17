@@ -327,9 +327,13 @@ void main()
         // that no runtime texture was resolved.
         float selectedTexture = draw.textureOptions.y - 1.0;
         int textureIndex = max(int(selectedTexture + 0.5), 0);
+        vec2 proceduralUv = vec2(inFaceCoordU, inFaceCoordV);
+        if (draw.textureOptions.w < -0.5) {
+            proceduralUv.y = 1.0 - proceduralUv.y;
+        }
         materialColor *= texture(
             modelTextures[nonuniformEXT(textureIndex)],
-            vec2(inFaceCoordU, inFaceCoordV));
+            proceduralUv);
     } else if (materialMode == DRAW_MODE_MANIFEST_TEXTURE) {
         int textureIndex = max(int(draw.materialOptions.z + 0.5), 0);
         baseColorSample = texture(

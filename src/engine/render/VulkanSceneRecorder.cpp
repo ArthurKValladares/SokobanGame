@@ -2136,7 +2136,7 @@ private:
                 shaderValue(DrawMaterialMode::ProceduralTexture),
                 static_cast<float>(particle.texture.value),
                 0.0f,
-                1.0f,
+                particle.flipTextureV ? -1.0f : 1.0f,
             },
         };
         return writeDrawInstance(constants);

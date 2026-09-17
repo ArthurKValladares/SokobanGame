@@ -33,6 +33,12 @@ void ParticleSystem::emit(
             std::max(effect.spawnRadius, 0.0f);
         const std::size_t textureIndex = static_cast<std::size_t>(
             random_() % effect.textures.size());
+        const float initialSize = std::max(
+            randomRange(effect.initialSize.x, effect.initialSize.y),
+            0.0f);
+        const float finalSize = std::max(
+            randomRange(effect.finalSize.x, effect.finalSize.y),
+            0.0f);
         particles_.push_back({
             .position = {
                 origin.x + std::cos(angle) * radius,
@@ -54,6 +60,7 @@ void ParticleSystem::emit(
             .texture = effect.textures[textureIndex],
             .rotationRadians = randomRange(
                 0.0f, std::numbers::pi_v<float> * 2.0f),
+            .billboardAlignment = effect.billboardAlignment,
             .angularVelocity = randomRange(
                 effect.minimumAngularVelocity,
                 effect.maximumAngularVelocity),
@@ -63,12 +70,14 @@ void ParticleSystem::emit(
                     effect.lifetimeSeconds.x,
                     effect.lifetimeSeconds.y),
                 0.001f),
-            .initialSize = std::max(
-                randomRange(effect.initialSize.x, effect.initialSize.y),
-                0.0f),
-            .finalSize = std::max(
-                randomRange(effect.finalSize.x, effect.finalSize.y),
-                0.0f),
+            .initialSize = {
+                initialSize * std::max(effect.initialSizeScale.x, 0.0f),
+                initialSize * std::max(effect.initialSizeScale.y, 0.0f),
+            },
+            .finalSize = {
+                finalSize * std::max(effect.finalSizeScale.x, 0.0f),
+                finalSize * std::max(effect.finalSizeScale.y, 0.0f),
+            },
             .drawOnTop = effect.drawOnTop,
         });
     }
@@ -95,6 +104,9 @@ void ParticleSystem::emitTrail(
     ParticleEffectDefinition sample = trail.particle;
     sample.particleCount = 1;
     sample.spawnRadius = 0.0f;
+    sample.billboardAlignment = distance > 0.0001f
+        ? Vec3 { delta.x / distance, delta.y / distance, delta.z / distance }
+        : Vec3 {};
 
     for (uint32_t i = 0; i <= segmentCount; ++i) {
         const float progress = static_cast<float>(i) /
@@ -109,6 +121,33 @@ void ParticleSystem::emitTrail(
             std::max(delaySeconds, 0.0f) +
                 distance * progress / speed);
     }
+}
+
+void ParticleSystem::emitRibbon(
+    Vec3 start,
+    Vec3 end,
+    const ParticleRibbonDefinition& ribbon,
+    float delaySeconds)
+{
+    const Vec3 delta = end - start;
+    const float distance = length(delta);
+    if (ribbon.texture.isNone() || distance <= 0.0001f ||
+        ribbon.width <= 0.0f || ribbon.maxLength <= 0.0f) {
+        return;
+    }
+    ribbons_.push_back({
+        .start = start,
+        .direction = delta / distance,
+        .color = ribbon.color,
+        .texture = ribbon.texture,
+        .distance = distance,
+        .width = ribbon.width,
+        .maxLength = ribbon.maxLength,
+        .speed = std::max(ribbon.speed, 0.001f),
+        .ageSeconds = -std::max(delaySeconds, 0.0f),
+        .flipTextureV = ribbon.flipTextureV,
+        .drawOnTop = ribbon.drawOnTop,
+    });
 }
 
 void ParticleSystem::update(float dt)
@@ -127,16 +166,26 @@ void ParticleSystem::update(float dt)
     std::erase_if(particles_, [](const Particle& particle) {
         return particle.ageSeconds >= particle.lifetimeSeconds;
     });
+    for (Ribbon& ribbon : ribbons_) {
+        ribbon.ageSeconds += dt;
+    }
+    std::erase_if(ribbons_, [](const Ribbon& ribbon) {
+        const float finishSeconds =
+            (ribbon.distance + ribbon.maxLength) / ribbon.speed;
+        return ribbon.ageSeconds >= finishSeconds;
+    });
 }
 
 void ParticleSystem::reset()
 {
     particles_.clear();
+    ribbons_.clear();
 }
 
 void ParticleSystem::appendRenderData(RenderFrameData& frame) const
 {
-    frame.particles.reserve(frame.particles.size() + particles_.size());
+    frame.particles.reserve(
+        frame.particles.size() + particles_.size() + ribbons_.size());
     for (const Particle& particle : particles_) {
         if (particle.ageSeconds < 0.0f) {
             continue;
@@ -144,17 +193,43 @@ void ParticleSystem::appendRenderData(RenderFrameData& frame) const
         const float progress = std::clamp(
             particle.ageSeconds / particle.lifetimeSeconds, 0.0f, 1.0f);
         const float fade = 1.0f - progress * progress * (3.0f - 2.0f * progress);
-        const float size = particle.initialSize +
-            (particle.finalSize - particle.initialSize) * progress;
+        const Vec2 size = lerp(
+            particle.initialSize, particle.finalSize, progress);
         Vec4 color = particle.color;
         color.w *= fade;
         frame.particles.push_back({
             .position = particle.position,
-            .size = { size, size },
+            .size = size,
             .rotationRadians = particle.rotationRadians,
+            .billboardAlignment = particle.billboardAlignment,
             .color = color,
             .texture = particle.texture,
             .drawOnTop = particle.drawOnTop,
+        });
+    }
+    for (const Ribbon& ribbon : ribbons_) {
+        if (ribbon.ageSeconds <= 0.0f) {
+            continue;
+        }
+        const float virtualHead = ribbon.ageSeconds * ribbon.speed;
+        const float headDistance = std::min(virtualHead, ribbon.distance);
+        const float tailDistance = std::clamp(
+            virtualHead - ribbon.maxLength, 0.0f, ribbon.distance);
+        const float visibleLength = headDistance - tailDistance;
+        if (visibleLength <= 0.0001f) {
+            continue;
+        }
+        const float centerDistance =
+            (headDistance + tailDistance) * 0.5f;
+        frame.particles.push_back({
+            .position = ribbon.start + ribbon.direction * centerDistance,
+            .size = { ribbon.width, visibleLength },
+            .billboardAlignment = ribbon.direction,
+            .billboardAlignmentUsesY = true,
+            .flipTextureV = ribbon.flipTextureV,
+            .color = ribbon.color,
+            .texture = ribbon.texture,
+            .drawOnTop = ribbon.drawOnTop,
         });
     }
 }

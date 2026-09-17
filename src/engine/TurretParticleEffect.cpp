@@ -11,6 +11,17 @@ namespace sokoban {
 TurretParticleEffects makeTurretParticleEffects(const AssetManifest& manifest)
 {
     TurretParticleEffects effects;
+    effects.muzzleGlow = {
+        .textures = {
+            manifest.textureIdByName(config::turretGlowTextureName),
+        },
+        .color = config::turretMuzzleGlowColor,
+        .particleCount = config::turretMuzzleGlowParticleCount,
+        .lifetimeSeconds = config::turretMuzzleGlowLifetimeSeconds,
+        .initialSize = config::turretMuzzleGlowInitialSize,
+        .finalSize = config::turretMuzzleGlowFinalSize,
+        .drawOnTop = config::turretParticlesDrawOnTop,
+    };
     effects.muzzleFlash = {
         .textures = {
             manifest.textureIdByName(config::turretMuzzleTextureName),
@@ -28,20 +39,17 @@ TurretParticleEffects makeTurretParticleEffects(const AssetManifest& manifest)
         .drawOnTop = config::turretParticlesDrawOnTop,
     };
     effects.bulletTrail = {
-        .particle = {
-            .textures = {
-                manifest.textureIdByName(config::turretTrailTextureName),
-            },
-            .color = config::turretTrailColor,
-            .particleCount = 1,
-            .lifetimeSeconds = config::turretTrailLifetimeSeconds,
-            .initialSize = config::turretTrailInitialSize,
-            .finalSize = config::turretTrailFinalSize,
-            .drawOnTop = config::turretParticlesDrawOnTop,
-        },
-        .spacing = config::turretTrailSpacing,
+        .texture = manifest.textureIdByName(config::turretTrailTextureName),
+        .color = config::turretTrailColor,
+        .width = config::turretTrailWidth,
+        .maxLength = config::turretTrailMaximumLength,
         .speed = config::turretBulletSpeed,
+        .flipTextureV = true,
+        .drawOnTop = config::turretParticlesDrawOnTop,
     };
+    effects.bulletTrailCore = effects.bulletTrail;
+    effects.bulletTrailCore.color = config::turretTrailCoreColor;
+    effects.bulletTrailCore.width = config::turretTrailCoreWidth;
     return effects;
 }
 
@@ -75,11 +83,17 @@ float emitTurretShotParticles(
             config::turretTrailAfterMuzzleSeconds,
         0.0f);
 
+    particles.emit(muzzle, effects.muzzleGlow, muzzleDelay);
     particles.emit(muzzle, effects.muzzleFlash, muzzleDelay);
-    particles.emitTrail(
+    particles.emitRibbon(
         muzzle,
         target,
         effects.bulletTrail,
+        muzzleDelay + config::turretTrailAfterMuzzleSeconds);
+    particles.emitRibbon(
+        muzzle,
+        target,
+        effects.bulletTrailCore,
         muzzleDelay + config::turretTrailAfterMuzzleSeconds);
     return muzzleDelay;
 }

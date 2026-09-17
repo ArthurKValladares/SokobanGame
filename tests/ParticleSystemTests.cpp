@@ -1,7 +1,9 @@
 #include "TestHarness.hpp"
 
 #include "engine/ParticleSystem.hpp"
+#include "engine/TurretParticleEffect.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 
@@ -108,6 +110,10 @@ void testTrailSamplesAppearAlongTheLineAtProjectileSpeed()
         .spacing = 0.25f,
         .speed = 10.0f,
     };
+    trail.particle.initialSize = { 1.0f, 1.0f };
+    trail.particle.finalSize = { 1.0f, 1.0f };
+    trail.particle.initialSizeScale = { 0.35f, 0.12f };
+    trail.particle.finalSizeScale = { 0.35f, 0.02f };
     particles.emitTrail(
         { 0.0f, 0.0f, 0.0f },
         { 1.0f, 0.0f, 0.0f },
@@ -118,12 +124,124 @@ void testTrailSamplesAppearAlongTheLineAtProjectileSpeed()
     particles.appendRenderData(frame);
     CHECK(frame.particles.size() == 1);
     CHECK(near(frame.particles.front().position.x, 0.0f));
+    CHECK(near(frame.particles.front().size.x, 0.35f));
+    CHECK(near(frame.particles.front().size.y, 0.12f));
+    CHECK((frame.particles.front().billboardAlignment ==
+        Vec3 { 1.0f, 0.0f, 0.0f }));
 
     particles.update(0.11f);
     frame.particles.clear();
     particles.appendRenderData(frame);
     CHECK(frame.particles.size() == 5);
     CHECK(near(frame.particles.back().position.x, 1.0f));
+    CHECK(near(frame.particles.front().size.x, 0.35f));
+    CHECK(frame.particles.front().size.y < frame.particles.back().size.y);
+    CHECK(frame.particles.front().color.w < frame.particles.back().color.w);
+}
+
+void testTurretShotLayersTheMuzzleAndTrace()
+{
+    TEST("turretShotLayersTheMuzzleAndTrace");
+    TurretParticleEffects effects;
+    effects.muzzleGlow = fixedEffect();
+    effects.muzzleGlow.textures = { RenderTexture { 10 } };
+    effects.muzzleGlow.particleCount = 1;
+    effects.muzzleFlash = fixedEffect();
+    effects.muzzleFlash.textures = { RenderTexture { 11 } };
+    effects.muzzleFlash.particleCount = 1;
+
+    effects.bulletTrail = {
+        .texture = RenderTexture { 12 },
+        .color = { 1.0f, 0.6f, 0.1f, 0.8f },
+        .width = 0.10f,
+        .maxLength = 1.0f,
+        .speed = 10.0f,
+        .flipTextureV = true,
+        .drawOnTop = true,
+    };
+    effects.bulletTrailCore = effects.bulletTrail;
+    effects.bulletTrailCore.texture = RenderTexture { 13 };
+    effects.bulletTrailCore.width = 0.04f;
+
+    ParticleSystem particles(17);
+    const float muzzleDelay = emitTurretShotParticles(
+        particles,
+        effects,
+        rules::TurretShot {
+            .turretCell = { 0, 0, 1 },
+            .targetCell = { 2, 0, 1 },
+            .direction = MoveDirection::Right,
+        },
+        0.25f);
+
+    particles.update(muzzleDelay + 0.001f);
+    RenderFrameData frame;
+    particles.appendRenderData(frame);
+    CHECK(frame.particles.size() == 2);
+    CHECK(std::ranges::any_of(frame.particles, [](const auto& particle) {
+        return particle.texture == RenderTexture { 10 };
+    }));
+    CHECK(std::ranges::any_of(frame.particles, [](const auto& particle) {
+        return particle.texture == RenderTexture { 11 };
+    }));
+
+    particles.update(0.058f);
+    frame.particles.clear();
+    particles.appendRenderData(frame);
+    const auto traceParticle = std::ranges::find_if(
+        frame.particles,
+        [](const auto& particle) {
+            return particle.texture == RenderTexture { 12 };
+        });
+    CHECK(traceParticle != frame.particles.end());
+    if (traceParticle != frame.particles.end()) {
+        CHECK(traceParticle->size.y > traceParticle->size.x);
+        CHECK(traceParticle->billboardAlignment.x > 0.99f);
+        CHECK(traceParticle->billboardAlignmentUsesY);
+        CHECK(traceParticle->flipTextureV);
+    }
+    CHECK(std::ranges::any_of(frame.particles, [](const auto& particle) {
+        return particle.texture == RenderTexture { 13 };
+    }));
+}
+
+void testRibbonRemainsOneConnectedMovingTracer()
+{
+    TEST("ribbonRemainsOneConnectedMovingTracer");
+    ParticleSystem particles(19);
+    particles.emitRibbon(
+        { 0.0f, 0.0f, 0.0f },
+        { 2.0f, 0.0f, 0.0f },
+        ParticleRibbonDefinition {
+            .texture = RenderTexture { 20 },
+            .color = { 1.0f, 0.8f, 0.2f, 0.9f },
+            .width = 0.12f,
+            .maxLength = 0.6f,
+            .speed = 2.0f,
+            .drawOnTop = true,
+        });
+    CHECK(particles.activeRibbonCount() == 1);
+
+    particles.update(0.25f);
+    RenderFrameData frame;
+    particles.appendRenderData(frame);
+    CHECK(frame.particles.size() == 1);
+    CHECK(near(frame.particles[0].position.x, 0.25f));
+    CHECK(near(frame.particles[0].size.x, 0.12f));
+    CHECK(near(frame.particles[0].size.y, 0.5f));
+    CHECK(frame.particles[0].billboardAlignmentUsesY);
+
+    particles.update(0.25f);
+    frame.particles.clear();
+    particles.appendRenderData(frame);
+    CHECK(frame.particles.size() == 1);
+    // The head is at x=1 and the tail has advanced to x=0.4, represented by
+    // one quad spanning the entire 0.6-unit wake rather than point samples.
+    CHECK(near(frame.particles[0].position.x, 0.7f));
+    CHECK(near(frame.particles[0].size.y, 0.6f));
+
+    particles.update(0.8f);
+    CHECK(particles.activeRibbonCount() == 0);
 }
 
 } // namespace
@@ -134,6 +252,8 @@ int main()
     testEmptyEffectsAndReset();
     testDelayedParticlesDoNotAgeOrMoveBeforeTheyAppear();
     testTrailSamplesAppearAlongTheLineAtProjectileSpeed();
+    testTurretShotLayersTheMuzzleAndTrace();
+    testRibbonRemainsOneConnectedMovingTracer();
 
     if (failures == 0) {
         std::cout << "ParticleSystemTests: " << checks

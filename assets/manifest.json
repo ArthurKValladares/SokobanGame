@@ -115,6 +115,11 @@
       "filter": "linear"
     },
     {
+      "name": "BulletTrace",
+      "path": "kenney_particle-pack/PNG (Transparent)/trace_05.png",
+      "filter": "linear"
+    },
+    {
       "name": "GroundGrass",
       "path": "custom/textures/ground_grass.png",
       "tiling": true,
