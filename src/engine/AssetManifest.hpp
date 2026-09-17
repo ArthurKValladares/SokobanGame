@@ -36,11 +36,20 @@ enum class ModelMaterialMode : uint32_t {
     Untextured = 0,
     SingleTexture = 1,
     PrimitiveMaterials = 2,
+    // Use the materials and textures authored in the glTF. This is the
+    // default for imported models; the other values are explicit manifest
+    // overrides (including Untextured, from material.mode = "none").
+    Auto = 3,
 };
 
 [[nodiscard]] constexpr float shaderValue(ModelMaterialMode mode)
 {
-    return static_cast<float>(mode);
+    // Auto is resolved to one of the three draw modes by the runtime texture
+    // catalog. Keep this fallback on the glTF path so an unresolved value can
+    // never collide with the UI-only draw mode that also has numeric value 3.
+    return mode == ModelMaterialMode::Auto
+        ? static_cast<float>(ModelMaterialMode::PrimitiveMaterials)
+        : static_cast<float>(mode);
 }
 
 // Runtime asset manifest: the single source of truth for model, texture,
@@ -89,7 +98,7 @@ public:
         bool rotateHalfTurn = false;
         bool playerRole = false; // the model gameplay animates as the player
         bool enemyRole = false; // the model gameplay animates as an enemy
-        ModelMaterialMode materialMode = ModelMaterialMode::Untextured;
+        ModelMaterialMode materialMode = ModelMaterialMode::Auto;
         uint32_t textureIndex = 0; // resolved single-texture descriptor index
         std::string materialTextureName; // as written in the manifest
         // Entry N describes glTF material N. Texture names resolve once during

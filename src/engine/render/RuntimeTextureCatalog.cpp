@@ -111,6 +111,9 @@ RuntimeTextureCatalog buildRuntimeTextureCatalog(
         const AssetManifest::Model& definition = manifest.models()[index];
         modelsByDocument[documentKey(definition.path)].push_back(index);
         RuntimeModelTextures& model = catalog.models_[index];
+        model.materialMode = definition.materialMode == ModelMaterialMode::Auto
+            ? ModelMaterialMode::PrimitiveMaterials
+            : definition.materialMode;
         model.primitiveMaterials.resize(definition.primitiveMaterials.size());
         for (PrimitiveMaterialBinding& binding : model.primitiveMaterials) {
             binding.bindBaseColorTexture = false;
@@ -138,8 +141,17 @@ RuntimeTextureCatalog buildRuntimeTextureCatalog(
 
     for (const ResolvedMaterialTexture& texture : materialTextures) {
         const auto modelsIt = modelsByDocument.find(documentKey(texture.document));
-        if (modelsIt == modelsByDocument.end() ||
-            texture.semantic == MaterialTextureSemantic::BaseColor) {
+        if (modelsIt == modelsByDocument.end()) {
+            continue;
+        }
+        const auto acceptsTexture = [&](uint32_t modelIndex) {
+            const ModelMaterialMode mode =
+                manifest.models()[modelIndex].materialMode;
+            return mode != ModelMaterialMode::Untextured &&
+                (texture.semantic != MaterialTextureSemantic::BaseColor ||
+                    mode == ModelMaterialMode::Auto);
+        };
+        if (std::ranges::none_of(modelsIt->second, acceptsTexture)) {
             continue;
         }
 
@@ -166,6 +178,11 @@ RuntimeTextureCatalog buildRuntimeTextureCatalog(
         }
 
         for (uint32_t modelIndex : modelsIt->second) {
+            // `none` is an explicit opt-out. Manifest base-colour mappings are
+            // overrides, while every other core map can still augment them.
+            if (!acceptsTexture(modelIndex)) {
+                continue;
+            }
             RuntimeModelTextures& model = catalog.models_[modelIndex];
             if (model.primitiveMaterials.size() <= texture.materialIndex) {
                 const std::size_t previousSize =
@@ -181,6 +198,10 @@ RuntimeTextureCatalog buildRuntimeTextureCatalog(
             PrimitiveMaterialBinding& binding =
                 model.primitiveMaterials[texture.materialIndex];
             switch (texture.semantic) {
+            case MaterialTextureSemantic::BaseColor:
+                binding.textureIndex = logicalIndex;
+                binding.bindBaseColorTexture = true;
+                break;
             case MaterialTextureSemantic::Normal:
                 binding.normalTextureIndex = logicalIndex;
                 break;
@@ -192,8 +213,6 @@ RuntimeTextureCatalog buildRuntimeTextureCatalog(
                 break;
             case MaterialTextureSemantic::Occlusion:
                 binding.occlusionTextureIndex = logicalIndex;
-                break;
-            case MaterialTextureSemantic::BaseColor:
                 break;
             }
             requireOnce(model.requiredTextures, logicalIndex);

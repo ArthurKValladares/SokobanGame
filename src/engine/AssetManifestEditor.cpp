@@ -202,7 +202,11 @@ std::string AssetManifestEditor::serialize() const
         if (model.geometry == ModelGeometry::Skinned) {
             item["geometry"] = "skinned";
         }
-        if (model.materialMode == ModelMaterialMode::SingleTexture) {
+        if (model.materialMode == ModelMaterialMode::Untextured) {
+            item["material"] = {
+                { "mode", "none" },
+            };
+        } else if (model.materialMode == ModelMaterialMode::SingleTexture) {
             item["material"] = {
                 { "mode", "texture" },
                 { "texture", model.materialTextureName },

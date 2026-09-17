@@ -412,9 +412,9 @@ MaterialAlphaMode alphaModeFrom(cgltf_alpha_mode mode)
     }
 }
 
-// One glTF material plus whatever the manifest says its texture is. cgltf
-// fills its defaults from the spec, so an absent field arrives as the value
-// the spec says it has rather than as nothing.
+// One glTF material plus its resolved runtime textures. Those are normally
+// the images authored by the glTF, but a manifest base-colour override can
+// occupy the same binding. cgltf fills absent values from the spec defaults.
 MeshMaterial materialFrom(
     const cgltf_material* source,
     const PrimitiveMaterialBinding& binding,

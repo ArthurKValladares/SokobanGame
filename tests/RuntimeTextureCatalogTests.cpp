@@ -114,6 +114,8 @@ void testBuildsDeduplicatedPerModelCatalog()
     const TextureSourceIdentity emissive =
         identity("maps/packed.png", TextureColorSpace::Srgb);
     const TextureSourceIdentity crateNormal = identity("maps/crate.png");
+    const TextureSourceIdentity crateBase =
+        identity("maps/crate-base.png", TextureColorSpace::Srgb);
     const TextureSourceIdentity ignoredBase =
         identity("maps/gltf-base.png", TextureColorSpace::Srgb);
     const std::vector<ResolvedMaterialTexture> materialTextures {
@@ -127,13 +129,15 @@ void testBuildsDeduplicatedPerModelCatalog()
             MaterialTextureSemantic::BaseColor, ignoredBase),
         materialTexture("models/crate.glb", 0,
             MaterialTextureSemantic::Normal, crateNormal),
+        materialTexture("models/crate.glb", 0,
+            MaterialTextureSemantic::BaseColor, crateBase),
     };
 
     const RuntimeTextureCatalog catalog =
         buildRuntimeTextureCatalog(manifest, materialTextures);
     CHECK(catalog.manifestTextureCount() == 3U);
-    CHECK(catalog.discoveredTextureCount() == 3U);
-    CHECK(catalog.textures().size() == 6U);
+    CHECK(catalog.discoveredTextureCount() == 4U);
+    CHECK(catalog.textures().size() == 7U);
 
     const RuntimeModelTextures& hero = catalog.model(0);
     const RuntimeModelTextures& belt = catalog.model(1);
@@ -147,8 +151,9 @@ void testBuildsDeduplicatedPerModelCatalog()
     CHECK(contains(belt.requiredTextures, 3U));
     CHECK(contains(belt.requiredTextures, 4U));
     CHECK(!contains(belt.requiredTextures, 5U));
-    CHECK(crate.requiredTextures.size() == 1U);
-    CHECK(crate.requiredTextures[0] == 5U);
+    CHECK(crate.requiredTextures.size() == 2U);
+    CHECK(contains(crate.requiredTextures, 5U));
+    CHECK(contains(crate.requiredTextures, 6U));
 
     CHECK(hero.primitiveMaterials[0].normalTextureIndex == 3U);
     CHECK(hero.primitiveMaterials[0].occlusionTextureIndex == 3U);
@@ -158,12 +163,17 @@ void testBuildsDeduplicatedPerModelCatalog()
     CHECK(belt.primitiveMaterials[0].textureIndex == 1U);
     CHECK(belt.primitiveMaterials[1].textureIndex == 2U);
     CHECK(belt.primitiveMaterials[1].flags == PrimitiveMaterialScrollV);
+    CHECK(crate.materialMode == ModelMaterialMode::PrimitiveMaterials);
+    CHECK(crate.primitiveMaterials[0].bindBaseColorTexture);
+    CHECK(crate.primitiveMaterials[0].textureIndex == 6U);
+    CHECK(crate.primitiveMaterials[0].normalTextureIndex == 5U);
 
     CHECK(catalog.descriptorIndex(0, 12) == 0U);
     CHECK(catalog.descriptorIndex(2, 12) == 2U);
-    CHECK(catalog.descriptorIndex(3, 12) == 9U);
-    CHECK(catalog.descriptorIndex(5, 12) == 11U);
-    checkThrows([&] { (void)catalog.descriptorIndex(6, 12); });
+    CHECK(catalog.descriptorIndex(3, 12) == 8U);
+    CHECK(catalog.descriptorIndex(5, 12) == 10U);
+    CHECK(catalog.descriptorIndex(6, 12) == 11U);
+    checkThrows([&] { (void)catalog.descriptorIndex(7, 12); });
     checkThrows([&] { (void)catalog.descriptorIndex(3, 5); });
 }
 

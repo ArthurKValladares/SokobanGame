@@ -38,7 +38,9 @@ bool drawGeometry(ModelGeometry& geometry)
 
 bool drawMaterialMode(ModelMaterialMode& mode)
 {
-    constexpr std::array labels { "None", "Texture", "Primitive Materials" };
+    constexpr std::array labels {
+        "None", "Texture Override", "Per-Material Overrides", "Authored glTF"
+    };
     int selected = static_cast<int>(mode);
     if (!ImGui::Combo("Material", &selected, labels.data(), static_cast<int>(labels.size()))) {
         return false;

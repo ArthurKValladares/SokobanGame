@@ -508,6 +508,7 @@ private:
     TextureDescriptorSpace textureSpace_;
     std::vector<std::vector<uint32_t>> modelTextureDependencies_;
     std::vector<std::vector<PrimitiveMaterialBinding>> modelMaterialBindings_;
+    std::vector<ModelMaterialMode> modelMaterialModes_;
     std::vector<TextureSlot> textures_;
     TextureResource fallbackTexture_ {};
     VulkanUploadRing uploadRing_ {};

@@ -237,6 +237,7 @@ void VulkanModelResources::create(
     }
     modelTextureDependencies_.resize(models_.size());
     modelMaterialBindings_.resize(models_.size());
+    modelMaterialModes_.resize(models_.size());
     for (uint32_t modelIndex = 0; modelIndex < models_.size(); ++modelIndex) {
         models_[modelIndex].sourceBytes = modelSourceBytes(
             assetRoot_, manifest.models()[modelIndex]);
@@ -247,6 +248,7 @@ void VulkanModelResources::create(
             std::move(mapped.requiredTextures);
         modelMaterialBindings_[modelIndex] =
             std::move(mapped.primitiveMaterials);
+        modelMaterialModes_[modelIndex] = mapped.materialMode;
     }
     for (uint32_t animationIndex = 0;
          animationIndex < animations_.size();
@@ -373,6 +375,7 @@ void VulkanModelResources::destroy()
     textureDefinitions_.clear();
     modelTextureDependencies_.clear();
     modelMaterialBindings_.clear();
+    modelMaterialModes_.clear();
     materialStorage_.clear();
     materialRanges_.reset(0);
     fallbackTexture_ = {};
@@ -1506,7 +1509,9 @@ VulkanModelResources::MaterialBinding VulkanModelResources::materialForModel(
         ? models_[model.index()].materialPolicy
         : ModelMaterialPolicy {};
     return {
-        .mode = definition.materialMode,
+        .mode = model.index() < modelMaterialModes_.size()
+            ? modelMaterialModes_[model.index()]
+            : ModelMaterialMode::Untextured,
         .textureIndex = definition.textureIndex,
         .materialBase = materialBase,
         .policy = policy,
@@ -2069,6 +2074,7 @@ bool VulkanModelResources::syncManifestModels()
     models_.resize(manifest_->models().size());
     modelTextureDependencies_.resize(models_.size());
     modelMaterialBindings_.resize(models_.size());
+    modelMaterialModes_.resize(models_.size());
     for (std::size_t modelIndex = previousSize;
          modelIndex < models_.size();
          ++modelIndex) {
@@ -2082,6 +2088,7 @@ bool VulkanModelResources::syncManifestModels()
             std::move(mapped.requiredTextures);
         modelMaterialBindings_[modelIndex] =
             std::move(mapped.primitiveMaterials);
+        modelMaterialModes_[modelIndex] = mapped.materialMode;
     }
     for (uint32_t textureIndex : textureSpace_.active()) {
         if (textures_[textureIndex].sourceBytes == 0 &&

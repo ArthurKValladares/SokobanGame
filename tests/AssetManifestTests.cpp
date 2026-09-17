@@ -3,6 +3,7 @@
 
 #include "engine/AssetManifest.hpp"
 #include "engine/render/GltfMesh.hpp"
+#include "engine/render/RuntimeTextureCatalog.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -138,6 +139,18 @@ void testValidManifest()
     const sokoban::RenderModel box = manifest.modelIdByName("Box");
     CHECK_MESSAGE(manifest.model(box).preserveSourceScale,
         "box preserves authored source scale");
+    CHECK_MESSAGE(
+        manifest.model(box).materialMode == sokoban::ModelMaterialMode::Auto,
+        "models use their authored glTF material by default");
+
+    Json explicitNone = Json::parse(validManifest);
+    explicitNone["models"][0]["material"] = { { "mode", "none" } };
+    const sokoban::AssetManifest withoutAuthoredMaterial =
+        sokoban::AssetManifest::parse(explicitNone.dump());
+    CHECK_MESSAGE(
+        withoutAuthoredMaterial.model(box).materialMode ==
+            sokoban::ModelMaterialMode::Untextured,
+        "explicit none disables authored glTF material textures");
 
     const sokoban::RenderModel hero = manifest.modelIdByName("Hero");
     CHECK_MESSAGE(!hero.isCube(), "hero id valid");
@@ -558,6 +571,41 @@ void testRealManifestFile()
     CHECK_MESSAGE(!manifest.modelForTile(sokoban::TileType::Wall).isCube(), "real manifest wall model");
     CHECK_MESSAGE(manifest.modelForTile(sokoban::TileType::Decorative).isCube(),
         "real manifest decorative block defaults to procedural cube");
+
+    const sokoban::RenderModel turret = manifest.modelIdByName("Turret");
+    CHECK_MESSAGE(
+        manifest.model(turret).materialMode == sokoban::ModelMaterialMode::Auto,
+        "turret uses its authored glTF material without a manifest override");
+    const sokoban::RuntimeTextureCatalog runtimeTextures =
+        sokoban::collectRuntimeTextureCatalog(*root, manifest);
+    const sokoban::RuntimeModelTextures& turretTextures =
+        runtimeTextures.model(static_cast<uint32_t>(turret.index()));
+    CHECK_MESSAGE(
+        turretTextures.materialMode ==
+            sokoban::ModelMaterialMode::PrimitiveMaterials,
+        "turret authored material resolves to the glTF draw path");
+    CHECK_MESSAGE(
+        !turretTextures.primitiveMaterials.empty() &&
+            turretTextures.primitiveMaterials[0].bindBaseColorTexture,
+        "turret authored base-color image is bound automatically");
+    if (!turretTextures.primitiveMaterials.empty() &&
+        turretTextures.primitiveMaterials[0].bindBaseColorTexture) {
+        const sokoban::RuntimeTextureDefinition& texture =
+            runtimeTextures.textures().at(
+                turretTextures.primitiveMaterials[0].textureIndex);
+        const auto* external = std::get_if<sokoban::ExternalTextureSource>(
+            &texture.identity.source);
+        CHECK_MESSAGE(
+            external != nullptr &&
+                external->path.filename() == "engineer_texture.png",
+            "turret glTF resolves its own engineer texture");
+        CHECK_MESSAGE(
+            texture.identity.interpretation.magFilter ==
+                    sokoban::TextureMagnificationFilter::Linear &&
+                texture.identity.interpretation.minFilter ==
+                    sokoban::TextureMinificationFilter::LinearMipmapLinear,
+            "turret glTF sampler settings survive runtime discovery");
+    }
 
     const AssetManifest::Animation& death =
         manifest.animation(manifest.playerDeathAnimation());

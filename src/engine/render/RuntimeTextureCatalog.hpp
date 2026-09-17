@@ -28,6 +28,10 @@ struct RuntimeModelTextures {
     // to stable high descriptor slots after the device capacity is selected.
     std::vector<uint32_t> requiredTextures;
     std::vector<PrimitiveMaterialBinding> primitiveMaterials;
+    // Auto is resolved here and never reaches a draw. Keeping the effective
+    // mode beside the resolved bindings makes startup and editor-added models
+    // take exactly the same rendering path.
+    ModelMaterialMode materialMode = ModelMaterialMode::Untextured;
     uint64_t preparedBytes = 0;
 };
 

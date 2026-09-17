@@ -48,8 +48,9 @@ struct PrimitiveMaterialBinding {
     // Kept adjacent to textureIndex for source compatibility with the
     // original two-field aggregate.
     uint32_t flags = PrimitiveMaterialNone;
-    // False for a map-only runtime binding. The manifest remains authoritative
-    // for base colour even when discovered glTF maps populate the other slots.
+    // False for a map-only runtime binding. An explicit manifest override
+    // remains authoritative; otherwise content discovery supplies the glTF's
+    // authored base-colour image here just like its other material maps.
     bool bindBaseColorTexture = true;
     // Optional zero-based descriptor indices for glTF-authored material maps.
     // Content discovery resolves these independently because one source image
@@ -71,9 +72,9 @@ enum class MaterialAlphaMode : uint32_t {
 // One glTF material, as authored.
 //
 // Factors, UV selections, and map-specific scalars come from the glTF. Map
-// handles come from content resolution: the manifest continues to own the
-// base-colour override while glTF dependency discovery supplies the other
-// maps. Handles are one-based descriptor indices, with zero meaning absent.
+// handles come from content resolution: glTF dependency discovery supplies
+// authored maps, while optional manifest entries can override base colour.
+// Handles are one-based descriptor indices, with zero meaning absent.
 struct MeshMaterial {
     Vec4 baseColorFactor { 1.0f, 1.0f, 1.0f, 1.0f };
     Vec3 emissiveFactor {};

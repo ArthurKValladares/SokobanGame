@@ -277,6 +277,7 @@ static void parseModelMaterial(
         if (hasTexture || hasSlots) {
             fail(materialContext, "mode 'none' does not accept texture or slots");
         }
+        model.materialMode = ModelMaterialMode::Untextured;
     } else if (mode == "texture") {
         if (hasSlots) {
             fail(materialContext, "mode 'texture' does not accept slots");
