@@ -79,12 +79,61 @@ void testEmptyEffectsAndReset()
     CHECK(particles.activeParticleCount() == 0);
 }
 
+void testDelayedParticlesDoNotAgeOrMoveBeforeTheyAppear()
+{
+    TEST("delayedParticlesDoNotAgeOrMoveBeforeTheyAppear");
+    ParticleSystem particles(11);
+    particles.emit({ 1.0f, 2.0f, 1.0f }, fixedEffect(), 0.25f);
+
+    particles.update(0.125f);
+    RenderFrameData frame;
+    particles.appendRenderData(frame);
+    CHECK(frame.particles.empty());
+
+    particles.update(0.25f);
+    particles.appendRenderData(frame);
+    CHECK(frame.particles.size() == 4);
+    for (const RenderFrameData::Particle& particle : frame.particles) {
+        // Only the 0.125 seconds after the delay contributes movement.
+        CHECK(near(particle.position.z, 1.0625f));
+    }
+}
+
+void testTrailSamplesAppearAlongTheLineAtProjectileSpeed()
+{
+    TEST("trailSamplesAppearAlongTheLineAtProjectileSpeed");
+    ParticleSystem particles(13);
+    ParticleTrailDefinition trail {
+        .particle = fixedEffect(),
+        .spacing = 0.25f,
+        .speed = 10.0f,
+    };
+    particles.emitTrail(
+        { 0.0f, 0.0f, 0.0f },
+        { 1.0f, 0.0f, 0.0f },
+        trail);
+    CHECK(particles.activeParticleCount() == 5);
+
+    RenderFrameData frame;
+    particles.appendRenderData(frame);
+    CHECK(frame.particles.size() == 1);
+    CHECK(near(frame.particles.front().position.x, 0.0f));
+
+    particles.update(0.11f);
+    frame.particles.clear();
+    particles.appendRenderData(frame);
+    CHECK(frame.particles.size() == 5);
+    CHECK(near(frame.particles.back().position.x, 1.0f));
+}
+
 } // namespace
 
 int main()
 {
     testBurstSimulationAndRenderData();
     testEmptyEffectsAndReset();
+    testDelayedParticlesDoNotAgeOrMoveBeforeTheyAppear();
+    testTrailSamplesAppearAlongTheLineAtProjectileSpeed();
 
     if (failures == 0) {
         std::cout << "ParticleSystemTests: " << checks

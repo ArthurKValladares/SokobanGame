@@ -1,6 +1,7 @@
 #include "engine/GameplayPresentation.hpp"
 
 #include "engine/PresentationTransactionBuilder.hpp"
+#include "engine/ParticleConfig.hpp"
 #include "engine/render/AnimationConfig.hpp"
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
@@ -151,6 +152,7 @@ void GameplayPresentation::resetEntities(const GameState& state)
     players_.clear();
     movables_.clear();
     enemies_.clear();
+    turretRecoils_.clear();
     syncToGameState(state);
 }
 
@@ -163,6 +165,54 @@ void GameplayPresentation::advanceClocks(float dt, bool reversed)
     for (EnemyVisual& enemy : enemies_) {
         enemy.clipTimeSeconds += dt * enemy.clipPlaybackRate;
     }
+    const float recoilStep = std::max(dt, 0.0f);
+    for (TurretRecoil& recoil : turretRecoils_) {
+        recoil.ageSeconds += recoilStep;
+    }
+    std::erase_if(turretRecoils_, [](const TurretRecoil& recoil) {
+        return recoil.ageSeconds >= config::turretRecoilDurationSeconds;
+    });
+}
+
+void GameplayPresentation::triggerTurretShot(
+    EntityId turretId,
+    MoveDirection direction,
+    float delaySeconds)
+{
+    if (turretId == invalidEntityId) {
+        return;
+    }
+    turretRecoils_.push_back({
+        .turretId = turretId,
+        .direction = direction,
+        .ageSeconds = -std::max(delaySeconds, 0.0f),
+    });
+}
+
+Vec2 GameplayPresentation::turretRecoilOffset(EntityId turretId) const
+{
+    Vec2 offset {};
+    for (const TurretRecoil& recoil : turretRecoils_) {
+        if (recoil.turretId != turretId || recoil.ageSeconds < 0.0f) {
+            continue;
+        }
+        const float progress = std::clamp(
+            recoil.ageSeconds / config::turretRecoilDurationSeconds,
+            0.0f,
+            1.0f);
+        constexpr float kickEnd = 0.18f;
+        const float phase = progress < kickEnd
+            ? progress / kickEnd
+            : (progress - kickEnd) / (1.0f - kickEnd);
+        const float smooth = phase * phase * (3.0f - 2.0f * phase);
+        const float amount = progress < kickEnd ? smooth : 1.0f - smooth;
+        const GridPosition direction = rules::directionOffset(recoil.direction);
+        offset.x -= static_cast<float>(direction.x) *
+            config::turretRecoilDistance * amount;
+        offset.y -= static_cast<float>(direction.y) *
+            config::turretRecoilDistance * amount;
+    }
+    return offset;
 }
 
 void GameplayPresentation::updateCameraPitch(

@@ -447,6 +447,7 @@ add_library(sokoban_core STATIC
     src/engine/MirrorParticleEffect.cpp
     src/engine/MiniaudioImpl.cpp
     src/engine/ParticleSystem.cpp
+    src/engine/TurretParticleEffect.cpp
     src/engine/PresentationSettings.cpp
     src/engine/PlayerProfile.cpp
     src/engine/PlayerProfileCodec.cpp

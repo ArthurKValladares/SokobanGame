@@ -102,7 +102,9 @@ std::size_t highestInFlightId(const GameplaySession& session)
 void startNewPresentations(
     GameplaySession& session,
     GameplayPresentation& presentation,
-    std::size_t& watermark)
+    std::size_t& watermark,
+    std::vector<GameplayLoop::UpdateResult::TurretShotPresentation>&
+        turretShots)
 {
     std::vector<std::size_t> fresh;
     for (const ActionScheduler::InFlight& action : session.inFlight()) {
@@ -115,6 +117,20 @@ void startNewPresentations(
     for (const std::size_t id : fresh) {
         watermark = std::max(watermark, id);
         startPresentation(session, presentation, id);
+        const ActionScheduler::InFlight* started = session.findInFlight(id);
+        if (started == nullptr) {
+            continue;
+        }
+        for (const plans::TurretShotCue& cue : started->turretShots) {
+            const float impactAt = static_cast<float>(cue.legIndex + 1) *
+                session.stepDurationSeconds();
+            turretShots.push_back({
+                .shot = cue.shot,
+                .impactDelaySeconds = std::max(
+                    impactAt - started->elapsedSeconds,
+                    0.0f),
+            });
+        }
     }
 }
 
@@ -195,7 +211,11 @@ GameplayLoop::UpdateResult GameplayLoop::update(
                 result.mirrorSwapDestinations =
                     session.lastMirrorSwapDestinations();
             }
-            startNewPresentations(session, presentation, presentedThrough);
+            startNewPresentations(
+                session,
+                presentation,
+                presentedThrough,
+                result.turretShots);
         }
         if (!session.moving()) {
             return result;
@@ -205,6 +225,11 @@ GameplayLoop::UpdateResult GameplayLoop::update(
             remainingTime, session.timeToNextCompletion());
         remainingTime -= step;
         session.advanceActiveAction(step);
+        for (UpdateResult::TurretShotPresentation& shot : result.turretShots) {
+            shot.impactDelaySeconds = std::max(
+                shot.impactDelaySeconds - step,
+                0.0f);
+        }
         seekAllInFlight(session, presentation);
         if (!session.anyActionComplete()) {
             continue;

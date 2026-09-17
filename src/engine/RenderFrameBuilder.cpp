@@ -731,11 +731,14 @@ void appendGameplayEntities(
         if (movable.type == TileType::Ice) {
             color.w = config::iceTintAlpha;
         }
+        const Vec2 turretRecoil = tileTypeIsTurret(movable.type)
+            ? input.presentation.turretRecoilOffset(visual.target.id)
+            : Vec2 {};
         RenderFrameData::Tile movableTile {
             .cell = movable.cell,
             .position = {
-                visual.renderPosition.x,
-                visual.renderPosition.y,
+                visual.renderPosition.x + turretRecoil.x,
+                visual.renderPosition.y + turretRecoil.y,
             },
             .color = color,
             .baseElevation = visual.renderPosition.z,

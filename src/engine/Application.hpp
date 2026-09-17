@@ -7,6 +7,7 @@
 #include "engine/AudioSystem.hpp"
 #include "engine/MirrorParticleEffect.hpp"
 #include "engine/ParticleSystem.hpp"
+#include "engine/TurretParticleEffect.hpp"
 #include "engine/OverworldView.hpp"
 #include "engine/CampaignSession.hpp"
 #include "engine/GameplayLoop.hpp"
@@ -204,6 +205,7 @@ private:
     AudioSystem audioSystem_;
     ParticleSystem particleSystem_;
     ParticleEffectDefinition mirrorSwapParticleEffect_;
+    TurretParticleEffects turretParticleEffects_;
     Level level_;
     std::optional<OverworldMap> overworldMap_;
     GameplaySession gameplaySession_;

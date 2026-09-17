@@ -34,11 +34,19 @@ public:
     };
 
     struct UpdateResult {
+        struct TurretShotPresentation {
+            rules::TurretShot shot;
+            // Time from this update to the gameplay impact. The particle
+            // effect starts early enough for its fast trace to arrive then.
+            float impactDelaySeconds = 0.0f;
+        };
+
         bool stateCommitted = false;
         bool screenSolved = false;
         bool draftSolved = false;
         bool mirrorActivated = false;
         std::vector<GridPosition3> mirrorSwapDestinations;
+        std::vector<TurretShotPresentation> turretShots;
     };
 
     [[nodiscard]] static UpdateResult update(

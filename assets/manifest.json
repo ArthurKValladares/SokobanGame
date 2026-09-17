@@ -105,6 +105,16 @@
       "path": "kenney_particle-pack/PNG (Transparent)/smoke_10.png"
     },
     {
+      "name": "Muzzle01",
+      "path": "kenney_particle-pack/PNG (Transparent)/muzzle_01.png",
+      "filter": "linear"
+    },
+    {
+      "name": "ParticleGlow",
+      "path": "kenney_particle-pack/PNG (Transparent)/circle_05.png",
+      "filter": "linear"
+    },
+    {
       "name": "GroundGrass",
       "path": "custom/textures/ground_grass.png",
       "tiling": true,

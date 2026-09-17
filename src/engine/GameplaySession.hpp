@@ -241,6 +241,7 @@ private:
     [[nodiscard]] bool beginAction(
         const Action& action,
         std::vector<GameState> legs = {},
+        std::vector<plans::TurretShotCue> turretShots = {},
         std::size_t causalGroup = 0,
         ActionDeferral deferral = {});
     [[nodiscard]] bool actionAdmissionAllows(const Action& action) const;
@@ -251,6 +252,7 @@ private:
     [[nodiscard]] ActionScheduler::Pending makePending(
         const Action& action,
         const std::vector<GameState>& legs,
+        const std::vector<plans::TurretShotCue>& turretShots,
         ActionDeferral deferral) const;
     // Drops entities some action in flight is already moving.
     //

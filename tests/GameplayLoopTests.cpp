@@ -458,6 +458,36 @@ void testMirrorDuplicationRequiresEveryPlayerOnAnEnd()
     CHECK(!complete.stateCommitted);
 }
 
+void testTurretShotCueIsEmittedWhenTheFiringActionStarts()
+{
+    TEST("turretShotCueIsEmittedWhenTheFiringActionStarts");
+    const Level level = makeLevel({
+        { "...." },
+        { "e  C" },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.25f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+
+    const GameplayLoop::UpdateResult result = GameplayLoop::update(
+        level,
+        session,
+        presentation,
+        { .left = { .pressed = true, .down = true } },
+        0.01f,
+        false);
+
+    CHECK(result.turretShots.size() == 1);
+    if (!result.turretShots.empty()) {
+        const GridPosition3 expectedTarget { 2, 0, 1 };
+        CHECK(result.turretShots[0].shot.target.kind == EntityKind::Player);
+        CHECK(result.turretShots[0].shot.targetCell == expectedTarget);
+        CHECK(result.turretShots[0].impactDelaySeconds > 0.0f);
+    }
+}
+
 } // namespace
 
 int main()
@@ -475,6 +505,7 @@ int main()
     testRejectedMirrorInputDoesNotEmitActivation();
     testSolvedScreenAndDraftOutcomesDiffer();
     testMirrorDuplicationRequiresEveryPlayerOnAnEnd();
+    testTurretShotCueIsEmittedWhenTheFiringActionStarts();
 
     if (failures == 0) {
         std::cout << "GameplayLoopTests: " << checks << " checks passed\n";

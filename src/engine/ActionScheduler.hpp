@@ -61,6 +61,9 @@ public:
         // Transient by design: a restored action already carries its built
         // timeline, so legs are never persisted.
         std::vector<GameState> legs;
+        // One-shot presentation events captured while the transient legs were
+        // planned. They are consumed only by the live action admission path.
+        std::vector<plans::TurretShotCue> turretShots;
         // Negative while the action is deferred - it has been admitted and
         // holds its claims, but has not begun. Zero is the moment it starts.
         // Readers that want a sampling time clamp to [0, duration]; the raw
@@ -104,6 +107,7 @@ public:
         ActionPlan plan;
         ActionReservations reservations;
         std::vector<GameState> legs;
+        std::vector<plans::TurretShotCue> turretShots;
         ActionDeferral deferral;
     };
 
@@ -137,7 +141,8 @@ public:
         const ActionReservations& reservations,
         std::vector<GameState> legs = {},
         std::size_t causalGroup = 0,
-        ActionDeferral deferral = {});
+        ActionDeferral deferral = {},
+        std::vector<plans::TurretShotCue> turretShots = {});
 
     // Admits a whole causal group, or none of it.
     //

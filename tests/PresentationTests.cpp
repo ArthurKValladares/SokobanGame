@@ -7,6 +7,7 @@
 #include "engine/AnimationPreviewScene.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/GameplayPresentation.hpp"
+#include "engine/ParticleConfig.hpp"
 #include "engine/PresentationTransactionBuilder.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/Rules.hpp"
@@ -1304,6 +1305,30 @@ void testTurretMovablesUseTheirModelAndOrientation()
             CHECK(turrets[i]->color.y == 1.0f);
             CHECK(turrets[i]->color.z == 1.0f);
         }
+    }
+
+    presentation.triggerTurretShot(
+        state.movables[0].id, MoveDirection::Up);
+    presentation.advanceClocks(
+        config::turretRecoilDurationSeconds * 0.18f, false);
+    const RenderFrameData recoilFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .moving = false,
+        .projectedState = {},
+        .presentation = presentation,
+        .settings = PresentationSettings {},
+    });
+    const auto recoiling = std::ranges::find_if(
+        recoilFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.renderableId == state.movables[0].id;
+        });
+    CHECK(recoiling != recoilFrame.tiles.end());
+    if (recoiling != recoilFrame.tiles.end()) {
+        // North fires toward -Y, so recoil moves the model toward +Y.
+        CHECK(recoiling->position.y > 0.0f);
     }
 }
 

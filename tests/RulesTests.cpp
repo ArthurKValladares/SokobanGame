@@ -1012,11 +1012,21 @@ void testTurretKillsAPlayerWhoMovesIntoLineOfSight()
     // Occupancy alone does not trigger a shot.
     CHECK(rules::step(level, initial) == initial);
 
-    const GameState shot = rules::step(
+    const rules::StepResult result = rules::stepWithEvents(
         level, initial, MoveDirection::Left);
+    const GameState& shot = result.state;
     CHECK(shot.players[0].cell == cell(2, 0, 1));
     CHECK(shot.players[0].dead);
     CHECK(!shot.players[0].drowned);
+    CHECK(result.turretShots.size() == 1);
+    if (!result.turretShots.empty()) {
+        CHECK(result.turretShots[0].turret.id == initial.movables[0].id);
+        CHECK(result.turretShots[0].target.id == initial.players[0].id);
+        CHECK(result.turretShots[0].target.kind == EntityKind::Player);
+        CHECK(result.turretShots[0].turretCell == cell(0, 0, 1));
+        CHECK(result.turretShots[0].targetCell == cell(2, 0, 1));
+        CHECK(result.turretShots[0].direction == MoveDirection::Right);
+    }
 }
 
 void testRockAndWallBlockTurretLineOfSight()
@@ -1026,12 +1036,14 @@ void testRockAndWallBlockTurretLineOfSight()
         { "....." },
         { "e R C" },
     });
-    const GameState behindRock = rules::step(
+    const rules::StepResult behindRockResult = rules::stepWithEvents(
         rockLevel,
         rules::initialState(rockLevel),
         MoveDirection::Left);
+    const GameState& behindRock = behindRockResult.state;
     CHECK(behindRock.players[0].cell == cell(3, 0, 1));
     CHECK(!behindRock.players[0].dead);
+    CHECK(behindRockResult.turretShots.empty());
 
     const Level wallLevel = makeLevel({
         { "....." },

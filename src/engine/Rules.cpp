@@ -957,7 +957,8 @@ public:
         GameState& after,
         std::optional<MoveDirection> playerInput,
         const StepRates& rates,
-        const StepScope& scope)
+        const StepScope& scope,
+        std::vector<TurretShot>* turretShots = nullptr)
         : level_(level)
         , after_(after)
         , playerInput_(playerInput)
@@ -967,6 +968,7 @@ public:
         , status_(movableCount_ + playerCount_)
         , enemyMoved_(after.enemies.size(), 0)
         , enemyMovedThisMicro_(after.enemies.size(), 0)
+        , turretShots_(turretShots)
     {
         for (Status& status : status_) {
             status.active = scope.wholeWorld();
@@ -1402,7 +1404,10 @@ private:
     {
         std::vector<char> killedPlayers(playerCount_, 0);
         std::vector<char> killedEnemies(after_.enemies.size(), 0);
-        for (const GameState::Movable& turret : after_.movables) {
+        for (std::size_t turretIndex = 0;
+             turretIndex < after_.movables.size();
+             ++turretIndex) {
+            const GameState::Movable& turret = after_.movables[turretIndex];
             const std::optional<MoveDirection> direction =
                 turretDirectionForTile(turret.type);
             if (turret.fallen || !direction) {
@@ -1418,6 +1423,27 @@ private:
                 if (!player.dead && status_[entityIndex].movedThisMicro &&
                     turretSees(turret.cell, *direction, player.cell)) {
                     killedPlayers[playerIndex] = true;
+                    if (turretShots_ != nullptr) {
+                        turretShots_->push_back({
+                            .turret = {
+                                EntityKind::Movable,
+                                resolvedEntityId(
+                                    EntityKind::Movable,
+                                    turret.id,
+                                    turretIndex),
+                            },
+                            .target = {
+                                EntityKind::Player,
+                                resolvedEntityId(
+                                    EntityKind::Player,
+                                    player.id,
+                                    playerIndex),
+                            },
+                            .turretCell = turret.cell,
+                            .targetCell = player.cell,
+                            .direction = *direction,
+                        });
+                    }
                 }
             }
             for (std::size_t enemyIndex = 0;
@@ -1428,6 +1454,27 @@ private:
                     enemyMovedThisMicro_[enemyIndex] &&
                     turretSees(turret.cell, *direction, enemy.cell)) {
                     killedEnemies[enemyIndex] = true;
+                    if (turretShots_ != nullptr) {
+                        turretShots_->push_back({
+                            .turret = {
+                                EntityKind::Movable,
+                                resolvedEntityId(
+                                    EntityKind::Movable,
+                                    turret.id,
+                                    turretIndex),
+                            },
+                            .target = {
+                                EntityKind::Enemy,
+                                resolvedEntityId(
+                                    EntityKind::Enemy,
+                                    enemy.id,
+                                    enemyIndex),
+                            },
+                            .turretCell = turret.cell,
+                            .targetCell = enemy.cell,
+                            .direction = *direction,
+                        });
+                    }
                 }
             }
         }
@@ -1569,6 +1616,7 @@ private:
     // Unlike the attack closure above, turret triggers are edge events: only
     // motion in the current micro-step counts.
     std::vector<char> enemyMovedThisMicro_;
+    std::vector<TurretShot>* turretShots_ = nullptr;
 };
 
 } // namespace
@@ -1582,6 +1630,16 @@ GameState step(
     return scopedStep(level, state, playerInput, rates, StepScope {});
 }
 
+StepResult stepWithEvents(
+    const Level& level,
+    const GameState& state,
+    std::optional<MoveDirection> playerInput,
+    const StepRates& rates)
+{
+    return scopedStepWithEvents(
+        level, state, playerInput, rates, StepScope {});
+}
+
 GameState scopedStep(
     const Level& level,
     const GameState& state,
@@ -1593,6 +1651,25 @@ GameState scopedStep(
     MicroStepResolver resolver(level, after, playerInput, rates, scope);
     resolver.run();
     return after;
+}
+
+StepResult scopedStepWithEvents(
+    const Level& level,
+    const GameState& state,
+    std::optional<MoveDirection> playerInput,
+    const StepRates& rates,
+    const StepScope& scope)
+{
+    StepResult result { .state = state };
+    MicroStepResolver resolver(
+        level,
+        result.state,
+        playerInput,
+        rates,
+        scope,
+        &result.turretShots);
+    resolver.run();
+    return result;
 }
 
 } // namespace sokoban::rules

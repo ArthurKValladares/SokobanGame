@@ -51,11 +51,22 @@ namespace plans {
 // are deliberately not part of `ActionPlan`: actions are persisted inside save
 // files, and a restored action already carries the built timeline, so it has no
 // use for them.
+struct TurretShotCue {
+    rules::TurretShot shot;
+    // Zero-based world-step leg whose end is the impact moment.
+    std::size_t legIndex = 0;
+
+    bool operator==(const TurretShotCue&) const = default;
+};
+
 struct PlannedAction {
     ActionPlan action;
     // One state per world step. `legs.back()` is always `action.after`, and the
     // state before `legs[i]` is `legs[i - 1]`, or `action.before` when i is 0.
     std::vector<GameState> legs;
+    // Transient presentation cues, just like legs: undo and save replay must
+    // never fire a weapon merely because an old action is being reconstructed.
+    std::vector<TurretShotCue> turretShots;
 
     bool operator==(const PlannedAction&) const = default;
 };

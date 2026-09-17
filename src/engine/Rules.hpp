@@ -88,6 +88,27 @@ struct StepRates {
     bool operator==(const StepRates&) const = default;
 };
 
+// A presentation cue emitted at the exact point where rule resolution decides
+// that a turret has a clear shot. Keeping this in the rules result means
+// visuals never have to guess whether a death came from a turret, an enemy, or
+// water, and a volley can retain every firing turret.
+struct TurretShot {
+    EntityTarget turret;
+    EntityTarget target;
+    GridPosition3 turretCell {};
+    GridPosition3 targetCell {};
+    MoveDirection direction = MoveDirection::Up;
+
+    bool operator==(const TurretShot&) const = default;
+};
+
+struct StepResult {
+    GameState state;
+    std::vector<TurretShot> turretShots;
+
+    bool operator==(const StepResult&) const = default;
+};
+
 [[nodiscard]] GameState initialState(const Level& level);
 
 [[nodiscard]] bool anyPlayerDead(const GameState& state);
@@ -200,12 +221,27 @@ struct StepScope {
     std::optional<MoveDirection> playerInput = std::nullopt,
     const StepRates& rates = {});
 
+// Event-bearing forms used by action planning. The ordinary state-only entry
+// points remain the stable gameplay/save replay API.
+[[nodiscard]] StepResult stepWithEvents(
+    const Level& level,
+    const GameState& state,
+    std::optional<MoveDirection> playerInput = std::nullopt,
+    const StepRates& rates = {});
+
 // The same step, restricted to the entities the scope names.
 //
 // `step` is exactly this with an empty scope, and the two must stay that way:
 // every save in existence is validated by replaying it through the whole-world
 // form, so it cannot be allowed to drift.
 [[nodiscard]] GameState scopedStep(
+    const Level& level,
+    const GameState& state,
+    std::optional<MoveDirection> playerInput,
+    const StepRates& rates,
+    const StepScope& scope);
+
+[[nodiscard]] StepResult scopedStepWithEvents(
     const Level& level,
     const GameState& state,
     std::optional<MoveDirection> playerInput,

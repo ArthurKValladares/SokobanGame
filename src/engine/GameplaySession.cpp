@@ -565,7 +565,11 @@ GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
 
     std::vector<ActionScheduler::Pending> batch;
     batch.push_back(
-        makePending(step->action, step->legs, ActionDeferral {}));
+        makePending(
+            step->action,
+            step->legs,
+            step->turretShots,
+            ActionDeferral {}));
 
     // Whatever the step leaves travelling, planned from the state the step
     // produces and starting one step behind it. Every slider goes into one
@@ -583,6 +587,7 @@ GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
         batch.push_back(makePending(
             slide->action,
             slide->legs,
+            slide->turretShots,
             ActionDeferral { .steps = stepLegs, .seconds = stepDuration }));
     }
 
@@ -633,7 +638,10 @@ GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
         if (!actionAdmissionAllows(slide->action)) {
             return StartOutcome::Impossible;
         }
-        return beginAction(slide->action, std::move(slide->legs))
+        return beginAction(
+                   slide->action,
+                   std::move(slide->legs),
+                   std::move(slide->turretShots))
             ? StartOutcome::Started
             : StartOutcome::Refused;
     }
@@ -649,7 +657,10 @@ GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
         if (!actionAdmissionAllows(ride->action)) {
             return StartOutcome::Impossible;
         }
-        return beginAction(ride->action, std::move(ride->legs))
+        return beginAction(
+                   ride->action,
+                   std::move(ride->legs),
+                   std::move(ride->turretShots))
             ? StartOutcome::Started
             : StartOutcome::Refused;
     }
@@ -824,14 +835,20 @@ void GameplaySession::setActionDuration(
 bool GameplaySession::beginAction(
     const Action& action,
     std::vector<GameState> legs,
+    std::vector<plans::TurretShotCue> turretShots,
     std::size_t causalGroup,
     ActionDeferral deferral)
 {
     const ActionReservations claims =
-        makePending(action, legs, deferral).reservations;
+        makePending(action, legs, turretShots, deferral).reservations;
     return std::holds_alternative<ActionScheduler::Started>(
         scheduler_.tryStart(
-            action, claims, std::move(legs), causalGroup, deferral));
+            action,
+            claims,
+            std::move(legs),
+            causalGroup,
+            deferral,
+            std::move(turretShots)));
 }
 
 bool GameplaySession::actionAdmissionAllows(const Action& action) const
@@ -863,6 +880,7 @@ bool GameplaySession::actionAdmissionAllows(
 ActionScheduler::Pending GameplaySession::makePending(
     const Action& action,
     const std::vector<GameState>& legs,
+    const std::vector<plans::TurretShotCue>& turretShots,
     ActionDeferral deferral) const
 {
     // Two different needs, deliberately not conflated.
@@ -887,6 +905,7 @@ ActionScheduler::Pending GameplaySession::makePending(
         .plan = action,
         .reservations = plans::reservationsFor(claimed),
         .legs = legs,
+        .turretShots = turretShots,
         .deferral = deferral,
     };
 }

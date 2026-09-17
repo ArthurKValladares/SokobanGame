@@ -179,6 +179,8 @@ Application::Application(ApplicationOptions options)
     , audioSystem_(assetRoot_, assetManifest_)
     , mirrorSwapParticleEffect_(
           makeMirrorSwapParticleEffect(assetManifest_))
+    , turretParticleEffects_(
+          makeTurretParticleEffects(assetManifest_))
     , settingsCoordinator_(playerProfile_, presentationSettings_)
 #if SOKOBAN_ENABLE_DEBUG_UI
     , tools_(std::make_unique<ApplicationTools>())
@@ -872,6 +874,18 @@ void Application::update(
                 },
                 mirrorSwapParticleEffect_);
         }
+    }
+    for (const GameplayLoop::UpdateResult::TurretShotPresentation& shot :
+         gameplayResult.turretShots) {
+        const float recoilDelay = emitTurretShotParticles(
+            particleSystem_,
+            turretParticleEffects_,
+            shot.shot,
+            shot.impactDelaySeconds);
+        presentation_.triggerTurretShot(
+            shot.shot.turret.id,
+            shot.shot.direction,
+            recoilDelay);
     }
     if (gameplayResult.draftSolved) {
 #if SOKOBAN_ENABLE_DEBUG_UI

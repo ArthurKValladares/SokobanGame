@@ -58,6 +58,11 @@ public:
         float transitionSeconds);
     void advanceAnimations(float dt, const GameState& state);
     void advanceAnimations(float dt) { advanceAnimations(dt, {}); }
+    void triggerTurretShot(
+        EntityId turretId,
+        MoveDirection direction,
+        float delaySeconds = 0.0f);
+    [[nodiscard]] Vec2 turretRecoilOffset(EntityId turretId) const;
     [[nodiscard]] ActionPresentationTimeline buildActionPresentation(
         const GameplaySession::Action& action) const;
     // Chain-aware: `legs` are the states the action passes through, one per
@@ -86,6 +91,12 @@ public:
     [[nodiscard]] const std::vector<EnemyVisual>& enemies() const { return enemies_; }
 
 private:
+    struct TurretRecoil {
+        EntityId turretId = invalidEntityId;
+        MoveDirection direction = MoveDirection::Up;
+        float ageSeconds = 0.0f;
+    };
+
     static void setImmediatePosition(EntityVisual& visual, Vec3 target);
     [[nodiscard]] EntityVisual* findMotionVisual(EntityTarget target);
     [[nodiscard]] AnimatedActorVisual* findAnimatedVisual(EntityTarget target);
@@ -93,6 +104,7 @@ private:
     std::vector<PlayerVisual> players_;
     std::vector<EntityVisual> movables_;
     std::vector<EnemyVisual> enemies_;
+    std::vector<TurretRecoil> turretRecoils_;
     const AnimationCatalog* animationCatalog_ = nullptr;
     // Where a reversed action's timeline is sampled from. The only piece of
     // per-action state the presentation keeps; three sibling members were

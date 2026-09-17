@@ -123,14 +123,21 @@ void addChanged(
     const rules::StepScope& scope,
     bool chainSlides)
 {
-    GameState current =
-        rules::scopedStep(level, state, playerInput, rates, scope);
+    rules::StepResult firstStep = rules::scopedStepWithEvents(
+        level, state, playerInput, rates, scope);
+    GameState current = std::move(firstStep.state);
     if (current == state) {
         return std::nullopt;
     }
 
     plans::PlannedAction planned;
     planned.legs.push_back(current);
+    for (rules::TurretShot& shot : firstStep.turretShots) {
+        planned.turretShots.push_back({
+            .shot = std::move(shot),
+            .legIndex = 0,
+        });
+    }
 
     if (chainSlides) {
         // The scope grows as planning discovers the closure: a block that gets
@@ -147,8 +154,9 @@ void addChanged(
         while (static_cast<int>(planned.legs.size()) < plans::maxChainedSteps &&
             (wholeWorld ? plans::anySlideMomentum(current)
                         : anySlideMomentumWithin(current, closure))) {
-            GameState next =
-                rules::scopedStep(level, current, std::nullopt, rates, chainScope);
+            rules::StepResult step = rules::scopedStepWithEvents(
+                level, current, std::nullopt, rates, chainScope);
+            GameState next = std::move(step.state);
             if (next == current) {
                 // Momentum that cannot be spent - nothing would change by
                 // asking again, so stop rather than spin.
@@ -160,6 +168,13 @@ void addChanged(
             }
             current = std::move(next);
             planned.legs.push_back(current);
+            const std::size_t legIndex = planned.legs.size() - 1;
+            for (rules::TurretShot& shot : step.turretShots) {
+                planned.turretShots.push_back({
+                    .shot = std::move(shot),
+                    .legIndex = legIndex,
+                });
+            }
         }
     }
 

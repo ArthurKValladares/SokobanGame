@@ -25,6 +25,15 @@ struct ParticleEffectDefinition {
     bool drawOnTop = false;
 };
 
+// A reusable line emitter built from ordinary particles. Each sample becomes
+// visible when a virtual projectile reaches it, then fades on its own, leaving
+// a short-lived trace behind the moving head.
+struct ParticleTrailDefinition {
+    ParticleEffectDefinition particle;
+    float spacing = 0.15f;
+    float speed = 24.0f;
+};
+
 // Vulkan-free particle simulation. Effects describe an emission burst while
 // ParticleSystem owns each live particle's randomized state and lifetime.
 class ParticleSystem {
@@ -32,7 +41,15 @@ public:
     ParticleSystem();
     explicit ParticleSystem(uint32_t randomSeed);
 
-    void emit(Vec3 origin, const ParticleEffectDefinition& effect);
+    void emit(
+        Vec3 origin,
+        const ParticleEffectDefinition& effect,
+        float delaySeconds = 0.0f);
+    void emitTrail(
+        Vec3 start,
+        Vec3 end,
+        const ParticleTrailDefinition& trail,
+        float delaySeconds = 0.0f);
     void update(float dt);
     void reset();
 
