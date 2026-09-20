@@ -408,6 +408,18 @@ void testLayoutValidationAndIndependentScreens()
             [&] { (void)OverworldMap::load(project.root); },
             "exactly one Player tile; found 2");
     }
+
+    {
+        TestProject project("knight_overworld");
+        Level::Definition knight = westDefinition();
+        knight.character = CharacterType::Knight;
+        project.writeScreen(1, knight);
+        project.writeScreen(2, eastDefinition());
+        project.writeLayout(eastWestLayout());
+        checkThrowsContaining(
+            [&] { (void)OverworldMap::load(project.root); },
+            "must use character rogue");
+    }
 }
 
 void testSelectorOwnershipAndCoverage()

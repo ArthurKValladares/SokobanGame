@@ -236,6 +236,10 @@ private:
 
         RenderFrameData::Tile renderTile = tileVisual(
             tile, cell, input_.manifest, input_.settings);
+        if (tile == TileType::Player) {
+            renderTile.model = input_.manifest.characterModel(
+                definition.character.value_or(CharacterType::Rogue));
+        }
         renderTile.pickable = false;
         renderTile.affectsCameraFit = false;
         const bool animatedActor =
@@ -414,6 +418,10 @@ private:
         // looking different from the tile the editor draws.
         RenderFrameData::Tile renderTile = tileVisual(
             tile, { x, y, z }, input_.manifest, input_.settings);
+        if (tile == TileType::Player) {
+            renderTile.model = input_.manifest.characterModel(
+                input_.editor.character());
+        }
         renderTile.baseElevation += preview ? 0.02f : 0.0f;
         renderTile.pickOnly = pickOnly;
         renderTile.isEditorPreview = preview;

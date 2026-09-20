@@ -628,7 +628,7 @@ void appendGameplayEntities(
             .showGrid = false,
             .affectsCameraFit = false,
             .isPrimaryPlayer = playerIndex == 0,
-            .model = input.manifest.playerModel(),
+            .model = input.manifest.characterModel(input.level.character()),
             .animation = animation,
             .animationFallback = fallback,
             .animationInstanceId = actorAnimationInstance(visual.motion.target),
@@ -893,7 +893,7 @@ void appendMirrorGhostTile(
         .showGrid = false,
         .affectsCameraFit = false,
         .model = entity.player
-            ? input.manifest.playerModel()
+            ? input.manifest.characterModel(input.level.character())
             : input.manifest.modelForTile(
                   state.movables[entity.movableIndex].type),
         .animation = entity.player

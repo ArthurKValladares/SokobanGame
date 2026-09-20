@@ -488,6 +488,10 @@ void testRealManifestFile()
     const AssetManifest manifest =
         AssetManifest::loadFromFile(*root / "manifest.json");
     CHECK_MESSAGE(!manifest.playerModel().isCube(), "real manifest has a player model");
+    CHECK_MESSAGE(
+        manifest.characterModel(sokoban::CharacterType::Knight) ==
+            manifest.modelIdByName("Knight"),
+        "real manifest resolves the knight character model");
     CHECK_MESSAGE(manifest.soundSet("footsteps").size() == 5, "real manifest footsteps");
     CHECK_MESSAGE(manifest.soundSet("stone-drag").size() == 4, "real manifest drags");
     CHECK_MESSAGE(manifest.soundSet("mirror-swap").size() == 1, "real manifest mirror swap");

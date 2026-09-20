@@ -29,15 +29,11 @@ using namespace sokoban;
 }
 
 [[nodiscard]] Level makeLevel(
-    const std::vector<std::vector<std::string>>& layers)
+    const std::vector<std::vector<std::string>>& layers,
+    CharacterType character = CharacterType::Rogue)
 {
-    std::vector<std::string> lines;
-    for (std::size_t layer = 0; layer < layers.size(); ++layer) {
-        lines.push_back("@layer " + std::to_string(layer));
-        lines.insert(lines.end(), layers[layer].begin(), layers[layer].end());
-        lines.emplace_back();
-    }
-    return Level::loadFromLines(lines, "test level");
+    return Level::loadFromDefinition(
+        { .layers = layers, .character = character }, "test level");
 }
 
 // Ground along the bottom layer, with the player at (1,0) and a rock at (2,0)
@@ -116,6 +112,26 @@ void testWalkingWithoutPushing()
         // Nothing was in the way, so this is a walk rather than a push.
         CHECK(!planned->action.playerPushing);
         CHECK(planned->action.after.movables[0].cell == cell(2, 0, 1));
+    }
+}
+
+void testKnightEnemyPushUsesThePushPresentation()
+{
+    TEST("knightEnemyPushUsesThePushPresentation");
+    const Level level = makeLevel({
+        { "..." },
+        { "CN " },
+    }, CharacterType::Knight);
+    const std::optional<plans::PlannedAction> planned = plans::worldStep(
+        level,
+        rules::initialState(level),
+        MoveDirection::Right,
+        {},
+        0.25f);
+    CHECK(planned.has_value());
+    if (planned) {
+        CHECK(planned->action.playerPushing);
+        CHECK(planned->action.after.enemies[0].cell == cell(2, 0, 1));
     }
 }
 
@@ -683,6 +699,7 @@ int main()
     testWorldStepWithoutMovementHasNoPlan();
     testPlanningIsPureAndRepeatable();
     testWalkingWithoutPushing();
+    testKnightEnemyPushUsesThePushPresentation();
     testRestartPlan();
     testInvertedSwapsEndpointsAndCounts();
     testPlayerMovementHelpers();

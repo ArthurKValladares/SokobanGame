@@ -123,6 +123,12 @@ const AssetManifest& testManifest()
           "role": "player"
         },
         {
+          "name": "Knight",
+          "path": "knight.glb",
+          "geometry": "skinned",
+          "material": { "mode": "texture", "texture": "Tex" }
+        },
+        {
           "name": "Enemy",
           "path": "enemy.glb",
           "geometry": "skinned",
@@ -627,6 +633,42 @@ void testGameplayFrameUsesSettingsAndPresentation()
     CHECK(near(player->position.x, -0.5f));
     CHECK(player->animation == testManifest().playerIdleAnimation());
     CHECK(near(conveyor->beltScrollOffset, 0.75f));
+}
+
+void testGameplayFrameUsesTheLevelsCharacterModel()
+{
+    TEST("gameplayFrameUsesTheLevelsCharacterModel");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "." },
+            { "C" },
+        },
+        .character = CharacterType::Knight,
+    }, "knight presentation frame");
+    const GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    PresentationSettings settings;
+    GameplaySession::Action action;
+
+    const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .projectedState = action.after,
+        .presentation = presentation,
+        .settings = settings,
+    });
+    const auto player = std::ranges::find_if(
+        frame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.isPrimaryPlayer;
+        });
+    CHECK(player != frame.tiles.end());
+    if (player != frame.tiles.end()) {
+        CHECK(player->model == testManifest().modelIdByName("Knight"));
+        CHECK(player->animation == testManifest().playerIdleAnimation());
+    }
 }
 
 void testSelectorFlagReflectsTargetCompletion()
@@ -2375,6 +2417,7 @@ int main()
     testPresentationResetClocksAndFallenTargets();
     testPresentationInterpolatesActionsAndClips();
     testGameplayFrameUsesSettingsAndPresentation();
+    testGameplayFrameUsesTheLevelsCharacterModel();
     testSelectorFlagReflectsTargetCompletion();
     testDecorativeTileRendersWithoutChangingCameraExtent();
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();

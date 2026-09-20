@@ -15,15 +15,12 @@ namespace {
 
 using namespace sokoban;
 
-Level makeLevel(const std::vector<std::vector<std::string>>& layers)
+Level makeLevel(
+    const std::vector<std::vector<std::string>>& layers,
+    CharacterType character = CharacterType::Rogue)
 {
-    std::vector<std::string> lines;
-    for (size_t layer = 0; layer < layers.size(); ++layer) {
-        lines.push_back("@layer " + std::to_string(layer));
-        lines.insert(lines.end(), layers[layer].begin(), layers[layer].end());
-        lines.emplace_back();
-    }
-    return Level::loadFromLines(lines, "test level");
+    return Level::loadFromDefinition(
+        { .layers = layers, .character = character }, "test level");
 }
 
 GridPosition3 cell(int x, int y, int z)
@@ -143,6 +140,53 @@ void testPushBlocked()
     });
     const GameState rockState = rules::initialState(rockBehind);
     CHECK(rules::step(rockBehind, rockState, MoveDirection::Right) == rockState);
+}
+
+void testKnightPushesAnUnlimitedMixedChain()
+{
+    TEST("knightPushesAnUnlimitedMixedChain");
+    const Level level = makeLevel({
+        { "......" },
+        { "CRRnN " },
+    }, CharacterType::Knight);
+    const GameState initial = rules::initialState(level);
+
+    const GameState pushed = rules::step(
+        level, initial, MoveDirection::Right);
+    CHECK(pushed.players[0].cell == cell(1, 0, 1));
+    CHECK(pushed.movables[0].cell == cell(2, 0, 1));
+    CHECK(pushed.movables[1].cell == cell(3, 0, 1));
+    CHECK(pushed.movables[2].type == TileType::TurretNorth);
+    CHECK(pushed.movables[2].cell == cell(4, 0, 1));
+    CHECK(pushed.enemies[0].cell == cell(5, 0, 1));
+    CHECK(!pushed.players[0].dead);
+}
+
+void testKnightChainPushIsAtomicWhenItsTailIsBlocked()
+{
+    TEST("knightChainPushIsAtomicWhenItsTailIsBlocked");
+    const Level level = makeLevel({
+        { "....." },
+        { "CRRN#" },
+    }, CharacterType::Knight);
+    const GameState initial = rules::initialState(level);
+
+    CHECK(rules::step(level, initial, MoveDirection::Right) == initial);
+}
+
+void testKnightCanPushAnEnemyButStillSuffersItsAttack()
+{
+    TEST("knightCanPushAnEnemyButStillSuffersItsAttack");
+    const Level level = makeLevel({
+        { "..." },
+        { "CN " },
+    }, CharacterType::Knight);
+
+    const GameState pushed = rules::step(
+        level, rules::initialState(level), MoveDirection::Right);
+    CHECK(pushed.players[0].cell == cell(1, 0, 1));
+    CHECK(pushed.enemies[0].cell == cell(2, 0, 1));
+    CHECK(pushed.players[0].dead);
 }
 
 void testIceSlidesOneTilePerStep()
@@ -1309,6 +1353,9 @@ int main()
     testStepIsPure();
     testPushRock();
     testPushBlocked();
+    testKnightPushesAnUnlimitedMixedChain();
+    testKnightChainPushIsAtomicWhenItsTailIsBlocked();
+    testKnightCanPushAnEnemyButStillSuffersItsAttack();
     testIceSlidesOneTilePerStep();
     testPlayerMovesWhileIceSlides();
     testPlayerMovesWhileConveyorCarriesRock();

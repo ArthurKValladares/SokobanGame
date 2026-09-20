@@ -27,9 +27,9 @@ std::optional<MoveDirection> movementDirection(
     return std::nullopt;
 }
 
-// A push is a movable that was in the cell the player stepped into and is no
-// longer there. Only direct input pushes, so this is not derived for automatic
-// steps.
+// A push is a movable or enemy that was in the cell the player stepped into
+// and is no longer there. Only direct input pushes, so this is not derived for
+// automatic steps.
 [[nodiscard]] bool derivePlayerPushing(
     const GameState& before,
     const GameState& after,
@@ -43,6 +43,14 @@ std::optional<MoveDirection> movementDirection(
         for (std::size_t i = 0; i < count; ++i) {
             if (before.movables[i].cell == pushCell &&
                 !(after.movables[i].cell == pushCell)) {
+                return true;
+            }
+        }
+        const std::size_t enemyCount =
+            std::min(before.enemies.size(), after.enemies.size());
+        for (std::size_t i = 0; i < enemyCount; ++i) {
+            if (before.enemies[i].cell == pushCell &&
+                !(after.enemies[i].cell == pushCell)) {
                 return true;
             }
         }

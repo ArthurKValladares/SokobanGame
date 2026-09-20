@@ -121,7 +121,7 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
 
     // Every valid level has a player, and gameplay can select any of these
     // clips without the level data changing.
-    requirements.requireModel(manifest.playerModel());
+    requirements.requireModel(manifest.characterModel(level.character()));
     auto requireUse = [&](AnimationUse use, RenderAnimation fallback) {
         requirements.requireAnimation(
             animations != nullptr ? animations->animation(use) : fallback);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/Character.hpp"
 #include "engine/TextureSource.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/RenderTypes.hpp"
@@ -195,6 +196,7 @@ public:
     [[nodiscard]] float tileScale(TileType type) const { return tileVisual(type).scale; }
 
     [[nodiscard]] RenderModel playerModel() const { return playerModel_; }
+    [[nodiscard]] RenderModel characterModel(CharacterType character) const;
     [[nodiscard]] RenderAnimation playerIdleAnimation() const { return playerIdle_; }
     [[nodiscard]] RenderAnimation playerMoveAnimation() const { return playerMove_; }
     [[nodiscard]] RenderAnimation playerPushAnimation() const { return playerPush_; }

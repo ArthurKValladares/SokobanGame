@@ -53,6 +53,7 @@ const AssetManifest& testManifest()
         { "name": "ScreenSelectorBSolved", "path": "flag-b-green.gltf" },
         { "name": "ScreenSelectorBUnavailable", "path": "flag-b-red.gltf" },
         { "name": "Hero", "path": "hero.glb", "geometry": "skinned", "role": "player" },
+        { "name": "Knight", "path": "knight.glb", "geometry": "skinned" },
         { "name": "Enemy", "path": "enemy.glb", "geometry": "skinned", "role": "enemy" }
       ],
       "animations": [
@@ -197,6 +198,24 @@ void testFrameRequirementsOnlyContainReferencedAssets()
     CHECK(requirements.animationCount() == 2);
     CHECK(requirements.textureCount() == 1);
     CHECK(requirements.contains(manifest.textureIdByName("Smoke03")));
+}
+
+void testKnightLevelRequiresKnightInsteadOfRogueModel()
+{
+    TEST("knightLevelRequiresKnightInsteadOfRogueModel");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "." },
+            { "C" },
+        },
+        .character = CharacterType::Knight,
+    }, "knight requirements");
+    const AssetManifest& manifest = testManifest();
+    const RenderAssetRequirements requirements =
+        renderAssetRequirementsForLevel(level, manifest);
+    CHECK(requirements.contains(manifest.modelIdByName("Knight")));
+    CHECK(!requirements.contains(manifest.playerModel()));
+    CHECK(requirements.contains(manifest.playerIdleAnimation()));
 }
 
 void testMergeDeduplicatesRequirements()
@@ -386,6 +405,7 @@ int main()
     testLevelRequirementsIncludeDynamicAndStaticAssets();
     testSelectorRequirementsIncludeEveryFlagState();
     testFrameRequirementsOnlyContainReferencedAssets();
+    testKnightLevelRequiresKnightInsteadOfRogueModel();
     testMergeDeduplicatesRequirements();
     testCubeAndNoneAreNeverRequirements();
     testGroundSplatTexturesAreRequired();

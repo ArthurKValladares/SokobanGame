@@ -220,13 +220,16 @@ controllers fall back to the generic glyph set.
 
 ## Level Format
 
-Screens are text `.scr` files containing sequential `@layer N` sections. An
-optional `@water N` directive makes Air on that layer resolve to Water and
+Screens are text `.scr` files containing sequential `@layer N` sections. Each
+authored screen declares `@character rogue` or `@character knight`; legacy
+screens without the directive default to the rogue. An optional `@water N`
+directive makes Air on that layer resolve to Water and
 extends the water beyond the authored board without expanding camera bounds.
 Any number of `@decoration` directives may reference manifest model names and
 provide authored transforms. Metadata must appear before `@layer 0`.
 
 ```text
+@character rogue
 @water 0
 @decoration {"model":"Tree","position":[4.5,2.5,1.0],"rotation":[0.0,0.0,30.0],"scale":[1.0,1.0,1.25]}
 @decoration {"light":{"castsShadows":true,"color":[1.0,0.55,0.2],"intensity":3.0,"offset":[0.0,0.0,1.2],"range":6.0,"shadowBias":0.004,"shadowOpacity":0.9},"model":"Lantern","position":[2.5,1.5,1.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
@@ -262,6 +265,11 @@ remains supported for older screens.
 Turrets are pushable movables. A turret shoots a player or enemy whenever that
 unit moves into its cardinal line of sight; walls, rocks, and other live units
 block the shot.
+
+The rogue uses the original one-object push rules and is always used in the
+overworld. The knight can push any-length contiguous chains containing rocks,
+ice blocks, turrets, and enemies, provided the entire chain has a valid place
+to move. Hazards and enemy attacks still resolve normally after the push.
 
 Mesh decoration positions are world-space tile coordinates, rotations are XYZ
 Euler degrees, and scales must be positive. Their `model` names must exist in

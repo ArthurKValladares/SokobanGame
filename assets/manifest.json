@@ -6,6 +6,10 @@
       "path": "KayKit Adventurers 2.0/Characters/gltf/rogue_texture.png"
     },
     {
+      "name": "Knight",
+      "path": "KayKit Adventurers 2.0/Characters/gltf/knight_texture.png"
+    },
+    {
       "name": "Barbarian",
       "path": "KayKit Adventurers 2.0/Characters/gltf/barbarian_texture.png"
     },
@@ -324,6 +328,17 @@
       "preserveAspectRatio": true,
       "rotateHalfTurn": true,
       "role": "player"
+    },
+    {
+      "name": "Knight",
+      "path": "KayKit Adventurers 2.0/Characters/gltf/Knight.glb",
+      "geometry": "skinned",
+      "material": {
+        "mode": "texture",
+        "texture": "Knight"
+      },
+      "preserveAspectRatio": true,
+      "rotateHalfTurn": true
     },
     {
       "name": "Barbarian",

@@ -1358,6 +1358,26 @@ private:
         if (playerBlocksAt(after_, target, playerIndex)) {
             return false;
         }
+        if (status.inputDriven &&
+            level_.character() == CharacterType::Knight) {
+            const std::vector<ChainEntity> chain = pushChainAt(target, direction);
+            if (!chain.empty()) {
+                // A movable with its own unresolved intent gets the same chance
+                // to vacate that the ordinary one-block push gives it.
+                for (const ChainEntity& entity : chain) {
+                    if (entity.movable && !status_[entity.index].resolved) {
+                        return false;
+                    }
+                }
+                if (pushKnightChain(chain, direction)) {
+                    applyPlayerMove(entityIndex, direction, target);
+                    status.movedThisMicro = true;
+                    anyMovement = true;
+                }
+                status.resolved = true;
+                return true;
+            }
+        }
         if (enemyAt(after_, target) != nullptr) {
             if (playerSliding(after_, playerIndex)) {
                 playerSliding(after_, playerIndex).reset();
@@ -1418,6 +1438,111 @@ private:
         return true;
     }
 
+    struct ChainEntity {
+        bool movable = false;
+        std::size_t index = 0;
+    };
+
+    [[nodiscard]] std::optional<ChainEntity> pushableAt(
+        const GameState& state,
+        GridPosition3 cell) const
+    {
+        if (const GameState::Movable* movable = movableAt(state, cell)) {
+            return ChainEntity {
+                .movable = true,
+                .index = static_cast<std::size_t>(
+                    movable - state.movables.data()),
+            };
+        }
+        if (const GameState::Enemy* enemy = enemyAt(state, cell)) {
+            return ChainEntity {
+                .movable = false,
+                .index = static_cast<std::size_t>(
+                    enemy - state.enemies.data()),
+            };
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::vector<ChainEntity> pushChainAt(
+        GridPosition3 firstCell,
+        MoveDirection direction) const
+    {
+        std::vector<ChainEntity> chain;
+        GridPosition3 cell = firstCell;
+        while (const std::optional<ChainEntity> entity =
+                   pushableAt(after_, cell)) {
+            chain.push_back(*entity);
+            cell = movementTarget(cell, direction);
+        }
+        return chain;
+    }
+
+    // Validates the complete mixed chain against a copy before committing any
+    // entity. Farthest-first movement then gives every block, turret, or enemy
+    // exactly one newly vacated destination and keeps a failed push atomic.
+    [[nodiscard]] bool pushKnightChain(
+        const std::vector<ChainEntity>& chain,
+        MoveDirection direction)
+    {
+        GameState trial = after_;
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+            const ChainEntity entity = *it;
+            if (entity.movable) {
+                if (status_[entity.index].movedThisMicro) {
+                    return false;
+                }
+                const GridPosition3 destination = movementTarget(
+                    trial.movables[entity.index].cell, direction);
+                if (!staticCellAllowsEntity(level_, destination) ||
+                    movableBlocksAt(trial, destination, entity.index) ||
+                    enemyBlocksAt(trial, destination) ||
+                    playerBlocksAt(trial, destination)) {
+                    return false;
+                }
+                const FallResult fall = movableFallTarget(
+                    level_, trial, entity.index, destination);
+                if (!fall.supported) {
+                    return false;
+                }
+                trial.movables[entity.index].cell = fall.cell;
+                trial.movables[entity.index].fallen = fall.fallen;
+            } else {
+                const GridPosition3 destination = movementTarget(
+                    trial.enemies[entity.index].cell, direction);
+                if (!staticCellAllowsEntity(level_, destination) ||
+                    movableBlocksAt(
+                        trial, destination, trial.movables.size()) ||
+                    enemyBlocksAt(trial, destination, entity.index) ||
+                    playerBlocksAt(trial, destination)) {
+                    return false;
+                }
+                const FallResult fall = enemyFallTarget(
+                    level_, trial, entity.index, destination);
+                if (!fall.supported) {
+                    return false;
+                }
+                trial.enemies[entity.index].cell = fall.cell;
+                trial.enemies[entity.index].fallen = fall.fallen;
+            }
+        }
+
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+            const ChainEntity entity = *it;
+            if (entity.movable) {
+                const GridPosition3 destination = movementTarget(
+                    after_.movables[entity.index].cell, direction);
+                applyMovableMove(entity.index, direction, destination);
+                status_[entity.index].movedThisMicro = true;
+                status_[entity.index].done = false;
+                status_[entity.index].active = true;
+            } else {
+                applyEnemyMove(entity.index, direction);
+            }
+        }
+        return true;
+    }
+
     [[nodiscard]] bool canPushEnemy(
         std::size_t enemyIndex,
         MoveDirection direction) const
@@ -1439,6 +1564,14 @@ private:
         if (!canPushEnemy(enemyIndex, direction)) {
             return false;
         }
+        applyEnemyMove(enemyIndex, direction);
+        return true;
+    }
+
+    void applyEnemyMove(
+        std::size_t enemyIndex,
+        MoveDirection direction)
+    {
         const GridPosition3 destination = movementTarget(
             after_.enemies[enemyIndex].cell,
             direction);
@@ -1451,7 +1584,6 @@ private:
         // including for whoever it has just been parked next to.
         enemyMoved_[enemyIndex] = true;
         enemyMovedThisMicro_[enemyIndex] = true;
-        return true;
     }
 
     // A turret normally reacts to movement, while two turrets aimed directly

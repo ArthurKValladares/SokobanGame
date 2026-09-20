@@ -70,6 +70,31 @@ void testSerializationRoundTrip()
     CHECK(Level::parseLayerRows(serialized, "round trip") == layered);
 }
 
+void testCharacterMetadataRoundTripAndLegacyDefault()
+{
+    TEST("characterMetadataRoundTripAndLegacyDefault");
+    const Level::Definition definition {
+        .layers = {
+            { "..." },
+            { "C  " },
+        },
+        .character = CharacterType::Knight,
+    };
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition(definition);
+    CHECK(serialized[0] == "@character knight");
+    CHECK(serialized[1].empty());
+
+    const Level::Definition parsed =
+        Level::parseDefinition(serialized, "knight round trip");
+    CHECK(parsed == definition);
+    CHECK(Level::loadFromDefinition(parsed, "knight").character() ==
+        CharacterType::Knight);
+
+    const Level legacy = Level::loadFromLines({ "C." }, "legacy rogue");
+    CHECK(legacy.character() == CharacterType::Rogue);
+}
+
 void testWaterLayerMetadataAndTileResolution()
 {
     TEST("waterLayerMetadataAndTileResolution");
@@ -217,6 +242,21 @@ void testParserRejectsMalformedStructure()
         (void)Level::parseDefinition(
             { "@selector {}", "C" }, "selector legacy");
     }, "requires explicit");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@character wizard", "@layer 0", "C" },
+            "unknown character");
+    }, "expected '@character rogue' or '@character knight'");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@character rogue", "@character knight", "@layer 0", "C" },
+            "duplicate character");
+    }, "more than one '@character'");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@layer 0", "C", "@character rogue" },
+            "late character");
+    }, "before '@layer 0'");
     checkThrowsContaining([] {
         (void)Level::parseDefinition(
             { "@water nope", "@layer 0", "C" },
@@ -429,6 +469,7 @@ int main()
 {
     testLegacyAndLayeredParsing();
     testSerializationRoundTrip();
+    testCharacterMetadataRoundTripAndLegacyDefault();
     testWaterLayerMetadataAndTileResolution();
     testDecorationMetadataRoundTrip();
     testSelectorMetadataRoundTripAndLookup();

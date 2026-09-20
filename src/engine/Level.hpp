@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/Character.hpp"
 #include "engine/Math.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/TileTypes.hpp"
@@ -88,6 +89,9 @@ public:
         std::optional<uint32_t> waterLayer;
         std::vector<Decoration> decorations;
         std::vector<ScreenSelector> selectors;
+        // Missing only for backwards-compatible legacy documents. Runtime
+        // levels always resolve it to Rogue.
+        std::optional<CharacterType> character;
 
         bool operator==(const Definition&) const = default;
     };
@@ -107,7 +111,8 @@ public:
         std::string_view sourceName,
         std::optional<uint32_t> waterLayer = std::nullopt,
         const std::vector<Decoration>& decorations = {},
-        const std::vector<ScreenSelector>& selectors = {});
+        const std::vector<ScreenSelector>& selectors = {},
+        CharacterType selectedCharacter = CharacterType::Rogue);
     [[nodiscard]] static Definition parseDefinition(
         const std::vector<std::string>& lines,
         std::string_view sourceName);
@@ -120,6 +125,7 @@ public:
     [[nodiscard]] uint32_t height() const { return height_; }
     [[nodiscard]] uint32_t depth() const { return depth_; }
     [[nodiscard]] GridPosition3 playerStart() const { return playerStart_; }
+    [[nodiscard]] CharacterType character() const { return character_; }
     [[nodiscard]] const std::vector<MovableTile>& movableTiles() const { return movableTiles_; }
     [[nodiscard]] const std::vector<GridPosition3>& enemyStarts() const { return enemyStarts_; }
     [[nodiscard]] const std::vector<GridPosition3>& pressurePlates() const { return pressurePlates_; }
@@ -139,6 +145,7 @@ private:
     uint32_t height_ = 0;
     uint32_t depth_ = 0;
     GridPosition3 playerStart_ {};
+    CharacterType character_ = CharacterType::Rogue;
     std::vector<MovableTile> movableTiles_;
     std::vector<GridPosition3> enemyStarts_;
     std::vector<GridPosition3> pressurePlates_;

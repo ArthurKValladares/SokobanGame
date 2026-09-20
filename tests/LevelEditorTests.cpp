@@ -221,6 +221,31 @@ void testSaveLoadAndRuntimeMirror()
     CHECK(!editor.editingDocument());
 }
 
+void testCharacterSelectionPersistsAndIsUndoable()
+{
+    TEST("characterSelectionPersistsAndIsUndoable");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(3, 2, false);
+    CHECK(editor.character() == CharacterType::Rogue);
+
+    editor.setCharacter(CharacterType::Knight);
+    CHECK(editor.character() == CharacterType::Knight);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.character() == CharacterType::Rogue);
+
+    editor.setCharacter(CharacterType::Knight);
+    const std::filesystem::path sourcePath =
+        project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(sourcePath));
+    CHECK(readFile(sourcePath).starts_with("@character knight\n"));
+
+    LevelEditor loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(sourcePath));
+    CHECK(loaded.character() == CharacterType::Knight);
+    CHECK(loaded.documentToLevel().character() == CharacterType::Knight);
+}
+
 void testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness()
 {
     TEST("atomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness");
@@ -1422,6 +1447,7 @@ int main()
     testTileValidationAndPlayerUniqueness();
     testAddLayerBelowShiftsContentAndWaterAndIsUndoable();
     testSaveLoadAndRuntimeMirror();
+    testCharacterSelectionPersistsAndIsUndoable();
     testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness();
     testSelectedPathIsSeparateFromTheLoadedDocument();
     testOpeningScreensPreservesIndependentDraftsAndUndoHistory();

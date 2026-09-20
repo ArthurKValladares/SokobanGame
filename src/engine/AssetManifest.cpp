@@ -720,6 +720,17 @@ const AssetManifest::TileVisual& AssetManifest::tileVisual(TileType type) const
     return tileVisuals_[static_cast<std::size_t>(type)];
 }
 
+RenderModel AssetManifest::characterModel(CharacterType character) const
+{
+    switch (character) {
+    case CharacterType::Rogue:
+        return playerModel_;
+    case CharacterType::Knight:
+        return modelIdByName("Knight");
+    }
+    return playerModel_;
+}
+
 RenderTexture AssetManifest::addTexture(Texture texture)
 {
     if (texture.name.empty() || texture.path.empty()) {

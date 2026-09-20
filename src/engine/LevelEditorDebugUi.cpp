@@ -211,6 +211,17 @@ void LevelEditorDebugUi::draw(
             "Screen size is fixed by the active overworld layout.");
     }
 
+    int character = static_cast<int>(editor.character());
+    constexpr const char* characterNames[] { "Rogue", "Knight" };
+    ImGui::BeginDisabled(editor.editingOverworld());
+    if (ImGui::Combo("Character", &character, characterNames, 2)) {
+        editor.setCharacter(static_cast<CharacterType>(character));
+    }
+    ImGui::EndDisabled();
+    if (editor.editingOverworld()) {
+        ImGui::TextDisabled("The overworld always uses the rogue.");
+    }
+
     ImGui::Separator();
     ImGui::Text("Layer %d of %d", static_cast<int>(editor.activeLayer()) + 1, static_cast<int>(editor.documentDepth()));
     int selectedLayer = static_cast<int>(editor.activeLayer());

@@ -1,3 +1,4 @@
+@character rogue
 @selector {"cell":[1,2,2],"id":1,"target":{"level":0,"screen":0}}
 @selector {"cell":[2,2,2],"id":2,"target":{"level":0,"screen":1}}
 @selector {"cell":[1,4,2],"id":3,"target":{"level":1,"screen":0}}

@@ -16,6 +16,7 @@ namespace {
 
 constexpr std::string_view layerPrefix = "@layer ";
 constexpr std::string_view waterPrefix = "@water ";
+constexpr std::string_view characterPrefix = "@character ";
 constexpr std::string_view decorationPrefix = "@decoration ";
 constexpr std::string_view selectorPrefix = "@selector ";
 
@@ -455,6 +456,7 @@ Level::Definition Level::parseDefinition(
     if (!layered) {
         if (std::ranges::any_of(lines, [](const std::string& line) {
                 return line.starts_with(waterPrefix) ||
+                    line.starts_with(characterPrefix) ||
                     line.starts_with(decorationPrefix) ||
                     line.starts_with(selectorPrefix);
             })) {
@@ -467,6 +469,26 @@ Level::Definition Level::parseDefinition(
     Definition definition;
     std::optional<uint32_t> currentLayer;
     for (const std::string& line : lines) {
+        if (line.starts_with(characterPrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Character metadata must appear before '@layer 0': " + source);
+            }
+            if (definition.character) {
+                throw std::runtime_error(
+                    "Level contains more than one '@character' directive: " + source);
+            }
+            const std::string_view name =
+                std::string_view(line).substr(characterPrefix.size());
+            definition.character = characterTypeFromName(name);
+            if (!definition.character) {
+                throw std::runtime_error(
+                    "Invalid character metadata; expected '@character rogue' or "
+                    "'@character knight': " + source);
+            }
+            continue;
+        }
+
         if (line.starts_with(selectorPrefix)) {
             if (currentLayer) {
                 throw std::runtime_error(
@@ -583,6 +605,7 @@ std::vector<std::string> Level::serializeDefinition(
     const Definition& definition)
 {
     if (definition.layers.size() == 1 &&
+        !definition.character &&
         !definition.waterLayer &&
         definition.decorations.empty() &&
         definition.selectors.empty()) {
@@ -590,6 +613,11 @@ std::vector<std::string> Level::serializeDefinition(
     }
 
     std::vector<std::string> lines;
+    if (definition.character) {
+        lines.push_back(
+            std::string(characterPrefix) +
+            std::string(characterTypeName(*definition.character)));
+    }
     if (definition.waterLayer) {
         lines.push_back(
             std::string(waterPrefix) +
@@ -603,7 +631,8 @@ std::vector<std::string> Level::serializeDefinition(
     for (const Decoration& decoration : definition.decorations) {
         lines.push_back(serializeDecoration(decoration));
     }
-    if (definition.waterLayer || !definition.decorations.empty() ||
+    if (definition.character || definition.waterLayer ||
+        !definition.decorations.empty() ||
         !definition.selectors.empty()) {
         lines.emplace_back();
     }
@@ -639,7 +668,8 @@ Level Level::loadFromDefinition(
         sourceName,
         definition.waterLayer,
         definition.decorations,
-        definition.selectors);
+        definition.selectors,
+        definition.character.value_or(CharacterType::Rogue));
 }
 
 Level Level::loadFromLayers(
@@ -647,7 +677,8 @@ Level Level::loadFromLayers(
     std::string_view sourceName,
     std::optional<uint32_t> waterLayer,
     const std::vector<Decoration>& decorations,
-    const std::vector<ScreenSelector>& selectors)
+    const std::vector<ScreenSelector>& selectors,
+    CharacterType selectedCharacter)
 {
     const std::string source(sourceName);
     if (sourceLayers.empty()) {
@@ -655,6 +686,7 @@ Level Level::loadFromLayers(
     }
 
     Level level;
+    level.character_ = selectedCharacter;
     level.depth_ = static_cast<uint32_t>(sourceLayers.size());
     if (waterLayer && *waterLayer >= level.depth_) {
         throw std::runtime_error(

@@ -233,6 +233,24 @@ void LevelEditor::setWaterLayer(std::optional<uint32_t> layer)
     recordDocumentChange(before);
 }
 
+void LevelEditor::setCharacter(CharacterType character)
+{
+    if (editingOverworld() && character != CharacterType::Rogue) {
+        document_.status = "The overworld always uses the rogue.";
+        return;
+    }
+    if (document_.character == character) {
+        return;
+    }
+
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.character = character;
+    document_.dirty = true;
+    document_.status = "Character set to " +
+        std::string(characterTypeName(character)) + ".";
+    recordDocumentChange(before);
+}
+
 void LevelEditor::setLayerLocked(bool locked)
 {
     document_.layerLocked = locked;
@@ -1102,6 +1120,11 @@ std::optional<uint32_t> LevelEditor::waterLayer() const
     return document_.waterLayer;
 }
 
+CharacterType LevelEditor::character() const
+{
+    return document_.character.value_or(CharacterType::Rogue);
+}
+
 bool LevelEditor::layerLocked() const
 {
     return document_.layerLocked;
@@ -1317,6 +1340,7 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     };
     document_.layers[1].front().front() = tileTypeToChar(TileType::Player);
     document_.waterLayer.reset();
+    document_.character = CharacterType::Rogue;
     document_.decorations.clear();
     document_.selectors.clear();
     document_.selectedDecoration.reset();
@@ -1583,6 +1607,7 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
 
     document_.layers = std::move(definition.layers);
     document_.waterLayer = definition.waterLayer;
+    document_.character = definition.character;
     document_.decorations = std::move(definition.decorations);
     document_.selectors = std::move(definition.selectors);
     document_.selectedDecoration.reset();
@@ -1630,6 +1655,7 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
             .waterLayer = document_.waterLayer,
             .decorations = document_.decorations,
             .selectors = document_.selectors,
+            .character = document_.character,
         });
 
     // A component edit can invalidate the unique Player tile, common
@@ -2259,6 +2285,7 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
     const DocumentSnapshot after = captureDocumentSnapshot();
     if (before.layers == after.layers &&
         before.waterLayer == after.waterLayer &&
+        before.character == after.character &&
         before.decorations == after.decorations &&
         before.selectors == after.selectors &&
         before.filePath == after.filePath &&
@@ -2280,6 +2307,7 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
     pendingMove_.reset();
     document_.layers = snapshot.layers;
     document_.waterLayer = snapshot.waterLayer;
+    document_.character = snapshot.character;
     document_.decorations = snapshot.decorations;
     document_.selectors = snapshot.selectors;
     document_.filePath = snapshot.filePath;
@@ -2307,6 +2335,7 @@ Level::Definition LevelEditor::documentDefinition() const
         .waterLayer = document_.waterLayer,
         .decorations = document_.decorations,
         .selectors = document_.selectors,
+        .character = document_.character,
     };
 }
 
@@ -2356,6 +2385,7 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
     return {
         .layers = document_.layers,
         .waterLayer = document_.waterLayer,
+        .character = document_.character,
         .decorations = document_.decorations,
         .selectors = document_.selectors,
         .filePath = document_.filePath,

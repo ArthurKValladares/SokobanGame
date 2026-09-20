@@ -108,6 +108,7 @@ public:
     [[nodiscard]] int requestedHeight() const;
     void setActiveLayer(int layer);
     void setWaterLayer(std::optional<uint32_t> layer);
+    void setCharacter(CharacterType character);
     void setLayerLocked(bool locked);
     void setShowOverworldNeighbors(bool show);
     void setSelectedTile(TileType tile);
@@ -200,6 +201,7 @@ public:
     [[nodiscard]] uint32_t documentDepth() const;
     [[nodiscard]] uint32_t activeLayer() const;
     [[nodiscard]] std::optional<uint32_t> waterLayer() const;
+    [[nodiscard]] CharacterType character() const;
     [[nodiscard]] bool layerLocked() const;
     [[nodiscard]] bool showOverworldNeighbors() const;
     [[nodiscard]] bool dirty() const;
@@ -239,6 +241,7 @@ private:
     struct Document {
         Level::LayerRows layers;
         std::optional<uint32_t> waterLayer;
+        std::optional<CharacterType> character;
         std::vector<Level::Decoration> decorations;
         std::vector<Level::ScreenSelector> selectors;
         // Selected path (browser clicks move this).
@@ -267,6 +270,7 @@ private:
     struct DocumentSnapshot {
         Level::LayerRows layers;
         std::optional<uint32_t> waterLayer;
+        std::optional<CharacterType> character;
         std::vector<Level::Decoration> decorations;
         std::vector<Level::ScreenSelector> selectors;
         std::filesystem::path filePath;
