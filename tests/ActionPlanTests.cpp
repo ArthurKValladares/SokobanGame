@@ -155,6 +155,23 @@ void testDruidPullIsPlannedAsPulling()
         CHECK(planned->action.after.players[0].cell == cell(2, 0, 1));
         CHECK(planned->action.after.movables[0].cell == cell(1, 0, 1));
     }
+
+    const Level enemyLevel = makeLevel({
+        { "...." },
+        { "NU  " },
+    });
+    const std::optional<plans::PlannedAction> enemyPlanned =
+        plans::planPlayerStep(
+            enemyLevel,
+            rules::initialState(enemyLevel),
+            MoveDirection::Right,
+            {},
+            0.25f);
+    CHECK(enemyPlanned.has_value());
+    if (enemyPlanned) {
+        CHECK(enemyPlanned->action.playerPulling);
+        CHECK(enemyPlanned->action.after.enemies[0].cell == cell(1, 0, 1));
+    }
 }
 
 void testWitchSwapDoesNotUseThePushPresentation()
@@ -176,6 +193,25 @@ void testWitchSwapDoesNotUseThePushPresentation()
         CHECK(!planned->action.playerPushing);
         CHECK(planned->action.after.players[0].cell == cell(1, 0, 1));
         CHECK(planned->action.after.movables[0].cell == cell(0, 0, 1));
+    }
+
+
+    const Level enemyLevel = makeLevel({
+        { "...." },
+        { "H N " },
+    });
+    const std::optional<plans::PlannedAction> enemyPlanned =
+        plans::planPlayerStep(
+            enemyLevel,
+            rules::initialState(enemyLevel),
+            MoveDirection::Right,
+            {},
+            0.25f);
+    CHECK(enemyPlanned.has_value());
+    if (enemyPlanned) {
+        CHECK(!enemyPlanned->action.playerPushing);
+        CHECK(enemyPlanned->action.after.players[0].cell == cell(2, 0, 1));
+        CHECK(enemyPlanned->action.after.enemies[0].cell == cell(0, 0, 1));
     }
 }
 
@@ -411,6 +447,12 @@ void testSlideMomentumDetection()
     state.players.push_back({ .id = 2 });
     state.players[0].sliding = MoveDirection::Left;
     CHECK(plans::anySlideMomentum(state));
+    state.players[0].sliding.reset();
+    state.enemies.push_back({
+        .id = 3,
+        .sliding = MoveDirection::Right,
+    });
+    CHECK(plans::anySlideMomentum(state));
 }
 
 // The scoped planners. `worldStep` plans every entity, so a plan made while a
@@ -545,6 +587,24 @@ void testConveyorRideIsOneStepPerAction()
         CHECK(ride->legs.size() == 1);
         CHECK(ride->action.after.movables[0].cell == cell(2, 1, 1));
         CHECK(ride->action.after.players[0] == state.players[0]);
+    }
+
+    GameState enemyState = rules::initialState(level);
+    enemyState.enemies.push_back({
+        .id = 99,
+        .cell = cell(1, 1, 1),
+    });
+    const std::vector<EntityId> enemyRiders =
+        plans::conveyorRiders(level, enemyState);
+    CHECK(enemyRiders.size() == 1);
+    const std::optional<plans::PlannedAction> enemyRide =
+        enemyRiders.empty()
+        ? std::nullopt
+        : plans::planConveyorRide(
+              level, enemyState, enemyRiders.front(), {}, 0.2f);
+    CHECK(enemyRide.has_value());
+    if (enemyRide) {
+        CHECK(enemyRide->action.after.enemies[0].cell == cell(2, 1, 1));
     }
 }
 

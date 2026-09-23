@@ -275,6 +275,16 @@ void testDruidCompulsivelyPullsTrailingMovables()
     const GameState blockedInitial = rules::initialState(blocked);
     CHECK(rules::step(
         blocked, blockedInitial, MoveDirection::Right) == blockedInitial);
+
+    const Level enemy = makeLevel({
+        { "...." },
+        { "NU  " },
+    });
+    const GameState enemyPulled = rules::step(
+        enemy, rules::initialState(enemy), MoveDirection::Right);
+    CHECK(enemyPulled.players[0].cell == cell(2, 0, 1));
+    CHECK(enemyPulled.enemies[0].cell == cell(1, 0, 1));
+    CHECK(enemyPulled.players[0].dead);
 }
 
 void testWitchCompulsivelySwapsWithVisibleMovables()
@@ -329,12 +339,16 @@ void testWitchSwapUsesNearestTargetAndRequiresClearSight()
         wallInitial);
 
     const Level enemy = makeLevel({
-        { "....." },
-        { "HN R " },
+        { "......" },
+        { "H N R " },
     });
     const GameState enemyInitial = rules::initialState(enemy);
-    CHECK(rules::step(enemy, enemyInitial, MoveDirection::Right) ==
-        enemyInitial);
+    const GameState enemySwap = rules::step(
+        enemy, enemyInitial, MoveDirection::Right);
+    CHECK(enemySwap.players[0].cell == cell(2, 0, 1));
+    CHECK(enemySwap.enemies[0].cell == cell(0, 0, 1));
+    CHECK(enemySwap.movables[0].cell == cell(4, 0, 1));
+    CHECK(!enemySwap.players[0].dead);
 
     const Level hero = makeLevel({
         { "....." },
@@ -437,6 +451,33 @@ void testConveyorMovesRockEachStep()
     CHECK(state.movables[0].cell == cell(3, 0, 1)); // carried off the belt
     CHECK(!rules::hasPendingMotion(level, state));
     CHECK(state.players[0].cell == cell(0, 0, 1)); // player never moved
+}
+
+void testEnemyUsesConveyorsAndIceMomentum()
+{
+    TEST("enemyUsesConveyorsAndIceMomentum");
+    const Level conveyor = makeLevel({
+        { "...." },
+        { "C>N " },
+    });
+    GameState conveyorState = rules::initialState(conveyor);
+    conveyorState.enemies[0].cell = cell(1, 0, 1);
+    CHECK(rules::hasPendingMotion(conveyor, conveyorState));
+    conveyorState = rules::step(conveyor, conveyorState);
+    CHECK(conveyorState.enemies[0].cell == cell(2, 0, 1));
+    CHECK(!rules::hasPendingMotion(conveyor, conveyorState));
+
+    const Level ice = makeLevel({
+        { "...." },
+        { "CN #" },
+    });
+    GameState iceState = rules::initialState(ice);
+    iceState.enemies[0].sliding = MoveDirection::Right;
+    CHECK(rules::hasPendingMotion(ice, iceState));
+    iceState = rules::step(ice, iceState);
+    CHECK(iceState.enemies[0].cell == cell(2, 0, 1));
+    CHECK(!iceState.enemies[0].sliding);
+    CHECK(!rules::hasPendingMotion(ice, iceState));
 }
 
 void testConveyorBlocked()
@@ -907,6 +948,9 @@ void testEveryPressurePlateMustHaveLiveOccupant()
     state.movables[0].fallen = true;
     CHECK(!rules::isEndUnlocked(level, state));
 
+    state.enemies.push_back({ .id = 99, .cell = cell(1, 0, 1) });
+    CHECK(rules::isEndUnlocked(level, state));
+
     const Level noPlates = makeLevel({
         { ".." },
         { "CE" },
@@ -970,6 +1014,24 @@ void testMirrorReflectsMovablesAndStopsAtNearestEntity()
     CHECK(after && after->movables[0].cell == cell(1, 2, 1));
     // The nearer rock occludes the ice on the same input ray.
     CHECK(after && after->movables[1].cell == cell(2, 4, 1));
+}
+
+void testMirrorReflectsEnemiesAsMovableEntities()
+{
+    TEST("mirrorReflectsEnemiesAsMovableEntities");
+    const Level level = makeLevel({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "C    ", "     ", "  3  ", "     ", "  N  " },
+    });
+    const GameState state = rules::initialState(level);
+    const std::optional<rules::MirrorActivationPreview> preview =
+        rules::previewMirrorActivation(level, state);
+
+    CHECK(preview.has_value());
+    CHECK(preview && preview->after.enemies[0].cell == cell(0, 2, 1));
+    CHECK(preview && preview->entities.size() == 1);
+    CHECK(preview && preview->entities[0].enemy);
+    CHECK(preview && preview->entities[0].enemyIndex == 0);
 }
 
 void testMirrorChainsWithoutReusingAMirror()
@@ -1136,9 +1198,9 @@ void testEnemySpawnsOutsideStaticGridAndKillsAdjacentPlayer()
     CHECK(!attacked.players[0].drowned);
 }
 
-void testEnemyDoesNotAttackDiagonallyAndBlocksDirectMovement()
+void testEnemyDoesNotAttackDiagonallyAndCanBePushed()
 {
-    TEST("enemyDoesNotAttackDiagonallyAndBlocksDirectMovement");
+    TEST("enemyDoesNotAttackDiagonallyAndCanBePushed");
     const Level diagonal = makeLevel({
         { "...", "...", "..." },
         { " N ", "C  ", "   " },
@@ -1148,12 +1210,15 @@ void testEnemyDoesNotAttackDiagonallyAndBlocksDirectMovement()
     CHECK(diagonalState.players[0].cell == cell(0, 2, 1));
     CHECK(!diagonalState.players[0].dead);
 
-    const Level blocked = makeLevel({
+    const Level pushable = makeLevel({
         { "..." },
         { "CN " },
     });
-    const GameState start = rules::initialState(blocked);
-    CHECK(rules::step(blocked, start, MoveDirection::Right) == start);
+    const GameState pushed = rules::step(
+        pushable, rules::initialState(pushable), MoveDirection::Right);
+    CHECK(pushed.players[0].cell == cell(1, 0, 1));
+    CHECK(pushed.enemies[0].cell == cell(2, 0, 1));
+    CHECK(pushed.players[0].dead);
 }
 
 void testMovingBlockPushesEnemy()
@@ -1529,6 +1594,7 @@ int main()
     testPlayerMovesWhileIceSlides();
     testPlayerMovesWhileConveyorCarriesRock();
     testConveyorMovesRockEachStep();
+    testEnemyUsesConveyorsAndIceMomentum();
     testConveyorBlocked();
     testConveyorRockBlockedByPlayer();
     testConveyorRockIntoWater();
@@ -1557,6 +1623,7 @@ int main()
     testEveryPressurePlateMustHaveLiveOccupant();
     testEveryMirrorOrientationReflectsBothWays();
     testMirrorReflectsMovablesAndStopsAtNearestEntity();
+    testMirrorReflectsEnemiesAsMovableEntities();
     testMirrorChainsWithoutReusingAMirror();
     testInvalidMirrorOutputRejectsWholeActivation();
     testMirrorCanTeleportPlayerIntoWater();
@@ -1565,7 +1632,7 @@ int main()
     testPlayerCopiesShareMovementAndCanDuplicateAgain();
     testEveryPlayerMustReachAnActiveEnd();
     testEnemySpawnsOutsideStaticGridAndKillsAdjacentPlayer();
-    testEnemyDoesNotAttackDiagonallyAndBlocksDirectMovement();
+    testEnemyDoesNotAttackDiagonallyAndCanBePushed();
     testMovingBlockPushesEnemy();
     testTurretsSpawnWithCardinalFacingAndCanBePushed();
     testTurretKillsAPlayerWhoMovesIntoLineOfSight();

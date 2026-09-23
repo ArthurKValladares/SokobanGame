@@ -804,6 +804,7 @@ struct MirrorEntityPreviewContext {
     const rules::MirrorEntityPreview& entity;
     const rules::MirrorEntityPreview* matchingEndEntity = nullptr;
     const GameplayPresentation::PlayerVisual* previewPlayer = nullptr;
+    const GameplayPresentation::EnemyVisual* previewEnemy = nullptr;
     const GameplayPresentation::EntityVisual* visual = nullptr;
     float progress = 0.0f;
     bool animatePreview = false;
@@ -881,6 +882,8 @@ void appendMirrorGhostTile(
         preview.matchingEndEntity;
     const GameplayPresentation::PlayerVisual* previewPlayer =
         preview.previewPlayer;
+    const GameplayPresentation::EnemyVisual* previewEnemy =
+        preview.previewEnemy;
     const float progress = preview.progress;
     const bool animatePreview = preview.animatePreview;
     const float previewOpacity = preview.previewOpacity;
@@ -927,8 +930,10 @@ void appendMirrorGhostTile(
             ? input.manifest.characterModel(
                   state.players[entity.playerIndex].character.value_or(
                       input.level.character()))
-            : input.manifest.modelForTile(
-                  state.movables[entity.movableIndex].type),
+            : (entity.enemy
+                    ? input.manifest.enemyModel()
+                    : input.manifest.modelForTile(
+                          state.movables[entity.movableIndex].type)),
         .animation = entity.player
             ? (ghostFallen
                     ? animationFor(
@@ -939,11 +944,19 @@ void appendMirrorGhostTile(
                           input.animations,
                           AnimationUse::MirrorPreviewPlayerIdle,
                           input.manifest.playerIdleAnimation()))
-            : noAnimation,
+            : (entity.enemy
+                    ? animationFor(
+                          input.animations,
+                          AnimationUse::EnemyIdle,
+                          input.manifest.playerIdleAnimation())
+                    : noAnimation),
         .animationInstanceId = entity.player
             ? mirrorGhostAnimationInstance(
                   entity.resultPlayerIndex)
-            : uint64_t { 0 },
+            : (entity.enemy
+                    ? mirrorGhostAnimationInstance(
+                          state.players.size() + entity.enemyIndex)
+                    : uint64_t { 0 }),
         .animationLoops = true,
         .animationTimeSeconds = previewPlayer
             ? animationTimeFor(
@@ -952,12 +965,20 @@ void appendMirrorGhostTile(
                       ? AnimationUse::MirrorPreviewPlayerDeadIdle
                       : AnimationUse::MirrorPreviewPlayerIdle,
                   previewPlayer->clipTimeSeconds)
-            : 0.0f,
+            : (previewEnemy
+                    ? animationTimeFor(
+                          input.animations,
+                          AnimationUse::EnemyIdle,
+                          previewEnemy->clipTimeSeconds)
+                    : 0.0f),
         .modelRotationQuarterTurns = entity.player
             ? (previewPlayer
                     ? previewPlayer->facingQuarterTurns
                     : 0U)
             : 0U,
+        .modelRotationOffsetRadians = previewEnemy
+            ? yawRadians(previewEnemy->orientation)
+            : 0.0f,
         .effect = RenderSurfaceEffect::MirrorEnergy,
     };
     applyTileScale(
@@ -965,7 +986,9 @@ void appendMirrorGhostTile(
         input.settings.tileScale(
             entity.player
                 ? TileType::Player
-                : state.movables[entity.movableIndex].type));
+                : (entity.enemy
+                        ? TileType::Enemy
+                        : state.movables[entity.movableIndex].type)));
     frame.tiles.push_back(ghost);
 }
 
@@ -976,6 +999,7 @@ void appendMirrorPreview(
     const GameState& state = input.state;
     const auto& playerVisuals = input.presentation.players();
     const auto& movableVisuals = input.presentation.movables();
+    const auto& enemyVisuals = input.presentation.enemies();
 
     if (!rules::anyPlayerDead(state)) {
         std::optional<rules::MirrorActivationPreview> mirrorPreview =
@@ -996,14 +1020,17 @@ void appendMirrorPreview(
                         actionEndPreview->entities,
                         [&](const rules::MirrorEntityPreview& candidate) {
                             return candidate.player == entity.player &&
+                                candidate.enemy == entity.enemy &&
                                 (entity.player
                                     ? candidate.playerIndex ==
                                             entity.playerIndex &&
                                         candidate.reflectionIndex ==
                                             entity.reflectionIndex
-                                    :
-                                    candidate.movableIndex ==
-                                        entity.movableIndex);
+                                    : (entity.enemy
+                                            ? candidate.enemyIndex ==
+                                                  entity.enemyIndex
+                                            : candidate.movableIndex ==
+                                                  entity.movableIndex));
                         });
                     if (match != actionEndPreview->entities.end()) {
                         matchingEndEntity = &*match;
@@ -1016,12 +1043,18 @@ void appendMirrorPreview(
                     entity.player && entity.playerIndex < playerVisuals.size()
                     ? &playerVisuals[entity.playerIndex]
                     : nullptr;
+                const GameplayPresentation::EnemyVisual* previewEnemy =
+                    entity.enemy && entity.enemyIndex < enemyVisuals.size()
+                    ? &enemyVisuals[entity.enemyIndex]
+                    : nullptr;
                 const GameplayPresentation::EntityVisual* visual =
                     entity.player
                     ? (previewPlayer ? &previewPlayer->motion : nullptr)
-                    : (entity.movableIndex < movableVisuals.size()
-                            ? &movableVisuals[entity.movableIndex]
-                            : nullptr);
+                    : (entity.enemy
+                            ? (previewEnemy ? &previewEnemy->motion : nullptr)
+                            : (entity.movableIndex < movableVisuals.size()
+                                    ? &movableVisuals[entity.movableIndex]
+                                    : nullptr));
                 const float progress =
                     visual && visual->animationDuration > 0.0001f
                     ? std::clamp(
@@ -1106,6 +1139,7 @@ void appendMirrorPreview(
                     entity,
                     matchingEndEntity,
                     previewPlayer,
+                    previewEnemy,
                     visual,
                     progress,
                     animatePreview,

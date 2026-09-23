@@ -211,6 +211,8 @@ std::vector<GridPosition3> witchSwapDestinations(const ActionPlan& action)
         action.before.players.size(), action.after.players.size());
     const std::size_t movableCount = std::min(
         action.before.movables.size(), action.after.movables.size());
+    const std::size_t enemyCount = std::min(
+        action.before.enemies.size(), action.after.enemies.size());
     for (std::size_t playerIndex = 0;
          playerIndex < playerCount;
          ++playerIndex) {
@@ -222,6 +224,7 @@ std::vector<GridPosition3> witchSwapDestinations(const ActionPlan& action)
             beforePlayer.cell == afterPlayer.cell) {
             continue;
         }
+        bool swapped = false;
         for (std::size_t movableIndex = 0;
              movableIndex < movableCount;
              ++movableIndex) {
@@ -229,14 +232,26 @@ std::vector<GridPosition3> witchSwapDestinations(const ActionPlan& action)
                 action.after.movables[movableIndex].cell != beforePlayer.cell) {
                 continue;
             }
-            for (GridPosition3 endpoint : {
-                     beforePlayer.cell, afterPlayer.cell }) {
-                if (std::ranges::find(destinations, endpoint) ==
-                    destinations.end()) {
-                    destinations.push_back(endpoint);
-                }
-            }
+            swapped = true;
             break;
+        }
+        for (std::size_t enemyIndex = 0;
+             !swapped && enemyIndex < enemyCount;
+             ++enemyIndex) {
+            if (action.before.enemies[enemyIndex].cell == afterPlayer.cell &&
+                action.after.enemies[enemyIndex].cell == beforePlayer.cell) {
+                swapped = true;
+            }
+        }
+        if (!swapped) {
+            continue;
+        }
+        for (GridPosition3 endpoint : {
+                 beforePlayer.cell, afterPlayer.cell }) {
+            if (std::ranges::find(destinations, endpoint) ==
+                destinations.end()) {
+                destinations.push_back(endpoint);
+            }
         }
     }
     return destinations;

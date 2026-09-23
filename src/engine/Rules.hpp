@@ -66,6 +66,7 @@ struct GameState {
         // Killed enemies leave gameplay without masquerading as water falls.
         // They no longer block, support, attack, occlude, or render.
         bool dead = false;
+        std::optional<MoveDirection> sliding;
 
         bool operator==(const Enemy&) const = default;
     };
@@ -93,7 +94,7 @@ namespace rules {
 // interact correctly with slower ones (blocking, vacating, pushing).
 struct StepRates {
     int playerMove = 1; // input-driven walking and pushing
-    int slide = 1;      // ice-slide momentum (player and movables)
+    int slide = 1;      // ice-slide momentum (all movable units)
     int conveyor = 1;   // belt riders
 
     bool operator==(const StepRates&) const = default;
@@ -169,10 +170,12 @@ struct MirrorBeamSegment {
 
 struct MirrorEntityPreview {
     bool player = false;
+    bool enemy = false;
     std::size_t playerIndex = 0;
     std::size_t reflectionIndex = 0;
     std::size_t resultPlayerIndex = 0;
     std::size_t movableIndex = 0;
+    std::size_t enemyIndex = 0;
     GridPosition3 start {};
     GridPosition3 destination {};
     bool fallen = false;
@@ -194,7 +197,7 @@ struct MirrorActivationPreview {
     const Level& level,
     const GameState& state);
 
-// Reflects every visible, non-fallen movable entity through mirrors as one
+// Reflects every visible, non-fallen movable unit through mirrors as one
 // atomic transaction. Returns no state when nothing is reflected or any
 // reflected destination/chain is invalid.
 [[nodiscard]] std::optional<GameState> activateMirrors(

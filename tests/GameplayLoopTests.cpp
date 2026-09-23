@@ -391,7 +391,7 @@ void testWitchSwapEmitsBothParticleEndpointsOnce()
     TEST("witchSwapEmitsBothParticleEndpointsOnce");
     const Level level = makeLevel({
         { "....." },
-        { "H  R " },
+        { "H  N " },
     });
     GameplaySession session;
     session.reset(level);

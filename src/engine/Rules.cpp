@@ -492,7 +492,9 @@ bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 p
 bool isEndUnlocked(const Level& level, const GameState& state)
 {
     return std::ranges::all_of(level.pressurePlates(), [&](GridPosition3 plate) {
-        return playerBlocksAt(state, plate) || movableAt(state, plate) != nullptr;
+        return playerBlocksAt(state, plate) ||
+            movableAt(state, plate) != nullptr ||
+            enemyAt(state, plate) != nullptr;
     });
 }
 
@@ -608,7 +610,13 @@ bool hasPendingMotion(const Level& level, const GameState& state)
     return std::ranges::any_of(state.movables, [&](const GameState::Movable& movable) {
         return !movable.fallen && !movable.dead &&
             (movable.sliding || conveyorDirectionAt(level, movable.cell).has_value());
-    });
+    }) || std::ranges::any_of(
+        state.enemies,
+        [&](const GameState::Enemy& enemy) {
+            return !enemy.fallen && !enemy.dead &&
+                (enemy.sliding ||
+                    conveyorDirectionAt(level, enemy.cell).has_value());
+        });
 }
 
 namespace {
@@ -687,8 +695,13 @@ bool entityBlocksSight(
             return true;
         }
     }
-    if (enemyBlocksAt(state, cell)) {
-        return true;
+    for (std::size_t i = 0; i < state.enemies.size(); ++i) {
+        const std::size_t entityIndex =
+            state.movables.size() + state.players.size() + i;
+        if (ignoredEntity != entityIndex && !state.enemies[i].fallen &&
+            !state.enemies[i].dead && state.enemies[i].cell == cell) {
+            return true;
+        }
     }
     return false;
 }
@@ -900,6 +913,7 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
     const std::size_t originalPlayerCount = state.players.size();
     std::vector<std::size_t> reflectedPlayerIndices;
     std::vector<bool> movableReflected(state.movables.size(), false);
+    std::vector<bool> enemyReflected(state.enemies.size(), false);
     EntityId nextEntityId = 1;
     for (const GameState::Player& player : state.players) {
         nextEntityId = std::max(nextEntityId, player.id + 1);
@@ -989,6 +1003,36 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
         }
     }
 
+    for (std::size_t i = 0; i < state.enemies.size(); ++i) {
+        if (state.enemies[i].fallen || state.enemies[i].dead) {
+            continue;
+        }
+        const std::optional<std::vector<ReflectedPath>> reflectedPaths =
+            reflectedPathsForEntity(
+                level,
+                state,
+                state.enemies[i].cell,
+                state.movables.size() + state.players.size() + i,
+                false);
+        if (!reflectedPaths) {
+            return std::nullopt;
+        }
+        const ReflectedPath& reflected = reflectedPaths->front();
+        if (reflected.reflected) {
+            after.enemies[i].cell = reflected.cell;
+            after.enemies[i].sliding.reset();
+            enemyReflected[i] = true;
+            entities.push_back({
+                .enemy = true,
+                .enemyIndex = i,
+                .start = state.enemies[i].cell,
+                .destination = reflected.cell,
+                .beamSegments = reflected.beamSegments,
+            });
+            anyReflected = true;
+        }
+    }
+
     if (!anyReflected || !liveCellsAreUnique(after)) {
         return std::nullopt;
     }
@@ -1015,6 +1059,18 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
         after.movables[i].cell = fall.cell;
         after.movables[i].fallen = fall.fallen;
     }
+    for (std::size_t i = 0; i < after.enemies.size(); ++i) {
+        if (!enemyReflected[i]) {
+            continue;
+        }
+        const FallResult fall = enemyFallTarget(
+            level, after, i, after.enemies[i].cell);
+        if (!fall.supported) {
+            return std::nullopt;
+        }
+        after.enemies[i].cell = fall.cell;
+        after.enemies[i].fallen = fall.fallen;
+    }
 
     if (!liveCellsAreUnique(after) || after == state) {
         return std::nullopt;
@@ -1024,6 +1080,9 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
         if (entity.player) {
             entity.destination = playerCell(after, entity.resultPlayerIndex);
             entity.fallen = after.players[entity.resultPlayerIndex].drowned;
+        } else if (entity.enemy) {
+            entity.destination = after.enemies[entity.enemyIndex].cell;
+            entity.fallen = after.enemies[entity.enemyIndex].fallen;
         } else {
             entity.destination = after.movables[entity.movableIndex].cell;
             entity.fallen = after.movables[entity.movableIndex].fallen;
@@ -1090,7 +1149,8 @@ public:
         , rates_(rates)
         , movableCount_(after.movables.size())
         , playerCount_(after.players.size())
-        , status_(movableCount_ + playerCount_)
+        , enemyCount_(after.enemies.size())
+        , status_(movableCount_ + playerCount_ + enemyCount_)
         , enemyMoved_(after.enemies.size(), 0)
         , enemyMovedThisMicro_(after.enemies.size(), 0)
         , turretShots_(turretShots)
@@ -1107,6 +1167,10 @@ public:
         for (std::size_t i = 0; i < movableCount_; ++i) {
             status_[i].done = after_.movables[i].fallen ||
                 after_.movables[i].dead;
+        }
+        for (std::size_t i = 0; i < enemyCount_; ++i) {
+            status_[entityIndexForEnemy(i)].done = after_.enemies[i].fallen ||
+                after_.enemies[i].dead;
         }
     }
 
@@ -1131,6 +1195,13 @@ public:
     }
 
 private:
+    // Rocks, ice, turrets, and enemies all participate in forced movement.
+    // The storage stays separate because enemies retain attack/death state.
+    struct ChainEntity {
+        bool movable = false;
+        std::size_t index = 0;
+    };
+
     struct Status {
         // Persistent across micro-steps: movement budget consumed and
         // whether this entity's movement source is finished for the step.
@@ -1150,8 +1221,8 @@ private:
         bool movedThisMicro = false;
         bool inputDriven = false; // player only
         // A witch replaces an input-driven walk with one teleport to the
-        // nearest visible movable on that ray.
-        std::optional<std::size_t> witchSwapTarget;
+        // nearest visible movable unit on that ray.
+        std::optional<ChainEntity> witchSwapTarget;
     };
 
     // Brings one entity into the causal closure, by the id the rest of the
@@ -1177,10 +1248,13 @@ private:
                 return;
             }
         }
-        // Enemy ids are accepted and do nothing, deliberately. An enemy has no
-        // volition - it only ever moves because something shoved it - so there
-        // is no sense in which naming one lets it act. It joins a closure by
-        // being pushed, and `pushEnemy` is where that is recorded.
+        for (std::size_t i = 0; i < enemyCount_; ++i) {
+            if (resolvedEntityId(
+                    EntityKind::Enemy, after_.enemies[i].id, i) == actor) {
+                status_[entityIndexForEnemy(i)].active = true;
+                return;
+            }
+        }
     }
 
     [[nodiscard]] std::size_t entityIndexForPlayer(
@@ -1190,28 +1264,50 @@ private:
     }
     [[nodiscard]] bool isPlayer(std::size_t index) const
     {
-        return index >= movableCount_;
+        return index >= movableCount_ &&
+            index < movableCount_ + playerCount_;
+    }
+    [[nodiscard]] std::size_t entityIndexForEnemy(
+        std::size_t enemyIndex) const
+    {
+        return movableCount_ + playerCount_ + enemyIndex;
+    }
+    [[nodiscard]] bool isEnemy(std::size_t index) const
+    {
+        return index >= movableCount_ + playerCount_;
     }
     [[nodiscard]] std::size_t playerIndexForEntity(std::size_t index) const
     {
         return index - movableCount_;
     }
+    [[nodiscard]] std::size_t enemyIndexForEntity(std::size_t index) const
+    {
+        return index - movableCount_ - playerCount_;
+    }
 
     [[nodiscard]] std::optional<MoveDirection>& slidingOf(std::size_t index)
     {
-        return isPlayer(index)
-            ? playerSliding(after_, playerIndexForEntity(index))
-            : after_.movables[index].sliding;
+        if (isPlayer(index)) {
+            return playerSliding(after_, playerIndexForEntity(index));
+        }
+        if (isEnemy(index)) {
+            return after_.enemies[enemyIndexForEntity(index)].sliding;
+        }
+        return after_.movables[index].sliding;
     }
 
     [[nodiscard]] GridPosition3 cellOf(std::size_t index) const
     {
-        return isPlayer(index)
-            ? playerCell(after_, playerIndexForEntity(index))
-            : after_.movables[index].cell;
+        if (isPlayer(index)) {
+            return playerCell(after_, playerIndexForEntity(index));
+        }
+        if (isEnemy(index)) {
+            return after_.enemies[enemyIndexForEntity(index)].cell;
+        }
+        return after_.movables[index].cell;
     }
 
-    [[nodiscard]] std::optional<std::size_t> visibleMovableForWitch(
+    [[nodiscard]] std::optional<ChainEntity> visibleMovableForWitch(
         std::size_t playerIndex,
         MoveDirection direction) const
     {
@@ -1227,11 +1323,20 @@ private:
                 return std::nullopt;
             }
             if (const GameState::Movable* movable = movableAt(after_, cell)) {
-                return static_cast<std::size_t>(
-                    movable - after_.movables.data());
+                return ChainEntity {
+                    .movable = true,
+                    .index = static_cast<std::size_t>(
+                        movable - after_.movables.data()),
+                };
             }
-            if (playerBlocksAt(after_, cell, playerIndex) ||
-                enemyAt(after_, cell) != nullptr) {
+            if (const GameState::Enemy* enemy = enemyAt(after_, cell)) {
+                return ChainEntity {
+                    .movable = false,
+                    .index = static_cast<std::size_t>(
+                        enemy - after_.enemies.data()),
+                };
+            }
+            if (playerBlocksAt(after_, cell, playerIndex)) {
                 return std::nullopt;
             }
         }
@@ -1279,6 +1384,23 @@ private:
                         status.intent = belt;
                     }
                 }
+            } else if (isEnemy(i)) {
+                const std::size_t enemyIndex = enemyIndexForEntity(i);
+                if (after_.enemies[enemyIndex].fallen ||
+                    after_.enemies[enemyIndex].dead) {
+                    continue;
+                }
+                if (after_.enemies[enemyIndex].sliding) {
+                    if (status.consumed < rates_.slide) {
+                        status.intent = after_.enemies[enemyIndex].sliding;
+                    }
+                } else if (const std::optional<MoveDirection> belt =
+                               conveyorDirectionAt(
+                                   level_, after_.enemies[enemyIndex].cell)) {
+                    if (status.consumed < rates_.conveyor) {
+                        status.intent = belt;
+                    }
+                }
             } else {
                 if (after_.movables[i].fallen || after_.movables[i].dead) {
                     continue;
@@ -1306,8 +1428,10 @@ private:
                             playerIndex, *status.intent);
                     }
                     if (status.witchSwapTarget) {
-                        status.target = after_.movables[
-                            *status.witchSwapTarget].cell;
+                        const ChainEntity swap = *status.witchSwapTarget;
+                        status.target = swap.movable
+                            ? after_.movables[swap.index].cell
+                            : after_.enemies[swap.index].cell;
                     } else {
                         status.target =
                             playerLadderClimbTarget(
@@ -1365,7 +1489,9 @@ private:
                 }
                 progressed |= isPlayer(i)
                     ? resolvePlayer(i, anyMovement)
-                    : resolveMovable(i, anyMovement);
+                    : (isEnemy(i)
+                            ? resolveEnemy(i, anyMovement)
+                            : resolveMovable(i, anyMovement));
             }
         }
         return anyMovement;
@@ -1396,6 +1522,9 @@ private:
         if (const GameState::Enemy* enemy = enemyAt(after_, target)) {
             const std::size_t enemyIndex =
                 static_cast<std::size_t>(enemy - after_.enemies.data());
+            if (!status_[entityIndexForEnemy(enemyIndex)].resolved) {
+                return false;
+            }
             if (!pushEnemy(enemyIndex, direction)) {
                 slidingOf(index) = std::nullopt;
                 status.done = true;
@@ -1404,6 +1533,68 @@ private:
             }
         }
         applyMovableMove(index, direction, target);
+        status.resolved = true;
+        status.movedThisMicro = true;
+        anyMovement = true;
+        return true;
+    }
+
+    [[nodiscard]] bool resolveEnemy(
+        std::size_t entityIndex,
+        bool& anyMovement)
+    {
+        Status& status = status_[entityIndex];
+        const std::size_t enemyIndex = enemyIndexForEntity(entityIndex);
+        const MoveDirection direction = *status.intent;
+        const GridPosition3 target = *status.target;
+
+        if (status.contested) {
+            cancelAndFinish(entityIndex, true);
+            status.resolved = true;
+            return true;
+        }
+        if (!staticCellAllowsEntity(level_, target) ||
+            !enemyFallTarget(level_, after_, enemyIndex, target).supported) {
+            after_.enemies[enemyIndex].sliding.reset();
+            status.done = true;
+            status.resolved = true;
+            return true;
+        }
+
+        if (const GameState::Movable* movable = movableAt(after_, target)) {
+            const std::size_t blockerIndex = static_cast<std::size_t>(
+                movable - after_.movables.data());
+            if (!status_[blockerIndex].resolved) {
+                return false;
+            }
+            cancelAndFinish(entityIndex, true);
+            status.resolved = true;
+            return true;
+        }
+        for (std::size_t i = 0; i < playerCount_; ++i) {
+            if (playerDead(after_, i) || !(playerCell(after_, i) == target)) {
+                continue;
+            }
+            if (!status_[entityIndexForPlayer(i)].resolved) {
+                return false;
+            }
+            cancelAndFinish(entityIndex, true);
+            status.resolved = true;
+            return true;
+        }
+        if (const GameState::Enemy* enemy = enemyAt(after_, target)) {
+            const std::size_t blockerIndex = static_cast<std::size_t>(
+                enemy - after_.enemies.data());
+            if (blockerIndex != enemyIndex &&
+                !status_[entityIndexForEnemy(blockerIndex)].resolved) {
+                return false;
+            }
+            cancelAndFinish(entityIndex, true);
+            status.resolved = true;
+            return true;
+        }
+
+        applyEnemyMove(enemyIndex, direction);
         status.resolved = true;
         status.movedThisMicro = true;
         anyMovement = true;
@@ -1425,33 +1616,61 @@ private:
             return true;
         }
         if (status.witchSwapTarget) {
-            const std::size_t movableIndex = *status.witchSwapTarget;
+            const ChainEntity swap = *status.witchSwapTarget;
             // In a whole-world step the target may also have an automatic
             // intent. Let it resolve first, then refuse a stale spell rather
             // than teleporting an entity the witch can no longer see.
-            if (!status_[movableIndex].resolved) {
-                return false;
-            }
-            if (status_[movableIndex].movedThisMicro ||
-                !(after_.movables[movableIndex].cell == target)) {
-                status.resolved = true;
-                return true;
+            if (swap.movable) {
+                if (!status_[swap.index].resolved) {
+                    return false;
+                }
+                if (status_[swap.index].movedThisMicro ||
+                    !(after_.movables[swap.index].cell == target)) {
+                    status.resolved = true;
+                    return true;
+                }
+            } else {
+                const std::size_t enemyEntityIndex =
+                    entityIndexForEnemy(swap.index);
+                if (!status_[enemyEntityIndex].resolved) {
+                    return false;
+                }
+                if (status_[enemyEntityIndex].movedThisMicro ||
+                    !(after_.enemies[swap.index].cell == target)) {
+                    status.resolved = true;
+                    return true;
+                }
             }
 
             const GridPosition3 origin = playerCell(after_, playerIndex);
             playerCell(after_, playerIndex) = target;
             playerSliding(after_, playerIndex).reset();
-            after_.movables[movableIndex].cell = origin;
-            after_.movables[movableIndex].sliding.reset();
+            if (swap.movable) {
+                after_.movables[swap.index].cell = origin;
+                after_.movables[swap.index].sliding.reset();
+            } else {
+                after_.enemies[swap.index].cell = origin;
+                after_.enemies[swap.index].sliding.reset();
+                enemyMoved_[swap.index] = true;
+                enemyMovedThisMicro_[swap.index] = true;
+                Status& enemyStatus =
+                    status_[entityIndexForEnemy(swap.index)];
+                enemyStatus.active = true;
+                enemyStatus.resolved = true;
+                enemyStatus.movedThisMicro = true;
+                enemyStatus.done = true;
+            }
 
             ++status.consumed;
             status.resolved = true;
             status.movedThisMicro = true;
             status.done = true;
-            status_[movableIndex].active = true;
-            status_[movableIndex].resolved = true;
-            status_[movableIndex].movedThisMicro = true;
-            status_[movableIndex].done = true;
+            if (swap.movable) {
+                status_[swap.index].active = true;
+                status_[swap.index].resolved = true;
+                status_[swap.index].movedThisMicro = true;
+                status_[swap.index].done = true;
+            }
             anyMovement = true;
             return true;
         }
@@ -1465,6 +1684,19 @@ private:
         if (playerBlocksAt(after_, target, playerIndex)) {
             return false;
         }
+        if (after_.players[playerIndex].character.value_or(
+                level_.character()) == CharacterType::Druid) {
+            const GridPosition3 pullSource = movementTarget(
+                playerCell(after_, playerIndex),
+                oppositeDirection(direction));
+            if (const GameState::Enemy* enemy = enemyAt(after_, pullSource)) {
+                const std::size_t enemyIndex = static_cast<std::size_t>(
+                    enemy - after_.enemies.data());
+                if (!status_[entityIndexForEnemy(enemyIndex)].resolved) {
+                    return false;
+                }
+            }
+        }
         if (status.inputDriven &&
             after_.players[playerIndex].character.value_or(
                 level_.character()) == CharacterType::Knight) {
@@ -1473,7 +1705,10 @@ private:
                 // A movable with its own unresolved intent gets the same chance
                 // to vacate that the ordinary one-block push gives it.
                 for (const ChainEntity& entity : chain) {
-                    if (entity.movable && !status_[entity.index].resolved) {
+                    const std::size_t statusIndex = entity.movable
+                        ? entity.index
+                        : entityIndexForEnemy(entity.index);
+                    if (!status_[statusIndex].resolved) {
                         return false;
                     }
                 }
@@ -1486,8 +1721,21 @@ private:
                 return true;
             }
         }
-        if (enemyAt(after_, target) != nullptr) {
-            if (playerSliding(after_, playerIndex)) {
+        if (const GameState::Enemy* blocker = enemyAt(after_, target)) {
+            const std::size_t enemyIndex = static_cast<std::size_t>(
+                blocker - after_.enemies.data());
+            if (!status_[entityIndexForEnemy(enemyIndex)].resolved) {
+                return false;
+            }
+            const bool rogue = after_.players[playerIndex].character.value_or(
+                level_.character()) == CharacterType::Rogue;
+            if (status.inputDriven && rogue &&
+                !enemyMovedThisMicro_[enemyIndex] &&
+                pushEnemy(enemyIndex, direction)) {
+                applyPlayerMoveAndPull(entityIndex, direction, target);
+                status.movedThisMicro = true;
+                anyMovement = true;
+            } else if (playerSliding(after_, playerIndex)) {
                 playerSliding(after_, playerIndex).reset();
                 status.done = true;
             }
@@ -1504,6 +1752,13 @@ private:
             // Direct input may push it.
             const GridPosition3 pushTarget = movementTarget(target, direction);
             const GameState::Enemy* pushedEnemy = enemyAt(after_, pushTarget);
+            if (pushedEnemy != nullptr) {
+                const std::size_t enemyIndex = static_cast<std::size_t>(
+                    pushedEnemy - after_.enemies.data());
+                if (!status_[entityIndexForEnemy(enemyIndex)].resolved) {
+                    return false;
+                }
+            }
             const bool enemyCanMove = pushedEnemy == nullptr ||
                 canPushEnemy(
                     static_cast<std::size_t>(pushedEnemy - after_.enemies.data()),
@@ -1547,11 +1802,6 @@ private:
         anyMovement = true;
         return true;
     }
-
-    struct ChainEntity {
-        bool movable = false;
-        std::size_t index = 0;
-    };
 
     [[nodiscard]] std::optional<ChainEntity> pushableAt(
         const GameState& state,
@@ -1690,6 +1940,19 @@ private:
             level_, after_, enemyIndex, destination);
         after_.enemies[enemyIndex].cell = fall.cell;
         after_.enemies[enemyIndex].fallen = fall.fallen;
+        const bool fell = fall.cell != destination || fall.fallen;
+        after_.enemies[enemyIndex].sliding =
+            (!fell && isIceFloor(level_, after_, fall.cell) &&
+                staticCellAllowsEntity(
+                    level_, movementTarget(fall.cell, direction)))
+                ? std::optional<MoveDirection>(direction)
+                : std::nullopt;
+        Status& status = status_[entityIndexForEnemy(enemyIndex)];
+        ++status.consumed;
+        status.active = true;
+        status.resolved = true;
+        status.movedThisMicro = true;
+        status.done = fall.fallen;
         // Shoved, therefore written, therefore this action's responsibility -
         // including for whoever it has just been parked next to.
         enemyMoved_[enemyIndex] = true;
@@ -1880,6 +2143,12 @@ private:
                 status_[entityIndexForPlayer(i)].done = true;
             }
         }
+        for (std::size_t i = 0; i < enemyCount_; ++i) {
+            if (after_.enemies[i].dead || after_.enemies[i].fallen) {
+                after_.enemies[i].sliding.reset();
+                status_[entityIndexForEnemy(i)].done = true;
+            }
+        }
     }
 
     // Enemies kill orthogonally adjacent players.
@@ -1977,7 +2246,7 @@ private:
         ++status_[entityIndex].consumed;
     }
 
-    // Druids drag the movable immediately behind them into the cell they
+    // Druids drag the movable unit immediately behind them into the cell they
     // vacate. The pull is part of the same micro-step as the player move, so
     // it is atomic for planning, undo, reservations, and presentation. Pulled
     // objects join the action's causal closure exactly as pushed objects do.
@@ -1988,34 +2257,38 @@ private:
     {
         const std::size_t playerIndex = playerIndexForEntity(entityIndex);
         const GridPosition3 vacated = playerCell(after_, playerIndex);
-        std::optional<std::size_t> pulledIndex;
+        std::optional<ChainEntity> pulled;
         if (after_.players[playerIndex].character.value_or(
                 level_.character()) == CharacterType::Druid) {
             const GridPosition3 pullSource =
                 movementTarget(vacated, oppositeDirection(direction));
-            if (const GameState::Movable* movable = movableAt(
-                    after_, pullSource)) {
-                const std::size_t index = static_cast<std::size_t>(
-                    movable - after_.movables.data());
-                if (!status_[index].movedThisMicro) {
-                    pulledIndex = index;
+            if (const std::optional<ChainEntity> entity =
+                    pushableAt(after_, pullSource)) {
+                const bool alreadyMoved = entity->movable
+                    ? status_[entity->index].movedThisMicro
+                    : enemyMovedThisMicro_[entity->index];
+                if (!alreadyMoved) {
+                    pulled = entity;
                 }
             }
         }
 
         applyPlayerMove(entityIndex, direction, target);
-        if (!pulledIndex) {
+        if (!pulled) {
             return;
         }
 
-        const std::size_t index = *pulledIndex;
         // The destination is the cell a live player just vacated, so the
         // resolver has already established that it is valid and supported.
-        applyMovableMove(index, direction, vacated);
-        status_[index].resolved = true;
-        status_[index].movedThisMicro = true;
-        status_[index].done = false;
-        status_[index].active = true;
+        if (pulled->movable) {
+            applyMovableMove(pulled->index, direction, vacated);
+            status_[pulled->index].resolved = true;
+            status_[pulled->index].movedThisMicro = true;
+            status_[pulled->index].done = false;
+            status_[pulled->index].active = true;
+        } else {
+            applyEnemyMove(pulled->index, direction);
+        }
     }
 
     void settleBlocked()
@@ -2033,9 +2306,9 @@ private:
     const StepRates& rates_;
     const std::size_t movableCount_;
     const std::size_t playerCount_;
+    const std::size_t enemyCount_;
     std::vector<Status> status_;
-    // Enemies never act on their own, so they need no Status - only whether
-    // this step has shoved them, which is what decides who they may kill.
+    // Tracks whether enemy movement in this action caused a new attack.
     std::vector<char> enemyMoved_;
     // Unlike the attack closure above, ordinary turret triggers are edge
     // events: only motion in the current micro-step counts. Mutual turret

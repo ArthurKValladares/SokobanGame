@@ -78,9 +78,9 @@ std::optional<MoveDirection> movementDirection(
     return false;
 }
 
-// A pull is a movable that began directly behind a moving player and ended in
-// the column of the cell that player vacated. The z coordinate may differ when
-// the pulled object falls or sinks after entering the vacated cell.
+// A pull is a movable unit that began directly behind a moving player and
+// ended in the column of the cell that player vacated. The z coordinate may
+// differ when the pulled unit falls or sinks after entering the vacated cell.
 [[nodiscard]] bool derivePlayerPulling(
     const Level& level,
     const GameState& before,
@@ -90,6 +90,8 @@ std::optional<MoveDirection> movementDirection(
         std::min(before.players.size(), after.players.size());
     const std::size_t movableCount =
         std::min(before.movables.size(), after.movables.size());
+    const std::size_t enemyCount =
+        std::min(before.enemies.size(), after.enemies.size());
     for (std::size_t playerIndex = 0;
          playerIndex < playerCount;
          ++playerIndex) {
@@ -116,6 +118,19 @@ std::optional<MoveDirection> movementDirection(
             if (movableBefore == source && !(movableAfter == source) &&
                 movableAfter.x == before.players[playerIndex].cell.x &&
                 movableAfter.y == before.players[playerIndex].cell.y) {
+                return true;
+            }
+        }
+        for (std::size_t enemyIndex = 0;
+             enemyIndex < enemyCount;
+             ++enemyIndex) {
+            const GridPosition3& enemyBefore =
+                before.enemies[enemyIndex].cell;
+            const GridPosition3& enemyAfter =
+                after.enemies[enemyIndex].cell;
+            if (enemyBefore == source && !(enemyAfter == source) &&
+                enemyAfter.x == before.players[playerIndex].cell.x &&
+                enemyAfter.y == before.players[playerIndex].cell.y) {
                 return true;
             }
         }
@@ -176,6 +191,15 @@ void addChanged(
             std::ranges::find(
                 closure,
                 resolvedEntityId(EntityKind::Movable, state.movables[i].id, i)) !=
+                closure.end()) {
+            return true;
+        }
+    }
+    for (std::size_t i = 0; i < state.enemies.size(); ++i) {
+        if (!state.enemies[i].dead && state.enemies[i].sliding &&
+            std::ranges::find(
+                closure,
+                resolvedEntityId(EntityKind::Enemy, state.enemies[i].id, i)) !=
                 closure.end()) {
             return true;
         }
@@ -342,6 +366,11 @@ bool anySlideMomentum(const GameState& state)
             return true;
         }
     }
+    for (const GameState::Enemy& enemy : state.enemies) {
+        if (!enemy.dead && enemy.sliding.has_value()) {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -499,6 +528,13 @@ std::vector<EntityId> slidingEntities(const GameState& state)
                 resolvedEntityId(EntityKind::Movable, state.movables[i].id, i));
         }
     }
+    for (std::size_t i = 0; i < state.enemies.size(); ++i) {
+        if (!state.enemies[i].fallen && !state.enemies[i].dead &&
+            state.enemies[i].sliding) {
+            ids.push_back(
+                resolvedEntityId(EntityKind::Enemy, state.enemies[i].id, i));
+        }
+    }
     return ids;
 }
 
@@ -521,6 +557,14 @@ std::vector<EntityId> conveyorRiders(
             rules::conveyorDirectionAt(level, movable.cell)) {
             ids.push_back(
                 resolvedEntityId(EntityKind::Movable, movable.id, i));
+        }
+    }
+    for (std::size_t i = 0; i < state.enemies.size(); ++i) {
+        const GameState::Enemy& enemy = state.enemies[i];
+        if (!enemy.fallen && !enemy.dead && !enemy.sliding &&
+            rules::conveyorDirectionAt(level, enemy.cell)) {
+            ids.push_back(
+                resolvedEntityId(EntityKind::Enemy, enemy.id, i));
         }
     }
     return ids;

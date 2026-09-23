@@ -10,9 +10,9 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
 - Layered Sokoban movement with rocks, pressure plates, goals, undo, restart,
   multi-screen levels, and completion tracking.
 - Ice, ladders, conveyors, falling, configurable water layers, and four
-  directional mirror types that can reflect the player and movable entities.
-- Immobile animated enemies that track and attack adjacent players, can be
-  pushed by blocks, and support skeleton-driven held-item attachments.
+  directional mirror types that can reflect players and movable units.
+- Animated enemies that track and attack adjacent players, participate in
+  physical movement rules, and support skeleton-driven held-item attachments.
 - Animated mirror beams, destination ghosts, sound, and particle effects.
 - Pixel-blur world transitions when entering a puzzle from the overworld and
   returning after completion.
@@ -271,12 +271,13 @@ block the shot.
 The rogue uses the original one-object push rules and is always used in the
 overworld. The knight can push any-length contiguous chains containing rocks,
 ice blocks, turrets, and enemies, provided the entire chain has a valid place
-to move. Instead of pushing, the druid compulsively pulls a movable directly
-behind it into every cell it vacates; rocks, ice blocks, and turrets can all be
-pulled. When the witch moves toward the nearest visible movable in a cardinal
-line, it swaps positions with that movable instead; walls, enemies, and other
-heroes block the spell's line of sight. Hazards and enemy attacks still resolve
-normally after these abilities.
+to move. Instead of pushing, the druid compulsively pulls a movable unit
+directly behind it into every cell it vacates. When the witch moves toward the
+nearest visible movable unit in a cardinal line, it swaps positions with that
+unit instead; other heroes and walls block the spell's line of sight. Rocks,
+ice blocks, turrets, and enemies are all movable units for these abilities,
+mirrors, pressure plates, conveyors, and ice momentum. Hazards and enemy
+attacks still resolve normally after forced movement.
 
 Mesh decoration positions are world-space tile coordinates, rotations are XYZ
 Euler degrees, and scales must be positive. Their `model` names must exist in

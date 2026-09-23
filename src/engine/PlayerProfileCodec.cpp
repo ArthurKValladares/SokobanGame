@@ -358,16 +358,21 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         const Json& item = enemies[i];
         rejectUnknownProperties(
             item,
-            { "id", "cell", "fallen", "dead" },
+            { "id", "cell", "fallen", "dead", "sliding" },
             enemyContext);
-        state.enemies.push_back({
+        GameState::Enemy enemy {
             .id = unsignedIntegerProperty(item, "id", enemyContext),
             .cell = positionFromJson(
                 requiredProperty(item, "cell", enemyContext),
                 enemyContext + ".cell"),
             .fallen = boolProperty(item, "fallen", enemyContext),
             .dead = boolProperty(item, "dead", enemyContext),
-        });
+        };
+        if (item.contains("sliding")) {
+            enemy.sliding = directionFromJson(
+                item["sliding"], enemyContext + ".sliding");
+        }
+        state.enemies.push_back(enemy);
     }
     return state;
 }
@@ -411,6 +416,9 @@ OrderedJson gameStateToJson(const GameState& state)
             { "cell", positionToJson(enemy.cell) },
             { "fallen", enemy.fallen },
             { "dead", enemy.dead },
+            { "sliding", enemy.sliding
+                ? OrderedJson(directionName(*enemy.sliding))
+                : OrderedJson(nullptr) },
         });
     }
     return {
