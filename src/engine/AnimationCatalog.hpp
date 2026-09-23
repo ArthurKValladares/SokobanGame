@@ -22,6 +22,7 @@ enum class AnimationUse : uint8_t {
     PlayerIdle,
     PlayerMove,
     PlayerPush,
+    PlayerPull,
     PlayerDeath,
     PlayerDeadIdle,
     EnemyIdle,

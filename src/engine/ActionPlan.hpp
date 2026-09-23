@@ -28,6 +28,7 @@ struct ActionPlan {
     GameState after;
     float durationSeconds = config::stepDurationSeconds;
     bool playerPushing = false;
+    bool playerPulling = false;
     bool reversed = false;
     int playerMoveCountBefore = 0;
     int playerMoveCountAfter = 0;

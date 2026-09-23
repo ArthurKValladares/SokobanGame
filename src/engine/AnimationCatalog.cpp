@@ -18,10 +18,11 @@ namespace {
 
 using Json = nlohmann::ordered_json;
 
-constexpr std::array<AnimationUseDefinition, 13> useDefinitions {{
+constexpr std::array<AnimationUseDefinition, 14> useDefinitions {{
     { AnimationUse::PlayerIdle, "player.idle", "Player / Idle" },
     { AnimationUse::PlayerMove, "player.move", "Player / Move" },
     { AnimationUse::PlayerPush, "player.push", "Player / Push" },
+    { AnimationUse::PlayerPull, "player.pull", "Player / Pull" },
     { AnimationUse::PlayerDeath, "player.death", "Player / Death" },
     { AnimationUse::PlayerDeadIdle, "player.dead-idle", "Player / Dead Idle" },
     { AnimationUse::EnemyIdle, "enemy.idle", "Enemy / Idle" },

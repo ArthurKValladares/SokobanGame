@@ -10,6 +10,10 @@
       "path": "KayKit Adventurers 2.0/Characters/gltf/knight_texture.png"
     },
     {
+      "name": "Druid",
+      "path": "KayKit Adventurers 2.0/Characters/gltf/druid_texture.png"
+    },
+    {
       "name": "Barbarian",
       "path": "KayKit Adventurers 2.0/Characters/gltf/barbarian_texture.png"
     },
@@ -231,11 +235,17 @@
   "models": [
     {
       "name": "BricksA",
-      "path": "KayKit Block Bits 1.0/Assets/gltf/bricks_A.gltf"
+      "path": "KayKit Block Bits 1.0/Assets/gltf/bricks_A.gltf",
+      "material": {
+        "mode": "none"
+      }
     },
     {
       "name": "Stone",
-      "path": "KayKit Block Bits 1.0/Assets/gltf/stone.gltf"
+      "path": "KayKit Block Bits 1.0/Assets/gltf/stone.gltf",
+      "material": {
+        "mode": "none"
+      }
     },
     {
       "name": "Glass",
@@ -336,6 +346,17 @@
       "material": {
         "mode": "texture",
         "texture": "Knight"
+      },
+      "preserveAspectRatio": true,
+      "rotateHalfTurn": true
+    },
+    {
+      "name": "Druid",
+      "path": "KayKit Adventurers 2.0/Characters/gltf/Druid.glb",
+      "geometry": "skinned",
+      "material": {
+        "mode": "texture",
+        "texture": "Druid"
       },
       "preserveAspectRatio": true,
       "rotateHalfTurn": true
@@ -582,6 +603,12 @@
       "path": "custom/Rig_Medium_Push.glb",
       "clip": 1,
       "role": "player-push"
+    },
+    {
+      "name": "DruidPull",
+      "path": "custom/Rig_Medium_Pull.glb",
+      "clip": 1,
+      "role": "player-pull"
     },
     {
       "name": "RogueDeath",

@@ -41,6 +41,9 @@ CharacterType characterForStartTile(
     if (tile == TileType::Rogue) {
         return CharacterType::Rogue;
     }
+    if (tile == TileType::Druid) {
+        return CharacterType::Druid;
+    }
     return legacyCharacter;
 }
 

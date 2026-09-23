@@ -397,11 +397,13 @@ static void parseAnimations(const Json& root, AssetManifest& manifest)
             animation.role != "player-idle" &&
             animation.role != "player-move" &&
             animation.role != "player-push" &&
+            animation.role != "player-pull" &&
             animation.role != "player-death" &&
             animation.role != "player-dead-idle" &&
             animation.role != "enemy-attack") {
             fail(context,
                 "role must be 'player-idle', 'player-move', 'player-push', "
+                "'player-pull', "
                 "'player-death', 'player-dead-idle', or 'enemy-attack'");
         }
         manifest.animations_.push_back(std::move(animation));
@@ -611,6 +613,8 @@ void AssetManifest::validateAndResolve()
             role = &playerMove_;
         } else if (animation.role == "player-push") {
             role = &playerPush_;
+        } else if (animation.role == "player-pull") {
+            role = &playerPull_;
         } else if (animation.role == "player-death") {
             role = &playerDeath_;
         } else if (animation.role == "player-dead-idle") {
@@ -727,6 +731,8 @@ RenderModel AssetManifest::characterModel(CharacterType character) const
         return playerModel_;
     case CharacterType::Knight:
         return modelIdByName("Knight");
+    case CharacterType::Druid:
+        return modelIdByName("Druid");
     }
     return playerModel_;
 }

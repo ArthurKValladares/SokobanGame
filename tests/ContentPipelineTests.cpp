@@ -214,6 +214,7 @@ std::string animationCatalog()
     { "id": "player.idle", "animation": "Idle", "speed": 1.0 },
     { "id": "player.move", "animation": "Move", "speed": 1.0 },
     { "id": "player.push", "animation": "Push", "speed": 1.0 },
+    { "id": "player.pull", "animation": "Push", "speed": 1.0 },
     { "id": "player.death", "animation": "Death", "speed": 1.0 },
     { "id": "player.dead-idle", "animation": "DeadIdle", "speed": 1.0 },
     { "id": "enemy.idle", "animation": "Idle", "speed": 1.0 },

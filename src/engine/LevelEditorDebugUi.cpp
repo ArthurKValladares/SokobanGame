@@ -478,7 +478,8 @@ void LevelEditorDebugUi::drawTilePalette(
              definition.type == TileType::Player) ||
             (editor.editingOverworld() &&
              (definition.type == TileType::Rogue ||
-              definition.type == TileType::Knight)) ||
+              definition.type == TileType::Knight ||
+              definition.type == TileType::Druid)) ||
             (editor.editingOverworld() &&
              definition.type == TileType::End)) {
             continue;

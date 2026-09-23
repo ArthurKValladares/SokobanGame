@@ -27,6 +27,21 @@ std::optional<MoveDirection> movementDirection(
     return std::nullopt;
 }
 
+[[nodiscard]] MoveDirection oppositeDirection(MoveDirection direction)
+{
+    switch (direction) {
+    case MoveDirection::Up:
+        return MoveDirection::Down;
+    case MoveDirection::Down:
+        return MoveDirection::Up;
+    case MoveDirection::Left:
+        return MoveDirection::Right;
+    case MoveDirection::Right:
+        return MoveDirection::Left;
+    }
+    return MoveDirection::Up;
+}
+
 // A push is a movable or enemy that was in the cell the player stepped into
 // and is no longer there. Only direct input pushes, so this is not derived for
 // automatic steps.
@@ -51,6 +66,51 @@ std::optional<MoveDirection> movementDirection(
         for (std::size_t i = 0; i < enemyCount; ++i) {
             if (before.enemies[i].cell == pushCell &&
                 !(after.enemies[i].cell == pushCell)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// A pull is a movable that began directly behind a moving player and ended in
+// the column of the cell that player vacated. The z coordinate may differ when
+// the pulled object falls or sinks after entering the vacated cell.
+[[nodiscard]] bool derivePlayerPulling(
+    const Level& level,
+    const GameState& before,
+    const GameState& after)
+{
+    const std::size_t playerCount =
+        std::min(before.players.size(), after.players.size());
+    const std::size_t movableCount =
+        std::min(before.movables.size(), after.movables.size());
+    for (std::size_t playerIndex = 0;
+         playerIndex < playerCount;
+         ++playerIndex) {
+        if (before.players[playerIndex].character.value_or(
+                level.character()) != CharacterType::Druid) {
+            continue;
+        }
+        const std::optional<MoveDirection> direction = movementDirection(
+            before.players[playerIndex].cell,
+            after.players[playerIndex].cell);
+        if (!direction) {
+            continue;
+        }
+        const GridPosition3 source = rules::movementTarget(
+            before.players[playerIndex].cell,
+            oppositeDirection(*direction));
+        for (std::size_t movableIndex = 0;
+             movableIndex < movableCount;
+             ++movableIndex) {
+            const GridPosition3& movableBefore =
+                before.movables[movableIndex].cell;
+            const GridPosition3& movableAfter =
+                after.movables[movableIndex].cell;
+            if (movableBefore == source && !(movableAfter == source) &&
+                movableAfter.x == before.players[playerIndex].cell.x &&
+                movableAfter.y == before.players[playerIndex].cell.y) {
                 return true;
             }
         }
@@ -197,6 +257,10 @@ void addChanged(
         // Only the first leg is input-driven, so a push is judged there.
         plan.playerPushing =
             derivePlayerPushing(plan.before, planned.legs.front(), *playerInput);
+    }
+    if (plans::anyPlayerMoved(plan.before, planned.legs.front())) {
+        plan.playerPulling =
+            derivePlayerPulling(level, plan.before, planned.legs.front());
     }
     if (!playerInput) {
         // Nothing was driving a facing, so take it from whoever moved - a
@@ -494,6 +558,7 @@ ActionPlan inverted(const ActionPlan& plan)
         .before = plan.after,
         .after = plan.before,
         .playerPushing = plan.playerPushing,
+        .playerPulling = plan.playerPulling,
         .reversed = true,
         .playerMoveCountBefore = plan.playerMoveCountAfter,
         .playerMoveCountAfter = plan.playerMoveCountBefore,

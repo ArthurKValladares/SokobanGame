@@ -492,6 +492,14 @@ void testRealManifestFile()
         manifest.characterModel(sokoban::CharacterType::Knight) ==
             manifest.modelIdByName("Knight"),
         "real manifest resolves the knight character model");
+    CHECK_MESSAGE(
+        manifest.characterModel(sokoban::CharacterType::Druid) ==
+            manifest.modelIdByName("Druid"),
+        "real manifest resolves the druid character model");
+    CHECK_MESSAGE(
+        manifest.playerPullAnimation() ==
+            manifest.animationIdByName("DruidPull"),
+        "real manifest resolves the druid pull animation");
     CHECK_MESSAGE(manifest.soundSet("footsteps").size() == 5, "real manifest footsteps");
     CHECK_MESSAGE(manifest.soundSet("stone-drag").size() == 4, "real manifest drags");
     CHECK_MESSAGE(manifest.soundSet("mirror-swap").size() == 1, "real manifest mirror swap");
@@ -578,12 +586,31 @@ void testRealManifestFile()
     CHECK_MESSAGE(manifest.modelForTile(sokoban::TileType::Decorative).isCube(),
         "real manifest decorative block defaults to procedural cube");
 
+    const sokoban::RenderModel wall = manifest.modelIdByName("BricksA");
+    const sokoban::RenderModel rock = manifest.modelIdByName("Stone");
+    CHECK_MESSAGE(
+        manifest.model(wall).materialMode ==
+            sokoban::ModelMaterialMode::Untextured,
+        "wall keeps the bright engine tint instead of the dark glTF palette");
+    CHECK_MESSAGE(
+        manifest.model(rock).materialMode ==
+            sokoban::ModelMaterialMode::Untextured,
+        "rock keeps the bright engine tint instead of the dark glTF palette");
+
     const sokoban::RenderModel turret = manifest.modelIdByName("Turret");
     CHECK_MESSAGE(
         manifest.model(turret).materialMode == sokoban::ModelMaterialMode::Auto,
         "turret uses its authored glTF material without a manifest override");
     const sokoban::RuntimeTextureCatalog runtimeTextures =
         sokoban::collectRuntimeTextureCatalog(*root, manifest);
+    CHECK_MESSAGE(
+        runtimeTextures.model(static_cast<uint32_t>(wall.index())).materialMode ==
+            sokoban::ModelMaterialMode::Untextured,
+        "wall runtime binding does not restore the authored base-color map");
+    CHECK_MESSAGE(
+        runtimeTextures.model(static_cast<uint32_t>(rock.index())).materialMode ==
+            sokoban::ModelMaterialMode::Untextured,
+        "rock runtime binding does not restore the authored base-color map");
     const sokoban::RuntimeModelTextures& turretTextures =
         runtimeTextures.model(static_cast<uint32_t>(turret.index()));
     CHECK_MESSAGE(

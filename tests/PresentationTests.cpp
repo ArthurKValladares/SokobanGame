@@ -183,6 +183,7 @@ AnimationCatalog testAnimationCatalog()
         { "id": "player.idle", "animation": "Idle", "speed": 1.0 },
         { "id": "player.move", "animation": "Move", "speed": 1.0 },
         { "id": "player.push", "animation": "Push", "speed": 1.0 },
+        { "id": "player.pull", "animation": "Push", "speed": 1.0 },
         { "id": "player.death", "animation": "Death", "speed": 1.0,
           "startAfter": { "use": "enemy.attack", "event": "attack-connected" } },
         { "id": "player.dead-idle", "animation": "DeadIdle", "speed": 1.0 },
@@ -545,6 +546,16 @@ void testPresentationInterpolatesActionsAndClips()
 
     presentation.finishAction(after);
     CHECK(near(presentation.players()[0].clipPlaybackRate, 1.0f));
+
+    GameplaySession::Action pullAction = action;
+    pullAction.playerPushing = false;
+    pullAction.playerPulling = true;
+    pullAction.presentation =
+        presentation.buildActionPresentation(pullAction);
+    presentation.resetEntities(before);
+    presentation.beginAction(pullAction, pullAction.before);
+    presentation.seekAction(pullAction, 0.0f);
+    CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerPull);
 }
 
 void testGameplayFrameUsesSettingsAndPresentation()

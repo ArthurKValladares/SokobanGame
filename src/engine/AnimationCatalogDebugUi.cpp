@@ -21,6 +21,8 @@ RenderModel previewModelForUse(
     const AssetManifest& manifest)
 {
     switch (use) {
+    case AnimationUse::PlayerPull:
+        return manifest.characterModel(CharacterType::Druid);
     case AnimationUse::EnemyIdle:
     case AnimationUse::EnemyAttack:
     case AnimationUse::EditorEnemyIdle:

@@ -10,6 +10,7 @@ namespace sokoban {
 enum class CharacterType {
     Rogue,
     Knight,
+    Druid,
 };
 
 [[nodiscard]] constexpr std::string_view characterTypeName(
@@ -20,6 +21,8 @@ enum class CharacterType {
         return "rogue";
     case CharacterType::Knight:
         return "knight";
+    case CharacterType::Druid:
+        return "druid";
     }
     return "rogue";
 }
@@ -32,6 +35,9 @@ enum class CharacterType {
     }
     if (name == "knight") {
         return CharacterType::Knight;
+    }
+    if (name == "druid") {
+        return CharacterType::Druid;
     }
     return std::nullopt;
 }

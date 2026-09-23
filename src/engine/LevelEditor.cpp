@@ -240,10 +240,12 @@ void LevelEditor::setCharacter(CharacterType character)
         return;
     }
     const DocumentSnapshot before = captureDocumentSnapshot();
-    const char replacement = tileTypeToChar(
-        character == CharacterType::Knight
-            ? TileType::Knight
-            : TileType::Rogue);
+    const TileType replacementType = character == CharacterType::Knight
+        ? TileType::Knight
+        : character == CharacterType::Druid
+            ? TileType::Druid
+            : TileType::Rogue;
+    const char replacement = tileTypeToChar(replacementType);
     bool changed = document_.character.has_value();
     for (std::vector<std::string>& layer : document_.layers) {
         for (std::string& row : layer) {
@@ -1153,6 +1155,9 @@ CharacterType LevelEditor::character() const
                 if (tile == TileType::Rogue) {
                     return CharacterType::Rogue;
                 }
+                if (tile == TileType::Druid) {
+                    return CharacterType::Druid;
+                }
             }
         }
     }
@@ -1607,11 +1612,13 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
         definition = Level::parseDefinition(rows, path.string());
         const bool overworld = overworldScreenIdForPath(path).has_value();
         if (!overworld) {
-            const TileType concrete =
-                definition.character.value_or(CharacterType::Rogue) ==
-                    CharacterType::Knight
+            const CharacterType character =
+                definition.character.value_or(CharacterType::Rogue);
+            const TileType concrete = character == CharacterType::Knight
                 ? TileType::Knight
-                : TileType::Rogue;
+                : character == CharacterType::Druid
+                    ? TileType::Druid
+                    : TileType::Rogue;
             for (std::vector<std::string>& layer : definition.layers) {
                 for (std::string& row : layer) {
                     std::ranges::replace(

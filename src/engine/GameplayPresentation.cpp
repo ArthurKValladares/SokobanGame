@@ -323,10 +323,9 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     // dies on leg four, and running the builder over leg one only gave it
     // correct motion and no clip at all.
     //
-    // `playerPushing` is deliberately confined to the first leg. A push is
-    // something input does, and the later legs are momentum spending itself
-    // out - carrying the flag through would play the push animation for the
-    // whole length of the slide.
+    // Push/pull effort is deliberately confined to the first leg. Later legs
+    // are momentum spending itself out; carrying either flag through would
+    // play an effort animation for the whole length of a slide.
     ActionPresentationTimeline timeline;
     for (std::size_t leg = 0; leg < legs.size(); ++leg) {
         GameplaySession::Action legAction = action;
@@ -334,6 +333,7 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
         legAction.after = legs[leg];
         legAction.durationSeconds = stepDuration;
         legAction.playerPushing = leg == 0 && action.playerPushing;
+        legAction.playerPulling = leg == 0 && action.playerPulling;
 
         timeline = concatenateTimelines(
             std::move(timeline),
@@ -383,9 +383,11 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
             });
             static_cast<void>(builder.addAnimation({
                 .target = target,
-                .use = action.playerPushing
-                    ? AnimationUse::PlayerPush
-                    : AnimationUse::PlayerMove,
+                .use = action.playerPulling
+                    ? AnimationUse::PlayerPull
+                    : action.playerPushing
+                        ? AnimationUse::PlayerPush
+                        : AnimationUse::PlayerMove,
                 .completionUse = AnimationUse::PlayerIdle,
                 .clipStartSeconds = initialClipTime,
                 .durationSeconds = motionDuration,

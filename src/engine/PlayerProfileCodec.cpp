@@ -512,7 +512,7 @@ GameplaySession::Action undoActionFromJson(
     GameState before)
 {
     rejectUnknownProperties(value, {
-        "after", "playerPushing", "moveCountBefore",
+        "after", "playerPushing", "playerPulling", "moveCountBefore",
         "moveCountAfter", "presentation",
     }, context);
     GameplaySession::Action action;
@@ -521,6 +521,7 @@ GameplaySession::Action undoActionFromJson(
         requiredProperty(value, "after", context),
         std::string(context) + ".after");
     action.playerPushing = boolProperty(value, "playerPushing", context);
+    action.playerPulling = boolProperty(value, "playerPulling", context);
     action.playerMoveCountBefore =
         nonNegativeIntegerProperty(value, "moveCountBefore", context);
     action.playerMoveCountAfter =
@@ -682,6 +683,7 @@ OrderedJson undoActionToJson(const GameplaySession::Action& action)
     return {
         { "after", gameStateToJson(action.after) },
         { "playerPushing", action.playerPushing },
+        { "playerPulling", action.playerPulling },
         { "moveCountBefore", action.playerMoveCountBefore },
         { "moveCountAfter", action.playerMoveCountAfter },
         { "presentation", {

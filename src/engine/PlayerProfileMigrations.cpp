@@ -552,7 +552,8 @@ void migrate16to17(Json& root)
                 const std::string use = span.value("use", "player.idle");
                 const bool death = use == "player.death";
                 const bool attack = use == "enemy.attack";
-                const bool motion = use == "player.move" || use == "player.push";
+                const bool motion = use == "player.move" ||
+                    use == "player.push" || use == "player.pull";
                 std::string initialUse = kind == "enemy"
                     ? "enemy.idle"
                     : "player.idle";
@@ -1016,6 +1017,41 @@ void migrate29to30(Json& root)
     }
 }
 
+// Format 31 records whether an undo action used the druid's pull animation.
+// Older actions predate druids and therefore unambiguously did not pull.
+void migrate30to31(Json& root)
+{
+    const auto migrateCheckpoint = [](Json& checkpoint) {
+        if (!checkpoint.is_object() || !checkpoint.contains("session") ||
+            !checkpoint["session"].is_object()) {
+            return;
+        }
+        Json& session = checkpoint["session"];
+        if (!session.contains("undoStack") ||
+            !session["undoStack"].is_array()) {
+            return;
+        }
+        for (Json& action : session["undoStack"]) {
+            if (action.is_object() && !action.contains("playerPulling")) {
+                action["playerPulling"] = false;
+            }
+        }
+    };
+
+    if (!root.contains("progress") || !root["progress"].is_object()) {
+        return;
+    }
+    Json& progress = root["progress"];
+    if (progress.contains("activeScreen") &&
+        !progress["activeScreen"].is_null()) {
+        migrateCheckpoint(progress["activeScreen"]);
+    }
+    if (progress.contains("overworldCheckpoint") &&
+        !progress["overworldCheckpoint"].is_null()) {
+        migrateCheckpoint(progress["overworldCheckpoint"]);
+    }
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -1051,6 +1087,7 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate27to28,
         migrate28to29,
         migrate29to30,
+        migrate30to31,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

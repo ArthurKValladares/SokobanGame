@@ -666,6 +666,7 @@ void GameplaySession::recordCompletion(
     folded.playerMoveCountAfter +=
         action.playerMoveCountAfter - action.playerMoveCountBefore;
     folded.playerPushing = folded.playerPushing || action.playerPushing;
+    folded.playerPulling = folded.playerPulling || action.playerPulling;
     // Anything that committed between the cause and this consequence sits after
     // it in the stack and was chained to the endpoint that just moved.
     rebaseUndoFrom(index + 1);

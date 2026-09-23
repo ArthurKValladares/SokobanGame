@@ -17,6 +17,11 @@
       "duration": 1.0666667222976685
     },
     {
+      "animation": "DruidPull",
+      "speed": 1.0,
+      "duration": 1.0666667222976685
+    },
+    {
       "animation": "RogueDeath",
       "speed": 3.0,
       "duration": 2.633333444595337
@@ -46,6 +51,11 @@
     {
       "id": "player.push",
       "animation": "RoguePush",
+      "speed": 1.0
+    },
+    {
+      "id": "player.pull",
+      "animation": "DruidPull",
       "speed": 1.0
     },
     {

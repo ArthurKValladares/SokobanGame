@@ -11,6 +11,21 @@
 namespace sokoban::rules {
 namespace {
 
+[[nodiscard]] MoveDirection oppositeDirection(MoveDirection direction)
+{
+    switch (direction) {
+    case MoveDirection::Up:
+        return MoveDirection::Down;
+    case MoveDirection::Down:
+        return MoveDirection::Up;
+    case MoveDirection::Left:
+        return MoveDirection::Right;
+    case MoveDirection::Right:
+        return MoveDirection::Left;
+    }
+    return MoveDirection::Up;
+}
+
 struct FallResult {
     GridPosition3 cell {};
     bool fallen = false;
@@ -1390,7 +1405,7 @@ private:
                     }
                 }
                 if (pushKnightChain(chain, direction)) {
-                    applyPlayerMove(entityIndex, direction, target);
+                    applyPlayerMoveAndPull(entityIndex, direction, target);
                     status.movedThisMicro = true;
                     anyMovement = true;
                 }
@@ -1420,7 +1435,9 @@ private:
                 canPushEnemy(
                     static_cast<std::size_t>(pushedEnemy - after_.enemies.data()),
                     direction);
-            if (status.inputDriven &&
+            const bool druid = after_.players[playerIndex].character.value_or(
+                level_.character()) == CharacterType::Druid;
+            if (status.inputDriven && !druid &&
                 !status_[blockerIndex].movedThisMicro &&
                 staticCellAllowsEntity(level_, pushTarget) &&
                 !movableBlocksAt(after_, pushTarget, blockerIndex) &&
@@ -1440,7 +1457,7 @@ private:
                 // written, and if it lands on ice it has to keep sliding under
                 // the same action rather than be left for whatever comes next.
                 status_[blockerIndex].active = true;
-                applyPlayerMove(entityIndex, direction, target);
+                applyPlayerMoveAndPull(entityIndex, direction, target);
                 status.movedThisMicro = true;
                 anyMovement = true;
             } else if (playerSliding(after_, playerIndex)) {
@@ -1451,7 +1468,7 @@ private:
             status.resolved = true;
             return true;
         }
-        applyPlayerMove(entityIndex, direction, target);
+        applyPlayerMoveAndPull(entityIndex, direction, target);
         status.resolved = true;
         status.movedThisMicro = true;
         anyMovement = true;
@@ -1885,6 +1902,47 @@ private:
                 ? std::optional<MoveDirection>(direction)
                 : std::nullopt;
         ++status_[entityIndex].consumed;
+    }
+
+    // Druids drag the movable immediately behind them into the cell they
+    // vacate. The pull is part of the same micro-step as the player move, so
+    // it is atomic for planning, undo, reservations, and presentation. Pulled
+    // objects join the action's causal closure exactly as pushed objects do.
+    void applyPlayerMoveAndPull(
+        std::size_t entityIndex,
+        MoveDirection direction,
+        GridPosition3 target)
+    {
+        const std::size_t playerIndex = playerIndexForEntity(entityIndex);
+        const GridPosition3 vacated = playerCell(after_, playerIndex);
+        std::optional<std::size_t> pulledIndex;
+        if (after_.players[playerIndex].character.value_or(
+                level_.character()) == CharacterType::Druid) {
+            const GridPosition3 pullSource =
+                movementTarget(vacated, oppositeDirection(direction));
+            if (const GameState::Movable* movable = movableAt(
+                    after_, pullSource)) {
+                const std::size_t index = static_cast<std::size_t>(
+                    movable - after_.movables.data());
+                if (!status_[index].movedThisMicro) {
+                    pulledIndex = index;
+                }
+            }
+        }
+
+        applyPlayerMove(entityIndex, direction, target);
+        if (!pulledIndex) {
+            return;
+        }
+
+        const std::size_t index = *pulledIndex;
+        // The destination is the cell a live player just vacated, so the
+        // resolver has already established that it is valid and supported.
+        applyMovableMove(index, direction, vacated);
+        status_[index].resolved = true;
+        status_[index].movedThisMicro = true;
+        status_[index].done = false;
+        status_[index].active = true;
     }
 
     void settleBlocked()

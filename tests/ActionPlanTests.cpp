@@ -135,6 +135,28 @@ void testKnightEnemyPushUsesThePushPresentation()
     }
 }
 
+void testDruidPullIsPlannedAsPulling()
+{
+    TEST("druidPullIsPlannedAsPulling");
+    const Level level = makeLevel({
+        { "...." },
+        { "RU  " },
+    });
+    const std::optional<plans::PlannedAction> planned = plans::planPlayerStep(
+        level,
+        rules::initialState(level),
+        MoveDirection::Right,
+        {},
+        0.25f);
+    CHECK(planned.has_value());
+    if (planned) {
+        CHECK(planned->action.playerPulling);
+        CHECK(!planned->action.playerPushing);
+        CHECK(planned->action.after.players[0].cell == cell(2, 0, 1));
+        CHECK(planned->action.after.movables[0].cell == cell(1, 0, 1));
+    }
+}
+
 void testRestartPlan()
 {
     TEST("restartPlan");
@@ -184,8 +206,9 @@ void testInvertedSwapsEndpointsAndCounts()
     CHECK(back.reversed);
     CHECK(back.playerMoveCountBefore == 5);
     CHECK(back.playerMoveCountAfter == 4);
-    // Carried through so the reversed animation still knows it was a push.
+    // Carried through so a reversed effort animation keeps its type.
     CHECK(back.playerPushing == forward->action.playerPushing);
+    CHECK(back.playerPulling == forward->action.playerPulling);
 
     // Inverting twice returns the original, aside from the reversed flag that
     // marks which direction history is being walked in.
@@ -700,6 +723,7 @@ int main()
     testPlanningIsPureAndRepeatable();
     testWalkingWithoutPushing();
     testKnightEnemyPushUsesThePushPresentation();
+    testDruidPullIsPlannedAsPulling();
     testRestartPlan();
     testInvertedSwapsEndpointsAndCounts();
     testPlayerMovementHelpers();

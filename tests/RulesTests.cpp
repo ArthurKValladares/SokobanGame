@@ -220,6 +220,63 @@ void testKnightCanPushAnEnemyButStillSuffersItsAttack()
     CHECK(pushed.players[0].dead);
 }
 
+void testDruidCompulsivelyPullsTrailingMovables()
+{
+    TEST("druidCompulsivelyPullsTrailingMovables");
+    const Level level = makeLevel({
+        { "...." },
+        { "RU  " },
+    });
+    const GameState initial = rules::initialState(level);
+    CHECK(initial.players[0].character == CharacterType::Druid);
+
+    const GameState pulled = rules::step(
+        level, initial, MoveDirection::Right);
+    CHECK(pulled.players[0].cell == cell(2, 0, 1));
+    CHECK(pulled.movables[0].cell == cell(1, 0, 1));
+
+    rules::StepRates fastRates;
+    fastRates.playerMove = 2;
+    const GameState pulledTwice = rules::step(
+        level, initial, MoveDirection::Right, fastRates);
+    CHECK(pulledTwice.players[0].cell == cell(3, 0, 1));
+    CHECK(pulledTwice.movables[0].cell == cell(2, 0, 1));
+
+    const Level conveyor = makeLevel({
+        { "....." },
+        { "C >  " },
+    });
+    GameState conveyorState = rules::initialState(conveyor);
+    conveyorState.players[0].cell = cell(2, 0, 1);
+    conveyorState.players[0].character = CharacterType::Druid;
+    conveyorState.movables.push_back({
+        .id = 99,
+        .type = TileType::Rock,
+        .cell = cell(1, 0, 1),
+    });
+    const GameState conveyorPulled = rules::step(conveyor, conveyorState);
+    CHECK(conveyorPulled.players[0].cell == cell(3, 0, 1));
+    CHECK(conveyorPulled.movables[0].cell == cell(2, 0, 1));
+
+    const Level cannotPush = makeLevel({
+        { "..." },
+        { "UR " },
+    });
+    const GameState cannotPushInitial = rules::initialState(cannotPush);
+    CHECK(rules::step(
+        cannotPush,
+        cannotPushInitial,
+        MoveDirection::Right) == cannotPushInitial);
+
+    const Level blocked = makeLevel({
+        { "..." },
+        { "RU#" },
+    });
+    const GameState blockedInitial = rules::initialState(blocked);
+    CHECK(rules::step(
+        blocked, blockedInitial, MoveDirection::Right) == blockedInitial);
+}
+
 void testIceSlidesOneTilePerStep()
 {
     TEST("iceSlidesOneTilePerStep");
@@ -1392,6 +1449,7 @@ int main()
     testKnightPushesAnUnlimitedMixedChain();
     testKnightChainPushIsAtomicWhenItsTailIsBlocked();
     testKnightCanPushAnEnemyButStillSuffersItsAttack();
+    testDruidCompulsivelyPullsTrailingMovables();
     testIceSlidesOneTilePerStep();
     testPlayerMovesWhileIceSlides();
     testPlayerMovesWhileConveyorCarriesRock();

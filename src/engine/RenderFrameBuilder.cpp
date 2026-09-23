@@ -39,6 +39,8 @@ RenderAnimation manifestAnimationForUse(
         return manifest.playerMoveAnimation();
     case AnimationUse::PlayerPush:
         return manifest.playerPushAnimation();
+    case AnimationUse::PlayerPull:
+        return manifest.playerPullAnimation();
     case AnimationUse::PlayerDeath:
         return manifest.playerDeathAnimation();
     case AnimationUse::PlayerDeadIdle:

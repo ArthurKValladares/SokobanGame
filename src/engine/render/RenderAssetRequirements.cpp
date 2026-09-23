@@ -131,6 +131,7 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     requireUse(AnimationUse::PlayerIdle, manifest.playerIdleAnimation());
     requireUse(AnimationUse::PlayerMove, manifest.playerMoveAnimation());
     requireUse(AnimationUse::PlayerPush, manifest.playerPushAnimation());
+    requireUse(AnimationUse::PlayerPull, manifest.playerPullAnimation());
     requireUse(AnimationUse::PlayerDeath, manifest.playerDeathAnimation());
     requireUse(AnimationUse::PlayerDeadIdle, manifest.playerDeadIdleAnimation());
     requireUse(

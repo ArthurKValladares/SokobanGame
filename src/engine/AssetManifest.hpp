@@ -126,8 +126,8 @@ public:
         std::string name;
         std::string path; // relative to the assets root
         uint32_t clip = 0; // one-based animation number inside the source file
-        // "", "player-idle", "player-move", "player-push", "player-death",
-        // or "player-dead-idle"
+        // "", "player-idle", "player-move", "player-push", "player-pull",
+        // "player-death", "player-dead-idle", or "enemy-attack"
         std::string role;
     };
 
@@ -200,6 +200,7 @@ public:
     [[nodiscard]] RenderAnimation playerIdleAnimation() const { return playerIdle_; }
     [[nodiscard]] RenderAnimation playerMoveAnimation() const { return playerMove_; }
     [[nodiscard]] RenderAnimation playerPushAnimation() const { return playerPush_; }
+    [[nodiscard]] RenderAnimation playerPullAnimation() const { return playerPull_; }
     [[nodiscard]] RenderAnimation playerDeathAnimation() const { return playerDeath_; }
     [[nodiscard]] RenderAnimation playerDeadIdleAnimation() const { return playerDeadIdle_; }
     [[nodiscard]] RenderModel enemyModel() const { return enemyModel_; }
@@ -229,6 +230,7 @@ private:
     RenderAnimation playerIdle_ {};
     RenderAnimation playerMove_ {};
     RenderAnimation playerPush_ {};
+    RenderAnimation playerPull_ {};
     RenderAnimation playerDeath_ {};
     RenderAnimation playerDeadIdle_ {};
     RenderModel enemyModel_ {};

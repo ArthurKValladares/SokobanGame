@@ -407,6 +407,7 @@ void testActiveScreenCheckpointRoundTrip()
         .before = before,
         .after = after,
         .playerPushing = true,
+        .playerPulling = true,
         .playerMoveCountBefore = 0,
         .playerMoveCountAfter = 1,
         .presentation = {
@@ -491,6 +492,9 @@ void testActiveScreenCheckpointRoundTrip()
     CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["undoStack"][0]
             ["presentation"]["animations"].size() == 2,
         "undo presentation timeline is persisted");
+    CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["undoStack"][0]
+            ["playerPulling"].get<bool>(),
+        "undo action pull presentation state is persisted");
     CHECK_MESSAGE(
         current["progress"]["activeScreen"]["session"].contains(
             "undoBaseState") &&

@@ -513,7 +513,16 @@ bool ApplicationTools::bakeTileThumbnails(
     namespace bake = tileThumbnails;
     RenderAssetRequirements requirements;
     for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
-        requirements.requireModel(manifest.modelForTile(definition.type));
+        if (tileTypeIsPlayerStart(definition.type)) {
+            const CharacterType character = definition.type == TileType::Knight
+                ? CharacterType::Knight
+                : definition.type == TileType::Druid
+                    ? CharacterType::Druid
+                    : CharacterType::Rogue;
+            requirements.requireModel(manifest.characterModel(character));
+        } else {
+            requirements.requireModel(manifest.modelForTile(definition.type));
+        }
     }
     requirements.requireTexture(
         manifest.findTextureIdByName(groundSplatBaseTextureName));

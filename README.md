@@ -221,9 +221,9 @@ controllers fall back to the generic glyph set.
 ## Level Format
 
 Screens are text `.scr` files containing sequential `@layer N` sections. Each
-authored screen declares `@character rogue` or `@character knight`; legacy
-screens without the directive default to the rogue. An optional `@water N`
-directive makes Air on that layer resolve to Water and
+authored screen declares `@character rogue`, `@character knight`, or
+`@character druid`; legacy screens without the directive default to the rogue.
+An optional `@water N` directive makes Air on that layer resolve to Water and
 extends the water beyond the authored board without expanding camera bounds.
 Any number of `@decoration` directives may reference manifest model names and
 provide authored transforms. Metadata must appear before `@layer 0`.
@@ -251,6 +251,7 @@ Common tile symbols:
 | --- | --- | --- | --- |
 | space | Air | `.` | Ground |
 | `#` | Wall | `C` | Player |
+| `Q K U` | Rogue / Knight / Druid starts | | |
 | `R` | Rock | `P` | Pressure plate |
 | `E` | End | `I` | Ice |
 | `L` | Ladder | `W` | Legacy explicit water |
@@ -269,7 +270,9 @@ block the shot.
 The rogue uses the original one-object push rules and is always used in the
 overworld. The knight can push any-length contiguous chains containing rocks,
 ice blocks, turrets, and enemies, provided the entire chain has a valid place
-to move. Hazards and enemy attacks still resolve normally after the push.
+to move. Instead of pushing, the druid compulsively pulls a movable directly
+behind it into every cell it vacates; rocks, ice blocks, and turrets can all be
+pulled. Hazards and enemy attacks still resolve normally after a push or pull.
 
 Mesh decoration positions are world-space tile coordinates, rotations are XYZ
 Euler degrees, and scales must be positive. Their `model` names must exist in

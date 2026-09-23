@@ -915,7 +915,8 @@ void Application::update(
          presentation_.players()) {
         playerMoving |= player.motion.moving;
         pushing |= player.motion.moving &&
-            player.animationUse == AnimationUse::PlayerPush;
+            (player.animationUse == AnimationUse::PlayerPush ||
+                player.animationUse == AnimationUse::PlayerPull);
     }
     audioSystem_.update(dt, playerMoving, pushing);
 }

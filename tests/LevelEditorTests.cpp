@@ -239,18 +239,19 @@ void testCharacterSelectionPersistsAndIsUndoable()
     CHECK(editor.tryUndoEdit());
     CHECK(editor.character() == CharacterType::Rogue);
 
-    editor.setCharacter(CharacterType::Knight);
+    editor.setCharacter(CharacterType::Druid);
+    CHECK(editor.character() == CharacterType::Druid);
     const std::filesystem::path sourcePath =
         project.source / "level0" / "screen0.scr";
     CHECK(editor.saveDocument(sourcePath));
     CHECK(readFile(sourcePath).find("@character") == std::string::npos);
-    CHECK(readFile(sourcePath).find(tileTypeToChar(TileType::Knight)) !=
+    CHECK(readFile(sourcePath).find(tileTypeToChar(TileType::Druid)) !=
         std::string::npos);
 
     LevelEditor loaded = makeEditor(project);
     CHECK(loaded.loadDocument(sourcePath));
-    CHECK(loaded.character() == CharacterType::Knight);
-    CHECK(loaded.documentToLevel().character() == CharacterType::Knight);
+    CHECK(loaded.character() == CharacterType::Druid);
+    CHECK(loaded.documentToLevel().character() == CharacterType::Druid);
 }
 
 void testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness()
