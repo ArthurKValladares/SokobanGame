@@ -293,6 +293,34 @@ void testRoguePaletteMatchesCpuSkinning()
     CHECK(mismatchedTangentCount == 0);
 }
 
+void testWitchUsesTheSharedCharacterRigAnimations()
+{
+    TEST("witchUsesTheSharedCharacterRigAnimations");
+    const std::filesystem::path assets = SOKOBAN_TEST_ASSET_DIR;
+    const SkinnedMeshData mesh = loadGltfSkinnedMesh(
+        assets / "KayKit Witch/characters/Witch.glb",
+        {
+            .preserveAspectRatio = true,
+            .rotateHalfTurn = true,
+        });
+    const GltfAnimationClip animation = loadGltfAnimationClip(
+        assets / "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/"
+                 "Rig_Medium_MovementBasic.glb",
+        6);
+
+    const MeshData start = skinGltfMesh(mesh, animation, 0.0f);
+    const MeshData moving = skinGltfMesh(mesh, animation, 0.37f);
+    CHECK(!mesh.vertices.empty());
+    CHECK(start.vertices.size() == moving.vertices.size());
+    bool anyVertexMoved = false;
+    for (std::size_t index = 0; index < start.vertices.size(); ++index) {
+        const Vec3 delta =
+            moving.vertices[index].position - start.vertices[index].position;
+        anyVertexMoved = anyVertexMoved || dot(delta, delta) > 0.000001f;
+    }
+    CHECK(anyVertexMoved);
+}
+
 } // namespace
 
 int main()
@@ -302,6 +330,7 @@ int main()
     testLayoutRejectsInvalidGeometryWithoutPacking();
     testNonuniformNormalizationPreservesSkinnedBasis();
     testRoguePaletteMatchesCpuSkinning();
+    testWitchUsesTheSharedCharacterRigAnimations();
     if (failures == 0) {
         std::cout << "GpuSkinningTests: " << checks << " checks passed\n";
         return 0;

@@ -8,5 +8,7 @@ class AssetManifest;
 
 [[nodiscard]] ParticleEffectDefinition makeMirrorSwapParticleEffect(
     const AssetManifest& manifest);
+[[nodiscard]] ParticleEffectDefinition makeWitchSwapParticleEffect(
+    const AssetManifest& manifest);
 
 } // namespace sokoban

@@ -5,17 +5,13 @@
 #include "engine/render/MirrorConfig.hpp"
 
 namespace sokoban {
+namespace {
 
-ParticleEffectDefinition makeMirrorSwapParticleEffect(
-    const AssetManifest& manifest)
+ParticleEffectDefinition makeSwapParticleEffect(
+    const AssetManifest& manifest, Vec4 color)
 {
     ParticleEffectDefinition effect {
-        .color = {
-            config::mirrorBeamCoreColor.x,
-            config::mirrorBeamCoreColor.y,
-            config::mirrorBeamCoreColor.z,
-            config::mirrorSwapSmokeOpacity,
-        },
+        .color = color,
         .particleCount = config::mirrorSwapSmokeParticleCount,
         .lifetimeSeconds = config::mirrorSwapSmokeLifetimeSeconds,
         .initialSize = {
@@ -44,6 +40,27 @@ ParticleEffectDefinition makeMirrorSwapParticleEffect(
         effect.textures.push_back(manifest.textureIdByName(name));
     }
     return effect;
+}
+
+} // namespace
+
+ParticleEffectDefinition makeMirrorSwapParticleEffect(
+    const AssetManifest& manifest)
+{
+    return makeSwapParticleEffect(
+        manifest,
+        {
+            config::mirrorBeamCoreColor.x,
+            config::mirrorBeamCoreColor.y,
+            config::mirrorBeamCoreColor.z,
+            config::mirrorSwapSmokeOpacity,
+        });
+}
+
+ParticleEffectDefinition makeWitchSwapParticleEffect(
+    const AssetManifest& manifest)
+{
+    return makeSwapParticleEffect(manifest, config::witchSwapSmokeColor);
 }
 
 } // namespace sokoban

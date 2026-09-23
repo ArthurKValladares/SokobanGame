@@ -205,6 +205,7 @@ private:
     AudioSystem audioSystem_;
     ParticleSystem particleSystem_;
     ParticleEffectDefinition mirrorSwapParticleEffect_;
+    ParticleEffectDefinition witchSwapParticleEffect_;
     TurretParticleEffects turretParticleEffects_;
     Level level_;
     std::optional<OverworldMap> overworldMap_;

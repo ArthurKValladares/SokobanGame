@@ -157,6 +157,28 @@ void testDruidPullIsPlannedAsPulling()
     }
 }
 
+void testWitchSwapDoesNotUseThePushPresentation()
+{
+    TEST("witchSwapDoesNotUseThePushPresentation");
+    const Level level = makeLevel({
+        { ".." },
+        { "HR" },
+    });
+    const std::optional<plans::PlannedAction> planned =
+        plans::planPlayerStep(
+            level,
+            rules::initialState(level),
+            MoveDirection::Right,
+            {},
+            0.25f);
+    CHECK(planned.has_value());
+    if (planned) {
+        CHECK(!planned->action.playerPushing);
+        CHECK(planned->action.after.players[0].cell == cell(1, 0, 1));
+        CHECK(planned->action.after.movables[0].cell == cell(0, 0, 1));
+    }
+}
+
 void testRestartPlan()
 {
     TEST("restartPlan");
@@ -724,6 +746,7 @@ int main()
     testWalkingWithoutPushing();
     testKnightEnemyPushUsesThePushPresentation();
     testDruidPullIsPlannedAsPulling();
+    testWitchSwapDoesNotUseThePushPresentation();
     testRestartPlan();
     testInvertedSwapsEndpointsAndCounts();
     testPlayerMovementHelpers();

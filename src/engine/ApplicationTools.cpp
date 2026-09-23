@@ -518,6 +518,8 @@ bool ApplicationTools::bakeTileThumbnails(
                 ? CharacterType::Knight
                 : definition.type == TileType::Druid
                     ? CharacterType::Druid
+                    : definition.type == TileType::Witch
+                        ? CharacterType::Witch
                     : CharacterType::Rogue;
             requirements.requireModel(manifest.characterModel(character));
         } else {

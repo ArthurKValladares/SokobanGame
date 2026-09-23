@@ -75,7 +75,8 @@ bool tileTypeIsSurfaceEntity(TileType type)
 bool tileTypeIsPlayerStart(TileType type)
 {
     return type == TileType::Player || type == TileType::Rogue ||
-        type == TileType::Knight || type == TileType::Druid;
+        type == TileType::Knight || type == TileType::Druid ||
+        type == TileType::Witch;
 }
 
 bool tileTypeIsConveyor(TileType type)

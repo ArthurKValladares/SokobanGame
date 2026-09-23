@@ -188,6 +188,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
     float remainingTime = dt;
     std::size_t observedMirrorActivation =
         session.mirrorActivationSequence();
+    std::size_t observedWitchSwap = session.witchSwapSequence();
     // Anything already running arrived with a timeline in an earlier frame.
     std::size_t presentedThrough = highestInFlightId(session);
 
@@ -213,6 +214,12 @@ GameplayLoop::UpdateResult GameplayLoop::update(
                 result.mirrorActivated = true;
                 result.mirrorSwapDestinations =
                     session.lastMirrorSwapDestinations();
+            }
+            if (session.witchSwapSequence() != observedWitchSwap) {
+                observedWitchSwap = session.witchSwapSequence();
+                result.witchSwapped = true;
+                result.witchSwapDestinations =
+                    session.lastWitchSwapDestinations();
             }
             startNewPresentations(
                 session,

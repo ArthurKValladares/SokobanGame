@@ -179,6 +179,8 @@ Application::Application(ApplicationOptions options)
     , audioSystem_(assetRoot_, assetManifest_)
     , mirrorSwapParticleEffect_(
           makeMirrorSwapParticleEffect(assetManifest_))
+    , witchSwapParticleEffect_(
+          makeWitchSwapParticleEffect(assetManifest_))
     , turretParticleEffects_(
           makeTurretParticleEffects(assetManifest_))
     , settingsCoordinator_(playerProfile_, presentationSettings_)
@@ -873,6 +875,19 @@ void Application::update(
                         config::mirrorSwapSmokeElevation,
                 },
                 mirrorSwapParticleEffect_);
+        }
+    }
+    if (gameplayResult.witchSwapped) {
+        for (GridPosition3 destination :
+             gameplayResult.witchSwapDestinations) {
+            particleSystem_.emit(
+                {
+                    static_cast<float>(destination.x) + 0.5f,
+                    static_cast<float>(destination.y) + 0.5f,
+                    static_cast<float>(destination.z) +
+                        config::mirrorSwapSmokeElevation,
+                },
+                witchSwapParticleEffect_);
         }
     }
     for (const GameplayLoop::UpdateResult::TurretShotPresentation& shot :

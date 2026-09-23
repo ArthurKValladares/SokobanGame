@@ -128,6 +128,15 @@ public:
     {
         return lastMirrorSwapDestinations_;
     }
+    [[nodiscard]] std::size_t witchSwapSequence() const
+    {
+        return witchSwapSequence_;
+    }
+    [[nodiscard]] const std::vector<GridPosition3>&
+        lastWitchSwapDestinations() const
+    {
+        return lastWitchSwapDestinations_;
+    }
     [[nodiscard]] int playerMoveCount() const { return playerMoveCount_; }
     [[nodiscard]] EntityId activeHeroController() const
     {
@@ -351,6 +360,11 @@ private:
     // Transient event sequence; intentionally excluded from save snapshots.
     std::size_t mirrorActivationSequence_ = 0;
     std::vector<GridPosition3> lastMirrorSwapDestinations_;
+    // Transient presentation event for a witch spell. The two endpoints of
+    // every admitted swap are retained until the next spell so the frame loop
+    // can emit smoke exactly once without persisting visual state in saves.
+    std::size_t witchSwapSequence_ = 0;
+    std::vector<GridPosition3> lastWitchSwapDestinations_;
     rules::StepRates stepRates_ {};
     // Rewinding freezes pending slides and conveyors until the next
     // input-driven step.

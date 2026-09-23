@@ -29,6 +29,7 @@ inline constexpr float mirrorSwapSmokeMaximumAngularVelocity = 1.8f;
 inline constexpr float mirrorSwapSmokeElevation = 0.72f;
 inline constexpr float mirrorSwapSmokeOpacity = 0.72f;
 inline constexpr bool mirrorSwapSmokeDrawOnTop = true;
+inline constexpr Vec4 witchSwapSmokeColor { 0.72f, 0.18f, 0.94f, 0.78f };
 
 inline constexpr std::string_view turretMuzzleTextureName = "Muzzle01";
 inline constexpr std::string_view turretGlowTextureName = "ParticleGlow";

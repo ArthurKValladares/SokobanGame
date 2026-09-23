@@ -252,6 +252,14 @@ void testCharacterSelectionPersistsAndIsUndoable()
     CHECK(loaded.loadDocument(sourcePath));
     CHECK(loaded.character() == CharacterType::Druid);
     CHECK(loaded.documentToLevel().character() == CharacterType::Druid);
+
+    loaded.setCharacter(CharacterType::Witch);
+    CHECK(loaded.character() == CharacterType::Witch);
+    CHECK(loaded.saveDocument(sourcePath));
+    LevelEditor witch = makeEditor(project);
+    CHECK(witch.loadDocument(sourcePath));
+    CHECK(witch.character() == CharacterType::Witch);
+    CHECK(witch.documentToLevel().character() == CharacterType::Witch);
 }
 
 void testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness()

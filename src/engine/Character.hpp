@@ -11,6 +11,7 @@ enum class CharacterType {
     Rogue,
     Knight,
     Druid,
+    Witch,
 };
 
 [[nodiscard]] constexpr std::string_view characterTypeName(
@@ -23,6 +24,8 @@ enum class CharacterType {
         return "knight";
     case CharacterType::Druid:
         return "druid";
+    case CharacterType::Witch:
+        return "witch";
     }
     return "rogue";
 }
@@ -38,6 +41,9 @@ enum class CharacterType {
     }
     if (name == "druid") {
         return CharacterType::Druid;
+    }
+    if (name == "witch") {
+        return CharacterType::Witch;
     }
     return std::nullopt;
 }

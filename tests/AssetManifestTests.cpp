@@ -497,6 +497,10 @@ void testRealManifestFile()
             manifest.modelIdByName("Druid"),
         "real manifest resolves the druid character model");
     CHECK_MESSAGE(
+        manifest.characterModel(sokoban::CharacterType::Witch) ==
+            manifest.modelIdByName("Witch"),
+        "real manifest resolves the witch character model");
+    CHECK_MESSAGE(
         manifest.playerPullAnimation() ==
             manifest.animationIdByName("DruidPull"),
         "real manifest resolves the druid pull animation");
@@ -639,6 +643,18 @@ void testRealManifestFile()
                     sokoban::TextureMinificationFilter::LinearMipmapLinear,
             "turret glTF sampler settings survive runtime discovery");
     }
+
+    const sokoban::RenderModel witch = manifest.modelIdByName("Witch");
+    const sokoban::RuntimeModelTextures& witchTextures =
+        runtimeTextures.model(static_cast<uint32_t>(witch.index()));
+    CHECK_MESSAGE(
+        witchTextures.materialMode ==
+            sokoban::ModelMaterialMode::PrimitiveMaterials,
+        "witch authored material resolves to the glTF draw path");
+    CHECK_MESSAGE(
+        !witchTextures.primitiveMaterials.empty() &&
+            witchTextures.primitiveMaterials[0].bindBaseColorTexture,
+        "witch embedded base-color image is bound automatically");
 
     const AssetManifest::Animation& death =
         manifest.animation(manifest.playerDeathAnimation());

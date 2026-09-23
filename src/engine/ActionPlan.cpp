@@ -46,11 +46,16 @@ std::optional<MoveDirection> movementDirection(
 // and is no longer there. Only direct input pushes, so this is not derived for
 // automatic steps.
 [[nodiscard]] bool derivePlayerPushing(
+    const Level& level,
     const GameState& before,
     const GameState& after,
     MoveDirection playerInput)
 {
     for (const GameState::Player& player : before.players) {
+        if (player.character.value_or(level.character()) ==
+            CharacterType::Witch) {
+            continue;
+        }
         const GridPosition3 pushCell =
             rules::movementTarget(player.cell, playerInput);
         const std::size_t count =
@@ -256,7 +261,8 @@ void addChanged(
     if (playerInput && plans::anyPlayerMoved(plan.before, planned.legs.front())) {
         // Only the first leg is input-driven, so a push is judged there.
         plan.playerPushing =
-            derivePlayerPushing(plan.before, planned.legs.front(), *playerInput);
+            derivePlayerPushing(
+                level, plan.before, planned.legs.front(), *playerInput);
     }
     if (plans::anyPlayerMoved(plan.before, planned.legs.front())) {
         plan.playerPulling =

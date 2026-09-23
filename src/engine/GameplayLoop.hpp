@@ -46,8 +46,10 @@ public:
         bool screenSolved = false;
         bool draftSolved = false;
         bool mirrorActivated = false;
+        bool witchSwapped = false;
         bool activeHeroChanged = false;
         std::vector<GridPosition3> mirrorSwapDestinations;
+        std::vector<GridPosition3> witchSwapDestinations;
         std::vector<TurretShotPresentation> turretShots;
     };
 

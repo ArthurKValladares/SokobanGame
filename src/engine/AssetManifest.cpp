@@ -733,6 +733,8 @@ RenderModel AssetManifest::characterModel(CharacterType character) const
         return modelIdByName("Knight");
     case CharacterType::Druid:
         return modelIdByName("Druid");
+    case CharacterType::Witch:
+        return modelIdByName("Witch");
     }
     return playerModel_;
 }

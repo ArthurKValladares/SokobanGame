@@ -1149,6 +1149,9 @@ private:
         bool resolved = false;
         bool movedThisMicro = false;
         bool inputDriven = false; // player only
+        // A witch replaces an input-driven walk with one teleport to the
+        // nearest visible movable on that ray.
+        std::optional<std::size_t> witchSwapTarget;
     };
 
     // Brings one entity into the causal closure, by the id the rest of the
@@ -1208,6 +1211,32 @@ private:
             : after_.movables[index].cell;
     }
 
+    [[nodiscard]] std::optional<std::size_t> visibleMovableForWitch(
+        std::size_t playerIndex,
+        MoveDirection direction) const
+    {
+        const GridPosition ray = directionOffset(direction);
+        const GridPosition3 origin = playerCell(after_, playerIndex);
+        for (int distance = 1;; ++distance) {
+            const GridPosition3 cell {
+                origin.x + ray.x * distance,
+                origin.y + ray.y * distance,
+                origin.z,
+            };
+            if (!staticCellAllowsEntity(level_, cell)) {
+                return std::nullopt;
+            }
+            if (const GameState::Movable* movable = movableAt(after_, cell)) {
+                return static_cast<std::size_t>(
+                    movable - after_.movables.data());
+            }
+            if (playerBlocksAt(after_, cell, playerIndex) ||
+                enemyAt(after_, cell) != nullptr) {
+                return std::nullopt;
+            }
+        }
+    }
+
     void deriveIntents()
     {
         std::fill(
@@ -1222,6 +1251,7 @@ private:
             status.resolved = false;
             status.movedThisMicro = false;
             status.inputDriven = false;
+            status.witchSwapTarget.reset();
 
             // Out of scope means scenery: still an obstacle to everyone else,
             // but it wants nothing and will not be written.
@@ -1268,13 +1298,25 @@ private:
             if (status.intent) {
                 status.target = movementTarget(cellOf(i), *status.intent);
                 if (isPlayer(i) && status.inputDriven) {
-                    status.target =
-                        playerLadderClimbTarget(
-                            level_,
-                            after_,
-                            playerIndexForEntity(i),
-                            *status.intent)
-                            .value_or(*status.target);
+                    const std::size_t playerIndex =
+                        playerIndexForEntity(i);
+                    if (after_.players[playerIndex].character.value_or(
+                            level_.character()) == CharacterType::Witch) {
+                        status.witchSwapTarget = visibleMovableForWitch(
+                            playerIndex, *status.intent);
+                    }
+                    if (status.witchSwapTarget) {
+                        status.target = after_.movables[
+                            *status.witchSwapTarget].cell;
+                    } else {
+                        status.target =
+                            playerLadderClimbTarget(
+                                level_,
+                                after_,
+                                playerIndex,
+                                *status.intent)
+                                .value_or(*status.target);
+                    }
                 }
             }
         }
@@ -1380,6 +1422,37 @@ private:
         if (status.contested) {
             cancelAndFinish(entityIndex, true);
             status.resolved = true;
+            return true;
+        }
+        if (status.witchSwapTarget) {
+            const std::size_t movableIndex = *status.witchSwapTarget;
+            // In a whole-world step the target may also have an automatic
+            // intent. Let it resolve first, then refuse a stale spell rather
+            // than teleporting an entity the witch can no longer see.
+            if (!status_[movableIndex].resolved) {
+                return false;
+            }
+            if (status_[movableIndex].movedThisMicro ||
+                !(after_.movables[movableIndex].cell == target)) {
+                status.resolved = true;
+                return true;
+            }
+
+            const GridPosition3 origin = playerCell(after_, playerIndex);
+            playerCell(after_, playerIndex) = target;
+            playerSliding(after_, playerIndex).reset();
+            after_.movables[movableIndex].cell = origin;
+            after_.movables[movableIndex].sliding.reset();
+
+            ++status.consumed;
+            status.resolved = true;
+            status.movedThisMicro = true;
+            status.done = true;
+            status_[movableIndex].active = true;
+            status_[movableIndex].resolved = true;
+            status_[movableIndex].movedThisMicro = true;
+            status_[movableIndex].done = true;
+            anyMovement = true;
             return true;
         }
         if (!staticCellAllowsEntity(level_, target) ||

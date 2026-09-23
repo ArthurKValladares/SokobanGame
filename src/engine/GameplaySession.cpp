@@ -204,6 +204,43 @@ void normalizeLegacySnapshot(
     }
 }
 
+std::vector<GridPosition3> witchSwapDestinations(const ActionPlan& action)
+{
+    std::vector<GridPosition3> destinations;
+    const std::size_t playerCount = std::min(
+        action.before.players.size(), action.after.players.size());
+    const std::size_t movableCount = std::min(
+        action.before.movables.size(), action.after.movables.size());
+    for (std::size_t playerIndex = 0;
+         playerIndex < playerCount;
+         ++playerIndex) {
+        const GameState::Player& beforePlayer =
+            action.before.players[playerIndex];
+        const GameState::Player& afterPlayer =
+            action.after.players[playerIndex];
+        if (beforePlayer.character != CharacterType::Witch ||
+            beforePlayer.cell == afterPlayer.cell) {
+            continue;
+        }
+        for (std::size_t movableIndex = 0;
+             movableIndex < movableCount;
+             ++movableIndex) {
+            if (action.before.movables[movableIndex].cell != afterPlayer.cell ||
+                action.after.movables[movableIndex].cell != beforePlayer.cell) {
+                continue;
+            }
+            for (GridPosition3 endpoint : {
+                     beforePlayer.cell, afterPlayer.cell }) {
+                if (std::ranges::find(destinations, endpoint) ==
+                    destinations.end()) {
+                    destinations.push_back(endpoint);
+                }
+            }
+            break;
+        }
+    }
+    return destinations;
+}
 
 } // namespace
 
@@ -222,6 +259,8 @@ void GameplaySession::reset(const Level& level)
         : rules::playerControllerId(undoBaseState_, 0);
     mirrorActivationSequence_ = 0;
     lastMirrorSwapDestinations_.clear();
+    witchSwapSequence_ = 0;
+    lastWitchSwapDestinations_.clear();
     autoMotionPaused_ = false;
 }
 
@@ -382,6 +421,8 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
             : rules::playerControllerId(normalized.state, 0);
     mirrorActivationSequence_ = 0;
     lastMirrorSwapDestinations_.clear();
+    witchSwapSequence_ = 0;
+    lastWitchSwapDestinations_.clear();
     autoMotionPaused_ = normalized.automaticMotionPaused;
     return true;
 }
@@ -743,6 +784,8 @@ GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
     const float stepDuration = step->action.durationSeconds;
     const int stepLegs = static_cast<int>(step->legs.size());
     const GameState afterStep = step->action.after;
+    const std::vector<GridPosition3> witchSwapEndpoints =
+        witchSwapDestinations(step->action);
 
     std::vector<ActionScheduler::Pending> batch;
     batch.push_back(
@@ -784,6 +827,10 @@ GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
     if (scheduler_.tryStartAll(std::move(batch), group)) {
         autoMotionPaused_ = wasPaused;
         return StartOutcome::Refused;
+    }
+    if (!witchSwapEndpoints.empty()) {
+        lastWitchSwapDestinations_ = witchSwapEndpoints;
+        ++witchSwapSequence_;
     }
     return StartOutcome::Started;
 }

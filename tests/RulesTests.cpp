@@ -277,6 +277,79 @@ void testDruidCompulsivelyPullsTrailingMovables()
         blocked, blockedInitial, MoveDirection::Right) == blockedInitial);
 }
 
+void testWitchCompulsivelySwapsWithVisibleMovables()
+{
+    TEST("witchCompulsivelySwapsWithVisibleMovables");
+    const Level level = makeLevel({
+        { ".....", "....." },
+        { "H  R ", "     " },
+    });
+    const GameState initial = rules::initialState(level);
+    CHECK(initial.players[0].character == CharacterType::Witch);
+
+    const GameState swapped = rules::step(
+        level, initial, MoveDirection::Right);
+    CHECK(swapped.players[0].cell == cell(3, 0, 1));
+    CHECK(swapped.movables[0].cell == cell(0, 0, 1));
+    CHECK(!swapped.players[0].sliding);
+    CHECK(!swapped.movables[0].sliding);
+
+    // The spell is one swap even when the configured walking rate is faster.
+    rules::StepRates fastRates;
+    fastRates.playerMove = 3;
+    CHECK(rules::step(level, initial, MoveDirection::Right, fastRates) ==
+        swapped);
+
+    // Without a target on the chosen ray, the witch walks normally.
+    const GameState walked = rules::step(
+        level, initial, MoveDirection::Down);
+    CHECK(walked.players[0].cell == cell(0, 1, 1));
+}
+
+void testWitchSwapUsesNearestTargetAndRequiresClearSight()
+{
+    TEST("witchSwapUsesNearestTargetAndRequiresClearSight");
+    const Level nearest = makeLevel({
+        { "......" },
+        { "H R R " },
+    });
+    const GameState nearestInitial = rules::initialState(nearest);
+    const GameState nearestSwap = rules::step(
+        nearest, nearestInitial, MoveDirection::Right);
+    CHECK(nearestSwap.players[0].cell == cell(2, 0, 1));
+    CHECK(nearestSwap.movables[0].cell == cell(0, 0, 1));
+    CHECK(nearestSwap.movables[1].cell == cell(4, 0, 1));
+
+    const Level wall = makeLevel({
+        { "....." },
+        { "H# R " },
+    });
+    const GameState wallInitial = rules::initialState(wall);
+    CHECK(rules::step(wall, wallInitial, MoveDirection::Right) ==
+        wallInitial);
+
+    const Level enemy = makeLevel({
+        { "....." },
+        { "HN R " },
+    });
+    const GameState enemyInitial = rules::initialState(enemy);
+    CHECK(rules::step(enemy, enemyInitial, MoveDirection::Right) ==
+        enemyInitial);
+
+    const Level hero = makeLevel({
+        { "....." },
+        { "HQ R " },
+    });
+    const GameState heroInitial = rules::initialState(hero);
+    const GameState heroBlocked = rules::scopedStep(
+        hero,
+        heroInitial,
+        MoveDirection::Right,
+        {},
+        { .actors = { heroInitial.players[0].id } });
+    CHECK(heroBlocked == heroInitial);
+}
+
 void testIceSlidesOneTilePerStep()
 {
     TEST("iceSlidesOneTilePerStep");
@@ -1450,6 +1523,8 @@ int main()
     testKnightChainPushIsAtomicWhenItsTailIsBlocked();
     testKnightCanPushAnEnemyButStillSuffersItsAttack();
     testDruidCompulsivelyPullsTrailingMovables();
+    testWitchCompulsivelySwapsWithVisibleMovables();
+    testWitchSwapUsesNearestTargetAndRequiresClearSight();
     testIceSlidesOneTilePerStep();
     testPlayerMovesWhileIceSlides();
     testPlayerMovesWhileConveyorCarriesRock();

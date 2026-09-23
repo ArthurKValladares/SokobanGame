@@ -386,6 +386,38 @@ void testRejectedMirrorInputDoesNotEmitActivation()
     CHECK(session.undoCount() == 0);
 }
 
+void testWitchSwapEmitsBothParticleEndpointsOnce()
+{
+    TEST("witchSwapEmitsBothParticleEndpointsOnce");
+    const Level level = makeLevel({
+        { "....." },
+        { "H  R " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+
+    const GameplayLoop::UpdateResult swapped = GameplayLoop::update(
+        level,
+        session,
+        presentation,
+        { .right = { .pressed = true, .down = true } },
+        0.01f,
+        false);
+    CHECK(swapped.witchSwapped);
+    const std::vector<GridPosition3> expected {
+        GridPosition3 { 0, 0, 1 },
+        GridPosition3 { 3, 0, 1 },
+    };
+    CHECK(swapped.witchSwapDestinations == expected);
+
+    const GameplayLoop::UpdateResult continued = GameplayLoop::update(
+        level, session, presentation, {}, 0.01f, false);
+    CHECK(!continued.witchSwapped);
+    CHECK(continued.witchSwapDestinations.empty());
+}
+
 void testSolvedScreenAndDraftOutcomesDiffer()
 {
     TEST("solvedScreenAndDraftOutcomesDiffer");
@@ -572,6 +604,7 @@ int main()
     testMoveAdvancesSessionAndPresentation();
     testMirrorInputCommitsAnInstantAction();
     testRejectedMirrorInputDoesNotEmitActivation();
+    testWitchSwapEmitsBothParticleEndpointsOnce();
     testSolvedScreenAndDraftOutcomesDiffer();
     testMirrorDuplicationRequiresEveryPlayerOnAnEnd();
     testTurretShotCueWaitsForMovementToFinish();

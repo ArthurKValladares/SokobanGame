@@ -221,8 +221,9 @@ controllers fall back to the generic glyph set.
 ## Level Format
 
 Screens are text `.scr` files containing sequential `@layer N` sections. Each
-authored screen declares `@character rogue`, `@character knight`, or
-`@character druid`; legacy screens without the directive default to the rogue.
+authored screen declares `@character rogue`, `@character knight`,
+`@character druid`, or `@character witch`; legacy screens without the
+directive default to the rogue.
 An optional `@water N` directive makes Air on that layer resolve to Water and
 extends the water beyond the authored board without expanding camera bounds.
 Any number of `@decoration` directives may reference manifest model names and
@@ -251,7 +252,7 @@ Common tile symbols:
 | --- | --- | --- | --- |
 | space | Air | `.` | Ground |
 | `#` | Wall | `C` | Player |
-| `Q K U` | Rogue / Knight / Druid starts | | |
+| `Q K U H` | Rogue / Knight / Druid / Witch starts | | |
 | `R` | Rock | `P` | Pressure plate |
 | `E` | End | `I` | Ice |
 | `L` | Ladder | `W` | Legacy explicit water |
@@ -272,7 +273,10 @@ overworld. The knight can push any-length contiguous chains containing rocks,
 ice blocks, turrets, and enemies, provided the entire chain has a valid place
 to move. Instead of pushing, the druid compulsively pulls a movable directly
 behind it into every cell it vacates; rocks, ice blocks, and turrets can all be
-pulled. Hazards and enemy attacks still resolve normally after a push or pull.
+pulled. When the witch moves toward the nearest visible movable in a cardinal
+line, it swaps positions with that movable instead; walls, enemies, and other
+heroes block the spell's line of sight. Hazards and enemy attacks still resolve
+normally after these abilities.
 
 Mesh decoration positions are world-space tile coordinates, rotations are XYZ
 Euler degrees, and scales must be positive. Their `model` names must exist in
