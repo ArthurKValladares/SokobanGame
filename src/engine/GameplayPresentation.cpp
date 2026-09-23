@@ -532,26 +532,47 @@ void GameplayPresentation::beginAction(
     reverseSourceStartSeconds_ = action.reversed
         ? action.presentation.durationSeconds
         : 0.0f;
-    // Every player instance turns, including ones this action does not move.
-    //
-    // This is intended, not an oversight, and it is the mirror mechanic's whole
-    // read: the copies are one character the player is controlling in several
-    // places, not several characters. They share one input, so they share one
-    // facing. A copy pressed against a wall while its siblings walk right must
-    // still turn right, or the set stops looking like one body and starts
-    // looking like a crowd that has lost sync.
-    //
-    // Scoping this to the players the action moves therefore stays wrong even
-    // under concurrency, where the obvious refactor would be to narrow it. What
-    // does need narrowing is ambient facing - see the `!playerInput` branch of
-    // `plans::worldStep`, which faces players from whoever a belt or slide
-    // happened to move. That is not an input and has no business turning
-    // players another action is driving.
-    //
-    // Pinned by `playerCopiesShareTheInputFacing` in PresentationTests.
+    // Face only the control groups participating in this action. Authored
+    // heroes have distinct controller ids, while mirror copies inherit their
+    // source's id. That keeps a blocked mirror copy visually tied to the copy
+    // that moved without rotating unrelated, inactive heroes.
     if (action.facingDirection) {
-        for (PlayerVisual& player : players_) {
-            player.facingQuarterTurns = facingQuarterTurns(*action.facingDirection);
+        std::vector<EntityId> movingControllers;
+        const std::size_t playerCount = std::min(
+            action.before.players.size(), action.after.players.size());
+        for (std::size_t index = 0; index < playerCount; ++index) {
+            if (action.before.players[index].cell ==
+                action.after.players[index].cell) {
+                continue;
+            }
+            const EntityId controller =
+                rules::playerControllerId(action.before, index);
+            if (std::ranges::find(movingControllers, controller) ==
+                movingControllers.end()) {
+                movingControllers.push_back(controller);
+            }
+        }
+
+        for (std::size_t index = 0;
+             index < action.before.players.size();
+             ++index) {
+            if (std::ranges::find(
+                    movingControllers,
+                    rules::playerControllerId(action.before, index)) ==
+                movingControllers.end()) {
+                continue;
+            }
+            const EntityTarget target = playerTarget(
+                action.before.players[index], index);
+            const auto visual = std::ranges::find_if(
+                players_,
+                [&](const PlayerVisual& candidate) {
+                    return candidate.motion.target == target;
+                });
+            if (visual != players_.end()) {
+                visual->facingQuarterTurns =
+                    facingQuarterTurns(*action.facingDirection);
+            }
         }
     }
 }

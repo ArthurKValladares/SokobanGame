@@ -1739,15 +1739,17 @@ void testPlayerCopiesRenderAndInterpolateTogether()
 void testPlayerCopiesShareTheInputFacing()
 {
     TEST("playerCopiesShareTheInputFacing");
-    // Mirror copies are one character in several places, so one input gives one
-    // facing. The copy that cannot move still turns; see the comment on
-    // GameplayPresentation::beginAction.
+    // Mirror copies share a controller, so the copy that cannot move still
+    // turns with the copy that can.
     const Level level = Level::loadFromLayers({
         { "....", "....", "...." },
         { "C   ", "    ", "  # " },
     }, "player copy facing");
     GameState before = rules::initialState(level);
-    before.players.push_back({ .cell = { 1, 2, 1 } });
+    before.players.push_back({
+        .cell = { 1, 2, 1 },
+        .controller = before.players[0].controller,
+    });
 
     GameplayPresentation presentation;
     presentation.resetEntities(before);
@@ -1769,8 +1771,7 @@ void testPlayerCopiesShareTheInputFacing()
     CHECK(presentation.players()[0].facingQuarterTurns == right);
     CHECK(presentation.players()[1].facingQuarterTurns == right);
 
-    // And again on an input that moves nobody: walking into a wall still turns
-    // the whole set, because the input is what facing follows.
+    // An action that moves nobody does not affect either copy's facing.
     GameplaySession::Action blocked {
         .before = after,
         .after = after,
@@ -1778,9 +1779,53 @@ void testPlayerCopiesShareTheInputFacing()
         .facingDirection = MoveDirection::Up,
     };
     presentation.beginAction(blocked, blocked.before);
+    CHECK(presentation.players()[0].facingQuarterTurns == right);
+    CHECK(presentation.players()[1].facingQuarterTurns == right);
+}
+
+void testInactiveHeroesKeepTheirFacing()
+{
+    TEST("inactiveHeroesKeepTheirFacing");
+    const Level level = Level::loadFromLayers({
+        { ".....", ".....", "....." },
+        { "Q    ", "K    ", "Q    " },
+    }, "independent hero facing");
+    const GameState initial = rules::initialState(level);
+
+    GameplayPresentation presentation;
+    presentation.resetEntities(initial);
+    CHECK(presentation.players().size() == 3);
+
+    GameState firstMoved = initial;
+    firstMoved.players[0].cell = { 1, 0, 1 };
+    GameplaySession::Action firstAction {
+        .before = initial,
+        .after = firstMoved,
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Right,
+    };
+    presentation.beginAction(firstAction, firstAction.before);
+
+    const uint32_t down = 0;
+    const uint32_t right = 3;
+    CHECK(presentation.players()[0].facingQuarterTurns == right);
+    CHECK(presentation.players()[1].facingQuarterTurns == down);
+    CHECK(presentation.players()[2].facingQuarterTurns == down);
+
+    GameState secondMoved = firstMoved;
+    secondMoved.players[1].cell = { 0, 0, 1 };
+    GameplaySession::Action secondAction {
+        .before = firstMoved,
+        .after = secondMoved,
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Up,
+    };
+    presentation.beginAction(secondAction, secondAction.before);
+
     const uint32_t up = 2;
-    CHECK(presentation.players()[0].facingQuarterTurns == up);
+    CHECK(presentation.players()[0].facingQuarterTurns == right);
     CHECK(presentation.players()[1].facingQuarterTurns == up);
+    CHECK(presentation.players()[2].facingQuarterTurns == down);
 }
 
 void testMirrorDuplicationPreviewsEveryDestination()
@@ -2441,6 +2486,7 @@ int main()
     testMirrorActivationBuildsBeamAndDestinationGhost();
     testPlayerCopiesRenderAndInterpolateTogether();
     testPlayerCopiesShareTheInputFacing();
+    testInactiveHeroesKeepTheirFacing();
     testMirrorDuplicationPreviewsEveryDestination();
     testGameplayFrameBuildsProceduralWaterSurface();
     testWaterLayerBuildsUnboundedNonPickableExterior();
