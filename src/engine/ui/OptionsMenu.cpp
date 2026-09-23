@@ -96,6 +96,11 @@ constexpr std::array bindingRows {
     BindingRow { OptionsMenuRowId::Undo, InputAction::Undo, "Undo" },
     BindingRow { OptionsMenuRowId::Restart, InputAction::Restart, "Restart" },
     BindingRow {
+        OptionsMenuRowId::CycleHero,
+        InputAction::CycleHero,
+        "Cycle active hero",
+    },
+    BindingRow {
         OptionsMenuRowId::ShowTopDownView,
         InputAction::ShowTopDownView,
         "Current Screen Top-Down",
@@ -282,6 +287,7 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::MoveRight:
     case OptionsMenuRowId::Undo:
     case OptionsMenuRowId::Restart:
+    case OptionsMenuRowId::CycleHero:
     case OptionsMenuRowId::ShowTopDownView:
     case OptionsMenuRowId::ShowOverworldMap:
     case OptionsMenuRowId::ConfirmInteract:

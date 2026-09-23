@@ -101,10 +101,11 @@ inline constexpr int maxChainedSteps = 512;
     const rules::StepRates& rates,
     float stepDurationSeconds);
 
-// Every living player takes one input-driven step, together with everything
-// that step drags in: a block they push, an enemy that block shoves, a player
-// the enemy kills. Players are planned as one action rather than one each
-// because they are one character - mirror copies share a single input.
+// Every living player controlled by `controller` takes one input-driven step,
+// together with everything that step drags in: a block they push, an enemy
+// that block shoves, or a player the enemy kills. Authored heroes have distinct
+// controller ids; mirror copies inherit their source controller and move as a
+// group.
 //
 // One step, deliberately. The slide a push sets off is planned separately, so
 // that the player is released after their own tile instead of being held for
@@ -117,7 +118,8 @@ inline constexpr int maxChainedSteps = 512;
     const GameState& state,
     MoveDirection input,
     const rules::StepRates& rates,
-    float stepDurationSeconds);
+    float stepDurationSeconds,
+    EntityId controller = invalidEntityId);
 
 // One entity's slide, resolved to its end as a single committed chain, plus
 // whatever it runs into on the way. Nothing that happens while it travels can

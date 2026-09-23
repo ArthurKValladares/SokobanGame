@@ -137,9 +137,9 @@ void testDocumentCommandsAndUndo()
     CHECK(editor.documentDepth() == 2);
 }
 
-void testTileValidationAndPlayerUniqueness()
+void testTileValidationAndMultipleHeroPlacement()
 {
-    TEST("tileValidationAndPlayerUniqueness");
+    TEST("tileValidationAndMultipleHeroPlacement");
     TemporaryProject project;
     LevelEditor editor = makeEditor(project);
     editor.newDocument(4, 3, false);
@@ -152,15 +152,20 @@ void testTileValidationAndPlayerUniqueness()
     editor.setCell({ 2, 1, 1 }, TileType::Ladder);
     CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::Ladder));
 
-    editor.setCell({ 3, 2, 1 }, TileType::Player);
-    int playerCount = 0;
+    editor.setCell({ 3, 2, 1 }, TileType::Rogue);
+    editor.setCell({ 2, 2, 1 }, TileType::Knight);
+    int heroCount = 0;
     for (const auto& layer : editor.documentLayers()) {
         for (const std::string& row : layer) {
-            playerCount += static_cast<int>(std::ranges::count(row, tileTypeToChar(TileType::Player)));
+            heroCount += static_cast<int>(std::ranges::count(
+                row, tileTypeToChar(TileType::Rogue)));
+            heroCount += static_cast<int>(std::ranges::count(
+                row, tileTypeToChar(TileType::Knight)));
         }
     }
-    CHECK(playerCount == 1);
-    CHECK(editor.documentLayers()[1][2][3] == tileTypeToChar(TileType::Player));
+    CHECK(heroCount == 3);
+    CHECK(editor.documentLayers()[1][2][3] == tileTypeToChar(TileType::Rogue));
+    CHECK(editor.documentLayers()[1][2][2] == tileTypeToChar(TileType::Knight));
 }
 
 void testAddLayerBelowShiftsContentAndWaterAndIsUndoable()
@@ -181,7 +186,7 @@ void testAddLayerBelowShiftsContentAndWaterAndIsUndoable()
     CHECK(editor.documentLayers()[1][0][0] ==
         tileTypeToChar(TileType::Ground));
     CHECK(editor.documentLayers()[2][0][0] ==
-        tileTypeToChar(TileType::Player));
+        tileTypeToChar(TileType::Rogue));
     CHECK(editor.status() == "Added layer below.");
 
     CHECK(editor.tryUndoEdit());
@@ -191,7 +196,7 @@ void testAddLayerBelowShiftsContentAndWaterAndIsUndoable()
     CHECK(editor.documentLayers()[0][0][0] ==
         tileTypeToChar(TileType::Ground));
     CHECK(editor.documentLayers()[1][0][0] ==
-        tileTypeToChar(TileType::Player));
+        tileTypeToChar(TileType::Rogue));
 }
 
 void testSaveLoadAndRuntimeMirror()
@@ -238,7 +243,9 @@ void testCharacterSelectionPersistsAndIsUndoable()
     const std::filesystem::path sourcePath =
         project.source / "level0" / "screen0.scr";
     CHECK(editor.saveDocument(sourcePath));
-    CHECK(readFile(sourcePath).starts_with("@character knight\n"));
+    CHECK(readFile(sourcePath).find("@character") == std::string::npos);
+    CHECK(readFile(sourcePath).find(tileTypeToChar(TileType::Knight)) !=
+        std::string::npos);
 
     LevelEditor loaded = makeEditor(project);
     CHECK(loaded.loadDocument(sourcePath));
@@ -779,7 +786,7 @@ void testResizePreservesOverlapAndUsesLayerFill()
     editor.resizeDocument(1, 1, false);
     CHECK(editor.documentWidth() == 1);
     CHECK(editor.documentHeight() == 1);
-    CHECK(editor.documentLayers()[1][0][0] == tileTypeToChar(TileType::Player));
+    CHECK(editor.documentLayers()[1][0][0] == tileTypeToChar(TileType::Rogue));
 }
 
 void testPaintingOutsideExpandsAndShiftsDocumentAtomically()
@@ -811,7 +818,7 @@ void testPaintingOutsideExpandsAndShiftsDocumentAtomically()
     CHECK(editor.documentLayers()[0][0][0] ==
         tileTypeToChar(TileType::Decorative));
     CHECK(editor.documentLayers()[1][1][1] ==
-        tileTypeToChar(TileType::Player));
+        tileTypeToChar(TileType::Rogue));
     CHECK(editor.documentLayers()[1][2][2] ==
         tileTypeToChar(TileType::Wall));
     CHECK(editor.documentLayers()[0][0][1] ==
@@ -823,7 +830,7 @@ void testPaintingOutsideExpandsAndShiftsDocumentAtomically()
     CHECK(editor.documentWidth() == 2);
     CHECK(editor.documentHeight() == 2);
     CHECK(editor.documentLayers()[1][0][0] ==
-        tileTypeToChar(TileType::Player));
+        tileTypeToChar(TileType::Rogue));
     CHECK(editor.documentLayers()[1][1][1] ==
         tileTypeToChar(TileType::Wall));
 
@@ -833,7 +840,7 @@ void testPaintingOutsideExpandsAndShiftsDocumentAtomically()
     CHECK(editor.documentLayers()[0][2][2] ==
         tileTypeToChar(TileType::Air));
     CHECK(editor.documentLayers()[1][0][0] ==
-        tileTypeToChar(TileType::Player));
+        tileTypeToChar(TileType::Rogue));
     CHECK(editor.documentLayers()[0][2][3] ==
         tileTypeToChar(TileType::Decorative));
 
@@ -1444,7 +1451,7 @@ void testOverworldPlayerTileMovesAcrossComponents()
 int main()
 {
     testDocumentCommandsAndUndo();
-    testTileValidationAndPlayerUniqueness();
+    testTileValidationAndMultipleHeroPlacement();
     testAddLayerBelowShiftsContentAndWaterAndIsUndoable();
     testSaveLoadAndRuntimeMirror();
     testCharacterSelectionPersistsAndIsUndoable();

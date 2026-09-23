@@ -1188,6 +1188,8 @@ Application::buildScreenPreviewRenderFrame() const
         .manifest = assetManifest_,
         .level = *screenPreviewLevel_,
         .state = screenPreviewSession_.state(),
+        .activeHeroController =
+            screenPreviewSession_.activeHeroController(),
         .moving = false,
         .projectedState = projectedState,
         .presentation = screenPreviewPresentation_,
@@ -2018,6 +2020,7 @@ RenderFrameData Application::buildRenderFrame(
         .manifest = assetManifest_,
         .level = level_,
         .state = gameplaySession_.state(),
+        .activeHeroController = gameplaySession_.activeHeroController(),
         .moving = gameplaySession_.moving(),
         .projectedState = projectedState,
         .presentation = presentation_,

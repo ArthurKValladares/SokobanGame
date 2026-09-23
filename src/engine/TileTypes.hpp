@@ -16,7 +16,12 @@ enum class TileType {
     Wall,
     End,
     PressurePlate,
+    // Legacy generic player start. New puzzle documents author a concrete
+    // Rogue or Knight tile; overworld documents retain this tile for
+    // backwards compatibility with their single rogue.
     Player,
+    Rogue,
+    Knight,
     Rock,
     Ice,
     Water,
@@ -54,6 +59,8 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::End, 'E', "End", { 1.0f, 0.05f, 0.04f, 1.0f }, { 0.38f, 0.04f, 0.04f, 1.0f } },
     TileTypeDefinition { TileType::PressurePlate, 'P', "Pressure", { 0.18f, 0.18f, 0.18f, 1.0f } },
     TileTypeDefinition { TileType::Player, 'C', "Player", { 0.0f, 1.0f, 0.15f, 1.0f } },
+    TileTypeDefinition { TileType::Rogue, 'Q', "Rogue", { 0.0f, 1.0f, 0.15f, 1.0f } },
+    TileTypeDefinition { TileType::Knight, 'K', "Knight", { 0.25f, 0.55f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::Rock, 'R', "Rock", { 0.20f, 0.10f, 0.04f, 1.0f } },
     TileTypeDefinition { TileType::Ice, 'I', "Ice", { 0.62f, 0.88f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::Water, 'W', "Water", { 0.08f, 0.34f, 0.78f, 1.0f } },
@@ -83,6 +90,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeSupportsEntity(TileType type);
 [[nodiscard]] bool tileTypeAllowsEntity(TileType type);
 [[nodiscard]] bool tileTypeIsSurfaceEntity(TileType type);
+[[nodiscard]] bool tileTypeIsPlayerStart(TileType type);
 [[nodiscard]] bool tileTypeIsConveyor(TileType type);
 [[nodiscard]] bool tileTypeIsMirror(TileType type);
 [[nodiscard]] bool tileTypeIsTurret(TileType type);

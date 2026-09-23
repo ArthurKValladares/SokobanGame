@@ -31,6 +31,19 @@ using namespace renderFrameParts;
 
 namespace {
 
+CharacterType characterForStartTile(
+    TileType tile,
+    CharacterType legacyCharacter = CharacterType::Rogue)
+{
+    if (tile == TileType::Knight) {
+        return CharacterType::Knight;
+    }
+    if (tile == TileType::Rogue) {
+        return CharacterType::Rogue;
+    }
+    return legacyCharacter;
+}
+
 class EditorFrameBuild {
 public:
     explicit EditorFrameBuild(
@@ -236,14 +249,16 @@ private:
 
         RenderFrameData::Tile renderTile = tileVisual(
             tile, cell, input_.manifest, input_.settings);
-        if (tile == TileType::Player) {
+        if (tileTypeIsPlayerStart(tile)) {
             renderTile.model = input_.manifest.characterModel(
-                definition.character.value_or(CharacterType::Rogue));
+                characterForStartTile(
+                    tile,
+                    definition.character.value_or(CharacterType::Rogue)));
         }
         renderTile.pickable = false;
         renderTile.affectsCameraFit = false;
         const bool animatedActor =
-            tile == TileType::Player || tile == TileType::Enemy;
+            tileTypeIsPlayerStart(tile) || tile == TileType::Enemy;
         const AnimationUse editorUse = tile == TileType::Enemy
             ? AnimationUse::EditorEnemyIdle
             : AnimationUse::EditorPlayerIdle;
@@ -418,15 +433,15 @@ private:
         // looking different from the tile the editor draws.
         RenderFrameData::Tile renderTile = tileVisual(
             tile, { x, y, z }, input_.manifest, input_.settings);
-        if (tile == TileType::Player) {
+        if (tileTypeIsPlayerStart(tile)) {
             renderTile.model = input_.manifest.characterModel(
-                input_.editor.character());
+                characterForStartTile(tile, input_.editor.character()));
         }
         renderTile.baseElevation += preview ? 0.02f : 0.0f;
         renderTile.pickOnly = pickOnly;
         renderTile.isEditorPreview = preview;
         const bool animatedActor =
-            tile == TileType::Player || tile == TileType::Enemy;
+            tileTypeIsPlayerStart(tile) || tile == TileType::Enemy;
         const AnimationUse editorUse = tile == TileType::Enemy
             ? AnimationUse::EditorEnemyIdle
             : AnimationUse::EditorPlayerIdle;
@@ -760,7 +775,7 @@ RenderFrameData::Tile tileVisual(
     const float centeredOffset = (1.0f - tileSize) * 0.5f;
 
     Vec4 color = tileColor(tile);
-    if (tile == TileType::Player || tile == TileType::Enemy ||
+    if (tileTypeIsPlayerStart(tile) || tile == TileType::Enemy ||
         tileTypeIsTurret(tile)) {
         color = { 1.0f, 1.0f, 1.0f, 1.0f };
     }
@@ -791,13 +806,15 @@ RenderFrameData::Tile tileVisual(
                             ? 1.0f
                             : 0.0f)),
         .blurBehind = tile == TileType::Ice,
-        .showGrid = tile != TileType::Player,
+        .showGrid = !tileTypeIsPlayerStart(tile),
         .affectsCameraFit = tileTypeAffectsCameraFit(tile),
-        .model = manifest.modelForTile(tile),
-        .animation = tile == TileType::Player || tile == TileType::Enemy
+        .model = tileTypeIsPlayerStart(tile)
+            ? manifest.characterModel(characterForStartTile(tile))
+            : manifest.modelForTile(tile),
+        .animation = tileTypeIsPlayerStart(tile) || tile == TileType::Enemy
             ? manifest.playerIdleAnimation()
             : noAnimation,
-        .animationInstanceId = tile == TileType::Player || tile == TileType::Enemy
+        .animationInstanceId = tileTypeIsPlayerStart(tile) || tile == TileType::Enemy
             ? authoredAnimationInstance(tile, cell)
             : uint64_t { 0 },
         // Conveyors, turrets, and mirrors each carry an orientation in their
@@ -815,7 +832,10 @@ RenderFrameData::Tile tileVisual(
             ? RenderSurfaceEffect::GroundSplat
             : RenderSurfaceEffect::Standard,
     };
-    applyTileScale(visual, settings.tileScale(tile));
+    applyTileScale(
+        visual,
+        settings.tileScale(
+            tileTypeIsPlayerStart(tile) ? TileType::Player : tile));
     return visual;
 }
 

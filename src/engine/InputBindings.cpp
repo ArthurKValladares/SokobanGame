@@ -191,6 +191,10 @@ InputBindings defaultInputBindings()
         KeyboardBinding { "V" },
         GamepadButtonBinding { "rightshoulder" },
     };
+    bindings.forAction(InputAction::CycleHero) = {
+        KeyboardBinding { "Q" },
+        GamepadButtonBinding { "leftshoulder" },
+    };
     return bindings;
 }
 
@@ -211,6 +215,7 @@ std::string_view inputActionName(InputAction action)
     case InputAction::EditorDeleteTile: return "editorDeleteTile";
     case InputAction::EditorMoveTile: return "editorMoveTile";
     case InputAction::PreviewScreen: return "previewScreen";
+    case InputAction::CycleHero: return "cycleHero";
     case InputAction::Count: break;
     }
     throw std::invalid_argument("invalid input action");

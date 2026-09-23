@@ -119,9 +119,11 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
 {
     RenderAssetRequirements requirements;
 
-    // Every valid level has a player, and gameplay can select any of these
-    // clips without the level data changing.
-    requirements.requireModel(manifest.characterModel(level.character()));
+    // Every authored hero model is resident. Duplicates are harmless here and
+    // collapse in the requirement bitset.
+    for (const Level::PlayerStart& player : level.playerStarts()) {
+        requirements.requireModel(manifest.characterModel(player.character));
+    }
     auto requireUse = [&](AnimationUse use, RenderAnimation fallback) {
         requirements.requireAnimation(
             animations != nullptr ? animations->animation(use) : fallback);

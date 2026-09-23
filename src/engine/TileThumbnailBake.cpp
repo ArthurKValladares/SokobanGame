@@ -127,7 +127,7 @@ RenderFrameData buildBakeFrame(
     subject.showGrid = false;
     subject.affectsCameraFit = true;
     if (animations != nullptr &&
-        (tile == TileType::Player || tile == TileType::Enemy)) {
+        (tileTypeIsPlayerStart(tile) || tile == TileType::Enemy)) {
         const AnimationUse use = tile == TileType::Enemy
             ? AnimationUse::ThumbnailEnemyIdle
             : AnimationUse::ThumbnailPlayerIdle;

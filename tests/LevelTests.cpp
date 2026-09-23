@@ -356,10 +356,13 @@ void testLevelValidationErrors()
     }, "no tiles");
     checkThrowsContaining([] {
         (void)Level::loadFromLayers({ { "..." } }, "no player");
-    }, "missing a player");
-    checkThrowsContaining([] {
-        (void)Level::loadFromLayers({ { "CC" } }, "two players");
-    }, "more than one player");
+    }, "missing a hero");
+    const Level multipleHeroes = Level::loadFromLayers(
+        { { "QKQ" } }, "multiple heroes");
+    CHECK(multipleHeroes.playerStarts().size() == 3);
+    CHECK(multipleHeroes.playerStarts()[0].character == CharacterType::Rogue);
+    CHECK(multipleHeroes.playerStarts()[1].character == CharacterType::Knight);
+    CHECK(multipleHeroes.playerStarts()[2].character == CharacterType::Rogue);
     checkThrowsContaining([] {
         (void)Level::loadFromLayers({ { "C?" } }, "unknown tile");
     }, "Unknown level tile");

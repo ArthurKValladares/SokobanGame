@@ -175,6 +175,35 @@ bool matchesForwardTransition(
         level, action, rates, rules::StepScope { .actors = std::move(changed) });
 }
 
+void normalizeLegacyPlayers(GameState& state, const Level& level)
+{
+    if (state.players.empty()) {
+        return;
+    }
+    const EntityId legacyController = resolvedEntityId(
+        EntityKind::Player, state.players.front().id, 0);
+    for (GameState::Player& player : state.players) {
+        if (!player.character) {
+            player.character = level.character();
+        }
+        if (player.controller == invalidEntityId) {
+            // Before authored multi-hero levels, every player beyond the first
+            // was a mirror copy and shared one input.
+            player.controller = legacyController;
+        }
+    }
+}
+
+void normalizeLegacySnapshot(
+    GameplaySession::Snapshot& snapshot, const Level& level)
+{
+    normalizeLegacyPlayers(snapshot.state, level);
+    for (GameplaySession::Action& action : snapshot.undoStack) {
+        normalizeLegacyPlayers(action.before, level);
+        normalizeLegacyPlayers(action.after, level);
+    }
+}
+
 
 } // namespace
 
@@ -188,6 +217,9 @@ void GameplaySession::reset(const Level& level)
     nextCausalGroup_ = 1;
     completedActionCount_ = 0;
     playerMoveCount_ = 0;
+    activeHeroController_ = undoBaseState_.players.empty()
+        ? invalidEntityId
+        : rules::playerControllerId(undoBaseState_, 0);
     mirrorActivationSequence_ = 0;
     lastMirrorSwapDestinations_.clear();
     autoMotionPaused_ = false;
@@ -282,6 +314,7 @@ GameplaySession::Snapshot GameplaySession::snapshot() const
         .undoStack = undoHistory_,
         .playerMoveCount = playerMoveCount_,
         .automaticMotionPaused = autoMotionPaused_,
+        .activeHeroController = activeHeroController_,
     };
     for (Action& action : result.undoStack) {
         action.durationSeconds = config::stepDurationSeconds;
@@ -297,9 +330,12 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
         return false;
     }
 
+    Snapshot normalized = snapshot;
+    normalizeLegacySnapshot(normalized, level);
+
     GameState expectedState = rules::initialState(level);
     int expectedMoveCount = 0;
-    for (const Action& action : snapshot.undoStack) {
+    for (const Action& action : normalized.undoStack) {
         if (action.reversed ||
             action.playerMoveCountBefore < 0 ||
             action.playerMoveCountAfter < 0 ||
@@ -311,17 +347,17 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
         expectedState = action.after;
         expectedMoveCount = action.playerMoveCountAfter;
     }
-    if (!(snapshot.state == expectedState) ||
-        snapshot.playerMoveCount != expectedMoveCount) {
+    if (!(normalized.state == expectedState) ||
+        normalized.playerMoveCount != expectedMoveCount) {
         return false;
     }
 
-    scheduler_.reset(snapshot.state, stepDurationSeconds_);
+    scheduler_.reset(normalized.state, stepDurationSeconds_);
     pendingCommands_.clear();
     // The stack was just validated against a replay from here, so it is exactly
     // the anchor the chain is built on.
     undoBaseState_ = rules::initialState(level);
-    undoHistory_ = snapshot.undoStack;
+    undoHistory_ = normalized.undoStack;
     // Nothing is in flight after a restore, so every group is closed and no
     // later action can fold into one of these. Distinct ids say exactly that.
     undoGroups_.clear();
@@ -330,10 +366,23 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
         undoGroups_.push_back(nextCausalGroup_++);
     }
     completedActionCount_ = 0;
-    playerMoveCount_ = snapshot.playerMoveCount;
+    playerMoveCount_ = normalized.playerMoveCount;
+    const bool activeControllerExists = std::ranges::any_of(
+        normalized.state.players,
+        [&](const GameState::Player& player) {
+            const std::size_t index = static_cast<std::size_t>(
+                &player - normalized.state.players.data());
+            return rules::playerControllerId(normalized.state, index) ==
+                normalized.activeHeroController;
+        });
+    activeHeroController_ = activeControllerExists
+        ? normalized.activeHeroController
+        : normalized.state.players.empty()
+            ? invalidEntityId
+            : rules::playerControllerId(normalized.state, 0);
     mirrorActivationSequence_ = 0;
     lastMirrorSwapDestinations_.clear();
-    autoMotionPaused_ = snapshot.automaticMotionPaused;
+    autoMotionPaused_ = normalized.automaticMotionPaused;
     return true;
 }
 
@@ -350,7 +399,11 @@ void GameplaySession::enqueue(Command command)
 
 void GameplaySession::queueMove(MoveDirection direction)
 {
-    enqueue({ .type = CommandType::Move, .direction = direction });
+    enqueue({
+        .type = CommandType::Move,
+        .direction = direction,
+        .controller = activeHeroController_,
+    });
 }
 
 void GameplaySession::queueMirror()
@@ -366,6 +419,26 @@ void GameplaySession::queueUndo()
 void GameplaySession::queueRestart()
 {
     enqueue({ .type = CommandType::Restart });
+}
+
+void GameplaySession::cycleActiveHero()
+{
+    std::vector<EntityId> controllers;
+    for (std::size_t i = 0; i < state().players.size(); ++i) {
+        const EntityId controller = rules::playerControllerId(state(), i);
+        if (std::ranges::find(controllers, controller) == controllers.end()) {
+            controllers.push_back(controller);
+        }
+    }
+    if (controllers.size() < 2) {
+        return;
+    }
+    const auto current = std::ranges::find(
+        controllers, activeHeroController_);
+    activeHeroController_ = current == controllers.end() ||
+            std::next(current) == controllers.end()
+        ? controllers.front()
+        : *std::next(current);
 }
 
 GameplaySession::StartOutcome GameplaySession::runCommand(
@@ -395,7 +468,8 @@ GameplaySession::StartOutcome GameplaySession::runCommand(
             command.direction == MoveDirection::Down
         ? controls.horizontalMove
         : controls.verticalMove;
-    return tryStartHeldDirection(level, command.direction, perpendicular);
+    return tryStartHeldDirection(
+        level, command.direction, perpendicular, command.controller);
 }
 
 bool GameplaySession::tryStartNextAction(const Level& level, const Controls& controls)
@@ -623,24 +697,35 @@ GameplaySession::StartOutcome GameplaySession::tryStartHeldMove(
     // somewhere they did not ask to go.
     if (controls.verticalMove) {
         const StartOutcome outcome = tryStartHeldDirection(
-            level, *controls.verticalMove, controls.horizontalMove);
+            level,
+            *controls.verticalMove,
+            controls.horizontalMove,
+            activeHeroController_);
         if (outcome != StartOutcome::Impossible) {
             return outcome;
         }
     }
     if (controls.horizontalMove) {
         return tryStartHeldDirection(
-            level, *controls.horizontalMove, controls.verticalMove);
+            level,
+            *controls.horizontalMove,
+            controls.verticalMove,
+            activeHeroController_);
     }
 
     return StartOutcome::Impossible;
 }
 
 GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
-    const Level& level, MoveDirection input)
+    const Level& level, MoveDirection input, EntityId controller)
 {
     std::optional<plans::PlannedAction> step = plans::planPlayerStep(
-        level, state(), input, stepRates_, stepDurationSeconds_);
+        level,
+        state(),
+        input,
+        stepRates_,
+        stepDurationSeconds_,
+        controller);
     if (!step) {
         return StartOutcome::Impossible;
     }
@@ -875,15 +960,21 @@ GameplaySession::StartOutcome GameplaySession::tryStartRestart(
 GameplaySession::StartOutcome GameplaySession::tryStartHeldDirection(
     const Level& level,
     MoveDirection direction,
-    std::optional<MoveDirection> queuedDirection)
+    std::optional<MoveDirection> queuedDirection,
+    EntityId controller)
 {
-    const StartOutcome outcome = tryStartPlayerStep(level, direction);
+    const StartOutcome outcome = tryStartPlayerStep(
+        level, direction, controller);
     if (outcome != StartOutcome::Started) {
         return outcome;
     }
 
-    if (queuedDirection && !hasPendingMove(*queuedDirection)) {
-        queueMove(*queuedDirection);
+    if (queuedDirection && !hasPendingMove(*queuedDirection, controller)) {
+        enqueue({
+            .type = CommandType::Move,
+            .direction = *queuedDirection,
+            .controller = controller,
+        });
     }
 
     return StartOutcome::Started;
@@ -897,10 +988,12 @@ bool GameplaySession::isStale(const Command& command) const
         commandStalenessSeconds;
 }
 
-bool GameplaySession::hasPendingMove(MoveDirection direction) const
+bool GameplaySession::hasPendingMove(
+    MoveDirection direction, EntityId controller) const
 {
-    return std::ranges::any_of(pendingCommands_, [direction](const Command& command) {
-        return command.type == CommandType::Move && command.direction == direction;
+    return std::ranges::any_of(pendingCommands_, [=](const Command& command) {
+        return command.type == CommandType::Move &&
+            command.direction == direction && command.controller == controller;
     });
 }
 

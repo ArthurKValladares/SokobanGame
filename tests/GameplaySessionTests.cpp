@@ -94,6 +94,45 @@ void testMoveCommitsAfterAnimation()
     CHECK(session.completedActionCount() == 1);
 }
 
+void testAuthoredHeroesMoveIndependentlyAndCycleInPlacementOrder()
+{
+    TEST("authoredHeroesMoveIndependentlyAndCycleInPlacementOrder");
+    const Level level = makeLevel({
+        { ".....", ".....", "....." },
+        { "Q    ", "K    ", "Q    " },
+    });
+    GameplaySession session;
+    session.reset(level);
+
+    CHECK(session.state().players.size() == 3);
+    CHECK(session.activeHeroController() ==
+        session.state().players[0].controller);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
+    CHECK(session.state().players[1].cell == cell(0, 1, 1));
+    CHECK(session.state().players[2].cell == cell(0, 2, 1));
+
+    session.cycleActiveHero();
+    CHECK(session.activeHeroController() ==
+        session.state().players[1].controller);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
+    CHECK(session.state().players[1].cell == cell(1, 1, 1));
+    CHECK(session.state().players[2].cell == cell(0, 2, 1));
+
+    session.cycleActiveHero();
+    CHECK(session.activeHeroController() ==
+        session.state().players[2].controller);
+    session.cycleActiveHero();
+    CHECK(session.activeHeroController() ==
+        session.state().players[0].controller);
+}
+
 void testPushMetadata()
 {
     TEST("pushMetadata");
@@ -1189,6 +1228,7 @@ int main()
     testCommandRefusedByAClaimIsRequeuedNotLost();
     testConcurrentPlayHistoryRoundTrips();
     testMoveCommitsAfterAnimation();
+    testAuthoredHeroesMoveIndependentlyAndCycleInPlacementOrder();
     testPushMetadata();
     testUndoRoundTrip();
     testCompletedActionTelemetryTracksLongUndoLoop();

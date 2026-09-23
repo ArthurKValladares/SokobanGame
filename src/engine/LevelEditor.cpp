@@ -235,18 +235,34 @@ void LevelEditor::setWaterLayer(std::optional<uint32_t> layer)
 
 void LevelEditor::setCharacter(CharacterType character)
 {
-    if (editingOverworld() && character != CharacterType::Rogue) {
-        document_.status = "The overworld always uses the rogue.";
+    if (editingOverworld()) {
+        document_.status = "Overworld hero placement is fixed to the rogue.";
         return;
     }
-    if (document_.character == character) {
-        return;
-    }
-
     const DocumentSnapshot before = captureDocumentSnapshot();
-    document_.character = character;
+    const char replacement = tileTypeToChar(
+        character == CharacterType::Knight
+            ? TileType::Knight
+            : TileType::Rogue);
+    bool changed = document_.character.has_value();
+    for (std::vector<std::string>& layer : document_.layers) {
+        for (std::string& row : layer) {
+            for (char& tile : row) {
+                const std::optional<TileType> type = charToTileType(tile);
+                if (type && tileTypeIsPlayerStart(*type) &&
+                    tile != replacement) {
+                    tile = replacement;
+                    changed = true;
+                }
+            }
+        }
+    }
+    document_.character.reset();
+    if (!changed) {
+        return;
+    }
     document_.dirty = true;
-    document_.status = "Character set to " +
+    document_.status = "All placed heroes changed to " +
         std::string(characterTypeName(character)) + ".";
     recordDocumentChange(before);
 }
@@ -721,6 +737,11 @@ GridPosition3 LevelEditor::resolveSelectorTarget(
 
 void LevelEditor::setCell(GridPosition3 position, TileType tile)
 {
+    if (editingOverworld() && tileTypeIsPlayerStart(tile)) {
+        tile = TileType::Player;
+    } else if (!editingOverworld() && tile == TileType::Player) {
+        tile = TileType::Rogue;
+    }
     if (document_.layers.empty() || position.z < 0) {
         return;
     }
@@ -847,7 +868,7 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
             std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Air)));
     }
 
-    if (tile == TileType::Player) {
+    if (editingOverworld() && tile == TileType::Player) {
         for (std::vector<std::string>& layer : document_.layers) {
             for (std::string& documentRow : layer) {
                 std::ranges::replace(documentRow, tileTypeToChar(TileType::Player), tileTypeToChar(TileType::Air));
@@ -1122,6 +1143,19 @@ std::optional<uint32_t> LevelEditor::waterLayer() const
 
 CharacterType LevelEditor::character() const
 {
+    for (const std::vector<std::string>& layer : document_.layers) {
+        for (const std::string& row : layer) {
+            for (char encoded : row) {
+                const std::optional<TileType> tile = charToTileType(encoded);
+                if (tile == TileType::Knight) {
+                    return CharacterType::Knight;
+                }
+                if (tile == TileType::Rogue) {
+                    return CharacterType::Rogue;
+                }
+            }
+        }
+    }
     return document_.character.value_or(CharacterType::Rogue);
 }
 
@@ -1338,9 +1372,9 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
             static_cast<size_t>(height),
             std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Air))),
     };
-    document_.layers[1].front().front() = tileTypeToChar(TileType::Player);
+    document_.layers[1].front().front() = tileTypeToChar(TileType::Rogue);
     document_.waterLayer.reset();
-    document_.character = CharacterType::Rogue;
+    document_.character.reset();
     document_.decorations.clear();
     document_.selectors.clear();
     document_.selectedDecoration.reset();
@@ -1571,7 +1605,24 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     Level::Definition definition;
     try {
         definition = Level::parseDefinition(rows, path.string());
-        if (overworldScreenIdForPath(path)) {
+        const bool overworld = overworldScreenIdForPath(path).has_value();
+        if (!overworld) {
+            const TileType concrete =
+                definition.character.value_or(CharacterType::Rogue) ==
+                    CharacterType::Knight
+                ? TileType::Knight
+                : TileType::Rogue;
+            for (std::vector<std::string>& layer : definition.layers) {
+                for (std::string& row : layer) {
+                    std::ranges::replace(
+                        row,
+                        tileTypeToChar(TileType::Player),
+                        tileTypeToChar(concrete));
+                }
+            }
+            definition.character.reset();
+        }
+        if (overworld) {
             // The complete composed map validates the single Player tile
             // across every overworld component.
             (void)OverworldMap::load(path.parent_path());
@@ -1655,7 +1706,9 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
             .waterLayer = document_.waterLayer,
             .decorations = document_.decorations,
             .selectors = document_.selectors,
-            .character = document_.character,
+            .character = overworldScreenIdForPath(sourcePath)
+                ? document_.character
+                : std::nullopt,
         });
 
     // A component edit can invalidate the unique Player tile, common
@@ -2335,7 +2388,9 @@ Level::Definition LevelEditor::documentDefinition() const
         .waterLayer = document_.waterLayer,
         .decorations = document_.decorations,
         .selectors = document_.selectors,
-        .character = document_.character,
+        .character = editingOverworld()
+            ? document_.character
+            : std::nullopt,
     };
 }
 
@@ -2603,7 +2658,7 @@ std::vector<std::string> LevelEditor::defaultScreenRows() const
             std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Air))),
     };
     layers[1][static_cast<size_t>(height / 2)][static_cast<size_t>(width / 2)] =
-        tileTypeToChar(TileType::Player);
+        tileTypeToChar(TileType::Rogue);
     return Level::serializeLayerRows(layers);
 }
 

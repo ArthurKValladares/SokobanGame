@@ -24,6 +24,7 @@ enum class InputAction {
     EditorDeleteTile,
     EditorMoveTile,
     PreviewScreen,
+    CycleHero,
     Count,
 };
 

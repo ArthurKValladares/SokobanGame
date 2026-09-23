@@ -41,6 +41,7 @@ public:
         std::vector<Action> undoStack;
         int playerMoveCount = 0;
         bool automaticMotionPaused = false;
+        EntityId activeHeroController = invalidEntityId;
 
         bool operator==(const Snapshot&) const = default;
     };
@@ -53,6 +54,7 @@ public:
     void queueMirror();
     void queueUndo();
     void queueRestart();
+    void cycleActiveHero();
 
     [[nodiscard]] bool tryStartNextAction(const Level& level, const Controls& controls);
     void advanceActiveAction(float dt);
@@ -127,6 +129,10 @@ public:
         return lastMirrorSwapDestinations_;
     }
     [[nodiscard]] int playerMoveCount() const { return playerMoveCount_; }
+    [[nodiscard]] EntityId activeHeroController() const
+    {
+        return activeHeroController_;
+    }
     // How admissions have gone this screen, for deciding whether the
     // reservation machinery is earning its keep. See `AdmissionStats`.
     [[nodiscard]] const ActionScheduler::AdmissionStats& admissionStats() const
@@ -172,6 +178,7 @@ private:
     struct Command {
         CommandType type = CommandType::Move;
         MoveDirection direction = MoveDirection::Up;
+        EntityId controller = invalidEntityId;
         // When it was entered, on the session clock, so a command the player
         // has visibly outlived can be dropped rather than played back.
         float queuedAtSeconds = 0.0f;
@@ -205,8 +212,9 @@ private:
 
     [[nodiscard]] StartOutcome tryStartHeldMove(
         const Level& level, const Controls& controls);
-    // One input-driven step for every living player, together with the slide it
-    // sets off, admitted as one causal group.
+    // One input-driven step for the selected authored hero and its mirror
+    // copies, together with the slide it sets off, admitted as one causal
+    // group.
     //
     // The consequence is planned here rather than when the step commits. Both
     // plans are therefore made from the same instant, which is what settles the
@@ -214,7 +222,7 @@ private:
     // would settle it against a state that arrives a step late, and that is
     // precisely the stability bug this whole design exists to remove.
     [[nodiscard]] StartOutcome tryStartPlayerStep(
-        const Level& level, MoveDirection input);
+        const Level& level, MoveDirection input, EntityId controller);
     // Motion nobody asked for: entities still carrying momentum, and entities
     // standing on a belt.
     //
@@ -230,12 +238,14 @@ private:
     [[nodiscard]] StartOutcome tryStartHeldDirection(
         const Level& level,
         MoveDirection direction,
-        std::optional<MoveDirection> queuedDirection);
+        std::optional<MoveDirection> queuedDirection,
+        EntityId controller);
     // Runs one queued command. `Impossible` also covers a command this context
     // ignores entirely, such as anything but undo while a player is dead.
     [[nodiscard]] StartOutcome runCommand(
         const Level& level, const Command& command, const Controls& controls);
-    [[nodiscard]] bool hasPendingMove(MoveDirection direction) const;
+    [[nodiscard]] bool hasPendingMove(
+        MoveDirection direction, EntityId controller) const;
     // Hands a plan to the scheduler, which admits it only if nothing already
     // running would be disturbed. Returns false when it was refused.
     //
@@ -337,6 +347,7 @@ private:
     GameState undoBaseState_;
     float stepDurationSeconds_ = config::stepDurationSeconds;
     int playerMoveCount_ = 0;
+    EntityId activeHeroController_ = invalidEntityId;
     // Transient event sequence; intentionally excluded from save snapshots.
     std::size_t mirrorActivationSequence_ = 0;
     std::vector<GridPosition3> lastMirrorSwapDestinations_;

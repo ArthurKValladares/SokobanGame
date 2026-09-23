@@ -101,6 +101,13 @@ public:
         GridPosition3 position {};
     };
 
+    struct PlayerStart {
+        GridPosition3 position {};
+        CharacterType character = CharacterType::Rogue;
+
+        bool operator==(const PlayerStart&) const = default;
+    };
+
     static Level loadFromFile(const std::filesystem::path& path);
     [[nodiscard]] static Definition loadDefinitionFromFile(
         const std::filesystem::path& path);
@@ -126,6 +133,10 @@ public:
     [[nodiscard]] uint32_t depth() const { return depth_; }
     [[nodiscard]] GridPosition3 playerStart() const { return playerStart_; }
     [[nodiscard]] CharacterType character() const { return character_; }
+    [[nodiscard]] const std::vector<PlayerStart>& playerStarts() const
+    {
+        return playerStarts_;
+    }
     [[nodiscard]] const std::vector<MovableTile>& movableTiles() const { return movableTiles_; }
     [[nodiscard]] const std::vector<GridPosition3>& enemyStarts() const { return enemyStarts_; }
     [[nodiscard]] const std::vector<GridPosition3>& pressurePlates() const { return pressurePlates_; }
@@ -146,6 +157,7 @@ private:
     uint32_t depth_ = 0;
     GridPosition3 playerStart_ {};
     CharacterType character_ = CharacterType::Rogue;
+    std::vector<PlayerStart> playerStarts_;
     std::vector<MovableTile> movableTiles_;
     std::vector<GridPosition3> enemyStarts_;
     std::vector<GridPosition3> pressurePlates_;

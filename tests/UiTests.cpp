@@ -633,7 +633,16 @@ void testControlsRemapping()
     menu.back();
 
     // Reset restores the defaults.
-    for (int i = 0; i < 9; ++i) {
+    const std::vector<sokoban::OptionsMenuRow> controlRows =
+        sokoban::optionsMenuRows(menu.state(), settings);
+    const auto resetRow = std::ranges::find(
+        controlRows,
+        sokoban::OptionsMenuRowId::ResetBindings,
+        &sokoban::OptionsMenuRow::id);
+    CHECK(resetRow != controlRows.end());
+    const int resetIndex = static_cast<int>(
+        std::distance(controlRows.begin(), resetRow));
+    while (menu.selectedRow() != resetIndex) {
         draw({ .down = true });
     }
     const auto reset = draw({ .confirm = true });

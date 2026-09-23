@@ -285,13 +285,30 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         const Json& item = players[i];
         rejectUnknownProperties(
             item,
-            { "id", "cell", "dead", "drowned", "sliding" },
+            { "id", "cell", "character", "controller", "dead", "drowned", "sliding" },
             playerContext);
+        std::optional<CharacterType> character;
+        const Json& encodedCharacter =
+            requiredProperty(item, "character", playerContext);
+        if (!encodedCharacter.is_null()) {
+            if (!encodedCharacter.is_string()) {
+                fail(playerContext,
+                    "property 'character' must be a string or null");
+            }
+            character = characterTypeFromName(
+                encodedCharacter.get<std::string>());
+            if (!character) {
+                fail(playerContext, "unknown hero character");
+            }
+        }
         state.players.push_back({
             .id = unsignedIntegerProperty(item, "id", playerContext),
             .cell = positionFromJson(
                 requiredProperty(item, "cell", playerContext),
                 playerContext + ".cell"),
+            .character = character,
+            .controller = unsignedIntegerProperty(
+                item, "controller", playerContext),
             .dead = boolProperty(item, "dead", playerContext),
             .drowned = boolProperty(item, "drowned", playerContext),
             .sliding = directionFromJson(
@@ -362,6 +379,11 @@ OrderedJson gameStateToJson(const GameState& state)
         players.push_back({
             { "id", player.id },
             { "cell", positionToJson(player.cell) },
+            { "character", player.character
+                ? OrderedJson(std::string(
+                      characterTypeName(*player.character)))
+                : OrderedJson(nullptr) },
+            { "controller", player.controller },
             { "dead", player.dead },
             { "drowned", player.drowned },
             { "sliding", player.sliding
@@ -677,7 +699,7 @@ GameplaySession::Snapshot sessionSnapshotFromJson(
     rejectUnknownProperties(
         value,
         { "state", "undoBaseState", "undoStack", "playerMoveCount",
-          "automaticMotionPaused" },
+          "automaticMotionPaused", "activeHeroController" },
         context);
     GameplaySession::Snapshot snapshot;
     snapshot.state = gameStateFromJson(
@@ -687,6 +709,8 @@ GameplaySession::Snapshot sessionSnapshotFromJson(
         nonNegativeIntegerProperty(value, "playerMoveCount", context);
     snapshot.automaticMotionPaused =
         boolProperty(value, "automaticMotionPaused", context);
+    snapshot.activeHeroController = unsignedIntegerProperty(
+        value, "activeHeroController", context);
     const Json& undoStack = requiredProperty(value, "undoStack", context);
     if (!undoStack.is_array()) {
         fail(context, "property 'undoStack' must be an array");
@@ -728,6 +752,7 @@ OrderedJson sessionSnapshotToJson(const GameplaySession::Snapshot& snapshot)
         { "undoStack", std::move(undoStack) },
         { "playerMoveCount", snapshot.playerMoveCount },
         { "automaticMotionPaused", snapshot.automaticMotionPaused },
+        { "activeHeroController", snapshot.activeHeroController },
     };
 }
 
@@ -824,14 +849,14 @@ InputBindings inputBindingsFromJson(
             "moveUp", "moveDown", "moveLeft", "moveRight",
             "undo", "restart", "showTopDownView", "showOverworldMap",
             "menuBack", "menuConfirm", "editorReplaceTile",
-            "editorDeleteTile", "editorMoveTile", "previewScreen",
+            "editorDeleteTile", "editorMoveTile", "previewScreen", "cycleHero",
         }, context);
     } else {
         rejectUnknownProperties(value, {
             "moveUp", "moveDown", "moveLeft", "moveRight",
             "undo", "restart", "showTopDownView", "showOverworldMap", "menuBack",
             "editorReplaceTile", "editorDeleteTile", "editorMoveTile",
-            "previewScreen",
+            "previewScreen", "cycleHero",
         }, context);
     }
     InputBindings result;

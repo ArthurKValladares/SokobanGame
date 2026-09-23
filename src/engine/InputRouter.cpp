@@ -130,6 +130,7 @@ InputRouter::Frame InputRouter::routeFrame(
             .undoPressed = input.actionPressed(InputAction::Undo),
             .undoDown = input.actionDown(InputAction::Undo),
             .restartPressed = input.actionPressed(InputAction::Restart),
+            .cycleHeroPressed = input.actionPressed(InputAction::CycleHero),
             .interactPressed = confirm,
         };
     }

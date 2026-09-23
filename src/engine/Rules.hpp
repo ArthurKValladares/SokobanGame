@@ -29,6 +29,14 @@ struct GameState {
     struct Player {
         EntityId id = invalidEntityId;
         GridPosition3 cell {};
+        // Authored heroes carry a concrete character. Null is accepted only
+        // while upgrading legacy checkpoints, whose level-wide character is
+        // applied by GameplaySession::restore.
+        std::optional<CharacterType> character;
+        // Independently controlled authored heroes use their own id. Mirror
+        // copies inherit this value from their source and therefore continue
+        // to share that source's input.
+        EntityId controller = invalidEntityId;
         bool dead = false;
         // Death and submersion are separate facts: enemy attacks leave the
         // actor on the board, while water deaths render below the surface.
@@ -115,6 +123,9 @@ struct StepResult {
 [[nodiscard]] GameState initialState(const Level& level);
 
 [[nodiscard]] bool anyPlayerDead(const GameState& state);
+
+[[nodiscard]] EntityId playerControllerId(
+    const GameState& state, std::size_t playerIndex);
 
 [[nodiscard]] GridPosition directionOffset(MoveDirection direction);
 [[nodiscard]] GridPosition3 movementTarget(GridPosition3 origin, MoveDirection direction);

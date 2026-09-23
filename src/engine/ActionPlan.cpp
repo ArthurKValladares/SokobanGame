@@ -207,12 +207,21 @@ void addChanged(
     return planned;
 }
 
-// Everyone still alive. Player input is shared, so they plan as one.
-[[nodiscard]] std::vector<EntityId> livingPlayers(const GameState& state)
+// Everyone still alive in one authored hero's control group. A missing
+// controller selects the first group for callers predating independent heroes.
+[[nodiscard]] std::vector<EntityId> controlledLivingPlayers(
+    const GameState& state, EntityId controller)
 {
     std::vector<EntityId> ids;
+    if (state.players.empty()) {
+        return ids;
+    }
+    if (controller == invalidEntityId) {
+        controller = rules::playerControllerId(state, 0);
+    }
     for (std::size_t i = 0; i < state.players.size(); ++i) {
-        if (!state.players[i].dead) {
+        if (!state.players[i].dead &&
+            rules::playerControllerId(state, i) == controller) {
             ids.push_back(
                 resolvedEntityId(EntityKind::Player, state.players[i].id, i));
         }
@@ -295,9 +304,10 @@ std::optional<PlannedAction> planPlayerStep(
     const GameState& state,
     MoveDirection input,
     const rules::StepRates& rates,
-    float stepDurationSeconds)
+    float stepDurationSeconds,
+    EntityId controller)
 {
-    std::vector<EntityId> players = livingPlayers(state);
+    std::vector<EntityId> players = controlledLivingPlayers(state, controller);
     if (players.empty()) {
         return std::nullopt;
     }

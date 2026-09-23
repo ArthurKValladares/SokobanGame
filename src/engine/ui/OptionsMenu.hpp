@@ -49,6 +49,7 @@ enum class OptionsMenuRowId {
     MoveRight,
     Undo,
     Restart,
+    CycleHero,
     ShowTopDownView,
     ShowOverworldMap,
     ConfirmInteract,

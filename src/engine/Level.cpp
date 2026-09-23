@@ -730,7 +730,6 @@ Level Level::loadFromLayers(
         static_cast<size_t>(level.width_) * level.height_ * level.depth_,
         TileType::Air);
 
-    bool hasPlayer = false;
     for (uint32_t z = 0; z < level.depth_; ++z) {
         const auto& layer = sourceLayers[z];
         for (uint32_t y = 0; y < static_cast<uint32_t>(layer.size()); ++y) {
@@ -747,12 +746,17 @@ Level Level::loadFromLayers(
                     throw unknownLevelCharacter(character);
                 }
 
-                if (*tile == TileType::Player) {
-                    if (hasPlayer) {
-                        throw std::runtime_error("Level has more than one player start: " + source);
+                if (tileTypeIsPlayerStart(*tile)) {
+                    const CharacterType heroCharacter = *tile == TileType::Knight
+                        ? CharacterType::Knight
+                        : *tile == TileType::Rogue
+                            ? CharacterType::Rogue
+                            : selectedCharacter;
+                    level.playerStarts_.push_back({ position, heroCharacter });
+                    if (level.playerStarts_.size() == 1) {
+                        level.playerStart_ = position;
+                        level.character_ = heroCharacter;
                     }
-                    hasPlayer = true;
-                    level.playerStart_ = position;
                 }
 
                 if (*tile == TileType::Rock || *tile == TileType::Ice ||
@@ -776,9 +780,11 @@ Level Level::loadFromLayers(
         }
     }
 
-    if (!hasPlayer) {
-        throw std::runtime_error(std::string("Level is missing a player start tile '") +
-            tileTypeToChar(TileType::Player) + "': " + source);
+    if (level.playerStarts_.empty()) {
+        throw std::runtime_error(
+            "Level is missing a hero start tile ('" +
+            std::string(1, tileTypeToChar(TileType::Rogue)) + "' or '" +
+            std::string(1, tileTypeToChar(TileType::Knight)) + "'): " + source);
     }
 
     for (const ScreenSelector& selector : level.selectors_) {

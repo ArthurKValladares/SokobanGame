@@ -27,6 +27,7 @@ public:
         bool undoPressed = false;
         bool undoDown = false;
         bool restartPressed = false;
+        bool cycleHeroPressed = false;
         // Contextual world interaction. GameplayLoop handles mirror
         // activation; Application handles transitions such as entering a
         // selector.
@@ -45,6 +46,7 @@ public:
         bool screenSolved = false;
         bool draftSolved = false;
         bool mirrorActivated = false;
+        bool activeHeroChanged = false;
         std::vector<GridPosition3> mirrorSwapDestinations;
         std::vector<TurretShotPresentation> turretShots;
     };

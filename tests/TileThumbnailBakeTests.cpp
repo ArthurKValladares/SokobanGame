@@ -32,7 +32,8 @@ const AssetManifest& testManifest()
       ],
       "models": [
         { "name": "Bricks", "path": "bricks.gltf" },
-        { "name": "Hero", "path": "h.glb", "geometry": "skinned", "role": "player" }
+        { "name": "Hero", "path": "h.glb", "geometry": "skinned", "role": "player" },
+        { "name": "Knight", "path": "k.glb", "geometry": "skinned" }
       ],
       "animations": [
         { "name": "Idle", "path": "a.glb", "role": "player-idle" },
@@ -91,6 +92,8 @@ void testAirAndWaterAreNotBaked()
     CHECK(tileThumbnails::shouldBake(TileType::Wall));
     CHECK(tileThumbnails::shouldBake(TileType::Ground));
     CHECK(tileThumbnails::shouldBake(TileType::Player));
+    CHECK(tileThumbnails::shouldBake(TileType::Rogue));
+    CHECK(tileThumbnails::shouldBake(TileType::Knight));
 }
 
 // The bake takes the game's live settings. Shadows and ambient occlusion are

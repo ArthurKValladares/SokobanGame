@@ -42,7 +42,7 @@ std::string_view tileTypeName(TileType type)
 
 bool tileTypeOccupiesLevelCell(TileType type)
 {
-    return type == TileType::Player || type == TileType::Rock ||
+    return tileTypeIsPlayerStart(type) || type == TileType::Rock ||
         type == TileType::Ice || type == TileType::Enemy ||
         tileTypeIsTurret(type);
 }
@@ -70,6 +70,12 @@ bool tileTypeAllowsEntity(TileType type)
 bool tileTypeIsSurfaceEntity(TileType type)
 {
     return type == TileType::End || type == TileType::PressurePlate;
+}
+
+bool tileTypeIsPlayerStart(TileType type)
+{
+    return type == TileType::Player || type == TileType::Rogue ||
+        type == TileType::Knight;
 }
 
 bool tileTypeIsConveyor(TileType type)

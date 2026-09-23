@@ -159,6 +159,13 @@ GameplayLoop::UpdateResult GameplayLoop::update(
     float dt,
     bool playingDraft)
 {
+    UpdateResult result;
+    if (input.cycleHeroPressed) {
+        const EntityId before = session.activeHeroController();
+        session.cycleActiveHero();
+        result.activeHeroChanged =
+            session.activeHeroController() != before;
+    }
     if (input.interactPressed) {
         session.queueMirror();
     }
@@ -179,7 +186,6 @@ GameplayLoop::UpdateResult GameplayLoop::update(
 
     presentation.advanceAnimations(dt, session.state());
     float remainingTime = dt;
-    UpdateResult result;
     std::size_t observedMirrorActivation =
         session.mirrorActivationSequence();
     // Anything already running arrived with a timeline in an earlier frame.

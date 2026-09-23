@@ -298,7 +298,16 @@ GameState initialState(const Level& level)
 {
     GameState state;
     EntityId nextId = 1;
-    state.players.push_back({ .id = nextId++, .cell = level.playerStart() });
+    state.players.reserve(level.playerStarts().size());
+    for (const Level::PlayerStart& start : level.playerStarts()) {
+        const EntityId id = nextId++;
+        state.players.push_back({
+            .id = id,
+            .cell = start.position,
+            .character = start.character,
+            .controller = id,
+        });
+    }
     state.movables.reserve(level.movableTiles().size());
     for (const Level::MovableTile& movable : level.movableTiles()) {
         GameState::Movable entry;
@@ -320,6 +329,14 @@ bool anyPlayerDead(const GameState& state)
     return std::ranges::any_of(
         state.players,
         [](const GameState::Player& player) { return player.dead; });
+}
+
+EntityId playerControllerId(const GameState& state, std::size_t playerIndex)
+{
+    const GameState::Player& player = state.players.at(playerIndex);
+    return player.controller != invalidEntityId
+        ? player.controller
+        : resolvedEntityId(EntityKind::Player, player.id, playerIndex);
 }
 
 GridPosition directionOffset(MoveDirection direction)
@@ -909,6 +926,8 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
                 after.players.push_back({
                     .id = nextEntityId++,
                     .cell = reflected.cell,
+                    .character = source.character,
+                    .controller = playerControllerId(state, sourcePlayer),
                     .dead = source.dead,
                     .drowned = source.drowned,
                     .sliding = std::nullopt,
@@ -1359,7 +1378,8 @@ private:
             return false;
         }
         if (status.inputDriven &&
-            level_.character() == CharacterType::Knight) {
+            after_.players[playerIndex].character.value_or(
+                level_.character()) == CharacterType::Knight) {
             const std::vector<ChainEntity> chain = pushChainAt(target, direction);
             if (!chain.empty()) {
                 // A movable with its own unresolved intent gets the same chance

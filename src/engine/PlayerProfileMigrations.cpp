@@ -944,6 +944,78 @@ void migrate28to29(Json& root)
     }
 }
 
+// Format 30 introduces independently controlled authored heroes. Legacy
+// checkpoint players have no per-instance character/controller data: their
+// level-wide character and formerly shared input are restored later with the
+// level available. It also adds the cycle-hero binding.
+void migrate29to30(Json& root)
+{
+    if (root.contains("settings") && root["settings"].is_object()) {
+        Json& input = root["settings"]["input"];
+        if (input.is_object() && !input.contains("cycleHero")) {
+            const OrderedJson defaults =
+                playerProfileMigrationSupport::inputBindingsToJson(
+                    defaultInputBindings());
+            input["cycleHero"] = Json::parse(defaults.at("cycleHero").dump());
+        }
+    }
+
+    const auto migrateState = [](Json& state) {
+        if (!state.is_object() || !state.contains("players") ||
+            !state["players"].is_array()) {
+            return;
+        }
+        for (Json& player : state["players"]) {
+            if (!player.is_object()) {
+                continue;
+            }
+            if (!player.contains("character")) {
+                player["character"] = nullptr;
+            }
+            if (!player.contains("controller")) {
+                player["controller"] = 0;
+            }
+        }
+    };
+    const auto migrateSession = [&](Json& checkpoint) {
+        if (!checkpoint.is_object() || !checkpoint.contains("session") ||
+            !checkpoint["session"].is_object()) {
+            return;
+        }
+        Json& session = checkpoint["session"];
+        if (!session.contains("activeHeroController")) {
+            session["activeHeroController"] = 0;
+        }
+        if (session.contains("state")) {
+            migrateState(session["state"]);
+        }
+        if (session.contains("undoBaseState") &&
+            !session["undoBaseState"].is_null()) {
+            migrateState(session["undoBaseState"]);
+        }
+        if (session.contains("undoStack") && session["undoStack"].is_array()) {
+            for (Json& action : session["undoStack"]) {
+                if (action.is_object() && action.contains("after")) {
+                    migrateState(action["after"]);
+                }
+            }
+        }
+    };
+
+    if (!root.contains("progress") || !root["progress"].is_object()) {
+        return;
+    }
+    Json& progress = root["progress"];
+    if (progress.contains("activeScreen") &&
+        !progress["activeScreen"].is_null()) {
+        migrateSession(progress["activeScreen"]);
+    }
+    if (progress.contains("overworldCheckpoint") &&
+        !progress["overworldCheckpoint"].is_null()) {
+        migrateSession(progress["overworldCheckpoint"]);
+    }
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -978,6 +1050,7 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate26to27,
         migrate27to28,
         migrate28to29,
+        migrate29to30,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

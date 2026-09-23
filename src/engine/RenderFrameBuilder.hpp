@@ -45,6 +45,7 @@ public:
         const AssetManifest& manifest;
         const Level& level;
         const GameState& state;
+        EntityId activeHeroController = invalidEntityId;
         bool moving = false;
         // The world as it will stand once everything in flight has committed.
         //

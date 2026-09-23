@@ -80,7 +80,7 @@ StaticRenderCell staticRenderCellFor(
     return {
         .tile = tile,
         .active = tile != TileType::End || endUnlocked,
-        .showGrid = tile != TileType::Player,
+        .showGrid = !tileTypeIsPlayerStart(tile),
         .size = surfaceEntity
             ? Vec2 { surfaceEntitySize, surfaceEntitySize }
             : Vec2 { 1.0f, 1.0f },
@@ -99,7 +99,7 @@ StaticRenderCell staticRenderCellFor(
                               tileTypeIsDecorative(tile)
                             ? 1.0f
                             : 0.0f)),
-        .modelRotationQuarterTurns = tile == TileType::Player
+        .modelRotationQuarterTurns = tileTypeIsPlayerStart(tile)
             ? playerFacingQuarterTurns
             : (rules::conveyorDirectionForTile(tile)
                     ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
@@ -228,7 +228,7 @@ void appendStaticTiles(
                         static_cast<float>(y) + cell.positionOffset.y,
                     },
                     .size = cell.size,
-                    .color = cell.tile == TileType::Player
+                    .color = tileTypeIsPlayerStart(cell.tile)
                         ? Vec4 { 1.0f, 1.0f, 1.0f, 1.0f }
                         : tileColor(cell.tile, cell.active),
                     .baseElevation = cell.baseElevation,
@@ -273,11 +273,27 @@ uint64_t mirrorGhostAnimationInstance(std::size_t resultPlayerIndex)
         (static_cast<uint64_t>(resultPlayerIndex) + 1);
 }
 
+std::size_t primaryPlayerIndex(
+    const RenderFrameBuilder::GameplayInput& input)
+{
+    if (input.activeHeroController != invalidEntityId) {
+        for (std::size_t i = 0; i < input.state.players.size(); ++i) {
+            if (rules::playerControllerId(input.state, i) ==
+                input.activeHeroController) {
+                return i;
+            }
+        }
+    }
+    return 0;
+}
+
 RenderFrameData initializeGameplayFrame(
     const RenderFrameBuilder::GameplayInput& input,
     FrameArena* arena = nullptr)
 {
-    const auto& primaryPlayerVisual = input.presentation.players().front();
+    const std::size_t primaryIndex = primaryPlayerIndex(input);
+    const auto& primaryPlayerVisual =
+        input.presentation.players().at(primaryIndex);
     RenderFrameData frame = arena != nullptr
         ? RenderFrameData(*arena)
         : RenderFrameData {};
@@ -300,7 +316,9 @@ RenderFrameData initializeGameplayFrame(
         });
     std::optional<RenderFrameData::CameraExtent> authoredGameplayExtent =
         gameplayExtent;
-    includeCameraCell(authoredGameplayExtent, input.level.playerStart());
+    for (const Level::PlayerStart& player : input.level.playerStarts()) {
+        includeCameraCell(authoredGameplayExtent, player.position);
+    }
     for (const Level::MovableTile& movable : input.level.movableTiles()) {
         includeCameraCell(authoredGameplayExtent, movable.position);
     }
@@ -495,7 +513,8 @@ void appendGameplayWorld(
     const RenderFrameBuilder::GameplayInput& input)
 {
     const GameState& state = input.state;
-    const auto& primaryPlayerVisual = input.presentation.players().front();
+    const auto& primaryPlayerVisual =
+        input.presentation.players().at(primaryPlayerIndex(input));
     const auto& movableVisuals = input.presentation.movables();
     const bool endUnlocked = rules::isEndUnlocked(input.level, state);
 
@@ -592,6 +611,9 @@ void appendGameplayEntities(
     const GameState& state = input.state;
     const auto& playerVisuals = input.presentation.players();
     const auto& movableVisuals = input.presentation.movables();
+    const std::size_t primaryIndex = primaryPlayerIndex(input);
+    const EntityId activeController =
+        rules::playerControllerId(state, primaryIndex);
 
     for (std::size_t playerIndex = 0;
          playerIndex < state.players.size() &&
@@ -616,19 +638,26 @@ void appendGameplayEntities(
                   manifestAnimationForUse(input.manifest, fallbackUse))
             : noAnimation;
 
+        const bool primary = playerIndex == primaryIndex;
+        const bool controlled = rules::playerControllerId(state, playerIndex) ==
+            activeController;
         RenderFrameData::Tile playerTile {
             .cell = state.players[playerIndex].cell,
             .position = {
                 visual.motion.renderPosition.x,
                 visual.motion.renderPosition.y,
             },
-            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .color = controlled
+                ? Vec4 { 1.0f, 1.0f, 1.0f, 1.0f }
+                : Vec4 { 0.72f, 0.72f, 0.72f, 1.0f },
             .baseElevation = visual.motion.renderPosition.z,
             .height = 1.0f,
             .showGrid = false,
             .affectsCameraFit = false,
-            .isPrimaryPlayer = playerIndex == 0,
-            .model = input.manifest.characterModel(input.level.character()),
+            .isPrimaryPlayer = primary,
+            .model = input.manifest.characterModel(
+                state.players[playerIndex].character.value_or(
+                    input.level.character())),
             .animation = animation,
             .animationFallback = fallback,
             .animationInstanceId = actorAnimationInstance(visual.motion.target),
@@ -893,7 +922,9 @@ void appendMirrorGhostTile(
         .showGrid = false,
         .affectsCameraFit = false,
         .model = entity.player
-            ? input.manifest.characterModel(input.level.character())
+            ? input.manifest.characterModel(
+                  state.players[entity.playerIndex].character.value_or(
+                      input.level.character()))
             : input.manifest.modelForTile(
                   state.movables[entity.movableIndex].type),
         .animation = entity.player

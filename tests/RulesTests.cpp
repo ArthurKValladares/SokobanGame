@@ -54,6 +54,37 @@ void testInitialState()
     CHECK(!rules::hasPendingMotion(level, state));
 }
 
+void testEachAuthoredHeroKeepsItsOwnCharacterAbility()
+{
+    TEST("eachAuthoredHeroKeepsItsOwnCharacterAbility");
+    const Level level = makeLevel({
+        { "......", "......" },
+        { "QRR   ", "KRR   " },
+    });
+    const GameState state = rules::initialState(level);
+    CHECK(state.players.size() == 2);
+    CHECK(state.players[0].character == CharacterType::Rogue);
+    CHECK(state.players[1].character == CharacterType::Knight);
+
+    const GameState rogueAttempt = rules::scopedStep(
+        level,
+        state,
+        MoveDirection::Right,
+        {},
+        { .actors = { state.players[0].id } });
+    CHECK(rogueAttempt.players[0].cell == cell(0, 0, 1));
+
+    const GameState knightMove = rules::scopedStep(
+        level,
+        state,
+        MoveDirection::Right,
+        {},
+        { .actors = { state.players[1].id } });
+    CHECK(knightMove.players[1].cell == cell(1, 1, 1));
+    CHECK(knightMove.movables[2].cell == cell(2, 1, 1));
+    CHECK(knightMove.movables[3].cell == cell(3, 1, 1));
+}
+
 void testStepMovesPlayer()
 {
     TEST("stepMovesPlayer");
@@ -899,6 +930,10 @@ void testEquidistantMirrorsDuplicatePlayers()
     CHECK(preview && preview->after.players[0].cell == cell(0, 0, 1));
     CHECK(preview && preview->after.players.size() == 2);
     CHECK(preview && preview->after.players[1].cell == cell(4, 4, 1));
+    CHECK(preview && preview->after.players[1].controller ==
+        preview->after.players[0].controller);
+    CHECK(preview && preview->after.players[1].character ==
+        preview->after.players[0].character);
     CHECK(preview && preview->entities.size() == 2);
     CHECK(preview && preview->entities[0].player);
     CHECK(preview && preview->entities[0].playerIndex == 0);
@@ -1348,6 +1383,7 @@ void testShovingAnEnemyPullsItsVictimIntoTheClosure()
 int main()
 {
     testInitialState();
+    testEachAuthoredHeroKeepsItsOwnCharacterAbility();
     testStepMovesPlayer();
     testDecorativeTileDoesNotBlockMovement();
     testStepIsPure();
