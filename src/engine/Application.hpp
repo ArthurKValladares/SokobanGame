@@ -258,6 +258,7 @@ private:
     bool evidenceSceneCaptured_ = false;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     float overworldOverviewProgress_ = 0.0f;
+    std::optional<OverworldFogReveal> overworldFogReveal_;
     bool screenPreviewActive_ = false;
     bool running_ = true;
 };

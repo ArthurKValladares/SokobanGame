@@ -61,6 +61,8 @@ bool CampaignSession::restoreProfileLocation(PlayerProfile& profile)
     clearRunState();
     const bool overworldCheckpointValid =
         validateOverworldCheckpoint(profile);
+    synchronizeOverworldDiscovery(profile);
+    recordOverworldDiscovery(profile, activeOverworldScreen_);
     if (profile.worldContext == PlayerProfile::WorldContext::Overworld) {
         inOverworld_ = true;
         return overworldCheckpointValid;
@@ -94,6 +96,8 @@ void CampaignSession::startNewGame(PlayerProfile& profile)
     inOverworld_ = true;
     activeOverworldScreen_ = overworldStartScreen_;
     profile.worldContext = PlayerProfile::WorldContext::Overworld;
+    synchronizeOverworldDiscovery(profile);
+    recordOverworldDiscovery(profile, activeOverworldScreen_);
 }
 
 bool CampaignSession::startPuzzle(
@@ -175,13 +179,25 @@ std::optional<OverworldScreenId> CampaignSession::sharedPlayerScreen(
 }
 
 bool CampaignSession::transitionOverworldScreen(
+    PlayerProfile& profile,
     OverworldScreenId destination)
 {
     if (!inOverworld_ || !overworldScreenExists(destination)) {
         return false;
     }
     activeOverworldScreen_ = destination;
+    recordOverworldDiscovery(profile, destination);
     return true;
+}
+
+bool CampaignSession::overworldScreenDiscovered(
+    const PlayerProfile& profile,
+    OverworldScreenId screen) const
+{
+    return profile.overworldDiscovery.topologyFingerprint ==
+            overworldFingerprint_ &&
+        std::ranges::binary_search(
+            profile.overworldDiscovery.screens, screen);
 }
 
 CampaignSession::WorldRestore CampaignSession::prepareWorldLoad(
@@ -217,6 +233,8 @@ void CampaignSession::finishWorldLoad(PlayerProfile& profile)
     if (inOverworld_) {
         profile.worldContext = PlayerProfile::WorldContext::Overworld;
         profile.activeScreen.reset();
+        synchronizeOverworldDiscovery(profile);
+        recordOverworldDiscovery(profile, activeOverworldScreen_);
     } else {
         profile.worldContext = PlayerProfile::WorldContext::Puzzle;
         profile.setCurrentScreen(current_.level, current_.screen);
@@ -273,6 +291,8 @@ void CampaignSession::writeCheckpoint(
     GameplaySession::Snapshot snapshot)
 {
     if (inOverworld_) {
+        synchronizeOverworldDiscovery(profile);
+        recordOverworldDiscovery(profile, activeOverworldScreen_);
         profile.worldContext = PlayerProfile::WorldContext::Overworld;
         profile.activeScreen.reset();
         profile.overworldCheckpoint = PlayerProfile::OverworldCheckpoint {
@@ -392,6 +412,37 @@ bool CampaignSession::validateOverworldCheckpoint(PlayerProfile& profile)
     activeOverworldScreen_ =
         profile.overworldCheckpoint->activeScreen;
     return true;
+}
+
+void CampaignSession::synchronizeOverworldDiscovery(
+    PlayerProfile& profile) const
+{
+    const bool invalidScreen = std::ranges::any_of(
+        profile.overworldDiscovery.screens,
+        [this](OverworldScreenId screen) {
+            return !overworldScreenExists(screen);
+        });
+    if (profile.overworldDiscovery.topologyFingerprint !=
+            overworldFingerprint_ || invalidScreen) {
+        profile.overworldDiscovery = {
+            .topologyFingerprint = overworldFingerprint_,
+        };
+    }
+}
+
+void CampaignSession::recordOverworldDiscovery(
+    PlayerProfile& profile,
+    OverworldScreenId screen) const
+{
+    synchronizeOverworldDiscovery(profile);
+    if (!overworldScreenExists(screen)) {
+        return;
+    }
+    auto& discovered = profile.overworldDiscovery.screens;
+    const auto insertion = std::ranges::lower_bound(discovered, screen);
+    if (insertion == discovered.end() || *insertion != screen) {
+        discovered.insert(insertion, screen);
+    }
 }
 
 void CampaignSession::validateOverworldTargets(

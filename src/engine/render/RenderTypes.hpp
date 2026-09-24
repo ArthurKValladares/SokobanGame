@@ -192,6 +192,10 @@ struct RenderFrameData {
     static constexpr std::size_t waterSurfaceCapacity = 8192;
     static constexpr std::size_t isoFaceCapacity = 65536;
     static constexpr std::size_t particleCapacity = 8192;
+    // One volume per visible overworld screen in the degenerate one-cell
+    // layout. Matching tileCapacity keeps overview fog complete whenever the
+    // composed map itself still fits in a render frame.
+    static constexpr std::size_t overworldFogVolumeCapacity = tileCapacity;
     static constexpr std::size_t groundSplatRegionCapacity = 18;
     static constexpr std::size_t pointLightCapacity = 8;
     enum class EditorDecorationHighlight {
@@ -228,6 +232,22 @@ struct RenderFrameData {
                 cell.x < origin.x + static_cast<int>(width) &&
                 cell.y < origin.y + static_cast<int>(height);
         }
+    };
+
+    struct OverworldFogVolume {
+        // The horizontal bounds include the outside feather. Full density
+        // begins edgeFadeDistance inside them, at the screen rectangle.
+        Vec3 minimum {};
+        Vec3 maximum {};
+        // A negative radius means the screen is wholly undiscovered. During
+        // first entry, density fades to zero inside this world-space circle.
+        Vec2 revealOrigin {};
+        float revealRadius = -1.0f;
+        float revealFeather = 0.0f;
+
+        friend constexpr bool operator==(
+            const OverworldFogVolume&,
+            const OverworldFogVolume&) = default;
     };
 
     struct DirectionalLight {
@@ -458,6 +478,7 @@ struct RenderFrameData {
         , waterSurfaces(arena, waterSurfaceCapacity)
         , isoFaces(arena, isoFaceCapacity)
         , particles(arena, particleCapacity)
+        , overworldFogVolumes(arena, overworldFogVolumeCapacity)
     {
     }
 
@@ -497,6 +518,7 @@ struct RenderFrameData {
     FrameArray<WaterSurface> waterSurfaces;
     FrameArray<IsoFace> isoFaces;
     FrameArray<Particle> particles;
+    FrameArray<OverworldFogVolume> overworldFogVolumes;
     GroundSplatTextures groundSplat {};
     std::array<GroundSplatRegion, groundSplatRegionCapacity>
         groundSplatRegions {};
@@ -532,7 +554,9 @@ struct RenderFrameData {
         arenaBytesFor<RenderFrameData::IsoFace>(
             RenderFrameData::isoFaceCapacity) +
         arenaBytesFor<RenderFrameData::Particle>(
-            RenderFrameData::particleCapacity);
+            RenderFrameData::particleCapacity) +
+        arenaBytesFor<RenderFrameData::OverworldFogVolume>(
+            RenderFrameData::overworldFogVolumeCapacity);
 }
 
 struct RenderPhaseTiming {

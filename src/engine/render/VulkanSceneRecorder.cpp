@@ -4,6 +4,7 @@
 #include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/MirrorConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
+#include "engine/render/FogOfWarConfig.hpp"
 #include "engine/render/OpaqueDrawSorter.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/SceneDrawLanes.hpp"
@@ -106,13 +107,28 @@ std::array<Vec4, 4> matrixColumns(const Mat4& matrix)
     };
 }
 
-bool atmosphereSamplesSceneDepth(
+bool baseAtmosphereSamplesSceneDepth(
     const RenderFrameData::Lighting::Atmosphere& atmosphere)
 {
     return atmosphere.enabled &&
         atmosphere.density > 0.0f &&
         atmosphere.maxDistance > 0.0f &&
         atmosphere.scatteringStrength > 0.0f;
+}
+
+bool atmosphereSamplesSceneDepth(const RenderFrameData& frameData)
+{
+    return baseAtmosphereSamplesSceneDepth(frameData.lighting.atmosphere) ||
+        !frameData.overworldFogVolumes.empty();
+}
+
+bool hasMirrorPreview(const RenderFrameData& frameData)
+{
+    return std::ranges::any_of(frameData.tiles, [](const auto& tile) {
+        return tile.effect == RenderSurfaceEffect::MirrorEnergy;
+    }) || std::ranges::any_of(frameData.isoFaces, [](const auto& face) {
+        return face.effect == RenderSurfaceEffect::MirrorEnergy;
+    });
 }
 
 std::array<Vec4, 4> affineTransformColumns(
@@ -442,11 +458,15 @@ public:
         const bool mainHasTranslucency =
             scene.hasTranslucentContent ||
             hasAuthoredBlendMaterials(frameData, scene);
+        const bool mirrorPreviewOverFog =
+            !frameData.overworldFogVolumes.empty() &&
+            hasMirrorPreview(frameData) && pipelines_.atmosphere() &&
+            frameData.lighting.ambientOcclusion.debug ==
+                RenderFrameData::Lighting::AmbientOcclusion::Debug::Off;
         const bool mainDepthPublished =
             VulkanSsaoPass::samplesSceneDepth(
                 frameData.lighting.ambientOcclusion) ||
-            atmosphereSamplesSceneDepth(
-                frameData.lighting.atmosphere) ||
+            atmosphereSamplesSceneDepth(frameData) ||
             mainHasTranslucency;
         const bool directSsaoColor =
             VulkanSsaoPass::samplesSceneDepth(
@@ -467,7 +487,8 @@ public:
             swapchain_.resolveColorView(directSsaoColor),
             frameData,
             scene,
-            directSsaoColor);
+            directSsaoColor,
+            mirrorPreviewOverFog);
         vulkanDebug::endLabel(device_, commandBuffer);
         gameTimeTelemetry_.record(elapsedMilliseconds(gameStart));
 
@@ -521,7 +542,7 @@ public:
             { 0.45f, 0.70f, 1.0f, 1.0f });
         recordAtmosphere(
             commandBuffer,
-            frameData.lighting,
+            frameData,
             isoClipFromWorld(scene.isoLayout, scene.renderExtent));
         vulkanDebug::endLabel(device_, commandBuffer);
         gpuProfiler_.endPhase(
@@ -530,6 +551,27 @@ public:
             VulkanGpuPhase::Atmosphere);
         atmosphereTimeTelemetry_.record(
             elapsedMilliseconds(atmosphereStart));
+        if (mirrorPreviewOverFog) {
+            vulkanDebug::beginLabel(
+                device_, commandBuffer, "Mirror preview over fog",
+                { 0.35f, 0.85f, 1.0f, 1.0f });
+            recordScenePass(
+                commandBuffer,
+                swapchain_.renderColorView(),
+                swapchain_.resolveColorView(),
+                frameData,
+                scene,
+                ScenePassOptions {
+                    .translucent = true,
+                    .loadColor = true,
+                    .storeColor = !swapchain_.resolveColorView(),
+                    .loadDepth = true,
+                    .writeDepth = false,
+                    .content = SceneContent::MirrorPreviewOnly,
+                },
+                { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
+            vulkanDebug::endLabel(device_, commandBuffer);
+        }
         if (mainDepthPublished) {
             swapchain_.prepareSceneDepthAttachment(commandBuffer, stats_);
         }
@@ -879,7 +921,8 @@ private:
         VkImageView resolveView,
         const RenderFrameData& frameData,
         const PreparedRenderScene& scene,
-        bool directSsaoColor)
+        bool directSsaoColor,
+        bool mirrorPreviewOverFog)
     {
         const bool hasTranslucency = scene.hasTranslucentContent ||
             hasAuthoredBlendMaterials(frameData, scene);
@@ -923,6 +966,9 @@ private:
                 .storeColor = hasTranslucency || !resolveView,
                 .loadDepth = false,
                 .writeDepth = true,
+                .content = mirrorPreviewOverFog
+                    ? SceneContent::WithoutMirrorPreview
+                    : SceneContent::Full,
             },
             { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
         if (directSsaoColor) {
@@ -941,7 +987,7 @@ private:
             VulkanGpuPhase::SceneDepthPublish);
         if (VulkanSsaoPass::samplesSceneDepth(
                 frameData.lighting.ambientOcclusion) ||
-            atmosphereSamplesSceneDepth(frameData.lighting.atmosphere) ||
+            atmosphereSamplesSceneDepth(frameData) ||
             hasTranslucency) {
             swapchain_.publishSceneDepth(commandBuffer, stats_);
         }
@@ -979,6 +1025,9 @@ private:
                 .storeColor = !resolveView,
                 .loadDepth = true,
                 .writeDepth = false,
+                .content = mirrorPreviewOverFog
+                    ? SceneContent::WithoutMirrorPreview
+                    : SceneContent::Full,
             },
             { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
         gpuProfiler_.endPhase(
@@ -1141,29 +1190,41 @@ private:
 
     void recordAtmosphere(
         VkCommandBuffer commandBuffer,
-        const RenderFrameData::Lighting& lighting,
+        const RenderFrameData& frameData,
         const Mat4& clipFromWorld)
     {
+        const RenderFrameData::Lighting& lighting = frameData.lighting;
         const VkPipeline pipeline = pipelines_.atmosphere();
         // An SSAO debug view is a diagnostic replacement for scene color.
         // Fogging it would turn the supposedly raw mask into a tinted image
         // and invalidate captures used to tune the bilateral filter.
-        if (!atmosphereSamplesSceneDepth(lighting.atmosphere) || !pipeline ||
+        if (!atmosphereSamplesSceneDepth(frameData) || !pipeline ||
             lighting.ambientOcclusion.debug !=
                 RenderFrameData::Lighting::AmbientOcclusion::Debug::Off) {
             return;
         }
 
-        // The pass reads the shaded HDR scene while replacing that same
-        // target. Keep the read side in the renderer's dedicated snapshot.
-        swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
-
         const VkExtent2D extent = swapchain_.renderExtent();
+        const VkImageView resolveView = swapchain_.resolveColorView();
+        // Keep the multisampled attachment in lockstep with the resolve. A
+        // mirror preview may be composited after the fog and must load the
+        // fogged samples rather than the pre-atmosphere scene.
         const VkRenderingAttachmentInfo attachment {
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = swapchain_.resolvedColorView(),
+            .imageView = swapchain_.renderColorView(),
             .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .resolveMode = resolveView
+                ? VK_RESOLVE_MODE_AVERAGE_BIT
+                : VK_RESOLVE_MODE_NONE,
+            .resolveImageView = resolveView,
+            .resolveImageLayout = resolveView
+                ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                : VK_IMAGE_LAYOUT_UNDEFINED,
             .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            // The post-fog mirror-preview pass loads this multisampled image
+            // before resolving it again. Discarding the source here leaves
+            // that later LOAD undefined, even though this pass's resolve is
+            // valid, and manifests as full-screen scanline corruption.
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
         };
         const VkRenderingInfo renderingInfo {
@@ -1183,67 +1244,125 @@ private:
         };
         const VkRect2D scissor { .offset = { 0, 0 }, .extent = extent };
 
-        const auto& atmosphere = lighting.atmosphere;
-        GpuDrawInstance pushConstants {};
-        pushConstants.vertices = matrixColumns(inverse(clipFromWorld));
-        pushConstants.color = {
-            std::max(atmosphere.color.x, 0.0f),
-            std::max(atmosphere.color.y, 0.0f),
-            std::max(atmosphere.color.z, 0.0f),
-            std::max(atmosphere.density, 0.0f),
-        };
-        pushConstants.normalAndAmbientRed = {
-            std::max(lighting.sun.color.x * lighting.sun.intensity, 0.0f),
-            std::max(lighting.sun.color.y * lighting.sun.intensity, 0.0f),
-            std::max(lighting.sun.color.z * lighting.sun.intensity, 0.0f),
-            std::max(atmosphere.scatteringStrength, 0.0f),
-        };
-        pushConstants.sunDirectionAndAmbientGreen = {
-            lighting.sun.direction.x,
-            lighting.sun.direction.y,
-            lighting.sun.direction.z,
-            std::clamp(atmosphere.anisotropy, -0.85f, 0.85f),
-        };
-        pushConstants.sunRadianceAndAmbientBlue = {
-            std::max(atmosphere.heightFalloff, 0.0f),
-            atmosphere.baseHeight,
-            std::max(atmosphere.maxDistance, 0.0f),
-            static_cast<float>(config::atmosphereSampleCount),
-        };
-        pushConstants.shadowOptions = {
-            lighting.shadows.enabled ? 1.0f : 0.0f,
-            std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
-            std::max(lighting.shadows.bias, 0.0f),
-            0.0f,
-        };
-        pushConstants.materialOptions = {
-            std::max(
-                lighting.ambient.color.x * lighting.ambient.intensity, 0.0f),
-            std::max(
-                lighting.ambient.color.y * lighting.ambient.intensity, 0.0f),
-            std::max(
-                lighting.ambient.color.z * lighting.ambient.intensity, 0.0f),
-            0.0f,
+        const auto recordMedium = [&, this](
+            const RenderFrameData::Lighting::Atmosphere& atmosphere,
+            const RenderFrameData::OverworldFogVolume* volume,
+            uint32_t sampleCount) {
+            // Each medium reads the result of the preceding one. This keeps
+            // ordinary height atmosphere and disjoint fog-of-war volumes
+            // composable without a fixed GPU-side volume-count limit.
+            swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
+
+            GpuDrawInstance pushConstants {};
+            pushConstants.vertices = matrixColumns(inverse(clipFromWorld));
+            if (volume != nullptr) {
+                pushConstants.passData[0] = {
+                    volume->minimum.x,
+                    volume->minimum.y,
+                    volume->minimum.z,
+                    1.0f,
+                };
+                pushConstants.passData[1] = {
+                    volume->maximum.x,
+                    volume->maximum.y,
+                    volume->maximum.z,
+                    0.0f,
+                };
+                pushConstants.passData[2] = {
+                    volume->revealOrigin.x,
+                    volume->revealOrigin.y,
+                    volume->revealRadius,
+                    volume->revealFeather,
+                };
+                pushConstants.passData[3].x =
+                    frameData.effectAnimationTimeSeconds;
+                pushConstants.passData[3].y =
+                    config::fogOfWarEdgeFadeDistance;
+            }
+            pushConstants.color = {
+                std::max(atmosphere.color.x, 0.0f),
+                std::max(atmosphere.color.y, 0.0f),
+                std::max(atmosphere.color.z, 0.0f),
+                std::max(atmosphere.density, 0.0f),
+            };
+            pushConstants.normalAndAmbientRed = {
+                std::max(lighting.sun.color.x * lighting.sun.intensity, 0.0f),
+                std::max(lighting.sun.color.y * lighting.sun.intensity, 0.0f),
+                std::max(lighting.sun.color.z * lighting.sun.intensity, 0.0f),
+                std::max(atmosphere.scatteringStrength, 0.0f),
+            };
+            pushConstants.sunDirectionAndAmbientGreen = {
+                lighting.sun.direction.x,
+                lighting.sun.direction.y,
+                lighting.sun.direction.z,
+                std::clamp(atmosphere.anisotropy, -0.85f, 0.85f),
+            };
+            pushConstants.sunRadianceAndAmbientBlue = {
+                std::max(atmosphere.heightFalloff, 0.0f),
+                atmosphere.baseHeight,
+                std::max(atmosphere.maxDistance, 0.0f),
+                static_cast<float>(sampleCount),
+            };
+            pushConstants.shadowOptions = {
+                lighting.shadows.enabled ? 1.0f : 0.0f,
+                std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
+                std::max(lighting.shadows.bias, 0.0f),
+                0.0f,
+            };
+            pushConstants.materialOptions = {
+                std::max(
+                    lighting.ambient.color.x * lighting.ambient.intensity, 0.0f),
+                std::max(
+                    lighting.ambient.color.y * lighting.ambient.intensity, 0.0f),
+                std::max(
+                    lighting.ambient.color.z * lighting.ambient.intensity, 0.0f),
+                0.0f,
+            };
+
+            vkCmdBeginRendering(commandBuffer, &renderingInfo);
+            ++stats_.renderPasses;
+            vkCmdBindPipeline(
+                commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+            ++stats_.pipelineBinds;
+            bindDescriptorSet(commandBuffer);
+            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+            vkCmdPushConstants(
+                commandBuffer,
+                pipelines_.layout(),
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                0,
+                sizeof(GpuDrawInstance),
+                &pushConstants);
+            vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+            ++stats_.drawCalls;
+            vkCmdEndRendering(commandBuffer);
         };
 
-        vkCmdBeginRendering(commandBuffer, &renderingInfo);
-        ++stats_.renderPasses;
-        vkCmdBindPipeline(
-            commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-        ++stats_.pipelineBinds;
-        bindDescriptorSet(commandBuffer);
-        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-        vkCmdPushConstants(
-            commandBuffer,
-            pipelines_.layout(),
-            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-            0,
-            sizeof(GpuDrawInstance),
-            &pushConstants);
-        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
-        ++stats_.drawCalls;
-        vkCmdEndRendering(commandBuffer);
+        if (baseAtmosphereSamplesSceneDepth(lighting.atmosphere)) {
+            recordMedium(
+                lighting.atmosphere,
+                nullptr,
+                config::atmosphereSampleCount);
+        }
+
+        const RenderFrameData::Lighting::Atmosphere fogOfWar {
+            .enabled = true,
+            .color = config::fogOfWarColor,
+            .density = config::fogOfWarDensity,
+            .heightFalloff = 0.0f,
+            .baseHeight = config::fogOfWarMinimumHeight,
+            // Bounded volumes use the camera-to-surface ray rather than this
+            // global cutoff; a positive value keeps the shared shader input
+            // valid and documents that distinction.
+            .maxDistance = 1.0f,
+            .scatteringStrength = config::fogOfWarScatteringStrength,
+            .anisotropy = config::fogOfWarAnisotropy,
+        };
+        for (const RenderFrameData::OverworldFogVolume& volume :
+             frameData.overworldFogVolumes) {
+            recordMedium(fogOfWar, &volume, config::fogOfWarSampleCount);
+        }
     }
 
     void recordLevelTransition(
@@ -1310,12 +1429,21 @@ private:
     // a subtly wrong frame rather than a crash - the opaque and translucent
     // passes differ in every one of them. Named at the call site instead, the
     // way FrameConfiguration and GltfMeshLoadOptions already are.
+    enum class SceneContent {
+        Full,
+        // Fog is a fullscreen composite, so mirror previews are withheld from
+        // the ordinary translucent pass and replayed once that composite ends.
+        WithoutMirrorPreview,
+        MirrorPreviewOnly,
+    };
+
     struct ScenePassOptions {
         bool translucent = false;
         bool loadColor = false;
         bool storeColor = false;
         bool loadDepth = false;
         bool writeDepth = false;
+        SceneContent content = SceneContent::Full;
     };
 
     void recordScenePass(
@@ -1458,17 +1586,27 @@ private:
                 commandBuffer,
                 scene,
                 frameData,
-                translucentPass);
+                translucentPass,
+                options.content);
         } else {
             for (const RenderFrameData::Tile& tile :
                  frameData.tiles) {
+                const bool mirrorPreview =
+                    tile.effect == RenderSurfaceEffect::MirrorEnergy;
+                if ((options.content == SceneContent::MirrorPreviewOnly &&
+                        !mirrorPreview) ||
+                    (options.content == SceneContent::WithoutMirrorPreview &&
+                        mirrorPreview)) {
+                    continue;
+                }
                 drawTile(
                     commandBuffer,
                     scene.tileLayout,
                     tile,
                     frameData.lighting);
             }
-            if (!translucentPass) {
+            if (!translucentPass &&
+                options.content != SceneContent::MirrorPreviewOnly) {
                 vkCmdSetDepthWriteEnable(
                     commandBuffer, VK_FALSE);
                 drawTopDownGridOverlay(
@@ -1651,7 +1789,8 @@ private:
         VkCommandBuffer commandBuffer,
         const PreparedRenderScene& scene,
         const RenderFrameData& frameData,
-        bool translucentPass)
+        bool translucentPass,
+        SceneContent content)
     {
         const std::vector<std::size_t>& faceIndices =
             translucentPass
@@ -1686,6 +1825,14 @@ private:
             const std::size_t faceIndex = faceIndices[position];
             const PreparedIsoFace& face =
                 scene.isoFaces[faceIndex];
+            const bool mirrorPreview =
+                face.material == PreparedSurfaceMaterial::MirrorEnergy;
+            if ((content == SceneContent::MirrorPreviewOnly &&
+                    !mirrorPreview) ||
+                (content == SceneContent::WithoutMirrorPreview &&
+                    mirrorPreview)) {
+                continue;
+            }
             const RenderFrameData::GroundSplatRegion* splatRegion =
                 frameData.groundSplatRegionAt(face.cell);
             const GroundSplatTextures& splatTextures = splatRegion
@@ -1879,6 +2026,14 @@ private:
         std::size_t sourceOrder = 0;
         if (translucentPass) {
             for (std::size_t tileIndex : scene.translucentModelIndices) {
+                const bool mirrorPreview = frameData.tiles[tileIndex].effect ==
+                    RenderSurfaceEffect::MirrorEnergy;
+                if ((content == SceneContent::MirrorPreviewOnly &&
+                        !mirrorPreview) ||
+                    (content == SceneContent::WithoutMirrorPreview &&
+                        mirrorPreview)) {
+                    continue;
+                }
                 candidates.push_back({
                     .tileIndex = tileIndex,
                     .depth = modelDepth(frameData.tiles[tileIndex]),
@@ -1887,6 +2042,9 @@ private:
             }
             for (std::size_t tileIndex : scene.opaqueModelIndices) {
                 const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
+                if (content == SceneContent::MirrorPreviewOnly) {
+                    continue;
+                }
                 if (models_.materialForModel(tile.model).policy.hasBlend) {
                     candidates.push_back({
                         .tileIndex = tileIndex,
@@ -1915,6 +2073,9 @@ private:
         } else {
             for (std::size_t tileIndex : scene.opaqueModelIndices) {
                 const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
+                if (content == SceneContent::MirrorPreviewOnly) {
+                    continue;
+                }
                 const ModelMaterialPolicy policy =
                     models_.materialForModel(tile.model).policy;
                 if (policy.hasOpaqueOrMask) {
@@ -2042,11 +2203,12 @@ private:
             const RecorderModelDraw& draw =
                 draws[orderedDraws[batch.firstItem].drawIndex];
             if (draw.mirrorGhost != mirrorGhostState) {
+                const bool writesMirrorDepth = draw.mirrorGhost &&
+                    content != SceneContent::MirrorPreviewOnly &&
+                    swapchain_.depthView();
                 vkCmdSetDepthWriteEnable(
                     commandBuffer,
-                    draw.mirrorGhost && swapchain_.depthView()
-                        ? VK_TRUE
-                        : VK_FALSE);
+                    writesMirrorDepth ? VK_TRUE : VK_FALSE);
                 mirrorGhostState = draw.mirrorGhost;
             }
             const ModelRasterPolicy rasterPolicy = modelRasterPolicy(
@@ -2120,7 +2282,9 @@ private:
             vkCmdSetFrontFace(
                 commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
         }
-        if (translucentPass && !scene.particles.empty()) {
+        if (translucentPass &&
+            content != SceneContent::MirrorPreviewOnly &&
+            !scene.particles.empty()) {
             vkCmdBindPipeline(
                 commandBuffer,
                 VK_PIPELINE_BIND_POINT_GRAPHICS,

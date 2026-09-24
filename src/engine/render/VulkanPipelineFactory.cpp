@@ -273,7 +273,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         ssaoComposite_ = createPostProcessPipeline(
             shaders[5], shaders[7], sceneFormat);
         atmosphere_ = createPostProcessPipeline(
-            shaders[5], shaders[16], sceneFormat);
+            shaders[5], shaders[16], sceneFormat, createInfo.sampleCount);
         worldTransition_ = createPostProcessPipeline(
             shaders[5], shaders[11], sceneFormat);
         tonemap_ = createPostProcessPipeline(
@@ -654,7 +654,8 @@ VkPipeline VulkanPipelineFactory::createShadowPipeline(
 VkPipeline VulkanPipelineFactory::createPostProcessPipeline(
     VkShaderModule vertexShader,
     VkShaderModule fragmentShader,
-    VkFormat colorFormat) const
+    VkFormat colorFormat,
+    VkSampleCountFlagBits sampleCount) const
 {
     std::array<VkPipelineShaderStageCreateInfo, 2> stages {
         VkPipelineShaderStageCreateInfo {
@@ -691,7 +692,7 @@ VkPipeline VulkanPipelineFactory::createPostProcessPipeline(
     };
     VkPipelineMultisampleStateCreateInfo multisampling {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+        .rasterizationSamples = sampleCount,
     };
     VkPipelineColorBlendAttachmentState blendAttachment {
         .blendEnable = VK_FALSE,

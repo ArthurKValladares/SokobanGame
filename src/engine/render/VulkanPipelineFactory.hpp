@@ -138,7 +138,8 @@ private:
     [[nodiscard]] VkPipeline createPostProcessPipeline(
         VkShaderModule vertexShader,
         VkShaderModule fragmentShader,
-        VkFormat colorFormat) const;
+        VkFormat colorFormat,
+        VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT) const;
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;

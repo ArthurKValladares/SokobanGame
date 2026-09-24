@@ -21,6 +21,10 @@ layout(location = 0) out vec4 outColor;
 layout(push_constant) uniform PushConstants
 {
     mat4 worldFromClip;
+    layout(offset = 64) vec4 volumeMinimumAndMode;
+    layout(offset = 80) vec4 volumeMaximum;
+    layout(offset = 96) vec4 revealOriginRadiusAndFeather;
+    layout(offset = 112) vec4 volumeAnimation;
     layout(offset = 128) vec4 mediumColorAndDensity;
     layout(offset = 144) vec4 sunRadianceAndStrength;
     layout(offset = 160) vec4 sunDirectionAndAnisotropy;
@@ -139,7 +143,35 @@ void main()
     }
 
     vec3 rayDirection = cameraToEndpoint / endpointDistance;
-    float rayLength = min(endpointDistance, max(pc.heightAndDistance.z, 0.0));
+    bool boundedVolume = pc.volumeMinimumAndMode.w > 0.5;
+    float rayStart = 0.0;
+    float rayEnd = min(
+        endpointDistance,
+        max(pc.heightAndDistance.z, 0.0));
+    if (boundedVolume) {
+        // Slab intersection against the screen's world-space fog column.
+        // Preserve a sign for axis-aligned rays so division stays finite.
+        const float directionEpsilon = 0.000001;
+        vec3 fallbackDirection = mix(
+            vec3(-directionEpsilon),
+            vec3(directionEpsilon),
+            greaterThanEqual(rayDirection, vec3(0.0)));
+        vec3 safeDirection = mix(
+            fallbackDirection,
+            rayDirection,
+            greaterThan(abs(rayDirection), vec3(directionEpsilon)));
+        vec3 first =
+            (pc.volumeMinimumAndMode.xyz - camera) / safeDirection;
+        vec3 second =
+            (pc.volumeMaximum.xyz - camera) / safeDirection;
+        vec3 nearPlanes = min(first, second);
+        vec3 farPlanes = max(first, second);
+        rayStart = max(max(nearPlanes.x, nearPlanes.y), nearPlanes.z);
+        rayEnd = min(min(farPlanes.x, farPlanes.y), farPlanes.z);
+        rayStart = max(rayStart, 0.0);
+        rayEnd = min(rayEnd, endpointDistance);
+    }
+    float rayLength = rayEnd - rayStart;
     if (rayLength <= 0.0001 || pc.mediumColorAndDensity.w <= 0.0 ||
         pc.sunRadianceAndStrength.w <= 0.0) {
         outColor = scene;
@@ -164,13 +196,48 @@ void main()
             break;
         }
         float distanceAlongRay =
-            (float(sampleIndex) + jitter) * stepLength;
+            rayStart + (float(sampleIndex) + jitter) * stepLength;
         vec3 samplePosition = camera + rayDirection * distanceAlongRay;
         float altitude = max(
             samplePosition.z - pc.heightAndDistance.y,
             0.0);
         float density = max(pc.mediumColorAndDensity.w, 0.0) * exp(
             -max(pc.heightAndDistance.x, 0.0) * altitude);
+        if (boundedVolume) {
+            // Two low-frequency world-space waves keep the dense cover alive
+            // without opening transparent holes that could reveal a screen.
+            float billow = sin(
+                dot(samplePosition.xy, vec2(0.73, 0.41)) +
+                samplePosition.z * 0.29 + pc.volumeAnimation.x * 0.46);
+            billow *= sin(
+                dot(samplePosition.xy, vec2(-0.37, 0.61)) -
+                samplePosition.z * 0.21 - pc.volumeAnimation.x * 0.31);
+            density *= 1.0 + billow * 0.15;
+
+            // volumeMinimum/Maximum include a horizontal feather beyond the
+            // authored screen. Distance is zero throughout the screen itself,
+            // so the fade never exposes any of its tiles prematurely.
+            float edgeFade = max(pc.volumeAnimation.y, 0.0001);
+            vec2 coveredMinimum =
+                pc.volumeMinimumAndMode.xy + vec2(edgeFade);
+            vec2 coveredMaximum = pc.volumeMaximum.xy - vec2(edgeFade);
+            vec2 outsideCoveredArea = max(
+                max(coveredMinimum - samplePosition.xy,
+                    samplePosition.xy - coveredMaximum),
+                vec2(0.0));
+            density *= 1.0 - smoothstep(
+                0.0, edgeFade, length(outsideCoveredArea));
+        }
+        if (boundedVolume && pc.revealOriginRadiusAndFeather.z >= 0.0) {
+            float revealDistance = distance(
+                samplePosition.xy,
+                pc.revealOriginRadiusAndFeather.xy);
+            density *= smoothstep(
+                pc.revealOriginRadiusAndFeather.z,
+                pc.revealOriginRadiusAndFeather.z +
+                    max(pc.revealOriginRadiusAndFeather.w, 0.0001),
+                revealDistance);
+        }
         float stepTransmittance = exp(-density * stepLength);
         float scatteredFraction = 1.0 - stepTransmittance;
 

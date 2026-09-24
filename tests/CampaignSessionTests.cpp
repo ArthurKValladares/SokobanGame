@@ -169,8 +169,14 @@ void testOverworldTopologyCheckpointValidation()
     PlayerProfile profile;
     campaign.startNewGame(profile);
     CHECK(campaign.activeOverworldScreen() == 4);
-    CHECK(!campaign.transitionOverworldScreen(7));
-    CHECK(campaign.transitionOverworldScreen(9));
+    CHECK(campaign.overworldScreenDiscovered(profile, 4));
+    CHECK(!campaign.overworldScreenDiscovered(profile, 9));
+    CHECK(!campaign.transitionOverworldScreen(profile, 7));
+    CHECK(campaign.transitionOverworldScreen(profile, 9));
+    CHECK(campaign.overworldScreenDiscovered(profile, 4));
+    CHECK(campaign.overworldScreenDiscovered(profile, 9));
+    CHECK(profile.overworldDiscovery.screens ==
+        std::vector<OverworldScreenId>({ 4, 9 }));
 
     GameplaySession::Snapshot snapshot;
     snapshot.playerMoveCount = 12;
@@ -183,6 +189,8 @@ void testOverworldTopologyCheckpointValidation()
     resumed.setOverworldTopology(1234, { 4, 9 }, 4);
     CHECK(resumed.restoreProfileLocation(profile));
     CHECK(resumed.activeOverworldScreen() == 9);
+    CHECK(resumed.overworldScreenDiscovered(profile, 4));
+    CHECK(resumed.overworldScreenDiscovered(profile, 9));
     const CampaignSession::WorldRestore restore =
         resumed.prepareWorldLoad(profile);
     CHECK(restore.checkpointMatched);
@@ -194,6 +202,9 @@ void testOverworldTopologyCheckpointValidation()
     CHECK(!changed.restoreProfileLocation(profile));
     CHECK(changed.activeOverworldScreen() == 4);
     CHECK(!profile.overworldCheckpoint.has_value());
+    CHECK(profile.overworldDiscovery.topologyFingerprint == 5678);
+    CHECK(profile.overworldDiscovery.screens ==
+        std::vector<OverworldScreenId>({ 4 }));
     CHECK(profile.worldContext == PlayerProfile::WorldContext::Overworld);
 }
 

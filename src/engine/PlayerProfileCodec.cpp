@@ -977,7 +977,8 @@ void parseProgressSection(PlayerProfile& profile, const Json& progress)
     rejectUnknownProperties(
         progress,
         { "unlockedLevel", "currentLevel", "currentScreen", "levels",
-          "screens", "activeScreen", "overworldCheckpoint", "worldContext" },
+          "screens", "activeScreen", "overworldCheckpoint",
+          "overworldDiscovery", "worldContext" },
         "progress");
     profile.unlockedLevel =
         nonNegativeIntegerProperty(progress, "unlockedLevel", "progress");
@@ -1052,6 +1053,39 @@ void parseProgressSection(PlayerProfile& profile, const Json& progress)
                 std::to_string(screen.screen));
         }
         profile.screens.push_back(screen);
+    }
+
+    const Json& overworldDiscovery = requiredProperty(
+        progress, "overworldDiscovery", "progress");
+    rejectUnknownProperties(
+        overworldDiscovery,
+        { "topologyFingerprint", "screens" },
+        "progress.overworldDiscovery");
+    profile.overworldDiscovery.topologyFingerprint = unsignedIntegerProperty(
+        overworldDiscovery,
+        "topologyFingerprint",
+        "progress.overworldDiscovery");
+    const Json& discoveredScreens = requiredProperty(
+        overworldDiscovery, "screens", "progress.overworldDiscovery");
+    if (!discoveredScreens.is_array()) {
+        fail("progress.overworldDiscovery", "property 'screens' must be an array");
+    }
+    for (std::size_t i = 0; i < discoveredScreens.size(); ++i) {
+        const std::string context = "progress.overworldDiscovery.screens[" +
+            std::to_string(i) + "]";
+        Json wrapper = { { "screen", discoveredScreens[i] } };
+        const uint64_t screen = unsignedIntegerProperty(
+            wrapper, "screen", context);
+        if (screen == 0 || screen > std::numeric_limits<uint32_t>::max()) {
+            fail(context, "must be a positive 32-bit integer");
+        }
+        const uint32_t id = static_cast<uint32_t>(screen);
+        if (std::ranges::find(
+                profile.overworldDiscovery.screens, id) !=
+            profile.overworldDiscovery.screens.end()) {
+            fail(context, "duplicate screen " + std::to_string(id));
+        }
+        profile.overworldDiscovery.screens.push_back(id);
     }
 
     const std::string worldContext =
@@ -1219,6 +1253,7 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
         normalized.currentScreen = currentScreen;
         normalized.levels = levels;
         normalized.screens = screens;
+        normalized.overworldDiscovery = overworldDiscovery;
         normalized.worldContext = worldContext;
     }
     if (sections != ProfileSections::ProgressOnly) {
@@ -1323,6 +1358,11 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
             { "screens", std::move(screenItems) },
             { "activeScreen", std::move(activeScreenJson) },
             { "overworldCheckpoint", std::move(overworldCheckpointJson) },
+            { "overworldDiscovery", {
+                { "topologyFingerprint",
+                  normalized.overworldDiscovery.topologyFingerprint },
+                { "screens", normalized.overworldDiscovery.screens },
+            } },
             { "worldContext",
               normalized.worldContext == WorldContext::Overworld
                   ? "overworld"

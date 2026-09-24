@@ -30,6 +30,13 @@ void PlayerProfile::normalize()
         return std::pair { left.level, left.screen } <
             std::pair { right.level, right.screen };
     });
+    std::erase(overworldDiscovery.screens, 0U);
+    std::ranges::sort(overworldDiscovery.screens);
+    overworldDiscovery.screens.erase(
+        std::unique(
+            overworldDiscovery.screens.begin(),
+            overworldDiscovery.screens.end()),
+        overworldDiscovery.screens.end());
     if (activeScreen &&
         (activeScreen->level != currentLevel || activeScreen->screen != currentScreen)) {
         activeScreen.reset();
@@ -107,6 +114,7 @@ void PlayerProfile::resetProgress()
     screens.clear();
     activeScreen.reset();
     overworldCheckpoint.reset();
+    overworldDiscovery = {};
     worldContext = WorldContext::Overworld;
     normalize();
 }
@@ -117,6 +125,7 @@ bool PlayerProfile::progressEmpty() const
         screens.empty() &&
         !activeScreen &&
         !overworldCheckpoint &&
+        overworldDiscovery.screens.empty() &&
         unlockedLevel == 0 &&
         currentLevel == 0 &&
         currentScreen == 0;

@@ -4,9 +4,11 @@
 #include "engine/GameplaySession.hpp"
 #include "engine/OverworldMap.hpp"
 #include "engine/OverworldView.hpp"
+#include "engine/render/FogOfWarConfig.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -202,7 +204,7 @@ void testCompositionAndGameplayCrossASeam()
     campaign.startNewGame(profile);
     CHECK(CampaignSession::sharedPlayerScreen(map, session.state()) ==
         std::optional<OverworldScreenId> { 2 });
-    CHECK(campaign.transitionOverworldScreen(2));
+    CHECK(campaign.transitionOverworldScreen(profile, 2));
     CHECK(campaign.activeOverworldScreen() == 2);
     GameState splitPlayers = session.state();
     splitPlayers.players.push_back(splitPlayers.players.front());
@@ -274,6 +276,60 @@ void testActionAdmissionAndCameraTransition()
     CHECK(overview.overviewCameraExtent.height == 2);
     CHECK(overview.visibleScreens ==
         std::vector<OverworldScreenId>({ 1, 2 }));
+
+    const std::array visibleScreens { OverworldScreenId { 1 },
+        OverworldScreenId { 2 } };
+    const std::array firstScreenDiscovered { OverworldScreenId { 1 } };
+    const std::vector<RenderFrameData::OverworldFogVolume> hiddenFog =
+        calculateOverworldFogVolumes(
+            map, visibleScreens, firstScreenDiscovered);
+    CHECK(hiddenFog.size() == 1);
+    CHECK(hiddenFog[0].minimum.x + config::fogOfWarEdgeFadeDistance ==
+        3.0f);
+    CHECK(hiddenFog[0].maximum.x - config::fogOfWarEdgeFadeDistance ==
+        6.0f);
+    CHECK(hiddenFog[0].minimum.y + config::fogOfWarEdgeFadeDistance ==
+        0.0f);
+    CHECK(hiddenFog[0].maximum.y - config::fogOfWarEdgeFadeDistance ==
+        2.0f);
+    CHECK(hiddenFog[0].minimum.z == config::fogOfWarMinimumHeight);
+    CHECK(hiddenFog[0].maximum.z == config::fogOfWarHeight);
+    CHECK(hiddenFog[0].revealRadius < 0.0f);
+
+    const std::array bothScreensDiscovered { OverworldScreenId { 1 },
+        OverworldScreenId { 2 } };
+    const OverworldFogReveal beginningReveal {
+        .screen = 2,
+        .origin = { 3.5f, 1.5f },
+        .progress = 0.0f,
+    };
+    const std::vector<RenderFrameData::OverworldFogVolume> beginningFog =
+        calculateOverworldFogVolumes(
+            map, visibleScreens, bothScreensDiscovered, beginningReveal);
+    CHECK(beginningFog.size() == 1);
+    CHECK(beginningFog[0].revealOrigin == Vec2({ 3.5f, 1.5f }));
+    CHECK(beginningFog[0].revealRadius > 0.0f);
+    const std::vector<RenderFrameData::OverworldFogVolume> halfwayFog =
+        calculateOverworldFogVolumes(
+            map,
+            visibleScreens,
+            bothScreensDiscovered,
+            OverworldFogReveal {
+                .screen = 2,
+                .origin = { 3.5f, 1.5f },
+                .progress = 0.5f,
+            });
+    CHECK(halfwayFog.size() == 1);
+    CHECK(halfwayFog[0].revealRadius > beginningFog[0].revealRadius);
+    CHECK(calculateOverworldFogVolumes(
+        map,
+        visibleScreens,
+        bothScreensDiscovered,
+        OverworldFogReveal {
+            .screen = 2,
+            .origin = { 3.5f, 1.5f },
+            .progress = 1.0f,
+        }).empty());
 
     RenderFrameData settledFrame;
     settledFrame.viewMode = RenderViewMode::Isometric3D;

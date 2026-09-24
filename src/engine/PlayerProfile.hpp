@@ -14,7 +14,7 @@
 
 namespace sokoban {
 
-inline constexpr int currentPlayerProfileFormat = 31;
+inline constexpr int currentPlayerProfileFormat = 32;
 
 // Which top-level sections serialize() writes. Save-slot files carry only
 // progress and the shared settings file only settings; both sections are
@@ -78,6 +78,15 @@ struct PlayerProfile {
         bool operator==(const OverworldCheckpoint&) const = default;
     };
 
+    struct OverworldDiscovery {
+        // Discovery belongs to one exact topology. A changed layout starts a
+        // fresh fog map instead of applying stale stable IDs to new content.
+        uint64_t topologyFingerprint = 0;
+        std::vector<uint32_t> screens;
+
+        bool operator==(const OverworldDiscovery&) const = default;
+    };
+
     int unlockedLevel = 0;
     int currentLevel = 0;
     int currentScreen = 0;
@@ -85,6 +94,7 @@ struct PlayerProfile {
     std::vector<ScreenProgress> screens;
     std::optional<ActiveScreen> activeScreen;
     std::optional<OverworldCheckpoint> overworldCheckpoint;
+    OverworldDiscovery overworldDiscovery;
     WorldContext worldContext = WorldContext::Overworld;
     UserSettings settings;
 

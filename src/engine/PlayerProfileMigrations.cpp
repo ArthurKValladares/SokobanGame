@@ -1052,6 +1052,45 @@ void migrate30to31(Json& root)
     }
 }
 
+// Format 32 persists overworld fog discovery independently of the gameplay
+// checkpoint. Older saves can prove that the checkpoint's active screen was
+// visited; no other screen can be inferred safely.
+void migrate31to32(Json& root)
+{
+    if (!root.contains("progress") || !root["progress"].is_object()) {
+        return;
+    }
+    Json& progress = root["progress"];
+    if (progress.contains("overworldDiscovery")) {
+        return;
+    }
+
+    uint64_t fingerprint = 0;
+    Json screens = Json::array();
+    if (progress.contains("overworldCheckpoint") &&
+        progress["overworldCheckpoint"].is_object()) {
+        const Json& checkpoint = progress["overworldCheckpoint"];
+        if (checkpoint.contains("topologyFingerprint") &&
+            checkpoint["topologyFingerprint"].is_number_unsigned()) {
+            fingerprint = checkpoint["topologyFingerprint"].get<uint64_t>();
+        } else if (checkpoint.contains("topologyFingerprint") &&
+            checkpoint["topologyFingerprint"].is_number_integer()) {
+            const int64_t signedFingerprint =
+                checkpoint["topologyFingerprint"].get<int64_t>();
+            if (signedFingerprint >= 0) {
+                fingerprint = static_cast<uint64_t>(signedFingerprint);
+            }
+        }
+        if (checkpoint.contains("activeScreen")) {
+            screens.push_back(checkpoint["activeScreen"]);
+        }
+    }
+    progress["overworldDiscovery"] = {
+        { "topologyFingerprint", fingerprint },
+        { "screens", std::move(screens) },
+    };
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -1088,6 +1127,7 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate28to29,
         migrate29to30,
         migrate30to31,
+        migrate31to32,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

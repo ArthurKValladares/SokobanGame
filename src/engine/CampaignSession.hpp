@@ -62,7 +62,11 @@ public:
     // Commits navigation metadata after the corresponding gameplay action has
     // committed. The next checkpoint persists this active screen.
     [[nodiscard]] bool transitionOverworldScreen(
+        PlayerProfile& profile,
         OverworldScreenId destination);
+    [[nodiscard]] bool overworldScreenDiscovered(
+        const PlayerProfile& profile,
+        OverworldScreenId screen) const;
     [[nodiscard]] WorldRestore prepareWorldLoad(
         const PlayerProfile& profile);
     void finishWorldLoad(PlayerProfile& profile);
@@ -128,6 +132,10 @@ private:
         OverworldScreenId screen) const;
     [[nodiscard]] bool validateOverworldCheckpoint(
         PlayerProfile& profile);
+    void synchronizeOverworldDiscovery(PlayerProfile& profile) const;
+    void recordOverworldDiscovery(
+        PlayerProfile& profile,
+        OverworldScreenId screen) const;
 
     std::vector<int> levelScreenCounts_;
     std::vector<LevelLocation> overworldTargets_;

@@ -6,6 +6,7 @@
 
 #include "engine/ParticleConfig.hpp"
 #include "engine/render/CameraConfig.hpp"
+#include "engine/render/FogOfWarConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 
 #include "engine/Log.hpp"
@@ -834,6 +835,14 @@ void Application::update(
     }
 #endif
 
+    if (overworldFogReveal_) {
+        overworldFogReveal_->progress += std::max(dt, 0.0f) /
+            config::fogOfWarRevealDurationSeconds;
+        if (overworldFogReveal_->progress >= 1.0f) {
+            overworldFogReveal_.reset();
+        }
+    }
+
     if (levelTransition_.active()) {
         updateLevelTransition(dt);
         audioSystem_.update(dt, false, false);
@@ -860,11 +869,26 @@ void Application::update(
             CampaignSession::sharedPlayerScreen(
                 *overworldMap_, gameplaySession_.state());
         if (playerScreen &&
-            *playerScreen != campaign_.activeOverworldScreen() &&
-            !campaign_.transitionOverworldScreen(*playerScreen)) {
-            log::error(log::Category::Gameplay)
-                << "Could not commit overworld screen transition to "
-                << *playerScreen;
+            *playerScreen != campaign_.activeOverworldScreen()) {
+            const bool firstVisit = !campaign_.overworldScreenDiscovered(
+                playerProfile_, *playerScreen);
+            if (!campaign_.transitionOverworldScreen(
+                    playerProfile_, *playerScreen)) {
+                log::error(log::Category::Gameplay)
+                    << "Could not commit overworld screen transition to "
+                    << *playerScreen;
+            } else if (firstVisit &&
+                !gameplaySession_.state().players.empty()) {
+                const GridPosition3 entry =
+                    gameplaySession_.state().players.front().cell;
+                overworldFogReveal_ = OverworldFogReveal {
+                    .screen = *playerScreen,
+                    .origin = {
+                        static_cast<float>(entry.x) + 0.5f,
+                        static_cast<float>(entry.y) + 0.5f,
+                    },
+                };
+            }
         }
     }
     if (gameplayResult.mirrorActivated) {
@@ -942,6 +966,7 @@ void Application::update(
 
 void Application::loadCurrentScreen()
 {
+    overworldFogReveal_.reset();
     // Editor draft play or a New Game may have changed the level set.
     buildLevelCatalog();
     const CampaignSession::WorldRestore restore =
@@ -2085,6 +2110,19 @@ RenderFrameData Application::buildRenderFrame(
             return campaign_.selectorViewState(playerProfile_, target);
         },
     }, arena);
+    if (renderCampaignOverworld && overworldView && renderedOverworld) {
+        std::vector<RenderFrameData::OverworldFogVolume> fogVolumes =
+            calculateOverworldFogVolumes(
+                *renderedOverworld,
+                overworldView->visibleScreens,
+                playerProfile_.overworldDiscovery.screens,
+                overworldFogReveal_);
+        for (RenderFrameData::OverworldFogVolume& volume : fogVolumes) {
+            if (!frame.overworldFogVolumes.push_back(std::move(volume))) {
+                break;
+            }
+        }
+    }
     particleSystem_.appendRenderData(frame);
     frame.levelTransitionAmount = levelTransition_.amount();
     if (evidenceWaterEnabled_) {

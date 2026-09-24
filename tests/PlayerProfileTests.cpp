@@ -970,12 +970,33 @@ void testScreenProgressOverworldCheckpointAndFormat17Migration()
         .activeScreen = 7,
         .session = session.snapshot(),
     };
+    profile.overworldDiscovery = {
+        .topologyFingerprint = 0x123456789abcdef0ULL,
+        .screens = { 2, 7 },
+    };
     profile.worldContext = sokoban::PlayerProfile::WorldContext::Overworld;
 
     const sokoban::DecodedPlayerProfile decoded =
         sokoban::decodePlayerProfile(profile.serialize());
     CHECK_MESSAGE(decoded.profile == profile,
         "screen progress and overworld checkpoint round-trip");
+    CHECK_MESSAGE(decoded.profile.overworldDiscovery.screens ==
+            std::vector<uint32_t>({ 2, 7 }),
+        "overworld fog discovery round-trips");
+
+    nlohmann::json format31 = nlohmann::json::parse(profile.serialize());
+    format31["format"] = 31;
+    format31["progress"].erase("overworldDiscovery");
+    const sokoban::DecodedPlayerProfile migrated31 =
+        sokoban::decodePlayerProfile(format31.dump());
+    CHECK_MESSAGE(migrated31.sourceFormat == 31,
+        "format 31 source is reported");
+    CHECK_MESSAGE(
+        migrated31.profile.overworldDiscovery.topologyFingerprint ==
+            0x123456789abcdef0ULL &&
+            migrated31.profile.overworldDiscovery.screens ==
+                std::vector<uint32_t>({ 7 }),
+        "format 31 infers discovery for the checkpoint screen");
 
     nlohmann::json format17 = nlohmann::json::parse(
         sokoban::PlayerProfile {}.serialize());

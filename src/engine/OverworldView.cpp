@@ -1,5 +1,7 @@
 #include "engine/OverworldView.hpp"
 
+#include "engine/render/FogOfWarConfig.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -186,6 +188,68 @@ OverworldView calculateOverworldView(
     includeNeighborhood(view.visibleScreens, map, *projectedOwner);
     std::ranges::sort(view.visibleScreens);
     return view;
+}
+
+std::vector<RenderFrameData::OverworldFogVolume>
+calculateOverworldFogVolumes(
+    const OverworldMap& map,
+    std::span<const OverworldScreenId> visibleScreens,
+    std::span<const OverworldScreenId> discoveredScreens,
+    std::optional<OverworldFogReveal> reveal)
+{
+    std::vector<RenderFrameData::OverworldFogVolume> volumes;
+    volumes.reserve(visibleScreens.size());
+    const float width = static_cast<float>(map.layout().screenWidth);
+    const float height = static_cast<float>(map.layout().screenHeight);
+    const float edgeFade = config::fogOfWarEdgeFadeDistance;
+
+    for (const OverworldScreenId screenId : visibleScreens) {
+        const OverworldScreenRuntime* screen = map.screen(screenId);
+        if (screen == nullptr) {
+            continue;
+        }
+        const bool discovered = std::ranges::find(
+            discoveredScreens, screenId) != discoveredScreens.end();
+        const bool revealing = reveal && reveal->screen == screenId &&
+            reveal->progress < 1.0f;
+        if (discovered && !revealing) {
+            continue;
+        }
+
+        RenderFrameData::OverworldFogVolume volume {
+            .minimum = {
+                static_cast<float>(screen->origin.x) - edgeFade,
+                static_cast<float>(screen->origin.y) - edgeFade,
+                config::fogOfWarMinimumHeight,
+            },
+            .maximum = {
+                static_cast<float>(screen->origin.x) + width + edgeFade,
+                static_cast<float>(screen->origin.y) + height + edgeFade,
+                config::fogOfWarHeight,
+            },
+        };
+        if (revealing) {
+            const float furthestX = std::max(
+                std::abs(reveal->origin.x - volume.minimum.x),
+                std::abs(volume.maximum.x - reveal->origin.x));
+            const float furthestY = std::max(
+                std::abs(reveal->origin.y - volume.minimum.y),
+                std::abs(volume.maximum.y - reveal->origin.y));
+            const float finalRadius = std::sqrt(
+                furthestX * furthestX + furthestY * furthestY) +
+                config::fogOfWarRevealFeather;
+            const float t = std::clamp(reveal->progress, 0.0f, 1.0f);
+            const float eased = t * t * (3.0f - 2.0f * t);
+            volume.revealOrigin = reveal->origin;
+            volume.revealRadius = lerp(
+                config::fogOfWarInitialRevealRadius,
+                finalRadius,
+                eased);
+            volume.revealFeather = config::fogOfWarRevealFeather;
+        }
+        volumes.push_back(volume);
+    }
+    return volumes;
 }
 
 } // namespace sokoban

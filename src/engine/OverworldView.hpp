@@ -5,6 +5,7 @@
 #include "engine/render/RenderTypes.hpp"
 
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace sokoban {
@@ -25,6 +26,13 @@ struct OverworldView {
     std::vector<OverworldScreenId> visibleScreens;
 };
 
+struct OverworldFogReveal {
+    OverworldScreenId screen = 0;
+    Vec2 origin {};
+    // Zero begins at the entry tile; one has cleared the entire screen.
+    float progress = 0.0f;
+};
+
 // Action-admission invariant: every living player must be owned by the same
 // authored screen. Dead players do not pin navigation, and an all-dead state
 // remains valid so death/undo mechanics keep working.
@@ -38,5 +46,15 @@ struct OverworldView {
     const GameState& projectedState,
     Vec3 primaryPlayerRenderPosition,
     float overviewProgress = 0.0f);
+
+// Produces bounded participating-media volumes for visible, undiscovered
+// screens. A just-discovered screen remains in the result while its radial
+// reveal is active, then disappears completely at progress one.
+[[nodiscard]] std::vector<RenderFrameData::OverworldFogVolume>
+calculateOverworldFogVolumes(
+    const OverworldMap& map,
+    std::span<const OverworldScreenId> visibleScreens,
+    std::span<const OverworldScreenId> discoveredScreens,
+    std::optional<OverworldFogReveal> reveal = std::nullopt);
 
 } // namespace sokoban
