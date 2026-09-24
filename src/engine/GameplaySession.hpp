@@ -255,6 +255,14 @@ private:
         const Level& level, const Command& command, const Controls& controls);
     [[nodiscard]] bool hasPendingMove(
         MoveDirection direction, EntityId controller) const;
+    // Rules planning sees entities at the last world-step boundary they have
+    // reached, while persistence and commits continue to use `state()`.
+    [[nodiscard]] GameState planningState() const;
+    // Finds the completed action whose momentum an automatic continuation is
+    // spending. A slide resumed after a checkpoint must still fold into that
+    // cause so later player steps remain ordered behind it in history.
+    [[nodiscard]] std::size_t continuationCausalGroup(
+        const Action& action) const;
     // Hands a plan to the scheduler, which admits it only if nothing already
     // running would be disturbed. Returns false when it was refused.
     //

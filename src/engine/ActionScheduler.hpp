@@ -88,6 +88,10 @@ public:
         // and the save format is untouched.
         std::size_t causalGroup = 0;
 
+        // State after the last mechanical leg boundary this action crossed.
+        // Deferred and not-yet-one-leg actions still report `plan.before`.
+        [[nodiscard]] const GameState& stateAtCurrentProgress() const;
+
         bool operator==(const InFlight&) const = default;
     };
 
@@ -198,6 +202,14 @@ public:
     void setStepDurationSeconds(float seconds);
 
     [[nodiscard]] const GameState& state() const { return state_; }
+    // The discrete world state at the movement boundary every running action
+    // has actually reached. The committed state deliberately waits until a
+    // whole action finishes, but planning from it would leave a chained slide
+    // sitting in its first cell for the entire animation. Reservations behind
+    // the slide could expire correctly and still be unusable because the rules
+    // would see that stale occupant. This view applies only completed legs;
+    // future legs remain protected by reservations.
+    [[nodiscard]] GameState stateAtCurrentProgress() const;
     // Direct replacement, for the paths that do not go through an action at
     // all: loading a screen, and restoring a save.
     void setState(GameState state) { state_ = std::move(state); }
@@ -223,12 +235,11 @@ private:
     // outcome is settled when it starts, so the entities it will move are
     // spoken for until it lands. Nothing else may plan for them.
     //
-    // The reservation table cannot express it. Claims are about cells at
-    // instants, and by the time a second action is admitted the table believes
-    // a sliding block has long since left the cell it is claimed on - while
-    // authoritative state, which is what planning reads, still has it sitting
-    // there. Both are right on their own terms and the contradiction is
-    // invisible to either.
+    // The reservation table cannot express it. A progress snapshot correctly
+    // places a sliding block in its current cell, but a second action could
+    // still try to push that same block again. Cell timing and entity ownership
+    // are separate constraints: the former frees the trail, while the latter
+    // keeps the moving entity itself spoken for.
     //
     // A causal group is exempt from itself: a consequence exists precisely to
     // take over the entities its cause was moving.

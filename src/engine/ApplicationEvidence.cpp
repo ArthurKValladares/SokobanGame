@@ -212,6 +212,9 @@ void Application::finishEvidenceCapture()
         "  SSAO command recording",
         evidenceStats_.ssaoCommandRecordingTiming);
     writePhase(
+        "  Atmosphere command recording",
+        evidenceStats_.atmosphereCommandRecordingTiming);
+    writePhase(
         "  Preview command recording",
         evidenceStats_.previewCommandRecordingTiming);
     writePhase(
@@ -230,6 +233,7 @@ void Application::finishEvidenceCapture()
     writePhase("  GPU SSAO scene snapshot", evidenceStats_.gpuSsaoSnapshotTiming);
     writePhase("  GPU SSAO occlusion", evidenceStats_.gpuSsaoOcclusionTiming);
     writePhase("  GPU SSAO composite", evidenceStats_.gpuSsaoCompositeTiming);
+    writePhase("GPU volumetric atmosphere", evidenceStats_.gpuAtmosphereTiming);
     writePhase("GPU output/UI", evidenceStats_.gpuOutputTiming);
     report << "- Asset publications: " << evidenceStats_.assetPublications
            << " across " << evidenceStats_.assetPublicationFrames

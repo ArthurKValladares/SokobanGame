@@ -125,6 +125,7 @@ private:
     mutable FrameTimeTelemetry shadowTimeTelemetry_ {};
     mutable FrameTimeTelemetry sceneTimeTelemetry_ {};
     mutable FrameTimeTelemetry ssaoTimeTelemetry_ {};
+    mutable FrameTimeTelemetry atmosphereTimeTelemetry_ {};
     mutable FrameTimeTelemetry previewTimeTelemetry_ {};
     mutable FrameTimeTelemetry outputTimeTelemetry_ {};
 };

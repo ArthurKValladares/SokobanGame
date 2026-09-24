@@ -29,6 +29,27 @@ PixelExtent ssaoBufferExtent(PixelExtent renderExtent)
     };
 }
 
+Vec2 ssaoNearestDepthTexelUv(
+    PixelExtent depthExtent,
+    Vec2 requestedUv)
+{
+    const auto texelCenter = [](float uv, uint32_t extent) {
+        if (extent == 0U) {
+            return 0.0f;
+        }
+        const float coordinate = std::clamp(uv, 0.0f, 1.0f) *
+            static_cast<float>(extent);
+        const uint32_t texel = std::min(
+            static_cast<uint32_t>(coordinate), extent - 1U);
+        return (static_cast<float>(texel) + 0.5f) /
+            static_cast<float>(extent);
+    };
+    return {
+        texelCenter(requestedUv.x, depthExtent.width),
+        texelCenter(requestedUv.y, depthExtent.height),
+    };
+}
+
 float ssaoRotationNoise(uint32_t pixelX, uint32_t pixelY)
 {
     uint32_t state = pixelX * 0x9e3779b9U ^ pixelY * 0x85ebca6bU;

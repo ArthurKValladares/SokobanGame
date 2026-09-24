@@ -290,12 +290,28 @@ struct RenderFrameData {
             Debug debug = Debug::Off;
         };
 
+        struct Atmosphere {
+            bool enabled = false;
+            Vec3 color { 1.0f, 1.0f, 1.0f };
+            // Extinction per world unit. The composite integrates this along
+            // each camera ray up to maxDistance.
+            float density = 0.0f;
+            float heightFalloff = 0.0f;
+            float baseHeight = 0.0f;
+            float maxDistance = 0.0f;
+            float scatteringStrength = 0.0f;
+            // Henyey-Greenstein asymmetry: positive values emphasize shafts
+            // while looking toward a light.
+            float anisotropy = 0.0f;
+        };
+
         DirectionalLight sun {};
         AmbientLight ambient {};
         std::array<PointLight, pointLightCapacity> pointLights {};
         std::size_t pointLightCount = 0;
         Shadows shadows {};
         AmbientOcclusion ambientOcclusion {};
+        Atmosphere atmosphere {};
         float specularStrength = 0.0f;
         float modelShadowReceive = 0.0f;
     };
@@ -582,6 +598,7 @@ struct RenderStats {
     RenderPhaseTiming shadowCommandRecordingTiming {};
     RenderPhaseTiming sceneCommandRecordingTiming {};
     RenderPhaseTiming ssaoCommandRecordingTiming {};
+    RenderPhaseTiming atmosphereCommandRecordingTiming {};
     RenderPhaseTiming previewCommandRecordingTiming {};
     RenderPhaseTiming outputCommandRecordingTiming {};
     RenderPhaseTiming assetPublicationEventTiming {};
@@ -610,6 +627,7 @@ struct RenderStats {
     RenderPhaseTiming gpuSsaoSnapshotTiming {};
     RenderPhaseTiming gpuSsaoOcclusionTiming {};
     RenderPhaseTiming gpuSsaoCompositeTiming {};
+    RenderPhaseTiming gpuAtmosphereTiming {};
     RenderPhaseTiming gpuOutputTiming {};
     bool wireframeEnabled = false;
     float wireframeLineWidth = 1.0f;

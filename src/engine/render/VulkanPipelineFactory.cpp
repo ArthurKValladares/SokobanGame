@@ -188,7 +188,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
 
     // Indices are positional only so that the cleanup loop below has one
     // array to walk; nothing else depends on the order.
-    std::array<VkShaderModule, 16> shaders {};
+    std::array<VkShaderModule, 17> shaders {};
     try {
         shaders[0] = shaderModule(shaderCatalog::triangleVert);
         shaders[1] = shaderModule(shaderCatalog::triangleFrag);
@@ -206,6 +206,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         shaders[13] = shaderModule(shaderCatalog::skinnedModelShadowVert);
         shaders[14] = shaderModule(shaderCatalog::tonemapFrag);
         shaders[15] = shaderModule(shaderCatalog::uiFrag);
+        shaders[16] = shaderModule(shaderCatalog::atmosphereFrag);
 
         scene_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
@@ -271,6 +272,8 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             shaders[5], shaders[6], VK_FORMAT_R8_UNORM);
         ssaoComposite_ = createPostProcessPipeline(
             shaders[5], shaders[7], sceneFormat);
+        atmosphere_ = createPostProcessPipeline(
+            shaders[5], shaders[16], sceneFormat);
         worldTransition_ = createPostProcessPipeline(
             shaders[5], shaders[11], sceneFormat);
         tonemap_ = createPostProcessPipeline(
@@ -295,6 +298,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             std::pair { skinnedModelShadow_, "Skinned model shadow pipeline" },
             std::pair { ssao_, "SSAO pipeline" },
             std::pair { ssaoComposite_, "SSAO composite pipeline" },
+            std::pair { atmosphere_, "Volumetric atmosphere pipeline" },
             std::pair { worldTransition_, "World transition pipeline" },
             std::pair { tonemap_, "Tonemap pipeline" },
         };
@@ -325,7 +329,7 @@ void VulkanPipelineFactory::destroy()
             mirrorEnergyModel_, skinnedModel_, skinnedModelOpaque_,
             skinnedMirrorEnergyModel_,
             shadow_, modelShadow_, skinnedModelShadow_,
-            ssao_, ssaoComposite_, worldTransition_, tonemap_,
+            ssao_, ssaoComposite_, atmosphere_, worldTransition_, tonemap_,
         };
         for (VkPipeline pipeline : pipelines) {
             if (pipeline) {
@@ -354,6 +358,7 @@ void VulkanPipelineFactory::destroy()
     skinnedModelShadow_ = VK_NULL_HANDLE;
     ssao_ = VK_NULL_HANDLE;
     ssaoComposite_ = VK_NULL_HANDLE;
+    atmosphere_ = VK_NULL_HANDLE;
     worldTransition_ = VK_NULL_HANDLE;
     tonemap_ = VK_NULL_HANDLE;
     layout_ = VK_NULL_HANDLE;

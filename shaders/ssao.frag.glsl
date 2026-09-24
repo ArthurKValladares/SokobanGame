@@ -50,6 +50,18 @@ vec2 projectViewPosition(vec3 viewPosition)
     return vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
 }
 
+ivec2 depthCoordinate(vec2 requestedUv)
+{
+    ivec2 extent = textureSize(depthTexture, 0);
+    return clamp(ivec2(requestedUv * vec2(extent)), ivec2(0), extent - 1);
+}
+
+vec2 depthTexelUv(ivec2 coordinate)
+{
+    return (vec2(coordinate) + 0.5) /
+        vec2(textureSize(depthTexture, 0));
+}
+
 vec3 viewNormal(vec3 centerPosition)
 {
     // Position derivatives provide the geometric view-space normal without a
@@ -68,8 +80,12 @@ void main()
 {
     vec2 aoExtent = max(pc.filterParams.xy, vec2(1.0));
     vec2 uv = gl_FragCoord.xy / aoExtent;
-    float centerDepth = texture(depthTexture, uv).r;
-    vec3 centerPosition = reconstructViewPosition(uv, centerDepth);
+    ivec2 centerDepthCoordinate = depthCoordinate(uv);
+    vec2 centerDepthUv = depthTexelUv(centerDepthCoordinate);
+    float centerDepth = texelFetch(
+        depthTexture, centerDepthCoordinate, 0).r;
+    vec3 centerPosition = reconstructViewPosition(
+        centerDepthUv, centerDepth);
     // Derivatives must execute for every invocation in the quad. Returning a
     // background lane first would make neighboring silhouette normals
     // undefined on exactly the pixels where stable reconstruction matters.
@@ -117,12 +133,15 @@ void main()
             continue;
         }
 
-        float sampledDepth = texture(depthTexture, sampleUv).r;
+        ivec2 sampledDepthCoordinate = depthCoordinate(sampleUv);
+        float sampledDepth = texelFetch(
+            depthTexture, sampledDepthCoordinate, 0).r;
         if (sampledDepth >= 0.9999) {
             continue;
         }
         vec3 actualPosition =
-            reconstructViewPosition(sampleUv, sampledDepth);
+            reconstructViewPosition(
+                depthTexelUv(sampledDepthCoordinate), sampledDepth);
         float distanceFromCenter =
             length(actualPosition - centerPosition);
         float rangeWeight = 1.0 - smoothstep(

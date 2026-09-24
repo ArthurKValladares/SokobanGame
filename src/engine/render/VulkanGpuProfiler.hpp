@@ -21,6 +21,7 @@ enum class VulkanGpuPhase : uint32_t {
     SsaoSnapshot,
     SsaoOcclusion,
     SsaoComposite,
+    Atmosphere,
     Output,
     Count,
 };

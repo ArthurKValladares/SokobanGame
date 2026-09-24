@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <ctime>
+#include <deque>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -18,9 +19,8 @@
 #include <utility>
 
 namespace sokoban::log {
-namespace {
 
-[[nodiscard]] std::string_view levelName(Level level)
+std::string_view levelName(Level level)
 {
     switch (level) {
     case Level::Debug: return "DEBUG";
@@ -31,7 +31,7 @@ namespace {
     return "?";
 }
 
-[[nodiscard]] std::string_view categoryName(Category category)
+std::string_view categoryName(Category category)
 {
     switch (category) {
     case Category::General: return "GENERAL";
@@ -49,6 +49,8 @@ namespace {
     }
     return "?";
 }
+
+namespace {
 
 [[nodiscard]] std::string timestamp(
     std::chrono::system_clock::time_point time)
@@ -175,6 +177,15 @@ public:
                 .message = std::move(message),
             };
             std::lock_guard lock(mutex_);
+            if (historyEnabled_) {
+                try {
+                    appendHistoryLocked(record);
+                } catch (...) {
+                    // The optional debug history must not interfere with the
+                    // primary asynchronous sinks under memory pressure.
+                    (void)0;
+                }
+            }
             if (stopping_) {
                 noteDropLocked(category);
                 return;
@@ -288,6 +299,9 @@ public:
         pendingDroppedMessages_ = 0;
         diagnostics_ = {};
         diagnostics_.queueCapacity = configuration_.queueCapacity;
+        historyEnabled_ = false;
+        history_.clear();
+        ++historyRevision_;
         filteredMessages_.store(0, std::memory_order_relaxed);
         minimumLevel_.store(
             static_cast<int>(Level::Info),
@@ -307,7 +321,50 @@ public:
         return result;
     }
 
+    void setHistoryEnabled(bool enabled)
+    {
+        std::lock_guard lock(mutex_);
+        historyEnabled_ = enabled;
+        if (!enabled && !history_.empty()) {
+            history_.clear();
+            ++historyRevision_;
+        }
+    }
+
+    HistorySnapshot historySnapshot(
+        std::optional<uint64_t> knownRevision)
+    {
+        std::lock_guard lock(mutex_);
+        HistorySnapshot result { .revision = historyRevision_ };
+        if (!knownRevision || *knownRevision != historyRevision_) {
+            result.entries.assign(history_.begin(), history_.end());
+        }
+        return result;
+    }
+
+    void clearHistory()
+    {
+        std::lock_guard lock(mutex_);
+        history_.clear();
+        ++historyRevision_;
+    }
+
 private:
+    void appendHistoryLocked(const detail::Record& record)
+    {
+        history_.push_back({
+            .sequence = ++nextHistorySequence_,
+            .timestamp = record.timestamp,
+            .level = record.level,
+            .category = record.category,
+            .message = record.message,
+        });
+        if (history_.size() > historyCapacity) {
+            history_.pop_front();
+        }
+        ++historyRevision_;
+    }
+
     void ensureWriterLocked()
     {
         if (writer_.joinable() || stopping_) {
@@ -534,6 +591,10 @@ private:
     std::unique_ptr<detail::BoundedQueue> queue_;
     std::thread writer_;
     std::filesystem::path requestedFilePath_;
+    std::deque<Entry> history_;
+    bool historyEnabled_ = false;
+    uint64_t nextHistorySequence_ = 0;
+    uint64_t historyRevision_ = 0;
     uint64_t fileConfigurationGeneration_ = 0;
     uint64_t flushRequestGeneration_ = 0;
     uint64_t flushCompletedGeneration_ = 0;
@@ -589,6 +650,22 @@ void reset()
 Diagnostics diagnostics()
 {
     return processLogger().diagnostics();
+}
+
+void setHistoryEnabled(bool enabled)
+{
+    processLogger().setHistoryEnabled(enabled);
+}
+
+HistorySnapshot historySnapshot(
+    std::optional<uint64_t> knownRevision)
+{
+    return processLogger().historySnapshot(knownRevision);
+}
+
+void clearHistory()
+{
+    processLogger().clearHistory();
 }
 
 Message::Message(Level level, Category category)

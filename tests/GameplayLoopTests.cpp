@@ -228,6 +228,44 @@ void testChainedSlideIsDrawnTileByTile()
     CHECK(previous < 5.0f);
 }
 
+void testHeldMoveFollowsDirectlyBehindSlide()
+{
+    TEST("heldMoveFollowsDirectlyBehindSlide");
+    const Level level = makeLevel({
+        { "............." },
+        { "CI          #" },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+
+    static_cast<void>(GameplayLoop::update(
+        level,
+        session,
+        presentation,
+        { .right = { .pressed = true, .down = true } },
+        0.01f,
+        false));
+    for (int frame = 1; frame < 35; ++frame) {
+        static_cast<void>(GameplayLoop::update(
+            level,
+            session,
+            presentation,
+            { .right = { .down = true } },
+            0.01f,
+            false));
+    }
+
+    // The long slide has not committed yet, but held input has already walked
+    // the player onto its released trail instead of waiting at the push cell.
+    CHECK(session.moving());
+    CHECK(session.state().movables[0].cell == (GridPosition3 { 2, 0, 1 }));
+    CHECK(session.state().players[0].cell == (GridPosition3 { 2, 0, 1 }));
+    CHECK(presentation.players()[0].motion.renderPosition.x > 2.0f);
+}
+
 void testCompletingActionPreservesConcurrentPresentation()
 {
     TEST("completingActionPreservesConcurrentPresentation");
@@ -600,6 +638,7 @@ int main()
     testSimulationTimingObservesTransientSuspendCycle();
     testRenderedPlayerNeverGoesBackwards();
     testChainedSlideIsDrawnTileByTile();
+    testHeldMoveFollowsDirectlyBehindSlide();
     testCompletingActionPreservesConcurrentPresentation();
     testMoveAdvancesSessionAndPresentation();
     testMirrorInputCommitsAnInstantAction();

@@ -169,6 +169,53 @@ void testPeriodicAndErrorFlushWithoutCallerFlush()
     CHECK(waitForText(errors, "error marker"));
 }
 
+void testInMemoryHistoryIsBoundedAndClearable()
+{
+    sokoban::log::reset();
+    sokoban::log::configure({
+        .queueCapacity = sokoban::log::historyCapacity + 16,
+        .flushInterval = std::chrono::seconds(30),
+        .stderrEnabled = false,
+    });
+    sokoban::log::info(sokoban::log::Category::Editor)
+        << "history is opt-in";
+    CHECK(sokoban::log::historySnapshot().entries.empty());
+    sokoban::log::setHistoryEnabled(true);
+    sokoban::log::setMinimumLevel(sokoban::log::Level::Info);
+
+    sokoban::log::debug(sokoban::log::Category::Application)
+        << "filtered from history";
+    for (std::size_t index = 0;
+        index < sokoban::log::historyCapacity + 7;
+        ++index) {
+        sokoban::log::info(sokoban::log::Category::Editor)
+            << "history " << index;
+    }
+
+    const sokoban::log::HistorySnapshot snapshot =
+        sokoban::log::historySnapshot();
+    CHECK(snapshot.entries.size() == sokoban::log::historyCapacity);
+    CHECK(snapshot.entries.front().message == "history 7");
+    CHECK(snapshot.entries.back().message ==
+        "history " + std::to_string(sokoban::log::historyCapacity + 6));
+    CHECK(snapshot.entries.front().category ==
+        sokoban::log::Category::Editor);
+    CHECK(snapshot.entries.front().level == sokoban::log::Level::Info);
+    CHECK(snapshot.entries.front().sequence <
+        snapshot.entries.back().sequence);
+
+    const sokoban::log::HistorySnapshot unchanged =
+        sokoban::log::historySnapshot(snapshot.revision);
+    CHECK(unchanged.revision == snapshot.revision);
+    CHECK(unchanged.entries.empty());
+
+    sokoban::log::clearHistory();
+    const sokoban::log::HistorySnapshot cleared =
+        sokoban::log::historySnapshot(snapshot.revision);
+    CHECK(cleared.revision != snapshot.revision);
+    CHECK(cleared.entries.empty());
+}
+
 void testConcurrentProducersAndDropDiagnostics()
 {
     sokoban::log::reset();
@@ -286,6 +333,7 @@ int main()
     testBoundedQueuePreservesErrors();
     testFilteringCategoriesAndExplicitFlush();
     testPeriodicAndErrorFlushWithoutCallerFlush();
+    testInMemoryHistoryIsBoundedAndClearable();
     testConcurrentProducersAndDropDiagnostics();
     testShutdownDrainsWithoutExplicitFlush();
     testFileRotationKeepsBoundedHistory();

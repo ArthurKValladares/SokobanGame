@@ -272,6 +272,9 @@ Application::Application(ApplicationOptions options)
             solveCurrentScreenForDebug();
         }
     });
+    DebugUi::addTab("Log", [this] {
+        tools_->logDebugUi.draw();
+    });
     DebugUi::addTab("Asset Manifest", [this] {
         tools_->assetManifestDebugUi.draw(tools_->assetManifestEditor);
     });
@@ -388,17 +391,18 @@ Application::~Application()
 
     // No longer waits for the world to go quiet.
     //
-    // The gate was there because a snapshot taken mid-action would have caught
-    // the world half-way through a transition. It does not: a snapshot holds
-    // the *committed* state and the undo stack chained to it, and an action in
-    // flight has contributed nothing to either. What is lost on reload is the
-    // action itself, and the state it was planned from is still on disk with
-    // whatever momentum it carried, so ambient motion simply plans it again.
+    // The gate was there because a snapshot taken mid-action could catch an
+    // unreplayable half-transition. It does not: a snapshot normally holds the
+    // committed state and its undo chain. If a later completed action already
+    // used cells an older slide released, the snapshot first folds only those
+    // completed slide legs into a copy of the chain. The remaining in-flight
+    // action is lost on reload, but its momentum is still on disk, so ambient
+    // motion simply plans the rest again.
     //
     // Under concurrency the world is rarely idle, so keeping the gate meant
     // saves quietly became rare exactly when there was most to lose. The one
-    // cost is undo granularity: a slide whose push had already committed
-    // reappears as its own undo entry rather than folded into that push.
+    // Restored slide momentum recovers the completed action that caused it, so
+    // the continuation still folds into the same undo entry.
     const bool editorDraftPlaying =
 #if SOKOBAN_ENABLE_DEBUG_UI
         tools_->levelEditor.playingDraft();

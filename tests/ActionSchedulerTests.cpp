@@ -233,6 +233,41 @@ void testSharedClockPlacesClaims()
     CHECK(!started(scheduler.tryStart(probe, nowAndGone)));
 }
 
+void testProgressStateAdvancesAtLegBoundaries()
+{
+    TEST("progressStateAdvancesAtLegBoundaries");
+    ActionScheduler scheduler;
+    scheduler.reset(twoRocks(), 0.1f);
+
+    ActionPlan slide;
+    slide.before = scheduler.state();
+    slide.after = slide.before;
+    slide.after.movables[0].cell = cell(8, 0);
+    slide.durationSeconds = 0.3f;
+
+    std::vector<GameState> legs;
+    for (int x = 6; x <= 8; ++x) {
+        GameState leg = legs.empty() ? slide.before : legs.back();
+        leg.movables[0].cell = cell(x, 0);
+        legs.push_back(std::move(leg));
+    }
+
+    CHECK(started(scheduler.tryStart(slide, {}, legs)));
+    CHECK(scheduler.stateAtCurrentProgress().movables[0].cell == cell(5, 0));
+
+    scheduler.advanceClock(0.09f);
+    CHECK(scheduler.stateAtCurrentProgress().movables[0].cell == cell(5, 0));
+    scheduler.advanceClock(0.01f);
+    CHECK(scheduler.stateAtCurrentProgress().movables[0].cell == cell(6, 0));
+    // The authoritative state still waits for the whole action to commit.
+    CHECK(scheduler.state().movables[0].cell == cell(5, 0));
+
+    scheduler.advanceClock(0.1f);
+    CHECK(scheduler.stateAtCurrentProgress().movables[0].cell == cell(7, 0));
+    scheduler.advanceClock(0.1f);
+    CHECK(scheduler.stateAtCurrentProgress().movables[0].cell == cell(8, 0));
+}
+
 void testResetClearsEverything()
 {
     TEST("resetClearsEverything");
@@ -277,6 +312,7 @@ int main()
     testCommitsAreDeltasNotWholeStates();
     testCompletionOrderIsDeterministic();
     testSharedClockPlacesClaims();
+    testProgressStateAdvancesAtLegBoundaries();
     testResetClearsEverything();
     testZeroDurationActionCompletesImmediately();
 

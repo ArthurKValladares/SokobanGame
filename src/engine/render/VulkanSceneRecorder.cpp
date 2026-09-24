@@ -92,6 +92,29 @@ RenderPhaseTiming renderPhaseTiming(const FrameTimeSummary& summary)
     };
 }
 
+std::array<Vec4, 4> matrixColumns(const Mat4& matrix)
+{
+    return {
+        Vec4 { at(matrix, 0, 0), at(matrix, 1, 0),
+            at(matrix, 2, 0), at(matrix, 3, 0) },
+        Vec4 { at(matrix, 0, 1), at(matrix, 1, 1),
+            at(matrix, 2, 1), at(matrix, 3, 1) },
+        Vec4 { at(matrix, 0, 2), at(matrix, 1, 2),
+            at(matrix, 2, 2), at(matrix, 3, 2) },
+        Vec4 { at(matrix, 0, 3), at(matrix, 1, 3),
+            at(matrix, 2, 3), at(matrix, 3, 3) },
+    };
+}
+
+bool atmosphereSamplesSceneDepth(
+    const RenderFrameData::Lighting::Atmosphere& atmosphere)
+{
+    return atmosphere.enabled &&
+        atmosphere.density > 0.0f &&
+        atmosphere.maxDistance > 0.0f &&
+        atmosphere.scatteringStrength > 0.0f;
+}
+
 std::array<Vec4, 4> affineTransformColumns(
     Vec4 origin,
     Vec4 xPoint,
@@ -260,6 +283,7 @@ public:
         , shadowTimeTelemetry_(recorder.shadowTimeTelemetry_)
         , sceneTimeTelemetry_(recorder.sceneTimeTelemetry_)
         , ssaoTimeTelemetry_(recorder.ssaoTimeTelemetry_)
+        , atmosphereTimeTelemetry_(recorder.atmosphereTimeTelemetry_)
         , previewTimeTelemetry_(recorder.previewTimeTelemetry_)
         , outputTimeTelemetry_(recorder.outputTimeTelemetry_)
     {
@@ -421,6 +445,8 @@ public:
         const bool mainDepthPublished =
             VulkanSsaoPass::samplesSceneDepth(
                 frameData.lighting.ambientOcclusion) ||
+            atmosphereSamplesSceneDepth(
+                frameData.lighting.atmosphere) ||
             mainHasTranslucency;
         const bool directSsaoColor =
             VulkanSsaoPass::samplesSceneDepth(
@@ -485,6 +511,25 @@ public:
             commandBuffer,
             configuration_.descriptorFrameIndex,
             VulkanGpuPhase::Ssao);
+        const auto atmosphereStart = std::chrono::steady_clock::now();
+        gpuProfiler_.beginPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::Atmosphere);
+        vulkanDebug::beginLabel(
+            device_, commandBuffer, "Volumetric atmosphere",
+            { 0.45f, 0.70f, 1.0f, 1.0f });
+        recordAtmosphere(
+            commandBuffer,
+            frameData.lighting,
+            isoClipFromWorld(scene.isoLayout, scene.renderExtent));
+        vulkanDebug::endLabel(device_, commandBuffer);
+        gpuProfiler_.endPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::Atmosphere);
+        atmosphereTimeTelemetry_.record(
+            elapsedMilliseconds(atmosphereStart));
         if (mainDepthPublished) {
             swapchain_.prepareSceneDepthAttachment(commandBuffer, stats_);
         }
@@ -895,7 +940,9 @@ private:
             configuration_.descriptorFrameIndex,
             VulkanGpuPhase::SceneDepthPublish);
         if (VulkanSsaoPass::samplesSceneDepth(
-                frameData.lighting.ambientOcclusion) || hasTranslucency) {
+                frameData.lighting.ambientOcclusion) ||
+            atmosphereSamplesSceneDepth(frameData.lighting.atmosphere) ||
+            hasTranslucency) {
             swapchain_.publishSceneDepth(commandBuffer, stats_);
         }
         gpuProfiler_.endPhase(
@@ -1069,6 +1116,113 @@ private:
             normalizedExposureEv(outputTransform.exposureEv),
             static_cast<float>(outputTransform.curve),
             0.0f,
+            0.0f,
+        };
+
+        vkCmdBeginRendering(commandBuffer, &renderingInfo);
+        ++stats_.renderPasses;
+        vkCmdBindPipeline(
+            commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        ++stats_.pipelineBinds;
+        bindDescriptorSet(commandBuffer);
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+        vkCmdPushConstants(
+            commandBuffer,
+            pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(GpuDrawInstance),
+            &pushConstants);
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        ++stats_.drawCalls;
+        vkCmdEndRendering(commandBuffer);
+    }
+
+    void recordAtmosphere(
+        VkCommandBuffer commandBuffer,
+        const RenderFrameData::Lighting& lighting,
+        const Mat4& clipFromWorld)
+    {
+        const VkPipeline pipeline = pipelines_.atmosphere();
+        // An SSAO debug view is a diagnostic replacement for scene color.
+        // Fogging it would turn the supposedly raw mask into a tinted image
+        // and invalidate captures used to tune the bilateral filter.
+        if (!atmosphereSamplesSceneDepth(lighting.atmosphere) || !pipeline ||
+            lighting.ambientOcclusion.debug !=
+                RenderFrameData::Lighting::AmbientOcclusion::Debug::Off) {
+            return;
+        }
+
+        // The pass reads the shaded HDR scene while replacing that same
+        // target. Keep the read side in the renderer's dedicated snapshot.
+        swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
+
+        const VkExtent2D extent = swapchain_.renderExtent();
+        const VkRenderingAttachmentInfo attachment {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = swapchain_.resolvedColorView(),
+            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        };
+        const VkRenderingInfo renderingInfo {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea = { .offset = { 0, 0 }, .extent = extent },
+            .layerCount = 1,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &attachment,
+        };
+        const VkViewport viewport {
+            .x = 0.0f,
+            .y = static_cast<float>(extent.height),
+            .width = static_cast<float>(extent.width),
+            .height = -static_cast<float>(extent.height),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+        const VkRect2D scissor { .offset = { 0, 0 }, .extent = extent };
+
+        const auto& atmosphere = lighting.atmosphere;
+        GpuDrawInstance pushConstants {};
+        pushConstants.vertices = matrixColumns(inverse(clipFromWorld));
+        pushConstants.color = {
+            std::max(atmosphere.color.x, 0.0f),
+            std::max(atmosphere.color.y, 0.0f),
+            std::max(atmosphere.color.z, 0.0f),
+            std::max(atmosphere.density, 0.0f),
+        };
+        pushConstants.normalAndAmbientRed = {
+            std::max(lighting.sun.color.x * lighting.sun.intensity, 0.0f),
+            std::max(lighting.sun.color.y * lighting.sun.intensity, 0.0f),
+            std::max(lighting.sun.color.z * lighting.sun.intensity, 0.0f),
+            std::max(atmosphere.scatteringStrength, 0.0f),
+        };
+        pushConstants.sunDirectionAndAmbientGreen = {
+            lighting.sun.direction.x,
+            lighting.sun.direction.y,
+            lighting.sun.direction.z,
+            std::clamp(atmosphere.anisotropy, -0.85f, 0.85f),
+        };
+        pushConstants.sunRadianceAndAmbientBlue = {
+            std::max(atmosphere.heightFalloff, 0.0f),
+            atmosphere.baseHeight,
+            std::max(atmosphere.maxDistance, 0.0f),
+            static_cast<float>(config::atmosphereSampleCount),
+        };
+        pushConstants.shadowOptions = {
+            lighting.shadows.enabled ? 1.0f : 0.0f,
+            std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
+            std::max(lighting.shadows.bias, 0.0f),
+            0.0f,
+        };
+        pushConstants.materialOptions = {
+            std::max(
+                lighting.ambient.color.x * lighting.ambient.intensity, 0.0f),
+            std::max(
+                lighting.ambient.color.y * lighting.ambient.intensity, 0.0f),
+            std::max(
+                lighting.ambient.color.z * lighting.ambient.intensity, 0.0f),
             0.0f,
         };
 
@@ -2737,6 +2891,7 @@ private:
     FrameTimeTelemetry& shadowTimeTelemetry_;
     FrameTimeTelemetry& sceneTimeTelemetry_;
     FrameTimeTelemetry& ssaoTimeTelemetry_;
+    FrameTimeTelemetry& atmosphereTimeTelemetry_;
     FrameTimeTelemetry& previewTimeTelemetry_;
     FrameTimeTelemetry& outputTimeTelemetry_;
     RenderStats stats_ {};
@@ -2765,6 +2920,8 @@ void VulkanSceneRecorder::populateTimingStats(RenderStats& stats) const
         sceneTimeTelemetry_.summary());
     stats.ssaoCommandRecordingTiming = renderPhaseTiming(
         ssaoTimeTelemetry_.summary());
+    stats.atmosphereCommandRecordingTiming = renderPhaseTiming(
+        atmosphereTimeTelemetry_.summary());
     stats.previewCommandRecordingTiming = renderPhaseTiming(
         previewTimeTelemetry_.summary());
     stats.outputCommandRecordingTiming = renderPhaseTiming(

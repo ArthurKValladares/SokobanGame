@@ -118,6 +118,7 @@ int main(int argc, char** argv)
         sokoban::log::addFileSink(logPath);
         sokoban::crash::install(diagnosticDirectory / "crashes");
 #if SOKOBAN_ENABLE_DEBUG_UI
+        sokoban::log::setHistoryEnabled(true);
         sokoban::log::setMinimumLevel(sokoban::log::Level::Debug);
 #endif
         sokoban::log::info(sokoban::log::Category::Application)

@@ -32,6 +32,15 @@ PresentationSettings::PresentationSettings()
           .ambientOcclusionStrength = config::ambientOcclusionStrength,
           .ambientOcclusionDebug =
               RenderFrameData::Lighting::AmbientOcclusion::Debug::Off,
+          .atmosphereEnabled = config::atmosphereEnabled,
+          .atmosphereColor = config::atmosphereColor,
+          .atmosphereDensity = config::atmosphereDensity,
+          .atmosphereHeightFalloff = config::atmosphereHeightFalloff,
+          .atmosphereBaseHeight = config::atmosphereBaseHeight,
+          .atmosphereMaxDistance = config::atmosphereMaxDistance,
+          .atmosphereScatteringStrength =
+              config::atmosphereScatteringStrength,
+          .atmosphereAnisotropy = config::atmosphereAnisotropy,
           .shadowsEnabled = config::shadowsEnabled,
           .shadowOpacity = config::shadowOpacity,
           .shadowBias = config::shadowBias,
@@ -86,6 +95,30 @@ void PresentationSettings::normalize()
             lighting.ambientOcclusionStrength,
             0.0f,
             config::maximumAmbientOcclusionStrength);
+    lighting.atmosphereColor.x = std::max(lighting.atmosphereColor.x, 0.0f);
+    lighting.atmosphereColor.y = std::max(lighting.atmosphereColor.y, 0.0f);
+    lighting.atmosphereColor.z = std::max(lighting.atmosphereColor.z, 0.0f);
+    lighting.atmosphereDensity = std::clamp(
+        lighting.atmosphereDensity, 0.0f,
+        config::maximumAtmosphereDensity);
+    lighting.atmosphereHeightFalloff = std::clamp(
+        lighting.atmosphereHeightFalloff, 0.0f,
+        config::maximumAtmosphereHeightFalloff);
+    lighting.atmosphereBaseHeight = std::clamp(
+        lighting.atmosphereBaseHeight,
+        config::minimumAtmosphereBaseHeight,
+        config::maximumAtmosphereBaseHeight);
+    lighting.atmosphereMaxDistance = std::clamp(
+        lighting.atmosphereMaxDistance,
+        config::minimumAtmosphereMaxDistance,
+        config::maximumAtmosphereMaxDistance);
+    lighting.atmosphereScatteringStrength = std::clamp(
+        lighting.atmosphereScatteringStrength, 0.0f,
+        config::maximumAtmosphereScatteringStrength);
+    lighting.atmosphereAnisotropy = std::clamp(
+        lighting.atmosphereAnisotropy,
+        config::minimumAtmosphereAnisotropy,
+        config::maximumAtmosphereAnisotropy);
     lighting.shadowOpacity = std::clamp(
         lighting.shadowOpacity, 0.0f, config::maximumShadowOpacity);
     lighting.shadowBias = std::clamp(
@@ -202,6 +235,16 @@ RenderFrameData::Lighting PresentationSettings::renderLighting() const
             .enabled = lighting.ambientOcclusionEnabled,
             .strength = lighting.ambientOcclusionStrength,
             .debug = lighting.ambientOcclusionDebug,
+        },
+        .atmosphere = {
+            .enabled = lighting.atmosphereEnabled,
+            .color = lighting.atmosphereColor,
+            .density = lighting.atmosphereDensity,
+            .heightFalloff = lighting.atmosphereHeightFalloff,
+            .baseHeight = lighting.atmosphereBaseHeight,
+            .maxDistance = lighting.atmosphereMaxDistance,
+            .scatteringStrength = lighting.atmosphereScatteringStrength,
+            .anisotropy = lighting.atmosphereAnisotropy,
         },
         .specularStrength = lighting.specularStrength,
         .modelShadowReceive = lighting.modelShadowReceive,

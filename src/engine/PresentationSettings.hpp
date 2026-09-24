@@ -28,6 +28,14 @@ public:
         RenderFrameData::Lighting::AmbientOcclusion::Debug
             ambientOcclusionDebug =
                 RenderFrameData::Lighting::AmbientOcclusion::Debug::Off;
+        bool atmosphereEnabled = false;
+        Vec3 atmosphereColor {};
+        float atmosphereDensity = 0.0f;
+        float atmosphereHeightFalloff = 0.0f;
+        float atmosphereBaseHeight = 0.0f;
+        float atmosphereMaxDistance = 0.0f;
+        float atmosphereScatteringStrength = 0.0f;
+        float atmosphereAnisotropy = 0.0f;
         bool shadowsEnabled = false;
         float shadowOpacity = 0.0f;
         float shadowBias = 0.0f;

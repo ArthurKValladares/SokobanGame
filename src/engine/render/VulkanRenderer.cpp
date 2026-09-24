@@ -1260,6 +1260,8 @@ RenderStats VulkanRenderer::renderStats() const
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SsaoOcclusion));
     stats.gpuSsaoCompositeTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SsaoComposite));
+    stats.gpuAtmosphereTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Atmosphere));
     stats.gpuOutputTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Output));
     sceneRecorder_.populateTimingStats(stats);

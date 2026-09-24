@@ -329,6 +329,27 @@ GameState GameplaySession::projectedState() const
     return projected;
 }
 
+GameState GameplaySession::planningState() const
+{
+    return scheduler_.stateAtCurrentProgress();
+}
+
+std::size_t GameplaySession::continuationCausalGroup(
+    const Action& action) const
+{
+    const std::vector<EntityId> continued =
+        StateDelta::between(action.before, action.after).changedEntityIds();
+    for (std::size_t i = undoHistory_.size(); i-- > 0;) {
+        if (StateDelta::between(
+                undoHistory_[i].before,
+                undoHistory_[i].after)
+                .changesAny(continued)) {
+            return undoGroups_[i];
+        }
+    }
+    return 0;
+}
+
 const ActionScheduler::InFlight* GameplaySession::findInFlight(
     std::size_t actionId) const
 {
@@ -370,6 +391,63 @@ GameplaySession::Snapshot GameplaySession::snapshot() const
         .automaticMotionPaused = autoMotionPaused_,
         .activeHeroController = activeHeroController_,
     };
+
+    // A completed action may have been planned against the current leg of an
+    // older action that is still in flight. A direct follower behind a slide
+    // is the important case: committed state still has the block at the start
+    // of its slide while the follower has entered that released cell. Preserve
+    // enough completed slide progress in the checkpoint copy to keep its
+    // history linear and replayable. Live state and history remain untouched;
+    // an in-flight action with no later completed entry is still dropped.
+    const auto rebaseResultFrom = [&](std::size_t index) {
+        for (std::size_t i = index; i < result.undoStack.size(); ++i) {
+            Action& entry = result.undoStack[i];
+            const StateDelta delta =
+                StateDelta::between(entry.before, entry.after);
+            const int moved =
+                entry.playerMoveCountAfter - entry.playerMoveCountBefore;
+            entry.before = i == 0
+                ? undoBaseState_
+                : result.undoStack[i - 1].after;
+            entry.after = entry.before;
+            delta.applyTo(entry.after);
+            entry.playerMoveCountBefore = i == 0
+                ? 0
+                : result.undoStack[i - 1].playerMoveCountAfter;
+            entry.playerMoveCountAfter =
+                entry.playerMoveCountBefore + moved;
+        }
+    };
+
+    bool incorporatedProgress = false;
+    for (const ActionScheduler::InFlight& action : scheduler_.inFlight()) {
+        if (action.causalGroup == 0) {
+            continue;
+        }
+        const auto group = std::ranges::find(
+            undoGroups_, action.causalGroup);
+        if (group == undoGroups_.end()) {
+            continue;
+        }
+        const std::size_t index = static_cast<std::size_t>(
+            std::distance(undoGroups_.begin(), group));
+        if (index + 1 >= result.undoStack.size()) {
+            continue;
+        }
+        const StateDelta progress = StateDelta::between(
+            action.plan.before,
+            action.stateAtCurrentProgress());
+        if (progress.empty()) {
+            continue;
+        }
+        progress.applyTo(result.undoStack[index].after);
+        rebaseResultFrom(index + 1);
+        incorporatedProgress = true;
+    }
+    if (incorporatedProgress) {
+        result.state = result.undoStack.back().after;
+    }
+
     for (Action& action : result.undoStack) {
         action.durationSeconds = config::stepDurationSeconds;
         action.reversed = false;
@@ -479,9 +557,10 @@ void GameplaySession::queueRestart()
 
 void GameplaySession::cycleActiveHero()
 {
+    const GameState progress = planningState();
     std::vector<EntityId> controllers;
-    for (std::size_t i = 0; i < state().players.size(); ++i) {
-        const EntityId controller = rules::playerControllerId(state(), i);
+    for (std::size_t i = 0; i < progress.players.size(); ++i) {
+        const EntityId controller = rules::playerControllerId(progress, i);
         if (std::ranges::find(controllers, controller) == controllers.end()) {
             controllers.push_back(controller);
         }
@@ -502,7 +581,7 @@ GameplaySession::StartOutcome GameplaySession::runCommand(
 {
     // Anything but undo is ignored while a player is dead, and dropped rather
     // than held: the world cannot move again until the death is taken back.
-    if (rules::anyPlayerDead(state())) {
+    if (rules::anyPlayerDead(planningState())) {
         return command.type == CommandType::Undo
             ? tryStartUndoMove()
             : StartOutcome::Impossible;
@@ -564,7 +643,8 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
         }
     }
 
-    if (rules::anyPlayerDead(state())) {
+    const GameState current = planningState();
+    if (rules::anyPlayerDead(current)) {
         return controls.undoHeld &&
             tryStartUndoMove() == StartOutcome::Started;
     }
@@ -574,7 +654,7 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
     }
 
     return !autoMotionPaused_ &&
-        rules::hasPendingMotion(level, state()) &&
+        rules::hasPendingMotion(level, current) &&
         tryStartAmbientMotion(level) == StartOutcome::Started;
 }
 
@@ -776,9 +856,10 @@ GameplaySession::StartOutcome GameplaySession::tryStartHeldMove(
 GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
     const Level& level, MoveDirection input, EntityId controller)
 {
+    const GameState current = planningState();
     std::optional<plans::PlannedAction> step = plans::planPlayerStep(
         level,
-        state(),
+        current,
         input,
         stepRates_,
         stepDurationSeconds_,
@@ -867,11 +948,12 @@ std::vector<EntityId> GameplaySession::withoutEntitiesInFlight(
 GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
     const Level& level)
 {
+    const GameState current = planningState();
     if (std::optional<plans::PlannedAction> volley = plans::planTurretVolley(
             level,
-            state(),
+            current,
             withoutEntitiesInFlight(
-                rules::mutuallyFacingTurrets(level, state())),
+                rules::mutuallyFacingTurrets(level, current)),
             stepRates_,
             stepDurationSeconds_)) {
         volley->action.playerMoveCountBefore = playerMoveCount_;
@@ -892,8 +974,8 @@ GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
     // once it has stopped.
     if (std::optional<plans::PlannedAction> slide = plans::planSlides(
             level,
-            state(),
-            withoutEntitiesInFlight(plans::slidingEntities(state())),
+            current,
+            withoutEntitiesInFlight(plans::slidingEntities(current)),
             stepRates_,
             stepDurationSeconds_)) {
         slide->action.playerMoveCountBefore = playerMoveCount_;
@@ -901,18 +983,20 @@ GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
         if (!actionAdmissionAllows(slide->action)) {
             return StartOutcome::Impossible;
         }
+        const std::size_t group = continuationCausalGroup(slide->action);
         return beginAction(
                    slide->action,
                    std::move(slide->legs),
-                   std::move(slide->turretShots))
+                   std::move(slide->turretShots),
+                   group)
             ? StartOutcome::Started
             : StartOutcome::Refused;
     }
 
     if (std::optional<plans::PlannedAction> ride = plans::planConveyorRides(
             level,
-            state(),
-            withoutEntitiesInFlight(plans::conveyorRiders(level, state())),
+            current,
+            withoutEntitiesInFlight(plans::conveyorRiders(level, current)),
             stepRates_,
             stepDurationSeconds_)) {
         ride->action.playerMoveCountBefore = playerMoveCount_;
@@ -934,8 +1018,9 @@ GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
 GameplaySession::StartOutcome GameplaySession::tryStartMirrorAction(
     const Level& level)
 {
+    const GameState current = planningState();
     std::optional<rules::MirrorActivationPreview> activation =
-        rules::previewMirrorActivation(level, state());
+        rules::previewMirrorActivation(level, current);
     if (!activation) {
         return StartOutcome::Impossible;
     }
@@ -945,7 +1030,7 @@ GameplaySession::StartOutcome GameplaySession::tryStartMirrorAction(
     for (const rules::MirrorEntityPreview& entity : activation->entities) {
         lastMirrorSwapDestinations_.push_back(entity.destination);
     }
-    Action action = plans::fromMirrorPreview(state(), *activation);
+    Action action = plans::fromMirrorPreview(current, *activation);
     action.playerMoveCountBefore = playerMoveCount_;
     action.playerMoveCountAfter = playerMoveCount_;
     if (!actionAdmissionAllows(action)) {

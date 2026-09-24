@@ -79,6 +79,7 @@ public:
     // are the same shader, the same format and, since the composite stopped
     // blending, the same state. params.w picks which one the draw is.
     [[nodiscard]] VkPipeline ssaoComposite() const { return ssaoComposite_; }
+    [[nodiscard]] VkPipeline atmosphere() const { return atmosphere_; }
     [[nodiscard]] VkPipeline worldTransition() const { return worldTransition_; }
     // Scene target -> display image. The one place a scene colour becomes a
     // presentable one, which is why the range and encode decisions live in
@@ -161,6 +162,7 @@ private:
     VkPipeline skinnedModelShadow_ = VK_NULL_HANDLE;
     VkPipeline ssao_ = VK_NULL_HANDLE;
     VkPipeline ssaoComposite_ = VK_NULL_HANDLE;
+    VkPipeline atmosphere_ = VK_NULL_HANDLE;
     VkPipeline worldTransition_ = VK_NULL_HANDLE;
     VkPipeline tonemap_ = VK_NULL_HANDLE;
 };

@@ -507,6 +507,68 @@ if (ImGui::CollapsingHeader("Lighting")) {
     }
     ImGui::EndDisabled();
 
+    ImGui::SeparatorText("Volumetric Atmosphere");
+    ImGui::Checkbox("Atmosphere", &lighting.atmosphereEnabled);
+    ImGui::BeginDisabled(!lighting.atmosphereEnabled);
+    float atmosphereColor[3] {
+        lighting.atmosphereColor.x,
+        lighting.atmosphereColor.y,
+        lighting.atmosphereColor.z,
+    };
+    if (ImGui::ColorEdit3("Atmosphere Color", atmosphereColor)) {
+        lighting.atmosphereColor = {
+            atmosphereColor[0],
+            atmosphereColor[1],
+            atmosphereColor[2],
+        };
+    }
+    ImGui::DragFloat(
+        "Atmosphere Density",
+        &lighting.atmosphereDensity,
+        0.001f,
+        0.0f,
+        config::maximumAtmosphereDensity,
+        "%.3f");
+    ImGui::DragFloat(
+        "Height Falloff",
+        &lighting.atmosphereHeightFalloff,
+        0.01f,
+        0.0f,
+        config::maximumAtmosphereHeightFalloff,
+        "%.2f");
+    ImGui::DragFloat(
+        "Fog Base Height",
+        &lighting.atmosphereBaseHeight,
+        0.05f,
+        config::minimumAtmosphereBaseHeight,
+        config::maximumAtmosphereBaseHeight,
+        "%.2f");
+    ImGui::DragFloat(
+        "Fog Distance",
+        &lighting.atmosphereMaxDistance,
+        0.25f,
+        config::minimumAtmosphereMaxDistance,
+        config::maximumAtmosphereMaxDistance,
+        "%.1f");
+    ImGui::DragFloat(
+        "Scattering Strength",
+        &lighting.atmosphereScatteringStrength,
+        0.01f,
+        0.0f,
+        config::maximumAtmosphereScatteringStrength,
+        "%.2f");
+    ImGui::DragFloat(
+        "Scattering Anisotropy",
+        &lighting.atmosphereAnisotropy,
+        0.01f,
+        config::minimumAtmosphereAnisotropy,
+        config::maximumAtmosphereAnisotropy,
+        "%.2f");
+    ImGui::TextDisabled(
+        "%u depth samples; sun and point lights use existing shadow maps.",
+        config::atmosphereSampleCount);
+    ImGui::EndDisabled();
+
     ImGui::Checkbox("Shadows", &lighting.shadowsEnabled);
     ImGui::BeginDisabled(!lighting.shadowsEnabled);
     ImGui::DragFloat(
@@ -572,6 +634,9 @@ void drawPhaseTimings(const RenderStats& renderStats)
         "  SSAO command recording",
         renderStats.ssaoCommandRecordingTiming);
     showPhase(
+        "  Atmosphere command recording",
+        renderStats.atmosphereCommandRecordingTiming);
+    showPhase(
         "  Preview command recording",
         renderStats.previewCommandRecordingTiming);
     showPhase(
@@ -590,6 +655,7 @@ void drawPhaseTimings(const RenderStats& renderStats)
     showPhase("  GPU SSAO scene snapshot", renderStats.gpuSsaoSnapshotTiming);
     showPhase("  GPU SSAO occlusion", renderStats.gpuSsaoOcclusionTiming);
     showPhase("  GPU SSAO composite", renderStats.gpuSsaoCompositeTiming);
+    showPhase("GPU volumetric atmosphere", renderStats.gpuAtmosphereTiming);
     showPhase("GPU output/UI", renderStats.gpuOutputTiming);
 }
 

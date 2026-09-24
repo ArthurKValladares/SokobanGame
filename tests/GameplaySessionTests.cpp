@@ -841,13 +841,9 @@ void testAnEntityInFlightCannotBeTakenBySomethingElse()
     // settled at the moment it is pushed, so the block is spoken for until it
     // gets there, and nothing else may plan to move it.
     //
-    // This was admitted before, and the reason is worth remembering: the
-    // reservation table reasons about cells at instants, and by the time the
-    // second push was tried it believed the block had left the cell it was
-    // claimed on - while authoritative state, which is what planning reads,
-    // still had the block sitting there because the slide had not committed.
-    // Both were right on their own terms. Ownership is the rule neither could
-    // express.
+    // Planning follows the block's current leg, but while it still occupies a
+    // cell a second push must not take it away from the slide that owns it.
+    // Ownership is the rule cell timing alone cannot express.
     const Level level = makeLevel({
         { "........" },
         { "CI     #" },
@@ -873,8 +869,8 @@ void testAnEntityInFlightCannotBeTakenBySomethingElse()
     CHECK(after.refusedByOwnership == before.refusedByOwnership + 1);
     CHECK(after.admitted == before.admitted);
 
-    // Queued, not dropped: it runs once the slide has landed, and the block
-    // ends exactly where the push said it would.
+    // Queued, not dropped: it runs once the slide has left this cell, and the
+    // block still ends exactly where the push said it would.
     runUntilIdle(session, level);
     CHECK(session.state().movables[0].cell == cell(6, 0, 1));
     CHECK(session.state().players[0].cell == cell(2, 0, 1));
@@ -1068,6 +1064,79 @@ void testPlayerFollowsIntoACellTheSlideHasPassed()
     CHECK(session.playerMoveCount() == 5);
 }
 
+void testPlayerDirectlyFollowsBehindASlide()
+{
+    TEST("playerDirectlyFollowsBehindASlide");
+    const Level level = makeLevel({
+        { "............." },
+        { "CI          #" },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    session.advanceActiveAction(session.timeToNextCompletion());
+    session.completeActiveAction();
+    CHECK(session.moving());
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
+
+    // The block has only just begun its slide and still occupies (2,0), so a
+    // second push is correctly refused and retained in the command queue.
+    session.queueMove(MoveDirection::Right);
+    CHECK(!session.tryStartNextAction(level, {}));
+
+    // Once the first slide leg completes, (2,0) is free. Planning must use the
+    // block's current leg at (3,0), not the committed state that still records
+    // it at (2,0), or this retry looks like another push and ownership rejects
+    // it for the entire slide.
+    session.advanceActiveAction(0.1f);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 2);
+    const GameplaySession::Action& follow = session.inFlight().back().plan;
+    CHECK(!follow.playerPushing);
+    CHECK(follow.before.movables[0].cell == cell(3, 0, 1));
+    CHECK(follow.after.movables[0].cell == cell(3, 0, 1));
+    CHECK(follow.after.players[0].cell == cell(2, 0, 1));
+
+    // The follower finishes before the slide. A checkpoint taken now must
+    // materialize the completed slide legs into its history copy; otherwise
+    // committed state contains both entities at (2,0) and cannot be restored.
+    session.advanceActiveAction(session.timeToNextCompletion());
+    session.completeActiveAction();
+    CHECK(session.moving());
+    const GameplaySession::Snapshot followed = session.snapshot();
+    CHECK(followed.state.players[0].cell == cell(2, 0, 1));
+    CHECK(followed.state.movables[0].cell == cell(4, 0, 1));
+
+    GameplaySession restored;
+    restored.setStepDurationSeconds(0.1f);
+    CHECK(restored.restore(level, followed));
+    CHECK(restored.tryStartNextAction(level, {}));
+
+    // A restored slide is an automatic continuation. It must recover the
+    // original push's causal group so another direct follower still produces
+    // a replayable checkpoint and undo chain.
+    restored.advanceActiveAction(0.1f);
+    restored.queueMove(MoveDirection::Right);
+    CHECK(restored.tryStartNextAction(level, {}));
+    restored.advanceActiveAction(restored.timeToNextCompletion());
+    restored.completeActiveAction();
+    const GameplaySession::Snapshot followedAgain = restored.snapshot();
+    GameplaySession restoredAgain;
+    restoredAgain.setStepDurationSeconds(0.1f);
+    CHECK(restoredAgain.restore(level, followedAgain));
+
+    runUntilIdle(restoredAgain, level);
+    CHECK(restoredAgain.state().players[0].cell == cell(3, 0, 1));
+    CHECK(restoredAgain.state().movables[0].cell == cell(11, 0, 1));
+    const GameplaySession::Snapshot finished = restoredAgain.snapshot();
+    GameplaySession finalRestore;
+    finalRestore.setStepDurationSeconds(0.1f);
+    CHECK(finalRestore.restore(level, finished));
+}
+
 void testCommandRefusedByAClaimIsRequeuedNotLost()
 {
     TEST("commandRefusedByAClaimIsRequeuedNotLost");
@@ -1185,13 +1254,13 @@ void testQueueIsBounded()
 void testStaleCommandsAreDropped()
 {
     TEST("staleCommandsAreDropped");
-    // Staleness is what stops a refused command retrying forever. A step into
-    // the path of a long slide is refused every time it is tried, and must
-    // eventually be given up on rather than played back into a world that has
-    // moved on.
+    // Staleness is what stops a refused command retrying forever. A second
+    // hero tries to enter a distant part of a long slide's future path; unlike
+    // the trail behind the block, that cell must stay reserved until the block
+    // has passed it.
     const Level level = makeLevel({
-        { "........" },
-        { "CI     #" },
+        { ".............", "............." },
+        { "CI          #", "     Q       " },
     });
     GameplaySession session;
     session.reset(level);
@@ -1202,23 +1271,23 @@ void testStaleCommandsAreDropped()
     session.advanceActiveAction(session.timeToNextCompletion());
     session.completeActiveAction();
 
-    // Into the block's path: refused now, and for as long as the slide runs.
-    session.queueMove(MoveDirection::Right);
+    session.cycleActiveHero();
+    // Up into (5,0), which is still ahead of the sliding block.
+    session.queueMove(MoveDirection::Up);
     CHECK(!session.tryStartNextAction(level, {}));
 
     runUntilIdle(session, level);
 
-    // Dropped rather than played back, so the player stays where the push left
-    // them.
+    // Dropped rather than played back, so the second hero stays where it was.
     CHECK(!session.tryStartNextAction(level, {}));
-    CHECK(session.state().players[0].cell == cell(1, 0, 1));
+    CHECK(session.state().players[1].cell == cell(5, 1, 1));
 
     // A command entered afterwards is honoured normally: staleness is measured
     // from when it was entered, not from some global age.
-    session.queueMove(MoveDirection::Left);
+    session.queueMove(MoveDirection::Right);
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().players[0].cell == cell(0, 0, 1));
+    CHECK(session.state().players[1].cell == cell(6, 1, 1));
 }
 
 int main()
@@ -1233,6 +1302,7 @@ int main()
     testGoldenTraceIsReproducible();
     testPlayerMovesAlongsideASlideItCannotDisturb();
     testPlayerFollowsIntoACellTheSlideHasPassed();
+    testPlayerDirectlyFollowsBehindASlide();
     testCommandRefusedByAClaimIsRequeuedNotLost();
     testConcurrentPlayHistoryRoundTrips();
     testMoveCommitsAfterAnimation();

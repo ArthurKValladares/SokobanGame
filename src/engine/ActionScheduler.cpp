@@ -56,6 +56,39 @@ void ActionScheduler::setStepDurationSeconds(float seconds)
     stepDurationSeconds_ = std::max(seconds, 0.0001f);
 }
 
+const GameState& ActionScheduler::InFlight::stateAtCurrentProgress() const
+{
+    if (elapsedSeconds < 0.0f || legs.empty()) {
+        return plan.before;
+    }
+
+    std::size_t completedLegs = 0;
+    if (mechanicalDurationSeconds <= 0.0f ||
+        elapsedSeconds >= mechanicalDurationSeconds) {
+        completedLegs = legs.size();
+    } else {
+        const float legDuration = mechanicalDurationSeconds /
+            static_cast<float>(legs.size());
+        completedLegs = std::min(
+            static_cast<std::size_t>(
+                std::floor(elapsedSeconds / legDuration)),
+            legs.size());
+    }
+    return completedLegs == 0 ? plan.before : legs[completedLegs - 1];
+}
+
+GameState ActionScheduler::stateAtCurrentProgress() const
+{
+    GameState current = state_;
+    for (const InFlight& action : inFlight_) {
+        StateDelta::between(
+            action.plan.before,
+            action.stateAtCurrentProgress())
+            .applyTo(current);
+    }
+    return current;
+}
+
 const ActionScheduler::InFlight* ActionScheduler::oldest() const
 {
     return inFlight_.empty() ? nullptr : &inFlight_.front();

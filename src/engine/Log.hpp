@@ -5,7 +5,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <sstream>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace sokoban::log {
 
@@ -33,6 +37,26 @@ enum class Category {
 
 inline constexpr std::size_t categoryCount =
     static_cast<std::size_t>(Category::Count);
+inline constexpr std::size_t historyCapacity = 4096;
+
+[[nodiscard]] std::string_view levelName(Level level);
+[[nodiscard]] std::string_view categoryName(Category category);
+
+// A bounded in-memory copy of recent messages for diagnostics and developer
+// tools. Entries are captured before the asynchronous output queue, so a full
+// file/stderr queue does not make the debug console blind to the incident.
+struct Entry {
+    uint64_t sequence = 0;
+    std::chrono::system_clock::time_point timestamp;
+    Level level = Level::Info;
+    Category category = Category::General;
+    std::string message;
+};
+
+struct HistorySnapshot {
+    uint64_t revision = 0;
+    std::vector<Entry> entries;
+};
 
 struct Configuration {
     std::size_t queueCapacity = 4096;
@@ -86,6 +110,17 @@ void shutdown();
 void reset();
 
 [[nodiscard]] Diagnostics diagnostics();
+
+// History is opt-in so shipping builds do not copy every log message solely
+// for a developer panel. Disabling it also releases retained messages.
+void setHistoryEnabled(bool enabled);
+
+// Supplying the revision from a previous snapshot avoids copying unchanged
+// entries. A changed revision always returns the complete current history,
+// including an empty vector after clearHistory().
+[[nodiscard]] HistorySnapshot historySnapshot(
+    std::optional<uint64_t> knownRevision = std::nullopt);
+void clearHistory();
 
 // Accumulates one message on the calling thread and enqueues it on destruction.
 // Disk/stderr output, timestamp formatting, and sink flushing are writer-owned.

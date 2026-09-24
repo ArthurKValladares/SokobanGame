@@ -83,6 +83,21 @@ void testAoExtentIsHalfResolutionAndCoversOddEdges()
     CHECK(empty == (PixelExtent { 0, 0 }));
 }
 
+void testNearestDepthUnprojectionUsesTheFetchedTexelCenter()
+{
+    TEST("nearestDepthUnprojectionUsesTheFetchedTexelCenter");
+    const PixelExtent extent { 8, 4 };
+    CHECK(near(ssaoNearestDepthTexelUv(
+        extent, { 0.25f, 0.5f }), { 2.5f / 8.0f, 2.5f / 4.0f }));
+    CHECK(near(ssaoNearestDepthTexelUv(
+        extent, { 3.5f / 8.0f, 1.5f / 4.0f }),
+        { 3.5f / 8.0f, 1.5f / 4.0f }));
+    CHECK(near(ssaoNearestDepthTexelUv(
+        extent, { -0.2f, 1.2f }), { 0.5f / 8.0f, 3.5f / 4.0f }));
+    CHECK(near(ssaoNearestDepthTexelUv(
+        { 0, 0 }, { 0.5f, 0.5f }), { 0.0f, 0.0f }));
+}
+
 void testRotationNoiseUsesBothAxesWithoutRowBias()
 {
     TEST("rotationNoiseUsesBothAxesWithoutRowBias");
@@ -234,6 +249,7 @@ int main()
 {
     testProjectionRoundTripUsesVulkanDepthAndFramebufferY();
     testAoExtentIsHalfResolutionAndCoversOddEdges();
+    testNearestDepthUnprojectionUsesTheFetchedTexelCenter();
     testRotationNoiseUsesBothAxesWithoutRowBias();
     testPhysicalRadiusIsIndependentOfRenderResolution();
     testReconstructedNormalFacesTheCamera();

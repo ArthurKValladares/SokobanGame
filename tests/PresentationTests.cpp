@@ -10,6 +10,7 @@
 #include "engine/ParticleConfig.hpp"
 #include "engine/PresentationTransactionBuilder.hpp"
 #include "engine/PresentationSettings.hpp"
+#include "engine/render/LightingConfig.hpp"
 #include "engine/Rules.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
@@ -390,6 +391,13 @@ void testSettingsNormalizeAndConvert()
     settings.lighting.specularStrength = 2.0f;
     settings.lighting.modelShadowReceive = -1.0f;
     settings.lighting.ambientOcclusionStrength = 4.0f;
+    settings.lighting.atmosphereColor = { -1.0f, 0.5f, 2.0f };
+    settings.lighting.atmosphereDensity = 9.0f;
+    settings.lighting.atmosphereHeightFalloff = 9.0f;
+    settings.lighting.atmosphereBaseHeight = 99.0f;
+    settings.lighting.atmosphereMaxDistance = 999.0f;
+    settings.lighting.atmosphereScatteringStrength = 9.0f;
+    settings.lighting.atmosphereAnisotropy = -9.0f;
     settings.lighting.shadowOpacity = 2.0f;
     settings.lighting.shadowBias = -1.0f;
     settings.grid.color.w = 4.0f;
@@ -416,6 +424,20 @@ void testSettingsNormalizeAndConvert()
     CHECK(near(settings.lighting.specularStrength, 1.0f));
     CHECK(near(settings.lighting.modelShadowReceive, 0.0f));
     CHECK(near(settings.lighting.ambientOcclusionStrength, 1.0f));
+    CHECK(near(settings.lighting.atmosphereColor.x, 0.0f));
+    CHECK(near(settings.lighting.atmosphereColor.z, 2.0f));
+    CHECK(near(settings.lighting.atmosphereDensity,
+        config::maximumAtmosphereDensity));
+    CHECK(near(settings.lighting.atmosphereHeightFalloff,
+        config::maximumAtmosphereHeightFalloff));
+    CHECK(near(settings.lighting.atmosphereBaseHeight,
+        config::maximumAtmosphereBaseHeight));
+    CHECK(near(settings.lighting.atmosphereMaxDistance,
+        config::maximumAtmosphereMaxDistance));
+    CHECK(near(settings.lighting.atmosphereScatteringStrength,
+        config::maximumAtmosphereScatteringStrength));
+    CHECK(near(settings.lighting.atmosphereAnisotropy,
+        config::minimumAtmosphereAnisotropy));
     CHECK(near(settings.lighting.shadowOpacity, 0.85f));
     CHECK(near(settings.lighting.shadowBias, 0.0f));
     CHECK(near(settings.grid.color.w, 1.0f));
@@ -457,6 +479,9 @@ void testSettingsNormalizeAndConvert()
     CHECK(lighting.ambientOcclusion.debug ==
         sokoban::RenderFrameData::Lighting::AmbientOcclusion::Debug::
             AmbientMask);
+    CHECK(lighting.atmosphere.enabled == settings.lighting.atmosphereEnabled);
+    CHECK(near(lighting.atmosphere.density,
+        config::maximumAtmosphereDensity));
     CHECK(near(lighting.shadows.opacity, 0.85f));
     CHECK(near(settings.renderGridOverlay().width, 0.0f));
     CHECK(settings.renderOutputTransform().curve ==

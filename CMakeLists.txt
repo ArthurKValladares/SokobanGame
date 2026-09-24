@@ -472,6 +472,7 @@ add_library(sokoban_core STATIC
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
     src/engine/render/AnimationController.cpp
+    src/engine/render/AtmosphereMath.cpp
     src/engine/render/AssetLoadScheduler.cpp
     src/engine/render/CompressedTextureArtifact.cpp
     src/engine/render/GltfMesh.cpp
@@ -639,6 +640,7 @@ if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
         $<$<CONFIG:Debug>:src/engine/AssetManifestDebugUi.cpp>
         $<$<CONFIG:Debug>:src/engine/DebugUi.cpp>
         $<$<CONFIG:Debug>:src/engine/LevelEditorDebugUi.cpp>
+        $<$<CONFIG:Debug>:src/engine/LogDebugUi.cpp>
     )
 endif()
 add_executable(sokoban ${SOKOBAN_APPLICATION_SOURCES})
@@ -1000,6 +1002,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME ssao_math TARGET sokoban_ssao_math_tests
         LIBS sokoban_core
         SOURCES tests/SsaoMathTests.cpp
+    )
+    sokoban_add_test(NAME atmosphere_math TARGET sokoban_atmosphere_math_tests
+        LIBS sokoban_core
+        SOURCES tests/AtmosphereMathTests.cpp
     )
     sokoban_add_test(NAME animation_catalog TARGET sokoban_animation_catalog_tests
         LIBS sokoban_core

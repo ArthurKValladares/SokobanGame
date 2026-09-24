@@ -11,6 +11,13 @@ namespace sokoban {
 // valid AO texel, including odd-sized and one-pixel render targets.
 [[nodiscard]] PixelExtent ssaoBufferExtent(PixelExtent renderExtent);
 
+// Nearest-filtered depth belongs to a discrete texel, not to the requested
+// UV. Return that texel's center so unprojection follows the same camera ray
+// that produced the stored depth value.
+[[nodiscard]] Vec2 ssaoNearestDepthTexelUv(
+    PixelExtent depthExtent,
+    Vec2 requestedUv);
+
 // CPU reference for the estimator's per-pixel kernel rotation. Both axes are
 // deliberately mixed to prevent row-correlated noise from becoming bands.
 [[nodiscard]] float ssaoRotationNoise(uint32_t pixelX, uint32_t pixelY);

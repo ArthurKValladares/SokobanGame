@@ -10,6 +10,7 @@
 #include "engine/DecorationMeshCatalog.hpp"
 #include "engine/LevelEditor.hpp"
 #include "engine/LevelEditorDebugUi.hpp"
+#include "engine/LogDebugUi.hpp"
 #include "engine/OverworldMapEditor.hpp"
 #include "engine/InputRouter.hpp"
 #include "engine/SplatPainter.hpp"
@@ -89,6 +90,7 @@ public:
         Vec2 viewportSize);
 
     ApplicationDebugUi applicationDebugUi;
+    LogDebugUi logDebugUi;
     AssetManifestEditor assetManifestEditor;
     AssetManifestDebugUi assetManifestDebugUi;
     LevelEditor levelEditor;

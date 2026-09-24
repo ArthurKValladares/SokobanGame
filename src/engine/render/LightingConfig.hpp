@@ -41,6 +41,27 @@ inline constexpr float ssaoBiasWorld = 0.025f;
 inline constexpr float ssaoBilateralDepthSigmaWorld = 0.10f;
 inline constexpr float ssaoBilateralNormalThreshold = 0.80f;
 
+// Depth-aware height fog. The density is extinction per world unit, so the
+// look remains stable when render scale or camera projection changes.
+inline constexpr bool atmosphereEnabled = true;
+inline constexpr Vec3 atmosphereColor { 0.55f, 0.68f, 0.82f };
+inline constexpr float atmosphereDensity = 0.018f;
+inline constexpr float maximumAtmosphereDensity = 0.20f;
+inline constexpr float atmosphereHeightFalloff = 0.28f;
+inline constexpr float maximumAtmosphereHeightFalloff = 4.0f;
+inline constexpr float atmosphereBaseHeight = 0.0f;
+inline constexpr float minimumAtmosphereBaseHeight = -16.0f;
+inline constexpr float maximumAtmosphereBaseHeight = 16.0f;
+inline constexpr float atmosphereMaxDistance = 28.0f;
+inline constexpr float minimumAtmosphereMaxDistance = 1.0f;
+inline constexpr float maximumAtmosphereMaxDistance = 128.0f;
+inline constexpr float atmosphereScatteringStrength = 0.55f;
+inline constexpr float maximumAtmosphereScatteringStrength = 4.0f;
+inline constexpr float atmosphereAnisotropy = 0.35f;
+inline constexpr float minimumAtmosphereAnisotropy = -0.85f;
+inline constexpr float maximumAtmosphereAnisotropy = 0.85f;
+inline constexpr uint32_t atmosphereSampleCount = 16;
+
 inline constexpr bool shadowsEnabled = true;
 inline constexpr float shadowOpacity = 0.5f;
 inline constexpr float maximumShadowOpacity = 0.85f;

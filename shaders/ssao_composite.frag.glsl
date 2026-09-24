@@ -42,38 +42,64 @@ vec3 reconstructViewPosition(vec2 uv, float depth)
     return view.xyz / max(abs(view.w), 0.000001) * sign(view.w);
 }
 
-vec3 viewNormalAt(vec2 uv, vec3 centerPosition)
+ivec2 depthCoordinate(vec2 requestedUv)
 {
-    vec2 texel = 1.0 / vec2(textureSize(depthTexture, 0));
+    ivec2 extent = textureSize(depthTexture, 0);
+    return clamp(ivec2(requestedUv * vec2(extent)), ivec2(0), extent - 1);
+}
+
+vec2 depthTexelUv(ivec2 coordinate)
+{
+    return (vec2(coordinate) + 0.5) /
+        vec2(textureSize(depthTexture, 0));
+}
+
+vec3 viewNormalAt(ivec2 centerCoordinate, vec3 centerPosition)
+{
+    ivec2 extent = textureSize(depthTexture, 0);
     float depthSigma = max(pc.filterParams.z, 0.0001);
 
-    vec2 rightUv = min(uv + vec2(texel.x, 0.0), vec2(1.0) - texel * 0.5);
-    float rightDepth = texture(depthTexture, rightUv).r;
+    ivec2 rightCoordinate = min(
+        centerCoordinate + ivec2(1, 0), extent - 1);
+    float rightDepth = texelFetch(
+        depthTexture, rightCoordinate, 0).r;
     vec3 rightPosition = rightDepth < 0.9999
-        ? reconstructViewPosition(rightUv, rightDepth)
+        ? reconstructViewPosition(
+            depthTexelUv(rightCoordinate), rightDepth)
         : centerPosition;
     vec3 dx = rightPosition - centerPosition;
-    if (rightDepth >= 0.9999 || abs(dx.z) > depthSigma * 2.0) {
+    if (rightCoordinate == centerCoordinate ||
+        rightDepth >= 0.9999 || abs(dx.z) > depthSigma * 2.0) {
         dx = vec3(0.0);
-        vec2 leftUv = max(uv - vec2(texel.x, 0.0), texel * 0.5);
-        float leftDepth = texture(depthTexture, leftUv).r;
+        ivec2 leftCoordinate = max(
+            centerCoordinate - ivec2(1, 0), ivec2(0));
+        float leftDepth = texelFetch(
+            depthTexture, leftCoordinate, 0).r;
         if (leftDepth < 0.9999) {
-            dx = centerPosition - reconstructViewPosition(leftUv, leftDepth);
+            dx = centerPosition - reconstructViewPosition(
+                depthTexelUv(leftCoordinate), leftDepth);
         }
     }
 
-    vec2 downUv = min(uv + vec2(0.0, texel.y), vec2(1.0) - texel * 0.5);
-    float downDepth = texture(depthTexture, downUv).r;
+    ivec2 downCoordinate = min(
+        centerCoordinate + ivec2(0, 1), extent - 1);
+    float downDepth = texelFetch(
+        depthTexture, downCoordinate, 0).r;
     vec3 downPosition = downDepth < 0.9999
-        ? reconstructViewPosition(downUv, downDepth)
+        ? reconstructViewPosition(
+            depthTexelUv(downCoordinate), downDepth)
         : centerPosition;
     vec3 dy = downPosition - centerPosition;
-    if (downDepth >= 0.9999 || abs(dy.z) > depthSigma * 2.0) {
+    if (downCoordinate == centerCoordinate ||
+        downDepth >= 0.9999 || abs(dy.z) > depthSigma * 2.0) {
         dy = vec3(0.0);
-        vec2 upUv = max(uv - vec2(0.0, texel.y), texel * 0.5);
-        float upDepth = texture(depthTexture, upUv).r;
+        ivec2 upCoordinate = max(
+            centerCoordinate - ivec2(0, 1), ivec2(0));
+        float upDepth = texelFetch(
+            depthTexture, upCoordinate, 0).r;
         if (upDepth < 0.9999) {
-            dy = centerPosition - reconstructViewPosition(upUv, upDepth);
+            dy = centerPosition - reconstructViewPosition(
+                depthTexelUv(upCoordinate), upDepth);
         }
     }
 
@@ -119,14 +145,17 @@ float bilateralAo(vec2 uv, vec3 centerPosition, vec3 centerNormal)
             ivec2 coordinate = clamp(
                 base + ivec2(x, y), ivec2(0), aoSize - ivec2(1));
             vec2 sampleUv = (vec2(coordinate) + 0.5) / vec2(aoSize);
-            float sampleDepth = texture(depthTexture, sampleUv).r;
+            ivec2 sampleDepthCoordinate = depthCoordinate(sampleUv);
+            float sampleDepth = texelFetch(
+                depthTexture, sampleDepthCoordinate, 0).r;
             if (sampleDepth >= 0.9999) {
                 continue;
             }
 
             vec3 samplePosition = reconstructViewPosition(
-                sampleUv, sampleDepth);
-            vec3 sampleNormal = viewNormalAt(sampleUv, samplePosition);
+                depthTexelUv(sampleDepthCoordinate), sampleDepth);
+            vec3 sampleNormal = viewNormalAt(
+                sampleDepthCoordinate, samplePosition);
             float spatialWeight =
                 (x == 0 ? 1.0 - fraction.x : fraction.x) *
                 (y == 0 ? 1.0 - fraction.y : fraction.y);
@@ -152,9 +181,13 @@ void main()
 {
     vec2 fullExtent = vec2(textureSize(depthTexture, 0));
     vec2 uv = gl_FragCoord.xy / fullExtent;
-    float centerDepth = texture(depthTexture, uv).r;
-    vec3 centerPosition = reconstructViewPosition(uv, centerDepth);
-    vec3 centerNormal = viewNormalAt(uv, centerPosition);
+    ivec2 centerDepthCoordinate = depthCoordinate(uv);
+    float centerDepth = texelFetch(
+        depthTexture, centerDepthCoordinate, 0).r;
+    vec3 centerPosition = reconstructViewPosition(
+        depthTexelUv(centerDepthCoordinate), centerDepth);
+    vec3 centerNormal = viewNormalAt(
+        centerDepthCoordinate, centerPosition);
 
     // Four half-resolution candidates form the native bilinear footprint;
     // view-space plane distance and normal agreement remove samples from the
