@@ -501,6 +501,43 @@ void testRealManifestFile()
             manifest.modelIdByName("Witch"),
         "real manifest resolves the witch character model");
     CHECK_MESSAGE(
+        manifest.characterModel(sokoban::CharacterType::Bard) ==
+            manifest.modelIdByName("Bard"),
+        "real manifest resolves the bard character model");
+    const AssetManifest::Model& bardModel = manifest.model(
+        manifest.characterModel(sokoban::CharacterType::Bard));
+    const sokoban::SkinnedMeshData bardMesh = sokoban::loadGltfSkinnedMesh(
+        *root / bardModel.path,
+        {
+            .preserveAspectRatio = bardModel.preserveAspectRatio,
+            .preserveSourceScale = bardModel.preserveSourceScale,
+            .rotateHalfTurn = bardModel.rotateHalfTurn,
+        });
+    CHECK_MESSAGE(!bardMesh.vertices.empty(),
+        "real bard asset contains skinned geometry");
+    CHECK_MESSAGE(!bardMesh.jointNodeIndices.empty(),
+        "real bard asset contains a skeleton");
+    const AssetManifest::Animation& idleAnimation = manifest.animation(
+        manifest.playerIdleAnimation());
+    const sokoban::GltfAnimationClip idleClip =
+        sokoban::loadGltfAnimationClip(
+            *root / idleAnimation.path, idleAnimation.clip - 1);
+    CHECK_MESSAGE(!idleClip.channels.empty(),
+        "shared idle animation contains channels");
+    for (const sokoban::AnimationChannel& channel : idleClip.channels) {
+        bool targetExists = false;
+        for (const sokoban::SkeletonNode& node : bardMesh.nodes) {
+            targetExists = targetExists || node.name == channel.targetNodeName;
+        }
+        CHECK_MESSAGE(targetExists,
+            "shared idle animation targets the bard skeleton");
+    }
+    const sokoban::SkinnedPoseMatrices idlePose = sokoban::sampleGltfSkinPose(
+        bardMesh, idleClip, 0.25f);
+    CHECK_MESSAGE(
+        idlePose.jointMatrices.size() == bardMesh.jointNodeIndices.size(),
+        "shared idle animation samples a complete bard pose");
+    CHECK_MESSAGE(
         manifest.playerPullAnimation() ==
             manifest.animationIdByName("DruidPull"),
         "real manifest resolves the druid pull animation");

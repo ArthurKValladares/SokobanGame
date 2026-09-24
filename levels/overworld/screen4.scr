@@ -1,6 +1,7 @@
 @selector {"cell":[3,2,2],"id":1,"target":{"level":4,"screen":0}}
 @selector {"cell":[4,2,2],"id":2,"target":{"level":4,"screen":1}}
 @selector {"cell":[5,2,2],"id":3,"target":{"level":4,"screen":2}}
+@selector {"cell":[6,2,2],"id":4,"target":{"level":4,"screen":4}}
 
 @layer 0
 .........

@@ -1604,6 +1604,40 @@ void testMirrorEnergyIsTranslucentNonPickableAndShadowless()
     }
 }
 
+void testTranslucentIsoFaceDoesNotOccludeOrCastShadows()
+{
+    using namespace sokoban;
+
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 3;
+    frame.levelHeight = 3;
+    frame.levelDepth = 2;
+    frame.isoFaces.push_back({
+        .vertices = {
+            Vec3 { 0.0f, 0.0f, 0.5f },
+            Vec3 { 2.0f, 0.0f, 0.5f },
+            Vec3 { 2.0f, 0.0f, 1.5f },
+            Vec3 { 0.0f, 0.0f, 1.5f },
+        },
+        .color = { 0.7f, 0.3f, 0.9f, 0.08f },
+        .translucent = true,
+        .castsShadows = false,
+    });
+
+    const PreparedRenderScene scene =
+        prepareScene(frame, { 1280.0f, 720.0f });
+    CHECK(scene.hasTranslucentContent);
+    CHECK(scene.opaqueFaceIndices.empty());
+    CHECK(scene.translucentFaceIndices.size() == 1);
+    CHECK(scene.shadowFaces.empty());
+    if (!scene.translucentFaceIndices.empty()) {
+        const PreparedIsoFace& face =
+            scene.isoFaces[scene.translucentFaceIndices.front()];
+        CHECK(face.material == PreparedSurfaceMaterial::Standard);
+    }
+}
+
 void testAlphaTintedModelUsesTheTranslucentPass()
 {
     sokoban::RenderFrameData frame;
@@ -1768,6 +1802,7 @@ int main()
     testAdjacentWaterFacesSharePerspectiveCoordinates();
     testAdjacentModelsShareProjectiveCoordinates();
     testMirrorEnergyIsTranslucentNonPickableAndShadowless();
+    testTranslucentIsoFaceDoesNotOccludeOrCastShadows();
     testAlphaTintedModelUsesTheTranslucentPass();
     testParticlesBecomeSortedTranslucentBillboardsOnly();
     testParticleRibbonFollowsTheProjectedWorldPath();

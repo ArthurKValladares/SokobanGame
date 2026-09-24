@@ -485,7 +485,7 @@ Level::Definition Level::parseDefinition(
                 throw std::runtime_error(
                     "Invalid character metadata; expected '@character rogue' or "
                     "'@character knight', '@character druid', or "
-                    "'@character witch': " + source);
+                    "'@character witch', or '@character bard': " + source);
             }
             continue;
         }
@@ -754,9 +754,11 @@ Level Level::loadFromLayers(
                             ? CharacterType::Druid
                             : *tile == TileType::Witch
                                 ? CharacterType::Witch
-                            : *tile == TileType::Rogue
-                                ? CharacterType::Rogue
-                                : selectedCharacter;
+                                : *tile == TileType::Bard
+                                    ? CharacterType::Bard
+                                    : *tile == TileType::Rogue
+                                        ? CharacterType::Rogue
+                                        : selectedCharacter;
                     level.playerStarts_.push_back({ position, heroCharacter });
                     if (level.playerStarts_.size() == 1) {
                         level.playerStart_ = position;
@@ -791,7 +793,8 @@ Level Level::loadFromLayers(
             std::string(1, tileTypeToChar(TileType::Rogue)) + "' or '" +
             std::string(1, tileTypeToChar(TileType::Knight)) + "' or '" +
             std::string(1, tileTypeToChar(TileType::Druid)) + "' or '" +
-            std::string(1, tileTypeToChar(TileType::Witch)) + "'): " + source);
+            std::string(1, tileTypeToChar(TileType::Witch)) + "' or '" +
+            std::string(1, tileTypeToChar(TileType::Bard)) + "'): " + source);
     }
 
     for (const ScreenSelector& selector : level.selectors_) {

@@ -129,6 +129,12 @@ const AssetManifest& testManifest()
           "material": { "mode": "texture", "texture": "Tex" }
         },
         {
+          "name": "Bard",
+          "path": "bard.glb",
+          "geometry": "skinned",
+          "material": { "mode": "texture", "texture": "Tex" }
+        },
+        {
           "name": "Enemy",
           "path": "enemy.glb",
           "geometry": "skinned",
@@ -679,6 +685,67 @@ void testGameplayFrameUsesTheLevelsCharacterModel()
     if (player != frame.tiles.end()) {
         CHECK(player->model == testManifest().modelIdByName("Knight"));
         CHECK(player->animation == testManifest().playerIdleAnimation());
+    }
+}
+
+void testBardFrameBuildsAnimatedMusicalAura()
+{
+    TEST("bardFrameBuildsAnimatedMusicalAura");
+    const Level level = Level::loadFromLayers({
+        { "...", "...", "..." },
+        { "   ", " B ", "   " },
+    }, "bard presentation frame");
+    const GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    presentation.advanceClocks(0.75f, false);
+
+    const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .projectedState = state,
+        .presentation = presentation,
+        .settings = {},
+    });
+    const auto bard = std::ranges::find_if(
+        frame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.isPrimaryPlayer;
+        });
+    CHECK(bard != frame.tiles.end());
+    if (bard != frame.tiles.end()) {
+        CHECK(bard->model == testManifest().modelIdByName("Bard"));
+    }
+
+    // One horizontal 5x5 field is enclosed by four transparent vertical
+    // music-sheet walls. Each wall has five staff lines and two animated,
+    // three-piece musical notes.
+    CHECK(frame.isoFaces.size() == 49);
+    if (frame.isoFaces.size() == 49) {
+        const RenderFrameData::IsoFace& field = frame.isoFaces.front();
+        CHECK(near(field.vertices[0].x, -1.0f));
+        CHECK(near(field.vertices[0].y, -1.0f));
+        CHECK(near(field.vertices[2].x, 4.0f));
+        CHECK(near(field.vertices[2].y, 4.0f));
+        CHECK(field.color.w > 0.0f);
+        CHECK(field.color.w < 0.2f);
+        CHECK(field.translucent);
+        CHECK(!field.castsShadows);
+        const RenderFrameData::IsoFace& curtain = frame.isoFaces[1];
+        CHECK(near(curtain.vertices[0].z, field.vertices[0].z - 1.0f));
+        CHECK(near(curtain.vertices[2].z, field.vertices[0].z + 1.0f));
+        CHECK(near(curtain.normal.z, 0.0f));
+        CHECK(curtain.color.w < field.color.w);
+        CHECK(curtain.translucent);
+        CHECK(!curtain.castsShadows);
+        CHECK(frame.isoFaces[2].color.w > curtain.color.w);
+        CHECK(near(
+            frame.isoFaces[13].vertices[0].x,
+            field.vertices[2].x));
+        CHECK(!near(
+            frame.isoFaces[7].vertices[0].z,
+            frame.isoFaces[10].vertices[0].z));
     }
 }
 
@@ -2474,6 +2541,7 @@ int main()
     testPresentationInterpolatesActionsAndClips();
     testGameplayFrameUsesSettingsAndPresentation();
     testGameplayFrameUsesTheLevelsCharacterModel();
+    testBardFrameBuildsAnimatedMusicalAura();
     testSelectorFlagReflectsTargetCompletion();
     testDecorativeTileRendersWithoutChangingCameraExtent();
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();

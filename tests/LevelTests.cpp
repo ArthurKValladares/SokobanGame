@@ -107,6 +107,14 @@ void testCharacterMetadataRoundTripAndLegacyDefault()
     CHECK(Level::parseDefinition(witchSerialized, "witch round trip") ==
         witchDefinition);
 
+    Level::Definition bardDefinition = definition;
+    bardDefinition.character = CharacterType::Bard;
+    const std::vector<std::string> bardSerialized =
+        Level::serializeDefinition(bardDefinition);
+    CHECK(bardSerialized[0] == "@character bard");
+    CHECK(Level::parseDefinition(bardSerialized, "bard round trip") ==
+        bardDefinition);
+
     const Level legacy = Level::loadFromLines({ "C." }, "legacy rogue");
     CHECK(legacy.character() == CharacterType::Rogue);
 }
@@ -374,12 +382,13 @@ void testLevelValidationErrors()
         (void)Level::loadFromLayers({ { "..." } }, "no player");
     }, "missing a hero");
     const Level multipleHeroes = Level::loadFromLayers(
-        { { "QKUH" } }, "multiple heroes");
-    CHECK(multipleHeroes.playerStarts().size() == 4);
+        { { "QKUHB" } }, "multiple heroes");
+    CHECK(multipleHeroes.playerStarts().size() == 5);
     CHECK(multipleHeroes.playerStarts()[0].character == CharacterType::Rogue);
     CHECK(multipleHeroes.playerStarts()[1].character == CharacterType::Knight);
     CHECK(multipleHeroes.playerStarts()[2].character == CharacterType::Druid);
     CHECK(multipleHeroes.playerStarts()[3].character == CharacterType::Witch);
+    CHECK(multipleHeroes.playerStarts()[4].character == CharacterType::Bard);
     checkThrowsContaining([] {
         (void)Level::loadFromLayers({ { "C?" } }, "unknown tile");
     }, "Unknown level tile");

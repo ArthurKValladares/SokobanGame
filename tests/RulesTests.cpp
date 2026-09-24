@@ -364,6 +364,77 @@ void testWitchSwapUsesNearestTargetAndRequiresClearSight()
     CHECK(heroBlocked == heroInitial);
 }
 
+void testBardMovesNearbyMovableUnitsInItsDirection()
+{
+    TEST("bardMovesNearbyMovableUnitsInItsDirection");
+    const Level level = makeLevel({
+        { "......." },
+        { "R .. . " },
+        { ". BR R " },
+        { "N      " },
+    });
+    const GameState initial = rules::initialState(level);
+    CHECK(initial.players[0].character == CharacterType::Bard);
+
+    const GameState moved = rules::scopedStep(
+        level,
+        initial,
+        MoveDirection::Right,
+        {},
+        { .actors = { initial.players[0].id } });
+    CHECK(moved.players[0].cell == cell(3, 0, 2));
+    CHECK(moved.movables[0].cell == cell(1, 0, 1));
+    CHECK(moved.movables[1].cell == cell(4, 0, 2));
+    CHECK(moved.movables[2].cell == cell(5, 0, 2));
+    CHECK(moved.enemies[0].cell == cell(1, 0, 3));
+}
+
+void testBardAuraMovesAreIndependentAndCanPushOneBlock()
+{
+    TEST("bardAuraMovesAreIndependentAndCanPushOneBlock");
+    const Level pushes = makeLevel({
+        { "...." },
+        { "BRR " },
+    });
+    const GameState pushInitial = rules::initialState(pushes);
+    const GameState pushed = rules::scopedStep(
+        pushes,
+        pushInitial,
+        MoveDirection::Right,
+        {},
+        { .actors = { pushInitial.players[0].id } });
+    CHECK(pushed.players[0].cell == cell(1, 0, 1));
+    CHECK(pushed.movables[0].cell == cell(2, 0, 1));
+    CHECK(pushed.movables[1].cell == cell(3, 0, 1));
+
+    const Level partial = makeLevel({
+        { "....", "....", "...." },
+        { " R# ", " B  ", " R  " },
+    });
+    const GameState partialInitial = rules::initialState(partial);
+    const GameState partialMove = rules::scopedStep(
+        partial,
+        partialInitial,
+        MoveDirection::Right,
+        {},
+        { .actors = { partialInitial.players[0].id } });
+    CHECK(partialMove.players[0].cell == cell(2, 1, 1));
+    CHECK(partialMove.movables[0].cell == cell(1, 0, 1));
+    CHECK(partialMove.movables[1].cell == cell(2, 2, 1));
+
+    const Level blockedBard = makeLevel({
+        { "...", "..." },
+        { " R ", " B#" },
+    });
+    const GameState blockedInitial = rules::initialState(blockedBard);
+    CHECK(rules::scopedStep(
+        blockedBard,
+        blockedInitial,
+        MoveDirection::Right,
+        {},
+        { .actors = { blockedInitial.players[0].id } }) == blockedInitial);
+}
+
 void testIceSlidesOneTilePerStep()
 {
     TEST("iceSlidesOneTilePerStep");
@@ -1590,6 +1661,8 @@ int main()
     testDruidCompulsivelyPullsTrailingMovables();
     testWitchCompulsivelySwapsWithVisibleMovables();
     testWitchSwapUsesNearestTargetAndRequiresClearSight();
+    testBardMovesNearbyMovableUnitsInItsDirection();
+    testBardAuraMovesAreIndependentAndCanPushOneBlock();
     testIceSlidesOneTilePerStep();
     testPlayerMovesWhileIceSlides();
     testPlayerMovesWhileConveyorCarriesRock();

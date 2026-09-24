@@ -252,7 +252,7 @@ Common tile symbols:
 | --- | --- | --- | --- |
 | space | Air | `.` | Ground |
 | `#` | Wall | `C` | Player |
-| `Q K U H` | Rogue / Knight / Druid / Witch starts | | |
+| `Q K U H B` | Rogue / Knight / Druid / Witch / Bard starts | | |
 | `R` | Rock | `P` | Pressure plate |
 | `E` | End | `I` | Ice |
 | `L` | Ladder | `W` | Legacy explicit water |
@@ -278,6 +278,14 @@ unit instead; other heroes and walls block the spell's line of sight. Rocks,
 ice blocks, turrets, and enemies are all movable units for these abilities,
 mirrors, pressure plates, conveyors, and ice momentum. Hazards and enemy
 attacks still resolve normally after forced movement.
+
+The bard surrounds itself with a 5x5 musical aura that also reaches one layer
+above and below. Whenever the bard moves, each live movable unit in that area
+tries to move one tile in the same direction. Affected units remain locked to
+the elevation where the aura caught them, allowing them to float across drops
+while the aura continues to affect them. Invalid individual moves are skipped;
+an affected unit may push one movable block when the block has a valid
+destination.
 
 Mesh decoration positions are world-space tile coordinates, rotations are XYZ
 Euler degrees, and scales must be positive. Their `model` names must exist in

@@ -606,6 +606,223 @@ void appendGameplayWorld(
     appendGameplayWaterAndShorelines(frame, input, state);
 }
 
+void appendBardAuraFace(
+    RenderFrameData& frame,
+    Vec2 minimum,
+    Vec2 maximum,
+    float elevation,
+    Vec4 color)
+{
+    frame.isoFaces.push_back({
+        .vertices = {
+            Vec3 { minimum.x, minimum.y, elevation },
+            Vec3 { maximum.x, minimum.y, elevation },
+            Vec3 { maximum.x, maximum.y, elevation },
+            Vec3 { minimum.x, maximum.y, elevation },
+        },
+        .normal = { 0.0f, 0.0f, 1.0f },
+        .color = color,
+        .translucent = true,
+        .castsShadows = false,
+    });
+}
+
+void appendBardWallRect(
+    RenderFrameData& frame,
+    Vec3 origin,
+    Vec3 tangent,
+    Vec3 normal,
+    float alongMinimum,
+    float alongMaximum,
+    float heightMinimum,
+    float heightMaximum,
+    float outwardOffset,
+    Vec4 color)
+{
+    const auto point = [&](float along, float height) {
+        return origin + tangent * along + normal * outwardOffset +
+            Vec3 { 0.0f, 0.0f, height };
+    };
+    frame.isoFaces.push_back({
+        .vertices = {
+            point(alongMinimum, heightMinimum),
+            point(alongMaximum, heightMinimum),
+            point(alongMaximum, heightMaximum),
+            point(alongMinimum, heightMaximum),
+        },
+        .normal = normal,
+        .color = color,
+        .translucent = true,
+        .castsShadows = false,
+    });
+}
+
+void appendBardWallNote(
+    RenderFrameData& frame,
+    Vec3 origin,
+    Vec3 tangent,
+    Vec3 normal,
+    float along,
+    float height,
+    Vec4 color)
+{
+    constexpr float headHalfWidth = 0.09f;
+    constexpr float headHalfHeight = 0.065f;
+    constexpr float stemHalfWidth = 0.022f;
+    constexpr float stemHeight = 0.28f;
+    constexpr float flagWidth = 0.14f;
+    constexpr float flagHeight = 0.045f;
+    constexpr float noteOffset = 0.012f;
+    appendBardWallRect(
+        frame,
+        origin,
+        tangent,
+        normal,
+        along - headHalfWidth,
+        along + headHalfWidth,
+        height - headHalfHeight,
+        height + headHalfHeight,
+        noteOffset,
+        color);
+    appendBardWallRect(
+        frame,
+        origin,
+        tangent,
+        normal,
+        along + headHalfWidth - stemHalfWidth * 2.0f,
+        along + headHalfWidth,
+        height,
+        height + stemHeight,
+        noteOffset,
+        color);
+    appendBardWallRect(
+        frame,
+        origin,
+        tangent,
+        normal,
+        along + headHalfWidth - stemHalfWidth * 2.0f,
+        along + headHalfWidth + flagWidth,
+        height + stemHeight - flagHeight,
+        height + stemHeight,
+        noteOffset,
+        color);
+}
+
+void appendBardMusicSheetWall(
+    RenderFrameData& frame,
+    Vec3 origin,
+    Vec3 tangent,
+    Vec3 normal,
+    float animationTimeSeconds,
+    std::size_t wallIndex)
+{
+    const float pulse = 0.5f + 0.5f * std::sin(animationTimeSeconds * 2.4f);
+    appendBardWallRect(
+        frame,
+        origin,
+        tangent,
+        normal,
+        0.0f,
+        5.0f,
+        -1.0f,
+        1.0f,
+        0.0f,
+        { 0.68f, 0.22f, 0.92f, 0.035f + pulse * 0.015f });
+
+    constexpr std::array<float, 5> staffHeights {
+        -0.60f,
+        -0.30f,
+        0.0f,
+        0.30f,
+        0.60f,
+    };
+    constexpr float staffHalfWidth = 0.012f;
+    const Vec4 staffColor {
+        0.96f, 0.60f, 1.0f, 0.38f + pulse * 0.12f,
+    };
+    for (const float height : staffHeights) {
+        appendBardWallRect(
+            frame,
+            origin,
+            tangent,
+            normal,
+            0.0f,
+            5.0f,
+            height - staffHalfWidth,
+            height + staffHalfWidth,
+            0.006f,
+            staffColor);
+    }
+
+    constexpr std::array<float, 2> notePositions {
+        1.25f,
+        3.75f,
+    };
+    for (std::size_t noteIndex = 0;
+         noteIndex < notePositions.size();
+         ++noteIndex) {
+        const float phase = static_cast<float>(wallIndex * 2 + noteIndex);
+        const float bob = 0.055f * std::sin(
+            animationTimeSeconds * 2.8f + phase * 0.9f);
+        const float height = (noteIndex == 0 ? -0.30f : 0.30f) + bob;
+        appendBardWallNote(
+            frame,
+            origin,
+            tangent,
+            normal,
+            notePositions[noteIndex],
+            height,
+            { 1.0f, 0.72f, 1.0f, 0.72f });
+    }
+}
+
+void appendBardAura(
+    RenderFrameData& frame,
+    Vec3 bardPosition,
+    float animationTimeSeconds)
+{
+    const float left = bardPosition.x - 2.0f;
+    const float top = bardPosition.y - 2.0f;
+    const float right = bardPosition.x + 3.0f;
+    const float bottom = bardPosition.y + 3.0f;
+    const float elevation = bardPosition.z + 0.025f;
+    const float pulse = 0.5f + 0.5f * std::sin(animationTimeSeconds * 2.4f);
+    appendBardAuraFace(
+        frame,
+        { left, top },
+        { right, bottom },
+        elevation,
+        { 0.68f, 0.22f, 0.92f, 0.075f + pulse * 0.025f });
+
+    const std::array<Vec3, 4> origins {
+        Vec3 { left, top, elevation },
+        Vec3 { right, top, elevation },
+        Vec3 { right, bottom, elevation },
+        Vec3 { left, bottom, elevation },
+    };
+    const std::array<Vec3, 4> tangents {
+        Vec3 { 1.0f, 0.0f, 0.0f },
+        Vec3 { 0.0f, 1.0f, 0.0f },
+        Vec3 { -1.0f, 0.0f, 0.0f },
+        Vec3 { 0.0f, -1.0f, 0.0f },
+    };
+    const std::array<Vec3, 4> normals {
+        Vec3 { 0.0f, -1.0f, 0.0f },
+        Vec3 { 1.0f, 0.0f, 0.0f },
+        Vec3 { 0.0f, 1.0f, 0.0f },
+        Vec3 { -1.0f, 0.0f, 0.0f },
+    };
+    for (std::size_t wallIndex = 0; wallIndex < origins.size(); ++wallIndex) {
+        appendBardMusicSheetWall(
+            frame,
+            origins[wallIndex],
+            tangents[wallIndex],
+            normals[wallIndex],
+            animationTimeSeconds,
+            wallIndex);
+    }
+}
+
 void appendGameplayEntities(
     RenderFrameData& frame,
     const RenderFrameBuilder::GameplayInput& input)
@@ -643,6 +860,14 @@ void appendGameplayEntities(
         const bool primary = playerIndex == primaryIndex;
         const bool controlled = rules::playerControllerId(state, playerIndex) ==
             activeController;
+        if (!state.players[playerIndex].dead &&
+            state.players[playerIndex].character.value_or(
+                input.level.character()) == CharacterType::Bard) {
+            appendBardAura(
+                frame,
+                visual.motion.renderPosition,
+                input.presentation.worldAnimationTimeSeconds());
+        }
         RenderFrameData::Tile playerTile {
             .cell = state.players[playerIndex].cell,
             .position = {

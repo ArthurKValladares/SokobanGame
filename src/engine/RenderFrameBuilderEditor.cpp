@@ -47,6 +47,9 @@ CharacterType characterForStartTile(
     if (tile == TileType::Witch) {
         return CharacterType::Witch;
     }
+    if (tile == TileType::Bard) {
+        return CharacterType::Bard;
+    }
     return legacyCharacter;
 }
 

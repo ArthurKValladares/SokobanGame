@@ -369,6 +369,13 @@
       "rotateHalfTurn": true
     },
     {
+      "name": "Bard",
+      "path": "KayKit Magical Girl/characters/MagicalGirl.glb",
+      "geometry": "skinned",
+      "preserveAspectRatio": true,
+      "rotateHalfTurn": true
+    },
+    {
       "name": "Barbarian",
       "path": "KayKit Adventurers 2.0/Characters/gltf/Barbarian.glb",
       "geometry": "skinned",

@@ -1182,10 +1182,36 @@ public:
         markDeadEntitiesDone();
         bool anyMovement = true;
         while (anyMovement) {
+            const bool mayPulse = anyBardHasMovementIntent();
+            const std::optional<GameState> beforeBardPulse = mayPulse
+                ? std::optional<GameState> { after_ }
+                : std::nullopt;
+            const std::optional<std::vector<Status>> statusesBeforeBardPulse =
+                mayPulse
+                ? std::optional<std::vector<Status>> { status_ }
+                : std::nullopt;
+            const std::optional<std::vector<char>> enemiesBeforeBardPulse =
+                mayPulse
+                ? std::optional<std::vector<char>> { enemyMoved_ }
+                : std::nullopt;
             deriveIntents();
+            const bool hasBardPulse = std::ranges::any_of(
+                status_,
+                [](const Status& status) { return status.bardDriven; });
             markContested();
             anyMovement = resolveMoves();
             settleBlocked();
+            if (hasBardPulse && !anyBardMovedThisMicro()) {
+                after_ = *beforeBardPulse;
+                status_ = *statusesBeforeBardPulse;
+                enemyMoved_ = *enemiesBeforeBardPulse;
+                suppressBardInfluences_ = true;
+                deriveIntents();
+                markContested();
+                anyMovement = resolveMoves();
+                settleBlocked();
+                suppressBardInfluences_ = false;
+            }
             if (anyMovement) {
                 resolveTurretShots();
                 resolveAttacks();
@@ -1220,6 +1246,14 @@ private:
         bool resolved = false;
         bool movedThisMicro = false;
         bool inputDriven = false; // player only
+        // A live bard moving within range overrides this movable unit's
+        // ordinary slide or conveyor intent for the current micro-step.
+        // The budget mirrors the bard's movement source so faster configured
+        // movement still produces exactly one pulse per bard tile.
+        std::optional<MoveDirection> bardDirection;
+        int bardMoveBudget = 0;
+        bool bardDirectionContested = false;
+        bool bardDriven = false;
         // A witch replaces an input-driven walk with one teleport to the
         // nearest visible movable unit on that ray.
         std::optional<ChainEntity> witchSwapTarget;
@@ -1342,6 +1376,140 @@ private:
         }
     }
 
+    struct PlayerMovementIntent {
+        MoveDirection direction = MoveDirection::Up;
+        int budget = 0;
+        bool inputDriven = false;
+    };
+
+    [[nodiscard]] std::optional<PlayerMovementIntent> movementIntentForPlayer(
+        std::size_t playerIndex) const
+    {
+        const Status& status = status_[entityIndexForPlayer(playerIndex)];
+        if (status.done || !status.active || playerDead(after_, playerIndex)) {
+            return std::nullopt;
+        }
+        if (playerSliding(after_, playerIndex)) {
+            if (status.consumed < rates_.slide) {
+                return PlayerMovementIntent {
+                    .direction = *playerSliding(after_, playerIndex),
+                    .budget = rates_.slide,
+                };
+            }
+            return std::nullopt;
+        }
+        if (playerInput_) {
+            if (status.consumed < rates_.playerMove) {
+                return PlayerMovementIntent {
+                    .direction = *playerInput_,
+                    .budget = rates_.playerMove,
+                    .inputDriven = true,
+                };
+            }
+            return std::nullopt;
+        }
+        if (const std::optional<MoveDirection> belt =
+                conveyorDirectionAt(level_, playerCell(after_, playerIndex))) {
+            if (status.consumed < rates_.conveyor) {
+                return PlayerMovementIntent {
+                    .direction = *belt,
+                    .budget = rates_.conveyor,
+                };
+            }
+        }
+        return std::nullopt;
+    }
+
+    void addBardInfluence(
+        std::size_t entityIndex,
+        MoveDirection direction,
+        int budget)
+    {
+        Status& status = status_[entityIndex];
+        if (status.done) {
+            return;
+        }
+        status.active = true;
+        if (status.bardDirection && *status.bardDirection != direction) {
+            status.bardDirectionContested = true;
+            return;
+        }
+        status.bardDirection = direction;
+        status.bardMoveBudget = std::max(status.bardMoveBudget, budget);
+    }
+
+    void deriveBardInfluences()
+    {
+        if (suppressBardInfluences_) {
+            return;
+        }
+        for (std::size_t playerIndex = 0;
+             playerIndex < playerCount_;
+             ++playerIndex) {
+            if (after_.players[playerIndex].character.value_or(
+                    level_.character()) != CharacterType::Bard) {
+                continue;
+            }
+            const std::optional<PlayerMovementIntent> bardIntent =
+                movementIntentForPlayer(playerIndex);
+            if (!bardIntent) {
+                continue;
+            }
+
+            const GridPosition3 bardCell = playerCell(after_, playerIndex);
+            auto inAura = [&](GridPosition3 cell) {
+                return std::abs(cell.x - bardCell.x) <= 2 &&
+                    std::abs(cell.y - bardCell.y) <= 2 &&
+                    std::abs(cell.z - bardCell.z) <= 1;
+            };
+            for (std::size_t i = 0; i < movableCount_; ++i) {
+                if (!after_.movables[i].fallen &&
+                    !after_.movables[i].dead &&
+                    inAura(after_.movables[i].cell)) {
+                    addBardInfluence(
+                        i, bardIntent->direction, bardIntent->budget);
+                }
+            }
+            for (std::size_t i = 0; i < enemyCount_; ++i) {
+                if (!after_.enemies[i].fallen && !after_.enemies[i].dead &&
+                    inAura(after_.enemies[i].cell)) {
+                    addBardInfluence(
+                        entityIndexForEnemy(i),
+                        bardIntent->direction,
+                        bardIntent->budget);
+                }
+            }
+        }
+    }
+
+    [[nodiscard]] bool anyBardMovedThisMicro() const
+    {
+        for (std::size_t playerIndex = 0;
+             playerIndex < playerCount_;
+             ++playerIndex) {
+            if (after_.players[playerIndex].character.value_or(
+                    level_.character()) == CharacterType::Bard &&
+                status_[entityIndexForPlayer(playerIndex)].movedThisMicro) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    [[nodiscard]] bool anyBardHasMovementIntent() const
+    {
+        for (std::size_t playerIndex = 0;
+             playerIndex < playerCount_;
+             ++playerIndex) {
+            if (after_.players[playerIndex].character.value_or(
+                    level_.character()) == CharacterType::Bard &&
+                movementIntentForPlayer(playerIndex)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void deriveIntents()
     {
         std::fill(
@@ -1356,7 +1524,17 @@ private:
             status.resolved = false;
             status.movedThisMicro = false;
             status.inputDriven = false;
+            status.bardDirection.reset();
+            status.bardMoveBudget = 0;
+            status.bardDirectionContested = false;
+            status.bardDriven = false;
             status.witchSwapTarget.reset();
+        }
+
+        deriveBardInfluences();
+
+        for (std::size_t i = 0; i < status_.size(); ++i) {
+            Status& status = status_[i];
 
             // Out of scope means scenery: still an obstacle to everyone else,
             // but it wants nothing and will not be written.
@@ -1365,24 +1543,10 @@ private:
             }
             if (isPlayer(i)) {
                 const std::size_t playerIndex = playerIndexForEntity(i);
-                if (playerDead(after_, playerIndex)) {
-                    continue;
-                }
-                if (playerSliding(after_, playerIndex)) {
-                    if (status.consumed < rates_.slide) {
-                        status.intent = playerSliding(after_, playerIndex);
-                    }
-                } else if (playerInput_) {
-                    if (status.consumed < rates_.playerMove) {
-                        status.intent = playerInput_;
-                        status.inputDriven = true;
-                    }
-                } else if (const std::optional<MoveDirection> belt =
-                               conveyorDirectionAt(
-                                   level_, playerCell(after_, playerIndex))) {
-                    if (status.consumed < rates_.conveyor) {
-                        status.intent = belt;
-                    }
+                if (const std::optional<PlayerMovementIntent> movement =
+                        movementIntentForPlayer(playerIndex)) {
+                    status.intent = movement->direction;
+                    status.inputDriven = movement->inputDriven;
                 }
             } else if (isEnemy(i)) {
                 const std::size_t enemyIndex = enemyIndexForEntity(i);
@@ -1390,7 +1554,12 @@ private:
                     after_.enemies[enemyIndex].dead) {
                     continue;
                 }
-                if (after_.enemies[enemyIndex].sliding) {
+                if (status.bardDirection &&
+                    !status.bardDirectionContested &&
+                    status.consumed < status.bardMoveBudget) {
+                    status.intent = status.bardDirection;
+                    status.bardDriven = true;
+                } else if (after_.enemies[enemyIndex].sliding) {
                     if (status.consumed < rates_.slide) {
                         status.intent = after_.enemies[enemyIndex].sliding;
                     }
@@ -1405,7 +1574,12 @@ private:
                 if (after_.movables[i].fallen || after_.movables[i].dead) {
                     continue;
                 }
-                if (after_.movables[i].sliding) {
+                if (status.bardDirection &&
+                    !status.bardDirectionContested &&
+                    status.consumed < status.bardMoveBudget) {
+                    status.intent = status.bardDirection;
+                    status.bardDriven = true;
+                } else if (after_.movables[i].sliding) {
                     if (status.consumed < rates_.slide) {
                         status.intent = after_.movables[i].sliding;
                     }
@@ -1454,8 +1628,15 @@ private:
             }
             for (std::size_t j = i + 1; j < status_.size(); ++j) {
                 if (status_[j].target && *status_[i].target == *status_[j].target) {
-                    status_[i].contested = true;
-                    status_[j].contested = true;
+                    if (status_[i].bardDriven != status_[j].bardDriven) {
+                        Status& follower = status_[i].bardDriven
+                            ? status_[i]
+                            : status_[j];
+                        follower.contested = true;
+                    } else {
+                        status_[i].contested = true;
+                        status_[j].contested = true;
+                    }
                 }
             }
         }
@@ -1471,6 +1652,43 @@ private:
         } else if (!onlyWhenSliding) {
             status_[index].done = true;
         }
+    }
+
+    // A bard-driven movable unit has the same one-block shove available to an
+    // ordinary hero. This is deliberately not a chain push: the knight keeps
+    // that distinct ability, while every aura participant can still advance
+    // through a single loose rock, ice block, or turret when space permits.
+    [[nodiscard]] bool pushOneMovableForBard(
+        std::size_t blockerIndex,
+        MoveDirection direction)
+    {
+        Status& blockerStatus = status_[blockerIndex];
+        if (blockerStatus.movedThisMicro) {
+            return false;
+        }
+        const GridPosition3 destination = movementTarget(
+            after_.movables[blockerIndex].cell, direction);
+        if (!staticCellAllowsEntity(level_, destination) ||
+            movableBlocksAt(after_, destination, blockerIndex) ||
+            playerBlocksAt(after_, destination) ||
+            enemyBlocksAt(after_, destination) ||
+            (!blockerStatus.bardDriven &&
+                !movableFallTarget(
+                    level_, after_, blockerIndex, destination)
+                     .supported)) {
+            return false;
+        }
+
+        applyMovableMove(
+            blockerIndex,
+            direction,
+            destination,
+            blockerStatus.bardDriven);
+        blockerStatus.active = true;
+        blockerStatus.resolved = true;
+        blockerStatus.movedThisMicro = true;
+        blockerStatus.done = false;
+        return true;
     }
 
     [[nodiscard]] bool resolveMoves()
@@ -1509,14 +1727,27 @@ private:
             return true;
         }
         if (!staticCellAllowsEntity(level_, target) ||
-            !movableFallTarget(level_, after_, index, target).supported) {
+            (!status.bardDriven &&
+                !movableFallTarget(level_, after_, index, target).supported)) {
             slidingOf(index) = std::nullopt;
             status.done = true;
             status.resolved = true;
             return true;
         }
-        if (movableBlocksAt(after_, target, index) ||
-            playerBlocksAt(after_, target)) {
+        if (const GameState::Movable* blocker = movableAt(after_, target)) {
+            const std::size_t blockerIndex = static_cast<std::size_t>(
+                blocker - after_.movables.data());
+            if (blockerIndex != index && !status_[blockerIndex].resolved) {
+                return false;
+            }
+            if (!status.bardDriven || blockerIndex == index ||
+                !pushOneMovableForBard(blockerIndex, direction)) {
+                cancelAndFinish(index, true);
+                status.resolved = true;
+                return true;
+            }
+        }
+        if (playerBlocksAt(after_, target)) {
             return false; // the blocking entity may still move this micro-step
         }
         if (const GameState::Enemy* enemy = enemyAt(after_, target)) {
@@ -1532,7 +1763,7 @@ private:
                 return true;
             }
         }
-        applyMovableMove(index, direction, target);
+        applyMovableMove(index, direction, target, status.bardDriven);
         status.resolved = true;
         status.movedThisMicro = true;
         anyMovement = true;
@@ -1554,7 +1785,8 @@ private:
             return true;
         }
         if (!staticCellAllowsEntity(level_, target) ||
-            !enemyFallTarget(level_, after_, enemyIndex, target).supported) {
+            (!status.bardDriven &&
+                !enemyFallTarget(level_, after_, enemyIndex, target).supported)) {
             after_.enemies[enemyIndex].sliding.reset();
             status.done = true;
             status.resolved = true;
@@ -1567,9 +1799,12 @@ private:
             if (!status_[blockerIndex].resolved) {
                 return false;
             }
-            cancelAndFinish(entityIndex, true);
-            status.resolved = true;
-            return true;
+            if (!status.bardDriven ||
+                !pushOneMovableForBard(blockerIndex, direction)) {
+                cancelAndFinish(entityIndex, true);
+                status.resolved = true;
+                return true;
+            }
         }
         for (std::size_t i = 0; i < playerCount_; ++i) {
             if (playerDead(after_, i) || !(playerCell(after_, i) == target)) {
@@ -1594,7 +1829,7 @@ private:
             return true;
         }
 
-        applyEnemyMove(enemyIndex, direction);
+        applyEnemyMove(enemyIndex, direction, status.bardDriven);
         status.resolved = true;
         status.movedThisMicro = true;
         anyMovement = true;
@@ -1930,14 +2165,16 @@ private:
 
     void applyEnemyMove(
         std::size_t enemyIndex,
-        MoveDirection direction)
+        MoveDirection direction,
+        bool preserveElevation = false)
     {
         const GridPosition3 destination = movementTarget(
             after_.enemies[enemyIndex].cell,
             direction);
         after_.enemies[enemyIndex].cell = destination;
-        const FallResult fall = enemyFallTarget(
-            level_, after_, enemyIndex, destination);
+        const FallResult fall = preserveElevation
+            ? FallResult { .cell = destination, .supported = true }
+            : enemyFallTarget(level_, after_, enemyIndex, destination);
         after_.enemies[enemyIndex].cell = fall.cell;
         after_.enemies[enemyIndex].fallen = fall.fallen;
         const bool fell = fall.cell != destination || fall.fallen;
@@ -2207,10 +2444,16 @@ private:
     // Momentum continues while the entity is icy (an ice block, or anything
     // standing on an ice floor), did not fall, and the next cell is not
     // statically blocked.
-    void applyMovableMove(std::size_t index, MoveDirection direction, GridPosition3 target)
+    void applyMovableMove(
+        std::size_t index,
+        MoveDirection direction,
+        GridPosition3 target,
+        bool preserveElevation = false)
     {
         after_.movables[index].cell = target;
-        const FallResult fall = movableFallTarget(level_, after_, index, target);
+        const FallResult fall = preserveElevation
+            ? FallResult { .cell = target, .supported = true }
+            : movableFallTarget(level_, after_, index, target);
         const bool fell = fall.cell.z != target.z || fall.fallen;
         after_.movables[index].cell = fall.cell;
         after_.movables[index].fallen = fall.fallen;
@@ -2315,6 +2558,7 @@ private:
     // volleys are the deliberate exception resolved before movement begins.
     std::vector<char> enemyMovedThisMicro_;
     std::vector<TurretShot>* turretShots_ = nullptr;
+    bool suppressBardInfluences_ = false;
 };
 
 } // namespace

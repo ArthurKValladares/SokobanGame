@@ -17,13 +17,14 @@ enum class TileType {
     End,
     PressurePlate,
     // Legacy generic player start. New puzzle documents author a concrete
-    // Rogue, Knight, Druid, or Witch tile; overworld documents retain this
-    // tile for backwards compatibility with their single rogue.
+    // Rogue, Knight, Druid, Witch, or Bard tile; overworld documents retain
+    // this tile for backwards compatibility with their single rogue.
     Player,
     Rogue,
     Knight,
     Druid,
     Witch,
+    Bard,
     Rock,
     Ice,
     Water,
@@ -65,6 +66,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::Knight, 'K', "Knight", { 0.25f, 0.55f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::Druid, 'U', "Druid", { 0.35f, 0.72f, 0.28f, 1.0f } },
     TileTypeDefinition { TileType::Witch, 'H', "Witch", { 0.62f, 0.25f, 0.82f, 1.0f } },
+    TileTypeDefinition { TileType::Bard, 'B', "Bard", { 0.94f, 0.44f, 0.82f, 1.0f } },
     TileTypeDefinition { TileType::Rock, 'R', "Rock", { 0.20f, 0.10f, 0.04f, 1.0f } },
     TileTypeDefinition { TileType::Ice, 'I', "Ice", { 0.62f, 0.88f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::Water, 'W', "Water", { 0.08f, 0.34f, 0.78f, 1.0f } },

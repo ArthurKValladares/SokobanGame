@@ -1073,7 +1073,8 @@ static void prepareAuxiliaryGeometry(
             { corners[4], corners[5], corners[6], corners[7] });
     }
     for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
-        if (face.effect != RenderSurfaceEffect::MirrorEnergy) {
+        if (face.castsShadows &&
+            face.effect != RenderSurfaceEffect::MirrorEnergy) {
             appendShadowFace(face.vertices);
         }
     }
@@ -1442,7 +1443,8 @@ void appendSourceIsoFaces(
         const std::size_t renderableIndex =
             frameData.tiles.size() + sourceIndex;
         if (scene.renderables[renderableIndex].mainSceneVisible) {
-            (face.material == PreparedSurfaceMaterial::MirrorEnergy
+            (source.translucent ||
+                    face.material == PreparedSurfaceMaterial::MirrorEnergy
                     ? scene.translucentFaceIndices
                     : scene.opaqueFaceIndices)
                 .push_back(scene.isoFaces.size());

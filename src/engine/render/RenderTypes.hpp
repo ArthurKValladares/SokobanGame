@@ -368,6 +368,11 @@ struct RenderFrameData {
         Vec3 normal {};
         Vec4 color {};
         RenderSurfaceEffect effect = RenderSurfaceEffect::Standard;
+        // Translucent authored faces draw after the opaque scene without
+        // writing depth. This keeps decorative volumes from punching holes
+        // through water, tiles, and models behind them.
+        bool translucent = false;
+        bool castsShadows = true;
     };
 
     struct WaterSurface {
