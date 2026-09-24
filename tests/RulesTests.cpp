@@ -692,9 +692,9 @@ void testPlayerOnPlateUnlocks()
     CHECK(rules::isEndUnlocked(level, moved));
 }
 
-void testPlayerDrownsInWater()
+void testPlayerCannotWalkIntoWater()
 {
-    TEST("playerDrownsInWater");
+    TEST("playerCannotWalkIntoWater");
     const Level level = Level::loadFromLayers(
         {
             { ". " },
@@ -705,15 +705,34 @@ void testPlayerDrownsInWater()
     const GameState state = rules::initialState(level);
     CHECK(rules::isUnfilledWater(level, state, cell(1, 0, 1)));
 
-    const GameState drowned = rules::step(level, state, MoveDirection::Right);
-    CHECK(drowned.players[0].cell == cell(1, 0, 1));
-    CHECK(drowned.players[0].dead);
-    CHECK(!drowned.players[0].sliding);
-    CHECK(rules::isUnfilledWater(level, drowned, cell(1, 0, 1)));
+    const GameState blocked = rules::step(level, state, MoveDirection::Right);
+    CHECK(blocked == state);
+    CHECK(blocked.players[0].cell == cell(0, 0, 1));
+    CHECK(!blocked.players[0].dead);
+    CHECK(rules::isUnfilledWater(level, blocked, cell(1, 0, 1)));
+}
 
-    // Dead players ignore input; the drowned world is inert.
-    CHECK(rules::step(level, drowned, MoveDirection::Left) == drowned);
-    CHECK(!rules::hasPendingMotion(level, drowned));
+void testPlayerCanSlideIntoWater()
+{
+    TEST("playerCanSlideIntoWater");
+    const Level level = makeLevel({
+        { "...WW" },
+        { "CI   " },
+    });
+    GameState state = rules::initialState(level);
+
+    state = rules::step(level, state, MoveDirection::Right); // push the ice
+    state = rules::step(level, state); // ice fills the first water tile
+    state = rules::step(level, state, MoveDirection::Right);
+    state = rules::step(level, state, MoveDirection::Right); // step onto ice
+    CHECK(state.players[0].cell == cell(3, 0, 1));
+    CHECK(state.players[0].sliding == MoveDirection::Right);
+
+    state = rules::step(level, state); // momentum carries the player into water
+    CHECK(state.players[0].cell == cell(4, 0, 1));
+    CHECK(state.players[0].dead);
+    CHECK(state.players[0].drowned);
+    CHECK(!state.players[0].sliding);
 }
 
 void testRockFillsWater()
@@ -1676,7 +1695,8 @@ int main()
     testSlideMomentumOverridesInput();
     testPressurePlateUnlocksEnd();
     testPlayerOnPlateUnlocks();
-    testPlayerDrownsInWater();
+    testPlayerCannotWalkIntoWater();
+    testPlayerCanSlideIntoWater();
     testRockFillsWater();
     testLadderClimb();
     testLadderClimbBlockedByMovable();

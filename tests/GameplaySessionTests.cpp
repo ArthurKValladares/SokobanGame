@@ -365,14 +365,22 @@ void testDeadPlayerDiscardsCommandsUntilUndo()
 {
     TEST("deadPlayerDiscardsCommandsUntilUndo");
     const Level level = makeLevel({
-        { ".W" },
-        { "C " },
+        { "..W" },
+        { "C> " },
     });
     GameplaySession session;
     session.reset(level);
     session.queueMove(MoveDirection::Right);
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
+    CHECK(!session.state().players[0].dead);
+
+    // The conveyor ride is secondary movement, so it can carry the player
+    // into water even though walking into that same cell would be blocked.
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().players[0].cell == cell(2, 0, 1));
     CHECK(session.state().players[0].dead);
 
     session.queueRestart();
@@ -382,7 +390,7 @@ void testDeadPlayerDiscardsCommandsUntilUndo()
     CHECK(session.activeAction().reversed);
     finishAction(session);
     CHECK(!session.state().players[0].dead);
-    CHECK(session.state().players[0].cell == cell(0, 0, 1));
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
 }
 
 void testRestartCanBeUndone()

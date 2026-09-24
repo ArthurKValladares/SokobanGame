@@ -1909,8 +1909,17 @@ private:
             anyMovement = true;
             return true;
         }
-        if (!staticCellAllowsEntity(level_, target) ||
-            !playerFallTarget(level_, after_, playerIndex, target).supported) {
+        if (!staticCellAllowsEntity(level_, target)) {
+            playerSliding(after_, playerIndex) = std::nullopt;
+            status.done = true;
+            status.resolved = true;
+            return true;
+        }
+        const FallResult fall =
+            playerFallTarget(level_, after_, playerIndex, target);
+        // A deliberate walk stops at unfilled water. Forced motion keeps the
+        // ordinary fall result, so slides and conveyor rides can still drown.
+        if (!fall.supported || (status.inputDriven && fall.fallen)) {
             playerSliding(after_, playerIndex) = std::nullopt;
             status.done = true;
             status.resolved = true;
