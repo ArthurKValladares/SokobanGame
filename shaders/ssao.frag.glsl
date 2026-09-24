@@ -69,7 +69,12 @@ vec3 viewNormal(vec3 centerPosition)
     // sample hemisphere consistently lies outside the visible surface.
     vec3 normal = cross(dFdx(centerPosition), dFdy(centerPosition));
     float magnitudeSquared = dot(normal, normal);
-    if (magnitudeSquared <= 0.00000001) {
+    // This cross product is an area in scene-units-per-pixel squared. Its
+    // magnitude therefore changes with resolution and depth even when the
+    // surface is perfectly well defined. Only reject a genuinely degenerate
+    // differential; a visual-scale epsilon makes whole rows switch to the
+    // fallback normal together and creates depth-aligned AO bands.
+    if (magnitudeSquared <= 1e-20) {
         return vec3(0.0, 0.0, -1.0);
     }
     normal *= inversesqrt(magnitudeSquared);

@@ -105,7 +105,9 @@ vec3 viewNormalAt(ivec2 centerCoordinate, vec3 centerPosition)
 
     vec3 normal = cross(dx, dy);
     float magnitudeSquared = dot(normal, normal);
-    if (magnitudeSquared <= 0.00000001) {
+    // The cross product is a screen-footprint area, so a fixed visual-scale
+    // epsilon would reject valid surfaces as their pixel footprint shrinks.
+    if (magnitudeSquared <= 1e-20) {
         return vec3(0.0, 0.0, -1.0);
     }
     normal *= inversesqrt(magnitudeSquared);

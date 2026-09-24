@@ -102,11 +102,13 @@ Vec2 projectSsaoViewPosition(
 
 Vec3 resolveSsaoViewNormal(Vec3 center, Vec3 right, Vec3 down)
 {
-    Vec3 normal = normalize(cross(
-        subtract(right, center), subtract(down, center)));
-    if (length(normal) <= 0.000001f) {
+    Vec3 normal = cross(
+        subtract(right, center), subtract(down, center));
+    const float magnitudeSquared = dot(normal, normal);
+    if (magnitudeSquared <= 1e-20f) {
         return { 0.0f, 0.0f, -1.0f };
     }
+    normal = multiply(normal, 1.0f / std::sqrt(magnitudeSquared));
     if (dot(normal, -center) < 0.0f) {
         normal = -normal;
     }

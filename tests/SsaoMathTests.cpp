@@ -171,6 +171,15 @@ void testReconstructedNormalFacesTheCamera()
 
     const Vec3 reversed = resolveSsaoViewNormal(center, down, right);
     CHECK(near(reversed, normal));
+
+    // Screen-space position differentials shrink with resolution and camera
+    // depth. Their cross product still has a valid direction long after its
+    // unnormalized magnitude falls below a visual-scale epsilon.
+    const Vec3 fineNormal = resolveSsaoViewNormal(
+        center,
+        add(center, Vec3 { 0.0001f, 0.0f, 0.0f }),
+        add(center, Vec3 { 0.0f, -0.0001f, 0.0f }));
+    CHECK(near(fineNormal, normal));
 }
 
 void testSampleComparisonUsesViewUnitsAndRejectsHalos()
