@@ -360,6 +360,8 @@ RenderFrameData initializeGameplayFrame(
         input.presentation.worldAnimationTimeSeconds();
     frame.effectAnimationTimeSeconds =
         input.presentation.worldAnimationTimeSeconds();
+    frame.animationTransitionTimeSeconds =
+        input.presentation.animationTransitionTimeSeconds();
     frame.playerPosition = {
         primaryPlayerVisual.motion.renderPosition.x,
         primaryPlayerVisual.motion.renderPosition.y,

@@ -516,6 +516,9 @@ struct RenderFrameData {
     }
     float waterAnimationTimeSeconds = 0.0f;
     float effectAnimationTimeSeconds = 0.0f;
+    // A monotonic presentation clock for animation transitions. Clip-local
+    // times can reset or run backward and therefore cannot measure a fade.
+    float animationTransitionTimeSeconds = 0.0f;
     // Fullscreen close/reveal amount for world replacement. Kept in the
     // prepared frame so command recording never reaches back into Application.
     float levelTransitionAmount = 0.0f;

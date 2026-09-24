@@ -59,11 +59,13 @@ private:
         RenderAnimation fadeFromAnimation = noAnimation;
         float fadeFromTime = 0.0f;
         float fadeElapsed = 0.0f;
+        float lastTransitionTimeSeconds = -1.0f;
     };
 
     [[nodiscard]] std::optional<SkinningRequest> updateTile(
         const RenderFrameData::Tile& tile,
         PlaybackState& playback,
+        float transitionTimeSeconds,
         bool forceSample = false);
     void resetPlayback();
 

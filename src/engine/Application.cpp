@@ -1843,6 +1843,8 @@ RenderFrameData Application::buildEditorRenderFrame(
             : std::nullopt,
         .worldAnimationTimeSeconds =
             presentation_.worldAnimationTimeSeconds(),
+        .animationTransitionTimeSeconds =
+            presentation_.animationTransitionTimeSeconds(),
         .conveyorBeltScrollOffset = beltScrollOffset,
         .levelLocation =
             levelLocationFromScreenPath(tools_->levelEditor.loadedDocumentPath()),

@@ -138,6 +138,7 @@ GltfAnimationClip makeClip(std::string name, float durationSeconds = 0.0f)
 RenderFrameData frameWithAnimation(RenderAnimation animation, float timeSeconds)
 {
     RenderFrameData frame;
+    frame.animationTransitionTimeSeconds = timeSeconds;
     frame.tiles.push_back({
         .model = heroModel,
         .animation = animation,
@@ -207,7 +208,10 @@ void testCrossfadeProgressesAndCompletes()
     CHECK(halfway->blended());
     CHECK(halfway->fromClip->name == "idle");
     CHECK(halfway->toClip->name == "movement");
-    CHECK(near(halfway->fromTimeSeconds, 1.05f));
+    // A clip switch has no meaningful local-time delta: the source holds its
+    // last sampled pose on the transition frame, then advances on later
+    // frames once the target clock has an in-domain delta.
+    CHECK(near(halfway->fromTimeSeconds, 1.0f));
     CHECK(near(halfway->blend, 0.5f));
 
     const auto complete = controller.update(frameWithAnimation(moveClip, 1.1f));
@@ -226,8 +230,37 @@ void testReverseTimeStillAdvancesFade()
     CHECK(request.has_value());
     CHECK(request->blended());
     CHECK(request->fromClip->name == "idle");
-    CHECK(near(request->fromTimeSeconds, 0.95f));
+    CHECK(near(request->fromTimeSeconds, 1.0f));
     CHECK(near(request->blend, 0.5f));
+}
+
+void testCrossfadeClockIsIndependentFromClipLocalTime()
+{
+    TEST("crossfadeClockIsIndependentFromClipLocalTime");
+    AnimationController controller = makeController(0.1f);
+
+    RenderFrameData idle = frameWithAnimation(idleClip, 5.0f);
+    idle.animationTransitionTimeSeconds = 10.0f;
+    CHECK(controller.update(idle).has_value());
+
+    // A real clip transition commonly resets local time to zero. That jump is
+    // not elapsed fade time and must not instantly consume the crossfade.
+    RenderFrameData move = frameWithAnimation(moveClip, 0.0f);
+    move.animationTransitionTimeSeconds = 10.01f;
+    const auto started = controller.update(move);
+    CHECK(started.has_value());
+    CHECK(started->blended());
+    CHECK(near(started->fromTimeSeconds, 5.0f));
+    CHECK(near(started->toTimeSeconds, 0.0f));
+    CHECK(near(started->blend, 0.028f));
+
+    // Transition time keeps advancing even when a target clip is paused.
+    move.animationTransitionTimeSeconds = 10.05f;
+    const auto halfway = controller.update(move);
+    CHECK(halfway.has_value());
+    CHECK(halfway->blended());
+    CHECK(near(halfway->fromTimeSeconds, 5.0f));
+    CHECK(near(halfway->blend, 0.5f));
 }
 
 void testHardTransitionDiscardsPreviousPose()
@@ -723,6 +756,7 @@ int main()
     testSelectsFirstAnimatedRogueAndDeduplicates();
     testCrossfadeProgressesAndCompletes();
     testReverseTimeStillAdvancesFade();
+    testCrossfadeClockIsIndependentFromClipLocalTime();
     testHardTransitionDiscardsPreviousPose();
     testPreviewOverridesAndThenReleasesGameplay();
     testNonLoopingAnimationFallsBackAtClipDuration();

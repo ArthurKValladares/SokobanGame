@@ -4,6 +4,8 @@
 #include "engine/Math.hpp"
 #include "engine/render/RenderTypes.hpp"
 
+#include <array>
+#include <cstddef>
 #include <optional>
 #include <vector>
 
@@ -28,16 +30,38 @@ public:
     };
 
     struct AnimatedActorVisual {
+        static constexpr std::size_t animationUseCount =
+            static_cast<std::size_t>(AnimationUse::Count);
+
         EntityVisual motion;
         AnimationUse animationUse = AnimationUse::PlayerIdle;
         std::optional<AnimationUse> animationFallbackUse;
         float clipTimeSeconds = 0.0f;
+        // Each semantic animation owns its own clock. A single shared clock
+        // made a short movement action overwrite locomotion phase with the
+        // idle clip's time, so every following step restarted on the same
+        // foot. Keeping the clocks here also makes newly added looping uses
+        // phase-continuous without adding another special case.
+        std::array<float, animationUseCount> clipTimeSecondsByUse {};
         float clipPlaybackRate = 1.0f;
         bool animationLoops = true;
         bool animationCrossfades = true;
         // Unit quaternion. Actor presentation owns smooth orientation;
         // render data receives only the resulting yaw angle.
         Quat orientation {};
+
+        [[nodiscard]] float clipTimeFor(AnimationUse use) const
+        {
+            return clipTimeSecondsByUse[static_cast<std::size_t>(use)];
+        }
+
+        void setClipTimeFor(AnimationUse use, float timeSeconds)
+        {
+            clipTimeSecondsByUse[static_cast<std::size_t>(use)] = timeSeconds;
+            if (animationUse == use) {
+                clipTimeSeconds = timeSeconds;
+            }
+        }
     };
 
     struct PlayerVisual : AnimatedActorVisual {
@@ -85,6 +109,13 @@ public:
 
     [[nodiscard]] float conveyorBeltScrollOffset(float stepDurationSeconds) const;
     [[nodiscard]] float worldAnimationTimeSeconds() const { return worldAnimationTimeSeconds_; }
+    // Monotonic presentation time used for transitions between clips. Unlike
+    // worldAnimationTimeSeconds it does not run backward during undo, and
+    // unlike clip-local clocks it does not jump when the selected clip changes.
+    [[nodiscard]] float animationTransitionTimeSeconds() const
+    {
+        return animationTransitionTimeSeconds_;
+    }
     [[nodiscard]] float cameraPitchDegrees() const { return cameraPitchDegrees_; }
     [[nodiscard]] const std::vector<PlayerVisual>& players() const { return players_; }
     [[nodiscard]] const std::vector<EntityVisual>& movables() const { return movables_; }
@@ -114,6 +145,7 @@ private:
     // flight, so one value suffices even with concurrent actions.
     float reverseSourceStartSeconds_ = 0.0f;
     float worldAnimationTimeSeconds_ = 0.0f;
+    float animationTransitionTimeSeconds_ = 0.0f;
     float cameraPitchDegrees_ = 0.0f;
     float cameraPitchStartDegrees_ = 0.0f;
     float cameraPitchTargetDegrees_ = 0.0f;

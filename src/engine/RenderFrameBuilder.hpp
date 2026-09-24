@@ -100,6 +100,7 @@ public:
         bool selectingMoveSource = false;
         std::optional<TileType> editorPreviewTile;
         float worldAnimationTimeSeconds = 0.0f;
+        float animationTransitionTimeSeconds = 0.0f;
         float conveyorBeltScrollOffset = 0.0f;
         // The screen this document belongs to, when it is one. Set so the
         // editor previews (and paints on) that screen's own splat map rather

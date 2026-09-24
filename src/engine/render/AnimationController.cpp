@@ -90,7 +90,10 @@ std::optional<AnimationController::SkinningRequest> AnimationController::update(
 
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
         if (tile.model == playerModel_ && !tile.animation.isNone()) {
-            return updateTile(tile, legacyPlayback_);
+            return updateTile(
+                tile,
+                legacyPlayback_,
+                frameData.animationTransitionTimeSeconds);
         }
     }
     return std::nullopt;
@@ -122,7 +125,11 @@ AnimationController::updateInstances(const RenderFrameData& frameData)
             });
             continue;
         }
-        if (std::optional<SkinningRequest> request = updateTile(tile, playback, true)) {
+        if (std::optional<SkinningRequest> request = updateTile(
+                tile,
+                playback,
+                frameData.animationTransitionTimeSeconds,
+                true)) {
             requests.push_back({
                 .instanceId = tile.animationInstanceId,
                 .model = tile.model,
@@ -136,6 +143,7 @@ AnimationController::updateInstances(const RenderFrameData& frameData)
 std::optional<AnimationController::SkinningRequest> AnimationController::updateTile(
     const RenderFrameData::Tile& tile,
     PlaybackState& playback,
+    float transitionTimeSeconds,
     bool forceSample)
 {
     constexpr float timeEpsilon = 0.0001f;
@@ -157,16 +165,24 @@ std::optional<AnimationController::SkinningRequest> AnimationController::updateT
         return std::nullopt;
     }
 
-    const float timeDelta = playback.activeAnimation.isNone()
+    const bool animationChanged =
+        !(requestedAnimation == playback.activeAnimation);
+    const float clipTimeDelta =
+        playback.activeAnimation.isNone() || animationChanged
         ? 0.0f
         : requestedTime - playback.activeAnimationTime;
+    const float transitionDelta = playback.lastTransitionTimeSeconds < 0.0f
+        ? 0.0f
+        : std::abs(
+              transitionTimeSeconds - playback.lastTransitionTimeSeconds);
+    playback.lastTransitionTimeSeconds = transitionTimeSeconds;
     if (resolvedNonLoopingFallback) {
         // The fallback is authored as the terminal pose of the one-shot clip.
         // A generic crossfade would sample the completed source at its exact
         // duration, which looping samplers wrap back to the starting pose.
         playback.fadeFromAnimation = noAnimation;
         playback.fadeElapsed = 0.0f;
-    } else if (!(requestedAnimation == playback.activeAnimation) &&
+    } else if (animationChanged &&
         !playback.activeAnimation.isNone()) {
         if (tile.animationCrossfades) {
             playback.fadeFromAnimation = playback.activeAnimation;
@@ -189,8 +205,8 @@ std::optional<AnimationController::SkinningRequest> AnimationController::updateT
         .toTimeSeconds = requestedTime,
     };
     if (!playback.fadeFromAnimation.isNone()) {
-        playback.fadeFromTime += timeDelta;
-        playback.fadeElapsed += std::abs(timeDelta);
+        playback.fadeFromTime += clipTimeDelta;
+        playback.fadeElapsed += transitionDelta;
         if (fadeDurationSeconds_ <= 0.0f ||
             playback.fadeElapsed >= fadeDurationSeconds_) {
             playback.fadeFromAnimation = noAnimation;

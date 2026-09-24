@@ -128,6 +128,8 @@ private:
             : groundSplatTextures(input_.manifest, input_.levelLocation);
         frame.waterAnimationTimeSeconds = input_.worldAnimationTimeSeconds;
         frame.effectAnimationTimeSeconds = input_.worldAnimationTimeSeconds;
+        frame.animationTransitionTimeSeconds =
+            input_.animationTransitionTimeSeconds;
         frame.tiles.reserve(
             static_cast<std::size_t>(frame.levelWidth) *
                 frame.levelHeight *

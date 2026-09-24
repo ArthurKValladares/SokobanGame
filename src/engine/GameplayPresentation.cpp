@@ -127,14 +127,26 @@ uint32_t facingQuarterTurns(MoveDirection direction)
 template <typename Visual>
 void setRestAnimation(Visual& visual, AnimationUse use)
 {
+    visual.setClipTimeFor(visual.animationUse, visual.clipTimeSeconds);
     if (visual.animationUse != use) {
-        visual.clipTimeSeconds = 0.0f;
+        visual.animationUse = use;
+        visual.clipTimeSeconds = visual.clipTimeFor(use);
     }
-    visual.animationUse = use;
     visual.animationFallbackUse.reset();
     visual.clipPlaybackRate = 1.0f;
     visual.animationLoops = true;
     visual.animationCrossfades = true;
+}
+
+void selectAnimationSample(
+    GameplayPresentation::AnimatedActorVisual& visual,
+    AnimationUse use,
+    float timeSeconds)
+{
+    visual.setClipTimeFor(visual.animationUse, visual.clipTimeSeconds);
+    visual.animationUse = use;
+    visual.clipTimeSeconds = timeSeconds;
+    visual.setClipTimeFor(use, timeSeconds);
 }
 
 } // namespace
@@ -159,11 +171,14 @@ void GameplayPresentation::resetEntities(const GameState& state)
 void GameplayPresentation::advanceClocks(float dt, bool reversed)
 {
     worldAnimationTimeSeconds_ += reversed ? -dt : dt;
+    animationTransitionTimeSeconds_ += std::max(dt, 0.0f);
     for (PlayerVisual& player : players_) {
         player.clipTimeSeconds += dt * player.clipPlaybackRate;
+        player.setClipTimeFor(player.animationUse, player.clipTimeSeconds);
     }
     for (EnemyVisual& enemy : enemies_) {
         enemy.clipTimeSeconds += dt * enemy.clipPlaybackRate;
+        enemy.setClipTimeFor(enemy.animationUse, enemy.clipTimeSeconds);
     }
     const float recoilStep = std::max(dt, 0.0f);
     for (TurretRecoil& recoil : turretRecoils_) {
@@ -360,13 +375,15 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
         const GameState::Player& after = action.after.players[index];
         const EntityTarget target = playerTarget(before, index);
         float initialClipTime = 0.0f;
+        float movementClipTime = 0.0f;
         const auto visual = std::ranges::find_if(
             players_,
             [&](const PlayerVisual& candidate) {
                 return candidate.motion.target == target;
             });
         if (visual != players_.end()) {
-            initialClipTime = visual->clipTimeSeconds;
+            initialClipTime = visual->clipTimeFor(
+                playerRestAnimation(before));
         }
         builder.setInitialAnimation(
             target,
@@ -375,6 +392,14 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
         const Vec3 from = playerRenderTarget(before.cell, before.drowned);
         const Vec3 to = playerRenderTarget(after.cell, after.drowned);
         if (gridDistance(from, to) > 0.0001f) {
+            const AnimationUse movementUse = action.playerPulling
+                ? AnimationUse::PlayerPull
+                : action.playerPushing
+                    ? AnimationUse::PlayerPush
+                    : AnimationUse::PlayerMove;
+            if (visual != players_.end()) {
+                movementClipTime = visual->clipTimeFor(movementUse);
+            }
             builder.addMotion({
                 .target = target,
                 .from = from,
@@ -383,13 +408,9 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
             });
             static_cast<void>(builder.addAnimation({
                 .target = target,
-                .use = action.playerPulling
-                    ? AnimationUse::PlayerPull
-                    : action.playerPushing
-                        ? AnimationUse::PlayerPush
-                        : AnimationUse::PlayerMove,
+                .use = movementUse,
                 .completionUse = AnimationUse::PlayerIdle,
-                .clipStartSeconds = initialClipTime,
+                .clipStartSeconds = movementClipTime,
                 .durationSeconds = motionDuration,
                 .loops = true,
             }));
@@ -431,7 +452,7 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
                 return candidate.motion.target == target;
             });
         if (visual != enemies_.end()) {
-            initialClipTime = visual->clipTimeSeconds;
+            initialClipTime = visual->clipTimeFor(AnimationUse::EnemyIdle);
         }
         builder.setInitialAnimation(
             target,
@@ -682,9 +703,11 @@ void GameplayPresentation::seekAction(
         if (visual == nullptr) {
             continue;
         }
-        visual->animationUse = track.initialUse;
+        selectAnimationSample(
+            *visual,
+            track.initialUse,
+            track.initialClipTimeSeconds + sourceTime);
         visual->animationFallbackUse.reset();
-        visual->clipTimeSeconds = track.initialClipTimeSeconds + sourceTime;
         visual->animationLoops = true;
         visual->animationCrossfades = !action.reversed;
         visual->clipPlaybackRate = action.reversed ? -1.0f : 1.0f;
@@ -695,16 +718,26 @@ void GameplayPresentation::seekAction(
             }
             const float end = segment.startSeconds + segment.durationSeconds;
             if (sourceTime < end) {
-                visual->animationUse = segment.use;
+                selectAnimationSample(
+                    *visual,
+                    segment.use,
+                    segment.clipStartSeconds +
+                        sourceTime - segment.startSeconds);
                 visual->animationFallbackUse = segment.fallbackUse;
-                visual->clipTimeSeconds = segment.clipStartSeconds +
-                    sourceTime - segment.startSeconds;
                 visual->animationLoops = segment.loops;
                 continue;
             }
-            visual->animationUse = segment.completionUse;
+            // Commit the sampled phase even though the completion pose uses a
+            // different clip. The next action can then continue this loop
+            // instead of borrowing the idle clock and restarting at zero.
+            visual->setClipTimeFor(
+                segment.use,
+                segment.clipStartSeconds + segment.durationSeconds);
+            selectAnimationSample(
+                *visual,
+                segment.completionUse,
+                sourceTime - end);
             visual->animationFallbackUse.reset();
-            visual->clipTimeSeconds = sourceTime - end;
             visual->animationLoops = true;
         }
     }

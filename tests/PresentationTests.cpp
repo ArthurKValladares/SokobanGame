@@ -519,9 +519,11 @@ void testPresentationResetClocksAndFallenTargets()
 
     presentation.advanceClocks(0.5f, false);
     CHECK(near(presentation.worldAnimationTimeSeconds(), 0.5f));
+    CHECK(near(presentation.animationTransitionTimeSeconds(), 0.5f));
     CHECK(near(presentation.players()[0].clipTimeSeconds, 0.5f));
     presentation.advanceClocks(0.25f, true);
     CHECK(near(presentation.worldAnimationTimeSeconds(), 0.25f));
+    CHECK(near(presentation.animationTransitionTimeSeconds(), 0.75f));
     CHECK(near(presentation.players()[0].clipTimeSeconds, 0.75f));
     CHECK(near(presentation.conveyorBeltScrollOffset(0.25f), 0.0f));
     CHECK(near(presentation.conveyorBeltScrollOffset(0.0f), 0.0f));
@@ -589,6 +591,144 @@ void testPresentationInterpolatesActionsAndClips()
     CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerPull);
 }
 
+void testLoopedAnimationPhasesContinueAcrossActionsAndLegs()
+{
+    TEST("loopedAnimationPhasesContinueAcrossActionsAndLegs");
+
+    const auto moved = [](GameState state, int x) {
+        state.players[0].cell.x = x;
+        return state;
+    };
+    const auto onlySegment = [](const ActionPresentationTimeline& timeline)
+        -> const ActionAnimationSegment& {
+        return timeline.animations.front().segments.front();
+    };
+
+    GameplayPresentation presentation;
+    const GameState start = stateWithPlayer({ 0, 0, 0 });
+    const GameState first = moved(start, 1);
+    const GameState second = moved(first, 2);
+    presentation.resetEntities(start);
+
+    GameplaySession::Action firstMove {
+        .before = start,
+        .after = first,
+        .durationSeconds = 0.25f,
+    };
+    firstMove.presentation =
+        presentation.buildActionPresentation(firstMove);
+    CHECK(near(onlySegment(firstMove.presentation).clipStartSeconds, 0.0f));
+    presentation.beginAction(firstMove, firstMove.before);
+    presentation.seekAction(firstMove, firstMove.durationSeconds);
+    presentation.finishAction(first);
+    CHECK(near(
+        presentation.players()[0].clipTimeFor(AnimationUse::PlayerMove),
+        0.25f));
+
+    GameplaySession::Action secondMove {
+        .before = first,
+        .after = second,
+        .durationSeconds = 0.25f,
+    };
+    secondMove.presentation =
+        presentation.buildActionPresentation(secondMove);
+    CHECK(near(
+        onlySegment(secondMove.presentation).clipStartSeconds,
+        0.25f));
+    presentation.beginAction(secondMove, secondMove.before);
+    presentation.seekAction(secondMove, secondMove.durationSeconds);
+    presentation.finishAction(second);
+    CHECK(near(
+        presentation.players()[0].clipTimeFor(AnimationUse::PlayerMove),
+        0.5f));
+
+    const GameplaySession::Action undoSecondMove {
+        .before = second,
+        .after = first,
+        .durationSeconds = 0.25f,
+        .reversed = true,
+        .presentation = secondMove.presentation,
+    };
+    presentation.beginAction(undoSecondMove, undoSecondMove.before);
+    presentation.seekAction(undoSecondMove, undoSecondMove.durationSeconds);
+    presentation.finishAction(first);
+    CHECK(near(
+        presentation.players()[0].clipTimeFor(AnimationUse::PlayerMove),
+        0.25f));
+
+    // Other looping action clips get independent persistent phases through
+    // the same mechanism; adding another AnimationUse automatically gives it
+    // another clock.
+    GameplaySession::Action firstPush {
+        .before = second,
+        .after = moved(second, 3),
+        .durationSeconds = 0.25f,
+        .playerPushing = true,
+    };
+    firstPush.presentation = presentation.buildActionPresentation(firstPush);
+    CHECK(near(onlySegment(firstPush.presentation).clipStartSeconds, 0.0f));
+    presentation.beginAction(firstPush, firstPush.before);
+    presentation.seekAction(firstPush, firstPush.durationSeconds);
+    presentation.finishAction(firstPush.after);
+
+    GameplaySession::Action secondPush {
+        .before = firstPush.after,
+        .after = moved(firstPush.after, 4),
+        .durationSeconds = 0.25f,
+        .playerPushing = true,
+    };
+    secondPush.presentation = presentation.buildActionPresentation(secondPush);
+    CHECK(near(
+        onlySegment(secondPush.presentation).clipStartSeconds,
+        0.25f));
+
+    GameplaySession::Action firstPull {
+        .before = firstPush.after,
+        .after = moved(firstPush.after, 4),
+        .durationSeconds = 0.25f,
+        .playerPulling = true,
+    };
+    firstPull.presentation = presentation.buildActionPresentation(firstPull);
+    CHECK(near(onlySegment(firstPull.presentation).clipStartSeconds, 0.0f));
+    presentation.beginAction(firstPull, firstPull.before);
+    presentation.seekAction(firstPull, firstPull.durationSeconds);
+    presentation.finishAction(firstPull.after);
+
+    GameplaySession::Action secondPull {
+        .before = firstPull.after,
+        .after = moved(firstPull.after, 5),
+        .durationSeconds = 0.25f,
+        .playerPulling = true,
+    };
+    secondPull.presentation = presentation.buildActionPresentation(secondPull);
+    CHECK(near(
+        onlySegment(secondPull.presentation).clipStartSeconds,
+        0.25f));
+
+    // Multi-leg actions are built all at once, before a visual can commit its
+    // intermediate phase. Concatenation must therefore stitch adjacent loops.
+    presentation.resetEntities(start);
+    GameplaySession::Action slide {
+        .before = start,
+        .after = moved(start, 3),
+        .durationSeconds = 0.75f,
+    };
+    const std::vector<GameState> legs {
+        moved(start, 1), moved(start, 2), moved(start, 3)
+    };
+    slide.presentation = presentation.buildActionPresentation(slide, legs);
+    CHECK(slide.presentation.animations.size() == 1);
+    if (slide.presentation.animations.size() == 1) {
+        const auto& segments = slide.presentation.animations[0].segments;
+        CHECK(segments.size() == 3);
+        if (segments.size() == 3) {
+            CHECK(near(segments[0].clipStartSeconds, 0.0f));
+            CHECK(near(segments[1].clipStartSeconds, 0.25f));
+            CHECK(near(segments[2].clipStartSeconds, 0.5f));
+        }
+    }
+}
+
 void testGameplayFrameUsesSettingsAndPresentation()
 {
     TEST("gameplayFrameUsesSettingsAndPresentation");
@@ -607,6 +747,7 @@ void testGameplayFrameUsesSettingsAndPresentation()
     }
     GameplayPresentation presentation;
     presentation.resetEntities(state);
+    presentation.advanceClocks(0.375f, false);
 
     PresentationSettings settings;
     settings.lighting.sunColor = { 0.1f, 0.2f, 0.3f };
@@ -626,6 +767,7 @@ void testGameplayFrameUsesSettingsAndPresentation()
     });
     CHECK(near(frame.outputTransform.exposureEv, -1.25f));
     CHECK(frame.outputTransform.curve == TonemapCurve::PbrNeutral);
+    CHECK(near(frame.animationTransitionTimeSeconds, 0.375f));
 
     CHECK(frame.viewMode == RenderViewMode::Isometric3D);
     const RenderFrameData overheadFrame = RenderFrameBuilder::buildGameplay({
@@ -1010,6 +1152,7 @@ void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
         .settings = {},
         .hoverCell = GridPosition3 { -1, 0, 0 },
         .worldAnimationTimeSeconds = 1.25f,
+        .animationTransitionTimeSeconds = 2.5f,
         .overworldScreen = 7,
     });
 
@@ -1017,6 +1160,7 @@ void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
     CHECK(frame.levelHeight == 2);
     CHECK(frame.gridPickBorder == 1);
     CHECK(near(frame.effectAnimationTimeSeconds, 1.25f));
+    CHECK(near(frame.animationTransitionTimeSeconds, 2.5f));
     CHECK(frame.groundSplat.splatMap ==
         testManifest().findTextureIdByName("GroundSplatMapOverworld7"));
     const auto pickCell = std::ranges::find_if(
@@ -2564,6 +2708,7 @@ int main()
     testSettingsNormalizeAndConvert();
     testPresentationResetClocksAndFallenTargets();
     testPresentationInterpolatesActionsAndClips();
+    testLoopedAnimationPhasesContinueAcrossActionsAndLegs();
     testGameplayFrameUsesSettingsAndPresentation();
     testGameplayFrameUsesTheLevelsCharacterModel();
     testBardFrameBuildsAnimatedMusicalAura();

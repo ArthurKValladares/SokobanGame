@@ -1,6 +1,7 @@
 #include "engine/PresentationTransactionBuilder.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <stdexcept>
 
@@ -205,6 +206,25 @@ ActionPresentationTimeline concatenateTimelines(
         for (const ActionAnimationSegment& segment : track.segments) {
             ActionAnimationSegment shifted = segment;
             shifted.startSeconds += offset;
+            // Independently built legs all start from the actor's phase at
+            // transaction creation. When adjacent legs play the same loop,
+            // stitch them into one clock before recording the immutable
+            // timeline. This covers slides and folded consequences without
+            // teaching either mechanic about feet, gaits, or clip lengths.
+            if (shifted.loops && !into.segments.empty()) {
+                const ActionAnimationSegment& previous =
+                    into.segments.back();
+                const float previousEnd =
+                    previous.startSeconds + previous.durationSeconds;
+                constexpr float adjacencyEpsilon = 0.0001f;
+                if (previous.loops && previous.use == shifted.use &&
+                    std::abs(previousEnd - shifted.startSeconds) <
+                        adjacencyEpsilon) {
+                    shifted.clipStartSeconds =
+                        previous.clipStartSeconds +
+                        previous.durationSeconds;
+                }
+            }
             into.segments.push_back(shifted);
         }
     }
