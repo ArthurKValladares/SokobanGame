@@ -7,11 +7,10 @@
   },
   "configurePresets": [
     {
-      "name": "dev",
-      "displayName": "Development (Ninja, Debug, MSVC)",
-      "description": "Everyday Windows build: Debug with the editor and developer tools, Ninja for per-file parallelism across every target. Open the folder in Visual Studio, or run from a Developer PowerShell for VS 2022.",
+      "name": "windows-msvc-ninja",
+      "hidden": true,
+      "description": "Shared settings for the everyday Windows builds: Ninja with MSVC, so every source compiles in parallel. Visual Studio's Open Folder mode supplies the compiler environment; from a shell, use a Developer PowerShell for VS 2022.",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/out/dev",
       "architecture": {
         "value": "x64",
         "strategy": "external"
@@ -21,7 +20,6 @@
         "strategy": "external"
       },
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl"
       },
@@ -32,9 +30,29 @@
       }
     },
     {
+      "name": "dev",
+      "displayName": "Debug (Ninja, MSVC)",
+      "description": "Everyday Windows build: Debug with the editor, developer tools, and Vulkan validation.",
+      "inherits": "windows-msvc-ninja",
+      "binaryDir": "${sourceDir}/out/dev",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release (Ninja, MSVC)",
+      "description": "Optimized Windows build of the game and tests. The editor, developer tools, and validation exist only in Debug builds; use the shipping presets for player packages.",
+      "inherits": "windows-msvc-ninja",
+      "binaryDir": "${sourceDir}/out/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
       "name": "headless-tests",
-      "displayName": "Headless tests",
-      "description": "Vulkan-free Debug build of the core, UI, and every SDK-independent test.",
+      "displayName": "Headless tests (no Vulkan)",
+      "description": "Vulkan-free Debug build of the core, UI, and every SDK-independent test. Builds no game.",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/out/headless-tests",
       "cacheVariables": {
@@ -81,7 +99,7 @@
   "buildPresets": [
     {
       "name": "dev",
-      "displayName": "Game only",
+      "displayName": "Debug: game only",
       "description": "Builds the game, its content, and nothing else: the inner loop.",
       "configurePreset": "dev",
       "targets": [
@@ -90,16 +108,35 @@
     },
     {
       "name": "dev-all",
-      "displayName": "Game and tests",
-      "description": "Everything the dev test preset runs.",
+      "displayName": "Debug: game + tests",
+      "description": "The game and every test runner the dev test preset uses.",
       "configurePreset": "dev"
     },
     {
+      "name": "release",
+      "displayName": "Release: game only",
+      "description": "An optimized game and its content, without the editor.",
+      "configurePreset": "release",
+      "targets": [
+        "sokoban"
+      ]
+    },
+    {
+      "name": "release-all",
+      "displayName": "Release: game + tests",
+      "description": "The optimized game and every test runner the release test preset uses.",
+      "configurePreset": "release"
+    },
+    {
       "name": "headless-tests",
+      "displayName": "Headless tests (no Vulkan)",
+      "description": "Only the Vulkan-independent test suites, as the SDK-free CI job builds them. There is no game in this build.",
       "configurePreset": "headless-tests"
     },
     {
       "name": "shipping",
+      "displayName": "Shipping: game package",
+      "description": "Editor-free Release game with LTO; package it with cpack --preset shipping.",
       "configurePreset": "shipping",
       "configuration": "Release",
       "targets": [
@@ -108,6 +145,8 @@
     },
     {
       "name": "shipping-installer",
+      "displayName": "Shipping: installer",
+      "description": "The per-user Windows installer. Requires Inno Setup 6.",
       "configurePreset": "shipping-installer",
       "configuration": "Release",
       "targets": [
@@ -116,6 +155,8 @@
     },
     {
       "name": "shipping-signed",
+      "displayName": "Shipping: signed installer",
+      "description": "The installer with verified Authenticode signatures. Requires a signing certificate.",
       "configurePreset": "shipping-signed",
       "configuration": "Release",
       "targets": [
@@ -126,6 +167,7 @@
   "testPresets": [
     {
       "name": "dev",
+      "displayName": "Debug tests",
       "configurePreset": "dev",
       "output": {
         "outputOnFailure": true
@@ -137,7 +179,21 @@
       }
     },
     {
+      "name": "release",
+      "displayName": "Release tests",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "timeout": 120,
+        "jobs": 4
+      }
+    },
+    {
       "name": "headless-tests",
+      "displayName": "Headless tests (no Vulkan)",
       "configurePreset": "headless-tests",
       "output": {
         "outputOnFailure": true

@@ -671,10 +671,14 @@ if(WIN32)
         @ONLY
     )
     target_sources(sokoban PRIVATE "${SOKOBAN_WINDOWS_RESOURCE_FILE}")
-    # MSVC already owns manifest resource 1. Let LINK merge our application
-    # manifest into that resource rather than defining a second one in .rc.
-    target_link_options(sokoban PRIVATE
-        "/MANIFESTINPUT:${SOKOBAN_MANIFEST_RESOURCE}")
+    # MSVC already owns manifest resource 1, so the application manifest is
+    # merged into it rather than defined a second time in .rc. Listing it as a
+    # source lets CMake do that merge for every generator: the Visual Studio
+    # generators hand it to MSBuild's manifest tool, and Ninja/Makefiles merge
+    # it with mt.exe after linking. Passing /MANIFESTINPUT to the linker
+    # directly only worked under MSBuild, which also adds /MANIFEST:EMBED;
+    # under Ninja the link failed with LNK1220.
+    target_sources(sokoban PRIVATE "${SOKOBAN_MANIFEST_RESOURCE}")
 endif()
 
 set_target_properties(sokoban PROPERTIES

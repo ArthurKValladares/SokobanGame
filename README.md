@@ -59,7 +59,13 @@ cmake --build --preset dev        # the game and its content only
 ```
 
 `cmake --build --preset dev-all` also builds the tests, and
-`ctest --preset dev` runs them.
+`ctest --preset dev` runs them. The `release` configure preset is the same
+build optimized, in `out/release` (`release` and `release-all` build presets,
+`release` test preset); it has no editor or developer tools, which exist only
+in Debug. In Visual Studio these appear in the build-preset dropdown as
+"Debug: game only", "Debug: game + tests", "Release: game only", and
+"Release: game + tests". "Headless tests (no Vulkan)" builds no game, and the
+"Shipping" entries produce player packages.
 
 The Visual Studio solution generator still works and is what CI uses on
 Windows:

@@ -64,6 +64,9 @@ cmake --build --preset dev-all    # plus the test runners
 ctest --preset dev
 ```
 
+`--preset release` (and `release-all`, `ctest --preset release`) is the same
+Ninja build optimized, in `out/release`, without the Debug-only editor tools.
+
 Full Windows validation build (the Visual Studio generator, as CI uses):
 
 ```powershell
