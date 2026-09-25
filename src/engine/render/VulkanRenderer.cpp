@@ -1306,6 +1306,16 @@ void VulkanRenderer::setWireframeEnabled(bool enabled)
         enabled && deviceContext_.wireframeSupported());
 }
 
+void VulkanRenderer::requestShaderReload()
+{
+    reconfigurationQueue_.requestShaderReload();
+}
+
+uint64_t VulkanRenderer::appliedShaderRevision() const
+{
+    return reconfigurationQueue_.active().shaderRevision;
+}
+
 bool VulkanRenderer::wireframeSupported() const
 {
     return deviceContext_.wireframeSupported();
@@ -1630,8 +1640,33 @@ void VulkanRenderer::applyPendingReconfiguration()
         return;
     }
 
-    std::unique_ptr<VulkanPipelineFactory> replacement =
-        createPipelines(activeResources_, plan->settings);
+    // A shader edited while the game runs can compile and still fail to
+    // become a pipeline. That must not take the session down: keep drawing
+    // with the pipelines already built and report why. Any other pipeline
+    // rebuild failing is still fatal, as before.
+    RendererSettingsSnapshot withoutShaderChange = plan->settings;
+    withoutShaderChange.shaderRevision =
+        reconfigurationQueue_.active().shaderRevision;
+    const bool shaderReloadOnly =
+        withoutShaderChange == reconfigurationQueue_.active();
+    std::unique_ptr<VulkanPipelineFactory> replacement;
+    try {
+        replacement = createPipelines(activeResources_, plan->settings);
+    } catch (const std::exception& error) {
+        if (!shaderReloadOnly) {
+            throw;
+        }
+        shaderReloadError_ = error.what();
+        log::error(log::Category::Rendering)
+            << "Shader reload failed; keeping the previous pipelines: "
+            << shaderReloadError_;
+        reconfigurationQueue_.commit(*plan);
+        return;
+    }
+    if (plan->settings.shaderRevision !=
+        reconfigurationQueue_.active().shaderRevision) {
+        shaderReloadError_.clear();
+    }
     RenderResourceSet retired;
     retired.pipelines = std::move(activeResources_.pipelines);
     activeResources_.pipelines = std::move(replacement);

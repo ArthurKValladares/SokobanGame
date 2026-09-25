@@ -147,6 +147,27 @@ and the required real-device checks are recorded.
   external files before manifest mutation, and copies the complete dependency
   set before package-index publication.
 
+## Developer iteration contracts
+
+- Shader hot reload (`ShaderHotReload`, Debug developer builds) compiles with
+  the same `SOKOBAN_GLSLC_FLAGS` list as the build rule; keep shader options
+  in that one CMake list. Compiles run off the main thread into
+  `<config>/shader-hot-reload/`, never inside the staged tree; a pass
+  publishes only if every module in it compiled, then refreshes
+  `content.index`. The renderer rebuilds pipelines through the
+  pipeline-only reconfiguration path (`requestShaderReload`), and a pipeline
+  creation failure caused only by a shader reload keeps the old pipelines.
+- Tunables (`engine/Tuning.hpp`) are `inline constexpr` when
+  `SOKOBAN_ENABLE_DEBUG_UI` is 0 and registered variables when it is 1. Read
+  them only at runtime. Values that size arrays, feed `static_assert`, or
+  define pipeline or resource shape must stay plain constants. The header
+  writer replaces only the literal value arguments of single
+  `SOKOBAN_TUNABLE_*` invocations; the `tuning` test checks that every
+  registered header round-trips unchanged.
+- `dev-session.json` lives in the save directory and is read and written
+  only by Debug developer builds; smoke and evidence runs neither resume nor
+  save it. It never stores game progress, which stays in the save slot.
+
 ## Gameplay and input contracts
 
 - `StateDelta` owns canonical player, movable, and enemy entity order, append,

@@ -7,6 +7,9 @@
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/PngWriter.hpp"
+#include "engine/render/ShaderCatalog.hpp"
+
+#include "ShaderToolchain.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -15,6 +18,7 @@
 #include <cmath>
 #include <exception>
 #include <limits>
+#include <string>
 #include <vector>
 
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -54,6 +58,184 @@ void ApplicationTools::initialize(
         sourceAssetRoot / "manifest.json",
         runtimeAssetRoot / "manifest.json");
     (void)decorationMeshCatalog.refresh(sourceAssetRoot, manifest);
+}
+
+void ApplicationTools::enableShaderHotReload(
+    const std::filesystem::path& runtimeAssetRoot)
+{
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(shaderToolchain::glslc, error)) {
+        shaderReloadStatus_ = std::string("Unavailable: glslc not found at ") +
+            shaderToolchain::glslc;
+        log::warning(log::Category::Rendering)
+            << "Shader hot reload is off. " << shaderReloadStatus_;
+        return;
+    }
+    std::vector<std::string> modules;
+    modules.reserve(shaderCatalog::sources.size());
+    for (const std::string_view name : shaderCatalog::sources) {
+        modules.emplace_back(name);
+    }
+    shaderHotReload_ = std::make_unique<ShaderHotReload>(
+        ShaderHotReload::Config {
+            .sourceDirectory = shaderToolchain::sourceDirectory,
+            .includeDirectory = shaderToolchain::includeDirectory,
+            .runtimeAssetRoot = runtimeAssetRoot,
+            .moduleNames = std::move(modules),
+            .compiler = glslcCompiler(
+                shaderToolchain::glslc,
+                std::vector<std::string>(
+                    shaderToolchain::flags.begin(),
+                    shaderToolchain::flags.end()),
+                shaderToolchain::includeDirectory),
+        });
+    shaderReloadStatus_ = std::string("Watching ") +
+        shaderToolchain::sourceDirectory;
+}
+
+void ApplicationTools::serviceShaderHotReload(VulkanRenderer& renderer)
+{
+    if (!shaderHotReload_) {
+        return;
+    }
+    // Sampling seventeen sources and a handful of includes is cheap, but
+    // there is no reason to stat them every frame.
+    const std::uint64_t now = SDL_GetTicks();
+    if (!shaderWatchEnabled_ ||
+        (now - lastShaderPollTicks_ < 250 && !shaderHotReload_->compiling())) {
+        return;
+    }
+    lastShaderPollTicks_ = now;
+    shaderHotReload_->poll();
+    std::optional<ShaderHotReload::Result> result =
+        shaderHotReload_->takeResult();
+    if (!result) {
+        if (shaderHotReload_->compiling()) {
+            shaderReloadStatus_ = "Compiling...";
+        }
+        return;
+    }
+
+    std::string names;
+    for (const std::string& module : result->modules) {
+        names += (names.empty() ? "" : ", ") + module;
+    }
+    shaderReloadDiagnostics_ = std::move(result->diagnostics);
+    shaderCompileFailed_ = !result->published;
+    if (result->published) {
+        renderer.requestShaderReload();
+        shaderReloadStatus_ = "Reloaded " + names;
+        log::info(log::Category::Rendering)
+            << "Shader hot reload: recompiled " << names;
+        if (!shaderReloadDiagnostics_.empty()) {
+            log::warning(log::Category::Rendering)
+                << "glslc reported:\n" << shaderReloadDiagnostics_;
+        }
+    } else {
+        shaderReloadStatus_ = "Compile failed; still running the last good "
+            "shaders";
+        log::error(log::Category::Rendering)
+            << "Shader hot reload: compile failed for " << names << "\n"
+            << shaderReloadDiagnostics_;
+    }
+}
+
+void ApplicationTools::drawShaderHotReloadPanel(const VulkanRenderer& renderer)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui::TextWrapped("%s", shaderReloadStatus_.c_str());
+    if (!renderer.shaderReloadError().empty()) {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.45f, 0.4f, 1.0f),
+            "Pipelines were not rebuilt: %s",
+            renderer.shaderReloadError().c_str());
+    }
+    if (!shaderHotReload_) {
+        return;
+    }
+    ImGui::Checkbox("Recompile shaders when they are saved", &shaderWatchEnabled_);
+    if (ImGui::Button("Recompile All (F6)")) {
+        shaderHotReload_->requestFullRecompile();
+        lastShaderPollTicks_ = 0;
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled(
+        "%zu modules; applied revision %llu",
+        shaderHotReload_->modules().size(),
+        static_cast<unsigned long long>(renderer.appliedShaderRevision()));
+    if (!shaderReloadDiagnostics_.empty()) {
+        ImGui::SeparatorText(
+            shaderCompileFailed_ ? "Compiler errors" : "Compiler warnings");
+        ImGui::InputTextMultiline(
+            "##ShaderDiagnostics",
+            shaderReloadDiagnostics_.data(),
+            shaderReloadDiagnostics_.size() + 1,
+            ImVec2(-1.0f, ImGui::GetTextLineHeight() * 14.0f),
+            ImGuiInputTextFlags_ReadOnly);
+    }
+#else
+    (void)renderer;
+#endif
+}
+
+void ApplicationTools::drawShaderHotReloadOverlay(const VulkanRenderer& renderer)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (!shaderHotReload_) {
+        return;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_F6, false)) {
+        shaderHotReload_->requestFullRecompile();
+        lastShaderPollTicks_ = 0;
+    }
+    if (!shaderCompileFailed_ && renderer.shaderReloadError().empty()) {
+        return;
+    }
+    // A failed compile is easy to miss while looking at the game, which
+    // keeps drawing the previous shaders. Say so where the game is.
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(
+        ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - 12.0f,
+            viewport->WorkPos.y + 12.0f),
+        ImGuiCond_Always,
+        ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.85f);
+    constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoDocking;
+    if (ImGui::Begin("##ShaderCompileFailed", nullptr, flags)) {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.45f, 0.4f, 1.0f),
+            shaderCompileFailed_ ? "Shader compile failed"
+                                 : "Shader pipelines failed to rebuild");
+        const std::string& detail = shaderCompileFailed_
+            ? shaderReloadDiagnostics_
+            : renderer.shaderReloadError();
+        // The first few lines carry the file, line, and message.
+        std::size_t end = 0;
+        for (int line = 0; line < 4 && end < detail.size(); ++line) {
+            const std::size_t newline = detail.find('\n', end);
+            end = newline == std::string::npos ? detail.size() : newline + 1;
+        }
+        ImGui::TextUnformatted(detail.data(), detail.data() + end);
+        ImGui::TextDisabled("Still drawing the last good shaders. "
+                            "Details in the Shaders tab.");
+    }
+    ImGui::End();
+#else
+    (void)renderer;
+#endif
+}
+
+void ApplicationTools::drawSessionMenu()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui::MenuItem("Resume here on next launch", nullptr, &resumeOnLaunch);
+    ImGui::TextDisabled(
+        "Skips the title, continues the active save slot, and reopens the "
+        "editor document.\nLaunch with --title to show the title once.");
+#endif
 }
 
 std::optional<DecorationGizmo::Geometry>

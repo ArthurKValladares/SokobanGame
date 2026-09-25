@@ -220,6 +220,18 @@ public:
     [[nodiscard]] bool wireframeEnabled() const;
     void setWireframeEnabled(bool enabled);
     [[nodiscard]] bool wireframeSupported() const;
+    // Rebuilds every pipeline from the shader modules now in the staged
+    // asset tree at the next frame boundary, retiring the old pipelines
+    // after the frames that use them. If creation fails, the old pipelines
+    // stay active and shaderReloadError() describes why.
+    void requestShaderReload();
+    // Advances each time a requested reload has been applied, successfully
+    // or not.
+    [[nodiscard]] uint64_t appliedShaderRevision() const;
+    [[nodiscard]] const std::string& shaderReloadError() const
+    {
+        return shaderReloadError_;
+    }
     // Developer toggle for model back-face culling. Dynamic state, so it takes
     // effect on the next recorded frame with no pipeline rebuild.
     [[nodiscard]] bool modelBackfaceCullingEnabled() const;
@@ -394,6 +406,7 @@ private:
     uint64_t nextStatsFrameIndex_ = 1;
     std::optional<GameViewportDisplay> gameViewportDisplay_;
     uint64_t pipelineRebuilds_ = 0;
+    std::string shaderReloadError_;
     uint64_t swapchainRecreations_ = 0;
     uint64_t swapchainRecreationDeferrals_ = 0;
     uint64_t renderResourceReconfigurations_ = 0;

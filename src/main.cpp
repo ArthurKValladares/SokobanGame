@@ -8,6 +8,7 @@
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_init.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -53,6 +54,11 @@ int runApplication(const sokoban::CommandLineOptions& options)
             .recorderScratchReuseEnabled =
                 options.recorderScratchReuseEnabled,
             .textureResidencyBudgetKiB = options.textureResidencyBudgetKiB,
+            .continueGame = options.continueGame,
+            .showTitle = options.showTitle,
+            .startLevel = options.startLevel,
+            .startScreen = std::max(options.startScreen, 0),
+            .editDocument = options.editDocument,
         }
     };
 #if SOKOBAN_ENABLE_DEBUG_UI

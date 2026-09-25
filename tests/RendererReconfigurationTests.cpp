@@ -78,6 +78,35 @@ void testRequestsCanReturnToActiveWithoutWork()
     CHECK(!queue.plan(false).has_value());
 }
 
+void testShaderReloadOnlyRebuildsPipelines()
+{
+    sokoban::RendererReconfigurationQueue queue({
+        .antiAliasing = sokoban::AntiAliasingMode::Msaa4x,
+        .renderScalePercent = 100,
+        .wireframe = false,
+    });
+    queue.requestShaderReload();
+    const auto plan = queue.plan(false);
+    CHECK(plan.has_value());
+    CHECK(plan->rebuildPipelines);
+    CHECK(!plan->rebuildRenderResources);
+    CHECK(!plan->recreateSwapchain);
+    queue.commit(*plan);
+    CHECK(queue.active().shaderRevision == 1);
+    CHECK(!queue.plan(false).has_value());
+
+    // Two reloads before one frame boundary are one rebuild, and a reload
+    // requested after a commit is new work even though the count matches.
+    queue.requestShaderReload();
+    queue.requestShaderReload();
+    const auto coalesced = queue.plan(false);
+    CHECK(coalesced.has_value());
+    queue.commit(*coalesced);
+    CHECK(!queue.plan(false).has_value());
+    queue.requestShaderReload();
+    CHECK(queue.plan(false).has_value());
+}
+
 } // namespace
 
 int main()
@@ -86,6 +115,7 @@ int main()
     testWireframeOnlyRebuildsPipelines();
     testSwapchainRequestForcesFullReplacement();
     testRequestsCanReturnToActiveWithoutWork();
+    testShaderReloadOnlyRebuildsPipelines();
 
     if (failures == 0) {
         std::cout << "RendererReconfigurationTests: "

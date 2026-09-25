@@ -31,6 +31,12 @@ std::vector<DebugTab>& debugTabs()
     return tabs;
 }
 
+std::vector<DebugTab>& debugMenus()
+{
+    static std::vector<DebugTab> menus;
+    return menus;
+}
+
 struct DebugUiScaleState {
     ImGuiStyle baseStyle;
     float scale = 1.0f;
@@ -290,6 +296,12 @@ void drawWorkspaceMenu()
             drawScaleControl();
             ImGui::EndMenu();
         }
+        for (const DebugTab& menu : debugMenus()) {
+            if (ImGui::BeginMenu(menu.name.c_str())) {
+                menu.callback();
+                ImGui::EndMenu();
+            }
+        }
         ImGui::EndMainMenuBar();
     }
 }
@@ -434,9 +446,18 @@ void DebugUi::addTab(std::string name, DrawCallback callback)
     });
 }
 
+void DebugUi::addMenu(std::string name, DrawCallback callback)
+{
+    debugMenus().push_back({
+        .name = std::move(name),
+        .callback = std::move(callback),
+    });
+}
+
 void DebugUi::clearTabs()
 {
     debugTabs().clear();
+    debugMenus().clear();
 }
 
 DebugUi::DrawResult DebugUi::draw(GameViewport gameViewport)
@@ -461,9 +482,28 @@ DebugUi::DrawResult DebugUi::draw(GameViewport gameViewport)
     }
 
     const DrawResult result = drawGameViewport(gameViewport);
+    // A tab added after imgui.ini was written has no saved placement and
+    // would open as a floating window over the game. Dock it beside the
+    // first tab that has a dock node instead, which is where the default
+    // layout puts every tab.
+    ImGuiID toolsDockId = 0;
+    for (const DebugTab& tab : debugTabs()) {
+        if (const ImGuiWindow* window =
+                ImGui::FindWindowByName(tab.name.c_str());
+            window != nullptr && window->DockId != 0) {
+            toolsDockId = window->DockId;
+            break;
+        }
+    }
     for (DebugTab& tab : debugTabs()) {
         if (!tab.open) {
             continue;
+        }
+        if (toolsDockId != 0 &&
+            ImGui::FindWindowSettingsByID(ImHashStr(tab.name.c_str())) ==
+                nullptr &&
+            ImGui::FindWindowByName(tab.name.c_str()) == nullptr) {
+            ImGui::SetNextWindowDockID(toolsDockId, ImGuiCond_FirstUseEver);
         }
         if (ImGui::Begin(tab.name.c_str(), &tab.open)) {
             tab.callback();

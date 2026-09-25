@@ -2,6 +2,7 @@
 #if SOKOBAN_ENABLE_DEBUG_UI
 #include "engine/ApplicationTools.hpp"
 #include "engine/DebugUi.hpp"
+#include "engine/DevSession.hpp"
 #endif
 
 #include "engine/ParticleConfig.hpp"
@@ -193,6 +194,14 @@ Application::Application(ApplicationOptions options)
           FrameArena("render frame B", renderFrameArenaBytes()),
       }
     , smokeFrames_(options.smokeFrames)
+    , launchContinue_(options.continueGame)
+    , launchShowTitle_(options.showTitle)
+    , launchLevel_(options.startLevel)
+    , launchScreen_(options.startScreen)
+    , launchEditDocument_(std::move(options.editDocument))
+#if SOKOBAN_ENABLE_DEBUG_UI
+    , devSessionPath_(saveSlots_.directory() / "dev-session.json")
+#endif
     , evidenceOutputDirectory_(
           std::move(options.evidenceOutputDirectory))
     , evidenceAmbientOcclusionEnabled_(
@@ -272,6 +281,18 @@ Application::Application(ApplicationOptions options)
         if (result.solveCurrentScreen) {
             solveCurrentScreenForDebug();
         }
+    });
+    if (const std::optional<DevSession> session =
+            loadDevSession(devSessionPath_)) {
+        tools_->resumeOnLaunch = session->resumeOnLaunch;
+    }
+    DebugUi::addMenu("Session", [this] { tools_->drawSessionMenu(); });
+    tools_->enableShaderHotReload(assetRoot_);
+    DebugUi::addTab("Tuning", [this] {
+        tools_->tuningDebugUi.draw();
+    });
+    DebugUi::addTab("Shaders", [this] {
+        tools_->drawShaderHotReloadPanel(renderer_);
     });
     DebugUi::addTab("Log", [this] {
         tools_->logDebugUi.draw();
@@ -427,9 +448,138 @@ Application::~Application()
             << persistence.settings.message;
     }
 #if SOKOBAN_ENABLE_DEBUG_UI
+    if (smokeFrames_ == 0 && evidenceOutputDirectory_.empty()) {
+        saveDevSession();
+    }
     DebugUi::clearTabs();
 #endif
     renderer_.waitIdle();
+}
+
+#if SOKOBAN_ENABLE_DEBUG_UI
+void Application::saveDevSession() const
+{
+    const LevelEditor& editor = tools_->levelEditor;
+    DevSession session {
+        .resumeOnLaunch = tools_->resumeOnLaunch,
+        .editorDocument = editor.loadedDocumentPath(),
+        .editingDocument = editor.editingDocument(),
+        .activeLayer = static_cast<int>(editor.activeLayer()),
+    };
+    switch (editor.tool()) {
+    case LevelEditor::Tool::Tiles:
+        session.tool = "tiles";
+        break;
+    case LevelEditor::Tool::Decorations:
+        session.tool = "decorations";
+        break;
+    case LevelEditor::Tool::Selectors:
+        session.tool = "selectors";
+        break;
+    }
+    try {
+        sokoban::saveDevSession(devSessionPath_, session);
+    } catch (const std::exception& error) {
+        log::warning(log::Category::Editor)
+            << "Could not save the developer session: " << error.what();
+    }
+}
+#endif
+
+void Application::applyLaunchRequest()
+{
+    bool continueGame = launchContinue_;
+    std::filesystem::path editDocument = launchEditDocument_;
+    std::optional<LevelLocation> startLocation;
+    if (launchLevel_ >= 0) {
+        startLocation = LevelLocation {
+            .level = launchLevel_,
+            .screen = launchScreen_,
+        };
+    }
+#if SOKOBAN_ENABLE_DEBUG_UI
+    std::optional<DevSession> session;
+    const bool explicitRequest =
+        launchShowTitle_ || continueGame || startLocation || !editDocument.empty();
+    if (!explicitRequest) {
+        session = loadDevSession(devSessionPath_);
+        if (session && session->resumeOnLaunch) {
+            continueGame = true;
+            if (session->editingDocument) {
+                editDocument = session->editorDocument;
+            }
+            log::info(log::Category::Application)
+                << "Resuming the last developer session (Session menu, or "
+                   "--title, to start at the title instead).";
+        }
+    }
+#else
+    if (startLocation || !editDocument.empty()) {
+        log::warning(log::Category::Application)
+            << "--level and --edit need a Debug build with developer tools; "
+               "ignoring them.";
+        startLocation.reset();
+        editDocument.clear();
+    }
+#endif
+    if (!continueGame && !startLocation && editDocument.empty()) {
+        return;
+    }
+
+    // Continue exactly as the title's Continue does. A slot with no progress
+    // has nothing to continue, so start it the way New Game would.
+    if (playerProfile_.progressEmpty()) {
+        startNewGame();
+    } else {
+        handleShellEvent(ShellTitleAction { title::Continue {} });
+    }
+
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (startLocation) {
+        if (!campaign_.screenExists(startLocation->level, startLocation->screen)) {
+            log::warning(log::Category::Application)
+                << "--level " << startLocation->level << " --screen "
+                << startLocation->screen << " does not exist";
+        } else {
+            checkpointCurrentScreen(true);
+            if (campaign_.startPuzzle(playerProfile_, *startLocation)) {
+                loadCurrentScreen();
+            }
+        }
+    }
+    if (!editDocument.empty()) {
+        LevelEditor& editor = tools_->levelEditor;
+        std::filesystem::path path = editDocument;
+        if (path.is_relative() && !std::filesystem::exists(path)) {
+            // Accept paths relative to the repository as well as the
+            // working directory: levels/level3/screen2.scr.
+            path = std::filesystem::path(SOKOBAN_SOURCE_LEVEL_DIR).parent_path() /
+                editDocument;
+        }
+        editor.selectDocument(path);
+        if (editor.openDocument(path)) {
+            if (session && session->editorDocument == editDocument) {
+                if (session->tool == "decorations") {
+                    editor.setTool(LevelEditor::Tool::Decorations);
+                } else if (session->tool == "selectors") {
+                    editor.setTool(LevelEditor::Tool::Selectors);
+                } else {
+                    editor.setTool(LevelEditor::Tool::Tiles);
+                }
+                editor.setActiveLayer(session->activeLayer);
+            }
+            editor.setEditingDocument(true);
+            tools_->levelEditorDebugUi.initialize(editor);
+            log::info(log::Category::Editor)
+                << "Editing " << path.string() << " (layer "
+                << editor.activeLayer() << ")";
+        } else {
+            log::warning(log::Category::Editor)
+                << "Could not open " << path.string()
+                << " for editing: " << editor.status();
+        }
+    }
+#endif
 }
 
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -525,6 +675,7 @@ bool Application::drawUiFrame(
             preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
     }
 #if SOKOBAN_ENABLE_DEBUG_UI
+    tools_->drawShaderHotReloadOverlay(renderer_);
     tools_->drawDraftExitConfirmation();
     tools_->drawBrushPreview(
         renderer_,
@@ -669,6 +820,8 @@ bool Application::run()
             << "Smoke run: starting a new game and rendering "
             << smokeFrames_ << " frames.";
         startNewGame();
+    } else if (evidenceOutputDirectory_.empty()) {
+        applyLaunchRequest();
     }
     std::uint64_t renderedFrames = 0;
     while (running_) {
@@ -686,6 +839,7 @@ bool Application::run()
             // the next launch.
             renderer_.invalidateTileThumbnails();
         }
+        tools_->serviceShaderHotReload(renderer_);
 #endif
         input_.beginFrame();
 

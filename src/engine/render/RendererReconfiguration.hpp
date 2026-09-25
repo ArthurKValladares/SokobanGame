@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 
 namespace sokoban {
@@ -17,6 +18,9 @@ struct RendererSettingsSnapshot {
     AntiAliasingMode antiAliasing = AntiAliasingMode::Msaa4x;
     int renderScalePercent = 100;
     bool wireframe = false;
+    // Bumped when shader modules on disk have been replaced, so pipelines
+    // are rebuilt from them without changing any other resource.
+    uint64_t shaderRevision = 0;
 
     bool operator==(const RendererSettingsSnapshot&) const = default;
 };
@@ -39,6 +43,7 @@ public:
     void requestAntiAliasing(AntiAliasingMode mode);
     void requestRenderScalePercent(int percent);
     void requestWireframe(bool enabled);
+    void requestShaderReload();
 
     [[nodiscard]] const RendererSettingsSnapshot& active() const;
     [[nodiscard]] const RendererSettingsSnapshot& requested() const;

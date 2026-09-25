@@ -243,6 +243,39 @@ void testMalformedInput()
     CHECK_MESSAGE(rejected.smokeFrames == 0, "a rejected run has no frame count");
 }
 
+void testLaunchShortcuts()
+{
+    TEST("launch shortcuts");
+    const auto defaults = parse({});
+    CHECK(!defaults.continueGame && !defaults.showTitle);
+    CHECK(!defaults.startLocationRequested() && defaults.editDocument.empty());
+
+    CHECK(parse({ "--continue" }).continueGame);
+    CHECK(parse({ "--title" }).showTitle);
+
+    const auto level = parse({ "--level", "3", "--screen", "2" });
+    CHECK(!level.malformed);
+    CHECK(level.startLocationRequested());
+    CHECK(level.startLevel == 3 && level.startScreen == 2);
+    const auto levelOnly = parse({ "--level", "1" });
+    CHECK(!levelOnly.malformed && levelOnly.startScreen == 0);
+
+    const auto edit = parse({ "--edit", "levels/level3/screen2.scr" });
+    CHECK(!edit.malformed);
+    CHECK(edit.editDocument == "levels/level3/screen2.scr");
+
+    CHECK(parse({ "--screen", "1" }).malformed);
+    CHECK(parse({ "--level" }).malformed);
+    CHECK(parse({ "--level", "-1" }).malformed);
+    CHECK(parse({ "--level", "2x" }).malformed);
+    CHECK(parse({ "--edit" }).malformed);
+    CHECK(parse({ "--title", "--continue" }).malformed);
+    CHECK(parse({ "--title", "--edit", "a.scr" }).malformed);
+    CHECK(parse({ "--level", "1", "--edit", "a.scr" }).malformed);
+    CHECK(parse({ "--smoke-frames", "3", "--continue" }).malformed);
+    CHECK(!parse({ "--continue", "--save-directory", "x" }).malformed);
+}
+
 void testLargeCountFits()
 {
     const sokoban::CommandLineOptions options =
@@ -259,6 +292,7 @@ int main()
     testFlags();
     testMalformedInput();
     testLargeCountFits();
+    testLaunchShortcuts();
     if (failures != 0) {
         std::cerr << "CommandLineOptionsTests: " << failures
                   << " CHECK_MESSAGE(s) failed\n";

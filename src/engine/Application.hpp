@@ -82,6 +82,13 @@ struct ApplicationOptions {
     // Zero keeps the production default. A non-zero override exists for
     // deterministic residency stress/validation runs.
     std::uint64_t textureResidencyBudgetKiB = 0;
+    // Launch shortcuts; see CommandLineOptions. The location and editor
+    // requests are honoured only by Debug builds with developer tools.
+    bool continueGame = false;
+    bool showTitle = false;
+    int startLevel = -1;
+    int startScreen = 0;
+    std::filesystem::path editDocument;
 };
 
 struct ApplicationTimingEventWatchState {
@@ -119,6 +126,9 @@ private:
     void deleteSaveSlot(int slot);
     void persistSettings(bool immediate);
     void startNewGame();
+    // Runs the launch shortcuts, or resumes the Debug session, before the
+    // first frame. Skipped by smoke and evidence runs.
+    void applyLaunchRequest();
     [[nodiscard]] ShellFacts shellFacts() const;
     void handleShellEvent(const ShellEvent& event);
     void executeShellCommand(const ShellCommand& command);
@@ -249,6 +259,15 @@ private:
     std::array<FrameArena, 2> renderFrameArenas_;
     std::size_t renderFrameArenaIndex_ = 0;
     std::uint64_t smokeFrames_ = 0;
+    bool launchContinue_ = false;
+    bool launchShowTitle_ = false;
+    int launchLevel_ = -1;
+    int launchScreen_ = 0;
+    std::filesystem::path launchEditDocument_;
+#if SOKOBAN_ENABLE_DEBUG_UI
+    std::filesystem::path devSessionPath_;
+    void saveDevSession() const;
+#endif
     std::filesystem::path evidenceOutputDirectory_;
     RenderStats evidenceStats_ {};
     bool evidenceAmbientOcclusionEnabled_ = true;

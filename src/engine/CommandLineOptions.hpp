@@ -50,11 +50,25 @@ struct CommandLineOptions {
     // Diagnostic override for exercising residency pressure. Zero keeps the
     // normal renderer budget.
     std::uint64_t textureResidencyBudgetKiB = 0;
+    // Developer launch shortcuts. --continue loads the active save slot
+    // instead of showing the title. --title shows the title even when a Debug
+    // session file would otherwise resume. --level/--screen and --edit need a
+    // Debug build with developer tools: the first continues and then enters
+    // that puzzle screen, the second opens a level document in the editor.
+    bool continueGame = false;
+    bool showTitle = false;
+    int startLevel = -1;
+    int startScreen = -1;
+    std::string editDocument;
     // Set when parsing rejected the arguments; `error` says why.
     bool malformed = false;
     std::string error;
 
     [[nodiscard]] bool smokeRun() const { return smokeFrames != 0; }
+    [[nodiscard]] bool startLocationRequested() const
+    {
+        return startLevel >= 0;
+    }
 };
 
 [[nodiscard]] inline CommandLineOptions parseCommandLine(
@@ -101,6 +115,38 @@ struct CommandLineOptions {
                 return reject("--smoke-frames must be greater than zero");
             }
             options.smokeFrames = frames;
+        } else if (argument == "--continue") {
+            options.continueGame = true;
+        } else if (argument == "--title") {
+            options.showTitle = true;
+        } else if (argument == "--level" || argument == "--screen") {
+            if (index + 1 >= arguments.size()) {
+                return reject(
+                    std::string(argument) + " needs a zero-based index");
+            }
+            const std::string_view value = arguments[++index];
+            int parsedIndex = -1;
+            const char* const begin = value.data();
+            const char* const end = begin + value.size();
+            const std::from_chars_result parsed =
+                std::from_chars(begin, end, parsedIndex);
+            if (parsed.ec != std::errc {} || parsed.ptr != end ||
+                parsedIndex < 0) {
+                return reject(
+                    std::string(argument) +
+                    " wants a non-negative integer, got '" +
+                    std::string(value) + "'");
+            }
+            (argument == "--level" ? options.startLevel : options.startScreen) =
+                parsedIndex;
+        } else if (argument == "--edit") {
+            if (index + 1 >= arguments.size()) {
+                return reject("--edit needs a level document path");
+            }
+            options.editDocument = std::string(arguments[++index]);
+            if (options.editDocument.empty()) {
+                return reject("--edit cannot be empty");
+            }
         } else if (argument == "--save-directory") {
             if (index + 1 >= arguments.size()) {
                 return reject("--save-directory needs a path");
@@ -196,6 +242,26 @@ struct CommandLineOptions {
             return reject("Unknown argument '" + std::string(argument) + "'");
         }
     }
+    if (options.startScreen >= 0 && options.startLevel < 0) {
+        return reject("--screen requires --level");
+    }
+    if (options.startLevel >= 0 && options.startScreen < 0) {
+        options.startScreen = 0;
+    }
+    const bool launchShortcut = options.continueGame ||
+        options.startLocationRequested() || !options.editDocument.empty();
+    if (options.showTitle && launchShortcut) {
+        return reject(
+            "--title cannot be combined with --continue, --level, or --edit");
+    }
+    if (options.smokeRun() && (launchShortcut || options.showTitle)) {
+        return reject(
+            "--smoke-frames always starts a new game; it cannot be combined "
+            "with --continue, --title, --level, or --edit");
+    }
+    if (options.startLocationRequested() && !options.editDocument.empty()) {
+        return reject("--level and --edit are mutually exclusive");
+    }
     if (!options.evidenceOutputDirectory.empty() && options.smokeFrames < 3) {
         return reject(
             "--evidence-output requires --smoke-frames of at least 3");
@@ -237,7 +303,9 @@ struct CommandLineOptions {
 }
 
 inline constexpr std::string_view commandLineUsage =
-    "Usage: sokoban [--smoke-frames <positive integer>] "
+    "Usage: sokoban [--continue | --title] "
+    "[--level <index> [--screen <index>] | --edit <level document>] "
+    "[--smoke-frames <positive integer>] "
     "[--save-directory <path>] [--require-validation] "
     "[--texture-residency-kib <1..16777216>] "
     "[--serial-scene-preparation] "

@@ -13,14 +13,18 @@
 #include "engine/LogDebugUi.hpp"
 #include "engine/OverworldMapEditor.hpp"
 #include "engine/InputRouter.hpp"
+#include "engine/ShaderHotReload.hpp"
 #include "engine/SplatPainter.hpp"
+#include "engine/TuningDebugUi.hpp"
 #include "engine/render/VulkanRenderer.hpp"
 #include "engine/ui/Ui.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
+#include <string>
 
 namespace sokoban {
 
@@ -79,6 +83,19 @@ public:
         const VulkanRenderer& renderer,
         const VulkanRenderer::PreparedFrame* frame) const;
     void drawDraftExitConfirmation();
+    // Shader hot reload: watches the source shaders this build compiled,
+    // recompiles edits with the build's glslc and flags, publishes them into
+    // the staged tree, and asks the renderer to rebuild its pipelines.
+    void enableShaderHotReload(const std::filesystem::path& runtimeAssetRoot);
+    // Between frames: polls sources (a few times a second) and hands any
+    // published modules to the renderer.
+    void serviceShaderHotReload(VulkanRenderer& renderer);
+    void drawShaderHotReloadPanel(const VulkanRenderer& renderer);
+    // Every frame: the F6 recompile shortcut and a compile-error notice that
+    // stays up until a compile succeeds.
+    void drawShaderHotReloadOverlay(const VulkanRenderer& renderer);
+    // The workspace's Session menu.
+    void drawSessionMenu();
     [[nodiscard]] bool bakeTileThumbnails(
         VulkanRenderer& renderer,
         UiContext& ui,
@@ -91,6 +108,7 @@ public:
 
     ApplicationDebugUi applicationDebugUi;
     LogDebugUi logDebugUi;
+    TuningDebugUi tuningDebugUi { SOKOBAN_SOURCE_ROOT_DIR };
     AssetManifestEditor assetManifestEditor;
     AssetManifestDebugUi assetManifestDebugUi;
     LevelEditor levelEditor;
@@ -108,8 +126,17 @@ public:
     std::uint64_t uploadedSplatRevision = 0;
     bool draftExitConfirmationOpen = false;
     bool bakeThumbnailsRequested = false;
+    // Persisted in the developer session file (DevSession.hpp).
+    bool resumeOnLaunch = true;
 
 private:
+    std::unique_ptr<ShaderHotReload> shaderHotReload_;
+    std::string shaderReloadStatus_;
+    std::string shaderReloadDiagnostics_;
+    bool shaderCompileFailed_ = false;
+    bool shaderWatchEnabled_ = true;
+    std::uint64_t lastShaderPollTicks_ = 0;
+
     bool updateGroundPainting(
         const InputRouter::EditorInput& input,
         const VulkanRenderer::PreparedFrame& previousRenderFrame,

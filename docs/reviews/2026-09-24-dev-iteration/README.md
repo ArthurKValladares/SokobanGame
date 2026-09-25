@@ -34,6 +34,20 @@ In the 2-core Linux measurement environment:
 The Windows/MSVC acceptance timings in DI-01 to DI-03 have not been recorded
 yet.
 
+Packet B was implemented on September 25, 2026, and verified on Linux.
+[The packet B evidence note](evidence/packet-b.md) has the details.
+
+- **DI-07:** saving a shader recompiles it with the build's `glslc` and
+  flags, publishes it into the staged tree, and rebuilds pipelines in the
+  running game. Errors keep the last good shaders and are shown over the
+  game.
+- **DI-08:** the `SOKOBAN_TUNABLE_*` declarations and the Tuning tab let
+  values change live, and Save writes them back into the header. Fog of war
+  is migrated; water and lighting are not yet.
+- **DI-09:** the `--continue`, `--title`, `--level/--screen` and `--edit`
+  launch options, plus a Debug session file that resumes the active slot
+  and the editor document on launch.
+
 ## Assessment
 
 The biggest cost is not compilation. **Every Debug build of `sokoban` spends about 29 seconds re-encoding every texture to BC7, even when nothing changed.** The local build tree shows 27.6 s of BC7 encoding on the last Debug build. A cloud reproduction shows a no-op build taking 25.2 s, all of it in `sokoban_content`. This one step turns a one-line shader or constant tweak into a half-minute wait before the game can even start.

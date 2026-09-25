@@ -2,6 +2,8 @@
 
 #include "engine/render/RenderResolution.hpp"
 
+#include <algorithm>
+
 namespace sokoban {
 
 RendererReconfigurationQueue::RendererReconfigurationQueue(
@@ -31,6 +33,12 @@ void RendererReconfigurationQueue::requestWireframe(bool enabled)
     requested_.wireframe = enabled;
 }
 
+void RendererReconfigurationQueue::requestShaderReload()
+{
+    requested_.shaderRevision = std::max(
+        requested_.shaderRevision, active_.shaderRevision) + 1U;
+}
+
 const RendererSettingsSnapshot&
 RendererReconfigurationQueue::active() const
 {
@@ -53,7 +61,8 @@ RendererReconfigurationQueue::plan(bool recreateSwapchain) const
             active_.renderScalePercent;
     const bool rebuildPipelines =
         rebuildRenderResources ||
-        requested_.wireframe != active_.wireframe;
+        requested_.wireframe != active_.wireframe ||
+        requested_.shaderRevision != active_.shaderRevision;
     if (!rebuildPipelines && !recreateSwapchain) {
         return std::nullopt;
     }

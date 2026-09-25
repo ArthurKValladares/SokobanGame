@@ -37,6 +37,9 @@ public:
 
     static void initialize();
     static void addTab(std::string name, DrawCallback callback);
+    // A menu in the workspace's main menu bar; the callback draws its items.
+    static void addMenu(std::string name, DrawCallback callback);
+    // Removes every tab and menu.
     static void clearTabs();
     [[nodiscard]] static DrawResult draw(GameViewport gameViewport);
 #else
@@ -44,6 +47,11 @@ public:
 
     template <typename Callback>
     static void addTab(std::string, Callback&&)
+    {
+    }
+
+    template <typename Callback>
+    static void addMenu(std::string, Callback&&)
     {
     }
 

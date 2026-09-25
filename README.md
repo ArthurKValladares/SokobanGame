@@ -369,6 +369,41 @@ editor commands but does not own document or filesystem policy.
   soft deletion, restore, and guarded permanent deletion are handled by the
   tested editor/project APIs.
 
+## Developer Iteration Tools
+
+Debug builds with developer tools add these to the workspace:
+
+- **Shader hot reload.** Saving a file under `shaders/` recompiles it with the
+  build's `glslc` and flags, writes the new SPIR-V into the staged asset
+  tree, and rebuilds the renderer's pipelines at the next frame boundary.
+  Editing a file in `shaders/include/` recompiles every shader. F6 or
+  **Shaders > Recompile All** forces a full pass. A compile error leaves the
+  last good shaders running and shows the compiler's message over the game
+  and in the Shaders tab.
+- **Tuning tab.** Values declared with `SOKOBAN_TUNABLE_*` in a
+  `*Config.hpp` header (see `src/engine/Tuning.hpp`; fog of war uses it
+  today) can be edited while the game runs. **Save to header** writes the
+  edited literals back into that header, so the next build compiles them as
+  the new defaults. Builds without developer tools compile the same
+  declarations as plain `constexpr` constants.
+- **Resume on launch.** When a Debug session ends, the game records where
+  you were in `dev-session.json` in the save directory. The next launch
+  skips the title, continues the active save slot, and reopens the editor
+  document you were editing. Turn this off in the **Session** menu, or
+  launch with `--title` once.
+
+Launch options for jumping straight to what you are working on:
+
+| Option | Effect |
+| --- | --- |
+| `--continue` | Continue the active save slot instead of showing the title (any build). |
+| `--title` | Show the title even if the developer session would resume. |
+| `--level <n> [--screen <m>]` | Continue, then enter puzzle screen `m` (default 0) of level `n`. Debug developer builds only. |
+| `--edit <path>` | Continue, then open a level document in the editor, e.g. `--edit levels/level3/screen2.scr`. Debug developer builds only. |
+
+In Visual Studio's Open Folder mode, add arguments with the startup item's
+**Debug and Launch Settings** (`launch.vs.json`, kept under `.vs/`).
+
 ## Content Pipeline
 
 `assets/manifest.json` is the strict, versioned source of runtime models,
