@@ -2,6 +2,7 @@
 
 #include "engine/TextureSource.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -91,6 +92,47 @@ resolveGltfMaterialTextures(
     const ContentSourceRoots& roots,
     const std::filesystem::path& outputRoot,
     std::string_view gameVersion);
+
+// Developer-build accelerations for the stage above. None of them changes the
+// package a stage produces: a stage that skips, or that takes every texture
+// from the cache, leaves the same files and content.index as a clean one.
+struct ContentStageOptions {
+    // A directory of compressed textures keyed by the bytes of every file a
+    // texture source reads, its interpretation, and the encoder revision.
+    // Keep it outside the output tree; it survives restaging and is safe to
+    // delete. Empty disables caching.
+    std::filesystem::path textureCache;
+    // Leave outputRoot untouched when the inventory, every source file's size
+    // and modification time, the game version, toolIdentity, and the staged
+    // content.index all match the record the previous successful stage wrote
+    // beside outputRoot (<outputRoot>.stage-record). Anything that rewrites
+    // the staged index, such as an editor publication, forces the next stage.
+    bool skipWhenUpToDate = false;
+    // Folded into that record so a rebuilt tool restages. The content tool
+    // passes its own executable's size and modification time.
+    std::string toolIdentity;
+    // Concurrent texture encodes. Zero picks a count from the hardware; one
+    // encodes on the calling thread.
+    unsigned encoderThreads = 0;
+};
+
+struct ContentStageReport {
+    ContentInventory inventory;
+    // True when skipWhenUpToDate found nothing to do. The inventory still
+    // describes the staged package, compressed textures included.
+    bool upToDate = false;
+    std::size_t texturesEncoded = 0;
+    std::size_t texturesFromCache = 0;
+    // Encoded textures the cache could not store. The stage still succeeded;
+    // the next one encodes them again.
+    std::size_t textureCacheWriteFailures = 0;
+};
+
+[[nodiscard]] ContentStageReport stageContent(
+    const ContentSourceRoots& roots,
+    const std::filesystem::path& outputRoot,
+    std::string_view gameVersion,
+    const ContentStageOptions& options);
 
 // Parses a staged content.index and verifies its version, declared count and
 // total size, every listed regular file, and that no package file is omitted

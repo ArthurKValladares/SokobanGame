@@ -19,6 +19,14 @@ if(MSVC)
         /FS
         "/pathmap:${CMAKE_SOURCE_DIR}=."
     )
+    # The Visual Studio generator hands every source in a project to one cl.exe
+    # invocation, which compiles them one after another unless /MP is given;
+    # MSBuild's own parallelism is only across projects. sokoban_core alone is
+    # ninety sources. Ninja already runs one cl.exe per source, where /MP is
+    # redundant, so it is added for the Visual Studio generators only.
+    if(CMAKE_GENERATOR MATCHES "^Visual Studio")
+        add_compile_options(/MP)
+    endif()
 endif()
 
 option(SOKOBAN_ENABLE_VALIDATION "Enable Vulkan validation layers in debug builds" ON)
@@ -38,6 +46,8 @@ option(SOKOBAN_WARNINGS_AS_ERRORS
     "Fail the build on any compiler warning in Sokoban's own targets" OFF)
 option(SOKOBAN_BUILD_FUZZ_TESTS
     "Build libFuzzer harnesses for hostile serialized input" OFF)
+option(SOKOBAN_INCREMENTAL_CONTENT
+    "Skip unchanged content stages and cache compressed textures in the build tree" ON)
 option(SOKOBAN_BUILD_TESTS "Build engine tests" ON)
 option(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS
     "Build the hidden-window Vulkan device and submission smoke test" ON)
@@ -96,6 +106,8 @@ if(SOKOBAN_SHIPPING_BUILD)
         "Enable interprocedural optimization for Release targets" FORCE)
     set(SOKOBAN_INSTALL_EXTERNAL_SYMBOLS ON CACHE BOOL
         "Install MSVC Program Database files in a separate symbols component" FORCE)
+    set(SOKOBAN_INCREMENTAL_CONTENT OFF CACHE BOOL
+        "Skip unchanged content stages and cache compressed textures in the build tree" FORCE)
 endif()
 
 if(MSVC AND SOKOBAN_INSTALL_EXTERNAL_SYMBOLS)
@@ -127,20 +139,8 @@ target_include_directories(sokoban_stb SYSTEM INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb"
 )
 
-add_library(sokoban_bc7enc16 STATIC
-    third_party/bc7enc16/bc7enc16.c
-)
-set_source_files_properties(
-    third_party/bc7enc16/bc7enc16.c
-    PROPERTIES LANGUAGE CXX SKIP_LINTING ON)
-target_include_directories(sokoban_bc7enc16 SYSTEM PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/bc7enc16"
-)
-if(MSVC)
-    target_compile_options(sokoban_bc7enc16 PRIVATE /w)
-else()
-    target_compile_options(sokoban_bc7enc16 PRIVATE -w)
-endif()
+# Optimized in every configuration; see cmake/bc7enc16/CMakeLists.txt.
+add_subdirectory(cmake/bc7enc16)
 
 # cgltf is vendored rather than fetched, like every other third-party header
 # here, so a fresh clone that skipped it should say what to do rather than
@@ -684,6 +684,27 @@ set_target_properties(sokoban PROPERTIES
 # Every build validates the manifest, its external glTF dependencies, playable
 # levels, and compiled shaders before replacing the executable's content tree.
 # The tool copies only reachable assets, keeping vendor packs out of packages.
+#
+# The target has no declared outputs, so it runs on every build; which files a
+# stage reads is only known once the manifest and glTF documents are parsed.
+# Development builds therefore pass --incremental: the tool still collects and
+# validates the inventory (about 0.1 s), then leaves the tree alone when its
+# stage record says nothing changed. Compressed textures come from a
+# build-local cache keyed by source bytes, so a stage that does run re-encodes
+# only textures whose inputs changed. Both used to be absent, and BC7 encoding
+# every texture on every build cost about 29 s of each Debug build. Shipping
+# builds keep the clean, uncached stage their package gate was validated with.
+set(SOKOBAN_CONTENT_STAGE_OPTIONS)
+if(SOKOBAN_INCREMENTAL_CONTENT)
+    list(APPEND SOKOBAN_CONTENT_STAGE_OPTIONS
+        --incremental
+        # Per configuration: floating-point code generation differs between
+        # optimization levels, so Debug and Release tools can encode the same
+        # image to slightly different (equally valid) blocks. Keeping their
+        # caches apart keeps each configuration's package its own.
+        --texture-cache "${CMAKE_CURRENT_BINARY_DIR}/content-cache/$<CONFIG>"
+    )
+endif()
 add_custom_target(sokoban_content ALL
     COMMAND "$<TARGET_FILE:sokoban_content_tool>"
         --assets "${CMAKE_CURRENT_SOURCE_DIR}/assets"
@@ -691,6 +712,7 @@ add_custom_target(sokoban_content ALL
         --shaders "${SHADER_OUTPUT_DIR}"
         --output "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets"
         --version "${PROJECT_VERSION}"
+        ${SOKOBAN_CONTENT_STAGE_OPTIONS}
     DEPENDS
         sokoban_content_tool
         sokoban_shaders
@@ -759,42 +781,160 @@ if(WIN32 AND SOKOBAN_SIGN_ARTIFACTS)
 endif()
 endif()
 
-# Declares one headless test executable with the project's include path and
-# warning set, registered with CTest.
+# Declares one headless test suite and registers it with CTest.
 #   sokoban_add_test(
-#       NAME <ctest name> TARGET <executable name>
+#       NAME <ctest name>
 #       SOURCES <files...>
 #       [LIBS <libraries...>]
+#       [DEFINITIONS <compile definitions...>]  # for this suite's sources only
+#       [DEPENDS <targets...>]                  # built before the suite
 #       [ASSET_DIR]   # compiles with SOKOBAN_TEST_ASSET_DIR = source assets
 #       [ASSETS_ENV]  # runs with SOKOBAN_ASSETS env var = source assets
+#       [STANDALONE TARGET <executable name>]
 #   )
+#
+# Suites share runner executables rather than each being its own program:
+# sokoban_vulkan_tests for suites that link sokoban_render_vulkan, and
+# sokoban_tests for the rest. With one executable per suite, every change to
+# sokoban_core relinked 76 test programs (3.7 GB of Debug PDBs on Windows);
+# now it relinks the runners. CTest still sees one test per suite, with the
+# same name, so -R, labels, timeouts, and per-suite environments are
+# unchanged: each test runs `<runner> <name> [args...]` in its own process.
+#
+# Each suite keeps its own `int main()` and still reads as a normal program.
+# Its sources are compiled with main defined to sokobanTestSuite_<name>, and
+# the runner (tests/TestRunner.cpp) dispatches to that function by name. The
+# runner's suite table is generated from these declarations, including
+# whether each main takes (argc, argv).
+#
+# STANDALONE keeps a suite in its own executable. Use it only when the suite
+# changes something program-wide, such as replacing global operator new, that
+# must not leak into other suites.
+#
+# SOKOBAN_TEST_RUNNERS=OFF gives every suite its own executable again, named
+# sokoban_<name>_tests. It defaults to OFF in sanitizer builds: GNU ld needs
+# far more memory for an ASan/UBSan runner than for the game (2.7-3.7 GB for
+# each third of sokoban_tests, and more than the 6 GB available for all of
+# it, against 0.7 GB for sokoban) because instrumented globals multiply the
+# sections it has to order. Separate links keep that job within an ordinary
+# CI runner, and sanitizer builds are not an inner loop.
+if(SOKOBAN_ENABLE_SANITIZERS)
+    set(SOKOBAN_TEST_RUNNERS_DEFAULT OFF)
+else()
+    set(SOKOBAN_TEST_RUNNERS_DEFAULT ON)
+endif()
+option(SOKOBAN_TEST_RUNNERS
+    "Link test suites into shared runner executables instead of one each"
+    ${SOKOBAN_TEST_RUNNERS_DEFAULT})
+
 function(sokoban_add_test)
-    cmake_parse_arguments(ARG "ASSET_DIR;ASSETS_ENV" "NAME;TARGET" "SOURCES;LIBS" ${ARGN})
-    if(NOT ARG_NAME OR NOT ARG_TARGET OR NOT ARG_SOURCES)
-        message(FATAL_ERROR "sokoban_add_test requires NAME, TARGET, and SOURCES")
+    cmake_parse_arguments(ARG "ASSET_DIR;ASSETS_ENV;STANDALONE" "NAME;TARGET"
+        "SOURCES;LIBS;DEFINITIONS;DEPENDS" ${ARGN})
+    if(NOT ARG_NAME OR NOT ARG_SOURCES)
+        message(FATAL_ERROR "sokoban_add_test requires NAME and SOURCES")
+    endif()
+    if(NOT ARG_NAME MATCHES "^[a-z][a-z0-9_]*$")
+        message(FATAL_ERROR
+            "Test name ${ARG_NAME} must be a lowercase identifier; it also "
+            "names the suite's entry point")
+    endif()
+    if(ARG_STANDALONE AND NOT ARG_TARGET)
+        message(FATAL_ERROR "STANDALONE test ${ARG_NAME} requires TARGET")
+    elseif(ARG_TARGET AND NOT ARG_STANDALONE)
+        message(FATAL_ERROR
+            "Test ${ARG_NAME} names TARGET without STANDALONE; runner suites "
+            "have no executable of their own")
     endif()
     foreach(test_source IN LISTS ARG_SOURCES)
         if(test_source MATCHES "(^|[/\\\\])src[/\\\\]")
             message(FATAL_ERROR
-                "${ARG_TARGET} compiles production source ${test_source}; "
+                "Test ${ARG_NAME} compiles production source ${test_source}; "
                 "link its owning Sokoban library instead")
         endif()
     endforeach()
-    add_executable(${ARG_TARGET} ${ARG_SOURCES})
-    target_include_directories(${ARG_TARGET} PRIVATE src)
-    if(ARG_LIBS)
-        target_link_libraries(${ARG_TARGET} PRIVATE ${ARG_LIBS})
-    endif()
+
+    set(definitions ${ARG_DEFINITIONS})
     if(ARG_ASSET_DIR)
-        target_compile_definitions(${ARG_TARGET} PRIVATE
+        list(APPEND definitions
             SOKOBAN_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
     endif()
-    sokoban_enable_warnings(${ARG_TARGET})
-    add_test(NAME ${ARG_NAME} COMMAND ${ARG_TARGET})
+
+    if(ARG_STANDALONE OR NOT SOKOBAN_TEST_RUNNERS)
+        if(ARG_TARGET)
+            set(target ${ARG_TARGET})
+        else()
+            set(target sokoban_${ARG_NAME}_tests)
+        endif()
+        add_executable(${target} ${ARG_SOURCES})
+        target_include_directories(${target} PRIVATE src)
+        target_compile_definitions(${target} PRIVATE ${definitions})
+        sokoban_enable_warnings(${target})
+        add_test(NAME ${ARG_NAME} COMMAND ${target})
+    else()
+        if(sokoban_render_vulkan IN_LIST ARG_LIBS)
+            set(target sokoban_vulkan_tests)
+        else()
+            set(target sokoban_tests)
+        endif()
+        if(NOT TARGET ${target})
+            add_executable(${target} tests/TestRunner.cpp)
+            target_include_directories(${target} PRIVATE
+                src
+                "${CMAKE_CURRENT_BINARY_DIR}/generated/tests/${target}")
+            target_link_libraries(${target} PRIVATE sokoban_ui)
+            sokoban_enable_warnings(${target})
+            set_property(GLOBAL APPEND PROPERTY SOKOBAN_TEST_RUNNERS ${target})
+        endif()
+        target_sources(${target} PRIVATE ${ARG_SOURCES})
+        set_property(SOURCE ${ARG_SOURCES} APPEND PROPERTY COMPILE_DEFINITIONS
+            main=sokobanTestSuite_${ARG_NAME} ${definitions})
+
+        # The runner's table needs to know how to call this suite's main. This
+        # is read at configure time: changing a suite between main() and
+        # main(argc, argv) needs a reconfigure, or the runner fails to link
+        # with an undefined sokobanTestSuite_<name>.
+        set(arity "")
+        foreach(test_source IN LISTS ARG_SOURCES)
+            file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${test_source}" text)
+            if(text MATCHES "\nint main\\(\\)")
+                set(arity NO_ARGS)
+            elseif(text MATCHES "\nint main\\(int [A-Za-z_]+, char\\*\\* [A-Za-z_]+\\)")
+                set(arity WITH_ARGS)
+            endif()
+        endforeach()
+        if(NOT arity)
+            message(FATAL_ERROR
+                "Test ${ARG_NAME}: none of its sources defines `int main()` or "
+                "`int main(int argc, char** argv)` at the start of a line")
+        endif()
+        set_property(GLOBAL APPEND PROPERTY SOKOBAN_TEST_SUITES_${target}
+            "SOKOBAN_TEST_SUITE_${arity}(${ARG_NAME})")
+        add_test(NAME ${ARG_NAME} COMMAND ${target} ${ARG_NAME})
+    endif()
+
+    if(ARG_LIBS)
+        target_link_libraries(${target} PRIVATE ${ARG_LIBS})
+    endif()
+    if(ARG_DEPENDS)
+        add_dependencies(${target} ${ARG_DEPENDS})
+    endif()
     if(ARG_ASSETS_ENV)
         set_tests_properties(${ARG_NAME} PROPERTIES
             ENVIRONMENT "SOKOBAN_ASSETS=${CMAKE_CURRENT_SOURCE_DIR}/assets")
     endif()
+endfunction()
+
+# Writes each runner's suite table once every suite has been declared.
+function(sokoban_finalize_test_runners)
+    get_property(runners GLOBAL PROPERTY SOKOBAN_TEST_RUNNERS)
+    foreach(runner IN LISTS runners)
+        get_property(suites GLOBAL PROPERTY SOKOBAN_TEST_SUITES_${runner})
+        list(JOIN suites "\n" table)
+        file(CONFIGURE
+            OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/tests/${runner}/TestSuites.inc"
+            CONTENT "// Generated by sokoban_add_test in CMakeLists.txt.\n${table}\n"
+            @ONLY)
+    endforeach()
 endfunction()
 
 if(SOKOBAN_BUILD_TESTS)
@@ -804,14 +944,13 @@ if(SOKOBAN_BUILD_TESTS)
     if(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS)
         target_compile_definitions(sokoban_render_vulkan PRIVATE
             SOKOBAN_ENABLE_TEST_HOOKS=1)
-        sokoban_add_test(NAME vulkan_smoke TARGET sokoban_vulkan_smoke_tests
+        sokoban_add_test(NAME vulkan_smoke
             LIBS sokoban_render_vulkan
             SOURCES tests/VulkanSmokeTests.cpp
-        )
-        target_compile_definitions(sokoban_vulkan_smoke_tests PRIVATE
-            SOKOBAN_ENABLE_TEST_HOOKS=1
-            SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-            SOKOBAN_GAME_VERSION="${PROJECT_VERSION}"
+            DEFINITIONS
+                SOKOBAN_ENABLE_TEST_HOOKS=1
+                SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+                SOKOBAN_GAME_VERSION="${PROJECT_VERSION}"
         )
         set_tests_properties(vulkan_smoke PROPERTIES
             LABELS "vulkan;smoke"
@@ -835,240 +974,243 @@ if(SOKOBAN_BUILD_TESTS)
         )
     endif()
 
-    # Header-only and dependency-free, so it links nothing: the point is that
-    # the flags a CI gate is built on cannot silently mean nothing.
-    sokoban_add_test(NAME command_line TARGET sokoban_command_line_tests
+    # Header-only and dependency-free: the point is that the flags a CI gate
+    # is built on cannot silently mean nothing. It links nothing of its own;
+    # the shared runner brings the libraries, which it does not use.
+    sokoban_add_test(NAME command_line
         SOURCES tests/CommandLineOptionsTests.cpp
     )
     # Also header-only. Math and Geometry underpin projection, skinning,
     # picking and (soon) culling, so their conventions are pinned here rather
     # than discovered from a wrong-looking frame.
-    sokoban_add_test(NAME math TARGET sokoban_math_tests
+    sokoban_add_test(NAME math
         SOURCES tests/MathTests.cpp
     )
-    sokoban_add_test(NAME geometry TARGET sokoban_geometry_tests
+    sokoban_add_test(NAME geometry
         SOURCES tests/GeometryTests.cpp
     )
-    sokoban_add_test(NAME rules TARGET sokoban_rules_tests
+    sokoban_add_test(NAME rules
         LIBS sokoban_core
         SOURCES tests/RulesTests.cpp
     )
-    sokoban_add_test(NAME level TARGET sokoban_level_tests
+    sokoban_add_test(NAME level
         LIBS sokoban_core
         SOURCES tests/LevelTests.cpp
     )
-    sokoban_add_test(NAME level_catalog TARGET sokoban_level_catalog_tests
+    sokoban_add_test(NAME level_catalog
         LIBS sokoban_core
         SOURCES tests/LevelCatalogTests.cpp
     )
-    sokoban_add_test(NAME overworld_map TARGET sokoban_overworld_map_tests
+    sokoban_add_test(NAME overworld_map
         LIBS sokoban_core
         SOURCES tests/OverworldMapTests.cpp
     )
-    sokoban_add_test(NAME gameplay_session TARGET sokoban_gameplay_session_tests
+    sokoban_add_test(NAME gameplay_session
         LIBS sokoban_core
         SOURCES tests/GameplaySessionTests.cpp
     )
-    sokoban_add_test(NAME player_profile TARGET sokoban_profile_tests
+    # Standalone because it replaces global operator new and delete to measure
+    # allocations, which must not apply to the suites sharing a runner.
+    sokoban_add_test(NAME player_profile STANDALONE TARGET sokoban_profile_tests
         LIBS sokoban_core sokoban_json
         SOURCES tests/PlayerProfileTests.cpp
+        DEFINITIONS SOKOBAN_ENABLE_TEST_HOOKS=1
     )
-    target_compile_definitions(sokoban_profile_tests PRIVATE SOKOBAN_ENABLE_TEST_HOOKS=1)
-    sokoban_add_test(NAME save_slots TARGET sokoban_save_slot_tests
+    sokoban_add_test(NAME save_slots
         LIBS sokoban_core sokoban_json
         SOURCES tests/SaveSlotManagerTests.cpp
     )
-    sokoban_add_test(NAME shell_flow TARGET sokoban_shell_flow_tests
+    sokoban_add_test(NAME shell_flow
         LIBS sokoban_ui
         SOURCES tests/ShellFlowTests.cpp
     )
-    sokoban_add_test(NAME input TARGET sokoban_input_tests
+    sokoban_add_test(NAME input
         LIBS sokoban_core
         SOURCES tests/InputTests.cpp
     )
-    sokoban_add_test(NAME image_data TARGET sokoban_image_data_tests
+    sokoban_add_test(NAME image_data
         LIBS sokoban_core
         ASSET_DIR
         SOURCES tests/ImageDataTests.cpp
     )
-    sokoban_add_test(NAME ui TARGET sokoban_ui_tests
+    sokoban_add_test(NAME ui
         LIBS sokoban_ui
         ASSET_DIR
         SOURCES tests/UiTests.cpp
     )
-    sokoban_add_test(NAME title TARGET sokoban_title_tests
+    sokoban_add_test(NAME title
         LIBS sokoban_ui
         ASSET_DIR
         SOURCES tests/TitleScreenTests.cpp
     )
     if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
-        sokoban_add_test(NAME vulkan_device_selection TARGET sokoban_vulkan_device_selection_tests
+        sokoban_add_test(NAME vulkan_device_selection
             LIBS sokoban_render_vulkan
             SOURCES tests/VulkanDeviceSelectionTests.cpp
         )
         # Needs no device: vkCheck only formats and throws.
-        sokoban_add_test(NAME vulkan_diagnostics TARGET sokoban_vulkan_diagnostics_tests
+        sokoban_add_test(NAME vulkan_diagnostics
             LIBS sokoban_render_vulkan
             SOURCES tests/VulkanDiagnosticsTests.cpp
         )
     endif()
-    sokoban_add_test(NAME input_router TARGET sokoban_input_router_tests
+    sokoban_add_test(NAME input_router
         LIBS sokoban_ui
         SOURCES tests/InputRouterTests.cpp
     )
-    sokoban_add_test(NAME settings_coordinator TARGET sokoban_settings_coordinator_tests
+    sokoban_add_test(NAME settings_coordinator
         LIBS sokoban_core
         SOURCES tests/SettingsCoordinatorTests.cpp
     )
-    sokoban_add_test(NAME campaign_session TARGET sokoban_campaign_session_tests
+    sokoban_add_test(NAME campaign_session
         LIBS sokoban_core
         SOURCES tests/CampaignSessionTests.cpp
     )
-    sokoban_add_test(NAME level_transition TARGET sokoban_level_transition_tests
+    sokoban_add_test(NAME level_transition
         LIBS sokoban_core
         SOURCES tests/LevelTransitionTests.cpp
     )
-    sokoban_add_test(NAME gameplay_loop TARGET sokoban_gameplay_loop_tests
+    sokoban_add_test(NAME gameplay_loop
         LIBS sokoban_core
         SOURCES tests/GameplayLoopTests.cpp
     )
-    sokoban_add_test(NAME frame_pacing TARGET sokoban_frame_pacing_tests
+    sokoban_add_test(NAME frame_pacing
         LIBS sokoban_core
         SOURCES tests/FramePacingTests.cpp
     )
     if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
-        sokoban_add_test(NAME frame_descriptor_sync TARGET sokoban_frame_descriptor_sync_tests
+        sokoban_add_test(NAME frame_descriptor_sync
             LIBS sokoban_render_vulkan
             SOURCES tests/FrameDescriptorSyncTests.cpp
         )
     endif()
-    sokoban_add_test(NAME frame_resource_tracker TARGET sokoban_frame_resource_tracker_tests
+    sokoban_add_test(NAME frame_resource_tracker
         LIBS sokoban_core
         SOURCES tests/FrameResourceTrackerTests.cpp
     )
-    sokoban_add_test(NAME frame_time_telemetry TARGET sokoban_frame_time_telemetry_tests
+    sokoban_add_test(NAME frame_time_telemetry
         LIBS sokoban_core
         SOURCES tests/FrameTimeTelemetryTests.cpp
     )
-    sokoban_add_test(NAME renderer_reconfiguration TARGET sokoban_renderer_reconfiguration_tests
+    sokoban_add_test(NAME renderer_reconfiguration
         LIBS sokoban_core
         SOURCES tests/RendererReconfigurationTests.cpp
     )
-    sokoban_add_test(NAME iso_scene_preparer TARGET sokoban_iso_scene_preparer_tests
+    sokoban_add_test(NAME iso_scene_preparer
         LIBS sokoban_core
         SOURCES tests/IsoScenePreparerTests.cpp
     )
-    sokoban_add_test(NAME level_editor TARGET sokoban_level_editor_tests
+    sokoban_add_test(NAME level_editor
         LIBS sokoban_core
         SOURCES tests/LevelEditorTests.cpp
     )
-    sokoban_add_test(NAME decoration_mesh_catalog TARGET sokoban_decoration_mesh_catalog_tests
+    sokoban_add_test(NAME decoration_mesh_catalog
         LIBS sokoban_core
         SOURCES tests/DecorationMeshCatalogTests.cpp
     )
-    sokoban_add_test(NAME decoration_gizmo TARGET sokoban_decoration_gizmo_tests
+    sokoban_add_test(NAME decoration_gizmo
         LIBS sokoban_core
         SOURCES tests/DecorationGizmoTests.cpp
     )
-    sokoban_add_test(NAME editor_interaction TARGET sokoban_editor_interaction_tests
+    sokoban_add_test(NAME editor_interaction
         LIBS sokoban_core
         SOURCES tests/EditorInteractionTests.cpp
     )
-    sokoban_add_test(NAME animation_controller TARGET sokoban_animation_controller_tests
+    sokoban_add_test(NAME animation_controller
         LIBS sokoban_core
         SOURCES tests/AnimationControllerTests.cpp
     )
-    sokoban_add_test(NAME gltf_dependencies TARGET sokoban_gltf_dependency_tests
+    sokoban_add_test(NAME gltf_dependencies
         LIBS sokoban_core
         SOURCES tests/GltfDependencyTests.cpp
     )
-    sokoban_add_test(NAME runtime_texture_catalog TARGET sokoban_runtime_texture_catalog_tests
+    sokoban_add_test(NAME runtime_texture_catalog
         LIBS sokoban_core
         ASSET_DIR
         SOURCES tests/RuntimeTextureCatalogTests.cpp
     )
-    sokoban_add_test(NAME compressed_texture_artifact TARGET sokoban_compressed_texture_artifact_tests
+    sokoban_add_test(NAME compressed_texture_artifact
         LIBS sokoban_core
         SOURCES tests/CompressedTextureArtifactTests.cpp
     )
-    sokoban_add_test(NAME tonemap TARGET sokoban_tonemap_tests
+    sokoban_add_test(NAME tonemap
         LIBS sokoban_core
         SOURCES tests/TonemapTests.cpp
     )
-    sokoban_add_test(NAME pbr_material TARGET sokoban_pbr_material_tests
+    sokoban_add_test(NAME pbr_material
         LIBS sokoban_core
         SOURCES tests/PbrMaterialTests.cpp
     )
-    sokoban_add_test(NAME ssao_math TARGET sokoban_ssao_math_tests
+    sokoban_add_test(NAME ssao_math
         LIBS sokoban_core
         SOURCES tests/SsaoMathTests.cpp
     )
-    sokoban_add_test(NAME atmosphere_math TARGET sokoban_atmosphere_math_tests
+    sokoban_add_test(NAME atmosphere_math
         LIBS sokoban_core
         SOURCES tests/AtmosphereMathTests.cpp
     )
-    sokoban_add_test(NAME animation_catalog TARGET sokoban_animation_catalog_tests
+    sokoban_add_test(NAME animation_catalog
         LIBS sokoban_core
         ASSETS_ENV
         SOURCES tests/AnimationCatalogTests.cpp
     )
-    sokoban_add_test(NAME animation_event_sequencer TARGET sokoban_animation_event_sequencer_tests
+    sokoban_add_test(NAME animation_event_sequencer
         LIBS sokoban_core
         ASSETS_ENV
         SOURCES tests/AnimationEventSequencerTests.cpp
     )
-    sokoban_add_test(NAME asset_manifest TARGET sokoban_asset_manifest_tests
+    sokoban_add_test(NAME asset_manifest
         LIBS sokoban_core sokoban_json
         ASSETS_ENV
         SOURCES tests/AssetManifestTests.cpp
     )
-    sokoban_add_test(NAME asset_manifest_editor TARGET sokoban_asset_manifest_editor_tests
+    sokoban_add_test(NAME asset_manifest_editor
         LIBS sokoban_core
         ASSETS_ENV
         SOURCES tests/AssetManifestEditorTests.cpp
     )
-    sokoban_add_test(NAME presentation TARGET sokoban_presentation_tests
+    sokoban_add_test(NAME presentation
         LIBS sokoban_core
         SOURCES tests/PresentationTests.cpp
     )
-    sokoban_add_test(NAME particles TARGET sokoban_particle_tests
+    sokoban_add_test(NAME particles
         LIBS sokoban_core
         SOURCES tests/ParticleSystemTests.cpp
     )
-    sokoban_add_test(NAME asset_requirements TARGET sokoban_asset_requirements_tests
+    sokoban_add_test(NAME asset_requirements
         LIBS sokoban_core
         SOURCES tests/AssetRequirementsTests.cpp
     )
-    sokoban_add_test(NAME asset_load_state TARGET sokoban_asset_load_state_tests
+    sokoban_add_test(NAME asset_load_state
         LIBS sokoban_core
         SOURCES tests/AssetLoadStateTests.cpp
     )
-    sokoban_add_test(NAME residency_budget TARGET sokoban_residency_budget_tests
+    sokoban_add_test(NAME residency_budget
         LIBS sokoban_core
         SOURCES tests/ResidencyBudgetTests.cpp
     )
-    sokoban_add_test(NAME asset_load_scheduler TARGET sokoban_asset_load_scheduler_tests
+    sokoban_add_test(NAME asset_load_scheduler
         LIBS sokoban_core
         SOURCES tests/AssetLoadSchedulerTests.cpp
     )
-    sokoban_add_test(NAME geometry_suballocator TARGET sokoban_geometry_suballocator_tests
+    sokoban_add_test(NAME geometry_suballocator
         LIBS sokoban_core
         SOURCES tests/GeometrySuballocatorTests.cpp
     )
-    sokoban_add_test(NAME upload_ring_allocator TARGET sokoban_upload_ring_allocator_tests
+    sokoban_add_test(NAME upload_ring_allocator
         LIBS sokoban_core
         SOURCES tests/UploadRingAllocatorTests.cpp
     )
-    sokoban_add_test(NAME material_range_allocator TARGET sokoban_material_range_allocator_tests
+    sokoban_add_test(NAME material_range_allocator
         LIBS sokoban_core
         SOURCES tests/MaterialRangeAllocatorTests.cpp
     )
-    sokoban_add_test(NAME gpu_skinning TARGET sokoban_gpu_skinning_tests
+    sokoban_add_test(NAME gpu_skinning
         LIBS sokoban_core
         ASSET_DIR
         SOURCES tests/GpuSkinningTests.cpp
     )
-    sokoban_add_test(NAME gpu_material TARGET sokoban_gpu_material_tests
+    sokoban_add_test(NAME gpu_material
         LIBS sokoban_core
         SOURCES tests/GpuMaterialTests.cpp
     )
@@ -1078,114 +1220,109 @@ if(SOKOBAN_BUILD_TESTS)
     # shaders built, and needs to be told where they landed - SHADER_OUTPUT_DIR
     # has no $<CONFIG> component, so one path serves every configuration.
     if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
-        sokoban_add_test(NAME gpu_abi TARGET sokoban_gpu_abi_tests
+        sokoban_add_test(NAME gpu_abi
             LIBS sokoban_core
             SOURCES tests/GpuAbiTests.cpp
+            DEFINITIONS SOKOBAN_TEST_SHADER_DIR="${SHADER_OUTPUT_DIR}"
+            DEPENDS sokoban_shaders
         )
-        target_compile_definitions(sokoban_gpu_abi_tests PRIVATE
-            SOKOBAN_TEST_SHADER_DIR="${SHADER_OUTPUT_DIR}")
-        add_dependencies(sokoban_gpu_abi_tests sokoban_shaders)
     endif()
     # Reads DrawMode.glsl as text and compares it to DrawMaterialMode. Needs
     # the shader *source* directory, not the compiled one: the value it checks
     # is folded into a branch by the optimizer and cannot be read back out of
     # SPIR-V, so the header itself is the only place to see it.
-    sokoban_add_test(NAME draw_mode TARGET sokoban_draw_mode_tests
+    sokoban_add_test(NAME draw_mode
         LIBS sokoban_core
         SOURCES tests/DrawModeTests.cpp
+        DEFINITIONS SOKOBAN_TEST_SHADER_INCLUDE_DIR="${SHADER_INCLUDE_DIR}"
     )
-    target_compile_definitions(sokoban_draw_mode_tests PRIVATE
-        SOKOBAN_TEST_SHADER_INCLUDE_DIR="${SHADER_INCLUDE_DIR}")
-    sokoban_add_test(NAME scene_draw_lanes TARGET sokoban_scene_draw_lanes_tests
+    sokoban_add_test(NAME scene_draw_lanes
         LIBS sokoban_core
         SOURCES tests/SceneDrawLanesTests.cpp
     )
-    sokoban_add_test(NAME texture_descriptor_space TARGET sokoban_texture_descriptor_space_tests
+    sokoban_add_test(NAME texture_descriptor_space
         LIBS sokoban_core
         SOURCES tests/TextureDescriptorSpaceTests.cpp
     )
     if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
         # Header-only and constexpr; it needs the Vulkan enums, not a device.
-        sokoban_add_test(NAME texture_upload_plan TARGET sokoban_texture_upload_plan_tests
+        sokoban_add_test(NAME texture_upload_plan
             LIBS sokoban_render_vulkan
             SOURCES tests/TextureUploadPlanTests.cpp
         )
     endif()
-    sokoban_add_test(NAME opaque_draw_sorter TARGET sokoban_opaque_draw_sorter_tests
+    sokoban_add_test(NAME opaque_draw_sorter
         LIBS sokoban_core
         SOURCES tests/OpaqueDrawSorterTests.cpp
     )
-    sokoban_add_test(NAME tasks TARGET sokoban_task_tests
+    sokoban_add_test(NAME tasks
         LIBS sokoban_core
         SOURCES tests/TaskSystemTests.cpp
+        DEFINITIONS SOKOBAN_ENABLE_TEST_HOOKS=1
     )
-    target_compile_definitions(sokoban_task_tests PRIVATE
-        SOKOBAN_ENABLE_TEST_HOOKS=1)
-    sokoban_add_test(NAME logging TARGET sokoban_log_tests
+    sokoban_add_test(NAME logging
         LIBS sokoban_core
         SOURCES tests/LogTests.cpp
     )
-    sokoban_add_test(NAME crash_diagnostics TARGET sokoban_crash_diagnostics_tests
+    sokoban_add_test(NAME crash_diagnostics
         LIBS sokoban_core
         SOURCES tests/CrashDiagnosticsTests.cpp
     )
-    sokoban_add_test(NAME frame_arena TARGET sokoban_frame_arena_tests
+    sokoban_add_test(NAME frame_arena
         LIBS sokoban_core
         SOURCES tests/FrameArenaTests.cpp
     )
-    sokoban_add_test(NAME atomic_file TARGET sokoban_atomic_file_tests
+    sokoban_add_test(NAME atomic_file
         LIBS sokoban_core
         SOURCES tests/AtomicFileTests.cpp
+        DEFINITIONS SOKOBAN_ENABLE_TEST_HOOKS=1
     )
-    target_compile_definitions(sokoban_atomic_file_tests PRIVATE SOKOBAN_ENABLE_TEST_HOOKS=1)
-    sokoban_add_test(NAME level_project_store TARGET sokoban_level_project_store_tests
+    sokoban_add_test(NAME level_project_store
         LIBS sokoban_core
         SOURCES tests/LevelProjectStoreTests.cpp
+        DEFINITIONS SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
     )
-    target_compile_definitions(sokoban_level_project_store_tests PRIVATE
-        SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-    )
-    sokoban_add_test(NAME overworld_map_editor TARGET sokoban_overworld_map_editor_tests
+    sokoban_add_test(NAME overworld_map_editor
         LIBS sokoban_core sokoban_json
         SOURCES tests/OverworldMapEditorTests.cpp
     )
-    sokoban_add_test(NAME content_pipeline TARGET sokoban_content_pipeline_tests
+    sokoban_add_test(NAME content_pipeline
         LIBS sokoban_core
         SOURCES tests/ContentPipelineTests.cpp
     )
-    sokoban_add_test(NAME splat_canvas TARGET sokoban_splat_canvas_tests
+    sokoban_add_test(NAME splat_canvas
         LIBS sokoban_core
         SOURCES tests/SplatCanvasTests.cpp
     )
-    sokoban_add_test(NAME splat_painter TARGET sokoban_splat_painter_tests
+    sokoban_add_test(NAME splat_painter
         LIBS sokoban_core
         SOURCES tests/SplatPainterTests.cpp
     )
-    sokoban_add_test(NAME png_writer TARGET sokoban_png_writer_tests
+    sokoban_add_test(NAME png_writer
         LIBS sokoban_core
         SOURCES tests/PngWriterTests.cpp
     )
-    sokoban_add_test(NAME ground_pick TARGET sokoban_ground_pick_tests
+    sokoban_add_test(NAME ground_pick
         LIBS sokoban_core
         SOURCES tests/GroundPickTests.cpp
     )
-    sokoban_add_test(NAME action_plan TARGET sokoban_action_plan_tests
+    sokoban_add_test(NAME action_plan
         LIBS sokoban_core
         SOURCES tests/ActionPlanTests.cpp
     )
-    sokoban_add_test(NAME action_scheduler TARGET sokoban_action_scheduler_tests
+    sokoban_add_test(NAME action_scheduler
         LIBS sokoban_core
         SOURCES tests/ActionSchedulerTests.cpp
     )
-    sokoban_add_test(NAME reservation TARGET sokoban_reservation_tests
+    sokoban_add_test(NAME reservation
         LIBS sokoban_core
         SOURCES tests/ReservationTests.cpp
     )
-    sokoban_add_test(NAME state_delta TARGET sokoban_state_delta_tests
+    sokoban_add_test(NAME state_delta
         LIBS sokoban_core
         SOURCES tests/StateDeltaTests.cpp
     )
-    sokoban_add_test(NAME tile_thumbnail_bake TARGET sokoban_tile_thumbnail_bake_tests
+    sokoban_add_test(NAME tile_thumbnail_bake
         LIBS sokoban_core
         SOURCES tests/TileThumbnailBakeTests.cpp
     )
@@ -1211,6 +1348,8 @@ if(SOKOBAN_BUILD_TESTS)
             TIMEOUT 45
         )
     endif()
+
+    sokoban_finalize_test_runners()
 endif()
 
 if(SOKOBAN_BUILD_FUZZ_TESTS)

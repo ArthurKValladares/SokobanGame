@@ -47,11 +47,31 @@ Texture decoding uses stb_image rather than platform-specific image APIs.
 
 ## Build And Run
 
+For day-to-day work, use the `dev` preset. It is a Debug build with the editor
+and developer tools, generated for Ninja so every source file compiles in
+parallel. Open the folder in Visual Studio (it picks up `CMakePresets.json`),
+or run these from a Developer PowerShell for VS 2022:
+
+```powershell
+cmake --preset dev
+cmake --build --preset dev        # the game and its content only
+.\out\dev\Debug\sokoban.exe
+```
+
+`cmake --build --preset dev-all` also builds the tests, and
+`ctest --preset dev` runs them.
+
+The Visual Studio solution generator still works and is what CI uses on
+Windows:
+
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Debug
 .\build\Debug\sokoban.exe
 ```
+
+Building `ALL_BUILD` there also builds every test runner. Build the `sokoban`
+target, or set it as the startup project, when you only want to run the game.
 
 `SOKOBAN_ENABLE_VALIDATION` defaults to `ON`. Headless tests are built by
 default and can be disabled with `-DSOKOBAN_BUILD_TESTS=OFF`.
@@ -88,6 +108,15 @@ ctest --test-dir build -C Debug --output-on-failure --no-tests=error
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure --no-tests=error
 ```
+
+Each suite is still its own CTest test, but suites are linked into a few
+runner executables instead of one program each: `sokoban_vulkan_tests` for
+suites that need the renderer, `sokoban_tests` for the rest, and
+`sokoban_profile_tests` on its own because it replaces global `operator new`.
+To run one suite directly, pass its CTest name: `sokoban_tests rules`
+(`sokoban_tests --list` prints them). Sanitizer builds default to one
+executable per suite (`SOKOBAN_TEST_RUNNERS=OFF`); see `sokoban_add_test` in
+`CMakeLists.txt` for why.
 
 The `Required Tests` GitHub Actions workflow performs clean Debug and Release
 builds on Linux and Windows for every push and pull request. Linux runs the
@@ -375,6 +404,16 @@ materials still require explicit manifest material entries.
 ```powershell
 cmake --build build --config Debug --target sokoban_content
 ```
+
+Outside the shipping presets, staging is incremental
+(`SOKOBAN_INCREMENTAL_CONTENT`). The tool still collects and validates the
+inventory on every build, but it leaves the staged tree alone when a record
+beside it (`assets.stage-record`) shows that no source file, the tool, and the
+staged `content.index` have changed. When a stage does run, BC7 textures come
+from a per-configuration cache in the build tree (`content-cache/<config>/`),
+keyed by the bytes of every file a texture reads, so only changed textures are
+re-encoded. Deleting the cache is always safe. The shipping presets turn both
+off and stage from scratch.
 
 The game loads from the staged `assets/` tree. Runtime asset requests are lazy;
 CPU work uses the task system, and requirements for the current and next level

@@ -54,7 +54,17 @@ problem or measurement.
 
 ## Build and validation
 
-Normal Windows development build:
+Inner development loop (Ninja, Debug, editor tools; open the folder in Visual
+Studio or use a Developer PowerShell):
+
+```powershell
+cmake --preset dev
+cmake --build --preset dev        # sokoban and its content only
+cmake --build --preset dev-all    # plus the test runners
+ctest --preset dev
+```
+
+Full Windows validation build (the Visual Studio generator, as CI uses):
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
@@ -78,6 +88,24 @@ for both GCC/Clang and MSVC. The Linux Debug job performs the standalone
 CTest device smoke without the separate validation-frame command. Hosted
 Windows runners build and run the SDK-independent and packaging tests but omit
 device smoke because they do not provide a Vulkan ICD.
+
+Test suites are declared with `sokoban_add_test` and linked into shared
+runners (`sokoban_tests`, `sokoban_vulkan_tests`); CTest runs
+`<runner> <suite>` in a separate process per suite. A suite that changes
+process-wide state must be `STANDALONE`, as `player_profile` is.
+Sanitizer builds default to one executable per suite
+(`SOKOBAN_TEST_RUNNERS=OFF`) because GNU ld's memory for an instrumented
+runner exceeds ordinary CI runners.
+
+Development content staging is incremental: `sokoban_content` skips an
+unchanged tree using `<config>/assets.stage-record` and takes BC7 textures
+from `content-cache/<config>/`. The cache key must describe everything the
+encoder's output depends on. Change
+`compressedTextureEncoderRevision` whenever `buildBc7Ktx2` would produce
+different bytes for the same input. Shipping presets set
+`SOKOBAN_INCREMENTAL_CONTENT=OFF` and stage from scratch. `sokoban_bc7enc16`
+is built with Release flags in every configuration from
+`cmake/bc7enc16/`.
 
 For shipping artifacts and human GPU acceptance, follow
 [`packaging/ReleaseValidation.md`](packaging/ReleaseValidation.md). A package is

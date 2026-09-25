@@ -13,18 +13,23 @@
 #include "engine/render/ShaderCatalog.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/TileTypes.hpp"
+#include "engine/TaskSystem.hpp"
 #include "engine/ui/UiConfig.hpp"
 
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <chrono>
 #include <cctype>
 #include <cmath>
+#include <cstring>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <optional>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -1283,25 +1288,361 @@ std::vector<ResolvedMaterialTexture> resolveGltfMaterialTextures(
     return resolvedMaterialTexturesFrom(dependencies, relative, assetLabel);
 }
 
+namespace {
+
+// FNV-1a is enough for what these digests do: name cache entries and notice
+// that a file or record changed. Every cache hit is also confirmed against
+// the complete key text, and a file's size is recorded next to its digest.
+constexpr uint64_t stageDigestOffset = 14695981039346656037ULL;
+constexpr uint64_t stageDigestPrime = 1099511628211ULL;
+
+uint64_t appendDigest(uint64_t digest, std::span<const char> bytes)
+{
+    for (const char byte : bytes) {
+        digest ^= static_cast<unsigned char>(byte);
+        digest *= stageDigestPrime;
+    }
+    return digest;
+}
+
+std::string hexDigest(uint64_t digest)
+{
+    std::array<char, 16> text {};
+    for (std::size_t index = text.size(); index-- > 0;) {
+        text[index] = "0123456789abcdef"[digest & 0xFU];
+        digest >>= 4U;
+    }
+    return std::string(text.data(), text.size());
+}
+
+std::string textDigest(std::string_view text)
+{
+    return hexDigest(appendDigest(stageDigestOffset, text));
+}
+
+// Returns nullopt when the file cannot be read, which callers treat as "no
+// match" rather than as an error of their own.
+std::optional<std::string> fileBytes(const std::filesystem::path& path)
+{
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        return std::nullopt;
+    }
+    std::string bytes {
+        std::istreambuf_iterator<char>(input),
+        std::istreambuf_iterator<char>() };
+    if (input.bad()) {
+        return std::nullopt;
+    }
+    return bytes;
+}
+
+std::string fileDigest(const std::filesystem::path& path)
+{
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error(
+            "cannot read texture source for the artifact cache: " +
+            path.string());
+    }
+    uint64_t digest = stageDigestOffset;
+    std::array<char, std::size_t { 64 } * 1024U> buffer {};
+    while (input) {
+        input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        digest = appendDigest(
+            digest,
+            std::span<const char>(
+                buffer.data(), static_cast<std::size_t>(input.gcount())));
+    }
+    if (input.bad()) {
+        throw std::runtime_error(
+            "cannot read texture source for the artifact cache: " +
+            path.string());
+    }
+    return hexDigest(digest);
+}
+
+// Every file whose bytes a texture source decodes from. A buffer-view source
+// lists its document and all of the document's external files: more than the
+// one buffer it reads, which can only cause an unnecessary re-encode, never a
+// stale artifact.
+std::vector<std::filesystem::path> textureSourceFiles(
+    const std::filesystem::path& assetRoot,
+    const TextureSource& source)
+{
+    return std::visit(
+        [&assetRoot](const auto& typed) -> std::vector<std::filesystem::path> {
+            using Source = std::decay_t<decltype(typed)>;
+            if constexpr (std::is_same_v<Source, ExternalTextureSource>) {
+                return { typed.path };
+            } else if constexpr (
+                std::is_same_v<Source, GltfBufferViewTextureSource>) {
+                std::vector<std::filesystem::path> files {
+                    typed.document };
+                std::vector<std::filesystem::path> external =
+                    resolveGltfExternalFiles(
+                        assetRoot, typed.document, "texture cache source");
+                files.insert(files.end(), external.begin(), external.end());
+                return files;
+            } else {
+                // A data URI carries its bytes in the identity key itself.
+                return {};
+            }
+        },
+        source);
+}
+
+// Everything a compressed artifact is a function of. Two sources with equal
+// keys encode to identical bytes, so a stored artifact with the same key can
+// stand in for encoding.
+std::string compressedTextureCacheKey(
+    const std::filesystem::path& assetRoot,
+    const TextureSourceIdentity& identity)
+{
+    const std::string identityKey = textureSourceIdentityKey(identity);
+    std::string key = "sokoban-compressed-texture-cache 1\n";
+    key += "encoder " + std::string(compressedTextureEncoderRevision) + '\n';
+    key += "identity " + textDigest(identityKey) + ' ' +
+        std::to_string(identityKey.size()) + '\n';
+    for (const std::filesystem::path& relative :
+         textureSourceFiles(assetRoot, identity.source)) {
+        const std::filesystem::path path = assetRoot / relative;
+        key += "file " + std::to_string(std::filesystem::file_size(path)) +
+            ' ' + fileDigest(path) + ' ' + relative.generic_string() + '\n';
+    }
+    return key;
+}
+
+// A build-local, content-addressed store of compressed textures. Entries are
+// named by the digest of their key; the key text is stored beside the
+// artifact and must match exactly, and the artifact must parse, before an
+// entry is used. The cache is disposable: deleting it only costs re-encoding.
+class CompressedTextureCache {
+public:
+    explicit CompressedTextureCache(std::filesystem::path directory)
+        : directory_(std::move(directory))
+    {
+    }
+
+    [[nodiscard]] bool enabled() const { return !directory_.empty(); }
+
+    [[nodiscard]] std::optional<std::vector<std::byte>> find(
+        const std::string& key) const
+    {
+        if (!enabled()) {
+            return std::nullopt;
+        }
+        const std::string stem = textDigest(key);
+        const std::optional<std::string> storedKey =
+            fileBytes(directory_ / (stem + ".key"));
+        if (!storedKey || *storedKey != key) {
+            return std::nullopt;
+        }
+        const std::optional<std::string> stored =
+            fileBytes(directory_ / (stem + ".ktx2"));
+        if (!stored) {
+            return std::nullopt;
+        }
+        std::vector<std::byte> artifact(stored->size());
+        std::memcpy(artifact.data(), stored->data(), stored->size());
+        try {
+            (void)parseBc7Ktx2(artifact, directory_ / (stem + ".ktx2"));
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+        touch(stem);
+        return artifact;
+    }
+
+    // Returns false when the entry could not be written. That is not a
+    // staging failure: it only means the next stage encodes again. The key is
+    // written last, so a key on disk implies a complete artifact beside it.
+    [[nodiscard]] bool store(
+        const std::string& key,
+        std::span<const std::byte> artifact) const
+    {
+        if (!enabled()) {
+            return true;
+        }
+        try {
+            std::filesystem::create_directories(directory_);
+            const std::string stem = textDigest(key);
+            atomicFile::write(
+                directory_ / (stem + ".ktx2"),
+                std::string_view(
+                    reinterpret_cast<const char*>(artifact.data()),
+                    artifact.size()));
+            atomicFile::write(directory_ / (stem + ".key"), key);
+            used_.insert(stem);
+            return true;
+        } catch (const std::exception&) {
+            return false;
+        }
+    }
+
+    // Removes entries this stage did not use and nothing has used for
+    // `unusedFor`, so the cache stays bounded without evicting anything a
+    // branch switch is likely to want back.
+    void prune(std::chrono::hours unusedFor) const
+    {
+        if (!enabled()) {
+            return;
+        }
+        std::error_code error;
+        if (!std::filesystem::is_directory(directory_, error)) {
+            return;
+        }
+        const auto cutoff =
+            std::filesystem::file_time_type::clock::now() - unusedFor;
+        for (std::filesystem::directory_iterator it(directory_, error), end;
+             !error && it != end;
+             it.increment(error)) {
+            const std::filesystem::path& path = it->path();
+            if (used_.contains(path.stem().string())) {
+                continue;
+            }
+            std::error_code timeError;
+            const auto written =
+                std::filesystem::last_write_time(path, timeError);
+            if (!timeError && written < cutoff) {
+                std::error_code removeError;
+                (void)std::filesystem::remove(path, removeError);
+            }
+        }
+    }
+
+private:
+    void touch(const std::string& stem) const
+    {
+        used_.insert(stem);
+        const auto now = std::filesystem::file_time_type::clock::now();
+        for (const char* extension : { ".key", ".ktx2" }) {
+            std::error_code error;
+            std::filesystem::last_write_time(
+                directory_ / (stem + extension), now, error);
+        }
+    }
+
+    std::filesystem::path directory_;
+    mutable std::unordered_set<std::string> used_;
+};
+
+// What the output tree is a function of, apart from the output itself. The
+// record written after a stage is this text plus the digest of the
+// content.index that stage produced; a later run whose text and staged index
+// both still match has nothing to do.
+std::string stageInputRecord(
+    const ContentSourceRoots& roots,
+    const ContentInventory& inventory,
+    std::string_view gameVersion,
+    std::string_view toolIdentity)
+{
+    std::string record = "sokoban-content-stage-record 1\n";
+    record += "game-version " + std::string(gameVersion) + '\n';
+    record += "tool " + std::string(toolIdentity) + '\n';
+    record += "encoder " + std::string(compressedTextureEncoderRevision) + '\n';
+    for (const std::filesystem::path* root :
+         { &roots.assets, &roots.levels, &roots.shaders }) {
+        record += "root " +
+            std::filesystem::absolute(*root).lexically_normal().generic_string() +
+            '\n';
+    }
+    for (const ContentFile& file : inventory.files) {
+        if (file.generated) {
+            record += "generated " + file.destination.generic_string() + '\n';
+            continue;
+        }
+        const auto written = std::filesystem::last_write_time(file.source);
+        record += "file " + std::to_string(file.size) + ' ' +
+            std::to_string(written.time_since_epoch().count()) + ' ' +
+            file.destination.generic_string() + " <- " +
+            file.source.generic_string() + '\n';
+    }
+    for (const TextureSourceIdentity& identity : inventory.textureSources) {
+        record += "texture " + textDigest(textureSourceIdentityKey(identity)) +
+            '\n';
+    }
+    return record;
+}
+
+std::filesystem::path stageRecordPath(const std::filesystem::path& outputRoot)
+{
+    return outputRoot.parent_path() /
+        (outputRoot.filename().string() + ".stage-record");
+}
+
+std::optional<std::string> stagedIndexDigest(
+    const std::filesystem::path& outputRoot)
+{
+    const std::optional<std::string> index =
+        fileBytes(outputRoot / "content.index");
+    if (!index) {
+        return std::nullopt;
+    }
+    return textDigest(*index);
+}
+
+} // namespace
+
 ContentInventory stageContent(
     const ContentSourceRoots& roots,
     const std::filesystem::path& outputRoot,
     std::string_view gameVersion)
 {
+    return stageContent(roots, outputRoot, gameVersion, {}).inventory;
+}
+
+ContentStageReport stageContent(
+    const ContentSourceRoots& roots,
+    const std::filesystem::path& outputRoot,
+    std::string_view gameVersion,
+    const ContentStageOptions& options)
+{
     ensureSafeOutputRoot(roots, outputRoot);
-    ContentInventory inventory = collectContentInventory(roots);
+    ContentStageReport report;
+    report.inventory = collectContentInventory(roots);
+    ContentInventory& inventory = report.inventory;
+    const std::filesystem::path recordPath = stageRecordPath(outputRoot);
+    const std::string inputRecord = stageInputRecord(
+        roots, inventory, gameVersion, options.toolIdentity);
+
+    std::error_code error;
+    if (options.skipWhenUpToDate) {
+        const std::optional<std::string> record = fileBytes(recordPath);
+        const std::optional<std::string> indexDigest =
+            stagedIndexDigest(outputRoot);
+        if (record && indexDigest &&
+            *record == inputRecord + "output-index " + *indexDigest + '\n') {
+            // Report the package as it stands, generated artifacts included,
+            // so callers see the same totals as the stage that produced it.
+            for (const TextureSourceIdentity& identity :
+                 inventory.textureSources) {
+                const std::filesystem::path relative =
+                    compressedTextureArtifactPath(identity);
+                const std::uintmax_t size =
+                    std::filesystem::file_size(outputRoot / relative, error);
+                inventory.files.push_back({ {}, relative, error ? 0 : size, true });
+                inventory.totalBytes += error ? 0 : size;
+            }
+            report.upToDate = true;
+            return report;
+        }
+    }
+    // A stale record must not survive into a stage that fails part way.
+    std::filesystem::remove(recordPath, error);
+
     const std::filesystem::path stagingRoot = outputRoot.parent_path() /
         (outputRoot.filename().string() + ".staging");
     const std::filesystem::path backupRoot = outputRoot.parent_path() /
         (outputRoot.filename().string() + ".previous");
 
-    std::error_code error;
     std::filesystem::remove_all(stagingRoot, error);
     if (error) {
         throw std::runtime_error("cannot clean temporary content directory: " + error.message());
     }
     std::filesystem::create_directories(stagingRoot);
 
+    const CompressedTextureCache cache(options.textureCache);
     try {
         for (const ContentFile& file : inventory.files) {
             const std::filesystem::path destination = stagingRoot / file.destination;
@@ -1314,19 +1655,61 @@ ContentInventory stageContent(
         for (const ContentFile& file : inventory.files) {
             packagePaths.insert(contentPathKey(file.destination));
         }
+
+        struct TextureArtifact {
+            std::filesystem::path relative;
+            std::string cacheKey;
+            std::vector<std::byte> bytes;
+        };
+        std::vector<TextureArtifact> artifacts;
+        artifacts.reserve(inventory.textureSources.size());
+        std::vector<std::size_t> misses;
         for (const TextureSourceIdentity& identity : inventory.textureSources) {
-            const std::filesystem::path relative =
-                compressedTextureArtifactPath(identity);
-            if (!packagePaths.insert(contentPathKey(relative)).second) {
+            TextureArtifact& artifact = artifacts.emplace_back();
+            artifact.relative = compressedTextureArtifactPath(identity);
+            if (!packagePaths.insert(contentPathKey(artifact.relative)).second) {
                 throw std::runtime_error(
                     "compressed texture artifact path collides with another "
-                    "package file: " + relative.string());
+                    "package file: " + artifact.relative.string());
             }
-            const ImageData source = loadRgbaTextureSource(
-                roots.assets, identity.source);
-            const std::vector<std::byte> artifact = buildBc7Ktx2(
-                source, identity.interpretation);
-            const std::filesystem::path destination = stagingRoot / relative;
+            if (cache.enabled()) {
+                artifact.cacheKey =
+                    compressedTextureCacheKey(roots.assets, identity);
+                if (std::optional<std::vector<std::byte>> cached =
+                        cache.find(artifact.cacheKey)) {
+                    artifact.bytes = std::move(*cached);
+                    ++report.texturesFromCache;
+                    continue;
+                }
+            }
+            misses.push_back(artifacts.size() - 1);
+        }
+
+        // Each texture is independent and the encoder is reentrant after its
+        // one-time table initialization, so misses are encoded in parallel.
+        // Results land in their own slots and are written below in inventory
+        // order, so the package does not depend on scheduling.
+        const auto encode = [&](std::size_t begin, std::size_t end) {
+            for (std::size_t index = begin; index < end; ++index) {
+                TextureArtifact& artifact = artifacts[misses[index]];
+                const TextureSourceIdentity& identity =
+                    inventory.textureSources[misses[index]];
+                const ImageData source = loadRgbaTextureSource(
+                    roots.assets, identity.source);
+                artifact.bytes = buildBc7Ktx2(source, identity.interpretation);
+            }
+        };
+        if (misses.size() > 1 && options.encoderThreads != 1) {
+            TaskSystem tasks(options.encoderThreads);
+            tasks.parallelFor(misses.size(), 1, encode);
+        } else {
+            encode(0, misses.size());
+        }
+        report.texturesEncoded = misses.size();
+
+        for (const TextureArtifact& artifact : artifacts) {
+            const std::filesystem::path destination =
+                stagingRoot / artifact.relative;
             std::filesystem::create_directories(destination.parent_path());
             std::ofstream output(destination, std::ios::binary);
             if (!output) {
@@ -1335,8 +1718,8 @@ ContentInventory stageContent(
                     destination.string());
             }
             output.write(
-                reinterpret_cast<const char*>(artifact.data()),
-                static_cast<std::streamsize>(artifact.size()));
+                reinterpret_cast<const char*>(artifact.bytes.data()),
+                static_cast<std::streamsize>(artifact.bytes.size()));
             output.close();
             if (!output) {
                 throw std::runtime_error(
@@ -1344,8 +1727,13 @@ ContentInventory stageContent(
                     destination.string());
             }
             inventory.files.push_back({
-                {}, relative, artifact.size(), true });
-            inventory.totalBytes += artifact.size();
+                {}, artifact.relative, artifact.bytes.size(), true });
+            inventory.totalBytes += artifact.bytes.size();
+        }
+        for (const std::size_t index : misses) {
+            if (!cache.store(artifacts[index].cacheKey, artifacts[index].bytes)) {
+                ++report.textureCacheWriteFailures;
+            }
         }
 
         atomicFile::write(
@@ -1376,7 +1764,19 @@ ContentInventory stageContent(
         throw;
     }
 
-    return inventory;
+    cache.prune(std::chrono::hours(24 * 30));
+    if (options.skipWhenUpToDate) {
+        const std::optional<std::string> indexDigest =
+            stagedIndexDigest(outputRoot);
+        if (!indexDigest) {
+            throw std::runtime_error(
+                "cannot read the content index just staged: " +
+                (outputRoot / "content.index").string());
+        }
+        atomicFile::write(
+            recordPath, inputRecord + "output-index " + *indexDigest + '\n');
+    }
+    return report;
 }
 
 } // namespace sokoban

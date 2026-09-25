@@ -3,11 +3,35 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <system_error>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 
 namespace {
+
+// Size and modification time of the running tool, so a rebuilt tool never
+// trusts a stage record written by its predecessor. Empty when the executable
+// cannot be found from argv[0], which only makes the record stricter.
+std::string toolIdentity(const char* argv0)
+{
+    std::error_code error;
+    const std::filesystem::path executable =
+        std::filesystem::absolute(argv0, error);
+    if (error) {
+        return {};
+    }
+    const std::uintmax_t size = std::filesystem::file_size(executable, error);
+    if (error) {
+        return {};
+    }
+    const auto written = std::filesystem::last_write_time(executable, error);
+    if (error) {
+        return {};
+    }
+    return std::to_string(size) + ' ' +
+        std::to_string(written.time_since_epoch().count());
+}
 
 std::string valueAfter(int& index, int argc, char** argv, std::string_view option)
 {
@@ -26,6 +50,7 @@ int main(int argc, char** argv)
         std::filesystem::path output;
         std::string version;
         bool validateOnly = false;
+        sokoban::ContentStageOptions options;
 
         for (int i = 1; i < argc; ++i) {
             const std::string_view option = argv[i];
@@ -41,6 +66,11 @@ int main(int argc, char** argv)
                 version = valueAfter(i, argc, argv, option);
             } else if (option == "--validate-only") {
                 validateOnly = true;
+            } else if (option == "--texture-cache") {
+                options.textureCache = valueAfter(i, argc, argv, option);
+            } else if (option == "--incremental") {
+                options.skipWhenUpToDate = true;
+                options.toolIdentity = toolIdentity(argv[0]);
             } else {
                 throw std::runtime_error("unknown option: " + std::string(option));
             }
@@ -53,16 +83,30 @@ int main(int argc, char** argv)
             throw std::runtime_error("staging requires --output and --version");
         }
 
-        const sokoban::ContentInventory inventory = validateOnly
-            ? sokoban::collectContentInventory(roots)
-            : sokoban::stageContent(roots, output, version);
-        std::cout << (validateOnly ? "Validated " : "Staged ")
-                  << inventory.files.size() << " files ("
-                  << inventory.totalBytes << " bytes)";
-        if (!validateOnly) {
-            std::cout << " to " << output.string();
+        if (validateOnly) {
+            const sokoban::ContentInventory inventory =
+                sokoban::collectContentInventory(roots);
+            std::cout << "Validated " << inventory.files.size() << " files ("
+                      << inventory.totalBytes << " bytes)\n";
+            return 0;
         }
-        std::cout << '\n';
+
+        const sokoban::ContentStageReport report =
+            sokoban::stageContent(roots, output, version, options);
+        if (report.upToDate) {
+            std::cout << "Content up to date: " << output.string() << '\n';
+            return 0;
+        }
+        std::cout << "Staged " << report.inventory.files.size() << " files ("
+                  << report.inventory.totalBytes << " bytes) to "
+                  << output.string() << "; " << report.texturesEncoded
+                  << " texture(s) encoded, " << report.texturesFromCache
+                  << " from cache\n";
+        if (report.textureCacheWriteFailures != 0) {
+            std::cout << "warning: " << report.textureCacheWriteFailures
+                      << " compressed texture(s) could not be cached; they "
+                         "will be encoded again next time\n";
+        }
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Content pipeline failed: " << error.what() << '\n';

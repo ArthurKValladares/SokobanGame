@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace sokoban {
@@ -44,6 +45,14 @@ struct CompressedTextureArtifact {
 void invalidateCompressedTextureArtifactsForSource(
     const std::filesystem::path& assetRoot,
     const std::filesystem::path& relativeSourcePath);
+
+// Names everything buildBc7Ktx2 does to a decoded image: mip filtering and
+// colour handling, encoder parameters, and the container layout. The content
+// pipeline's build-local artifact cache keys entries by it, so any change
+// that alters the bytes produced for the same input must change this string,
+// or developer builds will keep serving artifacts from before the change.
+inline constexpr std::string_view compressedTextureEncoderRevision =
+    "bc7enc16 mode1-partitions-16 box-mips ktx2 r1";
 
 // Creates a little-endian KTX 2.0 file containing native BC7 blocks. The mip
 // pyramid is complete only when the authored minification filter uses mips.

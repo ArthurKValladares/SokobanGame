@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <map>
 #include <iostream>
 #include <span>
 #include <stdexcept>
@@ -528,6 +529,157 @@ void testStagedContentIndexValidation()
     checkThrows(
         [&] { sokoban::validateContentPackage(output, "1.2.3"); },
         "content index rejects a truncated file list");
+}
+
+// Every regular file under root, relative path -> bytes.
+std::map<std::string, std::string> packageFiles(const std::filesystem::path& root)
+{
+    std::map<std::string, std::string> files;
+    for (const auto& entry :
+         std::filesystem::recursive_directory_iterator(root)) {
+        if (entry.is_regular_file()) {
+            files.emplace(
+                entry.path().lexically_relative(root).generic_string(),
+                readFile(entry.path()));
+        }
+    }
+    return files;
+}
+
+void testIncrementalStagingMatchesACleanStage()
+{
+    ScopedTestDirectory temp("sokoban-content-pipeline");
+    const auto roots = createValidContent(temp.path());
+    const std::filesystem::path output = temp.path() / "package/assets";
+    const std::filesystem::path cleanOutput = temp.path() / "clean/assets";
+    const std::filesystem::path record =
+        temp.path() / "package/assets.stage-record";
+    sokoban::ContentStageOptions options {
+        .textureCache = temp.path() / "texture-cache",
+        .skipWhenUpToDate = true,
+        .toolIdentity = "tool-a",
+        .encoderThreads = 2,
+    };
+    const std::size_t textureCount =
+        sokoban::collectContentInventory(roots).textureSources.size();
+    CHECK_MESSAGE(textureCount >= 2, "fixture exercises parallel encoding");
+
+    TEST("a cold incremental stage encodes everything and matches a clean one");
+    {
+        const sokoban::ContentStageReport first =
+            sokoban::stageContent(roots, output, "1.2.3", options);
+        CHECK(!first.upToDate);
+        CHECK(first.texturesEncoded == textureCount);
+        CHECK(first.texturesFromCache == 0);
+        CHECK(std::filesystem::is_regular_file(record));
+        (void)sokoban::stageContent(roots, cleanOutput, "1.2.3");
+        CHECK_MESSAGE(
+            packageFiles(output) == packageFiles(cleanOutput),
+            "cached, parallel staging produces the clean package");
+    }
+
+    TEST("an unchanged stage is skipped and still reports the package");
+    {
+        const std::string indexBefore = readFile(output / "content.index");
+        const sokoban::ContentStageReport skipped =
+            sokoban::stageContent(roots, output, "1.2.3", options);
+        CHECK(skipped.upToDate);
+        CHECK(skipped.texturesEncoded == 0);
+        const sokoban::ContentInventory clean =
+            sokoban::stageContent(roots, cleanOutput, "1.2.3");
+        CHECK(skipped.inventory.files.size() == clean.files.size());
+        CHECK(skipped.inventory.totalBytes == clean.totalBytes);
+        CHECK(readFile(output / "content.index") == indexBefore);
+    }
+
+    TEST("a new tool restages entirely from the cache");
+    {
+        options.toolIdentity = "tool-b";
+        const sokoban::ContentStageReport restaged =
+            sokoban::stageContent(roots, output, "1.2.3", options);
+        CHECK(!restaged.upToDate);
+        CHECK(restaged.texturesEncoded == 0);
+        CHECK(restaged.texturesFromCache == textureCount);
+        CHECK(packageFiles(output) == packageFiles(cleanOutput));
+    }
+
+    TEST("a changed game version restages");
+    {
+        const sokoban::ContentStageReport restaged =
+            sokoban::stageContent(roots, output, "1.2.4", options);
+        CHECK(!restaged.upToDate);
+        sokoban::validateContentPackage(output, "1.2.4");
+        CHECK(sokoban::stageContent(roots, output, "1.2.4", options).upToDate);
+    }
+
+    TEST("an editor publication into the staged tree forces the next stage");
+    {
+        writeFile(output / "custom/editor-added.bin", "new editor asset");
+        CHECK(sokoban::refreshContentPackageIndex(output));
+        const sokoban::ContentStageReport restaged =
+            sokoban::stageContent(roots, output, "1.2.4", options);
+        CHECK(!restaged.upToDate);
+        CHECK(!std::filesystem::exists(output / "custom/editor-added.bin"));
+    }
+
+    TEST("a removed output tree is staged again");
+    {
+        std::filesystem::remove_all(output);
+        const sokoban::ContentStageReport restaged =
+            sokoban::stageContent(roots, output, "1.2.4", options);
+        CHECK(!restaged.upToDate);
+        sokoban::validateContentPackage(output, "1.2.4");
+    }
+
+    TEST("a changed texture source re-encodes only what reads it");
+    {
+        const std::filesystem::path texture =
+            roots.assets / "textures/hero.png";
+        const std::vector<std::byte> png = sokoban::encodeRgbaPng(
+            2,
+            2,
+            {
+                0, 0, 0, 255,
+                255, 255, 255, 255,
+                255, 255, 255, 255,
+                0, 0, 0, 255,
+            });
+        writeFile(
+            texture,
+            std::string(reinterpret_cast<const char*>(png.data()), png.size()));
+        const sokoban::ContentStageReport restaged =
+            sokoban::stageContent(roots, output, "1.2.4", options);
+        CHECK(!restaged.upToDate);
+        CHECK(restaged.texturesEncoded >= 1);
+        CHECK(restaged.texturesEncoded < textureCount);
+        CHECK(restaged.texturesEncoded + restaged.texturesFromCache ==
+            textureCount);
+        (void)sokoban::stageContent(roots, cleanOutput, "1.2.4");
+        CHECK(packageFiles(output) == packageFiles(cleanOutput));
+    }
+
+    TEST("a damaged cache entry is re-encoded, not staged");
+    {
+        for (const auto& entry : std::filesystem::directory_iterator(
+                 options.textureCache)) {
+            if (entry.path().extension() == ".ktx2") {
+                writeFile(entry.path(), "truncated");
+            }
+        }
+        options.toolIdentity = "tool-c";
+        const sokoban::ContentStageReport restaged =
+            sokoban::stageContent(roots, output, "1.2.4", options);
+        CHECK(restaged.texturesEncoded == textureCount);
+        CHECK(packageFiles(output) == packageFiles(cleanOutput));
+        CHECK(sokoban::stageContent(roots, output, "1.2.4", options).upToDate);
+    }
+
+    TEST("the plain overload never skips or writes a record");
+    {
+        std::filesystem::remove(record);
+        (void)sokoban::stageContent(roots, output, "1.2.4");
+        CHECK(!std::filesystem::exists(record));
+    }
 }
 
 void testRuntimeIndexRefreshTracksEditorMutations()
@@ -1099,6 +1251,7 @@ int main()
     try {
         testInventoryAndStaging();
         testStagedContentIndexValidation();
+        testIncrementalStagingMatchesACleanStage();
         testRuntimeIndexRefreshTracksEditorMutations();
         testLevelEditorPublishesAStartupValidPackage();
         testUnassignedLegacySelectorIsStaged();

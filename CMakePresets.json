@@ -7,6 +7,31 @@
   },
   "configurePresets": [
     {
+      "name": "dev",
+      "displayName": "Development (Ninja, Debug, MSVC)",
+      "description": "Everyday Windows build: Debug with the editor and developer tools, Ninja for per-file parallelism across every target. Open the folder in Visual Studio, or run from a Developer PowerShell for VS 2022.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/dev",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "toolset": {
+        "value": "host=x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
       "name": "headless-tests",
       "displayName": "Headless tests",
       "description": "Vulkan-free Debug build of the core, UI, and every SDK-independent test.",
@@ -55,6 +80,21 @@
   ],
   "buildPresets": [
     {
+      "name": "dev",
+      "displayName": "Game only",
+      "description": "Builds the game, its content, and nothing else: the inner loop.",
+      "configurePreset": "dev",
+      "targets": [
+        "sokoban"
+      ]
+    },
+    {
+      "name": "dev-all",
+      "displayName": "Game and tests",
+      "description": "Everything the dev test preset runs.",
+      "configurePreset": "dev"
+    },
+    {
       "name": "headless-tests",
       "configurePreset": "headless-tests"
     },
@@ -84,6 +124,18 @@
     }
   ],
   "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "timeout": 120,
+        "jobs": 4
+      }
+    },
     {
       "name": "headless-tests",
       "configurePreset": "headless-tests",
