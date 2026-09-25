@@ -15,6 +15,13 @@ inline constexpr float fogOfWarScatteringStrength = 0.72f;
 inline constexpr float fogOfWarAnisotropy = 0.18f;
 inline constexpr uint32_t fogOfWarSampleCount = 20;
 
+// World-space fractal noise breaks the volume into broad billows with a
+// smaller detail octave. Strength stays below one so noise can shape the
+// cover without punching transparent holes through an undiscovered screen.
+inline constexpr float fogOfWarNoiseScale = 0.28f;
+inline constexpr float fogOfWarNoiseStrength = 0.58f;
+inline constexpr float fogOfWarNoiseSpeed = 0.12f;
+
 // Keep the cover to one consistent three-tile column above the board. The
 // horizontal feather begins outside the authored screen rectangle, so every
 // tile in an undiscovered screen still receives full-density fog.

@@ -1275,9 +1275,14 @@ private:
                     volume->revealFeather,
                 };
                 pushConstants.passData[3].x =
-                    frameData.effectAnimationTimeSeconds;
+                    frameData.effectAnimationTimeSeconds *
+                    config::fogOfWarNoiseSpeed;
                 pushConstants.passData[3].y =
                     config::fogOfWarEdgeFadeDistance;
+                pushConstants.passData[3].z =
+                    config::fogOfWarNoiseScale;
+                pushConstants.passData[3].w =
+                    config::fogOfWarNoiseStrength;
             }
             pushConstants.color = {
                 std::max(atmosphere.color.x, 0.0f),

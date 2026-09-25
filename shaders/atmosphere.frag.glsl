@@ -56,6 +56,46 @@ float bayer4x4(ivec2 pixel)
     return (values[wrapped.y * 4 + wrapped.x] + 0.5) / 16.0;
 }
 
+float fogNoiseHash(vec3 position)
+{
+    // Hash lattice coordinates without trigonometry. Keeping this cheap is
+    // important because it is evaluated at every volumetric ray-march step.
+    position = fract(position * 0.1031);
+    position += dot(position, position.yzx + 33.33);
+    return fract((position.x + position.y) * position.z);
+}
+
+float fogValueNoise(vec3 position)
+{
+    vec3 cell = floor(position);
+    vec3 local = fract(position);
+    vec3 blend = local * local * (3.0 - 2.0 * local);
+
+    float lower00 = mix(
+        fogNoiseHash(cell + vec3(0.0, 0.0, 0.0)),
+        fogNoiseHash(cell + vec3(1.0, 0.0, 0.0)), blend.x);
+    float lower10 = mix(
+        fogNoiseHash(cell + vec3(0.0, 1.0, 0.0)),
+        fogNoiseHash(cell + vec3(1.0, 1.0, 0.0)), blend.x);
+    float upper00 = mix(
+        fogNoiseHash(cell + vec3(0.0, 0.0, 1.0)),
+        fogNoiseHash(cell + vec3(1.0, 0.0, 1.0)), blend.x);
+    float upper10 = mix(
+        fogNoiseHash(cell + vec3(0.0, 1.0, 1.0)),
+        fogNoiseHash(cell + vec3(1.0, 1.0, 1.0)), blend.x);
+    float lower = mix(lower00, lower10, blend.y);
+    float upper = mix(upper00, upper10, blend.y);
+    return mix(lower, upper, blend.z);
+}
+
+float fogFractalNoise(vec3 position)
+{
+    float broadBillows = fogValueNoise(position);
+    float fineDetail = fogValueNoise(
+        position * 2.07 + vec3(19.1, -7.3, 11.7));
+    return broadBillows * 0.68 + fineDetail * 0.32;
+}
+
 float phaseFunction(float cosine)
 {
     float g = clamp(pc.sunDirectionAndAnisotropy.w, -0.85, 0.85);
@@ -203,16 +243,25 @@ void main()
             0.0);
         float density = max(pc.mediumColorAndDensity.w, 0.0) * exp(
             -max(pc.heightAndDistance.x, 0.0) * altitude);
+        float scatteringVariation = 1.0;
         if (boundedVolume) {
-            // Two low-frequency world-space waves keep the dense cover alive
-            // without opening transparent holes that could reveal a screen.
-            float billow = sin(
-                dot(samplePosition.xy, vec2(0.73, 0.41)) +
-                samplePosition.z * 0.29 + pc.volumeAnimation.x * 0.46);
-            billow *= sin(
-                dot(samplePosition.xy, vec2(-0.37, 0.61)) -
-                samplePosition.z * 0.21 - pc.volumeAnimation.x * 0.31);
-            density *= 1.0 + billow * 0.15;
+            // Sample slowly advected 3D noise in world space. The camera can
+            // move independently without the pattern swimming across the
+            // screen, while the time offset gives the fog a gentle drift.
+            float noiseScale = max(pc.volumeAnimation.z, 0.0001);
+            vec3 noisePosition = samplePosition * noiseScale +
+                pc.volumeAnimation.x * vec3(0.37, -0.23, 0.17);
+            float fogNoise = smoothstep(
+                0.32, 0.68, fogFractalNoise(noisePosition));
+            float signedNoise = fogNoise * 2.0 - 1.0;
+            float noiseStrength = clamp(pc.volumeAnimation.w, 0.0, 0.8);
+            density *= max(1.0 + signedNoise * noiseStrength, 0.2);
+            // A fully opaque medium converges on a uniform scattering color
+            // even when its density varies. Slightly varying local particle
+            // albedo with the same field keeps the 3D structure perceptible
+            // without making thin spots that reveal the hidden screen.
+            scatteringVariation = max(
+                1.0 + signedNoise * noiseStrength * 0.65, 0.5);
 
             // volumeMinimum/Maximum include a horizontal feather beyond the
             // authored screen. Distance is zero throughout the screen itself,
@@ -246,7 +295,8 @@ void main()
         directRadiance += pointLightRadiance(samplePosition, rayDirection);
         vec3 illumination = pc.ambientRadiance.rgb + directRadiance;
         vec3 scatteredRadiance = pc.mediumColorAndDensity.rgb *
-            illumination * pc.sunRadianceAndStrength.w;
+            illumination * pc.sunRadianceAndStrength.w *
+            scatteringVariation;
         inScattering += transmittance * scatteredFraction *
             scatteredRadiance;
         transmittance *= stepTransmittance;
