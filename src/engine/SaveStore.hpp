@@ -16,7 +16,10 @@ public:
         Loaded,
         // Nothing on disk; defaults returned without writing any file.
         CreatedDefault,
-        Migrated,
+        // Every file was from an older profile format. They were renamed to
+        // `<name>.obsolete-format-<N>-<stamp>` and defaults returned without
+        // writing a new file.
+        SetAsideObsolete,
         RecoveredInterruptedWrite,
         RecoveredBackup,
         // The profile decoded successfully, but migration or backup repair
@@ -78,8 +81,9 @@ public:
         std::string_view application);
 
     [[nodiscard]] LoadResult load();
-    // Examines primary and backup files without migrating, recovering,
-    // archiving, replacing, or creating anything on disk.
+    // Examines primary and backup files without recovering, archiving,
+    // replacing, or creating anything on disk. Files from an older profile
+    // format report Missing: loading will set them aside.
     [[nodiscard]] InspectionResult inspect() const;
     [[nodiscard]] bool save(const PlayerProfile& profile);
     [[nodiscard]] DeleteResult deleteProfile();
@@ -100,6 +104,11 @@ private:
     [[nodiscard]] bool recoverInterruptedWrite(const std::filesystem::path& path);
     void writePrimary(const PlayerProfile& profile, bool updateBackup);
     void archiveCorruptFile(const std::filesystem::path& path);
+    // Renames every recoverable artifact written in an older profile format
+    // out of the way. Returns the newest such format, if any.
+    [[nodiscard]] std::optional<int> setAsideObsoleteArtifacts();
+    static void setAsideObsoleteFile(
+        const std::filesystem::path& path, int format);
     [[nodiscard]] bool deletionMarked() const;
     [[nodiscard]] std::string removeRecoverableArtifacts() const;
 

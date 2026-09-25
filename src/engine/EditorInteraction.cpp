@@ -206,4 +206,44 @@ EditorInteraction::selectorLabels(
     return labels;
 }
 
+std::vector<GridPosition> EditorInteraction::gridLine(
+    GridPosition from, GridPosition to)
+{
+    std::vector<GridPosition> cells;
+    const int deltaX = std::abs(to.x - from.x);
+    const int deltaY = -std::abs(to.y - from.y);
+    const int stepX = from.x < to.x ? 1 : -1;
+    const int stepY = from.y < to.y ? 1 : -1;
+    cells.reserve(static_cast<std::size_t>(std::max(deltaX, -deltaY)) + 1U);
+    int error = deltaX + deltaY;
+    GridPosition cell = from;
+    while (true) {
+        cells.push_back(cell);
+        if (cell.x == to.x && cell.y == to.y) {
+            break;
+        }
+        const int doubled = 2 * error;
+        if (doubled >= deltaY) {
+            error += deltaY;
+            cell.x += stepX;
+        }
+        if (doubled <= deltaX) {
+            error += deltaX;
+            cell.y += stepY;
+        }
+    }
+    return cells;
+}
+
+GridPosition EditorInteraction::constrainToAxis(
+    GridPosition anchor, GridPosition point)
+{
+    if (std::abs(point.x - anchor.x) >= std::abs(point.y - anchor.y)) {
+        point.y = anchor.y;
+    } else {
+        point.x = anchor.x;
+    }
+    return point;
+}
+
 } // namespace sokoban

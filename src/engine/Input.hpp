@@ -10,8 +10,10 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace sokoban {
@@ -55,15 +57,22 @@ public:
         PressPolicy pressPolicy = PressPolicy::Record);
     void setBindings(InputBindings bindings);
 
+    // A capture candidate. A keyboard chord is captured when its non-modifier
+    // key goes down, carrying the modifiers held at that moment; a modifier
+    // key on its own (for a held action such as the eyedropper) is captured
+    // when it is released without another key having been pressed.
     [[nodiscard]] static std::optional<InputBinding> bindingCandidate(
         const SDL_Event& event,
         float axisCaptureThreshold = 0.75f);
+    [[nodiscard]] static bool isModifierKey(SDL_Scancode scancode);
 
     [[nodiscard]] bool actionDown(InputAction action) const;
     [[nodiscard]] bool actionPressed(InputAction action) const;
     [[nodiscard]] bool keyBoundToAction(SDL_Scancode key, InputAction action) const;
     [[nodiscard]] bool keyDown(SDL_Scancode scancode) const;
     [[nodiscard]] bool keyPressed(SDL_Scancode scancode) const;
+    // KeyModifier bits currently held (either side).
+    [[nodiscard]] std::uint8_t heldModifiers() const;
     [[nodiscard]] bool mouseButtonDown(Uint8 button) const;
     [[nodiscard]] bool mouseButtonPressed(Uint8 button) const;
     [[nodiscard]] Vec2 mousePosition() const { return mousePosition_; }
@@ -84,6 +93,7 @@ private:
     struct CompiledBinding {
         CompiledBindingKind kind = CompiledBindingKind::Keyboard;
         int control = 0;
+        std::uint8_t modifiers = keyModifierNone;
         AxisDirection direction = AxisDirection::Positive;
         float threshold = 0.5f;
     };
@@ -102,9 +112,17 @@ private:
     [[nodiscard]] SDL_Gamepad* gamepadHandle(SDL_JoystickID id) const;
     [[nodiscard]] bool bindingDown(const CompiledBinding& binding, bool previousAxis) const;
     [[nodiscard]] bool bindingPressed(const CompiledBinding& binding) const;
+    // Whether a keyboard binding's chord is the one the held modifiers
+    // select for its key: all of its modifiers are held, and no binding on
+    // the same key with more of the held modifiers exists.
+    [[nodiscard]] bool keyboardChordSelected(
+        const CompiledBinding& binding) const;
 
     InputBindings bindings_ = defaultInputBindings();
     std::array<std::vector<CompiledBinding>, inputActionCount> compiledBindings_;
+    // Every keyboard (scancode, modifiers) pair bound to any action, for
+    // choosing the most specific chord.
+    std::vector<std::pair<int, std::uint8_t>> keyboardChords_;
     std::array<bool, SDL_SCANCODE_COUNT> keysDown_ {};
     std::array<bool, SDL_SCANCODE_COUNT> keysPressed_ {};
     std::array<bool, 8> mouseButtonsDown_ {};

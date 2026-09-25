@@ -359,6 +359,10 @@ std::optional<InputPromptGlyph> InputPromptCatalog::glyphForBinding(
     const GamepadPresentation& gamepad) const
 {
     if (const auto* keyboard = std::get_if<KeyboardBinding>(&binding)) {
+        // Chords have no single glyph; callers fall back to the text label.
+        if (keyboard->modifiers != keyModifierNone) {
+            return std::nullopt;
+        }
         return find(InputPromptTheme::Keyboard, keyboardIconName(keyboard->scancode));
     }
     const InputPromptTheme theme = themeForGamepad(gamepad);

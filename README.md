@@ -104,7 +104,7 @@ executable-relative assets.
 ## Tests
 
 The project currently registers CTest suites covering rules, level parsing,
-campaign and gameplay sessions, persistence and migrations, input routing,
+campaign and gameplay sessions, persistence, input routing,
 player UI, renderer state, scene preparation and picking, editor transactions,
 assets, animation, particles, tasks, logging, and content packaging.
 
@@ -246,7 +246,15 @@ PDB belongs in the separately retained Symbols ZIP.
 | Menu back/options | `Escape` | Start button |
 
 Bindings can be changed from Options > Controls and are persisted in the
-shared settings profile. Keyboard and Controller tabs show and remap their
+shared settings profile. A keyboard binding may be a chord: hold Ctrl, Shift
+or Alt while pressing the key during capture. When several bindings on one key
+match the held modifiers, only the one needing the most modifiers fires, so
+`Ctrl+S` does not also move down.
+
+Saves and settings are not migrated between profile formats while the game is
+in early development. When a build changes the format, files from older
+builds are renamed to `<name>.obsolete-format-<N>-<stamp>` in the save
+directory and the game starts fresh. Keyboard and Controller tabs show and remap their
 respective bindings independently. Binding rows and contextual gameplay
 prompts use Kenney Input Prompts glyphs. SDL3 identifies the active controller
 and supplies its physical face-button labels, so Xbox, PlayStation, Nintendo
@@ -348,9 +356,33 @@ editor commands but does not own document or filesystem policy.
   move.
 - Hold `D` while clicking to delete; the target is shown with a dithered
   preview while invisible pick geometry keeps hover selection stable.
-- Press `Z` to undo editor changes.
-- Debug builds list these controls in the Level Editor panel and expose their
-  configurable bindings under **Options > Controls > Editor Controls**.
+- Hold the button and drag to paint (or, with `D`, delete, or with `R`,
+  replace) every cell the pointer crosses. Each board column is edited at
+  most once per drag, and the whole drag is one undo step. Hold `Shift` to
+  keep the drag on its starting row or column. A drag only extends the board
+  from its first cell.
+- Press `Z` to undo editor changes and `Y` (or `Ctrl+Shift+Z`) to redo them.
+  Like undo history, redo history travels with a document's unsaved draft.
+- More editor shortcuts, active while the game view has keyboard focus
+  (click it after using a panel). These are the defaults:
+
+  | Key | Action |
+  | --- | --- |
+  | `Ctrl+S` | Save the document back to the file it came from (or the ground splat map while painting it) |
+  | `F5` | Play the draft; `F5` again returns to the editor without the confirmation dialog |
+  | `Shift+F5` | Play a puzzle draft with its first hero moved to the cell under the pointer; the document is unchanged |
+  | Hold `Alt` + click | Pick up the tile under the pointer |
+  | `1`-`9` | Choose from the recent-tiles strip at the top of the Tiles palette |
+  | `PageUp` / `PageDown` | Change the active layer |
+  | `L` | Lock edits to the active layer |
+  | `Tab` | Cycle Tiles, Mesh Decorations and (overworld) Screen Selectors |
+  | `T` / `R` / `S` | Decoration gizmo: move / rotate / scale |
+
+- Every editor control above can be rebound under **Options > Controls >
+  Editor Controls** (Debug builds, Keyboard tab), which groups them as
+  Editing, Playtest and Recent Tiles. The Level Editor panel lists the
+  current bindings. Editor-only bindings may reuse gameplay keys; Undo, Back
+  and Play/Stop Draft are live in both and so conflict with both.
 - `+ Layer Below` and `+ Layer Above` insert undoable Air layers and preserve
   water-layer numbering.
 - Painting one cell beyond an edge expands every layer transactionally.

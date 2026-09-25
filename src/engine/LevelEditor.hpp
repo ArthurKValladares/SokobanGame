@@ -107,12 +107,27 @@ public:
     [[nodiscard]] int requestedWidth() const;
     [[nodiscard]] int requestedHeight() const;
     void setActiveLayer(int layer);
+    // PageUp/PageDown: moves the active layer and reports it in status().
+    void stepActiveLayer(int delta);
     void setWaterLayer(std::optional<uint32_t> layer);
     void setCharacter(CharacterType character);
     void setLayerLocked(bool locked);
+    // The L shortcut; reports the new state in status().
+    void toggleLayerLock();
     void setShowOverworldNeighbors(bool show);
     void setSelectedTile(TileType tile);
     void setTool(Tool tool);
+    // Tiles -> Decorations -> Selectors (overworld screens only) -> Tiles.
+    void cycleTool();
+    // Recently chosen tiles, newest first. A tile keeps its slot until newer
+    // choices push it out, so number-key shortcuts stay stable while you
+    // alternate between tiles already in the list.
+    static constexpr std::size_t recentTileCapacity = 9;
+    [[nodiscard]] const std::vector<TileType>& recentTiles() const;
+    [[nodiscard]] bool selectRecentTile(std::size_t slot);
+    // Eyedropper: selects the tile shown in the picked column (or on the
+    // active layer when the layer is locked). Returns the picked tile.
+    std::optional<TileType> pickTile(GridPosition3 pickedCell);
     void setSelectedDecorationModel(std::string modelName);
     void selectDocument(const std::filesystem::path& path);
     [[nodiscard]] bool setBrowserRoot(const std::filesystem::path& path);
@@ -128,18 +143,33 @@ public:
     [[nodiscard]] bool openDocument(const std::filesystem::path& path);
     [[nodiscard]] bool loadDocument(const std::filesystem::path& path, bool recordHistory = true);
     [[nodiscard]] SaveResult saveDocument(const std::filesystem::path& path);
+    // Ctrl+S: saves back to the file the document was loaded from. A new,
+    // never-saved document has no such file and needs an explicit path.
+    [[nodiscard]] SaveResult saveLoadedDocument();
     [[nodiscard]] Level::Definition documentDefinition() const;
     [[nodiscard]] Level documentToLevel() const;
+    // `heroStart`, when given, is a picked board cell: playback moves the
+    // draft's first hero start to the placement cell above it (puzzle
+    // screens only). The document itself is not changed.
     [[nodiscard]] std::optional<Level> beginDraftPlayback(
-        const OverworldMapEditor* topologyDraft = nullptr);
+        const OverworldMapEditor* topologyDraft = nullptr,
+        std::optional<GridPosition3> heroStart = std::nullopt);
     [[nodiscard]] const OverworldMap* draftOverworldMap() const
     {
         return draftOverworldMap_ ? &*draftOverworldMap_ : nullptr;
     }
 
-    void paintCell(GridPosition3 position);
-    void eraseCell(GridPosition3 position);
-    void setCell(GridPosition3 position, TileType tile);
+    // Each returns whether the document changed.
+    bool paintCell(GridPosition3 position);
+    bool eraseCell(GridPosition3 position);
+    bool setCell(GridPosition3 position, TileType tile);
+    // A stroke groups every change made until endStroke() into one undo
+    // record, so a drag that paints forty cells undoes in one step. Undo,
+    // redo and document switches end an open stroke first.
+    [[nodiscard]] bool beginStroke();
+    // Returns whether the stroke changed the document.
+    bool endStroke();
+    [[nodiscard]] bool strokeActive() const;
     [[nodiscard]] bool beginMove(GridPosition3 source);
     void cancelMove();
     [[nodiscard]] bool moveObject(GridPosition3 destination);
@@ -177,6 +207,11 @@ public:
     [[nodiscard]] GridPosition3 resolveSelectorTarget(
         GridPosition3 pickedCell) const;
     [[nodiscard]] bool tryUndoEdit();
+    // Re-applies the most recently undone change. Any new edit clears the
+    // redo history.
+    [[nodiscard]] bool tryRedoEdit();
+    [[nodiscard]] bool canUndo() const;
+    [[nodiscard]] bool canRedo() const;
 
     void addLevelAt(int levelIndex);
     void renameLevel(const LevelDirectory& level, const std::string& name);
@@ -293,6 +328,7 @@ private:
     struct DraftState {
         Document document;
         std::vector<EditActionRecord> editHistory;
+        std::vector<EditActionRecord> redoHistory;
     };
 
     struct ScreenIdentityRemap {
@@ -305,6 +341,7 @@ private:
 
     void recordDocumentChange(const DocumentSnapshot& before);
     void cacheActiveDraft();
+    void noteRecentTile(TileType tile);
     [[nodiscard]] static std::filesystem::path draftKey(
         const std::filesystem::path& path);
     void insertLayerAt(int insertionIndex, const char* status);
@@ -329,6 +366,15 @@ private:
 
     Document document_;
     std::vector<EditActionRecord> editHistory_;
+    std::vector<EditActionRecord> redoHistory_;
+    // Open stroke: the snapshot from before its first change, plus how many
+    // cell edits it has absorbed.
+    std::optional<DocumentSnapshot> strokeBefore_;
+    std::size_t strokeChanges_ = 0;
+    // Set while a compound command (moveObject) makes intermediate changes
+    // that it records itself.
+    bool historySuppressed_ = false;
+    std::vector<TileType> recentTiles_;
     std::map<std::filesystem::path, DraftState> drafts_;
     std::optional<DocumentSnapshot> decorationTransformBefore_;
     std::optional<MoveObject> pendingMove_;

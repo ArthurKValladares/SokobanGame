@@ -124,7 +124,11 @@ and the required real-device checks are recorded.
   may request snapshots through the documented synchronized boundary. Flush and
   channel replacement return revisions and a typed durable/retryable outcome;
   an empty queue is not evidence that bytes reached storage.
-- A decoded valid profile remains usable if migration or promotion cannot be
+- Player profiles are not migrated (see `currentPlayerProfileFormat`). Bump
+  the format whenever the document shape or meaning changes; `SaveStore`
+  renames older-format artifacts to `.obsolete-format-<N>-<stamp>` before
+  loading, inspection reports such slots as empty, and the player starts
+  fresh. A decoded valid profile remains usable if promotion cannot be
   persisted. Unsupported future formats remain preserved and do not fall
   through to an older writer.
 - Puzzle source writes use durable atomic replacement. Runtime mirrors and
@@ -167,6 +171,22 @@ and the required real-device checks are recorded.
 - `dev-session.json` lives in the save directory and is read and written
   only by Debug developer builds; smoke and evidence runs neither resume nor
   save it. It never stores game progress, which stays in the save slot.
+- Level editor edits go through `LevelEditor::recordDocumentChange`. While a
+  stroke is open (`beginStroke`/`endStroke`) it folds changes into one record,
+  and `endStroke` writes that record. Any recorded edit clears the redo stack.
+  Undo, redo, save shortcuts, draft playback and document switches close an
+  open stroke first. Compound commands that make intermediate edits (such as
+  `moveObject`) suppress recording and record once themselves; they must not
+  resize the history vectors. Redo is carried everywhere undo is: the draft
+  cache and screen-identity remaps.
+- Every editor control is an `InputAction`. `inputActionContext` decides
+  which actions may share a key; a new action needs a context, a default, a
+  name, and (when it is a player-facing control) an Options row. Adding one
+  changes the profile document, so bump the format.
+- Keyboard bindings may carry Ctrl/Shift/Alt modifiers. Among the bindings on
+  one key whose modifiers are all held, only those needing the most
+  modifiers fire, for held and pressed queries alike. Capture records a chord
+  on the non-modifier key's press and a lone modifier key on its release.
 
 ## Gameplay and input contracts
 

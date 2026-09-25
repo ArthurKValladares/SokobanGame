@@ -486,12 +486,21 @@ DebugUi::DrawResult DebugUi::draw(GameViewport gameViewport)
     // would open as a floating window over the game. Dock it beside the
     // first tab that has a dock node instead, which is where the default
     // layout puts every tab.
+    // Read the placement from the loaded settings as well as from live
+    // windows: on the first frame no window exists yet, and that is exactly
+    // when a new tab must be told where to go.
     ImGuiID toolsDockId = 0;
     for (const DebugTab& tab : debugTabs()) {
         if (const ImGuiWindow* window =
                 ImGui::FindWindowByName(tab.name.c_str());
             window != nullptr && window->DockId != 0) {
             toolsDockId = window->DockId;
+            break;
+        }
+        if (const ImGuiWindowSettings* settings =
+                ImGui::FindWindowSettingsByID(ImHashStr(tab.name.c_str()));
+            settings != nullptr && settings->DockId != 0) {
+            toolsDockId = settings->DockId;
             break;
         }
     }

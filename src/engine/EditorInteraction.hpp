@@ -59,6 +59,17 @@ public:
         const std::vector<Level::ScreenSelector>& selectors,
         const ProjectToPixels& project,
         const SelectorText& text = {});
+
+    // The board columns a drag crosses between two sampled pointer cells,
+    // both ends included, so a fast drag paints a connected line instead of
+    // one cell per frame. 8-connected (Bresenham).
+    [[nodiscard]] static std::vector<GridPosition> gridLine(
+        GridPosition from, GridPosition to);
+
+    // Shift-drag: keeps `point` on the anchor's row or column, whichever the
+    // pointer has moved further along.
+    [[nodiscard]] static GridPosition constrainToAxis(
+        GridPosition anchor, GridPosition point);
 };
 
 } // namespace sokoban

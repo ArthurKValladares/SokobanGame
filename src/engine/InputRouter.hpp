@@ -7,6 +7,7 @@
 
 #include <SDL3/SDL_events.h>
 
+#include <cstddef>
 #include <optional>
 
 namespace sokoban {
@@ -64,6 +65,20 @@ public:
         bool primaryDown = false;
         bool secondaryPressed = false;
         bool undoPressed = false;
+        // Editor shortcuts; each is an InputAction the player can rebind
+        // under Options > Controls > Editor Controls.
+        bool redoPressed = false;
+        bool savePressed = false;
+        bool layerUpPressed = false;
+        bool layerDownPressed = false;
+        bool cycleToolPressed = false;
+        bool toggleLayerLockPressed = false;
+        // Recent-tile shortcuts select slots 0-8.
+        std::optional<std::size_t> recentTileSlot;
+        // Held: turns a click into the eyedropper.
+        bool pickModifier = false;
+        // Held: keeps a drag stroke on its starting row or column.
+        bool lineConstraint = false;
         bool deleting = false;
         bool replaceLayer = false;
         bool moving = false;
@@ -80,6 +95,11 @@ public:
         bool previewScreen = false;
         TitleScreenInput title;
         OptionsMenuInput options;
+        // Play/Stop Draft plays the draft from the editor and returns to the
+        // editor while it plays. Play From Cursor plays with the hero moved
+        // to the cursor (and also stops a playing draft).
+        bool toggleDraftPlaybackPressed = false;
+        bool playDraftFromCursorPressed = false;
         PointerInput pointer;
         EditorInput editor;
     };

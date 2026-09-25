@@ -308,31 +308,7 @@ Application::Application(ApplicationOptions options)
             settingsCoordinator_.userSettings().input,
             {
             .playDraft = [this](Level level) {
-                // A puzzle draft keeps the campaign wherever it currently is,
-                // so derive its render assets from the edited document rather
-                // than from the unrelated campaign location. Composed
-                // overworld drafts select maps through their per-screen
-                // regions instead.
-                const std::optional<LevelLocation> draftLocation =
-                    tools_->levelEditor.draftOverworldMap()
-                    ? std::nullopt
-                    : levelLocationFromScreenPath(
-                          tools_->levelEditor.loadedDocumentPath());
-                // Playing a draft leaves the document view; a half-finished
-                // paint session would otherwise keep painting on the level
-                // being played.
-                tools_->splatPainter.close();
-                (void)applyLevel(
-                    std::move(level), nullptr, draftLocation);
-                if (tools_->levelEditor.draftOverworldMap()) {
-                    gameplaySession_.setActionAdmissionPolicy(
-                        [this](const GameState& state) {
-                            const OverworldMap* map =
-                                tools_->levelEditor.draftOverworldMap();
-                            return map &&
-                                overworldActionStateAllowed(*map, state);
-                        });
-                }
+                startEditorDraft(std::move(level));
             },
             .returnToCurrentScreen = [this] {
                 tools_->splatPainter.close();
@@ -898,6 +874,9 @@ bool Application::run()
 
         const InputRouter::Frame routedInput =
             inputRouter_.routeFrame(input_, inputRoutingContext());
+#if SOKOBAN_ENABLE_DEBUG_UI
+        handleDraftPlaybackShortcuts(routedInput);
+#endif
         const float measuredDt = frameTimer_.tick(simulationTiming_);
         // Evidence runs compare separate renderer configurations. Freezing
         // simulation makes their scene/camera/animation inputs identical.
@@ -1946,6 +1925,68 @@ FrameArena& Application::beginRenderFrameArena()
     arena.reset();
     return arena;
 }
+
+#if SOKOBAN_ENABLE_DEBUG_UI
+void Application::startEditorDraft(Level level)
+{
+    // A puzzle draft keeps the campaign wherever it currently is,
+    // so derive its render assets from the edited document rather
+    // than from the unrelated campaign location. Composed
+    // overworld drafts select maps through their per-screen
+    // regions instead.
+    const std::optional<LevelLocation> draftLocation =
+        tools_->levelEditor.draftOverworldMap()
+        ? std::nullopt
+        : levelLocationFromScreenPath(
+              tools_->levelEditor.loadedDocumentPath());
+    // Playing a draft leaves the document view; a half-finished
+    // paint session would otherwise keep painting on the level
+    // being played.
+    tools_->splatPainter.close();
+    (void)applyLevel(
+        std::move(level), nullptr, draftLocation);
+    if (tools_->levelEditor.draftOverworldMap()) {
+        gameplaySession_.setActionAdmissionPolicy(
+            [this](const GameState& state) {
+                const OverworldMap* map =
+                    tools_->levelEditor.draftOverworldMap();
+                return map &&
+                    overworldActionStateAllowed(*map, state);
+            });
+    }
+}
+
+void Application::playEditorDraft(std::optional<GridPosition3> heroStart)
+{
+    if (std::optional<Level> level =
+            tools_->levelEditor.beginDraftPlayback(
+                &tools_->overworldMapEditor, heroStart)) {
+        startEditorDraft(std::move(*level));
+    }
+}
+
+void Application::handleDraftPlaybackShortcuts(const InputRouter::Frame& input)
+{
+    if (levelTransition_.active()) {
+        return;
+    }
+    if (input.toggleDraftPlaybackPressed &&
+        tools_->levelEditor.playingDraft()) {
+        tools_->stopDraftPlayback();
+        return;
+    }
+    if (!tools_->levelEditor.editingDocument()) {
+        return;
+    }
+    if (input.toggleDraftPlaybackPressed) {
+        playEditorDraft(std::nullopt);
+    } else if (input.playDraftFromCursorPressed) {
+        // Off the board, the editor reports that the cursor must be on it.
+        playEditorDraft(
+            tools_->pickedCell.value_or(GridPosition3 { -1, -1, 0 }));
+    }
+}
+#endif
 
 #if SOKOBAN_ENABLE_DEBUG_UI
 // Builds the editor-only frame from the open document, pending move,

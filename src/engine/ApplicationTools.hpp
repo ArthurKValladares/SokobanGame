@@ -24,7 +24,9 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
+#include <utility>
 
 namespace sokoban {
 
@@ -83,6 +85,9 @@ public:
         const VulkanRenderer& renderer,
         const VulkanRenderer::PreparedFrame* frame) const;
     void drawDraftExitConfirmation();
+    // Leaves draft playback for the document view (the modal's Stop Testing
+    // button, and F5 while a draft is playing).
+    void stopDraftPlayback();
     // Shader hot reload: watches the source shaders this build compiled,
     // recompiles edits with the build's glslc and flags, publishes them into
     // the staged tree, and asks the renderer to rebuild its pipelines.
@@ -121,6 +126,9 @@ public:
     DecorationGizmo decorationGizmo;
     SplatPainter splatPainter;
     std::optional<GridPosition3> hoverCell;
+    // The board cell under the pointer before any edit-target resolution;
+    // Shift+F5 plays the draft with the hero moved here.
+    std::optional<GridPosition3> pickedCell;
     std::optional<std::size_t> hoverDecoration;
     std::optional<Vec3> brushPoint;
     std::uint64_t uploadedSplatRevision = 0;
@@ -130,6 +138,36 @@ public:
     bool resumeOnLaunch = true;
 
 private:
+    // A held-button tile drag. Each board column is edited at most once per
+    // stroke, so holding still does not stack tiles or erase down through
+    // layers, and LevelEditor folds the whole stroke into one undo record.
+    struct TileStroke {
+        bool deleting = false;
+        bool replaceLayer = false;
+        GridPosition anchor;
+        GridPosition last;
+        std::set<std::pair<int, int>> visited;
+        // The pointer left the board (or crossed a panel) since `last`; the
+        // next cell starts fresh instead of drawing a line back to it.
+        bool resumeWithoutLine = false;
+        // Painting outside grew the board, which shifts every coordinate.
+        // Also set by undo/redo/save mid-drag. Nothing more until release.
+        bool blocked = false;
+    };
+    std::optional<TileStroke> tileStroke_;
+
+    void beginTileStroke(
+        const InputRouter::EditorInput& input,
+        GridPosition3 target,
+        bool deleting);
+    void continueTileStroke(
+        const InputRouter::EditorInput& input,
+        GridPosition3 picked);
+    // Closes the editor's undo stroke but keeps ignoring the held button
+    // until it is released.
+    void interruptTileStroke();
+    void handleEditorShortcuts(const InputRouter::EditorInput& input);
+
     std::unique_ptr<ShaderHotReload> shaderHotReload_;
     std::string shaderReloadStatus_;
     std::string shaderReloadDiagnostics_;

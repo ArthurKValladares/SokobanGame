@@ -21,7 +21,7 @@ std::string uppercase(std::string value)
 std::string compactBindingLabel(const InputBinding& binding)
 {
     if (const auto* keyboard = std::get_if<KeyboardBinding>(&binding)) {
-        return keyboard->scancode;
+        return keyModifierPrefix(keyboard->modifiers) + keyboard->scancode;
     }
     if (const auto* button = std::get_if<GamepadButtonBinding>(&binding)) {
         if (button->button == "south") return "A";

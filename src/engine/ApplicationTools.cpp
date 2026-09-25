@@ -665,9 +665,12 @@ void ApplicationTools::drawDraftExitConfirmation()
         ImGui::TextUnformatted(
             "Stop testing this draft and return to the editor?");
         ImGui::Separator();
-        if (ImGui::Button("Stop Testing", ImVec2(120.0f, 0.0f))) {
-            levelEditor.setEditingDocument(true);
-            hoverCell.reset();
+        if (ImGui::Button("Stop Testing", ImVec2(120.0f, 0.0f)) ||
+            !levelEditor.playingDraft()) {
+            // Also closes when F5 already stopped the draft underneath.
+            if (levelEditor.playingDraft()) {
+                stopDraftPlayback();
+            }
             draftExitConfirmationOpen = false;
             ImGui::CloseCurrentPopup();
         }
@@ -679,6 +682,14 @@ void ApplicationTools::drawDraftExitConfirmation()
         ImGui::EndPopup();
     }
 #endif
+}
+
+void ApplicationTools::stopDraftPlayback()
+{
+    levelEditor.setEditingDocument(true);
+    hoverCell.reset();
+    pickedCell.reset();
+    draftExitConfirmationOpen = false;
 }
 
 bool ApplicationTools::bakeTileThumbnails(
@@ -810,24 +821,38 @@ void ApplicationTools::updateEditorInteraction(
     Vec2 pixelSize)
 {
     hoverCell.reset();
+    pickedCell.reset();
     hoverDecoration.reset();
     brushPoint.reset();
+    if (tileStroke_ && !input.primaryDown) {
+        (void)levelEditor.endStroke();
+        tileStroke_.reset();
+    }
     if (!input.moving) {
         levelEditor.cancelMove();
     }
-    if (input.undoPressed) {
+    if (input.undoPressed || input.redoPressed) {
         if (decorationGizmo.dragging()) {
             decorationGizmo.endDrag();
             (void)levelEditor.endSelectedDecorationTransform(false);
         }
-        const bool undone = splatPainter.active()
-            ? splatPainter.undo()
-            : levelEditor.tryUndoEdit();
-        (void)undone;
+        interruptTileStroke();
+        if (input.undoPressed) {
+            (void)(splatPainter.active()
+                    ? splatPainter.undo()
+                    : levelEditor.tryUndoEdit());
+        } else if (!splatPainter.active()) {
+            // Ground painting keeps an undo stack only.
+            (void)levelEditor.tryRedoEdit();
+        }
         pushPaintedSplatMap(renderer);
         return;
     }
+    handleEditorShortcuts(input);
     if (input.pointerCaptured) {
+        if (tileStroke_) {
+            tileStroke_->resumeWithoutLine = true;
+        }
         splatPainter.endStroke();
         if (decorationGizmo.dragging() && !input.primaryDown) {
             decorationGizmo.endDrag();
@@ -897,6 +922,19 @@ void ApplicationTools::updateEditorInteraction(
         }
 
         hoverCell = target;
+        pickedCell = *clicked;
+        const bool tilePainting =
+            !input.moving && !editingDecorations && !editingSelectors;
+        if (tilePainting && input.pickModifier) {
+            if (input.primaryPressed) {
+                (void)levelEditor.pickTile(*clicked);
+            }
+            return;
+        }
+        if (tilePainting && tileStroke_ && !input.primaryPressed) {
+            continueTileStroke(input, *clicked);
+            return;
+        }
         if (input.primaryPressed) {
             if (input.moving) {
                 if (levelEditor.pendingMove()) {
@@ -923,18 +961,129 @@ void ApplicationTools::updateEditorInteraction(
                 } else if (!deleting) {
                     (void)levelEditor.placeSelector(target);
                 }
-            } else if (deleting) {
-                levelEditor.eraseCell(target);
             } else {
-                levelEditor.paintCell(target);
+                beginTileStroke(input, target, deleting);
             }
         }
+    } else if (tileStroke_) {
+        tileStroke_->resumeWithoutLine = true;
     } else if (levelEditor.tool() == LevelEditor::Tool::Decorations &&
                input.primaryPressed) {
         levelEditor.clearDecorationSelection();
     } else if (levelEditor.tool() == LevelEditor::Tool::Selectors &&
                input.primaryPressed) {
         levelEditor.clearSelectorSelection();
+    }
+}
+
+void ApplicationTools::handleEditorShortcuts(
+    const InputRouter::EditorInput& input)
+{
+    if (input.savePressed) {
+        interruptTileStroke();
+        if (splatPainter.active()) {
+            (void)splatPainter.save();
+        } else if (levelEditor.saveLoadedDocument().sourceSaved()) {
+            levelEditorDebugUi.syncDocumentPath(levelEditor);
+        }
+    }
+    if (input.layerUpPressed) {
+        levelEditor.stepActiveLayer(1);
+    }
+    if (input.layerDownPressed) {
+        levelEditor.stepActiveLayer(-1);
+    }
+    if (input.cycleToolPressed) {
+        if (decorationGizmo.dragging()) {
+            decorationGizmo.endDrag();
+            (void)levelEditor.endSelectedDecorationTransform(false);
+        }
+        interruptTileStroke();
+        levelEditor.cycleTool();
+    }
+    if (input.recentTileSlot) {
+        (void)levelEditor.selectRecentTile(*input.recentTileSlot);
+    }
+    if (input.toggleLayerLockPressed) {
+        levelEditor.toggleLayerLock();
+    }
+}
+
+void ApplicationTools::interruptTileStroke()
+{
+    if (tileStroke_) {
+        (void)levelEditor.endStroke();
+        tileStroke_->blocked = true;
+    }
+}
+
+void ApplicationTools::beginTileStroke(
+    const InputRouter::EditorInput& input,
+    GridPosition3 target,
+    bool deleting)
+{
+    (void)levelEditor.endStroke();
+    (void)levelEditor.beginStroke();
+    const uint32_t width = levelEditor.documentWidth();
+    const uint32_t height = levelEditor.documentHeight();
+    if (deleting) {
+        (void)levelEditor.eraseCell(target);
+    } else {
+        (void)levelEditor.paintCell(target);
+    }
+    const GridPosition column { target.x, target.y };
+    tileStroke_ = TileStroke {
+        .deleting = deleting,
+        .replaceLayer = input.replaceLayer,
+        .anchor = column,
+        .last = column,
+    };
+    tileStroke_->visited.emplace(column.x, column.y);
+    if (levelEditor.documentWidth() != width ||
+        levelEditor.documentHeight() != height) {
+        interruptTileStroke();
+    }
+}
+
+void ApplicationTools::continueTileStroke(
+    const InputRouter::EditorInput& input,
+    GridPosition3 picked)
+{
+    TileStroke& stroke = *tileStroke_;
+    if (stroke.blocked) {
+        return;
+    }
+    GridPosition current { picked.x, picked.y };
+    if (input.lineConstraint) {
+        current = EditorInteraction::constrainToAxis(stroke.anchor, current);
+    }
+    if (current == stroke.last && !stroke.resumeWithoutLine) {
+        return;
+    }
+    const std::vector<GridPosition> columns = stroke.resumeWithoutLine
+        ? std::vector<GridPosition> { current }
+        : EditorInteraction::gridLine(stroke.last, current);
+    stroke.resumeWithoutLine = false;
+    stroke.last = current;
+
+    const auto width = static_cast<int>(levelEditor.documentWidth());
+    const auto height = static_cast<int>(levelEditor.documentHeight());
+    for (const GridPosition column : columns) {
+        // Only the first cell of a stroke may grow the board.
+        if (column.x < 0 || column.y < 0 ||
+            column.x >= width || column.y >= height ||
+            !stroke.visited.emplace(column.x, column.y).second) {
+            continue;
+        }
+        const GridPosition3 cell = levelEditor.resolveEditTarget(
+            { column.x, column.y, picked.z },
+            stroke.deleting,
+            stroke.replaceLayer);
+        if (stroke.deleting) {
+            (void)levelEditor.eraseCell(cell);
+        } else {
+            (void)levelEditor.paintCell(cell);
+        }
     }
 }
 

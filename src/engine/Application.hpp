@@ -141,6 +141,10 @@ private:
     void advanceScreen();
 #if SOKOBAN_ENABLE_DEBUG_UI
     void solveCurrentScreenForDebug();
+    // Level editor draft playback: the Play Draft button, F5 and Shift+F5.
+    void startEditorDraft(Level level);
+    void playEditorDraft(std::optional<GridPosition3> heroStart);
+    void handleDraftPlaybackShortcuts(const InputRouter::Frame& input);
 #endif
     void handlePuzzleCompleted(const CampaignSession::PuzzleCompleted& completed);
     void beginLevelTransition(std::function<void()> midpointAction);

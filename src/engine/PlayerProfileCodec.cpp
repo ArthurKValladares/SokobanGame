@@ -1,5 +1,4 @@
 #include "engine/PlayerProfile.hpp"
-#include "engine/PlayerProfileMigrations.hpp"
 
 #include "engine/render/RenderResolution.hpp"
 #include "engine/render/WaterConfig.hpp"
@@ -16,9 +15,9 @@
 #include <type_traits>
 #include <utility>
 
-// Serialization and strict current-format parsing for PlayerProfile. Historical
-// schema upgrades live in PlayerProfileMigrations.cpp; the model itself lives in
-// PlayerProfile.cpp.
+// Serialization and strict current-format parsing for PlayerProfile. Older
+// formats are not migrated (see currentPlayerProfileFormat); the model itself
+// lives in PlayerProfile.cpp.
 //
 // Save-slot files carry only progress and the shared settings.json
 // carries only settings (ProfileSections selects the shape at serialize
@@ -771,8 +770,40 @@ InputBinding inputBindingFromJson(const Json& value, std::string_view context)
     requireObject(value, context);
     const std::string type = stringProperty(value, "type", context);
     if (type == "keyboard") {
-        rejectUnknownProperties(value, { "type", "control" }, context);
-        return KeyboardBinding { stringProperty(value, "control", context) };
+        rejectUnknownProperties(
+            value, { "type", "control", "modifiers" }, context);
+        KeyboardBinding binding { stringProperty(value, "control", context) };
+        if (binding.scancode.empty()) {
+            fail(context, "keyboard control must not be empty");
+        }
+        if (value.contains("modifiers")) {
+            const Json& modifiers = value["modifiers"];
+            if (!modifiers.is_array() || modifiers.empty()) {
+                fail(context, "'modifiers' must be a non-empty array");
+            }
+            for (const Json& modifier : modifiers) {
+                if (!modifier.is_string()) {
+                    fail(context, "modifiers must be strings");
+                }
+                const std::string name = modifier.get<std::string>();
+                std::uint8_t bit = keyModifierNone;
+                for (const KeyModifier candidate :
+                     { keyModifierCtrl, keyModifierShift, keyModifierAlt }) {
+                    if (keyModifierName(candidate) == name) {
+                        bit = candidate;
+                    }
+                }
+                if (bit == keyModifierNone) {
+                    fail(context, "unknown key modifier '" + name + "'");
+                }
+                if ((binding.modifiers & bit) != 0U) {
+                    fail(context, "duplicate key modifier '" + name + "'");
+                }
+                binding.modifiers = static_cast<std::uint8_t>(
+                    binding.modifiers | bit);
+            }
+        }
+        return binding;
     }
     if (type == "gamepadButton") {
         rejectUnknownProperties(value, { "type", "control" }, context);
@@ -816,13 +847,26 @@ OrderedJson inputBindingToJson(const InputBinding& binding)
     return std::visit([](const auto& value) -> OrderedJson {
         using Binding = std::decay_t<decltype(value)>;
         if constexpr (std::is_same_v<Binding, KeyboardBinding>) {
-            if (value.scancode.empty()) {
-                throw std::runtime_error("player profile keyboard binding is empty");
+            if (value.scancode.empty() ||
+                (value.modifiers & ~keyModifierAll) != 0U) {
+                throw std::runtime_error(
+                    "player profile keyboard binding is invalid");
             }
-            return {
+            OrderedJson result {
                 { "type", "keyboard" },
                 { "control", value.scancode },
             };
+            if (value.modifiers != keyModifierNone) {
+                OrderedJson modifiers = OrderedJson::array();
+                for (const KeyModifier modifier :
+                     { keyModifierCtrl, keyModifierShift, keyModifierAlt }) {
+                    if ((value.modifiers & modifier) != 0U) {
+                        modifiers.push_back(keyModifierName(modifier));
+                    }
+                }
+                result["modifiers"] = std::move(modifiers);
+            }
+            return result;
         } else if constexpr (std::is_same_v<Binding, GamepadButtonBinding>) {
             if (!isKnownGamepadButtonName(value.button)) {
                 throw std::runtime_error(
@@ -851,33 +895,19 @@ OrderedJson inputBindingToJson(const InputBinding& binding)
 
 InputBindings inputBindingsFromJson(
     const Json& value,
-    std::string_view context,
-    bool includeMenuConfirm = true)
+    std::string_view context)
 {
-    if (includeMenuConfirm) {
-        rejectUnknownProperties(value, {
-            "moveUp", "moveDown", "moveLeft", "moveRight",
-            "undo", "restart", "showTopDownView", "showOverworldMap",
-            "menuBack", "menuConfirm", "editorReplaceTile",
-            "editorDeleteTile", "editorMoveTile", "previewScreen", "cycleHero",
-        }, context);
-    } else {
-        rejectUnknownProperties(value, {
-            "moveUp", "moveDown", "moveLeft", "moveRight",
-            "undo", "restart", "showTopDownView", "showOverworldMap", "menuBack",
-            "editorReplaceTile", "editorDeleteTile", "editorMoveTile",
-            "previewScreen", "cycleHero",
-        }, context);
+    requireObject(value, context);
+    for (const auto& [key, bindings] : value.items()) {
+        (void)bindings;
+        try {
+            (void)inputActionFromName(key);
+        } catch (const std::invalid_argument&) {
+            fail(context, "unknown property '" + key + "'");
+        }
     }
     InputBindings result;
-    if (!includeMenuConfirm) {
-        result.forAction(InputAction::MenuConfirm) =
-            defaultInputBindings().forAction(InputAction::MenuConfirm);
-    }
-    const std::size_t actionCount = includeMenuConfirm
-        ? inputActionCount
-        : static_cast<std::size_t>(InputAction::MenuConfirm);
-    for (std::size_t i = 0; i < actionCount; ++i) {
+    for (std::size_t i = 0; i < inputActionCount; ++i) {
         const InputAction action = static_cast<InputAction>(i);
         const std::string actionName(inputActionName(action));
         const Json& bindings = requiredProperty(value, actionName, context);
@@ -916,59 +946,6 @@ OrderedJson inputBindingsToJson(const InputBindings& bindings)
     }
     return result;
 }
-
-} // namespace
-
-namespace playerProfileMigrationSupport {
-
-[[noreturn]] void fail(
-    std::string_view context,
-    const std::string& message)
-{
-    sokoban::fail(context, message);
-}
-
-const Json& requiredProperty(
-    const Json& object,
-    std::string_view key,
-    std::string_view context)
-{
-    return sokoban::requiredProperty(object, key, context);
-}
-
-int nonNegativeIntegerProperty(
-    const Json& object,
-    std::string_view key,
-    std::string_view context)
-{
-    return sokoban::nonNegativeIntegerProperty(object, key, context);
-}
-
-std::string stringProperty(
-    const Json& object,
-    std::string_view key,
-    std::string_view context)
-{
-    return sokoban::stringProperty(object, key, context);
-}
-
-InputBindings inputBindingsFromJson(
-    const Json& value,
-    std::string_view context,
-    bool includeMenuConfirm)
-{
-    return sokoban::inputBindingsFromJson(
-        value, context, includeMenuConfirm);
-}
-
-OrderedJson inputBindingsToJson(const InputBindings& bindings)
-{
-    return sokoban::inputBindingsToJson(bindings);
-}
-
-} // namespace playerProfileMigrationSupport
-
-namespace {
 
 // ---- Strict current-format parse -------------------------------------------
 
@@ -1409,6 +1386,15 @@ UnsupportedPlayerProfileFormat::UnsupportedPlayerProfileFormat(int format)
 {
 }
 
+ObsoletePlayerProfileFormat::ObsoletePlayerProfileFormat(int format)
+    : std::runtime_error(
+          "player profile root: format " + std::to_string(format) +
+          " is from an older build and is no longer read (current format " +
+          std::to_string(currentPlayerProfileFormat) + ")")
+    , format_(format)
+{
+}
+
 DecodedPlayerProfile decodePlayerProfile(std::string_view text)
 {
     try {
@@ -1425,11 +1411,13 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
         if (format < 1 || format > currentPlayerProfileFormat) {
             throw UnsupportedPlayerProfileFormat(format);
         }
-
-        Json migrated = root;
-        migratePlayerProfileToCurrent(migrated, format);
-        return { .profile = parseCurrent(migrated), .sourceFormat = format };
+        if (format < currentPlayerProfileFormat) {
+            throw ObsoletePlayerProfileFormat(format);
+        }
+        return { .profile = parseCurrent(root) };
     } catch (const UnsupportedPlayerProfileFormat&) {
+        throw;
+    } catch (const ObsoletePlayerProfileFormat&) {
         throw;
     } catch (const std::bad_alloc&) {
         throw;

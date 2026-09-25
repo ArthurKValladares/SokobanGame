@@ -4,7 +4,9 @@
 
 #include <SDL3/SDL.h>
 
+#include <initializer_list>
 #include <iostream>
+#include <optional>
 
 namespace {
 
@@ -268,6 +270,116 @@ void testFocusLossClearsHeldActions()
     CHECK(!input.actionPressed(sokoban::InputAction::MoveUp));
 }
 
+void testKeyboardChordsPreferTheMostSpecificBinding()
+{
+    TEST("keyboardChordsPreferTheMostSpecificBinding");
+    sokoban::InputState input(false);
+    CHECK(input.invalidBindingCount() == 0);
+    const auto press = [&](std::initializer_list<SDL_Scancode> keys) {
+        input.handleEvent(keyEvent(SDL_EVENT_WINDOW_FOCUS_LOST, SDL_SCANCODE_UNKNOWN));
+        input.beginFrame();
+        for (const SDL_Scancode key : keys) {
+            input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, key));
+        }
+    };
+
+    press({ SDL_SCANCODE_S });
+    CHECK(input.actionPressed(sokoban::InputAction::MoveDown));
+    CHECK(input.actionPressed(sokoban::InputAction::EditorGizmoScale));
+    CHECK(!input.actionPressed(sokoban::InputAction::EditorSave));
+
+    press({ SDL_SCANCODE_RCTRL, SDL_SCANCODE_S });
+    CHECK(input.actionPressed(sokoban::InputAction::EditorSave));
+    CHECK(!input.actionPressed(sokoban::InputAction::MoveDown));
+    CHECK(!input.actionDown(sokoban::InputAction::MoveDown));
+    CHECK(!input.actionPressed(sokoban::InputAction::EditorGizmoScale));
+
+    press({ SDL_SCANCODE_F5 });
+    CHECK(input.actionPressed(sokoban::InputAction::EditorPlayDraft));
+    CHECK(!input.actionPressed(sokoban::InputAction::EditorPlayFromCursor));
+    press({ SDL_SCANCODE_LSHIFT, SDL_SCANCODE_F5 });
+    CHECK(input.actionPressed(sokoban::InputAction::EditorPlayFromCursor));
+    CHECK(!input.actionPressed(sokoban::InputAction::EditorPlayDraft));
+
+    // Ctrl+Z has no chord of its own, so Undo still answers it; Ctrl+Shift+Z
+    // is Redo's.
+    press({ SDL_SCANCODE_LCTRL, SDL_SCANCODE_Z });
+    CHECK(input.actionPressed(sokoban::InputAction::Undo));
+    CHECK(!input.actionPressed(sokoban::InputAction::EditorRedo));
+    press({ SDL_SCANCODE_LCTRL, SDL_SCANCODE_LSHIFT, SDL_SCANCODE_Z });
+    CHECK(input.actionPressed(sokoban::InputAction::EditorRedo));
+    CHECK(!input.actionPressed(sokoban::InputAction::Undo));
+
+    // Held modifier actions are plain keys and combine with each other.
+    press({ SDL_SCANCODE_LSHIFT, SDL_SCANCODE_RALT, SDL_SCANCODE_D });
+    CHECK(input.actionDown(sokoban::InputAction::EditorStraightLine));
+    CHECK(input.actionDown(sokoban::InputAction::EditorPickTile));
+    CHECK(input.actionDown(sokoban::InputAction::EditorDeleteTile));
+
+    CHECK(sokoban::actionBindingsDisplay(
+              input.bindings(), sokoban::InputAction::EditorRedo) ==
+        "Y / Ctrl+Shift+Z");
+}
+
+void testChordCaptureAndContexts()
+{
+    TEST("chordCaptureAndContexts");
+    SDL_Event chord = keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_S);
+    chord.key.mod = SDL_KMOD_LCTRL | SDL_KMOD_RSHIFT;
+    const std::optional<sokoban::InputBinding> captured =
+        sokoban::InputState::bindingCandidate(chord);
+    CHECK(captured.has_value());
+    if (captured) {
+        CHECK((std::get<sokoban::KeyboardBinding>(*captured) ==
+            sokoban::KeyboardBinding {
+                "S", sokoban::keyModifierCtrl | sokoban::keyModifierShift }));
+    }
+
+    // A modifier alone is captured on release, so it can start a chord.
+    SDL_Event shiftDown = keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_LSHIFT);
+    shiftDown.key.mod = SDL_KMOD_LSHIFT;
+    CHECK(!sokoban::InputState::bindingCandidate(shiftDown).has_value());
+    const std::optional<sokoban::InputBinding> shift =
+        sokoban::InputState::bindingCandidate(
+            keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_LSHIFT));
+    CHECK(shift.has_value());
+    if (shift) {
+        CHECK((std::get<sokoban::KeyboardBinding>(*shift) ==
+            sokoban::KeyboardBinding { "Left Shift" }));
+    }
+    CHECK(!sokoban::InputState::bindingCandidate(
+        keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_S)).has_value());
+
+    // Play/Stop Draft is live during play, so it takes keys from gameplay.
+    CHECK(sokoban::inputActionContext(sokoban::InputAction::EditorPlayDraft) ==
+        sokoban::InputActionContext::Global);
+    sokoban::InputBindings bindings = sokoban::defaultInputBindings();
+    sokoban::assignBinding(
+        bindings,
+        sokoban::InputAction::EditorPlayDraft,
+        sokoban::KeyboardBinding { "Q" });
+    CHECK(sokoban::actionBindingsDisplay(
+              bindings, sokoban::InputAction::CycleHero,
+              sokoban::BindingDeviceClass::Keyboard) == "Unbound");
+    // Editor-only shortcuts may share gameplay keys.
+    sokoban::assignBinding(
+        bindings,
+        sokoban::InputAction::EditorLayerUp,
+        sokoban::KeyboardBinding { "W" });
+    CHECK(sokoban::actionBindingsDisplay(
+              bindings, sokoban::InputAction::MoveUp,
+              sokoban::BindingDeviceClass::Keyboard) == "W");
+    // A chord and its plain key are different bindings.
+    sokoban::assignBinding(
+        bindings,
+        sokoban::InputAction::EditorLayerDown,
+        sokoban::KeyboardBinding { "W", sokoban::keyModifierAlt });
+    CHECK(sokoban::actionBindingsDisplay(
+              bindings, sokoban::InputAction::EditorLayerUp) == "W");
+    CHECK(sokoban::actionBindingsDisplay(
+              bindings, sokoban::InputAction::EditorLayerDown) == "Alt+W");
+}
+
 } // namespace
 
 int main()
@@ -281,6 +393,8 @@ int main()
     testInvalidBindingIsDiagnosed();
     testBindingCaptureCandidates();
     testFocusLossClearsHeldActions();
+    testKeyboardChordsPreferTheMostSpecificBinding();
+    testChordCaptureAndContexts();
 
     if (failures == 0) {
         std::cout << "InputTests: " << checks << " checks passed\n";

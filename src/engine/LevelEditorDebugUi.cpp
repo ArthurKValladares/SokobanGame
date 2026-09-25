@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <cctype>
 #include <exception>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #ifndef SOKOBAN_ENABLE_DEBUG_UI
 // Deliberately fatal rather than defaulting to 0. This flag decides whether
@@ -169,6 +171,11 @@ void LevelEditorDebugUi::draw(
             syncDocumentPath(editor);
         }
     }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "%s saves to the file the document came from.",
+            actionBindingsDisplay(bindings, InputAction::EditorSave).c_str());
+    }
     ImGui::SameLine();
     if (ImGui::Button("Play Draft")) {
         if (std::optional<Level> level =
@@ -177,6 +184,15 @@ void LevelEditorDebugUi::draw(
             callbacks.playDraft(std::move(*level));
         }
     }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "%s plays the draft and returns here.\n"
+            "%s plays with the hero moved to the cursor.",
+            actionBindingsDisplay(
+                bindings, InputAction::EditorPlayDraft).c_str(),
+            actionBindingsDisplay(
+                bindings, InputAction::EditorPlayFromCursor).c_str());
+    }
     ImGui::SameLine();
     if (ImGui::Button("Return To Current Screen")) {
         editor.setEditingDocument(false);
@@ -184,6 +200,18 @@ void LevelEditorDebugUi::draw(
             callbacks.returnToCurrentScreen();
         }
     }
+
+    ImGui::BeginDisabled(!editor.canUndo());
+    if (ImGui::Button("Undo")) {
+        (void)editor.tryUndoEdit();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!editor.canRedo());
+    if (ImGui::Button("Redo")) {
+        (void)editor.tryRedoEdit();
+    }
+    ImGui::EndDisabled();
 
     ImGui::Separator();
     drawFileBrowser(editor, overworldEditor);
@@ -328,8 +356,55 @@ void LevelEditorDebugUi::draw(
         ImGui::BulletText(
             "%s: undo the latest editor change",
             actionBindingsDisplay(bindings, InputAction::Undo).c_str());
+        const auto shortcut = [&](InputAction action, const char* what) {
+            ImGui::BulletText(
+                "%s: %s", actionBindingsDisplay(bindings, action).c_str(), what);
+        };
+        ImGui::BulletText(
+            "Drag: paint (or delete) every tile the pointer crosses; "
+            "the whole drag is one undo step");
+        ImGui::BulletText(
+            "%s + drag: stay on the starting row or column",
+            actionBindingsDisplay(
+                bindings, InputAction::EditorStraightLine).c_str());
+        ImGui::BulletText(
+            "%s + click: pick up the tile under the pointer",
+            actionBindingsDisplay(
+                bindings, InputAction::EditorPickTile).c_str());
+        shortcut(InputAction::EditorRedo, "redo");
+        shortcut(
+            InputAction::EditorSave,
+            "save the document (or the ground paint)");
+        shortcut(
+            InputAction::EditorPlayDraft,
+            "play the draft, and again to return");
+        shortcut(
+            InputAction::EditorPlayFromCursor,
+            "play with the hero moved to the pointer");
+        shortcut(InputAction::EditorLayerUp, "next layer up");
+        shortcut(InputAction::EditorLayerDown, "next layer down");
+        shortcut(
+            InputAction::EditorToggleLayerLock, "lock edits to the layer");
+        shortcut(InputAction::EditorCycleTool, "next tool");
+        ImGui::BulletText(
+            "%s / %s / %s: gizmo move / rotate / scale",
+            actionBindingsDisplay(
+                bindings, InputAction::EditorGizmoTranslate).c_str(),
+            actionBindingsDisplay(
+                bindings, InputAction::EditorGizmoRotate).c_str(),
+            actionBindingsDisplay(
+                bindings, InputAction::EditorGizmoScale).c_str());
+        ImGui::BulletText(
+            "%s ... %s: recent tiles",
+            actionBindingsDisplay(bindings, editorRecentTileAction(0))
+                .c_str(),
+            actionBindingsDisplay(
+                bindings,
+                editorRecentTileAction(editorRecentTileActionCount - 1))
+                .c_str());
         ImGui::TextDisabled(
-            "Rebind under Options > Controls > Editor Controls.");
+            "Rebind these under Options > Controls > Editor Controls. "
+            "Click the game view first if a panel has keyboard focus.");
     }
 #else
     (void)editor;
@@ -462,6 +537,43 @@ void LevelEditorDebugUi::drawTilePalette(
     LevelEditor& editor, const Callbacks& callbacks)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
+    if (!editor.recentTiles().empty()) {
+        ImGui::Text("Recent");
+        const std::vector<TileType>& recent = editor.recentTiles();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float rightEdge = ImGui::GetCursorScreenPos().x +
+            ImGui::GetContentRegionAvail().x;
+        const auto labelFor = [&](std::size_t slot) {
+            return std::to_string(slot + 1) + " " +
+                std::string(tileTypeName(recent[slot]));
+        };
+        for (std::size_t slot = 0; slot < recent.size(); ++slot) {
+            const std::string text = labelFor(slot);
+            const bool selected = editor.selectedTile() == recent[slot] &&
+                editor.tool() == LevelEditor::Tool::Tiles;
+            if (selected) {
+                ImGui::PushStyleColor(
+                    ImGuiCol_Button,
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            }
+            const std::string label = text + "##recent" + std::to_string(slot);
+            if (ImGui::SmallButton(label.c_str())) {
+                (void)editor.selectRecentTile(slot);
+            }
+            if (selected) {
+                ImGui::PopStyleColor();
+            }
+            if (slot + 1 < recent.size()) {
+                const float nextWidth =
+                    ImGui::CalcTextSize(labelFor(slot + 1).c_str()).x +
+                    style.FramePadding.x * 2.0f;
+                if (ImGui::GetItemRectMax().x + style.ItemSpacing.x +
+                        nextWidth < rightEdge) {
+                    ImGui::SameLine();
+                }
+            }
+        }
+    }
     ImGui::Text("Paint");
     // Wrap to the panel width instead of one long row, which these buttons are
     // far too wide for.

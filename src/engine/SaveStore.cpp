@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdint>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
@@ -32,13 +33,32 @@ std::string readFile(const std::filesystem::path& path)
     return contents.str();
 }
 
+std::uint64_t archiveStamp()
+{
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+}
+
 std::string corruptSuffix()
 {
     static std::atomic_uint64_t sequence = 0;
-    const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    return ".corrupt-" + std::to_string(timestamp) + "-" +
+    return ".corrupt-" + std::to_string(archiveStamp()) + "-" +
         std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
+}
+
+// The format of a document written by an older build; nullopt for anything
+// else (current, newer, or unreadable), which load() handles as before.
+std::optional<int> obsoleteFormat(const std::string& contents)
+{
+    try {
+        (void)decodePlayerProfile(contents);
+    } catch (const ObsoletePlayerProfileFormat& error) {
+        return error.format();
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    return std::nullopt;
 }
 
 enum class ProfileFileState : std::uint8_t {
@@ -74,6 +94,9 @@ ProfileFileState profileFileState(const std::filesystem::path& path)
         return ProfileFileState::Valid;
     } catch (const UnsupportedPlayerProfileFormat&) {
         return ProfileFileState::Unsupported;
+    } catch (const ObsoletePlayerProfileFormat&) {
+        // Never a recovery candidate; load() sets these aside first.
+        return ProfileFileState::Invalid;
     } catch (const InvalidPlayerProfileData&) {
         return ProfileFileState::Invalid;
     }
@@ -192,6 +215,10 @@ SaveStore::LoadResult SaveStore::load()
                 .message = status_,
             };
         }
+        // Saves from an older build are not migrated. Move them out of the
+        // way first so every path below sees only current-format files.
+        const std::optional<int> obsoleteFormat = setAsideObsoleteArtifacts();
+
         // Decode an authoritative primary before maintaining sibling
         // artifacts. If that maintenance fails, the player's usable progress
         // must remain available even though persistence needs attention.
@@ -270,26 +297,6 @@ SaveStore::LoadResult SaveStore::load()
             }
         }
         if (decodedPrimary) {
-            if (decodedPrimary->sourceFormat != currentPlayerProfileFormat) {
-                try {
-                    writePrimary(decodedPrimary->profile, true);
-                } catch (const std::exception& error) {
-                    status_ = "Loaded legacy player profile, but migration could not be saved: " +
-                        std::string(error.what());
-                    return {
-                        .profile = std::move(decodedPrimary->profile),
-                        .disposition = LoadDisposition::LoadedWithPersistenceError,
-                        .message = status_,
-                    };
-                }
-                status_ = "Migrated player profile from format " +
-                    std::to_string(decodedPrimary->sourceFormat) + ".";
-                return {
-                    .profile = std::move(decodedPrimary->profile),
-                    .disposition = LoadDisposition::Migrated,
-                    .message = status_,
-                };
-            }
             status_ = recoveredInterruptedWrite
                 ? "Recovered interrupted player profile write."
                 : "Loaded player profile.";
@@ -355,6 +362,12 @@ SaveStore::LoadResult SaveStore::load()
             // default file takes its place for diagnosis.
             writePrimary(profile, false);
             status_ = "Corrupt player saves were archived; defaults were restored.";
+        } else if (obsoleteFormat) {
+            // Like a fresh start, nothing is written until the player does
+            // something worth saving.
+            status_ = "Player profile from an older build (format " +
+                std::to_string(*obsoleteFormat) +
+                ") was set aside; starting fresh.";
         } else {
             // A genuinely fresh start writes nothing: no file exists until
             // the player actually begins a game or changes a setting.
@@ -364,7 +377,8 @@ SaveStore::LoadResult SaveStore::load()
             .profile = std::move(profile),
             .disposition = resetCorrupt
                 ? LoadDisposition::ResetCorrupt
-                : LoadDisposition::CreatedDefault,
+                : obsoleteFormat ? LoadDisposition::SetAsideObsolete
+                                 : LoadDisposition::CreatedDefault,
             .message = status_,
         };
     } catch (const std::exception& error) {
@@ -446,6 +460,8 @@ SaveStore::InspectionResult SaveStore::inspect() const
         }
 
         std::string primaryError;
+        bool primaryObsolete = false;
+        bool backupObsolete = false;
         if (primaryExists) {
             if (!std::filesystem::is_regular_file(primaryPath_)) {
                 return {
@@ -467,6 +483,8 @@ SaveStore::InspectionResult SaveStore::inspect() const
                     .message = "Player profile format is unsupported; the file was preserved: " +
                         std::string(error.what()),
                 };
+            } catch (const ObsoletePlayerProfileFormat&) {
+                primaryObsolete = true;
             } catch (const InvalidPlayerProfileData& error) {
                 primaryError = error.what();
             }
@@ -494,9 +512,20 @@ SaveStore::InspectionResult SaveStore::inspect() const
                     .message = "Player profile backup format is unsupported; the file was preserved: " +
                         std::string(error.what()),
                 };
+            } catch (const ObsoletePlayerProfileFormat&) {
+                backupObsolete = true;
             } catch (const InvalidPlayerProfileData& error) {
                 backupError = error.what();
             }
+        }
+
+        if ((!primaryExists || primaryObsolete) &&
+            (!backupExists || backupObsolete)) {
+            return {
+                .disposition = InspectionDisposition::Missing,
+                .message = "Player profile is from an older build and will "
+                           "be set aside.",
+            };
         }
 
         std::string message = "Player profile is corrupt";
@@ -576,10 +605,50 @@ void SaveStore::writePrimary(const PlayerProfile& profile, bool updateBackup)
 
     if (updateBackup && std::filesystem::is_regular_file(primaryPath_)) {
         const std::string previous = readFile(primaryPath_);
-        (void)decodePlayerProfile(previous);
-        atomicFile::write(backupPath_, previous);
+        if (const std::optional<int> format = obsoleteFormat(previous)) {
+            // Never back up a file this build cannot read.
+            setAsideObsoleteFile(primaryPath_, *format);
+        } else {
+            (void)decodePlayerProfile(previous);
+            atomicFile::write(backupPath_, previous);
+        }
     }
     atomicFile::write(primaryPath_, contents);
+}
+
+std::optional<int> SaveStore::setAsideObsoleteArtifacts()
+{
+    std::optional<int> newest;
+    for (const std::filesystem::path& path : recoverableArtifactPaths()) {
+        if (!std::filesystem::is_regular_file(path)) {
+            continue;
+        }
+        // Corrupt, unsupported, and valid files keep their usual handling
+        // in load().
+        if (const std::optional<int> format =
+                obsoleteFormat(readFile(path))) {
+            setAsideObsoleteFile(path, *format);
+            newest = std::max(newest.value_or(0), *format);
+        }
+    }
+    return newest;
+}
+
+void SaveStore::setAsideObsoleteFile(
+    const std::filesystem::path& path, int format)
+{
+    static std::atomic_uint64_t sequence = 0;
+    const std::filesystem::path archive = path.string() +
+        ".obsolete-format-" + std::to_string(format) + "-" +
+        std::to_string(archiveStamp()) + "-" +
+        std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
+    std::error_code error;
+    std::filesystem::rename(path, archive, error);
+    if (error) {
+        throw std::runtime_error(
+            "cannot set aside obsolete save " + path.string() + ": " +
+            error.message());
+    }
 }
 
 void SaveStore::archiveCorruptFile(const std::filesystem::path& path)

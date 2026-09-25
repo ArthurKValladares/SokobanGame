@@ -4,7 +4,10 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstddef>
+#include <initializer_list>
 #include <iostream>
+#include <optional>
 
 namespace {
 
@@ -356,6 +359,195 @@ void testEditorPointerExposesSecondaryPress()
     CHECK(!frame.editor.secondaryPressed);
 }
 
+sokoban::InputRouter::Frame editorFrameAfter(
+    std::initializer_list<SDL_Scancode> keys,
+    sokoban::InputRouter::RoutingContext context = { .editorEditing = true })
+{
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    input.beginFrame();
+    for (const SDL_Scancode key : keys) {
+        pressKey(router, input, key);
+    }
+    return router.routeFrame(input, context);
+}
+
+void testEditorShortcuts()
+{
+    TEST("editorShortcuts");
+    auto frame = editorFrameAfter({ SDL_SCANCODE_LCTRL, SDL_SCANCODE_S });
+    CHECK(frame.editor.savePressed);
+    CHECK(!frame.editor.scaleGizmoPressed);
+
+    frame = editorFrameAfter({ SDL_SCANCODE_S });
+    CHECK(!frame.editor.savePressed);
+    CHECK(frame.editor.scaleGizmoPressed);
+
+    frame = editorFrameAfter({ SDL_SCANCODE_Y });
+    CHECK(frame.editor.redoPressed);
+    CHECK(!frame.editor.undoPressed);
+
+    frame = editorFrameAfter(
+        { SDL_SCANCODE_RCTRL, SDL_SCANCODE_LSHIFT, SDL_SCANCODE_Z });
+    CHECK(frame.editor.redoPressed);
+    CHECK(!frame.editor.undoPressed);
+
+    frame = editorFrameAfter({ SDL_SCANCODE_LCTRL, SDL_SCANCODE_Z });
+    CHECK(frame.editor.undoPressed);
+    CHECK(!frame.editor.redoPressed);
+
+    frame = editorFrameAfter({ SDL_SCANCODE_PAGEUP });
+    CHECK(frame.editor.layerUpPressed);
+    CHECK(!frame.editor.layerDownPressed);
+    frame = editorFrameAfter({ SDL_SCANCODE_PAGEDOWN });
+    CHECK(frame.editor.layerDownPressed);
+
+    frame = editorFrameAfter({ SDL_SCANCODE_TAB });
+    CHECK(frame.editor.cycleToolPressed);
+
+    frame = editorFrameAfter({ SDL_SCANCODE_L });
+    CHECK(frame.editor.toggleLayerLockPressed);
+
+    frame = editorFrameAfter({ SDL_SCANCODE_3 });
+    CHECK(frame.editor.recentTileSlot == std::optional<std::size_t> { 2 });
+    // Extra modifiers do not block a plain key unless a chord claims them.
+    frame = editorFrameAfter({ SDL_SCANCODE_LCTRL, SDL_SCANCODE_3 });
+    CHECK(frame.editor.recentTileSlot == std::optional<std::size_t> { 2 });
+
+    frame = editorFrameAfter({ SDL_SCANCODE_LALT, SDL_SCANCODE_LSHIFT });
+    CHECK(frame.editor.pickModifier);
+    CHECK(frame.editor.lineConstraint);
+
+    // A focused text field owns the keyboard.
+    frame = editorFrameAfter(
+        { SDL_SCANCODE_Y, SDL_SCANCODE_PAGEUP, SDL_SCANCODE_TAB,
+            SDL_SCANCODE_1 },
+        { .editorEditing = true, .keyboardCaptured = true });
+    CHECK(!frame.editor.redoPressed);
+    CHECK(!frame.editor.layerUpPressed);
+    CHECK(!frame.editor.cycleToolPressed);
+    CHECK(!frame.editor.recentTileSlot);
+
+    // Y stays Undo for a player who bound Undo to it.
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    sokoban::InputBindings bindings = sokoban::defaultInputBindings();
+    sokoban::assignBinding(
+        bindings, sokoban::InputAction::Undo, sokoban::KeyboardBinding { "Y" });
+    input.setBindings(bindings);
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_Y);
+    frame = router.routeFrame(input, { .editorEditing = true });
+    CHECK(frame.editor.undoPressed);
+    CHECK(!frame.editor.redoPressed);
+
+    // Likewise L stays the delete modifier for a player who put it there.
+    sokoban::InputState remapped(false);
+    bindings = sokoban::defaultInputBindings();
+    sokoban::assignBinding(
+        bindings,
+        sokoban::InputAction::EditorDeleteTile,
+        sokoban::KeyboardBinding { "L" });
+    remapped.setBindings(bindings);
+    remapped.beginFrame();
+    pressKey(router, remapped, SDL_SCANCODE_L);
+    frame = router.routeFrame(remapped, { .editorEditing = true });
+    CHECK(frame.editor.deleting);
+    CHECK(!frame.editor.toggleLayerLockPressed);
+}
+
+void testEditorShortcutsFollowRebinding()
+{
+    TEST("editorShortcutsFollowRebinding");
+    sokoban::InputRouter router;
+    sokoban::InputBindings bindings = sokoban::defaultInputBindings();
+    sokoban::assignBinding(
+        bindings,
+        sokoban::InputAction::EditorSave,
+        sokoban::KeyboardBinding { "F2" });
+    sokoban::assignBinding(
+        bindings,
+        sokoban::InputAction::EditorRecentTile3,
+        sokoban::KeyboardBinding { "3", sokoban::keyModifierCtrl });
+    sokoban::assignBinding(
+        bindings,
+        sokoban::InputAction::EditorPickTile,
+        sokoban::KeyboardBinding { "Left Ctrl" });
+
+    const auto frameAfter = [&](std::initializer_list<SDL_Scancode> keys) {
+        sokoban::InputState input(false);
+        input.setBindings(bindings);
+        input.beginFrame();
+        for (const SDL_Scancode key : keys) {
+            pressKey(router, input, key);
+        }
+        return router.routeFrame(input, { .editorEditing = true });
+    };
+    CHECK(frameAfter({ SDL_SCANCODE_F2 }).editor.savePressed);
+    CHECK(!frameAfter({ SDL_SCANCODE_LCTRL, SDL_SCANCODE_S })
+               .editor.savePressed);
+    CHECK(!frameAfter({ SDL_SCANCODE_3 }).editor.recentTileSlot);
+    CHECK(frameAfter({ SDL_SCANCODE_LCTRL, SDL_SCANCODE_3 })
+              .editor.recentTileSlot == std::optional<std::size_t> { 2 });
+    CHECK(frameAfter({ SDL_SCANCODE_LCTRL }).editor.pickModifier);
+    CHECK(!frameAfter({ SDL_SCANCODE_LALT }).editor.pickModifier);
+}
+
+void testDraftPlaybackShortcuts()
+{
+    TEST("draftPlaybackShortcuts");
+    auto frame = editorFrameAfter({ SDL_SCANCODE_F5 });
+    CHECK(frame.toggleDraftPlaybackPressed);
+    CHECK(!frame.playDraftFromCursorPressed);
+
+    frame = editorFrameAfter({ SDL_SCANCODE_LSHIFT, SDL_SCANCODE_F5 });
+    CHECK(frame.playDraftFromCursorPressed);
+    CHECK(!frame.toggleDraftPlaybackPressed);
+
+    frame = editorFrameAfter({ SDL_SCANCODE_F5 }, { .draftPlaying = true });
+    CHECK(frame.toggleDraftPlaybackPressed);
+    // Shift+F5 while playing just stops, like F5.
+    frame = editorFrameAfter(
+        { SDL_SCANCODE_LSHIFT, SDL_SCANCODE_F5 }, { .draftPlaying = true });
+    CHECK(frame.toggleDraftPlaybackPressed);
+    CHECK(!frame.playDraftFromCursorPressed);
+
+    frame = editorFrameAfter({ SDL_SCANCODE_F5 }, {});
+    CHECK(!frame.toggleDraftPlaybackPressed);
+    frame = editorFrameAfter(
+        { SDL_SCANCODE_F5 },
+        { .editorEditing = true, .keyboardCaptured = true });
+    CHECK(!frame.toggleDraftPlaybackPressed);
+    frame = editorFrameAfter(
+        { SDL_SCANCODE_F5 },
+        { .optionsOpen = true, .editorEditing = true });
+    CHECK(!frame.toggleDraftPlaybackPressed);
+}
+
+void testEditorModifiersPassUiKeyboardCapture()
+{
+    TEST("editorModifiersPassUiKeyboardCapture");
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    input.beginFrame();
+    const sokoban::InputRouter::EventContext captured {
+        .keyboardCaptured = true,
+        .editorEditing = true,
+    };
+    CHECK(router.routeEvent(
+        keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_LALT), input, captured)
+            .forwardedToInput);
+    CHECK(router.routeEvent(
+        keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_RSHIFT), input, captured)
+            .forwardedToInput);
+    CHECK(!router.routeEvent(
+        keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_Y), input, captured)
+            .forwardedToInput);
+    CHECK(!router.routeEvent(
+        keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_F5), input, captured)
+            .forwardedToInput);
+}
+
 } // namespace
 
 int main()
@@ -371,6 +563,10 @@ int main()
     testEditorPointerExposesPressAndHold();
     testEditorPointerExposesSecondaryPress();
     testEditorGizmoShortcutsRespectKeyboardCapture();
+    testEditorShortcuts();
+    testDraftPlaybackShortcuts();
+    testEditorShortcutsFollowRebinding();
+    testEditorModifiersPassUiKeyboardCapture();
 
     if (failures == 0) {
         std::cout << "InputRouterTests: " << checks << " checks passed\n";

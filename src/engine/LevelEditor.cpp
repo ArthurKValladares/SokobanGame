@@ -141,8 +141,14 @@ void LevelEditor::initialize(
     document_.playingDraft = false;
     document_.editingDocument = false;
     editHistory_.clear();
+    redoHistory_.clear();
+    strokeBefore_.reset();
+    strokeChanges_ = 0;
     drafts_.clear();
     pendingMove_.reset();
+    // Start the recent strip with the default brush so slot 1 is useful
+    // before anything has been chosen from the palette.
+    noteRecentTile(document_.selectedTile);
 }
 
 void LevelEditor::setPlayingDraft(bool playingDraft)
@@ -214,6 +220,17 @@ void LevelEditor::setActiveLayer(int layer)
     document_.activeLayer = std::clamp(layer, 0, lastLayer);
 }
 
+void LevelEditor::stepActiveLayer(int delta)
+{
+    setActiveLayer(document_.activeLayer + delta);
+    document_.status = "Active layer " +
+        std::to_string(document_.activeLayer + 1) + " of " +
+        std::to_string(documentDepth()) +
+        (document_.layerLocked
+                ? "."
+                : ". Lock the layer to paint only on it.");
+}
+
 void LevelEditor::setWaterLayer(std::optional<uint32_t> layer)
 {
     if (layer && *layer >= document_.layers.size()) {
@@ -278,15 +295,114 @@ void LevelEditor::setLayerLocked(bool locked)
     document_.layerLocked = locked;
 }
 
+void LevelEditor::toggleLayerLock()
+{
+    document_.layerLocked = !document_.layerLocked;
+    document_.status = document_.layerLocked
+        ? "Edits locked to layer " +
+            std::to_string(document_.activeLayer + 1) + "."
+        : "Layer lock off.";
+}
+
 void LevelEditor::setSelectedTile(TileType tile)
 {
     document_.selectedTile = tile;
     document_.tool = Tool::Tiles;
+    noteRecentTile(tile);
 }
 
 void LevelEditor::setTool(Tool tool)
 {
     document_.tool = tool;
+}
+
+void LevelEditor::cycleTool()
+{
+    switch (document_.tool) {
+    case Tool::Tiles:
+        document_.tool = Tool::Decorations;
+        break;
+    case Tool::Decorations:
+        document_.tool = editingOverworld() ? Tool::Selectors : Tool::Tiles;
+        break;
+    case Tool::Selectors:
+        document_.tool = Tool::Tiles;
+        break;
+    }
+    pendingMove_.reset();
+    document_.status = document_.tool == Tool::Tiles
+        ? "Tool: Tiles."
+        : document_.tool == Tool::Decorations
+            ? "Tool: Decorations."
+            : "Tool: Selectors.";
+}
+
+void LevelEditor::noteRecentTile(TileType tile)
+{
+    if (tile == TileType::Air || std::ranges::find(recentTiles_, tile) != recentTiles_.end()) {
+        return;
+    }
+    recentTiles_.insert(recentTiles_.begin(), tile);
+    if (recentTiles_.size() > recentTileCapacity) {
+        recentTiles_.resize(recentTileCapacity);
+    }
+}
+
+const std::vector<TileType>& LevelEditor::recentTiles() const
+{
+    return recentTiles_;
+}
+
+bool LevelEditor::selectRecentTile(std::size_t slot)
+{
+    if (slot >= recentTiles_.size()) {
+        return false;
+    }
+    setSelectedTile(recentTiles_[slot]);
+    document_.status = "Selected " +
+        std::string(tileTypeName(document_.selectedTile)) + ".";
+    return true;
+}
+
+std::optional<TileType> LevelEditor::pickTile(GridPosition3 pickedCell)
+{
+    const auto tileAt = [&](int x, int y, int z) {
+        if (x < 0 || y < 0 || z < 0 ||
+            x >= static_cast<int>(documentWidth()) ||
+            y >= static_cast<int>(documentHeight()) ||
+            z >= static_cast<int>(documentDepth())) {
+            return TileType::Air;
+        }
+        return charToTileType(
+            document_.layers[static_cast<std::size_t>(z)]
+                [static_cast<std::size_t>(y)]
+                [static_cast<std::size_t>(x)]).value_or(TileType::Air);
+    };
+
+    std::optional<TileType> picked;
+    if (document_.layerLocked) {
+        const TileType tile =
+            tileAt(pickedCell.x, pickedCell.y, document_.activeLayer);
+        if (tile != TileType::Air) {
+            picked = tile;
+        }
+    } else {
+        for (int z = static_cast<int>(documentDepth()) - 1; z >= 0; --z) {
+            const TileType tile = tileAt(pickedCell.x, pickedCell.y, z);
+            if (tile != TileType::Air) {
+                picked = tile;
+                break;
+            }
+        }
+    }
+    if (!picked) {
+        document_.status = "Nothing to pick there.";
+        return std::nullopt;
+    }
+    setSelectedTile(*picked);
+    document_.status =
+        "Picked " + std::string(tileTypeName(*picked)) + ".";
+    return picked;
 }
 
 void LevelEditor::setSelectedDecorationModel(std::string modelName)
@@ -436,6 +552,7 @@ std::filesystem::path LevelEditor::draftKey(
 
 void LevelEditor::cacheActiveDraft()
 {
+    endStroke();
     const std::filesystem::path key = draftKey(document_.loadedPath);
     if (key.empty()) {
         return;
@@ -449,6 +566,7 @@ void LevelEditor::cacheActiveDraft()
         DraftState {
             .document = document_,
             .editHistory = editHistory_,
+            .redoHistory = redoHistory_,
         });
 }
 
@@ -466,14 +584,48 @@ bool LevelEditor::setBrowserRoot(const std::filesystem::path& path)
     return true;
 }
 
-void LevelEditor::paintCell(GridPosition3 position)
+bool LevelEditor::paintCell(GridPosition3 position)
 {
-    setCell(position, document_.selectedTile);
+    return setCell(position, document_.selectedTile);
 }
 
-void LevelEditor::eraseCell(GridPosition3 position)
+bool LevelEditor::eraseCell(GridPosition3 position)
 {
-    setCell(position, TileType::Air);
+    return setCell(position, TileType::Air);
+}
+
+bool LevelEditor::beginStroke()
+{
+    if (strokeBefore_) {
+        return false;
+    }
+    strokeBefore_ = captureDocumentSnapshot();
+    strokeChanges_ = 0;
+    return true;
+}
+
+bool LevelEditor::endStroke()
+{
+    if (!strokeBefore_) {
+        return false;
+    }
+    const DocumentSnapshot before = std::move(*strokeBefore_);
+    strokeBefore_.reset();
+    const std::size_t changes = std::exchange(strokeChanges_, 0);
+    if (changes == 0) {
+        return false;
+    }
+    if (changes > 1) {
+        document_.status = "Edited " + std::to_string(changes) +
+            " cells in one stroke.";
+    }
+    recordDocumentChange(before);
+    return true;
+}
+
+bool LevelEditor::strokeActive() const
+{
+    return strokeBefore_.has_value();
 }
 
 const std::optional<LevelEditor::MoveObject>& LevelEditor::pendingMove() const
@@ -608,18 +760,18 @@ bool LevelEditor::moveObject(GridPosition3 destination)
     }
 
     const DocumentSnapshot before = captureDocumentSnapshot();
-    const std::size_t historySize = editHistory_.size();
-    setCell(move->source, TileType::Air);
-    const std::size_t afterEraseHistorySize = editHistory_.size();
-    setCell(destination, move->tile);
-    if (editHistory_.size() == afterEraseHistorySize) {
+    // The erase and the placement are one command: record neither
+    // separately, and leave the history untouched if the placement fails.
+    historySuppressed_ = true;
+    (void)setCell(move->source, TileType::Air);
+    const bool placed = setCell(destination, move->tile);
+    historySuppressed_ = false;
+    if (!placed) {
         applyDocumentSnapshot(before);
-        editHistory_.resize(historySize);
         document_.status = "Tile cannot be moved to that destination.";
         return false;
     }
 
-    editHistory_.resize(historySize);
     document_.status = "Moved object.";
     recordDocumentChange(before);
     return true;
@@ -741,7 +893,7 @@ GridPosition3 LevelEditor::resolveSelectorTarget(
     return pickedCell;
 }
 
-void LevelEditor::setCell(GridPosition3 position, TileType tile)
+bool LevelEditor::setCell(GridPosition3 position, TileType tile)
 {
     if (editingOverworld() && tileTypeIsPlayerStart(tile)) {
         tile = TileType::Player;
@@ -749,12 +901,12 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
         tile = TileType::Rogue;
     }
     if (document_.layers.empty() || position.z < 0) {
-        return;
+        return false;
     }
     if (editingOverworld() && tile == TileType::End) {
         document_.status =
             "End tiles are not allowed in overworld screens.";
-        return;
+        return false;
     }
     if (editingOverworld() &&
         (position.x < 0 || position.y < 0 ||
@@ -762,7 +914,7 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
          position.y >= static_cast<int>(documentHeight()))) {
         document_.status =
             "Overworld screen dimensions are fixed by layout.json.";
-        return;
+        return false;
     }
     const int oldHeight = static_cast<int>(documentHeight());
     const int oldWidth = static_cast<int>(documentWidth());
@@ -774,7 +926,7 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
         prependColumns > 0 || prependRows > 0 ||
         appendColumns > 0 || appendRows > 0;
     if (tile == TileType::Air && expandsDocument) {
-        return;
+        return false;
     }
     const int width = oldWidth + prependColumns + appendColumns;
     const int height = oldHeight + prependRows + appendRows;
@@ -820,21 +972,21 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
         });
         if (!adjacentGround) {
             document_.status = "Ladders must be next to ground on the same layer.";
-            return;
+            return false;
         }
     }
 
     const char character = tileTypeToChar(tile);
     if (tile == TileType::Air &&
         translatedPosition.z >= static_cast<int>(document_.layers.size())) {
-        return;
+        return false;
     }
     if (!expandsDocument &&
         translatedPosition.z < static_cast<int>(document_.layers.size()) &&
         document_.layers[static_cast<size_t>(translatedPosition.z)]
             [static_cast<size_t>(translatedPosition.y)]
             [static_cast<size_t>(translatedPosition.x)] == character) {
-        return;
+        return false;
     }
 
     const DocumentSnapshot before = captureDocumentSnapshot();
@@ -900,6 +1052,7 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
                 std::to_string(translatedPosition.z + 1) + ".";
     }
     recordDocumentChange(before);
+    return true;
 }
 
 bool LevelEditor::placeDecoration(GridPosition3 surfaceCell)
@@ -1108,6 +1261,7 @@ bool LevelEditor::deleteSelectedDecoration()
 
 bool LevelEditor::tryUndoEdit()
 {
+    endStroke();
     pendingMove_.reset();
     if (editHistory_.empty()) {
         return false;
@@ -1115,9 +1269,35 @@ bool LevelEditor::tryUndoEdit()
 
     const EditActionRecord inverse = invertEditActionRecord(editHistory_.back());
     applyDocumentSnapshot(inverse.after);
+    redoHistory_.push_back(std::move(editHistory_.back()));
     editHistory_.pop_back();
     document_.status = "Undid editor change.";
     return true;
+}
+
+bool LevelEditor::tryRedoEdit()
+{
+    endStroke();
+    pendingMove_.reset();
+    if (redoHistory_.empty()) {
+        return false;
+    }
+
+    applyDocumentSnapshot(redoHistory_.back().after);
+    editHistory_.push_back(std::move(redoHistory_.back()));
+    redoHistory_.pop_back();
+    document_.status = "Redid editor change.";
+    return true;
+}
+
+bool LevelEditor::canUndo() const
+{
+    return !editHistory_.empty() || strokeChanges_ != 0;
+}
+
+bool LevelEditor::canRedo() const
+{
+    return !redoHistory_.empty() && strokeChanges_ == 0;
 }
 
 uint32_t LevelEditor::documentWidth() const
@@ -1545,6 +1725,18 @@ void LevelEditor::deleteActiveLayer()
     recordDocumentChange(before);
 }
 
+LevelEditor::SaveResult LevelEditor::saveLoadedDocument()
+{
+    endStroke();
+    if (document_.loadedPath.empty()) {
+        document_.status =
+            "This document has never been saved; enter a path and press Save.";
+        return {};
+    }
+    const std::filesystem::path path = document_.loadedPath;
+    return saveDocument(path);
+}
+
 bool LevelEditor::openDocument(const std::filesystem::path& path)
 {
     const std::filesystem::path targetKey = draftKey(path);
@@ -1580,6 +1772,7 @@ bool LevelEditor::openDocument(const std::filesystem::path& path)
         document_.editingDocument = true;
         document_.status = "Restored in-progress draft " + path.string();
         editHistory_ = std::move(draft.editHistory);
+        redoHistory_ = std::move(draft.redoHistory);
         decorationTransformBefore_.reset();
         pendingMove_.reset();
         draftOverworldMap_.reset();
@@ -1595,6 +1788,7 @@ bool LevelEditor::openDocument(const std::filesystem::path& path)
         return false;
     }
     editHistory_.clear();
+    redoHistory_.clear();
     return true;
 }
 
@@ -2356,6 +2550,14 @@ bool LevelEditor::permanentlyDelete(const std::filesystem::path& path)
 
 void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
 {
+    if (historySuppressed_) {
+        return;
+    }
+    if (strokeBefore_) {
+        // Folded into the stroke's single record by endStroke().
+        ++strokeChanges_;
+        return;
+    }
     const DocumentSnapshot after = captureDocumentSnapshot();
     if (before.layers == after.layers &&
         before.waterLayer == after.waterLayer &&
@@ -2374,6 +2576,7 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
         .before = before,
         .after = after,
     });
+    redoHistory_.clear();
 }
 
 void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
@@ -2416,11 +2619,78 @@ Level::Definition LevelEditor::documentDefinition() const
 }
 
 std::optional<Level> LevelEditor::beginDraftPlayback(
-    const OverworldMapEditor* topologyDraft)
+    const OverworldMapEditor* topologyDraft,
+    std::optional<GridPosition3> heroStart)
 {
+    endStroke();
+    if (heroStart && editingOverworld()) {
+        // The composed overworld has exactly one Player tile across all of
+        // its screens, so relocating it would mean editing another screen.
+        document_.status =
+            "Play from cursor is only available on puzzle screens.";
+        return std::nullopt;
+    }
     try {
         Level level;
-        if (const std::optional<OverworldScreenId> screenId =
+        if (heroStart) {
+            Level::Definition definition = documentDefinition();
+            if (heroStart->x < 0 || heroStart->y < 0 ||
+                heroStart->x >= static_cast<int>(documentWidth()) ||
+                heroStart->y >= static_cast<int>(documentHeight())) {
+                document_.status = "Point at a cell on the board to play "
+                                   "from the cursor.";
+                return std::nullopt;
+            }
+            // Lift out the first hero in scan order - the one the level
+            // starts controlling - or use a Rogue when the draft has none.
+            char hero = tileTypeToChar(TileType::Rogue);
+            bool lifted = false;
+            for (auto& layer : definition.layers) {
+                for (std::string& row : layer) {
+                    for (char& tile : row) {
+                        const std::optional<TileType> type =
+                            charToTileType(tile);
+                        if (!lifted && type && tileTypeIsPlayerStart(*type)) {
+                            hero = tile;
+                            tile = tileTypeToChar(TileType::Air);
+                            lifted = true;
+                        }
+                    }
+                }
+            }
+            // The same cell a paint click would fill, judged without the
+            // lifted hero so pointing at the hero's own column works.
+            const auto x = static_cast<std::size_t>(heroStart->x);
+            const auto y = static_cast<std::size_t>(heroStart->y);
+            std::size_t z = 0;
+            if (document_.layerLocked) {
+                z = static_cast<std::size_t>(document_.activeLayer);
+            } else {
+                for (std::size_t layer = definition.layers.size(); layer > 0;
+                     --layer) {
+                    if (charToTileType(definition.layers[layer - 1][y][x])
+                            .value_or(TileType::Air) != TileType::Air) {
+                        z = layer;
+                        break;
+                    }
+                }
+            }
+            while (z >= definition.layers.size()) {
+                definition.layers.emplace_back(
+                    documentHeight(),
+                    std::string(documentWidth(), tileTypeToChar(TileType::Air)));
+            }
+            char& targetTile = definition.layers[z][y][x];
+            if (charToTileType(targetTile).value_or(TileType::Air) !=
+                TileType::Air) {
+                document_.status = "The cursor cell is occupied.";
+                return std::nullopt;
+            }
+            targetTile = hero;
+            level = Level::loadFromDefinition(
+                definition, "level editor draft (play from cursor)");
+            draftOverworldMap_.reset();
+        } else if (const std::optional<OverworldScreenId> screenId =
                 overworldScreenId()) {
             OverworldDefinitionOverride activeDefinition {
                 .screen = *screenId,
@@ -2447,7 +2717,8 @@ std::optional<Level> LevelEditor::beginDraftPlayback(
         setPlayingDraft(true);
         document_.status = draftOverworldMap_
             ? "Playing composed overworld draft; selectors are disabled."
-            : "Playing editor draft.";
+            : heroStart ? "Playing editor draft from the cursor."
+                        : "Playing editor draft.";
         return level;
     } catch (const std::exception& error) {
         draftOverworldMap_.reset();
@@ -2751,8 +3022,12 @@ void LevelEditor::applyScreenIdentityRemaps(
 
     remapDocument(document_);
     remapHistory(editHistory_);
+    remapHistory(redoHistory_);
     if (decorationTransformBefore_) {
         remapSnapshot(*decorationTransformBefore_);
+    }
+    if (strokeBefore_) {
+        remapSnapshot(*strokeBefore_);
     }
 
     std::map<std::filesystem::path, DraftState> remappedDrafts;
@@ -2760,6 +3035,7 @@ void LevelEditor::applyScreenIdentityRemaps(
         DraftState& draft = entry.second;
         remapDocument(draft.document);
         remapHistory(draft.editHistory);
+        remapHistory(draft.redoHistory);
         const std::filesystem::path remappedKey =
             draftKey(draft.document.loadedPath);
         if (!remappedKey.empty()) {

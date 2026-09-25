@@ -38,17 +38,23 @@ InputRouter::EventResult InputRouter::routeEvent(
         event.type == SDL_EVENT_MOUSE_MOTION ||
         event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
         event.type == SDL_EVENT_MOUSE_BUTTON_UP;
+    // Held editor modifiers, the modifier keys chords need, and the gizmo
+    // keys keep their physical state accurate while a panel has keyboard
+    // focus; they only change what the next viewport click does.
+    const auto boundTo = [&](InputAction action) {
+        return input.keyBoundToAction(event.key.scancode, action);
+    };
     const bool editorEditModifier = keyboardEvent &&
         context.editorEditing &&
-        (input.keyBoundToAction(
-             event.key.scancode, InputAction::EditorReplaceTile) ||
-            input.keyBoundToAction(
-                event.key.scancode, InputAction::EditorDeleteTile) ||
-            input.keyBoundToAction(
-                event.key.scancode, InputAction::EditorMoveTile) ||
-            event.key.scancode == SDL_SCANCODE_T ||
-            event.key.scancode == SDL_SCANCODE_R ||
-            event.key.scancode == SDL_SCANCODE_S);
+        (boundTo(InputAction::EditorReplaceTile) ||
+            boundTo(InputAction::EditorDeleteTile) ||
+            boundTo(InputAction::EditorMoveTile) ||
+            boundTo(InputAction::EditorPickTile) ||
+            boundTo(InputAction::EditorStraightLine) ||
+            boundTo(InputAction::EditorGizmoTranslate) ||
+            boundTo(InputAction::EditorGizmoRotate) ||
+            boundTo(InputAction::EditorGizmoScale) ||
+            InputState::isModifierKey(event.key.scancode));
     const bool menuBackKey = keyboardEvent &&
         input.keyBoundToAction(event.key.scancode, InputAction::MenuBack);
 
@@ -141,28 +147,61 @@ InputRouter::Frame InputRouter::routeFrame(
         frame.options = { up, down, left, right, confirm };
     }
 
+    if ((context.editorEditing || context.draftPlaying) && !shellOpen &&
+        !context.keyboardCaptured) {
+        const bool fromCursor =
+            input.actionPressed(InputAction::EditorPlayFromCursor);
+        frame.toggleDraftPlaybackPressed =
+            input.actionPressed(InputAction::EditorPlayDraft) ||
+            // While playing, either key returns to the editor.
+            (context.draftPlaying && fromCursor);
+        frame.playDraftFromCursorPressed =
+            context.editorEditing && fromCursor;
+    }
+
     frame.pointer = {
         .position = input.mousePosition(),
         .primaryDown = input.mouseButtonDown(SDL_BUTTON_LEFT),
         .primaryPressed = input.mouseButtonPressed(SDL_BUTTON_LEFT),
     };
     if (context.editorEditing && !shellOpen) {
-        const bool allowEditorShortcuts = !context.keyboardCaptured;
+        // A focused text field or panel owns the keyboard. Held modifiers
+        // still apply so a panel click does not strand them.
+        const bool shortcuts = !context.keyboardCaptured;
+        const auto pressed = [&](InputAction action) {
+            return shortcuts && input.actionPressed(action);
+        };
+        std::optional<std::size_t> recentTileSlot;
+        for (int slot = 0; slot < editorRecentTileActionCount; ++slot) {
+            if (pressed(editorRecentTileAction(slot))) {
+                recentTileSlot = static_cast<std::size_t>(slot);
+                break;
+            }
+        }
         frame.editor = {
             .pointerPosition = input.mousePosition(),
             .primaryPressed = input.mouseButtonPressed(SDL_BUTTON_LEFT),
             .primaryDown = input.mouseButtonDown(SDL_BUTTON_LEFT),
             .secondaryPressed = input.mouseButtonPressed(SDL_BUTTON_RIGHT),
             .undoPressed = input.actionPressed(InputAction::Undo),
+            .redoPressed = pressed(InputAction::EditorRedo),
+            .savePressed = pressed(InputAction::EditorSave),
+            .layerUpPressed = pressed(InputAction::EditorLayerUp),
+            .layerDownPressed = pressed(InputAction::EditorLayerDown),
+            .cycleToolPressed = pressed(InputAction::EditorCycleTool),
+            .toggleLayerLockPressed =
+                pressed(InputAction::EditorToggleLayerLock),
+            .recentTileSlot = recentTileSlot,
+            .pickModifier = input.actionDown(InputAction::EditorPickTile),
+            .lineConstraint =
+                input.actionDown(InputAction::EditorStraightLine),
             .deleting = input.actionDown(InputAction::EditorDeleteTile),
             .replaceLayer = input.actionDown(InputAction::EditorReplaceTile),
             .moving = input.actionDown(InputAction::EditorMoveTile),
-            .translateGizmoPressed = allowEditorShortcuts &&
-                input.keyPressed(SDL_SCANCODE_T),
-            .rotateGizmoPressed = allowEditorShortcuts &&
-                input.keyPressed(SDL_SCANCODE_R),
-            .scaleGizmoPressed = allowEditorShortcuts &&
-                input.keyPressed(SDL_SCANCODE_S),
+            .translateGizmoPressed =
+                pressed(InputAction::EditorGizmoTranslate),
+            .rotateGizmoPressed = pressed(InputAction::EditorGizmoRotate),
+            .scaleGizmoPressed = pressed(InputAction::EditorGizmoScale),
             .pointerCaptured = context.mouseCaptured,
         };
     }

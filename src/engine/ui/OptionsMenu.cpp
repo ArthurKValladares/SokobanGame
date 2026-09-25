@@ -122,23 +122,182 @@ constexpr std::array bindingRows {
     },
 };
 
+struct EditorBindingRow {
+    OptionsMenuRowId row;
+    InputAction action;
+    std::string_view label;
+    EditorControlsSection section;
+};
+
 constexpr std::array editorBindingRows {
-    BindingRow {
+    EditorBindingRow {
         OptionsMenuRowId::EditorReplaceTile,
         InputAction::EditorReplaceTile,
-        "Replace tile",
+        "Replace tile (hold)",
+        EditorControlsSection::Editing,
     },
-    BindingRow {
+    EditorBindingRow {
         OptionsMenuRowId::EditorDeleteTile,
         InputAction::EditorDeleteTile,
-        "Delete tile",
+        "Delete tile (hold)",
+        EditorControlsSection::Editing,
     },
-    BindingRow {
+    EditorBindingRow {
         OptionsMenuRowId::EditorMoveTile,
         InputAction::EditorMoveTile,
-        "Move tile object",
+        "Move tile object (hold)",
+        EditorControlsSection::Editing,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorPickTile,
+        InputAction::EditorPickTile,
+        "Eyedropper (hold)",
+        EditorControlsSection::Editing,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorStraightLine,
+        InputAction::EditorStraightLine,
+        "Straight drag (hold)",
+        EditorControlsSection::Editing,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorRedo,
+        InputAction::EditorRedo,
+        "Redo",
+        EditorControlsSection::Editing,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorLayerUp,
+        InputAction::EditorLayerUp,
+        "Layer up",
+        EditorControlsSection::Editing,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorLayerDown,
+        InputAction::EditorLayerDown,
+        "Layer down",
+        EditorControlsSection::Editing,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorToggleLayerLock,
+        InputAction::EditorToggleLayerLock,
+        "Lock to layer",
+        EditorControlsSection::Editing,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorCycleTool,
+        InputAction::EditorCycleTool,
+        "Next tool",
+        EditorControlsSection::Editing,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorGizmoTranslate,
+        InputAction::EditorGizmoTranslate,
+        "Gizmo: move",
+        EditorControlsSection::Editing,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorGizmoRotate,
+        InputAction::EditorGizmoRotate,
+        "Gizmo: rotate",
+        EditorControlsSection::Editing,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorGizmoScale,
+        InputAction::EditorGizmoScale,
+        "Gizmo: scale",
+        EditorControlsSection::Editing,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorSave,
+        InputAction::EditorSave,
+        "Save document",
+        EditorControlsSection::Playtest,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorPlayDraft,
+        InputAction::EditorPlayDraft,
+        "Play / stop draft",
+        EditorControlsSection::Playtest,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorPlayFromCursor,
+        InputAction::EditorPlayFromCursor,
+        "Play from cursor",
+        EditorControlsSection::Playtest,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorRecentTile1,
+        InputAction::EditorRecentTile1,
+        "Recent tile 1",
+        EditorControlsSection::RecentTiles,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorRecentTile2,
+        InputAction::EditorRecentTile2,
+        "Recent tile 2",
+        EditorControlsSection::RecentTiles,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorRecentTile3,
+        InputAction::EditorRecentTile3,
+        "Recent tile 3",
+        EditorControlsSection::RecentTiles,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorRecentTile4,
+        InputAction::EditorRecentTile4,
+        "Recent tile 4",
+        EditorControlsSection::RecentTiles,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorRecentTile5,
+        InputAction::EditorRecentTile5,
+        "Recent tile 5",
+        EditorControlsSection::RecentTiles,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorRecentTile6,
+        InputAction::EditorRecentTile6,
+        "Recent tile 6",
+        EditorControlsSection::RecentTiles,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorRecentTile7,
+        InputAction::EditorRecentTile7,
+        "Recent tile 7",
+        EditorControlsSection::RecentTiles,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorRecentTile8,
+        InputAction::EditorRecentTile8,
+        "Recent tile 8",
+        EditorControlsSection::RecentTiles,
+    },
+    EditorBindingRow {
+        OptionsMenuRowId::EditorRecentTile9,
+        InputAction::EditorRecentTile9,
+        "Recent tile 9",
+        EditorControlsSection::RecentTiles,
     },
 };
+
+constexpr std::array editorControlsSectionChoices {
+    OptionsMenuChoice { 0, "Editing" },
+    OptionsMenuChoice { 1, "Playtest" },
+    OptionsMenuChoice { 2, "Recent Tiles" },
+};
+
+int editorControlsSectionChoice(EditorControlsSection section)
+{
+    return static_cast<int>(section);
+}
+
+EditorControlsSection editorControlsSectionFromChoice(int value)
+{
+    return static_cast<EditorControlsSection>(std::clamp(
+        value, 0, static_cast<int>(editorControlsSectionChoices.size()) - 1));
+}
 
 int displayIndex(const UserSettings& settings)
 {
@@ -161,7 +320,7 @@ std::optional<InputAction> actionForRow(OptionsMenuRowId row)
         return found->action;
     }
     const auto editorFound =
-        std::ranges::find(editorBindingRows, row, &BindingRow::row);
+        std::ranges::find(editorBindingRows, row, &EditorBindingRow::row);
     return editorFound == editorBindingRows.end()
         ? std::nullopt
         : std::optional<InputAction>(editorFound->action);
@@ -295,6 +454,28 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::EditorReplaceTile:
     case OptionsMenuRowId::EditorDeleteTile:
     case OptionsMenuRowId::EditorMoveTile:
+    case OptionsMenuRowId::EditorPickTile:
+    case OptionsMenuRowId::EditorStraightLine:
+    case OptionsMenuRowId::EditorRedo:
+    case OptionsMenuRowId::EditorSave:
+    case OptionsMenuRowId::EditorPlayDraft:
+    case OptionsMenuRowId::EditorPlayFromCursor:
+    case OptionsMenuRowId::EditorLayerUp:
+    case OptionsMenuRowId::EditorLayerDown:
+    case OptionsMenuRowId::EditorToggleLayerLock:
+    case OptionsMenuRowId::EditorCycleTool:
+    case OptionsMenuRowId::EditorGizmoTranslate:
+    case OptionsMenuRowId::EditorGizmoRotate:
+    case OptionsMenuRowId::EditorGizmoScale:
+    case OptionsMenuRowId::EditorRecentTile1:
+    case OptionsMenuRowId::EditorRecentTile2:
+    case OptionsMenuRowId::EditorRecentTile3:
+    case OptionsMenuRowId::EditorRecentTile4:
+    case OptionsMenuRowId::EditorRecentTile5:
+    case OptionsMenuRowId::EditorRecentTile6:
+    case OptionsMenuRowId::EditorRecentTile7:
+    case OptionsMenuRowId::EditorRecentTile8:
+    case OptionsMenuRowId::EditorRecentTile9:
         state.capturingAction = actionForRow(row);
         break;
     case OptionsMenuRowId::ResetBindings:
@@ -323,6 +504,7 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::MasterVolume:
     case OptionsMenuRowId::MusicVolume:
     case OptionsMenuRowId::BindingDevice:
+    case OptionsMenuRowId::EditorControlsSection:
         break;
     }
     return std::nullopt;
@@ -393,6 +575,13 @@ std::optional<OptionsAction> adjustRow(
                 bindingDeviceChoice(state.controlsBindingDevice),
                 direction));
         return std::nullopt;
+    case OptionsMenuRowId::EditorControlsSection:
+        state.editorControlsSection = editorControlsSectionFromChoice(
+            cycleChoice(
+                editorControlsSectionChoices,
+                editorControlsSectionChoice(state.editorControlsSection),
+                direction));
+        return std::nullopt;
     default:
         return std::nullopt;
     }
@@ -423,6 +612,13 @@ uiControls::ButtonTone buttonTone(OptionsMenuRowTone tone)
         return uiControls::ButtonTone::Normal;
     }
     return uiControls::ButtonTone::Normal;
+}
+
+// Pages of binding rows share the compact metrics and the prompt line.
+bool bindingPage(OptionsMenuPage page)
+{
+    return page == OptionsMenuPage::Controls ||
+        page == OptionsMenuPage::EditorControls;
 }
 
 std::string rowControlId(OptionsMenuRowId row)
@@ -767,7 +963,17 @@ void appendControlsRows(
 void appendEditorControlsRows(
     std::vector<OptionsMenuRow>& rows, const OptionsMenuState& state)
 {
-    for (const BindingRow& binding : editorBindingRows) {
+    rows.push_back({
+        .id = OptionsMenuRowId::EditorControlsSection,
+        .kind = OptionsMenuRowKind::Tabs,
+        .choices = editorControlsSectionChoices,
+        .choiceValue =
+            editorControlsSectionChoice(state.editorControlsSection),
+    });
+    for (const EditorBindingRow& binding : editorBindingRows) {
+        if (binding.section != state.editorControlsSection) {
+            continue;
+        }
         rows.push_back({
             .id = binding.row,
             .kind = OptionsMenuRowKind::Binding,
@@ -928,6 +1134,10 @@ OptionsMenuReduction reduceOptionsMenu(
             case OptionsMenuRowId::BindingDevice:
                 result.state.controlsBindingDevice =
                     bindingDeviceFromChoice(selection.value);
+                return;
+            case OptionsMenuRowId::EditorControlsSection:
+                result.state.editorControlsSection =
+                    editorControlsSectionFromChoice(selection.value);
                 return;
             default:
                 return;
@@ -1138,8 +1348,10 @@ void layoutOptionsRows(
         const OptionsMenuRow& row = rows[index];
         RowLayout& rowLayout = rowLayouts[index];
         if (row.flexibleSpaceBefore) {
-            if (state.page == OptionsMenuPage::Controls &&
-                row.id == OptionsMenuRowId::ResetBindings) {
+            if ((state.page == OptionsMenuPage::Controls &&
+                    row.id == OptionsMenuRowId::ResetBindings) ||
+                (state.page == OptionsMenuPage::EditorControls &&
+                    row.id == OptionsMenuRowId::Back)) {
                 controlsPrompt = layout.tree.item(
                     layout.tree.root(), 22.0f * verticalScale);
                 layout.tree.spacer(
@@ -1197,7 +1409,7 @@ void layoutOptionsRows(
         case OptionsMenuRowKind::Binding:
             rowLayout.primary = layout.tree.item(
                 layout.tree.root(),
-                state.page == OptionsMenuPage::Controls
+                bindingPage(state.page)
                     ? 35.0f * verticalScale
                     : (compactGraphics ? 32.0f : 52.0f) * verticalScale);
             break;
@@ -1208,7 +1420,7 @@ void layoutOptionsRows(
                 layout.tree.root(),
                 state.page == OptionsMenuPage::Main
                     ? 16.0f * verticalScale
-                    : (state.page == OptionsMenuPage::Controls
+                    : (bindingPage(state.page)
                             ? 2.0f * verticalScale
                             : (compactGraphics ? 3.0f : 10.0f) *
                                 verticalScale));
@@ -1579,7 +1791,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
         optionsMenuRows(state, settings);
     const bool compactGraphics =
         state.page == OptionsMenuPage::Graphics;
-    const float afterHeader = state.page == OptionsMenuPage::Controls
+    const float afterHeader = bindingPage(state.page)
         ? 16.0f
         : (compactGraphics ? 16.0f : 28.0f);
 
@@ -1655,11 +1867,14 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             { 0.83f, 0.86f, 0.83f, 1.0f },
             22.0f * verticalScale);
     }
-    if (state.page == OptionsMenuPage::Controls) {
+    if (bindingPage(state.page)) {
+        const bool editorPage = state.page == OptionsMenuPage::EditorControls;
         ui.centeredText(
             layout.tree.rect(controlsPrompt),
             state.capturingAction
-                ? "Esc or Start cancels. Rebinding steals duplicates."
+                ? (editorPage
+                        ? "Hold Ctrl, Shift or Alt for a chord. Esc cancels."
+                        : "Esc or Start cancels. Rebinding steals duplicates.")
                 : "Choose a tab, then confirm a row to remap it.",
             { 0.58f, 0.63f, 0.62f, 1.0f },
             17.0f * verticalScale);

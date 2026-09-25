@@ -13,9 +13,11 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -187,37 +189,67 @@ void testOverworldTargetSummaries()
         "all selector targets complete the slot");
 }
 
-void testPreSplitSettingsMigration()
+void testSharedSettingsWinOverSlotCopies()
 {
     TemporaryDirectory directory;
     {
-        // A pre-split combined save: progress and tuned settings together.
-        sokoban::SaveStore legacy(directory.path());
-        sokoban::PlayerProfile combined = profileWithProgress(1);
-        combined.settings.audio.musicVolume = 0.25f;
-        CHECK_MESSAGE(legacy.save(combined), "legacy combined save written");
+        // A slot file that happens to carry settings too.
+        sokoban::SaveStore combined(directory.path());
+        sokoban::PlayerProfile profile = profileWithProgress(1);
+        profile.settings.audio.musicVolume = 0.25f;
+        CHECK_MESSAGE(combined.save(profile), "combined slot file written");
+        sokoban::SaveStore settings(directory.path(), "settings");
+        sokoban::PlayerProfile shared;
+        shared.settings.audio.musicVolume = 0.9f;
+        CHECK_MESSAGE(settings.save(shared), "shared settings written");
     }
 
     sokoban::SaveSlotManager manager(directory.path(), instantWrites);
-    const sokoban::PlayerProfile profile = manager.loadActiveProfile();
-    CHECK_MESSAGE(profile.settings.audio.musicVolume == 0.25f, "migrated settings adopted");
-    CHECK_MESSAGE(profile.unlockedLevel == 1, "progress preserved through migration");
-    CHECK_MESSAGE(manager.flush().allPersisted(),
-        "settings migration reports durable completion");
-    CHECK_MESSAGE(std::filesystem::is_regular_file(directory.path() / "settings.json"),
-        "shared settings file bootstrapped");
-
-    // The shared file is now authoritative over slot copies.
-    sokoban::SaveStore settings(directory.path(), "settings");
-    sokoban::PlayerProfile shared = settings.load().profile;
-    CHECK_MESSAGE(shared.settings.audio.musicVolume == 0.25f, "bootstrapped settings persisted");
-    shared.settings.audio.musicVolume = 0.9f;
-    CHECK_MESSAGE(settings.save(shared), "shared settings updated");
-
-    sokoban::SaveSlotManager reloaded(directory.path(), instantWrites);
-    const sokoban::PlayerProfile merged = reloaded.loadActiveProfile();
-    CHECK_MESSAGE(merged.settings.audio.musicVolume == 0.9f, "shared settings win over slot copy");
+    const sokoban::PlayerProfile merged = manager.loadActiveProfile();
+    CHECK_MESSAGE(merged.settings.audio.musicVolume == 0.9f,
+        "shared settings win over slot copy");
     CHECK_MESSAGE(merged.unlockedLevel == 1, "slot progress still intact");
+}
+
+void testObsoleteSavesStartFresh()
+{
+    TemporaryDirectory directory;
+    nlohmann::json obsolete = nlohmann::json::parse(
+        profileWithProgress(2).serialize());
+    obsolete["format"] = sokoban::currentPlayerProfileFormat - 1;
+    obsolete["settings"]["audio"]["musicVolume"] = 0.1;
+    for (const char* name :
+         { "profile.json", "settings.json", "profile-slot2.json" }) {
+        std::ofstream(directory.path() / name, std::ios::binary)
+            << obsolete.dump();
+    }
+
+    sokoban::SaveSlotManager manager(directory.path(), instantWrites);
+    sokoban::PlayerProfile profile;
+    bool loaded = true;
+    try {
+        profile = manager.loadActiveProfile();
+    } catch (const std::exception&) {
+        loaded = false;
+    }
+    CHECK_MESSAGE(loaded, "obsolete saves do not stop the game from starting");
+    CHECK_MESSAGE(profile == sokoban::PlayerProfile {},
+        "obsolete progress and settings are replaced by defaults");
+    CHECK_MESSAGE(!std::filesystem::exists(directory.path() / "profile.json") &&
+            !std::filesystem::exists(directory.path() / "settings.json"),
+        "the active slot and shared settings were set aside");
+
+    const std::vector<sokoban::SaveSlotManager::SlotSummary> summaries =
+        manager.slotSummaries(profile, 4);
+    CHECK_MESSAGE(summaries[1].state == sokoban::SaveSlotState::Empty,
+        "an obsolete inactive slot shows as empty");
+    const std::optional<sokoban::PlayerProfile> switched =
+        manager.switchTo(1, profile);
+    CHECK_MESSAGE(switched && switched->progressEmpty(),
+        "switching to an obsolete slot starts it fresh");
+    CHECK_MESSAGE(!std::filesystem::exists(
+            directory.path() / "profile-slot2.json"),
+        "the obsolete inactive slot was set aside when opened");
 }
 
 void testSummariesSwitchingAndDeletion()
@@ -708,7 +740,8 @@ int main()
     testUnsupportedActiveDataStopsLoading();
     testInterruptedActiveSlotMarkerRecovery();
     testOverworldTargetSummaries();
-    testPreSplitSettingsMigration();
+    testSharedSettingsWinOverSlotCopies();
+    testObsoleteSavesStartFresh();
     testSummariesSwitchingAndDeletion();
     testSummaryCacheInvalidation();
     testSlotInspectionIsNonMutating();

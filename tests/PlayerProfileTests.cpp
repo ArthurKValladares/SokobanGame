@@ -209,18 +209,6 @@ bool hasCorruptArchive(
     return false;
 }
 
-const sokoban::KeyboardBinding* keyboardBinding(
-    const sokoban::InputBindings& bindings,
-    sokoban::InputAction action)
-{
-    for (const sokoban::InputBinding& binding : bindings.forAction(action)) {
-        if (const auto* keyboard = std::get_if<sokoban::KeyboardBinding>(&binding)) {
-            return keyboard;
-        }
-    }
-    return nullptr;
-}
-
 using TemporaryDirectory = ScopedTestDirectory;
 
 void testRoundTripAndBests()
@@ -264,7 +252,6 @@ void testRoundTripAndBests()
 
     const sokoban::DecodedPlayerProfile decoded =
         sokoban::decodePlayerProfile(profile.serialize());
-    CHECK_MESSAGE(decoded.sourceFormat == sokoban::currentPlayerProfileFormat, "current format decoded");
     CHECK_MESSAGE(decoded.profile == profile, "current profile round-trips");
 }
 
@@ -289,20 +276,6 @@ void testReachedScreensAndProgressReset()
     const sokoban::DecodedPlayerProfile decoded =
         sokoban::decodePlayerProfile(profile.serialize());
     CHECK_MESSAGE(decoded.profile == profile, "reached screens round-trip");
-
-    // Format-7 files (no reachedScreens) decode with zeroed counts.
-    nlohmann::json legacy = nlohmann::json::parse(profile.serialize());
-    legacy["format"] = 7;
-    for (auto& item : legacy["progress"]["levels"]) {
-        item.erase("reachedScreens");
-    }
-    const sokoban::DecodedPlayerProfile migrated =
-        sokoban::decodePlayerProfile(legacy.dump());
-    CHECK_MESSAGE(migrated.sourceFormat == 7, "format 7 source reported");
-    const sokoban::PlayerProfile::LevelProgress* migratedFirst =
-        migrated.profile.progressForLevel(0);
-    CHECK_MESSAGE(migratedFirst != nullptr && migratedFirst->reachedScreens == 0,
-        "format 7 migration defaults reached screens to zero");
 
     // Completing without recordBests keeps completion but no records.
     profile.recordLevelCompletion(1, 12, 5.0, true, false);
@@ -370,9 +343,10 @@ void testSectionedSerialization()
     CHECK_MESSAGE(settingsDecoded.settings.audio.musicVolume == 0.25f,
         "settings-only round-trips settings");
 
-    // A bare format-9 document decodes as a fully default profile.
-    const sokoban::PlayerProfile bare =
-        sokoban::decodePlayerProfile("{\"format\": 9}").profile;
+    // A bare current-format document decodes as a fully default profile.
+    const sokoban::PlayerProfile bare = sokoban::decodePlayerProfile(
+        "{\"format\": " +
+        std::to_string(sokoban::currentPlayerProfileFormat) + "}").profile;
     CHECK_MESSAGE(bare == sokoban::PlayerProfile {}, "sections are optional on read");
 }
 
@@ -516,74 +490,12 @@ void testActiveScreenCheckpointRoundTrip()
         (void)sokoban::decodePlayerProfile(nullUndoBase.dump());
     }, "non-empty current undo history rejects a null base state");
 
-    nlohmann::json format27 = current;
-    format27["format"] = 27;
-    nlohmann::json& format27Session =
-        format27["progress"]["activeScreen"]["session"];
-    nlohmann::json previousState = format27Session["undoBaseState"];
-    for (nlohmann::json& action : format27Session["undoStack"]) {
-        action["before"] = previousState;
-        previousState = action["after"];
-    }
-    format27Session.erase("undoBaseState");
-    const sokoban::DecodedPlayerProfile migrated27 =
-        sokoban::decodePlayerProfile(format27.dump());
-    CHECK_MESSAGE(migrated27.profile == profile,
-        "format 27 duplicate-state undo history migrates exactly");
-
-    nlohmann::json format28 = current;
-    format28["format"] = 28;
-    nlohmann::json& format28Session =
-        format28["progress"]["activeScreen"]["session"];
-    const auto eraseEnemyDeath = [](nlohmann::json& state) {
-        if (!state.is_object() || !state.contains("enemies") ||
-            !state["enemies"].is_array()) {
-            return;
-        }
-        for (nlohmann::json& enemy : state["enemies"]) {
-            if (enemy.is_object()) {
-                enemy.erase("dead");
-            }
-        }
-    };
-    eraseEnemyDeath(format28Session["state"]);
-    eraseEnemyDeath(format28Session["undoBaseState"]);
-    for (nlohmann::json& action : format28Session["undoStack"]) {
-        eraseEnemyDeath(action["after"]);
-    }
-    const sokoban::DecodedPlayerProfile migrated28 =
-        sokoban::decodePlayerProfile(format28.dump());
-    CHECK_MESSAGE(migrated28.sourceFormat == 28,
-        "format 28 source is reported");
-    CHECK_MESSAGE(migrated28.profile == profile,
-        "format 28 enemies migrate as alive");
-
-    nlohmann::json format15 = format27;
-    format15["format"] = 15;
-    format15["progress"]["activeScreen"]["session"]["undoStack"][0]
-        .erase("presentation");
-    const sokoban::DecodedPlayerProfile migrated15 =
-        sokoban::decodePlayerProfile(format15.dump());
-    CHECK_MESSAGE(migrated15.profile.activeScreen.has_value(),
-        "format 15 migration preserves the active checkpoint");
-    CHECK_MESSAGE(!migrated15.profile.activeScreen->session.undoStack[0]
-            .presentation.motions.empty(),
-        "format 15 migration reconstructs generic motion tracks");
     nlohmann::json emptyPlayers = current;
     emptyPlayers["progress"]["activeScreen"]["session"]["state"]
         ["players"] = nlohmann::json::array();
     checkThrows([&] {
         (void)sokoban::decodePlayerProfile(emptyPlayers.dump());
     }, "checkpoint rejects an empty players array");
-
-    nlohmann::json format13 = current;
-    format13["format"] = 13;
-    const sokoban::DecodedPlayerProfile migrated13 =
-        sokoban::decodePlayerProfile(format13.dump());
-    CHECK_MESSAGE(migrated13.sourceFormat == 13,
-        "format 13 checkpoint source is reported");
-    CHECK_MESSAGE(!migrated13.profile.activeScreen,
-        "format 13 active checkpoint is intentionally discarded");
 
     nlohmann::json mismatched = nlohmann::json::parse(serialized);
     mismatched["progress"]["activeScreen"]["screen"] = 1;
@@ -592,7 +504,7 @@ void testActiveScreenCheckpointRoundTrip()
     }, "checkpoint for a different screen is rejected");
 }
 
-void testNormalizationAndMigration()
+void testNormalizationAndValidation()
 {
     sokoban::PlayerProfile profile;
     profile.unlockedLevel = 2;
@@ -623,250 +535,6 @@ void testNormalizationAndMigration()
         "exposure clamps to its safe minimum");
     CHECK_MESSAGE(profile.settings.video.windowWidth == 640, "window width clamps low");
     CHECK_MESSAGE(profile.settings.video.windowHeight == 480, "window height clamps low");
-
-    constexpr std::string_view format1 = R"json({
-  "format": 1,
-  "unlockedLevel": 3,
-  "currentLevel": 2,
-  "completedLevels": [0, 1],
-  "masterVolume": 0.7,
-  "musicVolume": 0.4
-})json";
-    const sokoban::DecodedPlayerProfile migrated = sokoban::decodePlayerProfile(format1);
-    CHECK_MESSAGE(migrated.sourceFormat == 1, "format 1 source reported");
-    CHECK_MESSAGE(migrated.profile.currentLevel == 2, "format 1 current level migrated");
-    CHECK_MESSAGE(migrated.profile.progressForLevel(0) != nullptr, "format 1 completion migrated");
-    CHECK_MESSAGE(migrated.profile.settings.audio.soundVolume == 1.0f, "new setting receives migration default");
-    CHECK_MESSAGE(sokoban::decodePlayerProfile(migrated.profile.serialize()).sourceFormat ==
-            sokoban::currentPlayerProfileFormat,
-        "migrated profile serializes as current format");
-
-    nlohmann::json legacyInput = {
-        { "moveUp", "Up" },
-        { "moveDown", "Down" },
-        { "moveLeft", "Left" },
-        { "moveRight", "Right" },
-        { "undo", "Backspace" },
-        { "restart", "R" },
-    };
-    nlohmann::json format2Root = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format2Root["format"] = 2;
-    format2Root["progress"].erase("currentScreen");
-    format2Root["progress"].erase("activeScreen");
-    format2Root["settings"]["input"] = legacyInput;
-    format2Root["settings"]["video"].erase("antiAliasingSamples");
-    format2Root["settings"]["video"].erase("renderScalePercent");
-    format2Root["settings"]["video"].erase("customRenderScale");
-    format2Root["settings"]["video"].erase("customRenderScalePercent");
-    format2Root["settings"]["video"].erase("ambientOcclusion");
-    format2Root["settings"]["video"].erase("windowWidth");
-    format2Root["settings"]["video"].erase("windowHeight");
-    const sokoban::DecodedPlayerProfile migratedFormat2 =
-        sokoban::decodePlayerProfile(format2Root.dump());
-    CHECK_MESSAGE(migratedFormat2.sourceFormat == 2, "format 2 source reported");
-    CHECK_MESSAGE(migratedFormat2.profile.currentScreen == 0,
-        "format 2 receives default screen");
-    CHECK_MESSAGE(!migratedFormat2.profile.activeScreen,
-        "format 2 receives no gameplay checkpoint");
-    const sokoban::KeyboardBinding* migratedKeyboard = keyboardBinding(
-        migratedFormat2.profile.settings.input, sokoban::InputAction::MoveUp);
-    CHECK_MESSAGE(migratedKeyboard && migratedKeyboard->scancode == "Up",
-        "format 2 keyboard binding migrates");
-    CHECK_MESSAGE(migratedFormat2.profile.settings.input.forAction(
-            sokoban::InputAction::MoveUp).size() == 3,
-        "format 2 migration adds controller defaults");
-
-    nlohmann::json format3Root = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format3Root["format"] = 3;
-    format3Root["settings"]["input"] = legacyInput;
-    format3Root["settings"]["video"].erase("antiAliasingSamples");
-    format3Root["settings"]["video"].erase("renderScalePercent");
-    format3Root["settings"]["video"].erase("customRenderScale");
-    format3Root["settings"]["video"].erase("customRenderScalePercent");
-    format3Root["settings"]["video"].erase("ambientOcclusion");
-    format3Root["settings"]["video"].erase("windowWidth");
-    format3Root["settings"]["video"].erase("windowHeight");
-    const sokoban::DecodedPlayerProfile migratedFormat3 =
-        sokoban::decodePlayerProfile(format3Root.dump());
-    CHECK_MESSAGE(migratedFormat3.sourceFormat == 3, "format 3 source reported");
-    migratedKeyboard = keyboardBinding(
-        migratedFormat3.profile.settings.input, sokoban::InputAction::Undo);
-    CHECK_MESSAGE(migratedKeyboard && migratedKeyboard->scancode == "Backspace",
-        "format 3 keyboard binding migrates");
-
-    nlohmann::json format4Root = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format4Root["format"] = 4;
-    format4Root["settings"]["input"].erase("menuConfirm");
-    format4Root["settings"]["video"].erase("antiAliasingSamples");
-    format4Root["settings"]["video"].erase("renderScalePercent");
-    format4Root["settings"]["video"].erase("customRenderScale");
-    format4Root["settings"]["video"].erase("customRenderScalePercent");
-    format4Root["settings"]["video"].erase("ambientOcclusion");
-    format4Root["settings"]["video"].erase("windowWidth");
-    format4Root["settings"]["video"].erase("windowHeight");
-    const sokoban::DecodedPlayerProfile migratedFormat4 =
-        sokoban::decodePlayerProfile(format4Root.dump());
-    CHECK_MESSAGE(migratedFormat4.sourceFormat == 4, "format 4 source reported");
-    CHECK_MESSAGE(!migratedFormat4.profile.settings.input.forAction(
-            sokoban::InputAction::MenuConfirm).empty(),
-        "format 4 receives menu-confirm defaults");
-    CHECK_MESSAGE(migratedFormat4.profile.settings.video.antiAliasingSamples ==
-            sokoban::config::antiAliasingSamples,
-        "format 4 receives MSAA default");
-    CHECK_MESSAGE(migratedFormat4.profile.settings.video.windowWidth == 1280 &&
-            migratedFormat4.profile.settings.video.windowHeight == 720,
-        "format 4 receives window-size defaults");
-
-    nlohmann::json format24 = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format24["format"] = 24;
-    format24["settings"]["video"].erase("allowTearing");
-    format24["settings"]["video"].erase("frameRateLimit");
-    const sokoban::DecodedPlayerProfile migratedFormat24 =
-        sokoban::decodePlayerProfile(format24.dump());
-    CHECK_MESSAGE(migratedFormat24.sourceFormat == 24,
-        "format 24 source reported");
-    CHECK_MESSAGE(!migratedFormat24.profile.settings.video.allowTearing,
-        "format 24 receives safe tearing default");
-    CHECK_MESSAGE(migratedFormat24.profile.settings.video.frameRateLimit == 0,
-        "format 24 receives unlimited foreground cap default");
-
-    nlohmann::json format25 = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format25["format"] = 25;
-    format25["settings"]["accessibility"] = {
-        { "reducedMotion", true },
-        { "highContrast", true },
-        { "largeText", true },
-        { "subtitles", false },
-        { "screenShake", false },
-    };
-    const sokoban::DecodedPlayerProfile migratedFormat25 =
-        sokoban::decodePlayerProfile(format25.dump());
-    CHECK_MESSAGE(migratedFormat25.sourceFormat == 25,
-        "format 25 source reported");
-    CHECK_MESSAGE(migratedFormat25.profile.serialize().find("\"accessibility\"") ==
-            std::string::npos,
-        "format 25 accessibility settings are removed during migration");
-
-    nlohmann::json format26 = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format26["format"] = 26;
-    format26["settings"]["video"].erase("exposureEv");
-    const sokoban::DecodedPlayerProfile migratedFormat26 =
-        sokoban::decodePlayerProfile(format26.dump());
-    CHECK_MESSAGE(migratedFormat26.sourceFormat == 26,
-        "format 26 source reported");
-    CHECK_MESSAGE(migratedFormat26.profile.settings.video.exposureEv == 0.0f,
-        "format 26 receives neutral exposure");
-
-    nlohmann::json format5Root = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format5Root["format"] = 5;
-    format5Root["settings"]["video"].erase("renderScalePercent");
-    format5Root["settings"]["video"].erase("customRenderScale");
-    format5Root["settings"]["video"].erase("customRenderScalePercent");
-    const sokoban::DecodedPlayerProfile migratedFormat5 =
-        sokoban::decodePlayerProfile(format5Root.dump());
-    CHECK_MESSAGE(migratedFormat5.sourceFormat == 5, "format 5 source reported");
-    CHECK_MESSAGE(migratedFormat5.profile.settings.video.renderScalePercent == 100,
-        "format 5 receives native render scale");
-
-    nlohmann::json format6Root = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format6Root["format"] = 6;
-    format6Root["settings"]["video"].erase("customRenderScale");
-    format6Root["settings"]["video"].erase("customRenderScalePercent");
-    const sokoban::DecodedPlayerProfile migratedFormat6 =
-        sokoban::decodePlayerProfile(format6Root.dump());
-    CHECK_MESSAGE(migratedFormat6.sourceFormat == 6, "format 6 source reported");
-    CHECK_MESSAGE(!migratedFormat6.profile.settings.video.customRenderScale,
-        "format 6 defaults to preset render scale");
-    CHECK_MESSAGE(migratedFormat6.profile.settings.video.customRenderScalePercent == 100,
-        "format 6 receives a native custom value");
-
-    nlohmann::json format9Root = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format9Root["format"] = 9;
-    format9Root["settings"]["input"].erase("mirror");
-    format9Root["settings"]["input"].erase("showTopDownView");
-    format9Root["settings"]["input"]["undo"] = nlohmann::json::array({
-        nlohmann::json { { "type", "keyboard" }, { "control", "Z" } },
-        nlohmann::json { { "type", "gamepadButton" }, { "control", "west" } },
-    });
-    const sokoban::DecodedPlayerProfile migratedFormat9 =
-        sokoban::decodePlayerProfile(format9Root.dump());
-    CHECK_MESSAGE(migratedFormat9.sourceFormat == 9, "format 9 source reported");
-    migratedKeyboard = keyboardBinding(
-        migratedFormat9.profile.settings.input, sokoban::InputAction::Undo);
-    CHECK_MESSAGE(migratedKeyboard && migratedKeyboard->scancode == "Z",
-        "format 9 keeps the original undo default");
-
-    nlohmann::json format10Root = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format10Root["format"] = 10;
-    format10Root["settings"]["input"].erase("showTopDownView");
-    format10Root["settings"]["input"]["mirror"] = nlohmann::json::array({
-        nlohmann::json { { "type", "keyboard" }, { "control", "Z" } },
-        nlohmann::json { { "type", "gamepadButton" }, { "control", "east" } },
-    });
-    format10Root["settings"]["input"]["undo"] = nlohmann::json::array({
-        nlohmann::json { { "type", "keyboard" }, { "control", "X" } },
-        nlohmann::json { { "type", "gamepadButton" }, { "control", "west" } },
-    });
-    const sokoban::DecodedPlayerProfile migratedFormat10 =
-        sokoban::decodePlayerProfile(format10Root.dump());
-    CHECK_MESSAGE(migratedFormat10.sourceFormat == 10, "format 10 source reported");
-    migratedKeyboard = keyboardBinding(
-        migratedFormat10.profile.settings.input, sokoban::InputAction::Undo);
-    CHECK_MESSAGE(migratedKeyboard && migratedKeyboard->scancode == "Z",
-        "format 10 default undo returns to Z");
-
-    format10Root["settings"]["input"]["mirror"] = nlohmann::json::array({
-        nlohmann::json { { "type", "keyboard" }, { "control", "G" } },
-        nlohmann::json { { "type", "gamepadButton" }, { "control", "east" } },
-    });
-    const sokoban::DecodedPlayerProfile migratedCustomFormat10 =
-        sokoban::decodePlayerProfile(format10Root.dump());
-    const nlohmann::json migratedCustomFormat10Json = nlohmann::json::parse(
-        migratedCustomFormat10.profile.serialize());
-    CHECK_MESSAGE(!migratedCustomFormat10Json["settings"]["input"].contains("mirror"),
-        "retired custom mirror binding is removed");
-
-    nlohmann::json format11Root = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format11Root["format"] = 11;
-    format11Root["settings"]["input"].erase("showTopDownView");
-    format11Root["settings"]["input"]["undo"] = nlohmann::json::array({
-        nlohmann::json { { "type", "keyboard" }, { "control", "T" } },
-    });
-    const sokoban::DecodedPlayerProfile migratedFormat11 =
-        sokoban::decodePlayerProfile(format11Root.dump());
-    CHECK_MESSAGE(migratedFormat11.sourceFormat == 11, "format 11 source reported");
-    migratedKeyboard = keyboardBinding(
-        migratedFormat11.profile.settings.input,
-        sokoban::InputAction::ShowTopDownView);
-    CHECK_MESSAGE(migratedKeyboard && migratedKeyboard->scancode == "T",
-        "format 11 receives current-screen top-down default");
-    migratedKeyboard = keyboardBinding(
-        migratedFormat11.profile.settings.input, sokoban::InputAction::Undo);
-    CHECK_MESSAGE(migratedKeyboard && migratedKeyboard->scancode == "Z",
-        "format 11 binding displaced by T recovers its default");
-
-    nlohmann::json format12Root = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format12Root["format"] = 12;
-    format12Root["settings"]["video"].erase("ambientOcclusionStrength");
-    const sokoban::DecodedPlayerProfile migratedFormat12 =
-        sokoban::decodePlayerProfile(format12Root.dump());
-    CHECK_MESSAGE(migratedFormat12.sourceFormat == 12,
-        "format 12 source reported");
-    CHECK_MESSAGE(migratedFormat12.profile.settings.video.ambientOcclusionStrength ==
-            sokoban::UserSettings {}.video.ambientOcclusionStrength,
-        "format 12 receives AO strength default");
 
     checkThrows([] {
         (void)sokoban::decodePlayerProfile(R"json({ "format": 99 })json");
@@ -925,7 +593,7 @@ void testNormalizationAndMigration()
     }, "invalid gamepad axis threshold is rejected");
 }
 
-void testScreenProgressOverworldCheckpointAndFormat17Migration()
+void testScreenProgressAndOverworldCheckpoint()
 {
     sokoban::PlayerProfile progression;
     CHECK_MESSAGE(progression.selectorStatus({ .level = 0, .screen = 0 }) ==
@@ -984,59 +652,6 @@ void testScreenProgressOverworldCheckpointAndFormat17Migration()
             std::vector<uint32_t>({ 2, 7 }),
         "overworld fog discovery round-trips");
 
-    nlohmann::json format31 = nlohmann::json::parse(profile.serialize());
-    format31["format"] = 31;
-    format31["progress"].erase("overworldDiscovery");
-    const sokoban::DecodedPlayerProfile migrated31 =
-        sokoban::decodePlayerProfile(format31.dump());
-    CHECK_MESSAGE(migrated31.sourceFormat == 31,
-        "format 31 source is reported");
-    CHECK_MESSAGE(
-        migrated31.profile.overworldDiscovery.topologyFingerprint ==
-            0x123456789abcdef0ULL &&
-            migrated31.profile.overworldDiscovery.screens ==
-                std::vector<uint32_t>({ 7 }),
-        "format 31 infers discovery for the checkpoint screen");
-
-    nlohmann::json format17 = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format17["format"] = 17;
-    format17["progress"].erase("screens");
-    format17["progress"].erase("overworldCheckpoint");
-    format17["progress"].erase("worldContext");
-    format17["progress"]["levels"] = nlohmann::json::array({ {
-        { "level", 4 },
-        { "completed", true },
-        { "reachedScreens", 2 },
-        { "bestMoves", 30 },
-        { "bestTimeSeconds", 20.0 },
-    } });
-    const sokoban::DecodedPlayerProfile migrated =
-        sokoban::decodePlayerProfile(format17.dump());
-    CHECK_MESSAGE(migrated.sourceFormat == 17, "format 17 source is reported");
-    CHECK_MESSAGE(migrated.profile.screenCompleted({ .level = 4, .screen = 0 }) &&
-            migrated.profile.screenCompleted({ .level = 4, .screen = 1 }),
-        "format 17 reached screens migrate as completed");
-    CHECK_MESSAGE(!migrated.profile.progressForScreen({ .level = 4, .screen = 0 })
-                ->bestMoves,
-        "legacy aggregate best is not copied to an individual screen");
-    CHECK_MESSAGE(migrated.profile.worldContext ==
-            sokoban::PlayerProfile::WorldContext::Overworld,
-        "format 17 without an active checkpoint resumes in overworld");
-
-    nlohmann::json format19 = nlohmann::json::parse(profile.serialize());
-    format19["format"] = 19;
-    format19["progress"]["overworldSession"] =
-        format19["progress"]["overworldCheckpoint"]["session"];
-    format19["progress"].erase("overworldCheckpoint");
-    const sokoban::DecodedPlayerProfile migrated19 =
-        sokoban::decodePlayerProfile(format19.dump());
-    CHECK_MESSAGE(migrated19.sourceFormat == 19,
-        "format 19 source is reported");
-    CHECK_MESSAGE(!migrated19.profile.overworldCheckpoint,
-        "format 19 single-overworld checkpoint is safely discarded");
-    CHECK_MESSAGE(migrated19.profile.screenCompleted({ .level = 2, .screen = 3 }),
-        "format 19 puzzle progress survives checkpoint migration");
 }
 
 void testStoreBackupsAndRecovery()
@@ -1312,30 +927,105 @@ void testSaveSlotStems()
         "corrupt slot resets independently");
 }
 
-void testMigrationAndDoubleCorruption()
+void testObsoleteProfilesAreSetAsideAndDoubleCorruption()
 {
-    TemporaryDirectory migrationDirectory;
-    sokoban::SaveStore migrationStore(migrationDirectory.path());
-    writeFile(migrationStore.primaryPath(), R"json({
-  "format": 1,
-  "unlockedLevel": 1,
-  "currentLevel": 1,
-  "completedLevels": [0],
-  "masterVolume": 0.5,
-  "musicVolume": 0.25,
-  "soundVolume": 0.75
-})json");
-    const sokoban::SaveStore::LoadResult migrated = migrationStore.load();
-    CHECK_MESSAGE(migrated.disposition == sokoban::SaveStore::LoadDisposition::Migrated,
-        "store migrates old primary");
-    CHECK_MESSAGE(sokoban::decodePlayerProfile(
-        [&] {
-            std::ifstream stream(migrationStore.primaryPath(), std::ios::binary);
-            return std::string(
-                std::istreambuf_iterator<char>(stream),
-                std::istreambuf_iterator<char>());
-        }()).sourceFormat == sokoban::currentPlayerProfileFormat,
-        "migration rewrites current format");
+    nlohmann::json obsoleteJson =
+        nlohmann::json::parse(sokoban::PlayerProfile {}.serialize());
+    obsoleteJson["format"] = sokoban::currentPlayerProfileFormat - 1;
+    const std::string obsolete = obsoleteJson.dump();
+    try {
+        (void)sokoban::decodePlayerProfile(obsolete);
+        CHECK_MESSAGE(false, "an older format is not decoded");
+    } catch (const sokoban::ObsoletePlayerProfileFormat& error) {
+        CHECK_MESSAGE(error.format() == sokoban::currentPlayerProfileFormat - 1,
+            "the obsolete format is reported");
+    }
+    checkThrows([] {
+        (void)sokoban::decodePlayerProfile(R"json({ "format": 1 })json");
+    }, "format 1 is obsolete too");
+
+    const auto obsoleteArchives = [](const std::filesystem::path& directory) {
+        int count = 0;
+        for (const auto& entry :
+             std::filesystem::directory_iterator(directory)) {
+            if (entry.path().filename().string().find(
+                    ".obsolete-format-" + std::to_string(
+                        sokoban::currentPlayerProfileFormat - 1) + "-") !=
+                std::string::npos) {
+                ++count;
+            }
+        }
+        return count;
+    };
+
+    {
+        TemporaryDirectory directory;
+        sokoban::SaveStore store(directory.path());
+        writeFile(store.primaryPath(), obsolete);
+        writeFile(store.backupPath(), obsolete);
+        writeFile(store.primaryPath().string() + ".tmp", obsolete);
+        const sokoban::SaveStore::InspectionResult inspected = store.inspect();
+        CHECK_MESSAGE(inspected.disposition ==
+                sokoban::SaveStore::InspectionDisposition::Missing,
+            "an obsolete slot inspects as empty");
+        CHECK_MESSAGE(std::filesystem::exists(store.primaryPath()),
+            "inspection leaves obsolete files alone");
+
+        const sokoban::SaveStore::LoadResult loaded = store.load();
+        CHECK_MESSAGE(loaded.disposition ==
+                sokoban::SaveStore::LoadDisposition::SetAsideObsolete,
+            "loading an obsolete profile starts fresh");
+        CHECK_MESSAGE(loaded.profile == sokoban::PlayerProfile {},
+            "a set-aside profile returns defaults");
+        CHECK_MESSAGE(loaded.message.find("older build") != std::string::npos,
+            "the status explains why progress is gone");
+        CHECK_MESSAGE(!std::filesystem::exists(store.primaryPath()) &&
+                !std::filesystem::exists(store.backupPath()) &&
+                !std::filesystem::exists(
+                    store.primaryPath().string() + ".tmp"),
+            "every obsolete artifact is moved out of the way");
+        CHECK_MESSAGE(obsoleteArchives(directory.path()) == 3,
+            "obsolete artifacts are renamed, not deleted");
+        CHECK_MESSAGE(!hasCorruptArchive(directory.path(), "profile.json.corrupt-"),
+            "obsolete files are not reported as corrupt");
+        CHECK_MESSAGE(store.save(loaded.profile),
+            "a fresh profile saves over the set-aside slot");
+        CHECK_MESSAGE(store.load().disposition ==
+                sokoban::SaveStore::LoadDisposition::Loaded,
+            "the new profile loads normally");
+    }
+    {
+        // A current backup still recovers when only the primary is old.
+        TemporaryDirectory directory;
+        sokoban::SaveStore store(directory.path());
+        sokoban::PlayerProfile backup;
+        backup.unlockedLevel = 2;
+        backup.normalize();
+        writeFile(store.primaryPath(), obsolete);
+        writeFile(store.backupPath(), backup.serialize());
+        const sokoban::SaveStore::LoadResult loaded = store.load();
+        CHECK_MESSAGE(loaded.disposition ==
+                sokoban::SaveStore::LoadDisposition::RecoveredBackup,
+            "a current backup is recovered over an obsolete primary");
+        CHECK_MESSAGE(loaded.profile == backup, "the backup's data is used");
+        CHECK_MESSAGE(obsoleteArchives(directory.path()) == 1,
+            "the obsolete primary is set aside");
+    }
+    {
+        // Saving without loading first must not back up an unreadable file.
+        TemporaryDirectory directory;
+        sokoban::SaveStore store(directory.path());
+        writeFile(store.primaryPath(), obsolete);
+        sokoban::PlayerProfile fresh;
+        fresh.unlockedLevel = 1;
+        fresh.normalize();
+        CHECK_MESSAGE(store.save(fresh), "saving over an obsolete primary works");
+        CHECK_MESSAGE(!std::filesystem::exists(store.backupPath()),
+            "the obsolete primary is not copied into the backup");
+        CHECK_MESSAGE(obsoleteArchives(directory.path()) == 1,
+            "the obsolete primary is set aside instead");
+        CHECK_MESSAGE(store.load().profile == fresh, "the saved profile loads");
+    }
 
     TemporaryDirectory corruptDirectory;
     sokoban::SaveStore corruptStore(corruptDirectory.path());
@@ -1346,57 +1036,13 @@ void testMigrationAndDoubleCorruption()
         "double corruption resets defaults");
     CHECK_MESSAGE(reset.profile == sokoban::PlayerProfile {}, "double corruption returns defaults");
     CHECK_MESSAGE(sokoban::decodePlayerProfile(
-        [&] {
-            std::ifstream stream(corruptStore.primaryPath(), std::ios::binary);
-            return std::string(
-                std::istreambuf_iterator<char>(stream),
-                std::istreambuf_iterator<char>());
-        }()).sourceFormat == sokoban::currentPlayerProfileFormat,
+        readFile(corruptStore.primaryPath())).profile ==
+            sokoban::PlayerProfile {},
         "double corruption writes valid replacement");
 }
 
-void testMigrationPersistenceFailuresPreserveDecodedProfiles()
+void testBackupRepairFailuresPreserveDecodedProfiles()
 {
-    constexpr std::string_view legacy = R"json({
-  "format": 1,
-  "unlockedLevel": 3,
-  "currentLevel": 2,
-  "completedLevels": [0],
-  "masterVolume": 0.5,
-  "musicVolume": 0.25,
-  "soundVolume": 0.75
-})json";
-    const sokoban::PlayerProfile expected =
-        sokoban::decodePlayerProfile(legacy).profile;
-
-    const auto checkMigrationFailure = [&](std::uint32_t writesBeforeFailure) {
-        TemporaryDirectory directory;
-        sokoban::SaveStore store(directory.path());
-        writeFile(store.primaryPath(), legacy);
-
-        sokoban::atomicFile::failWriteAfterForTesting(
-            writesBeforeFailure, std::errc::no_space_on_device);
-        const sokoban::SaveStore::LoadResult loaded = store.load();
-
-        CHECK_MESSAGE(loaded.disposition ==
-                sokoban::SaveStore::LoadDisposition::LoadedWithPersistenceError,
-            "migration write failure has a distinct load disposition");
-        CHECK_MESSAGE(loaded.profile == expected,
-            "migration write failure returns the decoded legacy profile");
-        CHECK_MESSAGE(readFile(store.primaryPath()) == legacy,
-            "migration write failure preserves the valid legacy primary");
-        CHECK_MESSAGE(!hasCorruptArchive(directory.path(), "profile.json.corrupt-"),
-            "migration write failure does not archive the valid primary");
-        CHECK_MESSAGE(loaded.message.starts_with(
-                  "Loaded legacy player profile, but migration could not be saved:"),
-            "migration write failure reports an accurate storage diagnostic");
-    };
-
-    // Migration first protects the old primary in the backup, then installs
-    // the current-format primary. Exercise failure at each write boundary.
-    checkMigrationFailure(0);
-    checkMigrationFailure(1);
-
     TemporaryDirectory backupDirectory;
     sokoban::SaveStore backupStore(backupDirectory.path());
     sokoban::PlayerProfile backup;
@@ -1667,170 +1313,61 @@ void testAsyncStoreMultipleChannels()
     // The single worker joined cleanly at destruction with all channels drained.
 }
 
-void testFormat18AddsEditorBindings()
+void testKeyboardChordsAndEditorBindingsRoundTrip()
 {
-    nlohmann::json format18 = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format18["format"] = 18;
-    format18["settings"]["input"].erase("editorReplaceTile");
-    format18["settings"]["input"].erase("editorDeleteTile");
-    format18["settings"]["input"].erase("editorMoveTile");
+    sokoban::PlayerProfile profile;
+    sokoban::InputBindings& input = profile.settings.input;
+    input.forAction(sokoban::InputAction::EditorSave) = {
+        sokoban::KeyboardBinding {
+            "S",
+            sokoban::keyModifierCtrl | sokoban::keyModifierAlt,
+        },
+    };
+    const std::string serialized = profile.serialize();
+    const nlohmann::json json = nlohmann::json::parse(serialized);
+    const nlohmann::json& save = json["settings"]["input"]["editorSave"][0];
+    CHECK_MESSAGE(save["control"] == "S" &&
+            save["modifiers"] == nlohmann::json::array({ "ctrl", "alt" }),
+        "a chord serializes its modifiers by name");
+    CHECK_MESSAGE(!json["settings"]["input"]["undo"][0].contains("modifiers"),
+        "a plain key has no modifiers property");
+    CHECK_MESSAGE(sokoban::decodePlayerProfile(serialized).profile == profile,
+        "chords round-trip");
+    for (std::size_t index = 0; index < sokoban::inputActionCount; ++index) {
+        const auto action = static_cast<sokoban::InputAction>(index);
+        CHECK_MESSAGE(json["settings"]["input"].contains(
+                          std::string(sokoban::inputActionName(action))),
+            "every action, editor shortcuts included, is persisted");
+    }
 
-    const sokoban::DecodedPlayerProfile migrated =
-        sokoban::decodePlayerProfile(format18.dump());
-    CHECK_MESSAGE(migrated.sourceFormat == 18, "format 18 source is reported");
-    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
-              migrated.profile.settings.input,
-              sokoban::InputAction::EditorReplaceTile) == "R",
-        "format 18 receives the editor replace default");
-    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
-              migrated.profile.settings.input,
-              sokoban::InputAction::EditorDeleteTile) == "D",
-        "format 18 receives the editor delete default");
-    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
-              migrated.profile.settings.input,
-              sokoban::InputAction::EditorMoveTile) == "M",
-        "format 18 receives the editor move default");
-}
+    nlohmann::json invalid = json;
+    invalid["settings"]["input"]["editorSave"][0]["modifiers"] =
+        nlohmann::json::array({ "hyper" });
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(invalid.dump());
+    }, "unknown modifiers are rejected");
+    invalid["settings"]["input"]["editorSave"][0]["modifiers"] =
+        nlohmann::json::array({ "ctrl", "ctrl" });
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(invalid.dump());
+    }, "repeated modifiers are rejected");
+    invalid["settings"]["input"]["editorSave"][0]["modifiers"] =
+        nlohmann::json::array();
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(invalid.dump());
+    }, "an empty modifier list is rejected");
 
-void testFormat20AddsScreenPreviewBinding()
-{
-    nlohmann::json format20 = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format20["format"] = 20;
-    format20["settings"]["input"].erase("previewScreen");
-
-    const sokoban::DecodedPlayerProfile migrated =
-        sokoban::decodePlayerProfile(format20.dump());
-    CHECK_MESSAGE(migrated.sourceFormat == 20, "format 20 source is reported");
-    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
-              migrated.profile.settings.input,
-              sokoban::InputAction::PreviewScreen) ==
-            "V / Pad rightshoulder",
-        "format 20 receives the screen preview defaults");
-}
-
-void testFormat21ConsolidatesInteractBinding()
-{
-    nlohmann::json format21 = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format21["format"] = 21;
-    format21["settings"]["input"]["mirror"] = nlohmann::json::array({
-        nlohmann::json { { "type", "keyboard" }, { "control", "F" } },
-        nlohmann::json { { "type", "gamepadButton" }, { "control", "east" } },
-    });
-    format21["settings"]["input"]["menuConfirm"] = nlohmann::json::array({
-        nlohmann::json { { "type", "keyboard" }, { "control", "Return" } },
-        nlohmann::json { { "type", "keyboard" }, { "control", "Space" } },
-        nlohmann::json { { "type", "gamepadButton" }, { "control", "south" } },
-    });
-
-    const sokoban::DecodedPlayerProfile migrated =
-        sokoban::decodePlayerProfile(format21.dump());
-    CHECK_MESSAGE(migrated.sourceFormat == 21, "format 21 source is reported");
-    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
-              migrated.profile.settings.input,
-              sokoban::InputAction::MenuConfirm) ==
-            "Space / Pad south",
-        "format 21 receives the consolidated interact default");
-    const nlohmann::json current = nlohmann::json::parse(
-        migrated.profile.serialize());
-    CHECK_MESSAGE(!current["settings"]["input"].contains("mirror"),
-        "format 21 mirror binding is retired");
-
-    format21["settings"]["input"]["mirror"] = nlohmann::json::array({
-        nlohmann::json { { "type", "keyboard" }, { "control", "G" } },
-        nlohmann::json { { "type", "gamepadButton" }, { "control", "east" } },
-    });
-    const sokoban::DecodedPlayerProfile migratedMirrorCustom =
-        sokoban::decodePlayerProfile(format21.dump());
-    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
-              migratedMirrorCustom.profile.settings.input,
-              sokoban::InputAction::MenuConfirm) ==
-            "G / Pad south",
-        "format 21 carries a customized mirror key into interact");
-
-    format21["settings"]["input"]["menuConfirm"] = nlohmann::json::array({
-        nlohmann::json { { "type", "keyboard" }, { "control", "G" } },
-        nlohmann::json { { "type", "gamepadButton" }, { "control", "south" } },
-    });
-    const sokoban::DecodedPlayerProfile migratedCustom =
-        sokoban::decodePlayerProfile(format21.dump());
-    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
-              migratedCustom.profile.settings.input,
-              sokoban::InputAction::MenuConfirm) ==
-            "G / Pad south",
-        "format 21 preserves a customized interact binding");
-}
-
-void testFormat22UpdatesOverworldViewBinding()
-{
-    nlohmann::json format22 = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format22["format"] = 22;
-    format22["settings"]["input"]["showTopDownView"] =
-        nlohmann::json::array({
-            nlohmann::json {
-                { "type", "keyboard" }, { "control", "T" } },
-        });
-
-    const sokoban::DecodedPlayerProfile migrated =
-        sokoban::decodePlayerProfile(format22.dump());
-    CHECK_MESSAGE(migrated.sourceFormat == 22, "format 22 source is reported");
-    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
-              migrated.profile.settings.input,
-              sokoban::InputAction::ShowTopDownView) ==
-            "T",
-        "format 22 receives the current-screen top-down default");
-    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
-              migrated.profile.settings.input,
-              sokoban::InputAction::ShowOverworldMap) ==
-            "Tab / Pad lefttrigger+",
-        "format 22 receives TAB and left-trigger overworld defaults");
-
-    format22["settings"]["input"]["showTopDownView"] =
-        nlohmann::json::array({
-            nlohmann::json {
-                { "type", "keyboard" }, { "control", "Q" } },
-        });
-    const sokoban::DecodedPlayerProfile custom =
-        sokoban::decodePlayerProfile(format22.dump());
-    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
-              custom.profile.settings.input,
-              sokoban::InputAction::ShowTopDownView) == "Q",
-        "format 22 preserves a customized overview binding");
-    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
-              custom.profile.settings.input,
-              sokoban::InputAction::ShowOverworldMap) ==
-            "Tab / Pad lefttrigger+",
-        "format 22 custom top-down binding still receives overworld map defaults");
-
-    nlohmann::json format23 = nlohmann::json::parse(
-        sokoban::PlayerProfile {}.serialize());
-    format23["format"] = 23;
-    format23["settings"]["input"].erase("showOverworldMap");
-    format23["settings"]["input"]["showTopDownView"] =
-        nlohmann::json::array({
-            nlohmann::json {
-                { "type", "keyboard" }, { "control", "Tab" } },
-            nlohmann::json {
-                { "type", "gamepadAxis" },
-                { "control", "lefttrigger" },
-                { "direction", "positive" },
-                { "threshold", 0.5f },
-            },
-        });
-    const sokoban::DecodedPlayerProfile split =
-        sokoban::decodePlayerProfile(format23.dump());
-    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
-              split.profile.settings.input,
-              sokoban::InputAction::ShowTopDownView) == "T",
-        "format 23 combined binding migrates back to T for current screen");
-    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
-              split.profile.settings.input,
-              sokoban::InputAction::ShowOverworldMap) ==
-            "Tab / Pad lefttrigger+",
-        "format 23 combined binding migrates to the whole-map action");
+    invalid = json;
+    invalid["settings"]["input"].erase("editorRecentTile9");
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(invalid.dump());
+    }, "a missing editor action is rejected");
+    invalid = json;
+    invalid["settings"]["input"]["retiredAction"] =
+        invalid["settings"]["input"]["undo"];
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(invalid.dump());
+    }, "an unknown action is rejected");
 }
 
 sokoban::PlayerProfile longHistoryProfile()
@@ -1990,19 +1527,16 @@ int main(int argc, char** argv)
         testReachedScreensAndProgressReset();
         testSectionedSerialization();
         testActiveScreenCheckpointRoundTrip();
-        testNormalizationAndMigration();
-        testScreenProgressOverworldCheckpointAndFormat17Migration();
-        testFormat18AddsEditorBindings();
-        testFormat20AddsScreenPreviewBinding();
-        testFormat21ConsolidatesInteractBinding();
-        testFormat22UpdatesOverworldViewBinding();
+        testNormalizationAndValidation();
+        testScreenProgressAndOverworldCheckpoint();
+        testKeyboardChordsAndEditorBindingsRoundTrip();
         testStoreBackupsAndRecovery();
         testInterruptedWriteRecovery();
         testUsableProfilesSurviveMaintenanceFailures();
         testStorageFailuresPreserveCommittedProfile();
         testSaveSlotStems();
-        testMigrationAndDoubleCorruption();
-        testMigrationPersistenceFailuresPreserveDecodedProfiles();
+        testObsoleteProfilesAreSetAsideAndDoubleCorruption();
+        testBackupRepairFailuresPreserveDecodedProfiles();
         testUnsupportedProfileFormatsArePreserved();
         testAsyncSaveCoalescingAndFlush();
         testAsyncSaveDestructorFlushesNewestProfile();

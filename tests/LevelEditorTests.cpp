@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1457,6 +1458,275 @@ void testOverworldPlayerTileMovesAcrossComponents()
 
 } // namespace
 
+void testStrokeIsOneUndoStepAndRedoReplaysIt()
+{
+    TEST("strokeIsOneUndoStepAndRedoReplaysIt");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(6, 3, false);
+    const char wall = tileTypeToChar(TileType::Wall);
+    const char air = tileTypeToChar(TileType::Air);
+
+    editor.setSelectedTile(TileType::Wall);
+    CHECK(!editor.canRedo());
+    CHECK(editor.beginStroke());
+    CHECK(!editor.beginStroke());
+    CHECK(editor.strokeActive());
+    for (int x = 1; x < 5; ++x) {
+        CHECK(editor.setCell({ x, 1, 1 }, TileType::Wall));
+    }
+    // Repainting a cell the stroke already covers changes nothing.
+    CHECK(!editor.paintCell({ 2, 1, 1 }));
+    CHECK(editor.canUndo());
+    CHECK(editor.endStroke());
+    CHECK(!editor.strokeActive());
+    CHECK(editor.status().find("4 cells") != std::string::npos);
+
+    CHECK(editor.tryUndoEdit());
+    for (int x = 1; x < 5; ++x) {
+        CHECK(editor.documentLayers()[1][1][static_cast<std::size_t>(x)] ==
+            air);
+    }
+    CHECK(editor.canRedo());
+    CHECK(editor.tryRedoEdit());
+    for (int x = 1; x < 5; ++x) {
+        CHECK(editor.documentLayers()[1][1][static_cast<std::size_t>(x)] ==
+            wall);
+    }
+    CHECK(!editor.tryRedoEdit());
+
+    // An empty stroke records nothing.
+    CHECK(editor.beginStroke());
+    CHECK(!editor.endStroke());
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[1][1][1] == air);
+
+    // Undo during an open stroke closes it first, then undoes all of it.
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.beginStroke());
+    CHECK(editor.eraseCell({ 1, 1, 1 }));
+    CHECK(editor.eraseCell({ 2, 1, 1 }));
+    CHECK(editor.tryUndoEdit());
+    CHECK(!editor.strokeActive());
+    CHECK(editor.documentLayers()[1][1][1] == wall);
+    CHECK(editor.documentLayers()[1][1][2] == wall);
+
+    // A new edit abandons the redo branch.
+    CHECK(editor.canRedo());
+    CHECK(editor.setCell({ 5, 2, 1 }, TileType::Wall));
+    CHECK(!editor.canRedo());
+    CHECK(!editor.tryRedoEdit());
+}
+
+void testRedoSurvivesDraftSwitchingAndFailedMoves()
+{
+    TEST("redoSurvivesDraftSwitchingAndFailedMoves");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    const std::filesystem::path first =
+        project.source / "level0" / "screen0.scr";
+    const std::filesystem::path second =
+        project.source / "level0" / "screen1.scr";
+    editor.newDocument(5, 4, false);
+    CHECK(editor.saveDocument(first));
+    editor.newDocument(5, 4, false);
+    CHECK(editor.saveDocument(second));
+
+    CHECK(editor.openDocument(first));
+    CHECK(editor.setCell({ 1, 1, 0 }, TileType::Ladder));
+    editor.setCell({ 2, 2, 1 }, TileType::Wall);
+    editor.setCell({ 3, 2, 1 }, TileType::Wall);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.canRedo());
+
+    CHECK(editor.openDocument(second));
+    CHECK(!editor.canRedo());
+    CHECK(editor.openDocument(first));
+    CHECK(editor.canRedo());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers()[1][2][3] ==
+        tileTypeToChar(TileType::Wall));
+
+    // A move whose placement fails (a ladder needs ground beside it) is
+    // rolled back without touching undo or redo.
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.beginMove({ 1, 1, 0 }));
+    CHECK(!editor.moveObject({ 4, 3, 1 }));
+    CHECK(editor.documentLayers()[0][1][1] ==
+        tileTypeToChar(TileType::Ladder));
+    CHECK(editor.canRedo());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers()[1][2][3] ==
+        tileTypeToChar(TileType::Wall));
+}
+
+void testRedoFollowsScreenRenumbering()
+{
+    TEST("redoFollowsScreenRenumbering");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+
+    editor.setRequestedSize(5, 4);
+    editor.addLevelAt(0);
+    std::vector<LevelEditor::LevelDirectory> levels =
+        editor.collectLevelDirectories();
+    editor.addScreenAt(levels[0], 1);
+    levels = editor.collectLevelDirectories();
+    const std::filesystem::path originalFirst = levels[0].screens[0].path;
+    const std::filesystem::path originalSecond = levels[0].screens[1].path;
+
+    CHECK(editor.openDocument(originalSecond));
+    editor.setCell({ 1, 1, 1 }, TileType::Wall);
+    editor.setCell({ 2, 1, 1 }, TileType::Wall);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.openDocument(originalFirst));
+
+    editor.addScreenAt(levels[0], 0);
+    levels = editor.collectLevelDirectories();
+    const std::filesystem::path shiftedSecond = levels[0].screens[2].path;
+    CHECK(editor.openDocument(shiftedSecond));
+    CHECK(editor.canRedo());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers()[1][1][2] ==
+        tileTypeToChar(TileType::Wall));
+    CHECK(editor.loadedDocumentPath() == shiftedSecond);
+    // The redone snapshot carries the remapped identity too.
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.loadedDocumentPath() == shiftedSecond);
+}
+
+void testEyedropperRecentTilesAndToolCycling()
+{
+    TEST("eyedropperRecentTilesAndToolCycling");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(4, 3, false);
+
+    editor.setSelectedTile(TileType::Wall);
+    editor.setSelectedTile(TileType::Rock);
+    editor.setSelectedTile(TileType::Wall);
+    CHECK((editor.recentTiles() ==
+        std::vector<TileType> { TileType::Rock, TileType::Wall }));
+    CHECK(editor.selectRecentTile(1));
+    CHECK(editor.selectedTile() == TileType::Wall);
+    CHECK(!editor.selectRecentTile(2));
+
+    // Eyedropper reads the top of the picked column.
+    editor.setSelectedTile(TileType::Decorative);
+    CHECK(editor.paintCell({ 2, 1, 1 }));
+    editor.setSelectedTile(TileType::Ice);
+    const std::optional<TileType> picked = editor.pickTile({ 2, 1, 0 });
+    CHECK(picked == TileType::Decorative);
+    CHECK(editor.selectedTile() == TileType::Decorative);
+    CHECK(editor.pickTile({ 1, 1, 0 }) == TileType::Ground);
+
+    editor.setLayerLocked(true);
+    editor.setActiveLayer(1);
+    CHECK(!editor.pickTile({ 1, 1, 0 }).has_value());
+    CHECK(editor.selectedTile() == TileType::Ground);
+
+    for (int index = 0; index < 20; ++index) {
+        editor.setSelectedTile(
+            index % 2 == 0 ? TileType::Wall : TileType::Rock);
+    }
+    CHECK(editor.recentTiles().size() <= LevelEditor::recentTileCapacity);
+
+    editor.setTool(LevelEditor::Tool::Tiles);
+    editor.cycleTool();
+    CHECK(editor.tool() == LevelEditor::Tool::Decorations);
+    // Selectors only exist on overworld screens.
+    editor.cycleTool();
+    CHECK(editor.tool() == LevelEditor::Tool::Tiles);
+}
+
+void testPlayFromCursorMovesTheFirstHeroWithoutEditing()
+{
+    TEST("playFromCursorMovesTheFirstHeroWithoutEditing");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(5, 4, false);
+    const Level::LayerRows before = editor.documentLayers();
+
+    const std::optional<Level> level =
+        editor.beginDraftPlayback(nullptr, GridPosition3 { 3, 2, 0 });
+    CHECK(level.has_value());
+    if (level) {
+        CHECK((level->playerStart() == GridPosition3 { 3, 2, 1 }));
+        CHECK(level->playerStarts().size() == 1);
+    }
+    CHECK(editor.playingDraft());
+    CHECK(editor.documentLayers() == before);
+    editor.setPlayingDraft(false);
+
+    // Pointing at the hero's own column keeps it on the same layer.
+    const std::optional<Level> same =
+        editor.beginDraftPlayback(nullptr, GridPosition3 { 0, 0, 1 });
+    CHECK(same.has_value());
+    if (same) {
+        CHECK((same->playerStart() == GridPosition3 { 0, 0, 1 }));
+    }
+    editor.setPlayingDraft(false);
+
+    // Stacked on a wall, the hero starts on top of it.
+    editor.setCell({ 4, 3, 1 }, TileType::Wall);
+    const std::optional<Level> onWall =
+        editor.beginDraftPlayback(nullptr, GridPosition3 { 4, 3, 1 });
+    CHECK(onWall.has_value());
+    if (onWall) {
+        CHECK((onWall->playerStart() == GridPosition3 { 4, 3, 2 }));
+    }
+    editor.setPlayingDraft(false);
+
+    CHECK(!editor.beginDraftPlayback(nullptr, GridPosition3 { 9, 9, 0 }));
+    CHECK(editor.status().find("board") != std::string::npos);
+    CHECK(!editor.playingDraft());
+    const std::optional<Level> plain = editor.beginDraftPlayback();
+    CHECK(plain.has_value());
+    if (plain) {
+        CHECK((plain->playerStart() == GridPosition3 { 0, 0, 1 }));
+    }
+}
+
+void testSaveShortcutAndLayerStepping()
+{
+    TEST("saveShortcutAndLayerStepping");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(4, 3, false);
+    CHECK(!editor.saveLoadedDocument());
+    CHECK(editor.status().find("never been saved") != std::string::npos);
+
+    const std::filesystem::path path =
+        project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(path));
+    CHECK(editor.beginStroke());
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::Wall));
+    CHECK(editor.dirty());
+    // Saving closes the open stroke so it still undoes as one step.
+    CHECK(editor.saveLoadedDocument());
+    CHECK(!editor.strokeActive());
+    CHECK(!editor.dirty());
+    CHECK(readFile(path).find(tileTypeToChar(TileType::Wall)) !=
+        std::string::npos);
+    CHECK(editor.canUndo());
+
+    editor.setActiveLayer(0);
+    editor.stepActiveLayer(1);
+    CHECK(editor.activeLayer() == 1);
+    CHECK(editor.status().find("Active layer 2 of 2") != std::string::npos);
+    editor.stepActiveLayer(1);
+    CHECK(editor.activeLayer() == 1);
+    editor.stepActiveLayer(-5);
+    CHECK(editor.activeLayer() == 0);
+
+    editor.toggleLayerLock();
+    CHECK(editor.layerLocked());
+    CHECK(editor.status().find("layer 1") != std::string::npos);
+    editor.toggleLayerLock();
+    CHECK(!editor.layerLocked());
+}
+
 int main()
 {
     testDocumentCommandsAndUndo();
@@ -1488,6 +1758,12 @@ int main()
     testComposedOverworldDocumentsArePathAwareAndTransactional();
     testComposedSelectorOwnershipIsEnforcedBeforeSave();
     testOverworldPlayerTileMovesAcrossComponents();
+    testStrokeIsOneUndoStepAndRedoReplaysIt();
+    testRedoSurvivesDraftSwitchingAndFailedMoves();
+    testRedoFollowsScreenRenumbering();
+    testEyedropperRecentTilesAndToolCycling();
+    testPlayFromCursorMovesTheFirstHeroWithoutEditing();
+    testSaveShortcutAndLayerStepping();
 
     if (failures == 0) {
         std::cout << "LevelEditorTests: " << checks << " checks passed\n";

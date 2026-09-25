@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -25,16 +26,62 @@ enum class InputAction {
     EditorMoveTile,
     PreviewScreen,
     CycleHero,
+    // Level editor shortcuts (Debug developer builds). Held modifiers first,
+    // then commands.
+    EditorPickTile,
+    EditorStraightLine,
+    EditorRedo,
+    EditorSave,
+    EditorPlayDraft,
+    EditorPlayFromCursor,
+    EditorLayerUp,
+    EditorLayerDown,
+    EditorToggleLayerLock,
+    EditorCycleTool,
+    EditorGizmoTranslate,
+    EditorGizmoRotate,
+    EditorGizmoScale,
+    EditorRecentTile1,
+    EditorRecentTile2,
+    EditorRecentTile3,
+    EditorRecentTile4,
+    EditorRecentTile5,
+    EditorRecentTile6,
+    EditorRecentTile7,
+    EditorRecentTile8,
+    EditorRecentTile9,
     Count,
 };
+
+inline constexpr int editorRecentTileActionCount = 9;
+[[nodiscard]] constexpr InputAction editorRecentTileAction(int slot)
+{
+    return static_cast<InputAction>(
+        static_cast<int>(InputAction::EditorRecentTile1) + slot);
+}
 
 enum class AxisDirection {
     Negative,
     Positive,
 };
 
+// Modifier keys a keyboard chord requires. Left and right keys are
+// equivalent.
+enum KeyModifier : std::uint8_t {
+    keyModifierNone = 0,
+    keyModifierCtrl = 1U << 0U,
+    keyModifierShift = 1U << 1U,
+    keyModifierAlt = 1U << 2U,
+    keyModifierAll = keyModifierCtrl | keyModifierShift | keyModifierAlt,
+};
+
 struct KeyboardBinding {
+    // SDL scancode name, such as "S" or "Left Alt".
     std::string scancode;
+    // KeyModifier bits that must be held. When several bindings on the same
+    // key are satisfied, only the one requiring the most modifiers fires, so
+    // Ctrl+S does not also press S and Shift+F5 does not also press F5.
+    std::uint8_t modifiers = keyModifierNone;
 
     bool operator==(const KeyboardBinding&) const = default;
 };
@@ -79,7 +126,8 @@ enum class BindingDeviceClass {
 
 [[nodiscard]] InputBindings defaultInputBindings();
 [[nodiscard]] BindingDeviceClass bindingDeviceClass(const InputBinding& binding);
-// Short human-readable label, e.g. "W", "Pad dpup", or "Pad lefty-".
+// Short human-readable label, e.g. "W", "Ctrl+S", "Pad dpup", or
+// "Pad lefty-".
 [[nodiscard]] std::string bindingDisplayName(const InputBinding& binding);
 // One display string for every binding of an action, joined with " / ";
 // "Unbound" when empty.
@@ -103,6 +151,18 @@ void assignBinding(
     InputBindings& bindings,
     InputAction action,
     const InputBinding& candidate);
+// Which actions may share a binding: gameplay and menu actions never run
+// while a document is being edited, and editor actions only run then. Undo,
+// Back, and Play/Stop Draft are live in both.
+enum class InputActionContext {
+    Gameplay,
+    Editor,
+    Global,
+};
+[[nodiscard]] InputActionContext inputActionContext(InputAction action);
+// "Ctrl+Shift+" style prefix for a modifier mask; empty for none.
+[[nodiscard]] std::string keyModifierPrefix(std::uint8_t modifiers);
+[[nodiscard]] std::string_view keyModifierName(KeyModifier modifier);
 [[nodiscard]] std::string_view inputActionName(InputAction action);
 [[nodiscard]] InputAction inputActionFromName(std::string_view name);
 [[nodiscard]] std::string_view axisDirectionName(AxisDirection direction);

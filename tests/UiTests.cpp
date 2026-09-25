@@ -869,9 +869,12 @@ void testDebugEditorControlBindings()
     CHECK(state.page == sokoban::OptionsMenuPage::EditorControls);
     const std::vector<sokoban::OptionsMenuRow> editorRows =
         sokoban::optionsMenuRows(state, settings);
-    CHECK(editorRows.size() == 4);
+    // Section tabs, the thirteen editing bindings, then Back.
+    CHECK(editorRows.size() == 15);
     CHECK(editorRows.front().id ==
-        sokoban::OptionsMenuRowId::EditorReplaceTile);
+        sokoban::OptionsMenuRowId::EditorControlsSection);
+    CHECK(editorRows[1].id == sokoban::OptionsMenuRowId::EditorReplaceTile);
+    CHECK(editorRows.back().id == sokoban::OptionsMenuRowId::Back);
 
     reduction = sokoban::reduceOptionsMenu(
         state,
@@ -880,6 +883,53 @@ void testDebugEditorControlBindings()
             sokoban::OptionsMenuRowId::EditorMoveTile });
     CHECK(reduction.state.capturingAction ==
         sokoban::InputAction::EditorMoveTile);
+
+    // A captured chord is stored with its modifiers.
+    reduction = sokoban::reduceOptionsMenu(
+        reduction.state,
+        settings,
+        sokoban::options::intent::ProvideBinding {
+            sokoban::KeyboardBinding { "M", sokoban::keyModifierAlt } });
+    CHECK(!reduction.state.capturingAction);
+    CHECK(reduction.action.has_value());
+    if (reduction.action) {
+        const auto& changed =
+            std::get<sokoban::options::SettingsChanged>(*reduction.action);
+        CHECK(sokoban::actionBindingsDisplay(
+                  changed.settings.input,
+                  sokoban::InputAction::EditorMoveTile) == "Alt+M");
+    }
+
+    // Every editor action is reachable from exactly one section.
+    int editorBindingRows = 0;
+    for (const sokoban::EditorControlsSection section : {
+             sokoban::EditorControlsSection::Editing,
+             sokoban::EditorControlsSection::Playtest,
+             sokoban::EditorControlsSection::RecentTiles,
+         }) {
+        reduction = sokoban::reduceOptionsMenu(
+            state,
+            settings,
+            sokoban::options::intent::SelectChoice {
+                sokoban::OptionsMenuRowId::EditorControlsSection,
+                static_cast<int>(section) });
+        CHECK(reduction.state.editorControlsSection == section);
+        for (const sokoban::OptionsMenuRow& row :
+             sokoban::optionsMenuRows(reduction.state, settings)) {
+            editorBindingRows +=
+                row.kind == sokoban::OptionsMenuRowKind::Binding ? 1 : 0;
+        }
+    }
+    int editorActions = 0;
+    for (std::size_t index = 0; index < sokoban::inputActionCount; ++index) {
+        editorActions += sokoban::inputActionContext(
+                             static_cast<sokoban::InputAction>(index)) ==
+                sokoban::InputActionContext::Editor
+            ? 1
+            : 0;
+    }
+    // Play/Stop Draft is global rather than editor-only but lives here too.
+    CHECK(editorBindingRows == editorActions + 1);
 }
 #endif
 

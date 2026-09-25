@@ -2,7 +2,11 @@
 
 #include "engine/EditorInteraction.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
+#include <utility>
 #include <iostream>
 
 namespace {
@@ -116,6 +120,46 @@ void testSelectorLabelsUseStableIdsAndWorldAnchors()
     CHECK(near(labels[0].anchor.y, 45.0f));
 }
 
+void testGridLineIsContinuousAndInclusive()
+{
+    using sokoban::EditorInteraction;
+    using sokoban::GridPosition;
+    const auto single = EditorInteraction::gridLine({ 3, 4 }, { 3, 4 });
+    CHECK(single.size() == 1);
+
+    const auto horizontal = EditorInteraction::gridLine({ 5, 1 }, { 1, 1 });
+    CHECK(horizontal.size() == 5);
+    CHECK((horizontal.front() == GridPosition { 5, 1 }));
+    CHECK((horizontal.back() == GridPosition { 1, 1 }));
+
+    for (const auto& [from, to] : std::array {
+             std::pair { GridPosition { 0, 0 }, GridPosition { 7, 3 } },
+             std::pair { GridPosition { 2, 9 }, GridPosition { -3, 0 } },
+             std::pair { GridPosition { 0, 0 }, GridPosition { 4, -4 } },
+         }) {
+        const auto line = EditorInteraction::gridLine(from, to);
+        CHECK((line.front() == from));
+        CHECK((line.back() == to));
+        CHECK(line.size() ==
+            static_cast<std::size_t>(std::max(
+                std::abs(to.x - from.x), std::abs(to.y - from.y))) + 1U);
+        for (std::size_t index = 1; index < line.size(); ++index) {
+            CHECK(std::abs(line[index].x - line[index - 1].x) <= 1);
+            CHECK(std::abs(line[index].y - line[index - 1].y) <= 1);
+        }
+    }
+}
+
+void testAxisConstraint()
+{
+    using sokoban::EditorInteraction;
+    using sokoban::GridPosition;
+    CHECK((EditorInteraction::constrainToAxis({ 2, 2 }, { 7, 4 }) ==
+        GridPosition { 7, 2 }));
+    CHECK((EditorInteraction::constrainToAxis({ 2, 2 }, { 1, -5 }) ==
+        GridPosition { 2, -5 }));
+}
+
 } // namespace
 
 int main()
@@ -125,6 +169,8 @@ int main()
     testGizmoTargetsConstantPixelLength();
     testPointerPixelScaling();
     testSelectorLabelsUseStableIdsAndWorldAnchors();
+    testGridLineIsContinuousAndInclusive();
+    testAxisConstraint();
 
     if (failures != 0) {
         std::cerr << "EditorInteractionTests: " << failures

@@ -53,9 +53,11 @@ public:
         SplatPainter& painter,
         const InputBindings& bindings,
         const Callbacks& callbacks);
+    // Refreshes the Path field after a save or load made outside this panel
+    // (the Ctrl+S shortcut).
+    void syncDocumentPath(const LevelEditor& editor);
 
 private:
-    void syncDocumentPath(const LevelEditor& editor);
     void drawGroundPaintTab(SplatPainter& painter, const Callbacks& callbacks);
     void drawTilePalette(LevelEditor& editor, const Callbacks& callbacks);
     // The two halves of the decoration palette: the mesh library, and the

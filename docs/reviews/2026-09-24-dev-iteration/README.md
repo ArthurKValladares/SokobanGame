@@ -48,6 +48,25 @@ Packet B was implemented on September 25, 2026, and verified on Linux.
   launch options, plus a Debug session file that resumes the active slot
   and the editor document on launch.
 
+Packet C was implemented on September 25, 2026, and verified on Linux.
+[The packet C evidence note](evidence/packet-c.md) has the details.
+
+- **DI-12:**
+  - A held-button drag paints, deletes or replaces every cell it crosses,
+    once per board column. Shift keeps it to one row or column.
+  - Each drag is one undo record.
+  - Redo (`Y` or `Ctrl+Shift+Z`) survives draft switching and screen
+    renumbering.
+  - The optional rectangle mode was not built. Move stays click-twice.
+- **DI-13:**
+  - Shortcuts: `Ctrl+S` save, `F5` play and return without the modal,
+    `Shift+F5` play from the cursor, `Alt+click` eyedropper, `1`-`9`
+    recent tiles, `PageUp`/`PageDown` layer, `L` layer lock, `Tab` tool.
+  - All of them, plus the gizmo keys, are rebindable under Editor
+    Controls, including chords such as Ctrl+S. This needed a profile format
+    change, and older saves and settings are now set aside instead of
+    migrated (agreed for early development).
+
 ## Assessment
 
 The biggest cost is not compilation. **Every Debug build of `sokoban` spends about 29 seconds re-encoding every texture to BC7, even when nothing changed.** The local build tree shows 27.6 s of BC7 encoding on the last Debug build. A cloud reproduction shows a no-op build taking 25.2 s, all of it in `sokoban_content`. This one step turns a one-line shader or constant tweak into a half-minute wait before the game can even start.

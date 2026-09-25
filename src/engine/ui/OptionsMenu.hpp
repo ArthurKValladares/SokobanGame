@@ -58,10 +58,40 @@ enum class OptionsMenuRowId {
     EditorReplaceTile,
     EditorDeleteTile,
     EditorMoveTile,
+    EditorControlsSection,
+    EditorPickTile,
+    EditorStraightLine,
+    EditorRedo,
+    EditorSave,
+    EditorPlayDraft,
+    EditorPlayFromCursor,
+    EditorLayerUp,
+    EditorLayerDown,
+    EditorToggleLayerLock,
+    EditorCycleTool,
+    EditorGizmoTranslate,
+    EditorGizmoRotate,
+    EditorGizmoScale,
+    EditorRecentTile1,
+    EditorRecentTile2,
+    EditorRecentTile3,
+    EditorRecentTile4,
+    EditorRecentTile5,
+    EditorRecentTile6,
+    EditorRecentTile7,
+    EditorRecentTile8,
+    EditorRecentTile9,
     ResetBindings,
     Back,
     CancelQuit,
     ConfirmQuit,
+};
+
+// The Editor Controls page shows one group of editor bindings at a time.
+enum class EditorControlsSection {
+    Editing,
+    Playtest,
+    RecentTiles,
 };
 
 enum class OptionsMenuRowKind {
@@ -118,6 +148,8 @@ struct OptionsMenuState {
     int selectedRow = 0;
     BindingDeviceClass controlsBindingDevice =
         BindingDeviceClass::Keyboard;
+    EditorControlsSection editorControlsSection =
+        EditorControlsSection::Editing;
     std::optional<InputAction> capturingAction;
     std::optional<int> customRenderScalePreview;
 

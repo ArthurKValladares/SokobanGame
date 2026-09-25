@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <string>
 
 namespace sokoban {
 namespace {
@@ -15,27 +16,19 @@ std::size_t actionIndex(InputAction action)
     return index;
 }
 
-bool editorOnlyAction(InputAction action)
-{
-    return action == InputAction::EditorReplaceTile ||
-        action == InputAction::EditorDeleteTile ||
-        action == InputAction::EditorMoveTile;
-}
-
 bool actionsShareContext(InputAction left, InputAction right)
 {
     if (left == right) {
         return true;
     }
-    // Editor modifiers may intentionally reuse gameplay/menu controls because
-    // document editing and gameplay are mutually exclusive. Undo and Back are
-    // also active while editing, so they still conflict with both groups.
-    const bool globallyActive = [](InputAction action) {
-        return action == InputAction::Undo || action == InputAction::MenuBack;
-    }(left) || [](InputAction action) {
-        return action == InputAction::Undo || action == InputAction::MenuBack;
-    }(right);
-    return globallyActive || editorOnlyAction(left) == editorOnlyAction(right);
+    // Editor controls may intentionally reuse gameplay/menu controls because
+    // document editing and gameplay are mutually exclusive. Global actions
+    // are live in both, so they conflict with both groups.
+    const InputActionContext leftContext = inputActionContext(left);
+    const InputActionContext rightContext = inputActionContext(right);
+    return leftContext == InputActionContext::Global ||
+        rightContext == InputActionContext::Global ||
+        leftContext == rightContext;
 }
 
 } // namespace
@@ -57,10 +50,85 @@ BindingDeviceClass bindingDeviceClass(const InputBinding& binding)
         : BindingDeviceClass::Gamepad;
 }
 
+InputActionContext inputActionContext(InputAction action)
+{
+    switch (action) {
+    case InputAction::Undo:
+    case InputAction::MenuBack:
+    case InputAction::EditorPlayDraft:
+        return InputActionContext::Global;
+    case InputAction::EditorReplaceTile:
+    case InputAction::EditorDeleteTile:
+    case InputAction::EditorMoveTile:
+    case InputAction::EditorPickTile:
+    case InputAction::EditorStraightLine:
+    case InputAction::EditorRedo:
+    case InputAction::EditorSave:
+    case InputAction::EditorPlayFromCursor:
+    case InputAction::EditorLayerUp:
+    case InputAction::EditorLayerDown:
+    case InputAction::EditorToggleLayerLock:
+    case InputAction::EditorCycleTool:
+    case InputAction::EditorGizmoTranslate:
+    case InputAction::EditorGizmoRotate:
+    case InputAction::EditorGizmoScale:
+    case InputAction::EditorRecentTile1:
+    case InputAction::EditorRecentTile2:
+    case InputAction::EditorRecentTile3:
+    case InputAction::EditorRecentTile4:
+    case InputAction::EditorRecentTile5:
+    case InputAction::EditorRecentTile6:
+    case InputAction::EditorRecentTile7:
+    case InputAction::EditorRecentTile8:
+    case InputAction::EditorRecentTile9:
+        return InputActionContext::Editor;
+    case InputAction::MoveUp:
+    case InputAction::MoveDown:
+    case InputAction::MoveLeft:
+    case InputAction::MoveRight:
+    case InputAction::Restart:
+    case InputAction::ShowTopDownView:
+    case InputAction::ShowOverworldMap:
+    case InputAction::MenuConfirm:
+    case InputAction::PreviewScreen:
+    case InputAction::CycleHero:
+        return InputActionContext::Gameplay;
+    case InputAction::Count:
+        break;
+    }
+    throw std::invalid_argument("invalid input action");
+}
+
+std::string_view keyModifierName(KeyModifier modifier)
+{
+    switch (modifier) {
+    case keyModifierCtrl: return "ctrl";
+    case keyModifierShift: return "shift";
+    case keyModifierAlt: return "alt";
+    default: break;
+    }
+    throw std::invalid_argument("invalid key modifier");
+}
+
+std::string keyModifierPrefix(std::uint8_t modifiers)
+{
+    std::string prefix;
+    if ((modifiers & keyModifierCtrl) != 0U) {
+        prefix += "Ctrl+";
+    }
+    if ((modifiers & keyModifierShift) != 0U) {
+        prefix += "Shift+";
+    }
+    if ((modifiers & keyModifierAlt) != 0U) {
+        prefix += "Alt+";
+    }
+    return prefix;
+}
+
 std::string bindingDisplayName(const InputBinding& binding)
 {
     if (const KeyboardBinding* key = std::get_if<KeyboardBinding>(&binding)) {
-        return key->scancode;
+        return keyModifierPrefix(key->modifiers) + key->scancode;
     }
     if (const GamepadButtonBinding* button = std::get_if<GamepadButtonBinding>(&binding)) {
         return "Pad " + button->button;
@@ -195,6 +263,55 @@ InputBindings defaultInputBindings()
         KeyboardBinding { "Q" },
         GamepadButtonBinding { "leftshoulder" },
     };
+    bindings.forAction(InputAction::EditorPickTile) = {
+        KeyboardBinding { "Left Alt" },
+        KeyboardBinding { "Right Alt" },
+    };
+    bindings.forAction(InputAction::EditorStraightLine) = {
+        KeyboardBinding { "Left Shift" },
+        KeyboardBinding { "Right Shift" },
+    };
+    bindings.forAction(InputAction::EditorRedo) = {
+        KeyboardBinding { "Y" },
+        KeyboardBinding { "Z", keyModifierCtrl | keyModifierShift },
+    };
+    bindings.forAction(InputAction::EditorSave) = {
+        KeyboardBinding { "S", keyModifierCtrl },
+    };
+    bindings.forAction(InputAction::EditorPlayDraft) = {
+        KeyboardBinding { "F5" },
+    };
+    bindings.forAction(InputAction::EditorPlayFromCursor) = {
+        KeyboardBinding { "F5", keyModifierShift },
+    };
+    bindings.forAction(InputAction::EditorLayerUp) = {
+        KeyboardBinding { "PageUp" },
+    };
+    bindings.forAction(InputAction::EditorLayerDown) = {
+        KeyboardBinding { "PageDown" },
+    };
+    bindings.forAction(InputAction::EditorToggleLayerLock) = {
+        KeyboardBinding { "L" },
+    };
+    bindings.forAction(InputAction::EditorCycleTool) = {
+        KeyboardBinding { "Tab" },
+    };
+    // Rotate shares R with Replace Tile on purpose: the gizmo exists only in
+    // the Decorations tool and Replace only in the Tiles tool.
+    bindings.forAction(InputAction::EditorGizmoTranslate) = {
+        KeyboardBinding { "T" },
+    };
+    bindings.forAction(InputAction::EditorGizmoRotate) = {
+        KeyboardBinding { "R" },
+    };
+    bindings.forAction(InputAction::EditorGizmoScale) = {
+        KeyboardBinding { "S" },
+    };
+    for (int slot = 0; slot < editorRecentTileActionCount; ++slot) {
+        bindings.forAction(editorRecentTileAction(slot)) = {
+            KeyboardBinding { std::to_string(slot + 1) },
+        };
+    }
     return bindings;
 }
 
@@ -216,6 +333,28 @@ std::string_view inputActionName(InputAction action)
     case InputAction::EditorMoveTile: return "editorMoveTile";
     case InputAction::PreviewScreen: return "previewScreen";
     case InputAction::CycleHero: return "cycleHero";
+    case InputAction::EditorPickTile: return "editorPickTile";
+    case InputAction::EditorStraightLine: return "editorStraightLine";
+    case InputAction::EditorRedo: return "editorRedo";
+    case InputAction::EditorSave: return "editorSave";
+    case InputAction::EditorPlayDraft: return "editorPlayDraft";
+    case InputAction::EditorPlayFromCursor: return "editorPlayFromCursor";
+    case InputAction::EditorLayerUp: return "editorLayerUp";
+    case InputAction::EditorLayerDown: return "editorLayerDown";
+    case InputAction::EditorToggleLayerLock: return "editorToggleLayerLock";
+    case InputAction::EditorCycleTool: return "editorCycleTool";
+    case InputAction::EditorGizmoTranslate: return "editorGizmoTranslate";
+    case InputAction::EditorGizmoRotate: return "editorGizmoRotate";
+    case InputAction::EditorGizmoScale: return "editorGizmoScale";
+    case InputAction::EditorRecentTile1: return "editorRecentTile1";
+    case InputAction::EditorRecentTile2: return "editorRecentTile2";
+    case InputAction::EditorRecentTile3: return "editorRecentTile3";
+    case InputAction::EditorRecentTile4: return "editorRecentTile4";
+    case InputAction::EditorRecentTile5: return "editorRecentTile5";
+    case InputAction::EditorRecentTile6: return "editorRecentTile6";
+    case InputAction::EditorRecentTile7: return "editorRecentTile7";
+    case InputAction::EditorRecentTile8: return "editorRecentTile8";
+    case InputAction::EditorRecentTile9: return "editorRecentTile9";
     case InputAction::Count: break;
     }
     throw std::invalid_argument("invalid input action");

@@ -117,19 +117,9 @@ PlayerProfile SaveSlotManager::loadActiveProfile()
             "shared settings use an unsupported profile format: " +
             settings.message);
     }
-    if (settings.disposition == SaveStore::LoadDisposition::CreatedDefault) {
-        // Migrate a pre-split combined save's settings into the shared file;
-        // a genuinely fresh install writes nothing anywhere.
-        if (slot.disposition != SaveStore::LoadDisposition::CreatedDefault &&
-            slot.disposition != SaveStore::LoadDisposition::StorageUnavailable &&
-            slot.disposition != SaveStore::LoadDisposition::UnsupportedFormat) {
-            store_->requestSave(
-                kSettingsChannel, profile.settingsOnly(),
-                AsyncSaveStore::Urgency::Immediate);
-        }
-    } else {
-        profile.adoptSettingsFrom(settings.profile);
-    }
+    // Missing or set-aside settings leave the defaults in place; nothing is
+    // written until the player changes a setting.
+    profile.adoptSettingsFrom(settings.profile);
     return profile;
 }
 

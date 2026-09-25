@@ -14,7 +14,11 @@
 
 namespace sokoban {
 
-inline constexpr int currentPlayerProfileFormat = 32;
+// There are no migrations. The game is in early development, so a format
+// change makes older saves and settings obsolete: SaveStore sets those files
+// aside and the player starts fresh. Bump this whenever the document shape
+// or its meaning changes.
+inline constexpr int currentPlayerProfileFormat = 33;
 
 // Which top-level sections serialize() writes. Save-slot files carry only
 // progress and the shared settings file only settings; both sections are
@@ -141,7 +145,6 @@ struct PlayerProfile {
 
 struct DecodedPlayerProfile {
     PlayerProfile profile;
-    int sourceFormat = currentPlayerProfileFormat;
 };
 
 class InvalidPlayerProfileData final : public std::runtime_error {
@@ -159,10 +162,21 @@ private:
     int format_ = 0;
 };
 
-// Throws UnsupportedPlayerProfileFormat when the version is outside the
-// supported range, and InvalidPlayerProfileData for malformed or semantically
-// invalid data. Older formats migrate through forward JSON patches followed
-// by one strict current-format parse.
+// A document written by an older build. Its format is not migrated.
+class ObsoletePlayerProfileFormat final : public std::runtime_error {
+public:
+    explicit ObsoletePlayerProfileFormat(int format);
+
+    [[nodiscard]] int format() const noexcept { return format_; }
+
+private:
+    int format_ = 0;
+};
+
+// Strict current-format parse. Throws ObsoletePlayerProfileFormat for an
+// older format, UnsupportedPlayerProfileFormat for a newer (or nonsensical)
+// one, and InvalidPlayerProfileData for malformed or semantically invalid
+// data.
 [[nodiscard]] DecodedPlayerProfile decodePlayerProfile(std::string_view text);
 
 } // namespace sokoban
