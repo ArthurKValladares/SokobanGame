@@ -243,7 +243,7 @@ void main()
             0.0);
         float density = max(pc.mediumColorAndDensity.w, 0.0) * exp(
             -max(pc.heightAndDistance.x, 0.0) * altitude);
-        float scatteringVariation = 1.0;
+        float colorValueVariation = 1.0;
         if (boundedVolume) {
             // Sample slowly advected 3D noise in world space. The camera can
             // move independently without the pattern swimming across the
@@ -256,12 +256,22 @@ void main()
             float signedNoise = fogNoise * 2.0 - 1.0;
             float noiseStrength = clamp(pc.volumeAnimation.w, 0.0, 0.8);
             density *= max(1.0 + signedNoise * noiseStrength, 0.2);
-            // A fully opaque medium converges on a uniform scattering color
-            // even when its density varies. Slightly varying local particle
-            // albedo with the same field keeps the 3D structure perceptible
-            // without making thin spots that reveal the hidden screen.
-            scatteringVariation = max(
-                1.0 + signedNoise * noiseStrength * 0.65, 0.5);
+
+            // An independent field changes value only: every RGB component
+            // receives the same multiplier, preserving the fog hue while
+            // producing a wider range of light and dark greys. Its distinct
+            // scale, offset, and motion keep it from tracing density billows.
+            float colorNoiseScale = max(pc.volumeMaximum.w, 0.0001);
+            vec3 colorNoisePosition = samplePosition * colorNoiseScale +
+                pc.ambientRadiance.w * vec3(-0.21, 0.29, -0.13) +
+                vec3(37.1, -19.7, 8.3);
+            float colorNoise = smoothstep(
+                0.3, 0.7, fogFractalNoise(colorNoisePosition));
+            float colorNoiseStrength = clamp(pc.shadowOptions.w, 0.0, 0.75);
+            colorValueVariation = mix(
+                1.0 - colorNoiseStrength,
+                1.0 + colorNoiseStrength,
+                colorNoise);
 
             // volumeMinimum/Maximum include a horizontal feather beyond the
             // authored screen. Distance is zero throughout the screen itself,
@@ -296,7 +306,7 @@ void main()
         vec3 illumination = pc.ambientRadiance.rgb + directRadiance;
         vec3 scatteredRadiance = pc.mediumColorAndDensity.rgb *
             illumination * pc.sunRadianceAndStrength.w *
-            scatteringVariation;
+            colorValueVariation;
         inScattering += transmittance * scatteredFraction *
             scatteredRadiance;
         transmittance *= stepTransmittance;

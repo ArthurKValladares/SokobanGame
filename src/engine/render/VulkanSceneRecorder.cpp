@@ -1266,7 +1266,7 @@ private:
                     volume->maximum.x,
                     volume->maximum.y,
                     volume->maximum.z,
-                    0.0f,
+                    config::fogOfWarColorNoiseScale,
                 };
                 pushConstants.passData[2] = {
                     volume->revealOrigin.x,
@@ -1312,7 +1312,9 @@ private:
                 lighting.shadows.enabled ? 1.0f : 0.0f,
                 std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
                 std::max(lighting.shadows.bias, 0.0f),
-                0.0f,
+                volume != nullptr
+                    ? config::fogOfWarColorNoiseStrength
+                    : 0.0f,
             };
             pushConstants.materialOptions = {
                 std::max(
@@ -1321,7 +1323,10 @@ private:
                     lighting.ambient.color.y * lighting.ambient.intensity, 0.0f),
                 std::max(
                     lighting.ambient.color.z * lighting.ambient.intensity, 0.0f),
-                0.0f,
+                volume != nullptr
+                    ? frameData.effectAnimationTimeSeconds *
+                        config::fogOfWarColorNoiseSpeed
+                    : 0.0f,
             };
 
             vkCmdBeginRendering(commandBuffer, &renderingInfo);

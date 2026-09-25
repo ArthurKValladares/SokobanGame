@@ -22,6 +22,13 @@ inline constexpr float fogOfWarNoiseScale = 0.28f;
 inline constexpr float fogOfWarNoiseStrength = 0.58f;
 inline constexpr float fogOfWarNoiseSpeed = 0.12f;
 
+// A second, independent field varies only the value of the scattered fog
+// color. It uses a broader scale and slower motion so light and dark grey
+// masses do not simply trace the density billows.
+inline constexpr float fogOfWarColorNoiseScale = 0.18f;
+inline constexpr float fogOfWarColorNoiseStrength = 0.48f;
+inline constexpr float fogOfWarColorNoiseSpeed = 0.07f;
+
 // Keep the cover to one consistent three-tile column above the board. The
 // horizontal feather begins outside the authored screen rectangle, so every
 // tile in an undiscovered screen still receives full-density fog.
