@@ -9,45 +9,12 @@
 
 #include <algorithm>
 #include <cmath>
-#include <future>
 #include <limits>
+#include <optional>
 #include <ranges>
 
 namespace sokoban {
 namespace {
-
-class ScopedVoidTask {
-public:
-    ScopedVoidTask() = default;
-    explicit ScopedVoidTask(std::future<void> task)
-        : task_(std::move(task))
-    {
-    }
-
-    ~ScopedVoidTask()
-    {
-        // If foreground preparation throws, the scene must remain alive until
-        // the worker has stopped writing its disjoint output vectors.
-        if (task_.valid()) {
-            task_.wait();
-        }
-    }
-
-    ScopedVoidTask(ScopedVoidTask&&) = delete;
-    ScopedVoidTask& operator=(ScopedVoidTask&&) = delete;
-    ScopedVoidTask(const ScopedVoidTask&) = delete;
-    ScopedVoidTask& operator=(const ScopedVoidTask&) = delete;
-
-    void finish()
-    {
-        if (task_.valid()) {
-            task_.get();
-        }
-    }
-
-private:
-    std::future<void> task_;
-};
 
 // The scalar half of a pair. isoClipFromView builds the same projection as a
 // matrix, and IsoScenePreparer.hpp explains why both exist - briefly, this one
@@ -1643,26 +1610,10 @@ void IsoScenePreparer::prepare(
         isoClipFromWorld(scene.isoLayout, scene.renderExtent));
     scene.hasTranslucentContent = false;
 
-    std::future<void> auxiliaryFuture;
-    if (auxiliaryTasks) {
-        auxiliaryFuture = auxiliaryTasks->enqueue([
-            &frameData,
-            &scene,
-            this] {
-            prepareAuxiliaryGeometry(
-                frameData,
-                scene.isoLayout,
-                scene.particles,
-                scene.shadowFaces,
-                scene.shadowFaceBounds,
-                scene.shadowModelIndices,
-                scene.pointShadowCasters,
-                scene.pointShadowFaceCandidates,
-                scene.pointShadowFacesInRange,
-                scene.pointShadowFacesCulled,
-                pointShadowRangeCulling_);
-        });
-    } else {
+    const auto prepareAuxiliary = [
+                                      &frameData,
+                                      &scene,
+                                      this] {
         prepareAuxiliaryGeometry(
             frameData,
             scene.isoLayout,
@@ -1675,8 +1626,15 @@ void IsoScenePreparer::prepare(
             scene.pointShadowFacesInRange,
             scene.pointShadowFacesCulled,
             pointShadowRangeCulling_);
+    };
+    using AuxiliaryTask =
+        TaskSystem::ScopedTask<decltype(prepareAuxiliary)>;
+    std::optional<AuxiliaryTask> auxiliaryTask;
+    if (auxiliaryTasks) {
+        auxiliaryTask.emplace(*auxiliaryTasks, prepareAuxiliary);
+    } else {
+        prepareAuxiliary();
     }
-    ScopedVoidTask auxiliaryTask(std::move(auxiliaryFuture));
 
     scene.isoFaces.reserve(
         frameData.tiles.size() * 5 + frameData.waterSurfaces.size());
@@ -1740,7 +1698,9 @@ void IsoScenePreparer::prepare(
         appendSourceIsoFaces(scene, frameData);
         orderIsoFaces(scene, opaqueFrontToBackSort_);
     }
-    auxiliaryTask.finish();
+    if (auxiliaryTask) {
+        auxiliaryTask->finish();
+    }
     scene.hasTranslucentContent =
         !scene.translucentFaceIndices.empty() ||
         !scene.translucentModelIndices.empty() ||

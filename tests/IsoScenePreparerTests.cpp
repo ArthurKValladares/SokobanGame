@@ -6,10 +6,12 @@
 #include "engine/TaskSystem.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <limits>
 #include <ranges>
+#include <thread>
 #include <unordered_set>
 
 namespace {
@@ -204,6 +206,12 @@ void testParallelAuxiliaryPreparationMatchesSerialOutput()
     serialPreparer.prepare(frame, extent, serialScene);
     parallelPreparer.prepare(
         frame, extent, parallelScene, &preparationTasks);
+    const auto firstTaskDeadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(1);
+    while (preparationTasks.executedTaskCount() != 1 &&
+        std::chrono::steady_clock::now() < firstTaskDeadline) {
+        std::this_thread::yield();
+    }
     CHECK(preparationTasks.executedTaskCount() == 1);
     checkPreparationOutputsMatch(serialScene, parallelScene);
 
@@ -212,6 +220,12 @@ void testParallelAuxiliaryPreparationMatchesSerialOutput()
     serialPreparer.prepare(frame, extent, serialScene);
     parallelPreparer.prepare(
         frame, extent, parallelScene, &preparationTasks);
+    const auto secondTaskDeadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(1);
+    while (preparationTasks.executedTaskCount() != 2 &&
+        std::chrono::steady_clock::now() < secondTaskDeadline) {
+        std::this_thread::yield();
+    }
     CHECK(preparationTasks.executedTaskCount() == 2);
     CHECK(serialScene.reusedRenderableBounds ==
           parallelScene.reusedRenderableBounds);

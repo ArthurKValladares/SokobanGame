@@ -1,11 +1,10 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
 
-// HDR scene snapshot and resolved scene depth. This pass writes the live HDR
-// target, so sampling the snapshot avoids a read/write attachment feedback
-// loop.
+// Resolved scene depth drives the half-resolution volumetric integration.
+// The result is scattering.rgb + transmittance.a; a separate depth-aware
+// fullscreen pass composites it over the unblurred HDR scene.
 layout(set = 0, binding = 0) uniform sampler2D shadowMap;
-layout(set = 0, binding = 1) uniform sampler2D sceneColor;
 layout(set = 0, binding = 5) uniform sampler2D depthTexture;
 layout(set = 0, binding = 8) uniform samplerCubeArray pointShadowMaps;
 
@@ -31,6 +30,7 @@ layout(push_constant) uniform PushConstants
     layout(offset = 176) vec4 heightAndDistance;
     layout(offset = 192) vec4 shadowOptions;
     layout(offset = 208) vec4 ambientRadiance;
+    layout(offset = 224) vec4 targetExtent;
 } pc;
 
 const int maximumSampleCount = 32;
@@ -165,10 +165,14 @@ vec3 pointLightRadiance(vec3 worldPosition, vec3 rayDirection)
 void main()
 {
     ivec2 pixel = ivec2(gl_FragCoord.xy);
-    ivec2 extent = textureSize(depthTexture, 0);
+    ivec2 extent = max(ivec2(pc.targetExtent.xy + 0.5), ivec2(1));
     vec2 uv = (vec2(pixel) + 0.5) / vec2(extent);
-    float depth = texelFetch(depthTexture, pixel, 0).r;
-    vec4 scene = texelFetch(sceneColor, pixel, 0);
+    ivec2 depthExtent = textureSize(depthTexture, 0);
+    ivec2 depthPixel = clamp(
+        ivec2(uv * vec2(depthExtent)),
+        ivec2(0),
+        depthExtent - ivec2(1));
+    float depth = texelFetch(depthTexture, depthPixel, 0).r;
 
     vec3 camera = frame.cameraPositionAndNearPlane.xyz;
     // Pull a background sample slightly inside the far plane so an infinite
@@ -178,7 +182,7 @@ void main()
     vec3 cameraToEndpoint = endpoint - camera;
     float endpointDistance = length(cameraToEndpoint);
     if (endpointDistance <= 0.0001) {
-        outColor = scene;
+        outColor = vec4(0.0, 0.0, 0.0, 1.0);
         return;
     }
 
@@ -214,7 +218,7 @@ void main()
     float rayLength = rayEnd - rayStart;
     if (rayLength <= 0.0001 || pc.mediumColorAndDensity.w <= 0.0 ||
         pc.sunRadianceAndStrength.w <= 0.0) {
-        outColor = scene;
+        outColor = vec4(0.0, 0.0, 0.0, 1.0);
         return;
     }
 
@@ -312,5 +316,5 @@ void main()
         transmittance *= stepTransmittance;
     }
 
-    outColor = vec4(scene.rgb * transmittance + inScattering, scene.a);
+    outColor = vec4(inScattering, transmittance);
 }

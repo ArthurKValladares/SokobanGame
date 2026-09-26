@@ -620,6 +620,11 @@ struct RenderStats {
     uint32_t renderHeight = 0;
     uint32_t ssaoWidth = 0;
     uint32_t ssaoHeight = 0;
+    uint32_t atmosphereWidth = 0;
+    uint32_t atmosphereHeight = 0;
+    uint32_t atmosphereMediaCount = 0;
+    uint64_t atmosphereCompositePixels = 0;
+    uint64_t atmosphereUnscissoredPixels = 0;
     uint32_t renderScalePercent = 100;
     uint32_t activeSamples = 1;
     bool parallelScenePreparationEnabled = true;

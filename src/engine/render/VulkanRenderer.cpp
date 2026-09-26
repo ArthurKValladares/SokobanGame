@@ -674,6 +674,7 @@ void VulkanRenderer::drawFrame(
             .swapchain = *activeResources_.swapchain,
             .shadowPass = shadowPass_,
             .ssaoPass = *activeResources_.ssaoPass,
+            .atmospherePass = *activeResources_.atmospherePass,
             .sceneDescriptors =
                 *activeResources_.sceneDescriptors,
             .pipelines = *activeResources_.pipelines,
@@ -1492,6 +1493,10 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
             .sampler = resources.ssaoPass->sampler(),
             .imageView = resources.ssaoPass->imageView(),
         },
+        .atmosphere = {
+            .sampler = resources.atmospherePass->sampler(),
+            .imageView = resources.atmospherePass->imageView(),
+        },
         .uiFont = {
             .sampler = uiResources_.sampler(),
             .imageView = uiResources_.fontImageView(),
@@ -1550,6 +1555,12 @@ VulkanRenderer::createRenderResources(
         deviceContext_.memoryAllocator(),
         deviceContext_.device(),
         resources.swapchain->renderExtent());
+    resources.atmospherePass = std::make_unique<VulkanAtmospherePass>();
+    resources.atmospherePass->create(
+        deviceContext_.memoryAllocator(),
+        deviceContext_.device(),
+        resources.swapchain->renderExtent(),
+        resources.swapchain->sceneColorFormat());
     resources.sceneDescriptors =
         std::make_unique<VulkanSceneDescriptors>();
     resources.sceneDescriptors->create(

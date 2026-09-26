@@ -1,5 +1,6 @@
 #include "engine/ProfilerDebugUi.hpp"
 
+#include "engine/PerformanceAnalysis.hpp"
 #include "engine/Profiler.hpp"
 #include "engine/render/RenderTypes.hpp"
 #include "engine/render/VulkanRenderer.hpp"
@@ -333,6 +334,34 @@ void drawMemoryHistory(
     }
 }
 
+void drawOptimizationCandidates(const PerformanceAnalysis& analysis)
+{
+    if (analysis.findings.empty()) {
+        ImGui::TextDisabled(
+            "No rule-based bottleneck is visible in the current capture.");
+        return;
+    }
+    for (std::size_t index = 0; index < analysis.findings.size(); ++index) {
+        const PerformanceFinding& finding = analysis.findings[index];
+        const ImVec4 color = finding.priority == PerformancePriority::High
+            ? ImVec4(1.0f, 0.38f, 0.28f, 1.0f)
+            : finding.priority == PerformancePriority::Medium
+                ? ImVec4(1.0f, 0.72f, 0.25f, 1.0f)
+                : ImVec4(0.55f, 0.78f, 1.0f, 1.0f);
+        ImGui::PushID(static_cast<int>(index));
+        ImGui::TextColored(
+            color,
+            "%zu. [%s] %s",
+            index + 1,
+            performancePriorityName(finding.priority),
+            finding.title.c_str());
+        ImGui::TextWrapped("Evidence: %s", finding.evidence.c_str());
+        ImGui::TextWrapped("Next experiment: %s", finding.recommendation.c_str());
+        ImGui::Separator();
+        ImGui::PopID();
+    }
+}
+
 } // namespace
 
 void ProfilerDebugUi::appendHistory(
@@ -462,9 +491,34 @@ void ProfilerDebugUi::draw(const VulkanRenderer& renderer)
         stats.triangles,
         stats.pipelineBinds,
         stats.imageBarriers);
+    if (stats.atmosphereWidth != 0 && stats.atmosphereHeight != 0) {
+        ImGui::SameLine();
+        if (stats.atmosphereUnscissoredPixels != 0) {
+            const double coverage = 100.0 *
+                static_cast<double>(stats.atmosphereCompositePixels) /
+                static_cast<double>(stats.atmosphereUnscissoredPixels);
+            ImGui::TextDisabled(
+                "Atmosphere %ux%u, %u media, %.1f%% coverage",
+                stats.atmosphereWidth,
+                stats.atmosphereHeight,
+                stats.atmosphereMediaCount,
+                coverage);
+        } else {
+            ImGui::TextDisabled(
+                "Atmosphere %ux%u",
+                stats.atmosphereWidth,
+                stats.atmosphereHeight);
+        }
+    }
     drawTimingHistory(
         totalCpuHistory_, rendererCpuHistory_, gpuHistory_,
         frameBudgetMilliseconds_);
+
+    if (ImGui::CollapsingHeader(
+            "Optimization Candidates", ImGuiTreeNodeFlags_DefaultOpen)) {
+        drawOptimizationCandidates(analyzePerformance(
+            stats, frame, frameBudgetMilliseconds_));
+    }
 
     if (ImGui::CollapsingHeader(
             "CPU Timeline", ImGuiTreeNodeFlags_DefaultOpen)) {

@@ -37,7 +37,7 @@ namespace {
 // it, and this file is the only record of that: the slot was retired and the
 // numbering was not compacted, because every later binding is named by hand in
 // the shaders that use it and renumbering would mean editing all of them to no
-// effect. **Do not reuse 2.** A new binding continues at 13; a reused 2 would
+// effect. **Do not reuse 2.** New bindings continue at 14; a reused 2 would
 // silently match any shader still carrying an old declaration.
 //
 // The array's size is deduced from the table rather than written beside it, so
@@ -67,6 +67,7 @@ constexpr auto sceneBindings = std::to_array<SceneBinding>({
     // Fragment only for now. A vertex stage that wanted to fold a material into
     // its transform would have to be added here as well as declared there.
     SceneBinding { 12, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+    SceneBinding { 13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
 });
 
 // The type a binding was declared with. Returning MAX_ENUM for an unknown
@@ -107,7 +108,7 @@ static_assert(sceneBindingType(7) == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 static_assert(sceneBindingType(9) == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 static_assert(sceneBindingType(12) == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 static_assert(sceneBindingType(2) == VK_DESCRIPTOR_TYPE_MAX_ENUM);
-static_assert(sceneBindingType(13) == VK_DESCRIPTOR_TYPE_MAX_ENUM);
+static_assert(sceneBindingType(13) == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 static_assert(isImageBinding(sceneBindingType(0)));
 static_assert(!isImageBinding(sceneBindingType(7)));
 static_assert(!isImageBinding(sceneBindingType(9)));
@@ -350,18 +351,19 @@ void VulkanSceneDescriptors::updateInternal(
     if (!descriptorSet) {
         throw std::runtime_error("Scene descriptors have not been created");
     }
-    // Named rather than or-ed together, for two reasons: an eleven-clause
+    // Named rather than or-ed together, for two reasons: a twelve-clause
     // condition is one a reader has to check against the writes below by eye,
     // and "resources are incomplete" told whoever hit it nothing about which
     // one. A missing entry here is a descriptor written from a null handle,
     // which validation catches but only on a validation build.
-    const std::array<std::pair<const char*, bool>, 11> required {
+    const std::array<std::pair<const char*, bool>, 12> required {
         std::pair { "shadow", resources.shadow.valid() },
         std::pair { "pointShadows", resources.pointShadows.valid() },
         std::pair { "sceneColor", resources.sceneColor.valid() },
         std::pair { "sceneHdrColor", resources.sceneHdrColor.valid() },
         std::pair { "sceneDepth", resources.sceneDepth.valid() },
         std::pair { "ssao", resources.ssao.valid() },
+        std::pair { "atmosphere", resources.atmosphere.valid() },
         std::pair { "uiFont", resources.uiFont.valid() },
         std::pair { "titleBackground", resources.titleBackground.valid() },
         std::pair { "skinning", resources.skinning.valid() },
@@ -425,6 +427,11 @@ void VulkanSceneDescriptors::updateInternal(
         .imageView = resources.ssao.imageView,
         .imageLayout = resources.ssao.imageLayout,
     };
+    const VkDescriptorImageInfo atmosphere {
+        .sampler = resources.atmosphere.sampler,
+        .imageView = resources.atmosphere.imageView,
+        .imageLayout = resources.atmosphere.imageLayout,
+    };
     const VkDescriptorImageInfo uiFont {
         .sampler = resources.uiFont.sampler,
         .imageView = resources.uiFont.imageView,
@@ -435,7 +442,7 @@ void VulkanSceneDescriptors::updateInternal(
         .imageView = resources.titleBackground.imageView,
         .imageLayout = resources.titleBackground.imageLayout,
     };
-    // Twelve hand-written VkWriteDescriptorSet blocks, in the binding order
+    // Thirteen hand-written VkWriteDescriptorSet blocks, in the binding order
     // 3, 4, 0, 1, 5, 6, ... - each repeating its binding number and its
     // descriptor type beside the one thing that actually differed. The order
     // was not meaningful: writes to distinct descriptors within a single
@@ -454,6 +461,7 @@ void VulkanSceneDescriptors::updateInternal(
         SceneWriteSource { 10, nullptr, &drawInstances },
         SceneWriteSource { 11, &sceneHdrColor, nullptr },
         SceneWriteSource { 12, nullptr, &materials },
+        SceneWriteSource { 13, &atmosphere, nullptr },
     };
 
     std::array<VkWriteDescriptorSet, sceneBindings.size()> writes {};

@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <exception>
 #include <latch>
-#include <memory>
 #include <system_error>
 
 namespace sokoban {
@@ -178,7 +177,25 @@ void TaskSystem::push(std::function<void()> task)
 {
     {
         const std::scoped_lock lock(mutex_);
-        queue_.push_back(std::move(task));
+        constexpr std::size_t minimumQueueCapacity = 64;
+        if (queuedTaskCount_ == queue_.size()) {
+            const std::size_t grownCapacity = queue_.empty()
+                ? minimumQueueCapacity
+                : queue_.size() * 2;
+            std::vector<std::function<void()>> grown(grownCapacity);
+            for (std::size_t index = 0;
+                 index < queuedTaskCount_;
+                 ++index) {
+                grown[index] = std::move(
+                    queue_[(queueHead_ + index) % queue_.size()]);
+            }
+            queue_ = std::move(grown);
+            queueHead_ = 0;
+        }
+        const std::size_t tail =
+            (queueHead_ + queuedTaskCount_) % queue_.size();
+        queue_[tail] = std::move(task);
+        ++queuedTaskCount_;
     }
     condition_.notify_one();
 }
@@ -192,12 +209,16 @@ void TaskSystem::workerLoop()
         std::function<void()> task;
         {
             std::unique_lock lock(mutex_);
-            condition_.wait(lock, [this] { return stopping_ || !queue_.empty(); });
-            if (queue_.empty()) {
+            condition_.wait(lock, [this] {
+                return stopping_ || queuedTaskCount_ != 0;
+            });
+            if (queuedTaskCount_ == 0) {
                 return; // stopping, queue drained
             }
-            task = std::move(queue_.front());
-            queue_.pop_front();
+            task = std::move(queue_[queueHead_]);
+            queue_[queueHead_] = {};
+            queueHead_ = (queueHead_ + 1) % queue_.size();
+            --queuedTaskCount_;
         }
         {
             SOKOBAN_PROFILE_SCOPE("TaskSystem.Task");
@@ -238,25 +259,30 @@ void TaskSystem::parallelFor(size_t count, size_t minChunk, const std::function<
     const size_t chunkSize = std::max(minChunk, (count + threads * 4 - 1) / (threads * 4));
 
     const size_t helperCount = std::min(workers_.size(), (count + chunkSize - 1) / chunkSize);
-    const auto state = std::make_shared<ParallelForState>(
-        count, chunkSize, helperCount, fn);
+    // parallelFor always joins every helper before returning, so the
+    // coordination state can stay in this scope. A shared_ptr used to make
+    // this lifetime obvious, but it also put every parallel loop on the
+    // general heap. The wait below is the lifetime boundary: even when queue
+    // growth throws, already queued helpers count down before state leaves
+    // the stack.
+    ParallelForState state(count, chunkSize, helperCount, fn);
 
     size_t queuedHelpers = 0;
     try {
         for (; queuedHelpers < helperCount; ++queuedHelpers) {
-            push([state] {
-                state->runChunks();
-                state->helperComplete();
+            push([&state] {
+                state.runChunks();
+                state.helperComplete();
             });
         }
     } catch (...) {
-        state->recordFailure(std::current_exception());
-        state->helpersNotQueued(helperCount - queuedHelpers);
+        state.recordFailure(std::current_exception());
+        state.helpersNotQueued(helperCount - queuedHelpers);
     }
 
-    state->runChunks(); // the calling thread participates
-    state->waitForHelpers();
-    state->rethrowFailure();
+    state.runChunks(); // the calling thread participates
+    state.waitForHelpers();
+    state.rethrowFailure();
 }
 
 TaskSystem& taskSystem()

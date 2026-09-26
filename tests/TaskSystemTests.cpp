@@ -53,6 +53,49 @@ void testEnqueuePropagatesExceptions()
     CHECK(threw);
 }
 
+void testScopedTaskCompletesAndPropagatesExceptions()
+{
+    TEST("scopedTaskCompletesAndPropagatesExceptions");
+    sokoban::TaskSystem system(2);
+    std::atomic<int> value { 0 };
+    {
+        auto task = system.scopedTask([&] {
+            value.store(42, std::memory_order_release);
+        });
+        task.finish();
+    }
+    CHECK(value.load(std::memory_order_acquire) == 42);
+
+    bool threw = false;
+    try {
+        auto task = system.scopedTask([] {
+            throw std::runtime_error("scoped boom");
+        });
+        task.finish();
+    } catch (const std::runtime_error& error) {
+        threw = std::string(error.what()) == "scoped boom";
+    }
+    CHECK(threw);
+}
+
+void testScopedTaskDestructorWaitsDuringForegroundUnwind()
+{
+    TEST("scopedTaskDestructorWaitsDuringForegroundUnwind");
+    sokoban::TaskSystem system(1);
+    std::atomic<bool> workerFinished { false };
+    bool foregroundThrew = false;
+    try {
+        auto task = system.scopedTask([&] {
+            workerFinished.store(true, std::memory_order_release);
+        });
+        throw std::runtime_error("foreground boom");
+    } catch (const std::runtime_error& error) {
+        foregroundThrew = std::string(error.what()) == "foreground boom";
+    }
+    CHECK(foregroundThrew);
+    CHECK(workerFinished.load(std::memory_order_acquire));
+}
+
 void testParallelForCoversEveryIndexOnce()
 {
     TEST("parallelForCoversEveryIndexOnce");
@@ -264,6 +307,8 @@ int main()
 {
     testEnqueueReturnsValues();
     testEnqueuePropagatesExceptions();
+    testScopedTaskCompletesAndPropagatesExceptions();
+    testScopedTaskDestructorWaitsDuringForegroundUnwind();
     testParallelForCoversEveryIndexOnce();
     testParallelForSmallCountsRunInline();
     testParallelForComputesDeterministicResult();

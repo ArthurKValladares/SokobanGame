@@ -20,6 +20,7 @@ class VulkanPipelineFactory;
 class VulkanSceneDescriptors;
 class VulkanShadowPass;
 class VulkanSsaoPass;
+class VulkanAtmospherePass;
 class VulkanSwapchainResources;
 class SceneRecordingSession;
 
@@ -40,6 +41,7 @@ public:
         VulkanSwapchainResources& swapchain;
         VulkanShadowPass& shadowPass;
         VulkanSsaoPass& ssaoPass;
+        VulkanAtmospherePass& atmospherePass;
         VulkanSceneDescriptors& sceneDescriptors;
         VulkanPipelineFactory& pipelines;
         VulkanModelResources& modelResources;

@@ -33,6 +33,7 @@ public:
         ImageBinding sceneHdrColor;
         ImageBinding sceneDepth;
         ImageBinding ssao;
+        ImageBinding atmosphere;
         ImageBinding uiFont;
         ImageBinding titleBackground;
         std::vector<VulkanModelResources::TextureView> modelTextures;

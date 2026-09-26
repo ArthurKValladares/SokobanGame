@@ -7,6 +7,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 struct SDL_Window;
@@ -77,7 +78,8 @@ public:
         RenderStats& stats);
     void copyResolvedSceneColor(
         VkCommandBuffer commandBuffer,
-        RenderStats& stats);
+        RenderStats& stats,
+        std::optional<VkRect2D> region = std::nullopt);
     // Publishes the single-sample depth resolve directly for shader reads;
     // prepareSceneDepthAttachment restores it before another scene render.
     void publishSceneDepth(

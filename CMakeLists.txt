@@ -523,6 +523,7 @@ add_library(sokoban_core STATIC
     src/engine/MirrorParticleEffect.cpp
     src/engine/MiniaudioImpl.cpp
     src/engine/ParticleSystem.cpp
+    src/engine/PerformanceAnalysis.cpp
     src/engine/TurretParticleEffect.cpp
     src/engine/PresentationSettings.cpp
     src/engine/PlayerProfile.cpp
@@ -646,6 +647,7 @@ endif()
 
 if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
 add_library(sokoban_render_vulkan STATIC
+    src/engine/render/VulkanAtmospherePass.cpp
     src/engine/render/VulkanRenderer.cpp
     src/engine/render/VulkanDeviceContext.cpp
     src/engine/render/VulkanDebugUtils.cpp
@@ -1056,6 +1058,27 @@ if(SOKOBAN_BUILD_TESTS)
     target_compile_definitions(sokoban_core PRIVATE SOKOBAN_ENABLE_TEST_HOOKS=1)
     enable_testing()
 
+    # Hardware timings are deliberately not registered with CTest: absolute
+    # performance is machine and power-state dependent. The executable emits
+    # structured results, a ranked report, and a Chrome/Perfetto CPU trace;
+    # the custom target is a convenient quick local run.
+    add_executable(sokoban_performance_tests
+        tests/PerformanceSuite.cpp
+    )
+    target_include_directories(sokoban_performance_tests PRIVATE src)
+    target_link_libraries(sokoban_performance_tests PRIVATE sokoban_core)
+    sokoban_enable_warnings(sokoban_performance_tests)
+    sokoban_enable_precompiled_headers(sokoban_performance_tests)
+    sokoban_enable_lto(sokoban_performance_tests)
+    add_custom_target(performance
+        COMMAND $<TARGET_FILE:sokoban_performance_tests>
+            --quick
+            --output "${CMAKE_CURRENT_BINARY_DIR}/performance-results/$<CONFIG>"
+        DEPENDS sokoban_performance_tests
+        USES_TERMINAL
+        VERBATIM
+    )
+
     if(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS)
         target_compile_definitions(sokoban_render_vulkan PRIVATE
             SOKOBAN_ENABLE_TEST_HOOKS=1)
@@ -1210,6 +1233,15 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME profiler
         LIBS sokoban_core
         SOURCES tests/ProfilerTests.cpp
+    )
+    sokoban_add_test(NAME performance_analysis
+        LIBS sokoban_core
+        SOURCES tests/PerformanceAnalysisTests.cpp
+    )
+    sokoban_add_test(NAME scene_preparation_allocations
+        STANDALONE TARGET sokoban_scene_preparation_allocation_tests
+        LIBS sokoban_core
+        SOURCES tests/ScenePreparationAllocationTests.cpp
     )
     sokoban_add_test(NAME renderer_reconfiguration
         LIBS sokoban_core
@@ -1500,6 +1532,30 @@ if(SOKOBAN_BUILD_TESTS)
     endif()
 
     sokoban_finalize_test_runners()
+
+    if(WIN32 AND NOT SOKOBAN_HEADLESS_TESTS_ONLY)
+        set(SOKOBAN_COMPREHENSIVE_PERFORMANCE_DEPENDS
+            sokoban
+            sokoban_performance_tests
+        )
+        if(TARGET sokoban_vulkan_tests)
+            list(APPEND SOKOBAN_COMPREHENSIVE_PERFORMANCE_DEPENDS
+                sokoban_vulkan_tests)
+        endif()
+        add_custom_target(performance-comprehensive
+            COMMAND "${SOKOBAN_POWERSHELL_EXECUTABLE}"
+                -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_CURRENT_SOURCE_DIR}/tools/RunPerformanceSuites.ps1"
+                -BuildDirectory "${CMAKE_CURRENT_BINARY_DIR}"
+                -Configuration "$<CONFIG>"
+                -OutputDirectory
+                    "${CMAKE_CURRENT_BINARY_DIR}/performance-results/$<CONFIG>/comprehensive"
+                -SkipBuild
+            DEPENDS ${SOKOBAN_COMPREHENSIVE_PERFORMANCE_DEPENDS}
+            USES_TERMINAL
+            VERBATIM
+        )
+    endif()
 endif()
 
 if(SOKOBAN_BUILD_FUZZ_TESTS)

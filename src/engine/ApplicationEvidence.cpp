@@ -1,6 +1,8 @@
 #include "engine/Application.hpp"
 
 #include "engine/Log.hpp"
+#include "engine/PerformanceAnalysis.hpp"
+#include "engine/Profiler.hpp"
 #include "engine/render/PngWriter.hpp"
 
 #include <cstddef>
@@ -124,6 +126,20 @@ void Application::finishEvidenceCapture()
            << evidenceStats_.renderHeight << "\n";
     report << "- SSAO target: " << evidenceStats_.ssaoWidth << 'x'
            << evidenceStats_.ssaoHeight << "\n";
+    report << "- Atmosphere target: " << evidenceStats_.atmosphereWidth << 'x'
+           << evidenceStats_.atmosphereHeight << "\n";
+    if (evidenceStats_.atmosphereUnscissoredPixels != 0) {
+        const double coverage = 100.0 *
+            static_cast<double>(evidenceStats_.atmosphereCompositePixels) /
+            static_cast<double>(evidenceStats_.atmosphereUnscissoredPixels);
+        report << "- Atmosphere coverage: "
+               << evidenceStats_.atmosphereMediaCount << " media, "
+               << evidenceStats_.atmosphereCompositePixels << " / "
+               << evidenceStats_.atmosphereUnscissoredPixels
+               << " full-resolution pixels (" << std::fixed
+               << std::setprecision(1) << coverage << "% after scissoring)"
+               << std::setprecision(3) << "\n";
+    }
     report << "- Ambient occlusion: "
            << (evidenceAmbientOcclusionEnabled_ ? "enabled" : "disabled")
            << "\n";
@@ -263,6 +279,17 @@ void Application::finishEvidenceCapture()
                << (evidenceStats_.gpuTimestampsSupported ? "yes" : "no")
                << ")\n";
     }
+    report << "- Process resident memory: "
+           << evidenceStats_.processResidentBytes / (1024.0 * 1024.0)
+           << " MiB (peak "
+           << evidenceStats_.processPeakResidentBytes / (1024.0 * 1024.0)
+           << " MiB)\n";
+    report << "- GPU allocation memory: "
+           << evidenceStats_.gpuMemoryAllocationBytes / (1024.0 * 1024.0)
+           << " MiB in " << evidenceStats_.gpuMemoryAllocationCount
+           << " allocations; "
+           << evidenceStats_.gpuMemoryBlockBytes / (1024.0 * 1024.0)
+           << " MiB reserved in blocks\n";
     report << "- Scene image: `" << sceneName << "`\n";
     if (evidenceAmbientOcclusionEnabled_) {
         report << "- Filtered SSAO image: `" << occlusionName << "`\n";
@@ -272,6 +299,10 @@ void Application::finishEvidenceCapture()
         report << "\nThe simulation was frozen for the run. Ambient occlusion "
                   "was disabled for the complete timing window.\n";
     }
+    writePerformanceAnalysisMarkdown(
+        report,
+        analyzePerformance(
+            evidenceStats_, CpuProfiler::instance().latestFrame()));
     if (!report) {
         throw std::runtime_error(
             "Could not finish evidence report '" + reportPath.string() + "'");

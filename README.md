@@ -162,6 +162,51 @@ Production code is compiled once into `sokoban_core`, `sokoban_ui`, and
 `sokoban_render_vulkan`; tests link those libraries rather than recompiling
 engine implementation files.
 
+### Performance suites
+
+Performance measurements are kept out of CTest because absolute timings are
+hardware, thermal, and power-state dependent. Build and run the dedicated
+suite in an optimized configuration instead:
+
+```powershell
+cmake --build build --config Release --target sokoban_performance_tests
+.\build\Release\sokoban_performance_tests.exe --full --output build\performance-results\Release
+
+# Shorter iteration while changing a suspected hot path:
+cmake --build build --config Release --target performance
+
+# Full CPU, Vulkan startup/streaming, and GPU evidence A/B matrix:
+.\tools\RunPerformanceSuites.ps1 -BuildDirectory build -Configuration Release
+# Equivalent build target after configuration:
+cmake --build build --config Release --target performance-comprehensive
+```
+
+The suite covers profiler overhead, process-memory sampling, frame-time
+statistics, frame-arena versus heap allocation, opaque draw sorting and
+batching, task dispatch and parallel scaling, and cold/warm plus
+serial/parallel scene preparation at multiple scene sizes. Every case uses the
+engine's bounded telemetry and CPU scopes, including worker-chunk scopes for
+parallel workloads. It writes `performance-report.md`,
+machine-readable `performance-results.json`, and a `cpu-trace.json` that opens
+in Chrome tracing or Perfetto. The report ranks relative optimization
+candidates such as task crossover points, cache value, and materially costly
+nonlinear scene scaling; compare numeric results only on the same machine
+and power state. Use `--filter scene-preparation` to isolate a group and
+`--quick` for a 12-sample run. `RunPerformanceSuites.ps1 -Quick` also runs a
+short baseline, point-light stress, and serial-scene GPU matrix. Its full mode
+adds render-scale, AO, translucency, frustum-culling, point-shadow, and command
+recorder A/B captures, then repeats the baseline to expose thermal or power
+state drift; every evidence report uses the same ranked analyzer as the live
+profiler.
+
+`scene_preparation_allocations` is a separate deterministic CTest regression:
+after warm-up, serial scene preparation, parallel scene preparation, and
+`TaskSystem::parallelFor` coordination must complete 64 representative runs
+with zero general-heap allocations. The parallel scene path uses
+`TaskSystem::scopedTask`, whose callable and completion state stay on the
+waiting stack instead of allocating `packaged_task`/`future` shared state;
+`parallelFor` keeps its join-before-return coordination state there too.
+
 ## Shipping Package
 
 The Windows `shipping` preset produces an optimized, editor-free x64 build.
@@ -423,7 +468,10 @@ Debug builds with developer tools add these to the workspace:
   chart and exclusive/inclusive hot-path table; breaks CPU command recording
   and Vulkan timestamp queries down by render phase; and tracks process
   memory, VMA allocations, peaks, churn, fragmentation, and per-heap budget
-  pressure. Capture can be paused or cleared, and **Export Chrome trace**
+  pressure. Its ranked optimization candidates use those same measurements
+  to call out CPU/GPU budget overruns, synchronization, dominant passes,
+  submission granularity, cache reuse, jitter, and memory pressure. Capture
+  can be paused or cleared, and **Export Chrome trace**
   writes the bounded 240-frame history to `profiling/cpu-trace.json` for
   Chrome or Perfetto. Add `SOKOBAN_PROFILE_SCOPE("Name")` to any engine scope
   that needs to appear in the timeline; task-system work is collected by

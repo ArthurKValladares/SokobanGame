@@ -401,8 +401,22 @@ void VulkanSwapchainResources::publishSceneColor(
 
 void VulkanSwapchainResources::copyResolvedSceneColor(
     VkCommandBuffer commandBuffer,
-    RenderStats& stats)
+    RenderStats& stats,
+    std::optional<VkRect2D> region)
 {
+    const VkRect2D copyRect = region.value_or(VkRect2D {
+        .offset = { 0, 0 },
+        .extent = renderExtent_,
+    });
+    if (copyRect.offset.x < 0 || copyRect.offset.y < 0 ||
+        copyRect.extent.width == 0 || copyRect.extent.height == 0 ||
+        static_cast<uint64_t>(copyRect.offset.x) + copyRect.extent.width >
+            renderExtent_.width ||
+        static_cast<uint64_t>(copyRect.offset.y) + copyRect.extent.height >
+            renderExtent_.height) {
+        throw std::out_of_range(
+            "Resolved scene color copy region is outside the render target");
+    }
     const std::array<VkImageMemoryBarrier2, 2> toTransfer {
         vulkanResources::imageBarrier(
             resolvedColorImage_.image,
@@ -445,13 +459,27 @@ void VulkanSwapchainResources::copyResolvedSceneColor(
             .baseArrayLayer = 0,
             .layerCount = 1,
         },
+        .srcOffset = {
+            copyRect.offset.x,
+            copyRect.offset.y,
+            0,
+        },
         .dstSubresource = {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
             .mipLevel = 0,
             .baseArrayLayer = 0,
             .layerCount = 1,
         },
-        .extent = { .width = renderExtent_.width, .height = renderExtent_.height, .depth = 1 },
+        .dstOffset = {
+            copyRect.offset.x,
+            copyRect.offset.y,
+            0,
+        },
+        .extent = {
+            .width = copyRect.extent.width,
+            .height = copyRect.extent.height,
+            .depth = 1,
+        },
     };
     vkCmdCopyImage(
         commandBuffer,

@@ -1,7 +1,9 @@
 #include "engine/render/VulkanSceneRecorder.hpp"
 
 #include "engine/Profiler.hpp"
+#include "engine/render/AtmosphereMath.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
+#include "engine/render/VulkanAtmospherePass.hpp"
 #include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/MirrorConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
@@ -126,6 +128,48 @@ bool atmosphereSamplesSceneDepth(const RenderFrameData& frameData)
 {
     return baseAtmosphereSamplesSceneDepth(frameData.lighting.atmosphere) ||
         !frameData.overworldFogVolumes.empty();
+}
+
+VkRect2D atmosphereIntegrationRect(
+    VkRect2D fullResolutionRect,
+    VkExtent2D fullExtent,
+    VkExtent2D integrationExtent)
+{
+    const uint64_t sourceRight =
+        static_cast<uint64_t>(fullResolutionRect.offset.x) +
+        fullResolutionRect.extent.width;
+    const uint64_t sourceBottom =
+        static_cast<uint64_t>(fullResolutionRect.offset.y) +
+        fullResolutionRect.extent.height;
+    uint32_t left = static_cast<uint32_t>(
+        static_cast<uint64_t>(fullResolutionRect.offset.x) *
+        integrationExtent.width / fullExtent.width);
+    uint32_t top = static_cast<uint32_t>(
+        static_cast<uint64_t>(fullResolutionRect.offset.y) *
+        integrationExtent.height / fullExtent.height);
+    uint32_t right = static_cast<uint32_t>(
+        (sourceRight * integrationExtent.width + fullExtent.width - 1U) /
+        fullExtent.width);
+    uint32_t bottom = static_cast<uint32_t>(
+        (sourceBottom * integrationExtent.height + fullExtent.height - 1U) /
+        fullExtent.height);
+    // The full-resolution composite bilinearly gathers a 2x2 neighborhood.
+    // Retain a half-resolution texel around the projected silhouette so that
+    // every gathered sample has been refreshed for this medium.
+    left = left > 0 ? left - 1U : 0U;
+    top = top > 0 ? top - 1U : 0U;
+    right = std::min(right + 1U, integrationExtent.width);
+    bottom = std::min(bottom + 1U, integrationExtent.height);
+    return {
+        .offset = {
+            static_cast<int32_t>(left),
+            static_cast<int32_t>(top),
+        },
+        .extent = {
+            right - left,
+            bottom - top,
+        },
+    };
 }
 
 bool hasMirrorPreview(const RenderFrameData& frameData)
@@ -290,6 +334,7 @@ public:
         , swapchain_(resources.swapchain)
         , shadowPass_(resources.shadowPass)
         , ssaoPass_(resources.ssaoPass)
+        , atmospherePass_(resources.atmospherePass)
         , descriptors_(resources.sceneDescriptors)
         , pipelines_(resources.pipelines)
         , models_(resources.modelResources)
@@ -328,6 +373,7 @@ public:
         const VkExtent2D extent = swapchain_.extent();
         const VkExtent2D renderExtent = swapchain_.renderExtent();
         const VkExtent2D ssaoExtent = ssaoPass_.aoExtent();
+        const VkExtent2D atmosphereExtent = atmospherePass_.extent();
         const auto unavailableModelCount = [this](
                                                const RenderFrameData& data,
                                                const PreparedRenderScene& prepared) {
@@ -399,6 +445,8 @@ public:
             .renderHeight = renderExtent.height,
             .ssaoWidth = ssaoExtent.width,
             .ssaoHeight = ssaoExtent.height,
+            .atmosphereWidth = atmosphereExtent.width,
+            .atmosphereHeight = atmosphereExtent.height,
             .renderScalePercent = static_cast<uint32_t>(
                 swapchain_.renderScalePercent()),
             .activeSamples = configuration_.activeSamples,
@@ -550,7 +598,8 @@ public:
         recordAtmosphere(
             commandBuffer,
             frameData,
-            isoClipFromWorld(scene.isoLayout, scene.renderExtent));
+            isoClipFromWorld(scene.isoLayout, scene.renderExtent),
+            mirrorPreviewOverFog);
         vulkanDebug::endLabel(device_, commandBuffer);
         gpuProfiler_.endPhase(
             commandBuffer,
@@ -1202,51 +1251,37 @@ private:
     void recordAtmosphere(
         VkCommandBuffer commandBuffer,
         const RenderFrameData& frameData,
-        const Mat4& clipFromWorld)
+        const Mat4& clipFromWorld,
+        bool preserveMultisampleColor)
     {
         SOKOBAN_PROFILE_SCOPE("Renderer.Record atmosphere");
         const RenderFrameData::Lighting& lighting = frameData.lighting;
-        const VkPipeline pipeline = pipelines_.atmosphere();
+        const bool multisampleComposite = preserveMultisampleColor &&
+            swapchain_.resolveColorView() != VK_NULL_HANDLE;
+        const VkPipeline integrationPipeline = pipelines_.atmosphere();
+        const VkPipeline compositePipeline = multisampleComposite
+            ? pipelines_.atmosphereCompositeMultisample()
+            : pipelines_.atmosphereComposite();
         // An SSAO debug view is a diagnostic replacement for scene color.
         // Fogging it would turn the supposedly raw mask into a tinted image
         // and invalidate captures used to tune the bilateral filter.
-        if (!atmosphereSamplesSceneDepth(frameData) || !pipeline ||
+        if (!atmosphereSamplesSceneDepth(frameData) ||
+            !atmospherePass_.valid() || !integrationPipeline ||
+            !compositePipeline ||
             lighting.ambientOcclusion.debug !=
                 RenderFrameData::Lighting::AmbientOcclusion::Debug::Off) {
             return;
         }
 
         const VkExtent2D extent = swapchain_.renderExtent();
-        const VkImageView resolveView = swapchain_.resolveColorView();
-        // Keep the multisampled attachment in lockstep with the resolve. A
-        // mirror preview may be composited after the fog and must load the
-        // fogged samples rather than the pre-atmosphere scene.
-        const VkRenderingAttachmentInfo attachment {
-            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = swapchain_.renderColorView(),
-            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .resolveMode = resolveView
-                ? VK_RESOLVE_MODE_AVERAGE_BIT
-                : VK_RESOLVE_MODE_NONE,
-            .resolveImageView = resolveView,
-            .resolveImageLayout = resolveView
-                ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-                : VK_IMAGE_LAYOUT_UNDEFINED,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            // The post-fog mirror-preview pass loads this multisampled image
-            // before resolving it again. Discarding the source here leaves
-            // that later LOAD undefined, even though this pass's resolve is
-            // valid, and manifests as full-screen scanline corruption.
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        };
-        const VkRenderingInfo renderingInfo {
-            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-            .renderArea = { .offset = { 0, 0 }, .extent = extent },
-            .layerCount = 1,
-            .colorAttachmentCount = 1,
-            .pColorAttachments = &attachment,
-        };
-        const VkViewport viewport {
+        const VkExtent2D integrationExtent = atmospherePass_.extent();
+        const VkImageView resolveView = multisampleComposite
+            ? swapchain_.resolveColorView()
+            : VK_NULL_HANDLE;
+        const VkImageView colorView = multisampleComposite
+            ? swapchain_.renderColorView()
+            : swapchain_.resolvedColorView();
+        const VkViewport compositeViewport {
             .x = 0.0f,
             .y = static_cast<float>(extent.height),
             .width = static_cast<float>(extent.width),
@@ -1254,16 +1289,69 @@ private:
             .minDepth = 0.0f,
             .maxDepth = 1.0f,
         };
-        const VkRect2D scissor { .offset = { 0, 0 }, .extent = extent };
+        const VkViewport integrationViewport {
+            .x = 0.0f,
+            .y = static_cast<float>(integrationExtent.height),
+            .width = static_cast<float>(integrationExtent.width),
+            .height = -static_cast<float>(integrationExtent.height),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
 
         const auto recordMedium = [&, this](
             const RenderFrameData::Lighting::Atmosphere& atmosphere,
             const RenderFrameData::OverworldFogVolume* volume,
             uint32_t sampleCount) {
+            VkRect2D compositeScissor {
+                .offset = { 0, 0 },
+                .extent = extent,
+            };
+            if (volume != nullptr) {
+                const std::optional<AtmosphereScreenRect> projected =
+                    projectAtmosphereVolumeToScreen(
+                        clipFromWorld,
+                        volume->minimum,
+                        volume->maximum,
+                        extent.width,
+                        extent.height);
+                if (!projected) {
+                    return;
+                }
+                compositeScissor = {
+                    .offset = {
+                        static_cast<int32_t>(projected->x),
+                        static_cast<int32_t>(projected->y),
+                    },
+                    .extent = {
+                        projected->width,
+                        projected->height,
+                    },
+                };
+            }
+            const bool fullScreen = compositeScissor.offset.x == 0 &&
+                compositeScissor.offset.y == 0 &&
+                compositeScissor.extent.width == extent.width &&
+                compositeScissor.extent.height == extent.height;
+            const VkRect2D integrationScissor = atmosphereIntegrationRect(
+                compositeScissor, extent, integrationExtent);
+            ++stats_.atmosphereMediaCount;
+            stats_.atmosphereCompositePixels +=
+                static_cast<uint64_t>(compositeScissor.extent.width) *
+                compositeScissor.extent.height;
+            stats_.atmosphereUnscissoredPixels +=
+                static_cast<uint64_t>(extent.width) * extent.height;
+
             // Each medium reads the result of the preceding one. This keeps
             // ordinary height atmosphere and disjoint fog-of-war volumes
-            // composable without a fixed GPU-side volume-count limit.
-            swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
+            // composable without a fixed GPU-side volume-count limit. A
+            // bounded volume only needs the source pixels its projected box
+            // can touch.
+            swapchain_.copyResolvedSceneColor(
+                commandBuffer,
+                stats_,
+                fullScreen
+                    ? std::nullopt
+                    : std::optional<VkRect2D> { compositeScissor });
 
             GpuDrawInstance pushConstants {};
             pushConstants.vertices = matrixColumns(inverse(clipFromWorld));
@@ -1340,15 +1428,89 @@ private:
                         config::fogOfWarColorNoiseSpeed
                     : 0.0f,
             };
+            pushConstants.gridColor = {
+                static_cast<float>(integrationExtent.width),
+                static_cast<float>(integrationExtent.height),
+                static_cast<float>(extent.width),
+                static_cast<float>(extent.height),
+            };
 
-            vkCmdBeginRendering(commandBuffer, &renderingInfo);
+            const VkRenderingAttachmentInfo integrationAttachment {
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = atmospherePass_.imageView(),
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            };
+            const VkRenderingInfo integrationRenderingInfo {
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = integrationScissor,
+                .layerCount = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments = &integrationAttachment,
+            };
+
+            atmospherePass_.prepareTarget(commandBuffer, stats_);
+            vkCmdBeginRendering(commandBuffer, &integrationRenderingInfo);
             ++stats_.renderPasses;
             vkCmdBindPipeline(
-                commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                integrationPipeline);
             ++stats_.pipelineBinds;
             bindDescriptorSet(commandBuffer);
-            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+            vkCmdSetViewport(commandBuffer, 0, 1, &integrationViewport);
+            vkCmdSetScissor(commandBuffer, 0, 1, &integrationScissor);
+            vkCmdPushConstants(
+                commandBuffer,
+                pipelines_.layout(),
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                0,
+                sizeof(GpuDrawInstance),
+                &pushConstants);
+            vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+            ++stats_.drawCalls;
+            vkCmdEndRendering(commandBuffer);
+            atmospherePass_.publishTarget(commandBuffer, stats_);
+
+            // Opaque/translucent scene rendering has already produced a
+            // single-sample resolve. The ordinary path writes directly into
+            // it; the mirror continuation resolves the updated subregion back
+            // from MSAA. Partial volumes load the untouched attachment area.
+            const VkRenderingAttachmentInfo compositeAttachment {
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = colorView,
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .resolveMode = resolveView
+                    ? VK_RESOLVE_MODE_AVERAGE_BIT
+                    : VK_RESOLVE_MODE_NONE,
+                .resolveImageView = resolveView,
+                .resolveImageLayout = resolveView
+                    ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                    : VK_IMAGE_LAYOUT_UNDEFINED,
+                .loadOp = fullScreen
+                    ? VK_ATTACHMENT_LOAD_OP_DONT_CARE
+                    : VK_ATTACHMENT_LOAD_OP_LOAD,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            };
+            const VkRenderingInfo compositeRenderingInfo {
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = compositeScissor,
+                .layerCount = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments = &compositeAttachment,
+            };
+
+            vkCmdBeginRendering(commandBuffer, &compositeRenderingInfo);
+            ++stats_.renderPasses;
+            vkCmdBindPipeline(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                compositePipeline);
+            ++stats_.pipelineBinds;
+            bindDescriptorSet(commandBuffer);
+            vkCmdSetViewport(commandBuffer, 0, 1, &compositeViewport);
+            vkCmdSetScissor(commandBuffer, 0, 1, &compositeScissor);
             vkCmdPushConstants(
                 commandBuffer,
                 pipelines_.layout(),
@@ -3065,6 +3227,7 @@ private:
     VulkanShadowPass& shadowPass_;
     bool previewDescriptor_ = false;
     VulkanSsaoPass& ssaoPass_;
+    VulkanAtmospherePass& atmospherePass_;
     VulkanSceneDescriptors& descriptors_;
     VulkanPipelineFactory& pipelines_;
     VulkanModelResources& models_;

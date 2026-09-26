@@ -62,6 +62,8 @@ inline constexpr std::string_view ssaoFrag = "ssao.frag.glsl";
 inline constexpr std::string_view ssaoCompositeFrag = "ssao_composite.frag.glsl";
 inline constexpr std::string_view tonemapFrag = "tonemap.frag.glsl";
 inline constexpr std::string_view atmosphereFrag = "atmosphere.frag.glsl";
+inline constexpr std::string_view atmosphereCompositeFrag =
+    "atmosphere_composite.frag.glsl";
 inline constexpr std::string_view worldTransitionFrag =
     "world_transition.frag.glsl";
 
@@ -82,6 +84,7 @@ inline constexpr auto sources = std::to_array<std::string_view>({
     ssaoCompositeFrag,
     tonemapFrag,
     atmosphereFrag,
+    atmosphereCompositeFrag,
     worldTransitionFrag,
 });
 
