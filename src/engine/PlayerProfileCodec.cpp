@@ -1,7 +1,6 @@
 #include "engine/PlayerProfile.hpp"
 
 #include "engine/render/RenderResolution.hpp"
-#include "engine/render/WaterConfig.hpp"
 
 #include <nlohmann/json.hpp>
 

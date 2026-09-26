@@ -783,6 +783,9 @@ Level Level::loadFromLayers(
                 if (*tile == TileType::PressurePlate) {
                     level.pressurePlates_.push_back(position);
                 }
+                if (*tile == TileType::End) {
+                    level.ends_.push_back(position);
+                }
             }
         }
     }

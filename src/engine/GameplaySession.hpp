@@ -8,6 +8,7 @@
 #include "engine/Rules.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <optional>
@@ -15,6 +16,17 @@
 #include <vector>
 
 namespace sokoban {
+
+// An input as far as solutions are concerned: one that started something.
+enum class PlayerInput : std::uint8_t {
+    Up,
+    Down,
+    Left,
+    Right,
+    CycleHero,
+    Interact,
+    Undo,
+};
 
 // Headless orchestration for one playable screen. This owns command buffering,
 // authoritative state, action timing, history, undo/restart, and automatic
@@ -47,6 +59,11 @@ public:
     };
 
     void reset(const Level& level);
+    // Tools only (solution search): starts from `state` with an empty history,
+    // as though it were the level's opening state. Gameplay never calls this;
+    // checkpoints go through restore(), which validates their history.
+    void resetToState(
+        const GameState& state, EntityId activeHeroController);
     [[nodiscard]] Snapshot snapshot() const;
     [[nodiscard]] bool restore(const Level& level, const Snapshot& snapshot);
 
@@ -138,6 +155,18 @@ public:
         return lastWitchSwapDestinations_;
     }
     [[nodiscard]] int playerMoveCount() const { return playerMoveCount_; }
+    // Every input that started an action (or switched hero) since the last
+    // reset, restore or restart, in order. Debug builds save it as a solution
+    // when a screen is solved; held-key repeats appear once per step.
+    [[nodiscard]] const std::vector<PlayerInput>& inputLog() const
+    {
+        return inputLog_;
+    }
+    // After an undo, slides and belts wait for the next input-driven step.
+    [[nodiscard]] bool automaticMotionPaused() const
+    {
+        return autoMotionPaused_;
+    }
     [[nodiscard]] EntityId activeHeroController() const
     {
         return activeHeroController_;
@@ -378,6 +407,7 @@ private:
     // input-driven step.
     bool autoMotionPaused_ = false;
     ActionAdmissionPolicy actionAdmissionPolicy_;
+    std::vector<PlayerInput> inputLog_;
 };
 
 } // namespace sokoban

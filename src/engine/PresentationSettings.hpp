@@ -57,7 +57,8 @@ public:
     Grid grid;
     Geometry geometry;
     RenderFrameData::OutputTransform outputTransform;
-    RenderFrameData::WaterRendering water;
+    RenderFrameData::WaterRendering water =
+        RenderFrameData::defaultWaterRendering();
 
     void normalize();
     // Seeds per-tile render scales from the asset manifest's tile visuals.

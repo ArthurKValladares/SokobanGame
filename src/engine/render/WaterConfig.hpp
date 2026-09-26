@@ -1,13 +1,15 @@
 #pragma once
 
 #include "engine/Math.hpp"
+#include "engine/render/WaterGeometry.hpp"
+
+// Water look. Only the few files that apply or edit these values include
+// this header; RenderTypes.hpp gets its defaults from
+// RenderFrameData::defaultWaterRendering() so editing a value here does not
+// recompile the renderer's clients. Geometry lives in WaterGeometry.hpp.
 
 namespace sokoban::config {
 
-inline constexpr float waterDepthBelowGround = 0.18f;
-inline constexpr float waterExteriorMarginScale = 2.0f;
-inline constexpr float waterExteriorMinimumMarginTiles = 4.0f;
-inline constexpr float drownedPlayerDepthBelowGround = 1.0f;
 inline constexpr Vec4 waterSurfaceColor { 0.03f, 0.34f, 0.68f, 0.72f };
 
 inline constexpr float waterToneSpatialFrequency = 0.38f;

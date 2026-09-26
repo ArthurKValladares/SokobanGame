@@ -114,6 +114,28 @@ void rewriteOverworldSelectors(
     }
 }
 
+// Pads every layer to the widest row and tallest layer, the rectangular
+// shape the editor works on. Returns that width and height.
+std::pair<uint32_t, uint32_t> padToRectangle(Level::Definition& definition)
+{
+    uint32_t width = 0;
+    uint32_t height = 0;
+    for (const std::vector<std::string>& layer : definition.layers) {
+        height = std::max(height, static_cast<uint32_t>(layer.size()));
+        for (const std::string& row : layer) {
+            width = std::max(width, static_cast<uint32_t>(row.size()));
+        }
+    }
+    const char fill = tileTypeToChar(TileType::Air);
+    for (std::vector<std::string>& layer : definition.layers) {
+        layer.resize(height, std::string(width, fill));
+        for (std::string& row : layer) {
+            row.resize(width, fill);
+        }
+    }
+    return { width, height };
+}
+
 } // namespace
 
 void LevelEditor::initialize(
@@ -1850,26 +1872,7 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
         return false;
     }
 
-    uint32_t width = 0;
-    uint32_t height = 0;
-    for (const std::vector<std::string>& layer : definition.layers) {
-        height = std::max(height, static_cast<uint32_t>(layer.size()));
-        for (const std::string& row : layer) {
-            width = std::max(width, static_cast<uint32_t>(row.size()));
-        }
-    }
-
-    for (size_t layerIndex = 0;
-         layerIndex < definition.layers.size();
-         ++layerIndex) {
-        const char fill = tileTypeToChar(TileType::Air);
-        definition.layers[layerIndex].resize(
-            height,
-            std::string(width, fill));
-        for (std::string& row : definition.layers[layerIndex]) {
-            row.resize(width, fill);
-        }
-    }
+    const auto [width, height] = padToRectangle(definition);
 
     document_.layers = std::move(definition.layers);
     document_.waterLayer = definition.waterLayer;
@@ -1893,6 +1896,46 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     if (recordHistory) {
         recordDocumentChange(before);
     }
+    return true;
+}
+
+bool LevelEditor::reloadFromDisk()
+{
+    if (document_.loadedPath.empty() || document_.dirty || strokeBefore_ ||
+        decorationTransformBefore_) {
+        return false;
+    }
+    const std::filesystem::path path = document_.loadedPath;
+    try {
+        Level::Definition onDisk = Level::loadDefinitionFromFile(path);
+        (void)padToRectangle(onDisk);
+        // The editor's own saves land here too; they change nothing.
+        if (onDisk.layers == document_.layers &&
+            onDisk.waterLayer == document_.waterLayer &&
+            onDisk.character == document_.character &&
+            onDisk.decorations == document_.decorations &&
+            onDisk.selectors == document_.selectors) {
+            return false;
+        }
+    } catch (const std::exception&) {
+        // A half-written or invalid file: keep the document until it parses.
+        return false;
+    }
+    const bool editing = document_.editingDocument;
+    const bool playing = document_.playingDraft;
+    const int activeLayer = document_.activeLayer;
+    if (!loadDocument(path, false)) {
+        return false;
+    }
+    // The history described the old contents.
+    editHistory_.clear();
+    redoHistory_.clear();
+    pendingMove_.reset();
+    document_.editingDocument = editing;
+    document_.playingDraft = playing;
+    setActiveLayer(activeLayer);
+    document_.status =
+        "Reloaded " + path.filename().string() + " after it changed on disk.";
     return true;
 }
 

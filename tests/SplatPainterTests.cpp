@@ -5,6 +5,7 @@
 #include "TestHarness.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/LevelCatalog.hpp"
 #include "engine/ContentPipeline.hpp"
 #include "engine/SplatPainter.hpp"
 #include "engine/render/ImageData.hpp"

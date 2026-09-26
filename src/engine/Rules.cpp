@@ -500,16 +500,20 @@ bool isEndUnlocked(const Level& level, const GameState& state)
 
 bool isAtUnlockedEnd(const Level& level, const GameState& state)
 {
-    return !anyPlayerDead(state) && isEndUnlocked(level, state) &&
-        [&] {
-            for (const std::size_t i :
-                 std::views::iota(std::size_t { 0 }, state.players.size())) {
-                if (!level.isEnd(playerCell(state, i))) {
-                    return false;
-                }
-            }
-            return true;
-        }();
+    if (level.ends().empty() || anyPlayerDead(state) ||
+        !isEndUnlocked(level, state)) {
+        return false;
+    }
+    // Every hero stands on an End, and every End holds a hero.
+    for (const std::size_t i :
+         std::views::iota(std::size_t { 0 }, state.players.size())) {
+        if (!level.isEnd(playerCell(state, i))) {
+            return false;
+        }
+    }
+    return std::ranges::all_of(level.ends(), [&](GridPosition3 end) {
+        return playerBlocksAt(state, end);
+    });
 }
 
 namespace {

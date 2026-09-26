@@ -2,7 +2,7 @@
 
 #include "engine/Character.hpp"
 #include "engine/Math.hpp"
-#include "engine/LevelCatalog.hpp"
+#include "engine/LevelLocation.hpp"
 #include "engine/TileTypes.hpp"
 
 #include <cstdint>
@@ -140,6 +140,7 @@ public:
     [[nodiscard]] const std::vector<MovableTile>& movableTiles() const { return movableTiles_; }
     [[nodiscard]] const std::vector<GridPosition3>& enemyStarts() const { return enemyStarts_; }
     [[nodiscard]] const std::vector<GridPosition3>& pressurePlates() const { return pressurePlates_; }
+    [[nodiscard]] const std::vector<GridPosition3>& ends() const { return ends_; }
     [[nodiscard]] std::optional<uint32_t> waterLayer() const { return waterLayer_; }
     [[nodiscard]] const std::vector<Decoration>& decorations() const { return decorations_; }
     [[nodiscard]] const std::vector<ScreenSelector>& selectors() const { return selectors_; }
@@ -161,6 +162,7 @@ private:
     std::vector<MovableTile> movableTiles_;
     std::vector<GridPosition3> enemyStarts_;
     std::vector<GridPosition3> pressurePlates_;
+    std::vector<GridPosition3> ends_;
     std::vector<TileType> tiles_;
     std::optional<uint32_t> waterLayer_;
     std::vector<Decoration> decorations_;

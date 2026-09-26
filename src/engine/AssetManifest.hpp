@@ -74,6 +74,8 @@ public:
         // textures (the ground splat weight map) must not be: a painted 50%
         // grey has to arrive at the shader as a 0.5 blend weight, not 0.21.
         TextureColorSpace colorSpace = TextureColorSpace::Srgb;
+
+        bool operator==(const Texture&) const = default;
     };
 
     struct Model {
@@ -81,12 +83,16 @@ public:
             std::string path;
             std::string node;
             bool rotateHalfTurn = false;
+
+            bool operator==(const Attachment&) const = default;
         };
 
         struct PrimitiveMaterial {
             std::string textureName;
             uint32_t textureIndex = 0;
             bool scrollV = false;
+
+            bool operator==(const PrimitiveMaterial&) const = default;
         };
 
         std::string name;
@@ -120,6 +126,8 @@ public:
             }
             return false;
         }
+
+        bool operator==(const Model&) const = default;
     };
 
     struct Animation {
@@ -129,29 +137,39 @@ public:
         // "", "player-idle", "player-move", "player-push", "player-pull",
         // "player-death", "player-dead-idle", or "enemy-attack"
         std::string role;
+
+        bool operator==(const Animation&) const = default;
     };
 
     struct TileVisual {
         RenderModel model = cubeModel; // cube renders as a colored box
         float scale = 1.0f;
+
+        bool operator==(const TileVisual&) const = default;
     };
 
     struct TileEntry {
         TileType tile = TileType::Ground;
         std::string modelName; // empty selects the procedural cube
         float scale = 1.0f;
+
+        bool operator==(const TileEntry&) const = default;
     };
 
     struct SoundSet {
         std::string name;
         std::vector<std::string> files; // relative to the assets root
         float volume = 1.0f; // relative to the master volume
+
+        bool operator==(const SoundSet&) const = default;
     };
 
     struct MusicTrack {
         int level = 0;
         std::string file; // relative to the assets root
         float volume = 1.0f; // multiplies the global music volume
+
+        bool operator==(const MusicTrack&) const = default;
     };
 
     // Throws std::runtime_error with JSON byte/context information on any
@@ -210,6 +228,13 @@ public:
     [[nodiscard]] const std::vector<std::string>& soundSet(std::string_view name) const;
     // Returns 1.0 for unknown set names.
     [[nodiscard]] float soundSetVolume(std::string_view name) const;
+    // Debug hot reload: takes the fields that can change while the game runs
+    // (tile scales, sound-set and music volumes) from `updated`, provided
+    // nothing else differs. Returns false, changing nothing, when anything
+    // structural does: ids, paths, models, textures, roles, tile models.
+    [[nodiscard]] bool adoptLiveFields(const AssetManifest& updated);
+
+    bool operator==(const AssetManifest&) const = default;
     // Returns nullptr when the level has no soundtrack.
     [[nodiscard]] const std::string* musicForLevel(int level) const;
 

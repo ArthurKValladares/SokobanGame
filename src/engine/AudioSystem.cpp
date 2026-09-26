@@ -349,6 +349,23 @@ void AudioSystem::setSoundVolume(float volume)
     }
 }
 
+void AudioSystem::applyManifestVolumes()
+{
+    if (manifest_ == nullptr) {
+        return;
+    }
+    footstepVolume_ =
+        std::clamp(manifest_->soundSetVolume("footsteps"), 0.0f, 1.0f);
+    stoneDragVolume_ =
+        std::clamp(manifest_->soundSetVolume("stone-drag"), 0.0f, 1.0f);
+    for (EngineHandle::OneShotSoundSet& set : engine_->oneShotSoundSets) {
+        set.volume =
+            std::clamp(manifest_->soundSetVolume(set.name), 0.0f, 1.0f);
+    }
+    setSoundVolume(soundVolume_);
+    setMusicVolume(musicVolume_);
+}
+
 void AudioSystem::setStoneDragVolume(float volume)
 {
     stoneDragVolume_ = std::clamp(volume, 0.0f, 1.0f);

@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -281,9 +282,10 @@ ShaderHotReload::Compiler glslcCompiler(
         const std::string& name = request.module.name;
         std::vector<std::string> command { glslc.string() };
         command.insert(command.end(), arguments.begin(), arguments.end());
-        command.push_back(name.find(".vert.") != std::string::npos
-                ? "-fshader-stage=vertex"
-                : "-fshader-stage=fragment");
+        const std::string_view stage = name.find(".vert.") != std::string::npos
+            ? "-fshader-stage=vertex"
+            : "-fshader-stage=fragment";
+        command.emplace_back(stage);
         command.push_back("-I");
         command.push_back(includeDirectory.string());
         command.push_back(request.module.source.string());

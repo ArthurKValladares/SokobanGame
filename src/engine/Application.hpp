@@ -145,6 +145,23 @@ private:
     void startEditorDraft(Level level);
     void playEditorDraft(std::optional<GridPosition3> heroStart);
     void handleDraftPlaybackShortcuts(const InputRouter::Frame& input);
+    // Reloads source levels, textures, the manifest and the animation
+    // catalog edited outside the game (DI-10). Called between frames.
+    void serviceSourceWatcher();
+    // False for smoke and evidence runs, which must not write into the
+    // source tree (source reloads, recorded solutions).
+    [[nodiscard]] bool developerFilesWritable() const
+    {
+        return smokeFrames_ == 0 && evidenceOutputDirectory_.empty();
+    }
+    void configureSourceWatcher();
+    void reloadSourceLevel(const std::filesystem::path& source);
+    void reloadSourceTexture(
+        const std::filesystem::path& source,
+        const std::string& textureName,
+        const std::string& relativePath);
+    void reloadSourceManifest(const std::filesystem::path& source);
+    void reloadSourceAnimationCatalog(const std::filesystem::path& source);
 #endif
     void handlePuzzleCompleted(const CampaignSession::PuzzleCompleted& completed);
     void beginLevelTransition(std::function<void()> midpointAction);

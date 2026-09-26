@@ -1,4 +1,5 @@
 #include "engine/SplatPainter.hpp"
+#include "engine/LevelCatalog.hpp"
 
 #include "engine/AssetManifest.hpp"
 #include "engine/ContentPipeline.hpp"

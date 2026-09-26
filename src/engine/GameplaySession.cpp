@@ -277,6 +277,27 @@ void GameplaySession::reset(const Level& level)
     witchSwapSequence_ = 0;
     lastWitchSwapDestinations_.clear();
     autoMotionPaused_ = false;
+    inputLog_.clear();
+}
+
+void GameplaySession::resetToState(
+    const GameState& state, EntityId activeHeroController)
+{
+    undoBaseState_ = state;
+    scheduler_.reset(undoBaseState_, stepDurationSeconds_);
+    pendingCommands_.clear();
+    undoHistory_.clear();
+    undoGroups_.clear();
+    nextCausalGroup_ = 1;
+    completedActionCount_ = 0;
+    playerMoveCount_ = 0;
+    activeHeroController_ = activeHeroController;
+    mirrorActivationSequence_ = 0;
+    lastMirrorSwapDestinations_.clear();
+    witchSwapSequence_ = 0;
+    lastWitchSwapDestinations_.clear();
+    autoMotionPaused_ = false;
+    inputLog_.clear();
 }
 
 void GameplaySession::setStepDurationSeconds(float durationSeconds)
@@ -517,6 +538,7 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
     witchSwapSequence_ = 0;
     lastWitchSwapDestinations_.clear();
     autoMotionPaused_ = normalized.automaticMotionPaused;
+    inputLog_.clear();
     return true;
 }
 
@@ -574,6 +596,7 @@ void GameplaySession::cycleActiveHero()
             std::next(current) == controllers.end()
         ? controllers.front()
         : *std::next(current);
+    inputLog_.push_back(PlayerInput::CycleHero);
 }
 
 GameplaySession::StartOutcome GameplaySession::runCommand(
@@ -928,6 +951,11 @@ GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
         lastWitchSwapDestinations_ = witchSwapEndpoints;
         ++witchSwapSequence_;
     }
+    inputLog_.push_back(
+        input == MoveDirection::Up ? PlayerInput::Up
+        : input == MoveDirection::Down ? PlayerInput::Down
+        : input == MoveDirection::Left ? PlayerInput::Left
+                                       : PlayerInput::Right);
     return StartOutcome::Started;
 }
 
@@ -1043,6 +1071,7 @@ GameplaySession::StartOutcome GameplaySession::tryStartMirrorAction(
     }
     autoMotionPaused_ = false;
     ++mirrorActivationSequence_;
+    inputLog_.push_back(PlayerInput::Interact);
     return StartOutcome::Started;
 }
 
@@ -1075,6 +1104,7 @@ GameplaySession::StartOutcome GameplaySession::tryStartUndoMove()
         return StartOutcome::Refused;
     }
     autoMotionPaused_ = true;
+    inputLog_.push_back(PlayerInput::Undo);
     return StartOutcome::Started;
 }
 
@@ -1102,6 +1132,8 @@ GameplaySession::StartOutcome GameplaySession::tryStartRestart(
         return StartOutcome::Refused;
     }
     autoMotionPaused_ = false;
+    // A restart begins a fresh attempt; the log describes that attempt only.
+    inputLog_.clear();
     return StartOutcome::Started;
 }
 

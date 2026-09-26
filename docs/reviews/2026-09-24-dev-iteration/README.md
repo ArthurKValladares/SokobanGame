@@ -67,6 +67,36 @@ Packet C was implemented on September 25, 2026, and verified on Linux.
     change, and older saves and settings are now set aside instead of
     migrated (agreed for early development).
 
+Packet D was implemented on September 25, 2026, and verified on Linux.
+[The packet D evidence note](evidence/packet-d.md) has the details.
+
+- **DI-04:** a precompiled header of standard headers plus `Math.hpp`
+  (and `<vulkan/vulkan.h>` for the renderer and game) on the four
+  first-party targets, behind `SOKOBAN_PRECOMPILED_HEADERS`. A clean
+  core+ui build is 41% faster with clang and 10% faster with GCC. The test
+  runners are left out because of their per-suite `-Dmain` define. MSVC
+  timing is still open.
+- **DI-05:** touching `WaterConfig.hpp` now recompiles 5 TUs (was 111) and
+  `LevelCatalog.hpp` 14 (was 126).
+- **DI-14:**
+  - Recordings live in `solutions/`, matched to screens by a digest of
+    their gameplay content.
+  - The `solution_replay` test replays them in 0.05 s and names the step
+    and entity that diverged.
+  - Debug builds record every solve automatically on a worker thread,
+    keeping the shortest run per screen. `sokoban_solve_level` searches
+    for solutions; README.md > Solutions lists ideas for improving it.
+  - 17 of the 18 puzzle screens have a recording. Level 3 screen 2 still
+    needs one: the solver gave up after 5 million positions, but it is
+    solvable by hand and will be recorded the next time it is played in
+    a Debug build.
+  - Replaying found that level 3 screen 3 could be won by one hero on one
+    of its two Ends. A screen now needs every End occupied by a hero.
+- **DI-10:** a Debug source watcher reloads edited levels, textures, the
+  manifest's tile scales and volumes, and the animation catalog without a
+  restart. Structural manifest edits say a restart is needed. Models are
+  not reloaded.
+
 ## Assessment
 
 The biggest cost is not compilation. **Every Debug build of `sokoban` spends about 29 seconds re-encoding every texture to BC7, even when nothing changed.** The local build tree shows 27.6 s of BC7 encoding on the last Debug build. A cloud reproduction shows a no-op build taking 25.2 s, all of it in `sokoban_content`. This one step turns a one-line shader or constant tweak into a half-minute wait before the game can even start.

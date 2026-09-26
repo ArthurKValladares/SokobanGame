@@ -1,7 +1,7 @@
 #pragma once
 
 #include "engine/AsyncSaveStore.hpp"
-#include "engine/LevelCatalog.hpp"
+#include "engine/LevelLocation.hpp"
 #include "engine/PlayerProfile.hpp"
 #include "engine/SaveSlotState.hpp"
 

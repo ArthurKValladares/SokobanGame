@@ -155,6 +155,9 @@ struct StepResult {
 [[nodiscard]] bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 position);
 
 [[nodiscard]] bool isEndUnlocked(const Level& level, const GameState& state);
+// A screen is solved when every plate is covered, every living hero stands on
+// an End, and every End holds a hero. A level with more Ends than heroes needs
+// hero copies (mirrors) to be solved.
 [[nodiscard]] bool isAtUnlockedEnd(const Level& level, const GameState& state);
 
 // True when the world has an automatic action to resolve: a mutual turret

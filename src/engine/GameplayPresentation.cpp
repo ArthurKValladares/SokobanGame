@@ -4,7 +4,7 @@
 #include "engine/ParticleConfig.hpp"
 #include "engine/render/AnimationConfig.hpp"
 #include "engine/render/CameraConfig.hpp"
-#include "engine/render/WaterConfig.hpp"
+#include "engine/render/WaterGeometry.hpp"
 
 #include <algorithm>
 #include <cmath>

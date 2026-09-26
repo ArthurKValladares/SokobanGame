@@ -99,6 +99,9 @@ public:
     [[nodiscard]] float stoneDragVolume() const { return stoneDragVolume_; }
     void setFootstepIntervalSeconds(float seconds);
     [[nodiscard]] float footstepIntervalSeconds() const { return cadence_.intervalSeconds; }
+    // Re-reads the manifest's sound-set and music volumes (Debug hot reload
+    // after AssetManifest::adoptLiveFields).
+    void applyManifestVolumes();
     [[nodiscard]] bool available() const;
 
 private:

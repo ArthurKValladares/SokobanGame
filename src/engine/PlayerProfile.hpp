@@ -1,7 +1,7 @@
 #pragma once
 
 #include "engine/GameplaySession.hpp"
-#include "engine/LevelCatalog.hpp"
+#include "engine/LevelLocation.hpp"
 #include "engine/ScreenSelectorState.hpp"
 #include "engine/SettingsTypes.hpp"
 

@@ -1727,6 +1727,39 @@ void testSaveShortcutAndLayerStepping()
     CHECK(!editor.layerLocked());
 }
 
+void testReloadFromDiskKeepsDraftsAndIgnoresOwnSaves()
+{
+    TEST("reloadFromDiskKeepsDraftsAndIgnoresOwnSaves");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    const std::filesystem::path path =
+        project.source / "level0" / "screen0.scr";
+    editor.newDocument(4, 3, false);
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::Wall));
+    CHECK(editor.saveDocument(path));
+    CHECK(editor.canUndo());
+    // The editor's own save is not an outside change.
+    CHECK(!editor.reloadFromDisk());
+    CHECK(editor.canUndo());
+
+    // An outside edit replaces a clean document and its stale history.
+    std::string text = readFile(path);
+    const std::size_t wall = text.find(tileTypeToChar(TileType::Wall));
+    CHECK(wall != std::string::npos);
+    text[wall] = tileTypeToChar(TileType::Air);
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << text;
+    CHECK(editor.reloadFromDisk());
+    CHECK(editor.documentLayers()[1][1][1] == tileTypeToChar(TileType::Air));
+    CHECK(!editor.canUndo());
+    CHECK(!editor.dirty());
+
+    // Unsaved edits are never replaced.
+    CHECK(editor.setCell({ 2, 1, 1 }, TileType::Wall));
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << readFile(path) << "\n";
+    CHECK(!editor.reloadFromDisk());
+    CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::Wall));
+}
+
 int main()
 {
     testDocumentCommandsAndUndo();
@@ -1764,6 +1797,7 @@ int main()
     testEyedropperRecentTilesAndToolCycling();
     testPlayFromCursorMovesTheFirstHeroWithoutEditing();
     testSaveShortcutAndLayerStepping();
+    testReloadFromDiskKeepsDraftsAndIgnoresOwnSaves();
 
     if (failures == 0) {
         std::cout << "LevelEditorTests: " << checks << " checks passed\n";

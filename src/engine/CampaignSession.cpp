@@ -1,4 +1,5 @@
 #include "engine/CampaignSession.hpp"
+#include "engine/LevelCatalog.hpp"
 
 #include <algorithm>
 #include <stdexcept>

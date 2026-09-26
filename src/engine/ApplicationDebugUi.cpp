@@ -188,7 +188,7 @@ void drawWaterSection(const ApplicationDebugUi::Context& context)
 if (ImGui::CollapsingHeader("Water")) {
     auto& water = settings.water;
     if (ImGui::Button("Reset Water Defaults")) {
-        water = {};
+        water = RenderFrameData::defaultWaterRendering();
     }
     ImGui::TextDisabled(
         "Live renderer tuning; reset restores WaterConfig defaults.");

@@ -7,3 +7,6 @@ out/
 imgui.ini
 __pycache__/
 *.pyc
+
+# Recordings of unsaved editor drafts (see README.md > Solutions).
+solutions/drafts/

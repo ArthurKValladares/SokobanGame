@@ -1,14 +1,18 @@
 #include "engine/Application.hpp"
 #if SOKOBAN_ENABLE_DEBUG_UI
 #include "engine/ApplicationTools.hpp"
+#include "engine/AtomicFile.hpp"
+#include "engine/ContentPipeline.hpp"
 #include "engine/DebugUi.hpp"
 #include "engine/DevSession.hpp"
 #endif
 
 #include "engine/ParticleConfig.hpp"
 #include "engine/render/CameraConfig.hpp"
+#include "engine/render/CompressedTextureArtifact.hpp"
+#include "engine/render/ImageData.hpp"
 #include "engine/render/FogOfWarConfig.hpp"
-#include "engine/render/WaterConfig.hpp"
+#include "engine/render/WaterGeometry.hpp"
 
 #include "engine/Log.hpp"
 #include "engine/RenderFrameBuilder.hpp"
@@ -22,9 +26,11 @@
 
 #include <algorithm>
 #include <exception>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <ranges>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -220,7 +226,8 @@ Application::Application(ApplicationOptions options)
         presentationSettings_.lighting.ambientOcclusionEnabled =
             evidenceAmbientOcclusionEnabled_;
         if (evidenceWaterEnabled_) {
-            presentationSettings_.water = {};
+            presentationSettings_.water =
+                RenderFrameData::defaultWaterRendering();
         }
         renderer_.setFrustumCullingEnabled(
             options.evidenceFrustumCullingEnabled);
@@ -299,6 +306,7 @@ Application::Application(ApplicationOptions options)
     });
     DebugUi::addTab("Asset Manifest", [this] {
         tools_->assetManifestDebugUi.draw(tools_->assetManifestEditor);
+        tools_->drawManifestReloadStatus();
     });
     DebugUi::addTab("Level Editor", [this] {
         tools_->levelEditorDebugUi.draw(
@@ -363,6 +371,7 @@ Application::Application(ApplicationOptions options)
                     renderer_);
             },
             });
+        tools_->drawSolutionPanel();
     });
     DebugUi::addTab("Animation", [this] {
         if (tools_->animationCatalogDebugUi.draw(
@@ -816,6 +825,8 @@ bool Application::run()
             renderer_.invalidateTileThumbnails();
         }
         tools_->serviceShaderHotReload(renderer_);
+        serviceSourceWatcher();
+        tools_->serviceSolutionStore();
 #endif
         input_.beginFrame();
 
@@ -1066,9 +1077,40 @@ void Application::update(
     if (gameplayResult.draftSolved) {
 #if SOKOBAN_ENABLE_DEBUG_UI
         tools_->levelEditor.markDraftSolved();
+        const std::filesystem::path& draftPath =
+            tools_->levelEditor.loadedDocumentPath();
+        if (developerFilesWritable()) {
+            tools_->saveSolve({
+                .name = draftPath.empty() ? std::string("the editor draft")
+                                          : draftPath.filename().string() +
+                        " (draft)",
+                .definition = tools_->levelEditor.documentDefinition(),
+                .inputs = gameplaySession_.inputLog(),
+            });
+        }
 #endif
     }
     if (gameplayResult.screenSolved) {
+#if SOKOBAN_ENABLE_DEBUG_UI
+        if (!campaign_.inOverworld() && developerFilesWritable()) {
+            const LevelLocation location {
+                .level = campaign_.currentLevel(),
+                .screen = campaign_.currentScreen(),
+            };
+            try {
+                tools_->saveSolve({
+                    .name = "level" + std::to_string(location.level) +
+                        "/screen" + std::to_string(location.screen),
+                    .definition = Level::loadDefinitionFromFile(
+                        screenPath(location.level, location.screen)),
+                    .inputs = gameplaySession_.inputLog(),
+                });
+            } catch (const std::exception& error) {
+                log::warning(log::Category::Editor)
+                    << "Could not record the solve: " << error.what();
+            }
+        }
+#endif
         advanceScreen();
     } else if (input.gameplay.interactPressed &&
         campaign_.inOverworld() && !gameplaySession_.moving() &&
@@ -1963,6 +2005,222 @@ void Application::playEditorDraft(std::optional<GridPosition3> heroStart)
                 &tools_->overworldMapEditor, heroStart)) {
         startEditorDraft(std::move(*level));
     }
+}
+
+namespace {
+
+// Copies an edited source file over its staged copy, so a later load (and
+// the next launch) sees it without a content build.
+void mirrorIntoRuntime(
+    const std::filesystem::path& source,
+    const std::filesystem::path& runtime)
+{
+    std::ifstream stream(source, std::ios::binary);
+    if (!stream) {
+        throw std::runtime_error("cannot read " + source.string());
+    }
+    std::ostringstream contents;
+    contents << stream.rdbuf();
+    std::filesystem::create_directories(runtime.parent_path());
+    atomicFile::write(runtime, contents.str());
+}
+
+} // namespace
+
+void Application::configureSourceWatcher()
+{
+    const std::filesystem::path sourceRoot = SOKOBAN_SOURCE_ROOT_DIR;
+    const std::filesystem::path sourceAssets = SOKOBAN_SOURCE_ASSET_DIR;
+    SourceWatcher& watcher = tools_->sourceWatcher;
+    watcher.watchTree(sourceRoot / "levels", { ".scr", ".json" });
+    std::vector<std::filesystem::path> files {
+        sourceAssets / "manifest.json",
+        sourceAssets / "animation_catalog.json",
+    };
+    for (const AssetManifest::Texture& texture : assetManifest_.textures()) {
+        files.push_back(sourceAssets / texture.path);
+    }
+    watcher.setWatchedFiles(files);
+    (void)watcher.poll();
+    log::info(log::Category::Assets)
+        << "Watching " << watcher.watchedCount()
+        << " source files for edits made outside the game.";
+}
+
+void Application::serviceSourceWatcher()
+{
+    // Smoke and evidence runs must see exactly the staged content.
+    if (!developerFilesWritable()) {
+        return;
+    }
+    const std::uint64_t now = SDL_GetTicks();
+    if (now - tools_->lastSourcePollTicks < 500) {
+        return;
+    }
+    tools_->lastSourcePollTicks = now;
+    if (!tools_->sourceWatcherConfigured) {
+        tools_->sourceWatcherConfigured = true;
+        configureSourceWatcher();
+        // Levels may have changed while the game was closed.
+        tools_->requestSolutionReconcile();
+        return;
+    }
+    const std::filesystem::path sourceRoot = SOKOBAN_SOURCE_ROOT_DIR;
+    const std::filesystem::path sourceAssets = SOKOBAN_SOURCE_ASSET_DIR;
+    for (const std::filesystem::path& changed : tools_->sourceWatcher.poll()) {
+        try {
+            const std::filesystem::path relativeToLevels =
+                changed.lexically_relative(sourceRoot / "levels");
+            if (!relativeToLevels.empty() &&
+                *relativeToLevels.begin() != "..") {
+                reloadSourceLevel(changed);
+                continue;
+            }
+            if (changed == (sourceAssets / "manifest.json").lexically_normal()) {
+                reloadSourceManifest(changed);
+                continue;
+            }
+            if (changed ==
+                (sourceAssets / "animation_catalog.json").lexically_normal()) {
+                reloadSourceAnimationCatalog(changed);
+                continue;
+            }
+            for (const AssetManifest::Texture& texture :
+                 assetManifest_.textures()) {
+                if ((sourceAssets / texture.path).lexically_normal() ==
+                    changed) {
+                    reloadSourceTexture(changed, texture.name, texture.path);
+                    break;
+                }
+            }
+        } catch (const std::exception& error) {
+            log::error(log::Category::Assets)
+                << "Could not reload " << changed.string() << ": "
+                << error.what();
+        }
+    }
+}
+
+void Application::reloadSourceLevel(const std::filesystem::path& source)
+{
+    const std::filesystem::path sourceLevels =
+        std::filesystem::path(SOKOBAN_SOURCE_ROOT_DIR) / "levels";
+    const std::filesystem::path relative =
+        source.lexically_relative(sourceLevels);
+    // Deleted (soft-deleted) levels are not part of the package.
+    if (*relative.begin() == "Deleted") {
+        return;
+    }
+    mirrorIntoRuntime(source, assetRoot_ / "levels" / relative);
+    (void)refreshContentPackageIndex(assetRoot_);
+    // A saved draft may now match a recording waiting in solutions/drafts/.
+    tools_->requestSolutionReconcile();
+
+    LevelEditor& editor = tools_->levelEditor;
+    if (!editor.loadedDocumentPath().empty() &&
+        std::filesystem::absolute(editor.loadedDocumentPath())
+                .lexically_normal() ==
+            std::filesystem::absolute(source).lexically_normal()) {
+        if (editor.dirty()) {
+            log::warning(log::Category::Editor)
+                << source.filename().string()
+                << " changed on disk; the editor keeps your unsaved draft.";
+        } else if (editor.reloadFromDisk()) {
+            log::info(log::Category::Editor)
+                << "Reloaded " << source.filename().string()
+                << " in the editor after it changed on disk.";
+        }
+    }
+
+    const std::optional<LevelLocation> location =
+        levelLocationFromScreenPath(relative);
+    const bool currentScreen = location && !campaign_.inOverworld() &&
+        location->level == campaign_.currentLevel() &&
+        location->screen == campaign_.currentScreen();
+    if (currentScreen && !editor.editingDocument() &&
+        !editor.playingDraft() && !levelTransition_.active()) {
+        // The checkpoint describes the old layout; start the new one fresh
+        // rather than failing to restore it.
+        playerProfile_.activeScreen.reset();
+        loadCurrentScreen();
+        log::info(log::Category::Gameplay)
+            << "Reloaded level " << location->level << " screen "
+            << location->screen << " after its source changed.";
+    } else if (!location) {
+        log::info(log::Category::Assets)
+            << "Mirrored " << relative.generic_string()
+            << "; it applies the next time it is loaded.";
+    }
+}
+
+void Application::reloadSourceTexture(
+    const std::filesystem::path& source,
+    const std::string& textureName,
+    const std::string& relativePath)
+{
+    const std::filesystem::path runtime = assetRoot_ / relativePath;
+    mirrorIntoRuntime(source, runtime);
+    // Prepared (BC7) copies of the old pixels would otherwise win on the
+    // next load.
+    invalidateCompressedTextureArtifactsForSource(assetRoot_, relativePath);
+    (void)refreshContentPackageIndex(assetRoot_);
+    const RenderTexture texture =
+        assetManifest_.findTextureIdByName(textureName);
+    // A texture that is not resident yet picks the file up when it loads.
+    const bool updated = !texture.isNone() &&
+        renderer_.updateTexture(texture, loadRgbaImage(runtime));
+    log::info(log::Category::Assets)
+        << "Reloaded texture " << textureName
+        << (updated ? "" : " (loads on first use)");
+}
+
+void Application::reloadSourceManifest(const std::filesystem::path& source)
+{
+    AssetManifest updated = AssetManifest::loadFromFile(source);
+    if (assetManifest_ == updated) {
+        // An edit that needed a restart may have been reverted.
+        if (!tools_->manifestReloadStatus.empty()) {
+            tools_->manifestReloadStatus =
+                "manifest.json matches the running game again.";
+        }
+        return;
+    }
+    if (!assetManifest_.adoptLiveFields(updated)) {
+        tools_->manifestReloadStatus =
+            "manifest.json changed in a way that needs a restart (a model, "
+            "texture, animation, role or tile model). Tile scales and "
+            "volumes apply live.";
+        log::warning(log::Category::Assets) << tools_->manifestReloadStatus;
+        return;
+    }
+    mirrorIntoRuntime(source, assetRoot_ / "manifest.json");
+    (void)refreshContentPackageIndex(assetRoot_);
+    presentationSettings_.applyTileScales(assetManifest_);
+    audioSystem_.applyManifestVolumes();
+    tools_->manifestReloadStatus =
+        "Applied manifest.json live (tile scales and volumes).";
+    log::info(log::Category::Assets) << tools_->manifestReloadStatus;
+}
+
+void Application::reloadSourceAnimationCatalog(
+    const std::filesystem::path& source)
+{
+    AnimationCatalogEditor& editor = tools_->animationCatalogEditor;
+    if (editor.dirty()) {
+        log::warning(log::Category::Assets)
+            << "animation_catalog.json changed on disk; the Animation tab "
+               "keeps your unsaved edits.";
+        return;
+    }
+    if (!editor.reload(assetManifest_)) {
+        log::warning(log::Category::Assets) << editor.status();
+        return;
+    }
+    mirrorIntoRuntime(source, assetRoot_ / "animation_catalog.json");
+    (void)refreshContentPackageIndex(assetRoot_);
+    animationCatalog_ = editor.catalog();
+    log::info(log::Category::Assets)
+        << "Reloaded animation_catalog.json after it changed on disk.";
 }
 
 void Application::handleDraftPlaybackShortcuts(const InputRouter::Frame& input)

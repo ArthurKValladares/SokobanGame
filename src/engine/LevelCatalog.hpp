@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/LevelLocation.hpp"
+
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -8,13 +10,6 @@
 #include <vector>
 
 namespace sokoban {
-
-struct LevelLocation {
-    int level = 0;
-    int screen = 0;
-
-    bool operator==(const LevelLocation&) const = default;
-};
 
 // Optional author-facing labels stored beside a level's screen files in
 // metadata.json. Empty labels deliberately mean "use the numbered fallback",

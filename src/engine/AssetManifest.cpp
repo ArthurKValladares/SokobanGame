@@ -862,4 +862,34 @@ TextureSourceIdentity manifestTextureSourceIdentity(
     };
 }
 
+bool AssetManifest::adoptLiveFields(const AssetManifest& updated)
+{
+    // Put this manifest's live values into a copy of the update; what is
+    // left over is structural and must match exactly.
+    AssetManifest structural = updated;
+    for (std::size_t index = 0; index < tileVisuals_.size(); ++index) {
+        structural.tileVisuals_[index].scale = tileVisuals_[index].scale;
+    }
+    if (structural.tiles_.size() == tiles_.size()) {
+        for (std::size_t index = 0; index < tiles_.size(); ++index) {
+            structural.tiles_[index].scale = tiles_[index].scale;
+        }
+    }
+    if (structural.sounds_.size() == sounds_.size()) {
+        for (std::size_t index = 0; index < sounds_.size(); ++index) {
+            structural.sounds_[index].volume = sounds_[index].volume;
+        }
+    }
+    if (structural.music_.size() == music_.size()) {
+        for (std::size_t index = 0; index < music_.size(); ++index) {
+            structural.music_[index].volume = music_[index].volume;
+        }
+    }
+    if (!(structural == *this)) {
+        return false;
+    }
+    *this = updated;
+    return true;
+}
+
 } // namespace sokoban

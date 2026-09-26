@@ -14,6 +14,8 @@
 #include "engine/OverworldMapEditor.hpp"
 #include "engine/InputRouter.hpp"
 #include "engine/ShaderHotReload.hpp"
+#include "engine/SolutionStore.hpp"
+#include "engine/SourceWatcher.hpp"
 #include "engine/SplatPainter.hpp"
 #include "engine/TuningDebugUi.hpp"
 #include "engine/render/VulkanRenderer.hpp"
@@ -21,12 +23,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace sokoban {
 
@@ -101,6 +106,17 @@ public:
     void drawShaderHotReloadOverlay(const VulkanRenderer& renderer);
     // The workspace's Session menu.
     void drawSessionMenu();
+    // A screen or draft was just solved: record it into solutions/ on a
+    // worker thread (engine/SolutionStore.hpp). Jobs run one at a time, in
+    // order; results go to the Log and the Solutions panel.
+    void saveSolve(solution::SolveToStore solve);
+    // Re-files recordings after level files change, e.g. a draft was saved.
+    void requestSolutionReconcile();
+    // Every frame: reports a finished job and starts the next one.
+    void serviceSolutionStore();
+    // Level Editor panel section: what the store did recently.
+    void drawSolutionPanel();
+    void drawManifestReloadStatus();
     [[nodiscard]] bool bakeTileThumbnails(
         VulkanRenderer& renderer,
         UiContext& ui,
@@ -168,6 +184,29 @@ private:
     void interruptTileStroke();
     void handleEditorShortcuts(const InputRouter::EditorInput& input);
 
+public:
+    // Source hot reload (DI-10). Application::serviceSourceWatcher drives it.
+    SourceWatcher sourceWatcher;
+    bool sourceWatcherConfigured = false;
+    std::uint64_t lastSourcePollTicks = 0;
+    // Shown under the Asset Manifest tab after a manifest file changes.
+    std::string manifestReloadStatus;
+
+private:
+    void reportSolutionStatus(std::string line, bool warning);
+
+    // A queued solve, or nullopt for a reconcile-only pass.
+    std::deque<std::optional<solution::SolveToStore>> solutionJobs_;
+    std::future<std::vector<solution::StoreChange>> solutionJob_;
+    std::string solutionJobName_;
+    std::size_t solutionJobInputs_ = 0;
+    struct LastSolve {
+        std::uint64_t digest = 0;
+        std::vector<solution::Input> inputs;
+        bool operator==(const LastSolve&) const = default;
+    };
+    std::optional<LastSolve> lastSolve_;
+    std::vector<std::string> solutionStatus_;
     std::unique_ptr<ShaderHotReload> shaderHotReload_;
     std::string shaderReloadStatus_;
     std::string shaderReloadDiagnostics_;

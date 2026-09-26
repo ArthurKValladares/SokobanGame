@@ -8,7 +8,7 @@
 #include "engine/render/SelectorRenderConfig.hpp"
 #include "engine/render/MirrorConfig.hpp"
 #include "engine/render/SceneConfig.hpp"
-#include "engine/render/WaterConfig.hpp"
+#include "engine/render/WaterGeometry.hpp"
 
 #include <algorithm>
 #include <array>

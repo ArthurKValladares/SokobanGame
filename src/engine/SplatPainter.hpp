@@ -1,6 +1,6 @@
 #pragma once
 
-#include "engine/LevelCatalog.hpp"
+#include "engine/LevelLocation.hpp"
 #include "engine/Math.hpp"
 #include "engine/SplatCanvas.hpp"
 #include "engine/render/RenderTypes.hpp"

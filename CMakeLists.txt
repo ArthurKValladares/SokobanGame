@@ -44,6 +44,8 @@ option(SOKOBAN_ENABLE_CLANG_TIDY
     "Run the selected clang-tidy checks while compiling Sokoban targets" OFF)
 option(SOKOBAN_WARNINGS_AS_ERRORS
     "Fail the build on any compiler warning in Sokoban's own targets" OFF)
+option(SOKOBAN_PRECOMPILED_HEADERS
+    "Precompile the standard headers every Sokoban library uses (off under clang-tidy)" ON)
 option(SOKOBAN_BUILD_FUZZ_TESTS
     "Build libFuzzer harnesses for hostile serialized input" OFF)
 option(SOKOBAN_INCREMENTAL_CONTENT
@@ -419,6 +421,48 @@ if(SOKOBAN_ENABLE_LTO)
     endif()
 endif()
 
+# Most first-party compile time is spent parsing the same standard headers.
+# One precompiled header per target holds those plus Math.hpp. First-party
+# headers that change often - config, tuning, render types - stay out, or
+# every edit to them would rebuild the PCH and then everything. clang-tidy
+# cannot consume another compiler's PCH, so tidy builds turn this off.
+set(SOKOBAN_PRECOMPILED_HEADER_LIST
+    <algorithm>
+    <array>
+    <atomic>
+    <chrono>
+    <cmath>
+    <cstddef>
+    <cstdint>
+    <cstring>
+    <filesystem>
+    <functional>
+    <map>
+    <memory>
+    <mutex>
+    <optional>
+    <span>
+    <string>
+    <string_view>
+    <unordered_map>
+    <utility>
+    <variant>
+    <vector>
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/Math.hpp"
+)
+
+# Extra arguments add target-specific headers, such as <vulkan/vulkan.h> for
+# the targets that talk to Vulkan.
+function(sokoban_enable_precompiled_headers target)
+    if(NOT SOKOBAN_PRECOMPILED_HEADERS OR SOKOBAN_ENABLE_CLANG_TIDY)
+        return()
+    endif()
+    foreach(header IN LISTS SOKOBAN_PRECOMPILED_HEADER_LIST ARGN)
+        target_precompile_headers(${target} PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:${header}>")
+    endforeach()
+endfunction()
+
 function(sokoban_enable_lto target)
     if(SOKOBAN_ENABLE_LTO)
         set_property(TARGET ${target} PROPERTY
@@ -487,11 +531,15 @@ add_library(sokoban_core STATIC
     src/engine/RenderFrameBuilder.cpp
     src/engine/RenderFrameBuilderEditor.cpp
     src/engine/RenderFrameParts.cpp
+    src/engine/render/RenderTypes.cpp
     src/engine/Reservation.cpp
     src/engine/Rules.cpp
     src/engine/RuntimeContent.cpp
     src/engine/SaveSlotManager.cpp
     src/engine/SaveStore.cpp
+    src/engine/Solution.cpp
+    src/engine/SolutionStore.cpp
+    src/engine/SourceWatcher.cpp
     src/engine/SettingsCoordinator.cpp
     src/engine/SettingsTypes.cpp
     src/engine/ShaderHotReload.cpp
@@ -562,6 +610,7 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(sokoban_core PRIVATE ${CMAKE_DL_LIBS} m)
 endif()
 sokoban_enable_warnings(sokoban_core)
+sokoban_enable_precompiled_headers(sokoban_core)
 sokoban_enable_lto(sokoban_core)
 
 add_library(sokoban_ui STATIC
@@ -584,6 +633,7 @@ target_link_libraries(sokoban_ui
     PRIVATE sokoban_stb
 )
 sokoban_enable_warnings(sokoban_ui)
+sokoban_enable_precompiled_headers(sokoban_ui)
 sokoban_enable_lto(sokoban_ui)
 
 if(MSVC)
@@ -643,6 +693,7 @@ target_compile_definitions(sokoban_render_vulkan PRIVATE
     SOKOBAN_ENABLE_VALIDATION=$<IF:$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_VALIDATION}>>,1,0>
 )
 sokoban_enable_warnings(sokoban_render_vulkan)
+sokoban_enable_precompiled_headers(sokoban_render_vulkan <vulkan/vulkan.h>)
 sokoban_enable_lto(sokoban_render_vulkan)
 
 # VMA is a vendored single-header implementation. Keep third-party diagnostics
@@ -656,8 +707,25 @@ else()
         src/engine/render/VulkanMemoryAllocatorImplementation.cpp
         PROPERTIES COMPILE_OPTIONS "-w")
 endif()
+# Third-party implementation units compile with their own configuration
+# macros and warning levels; they gain nothing from the shared PCH.
+set_source_files_properties(
+    src/engine/MiniaudioImpl.cpp
+    src/engine/render/VulkanMemoryAllocatorImplementation.cpp
+    ${SOKOBAN_IMGUI_SOURCES}
+    PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
 target_link_libraries(sokoban_content_tool PRIVATE sokoban_core)
+
+# Searches for puzzle solutions and records them for the solution_replay test.
+# A developer tool: nothing in the build runs it. See README.md > Solutions.
+add_executable(sokoban_solve_level tools/SolveLevel.cpp)
+target_include_directories(sokoban_solve_level PRIVATE src)
+target_link_libraries(sokoban_solve_level PRIVATE sokoban_core)
+set_target_properties(sokoban_solve_level PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tools/$<CONFIG>"
+)
+sokoban_enable_warnings(sokoban_solve_level)
 
 set(SOKOBAN_APPLICATION_SOURCES
     src/main.cpp
@@ -784,6 +852,7 @@ if(MSVC AND SOKOBAN_INSTALL_EXTERNAL_SYMBOLS)
 endif()
 
 sokoban_enable_warnings(sokoban)
+sokoban_enable_precompiled_headers(sokoban <vulkan/vulkan.h>)
 sokoban_enable_lto(sokoban)
 
 set(SOKOBAN_RUNTIME_SIGN_TARGET sokoban)
@@ -923,6 +992,9 @@ function(sokoban_add_test)
                 "${CMAKE_CURRENT_BINARY_DIR}/generated/tests/${target}")
             target_link_libraries(${target} PRIVATE sokoban_ui)
             sokoban_enable_warnings(${target})
+            # No PCH here: every suite renames `main` with a per-file macro,
+            # and GCC refuses a PCH whose headers mention a macro defined
+            # differently on the command line.
             set_property(GLOBAL APPEND PROPERTY SOKOBAN_TEST_RUNNERS ${target})
         endif()
         target_sources(${target} PRIVATE ${ARG_SOURCES})
@@ -1337,6 +1409,16 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME tuning
         LIBS sokoban_core
         SOURCES tests/TuningTests.cpp
+        DEFINITIONS SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    sokoban_add_test(NAME source_watcher
+        LIBS sokoban_core
+        SOURCES tests/SourceWatcherTests.cpp
+    )
+    # Replays solutions/*.solution against the current rules and levels.
+    sokoban_add_test(NAME solution_replay
+        LIBS sokoban_core
+        SOURCES tests/SolutionReplayTests.cpp
         DEFINITIONS SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
     )
     set(SOKOBAN_SHADER_HOT_RELOAD_TEST_DEFINITIONS)

@@ -1,0 +1,23 @@
+# Sokoban 3D recorded solution. Replayed by the solution_replay test;
+# see README.md > Solutions. One input per step, then what it changed.
+format 1
+level-digest e4130345aa100698
+recorded-for level3/screen4
+step up p1=0,7,1
+step up p1=0,6,1
+step up p1=0,5,1 m4=0,4,1
+step up p1=0,4,1 m3=12,3,1+dead m4=0,3,1+dead
+step down p1=0,5,1
+step down p1=0,6,1
+step down p1=0,7,1
+step down p1=0,8,1
+step right p1=1,8,1
+step right p1=2,8,1
+step right p1=3,8,1
+step right p1=4,8,1
+step right p1=5,8,1 m5=6,8,1
+step right p1=6,8,1 m2=7,0,1+dead m5=7,8,1+dead
+step up p1=6,7,1
+step up p1=6,6,1
+step up p1=6,5,1
+step up p1=6,4,1

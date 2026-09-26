@@ -1,6 +1,8 @@
 #include "engine/ApplicationTools.hpp"
 
+#include "engine/AtomicFile.hpp"
 #include "engine/ContentPipeline.hpp"
+#include "engine/LevelCatalog.hpp"
 #include "engine/DecorationAssetRegistry.hpp"
 #include "engine/EditorInteraction.hpp"
 #include "engine/Log.hpp"
@@ -15,8 +17,12 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <exception>
+#include <future>
+#include <sstream>
+#include <fstream>
 #include <limits>
 #include <string>
 #include <vector>
@@ -680,6 +686,163 @@ void ApplicationTools::drawDraftExitConfirmation()
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
+    }
+#endif
+}
+
+void ApplicationTools::saveSolve(solution::SolveToStore solve)
+{
+    // Draft playback reports a solve again on every action that ends on the
+    // Ends (cycling heroes, say); the run is the same, so store it once.
+    LastSolve key {
+        .digest = solution::levelDigest(solve.definition),
+        .inputs = solve.inputs,
+    };
+    if (lastSolve_ == key) {
+        return;
+    }
+    lastSolve_ = std::move(key);
+    solutionJobs_.emplace_back(std::move(solve));
+}
+
+void ApplicationTools::requestSolutionReconcile()
+{
+    // One pending pass covers any number of level edits.
+    if (solutionJobs_.empty() || solutionJobs_.back().has_value()) {
+        solutionJobs_.emplace_back(std::nullopt);
+    }
+}
+
+void ApplicationTools::reportSolutionStatus(
+    std::string line, bool warning)
+{
+    if (warning) {
+        log::warning(log::Category::Editor) << line;
+    } else {
+        log::info(log::Category::Editor) << line;
+    }
+    solutionStatus_.push_back(std::move(line));
+    constexpr std::size_t kept = 6;
+    if (solutionStatus_.size() > kept) {
+        solutionStatus_.erase(
+            solutionStatus_.begin(),
+            solutionStatus_.end() - static_cast<std::ptrdiff_t>(kept));
+    }
+}
+
+void ApplicationTools::serviceSolutionStore()
+{
+    if (solutionJob_.valid()) {
+        if (solutionJob_.wait_for(std::chrono::seconds(0)) !=
+            std::future_status::ready) {
+            return;
+        }
+        const std::string name = std::move(solutionJobName_);
+        const std::size_t inputs = solutionJobInputs_;
+        try {
+            for (const solution::StoreChange& change : solutionJob_.get()) {
+                const std::string file = change.file.filename().string();
+                std::string line;
+                bool warning = false;
+                using Kind = solution::StoreChange::Kind;
+                switch (change.kind) {
+                case Kind::Saved:
+                    line += "Saved the ";
+                    line += std::to_string(change.steps);
+                    line += "-step solution of ";
+                    line += name;
+                    if (change.file.parent_path().filename() == "drafts") {
+                        line += " as drafts/";
+                        line += file;
+                        line += " until the draft is saved.";
+                    } else {
+                        line += " as ";
+                        line += file;
+                        line += '.';
+                    }
+                    break;
+                case Kind::KeptExisting:
+                    line += "Solved ";
+                    line += name;
+                    line += " in ";
+                    line += std::to_string(inputs);
+                    line += " inputs; kept the stored ";
+                    line += std::to_string(change.steps);
+                    line += "-step ";
+                    line += file;
+                    line += '.';
+                    break;
+                case Kind::Moved:
+                    line += "Moved a recorded solution ";
+                    line += change.message;
+                    line += " to ";
+                    line += file;
+                    line += " to match the levels on disk.";
+                    break;
+                case Kind::NotRecorded:
+                    warning = true;
+                    line += "Did not save the solve of ";
+                    line += name;
+                    line += ": ";
+                    line += change.message;
+                    line += ". Solutions replay one input at a time, so a "
+                            "run that moved during a slide may not repeat.";
+                    break;
+                }
+                reportSolutionStatus(std::move(line), warning);
+            }
+        } catch (const std::exception& error) {
+            reportSolutionStatus(
+                "Could not update solutions/: " + std::string(error.what()),
+                true);
+        }
+    }
+    if (solutionJobs_.empty()) {
+        return;
+    }
+    std::optional<solution::SolveToStore> job =
+        std::move(solutionJobs_.front());
+    solutionJobs_.pop_front();
+    solutionJobName_ = job ? job->name : std::string {};
+    solutionJobInputs_ = job ? job->inputs.size() : 0;
+    const std::filesystem::path root = SOKOBAN_SOURCE_ROOT_DIR;
+    // Recording replays the whole solve, so it runs off the main thread. The
+    // job owns copies of everything it reads.
+    solutionJob_ = std::async(
+        std::launch::async,
+        [levels = root / "levels",
+            solutions = root / "solutions",
+            job = std::move(job)] {
+            return solution::reconcileStore(levels, solutions, job);
+        });
+}
+
+void ApplicationTools::drawSolutionPanel()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (!ImGui::CollapsingHeader("Solutions")) {
+        return;
+    }
+    ImGui::TextWrapped(
+        "Every solve is recorded to solutions/ automatically, keeping the "
+        "shortest run for each screen. The solution_replay test replays "
+        "them after rule changes.");
+    if (solutionJob_.valid() || !solutionJobs_.empty()) {
+        ImGui::TextDisabled("Saving...");
+    }
+    for (const std::string& line : solutionStatus_) {
+        ImGui::Bullet();
+        ImGui::TextWrapped("%s", line.c_str());
+    }
+#endif
+}
+
+void ApplicationTools::drawManifestReloadStatus()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (!manifestReloadStatus.empty()) {
+        ImGui::Separator();
+        ImGui::TextWrapped("%s", manifestReloadStatus.c_str());
     }
 #endif
 }

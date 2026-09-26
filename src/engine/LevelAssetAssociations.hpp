@@ -1,7 +1,7 @@
 #pragma once
 
 #include "engine/AssetManifest.hpp"
-#include "engine/LevelCatalog.hpp"
+#include "engine/LevelLocation.hpp"
 
 #include <filesystem>
 #include <optional>

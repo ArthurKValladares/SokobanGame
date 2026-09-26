@@ -143,6 +143,11 @@ public:
     [[nodiscard]] bool openDocument(const std::filesystem::path& path);
     [[nodiscard]] bool loadDocument(const std::filesystem::path& path, bool recordHistory = true);
     [[nodiscard]] SaveResult saveDocument(const std::filesystem::path& path);
+    // The loaded file changed outside the editor (a text editor, a merge).
+    // Reloads it when there are no unsaved edits, and clears the history,
+    // which described the old contents. Returns whether it reloaded; the
+    // editor's own saves never trigger a reload.
+    [[nodiscard]] bool reloadFromDisk();
     // Ctrl+S: saves back to the file the document was loaded from. A new,
     // never-saved document has no such file and needs an explicit path.
     [[nodiscard]] SaveResult saveLoadedDocument();

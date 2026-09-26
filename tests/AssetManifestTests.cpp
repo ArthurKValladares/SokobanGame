@@ -717,6 +717,37 @@ void testRealManifestFile()
 
 } // namespace
 
+void testLiveFieldsAdoptOnlyWhenNothingStructuralChanged()
+{
+    const Json base = Json::parse(validManifest);
+    sokoban::AssetManifest live = sokoban::AssetManifest::parse(base.dump());
+
+    Json tuned = base;
+    tuned["tiles"][0]["scale"] = 1.5;
+    tuned["sounds"][0]["volume"] = 0.6;
+    tuned["music"][1]["volume"] = 0.4;
+    const sokoban::AssetManifest tunedManifest =
+        sokoban::AssetManifest::parse(tuned.dump());
+    CHECK(!(live == tunedManifest));
+    CHECK(live.adoptLiveFields(tunedManifest));
+    CHECK(live == tunedManifest);
+    CHECK(live.tileScale(sokoban::TileType::Wall) == 1.5f);
+    CHECK(live.soundSetVolume("footsteps") == 0.6f);
+
+    Json structural = tuned;
+    structural["textures"][1]["path"] = "textures/other.png";
+    const sokoban::AssetManifest before = live;
+    CHECK(!live.adoptLiveFields(
+        sokoban::AssetManifest::parse(structural.dump())));
+    CHECK(live == before);
+
+    Json retiled = tuned;
+    retiled["tiles"][0]["model"] = "Belt";
+    CHECK(!live.adoptLiveFields(
+        sokoban::AssetManifest::parse(retiled.dump())));
+    CHECK(live == before);
+}
+
 int main()
 {
     testValidManifest();
@@ -726,6 +757,7 @@ int main()
     testRuntimeDecorationModelRegistration();
     testDecorationMeshCanPreserveAuthoredScale();
     testRealManifestFile();
+    testLiveFieldsAdoptOnlyWhenNothingStructuralChanged();
 
     if (failures != 0) {
         std::cerr << failures << " asset manifest checks failed\n";

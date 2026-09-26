@@ -1269,6 +1269,30 @@ void testEveryPlayerMustReachAnActiveEnd()
     CHECK(!rules::isAtUnlockedEnd(level, state));
 }
 
+void testEveryEndMustHoldAHero()
+{
+    TEST("everyEndMustHoldAHero");
+    const Level level = makeLevel({
+        { "....." },
+        { "E C E" },
+    });
+    GameState state = rules::initialState(level);
+    state.players[0].cell = cell(0, 0, 1);
+    CHECK(!rules::isAtUnlockedEnd(level, state));
+    state.players.push_back({ .cell = cell(4, 0, 1) });
+    CHECK(rules::isAtUnlockedEnd(level, state));
+    // A block on an End does not count as holding it.
+    const Level blocked = makeLevel({
+        { "...." },
+        { "ECRE" },
+    });
+    GameState pushed = rules::step(
+        blocked, rules::initialState(blocked), MoveDirection::Right);
+    CHECK(pushed.movables[0].cell == cell(3, 0, 1));
+    pushed.players[0].cell = cell(0, 0, 1);
+    CHECK(!rules::isAtUnlockedEnd(blocked, pushed));
+}
+
 void testEnemySpawnsOutsideStaticGridAndKillsAdjacentPlayer()
 {
     TEST("enemySpawnsOutsideStaticGridAndKillsAdjacentPlayer");
@@ -1724,6 +1748,7 @@ int main()
     testEquidistantMirrorsDuplicatePlayers();
     testPlayerCopiesShareMovementAndCanDuplicateAgain();
     testEveryPlayerMustReachAnActiveEnd();
+    testEveryEndMustHoldAHero();
     testEnemySpawnsOutsideStaticGridAndKillsAdjacentPlayer();
     testEnemyDoesNotAttackDiagonallyAndCanBePushed();
     testMovingBlockPushesEnemy();

@@ -3,6 +3,7 @@
 #include "engine/AnimationCatalog.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/TileTypes.hpp"
+#include "engine/render/WaterGeometry.hpp"
 
 #include <algorithm>
 #include <cmath>

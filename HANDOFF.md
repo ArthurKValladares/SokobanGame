@@ -12,10 +12,10 @@ Sokoban 3D is a C++20, SDL3, Vulkan 1.3 project. Runtime content is declared by
 `assets/manifest.json`, staged by `sokoban_content`, and validated against
 `content.index` at startup.
 
-The full Windows configuration currently registers 80 CTest suites. The
-Vulkan-free `headless-tests` preset registers 72; it omits seven SDK-dependent
-suites, while the Windows-only shipping-package gate accounts for the eighth
-difference. Do not copy these counts into new scripts. CTest is the source of
+The full Windows configuration currently registers 86 CTest suites (85 on
+Linux). The Vulkan-free `headless-tests` preset registers 78; it omits seven
+SDK-dependent suites, while the Windows-only shipping-package gate accounts for
+the eighth difference. Do not copy these counts into new scripts. CTest is the source of
 truth.
 
 The 14 actionable findings in the September 3 code-quality review are resolved.
@@ -187,6 +187,45 @@ and the required real-device checks are recorded.
   one key whose modifiers are all held, only those needing the most
   modifiers fire, for held and pressed queries alike. Capture records a chord
   on the non-modifier key's press and a lone modifier key on its release.
+
+- Recorded solutions (`engine/Solution.hpp`, `solutions/`) are matched to
+  screens by `solution::levelDigest`, which hashes only what gameplay reads:
+  the layers with trailing spaces trimmed, the water layer and the hero.
+  If gameplay starts reading another part of the definition, add it to the
+  digest. A replay applies each input with `solution::Driver` and waits for
+  it and every slide, conveyor and enemy reaction to settle before the next
+  one, so recordings do not depend on frame timing; the recorder, the
+  automatic in-game saving and `sokoban_solve_level` all go through the
+  same driver. Changing the text format means bumping `format` and
+  re-recording, not migrating.
+- `solution::reconcileStore` (`engine/SolutionStore.hpp`) is the only code
+  that decides where a recording lives: one `level<L>-screen<S>.solution`
+  per current screen holding the shortest run (ties keep the file in
+  place), unsaved-draft content in `solutions/drafts/` (gitignored), and
+  displaced recordings parked there instead of deleted. Debug builds call
+  it on a worker thread after every solve, once at startup and after any
+  source level change; jobs run one at a time. It must stay free of game,
+  UI and GPU state.
+- `GameplaySession::inputLog()` lists the inputs that started actions since
+  the last restart or restore, for solution recording. `resetToState` exists for
+  the solver and the replay driver only; gameplay code restores snapshots.
+- The source watcher (`SourceWatcher`, `Application::serviceSourceWatcher`,
+  Debug developer builds) polls stamps every 500 ms and never runs in smoke
+  or evidence runs. It writes only into the staged tree and content index,
+  never into source. `LevelEditor::reloadFromDisk` refuses while the
+  document is dirty or a stroke or transform is open, and ignores files that
+  match the document (its own saves). `AssetManifest::adoptLiveFields` is the
+  list of manifest fields that may change without a restart; anything else
+  it reports as structural. Models are deliberately not reloaded (see the
+  `VulkanModelResources` guidance below).
+- Precompiled headers hold standard headers, `Math.hpp` and, for the
+  renderer and game, `<vulkan/vulkan.h>`. Do not add config, tuning or
+  render-type headers: every edit to them would rebuild the PCH. The shared
+  test runners stay without a PCH, because GCC rejects a PCH built without
+  the runners' per-source `-Dmain=` define. `RenderTypes.hpp` must not
+  include `WaterConfig.hpp` or `LevelCatalog.hpp` again; water defaults come
+  from `RenderFrameData::defaultWaterRendering()` in `RenderTypes.cpp`, and
+  `LevelLocation` has its own header.
 
 ## Gameplay and input contracts
 

@@ -101,6 +101,14 @@ Debug builds include the ImGui developer tools and can mirror edited source
 levels into staged runtime content. Release builds use only packaged,
 executable-relative assets.
 
+Sokoban's own libraries and the game compile with a precompiled header of
+common standard headers plus `Math.hpp` (and `<vulkan/vulkan.h>` for the
+renderer and the game). Configure with `-DSOKOBAN_PRECOMPILED_HEADERS=OFF` to
+turn it off, for example when checking that a file includes what it uses.
+clang-tidy builds turn it off automatically, and the shared test runners do
+not use it (see the comment above `sokoban_enable_precompiled_headers` in
+`CMakeLists.txt`).
+
 ## Tests
 
 The project currently registers CTest suites covering rules, level parsing,
@@ -307,6 +315,11 @@ Decorative blocks render but have no gameplay, support, occupancy, camera-fit,
 or water-grid-bound semantics. New water layouts should use `@water N`; `W`
 remains supported for older screens.
 
+A screen is complete when every pressure plate is covered, every living hero
+stands on an End, and every End holds a hero. A screen with more Ends than
+heroes therefore needs mirror copies of a hero to finish; a rock on an End
+does not count.
+
 Turrets are pushable movables. A turret shoots a player or enemy whenever that
 unit moves into its cardinal line of sight; walls, rocks, and other live units
 block the shot.
@@ -418,6 +431,21 @@ Debug builds with developer tools add these to the workspace:
   edited literals back into that header, so the next build compiles them as
   the new defaults. Builds without developer tools compile the same
   declarations as plain `constexpr` constants.
+- **Source watcher.** Every half second the game checks the source
+  `levels/` tree, `assets/manifest.json`, `assets/animation_catalog.json`
+  and every texture the manifest names, and applies edits made outside the
+  game:
+  - A `.scr` or level `.json` is mirrored into the staged tree. The editor
+    reloads it if it is the open document and has no unsaved changes (it
+    keeps an unsaved draft and says so in the Log). If it is the puzzle
+    screen you are playing, the screen restarts from the new layout.
+  - A texture is re-read and replaces the GPU copy in place.
+  - A manifest edit that only changes tile scales or sound and music
+    volumes applies live. Anything structural (a model, texture, animation,
+    role or tile model) shows "needs a restart" in the Asset Manifest tab.
+  - The animation catalog is reloaded unless the Animation tab has unsaved
+    edits.
+  - Models are not reloaded; restart for those.
 - **Resume on launch.** When a Debug session ends, the game records where
   you were in `dev-session.json` in the save directory. The next launch
   skips the title, continues the active save slot, and reopens the editor
@@ -435,6 +463,90 @@ Launch options for jumping straight to what you are working on:
 
 In Visual Studio's Open Folder mode, add arguments with the startup item's
 **Debug and Launch Settings** (`launch.vs.json`, kept under `.vs/`).
+
+## Solutions
+
+`solutions/` holds one recorded solution per puzzle screen. The
+`solution_replay` test replays each one against the screen whose content
+matches it and fails, naming the step and the first hero, block or enemy
+that went somewhere else, when a rule change breaks a recording. It also
+fails if a recording solves its screen early. Screens without a recording
+are listed as notes, not failures.
+
+A file looks like this:
+
+```text
+format 1
+level-digest a7799b56118fdd89
+recorded-for level0/screen0
+step up p1=6,4,2
+step up p1=6,3,2
+```
+
+Each `step` is one input (`up`, `down`, `left`, `right`, `cycle`,
+`interact`, `undo`) followed by what it changed: `p` players, `m` movable
+blocks and `e` enemies, each `id=x,y,z` with `+dead`, `+fallen` or
+`+drowned` when that changed. The digest covers the gameplay layers, water
+and hero, not decorations, so re-decorating a screen keeps its solution.
+Solutions live outside `levels/` because the content pipeline rejects
+unexpected files there, and they are matched by digest, so renumbering
+screens does not break them. After changing a screen's layout, record it
+again.
+
+Debug builds record every solve automatically. When you solve a campaign
+screen or an editor draft, a worker thread replays your inputs one at a time,
+waiting for each to finish, and stores the run as
+`level<L>-screen<S>.solution` if it is the first recording of that content
+or shorter than the stored one. The Log and **Level Editor > Solutions**
+say what happened. A run that only worked because of real-time timing
+(moving during a slide) does not replay and is not stored.
+
+A solved draft that has not been saved yet is kept in
+`solutions/drafts/<digest>.solution` (ignored by git) and moves into place
+when a screen with that content is saved. When a screen is edited, its old
+recording is parked in `drafts/` once the new layout has a recording, and
+comes back if the edit is undone. Smoke and evidence runs never write here.
+
+`sokoban_solve_level` searches for solutions instead. The `release-all`
+build preset builds it:
+
+```powershell
+.\out\release\tools\Release\sokoban_solve_level.exe levels solutions --level 3 --screen 2 --best-first
+```
+
+Without `--level` it tries every screen that has no current recording. It
+skips screens whose recording still matches unless given `--overwrite`, and
+stops a screen after `--max-states` (default 2,000,000) distinct positions.
+The default search is breadth-first and finds the shortest solution;
+`--best-first` is usually much faster on large screens but the result may
+be longer. Use a Release build; the search is slow in Debug.
+
+### Improving the solver (future work)
+
+The solver is simple on purpose and gives up on larger screens: level 3
+screen 2 was not solved after 5 million positions, although it is
+solvable by hand. Ideas, roughly in order of payoff:
+
+- **Dead positions.** Prune states where a rock sits in a corner or along a
+  wall away from every plate, or has fallen into water it cannot be used
+  from. Classic Sokoban solvers get most of their speed from this.
+- **A better estimate.** Match rocks to plates (minimum-cost assignment
+  instead of each plate's nearest rock), count the heroes still missing for
+  the Ends, and account for water that must be bridged before an island's
+  plates or Ends can be reached.
+- **Mirror-aware moves.** Treat "walk to a spot and interact with a mirror"
+  as one move and skip mirror activations that change nothing, so hero
+  copies do not multiply the search.
+- **Smaller states.** Today a state is a string key; a packed binary key
+  with identical rocks sorted would cut memory (about 400 bytes per
+  position now, 1.9 GB at 5 million) and merge equivalent positions.
+- **Iterative deepening (IDA\*)** so memory stops being the limit, and
+  running independent branches on several threads.
+- **Progress output** (positions per second, best estimate so far) so a
+  long run can be judged before it ends.
+- **Seeding from a human solve.** Start from a recorded solution and
+  search for shorter ones, which also checks that a screen still has the
+  intended difficulty after edits.
 
 ## Content Pipeline
 
