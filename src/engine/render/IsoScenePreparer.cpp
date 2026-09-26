@@ -1,5 +1,6 @@
 #include "engine/render/IsoScenePreparer.hpp"
 
+#include "engine/Profiler.hpp"
 #include "engine/TaskSystem.hpp"
 
 #include "engine/BoardLayout.hpp"
@@ -1617,6 +1618,7 @@ void IsoScenePreparer::prepare(
     PreparedRenderScene& scene,
     TaskSystem* auxiliaryTasks) const
 {
+    SOKOBAN_PROFILE_SCOPE("Renderer.Prepare scene");
     scene.isoFaces.clear();
     scene.opaqueFaceIndices.clear();
     scene.opaqueBlendedFirst = 0;

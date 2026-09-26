@@ -43,10 +43,26 @@ FrameTimeSummary FrameTimeTelemetry::summary() const
     }
     std::ranges::sort(std::span(sorted).first(sampleCount_));
     result.averageMilliseconds = total / static_cast<double>(sampleCount_);
+    result.minimumMilliseconds = sorted[0];
+    const std::size_t medianIndex = (sampleCount_ - 1) / 2;
+    result.medianMilliseconds = sampleCount_ % 2 == 0
+        ? (sorted[medianIndex] + sorted[medianIndex + 1]) * 0.5
+        : sorted[medianIndex];
     const std::size_t p95Index =
         (sampleCount_ * 95 + 99) / 100 - 1;
     result.p95Milliseconds = sorted[p95Index];
+    const std::size_t p99Index =
+        (sampleCount_ * 99 + 99) / 100 - 1;
+    result.p99Milliseconds = sorted[p99Index];
     result.maximumMilliseconds = sorted[sampleCount_ - 1];
+    double squaredDifferenceTotal = 0.0;
+    for (std::size_t index = 0; index < sampleCount_; ++index) {
+        const double difference =
+            samples_[index] - result.averageMilliseconds;
+        squaredDifferenceTotal += difference * difference;
+    }
+    result.standardDeviationMilliseconds = std::sqrt(
+        squaredDifferenceTotal / static_cast<double>(sampleCount_));
     return result;
 }
 

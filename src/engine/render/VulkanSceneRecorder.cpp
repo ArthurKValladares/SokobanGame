@@ -1,5 +1,6 @@
 #include "engine/render/VulkanSceneRecorder.hpp"
 
+#include "engine/Profiler.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/MirrorConfig.hpp"
@@ -88,8 +89,13 @@ RenderPhaseTiming renderPhaseTiming(const FrameTimeSummary& summary)
         .samples = summary.sampleCount,
         .latestMilliseconds = summary.latestMilliseconds,
         .averageMilliseconds = summary.averageMilliseconds,
+        .minimumMilliseconds = summary.minimumMilliseconds,
+        .medianMilliseconds = summary.medianMilliseconds,
         .p95Milliseconds = summary.p95Milliseconds,
+        .p99Milliseconds = summary.p99Milliseconds,
         .maximumMilliseconds = summary.maximumMilliseconds,
+        .standardDeviationMilliseconds =
+            summary.standardDeviationMilliseconds,
     };
 }
 
@@ -307,6 +313,7 @@ public:
 
     RenderStats record(const VulkanSceneRecorder::FrameInputs& inputs)
     {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Command recording");
         const VkCommandBuffer commandBuffer = inputs.commandBuffer;
         const uint32_t imageIndex = inputs.imageIndex;
         const RenderFrameData& frameData = inputs.game.frameData;
@@ -752,6 +759,7 @@ private:
         const RenderFrameData& frameData,
         const PreparedRenderScene& scene)
     {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Record shadows");
         shadowPass_.begin(
             commandBuffer, pipelines_.shadow(), stats_);
         drawShadowFaces(commandBuffer, scene.shadowLayout, scene.shadowFaces);
@@ -924,6 +932,7 @@ private:
         bool directSsaoColor,
         bool mirrorPreviewOverFog)
     {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Record game scene");
         const bool hasTranslucency = scene.hasTranslucentContent ||
             hasAuthoredBlendMaterials(frameData, scene);
         const auto shadowStart = std::chrono::steady_clock::now();
@@ -1048,6 +1057,7 @@ private:
         const RenderFrameData& frameData,
         const PreparedRenderScene& scene)
     {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Record preview");
         previewDescriptor_ = true;
         const bool hasTranslucency = scene.hasTranslucentContent ||
             hasAuthoredBlendMaterials(frameData, scene);
@@ -1120,6 +1130,7 @@ private:
         VkCommandBuffer commandBuffer,
         const RenderFrameData::OutputTransform& outputTransform)
     {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Record tonemap");
         // Unconditionally, and before the guard below: the blit, the game
         // viewport and the capture all assume the display image is a colour
         // attachment by now. Skipping the transition would make a missing
@@ -1193,6 +1204,7 @@ private:
         const RenderFrameData& frameData,
         const Mat4& clipFromWorld)
     {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Record atmosphere");
         const RenderFrameData::Lighting& lighting = frameData.lighting;
         const VkPipeline pipeline = pipelines_.atmosphere();
         // An SSAO debug view is a diagnostic replacement for scene color.
@@ -1379,6 +1391,7 @@ private:
         VkCommandBuffer commandBuffer,
         float amount)
     {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Record transition");
         const VkPipeline pipeline = pipelines_.worldTransition();
         if (amount <= 0.0f || !pipeline) {
             return;
@@ -1465,6 +1478,7 @@ private:
         ScenePassOptions options,
         VkRect2D renderArea)
     {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Record scene pass");
         const bool translucentPass = options.translucent;
         const bool loadColor = options.loadColor;
         const bool storeColor = options.storeColor;
@@ -1638,6 +1652,7 @@ private:
         bool renderImGui,
         bool clearTarget)
     {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Record UI overlay");
 #if !SOKOBAN_ENABLE_DEBUG_UI
         renderImGui = false;
 #endif

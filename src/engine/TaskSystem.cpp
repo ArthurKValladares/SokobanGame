@@ -1,5 +1,7 @@
 #include "engine/TaskSystem.hpp"
 
+#include "engine/Profiler.hpp"
+
 #include <algorithm>
 #include <exception>
 #include <latch>
@@ -197,7 +199,10 @@ void TaskSystem::workerLoop()
             task = std::move(queue_.front());
             queue_.pop_front();
         }
-        task();
+        {
+            SOKOBAN_PROFILE_SCOPE("TaskSystem.Task");
+            task();
+        }
         executedTasks_.fetch_add(1, std::memory_order_relaxed);
     }
 }

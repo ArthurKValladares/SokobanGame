@@ -1,5 +1,6 @@
 #include "engine/render/VulkanSsaoPass.hpp"
 
+#include "engine/Profiler.hpp"
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/SsaoMath.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
@@ -186,6 +187,7 @@ void VulkanSsaoPass::record(
     uint32_t frameIndex,
     RenderStats& stats) const
 {
+    SOKOBAN_PROFILE_SCOPE("Renderer.Record SSAO");
     if (!samplesSceneDepth(settings) ||
         !valid() ||
         !targetView ||

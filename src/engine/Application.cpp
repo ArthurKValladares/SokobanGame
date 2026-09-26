@@ -1,4 +1,6 @@
 #include "engine/Application.hpp"
+
+#include "engine/Profiler.hpp"
 #if SOKOBAN_ENABLE_DEBUG_UI
 #include "engine/ApplicationTools.hpp"
 #include "engine/AtomicFile.hpp"
@@ -288,6 +290,9 @@ Application::Application(ApplicationOptions options)
         if (result.solveCurrentScreen) {
             solveCurrentScreenForDebug();
         }
+    });
+    DebugUi::addTab("Profiler", [this] {
+        tools_->profilerDebugUi.draw(renderer_);
     });
     if (const std::optional<DevSession> session =
             loadDevSession(devSessionPath_)) {
@@ -809,7 +814,13 @@ bool Application::run()
         applyLaunchRequest();
     }
     std::uint64_t renderedFrames = 0;
+#if SOKOBAN_ENABLE_DEBUG_UI
+    CpuProfiler::instance().setCurrentThreadName("Main");
+#endif
     while (running_) {
+#if SOKOBAN_ENABLE_DEBUG_UI
+        CpuProfileFrameScope profileFrame(renderedFrames + 1);
+#endif
         framePacer_.beginFrame();
 #if SOKOBAN_ENABLE_DEBUG_UI
         // Serviced here, between frames, where no ImGui or UI frame is open.
@@ -830,30 +841,34 @@ bool Application::run()
 #endif
         input_.beginFrame();
 
-        SDL_Event event {};
-        while (SDL_PollEvent(&event)) {
-            renderer_.handleEvent(event);
-            InputRouter::EventContext eventContext {
-                .bindingCapture = optionsMenu_.capturingBinding(),
-                .shellMenuOpen = shellMenuOpen(),
-                .keyboardCaptured = renderer_.wantsKeyboardCapture(),
-                .mouseCaptured = renderer_.wantsMouseCapture(),
-            };
+        {
+            SOKOBAN_PROFILE_SCOPE("Application.Events");
+            SDL_Event event {};
+            while (SDL_PollEvent(&event)) {
+                renderer_.handleEvent(event);
+                InputRouter::EventContext eventContext {
+                    .bindingCapture = optionsMenu_.capturingBinding(),
+                    .shellMenuOpen = shellMenuOpen(),
+                    .keyboardCaptured = renderer_.wantsKeyboardCapture(),
+                    .mouseCaptured = renderer_.wantsMouseCapture(),
+                };
 #if SOKOBAN_ENABLE_DEBUG_UI
-            eventContext.editorEditing = tools_->levelEditor.editingDocument();
+                eventContext.editorEditing =
+                    tools_->levelEditor.editingDocument();
 #endif
-            const InputRouter::EventResult routedEvent =
-                inputRouter_.routeEvent(event, input_, eventContext);
-            if (routedEvent.bindingCandidate) {
-                if (const std::optional<OptionsAction> action =
-                        optionsMenu_.provideBindingCandidate(
-                            settingsCoordinator_.userSettings(),
-                            *routedEvent.bindingCandidate)) {
-                    handleShellEvent(ShellOptionsAction { *action });
+                const InputRouter::EventResult routedEvent =
+                    inputRouter_.routeEvent(event, input_, eventContext);
+                if (routedEvent.bindingCandidate) {
+                    if (const std::optional<OptionsAction> action =
+                            optionsMenu_.provideBindingCandidate(
+                                settingsCoordinator_.userSettings(),
+                                *routedEvent.bindingCandidate)) {
+                        handleShellEvent(ShellOptionsAction { *action });
+                    }
                 }
-            }
-            if (routedEvent.closeRequested) {
-                handleShellEvent(ShellCloseRequested {});
+                if (routedEvent.closeRequested) {
+                    handleShellEvent(ShellCloseRequested {});
+                }
             }
         }
 
@@ -894,18 +909,31 @@ bool Application::run()
         const float dt = evidenceOutputDirectory_.empty()
             ? measuredDt
             : 0.0f;
-        update(
-            dt,
-            routedInput,
-            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
-        const bool developerWorkspaceVisible = drawUiFrame(routedInput, dt);
-        preparedRenderFrame_ = renderer_.prepareFrame(
-            buildRenderFrame(routedInput.editor),
-            buildScreenPreviewRenderFrame());
-        renderer_.drawFrame(
-            *preparedRenderFrame_,
-            ui_.drawData(),
-            developerWorkspaceVisible);
+        {
+            SOKOBAN_PROFILE_SCOPE("Application.Update");
+            update(
+                dt,
+                routedInput,
+                preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
+        }
+        bool developerWorkspaceVisible = false;
+        {
+            SOKOBAN_PROFILE_SCOPE("Application.UI");
+            developerWorkspaceVisible = drawUiFrame(routedInput, dt);
+        }
+        {
+            SOKOBAN_PROFILE_SCOPE("Application.Build render frame");
+            preparedRenderFrame_ = renderer_.prepareFrame(
+                buildRenderFrame(routedInput.editor),
+                buildScreenPreviewRenderFrame());
+        }
+        {
+            SOKOBAN_PROFILE_SCOPE("Application.Render");
+            renderer_.drawFrame(
+                *preparedRenderFrame_,
+                ui_.drawData(),
+                developerWorkspaceVisible);
+        }
         ++renderedFrames;
         if (renderer_.hasFatalFailure()) {
             log::error(log::Category::Application)
@@ -915,6 +943,7 @@ bool Application::run()
             finishSmokeRunIfDue(renderedFrames);
         }
         if (running_) {
+            SOKOBAN_PROFILE_SCOPE("Application.Frame pacing");
             framePacer_.pace();
         }
     }

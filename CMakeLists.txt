@@ -528,6 +528,8 @@ add_library(sokoban_core STATIC
     src/engine/PlayerProfile.cpp
     src/engine/PlayerProfileCodec.cpp
     src/engine/PresentationTransactionBuilder.cpp
+    src/engine/ProcessMemory.cpp
+    src/engine/Profiler.cpp
     src/engine/RenderFrameBuilder.cpp
     src/engine/RenderFrameBuilderEditor.cpp
     src/engine/RenderFrameParts.cpp
@@ -588,7 +590,7 @@ target_link_libraries(sokoban_core
         sokoban_bc7enc16
 )
 if(WIN32)
-    target_link_libraries(sokoban_core PRIVATE dbghelp)
+    target_link_libraries(sokoban_core PRIVATE dbghelp psapi)
 endif()
 target_compile_definitions(sokoban_core PRIVATE
     SOKOBAN_GAME_VERSION="${PROJECT_VERSION}"
@@ -742,6 +744,7 @@ if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
         $<$<CONFIG:Debug>:src/engine/DebugUi.cpp>
         $<$<CONFIG:Debug>:src/engine/LevelEditorDebugUi.cpp>
         $<$<CONFIG:Debug>:src/engine/LogDebugUi.cpp>
+        $<$<CONFIG:Debug>:src/engine/ProfilerDebugUi.cpp>
         $<$<CONFIG:Debug>:src/engine/TuningDebugUi.cpp>
     )
 endif()
@@ -1203,6 +1206,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME frame_time_telemetry
         LIBS sokoban_core
         SOURCES tests/FrameTimeTelemetryTests.cpp
+    )
+    sokoban_add_test(NAME profiler
+        LIBS sokoban_core
+        SOURCES tests/ProfilerTests.cpp
     )
     sokoban_add_test(NAME renderer_reconfiguration
         LIBS sokoban_core

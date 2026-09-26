@@ -1,6 +1,8 @@
 #include "engine/render/VulkanRenderer.hpp"
 
 #include "engine/Log.hpp"
+#include "engine/ProcessMemory.hpp"
+#include "engine/Profiler.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
@@ -52,8 +54,13 @@ RenderPhaseTiming renderPhaseTiming(const FrameTimeSummary& summary)
         .samples = summary.sampleCount,
         .latestMilliseconds = summary.latestMilliseconds,
         .averageMilliseconds = summary.averageMilliseconds,
+        .minimumMilliseconds = summary.minimumMilliseconds,
+        .medianMilliseconds = summary.medianMilliseconds,
         .p95Milliseconds = summary.p95Milliseconds,
+        .p99Milliseconds = summary.p99Milliseconds,
         .maximumMilliseconds = summary.maximumMilliseconds,
+        .standardDeviationMilliseconds =
+            summary.standardDeviationMilliseconds,
     };
 }
 
@@ -363,6 +370,7 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
     RenderFrameData frameData,
     std::optional<RenderFrameData> previewFrameData)
 {
+    SOKOBAN_PROFILE_SCOPE("Renderer.Prepare frame");
     const auto preparationStart = std::chrono::steady_clock::now();
     const VkExtent2D extent =
         activeResources_.swapchain->renderExtent();
@@ -456,6 +464,7 @@ VulkanRenderer::resolvePreparedFrame(const PreparedFrame& frame) const
 void VulkanRenderer::runAssetMaintenance(
     const PreparedFrameScratch& prepared, const RenderFrameData& frameData)
 {
+    SOKOBAN_PROFILE_SCOPE("Renderer.Asset maintenance");
     const auto assetMaintenanceStart = std::chrono::steady_clock::now();
     completeFrame(currentFrame_);
     gpuProfiler_.collectCompletedFrame(currentFrame_);
@@ -500,6 +509,7 @@ void VulkanRenderer::runAssetMaintenance(
 void VulkanRenderer::submitAndPresent(
     const FrameResources& frame, uint32_t imageIndex)
 {
+    SOKOBAN_PROFILE_SCOPE("Renderer.Submit and present");
     VkSemaphoreSubmitInfo waitSemaphore {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = frame.imageAvailable,
@@ -567,6 +577,7 @@ void VulkanRenderer::drawFrame(
     const UiDrawData& uiDrawData,
     bool developerWorkspaceVisible)
 {
+    SOKOBAN_PROFILE_SCOPE("Renderer.Draw frame");
     if (fatalFailure_) {
         return;
     }
@@ -598,14 +609,17 @@ void VulkanRenderer::drawFrame(
 
     auto& frame = frames_[currentFrame_];
     const auto frameFenceWaitStart = std::chrono::steady_clock::now();
-    vkCheck(
-        vkWaitForFences(
-            deviceContext_.device(),
-            1,
-            &frame.inFlight,
-            VK_TRUE,
-            UINT64_MAX),
-        "vkWaitForFences failed");
+    {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Wait frame fence");
+        vkCheck(
+            vkWaitForFences(
+                deviceContext_.device(),
+                1,
+                &frame.inFlight,
+                VK_TRUE,
+                UINT64_MAX),
+            "vkWaitForFences failed");
+    }
     frameFenceWaitTimeTelemetry_.record(
         elapsedMilliseconds(frameFenceWaitStart));
 
@@ -613,8 +627,12 @@ void VulkanRenderer::drawFrame(
 
     uint32_t imageIndex = 0;
     const auto imageAcquisitionStart = std::chrono::steady_clock::now();
-    VkResult acquired = activeResources_.swapchain->acquire(
-        frame.imageAvailable, imageIndex);
+    VkResult acquired = VK_SUCCESS;
+    {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Acquire swapchain image");
+        acquired = activeResources_.swapchain->acquire(
+            frame.imageAvailable, imageIndex);
+    }
     imageAcquisitionTimeTelemetry_.record(
         elapsedMilliseconds(imageAcquisitionStart));
     if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -1264,6 +1282,39 @@ RenderStats VulkanRenderer::renderStats() const
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Atmosphere));
     stats.gpuOutputTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Output));
+    const VulkanMemoryStatistics memory =
+        deviceContext_.memoryAllocator().statistics();
+    stats.gpuMemoryBlockCount = memory.blockCount;
+    stats.gpuMemoryAllocationCount = memory.allocationCount;
+    stats.gpuImageAllocationCount = memory.imageCount;
+    stats.gpuBufferAllocationCount = memory.bufferCount;
+    stats.gpuMemoryBlockBytes = memory.blockBytes;
+    stats.gpuMemoryAllocationBytes = memory.allocationBytes;
+    stats.gpuMemoryPeakAllocationBytes = memory.peakAllocationBytes;
+    stats.gpuMemoryTotalAllocatedBytes = memory.totalAllocatedBytes;
+    stats.gpuMemoryTotalFreedBytes = memory.totalFreedBytes;
+    stats.gpuImageBytes = memory.imageBytes;
+    stats.gpuBufferBytes = memory.bufferBytes;
+    stats.gpuDeviceLocalBytes = memory.deviceLocalBytes;
+    stats.gpuHostVisibleBytes = memory.hostVisibleBytes;
+    stats.gpuLifetimeAllocations = memory.lifetimeAllocations;
+    stats.gpuLifetimeFrees = memory.lifetimeFrees;
+    stats.gpuMemoryHeapCount = memory.heapCount;
+    for (uint32_t index = 0; index < memory.heapCount; ++index) {
+        const VulkanMemoryHeapStatistics& heap = memory.heaps[index];
+        stats.gpuMemoryHeaps[index] = {
+            .deviceLocal = heap.deviceLocal,
+            .blockBytes = heap.blockBytes,
+            .allocationBytes = heap.allocationBytes,
+            .usageBytes = heap.usageBytes,
+            .budgetBytes = heap.budgetBytes,
+        };
+    }
+    const ProcessMemoryStatistics process = processMemoryStatistics();
+    stats.processMemoryAvailable = process.available;
+    stats.processResidentBytes = process.residentBytes;
+    stats.processPeakResidentBytes = process.peakResidentBytes;
+    stats.processPrivateBytes = process.privateBytes;
     sceneRecorder_.populateTimingStats(stats);
     return stats;
 }

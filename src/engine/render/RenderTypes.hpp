@@ -563,9 +563,23 @@ struct RenderPhaseTiming {
     uint32_t samples = 0;
     double latestMilliseconds = 0.0;
     double averageMilliseconds = 0.0;
+    double minimumMilliseconds = 0.0;
+    double medianMilliseconds = 0.0;
     double p95Milliseconds = 0.0;
+    double p99Milliseconds = 0.0;
     double maximumMilliseconds = 0.0;
+    double standardDeviationMilliseconds = 0.0;
 };
+
+struct RenderMemoryHeapStats {
+    bool deviceLocal = false;
+    uint64_t blockBytes = 0;
+    uint64_t allocationBytes = 0;
+    uint64_t usageBytes = 0;
+    uint64_t budgetBytes = 0;
+};
+
+inline constexpr std::size_t maxRenderMemoryHeaps = 16;
 
 struct RenderStats {
     uint64_t frameIndex = 0;
@@ -655,6 +669,28 @@ struct RenderStats {
     RenderPhaseTiming gpuSsaoCompositeTiming {};
     RenderPhaseTiming gpuAtmosphereTiming {};
     RenderPhaseTiming gpuOutputTiming {};
+    bool processMemoryAvailable = false;
+    uint64_t processResidentBytes = 0;
+    uint64_t processPeakResidentBytes = 0;
+    uint64_t processPrivateBytes = 0;
+    uint32_t gpuMemoryBlockCount = 0;
+    uint32_t gpuMemoryAllocationCount = 0;
+    uint32_t gpuImageAllocationCount = 0;
+    uint32_t gpuBufferAllocationCount = 0;
+    uint64_t gpuMemoryBlockBytes = 0;
+    uint64_t gpuMemoryAllocationBytes = 0;
+    uint64_t gpuMemoryPeakAllocationBytes = 0;
+    uint64_t gpuMemoryTotalAllocatedBytes = 0;
+    uint64_t gpuMemoryTotalFreedBytes = 0;
+    uint64_t gpuImageBytes = 0;
+    uint64_t gpuBufferBytes = 0;
+    uint64_t gpuDeviceLocalBytes = 0;
+    uint64_t gpuHostVisibleBytes = 0;
+    uint64_t gpuLifetimeAllocations = 0;
+    uint64_t gpuLifetimeFrees = 0;
+    uint32_t gpuMemoryHeapCount = 0;
+    std::array<RenderMemoryHeapStats, maxRenderMemoryHeaps>
+        gpuMemoryHeaps {};
     bool wireframeEnabled = false;
     float wireframeLineWidth = 1.0f;
     uint64_t pipelineRebuilds = 0;

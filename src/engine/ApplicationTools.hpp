@@ -12,6 +12,7 @@
 #include "engine/LevelEditorDebugUi.hpp"
 #include "engine/LogDebugUi.hpp"
 #include "engine/OverworldMapEditor.hpp"
+#include "engine/ProfilerDebugUi.hpp"
 #include "engine/InputRouter.hpp"
 #include "engine/ShaderHotReload.hpp"
 #include "engine/SolutionStore.hpp"
@@ -128,6 +129,7 @@ public:
         Vec2 viewportSize);
 
     ApplicationDebugUi applicationDebugUi;
+    ProfilerDebugUi profilerDebugUi;
     LogDebugUi logDebugUi;
     TuningDebugUi tuningDebugUi { SOKOBAN_SOURCE_ROOT_DIR };
     AssetManifestEditor assetManifestEditor;

@@ -29,8 +29,14 @@ void testSummaryAndPercentile()
     CHECK_MESSAGE(summary.sampleCount == 20, "records every valid sample");
     CHECK_MESSAGE(near(summary.latestMilliseconds, 20.0), "retains the latest sample");
     CHECK_MESSAGE(near(summary.averageMilliseconds, 10.5), "reports arithmetic mean");
+    CHECK_MESSAGE(near(summary.minimumMilliseconds, 1.0), "reports minimum");
+    CHECK_MESSAGE(near(summary.medianMilliseconds, 10.5), "reports median");
     CHECK_MESSAGE(near(summary.p95Milliseconds, 19.0), "reports nearest-rank p95");
+    CHECK_MESSAGE(near(summary.p99Milliseconds, 20.0), "reports nearest-rank p99");
     CHECK_MESSAGE(near(summary.maximumMilliseconds, 20.0), "reports worst frame");
+    CHECK_MESSAGE(
+        near(summary.standardDeviationMilliseconds, std::sqrt(33.25)),
+        "reports population standard deviation");
 }
 
 void testRollingHistoryAndInvalidSamples()

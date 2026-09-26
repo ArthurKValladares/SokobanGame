@@ -10,8 +10,12 @@ struct FrameTimeSummary {
     uint32_t sampleCount = 0;
     double latestMilliseconds = 0.0;
     double averageMilliseconds = 0.0;
+    double minimumMilliseconds = 0.0;
+    double medianMilliseconds = 0.0;
     double p95Milliseconds = 0.0;
+    double p99Milliseconds = 0.0;
     double maximumMilliseconds = 0.0;
+    double standardDeviationMilliseconds = 0.0;
 
     [[nodiscard]] bool available() const { return sampleCount != 0; }
 };

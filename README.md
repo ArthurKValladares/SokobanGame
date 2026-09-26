@@ -418,6 +418,16 @@ editor commands but does not own document or filesystem policy.
 
 Debug builds with developer tools add these to the workspace:
 
+- **Live profiler.** The Profiler tab charts total CPU, renderer CPU, and GPU
+  frame time against an adjustable budget; shows a thread-aware CPU flame
+  chart and exclusive/inclusive hot-path table; breaks CPU command recording
+  and Vulkan timestamp queries down by render phase; and tracks process
+  memory, VMA allocations, peaks, churn, fragmentation, and per-heap budget
+  pressure. Capture can be paused or cleared, and **Export Chrome trace**
+  writes the bounded 240-frame history to `profiling/cpu-trace.json` for
+  Chrome or Perfetto. Add `SOKOBAN_PROFILE_SCOPE("Name")` to any engine scope
+  that needs to appear in the timeline; task-system work is collected by
+  thread and scopes that cross frame boundaries are retained.
 - **Shader hot reload.** Saving a file under `shaders/` recompiles it with the
   build's `glslc` and flags, writes the new SPIR-V into the staged asset
   tree, and rebuilds the renderer's pipelines at the next frame boundary.
