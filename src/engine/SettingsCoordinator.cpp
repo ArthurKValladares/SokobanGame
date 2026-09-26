@@ -20,6 +20,7 @@ SettingsEffects SettingsCoordinator::initialize()
         .fullscreen = profile_.settings.video.fullscreen,
         .width = profile_.settings.video.windowWidth,
         .height = profile_.settings.video.windowHeight,
+        .maximized = profile_.settings.video.windowMaximized,
     };
     effects.audio = profile_.settings.audio;
     effects.input = profile_.settings.input;
@@ -73,11 +74,14 @@ SettingsEffects SettingsCoordinator::applyUserSettings(
             (oldSettings.video.windowWidth !=
                     profile_.settings.video.windowWidth ||
                 oldSettings.video.windowHeight !=
-                    profile_.settings.video.windowHeight))) {
+                    profile_.settings.video.windowHeight ||
+                oldSettings.video.windowMaximized !=
+                    profile_.settings.video.windowMaximized))) {
         effects.window = SettingsEffects::WindowState {
             .fullscreen = profile_.settings.video.fullscreen,
             .width = profile_.settings.video.windowWidth,
             .height = profile_.settings.video.windowHeight,
+            .maximized = profile_.settings.video.windowMaximized,
         };
     }
     if (!(oldSettings.audio == profile_.settings.audio)) {

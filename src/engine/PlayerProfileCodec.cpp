@@ -1167,6 +1167,7 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
         "antiAliasingSamples", "renderScalePercent",
         "customRenderScale", "customRenderScalePercent", "ambientOcclusion",
         "ambientOcclusionStrength", "exposureEv", "windowWidth", "windowHeight",
+        "windowMaximized",
     }, "settings.video");
     profile.settings.video.fullscreen =
         boolProperty(video, "fullscreen", "settings.video");
@@ -1194,6 +1195,11 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
         video, "windowWidth", "settings.video");
     profile.settings.video.windowHeight = nonNegativeIntegerProperty(
         video, "windowHeight", "settings.video");
+    // Settings written before maximized window support preserve their saved
+    // fixed size; only a genuinely fresh profile adopts the new default.
+    profile.settings.video.windowMaximized = video.contains("windowMaximized")
+        ? boolProperty(video, "windowMaximized", "settings.video")
+        : false;
 
     profile.settings.input = inputBindingsFromJson(
         requiredProperty(settings, "input", "settings"),
@@ -1367,6 +1373,7 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
                 { "exposureEv", normalized.settings.video.exposureEv },
                 { "windowWidth", normalized.settings.video.windowWidth },
                 { "windowHeight", normalized.settings.video.windowHeight },
+                { "windowMaximized", normalized.settings.video.windowMaximized },
             } },
             { "input", inputBindingsToJson(normalized.settings.input) },
         };

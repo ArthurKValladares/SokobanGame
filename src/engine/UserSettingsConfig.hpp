@@ -4,7 +4,7 @@
 
 namespace sokoban::config {
 
-inline constexpr bool fullscreen = false;
+inline constexpr bool fullscreen = true;
 // FIFO is available on every Vulkan presentation surface and provides stable
 // pacing out of the box. Mailbox is used only when the player opts out.
 inline constexpr bool vsync = true;
@@ -31,6 +31,7 @@ inline constexpr float minimumUserAmbientOcclusionStrength = 0.0f;
 inline constexpr float maximumUserAmbientOcclusionStrength = 1.0f;
 inline constexpr int windowWidth = 1280;
 inline constexpr int windowHeight = 720;
+inline constexpr bool windowMaximized = true;
 inline constexpr int minimumWindowWidth = 640;
 inline constexpr int maximumWindowWidth = 7680;
 inline constexpr int minimumWindowHeight = 480;

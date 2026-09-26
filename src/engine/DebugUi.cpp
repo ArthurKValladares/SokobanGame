@@ -51,6 +51,7 @@ DebugUiScaleState& debugUiScaleState()
 
 struct DebugUiWorkspaceState {
     bool gameViewportOpen = true;
+    bool gameplayFullWindow = false;
     bool resetLayout = false;
     std::array<char, 64> layoutName {};
     std::vector<std::string> layouts;
@@ -296,6 +297,14 @@ void drawWorkspaceMenu()
             drawScaleControl();
             ImGui::EndMenu();
         }
+        if (ImGui::Button("Full Game View (F11)")) {
+            state.gameplayFullWindow = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Hide the debug workspace and fill this window with the "
+                "gameplay view. Press F11 to return.");
+        }
         for (const DebugTab& menu : debugMenus()) {
             if (ImGui::BeginMenu(menu.name.c_str())) {
                 menu.callback();
@@ -421,6 +430,7 @@ void DebugUi::initialize()
     state.baseStyle = ImGui::GetStyle();
     state.baseStyleCaptured = true;
     state.scale = 1.0f;
+    workspaceState().gameplayFullWindow = false;
     refreshLayouts();
 
     if (ImGui::FindSettingsHandler("DebugUi")) {
@@ -467,7 +477,22 @@ DebugUi::DrawResult DebugUi::draw(GameViewport gameViewport)
         applyDebugUiScale(scaleState.scale);
     }
 
+    DebugUiWorkspaceState& workspace = workspaceState();
+    if (ImGui::Shortcut(
+            ImGuiKey_F11,
+            ImGuiInputFlags_RouteGlobal |
+                ImGuiInputFlags_RouteOverFocused |
+                ImGuiInputFlags_RouteOverActive)) {
+        workspace.gameplayFullWindow = !workspace.gameplayFullWindow;
+    }
+    if (workspace.gameplayFullWindow) {
+        return { .gameplayFullWindow = true };
+    }
+
     drawWorkspaceMenu();
+    if (workspace.gameplayFullWindow) {
+        return { .gameplayFullWindow = true };
+    }
     const ImGuiID dockspaceId = ImGui::GetID("SokobanDockSpace");
     const bool dockspaceExisted =
         ImGui::DockBuilderGetNode(dockspaceId) != nullptr;
@@ -475,7 +500,6 @@ DebugUi::DrawResult DebugUi::draw(GameViewport gameViewport)
         dockspaceId,
         ImGui::GetMainViewport(),
         ImGuiDockNodeFlags_None);
-    DebugUiWorkspaceState& workspace = workspaceState();
     if (workspace.resetLayout || !dockspaceExisted) {
         buildDefaultLayout(dockspaceId);
         workspace.resetLayout = false;

@@ -33,6 +33,7 @@ public:
         float viewportHeight = 0.0f;
         bool viewportHovered = false;
         bool viewportFocused = false;
+        bool gameplayFullWindow = false;
     };
 
     static void initialize();

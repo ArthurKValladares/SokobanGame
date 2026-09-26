@@ -21,6 +21,7 @@ void testInitializationProducesAllStartupEffects()
 
     CHECK(effects.window.has_value());
     CHECK(effects.window->fullscreen);
+    CHECK(effects.window->maximized);
     CHECK(effects.audio.has_value());
     CHECK(effects.audio->masterVolume == 0.7f);
     CHECK(effects.input.has_value());
@@ -55,6 +56,8 @@ void testMenuProjectionAndChangePlan()
     settings.video.exposureEv = -1.5f;
     settings.video.windowWidth = 1600;
     settings.video.windowHeight = 900;
+    settings.video.fullscreen = false;
+    settings.video.windowMaximized = false;
     settings.audio.masterVolume = 0.4f;
     settings.input.forAction(sokoban::InputAction::Undo) = {
         sokoban::KeyboardBinding { "Backspace" },
@@ -69,6 +72,7 @@ void testMenuProjectionAndChangePlan()
     CHECK(!effects.window->fullscreen);
     CHECK(effects.window->width == 1600);
     CHECK(effects.window->height == 900);
+    CHECK(!effects.window->maximized);
     CHECK(effects.audio.has_value());
     CHECK(effects.input.has_value());
     CHECK(effects.saveProgress);

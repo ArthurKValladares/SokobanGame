@@ -68,6 +68,19 @@ void Window::setFullscreen(bool fullscreen)
     syncWindow(window_, "SDL_SetWindowFullscreen");
 }
 
+void Window::setWindowedMaximized()
+{
+    if (!SDL_SetWindowFullscreen(window_, false)) {
+        throw std::runtime_error(
+            std::string("SDL_SetWindowFullscreen failed: ") + SDL_GetError());
+    }
+    if (!SDL_MaximizeWindow(window_)) {
+        throw std::runtime_error(
+            std::string("SDL_MaximizeWindow failed: ") + SDL_GetError());
+    }
+    syncWindow(window_, "Window maximize");
+}
+
 void Window::setWindowedSize(int width, int height)
 {
     if (!SDL_SetWindowFullscreen(window_, false)) {

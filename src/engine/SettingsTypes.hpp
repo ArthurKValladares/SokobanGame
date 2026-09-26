@@ -31,6 +31,7 @@ struct UserSettings {
         float exposureEv = defaultExposureEv;
         int windowWidth = config::windowWidth;
         int windowHeight = config::windowHeight;
+        bool windowMaximized = config::windowMaximized;
 
         [[nodiscard]] int effectiveRenderScalePercent() const;
         bool operator==(const Video&) const = default;

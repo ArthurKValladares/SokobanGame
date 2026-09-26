@@ -506,9 +506,28 @@ void testFrameRateStepperPreservesSemanticValues()
     // semantic stepper adapter still leaves their valid idle state untouched.
     state.selectedRow = 9;
     settings.video.fullscreen = false;
+    settings.video.windowMaximized = false;
     settings.video.windowWidth = 1280;
     settings.video.windowHeight = 720;
     CHECK(!draw(settings).has_value());
+
+    settings.video.fullscreen = true;
+    settings.video.windowMaximized = true;
+    const sokoban::OptionsMenuReduction maximized =
+        sokoban::reduceOptionsMenu(
+            state,
+            settings,
+            sokoban::options::intent::AdjustSelected { 1 });
+    const auto* maximizedSettings = maximized.action
+        ? std::get_if<sokoban::options::SettingsChanged>(&*maximized.action)
+        : nullptr;
+    CHECK(maximizedSettings != nullptr);
+    if (maximizedSettings != nullptr) {
+        CHECK(!maximizedSettings->settings.video.fullscreen);
+        CHECK(maximizedSettings->settings.video.windowMaximized);
+        CHECK(maximizedSettings->settings.video.windowWidth == 1280);
+        CHECK(maximizedSettings->settings.video.windowHeight == 720);
+    }
 }
 
 void testControlsRemapping()

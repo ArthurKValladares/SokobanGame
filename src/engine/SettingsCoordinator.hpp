@@ -16,6 +16,7 @@ struct SettingsEffects {
         bool fullscreen = false;
         int width = 1280;
         int height = 720;
+        bool maximized = false;
     };
 
     std::optional<WindowState> window;

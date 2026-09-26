@@ -45,16 +45,18 @@ constexpr std::array frameRateLimitChoices {
 struct DisplayMode {
     OptionsMenuChoice choice;
     bool fullscreen = false;
+    bool maximized = false;
     int width = 1280;
     int height = 720;
 };
 
 constexpr std::array displayModes {
-    DisplayMode { { 0, "Fullscreen" }, true, 0, 0 },
-    DisplayMode { { 1, "1920 x 1080" }, false, 1920, 1080 },
-    DisplayMode { { 2, "1600 x 900" }, false, 1600, 900 },
-    DisplayMode { { 3, "1280 x 720" }, false, 1280, 720 },
-    DisplayMode { { 4, "1024 x 768" }, false, 1024, 768 },
+    DisplayMode { { 0, "Fullscreen" }, true, false, 0, 0 },
+    DisplayMode { { 1, "Maximized" }, false, true, 0, 0 },
+    DisplayMode { { 2, "1920 x 1080" }, false, false, 1920, 1080 },
+    DisplayMode { { 3, "1600 x 900" }, false, false, 1600, 900 },
+    DisplayMode { { 4, "1280 x 720" }, false, false, 1280, 720 },
+    DisplayMode { { 5, "1024 x 768" }, false, false, 1024, 768 },
 };
 
 constexpr std::array displayChoices {
@@ -63,6 +65,7 @@ constexpr std::array displayChoices {
     displayModes[2].choice,
     displayModes[3].choice,
     displayModes[4].choice,
+    displayModes[5].choice,
 };
 
 constexpr std::array bindingDeviceChoices {
@@ -304,13 +307,16 @@ int displayIndex(const UserSettings& settings)
     if (settings.video.fullscreen) {
         return 0;
     }
-    for (std::size_t index = 1; index < displayModes.size(); ++index) {
+    if (settings.video.windowMaximized) {
+        return 1;
+    }
+    for (std::size_t index = 2; index < displayModes.size(); ++index) {
         if (displayModes[index].width == settings.video.windowWidth &&
             displayModes[index].height == settings.video.windowHeight) {
             return static_cast<int>(index);
         }
     }
-    return 3;
+    return 4;
 }
 
 std::optional<InputAction> actionForRow(OptionsMenuRowId row)
@@ -376,8 +382,11 @@ void applyDisplayMode(UserSettings& settings, int index)
         std::clamp(index, 0, static_cast<int>(displayModes.size()) - 1))];
     settings.video.fullscreen = mode.fullscreen;
     if (!mode.fullscreen) {
-        settings.video.windowWidth = mode.width;
-        settings.video.windowHeight = mode.height;
+        settings.video.windowMaximized = mode.maximized;
+        if (!mode.maximized) {
+            settings.video.windowWidth = mode.width;
+            settings.video.windowHeight = mode.height;
+        }
     }
 }
 

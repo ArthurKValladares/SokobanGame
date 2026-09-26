@@ -20,6 +20,7 @@ public:
     [[nodiscard]] Vec2 size() const;
     [[nodiscard]] Vec2 sizeInPixels() const;
     void setFullscreen(bool fullscreen);
+    void setWindowedMaximized();
     void setWindowedSize(int width, int height);
 
 private:

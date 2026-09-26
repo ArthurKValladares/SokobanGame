@@ -600,7 +600,7 @@ bool Application::drawUiFrame(
     const Vec2 windowSize = window_.size();
     const Vec2 pixelSize = window_.sizeInPixels();
 #if SOKOBAN_ENABLE_DEBUG_UI
-    const bool developerWorkspaceVisible =
+    bool developerWorkspaceVisible =
         evidenceOutputDirectory_.empty() &&
         !optionsMenu_.isOpen() && !titleScreen_.isOpen();
     if (!developerWorkspaceVisible) {
@@ -636,7 +636,12 @@ bool Application::drawUiFrame(
             .width = gameExtent.width,
             .height = gameExtent.height,
         });
-        if (workspace.viewportWidth > 0.0f &&
+        if (workspace.gameplayFullWindow) {
+            // Bypass the docked texture view so the renderer can present the
+            // game directly across the full swapchain client area.
+            developerWorkspaceVisible = false;
+            renderer_.setGameViewportDisplay(std::nullopt);
+        } else if (workspace.viewportWidth > 0.0f &&
             workspace.viewportHeight > 0.0f) {
             renderer_.setGameViewportDisplay(
                 VulkanRenderer::GameViewportDisplay {
@@ -1792,6 +1797,8 @@ void Application::applySettingsEffects(const SettingsEffects& effects)
     if (effects.window) {
         if (effects.window->fullscreen) {
             window_.setFullscreen(true);
+        } else if (effects.window->maximized) {
+            window_.setWindowedMaximized();
         } else {
             window_.setWindowedSize(
                 effects.window->width, effects.window->height);

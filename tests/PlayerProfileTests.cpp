@@ -231,6 +231,7 @@ void testRoundTripAndBests()
         .exposureEv = 1.25f,
         .windowWidth = 1600,
         .windowHeight = 900,
+        .windowMaximized = false,
     };
     profile.settings.input.forAction(sokoban::InputAction::MoveUp) = {
         sokoban::KeyboardBinding { "Up" },
@@ -253,6 +254,15 @@ void testRoundTripAndBests()
     const sokoban::DecodedPlayerProfile decoded =
         sokoban::decodePlayerProfile(profile.serialize());
     CHECK_MESSAGE(decoded.profile == profile, "current profile round-trips");
+
+    nlohmann::json settingsWithoutMaximized =
+        nlohmann::json::parse(profile.serialize());
+    settingsWithoutMaximized["settings"]["video"].erase("windowMaximized");
+    const sokoban::DecodedPlayerProfile decodedOlderSettings =
+        sokoban::decodePlayerProfile(settingsWithoutMaximized.dump());
+    CHECK_MESSAGE(
+        !decodedOlderSettings.profile.settings.video.windowMaximized,
+        "settings saved before maximized mode retain their fixed window size");
 }
 
 void testReachedScreensAndProgressReset()
