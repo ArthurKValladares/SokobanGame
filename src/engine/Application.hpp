@@ -71,6 +71,7 @@ struct ApplicationOptions {
     std::filesystem::path evidenceOutputDirectory;
     int evidenceRenderScalePercent = 100;
     int evidenceAntiAliasingSamples = config::antiAliasingSamples;
+    bool evidenceVsyncEnabled = true;
     bool evidenceAmbientOcclusionEnabled = true;
     bool evidenceFrustumCullingEnabled = true;
     bool evidenceWaterEnabled = false;

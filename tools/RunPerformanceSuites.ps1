@@ -100,6 +100,7 @@ $gameExecutable = Resolve-Executable "sokoban"
 $frameCount = if ($Quick) { 120 } else { 360 }
 $scenarios = @(
     @{ Name = "baseline"; Arguments = @() },
+    @{ Name = "vsync-disabled"; Arguments = @("--evidence-disable-vsync") },
     @{ Name = "point-light-stress"; Arguments = @("--evidence-point-light-stress") },
     @{ Name = "serial-scene-preparation"; Arguments = @("--serial-scene-preparation") }
 )

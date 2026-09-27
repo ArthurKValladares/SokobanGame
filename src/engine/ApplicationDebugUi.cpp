@@ -920,6 +920,10 @@ if (ImGui::CollapsingHeader("Rendering Stats")) {
         renderStats.pointShadowCubeFacesRendered,
         renderStats.pointShadowCubeFacesReused);
     ImGui::Text(
+        "Point-shadow quads %u draw calls, %u instances",
+        renderStats.pointShadowQuadDrawCalls,
+        renderStats.pointShadowQuadInstances);
+    ImGui::Text(
         "Point-shadow models %u/%u in range (%u culled)",
         renderStats.pointShadowModelsInRange,
         renderStats.pointShadowModelCandidates,

@@ -177,8 +177,12 @@ Application::Application(ApplicationOptions options)
               ? playerProfile_.settings.video.effectiveRenderScalePercent()
               : options.evidenceRenderScalePercent,
           {
-              .vsync = playerProfile_.settings.video.vsync,
-              .allowTearing = playerProfile_.settings.video.allowTearing,
+              .vsync = options.evidenceOutputDirectory.empty()
+                  ? playerProfile_.settings.video.vsync
+                  : options.evidenceVsyncEnabled,
+              .allowTearing = options.evidenceOutputDirectory.empty()
+                  ? playerProfile_.settings.video.allowTearing
+                  : !options.evidenceVsyncEnabled,
           },
           assetLoadingBudgetFor(options),
           options.parallelScenePreparationEnabled,
@@ -225,6 +229,14 @@ Application::Application(ApplicationOptions options)
     restoreProfileLocation();
     applySettingsEffects(settingsCoordinator_.initialize());
     if (!evidenceOutputDirectory_.empty()) {
+        // Evidence presentation policy is a process-local diagnostic override,
+        // just like scale and MSAA above. Reapply it after user settings are
+        // initialized so later swapchain recreation cannot silently return an
+        // explicitly non-vsync capture to the persisted/default FIFO policy.
+        renderer_.setPresentationPolicy({
+            .vsync = options.evidenceVsyncEnabled,
+            .allowTearing = !options.evidenceVsyncEnabled,
+        });
         presentationSettings_.lighting.ambientOcclusionEnabled =
             evidenceAmbientOcclusionEnabled_;
         if (evidenceWaterEnabled_) {

@@ -38,6 +38,9 @@ struct CommandLineOptions {
     // product default unless the run explicitly selects another supported
     // sample count.
     int evidenceAntiAliasingSamples = config::antiAliasingSamples;
+    // Uses the product's non-vsync policy for an evidence A/B run. The actual
+    // selected mode is still hardware-dependent and is written to the report.
+    bool evidenceVsyncEnabled = true;
     bool evidenceAmbientOcclusionEnabled = true;
     bool evidenceFrustumCullingEnabled = true;
     bool evidenceWaterEnabled = false;
@@ -77,6 +80,7 @@ struct CommandLineOptions {
     CommandLineOptions options;
     bool evidenceScaleSpecified = false;
     bool evidenceAntiAliasingSpecified = false;
+    bool evidenceVsyncSpecified = false;
     bool evidenceAmbientOcclusionSpecified = false;
     bool evidenceFrustumCullingSpecified = false;
     bool evidenceWaterSpecified = false;
@@ -201,6 +205,9 @@ struct CommandLineOptions {
         } else if (argument == "--evidence-disable-ao") {
             options.evidenceAmbientOcclusionEnabled = false;
             evidenceAmbientOcclusionSpecified = true;
+        } else if (argument == "--evidence-disable-vsync") {
+            options.evidenceVsyncEnabled = false;
+            evidenceVsyncSpecified = true;
         } else if (argument == "--evidence-disable-frustum-culling") {
             options.evidenceFrustumCullingEnabled = false;
             evidenceFrustumCullingSpecified = true;
@@ -278,6 +285,9 @@ struct CommandLineOptions {
         evidenceAmbientOcclusionSpecified) {
         return reject("--evidence-disable-ao requires --evidence-output");
     }
+    if (options.evidenceOutputDirectory.empty() && evidenceVsyncSpecified) {
+        return reject("--evidence-disable-vsync requires --evidence-output");
+    }
     if (options.evidenceOutputDirectory.empty() &&
         evidenceFrustumCullingSpecified) {
         return reject(
@@ -314,6 +324,7 @@ inline constexpr std::string_view commandLineUsage =
     "[--bake-tile-thumbnails] "
     "[--evidence-output <directory> "
     "--evidence-render-scale <25..100> [--evidence-msaa <1|2|4|8>] "
+    "[--evidence-disable-vsync] "
     "[--evidence-disable-ao] "
     "[--evidence-disable-frustum-culling] [--evidence-water] "
     "[--evidence-point-light] "

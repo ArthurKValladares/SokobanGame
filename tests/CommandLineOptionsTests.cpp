@@ -31,6 +31,8 @@ void testEmptyIsANormalRun()
         "evidence scale defaults to 100 percent");
     CHECK_MESSAGE(options.evidenceAntiAliasingSamples == 4,
         "evidence MSAA defaults to the product default");
+    CHECK_MESSAGE(options.evidenceVsyncEnabled,
+        "evidence uses product-default vsync unless explicitly disabled");
     CHECK_MESSAGE(options.evidenceAmbientOcclusionEnabled,
         "ambient occlusion is enabled in evidence runs by default");
     CHECK_MESSAGE(options.evidenceFrustumCullingEnabled,
@@ -112,6 +114,14 @@ void testFlags()
         "evidence scale is read");
     CHECK_MESSAGE(evidence.evidenceAntiAliasingSamples == 2,
         "evidence MSAA is read");
+
+    const sokoban::CommandLineOptions uncappedEvidence = parse(
+        { "--smoke-frames", "180", "--evidence-output", "/tmp/evidence",
+            "--evidence-disable-vsync" });
+    CHECK_MESSAGE(!uncappedEvidence.malformed,
+        "non-vsync evidence invocation parses");
+    CHECK_MESSAGE(!uncappedEvidence.evidenceVsyncEnabled,
+        "non-vsync evidence invocation overrides presentation policy");
 
     for (const std::string_view samples : { "1", "2", "4", "8" }) {
         const sokoban::CommandLineOptions supported = parse(
@@ -225,6 +235,8 @@ void testMalformedInput()
         "malformed evidence MSAA is rejected");
     CHECK_MESSAGE(parse({ "--evidence-disable-ao" }).malformed,
         "AO-off evidence mode requires an output directory");
+    CHECK_MESSAGE(parse({ "--evidence-disable-vsync" }).malformed,
+        "non-vsync evidence mode requires an output directory");
     CHECK_MESSAGE(parse({ "--evidence-disable-frustum-culling" }).malformed,
         "culling-off evidence mode requires an output directory");
     CHECK_MESSAGE(parse({ "--evidence-water" }).malformed,

@@ -31,6 +31,7 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <optional>
 #include <vector>
 
 #ifndef SOKOBAN_ENABLE_DEBUG_UI
@@ -469,6 +470,32 @@ public:
             .rendererReconfigurationPending =
                 configuration_.rendererReconfigurationPending,
         };
+
+        // Point-shadow quad batching borrows the ordinary draw-instance
+        // buffer. Reserve a conservative upper bound for all later users so
+        // a shadow-heavy frame cannot make visible scene or UI draws overflow.
+        // If a light's batch does not fit beside this reserve, it retains the
+        // capacity-independent push-constant path.
+        const auto ordinaryDrawReserve = [](const RenderFrameData& data,
+                                             const PreparedRenderScene& prepared) {
+            uint64_t reserve = prepared.shadowFaces.size() +
+                2ULL * (prepared.opaqueFaceIndices.size() +
+                    prepared.translucentFaceIndices.size() +
+                    prepared.opaqueModelIndices.size() +
+                    prepared.translucentModelIndices.size()) +
+                prepared.particles.size() + data.waterSurfaces.size();
+            if (data.viewMode == RenderViewMode::TopDown2D) {
+                reserve += data.tiles.size() +
+                    2ULL * (data.levelWidth + data.levelHeight + 2ULL);
+            }
+            return reserve;
+        };
+        pointShadowDrawInstanceReserve_ = ordinaryDrawReserve(
+            frameData, scene) + uiDrawData.commands.size() + 64ULL;
+        if (previewFrameData && previewScene) {
+            pointShadowDrawInstanceReserve_ += ordinaryDrawReserve(
+                *previewFrameData, *previewScene);
+        }
 
         const auto setupStart = std::chrono::steady_clock::now();
         // The camera the whole frame renders through. Built here rather than
@@ -909,6 +936,8 @@ private:
                 stats_.pointShadowCubeFacesReused += 6;
                 continue;
             }
+            const std::optional<PointShadowFaceBatch> faceBatch =
+                writePointShadowFaceBatch(scene, casters);
             for (uint32_t cubeFace = 0; cubeFace < 6; ++cubeFace) {
                 shadowPass_.beginPointFace(
                     commandBuffer,
@@ -917,12 +946,20 @@ private:
                     pipelines_.shadow(),
                     stats_);
                 bindDescriptorSet(commandBuffer);
-                for (std::size_t faceIndex : casters.faceIndices) {
-                    drawPointShadowFace(
+                if (faceBatch) {
+                    drawPointShadowFaceBatch(
                         commandBuffer,
-                        light,
+                        static_cast<uint32_t>(lightIndex),
                         cubeFace,
-                        scene.shadowFaces[faceIndex]);
+                        *faceBatch);
+                } else {
+                    for (std::size_t faceIndex : casters.faceIndices) {
+                        drawPointShadowFaceUnbatched(
+                            commandBuffer,
+                            light,
+                            cubeFace,
+                            scene.shadowFaces[faceIndex]);
+                    }
                 }
                 VkPipeline pointModelPipeline = VK_NULL_HANDLE;
                 for (const PointShadowModelState& state : modelStates) {
@@ -2904,7 +2941,70 @@ private:
         vkCmdDraw(commandBuffer, 6, instanceCount, 0, firstInstance);
     }
 
-    void drawPointShadowFace(
+    struct PointShadowFaceBatch {
+        uint32_t firstInstance = 0;
+        uint32_t instanceCount = 0;
+    };
+
+    [[nodiscard]] std::optional<PointShadowFaceBatch>
+    writePointShadowFaceBatch(
+        const PreparedRenderScene& scene,
+        const PreparedPointShadowCasters& casters)
+    {
+        const uint64_t required = casters.faceIndices.size();
+        const uint64_t available = models_.availableDrawInstances();
+        if (!pointShadowBatchFitsDrawInstances(
+                required, available, pointShadowDrawInstanceReserve_)) {
+            return std::nullopt;
+        }
+        PointShadowFaceBatch batch;
+        for (std::size_t faceIndex : casters.faceIndices) {
+            const uint32_t instance = writeDrawInstance({
+                .vertices = quadVertices(
+                    scene.shadowFaces[faceIndex], worldSpaceQuad),
+            });
+            if (batch.instanceCount == 0) {
+                batch.firstInstance = instance;
+            }
+            ++batch.instanceCount;
+        }
+        return batch;
+    }
+
+    void drawPointShadowFaceBatch(
+        VkCommandBuffer commandBuffer,
+        uint32_t lightIndex,
+        uint32_t cubeFace,
+        PointShadowFaceBatch batch)
+    {
+        if (batch.instanceCount == 0) {
+            return;
+        }
+        GpuDrawInstance constants {};
+        constants.passData[0] = {
+            2.0f,
+            static_cast<float>(lightIndex),
+            static_cast<float>(cubeFace),
+            config::pointShadowNearPlane,
+        };
+        vkCmdPushConstants(
+            commandBuffer,
+            pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(GpuDrawInstance),
+            &constants);
+        vkCmdDraw(
+            commandBuffer,
+            6,
+            batch.instanceCount,
+            0,
+            batch.firstInstance);
+        ++stats_.pointShadowQuadDrawCalls;
+        stats_.pointShadowQuadInstances += batch.instanceCount;
+    }
+
+    void drawPointShadowFaceUnbatched(
         VkCommandBuffer commandBuffer,
         const RenderFrameData::PointLight& light,
         uint32_t cubeFace,
@@ -2915,10 +3015,9 @@ private:
             shadowVertices[i] = projectPointShadow(
                 light, cubeFace, worldVertices[i]);
         }
-        // Point lights can multiply the same caster set by six faces and up
-        // to the full light capacity. Keep their proven push-constant path so
-        // batching the directional map cannot exhaust the frame instance
-        // buffer in a point-light stress scene.
+        // This path is deliberately independent of instance-buffer capacity.
+        // A light lands here when its complete batch would consume the reserve
+        // retained for the visible scene, preview and UI.
         GpuDrawInstance constants {
             .vertices = shadowVertices,
         };
@@ -2932,6 +3031,8 @@ private:
             sizeof(GpuDrawInstance),
             &constants);
         vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+        ++stats_.pointShadowQuadDrawCalls;
+        ++stats_.pointShadowQuadInstances;
     }
 
     // Neither camera is a parameter any more. A model's push constants are
@@ -3244,6 +3345,7 @@ private:
     std::array<std::vector<PointShadowModelState>,
         RenderFrameData::pointLightCapacity>& pointShadowModelStateScratch_;
     bool pointShadowCacheEnabled_ = true;
+    uint64_t pointShadowDrawInstanceReserve_ = 0;
     VulkanSceneRecorder::Scratch& scratch_;
     bool scratchReuseEnabled_ = true;
     FrameTimeTelemetry& setupTimeTelemetry_;

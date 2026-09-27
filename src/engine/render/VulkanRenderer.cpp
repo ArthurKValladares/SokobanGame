@@ -1248,6 +1248,11 @@ VkSampleCountFlagBits VulkanRenderer::activeSampleCount() const
 RenderStats VulkanRenderer::renderStats() const
 {
     RenderStats stats = lastStats_;
+    const VkPresentModeKHR presentMode =
+        activeResources_.swapchain->presentMode();
+    stats.fifoPresentationEnabled =
+        presentMode == VK_PRESENT_MODE_FIFO_KHR ||
+        presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR;
     stats.sceneDepthBits = vulkanDepthFormatBits(depthFormat_);
     stats.assetSchedulingTiming = renderPhaseTiming(
         assetSchedulingTimeTelemetry_.summary());

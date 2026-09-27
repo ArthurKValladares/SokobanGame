@@ -268,6 +268,7 @@ public:
     [[nodiscard]] uint32_t writeDrawInstance(
         uint32_t frameIndex,
         const GpuDrawInstance& instance);
+    [[nodiscard]] uint32_t availableDrawInstances() const noexcept;
 
     [[nodiscard]] MeshView meshForTile(
         const RenderFrameData::Tile& tile,

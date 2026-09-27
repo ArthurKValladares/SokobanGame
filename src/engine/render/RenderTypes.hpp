@@ -595,6 +595,8 @@ struct RenderStats {
     uint32_t pointShadowModelsCulled = 0;
     uint32_t pointShadowCubeFacesRendered = 0;
     uint32_t pointShadowCubeFacesReused = 0;
+    uint32_t pointShadowQuadDrawCalls = 0;
+    uint32_t pointShadowQuadInstances = 0;
     uint32_t preparedModels = 0;
     uint32_t unavailableModels = 0;
     uint32_t preparedParticles = 0;
@@ -616,6 +618,9 @@ struct RenderStats {
     uint32_t swapchainWidth = 0;
     uint32_t swapchainHeight = 0;
     uint32_t swapchainImages = 0;
+    // FIFO modes deliberately synchronize queue progress with the display.
+    // WSI backpressure can surface at an otherwise ordinary frame-slot fence.
+    bool fifoPresentationEnabled = false;
     uint32_t renderWidth = 0;
     uint32_t renderHeight = 0;
     uint32_t ssaoWidth = 0;

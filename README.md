@@ -199,6 +199,12 @@ recorder A/B captures, then repeats the baseline to expose thermal or power
 state drift; every evidence report uses the same ranked analyzer as the live
 profiler.
 
+Every quick and full GPU matrix also records a `vsync-disabled` control. Its
+report names the presentation mode the driver actually selected, allowing a
+large FIFO frame-fence wait to be separated from GPU backpressure or an
+actionable synchronization stall. For an isolated comparison, pass
+`--evidence-disable-vsync` with an ordinary `--evidence-output` capture.
+
 `scene_preparation_allocations` is a separate deterministic CTest regression:
 after warm-up, serial scene preparation, parallel scene preparation, and
 `TaskSystem::parallelFor` coordination must complete 64 representative runs

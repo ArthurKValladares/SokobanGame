@@ -121,6 +121,25 @@ void testFenceWaitBeyondGpuBackPressureRemainsActionable()
     CHECK(find(analysis, "fence-wait") != nullptr);
 }
 
+void testFifoPresentationPacingIsNotReportedAsCpuWork()
+{
+    sokoban::RenderStats stats;
+    stats.fifoPresentationEnabled = true;
+    stats.cpuFrameTiming = timing(8.0, 8.7);
+    stats.gpuFrameTiming = timing(4.8, 5.0);
+    stats.frameFenceWaitTiming = timing(7.3, 7.9);
+
+    const sokoban::PerformanceAnalysis analysis =
+        sokoban::analyzePerformance(stats, {});
+    CHECK(find(analysis, "fence-wait") == nullptr);
+
+    // The same unexplained wait remains visible in a non-FIFO diagnostic run.
+    stats.fifoPresentationEnabled = false;
+    const sokoban::PerformanceAnalysis uncapped =
+        sokoban::analyzePerformance(stats, {});
+    CHECK(find(uncapped, "fence-wait") != nullptr);
+}
+
 void testCacheAndMemoryFindings()
 {
     sokoban::RenderStats stats;
@@ -175,6 +194,7 @@ int main()
     testGpuPhaseAndSubmissionFindings();
     testExpectedGpuBackPressureIsNotReportedAsCpuWork();
     testFenceWaitBeyondGpuBackPressureRemainsActionable();
+    testFifoPresentationPacingIsNotReportedAsCpuWork();
     testCacheAndMemoryFindings();
     testHealthyCaptureDoesNotInventFindings();
     if (failures == 0) {

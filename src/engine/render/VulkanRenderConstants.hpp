@@ -82,10 +82,10 @@ inline constexpr float clipSpaceQuad = 0.0f;
 // It was one vkCmdPushConstants(256) + vkCmdDraw(6) per quad before, and a
 // board of any size is on the order of a thousand quads.
 //
-// The shadow pipelines still receive this same block as *push constants*.
-// They are not instanced, they have one camera per pass, and nothing in a
-// shadow pass reads material state - so the transport differs while the
-// layout stays identical, and there is only one struct to keep in step.
+// Shadow draws use the same block through both transports. Batched sun and
+// point-light quads live in the instance buffer; mesh transforms and the
+// capacity-independent point-quad fallback still arrive as push constants.
+// Nothing in a shadow pass reads material state, so one layout can serve both.
 // Which shading path a draw takes. Lives in GpuDrawInstance::textureOptions.x
 // and is what the scene, mirror and UI fragment shaders branch on.
 //
@@ -170,9 +170,9 @@ struct GpuDrawInstance {
     // a baked clipFromModel, which is why the vertex shaders had nothing to
     // transform and nothing to report a world position from.
     //
-    // The shadow pass is the exception: it has one camera per sun and six
-    // more per point light, so its pipelines keep receiving clip-space
-    // corners here. Nothing samples a world position in a shadow pass.
+    // Sun-shadow quads and the point-shadow fallback carry clip-space corners.
+    // Batched point-shadow quads carry world-space corners and project them in
+    // the vertex shader so all six cube faces can reuse one instance range.
     std::array<Vec4, 4> vertices;
     // Sixty-four bytes of per-draw space, claimed by one pass at a time.
     //
@@ -227,6 +227,18 @@ inline constexpr uint32_t maxDrawInstancesPerFrame =
 // corrupting the run it was part of.
 inline constexpr uint32_t drawInstanceDiscardSlot =
     maxDrawInstancesPerFrame - 1;
+
+// A point-light batch may borrow the ordinary instance buffer only when the
+// batch and the recorder's conservative reserve both fit. Spell this without
+// addition so even adversarial counts cannot wrap before the comparison.
+[[nodiscard]] constexpr bool pointShadowBatchFitsDrawInstances(
+    uint64_t required,
+    uint64_t available,
+    uint64_t ordinaryReserve) noexcept
+{
+    return required <= available &&
+        ordinaryReserve <= available - required;
+}
 
 // Four explicit 32-bit integer lanes with the size and alignment of a GLSL
 // uvec4 under std430. Keeping this separate from Math.hpp avoids making an

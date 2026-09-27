@@ -1452,6 +1452,13 @@ uint32_t VulkanModelResources::writeDrawInstance(
     return result;
 }
 
+uint32_t VulkanModelResources::availableDrawInstances() const noexcept
+{
+    return drawInstanceCount_ < drawInstanceDiscardSlot
+        ? drawInstanceDiscardSlot - drawInstanceCount_
+        : 0U;
+}
+
 VulkanModelResources::MeshView VulkanModelResources::meshForTile(
     const RenderFrameData::Tile& tile,
     uint32_t frameIndex) const

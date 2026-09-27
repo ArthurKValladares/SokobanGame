@@ -211,11 +211,19 @@ PerformanceAnalysis analyzePerformance(
             &stats.imageAcquisitionTiming,
             "Correlate acquisition stalls with present mode, GPU saturation, and window-system pacing." },
     };
-    const bool expectedGpuBackPressure =
+    // FIFO presentation intentionally applies display/compositor backpressure.
+    // Depending on the WSI implementation, that wait can surface when a frame
+    // slot's fence is recycled rather than inside acquire or present. Aggregate
+    // fence telemetry cannot distinguish that normal pacing from an avoidable
+    // synchronization stall. Non-FIFO evidence captures provide the diagnostic
+    // control when this phase needs investigation.
+    const bool expectedSynchronizationBackPressure =
+        stats.fifoPresentationEnabled ||
         fenceWaitIsExpectedGpuBackPressure(stats);
     if (stats.cpuFrameTiming.available && cpu > 0.0) {
         for (const NamedTiming& phase : cpuPhases) {
-            if (phase.id == "fence-wait" && expectedGpuBackPressure) {
+            if (phase.id == "fence-wait" &&
+                expectedSynchronizationBackPressure) {
                 continue;
             }
             const double phaseTime = representative(*phase.timing);

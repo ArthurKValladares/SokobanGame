@@ -122,6 +122,7 @@ void Application::finishEvidenceCapture()
            << " (" << renderer_.physicalDeviceTypeName() << ")\n";
     report << "- Swapchain: " << evidenceStats_.swapchainWidth << 'x'
            << evidenceStats_.swapchainHeight << "\n";
+    report << "- Present mode: " << renderer_.presentModeName() << "\n";
     report << "- Scene target: " << evidenceStats_.renderWidth << 'x'
            << evidenceStats_.renderHeight << "\n";
     report << "- SSAO target: " << evidenceStats_.ssaoWidth << 'x'
@@ -166,6 +167,9 @@ void Application::finishEvidenceCapture()
     report << "- Point-shadow cube faces: "
            << evidenceStats_.pointShadowCubeFacesRendered << " rendered, "
            << evidenceStats_.pointShadowCubeFacesReused << " reused\n";
+    report << "- Point-shadow quad submissions: "
+           << evidenceStats_.pointShadowQuadDrawCalls << " draws for "
+           << evidenceStats_.pointShadowQuadInstances << " instances\n";
     report << "- Point-shadow models: "
            << evidenceStats_.pointShadowModelsInRange << " / "
            << evidenceStats_.pointShadowModelCandidates << " in range; "

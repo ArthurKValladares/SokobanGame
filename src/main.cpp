@@ -39,6 +39,7 @@ int runApplication(const sokoban::CommandLineOptions& options)
             .evidenceRenderScalePercent = options.evidenceRenderScalePercent,
             .evidenceAntiAliasingSamples =
                 options.evidenceAntiAliasingSamples,
+            .evidenceVsyncEnabled = options.evidenceVsyncEnabled,
             .evidenceAmbientOcclusionEnabled =
                 options.evidenceAmbientOcclusionEnabled,
             .evidenceFrustumCullingEnabled =

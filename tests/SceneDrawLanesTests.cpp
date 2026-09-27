@@ -282,6 +282,20 @@ void testDegenerateValuesArePassedThroughUntouched()
     CHECK(sameFloat(packed[0].w, worldSpaceQuad));
 }
 
+void testPointShadowBatchCapacityKeepsTheOrdinaryDrawReserve()
+{
+    TEST("pointShadowBatchCapacityKeepsTheOrdinaryDrawReserve");
+    CHECK(pointShadowBatchFitsDrawInstances(12'000, 65'535, 4'000));
+    CHECK(pointShadowBatchFitsDrawInstances(12'000, 16'000, 4'000));
+    CHECK(!pointShadowBatchFitsDrawInstances(12'001, 16'000, 4'000));
+    CHECK(!pointShadowBatchFitsDrawInstances(16'001, 16'000, 0));
+
+    // The comparison is subtraction-based: an impossible caller count cannot
+    // wrap around with its reserve and appear to fit.
+    CHECK(!pointShadowBatchFitsDrawInstances(
+        std::numeric_limits<uint64_t>::max(), 65'535, 1));
+}
+
 } // namespace
 
 int main()
@@ -302,6 +316,7 @@ int main()
 
     testQuadVerticesCarryTheSpaceFlag();
     testDegenerateValuesArePassedThroughUntouched();
+    testPointShadowBatchCapacityKeepsTheOrdinaryDrawReserve();
 
     if (failures != 0) {
         std::cerr << failures << " of " << checks << " checks failed\n";
