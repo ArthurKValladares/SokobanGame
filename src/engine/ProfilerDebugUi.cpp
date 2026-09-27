@@ -568,6 +568,8 @@ void ProfilerDebugUi::draw(const VulkanRenderer& renderer)
                 { "  Raster/resolve", &stats.gpuSceneRasterTiming },
                 { "  Depth publish", &stats.gpuSceneDepthPublishTiming },
                 { "  Translucency", &stats.gpuSceneTranslucencyTiming },
+                { "  Mirror continuation",
+                    &stats.gpuSceneMirrorContinuationTiming },
                 { "SSAO", &stats.gpuSsaoTiming },
                 { "  Scene snapshot", &stats.gpuSsaoSnapshotTiming },
                 { "  Occlusion", &stats.gpuSsaoOcclusionTiming },

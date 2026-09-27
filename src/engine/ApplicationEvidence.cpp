@@ -152,6 +152,8 @@ void Application::finishEvidenceCapture()
            << (evidenceStats_.ssaoColorSnapshotCopied ? "exercised" : "skipped")
            << "\n";
     report << "- MSAA samples: " << evidenceStats_.activeSamples << "\n";
+    report << "- Scene depth: " << evidenceStats_.sceneDepthBits
+           << " bits\n";
     report << "- Draw calls: " << evidenceStats_.drawCalls << "\n";
     report << "- Triangles: " << evidenceStats_.triangles << "\n";
     report << "- Render passes: " << evidenceStats_.renderPasses << "\n";
@@ -245,6 +247,9 @@ void Application::finishEvidenceCapture()
     writePhase(
         "  GPU scene depth publish", evidenceStats_.gpuSceneDepthPublishTiming);
     writePhase("  GPU scene translucency", evidenceStats_.gpuSceneTranslucencyTiming);
+    writePhase(
+        "  GPU mirror continuation",
+        evidenceStats_.gpuSceneMirrorContinuationTiming);
     writePhase("GPU SSAO", evidenceStats_.gpuSsaoTiming);
     writePhase("  GPU SSAO scene snapshot", evidenceStats_.gpuSsaoSnapshotTiming);
     writePhase("  GPU SSAO occlusion", evidenceStats_.gpuSsaoOcclusionTiming);

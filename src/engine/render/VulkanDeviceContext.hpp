@@ -57,6 +57,7 @@ public:
     [[nodiscard]] float timestampPeriodNanoseconds() const;
     [[nodiscard]] uint32_t graphicsTimestampValidBits() const;
     [[nodiscard]] std::array<float, 2> wireframeLineWidthRange() const;
+    [[nodiscard]] VkFormat sceneDepthFormat() const;
     [[nodiscard]] VkSampleCountFlagBits supportedSampleCount(
         VkSampleCountFlagBits requested) const;
     void waitIdle() const;
@@ -74,6 +75,8 @@ private:
         VkPhysicalDevice device) const;
     [[nodiscard]] bool isDeviceSuitable(VkPhysicalDevice device) const;
     [[nodiscard]] VulkanDeviceFeatureSupport queryFeatureSupport(
+        VkPhysicalDevice device) const;
+    [[nodiscard]] VulkanSceneDepthFormatSelection querySceneDepthFormat(
         VkPhysicalDevice device) const;
 
     SDL_Window* window_ = nullptr;
@@ -93,6 +96,8 @@ private:
     uint32_t textureDescriptorCapacity_ = 0;
     bool wideLinesSupported_ = false;
     uint32_t graphicsTimestampValidBits_ = 0;
+    VkFormat sceneDepthFormat_ = VK_FORMAT_D32_SFLOAT;
+    VkSampleCountFlags sceneDepthSampleCounts_ = VK_SAMPLE_COUNT_1_BIT;
     std::array<float, 2> wireframeLineWidthRange_ { 1.0f, 1.0f };
 };
 

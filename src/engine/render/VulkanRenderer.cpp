@@ -277,6 +277,7 @@ VulkanRenderer::VulkanRenderer(
     sceneRecorder_.setPointShadowCacheEnabled(
         pointShadowOptimizationsEnabled_);
     sceneRecorder_.setScratchReuseEnabled(recorderScratchReuseEnabled_);
+    depthFormat_ = deviceContext_.sceneDepthFormat();
     pipelineCache_.create(
         deviceContext_.device(),
         deviceContext_.physicalDeviceProperties(),
@@ -1247,6 +1248,7 @@ VkSampleCountFlagBits VulkanRenderer::activeSampleCount() const
 RenderStats VulkanRenderer::renderStats() const
 {
     RenderStats stats = lastStats_;
+    stats.sceneDepthBits = vulkanDepthFormatBits(depthFormat_);
     stats.assetSchedulingTiming = renderPhaseTiming(
         assetSchedulingTimeTelemetry_.summary());
     stats.frameFenceWaitTiming = renderPhaseTiming(
@@ -1271,6 +1273,9 @@ RenderStats VulkanRenderer::renderStats() const
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SceneDepthPublish));
     stats.gpuSceneTranslucencyTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SceneTranslucency));
+    stats.gpuSceneMirrorContinuationTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(
+            VulkanGpuPhase::SceneMirrorContinuation));
     stats.gpuSsaoTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Ssao));
     stats.gpuSsaoSnapshotTiming = renderPhaseTiming(
@@ -1910,7 +1915,8 @@ void VulkanRenderer::logRenderConfiguration() const
         << activeResources_.swapchain->renderScalePercent()
         << "% ("
         << static_cast<double>(samplePixels) / 1'000'000.0
-        << " M sample-pixels)";
+        << " M sample-pixels), scene depth "
+        << vulkanDepthFormatName(depthFormat_);
 }
 
 VkSampleCountFlagBits VulkanRenderer::sampleCountForMode(AntiAliasingMode mode) const

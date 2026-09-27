@@ -627,6 +627,7 @@ struct RenderStats {
     uint64_t atmosphereUnscissoredPixels = 0;
     uint32_t renderScalePercent = 100;
     uint32_t activeSamples = 1;
+    uint32_t sceneDepthBits = 0;
     bool parallelScenePreparationEnabled = true;
     bool pointShadowOptimizationsEnabled = true;
     bool recorderScratchReuseEnabled = true;
@@ -668,6 +669,7 @@ struct RenderStats {
     RenderPhaseTiming gpuSceneRasterTiming {};
     RenderPhaseTiming gpuSceneDepthPublishTiming {};
     RenderPhaseTiming gpuSceneTranslucencyTiming {};
+    RenderPhaseTiming gpuSceneMirrorContinuationTiming {};
     RenderPhaseTiming gpuSsaoTiming {};
     RenderPhaseTiming gpuSsaoSnapshotTiming {};
     RenderPhaseTiming gpuSsaoOcclusionTiming {};

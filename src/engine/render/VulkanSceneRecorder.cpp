@@ -607,6 +607,10 @@ public:
             VulkanGpuPhase::Atmosphere);
         atmosphereTimeTelemetry_.record(
             elapsedMilliseconds(atmosphereStart));
+        gpuProfiler_.beginPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::SceneMirrorContinuation);
         if (mirrorPreviewOverFog) {
             vulkanDebug::beginLabel(
                 device_, commandBuffer, "Mirror preview over fog",
@@ -628,6 +632,10 @@ public:
                 { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
             vulkanDebug::endLabel(device_, commandBuffer);
         }
+        gpuProfiler_.endPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::SceneMirrorContinuation);
         if (mainDepthPublished) {
             swapchain_.prepareSceneDepthAttachment(commandBuffer, stats_);
         }

@@ -174,6 +174,54 @@ int main()
     CHECK_MESSAGE(throwsForNoSurfaceMode({}),
         "surface with no composite alpha support is rejected");
 
+    constexpr VkFormatFeatureFlags sceneDepthFeatures =
+        VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+    const std::array preferredSceneDepth {
+        sokoban::VulkanSceneDepthFormatCandidate {
+            .format = VK_FORMAT_D16_UNORM,
+            .optimalTilingFeatures = sceneDepthFeatures,
+            .sampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT,
+        },
+        sokoban::VulkanSceneDepthFormatCandidate {
+            .format = VK_FORMAT_D32_SFLOAT,
+            .optimalTilingFeatures = sceneDepthFeatures,
+            .sampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_8_BIT,
+        },
+    };
+    const auto preferredDepth =
+        sokoban::chooseVulkanSceneDepthFormat(preferredSceneDepth);
+    CHECK_MESSAGE(
+        preferredDepth.format == VK_FORMAT_D16_UNORM &&
+            preferredDepth.sampleCounts ==
+                (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT),
+        "D16 scene depth is preferred when it supports attachment and sampling");
+
+    auto fallbackSceneDepth = preferredSceneDepth;
+    fallbackSceneDepth[0].optimalTilingFeatures =
+        VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    CHECK_MESSAGE(
+        sokoban::chooseVulkanSceneDepthFormat(fallbackSceneDepth).format ==
+            VK_FORMAT_D32_SFLOAT,
+        "scene depth falls back to D32 when D16 cannot be sampled");
+    CHECK_MESSAGE(
+        sokoban::chooseVulkanSceneDepthFormat(
+            preferredSceneDepth,
+            VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_8_BIT).format ==
+            VK_FORMAT_D32_SFLOAT,
+        "scene depth preserves an MSAA mode supported by the D32 fallback");
+
+    auto unsupportedSceneDepth = fallbackSceneDepth;
+    unsupportedSceneDepth[1].sampleCounts = 0;
+    CHECK_MESSAGE(
+        !sokoban::chooseVulkanSceneDepthFormat(unsupportedSceneDepth).supported(),
+        "scene depth rejects formats without a usable sample count");
+    CHECK_MESSAGE(
+        sokoban::vulkanDepthFormatBits(VK_FORMAT_D16_UNORM) == 16 &&
+            std::string_view(sokoban::vulkanDepthFormatName(
+                VK_FORMAT_D32_SFLOAT)) == "D32_SFLOAT",
+        "scene-depth telemetry exposes stable precision and format labels");
+
     constexpr uint32_t requiredPushConstants = 128;
     constexpr uint32_t requiredSampledImages = 32;
     const auto chooseReleaseTier = [&](const auto& support) {

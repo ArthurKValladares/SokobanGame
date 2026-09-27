@@ -651,6 +651,9 @@ void drawPhaseTimings(const RenderStats& renderStats)
     showPhase(
         "  GPU scene depth publish", renderStats.gpuSceneDepthPublishTiming);
     showPhase("  GPU scene translucency", renderStats.gpuSceneTranslucencyTiming);
+    showPhase(
+        "  GPU mirror continuation",
+        renderStats.gpuSceneMirrorContinuationTiming);
     showPhase("GPU SSAO", renderStats.gpuSsaoTiming);
     showPhase("  GPU SSAO scene snapshot", renderStats.gpuSsaoSnapshotTiming);
     showPhase("  GPU SSAO occlusion", renderStats.gpuSsaoOcclusionTiming);
@@ -890,6 +893,7 @@ if (ImGui::CollapsingHeader("Rendering Stats")) {
             static_cast<double>(renderStats.renderHeight) /
             1'000'000.0 * renderStats.activeSamples);
     ImGui::Text("Active samples %ux", renderStats.activeSamples);
+    ImGui::Text("Scene depth %u-bit", renderStats.sceneDepthBits);
     ImGui::Text(
         "Wireframe %s",
         renderStats.wireframeEnabled ? "on" : "off");

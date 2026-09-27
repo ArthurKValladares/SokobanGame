@@ -135,6 +135,52 @@ std::string vulkanTextureHeapCapacityFailureMessage(
         " are available";
 }
 
+VulkanSceneDepthFormatSelection chooseVulkanSceneDepthFormat(
+    std::span<const VulkanSceneDepthFormatCandidate> candidates,
+    VkSampleCountFlags requiredSampleCounts)
+{
+    constexpr VkFormatFeatureFlags requiredFeatures =
+        VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+    requiredSampleCounts |= VK_SAMPLE_COUNT_1_BIT;
+    for (const VulkanSceneDepthFormatCandidate& candidate : candidates) {
+        if ((candidate.optimalTilingFeatures & requiredFeatures) ==
+                requiredFeatures &&
+            (candidate.sampleCounts & requiredSampleCounts) ==
+                requiredSampleCounts) {
+            return {
+                .format = candidate.format,
+                .sampleCounts = candidate.sampleCounts,
+            };
+        }
+    }
+    return {};
+}
+
+const char* vulkanDepthFormatName(VkFormat format)
+{
+    switch (format) {
+    case VK_FORMAT_D16_UNORM: return "D16_UNORM";
+    case VK_FORMAT_D24_UNORM_S8_UINT: return "D24_UNORM_S8_UINT";
+    case VK_FORMAT_D32_SFLOAT: return "D32_SFLOAT";
+    case VK_FORMAT_D32_SFLOAT_S8_UINT: return "D32_SFLOAT_S8_UINT";
+    default: return "unknown depth format";
+    }
+}
+
+uint32_t vulkanDepthFormatBits(VkFormat format)
+{
+    switch (format) {
+    case VK_FORMAT_D16_UNORM: return 16;
+    case VK_FORMAT_D24_UNORM_S8_UINT: return 24;
+    case VK_FORMAT_D32_SFLOAT:
+    case VK_FORMAT_D32_SFLOAT_S8_UINT:
+        return 32;
+    default:
+        return 0;
+    }
+}
+
 std::string_view vulkanFeatureTierRejectionMessage(
     VulkanFeatureTierRejection rejection)
 {

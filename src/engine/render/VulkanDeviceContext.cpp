@@ -199,6 +199,11 @@ VulkanDeviceContext::wireframeLineWidthRange() const
     return wireframeLineWidthRange_;
 }
 
+VkFormat VulkanDeviceContext::sceneDepthFormat() const
+{
+    return sceneDepthFormat_;
+}
+
 VkSampleCountFlagBits VulkanDeviceContext::supportedSampleCount(
     VkSampleCountFlagBits requested) const
 {
@@ -208,7 +213,8 @@ VkSampleCountFlagBits VulkanDeviceContext::supportedSampleCount(
 
     const VkSampleCountFlags supported =
         physicalDeviceProperties_.limits.framebufferColorSampleCounts &
-        physicalDeviceProperties_.limits.framebufferDepthSampleCounts;
+        physicalDeviceProperties_.limits.framebufferDepthSampleCounts &
+        sceneDepthSampleCounts_;
     if (supported & requested) {
         return requested;
     }
@@ -366,6 +372,10 @@ void VulkanDeviceContext::pickPhysicalDevice()
         queueFamilyProperties[queueFamilies_.graphics].timestampValidBits;
     const VulkanDeviceFeatureSupport support =
         queryFeatureSupport(physicalDevice_);
+    const VulkanSceneDepthFormatSelection sceneDepth =
+        querySceneDepthFormat(physicalDevice_);
+    sceneDepthFormat_ = sceneDepth.format;
+    sceneDepthSampleCounts_ = sceneDepth.sampleCounts;
     const VulkanTextureHeapCapacity textureHeap =
         chooseVulkanTextureHeapCapacity(
             support,
@@ -388,7 +398,8 @@ void VulkanDeviceContext::pickPhysicalDevice()
         << ")" << (featureTier_.wireframeSupported
             ? " with debug wireframe support"
             : " without debug wireframe support")
-        << "; texture descriptor capacity " << textureDescriptorCapacity_;
+        << "; texture descriptor capacity " << textureDescriptorCapacity_
+        << "; scene depth " << vulkanDepthFormatName(sceneDepthFormat_);
 }
 
 void VulkanDeviceContext::createDevice()
@@ -581,6 +592,13 @@ bool VulkanDeviceContext::isDeviceSuitable(VkPhysicalDevice device) const
         return false;
     }
 
+    if (!querySceneDepthFormat(device).supported()) {
+        log::warning(log::Category::Rendering)
+            << "Rejecting Vulkan GPU " << properties.deviceName
+            << ": no sampled depth-attachment format is available";
+        return false;
+    }
+
     const VulkanQueueFamilyIndices indices = findQueueFamilies(device);
     if (!indices.complete()) {
         return false;
@@ -669,6 +687,55 @@ VulkanDeviceFeatureSupport VulkanDeviceContext::queryFeatureSupport(
         .wideLines = features.features.wideLines == VK_TRUE,
         .samplerAnisotropy = features.features.samplerAnisotropy == VK_TRUE,
     };
+}
+
+VulkanSceneDepthFormatSelection VulkanDeviceContext::querySceneDepthFormat(
+    VkPhysicalDevice device) const
+{
+    // D16 halves the bandwidth and storage of the scene depth targets. D32 is
+    // retained as the conservative fallback for devices that cannot both
+    // render to and sample D16 at the sample counts they advertise.
+    constexpr std::array<VkFormat, 2> preferredFormats {
+        VK_FORMAT_D16_UNORM,
+        VK_FORMAT_D32_SFLOAT,
+    };
+    std::array<VulkanSceneDepthFormatCandidate, preferredFormats.size()>
+        candidates {};
+    for (std::size_t index = 0; index < preferredFormats.size(); ++index) {
+        VkFormatProperties formatProperties {};
+        vkGetPhysicalDeviceFormatProperties(
+            device, preferredFormats[index], &formatProperties);
+        VkImageFormatProperties imageProperties {};
+        const VkResult imageResult = vkGetPhysicalDeviceImageFormatProperties(
+            device,
+            preferredFormats[index],
+            VK_IMAGE_TYPE_2D,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT,
+            0,
+            &imageProperties);
+        candidates[index] = {
+            .format = preferredFormats[index],
+            .optimalTilingFeatures = formatProperties.optimalTilingFeatures,
+            .sampleCounts = imageResult == VK_SUCCESS
+                ? imageProperties.sampleCounts
+                : 0,
+        };
+    }
+    // Do not buy the D16 optimization by silently removing an MSAA mode that
+    // D32 would have supported. The renderer exposes modes only through 8x,
+    // so higher hardware-only sample counts do not influence this choice.
+    constexpr VkSampleCountFlags rendererSampleCounts =
+        VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_2_BIT |
+        VK_SAMPLE_COUNT_4_BIT | VK_SAMPLE_COUNT_8_BIT;
+    const VkSampleCountFlags preservedSampleCounts =
+        candidates.back().sampleCounts & rendererSampleCounts;
+    return chooseVulkanSceneDepthFormat(
+        candidates,
+        preservedSampleCounts != 0
+            ? preservedSampleCounts
+            : VK_SAMPLE_COUNT_1_BIT);
 }
 
 } // namespace sokoban

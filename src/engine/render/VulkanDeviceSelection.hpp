@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -72,6 +73,26 @@ struct VulkanTextureHeapCapacity {
     bool supported = false;
 };
 
+// Format support is deliberately represented independently of a live Vulkan
+// device so the preference and fallback policy remains unit-testable. Scene
+// depth is sampled by SSAO, water, and atmosphere after serving as the depth
+// attachment, so both usages (and at least single-sample images) are required.
+struct VulkanSceneDepthFormatCandidate {
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    VkFormatFeatureFlags optimalTilingFeatures = 0;
+    VkSampleCountFlags sampleCounts = 0;
+};
+
+struct VulkanSceneDepthFormatSelection {
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    VkSampleCountFlags sampleCounts = 0;
+
+    [[nodiscard]] bool supported() const
+    {
+        return format != VK_FORMAT_UNDEFINED;
+    }
+};
+
 [[nodiscard]] VulkanFeatureTier chooseVulkanFeatureTier(
     const VulkanDeviceFeatureSupport& support,
     uint32_t requiredPushConstantsSize,
@@ -90,6 +111,11 @@ struct VulkanTextureHeapCapacity {
     uint32_t otherCombinedImageSamplers);
 [[nodiscard]] std::string vulkanTextureHeapCapacityFailureMessage(
     const VulkanTextureHeapCapacity& capacity);
+[[nodiscard]] VulkanSceneDepthFormatSelection chooseVulkanSceneDepthFormat(
+    std::span<const VulkanSceneDepthFormatCandidate> candidates,
+    VkSampleCountFlags requiredSampleCounts = VK_SAMPLE_COUNT_1_BIT);
+[[nodiscard]] const char* vulkanDepthFormatName(VkFormat format);
+[[nodiscard]] uint32_t vulkanDepthFormatBits(VkFormat format);
 
 // Scores devices only after the renderer has established that they support
 // its required queues, extensions, surface formats, and Vulkan features.
