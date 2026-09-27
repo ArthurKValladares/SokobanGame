@@ -49,16 +49,14 @@ namespace sokoban {
     float radius,
     float bias);
 
-// Reference for the composite shader's bilateral upsample. Plane distance
-// rejects depth discontinuities while the normal term rejects adjoining faces;
-// spatialWeight is the ordinary bilinear contribution of the AO texel.
+// Reference for the composite shader's bilateral upsample. Distance from the
+// center surface's plane rejects depth discontinuities; spatialWeight is the
+// ordinary bilinear contribution of the AO texel.
 [[nodiscard]] float ssaoBilateralWeight(
     Vec3 centerPosition,
     Vec3 centerNormal,
     Vec3 samplePosition,
-    Vec3 sampleNormal,
     float depthSigma,
-    float normalThreshold,
     float spatialWeight);
 
 } // namespace sokoban

@@ -137,9 +137,7 @@ float ssaoBilateralWeight(
     Vec3 centerPosition,
     Vec3 centerNormal,
     Vec3 samplePosition,
-    Vec3 sampleNormal,
     float depthSigma,
-    float normalThreshold,
     float spatialWeight)
 {
     const float safeSigma = std::max(depthSigma, 0.000001f);
@@ -148,12 +146,7 @@ float ssaoBilateralWeight(
     const float normalizedDistance = planeDistance / safeSigma;
     const float depthWeight = std::exp(
         -0.5f * normalizedDistance * normalizedDistance);
-    const float threshold = std::clamp(normalThreshold, -1.0f, 0.999999f);
-    const float normalWeight = smoothstep(
-        threshold,
-        1.0f,
-        std::clamp(dot(centerNormal, sampleNormal), -1.0f, 1.0f));
-    return std::max(spatialWeight, 0.0f) * depthWeight * normalWeight;
+    return std::max(spatialWeight, 0.0f) * depthWeight;
 }
 
 } // namespace sokoban

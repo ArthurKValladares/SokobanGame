@@ -200,55 +200,39 @@ void testSampleComparisonUsesViewUnitsAndRejectsHalos()
     CHECK(faded < 1.0f);
 }
 
-void testBilateralWeightRejectsDepthAndNormalDiscontinuities()
+void testBilateralWeightRejectsOffPlaneDiscontinuities()
 {
-    TEST("bilateralWeightRejectsDepthAndNormalDiscontinuities");
+    TEST("bilateralWeightRejectsOffPlaneDiscontinuities");
     const Vec3 center { 0.0f, 0.0f, 5.0f };
     const Vec3 normal { 0.0f, 0.0f, -1.0f };
     CHECK(near(ssaoBilateralWeight(
         center,
         normal,
         { 1.0f, 0.0f, 5.0f },
-        normal,
         0.1f,
-        0.8f,
         0.5f), 0.5f));
 
     const float acrossDepthEdge = ssaoBilateralWeight(
         center,
         normal,
         { 0.0f, 0.0f, 5.5f },
-        normal,
         0.1f,
-        0.8f,
         0.5f);
     CHECK(acrossDepthEdge < 0.00001f);
 
+    // Movement along the plane is not a depth discontinuity, regardless of
+    // distance. This is what avoids dark seams across a sloped surface.
     CHECK(near(ssaoBilateralWeight(
         center,
         normal,
-        { 0.0f, 0.0f, 5.0f },
-        { 1.0f, 0.0f, 0.0f },
+        { 100.0f, -50.0f, 5.0f },
         0.1f,
-        0.8f,
-        0.5f), 0.0f));
-    const float similarNormal = ssaoBilateralWeight(
-        center,
-        normal,
-        { 0.0f, 0.0f, 5.0f },
-        normalize(Vec3 { 0.4f, 0.0f, -1.0f }),
-        0.1f,
-        0.8f,
-        0.5f);
-    CHECK(similarNormal > 0.0f);
-    CHECK(similarNormal < 0.5f);
+        0.5f), 0.5f));
     CHECK(near(ssaoBilateralWeight(
         center,
         normal,
         center,
-        normal,
         0.1f,
-        0.8f,
         -1.0f), 0.0f));
 }
 
@@ -263,7 +247,7 @@ int main()
     testPhysicalRadiusIsIndependentOfRenderResolution();
     testReconstructedNormalFacesTheCamera();
     testSampleComparisonUsesViewUnitsAndRejectsHalos();
-    testBilateralWeightRejectsDepthAndNormalDiscontinuities();
+    testBilateralWeightRejectsOffPlaneDiscontinuities();
 
     if (failures == 0) {
         std::cout << "SsaoMathTests: " << checks << " checks passed\n";

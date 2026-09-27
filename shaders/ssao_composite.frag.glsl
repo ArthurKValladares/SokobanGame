@@ -23,8 +23,8 @@ layout(set = 0, binding = 6) uniform sampler2D ssaoTexture;
 layout(location = 0) out vec4 outColor;
 
 // params: x = strength, w = debug view (1 draws the filtered occlusion buffer,
-// 2 draws the ambient mask this pass scales itself by). filterParams: z is
-// the view-space depth sigma and w is the minimum normal similarity.
+// 2 draws the ambient mask this pass scales itself by). filterParams.z is the
+// view-space plane-distance sigma.
 layout(push_constant) uniform PushConstants
 {
     mat4 viewFromClip;
@@ -54,56 +54,12 @@ vec2 depthTexelUv(ivec2 coordinate)
         vec2(textureSize(depthTexture, 0));
 }
 
-vec3 viewNormalAt(ivec2 centerCoordinate, vec3 centerPosition)
+vec3 viewNormal(vec3 centerPosition)
 {
-    ivec2 extent = textureSize(depthTexture, 0);
-    float depthSigma = max(pc.filterParams.z, 0.0001);
-
-    ivec2 rightCoordinate = min(
-        centerCoordinate + ivec2(1, 0), extent - 1);
-    float rightDepth = texelFetch(
-        depthTexture, rightCoordinate, 0).r;
-    vec3 rightPosition = rightDepth < 0.9999
-        ? reconstructViewPosition(
-            depthTexelUv(rightCoordinate), rightDepth)
-        : centerPosition;
-    vec3 dx = rightPosition - centerPosition;
-    if (rightCoordinate == centerCoordinate ||
-        rightDepth >= 0.9999 || abs(dx.z) > depthSigma * 2.0) {
-        dx = vec3(0.0);
-        ivec2 leftCoordinate = max(
-            centerCoordinate - ivec2(1, 0), ivec2(0));
-        float leftDepth = texelFetch(
-            depthTexture, leftCoordinate, 0).r;
-        if (leftDepth < 0.9999) {
-            dx = centerPosition - reconstructViewPosition(
-                depthTexelUv(leftCoordinate), leftDepth);
-        }
-    }
-
-    ivec2 downCoordinate = min(
-        centerCoordinate + ivec2(0, 1), extent - 1);
-    float downDepth = texelFetch(
-        depthTexture, downCoordinate, 0).r;
-    vec3 downPosition = downDepth < 0.9999
-        ? reconstructViewPosition(
-            depthTexelUv(downCoordinate), downDepth)
-        : centerPosition;
-    vec3 dy = downPosition - centerPosition;
-    if (downCoordinate == centerCoordinate ||
-        downDepth >= 0.9999 || abs(dy.z) > depthSigma * 2.0) {
-        dy = vec3(0.0);
-        ivec2 upCoordinate = max(
-            centerCoordinate - ivec2(0, 1), ivec2(0));
-        float upDepth = texelFetch(
-            depthTexture, upCoordinate, 0).r;
-        if (upDepth < 0.9999) {
-            dy = centerPosition - reconstructViewPosition(
-                depthTexelUv(upCoordinate), upDepth);
-        }
-    }
-
-    vec3 normal = cross(dx, dy);
+    // Neighboring lanes already reconstructed their positions. Derivatives
+    // reuse those values instead of fetching and unprojecting another two to
+    // four depth texels per full-resolution pixel.
+    vec3 normal = cross(dFdx(centerPosition), dFdy(centerPosition));
     float magnitudeSquared = dot(normal, normal);
     // The cross product is a screen-footprint area, so a fixed visual-scale
     // epsilon would reject valid surfaces as their pixel footprint shrinks.
@@ -118,7 +74,6 @@ float bilateralWeight(
     vec3 centerPosition,
     vec3 centerNormal,
     vec3 samplePosition,
-    vec3 sampleNormal,
     float spatialWeight)
 {
     float depthSigma = max(pc.filterParams.z, 0.0001);
@@ -126,11 +81,7 @@ float bilateralWeight(
         samplePosition - centerPosition, centerNormal));
     float normalizedDistance = planeDistance / depthSigma;
     float depthWeight = exp(-0.5 * normalizedDistance * normalizedDistance);
-    float normalWeight = smoothstep(
-        clamp(pc.filterParams.w, -1.0, 0.9999),
-        1.0,
-        clamp(dot(centerNormal, sampleNormal), -1.0, 1.0));
-    return spatialWeight * depthWeight * normalWeight;
+    return spatialWeight * depthWeight;
 }
 
 float bilateralAo(vec2 uv, vec3 centerPosition, vec3 centerNormal)
@@ -156,8 +107,6 @@ float bilateralAo(vec2 uv, vec3 centerPosition, vec3 centerNormal)
 
             vec3 samplePosition = reconstructViewPosition(
                 depthTexelUv(sampleDepthCoordinate), sampleDepth);
-            vec3 sampleNormal = viewNormalAt(
-                sampleDepthCoordinate, samplePosition);
             float spatialWeight =
                 (x == 0 ? 1.0 - fraction.x : fraction.x) *
                 (y == 0 ? 1.0 - fraction.y : fraction.y);
@@ -165,7 +114,6 @@ float bilateralAo(vec2 uv, vec3 centerPosition, vec3 centerNormal)
                 centerPosition,
                 centerNormal,
                 samplePosition,
-                sampleNormal,
                 spatialWeight);
             weightedAo += texelFetch(ssaoTexture, coordinate, 0).r * weight;
             weightSum += weight;
@@ -188,12 +136,13 @@ void main()
         depthTexture, centerDepthCoordinate, 0).r;
     vec3 centerPosition = reconstructViewPosition(
         depthTexelUv(centerDepthCoordinate), centerDepth);
-    vec3 centerNormal = viewNormalAt(
-        centerDepthCoordinate, centerPosition);
+    vec3 centerNormal = viewNormal(centerPosition);
 
-    // Four half-resolution candidates form the native bilinear footprint;
-    // view-space plane distance and normal agreement remove samples from the
-    // other side of depth discontinuities before normalization.
+    // Four half-resolution candidates form the native bilinear footprint.
+    // Distance from the center surface's view-space plane rejects samples
+    // across depth discontinuities before normalization. Reconstructing a
+    // second normal for every candidate gave no visible edge improvement and
+    // dominated this full-resolution pass.
     float ao = centerDepth < 0.9999
         ? bilateralAo(uv, centerPosition, centerNormal)
         : 1.0;

@@ -240,7 +240,7 @@ void VulkanSsaoPass::record(
     using Debug = RenderFrameData::Lighting::AmbientOcclusion::Debug;
     // Both draws read the same block. The estimator uses the half-resolution
     // extent to map its fragment coordinates over the full depth image. The
-    // composite reuses the inverse projection and bilateral thresholds.
+    // composite reuses the inverse projection and plane-distance threshold.
     const float debugMode = settings.debug == Debug::AmbientMask
         ? 2.0f
         : (settings.debug == Debug::Occlusion ? 1.0f : 0.0f);
@@ -257,7 +257,7 @@ void VulkanSsaoPass::record(
         static_cast<float>(aoExtent_.width),
         static_cast<float>(aoExtent_.height),
         config::ssaoBilateralDepthSigmaWorld,
-        config::ssaoBilateralNormalThreshold,
+        0.0f,
     };
 
     VkRenderingAttachmentInfo ssaoAttachment {

@@ -36,10 +36,8 @@ inline constexpr float maximumAmbientOcclusionStrength = 1.0f;
 // scale therefore change the pixel footprint, not the AO neighborhood.
 inline constexpr float ssaoRadiusWorld = 0.45f;
 inline constexpr float ssaoBiasWorld = 0.025f;
-// Bilateral upsampling compares reconstructed planes in scene units and fades
-// samples whose surface normals differ by more than about 37 degrees.
+// Bilateral upsampling compares reconstructed planes in scene units.
 inline constexpr float ssaoBilateralDepthSigmaWorld = 0.10f;
-inline constexpr float ssaoBilateralNormalThreshold = 0.80f;
 
 // Depth-aware height fog. The density is extinction per world unit, so the
 // look remains stable when render scale or camera projection changes.
