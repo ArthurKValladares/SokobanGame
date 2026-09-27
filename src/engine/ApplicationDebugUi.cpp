@@ -659,6 +659,18 @@ void drawPhaseTimings(const RenderStats& renderStats)
     showPhase("  GPU SSAO occlusion", renderStats.gpuSsaoOcclusionTiming);
     showPhase("  GPU SSAO composite", renderStats.gpuSsaoCompositeTiming);
     showPhase("GPU volumetric atmosphere", renderStats.gpuAtmosphereTiming);
+    showPhase(
+        "  GPU global atmosphere",
+        renderStats.gpuAtmosphereGlobalTiming);
+    showPhase(
+        "    GPU ray integration",
+        renderStats.gpuAtmosphereGlobalIntegrationTiming);
+    showPhase(
+        "    GPU depth-aware composite",
+        renderStats.gpuAtmosphereGlobalCompositeTiming);
+    showPhase(
+        "  GPU bounded fog volumes",
+        renderStats.gpuAtmosphereVolumesTiming);
     showPhase("GPU output/UI", renderStats.gpuOutputTiming);
 }
 

@@ -680,6 +680,10 @@ struct RenderStats {
     RenderPhaseTiming gpuSsaoOcclusionTiming {};
     RenderPhaseTiming gpuSsaoCompositeTiming {};
     RenderPhaseTiming gpuAtmosphereTiming {};
+    RenderPhaseTiming gpuAtmosphereGlobalTiming {};
+    RenderPhaseTiming gpuAtmosphereGlobalIntegrationTiming {};
+    RenderPhaseTiming gpuAtmosphereGlobalCompositeTiming {};
+    RenderPhaseTiming gpuAtmosphereVolumesTiming {};
     RenderPhaseTiming gpuOutputTiming {};
     bool processMemoryAvailable = false;
     uint64_t processResidentBytes = 0;

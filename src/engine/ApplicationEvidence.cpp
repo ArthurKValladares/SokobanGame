@@ -259,6 +259,18 @@ void Application::finishEvidenceCapture()
     writePhase("  GPU SSAO occlusion", evidenceStats_.gpuSsaoOcclusionTiming);
     writePhase("  GPU SSAO composite", evidenceStats_.gpuSsaoCompositeTiming);
     writePhase("GPU volumetric atmosphere", evidenceStats_.gpuAtmosphereTiming);
+    writePhase(
+        "  GPU global atmosphere",
+        evidenceStats_.gpuAtmosphereGlobalTiming);
+    writePhase(
+        "    GPU ray integration",
+        evidenceStats_.gpuAtmosphereGlobalIntegrationTiming);
+    writePhase(
+        "    GPU depth-aware composite",
+        evidenceStats_.gpuAtmosphereGlobalCompositeTiming);
+    writePhase(
+        "  GPU bounded fog volumes",
+        evidenceStats_.gpuAtmosphereVolumesTiming);
     writePhase("GPU output/UI", evidenceStats_.gpuOutputTiming);
     report << "- Asset publications: " << evidenceStats_.assetPublications
            << " across " << evidenceStats_.assetPublicationFrames

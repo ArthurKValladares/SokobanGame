@@ -23,6 +23,10 @@ enum class VulkanGpuPhase : uint32_t {
     SsaoOcclusion,
     SsaoComposite,
     Atmosphere,
+    AtmosphereGlobal,
+    AtmosphereGlobalIntegration,
+    AtmosphereGlobalComposite,
+    AtmosphereVolumes,
     Output,
     Count,
 };

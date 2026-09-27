@@ -1,6 +1,7 @@
 #include "engine/render/VulkanAtmospherePass.hpp"
 
 #include "engine/render/VulkanDebugUtils.hpp"
+#include "engine/render/LightingConfig.hpp"
 #include "engine/render/VulkanMemoryAllocator.hpp"
 
 namespace sokoban {
@@ -20,9 +21,11 @@ void VulkanAtmospherePass::create(
     device_ = device;
     allocator_ = &allocator;
     format_ = format;
+    constexpr uint32_t divisor = config::atmosphereResolutionDivisor;
+    static_assert(divisor > 0);
     extent_ = {
-        .width = (renderExtent.width + 1U) / 2U,
-        .height = (renderExtent.height + 1U) / 2U,
+        .width = (renderExtent.width + divisor - 1U) / divisor,
+        .height = (renderExtent.height + divisor - 1U) / divisor,
     };
 
     try {
@@ -49,7 +52,7 @@ void VulkanAtmospherePass::create(
             device_,
             imageInfo,
             VK_IMAGE_ASPECT_COLOR_BIT,
-            "Half-resolution atmosphere integration");
+            "Reduced-resolution atmosphere integration");
 
         const VkSamplerCreateInfo samplerInfo {
             .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,

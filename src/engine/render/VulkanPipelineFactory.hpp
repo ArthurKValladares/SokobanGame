@@ -128,6 +128,11 @@ private:
         Display,
     };
 
+    enum class PostProcessBlend {
+        Replace,
+        Atmosphere,
+    };
+
     [[nodiscard]] VkPipeline createScenePipeline(
         VkShaderModule vertexShader,
         VkShaderModule fragmentShader,
@@ -140,14 +145,15 @@ private:
     [[nodiscard]] VkPipeline createShadowPipeline(
         VkShaderModule vertexShader,
         VertexLayout vertexLayout) const;
-    // Fullscreen passes. All of them write their result outright: the SSAO
-    // composite was the last multiply blend and stopped being one when it
-    // started scaling the ambient term rather than the finished pixel.
+    // Fullscreen passes normally replace their target. Atmosphere is the one
+    // exception: fixed-function blending applies scattering + transmittance
+    // directly to the existing scene without first copying that scene.
     [[nodiscard]] VkPipeline createPostProcessPipeline(
         VkShaderModule vertexShader,
         VkShaderModule fragmentShader,
         VkFormat colorFormat,
-        VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT) const;
+        VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT,
+        PostProcessBlend blend = PostProcessBlend::Replace) const;
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;

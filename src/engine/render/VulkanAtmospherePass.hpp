@@ -7,7 +7,7 @@
 
 namespace sokoban {
 
-// Owns the half-resolution integration target used by volumetric atmosphere.
+// Owns the reduced-resolution integration target used by volumetric atmosphere.
 // The expensive ray march writes scattering + transmittance here; a cheap
 // full-resolution pass then composites it over the unblurred scene.
 class VulkanAtmospherePass {

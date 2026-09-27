@@ -59,6 +59,11 @@ inline constexpr float atmosphereAnisotropy = 0.35f;
 inline constexpr float minimumAtmosphereAnisotropy = -0.85f;
 inline constexpr float maximumAtmosphereAnisotropy = 0.85f;
 inline constexpr uint32_t atmosphereSampleCount = 16;
+// Volumetric integration is deliberately quarter-resolution in each axis.
+// The full-resolution composite uses scene-depth-aware reconstruction, so
+// edges stay attached to geometry while the expensive ray march processes
+// one sixteenth as many pixels as the full-resolution target.
+inline constexpr uint32_t atmosphereResolutionDivisor = 4;
 
 inline constexpr bool shadowsEnabled = true;
 inline constexpr float shadowOpacity = 0.5f;

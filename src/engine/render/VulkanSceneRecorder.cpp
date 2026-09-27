@@ -155,7 +155,7 @@ VkRect2D atmosphereIntegrationRect(
         (sourceBottom * integrationExtent.height + fullExtent.height - 1U) /
         fullExtent.height);
     // The full-resolution composite bilinearly gathers a 2x2 neighborhood.
-    // Retain a half-resolution texel around the projected silhouette so that
+    // Retain one integration texel around the projected silhouette so that
     // every gathered sample has been refreshed for this medium.
     left = left > 0 ? left - 1U : 0U;
     top = top > 0 ? top - 1U : 0U;
@@ -1373,10 +1373,6 @@ private:
                     },
                 };
             }
-            const bool fullScreen = compositeScissor.offset.x == 0 &&
-                compositeScissor.offset.y == 0 &&
-                compositeScissor.extent.width == extent.width &&
-                compositeScissor.extent.height == extent.height;
             const VkRect2D integrationScissor = atmosphereIntegrationRect(
                 compositeScissor, extent, integrationExtent);
             ++stats_.atmosphereMediaCount;
@@ -1385,18 +1381,6 @@ private:
                 compositeScissor.extent.height;
             stats_.atmosphereUnscissoredPixels +=
                 static_cast<uint64_t>(extent.width) * extent.height;
-
-            // Each medium reads the result of the preceding one. This keeps
-            // ordinary height atmosphere and disjoint fog-of-war volumes
-            // composable without a fixed GPU-side volume-count limit. A
-            // bounded volume only needs the source pixels its projected box
-            // can touch.
-            swapchain_.copyResolvedSceneColor(
-                commandBuffer,
-                stats_,
-                fullScreen
-                    ? std::nullopt
-                    : std::optional<VkRect2D> { compositeScissor });
 
             GpuDrawInstance pushConstants {};
             pushConstants.vertices = matrixColumns(inverse(clipFromWorld));
@@ -1476,8 +1460,8 @@ private:
             pushConstants.gridColor = {
                 static_cast<float>(integrationExtent.width),
                 static_cast<float>(integrationExtent.height),
-                static_cast<float>(extent.width),
-                static_cast<float>(extent.height),
+                multisampleComposite ? 1.0f : 0.0f,
+                0.0f,
             };
 
             const VkRenderingAttachmentInfo integrationAttachment {
@@ -1495,6 +1479,12 @@ private:
                 .pColorAttachments = &integrationAttachment,
             };
 
+            if (volume == nullptr) {
+                gpuProfiler_.beginPhase(
+                    commandBuffer,
+                    configuration_.descriptorFrameIndex,
+                    VulkanGpuPhase::AtmosphereGlobalIntegration);
+            }
             atmospherePass_.prepareTarget(commandBuffer, stats_);
             vkCmdBeginRendering(commandBuffer, &integrationRenderingInfo);
             ++stats_.renderPasses;
@@ -1517,11 +1507,25 @@ private:
             ++stats_.drawCalls;
             vkCmdEndRendering(commandBuffer);
             atmospherePass_.publishTarget(commandBuffer, stats_);
+            if (volume == nullptr) {
+                gpuProfiler_.endPhase(
+                    commandBuffer,
+                    configuration_.descriptorFrameIndex,
+                    VulkanGpuPhase::AtmosphereGlobalIntegration);
+            }
 
-            // Opaque/translucent scene rendering has already produced a
-            // single-sample resolve. The ordinary path writes directly into
-            // it; the mirror continuation resolves the updated subregion back
-            // from MSAA. Partial volumes load the untouched attachment area.
+            // The ordinary path uses fixed-function blending in place. The
+            // mirror-over-fog path must preserve and resolve MSAA color for a
+            // later continuation; sample the already-resolved scene there so
+            // SSAO and preceding media survive the replacement draw.
+            if (multisampleComposite) {
+                swapchain_.copyResolvedSceneColor(
+                    commandBuffer,
+                    stats_,
+                    std::optional<VkRect2D> { compositeScissor });
+            }
+            swapchain_.synchronizeAtmosphereComposite(
+                commandBuffer, multisampleComposite, stats_);
             const VkRenderingAttachmentInfo compositeAttachment {
                 .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                 .imageView = colorView,
@@ -1533,9 +1537,7 @@ private:
                 .resolveImageLayout = resolveView
                     ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
                     : VK_IMAGE_LAYOUT_UNDEFINED,
-                .loadOp = fullScreen
-                    ? VK_ATTACHMENT_LOAD_OP_DONT_CARE
-                    : VK_ATTACHMENT_LOAD_OP_LOAD,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
             };
             const VkRenderingInfo compositeRenderingInfo {
@@ -1546,6 +1548,12 @@ private:
                 .pColorAttachments = &compositeAttachment,
             };
 
+            if (volume == nullptr) {
+                gpuProfiler_.beginPhase(
+                    commandBuffer,
+                    configuration_.descriptorFrameIndex,
+                    VulkanGpuPhase::AtmosphereGlobalComposite);
+            }
             vkCmdBeginRendering(commandBuffer, &compositeRenderingInfo);
             ++stats_.renderPasses;
             vkCmdBindPipeline(
@@ -1566,13 +1574,27 @@ private:
             vkCmdDraw(commandBuffer, 3, 1, 0, 0);
             ++stats_.drawCalls;
             vkCmdEndRendering(commandBuffer);
+            if (volume == nullptr) {
+                gpuProfiler_.endPhase(
+                    commandBuffer,
+                    configuration_.descriptorFrameIndex,
+                    VulkanGpuPhase::AtmosphereGlobalComposite);
+            }
         };
 
         if (baseAtmosphereSamplesSceneDepth(lighting.atmosphere)) {
+            gpuProfiler_.beginPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::AtmosphereGlobal);
             recordMedium(
                 lighting.atmosphere,
                 nullptr,
                 config::atmosphereSampleCount);
+            gpuProfiler_.endPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::AtmosphereGlobal);
         }
 
         const RenderFrameData::Lighting::Atmosphere fogOfWar {
@@ -1588,9 +1610,19 @@ private:
             .scatteringStrength = config::fogOfWarScatteringStrength,
             .anisotropy = config::fogOfWarAnisotropy,
         };
-        for (const RenderFrameData::OverworldFogVolume& volume :
-             frameData.overworldFogVolumes) {
-            recordMedium(fogOfWar, &volume, config::fogOfWarSampleCount);
+        if (!frameData.overworldFogVolumes.empty()) {
+            gpuProfiler_.beginPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::AtmosphereVolumes);
+            for (const RenderFrameData::OverworldFogVolume& volume :
+                 frameData.overworldFogVolumes) {
+                recordMedium(fogOfWar, &volume, config::fogOfWarSampleCount);
+            }
+            gpuProfiler_.endPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::AtmosphereVolumes);
         }
     }
 

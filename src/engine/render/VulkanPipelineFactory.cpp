@@ -274,13 +274,14 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         ssaoComposite_ = createPostProcessPipeline(
             shaders[5], shaders[7], sceneFormat);
         // Expensive volumetric integration is always single-sample and writes
-        // a half-resolution scattering/transmittance target. The lightweight
-        // composite normally writes the resolved scene directly; its MSAA
-        // twin exists only for the overworld mirror continuation.
+        // a reduced-resolution scattering/transmittance target. The composite
+        // blends that result over the scene in place; its MSAA twin exists
+        // only for the overworld mirror continuation.
         atmosphere_ = createPostProcessPipeline(
             shaders[5], shaders[16], sceneFormat);
         atmosphereComposite_ = createPostProcessPipeline(
-            shaders[5], shaders[17], sceneFormat);
+            shaders[5], shaders[17], sceneFormat,
+            VK_SAMPLE_COUNT_1_BIT, PostProcessBlend::Atmosphere);
         atmosphereCompositeMultisample_ = createPostProcessPipeline(
             shaders[5], shaders[17], sceneFormat, createInfo.sampleCount);
         worldTransition_ = createPostProcessPipeline(
@@ -674,7 +675,8 @@ VkPipeline VulkanPipelineFactory::createPostProcessPipeline(
     VkShaderModule vertexShader,
     VkShaderModule fragmentShader,
     VkFormat colorFormat,
-    VkSampleCountFlagBits sampleCount) const
+    VkSampleCountFlagBits sampleCount,
+    PostProcessBlend blend) const
 {
     std::array<VkPipelineShaderStageCreateInfo, 2> stages {
         VkPipelineShaderStageCreateInfo {
@@ -714,7 +716,15 @@ VkPipeline VulkanPipelineFactory::createPostProcessPipeline(
         .rasterizationSamples = sampleCount,
     };
     VkPipelineColorBlendAttachmentState blendAttachment {
-        .blendEnable = VK_FALSE,
+        .blendEnable = blend == PostProcessBlend::Atmosphere,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        // Scene alpha carries the ambient-light share used by SSAO. Fogging
+        // the scene must not replace or attenuate that semantic channel.
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
         .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
     };

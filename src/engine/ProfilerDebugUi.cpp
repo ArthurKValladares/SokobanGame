@@ -575,6 +575,12 @@ void ProfilerDebugUi::draw(const VulkanRenderer& renderer)
                 { "  Occlusion", &stats.gpuSsaoOcclusionTiming },
                 { "  Composite", &stats.gpuSsaoCompositeTiming },
                 { "Atmosphere", &stats.gpuAtmosphereTiming },
+                { "  Global", &stats.gpuAtmosphereGlobalTiming },
+                { "    Ray integration",
+                    &stats.gpuAtmosphereGlobalIntegrationTiming },
+                { "    Depth-aware composite",
+                    &stats.gpuAtmosphereGlobalCompositeTiming },
+                { "  Bounded volumes", &stats.gpuAtmosphereVolumesTiming },
                 { "Output/UI", &stats.gpuOutputTiming },
             };
             drawPhaseBars(

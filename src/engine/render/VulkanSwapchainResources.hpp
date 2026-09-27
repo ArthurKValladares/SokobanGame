@@ -65,6 +65,12 @@ public:
     void publishSceneColor(
         VkCommandBuffer commandBuffer,
         RenderStats& stats);
+    // Orders one in-place atmosphere blend after preceding scene/medium color
+    // writes without copying the target through the sampled scene image.
+    void synchronizeAtmosphereComposite(
+        VkCommandBuffer commandBuffer,
+        bool multisampled,
+        RenderStats& stats) const;
     // Hands the scene target to the tonemap pass and its display image to the
     // rasterizer. Everything that used to read the scene target directly -
     // the upscale blit, the developer workspace's game viewport, the frame

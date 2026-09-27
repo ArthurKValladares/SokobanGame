@@ -21,7 +21,7 @@ SOKOBAN_TUNABLE_FLOAT(fogOfWarTuning, fogOfWarDensity, 4.25f, 0.0f, 16.0f);
 SOKOBAN_TUNABLE_FLOAT(
     fogOfWarTuning, fogOfWarScatteringStrength, 0.72f, 0.0f, 4.0f);
 SOKOBAN_TUNABLE_FLOAT(fogOfWarTuning, fogOfWarAnisotropy, 0.18f, -0.95f, 0.95f);
-SOKOBAN_TUNABLE_UINT(fogOfWarTuning, fogOfWarSampleCount, 20, 1, 64);
+SOKOBAN_TUNABLE_UINT(fogOfWarTuning, fogOfWarSampleCount, 16, 1, 64);
 
 // World-space fractal noise breaks the volume into broad billows with a
 // smaller detail octave. Strength stays below one so noise can shape the

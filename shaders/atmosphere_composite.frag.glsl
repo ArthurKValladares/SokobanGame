@@ -36,7 +36,6 @@ void main()
     ivec2 pixel = ivec2(gl_FragCoord.xy);
     ivec2 fullExtent = textureSize(depthTexture, 0);
     vec2 uv = (vec2(pixel) + 0.5) / vec2(fullExtent);
-    vec4 scene = texelFetch(sceneColor, pixel, 0);
     float centerDepth = texelFetch(depthTexture, pixel, 0).r;
     float centerDistance = endpointDistance(uv, centerDepth);
     bool centerSky = centerDepth >= 0.9999;
@@ -82,7 +81,19 @@ void main()
         medium = texture(atmosphereTexture, uv);
     }
 
-    outColor = vec4(
-        scene.rgb * clamp(medium.a, 0.0, 1.0) + medium.rgb,
-        scene.a);
+    float transmittance = clamp(medium.a, 0.0, 1.0);
+    if (pc.targetExtent.z > 0.5) {
+        // The mirror-over-fog path composites into the preserved multisample
+        // scene and resolves it again. Its source is the already-resolved scene
+        // (including SSAO and earlier media), so it still replaces the target.
+        vec4 scene = texelFetch(sceneColor, pixel, 0);
+        outColor = vec4(
+            scene.rgb * transmittance + medium.rgb,
+            scene.a);
+    } else {
+        // The ordinary single-sample pipeline uses fixed-function blending:
+        // source.rgb + destination.rgb * source.a, preserving destination
+        // alpha. It avoids a scene snapshot and texture read for every medium.
+        outColor = vec4(medium.rgb, transmittance);
+    }
 }

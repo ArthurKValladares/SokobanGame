@@ -1291,6 +1291,16 @@ RenderStats VulkanRenderer::renderStats() const
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SsaoComposite));
     stats.gpuAtmosphereTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Atmosphere));
+    stats.gpuAtmosphereGlobalTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::AtmosphereGlobal));
+    stats.gpuAtmosphereGlobalIntegrationTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(
+            VulkanGpuPhase::AtmosphereGlobalIntegration));
+    stats.gpuAtmosphereGlobalCompositeTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(
+            VulkanGpuPhase::AtmosphereGlobalComposite));
+    stats.gpuAtmosphereVolumesTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::AtmosphereVolumes));
     stats.gpuOutputTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Output));
     const VulkanMemoryStatistics memory =

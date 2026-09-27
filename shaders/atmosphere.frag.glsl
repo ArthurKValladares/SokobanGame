@@ -1,7 +1,7 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
 
-// Resolved scene depth drives the half-resolution volumetric integration.
+// Resolved scene depth drives the reduced-resolution volumetric integration.
 // The result is scattering.rgb + transmittance.a; a separate depth-aware
 // fullscreen pass composites it over the unblurred HDR scene.
 layout(set = 0, binding = 0) uniform sampler2D shadowMap;
@@ -129,6 +129,38 @@ float sunVisibility(vec3 worldPosition)
     return 1.0 - shadowed * clamp(pc.shadowOptions.y, 0.0, 1.0);
 }
 
+float pointLightVisibility(
+    PointLightData light,
+    vec3 fromLight,
+    vec3 directionFromLight)
+{
+    if (light.shadowOptions.x <= 0.5) {
+        return 1.0;
+    }
+    const float nearPlane = POINT_SHADOW_NEAR_PLANE;
+    float farPlane = max(light.positionAndRange.w, nearPlane + 0.001);
+    float majorDistance = max(
+        abs(fromLight.x), max(abs(fromLight.y), abs(fromLight.z)));
+    if (majorDistance <= nearPlane || majorDistance >= farPlane) {
+        return 1.0;
+    }
+
+    // A participating medium has no surface normal. The old call supplied
+    // the direction to the light, which made the shared surface bias compute
+    // a facing of exactly one after normalizing the same vector twice. Keep
+    // that result directly and reuse the already-normalized light direction.
+    float worldBias = max(light.shadowOptions.z, 0.0);
+    float closestDepth = texture(
+        pointShadowMaps,
+        vec4(directionFromLight, light.shadowOptions.y)).r;
+    float closestDistance = pointShadowWorldDistance(
+        closestDepth, nearPlane, farPlane);
+    float shadowed = majorDistance - worldBias > closestDistance
+        ? 1.0
+        : 0.0;
+    return 1.0 - shadowed * clamp(light.shadowOptions.w, 0.0, 1.0);
+}
+
 vec3 pointLightRadiance(vec3 worldPosition, vec3 rayDirection)
 {
     vec3 radiance = vec3(0.0);
@@ -136,23 +168,24 @@ vec3 pointLightRadiance(vec3 worldPosition, vec3 rayDirection)
     for (int lightIndex = 0; lightIndex < count; ++lightIndex) {
         PointLightData light = frame.pointLights[lightIndex];
         vec3 toLight = light.positionAndRange.xyz - worldPosition;
-        float distanceToLight = length(toLight);
+        float distanceSquared = dot(toLight, toLight);
         float range = max(light.positionAndRange.w, 0.001);
-        if (distanceToLight <= 0.0001 || distanceToLight >= range) {
+        float rangeSquared = range * range;
+        if (distanceSquared <= 0.00000001 ||
+            distanceSquared >= rangeSquared) {
             continue;
         }
-        vec3 lightDirection = toLight / distanceToLight;
-        float normalizedDistance = distanceToLight / range;
+        vec3 lightDirection = toLight * inversesqrt(distanceSquared);
+        float normalizedDistanceSquared = distanceSquared / rangeSquared;
         float rangeWindow = max(
-            1.0 - normalizedDistance * normalizedDistance *
-                normalizedDistance * normalizedDistance,
+            1.0 - normalizedDistanceSquared * normalizedDistanceSquared,
             0.0);
         float attenuation = rangeWindow * rangeWindow /
-            max(distanceToLight * distanceToLight, 0.16);
-        float visibility = pointShadowFactor(
-            lightIndex,
+            max(distanceSquared, 0.16);
+        float visibility = pointLightVisibility(
+            light,
             -toLight,
-            lightDirection);
+            -lightDirection);
         radiance += light.colorAndIntensity.rgb *
             light.colorAndIntensity.w * attenuation * visibility *
             phaseFunction(dot(rayDirection, lightDirection));

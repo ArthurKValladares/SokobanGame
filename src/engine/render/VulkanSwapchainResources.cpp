@@ -399,6 +399,36 @@ void VulkanSwapchainResources::publishSceneColor(
     ++stats.imageBarriers;
 }
 
+void VulkanSwapchainResources::synchronizeAtmosphereComposite(
+    VkCommandBuffer commandBuffer,
+    bool multisampled,
+    RenderStats& stats) const
+{
+    const vulkanResources::ImageState attachmentState {
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
+    const std::array barriers {
+        vulkanResources::imageBarrier(
+            resolvedColorImage_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            attachmentState,
+            attachmentState),
+        vulkanResources::imageBarrier(
+            msaaColorImage_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            attachmentState,
+            attachmentState),
+    };
+    vulkanResources::transitionImages(
+        commandBuffer,
+        std::span<const VkImageMemoryBarrier2> {
+            barriers.data(), multisampled ? barriers.size() : 1U });
+    stats.imageBarriers += multisampled ? 2U : 1U;
+}
+
 void VulkanSwapchainResources::copyResolvedSceneColor(
     VkCommandBuffer commandBuffer,
     RenderStats& stats,
