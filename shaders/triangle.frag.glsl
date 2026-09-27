@@ -172,33 +172,7 @@ float gridMask()
     return max(line.x, line.y) * draw.gridColor.a;
 }
 
-float shadowFactor(vec4 shadowPosition, float diffuse)
-{
-    if (draw.shadowOptions.x <= 0.5 || diffuse <= 0.0 || abs(shadowPosition.w) <= 0.0001) {
-        return 1.0;
-    }
-
-    vec3 shadowCoord = shadowPosition.xyz / shadowPosition.w;
-    vec2 shadowUv = shadowCoord.xy * 0.5 + 0.5;
-    if (any(lessThan(shadowUv, vec2(0.0))) ||
-        any(greaterThan(shadowUv, vec2(1.0))) ||
-        shadowCoord.z < 0.0 ||
-        shadowCoord.z > 1.0) {
-        return 1.0;
-    }
-
-    vec2 texel = 1.0 / vec2(textureSize(shadowMap, 0));
-    float shadowedSamples = 0.0;
-    for (int y = -1; y <= 1; ++y) {
-        for (int x = -1; x <= 1; ++x) {
-            float closestDepth = texture(shadowMap, shadowUv + vec2(float(x), float(y)) * texel).r;
-            shadowedSamples += shadowCoord.z - draw.shadowOptions.z > closestDepth ? 1.0 : 0.0;
-        }
-    }
-
-    float shadowAmount = shadowedSamples / 9.0;
-    return 1.0 - shadowAmount * draw.shadowOptions.y;
-}
+#include "DirectionalShadow.glsl"
 
 #define POINT_SHADOW_TAPS 5
 #include "PointShadow.glsl"
@@ -423,27 +397,27 @@ void main()
         for (int lightIndex = 0; lightIndex < pointLightCount; ++lightIndex) {
             PointLightData pointLight = frame.pointLights[lightIndex];
             vec3 toLight = pointLight.positionAndRange.xyz - inWorldPosition;
-            float distanceToLight = length(toLight);
-            float range = max(pointLight.positionAndRange.w, 0.001);
-            if (distanceToLight <= 0.0001 || distanceToLight >= range) {
+            float distanceSquared = dot(toLight, toLight);
+            float normalizedDistanceSquared = distanceSquared *
+                pointLight.radianceAndInverseRangeSquared.w;
+            if (distanceSquared <= 0.00000001 ||
+                normalizedDistanceSquared >= 1.0) {
                 continue;
             }
-            vec3 pointDirection = toLight / distanceToLight;
+            vec3 pointDirection = toLight * inversesqrt(distanceSquared);
             float pointLambert = max(dot(normal, pointDirection), 0.0);
             if (pointLambert <= 0.0) {
                 continue;
             }
-            float normalizedDistance = distanceToLight / range;
-            float rangeWindow = max(
-                1.0 - normalizedDistance * normalizedDistance *
-                    normalizedDistance * normalizedDistance,
-                0.0);
+            float rangeWindow = 1.0 - normalizedDistanceSquared *
+                normalizedDistanceSquared;
             float attenuation = rangeWindow * rangeWindow /
-                max(distanceToLight * distanceToLight, 0.04);
-            float pointShadow = pointShadowFactor(
-                lightIndex, -toLight, normal);
-            vec3 radiance = pointLight.colorAndIntensity.rgb *
-                pointLight.colorAndIntensity.w * attenuation * pointShadow;
+                max(distanceSquared, 0.04);
+            float pointShadow = pointShadowFactorPrepared(
+                pointLight, -toLight, -pointDirection, normal);
+            vec3 radiance =
+                pointLight.radianceAndInverseRangeSquared.rgb *
+                attenuation * pointShadow;
             Shaded point = shadeLight(
                 normal, viewDirection, pointDirection, radiance,
                 diffuseAlbedo, f0, roughness);

@@ -613,19 +613,21 @@ void VulkanSceneDescriptors::updateFrame(
         RenderFrameData::pointLightCapacity);
     for (std::size_t i = 0; i < count; ++i) {
         const RenderFrameData::PointLight& light = lighting.pointLights[i];
+        const float range = std::max(light.range, 0.05f);
+        const float intensity = std::max(light.intensity, 0.0f);
         const bool shadowMapRendered = light.castsShadows &&
             light.intensity > 0.0f &&
             light.range > config::pointShadowNearPlane;
         uniform.pointLights[i] = {
             .positionAndRange = {
                 light.position.x, light.position.y, light.position.z,
-                std::max(light.range, 0.05f),
+                range,
             },
-            .colorAndIntensity = {
-                std::max(light.color.x, 0.0f),
-                std::max(light.color.y, 0.0f),
-                std::max(light.color.z, 0.0f),
-                std::max(light.intensity, 0.0f),
+            .radianceAndInverseRangeSquared = {
+                std::max(light.color.x, 0.0f) * intensity,
+                std::max(light.color.y, 0.0f) * intensity,
+                std::max(light.color.z, 0.0f) * intensity,
+                1.0f / (range * range),
             },
             .shadowOptions = {
                 shadowMapRendered ? 1.0f : 0.0f,

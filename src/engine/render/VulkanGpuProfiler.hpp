@@ -15,6 +15,8 @@ enum class VulkanGpuPhase : uint32_t {
     Shadows,
     Scene,
     SceneRaster,
+    SceneFaces,
+    SceneModels,
     SceneDepthPublish,
     SceneTranslucency,
     SceneMirrorContinuation,

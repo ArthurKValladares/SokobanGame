@@ -1274,6 +1274,10 @@ RenderStats VulkanRenderer::renderStats() const
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Scene));
     stats.gpuSceneRasterTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SceneRaster));
+    stats.gpuSceneFacesTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SceneFaces));
+    stats.gpuSceneModelsTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SceneModels));
     stats.gpuSceneDepthPublishTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SceneDepthPublish));
     stats.gpuSceneTranslucencyTiming = renderPhaseTiming(

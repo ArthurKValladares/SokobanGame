@@ -169,25 +169,23 @@ vec3 pointLightRadiance(vec3 worldPosition, vec3 rayDirection)
         PointLightData light = frame.pointLights[lightIndex];
         vec3 toLight = light.positionAndRange.xyz - worldPosition;
         float distanceSquared = dot(toLight, toLight);
-        float range = max(light.positionAndRange.w, 0.001);
-        float rangeSquared = range * range;
+        float normalizedDistanceSquared = distanceSquared *
+            light.radianceAndInverseRangeSquared.w;
         if (distanceSquared <= 0.00000001 ||
-            distanceSquared >= rangeSquared) {
+            normalizedDistanceSquared >= 1.0) {
             continue;
         }
         vec3 lightDirection = toLight * inversesqrt(distanceSquared);
-        float normalizedDistanceSquared = distanceSquared / rangeSquared;
-        float rangeWindow = max(
-            1.0 - normalizedDistanceSquared * normalizedDistanceSquared,
-            0.0);
+        float rangeWindow = 1.0 -
+            normalizedDistanceSquared * normalizedDistanceSquared;
         float attenuation = rangeWindow * rangeWindow /
             max(distanceSquared, 0.16);
         float visibility = pointLightVisibility(
             light,
             -toLight,
             -lightDirection);
-        radiance += light.colorAndIntensity.rgb *
-            light.colorAndIntensity.w * attenuation * visibility *
+        radiance += light.radianceAndInverseRangeSquared.rgb *
+            attenuation * visibility *
             phaseFunction(dot(rayDirection, lightDirection));
     }
     // Keep a ray passing almost exactly through an emitter finite. Surface

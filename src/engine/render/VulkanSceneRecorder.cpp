@@ -1072,6 +1072,7 @@ private:
                 .content = mirrorPreviewOverFog
                     ? SceneContent::WithoutMirrorPreview
                     : SceneContent::Full,
+                .profileOpaqueGeometry = true,
             },
             { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
         if (directSsaoColor) {
@@ -1706,6 +1707,10 @@ private:
         bool loadDepth = false;
         bool writeDepth = false;
         SceneContent content = SceneContent::Full;
+        // Only the primary opaque scene owns these timestamp slots. Preview,
+        // translucency, and mirror replays share this function but must not
+        // overwrite the main-scene face/model queries later in the frame.
+        bool profileOpaqueGeometry = false;
     };
 
     void recordScenePass(
@@ -1850,7 +1855,8 @@ private:
                 scene,
                 frameData,
                 translucentPass,
-                options.content);
+                options.content,
+                options.profileOpaqueGeometry);
         } else {
             for (const RenderFrameData::Tile& tile :
                  frameData.tiles) {
@@ -2054,13 +2060,20 @@ private:
         const PreparedRenderScene& scene,
         const RenderFrameData& frameData,
         bool translucentPass,
-        SceneContent content)
+        SceneContent content,
+        bool profileOpaqueGeometry)
     {
         const std::vector<std::size_t>& faceIndices =
             translucentPass
             ? scene.translucentFaceIndices
             : scene.opaqueFaceIndices;
         const bool opaquePass = !translucentPass;
+        if (profileOpaqueGeometry) {
+            gpuProfiler_.beginPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::SceneFaces);
+        }
         VkPipeline boundFacePipeline = flatScenePipeline(opaquePass);
         uint32_t runFirst = 0;
         uint32_t runCount = 0;
@@ -2227,6 +2240,16 @@ private:
             ++runCount;
         }
         flushFaceRun();
+        if (profileOpaqueGeometry) {
+            gpuProfiler_.endPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::SceneFaces);
+            gpuProfiler_.beginPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::SceneModels);
+        }
 
         const auto batchStateFor = [](const GpuDrawInstance& constants) {
             std::array<uint32_t, 29> result {};
@@ -2532,6 +2555,12 @@ private:
                     firstInstance,
                     firstInstance);
             }
+        }
+        if (profileOpaqueGeometry) {
+            gpuProfiler_.endPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::SceneModels);
         }
         if (mirrorGhostState) {
             vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);

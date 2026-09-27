@@ -7,7 +7,9 @@
 struct PointLightData
 {
     vec4 positionAndRange;
-    vec4 colorAndIntensity;
+    // rgb is linear radiance with intensity already applied. w is 1/range^2;
+    // positionAndRange.w retains the range needed by cube-shadow depth.
+    vec4 radianceAndInverseRangeSquared;
     vec4 shadowOptions;
 };
 layout(std140, set = 0, binding = 7) uniform SceneFrame

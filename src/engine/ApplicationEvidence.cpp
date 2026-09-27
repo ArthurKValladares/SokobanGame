@@ -248,6 +248,8 @@ void Application::finishEvidenceCapture()
     writePhase("GPU shadows", evidenceStats_.gpuShadowTiming);
     writePhase("GPU scene color/depth", evidenceStats_.gpuSceneTiming);
     writePhase("  GPU scene raster/resolve", evidenceStats_.gpuSceneRasterTiming);
+    writePhase("    GPU scene surfaces", evidenceStats_.gpuSceneFacesTiming);
+    writePhase("    GPU scene models", evidenceStats_.gpuSceneModelsTiming);
     writePhase(
         "  GPU scene depth publish", evidenceStats_.gpuSceneDepthPublishTiming);
     writePhase("  GPU scene translucency", evidenceStats_.gpuSceneTranslucencyTiming);

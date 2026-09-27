@@ -50,10 +50,15 @@ float pointShadowWorldDistance(
         : farPlane;
 }
 
-float pointShadowFactor(
-    int lightIndex, vec3 fromLight, vec3 surfaceNormal)
+// The lighting loop already has both of these unit vectors. Accept them here
+// so every shadowed point light does not normalize the same light direction
+// and surface normal a second time merely to compute bias and the cube lookup.
+float pointShadowFactorPrepared(
+    PointLightData light,
+    vec3 fromLight,
+    vec3 directionFromLight,
+    vec3 normalizedSurfaceNormal)
 {
-    PointLightData light = frame.pointLights[lightIndex];
     if (light.shadowOptions.x <= 0.5) {
         return 1.0;
     }
@@ -64,36 +69,39 @@ float pointShadowFactor(
     if (majorDistance <= nearPlane || majorDistance >= farPlane) {
         return 1.0;
     }
-    vec3 direction = normalize(fromLight);
     // The authored bias is a world-space minimum. Increase it at grazing
     // angles, where rasterized depth changes fastest across the surface.
-    float facing = clamp(dot(normalize(surfaceNormal), -direction), 0.0, 1.0);
+    float facing = clamp(
+        dot(normalizedSurfaceNormal, -directionFromLight), 0.0, 1.0);
     float worldBias = max(light.shadowOptions.z, 0.0) *
         (1.0 + 2.0 * (1.0 - facing));
 
     float shadowed = 0.0;
 #if POINT_SHADOW_TAPS == 5
-    // A cross one texel wide, in the plane facing the light.
-    float texelAngle = 2.0 / float(textureSize(pointShadowMaps, 0).x);
-    vec3 tangent = normalize(cross(
-        abs(direction.z) < 0.9 ? vec3(0.0, 0.0, 1.0)
-                               : vec3(0.0, 1.0, 0.0),
-        direction));
-    vec3 bitangent = cross(direction, tangent);
-    vec3 offsets[5] = vec3[5](
-        vec3(0.0), tangent, -tangent, bitangent, -bitangent);
-    for (int sampleIndex = 0; sampleIndex < 5; ++sampleIndex) {
-        vec3 sampleDirection = direction +
-            offsets[sampleIndex] * texelAngle;
-        float closestDepth = texture(
-            pointShadowMaps,
-            vec4(sampleDirection, light.shadowOptions.y)).r;
-        float closestDistance = pointShadowWorldDistance(
-            closestDepth, nearPlane, farPlane);
-        shadowed += majorDistance - worldBias > closestDistance
-            ? 1.0
-            : 0.0;
-    }
+    // Preserve five comparisons while asking the texture unit for the four
+    // texels surrounding the lookup in one gather. The previous hand-built
+    // cross issued five independent cube samples and built a tangent frame
+    // per light. Center + the hardware footprint gives the same five-sample
+    // weight, a similarly sized filter, and no per-fragment basis.
+    vec4 cubeCoordinate = vec4(
+        directionFromLight, light.shadowOptions.y);
+    float centerDepth = texture(pointShadowMaps, cubeCoordinate).r;
+    vec4 gatheredDepth = textureGather(pointShadowMaps, cubeCoordinate);
+    float distanceNumerator = farPlane * nearPlane;
+    float depthScale = farPlane - nearPlane;
+    float centerDistance = distanceNumerator /
+        max(farPlane - centerDepth * depthScale, 0.000001);
+    vec4 gatheredDistance = vec4(distanceNumerator) / max(
+        vec4(farPlane) - gatheredDepth * depthScale,
+        vec4(0.000001));
+    float biasedDistance = majorDistance - worldBias;
+    shadowed = biasedDistance > centerDistance ? 1.0 : 0.0;
+    shadowed += dot(
+        mix(
+            vec4(0.0),
+            vec4(1.0),
+            greaterThan(vec4(biasedDistance), gatheredDistance)),
+        vec4(1.0));
 #else
     // Written out rather than run as a one-iteration loop. glslc does not
     // unroll that loop, so the loop form costs the ground a real compare,
@@ -102,7 +110,7 @@ float pointShadowFactor(
     // instructions larger.
     float closestDepth = texture(
         pointShadowMaps,
-        vec4(direction, light.shadowOptions.y)).r;
+        vec4(directionFromLight, light.shadowOptions.y)).r;
     float closestDistance = pointShadowWorldDistance(
         closestDepth, nearPlane, farPlane);
     shadowed = majorDistance - worldBias > closestDistance
@@ -116,6 +124,18 @@ float pointShadowFactor(
 #else
     return 1.0 - shadowed * clamp(light.shadowOptions.w, 0.0, 1.0);
 #endif
+}
+
+// Kept as the safe general entry point for callers that do not already own
+// normalized lighting vectors. Hot scene loops use the prepared form above.
+float pointShadowFactor(
+    int lightIndex, vec3 fromLight, vec3 surfaceNormal)
+{
+    return pointShadowFactorPrepared(
+        frame.pointLights[lightIndex],
+        fromLight,
+        normalize(fromLight),
+        normalize(surfaceNormal));
 }
 
 #endif

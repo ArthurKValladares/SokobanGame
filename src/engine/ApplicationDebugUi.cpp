@@ -648,6 +648,8 @@ void drawPhaseTimings(const RenderStats& renderStats)
     showPhase("GPU shadows", renderStats.gpuShadowTiming);
     showPhase("GPU scene color/depth", renderStats.gpuSceneTiming);
     showPhase("  GPU scene raster/resolve", renderStats.gpuSceneRasterTiming);
+    showPhase("    GPU scene surfaces", renderStats.gpuSceneFacesTiming);
+    showPhase("    GPU scene models", renderStats.gpuSceneModelsTiming);
     showPhase(
         "  GPU scene depth publish", renderStats.gpuSceneDepthPublishTiming);
     showPhase("  GPU scene translucency", renderStats.gpuSceneTranslucencyTiming);

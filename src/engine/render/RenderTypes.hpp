@@ -672,6 +672,8 @@ struct RenderStats {
     RenderPhaseTiming gpuShadowTiming {};
     RenderPhaseTiming gpuSceneTiming {};
     RenderPhaseTiming gpuSceneRasterTiming {};
+    RenderPhaseTiming gpuSceneFacesTiming {};
+    RenderPhaseTiming gpuSceneModelsTiming {};
     RenderPhaseTiming gpuSceneDepthPublishTiming {};
     RenderPhaseTiming gpuSceneTranslucencyTiming {};
     RenderPhaseTiming gpuSceneMirrorContinuationTiming {};

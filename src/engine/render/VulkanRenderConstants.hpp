@@ -19,7 +19,10 @@ inline constexpr uint32_t sceneSingleImageBindings = 9;
 
 struct PointLightUniform {
     Vec4 positionAndRange {};
-    Vec4 colorAndIntensity {};
+    // rgb is the already-scaled linear radiance. w is 1 / range^2, which
+    // turns the per-fragment range normalization into a multiply. The
+    // unmodified range remains in positionAndRange.w for cube-shadow depth.
+    Vec4 radianceAndInverseRangeSquared {};
     Vec4 shadowOptions {};
 };
 
