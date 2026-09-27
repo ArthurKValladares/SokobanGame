@@ -209,6 +209,12 @@ and the required real-device checks are recorded.
 - `GameplaySession::inputLog()` lists the inputs that started actions since
   the last restart or restore, for solution recording. `resetToState` exists for
   the solver and the replay driver only; gameplay code restores snapshots.
+- Reusable solution search lives in `engine/solver/Solver.hpp`; the
+  `sokoban_solve_level` executable owns only level/solution file orchestration.
+  Solver limits use generated states, while its statistics distinguish
+  generated nodes, uniquely expanded canonical positions, duplicate rejection,
+  walking-region work and frontier peaks. Every returned solution must still
+  pass through `solution::record`/`solution::Driver` before it is stored.
 - The source watcher (`SourceWatcher`, `Application::serviceSourceWatcher`,
   Debug developer builds) polls stamps every 500 ms and never runs in smoke
   or evidence runs. It writes only into the staged tree and content index,

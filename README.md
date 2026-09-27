@@ -575,15 +575,23 @@ comes back if the edit is undone. Smoke and evidence runs never write here.
 build preset builds it:
 
 ```powershell
-.\out\release\tools\Release\sokoban_solve_level.exe levels solutions --level 3 --screen 2 --best-first
+.\out\release\tools\Release\sokoban_solve_level.exe levels solutions --level 3 --screen 2 --best-first --progress-interval 100000
 ```
 
 Without `--level` it tries every screen that has no current recording. It
 skips screens whose recording still matches unless given `--overwrite`, and
-stops a screen after `--max-states` (default 2,000,000) distinct positions.
-The default search is breadth-first and finds the shortest solution;
-`--best-first` is usually much faster on large screens but the result may
-be longer. Use a Release build; the search is slow in Debug.
+stops a screen after `--max-states` (default 2,000,000) generated positions.
+The default breadth-first search minimizes significant state-changing moves,
+not necessarily recorded inputs; `--best-first` is usually much faster on
+large screens but the result may be longer. Final output distinguishes
+generated and expanded positions, duplicate states, and peak frontier size.
+`--progress-interval N` prints the same counters after approximately every N
+generated positions. Use a Release build; the search is slow in Debug.
+
+The search itself is the reusable `engine/solver/Solver.hpp` API. It reports
+solved, exhausted, state-limit and cancelled outcomes separately, accepts an
+optional progress/cancellation callback, and exposes deterministic work
+counters suitable for regression benchmarks and future difficulty grading.
 
 ### Improving the solver (future work)
 
@@ -606,8 +614,6 @@ solvable by hand. Ideas, roughly in order of payoff:
   position now, 1.9 GB at 5 million) and merge equivalent positions.
 - **Iterative deepening (IDA\*)** so memory stops being the limit, and
   running independent branches on several threads.
-- **Progress output** (positions per second, best estimate so far) so a
-  long run can be judged before it ends.
 - **Seeding from a human solve.** Start from a recorded solution and
   search for shorter ones, which also checks that a screen still has the
   intended difficulty after edits.
@@ -684,6 +690,8 @@ staged assets, and third-party licenses.
 ## Architecture
 
 - `src/engine/Rules.*`: pure gameplay rules over `Level` and `GameState`.
+- `src/engine/solver/`: reusable solution search, limits, cancellation, and
+  deterministic search-work statistics; the CLI is only file orchestration.
 - `src/engine/GameplaySession.*`: commands, timing, state, and undo history;
   committed actions retain a semantic presentation timeline so undo can replay
   movement and actor animations in their exact reverse order.

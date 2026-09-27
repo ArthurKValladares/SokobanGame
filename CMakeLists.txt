@@ -542,6 +542,7 @@ add_library(sokoban_core STATIC
     src/engine/SaveStore.cpp
     src/engine/Solution.cpp
     src/engine/SolutionStore.cpp
+    src/engine/solver/Solver.cpp
     src/engine/SourceWatcher.cpp
     src/engine/SettingsCoordinator.cpp
     src/engine/SettingsTypes.cpp
@@ -1130,6 +1131,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME rules
         LIBS sokoban_core
         SOURCES tests/RulesTests.cpp
+    )
+    sokoban_add_test(NAME solver
+        LIBS sokoban_core
+        SOURCES tests/SolverTests.cpp
     )
     sokoban_add_test(NAME level
         LIBS sokoban_core
