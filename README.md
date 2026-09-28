@@ -584,7 +584,8 @@ stops a screen after `--max-states` (default 2,000,000) generated positions.
 The default breadth-first search minimizes significant state-changing moves,
 not necessarily recorded inputs; `--best-first` is usually much faster on
 large screens but the result may be longer. Final output distinguishes
-generated and expanded positions, duplicate states, and peak frontier size.
+generated and expanded positions, duplicate states, early-canonicalization
+floods/walk states, and peak frontier size.
 `--progress-interval N` prints the same counters after approximately every N
 generated positions. Use a Release build; the search is slow in Debug.
 
@@ -592,6 +593,12 @@ The search itself is the reusable `engine/solver/Solver.hpp` API. It reports
 solved, exhausted, state-limit and cancelled outcomes separately, accepts an
 optional progress/cancellation callback, and exposes deterministic work
 counters suitable for regression benchmarks and future difficulty grading.
+Search identity is a packed, lossless key over every dynamic gameplay field.
+An exact-state filter avoids unnecessary work, then each new successor's
+walking region is canonicalized before it can consume retained-node or
+frontier capacity. Ordinary settled steps use the production action planner
+directly; automatic ice, conveyor and turret consequences fall back to the
+full replay driver.
 
 ### Improving the solver (future work)
 
@@ -609,9 +616,10 @@ solvable by hand. Ideas, roughly in order of payoff:
 - **Mirror-aware moves.** Treat "walk to a spot and interact with a mirror"
   as one move and skip mirror activations that change nothing, so hero
   copies do not multiply the search.
-- **Smaller states.** Today a state is a string key; a packed binary key
-  with identical rocks sorted would cut memory (about 400 bytes per
-  position now, 1.9 GB at 5 million) and merge equivalent positions.
+- **More symmetry reduction.** Packed binary keys and walking-region
+  canonicalization are implemented. Sorting truly interchangeable rocks (and
+  proving which other entities are interchangeable) would merge more
+  equivalent positions without sacrificing mechanic-specific identity.
 - **Iterative deepening (IDA\*)** so memory stops being the limit, and
   running independent branches on several threads.
 - **Seeding from a human solve.** Start from a recorded solution and

@@ -24,13 +24,11 @@ constexpr std::array inputNames {
     std::pair { Input::Undo, std::string_view("undo") },
 };
 
-// One frame of simulated time. Actions finish on their own completion
-// boundaries whatever the frame length (GameplayLoop catches up in-frame), so
-// this only bounds how much time passes between idle checks.
-constexpr float frameSeconds = 1.0f / 30.0f;
 // Two minutes of game time after one input is far beyond any settle this
 // game has; running past it means the world never comes to rest.
-constexpr int maximumSettleFrames = 3600;
+constexpr float maximumSettleSeconds = 120.0f;
+// Also guard zero-duration or otherwise non-advancing action cycles.
+constexpr int maximumSettleTransitions = 10'000;
 
 void hashBytes(std::uint64_t& hash, std::string_view bytes)
 {
@@ -373,13 +371,11 @@ Driver::Driver(const Level& level)
     : level_(level)
 {
     session_.reset(level_);
-    presentation_.resetEntities(session_.state());
 }
 
 void Driver::resetTo(const GameState& state, EntityId activeHeroController)
 {
     session_.resetToState(state, activeHeroController);
-    presentation_.resetEntities(session_.state());
 }
 
 bool Driver::settled() const
@@ -394,31 +390,46 @@ bool Driver::settled() const
 
 bool Driver::runUntilSettled()
 {
-    for (int frame = 0; frame < maximumSettleFrames; ++frame) {
+    float elapsedSeconds = 0.0f;
+    for (int transition = 0;
+         transition < maximumSettleTransitions;
+         ++transition) {
+        // This is GameplayLoop's mechanical core without presentation work:
+        // admit everything that can run concurrently, advance exactly to the
+        // next completion, commit it, and repeat from the new world state.
+        while (session_.tryStartNextAction(level_, {})) {
+        }
         if (settled()) {
             return true;
         }
-        (void)GameplayLoop::update(
-            level_, session_, presentation_, {}, frameSeconds, true);
+        if (!session_.moving()) {
+            return false;
+        }
+        const float step = session_.timeToNextCompletion();
+        elapsedSeconds += step;
+        if (elapsedSeconds > maximumSettleSeconds) {
+            return false;
+        }
+        session_.advanceActiveAction(step);
+        if (!session_.anyActionComplete()) {
+            return false;
+        }
+        session_.completeActiveAction();
     }
     return settled();
 }
 
 bool Driver::apply(Input input)
 {
-    GameplayLoop::InputFrame frame;
     switch (input) {
-    case Input::Up: frame.up.pressed = true; break;
-    case Input::Down: frame.down.pressed = true; break;
-    case Input::Left: frame.left.pressed = true; break;
-    case Input::Right: frame.right.pressed = true; break;
-    case Input::CycleHero: frame.cycleHeroPressed = true; break;
-    case Input::Interact: frame.interactPressed = true; break;
-    case Input::Undo: frame.undoPressed = true; break;
+    case Input::Up: session_.queueMove(MoveDirection::Up); break;
+    case Input::Down: session_.queueMove(MoveDirection::Down); break;
+    case Input::Left: session_.queueMove(MoveDirection::Left); break;
+    case Input::Right: session_.queueMove(MoveDirection::Right); break;
+    case Input::CycleHero: session_.cycleActiveHero(); break;
+    case Input::Interact: session_.queueMirror(); break;
+    case Input::Undo: session_.queueUndo(); break;
     }
-    // Pressed without held: exactly one step, never a held repeat.
-    (void)GameplayLoop::update(
-        level_, session_, presentation_, frame, frameSeconds, true);
     return runUntilSettled();
 }
 

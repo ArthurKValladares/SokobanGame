@@ -1,8 +1,6 @@
 #pragma once
 
 #include "engine/EntityId.hpp"
-#include "engine/GameplayLoop.hpp"
-#include "engine/GameplayPresentation.hpp"
 #include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelLocation.hpp"
@@ -82,9 +80,11 @@ struct Solution {
 // `solutions/level<L>-screen<S>.solution` style name for a new recording.
 [[nodiscard]] std::string fileNameFor(LevelLocation location);
 
-// Drives one screen through GameplayLoop, one input at a time, waiting after
-// each until nothing is moving. Waiting is what makes a recording replayable:
-// a player pressing keys mid-slide depends on timing, a replay must not.
+// Drives one screen through the same GameplaySession action planner and
+// scheduler used by GameplayLoop, one input at a time. It advances directly
+// between mechanical completion boundaries because tools have no animation to
+// render. Waiting until idle is what makes a recording replayable: a player
+// pressing keys mid-slide depends on timing, a replay must not.
 class Driver {
 public:
     explicit Driver(const Level& level);
@@ -110,7 +110,6 @@ private:
 
     const Level& level_;
     GameplaySession session_;
-    GameplayPresentation presentation_;
 };
 
 [[nodiscard]] std::vector<EntityChange> changesBetween(

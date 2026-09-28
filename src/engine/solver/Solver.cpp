@@ -1,19 +1,27 @@
 #include "engine/solver/Solver.hpp"
 
+#include "engine/ActionPlan.hpp"
+#include "engine/GameplayConfig.hpp"
 #include "engine/Rules.hpp"
+#include "engine/solver/StateKey.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <queue>
-#include <string>
-#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace sokoban::solver {
 namespace {
 
 using solution::Input;
+using detail::PackedStateKey;
+using detail::PackedStateKeyHash;
+
+constexpr std::array directions {
+    Input::Up, Input::Down, Input::Left, Input::Right,
+};
 
 // A search node is a "position" in the classic Sokoban sense: everything
 // that is not a walking hero is fixed, and walking between cells the heroes
@@ -84,35 +92,6 @@ int estimate(
     return cost;
 }
 
-void appendCell(std::string& key, GridPosition3 cell)
-{
-    key += std::to_string(cell.x) + ',' + std::to_string(cell.y) + ',' +
-        std::to_string(cell.z) + ';';
-}
-
-std::string stateKey(const GameState& state, EntityId controller)
-{
-    std::string key = std::to_string(controller) + '|';
-    for (const GameState::Player& player : state.players) {
-        key += 'p' + std::to_string(player.id);
-        appendCell(key, player.cell);
-        key += player.dead ? 'd' : '-';
-    }
-    for (const GameState::Movable& movable : state.movables) {
-        key += 'm' + std::to_string(movable.id);
-        appendCell(key, movable.cell);
-        key += movable.fallen ? 'f' : '-';
-        key += movable.dead ? 'd' : '-';
-    }
-    for (const GameState::Enemy& enemy : state.enemies) {
-        key += 'e' + std::to_string(enemy.id);
-        appendCell(key, enemy.cell);
-        key += enemy.fallen ? 'f' : '-';
-        key += enemy.dead ? 'd' : '-';
-    }
-    return key;
-}
-
 std::size_t livingControllers(const GameState& state)
 {
     std::vector<EntityId> controllers;
@@ -139,6 +118,107 @@ bool onlyPlayersMoved(const GameState& before, const GameState& after)
         before.enemies == after.enemies;
 }
 
+struct DirectionTransition {
+    GameState state;
+    bool solved = false;
+};
+
+std::optional<DirectionTransition> applyDirection(
+    const Level& level,
+    const GameState& before,
+    EntityId controller,
+    Input input,
+    solution::Driver& fallbackDriver)
+{
+    MoveDirection direction = MoveDirection::Up;
+    switch (input) {
+    case Input::Up: direction = MoveDirection::Up; break;
+    case Input::Down: direction = MoveDirection::Down; break;
+    case Input::Left: direction = MoveDirection::Left; break;
+    case Input::Right: direction = MoveDirection::Right; break;
+    case Input::CycleHero:
+    case Input::Interact:
+    case Input::Undo:
+        return std::nullopt;
+    }
+
+    // Most solver probes are settled walks or pushes with no automatic
+    // consequence. Plan those directly through the same production rules the
+    // GameplaySession uses, avoiding scheduler and presentation setup. Ice,
+    // conveyors, and turret reactions still take the full Driver path.
+    const std::optional<plans::PlannedAction> planned =
+        plans::planPlayerStep(
+            level,
+            before,
+            direction,
+            {},
+            config::stepDurationSeconds,
+            controller);
+    if (!planned) {
+        return DirectionTransition {
+            .state = before,
+            .solved = rules::isAtUnlockedEnd(level, before),
+        };
+    }
+    if (!rules::hasPendingMotion(level, planned->action.after)) {
+        return DirectionTransition {
+            .state = planned->action.after,
+            .solved = rules::isAtUnlockedEnd(level, planned->action.after),
+        };
+    }
+
+    fallbackDriver.resetTo(before, controller);
+    if (!fallbackDriver.apply(input)) {
+        return std::nullopt;
+    }
+    return DirectionTransition {
+        .state = fallbackDriver.state(),
+        .solved = fallbackDriver.solved(),
+    };
+}
+
+PackedStateKey canonicalWalkingKey(
+    const Level& level,
+    const GameState& state,
+    EntityId controller,
+    solution::Driver& driver,
+    Statistics& statistics)
+{
+    ++statistics.canonicalizationFloods;
+    std::vector<GameState> walks { state };
+    PackedStateKey canonical =
+        detail::makePackedStateKey(state, controller);
+    std::unordered_set<PackedStateKey, PackedStateKeyHash> seen;
+    seen.emplace(canonical);
+
+    for (std::size_t walk = 0; walk < walks.size(); ++walk) {
+        ++statistics.canonicalizationWalkStates;
+        for (const Input input : directions) {
+            const std::optional<DirectionTransition> transition =
+                applyDirection(
+                    level, walks[walk], controller, input, driver);
+            if (!transition || rules::anyPlayerDead(transition->state) ||
+                transition->state == walks[walk] ||
+                !onlyPlayersMoved(walks[walk], transition->state) ||
+                transition->solved) {
+                continue;
+            }
+            PackedStateKey key =
+                detail::makePackedStateKey(transition->state, controller);
+            if (!seen.emplace(key).second) {
+                continue;
+            }
+            if (key < canonical) {
+                canonical = key;
+            }
+            walks.push_back(transition->state);
+        }
+    }
+    statistics.peakCanonicalWalkRegion = std::max(
+        statistics.peakCanonicalWalkRegion, walks.size());
+    return canonical;
+}
+
 struct WalkState {
     GameState state;
     std::size_t parent = 0;
@@ -160,10 +240,6 @@ std::vector<Input> walkPath(
 
 Result solve(const Level& level, const Options& options)
 {
-    constexpr std::array directions {
-        Input::Up, Input::Down, Input::Left, Input::Right,
-    };
-
     Result result;
     if (options.maxStates == 0) {
         result.status = Status::StateLimitReached;
@@ -202,11 +278,19 @@ Result solve(const Level& level, const Options& options)
     frontier.emplace(priority(0), 0);
     result.statistics.peakFrontier = 1;
 
-    // Canonical keys of positions already expanded: the smallest walk-state
-    // key in the reachable region.
-    std::unordered_map<std::string, std::size_t> expanded;
-    std::unordered_map<std::string, std::size_t> queued;
-    queued.emplace(stateKey(nodes[0].state, nodes[0].controller), 0);
+    // Keep an inexpensive exact-state filter in front of walk-region
+    // canonicalization. The canonical set then prevents equivalent walking
+    // variants from ever consuming frontier or retained-node capacity.
+    std::unordered_set<PackedStateKey, PackedStateKeyHash> rawQueued;
+    std::unordered_set<PackedStateKey, PackedStateKeyHash> canonicalQueued;
+    rawQueued.emplace(detail::makePackedStateKey(
+        nodes[0].state, nodes[0].controller));
+    canonicalQueued.emplace(canonicalWalkingKey(
+        level,
+        nodes[0].state,
+        nodes[0].controller,
+        driver,
+        result.statistics));
 
     const auto finish = [&](std::size_t index) {
         std::vector<Input> inputs;
@@ -245,40 +329,46 @@ Result solve(const Level& level, const Options& options)
 
         // Flood the walkable region.
         std::vector<WalkState> walks { { .state = nodes[index].state } };
-        std::unordered_map<std::string, std::size_t> walkSeen;
-        std::string canonical = stateKey(walks[0].state, controller);
-        walkSeen.emplace(canonical, 0);
+        std::unordered_set<PackedStateKey, PackedStateKeyHash> walkSeen;
+        walkSeen.emplace(
+            detail::makePackedStateKey(walks[0].state, controller));
         std::vector<std::pair<std::size_t, Input>> significant;
         for (std::size_t walk = 0; walk < walks.size(); ++walk) {
             ++result.statistics.walkStates;
             for (const Input input : directions) {
-                driver.resetTo(walks[walk].state, controller);
-                if (!driver.apply(input)) {
+                const std::optional<DirectionTransition> transition =
+                    applyDirection(
+                        level,
+                        walks[walk].state,
+                        controller,
+                        input,
+                        driver);
+                if (!transition) {
                     ++result.statistics.settleFailures;
                     continue;
                 }
-                if (driver.anyPlayerDead()) {
+                if (rules::anyPlayerDead(transition->state)) {
                     ++result.statistics.playerDeathPrunes;
                     continue;
                 }
-                if (driver.state() == walks[walk].state) {
+                if (transition->state == walks[walk].state) {
                     ++result.statistics.unchangedInputs;
                     continue;
                 }
-                if (!onlyPlayersMoved(walks[walk].state, driver.state()) ||
-                    driver.solved()) {
+                if (!onlyPlayersMoved(
+                        walks[walk].state, transition->state) ||
+                    transition->solved) {
                     significant.emplace_back(walk, input);
                     ++result.statistics.significantMovesDiscovered;
                     continue;
                 }
-                std::string key = stateKey(driver.state(), controller);
-                if (walkSeen.contains(key)) {
+                PackedStateKey key =
+                    detail::makePackedStateKey(transition->state, controller);
+                if (!walkSeen.emplace(std::move(key)).second) {
                     continue;
                 }
-                canonical = std::min(canonical, key);
-                walkSeen.emplace(std::move(key), walks.size());
                 walks.push_back({
-                    .state = driver.state(),
+                    .state = transition->state,
                     .parent = walk,
                     .input = input,
                 });
@@ -294,14 +384,6 @@ Result solve(const Level& level, const Options& options)
         }
         result.statistics.peakWalkRegion = std::max(
             result.statistics.peakWalkRegion, walks.size());
-        if (!expanded.emplace(canonical, index).second) {
-            ++result.statistics.canonicalDuplicates;
-            if (!reportProgress()) {
-                result.status = Status::Cancelled;
-                return result;
-            }
-            continue;
-        }
         ++result.statistics.expandedPositions;
 
         for (const auto& [walk, input] : significant) {
@@ -315,10 +397,26 @@ Result solve(const Level& level, const Options& options)
                 ++result.statistics.playerDeathPrunes;
                 continue;
             }
-            std::string key =
-                stateKey(driver.state(), driver.activeHeroController());
-            if (queued.contains(key)) {
+            const GameState successorState = driver.state();
+            const bool successorSolved = driver.solved();
+            const EntityId successorController =
+                driver.activeHeroController();
+            PackedStateKey rawKey = detail::makePackedStateKey(
+                successorState, successorController);
+            if (!rawQueued.emplace(rawKey).second) {
                 ++result.statistics.queuedDuplicates;
+                continue;
+            }
+            PackedStateKey canonicalKey = successorSolved
+                ? rawKey
+                : canonicalWalkingKey(
+                    level,
+                    successorState,
+                    successorController,
+                    driver,
+                    result.statistics);
+            if (!canonicalQueued.emplace(std::move(canonicalKey)).second) {
+                ++result.statistics.canonicalDuplicates;
                 continue;
             }
             // Keep maxStates an exact retained-node budget. The former
@@ -328,13 +426,12 @@ Result solve(const Level& level, const Options& options)
                 result.status = Status::StateLimitReached;
                 return result;
             }
-            queued.emplace(std::move(key), nodes.size());
             std::vector<Input> inputs = walkPath(walks, walk);
             inputs.push_back(input);
             const std::size_t depth = nodes[index].depth + inputs.size();
             nodes.push_back({
-                .state = driver.state(),
-                .controller = driver.activeHeroController(),
+                .state = successorState,
+                .controller = successorController,
                 .parent = index,
                 .inputs = std::move(inputs),
                 .depth = depth,
@@ -343,7 +440,7 @@ Result solve(const Level& level, const Options& options)
             frontier.emplace(priority(nodes.size() - 1), nodes.size() - 1);
             result.statistics.peakFrontier = std::max(
                 result.statistics.peakFrontier, frontier.size());
-            if (driver.solved()) {
+            if (successorSolved) {
                 finish(nodes.size() - 1);
                 return result;
             }

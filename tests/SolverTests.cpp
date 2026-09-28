@@ -3,9 +3,11 @@
 #include "engine/Level.hpp"
 #include "engine/Solution.hpp"
 #include "engine/solver/Solver.hpp"
+#include "engine/solver/StateKey.hpp"
 
 #include <exception>
 #include <iostream>
+#include <unordered_set>
 
 namespace {
 
@@ -17,6 +19,136 @@ const Level::Definition pushAndPlateDefinition {
         { "C RPE", "     " },
     },
 };
+
+void testPackedStateKeyIncludesEveryDynamicField()
+{
+    TEST("packedStateKeyIncludesEveryDynamicField");
+    GameState state {
+        .players = { {
+            .id = 11,
+            .cell = { -2, 3, 4 },
+            .character = CharacterType::Knight,
+            .controller = 12,
+            .sliding = MoveDirection::Left,
+        } },
+        .movables = { {
+            .id = 21,
+            .type = TileType::TurretNorth,
+            .cell = { 5, -6, 7 },
+            .sliding = MoveDirection::Right,
+        } },
+        .enemies = { {
+            .id = 31,
+            .cell = { 8, 9, -10 },
+            .sliding = MoveDirection::Down,
+        } },
+    };
+    constexpr EntityId activeController = 12;
+    const auto key =
+        solver::detail::makePackedStateKey(state, activeController);
+    CHECK(key.wordCount() == 14);
+    CHECK(key == solver::detail::makePackedStateKey(
+        state, activeController));
+
+    std::unordered_set<
+        solver::detail::PackedStateKey,
+        solver::detail::PackedStateKeyHash> keys;
+    keys.emplace(key);
+    CHECK(keys.contains(solver::detail::makePackedStateKey(
+        state, activeController)));
+
+    const auto checkChanged = [&](const GameState& changed) {
+        CHECK(key != solver::detail::makePackedStateKey(
+            changed, activeController));
+    };
+    CHECK(key != solver::detail::makePackedStateKey(
+        state, activeController + 1));
+
+    GameState changed = state;
+    ++changed.players[0].id;
+    checkChanged(changed);
+    changed = state;
+    ++changed.players[0].cell.x;
+    checkChanged(changed);
+    changed = state;
+    ++changed.players[0].cell.y;
+    checkChanged(changed);
+    changed = state;
+    ++changed.players[0].cell.z;
+    checkChanged(changed);
+    changed = state;
+    changed.players[0].character = CharacterType::Witch;
+    checkChanged(changed);
+    changed = state;
+    ++changed.players[0].controller;
+    checkChanged(changed);
+    changed = state;
+    changed.players[0].dead = true;
+    checkChanged(changed);
+    changed = state;
+    changed.players[0].drowned = true;
+    checkChanged(changed);
+    changed = state;
+    changed.players[0].sliding = MoveDirection::Up;
+    checkChanged(changed);
+
+    changed = state;
+    ++changed.movables[0].id;
+    checkChanged(changed);
+    changed = state;
+    changed.movables[0].type = TileType::Rock;
+    checkChanged(changed);
+    changed = state;
+    ++changed.movables[0].cell.x;
+    checkChanged(changed);
+    changed = state;
+    ++changed.movables[0].cell.y;
+    checkChanged(changed);
+    changed = state;
+    ++changed.movables[0].cell.z;
+    checkChanged(changed);
+    changed = state;
+    changed.movables[0].fallen = true;
+    checkChanged(changed);
+    changed = state;
+    changed.movables[0].dead = true;
+    checkChanged(changed);
+    changed = state;
+    changed.movables[0].sliding = MoveDirection::Up;
+    checkChanged(changed);
+
+    changed = state;
+    ++changed.enemies[0].id;
+    checkChanged(changed);
+    changed = state;
+    ++changed.enemies[0].cell.x;
+    checkChanged(changed);
+    changed = state;
+    ++changed.enemies[0].cell.y;
+    checkChanged(changed);
+    changed = state;
+    ++changed.enemies[0].cell.z;
+    checkChanged(changed);
+    changed = state;
+    changed.enemies[0].fallen = true;
+    checkChanged(changed);
+    changed = state;
+    changed.enemies[0].dead = true;
+    checkChanged(changed);
+    changed = state;
+    changed.enemies[0].sliding = MoveDirection::Up;
+    checkChanged(changed);
+
+    changed = state;
+    changed.players.push_back(state.players[0]);
+    checkChanged(changed);
+    changed = state;
+    changed.movables.push_back(state.movables[0]);
+    checkChanged(changed);
+    changed = state;
+    changed.enemies.push_back(state.enemies[0]);
+    checkChanged(changed);
+}
 
 void testSearchResultReplays()
 {
@@ -42,6 +174,9 @@ void testSearchResultReplays()
     CHECK(result.statistics.significantMovesTried > 0);
     CHECK(result.statistics.peakFrontier > 0);
     CHECK(result.statistics.peakWalkRegion > 0);
+    CHECK(result.statistics.canonicalizationFloods > 0);
+    CHECK(result.statistics.canonicalizationWalkStates > 0);
+    CHECK(result.statistics.peakCanonicalWalkRegion > 0);
 }
 
 void testExhaustionIsDistinctFromStateLimit()
@@ -100,6 +235,42 @@ void testBestFirstReportsHeuristicWork()
     CHECK(result.statistics.bestHeuristic.has_value());
 }
 
+void testWalkingVariantsAreCanonicalizedBeforeEnqueue()
+{
+    TEST("walkingVariantsAreCanonicalizedBeforeEnqueue");
+    const Level::Definition cyclicDefinition {
+        .layers = {
+            {
+                ".....",
+                ".....",
+                ".....",
+                ".....",
+                ".....",
+            },
+            {
+                "#####",
+                "#C  #",
+                "# R #",
+                "#   #",
+                "#####",
+            },
+        },
+    };
+    const Level level =
+        Level::loadFromDefinition(cyclicDefinition, "cyclic solver test");
+    const solver::Result result = solver::solve(level, {
+        .maxStates = 10'000,
+    });
+
+    CHECK(result.status == solver::Status::Exhausted);
+    CHECK(result.statistics.generatedStates > 1);
+    CHECK(result.statistics.expandedPositions ==
+        result.statistics.frontierPops);
+    CHECK(result.statistics.canonicalDuplicates > 0);
+    CHECK(result.statistics.canonicalizationFloods >=
+        result.statistics.generatedStates);
+}
+
 void testProgressCanCancelSearch()
 {
     TEST("progressCanCancelSearch");
@@ -140,9 +311,11 @@ void testStatusNamesAreStable()
 int main()
 {
     try {
+        testPackedStateKeyIncludesEveryDynamicField();
         testSearchResultReplays();
         testExhaustionIsDistinctFromStateLimit();
         testBestFirstReportsHeuristicWork();
+        testWalkingVariantsAreCanonicalizedBeforeEnqueue();
         testProgressCanCancelSearch();
         testStatusNamesAreStable();
     } catch (const std::exception& error) {

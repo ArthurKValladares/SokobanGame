@@ -29,15 +29,18 @@ struct Statistics {
     // bounded by Options::maxStates.
     std::size_t generatedStates = 0;
     // Entries removed from the frontier. A pop can still be rejected by the
-    // state limit or by walk-region canonicalization.
+    // state limit.
     std::size_t frontierPops = 0;
     // Unique canonical positions whose significant successors were searched.
     std::size_t expandedPositions = 0;
-    // Raw successor states rejected because they had already been queued.
+    // Raw successor states rejected because they had already been observed.
     std::size_t queuedDuplicates = 0;
-    // Queued walking variants rejected after their regions canonicalized to an
-    // already-expanded position.
+    // Successors rejected before enqueueing because their walking regions
+    // canonicalized to a position already retained by the search.
     std::size_t canonicalDuplicates = 0;
+    // Cost of canonicalizing successors before they consume frontier space.
+    std::size_t canonicalizationFloods = 0;
+    std::size_t canonicalizationWalkStates = 0;
     // Ordinary walking configurations visited while constructing macro moves.
     std::size_t walkStates = 0;
     // State-changing moves discovered during walking-region floods and then
@@ -52,6 +55,7 @@ struct Statistics {
     std::size_t unchangedInputs = 0;
     std::size_t peakFrontier = 0;
     std::size_t peakWalkRegion = 0;
+    std::size_t peakCanonicalWalkRegion = 0;
     std::size_t heuristicEvaluations = 0;
     std::optional<int> bestHeuristic;
 

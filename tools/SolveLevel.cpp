@@ -68,8 +68,12 @@ void appendStatistics(
 {
     stream << statistics.generatedStates << " generated, "
            << statistics.expandedPositions << " expanded, "
-           << duplicateCount(statistics) << " duplicate, peak frontier "
-           << statistics.peakFrontier;
+           << duplicateCount(statistics) << " duplicate ("
+           << statistics.queuedDuplicates << " exact, "
+           << statistics.canonicalDuplicates << " canonical), "
+           << statistics.canonicalizationFloods << " canonical floods/"
+           << statistics.canonicalizationWalkStates << " walk states, "
+           << "peak frontier " << statistics.peakFrontier;
     if (statistics.bestHeuristic) {
         stream << ", best estimate " << *statistics.bestHeuristic;
     }
