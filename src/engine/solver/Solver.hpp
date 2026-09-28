@@ -56,9 +56,16 @@ struct Statistics {
     // Ordinary walking configurations visited while constructing macro moves.
     std::size_t walkStates = 0;
     // State-changing moves discovered during walking-region floods and then
-    // actually simulated as candidate successors.
+    // admitted to the successor pipeline after local deduplication.
     std::size_t significantMovesDiscovered = 0;
     std::size_t significantMovesTried = 0;
+    // Successors reused from walking-flood planning versus those that still
+    // required the full solution Driver (automatic motion after interaction).
+    std::size_t precomputedSuccessorsReused = 0;
+    std::size_t drivenSuccessors = 0;
+    // Equivalent raw outcomes removed within one expanded position, before
+    // dead-position checks or walking-region canonicalization.
+    std::size_t localSuccessorDuplicates = 0;
     // Driver applications that could not settle within its safety limit.
     std::size_t settleFailures = 0;
     // Candidate inputs pruned because at least one hero died.

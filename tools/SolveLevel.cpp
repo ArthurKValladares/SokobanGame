@@ -6,8 +6,9 @@
 //                       [--best-first]
 //                       [--progress-interval N] [--overwrite]
 //
-// The solver applies inputs through solution::Driver, exactly as replay does,
-// so every solution this tool finds is accepted by the solution_replay test.
+// The solver plans ordinary transitions through the production rules and uses
+// solution::Driver for automatic consequences. Every result is still recorded
+// and replayed through Driver before it is written.
 // Screens that already have a solution for their current content are skipped
 // unless --overwrite is given.
 
@@ -93,6 +94,13 @@ void appendStatistics(
             stream << " (" << statistics.staticDeadCells
                    << " static dead cells)";
         }
+    }
+    stream << ", " << statistics.precomputedSuccessorsReused
+           << " precomputed successors/"
+           << statistics.drivenSuccessors << " driven";
+    if (statistics.localSuccessorDuplicates != 0) {
+        stream << ", " << statistics.localSuccessorDuplicates
+               << " local successor duplicates";
     }
     stream << ", peak frontier " << statistics.peakFrontier;
     if (statistics.bestHeuristic) {

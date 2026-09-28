@@ -589,7 +589,8 @@ not necessarily recorded inputs; `--best-first` is usually much faster on
 large screens but the result may be longer. Final output distinguishes
 generated and expanded positions, duplicate states, early-canonicalization
 floods/walk states, walking-component cache hits/current and peak size,
-evictions, and peak frontier size. Solved screens also report their significant
+evictions, precomputed-versus-driven successors, local successor duplicates,
+and peak frontier size. Solved screens also report their significant
 state-changing move count.
 `--progress-interval N` prints the same counters, including dead-position
 checks and prunes, after approximately every N generated positions. Use a
@@ -612,8 +613,11 @@ ties, preventing a long harmless walk from outweighing a useful push. Its
 precomputed relaxed graph models push geometry, potentially bridged water, and
 mirror reflection, then finds a minimum-cost distinct assignment of live
 movable units to plates. Ordinary settled steps use the production action
-planner directly; automatic ice, conveyor and turret consequences fall back to
-the full replay driver.
+planner directly. State-changing results found during the walking flood are
+reused as successors instead of being simulated a second time, including
+settled mirror previews and hero switches; equivalent raw outcomes from one
+expansion are discarded locally. Automatic ice, conveyor and turret
+consequences still fall back to the full replay driver.
 Pressure-plate feasibility rejects states with too few
 surviving movable units on every level. Classic flat push-only screens also
 precompute reverse-push reachability for each plate, rejecting both rocks on

@@ -42,7 +42,7 @@ struct Node {
     std::size_t inputDepth = 0;
 };
 
-std::size_t livingControllers(const GameState& state)
+std::vector<EntityId> livingControllerIds(const GameState& state)
 {
     std::vector<EntityId> controllers;
     for (std::size_t i = 0; i < state.players.size(); ++i) {
@@ -54,7 +54,17 @@ std::size_t livingControllers(const GameState& state)
             controllers.push_back(controller);
         }
     }
-    return controllers.size();
+    return controllers;
+}
+
+EntityId nextLivingController(
+    const std::vector<EntityId>& controllers, EntityId current)
+{
+    const auto currentIt = std::ranges::find(controllers, current);
+    if (currentIt == controllers.end() || currentIt + 1 == controllers.end()) {
+        return controllers.front();
+    }
+    return *(currentIt + 1);
 }
 
 // Only heroes changed: an ordinary walk (or a slide the walk set off).
@@ -253,6 +263,18 @@ struct WalkState {
     Input input = Input::Up;
 };
 
+struct SignificantTransition {
+    std::size_t walk = 0;
+    Input input = Input::Up;
+    GameState successor;
+    EntityId controller = invalidEntityId;
+    bool solved = false;
+    bool precomputed = false;
+    // Points into the expansion-local set. References and pointers to
+    // unordered-set elements remain valid when the table rehashes.
+    const PackedStateKey* rawKey = nullptr;
+};
+
 std::vector<Input> walkPath(
     const std::vector<WalkState>& walks, std::size_t index)
 {
@@ -380,11 +402,47 @@ Result solve(const Level& level, const Options& options)
         std::unordered_set<PackedStateKey, PackedStateKeyHash> walkSeen;
         walkSeen.emplace(
             detail::makePackedStateKey(walks[0].state, controller));
-        std::vector<std::pair<std::size_t, Input>> significant;
+        std::vector<SignificantTransition> significant;
+        std::unordered_set<PackedStateKey, PackedStateKeyHash>
+            localSuccessors;
+        const auto addPrecomputedSuccessor = [
+                &result, &significant, &localSuccessors](
+                std::size_t walk,
+                Input input,
+                GameState successor,
+                EntityId successorController,
+                bool solved) {
+            ++result.statistics.significantMovesDiscovered;
+            PackedStateKey key = detail::makePackedStateKey(
+                successor, successorController);
+            const auto [keyPosition, inserted] =
+                localSuccessors.emplace(std::move(key));
+            if (!inserted) {
+                ++result.statistics.localSuccessorDuplicates;
+                return;
+            }
+            significant.push_back({
+                .walk = walk,
+                .input = input,
+                .successor = std::move(successor),
+                .controller = successorController,
+                .solved = solved,
+                .precomputed = true,
+                .rawKey = &*keyPosition,
+            });
+        };
+        const auto addDrivenSuccessor = [&result, &significant](
+                std::size_t walk, Input input) {
+            ++result.statistics.significantMovesDiscovered;
+            significant.push_back({
+                .walk = walk,
+                .input = input,
+            });
+        };
         for (std::size_t walk = 0; walk < walks.size(); ++walk) {
             ++result.statistics.walkStates;
             for (const Input input : directions) {
-                const std::optional<DirectionTransition> transition =
+                std::optional<DirectionTransition> transition =
                     applyDirection(
                         level,
                         walks[walk].state,
@@ -406,8 +464,12 @@ Result solve(const Level& level, const Options& options)
                 if (!onlyPlayersMoved(
                         walks[walk].state, transition->state) ||
                     transition->solved) {
-                    significant.emplace_back(walk, input);
-                    ++result.statistics.significantMovesDiscovered;
+                    addPrecomputedSuccessor(
+                        walk,
+                        input,
+                        std::move(transition->state),
+                        controller,
+                        transition->solved);
                     continue;
                 }
                 PackedStateKey key =
@@ -416,37 +478,81 @@ Result solve(const Level& level, const Options& options)
                     continue;
                 }
                 walks.push_back({
-                    .state = transition->state,
+                    .state = std::move(transition->state),
                     .parent = walk,
                     .input = input,
                 });
             }
-            if (livingControllers(walks[walk].state) > 1) {
-                significant.emplace_back(walk, Input::CycleHero);
-                ++result.statistics.significantMovesDiscovered;
+            const std::vector<EntityId> controllers =
+                livingControllerIds(walks[walk].state);
+            if (controllers.size() > 1) {
+                addPrecomputedSuccessor(
+                    walk,
+                    Input::CycleHero,
+                    walks[walk].state,
+                    nextLivingController(controllers, controller),
+                    false);
             }
-            if (rules::previewMirrorActivation(level, walks[walk].state)) {
-                significant.emplace_back(walk, Input::Interact);
-                ++result.statistics.significantMovesDiscovered;
+            std::optional<rules::MirrorActivationPreview> mirror =
+                rules::previewMirrorActivation(level, walks[walk].state);
+            if (mirror) {
+                if (rules::anyPlayerDead(mirror->after)) {
+                    ++result.statistics.playerDeathPrunes;
+                } else if (!rules::hasPendingMotion(level, mirror->after)) {
+                    const bool solved =
+                        rules::isAtUnlockedEnd(level, mirror->after);
+                    addPrecomputedSuccessor(
+                        walk,
+                        Input::Interact,
+                        std::move(mirror->after),
+                        controller,
+                        solved);
+                } else {
+                    // Mirror previews describe the transaction itself. Let the
+                    // Driver resolve any ice, conveyor, or turret consequence.
+                    addDrivenSuccessor(walk, Input::Interact);
+                }
             }
         }
         result.statistics.peakWalkRegion = std::max(
             result.statistics.peakWalkRegion, walks.size());
         ++result.statistics.expandedPositions;
 
-        for (const auto& [walk, input] : significant) {
+        for (SignificantTransition& transition : significant) {
             ++result.statistics.significantMovesTried;
-            driver.resetTo(walks[walk].state, controller);
-            if (!driver.apply(input)) {
-                ++result.statistics.settleFailures;
-                continue;
+            GameState successorState;
+            bool successorSolved = false;
+            EntityId successorController = invalidEntityId;
+            if (transition.precomputed) {
+                ++result.statistics.precomputedSuccessorsReused;
+                successorState = std::move(transition.successor);
+                successorSolved = transition.solved;
+                successorController = transition.controller;
+            } else {
+                ++result.statistics.drivenSuccessors;
+                driver.resetTo(
+                    walks[transition.walk].state, controller);
+                if (!driver.apply(transition.input)) {
+                    ++result.statistics.settleFailures;
+                    continue;
+                }
+                if (driver.anyPlayerDead()) {
+                    ++result.statistics.playerDeathPrunes;
+                    continue;
+                }
+                successorState = driver.state();
+                successorSolved = driver.solved();
+                successorController = driver.activeHeroController();
+                PackedStateKey localKey = detail::makePackedStateKey(
+                    successorState, successorController);
+                const auto [keyPosition, inserted] =
+                    localSuccessors.emplace(std::move(localKey));
+                if (!inserted) {
+                    ++result.statistics.localSuccessorDuplicates;
+                    continue;
+                }
+                transition.rawKey = &*keyPosition;
             }
-            if (driver.anyPlayerDead()) {
-                ++result.statistics.playerDeathPrunes;
-                continue;
-            }
-            const GameState successorState = driver.state();
-            const bool successorSolved = driver.solved();
             if (deadPositions.applicable()) {
                 ++result.statistics.deadPositionChecks;
                 if (!successorSolved &&
@@ -455,10 +561,7 @@ Result solve(const Level& level, const Options& options)
                     continue;
                 }
             }
-            const EntityId successorController =
-                driver.activeHeroController();
-            PackedStateKey rawKey = detail::makePackedStateKey(
-                successorState, successorController);
+            const PackedStateKey& rawKey = *transition.rawKey;
             // Cache members are added only after their canonical position is
             // retained. Expanding that position will visit this exact walking
             // state, so the successor cannot expose a new significant move.
@@ -468,7 +571,6 @@ Result solve(const Level& level, const Options& options)
                 continue;
             }
             std::optional<CanonicalWalkingRegion> region;
-            PackedStateKey canonicalKey = rawKey;
             if (!successorSolved) {
                 region = canonicalWalkingRegion(
                     level,
@@ -476,8 +578,10 @@ Result solve(const Level& level, const Options& options)
                     successorController,
                     driver,
                     result.statistics);
-                canonicalKey = region->canonical;
             }
+            PackedStateKey canonicalKey = successorSolved
+                ? rawKey
+                : std::move(region->canonical);
             if (!canonicalQueued.emplace(std::move(canonicalKey)).second) {
                 ++result.statistics.canonicalDuplicates;
                 continue;
@@ -493,8 +597,9 @@ Result solve(const Level& level, const Options& options)
                 walkingRegionCache.insert(
                     region->members, result.statistics);
             }
-            std::vector<Input> inputs = walkPath(walks, walk);
-            inputs.push_back(input);
+            std::vector<Input> inputs =
+                walkPath(walks, transition.walk);
+            inputs.push_back(transition.input);
             const std::size_t inputDepth =
                 nodes[index].inputDepth + inputs.size();
             nodes.push_back({

@@ -231,6 +231,13 @@ and the required real-device checks are recorded.
   independent static mirror reflection. It uses a distinct unit-to-plate
   assignment and affects ordering only, never correctness. Keep new mechanics
   optimistic unless their exact relaxed transition is modeled.
+  Significant directional results discovered during a walking flood are
+  already settled production-rule transitions; reuse them rather than running
+  the same input through `solution::Driver` again. Settled mirror previews and
+  hero-controller switches are likewise exact successors. Mirror results with
+  pending automatic motion must continue through the Driver. Local exact-state
+  deduplication happens before dead-position and canonicalization work, and the
+  solver statistics expose reused, driven, and locally duplicated successors.
   `engine/solver/DeadPosition.*` always applies the safe
   movable-unit/plate cardinality proof. Its per-plate reverse-push tables also
   require a complete rock-to-plate matching, but that stronger proof is

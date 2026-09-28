@@ -365,6 +365,10 @@ void testSearchResultReplays()
     CHECK(result.statistics.walkStates > 0);
     CHECK(result.statistics.significantMovesDiscovered > 0);
     CHECK(result.statistics.significantMovesTried > 0);
+    CHECK(result.statistics.precomputedSuccessorsReused > 0);
+    CHECK(result.statistics.precomputedSuccessorsReused +
+            result.statistics.drivenSuccessors ==
+        result.statistics.significantMovesTried);
     CHECK(result.statistics.peakFrontier > 0);
     CHECK(result.statistics.peakWalkRegion > 0);
     CHECK(result.statistics.canonicalizationFloods > 0);
@@ -374,6 +378,29 @@ void testSearchResultReplays()
     CHECK(result.statistics.solutionSignificantMoves.has_value());
     CHECK(result.statistics.solutionSignificantMoves.value_or(
         result.inputs.size()) < result.inputs.size());
+}
+
+void testPrecomputedMirrorSuccessorReplays()
+{
+    TEST("precomputedMirrorSuccessorReplays");
+    const Level level = Level::loadFromDefinition(
+        mirrorHeuristicDefinition, "mirror successor test");
+    const solver::Result result = solver::solve(level, {
+        .maxStates = 10'000,
+        .strategy = solver::Strategy::BestFirst,
+    });
+
+    CHECK(result.solved());
+    CHECK(std::ranges::find(result.inputs, solution::Input::Interact) !=
+        result.inputs.end());
+    CHECK(result.statistics.precomputedSuccessorsReused > 0);
+    CHECK_MESSAGE(
+        solution::record(
+            level,
+            mirrorHeuristicDefinition,
+            result.inputs,
+            "mirror successor test").solved,
+        "a reused mirror preview must match replay-driver semantics");
 }
 
 void testExhaustionIsDistinctFromStateLimit()
@@ -547,6 +574,7 @@ int main()
         testDeadPositionAnalysisIsConservativeAndFeatureAware();
         testPackedStateKeyIncludesEveryDynamicField();
         testSearchResultReplays();
+        testPrecomputedMirrorSuccessorReplays();
         testExhaustionIsDistinctFromStateLimit();
         testBestFirstReportsHeuristicWork();
         testWalkingVariantsAreCanonicalizedBeforeEnqueue();
