@@ -3,6 +3,7 @@
 #include "engine/ActionPlan.hpp"
 #include "engine/GameplayConfig.hpp"
 #include "engine/Rules.hpp"
+#include "engine/solver/DeadPosition.hpp"
 #include "engine/solver/StateKey.hpp"
 
 #include <algorithm>
@@ -251,6 +252,18 @@ Result solve(const Level& level, const Options& options)
         result.status = Status::Solved;
         return result;
     }
+    const detail::DeadPositionIndex deadPositions(level);
+    result.statistics.staticDeadPositionAnalysisEnabled =
+        deadPositions.staticAnalysisEnabled();
+    result.statistics.staticDeadCells = deadPositions.deadCellCount();
+    if (deadPositions.applicable()) {
+        ++result.statistics.deadPositionChecks;
+        if (deadPositions.rejects(driver.state())) {
+            ++result.statistics.deadPositionPrunes;
+            result.status = Status::Exhausted;
+            return result;
+        }
+    }
 
     std::vector<Node> nodes;
     nodes.push_back({
@@ -399,6 +412,14 @@ Result solve(const Level& level, const Options& options)
             }
             const GameState successorState = driver.state();
             const bool successorSolved = driver.solved();
+            if (deadPositions.applicable()) {
+                ++result.statistics.deadPositionChecks;
+                if (!successorSolved &&
+                    deadPositions.rejects(successorState)) {
+                    ++result.statistics.deadPositionPrunes;
+                    continue;
+                }
+            }
             const EntityId successorController =
                 driver.activeHeroController();
             PackedStateKey rawKey = detail::makePackedStateKey(

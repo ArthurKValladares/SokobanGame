@@ -72,8 +72,17 @@ void appendStatistics(
            << statistics.queuedDuplicates << " exact, "
            << statistics.canonicalDuplicates << " canonical), "
            << statistics.canonicalizationFloods << " canonical floods/"
-           << statistics.canonicalizationWalkStates << " walk states, "
-           << "peak frontier " << statistics.peakFrontier;
+           << statistics.canonicalizationWalkStates << " walk states";
+    if (statistics.deadPositionChecks != 0) {
+        stream << ", " << statistics.deadPositionPrunes
+               << " dead-position prunes/"
+               << statistics.deadPositionChecks << " checks";
+        if (statistics.staticDeadPositionAnalysisEnabled) {
+            stream << " (" << statistics.staticDeadCells
+                   << " static dead cells)";
+        }
+    }
+    stream << ", peak frontier " << statistics.peakFrontier;
     if (statistics.bestHeuristic) {
         stream << ", best estimate " << *statistics.bestHeuristic;
     }

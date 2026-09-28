@@ -41,6 +41,13 @@ struct Statistics {
     // Cost of canonicalizing successors before they consume frontier space.
     std::size_t canonicalizationFloods = 0;
     std::size_t canonicalizationWalkStates = 0;
+    // Conservative pressure-plate feasibility pruning. Unit-count checks
+    // apply everywhere; static dead cells are feature-gated to ordinary push
+    // mechanics.
+    bool staticDeadPositionAnalysisEnabled = false;
+    std::size_t staticDeadCells = 0;
+    std::size_t deadPositionChecks = 0;
+    std::size_t deadPositionPrunes = 0;
     // Ordinary walking configurations visited while constructing macro moves.
     std::size_t walkStates = 0;
     // State-changing moves discovered during walking-region floods and then

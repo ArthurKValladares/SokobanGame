@@ -542,6 +542,7 @@ add_library(sokoban_core STATIC
     src/engine/SaveStore.cpp
     src/engine/Solution.cpp
     src/engine/SolutionStore.cpp
+    src/engine/solver/DeadPosition.cpp
     src/engine/solver/Solver.cpp
     src/engine/solver/StateKey.cpp
     src/engine/SourceWatcher.cpp

@@ -2,6 +2,7 @@
 
 #include "engine/Level.hpp"
 #include "engine/Solution.hpp"
+#include "engine/solver/DeadPosition.hpp"
 #include "engine/solver/Solver.hpp"
 #include "engine/solver/StateKey.hpp"
 
@@ -19,6 +20,113 @@ const Level::Definition pushAndPlateDefinition {
         { "C RPE", "     " },
     },
 };
+
+const Level::Definition classicDeadPositionDefinition {
+    .layers = {
+        {
+            "......",
+            "......",
+            "......",
+            "......",
+            "......",
+        },
+        {
+            "######",
+            "#C   #",
+            "# R P#",
+            "#    #",
+            "######",
+        },
+    },
+};
+
+const Level::Definition assignmentDeadlockDefinition {
+    .layers = {
+        {
+            ".........",
+            ".........",
+            ".........",
+            ".........",
+            ".........",
+        },
+        {
+            "#########",
+            "#C RRP###",
+            "#########",
+            "#    P###",
+            "#########",
+        },
+    },
+};
+
+void testDeadPositionAnalysisIsConservativeAndFeatureAware()
+{
+    TEST("deadPositionAnalysisIsConservativeAndFeatureAware");
+    const Level level = Level::loadFromDefinition(
+        classicDeadPositionDefinition, "dead-position test");
+    const solver::detail::DeadPositionIndex deadPositions(level);
+
+    CHECK(deadPositions.staticAnalysisEnabled());
+    CHECK(deadPositions.deadCellCount() > 0);
+    CHECK(deadPositions.isDeadCell({ 1, 1, 1 }));
+    CHECK(!deadPositions.isDeadCell({ 2, 2, 1 }));
+    CHECK(!deadPositions.isDeadCell({ 4, 2, 1 }));
+
+    GameState state = rules::initialState(level);
+    CHECK(!deadPositions.rejects(state));
+    state.movables[0].cell = { 1, 1, 1 };
+    CHECK(deadPositions.rejects(state));
+
+    // One unusable extra rock is harmless when another rock can still cover
+    // the one plate.
+    state.movables.push_back({
+        .id = 99,
+        .type = TileType::Rock,
+        .cell = { 3, 2, 1 },
+    });
+    CHECK(!deadPositions.rejects(state));
+    state.movables[1].cell = { 1, 1, 1 };
+    state.movables[0].cell = { 4, 2, 1 };
+    CHECK(!deadPositions.rejects(state));
+
+    const Level assignmentLevel = Level::loadFromDefinition(
+        assignmentDeadlockDefinition, "assignment deadlock test");
+    const solver::detail::DeadPositionIndex assignmentDeadPositions(
+        assignmentLevel);
+    const GameState assignmentState = rules::initialState(assignmentLevel);
+    CHECK(assignmentDeadPositions.staticAnalysisEnabled());
+    CHECK(assignmentState.movables.size() ==
+        assignmentLevel.pressurePlates().size());
+    CHECK(!assignmentDeadPositions.isDeadCell(
+        assignmentState.movables[0].cell));
+    CHECK(!assignmentDeadPositions.isDeadCell(
+        assignmentState.movables[1].cell));
+    CHECK(assignmentDeadPositions.rejects(assignmentState));
+
+    Level::Definition mirrored = classicDeadPositionDefinition;
+    mirrored.layers[1][1][3] = '1';
+    const Level mirroredLevel =
+        Level::loadFromDefinition(mirrored, "mirror dead-position test");
+    const solver::detail::DeadPositionIndex mirroredDeadPositions(
+        mirroredLevel);
+    CHECK(!mirroredDeadPositions.staticAnalysisEnabled());
+    GameState mirroredState = rules::initialState(mirroredLevel);
+    CHECK(!mirroredDeadPositions.rejects(mirroredState));
+    mirroredState.movables[0].fallen = true;
+    CHECK(mirroredDeadPositions.rejects(mirroredState));
+
+    Level::Definition bard = classicDeadPositionDefinition;
+    bard.layers[1][1][1] = 'B';
+    CHECK(!solver::detail::DeadPositionIndex(
+        Level::loadFromDefinition(bard, "bard dead-position test"))
+        .staticAnalysisEnabled());
+
+    Level::Definition drop = classicDeadPositionDefinition;
+    drop.layers[0][3][3] = ' ';
+    CHECK(!solver::detail::DeadPositionIndex(
+        Level::loadFromDefinition(drop, "drop dead-position test"))
+        .staticAnalysisEnabled());
+}
 
 void testPackedStateKeyIncludesEveryDynamicField()
 {
@@ -271,6 +379,22 @@ void testWalkingVariantsAreCanonicalizedBeforeEnqueue()
         result.statistics.generatedStates);
 }
 
+void testDeadPositionsArePrunedBeforeCanonicalization()
+{
+    TEST("deadPositionsArePrunedBeforeCanonicalization");
+    const Level level = Level::loadFromDefinition(
+        classicDeadPositionDefinition, "dead-position solver test");
+    const solver::Result result = solver::solve(level, {
+        .maxStates = 10'000,
+    });
+
+    CHECK(result.status == solver::Status::Exhausted);
+    CHECK(result.statistics.staticDeadPositionAnalysisEnabled);
+    CHECK(result.statistics.staticDeadCells > 0);
+    CHECK(result.statistics.deadPositionChecks > 0);
+    CHECK(result.statistics.deadPositionPrunes > 0);
+}
+
 void testProgressCanCancelSearch()
 {
     TEST("progressCanCancelSearch");
@@ -311,11 +435,13 @@ void testStatusNamesAreStable()
 int main()
 {
     try {
+        testDeadPositionAnalysisIsConservativeAndFeatureAware();
         testPackedStateKeyIncludesEveryDynamicField();
         testSearchResultReplays();
         testExhaustionIsDistinctFromStateLimit();
         testBestFirstReportsHeuristicWork();
         testWalkingVariantsAreCanonicalizedBeforeEnqueue();
+        testDeadPositionsArePrunedBeforeCanonicalization();
         testProgressCanCancelSearch();
         testStatusNamesAreStable();
     } catch (const std::exception& error) {

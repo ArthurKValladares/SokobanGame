@@ -586,8 +586,9 @@ not necessarily recorded inputs; `--best-first` is usually much faster on
 large screens but the result may be longer. Final output distinguishes
 generated and expanded positions, duplicate states, early-canonicalization
 floods/walk states, and peak frontier size.
-`--progress-interval N` prints the same counters after approximately every N
-generated positions. Use a Release build; the search is slow in Debug.
+`--progress-interval N` prints the same counters, including dead-position
+checks and prunes, after approximately every N generated positions. Use a
+Release build; the search is slow in Debug.
 
 The search itself is the reusable `engine/solver/Solver.hpp` API. It reports
 solved, exhausted, state-limit and cancelled outcomes separately, accepts an
@@ -598,7 +599,12 @@ An exact-state filter avoids unnecessary work, then each new successor's
 walking region is canonicalized before it can consume retained-node or
 frontier capacity. Ordinary settled steps use the production action planner
 directly; automatic ice, conveyor and turret consequences fall back to the
-full replay driver.
+full replay driver. Pressure-plate feasibility rejects states with too few
+surviving movable units on every level. Classic flat push-only screens also
+precompute reverse-push reachability for each plate, rejecting both rocks on
+cells that cannot reach any plate and sets of rocks that cannot be assigned to
+distinct plates. Mechanics that can invalidate that proof disable the static
+portion automatically.
 
 ### Improving the solver (future work)
 
@@ -606,9 +612,10 @@ The solver is simple on purpose and gives up on larger screens: level 3
 screen 2 was not solved after 5 million positions, although it is
 solvable by hand. Ideas, roughly in order of payoff:
 
-- **Dead positions.** Prune states where a rock sits in a corner or along a
-  wall away from every plate, or has fallen into water it cannot be used
-  from. Classic Sokoban solvers get most of their speed from this.
+- **More deadlock patterns.** Unit-count feasibility, static dead cells, and
+  complete rock-to-plate reachability matching for flat push-only screens are
+  implemented. Next are multi-rock freezes, wall groups, and feature-aware
+  proofs for water, mirrors, ice, and character abilities.
 - **A better estimate.** Match rocks to plates (minimum-cost assignment
   instead of each plate's nearest rock), count the heroes still missing for
   the Ends, and account for water that must be bridged before an island's

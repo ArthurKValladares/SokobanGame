@@ -220,8 +220,12 @@ and the required real-device checks are recorded.
   identity is the packed, lossless key in `engine/solver/StateKey.*`; when a
   `GameState` field is added, update its key and the field-by-field solver test.
   Exact states are filtered first, then walking regions are canonicalized
-  before enqueueing. Every returned solution must still pass through
-  `solution::record`/`solution::Driver` before it is stored.
+  before enqueueing. `engine/solver/DeadPosition.*` always applies the safe
+  movable-unit/plate cardinality proof. Its per-plate reverse-push tables also
+  require a complete rock-to-plate matching, but that stronger proof is
+  deliberately feature-gated: do not enable it for a new mechanic until that
+  mechanic is included in the reachability proof. Every returned solution must
+  still pass through `solution::record`/`solution::Driver` before it is stored.
 - The source watcher (`SourceWatcher`, `Application::serviceSourceWatcher`,
   Debug developer builds) polls stamps every 500 ms and never runs in smoke
   or evidence runs. It writes only into the staged tree and content index,
