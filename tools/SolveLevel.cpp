@@ -89,10 +89,19 @@ void appendStatistics(
     if (statistics.deadPositionChecks != 0) {
         stream << ", " << statistics.deadPositionPrunes
                << " dead-position prunes/"
-               << statistics.deadPositionChecks << " checks";
+               << statistics.deadPositionChecks << " checks ["
+               << statistics.deadPositionUnitCountPrunes << " unit, "
+               << statistics.deadPositionStaticMatchingPrunes
+               << " matching, "
+               << statistics.deadPositionFrozenClusterPrunes
+               << " frozen-cluster]";
         if (statistics.staticDeadPositionAnalysisEnabled) {
             stream << " (" << statistics.staticDeadCells
-                   << " static dead cells)";
+                   << " static dead cells";
+            if (statistics.multiRockFreezeAnalysisEnabled) {
+                stream << ", 2x2 freeze enabled";
+            }
+            stream << ")";
         }
     }
     stream << ", " << statistics.precomputedSuccessorsReused

@@ -242,7 +242,12 @@ and the required real-device checks are recorded.
   movable-unit/plate cardinality proof. Its per-plate reverse-push tables also
   require a complete rock-to-plate matching, but that stronger proof is
   deliberately feature-gated: do not enable it for a new mechanic until that
-  mechanic is included in the reachability proof. Every returned solution must
+  mechanic is included in the reachability proof. Rogue-only layouts add a
+  still stricter 2x2 freeze proof: every cell in the square must be either a
+  live rock or static blocker, and frozen rocks only match plates they already
+  occupy. Do not enable this for Knight chain pushes. Dead-position statistics
+  distinguish cardinality, static-matching, and frozen-cluster rejections.
+  Every returned solution must
   still pass through `solution::record`/`solution::Driver` before it is stored.
 - The source watcher (`SourceWatcher`, `Application::serviceSourceWatcher`,
   Debug developer builds) polls stamps every 500 ms and never runs in smoke

@@ -50,9 +50,13 @@ struct Statistics {
     // apply everywhere; static dead cells are feature-gated to ordinary push
     // mechanics.
     bool staticDeadPositionAnalysisEnabled = false;
+    bool multiRockFreezeAnalysisEnabled = false;
     std::size_t staticDeadCells = 0;
     std::size_t deadPositionChecks = 0;
     std::size_t deadPositionPrunes = 0;
+    std::size_t deadPositionUnitCountPrunes = 0;
+    std::size_t deadPositionStaticMatchingPrunes = 0;
+    std::size_t deadPositionFrozenClusterPrunes = 0;
     // Ordinary walking configurations visited while constructing macro moves.
     std::size_t walkStates = 0;
     // State-changing moves discovered during walking-region floods and then

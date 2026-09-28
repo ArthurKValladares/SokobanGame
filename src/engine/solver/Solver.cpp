@@ -304,14 +304,37 @@ Result solve(const Level& level, const Options& options)
     const detail::DeadPositionIndex deadPositions(level);
     result.statistics.staticDeadPositionAnalysisEnabled =
         deadPositions.staticAnalysisEnabled();
+    result.statistics.multiRockFreezeAnalysisEnabled =
+        deadPositions.multiRockFreezeAnalysisEnabled();
     result.statistics.staticDeadCells = deadPositions.deadCellCount();
-    if (deadPositions.applicable()) {
-        ++result.statistics.deadPositionChecks;
-        if (deadPositions.rejects(driver.state())) {
-            ++result.statistics.deadPositionPrunes;
-            result.status = Status::Exhausted;
-            return result;
+    const auto rejectedByDeadPosition = [&](const GameState& state) {
+        if (!deadPositions.applicable()) {
+            return false;
         }
+        ++result.statistics.deadPositionChecks;
+        const detail::DeadPositionReason reason =
+            deadPositions.rejectionReason(state);
+        if (reason == detail::DeadPositionReason::None) {
+            return false;
+        }
+        ++result.statistics.deadPositionPrunes;
+        switch (reason) {
+        case detail::DeadPositionReason::None: break;
+        case detail::DeadPositionReason::UnitCount:
+            ++result.statistics.deadPositionUnitCountPrunes;
+            break;
+        case detail::DeadPositionReason::StaticMatching:
+            ++result.statistics.deadPositionStaticMatchingPrunes;
+            break;
+        case detail::DeadPositionReason::FrozenCluster:
+            ++result.statistics.deadPositionFrozenClusterPrunes;
+            break;
+        }
+        return true;
+    };
+    if (rejectedByDeadPosition(driver.state())) {
+        result.status = Status::Exhausted;
+        return result;
     }
     const detail::RelaxedHeuristic heuristic(level);
     result.statistics.heuristicGraphCells =
@@ -553,13 +576,9 @@ Result solve(const Level& level, const Options& options)
                 }
                 transition.rawKey = &*keyPosition;
             }
-            if (deadPositions.applicable()) {
-                ++result.statistics.deadPositionChecks;
-                if (!successorSolved &&
-                    deadPositions.rejects(successorState)) {
-                    ++result.statistics.deadPositionPrunes;
-                    continue;
-                }
+            if (!successorSolved &&
+                rejectedByDeadPosition(successorState)) {
+                continue;
             }
             const PackedStateKey& rawKey = *transition.rawKey;
             // Cache members are added only after their canonical position is

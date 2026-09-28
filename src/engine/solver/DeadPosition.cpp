@@ -23,6 +23,11 @@ bool characterUsesOrdinaryPushes(CharacterType character)
         character == CharacterType::Knight;
 }
 
+bool characterCannotPushChains(CharacterType character)
+{
+    return character == CharacterType::Rogue;
+}
+
 bool tileChangesMovableReachability(TileType tile)
 {
     return tile == TileType::Ice || tile == TileType::Water ||
@@ -109,6 +114,11 @@ DeadPositionIndex::DeadPositionIndex(const Level& level)
     : level_(level)
 {
     enabled_ = supportsStaticAnalysis(level);
+    freezeAnalysisEnabled_ = enabled_ && std::ranges::all_of(
+        level.playerStarts(),
+        [](const Level::PlayerStart& player) {
+            return characterCannotPushChains(player.character);
+        });
     if (!enabled_) {
         return;
     }
@@ -189,7 +199,63 @@ bool DeadPositionIndex::isDeadCell(GridPosition3 cell) const
         !canReachPlate_[index(cell)];
 }
 
-bool DeadPositionIndex::rejects(const GameState& state) const
+std::vector<bool> DeadPositionIndex::frozenInTwoByTwoBlocks(
+    const std::vector<GridPosition3>& liveMovables) const
+{
+    std::vector<bool> frozen(liveMovables.size());
+    if (!freezeAnalysisEnabled_ || liveMovables.empty()) {
+        return frozen;
+    }
+
+    const std::size_t noMovable = liveMovables.size();
+    std::vector<std::size_t> movableAtCell(supported_.size(), noMovable);
+    for (std::size_t movable = 0; movable < liveMovables.size(); ++movable) {
+        if (inRange(liveMovables[movable])) {
+            movableAtCell[index(liveMovables[movable])] = movable;
+        }
+    }
+
+    // In a full 2x2 made only of static blockers and one-step-push rocks, no
+    // rock can be the first to move: every outward push needs the opposite
+    // cell inside the same sealed square. Mark every rock in such a square as
+    // permanently frozen. Knight chain pushes are why this proof has its own
+    // stricter feature gate.
+    for (int z = 0; z <= static_cast<int>(level_.depth()); ++z) {
+        for (int y = 0; y + 1 < static_cast<int>(level_.height()); ++y) {
+            for (int x = 0; x + 1 < static_cast<int>(level_.width()); ++x) {
+                const std::array cells {
+                    GridPosition3 { x, y, z },
+                    GridPosition3 { x + 1, y, z },
+                    GridPosition3 { x, y + 1, z },
+                    GridPosition3 { x + 1, y + 1, z },
+                };
+                bool sealed = true;
+                bool containsMovable = false;
+                for (const GridPosition3 cell : cells) {
+                    const std::size_t cellIndex = index(cell);
+                    const bool occupied =
+                        movableAtCell[cellIndex] != noMovable;
+                    containsMovable = containsMovable || occupied;
+                    sealed = sealed &&
+                        (occupied || !supported_[cellIndex]);
+                }
+                if (!sealed || !containsMovable) {
+                    continue;
+                }
+                for (const GridPosition3 cell : cells) {
+                    const std::size_t movable = movableAtCell[index(cell)];
+                    if (movable != noMovable) {
+                        frozen[movable] = true;
+                    }
+                }
+            }
+        }
+    }
+    return frozen;
+}
+
+DeadPositionReason DeadPositionIndex::rejectionReason(
+    const GameState& state) const
 {
     std::vector<GridPosition3> liveMovables;
     for (const GameState::Movable& movable : state.movables) {
@@ -205,44 +271,61 @@ bool DeadPositionIndex::rejects(const GameState& state) const
     }
     const std::size_t plateCount = level_.pressurePlates().size();
     if (liveMovables.size() + liveEnemies < plateCount) {
-        return true;
+        return DeadPositionReason::UnitCount;
     }
     if (!enabled_) {
-        return false;
+        return DeadPositionReason::None;
     }
 
     // Maximum bipartite matching between plates and current rock cells. An
     // edge means the rock could reach that plate on an otherwise empty board;
     // ignoring all dynamic blockers makes failure a safe impossibility proof.
-    std::vector<std::size_t> plateForMovable(
-        liveMovables.size(), plateCount);
-    const auto assign = [&](auto&& self,
-                            std::size_t plate,
-                            std::vector<bool>& visited) -> bool {
-        for (std::size_t movable = 0;
-             movable < liveMovables.size();
-             ++movable) {
-            const GridPosition3 cell = liveMovables[movable];
-            if (visited[movable] || !inRange(cell) ||
-                !reachableByPlate_[plate][index(cell)]) {
-                continue;
+    const auto hasCompleteMatching = [
+            this, &liveMovables, plateCount](
+            const std::vector<bool>* frozen) {
+        std::vector<std::size_t> plateForMovable(
+            liveMovables.size(), plateCount);
+        const auto assign = [&](auto&& self,
+                                std::size_t plate,
+                                std::vector<bool>& visited) -> bool {
+            for (std::size_t movable = 0;
+                 movable < liveMovables.size();
+                 ++movable) {
+                const GridPosition3 cell = liveMovables[movable];
+                const bool canServePlate = frozen && (*frozen)[movable]
+                    ? cell == level_.pressurePlates()[plate]
+                    : inRange(cell) &&
+                        reachableByPlate_[plate][index(cell)];
+                if (visited[movable] || !canServePlate) {
+                    continue;
+                }
+                visited[movable] = true;
+                if (plateForMovable[movable] == plateCount ||
+                    self(self, plateForMovable[movable], visited)) {
+                    plateForMovable[movable] = plate;
+                    return true;
+                }
             }
-            visited[movable] = true;
-            if (plateForMovable[movable] == plateCount ||
-                self(self, plateForMovable[movable], visited)) {
-                plateForMovable[movable] = plate;
-                return true;
+            return false;
+        };
+        for (std::size_t plate = 0; plate < plateCount; ++plate) {
+            std::vector<bool> visited(liveMovables.size());
+            if (!assign(assign, plate, visited)) {
+                return false;
             }
         }
-        return false;
+        return true;
     };
-    for (std::size_t plate = 0; plate < plateCount; ++plate) {
-        std::vector<bool> visited(liveMovables.size());
-        if (!assign(assign, plate, visited)) {
-            return true;
-        }
+    if (!hasCompleteMatching(nullptr)) {
+        return DeadPositionReason::StaticMatching;
     }
-    return false;
+    const std::vector<bool> frozen =
+        frozenInTwoByTwoBlocks(liveMovables);
+    if (std::ranges::any_of(frozen, [](bool value) { return value; }) &&
+        !hasCompleteMatching(&frozen)) {
+        return DeadPositionReason::FrozenCluster;
+    }
+    return DeadPositionReason::None;
 }
 
 } // namespace sokoban::solver::detail

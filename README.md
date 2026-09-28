@@ -593,8 +593,9 @@ evictions, precomputed-versus-driven successors, local successor duplicates,
 and peak frontier size. Solved screens also report their significant
 state-changing move count.
 `--progress-interval N` prints the same counters, including dead-position
-checks and prunes, after approximately every N generated positions. Use a
-Release build; the search is slow in Debug.
+checks and prunes broken down by unit count, static matching, and frozen
+clusters, after approximately every N generated positions. Use a Release
+build; the search is slow in Debug.
 
 The search itself is the reusable `engine/solver/Solver.hpp` API. It reports
 solved, exhausted, state-limit and cancelled outcomes separately, accepts an
@@ -622,8 +623,11 @@ Pressure-plate feasibility rejects states with too few
 surviving movable units on every level. Classic flat push-only screens also
 precompute reverse-push reachability for each plate, rejecting both rocks on
 cells that cannot reach any plate and sets of rocks that cannot be assigned to
-distinct plates. Mechanics that can invalidate that proof disable the static
-portion automatically.
+distinct plates. Rogue-only screens additionally reject permanently sealed 2x2
+groups of rocks and static blockers, while preserving groups whose frozen rocks
+already cover the required plates. Knights are excluded because chain pushes
+can break that pattern. Mechanics that can invalidate either proof disable its
+static portion automatically.
 
 ### Improving the solver (future work)
 
@@ -631,9 +635,10 @@ The feature-aware best-first solver solves level 3 screen 2, which the earlier
 Manhattan-guided search could not solve after 5 million positions. Further
 ideas, roughly in order of payoff:
 
-- **More deadlock patterns.** Unit-count feasibility, static dead cells, and
-  complete rock-to-plate reachability matching for flat push-only screens are
-  implemented. Next are multi-rock freezes, wall groups, and feature-aware
+- **More deadlock patterns.** Unit-count feasibility, static dead cells,
+  complete rock-to-plate reachability matching, and sealed 2x2 rock/blocker
+  freezes are implemented for the feature sets where each proof is sound. Next
+  are recursive multi-rock freezes, larger wall groups, and feature-aware
   proofs for water, mirrors, ice, and character abilities.
 - **Extend the relaxed estimate.** Distinct unit-to-plate assignment over
   push, bridgeable-water, and mirror edges is implemented. Next, assign heroes

@@ -60,6 +60,29 @@ const Level::Definition assignmentDeadlockDefinition {
     },
 };
 
+const Level::Definition frozenClusterDefinition {
+    .layers = {
+        {
+            ".........",
+            ".........",
+            ".........",
+            ".........",
+            ".........",
+            ".........",
+            ".........",
+        },
+        {
+            "#########",
+            "#Q      #",
+            "#  RR   #",
+            "#  RR   #",
+            "#    PP #",
+            "# E  PP #",
+            "#########",
+        },
+    },
+};
+
 const Level::Definition cyclicDefinition {
     .layers = {
         {
@@ -211,6 +234,42 @@ void testDeadPositionAnalysisIsConservativeAndFeatureAware()
     CHECK(!solver::detail::DeadPositionIndex(
         Level::loadFromDefinition(drop, "drop dead-position test"))
         .staticAnalysisEnabled());
+
+    const Level frozenLevel = Level::loadFromDefinition(
+        frozenClusterDefinition, "frozen-cluster dead-position test");
+    const solver::detail::DeadPositionIndex frozenDeadPositions(
+        frozenLevel);
+    const GameState frozenState = rules::initialState(frozenLevel);
+    CHECK(frozenDeadPositions.multiRockFreezeAnalysisEnabled());
+    for (const GameState::Movable& movable : frozenState.movables) {
+        CHECK(!frozenDeadPositions.isDeadCell(movable.cell));
+    }
+    CHECK(frozenDeadPositions.rejectionReason(frozenState) ==
+        solver::detail::DeadPositionReason::FrozenCluster);
+
+    // A sealed group is harmless when each immovable rock already occupies a
+    // distinct plate.
+    GameState covered = frozenState;
+    CHECK(covered.movables.size() == frozenLevel.pressurePlates().size());
+    for (std::size_t i = 0; i < covered.movables.size(); ++i) {
+        covered.movables[i].cell = frozenLevel.pressurePlates()[i];
+    }
+    CHECK(frozenDeadPositions.rejectionReason(covered) ==
+        solver::detail::DeadPositionReason::None);
+
+    // Knights can move a row or column of rocks as a chain, invalidating the
+    // no-first-move proof used for Rogue-only 2x2 clusters.
+    Level::Definition knightCluster = frozenClusterDefinition;
+    knightCluster.layers[1][1][1] = 'K';
+    const Level knightClusterLevel = Level::loadFromDefinition(
+        knightCluster, "knight frozen-cluster gate test");
+    const solver::detail::DeadPositionIndex knightDeadPositions(
+        knightClusterLevel);
+    CHECK(knightDeadPositions.staticAnalysisEnabled());
+    CHECK(!knightDeadPositions.multiRockFreezeAnalysisEnabled());
+    CHECK(knightDeadPositions.rejectionReason(
+            rules::initialState(knightClusterLevel)) ==
+        solver::detail::DeadPositionReason::None);
 }
 
 void testPackedStateKeyIncludesEveryDynamicField()
@@ -528,6 +587,22 @@ void testDeadPositionsArePrunedBeforeCanonicalization()
     CHECK(result.statistics.staticDeadCells > 0);
     CHECK(result.statistics.deadPositionChecks > 0);
     CHECK(result.statistics.deadPositionPrunes > 0);
+    CHECK(result.statistics.deadPositionUnitCountPrunes +
+            result.statistics.deadPositionStaticMatchingPrunes +
+            result.statistics.deadPositionFrozenClusterPrunes ==
+        result.statistics.deadPositionPrunes);
+
+    const Level frozenLevel = Level::loadFromDefinition(
+        frozenClusterDefinition, "frozen-cluster solver test");
+    const solver::Result frozen = solver::solve(frozenLevel, {
+        .maxStates = 10'000,
+    });
+    CHECK(frozen.status == solver::Status::Exhausted);
+    CHECK(frozen.statistics.generatedStates == 1);
+    CHECK(frozen.statistics.expandedPositions == 0);
+    CHECK(frozen.statistics.multiRockFreezeAnalysisEnabled);
+    CHECK(frozen.statistics.deadPositionPrunes == 1);
+    CHECK(frozen.statistics.deadPositionFrozenClusterPrunes == 1);
 }
 
 void testProgressCanCancelSearch()
