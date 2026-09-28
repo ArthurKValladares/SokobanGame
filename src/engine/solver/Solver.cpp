@@ -4,12 +4,13 @@
 #include "engine/GameplayConfig.hpp"
 #include "engine/Rules.hpp"
 #include "engine/solver/DeadPosition.hpp"
+#include "engine/solver/Heuristic.hpp"
 #include "engine/solver/StateKey.hpp"
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <queue>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 
@@ -35,63 +36,11 @@ struct Node {
     std::size_t parent = 0;
     // Inputs from the parent's state to this one: a walk, then the move.
     std::vector<Input> inputs;
-    // Inputs from the start to here.
-    std::size_t depth = 0;
+    // Search cost counts state-changing macro actions. The raw input count is
+    // only a tie-breaker; otherwise a long harmless walk can outweigh a push.
+    std::size_t significantDepth = 0;
+    std::size_t inputDepth = 0;
 };
-
-int distance(GridPosition3 a, GridPosition3 b)
-{
-    return std::abs(a.x - b.x) + std::abs(a.y - b.y) +
-        std::abs(a.z - b.z);
-}
-
-// Estimated remaining work for best-first search: every uncovered pressure
-// plate wants the nearest free movable, then every End wants a hero. Not
-// admissible - it is for finding a solution in a large room, not the
-// shortest one.
-int estimate(
-    const Level& level,
-    const std::vector<GridPosition3>& ends,
-    const GameState& state)
-{
-    int cost = 0;
-    const auto onPlate = [&](GridPosition3 cell) {
-        return std::ranges::find(level.pressurePlates(), cell) !=
-            level.pressurePlates().end();
-    };
-    for (const GridPosition3 plate : level.pressurePlates()) {
-        if (rules::movableAt(state, plate) != nullptr) {
-            continue;
-        }
-        int nearest = 64;
-        for (const GameState::Movable& movable : state.movables) {
-            if (!movable.fallen && !movable.dead && !onPlate(movable.cell)) {
-                nearest = std::min(nearest, distance(movable.cell, plate));
-            }
-        }
-        cost += 8 + nearest;
-    }
-    if (cost == 0) {
-        // Every End needs its own hero. Missing heroes must come from
-        // mirrors, which is expensive.
-        int living = 0;
-        for (const GameState::Player& player : state.players) {
-            living += player.dead ? 0 : 1;
-        }
-        const int missing = static_cast<int>(ends.size()) - living;
-        cost += 8 * std::max(missing, 0);
-        for (const GridPosition3 end : ends) {
-            int nearest = 64;
-            for (const GameState::Player& player : state.players) {
-                if (!player.dead) {
-                    nearest = std::min(nearest, distance(player.cell, end));
-                }
-            }
-            cost += nearest;
-        }
-    }
-    return cost;
-}
 
 std::size_t livingControllers(const GameState& state)
 {
@@ -178,7 +127,82 @@ std::optional<DirectionTransition> applyDirection(
     };
 }
 
-PackedStateKey canonicalWalkingKey(
+struct CanonicalWalkingRegion {
+    PackedStateKey canonical;
+    std::unordered_set<PackedStateKey, PackedStateKeyHash> members;
+};
+
+class WalkingRegionCache {
+public:
+    explicit WalkingRegionCache(std::size_t maxStates)
+        : capacity_(maxStates)
+    {
+    }
+
+    [[nodiscard]] bool contains(const PackedStateKey& key) const
+    {
+        return states_.contains(key);
+    }
+
+    void insert(
+        std::unordered_set<PackedStateKey, PackedStateKeyHash>& members,
+        Statistics& statistics)
+    {
+        if (capacity_ == 0) {
+            return;
+        }
+        if (members.size() > capacity_) {
+            if (!states_.empty()) {
+                rotate(statistics, capacity_);
+            }
+            while (states_.size() < capacity_) {
+                states_.insert(members.extract(members.begin()));
+            }
+            updateStatistics(statistics);
+            return;
+        }
+        if (states_.size() > capacity_ - members.size()) {
+            rotate(statistics, members.size());
+        }
+        // Walking regions retained by different canonical positions are
+        // normally disjoint. Node-wise merge preserves that fast path and
+        // leaves any unexpected overlaps behind for destruction.
+        states_.merge(members);
+        updateStatistics(statistics);
+    }
+
+private:
+    using StateSet =
+        std::unordered_set<PackedStateKey, PackedStateKeyHash>;
+
+    void rotate(Statistics& statistics, std::size_t incoming)
+    {
+        const std::size_t retained = std::min(
+            capacity_ / 2, capacity_ - incoming);
+        const std::size_t before = states_.size();
+        while (states_.size() > retained) {
+            states_.erase(states_.begin());
+        }
+        statistics.canonicalizationCacheEvictions +=
+            before - states_.size();
+        ++statistics.canonicalizationCacheRotations;
+        updateStatistics(statistics);
+    }
+
+    void updateStatistics(Statistics& statistics) const
+    {
+        statistics.canonicalizationCachedStates =
+            states_.size();
+        statistics.peakCanonicalizationCachedStates = std::max(
+            statistics.peakCanonicalizationCachedStates,
+            statistics.canonicalizationCachedStates);
+    }
+
+    std::size_t capacity_ = 0;
+    StateSet states_;
+};
+
+CanonicalWalkingRegion canonicalWalkingRegion(
     const Level& level,
     const GameState& state,
     EntityId controller,
@@ -217,7 +241,10 @@ PackedStateKey canonicalWalkingKey(
     }
     statistics.peakCanonicalWalkRegion = std::max(
         statistics.peakCanonicalWalkRegion, walks.size());
-    return canonical;
+    return {
+        .canonical = std::move(canonical),
+        .members = std::move(seen),
+    };
 }
 
 struct WalkState {
@@ -264,46 +291,52 @@ Result solve(const Level& level, const Options& options)
             return result;
         }
     }
+    const detail::RelaxedHeuristic heuristic(level);
+    result.statistics.heuristicGraphCells =
+        heuristic.traversableCellCount();
+    result.statistics.heuristicGraphEdges = heuristic.edgeCount();
+    result.statistics.heuristicMirrorEdges = heuristic.mirrorEdgeCount();
 
     std::vector<Node> nodes;
     nodes.push_back({
         .state = driver.state(),
         .controller = driver.activeHeroController(),
     });
-    const std::vector<GridPosition3>& ends = level.ends();
     // Breadth-first by default (fewest significant moves). Best-first orders
-    // by depth plus a weighted estimate instead.
-    using Entry = std::pair<std::size_t, std::size_t>;
+    // by significant actions plus a weighted estimate. Raw input count only
+    // breaks ties, so walking distance cannot bury a strategically useful
+    // push or mirror activation.
+    using Entry = std::tuple<std::size_t, std::size_t, std::size_t>;
     std::priority_queue<Entry, std::vector<Entry>, std::greater<>> frontier;
-    const auto priority = [&](std::size_t index) -> std::size_t {
-        if (options.strategy != Strategy::BestFirst) {
-            return index;
+    const auto priority = [&](std::size_t index) -> Entry {
+        std::size_t score = nodes[index].significantDepth;
+        if (options.strategy == Strategy::BestFirst) {
+            const int remaining = heuristic.estimate(nodes[index].state);
+            ++result.statistics.heuristicEvaluations;
+            if (!result.statistics.bestHeuristic ||
+                remaining < *result.statistics.bestHeuristic) {
+                result.statistics.bestHeuristic = remaining;
+            }
+            score += 3 * static_cast<std::size_t>(remaining);
         }
-        const int remaining = estimate(level, ends, nodes[index].state);
-        ++result.statistics.heuristicEvaluations;
-        if (!result.statistics.bestHeuristic ||
-            remaining < *result.statistics.bestHeuristic) {
-            result.statistics.bestHeuristic = remaining;
-        }
-        return nodes[index].depth +
-            3 * static_cast<std::size_t>(remaining);
+        return { score, nodes[index].inputDepth, index };
     };
-    frontier.emplace(priority(0), 0);
+    frontier.push(priority(0));
     result.statistics.peakFrontier = 1;
 
-    // Keep an inexpensive exact-state filter in front of walk-region
-    // canonicalization. The canonical set then prevents equivalent walking
-    // variants from ever consuming frontier or retained-node capacity.
-    std::unordered_set<PackedStateKey, PackedStateKeyHash> rawQueued;
+    // The bounded membership cache handles the common duplicate path without
+    // retaining every raw successor forever. The canonical set is the
+    // lossless, unbounded identity of positions that consume frontier space.
     std::unordered_set<PackedStateKey, PackedStateKeyHash> canonicalQueued;
-    rawQueued.emplace(detail::makePackedStateKey(
-        nodes[0].state, nodes[0].controller));
-    canonicalQueued.emplace(canonicalWalkingKey(
+    WalkingRegionCache walkingRegionCache(options.maxCachedWalkingStates);
+    CanonicalWalkingRegion initialRegion = canonicalWalkingRegion(
         level,
         nodes[0].state,
         nodes[0].controller,
         driver,
-        result.statistics));
+        result.statistics);
+    canonicalQueued.emplace(std::move(initialRegion.canonical));
+    walkingRegionCache.insert(initialRegion.members, result.statistics);
 
     const auto finish = [&](std::size_t index) {
         std::vector<Input> inputs;
@@ -312,6 +345,8 @@ Result solve(const Level& level, const Options& options)
                 inputs.begin(), nodes[at].inputs.begin(), nodes[at].inputs.end());
         }
         result.inputs = std::move(inputs);
+        result.statistics.solutionSignificantMoves =
+            nodes[index].significantDepth;
         result.status = Status::Solved;
     };
 
@@ -331,7 +366,7 @@ Result solve(const Level& level, const Options& options)
     };
 
     while (!frontier.empty()) {
-        const std::size_t index = frontier.top().second;
+        const std::size_t index = std::get<2>(frontier.top());
         frontier.pop();
         ++result.statistics.frontierPops;
         if (nodes.size() >= options.maxStates) {
@@ -424,18 +459,25 @@ Result solve(const Level& level, const Options& options)
                 driver.activeHeroController();
             PackedStateKey rawKey = detail::makePackedStateKey(
                 successorState, successorController);
-            if (!rawQueued.emplace(rawKey).second) {
-                ++result.statistics.queuedDuplicates;
+            // Cache members are added only after their canonical position is
+            // retained. Expanding that position will visit this exact walking
+            // state, so the successor cannot expose a new significant move.
+            if (!successorSolved && walkingRegionCache.contains(rawKey)) {
+                ++result.statistics.canonicalizationCacheHits;
+                ++result.statistics.canonicalDuplicates;
                 continue;
             }
-            PackedStateKey canonicalKey = successorSolved
-                ? rawKey
-                : canonicalWalkingKey(
+            std::optional<CanonicalWalkingRegion> region;
+            PackedStateKey canonicalKey = rawKey;
+            if (!successorSolved) {
+                region = canonicalWalkingRegion(
                     level,
                     successorState,
                     successorController,
                     driver,
                     result.statistics);
+                canonicalKey = region->canonical;
+            }
             if (!canonicalQueued.emplace(std::move(canonicalKey)).second) {
                 ++result.statistics.canonicalDuplicates;
                 continue;
@@ -447,18 +489,24 @@ Result solve(const Level& level, const Options& options)
                 result.status = Status::StateLimitReached;
                 return result;
             }
+            if (region) {
+                walkingRegionCache.insert(
+                    region->members, result.statistics);
+            }
             std::vector<Input> inputs = walkPath(walks, walk);
             inputs.push_back(input);
-            const std::size_t depth = nodes[index].depth + inputs.size();
+            const std::size_t inputDepth =
+                nodes[index].inputDepth + inputs.size();
             nodes.push_back({
                 .state = successorState,
                 .controller = successorController,
                 .parent = index,
                 .inputs = std::move(inputs),
-                .depth = depth,
+                .significantDepth = nodes[index].significantDepth + 1,
+                .inputDepth = inputDepth,
             });
             ++result.statistics.generatedStates;
-            frontier.emplace(priority(nodes.size() - 1), nodes.size() - 1);
+            frontier.push(priority(nodes.size() - 1));
             result.statistics.peakFrontier = std::max(
                 result.statistics.peakFrontier, frontier.size());
             if (successorSolved) {

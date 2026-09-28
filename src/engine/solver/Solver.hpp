@@ -33,14 +33,19 @@ struct Statistics {
     std::size_t frontierPops = 0;
     // Unique canonical positions whose significant successors were searched.
     std::size_t expandedPositions = 0;
-    // Raw successor states rejected because they had already been observed.
-    std::size_t queuedDuplicates = 0;
-    // Successors rejected before enqueueing because their walking regions
-    // canonicalized to a position already retained by the search.
+    // Successors rejected before enqueueing because their walking regions are
+    // known or canonicalized to a position already retained by the search.
     std::size_t canonicalDuplicates = 0;
     // Cost of canonicalizing successors before they consume frontier space.
     std::size_t canonicalizationFloods = 0;
     std::size_t canonicalizationWalkStates = 0;
+    // Raw walking states retained as membership witnesses for already queued
+    // canonical positions. A cache hit avoids another complete walking flood.
+    std::size_t canonicalizationCacheHits = 0;
+    std::size_t canonicalizationCachedStates = 0;
+    std::size_t peakCanonicalizationCachedStates = 0;
+    std::size_t canonicalizationCacheEvictions = 0;
+    std::size_t canonicalizationCacheRotations = 0;
     // Conservative pressure-plate feasibility pruning. Unit-count checks
     // apply everywhere; static dead cells are feature-gated to ordinary push
     // mechanics.
@@ -65,6 +70,13 @@ struct Statistics {
     std::size_t peakCanonicalWalkRegion = 0;
     std::size_t heuristicEvaluations = 0;
     std::optional<int> bestHeuristic;
+    std::size_t heuristicGraphCells = 0;
+    std::size_t heuristicGraphEdges = 0;
+    std::size_t heuristicMirrorEdges = 0;
+    // Significant state-changing actions in the returned solution. Ordinary
+    // walking inputs are retained in Result::inputs but do not inflate this
+    // cost or best-first search depth.
+    std::optional<std::size_t> solutionSignificantMoves;
 
     bool operator==(const Statistics&) const = default;
 };
@@ -81,6 +93,9 @@ using ProgressCallback = std::function<bool(const Progress&)>;
 
 struct Options {
     std::size_t maxStates = 2'000'000;
+    // Exact walking-state membership keys retained across canonicalization
+    // floods. The rolling cache never exceeds this count; zero disables it.
+    std::size_t maxCachedWalkingStates = 1'000'000;
     Strategy strategy = Strategy::BreadthFirst;
     std::size_t progressInterval = 0;
     ProgressCallback progress;

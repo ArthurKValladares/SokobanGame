@@ -219,8 +219,19 @@ and the required real-device checks are recorded.
   walking-region work, early-canonicalization work and frontier peaks. State
   identity is the packed, lossless key in `engine/solver/StateKey.*`; when a
   `GameState` field is added, update its key and the field-by-field solver test.
-  Exact states are filtered first, then walking regions are canonicalized
-  before enqueueing. `engine/solver/DeadPosition.*` always applies the safe
+  Walking members of every retained canonical position enter the bounded exact
+  membership cache, allowing later equivalent successors to skip their
+  canonicalization flood; only members reachable from a retained position may
+  enter it. Cache eviction may add work but must never reject a new position.
+  Do not add another unbounded raw-successor set: the retained canonical set is
+  the lossless fallback and grows only to `Options::maxStates`. Search depth
+  counts significant actions, with raw input length used only as a priority
+  tie-breaker. `engine/solver/Heuristic.*` precomputes an optimistic graph:
+  ordinary empty-board pushes, water treated as potentially bridged, and
+  independent static mirror reflection. It uses a distinct unit-to-plate
+  assignment and affects ordering only, never correctness. Keep new mechanics
+  optimistic unless their exact relaxed transition is modeled.
+  `engine/solver/DeadPosition.*` always applies the safe
   movable-unit/plate cardinality proof. Its per-plate reverse-push tables also
   require a complete rock-to-plate matching, but that stronger proof is
   deliberately feature-gated: do not enable it for a new mechanic until that

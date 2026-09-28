@@ -575,17 +575,22 @@ comes back if the edit is undone. Smoke and evidence runs never write here.
 build preset builds it:
 
 ```powershell
-.\out\release\tools\Release\sokoban_solve_level.exe levels solutions --level 3 --screen 2 --best-first --progress-interval 100000
+.\out\release\tools\Release\sokoban_solve_level.exe levels solutions --level 3 --screen 2 --best-first --max-walking-cache 1000000 --progress-interval 100000
 ```
 
 Without `--level` it tries every screen that has no current recording. It
 skips screens whose recording still matches unless given `--overwrite`, and
 stops a screen after `--max-states` (default 2,000,000) generated positions.
+The exact walking-membership cache is limited by `--max-walking-cache`
+(default 1,000,000 keys); zero disables it, while a larger value trades memory
+for fewer repeated canonicalization floods.
 The default breadth-first search minimizes significant state-changing moves,
 not necessarily recorded inputs; `--best-first` is usually much faster on
 large screens but the result may be longer. Final output distinguishes
 generated and expanded positions, duplicate states, early-canonicalization
-floods/walk states, and peak frontier size.
+floods/walk states, walking-component cache hits/current and peak size,
+evictions, and peak frontier size. Solved screens also report their significant
+state-changing move count.
 `--progress-interval N` prints the same counters, including dead-position
 checks and prunes, after approximately every N generated positions. Use a
 Release build; the search is slow in Debug.
@@ -595,11 +600,21 @@ solved, exhausted, state-limit and cancelled outcomes separately, accepts an
 optional progress/cancellation callback, and exposes deterministic work
 counters suitable for regression benchmarks and future difficulty grading.
 Search identity is a packed, lossless key over every dynamic gameplay field.
-An exact-state filter avoids unnecessary work, then each new successor's
-walking region is canonicalized before it can consume retained-node or
-frontier capacity. Ordinary settled steps use the production action planner
-directly; automatic ice, conveyor and turret consequences fall back to the
-full replay driver. Pressure-plate feasibility rejects states with too few
+Every walking state discovered while canonicalizing a retained position enters
+a bounded exact-membership cache, so later walking-equivalent successors can be
+rejected without repeating the flood. When full, the cache discards half its
+entries; a miss can only cause extra work because the retained-position
+canonical set remains lossless and is itself bounded by `maxStates`. There is
+no separate unbounded raw-successor table. New components are canonicalized
+before they can consume retained-node or frontier capacity.
+Best-first depth counts significant actions while raw input length only breaks
+ties, preventing a long harmless walk from outweighing a useful push. Its
+precomputed relaxed graph models push geometry, potentially bridged water, and
+mirror reflection, then finds a minimum-cost distinct assignment of live
+movable units to plates. Ordinary settled steps use the production action
+planner directly; automatic ice, conveyor and turret consequences fall back to
+the full replay driver.
+Pressure-plate feasibility rejects states with too few
 surviving movable units on every level. Classic flat push-only screens also
 precompute reverse-push reachability for each plate, rejecting both rocks on
 cells that cannot reach any plate and sets of rocks that cannot be assigned to
@@ -608,25 +623,26 @@ portion automatically.
 
 ### Improving the solver (future work)
 
-The solver is simple on purpose and gives up on larger screens: level 3
-screen 2 was not solved after 5 million positions, although it is
-solvable by hand. Ideas, roughly in order of payoff:
+The feature-aware best-first solver solves level 3 screen 2, which the earlier
+Manhattan-guided search could not solve after 5 million positions. Further
+ideas, roughly in order of payoff:
 
 - **More deadlock patterns.** Unit-count feasibility, static dead cells, and
   complete rock-to-plate reachability matching for flat push-only screens are
   implemented. Next are multi-rock freezes, wall groups, and feature-aware
   proofs for water, mirrors, ice, and character abilities.
-- **A better estimate.** Match rocks to plates (minimum-cost assignment
-  instead of each plate's nearest rock), count the heroes still missing for
-  the Ends, and account for water that must be bridged before an island's
-  plates or Ends can be reached.
+- **Extend the relaxed estimate.** Distinct unit-to-plate assignment over
+  push, bridgeable-water, and mirror edges is implemented. Next, assign heroes
+  to Ends through their reachable walking components and price the rocks that
+  must actually be sacrificed to bridge water, plus ice and conveyor motion.
 - **Mirror-aware moves.** Treat "walk to a spot and interact with a mirror"
   as one move and skip mirror activations that change nothing, so hero
   copies do not multiply the search.
-- **More symmetry reduction.** Packed binary keys and walking-region
-  canonicalization are implemented. Sorting truly interchangeable rocks (and
-  proving which other entities are interchangeable) would merge more
-  equivalent positions without sacrificing mechanic-specific identity.
+- **More symmetry reduction.** Packed binary keys, walking-region
+  canonicalization, and cached walking-component membership are implemented.
+  Sorting truly interchangeable rocks (and proving which other entities are
+  interchangeable) would merge more equivalent positions without sacrificing
+  mechanic-specific identity.
 - **Iterative deepening (IDA\*)** so memory stops being the limit, and
   running independent branches on several threads.
 - **Seeding from a human solve.** Start from a recorded solution and

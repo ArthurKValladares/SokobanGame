@@ -2,7 +2,8 @@
 // writes them as recorded solutions.
 //
 //   sokoban_solve_level <levels-root> <solutions-dir> [--level L [--screen S]]
-//                       [--max-states N] [--best-first]
+//                       [--max-states N] [--max-walking-cache N]
+//                       [--best-first]
 //                       [--progress-interval N] [--overwrite]
 //
 // The solver applies inputs through solution::Driver, exactly as replay does,
@@ -58,7 +59,7 @@ std::map<std::uint64_t, std::filesystem::path> existingSolutions(
 
 std::size_t duplicateCount(const solver::Statistics& statistics)
 {
-    return statistics.queuedDuplicates + statistics.canonicalDuplicates;
+    return statistics.canonicalDuplicates;
 }
 
 void appendStatistics(
@@ -69,10 +70,21 @@ void appendStatistics(
     stream << statistics.generatedStates << " generated, "
            << statistics.expandedPositions << " expanded, "
            << duplicateCount(statistics) << " duplicate ("
-           << statistics.queuedDuplicates << " exact, "
-           << statistics.canonicalDuplicates << " canonical), "
+           << statistics.canonicalizationCacheHits << " cache, "
+           << statistics.canonicalDuplicates -
+                  statistics.canonicalizationCacheHits
+           << " after flood), "
            << statistics.canonicalizationFloods << " canonical floods/"
-           << statistics.canonicalizationWalkStates << " walk states";
+           << statistics.canonicalizationWalkStates << " walk states, "
+           << statistics.canonicalizationCachedStates << "/"
+           << statistics.peakCanonicalizationCachedStates
+           << " cached now/peak";
+    if (statistics.canonicalizationCacheRotations != 0) {
+        stream << ", " << statistics.canonicalizationCacheEvictions
+               << " cache evictions/"
+               << statistics.canonicalizationCacheRotations
+               << " rotations";
+    }
     if (statistics.deadPositionChecks != 0) {
         stream << ", " << statistics.deadPositionPrunes
                << " dead-position prunes/"
@@ -85,6 +97,13 @@ void appendStatistics(
     stream << ", peak frontier " << statistics.peakFrontier;
     if (statistics.bestHeuristic) {
         stream << ", best estimate " << *statistics.bestHeuristic;
+        stream << " (" << statistics.heuristicGraphCells << " cells/"
+               << statistics.heuristicGraphEdges << " edges/"
+               << statistics.heuristicMirrorEdges << " mirror)";
+    }
+    if (statistics.solutionSignificantMoves) {
+        stream << ", " << *statistics.solutionSignificantMoves
+               << " significant moves";
     }
     stream << ", " << seconds << " s";
 }
@@ -96,7 +115,8 @@ int main(int argc, char** argv)
     if (argc < 3) {
         std::cerr << "usage: sokoban_solve_level <levels-root> "
                      "<solutions-dir> [--level L [--screen S]] "
-                     "[--max-states N] [--best-first] "
+                     "[--max-states N] [--max-walking-cache N] "
+                     "[--best-first] "
                      "[--progress-interval N] [--overwrite]\n";
         return 2;
     }
@@ -105,6 +125,8 @@ int main(int argc, char** argv)
     std::optional<int> onlyLevel;
     std::optional<int> onlyScreen;
     std::size_t maxStates = 2'000'000;
+    std::size_t maxCachedWalkingStates =
+        solver::Options {}.maxCachedWalkingStates;
     std::size_t progressInterval = 0;
     bool overwrite = false;
     solver::Strategy strategy = solver::Strategy::BreadthFirst;
@@ -124,6 +146,9 @@ int main(int argc, char** argv)
                 onlyScreen = std::stoi(value());
             } else if (argument == "--max-states") {
                 maxStates = static_cast<std::size_t>(std::stoull(value()));
+            } else if (argument == "--max-walking-cache") {
+                maxCachedWalkingStates =
+                    static_cast<std::size_t>(std::stoull(value()));
             } else if (argument == "--progress-interval") {
                 progressInterval =
                     static_cast<std::size_t>(std::stoull(value()));
@@ -177,6 +202,7 @@ int main(int argc, char** argv)
             const auto started = std::chrono::steady_clock::now();
             solver::Options options {
                 .maxStates = maxStates,
+                .maxCachedWalkingStates = maxCachedWalkingStates,
                 .strategy = strategy,
                 .progressInterval = progressInterval,
             };

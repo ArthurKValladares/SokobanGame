@@ -3,6 +3,7 @@
 #include "engine/Level.hpp"
 #include "engine/Solution.hpp"
 #include "engine/solver/DeadPosition.hpp"
+#include "engine/solver/Heuristic.hpp"
 #include "engine/solver/Solver.hpp"
 #include "engine/solver/StateKey.hpp"
 
@@ -58,6 +59,90 @@ const Level::Definition assignmentDeadlockDefinition {
         },
     },
 };
+
+const Level::Definition cyclicDefinition {
+    .layers = {
+        {
+            ".....",
+            ".....",
+            ".....",
+            ".....",
+            ".....",
+        },
+        {
+            "#####",
+            "#C  #",
+            "# R #",
+            "#   #",
+            "#####",
+        },
+    },
+};
+
+const Level::Definition mirrorHeuristicDefinition {
+    .layers = {
+        {
+            ".......",
+            ".......",
+            ".......",
+            ".......",
+            ".......",
+            ".......",
+            ".......",
+        },
+        {
+            "#######",
+            "#  P  #",
+            "#     #",
+            "#R 1  #",
+            "#     #",
+            "#C  E #",
+            "#######",
+        },
+    },
+};
+
+const Level::Definition assignmentHeuristicDefinition {
+    .layers = {
+        {
+            ".........",
+            ".........",
+            ".........",
+            ".........",
+            ".........",
+        },
+        {
+            "#########",
+            "#PRP  R #",
+            "#       #",
+            "#C    E #",
+            "#########",
+        },
+    },
+};
+
+void testRelaxedHeuristicUsesMirrorTransport()
+{
+    TEST("relaxedHeuristicUsesMirrorTransport");
+    const Level level = Level::loadFromDefinition(
+        mirrorHeuristicDefinition, "mirror heuristic test");
+    const solver::detail::RelaxedHeuristic heuristic(level);
+
+    CHECK(heuristic.traversableCellCount() > 0);
+    CHECK(heuristic.edgeCount() > 0);
+    CHECK(heuristic.mirrorEdgeCount() > 0);
+    // The rock and plate are four Manhattan cells apart, but one mirror
+    // activation moves the rock directly onto the plate.
+    CHECK(heuristic.estimate(rules::initialState(level)) == 9);
+
+    const Level assignmentLevel = Level::loadFromDefinition(
+        assignmentHeuristicDefinition, "assignment heuristic test");
+    const solver::detail::RelaxedHeuristic assignment(assignmentLevel);
+    // The left rock is one push from either plate. A nearest-unit sum would
+    // use it twice and return two; distinct assignment correctly reserves the
+    // right rock for the second plate, for four pushes plus two goal bonuses.
+    CHECK(assignment.estimate(rules::initialState(assignmentLevel)) == 20);
+}
 
 void testDeadPositionAnalysisIsConservativeAndFeatureAware()
 {
@@ -284,7 +369,11 @@ void testSearchResultReplays()
     CHECK(result.statistics.peakWalkRegion > 0);
     CHECK(result.statistics.canonicalizationFloods > 0);
     CHECK(result.statistics.canonicalizationWalkStates > 0);
+    CHECK(result.statistics.canonicalizationCachedStates > 0);
     CHECK(result.statistics.peakCanonicalWalkRegion > 0);
+    CHECK(result.statistics.solutionSignificantMoves.has_value());
+    CHECK(result.statistics.solutionSignificantMoves.value_or(
+        result.inputs.size()) < result.inputs.size());
 }
 
 void testExhaustionIsDistinctFromStateLimit()
@@ -341,29 +430,13 @@ void testBestFirstReportsHeuristicWork()
     CHECK(result.solved());
     CHECK(result.statistics.heuristicEvaluations > 0);
     CHECK(result.statistics.bestHeuristic.has_value());
+    CHECK(result.statistics.heuristicGraphCells > 0);
+    CHECK(result.statistics.heuristicGraphEdges > 0);
 }
 
 void testWalkingVariantsAreCanonicalizedBeforeEnqueue()
 {
     TEST("walkingVariantsAreCanonicalizedBeforeEnqueue");
-    const Level::Definition cyclicDefinition {
-        .layers = {
-            {
-                ".....",
-                ".....",
-                ".....",
-                ".....",
-                ".....",
-            },
-            {
-                "#####",
-                "#C  #",
-                "# R #",
-                "#   #",
-                "#####",
-            },
-        },
-    };
     const Level level =
         Level::loadFromDefinition(cyclicDefinition, "cyclic solver test");
     const solver::Result result = solver::solve(level, {
@@ -375,8 +448,43 @@ void testWalkingVariantsAreCanonicalizedBeforeEnqueue()
     CHECK(result.statistics.expandedPositions ==
         result.statistics.frontierPops);
     CHECK(result.statistics.canonicalDuplicates > 0);
-    CHECK(result.statistics.canonicalizationFloods >=
+    CHECK(result.statistics.canonicalizationCacheHits > 0);
+    CHECK(result.statistics.canonicalizationCacheHits <=
+        result.statistics.canonicalDuplicates);
+    CHECK(result.statistics.canonicalizationCachedStates >=
         result.statistics.generatedStates);
+    CHECK(result.statistics.peakCanonicalizationCachedStates >=
+        result.statistics.canonicalizationCachedStates);
+    CHECK(result.statistics.canonicalizationFloods ==
+        result.statistics.generatedStates);
+}
+
+void testWalkingCacheIsBoundedAndOptional()
+{
+    TEST("walkingCacheIsBoundedAndOptional");
+    const Level level = Level::loadFromDefinition(
+        cyclicDefinition, "bounded walking cache test");
+    const solver::Result bounded = solver::solve(level, {
+        .maxStates = 10'000,
+        .maxCachedWalkingStates = 8,
+    });
+    CHECK(bounded.status == solver::Status::Exhausted);
+    CHECK(bounded.statistics.peakCanonicalizationCachedStates <= 8);
+    CHECK(bounded.statistics.canonicalizationCacheRotations > 0);
+    CHECK(bounded.statistics.canonicalizationCacheEvictions > 0);
+
+    const solver::Result disabled = solver::solve(level, {
+        .maxStates = 10'000,
+        .maxCachedWalkingStates = 0,
+    });
+    CHECK(disabled.status == solver::Status::Exhausted);
+    CHECK(disabled.statistics.generatedStates ==
+        bounded.statistics.generatedStates);
+    CHECK(disabled.statistics.expandedPositions ==
+        bounded.statistics.expandedPositions);
+    CHECK(disabled.statistics.canonicalizationCacheHits == 0);
+    CHECK(disabled.statistics.canonicalizationCachedStates == 0);
+    CHECK(disabled.statistics.peakCanonicalizationCachedStates == 0);
 }
 
 void testDeadPositionsArePrunedBeforeCanonicalization()
@@ -435,12 +543,14 @@ void testStatusNamesAreStable()
 int main()
 {
     try {
+        testRelaxedHeuristicUsesMirrorTransport();
         testDeadPositionAnalysisIsConservativeAndFeatureAware();
         testPackedStateKeyIncludesEveryDynamicField();
         testSearchResultReplays();
         testExhaustionIsDistinctFromStateLimit();
         testBestFirstReportsHeuristicWork();
         testWalkingVariantsAreCanonicalizedBeforeEnqueue();
+        testWalkingCacheIsBoundedAndOptional();
         testDeadPositionsArePrunedBeforeCanonicalization();
         testProgressCanCancelSearch();
         testStatusNamesAreStable();
