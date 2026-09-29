@@ -6,10 +6,12 @@ layout(set = 0, binding = 5) uniform sampler2D sceneDepth;
 
 layout(location = 1) in float inFaceCoordU;
 layout(location = 2) in float inFaceCoordV;
+layout(location = 6) in vec3 inWorldPosition;
 layout(location = 7) flat in uint inDrawInstance;
 layout(location = 0) out vec4 outColor;
 
 #include "DrawInstance.glsl"
+#include "SceneFrame.glsl"
 
 #define draw drawInstances.instances[inDrawInstance]
 
@@ -20,6 +22,11 @@ const float shorelineNearDistance = 0.055;
 const float shorelineFarDistance = 0.090;
 const float shorelineFarThickness = 0.010;
 const float tileBorderExteriorFadeDistance = 0.25;
+const int reflectionMaximumStepCount = 24;
+const float reflectionMinimumThickness = 0.08;
+const float reflectionDistanceThicknessScale = 0.018;
+const float reflectionNormalScale = 0.018;
+const float reflectionMaximumSlope = 0.32;
 
 float bayer8x8(ivec2 pixel)
 {
@@ -599,6 +606,186 @@ float cameraDepthFromDeviceDepth(
         max(farDepth - deviceDepth * depthRange, 0.0001);
 }
 
+vec3 waterReflectionNormal(vec2 worldPosition, float rippleField)
+{
+    // Recover the ripple field's world-X/Y gradient from its screen-space
+    // derivatives. This keeps the reflected ray tied to the procedural water
+    // instead of wobbling in screen space when the camera moves.
+    vec2 positionDx = dFdx(worldPosition);
+    vec2 positionDy = dFdy(worldPosition);
+    float fieldDx = dFdx(rippleField);
+    float fieldDy = dFdy(rippleField);
+    float determinant =
+        positionDx.x * positionDy.y - positionDx.y * positionDy.x;
+    vec2 worldGradient = vec2(0.0);
+    if (abs(determinant) > 0.00000001) {
+        worldGradient = vec2(
+            (fieldDx * positionDy.y - positionDx.y * fieldDy) /
+                determinant,
+            (positionDx.x * fieldDy - fieldDx * positionDy.x) /
+                determinant);
+    }
+    vec2 slope = worldGradient * reflectionNormalScale;
+    float slopeLength = length(slope);
+    if (slopeLength > reflectionMaximumSlope) {
+        slope *= reflectionMaximumSlope / slopeLength;
+    }
+    return normalize(vec3(-slope, 1.0));
+}
+
+bool projectReflectionSample(
+    vec3 worldPosition,
+    out vec2 uv,
+    out float deviceDepth)
+{
+    vec4 clip = frame.clipFromWorld * vec4(worldPosition, 1.0);
+    if (clip.w <= 0.0001) {
+        return false;
+    }
+    vec3 ndc = clip.xyz / clip.w;
+    uv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    deviceDepth = ndc.z;
+    return all(greaterThanEqual(uv, vec2(0.001))) &&
+        all(lessThanEqual(uv, vec2(0.999))) &&
+        deviceDepth >= 0.0 && deviceDepth <= 1.0;
+}
+
+bool traceWaterReflection(
+    vec3 surfacePosition,
+    vec3 reflectionDirection,
+    float nearDepth,
+    float farDepth,
+    float maximumDistance,
+    out vec2 hitUv,
+    out float hitConfidence)
+{
+    float clampedMaximumDistance = max(maximumDistance, 0.0);
+    float jitter = bayer8x8(ivec2(gl_FragCoord.xy));
+    float previousDistance = 0.0;
+    float previousSeparation = -farDepth;
+    // The biased surface origin itself is known to be in front of anything
+    // the opaque depth buffer can reflect. Keeping it as the first lower
+    // bound also lets a very close object be refined from the first step.
+    bool hasPreviousSample = true;
+    for (int stepIndex = 0;
+         stepIndex < reflectionMaximumStepCount;
+         ++stepIndex) {
+        float stepFraction = min(
+            (float(stepIndex) + 1.0 + jitter * 0.65) /
+                float(reflectionMaximumStepCount),
+            1.0);
+        float distanceAlongRay = 0.04 +
+            clampedMaximumDistance * pow(stepFraction, 1.65);
+        vec3 samplePosition =
+            surfacePosition + reflectionDirection * distanceAlongRay;
+        vec2 sampleUv;
+        float rayDeviceDepth;
+        if (!projectReflectionSample(
+                samplePosition, sampleUv, rayDeviceDepth)) {
+            break;
+        }
+
+        // Explicit LOD keeps this sample defined inside the varying ray-march
+        // loop. The resolved depth target has one level, but implicit texture
+        // derivatives here would still be undefined by GLSL.
+        float sampledDeviceDepth = textureLod(
+            sceneDepth, sampleUv, 0.0).r;
+        if (sampledDeviceDepth >= 0.9999) {
+            // Treat clear background as the ray remaining in front of the far
+            // plane. If the next step enters an object silhouette, the same
+            // crossing refinement used for continuous geometry can converge
+            // on that edge instead of skipping the reflection entirely.
+            previousDistance = distanceAlongRay;
+            previousSeparation = -farDepth;
+            hasPreviousSample = true;
+            continue;
+        }
+        float rayCameraDepth = cameraDepthFromDeviceDepth(
+            rayDeviceDepth, nearDepth, farDepth);
+        float sampledCameraDepth = cameraDepthFromDeviceDepth(
+            sampledDeviceDepth, nearDepth, farDepth);
+        float separation = rayCameraDepth - sampledCameraDepth;
+        float thickness = reflectionMinimumThickness +
+            distanceAlongRay * reflectionDistanceThicknessScale;
+        if (separation < 0.0) {
+            previousDistance = distanceAlongRay;
+            previousSeparation = separation;
+            hasPreviousSample = true;
+            continue;
+        }
+
+        // A sparse world-space march commonly steps from just in front of a
+        // surface to well behind it. Refine that interval in-place rather
+        // than requiring one of the coarse samples to land inside a very thin
+        // depth window. This is especially important for the elevated camera,
+        // where vertical objects occupy a short distance along a reflected
+        // ray even though they cover many screen pixels.
+        if (separation > thickness && hasPreviousSample &&
+            previousSeparation < 0.0) {
+            float lowerDistance = previousDistance;
+            float upperDistance = distanceAlongRay;
+            for (int refinement = 0; refinement < 5; ++refinement) {
+                float middleDistance =
+                    (lowerDistance + upperDistance) * 0.5;
+                vec3 middlePosition = surfacePosition +
+                    reflectionDirection * middleDistance;
+                vec2 middleUv;
+                float middleRayDeviceDepth;
+                if (!projectReflectionSample(
+                        middlePosition,
+                        middleUv,
+                        middleRayDeviceDepth)) {
+                    lowerDistance = middleDistance;
+                    continue;
+                }
+                float middleSampledDeviceDepth = textureLod(
+                    sceneDepth, middleUv, 0.0).r;
+                if (middleSampledDeviceDepth >= 0.9999) {
+                    lowerDistance = middleDistance;
+                    continue;
+                }
+                float middleSeparation = cameraDepthFromDeviceDepth(
+                        middleRayDeviceDepth, nearDepth, farDepth) -
+                    cameraDepthFromDeviceDepth(
+                        middleSampledDeviceDepth, nearDepth, farDepth);
+                if (middleSeparation >= 0.0) {
+                    upperDistance = middleDistance;
+                    distanceAlongRay = middleDistance;
+                    sampleUv = middleUv;
+                    separation = middleSeparation;
+                } else {
+                    lowerDistance = middleDistance;
+                }
+            }
+            thickness = reflectionMinimumThickness +
+                distanceAlongRay * reflectionDistanceThicknessScale;
+        } else if (separation > thickness) {
+            previousDistance = distanceAlongRay;
+            previousSeparation = separation;
+            hasPreviousSample = true;
+            continue;
+        }
+
+        float edgeDistance = min(
+            min(sampleUv.x, 1.0 - sampleUv.x),
+            min(sampleUv.y, 1.0 - sampleUv.y));
+        float edgeFade = smoothstep(0.0, 0.08, edgeDistance);
+        float distanceFade = 1.0 - smoothstep(
+            clampedMaximumDistance * 0.60,
+            max(clampedMaximumDistance, 0.001),
+            distanceAlongRay);
+        float intersectionFade = 1.0 -
+            smoothstep(0.0, thickness, separation);
+        hitUv = sampleUv;
+        hitConfidence = edgeFade * distanceFade *
+            mix(0.70, 1.0, intersectionFade);
+        return hitConfidence > 0.0;
+    }
+    hitUv = vec2(0.0);
+    hitConfidence = 0.0;
+    return false;
+}
+
 vec2 shorelineWave(
     float distanceToEdge,
     float alongEdge,
@@ -834,6 +1021,11 @@ void main()
         dFdy(diffractionField));
     vec2 diffractionFlow = diffractionGradient /
         max(fwidth(diffractionField), 0.0001);
+    // Evaluate derivatives before any depth-dependent branch. Neighboring
+    // fragments can disagree about opaque coverage at a shoreline, while a
+    // derivative operation must remain in uniform control flow.
+    vec3 reflectionNormal = waterReflectionNormal(
+        worldPosition, diffractionField);
 
     vec2 sceneSize = vec2(textureSize(sceneColor, 0));
     vec2 sceneUv = gl_FragCoord.xy / sceneSize;
@@ -859,9 +1051,7 @@ void main()
         opaqueCameraDepth - waterCameraDepth,
         0.0);
     float geometryPresent = 1.0 - step(0.9999, opaqueDeviceDepth);
-    vec2 cameraPosition = vec2(
-        draw.materialOptions.x,
-        draw.gridColor.w);
+    vec2 cameraPosition = frame.cameraPositionAndNearPlane.xy;
     vec2 causticProjectionOffset =
         (worldPosition - cameraPosition) *
         (distanceBehindWater / max(waterCameraDepth, 0.001)) *
@@ -929,6 +1119,42 @@ void main()
         diffractedScene,
         waterTint,
         clamp(draw.color.a, 0.0, 0.95));
+
+    float reflectionStrength =
+        clamp(draw.materialOptions.x, 0.0, 1.0);
+    float reflectionMaxDistance = max(draw.gridColor.w, 0.0);
+    vec3 viewDirection = normalize(
+        frame.cameraPositionAndNearPlane.xyz - inWorldPosition);
+    vec3 reflectionDirection = reflect(-viewDirection, reflectionNormal);
+    vec2 reflectionUv;
+    float reflectionConfidence;
+    if (reflectionStrength > 0.0 && reflectionDirection.z > 0.01 &&
+        traceWaterReflection(
+            inWorldPosition + reflectionNormal * 0.025,
+            reflectionDirection,
+            nearDepth,
+            farDepth,
+            reflectionMaxDistance,
+            reflectionUv,
+            reflectionConfidence)) {
+        vec3 reflectedScene = textureLod(
+            sceneColor, reflectionUv, 0.0).rgb;
+        float facing = clamp(
+            dot(reflectionNormal, viewDirection), 0.0, 1.0);
+        // Physical water viewed this close to its normal has a very weak
+        // Fresnel response. That is nearly invisible through the game's
+        // intentionally opaque, saturated water tint, so use a stylized floor
+        // while retaining the normal grazing-angle increase.
+        float fresnel = 0.32 + 0.68 *
+            pow(1.0 - facing, 5.0);
+        waterColor = mix(
+            waterColor,
+            reflectedScene,
+            clamp(
+                reflectionStrength * reflectionConfidence * fresnel,
+                0.0,
+                1.0));
+    }
 
     float secondaryRippleCoverage = clamp(
         secondaryCaustics.x * 0.12 +

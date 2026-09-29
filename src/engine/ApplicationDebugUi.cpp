@@ -217,6 +217,19 @@ if (ImGui::CollapsingHeader("Water")) {
             config::maximumWaterRefractionStrength,
             "%.4f");
         ImGui::SliderFloat(
+            "Reflection Strength",
+            &water.reflectionStrength,
+            config::minimumWaterReflectionStrength,
+            config::maximumWaterReflectionStrength,
+            "%.2f");
+        ImGui::DragFloat(
+            "Reflection Distance",
+            &water.reflectionMaxDistance,
+            0.1f,
+            config::minimumWaterReflectionMaxDistance,
+            config::maximumWaterReflectionMaxDistance,
+            "%.1f");
+        ImGui::SliderFloat(
             "Underwater Caustics",
             &water.underwaterCausticStrength,
             0.0f,

@@ -13,6 +13,8 @@ RenderFrameData::WaterRendering RenderFrameData::defaultWaterRendering()
         .rippleSpatialFrequency = config::waterRippleSpatialFrequency,
         .rippleSpeed = config::waterRippleSpeed,
         .refractionStrength = config::waterRefractionStrength,
+        .reflectionStrength = config::waterReflectionStrength,
+        .reflectionMaxDistance = config::waterReflectionMaxDistance,
         .rippleCrestHalfWidth = config::waterRippleCrestHalfWidth,
         .rippleHaloWidth = config::waterRippleHaloWidth,
         .rippleHaloStrength = config::waterRippleHaloStrength,

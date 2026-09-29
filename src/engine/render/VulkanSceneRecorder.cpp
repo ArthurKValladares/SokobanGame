@@ -2942,7 +2942,7 @@ private:
                 rendering.secondaryRippleOpacity,
             },
             .materialOptions = {
-                layout.cameraPosition.x,
+                rendering.reflectionStrength,
                 size.x,
                 size.y,
                 isEditorPreview
@@ -2953,7 +2953,7 @@ private:
                 worldOrigin.x,
                 worldOrigin.y,
                 animationTimeSeconds,
-                layout.cameraPosition.y,
+                rendering.reflectionMaxDistance,
             },
             .textureOptions = {
                 rendering.rippleSpatialFrequency,

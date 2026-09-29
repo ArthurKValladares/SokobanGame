@@ -160,6 +160,14 @@ void PresentationSettings::normalize()
         water.refractionStrength,
         config::minimumWaterRefractionStrength,
         config::maximumWaterRefractionStrength);
+    water.reflectionStrength = std::clamp(
+        water.reflectionStrength,
+        config::minimumWaterReflectionStrength,
+        config::maximumWaterReflectionStrength);
+    water.reflectionMaxDistance = std::clamp(
+        water.reflectionMaxDistance,
+        config::minimumWaterReflectionMaxDistance,
+        config::maximumWaterReflectionMaxDistance);
     water.rippleCrestHalfWidth = std::clamp(
         water.rippleCrestHalfWidth,
         config::minimumWaterRippleWidth,

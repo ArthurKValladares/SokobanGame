@@ -410,6 +410,8 @@ void testSettingsNormalizeAndConvert()
     settings.water.rippleSpatialFrequency = 99.0f;
     settings.water.rippleSpeed = -1.0f;
     settings.water.refractionStrength = 1.0f;
+    settings.water.reflectionStrength = 2.0f;
+    settings.water.reflectionMaxDistance = -1.0f;
     settings.water.rippleCrestHalfWidth = 0.4f;
     settings.water.rippleHaloWidth = 0.1f;
     settings.water.underwaterCausticStrength = 2.0f;
@@ -458,6 +460,12 @@ void testSettingsNormalizeAndConvert()
     CHECK(near(
         settings.water.refractionStrength,
         config::maximumWaterRefractionStrength));
+    CHECK(near(
+        settings.water.reflectionStrength,
+        config::maximumWaterReflectionStrength));
+    CHECK(near(
+        settings.water.reflectionMaxDistance,
+        config::minimumWaterReflectionMaxDistance));
     CHECK(near(
         settings.water.rippleHaloWidth,
         settings.water.rippleCrestHalfWidth));
@@ -1865,6 +1873,8 @@ void testGameplayFrameBuildsProceduralWaterSurface()
     settings.water.surfaceColor = { 0.12f, 0.24f, 0.36f, 0.48f };
     settings.water.underwaterCausticStrength = 0.61f;
     settings.water.refractionStrength = 0.0042f;
+    settings.water.reflectionStrength = 0.73f;
+    settings.water.reflectionMaxDistance = 9.5f;
     settings.water.visualizeCausticsOnly = true;
     const GameplaySession::Action action;
     const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
@@ -1900,6 +1910,12 @@ void testGameplayFrameBuildsProceduralWaterSurface()
     CHECK(near(
         frame.waterRendering.refractionStrength,
         settings.water.refractionStrength));
+    CHECK(near(
+        frame.waterRendering.reflectionStrength,
+        settings.water.reflectionStrength));
+    CHECK(near(
+        frame.waterRendering.reflectionMaxDistance,
+        settings.water.reflectionMaxDistance));
     CHECK(frame.waterRendering.visualizeCausticsOnly);
     CHECK(near(frame.waterAnimationTimeSeconds, 0.75f));
     CHECK(std::ranges::none_of(

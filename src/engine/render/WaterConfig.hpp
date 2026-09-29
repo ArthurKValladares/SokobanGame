@@ -28,6 +28,8 @@ inline constexpr float waterSecondaryRippleOpacity = 0.10f;
 inline constexpr float waterRippleSpatialFrequency = 1.5f;
 inline constexpr float waterRippleSpeed = 1.15f;
 inline constexpr float waterRefractionStrength = 0.0045f;
+inline constexpr float waterReflectionStrength = 0.85f;
+inline constexpr float waterReflectionMaxDistance = 12.0f;
 inline constexpr float waterRippleCrestHalfWidth = 0.038f;
 inline constexpr float waterRippleHaloWidth = 0.085f;
 inline constexpr float waterRippleHaloStrength = 0.08f;
@@ -41,6 +43,10 @@ inline constexpr float minimumWaterRippleSpeed = 0.0f;
 inline constexpr float maximumWaterRippleSpeed = 5.0f;
 inline constexpr float minimumWaterRefractionStrength = 0.0f;
 inline constexpr float maximumWaterRefractionStrength = 0.02f;
+inline constexpr float minimumWaterReflectionStrength = 0.0f;
+inline constexpr float maximumWaterReflectionStrength = 1.0f;
+inline constexpr float minimumWaterReflectionMaxDistance = 1.0f;
+inline constexpr float maximumWaterReflectionMaxDistance = 32.0f;
 inline constexpr float minimumWaterRippleWidth = 0.001f;
 inline constexpr float maximumWaterRippleWidth = 0.5f;
 inline constexpr float minimumWaterSecondaryRippleThicknessScale = 0.05f;
@@ -73,6 +79,12 @@ static_assert(
 static_assert(
     waterUnderwaterCausticStrength >= 0.0f &&
     waterUnderwaterCausticStrength <= 1.0f);
+static_assert(
+    waterReflectionStrength >= minimumWaterReflectionStrength &&
+    waterReflectionStrength <= maximumWaterReflectionStrength);
+static_assert(
+    waterReflectionMaxDistance >= minimumWaterReflectionMaxDistance &&
+    waterReflectionMaxDistance <= maximumWaterReflectionMaxDistance);
 static_assert(
     waterPrimaryShorelineOpacity >= 0.0f &&
     waterPrimaryShorelineOpacity <= 1.0f);

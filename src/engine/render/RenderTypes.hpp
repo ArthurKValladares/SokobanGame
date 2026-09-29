@@ -458,6 +458,8 @@ struct RenderFrameData {
         float rippleSpatialFrequency {};
         float rippleSpeed {};
         float refractionStrength {};
+        float reflectionStrength {};
+        float reflectionMaxDistance {};
         float rippleCrestHalfWidth {};
         float rippleHaloWidth {};
         float rippleHaloStrength {};
