@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <limits>
 #include <ranges>
 #include <set>
@@ -79,12 +80,41 @@ VulkanDeviceContext::VulkanDeviceContext(
     requiredTextureDescriptors_ = std::max(
         static_cast<uint32_t>(requiredTextureDescriptors), 1U);
     try {
+        using StartupClock = std::chrono::steady_clock;
+        const StartupClock::time_point started = StartupClock::now();
+        auto phaseStarted = started;
+        const auto finishPhase = [&phaseStarted]() {
+            const auto now = StartupClock::now();
+            const auto elapsed =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    now - phaseStarted).count();
+            phaseStarted = now;
+            return elapsed;
+        };
         createInstance();
+        const auto instanceMicroseconds = finishPhase();
         createSurface();
+        const auto surfaceMicroseconds = finishPhase();
         pickPhysicalDevice();
+        const auto physicalDeviceMicroseconds = finishPhase();
         createDevice();
+        const auto logicalDeviceMicroseconds = finishPhase();
         memoryAllocator_.create(instance_, physicalDevice_, device_);
+        const auto allocatorMicroseconds = finishPhase();
         createCommandPool();
+        const auto commandPoolMicroseconds = finishPhase();
+        const auto totalMicroseconds =
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                StartupClock::now() - started).count();
+        log::info(log::Category::Rendering)
+            << "Vulkan device startup phases (us): instance="
+            << instanceMicroseconds
+            << " surface=" << surfaceMicroseconds
+            << " physical-device=" << physicalDeviceMicroseconds
+            << " logical-device=" << logicalDeviceMicroseconds
+            << " allocator=" << allocatorMicroseconds
+            << " command-pool=" << commandPoolMicroseconds
+            << " total=" << totalMicroseconds;
     } catch (...) {
         destroy();
         throw;

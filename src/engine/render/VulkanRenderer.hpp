@@ -35,6 +35,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
@@ -320,7 +321,8 @@ private:
     [[nodiscard]] VulkanSceneDescriptors::Resources descriptorResources(
         const RenderResourceSet& resources) const;
     [[nodiscard]] RenderResourceSet createRenderResources(
-        const RendererSettingsSnapshot& settings);
+        const RendererSettingsSnapshot& settings,
+        std::future<void>* startupPrerequisites = nullptr);
     [[nodiscard]] std::unique_ptr<VulkanPipelineFactory> createPipelines(
         const RenderResourceSet& resources,
         const RendererSettingsSnapshot& settings);

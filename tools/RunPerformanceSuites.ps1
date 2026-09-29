@@ -124,8 +124,64 @@ if (-not $Quick) {
 
 $originalLocation = Get-Location
 $runId = Get-Date -Format "yyyyMMdd-HHmmss-fff"
+$startupOutput = Join-Path $outputRoot "startup"
+$startupState = Join-Path $startupOutput "state-$runId"
+$startupMeasurements = @()
 try {
     Set-Location (Split-Path -Parent $gameExecutable)
+    New-Item -ItemType Directory -Path $startupState -Force | Out-Null
+    foreach ($startupCase in @("cold-pipeline-cache", "warm-pipeline-cache")) {
+        $startupLog = Join-Path $startupOutput "$startupCase.log"
+        $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+        Invoke-Checked $gameExecutable @(
+            "--smoke-frames", "1",
+            "--save-directory", $startupState
+        ) $startupLog
+        $stopwatch.Stop()
+        $startupText = Get-Content -LiteralPath $startupLog -Raw
+        $firstFrame = [regex]::Match(
+            $startupText,
+            'Application startup phases \(us\): construction=([0-9]+) first-frame=([0-9]+)')
+        $startupMeasurements += [pscustomobject]@{
+            Name = $startupCase
+            ConstructionMicroseconds = if ($firstFrame.Success) {
+                [uint64]$firstFrame.Groups[1].Value
+            } else { $null }
+            FirstFrameMicroseconds = if ($firstFrame.Success) {
+                [uint64]$firstFrame.Groups[2].Value
+            } else { $null }
+            ElapsedMicroseconds = [math]::Round(
+                $stopwatch.Elapsed.TotalMilliseconds * 1000.0)
+            Log = "$startupCase.log"
+        }
+    }
+    $startupMeasurements |
+        ConvertTo-Json -Depth 3 |
+        Set-Content -LiteralPath (Join-Path $startupOutput "startup-results.json") `
+            -Encoding utf8
+    $startupSummary = @(
+        "# Application startup",
+        "",
+        "Both runs use the same isolated save directory. The first has no game pipeline cache; the second reuses the cache persisted by the first run.",
+        "",
+        "| Case | Construction | First frame | Process wall time | Detailed phase log |",
+        "|---|---:|---:|---:|---|"
+    )
+    foreach ($measurement in $startupMeasurements) {
+        $constructionMilliseconds = if ($null -ne $measurement.ConstructionMicroseconds) {
+            "$([math]::Round($measurement.ConstructionMicroseconds / 1000.0, 1)) ms"
+        } else { "unavailable" }
+        $firstFrameMilliseconds = if ($null -ne $measurement.FirstFrameMicroseconds) {
+            "$([math]::Round($measurement.FirstFrameMicroseconds / 1000.0, 1)) ms"
+        } else { "unavailable" }
+        $milliseconds = [math]::Round(
+            $measurement.ElapsedMicroseconds / 1000.0, 1)
+        $startupSummary += "| $($measurement.Name) | $constructionMilliseconds | $firstFrameMilliseconds | $milliseconds ms | [$($measurement.Log)]($($measurement.Log)) |"
+    }
+    $startupSummary |
+        Set-Content -LiteralPath (Join-Path $startupOutput "startup-report.md") `
+            -Encoding utf8
+
     foreach ($scenario in $scenarios) {
         $scenarioOutput = Join-Path $outputRoot "gpu/$($scenario.Name)"
         # A fresh preference/profile root makes scenarios comparable even when
@@ -156,6 +212,11 @@ $indexLines = @(
     "- [Ranked CPU report](cpu/performance-report.md)",
     "- [Machine-readable results](cpu/performance-results.json)",
     "- [CPU trace](cpu/cpu-trace.json)",
+    "",
+    "## Application startup",
+    "",
+    "- [Cold/warm startup report](startup/startup-report.md)",
+    "- [Machine-readable startup results](startup/startup-results.json)",
     "",
     "## GPU evidence matrix",
     "",

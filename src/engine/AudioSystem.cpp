@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -85,6 +86,7 @@ AudioSystem::AudioSystem(std::filesystem::path audioRoot, const AssetManifest& m
     , manifest_(&manifest)
     , random_(std::random_device {}())
 {
+    const auto startupStarted = std::chrono::steady_clock::now();
     if (ma_engine_init(nullptr, &engine_->engine) != MA_SUCCESS) {
         log::warning(log::Category::Audio)
             << "Audio disabled: audio engine initialization failed";
@@ -134,6 +136,10 @@ AudioSystem::AudioSystem(std::filesystem::path audioRoot, const AssetManifest& m
         musicFiles,
         engine_->musicSounds, engine_->loadedMusic,
         MA_SOUND_FLAG_STREAM);
+    log::info(log::Category::Audio)
+        << "Audio startup phase (us): total="
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now() - startupStarted).count();
 }
 
 AudioSystem::~AudioSystem()

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <limits>
 #include <ranges>
 #include <stdexcept>
@@ -47,8 +48,20 @@ void VulkanSwapchainResources::create(
     presentationPolicy_ = presentationPolicy;
 
     try {
+        const auto swapchainStarted = std::chrono::steady_clock::now();
         createSwapchain(oldSwapchain);
+        const auto attachmentsStarted = std::chrono::steady_clock::now();
         createAttachments();
+        const auto finished = std::chrono::steady_clock::now();
+        if (!oldSwapchain) {
+            log::info(log::Category::Rendering)
+                << "Swapchain startup phases (us): create="
+                << std::chrono::duration_cast<std::chrono::microseconds>(
+                       attachmentsStarted - swapchainStarted).count()
+                << " attachments="
+                << std::chrono::duration_cast<std::chrono::microseconds>(
+                       finished - attachmentsStarted).count();
+        }
     } catch (...) {
         destroy();
         throw;

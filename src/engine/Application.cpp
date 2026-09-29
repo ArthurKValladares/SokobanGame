@@ -66,6 +66,24 @@ AssetLoadingBudget assetLoadingBudgetFor(const ApplicationOptions& options)
     return budget;
 }
 
+bool configureStartupWindow(Window& window, PlayerProfile& profile)
+{
+    // Apply the persisted mode before Vulkan creates its surface and
+    // swapchain. Creating a default window first and changing it after the
+    // renderer exists forces an otherwise redundant swapchain generation
+    // before frame one.
+    profile.normalize();
+    const UserSettings::Video& video = profile.settings.video;
+    if (video.fullscreen) {
+        window.setFullscreen(true);
+    } else if (video.windowMaximized) {
+        window.setWindowedMaximized();
+    } else {
+        window.setWindowedSize(video.windowWidth, video.windowHeight);
+    }
+    return true;
+}
+
 void appendEvidenceWaterFixture(RenderFrameData& frame)
 {
     if (frame.levelWidth == 0 || frame.levelHeight == 0) {
@@ -154,8 +172,13 @@ Application::Application(ApplicationOptions options)
               ? SaveStore::preferencePath("Sokoban3D", "Sokoban3D")
               : options.saveDirectoryOverride)
     , playerProfile_(saveSlots_.loadActiveProfile())
+    , startupWindowConfigured_(
+          configureStartupWindow(window_, playerProfile_))
     , assetRoot_(runtimeContentRoot())
     , assetManifest_(AssetManifest::loadFromFile(assetRoot_ / "manifest.json"))
+    , audioStartup_(std::async(std::launch::async, [this] {
+          return std::make_unique<AudioSystem>(assetRoot_, assetManifest_);
+      }))
     , animationCatalog_(AnimationCatalog::loadFromFile(
           assetRoot_ / "animation_catalog.json", assetManifest_))
     , uiFont_(FontAtlas::load(
@@ -190,7 +213,7 @@ Application::Application(ApplicationOptions options)
           options.recorderScratchReuseEnabled,
           options.showFailureDialogs)
     , ui_(uiFont_)
-    , audioSystem_(assetRoot_, assetManifest_)
+    , audioSystem_(audioStartup_.get())
     , mirrorSwapParticleEffect_(
           makeMirrorSwapParticleEffect(assetManifest_))
     , witchSwapParticleEffect_(
@@ -227,7 +250,12 @@ Application::Application(ApplicationOptions options)
         << saveSlots_.progressStatus();
     buildLevelCatalog();
     restoreProfileLocation();
-    applySettingsEffects(settingsCoordinator_.initialize());
+    SettingsEffects initialSettings = settingsCoordinator_.initialize();
+    // The window was configured before renderer construction so Vulkan saw
+    // the final startup extent. Reapplying it here would synchronize the OS
+    // window and request a second swapchain for no visual change.
+    initialSettings.window.reset();
+    applySettingsEffects(initialSettings);
     if (!evidenceOutputDirectory_.empty()) {
         // Evidence presentation policy is a process-local diagnostic override,
         // just like scale and MSAA above. Reapply it after user settings are
@@ -289,7 +317,7 @@ Application::Application(ApplicationOptions options)
             .input = input_,
             .renderer = renderer_,
             .settings = presentationSettings_,
-            .audio = audioSystem_,
+            .audio = *audioSystem_,
             .saveDiagnostics = saveSlots_.progressDiagnostics(),
             .audioSettings = playerProfile_.settings.audio,
             .updateAudioSettings = [this](
@@ -826,6 +854,9 @@ void Application::finishSmokeRunIfDue(std::uint64_t renderedFrames)
 
 bool Application::run()
 {
+    startupConstructionMicroseconds_ =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - startupStarted_).count();
     if (smokeFrames_ > 0) {
         // Nobody is here to press New Game, and the title screen draws no
         // world behind it, so a smoke run that stayed on the title would
@@ -973,6 +1004,16 @@ bool Application::run()
                 ui_.drawData(),
                 developerWorkspaceVisible);
         }
+        if (!startupReported_) {
+            startupReported_ = true;
+            log::info(log::Category::Application)
+                << "Application startup phases (us): construction="
+                << startupConstructionMicroseconds_
+                << " first-frame="
+                << std::chrono::duration_cast<std::chrono::microseconds>(
+                       std::chrono::steady_clock::now() - startupStarted_)
+                       .count();
+        }
         ++renderedFrames;
         if (renderer_.hasFatalFailure()) {
             log::error(log::Category::Application)
@@ -1034,20 +1075,20 @@ void Application::update(
         : std::max(overworldOverviewProgress_ - overviewStep, 0.0f);
 
     if (shellMenuOpen()) {
-        audioSystem_.update(dt, false, false);
+        audioSystem_->update(dt, false, false);
         return;
     }
 
 #if SOKOBAN_ENABLE_DEBUG_UI
     if (tools_->draftExitConfirmationOpen) {
-        audioSystem_.update(dt, false, false);
+        audioSystem_->update(dt, false, false);
         return;
     }
     if (detachedCameraActive) {
         tools_->updateDetachedCamera(dt, input_);
     }
     if (tools_->levelEditor.editingDocument()) {
-        audioSystem_.update(dt, false, false);
+        audioSystem_->update(dt, false, false);
         if (!detachedCameraActive) {
             tools_->updateEditorInteraction(
                 input.editor,
@@ -1070,14 +1111,14 @@ void Application::update(
 
     if (levelTransition_.active()) {
         updateLevelTransition(dt);
-        audioSystem_.update(dt, false, false);
+        audioSystem_->update(dt, false, false);
         return;
     }
 
     if (updateScreenPreview(
             !detachedCameraActive && input.previewScreen,
             dt)) {
-        audioSystem_.update(dt, false, false);
+        audioSystem_->update(dt, false, false);
         return;
     }
 
@@ -1121,7 +1162,7 @@ void Application::update(
         }
     }
     if (gameplayResult.mirrorActivated) {
-        audioSystem_.playOneShot("mirror-swap");
+        audioSystem_->playOneShot("mirror-swap");
         for (GridPosition3 destination :
              gameplayResult.mirrorSwapDestinations) {
             particleSystem_.emit(
@@ -1221,7 +1262,7 @@ void Application::update(
             (player.animationUse == AnimationUse::PlayerPush ||
                 player.animationUse == AnimationUse::PlayerPull);
     }
-    audioSystem_.update(dt, playerMoving, pushing);
+    audioSystem_->update(dt, playerMoving, pushing);
 }
 
 void Application::loadCurrentScreen()
@@ -1260,7 +1301,7 @@ void Application::loadCurrentScreen()
     }
     campaign_.finishWorldLoad(playerProfile_);
     checkpointCurrentScreen(true);
-    audioSystem_.playMusicForLevel(
+    audioSystem_->playMusicForLevel(
         campaign_.inOverworld() ? 0 : campaign_.currentLevel());
     preloadUpcomingAssets();
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -1869,9 +1910,9 @@ void Application::applySettingsEffects(const SettingsEffects& effects)
         framePacer_.setFrameRateLimit(*effects.frameRateLimit);
     }
     if (effects.audio) {
-        audioSystem_.setMasterVolume(effects.audio->masterVolume);
-        audioSystem_.setMusicVolume(effects.audio->musicVolume);
-        audioSystem_.setSoundVolume(effects.audio->soundVolume);
+        audioSystem_->setMasterVolume(effects.audio->masterVolume);
+        audioSystem_->setMusicVolume(effects.audio->musicVolume);
+        audioSystem_->setSoundVolume(effects.audio->soundVolume);
     }
     if (effects.input) {
         input_.setBindings(*effects.input);
@@ -2283,7 +2324,7 @@ void Application::reloadSourceManifest(const std::filesystem::path& source)
     mirrorIntoRuntime(source, assetRoot_ / "manifest.json");
     (void)refreshContentPackageIndex(assetRoot_);
     presentationSettings_.applyTileScales(assetManifest_);
-    audioSystem_.applyManifestVolumes();
+    audioSystem_->applyManifestVolumes();
     tools_->manifestReloadStatus =
         "Applied manifest.json live (tile scales and volumes).";
     log::info(log::Category::Assets) << tools_->manifestReloadStatus;

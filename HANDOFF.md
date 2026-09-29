@@ -352,6 +352,13 @@ Keep point-shadow sampling policy deliberate: the scene and ground select
 different tap counts from `shaders/include/PointShadow.glsl` because their cost
 scales differently. Validate changes with the point-light evidence modes.
 
+Startup construction now overlaps audio initialization and independent Vulkan
+resource setup, applies the saved window mode before the first swapchain, and
+emits first-frame plus Vulkan/audio subphase timings. The comprehensive
+performance runner records matched cold/warm application launches. Current
+measurements and remaining driver-owned costs are documented in
+`docs/performance/2026-09-29-startup/README.md`.
+
 ## Documentation rule
 
 Update this file when an enduring contract, supported command, or immediate

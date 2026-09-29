@@ -193,11 +193,14 @@ candidates such as task crossover points, cache value, and materially costly
 nonlinear scene scaling; compare numeric results only on the same machine
 and power state. Use `--filter scene-preparation` to isolate a group and
 `--quick` for a 12-sample run. `RunPerformanceSuites.ps1 -Quick` also runs a
-short baseline, point-light stress, and serial-scene GPU matrix. Its full mode
-adds render-scale, AO, translucency, frustum-culling, point-shadow, and command
-recorder A/B captures, then repeats the baseline to expose thermal or power
-state drift; every evidence report uses the same ranked analyzer as the live
-profiler.
+matched cold/warm application-startup pair plus a short baseline, point-light
+stress, and serial-scene GPU matrix. The startup report records construction,
+first-frame, and process wall time, while its logs break out Vulkan instance,
+device, swapchain, render-resource, pipeline, audio, and renderer phases. Its
+full mode adds render-scale, AO, translucency, frustum-culling, point-shadow,
+and command-recorder A/B captures, then repeats the baseline to expose thermal
+or power-state drift; every evidence report uses the same ranked analyzer as
+the live profiler.
 
 Every quick and full GPU matrix also records a `vsync-disabled` control. Its
 report names the presentation mode the driver actually selected, allowing a

@@ -270,6 +270,17 @@ VulkanRenderer::VulkanRenderer(
     , recorderScratchReuseEnabled_(recorderScratchReuseEnabled)
     , showFailureDialogs_(showFailureDialogs)
 {
+    using StartupClock = std::chrono::steady_clock;
+    const StartupClock::time_point rendererSetupStarted = StartupClock::now();
+    auto phaseStarted = rendererSetupStarted;
+    const auto finishPhase = [&phaseStarted]() {
+        const auto now = StartupClock::now();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+            now - phaseStarted).count();
+        phaseStarted = now;
+        return elapsed;
+    };
+
     scenePreparer_.setPointShadowRangeCulling(
         pointShadowOptimizationsEnabled_);
     previewScenePreparer_.setPointShadowRangeCulling(
@@ -282,35 +293,61 @@ VulkanRenderer::VulkanRenderer(
         deviceContext_.device(),
         deviceContext_.physicalDeviceProperties(),
         std::move(pipelineCachePath));
+    const auto pipelineCacheMicroseconds = finishPhase();
     wireframeLineWidth_ = std::clamp(
         wireframeLineWidth_,
         1.0f,
         deviceContext_.wireframeLineWidthRange()[1]);
     // The default MSAA mode is a request; drop to what the device supports.
     activeSampleCount_ = sampleCountForMode(antiAliasingMode);
-    shadowPass_.create(
-        deviceContext_.memoryAllocator(),
-        deviceContext_.device(),
-        shadowFormat_);
-    uiResources_.create(
-        deviceContext_.memoryAllocator(),
-        deviceContext_.device(),
-        deviceContext_.commandPool(),
-        deviceContext_.graphicsQueue(),
-        uiFont,
-        loadRgbaImage(assetRoot_ / config::titleBackgroundPath));
-    modelResources_.create(
-        deviceContext_.physicalDevice(),
-        deviceContext_.memoryAllocator(),
-        deviceContext_.device(),
-        deviceContext_.commandPool(),
-        deviceContext_.graphicsQueue(),
-        assetRoot_, manifest, runtimeTextureCatalog_,
-        deviceContext_.textureDescriptorCapacity(),
-        deviceContext_.maxSamplerAnisotropy(),
-        assetLoadingBudget);
+    std::int64_t shadowResourcesMicroseconds = 0;
+    std::int64_t uiResourcesMicroseconds = 0;
+    std::int64_t modelResourcesMicroseconds = 0;
+    std::future<void> startupPrerequisites = std::async(
+        std::launch::async,
+        [this, &manifest, &uiFont, assetLoadingBudget,
+            &shadowResourcesMicroseconds, &uiResourcesMicroseconds,
+            &modelResourcesMicroseconds] {
+            const auto started = StartupClock::now();
+            auto resourceStarted = started;
+            shadowPass_.create(
+                deviceContext_.memoryAllocator(),
+                deviceContext_.device(),
+                shadowFormat_);
+            auto now = StartupClock::now();
+            shadowResourcesMicroseconds =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    now - resourceStarted).count();
+            resourceStarted = now;
+            uiResources_.create(
+                deviceContext_.memoryAllocator(),
+                deviceContext_.device(),
+                deviceContext_.commandPool(),
+                deviceContext_.graphicsQueue(),
+                uiFont,
+                loadRgbaImage(assetRoot_ / config::titleBackgroundPath));
+            now = StartupClock::now();
+            uiResourcesMicroseconds =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    now - resourceStarted).count();
+            resourceStarted = now;
+            modelResources_.create(
+                deviceContext_.physicalDevice(),
+                deviceContext_.memoryAllocator(),
+                deviceContext_.device(),
+                deviceContext_.commandPool(),
+                deviceContext_.graphicsQueue(),
+                assetRoot_, manifest, runtimeTextureCatalog_,
+                deviceContext_.textureDescriptorCapacity(),
+                deviceContext_.maxSamplerAnisotropy(),
+                assetLoadingBudget);
+            modelResourcesMicroseconds =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    StartupClock::now() - resourceStarted).count();
+        });
     activeResources_ = createRenderResources(
-        reconfigurationQueue_.active());
+        reconfigurationQueue_.active(), &startupPrerequisites);
+    const auto renderResourcesMicroseconds = finishPhase();
     descriptorSync_.markAllUpdated();
     logRenderConfiguration();
     if (deviceContext_.graphicsTimestampsSupported()) {
@@ -320,8 +357,11 @@ VulkanRenderer::VulkanRenderer(
             deviceContext_.graphicsTimestampValidBits(),
             maxFramesInFlight_);
     }
+    const auto gpuProfilerMicroseconds = finishPhase();
     createFrameResources();
+    const auto frameResourcesMicroseconds = finishPhase();
     initializeDebugUi();
+    const auto debugUiMicroseconds = finishPhase();
 #if SOKOBAN_ENABLE_DEBUG_UI
     // After initializeDebugUi: registering a thumbnail with ImGui needs the
     // Vulkan backend to exist. Failure here only costs the editor its
@@ -333,6 +373,22 @@ VulkanRenderer::VulkanRenderer(
         deviceContext_.graphicsQueue(),
         assetRoot_);
 #endif
+    const auto thumbnailMicroseconds = finishPhase();
+    const auto totalMicroseconds =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            StartupClock::now() - rendererSetupStarted).count();
+    log::info(log::Category::Rendering)
+        << "Renderer startup phases (us): pipeline-cache="
+        << pipelineCacheMicroseconds
+        << " shadow-resources=" << shadowResourcesMicroseconds
+        << " ui-resources=" << uiResourcesMicroseconds
+        << " model-resources=" << modelResourcesMicroseconds
+        << " render-resources=" << renderResourcesMicroseconds
+        << " gpu-profiler=" << gpuProfilerMicroseconds
+        << " frame-resources=" << frameResourcesMicroseconds
+        << " debug-ui=" << debugUiMicroseconds
+        << " thumbnails=" << thumbnailMicroseconds
+        << " total=" << totalMicroseconds;
 }
 
 VulkanRenderer::~VulkanRenderer()
@@ -1557,8 +1613,20 @@ void VulkanRenderer::setAnimationPreview(
 
 VulkanRenderer::RenderResourceSet
 VulkanRenderer::createRenderResources(
-    const RendererSettingsSnapshot& settings)
+    const RendererSettingsSnapshot& settings,
+    std::future<void>* startupPrerequisites)
 {
+    using StartupClock = std::chrono::steady_clock;
+    const bool initialCreation = pipelineRebuilds_ == 0;
+    const StartupClock::time_point started = StartupClock::now();
+    auto phaseStarted = started;
+    const auto finishPhase = [&phaseStarted]() {
+        const auto now = StartupClock::now();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+            now - phaseStarted).count();
+        phaseStarted = now;
+        return elapsed;
+    };
     RenderResourceSet resources;
     const VkSampleCountFlagBits sampleCount =
         sampleCountForMode(settings.antiAliasing);
@@ -1581,6 +1649,7 @@ VulkanRenderer::createRenderResources(
         activeResources_.swapchain
             ? activeResources_.swapchain->handle()
             : VK_NULL_HANDLE);
+    const auto swapchainMicroseconds = finishPhase();
     // Must follow swapchain creation: the count comes from the images the
     // driver actually handed back, not from the requested minimum.
     resources.presentSemaphores = SwapchainPresentSemaphores(
@@ -1590,12 +1659,18 @@ VulkanRenderer::createRenderResources(
         deviceContext_.memoryAllocator(),
         deviceContext_.device(),
         resources.swapchain->renderExtent());
+    const auto ssaoMicroseconds = finishPhase();
     resources.atmospherePass = std::make_unique<VulkanAtmospherePass>();
     resources.atmospherePass->create(
         deviceContext_.memoryAllocator(),
         deviceContext_.device(),
         resources.swapchain->renderExtent(),
         resources.swapchain->sceneColorFormat());
+    const auto atmosphereMicroseconds = finishPhase();
+    if (startupPrerequisites) {
+        startupPrerequisites->get();
+    }
+    const auto prerequisiteWaitMicroseconds = finishPhase();
     resources.sceneDescriptors =
         std::make_unique<VulkanSceneDescriptors>();
     resources.sceneDescriptors->create(
@@ -1603,7 +1678,23 @@ VulkanRenderer::createRenderResources(
         deviceContext_.device(),
         descriptorResources(resources),
         maxFramesInFlight_);
+    const auto descriptorsMicroseconds = finishPhase();
     resources.pipelines = createPipelines(resources, settings);
+    const auto pipelinesMicroseconds = finishPhase();
+    if (initialCreation) {
+        const auto totalMicroseconds =
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                StartupClock::now() - started).count();
+        log::info(log::Category::Rendering)
+            << "Render-resource startup phases (us): swapchain="
+            << swapchainMicroseconds
+            << " ssao=" << ssaoMicroseconds
+            << " atmosphere=" << atmosphereMicroseconds
+            << " prerequisite-wait=" << prerequisiteWaitMicroseconds
+            << " descriptors=" << descriptorsMicroseconds
+            << " pipelines=" << pipelinesMicroseconds
+            << " total=" << totalMicroseconds;
+    }
     return resources;
 }
 

@@ -32,9 +32,11 @@
 #include "engine/ui/TitleScreen.hpp"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -215,15 +217,26 @@ private:
     [[nodiscard]] RenderFrameData buildRenderFrame(
         const InputRouter::EditorInput& editorInput);
 
+    // First member so the first-frame metric includes every other member's
+    // construction, including the platform window and renderer.
+    std::chrono::steady_clock::time_point startupStarted_ =
+        std::chrono::steady_clock::now();
     Window window_;
     // Owns slot stores, the shared settings store, the marker, and every
     // other disk decision; Application owns the live profile and the
     // gameplay consequences.
     SaveSlotManager saveSlots_;
     PlayerProfile playerProfile_;
+    // Initialization barrier: applies the profile's window mode before the
+    // renderer member constructs its first swapchain.
+    bool startupWindowConfigured_ = false;
     std::filesystem::path assetRoot_;
     // Declared before the renderer/audio members that hold references to it.
     AssetManifest assetManifest_;
+    // Audio device creation and sound decoding are independent of the rest of
+    // content startup. Start them as soon as the manifest is available, then
+    // join at the member's normal lifetime position.
+    std::future<std::unique_ptr<AudioSystem>> audioStartup_;
     AnimationCatalog animationCatalog_;
     FontAtlas uiFont_;
     InputPromptCatalog inputPrompts_;
@@ -234,7 +247,7 @@ private:
     TitleScreen titleScreen_;
     // Pure shell routing; Application executes the commands it emits.
     ShellFlow shellFlow_;
-    AudioSystem audioSystem_;
+    std::unique_ptr<AudioSystem> audioSystem_;
     ParticleSystem particleSystem_;
     ParticleEffectDefinition mirrorSwapParticleEffect_;
     ParticleEffectDefinition witchSwapParticleEffect_;
@@ -301,6 +314,8 @@ private:
     float overworldOverviewProgress_ = 0.0f;
     std::optional<OverworldFogReveal> overworldFogReveal_;
     bool screenPreviewActive_ = false;
+    std::int64_t startupConstructionMicroseconds_ = 0;
+    bool startupReported_ = false;
     bool running_ = true;
 };
 
