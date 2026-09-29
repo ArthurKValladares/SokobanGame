@@ -311,6 +311,11 @@ Application::Application(ApplicationOptions options)
         tools_->resumeOnLaunch = session->resumeOnLaunch;
     }
     DebugUi::addMenu("Session", [this] { tools_->drawSessionMenu(); });
+    DebugUi::addMenu("Camera", [this] {
+        tools_->drawDetachedCameraMenu(
+            window_.nativeHandle(),
+            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
+    });
     tools_->enableShaderHotReload(assetRoot_);
     DebugUi::addTab("Tuning", [this] {
         tools_->tuningDebugUi.draw();
@@ -453,6 +458,7 @@ Application::~Application()
     if (smokeFrames_ == 0 && evidenceOutputDirectory_.empty()) {
         saveDevSession();
     }
+    tools_->shutdownDetachedCamera(window_.nativeHandle());
     DebugUi::clearTabs();
 #endif
     renderer_.waitIdle();
@@ -616,6 +622,7 @@ bool Application::drawUiFrame(
         evidenceOutputDirectory_.empty() &&
         !optionsMenu_.isOpen() && !titleScreen_.isOpen();
     if (!developerWorkspaceVisible) {
+        tools_->releaseDetachedCameraMouse(window_.nativeHandle());
         renderer_.setGameViewportDisplay(std::nullopt);
     }
 #else
@@ -863,6 +870,17 @@ bool Application::run()
             SDL_Event event {};
             while (SDL_PollEvent(&event)) {
                 renderer_.handleEvent(event);
+#if SOKOBAN_ENABLE_DEBUG_UI
+                const bool detachedCameraConsumed =
+                    tools_->handleDetachedCameraEvent(
+                        event,
+                        window_.nativeHandle(),
+                        !shellMenuOpen() && evidenceOutputDirectory_.empty(),
+                        renderer_.wantsMouseCapture());
+                if (detachedCameraConsumed) {
+                    continue;
+                }
+#endif
                 InputRouter::EventContext eventContext {
                     .bindingCapture = optionsMenu_.capturingBinding(),
                     .shellMenuOpen = shellMenuOpen(),
@@ -872,6 +890,10 @@ bool Application::run()
 #if SOKOBAN_ENABLE_DEBUG_UI
                 eventContext.editorEditing =
                     tools_->levelEditor.editingDocument();
+                if (tools_->detachedCameraCapturingMouse()) {
+                    eventContext.keyboardCaptured = false;
+                    eventContext.mouseCaptured = false;
+                }
 #endif
                 const InputRouter::EventResult routedEvent =
                     inputRouter_.routeEvent(event, input_, eventContext);
@@ -987,11 +1009,19 @@ void Application::update(
 #else
         false;
 #endif
+    const bool detachedCameraActive =
+#if SOKOBAN_ENABLE_DEBUG_UI
+        tools_->detachedCameraActive();
+#else
+        false;
+#endif
     const bool showOverworldMap =
-        input.showOverworldMap && campaign_.inOverworld() &&
+        !detachedCameraActive && input.showOverworldMap &&
+        campaign_.inOverworld() &&
         !editorDraftPlaying;
     presentation_.updateCameraPitch(
-        (input.showTopDownView || showOverworldMap)
+        (!detachedCameraActive &&
+                (input.showTopDownView || showOverworldMap))
             ? 0.0f
             : config::cameraPitchDegrees,
         dt,
@@ -1013,14 +1043,19 @@ void Application::update(
         audioSystem_.update(dt, false, false);
         return;
     }
+    if (detachedCameraActive) {
+        tools_->updateDetachedCamera(dt, input_);
+    }
     if (tools_->levelEditor.editingDocument()) {
         audioSystem_.update(dt, false, false);
-        tools_->updateEditorInteraction(
-            input.editor,
-            previousRenderFrame,
-            renderer_,
-            window_.size(),
-            window_.sizeInPixels());
+        if (!detachedCameraActive) {
+            tools_->updateEditorInteraction(
+                input.editor,
+                previousRenderFrame,
+                renderer_,
+                window_.size(),
+                window_.sizeInPixels());
+        }
         return;
     }
 #endif
@@ -1039,7 +1074,9 @@ void Application::update(
         return;
     }
 
-    if (updateScreenPreview(input.previewScreen, dt)) {
+    if (updateScreenPreview(
+            !detachedCameraActive && input.previewScreen,
+            dt)) {
         audioSystem_.update(dt, false, false);
         return;
     }
@@ -1050,7 +1087,9 @@ void Application::update(
         level_,
         gameplaySession_,
         presentation_,
-        input.gameplay,
+        detachedCameraActive
+            ? GameplayLoop::InputFrame {}
+            : input.gameplay,
         dt,
         editorDraftPlaying);
     if (gameplayResult.stateCommitted && campaign_.inOverworld() &&
@@ -1158,7 +1197,7 @@ void Application::update(
         }
 #endif
         advanceScreen();
-    } else if (input.gameplay.interactPressed &&
+    } else if (!detachedCameraActive && input.gameplay.interactPressed &&
         campaign_.inOverworld() && !gameplaySession_.moving() &&
         !rules::hasPendingMotion(level_, gameplaySession_.state())) {
         tryEnterSelector();
@@ -2483,10 +2522,15 @@ RenderFrameData Application::buildRenderFrame(
     if (const std::optional<RenderFrameData> preview =
             tools_->animationPreviewDebugUi.previewFrame(
                 assetManifest_, presentationSettings_)) {
-        return *preview;
+        RenderFrameData frame = *preview;
+        tools_->applyDetachedCamera(frame);
+        return frame;
     }
     if (tools_->levelEditor.editingDocument()) {
-        return buildEditorRenderFrame(editorInput, beltScrollOffset);
+        RenderFrameData frame =
+            buildEditorRenderFrame(editorInput, beltScrollOffset);
+        tools_->applyDetachedCamera(frame);
+        return frame;
     }
 #endif
 
@@ -2630,6 +2674,9 @@ RenderFrameData Application::buildRenderFrame(
         appendEvidenceWaterFixture(frame);
     }
     appendEvidencePointLights(frame);
+#if SOKOBAN_ENABLE_DEBUG_UI
+    tools_->applyDetachedCamera(frame);
+#endif
     return frame;
 }
 

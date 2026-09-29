@@ -397,6 +397,57 @@ void testCameraLayoutUsesConfiguredAngles()
     CHECK(near(overhead.isoLayout.cameraUp.y, -std::cos(yaw)));
 }
 
+void testExplicitCameraPoseBypassesBoardFit()
+{
+    using namespace sokoban;
+
+    RenderFrameData frame = sceneFrame();
+    frame.cameraExtent = RenderFrameData::CameraExtent {
+        .originX = -20,
+        .originY = -20,
+        .originZ = -5,
+        .width = 40,
+        .height = 40,
+        .depth = 10,
+    };
+    frame.cameraOverride = RenderFrameData::CameraOverride {
+        .position = { 1.5f, -4.0f, 2.25f },
+        .forward = { 0.2f, 1.0f, -0.25f },
+        .verticalFovDegrees = 75.0f,
+    };
+
+    const PreparedRenderScene scene =
+        prepareScene(frame, { 1600.0f, 900.0f });
+    const Vec3 expectedForward = normalize(frame.cameraOverride->forward);
+    CHECK(scene.isoLayout.cameraPosition == frame.cameraOverride->position);
+    CHECK(near(scene.isoLayout.cameraForward.x, expectedForward.x));
+    CHECK(near(scene.isoLayout.cameraForward.y, expectedForward.y));
+    CHECK(near(scene.isoLayout.cameraForward.z, expectedForward.z));
+    CHECK(near(dot(
+        scene.isoLayout.cameraForward,
+        scene.isoLayout.cameraRight), 0.0f));
+    CHECK(near(dot(
+        scene.isoLayout.cameraForward,
+        scene.isoLayout.cameraUp), 0.0f));
+    CHECK(near(scene.isoLayout.projectedCenter.x, 0.0f));
+    CHECK(near(scene.isoLayout.projectedCenter.y, 0.0f));
+    CHECK(near(scene.isoLayout.fitScale, 1.0f));
+    CHECK(near(scene.isoLayout.nearestDepth, 0.05f));
+    CHECK(scene.isoLayout.farthestDepth > scene.isoLayout.nearestDepth);
+    CHECK(near(
+        scene.isoLayout.focalLength,
+        1.0f / std::tan(degreesToRadians(75.0f) * 0.5f)));
+
+    const Vec3 pointOnAim =
+        frame.cameraOverride->position + expectedForward * 5.0f;
+    const Vec3 projected = IsoScenePreparer::projectIsoPoint(
+        scene.isoLayout,
+        scene.renderExtent,
+        pointOnAim);
+    CHECK(near(projected.x, 0.0f));
+    CHECK(near(projected.y, 0.0f));
+}
+
 bool containsCell(
     const sokoban::PreparedRenderScene& scene,
     sokoban::GridPosition3 cell)
@@ -1793,6 +1844,7 @@ int main()
     testPointShadowCastersAreRangeCulledConservatively();
     testPointShadowFaceCacheRequiresExactStableGeometry();
     testCameraLayoutUsesConfiguredAngles();
+    testExplicitCameraPoseBypassesBoardFit();
     testPreparationCategorizesOneSharedFacePool();
     testPassListsAreDepthSorted();
     testOpaqueListEndsWithABackToFrontBlendedTail();

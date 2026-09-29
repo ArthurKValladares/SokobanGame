@@ -353,52 +353,6 @@ void VulkanSwapchainResources::publishDisplayColor(
     ++stats.imageBarriers;
 }
 
-void VulkanSwapchainResources::prepareSceneColorAttachment(
-    VkCommandBuffer commandBuffer,
-    RenderStats& stats)
-{
-    vulkanResources::transitionImage(
-        commandBuffer,
-        sceneColorImage_.image,
-        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
-        sceneColorLayout_ == VK_IMAGE_LAYOUT_UNDEFINED
-            ? vulkanResources::ImageState {}
-            : vulkanResources::ImageState {
-                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            },
-        {
-            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        });
-    sceneColorLayout_ = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    ++stats.imageBarriers;
-}
-
-void VulkanSwapchainResources::publishSceneColor(
-    VkCommandBuffer commandBuffer,
-    RenderStats& stats)
-{
-    vulkanResources::transitionImage(
-        commandBuffer,
-        sceneColorImage_.image,
-        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
-        {
-            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        },
-        {
-            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        });
-    sceneColorLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    ++stats.imageBarriers;
-}
-
 void VulkanSwapchainResources::synchronizeAtmosphereComposite(
     VkCommandBuffer commandBuffer,
     bool multisampled,
@@ -741,26 +695,14 @@ VkImage VulkanSwapchainResources::depthSourceImage() const
     return resolveDepthImage_.image ? resolveDepthImage_.image : depthImage_.image;
 }
 
-VkImageView VulkanSwapchainResources::renderColorView(
-    bool resolveIntoSampledScene) const
+VkImageView VulkanSwapchainResources::renderColorView() const
 {
-    if (msaaEnabled()) {
-        return msaaColorImage_.view;
-    }
-    return resolveIntoSampledScene
-        ? sceneColorImage_.view
-        : resolvedColorImage_.view;
+    return msaaEnabled() ? msaaColorImage_.view : resolvedColorImage_.view;
 }
 
-VkImageView VulkanSwapchainResources::resolveColorView(
-    bool resolveIntoSampledScene) const
+VkImageView VulkanSwapchainResources::resolveColorView() const
 {
-    if (!msaaEnabled()) {
-        return VK_NULL_HANDLE;
-    }
-    return resolveIntoSampledScene
-        ? sceneColorImage_.view
-        : resolvedColorImage_.view;
+    return msaaEnabled() ? resolvedColorImage_.view : VK_NULL_HANDLE;
 }
 
 void VulkanSwapchainResources::createSwapchain(
@@ -1016,8 +958,10 @@ void VulkanSwapchainResources::createSceneColor()
         .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-            VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+        // Deliberately not a color attachment. Scene pipelines statically
+        // reference this sampled copy, so making it a render target would
+        // permit an invalid attachment/read feedback path to return.
+        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
             VK_IMAGE_USAGE_SAMPLED_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,

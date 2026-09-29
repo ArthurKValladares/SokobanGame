@@ -100,6 +100,12 @@ public:
     struct PreparedFrame {
         uint32_t levelWidth = 0;
         uint32_t levelHeight = 0;
+        // Published for Debug tools that need to detach from the currently
+        // rendered camera without reaching into the renderer's frame scratch.
+        Vec3 cameraPosition {};
+        Vec3 cameraForward {};
+        float cameraVerticalFovDegrees = 60.0f;
+        bool cameraValid = false;
 
     private:
         friend class VulkanRenderer;

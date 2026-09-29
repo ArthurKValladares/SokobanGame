@@ -485,6 +485,16 @@ struct RenderFrameData {
 
     RenderViewMode viewMode = RenderViewMode::TopDown2D;
     std::optional<float> cameraPitchDegrees;
+    // An explicit perspective camera pose. Normal gameplay leaves this
+    // unset and lets the scene preparer fit the authored board extent. The
+    // Debug detached camera sets it so position and aim are independent of
+    // the board while every render pass continues to share one camera.
+    struct CameraOverride {
+        Vec3 position {};
+        Vec3 forward { 0.0f, 1.0f, 0.0f };
+        float verticalFovDegrees = 60.0f;
+    };
+    std::optional<CameraOverride> cameraOverride;
     // Pulls the camera back without changing what is framed. The fit rescales
     // to compensate, so this picks a lens rather than a zoom: a larger value is
     // a longer lens with less perspective divergence, and the subject stays the

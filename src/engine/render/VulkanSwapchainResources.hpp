@@ -59,12 +59,6 @@ public:
         uint32_t imageIndex,
         RenderStats& stats) const;
     void ensureSceneColorReadable(VkCommandBuffer commandBuffer, RenderStats& stats);
-    void prepareSceneColorAttachment(
-        VkCommandBuffer commandBuffer,
-        RenderStats& stats);
-    void publishSceneColor(
-        VkCommandBuffer commandBuffer,
-        RenderStats& stats);
     // Orders one in-place atmosphere blend after preceding scene/medium color
     // writes without copying the target through the sampled scene image.
     void synchronizeAtmosphereComposite(
@@ -126,10 +120,8 @@ public:
     [[nodiscard]] VkImageView resolvedColorView() const { return resolvedColorImage_.view; }
     [[nodiscard]] VkImage displayColorImage() const { return displayColorImage_.image; }
     [[nodiscard]] VkImageView displayColorView() const { return displayColorImage_.view; }
-    [[nodiscard]] VkImageView renderColorView(
-        bool resolveIntoSampledScene = false) const;
-    [[nodiscard]] VkImageView resolveColorView(
-        bool resolveIntoSampledScene = false) const;
+    [[nodiscard]] VkImageView renderColorView() const;
+    [[nodiscard]] VkImageView resolveColorView() const;
 
 private:
     struct SwapchainImage {

@@ -550,14 +550,8 @@ public:
                 frameData.lighting.ambientOcclusion) ||
             atmosphereSamplesSceneDepth(frameData) ||
             mainHasTranslucency;
-        const bool directSsaoColor =
-            VulkanSsaoPass::samplesSceneDepth(
-                frameData.lighting.ambientOcclusion) &&
-            !mainHasTranslucency &&
-            ssaoPass_.valid() && pipelines_.ssao() &&
-            pipelines_.ssaoComposite();
         const bool ssaoColorSnapshotCopied =
-            !directSsaoColor && VulkanSsaoPass::samplesSceneDepth(
+            VulkanSsaoPass::samplesSceneDepth(
                 frameData.lighting.ambientOcclusion);
         stats_.mainSceneHasTranslucency = mainHasTranslucency;
         stats_.ssaoColorSnapshotCopied = ssaoColorSnapshotCopied;
@@ -565,11 +559,10 @@ public:
             device_, commandBuffer, "Game rendering", { 0.2f, 0.9f, 0.4f, 1.0f });
         recordGameRendering(
             commandBuffer,
-            swapchain_.renderColorView(directSsaoColor),
-            swapchain_.resolveColorView(directSsaoColor),
+            swapchain_.renderColorView(),
+            swapchain_.resolveColorView(),
             frameData,
             scene,
-            directSsaoColor,
             mirrorPreviewOverFog);
         vulkanDebug::endLabel(device_, commandBuffer);
         gameTimeTelemetry_.record(elapsedMilliseconds(gameStart));
@@ -1023,7 +1016,6 @@ private:
         VkImageView resolveView,
         const RenderFrameData& frameData,
         const PreparedRenderScene& scene,
-        bool directSsaoColor,
         bool mirrorPreviewOverFog)
     {
         SOKOBAN_PROFILE_SCOPE("Renderer.Record game scene");
@@ -1052,11 +1044,13 @@ private:
             commandBuffer,
             configuration_.descriptorFrameIndex,
             VulkanGpuPhase::SceneRaster);
-        if (directSsaoColor) {
-            swapchain_.prepareSceneColorAttachment(commandBuffer, stats_);
-        } else {
-            swapchain_.ensureSceneColorReadable(commandBuffer, stats_);
-        }
+        // Scene fragment pipelines statically reference the sampled scene
+        // color binding (blur/refraction branches included). It therefore
+        // must remain shader-readable even when a particular opaque draw
+        // will not take those branches. Rendering directly into that image
+        // creates an attachment/read feedback loop and is invalid without a
+        // feedback-loop layout extension.
+        swapchain_.ensureSceneColorReadable(commandBuffer, stats_);
         recordScenePass(
             commandBuffer,
             colorView,
@@ -1075,9 +1069,6 @@ private:
                 .profileOpaqueGeometry = true,
             },
             { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
-        if (directSsaoColor) {
-            swapchain_.publishSceneColor(commandBuffer, stats_);
-        }
         gpuProfiler_.endPhase(
             commandBuffer,
             configuration_.descriptorFrameIndex,

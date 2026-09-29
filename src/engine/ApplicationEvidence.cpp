@@ -67,7 +67,7 @@ void Application::captureEvidenceScene()
     if (evidenceWaterEnabled_ && evidenceAmbientOcclusionEnabled_ &&
         !evidenceStats_.ssaoColorSnapshotCopied) {
         throw std::runtime_error(
-            "Evidence water fixture did not exercise the SSAO color-copy fallback");
+            "Evidence water fixture did not exercise the SSAO color snapshot");
     }
     const std::string suffix = evidenceSuffix(
         evidenceStats_.renderScalePercent,
@@ -149,7 +149,7 @@ void Application::finishEvidenceCapture()
     report << "- Main-scene translucency: "
            << (evidenceStats_.mainSceneHasTranslucency ? "present" : "absent")
            << "\n";
-    report << "- SSAO color-copy fallback: "
+    report << "- SSAO color snapshot: "
            << (evidenceStats_.ssaoColorSnapshotCopied ? "exercised" : "skipped")
            << "\n";
     report << "- MSAA samples: " << evidenceStats_.activeSamples << "\n";

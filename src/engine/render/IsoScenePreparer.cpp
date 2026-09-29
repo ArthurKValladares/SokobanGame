@@ -249,28 +249,53 @@ IsoRenderLayout calculateIsoLayout(
         cameraExtent.depth = interpolate(
             cameraExtent.depth, static_cast<float>(target.depth));
     }
-    const float cameraDistance = std::max(
-        std::max(cameraExtent.width, cameraExtent.height),
-        1.0f) * config::cameraDistanceScale *
-        std::max(frameData.cameraDistanceMultiplier.value_or(1.0f), 0.01f);
     const Vec3 target {
         cameraExtent.originX + cameraExtent.width * 0.5f,
         cameraExtent.originY + cameraExtent.height * 0.5f,
         cameraExtent.originZ +
             (std::max(cameraExtent.depth, 1.0f) - 1.0f) * 0.5f,
     };
-    const float horizontalDistance =
-        std::sin(pitch) * cameraDistance;
-    const Vec3 cameraPosition {
-        target.x + std::sin(yaw) * horizontalDistance,
-        target.y + std::cos(yaw) * horizontalDistance,
-        target.z + std::cos(pitch) * cameraDistance,
-    };
-    const Vec3 cameraForward = normalize(subtract(target, cameraPosition));
-    const Vec3 cameraRight = std::abs(horizontalDistance) > 0.0001f
-        ? normalize(cross({ 0.0f, 0.0f, 1.0f }, cameraForward))
-        : Vec3 { std::cos(yaw), -std::sin(yaw), 0.0f };
-    const Vec3 cameraUp = normalize(cross(cameraForward, cameraRight));
+    Vec3 cameraPosition;
+    Vec3 cameraForward;
+    Vec3 cameraRight;
+    Vec3 cameraUp;
+    float verticalFovDegrees = config::cameraVerticalFovDegrees;
+    if (frameData.cameraOverride) {
+        cameraPosition = frameData.cameraOverride->position;
+        cameraForward = normalizeOr(
+            frameData.cameraOverride->forward,
+            Vec3 { 0.0f, 1.0f, 0.0f });
+        const Vec3 referenceUp = std::abs(cameraForward.z) > 0.999f
+            ? Vec3 { 0.0f, 1.0f, 0.0f }
+            : Vec3 { 0.0f, 0.0f, 1.0f };
+        cameraRight = normalizeOr(
+            cross(referenceUp, cameraForward),
+            Vec3 { 1.0f, 0.0f, 0.0f });
+        cameraUp = normalize(cross(cameraForward, cameraRight));
+        verticalFovDegrees = std::clamp(
+            frameData.cameraOverride->verticalFovDegrees,
+            1.0f,
+            179.0f);
+    } else {
+        const float cameraDistance = std::max(
+            std::max(cameraExtent.width, cameraExtent.height),
+            1.0f) * config::cameraDistanceScale *
+            std::max(
+                frameData.cameraDistanceMultiplier.value_or(1.0f),
+                0.01f);
+        const float horizontalDistance =
+            std::sin(pitch) * cameraDistance;
+        cameraPosition = {
+            target.x + std::sin(yaw) * horizontalDistance,
+            target.y + std::cos(yaw) * horizontalDistance,
+            target.z + std::cos(pitch) * cameraDistance,
+        };
+        cameraForward = normalize(subtract(target, cameraPosition));
+        cameraRight = std::abs(horizontalDistance) > 0.0001f
+            ? normalize(cross({ 0.0f, 0.0f, 1.0f }, cameraForward))
+            : Vec3 { std::cos(yaw), -std::sin(yaw), 0.0f };
+        cameraUp = normalize(cross(cameraForward, cameraRight));
+    }
 
     IsoRenderLayout layout {
         .cameraPosition = cameraPosition,
@@ -278,7 +303,7 @@ IsoRenderLayout calculateIsoLayout(
         .cameraUp = cameraUp,
         .cameraForward = cameraForward,
         .focalLength = 1.0f / std::tan(
-            config::cameraVerticalFovDegrees * radiansPerDegree * 0.5f),
+            verticalFovDegrees * radiansPerDegree * 0.5f),
     };
 
     Vec2 minPoint {
@@ -289,8 +314,12 @@ IsoRenderLayout calculateIsoLayout(
         std::numeric_limits<float>::lowest(),
         std::numeric_limits<float>::lowest(),
     };
-    float nearestDepth = std::numeric_limits<float>::max();
-    float farthestDepth = std::numeric_limits<float>::lowest();
+    float nearestDepth = frameData.cameraOverride
+        ? 0.05f
+        : std::numeric_limits<float>::max();
+    float farthestDepth = frameData.cameraOverride
+        ? 0.05f
+        : std::numeric_limits<float>::lowest();
 
     // The depth range and the on-screen fit are separate questions and must
     // stay separate. The fit is authored: an explicit cameraExtent decides
@@ -305,6 +334,12 @@ IsoRenderLayout calculateIsoLayout(
         const float cameraDepth =
             dot(subtract(worldPoint, layout.cameraPosition),
                 layout.cameraForward);
+        if (frameData.cameraOverride) {
+            if (cameraDepth > 0.0f) {
+                farthestDepth = std::max(farthestDepth, cameraDepth);
+            }
+            return;
+        }
         nearestDepth = std::min(nearestDepth, cameraDepth);
         farthestDepth = std::max(farthestDepth, cameraDepth);
     };
@@ -329,13 +364,18 @@ IsoRenderLayout calculateIsoLayout(
              Vec3 { left, nearY, bottom },
              Vec3 { right, farY, top },
          })) {
-        includePoint(point);
+        if (frameData.cameraOverride) {
+            includeDepth(point);
+        } else {
+            includePoint(point);
+        }
     }
     // Every tile is walked for depth. Only the ones that own the framing are
     // also walked for the fit, and only when the fit is not authored.
     const bool fitToContent = !frameData.cameraExtent;
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
-        const bool framesTheCamera = fitToContent &&
+        const bool framesTheCamera = !frameData.cameraOverride &&
+            fitToContent &&
             !tile.isEditorPreview && tile.affectsCameraFit;
         for (Vec3 point : tileCorners(tile)) {
             if (framesTheCamera) {
@@ -347,12 +387,22 @@ IsoRenderLayout calculateIsoLayout(
     }
     for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
         for (Vec3 point : face.vertices) {
-            if (fitToContent) {
+            if (!frameData.cameraOverride && fitToContent) {
                 includePoint(point);
             } else {
                 includeDepth(point);
             }
         }
+    }
+
+    if (frameData.cameraOverride) {
+        layout.projectedCenter = {};
+        layout.fitScale = 1.0f;
+        layout.nearestDepth = nearestDepth;
+        layout.farthestDepth = std::max(
+            farthestDepth + config::cameraDepthPaddingTiles,
+            layout.nearestDepth + 1.0f);
+        return layout;
     }
 
     const Vec2 sceneSize {
