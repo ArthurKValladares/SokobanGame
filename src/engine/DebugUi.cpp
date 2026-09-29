@@ -53,6 +53,23 @@ enum class DebugUiTheme {
     RosePine,
     OneDark,
     Everforest,
+    DeepBlue,
+    BlackGreen,
+    ForestGreen,
+    Amethyst,
+    Sapphire,
+    Amber,
+    CrimsonVesuvius,
+    Cyberpunk,
+    PaperAndInk,
+    RoseQuartz,
+    NuklearGray,
+};
+
+enum class DebugUiThemeGroup {
+    BuiltIn,
+    Curated,
+    ImGuiGallery,
 };
 
 struct DebugUiThemeDefinition {
@@ -60,7 +77,7 @@ struct DebugUiThemeDefinition {
     const char* label;
     const char* key;
     const char* description;
-    bool builtIn;
+    DebugUiThemeGroup group;
 };
 
 constexpr std::array debugUiThemes {
@@ -69,98 +86,175 @@ constexpr std::array debugUiThemes {
         "Dear ImGui Dark",
         "Dark",
         "Dear ImGui's default dark palette.",
-        true,
+        DebugUiThemeGroup::BuiltIn,
     },
     DebugUiThemeDefinition {
         DebugUiTheme::Light,
         "Dear ImGui Light",
         "Light",
         "Dear ImGui's default light palette.",
-        true,
+        DebugUiThemeGroup::BuiltIn,
     },
     DebugUiThemeDefinition {
         DebugUiTheme::Classic,
         "Dear ImGui Classic",
         "Classic",
         "Dear ImGui's original high-contrast palette.",
-        true,
+        DebugUiThemeGroup::BuiltIn,
     },
     DebugUiThemeDefinition {
         DebugUiTheme::HighContrast,
         "High Contrast",
         "HighContrast",
         "Near-black surfaces, bright text, and strong focus indicators.",
-        false,
+        DebugUiThemeGroup::Curated,
     },
     DebugUiThemeDefinition {
         DebugUiTheme::Dracula,
         "Dracula",
         "Dracula",
         "Deep violet surfaces with bright purple and cyan accents.",
-        false,
+        DebugUiThemeGroup::Curated,
     },
     DebugUiThemeDefinition {
         DebugUiTheme::Nord,
         "Nord",
         "Nord",
         "An arctic blue palette with muted, low-glare contrast.",
-        false,
+        DebugUiThemeGroup::Curated,
     },
     DebugUiThemeDefinition {
         DebugUiTheme::CatppuccinMocha,
         "Catppuccin Mocha",
         "CatppuccinMocha",
         "A warm dark palette with pastel blue and mauve accents.",
-        false,
+        DebugUiThemeGroup::Curated,
     },
     DebugUiThemeDefinition {
         DebugUiTheme::GruvboxDark,
         "Gruvbox Dark",
         "GruvboxDark",
         "Warm retro neutrals with earthy blue and aqua accents.",
-        false,
+        DebugUiThemeGroup::Curated,
     },
     DebugUiThemeDefinition {
         DebugUiTheme::SolarizedDark,
         "Solarized Dark",
         "SolarizedDark",
         "Low-glare blue-green surfaces with balanced contrast.",
-        false,
+        DebugUiThemeGroup::Curated,
     },
     DebugUiThemeDefinition {
         DebugUiTheme::SolarizedLight,
         "Solarized Light",
         "SolarizedLight",
         "A warm light theme using Solarized's symmetric palette.",
-        false,
+        DebugUiThemeGroup::Curated,
     },
     DebugUiThemeDefinition {
         DebugUiTheme::TokyoNight,
         "Tokyo Night",
         "TokyoNight",
         "Midnight navy surfaces with vivid blue and violet accents.",
-        false,
+        DebugUiThemeGroup::Curated,
     },
     DebugUiThemeDefinition {
         DebugUiTheme::RosePine,
         "Rose Pine",
         "RosePine",
         "Soft ink surfaces with rose, foam, and iris accents.",
-        false,
+        DebugUiThemeGroup::Curated,
     },
     DebugUiThemeDefinition {
         DebugUiTheme::OneDark,
         "One Dark",
         "OneDark",
         "Graphite surfaces with crisp blue and purple accents.",
-        false,
+        DebugUiThemeGroup::Curated,
     },
     DebugUiThemeDefinition {
         DebugUiTheme::Everforest,
         "Everforest",
         "Everforest",
         "Muted forest greens and warm, comfortable foregrounds.",
-        false,
+        DebugUiThemeGroup::Curated,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::DeepBlue,
+        "Deep Blue",
+        "DeepBlue",
+        "An early ImGui gallery favorite with rounded windows and square scrollbars.",
+        DebugUiThemeGroup::ImGuiGallery,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::BlackGreen,
+        "Black & Green",
+        "BlackGreen",
+        "Compact near-black surfaces with vivid green controls.",
+        DebugUiThemeGroup::ImGuiGallery,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::ForestGreen,
+        "Forest Green",
+        "ForestGreen",
+        "Roomy dark green panels with softly rounded controls.",
+        DebugUiThemeGroup::ImGuiGallery,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::Amethyst,
+        "Amethyst",
+        "Amethyst",
+        "A dark violet interface with lilac highlights.",
+        DebugUiThemeGroup::ImGuiGallery,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::Sapphire,
+        "Sapphire",
+        "Sapphire",
+        "Deep blue surfaces with crisp sapphire focus states.",
+        DebugUiThemeGroup::ImGuiGallery,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::Amber,
+        "Amber",
+        "Amber",
+        "Charcoal and warm amber with compact, gently rounded widgets.",
+        DebugUiThemeGroup::ImGuiGallery,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::CrimsonVesuvius,
+        "Crimson Vesuvius",
+        "CrimsonVesuvius",
+        "A dense charcoal-and-crimson theme with restrained rounding.",
+        DebugUiThemeGroup::ImGuiGallery,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::Cyberpunk,
+        "Cyberpunk",
+        "Cyberpunk",
+        "Hard square edges, neon cyan, and magenta accents.",
+        DebugUiThemeGroup::ImGuiGallery,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::PaperAndInk,
+        "Paper & Ink",
+        "PaperAndInk",
+        "A bordered warm-paper theme with dark ink and blue accents.",
+        DebugUiThemeGroup::ImGuiGallery,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::RoseQuartz,
+        "Rose Quartz",
+        "RoseQuartz",
+        "Generous spacing, pill-like controls, and muted rose accents.",
+        DebugUiThemeGroup::ImGuiGallery,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::NuklearGray,
+        "Nuklear Gray",
+        "NuklearGray",
+        "A compact industrial gray skin with subtle warm highlights.",
+        DebugUiThemeGroup::ImGuiGallery,
     },
 };
 
@@ -292,6 +386,348 @@ void applyPalette(ImGuiStyle& style, const DebugUiPalette& palette)
     colors[ImGuiCol_NavWindowingHighlight] = withAlpha(palette.text, 0.70f);
     colors[ImGuiCol_NavWindowingDimBg] = color(0x000000, 0.20f);
     colors[ImGuiCol_ModalWindowDimBg] = color(0x000000, 0.35f);
+}
+
+struct DebugUiStyleProfile {
+    ImVec2 windowPadding { 8.0f, 8.0f };
+    ImVec2 framePadding { 5.0f, 3.0f };
+    ImVec2 cellPadding { 6.0f, 4.0f };
+    ImVec2 itemSpacing { 6.0f, 4.0f };
+    ImVec2 itemInnerSpacing { 6.0f, 4.0f };
+    float indentSpacing = 20.0f;
+    float scrollbarSize = 13.0f;
+    float grabMinSize = 10.0f;
+    float windowRounding = 4.0f;
+    float childRounding = 3.0f;
+    float popupRounding = 3.0f;
+    float frameRounding = 3.0f;
+    float scrollbarRounding = 9.0f;
+    float grabRounding = 3.0f;
+    float tabRounding = 3.0f;
+    float windowBorderSize = 1.0f;
+    float childBorderSize = 1.0f;
+    float popupBorderSize = 1.0f;
+    float frameBorderSize = 0.0f;
+    float tabBorderSize = 0.0f;
+    float tabBarBorderSize = 1.0f;
+    float tabBarOverlineSize = 2.0f;
+    float dockingSeparatorSize = 1.0f;
+    ImVec2 windowTitleAlign { 0.0f, 0.5f };
+    ImGuiDir windowMenuButtonPosition = ImGuiDir_Left;
+};
+
+void applyStyleProfile(
+    ImGuiStyle& style,
+    const DebugUiStyleProfile& profile)
+{
+    style.WindowPadding = profile.windowPadding;
+    style.FramePadding = profile.framePadding;
+    style.CellPadding = profile.cellPadding;
+    style.ItemSpacing = profile.itemSpacing;
+    style.ItemInnerSpacing = profile.itemInnerSpacing;
+    style.IndentSpacing = profile.indentSpacing;
+    style.ScrollbarSize = profile.scrollbarSize;
+    style.GrabMinSize = profile.grabMinSize;
+    style.WindowRounding = profile.windowRounding;
+    style.ChildRounding = profile.childRounding;
+    style.PopupRounding = profile.popupRounding;
+    style.FrameRounding = profile.frameRounding;
+    style.ScrollbarRounding = profile.scrollbarRounding;
+    style.GrabRounding = profile.grabRounding;
+    style.TabRounding = profile.tabRounding;
+    style.WindowBorderSize = profile.windowBorderSize;
+    style.ChildBorderSize = profile.childBorderSize;
+    style.PopupBorderSize = profile.popupBorderSize;
+    style.FrameBorderSize = profile.frameBorderSize;
+    style.TabBorderSize = profile.tabBorderSize;
+    style.TabBarBorderSize = profile.tabBarBorderSize;
+    style.TabBarOverlineSize = profile.tabBarOverlineSize;
+    style.DockingSeparatorSize = profile.dockingSeparatorSize;
+    style.WindowTitleAlign = profile.windowTitleAlign;
+    style.WindowMenuButtonPosition = profile.windowMenuButtonPosition;
+}
+
+// Community themes are adapted to the current ImGui style fields from:
+// https://github.com/ocornut/imgui/issues/707
+void applyThemeGeometry(ImGuiStyle& style, DebugUiTheme theme)
+{
+    DebugUiStyleProfile profile;
+    switch (theme) {
+    case DebugUiTheme::Dark:
+    case DebugUiTheme::Light:
+    case DebugUiTheme::Classic:
+        return;
+    case DebugUiTheme::HighContrast:
+        profile.windowPadding = { 8.0f, 8.0f };
+        profile.framePadding = { 6.0f, 4.0f };
+        profile.itemSpacing = { 8.0f, 5.0f };
+        profile.windowRounding = 0.0f;
+        profile.childRounding = 0.0f;
+        profile.popupRounding = 0.0f;
+        profile.frameRounding = 0.0f;
+        profile.scrollbarRounding = 0.0f;
+        profile.grabRounding = 0.0f;
+        profile.tabRounding = 0.0f;
+        profile.frameBorderSize = 1.0f;
+        break;
+    case DebugUiTheme::Dracula:
+        profile.windowPadding = { 10.0f, 10.0f };
+        profile.framePadding = { 6.0f, 4.0f };
+        profile.itemSpacing = { 8.0f, 6.0f };
+        profile.scrollbarSize = 14.0f;
+        profile.grabMinSize = 12.0f;
+        profile.windowRounding = 6.0f;
+        profile.childRounding = 4.0f;
+        profile.popupRounding = 4.0f;
+        profile.frameRounding = 4.0f;
+        profile.scrollbarRounding = 12.0f;
+        profile.grabRounding = 4.0f;
+        profile.tabRounding = 4.0f;
+        profile.frameBorderSize = 1.0f;
+        break;
+    case DebugUiTheme::Nord:
+        profile.windowRounding = 5.0f;
+        profile.childRounding = 4.0f;
+        profile.frameRounding = 3.0f;
+        profile.popupRounding = 4.0f;
+        profile.grabRounding = 3.0f;
+        profile.tabRounding = 4.0f;
+        break;
+    case DebugUiTheme::CatppuccinMocha:
+        profile.windowPadding = { 12.0f, 12.0f };
+        profile.framePadding = { 6.0f, 4.0f };
+        profile.itemSpacing = { 8.0f, 6.0f };
+        profile.scrollbarSize = 14.0f;
+        profile.grabMinSize = 12.0f;
+        profile.windowRounding = 8.0f;
+        profile.childRounding = 5.0f;
+        profile.popupRounding = 5.0f;
+        profile.frameRounding = 5.0f;
+        profile.scrollbarRounding = 12.0f;
+        profile.grabRounding = 5.0f;
+        profile.tabRounding = 5.0f;
+        break;
+    case DebugUiTheme::GruvboxDark:
+        profile.windowPadding = { 10.0f, 10.0f };
+        profile.framePadding = { 6.0f, 4.0f };
+        profile.itemSpacing = { 8.0f, 4.0f };
+        profile.scrollbarSize = 14.0f;
+        profile.grabMinSize = 12.0f;
+        profile.windowRounding = 2.0f;
+        profile.childRounding = 2.0f;
+        profile.popupRounding = 2.0f;
+        profile.frameRounding = 2.0f;
+        profile.scrollbarRounding = 2.0f;
+        profile.grabRounding = 2.0f;
+        profile.tabRounding = 2.0f;
+        profile.frameBorderSize = 1.0f;
+        break;
+    case DebugUiTheme::SolarizedDark:
+    case DebugUiTheme::SolarizedLight:
+        profile.windowPadding = { 9.0f, 9.0f };
+        profile.framePadding = { 6.0f, 4.0f };
+        profile.itemSpacing = { 7.0f, 5.0f };
+        profile.windowRounding = 3.0f;
+        profile.childRounding = 3.0f;
+        profile.popupRounding = 3.0f;
+        profile.frameRounding = 3.0f;
+        profile.scrollbarRounding = 3.0f;
+        profile.grabRounding = 3.0f;
+        profile.tabRounding = 3.0f;
+        break;
+    case DebugUiTheme::TokyoNight:
+        profile.windowPadding = { 9.0f, 9.0f };
+        profile.framePadding = { 6.0f, 4.0f };
+        profile.itemSpacing = { 8.0f, 5.0f };
+        profile.windowRounding = 5.0f;
+        profile.childRounding = 4.0f;
+        profile.popupRounding = 4.0f;
+        profile.frameRounding = 3.0f;
+        profile.grabRounding = 3.0f;
+        profile.tabRounding = 4.0f;
+        break;
+    case DebugUiTheme::RosePine:
+        profile.windowPadding = { 11.0f, 11.0f };
+        profile.framePadding = { 6.0f, 4.0f };
+        profile.itemSpacing = { 8.0f, 6.0f };
+        profile.scrollbarSize = 14.0f;
+        profile.grabMinSize = 12.0f;
+        profile.windowRounding = 8.0f;
+        profile.childRounding = 5.0f;
+        profile.popupRounding = 5.0f;
+        profile.frameRounding = 5.0f;
+        profile.scrollbarRounding = 12.0f;
+        profile.grabRounding = 5.0f;
+        profile.tabRounding = 5.0f;
+        break;
+    case DebugUiTheme::OneDark:
+        profile.windowRounding = 3.0f;
+        profile.childRounding = 3.0f;
+        profile.popupRounding = 3.0f;
+        profile.frameRounding = 3.0f;
+        profile.scrollbarRounding = 3.0f;
+        profile.grabRounding = 3.0f;
+        profile.tabRounding = 3.0f;
+        profile.frameBorderSize = 1.0f;
+        profile.dockingSeparatorSize = 3.0f;
+        break;
+    case DebugUiTheme::Everforest:
+        profile.windowPadding = { 10.0f, 10.0f };
+        profile.framePadding = { 6.0f, 4.0f };
+        profile.itemSpacing = { 8.0f, 6.0f };
+        profile.windowRounding = 6.0f;
+        profile.childRounding = 4.0f;
+        profile.popupRounding = 4.0f;
+        profile.frameRounding = 4.0f;
+        profile.scrollbarRounding = 6.0f;
+        profile.grabRounding = 4.0f;
+        profile.tabRounding = 4.0f;
+        break;
+    case DebugUiTheme::DeepBlue:
+        profile.windowRounding = 5.3f;
+        profile.childRounding = 3.0f;
+        profile.popupRounding = 3.0f;
+        profile.frameRounding = 2.3f;
+        profile.scrollbarRounding = 0.0f;
+        profile.grabRounding = 2.3f;
+        profile.tabRounding = 2.3f;
+        break;
+    case DebugUiTheme::BlackGreen:
+        profile.scrollbarSize = 10.0f;
+        profile.grabMinSize = 10.0f;
+        profile.windowRounding = 4.0f;
+        profile.childRounding = 4.0f;
+        profile.popupRounding = 4.0f;
+        profile.frameRounding = 4.0f;
+        profile.scrollbarRounding = 4.0f;
+        profile.grabRounding = 3.0f;
+        profile.tabRounding = 4.0f;
+        profile.windowMenuButtonPosition = ImGuiDir_Right;
+        break;
+    case DebugUiTheme::ForestGreen:
+        profile.windowPadding = { 10.0f, 10.0f };
+        profile.framePadding = { 6.0f, 4.0f };
+        profile.itemSpacing = { 8.0f, 6.0f };
+        profile.scrollbarSize = 14.0f;
+        profile.grabMinSize = 12.0f;
+        profile.windowRounding = 6.0f;
+        profile.childRounding = 4.0f;
+        profile.popupRounding = 4.0f;
+        profile.frameRounding = 4.0f;
+        profile.scrollbarRounding = 4.0f;
+        profile.grabRounding = 4.0f;
+        profile.tabRounding = 4.0f;
+        profile.frameBorderSize = 1.0f;
+        break;
+    case DebugUiTheme::Amethyst:
+        profile.windowPadding = { 11.0f, 10.0f };
+        profile.framePadding = { 7.0f, 4.0f };
+        profile.itemSpacing = { 8.0f, 6.0f };
+        profile.windowRounding = 7.0f;
+        profile.childRounding = 5.0f;
+        profile.popupRounding = 5.0f;
+        profile.frameRounding = 5.0f;
+        profile.scrollbarRounding = 8.0f;
+        profile.grabRounding = 5.0f;
+        profile.tabRounding = 5.0f;
+        break;
+    case DebugUiTheme::Sapphire:
+        profile.windowPadding = { 9.0f, 9.0f };
+        profile.framePadding = { 6.0f, 4.0f };
+        profile.itemSpacing = { 7.0f, 5.0f };
+        profile.windowRounding = 5.0f;
+        profile.childRounding = 3.0f;
+        profile.popupRounding = 4.0f;
+        profile.frameRounding = 3.0f;
+        profile.scrollbarRounding = 6.0f;
+        profile.grabRounding = 3.0f;
+        profile.tabRounding = 3.0f;
+        break;
+    case DebugUiTheme::Amber:
+        profile.windowPadding = { 8.0f, 8.0f };
+        profile.framePadding = { 6.0f, 3.0f };
+        profile.itemSpacing = { 7.0f, 4.0f };
+        profile.windowRounding = 4.0f;
+        profile.childRounding = 3.0f;
+        profile.popupRounding = 3.0f;
+        profile.frameRounding = 3.0f;
+        profile.scrollbarRounding = 4.0f;
+        profile.grabRounding = 3.0f;
+        profile.tabRounding = 3.0f;
+        break;
+    case DebugUiTheme::CrimsonVesuvius:
+        profile.windowPadding = { 10.0f, 10.0f };
+        profile.framePadding = { 5.0f, 3.0f };
+        profile.itemSpacing = { 8.0f, 4.0f };
+        profile.scrollbarSize = 13.0f;
+        profile.grabMinSize = 10.0f;
+        profile.windowRounding = 3.0f;
+        profile.childRounding = 2.0f;
+        profile.popupRounding = 2.0f;
+        profile.frameRounding = 2.0f;
+        profile.scrollbarRounding = 12.0f;
+        profile.grabRounding = 2.0f;
+        profile.tabRounding = 3.0f;
+        profile.frameBorderSize = 1.0f;
+        break;
+    case DebugUiTheme::Cyberpunk:
+        profile.windowPadding = { 10.0f, 10.0f };
+        profile.framePadding = { 6.0f, 4.0f };
+        profile.itemSpacing = { 8.0f, 4.0f };
+        profile.windowRounding = 0.0f;
+        profile.childRounding = 0.0f;
+        profile.popupRounding = 0.0f;
+        profile.frameRounding = 0.0f;
+        profile.scrollbarRounding = 0.0f;
+        profile.grabRounding = 0.0f;
+        profile.tabRounding = 0.0f;
+        profile.frameBorderSize = 1.0f;
+        break;
+    case DebugUiTheme::PaperAndInk:
+        profile.windowPadding = { 12.0f, 12.0f };
+        profile.framePadding = { 6.0f, 4.0f };
+        profile.itemSpacing = { 8.0f, 6.0f };
+        profile.scrollbarSize = 14.0f;
+        profile.grabMinSize = 12.0f;
+        profile.windowRounding = 2.0f;
+        profile.childRounding = 2.0f;
+        profile.popupRounding = 2.0f;
+        profile.frameRounding = 2.0f;
+        profile.scrollbarRounding = 12.0f;
+        profile.grabRounding = 2.0f;
+        profile.tabRounding = 2.0f;
+        profile.frameBorderSize = 1.0f;
+        profile.tabBorderSize = 1.0f;
+        break;
+    case DebugUiTheme::RoseQuartz:
+        profile.windowPadding = { 10.0f, 10.0f };
+        profile.framePadding = { 6.0f, 4.0f };
+        profile.itemSpacing = { 8.0f, 5.0f };
+        profile.scrollbarSize = 14.0f;
+        profile.grabMinSize = 12.0f;
+        profile.windowRounding = 10.0f;
+        profile.childRounding = 6.0f;
+        profile.popupRounding = 6.0f;
+        profile.frameRounding = 6.0f;
+        profile.scrollbarRounding = 12.0f;
+        profile.grabRounding = 6.0f;
+        profile.tabRounding = 6.0f;
+        break;
+    case DebugUiTheme::NuklearGray:
+        profile.windowPadding = { 8.0f, 8.0f };
+        profile.framePadding = { 5.0f, 3.0f };
+        profile.itemSpacing = { 6.0f, 4.0f };
+        profile.windowRounding = 2.0f;
+        profile.childRounding = 2.0f;
+        profile.popupRounding = 2.0f;
+        profile.frameRounding = 2.0f;
+        profile.scrollbarRounding = 2.0f;
+        profile.grabRounding = 2.0f;
+        profile.tabRounding = 2.0f;
+        profile.frameBorderSize = 1.0f;
+        break;
+    }
+    applyStyleProfile(style, profile);
 }
 
 void applyThemeColors(ImGuiStyle& style, DebugUiTheme theme)
@@ -515,6 +951,215 @@ void applyThemeColors(ImGuiStyle& style, DebugUiTheme theme)
             .positive = color(0xa7c080),
         });
         return;
+    case DebugUiTheme::DeepBlue:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xf2f5f8),
+            .textDisabled = color(0x8294a6),
+            .window = color(0x101722),
+            .child = color(0x0b111a),
+            .popup = color(0x162536),
+            .border = color(0x2d4f6c),
+            .surface = color(0x1b3044),
+            .surfaceHovered = color(0x245477),
+            .surfaceActive = color(0x3279a8),
+            .accent = color(0x65b9eb),
+            .accentHovered = color(0x8bd1ff),
+            .accentActive = color(0x3d90c2),
+            .warning = color(0xe6b450),
+            .positive = color(0x69c796),
+        });
+        return;
+    case DebugUiTheme::BlackGreen:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xe8f5eb),
+            .textDisabled = color(0x68816f),
+            .window = color(0x050806),
+            .child = color(0x09100b),
+            .popup = color(0x0d1710),
+            .border = color(0x244d2d),
+            .surface = color(0x102517),
+            .surfaceHovered = color(0x173921),
+            .surfaceActive = color(0x205c2d),
+            .accent = color(0x46e36f),
+            .accentHovered = color(0x75f293),
+            .accentActive = color(0xb2ffc3),
+            .warning = color(0xffd166),
+            .positive = color(0x6dea8d),
+        });
+        return;
+    case DebugUiTheme::ForestGreen:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xdce8d8),
+            .textDisabled = color(0x71806f),
+            .window = color(0x152019),
+            .child = color(0x101712),
+            .popup = color(0x1c2b21),
+            .border = color(0x405544),
+            .surface = color(0x24372a),
+            .surfaceHovered = color(0x31513b),
+            .surfaceActive = color(0x3f6b4c),
+            .accent = color(0x72b982),
+            .accentHovered = color(0x91cf9d),
+            .accentActive = color(0xb2ddb5),
+            .warning = color(0xd9ba73),
+            .positive = color(0x80c78b),
+        });
+        return;
+    case DebugUiTheme::Amethyst:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xeee8f7),
+            .textDisabled = color(0x8b7d9d),
+            .window = color(0x1e1727),
+            .child = color(0x17111f),
+            .popup = color(0x291f35),
+            .border = color(0x58456d),
+            .surface = color(0x332642),
+            .surfaceHovered = color(0x49345e),
+            .surfaceActive = color(0x62427d),
+            .accent = color(0xbd82e6),
+            .accentHovered = color(0xd4a6f2),
+            .accentActive = color(0x9f62cc),
+            .warning = color(0xf1bd6b),
+            .positive = color(0x83cf9a),
+        });
+        return;
+    case DebugUiTheme::Sapphire:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xe8f0fa),
+            .textDisabled = color(0x788aa1),
+            .window = color(0x111a27),
+            .child = color(0x0c131d),
+            .popup = color(0x192638),
+            .border = color(0x385475),
+            .surface = color(0x20334a),
+            .surfaceHovered = color(0x294b70),
+            .surfaceActive = color(0x32689d),
+            .accent = color(0x4da3ff),
+            .accentHovered = color(0x78bdff),
+            .accentActive = color(0x267fd4),
+            .warning = color(0xf0b35a),
+            .positive = color(0x6dcc9a),
+        });
+        return;
+    case DebugUiTheme::Amber:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xf0e6d2),
+            .textDisabled = color(0x8d806b),
+            .window = color(0x211c16),
+            .child = color(0x191510),
+            .popup = color(0x2b241b),
+            .border = color(0x5c4b34),
+            .surface = color(0x392f22),
+            .surfaceHovered = color(0x554329),
+            .surfaceActive = color(0x73552b),
+            .accent = color(0xf0a83a),
+            .accentHovered = color(0xffc45f),
+            .accentActive = color(0xd88922),
+            .warning = color(0xffd166),
+            .positive = color(0x9bcf75),
+        });
+        return;
+    case DebugUiTheme::CrimsonVesuvius:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xf2e9e9),
+            .textDisabled = color(0x8b7375),
+            .window = color(0x1d1718),
+            .child = color(0x151112),
+            .popup = color(0x291f20),
+            .border = color(0x62373c),
+            .surface = color(0x352326),
+            .surfaceHovered = color(0x542d33),
+            .surfaceActive = color(0x76343d),
+            .accent = color(0xd94a5b),
+            .accentHovered = color(0xef6a78),
+            .accentActive = color(0xb92f42),
+            .warning = color(0xe8a34a),
+            .positive = color(0x79c98a),
+        });
+        return;
+    case DebugUiTheme::Cyberpunk:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xeafcff),
+            .textDisabled = color(0x637880),
+            .window = color(0x080b10),
+            .child = color(0x05070b),
+            .popup = color(0x10151d),
+            .border = color(0x174e5c),
+            .surface = color(0x111d26),
+            .surfaceHovered = color(0x123746),
+            .surfaceActive = color(0x214f60),
+            .accent = color(0x00e5ff),
+            .accentHovered = color(0xff3cac),
+            .accentActive = color(0xb967ff),
+            .warning = color(0xffd319),
+            .positive = color(0x38f89d),
+        });
+        return;
+    case DebugUiTheme::PaperAndInk:
+        ImGui::StyleColorsLight(&style);
+        applyPalette(style, {
+            .text = color(0x282620),
+            .textDisabled = color(0x847f73),
+            .window = color(0xf4efdf),
+            .child = color(0xe9e2cf),
+            .popup = color(0xfffbef),
+            .border = color(0x6f6a5f),
+            .surface = color(0xe2dac5),
+            .surfaceHovered = color(0xcad8df),
+            .surfaceActive = color(0xaec4d0),
+            .accent = color(0x26658c),
+            .accentHovered = color(0x347fa9),
+            .accentActive = color(0x174d70),
+            .warning = color(0xb56b22),
+            .positive = color(0x4f7c4a),
+        });
+        return;
+    case DebugUiTheme::RoseQuartz:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xf3e8ed),
+            .textDisabled = color(0x9a7f8b),
+            .window = color(0x241b22),
+            .child = color(0x1b151a),
+            .popup = color(0x30242d),
+            .border = color(0x604552),
+            .surface = color(0x3a2a34),
+            .surfaceHovered = color(0x533845),
+            .surfaceActive = color(0x714958),
+            .accent = color(0xe59aaa),
+            .accentHovered = color(0xf2b6c2),
+            .accentActive = color(0xc8778b),
+            .warning = color(0xe9b66d),
+            .positive = color(0x8bc7a2),
+        });
+        return;
+    case DebugUiTheme::NuklearGray:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xe4e4e4),
+            .textDisabled = color(0x858585),
+            .window = color(0x252525),
+            .child = color(0x1d1d1d),
+            .popup = color(0x303030),
+            .border = color(0x555555),
+            .surface = color(0x3a3a3a),
+            .surfaceHovered = color(0x505050),
+            .surfaceActive = color(0x686868),
+            .accent = color(0xd99a4e),
+            .accentHovered = color(0xf0b96c),
+            .accentActive = color(0xbc7a30),
+            .warning = color(0xe5b65b),
+            .positive = color(0x83b97b),
+        });
+        return;
     }
 }
 
@@ -549,6 +1194,7 @@ void applyDebugUiAppearance()
     state.scale = std::clamp(state.scale, 1.0f, 3.0f);
     ImGuiStyle appearance = state.baseStyle;
     applyThemeColors(appearance, state.theme);
+    applyThemeGeometry(appearance, state.theme);
     appearance.ScaleAllSizes(state.scale);
     appearance.FontScaleMain = state.baseStyle.FontScaleMain * state.scale;
     ImGui::GetStyle() = appearance;
@@ -719,23 +1365,32 @@ void drawScaleControl()
 void drawThemeMenu()
 {
     DebugUiAppearanceState& appearance = debugUiAppearanceState();
-    bool reachedCustomThemes = false;
-    for (const DebugUiThemeDefinition& definition : debugUiThemes) {
-        if (!definition.builtIn && !reachedCustomThemes) {
-            ImGui::Separator();
-            reachedCustomThemes = true;
+    const auto drawGroup = [&](const char* label, DebugUiThemeGroup group) {
+        if (!ImGui::BeginMenu(label)) {
+            return;
         }
-        const bool selected = appearance.theme == definition.theme;
-        if (ImGui::MenuItem(definition.label, nullptr, selected) &&
-            !selected) {
-            appearance.theme = definition.theme;
-            applyDebugUiAppearance();
-            ImGui::MarkIniSettingsDirty();
+
+        for (const DebugUiThemeDefinition& definition : debugUiThemes) {
+            if (definition.group != group) {
+                continue;
+            }
+            const bool selected = appearance.theme == definition.theme;
+            if (ImGui::MenuItem(definition.label, nullptr, selected) &&
+                !selected) {
+                appearance.theme = definition.theme;
+                applyDebugUiAppearance();
+                ImGui::MarkIniSettingsDirty();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", definition.description);
+            }
         }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", definition.description);
-        }
-    }
+        ImGui::EndMenu();
+    };
+
+    drawGroup("Built-in", DebugUiThemeGroup::BuiltIn);
+    drawGroup("Curated", DebugUiThemeGroup::Curated);
+    drawGroup("ImGui Gallery", DebugUiThemeGroup::ImGuiGallery);
 }
 
 void drawWorkspaceMenu()
