@@ -42,9 +42,17 @@ enum class DebugUiTheme {
     Dark,
     Light,
     Classic,
+    HighContrast,
     Dracula,
     Nord,
     CatppuccinMocha,
+    GruvboxDark,
+    SolarizedDark,
+    SolarizedLight,
+    TokyoNight,
+    RosePine,
+    OneDark,
+    Everforest,
 };
 
 struct DebugUiThemeDefinition {
@@ -78,6 +86,13 @@ constexpr std::array debugUiThemes {
         true,
     },
     DebugUiThemeDefinition {
+        DebugUiTheme::HighContrast,
+        "High Contrast",
+        "HighContrast",
+        "Near-black surfaces, bright text, and strong focus indicators.",
+        false,
+    },
+    DebugUiThemeDefinition {
         DebugUiTheme::Dracula,
         "Dracula",
         "Dracula",
@@ -96,6 +111,55 @@ constexpr std::array debugUiThemes {
         "Catppuccin Mocha",
         "CatppuccinMocha",
         "A warm dark palette with pastel blue and mauve accents.",
+        false,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::GruvboxDark,
+        "Gruvbox Dark",
+        "GruvboxDark",
+        "Warm retro neutrals with earthy blue and aqua accents.",
+        false,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::SolarizedDark,
+        "Solarized Dark",
+        "SolarizedDark",
+        "Low-glare blue-green surfaces with balanced contrast.",
+        false,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::SolarizedLight,
+        "Solarized Light",
+        "SolarizedLight",
+        "A warm light theme using Solarized's symmetric palette.",
+        false,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::TokyoNight,
+        "Tokyo Night",
+        "TokyoNight",
+        "Midnight navy surfaces with vivid blue and violet accents.",
+        false,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::RosePine,
+        "Rose Pine",
+        "RosePine",
+        "Soft ink surfaces with rose, foam, and iris accents.",
+        false,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::OneDark,
+        "One Dark",
+        "OneDark",
+        "Graphite surfaces with crisp blue and purple accents.",
+        false,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::Everforest,
+        "Everforest",
+        "Everforest",
+        "Muted forest greens and warm, comfortable foregrounds.",
         false,
     },
 };
@@ -226,8 +290,8 @@ void applyPalette(ImGuiStyle& style, const DebugUiPalette& palette)
     colors[ImGuiCol_UnsavedMarker] = palette.warning;
     colors[ImGuiCol_NavCursor] = palette.accent;
     colors[ImGuiCol_NavWindowingHighlight] = withAlpha(palette.text, 0.70f);
-    colors[ImGuiCol_NavWindowingDimBg] = withAlpha(palette.window, 0.20f);
-    colors[ImGuiCol_ModalWindowDimBg] = withAlpha(palette.window, 0.35f);
+    colors[ImGuiCol_NavWindowingDimBg] = color(0x000000, 0.20f);
+    colors[ImGuiCol_ModalWindowDimBg] = color(0x000000, 0.35f);
 }
 
 void applyThemeColors(ImGuiStyle& style, DebugUiTheme theme)
@@ -241,6 +305,25 @@ void applyThemeColors(ImGuiStyle& style, DebugUiTheme theme)
         return;
     case DebugUiTheme::Classic:
         ImGui::StyleColorsClassic(&style);
+        return;
+    case DebugUiTheme::HighContrast:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xffffff),
+            .textDisabled = color(0xb0b0b0),
+            .window = color(0x000000),
+            .child = color(0x080808),
+            .popup = color(0x101010),
+            .border = color(0xffffff),
+            .surface = color(0x161616),
+            .surfaceHovered = color(0x004e7a),
+            .surfaceActive = color(0x007acc),
+            .accent = color(0x00c8ff),
+            .accentHovered = color(0xffffff),
+            .accentActive = color(0xffd400),
+            .warning = color(0xffd400),
+            .positive = color(0x53ff7a),
+        });
         return;
     case DebugUiTheme::Dracula:
         ImGui::StyleColorsDark(&style);
@@ -297,6 +380,139 @@ void applyThemeColors(ImGuiStyle& style, DebugUiTheme theme)
             .accentActive = color(0xcba6f7),
             .warning = color(0xfab387),
             .positive = color(0xa6e3a1),
+        });
+        return;
+    case DebugUiTheme::GruvboxDark:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xebdbb2),
+            .textDisabled = color(0x928374),
+            .window = color(0x282828),
+            .child = color(0x1d2021),
+            .popup = color(0x3c3836),
+            .border = color(0x665c54),
+            .surface = color(0x3c3836),
+            .surfaceHovered = color(0x504945),
+            .surfaceActive = color(0x665c54),
+            .accent = color(0x83a598),
+            .accentHovered = color(0x8ec07c),
+            .accentActive = color(0xd3869b),
+            .warning = color(0xfabd2f),
+            .positive = color(0xb8bb26),
+        });
+        return;
+    case DebugUiTheme::SolarizedDark:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0x93a1a1),
+            .textDisabled = color(0x586e75),
+            .window = color(0x002b36),
+            .child = color(0x00212b),
+            .popup = color(0x073642),
+            .border = color(0x586e75),
+            .surface = color(0x073642),
+            .surfaceHovered = color(0x174b57),
+            .surfaceActive = color(0x586e75),
+            .accent = color(0x268bd2),
+            .accentHovered = color(0x2aa198),
+            .accentActive = color(0x6c71c4),
+            .warning = color(0xb58900),
+            .positive = color(0x859900),
+        });
+        return;
+    case DebugUiTheme::SolarizedLight:
+        ImGui::StyleColorsLight(&style);
+        applyPalette(style, {
+            .text = color(0x586e75),
+            .textDisabled = color(0x93a1a1),
+            .window = color(0xfdf6e3),
+            .child = color(0xeee8d5),
+            .popup = color(0xfffbeb),
+            .border = color(0x93a1a1),
+            .surface = color(0xeee8d5),
+            .surfaceHovered = color(0xd8d2c1),
+            .surfaceActive = color(0x93a1a1),
+            .accent = color(0x268bd2),
+            .accentHovered = color(0x2aa198),
+            .accentActive = color(0x6c71c4),
+            .warning = color(0xb58900),
+            .positive = color(0x859900),
+        });
+        return;
+    case DebugUiTheme::TokyoNight:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xc0caf5),
+            .textDisabled = color(0x545c7e),
+            .window = color(0x1a1b26),
+            .child = color(0x16161e),
+            .popup = color(0x24283b),
+            .border = color(0x414868),
+            .surface = color(0x24283b),
+            .surfaceHovered = color(0x292e42),
+            .surfaceActive = color(0x414868),
+            .accent = color(0x7aa2f7),
+            .accentHovered = color(0x2ac3de),
+            .accentActive = color(0xbb9af7),
+            .warning = color(0xe0af68),
+            .positive = color(0x9ece6a),
+        });
+        return;
+    case DebugUiTheme::RosePine:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xe0def4),
+            .textDisabled = color(0x6e6a86),
+            .window = color(0x191724),
+            .child = color(0x13111d),
+            .popup = color(0x1f1d2e),
+            .border = color(0x403d52),
+            .surface = color(0x1f1d2e),
+            .surfaceHovered = color(0x26233a),
+            .surfaceActive = color(0x403d52),
+            .accent = color(0xc4a7e7),
+            .accentHovered = color(0x9ccfd8),
+            .accentActive = color(0x31748f),
+            .warning = color(0xf6c177),
+            .positive = color(0x9ccfd8),
+        });
+        return;
+    case DebugUiTheme::OneDark:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xabb2bf),
+            .textDisabled = color(0x5c6370),
+            .window = color(0x282c34),
+            .child = color(0x21252b),
+            .popup = color(0x2c323c),
+            .border = color(0x4b5263),
+            .surface = color(0x2c323c),
+            .surfaceHovered = color(0x3e4451),
+            .surfaceActive = color(0x4b5263),
+            .accent = color(0x61afef),
+            .accentHovered = color(0x56b6c2),
+            .accentActive = color(0xc678dd),
+            .warning = color(0xe5c07b),
+            .positive = color(0x98c379),
+        });
+        return;
+    case DebugUiTheme::Everforest:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xd3c6aa),
+            .textDisabled = color(0x7a8478),
+            .window = color(0x2d353b),
+            .child = color(0x232a2e),
+            .popup = color(0x3d484d),
+            .border = color(0x4f585e),
+            .surface = color(0x343f44),
+            .surfaceHovered = color(0x3d484d),
+            .surfaceActive = color(0x475258),
+            .accent = color(0x7fbbb3),
+            .accentHovered = color(0x83c092),
+            .accentActive = color(0xd699b6),
+            .warning = color(0xdbbc7f),
+            .positive = color(0xa7c080),
         });
         return;
     }
