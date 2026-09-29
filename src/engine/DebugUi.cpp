@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <optional>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -37,15 +38,78 @@ std::vector<DebugTab>& debugMenus()
     return menus;
 }
 
-struct DebugUiScaleState {
+enum class DebugUiTheme {
+    Dark,
+    Light,
+    Classic,
+    Dracula,
+    Nord,
+    CatppuccinMocha,
+};
+
+struct DebugUiThemeDefinition {
+    DebugUiTheme theme;
+    const char* label;
+    const char* key;
+    const char* description;
+    bool builtIn;
+};
+
+constexpr std::array debugUiThemes {
+    DebugUiThemeDefinition {
+        DebugUiTheme::Dark,
+        "Dear ImGui Dark",
+        "Dark",
+        "Dear ImGui's default dark palette.",
+        true,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::Light,
+        "Dear ImGui Light",
+        "Light",
+        "Dear ImGui's default light palette.",
+        true,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::Classic,
+        "Dear ImGui Classic",
+        "Classic",
+        "Dear ImGui's original high-contrast palette.",
+        true,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::Dracula,
+        "Dracula",
+        "Dracula",
+        "Deep violet surfaces with bright purple and cyan accents.",
+        false,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::Nord,
+        "Nord",
+        "Nord",
+        "An arctic blue palette with muted, low-glare contrast.",
+        false,
+    },
+    DebugUiThemeDefinition {
+        DebugUiTheme::CatppuccinMocha,
+        "Catppuccin Mocha",
+        "CatppuccinMocha",
+        "A warm dark palette with pastel blue and mauve accents.",
+        false,
+    },
+};
+
+struct DebugUiAppearanceState {
     ImGuiStyle baseStyle;
     float scale = 1.0f;
+    DebugUiTheme theme = DebugUiTheme::Dark;
     bool baseStyleCaptured = false;
 };
 
-DebugUiScaleState& debugUiScaleState()
+DebugUiAppearanceState& debugUiAppearanceState()
 {
-    static DebugUiScaleState state;
+    static DebugUiAppearanceState state;
     return state;
 }
 
@@ -65,7 +129,214 @@ DebugUiWorkspaceState& workspaceState()
     return state;
 }
 
-void applyDebugUiScale(float scale);
+ImVec4 color(unsigned int rgb, float alpha = 1.0f)
+{
+    return {
+        static_cast<float>((rgb >> 16U) & 0xffU) / 255.0f,
+        static_cast<float>((rgb >> 8U) & 0xffU) / 255.0f,
+        static_cast<float>(rgb & 0xffU) / 255.0f,
+        alpha,
+    };
+}
+
+ImVec4 withAlpha(ImVec4 value, float alpha)
+{
+    value.w = alpha;
+    return value;
+}
+
+struct DebugUiPalette {
+    ImVec4 text;
+    ImVec4 textDisabled;
+    ImVec4 window;
+    ImVec4 child;
+    ImVec4 popup;
+    ImVec4 border;
+    ImVec4 surface;
+    ImVec4 surfaceHovered;
+    ImVec4 surfaceActive;
+    ImVec4 accent;
+    ImVec4 accentHovered;
+    ImVec4 accentActive;
+    ImVec4 warning;
+    ImVec4 positive;
+};
+
+void applyPalette(ImGuiStyle& style, const DebugUiPalette& palette)
+{
+    ImVec4* colors = style.Colors;
+    colors[ImGuiCol_Text] = palette.text;
+    colors[ImGuiCol_TextDisabled] = palette.textDisabled;
+    colors[ImGuiCol_WindowBg] = palette.window;
+    colors[ImGuiCol_ChildBg] = palette.child;
+    colors[ImGuiCol_PopupBg] = palette.popup;
+    colors[ImGuiCol_Border] = palette.border;
+    colors[ImGuiCol_BorderShadow] = withAlpha(palette.window, 0.0f);
+    colors[ImGuiCol_FrameBg] = palette.surface;
+    colors[ImGuiCol_FrameBgHovered] = palette.surfaceHovered;
+    colors[ImGuiCol_FrameBgActive] = palette.surfaceActive;
+    colors[ImGuiCol_TitleBg] = palette.child;
+    colors[ImGuiCol_TitleBgActive] = palette.surface;
+    colors[ImGuiCol_TitleBgCollapsed] = palette.child;
+    colors[ImGuiCol_MenuBarBg] = palette.child;
+    colors[ImGuiCol_ScrollbarBg] = palette.child;
+    colors[ImGuiCol_ScrollbarGrab] = palette.surface;
+    colors[ImGuiCol_ScrollbarGrabHovered] = palette.surfaceHovered;
+    colors[ImGuiCol_ScrollbarGrabActive] = palette.surfaceActive;
+    colors[ImGuiCol_CheckMark] = palette.accent;
+    colors[ImGuiCol_CheckboxSelectedBg] = palette.accent;
+    colors[ImGuiCol_SliderGrab] = palette.accent;
+    colors[ImGuiCol_SliderGrabActive] = palette.accentActive;
+    colors[ImGuiCol_Button] = palette.surface;
+    colors[ImGuiCol_ButtonHovered] = palette.surfaceHovered;
+    colors[ImGuiCol_ButtonActive] = palette.surfaceActive;
+    colors[ImGuiCol_Header] = palette.surface;
+    colors[ImGuiCol_HeaderHovered] = palette.surfaceHovered;
+    colors[ImGuiCol_HeaderActive] = palette.surfaceActive;
+    colors[ImGuiCol_Separator] = palette.border;
+    colors[ImGuiCol_SeparatorHovered] = palette.accentHovered;
+    colors[ImGuiCol_SeparatorActive] = palette.accentActive;
+    colors[ImGuiCol_ResizeGrip] = withAlpha(palette.accent, 0.25f);
+    colors[ImGuiCol_ResizeGripHovered] = withAlpha(palette.accentHovered, 0.67f);
+    colors[ImGuiCol_ResizeGripActive] = palette.accentActive;
+    colors[ImGuiCol_InputTextCursor] = palette.accent;
+    colors[ImGuiCol_TabHovered] = palette.surfaceHovered;
+    colors[ImGuiCol_Tab] = palette.surface;
+    colors[ImGuiCol_TabSelected] = palette.surfaceActive;
+    colors[ImGuiCol_TabSelectedOverline] = palette.accent;
+    colors[ImGuiCol_TabDimmed] = palette.child;
+    colors[ImGuiCol_TabDimmedSelected] = palette.surface;
+    colors[ImGuiCol_TabDimmedSelectedOverline] = palette.textDisabled;
+    colors[ImGuiCol_DockingPreview] = withAlpha(palette.accent, 0.70f);
+    colors[ImGuiCol_DockingEmptyBg] = palette.window;
+    colors[ImGuiCol_PlotLines] = palette.textDisabled;
+    colors[ImGuiCol_PlotLinesHovered] = palette.accentHovered;
+    colors[ImGuiCol_PlotHistogram] = palette.positive;
+    colors[ImGuiCol_PlotHistogramHovered] = palette.warning;
+    colors[ImGuiCol_TableHeaderBg] = palette.surface;
+    colors[ImGuiCol_TableBorderStrong] = palette.border;
+    colors[ImGuiCol_TableBorderLight] = withAlpha(palette.border, 0.55f);
+    colors[ImGuiCol_TableRowBg] = withAlpha(palette.window, 0.0f);
+    colors[ImGuiCol_TableRowBgAlt] = withAlpha(palette.surface, 0.35f);
+    colors[ImGuiCol_TextLink] = palette.accent;
+    colors[ImGuiCol_TextSelectedBg] = withAlpha(palette.accent, 0.35f);
+    colors[ImGuiCol_TreeLines] = palette.border;
+    colors[ImGuiCol_DragDropTarget] = palette.warning;
+    colors[ImGuiCol_DragDropTargetBg] = withAlpha(palette.warning, 0.15f);
+    colors[ImGuiCol_UnsavedMarker] = palette.warning;
+    colors[ImGuiCol_NavCursor] = palette.accent;
+    colors[ImGuiCol_NavWindowingHighlight] = withAlpha(palette.text, 0.70f);
+    colors[ImGuiCol_NavWindowingDimBg] = withAlpha(palette.window, 0.20f);
+    colors[ImGuiCol_ModalWindowDimBg] = withAlpha(palette.window, 0.35f);
+}
+
+void applyThemeColors(ImGuiStyle& style, DebugUiTheme theme)
+{
+    switch (theme) {
+    case DebugUiTheme::Dark:
+        ImGui::StyleColorsDark(&style);
+        return;
+    case DebugUiTheme::Light:
+        ImGui::StyleColorsLight(&style);
+        return;
+    case DebugUiTheme::Classic:
+        ImGui::StyleColorsClassic(&style);
+        return;
+    case DebugUiTheme::Dracula:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xf8f8f2),
+            .textDisabled = color(0x6272a4),
+            .window = color(0x282a36),
+            .child = color(0x21222c),
+            .popup = color(0x343746),
+            .border = color(0x44475a),
+            .surface = color(0x343746),
+            .surfaceHovered = color(0x44475a),
+            .surfaceActive = color(0x6272a4),
+            .accent = color(0xbd93f9),
+            .accentHovered = color(0xff79c6),
+            .accentActive = color(0x8be9fd),
+            .warning = color(0xffb86c),
+            .positive = color(0x50fa7b),
+        });
+        return;
+    case DebugUiTheme::Nord:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xd8dee9),
+            .textDisabled = color(0x7b88a1),
+            .window = color(0x2e3440),
+            .child = color(0x272c36),
+            .popup = color(0x3b4252),
+            .border = color(0x4c566a),
+            .surface = color(0x3b4252),
+            .surfaceHovered = color(0x434c5e),
+            .surfaceActive = color(0x4c566a),
+            .accent = color(0x88c0d0),
+            .accentHovered = color(0x81a1c1),
+            .accentActive = color(0x5e81ac),
+            .warning = color(0xebcb8b),
+            .positive = color(0xa3be8c),
+        });
+        return;
+    case DebugUiTheme::CatppuccinMocha:
+        ImGui::StyleColorsDark(&style);
+        applyPalette(style, {
+            .text = color(0xcdd6f4),
+            .textDisabled = color(0x7f849c),
+            .window = color(0x1e1e2e),
+            .child = color(0x181825),
+            .popup = color(0x313244),
+            .border = color(0x45475a),
+            .surface = color(0x313244),
+            .surfaceHovered = color(0x45475a),
+            .surfaceActive = color(0x585b70),
+            .accent = color(0x89b4fa),
+            .accentHovered = color(0xb4befe),
+            .accentActive = color(0xcba6f7),
+            .warning = color(0xfab387),
+            .positive = color(0xa6e3a1),
+        });
+        return;
+    }
+}
+
+const char* themeKey(DebugUiTheme theme)
+{
+    for (const DebugUiThemeDefinition& definition : debugUiThemes) {
+        if (definition.theme == theme) {
+            return definition.key;
+        }
+    }
+    return "Dark";
+}
+
+std::optional<DebugUiTheme> themeFromKey(std::string_view key)
+{
+    for (const DebugUiThemeDefinition& definition : debugUiThemes) {
+        if (key == definition.key) {
+            return definition.theme;
+        }
+    }
+    return std::nullopt;
+}
+
+void applyDebugUiAppearance()
+{
+    DebugUiAppearanceState& state = debugUiAppearanceState();
+    if (!state.baseStyleCaptured) {
+        state.baseStyle = ImGui::GetStyle();
+        state.baseStyleCaptured = true;
+    }
+
+    state.scale = std::clamp(state.scale, 1.0f, 3.0f);
+    ImGuiStyle appearance = state.baseStyle;
+    applyThemeColors(appearance, state.theme);
+    appearance.ScaleAllSizes(state.scale);
+    appearance.FontScaleMain = state.baseStyle.FontScaleMain * state.scale;
+    ImGui::GetStyle() = appearance;
+}
 
 std::filesystem::path layoutDirectory()
 {
@@ -208,9 +479,9 @@ void buildDefaultLayout(ImGuiID dockspaceId)
 
 void drawScaleControl()
 {
-    DebugUiScaleState& scaleState = debugUiScaleState();
-    float requestedScale = scaleState.scale;
-    ImGui::SetNextItemWidth(140.0f * scaleState.scale);
+    DebugUiAppearanceState& appearance = debugUiAppearanceState();
+    float requestedScale = appearance.scale;
+    ImGui::SetNextItemWidth(140.0f * appearance.scale);
     bool scaleChanged = ImGui::SliderFloat(
         "UI Scale",
         &requestedScale,
@@ -223,8 +494,31 @@ void drawScaleControl()
         scaleChanged = true;
     }
     if (scaleChanged) {
-        applyDebugUiScale(requestedScale);
+        appearance.scale = requestedScale;
+        applyDebugUiAppearance();
         ImGui::MarkIniSettingsDirty();
+    }
+}
+
+void drawThemeMenu()
+{
+    DebugUiAppearanceState& appearance = debugUiAppearanceState();
+    bool reachedCustomThemes = false;
+    for (const DebugUiThemeDefinition& definition : debugUiThemes) {
+        if (!definition.builtIn && !reachedCustomThemes) {
+            ImGui::Separator();
+            reachedCustomThemes = true;
+        }
+        const bool selected = appearance.theme == definition.theme;
+        if (ImGui::MenuItem(definition.label, nullptr, selected) &&
+            !selected) {
+            appearance.theme = definition.theme;
+            applyDebugUiAppearance();
+            ImGui::MarkIniSettingsDirty();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", definition.description);
+        }
     }
 }
 
@@ -297,6 +591,10 @@ void drawWorkspaceMenu()
             drawScaleControl();
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Themes")) {
+            drawThemeMenu();
+            ImGui::EndMenu();
+        }
         if (ImGui::Button("Full Game View (F11)")) {
             state.gameplayFullWindow = true;
         }
@@ -358,78 +656,76 @@ DebugUi::DrawResult drawGameViewport(DebugUi::GameViewport viewport)
     return result;
 }
 
-void applyDebugUiScale(float scale)
-{
-    DebugUiScaleState& state = debugUiScaleState();
-    if (!state.baseStyleCaptured) {
-        state.baseStyle = ImGui::GetStyle();
-        state.baseStyleCaptured = true;
-    }
-
-    state.scale = std::clamp(scale, 1.0f, 3.0f);
-    ImGuiStyle scaledStyle = state.baseStyle;
-    scaledStyle.ScaleAllSizes(state.scale);
-    scaledStyle.FontScaleMain =
-        state.baseStyle.FontScaleMain * state.scale;
-    ImGui::GetStyle() = scaledStyle;
-}
-
-void resetDebugUiScaleSettings(
+void resetDebugUiAppearanceSettings(
     ImGuiContext*, ImGuiSettingsHandler*)
 {
-    debugUiScaleState().scale = 1.0f;
+    DebugUiAppearanceState& state = debugUiAppearanceState();
+    state.scale = 1.0f;
+    state.theme = DebugUiTheme::Dark;
 }
 
-void* openDebugUiScaleSettings(
+void* openDebugUiAppearanceSettings(
     ImGuiContext*, ImGuiSettingsHandler*, const char* name)
 {
     return std::strcmp(name, "Settings") == 0
-        ? &debugUiScaleState()
+        ? &debugUiAppearanceState()
         : nullptr;
 }
 
-void readDebugUiScaleSetting(
+void readDebugUiAppearanceSetting(
     ImGuiContext*,
     ImGuiSettingsHandler*,
     void* entry,
     const char* line)
 {
-    auto& state = *static_cast<DebugUiScaleState*>(entry);
-    constexpr char prefix[] = "Scale=";
-    if (std::strncmp(line, prefix, sizeof(prefix) - 1) != 0) {
+    auto& state = *static_cast<DebugUiAppearanceState*>(entry);
+    constexpr char scalePrefix[] = "Scale=";
+    if (std::strncmp(line, scalePrefix, sizeof(scalePrefix) - 1) == 0) {
+        char* end = nullptr;
+        const float scale = std::strtof(
+            line + sizeof(scalePrefix) - 1,
+            &end);
+        if (end != line + sizeof(scalePrefix) - 1 && *end == '\0') {
+            state.scale = std::clamp(scale, 1.0f, 3.0f);
+        }
         return;
     }
-    char* end = nullptr;
-    const float scale = std::strtof(line + sizeof(prefix) - 1, &end);
-    if (end != line + sizeof(prefix) - 1) {
-        state.scale = std::clamp(scale, 1.0f, 3.0f);
+
+    constexpr char themePrefix[] = "Theme=";
+    if (std::strncmp(line, themePrefix, sizeof(themePrefix) - 1) == 0) {
+        if (const std::optional<DebugUiTheme> theme =
+                themeFromKey(line + sizeof(themePrefix) - 1)) {
+            state.theme = *theme;
+        }
     }
 }
 
-void applyDebugUiScaleSettings(
+void applyDebugUiAppearanceSettings(
     ImGuiContext*, ImGuiSettingsHandler*)
 {
-    applyDebugUiScale(debugUiScaleState().scale);
+    applyDebugUiAppearance();
 }
 
-void writeDebugUiScaleSettings(
+void writeDebugUiAppearanceSettings(
     ImGuiContext*,
     ImGuiSettingsHandler*,
     ImGuiTextBuffer* output)
 {
     output->appendf(
-        "[DebugUi][Settings]\nScale=%.3f\n\n",
-        debugUiScaleState().scale);
+        "[DebugUi][Settings]\nScale=%.3f\nTheme=%s\n\n",
+        debugUiAppearanceState().scale,
+        themeKey(debugUiAppearanceState().theme));
 }
 
 } // namespace
 
 void DebugUi::initialize()
 {
-    DebugUiScaleState& state = debugUiScaleState();
+    DebugUiAppearanceState& state = debugUiAppearanceState();
     state.baseStyle = ImGui::GetStyle();
     state.baseStyleCaptured = true;
     state.scale = 1.0f;
+    state.theme = DebugUiTheme::Dark;
     workspaceState().gameplayFullWindow = false;
     refreshLayouts();
 
@@ -439,11 +735,11 @@ void DebugUi::initialize()
     ImGuiSettingsHandler handler;
     handler.TypeName = "DebugUi";
     handler.TypeHash = ImHashStr("DebugUi");
-    handler.ReadInitFn = resetDebugUiScaleSettings;
-    handler.ReadOpenFn = openDebugUiScaleSettings;
-    handler.ReadLineFn = readDebugUiScaleSetting;
-    handler.ApplyAllFn = applyDebugUiScaleSettings;
-    handler.WriteAllFn = writeDebugUiScaleSettings;
+    handler.ReadInitFn = resetDebugUiAppearanceSettings;
+    handler.ReadOpenFn = openDebugUiAppearanceSettings;
+    handler.ReadLineFn = readDebugUiAppearanceSetting;
+    handler.ApplyAllFn = applyDebugUiAppearanceSettings;
+    handler.WriteAllFn = writeDebugUiAppearanceSettings;
     ImGui::AddSettingsHandler(&handler);
 }
 
@@ -472,9 +768,9 @@ void DebugUi::clearTabs()
 
 DebugUi::DrawResult DebugUi::draw(GameViewport gameViewport)
 {
-    DebugUiScaleState& scaleState = debugUiScaleState();
-    if (!scaleState.baseStyleCaptured) {
-        applyDebugUiScale(scaleState.scale);
+    DebugUiAppearanceState& appearance = debugUiAppearanceState();
+    if (!appearance.baseStyleCaptured) {
+        applyDebugUiAppearance();
     }
 
     DebugUiWorkspaceState& workspace = workspaceState();
