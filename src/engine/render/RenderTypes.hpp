@@ -3,6 +3,7 @@
 #include "engine/FrameArray.hpp"
 #include "engine/LevelLocation.hpp"
 #include "engine/Math.hpp"
+#include "engine/render/NineSlice.hpp"
 #include "engine/render/Tonemap.hpp"
 
 #include <array>
@@ -434,6 +435,7 @@ struct RenderFrameData {
         bool flipTextureV = false;
         Vec4 color {};
         float emissiveStrength = 1.0f;
+        NineSlice textureNineSlice {};
         RenderTexture texture = noTexture;
         bool drawOnTop = false;
         int32_t drawOrder = 0;

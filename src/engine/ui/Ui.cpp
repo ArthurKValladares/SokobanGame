@@ -105,7 +105,8 @@ void UiContext::textureImage(
     UiRect rectValue,
     RenderTexture texture,
     UiRect uvRectValue,
-    Vec4 color)
+    Vec4 color,
+    NineSlice nineSlice)
 {
     if (texture.isNone() || rectValue.size.x <= 0.0f ||
         rectValue.size.y <= 0.0f || color.w <= 0.0f) {
@@ -116,6 +117,7 @@ void UiContext::textureImage(
         .rect = rectValue,
         .uvRect = uvRectValue,
         .color = color,
+        .nineSlice = sanitizedNineSlice(nineSlice),
         .texture = texture,
     });
 }

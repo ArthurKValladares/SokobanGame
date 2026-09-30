@@ -156,6 +156,8 @@ void testTurretShotLayersTheMuzzleAndFullPathLaser()
         .texture = RenderTexture { 12 },
         .color = { 1.0f, 0.6f, 0.1f, 0.8f },
         .emissiveStrength = 2.25f,
+        .textureNineSlice =
+            NineSlice::symmetricFitTargetWidth({ 0.2f, 0.2f }),
         .width = 0.40f,
         .lifetimeSeconds = 0.20f,
         .revealSeconds = 0.06f,
@@ -168,6 +170,7 @@ void testTurretShotLayersTheMuzzleAndFullPathLaser()
     effects.impactGlow = fixedEffect();
     effects.impactGlow.textures = { RenderTexture { 14 } };
     effects.impactGlow.color = effects.laserBeam.color;
+    effects.impactGlow.color.w = 1.0f;
     effects.impactGlow.emissiveStrength = 2.6f;
     effects.impactGlow.particleCount = 1;
     effects.impactGlow.drawOrder = 2;
@@ -178,6 +181,7 @@ void testTurretShotLayersTheMuzzleAndFullPathLaser()
     effects.impactCore = fixedEffect();
     effects.impactCore.textures = { RenderTexture { 15 } };
     effects.impactCore.color = { 1.0f, 0.96f, 0.7f, 0.96f };
+    effects.impactCore.color.w = 1.0f;
     effects.impactCore.emissiveStrength = 4.2f;
     effects.impactCore.particleCount = 1;
     effects.impactCore.drawOrder = 3;
@@ -224,6 +228,8 @@ void testTurretShotLayersTheMuzzleAndFullPathLaser()
         CHECK(laserParticle->billboardAlignmentUsesY);
         CHECK(!laserParticle->flipTextureV);
         CHECK(near(laserParticle->emissiveStrength, 2.25f));
+        CHECK(near(laserParticle->textureNineSlice.sourceBorders.x, 0.2f));
+        CHECK(near(laserParticle->textureNineSlice.sourceBorders.y, 0.2f));
         CHECK(laserParticle->size.y < 1.48f);
     }
     CHECK(std::ranges::any_of(frame.particles, [](const auto& particle) {
@@ -267,6 +273,7 @@ void testTurretShotLayersTheMuzzleAndFullPathLaser()
         CHECK(near(impactGlow->position.y, 0.5f));
         CHECK(near(impactGlow->position.z, 1.58f));
         CHECK(near(impactGlow->emissiveStrength, 2.6f));
+        CHECK(impactGlow->color.w > 0.999f);
         CHECK(impactGlow->size.x > 0.4f);
         CHECK(impactGlow->drawOrder == 2);
     }
@@ -275,6 +282,7 @@ void testTurretShotLayersTheMuzzleAndFullPathLaser()
         CHECK(near(impactCore->position.y, 0.5f));
         CHECK(near(impactCore->position.z, 1.58f));
         CHECK(near(impactCore->emissiveStrength, 4.2f));
+        CHECK(impactCore->color.w > 0.999f);
         CHECK(impactCore->drawOrder == 3);
     }
 }
@@ -289,6 +297,8 @@ void testFullLengthRibbonStaysVisibleUntilItsLifetimeEnds()
         ParticleRibbonDefinition {
             .texture = RenderTexture { 21 },
             .color = { 1.0f, 0.7f, 0.2f, 0.9f },
+            .textureNineSlice =
+                NineSlice::symmetricFitTargetWidth({ 0.2f, 0.2f }),
             .width = 0.6f,
             .lifetimeSeconds = 0.5f,
             .fullLength = true,
@@ -302,6 +312,10 @@ void testFullLengthRibbonStaysVisibleUntilItsLifetimeEnds()
         CHECK(near(frame.particles[0].position.x, 1.0f));
         CHECK(near(frame.particles[0].size.x, 0.6f));
         CHECK(near(frame.particles[0].size.y, 2.0f));
+        CHECK(near(
+            frame.particles[0].textureNineSlice.sourceBorders.x, 0.2f));
+        CHECK(near(
+            frame.particles[0].textureNineSlice.sourceBorders.y, 0.2f));
     }
 
     particles.update(0.49f);

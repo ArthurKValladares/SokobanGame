@@ -2828,8 +2828,18 @@ private:
         beginQuadDraw(commandBuffer);
 
         const float emission = std::max(particle.emissiveStrength, 0.0f);
+        const float quadWidth = length(
+            particle.vertices[1] - particle.vertices[0]);
+        const float quadHeight = length(
+            particle.vertices[3] - particle.vertices[0]);
+        const NineSliceDrawData nineSlice = nineSliceDrawData(
+            particle.textureNineSlice, { quadWidth, quadHeight });
         const GpuDrawInstance constants {
             .vertices = quadVertices(particle.vertices, worldSpaceQuad),
+            .passData = {
+                nineSlice.sourceBorders,
+                nineSlice.targetExtentAndSourcePixelScale,
+            },
             .color = {
                 particle.color.x * emission,
                 particle.color.y * emission,
@@ -3452,12 +3462,18 @@ private:
         stats_.triangles += 2;
         const float materialMode =
             shaderValue(uiDrawMaterialMode(command.kind));
+        const NineSliceDrawData nineSlice = nineSliceDrawData(
+            command.nineSlice, command.rect.size);
         const GpuDrawInstance constants {
             .vertices = {
                 Vec4 { left, top, 0.0f, clipSpaceQuad },
                 Vec4 { right, top, 0.0f, clipSpaceQuad },
                 Vec4 { right, bottom, 0.0f, clipSpaceQuad },
                 Vec4 { left, bottom, 0.0f, clipSpaceQuad },
+            },
+            .passData = {
+                nineSlice.sourceBorders,
+                nineSlice.targetExtentAndSourcePixelScale,
             },
             .color = command.color,
             .shadowOptions = command.effectOptions,

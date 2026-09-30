@@ -127,6 +127,7 @@ struct PreparedParticle {
     std::array<Vec3, 4> vertices {};
     Vec4 color {};
     float emissiveStrength = 1.0f;
+    NineSlice textureNineSlice {};
     RenderTexture texture = noTexture;
     float depth = 0.0f;
     bool flipTextureV = false;

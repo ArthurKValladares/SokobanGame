@@ -43,6 +43,7 @@ TurretParticleEffects makeTurretParticleEffects(const AssetManifest& manifest)
         .texture = manifest.textureIdByName(config::turretLaserTextureName),
         .color = config::turretLaserColor,
         .emissiveStrength = config::turretLaserEmissiveStrength,
+        .textureNineSlice = config::turretLaserTextureNineSlice,
         .width = config::turretLaserWidth,
         .lifetimeSeconds = config::turretLaserLifetimeSeconds,
         .revealSeconds = config::turretLaserGrowthSeconds,

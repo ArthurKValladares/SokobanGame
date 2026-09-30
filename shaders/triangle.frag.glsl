@@ -31,6 +31,7 @@ layout(location = 10) flat in uint inMaterialIndex;
 layout(location = 0) out vec4 outColor;
 
 #include "DrawInstance.glsl"
+#include "NineSlice.glsl"
 
 #define draw drawInstances.instances[inDrawInstance]
 
@@ -301,7 +302,13 @@ void main()
         // that no runtime texture was resolved.
         float selectedTexture = draw.textureOptions.y - 1.0;
         int textureIndex = max(int(selectedTexture + 0.5), 0);
-        vec2 proceduralUv = vec2(inFaceCoordU, inFaceCoordV);
+        vec2 proceduralUv = nineSliceUv(
+            vec2(inFaceCoordU, inFaceCoordV),
+            draw.passData[0],
+            draw.passData[1].xy,
+            vec2(textureSize(
+                modelTextures[nonuniformEXT(textureIndex)], 0)),
+            draw.passData[1].z);
         if (draw.textureOptions.w < -0.5) {
             proceduralUv.y = 1.0 - proceduralUv.y;
         }

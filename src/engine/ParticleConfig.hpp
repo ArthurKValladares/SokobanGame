@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Math.hpp"
+#include "engine/render/NineSlice.hpp"
 
 #include <array>
 #include <cstdint>
@@ -61,6 +62,11 @@ inline constexpr Vec4 turretLaserColor { 1.0f, 0.58f, 0.06f, 0.72f };
 inline constexpr Vec4 turretLaserCoreColor { 1.0f, 0.96f, 0.70f, 0.96f };
 inline constexpr float turretLaserEmissiveStrength = 2.2f;
 inline constexpr float turretLaserCoreEmissiveStrength = 3.8f;
+// The laser texture is a vertical capsule. Nine-slicing keeps its rounded
+// ends proportional to beam width while only its central band grows along
+// the path.
+inline constexpr NineSlice turretLaserTextureNineSlice =
+    NineSlice::symmetricFitTargetWidth({ 0.20f, 0.20f });
 inline constexpr int32_t turretLaserDrawOrder = 0;
 inline constexpr int32_t turretLaserCoreDrawOrder = 1;
 inline constexpr float turretLaserWidth = 0.90f;
@@ -73,8 +79,18 @@ inline constexpr float turretLaserAfterMuzzleSeconds = 0.008f;
 // The hit uses the same circular glow texture and palette as the beam. Two
 // centered layers read as one expanding sphere: a broad warm shell and a
 // shorter-lived white-hot core.
-inline constexpr Vec4 turretImpactColor = turretLaserColor;
-inline constexpr Vec4 turretImpactCoreColor = turretLaserCoreColor;
+inline constexpr Vec4 turretImpactColor {
+    turretLaserColor.x,
+    turretLaserColor.y,
+    turretLaserColor.z,
+    1.0f,
+};
+inline constexpr Vec4 turretImpactCoreColor {
+    turretLaserCoreColor.x,
+    turretLaserCoreColor.y,
+    turretLaserCoreColor.z,
+    1.0f,
+};
 inline constexpr float turretImpactEmissiveStrength = 2.6f;
 inline constexpr float turretImpactCoreEmissiveStrength = 4.2f;
 inline constexpr Vec2 turretImpactLifetimeSeconds { 0.20f, 0.20f };

@@ -33,6 +33,7 @@ struct UiDrawCommand {
     UiRect uvRect {};
     Vec4 color {};
     Vec4 effectOptions {};
+    NineSlice nineSlice {};
     RenderTexture texture = noTexture;
 };
 
@@ -90,7 +91,10 @@ public:
         UiRect rect,
         RenderTexture texture,
         UiRect uvRect = { {}, { 1.0f, 1.0f } },
-        Vec4 color = { 1.0f, 1.0f, 1.0f, 1.0f });
+        Vec4 color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        // Use NineSlice::preserveSourcePixels(...) for UI panels whose
+        // corners must retain their authored pixel size.
+        NineSlice nineSlice = {});
     // Samples the renderer's preserved main-scene image. Used when UI needs
     // to composite the live world back over a later scene pass.
     void sceneImage(

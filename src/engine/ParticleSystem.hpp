@@ -16,6 +16,9 @@ struct ParticleEffectDefinition {
     // Multiplies RGB after simulation while leaving opacity untouched. Values
     // above one carry real HDR radiance into the renderer and can bloom.
     float emissiveStrength = 1.0f;
+    // Opt-in reusable 3-by-3 texture mapping. The default leaves the texture
+    // on the ordinary full-quad UV path.
+    NineSlice textureNineSlice {};
     uint32_t particleCount = 1;
     Vec2 lifetimeSeconds { 0.5f, 0.5f };
     Vec2 initialSize { 0.5f, 0.5f };
@@ -62,6 +65,7 @@ struct ParticleRibbonDefinition {
     RenderTexture texture = noTexture;
     Vec4 color { 1.0f, 1.0f, 1.0f, 1.0f };
     float emissiveStrength = 1.0f;
+    NineSlice textureNineSlice {};
     float width = 0.12f;
     float maxLength = 6.0f;
     float speed = 24.0f;
@@ -113,6 +117,7 @@ private:
         Vec3 velocity {};
         Vec4 color {};
         float emissiveStrength = 1.0f;
+        NineSlice textureNineSlice {};
         RenderTexture texture {};
         float rotationRadians = 0.0f;
         Vec3 billboardAlignment {};
@@ -130,6 +135,7 @@ private:
         Vec3 direction {};
         Vec4 color {};
         float emissiveStrength = 1.0f;
+        NineSlice textureNineSlice {};
         RenderTexture texture = noTexture;
         float distance = 0.0f;
         float width = 0.12f;

@@ -1400,6 +1400,10 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/SceneDrawLanesTests.cpp
     )
+    sokoban_add_test(NAME nine_slice
+        LIBS sokoban_core
+        SOURCES tests/NineSliceTests.cpp
+    )
     sokoban_add_test(NAME texture_descriptor_space
         LIBS sokoban_core
         SOURCES tests/TextureDescriptorSpaceTests.cpp

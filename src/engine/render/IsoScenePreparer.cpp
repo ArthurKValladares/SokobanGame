@@ -1038,6 +1038,7 @@ static void prepareAuxiliaryGeometry(
                 },
                 .color = source.color,
                 .emissiveStrength = source.emissiveStrength,
+                .textureNineSlice = source.textureNineSlice,
                 .texture = source.texture,
                 .depth = dot(
                     subtract(source.position, isoLayout.cameraPosition),

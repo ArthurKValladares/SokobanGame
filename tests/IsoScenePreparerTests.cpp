@@ -165,6 +165,8 @@ void checkPreparationOutputsMatch(
         CHECK(expected.particles[index].color == actual.particles[index].color);
         CHECK(expected.particles[index].emissiveStrength ==
               actual.particles[index].emissiveStrength);
+        CHECK(expected.particles[index].textureNineSlice ==
+              actual.particles[index].textureNineSlice);
         CHECK(expected.particles[index].texture ==
               actual.particles[index].texture);
         CHECK(expected.particles[index].depth == actual.particles[index].depth);
@@ -1807,6 +1809,8 @@ void testParticleRibbonFollowsTheProjectedWorldPath()
         .billboardAlignmentUsesY = true,
         .flipTextureV = true,
         .color = { 1.0f, 0.8f, 0.2f, 1.0f },
+        .textureNineSlice =
+            NineSlice::symmetricFitTargetWidth({ 0.2f, 0.2f }),
         .texture = RenderTexture { 5 },
     });
 
@@ -1814,6 +1818,10 @@ void testParticleRibbonFollowsTheProjectedWorldPath()
     CHECK(scene.particles.size() == 1);
     const PreparedParticle& ribbon = scene.particles.front();
     CHECK(ribbon.flipTextureV);
+    CHECK(near(ribbon.textureNineSlice.sourceBorders.x, 0.2f));
+    CHECK(near(ribbon.textureNineSlice.sourceBorders.y, 0.2f));
+    CHECK(ribbon.textureNineSlice.scaleMode ==
+        NineSliceScaleMode::FitTargetWidth);
     const Vec3 longEdge = ribbon.vertices[3] - ribbon.vertices[0];
     const Vec3 projectedWorldPath =
         scene.isoLayout.cameraRight *

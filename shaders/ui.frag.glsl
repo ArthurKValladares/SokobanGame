@@ -16,6 +16,7 @@ layout(location = 7) flat in uint inDrawInstance;
 layout(location = 0) out vec4 outColor;
 
 #include "DrawInstance.glsl"
+#include "NineSlice.glsl"
 
 #define draw drawInstances.instances[inDrawInstance]
 
@@ -69,6 +70,16 @@ void main()
         color.a *= 1.0 - sceneImageCutoutOpacity();
     } else if (mode == DRAW_MODE_TEXTURE_IMAGE) {
         int textureIndex = max(int(draw.textureOptions.y + 0.5) - 1, 0);
+        vec2 uvSpan = max(draw.materialOptions.yz, vec2(0.00001));
+        vec2 localUv = vec2(inFaceCoordU, inFaceCoordV) / uvSpan;
+        localUv = nineSliceUv(
+            localUv,
+            draw.passData[0],
+            draw.passData[1].xy,
+            vec2(textureSize(
+                modelTextures[nonuniformEXT(textureIndex)], 0)) * uvSpan,
+            draw.passData[1].z);
+        uv = draw.gridColor.xy + localUv * uvSpan;
         color *= texture(
             modelTextures[nonuniformEXT(textureIndex)], uv);
     } else if (mode != DRAW_MODE_UNTEXTURED) {

@@ -73,6 +73,27 @@ void testFontAtlasAndText()
     CHECK(ui.drawData().commands.front().kind == sokoban::UiDrawKind::Image);
     CHECK(ui.drawData().commands.front().uvRect.position.x == 0.1f);
     CHECK(ui.drawData().commands.front().uvRect.size.y == 0.6f);
+
+    ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+    ui.textureImage(
+        { { 20.0f, 30.0f }, { 300.0f, 120.0f } },
+        sokoban::RenderTexture { 7 },
+        { {}, { 1.0f, 1.0f } },
+        { 1.0f, 1.0f, 1.0f, 1.0f },
+        sokoban::NineSlice::preserveSourcePixels(
+            { 0.1f, 0.2f, 0.3f, 0.4f }, 2.0f));
+    ui.endFrame();
+    CHECK(ui.drawData().commands.size() == 1);
+    const sokoban::NineSlice& nineSlice =
+        ui.drawData().commands.front().nineSlice;
+    CHECK(nineSlice.enabled());
+    CHECK(nineSlice.sourceBorders.x == 0.1f);
+    CHECK(nineSlice.sourceBorders.y == 0.2f);
+    CHECK(nineSlice.sourceBorders.z == 0.3f);
+    CHECK(nineSlice.sourceBorders.w == 0.4f);
+    CHECK(nineSlice.scaleMode ==
+        sokoban::NineSliceScaleMode::PreserveSourcePixels);
+    CHECK(nineSlice.sourcePixelScale == 2.0f);
 }
 
 void testReusableControls()
