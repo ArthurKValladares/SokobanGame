@@ -1037,12 +1037,14 @@ static void prepareAuxiliaryGeometry(
                     add(subtract(source.position, right), up),
                 },
                 .color = source.color,
+                .emissiveStrength = source.emissiveStrength,
                 .texture = source.texture,
                 .depth = dot(
                     subtract(source.position, isoLayout.cameraPosition),
                     isoLayout.cameraForward),
                 .flipTextureV = source.flipTextureV,
                 .drawOnTop = source.drawOnTop,
+                .drawOrder = source.drawOrder,
             };
             particles.push_back(particle);
         }
@@ -1051,6 +1053,9 @@ static void prepareAuxiliaryGeometry(
             [](const PreparedParticle& left, const PreparedParticle& right) {
                 if (left.drawOnTop != right.drawOnTop) {
                     return !left.drawOnTop;
+                }
+                if (left.drawOrder != right.drawOrder) {
+                    return left.drawOrder < right.drawOrder;
                 }
                 return left.depth > right.depth;
             });

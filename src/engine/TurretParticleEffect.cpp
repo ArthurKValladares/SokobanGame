@@ -15,6 +15,7 @@ TurretParticleEffects makeTurretParticleEffects(const AssetManifest& manifest)
             manifest.textureIdByName(config::turretGlowTextureName),
         },
         .color = config::turretMuzzleGlowColor,
+        .emissiveStrength = config::turretMuzzleGlowEmissiveStrength,
         .particleCount = config::turretMuzzleGlowParticleCount,
         .lifetimeSeconds = config::turretMuzzleGlowLifetimeSeconds,
         .initialSize = config::turretMuzzleGlowInitialSize,
@@ -26,6 +27,7 @@ TurretParticleEffects makeTurretParticleEffects(const AssetManifest& manifest)
             manifest.textureIdByName(config::turretMuzzleTextureName),
         },
         .color = config::turretMuzzleColor,
+        .emissiveStrength = config::turretMuzzleEmissiveStrength,
         .particleCount = config::turretMuzzleParticleCount,
         .lifetimeSeconds = config::turretMuzzleLifetimeSeconds,
         .initialSize = config::turretMuzzleInitialSize,
@@ -40,15 +42,46 @@ TurretParticleEffects makeTurretParticleEffects(const AssetManifest& manifest)
     effects.laserBeam = {
         .texture = manifest.textureIdByName(config::turretLaserTextureName),
         .color = config::turretLaserColor,
+        .emissiveStrength = config::turretLaserEmissiveStrength,
         .width = config::turretLaserWidth,
         .lifetimeSeconds = config::turretLaserLifetimeSeconds,
         .revealSeconds = config::turretLaserGrowthSeconds,
         .fullLength = true,
         .drawOnTop = config::turretParticlesDrawOnTop,
+        .drawOrder = config::turretLaserDrawOrder,
     };
     effects.laserBeamCore = effects.laserBeam;
     effects.laserBeamCore.color = config::turretLaserCoreColor;
+    effects.laserBeamCore.emissiveStrength =
+        config::turretLaserCoreEmissiveStrength;
     effects.laserBeamCore.width = config::turretLaserCoreWidth;
+    effects.laserBeamCore.drawOrder = config::turretLaserCoreDrawOrder;
+    effects.impactGlow = {
+        .textures = {
+            manifest.textureIdByName(config::turretGlowTextureName),
+        },
+        .color = config::turretImpactColor,
+        .emissiveStrength = config::turretImpactEmissiveStrength,
+        .particleCount = 1,
+        .lifetimeSeconds = config::turretImpactLifetimeSeconds,
+        .initialSize = config::turretImpactInitialSize,
+        .finalSize = config::turretImpactFinalSize,
+        .drawOnTop = config::turretParticlesDrawOnTop,
+        .drawOrder = config::turretImpactDrawOrder,
+    };
+    effects.impactCore = {
+        .textures = {
+            manifest.textureIdByName(config::turretGlowTextureName),
+        },
+        .color = config::turretImpactCoreColor,
+        .emissiveStrength = config::turretImpactCoreEmissiveStrength,
+        .particleCount = 1,
+        .lifetimeSeconds = config::turretImpactCoreLifetimeSeconds,
+        .initialSize = config::turretImpactCoreInitialSize,
+        .finalSize = config::turretImpactCoreFinalSize,
+        .drawOnTop = config::turretParticlesDrawOnTop,
+        .drawOrder = config::turretImpactCoreDrawOrder,
+    };
     return effects;
 }
 
@@ -81,6 +114,11 @@ float emitTurretShotParticles(
     const float muzzleDelay = std::max(
         beamDelay - config::turretLaserAfterMuzzleSeconds,
         0.0f);
+    const float beamTravelSeconds = effects.laserBeam.fullLength
+        ? std::max(effects.laserBeam.revealSeconds, 0.0f)
+        : length(target - muzzle) /
+            std::max(effects.laserBeam.speed, 0.001f);
+    const float hitDelay = beamDelay + beamTravelSeconds;
 
     particles.emit(muzzle, effects.muzzleGlow, muzzleDelay);
     particles.emit(muzzle, effects.muzzleFlash, muzzleDelay);
@@ -94,6 +132,8 @@ float emitTurretShotParticles(
         target,
         effects.laserBeamCore,
         beamDelay);
+    particles.emit(target, effects.impactGlow, hitDelay);
+    particles.emit(target, effects.impactCore, hitDelay);
     return muzzleDelay;
 }
 

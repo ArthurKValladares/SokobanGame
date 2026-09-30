@@ -2,8 +2,10 @@
 
 #include "engine/Profiler.hpp"
 #include "engine/render/AtmosphereMath.hpp"
+#include "engine/render/BloomConfig.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanAtmospherePass.hpp"
+#include "engine/render/VulkanBloomPass.hpp"
 #include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/MirrorConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
@@ -336,6 +338,7 @@ public:
         , shadowPass_(resources.shadowPass)
         , ssaoPass_(resources.ssaoPass)
         , atmospherePass_(resources.atmospherePass)
+        , bloomPass_(resources.bloomPass)
         , descriptors_(resources.sceneDescriptors)
         , pipelines_(resources.pipelines)
         , models_(resources.modelResources)
@@ -687,6 +690,10 @@ public:
             device_, commandBuffer, "Level transition", { 1.0f, 0.4f, 0.2f, 1.0f });
         recordLevelTransition(
             commandBuffer, frameData.levelTransitionAmount);
+        vulkanDebug::endLabel(device_, commandBuffer);
+        vulkanDebug::beginLabel(
+            device_, commandBuffer, "Bloom", { 1.0f, 0.65f, 0.15f, 1.0f });
+        recordBloom(commandBuffer);
         vulkanDebug::endLabel(device_, commandBuffer);
         vulkanDebug::beginLabel(
             device_, commandBuffer, "Tonemap", { 0.6f, 0.5f, 1.0f, 1.0f });
@@ -1261,7 +1268,7 @@ private:
         pushConstants.color = {
             normalizedExposureEv(outputTransform.exposureEv),
             static_cast<float>(outputTransform.curve),
-            0.0f,
+            config::bloomIntensity,
             0.0f,
         };
 
@@ -1283,6 +1290,90 @@ private:
         vkCmdDraw(commandBuffer, 3, 1, 0, 0);
         ++stats_.drawCalls;
         vkCmdEndRendering(commandBuffer);
+    }
+
+    void recordBloom(VkCommandBuffer commandBuffer)
+    {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Record bloom");
+        const VkPipeline extractPipeline = pipelines_.bloomExtract();
+        const VkPipeline blurPipeline = pipelines_.bloomBlur();
+        if (!bloomPass_.valid() || !extractPipeline || !blurPipeline) {
+            return;
+        }
+
+        // Bloom reads the completed scene through the existing snapshot
+        // image. Keeping the live scene target as a color attachment avoids
+        // a read/write feedback path and lets beginTonemap retain its simple
+        // attachment-to-sampled handoff.
+        swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
+
+        const VkExtent2D extent = bloomPass_.extent();
+        const VkViewport viewport {
+            .x = 0.0f,
+            .y = static_cast<float>(extent.height),
+            .width = static_cast<float>(extent.width),
+            .height = -static_cast<float>(extent.height),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+        const VkRect2D scissor { .offset = { 0, 0 }, .extent = extent };
+        GpuDrawInstance pushConstants {};
+        pushConstants.color = {
+            config::bloomThreshold,
+            config::bloomSoftKnee,
+            0.0f,
+            0.0f,
+        };
+        pushConstants.normalAndAmbientRed = {
+            static_cast<float>(extent.width),
+            static_cast<float>(extent.height),
+            0.0f,
+            0.0f,
+        };
+
+        const auto drawPass = [&](
+            VkPipeline pipeline,
+            VkImageView target) {
+            const VkRenderingAttachmentInfo attachment {
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = target,
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            };
+            const VkRenderingInfo renderingInfo {
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = { .offset = { 0, 0 }, .extent = extent },
+                .layerCount = 1,
+                .colorAttachmentCount = 1,
+                .pColorAttachments = &attachment,
+            };
+            vkCmdBeginRendering(commandBuffer, &renderingInfo);
+            ++stats_.renderPasses;
+            vkCmdBindPipeline(
+                commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+            ++stats_.pipelineBinds;
+            bindDescriptorSet(commandBuffer);
+            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+            vkCmdPushConstants(
+                commandBuffer,
+                pipelines_.layout(),
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                0,
+                sizeof(GpuDrawInstance),
+                &pushConstants);
+            vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+            ++stats_.drawCalls;
+            vkCmdEndRendering(commandBuffer);
+        };
+
+        bloomPass_.prepareExtractTarget(commandBuffer, stats_);
+        drawPass(extractPipeline, bloomPass_.extractImageView());
+        bloomPass_.publishExtractTarget(commandBuffer, stats_);
+        bloomPass_.prepareBlurTarget(commandBuffer, stats_);
+        drawPass(blurPipeline, bloomPass_.bloomImageView());
+        bloomPass_.publishBlurTarget(commandBuffer, stats_);
     }
 
     void recordAtmosphere(
@@ -2736,9 +2827,15 @@ private:
     {
         beginQuadDraw(commandBuffer);
 
+        const float emission = std::max(particle.emissiveStrength, 0.0f);
         const GpuDrawInstance constants {
             .vertices = quadVertices(particle.vertices, worldSpaceQuad),
-            .color = particle.color,
+            .color = {
+                particle.color.x * emission,
+                particle.color.y * emission,
+                particle.color.z * emission,
+                particle.color.w,
+            },
             .materialOptions = { 0.0f, 1.0f, 1.0f, 0.0f },
             .textureOptions = {
                 shaderValue(DrawMaterialMode::ProceduralTexture),
@@ -3389,6 +3486,7 @@ private:
     bool previewDescriptor_ = false;
     VulkanSsaoPass& ssaoPass_;
     VulkanAtmospherePass& atmospherePass_;
+    VulkanBloomPass& bloomPass_;
     VulkanSceneDescriptors& descriptors_;
     VulkanPipelineFactory& pipelines_;
     VulkanModelResources& models_;

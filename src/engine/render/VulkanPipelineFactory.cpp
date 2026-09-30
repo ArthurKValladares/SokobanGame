@@ -208,6 +208,8 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         shaders[15] = shaderModule(shaderCatalog::uiFrag);
         shaders[16] = shaderModule(shaderCatalog::atmosphereFrag);
         shaders[17] = shaderModule(shaderCatalog::atmosphereCompositeFrag);
+        shaders[18] = shaderModule(shaderCatalog::bloomExtractFrag);
+        shaders[19] = shaderModule(shaderCatalog::bloomBlurFrag);
 
         scene_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
@@ -284,6 +286,10 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             VK_SAMPLE_COUNT_1_BIT, PostProcessBlend::Atmosphere);
         atmosphereCompositeMultisample_ = createPostProcessPipeline(
             shaders[5], shaders[17], sceneFormat, createInfo.sampleCount);
+        bloomExtract_ = createPostProcessPipeline(
+            shaders[5], shaders[18], sceneFormat);
+        bloomBlur_ = createPostProcessPipeline(
+            shaders[5], shaders[19], sceneFormat);
         worldTransition_ = createPostProcessPipeline(
             shaders[5], shaders[11], sceneFormat);
         tonemap_ = createPostProcessPipeline(
@@ -315,6 +321,8 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             std::pair {
                 atmosphereCompositeMultisample_,
                 "Volumetric atmosphere composite pipeline (multisample)" },
+            std::pair { bloomExtract_, "Bloom extract pipeline" },
+            std::pair { bloomBlur_, "Bloom blur pipeline" },
             std::pair { worldTransition_, "World transition pipeline" },
             std::pair { tonemap_, "Tonemap pipeline" },
         };
@@ -347,6 +355,7 @@ void VulkanPipelineFactory::destroy()
             shadow_, modelShadow_, skinnedModelShadow_,
             ssao_, ssaoComposite_, atmosphere_, atmosphereComposite_,
             atmosphereCompositeMultisample_,
+            bloomExtract_, bloomBlur_,
             worldTransition_, tonemap_,
         };
         for (VkPipeline pipeline : pipelines) {
@@ -379,6 +388,8 @@ void VulkanPipelineFactory::destroy()
     atmosphere_ = VK_NULL_HANDLE;
     atmosphereComposite_ = VK_NULL_HANDLE;
     atmosphereCompositeMultisample_ = VK_NULL_HANDLE;
+    bloomExtract_ = VK_NULL_HANDLE;
+    bloomBlur_ = VK_NULL_HANDLE;
     worldTransition_ = VK_NULL_HANDLE;
     tonemap_ = VK_NULL_HANDLE;
     layout_ = VK_NULL_HANDLE;

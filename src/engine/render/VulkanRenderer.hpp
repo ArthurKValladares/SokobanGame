@@ -15,6 +15,7 @@
 #include "engine/render/VulkanDeviceContext.hpp"
 #include "engine/render/VulkanDiagnostics.hpp"
 #include "engine/render/VulkanAtmospherePass.hpp"
+#include "engine/render/VulkanBloomPass.hpp"
 #include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanPipelineCache.hpp"
@@ -294,6 +295,7 @@ private:
         SwapchainPresentSemaphores presentSemaphores;
         std::unique_ptr<VulkanSsaoPass> ssaoPass;
         std::unique_ptr<VulkanAtmospherePass> atmospherePass;
+        std::unique_ptr<VulkanBloomPass> bloomPass;
         std::unique_ptr<VulkanSceneDescriptors> sceneDescriptors;
         std::unique_ptr<VulkanPipelineFactory> pipelines;
         VkDescriptorSet gameViewportTexture = VK_NULL_HANDLE;

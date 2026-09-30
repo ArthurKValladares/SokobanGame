@@ -11,13 +11,14 @@
 // pass ever writes to a UNORM target, or applies its own pow(), the result is
 // a colour-space bug that reads like a badly chosen tonemap curve.
 layout(set = 0, binding = 11) uniform sampler2D sceneHdrColor;
+layout(set = 0, binding = 15) uniform sampler2D bloomColor;
 
 layout(location = 0) out vec4 outColor;
 
 // GpuDrawInstance::color sits at byte 128, which is the slot every other
 // fullscreen pass reads its parameters from.
 // params: x = exposure in EV, y = curve (0 = clamp, 1 = Khronos PBR
-// Neutral), z and w unused.
+// Neutral), z = bloom intensity, w unused.
 layout(push_constant) uniform PushConstants
 {
     layout(offset = 128) vec4 params;
@@ -53,6 +54,8 @@ void main()
     // a 1:1 fetch with no filtering. Scaling to the swapchain stays a
     // separate blit.
     vec3 color = texelFetch(sceneHdrColor, ivec2(gl_FragCoord.xy), 0).rgb;
+    vec2 uv = gl_FragCoord.xy / vec2(textureSize(sceneHdrColor, 0));
+    color += texture(bloomColor, uv).rgb * max(pc.params.z, 0.0);
 
     color = max(color, vec3(0.0)) * exp2(pc.params.x);
     color = pc.params.y < 0.5

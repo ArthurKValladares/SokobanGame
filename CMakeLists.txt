@@ -652,6 +652,7 @@ endif()
 if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
 add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanAtmospherePass.cpp
+    src/engine/render/VulkanBloomPass.cpp
     src/engine/render/VulkanRenderer.cpp
     src/engine/render/VulkanDeviceContext.cpp
     src/engine/render/VulkanDebugUtils.cpp

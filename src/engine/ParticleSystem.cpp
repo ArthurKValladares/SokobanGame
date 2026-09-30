@@ -57,6 +57,7 @@ void ParticleSystem::emit(
                     effect.maximumVelocity.z),
             },
             .color = effect.color,
+            .emissiveStrength = std::max(effect.emissiveStrength, 0.0f),
             .texture = effect.textures[textureIndex],
             .rotationRadians = randomRange(
                 0.0f, std::numbers::pi_v<float> * 2.0f),
@@ -79,6 +80,7 @@ void ParticleSystem::emit(
                 finalSize * std::max(effect.finalSizeScale.y, 0.0f),
             },
             .drawOnTop = effect.drawOnTop,
+            .drawOrder = effect.drawOrder,
         });
     }
 }
@@ -142,6 +144,7 @@ void ParticleSystem::emitRibbon(
         .start = start,
         .direction = delta / distance,
         .color = ribbon.color,
+        .emissiveStrength = std::max(ribbon.emissiveStrength, 0.0f),
         .texture = ribbon.texture,
         .distance = distance,
         .width = ribbon.width,
@@ -153,6 +156,7 @@ void ParticleSystem::emitRibbon(
         .fullLength = ribbon.fullLength,
         .flipTextureV = ribbon.flipTextureV,
         .drawOnTop = ribbon.drawOnTop,
+        .drawOrder = ribbon.drawOrder,
     });
 }
 
@@ -212,8 +216,10 @@ void ParticleSystem::appendRenderData(RenderFrameData& frame) const
             .rotationRadians = particle.rotationRadians,
             .billboardAlignment = particle.billboardAlignment,
             .color = color,
+            .emissiveStrength = particle.emissiveStrength,
             .texture = particle.texture,
             .drawOnTop = particle.drawOnTop,
+            .drawOrder = particle.drawOrder,
         });
     }
     for (const Ribbon& ribbon : ribbons_) {
@@ -246,8 +252,10 @@ void ParticleSystem::appendRenderData(RenderFrameData& frame) const
             .billboardAlignmentUsesY = true,
             .flipTextureV = ribbon.flipTextureV,
             .color = ribbon.color,
+            .emissiveStrength = ribbon.emissiveStrength,
             .texture = ribbon.texture,
             .drawOnTop = ribbon.drawOnTop,
+            .drawOrder = ribbon.drawOrder,
         });
     }
 }

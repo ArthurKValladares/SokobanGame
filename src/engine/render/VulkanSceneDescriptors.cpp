@@ -68,6 +68,8 @@ constexpr auto sceneBindings = std::to_array<SceneBinding>({
     // its transform would have to be added here as well as declared there.
     SceneBinding { 12, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
     SceneBinding { 13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+    SceneBinding { 14, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+    SceneBinding { 15, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
 });
 
 // The type a binding was declared with. Returning MAX_ENUM for an unknown
@@ -109,6 +111,8 @@ static_assert(sceneBindingType(9) == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 static_assert(sceneBindingType(12) == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 static_assert(sceneBindingType(2) == VK_DESCRIPTOR_TYPE_MAX_ENUM);
 static_assert(sceneBindingType(13) == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+static_assert(sceneBindingType(14) == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+static_assert(sceneBindingType(15) == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 static_assert(isImageBinding(sceneBindingType(0)));
 static_assert(!isImageBinding(sceneBindingType(7)));
 static_assert(!isImageBinding(sceneBindingType(9)));
@@ -356,7 +360,7 @@ void VulkanSceneDescriptors::updateInternal(
     // and "resources are incomplete" told whoever hit it nothing about which
     // one. A missing entry here is a descriptor written from a null handle,
     // which validation catches but only on a validation build.
-    const std::array<std::pair<const char*, bool>, 12> required {
+    const std::array<std::pair<const char*, bool>, 14> required {
         std::pair { "shadow", resources.shadow.valid() },
         std::pair { "pointShadows", resources.pointShadows.valid() },
         std::pair { "sceneColor", resources.sceneColor.valid() },
@@ -364,6 +368,8 @@ void VulkanSceneDescriptors::updateInternal(
         std::pair { "sceneDepth", resources.sceneDepth.valid() },
         std::pair { "ssao", resources.ssao.valid() },
         std::pair { "atmosphere", resources.atmosphere.valid() },
+        std::pair { "bloomExtract", resources.bloomExtract.valid() },
+        std::pair { "bloom", resources.bloom.valid() },
         std::pair { "uiFont", resources.uiFont.valid() },
         std::pair { "titleBackground", resources.titleBackground.valid() },
         std::pair { "skinning", resources.skinning.valid() },
@@ -432,6 +438,16 @@ void VulkanSceneDescriptors::updateInternal(
         .imageView = resources.atmosphere.imageView,
         .imageLayout = resources.atmosphere.imageLayout,
     };
+    const VkDescriptorImageInfo bloomExtract {
+        .sampler = resources.bloomExtract.sampler,
+        .imageView = resources.bloomExtract.imageView,
+        .imageLayout = resources.bloomExtract.imageLayout,
+    };
+    const VkDescriptorImageInfo bloom {
+        .sampler = resources.bloom.sampler,
+        .imageView = resources.bloom.imageView,
+        .imageLayout = resources.bloom.imageLayout,
+    };
     const VkDescriptorImageInfo uiFont {
         .sampler = resources.uiFont.sampler,
         .imageView = resources.uiFont.imageView,
@@ -462,6 +478,8 @@ void VulkanSceneDescriptors::updateInternal(
         SceneWriteSource { 11, &sceneHdrColor, nullptr },
         SceneWriteSource { 12, nullptr, &materials },
         SceneWriteSource { 13, &atmosphere, nullptr },
+        SceneWriteSource { 14, &bloomExtract, nullptr },
+        SceneWriteSource { 15, &bloom, nullptr },
     };
 
     std::array<VkWriteDescriptorSet, sceneBindings.size()> writes {};

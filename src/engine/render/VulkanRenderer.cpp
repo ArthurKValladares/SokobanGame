@@ -743,6 +743,7 @@ void VulkanRenderer::drawFrame(
             .shadowPass = shadowPass_,
             .ssaoPass = *activeResources_.ssaoPass,
             .atmospherePass = *activeResources_.atmospherePass,
+            .bloomPass = *activeResources_.bloomPass,
             .sceneDescriptors =
                 *activeResources_.sceneDescriptors,
             .pipelines = *activeResources_.pipelines,
@@ -1588,6 +1589,14 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
             .sampler = resources.atmospherePass->sampler(),
             .imageView = resources.atmospherePass->imageView(),
         },
+        .bloomExtract = {
+            .sampler = resources.bloomPass->sampler(),
+            .imageView = resources.bloomPass->extractImageView(),
+        },
+        .bloom = {
+            .sampler = resources.bloomPass->sampler(),
+            .imageView = resources.bloomPass->bloomImageView(),
+        },
         .uiFont = {
             .sampler = uiResources_.sampler(),
             .imageView = uiResources_.fontImageView(),
@@ -1667,6 +1676,13 @@ VulkanRenderer::createRenderResources(
         resources.swapchain->renderExtent(),
         resources.swapchain->sceneColorFormat());
     const auto atmosphereMicroseconds = finishPhase();
+    resources.bloomPass = std::make_unique<VulkanBloomPass>();
+    resources.bloomPass->create(
+        deviceContext_.memoryAllocator(),
+        deviceContext_.device(),
+        resources.swapchain->renderExtent(),
+        resources.swapchain->sceneColorFormat());
+    const auto bloomMicroseconds = finishPhase();
     if (startupPrerequisites) {
         startupPrerequisites->get();
     }
@@ -1690,6 +1706,7 @@ VulkanRenderer::createRenderResources(
             << swapchainMicroseconds
             << " ssao=" << ssaoMicroseconds
             << " atmosphere=" << atmosphereMicroseconds
+            << " bloom=" << bloomMicroseconds
             << " prerequisite-wait=" << prerequisiteWaitMicroseconds
             << " descriptors=" << descriptorsMicroseconds
             << " pipelines=" << pipelinesMicroseconds

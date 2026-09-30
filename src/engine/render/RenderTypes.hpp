@@ -433,8 +433,10 @@ struct RenderFrameData {
         bool billboardAlignmentUsesY = false;
         bool flipTextureV = false;
         Vec4 color {};
+        float emissiveStrength = 1.0f;
         RenderTexture texture = noTexture;
         bool drawOnTop = false;
+        int32_t drawOrder = 0;
     };
 
     struct GridOverlay {

@@ -126,10 +126,12 @@ struct PreparedParticle {
     // world points and the vertex shader projects them.
     std::array<Vec3, 4> vertices {};
     Vec4 color {};
+    float emissiveStrength = 1.0f;
     RenderTexture texture = noTexture;
     float depth = 0.0f;
     bool flipTextureV = false;
     bool drawOnTop = false;
+    int32_t drawOrder = 0;
 };
 
 // Persistent, Vulkan-free identity and world bounds for one source

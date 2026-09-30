@@ -13,6 +13,9 @@ namespace sokoban {
 struct ParticleEffectDefinition {
     std::vector<RenderTexture> textures;
     Vec4 color { 1.0f, 1.0f, 1.0f, 1.0f };
+    // Multiplies RGB after simulation while leaving opacity untouched. Values
+    // above one carry real HDR radiance into the renderer and can bloom.
+    float emissiveStrength = 1.0f;
     uint32_t particleCount = 1;
     Vec2 lifetimeSeconds { 0.5f, 0.5f };
     Vec2 initialSize { 0.5f, 0.5f };
@@ -32,6 +35,10 @@ struct ParticleEffectDefinition {
     float minimumAngularVelocity = 0.0f;
     float maximumAngularVelocity = 0.0f;
     bool drawOnTop = false;
+    // Higher overlay orders render later among particles in the same depth
+    // mode. This is for layered effects whose visual stacking must not vary
+    // with camera direction.
+    int32_t drawOrder = 0;
 };
 
 // A reusable line emitter built from ordinary particles. Each path-aligned
@@ -54,6 +61,7 @@ struct ParticleTrailDefinition {
 struct ParticleRibbonDefinition {
     RenderTexture texture = noTexture;
     Vec4 color { 1.0f, 1.0f, 1.0f, 1.0f };
+    float emissiveStrength = 1.0f;
     float width = 0.12f;
     float maxLength = 6.0f;
     float speed = 24.0f;
@@ -62,6 +70,7 @@ struct ParticleRibbonDefinition {
     bool fullLength = false;
     bool flipTextureV = false;
     bool drawOnTop = false;
+    int32_t drawOrder = 0;
 };
 
 // Vulkan-free particle simulation. Effects describe an emission burst while
@@ -103,6 +112,7 @@ private:
         Vec3 position {};
         Vec3 velocity {};
         Vec4 color {};
+        float emissiveStrength = 1.0f;
         RenderTexture texture {};
         float rotationRadians = 0.0f;
         Vec3 billboardAlignment {};
@@ -112,12 +122,14 @@ private:
         Vec2 initialSize { 1.0f, 1.0f };
         Vec2 finalSize { 1.0f, 1.0f };
         bool drawOnTop = false;
+        int32_t drawOrder = 0;
     };
 
     struct Ribbon {
         Vec3 start {};
         Vec3 direction {};
         Vec4 color {};
+        float emissiveStrength = 1.0f;
         RenderTexture texture = noTexture;
         float distance = 0.0f;
         float width = 0.12f;
@@ -129,6 +141,7 @@ private:
         bool fullLength = false;
         bool flipTextureV = false;
         bool drawOnTop = false;
+        int32_t drawOrder = 0;
     };
 
     [[nodiscard]] float randomRange(float minimum, float maximum);

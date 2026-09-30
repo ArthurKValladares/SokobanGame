@@ -34,6 +34,10 @@ public:
         ImageBinding sceneDepth;
         ImageBinding ssao;
         ImageBinding atmosphere;
+        // The first bloom target feeds the vertical blur; the second is the
+        // finished bloom texture sampled by tonemapping.
+        ImageBinding bloomExtract;
+        ImageBinding bloom;
         ImageBinding uiFont;
         ImageBinding titleBackground;
         std::vector<VulkanModelResources::TextureView> modelTextures;

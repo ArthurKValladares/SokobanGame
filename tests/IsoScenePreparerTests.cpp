@@ -163,6 +163,8 @@ void checkPreparationOutputsMatch(
         CHECK(expected.particles[index].vertices ==
               actual.particles[index].vertices);
         CHECK(expected.particles[index].color == actual.particles[index].color);
+        CHECK(expected.particles[index].emissiveStrength ==
+              actual.particles[index].emissiveStrength);
         CHECK(expected.particles[index].texture ==
               actual.particles[index].texture);
         CHECK(expected.particles[index].depth == actual.particles[index].depth);
@@ -170,6 +172,8 @@ void checkPreparationOutputsMatch(
               actual.particles[index].flipTextureV);
         CHECK(expected.particles[index].drawOnTop ==
               actual.particles[index].drawOnTop);
+        CHECK(expected.particles[index].drawOrder ==
+              actual.particles[index].drawOrder);
     }
 }
 
@@ -1744,6 +1748,7 @@ void testParticlesBecomeSortedTranslucentBillboardsOnly()
             .color = { 0.7f, 0.9f, 1.0f, 0.6f },
             .texture = RenderTexture { 5 },
             .drawOnTop = true,
+            .drawOrder = 2,
         },
         RenderFrameData::Particle {
             .position = { 0.5f, 0.5f, 0.8f },
@@ -1751,18 +1756,28 @@ void testParticlesBecomeSortedTranslucentBillboardsOnly()
             .color = { 0.7f, 0.9f, 1.0f, 0.4f },
             .texture = RenderTexture { 6 },
         },
+        RenderFrameData::Particle {
+            .position = { 2.5f, 2.5f, 0.8f },
+            .size = { 0.3f, 0.3f },
+            .color = { 1.0f, 0.5f, 0.1f, 0.5f },
+            .texture = RenderTexture { 7 },
+            .drawOnTop = true,
+            .drawOrder = 1,
+        },
     };
 
     const PreparedRenderScene scene = prepareScene(frame, { 1280.0f, 720.0f });
     CHECK(scene.hasTranslucentContent);
-    CHECK(scene.particles.size() == 2);
+    CHECK(scene.particles.size() == 3);
     CHECK(!scene.particles[0].drawOnTop);
     CHECK(scene.particles[1].drawOnTop);
+    CHECK(scene.particles[1].drawOrder == 1);
+    CHECK(scene.particles[2].drawOrder == 2);
     CHECK(scene.particles[0].vertices[0].x !=
         scene.particles[0].vertices[2].x);
     CHECK(scene.particles[0].vertices[0].y !=
         scene.particles[0].vertices[2].y);
-    const PreparedParticle& aligned = scene.particles[1];
+    const PreparedParticle& aligned = scene.particles[2];
     const Vec3 longEdge = aligned.vertices[1] - aligned.vertices[0];
     const Vec3 projectedWorldX =
         scene.isoLayout.cameraRight *
