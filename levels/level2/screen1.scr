@@ -1,5 +1,5 @@
-@character rogue
 @water 1
+@gate {"cell":[13,9,2],"color":[1.0,0.7200000286102295,0.11999999731779099],"plates":[[10,8,2]]}
 
 @layer 0
 DDDDDDDDDDDDDDDDDDD
@@ -39,9 +39,9 @@ DDD             DDD
                    
             #      
       #            
-    C I      #     
-          P#  E    
-       #           
-                   
+    Q I      #     
+          P# ###   
+       #     GE#   
+             ###   
                    
                    

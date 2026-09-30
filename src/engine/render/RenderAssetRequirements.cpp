@@ -165,6 +165,12 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
                 if (level.tileAt(x, y, z) == TileType::Water) {
                     continue;
                 }
+                if (level.tileAt(x, y, z) == TileType::Gate) {
+                    requirements.requireTexture(
+                        manifest.textureIdByName(
+                            config::gateParticleTextureName));
+                    continue;
+                }
                 requirements.requireModel(
                     manifest.modelForTile(level.tileAt(x, y, z)));
             }

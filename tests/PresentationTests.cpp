@@ -63,7 +63,8 @@ const AssetManifest& testManifest()
         { "name": "GroundGrass", "path": "grass.png" },
         { "name": "GroundRock", "path": "rock.png" },
         { "name": "GroundSplatMap", "path": "splat.png" },
-        { "name": "GroundSplatMapOverworld7", "path": "overworld7.png" }
+        { "name": "GroundSplatMapOverworld7", "path": "overworld7.png" },
+        { "name": "ParticleGlow", "path": "glow.png" }
       ],
       "models": [
         { "name": "Stone", "path": "stone.gltf" },
@@ -1145,6 +1146,111 @@ void testGameplayVisibleCellFiltersComposedWorldFrame()
     CHECK(std::ranges::none_of(frame.tiles, [](const RenderFrameData::Tile& tile) {
         return tile.model == testManifest().modelForTile(TileType::Rock);
     }));
+}
+
+void testGateParticlesFadeAndPressurePlateMatchesColor()
+{
+    TEST("gateParticlesFadeAndPressurePlateMatchesColor");
+    const Vec3 gateColor { 0.2f, 0.7f, 1.0f };
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "..." },
+            { "CPG" },
+        },
+        .gates = { Level::Gate {
+            .cell = { 2, 0, 1 },
+            .pressurePlates = { { 1, 0, 1 } },
+            .color = gateColor,
+        } },
+    }, "gate presentation");
+    const GameState closed = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(closed);
+    const RenderFrameData closedFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = closed,
+        .moving = false,
+        .projectedState = closed,
+        .presentation = presentation,
+        .settings = {},
+    });
+    CHECK(closedFrame.particles.size() ==
+        config::gateParticleColumns * config::gateParticleRows);
+    CHECK(std::ranges::none_of(
+        closedFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 2, 0, 1 };
+        }));
+    const auto closedPlate = std::ranges::find_if(
+        closedFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 1, 0, 1 };
+        });
+    CHECK(closedPlate != closedFrame.tiles.end());
+    CHECK(near(closedPlate->color.x, gateColor.x * 0.42f));
+
+    GameState open = closed;
+    open.players[0].cell = { 1, 0, 1 };
+    GameplaySession::Action action {
+        .before = closed,
+        .after = open,
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Right,
+    };
+    action.presentation = presentation.buildActionPresentation(action);
+    presentation.beginAction(action, action.before);
+    presentation.seekAction(action, 0.5f);
+    const RenderFrameData fadingFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = closed,
+        .moving = true,
+        .projectedState = open,
+        .presentation = presentation,
+        .settings = {},
+    });
+    CHECK(fadingFrame.particles.size() == closedFrame.particles.size());
+    CHECK(fadingFrame.particles[0].color.w < closedFrame.particles[0].color.w);
+    CHECK(fadingFrame.particles[0].color.w > 0.0f);
+
+    GameplayPresentation openPresentation;
+    openPresentation.resetEntities(open);
+    const RenderFrameData openFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = open,
+        .moving = false,
+        .projectedState = open,
+        .presentation = openPresentation,
+        .settings = {},
+    });
+    CHECK(openFrame.particles.empty());
+    const auto openPlate = std::ranges::find_if(
+        openFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 1, 0, 1 };
+        });
+    CHECK(openPlate != openFrame.tiles.end());
+    CHECK(near(openPlate->color.x, gateColor.x));
+
+    LevelEditor editor;
+    editor.newDocument(3, 2, false);
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::PressurePlate));
+    CHECK(editor.setCell({ 2, 0, 1 }, TileType::Gate));
+    CHECK(editor.updateGate(0, { { 1, 0, 1 } }, gateColor));
+    const RenderFrameData editorFrame = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(),
+        .editor = editor,
+        .settings = {},
+    });
+    CHECK(editorFrame.particles.size() ==
+        config::gateParticleColumns * config::gateParticleRows);
+    CHECK(std::ranges::any_of(
+        editorFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 2, 0, 1 } && tile.pickOnly;
+        }));
 }
 
 void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
@@ -2732,6 +2838,7 @@ int main()
     testDecorativeTileRendersWithoutChangingCameraExtent();
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();
     testGameplayVisibleCellFiltersComposedWorldFrame();
+    testGateParticlesFadeAndPressurePlateMatchesColor();
     testEditorFrameProvidesInvisibleExpansionBorderAndPreview();
     testEditorFrameShowsReadOnlyOverworldNeighbors();
     testEditorSelectorMoveUsesFlagPreviews();

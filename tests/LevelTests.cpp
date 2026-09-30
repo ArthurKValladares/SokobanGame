@@ -239,6 +239,58 @@ void testSelectorMetadataRoundTripAndLookup()
     CHECK(level.isWalkable({ 1, 0, 1 }));
 }
 
+void testGateMetadataRoundTripAndValidation()
+{
+    TEST("gateMetadataRoundTripAndValidation");
+    const Level::Definition definition {
+        .layers = {
+            { "...." },
+            { "CPG " },
+        },
+        .gates = { Level::Gate {
+            .cell = { 2, 0, 1 },
+            .pressurePlates = { { 1, 0, 1 } },
+            .color = { 0.2f, 0.65f, 1.0f },
+        } },
+    };
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition(definition);
+    CHECK(serialized.front().starts_with("@gate "));
+    const Level::Definition parsed =
+        Level::parseDefinition(serialized, "gate round trip");
+    CHECK(parsed == definition);
+
+    const Level level = Level::loadFromDefinition(parsed, "gate level");
+    CHECK(tileTypeToChar(TileType::Gate) == 'G');
+    CHECK(charToTileType('G') == TileType::Gate);
+    CHECK(level.gates().size() == 1);
+    CHECK(level.gateAt({ 2, 0, 1 }) == &level.gates().front());
+    CHECK(level.gateForPressurePlate({ 1, 0, 1 }) ==
+        &level.gates().front());
+    CHECK(!level.isWalkable({ 2, 0, 1 }));
+
+    checkThrowsContaining([] {
+        (void)Level::loadFromDefinition({
+            .layers = {
+                { "..." },
+                { "C G" },
+            },
+        }, "gate missing metadata");
+    }, "requires an '@gate'");
+    checkThrowsContaining([] {
+        (void)Level::loadFromDefinition({
+            .layers = {
+                { "..." },
+                { "C.G" },
+            },
+            .gates = { Level::Gate {
+                .cell = { 2, 0, 1 },
+                .pressurePlates = { { 1, 0, 1 } },
+            } },
+        }, "gate bad link");
+    }, "Pressure tiles");
+}
+
 void testParserRejectsMalformedStructure()
 {
     TEST("parserRejectsMalformedStructure");
@@ -502,6 +554,7 @@ int main()
     testWaterLayerMetadataAndTileResolution();
     testDecorationMetadataRoundTrip();
     testSelectorMetadataRoundTripAndLookup();
+    testGateMetadataRoundTripAndValidation();
     testParserRejectsMalformedStructure();
     testLevelValidationErrors();
     testRaggedLayersNormalizeToAir();

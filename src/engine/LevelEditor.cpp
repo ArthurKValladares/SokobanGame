@@ -794,6 +794,33 @@ bool LevelEditor::moveObject(GridPosition3 destination)
         return false;
     }
 
+    // setCell keeps gate metadata valid at every intermediate point. Restore
+    // the authored relationships after the two-cell transaction completes.
+    if (move->tile == TileType::Gate) {
+        const auto oldGate = std::ranges::find(
+            before.gates, move->source, &Level::Gate::cell);
+        const auto newGate = std::ranges::find(
+            document_.gates, destination, &Level::Gate::cell);
+        if (oldGate != before.gates.end() &&
+            newGate != document_.gates.end()) {
+            const std::size_t index = static_cast<std::size_t>(
+                std::distance(document_.gates.begin(), newGate));
+            document_.gates[index] = *oldGate;
+            document_.gates[index].cell = destination;
+        }
+    } else if (move->tile == TileType::PressurePlate) {
+        for (Level::Gate& gate : document_.gates) {
+            const auto oldGate = std::ranges::find(
+                before.gates, gate.cell, &Level::Gate::cell);
+            if (oldGate != before.gates.end() &&
+                std::ranges::find(
+                    oldGate->pressurePlates, move->source) !=
+                    oldGate->pressurePlates.end()) {
+                gate.pressurePlates.push_back(destination);
+            }
+        }
+    }
+
     document_.status = "Moved object.";
     recordDocumentChange(before);
     return true;
@@ -1040,6 +1067,14 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             selector.cell.x += prependColumns;
             selector.cell.y += prependRows;
         }
+        for (Level::Gate& gate : document_.gates) {
+            gate.cell.x += prependColumns;
+            gate.cell.y += prependRows;
+            for (GridPosition3& plate : gate.pressurePlates) {
+                plate.x += prependColumns;
+                plate.y += prependRows;
+            }
+        }
     }
 
     while (translatedPosition.z >= static_cast<int>(document_.layers.size())) {
@@ -1054,6 +1089,26 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
                 std::ranges::replace(documentRow, tileTypeToChar(TileType::Player), tileTypeToChar(TileType::Air));
             }
         }
+    }
+
+    const TileType previousTile = charToTileType(
+        document_.layers[static_cast<size_t>(translatedPosition.z)]
+            [static_cast<size_t>(translatedPosition.y)]
+            [static_cast<size_t>(translatedPosition.x)])
+                                      .value_or(TileType::Air);
+    if (previousTile == TileType::Gate && tile != TileType::Gate) {
+        std::erase_if(document_.gates, [&](const Level::Gate& gate) {
+            return gate.cell == translatedPosition;
+        });
+    }
+    if (previousTile == TileType::PressurePlate &&
+        tile != TileType::PressurePlate) {
+        for (Level::Gate& gate : document_.gates) {
+            std::erase(gate.pressurePlates, translatedPosition);
+        }
+    }
+    if (tile == TileType::Gate && previousTile != TileType::Gate) {
+        document_.gates.push_back({ .cell = translatedPosition });
     }
 
     document_.layers[static_cast<size_t>(translatedPosition.z)]
@@ -1444,6 +1499,76 @@ const Level::ScreenSelector* LevelEditor::selectedSelector() const
     return &document_.selectors[*document_.selectedSelector];
 }
 
+const std::vector<Level::Gate>& LevelEditor::gates() const
+{
+    return document_.gates;
+}
+
+bool LevelEditor::updateGate(
+    std::size_t index,
+    std::vector<GridPosition3> pressurePlates,
+    Vec3 color)
+{
+    if (index >= document_.gates.size()) {
+        return false;
+    }
+    const auto validColor = [](float component) {
+        return std::isfinite(component) && component >= 0.0f &&
+            component <= 1.0f;
+    };
+    if (!validColor(color.x) || !validColor(color.y) ||
+        !validColor(color.z)) {
+        document_.status = "Gate colors must be between zero and one.";
+        return false;
+    }
+    const auto tileAt = [&](GridPosition3 cell) {
+        if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+            cell.x >= static_cast<int>(documentWidth()) ||
+            cell.y >= static_cast<int>(documentHeight()) ||
+            cell.z >= static_cast<int>(documentDepth())) {
+            return TileType::Air;
+        }
+        return charToTileType(
+            document_.layers[static_cast<std::size_t>(cell.z)]
+                [static_cast<std::size_t>(cell.y)]
+                [static_cast<std::size_t>(cell.x)])
+            .value_or(TileType::Air);
+    };
+    for (std::size_t plateIndex = 0;
+         plateIndex < pressurePlates.size();
+         ++plateIndex) {
+        if (tileAt(pressurePlates[plateIndex]) != TileType::PressurePlate) {
+            document_.status = "Gate links must point to Pressure tiles.";
+            return false;
+        }
+        if (std::ranges::find(
+                pressurePlates.begin(),
+                pressurePlates.begin() +
+                    static_cast<std::ptrdiff_t>(plateIndex),
+                pressurePlates[plateIndex]) !=
+            pressurePlates.begin() +
+                static_cast<std::ptrdiff_t>(plateIndex)) {
+            document_.status = "A pressure plate can only be linked once per gate.";
+            return false;
+        }
+    }
+
+    Level::Gate replacement = document_.gates[index];
+    replacement.pressurePlates = std::move(pressurePlates);
+    replacement.color = color;
+    if (replacement == document_.gates[index]) {
+        return false;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.gates[index] = std::move(replacement);
+    document_.dirty = true;
+    document_.status = document_.gates[index].pressurePlates.empty()
+        ? "Updated gate; it will remain closed until a plate is linked."
+        : "Updated gate links and color.";
+    recordDocumentChange(before);
+    return true;
+}
+
 bool LevelEditor::editingOverworld() const
 {
     if (document_.loadedPath.empty()) {
@@ -1594,6 +1719,7 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     document_.character.reset();
     document_.decorations.clear();
     document_.selectors.clear();
+    document_.gates.clear();
     document_.selectedDecoration.reset();
     document_.selectedSelector.reset();
     // A new document belongs to no screen until it is saved as one, so it has
@@ -1648,6 +1774,15 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
         *document_.selectedSelector >= document_.selectors.size()) {
         document_.selectedSelector.reset();
     }
+    std::erase_if(document_.gates, [&](Level::Gate& gate) {
+        if (gate.cell.x >= width || gate.cell.y >= height) {
+            return true;
+        }
+        std::erase_if(gate.pressurePlates, [&](GridPosition3 plate) {
+            return plate.x >= width || plate.y >= height;
+        });
+        return false;
+    });
 
     document_.requestedWidth = width;
     document_.requestedHeight = height;
@@ -1696,6 +1831,16 @@ void LevelEditor::insertLayerAt(int insertionIndex, const char* status)
             ++selector.cell.z;
         }
     }
+    for (Level::Gate& gate : document_.gates) {
+        if (gate.cell.z >= insertionIndex) {
+            ++gate.cell.z;
+        }
+        for (GridPosition3& plate : gate.pressurePlates) {
+            if (plate.z >= insertionIndex) {
+                ++plate.z;
+            }
+        }
+    }
     document_.activeLayer = insertionIndex;
     document_.dirty = true;
     document_.status = status;
@@ -1739,6 +1884,24 @@ void LevelEditor::deleteActiveLayer()
         *document_.selectedSelector >= document_.selectors.size()) {
         document_.selectedSelector.reset();
     }
+    std::erase_if(document_.gates, [&](Level::Gate& gate) {
+        if (gate.cell.z == static_cast<int>(deletedLayer)) {
+            return true;
+        }
+        if (gate.cell.z > static_cast<int>(deletedLayer)) {
+            --gate.cell.z;
+        }
+        std::erase_if(gate.pressurePlates, [&](GridPosition3& plate) {
+            if (plate.z == static_cast<int>(deletedLayer)) {
+                return true;
+            }
+            if (plate.z > static_cast<int>(deletedLayer)) {
+                --plate.z;
+            }
+            return false;
+        });
+        return false;
+    });
     document_.activeLayer = std::min(
         document_.activeLayer,
         static_cast<int>(document_.layers.size()) - 1);
@@ -1879,6 +2042,7 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     document_.character = definition.character;
     document_.decorations = std::move(definition.decorations);
     document_.selectors = std::move(definition.selectors);
+    document_.gates = std::move(definition.gates);
     document_.selectedDecoration.reset();
     document_.selectedSelector.reset();
     document_.filePath = path;
@@ -1914,7 +2078,8 @@ bool LevelEditor::reloadFromDisk()
             onDisk.waterLayer == document_.waterLayer &&
             onDisk.character == document_.character &&
             onDisk.decorations == document_.decorations &&
-            onDisk.selectors == document_.selectors) {
+            onDisk.selectors == document_.selectors &&
+            onDisk.gates == document_.gates) {
             return false;
         }
     } catch (const std::exception&) {
@@ -1964,6 +2129,7 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
             .waterLayer = document_.waterLayer,
             .decorations = document_.decorations,
             .selectors = document_.selectors,
+            .gates = document_.gates,
             .character = overworldScreenIdForPath(sourcePath)
                 ? document_.character
                 : std::nullopt,
@@ -2607,6 +2773,7 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
         before.character == after.character &&
         before.decorations == after.decorations &&
         before.selectors == after.selectors &&
+        before.gates == after.gates &&
         before.filePath == after.filePath &&
         before.requestedWidth == after.requestedWidth &&
         before.requestedHeight == after.requestedHeight &&
@@ -2630,6 +2797,7 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
     document_.character = snapshot.character;
     document_.decorations = snapshot.decorations;
     document_.selectors = snapshot.selectors;
+    document_.gates = snapshot.gates;
     document_.filePath = snapshot.filePath;
     document_.loadedPath = snapshot.loadedPath;
     document_.requestedWidth = snapshot.requestedWidth;
@@ -2655,6 +2823,7 @@ Level::Definition LevelEditor::documentDefinition() const
         .waterLayer = document_.waterLayer,
         .decorations = document_.decorations,
         .selectors = document_.selectors,
+        .gates = document_.gates,
         .character = editingOverworld()
             ? document_.character
             : std::nullopt,
@@ -2778,6 +2947,7 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
         .character = document_.character,
         .decorations = document_.decorations,
         .selectors = document_.selectors,
+        .gates = document_.gates,
         .filePath = document_.filePath,
         .loadedPath = document_.loadedPath,
         .requestedWidth = document_.requestedWidth,

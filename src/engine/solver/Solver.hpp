@@ -46,9 +46,9 @@ struct Statistics {
     std::size_t peakCanonicalizationCachedStates = 0;
     std::size_t canonicalizationCacheEvictions = 0;
     std::size_t canonicalizationCacheRotations = 0;
-    // Conservative pressure-plate feasibility pruning. Unit-count checks
-    // apply everywhere; static dead cells are feature-gated to ordinary push
-    // mechanics.
+    // Legacy pressure-plate feasibility counters. Gate-controlled plates are
+    // transient switches rather than completion goals, so this analysis is
+    // currently disabled and these remain zero.
     bool staticDeadPositionAnalysisEnabled = false;
     bool multiRockFreezeAnalysisEnabled = false;
     std::size_t staticDeadCells = 0;

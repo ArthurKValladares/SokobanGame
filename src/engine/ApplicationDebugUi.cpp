@@ -1071,9 +1071,15 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
     if (context.input.invalidBindingCount() != 0) {
         ImGui::Text("Invalid input bindings %zu", context.input.invalidBindingCount());
     }
+    const std::size_t openGates = static_cast<std::size_t>(std::ranges::count_if(
+        context.level.gates(),
+        [&](const Level::Gate& gate) {
+            return rules::isGateOpen(context.level, state, gate);
+        }));
     ImGui::Text(
-        "End %s",
-        rules::isEndUnlocked(context.level, state) ? "unlocked" : "locked");
+        "Gates %zu/%zu open",
+        openGates,
+        context.level.gates().size());
     ImGui::BeginDisabled(context.inOverworld);
     result.solveCurrentScreen = ImGui::Button("Solve Current Screen");
     ImGui::EndDisabled();

@@ -26,6 +26,14 @@ public:
         bool operator==(const ScreenSelector&) const = default;
     };
 
+    struct Gate {
+        GridPosition3 cell {};
+        std::vector<GridPosition3> pressurePlates;
+        Vec3 color { 1.0f, 0.72f, 0.12f };
+
+        bool operator==(const Gate&) const = default;
+    };
+
     struct Decoration {
         struct PointLight {
             // Offset in the decoration's local space. It is scaled and
@@ -89,6 +97,7 @@ public:
         std::optional<uint32_t> waterLayer;
         std::vector<Decoration> decorations;
         std::vector<ScreenSelector> selectors;
+        std::vector<Gate> gates;
         // Missing only for backwards-compatible legacy documents. Runtime
         // levels always resolve it to Rogue.
         std::optional<CharacterType> character;
@@ -119,6 +128,7 @@ public:
         std::optional<uint32_t> waterLayer = std::nullopt,
         const std::vector<Decoration>& decorations = {},
         const std::vector<ScreenSelector>& selectors = {},
+        const std::vector<Gate>& gates = {},
         CharacterType selectedCharacter = CharacterType::Rogue);
     [[nodiscard]] static Definition parseDefinition(
         const std::vector<std::string>& lines,
@@ -140,6 +150,9 @@ public:
     [[nodiscard]] const std::vector<MovableTile>& movableTiles() const { return movableTiles_; }
     [[nodiscard]] const std::vector<GridPosition3>& enemyStarts() const { return enemyStarts_; }
     [[nodiscard]] const std::vector<GridPosition3>& pressurePlates() const { return pressurePlates_; }
+    [[nodiscard]] const std::vector<Gate>& gates() const { return gates_; }
+    [[nodiscard]] const Gate* gateAt(GridPosition3 cell) const;
+    [[nodiscard]] const Gate* gateForPressurePlate(GridPosition3 cell) const;
     [[nodiscard]] const std::vector<GridPosition3>& ends() const { return ends_; }
     [[nodiscard]] std::optional<uint32_t> waterLayer() const { return waterLayer_; }
     [[nodiscard]] const std::vector<Decoration>& decorations() const { return decorations_; }
@@ -162,6 +175,7 @@ private:
     std::vector<MovableTile> movableTiles_;
     std::vector<GridPosition3> enemyStarts_;
     std::vector<GridPosition3> pressurePlates_;
+    std::vector<Gate> gates_;
     std::vector<GridPosition3> ends_;
     std::vector<TileType> tiles_;
     std::optional<uint32_t> waterLayer_;

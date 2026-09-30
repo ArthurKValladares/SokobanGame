@@ -7,8 +7,8 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
 
 ## Current Features
 
-- Layered Sokoban movement with rocks, pressure plates, goals, undo, restart,
-  multi-screen levels, and completion tracking.
+- Layered Sokoban movement with rocks, pressure-plate gates, goals, undo,
+  restart, multi-screen levels, and completion tracking.
 - Ice, ladders, conveyors, falling, configurable water layers, and four
   directional mirror types that can reflect players and movable units.
 - Animated enemies that track and attack adjacent players, participate in
@@ -338,23 +338,26 @@ directive default to the rogue.
 An optional `@water N` directive makes Air on that layer resolve to Water and
 extends the water beyond the authored board without expanding camera bounds.
 Any number of `@decoration` directives may reference manifest model names and
-provide authored transforms. Metadata must appear before `@layer 0`.
+provide authored transforms. Each Gate tile has an accompanying `@gate`
+directive that identifies its cell, the pressure plates that open it, and its
+RGB color. Metadata must appear before `@layer 0`.
 
 ```text
 @character rogue
 @water 0
+@gate {"cell":[4,1,1],"plates":[[1,1,1],[2,1,1]],"color":[1.0,0.72,0.12]}
 @decoration {"model":"Tree","position":[4.5,2.5,1.0],"rotation":[0.0,0.0,30.0],"scale":[1.0,1.0,1.25]}
 @decoration {"light":{"castsShadows":true,"color":[1.0,0.55,0.2],"intensity":3.0,"offset":[0.0,0.0,1.2],"range":6.0,"shadowBias":0.004,"shadowOpacity":0.9},"model":"Lantern","position":[2.5,1.5,1.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
 
 @layer 0
-.....
-.. ..
-.....
+......
+......
+......
 
 @layer 1
-#####
-# C #
-#####
+######
+#PPCG#
+######
 ```
 
 Common tile symbols:
@@ -365,8 +368,9 @@ Common tile symbols:
 | `#` | Wall | `C` | Player |
 | `Q K U H B` | Rogue / Knight / Druid / Witch / Bard starts | | |
 | `R` | Rock | `P` | Pressure plate |
-| `E` | End | `I` | Ice |
-| `L` | Ladder | `W` | Legacy explicit water |
+| `G` | Gate | `E` | End |
+| `I` | Ice | `L` | Ladder |
+| `W` | Legacy explicit water | | |
 | `^ v > <` | Conveyors | `1 2 3 4` | Mirror orientations |
 | `D` | Decorative block | `N` | Enemy |
 | `n e s w` | Turrets facing north/east/south/west | | |
@@ -375,10 +379,16 @@ Decorative blocks render but have no gameplay, support, occupancy, camera-fit,
 or water-grid-bound semantics. New water layouts should use `@water N`; `W`
 remains supported for older screens.
 
-A screen is complete when every pressure plate is covered, every living hero
-stands on an End, and every End holds a hero. A screen with more Ends than
-heroes therefore needs mirror copies of a hero to finish; a rock on an End
-does not count.
+A closed Gate blocks every entity. It opens only while every pressure plate
+listed in its `plates` array is occupied by a living player, movable object, or
+enemy; a Gate with no linked plates stays closed. The gate and its linked
+plates share the configured color in the game. Gate assignments and colors can
+also be edited from the ImGui Tiles palette.
+
+A screen is complete when every living hero stands on an End and every End
+holds a hero. Pressure plates no longer affect completion directly. A screen
+with more Ends than heroes therefore needs mirror copies of a hero to finish;
+a rock on an End does not count.
 
 Turrets are pushable movables. A turret shoots a player or enemy whenever that
 unit moves into its cardinal line of sight; walls, rocks, and other live units

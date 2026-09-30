@@ -142,8 +142,15 @@ struct StepResult {
 
 // A cell entities may occupy, ignoring movables. The plane directly above the
 // top layer (z == depth) is intentionally allowed so entities can stand on
-// top-layer blocks.
+// top-layer blocks. Gates are treated as potentially passable so static solver
+// estimates remain admissible; gameplay movement uses cellAllowsEntity.
 [[nodiscard]] bool staticCellAllowsEntity(const Level& level, GridPosition3 position);
+// State-aware static collision. A Gate cell allows entry only while every
+// pressure plate linked by its authored gate record has a live occupant.
+[[nodiscard]] bool cellAllowsEntity(
+    const Level& level,
+    const GameState& state,
+    GridPosition3 position);
 
 [[nodiscard]] const GameState::Movable* movableAt(const GameState& state, GridPosition3 position);
 [[nodiscard]] const GameState::Movable* fallenMovableAt(const GameState& state, GridPosition3 position);
@@ -154,10 +161,19 @@ struct StepResult {
 // below the water surface and does not displace it.
 [[nodiscard]] bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 position);
 
+[[nodiscard]] bool isPressurePlateActive(
+    const GameState& state,
+    GridPosition3 plate);
+[[nodiscard]] bool isGateOpen(
+    const Level& level,
+    const GameState& state,
+    const Level::Gate& gate);
+// Kept as a compatibility query for debug/presentation callers. End tiles no
+// longer have a locked state, so this always returns true.
 [[nodiscard]] bool isEndUnlocked(const Level& level, const GameState& state);
-// A screen is solved when every plate is covered, every living hero stands on
-// an End, and every End holds a hero. A level with more Ends than heroes needs
-// hero copies (mirrors) to be solved.
+// A screen is solved when every living hero stands on an End and every End
+// holds a hero. A level with more Ends than heroes needs hero copies (mirrors)
+// to be solved. Pressure plates now control Gates rather than completion.
 [[nodiscard]] bool isAtUnlockedEnd(const Level& level, const GameState& state);
 
 // True when the world has an automatic action to resolve: a mutual turret

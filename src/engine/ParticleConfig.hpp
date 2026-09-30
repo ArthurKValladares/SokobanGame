@@ -32,6 +32,17 @@ inline constexpr float mirrorSwapSmokeOpacity = 0.72f;
 inline constexpr bool mirrorSwapSmokeDrawOnTop = true;
 inline constexpr Vec4 witchSwapSmokeColor { 0.72f, 0.18f, 0.94f, 0.78f };
 
+// Gates are continuous, deterministic particle fields built directly into a
+// frame rather than transient ParticleSystem bursts. The glow texture and
+// small drifting lattice keep the cell readable as a barrier without a model.
+inline constexpr std::string_view gateParticleTextureName = "ParticleGlow";
+inline constexpr float gateParticleOpacity = 0.78f;
+inline constexpr float gateParticleEmissiveStrength = 2.0f;
+inline constexpr float gateParticleSize = 0.46f;
+inline constexpr float gateParticleDrift = 0.08f;
+inline constexpr uint32_t gateParticleColumns = 3;
+inline constexpr uint32_t gateParticleRows = 4;
+
 inline constexpr std::string_view turretMuzzleTextureName = "Muzzle01";
 inline constexpr std::string_view turretGlowTextureName = "ParticleGlow";
 inline constexpr std::string_view turretLaserTextureName = "LaserBeam";

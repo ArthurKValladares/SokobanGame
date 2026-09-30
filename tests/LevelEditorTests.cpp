@@ -138,6 +138,51 @@ void testDocumentCommandsAndUndo()
     CHECK(editor.documentDepth() == 2);
 }
 
+void testGateLinksPersistAndFollowEditorCommands()
+{
+    TEST("gateLinksPersistAndFollowEditorCommands");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(5, 3, false);
+
+    const GridPosition3 plate { 1, 1, 1 };
+    const GridPosition3 gateCell { 2, 1, 1 };
+    CHECK(editor.setCell(plate, TileType::PressurePlate));
+    CHECK(editor.setCell(gateCell, TileType::Gate));
+    CHECK(editor.gates().size() == 1);
+    CHECK(editor.gates()[0].pressurePlates.empty());
+    CHECK(editor.updateGate(0, { plate }, { 0.2f, 0.7f, 1.0f }));
+    CHECK(editor.gates()[0].pressurePlates ==
+        std::vector<GridPosition3> { plate });
+    CHECK(editor.documentToLevel().gateAt(gateCell) != nullptr);
+
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.gates()[0].pressurePlates.empty());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.gates()[0].color == Vec3({ 0.2f, 0.7f, 1.0f }));
+
+    const GridPosition3 movedGate { 3, 1, 1 };
+    CHECK(editor.beginMove(gateCell));
+    CHECK(editor.moveObject(movedGate));
+    CHECK(editor.gates().size() == 1);
+    CHECK(editor.gates()[0].cell == movedGate);
+    CHECK(editor.gates()[0].pressurePlates ==
+        std::vector<GridPosition3> { plate });
+
+    const std::filesystem::path path =
+        project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(path));
+    LevelEditor loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(path, false));
+    CHECK(loaded.gates() == editor.gates());
+
+    CHECK(loaded.setCell(plate, TileType::Air));
+    CHECK(loaded.gates()[0].pressurePlates.empty());
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.gates()[0].pressurePlates ==
+        std::vector<GridPosition3> { plate });
+}
+
 void testTileValidationAndMultipleHeroPlacement()
 {
     TEST("tileValidationAndMultipleHeroPlacement");
@@ -1763,6 +1808,7 @@ void testReloadFromDiskKeepsDraftsAndIgnoresOwnSaves()
 int main()
 {
     testDocumentCommandsAndUndo();
+    testGateLinksPersistAndFollowEditorCommands();
     testTileValidationAndMultipleHeroPlacement();
     testAddLayerBelowShiftsContentAndWaterAndIsUndoable();
     testSaveLoadAndRuntimeMirror();

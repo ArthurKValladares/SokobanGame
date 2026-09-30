@@ -1,5 +1,5 @@
-@character rogue
 @water 1
+@gate {"cell":[15,7,2],"color":[1.0,0.7200000286102295,0.11999999731779099],"plates":[[6,7,2],[6,8,2],[15,8,2]]}
 
 @layer 0
 DDDDDDDDDDDDDDDDDDDDDD
@@ -20,18 +20,18 @@ DDDDDDDDDDDDDDDDDDDDDD
 @layer 1
                       
                       
-                      
+         ....         
       ..........      
       ..........      
       ..........      
         ......        
-      . ...... .      
+      . ...... ..     
       . ...... .      
         ......        
       ..........      
       ..........      
       ..........      
-                      
+         ....         
 
 @layer 2
                       
@@ -41,10 +41,10 @@ DDDDDDDDDDDDDDDDDDDDDD
        R      R       
                       
                       
-      P   12   E      
+      P   12   GE     
       P   34   P      
                       
                       
-       C      R       
+       Q      R       
                       
                       

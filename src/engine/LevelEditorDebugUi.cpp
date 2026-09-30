@@ -614,6 +614,87 @@ void LevelEditorDebugUi::drawTilePalette(
     const std::string_view selectedName = tileTypeName(editor.selectedTile());
     ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
 
+    ImGui::Separator();
+    ImGui::TextUnformatted("Gate Assignments");
+    ImGui::TextWrapped(
+        "Each gate opens only while all of its linked pressure plates are "
+        "occupied. Unlinked gates stay closed.");
+    const std::vector<Level::Gate>& gates = editor.gates();
+    if (selectedGateIndex_ && *selectedGateIndex_ >= gates.size()) {
+        selectedGateIndex_.reset();
+    }
+    if (!selectedGateIndex_ && !gates.empty()) {
+        selectedGateIndex_ = 0;
+    }
+    if (gates.empty()) {
+        ImGui::TextDisabled("Paint a Gate tile to configure it here.");
+    } else {
+        const auto gateLabel = [](const Level::Gate& gate) {
+            return "Gate (" + std::to_string(gate.cell.x) + ", " +
+                std::to_string(gate.cell.y) + ", " +
+                std::to_string(gate.cell.z) + ")";
+        };
+        const std::string preview = gateLabel(gates[*selectedGateIndex_]);
+        if (ImGui::BeginCombo("Gate", preview.c_str())) {
+            for (std::size_t index = 0; index < gates.size(); ++index) {
+                const std::string label = gateLabel(gates[index]);
+                if (ImGui::Selectable(
+                        label.c_str(), *selectedGateIndex_ == index)) {
+                    selectedGateIndex_ = index;
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        const std::size_t gateIndex = *selectedGateIndex_;
+        Level::Gate edited = gates[gateIndex];
+        bool changed = ImGui::ColorEdit3("Gate / Plate Color", &edited.color.x);
+        std::vector<GridPosition3> pressurePlates;
+        const Level::LayerRows& layers = editor.documentLayers();
+        for (std::size_t z = 0; z < layers.size(); ++z) {
+            for (std::size_t y = 0; y < layers[z].size(); ++y) {
+                for (std::size_t x = 0; x < layers[z][y].size(); ++x) {
+                    if (charToTileType(layers[z][y][x]) !=
+                        TileType::PressurePlate) {
+                        continue;
+                    }
+                    pressurePlates.push_back({
+                        static_cast<int>(x),
+                        static_cast<int>(y),
+                        static_cast<int>(z),
+                    });
+                }
+            }
+        }
+        ImGui::Text("Linked Pressure Plates (%zu available)", pressurePlates.size());
+        for (GridPosition3 plate : pressurePlates) {
+            bool linked = std::ranges::find(
+                edited.pressurePlates, plate) !=
+                edited.pressurePlates.end();
+            const std::string label =
+                "(" + std::to_string(plate.x) + ", " +
+                std::to_string(plate.y) + ", " +
+                std::to_string(plate.z) + ")##gate_plate_" +
+                std::to_string(plate.x) + "_" +
+                std::to_string(plate.y) + "_" +
+                std::to_string(plate.z);
+            if (ImGui::Checkbox(label.c_str(), &linked)) {
+                changed = true;
+                if (linked) {
+                    edited.pressurePlates.push_back(plate);
+                } else {
+                    std::erase(edited.pressurePlates, plate);
+                }
+            }
+        }
+        if (changed) {
+            (void)editor.updateGate(
+                gateIndex,
+                std::move(edited.pressurePlates),
+                edited.color);
+        }
+    }
+
     // These pictures are screenshots of the real render, so they go stale when
     // models, materials or lighting change.
     if (ImGui::Button("Re-bake Tile Pictures") && callbacks.bakeTileThumbnails) {

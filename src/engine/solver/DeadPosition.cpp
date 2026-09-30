@@ -32,7 +32,7 @@ bool tileChangesMovableReachability(TileType tile)
 {
     return tile == TileType::Ice || tile == TileType::Water ||
         tile == TileType::Ladder || tileTypeIsConveyor(tile) ||
-        tileTypeIsMirror(tile);
+        tileTypeIsMirror(tile) || tile == TileType::Gate;
 }
 
 bool staticallySupported(const Level& level, GridPosition3 cell)
@@ -113,6 +113,9 @@ GridPosition3 subtract(GridPosition3 cell, GridPosition offset)
 DeadPositionIndex::DeadPositionIndex(const Level& level)
     : level_(level)
 {
+    if (!applicable()) {
+        return;
+    }
     enabled_ = supportsStaticAnalysis(level);
     freezeAnalysisEnabled_ = enabled_ && std::ranges::all_of(
         level.playerStarts(),
@@ -257,6 +260,10 @@ std::vector<bool> DeadPositionIndex::frozenInTwoByTwoBlocks(
 DeadPositionReason DeadPositionIndex::rejectionReason(
     const GameState& state) const
 {
+    if (!applicable()) {
+        (void)state;
+        return DeadPositionReason::None;
+    }
     std::vector<GridPosition3> liveMovables;
     for (const GameState::Movable& movable : state.movables) {
         if (!movable.fallen && !movable.dead) {

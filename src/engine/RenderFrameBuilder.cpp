@@ -1,6 +1,7 @@
 #include "engine/RenderFrameBuilder.hpp"
 
 #include "engine/AnimationCatalog.hpp"
+#include "engine/GateEffect.hpp"
 #include "engine/RenderFrameParts.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
@@ -61,6 +62,7 @@ struct StaticRenderCell {
     float baseElevation = 0.0f;
     float height = 0.0f;
     uint32_t modelRotationQuarterTurns = 0;
+    std::optional<Vec4> colorOverride;
 };
 
 StaticRenderCell staticRenderCellFor(
@@ -216,7 +218,8 @@ void appendStaticTiles(
                 const StaticRenderCell cell = cellAt(x, y, z);
                 if (cell.tile == TileType::Air ||
                     cell.tile == TileType::Ladder ||
-                    cell.tile == TileType::Water) {
+                    cell.tile == TileType::Water ||
+                    cell.tile == TileType::Gate) {
                     continue;
                 }
                 RenderFrameData::Tile renderTile {
@@ -230,9 +233,10 @@ void appendStaticTiles(
                         static_cast<float>(y) + cell.positionOffset.y,
                     },
                     .size = cell.size,
-                    .color = tileTypeIsPlayerStart(cell.tile)
-                        ? Vec4 { 1.0f, 1.0f, 1.0f, 1.0f }
-                        : tileColor(cell.tile, cell.active),
+                    .color = cell.colorOverride.value_or(
+                        tileTypeIsPlayerStart(cell.tile)
+                            ? Vec4 { 1.0f, 1.0f, 1.0f, 1.0f }
+                            : tileColor(cell.tile, cell.active)),
                     .baseElevation = cell.baseElevation,
                     .height = cell.height,
                     .showGrid = cell.showGrid,
@@ -569,7 +573,7 @@ void appendGameplayWorld(
                 }
             }
 
-            return staticRenderCellFor(
+            StaticRenderCell cell = staticRenderCellFor(
                 input.level,
                 x,
                 y,
@@ -579,6 +583,20 @@ void appendGameplayWorld(
                 input.settings.geometry.surfaceEntityHeight,
                 input.settings.geometry.surfaceEntityWidthDepth,
                 primaryPlayerVisual.facingQuarterTurns);
+            if (cell.tile == TileType::PressurePlate) {
+                if (const Level::Gate* gate =
+                        input.level.gateForPressurePlate(position)) {
+                    const float strength = rules::isPressurePlateActive(
+                        state, position) ? 1.0f : 0.42f;
+                    cell.colorOverride = Vec4 {
+                        gate->color.x * strength,
+                        gate->color.y * strength,
+                        gate->color.z * strength,
+                        1.0f,
+                    };
+                }
+            }
+            return cell;
         };
     appendStaticTiles(
         frame,
@@ -604,6 +622,52 @@ void appendGameplayWorld(
         std::nullopt,
         false,
         input.visibleCell);
+
+    float actionProgress = 0.0f;
+    const auto includeProgress = [&](const GameplayPresentation::EntityVisual& visual) {
+        if (visual.moving && visual.animationDuration > 0.0f) {
+            actionProgress = std::max(
+                actionProgress,
+                std::clamp(
+                    visual.animationElapsed / visual.animationDuration,
+                    0.0f,
+                    1.0f));
+        }
+    };
+    for (const GameplayPresentation::PlayerVisual& player :
+         input.presentation.players()) {
+        includeProgress(player.motion);
+    }
+    for (const GameplayPresentation::EntityVisual& movable :
+         input.presentation.movables()) {
+        includeProgress(movable);
+    }
+    for (const GameplayPresentation::EnemyVisual& enemy :
+         input.presentation.enemies()) {
+        includeProgress(enemy.motion);
+    }
+    const float smoothProgress = actionProgress * actionProgress *
+        (3.0f - 2.0f * actionProgress);
+    for (const Level::Gate& gate : input.level.gates()) {
+        if (input.visibleCell && !input.visibleCell(gate.cell)) {
+            continue;
+        }
+        const bool open = rules::isGateOpen(input.level, state, gate);
+        const bool projectedOpen = rules::isGateOpen(
+            input.level, input.projectedState, gate);
+        float closedOpacity = open ? 0.0f : 1.0f;
+        if (open != projectedOpen) {
+            closedOpacity = open
+                ? smoothProgress
+                : 1.0f - smoothProgress;
+        }
+        appendGateEffect(
+            frame,
+            gate,
+            input.manifest,
+            closedOpacity,
+            input.presentation.worldAnimationTimeSeconds());
+    }
 
     appendGameplayWaterAndShorelines(frame, input, state);
 }

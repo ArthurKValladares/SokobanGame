@@ -1,6 +1,7 @@
 #include "engine/RenderFrameBuilder.hpp"
 
 #include "engine/AnimationCatalog.hpp"
+#include "engine/GateEffect.hpp"
 #include "engine/RenderFrameParts.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
@@ -257,6 +258,21 @@ private:
             }
             return;
         }
+        if (tile == TileType::Gate) {
+            const auto found = std::ranges::find(
+                definition.gates, localCell, &Level::Gate::cell);
+            Level::Gate gate = found != definition.gates.end()
+                ? *found
+                : Level::Gate { .cell = localCell };
+            gate.cell = cell;
+            appendGateEffect(
+                frame,
+                gate,
+                input_.manifest,
+                1.0f,
+                input_.worldAnimationTimeSeconds);
+            return;
+        }
 
         RenderFrameData::Tile renderTile = tileVisual(
             tile, cell, input_.manifest, input_.settings);
@@ -439,11 +455,59 @@ private:
                 preview);
             return;
         }
+        if (tile == TileType::Gate) {
+            const GridPosition3 cell { x, y, z };
+            const auto found = std::ranges::find(
+                input_.editor.gates(), cell, &Level::Gate::cell);
+            const Level::Gate gate = found != input_.editor.gates().end()
+                ? *found
+                : Level::Gate { .cell = cell };
+            if (!pickOnly) {
+                appendGateEffect(
+                    frame,
+                    gate,
+                    input_.manifest,
+                    preview ? 0.68f : 1.0f,
+                    input_.worldAnimationTimeSeconds);
+            }
+            frame.tiles.push_back({
+                .cell = cell,
+                .position = {
+                    static_cast<float>(x),
+                    static_cast<float>(y),
+                },
+                .color = { 0.0f, 0.0f, 0.0f, 0.0f },
+                .baseElevation = static_cast<float>(z),
+                .height = 1.0f,
+                .pickOnly = true,
+                .showGrid = false,
+                .isEditorPreview = preview,
+            });
+            return;
+        }
 
         // Shared with the thumbnail bake, so a palette icon cannot end up
         // looking different from the tile the editor draws.
         RenderFrameData::Tile renderTile = tileVisual(
             tile, { x, y, z }, input_.manifest, input_.settings);
+        if (tile == TileType::PressurePlate) {
+            const GridPosition3 cell { x, y, z };
+            const auto gate = std::ranges::find_if(
+                input_.editor.gates(),
+                [cell](const Level::Gate& candidate) {
+                    return std::ranges::find(
+                        candidate.pressurePlates, cell) !=
+                        candidate.pressurePlates.end();
+                });
+            if (gate != input_.editor.gates().end()) {
+                renderTile.color = {
+                    gate->color.x,
+                    gate->color.y,
+                    gate->color.z,
+                    1.0f,
+                };
+            }
+        }
         if (tileTypeIsPlayerStart(tile)) {
             renderTile.model = input_.manifest.characterModel(
                 characterForStartTile(tile, input_.editor.character()));

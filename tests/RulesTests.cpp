@@ -664,32 +664,48 @@ void testSlideMomentumOverridesInput()
     CHECK(state.players[0].cell.y == 0);
 }
 
-void testPressurePlateUnlocksEnd()
+void testPressurePlatesDoNotLockEnd()
 {
-    TEST("pressurePlateUnlocksEnd");
+    TEST("pressurePlatesDoNotLockEnd");
     const Level level = makeLevel({
-        { "...." },
-        { "CRPE" },
+        { "..." },
+        { "CPE" },
     });
-    const GameState state = rules::initialState(level);
-    CHECK(!rules::isEndUnlocked(level, state));
-
-    const GameState pushed = rules::step(level, state, MoveDirection::Right);
-    CHECK(pushed.movables[0].cell == cell(2, 0, 1));
-    CHECK(rules::isEndUnlocked(level, pushed));
-    CHECK(!rules::isAtUnlockedEnd(level, pushed));
+    GameState state = rules::initialState(level);
+    state.players[0].cell = cell(2, 0, 1);
+    CHECK(rules::isEndUnlocked(level, state));
+    CHECK(rules::isAtUnlockedEnd(level, state));
 }
 
-void testPlayerOnPlateUnlocks()
+void testClosedGateBlocksMovementAndLinkedPlateOpensIt()
 {
-    TEST("playerOnPlateUnlocks");
-    const Level level = makeLevel({
-        { ".." },
-        { "CP" },
+    TEST("closedGateBlocksMovementAndLinkedPlateOpensIt");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "..." },
+            { "PCG" },
+        },
+        .gates = { Level::Gate {
+            .cell = cell(2, 0, 1),
+            .pressurePlates = { cell(0, 0, 1) },
+            .color = { 0.25f, 0.7f, 1.0f },
+        } },
+    }, "gate movement");
+    GameState state = rules::initialState(level);
+    CHECK(!rules::isGateOpen(level, state, level.gates().front()));
+    CHECK(!rules::cellAllowsEntity(level, state, cell(2, 0, 1)));
+    const GameState blocked = rules::step(level, state, MoveDirection::Right);
+    CHECK(blocked.players[0].cell == cell(1, 0, 1));
+
+    state.movables.push_back({
+        .id = 99,
+        .type = TileType::Rock,
+        .cell = cell(0, 0, 1),
     });
-    const GameState moved = rules::step(level, rules::initialState(level), MoveDirection::Right);
-    CHECK(moved.players[0].cell == cell(1, 0, 1));
-    CHECK(rules::isEndUnlocked(level, moved));
+    CHECK(rules::isGateOpen(level, state, level.gates().front()));
+    CHECK(rules::cellAllowsEntity(level, state, cell(2, 0, 1)));
+    const GameState passed = rules::step(level, state, MoveDirection::Right);
+    CHECK(passed.players[0].cell == cell(2, 0, 1));
 }
 
 void testPlayerCannotWalkIntoWater()
@@ -1021,31 +1037,45 @@ void testHeadOnSlidesStopWithoutOverlap()
     CHECK(!rules::hasPendingMotion(level, stepped));
 }
 
-void testEveryPressurePlateMustHaveLiveOccupant()
+void testEveryLinkedPressurePlateMustHaveLiveOccupant()
 {
-    TEST("everyPressurePlateMustHaveLiveOccupant");
-    const Level level = makeLevel({
-        { "......" },
-        { "CPPR E" },
-    });
+    TEST("everyLinkedPressurePlateMustHaveLiveOccupant");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "....." },
+            { "PPC G" },
+        },
+        .gates = { Level::Gate {
+            .cell = cell(4, 0, 1),
+            .pressurePlates = { cell(0, 0, 1), cell(1, 0, 1) },
+        } },
+    }, "multi-plate gate");
     GameState state = rules::initialState(level);
-    CHECK(!rules::isEndUnlocked(level, state));
+    CHECK(!rules::isGateOpen(level, state, level.gates().front()));
 
-    state.players[0].cell = cell(2, 0, 1);
-    state.movables[0].cell = cell(1, 0, 1);
-    CHECK(rules::isEndUnlocked(level, state));
+    state.players[0].cell = cell(1, 0, 1);
+    state.movables.push_back({
+        .id = 99,
+        .type = TileType::Rock,
+        .cell = cell(0, 0, 1),
+    });
+    CHECK(rules::isGateOpen(level, state, level.gates().front()));
 
     state.movables[0].fallen = true;
-    CHECK(!rules::isEndUnlocked(level, state));
+    CHECK(!rules::isGateOpen(level, state, level.gates().front()));
 
-    state.enemies.push_back({ .id = 99, .cell = cell(1, 0, 1) });
-    CHECK(rules::isEndUnlocked(level, state));
+    state.enemies.push_back({ .id = 100, .cell = cell(0, 0, 1) });
+    CHECK(rules::isGateOpen(level, state, level.gates().front()));
 
-    const Level noPlates = makeLevel({
-        { ".." },
-        { "CE" },
-    });
-    CHECK(rules::isEndUnlocked(noPlates, rules::initialState(noPlates)));
+    const Level noLinks = Level::loadFromDefinition({
+        .layers = {
+            { "..." },
+            { "C G" },
+        },
+        .gates = { Level::Gate { .cell = cell(2, 0, 1) } },
+    }, "unlinked gate");
+    CHECK(!rules::isGateOpen(
+        noLinks, rules::initialState(noLinks), noLinks.gates().front()));
 }
 
 void testEveryMirrorOrientationReflectsBothWays()
@@ -1717,8 +1747,8 @@ int main()
     testIceIntoWater();
     testPlayerSlidesOnFallenIce();
     testSlideMomentumOverridesInput();
-    testPressurePlateUnlocksEnd();
-    testPlayerOnPlateUnlocks();
+    testPressurePlatesDoNotLockEnd();
+    testClosedGateBlocksMovementAndLinkedPlateOpensIt();
     testPlayerCannotWalkIntoWater();
     testPlayerCanSlideIntoWater();
     testRockFillsWater();
@@ -1737,7 +1767,7 @@ int main()
     testPlayerAndMovableContestingDestinationBothWait();
     testConveyorChainMovesIntoVacatedCells();
     testHeadOnSlidesStopWithoutOverlap();
-    testEveryPressurePlateMustHaveLiveOccupant();
+    testEveryLinkedPressurePlateMustHaveLiveOccupant();
     testEveryMirrorOrientationReflectsBothWays();
     testMirrorReflectsMovablesAndStopsAtNearestEntity();
     testMirrorReflectsEnemiesAsMovableEntities();

@@ -258,6 +258,13 @@ public:
     [[nodiscard]] const std::vector<Level::ScreenSelector>& selectors() const;
     [[nodiscard]] std::optional<std::size_t> selectedSelectorIndex() const;
     [[nodiscard]] const Level::ScreenSelector* selectedSelector() const;
+    [[nodiscard]] const std::vector<Level::Gate>& gates() const;
+    // Replaces one gate's authored links and display color as one undoable
+    // editor command. The gate cell itself is fixed by its Gate tile.
+    [[nodiscard]] bool updateGate(
+        std::size_t index,
+        std::vector<GridPosition3> pressurePlates,
+        Vec3 color);
     [[nodiscard]] bool editingOverworld() const;
     // The path shown in the UI, which the file browser changes on a single
     // click. It is a *selection*: the document in memory is unchanged until
@@ -284,6 +291,7 @@ private:
         std::optional<CharacterType> character;
         std::vector<Level::Decoration> decorations;
         std::vector<Level::ScreenSelector> selectors;
+        std::vector<Level::Gate> gates;
         // Selected path (browser clicks move this).
         std::filesystem::path filePath;
         // Where `layers` was actually read from or written to. Empty for an
@@ -313,6 +321,7 @@ private:
         std::optional<CharacterType> character;
         std::vector<Level::Decoration> decorations;
         std::vector<Level::ScreenSelector> selectors;
+        std::vector<Level::Gate> gates;
         std::filesystem::path filePath;
         // Undoing a load has to restore where the document came from too, or
         // the restored contents would be attributed to the wrong screen.

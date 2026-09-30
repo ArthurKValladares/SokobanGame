@@ -192,8 +192,8 @@ int minimumAssignment(const std::vector<std::vector<int>>& costs)
         return unreachable;
     }
 
-    // Rectangular Hungarian algorithm: every plate row receives a distinct
-    // live movable/enemy column, while surplus units remain unused.
+    // Rectangular Hungarian algorithm: every End row receives a distinct
+    // living hero column, while surplus heroes remain unused.
     std::vector<int> rowPotential(rows + 1);
     std::vector<int> columnPotential(columns + 1);
     std::vector<std::size_t> columnMatch(columns + 1);
@@ -246,12 +246,6 @@ int minimumAssignment(const std::vector<std::vector<int>>& costs)
     return -columnPotential[0];
 }
 
-int distance(GridPosition3 a, GridPosition3 b)
-{
-    return std::abs(a.x - b.x) + std::abs(a.y - b.y) +
-        std::abs(a.z - b.z);
-}
-
 } // namespace
 
 RelaxedHeuristic::RelaxedHeuristic(const Level& level)
@@ -288,10 +282,8 @@ RelaxedHeuristic::RelaxedHeuristic(const Level& level)
                     const GridPosition delta =
                         rules::directionOffset(direction);
                     const GridPosition3 destination = offset(source, delta);
-                    const GridPosition3 pusher = offset(source, delta, -1);
-                    if (inRange(destination) && inRange(pusher) &&
-                        traversable_[index(destination)] &&
-                        traversable_[index(pusher)]) {
+                    if (inRange(destination) &&
+                        traversable_[index(destination)]) {
                         edges[index(source)].push_back(index(destination));
                     }
                 }
@@ -322,13 +314,11 @@ RelaxedHeuristic::RelaxedHeuristic(const Level& level)
         }
     }
 
-    distanceByPlate_.resize(level.pressurePlates().size());
-    for (std::size_t plate = 0;
-         plate < level.pressurePlates().size();
-         ++plate) {
-        std::vector<int>& distances = distanceByPlate_[plate];
+    distanceByEnd_.resize(level.ends().size());
+    for (std::size_t end = 0; end < level.ends().size(); ++end) {
+        std::vector<int>& distances = distanceByEnd_[end];
         distances.assign(cellCount_, unreachable);
-        const GridPosition3 goal = level.pressurePlates()[plate];
+        const GridPosition3 goal = level.ends()[end];
         if (!inRange(goal) || !traversable_[index(goal)]) {
             continue;
         }
@@ -365,65 +355,47 @@ std::size_t RelaxedHeuristic::index(GridPosition3 cell) const
         static_cast<std::size_t>(cell.x);
 }
 
-int RelaxedHeuristic::distanceToPlate(
-    std::size_t plate, GridPosition3 cell) const
+int RelaxedHeuristic::distanceToEnd(
+    std::size_t end, GridPosition3 cell) const
 {
     if (!inRange(cell)) {
         return unreachableCost_;
     }
-    const int distance = distanceByPlate_[plate][index(cell)];
+    const int distance = distanceByEnd_[end][index(cell)];
     return distance == unreachable ? unreachableCost_ : distance;
 }
 
 int RelaxedHeuristic::estimate(const GameState& state) const
 {
-    std::vector<GridPosition3> units;
-    for (const GameState::Movable& movable : state.movables) {
-        if (!movable.fallen && !movable.dead) {
-            units.push_back(movable.cell);
+    std::vector<GridPosition3> heroes;
+    for (const GameState::Player& player : state.players) {
+        if (!player.dead) {
+            heroes.push_back(player.cell);
         }
     }
-    for (const GameState::Enemy& enemy : state.enemies) {
-        if (!enemy.fallen && !enemy.dead) {
-            units.push_back(enemy.cell);
-        }
-    }
-
-    std::size_t uncovered = 0;
     std::vector<std::vector<int>> costs(
-        level_.pressurePlates().size(),
-        std::vector<int>(units.size(), unreachableCost_));
-    for (std::size_t plate = 0;
-         plate < level_.pressurePlates().size();
-         ++plate) {
-        const GridPosition3 goal = level_.pressurePlates()[plate];
-        const bool occupied =
-            rules::movableAt(state, goal) != nullptr ||
-            rules::enemyAt(state, goal) != nullptr;
-        uncovered += occupied ? 0 : 1;
-        for (std::size_t unit = 0; unit < units.size(); ++unit) {
-            costs[plate][unit] = distanceToPlate(plate, units[unit]);
+        level_.ends().size(),
+        std::vector<int>(heroes.size(), unreachableCost_));
+    for (std::size_t end = 0; end < level_.ends().size(); ++end) {
+        for (std::size_t hero = 0; hero < heroes.size(); ++hero) {
+            costs[end][hero] = distanceToEnd(end, heroes[hero]);
         }
     }
 
-    int cost = 8 * static_cast<int>(uncovered);
-    const int assignment = minimumAssignment(costs);
-    cost += assignment == unreachable ? unreachableCost_ : assignment;
-    if (uncovered == 0) {
-        int living = 0;
-        for (const GameState::Player& player : state.players) {
-            living += player.dead ? 0 : 1;
-        }
-        const int missing =
-            static_cast<int>(level_.ends().size()) - living;
-        cost += 8 * std::max(missing, 0);
-        for (const GridPosition3 end : level_.ends()) {
+    const int missing = static_cast<int>(level_.ends().size()) -
+        static_cast<int>(heroes.size());
+    int cost = 8 * std::abs(missing);
+    if (missing <= 0) {
+        const int assignment = minimumAssignment(costs);
+        cost += assignment == unreachable ? unreachableCost_ : assignment;
+    } else {
+        // Mirrors can create the missing heroes. Until then, allow the same
+        // existing hero to stand in for multiple eventual copies so the
+        // estimate remains useful without declaring the position impossible.
+        for (std::size_t end = 0; end < level_.ends().size(); ++end) {
             int nearest = unreachableCost_;
-            for (const GameState::Player& player : state.players) {
-                if (!player.dead) {
-                    nearest = std::min(
-                        nearest, distance(player.cell, end));
-                }
+            for (std::size_t hero = 0; hero < heroes.size(); ++hero) {
+                nearest = std::min(nearest, costs[end][hero]);
             }
             cost += nearest;
         }

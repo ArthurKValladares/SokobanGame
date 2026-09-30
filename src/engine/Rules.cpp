@@ -165,7 +165,7 @@ FallResult fallTarget(
                 .fallen = isUnfilledWater(level, state, current),
             };
         }
-        if (!staticCellAllowsEntity(level, below)) {
+        if (!cellAllowsEntity(level, state, below)) {
             return { .cell = current, .fallen = false };
         }
 
@@ -272,7 +272,7 @@ std::optional<GridPosition3> ladderClimbTarget(
         groundCell.y,
         groundCell.z + 1,
     };
-    if (!staticCellAllowsEntity(level, topCell)) {
+    if (!cellAllowsEntity(level, state, topCell)) {
         return std::nullopt;
     }
     if (movableAt(state, topCell) != nullptr) {
@@ -434,7 +434,21 @@ bool staticCellAllowsEntity(const Level& level, GridPosition3 position)
         return true;
     }
 
-    return tileTypeAllowsEntity(tileAt(level, position));
+    const TileType tile = tileAt(level, position);
+    return tileTypeAllowsEntity(tile) || tile == TileType::Gate;
+}
+
+bool cellAllowsEntity(
+    const Level& level,
+    const GameState& state,
+    GridPosition3 position)
+{
+    if (!level.inBounds(position) ||
+        tileAt(level, position) != TileType::Gate) {
+        return staticCellAllowsEntity(level, position);
+    }
+    const Level::Gate* gate = level.gateAt(position);
+    return gate != nullptr && isGateOpen(level, state, *gate);
 }
 
 const GameState::Movable* movableAt(const GameState& state, GridPosition3 position)
@@ -489,19 +503,39 @@ bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 p
         fallenMovableAt(state, position) == nullptr;
 }
 
+bool isPressurePlateActive(
+    const GameState& state,
+    GridPosition3 plate)
+{
+    return playerBlocksAt(state, plate) ||
+        movableAt(state, plate) != nullptr ||
+        enemyAt(state, plate) != nullptr;
+}
+
+bool isGateOpen(
+    const Level& level,
+    const GameState& state,
+    const Level::Gate& gate)
+{
+    (void)level;
+    return !gate.pressurePlates.empty() &&
+        std::ranges::all_of(
+            gate.pressurePlates,
+            [&](GridPosition3 plate) {
+                return isPressurePlateActive(state, plate);
+            });
+}
+
 bool isEndUnlocked(const Level& level, const GameState& state)
 {
-    return std::ranges::all_of(level.pressurePlates(), [&](GridPosition3 plate) {
-        return playerBlocksAt(state, plate) ||
-            movableAt(state, plate) != nullptr ||
-            enemyAt(state, plate) != nullptr;
-    });
+    (void)level;
+    (void)state;
+    return true;
 }
 
 bool isAtUnlockedEnd(const Level& level, const GameState& state)
 {
-    if (level.ends().empty() || anyPlayerDead(state) ||
-        !isEndUnlocked(level, state)) {
+    if (level.ends().empty() || anyPlayerDead(state)) {
         return false;
     }
     // Every hero stands on an End, and every End holds a hero.
@@ -546,7 +580,7 @@ bool turretHasLineOfSight(
             turret.y + ray.y * step,
             turret.z,
         };
-        if (!staticCellAllowsEntity(level, cell) ||
+        if (!cellAllowsEntity(level, state, cell) ||
             movableAt(state, cell) != nullptr ||
             playerBlocksAt(state, cell) ||
             enemyAt(state, cell) != nullptr) {
@@ -720,7 +754,7 @@ bool inputRayIsClear(
 {
     for (int step = 1; step < distance; ++step) {
         const GridPosition3 cell = rayCell(mirror, ray, step);
-        if (!staticCellAllowsEntity(level, cell) ||
+        if (!cellAllowsEntity(level, state, cell) ||
             entityBlocksSight(state, cell, entityIndex)) {
             return false;
         }
@@ -730,12 +764,14 @@ bool inputRayIsClear(
 
 bool outputRayIsClear(
     const Level& level,
+    const GameState& state,
     GridPosition3 mirror,
     GridPosition ray,
     int distance)
 {
     for (int step = 1; step <= distance; ++step) {
-        if (!staticCellAllowsEntity(level, rayCell(mirror, ray, step))) {
+        if (!cellAllowsEntity(
+                level, state, rayCell(mirror, ray, step))) {
             return false;
         }
     }
@@ -855,7 +891,7 @@ std::optional<std::vector<ReflectedPath>> reflectedPathsForEntity(
         // later popped from this depth-first stack.
         for (auto hit = hits.rbegin(); hit != hits.rend(); ++hit) {
             if (!outputRayIsClear(
-                    level, hit->cell, hit->output, hit->distance)) {
+                    level, state, hit->cell, hit->output, hit->distance)) {
                 return std::nullopt;
             }
             PendingReflectionPath branch = path;
@@ -1357,7 +1393,7 @@ private:
                 origin.y + ray.y * distance,
                 origin.z,
             };
-            if (!staticCellAllowsEntity(level_, cell)) {
+            if (!cellAllowsEntity(level_, after_, cell)) {
                 return std::nullopt;
             }
             if (const GameState::Movable* movable = movableAt(after_, cell)) {
@@ -1672,7 +1708,7 @@ private:
         }
         const GridPosition3 destination = movementTarget(
             after_.movables[blockerIndex].cell, direction);
-        if (!staticCellAllowsEntity(level_, destination) ||
+        if (!cellAllowsEntity(level_, after_, destination) ||
             movableBlocksAt(after_, destination, blockerIndex) ||
             playerBlocksAt(after_, destination) ||
             enemyBlocksAt(after_, destination) ||
@@ -1730,7 +1766,7 @@ private:
             status.resolved = true;
             return true;
         }
-        if (!staticCellAllowsEntity(level_, target) ||
+        if (!cellAllowsEntity(level_, after_, target) ||
             (!status.bardDriven &&
                 !movableFallTarget(level_, after_, index, target).supported)) {
             slidingOf(index) = std::nullopt;
@@ -1788,7 +1824,7 @@ private:
             status.resolved = true;
             return true;
         }
-        if (!staticCellAllowsEntity(level_, target) ||
+        if (!cellAllowsEntity(level_, after_, target) ||
             (!status.bardDriven &&
                 !enemyFallTarget(level_, after_, enemyIndex, target).supported)) {
             after_.enemies[enemyIndex].sliding.reset();
@@ -1913,7 +1949,7 @@ private:
             anyMovement = true;
             return true;
         }
-        if (!staticCellAllowsEntity(level_, target)) {
+        if (!cellAllowsEntity(level_, after_, target)) {
             playerSliding(after_, playerIndex) = std::nullopt;
             status.done = true;
             status.resolved = true;
@@ -2015,7 +2051,7 @@ private:
                 level_.character()) == CharacterType::Druid;
             if (status.inputDriven && !druid &&
                 !status_[blockerIndex].movedThisMicro &&
-                staticCellAllowsEntity(level_, pushTarget) &&
+                cellAllowsEntity(level_, after_, pushTarget) &&
                 !movableBlocksAt(after_, pushTarget, blockerIndex) &&
                 !playerBlocksAt(after_, pushTarget, playerIndex) &&
                 enemyCanMove &&
@@ -2102,7 +2138,7 @@ private:
                 }
                 const GridPosition3 destination = movementTarget(
                     trial.movables[entity.index].cell, direction);
-                if (!staticCellAllowsEntity(level_, destination) ||
+                if (!cellAllowsEntity(level_, trial, destination) ||
                     movableBlocksAt(trial, destination, entity.index) ||
                     enemyBlocksAt(trial, destination) ||
                     playerBlocksAt(trial, destination)) {
@@ -2118,7 +2154,7 @@ private:
             } else {
                 const GridPosition3 destination = movementTarget(
                     trial.enemies[entity.index].cell, direction);
-                if (!staticCellAllowsEntity(level_, destination) ||
+                if (!cellAllowsEntity(level_, trial, destination) ||
                     movableBlocksAt(
                         trial, destination, trial.movables.size()) ||
                     enemyBlocksAt(trial, destination, entity.index) ||
@@ -2158,7 +2194,7 @@ private:
         const GridPosition3 destination = movementTarget(
             after_.enemies[enemyIndex].cell,
             direction);
-        return staticCellAllowsEntity(level_, destination) &&
+        return cellAllowsEntity(level_, after_, destination) &&
             !movableBlocksAt(after_, destination, after_.movables.size()) &&
             !playerBlocksAt(after_, destination) &&
             !enemyBlocksAt(after_, destination, enemyIndex) &&
@@ -2193,8 +2229,8 @@ private:
         const bool fell = fall.cell != destination || fall.fallen;
         after_.enemies[enemyIndex].sliding =
             (!fell && isIceFloor(level_, after_, fall.cell) &&
-                staticCellAllowsEntity(
-                    level_, movementTarget(fall.cell, direction)))
+                cellAllowsEntity(
+                    level_, after_, movementTarget(fall.cell, direction)))
                 ? std::optional<MoveDirection>(direction)
                 : std::nullopt;
         Status& status = status_[entityIndexForEnemy(enemyIndex)];
@@ -2474,7 +2510,8 @@ private:
             isIceFloor(level_, after_, fall.cell);
         after_.movables[index].sliding =
             (!fell && slippery &&
-                staticCellAllowsEntity(level_, movementTarget(fall.cell, direction)))
+                cellAllowsEntity(
+                    level_, after_, movementTarget(fall.cell, direction)))
                 ? std::optional<MoveDirection>(direction)
                 : std::nullopt;
         ++status_[index].consumed;
@@ -2496,7 +2533,8 @@ private:
         playerSliding(after_, playerIndex) =
             (!fell && !playerDead(after_, playerIndex) &&
                 isIceFloor(level_, after_, fall.cell) &&
-                staticCellAllowsEntity(level_, movementTarget(fall.cell, direction)))
+                cellAllowsEntity(
+                    level_, after_, movementTarget(fall.cell, direction)))
                 ? std::optional<MoveDirection>(direction)
                 : std::nullopt;
         ++status_[entityIndex].consumed;

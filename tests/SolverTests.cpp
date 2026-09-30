@@ -22,67 +22,6 @@ const Level::Definition pushAndPlateDefinition {
     },
 };
 
-const Level::Definition classicDeadPositionDefinition {
-    .layers = {
-        {
-            "......",
-            "......",
-            "......",
-            "......",
-            "......",
-        },
-        {
-            "######",
-            "#C   #",
-            "# R P#",
-            "#    #",
-            "######",
-        },
-    },
-};
-
-const Level::Definition assignmentDeadlockDefinition {
-    .layers = {
-        {
-            ".........",
-            ".........",
-            ".........",
-            ".........",
-            ".........",
-        },
-        {
-            "#########",
-            "#C RRP###",
-            "#########",
-            "#    P###",
-            "#########",
-        },
-    },
-};
-
-const Level::Definition frozenClusterDefinition {
-    .layers = {
-        {
-            ".........",
-            ".........",
-            ".........",
-            ".........",
-            ".........",
-            ".........",
-            ".........",
-        },
-        {
-            "#########",
-            "#Q      #",
-            "#  RR   #",
-            "#  RR   #",
-            "#    PP #",
-            "# E  PP #",
-            "#########",
-        },
-    },
-};
-
 const Level::Definition cyclicDefinition {
     .layers = {
         {
@@ -154,122 +93,32 @@ void testRelaxedHeuristicUsesMirrorTransport()
     CHECK(heuristic.traversableCellCount() > 0);
     CHECK(heuristic.edgeCount() > 0);
     CHECK(heuristic.mirrorEdgeCount() > 0);
-    // The rock and plate are four Manhattan cells apart, but one mirror
-    // activation moves the rock directly onto the plate.
-    CHECK(heuristic.estimate(rules::initialState(level)) == 9);
+    // Plates are switches now, so the estimate follows the hero to the End.
+    CHECK(heuristic.estimate(rules::initialState(level)) == 3);
 
     const Level assignmentLevel = Level::loadFromDefinition(
         assignmentHeuristicDefinition, "assignment heuristic test");
     const solver::detail::RelaxedHeuristic assignment(assignmentLevel);
-    // The left rock is one push from either plate. A nearest-unit sum would
-    // use it twice and return two; distinct assignment correctly reserves the
-    // right rock for the second plate, for four pushes plus two goal bonuses.
-    CHECK(assignment.estimate(rules::initialState(assignmentLevel)) == 20);
+    CHECK(assignment.estimate(rules::initialState(assignmentLevel)) == 5);
 }
 
 void testDeadPositionAnalysisIsConservativeAndFeatureAware()
 {
-    TEST("deadPositionAnalysisIsConservativeAndFeatureAware");
-    const Level level = Level::loadFromDefinition(
-        classicDeadPositionDefinition, "dead-position test");
+    TEST("pressurePlateSwitchesDoNotBecomeSolverGoals");
+    const Level level = Level::loadFromLayers({
+        { "....." },
+        { "C P E" },
+    }, "plate switch solver test");
     const solver::detail::DeadPositionIndex deadPositions(level);
+    CHECK(!deadPositions.applicable());
+    CHECK(!deadPositions.staticAnalysisEnabled());
+    CHECK(!deadPositions.rejects(rules::initialState(level)));
 
-    CHECK(deadPositions.staticAnalysisEnabled());
-    CHECK(deadPositions.deadCellCount() > 0);
-    CHECK(deadPositions.isDeadCell({ 1, 1, 1 }));
-    CHECK(!deadPositions.isDeadCell({ 2, 2, 1 }));
-    CHECK(!deadPositions.isDeadCell({ 4, 2, 1 }));
-
-    GameState state = rules::initialState(level);
-    CHECK(!deadPositions.rejects(state));
-    state.movables[0].cell = { 1, 1, 1 };
-    CHECK(deadPositions.rejects(state));
-
-    // One unusable extra rock is harmless when another rock can still cover
-    // the one plate.
-    state.movables.push_back({
-        .id = 99,
-        .type = TileType::Rock,
-        .cell = { 3, 2, 1 },
+    const solver::Result result = solver::solve(level, {
+        .maxStates = 1'000,
     });
-    CHECK(!deadPositions.rejects(state));
-    state.movables[1].cell = { 1, 1, 1 };
-    state.movables[0].cell = { 4, 2, 1 };
-    CHECK(!deadPositions.rejects(state));
-
-    const Level assignmentLevel = Level::loadFromDefinition(
-        assignmentDeadlockDefinition, "assignment deadlock test");
-    const solver::detail::DeadPositionIndex assignmentDeadPositions(
-        assignmentLevel);
-    const GameState assignmentState = rules::initialState(assignmentLevel);
-    CHECK(assignmentDeadPositions.staticAnalysisEnabled());
-    CHECK(assignmentState.movables.size() ==
-        assignmentLevel.pressurePlates().size());
-    CHECK(!assignmentDeadPositions.isDeadCell(
-        assignmentState.movables[0].cell));
-    CHECK(!assignmentDeadPositions.isDeadCell(
-        assignmentState.movables[1].cell));
-    CHECK(assignmentDeadPositions.rejects(assignmentState));
-
-    Level::Definition mirrored = classicDeadPositionDefinition;
-    mirrored.layers[1][1][3] = '1';
-    const Level mirroredLevel =
-        Level::loadFromDefinition(mirrored, "mirror dead-position test");
-    const solver::detail::DeadPositionIndex mirroredDeadPositions(
-        mirroredLevel);
-    CHECK(!mirroredDeadPositions.staticAnalysisEnabled());
-    GameState mirroredState = rules::initialState(mirroredLevel);
-    CHECK(!mirroredDeadPositions.rejects(mirroredState));
-    mirroredState.movables[0].fallen = true;
-    CHECK(mirroredDeadPositions.rejects(mirroredState));
-
-    Level::Definition bard = classicDeadPositionDefinition;
-    bard.layers[1][1][1] = 'B';
-    CHECK(!solver::detail::DeadPositionIndex(
-        Level::loadFromDefinition(bard, "bard dead-position test"))
-        .staticAnalysisEnabled());
-
-    Level::Definition drop = classicDeadPositionDefinition;
-    drop.layers[0][3][3] = ' ';
-    CHECK(!solver::detail::DeadPositionIndex(
-        Level::loadFromDefinition(drop, "drop dead-position test"))
-        .staticAnalysisEnabled());
-
-    const Level frozenLevel = Level::loadFromDefinition(
-        frozenClusterDefinition, "frozen-cluster dead-position test");
-    const solver::detail::DeadPositionIndex frozenDeadPositions(
-        frozenLevel);
-    const GameState frozenState = rules::initialState(frozenLevel);
-    CHECK(frozenDeadPositions.multiRockFreezeAnalysisEnabled());
-    for (const GameState::Movable& movable : frozenState.movables) {
-        CHECK(!frozenDeadPositions.isDeadCell(movable.cell));
-    }
-    CHECK(frozenDeadPositions.rejectionReason(frozenState) ==
-        solver::detail::DeadPositionReason::FrozenCluster);
-
-    // A sealed group is harmless when each immovable rock already occupies a
-    // distinct plate.
-    GameState covered = frozenState;
-    CHECK(covered.movables.size() == frozenLevel.pressurePlates().size());
-    for (std::size_t i = 0; i < covered.movables.size(); ++i) {
-        covered.movables[i].cell = frozenLevel.pressurePlates()[i];
-    }
-    CHECK(frozenDeadPositions.rejectionReason(covered) ==
-        solver::detail::DeadPositionReason::None);
-
-    // Knights can move a row or column of rocks as a chain, invalidating the
-    // no-first-move proof used for Rogue-only 2x2 clusters.
-    Level::Definition knightCluster = frozenClusterDefinition;
-    knightCluster.layers[1][1][1] = 'K';
-    const Level knightClusterLevel = Level::loadFromDefinition(
-        knightCluster, "knight frozen-cluster gate test");
-    const solver::detail::DeadPositionIndex knightDeadPositions(
-        knightClusterLevel);
-    CHECK(knightDeadPositions.staticAnalysisEnabled());
-    CHECK(!knightDeadPositions.multiRockFreezeAnalysisEnabled());
-    CHECK(knightDeadPositions.rejectionReason(
-            rules::initialState(knightClusterLevel)) ==
-        solver::detail::DeadPositionReason::None);
+    CHECK(result.solved());
+    CHECK(result.statistics.deadPositionChecks == 0);
 }
 
 void testPackedStateKeyIncludesEveryDynamicField()
@@ -442,8 +291,16 @@ void testSearchResultReplays()
 void testPrecomputedMirrorSuccessorReplays()
 {
     TEST("precomputedMirrorSuccessorReplays");
+    const Level::Definition mirrorCompletion {
+        .layers = {
+            { ".....", ".....", ".....", ".....", "....." },
+            { "E 3  ", "     ", "  C  ", "     ", "  2 E" },
+        },
+    };
+    // The two equidistant mirrors duplicate the only hero directly onto both
+    // Ends, so Interact is required under the current completion rules.
     const Level level = Level::loadFromDefinition(
-        mirrorHeuristicDefinition, "mirror successor test");
+        mirrorCompletion, "mirror successor test");
     const solver::Result result = solver::solve(level, {
         .maxStates = 10'000,
         .strategy = solver::Strategy::BestFirst,
@@ -456,7 +313,7 @@ void testPrecomputedMirrorSuccessorReplays()
     CHECK_MESSAGE(
         solution::record(
             level,
-            mirrorHeuristicDefinition,
+            mirrorCompletion,
             result.inputs,
             "mirror successor test").solved,
         "a reused mirror preview must match replay-driver semantics");
@@ -573,43 +430,46 @@ void testWalkingCacheIsBoundedAndOptional()
     CHECK(disabled.statistics.peakCanonicalizationCachedStates == 0);
 }
 
-void testDeadPositionsArePrunedBeforeCanonicalization()
+void testGateSwitchesRemainSearchable()
 {
-    TEST("deadPositionsArePrunedBeforeCanonicalization");
-    const Level level = Level::loadFromDefinition(
-        classicDeadPositionDefinition, "dead-position solver test");
+    TEST("gateSwitchesRemainSearchable");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            {
+                ".......",
+                ".......",
+                ".......",
+                ".......",
+                ".......",
+            },
+            {
+                "#######",
+                "#  P  #",
+                "#C RGE#",
+                "#     #",
+                "#######",
+            },
+        },
+        .gates = { Level::Gate {
+            .cell = { 4, 2, 1 },
+            .pressurePlates = { { 3, 1, 1 } },
+        } },
+    }, "gate solver test");
     const solver::Result result = solver::solve(level, {
         .maxStates = 10'000,
     });
 
-    CHECK(result.status == solver::Status::Exhausted);
-    CHECK(result.statistics.staticDeadPositionAnalysisEnabled);
-    CHECK(result.statistics.staticDeadCells > 0);
-    CHECK(result.statistics.deadPositionChecks > 0);
-    CHECK(result.statistics.deadPositionPrunes > 0);
-    CHECK(result.statistics.deadPositionUnitCountPrunes +
-            result.statistics.deadPositionStaticMatchingPrunes +
-            result.statistics.deadPositionFrozenClusterPrunes ==
-        result.statistics.deadPositionPrunes);
-
-    const Level frozenLevel = Level::loadFromDefinition(
-        frozenClusterDefinition, "frozen-cluster solver test");
-    const solver::Result frozen = solver::solve(frozenLevel, {
-        .maxStates = 10'000,
-    });
-    CHECK(frozen.status == solver::Status::Exhausted);
-    CHECK(frozen.statistics.generatedStates == 1);
-    CHECK(frozen.statistics.expandedPositions == 0);
-    CHECK(frozen.statistics.multiRockFreezeAnalysisEnabled);
-    CHECK(frozen.statistics.deadPositionPrunes == 1);
-    CHECK(frozen.statistics.deadPositionFrozenClusterPrunes == 1);
+    CHECK(result.solved());
+    CHECK(!result.statistics.staticDeadPositionAnalysisEnabled);
+    CHECK(result.statistics.deadPositionChecks == 0);
+    CHECK(result.statistics.deadPositionPrunes == 0);
 }
 
 void testProgressCanCancelSearch()
 {
     TEST("progressCanCancelSearch");
     const Level level =
-        Level::loadFromDefinition(pushAndPlateDefinition, "cancel solver test");
+        Level::loadFromDefinition(cyclicDefinition, "cancel solver test");
     int callbacks = 0;
     solver::Progress observed;
     solver::Options options {
@@ -654,7 +514,7 @@ int main()
         testBestFirstReportsHeuristicWork();
         testWalkingVariantsAreCanonicalizedBeforeEnqueue();
         testWalkingCacheIsBoundedAndOptional();
-        testDeadPositionsArePrunedBeforeCanonicalization();
+        testGateSwitchesRemainSearchable();
         testProgressCanCancelSearch();
         testStatusNamesAreStable();
     } catch (const std::exception& error) {

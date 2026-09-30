@@ -1,30 +1,10 @@
 # Sokoban 3D recorded solution. Replayed by the solution_replay test;
 # see README.md > Solutions. One input per step, then what it changed.
 format 1
-level-digest c4076d534aeede87
+level-digest 5f913bc1985e3eb1
 recorded-for level3/screen2
-step down p1=7,12,2
-step right p1=8,12,2
-step right p1=9,12,2
-step right p1=10,12,2
-step right p1=11,12,2
-step right p1=12,12,2
-step up p1=12,11,2
-step up p1=12,10,2
-step up p1=12,9,2
-step right p1=13,9,2
-step down p1=13,10,2
-step right p1=14,10,2
-step down p1=14,11,2 m4=14,12,2
-step right p1=15,11,2
-step down p1=15,12,2
-step left p1=14,12,2 m4=13,12,2
-step left p1=13,12,2 m4=12,12,2
-step left p1=12,12,2 m4=11,12,2
-step left p1=11,12,2 m4=10,12,2
-step up p1=11,11,2
-step left p1=10,11,2
-step left p1=9,11,2
+step right p1=8,11,2
+step right p1=9,11,2
 step up p1=9,10,2
 step up p1=9,9,2
 step up p1=9,8,2
@@ -39,18 +19,32 @@ step up p1=6,3,2
 step right p1=7,3,2 m2=8,3,2
 step right p1=8,3,2 m2=9,3,2
 step right p1=9,3,2 m2=10,3,2
+step right p1=10,3,2 m2=11,3,2
+step undo p1=9,3,2 m2=10,3,2
 step down p1=9,4,2
-step right p1=10,4,2
-step right p1=11,4,2
-step right p1=12,4,2
-step right p1=13,4,2
-step up p1=13,3,2
-step right p1=14,3,2
-step right p1=15,3,2
-step down p1=15,4,2
+step down p1=9,5,2
+step right p1=10,5,2
+step right p1=11,5,2
+step right p1=12,5,2
+step right p1=13,5,2
+step right p1=14,5,2
+step up p1=14,4,2 m3=14,3,2
+step right p1=15,4,2
+step left p1=14,4,2
+step up p1=14,3,2 m3=14,2,2+fallen
+step left p1=13,3,2
+step undo p1=14,3,2
+step undo p1=14,4,2 m3=14,3,2
+step undo p1=15,4,2
+step up p1=15,3,2
+step undo p1=15,4,2
+step undo p1=14,4,2
+step undo p1=14,5,2 m3=14,4,2
+step undo p1=13,5,2
+step right p1=14,5,2
+step right p1=15,5,2
+step up p1=15,4,2
 step left p1=14,4,2 m3=13,4,2
-step up p1=14,3,2
-step down p1=14,4,2
 step left p1=13,4,2 m3=12,4,2
 step up p1=13,3,2
 step left p1=12,3,2
@@ -61,18 +55,44 @@ step down p1=12,7,2 m3=12,8,2
 step down p1=12,8,2 m3=12,9,2
 step down p1=12,9,2 m3=12,10,2
 step down p1=12,10,2 m3=12,11,2
-step down p1=12,11,2 m3=12,12,2
-step right p1=13,11,2
-step down p1=13,12,2
-step left p1=12,12,2 m3=11,12,2
-step up p1=12,11,2
+step right p1=13,10,2
+step down p1=13,11,2
+step left p1=12,11,2 m3=11,11,2
+step left p1=11,11,2 m3=10,11,2
+step up p1=11,10,2
+step left p1=10,10,2
+step down p1=10,11,2 m3=10,12,2
+step right p1=11,11,2
+step right p1=12,11,2
 step up p1=12,10,2
 step up p1=12,9,2
-step up p1=12,8,2
-step up p1=12,7,2
-step up p1=12,6,2
+step right p1=13,9,2
+step down p1=13,10,2
+step down p1=13,11,2
+step right p1=14,11,2 m4=15,11,2
+step undo p1=13,11,2 m4=14,11,2
+step up p1=13,10,2
+step right p1=14,10,2
+step down p1=14,11,2 m4=14,12,2
+step right p1=15,11,2
+step down p1=15,12,2
+step left p1=14,12,2 m4=13,12,2
+step left p1=13,12,2 m4=12,12,2
+step left p1=12,12,2 m4=11,12,2
+step up p1=12,11,2
+step up p1=12,10,2
+step right p1=13,10,2
+step up p1=13,9,2
+step interact m2=6,7,2 m3=6,8,2 m4=15,8,2
+step up p1=13,8,2
+step up p1=13,7,2
+step up p1=13,6,2
+step left p1=12,6,2
 step up p1=12,5,2
-step up p1=12,4,2
-step left p1=11,4,2
-step up p1=11,3,2
-step interact p1=15,7,2 m2=6,7,2 m3=15,8,2 m4=6,8,2
+step left p1=11,5,2
+step up p1=11,4,2
+step left p1=10,4,2
+step up p1=10,3,2
+step right p1=11,3,2
+step up p1=11,2,2
+step interact p1=16,7,2 m2=10,3,2 m3=10,12,2 m4=11,12,2
