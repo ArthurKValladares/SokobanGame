@@ -10,6 +10,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -265,6 +266,17 @@ public:
         std::size_t index,
         std::vector<GridPosition3> pressurePlates,
         Vec3 color);
+    [[nodiscard]] const std::vector<Level::Rotator>& rotators() const;
+    // Plates authored beneath a unit or mirror (see Level::Plate).
+    [[nodiscard]] const std::vector<Level::Plate>& coveredPlates() const;
+    // The plate at `cell` in the document, uncovered or beneath something.
+    [[nodiscard]] std::optional<TileType> documentPlateAt(GridPosition3 cell) const;
+    // The rotator equivalent of updateGate: links and color as one undoable
+    // command. The rotator's cell and direction come from its tile.
+    [[nodiscard]] bool updateRotator(
+        std::size_t index,
+        std::vector<GridPosition3> pressurePlates,
+        Vec3 color);
     [[nodiscard]] bool editingOverworld() const;
     // The path shown in the UI, which the file browser changes on a single
     // click. It is a *selection*: the document in memory is unchanged until
@@ -292,6 +304,8 @@ private:
         std::vector<Level::Decoration> decorations;
         std::vector<Level::ScreenSelector> selectors;
         std::vector<Level::Gate> gates;
+        std::vector<Level::Rotator> rotators;
+        std::vector<Level::Plate> plates;
         // Selected path (browser clicks move this).
         std::filesystem::path filePath;
         // Where `layers` was actually read from or written to. Empty for an
@@ -322,6 +336,8 @@ private:
         std::vector<Level::Decoration> decorations;
         std::vector<Level::ScreenSelector> selectors;
         std::vector<Level::Gate> gates;
+        std::vector<Level::Rotator> rotators;
+        std::vector<Level::Plate> plates;
         std::filesystem::path filePath;
         // Undoing a load has to restore where the document came from too, or
         // the restored contents would be attributed to the wrong screen.
@@ -354,6 +370,13 @@ private:
     using ScreenIdentityRemaps = std::vector<ScreenIdentityRemap>;
 
     void recordDocumentChange(const DocumentSnapshot& before);
+    // Shared by updateGate/updateRotator. Sets the status and returns false
+    // when a color is out of range or a link does not name a distinct
+    // Pressure tile.
+    [[nodiscard]] bool validLinkUpdate(
+        const std::vector<GridPosition3>& pressurePlates,
+        Vec3 color,
+        std::string_view kind);
     void cacheActiveDraft();
     void noteRecentTile(TileType tile);
     [[nodiscard]] static std::filesystem::path draftKey(

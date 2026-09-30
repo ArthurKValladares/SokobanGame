@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <exception>
 #include <fstream>
@@ -134,6 +135,195 @@ std::pair<uint32_t, uint32_t> padToRectangle(Level::Definition& definition)
         }
     }
     return { width, height };
+}
+
+// Gates and rotators share one authoring model: a record on the device's
+// cell listing the pressure plates that drive it. These helpers keep both
+// record lists in step with tile edits.
+template <typename Record>
+void translateLinkedRecords(
+    std::vector<Record>& records, int columns, int rows)
+{
+    for (Record& record : records) {
+        record.cell.x += columns;
+        record.cell.y += rows;
+        for (GridPosition3& plate : record.pressurePlates) {
+            plate.x += columns;
+            plate.y += rows;
+        }
+    }
+}
+
+template <typename Record>
+void cropLinkedRecords(std::vector<Record>& records, int width, int height)
+{
+    std::erase_if(records, [&](Record& record) {
+        if (record.cell.x >= width || record.cell.y >= height) {
+            return true;
+        }
+        std::erase_if(record.pressurePlates, [&](GridPosition3 plate) {
+            return plate.x >= width || plate.y >= height;
+        });
+        return false;
+    });
+}
+
+template <typename Record>
+void shiftLinkedRecordsForInsertedLayer(
+    std::vector<Record>& records, int insertionIndex)
+{
+    for (Record& record : records) {
+        if (record.cell.z >= insertionIndex) {
+            ++record.cell.z;
+        }
+        for (GridPosition3& plate : record.pressurePlates) {
+            if (plate.z >= insertionIndex) {
+                ++plate.z;
+            }
+        }
+    }
+}
+
+template <typename Record>
+void removeLinkedRecordLayer(std::vector<Record>& records, int deletedLayer)
+{
+    std::erase_if(records, [&](Record& record) {
+        if (record.cell.z == deletedLayer) {
+            return true;
+        }
+        if (record.cell.z > deletedLayer) {
+            --record.cell.z;
+        }
+        std::erase_if(record.pressurePlates, [&](GridPosition3& plate) {
+            if (plate.z == deletedLayer) {
+                return true;
+            }
+            if (plate.z > deletedLayer) {
+                --plate.z;
+            }
+            return false;
+        });
+        return false;
+    });
+}
+
+// What a cell shows after painting `tile` over `top` (the grid tile) with
+// `covered` beneath it (an `@plate` record, when present).
+//
+// Plates (TileProperty::Plate) and what can stand on them stack instead of
+// replacing each other: painting a unit or mirror on a plate keeps the plate
+// underneath, painting a plate under a unit or mirror slides it beneath, and
+// erasing a stacked cell lifts the occupant off and leaves the plate. Any
+// other tile replaces the whole stack.
+struct PaintedCell {
+    TileType top = TileType::Air;
+    std::optional<TileType> covered;
+
+    bool operator==(const PaintedCell&) const = default;
+
+    [[nodiscard]] std::optional<TileType> plate() const
+    {
+        if (covered) {
+            return covered;
+        }
+        return tileTypeIsPlate(top) ? std::optional<TileType>(top) : std::nullopt;
+    }
+};
+
+PaintedCell stackPaint(PaintedCell current, TileType tile)
+{
+    if (tile == TileType::Air) {
+        return current.covered
+            ? PaintedCell { .top = *current.covered }
+            : PaintedCell {};
+    }
+    if (tileTypeIsPlate(tile) && tileTypeCanStandOnPlate(current.top)) {
+        return { .top = current.top, .covered = tile };
+    }
+    if (tileTypeCanStandOnPlate(tile) && current.plate()) {
+        return { .top = tile, .covered = current.plate() };
+    }
+    return { .top = tile };
+}
+
+// Removes every legacy Player tile (the overworld has exactly one). A Player
+// standing on a plate leaves that plate behind in the grid.
+bool removePlayerTiles(
+    Level::LayerRows& layers, std::vector<Level::Plate>& plates)
+{
+    bool changed = false;
+    const char player = tileTypeToChar(TileType::Player);
+    for (std::size_t z = 0; z < layers.size(); ++z) {
+        for (std::size_t y = 0; y < layers[z].size(); ++y) {
+            for (std::size_t x = 0; x < layers[z][y].size(); ++x) {
+                char& tile = layers[z][y][x];
+                if (tile != player) {
+                    continue;
+                }
+                const GridPosition3 cell {
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(z),
+                };
+                const auto covered =
+                    std::ranges::find(plates, cell, &Level::Plate::cell);
+                if (covered != plates.end()) {
+                    tile = tileTypeToChar(covered->tile);
+                    plates.erase(covered);
+                } else {
+                    tile = tileTypeToChar(TileType::Air);
+                }
+                changed = true;
+            }
+        }
+    }
+    return changed;
+}
+
+void translatePlateRecords(
+    std::vector<Level::Plate>& plates, int columns, int rows)
+{
+    for (Level::Plate& plate : plates) {
+        plate.cell.x += columns;
+        plate.cell.y += rows;
+    }
+}
+
+// After moveObject's erase-and-place, restores the moved device's links
+// (setCell recreated it with defaults) or re-links a moved pressure plate
+// wherever its old cell was linked.
+template <typename Record>
+void restoreLinksAfterMove(
+    std::vector<Record>& records,
+    const std::vector<Record>& before,
+    bool movedDevice,
+    bool movedPlate,
+    GridPosition3 source,
+    GridPosition3 destination)
+{
+    if (movedDevice) {
+        const auto oldRecord = std::ranges::find(
+            before, source, &Record::cell);
+        const auto newRecord = std::ranges::find(
+            records, destination, &Record::cell);
+        if (oldRecord != before.end() && newRecord != records.end()) {
+            *newRecord = *oldRecord;
+            newRecord->cell = destination;
+        }
+        return;
+    }
+    if (!movedPlate) {
+        return;
+    }
+    for (Record& record : records) {
+        const auto oldRecord = std::ranges::find(
+            before, record.cell, &Record::cell);
+        if (oldRecord != before.end() &&
+            std::ranges::find(oldRecord->pressurePlates, source) !=
+                oldRecord->pressurePlates.end()) {
+            record.pressurePlates.push_back(destination);
+        }
+    }
 }
 
 } // namespace
@@ -775,9 +965,14 @@ bool LevelEditor::moveObject(GridPosition3 destination)
         document_.status = "The selected object no longer exists.";
         return false;
     }
-    if (tileAt(destination) != TileType::Air ||
+    // A unit or mirror may also be moved onto an unoccupied plate.
+    const bool ontoPlate = tileTypeCanStandOnPlate(move->tile) &&
+        tileTypeIsPlate(tileAt(destination));
+    if ((tileAt(destination) != TileType::Air && !ontoPlate) ||
         selectorAt(destination) != document_.selectors.end()) {
-        document_.status = "Move destination must be empty.";
+        document_.status = tileTypeCanStandOnPlate(move->tile)
+            ? "Move destination must be empty or an unoccupied plate."
+            : "Move destination must be empty.";
         return false;
     }
 
@@ -796,30 +991,21 @@ bool LevelEditor::moveObject(GridPosition3 destination)
 
     // setCell keeps gate metadata valid at every intermediate point. Restore
     // the authored relationships after the two-cell transaction completes.
-    if (move->tile == TileType::Gate) {
-        const auto oldGate = std::ranges::find(
-            before.gates, move->source, &Level::Gate::cell);
-        const auto newGate = std::ranges::find(
-            document_.gates, destination, &Level::Gate::cell);
-        if (oldGate != before.gates.end() &&
-            newGate != document_.gates.end()) {
-            const std::size_t index = static_cast<std::size_t>(
-                std::distance(document_.gates.begin(), newGate));
-            document_.gates[index] = *oldGate;
-            document_.gates[index].cell = destination;
-        }
-    } else if (move->tile == TileType::PressurePlate) {
-        for (Level::Gate& gate : document_.gates) {
-            const auto oldGate = std::ranges::find(
-                before.gates, gate.cell, &Level::Gate::cell);
-            if (oldGate != before.gates.end() &&
-                std::ranges::find(
-                    oldGate->pressurePlates, move->source) !=
-                    oldGate->pressurePlates.end()) {
-                gate.pressurePlates.push_back(destination);
-            }
-        }
-    }
+    const bool movedPlate = move->tile == TileType::PressurePlate;
+    restoreLinksAfterMove(
+        document_.gates,
+        before.gates,
+        move->tile == TileType::Gate,
+        movedPlate,
+        move->source,
+        destination);
+    restoreLinksAfterMove(
+        document_.rotators,
+        before.rotators,
+        tileTypeIsRotator(move->tile),
+        movedPlate,
+        move->source,
+        destination);
 
     document_.status = "Moved object.";
     recordDocumentChange(before);
@@ -1025,17 +1211,31 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
         }
     }
 
-    const char character = tileTypeToChar(tile);
     if (tile == TileType::Air &&
         translatedPosition.z >= static_cast<int>(document_.layers.size())) {
         return false;
     }
+    // The grid tile and any plate recorded beneath it, read from the current
+    // document (callers pass coordinates that are valid after expansion).
+    const auto paintedCellAt = [&](GridPosition3 cell) {
+        const auto covered =
+            std::ranges::find(document_.plates, cell, &Level::Plate::cell);
+        return PaintedCell {
+            .top = charToTileType(
+                document_.layers[static_cast<size_t>(cell.z)]
+                    [static_cast<size_t>(cell.y)]
+                    [static_cast<size_t>(cell.x)]).value_or(TileType::Air),
+            .covered = covered != document_.plates.end()
+                ? std::optional<TileType>(covered->tile)
+                : std::nullopt,
+        };
+    };
     if (!expandsDocument &&
-        translatedPosition.z < static_cast<int>(document_.layers.size()) &&
-        document_.layers[static_cast<size_t>(translatedPosition.z)]
-            [static_cast<size_t>(translatedPosition.y)]
-            [static_cast<size_t>(translatedPosition.x)] == character) {
-        return false;
+        translatedPosition.z < static_cast<int>(document_.layers.size())) {
+        const PaintedCell current = paintedCellAt(translatedPosition);
+        if (stackPaint(current, tile) == current) {
+            return false;
+        }
     }
 
     const DocumentSnapshot before = captureDocumentSnapshot();
@@ -1067,14 +1267,10 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             selector.cell.x += prependColumns;
             selector.cell.y += prependRows;
         }
-        for (Level::Gate& gate : document_.gates) {
-            gate.cell.x += prependColumns;
-            gate.cell.y += prependRows;
-            for (GridPosition3& plate : gate.pressurePlates) {
-                plate.x += prependColumns;
-                plate.y += prependRows;
-            }
-        }
+        translateLinkedRecords(document_.gates, prependColumns, prependRows);
+        translateLinkedRecords(
+            document_.rotators, prependColumns, prependRows);
+        translatePlateRecords(document_.plates, prependColumns, prependRows);
     }
 
     while (translatedPosition.z >= static_cast<int>(document_.layers.size())) {
@@ -1084,36 +1280,54 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
     }
 
     if (editingOverworld() && tile == TileType::Player) {
-        for (std::vector<std::string>& layer : document_.layers) {
-            for (std::string& documentRow : layer) {
-                std::ranges::replace(documentRow, tileTypeToChar(TileType::Player), tileTypeToChar(TileType::Air));
-            }
-        }
+        (void)removePlayerTiles(document_.layers, document_.plates);
     }
 
-    const TileType previousTile = charToTileType(
-        document_.layers[static_cast<size_t>(translatedPosition.z)]
-            [static_cast<size_t>(translatedPosition.y)]
-            [static_cast<size_t>(translatedPosition.x)])
-                                      .value_or(TileType::Air);
-    if (previousTile == TileType::Gate && tile != TileType::Gate) {
+    const PaintedCell previous = paintedCellAt(translatedPosition);
+    const PaintedCell painted = stackPaint(previous, tile);
+    const TileType previousPlate =
+        previous.plate().value_or(TileType::Air);
+    const TileType paintedPlate = painted.plate().value_or(TileType::Air);
+    if (previous.top == TileType::Gate && painted.top != TileType::Gate) {
         std::erase_if(document_.gates, [&](const Level::Gate& gate) {
             return gate.cell == translatedPosition;
         });
     }
-    if (previousTile == TileType::PressurePlate &&
-        tile != TileType::PressurePlate) {
+    // Swapping a rotator's direction keeps its record, and so its links.
+    if (tileTypeIsRotator(previousPlate) && !tileTypeIsRotator(paintedPlate)) {
+        std::erase_if(document_.rotators, [&](const Level::Rotator& rotator) {
+            return rotator.cell == translatedPosition;
+        });
+    }
+    if (previousPlate == TileType::PressurePlate &&
+        paintedPlate != TileType::PressurePlate) {
         for (Level::Gate& gate : document_.gates) {
             std::erase(gate.pressurePlates, translatedPosition);
         }
+        for (Level::Rotator& rotator : document_.rotators) {
+            std::erase(rotator.pressurePlates, translatedPosition);
+        }
     }
-    if (tile == TileType::Gate && previousTile != TileType::Gate) {
+    if (painted.top == TileType::Gate && previous.top != TileType::Gate) {
         document_.gates.push_back({ .cell = translatedPosition });
+    }
+    if (tileTypeIsRotator(paintedPlate) && !tileTypeIsRotator(previousPlate)) {
+        document_.rotators.push_back({ .cell = translatedPosition });
+    }
+    std::erase_if(document_.plates, [&](const Level::Plate& plate) {
+        return plate.cell == translatedPosition;
+    });
+    if (painted.covered) {
+        document_.plates.push_back({
+            .cell = translatedPosition,
+            .tile = *painted.covered,
+        });
     }
 
     document_.layers[static_cast<size_t>(translatedPosition.z)]
         [static_cast<size_t>(translatedPosition.y)]
-        [static_cast<size_t>(translatedPosition.x)] = character;
+        [static_cast<size_t>(translatedPosition.x)] =
+        tileTypeToChar(painted.top);
     document_.activeLayer = translatedPosition.z;
     document_.dirty = true;
     if (expandsDocument) {
@@ -1123,10 +1337,17 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             std::to_string(translatedPosition.z + 1) + ".";
     } else {
         document_.status = tile == TileType::Air
-            ? "Deleted tile from layer " +
-                std::to_string(translatedPosition.z + 1) + "."
-            : "Painted layer " +
-                std::to_string(translatedPosition.z + 1) + ".";
+            ? (previous.covered
+                    ? "Lifted the tile off its plate on layer " +
+                        std::to_string(translatedPosition.z + 1) + "."
+                    : "Deleted tile from layer " +
+                        std::to_string(translatedPosition.z + 1) + ".")
+            : (painted.covered
+                    ? "Painted layer " +
+                        std::to_string(translatedPosition.z + 1) +
+                        " with a tile standing on a plate."
+                    : "Painted layer " +
+                        std::to_string(translatedPosition.z + 1) + ".");
     }
     recordDocumentChange(before);
     return true;
@@ -1504,21 +1725,19 @@ const std::vector<Level::Gate>& LevelEditor::gates() const
     return document_.gates;
 }
 
-bool LevelEditor::updateGate(
-    std::size_t index,
-    std::vector<GridPosition3> pressurePlates,
-    Vec3 color)
+bool LevelEditor::validLinkUpdate(
+    const std::vector<GridPosition3>& pressurePlates,
+    Vec3 color,
+    std::string_view kind)
 {
-    if (index >= document_.gates.size()) {
-        return false;
-    }
     const auto validColor = [](float component) {
         return std::isfinite(component) && component >= 0.0f &&
             component <= 1.0f;
     };
     if (!validColor(color.x) || !validColor(color.y) ||
         !validColor(color.z)) {
-        document_.status = "Gate colors must be between zero and one.";
+        document_.status =
+            std::string(kind) + " colors must be between zero and one.";
         return false;
     }
     const auto tileAt = [&](GridPosition3 cell) {
@@ -1534,11 +1753,21 @@ bool LevelEditor::updateGate(
                 [static_cast<std::size_t>(cell.x)])
             .value_or(TileType::Air);
     };
+    std::string lowered(kind);
+    for (char& character : lowered) {
+        character = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(character)));
+    }
     for (std::size_t plateIndex = 0;
          plateIndex < pressurePlates.size();
          ++plateIndex) {
-        if (tileAt(pressurePlates[plateIndex]) != TileType::PressurePlate) {
-            document_.status = "Gate links must point to Pressure tiles.";
+        const TileType linked = tileAt(pressurePlates[plateIndex]);
+        const auto covered = std::ranges::find(
+            document_.plates, pressurePlates[plateIndex], &Level::Plate::cell);
+        if ((covered != document_.plates.end() ? covered->tile : linked) !=
+            TileType::PressurePlate) {
+            document_.status =
+                std::string(kind) + " links must point to Pressure tiles.";
             return false;
         }
         if (std::ranges::find(
@@ -1548,9 +1777,22 @@ bool LevelEditor::updateGate(
                 pressurePlates[plateIndex]) !=
             pressurePlates.begin() +
                 static_cast<std::ptrdiff_t>(plateIndex)) {
-            document_.status = "A pressure plate can only be linked once per gate.";
+            document_.status =
+                "A pressure plate can only be linked once per " + lowered + ".";
             return false;
         }
+    }
+    return true;
+}
+
+bool LevelEditor::updateGate(
+    std::size_t index,
+    std::vector<GridPosition3> pressurePlates,
+    Vec3 color)
+{
+    if (index >= document_.gates.size() ||
+        !validLinkUpdate(pressurePlates, color, "Gate")) {
+        return false;
     }
 
     Level::Gate replacement = document_.gates[index];
@@ -1565,6 +1807,62 @@ bool LevelEditor::updateGate(
     document_.status = document_.gates[index].pressurePlates.empty()
         ? "Updated gate; it will remain closed until a plate is linked."
         : "Updated gate links and color.";
+    recordDocumentChange(before);
+    return true;
+}
+
+const std::vector<Level::Rotator>& LevelEditor::rotators() const
+{
+    return document_.rotators;
+}
+
+const std::vector<Level::Plate>& LevelEditor::coveredPlates() const
+{
+    return document_.plates;
+}
+
+std::optional<TileType> LevelEditor::documentPlateAt(GridPosition3 cell) const
+{
+    if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+        cell.x >= static_cast<int>(documentWidth()) ||
+        cell.y >= static_cast<int>(documentHeight()) ||
+        cell.z >= static_cast<int>(documentDepth())) {
+        return std::nullopt;
+    }
+    const auto covered =
+        std::ranges::find(document_.plates, cell, &Level::Plate::cell);
+    if (covered != document_.plates.end()) {
+        return covered->tile;
+    }
+    const TileType tile = charToTileType(
+        document_.layers[static_cast<std::size_t>(cell.z)]
+            [static_cast<std::size_t>(cell.y)]
+            [static_cast<std::size_t>(cell.x)]).value_or(TileType::Air);
+    return tileTypeIsPlate(tile) ? std::optional<TileType>(tile) : std::nullopt;
+}
+
+bool LevelEditor::updateRotator(
+    std::size_t index,
+    std::vector<GridPosition3> pressurePlates,
+    Vec3 color)
+{
+    if (index >= document_.rotators.size() ||
+        !validLinkUpdate(pressurePlates, color, "Rotator")) {
+        return false;
+    }
+
+    Level::Rotator replacement = document_.rotators[index];
+    replacement.pressurePlates = std::move(pressurePlates);
+    replacement.color = color;
+    if (replacement == document_.rotators[index]) {
+        return false;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.rotators[index] = std::move(replacement);
+    document_.dirty = true;
+    document_.status = document_.rotators[index].pressurePlates.empty()
+        ? "Updated rotator; it will not turn until a plate is linked."
+        : "Updated rotator links and color.";
     recordDocumentChange(before);
     return true;
 }
@@ -1720,6 +2018,8 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     document_.decorations.clear();
     document_.selectors.clear();
     document_.gates.clear();
+    document_.rotators.clear();
+    document_.plates.clear();
     document_.selectedDecoration.reset();
     document_.selectedSelector.reset();
     // A new document belongs to no screen until it is saved as one, so it has
@@ -1774,14 +2074,10 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
         *document_.selectedSelector >= document_.selectors.size()) {
         document_.selectedSelector.reset();
     }
-    std::erase_if(document_.gates, [&](Level::Gate& gate) {
-        if (gate.cell.x >= width || gate.cell.y >= height) {
-            return true;
-        }
-        std::erase_if(gate.pressurePlates, [&](GridPosition3 plate) {
-            return plate.x >= width || plate.y >= height;
-        });
-        return false;
+    cropLinkedRecords(document_.gates, width, height);
+    cropLinkedRecords(document_.rotators, width, height);
+    std::erase_if(document_.plates, [&](const Level::Plate& plate) {
+        return plate.cell.x >= width || plate.cell.y >= height;
     });
 
     document_.requestedWidth = width;
@@ -1831,14 +2127,11 @@ void LevelEditor::insertLayerAt(int insertionIndex, const char* status)
             ++selector.cell.z;
         }
     }
-    for (Level::Gate& gate : document_.gates) {
-        if (gate.cell.z >= insertionIndex) {
-            ++gate.cell.z;
-        }
-        for (GridPosition3& plate : gate.pressurePlates) {
-            if (plate.z >= insertionIndex) {
-                ++plate.z;
-            }
+    shiftLinkedRecordsForInsertedLayer(document_.gates, insertionIndex);
+    shiftLinkedRecordsForInsertedLayer(document_.rotators, insertionIndex);
+    for (Level::Plate& plate : document_.plates) {
+        if (plate.cell.z >= insertionIndex) {
+            ++plate.cell.z;
         }
     }
     document_.activeLayer = insertionIndex;
@@ -1884,22 +2177,16 @@ void LevelEditor::deleteActiveLayer()
         *document_.selectedSelector >= document_.selectors.size()) {
         document_.selectedSelector.reset();
     }
-    std::erase_if(document_.gates, [&](Level::Gate& gate) {
-        if (gate.cell.z == static_cast<int>(deletedLayer)) {
+    removeLinkedRecordLayer(document_.gates, static_cast<int>(deletedLayer));
+    removeLinkedRecordLayer(
+        document_.rotators, static_cast<int>(deletedLayer));
+    std::erase_if(document_.plates, [&](Level::Plate& plate) {
+        if (plate.cell.z == static_cast<int>(deletedLayer)) {
             return true;
         }
-        if (gate.cell.z > static_cast<int>(deletedLayer)) {
-            --gate.cell.z;
+        if (plate.cell.z > static_cast<int>(deletedLayer)) {
+            --plate.cell.z;
         }
-        std::erase_if(gate.pressurePlates, [&](GridPosition3& plate) {
-            if (plate.z == static_cast<int>(deletedLayer)) {
-                return true;
-            }
-            if (plate.z > static_cast<int>(deletedLayer)) {
-                --plate.z;
-            }
-            return false;
-        });
         return false;
     });
     document_.activeLayer = std::min(
@@ -2043,6 +2330,8 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     document_.decorations = std::move(definition.decorations);
     document_.selectors = std::move(definition.selectors);
     document_.gates = std::move(definition.gates);
+    document_.rotators = std::move(definition.rotators);
+    document_.plates = std::move(definition.plates);
     document_.selectedDecoration.reset();
     document_.selectedSelector.reset();
     document_.filePath = path;
@@ -2079,7 +2368,9 @@ bool LevelEditor::reloadFromDisk()
             onDisk.character == document_.character &&
             onDisk.decorations == document_.decorations &&
             onDisk.selectors == document_.selectors &&
-            onDisk.gates == document_.gates) {
+            onDisk.gates == document_.gates &&
+            onDisk.rotators == document_.rotators &&
+            onDisk.plates == document_.plates) {
             return false;
         }
     } catch (const std::exception&) {
@@ -2130,6 +2421,8 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
             .decorations = document_.decorations,
             .selectors = document_.selectors,
             .gates = document_.gates,
+            .rotators = document_.rotators,
+            .plates = document_.plates,
             .character = overworldScreenIdForPath(sourcePath)
                 ? document_.character
                 : std::nullopt,
@@ -2168,17 +2461,8 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
                             }
                             Level::Definition definition =
                                 Level::loadDefinitionFromFile(other);
-                            bool changed = false;
-                            for (auto& layer : definition.layers) {
-                                for (std::string& row : layer) {
-                                    const auto before = row;
-                                    std::ranges::replace(
-                                        row,
-                                        tileTypeToChar(TileType::Player),
-                                        tileTypeToChar(TileType::Air));
-                                    changed = changed || row != before;
-                                }
-                            }
+                            const bool changed = removePlayerTiles(
+                                definition.layers, definition.plates);
                             if (changed) {
                                 writeScreenRows(
                                     other,
@@ -2774,6 +3058,8 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
         before.decorations == after.decorations &&
         before.selectors == after.selectors &&
         before.gates == after.gates &&
+        before.rotators == after.rotators &&
+        before.plates == after.plates &&
         before.filePath == after.filePath &&
         before.requestedWidth == after.requestedWidth &&
         before.requestedHeight == after.requestedHeight &&
@@ -2798,6 +3084,8 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
     document_.decorations = snapshot.decorations;
     document_.selectors = snapshot.selectors;
     document_.gates = snapshot.gates;
+    document_.rotators = snapshot.rotators;
+    document_.plates = snapshot.plates;
     document_.filePath = snapshot.filePath;
     document_.loadedPath = snapshot.loadedPath;
     document_.requestedWidth = snapshot.requestedWidth;
@@ -2824,6 +3112,8 @@ Level::Definition LevelEditor::documentDefinition() const
         .decorations = document_.decorations,
         .selectors = document_.selectors,
         .gates = document_.gates,
+        .rotators = document_.rotators,
+        .plates = document_.plates,
         .character = editingOverworld()
             ? document_.character
             : std::nullopt,
@@ -2948,6 +3238,8 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
         .decorations = document_.decorations,
         .selectors = document_.selectors,
         .gates = document_.gates,
+        .rotators = document_.rotators,
+        .plates = document_.plates,
         .filePath = document_.filePath,
         .loadedPath = document_.loadedPath,
         .requestedWidth = document_.requestedWidth,

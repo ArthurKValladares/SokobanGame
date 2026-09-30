@@ -6,6 +6,7 @@
 #include "engine/TileTypes.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -42,6 +43,10 @@ struct GameState {
         // actor on the board, while water deaths render below the surface.
         bool drowned = false;
         std::optional<MoveDirection> sliding;
+        // Clockwise quarter turns (0-3) rotator plates have applied to this
+        // hero. Presentation-only for heroes, but kept in the state so undo,
+        // saves and concurrent actions agree on it.
+        uint8_t quarterTurns = 0;
 
         bool operator==(const Player&) const = default;
     };
@@ -55,6 +60,11 @@ struct GameState {
         // undo/save deltas, but no longer block, move, fire, or render.
         bool dead = false;
         std::optional<MoveDirection> sliding;
+        // Clockwise quarter turns (0-3) rotator plates have applied since the
+        // unit was authored. A turret fires along its authored direction
+        // turned by this amount (see rules::turretDirection); other movables
+        // only change how they are drawn.
+        uint8_t quarterTurns = 0;
 
         bool operator==(const Movable&) const = default;
     };
@@ -67,13 +77,29 @@ struct GameState {
         // They no longer block, support, attack, occlude, or render.
         bool dead = false;
         std::optional<MoveDirection> sliding;
+        // Clockwise quarter turns (0-3) applied by rotator plates. Enemies
+        // still turn to track heroes; this only drives the visible spin.
+        uint8_t quarterTurns = 0;
 
         bool operator==(const Enemy&) const = default;
+    };
+
+    // A mirror a rotator plate has turned. Mirrors are static level tiles;
+    // only their orientation can change, so only turned mirrors are listed,
+    // sorted by cell (z, y, x) and never with zero quarter turns. An empty
+    // list means every mirror is as authored.
+    struct TurnedMirror {
+        GridPosition3 cell {};
+        // Clockwise quarter turns (1-3) from the authored mirror tile.
+        uint8_t quarterTurns = 0;
+
+        bool operator==(const TurnedMirror&) const = default;
     };
 
     std::vector<Player> players;
     std::vector<Movable> movables;
     std::vector<Enemy> enemies;
+    std::vector<TurnedMirror> turnedMirrors;
 
     bool operator==(const GameState&) const = default;
 };
@@ -133,6 +159,31 @@ struct StepResult {
 [[nodiscard]] std::optional<MoveDirection> conveyorDirectionForTile(TileType tile);
 [[nodiscard]] std::optional<MoveDirection> conveyorDirectionAt(const Level& level, GridPosition3 position);
 [[nodiscard]] std::optional<MoveDirection> turretDirectionForTile(TileType tile);
+// `direction` turned by `quarterTurns` clockwise quarter turns (negative
+// values turn counter-clockwise).
+[[nodiscard]] MoveDirection rotateDirection(
+    MoveDirection direction, int quarterTurns);
+// `quarterTurns` advanced by a signed number of quarter turns, kept in 0-3.
+[[nodiscard]] uint8_t addQuarterTurns(uint8_t quarterTurns, int delta);
+// The direction a live turret movable fires: its authored tile direction
+// turned by the quarter turns rotator plates have applied. Empty for
+// anything that is not a turret.
+[[nodiscard]] std::optional<MoveDirection> turretDirection(
+    const GameState::Movable& movable);
+// A mirror tile turned by `quarterTurns` clockwise quarter turns; any other
+// tile is returned unchanged.
+[[nodiscard]] TileType rotateMirrorTile(TileType tile, int quarterTurns);
+// Quarter turns rotators have applied to the mirror at `cell` (0 if none).
+[[nodiscard]] uint8_t mirrorQuarterTurnsAt(
+    const GameState& state, GridPosition3 cell);
+// Records the mirror at `cell` as turned by `quarterTurns`, keeping
+// GameState::turnedMirrors sorted and free of zero entries.
+void setMirrorQuarterTurns(
+    GameState& state, GridPosition3 cell, uint8_t quarterTurns);
+// The mirror tile currently at `cell`, including rotator turns. Empty when
+// the cell holds no mirror.
+[[nodiscard]] std::optional<TileType> mirrorTileAt(
+    const Level& level, const GameState& state, GridPosition3 cell);
 
 // Live turret ids participating in at least one unobstructed pair where both
 // barrels face the other turret. These pairs fire without requiring movement.
@@ -161,13 +212,23 @@ struct StepResult {
 // below the water surface and does not displace it.
 [[nodiscard]] bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 position);
 
+// A pressure plate is pressed by a live hero, movable or enemy, or by a
+// mirror authored on top of it (which holds it pressed for good).
 [[nodiscard]] bool isPressurePlateActive(
+    const Level& level,
     const GameState& state,
     GridPosition3 plate);
 [[nodiscard]] bool isGateOpen(
     const Level& level,
     const GameState& state,
     const Level::Gate& gate);
+// True while every pressure plate linked to the rotator has a live occupant.
+// A rotator turns its occupant only on the step this becomes true, so a unit
+// left standing on a pressed plate does not keep the rotator spinning.
+[[nodiscard]] bool isRotatorEngaged(
+    const Level& level,
+    const GameState& state,
+    const Level::Rotator& rotator);
 // Kept as a compatibility query for debug/presentation callers. End tiles no
 // longer have a locked state, so this always returns true.
 [[nodiscard]] bool isEndUnlocked(const Level& level, const GameState& state);

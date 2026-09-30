@@ -192,6 +192,9 @@ void testPackedStateKeyIncludesEveryDynamicField()
     changed = state;
     changed.players[0].sliding = MoveDirection::Up;
     checkChanged(changed);
+    changed = state;
+    changed.players[0].quarterTurns = 1;
+    checkChanged(changed);
 
     changed = state;
     ++changed.movables[0].id;
@@ -217,6 +220,9 @@ void testPackedStateKeyIncludesEveryDynamicField()
     changed = state;
     changed.movables[0].sliding = MoveDirection::Up;
     checkChanged(changed);
+    changed = state;
+    changed.movables[0].quarterTurns = 3;
+    checkChanged(changed);
 
     changed = state;
     ++changed.enemies[0].id;
@@ -239,6 +245,21 @@ void testPackedStateKeyIncludesEveryDynamicField()
     changed = state;
     changed.enemies[0].sliding = MoveDirection::Up;
     checkChanged(changed);
+    changed = state;
+    changed.enemies[0].quarterTurns = 2;
+    checkChanged(changed);
+
+    changed = state;
+    changed.turnedMirrors.push_back({ .cell = { 1, 2, 3 }, .quarterTurns = 1 });
+    checkChanged(changed);
+    GameState turned = changed;
+    turned.turnedMirrors[0].quarterTurns = 2;
+    CHECK(solver::detail::makePackedStateKey(turned, activeController) !=
+        solver::detail::makePackedStateKey(changed, activeController));
+    turned = changed;
+    ++turned.turnedMirrors[0].cell.x;
+    CHECK(solver::detail::makePackedStateKey(turned, activeController) !=
+        solver::detail::makePackedStateKey(changed, activeController));
 
     changed = state;
     changed.players.push_back(state.players[0]);

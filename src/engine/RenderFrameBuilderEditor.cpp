@@ -3,6 +3,7 @@
 #include "engine/AnimationCatalog.hpp"
 #include "engine/GateEffect.hpp"
 #include "engine/RenderFrameParts.hpp"
+#include "engine/RotatorVisuals.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
@@ -282,6 +283,14 @@ private:
                     tile,
                     definition.character.value_or(CharacterType::Rogue)));
         }
+        if (tileTypeIsRotator(tile)) {
+            const auto found = std::ranges::find(
+                definition.rotators, localCell, &Level::Rotator::cell);
+            const Vec3 color = found != definition.rotators.end()
+                ? found->color
+                : Level::Rotator {}.color;
+            renderTile.color = { color.x, color.y, color.z, 1.0f };
+        }
         renderTile.pickable = false;
         renderTile.affectsCameraFit = false;
         const bool animatedActor =
@@ -344,6 +353,18 @@ private:
                             neighbor.origin,
                             localCell,
                             definitionTileAt(definition, localCell));
+                        const auto covered = std::ranges::find(
+                            definition.plates,
+                            localCell,
+                            &Level::Plate::cell);
+                        if (covered != definition.plates.end()) {
+                            appendOverworldNeighborTile(
+                                frame,
+                                definition,
+                                neighbor.origin,
+                                localCell,
+                                covered->tile);
+                        }
                     }
                 }
             }
@@ -492,13 +513,15 @@ private:
             tile, { x, y, z }, input_.manifest, input_.settings);
         if (tile == TileType::PressurePlate) {
             const GridPosition3 cell { x, y, z };
-            const auto gate = std::ranges::find_if(
-                input_.editor.gates(),
-                [cell](const Level::Gate& candidate) {
-                    return std::ranges::find(
-                        candidate.pressurePlates, cell) !=
-                        candidate.pressurePlates.end();
-                });
+            const auto linkedTo = [cell](const auto& candidate) {
+                return std::ranges::find(candidate.pressurePlates, cell) !=
+                    candidate.pressurePlates.end();
+            };
+            const auto gate =
+                std::ranges::find_if(input_.editor.gates(), linkedTo);
+            const auto rotator =
+                std::ranges::find_if(input_.editor.rotators(), linkedTo);
+            // Gates win, matching Level::pressurePlateLinkColor.
             if (gate != input_.editor.gates().end()) {
                 renderTile.color = {
                     gate->color.x,
@@ -506,7 +529,23 @@ private:
                     gate->color.z,
                     1.0f,
                 };
+            } else if (rotator != input_.editor.rotators().end()) {
+                renderTile.color = {
+                    rotator->color.x,
+                    rotator->color.y,
+                    rotator->color.z,
+                    1.0f,
+                };
             }
+        }
+        if (tileTypeIsRotator(tile)) {
+            const GridPosition3 cell { x, y, z };
+            const auto found = std::ranges::find(
+                input_.editor.rotators(), cell, &Level::Rotator::cell);
+            const Vec3 color = found != input_.editor.rotators().end()
+                ? found->color
+                : Level::Rotator {}.color;
+            renderTile.color = { color.x, color.y, color.z, 1.0f };
         }
         if (tileTypeIsPlayerStart(tile)) {
             renderTile.model = input_.manifest.characterModel(
@@ -628,8 +667,29 @@ private:
                         tile,
                         false,
                         deletePreviewTarget || movePreviewSource);
+                    appendCoveredPlate(frame, {
+                        static_cast<int>(x),
+                        static_cast<int>(y),
+                        static_cast<int>(z),
+                    });
                 }
             }
+        }
+    }
+
+    // A plate authored beneath a unit or mirror. It draws under its occupant
+    // but never takes picks from it: hover, delete and move address the top.
+    void appendCoveredPlate(RenderFrameData& frame, GridPosition3 cell) const
+    {
+        const auto covered = std::ranges::find(
+            input_.editor.coveredPlates(), cell, &Level::Plate::cell);
+        if (covered == input_.editor.coveredPlates().end()) {
+            return;
+        }
+        const std::size_t first = frame.tiles.size();
+        appendEditorTile(frame, cell.x, cell.y, cell.z, covered->tile, false);
+        for (std::size_t index = first; index < frame.tiles.size(); ++index) {
+            frame.tiles[index].pickable = false;
         }
     }
 
@@ -844,9 +904,10 @@ RenderFrameData::Tile tileVisual(
 {
     const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
     const bool conveyor = tileTypeIsConveyor(tile);
-    const float tileSize = surfaceEntity
-        ? settings.geometry.surfaceEntityWidthDepth
-        : 1.0f;
+    const bool rotator = tileTypeIsRotator(tile);
+    const float tileSize = rotator
+        ? config::rotatorPlateWidthDepth
+        : (surfaceEntity ? settings.geometry.surfaceEntityWidthDepth : 1.0f);
     const float centeredOffset = (1.0f - tileSize) * 0.5f;
 
     Vec4 color = tileColor(tile);
@@ -870,7 +931,9 @@ RenderFrameData::Tile tileVisual(
         // Conveyors are the reason this is shared: they are neither a surface
         // entity nor a solid block, so anything that only tests those two ends
         // up drawing them flat.
-        .height = surfaceEntity
+        .height = rotator
+            ? config::rotatorPlateHeight
+            : surfaceEntity
             ? settings.geometry.surfaceEntityHeight
             : (conveyor
                     ? config::conveyorTileHeight

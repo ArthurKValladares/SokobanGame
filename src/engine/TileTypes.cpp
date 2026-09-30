@@ -40,6 +40,43 @@ std::string_view tileTypeName(TileType type)
     return "Unknown";
 }
 
+std::optional<TileType> tileTypeFromName(std::string_view name)
+{
+    for (const TileTypeDefinition& definition : tileTypeDefinitionTable) {
+        if (definition.name == name) {
+            return definition.type;
+        }
+    }
+
+    return std::nullopt;
+}
+
+TileProperty tileTypeProperties(TileType type)
+{
+    for (const TileTypeDefinition& definition : tileTypeDefinitionTable) {
+        if (definition.type == type) {
+            return definition.properties;
+        }
+    }
+
+    return TileProperty::None;
+}
+
+bool tileTypeHasProperty(TileType type, TileProperty property)
+{
+    return hasProperty(tileTypeProperties(type), property);
+}
+
+bool tileTypeIsPlate(TileType type)
+{
+    return tileTypeHasProperty(type, TileProperty::Plate);
+}
+
+bool tileTypeCanStandOnPlate(TileType type)
+{
+    return tileTypeOccupiesLevelCell(type) || tileTypeIsMirror(type);
+}
+
 bool tileTypeOccupiesLevelCell(TileType type)
 {
     return tileTypeIsPlayerStart(type) || type == TileType::Rock ||
@@ -63,13 +100,12 @@ bool tileTypeAllowsEntity(TileType type)
         type == TileType::Decorative ||
         type == TileType::Ladder ||
         tileTypeIsConveyor(type) ||
-        type == TileType::End ||
-        type == TileType::PressurePlate;
+        tileTypeIsPlate(type);
 }
 
 bool tileTypeIsSurfaceEntity(TileType type)
 {
-    return type == TileType::End || type == TileType::PressurePlate;
+    return tileTypeIsPlate(type);
 }
 
 bool tileTypeIsPlayerStart(TileType type)
@@ -106,6 +142,21 @@ bool tileTypeIsTurret(TileType type)
 bool tileTypeIsDecorative(TileType type)
 {
     return type == TileType::Decorative;
+}
+
+bool tileTypeIsRotator(TileType type)
+{
+    return type == TileType::RotatorClockwise ||
+        type == TileType::RotatorCounterClockwise;
+}
+
+std::optional<int> rotatorQuarterTurns(TileType type)
+{
+    switch (type) {
+    case TileType::RotatorClockwise: return 1;
+    case TileType::RotatorCounterClockwise: return -1;
+    default: return std::nullopt;
+    }
 }
 
 bool tileTypeAffectsCameraFit(TileType type)

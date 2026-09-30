@@ -280,6 +280,34 @@ and the required real-device checks are recorded.
 - Binding capture continues forwarding physical state changes while suppressing
   action edges. Releases and axis neutralization during capture must remain
   visible when capture completes or is cancelled.
+- Rotator plates are resolved inside `rules` steps, not as separate actions.
+  `MicroStepResolver` samples which rotators are engaged (every linked plate
+  occupied) when a step begins and, once the step's movement settles, turns
+  the occupant of every rotator that became engaged. That keeps rotation
+  stateless (no latch in `GameState`), deterministic for replay and undo, and
+  identical between whole-world and scoped steps: a turned unit joins the
+  step's closure, so `StateDelta` and reservations see it. Mirror activation
+  applies the same rule. A turned turret sweeps its new line of fire once.
+- Every unit carries `quarterTurns` (0-3, clockwise). Turret firing direction
+  is `rules::turretDirection` (authored tile turned by `quarterTurns`); do not
+  read turret direction from the tile type alone. Profiles write the field only
+  when non-zero and read it as optional, so no format bump was needed. The
+  solver key includes it. Solution digests hash rotator links only for screens
+  that have rotators, which keeps older digests stable. Gate links are still
+  not part of the digest.
+- Plates are the tiles with `TileProperty::Plate` (pressure plates, rotators,
+  Ends). New plate kinds get the property in the tile table; code asks
+  `tileTypeIsPlate`, and anything that asks "what plate is here" must use
+  `Level::plateAt`, not `tileAt`: a unit authored on a plate leaves the plate
+  in the static grid, but a mirror is itself static and covers it. `@plate`
+  records (`Level::Plate`, `Level::coveredPlates`) hold plates authored beneath
+  an occupant; the editor keeps them in `document_.plates` and every command
+  that moves, crops or deletes cells must update them like gate records.
+- Mirrors turned by rotators live in `GameState::turnedMirrors` (sorted,
+  non-zero only) and travel in `StateDelta::mirrors`, keyed by cell because
+  mirrors never move. Rules read a mirror's current orientation through
+  `rules::mirrorTileAt`. The solver heuristic still uses authored mirror
+  orientations; that only affects search ordering.
 - Starting a new game on a selected slot is one dependent shell command. The
   start action runs only after the slot switch commits successfully; a switch
   failure preserves the current profile and title error state.

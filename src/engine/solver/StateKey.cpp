@@ -54,6 +54,7 @@ PackedStateKey makePackedStateKey(
         flags |= optionalEnumCode(player.sliding) << 8;
         flags |= static_cast<std::uint32_t>(player.dead) << 16;
         flags |= static_cast<std::uint32_t>(player.drowned) << 17;
+        flags |= static_cast<std::uint32_t>(player.quarterTurns) << 18;
         words.push_back(player.id);
         words.push_back(player.controller);
         words.push_back(packPair(player.cell.x, player.cell.y));
@@ -66,6 +67,7 @@ PackedStateKey makePackedStateKey(
         flags |= optionalEnumCode(movable.sliding) << 8;
         flags |= static_cast<std::uint32_t>(movable.fallen) << 16;
         flags |= static_cast<std::uint32_t>(movable.dead) << 17;
+        flags |= static_cast<std::uint32_t>(movable.quarterTurns) << 18;
         words.push_back(movable.id);
         words.push_back(packPair(movable.cell.x, movable.cell.y));
         words.push_back(packZAndFlags(movable.cell.z, flags));
@@ -76,11 +78,22 @@ PackedStateKey makePackedStateKey(
         std::uint32_t flags = optionalEnumCode(enemy.sliding);
         flags |= static_cast<std::uint32_t>(enemy.fallen) << 8;
         flags |= static_cast<std::uint32_t>(enemy.dead) << 9;
+        flags |= static_cast<std::uint32_t>(enemy.quarterTurns) << 10;
         words.push_back(enemy.id);
         words.push_back(packPair(enemy.cell.x, enemy.cell.y));
         words.push_back(packZAndFlags(enemy.cell.z, flags));
     }
 
+    // Appended only when present, so keys for screens without turned mirrors
+    // are unchanged; the counted sections above keep the tail unambiguous.
+    if (!state.turnedMirrors.empty()) {
+        words.push_back(state.turnedMirrors.size());
+        for (const GameState::TurnedMirror& mirror : state.turnedMirrors) {
+            words.push_back(packPair(mirror.cell.x, mirror.cell.y));
+            words.push_back(packZAndFlags(
+                mirror.cell.z, static_cast<std::uint32_t>(mirror.quarterTurns)));
+        }
+    }
     return PackedStateKey(std::move(words));
 }
 

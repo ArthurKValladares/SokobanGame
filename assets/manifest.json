@@ -597,6 +597,31 @@
         "texture": "BoardGameBits"
       },
       "preserveSourceScale": true
+    },
+    {
+      "name": "RotatorClockwise",
+      "path": "custom/models/rotator_clockwise.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "RotatorCounterClockwise",
+      "path": "custom/models/rotator_counter_clockwise.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "RotatorGear",
+      "path": "custom/models/rotator_gear.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "RotatorIconClockwise",
+      "path": "custom/models/rotator_icon_clockwise.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "RotatorIconCounterClockwise",
+      "path": "custom/models/rotator_icon_counter_clockwise.glb",
+      "preserveSourceScale": true
     }
   ],
   "animations": [
@@ -721,6 +746,14 @@
       "tile": "Player",
       "model": "Rogue",
       "scale": 1.100000023841858
+    },
+    {
+      "tile": "Rotator Clockwise",
+      "model": "RotatorClockwise"
+    },
+    {
+      "tile": "Rotator Counter-Clockwise",
+      "model": "RotatorCounterClockwise"
     }
   ],
   "sounds": [

@@ -34,6 +34,28 @@ public:
         bool operator==(const Gate&) const = default;
     };
 
+    // A Rotator tile's authored links. Direction comes from the tile type;
+    // the record says which pressure plates activate it and which color the
+    // plate and its linked pressure plates share. Linking follows the gate
+    // rule: the rotator activates when every linked plate becomes occupied.
+    struct Rotator {
+        GridPosition3 cell {};
+        std::vector<GridPosition3> pressurePlates;
+        Vec3 color { 0.24f, 0.62f, 0.92f };
+
+        bool operator==(const Rotator&) const = default;
+    };
+
+    // A plate (see TileProperty::Plate) authored underneath something already
+    // standing on it: the layer grid holds the occupant, this record the
+    // plate. Plates with nothing on them stay in the grid as usual.
+    struct Plate {
+        GridPosition3 cell {};
+        TileType tile = TileType::PressurePlate;
+
+        bool operator==(const Plate&) const = default;
+    };
+
     struct Decoration {
         struct PointLight {
             // Offset in the decoration's local space. It is scaled and
@@ -98,6 +120,8 @@ public:
         std::vector<Decoration> decorations;
         std::vector<ScreenSelector> selectors;
         std::vector<Gate> gates;
+        std::vector<Rotator> rotators;
+        std::vector<Plate> plates;
         // Missing only for backwards-compatible legacy documents. Runtime
         // levels always resolve it to Rogue.
         std::optional<CharacterType> character;
@@ -129,6 +153,8 @@ public:
         const std::vector<Decoration>& decorations = {},
         const std::vector<ScreenSelector>& selectors = {},
         const std::vector<Gate>& gates = {},
+        const std::vector<Rotator>& rotators = {},
+        const std::vector<Plate>& plates = {},
         CharacterType selectedCharacter = CharacterType::Rogue);
     [[nodiscard]] static Definition parseDefinition(
         const std::vector<std::string>& lines,
@@ -153,6 +179,18 @@ public:
     [[nodiscard]] const std::vector<Gate>& gates() const { return gates_; }
     [[nodiscard]] const Gate* gateAt(GridPosition3 cell) const;
     [[nodiscard]] const Gate* gateForPressurePlate(GridPosition3 cell) const;
+    [[nodiscard]] const std::vector<Rotator>& rotators() const { return rotators_; }
+    [[nodiscard]] const Rotator* rotatorAt(GridPosition3 cell) const;
+    [[nodiscard]] const Rotator* rotatorForPressurePlate(GridPosition3 cell) const;
+    // The color a pressure plate takes from the gate or rotator it drives
+    // (gates win when a plate is linked to both). Empty for unlinked plates.
+    [[nodiscard]] std::optional<Vec3> pressurePlateLinkColor(GridPosition3 cell) const;
+    // The plate at `cell`, whether it is uncovered or has something authored
+    // on top of it. Units standing on a plate leave it in tileAt(); a mirror
+    // on a plate replaces it there, so rules that ask about plates use this.
+    [[nodiscard]] std::optional<TileType> plateAt(GridPosition3 cell) const;
+    // Every `@plate` record (plates authored beneath an occupant).
+    [[nodiscard]] const std::vector<Plate>& coveredPlates() const { return coveredPlates_; }
     [[nodiscard]] const std::vector<GridPosition3>& ends() const { return ends_; }
     [[nodiscard]] std::optional<uint32_t> waterLayer() const { return waterLayer_; }
     [[nodiscard]] const std::vector<Decoration>& decorations() const { return decorations_; }
@@ -176,6 +214,8 @@ private:
     std::vector<GridPosition3> enemyStarts_;
     std::vector<GridPosition3> pressurePlates_;
     std::vector<Gate> gates_;
+    std::vector<Rotator> rotators_;
+    std::vector<Plate> coveredPlates_;
     std::vector<GridPosition3> ends_;
     std::vector<TileType> tiles_;
     std::optional<uint32_t> waterLayer_;

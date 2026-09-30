@@ -15,6 +15,7 @@
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 #include "engine/RenderFrameBuilder.hpp"
+#include "engine/RotatorVisuals.hpp"
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/MirrorConfig.hpp"
 
@@ -142,7 +143,12 @@ const AssetManifest& testManifest()
           "geometry": "skinned",
           "material": { "mode": "texture", "texture": "Tex" },
           "role": "enemy"
-        }
+        },
+        { "name": "RotatorClockwise", "path": "rotator-cw.glb", "preserveSourceScale": true },
+        { "name": "RotatorCounterClockwise", "path": "rotator-ccw.glb", "preserveSourceScale": true },
+        { "name": "RotatorGear", "path": "rotator-gear.glb", "preserveSourceScale": true },
+        { "name": "RotatorIconClockwise", "path": "rotator-icon-cw.glb", "preserveSourceScale": true },
+        { "name": "RotatorIconCounterClockwise", "path": "rotator-icon-ccw.glb", "preserveSourceScale": true }
       ],
       "animations": [
         { "name": "Idle", "path": "a.glb", "role": "player-idle" },
@@ -169,7 +175,9 @@ const AssetManifest& testManifest()
         { "tile": "Turret South", "model": "Turret" },
         { "tile": "Turret West", "model": "Turret" },
         { "tile": "Player", "model": "Hero" },
-        { "tile": "Enemy", "model": "Enemy" }
+        { "tile": "Enemy", "model": "Enemy" },
+        { "tile": "Rotator Clockwise", "model": "RotatorClockwise" },
+        { "tile": "Rotator Counter-Clockwise", "model": "RotatorCounterClockwise" }
       ]
     })json");
     return manifest;
@@ -1287,6 +1295,313 @@ void testGateEnergyCubeFadesAndPressurePlateMatchesColor()
         [](const RenderFrameData::Tile& tile) {
             return tile.cell == GridPosition3 { 2, 0, 1 } && tile.pickOnly;
         }));
+}
+
+void testRotatorPlateSpinsWithTheUnitItTurns()
+{
+    TEST("rotatorPlateSpinsWithTheUnitItTurns");
+    const Vec3 rotatorColor { 0.9f, 0.4f, 0.1f };
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "....." },
+            { "PC )R" },
+        },
+        .rotators = { Level::Rotator {
+            .cell = { 3, 0, 1 },
+            .pressurePlates = { { 0, 0, 1 } },
+            .color = rotatorColor,
+        } },
+    }, "rotator presentation");
+    const AssetManifest& manifest = testManifest();
+    const RenderModel gearModel = manifest.modelIdByName("RotatorGear");
+    const RenderModel iconModel =
+        manifest.modelIdByName("RotatorIconClockwise");
+    const GridPosition3 rotatorCell { 3, 0, 1 };
+    GameState idle = rules::initialState(level);
+    idle.movables[0].cell = rotatorCell;
+    GameplayPresentation presentation;
+    presentation.resetEntities(idle);
+    const RenderFrameData idleFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest,
+        .level = level,
+        .state = idle,
+        .moving = false,
+        .projectedState = idle,
+        .presentation = presentation,
+        .settings = {},
+    });
+    const auto tileWithModel = [&](const RenderFrameData& frame, RenderModel model) {
+        return std::ranges::find_if(frame.tiles, [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == rotatorCell && tile.model == model;
+        });
+    };
+    const auto idleGear = tileWithModel(idleFrame, gearModel);
+    const auto idleIcon = tileWithModel(idleFrame, iconModel);
+    CHECK(idleGear != idleFrame.tiles.end());
+    CHECK(idleIcon != idleFrame.tiles.end());
+    CHECK(std::ranges::none_of(idleFrame.tiles, [&](const RenderFrameData::Tile& tile) {
+        return tile.model == manifest.modelForTile(TileType::RotatorClockwise);
+    }));
+    if (idleGear != idleFrame.tiles.end() && idleIcon != idleFrame.tiles.end()) {
+        CHECK(near(idleGear->color.x,
+            rotatorColor.x * config::rotatorIdleBrightness));
+        CHECK(near(idleGear->modelRotationOffsetRadians, 0.0f));
+        CHECK(!idleIcon->pickable);
+    }
+    const auto plateTile = std::ranges::find_if(idleFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 0, 0, 1 };
+        });
+    CHECK(plateTile != idleFrame.tiles.end() &&
+        near(plateTile->color.x, rotatorColor.x * 0.42f));
+
+    // Halfway through the press, the gear and the rock are both part-way
+    // through their quarter turn and the icon stays still.
+    const GameState pressed = rules::step(level, idle, MoveDirection::Left);
+    CHECK(pressed.movables[0].quarterTurns == 1);
+    GameplaySession::Action action {
+        .before = idle,
+        .after = pressed,
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Left,
+    };
+    action.presentation = presentation.buildActionPresentation(action);
+    presentation.beginAction(action, action.before);
+    presentation.seekAction(action, 0.5f);
+    const RenderFrameData turningFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest,
+        .level = level,
+        .state = idle,
+        .moving = true,
+        .projectedState = pressed,
+        .presentation = presentation,
+        .settings = {},
+    });
+    const auto turningGear = tileWithModel(turningFrame, gearModel);
+    const auto turningIcon = tileWithModel(turningFrame, iconModel);
+    const auto turningRock = tileWithModel(
+        turningFrame, manifest.modelForTile(TileType::Rock));
+    CHECK(turningGear != turningFrame.tiles.end() &&
+        turningGear->modelRotationOffsetRadians > 0.1f &&
+        turningGear->modelRotationOffsetRadians < pi * 0.5f);
+    CHECK(turningIcon != turningFrame.tiles.end() &&
+        near(turningIcon->modelRotationOffsetRadians, 0.0f));
+    CHECK(turningRock != turningFrame.tiles.end() &&
+        turningGear != turningFrame.tiles.end() &&
+        near(turningRock->modelRotationOffsetRadians,
+            turningGear->modelRotationOffsetRadians));
+
+    GameplayPresentation settled;
+    settled.resetEntities(pressed);
+    const RenderFrameData pressedFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest,
+        .level = level,
+        .state = pressed,
+        .moving = false,
+        .projectedState = pressed,
+        .presentation = settled,
+        .settings = {},
+    });
+    const auto pressedGear = tileWithModel(pressedFrame, gearModel);
+    const auto pressedRock = tileWithModel(
+        pressedFrame, manifest.modelForTile(TileType::Rock));
+    CHECK(pressedGear != pressedFrame.tiles.end() &&
+        near(pressedGear->color.x, rotatorColor.x) &&
+        near(pressedGear->modelRotationOffsetRadians, 0.0f));
+    CHECK(pressedRock != pressedFrame.tiles.end() &&
+        pressedRock->modelRotationQuarterTurns == 1 &&
+        near(pressedRock->modelRotationOffsetRadians, 0.0f));
+
+    // The editor draws the whole plate in the rotator's link color.
+    LevelEditor editor;
+    editor.newDocument(4, 2, false);
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::PressurePlate));
+    CHECK(editor.setCell({ 2, 0, 1 }, TileType::RotatorCounterClockwise));
+    CHECK(editor.updateRotator(0, { { 1, 0, 1 } }, rotatorColor));
+    const RenderFrameData editorFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest,
+        .editor = editor,
+        .settings = {},
+    });
+    const auto editorPlate = std::ranges::find_if(editorFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 2, 0, 1 } &&
+                tile.model ==
+                    manifest.modelForTile(TileType::RotatorCounterClockwise);
+        });
+    CHECK(editorPlate != editorFrame.tiles.end() &&
+        near(editorPlate->color.x, rotatorColor.x) &&
+        near(editorPlate->size.x, config::rotatorPlateWidthDepth));
+    const auto editorPressure = std::ranges::find_if(editorFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 1, 0, 1 } && !tile.pickOnly;
+        });
+    CHECK(editorPressure != editorFrame.tiles.end() &&
+        near(editorPressure->color.x, rotatorColor.x));
+}
+
+void testTurnedHeroFacesItsNewDirectionSmoothly()
+{
+    TEST("turnedHeroFacesItsNewDirectionSmoothly");
+    GameState before;
+    before.players.push_back({ .id = 1, .cell = { 1, 1, 1 } });
+    GameState after = before;
+    after.players[0].quarterTurns = 1;
+    GameplayPresentation presentation;
+    presentation.resetEntities(before);
+    const uint32_t facingBefore = presentation.players()[0].facingQuarterTurns;
+    GameplaySession::Action action {
+        .before = before,
+        .after = after,
+        .durationSeconds = 1.0f,
+    };
+    action.presentation = presentation.buildActionPresentation(action);
+    presentation.beginAction(action, before);
+    CHECK(presentation.players()[0].facingQuarterTurns ==
+        (facingBefore + 1) % 4);
+
+    GameplaySession::Action undo = plans::inverted(action);
+    undo.presentation = presentation.buildActionPresentation(undo);
+    presentation.beginAction(undo, after);
+    CHECK(presentation.players()[0].facingQuarterTurns == facingBefore);
+}
+
+void testMirrorOnPlatesDrawsPlateAndTurns()
+{
+    TEST("mirrorOnPlatesDrawsPlateAndTurns");
+    const Vec3 gateColor { 0.2f, 0.8f, 0.4f };
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "......" },
+            { "PC 1G1" },
+        },
+        .gates = { Level::Gate {
+            .cell = { 4, 0, 1 },
+            .pressurePlates = { { 3, 0, 1 } },
+            .color = gateColor,
+        } },
+        .rotators = { Level::Rotator {
+            .cell = { 5, 0, 1 },
+            .pressurePlates = { { 0, 0, 1 } },
+        } },
+        .plates = {
+            Level::Plate { .cell = { 3, 0, 1 }, .tile = TileType::PressurePlate },
+            Level::Plate { .cell = { 5, 0, 1 }, .tile = TileType::RotatorClockwise },
+        },
+    }, "mirrors on plates");
+    const AssetManifest& manifest = testManifest();
+    const GameState idle = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(idle);
+    const RenderFrameData idleFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest,
+        .level = level,
+        .state = idle,
+        .moving = false,
+        .projectedState = idle,
+        .presentation = presentation,
+        .settings = {},
+    });
+    const auto tileAt = [](const RenderFrameData& frame, GridPosition3 cell, RenderModel model) {
+        return std::ranges::find_if(frame.tiles, [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == cell && tile.model == model;
+        });
+    };
+    // The pressure plate under the mirror is drawn, pressed, in its gate's
+    // color; the rotator under the other mirror draws its gear.
+    const auto coveredPlate = tileAt(
+        idleFrame, { 3, 0, 1 }, manifest.modelForTile(TileType::PressurePlate));
+    CHECK(coveredPlate != idleFrame.tiles.end() &&
+        near(coveredPlate->color.y, gateColor.y));
+    CHECK(tileAt(idleFrame, { 3, 0, 1 }, manifest.modelForTile(
+        TileType::MirrorNorthWest)) != idleFrame.tiles.end());
+    CHECK(tileAt(idleFrame, { 5, 0, 1 }, manifest.modelIdByName("RotatorGear")) !=
+        idleFrame.tiles.end());
+
+    // Pressing the rotator's plate turns the mirror on it: mid-action the
+    // mirror is part-way round, and afterwards it faces the next corner.
+    const GameState pressed = rules::step(level, idle, MoveDirection::Left);
+    CHECK(rules::mirrorQuarterTurnsAt(pressed, { 5, 0, 1 }) == 1);
+    GameplaySession::Action action {
+        .before = idle,
+        .after = pressed,
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Left,
+    };
+    action.presentation = presentation.buildActionPresentation(action);
+    presentation.beginAction(action, action.before);
+    presentation.seekAction(action, 0.5f);
+    const RenderFrameData turningFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest,
+        .level = level,
+        .state = idle,
+        .moving = true,
+        .projectedState = pressed,
+        .presentation = presentation,
+        .settings = {},
+    });
+    const RenderModel mirrorModel =
+        manifest.modelForTile(TileType::MirrorNorthWest);
+    const auto idleMirror = tileAt(idleFrame, { 5, 0, 1 }, mirrorModel);
+    const auto turningMirror = tileAt(turningFrame, { 5, 0, 1 }, mirrorModel);
+    const auto untouchedMirror = tileAt(turningFrame, { 3, 0, 1 }, mirrorModel);
+    CHECK(idleMirror != idleFrame.tiles.end() &&
+        turningMirror != turningFrame.tiles.end() &&
+        untouchedMirror != turningFrame.tiles.end());
+    if (idleMirror != idleFrame.tiles.end() &&
+        turningMirror != turningFrame.tiles.end() &&
+        untouchedMirror != turningFrame.tiles.end()) {
+        CHECK(turningMirror->modelRotationOffsetRadians >
+            idleMirror->modelRotationOffsetRadians + 0.1f);
+        CHECK(near(untouchedMirror->modelRotationOffsetRadians,
+            idleMirror->modelRotationOffsetRadians));
+    }
+    const auto turningGear = tileAt(
+        turningFrame, { 5, 0, 1 }, manifest.modelIdByName("RotatorGear"));
+    CHECK(turningGear != turningFrame.tiles.end() &&
+        turningGear->modelRotationOffsetRadians > 0.1f);
+
+    GameplayPresentation settled;
+    settled.resetEntities(pressed);
+    const RenderFrameData pressedFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest,
+        .level = level,
+        .state = pressed,
+        .moving = false,
+        .projectedState = pressed,
+        .presentation = settled,
+        .settings = {},
+    });
+    const auto turnedMirror = tileAt(pressedFrame, { 5, 0, 1 }, mirrorModel);
+    CHECK(turnedMirror != pressedFrame.tiles.end() &&
+        turnedMirror->modelRotationQuarterTurns ==
+            *mirrorOrientationQuarterTurns(TileType::MirrorNorthEast));
+}
+
+void testEditorDrawsPlatesBeneathTheirOccupants()
+{
+    TEST("editorDrawsPlatesBeneathTheirOccupants");
+    LevelEditor editor;
+    editor.newDocument(4, 2, false);
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::End));
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::Rock));
+    const AssetManifest& manifest = testManifest();
+    const RenderFrameData frame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest,
+        .editor = editor,
+        .settings = {},
+    });
+    const auto rock = std::ranges::find_if(frame.tiles, [&](const RenderFrameData::Tile& tile) {
+        return tile.cell == GridPosition3 { 1, 0, 1 } &&
+            tile.model == manifest.modelForTile(TileType::Rock) && !tile.pickOnly;
+    });
+    const auto end = std::ranges::find_if(frame.tiles, [&](const RenderFrameData::Tile& tile) {
+        return tile.cell == GridPosition3 { 1, 0, 1 } &&
+            tile.model == manifest.modelForTile(TileType::End) &&
+            near(tile.height, config::surfaceEntityHeight);
+    });
+    CHECK(rock != frame.tiles.end() && rock->pickable);
+    CHECK(end != frame.tiles.end() && !end->pickable);
 }
 
 void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
@@ -2875,6 +3190,10 @@ int main()
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();
     testGameplayVisibleCellFiltersComposedWorldFrame();
     testGateEnergyCubeFadesAndPressurePlateMatchesColor();
+    testRotatorPlateSpinsWithTheUnitItTurns();
+    testTurnedHeroFacesItsNewDirectionSmoothly();
+    testMirrorOnPlatesDrawsPlateAndTurns();
+    testEditorDrawsPlatesBeneathTheirOccupants();
     testEditorFrameProvidesInvisibleExpansionBorderAndPreview();
     testEditorFrameShowsReadOnlyOverworldNeighbors();
     testEditorSelectorMoveUsesFlagPreviews();

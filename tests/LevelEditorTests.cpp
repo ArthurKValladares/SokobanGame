@@ -183,6 +183,182 @@ void testGateLinksPersistAndFollowEditorCommands()
         std::vector<GridPosition3> { plate });
 }
 
+void testRotatorLinksPersistAndFollowEditorCommands()
+{
+    TEST("rotatorLinksPersistAndFollowEditorCommands");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(6, 3, false);
+
+    const GridPosition3 plate { 1, 1, 1 };
+    const GridPosition3 rotatorCell { 2, 1, 1 };
+    CHECK(editor.setCell(plate, TileType::PressurePlate));
+    CHECK(editor.setCell(rotatorCell, TileType::RotatorClockwise));
+    CHECK(editor.rotators().size() == 1);
+    CHECK(editor.rotators()[0].cell == rotatorCell);
+    CHECK(editor.rotators()[0].pressurePlates.empty());
+    CHECK(editor.updateRotator(0, { plate }, { 0.9f, 0.4f, 0.1f }));
+    CHECK(editor.rotators()[0].pressurePlates ==
+        std::vector<GridPosition3> { plate });
+    CHECK(editor.documentToLevel().rotatorAt(rotatorCell) != nullptr);
+    CHECK(editor.documentToLevel().pressurePlateLinkColor(plate) ==
+        std::optional<Vec3>(Vec3 { 0.9f, 0.4f, 0.1f }));
+
+    // Invalid links are refused without touching the document.
+    CHECK(!editor.updateRotator(0, { { 0, 0, 1 } }, { 0.9f, 0.4f, 0.1f }));
+    CHECK(!editor.updateRotator(0, { plate, plate }, { 0.9f, 0.4f, 0.1f }));
+    CHECK(!editor.updateRotator(0, { plate }, { 2.0f, 0.4f, 0.1f }));
+    CHECK(editor.rotators()[0].pressurePlates ==
+        std::vector<GridPosition3> { plate });
+
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.rotators()[0].pressurePlates.empty());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.rotators()[0].color == Vec3({ 0.9f, 0.4f, 0.1f }));
+
+    // Swapping the direction keeps the record and its links.
+    CHECK(editor.setCell(rotatorCell, TileType::RotatorCounterClockwise));
+    CHECK(editor.rotators().size() == 1);
+    CHECK(editor.rotators()[0].pressurePlates ==
+        std::vector<GridPosition3> { plate });
+
+    const GridPosition3 movedRotator { 4, 1, 1 };
+    CHECK(editor.beginMove(rotatorCell));
+    CHECK(editor.moveObject(movedRotator));
+    CHECK(editor.rotators().size() == 1);
+    CHECK(editor.rotators()[0].cell == movedRotator);
+    CHECK(editor.rotators()[0].pressurePlates ==
+        std::vector<GridPosition3> { plate });
+
+    const GridPosition3 movedPlate { 3, 1, 1 };
+    CHECK(editor.beginMove(plate));
+    CHECK(editor.moveObject(movedPlate));
+    CHECK(editor.rotators()[0].pressurePlates ==
+        std::vector<GridPosition3> { movedPlate });
+
+    const std::filesystem::path path =
+        project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(path));
+    LevelEditor loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(path, false));
+    CHECK(loaded.rotators() == editor.rotators());
+    CHECK(loaded.documentLayers()[1][1][4] ==
+        tileTypeToChar(TileType::RotatorCounterClockwise));
+
+    CHECK(loaded.setCell(movedPlate, TileType::Air));
+    CHECK(loaded.rotators()[0].pressurePlates.empty());
+    CHECK(loaded.setCell(movedRotator, TileType::Air));
+    CHECK(loaded.rotators().empty());
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.rotators().size() == 1);
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.rotators()[0].pressurePlates ==
+        std::vector<GridPosition3> { movedPlate });
+}
+
+void testUnitsAndMirrorsStackOnPlates()
+{
+    TEST("unitsAndMirrorsStackOnPlates");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(6, 3, false);
+    const auto top = [&](GridPosition3 cell) {
+        return charToTileType(editor.documentLayers()
+            [static_cast<std::size_t>(cell.z)]
+            [static_cast<std::size_t>(cell.y)]
+            [static_cast<std::size_t>(cell.x)]).value_or(TileType::Air);
+    };
+
+    // Unit painted onto a rotator: the rotator (and its record) stay beneath.
+    const GridPosition3 rotatorCell { 2, 1, 1 };
+    const GridPosition3 plate { 1, 1, 1 };
+    CHECK(editor.setCell(plate, TileType::PressurePlate));
+    CHECK(editor.setCell(rotatorCell, TileType::RotatorClockwise));
+    CHECK(editor.updateRotator(0, { plate }, { 0.3f, 0.6f, 0.9f }));
+    CHECK(editor.setCell(rotatorCell, TileType::MirrorNorthWest));
+    CHECK(top(rotatorCell) == TileType::MirrorNorthWest);
+    const std::vector<Level::Plate> expectedPlates {
+        { .cell = rotatorCell, .tile = TileType::RotatorClockwise },
+    };
+    CHECK(editor.coveredPlates() == expectedPlates);
+    CHECK(editor.documentPlateAt(rotatorCell) == TileType::RotatorClockwise);
+    CHECK(editor.rotators().size() == 1);
+    CHECK(editor.rotators()[0].pressurePlates ==
+        std::vector<GridPosition3> { plate });
+    // Painting the same stack again changes nothing.
+    CHECK(!editor.setCell(rotatorCell, TileType::MirrorNorthWest));
+    // Replacing the occupant keeps the plate.
+    CHECK(editor.setCell(rotatorCell, TileType::Rock));
+    CHECK(top(rotatorCell) == TileType::Rock);
+    CHECK(editor.documentPlateAt(rotatorCell) == TileType::RotatorClockwise);
+    // Swapping the plate beneath keeps the occupant and the rotator record.
+    CHECK(editor.setCell(rotatorCell, TileType::RotatorCounterClockwise));
+    CHECK(top(rotatorCell) == TileType::Rock);
+    CHECK(editor.documentPlateAt(rotatorCell) ==
+        TileType::RotatorCounterClockwise);
+    CHECK(editor.rotators().size() == 1);
+
+    // A plate painted under an existing unit slides beneath it, and a covered
+    // pressure plate can still be linked.
+    const GridPosition3 heroCell { 4, 1, 1 };
+    CHECK(editor.setCell(heroCell, TileType::Rogue));
+    CHECK(editor.setCell(heroCell, TileType::PressurePlate));
+    CHECK(top(heroCell) == TileType::Rogue);
+    CHECK(editor.documentPlateAt(heroCell) == TileType::PressurePlate);
+    CHECK(editor.updateRotator(0, { plate, heroCell }, { 0.3f, 0.6f, 0.9f }));
+
+    const Level level = editor.documentToLevel();
+    CHECK(level.coveredPlates().size() == 2);
+    CHECK(level.tileAt(4, 1, 1) == TileType::PressurePlate);
+    CHECK(level.tileAt(2, 1, 1) == TileType::RotatorCounterClockwise);
+
+    const std::filesystem::path path =
+        project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(path));
+    LevelEditor loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(path, false));
+    CHECK(loaded.coveredPlates() == editor.coveredPlates());
+    CHECK(loaded.rotators() == editor.rotators());
+
+    // Erasing lifts the unit off and leaves the plate; erasing again removes
+    // the plate and its links.
+    CHECK(loaded.setCell(heroCell, TileType::Air));
+    CHECK(loaded.coveredPlates().size() == 1);
+    CHECK(loaded.documentLayers()[1][1][4] ==
+        tileTypeToChar(TileType::PressurePlate));
+    CHECK(loaded.rotators()[0].pressurePlates.size() == 2);
+    CHECK(loaded.setCell(heroCell, TileType::Air));
+    CHECK(loaded.rotators()[0].pressurePlates ==
+        std::vector<GridPosition3> { plate });
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.coveredPlates() == editor.coveredPlates());
+
+    // Painting a non-stacking tile replaces the whole stack.
+    CHECK(loaded.setCell(rotatorCell, TileType::Wall));
+    CHECK(loaded.coveredPlates().size() == 1);
+    CHECK(loaded.rotators().empty());
+
+    // Moving a unit onto a free plate stacks it; moving it off again leaves
+    // the plate behind.
+    LevelEditor mover = makeEditor(project);
+    mover.newDocument(6, 3, false);
+    CHECK(mover.setCell({ 1, 1, 1 }, TileType::Rock));
+    CHECK(mover.setCell({ 3, 1, 1 }, TileType::End));
+    CHECK(mover.beginMove({ 1, 1, 1 }));
+    CHECK(mover.moveObject({ 3, 1, 1 }));
+    CHECK(mover.documentPlateAt({ 3, 1, 1 }) == TileType::End);
+    CHECK(mover.coveredPlates().size() == 1);
+    CHECK(mover.beginMove({ 3, 1, 1 }));
+    CHECK(mover.moveObject({ 4, 1, 1 }));
+    CHECK(mover.coveredPlates().empty());
+    CHECK(mover.documentLayers()[1][1][3] == tileTypeToChar(TileType::End));
+    CHECK(mover.documentLayers()[1][1][4] == tileTypeToChar(TileType::Rock));
+    // Plates cannot be moved on top of anything.
+    CHECK(mover.beginMove({ 3, 1, 1 }));
+    CHECK(!mover.moveObject({ 4, 1, 1 }));
+}
+
 void testTileValidationAndMultipleHeroPlacement()
 {
     TEST("tileValidationAndMultipleHeroPlacement");
@@ -1809,6 +1985,8 @@ int main()
 {
     testDocumentCommandsAndUndo();
     testGateLinksPersistAndFollowEditorCommands();
+    testRotatorLinksPersistAndFollowEditorCommands();
+    testUnitsAndMirrorsStackOnPlates();
     testTileValidationAndMultipleHeroPlacement();
     testAddLayerBelowShiftsContentAndWaterAndIsUndoable();
     testSaveLoadAndRuntimeMirror();

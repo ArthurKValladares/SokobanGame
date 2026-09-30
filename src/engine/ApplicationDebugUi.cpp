@@ -1080,6 +1080,15 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
         "Gates %zu/%zu open",
         openGates,
         context.level.gates().size());
+    const std::size_t engagedRotators = static_cast<std::size_t>(std::ranges::count_if(
+        context.level.rotators(),
+        [&](const Level::Rotator& rotator) {
+            return rules::isRotatorEngaged(context.level, state, rotator);
+        }));
+    ImGui::Text(
+        "Rotators %zu/%zu engaged",
+        engagedRotators,
+        context.level.rotators().size());
     ImGui::BeginDisabled(context.inOverworld);
     result.solveCurrentScreen = ImGui::Button("Solve Current Screen");
     ImGui::EndDisabled();

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <fstream>
@@ -20,6 +21,8 @@ constexpr std::string_view characterPrefix = "@character ";
 constexpr std::string_view decorationPrefix = "@decoration ";
 constexpr std::string_view selectorPrefix = "@selector ";
 constexpr std::string_view gatePrefix = "@gate ";
+constexpr std::string_view rotatorPrefix = "@rotator ";
+constexpr std::string_view platePrefix = "@plate ";
 
 using Json = nlohmann::json;
 
@@ -381,14 +384,29 @@ std::string serializeSelector(const Level::ScreenSelector& selector)
     return std::string(selectorPrefix) + object.dump();
 }
 
-GridPosition3 parseGateCell(
+// Gates and rotators are both linked to pressure plates by an authored
+// metadata record with the same shape: the device cell, the plates that drive
+// it, and the color the device and its plates share. `kind` is the capitalized
+// record name used in diagnostics ("Gate", "Rotator").
+std::string lowercaseKind(std::string_view kind)
+{
+    std::string lowered(kind);
+    for (char& character : lowered) {
+        character = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(character)));
+    }
+    return lowered;
+}
+
+GridPosition3 parseLinkedCell(
     const Json& value,
     std::string_view field,
-    std::string_view sourceName)
+    std::string_view sourceName,
+    std::string_view kind)
 {
     if (!value.is_array() || value.size() != 3) {
         throw std::runtime_error(
-            "Gate '" + std::string(field) +
+            std::string(kind) + " '" + std::string(field) +
             "' must be an array of three integers: " +
             std::string(sourceName));
     }
@@ -397,124 +415,233 @@ GridPosition3 parseGateCell(
     for (std::size_t i = 0; i < 3; ++i) {
         if (!value[i].is_number_integer()) {
             throw std::runtime_error(
-                "Gate '" + std::string(field) +
+                std::string(kind) + " '" + std::string(field) +
                 "' must contain only integers: " +
                 std::string(sourceName));
         }
         *components[i] = value[i].get<int>();
         if (*components[i] < 0) {
             throw std::runtime_error(
-                "Gate cell coordinates must not be negative: " +
+                std::string(kind) + " cell coordinates must not be negative: " +
                 std::string(sourceName));
         }
     }
     return cell;
 }
 
-void validateGateRecord(
-    const Level::Gate& gate,
-    std::string_view sourceName)
+template <typename Record>
+void validateLinkedRecord(
+    const Record& record,
+    std::string_view sourceName,
+    std::string_view kind)
 {
-    if (gate.cell.x < 0 || gate.cell.y < 0 || gate.cell.z < 0) {
+    if (record.cell.x < 0 || record.cell.y < 0 || record.cell.z < 0) {
         throw std::runtime_error(
-            "Gate cell coordinates must not be negative: " +
+            std::string(kind) + " cell coordinates must not be negative: " +
             std::string(sourceName));
     }
     const auto validColor = [](float component) {
         return std::isfinite(component) && component >= 0.0f &&
             component <= 1.0f;
     };
-    if (!validColor(gate.color.x) || !validColor(gate.color.y) ||
-        !validColor(gate.color.z)) {
+    if (!validColor(record.color.x) || !validColor(record.color.y) ||
+        !validColor(record.color.z)) {
         throw std::runtime_error(
-            "Gate color components must be finite values from zero to one: " +
+            std::string(kind) +
+            " color components must be finite values from zero to one: " +
             std::string(sourceName));
     }
-    for (std::size_t i = 0; i < gate.pressurePlates.size(); ++i) {
-        const GridPosition3 plate = gate.pressurePlates[i];
+    for (std::size_t i = 0; i < record.pressurePlates.size(); ++i) {
+        const GridPosition3 plate = record.pressurePlates[i];
         if (plate.x < 0 || plate.y < 0 || plate.z < 0) {
             throw std::runtime_error(
-                "Gate pressure-plate coordinates must not be negative: " +
+                std::string(kind) +
+                " pressure-plate coordinates must not be negative: " +
                 std::string(sourceName));
         }
         if (std::ranges::find(
-                gate.pressurePlates.begin(),
-                gate.pressurePlates.begin() +
+                record.pressurePlates.begin(),
+                record.pressurePlates.begin() +
                     static_cast<std::ptrdiff_t>(i),
-                plate) != gate.pressurePlates.begin() +
+                plate) != record.pressurePlates.begin() +
                     static_cast<std::ptrdiff_t>(i)) {
             throw std::runtime_error(
-                "Gate contains the same pressure plate more than once: " +
+                std::string(kind) +
+                " contains the same pressure plate more than once: " +
                 std::string(sourceName));
         }
     }
 }
 
-Level::Gate parseGate(
+template <typename Record>
+Record parseLinkedRecord(
     std::string_view payload,
-    std::string_view sourceName)
+    std::string_view sourceName,
+    std::string_view kind)
 {
+    const std::string lower = lowercaseKind(kind);
     try {
         const Json object = Json::parse(payload);
         if (!object.is_object()) {
-            throw std::runtime_error("gate payload is not an object");
+            throw std::runtime_error(lower + " payload is not an object");
         }
         const auto cell = object.find("cell");
         const auto plates = object.find("plates");
         const auto color = object.find("color");
         if (cell == object.end()) {
-            throw std::runtime_error("gate 'cell' is required");
+            throw std::runtime_error(lower + " 'cell' is required");
         }
         if (plates == object.end() || !plates->is_array()) {
-            throw std::runtime_error("gate 'plates' must be an array");
+            throw std::runtime_error(lower + " 'plates' must be an array");
         }
         if (color == object.end() || !color->is_array() ||
             color->size() != 3) {
             throw std::runtime_error(
-                "gate 'color' must be an array of three numbers");
+                lower + " 'color' must be an array of three numbers");
         }
-        Level::Gate gate {
-            .cell = parseGateCell(*cell, "cell", sourceName),
+        Record record {
+            .cell = parseLinkedCell(*cell, "cell", sourceName, kind),
         };
-        gate.pressurePlates.reserve(plates->size());
+        record.pressurePlates.reserve(plates->size());
         for (const Json& plate : *plates) {
-            gate.pressurePlates.push_back(
-                parseGateCell(plate, "plates", sourceName));
+            record.pressurePlates.push_back(
+                parseLinkedCell(plate, "plates", sourceName, kind));
         }
-        float* components[] { &gate.color.x, &gate.color.y, &gate.color.z };
+        float* components[] {
+            &record.color.x, &record.color.y, &record.color.z,
+        };
         for (std::size_t i = 0; i < 3; ++i) {
             if (!(*color)[i].is_number()) {
                 throw std::runtime_error(
-                    "gate 'color' must contain only numbers");
+                    lower + " 'color' must contain only numbers");
             }
             *components[i] = (*color)[i].get<float>();
         }
-        validateGateRecord(gate, sourceName);
-        return gate;
+        validateLinkedRecord(record, sourceName, kind);
+        return record;
     } catch (const nlohmann::json::exception& error) {
         throw std::runtime_error(
-            "Invalid gate JSON in " + std::string(sourceName) +
+            "Invalid " + lower + " JSON in " + std::string(sourceName) +
             ": " + error.what());
     } catch (const std::runtime_error& error) {
         throw std::runtime_error(
-            "Invalid gate in " + std::string(sourceName) +
+            "Invalid " + lower + " in " + std::string(sourceName) +
             ": " + error.what());
     }
 }
 
-std::string serializeGate(const Level::Gate& gate)
+template <typename Record>
+std::string serializeLinkedRecord(
+    const Record& record,
+    std::string_view prefix,
+    std::string_view kind)
 {
-    validateGateRecord(gate, "serialized level");
+    validateLinkedRecord(record, "serialized level", kind);
     Json plates = Json::array();
-    for (GridPosition3 plate : gate.pressurePlates) {
+    for (GridPosition3 plate : record.pressurePlates) {
         plates.push_back({ plate.x, plate.y, plate.z });
     }
     const Json object {
-        { "cell", { gate.cell.x, gate.cell.y, gate.cell.z } },
+        { "cell", { record.cell.x, record.cell.y, record.cell.z } },
         { "plates", std::move(plates) },
-        { "color", { gate.color.x, gate.color.y, gate.color.z } },
+        { "color", { record.color.x, record.color.y, record.color.z } },
     };
-    return std::string(gatePrefix) + object.dump();
+    return std::string(prefix) + object.dump();
+}
+
+// Sorts records into canonical z/y/x order and rejects invalid or duplicate
+// cells, so parsing, serialization and runtime levels agree on one order.
+template <typename Record>
+void canonicalizeLinkedRecords(
+    std::vector<Record>& records,
+    std::string_view sourceName,
+    std::string_view kind)
+{
+    std::ranges::sort(records, {}, [](const Record& record) {
+        return std::array { record.cell.z, record.cell.y, record.cell.x };
+    });
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        validateLinkedRecord(records[i], sourceName, kind);
+        if (i > 0 && records[i - 1].cell == records[i].cell) {
+            throw std::runtime_error(
+                "Level contains more than one " + lowercaseKind(kind) +
+                " record at the same cell: " + std::string(sourceName));
+        }
+    }
+}
+
+Level::Plate parsePlate(std::string_view payload, std::string_view sourceName)
+{
+    try {
+        const Json object = Json::parse(payload);
+        if (!object.is_object()) {
+            throw std::runtime_error("plate payload is not an object");
+        }
+        const auto cell = object.find("cell");
+        const auto tile = object.find("tile");
+        if (cell == object.end()) {
+            throw std::runtime_error("plate 'cell' is required");
+        }
+        if (tile == object.end() || !tile->is_string()) {
+            throw std::runtime_error("plate 'tile' must be a tile name");
+        }
+        const std::optional<TileType> type =
+            tileTypeFromName(tile->get<std::string>());
+        if (!type || !tileTypeIsPlate(*type)) {
+            throw std::runtime_error(
+                "plate 'tile' must name a plate tile (Pressure, End or a Rotator)");
+        }
+        return Level::Plate {
+            .cell = parseLinkedCell(*cell, "cell", sourceName, "Plate"),
+            .tile = *type,
+        };
+    } catch (const nlohmann::json::exception& error) {
+        throw std::runtime_error(
+            "Invalid plate JSON in " + std::string(sourceName) +
+            ": " + error.what());
+    } catch (const std::runtime_error& error) {
+        throw std::runtime_error(
+            "Invalid plate in " + std::string(sourceName) +
+            ": " + error.what());
+    }
+}
+
+std::string serializePlate(const Level::Plate& plate)
+{
+    if (!tileTypeIsPlate(plate.tile)) {
+        throw std::runtime_error("Cannot serialize a plate record for a non-plate tile");
+    }
+    const Json object {
+        { "cell", { plate.cell.x, plate.cell.y, plate.cell.z } },
+        { "tile", std::string(tileTypeName(plate.tile)) },
+    };
+    return std::string(platePrefix) + object.dump();
+}
+
+void canonicalizePlates(
+    std::vector<Level::Plate>& plates, std::string_view sourceName)
+{
+    std::ranges::sort(plates, {}, [](const Level::Plate& plate) {
+        return std::array { plate.cell.z, plate.cell.y, plate.cell.x };
+    });
+    for (std::size_t i = 0; i < plates.size(); ++i) {
+        const GridPosition3 cell = plates[i].cell;
+        if (cell.x < 0 || cell.y < 0 || cell.z < 0) {
+            throw std::runtime_error(
+                "Plate cell coordinates must not be negative: " +
+                std::string(sourceName));
+        }
+        if (!tileTypeIsPlate(plates[i].tile)) {
+            throw std::runtime_error(
+                "Plate records must name a plate tile: " +
+                std::string(sourceName));
+        }
+        if (i > 0 && plates[i - 1].cell == cell) {
+            throw std::runtime_error(
+                "Level contains more than one plate record at the same cell: " +
+                std::string(sourceName));
+        }
+    }
 }
 
 size_t tileIndex(uint32_t x, uint32_t y, uint32_t z, uint32_t width, uint32_t height)
@@ -596,7 +723,9 @@ Level::Definition Level::parseDefinition(
                     line.starts_with(characterPrefix) ||
                     line.starts_with(decorationPrefix) ||
                     line.starts_with(selectorPrefix) ||
-                    line.starts_with(gatePrefix);
+                    line.starts_with(gatePrefix) ||
+                    line.starts_with(rotatorPrefix) ||
+                    line.starts_with(platePrefix);
             })) {
             throw std::runtime_error(
                 "Level metadata requires explicit '@layer 0' sections: " + source);
@@ -655,9 +784,33 @@ Level::Definition Level::parseDefinition(
                 throw std::runtime_error(
                     "Gate metadata must appear before '@layer 0': " + source);
             }
-            definition.gates.push_back(parseGate(
+            definition.gates.push_back(parseLinkedRecord<Gate>(
                 std::string_view(line).substr(gatePrefix.size()),
+                sourceName,
+                "Gate"));
+            continue;
+        }
+
+        if (line.starts_with(platePrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Plate metadata must appear before '@layer 0': " + source);
+            }
+            definition.plates.push_back(parsePlate(
+                std::string_view(line).substr(platePrefix.size()),
                 sourceName));
+            continue;
+        }
+
+        if (line.starts_with(rotatorPrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Rotator metadata must appear before '@layer 0': " + source);
+            }
+            definition.rotators.push_back(parseLinkedRecord<Rotator>(
+                std::string_view(line).substr(rotatorPrefix.size()),
+                sourceName,
+                "Rotator"));
             continue;
         }
 
@@ -741,18 +894,9 @@ Level::Definition Level::parseDefinition(
         }
     }
 
-    std::ranges::sort(definition.gates, {}, [](const Gate& gate) {
-        return std::array { gate.cell.z, gate.cell.y, gate.cell.x };
-    });
-    for (std::size_t i = 0; i < definition.gates.size(); ++i) {
-        validateGateRecord(definition.gates[i], sourceName);
-        if (i > 0 &&
-            definition.gates[i - 1].cell == definition.gates[i].cell) {
-            throw std::runtime_error(
-                "Level contains more than one gate record at the same cell: " +
-                source);
-        }
-    }
+    canonicalizeLinkedRecords(definition.gates, sourceName, "Gate");
+    canonicalizeLinkedRecords(definition.rotators, sourceName, "Rotator");
+    canonicalizePlates(definition.plates, sourceName);
 
     return definition;
 }
@@ -772,7 +916,9 @@ std::vector<std::string> Level::serializeDefinition(
         !definition.waterLayer &&
         definition.decorations.empty() &&
         definition.selectors.empty() &&
-        definition.gates.empty()) {
+        definition.gates.empty() &&
+        definition.rotators.empty() &&
+        definition.plates.empty()) {
         return definition.layers.front();
     }
 
@@ -797,7 +943,22 @@ std::vector<std::string> Level::serializeDefinition(
         return std::array { gate.cell.z, gate.cell.y, gate.cell.x };
     });
     for (const Gate& gate : gates) {
-        lines.push_back(serializeGate(gate));
+        lines.push_back(serializeLinkedRecord(gate, gatePrefix, "Gate"));
+    }
+    std::vector<Rotator> rotators = definition.rotators;
+    std::ranges::sort(rotators, {}, [](const Rotator& rotator) {
+        return std::array { rotator.cell.z, rotator.cell.y, rotator.cell.x };
+    });
+    for (const Rotator& rotator : rotators) {
+        lines.push_back(
+            serializeLinkedRecord(rotator, rotatorPrefix, "Rotator"));
+    }
+    std::vector<Plate> plates = definition.plates;
+    std::ranges::sort(plates, {}, [](const Plate& plate) {
+        return std::array { plate.cell.z, plate.cell.y, plate.cell.x };
+    });
+    for (const Plate& plate : plates) {
+        lines.push_back(serializePlate(plate));
     }
     for (const Decoration& decoration : definition.decorations) {
         lines.push_back(serializeDecoration(decoration));
@@ -805,7 +966,9 @@ std::vector<std::string> Level::serializeDefinition(
     if (definition.character || definition.waterLayer ||
         !definition.decorations.empty() ||
         !definition.selectors.empty() ||
-        !definition.gates.empty()) {
+        !definition.gates.empty() ||
+        !definition.rotators.empty() ||
+        !definition.plates.empty()) {
         lines.emplace_back();
     }
     for (size_t layer = 0; layer < definition.layers.size(); ++layer) {
@@ -842,6 +1005,8 @@ Level Level::loadFromDefinition(
         definition.decorations,
         definition.selectors,
         definition.gates,
+        definition.rotators,
+        definition.plates,
         definition.character.value_or(CharacterType::Rogue));
 }
 
@@ -852,6 +1017,8 @@ Level Level::loadFromLayers(
     const std::vector<Decoration>& decorations,
     const std::vector<ScreenSelector>& selectors,
     const std::vector<Gate>& gates,
+    const std::vector<Rotator>& rotators,
+    const std::vector<Plate>& plates,
     CharacterType selectedCharacter)
 {
     const std::string source(sourceName);
@@ -890,17 +1057,11 @@ Level Level::loadFromLayers(
         }
     }
     level.gates_ = gates;
-    std::ranges::sort(level.gates_, {}, [](const Gate& gate) {
-        return std::array { gate.cell.z, gate.cell.y, gate.cell.x };
-    });
-    for (std::size_t i = 0; i < level.gates_.size(); ++i) {
-        validateGateRecord(level.gates_[i], sourceName);
-        if (i > 0 && level.gates_[i - 1].cell == level.gates_[i].cell) {
-            throw std::runtime_error(
-                "Level contains more than one gate record at the same cell: " +
-                source);
-        }
-    }
+    canonicalizeLinkedRecords(level.gates_, sourceName, "Gate");
+    level.rotators_ = rotators;
+    canonicalizeLinkedRecords(level.rotators_, sourceName, "Rotator");
+    level.coveredPlates_ = plates;
+    canonicalizePlates(level.coveredPlates_, sourceName);
     for (const auto& layer : sourceLayers) {
         level.height_ = std::max(level.height_, static_cast<uint32_t>(layer.size()));
         for (const std::string& row : layer) {
@@ -915,6 +1076,7 @@ Level Level::loadFromLayers(
     level.tiles_.assign(
         static_cast<size_t>(level.width_) * level.height_ * level.depth_,
         TileType::Air);
+    std::size_t matchedCoveredPlates = 0;
 
     for (uint32_t z = 0; z < level.depth_; ++z) {
         const auto& layer = sourceLayers[z];
@@ -963,16 +1125,43 @@ Level Level::loadFromLayers(
                     level.enemyStarts_.push_back(position);
                 }
 
+                // A unit standing on a plate leaves the plate in the static
+                // grid; a mirror is static itself and covers the plate.
+                const auto covered = std::ranges::find(
+                    level.coveredPlates_, position, &Plate::cell);
+                if (covered != level.coveredPlates_.end()) {
+                    if (!tileTypeCanStandOnPlate(*tile)) {
+                        throw std::runtime_error(
+                            "A '@plate' record must lie beneath a unit or mirror, not '" +
+                            std::string(tileTypeName(*tile)) + "': " + source);
+                    }
+                    ++matchedCoveredPlates;
+                }
+                const std::optional<TileType> plate =
+                    covered != level.coveredPlates_.end()
+                    ? std::optional<TileType>(covered->tile)
+                    : (tileTypeIsPlate(*tile)
+                            ? std::optional<TileType>(*tile)
+                            : std::nullopt);
                 level.tiles_[tileIndex(x, y, z, level.width_, level.height_)] =
-                    tileTypeOccupiesLevelCell(*tile) ? TileType::Air : *tile;
-                if (*tile == TileType::PressurePlate) {
+                    tileTypeOccupiesLevelCell(*tile)
+                    ? plate.value_or(TileType::Air)
+                    : *tile;
+                if (plate == TileType::PressurePlate) {
                     level.pressurePlates_.push_back(position);
                 }
-                if (*tile == TileType::End) {
+                // An End under a mirror can never hold a hero, so it is not
+                // one of the Ends completion waits for.
+                if (plate == TileType::End && !tileTypeIsMirror(*tile)) {
                     level.ends_.push_back(position);
                 }
             }
         }
+    }
+
+    if (matchedCoveredPlates != level.coveredPlates_.size()) {
+        throw std::runtime_error(
+            "A '@plate' record must lie beneath a unit or mirror: " + source);
     }
 
     if (level.playerStarts_.empty()) {
@@ -995,28 +1184,44 @@ Level Level::loadFromLayers(
                 "Gate metadata cell must contain a Gate tile: " + source);
         }
         for (GridPosition3 plate : gate.pressurePlates) {
-            if (!level.inBounds(plate) ||
-                level.authoredTileAt(
-                    static_cast<uint32_t>(plate.x),
-                    static_cast<uint32_t>(plate.y),
-                    static_cast<uint32_t>(plate.z)) !=
-                    TileType::PressurePlate) {
+            if (level.plateAt(plate) != TileType::PressurePlate) {
                 throw std::runtime_error(
                     "Gate links must refer to Pressure tiles: " + source);
+            }
+        }
+    }
+    for (const Rotator& rotator : level.rotators_) {
+        if (!tileTypeIsRotator(
+                level.plateAt(rotator.cell).value_or(TileType::Air))) {
+            throw std::runtime_error(
+                "Rotator metadata cell must contain a Rotator tile: " + source);
+        }
+        for (GridPosition3 plate : rotator.pressurePlates) {
+            if (level.plateAt(plate) != TileType::PressurePlate) {
+                throw std::runtime_error(
+                    "Rotator links must refer to Pressure tiles: " + source);
             }
         }
     }
     for (uint32_t z = 0; z < level.depth_; ++z) {
         for (uint32_t y = 0; y < level.height_; ++y) {
             for (uint32_t x = 0; x < level.width_; ++x) {
-                if (level.authoredTileAt(x, y, z) == TileType::Gate &&
-                    level.gateAt({
-                        static_cast<int>(x),
-                        static_cast<int>(y),
-                        static_cast<int>(z),
-                    }) == nullptr) {
+                const GridPosition3 cell {
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(z),
+                };
+                const TileType authored = level.authoredTileAt(x, y, z);
+                if (authored == TileType::Gate &&
+                    level.gateAt(cell) == nullptr) {
                     throw std::runtime_error(
                         "Every Gate tile requires an '@gate' metadata record: " +
+                        source);
+                }
+                if (tileTypeIsRotator(level.plateAt(cell).value_or(authored)) &&
+                    level.rotatorAt(cell) == nullptr) {
+                    throw std::runtime_error(
+                        "Every Rotator tile requires an '@rotator' metadata record: " +
                         source);
                 }
             }
@@ -1143,6 +1348,50 @@ const Level::Gate* Level::gateForPressurePlate(GridPosition3 cell) const
             gate.pressurePlates.end();
     });
     return found == gates_.end() ? nullptr : &*found;
+}
+
+const Level::Rotator* Level::rotatorAt(GridPosition3 cell) const
+{
+    const auto found = std::ranges::find(rotators_, cell, &Rotator::cell);
+    return found == rotators_.end() ? nullptr : &*found;
+}
+
+const Level::Rotator* Level::rotatorForPressurePlate(GridPosition3 cell) const
+{
+    const auto found = std::ranges::find_if(
+        rotators_,
+        [cell](const Rotator& rotator) {
+            return std::ranges::find(rotator.pressurePlates, cell) !=
+                rotator.pressurePlates.end();
+        });
+    return found == rotators_.end() ? nullptr : &*found;
+}
+
+std::optional<TileType> Level::plateAt(GridPosition3 cell) const
+{
+    if (!inBounds(cell)) {
+        return std::nullopt;
+    }
+    const auto covered = std::ranges::find(coveredPlates_, cell, &Plate::cell);
+    if (covered != coveredPlates_.end()) {
+        return covered->tile;
+    }
+    const TileType tile = authoredTileAt(
+        static_cast<uint32_t>(cell.x),
+        static_cast<uint32_t>(cell.y),
+        static_cast<uint32_t>(cell.z));
+    return tileTypeIsPlate(tile) ? std::optional<TileType>(tile) : std::nullopt;
+}
+
+std::optional<Vec3> Level::pressurePlateLinkColor(GridPosition3 cell) const
+{
+    if (const Gate* gate = gateForPressurePlate(cell)) {
+        return gate->color;
+    }
+    if (const Rotator* rotator = rotatorForPressurePlate(cell)) {
+        return rotator->color;
+    }
+    return std::nullopt;
 }
 
 } // namespace sokoban

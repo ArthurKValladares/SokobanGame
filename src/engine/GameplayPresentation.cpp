@@ -296,8 +296,12 @@ void GameplayPresentation::advanceAnimations(float dt, const GameState& state)
         if (std::abs(dx) + std::abs(dy) <= 0.0001f) {
             continue;
         }
-        const Quat target =
-            quatFromAxisAngle({ 0.0f, 0.0f, 1.0f }, std::atan2(-dx, dy));
+        // Rotator plates turn an enemy's frame of reference: it keeps
+        // tracking the nearest hero, offset by the quarter turns applied.
+        const float rotatorYaw = static_cast<float>(
+            state.enemies[enemyIndex].quarterTurns) * (pi * 0.5f);
+        const Quat target = quatFromAxisAngle(
+            { 0.0f, 0.0f, 1.0f }, std::atan2(-dx, dy) + rotatorYaw);
         const float blend = config::enemyFacingSlerpSeconds <= 0.0f
             ? 1.0f
             : 1.0f - std::exp(
@@ -594,6 +598,32 @@ void GameplayPresentation::beginAction(
                 visual->facingQuarterTurns =
                     facingQuarterTurns(*action.facingDirection);
             }
+        }
+    }
+
+    // Heroes a rotator turns face their new direction from the start of the
+    // action; the frame builder unwinds the turn until the action completes,
+    // so the hero is seen turning rather than snapping.
+    const std::size_t turnedPlayerCount = std::min(
+        action.before.players.size(), action.after.players.size());
+    for (std::size_t index = 0; index < turnedPlayerCount; ++index) {
+        const int delta =
+            static_cast<int>(action.after.players[index].quarterTurns) -
+            static_cast<int>(action.before.players[index].quarterTurns);
+        if (delta == 0) {
+            continue;
+        }
+        const EntityTarget target = playerTarget(
+            action.before.players[index], index);
+        const auto visual = std::ranges::find_if(
+            players_,
+            [&](const PlayerVisual& candidate) {
+                return candidate.motion.target == target;
+            });
+        if (visual != players_.end()) {
+            visual->facingQuarterTurns = static_cast<uint32_t>(
+                ((static_cast<int>(visual->facingQuarterTurns) + delta) % 4 +
+                    4) % 4);
         }
     }
 }

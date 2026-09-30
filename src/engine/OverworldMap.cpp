@@ -649,6 +649,20 @@ void OverworldMap::composeScreenGrid(
             }
             composed.gates.push_back(std::move(translated));
         }
+        for (const Level::Rotator& authored : screen.definition.rotators) {
+            Level::Rotator translated = authored;
+            translated.cell = translate(screen, authored.cell);
+            for (GridPosition3& plate : translated.pressurePlates) {
+                plate = translate(screen, plate);
+            }
+            composed.rotators.push_back(std::move(translated));
+        }
+        for (const Level::Plate& authored : screen.definition.plates) {
+            composed.plates.push_back({
+                .cell = translate(screen, authored.cell),
+                .tile = authored.tile,
+            });
+        }
         for (const Level::ScreenSelector& authored : screen.definition.selectors) {
             if (nextRuntimeSelectorId == 0) {
                 throw std::runtime_error("overworld contains too many selectors");

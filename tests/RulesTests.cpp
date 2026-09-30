@@ -5,6 +5,7 @@
 
 #include "engine/Level.hpp"
 #include "engine/Rules.hpp"
+#include "engine/StateDelta.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -706,6 +707,373 @@ void testClosedGateBlocksMovementAndLinkedPlateOpensIt()
     CHECK(rules::cellAllowsEntity(level, state, cell(2, 0, 1)));
     const GameState passed = rules::step(level, state, MoveDirection::Right);
     CHECK(passed.players[0].cell == cell(2, 0, 1));
+}
+
+// Layer 1: plate at x=0, hero at x=2, rotator at x=4. A rock authored at x=5
+// is moved onto the rotator in the state.
+Level makeRotatorLevel(char rotatorTile, char unitTile = 'R')
+{
+    std::string row = "P C ";
+    row += rotatorTile;
+    row += unitTile;
+    return Level::loadFromDefinition({
+        .layers = {
+            { "......." },
+            { row },
+        },
+        .rotators = { Level::Rotator {
+            .cell = cell(4, 0, 1),
+            .pressurePlates = { cell(0, 0, 1) },
+        } },
+    }, "rotator level");
+}
+
+void testRotatorTurnsOccupantOncePerPress()
+{
+    TEST("rotatorTurnsOccupantOncePerPress");
+    const Level level = makeRotatorLevel(')');
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(4, 0, 1);
+    CHECK(!rules::isRotatorEngaged(level, state, level.rotators().front()));
+
+    state = rules::step(level, state, MoveDirection::Left);
+    CHECK(state.players[0].cell == cell(1, 0, 1));
+    CHECK(state.movables[0].quarterTurns == 0);
+
+    // Stepping onto the linked plate turns the rock a quarter turn.
+    state = rules::step(level, state, MoveDirection::Left);
+    CHECK(state.players[0].cell == cell(0, 0, 1));
+    CHECK(rules::isRotatorEngaged(level, state, level.rotators().front()));
+    CHECK(state.movables[0].quarterTurns == 1);
+    CHECK(state.movables[0].cell == cell(4, 0, 1));
+    CHECK(!rules::hasPendingMotion(level, state));
+
+    // Staying on the plate does not keep the rotator turning.
+    state = rules::step(level, state, MoveDirection::Left);
+    CHECK(state.players[0].cell == cell(0, 0, 1));
+    CHECK(state.movables[0].quarterTurns == 1);
+
+    // Stepping off and back on turns it again.
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.movables[0].quarterTurns == 1);
+    state = rules::step(level, state, MoveDirection::Left);
+    CHECK(state.movables[0].quarterTurns == 2);
+    for (int press = 0; press < 2; ++press) {
+        state = rules::step(level, state, MoveDirection::Right);
+        state = rules::step(level, state, MoveDirection::Left);
+    }
+    CHECK(state.movables[0].quarterTurns == 0);
+}
+
+void testCounterClockwiseRotatorAndPressedStart()
+{
+    TEST("counterClockwiseRotatorAndPressedStart");
+    const Level level = makeRotatorLevel('(');
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(4, 0, 1);
+    state.players[0].cell = cell(1, 0, 1);
+    state = rules::step(level, state, MoveDirection::Left);
+    CHECK(state.movables[0].quarterTurns == 3);
+
+    // A plate already pressed when a step begins does not fire the rotator.
+    GameState pressed = rules::initialState(level);
+    pressed.movables[0].cell = cell(4, 0, 1);
+    pressed.movables.push_back({
+        .id = 99,
+        .type = TileType::Rock,
+        .cell = cell(0, 0, 1),
+    });
+    pressed = rules::step(level, pressed, MoveDirection::Left);
+    CHECK(pressed.players[0].cell == cell(1, 0, 1));
+    CHECK(pressed.movables[0].quarterTurns == 0);
+
+    // An unlinked rotator never turns anything.
+    const Level unlinked = Level::loadFromDefinition({
+        .layers = { { "....." }, { "PC )R" } },
+        .rotators = { Level::Rotator { .cell = cell(3, 0, 1) } },
+    }, "unlinked rotator");
+    GameState idle = rules::initialState(unlinked);
+    idle.movables[0].cell = cell(3, 0, 1);
+    idle = rules::step(unlinked, idle, MoveDirection::Left);
+    CHECK(idle.players[0].cell == cell(0, 0, 1));
+    CHECK(idle.movables[0].quarterTurns == 0);
+}
+
+void testRotatedTurretReaimsAndFires()
+{
+    TEST("rotatedTurretReaimsAndFires");
+    // Clockwise: a north-facing turret turns east and shoots the enemy that
+    // was already standing in that line.
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "........" },
+            { "P C )n N" },
+        },
+        .rotators = { Level::Rotator {
+            .cell = cell(4, 0, 1),
+            .pressurePlates = { cell(0, 0, 1) },
+        } },
+    }, "turret rotator");
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(4, 0, 1);
+    state.players[0].cell = cell(1, 0, 1);
+    CHECK(rules::turretDirection(state.movables[0]) == MoveDirection::Up);
+    const rules::StepResult result =
+        rules::stepWithEvents(level, state, MoveDirection::Left);
+    CHECK(result.state.movables[0].quarterTurns == 1);
+    CHECK(rules::turretDirection(result.state.movables[0]) ==
+        MoveDirection::Right);
+    CHECK(result.state.enemies[0].dead);
+    CHECK(!result.state.players[0].dead);
+    CHECK(result.turretShots.size() == 1);
+    CHECK(result.turretShots.front().direction == MoveDirection::Right);
+    CHECK(result.turretShots.front().targetCell == cell(7, 0, 1));
+
+    // Counter-clockwise: the turret turns west, towards the hero who just
+    // pressed the plate.
+    const Level westward = Level::loadFromDefinition({
+        .layers = {
+            { "......" },
+            { "P C (n" },
+        },
+        .rotators = { Level::Rotator {
+            .cell = cell(4, 0, 1),
+            .pressurePlates = { cell(0, 0, 1) },
+        } },
+    }, "turret rotator west");
+    GameState west = rules::initialState(westward);
+    west.movables[0].cell = cell(4, 0, 1);
+    west.players[0].cell = cell(1, 0, 1);
+    west = rules::step(westward, west, MoveDirection::Left);
+    CHECK(rules::turretDirection(west.movables[0]) == MoveDirection::Left);
+    CHECK(west.players[0].dead);
+}
+
+void testRotatorTurnsHeroesAndEnemiesOutsideTheScope()
+{
+    TEST("rotatorTurnsHeroesAndEnemiesOutsideTheScope");
+    // The hero pushes a rock onto the plate; a second hero standing on the
+    // rotator is outside the step's scope but is still turned, because the
+    // action writes it.
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "......" },
+            { "PRC ) " },
+        },
+        .rotators = { Level::Rotator {
+            .cell = cell(4, 0, 1),
+            .pressurePlates = { cell(0, 0, 1) },
+        } },
+    }, "hero rotator");
+    GameState state = rules::initialState(level);
+    GameState::Player bystander;
+    bystander.id = 99;
+    bystander.controller = 99;
+    bystander.character = CharacterType::Rogue;
+    bystander.cell = cell(4, 0, 1);
+    state.players.push_back(bystander);
+    const rules::StepScope scope { .actors = { state.players[0].id } };
+    const GameState after = rules::scopedStep(
+        level, state, MoveDirection::Left, {}, scope);
+    CHECK(after.movables[0].cell == cell(0, 0, 1));
+    CHECK(after.players[0].cell == cell(1, 0, 1));
+    CHECK(after.players[1].cell == cell(4, 0, 1));
+    CHECK(after.players[1].quarterTurns == 1);
+    CHECK(after.players[0].quarterTurns == 0);
+
+    GameState enemyState = rules::initialState(level);
+    enemyState.enemies.push_back({ .id = 77, .cell = cell(4, 0, 1) });
+    const GameState enemyAfter =
+        rules::step(level, enemyState, MoveDirection::Left);
+    CHECK(enemyAfter.enemies[0].quarterTurns == 1);
+    CHECK(!enemyAfter.enemies[0].dead);
+}
+
+void testRotationHelpers()
+{
+    TEST("rotationHelpers");
+    CHECK(rules::rotateDirection(MoveDirection::Up, 1) == MoveDirection::Right);
+    CHECK(rules::rotateDirection(MoveDirection::Right, 1) == MoveDirection::Down);
+    CHECK(rules::rotateDirection(MoveDirection::Down, 1) == MoveDirection::Left);
+    CHECK(rules::rotateDirection(MoveDirection::Left, 1) == MoveDirection::Up);
+    CHECK(rules::rotateDirection(MoveDirection::Up, -1) == MoveDirection::Left);
+    CHECK(rules::rotateDirection(MoveDirection::Up, 6) == MoveDirection::Down);
+    CHECK(rules::addQuarterTurns(0, -1) == 3);
+    CHECK(rules::addQuarterTurns(3, 1) == 0);
+    CHECK(rules::addQuarterTurns(1, 6) == 3);
+    GameState::Movable rock { .type = TileType::Rock, .quarterTurns = 2 };
+    CHECK(!rules::turretDirection(rock));
+    GameState::Movable turret { .type = TileType::TurretWest, .quarterTurns = 3 };
+    CHECK(rules::turretDirection(turret) == MoveDirection::Down);
+}
+
+void testUnitsAuthoredOnPlatesUseThem()
+{
+    TEST("unitsAuthoredOnPlatesUseThem");
+    // A rock authored standing on a rotator is turned as soon as the linked
+    // plate is pressed.
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "......" },
+            { "P C R " },
+        },
+        .rotators = { Level::Rotator {
+            .cell = cell(4, 0, 1),
+            .pressurePlates = { cell(0, 0, 1) },
+        } },
+        .plates = { Level::Plate {
+            .cell = cell(4, 0, 1),
+            .tile = TileType::RotatorClockwise,
+        } },
+    }, "rock on rotator");
+    CHECK(level.tileAt(4, 0, 1) == TileType::RotatorClockwise);
+    GameState state = rules::initialState(level);
+    CHECK(state.movables[0].cell == cell(4, 0, 1));
+    state = rules::step(level, state, MoveDirection::Left);
+    state = rules::step(level, state, MoveDirection::Left);
+    CHECK(state.players[0].cell == cell(0, 0, 1));
+    CHECK(state.movables[0].quarterTurns == 1);
+
+    // A hero authored on an End has already finished; a rock authored on a
+    // pressure plate holds its gate open from the first frame.
+    const Level startsDone = Level::loadFromDefinition({
+        .layers = {
+            { "...." },
+            { "Q RG" },
+        },
+        .gates = { Level::Gate {
+            .cell = cell(3, 0, 1),
+            .pressurePlates = { cell(2, 0, 1) },
+        } },
+        .plates = {
+            Level::Plate { .cell = cell(0, 0, 1), .tile = TileType::End },
+            Level::Plate {
+                .cell = cell(2, 0, 1),
+                .tile = TileType::PressurePlate,
+            },
+        },
+    }, "units on end and plate");
+    CHECK(startsDone.ends().size() == 1);
+    CHECK(startsDone.pressurePlates().size() == 1);
+    const GameState opening = rules::initialState(startsDone);
+    CHECK(rules::isAtUnlockedEnd(startsDone, opening));
+    CHECK(rules::isGateOpen(startsDone, opening, startsDone.gates().front()));
+}
+
+void testMirrorOnRotatorTurnsAndReflectsDifferently()
+{
+    TEST("mirrorOnRotatorTurnsAndReflectsDifferently");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { ".....", ".....", ".....", ".....", "....." },
+            { "P C  ", "     ", "  1  ", "     ", "     " },
+        },
+        .rotators = { Level::Rotator {
+            .cell = cell(2, 2, 1),
+            .pressurePlates = { cell(0, 0, 1) },
+        } },
+        .plates = { Level::Plate {
+            .cell = cell(2, 2, 1),
+            .tile = TileType::RotatorClockwise,
+        } },
+    }, "mirror on rotator");
+    CHECK(level.tileAt(2, 2, 1) == TileType::MirrorNorthWest);
+    CHECK(level.plateAt(cell(2, 2, 1)) == TileType::RotatorClockwise);
+    GameState state = rules::initialState(level);
+    CHECK(rules::mirrorTileAt(level, state, cell(2, 2, 1)) ==
+        TileType::MirrorNorthWest);
+    // As authored, the hero north of the mirror is reflected west.
+    const std::optional<GameState> westward = rules::activateMirrors(level, state);
+    CHECK(westward && westward->players[0].cell == cell(0, 2, 1));
+
+    state = rules::step(level, state, MoveDirection::Left);
+    state = rules::step(level, state, MoveDirection::Left);
+    CHECK(state.players[0].cell == cell(0, 0, 1));
+    CHECK(rules::mirrorQuarterTurnsAt(state, cell(2, 2, 1)) == 1);
+    CHECK(rules::mirrorTileAt(level, state, cell(2, 2, 1)) ==
+        TileType::MirrorNorthEast);
+    CHECK(state.turnedMirrors.size() == 1);
+
+    // Turned clockwise, it now reflects the same hero east.
+    GameState north = state;
+    north.players[0].cell = cell(2, 0, 1);
+    const std::optional<GameState> eastward = rules::activateMirrors(level, north);
+    CHECK(eastward && eastward->players[0].cell == cell(4, 2, 1));
+
+    // Four presses bring it back to its authored orientation, and the list
+    // of turned mirrors is empty again.
+    for (int press = 0; press < 3; ++press) {
+        state = rules::step(level, state, MoveDirection::Right);
+        state = rules::step(level, state, MoveDirection::Left);
+    }
+    CHECK(state.turnedMirrors.empty());
+    CHECK(rules::rotateMirrorTile(TileType::MirrorSouthWest, 1) ==
+        TileType::MirrorNorthWest);
+    CHECK(rules::rotateMirrorTile(TileType::MirrorNorthWest, -1) ==
+        TileType::MirrorSouthWest);
+    CHECK(rules::rotateMirrorTile(TileType::Rock, 1) == TileType::Rock);
+}
+
+void testMirrorOnPressurePlateHoldsItPressed()
+{
+    TEST("mirrorOnPressurePlateHoldsItPressed");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "......" },
+            { "C 1G)R" },
+        },
+        .gates = { Level::Gate {
+            .cell = cell(3, 0, 1),
+            .pressurePlates = { cell(2, 0, 1) },
+        } },
+        .rotators = { Level::Rotator {
+            .cell = cell(4, 0, 1),
+            .pressurePlates = { cell(2, 0, 1) },
+        } },
+        .plates = { Level::Plate {
+            .cell = cell(2, 0, 1),
+            .tile = TileType::PressurePlate,
+        } },
+    }, "mirror on pressure plate");
+    GameState state = rules::initialState(level);
+    CHECK(rules::isPressurePlateActive(level, state, cell(2, 0, 1)));
+    CHECK(rules::isGateOpen(level, state, level.gates().front()));
+    // Held from the start, so the linked rotator never fires.
+    state.movables[0].cell = cell(4, 0, 1);
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.movables[0].quarterTurns == 0);
+}
+
+void testStateDeltaCarriesMirrorTurns()
+{
+    TEST("stateDeltaCarriesMirrorTurns");
+    GameState before;
+    before.players.push_back({ .id = 1, .cell = cell(0, 0, 1) });
+    rules::setMirrorQuarterTurns(before, cell(3, 0, 1), 2);
+    GameState after = before;
+    after.players[0].cell = cell(1, 0, 1);
+    rules::setMirrorQuarterTurns(after, cell(3, 0, 1), 3);
+    rules::setMirrorQuarterTurns(after, cell(1, 1, 1), 1);
+    rules::setMirrorQuarterTurns(after, cell(0, 1, 1), 2);
+    CHECK(after.turnedMirrors.size() == 3);
+    // Sorted by layer, then row, then column.
+    CHECK(after.turnedMirrors[0].cell == cell(3, 0, 1));
+    CHECK(after.turnedMirrors[1].cell == cell(0, 1, 1));
+    CHECK(after.turnedMirrors[2].cell == cell(1, 1, 1));
+
+    const StateDelta delta = StateDelta::between(before, after);
+    CHECK(delta.mirrors.size() == 3);
+    CHECK(delta.changedEntityCount() == 1);
+    GameState applied = before;
+    delta.applyTo(applied);
+    CHECK(applied == after);
+    delta.inverted().applyTo(applied);
+    CHECK(applied == before);
+
+    GameState reset = after;
+    rules::setMirrorQuarterTurns(reset, cell(1, 1, 1), 0);
+    CHECK(reset.turnedMirrors.size() == 2);
+    CHECK(rules::mirrorQuarterTurnsAt(reset, cell(1, 1, 1)) == 0);
 }
 
 void testPlayerCannotWalkIntoWater()
@@ -1749,6 +2117,15 @@ int main()
     testSlideMomentumOverridesInput();
     testPressurePlatesDoNotLockEnd();
     testClosedGateBlocksMovementAndLinkedPlateOpensIt();
+    testRotatorTurnsOccupantOncePerPress();
+    testCounterClockwiseRotatorAndPressedStart();
+    testRotatedTurretReaimsAndFires();
+    testRotatorTurnsHeroesAndEnemiesOutsideTheScope();
+    testRotationHelpers();
+    testUnitsAuthoredOnPlatesUseThem();
+    testMirrorOnRotatorTurnsAndReflectsDifferently();
+    testMirrorOnPressurePlateHoldsItPressed();
+    testStateDeltaCarriesMirrorTurns();
     testPlayerCannotWalkIntoWater();
     testPlayerCanSlideIntoWater();
     testRockFillsWater();

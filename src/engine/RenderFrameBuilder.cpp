@@ -3,6 +3,7 @@
 #include "engine/AnimationCatalog.hpp"
 #include "engine/GateEffect.hpp"
 #include "engine/RenderFrameParts.hpp"
+#include "engine/RotatorVisuals.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
@@ -62,6 +63,9 @@ struct StaticRenderCell {
     float baseElevation = 0.0f;
     float height = 0.0f;
     uint32_t modelRotationQuarterTurns = 0;
+    // Extra yaw on top of the tile's own orientation, e.g. a mirror part-way
+    // through a rotator's quarter turn.
+    float modelRotationOffsetRadians = 0.0f;
     std::optional<Vec4> colorOverride;
 };
 
@@ -219,7 +223,9 @@ void appendStaticTiles(
                 if (cell.tile == TileType::Air ||
                     cell.tile == TileType::Ladder ||
                     cell.tile == TileType::Water ||
-                    cell.tile == TileType::Gate) {
+                    cell.tile == TileType::Gate ||
+                    tileTypeIsRotator(cell.tile)) {
+                    // Gates and rotators are drawn by their own passes.
                     continue;
                 }
                 RenderFrameData::Tile renderTile {
@@ -245,9 +251,10 @@ void appendStaticTiles(
                     .model = manifest.modelForTile(cell.tile),
                     .modelRotationQuarterTurns = cell.modelRotationQuarterTurns,
                     .modelRotationOffsetRadians =
-                        tileTypeIsMirror(cell.tile)
-                        ? config::mirrorModelRotationOffsetRadians
-                        : 0.0f,
+                        cell.modelRotationOffsetRadians +
+                        (tileTypeIsMirror(cell.tile)
+                                ? config::mirrorModelRotationOffsetRadians
+                                : 0.0f),
                     // Procedural ground tops blend grass/rock through the
                     // splat map; modelled tiles keep their own materials.
                     .effect = cell.tile == TileType::Ground
@@ -266,6 +273,96 @@ void appendStaticTiles(
 float yawRadians(Quat orientation)
 {
     return 2.0f * std::atan2(orientation.z, orientation.w);
+}
+
+// How far the in-flight actions have progressed, eased. There is no single
+// action clock once actions overlap, so this follows the furthest-along
+// moving entity; gates fade and rotators turn on it.
+float inFlightActionProgress(const RenderFrameBuilder::GameplayInput& input)
+{
+    float actionProgress = 0.0f;
+    const auto includeProgress = [&](const GameplayPresentation::EntityVisual& visual) {
+        if (visual.moving && visual.animationDuration > 0.0f) {
+            actionProgress = std::max(
+                actionProgress,
+                std::clamp(
+                    visual.animationElapsed / visual.animationDuration,
+                    0.0f,
+                    1.0f));
+        }
+    };
+    for (const GameplayPresentation::PlayerVisual& player :
+         input.presentation.players()) {
+        includeProgress(player.motion);
+    }
+    for (const GameplayPresentation::EntityVisual& movable :
+         input.presentation.movables()) {
+        includeProgress(movable);
+    }
+    for (const GameplayPresentation::EnemyVisual& enemy :
+         input.presentation.enemies()) {
+        includeProgress(enemy.motion);
+    }
+    return actionProgress * actionProgress * (3.0f - 2.0f * actionProgress);
+}
+
+// Signed clockwise quarter turns from `from` to `to`: -1, 0, 1 or 2.
+int quarterTurnDelta(uint8_t from, uint8_t to)
+{
+    const int delta = ((static_cast<int>(to) - static_cast<int>(from)) % 4 + 4) % 4;
+    return delta == 3 ? -1 : delta;
+}
+
+template <typename Entity>
+int quarterTurnDeltaAt(
+    const std::vector<Entity>& committed,
+    const std::vector<Entity>& projected,
+    std::size_t index)
+{
+    if (index >= committed.size() || index >= projected.size()) {
+        return 0;
+    }
+    return quarterTurnDelta(
+        committed[index].quarterTurns, projected[index].quarterTurns);
+}
+
+// The quarter turns an in-flight action is applying to whatever will stand on
+// `cell` once it commits. Zero when nothing there is being turned.
+int quarterTurnsInFlightAt(
+    const RenderFrameBuilder::GameplayInput& input,
+    GridPosition3 cell)
+{
+    const GameState& committed = input.state;
+    const GameState& projected = input.projectedState;
+    for (std::size_t i = 0; i < projected.players.size(); ++i) {
+        if (projected.players[i].cell == cell && !projected.players[i].dead) {
+            if (const int delta = quarterTurnDeltaAt(
+                    committed.players, projected.players, i)) {
+                return delta;
+            }
+        }
+    }
+    for (std::size_t i = 0; i < projected.movables.size(); ++i) {
+        const GameState::Movable& movable = projected.movables[i];
+        if (movable.cell == cell && !movable.fallen && !movable.dead) {
+            if (const int delta = quarterTurnDeltaAt(
+                    committed.movables, projected.movables, i)) {
+                return delta;
+            }
+        }
+    }
+    for (std::size_t i = 0; i < projected.enemies.size(); ++i) {
+        const GameState::Enemy& enemy = projected.enemies[i];
+        if (enemy.cell == cell && !enemy.fallen && !enemy.dead) {
+            if (const int delta = quarterTurnDeltaAt(
+                    committed.enemies, projected.enemies, i)) {
+                return delta;
+            }
+        }
+    }
+    return quarterTurnDelta(
+        rules::mirrorQuarterTurnsAt(committed, cell),
+        rules::mirrorQuarterTurnsAt(projected, cell));
 }
 
 uint64_t actorAnimationInstance(EntityTarget target)
@@ -516,6 +613,52 @@ void appendGameplayWaterAndShorelines(
     }
 }
 
+// Units standing on a plate leave it in the level grid, where the static pass
+// draws it. A mirror is itself a static tile, so a plate authored beneath one
+// is drawn here. Rotators draw from their records and need nothing extra.
+void appendMirrorCoveredPlates(
+    RenderFrameData& frame,
+    const RenderFrameBuilder::GameplayInput& input,
+    bool endUnlocked)
+{
+    const float size = input.settings.geometry.surfaceEntityWidthDepth;
+    const float offset = (1.0f - size) * 0.5f;
+    for (const Level::Plate& plate : input.level.coveredPlates()) {
+        const GridPosition3 cell = plate.cell;
+        if (tileTypeIsRotator(plate.tile) ||
+            (input.visibleCell && !input.visibleCell(cell)) ||
+            !tileTypeIsMirror(input.level.tileAt(
+                static_cast<uint32_t>(cell.x),
+                static_cast<uint32_t>(cell.y),
+                static_cast<uint32_t>(cell.z)))) {
+            continue;
+        }
+        Vec4 color = tileColor(
+            plate.tile, plate.tile != TileType::End || endUnlocked);
+        if (plate.tile == TileType::PressurePlate) {
+            // The mirror holds the plate pressed.
+            if (const std::optional<Vec3> linkColor =
+                    input.level.pressurePlateLinkColor(cell)) {
+                color = { linkColor->x, linkColor->y, linkColor->z, 1.0f };
+            }
+        }
+        RenderFrameData::Tile renderTile {
+            .cell = cell,
+            .position = {
+                static_cast<float>(cell.x) + offset,
+                static_cast<float>(cell.y) + offset,
+            },
+            .size = { size, size },
+            .color = color,
+            .baseElevation = static_cast<float>(cell.z),
+            .height = input.settings.geometry.surfaceEntityHeight,
+            .model = input.manifest.modelForTile(plate.tile),
+        };
+        applyTileScale(renderTile, input.settings.tileScale(plate.tile));
+        frame.tiles.push_back(renderTile);
+    }
+}
+
 void appendGameplayWorld(
     RenderFrameData& frame,
     const RenderFrameBuilder::GameplayInput& input)
@@ -525,6 +668,7 @@ void appendGameplayWorld(
         input.presentation.players().at(primaryPlayerIndex(input));
     const auto& movableVisuals = input.presentation.movables();
     const bool endUnlocked = rules::isEndUnlocked(input.level, state);
+    const float turnProgress = inFlightActionProgress(input);
 
     frame.tiles.reserve(
         static_cast<std::size_t>(input.level.width()) *
@@ -583,15 +727,29 @@ void appendGameplayWorld(
                 input.settings.geometry.surfaceEntityHeight,
                 input.settings.geometry.surfaceEntityWidthDepth,
                 primaryPlayerVisual.facingQuarterTurns);
+            if (tileTypeIsMirror(cell.tile)) {
+                // Rotators turn mirrors; animate towards the projected turn.
+                const TileType turned =
+                    rules::mirrorTileAt(input.level, state, position)
+                        .value_or(cell.tile);
+                cell.modelRotationQuarterTurns =
+                    mirrorOrientationQuarterTurns(turned).value_or(0);
+                cell.modelRotationOffsetRadians =
+                    static_cast<float>(quarterTurnDelta(
+                        rules::mirrorQuarterTurnsAt(state, position),
+                        rules::mirrorQuarterTurnsAt(
+                            input.projectedState, position))) *
+                    (pi * 0.5f) * turnProgress;
+            }
             if (cell.tile == TileType::PressurePlate) {
-                if (const Level::Gate* gate =
-                        input.level.gateForPressurePlate(position)) {
+                if (const std::optional<Vec3> linkColor =
+                        input.level.pressurePlateLinkColor(position)) {
                     const float strength = rules::isPressurePlateActive(
-                        state, position) ? 1.0f : 0.42f;
+                        input.level, state, position) ? 1.0f : 0.42f;
                     cell.colorOverride = Vec4 {
-                        gate->color.x * strength,
-                        gate->color.y * strength,
-                        gate->color.z * strength,
+                        linkColor->x * strength,
+                        linkColor->y * strength,
+                        linkColor->z * strength,
                         1.0f,
                     };
                 }
@@ -606,6 +764,7 @@ void appendGameplayWorld(
         [&](TileType tile) {
             return input.settings.tileScale(tile);
         });
+    appendMirrorCoveredPlates(frame, input, endUnlocked);
     appendDecorations(
         frame,
         input.level.decorations(),
@@ -623,31 +782,7 @@ void appendGameplayWorld(
         false,
         input.visibleCell);
 
-    float actionProgress = 0.0f;
-    const auto includeProgress = [&](const GameplayPresentation::EntityVisual& visual) {
-        if (visual.moving && visual.animationDuration > 0.0f) {
-            actionProgress = std::max(
-                actionProgress,
-                std::clamp(
-                    visual.animationElapsed / visual.animationDuration,
-                    0.0f,
-                    1.0f));
-        }
-    };
-    for (const GameplayPresentation::PlayerVisual& player :
-         input.presentation.players()) {
-        includeProgress(player.motion);
-    }
-    for (const GameplayPresentation::EntityVisual& movable :
-         input.presentation.movables()) {
-        includeProgress(movable);
-    }
-    for (const GameplayPresentation::EnemyVisual& enemy :
-         input.presentation.enemies()) {
-        includeProgress(enemy.motion);
-    }
-    const float smoothProgress = actionProgress * actionProgress *
-        (3.0f - 2.0f * actionProgress);
+    const float smoothProgress = inFlightActionProgress(input);
     for (const Level::Gate& gate : input.level.gates()) {
         if (input.visibleCell && !input.visibleCell(gate.cell)) {
             continue;
@@ -667,6 +802,35 @@ void appendGameplayWorld(
             input.manifest,
             closedOpacity,
             input.presentation.worldAnimationTimeSeconds());
+    }
+
+    for (const Level::Rotator& rotator : input.level.rotators()) {
+        if (input.visibleCell && !input.visibleCell(rotator.cell)) {
+            continue;
+        }
+        const TileType tile = input.level.tileAt(
+            static_cast<uint32_t>(rotator.cell.x),
+            static_cast<uint32_t>(rotator.cell.y),
+            static_cast<uint32_t>(rotator.cell.z));
+        const float brightness =
+            rules::isRotatorEngaged(input.level, state, rotator)
+            ? 1.0f
+            : config::rotatorIdleBrightness;
+        // The gear spins with whatever the in-flight action is turning on
+        // it. Twelve teeth make a quarter turn end on the same silhouette.
+        const int turning = quarterTurnsInFlightAt(input, rotator.cell);
+        appendRotatorPlate(
+            frame,
+            rotator.cell,
+            tile,
+            Vec4 {
+                rotator.color.x * brightness,
+                rotator.color.y * brightness,
+                rotator.color.z * brightness,
+                1.0f,
+            },
+            static_cast<float>(turning) * (pi * 0.5f) * smoothProgress,
+            input.manifest);
     }
 
     appendGameplayWaterAndShorelines(frame, input, state);
@@ -899,6 +1063,9 @@ void appendGameplayEntities(
     const std::size_t primaryIndex = primaryPlayerIndex(input);
     const EntityId activeController =
         rules::playerControllerId(state, primaryIndex);
+    // Rotator turns interpolate between the committed and projected states.
+    const float turnProgress = inFlightActionProgress(input);
+    const float quarterTurnRadians = pi * 0.5f;
 
     for (std::size_t playerIndex = 0;
          playerIndex < state.players.size() &&
@@ -961,7 +1128,13 @@ void appendGameplayEntities(
                 input.animations, animationUse, visual.clipTimeSeconds),
             .animationFallbackTimeSeconds = animationTimeFor(
                 input.animations, fallbackUse, visual.clipTimeSeconds),
+            // The presentation already faces the hero where a rotator is
+            // turning it; unwind that until the action has played out.
             .modelRotationQuarterTurns = visual.facingQuarterTurns,
+            .modelRotationOffsetRadians =
+                -static_cast<float>(quarterTurnDeltaAt(
+                    state.players, input.projectedState.players, playerIndex)) *
+                quarterTurnRadians * (1.0f - turnProgress),
         };
         applyTileScale(
             playerTile,
@@ -1076,11 +1249,17 @@ void appendGameplayEntities(
             .affectsCameraFit = false,
             .model = input.manifest.modelForTile(movable.type),
             .renderableId = visual.target.id,
-            .modelRotationQuarterTurns =
-                rules::turretDirectionForTile(movable.type)
-                ? facingQuarterTurns(
-                      *rules::turretDirectionForTile(movable.type))
-                : 0U,
+            // Turrets face their (possibly rotated) firing direction; other
+            // movables show the quarter turns rotators have applied.
+            .modelRotationQuarterTurns = rules::turretDirection(movable)
+                ? facingQuarterTurns(*rules::turretDirection(movable))
+                : static_cast<uint32_t>(movable.quarterTurns),
+            .modelRotationOffsetRadians =
+                static_cast<float>(quarterTurnDeltaAt(
+                    state.movables,
+                    input.projectedState.movables,
+                    movableIndex)) *
+                quarterTurnRadians * turnProgress,
         };
         applyTileScale(
             movableTile,

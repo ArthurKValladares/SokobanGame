@@ -58,6 +58,7 @@ struct StateDelta {
     [[nodiscard]] StateDelta inverted() const;
 
     [[nodiscard]] bool empty() const;
+    // Entities only; mirror turns are not entities and have no ids.
     [[nodiscard]] std::size_t changedEntityCount() const;
     // Entity ids use players, movables, enemies order, matching the delta's
     // application order. Appending preserves that order and intentionally
@@ -68,9 +69,20 @@ struct StateDelta {
 
     bool operator==(const StateDelta&) const = default;
 
+    // Mirrors are not entities: they never move, and only their orientation
+    // can change. They are keyed by cell; zero means "as authored".
+    struct MirrorChange {
+        GridPosition3 cell {};
+        uint8_t before = 0;
+        uint8_t after = 0;
+
+        bool operator==(const MirrorChange&) const = default;
+    };
+
     std::vector<Change<GameState::Player>> players;
     std::vector<Change<GameState::Movable>> movables;
     std::vector<Change<GameState::Enemy>> enemies;
+    std::vector<MirrorChange> mirrors;
 };
 
 } // namespace sokoban

@@ -533,6 +533,97 @@ void LevelEditorDebugUi::syncDocumentPath(const LevelEditor& editor)
     filePathBuffer_ = editor.documentPath().string();
 }
 
+namespace {
+
+// Shared Gate/Rotator link editor: a device picker, its color, and one
+// checkbox per Pressure tile in the document. `apply` receives the edited
+// links and color only when something changed.
+template <typename Record, typename Apply>
+void drawPlateLinkAssignments(
+    const LevelEditor& editor,
+    const std::vector<Record>& records,
+    std::optional<std::size_t>& selectedIndex,
+    const char* kind,
+    const char* emptyHint,
+    Apply&& apply)
+{
+    ImGui::PushID(kind);
+    if (selectedIndex && *selectedIndex >= records.size()) {
+        selectedIndex.reset();
+    }
+    if (!selectedIndex && !records.empty()) {
+        selectedIndex = 0;
+    }
+    if (records.empty()) {
+        ImGui::TextDisabled("%s", emptyHint);
+        ImGui::PopID();
+        return;
+    }
+    const auto recordLabel = [&](const Record& record) {
+        return std::string(kind) + " (" + std::to_string(record.cell.x) + ", " +
+            std::to_string(record.cell.y) + ", " +
+            std::to_string(record.cell.z) + ")";
+    };
+    const std::string preview = recordLabel(records[*selectedIndex]);
+    if (ImGui::BeginCombo(kind, preview.c_str())) {
+        for (std::size_t index = 0; index < records.size(); ++index) {
+            const std::string label = recordLabel(records[index]);
+            if (ImGui::Selectable(label.c_str(), *selectedIndex == index)) {
+                selectedIndex = index;
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    const std::size_t recordIndex = *selectedIndex;
+    Record edited = records[recordIndex];
+    const std::string colorLabel = std::string(kind) + " / Plate Color";
+    bool changed = ImGui::ColorEdit3(colorLabel.c_str(), &edited.color.x);
+    std::vector<GridPosition3> pressurePlates;
+    const Level::LayerRows& layers = editor.documentLayers();
+    for (std::size_t z = 0; z < layers.size(); ++z) {
+        for (std::size_t y = 0; y < layers[z].size(); ++y) {
+            for (std::size_t x = 0; x < layers[z][y].size(); ++x) {
+                const GridPosition3 cell {
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(z),
+                };
+                // Includes pressure plates with something standing on them.
+                if (editor.documentPlateAt(cell) == TileType::PressurePlate) {
+                    pressurePlates.push_back(cell);
+                }
+            }
+        }
+    }
+    ImGui::Text("Linked Pressure Plates (%zu available)", pressurePlates.size());
+    for (GridPosition3 plate : pressurePlates) {
+        bool linked = std::ranges::find(edited.pressurePlates, plate) !=
+            edited.pressurePlates.end();
+        const std::string label =
+            "(" + std::to_string(plate.x) + ", " +
+            std::to_string(plate.y) + ", " +
+            std::to_string(plate.z) + ")##plate_" +
+            std::to_string(plate.x) + "_" +
+            std::to_string(plate.y) + "_" +
+            std::to_string(plate.z);
+        if (ImGui::Checkbox(label.c_str(), &linked)) {
+            changed = true;
+            if (linked) {
+                edited.pressurePlates.push_back(plate);
+            } else {
+                std::erase(edited.pressurePlates, plate);
+            }
+        }
+    }
+    if (changed) {
+        apply(recordIndex, std::move(edited.pressurePlates), edited.color);
+    }
+    ImGui::PopID();
+}
+
+} // namespace
+
 void LevelEditorDebugUi::drawTilePalette(
     LevelEditor& editor, const Callbacks& callbacks)
 {
@@ -613,87 +704,41 @@ void LevelEditorDebugUi::drawTilePalette(
 
     const std::string_view selectedName = tileTypeName(editor.selectedTile());
     ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
+    ImGui::TextWrapped(
+        "Plates (Pressure, End, Rotators) stack with units and mirrors: paint "
+        "one onto the other in either order. Erasing lifts the unit or mirror "
+        "off and leaves the plate.");
 
     ImGui::Separator();
     ImGui::TextUnformatted("Gate Assignments");
     ImGui::TextWrapped(
         "Each gate opens only while all of its linked pressure plates are "
         "occupied. Unlinked gates stay closed.");
-    const std::vector<Level::Gate>& gates = editor.gates();
-    if (selectedGateIndex_ && *selectedGateIndex_ >= gates.size()) {
-        selectedGateIndex_.reset();
-    }
-    if (!selectedGateIndex_ && !gates.empty()) {
-        selectedGateIndex_ = 0;
-    }
-    if (gates.empty()) {
-        ImGui::TextDisabled("Paint a Gate tile to configure it here.");
-    } else {
-        const auto gateLabel = [](const Level::Gate& gate) {
-            return "Gate (" + std::to_string(gate.cell.x) + ", " +
-                std::to_string(gate.cell.y) + ", " +
-                std::to_string(gate.cell.z) + ")";
-        };
-        const std::string preview = gateLabel(gates[*selectedGateIndex_]);
-        if (ImGui::BeginCombo("Gate", preview.c_str())) {
-            for (std::size_t index = 0; index < gates.size(); ++index) {
-                const std::string label = gateLabel(gates[index]);
-                if (ImGui::Selectable(
-                        label.c_str(), *selectedGateIndex_ == index)) {
-                    selectedGateIndex_ = index;
-                }
-            }
-            ImGui::EndCombo();
-        }
+    drawPlateLinkAssignments(
+        editor,
+        editor.gates(),
+        selectedGateIndex_,
+        "Gate",
+        "Paint a Gate tile to configure it here.",
+        [&](std::size_t index, std::vector<GridPosition3> plates, Vec3 color) {
+            (void)editor.updateGate(index, std::move(plates), color);
+        });
 
-        const std::size_t gateIndex = *selectedGateIndex_;
-        Level::Gate edited = gates[gateIndex];
-        bool changed = ImGui::ColorEdit3("Gate / Plate Color", &edited.color.x);
-        std::vector<GridPosition3> pressurePlates;
-        const Level::LayerRows& layers = editor.documentLayers();
-        for (std::size_t z = 0; z < layers.size(); ++z) {
-            for (std::size_t y = 0; y < layers[z].size(); ++y) {
-                for (std::size_t x = 0; x < layers[z][y].size(); ++x) {
-                    if (charToTileType(layers[z][y][x]) !=
-                        TileType::PressurePlate) {
-                        continue;
-                    }
-                    pressurePlates.push_back({
-                        static_cast<int>(x),
-                        static_cast<int>(y),
-                        static_cast<int>(z),
-                    });
-                }
-            }
-        }
-        ImGui::Text("Linked Pressure Plates (%zu available)", pressurePlates.size());
-        for (GridPosition3 plate : pressurePlates) {
-            bool linked = std::ranges::find(
-                edited.pressurePlates, plate) !=
-                edited.pressurePlates.end();
-            const std::string label =
-                "(" + std::to_string(plate.x) + ", " +
-                std::to_string(plate.y) + ", " +
-                std::to_string(plate.z) + ")##gate_plate_" +
-                std::to_string(plate.x) + "_" +
-                std::to_string(plate.y) + "_" +
-                std::to_string(plate.z);
-            if (ImGui::Checkbox(label.c_str(), &linked)) {
-                changed = true;
-                if (linked) {
-                    edited.pressurePlates.push_back(plate);
-                } else {
-                    std::erase(edited.pressurePlates, plate);
-                }
-            }
-        }
-        if (changed) {
-            (void)editor.updateGate(
-                gateIndex,
-                std::move(edited.pressurePlates),
-                edited.color);
-        }
-    }
+    ImGui::Separator();
+    ImGui::TextUnformatted("Rotator Assignments");
+    ImGui::TextWrapped(
+        "A rotator turns the unit standing on it a quarter turn each time all "
+        "of its linked pressure plates become occupied. Unlinked rotators "
+        "never turn.");
+    drawPlateLinkAssignments(
+        editor,
+        editor.rotators(),
+        selectedRotatorIndex_,
+        "Rotator",
+        "Paint a Rotator tile to configure it here.",
+        [&](std::size_t index, std::vector<GridPosition3> plates, Vec3 color) {
+            (void)editor.updateRotator(index, std::move(plates), color);
+        });
 
     // These pictures are screenshots of the real render, so they go stale when
     // models, materials or lighting change.

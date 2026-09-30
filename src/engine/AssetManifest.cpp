@@ -797,6 +797,16 @@ RenderTexture AssetManifest::textureIdByName(std::string_view name) const
     return found;
 }
 
+std::optional<RenderModel> AssetManifest::findModelIdByName(std::string_view name) const
+{
+    for (std::size_t i = 0; i < models_.size(); ++i) {
+        if (models_[i].name == name) {
+            return RenderModel { static_cast<uint32_t>(i + 1) };
+        }
+    }
+    return std::nullopt;
+}
+
 RenderTexture AssetManifest::findTextureIdByName(std::string_view name) const
 {
     for (std::size_t i = 0; i < textures_.size(); ++i) {

@@ -5,6 +5,7 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/Level.hpp"
 #include "engine/ParticleConfig.hpp"
+#include "engine/RotatorVisuals.hpp"
 #include "engine/TileTypes.hpp"
 
 #include <algorithm>
@@ -171,8 +172,24 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
                             config::gateParticleTextureName));
                     continue;
                 }
-                requirements.requireModel(
-                    manifest.modelForTile(level.tileAt(x, y, z)));
+                const TileType tile = level.tileAt(x, y, z);
+                requirements.requireModel(manifest.modelForTile(tile));
+                // A plate under a mirror is not in the grid; ask for it too.
+                const std::optional<TileType> plate = level.plateAt({
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(z),
+                });
+                if (plate && *plate != tile) {
+                    requirements.requireModel(manifest.modelForTile(*plate));
+                }
+                if (tileTypeIsRotator(plate.value_or(tile))) {
+                    if (const std::optional<RotatorModelParts> parts =
+                            rotatorModelParts(manifest, *plate)) {
+                        requirements.requireModel(parts->gear);
+                        requirements.requireModel(parts->icon);
+                    }
+                }
             }
         }
     }

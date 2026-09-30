@@ -93,6 +93,7 @@ private:
     std::string decorationRegistrationStatus_;
     std::optional<LevelEditor::Tool> selectedToolTab_;
     std::optional<std::size_t> selectedGateIndex_;
+    std::optional<std::size_t> selectedRotatorIndex_;
     int requestedWidth_ = 12;
     int requestedHeight_ = 8;
     std::optional<LevelEditor::LevelDirectory> pendingRenameLevel_;

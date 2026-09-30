@@ -17,6 +17,10 @@ enum class TileType {
     End,
     PressurePlate,
     Gate,
+    // Surface plates that turn whatever stands on them a quarter turn each
+    // time their linked pressure plates become fully pressed.
+    RotatorClockwise,
+    RotatorCounterClockwise,
     // Legacy generic player start. New puzzle documents author a concrete
     // Rogue, Knight, Druid, Witch, or Bard tile; overworld documents retain
     // this tile for backwards compatibility with their single rogue.
@@ -47,12 +51,37 @@ enum class TileType {
     Count,
 };
 
+// Behavioural traits shared by families of tiles. Combine with `|`.
+enum class TileProperty : uint32_t {
+    None = 0,
+    // A floor plate: a thin tile that units, and mirrors, may occupy. Plates
+    // may be authored with something already standing on them (see the
+    // `@plate` screen directive), and each kind reacts to its occupant: a
+    // pressure plate drives gates and rotators, a rotator turns what stands
+    // on it, and an End is where heroes finish.
+    Plate = 1U << 0U,
+};
+
+[[nodiscard]] constexpr TileProperty operator|(TileProperty left, TileProperty right)
+{
+    return static_cast<TileProperty>(
+        static_cast<uint32_t>(left) | static_cast<uint32_t>(right));
+}
+
+[[nodiscard]] constexpr bool hasProperty(TileProperty set, TileProperty property)
+{
+    return (static_cast<uint32_t>(set) & static_cast<uint32_t>(property)) ==
+        static_cast<uint32_t>(property) &&
+        property != TileProperty::None;
+}
+
 struct TileTypeDefinition {
     TileType type = TileType::Ground;
     char character = ' ';
     std::string_view name;
     Vec4 activeColor {};
     Vec4 inactiveColor {};
+    TileProperty properties = TileProperty::None;
 };
 
 inline constexpr auto tileTypeCount = static_cast<std::size_t>(TileType::Count);
@@ -60,9 +89,11 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::Air, ' ', "Air", { 0.0f, 0.0f, 0.0f, 0.0f } },
     TileTypeDefinition { TileType::Ground, '.', "Ground", { 0.82f, 0.82f, 0.84f, 1.0f } },
     TileTypeDefinition { TileType::Wall, '#', "Wall", { 0.62f, 0.32f, 0.09f, 1.0f } },
-    TileTypeDefinition { TileType::End, 'E', "End", { 1.0f, 0.05f, 0.04f, 1.0f }, { 0.38f, 0.04f, 0.04f, 1.0f } },
-    TileTypeDefinition { TileType::PressurePlate, 'P', "Pressure", { 0.18f, 0.18f, 0.18f, 1.0f } },
+    TileTypeDefinition { TileType::End, 'E', "End", { 1.0f, 0.05f, 0.04f, 1.0f }, { 0.38f, 0.04f, 0.04f, 1.0f }, TileProperty::Plate },
+    TileTypeDefinition { TileType::PressurePlate, 'P', "Pressure", { 0.18f, 0.18f, 0.18f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::Gate, 'G', "Gate", { 1.0f, 0.72f, 0.12f, 0.82f }, { 1.0f, 0.72f, 0.12f, 0.0f } },
+    TileTypeDefinition { TileType::RotatorClockwise, ')', "Rotator Clockwise", { 0.24f, 0.62f, 0.92f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::RotatorCounterClockwise, '(', "Rotator Counter-Clockwise", { 0.24f, 0.62f, 0.92f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::Player, 'C', "Player", { 0.0f, 1.0f, 0.15f, 1.0f } },
     TileTypeDefinition { TileType::Rogue, 'Q', "Rogue", { 0.0f, 1.0f, 0.15f, 1.0f } },
     TileTypeDefinition { TileType::Knight, 'K', "Knight", { 0.25f, 0.55f, 1.0f, 1.0f } },
@@ -93,16 +124,31 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] char tileTypeToChar(TileType type);
 [[nodiscard]] std::optional<TileType> charToTileType(char character);
 [[nodiscard]] std::string_view tileTypeName(TileType type);
+// Inverse of tileTypeName; empty for unknown names.
+[[nodiscard]] std::optional<TileType> tileTypeFromName(std::string_view name);
+[[nodiscard]] TileProperty tileTypeProperties(TileType type);
+[[nodiscard]] bool tileTypeHasProperty(TileType type, TileProperty property);
+// Pressure plates, rotators and Ends: see TileProperty::Plate.
+[[nodiscard]] bool tileTypeIsPlate(TileType type);
+// What may stand on a plate, including when a screen is authored that way:
+// every unit that occupies a level cell (heroes, rocks, ice, turrets,
+// enemies) and mirrors.
+[[nodiscard]] bool tileTypeCanStandOnPlate(TileType type);
 [[nodiscard]] bool tileTypeOccupiesLevelCell(TileType type);
 [[nodiscard]] bool tileTypeIsSolidBlock(TileType type);
 [[nodiscard]] bool tileTypeSupportsEntity(TileType type);
 [[nodiscard]] bool tileTypeAllowsEntity(TileType type);
+// Thin floor-level tiles drawn as flat slabs; currently exactly the plates.
 [[nodiscard]] bool tileTypeIsSurfaceEntity(TileType type);
 [[nodiscard]] bool tileTypeIsPlayerStart(TileType type);
 [[nodiscard]] bool tileTypeIsConveyor(TileType type);
 [[nodiscard]] bool tileTypeIsMirror(TileType type);
 [[nodiscard]] bool tileTypeIsTurret(TileType type);
 [[nodiscard]] bool tileTypeIsDecorative(TileType type);
+[[nodiscard]] bool tileTypeIsRotator(TileType type);
+// Signed quarter turns one activation applies: +1 clockwise, -1
+// counter-clockwise (seen from above). Empty for every other tile.
+[[nodiscard]] std::optional<int> rotatorQuarterTurns(TileType type);
 [[nodiscard]] bool tileTypeAffectsCameraFit(TileType type);
 // Clockwise quarter-turns from the north-west-facing model orientation.
 [[nodiscard]] std::optional<uint32_t> mirrorOrientationQuarterTurns(TileType type);

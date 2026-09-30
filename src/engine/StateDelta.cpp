@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <utility>
 
 namespace sokoban {
 namespace {
@@ -122,6 +123,31 @@ template <typename Entity>
     });
 }
 
+void collectMirrors(
+    const GameState& before,
+    const GameState& after,
+    std::vector<StateDelta::MirrorChange>& changes)
+{
+    const auto note = [&](GridPosition3 cell) {
+        if (std::ranges::any_of(changes, [&](const auto& change) {
+                return change.cell == cell;
+            })) {
+            return;
+        }
+        const uint8_t from = rules::mirrorQuarterTurnsAt(before, cell);
+        const uint8_t to = rules::mirrorQuarterTurnsAt(after, cell);
+        if (from != to) {
+            changes.push_back({ .cell = cell, .before = from, .after = to });
+        }
+    };
+    for (const GameState::TurnedMirror& mirror : before.turnedMirrors) {
+        note(mirror.cell);
+    }
+    for (const GameState::TurnedMirror& mirror : after.turnedMirrors) {
+        note(mirror.cell);
+    }
+}
+
 } // namespace
 
 StateDelta StateDelta::between(
@@ -132,6 +158,7 @@ StateDelta StateDelta::between(
     collect<EntityKind::Movable>(
         before.movables, after.movables, delta.movables);
     collect<EntityKind::Enemy>(before.enemies, after.enemies, delta.enemies);
+    collectMirrors(before, after, delta.mirrors);
     return delta;
 }
 
@@ -140,20 +167,34 @@ void StateDelta::applyTo(GameState& state) const
     apply<EntityKind::Player>(players, state.players);
     apply<EntityKind::Movable>(movables, state.movables);
     apply<EntityKind::Enemy>(enemies, state.enemies);
+    for (const MirrorChange& change : mirrors) {
+        rules::setMirrorQuarterTurns(state, change.cell, change.after);
+    }
 }
 
 StateDelta StateDelta::inverted() const
 {
+    std::vector<MirrorChange> invertedMirrors;
+    invertedMirrors.reserve(mirrors.size());
+    for (const MirrorChange& change : mirrors) {
+        invertedMirrors.push_back({
+            .cell = change.cell,
+            .before = change.after,
+            .after = change.before,
+        });
+    }
     return {
         .players = invert(players),
         .movables = invert(movables),
         .enemies = invert(enemies),
+        .mirrors = std::move(invertedMirrors),
     };
 }
 
 bool StateDelta::empty() const
 {
-    return players.empty() && movables.empty() && enemies.empty();
+    return players.empty() && movables.empty() && enemies.empty() &&
+        mirrors.empty();
 }
 
 std::size_t StateDelta::changedEntityCount() const

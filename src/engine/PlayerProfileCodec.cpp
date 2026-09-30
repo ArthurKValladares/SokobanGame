@@ -1,5 +1,6 @@
 #include "engine/PlayerProfile.hpp"
 
+#include "engine/Rules.hpp"
 #include "engine/render/RenderResolution.hpp"
 
 #include <nlohmann/json.hpp>
@@ -123,6 +124,22 @@ uint64_t unsignedIntegerProperty(
         fail(context, "property '" + std::string(key) + "' must not be negative");
     }
     return static_cast<uint64_t>(number);
+}
+
+// Rotator quarter turns were added without a format change: absent means the
+// unit was never turned, and the value is written only when non-zero, so
+// documents for screens without rotators are byte-for-byte unchanged.
+uint8_t quarterTurnsProperty(const Json& object, std::string_view context)
+{
+    if (!object.contains("quarterTurns")) {
+        return 0;
+    }
+    const uint64_t value =
+        unsignedIntegerProperty(object, "quarterTurns", context);
+    if (value > 3) {
+        fail(context, "property 'quarterTurns' must be between 0 and 3");
+    }
+    return static_cast<uint8_t>(value);
 }
 
 std::optional<int> optionalNonNegativeInteger(
@@ -269,7 +286,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
 {
     rejectUnknownProperties(
         value,
-        { "players", "movables", "enemies" },
+        { "players", "movables", "enemies", "turnedMirrors" },
         context);
     GameState state;
     const Json& players = requiredProperty(value, "players", context);
@@ -283,7 +300,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         const Json& item = players[i];
         rejectUnknownProperties(
             item,
-            { "id", "cell", "character", "controller", "dead", "drowned", "sliding" },
+            { "id", "cell", "character", "controller", "dead", "drowned", "sliding", "quarterTurns" },
             playerContext);
         std::optional<CharacterType> character;
         const Json& encodedCharacter =
@@ -312,6 +329,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
             .sliding = directionFromJson(
                 requiredProperty(item, "sliding", playerContext),
                 playerContext + ".sliding"),
+            .quarterTurns = quarterTurnsProperty(item, playerContext),
         });
     }
 
@@ -325,7 +343,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         const Json& item = movables[i];
         rejectUnknownProperties(
             item,
-            { "id", "type", "cell", "fallen", "dead", "sliding" },
+            { "id", "type", "cell", "fallen", "dead", "sliding", "quarterTurns" },
             movableContext);
         GameState::Movable movable;
         movable.id = unsignedIntegerProperty(item, "id", movableContext);
@@ -344,6 +362,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         movable.sliding = directionFromJson(
             requiredProperty(item, "sliding", movableContext),
             movableContext + ".sliding");
+        movable.quarterTurns = quarterTurnsProperty(item, movableContext);
         state.movables.push_back(movable);
     }
     const Json& enemies = requiredProperty(value, "enemies", context);
@@ -356,7 +375,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         const Json& item = enemies[i];
         rejectUnknownProperties(
             item,
-            { "id", "cell", "fallen", "dead", "sliding" },
+            { "id", "cell", "fallen", "dead", "sliding", "quarterTurns" },
             enemyContext);
         GameState::Enemy enemy {
             .id = unsignedIntegerProperty(item, "id", enemyContext),
@@ -370,7 +389,33 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
             enemy.sliding = directionFromJson(
                 item["sliding"], enemyContext + ".sliding");
         }
+        enemy.quarterTurns = quarterTurnsProperty(item, enemyContext);
         state.enemies.push_back(enemy);
+    }
+    // Written only when a rotator has turned a mirror.
+    if (value.contains("turnedMirrors")) {
+        const Json& mirrors = value["turnedMirrors"];
+        if (!mirrors.is_array()) {
+            fail(context, "property 'turnedMirrors' must be an array");
+        }
+        for (std::size_t i = 0; i < mirrors.size(); ++i) {
+            const std::string mirrorContext = std::string(context) +
+                ".turnedMirrors[" + std::to_string(i) + "]";
+            const Json& item = mirrors[i];
+            rejectUnknownProperties(
+                item, { "cell", "quarterTurns" }, mirrorContext);
+            const GridPosition3 cell = positionFromJson(
+                requiredProperty(item, "cell", mirrorContext),
+                mirrorContext + ".cell");
+            const uint8_t quarterTurns =
+                quarterTurnsProperty(item, mirrorContext);
+            if (quarterTurns == 0 ||
+                rules::mirrorQuarterTurnsAt(state, cell) != 0) {
+                fail(mirrorContext,
+                    "turned mirrors need distinct cells and 1-3 quarter turns");
+            }
+            rules::setMirrorQuarterTurns(state, cell, quarterTurns);
+        }
     }
     return state;
 }
@@ -393,6 +438,9 @@ OrderedJson gameStateToJson(const GameState& state)
                 ? OrderedJson(directionName(*player.sliding))
                 : OrderedJson(nullptr) },
         });
+        if (player.quarterTurns != 0) {
+            players.back()["quarterTurns"] = player.quarterTurns;
+        }
     }
     OrderedJson movables = OrderedJson::array();
     for (const GameState::Movable& movable : state.movables) {
@@ -406,6 +454,9 @@ OrderedJson gameStateToJson(const GameState& state)
                 ? OrderedJson(directionName(*movable.sliding))
                 : OrderedJson(nullptr) },
         });
+        if (movable.quarterTurns != 0) {
+            movables.back()["quarterTurns"] = movable.quarterTurns;
+        }
     }
     OrderedJson enemies = OrderedJson::array();
     for (const GameState::Enemy& enemy : state.enemies) {
@@ -418,12 +469,26 @@ OrderedJson gameStateToJson(const GameState& state)
                 ? OrderedJson(directionName(*enemy.sliding))
                 : OrderedJson(nullptr) },
         });
+        if (enemy.quarterTurns != 0) {
+            enemies.back()["quarterTurns"] = enemy.quarterTurns;
+        }
     }
-    return {
+    OrderedJson result {
         { "players", std::move(players) },
         { "movables", std::move(movables) },
         { "enemies", std::move(enemies) },
     };
+    if (!state.turnedMirrors.empty()) {
+        OrderedJson mirrors = OrderedJson::array();
+        for (const GameState::TurnedMirror& mirror : state.turnedMirrors) {
+            mirrors.push_back({
+                { "cell", positionToJson(mirror.cell) },
+                { "quarterTurns", mirror.quarterTurns },
+            });
+        }
+        result["turnedMirrors"] = std::move(mirrors);
+    }
+    return result;
 }
 
 Vec3 vec3FromJson(const Json& value, std::string_view context)

@@ -409,6 +409,11 @@ void testActiveScreenCheckpointRoundTrip()
     after.movables.front().dead = true;
     after.movables.front().sliding = sokoban::MoveDirection::Right;
     after.enemies.front().cell = { 5, 0, 1 };
+    // Rotator plates leave quarter turns on any unit.
+    after.players[0].quarterTurns = 3;
+    after.movables.front().quarterTurns = 1;
+    after.enemies.front().quarterTurns = 2;
+    after.turnedMirrors.push_back({ .cell = { 2, 2, 1 }, .quarterTurns = 3 });
 
     sokoban::GameplaySession::Action move {
         .before = before,
@@ -508,6 +513,34 @@ void testActiveScreenCheckpointRoundTrip()
             !current["progress"]["activeScreen"]["session"]["undoStack"][0]
                 .contains("before"),
         "current undo schema stores the chain base without duplicate before states");
+
+    const nlohmann::json& checkpointState =
+        current["progress"]["activeScreen"]["session"]["state"];
+    CHECK_MESSAGE(checkpointState["movables"][0]["quarterTurns"].get<int>() == 1 &&
+            checkpointState["players"][0]["quarterTurns"].get<int>() == 3 &&
+            checkpointState["enemies"][0]["quarterTurns"].get<int>() == 2,
+        "checkpoint state persists rotator quarter turns");
+    CHECK_MESSAGE(!checkpointState["players"][1].contains("quarterTurns"),
+        "unturned units omit quarter turns");
+    CHECK_MESSAGE(checkpointState["turnedMirrors"].size() == 1 &&
+            checkpointState["turnedMirrors"][0]["quarterTurns"].get<int>() == 3,
+        "checkpoint state persists turned mirrors");
+
+    nlohmann::json duplicateMirror = current;
+    auto& duplicateMirrors = duplicateMirror["progress"]["activeScreen"]
+        ["session"]["state"]["turnedMirrors"];
+    const nlohmann::json firstMirror = duplicateMirrors[0];
+    duplicateMirrors.push_back(firstMirror);
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(duplicateMirror.dump());
+    }, "checkpoint rejects a mirror turned twice");
+
+    nlohmann::json badQuarterTurns = current;
+    badQuarterTurns["progress"]["activeScreen"]["session"]["state"]
+        ["movables"][0]["quarterTurns"] = 4;
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(badQuarterTurns.dump());
+    }, "checkpoint rejects out-of-range quarter turns");
 
     nlohmann::json missingUndoBase = current;
     missingUndoBase["progress"]["activeScreen"]["session"].erase(

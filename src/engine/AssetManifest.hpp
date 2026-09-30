@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -206,6 +207,9 @@ public:
     // Optional lookup for textures a feature can render without; returns
     // noTexture when the manifest does not declare `name`.
     [[nodiscard]] RenderTexture findTextureIdByName(std::string_view name) const;
+    // Optional lookup for models a feature can draw without; empty when the
+    // manifest does not declare `name`.
+    [[nodiscard]] std::optional<RenderModel> findModelIdByName(std::string_view name) const;
     [[nodiscard]] const Model& model(RenderModel id) const; // throws for cube/out of range
     [[nodiscard]] const Animation& animation(RenderAnimation id) const; // throws for none/out of range
 

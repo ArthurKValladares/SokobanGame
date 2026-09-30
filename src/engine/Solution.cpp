@@ -259,6 +259,40 @@ std::uint64_t levelDigest(const Level::Definition& definition)
         definition.character
             ? std::string(characterTypeName(*definition.character))
             : std::string("default"));
+    // Rotator links decide which plates turn which units. Hashed only when
+    // present so digests of screens without rotators stay unchanged.
+    std::vector<Level::Rotator> rotators = definition.rotators;
+    const auto cellOrder = [](GridPosition3 cell) {
+        return std::array { cell.z, cell.y, cell.x };
+    };
+    std::ranges::sort(rotators, {}, [&](const Level::Rotator& rotator) {
+        return cellOrder(rotator.cell);
+    });
+    for (Level::Rotator& rotator : rotators) {
+        std::ranges::sort(rotator.pressurePlates, {}, cellOrder);
+        std::string text = "@rotator " + std::to_string(rotator.cell.x) +
+            "," + std::to_string(rotator.cell.y) + "," +
+            std::to_string(rotator.cell.z) + ":";
+        for (GridPosition3 plate : rotator.pressurePlates) {
+            text += " " + std::to_string(plate.x) + "," +
+                std::to_string(plate.y) + "," + std::to_string(plate.z);
+        }
+        hashBytes(hash, text + "\n");
+    }
+    // Plates authored beneath units change what the screen does from its
+    // first step; hashed only when present, like rotators.
+    std::vector<Level::Plate> plates = definition.plates;
+    std::ranges::sort(plates, {}, [&](const Level::Plate& plate) {
+        return cellOrder(plate.cell);
+    });
+    for (const Level::Plate& plate : plates) {
+        hashBytes(
+            hash,
+            "@plate " + std::to_string(plate.cell.x) + "," +
+                std::to_string(plate.cell.y) + "," +
+                std::to_string(plate.cell.z) + ":" +
+                std::string(tileTypeName(plate.tile)) + "\n");
+    }
     return hash;
 }
 

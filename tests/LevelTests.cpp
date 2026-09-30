@@ -4,11 +4,13 @@
 
 #include "engine/Level.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -291,6 +293,231 @@ void testGateMetadataRoundTripAndValidation()
     }, "Pressure tiles");
 }
 
+void testRotatorMetadataRoundTripAndValidation()
+{
+    TEST("rotatorMetadataRoundTripAndValidation");
+    const Level::Definition definition {
+        .layers = {
+            { "....." },
+            { "CP)(G" },
+        },
+        .gates = { Level::Gate {
+            .cell = { 4, 0, 1 },
+            .pressurePlates = { { 1, 0, 1 } },
+        } },
+        .rotators = {
+            Level::Rotator {
+                .cell = { 2, 0, 1 },
+                .pressurePlates = { { 1, 0, 1 } },
+                .color = { 0.9f, 0.3f, 0.2f },
+            },
+            Level::Rotator { .cell = { 3, 0, 1 } },
+        },
+    };
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition(definition);
+    CHECK(std::ranges::count_if(serialized, [](const std::string& line) {
+        return line.starts_with("@rotator ");
+    }) == 2);
+    const Level::Definition parsed =
+        Level::parseDefinition(serialized, "rotator round trip");
+    CHECK(parsed == definition);
+
+    const Level level = Level::loadFromDefinition(parsed, "rotator level");
+    CHECK(tileTypeToChar(TileType::RotatorClockwise) == ')');
+    CHECK(tileTypeToChar(TileType::RotatorCounterClockwise) == '(');
+    CHECK(charToTileType(')') == TileType::RotatorClockwise);
+    CHECK(charToTileType('(') == TileType::RotatorCounterClockwise);
+    CHECK(rotatorQuarterTurns(TileType::RotatorClockwise) == 1);
+    CHECK(rotatorQuarterTurns(TileType::RotatorCounterClockwise) == -1);
+    CHECK(!rotatorQuarterTurns(TileType::PressurePlate));
+    CHECK(level.rotators().size() == 2);
+    CHECK(level.rotatorAt({ 2, 0, 1 }) == &level.rotators().front());
+    CHECK(level.rotatorForPressurePlate({ 1, 0, 1 }) ==
+        &level.rotators().front());
+    CHECK(level.isWalkable({ 2, 0, 1 }));
+    CHECK(level.isWalkable({ 3, 0, 1 }));
+    // A plate linked to both a gate and a rotator takes the gate's color.
+    CHECK(level.pressurePlateLinkColor({ 1, 0, 1 }) ==
+        std::optional<Vec3>(level.gates().front().color));
+
+    checkThrowsContaining([] {
+        (void)Level::loadFromDefinition({
+            .layers = {
+                { "..." },
+                { "C )" },
+            },
+        }, "rotator missing metadata");
+    }, "requires an '@rotator'");
+    checkThrowsContaining([] {
+        (void)Level::loadFromDefinition({
+            .layers = {
+                { "..." },
+                { "C.)" },
+            },
+            .rotators = { Level::Rotator {
+                .cell = { 2, 0, 1 },
+                .pressurePlates = { { 1, 0, 1 } },
+            } },
+        }, "rotator bad link");
+    }, "Pressure tiles");
+    checkThrowsContaining([] {
+        (void)Level::loadFromDefinition({
+            .layers = {
+                { "..." },
+                { "CP." },
+            },
+            .rotators = { Level::Rotator {
+                .cell = { 2, 0, 1 },
+                .pressurePlates = { { 1, 0, 1 } },
+            } },
+        }, "rotator record without tile");
+    }, "must contain a Rotator tile");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            {
+                "@layer 0",
+                "...",
+                "@rotator {\"cell\":[2,0,1],\"plates\":[],\"color\":[2,0,0]}",
+            },
+            "rotator after layer");
+    }, "before '@layer 0'");
+}
+
+void testPlatePropertyAndCoveredPlateRecords()
+{
+    TEST("platePropertyAndCoveredPlateRecords");
+    for (const TileType plate : {
+             TileType::PressurePlate,
+             TileType::End,
+             TileType::RotatorClockwise,
+             TileType::RotatorCounterClockwise,
+         }) {
+        CHECK(tileTypeIsPlate(plate));
+        CHECK(tileTypeHasProperty(plate, TileProperty::Plate));
+        CHECK(tileTypeIsSurfaceEntity(plate));
+        CHECK(!tileTypeCanStandOnPlate(plate));
+    }
+    for (const TileType other : {
+             TileType::Ground, TileType::Wall, TileType::Gate,
+             TileType::Rock, TileType::MirrorNorthWest, TileType::Rogue,
+         }) {
+        CHECK(!tileTypeIsPlate(other));
+    }
+    for (const TileType occupant : {
+             TileType::Rock, TileType::Ice, TileType::Enemy,
+             TileType::TurretEast, TileType::Knight, TileType::Player,
+             TileType::MirrorSouthEast,
+         }) {
+        CHECK(tileTypeCanStandOnPlate(occupant));
+    }
+    CHECK(!tileTypeCanStandOnPlate(TileType::Wall));
+    CHECK(!tileTypeCanStandOnPlate(TileType::Air));
+    CHECK(tileTypeFromName("Rotator Counter-Clockwise") ==
+        TileType::RotatorCounterClockwise);
+    CHECK(!tileTypeFromName("Not A Tile"));
+
+    const Level::Definition definition {
+        .layers = {
+            { "......" },
+            { "QPR1(E" },
+        },
+        .rotators = {
+            Level::Rotator {
+                .cell = { 3, 0, 1 },
+                .pressurePlates = { { 1, 0, 1 }, { 2, 0, 1 } },
+            },
+            Level::Rotator { .cell = { 4, 0, 1 } },
+        },
+        .plates = {
+            Level::Plate { .cell = { 2, 0, 1 }, .tile = TileType::PressurePlate },
+            Level::Plate { .cell = { 0, 0, 1 }, .tile = TileType::End },
+            Level::Plate { .cell = { 3, 0, 1 }, .tile = TileType::RotatorClockwise },
+        },
+    };
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition(definition);
+    CHECK(std::ranges::count_if(serialized, [](const std::string& line) {
+        return line.starts_with("@plate ");
+    }) == 3);
+    const Level::Definition parsed =
+        Level::parseDefinition(serialized, "plate round trip");
+    // Parsing puts records in canonical cell order.
+    CHECK(parsed.plates.size() == 3);
+    CHECK(parsed.plates.front().cell == GridPosition3({ 0, 0, 1 }));
+    CHECK(Level::serializeDefinition(parsed) == serialized);
+
+    const Level level = Level::loadFromDefinition(parsed, "plate level");
+    CHECK(level.coveredPlates().size() == 3);
+    // A unit standing on a plate leaves the plate in the static grid.
+    CHECK(level.tileAt(0, 0, 1) == TileType::End);
+    CHECK(level.tileAt(2, 0, 1) == TileType::PressurePlate);
+    // A mirror covers its plate, which stays reachable through plateAt.
+    CHECK(level.tileAt(3, 0, 1) == TileType::MirrorNorthWest);
+    CHECK(level.plateAt({ 3, 0, 1 }) == TileType::RotatorClockwise);
+    CHECK(level.plateAt({ 4, 0, 1 }) == TileType::RotatorCounterClockwise);
+    CHECK(level.plateAt({ 5, 0, 1 }) == TileType::End);
+    CHECK(!level.plateAt({ 0, 0, 0 }));
+    CHECK(level.pressurePlates().size() == 2);
+    CHECK(level.ends().size() == 2);
+    CHECK(level.movableTiles().size() == 1);
+    CHECK(level.playerStarts().front().position == GridPosition3({ 0, 0, 1 }));
+
+    const auto plateUnder = [](char occupant, TileType plate) {
+        std::string row = "Q ";
+        row += occupant;
+        return Level::Definition {
+            .layers = { { "..." }, { row } },
+            .plates = { Level::Plate { .cell = { 2, 0, 1 }, .tile = plate } },
+        };
+    };
+    // An End under a mirror can never hold a hero, so it is not counted.
+    const Level coveredEnd = Level::loadFromDefinition(
+        plateUnder('1', TileType::End), "end under mirror");
+    CHECK(coveredEnd.ends().empty());
+    CHECK(coveredEnd.plateAt({ 2, 0, 1 }) == TileType::End);
+
+    checkThrowsContaining([&] {
+        (void)Level::loadFromDefinition(
+            plateUnder('#', TileType::PressurePlate), "plate under wall");
+    }, "beneath a unit or mirror");
+    checkThrowsContaining([&] {
+        (void)Level::loadFromDefinition(
+            plateUnder(' ', TileType::PressurePlate), "plate under air");
+    }, "beneath a unit or mirror");
+    checkThrowsContaining([&] {
+        (void)Level::loadFromDefinition({
+            .layers = { { "..." }, { "Q R" } },
+            .plates = { Level::Plate { .cell = { 7, 0, 1 } } },
+        }, "plate outside board");
+    }, "beneath a unit or mirror");
+    checkThrowsContaining([&] {
+        (void)Level::loadFromDefinition(
+            plateUnder('R', TileType::RotatorClockwise), "rotator plate without record");
+    }, "requires an '@rotator'");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            {
+                "@plate {\"cell\":[1,0,1],\"tile\":\"Wall\"}",
+                "",
+                "@layer 0",
+                "..",
+            },
+            "non-plate record");
+    }, "must name a plate tile");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            {
+                "@plate {\"cell\":[1,0,1],\"tile\":\"End\"}",
+                "@plate {\"cell\":[1,0,1],\"tile\":\"Pressure\"}",
+                "",
+                "@layer 0",
+                "..",
+            },
+            "duplicate plate");
+    }, "more than one plate record");
+}
+
 void testParserRejectsMalformedStructure()
 {
     TEST("parserRejectsMalformedStructure");
@@ -555,6 +782,8 @@ int main()
     testDecorationMetadataRoundTrip();
     testSelectorMetadataRoundTripAndLookup();
     testGateMetadataRoundTripAndValidation();
+    testRotatorMetadataRoundTripAndValidation();
+    testPlatePropertyAndCoveredPlateRecords();
     testParserRejectsMalformedStructure();
     testLevelValidationErrors();
     testRaggedLayersNormalizeToAir();

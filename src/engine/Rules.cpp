@@ -420,6 +420,99 @@ std::optional<MoveDirection> turretDirectionForTile(TileType tile)
     }
 }
 
+MoveDirection rotateDirection(MoveDirection direction, int quarterTurns)
+{
+    // Clockwise order seen from above: north, east, south, west.
+    constexpr std::array clockwise {
+        MoveDirection::Up,
+        MoveDirection::Right,
+        MoveDirection::Down,
+        MoveDirection::Left,
+    };
+    const auto found = std::ranges::find(clockwise, direction);
+    const int index = static_cast<int>(found - clockwise.begin());
+    const int turned = ((index + quarterTurns) % 4 + 4) % 4;
+    return clockwise[static_cast<std::size_t>(turned)];
+}
+
+uint8_t addQuarterTurns(uint8_t quarterTurns, int delta)
+{
+    return static_cast<uint8_t>(
+        ((static_cast<int>(quarterTurns) + delta) % 4 + 4) % 4);
+}
+
+std::optional<MoveDirection> turretDirection(const GameState::Movable& movable)
+{
+    const std::optional<MoveDirection> authored =
+        turretDirectionForTile(movable.type);
+    if (!authored) {
+        return std::nullopt;
+    }
+    return rotateDirection(*authored, movable.quarterTurns);
+}
+
+TileType rotateMirrorTile(TileType tile, int quarterTurns)
+{
+    // Clockwise order: the corner a mirror faces turns NW, NE, SE, SW.
+    constexpr std::array clockwise {
+        TileType::MirrorNorthWest,
+        TileType::MirrorNorthEast,
+        TileType::MirrorSouthEast,
+        TileType::MirrorSouthWest,
+    };
+    const auto found = std::ranges::find(clockwise, tile);
+    if (found == clockwise.end()) {
+        return tile;
+    }
+    const int index = static_cast<int>(found - clockwise.begin());
+    return clockwise[static_cast<std::size_t>(
+        ((index + quarterTurns) % 4 + 4) % 4)];
+}
+
+uint8_t mirrorQuarterTurnsAt(const GameState& state, GridPosition3 cell)
+{
+    const auto found = std::ranges::find(
+        state.turnedMirrors, cell, &GameState::TurnedMirror::cell);
+    return found == state.turnedMirrors.end() ? uint8_t { 0 } : found->quarterTurns;
+}
+
+void setMirrorQuarterTurns(
+    GameState& state, GridPosition3 cell, uint8_t quarterTurns)
+{
+    std::erase_if(state.turnedMirrors, [&](const GameState::TurnedMirror& mirror) {
+        return mirror.cell == cell;
+    });
+    quarterTurns = addQuarterTurns(quarterTurns, 0);
+    if (quarterTurns == 0) {
+        return;
+    }
+    const auto order = [](GridPosition3 position) {
+        return std::array { position.z, position.y, position.x };
+    };
+    const auto insertAt = std::ranges::upper_bound(
+        state.turnedMirrors,
+        order(cell),
+        {},
+        [&](const GameState::TurnedMirror& mirror) { return order(mirror.cell); });
+    state.turnedMirrors.insert(insertAt, { .cell = cell, .quarterTurns = quarterTurns });
+}
+
+std::optional<TileType> mirrorTileAt(
+    const Level& level, const GameState& state, GridPosition3 cell)
+{
+    if (!level.inBounds(cell)) {
+        return std::nullopt;
+    }
+    const TileType tile = level.tileAt(
+        static_cast<uint32_t>(cell.x),
+        static_cast<uint32_t>(cell.y),
+        static_cast<uint32_t>(cell.z));
+    if (!tileTypeIsMirror(tile)) {
+        return std::nullopt;
+    }
+    return rotateMirrorTile(tile, mirrorQuarterTurnsAt(state, cell));
+}
+
 bool staticCellAllowsEntity(const Level& level, GridPosition3 position)
 {
     if (position.x < 0 ||
@@ -504,9 +597,17 @@ bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 p
 }
 
 bool isPressurePlateActive(
+    const Level& level,
     const GameState& state,
     GridPosition3 plate)
 {
+    if (level.inBounds(plate) &&
+        tileTypeIsMirror(level.tileAt(
+            static_cast<uint32_t>(plate.x),
+            static_cast<uint32_t>(plate.y),
+            static_cast<uint32_t>(plate.z)))) {
+        return true;
+    }
     return playerBlocksAt(state, plate) ||
         movableAt(state, plate) != nullptr ||
         enemyAt(state, plate) != nullptr;
@@ -517,14 +618,110 @@ bool isGateOpen(
     const GameState& state,
     const Level::Gate& gate)
 {
-    (void)level;
     return !gate.pressurePlates.empty() &&
         std::ranges::all_of(
             gate.pressurePlates,
             [&](GridPosition3 plate) {
-                return isPressurePlateActive(state, plate);
+                return isPressurePlateActive(level, state, plate);
             });
 }
+
+bool isRotatorEngaged(
+    const Level& level,
+    const GameState& state,
+    const Level::Rotator& rotator)
+{
+    return !rotator.pressurePlates.empty() &&
+        std::ranges::all_of(
+            rotator.pressurePlates,
+            [&](GridPosition3 plate) {
+                return isPressurePlateActive(level, state, plate);
+            });
+}
+
+namespace {
+
+// Per-rotator engagement, in Level::rotators() order.
+std::vector<char> rotatorEngagement(const Level& level, const GameState& state)
+{
+    std::vector<char> engaged(level.rotators().size(), 0);
+    for (std::size_t i = 0; i < engaged.size(); ++i) {
+        engaged[i] = isRotatorEngaged(level, state, level.rotators()[i]);
+    }
+    return engaged;
+}
+
+// Which state entities a rotator activation turned.
+struct RotatedOccupants {
+    std::vector<std::size_t> players;
+    std::vector<std::size_t> movables;
+    std::vector<std::size_t> enemies;
+    std::vector<GridPosition3> mirrors;
+
+    [[nodiscard]] bool empty() const
+    {
+        return players.empty() && movables.empty() && enemies.empty() &&
+            mirrors.empty();
+    }
+};
+
+// Turns the live occupant of every rotator whose linked plates became fully
+// pressed since `engagedBefore` was sampled. A rotator is a floor tile, so at
+// most one live unit stands on it; the loops below do not rely on that.
+RotatedOccupants applyRotatorActivations(
+    const Level& level,
+    GameState& state,
+    const std::vector<char>& engagedBefore)
+{
+    RotatedOccupants rotated;
+    for (std::size_t r = 0; r < level.rotators().size(); ++r) {
+        const Level::Rotator& rotator = level.rotators()[r];
+        if ((r < engagedBefore.size() && engagedBefore[r]) ||
+            !isRotatorEngaged(level, state, rotator) ||
+            !level.inBounds(rotator.cell)) {
+            continue;
+        }
+        // The rotator may be covered by a mirror, so ask for the plate.
+        const std::optional<int> turns = rotatorQuarterTurns(
+            level.plateAt(rotator.cell).value_or(TileType::Air));
+        if (!turns) {
+            continue;
+        }
+        if (mirrorTileAt(level, state, rotator.cell)) {
+            setMirrorQuarterTurns(
+                state,
+                rotator.cell,
+                addQuarterTurns(
+                    mirrorQuarterTurnsAt(state, rotator.cell), *turns));
+            rotated.mirrors.push_back(rotator.cell);
+        }
+        for (std::size_t i = 0; i < state.players.size(); ++i) {
+            GameState::Player& player = state.players[i];
+            if (!player.dead && player.cell == rotator.cell) {
+                player.quarterTurns = addQuarterTurns(player.quarterTurns, *turns);
+                rotated.players.push_back(i);
+            }
+        }
+        for (std::size_t i = 0; i < state.movables.size(); ++i) {
+            GameState::Movable& movable = state.movables[i];
+            if (!movable.fallen && !movable.dead &&
+                movable.cell == rotator.cell) {
+                movable.quarterTurns = addQuarterTurns(movable.quarterTurns, *turns);
+                rotated.movables.push_back(i);
+            }
+        }
+        for (std::size_t i = 0; i < state.enemies.size(); ++i) {
+            GameState::Enemy& enemy = state.enemies[i];
+            if (!enemy.fallen && !enemy.dead && enemy.cell == rotator.cell) {
+                enemy.quarterTurns = addQuarterTurns(enemy.quarterTurns, *turns);
+                rotated.enemies.push_back(i);
+            }
+        }
+    }
+    return rotated;
+}
+
+} // namespace
 
 bool isEndUnlocked(const Level& level, const GameState& state)
 {
@@ -600,7 +797,7 @@ std::vector<EntityId> mutuallyFacingTurrets(
     for (std::size_t first = 0; first < state.movables.size(); ++first) {
         const GameState::Movable& a = state.movables[first];
         const std::optional<MoveDirection> aDirection =
-            turretDirectionForTile(a.type);
+            turretDirection(a);
         if (a.dead || a.fallen || !aDirection) {
             continue;
         }
@@ -609,7 +806,7 @@ std::vector<EntityId> mutuallyFacingTurrets(
              ++second) {
             const GameState::Movable& b = state.movables[second];
             const std::optional<MoveDirection> bDirection =
-                turretDirectionForTile(b.type);
+                turretDirection(b);
             if (b.dead || b.fallen || !bDirection ||
                 !turretHasLineOfSight(
                     level, state, a.cell, *aDirection, b.cell) ||
@@ -801,7 +998,10 @@ std::vector<MirrorHit> nearestMirrors(
             if (std::ranges::find(usedMirrors, mirror) != usedMirrors.end()) {
                 continue;
             }
-            const std::optional<MirrorRays> rays = mirrorRays(tileAt(level, mirror));
+            const std::optional<TileType> mirrorTile =
+                mirrorTileAt(level, state, mirror);
+            const std::optional<MirrorRays> rays =
+                mirrorTile ? mirrorRays(*mirrorTile) : std::nullopt;
             if (!rays) {
                 continue;
             }
@@ -1115,6 +1315,10 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
     if (!liveCellsAreUnique(after) || after == state) {
         return std::nullopt;
     }
+    // Reflected units can land on pressure plates or rotators exactly as a
+    // step can, so linked rotators fire here too.
+    (void)applyRotatorActivations(
+        level, after, rotatorEngagement(level, state));
     resolveEnemyAttacks(after);
     for (MirrorEntityPreview& entity : entities) {
         if (entity.player) {
@@ -1194,6 +1398,7 @@ public:
         , enemyMoved_(after.enemies.size(), 0)
         , enemyMovedThisMicro_(after.enemies.size(), 0)
         , turretShots_(turretShots)
+        , rotatorsEngagedAtStart_(rotatorEngagement(level, after))
     {
         for (Status& status : status_) {
             status.active = scope.wholeWorld();
@@ -1258,6 +1463,7 @@ public:
                 markDeadEntitiesDone();
             }
         }
+        resolveRotators();
     }
 
 private:
@@ -2245,13 +2451,46 @@ private:
         enemyMovedThisMicro_[enemyIndex] = true;
     }
 
+    // Rotator plates act once the step's movement has settled: a plate is
+    // pressed by where units end up, not by what passes over it mid-step.
+    // Turned units join the action's closure because they are written. A
+    // turret that turns sweeps its new line of fire once, so it shoots a
+    // target already standing there rather than waiting for it to move.
+    void resolveRotators()
+    {
+        const RotatedOccupants rotated = applyRotatorActivations(
+            level_, after_, rotatorsEngagedAtStart_);
+        if (rotated.empty()) {
+            return;
+        }
+        for (const std::size_t index : rotated.players) {
+            status_[entityIndexForPlayer(index)].active = true;
+        }
+        for (const std::size_t index : rotated.enemies) {
+            status_[entityIndexForEnemy(index)].active = true;
+        }
+        std::vector<char> sweeping(movableCount_, 0);
+        bool anyTurret = false;
+        for (const std::size_t index : rotated.movables) {
+            status_[index].active = true;
+            if (turretDirection(after_.movables[index])) {
+                sweeping[index] = 1;
+                anyTurret = true;
+            }
+        }
+        if (anyTurret) {
+            resolveTurretShots(&sweeping);
+            markDeadEntitiesDone();
+        }
+    }
+
     // A turret normally reacts to movement, while two turrets aimed directly
     // at one another form an ambient volley without waiting for another actor.
     // Every live entity is still an occluder, so a rock between a turret and a
     // target keeps that target safe. Kills are collected before they are
     // applied to make a volley observe one consistent board rather than
     // letting the first death open a ray for the next turret.
-    void resolveTurretShots()
+    void resolveTurretShots(const std::vector<char>* sweepingTurrets = nullptr)
     {
         std::vector<char> killedPlayers(playerCount_, 0);
         std::vector<char> killedMovables(movableCount_, 0);
@@ -2261,8 +2500,15 @@ private:
              ++turretIndex) {
             const GameState::Movable& turret = after_.movables[turretIndex];
             const std::optional<MoveDirection> direction =
-                turretDirectionForTile(turret.type);
+                turretDirection(turret);
             if (turret.fallen || turret.dead || !direction) {
+                continue;
+            }
+            // Only turrets a rotator has just turned sweep; ordinary shots
+            // still need the target to have moved.
+            const bool sweeping = sweepingTurrets != nullptr &&
+                (*sweepingTurrets)[turretIndex] != 0;
+            if (sweepingTurrets != nullptr && !sweeping) {
                 continue;
             }
             for (std::size_t targetIndex = 0;
@@ -2274,7 +2520,7 @@ private:
                 const GameState::Movable& target =
                     after_.movables[targetIndex];
                 const std::optional<MoveDirection> targetDirection =
-                    turretDirectionForTile(target.type);
+                    turretDirection(target);
                 if (target.fallen || target.dead || !targetDirection ||
                     !turretHasLineOfSight(
                         level_,
@@ -2290,7 +2536,7 @@ private:
                     target.cell,
                     *targetDirection,
                     turret.cell);
-                if (!status_[targetIndex].movedThisMicro &&
+                if (!sweeping && !status_[targetIndex].movedThisMicro &&
                     !(faceEachOther &&
                         (status_[turretIndex].active ||
                             status_[targetIndex].active))) {
@@ -2326,7 +2572,8 @@ private:
                     entityIndexForPlayer(playerIndex);
                 const GameState::Player& player =
                     after_.players[playerIndex];
-                if (!player.dead && status_[entityIndex].movedThisMicro &&
+                if (!player.dead &&
+                    (sweeping || status_[entityIndex].movedThisMicro) &&
                     turretHasLineOfSight(
                         level_, after_, turret.cell, *direction, player.cell)) {
                     killedPlayers[playerIndex] = true;
@@ -2358,7 +2605,7 @@ private:
                  ++enemyIndex) {
                 const GameState::Enemy& enemy = after_.enemies[enemyIndex];
                 if (!enemy.dead && !enemy.fallen &&
-                    enemyMovedThisMicro_[enemyIndex] &&
+                    (sweeping || enemyMovedThisMicro_[enemyIndex]) &&
                     turretHasLineOfSight(
                         level_, after_, turret.cell, *direction, enemy.cell)) {
                     killedEnemies[enemyIndex] = true;
@@ -2610,6 +2857,10 @@ private:
     std::vector<char> enemyMovedThisMicro_;
     std::vector<TurretShot>* turretShots_ = nullptr;
     bool suppressBardInfluences_ = false;
+    // Which rotators had every linked plate pressed when the step began. A
+    // rotator activates on the step that presses its last plate, never on a
+    // step that merely leaves it pressed.
+    std::vector<char> rotatorsEngagedAtStart_;
 };
 
 } // namespace
