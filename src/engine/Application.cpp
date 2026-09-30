@@ -976,9 +976,15 @@ bool Application::run()
         const float measuredDt = frameTimer_.tick(simulationTiming_);
         // Evidence runs compare separate renderer configurations. Freezing
         // simulation makes their scene/camera/animation inputs identical.
-        const float dt = evidenceOutputDirectory_.empty()
+        const float wallClockDt = evidenceOutputDirectory_.empty()
             ? measuredDt
             : 0.0f;
+        const float dt = SimulationTiming::scaledDelta(
+            wallClockDt,
+            static_cast<float>(
+                settingsCoordinator_.userSettings()
+                    .gameplay.simulationSpeedPercent) /
+                100.0f);
         {
             SOKOBAN_PROFILE_SCOPE("Application.Update");
             update(
@@ -989,7 +995,9 @@ bool Application::run()
         bool developerWorkspaceVisible = false;
         {
             SOKOBAN_PROFILE_SCOPE("Application.UI");
-            developerWorkspaceVisible = drawUiFrame(routedInput, dt);
+            // Menus and developer tools remain responsive in wall-clock time,
+            // independent of the selected gameplay simulation speed.
+            developerWorkspaceVisible = drawUiFrame(routedInput, wallClockDt);
         }
         {
             SOKOBAN_PROFILE_SCOPE("Application.Build render frame");

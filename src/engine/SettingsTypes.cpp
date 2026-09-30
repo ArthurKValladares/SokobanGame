@@ -17,6 +17,13 @@ int UserSettings::Video::effectiveRenderScalePercent() const
 
 void UserSettings::normalize()
 {
+    if (std::find(
+            config::simulationSpeedPercentOptions.begin(),
+            config::simulationSpeedPercentOptions.end(),
+            gameplay.simulationSpeedPercent) ==
+        config::simulationSpeedPercentOptions.end()) {
+        gameplay.simulationSpeedPercent = config::simulationSpeedPercent;
+    }
     audio.masterVolume = std::clamp(
         audio.masterVolume, config::minimumVolume, config::maximumVolume);
     audio.musicVolume = std::clamp(

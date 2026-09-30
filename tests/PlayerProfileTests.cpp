@@ -216,6 +216,7 @@ void testRoundTripAndBests()
     sokoban::PlayerProfile profile;
     profile.unlockedLevel = 3;
     profile.setCurrentLevel(2);
+    profile.settings.gameplay.simulationSpeedPercent = 25;
     profile.settings.audio = { .masterVolume = 0.8f, .musicVolume = 0.4f, .soundVolume = 0.6f };
     profile.settings.video = {
         .fullscreen = true,
@@ -254,6 +255,17 @@ void testRoundTripAndBests()
     const sokoban::DecodedPlayerProfile decoded =
         sokoban::decodePlayerProfile(profile.serialize());
     CHECK_MESSAGE(decoded.profile == profile, "current profile round-trips");
+
+    nlohmann::json settingsWithoutGameplay =
+        nlohmann::json::parse(profile.serialize());
+    settingsWithoutGameplay["settings"].erase("gameplay");
+    const sokoban::DecodedPlayerProfile decodedPreSimulationSpeedSettings =
+        sokoban::decodePlayerProfile(settingsWithoutGameplay.dump());
+    CHECK_MESSAGE(
+        decodedPreSimulationSpeedSettings.profile.settings.gameplay
+                .simulationSpeedPercent ==
+            sokoban::config::simulationSpeedPercent,
+        "settings saved before simulation speed retain normal speed");
 
     nlohmann::json settingsWithoutMaximized =
         nlohmann::json::parse(profile.serialize());
@@ -527,6 +539,7 @@ void testNormalizationAndValidation()
     profile.settings.video.exposureEv = -99.0f;
     profile.settings.video.windowWidth = 20;
     profile.settings.video.windowHeight = 30;
+    profile.settings.gameplay.simulationSpeedPercent = 37;
     profile.normalize();
     CHECK_MESSAGE(profile.currentLevel == 9,
         "current level is independent of legacy unlock progression");
@@ -545,6 +558,10 @@ void testNormalizationAndValidation()
         "exposure clamps to its safe minimum");
     CHECK_MESSAGE(profile.settings.video.windowWidth == 640, "window width clamps low");
     CHECK_MESSAGE(profile.settings.video.windowHeight == 480, "window height clamps low");
+    CHECK_MESSAGE(
+        profile.settings.gameplay.simulationSpeedPercent ==
+            sokoban::config::simulationSpeedPercent,
+        "unsupported simulation speed receives default");
 
     checkThrows([] {
         (void)sokoban::decodePlayerProfile(R"json({ "format": 99 })json");

@@ -12,6 +12,13 @@ inline constexpr bool allowTearing = false;
 // Zero means no CPU cap: FIFO/mailbox remains responsible for pacing.
 inline constexpr int frameRateLimit = 0;
 inline constexpr std::array frameRateLimitOptions { 0, 30, 60, 120, 144, 240 };
+// Simulation speed is stored as an integer percentage so it can be persisted
+// and selected without floating-point equality becoming part of settings
+// policy. It changes elapsed simulation time, not rendering or input polling.
+inline constexpr int simulationSpeedPercent = 100;
+inline constexpr std::array simulationSpeedPercentOptions {
+    10, 25, 50, 75, 100, 150, 200, 400,
+};
 inline constexpr int unfocusedFrameRateLimit = 20;
 inline constexpr int minimizedFrameRateLimit = 5;
 inline constexpr std::array antiAliasingSampleOptions { 1, 2, 4, 8 };

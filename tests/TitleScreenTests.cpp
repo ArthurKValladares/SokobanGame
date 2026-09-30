@@ -277,15 +277,17 @@ void testOptionsTitleExitRow()
         return result;
     };
 
-    // Pause context: Graphics, Audio, Controls, Exit To Title, Quit.
+    // Pause context: Graphics, Audio, Controls, Gameplay, Exit To Title, Quit.
     menu.open(true);
+    draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });
     CHECK(isAction<sokoban::options::ExitToTitle>(draw({ .confirm = true })));
 
-    // Title context: the row is absent and the fourth row is Quit.
+    // Title context: the row is absent and the fifth row is Quit.
     menu.open(false);
+    draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });

@@ -8,6 +8,12 @@
 namespace sokoban {
 
 struct UserSettings {
+    struct Gameplay {
+        int simulationSpeedPercent = config::simulationSpeedPercent;
+
+        bool operator==(const Gameplay&) const = default;
+    };
+
     struct Audio {
         float masterVolume = config::masterVolume;
         float musicVolume = config::musicVolume;
@@ -37,6 +43,7 @@ struct UserSettings {
         bool operator==(const Video&) const = default;
     };
 
+    Gameplay gameplay;
     Audio audio;
     Video video;
     InputBindings input = defaultInputBindings();

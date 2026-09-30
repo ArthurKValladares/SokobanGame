@@ -1146,8 +1146,24 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
 {
     rejectUnknownProperties(
         settings,
-        { "audio", "video", "input" },
+        { "gameplay", "audio", "video", "input" },
         "settings");
+
+    // Older settings documents from this same development format predate the
+    // gameplay section. They retain the default 1x simulation speed.
+    if (settings.contains("gameplay")) {
+        const Json& gameplay = requiredProperty(
+            settings, "gameplay", "settings");
+        rejectUnknownProperties(
+            gameplay,
+            { "simulationSpeedPercent" },
+            "settings.gameplay");
+        profile.settings.gameplay.simulationSpeedPercent =
+            nonNegativeIntegerProperty(
+                gameplay,
+                "simulationSpeedPercent",
+                "settings.gameplay");
+    }
 
     const Json& audio = requiredProperty(settings, "audio", "settings");
     rejectUnknownProperties(
@@ -1354,6 +1370,10 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
 
     if (sections != ProfileSections::ProgressOnly) {
         root["settings"] = {
+            { "gameplay", {
+                { "simulationSpeedPercent",
+                  normalized.settings.gameplay.simulationSpeedPercent },
+            } },
             { "audio", {
                 { "masterVolume", normalized.settings.audio.masterVolume },
                 { "musicVolume", normalized.settings.audio.musicVolume },

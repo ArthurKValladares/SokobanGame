@@ -264,6 +264,7 @@ void testOptionsRemainReachableAtSupportedWindowSizes()
         sokoban::Vec2 { 1920.0f, 1080.0f },
     };
     constexpr std::array pages {
+        sokoban::OptionsMenuPage::Gameplay,
         sokoban::OptionsMenuPage::Graphics,
         sokoban::OptionsMenuPage::Audio,
         sokoban::OptionsMenuPage::Controls,
@@ -280,6 +281,7 @@ void testOptionsRemainReachableAtSupportedWindowSizes()
             sokoban::OptionsMenuRowId::Graphics,
             sokoban::OptionsMenuRowId::Audio,
             sokoban::OptionsMenuRowId::Controls,
+            sokoban::OptionsMenuRowId::Gameplay,
         };
         for (std::size_t index = 0; index < sectionRows.size(); ++index) {
             mainState.selectedRow = static_cast<int>(index);
@@ -1031,10 +1033,49 @@ void testOptionsReducerAndDeclarativeRows()
     CHECK(state.open);
     const std::vector<sokoban::OptionsMenuRow> mainRows =
         sokoban::optionsMenuRows(state, settings);
-    CHECK(mainRows.size() == 5);
-    CHECK(mainRows[3].id == sokoban::OptionsMenuRowId::ExitToTitle);
+    CHECK(mainRows.size() == 6);
+    CHECK(mainRows[3].id == sokoban::OptionsMenuRowId::Gameplay);
+    CHECK(mainRows[4].id == sokoban::OptionsMenuRowId::ExitToTitle);
     CHECK(mainRows.back().tone == sokoban::OptionsMenuRowTone::Danger);
     CHECK(mainRows.back().dividerBefore);
+
+    reduction = sokoban::reduceOptionsMenu(
+        state,
+        settings,
+        sokoban::options::intent::ActivateRow {
+            sokoban::OptionsMenuRowId::Gameplay });
+    state = reduction.state;
+    CHECK(state.page == sokoban::OptionsMenuPage::Gameplay);
+    const std::vector<sokoban::OptionsMenuRow> gameplayRows =
+        sokoban::optionsMenuRows(state, settings);
+    CHECK(gameplayRows.size() == 2);
+    CHECK(gameplayRows.front().id ==
+        sokoban::OptionsMenuRowId::SimulationSpeed);
+    CHECK(gameplayRows.front().kind ==
+        sokoban::OptionsMenuRowKind::StepperChoice);
+    CHECK(gameplayRows.front().choiceValue == 100);
+
+    reduction = sokoban::reduceOptionsMenu(
+        state,
+        settings,
+        sokoban::options::intent::AdjustSelected { -1 });
+    const auto* speedChanged =
+        std::get_if<sokoban::options::SettingsChanged>(
+            &*reduction.action);
+    CHECK(speedChanged != nullptr);
+    CHECK(speedChanged->settings.gameplay.simulationSpeedPercent == 75);
+
+    reduction = sokoban::reduceOptionsMenu(
+        state,
+        settings,
+        sokoban::options::intent::SelectChoice {
+            sokoban::OptionsMenuRowId::SimulationSpeed,
+            10,
+        });
+    speedChanged = std::get_if<sokoban::options::SettingsChanged>(
+        &*reduction.action);
+    CHECK(speedChanged != nullptr);
+    CHECK(speedChanged->settings.gameplay.simulationSpeedPercent == 10);
 
     reduction = sokoban::reduceOptionsMenu(
         state,

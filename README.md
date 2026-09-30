@@ -313,6 +313,11 @@ or Alt while pressing the key during capture. When several bindings on one key
 match the held modifiers, only the one needing the most modifiers fires, so
 `Ctrl+S` does not also move down.
 
+Options > Gameplay also provides a persistent simulation-speed control from
+0.1x slow motion through 4x speed. Rendering and menu input stay at normal
+speed while gameplay, animation, transitions, timers, and particle effects
+advance from the same scaled simulation clock.
+
 Saves and settings are not migrated between profile formats while the game is
 in early development. When a build changes the format, files from older
 builds are renamed to `<name>.obsolete-format-<N>-<stamp>` in the save

@@ -4,6 +4,7 @@
 #include "engine/Time.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -50,6 +51,22 @@ void testSimulationTimingClampsLongFrames()
     CHECK(timing.frameDelta(-1.0f) == 0.0f);
     CHECK(timing.frameDelta(
         std::numeric_limits<float>::infinity()) == 0.0f);
+}
+
+void testSimulationTimingScalesOneSharedDelta()
+{
+    TEST("simulationTimingScalesOneSharedDelta");
+
+    CHECK(std::abs(
+        SimulationTiming::scaledDelta(0.05f, 0.1f) - 0.005f) < 0.000001f);
+    CHECK(std::abs(
+        SimulationTiming::scaledDelta(0.05f, 0.5f) - 0.025f) < 0.000001f);
+    CHECK(std::abs(
+        SimulationTiming::scaledDelta(0.025f, 2.0f) - 0.05f) < 0.000001f);
+    CHECK(SimulationTiming::scaledDelta(0.08f, 4.0f) ==
+        SimulationTiming::maximumDeltaSeconds);
+    CHECK(SimulationTiming::scaledDelta(-1.0f, 0.5f) == 0.0f);
+    CHECK(SimulationTiming::scaledDelta(0.05f, 0.0f) == 0.0f);
 }
 
 void testSimulationTimingResetsAcrossMinimize()
@@ -633,6 +650,7 @@ int main()
 {
     testOpposingDirectionsAreNeutral();
     testSimulationTimingClampsLongFrames();
+    testSimulationTimingScalesOneSharedDelta();
     testSimulationTimingResetsAcrossMinimize();
     testSimulationTimingTracksOverlappingSuspensions();
     testSimulationTimingObservesTransientSuspendCycle();
