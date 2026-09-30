@@ -205,6 +205,14 @@ struct GltfAnimationClip {
     std::vector<AnimationChannel> channels;
 };
 
+// Sampling behavior belongs to the animation request, not to a particular
+// clip. Locomotion can loop a source while a death or attack using the same
+// loader must hold its terminal pose once its clock reaches the end.
+enum class AnimationPlaybackMode {
+    Loop,
+    Clamp,
+};
+
 struct GltfMeshLoadOptions {
     bool preserveAspectRatio = false;
     bool preserveSourceScale = false;
@@ -382,7 +390,8 @@ void addSkinnedAttachment(
 [[nodiscard]] MeshData skinGltfMesh(
     const SkinnedMeshData& mesh,
     const GltfAnimationClip& animation,
-    float timeSeconds);
+    float timeSeconds,
+    AnimationPlaybackMode playbackMode = AnimationPlaybackMode::Loop);
 
 // Skins with a pose blended between two clips (0 = from, 1 = to); used for
 // short crossfades when the active animation changes.
@@ -392,20 +401,25 @@ void addSkinnedAttachment(
     float fromTimeSeconds,
     const GltfAnimationClip& toAnimation,
     float toTimeSeconds,
-    float blend);
+    float blend,
+    AnimationPlaybackMode fromPlaybackMode = AnimationPlaybackMode::Loop,
+    AnimationPlaybackMode toPlaybackMode = AnimationPlaybackMode::Loop);
 
 // Samples the skeleton without transforming vertices. GPU skinning uploads
 // these palettes instead of rebuilding every vertex on the CPU.
 [[nodiscard]] SkinnedPoseMatrices sampleGltfSkinPose(
     const SkinnedMeshData& mesh,
     const GltfAnimationClip& animation,
-    float timeSeconds);
+    float timeSeconds,
+    AnimationPlaybackMode playbackMode = AnimationPlaybackMode::Loop);
 [[nodiscard]] SkinnedPoseMatrices sampleGltfSkinPoseBlended(
     const SkinnedMeshData& mesh,
     const GltfAnimationClip& fromAnimation,
     float fromTimeSeconds,
     const GltfAnimationClip& toAnimation,
     float toTimeSeconds,
-    float blend);
+    float blend,
+    AnimationPlaybackMode fromPlaybackMode = AnimationPlaybackMode::Loop,
+    AnimationPlaybackMode toPlaybackMode = AnimationPlaybackMode::Loop);
 
 } // namespace sokoban

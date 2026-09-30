@@ -151,6 +151,9 @@ std::optional<AnimationController::SkinningRequest> AnimationController::updateT
         ? fallbackClip_
         : tile.animation;
     float requestedTime = tile.animationTimeSeconds;
+    AnimationPlaybackMode requestedPlaybackMode = tile.animationLoops
+        ? AnimationPlaybackMode::Loop
+        : AnimationPlaybackMode::Clamp;
     bool resolvedNonLoopingFallback = false;
     if (!tile.animationLoops &&
         !tile.animationFallback.isNone() &&
@@ -159,6 +162,7 @@ std::optional<AnimationController::SkinningRequest> AnimationController::updateT
         requestedTime >= clip(requestedAnimation).durationSeconds) {
         requestedAnimation = tile.animationFallback;
         requestedTime = tile.animationFallbackTimeSeconds;
+        requestedPlaybackMode = AnimationPlaybackMode::Loop;
         resolvedNonLoopingFallback = true;
     }
     if (requestedAnimation.isNone() || !hasClip(requestedAnimation)) {
@@ -187,6 +191,7 @@ std::optional<AnimationController::SkinningRequest> AnimationController::updateT
         if (tile.animationCrossfades) {
             playback.fadeFromAnimation = playback.activeAnimation;
             playback.fadeFromTime = playback.activeAnimationTime;
+            playback.fadeFromPlaybackMode = playback.activePlaybackMode;
             playback.fadeElapsed = 0.0f;
         } else {
             playback.fadeFromAnimation = noAnimation;
@@ -203,6 +208,7 @@ std::optional<AnimationController::SkinningRequest> AnimationController::updateT
     SkinningRequest request {
         .toClip = &clip(requestedAnimation),
         .toTimeSeconds = requestedTime,
+        .toPlaybackMode = requestedPlaybackMode,
     };
     if (!playback.fadeFromAnimation.isNone()) {
         playback.fadeFromTime += clipTimeDelta;
@@ -215,12 +221,14 @@ std::optional<AnimationController::SkinningRequest> AnimationController::updateT
             blend = blend * blend * (3.0f - 2.0f * blend);
             request.fromClip = &clip(playback.fadeFromAnimation);
             request.fromTimeSeconds = playback.fadeFromTime;
+            request.fromPlaybackMode = playback.fadeFromPlaybackMode;
             request.blend = blend;
         }
     }
 
     playback.activeAnimation = requestedAnimation;
     playback.activeAnimationTime = requestedTime;
+    playback.activePlaybackMode = requestedPlaybackMode;
     return request;
 }
 

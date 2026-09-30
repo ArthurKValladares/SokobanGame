@@ -1572,12 +1572,21 @@ struct NodePose {
     Vec3 scale { 1.0f, 1.0f, 1.0f };
 };
 
-std::vector<NodePose> sampleAnimationPoses(const SkinnedMeshData& mesh, const GltfAnimationClip& animation, float timeSeconds)
+std::vector<NodePose> sampleAnimationPoses(
+    const SkinnedMeshData& mesh,
+    const GltfAnimationClip& animation,
+    float timeSeconds,
+    AnimationPlaybackMode playbackMode)
 {
     if (animation.durationSeconds > 0.000001f) {
-        timeSeconds = std::fmod(timeSeconds, animation.durationSeconds);
-        if (timeSeconds < 0.0f) {
-            timeSeconds += animation.durationSeconds;
+        if (playbackMode == AnimationPlaybackMode::Loop) {
+            timeSeconds = std::fmod(timeSeconds, animation.durationSeconds);
+            if (timeSeconds < 0.0f) {
+                timeSeconds += animation.durationSeconds;
+            }
+        } else {
+            timeSeconds = std::clamp(
+                timeSeconds, 0.0f, animation.durationSeconds);
         }
     } else {
         timeSeconds = 0.0f;
@@ -1810,9 +1819,15 @@ SkinnedPoseMatrices poseMatricesFromPoses(
 
 } // namespace
 
-MeshData skinGltfMesh(const SkinnedMeshData& mesh, const GltfAnimationClip& animation, float timeSeconds)
+MeshData skinGltfMesh(
+    const SkinnedMeshData& mesh,
+    const GltfAnimationClip& animation,
+    float timeSeconds,
+    AnimationPlaybackMode playbackMode)
 {
-    return skinWithPoses(mesh, sampleAnimationPoses(mesh, animation, timeSeconds));
+    return skinWithPoses(
+        mesh,
+        sampleAnimationPoses(mesh, animation, timeSeconds, playbackMode));
 }
 
 MeshData skinGltfMeshBlended(
@@ -1821,11 +1836,15 @@ MeshData skinGltfMeshBlended(
     float fromTimeSeconds,
     const GltfAnimationClip& toAnimation,
     float toTimeSeconds,
-    float blend)
+    float blend,
+    AnimationPlaybackMode fromPlaybackMode,
+    AnimationPlaybackMode toPlaybackMode)
 {
     blend = std::clamp(blend, 0.0f, 1.0f);
-    std::vector<NodePose> poses = sampleAnimationPoses(mesh, fromAnimation, fromTimeSeconds);
-    const std::vector<NodePose> target = sampleAnimationPoses(mesh, toAnimation, toTimeSeconds);
+    std::vector<NodePose> poses = sampleAnimationPoses(
+        mesh, fromAnimation, fromTimeSeconds, fromPlaybackMode);
+    const std::vector<NodePose> target = sampleAnimationPoses(
+        mesh, toAnimation, toTimeSeconds, toPlaybackMode);
     for (size_t i = 0; i < poses.size() && i < target.size(); ++i) {
         poses[i].translation = lerpVec3(poses[i].translation, target[i].translation, blend);
         poses[i].rotation = blendRotation(poses[i].rotation, target[i].rotation, blend);
@@ -1837,9 +1856,12 @@ MeshData skinGltfMeshBlended(
 SkinnedPoseMatrices sampleGltfSkinPose(
     const SkinnedMeshData& mesh,
     const GltfAnimationClip& animation,
-    float timeSeconds)
+    float timeSeconds,
+    AnimationPlaybackMode playbackMode)
 {
-    return poseMatricesFromPoses(mesh, sampleAnimationPoses(mesh, animation, timeSeconds));
+    return poseMatricesFromPoses(
+        mesh,
+        sampleAnimationPoses(mesh, animation, timeSeconds, playbackMode));
 }
 
 SkinnedPoseMatrices sampleGltfSkinPoseBlended(
@@ -1848,13 +1870,17 @@ SkinnedPoseMatrices sampleGltfSkinPoseBlended(
     float fromTimeSeconds,
     const GltfAnimationClip& toAnimation,
     float toTimeSeconds,
-    float blend)
+    float blend,
+    AnimationPlaybackMode fromPlaybackMode,
+    AnimationPlaybackMode toPlaybackMode)
 {
     blend = std::clamp(blend, 0.0f, 1.0f);
     std::vector<NodePose> poses =
-        sampleAnimationPoses(mesh, fromAnimation, fromTimeSeconds);
+        sampleAnimationPoses(
+            mesh, fromAnimation, fromTimeSeconds, fromPlaybackMode);
     const std::vector<NodePose> target =
-        sampleAnimationPoses(mesh, toAnimation, toTimeSeconds);
+        sampleAnimationPoses(
+            mesh, toAnimation, toTimeSeconds, toPlaybackMode);
     for (size_t i = 0; i < poses.size() && i < target.size(); ++i) {
         poses[i].translation = lerpVec3(poses[i].translation, target[i].translation, blend);
         poses[i].rotation = blendRotation(poses[i].rotation, target[i].rotation, blend);

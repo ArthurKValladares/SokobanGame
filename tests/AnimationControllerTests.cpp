@@ -345,6 +345,7 @@ void testNonLoopingAnimationFallsBackAtClipDuration()
     const auto death = controller.update(frame);
     CHECK(death.has_value());
     CHECK(death->toClip->name == "death");
+    CHECK(death->toPlaybackMode == AnimationPlaybackMode::Clamp);
 
     frame.tiles.front().animationTimeSeconds = 1.0f;
     frame.tiles.front().animationFallbackTimeSeconds = 0.25f;
@@ -353,6 +354,28 @@ void testNonLoopingAnimationFallsBackAtClipDuration()
     CHECK(!deadIdle->blended());
     CHECK(deadIdle->toClip->name == "dead idle");
     CHECK(near(deadIdle->toTimeSeconds, 0.25f));
+    CHECK(deadIdle->toPlaybackMode == AnimationPlaybackMode::Loop);
+}
+
+void testNonLoopingPlaybackModeSurvivesCrossfade()
+{
+    TEST("nonLoopingPlaybackModeSurvivesCrossfade");
+    AnimationController controller = makeController(0.1f);
+
+    RenderFrameData death = frameWithAnimation(deathClip, 0.75f);
+    death.tiles.front().animationLoops = false;
+    const auto oneShot = controller.update(death);
+    CHECK(oneShot.has_value());
+    CHECK(oneShot->toPlaybackMode == AnimationPlaybackMode::Clamp);
+
+    RenderFrameData move = frameWithAnimation(moveClip, 0.0f);
+    move.animationTransitionTimeSeconds = 0.80f;
+    const auto transition = controller.update(move);
+    CHECK(transition.has_value());
+    CHECK(transition->blended());
+    CHECK(transition->fromClip->name == "death");
+    CHECK(transition->fromPlaybackMode == AnimationPlaybackMode::Clamp);
+    CHECK(transition->toPlaybackMode == AnimationPlaybackMode::Loop);
 }
 
 void testClipValidationAndClear()
@@ -574,10 +597,13 @@ GltfAnimationClip translationClip(
 Vec3 markerPosition(
     const SkinnedMeshData& rig,
     const GltfAnimationClip& clip,
-    float timeSeconds)
+    float timeSeconds,
+    AnimationPlaybackMode playbackMode = AnimationPlaybackMode::Loop)
 {
     // Index 3 is the first attachment vertex: the rig's own three come first.
-    return skinGltfMesh(rig, clip, timeSeconds).vertices[3].position;
+    return skinGltfMesh(rig, clip, timeSeconds, playbackMode)
+        .vertices[3]
+        .position;
 }
 
 bool samePosition(Vec3 left, Vec3 right)
@@ -690,6 +716,44 @@ void testAnimationInterpolationModes()
         markerPosition(rig, linear, 0.0625f)));
 }
 
+void testNonLoopingSamplingHoldsTheTerminalPose()
+{
+    TEST("nonLoopingSamplingHoldsTheTerminalPose");
+    const SkinnedMeshData rig = interpolationRig();
+    const std::vector<Vec4> endpoints {
+        Vec4 {},
+        Vec4 { 4.0f, 0.0f, 0.0f, 0.0f },
+    };
+    const GltfAnimationClip oneSecond = translationClip(
+        AnimationInterpolation::Linear, { 0.0f, 1.0f }, endpoints);
+    const GltfAnimationClip heldReference = translationClip(
+        AnimationInterpolation::Linear,
+        { 0.0f, 1.0f },
+        endpoints,
+        2.0f);
+
+    // Looping retains the historical modulo behavior.
+    CHECK(samePosition(
+        markerPosition(rig, oneSecond, 1.25f),
+        markerPosition(rig, heldReference, 0.25f)));
+    // A one-shot samples its last authored pose after the end instead of
+    // wrapping to the first quarter of the clip and visibly replaying.
+    CHECK(samePosition(
+        markerPosition(
+            rig,
+            oneSecond,
+            1.25f,
+            AnimationPlaybackMode::Clamp),
+        markerPosition(rig, heldReference, 1.25f)));
+    CHECK(!samePosition(
+        markerPosition(
+            rig,
+            oneSecond,
+            1.25f,
+            AnimationPlaybackMode::Clamp),
+        markerPosition(rig, oneSecond, 1.25f)));
+}
+
 void testLoadsCubicSplineAnimationLayout()
 {
     TEST("loadsCubicSplineAnimationLayout");
@@ -760,10 +824,12 @@ int main()
     testHardTransitionDiscardsPreviousPose();
     testPreviewOverridesAndThenReleasesGameplay();
     testNonLoopingAnimationFallsBackAtClipDuration();
+    testNonLoopingPlaybackModeSurvivesCrossfade();
     testClipValidationAndClear();
     testAnimatedInstancesKeepIndependentPlayback();
     testSkinnedAttachmentsInheritAnimatedNodeTransforms();
     testAnimationInterpolationModes();
+    testNonLoopingSamplingHoldsTheTerminalPose();
     testLoadsCubicSplineAnimationLayout();
 
     if (failures == 0) {

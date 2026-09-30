@@ -2010,8 +2010,14 @@ void VulkanModelResources::writeSkinningInstance(
             request.fromTimeSeconds,
             *request.toClip,
             request.toTimeSeconds,
-            request.blend)
-        : sampleGltfSkinPose(mesh, *request.toClip, request.toTimeSeconds);
+            request.blend,
+            request.fromPlaybackMode,
+            request.toPlaybackMode)
+        : sampleGltfSkinPose(
+            mesh,
+            *request.toClip,
+            request.toTimeSeconds,
+            request.toPlaybackMode);
     const GpuSkinningInstance instance = makeGpuSkinningInstance(mesh, pose);
     const uint64_t linearIndex =
         static_cast<uint64_t>(frameIndex) * maxSkinnedInstancesPerFrame + instanceSlot;

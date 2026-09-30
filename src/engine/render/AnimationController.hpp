@@ -19,8 +19,10 @@ public:
     struct SkinningRequest {
         const GltfAnimationClip* fromClip = nullptr;
         float fromTimeSeconds = 0.0f;
+        AnimationPlaybackMode fromPlaybackMode = AnimationPlaybackMode::Loop;
         const GltfAnimationClip* toClip = nullptr;
         float toTimeSeconds = 0.0f;
+        AnimationPlaybackMode toPlaybackMode = AnimationPlaybackMode::Loop;
         float blend = 1.0f;
 
         [[nodiscard]] bool blended() const { return fromClip != nullptr; }
@@ -56,8 +58,10 @@ private:
     struct PlaybackState {
         RenderAnimation activeAnimation = noAnimation;
         float activeAnimationTime = -1.0f;
+        AnimationPlaybackMode activePlaybackMode = AnimationPlaybackMode::Loop;
         RenderAnimation fadeFromAnimation = noAnimation;
         float fadeFromTime = 0.0f;
+        AnimationPlaybackMode fadeFromPlaybackMode = AnimationPlaybackMode::Loop;
         float fadeElapsed = 0.0f;
         float lastTransitionTimeSeconds = -1.0f;
     };
