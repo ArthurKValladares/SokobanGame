@@ -38,6 +38,12 @@ std::vector<DebugTab>& debugMenus()
     return menus;
 }
 
+std::vector<DebugUi::DrawCallback>& debugTopBarControls()
+{
+    static std::vector<DebugUi::DrawCallback> controls;
+    return controls;
+}
+
 enum class DebugUiTheme {
     Dark,
     Light,
@@ -1480,6 +1486,9 @@ void drawWorkspaceMenu()
                 ImGui::EndMenu();
             }
         }
+        for (const DebugUi::DrawCallback& control : debugTopBarControls()) {
+            control();
+        }
         ImGui::EndMainMenuBar();
     }
 }
@@ -1631,10 +1640,16 @@ void DebugUi::addMenu(std::string name, DrawCallback callback)
     });
 }
 
+void DebugUi::addTopBarControl(DrawCallback callback)
+{
+    debugTopBarControls().push_back(std::move(callback));
+}
+
 void DebugUi::clearTabs()
 {
     debugTabs().clear();
     debugMenus().clear();
+    debugTopBarControls().clear();
 }
 
 DebugUi::DrawResult DebugUi::draw(GameViewport gameViewport)

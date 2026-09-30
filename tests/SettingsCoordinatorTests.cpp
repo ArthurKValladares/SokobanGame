@@ -160,6 +160,25 @@ void testAudioPersistencePolicy()
     CHECK(effects.immediatePersistence);
 }
 
+void testSimulationSpeedUpdatesLiveAndPersistsOnCommit()
+{
+    sokoban::PlayerProfile profile;
+    sokoban::PresentationSettings presentation;
+    sokoban::SettingsCoordinator coordinator(profile, presentation);
+
+    sokoban::SettingsEffects effects =
+        coordinator.applySimulationSpeed(2.75f, false);
+    CHECK(coordinator.userSettings().gameplay.simulationSpeed == 2.75f);
+    CHECK(!effects.saveProgress);
+    CHECK(!effects.saveSettings);
+
+    effects = coordinator.applySimulationSpeed(12.5f, true);
+    CHECK(coordinator.userSettings().gameplay.simulationSpeed == 12.5f);
+    CHECK(effects.saveProgress);
+    CHECK(effects.saveSettings);
+    CHECK(effects.immediatePersistence);
+}
+
 } // namespace
 
 int main()
@@ -169,6 +188,7 @@ int main()
     testUnchangedDomainsDoNotProduceRuntimeEffects();
     testPresentationAndPacingProduceTargetedEffects();
     testAudioPersistencePolicy();
+    testSimulationSpeedUpdatesLiveAndPersistsOnCommit();
 
     if (failures == 0) {
         std::cout << "SettingsCoordinatorTests: " << checks

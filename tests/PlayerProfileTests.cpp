@@ -216,7 +216,7 @@ void testRoundTripAndBests()
     sokoban::PlayerProfile profile;
     profile.unlockedLevel = 3;
     profile.setCurrentLevel(2);
-    profile.settings.gameplay.simulationSpeedPercent = 25;
+    profile.settings.gameplay.simulationSpeed = 12.5f;
     profile.settings.audio = { .masterVolume = 0.8f, .musicVolume = 0.4f, .soundVolume = 0.6f };
     profile.settings.video = {
         .fullscreen = true,
@@ -263,9 +263,20 @@ void testRoundTripAndBests()
         sokoban::decodePlayerProfile(settingsWithoutGameplay.dump());
     CHECK_MESSAGE(
         decodedPreSimulationSpeedSettings.profile.settings.gameplay
-                .simulationSpeedPercent ==
-            sokoban::config::simulationSpeedPercent,
+                .simulationSpeed ==
+            sokoban::config::simulationSpeed,
         "settings saved before simulation speed retain normal speed");
+
+    nlohmann::json percentageSettings =
+        nlohmann::json::parse(profile.serialize());
+    percentageSettings["settings"]["gameplay"].erase("simulationSpeed");
+    percentageSettings["settings"]["gameplay"]["simulationSpeedPercent"] = 25;
+    const sokoban::DecodedPlayerProfile decodedPercentageSettings =
+        sokoban::decodePlayerProfile(percentageSettings.dump());
+    CHECK_MESSAGE(
+        decodedPercentageSettings.profile.settings.gameplay.simulationSpeed ==
+            0.25f,
+        "percentage simulation speed settings remain compatible");
 
     nlohmann::json settingsWithoutMaximized =
         nlohmann::json::parse(profile.serialize());
@@ -539,7 +550,7 @@ void testNormalizationAndValidation()
     profile.settings.video.exposureEv = -99.0f;
     profile.settings.video.windowWidth = 20;
     profile.settings.video.windowHeight = 30;
-    profile.settings.gameplay.simulationSpeedPercent = 37;
+    profile.settings.gameplay.simulationSpeed = -1.0f;
     profile.normalize();
     CHECK_MESSAGE(profile.currentLevel == 9,
         "current level is independent of legacy unlock progression");
@@ -559,9 +570,14 @@ void testNormalizationAndValidation()
     CHECK_MESSAGE(profile.settings.video.windowWidth == 640, "window width clamps low");
     CHECK_MESSAGE(profile.settings.video.windowHeight == 480, "window height clamps low");
     CHECK_MESSAGE(
-        profile.settings.gameplay.simulationSpeedPercent ==
-            sokoban::config::simulationSpeedPercent,
-        "unsupported simulation speed receives default");
+        profile.settings.gameplay.simulationSpeed ==
+            sokoban::config::simulationSpeed,
+        "negative simulation speed receives default");
+    profile.settings.gameplay.simulationSpeed = 12.5f;
+    profile.normalize();
+    CHECK_MESSAGE(
+        profile.settings.gameplay.simulationSpeed == 12.5f,
+        "manual simulation speed above slider range is retained");
 
     checkThrows([] {
         (void)sokoban::decodePlayerProfile(R"json({ "format": 99 })json");

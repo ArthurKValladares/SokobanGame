@@ -40,7 +40,9 @@ public:
     static void addTab(std::string name, DrawCallback callback);
     // A menu in the workspace's main menu bar; the callback draws its items.
     static void addMenu(std::string name, DrawCallback callback);
-    // Removes every tab and menu.
+    // A control drawn directly in the workspace's main menu bar.
+    static void addTopBarControl(DrawCallback callback);
+    // Removes every tab, menu, and top-bar control.
     static void clearTabs();
     [[nodiscard]] static DrawResult draw(GameViewport gameViewport);
 #else
@@ -53,6 +55,11 @@ public:
 
     template <typename Callback>
     static void addMenu(std::string, Callback&&)
+    {
+    }
+
+    template <typename Callback>
+    static void addTopBarControl(Callback&&)
     {
     }
 

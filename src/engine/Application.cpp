@@ -7,6 +7,7 @@
 #include "engine/ContentPipeline.hpp"
 #include "engine/DebugUi.hpp"
 #include "engine/DevSession.hpp"
+#include <imgui.h>
 #endif
 
 #include "engine/ParticleConfig.hpp"
@@ -343,6 +344,28 @@ Application::Application(ApplicationOptions options)
         tools_->drawDetachedCameraMenu(
             window_.nativeHandle(),
             preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
+    });
+    DebugUi::addTopBarControl([this] {
+        float speed = settingsCoordinator_.userSettings()
+                          .gameplay.simulationSpeed;
+        ImGui::SetNextItemWidth(180.0f);
+        const bool changed = ImGui::SliderFloat(
+            "Simulation speed",
+            &speed,
+            config::simulationSpeedSliderMinimum,
+            config::simulationSpeedSliderMaximum,
+            "%.3fx");
+        const bool committed = ImGui::IsItemDeactivatedAfterEdit();
+        if (changed || committed) {
+            applySettingsEffects(
+                settingsCoordinator_.applySimulationSpeed(
+                    speed, committed));
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Ctrl-click to type any non-negative value, including above "
+                "10x. Rendering and editor input remain at normal speed.");
+        }
     });
     tools_->enableShaderHotReload(assetRoot_);
     DebugUi::addTab("Tuning", [this] {
@@ -981,10 +1004,7 @@ bool Application::run()
             : 0.0f;
         const float dt = SimulationTiming::scaledDelta(
             wallClockDt,
-            static_cast<float>(
-                settingsCoordinator_.userSettings()
-                    .gameplay.simulationSpeedPercent) /
-                100.0f);
+            settingsCoordinator_.userSettings().gameplay.simulationSpeed);
         {
             SOKOBAN_PROFILE_SCOPE("Application.Update");
             update(

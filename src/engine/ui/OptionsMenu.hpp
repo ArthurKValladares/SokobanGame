@@ -17,7 +17,6 @@ struct GamepadPresentation;
 
 enum class OptionsMenuPage {
     Main,
-    Gameplay,
     Graphics,
     Audio,
     Controls,
@@ -26,13 +25,11 @@ enum class OptionsMenuPage {
 };
 
 enum class OptionsMenuRowId {
-    Gameplay,
     Graphics,
     Audio,
     Controls,
     ExitToTitle,
     Quit,
-    SimulationSpeed,
     AntiAliasing,
     Vsync,
     AllowTearing,

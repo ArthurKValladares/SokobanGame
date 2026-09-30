@@ -122,9 +122,10 @@ class SimulationTiming {
 public:
     static constexpr float maximumDeltaSeconds = 0.1f;
 
-    // Scales a sanitized frame delta while retaining the same maximum step as
-    // normal-speed play. Rendering and input continue at wall-clock speed;
-    // every simulation consumer receives this one shared scaled delta.
+    // Scales a sanitized frame delta. The wall-clock delta has already been
+    // capped by frameDelta(); applying the scale afterwards lets values above
+    // 1x actually advance faster. Rendering and input continue at wall-clock
+    // speed; every simulation consumer receives this one shared scaled delta.
     [[nodiscard]] static float scaledDelta(
         float frameDeltaSeconds,
         float scale) noexcept
@@ -133,9 +134,7 @@ public:
             !std::isfinite(scale) || scale <= 0.0f) {
             return 0.0f;
         }
-        return std::min(
-            frameDeltaSeconds * scale,
-            maximumDeltaSeconds);
+        return frameDeltaSeconds * scale;
     }
 
     void setSuspended(

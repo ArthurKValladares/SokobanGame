@@ -63,8 +63,10 @@ void testSimulationTimingScalesOneSharedDelta()
         SimulationTiming::scaledDelta(0.05f, 0.5f) - 0.025f) < 0.000001f);
     CHECK(std::abs(
         SimulationTiming::scaledDelta(0.025f, 2.0f) - 0.05f) < 0.000001f);
-    CHECK(SimulationTiming::scaledDelta(0.08f, 4.0f) ==
-        SimulationTiming::maximumDeltaSeconds);
+    CHECK(std::abs(
+        SimulationTiming::scaledDelta(0.08f, 4.0f) - 0.32f) < 0.000001f);
+    CHECK(std::abs(
+        SimulationTiming::scaledDelta(0.016f, 10.0f) - 0.16f) < 0.000001f);
     CHECK(SimulationTiming::scaledDelta(-1.0f, 0.5f) == 0.0f);
     CHECK(SimulationTiming::scaledDelta(0.05f, 0.0f) == 0.0f);
 }

@@ -42,17 +42,6 @@ constexpr std::array frameRateLimitChoices {
     OptionsMenuChoice { 240, "240 FPS" },
 };
 
-constexpr std::array simulationSpeedChoices {
-    OptionsMenuChoice { 10, "0.1x" },
-    OptionsMenuChoice { 25, "0.25x" },
-    OptionsMenuChoice { 50, "0.5x" },
-    OptionsMenuChoice { 75, "0.75x" },
-    OptionsMenuChoice { 100, "1x" },
-    OptionsMenuChoice { 150, "1.5x" },
-    OptionsMenuChoice { 200, "2x" },
-    OptionsMenuChoice { 400, "4x" },
-};
-
 struct DisplayMode {
     OptionsMenuChoice choice;
     bool fullscreen = false;
@@ -423,9 +412,6 @@ std::optional<OptionsAction> activateRow(
 {
     UserSettings settings = current;
     switch (row) {
-    case OptionsMenuRowId::Gameplay:
-        setPage(state, OptionsMenuPage::Gameplay);
-        break;
     case OptionsMenuRowId::Graphics:
         setPage(state, OptionsMenuPage::Graphics);
         break;
@@ -520,7 +506,6 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::ConfirmQuit:
         return options::Quit {};
     case OptionsMenuRowId::AntiAliasing:
-    case OptionsMenuRowId::SimulationSpeed:
     case OptionsMenuRowId::FrameRateLimit:
     case OptionsMenuRowId::RenderScalePreset:
     case OptionsMenuRowId::AmbientOcclusionStrength:
@@ -545,12 +530,6 @@ std::optional<OptionsAction> adjustRow(
     }
     UserSettings settings = current;
     switch (row) {
-    case OptionsMenuRowId::SimulationSpeed:
-        settings.gameplay.simulationSpeedPercent = cycleChoice(
-            simulationSpeedChoices,
-            settings.gameplay.simulationSpeedPercent,
-            direction);
-        break;
     case OptionsMenuRowId::AntiAliasing:
         settings.video.antiAliasingSamples = cycleChoice(
             sampleCountChoices,
@@ -622,7 +601,6 @@ std::string_view pageTitle(OptionsMenuPage page)
 {
     switch (page) {
     case OptionsMenuPage::Main: return "OPTIONS";
-    case OptionsMenuPage::Gameplay: return "GAMEPLAY";
     case OptionsMenuPage::Graphics: return "GRAPHICS";
     case OptionsMenuPage::Audio: return "AUDIO";
     case OptionsMenuPage::Controls: return "CONTROLS";
@@ -813,11 +791,6 @@ void appendMainRows(
         .kind = OptionsMenuRowKind::Button,
         .label = "Controls",
     });
-    rows.push_back({
-        .id = OptionsMenuRowId::Gameplay,
-        .kind = OptionsMenuRowKind::Button,
-        .label = "Gameplay",
-    });
     if (state.allowTitleExit) {
         rows.push_back({
             .id = OptionsMenuRowId::ExitToTitle,
@@ -833,28 +806,6 @@ void appendMainRows(
         .flexibleSpaceBefore = true,
         .dividerBefore = true,
     });
-}
-
-// Gameplay-wide timing controls. Rendering and menu input are intentionally
-// excluded from this speed so slow motion remains easy to inspect and adjust.
-void appendGameplayRows(
-    std::vector<OptionsMenuRow>& rows, const UserSettings& settings)
-{
-    rows = {
-        {
-            .id = OptionsMenuRowId::SimulationSpeed,
-            .kind = OptionsMenuRowKind::StepperChoice,
-            .label = "Simulation speed",
-            .choices = simulationSpeedChoices,
-            .choiceValue = settings.gameplay.simulationSpeedPercent,
-        },
-        {
-            .id = OptionsMenuRowId::Back,
-            .kind = OptionsMenuRowKind::Button,
-            .label = "Back",
-            .flexibleSpaceBefore = true,
-        },
-    };
 }
 
 // The graphics page: the display, quality and scaling rows.
@@ -1077,9 +1028,6 @@ std::vector<OptionsMenuRow> optionsMenuRows(
     case OptionsMenuPage::Main:
         appendMainRows(rows, state);
         break;
-    case OptionsMenuPage::Gameplay:
-        appendGameplayRows(rows, settings);
-        break;
     case OptionsMenuPage::Graphics:
         appendGraphicsRows(rows, state, settings);
         break;
@@ -1178,9 +1126,6 @@ OptionsMenuReduction reduceOptionsMenu(
         [&](const options::intent::SelectChoice& selection) {
             UserSettings settings = currentSettings;
             switch (selection.row) {
-            case OptionsMenuRowId::SimulationSpeed:
-                settings.gameplay.simulationSpeedPercent = selection.value;
-                break;
             case OptionsMenuRowId::AntiAliasing:
                 settings.video.antiAliasingSamples = selection.value;
                 break;

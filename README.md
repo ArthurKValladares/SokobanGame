@@ -313,8 +313,9 @@ or Alt while pressing the key during capture. When several bindings on one key
 match the held modifiers, only the one needing the most modifiers fires, so
 `Ctrl+S` does not also move down.
 
-Options > Gameplay also provides a persistent simulation-speed control from
-0.1x slow motion through 4x speed. Rendering and menu input stay at normal
+The ImGui workspace's top row provides a persistent 0x-10x Simulation Speed
+slider. Ctrl-clicking the slider accepts an arbitrary non-negative
+value, including values above 10x. Rendering and editor input stay at normal
 speed while gameplay, animation, transitions, timers, and particle effects
 advance from the same scaled simulation clock.
 

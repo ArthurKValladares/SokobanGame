@@ -9,7 +9,7 @@ namespace sokoban {
 
 struct UserSettings {
     struct Gameplay {
-        int simulationSpeedPercent = config::simulationSpeedPercent;
+        float simulationSpeed = config::simulationSpeed;
 
         bool operator==(const Gameplay&) const = default;
     };

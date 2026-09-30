@@ -5,6 +5,7 @@
 #include "engine/render/RenderResolution.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace sokoban {
 
@@ -17,12 +18,9 @@ int UserSettings::Video::effectiveRenderScalePercent() const
 
 void UserSettings::normalize()
 {
-    if (std::find(
-            config::simulationSpeedPercentOptions.begin(),
-            config::simulationSpeedPercentOptions.end(),
-            gameplay.simulationSpeedPercent) ==
-        config::simulationSpeedPercentOptions.end()) {
-        gameplay.simulationSpeedPercent = config::simulationSpeedPercent;
+    if (!std::isfinite(gameplay.simulationSpeed) ||
+        gameplay.simulationSpeed < 0.0f) {
+        gameplay.simulationSpeed = config::simulationSpeed;
     }
     audio.masterVolume = std::clamp(
         audio.masterVolume, config::minimumVolume, config::maximumVolume);

@@ -47,6 +47,9 @@ public:
     [[nodiscard]] SettingsEffects applyAudioSettings(
         const PlayerProfile::AudioSettings& settings,
         bool persist);
+    [[nodiscard]] SettingsEffects applySimulationSpeed(
+        float speed,
+        bool persist);
 
 private:
     void updatePresentationSettings();

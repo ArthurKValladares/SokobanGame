@@ -110,6 +110,20 @@ SettingsEffects SettingsCoordinator::applyAudioSettings(
     return effects;
 }
 
+SettingsEffects SettingsCoordinator::applySimulationSpeed(
+    float speed,
+    bool persist)
+{
+    profile_.settings.gameplay.simulationSpeed = speed;
+    profile_.normalize();
+
+    SettingsEffects effects;
+    effects.saveProgress = persist;
+    effects.saveSettings = persist;
+    effects.immediatePersistence = persist;
+    return effects;
+}
+
 void SettingsCoordinator::updatePresentationSettings()
 {
     presentationSettings_.lighting.ambientOcclusionEnabled =
