@@ -2209,6 +2209,7 @@ private:
                 case PreparedSurfaceMaterial::Water:
                     return pipelines_.water();
                 case PreparedSurfaceMaterial::MirrorEnergy:
+                case PreparedSurfaceMaterial::GateEnergy:
                     return pipelines_.mirrorEnergy();
                 case PreparedSurfaceMaterial::GroundSplat:
                     // Falls back to the flat tile shader when the manifest
@@ -2262,7 +2263,8 @@ private:
                     scene.isoLayout,
                     face.isEditorPreview);
             } else if (
-                face.material == PreparedSurfaceMaterial::MirrorEnergy) {
+                face.material == PreparedSurfaceMaterial::MirrorEnergy ||
+                face.material == PreparedSurfaceMaterial::GateEnergy) {
                 faceInstance = drawMirrorEnergyFace(
                     commandBuffer,
                     face.worldVertices,

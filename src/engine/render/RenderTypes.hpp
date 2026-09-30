@@ -24,6 +24,9 @@ enum class RenderViewMode {
 enum class RenderSurfaceEffect {
     Standard,
     MirrorEnergy,
+    // Persistent energy barriers share the animated emissive shader with
+    // mirror projections, but remain part of the normal world pass.
+    GateEnergy,
     // Ground tops blend two ground textures through a splat map; see
     // shaders/ground_splat.frag.glsl.
     GroundSplat,

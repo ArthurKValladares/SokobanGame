@@ -1148,9 +1148,9 @@ void testGameplayVisibleCellFiltersComposedWorldFrame()
     }));
 }
 
-void testGateParticlesFadeAndPressurePlateMatchesColor()
+void testGateEnergyCubeFadesAndPressurePlateMatchesColor()
 {
-    TEST("gateParticlesFadeAndPressurePlateMatchesColor");
+    TEST("gateEnergyCubeFadesAndPressurePlateMatchesColor");
     const Vec3 gateColor { 0.2f, 0.7f, 1.0f };
     const Level level = Level::loadFromDefinition({
         .layers = {
@@ -1176,12 +1176,24 @@ void testGateParticlesFadeAndPressurePlateMatchesColor()
         .settings = {},
     });
     CHECK(closedFrame.particles.size() ==
-        config::gateParticleColumns * config::gateParticleRows);
-    CHECK(std::ranges::none_of(
+        config::gateCornerParticleCount);
+    CHECK(std::ranges::count_if(
         closedFrame.tiles,
         [](const RenderFrameData::Tile& tile) {
-            return tile.cell == GridPosition3 { 2, 0, 1 };
-        }));
+            return tile.cell == GridPosition3 { 2, 0, 1 } &&
+                tile.effect == RenderSurfaceEffect::GateEnergy;
+        }) == config::gateEnergyTileCount);
+    const auto closedEnergy = std::ranges::find_if(
+        closedFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 2, 0, 1 } &&
+                tile.effect == RenderSurfaceEffect::GateEnergy;
+        });
+    CHECK(closedEnergy != closedFrame.tiles.end());
+    CHECK(closedEnergy != closedFrame.tiles.end() &&
+        closedEnergy->model == cubeModel);
+    CHECK(closedEnergy != closedFrame.tiles.end() &&
+        near(closedEnergy->color.x, gateColor.x));
     const auto closedPlate = std::ranges::find_if(
         closedFrame.tiles,
         [](const RenderFrameData::Tile& tile) {
@@ -1213,6 +1225,18 @@ void testGateParticlesFadeAndPressurePlateMatchesColor()
     CHECK(fadingFrame.particles.size() == closedFrame.particles.size());
     CHECK(fadingFrame.particles[0].color.w < closedFrame.particles[0].color.w);
     CHECK(fadingFrame.particles[0].color.w > 0.0f);
+    const auto fadingEnergy = std::ranges::find_if(
+        fadingFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 2, 0, 1 } &&
+                tile.effect == RenderSurfaceEffect::GateEnergy;
+        });
+    CHECK(fadingEnergy != fadingFrame.tiles.end());
+    if (fadingEnergy != fadingFrame.tiles.end() &&
+        closedEnergy != closedFrame.tiles.end()) {
+        CHECK(fadingEnergy->color.w < closedEnergy->color.w);
+        CHECK(fadingEnergy->color.w > 0.0f);
+    }
 
     GameplayPresentation openPresentation;
     openPresentation.resetEntities(open);
@@ -1226,6 +1250,12 @@ void testGateParticlesFadeAndPressurePlateMatchesColor()
         .settings = {},
     });
     CHECK(openFrame.particles.empty());
+    CHECK(std::ranges::none_of(
+        openFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 2, 0, 1 } &&
+                tile.effect == RenderSurfaceEffect::GateEnergy;
+        }));
     const auto openPlate = std::ranges::find_if(
         openFrame.tiles,
         [](const RenderFrameData::Tile& tile) {
@@ -1245,7 +1275,13 @@ void testGateParticlesFadeAndPressurePlateMatchesColor()
         .settings = {},
     });
     CHECK(editorFrame.particles.size() ==
-        config::gateParticleColumns * config::gateParticleRows);
+        config::gateCornerParticleCount);
+    CHECK(std::ranges::count_if(
+        editorFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 2, 0, 1 } &&
+                tile.effect == RenderSurfaceEffect::GateEnergy;
+        }) == config::gateEnergyTileCount);
     CHECK(std::ranges::any_of(
         editorFrame.tiles,
         [](const RenderFrameData::Tile& tile) {
@@ -2838,7 +2874,7 @@ int main()
     testDecorativeTileRendersWithoutChangingCameraExtent();
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();
     testGameplayVisibleCellFiltersComposedWorldFrame();
-    testGateParticlesFadeAndPressurePlateMatchesColor();
+    testGateEnergyCubeFadesAndPressurePlateMatchesColor();
     testEditorFrameProvidesInvisibleExpansionBorderAndPreview();
     testEditorFrameShowsReadOnlyOverworldNeighbors();
     testEditorSelectorMoveUsesFlagPreviews();

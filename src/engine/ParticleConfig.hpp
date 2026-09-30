@@ -32,16 +32,20 @@ inline constexpr float mirrorSwapSmokeOpacity = 0.72f;
 inline constexpr bool mirrorSwapSmokeDrawOnTop = true;
 inline constexpr Vec4 witchSwapSmokeColor { 0.72f, 0.18f, 0.94f, 0.78f };
 
-// Gates are continuous, deterministic particle fields built directly into a
-// frame rather than transient ParticleSystem bursts. The glow texture and
-// small drifting lattice keep the cell readable as a barrier without a model.
+// Gates use the renderer's animated energy-surface shader for a translucent
+// cube and its edge rails. Particles are limited to textured corner blooms,
+// giving the barrier a readable silhouette instead of a lattice of dots.
 inline constexpr std::string_view gateParticleTextureName = "ParticleGlow";
-inline constexpr float gateParticleOpacity = 0.78f;
-inline constexpr float gateParticleEmissiveStrength = 2.0f;
-inline constexpr float gateParticleSize = 0.46f;
-inline constexpr float gateParticleDrift = 0.08f;
-inline constexpr uint32_t gateParticleColumns = 3;
-inline constexpr uint32_t gateParticleRows = 4;
+inline constexpr float gateEnergyShellAlpha = 0.30f;
+inline constexpr float gateEnergyCoreAlpha = 0.12f;
+inline constexpr float gateEnergyEdgeAlpha = 0.88f;
+inline constexpr float gateEnergyInset = 0.055f;
+inline constexpr float gateEnergyEdgeThickness = 0.075f;
+inline constexpr uint32_t gateEnergyTileCount = 14;
+inline constexpr float gateCornerParticleOpacity = 0.42f;
+inline constexpr float gateCornerParticleEmissiveStrength = 2.8f;
+inline constexpr float gateCornerParticleSize = 0.38f;
+inline constexpr uint32_t gateCornerParticleCount = 8;
 
 inline constexpr std::string_view turretMuzzleTextureName = "Muzzle01";
 inline constexpr std::string_view turretGlowTextureName = "ParticleGlow";

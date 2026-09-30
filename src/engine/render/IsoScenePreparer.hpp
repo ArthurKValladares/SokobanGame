@@ -86,6 +86,7 @@ enum class PreparedSurfaceMaterial {
     Standard,
     Water,
     MirrorEnergy,
+    GateEnergy,
     // Splat-mapped ground: only the upward-facing top of a ground tile uses
     // it, so the sides keep the flat tile color.
     GroundSplat,

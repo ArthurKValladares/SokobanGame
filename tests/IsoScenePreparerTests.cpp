@@ -1640,6 +1640,17 @@ void testMirrorEnergyIsTranslucentNonPickableAndShadowless()
         .model = { 1 },
         .effect = sokoban::RenderSurfaceEffect::MirrorEnergy,
     });
+    frame.tiles.push_back({
+        .cell = { 0, 0, 0 },
+        .position = { 0.05f, 0.05f },
+        .size = { 0.9f, 0.9f },
+        .color = { 1.0f, 0.72f, 0.12f, 0.35f },
+        .baseElevation = 0.05f,
+        .height = 0.9f,
+        .pickable = false,
+        .showGrid = false,
+        .effect = sokoban::RenderSurfaceEffect::GateEnergy,
+    });
     frame.isoFaces.push_back({
         .vertices = {
             sokoban::Vec3 { 0.0f, 0.0f, 0.5f },
@@ -1671,6 +1682,18 @@ void testMirrorEnergyIsTranslucentNonPickableAndShadowless()
     if (energyFaceIndex != scene.translucentFaceIndices.end()) {
         CHECK(std::ranges::find(
             scene.opaqueFaceIndices, *energyFaceIndex) ==
+            scene.opaqueFaceIndices.end());
+    }
+    const auto gateFaceIndex = std::ranges::find_if(
+        scene.translucentFaceIndices,
+        [&](std::size_t index) {
+            return scene.isoFaces[index].material ==
+                sokoban::PreparedSurfaceMaterial::GateEnergy;
+        });
+    CHECK(gateFaceIndex != scene.translucentFaceIndices.end());
+    if (gateFaceIndex != scene.translucentFaceIndices.end()) {
+        CHECK(std::ranges::find(
+            scene.opaqueFaceIndices, *gateFaceIndex) ==
             scene.opaqueFaceIndices.end());
     }
 }

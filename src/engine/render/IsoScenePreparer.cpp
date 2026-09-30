@@ -1071,7 +1071,8 @@ static void prepareAuxiliaryGeometry(
          ++tileIndex) {
         const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
         if (tile.isEditorPreview || tile.pickOnly ||
-            tile.effect == RenderSurfaceEffect::MirrorEnergy) {
+            tile.effect == RenderSurfaceEffect::MirrorEnergy ||
+            tile.effect == RenderSurfaceEffect::GateEnergy) {
             continue;
         }
         if (!tile.model.isCube()) {
@@ -1098,7 +1099,8 @@ static void prepareAuxiliaryGeometry(
     }
     for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
         if (face.castsShadows &&
-            face.effect != RenderSurfaceEffect::MirrorEnergy) {
+            face.effect != RenderSurfaceEffect::MirrorEnergy &&
+            face.effect != RenderSurfaceEffect::GateEnergy) {
             appendShadowFace(face.vertices);
         }
     }
@@ -1262,7 +1264,8 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
     if (request.drawable) {
         (request.blurBehind ||
                 request.material == PreparedSurfaceMaterial::Water ||
-                request.material == PreparedSurfaceMaterial::MirrorEnergy
+                request.material == PreparedSurfaceMaterial::MirrorEnergy ||
+                request.material == PreparedSurfaceMaterial::GateEnergy
                 ? scene.translucentFaceIndices
                 : scene.opaqueFaceIndices)
             .push_back(index);
@@ -1303,10 +1306,13 @@ void appendTileFaces(
         const bool pickable =
             tile.pickable &&
             !tile.isEditorPreview &&
-            tile.effect != RenderSurfaceEffect::MirrorEnergy;
+            tile.effect != RenderSurfaceEffect::MirrorEnergy &&
+            tile.effect != RenderSurfaceEffect::GateEnergy;
         const PreparedSurfaceMaterial tileMaterial =
             tile.effect == RenderSurfaceEffect::MirrorEnergy
             ? PreparedSurfaceMaterial::MirrorEnergy
+            : tile.effect == RenderSurfaceEffect::GateEnergy
+            ? PreparedSurfaceMaterial::GateEnergy
             : PreparedSurfaceMaterial::Standard;
         // Splatting is a top-surface treatment: the sides of a ground
         // block keep the flat tile material.
@@ -1429,7 +1435,8 @@ void appendTileFaces(
 
         if (!tile.model.isCube() && !tile.pickOnly && mainSceneVisible) {
             (tile.blurBehind || tile.color.w < 1.0f ||
-                    tile.effect == RenderSurfaceEffect::MirrorEnergy
+                    tile.effect == RenderSurfaceEffect::MirrorEnergy ||
+                    tile.effect == RenderSurfaceEffect::GateEnergy
                     ? scene.translucentModelIndices
                     : scene.opaqueModelIndices)
                 .push_back(tileIndex);
@@ -1456,6 +1463,8 @@ void appendSourceIsoFaces(
             .material =
                 source.effect == RenderSurfaceEffect::MirrorEnergy
                 ? PreparedSurfaceMaterial::MirrorEnergy
+                : source.effect == RenderSurfaceEffect::GateEnergy
+                ? PreparedSurfaceMaterial::GateEnergy
                 : PreparedSurfaceMaterial::Standard,
             .depth = faceDepth(scene.isoLayout, source.vertices),
         };
@@ -1468,7 +1477,8 @@ void appendSourceIsoFaces(
             frameData.tiles.size() + sourceIndex;
         if (scene.renderables[renderableIndex].mainSceneVisible) {
             (source.translucent ||
-                    face.material == PreparedSurfaceMaterial::MirrorEnergy
+                    face.material == PreparedSurfaceMaterial::MirrorEnergy ||
+                    face.material == PreparedSurfaceMaterial::GateEnergy
                     ? scene.translucentFaceIndices
                     : scene.opaqueFaceIndices)
                 .push_back(scene.isoFaces.size());
