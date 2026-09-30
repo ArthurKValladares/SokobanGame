@@ -201,7 +201,7 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
         requirements.requireTexture(
             manifest.textureIdByName(config::turretGlowTextureName));
         requirements.requireTexture(
-            manifest.textureIdByName(config::turretTrailTextureName));
+            manifest.textureIdByName(config::turretLaserTextureName));
     }
     for (const Level::Decoration& decoration : level.decorations()) {
         requirements.requireModel(

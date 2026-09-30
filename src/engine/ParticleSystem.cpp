@@ -132,7 +132,10 @@ void ParticleSystem::emitRibbon(
     const Vec3 delta = end - start;
     const float distance = length(delta);
     if (ribbon.texture.isNone() || distance <= 0.0001f ||
-        ribbon.width <= 0.0f || ribbon.maxLength <= 0.0f) {
+        ribbon.width <= 0.0f ||
+        (ribbon.fullLength
+                ? ribbon.lifetimeSeconds <= 0.0f
+                : ribbon.maxLength <= 0.0f)) {
         return;
     }
     ribbons_.push_back({
@@ -144,7 +147,10 @@ void ParticleSystem::emitRibbon(
         .width = ribbon.width,
         .maxLength = ribbon.maxLength,
         .speed = std::max(ribbon.speed, 0.001f),
+        .lifetimeSeconds = std::max(ribbon.lifetimeSeconds, 0.001f),
+        .revealSeconds = std::max(ribbon.revealSeconds, 0.0f),
         .ageSeconds = -std::max(delaySeconds, 0.0f),
+        .fullLength = ribbon.fullLength,
         .flipTextureV = ribbon.flipTextureV,
         .drawOnTop = ribbon.drawOnTop,
     });
@@ -170,6 +176,9 @@ void ParticleSystem::update(float dt)
         ribbon.ageSeconds += dt;
     }
     std::erase_if(ribbons_, [](const Ribbon& ribbon) {
+        if (ribbon.fullLength) {
+            return ribbon.ageSeconds >= ribbon.lifetimeSeconds;
+        }
         const float finishSeconds =
             (ribbon.distance + ribbon.maxLength) / ribbon.speed;
         return ribbon.ageSeconds >= finishSeconds;
@@ -208,13 +217,22 @@ void ParticleSystem::appendRenderData(RenderFrameData& frame) const
         });
     }
     for (const Ribbon& ribbon : ribbons_) {
-        if (ribbon.ageSeconds <= 0.0f) {
+        if (ribbon.ageSeconds < 0.0f ||
+            (!ribbon.fullLength && ribbon.ageSeconds <= 0.0f)) {
             continue;
         }
         const float virtualHead = ribbon.ageSeconds * ribbon.speed;
-        const float headDistance = std::min(virtualHead, ribbon.distance);
-        const float tailDistance = std::clamp(
-            virtualHead - ribbon.maxLength, 0.0f, ribbon.distance);
+        const float revealProgress = ribbon.revealSeconds > 0.0f
+            ? std::clamp(
+                  ribbon.ageSeconds / ribbon.revealSeconds, 0.0f, 1.0f)
+            : 1.0f;
+        const float headDistance = ribbon.fullLength
+            ? ribbon.distance * revealProgress
+            : std::min(virtualHead, ribbon.distance);
+        const float tailDistance = ribbon.fullLength
+            ? 0.0f
+            : std::clamp(
+                  virtualHead - ribbon.maxLength, 0.0f, ribbon.distance);
         const float visibleLength = headDistance - tailDistance;
         if (visibleLength <= 0.0001f) {
             continue;

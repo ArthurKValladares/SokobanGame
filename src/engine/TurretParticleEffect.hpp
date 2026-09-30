@@ -10,15 +10,15 @@ class AssetManifest;
 struct TurretParticleEffects {
     ParticleEffectDefinition muzzleGlow;
     ParticleEffectDefinition muzzleFlash;
-    ParticleRibbonDefinition bulletTrail;
-    ParticleRibbonDefinition bulletTrailCore;
+    ParticleRibbonDefinition laserBeam;
+    ParticleRibbonDefinition laserBeamCore;
 };
 
 [[nodiscard]] TurretParticleEffects makeTurretParticleEffects(
     const AssetManifest& manifest);
 
-// Schedules a layered muzzle burst and a fast, tapered ribbon whose head reaches
-// the target at impactDelaySeconds. Returns the muzzle/recoil start delay.
+// Schedules a layered muzzle burst and a full-path laser that remains visible
+// across the gameplay impact. Returns the muzzle/recoil start delay.
 [[nodiscard]] float emitTurretShotParticles(
     ParticleSystem& particles,
     const TurretParticleEffects& effects,

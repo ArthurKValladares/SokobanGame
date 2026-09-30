@@ -4,7 +4,6 @@
 #include "engine/ParticleConfig.hpp"
 
 #include <algorithm>
-#include <cmath>
 
 namespace sokoban {
 
@@ -38,18 +37,18 @@ TurretParticleEffects makeTurretParticleEffects(const AssetManifest& manifest)
         .maximumAngularVelocity = 2.5f,
         .drawOnTop = config::turretParticlesDrawOnTop,
     };
-    effects.bulletTrail = {
-        .texture = manifest.textureIdByName(config::turretTrailTextureName),
-        .color = config::turretTrailColor,
-        .width = config::turretTrailWidth,
-        .maxLength = config::turretTrailMaximumLength,
-        .speed = config::turretBulletSpeed,
-        .flipTextureV = true,
+    effects.laserBeam = {
+        .texture = manifest.textureIdByName(config::turretLaserTextureName),
+        .color = config::turretLaserColor,
+        .width = config::turretLaserWidth,
+        .lifetimeSeconds = config::turretLaserLifetimeSeconds,
+        .revealSeconds = config::turretLaserGrowthSeconds,
+        .fullLength = true,
         .drawOnTop = config::turretParticlesDrawOnTop,
     };
-    effects.bulletTrailCore = effects.bulletTrail;
-    effects.bulletTrailCore.color = config::turretTrailCoreColor;
-    effects.bulletTrailCore.width = config::turretTrailCoreWidth;
+    effects.laserBeamCore = effects.laserBeam;
+    effects.laserBeamCore.color = config::turretLaserCoreColor;
+    effects.laserBeamCore.width = config::turretLaserCoreWidth;
     return effects;
 }
 
@@ -72,15 +71,15 @@ float emitTurretShotParticles(
         static_cast<float>(shot.targetCell.y) + 0.5f,
         static_cast<float>(shot.targetCell.z) + config::turretTargetElevation,
     };
-    const float dx = target.x - muzzle.x;
-    const float dy = target.y - muzzle.y;
-    const float dz = target.z - muzzle.z;
-    const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
-    const float travelSeconds = distance /
-        std::max(effects.bulletTrail.speed, 0.001f);
+    const float beamLeadSeconds = std::max(
+        effects.laserBeam.lifetimeSeconds -
+            config::turretLaserAfterImpactSeconds,
+        0.0f);
+    const float beamDelay = std::max(
+        impactDelaySeconds - beamLeadSeconds,
+        0.0f);
     const float muzzleDelay = std::max(
-        impactDelaySeconds - travelSeconds -
-            config::turretTrailAfterMuzzleSeconds,
+        beamDelay - config::turretLaserAfterMuzzleSeconds,
         0.0f);
 
     particles.emit(muzzle, effects.muzzleGlow, muzzleDelay);
@@ -88,13 +87,13 @@ float emitTurretShotParticles(
     particles.emitRibbon(
         muzzle,
         target,
-        effects.bulletTrail,
-        muzzleDelay + config::turretTrailAfterMuzzleSeconds);
+        effects.laserBeam,
+        beamDelay);
     particles.emitRibbon(
         muzzle,
         target,
-        effects.bulletTrailCore,
-        muzzleDelay + config::turretTrailAfterMuzzleSeconds);
+        effects.laserBeamCore,
+        beamDelay);
     return muzzleDelay;
 }
 

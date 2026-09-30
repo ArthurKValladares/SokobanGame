@@ -33,7 +33,7 @@ inline constexpr Vec4 witchSwapSmokeColor { 0.72f, 0.18f, 0.94f, 0.78f };
 
 inline constexpr std::string_view turretMuzzleTextureName = "Muzzle01";
 inline constexpr std::string_view turretGlowTextureName = "ParticleGlow";
-inline constexpr std::string_view turretTrailTextureName = "BulletTrace";
+inline constexpr std::string_view turretLaserTextureName = "LaserBeam";
 inline constexpr Vec4 turretMuzzleColor { 1.0f, 0.82f, 0.28f, 1.0f };
 inline constexpr uint32_t turretMuzzleParticleCount = 3;
 inline constexpr Vec2 turretMuzzleLifetimeSeconds { 0.11f, 0.16f };
@@ -53,15 +53,16 @@ inline constexpr Vec2 turretMuzzleGlowLifetimeSeconds { 0.13f, 0.19f };
 inline constexpr Vec2 turretMuzzleGlowInitialSize { 1.23f, 1.53f };
 inline constexpr Vec2 turretMuzzleGlowFinalSize { 0.39f, 0.63f };
 
-// The authored trace fades and narrows from V=1 (the bullet head) toward V=0
-// (the tail). One moving ribbon is used per layer, never a row of sprites.
-inline constexpr Vec4 turretTrailColor { 1.0f, 0.58f, 0.06f, 0.72f };
-inline constexpr Vec4 turretTrailCoreColor { 1.0f, 0.96f, 0.70f, 0.96f };
-inline constexpr float turretTrailWidth = 0.33f;
-inline constexpr float turretTrailCoreWidth = 0.1275f;
-inline constexpr float turretTrailMaximumLength = 7.0f;
-inline constexpr float turretBulletSpeed = 48.0f;
-inline constexpr float turretTrailAfterMuzzleSeconds = 0.008f;
+// Both layers span the full muzzle-to-target path as soon as the laser fires.
+// A broad warm glow surrounds a tighter near-white core.
+inline constexpr Vec4 turretLaserColor { 1.0f, 0.58f, 0.06f, 0.72f };
+inline constexpr Vec4 turretLaserCoreColor { 1.0f, 0.96f, 0.70f, 0.96f };
+inline constexpr float turretLaserWidth = 0.90f;
+inline constexpr float turretLaserCoreWidth = 0.30f;
+inline constexpr float turretLaserLifetimeSeconds = 0.36f;
+inline constexpr float turretLaserGrowthSeconds = 0.08f;
+inline constexpr float turretLaserAfterImpactSeconds = 0.08f;
+inline constexpr float turretLaserAfterMuzzleSeconds = 0.008f;
 inline constexpr float turretMuzzleForwardOffset = 0.52f;
 inline constexpr float turretMuzzleElevation = 0.64f;
 inline constexpr float turretTargetElevation = 0.58f;

@@ -37,7 +37,7 @@ const AssetManifest& testManifest()
         { "name": "GroundSplatMapOverworld2", "path": "overworld2.png" },
         { "name": "Muzzle01", "path": "muzzle.png" },
         { "name": "ParticleGlow", "path": "glow.png" },
-        { "name": "BulletTrace", "path": "trace.png" }
+        { "name": "LaserBeam", "path": "laser.png" }
       ],
       "models": [
         { "name": "Stone", "path": "stone.gltf" },
@@ -140,7 +140,7 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.modelIdByName("Turret")));
     CHECK(requirements.contains(manifest.textureIdByName("Muzzle01")));
     CHECK(requirements.contains(manifest.textureIdByName("ParticleGlow")));
-    CHECK(requirements.contains(manifest.textureIdByName("BulletTrace")));
+    CHECK(requirements.contains(manifest.textureIdByName("LaserBeam")));
     CHECK(!requirements.contains(cubeModel));
     CHECK(requirements.contains(manifest.playerIdleAnimation()));
     CHECK(requirements.contains(manifest.playerMoveAnimation()));
@@ -151,7 +151,7 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.enemyAttackAnimation()));
     CHECK(requirements.modelCount() == 8);
     CHECK(requirements.animationCount() == 6);
-    // Three ground splat textures plus muzzle, glow, and connected trace.
+    // Three ground splat textures plus muzzle, glow, and the laser beam.
     CHECK(requirements.textureCount() == 6);
 
     const Level mirrorLevel = Level::loadFromLayers({

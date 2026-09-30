@@ -43,18 +43,23 @@ struct ParticleTrailDefinition {
     float speed = 24.0f;
 };
 
-// A single connected tracer whose head advances at projectile speed while its
-// tail follows at most maxLength world units behind. Unlike emitTrail's burst
-// of independent samples, this remains one textured quad and cannot break into
-// visible beads. The geometry's V axis runs from tail (0) to head (1), with
-// flipTextureV available when an authored texture stores its bright head at
-// the opposite end.
+// A single connected path effect. By default its head advances at projectile
+// speed while its tail follows at most maxLength world units behind. Setting
+// fullLength keeps the tail anchored at start for lifetimeSeconds. With a
+// positive revealSeconds its head grows toward end over that short interval;
+// zero reveals the complete path immediately. Unlike emitTrail's burst of
+// independent samples, either mode remains one textured quad and cannot break
+// into visible beads. The geometry's V axis runs from start/tail (0) to
+// end/head (1), with flipTextureV available for asymmetric authored textures.
 struct ParticleRibbonDefinition {
     RenderTexture texture = noTexture;
     Vec4 color { 1.0f, 1.0f, 1.0f, 1.0f };
     float width = 0.12f;
     float maxLength = 6.0f;
     float speed = 24.0f;
+    float lifetimeSeconds = 0.15f;
+    float revealSeconds = 0.0f;
+    bool fullLength = false;
     bool flipTextureV = false;
     bool drawOnTop = false;
 };
@@ -118,7 +123,10 @@ private:
         float width = 0.12f;
         float maxLength = 6.0f;
         float speed = 24.0f;
+        float lifetimeSeconds = 0.15f;
+        float revealSeconds = 0.0f;
         float ageSeconds = 0.0f;
+        bool fullLength = false;
         bool flipTextureV = false;
         bool drawOnTop = false;
     };

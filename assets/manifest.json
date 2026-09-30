@@ -123,8 +123,8 @@
       "filter": "linear"
     },
     {
-      "name": "BulletTrace",
-      "path": "kenney_particle-pack/PNG (Transparent)/trace_05.png",
+      "name": "LaserBeam",
+      "path": "custom/textures/turret_laser_beam.png",
       "filter": "linear"
     },
     {

@@ -139,9 +139,9 @@ void testTrailSamplesAppearAlongTheLineAtProjectileSpeed()
     CHECK(frame.particles.front().color.w < frame.particles.back().color.w);
 }
 
-void testTurretShotLayersTheMuzzleAndTrace()
+void testTurretShotLayersTheMuzzleAndFullPathLaser()
 {
-    TEST("turretShotLayersTheMuzzleAndTrace");
+    TEST("turretShotLayersTheMuzzleAndFullPathLaser");
     TurretParticleEffects effects;
     effects.muzzleGlow = fixedEffect();
     effects.muzzleGlow.textures = { RenderTexture { 10 } };
@@ -150,18 +150,17 @@ void testTurretShotLayersTheMuzzleAndTrace()
     effects.muzzleFlash.textures = { RenderTexture { 11 } };
     effects.muzzleFlash.particleCount = 1;
 
-    effects.bulletTrail = {
+    effects.laserBeam = {
         .texture = RenderTexture { 12 },
         .color = { 1.0f, 0.6f, 0.1f, 0.8f },
-        .width = 0.10f,
-        .maxLength = 1.0f,
-        .speed = 10.0f,
-        .flipTextureV = true,
+        .width = 0.40f,
+        .lifetimeSeconds = 0.20f,
+        .fullLength = true,
         .drawOnTop = true,
     };
-    effects.bulletTrailCore = effects.bulletTrail;
-    effects.bulletTrailCore.texture = RenderTexture { 13 };
-    effects.bulletTrailCore.width = 0.04f;
+    effects.laserBeamCore = effects.laserBeam;
+    effects.laserBeamCore.texture = RenderTexture { 13 };
+    effects.laserBeamCore.width = 0.12f;
 
     ParticleSystem particles(17);
     const float muzzleDelay = emitTurretShotParticles(
@@ -188,21 +187,105 @@ void testTurretShotLayersTheMuzzleAndTrace()
     particles.update(0.058f);
     frame.particles.clear();
     particles.appendRenderData(frame);
-    const auto traceParticle = std::ranges::find_if(
+    const auto laserParticle = std::ranges::find_if(
         frame.particles,
         [](const auto& particle) {
             return particle.texture == RenderTexture { 12 };
         });
-    CHECK(traceParticle != frame.particles.end());
-    if (traceParticle != frame.particles.end()) {
-        CHECK(traceParticle->size.y > traceParticle->size.x);
-        CHECK(traceParticle->billboardAlignment.x > 0.99f);
-        CHECK(traceParticle->billboardAlignmentUsesY);
-        CHECK(traceParticle->flipTextureV);
+    CHECK(laserParticle != frame.particles.end());
+    if (laserParticle != frame.particles.end()) {
+        CHECK(near(laserParticle->size.x, 0.40f));
+        CHECK(laserParticle->size.y > 1.4f);
+        CHECK(laserParticle->billboardAlignment.x > 0.99f);
+        CHECK(laserParticle->billboardAlignmentUsesY);
+        CHECK(!laserParticle->flipTextureV);
     }
     CHECK(std::ranges::any_of(frame.particles, [](const auto& particle) {
         return particle.texture == RenderTexture { 13 };
     }));
+}
+
+void testFullLengthRibbonStaysVisibleUntilItsLifetimeEnds()
+{
+    TEST("fullLengthRibbonStaysVisibleUntilItsLifetimeEnds");
+    ParticleSystem particles(23);
+    particles.emitRibbon(
+        { 0.0f, 0.0f, 0.0f },
+        { 2.0f, 0.0f, 0.0f },
+        ParticleRibbonDefinition {
+            .texture = RenderTexture { 21 },
+            .color = { 1.0f, 0.7f, 0.2f, 0.9f },
+            .width = 0.6f,
+            .lifetimeSeconds = 0.5f,
+            .fullLength = true,
+            .drawOnTop = true,
+        });
+
+    RenderFrameData frame;
+    particles.appendRenderData(frame);
+    CHECK(frame.particles.size() == 1);
+    if (!frame.particles.empty()) {
+        CHECK(near(frame.particles[0].position.x, 1.0f));
+        CHECK(near(frame.particles[0].size.x, 0.6f));
+        CHECK(near(frame.particles[0].size.y, 2.0f));
+    }
+
+    particles.update(0.49f);
+    frame.particles.clear();
+    particles.appendRenderData(frame);
+    CHECK(frame.particles.size() == 1);
+    if (!frame.particles.empty()) {
+        CHECK(near(frame.particles[0].position.x, 1.0f));
+        CHECK(near(frame.particles[0].size.y, 2.0f));
+    }
+
+    particles.update(0.02f);
+    CHECK(particles.activeRibbonCount() == 0);
+}
+
+void testFullLengthRibbonGrowsFromItsOriginThenHolds()
+{
+    TEST("fullLengthRibbonGrowsFromItsOriginThenHolds");
+    ParticleSystem particles(29);
+    particles.emitRibbon(
+        { 0.0f, 0.0f, 0.0f },
+        { 2.0f, 0.0f, 0.0f },
+        ParticleRibbonDefinition {
+            .texture = RenderTexture { 22 },
+            .color = { 1.0f, 0.7f, 0.2f, 0.9f },
+            .width = 0.6f,
+            .lifetimeSeconds = 0.5f,
+            .revealSeconds = 0.1f,
+            .fullLength = true,
+            .drawOnTop = true,
+        });
+
+    particles.update(0.05f);
+    RenderFrameData frame;
+    particles.appendRenderData(frame);
+    CHECK(frame.particles.size() == 1);
+    if (!frame.particles.empty()) {
+        CHECK(near(frame.particles[0].position.x, 0.5f));
+        CHECK(near(frame.particles[0].size.y, 1.0f));
+    }
+
+    particles.update(0.05f);
+    frame.particles.clear();
+    particles.appendRenderData(frame);
+    CHECK(frame.particles.size() == 1);
+    if (!frame.particles.empty()) {
+        CHECK(near(frame.particles[0].position.x, 1.0f));
+        CHECK(near(frame.particles[0].size.y, 2.0f));
+    }
+
+    particles.update(0.2f);
+    frame.particles.clear();
+    particles.appendRenderData(frame);
+    CHECK(frame.particles.size() == 1);
+    if (!frame.particles.empty()) {
+        CHECK(near(frame.particles[0].position.x, 1.0f));
+        CHECK(near(frame.particles[0].size.y, 2.0f));
+    }
 }
 
 void testRibbonRemainsOneConnectedMovingTracer()
@@ -252,8 +335,10 @@ int main()
     testEmptyEffectsAndReset();
     testDelayedParticlesDoNotAgeOrMoveBeforeTheyAppear();
     testTrailSamplesAppearAlongTheLineAtProjectileSpeed();
-    testTurretShotLayersTheMuzzleAndTrace();
+    testTurretShotLayersTheMuzzleAndFullPathLaser();
     testRibbonRemainsOneConnectedMovingTracer();
+    testFullLengthRibbonStaysVisibleUntilItsLifetimeEnds();
+    testFullLengthRibbonGrowsFromItsOriginThenHolds();
 
     if (failures == 0) {
         std::cout << "ParticleSystemTests: " << checks
