@@ -1604,6 +1604,64 @@ void testEditorDrawsPlatesBeneathTheirOccupants()
     CHECK(end != frame.tiles.end() && !end->pickable);
 }
 
+void testRotatedEnemyFacesHeroAgainOnNextAction()
+{
+    TEST("rotatedEnemyFacesHeroAgainOnNextAction");
+    GameState before;
+    before.players.push_back({ .id = 1, .cell = { 1, 3, 1 } });
+    before.enemies.push_back({ .id = 2, .cell = { 1, 1, 1 } });
+    GameState turned = before;
+    turned.enemies[0].quarterTurns = 1;
+    GameplayPresentation presentation;
+    presentation.resetEntities(before);
+    const auto yaw = [&] {
+        const Quat orientation = presentation.enemies()[0].orientation;
+        return 2.0f * std::atan2(orientation.z, orientation.w);
+    };
+    const auto settle = [&](const GameState& state) {
+        for (int frame = 0; frame < 120; ++frame) {
+            presentation.advanceAnimations(1.0f / 60.0f, state);
+        }
+    };
+    settle(before);
+    const float tracking = yaw();
+
+    GameplaySession::Action rotate {
+        .before = before,
+        .after = turned,
+        .durationSeconds = 0.2f,
+    };
+    rotate.presentation = presentation.buildActionPresentation(rotate);
+    presentation.beginAction(rotate, before);
+    CHECK(near(presentation.enemies()[0].rotatorYawOffsetRadians, pi * 0.5f));
+    settle(turned);
+    CHECK(std::abs(std::remainder(yaw() - tracking - pi * 0.5f, 2.0f * pi)) < 0.01f);
+
+    // The next action, whatever it is, releases the turn.
+    GameState moved = turned;
+    moved.players[0].cell = { 2, 3, 1 };
+    GameplaySession::Action step {
+        .before = turned,
+        .after = moved,
+        .durationSeconds = 0.2f,
+        .facingDirection = MoveDirection::Right,
+    };
+    step.presentation = presentation.buildActionPresentation(step);
+    presentation.beginAction(step, turned);
+    CHECK(near(presentation.enemies()[0].rotatorYawOffsetRadians, 0.0f));
+    presentation.finishAction(moved);
+    settle(moved);
+    const float dx = 2.0f - 1.0f;
+    const float dy = 3.0f - 1.0f;
+    CHECK(std::abs(std::remainder(yaw() - std::atan2(-dx, dy), 2.0f * pi)) < 0.01f);
+
+    // Undoing a turn never adds one.
+    GameplaySession::Action undo = plans::inverted(rotate);
+    undo.presentation = presentation.buildActionPresentation(undo);
+    presentation.beginAction(undo, turned);
+    CHECK(near(presentation.enemies()[0].rotatorYawOffsetRadians, 0.0f));
+}
+
 void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
 {
     TEST("editorFrameProvidesInvisibleExpansionBorderAndPreview");
@@ -3194,6 +3252,7 @@ int main()
     testTurnedHeroFacesItsNewDirectionSmoothly();
     testMirrorOnPlatesDrawsPlateAndTurns();
     testEditorDrawsPlatesBeneathTheirOccupants();
+    testRotatedEnemyFacesHeroAgainOnNextAction();
     testEditorFrameProvidesInvisibleExpansionBorderAndPreview();
     testEditorFrameShowsReadOnlyOverworldNeighbors();
     testEditorSelectorMoveUsesFlagPreviews();

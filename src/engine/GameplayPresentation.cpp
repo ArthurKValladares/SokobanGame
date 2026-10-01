@@ -296,12 +296,12 @@ void GameplayPresentation::advanceAnimations(float dt, const GameState& state)
         if (std::abs(dx) + std::abs(dy) <= 0.0001f) {
             continue;
         }
-        // Rotator plates turn an enemy's frame of reference: it keeps
-        // tracking the nearest hero, offset by the quarter turns applied.
-        const float rotatorYaw = static_cast<float>(
-            state.enemies[enemyIndex].quarterTurns) * (pi * 0.5f);
+        // A rotator plate's turn holds until the next action begins (see
+        // beginAction); otherwise the enemy faces the hero squarely.
         const Quat target = quatFromAxisAngle(
-            { 0.0f, 0.0f, 1.0f }, std::atan2(-dx, dy) + rotatorYaw);
+            { 0.0f, 0.0f, 1.0f },
+            std::atan2(-dx, dy) +
+                enemies_[enemyIndex].rotatorYawOffsetRadians);
         const float blend = config::enemyFacingSlerpSeconds <= 0.0f
             ? 1.0f
             : 1.0f - std::exp(
@@ -597,6 +597,42 @@ void GameplayPresentation::beginAction(
             if (visual != players_.end()) {
                 visual->facingQuarterTurns =
                     facingQuarterTurns(*action.facingDirection);
+            }
+        }
+    }
+
+    // Enemies are turned by rotators only until the board next changes: any
+    // new action releases every held turn, so they go back to facing the
+    // nearest hero. A forward action that turns an enemy then holds its new
+    // turn. Undo never adds one; it just lets the enemy face the hero again.
+    for (EnemyVisual& enemy : enemies_) {
+        enemy.rotatorYawOffsetRadians = 0.0f;
+    }
+    if (!action.reversed) {
+        const std::size_t turnedEnemyCount = std::min(
+            action.before.enemies.size(), action.after.enemies.size());
+        for (std::size_t index = 0; index < turnedEnemyCount; ++index) {
+            const int turns =
+                ((static_cast<int>(action.after.enemies[index].quarterTurns) -
+                     static_cast<int>(
+                         action.before.enemies[index].quarterTurns)) %
+                        4 +
+                    4) %
+                4;
+            if (turns == 0) {
+                continue;
+            }
+            const EntityTarget target =
+                enemyTarget(action.before.enemies[index], index);
+            const auto visual = std::ranges::find_if(
+                enemies_,
+                [&](const EnemyVisual& candidate) {
+                    return candidate.motion.target == target;
+                });
+            if (visual != enemies_.end()) {
+                // 3 clockwise quarter turns read as one counter-clockwise.
+                visual->rotatorYawOffsetRadians =
+                    static_cast<float>(turns == 3 ? -1 : turns) * (pi * 0.5f);
             }
         }
     }

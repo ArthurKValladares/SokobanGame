@@ -288,6 +288,9 @@ and the required real-device checks are recorded.
   identical between whole-world and scoped steps: a turned unit joins the
   step's closure, so `StateDelta` and reservations see it. Mirror activation
   applies the same rule. A turned turret sweeps its new line of fire once.
+  An enemy's `quarterTurns` has no rule effect; `GameplayPresentation` holds
+  the turn only until the next action begins, then the enemy faces the
+  nearest hero again.
 - Every unit carries `quarterTurns` (0-3, clockwise). Turret firing direction
   is `rules::turretDirection` (authored tile turned by `quarterTurns`); do not
   read turret direction from the tile type alone. Profiles write the field only

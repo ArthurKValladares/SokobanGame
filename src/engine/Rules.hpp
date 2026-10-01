@@ -77,8 +77,9 @@ struct GameState {
         // They no longer block, support, attack, occlude, or render.
         bool dead = false;
         std::optional<MoveDirection> sliding;
-        // Clockwise quarter turns (0-3) applied by rotator plates. Enemies
-        // still turn to track heroes; this only drives the visible spin.
+        // Clockwise quarter turns (0-3) applied by rotator plates. It has no
+        // rule effect: the presentation turns the enemy when this changes and
+        // returns it to facing the nearest hero when the next action begins.
         uint8_t quarterTurns = 0;
 
         bool operator==(const Enemy&) const = default;

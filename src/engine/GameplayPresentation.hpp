@@ -68,7 +68,12 @@ public:
         uint32_t facingQuarterTurns = 0;
     };
 
-    struct EnemyVisual : AnimatedActorVisual {};
+    struct EnemyVisual : AnimatedActorVisual {
+        // Set when a rotator plate turns this enemy. The enemy keeps tracking
+        // the nearest hero but offset by this yaw, until the next action
+        // begins, when it clears and the enemy turns back to face the hero.
+        float rotatorYawOffsetRadians = 0.0f;
+    };
 
     void setAnimationCatalog(const AnimationCatalog* catalog)
     {

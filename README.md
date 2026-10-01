@@ -398,8 +398,9 @@ Gate), it turns the living unit standing on it a quarter turn: clockwise for
 does nothing more, and a plate already pressed when a step begins does not
 fire it. Heroes, rocks, ice blocks, turrets and enemies can all be turned. A
 turned turret fires along its new direction, immediately shooting any hero,
-enemy or turret already standing in that line. Enemies keep tracking the
-nearest hero, offset by the turns they have received. A Rotator with no linked
+enemy or turret already standing in that line. A turned enemy keeps
+that turn only until the board next changes, then goes back to facing the
+nearest hero. A Rotator with no linked
 plates never turns. The plate, its icon (a darker shade of the same color) and
 its linked pressure plates share the configured color; a pressure plate linked
 to both a Gate and a Rotator shows the Gate's color. Rotator assignments are
