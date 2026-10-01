@@ -1386,15 +1386,14 @@ void ApplicationTools::updateEditorInteraction(
         }
         return;
     }
-    // The pointer is over the board: show the tool a held key has turned
-    // the click into.
-    if (levelEditor.tool() == LevelEditor::Tool::Tiles &&
-        !splatPainter.active() && !input.moving) {
-        if (input.pickModifier) {
-            wantedEditorCursor_ = EditorCursor::Eyedropper;
-        } else if (input.paintLinkColorModifier) {
-            wantedEditorCursor_ = EditorCursor::Brush;
-        }
+    // The eyedropper and the link-color brush take over the pointer while
+    // their key is held, whatever the tool or other held keys: no placing,
+    // deleting, moving, decoration or ground editing, and no preview of any
+    // of those.
+    if (input.pickModifier || input.paintLinkColorModifier) {
+        updateEditorToolModifier(
+            input, previousRenderFrame, renderer, windowSize, pixelSize);
+        return;
     }
     if (levelEditor.tool() == LevelEditor::Tool::Decorations &&
         input.secondaryPressed && levelEditor.selectedDecoration()) {
@@ -1461,27 +1460,6 @@ void ApplicationTools::updateEditorInteraction(
         pickedCell = *clicked;
         const bool tilePainting =
             !input.moving && !editingDecorations && !editingSelectors;
-        if (tilePainting && input.pickModifier) {
-            if (input.primaryPressed) {
-                (void)levelEditor.pickTile(*clicked);
-            }
-            return;
-        }
-        if (tilePainting && input.paintLinkColorModifier) {
-            const GridPosition column { clicked->x, clicked->y };
-            if (input.primaryPressed) {
-                interruptTileStroke();
-                (void)levelEditor.endStroke();
-                (void)levelEditor.beginStroke();
-                (void)levelEditor.paintLinkColorAt(*clicked);
-                linkColorStroke_ = LinkColorStroke { .last = column };
-            } else if (linkColorStroke_ && linkColorStroke_->last != column) {
-                // Each tile once per drag; the drag is one undo step.
-                (void)levelEditor.paintLinkColorAt(*clicked);
-                linkColorStroke_->last = column;
-            }
-            return;
-        }
         if (tilePainting && tileStroke_ && !input.primaryPressed) {
             continueTileStroke(input, *clicked);
             return;
@@ -1524,6 +1502,72 @@ void ApplicationTools::updateEditorInteraction(
     } else if (levelEditor.tool() == LevelEditor::Tool::Selectors &&
                input.primaryPressed) {
         levelEditor.clearSelectorSelection();
+    }
+}
+
+void ApplicationTools::updateEditorToolModifier(
+    const InputRouter::EditorInput& input,
+    const VulkanRenderer::PreparedFrame* previousRenderFrame,
+    VulkanRenderer& renderer,
+    Vec2 windowSize,
+    Vec2 pixelSize)
+{
+    // The eyedropper wins when both keys are held.
+    const bool eyedropper = input.pickModifier;
+    wantedEditorCursor_ =
+        eyedropper ? EditorCursor::Eyedropper : EditorCursor::Brush;
+
+    // Whatever the pointer was doing stops here. A tile drag keeps ignoring
+    // the held button until it is released, so letting go of the key
+    // mid-drag does not start painting.
+    interruptTileStroke();
+    splatPainter.endStroke();
+    if (decorationGizmo.dragging()) {
+        decorationGizmo.endDrag();
+        (void)levelEditor.endSelectedDecorationTransform();
+    }
+    if (eyedropper && linkColorStroke_) {
+        (void)levelEditor.endStroke();
+        linkColorStroke_.reset();
+    }
+
+    if (!previousRenderFrame) {
+        return;
+    }
+    const uint32_t documentWidth = levelEditor.documentWidth();
+    const uint32_t documentHeight = levelEditor.documentHeight();
+    if (documentWidth == 0 || documentHeight == 0 ||
+        windowSize.x <= 0.0f || windowSize.y <= 0.0f ||
+        pixelSize.x <= 0.0f || pixelSize.y <= 0.0f ||
+        previousRenderFrame->levelWidth != documentWidth ||
+        previousRenderFrame->levelHeight != documentHeight) {
+        return;
+    }
+    const Vec2 pointerPixels = EditorInteraction::pointerPixels(
+        input.pointerPosition, windowSize, pixelSize);
+    const std::optional<GridPosition3> clicked =
+        renderer.pickIsoGridCell(*previousRenderFrame, pointerPixels);
+    if (!clicked) {
+        return;
+    }
+    // hoverCell stays empty: neither tool shows a tile preview.
+    pickedCell = *clicked;
+    if (eyedropper) {
+        if (input.primaryPressed) {
+            (void)levelEditor.pickTile(*clicked);
+        }
+        return;
+    }
+    const GridPosition column { clicked->x, clicked->y };
+    if (input.primaryPressed) {
+        (void)levelEditor.endStroke();
+        (void)levelEditor.beginStroke();
+        (void)levelEditor.paintLinkColorAt(*clicked);
+        linkColorStroke_ = LinkColorStroke { .last = column };
+    } else if (linkColorStroke_ && linkColorStroke_->last != column) {
+        // Each tile once per drag; the drag is one undo step.
+        (void)levelEditor.paintLinkColorAt(*clicked);
+        linkColorStroke_->last = column;
     }
 }
 

@@ -256,6 +256,14 @@ private:
     // until it is released.
     void interruptTileStroke();
     void handleEditorShortcuts(const InputRouter::EditorInput& input);
+    // While the Pick Tile or Paint Link Color key is held, the pointer is the
+    // eyedropper or the link-color brush and nothing else.
+    void updateEditorToolModifier(
+        const InputRouter::EditorInput& input,
+        const VulkanRenderer::PreparedFrame* previousRenderFrame,
+        VulkanRenderer& renderer,
+        Vec2 windowSize,
+        Vec2 pixelSize);
 
 public:
     // Source hot reload (DI-10). Application::serviceSourceWatcher drives it.

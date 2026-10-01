@@ -385,6 +385,10 @@ void LevelEditorDebugUi::draw(
             "whole drag is one undo step",
             actionBindingsDisplay(
                 bindings, InputAction::EditorPaintLinkColor).c_str());
+        ImGui::BulletText(
+            "While either is held it is the only thing a click does, in any "
+            "tool: nothing is placed, deleted, moved or ground-painted, and "
+            "the tile preview is hidden");
         shortcut(InputAction::EditorRedo, "redo");
         shortcut(
             InputAction::EditorSave,

@@ -329,7 +329,10 @@ and the required real-device checks are recorded.
   are drawn in code (`EditorCursorArt.hpp`) and owned by `ApplicationTools`.
   `updateEditorInteraction` records which one the pointer wants;
   `Application::update` applies it once a frame, before any early return, so
-  menus, modals and the fly camera restore the system cursor.
+  menus, modals and the fly camera restore the system cursor. While either
+  key is held, `updateEditorToolModifier` owns the pointer outright: it ends
+  any tile, ground or gizmo drag, sets no `hoverCell` (so no preview), and
+  nothing else in `updateEditorInteraction` runs.
 - Elevators (`Level::Elevator`, tile `=`) keep their platforms in
   `GameState::elevators`: one entry per level record, in record order, holding
   the platform cell and cycle phase (`rules::elevatorStopIndex`/

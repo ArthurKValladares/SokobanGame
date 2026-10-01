@@ -506,7 +506,10 @@ editor commands but does not own document or filesystem policy.
   the cursor into an eyedropper: clicking picks up the tile and, from a plate
   or device, its link color. Holding `Ctrl` turns it into a brush dipped in
   the Link Color: clicking or dragging gives every plate or device it
-  touches that color, the whole drag as one undo step. The Links list shows each color group with its
+  touches that color, the whole drag as one undo step. While either key is
+  held, that tool is all a click does, in any editor tool: nothing is
+  placed, deleted, moved or painted onto the ground, and the tile preview is
+  hidden. The Links list shows each color group with its
   members, warns about devices with no plates, and can recolor a whole group
   (choosing another group's color merges them). Colors are only an authoring
   aid: saving writes each device's explicit `plates` list, which is all
