@@ -189,6 +189,50 @@ void testUndoRoundTrip()
     CHECK(session.completedActionCount() == 2);
 }
 
+void testElevatorRideCommitsUndoesAndRestores()
+{
+    TEST("elevatorRideCommitsUndoesAndRestores");
+    // The plate is on the platform: stepping onto it rides it up to layer 2.
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "....=." },
+            { "  C P." },
+            { "     ." },
+            { "      " },
+        },
+        .elevators = { Level::Elevator {
+            .cell = { 4, 0, 0 },
+            .pressurePlates = { { 4, 0, 1 } },
+            .levels = { 0, 2 },
+        } },
+    }, "elevator session");
+    GameplaySession session;
+    session.reset(level);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeAction().after.elevators[0].cell == cell(4, 0, 2));
+    finishAction(session);
+    CHECK(session.state().elevators[0].cell == cell(4, 0, 2));
+    CHECK(session.state().elevators[0].phase == 1);
+    CHECK(session.state().players[0].cell == cell(4, 0, 3));
+
+    // A checkpoint of the ride replays and restores.
+    const GameplaySession::Snapshot snapshot = session.snapshot();
+    GameplaySession restored;
+    CHECK(restored.restore(level, snapshot));
+    CHECK(restored.state() == session.state());
+
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().elevators[0].cell == cell(4, 0, 0));
+    CHECK(session.state().elevators[0].phase == 0);
+    CHECK(session.state().players[0].cell == cell(3, 0, 1));
+}
+
 void testCompletedActionTelemetryTracksLongUndoLoop()
 {
     TEST("completedActionTelemetryTracksLongUndoLoop");
@@ -1292,6 +1336,7 @@ void testStaleCommandsAreDropped()
 
 int main()
 {
+    testElevatorRideCommitsUndoesAndRestores();
     testQueueIsBounded();
     testStaleCommandsAreDropped();
     testIceSlideIsSettledAtTheMomentOfThePush();

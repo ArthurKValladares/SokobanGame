@@ -137,9 +137,10 @@ std::pair<uint32_t, uint32_t> padToRectangle(Level::Definition& definition)
     return { width, height };
 }
 
-// Gates and rotators share one authoring model: a record on the device's
-// cell listing the pressure plates that drive it. These helpers keep both
-// record lists in step with tile edits.
+// Gates, rotators and elevators share one record shape: the device's cell,
+// the pressure plates that drive it and its color. In the editor the plate
+// lists stay empty (links come from colors, see linkedDefinition); these
+// helpers keep the records in step with tile edits.
 template <typename Record>
 void translateLinkedRecords(
     std::vector<Record>& records, int columns, int rows)
@@ -176,6 +177,13 @@ void shiftLinkedRecordsForInsertedLayer(
         if (record.cell.z >= insertionIndex) {
             ++record.cell.z;
         }
+        if constexpr (requires { record.levels; }) {
+            for (int& level : record.levels) {
+                if (level >= insertionIndex) {
+                    ++level;
+                }
+            }
+        }
         for (GridPosition3& plate : record.pressurePlates) {
             if (plate.z >= insertionIndex) {
                 ++plate.z;
@@ -193,6 +201,14 @@ void removeLinkedRecordLayer(std::vector<Record>& records, int deletedLayer)
         }
         if (record.cell.z > deletedLayer) {
             --record.cell.z;
+        }
+        if constexpr (requires { record.levels; }) {
+            std::erase(record.levels, deletedLayer);
+            for (int& level : record.levels) {
+                if (level > deletedLayer) {
+                    --level;
+                }
+            }
         }
         std::erase_if(record.pressurePlates, [&](GridPosition3& plate) {
             if (plate.z == deletedLayer) {
@@ -289,40 +305,275 @@ void translatePlateRecords(
     }
 }
 
-// After moveObject's erase-and-place, restores the moved device's links
-// (setCell recreated it with defaults) or re-links a moved pressure plate
-// wherever its old cell was linked.
+// After moveObject's erase-and-place, restores the moved device's record
+// (setCell recreated it with defaults): its color and, for an elevator, its
+// stops.
 template <typename Record>
-void restoreLinksAfterMove(
+void restoreRecordAfterMove(
     std::vector<Record>& records,
     const std::vector<Record>& before,
     bool movedDevice,
-    bool movedPlate,
     GridPosition3 source,
     GridPosition3 destination)
 {
-    if (movedDevice) {
-        const auto oldRecord = std::ranges::find(
-            before, source, &Record::cell);
-        const auto newRecord = std::ranges::find(
-            records, destination, &Record::cell);
-        if (oldRecord != before.end() && newRecord != records.end()) {
-            *newRecord = *oldRecord;
-            newRecord->cell = destination;
-        }
+    if (!movedDevice) {
         return;
     }
-    if (!movedPlate) {
+    const auto oldRecord = std::ranges::find(before, source, &Record::cell);
+    const auto newRecord = std::ranges::find(records, destination, &Record::cell);
+    if (oldRecord == before.end() || newRecord == records.end()) {
         return;
     }
-    for (Record& record : records) {
-        const auto oldRecord = std::ranges::find(
-            before, record.cell, &Record::cell);
-        if (oldRecord != before.end() &&
-            std::ranges::find(oldRecord->pressurePlates, source) !=
-                oldRecord->pressurePlates.end()) {
-            record.pressurePlates.push_back(destination);
+    *newRecord = *oldRecord;
+    newRecord->cell = destination;
+    // An elevator starts where its tile is, so a move to another layer moves
+    // that stop with it.
+    if constexpr (requires { newRecord->levels; }) {
+        if (std::ranges::find(newRecord->levels, destination.z) ==
+            newRecord->levels.end()) {
+            std::ranges::replace(newRecord->levels, source.z, destination.z);
         }
+    }
+}
+
+// Link colors are compared as the 8-bit RGB the color picker shows, so two
+// colors that look identical in the editor always group together.
+std::array<long, 3> linkColorKey(Vec3 color)
+{
+    const auto channel = [](float value) {
+        return std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f);
+    };
+    return { channel(color.x), channel(color.y), channel(color.z) };
+}
+
+bool sameColor(Vec3 left, Vec3 right)
+{
+    return linkColorKey(left) == linkColorKey(right);
+}
+
+std::array<int, 3> cellOrder(GridPosition3 cell)
+{
+    return { cell.z, cell.y, cell.x };
+}
+
+void sortLinkColors(std::vector<Level::LinkColor>& colors)
+{
+    std::ranges::sort(colors, {}, [](const Level::LinkColor& record) {
+        return cellOrder(record.cell);
+    });
+}
+
+// Unlinked pressure plates from screens authored before color grouping get
+// this, unless a device already uses it.
+constexpr Vec3 unlinkedPlateColor { 0.55f, 0.55f, 0.55f };
+
+// A color no group uses yet: hues spread by the golden ratio, so successive
+// picks stay far apart.
+Vec3 freshLinkColor(const std::vector<std::array<long, 3>>& used)
+{
+    for (int attempt = 0; attempt < 1024; ++attempt) {
+        const float hue = std::fmod(
+            0.11f + static_cast<float>(attempt) * 0.6180339887f, 1.0f);
+        const float sector = hue * 6.0f;
+        const float fraction = sector - std::floor(sector);
+        const float value = 0.95f;
+        const float low = value * (1.0f - 0.7f);
+        const float falling = value * (1.0f - 0.7f * fraction);
+        const float rising = value * (1.0f - 0.7f * (1.0f - fraction));
+        Vec3 color {};
+        switch (static_cast<int>(sector) % 6) {
+        case 0: color = { value, rising, low }; break;
+        case 1: color = { falling, value, low }; break;
+        case 2: color = { low, value, rising }; break;
+        case 3: color = { low, falling, value }; break;
+        case 4: color = { rising, low, value }; break;
+        default: color = { value, low, falling }; break;
+        }
+        if (std::ranges::find(used, linkColorKey(color)) == used.end()) {
+            return color;
+        }
+    }
+    return unlinkedPlateColor;
+}
+
+// Every pressure plate in a definition, uncovered or beneath an occupant, in
+// z/y/x order.
+std::vector<GridPosition3> pressurePlateCells(const Level::Definition& definition)
+{
+    std::vector<GridPosition3> cells;
+    const char pressure = tileTypeToChar(TileType::PressurePlate);
+    for (std::size_t z = 0; z < definition.layers.size(); ++z) {
+        for (std::size_t y = 0; y < definition.layers[z].size(); ++y) {
+            for (std::size_t x = 0; x < definition.layers[z][y].size(); ++x) {
+                if (definition.layers[z][y][x] == pressure) {
+                    cells.push_back({
+                        static_cast<int>(x),
+                        static_cast<int>(y),
+                        static_cast<int>(z),
+                    });
+                }
+            }
+        }
+    }
+    for (const Level::Plate& plate : definition.plates) {
+        if (plate.tile == TileType::PressurePlate) {
+            cells.push_back(plate.cell);
+        }
+    }
+    std::ranges::sort(cells, {}, cellOrder);
+    return cells;
+}
+
+// The gates, rotators and elevators of a definition, seen only as a color and
+// an explicit plate list.
+struct LinkedDevice {
+    Vec3* color = nullptr;
+    std::vector<GridPosition3> plates;
+};
+
+std::vector<LinkedDevice> linkedDevices(Level::Definition& definition)
+{
+    std::vector<LinkedDevice> devices;
+    const auto add = [&](auto& records) {
+        for (auto& record : records) {
+            std::vector<GridPosition3> plates = record.pressurePlates;
+            std::ranges::sort(plates, {}, cellOrder);
+            devices.push_back({ .color = &record.color, .plates = std::move(plates) });
+        }
+    };
+    // Gates, then rotators, then elevators: the order Level uses to color a
+    // plate linked to more than one device.
+    add(definition.gates);
+    add(definition.rotators);
+    add(definition.elevators);
+    return devices;
+}
+
+struct LinkColoring {
+    // One entry per pressure plate.
+    std::vector<Level::LinkColor> plateColors;
+    // Device colors had to change so the groups stay apart.
+    bool recolored = false;
+    // Some explicit links could not be expressed by color groups at all.
+    bool regrouped = false;
+};
+
+// Turns a screen's explicit links into the editor's color groups: a plate
+// takes the color of the device it drives, or its stored link color when it
+// drives nothing. Screens authored before color grouping can link plates in
+// ways colors do not reproduce (two gates sharing a color but not their
+// plates); those devices and plates get distinct colors so that, wherever
+// possible, saving reproduces exactly the links that were loaded.
+LinkColoring colorLinks(Level::Definition& definition)
+{
+    LinkColoring result;
+    const std::vector<GridPosition3> cells = pressurePlateCells(definition);
+    std::vector<LinkedDevice> devices = linkedDevices(definition);
+    const auto storedColor = [&](GridPosition3 cell) -> std::optional<Vec3> {
+        const auto found = std::ranges::find(
+            definition.linkColors, cell, &Level::LinkColor::cell);
+        return found == definition.linkColors.end()
+            ? std::nullopt
+            : std::optional<Vec3>(found->color);
+    };
+    const auto firstDriver = [&](GridPosition3 cell) -> const LinkedDevice* {
+        const auto found = std::ranges::find_if(devices, [&](const auto& device) {
+            return std::ranges::find(device.plates, cell) != device.plates.end();
+        });
+        return found == devices.end() ? nullptr : &*found;
+    };
+    const auto assignPlates = [&]() {
+        result.plateColors.clear();
+        for (const GridPosition3 cell : cells) {
+            const LinkedDevice* driver = firstDriver(cell);
+            result.plateColors.push_back({
+                .cell = cell,
+                .color = driver != nullptr
+                    ? *driver->color
+                    : storedColor(cell).value_or(unlinkedPlateColor),
+            });
+        }
+    };
+    const auto groupsMatchLinks = [&]() {
+        for (const LinkedDevice& device : devices) {
+            std::vector<GridPosition3> grouped;
+            for (const Level::LinkColor& plate : result.plateColors) {
+                if (sameColor(plate.color, *device.color)) {
+                    grouped.push_back(plate.cell);
+                }
+            }
+            if (grouped != device.plates) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    assignPlates();
+    if (!groupsMatchLinks()) {
+        // Devices with the same plate list share one color; every other
+        // device, and every plate that drives nothing, gets a color of its
+        // own.
+        result.recolored = true;
+        std::vector<std::array<long, 3>> used;
+        std::vector<std::pair<std::vector<GridPosition3>, Vec3>> groups;
+        for (LinkedDevice& device : devices) {
+            const auto group = std::ranges::find_if(groups, [&](const auto& entry) {
+                return !device.plates.empty() && entry.first == device.plates;
+            });
+            if (group != groups.end()) {
+                *device.color = group->second;
+                continue;
+            }
+            if (std::ranges::find(used, linkColorKey(*device.color)) != used.end()) {
+                *device.color = freshLinkColor(used);
+            }
+            used.push_back(linkColorKey(*device.color));
+            if (!device.plates.empty()) {
+                groups.emplace_back(device.plates, *device.color);
+            }
+        }
+        for (const GridPosition3 cell : cells) {
+            if (firstDriver(cell) != nullptr) {
+                continue;
+            }
+            const auto stored = std::ranges::find(
+                definition.linkColors, cell, &Level::LinkColor::cell);
+            const Vec3 color = storedColor(cell).value_or(unlinkedPlateColor);
+            if (std::ranges::find(used, linkColorKey(color)) != used.end()) {
+                const Vec3 replacement = freshLinkColor(used);
+                if (stored != definition.linkColors.end()) {
+                    stored->color = replacement;
+                } else {
+                    definition.linkColors.push_back(
+                        { .cell = cell, .color = replacement });
+                }
+            }
+        }
+        assignPlates();
+        result.regrouped = !groupsMatchLinks();
+    }
+
+    // In the editor the groups are the links.
+    for (Level::Gate& gate : definition.gates) {
+        gate.pressurePlates.clear();
+    }
+    for (Level::Rotator& rotator : definition.rotators) {
+        rotator.pressurePlates.clear();
+    }
+    for (Level::Elevator& elevator : definition.elevators) {
+        elevator.pressurePlates.clear();
+    }
+    definition.linkColors.clear();
+    return result;
+}
+
+void translateLinkColors(
+    std::vector<Level::LinkColor>& colors, int columns, int rows)
+{
+    for (Level::LinkColor& record : colors) {
+        record.cell.x += columns;
+        record.cell.y += rows;
     }
 }
 
@@ -614,6 +865,23 @@ std::optional<TileType> LevelEditor::pickTile(GridPosition3 pickedCell)
     setSelectedTile(*picked);
     document_.status =
         "Picked " + std::string(tileTypeName(*picked)) + ".";
+    // Picking a pressure plate or device also picks up its link color.
+    for (int z = static_cast<int>(documentDepth()) - 1; z >= 0; --z) {
+        if (document_.layerLocked && z != document_.activeLayer) {
+            continue;
+        }
+        const GridPosition3 cell { pickedCell.x, pickedCell.y, z };
+        if (tileAt(cell.x, cell.y, cell.z) == TileType::Air) {
+            continue;
+        }
+        if (const std::optional<Vec3> color = linkColorAt(cell)) {
+            activeLinkColor_ = *color;
+            document_.status = "Picked " +
+                std::string(tileTypeName(*picked)) +
+                " and its link color.";
+        }
+        break;
+    }
     return picked;
 }
 
@@ -991,21 +1259,35 @@ bool LevelEditor::moveObject(GridPosition3 destination)
 
     // setCell keeps gate metadata valid at every intermediate point. Restore
     // the authored relationships after the two-cell transaction completes.
-    const bool movedPlate = move->tile == TileType::PressurePlate;
-    restoreLinksAfterMove(
+    restoreRecordAfterMove(
         document_.gates,
         before.gates,
         move->tile == TileType::Gate,
-        movedPlate,
         move->source,
         destination);
-    restoreLinksAfterMove(
+    restoreRecordAfterMove(
         document_.rotators,
         before.rotators,
         tileTypeIsRotator(move->tile),
-        movedPlate,
         move->source,
         destination);
+    restoreRecordAfterMove(
+        document_.elevators,
+        before.elevators,
+        tileTypeIsElevator(move->tile),
+        move->source,
+        destination);
+    // A moved pressure plate keeps its color, and so its group.
+    if (move->tile == TileType::PressurePlate) {
+        const auto oldColor = std::ranges::find(
+            before.plateColors, move->source, &Level::LinkColor::cell);
+        const auto newColor = std::ranges::find(
+            document_.plateColors, destination, &Level::LinkColor::cell);
+        if (oldColor != before.plateColors.end() &&
+            newColor != document_.plateColors.end()) {
+            newColor->color = oldColor->color;
+        }
+    }
 
     document_.status = "Moved object.";
     recordDocumentChange(before);
@@ -1234,6 +1516,15 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
         translatedPosition.z < static_cast<int>(document_.layers.size())) {
         const PaintedCell current = paintedCellAt(translatedPosition);
         if (stackPaint(current, tile) == current) {
+            // Painting a pressure plate or device over itself gives it the
+            // active link color.
+            const bool linkable = tile == TileType::PressurePlate ||
+                tile == TileType::Gate || tileTypeIsRotator(tile) ||
+                tile == TileType::Elevator;
+            const std::optional<Vec3> color = linkColorAt(translatedPosition);
+            if (linkable && color && !sameColor(*color, activeLinkColor_)) {
+                return setLinkColor(translatedPosition, activeLinkColor_);
+            }
             return false;
         }
     }
@@ -1270,7 +1561,11 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
         translateLinkedRecords(document_.gates, prependColumns, prependRows);
         translateLinkedRecords(
             document_.rotators, prependColumns, prependRows);
+        translateLinkedRecords(
+            document_.elevators, prependColumns, prependRows);
         translatePlateRecords(document_.plates, prependColumns, prependRows);
+        translateLinkColors(
+            document_.plateColors, prependColumns, prependRows);
     }
 
     while (translatedPosition.z >= static_cast<int>(document_.layers.size())) {
@@ -1299,20 +1594,49 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             return rotator.cell == translatedPosition;
         });
     }
+    // A pressure plate keeps its link color while it stays; a new one takes
+    // the active color.
     if (previousPlate == TileType::PressurePlate &&
         paintedPlate != TileType::PressurePlate) {
-        for (Level::Gate& gate : document_.gates) {
-            std::erase(gate.pressurePlates, translatedPosition);
-        }
-        for (Level::Rotator& rotator : document_.rotators) {
-            std::erase(rotator.pressurePlates, translatedPosition);
-        }
+        std::erase_if(document_.plateColors, [&](const Level::LinkColor& plate) {
+            return plate.cell == translatedPosition;
+        });
+    }
+    if (paintedPlate == TileType::PressurePlate &&
+        previousPlate != TileType::PressurePlate) {
+        document_.plateColors.push_back({
+            .cell = translatedPosition,
+            .color = activeLinkColor_,
+        });
+        sortLinkColors(document_.plateColors);
     }
     if (painted.top == TileType::Gate && previous.top != TileType::Gate) {
-        document_.gates.push_back({ .cell = translatedPosition });
+        document_.gates.push_back({
+            .cell = translatedPosition,
+            .color = activeLinkColor_,
+        });
     }
     if (tileTypeIsRotator(paintedPlate) && !tileTypeIsRotator(previousPlate)) {
-        document_.rotators.push_back({ .cell = translatedPosition });
+        document_.rotators.push_back({
+            .cell = translatedPosition,
+            .color = activeLinkColor_,
+        });
+    }
+    if (previous.top == TileType::Elevator &&
+        painted.top != TileType::Elevator) {
+        std::erase_if(document_.elevators, [&](const Level::Elevator& elevator) {
+            return elevator.cell == translatedPosition;
+        });
+    }
+    if (painted.top == TileType::Elevator &&
+        previous.top != TileType::Elevator) {
+        // A new elevator has only its own layer as a stop, so it does not
+        // move until the editor gives it more.
+        document_.elevators.push_back({
+            .cell = translatedPosition,
+            .color = activeLinkColor_,
+            .levels = { translatedPosition.z },
+        });
     }
     std::erase_if(document_.plates, [&](const Level::Plate& plate) {
         return plate.cell == translatedPosition;
@@ -1725,95 +2049,14 @@ const std::vector<Level::Gate>& LevelEditor::gates() const
     return document_.gates;
 }
 
-bool LevelEditor::validLinkUpdate(
-    const std::vector<GridPosition3>& pressurePlates,
-    Vec3 color,
-    std::string_view kind)
-{
-    const auto validColor = [](float component) {
-        return std::isfinite(component) && component >= 0.0f &&
-            component <= 1.0f;
-    };
-    if (!validColor(color.x) || !validColor(color.y) ||
-        !validColor(color.z)) {
-        document_.status =
-            std::string(kind) + " colors must be between zero and one.";
-        return false;
-    }
-    const auto tileAt = [&](GridPosition3 cell) {
-        if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
-            cell.x >= static_cast<int>(documentWidth()) ||
-            cell.y >= static_cast<int>(documentHeight()) ||
-            cell.z >= static_cast<int>(documentDepth())) {
-            return TileType::Air;
-        }
-        return charToTileType(
-            document_.layers[static_cast<std::size_t>(cell.z)]
-                [static_cast<std::size_t>(cell.y)]
-                [static_cast<std::size_t>(cell.x)])
-            .value_or(TileType::Air);
-    };
-    std::string lowered(kind);
-    for (char& character : lowered) {
-        character = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(character)));
-    }
-    for (std::size_t plateIndex = 0;
-         plateIndex < pressurePlates.size();
-         ++plateIndex) {
-        const TileType linked = tileAt(pressurePlates[plateIndex]);
-        const auto covered = std::ranges::find(
-            document_.plates, pressurePlates[plateIndex], &Level::Plate::cell);
-        if ((covered != document_.plates.end() ? covered->tile : linked) !=
-            TileType::PressurePlate) {
-            document_.status =
-                std::string(kind) + " links must point to Pressure tiles.";
-            return false;
-        }
-        if (std::ranges::find(
-                pressurePlates.begin(),
-                pressurePlates.begin() +
-                    static_cast<std::ptrdiff_t>(plateIndex),
-                pressurePlates[plateIndex]) !=
-            pressurePlates.begin() +
-                static_cast<std::ptrdiff_t>(plateIndex)) {
-            document_.status =
-                "A pressure plate can only be linked once per " + lowered + ".";
-            return false;
-        }
-    }
-    return true;
-}
-
-bool LevelEditor::updateGate(
-    std::size_t index,
-    std::vector<GridPosition3> pressurePlates,
-    Vec3 color)
-{
-    if (index >= document_.gates.size() ||
-        !validLinkUpdate(pressurePlates, color, "Gate")) {
-        return false;
-    }
-
-    Level::Gate replacement = document_.gates[index];
-    replacement.pressurePlates = std::move(pressurePlates);
-    replacement.color = color;
-    if (replacement == document_.gates[index]) {
-        return false;
-    }
-    const DocumentSnapshot before = captureDocumentSnapshot();
-    document_.gates[index] = std::move(replacement);
-    document_.dirty = true;
-    document_.status = document_.gates[index].pressurePlates.empty()
-        ? "Updated gate; it will remain closed until a plate is linked."
-        : "Updated gate links and color.";
-    recordDocumentChange(before);
-    return true;
-}
-
 const std::vector<Level::Rotator>& LevelEditor::rotators() const
 {
     return document_.rotators;
+}
+
+const std::vector<Level::Elevator>& LevelEditor::elevators() const
+{
+    return document_.elevators;
 }
 
 const std::vector<Level::Plate>& LevelEditor::coveredPlates() const
@@ -1841,30 +2084,283 @@ std::optional<TileType> LevelEditor::documentPlateAt(GridPosition3 cell) const
     return tileTypeIsPlate(tile) ? std::optional<TileType>(tile) : std::nullopt;
 }
 
-bool LevelEditor::updateRotator(
-    std::size_t index,
-    std::vector<GridPosition3> pressurePlates,
-    Vec3 color)
+bool LevelEditor::sameLinkColor(Vec3 left, Vec3 right)
 {
-    if (index >= document_.rotators.size() ||
-        !validLinkUpdate(pressurePlates, color, "Rotator")) {
+    return sameColor(left, right);
+}
+
+Vec3 LevelEditor::activeLinkColor() const
+{
+    return activeLinkColor_;
+}
+
+void LevelEditor::setActiveLinkColor(Vec3 color)
+{
+    activeLinkColor_ = {
+        std::clamp(color.x, 0.0f, 1.0f),
+        std::clamp(color.y, 0.0f, 1.0f),
+        std::clamp(color.z, 0.0f, 1.0f),
+    };
+}
+
+const std::vector<Level::LinkColor>& LevelEditor::pressurePlateColors() const
+{
+    return document_.plateColors;
+}
+
+std::optional<Vec3> LevelEditor::linkColorAt(GridPosition3 cell) const
+{
+    const auto plate = std::ranges::find(
+        document_.plateColors, cell, &Level::LinkColor::cell);
+    if (plate != document_.plateColors.end()) {
+        return plate->color;
+    }
+    const auto colorOf = [&](const auto& records) -> std::optional<Vec3> {
+        const auto found = std::ranges::find_if(records, [&](const auto& record) {
+            return record.cell == cell;
+        });
+        return found == records.end()
+            ? std::nullopt
+            : std::optional<Vec3>(found->color);
+    };
+    if (const std::optional<Vec3> color = colorOf(document_.gates)) {
+        return color;
+    }
+    if (const std::optional<Vec3> color = colorOf(document_.rotators)) {
+        return color;
+    }
+    return colorOf(document_.elevators);
+}
+
+std::vector<GridPosition3> LevelEditor::linkedPressurePlates(Vec3 color) const
+{
+    std::vector<GridPosition3> plates;
+    for (const Level::LinkColor& plate : document_.plateColors) {
+        if (sameColor(plate.color, color)) {
+            plates.push_back(plate.cell);
+        }
+    }
+    return plates;
+}
+
+std::vector<LevelEditor::LinkGroup> LevelEditor::linkGroups() const
+{
+    std::vector<LinkGroup> groups;
+    const auto groupFor = [&](Vec3 color) -> LinkGroup& {
+        const auto found = std::ranges::find_if(groups, [&](const LinkGroup& group) {
+            return sameColor(group.color, color);
+        });
+        if (found != groups.end()) {
+            return *found;
+        }
+        return groups.emplace_back(LinkGroup { .color = color });
+    };
+    for (const Level::LinkColor& plate : document_.plateColors) {
+        groupFor(plate.color).pressurePlates.push_back(plate.cell);
+    }
+    for (const Level::Gate& gate : document_.gates) {
+        groupFor(gate.color).gates.push_back(gate.cell);
+    }
+    for (const Level::Rotator& rotator : document_.rotators) {
+        groupFor(rotator.color).rotators.push_back(rotator.cell);
+    }
+    for (const Level::Elevator& elevator : document_.elevators) {
+        groupFor(elevator.color).elevators.push_back(elevator.cell);
+    }
+    return groups;
+}
+
+bool LevelEditor::setLinkColor(GridPosition3 cell, Vec3 color)
+{
+    const auto validColor = [](float component) {
+        return std::isfinite(component) && component >= 0.0f &&
+            component <= 1.0f;
+    };
+    if (!validColor(color.x) || !validColor(color.y) || !validColor(color.z)) {
+        document_.status = "Link colors must be between zero and one.";
         return false;
     }
-
-    Level::Rotator replacement = document_.rotators[index];
-    replacement.pressurePlates = std::move(pressurePlates);
-    replacement.color = color;
-    if (replacement == document_.rotators[index]) {
+    const std::optional<Vec3> current = linkColorAt(cell);
+    if (!current) {
+        document_.status =
+            "Only pressure plates, gates, rotators and elevators have link colors.";
+        return false;
+    }
+    if (sameColor(*current, color)) {
         return false;
     }
     const DocumentSnapshot before = captureDocumentSnapshot();
-    document_.rotators[index] = std::move(replacement);
+    const auto recolor = [&](auto& records) {
+        for (auto& record : records) {
+            if (record.cell == cell) {
+                record.color = color;
+            }
+        }
+    };
+    recolor(document_.plateColors);
+    recolor(document_.gates);
+    recolor(document_.rotators);
+    recolor(document_.elevators);
     document_.dirty = true;
-    document_.status = document_.rotators[index].pressurePlates.empty()
-        ? "Updated rotator; it will not turn until a plate is linked."
-        : "Updated rotator links and color.";
+    const std::size_t linked = linkedPressurePlates(color).size();
+    document_.status = "Recolored; that color now groups " +
+        std::to_string(linked) + " pressure plate" +
+        (linked == 1 ? "" : "s") + ".";
     recordDocumentChange(before);
     return true;
+}
+
+bool LevelEditor::paintLinkColorAt(GridPosition3 pickedCell)
+{
+    const auto occupied = [&](int z) {
+        return charToTileType(
+                   document_.layers[static_cast<std::size_t>(z)]
+                                   [static_cast<std::size_t>(pickedCell.y)]
+                                   [static_cast<std::size_t>(pickedCell.x)])
+                   .value_or(TileType::Air) != TileType::Air;
+    };
+    if (pickedCell.x < 0 || pickedCell.y < 0 ||
+        pickedCell.x >= static_cast<int>(documentWidth()) ||
+        pickedCell.y >= static_cast<int>(documentHeight())) {
+        return false;
+    }
+    std::optional<GridPosition3> target;
+    for (int z = static_cast<int>(documentDepth()) - 1; z >= 0; --z) {
+        if (document_.layerLocked && z != document_.activeLayer) {
+            continue;
+        }
+        if (occupied(z)) {
+            target = GridPosition3 { pickedCell.x, pickedCell.y, z };
+            break;
+        }
+    }
+    if (!target || !linkColorAt(*target)) {
+        document_.status =
+            "The link-color brush paints pressure plates, gates, rotators "
+            "and elevators.";
+        return false;
+    }
+    return setLinkColor(*target, activeLinkColor_);
+}
+
+bool LevelEditor::recolorLinkGroup(Vec3 from, Vec3 to)
+{
+    if (sameColor(from, to)) {
+        return false;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    bool changed = false;
+    const auto recolor = [&](auto& records) {
+        for (auto& record : records) {
+            if (sameColor(record.color, from)) {
+                record.color = to;
+                changed = true;
+            }
+        }
+    };
+    const bool merges = std::ranges::any_of(
+        linkGroups(),
+        [&](const LinkGroup& group) { return sameColor(group.color, to); });
+    recolor(document_.plateColors);
+    recolor(document_.gates);
+    recolor(document_.rotators);
+    recolor(document_.elevators);
+    if (!changed) {
+        return false;
+    }
+    if (sameColor(activeLinkColor_, from)) {
+        activeLinkColor_ = to;
+    }
+    document_.dirty = true;
+    document_.status = merges
+        ? "Merged two link groups."
+        : "Recolored a link group.";
+    recordDocumentChange(before);
+    return true;
+}
+
+bool LevelEditor::setElevatorLevels(std::size_t index, std::vector<int> levels)
+{
+    if (index >= document_.elevators.size()) {
+        return false;
+    }
+    const Level::Elevator& current = document_.elevators[index];
+    if (levels.empty()) {
+        document_.status = "An elevator needs at least one stop level.";
+        return false;
+    }
+    const int depth = static_cast<int>(documentDepth());
+    for (std::size_t i = 0; i < levels.size(); ++i) {
+        if (levels[i] < 0 || levels[i] >= depth) {
+            document_.status = "Elevator stop " + std::to_string(levels[i]) +
+                " is not a layer of this screen (0-" +
+                std::to_string(depth - 1) + ").";
+            return false;
+        }
+        if (std::ranges::find(
+                levels.begin(),
+                levels.begin() + static_cast<std::ptrdiff_t>(i),
+                levels[i]) != levels.begin() + static_cast<std::ptrdiff_t>(i)) {
+            document_.status = "Elevator stop " + std::to_string(levels[i]) +
+                " is listed more than once.";
+            return false;
+        }
+    }
+    if (std::ranges::find(levels, current.cell.z) == levels.end()) {
+        document_.status =
+            "Elevator stops must include the elevator's own layer (" +
+            std::to_string(current.cell.z) + "), where it starts.";
+        return false;
+    }
+    if (levels == current.levels) {
+        return false;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.elevators[index].levels = std::move(levels);
+    document_.dirty = true;
+    document_.status = document_.elevators[index].levels.size() < 2
+        ? "Updated elevator; it will not move until it has a second stop."
+        : "Updated elevator stops.";
+    recordDocumentChange(before);
+    return true;
+}
+
+Level::Definition LevelEditor::linkedDefinition(
+    std::optional<CharacterType> character) const
+{
+    Level::Definition definition {
+        .layers = document_.layers,
+        .waterLayer = document_.waterLayer,
+        .decorations = document_.decorations,
+        .selectors = document_.selectors,
+        .gates = document_.gates,
+        .rotators = document_.rotators,
+        .plates = document_.plates,
+        .elevators = document_.elevators,
+        .character = character,
+    };
+    // The color groups become explicit links here, and only here; nothing
+    // past this point ever compares colors.
+    const auto link = [&](auto& records) {
+        for (auto& record : records) {
+            record.pressurePlates = linkedPressurePlates(record.color);
+        }
+    };
+    link(definition.gates);
+    link(definition.rotators);
+    link(definition.elevators);
+    for (const Level::LinkColor& plate : document_.plateColors) {
+        const auto drives = [&](const auto& records) {
+            return std::ranges::any_of(records, [&](const auto& record) {
+                return sameColor(record.color, plate.color);
+            });
+        };
+        if (!drives(document_.gates) && !drives(document_.rotators) &&
+            !drives(document_.elevators)) {
+            definition.linkColors.push_back(plate);
+        }
+    }
+    return definition;
 }
 
 bool LevelEditor::editingOverworld() const
@@ -2019,7 +2515,9 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     document_.selectors.clear();
     document_.gates.clear();
     document_.rotators.clear();
+    document_.elevators.clear();
     document_.plates.clear();
+    document_.plateColors.clear();
     document_.selectedDecoration.reset();
     document_.selectedSelector.reset();
     // A new document belongs to no screen until it is saved as one, so it has
@@ -2076,7 +2574,11 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
     }
     cropLinkedRecords(document_.gates, width, height);
     cropLinkedRecords(document_.rotators, width, height);
+    cropLinkedRecords(document_.elevators, width, height);
     std::erase_if(document_.plates, [&](const Level::Plate& plate) {
+        return plate.cell.x >= width || plate.cell.y >= height;
+    });
+    std::erase_if(document_.plateColors, [&](const Level::LinkColor& plate) {
         return plate.cell.x >= width || plate.cell.y >= height;
     });
 
@@ -2129,7 +2631,13 @@ void LevelEditor::insertLayerAt(int insertionIndex, const char* status)
     }
     shiftLinkedRecordsForInsertedLayer(document_.gates, insertionIndex);
     shiftLinkedRecordsForInsertedLayer(document_.rotators, insertionIndex);
+    shiftLinkedRecordsForInsertedLayer(document_.elevators, insertionIndex);
     for (Level::Plate& plate : document_.plates) {
+        if (plate.cell.z >= insertionIndex) {
+            ++plate.cell.z;
+        }
+    }
+    for (Level::LinkColor& plate : document_.plateColors) {
         if (plate.cell.z >= insertionIndex) {
             ++plate.cell.z;
         }
@@ -2180,7 +2688,18 @@ void LevelEditor::deleteActiveLayer()
     removeLinkedRecordLayer(document_.gates, static_cast<int>(deletedLayer));
     removeLinkedRecordLayer(
         document_.rotators, static_cast<int>(deletedLayer));
+    removeLinkedRecordLayer(
+        document_.elevators, static_cast<int>(deletedLayer));
     std::erase_if(document_.plates, [&](Level::Plate& plate) {
+        if (plate.cell.z == static_cast<int>(deletedLayer)) {
+            return true;
+        }
+        if (plate.cell.z > static_cast<int>(deletedLayer)) {
+            --plate.cell.z;
+        }
+        return false;
+    });
+    std::erase_if(document_.plateColors, [&](Level::LinkColor& plate) {
         if (plate.cell.z == static_cast<int>(deletedLayer)) {
             return true;
         }
@@ -2323,6 +2842,7 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     }
 
     const auto [width, height] = padToRectangle(definition);
+    const LinkColoring coloring = colorLinks(definition);
 
     document_.layers = std::move(definition.layers);
     document_.waterLayer = definition.waterLayer;
@@ -2331,7 +2851,9 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     document_.selectors = std::move(definition.selectors);
     document_.gates = std::move(definition.gates);
     document_.rotators = std::move(definition.rotators);
+    document_.elevators = std::move(definition.elevators);
     document_.plates = std::move(definition.plates);
+    document_.plateColors = coloring.plateColors;
     document_.selectedDecoration.reset();
     document_.selectedSelector.reset();
     document_.filePath = path;
@@ -2345,6 +2867,15 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     document_.playingDraft = false;
     document_.editingDocument = true;
     document_.status = "Loaded " + path.string();
+    if (coloring.regrouped) {
+        document_.status +=
+            ". Some pressure plates drove devices with different plate "
+            "lists, which link colors cannot express; they now follow their "
+            "color groups. Check the links before saving.";
+    } else if (coloring.recolored) {
+        document_.status +=
+            ". Gave its link groups distinct colors; the links are unchanged.";
+    }
     drafts_.erase(draftKey(path));
     if (recordHistory) {
         recordDocumentChange(before);
@@ -2363,14 +2894,18 @@ bool LevelEditor::reloadFromDisk()
         Level::Definition onDisk = Level::loadDefinitionFromFile(path);
         (void)padToRectangle(onDisk);
         // The editor's own saves land here too; they change nothing.
-        if (onDisk.layers == document_.layers &&
-            onDisk.waterLayer == document_.waterLayer &&
-            onDisk.character == document_.character &&
-            onDisk.decorations == document_.decorations &&
-            onDisk.selectors == document_.selectors &&
-            onDisk.gates == document_.gates &&
-            onDisk.rotators == document_.rotators &&
-            onDisk.plates == document_.plates) {
+        const Level::Definition current =
+            linkedDefinition(document_.character);
+        if (onDisk.layers == current.layers &&
+            onDisk.waterLayer == current.waterLayer &&
+            onDisk.character == current.character &&
+            onDisk.decorations == current.decorations &&
+            onDisk.selectors == current.selectors &&
+            onDisk.gates == current.gates &&
+            onDisk.rotators == current.rotators &&
+            onDisk.elevators == current.elevators &&
+            onDisk.plates == current.plates &&
+            onDisk.linkColors == current.linkColors) {
             return false;
         }
     } catch (const std::exception&) {
@@ -2415,18 +2950,10 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
                 });
         });
     const std::vector<std::string> serialized =
-        Level::serializeDefinition({
-            .layers = document_.layers,
-            .waterLayer = document_.waterLayer,
-            .decorations = document_.decorations,
-            .selectors = document_.selectors,
-            .gates = document_.gates,
-            .rotators = document_.rotators,
-            .plates = document_.plates,
-            .character = overworldScreenIdForPath(sourcePath)
+        Level::serializeDefinition(linkedDefinition(
+            overworldScreenIdForPath(sourcePath)
                 ? document_.character
-                : std::nullopt,
-        });
+                : std::nullopt));
 
     // A component edit can invalidate the unique Player tile, common
     // dimensions, or water metadata. Route it through the
@@ -3059,7 +3586,9 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
         before.selectors == after.selectors &&
         before.gates == after.gates &&
         before.rotators == after.rotators &&
+        before.elevators == after.elevators &&
         before.plates == after.plates &&
+        before.plateColors == after.plateColors &&
         before.filePath == after.filePath &&
         before.requestedWidth == after.requestedWidth &&
         before.requestedHeight == after.requestedHeight &&
@@ -3085,6 +3614,8 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
     document_.selectors = snapshot.selectors;
     document_.gates = snapshot.gates;
     document_.rotators = snapshot.rotators;
+    document_.elevators = snapshot.elevators;
+    document_.plateColors = snapshot.plateColors;
     document_.plates = snapshot.plates;
     document_.filePath = snapshot.filePath;
     document_.loadedPath = snapshot.loadedPath;
@@ -3106,18 +3637,8 @@ Level LevelEditor::documentToLevel() const
 
 Level::Definition LevelEditor::documentDefinition() const
 {
-    return {
-        .layers = document_.layers,
-        .waterLayer = document_.waterLayer,
-        .decorations = document_.decorations,
-        .selectors = document_.selectors,
-        .gates = document_.gates,
-        .rotators = document_.rotators,
-        .plates = document_.plates,
-        .character = editingOverworld()
-            ? document_.character
-            : std::nullopt,
-    };
+    return linkedDefinition(
+        editingOverworld() ? document_.character : std::nullopt);
 }
 
 std::optional<Level> LevelEditor::beginDraftPlayback(
@@ -3240,6 +3761,8 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
         .gates = document_.gates,
         .rotators = document_.rotators,
         .plates = document_.plates,
+        .elevators = document_.elevators,
+        .plateColors = document_.plateColors,
         .filePath = document_.filePath,
         .loadedPath = document_.loadedPath,
         .requestedWidth = document_.requestedWidth,

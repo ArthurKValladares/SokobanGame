@@ -213,6 +213,52 @@ void testUninvolvedEntitiesAreNotClaimed()
     CHECK(table.conflict(plans::reservationsFor(behind), 1).has_value());
 }
 
+void testElevatorClaimsItsShaft()
+{
+    TEST("elevatorClaimsItsShaft");
+    // A platform at (4, 0, 0) carries a rock from layer 1 up to layer 3.
+    GameState state;
+    state.movables.push_back({ .id = 1, .cell = cell(4, 0, 1) });
+    state.elevators.push_back({ .cell = cell(4, 0, 0), .phase = 0 });
+    plans::PlannedAction ride;
+    ride.action.before = state;
+    GameState after = state;
+    after.movables[0].cell = cell(4, 0, 3);
+    after.elevators[0] = { .cell = cell(4, 0, 2), .phase = 1 };
+    ride.action.after = after;
+    ride.legs.push_back(after);
+    const ActionReservations claims = plans::reservationsFor(ride);
+
+    // Every cell the column passes through, and the one just above it, is
+    // held while it moves; the platform keeps its new cell.
+    for (int z = 0; z <= 4; ++z) {
+        CHECK(holds(claims.cells, cell(4, 0, z), 0));
+    }
+    CHECK(holds(claims.cells, cell(4, 0, 2), 50));
+    CHECK(!holds(claims.cells, cell(4, 0, 1), 50));
+    CHECK(!holds(claims.cells, cell(3, 0, 1), 0));
+
+    // Something walking into the shaft meanwhile is refused.
+    ReservationTable table;
+    table.admit(1, claims, 0);
+    GameState walker;
+    walker.players.push_back({ .id = 7, .cell = cell(3, 0, 2) });
+    plans::PlannedAction step;
+    step.action.before = walker;
+    GameState stepped = walker;
+    stepped.players[0].cell = cell(4, 0, 2);
+    step.action.after = stepped;
+    step.legs.push_back(stepped);
+    CHECK(table.conflict(plans::reservationsFor(step), 0).has_value());
+
+    // An elevator that does not move claims nothing.
+    plans::PlannedAction idle;
+    idle.action.before = state;
+    idle.action.after = state;
+    idle.legs.push_back(state);
+    CHECK(plans::reservationsFor(idle).cells.empty());
+}
+
 void testEntitiesCannotSwapThroughEachOther()
 {
     TEST("entitiesCannotSwapThroughEachOther");
@@ -471,6 +517,7 @@ void testEntitiesAnActionAddsAreClaimed()
 int main()
 {
     testEntitiesAnActionAddsAreClaimed();
+    testElevatorClaimsItsShaft();
     testOverlapRules();
     testSlideClaimsItsWholePath();
     testUninvolvedEntitiesAreNotClaimed();

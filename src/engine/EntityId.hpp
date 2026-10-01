@@ -12,6 +12,11 @@ enum class EntityKind : uint8_t {
     Player,
     Movable,
     Enemy,
+    // Elevator platforms are not GameState entities (they have no ids and
+    // never enter StateDelta's entity lists), but presentation animates them
+    // through the same motion tracks. Their target id is
+    // resolvedEntityId(Elevator, invalidEntityId, elevator index).
+    Elevator,
 };
 
 struct EntityTarget {

@@ -6,6 +6,7 @@
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AnimationPreviewScene.hpp"
 #include "engine/AssetManifest.hpp"
+#include "engine/ElevatorVisuals.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/PresentationTransactionBuilder.hpp"
@@ -148,7 +149,8 @@ const AssetManifest& testManifest()
         { "name": "RotatorCounterClockwise", "path": "rotator-ccw.glb", "preserveSourceScale": true },
         { "name": "RotatorGear", "path": "rotator-gear.glb", "preserveSourceScale": true },
         { "name": "RotatorIconClockwise", "path": "rotator-icon-cw.glb", "preserveSourceScale": true },
-        { "name": "RotatorIconCounterClockwise", "path": "rotator-icon-ccw.glb", "preserveSourceScale": true }
+        { "name": "RotatorIconCounterClockwise", "path": "rotator-icon-ccw.glb", "preserveSourceScale": true },
+        { "name": "ElevatorPlatform", "path": "platform.glb" }
       ],
       "animations": [
         { "name": "Idle", "path": "a.glb", "role": "player-idle" },
@@ -177,7 +179,8 @@ const AssetManifest& testManifest()
         { "tile": "Player", "model": "Hero" },
         { "tile": "Enemy", "model": "Enemy" },
         { "tile": "Rotator Clockwise", "model": "RotatorClockwise" },
-        { "tile": "Rotator Counter-Clockwise", "model": "RotatorCounterClockwise" }
+        { "tile": "Rotator Counter-Clockwise", "model": "RotatorCounterClockwise" },
+        { "tile": "Elevator", "model": "ElevatorPlatform" }
       ]
     })json");
     return manifest;
@@ -1274,9 +1277,9 @@ void testGateEnergyCubeFadesAndPressurePlateMatchesColor()
 
     LevelEditor editor;
     editor.newDocument(3, 2, false);
+    editor.setActiveLinkColor(gateColor);
     CHECK(editor.setCell({ 1, 0, 1 }, TileType::PressurePlate));
     CHECK(editor.setCell({ 2, 0, 1 }, TileType::Gate));
-    CHECK(editor.updateGate(0, { { 1, 0, 1 } }, gateColor));
     const RenderFrameData editorFrame = RenderFrameBuilder::buildEditor({
         .manifest = testManifest(),
         .editor = editor,
@@ -1415,9 +1418,9 @@ void testRotatorPlateSpinsWithTheUnitItTurns()
     // The editor draws the whole plate in the rotator's link color.
     LevelEditor editor;
     editor.newDocument(4, 2, false);
+    editor.setActiveLinkColor(rotatorColor);
     CHECK(editor.setCell({ 1, 0, 1 }, TileType::PressurePlate));
     CHECK(editor.setCell({ 2, 0, 1 }, TileType::RotatorCounterClockwise));
-    CHECK(editor.updateRotator(0, { { 1, 0, 1 } }, rotatorColor));
     const RenderFrameData editorFrame = RenderFrameBuilder::buildEditor({
         .manifest = manifest,
         .editor = editor,
@@ -1438,6 +1441,165 @@ void testRotatorPlateSpinsWithTheUnitItTurns()
         });
     CHECK(editorPressure != editorFrame.tiles.end() &&
         near(editorPressure->color.x, rotatorColor.x));
+}
+
+void testElevatorPlatformIsFlushAndCarriesItsRider()
+{
+    TEST("elevatorPlatformIsFlushAndCarriesItsRider");
+    const Vec3 elevatorColor { 0.2f, 0.5f, 0.9f };
+    // The plate is on the platform, so the hero rides when it steps on.
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "....=." },
+            { "  C P." },
+            { "     ." },
+            { "      " },
+        },
+        .elevators = { Level::Elevator {
+            .cell = { 4, 0, 0 },
+            .pressurePlates = { { 4, 0, 1 } },
+            .color = elevatorColor,
+            .levels = { 0, 2 },
+        } },
+    }, "elevator presentation");
+    const AssetManifest& manifest = testManifest();
+    const RenderModel platformModel = manifest.modelForTile(TileType::Elevator);
+    CHECK(platformModel == manifest.modelIdByName("ElevatorPlatform"));
+    const auto platformTiles = [&](const RenderFrameData& frame) {
+        std::vector<RenderFrameData::Tile> tiles;
+        for (const RenderFrameData::Tile& tile : frame.tiles) {
+            if (tile.model == platformModel) {
+                tiles.push_back(tile);
+            }
+        }
+        return tiles;
+    };
+
+    GameState start = rules::initialState(level);
+    start.players[0].cell = { 3, 0, 1 };
+    GameplayPresentation presentation;
+    presentation.resetEntities(start);
+    CHECK(presentation.elevators().size() == 1);
+    const RenderFrameData idleFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest,
+        .level = level,
+        .state = start,
+        .moving = false,
+        .projectedState = start,
+        .presentation = presentation,
+        .settings = {},
+    });
+    // One platform, its top flush with the top of layer 0, where a unit on
+    // layer 1 stands; the authored grid cell is not drawn a second time.
+    const std::vector<RenderFrameData::Tile> idlePlatforms =
+        platformTiles(idleFrame);
+    CHECK(idlePlatforms.size() == 1);
+    if (!idlePlatforms.empty()) {
+        const RenderFrameData::Tile& platform = idlePlatforms.front();
+        CHECK(near(platform.baseElevation + platform.height, 1.0f));
+        CHECK(near(platform.height, config::elevatorPlatformHeight));
+        CHECK(near(platform.position.x, 4.0f));
+        CHECK(near(platform.size.x, 1.0f));
+        CHECK(platform.cell == (GridPosition3 { 4, 0, 0 }));
+        CHECK(platform.color.z > platform.color.x);
+    }
+
+    const GameState arrived = rules::step(level, start, MoveDirection::Right);
+    CHECK(arrived.elevators[0].cell == (GridPosition3 { 4, 0, 2 }));
+    CHECK(arrived.players[0].cell == (GridPosition3 { 4, 0, 3 }));
+    GameplaySession::Action action {
+        .before = start,
+        .after = arrived,
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Right,
+    };
+    action.presentation = presentation.buildActionPresentation(action);
+    const EntityTarget elevatorTarget {
+        EntityKind::Elevator,
+        resolvedEntityId(EntityKind::Elevator, invalidEntityId, 0),
+    };
+    CHECK(std::ranges::any_of(action.presentation.motions,
+        [&](const ActionMotionTrack& track) {
+            return track.target == elevatorTarget &&
+                near(track.from.z, 0.0f) && near(track.to.z, 2.0f);
+        }));
+    // The hero walks onto the platform in the step's own second, then the
+    // platform climbs two layers at 0.6 steps per layer, carrying it.
+    CHECK(near(action.presentation.durationSeconds,
+        1.0f + 2.0f * config::elevatorSecondsPerLayerPerStep));
+    const auto platformTopAt = [&](float seconds) {
+        presentation.seekAction(action, seconds);
+        const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+            .manifest = manifest,
+            .level = level,
+            .state = start,
+            .moving = true,
+            .projectedState = arrived,
+            .presentation = presentation,
+            .settings = {},
+        });
+        const std::vector<RenderFrameData::Tile> platforms =
+            platformTiles(frame);
+        CHECK(platforms.size() == 1);
+        return platforms.empty()
+            ? -1.0f
+            : platforms.front().baseElevation + platforms.front().height;
+    };
+    presentation.beginAction(action, action.before);
+    const float walkingTop = platformTopAt(0.5f);
+    CHECK(near(walkingTop, 1.0f));
+    CHECK(near(presentation.players()[0].motion.renderPosition.x, 3.5f));
+    CHECK(near(presentation.players()[0].motion.renderPosition.z, 1.0f));
+    const float ridingTop =
+        platformTopAt(1.0f + config::elevatorSecondsPerLayerPerStep);
+    CHECK(presentation.elevators()[0].moving);
+    CHECK(near(ridingTop, 2.0f));
+    // The rider stands on the platform the whole way up.
+    CHECK(near(presentation.players()[0].motion.renderPosition.x, 4.0f));
+    CHECK(near(presentation.players()[0].motion.renderPosition.z, ridingTop));
+
+    GameplayPresentation settled;
+    settled.resetEntities(arrived);
+    const RenderFrameData arrivedFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest,
+        .level = level,
+        .state = arrived,
+        .moving = false,
+        .projectedState = arrived,
+        .presentation = settled,
+        .settings = {},
+    });
+    const std::vector<RenderFrameData::Tile> arrivedPlatforms =
+        platformTiles(arrivedFrame);
+    CHECK(arrivedPlatforms.size() == 1 &&
+        near(arrivedPlatforms.front().baseElevation +
+                arrivedPlatforms.front().height,
+            3.0f));
+
+    // The editor draws the platform flush on its own layer and a dithered,
+    // unpickable platform at each other stop.
+    LevelEditor editor;
+    editor.newDocument(4, 2, false);
+    editor.setActiveLinkColor(elevatorColor);
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::PressurePlate));
+    CHECK(editor.setCell({ 2, 0, 0 }, TileType::Elevator));
+    CHECK(editor.setCell({ 3, 1, 2 }, TileType::Wall));
+    CHECK(editor.setElevatorLevels(0, { 0, 2 }));
+    const RenderFrameData editorFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest,
+        .editor = editor,
+        .settings = {},
+    });
+    const std::vector<RenderFrameData::Tile> editorPlatforms =
+        platformTiles(editorFrame);
+    const auto authored = std::ranges::find_if(editorPlatforms,
+        [](const RenderFrameData::Tile& tile) { return !tile.isEditorPreview; });
+    const auto ghost = std::ranges::find_if(editorPlatforms,
+        [](const RenderFrameData::Tile& tile) { return tile.isEditorPreview; });
+    CHECK(authored != editorPlatforms.end() &&
+        near(authored->baseElevation + authored->height, 1.0f));
+    CHECK(ghost != editorPlatforms.end() &&
+        near(ghost->baseElevation + ghost->height, 3.0f) && !ghost->pickable);
 }
 
 void testTurnedHeroFacesItsNewDirectionSmoothly()
@@ -3249,6 +3411,7 @@ int main()
     testGameplayVisibleCellFiltersComposedWorldFrame();
     testGateEnergyCubeFadesAndPressurePlateMatchesColor();
     testRotatorPlateSpinsWithTheUnitItTurns();
+    testElevatorPlatformIsFlushAndCarriesItsRider();
     testTurnedHeroFacesItsNewDirectionSmoothly();
     testMirrorOnPlatesDrawsPlateAndTurns();
     testEditorDrawsPlatesBeneathTheirOccupants();

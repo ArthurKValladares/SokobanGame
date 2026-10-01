@@ -12,6 +12,8 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace sokoban {
 
@@ -59,7 +61,10 @@ public:
 
 private:
     void drawGroundPaintTab(SplatPainter& painter, const Callbacks& callbacks);
-    void drawTilePalette(LevelEditor& editor, const Callbacks& callbacks);
+    void drawTilePalette(
+        LevelEditor& editor,
+        const InputBindings& bindings,
+        const Callbacks& callbacks);
     // The two halves of the decoration palette: the mesh library, and the
     // inspector for whichever decoration is selected.
     void drawDecorationMeshLibrary(
@@ -92,8 +97,15 @@ private:
     std::string decorationFilter_;
     std::string decorationRegistrationStatus_;
     std::optional<LevelEditor::Tool> selectedToolTab_;
-    std::optional<std::size_t> selectedGateIndex_;
-    std::optional<std::size_t> selectedRotatorIndex_;
+    // The link group (by color) the Links section recolors.
+    std::optional<Vec3> selectedLinkGroup_;
+    std::optional<std::size_t> selectedElevatorIndex_;
+    // The elevator stop list being typed, and which record (index and stops)
+    // it was last filled from.
+    std::string elevatorLevelsBuffer_;
+    std::optional<std::pair<std::size_t, std::vector<int>>> elevatorLevelsSource_;
+    bool elevatorLevelsEditing_ = false;
+    bool elevatorLevelsError_ = false;
     int requestedWidth_ = 12;
     int requestedHeight_ = 8;
     std::optional<LevelEditor::LevelDirectory> pendingRenameLevel_;

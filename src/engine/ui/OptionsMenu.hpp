@@ -60,6 +60,7 @@ enum class OptionsMenuRowId {
     EditorMoveTile,
     EditorControlsSection,
     EditorPickTile,
+    EditorPaintLinkColor,
     EditorStraightLine,
     EditorRedo,
     EditorSave,

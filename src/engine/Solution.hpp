@@ -69,7 +69,8 @@ struct Solution {
 };
 
 // Digest of what gameplay depends on: layers, water layer, character and,
-// when present, rotator links and plates authored beneath units.
+// when present, rotator links, elevator links and stops, and plates authored
+// beneath units.
 // Decorations and selectors do not affect a solution and are left out.
 [[nodiscard]] std::uint64_t levelDigest(const Level::Definition& definition);
 [[nodiscard]] std::string digestText(std::uint64_t digest);

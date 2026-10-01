@@ -86,7 +86,11 @@ bool tileTypeOccupiesLevelCell(TileType type)
 
 bool tileTypeIsSolidBlock(TileType type)
 {
-    return type == TileType::Ground || type == TileType::Wall;
+    // An elevator is solid wherever its platform currently rests. The level
+    // grid only knows where it was authored; rules ask about the live
+    // position (see rules::elevatorPlatformAt).
+    return type == TileType::Ground || type == TileType::Wall ||
+        type == TileType::Elevator;
 }
 
 bool tileTypeSupportsEntity(TileType type)
@@ -148,6 +152,11 @@ bool tileTypeIsRotator(TileType type)
 {
     return type == TileType::RotatorClockwise ||
         type == TileType::RotatorCounterClockwise;
+}
+
+bool tileTypeIsElevator(TileType type)
+{
+    return type == TileType::Elevator;
 }
 
 std::optional<int> rotatorQuarterTurns(TileType type)

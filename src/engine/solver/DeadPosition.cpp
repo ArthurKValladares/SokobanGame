@@ -32,7 +32,8 @@ bool tileChangesMovableReachability(TileType tile)
 {
     return tile == TileType::Ice || tile == TileType::Water ||
         tile == TileType::Ladder || tileTypeIsConveyor(tile) ||
-        tileTypeIsMirror(tile) || tile == TileType::Gate;
+        tileTypeIsMirror(tile) || tile == TileType::Gate ||
+        tileTypeIsElevator(tile);
 }
 
 bool staticallySupported(const Level& level, GridPosition3 cell)

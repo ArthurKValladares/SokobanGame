@@ -622,6 +622,10 @@
       "name": "RotatorIconCounterClockwise",
       "path": "custom/models/rotator_icon_counter_clockwise.glb",
       "preserveSourceScale": true
+    },
+    {
+      "name": "ElevatorPlatform",
+      "path": "Kenney Platformer Kit/Models/GLB format/platform.glb"
     }
   ],
   "animations": [
@@ -754,6 +758,10 @@
     {
       "tile": "Rotator Counter-Clockwise",
       "model": "RotatorCounterClockwise"
+    },
+    {
+      "tile": "Elevator",
+      "model": "ElevatorPlatform"
     }
   ],
   "sounds": [

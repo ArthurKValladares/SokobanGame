@@ -417,6 +417,15 @@ void testEditorShortcuts()
     frame = editorFrameAfter({ SDL_SCANCODE_LALT, SDL_SCANCODE_LSHIFT });
     CHECK(frame.editor.pickModifier);
     CHECK(frame.editor.lineConstraint);
+    CHECK(!frame.editor.paintLinkColorModifier);
+
+    // Ctrl alone holds the link-color brush, and still takes part in chords.
+    frame = editorFrameAfter({ SDL_SCANCODE_RCTRL });
+    CHECK(frame.editor.paintLinkColorModifier);
+    CHECK(!frame.editor.pickModifier);
+    frame = editorFrameAfter({ SDL_SCANCODE_LCTRL, SDL_SCANCODE_S });
+    CHECK(frame.editor.paintLinkColorModifier);
+    CHECK(frame.editor.savePressed);
 
     // A focused text field owns the keyboard.
     frame = editorFrameAfter(
@@ -491,6 +500,9 @@ void testEditorShortcutsFollowRebinding()
               .editor.recentTileSlot == std::optional<std::size_t> { 2 });
     CHECK(frameAfter({ SDL_SCANCODE_LCTRL }).editor.pickModifier);
     CHECK(!frameAfter({ SDL_SCANCODE_LALT }).editor.pickModifier);
+    // Taking Left Ctrl for the eyedropper leaves the brush on Right Ctrl.
+    CHECK(!frameAfter({ SDL_SCANCODE_LCTRL }).editor.paintLinkColorModifier);
+    CHECK(frameAfter({ SDL_SCANCODE_RCTRL }).editor.paintLinkColorModifier);
 }
 
 void testDraftPlaybackShortcuts()

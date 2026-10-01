@@ -4,6 +4,7 @@
 #include "engine/ContentPipeline.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/DecorationAssetRegistry.hpp"
+#include "engine/EditorCursorArt.hpp"
 #include "engine/EditorInteraction.hpp"
 #include "engine/Log.hpp"
 #include "engine/TileThumbnailBake.hpp"
@@ -1242,6 +1243,92 @@ bool ApplicationTools::bakeTileThumbnails(
 #endif
 }
 
+namespace {
+
+SDL_Cursor* createEditorCursor(const editorCursorArt::Image& image)
+{
+    SDL_Surface* surface = SDL_CreateSurface(
+        editorCursorArt::size, editorCursorArt::size, SDL_PIXELFORMAT_RGBA32);
+    if (surface == nullptr) {
+        return nullptr;
+    }
+    const auto* source = image.rgba.data();
+    auto* destination = static_cast<std::uint8_t*>(surface->pixels);
+    const std::size_t rowBytes =
+        static_cast<std::size_t>(editorCursorArt::size) * 4U;
+    for (int row = 0; row < editorCursorArt::size; ++row) {
+        std::copy_n(
+            source + static_cast<std::size_t>(row) * rowBytes,
+            rowBytes,
+            destination + static_cast<std::size_t>(row) *
+                static_cast<std::size_t>(surface->pitch));
+    }
+    SDL_Cursor* cursor = SDL_CreateColorCursor(
+        surface, image.hotspotX, image.hotspotY);
+    SDL_DestroySurface(surface);
+    return cursor;
+}
+
+} // namespace
+
+void ApplicationTools::updateEditorCursor(bool editorActive)
+{
+    const EditorCursor wanted =
+        editorActive ? wantedEditorCursor_ : EditorCursor::Default;
+    SDL_Cursor* cursor = nullptr;
+    if (wanted == EditorCursor::Eyedropper) {
+        if (eyedropperCursor_ == nullptr) {
+            eyedropperCursor_ = createEditorCursor(editorCursorArt::eyedropper());
+        }
+        cursor = eyedropperCursor_;
+    } else if (wanted == EditorCursor::Brush) {
+        const Vec3 paint = levelEditor.activeLinkColor();
+        if (brushCursor_ != nullptr &&
+            !LevelEditor::sameLinkColor(paint, brushCursorColor_)) {
+            if (shownEditorCursor_ == EditorCursor::Brush) {
+                SDL_SetCursor(SDL_GetDefaultCursor());
+                shownEditorCursor_ = EditorCursor::Default;
+            }
+            SDL_DestroyCursor(brushCursor_);
+            brushCursor_ = nullptr;
+        }
+        if (brushCursor_ == nullptr) {
+            brushCursor_ = createEditorCursor(editorCursorArt::brush(paint));
+            brushCursorColor_ = paint;
+        }
+        cursor = brushCursor_;
+    }
+    if (wanted == shownEditorCursor_) {
+        return;
+    }
+    // Dear ImGui's backend only sets the cursor when the one it wants
+    // changes, and over the board it wants the arrow throughout, so it leaves
+    // ours alone; leaving a tool cursor restores the arrow ourselves.
+    if (cursor != nullptr) {
+        SDL_SetCursor(cursor);
+        shownEditorCursor_ = wanted;
+    } else {
+        SDL_SetCursor(SDL_GetDefaultCursor());
+        shownEditorCursor_ = EditorCursor::Default;
+    }
+}
+
+void ApplicationTools::shutdownEditorCursors()
+{
+    if (shownEditorCursor_ != EditorCursor::Default) {
+        SDL_SetCursor(SDL_GetDefaultCursor());
+        shownEditorCursor_ = EditorCursor::Default;
+    }
+    if (eyedropperCursor_ != nullptr) {
+        SDL_DestroyCursor(eyedropperCursor_);
+        eyedropperCursor_ = nullptr;
+    }
+    if (brushCursor_ != nullptr) {
+        SDL_DestroyCursor(brushCursor_);
+        brushCursor_ = nullptr;
+    }
+}
+
 void ApplicationTools::updateEditorInteraction(
     const InputRouter::EditorInput& input,
     const VulkanRenderer::PreparedFrame* previousRenderFrame,
@@ -1249,6 +1336,7 @@ void ApplicationTools::updateEditorInteraction(
     Vec2 windowSize,
     Vec2 pixelSize)
 {
+    wantedEditorCursor_ = EditorCursor::Default;
     hoverCell.reset();
     pickedCell.reset();
     hoverDecoration.reset();
@@ -1256,6 +1344,11 @@ void ApplicationTools::updateEditorInteraction(
     if (tileStroke_ && !input.primaryDown) {
         (void)levelEditor.endStroke();
         tileStroke_.reset();
+    }
+    if (linkColorStroke_ &&
+        (!input.primaryDown || !input.paintLinkColorModifier)) {
+        (void)levelEditor.endStroke();
+        linkColorStroke_.reset();
     }
     if (!input.moving) {
         levelEditor.cancelMove();
@@ -1266,6 +1359,10 @@ void ApplicationTools::updateEditorInteraction(
             (void)levelEditor.endSelectedDecorationTransform(false);
         }
         interruptTileStroke();
+        if (linkColorStroke_) {
+            (void)levelEditor.endStroke();
+            linkColorStroke_.reset();
+        }
         if (input.undoPressed) {
             (void)(splatPainter.active()
                     ? splatPainter.undo()
@@ -1288,6 +1385,16 @@ void ApplicationTools::updateEditorInteraction(
             (void)levelEditor.endSelectedDecorationTransform();
         }
         return;
+    }
+    // The pointer is over the board: show the tool a held key has turned
+    // the click into.
+    if (levelEditor.tool() == LevelEditor::Tool::Tiles &&
+        !splatPainter.active() && !input.moving) {
+        if (input.pickModifier) {
+            wantedEditorCursor_ = EditorCursor::Eyedropper;
+        } else if (input.paintLinkColorModifier) {
+            wantedEditorCursor_ = EditorCursor::Brush;
+        }
     }
     if (levelEditor.tool() == LevelEditor::Tool::Decorations &&
         input.secondaryPressed && levelEditor.selectedDecoration()) {
@@ -1357,6 +1464,21 @@ void ApplicationTools::updateEditorInteraction(
         if (tilePainting && input.pickModifier) {
             if (input.primaryPressed) {
                 (void)levelEditor.pickTile(*clicked);
+            }
+            return;
+        }
+        if (tilePainting && input.paintLinkColorModifier) {
+            const GridPosition column { clicked->x, clicked->y };
+            if (input.primaryPressed) {
+                interruptTileStroke();
+                (void)levelEditor.endStroke();
+                (void)levelEditor.beginStroke();
+                (void)levelEditor.paintLinkColorAt(*clicked);
+                linkColorStroke_ = LinkColorStroke { .last = column };
+            } else if (linkColorStroke_ && linkColorStroke_->last != column) {
+                // Each tile once per drag; the drag is one undo step.
+                (void)levelEditor.paintLinkColorAt(*clicked);
+                linkColorStroke_->last = column;
             }
             return;
         }

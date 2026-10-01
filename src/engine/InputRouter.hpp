@@ -75,8 +75,12 @@ public:
         bool toggleLayerLockPressed = false;
         // Recent-tile shortcuts select slots 0-8.
         std::optional<std::size_t> recentTileSlot;
-        // Held: turns a click into the eyedropper.
+        // Held: turns a click into the eyedropper, which also picks up a
+        // pressure plate's or device's link color.
         bool pickModifier = false;
+        // Held: turns a click (or drag) into the link-color brush, which gives
+        // each pressure plate or device it touches the active link color.
+        bool paintLinkColorModifier = false;
         // Held: keeps a drag stroke on its starting row or column.
         bool lineConstraint = false;
         bool deleting = false;

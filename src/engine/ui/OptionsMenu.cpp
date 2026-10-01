@@ -158,6 +158,12 @@ constexpr std::array editorBindingRows {
         EditorControlsSection::Editing,
     },
     EditorBindingRow {
+        OptionsMenuRowId::EditorPaintLinkColor,
+        InputAction::EditorPaintLinkColor,
+        "Paint link color (hold)",
+        EditorControlsSection::Editing,
+    },
+    EditorBindingRow {
         OptionsMenuRowId::EditorStraightLine,
         InputAction::EditorStraightLine,
         "Straight drag (hold)",
@@ -464,6 +470,7 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::EditorDeleteTile:
     case OptionsMenuRowId::EditorMoveTile:
     case OptionsMenuRowId::EditorPickTile:
+    case OptionsMenuRowId::EditorPaintLinkColor:
     case OptionsMenuRowId::EditorStraightLine:
     case OptionsMenuRowId::EditorRedo:
     case OptionsMenuRowId::EditorSave:

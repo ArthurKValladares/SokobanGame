@@ -5,6 +5,7 @@
 #include "engine/LevelLocation.hpp"
 #include "engine/TileTypes.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -46,6 +47,27 @@ public:
         bool operator==(const Rotator&) const = default;
     };
 
+    // An Elevator tile's authored record. The tile marks the platform's
+    // starting cell; `levels` lists the layers the platform stops at, in
+    // travel order, and always includes the starting layer. Activation follows
+    // the rotator rule (it fires once each time every linked pressure plate
+    // becomes occupied) and moves the platform one stop along the list,
+    // turning back at either end: [0, 3, 5, 7] travels
+    // 0 -> 3 -> 5 -> 7 -> 5 -> 3 -> 0 -> 3 ... A platform resting at layer L
+    // is a solid block in cell (x, y, L), its top flush with the other blocks
+    // of that layer, and it carries whatever stands on it.
+    struct Elevator {
+        GridPosition3 cell {};
+        std::vector<GridPosition3> pressurePlates;
+        Vec3 color { 0.38f, 0.80f, 0.44f };
+        std::vector<int> levels;
+
+        // Index of the starting layer (cell.z) in `levels`.
+        [[nodiscard]] std::size_t startStop() const;
+
+        bool operator==(const Elevator&) const = default;
+    };
+
     // A plate (see TileProperty::Plate) authored underneath something already
     // standing on it: the layer grid holds the occupant, this record the
     // plate. Plates with nothing on them stay in the grid as usual.
@@ -54,6 +76,24 @@ public:
         TileType tile = TileType::PressurePlate;
 
         bool operator==(const Plate&) const = default;
+    };
+
+    // Level-editor bookkeeping, never read by gameplay. In the editor a
+    // pressure plate drives every gate, rotator and elevator of its color;
+    // saving turns those color groups into the explicit `pressurePlates`
+    // lists above, which are what gameplay uses. Linked plates take their
+    // color back from their device when a screen is loaded, so only a
+    // pressure plate that drives nothing yet needs its color written down,
+    // here, to survive a save.
+    struct LinkColor {
+        GridPosition3 cell {};
+        Vec3 color {};
+
+        bool operator==(const LinkColor& other) const
+        {
+            return cell == other.cell && color.x == other.color.x &&
+                color.y == other.color.y && color.z == other.color.z;
+        }
     };
 
     struct Decoration {
@@ -122,6 +162,9 @@ public:
         std::vector<Gate> gates;
         std::vector<Rotator> rotators;
         std::vector<Plate> plates;
+        std::vector<Elevator> elevators;
+        // Editor-only (see LinkColor); Level::loadFromDefinition ignores it.
+        std::vector<LinkColor> linkColors;
         // Missing only for backwards-compatible legacy documents. Runtime
         // levels always resolve it to Rogue.
         std::optional<CharacterType> character;
@@ -155,7 +198,8 @@ public:
         const std::vector<Gate>& gates = {},
         const std::vector<Rotator>& rotators = {},
         const std::vector<Plate>& plates = {},
-        CharacterType selectedCharacter = CharacterType::Rogue);
+        CharacterType selectedCharacter = CharacterType::Rogue,
+        const std::vector<Elevator>& elevators = {});
     [[nodiscard]] static Definition parseDefinition(
         const std::vector<std::string>& lines,
         std::string_view sourceName);
@@ -182,8 +226,12 @@ public:
     [[nodiscard]] const std::vector<Rotator>& rotators() const { return rotators_; }
     [[nodiscard]] const Rotator* rotatorAt(GridPosition3 cell) const;
     [[nodiscard]] const Rotator* rotatorForPressurePlate(GridPosition3 cell) const;
-    // The color a pressure plate takes from the gate or rotator it drives
-    // (gates win when a plate is linked to both). Empty for unlinked plates.
+    [[nodiscard]] const std::vector<Elevator>& elevators() const { return elevators_; }
+    // The elevator authored at `cell` (its starting cell), if any.
+    [[nodiscard]] const Elevator* elevatorAt(GridPosition3 cell) const;
+    [[nodiscard]] const Elevator* elevatorForPressurePlate(GridPosition3 cell) const;
+    // The color a pressure plate takes from the gate, rotator or elevator it
+    // drives, in that order of precedence. Empty for unlinked plates.
     [[nodiscard]] std::optional<Vec3> pressurePlateLinkColor(GridPosition3 cell) const;
     // The plate at `cell`, whether it is uncovered or has something authored
     // on top of it. Units standing on a plate leave it in tileAt(); a mirror
@@ -215,6 +263,7 @@ private:
     std::vector<GridPosition3> pressurePlates_;
     std::vector<Gate> gates_;
     std::vector<Rotator> rotators_;
+    std::vector<Elevator> elevators_;
     std::vector<Plate> coveredPlates_;
     std::vector<GridPosition3> ends_;
     std::vector<TileType> tiles_;

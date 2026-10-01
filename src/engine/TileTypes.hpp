@@ -48,6 +48,11 @@ enum class TileType {
     TurretEast,
     TurretSouth,
     TurretWest,
+    // A moving platform. It is a solid block on the layer it rests on, so
+    // units stand on top of it; each time its linked pressure plates become
+    // fully pressed it carries itself and whatever stands on it to the next
+    // stop in its authored list of layers (see Level::Elevator).
+    Elevator,
     Count,
 };
 
@@ -118,6 +123,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::TurretEast, 'e', "Turret East", { 0.72f, 0.48f, 0.16f, 1.0f } },
     TileTypeDefinition { TileType::TurretSouth, 's', "Turret South", { 0.72f, 0.48f, 0.16f, 1.0f } },
     TileTypeDefinition { TileType::TurretWest, 'w', "Turret West", { 0.72f, 0.48f, 0.16f, 1.0f } },
+    TileTypeDefinition { TileType::Elevator, '=', "Elevator", { 0.86f, 0.88f, 0.92f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -146,6 +152,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeIsTurret(TileType type);
 [[nodiscard]] bool tileTypeIsDecorative(TileType type);
 [[nodiscard]] bool tileTypeIsRotator(TileType type);
+[[nodiscard]] bool tileTypeIsElevator(TileType type);
 // Signed quarter turns one activation applies: +1 clockwise, -1
 // counter-clockwise (seen from above). Empty for every other tile.
 [[nodiscard]] std::optional<int> rotatorQuarterTurns(TileType type);

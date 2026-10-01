@@ -1089,6 +1089,19 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
         "Rotators %zu/%zu engaged",
         engagedRotators,
         context.level.rotators().size());
+    for (std::size_t index = 0; index < context.level.elevators().size(); ++index) {
+        const Level::Elevator& elevator = context.level.elevators()[index];
+        const GridPosition3 platform =
+            rules::elevatorPlatformCell(context.level, state, index);
+        ImGui::Text(
+            "Elevator (%d, %d) at layer %d%s",
+            elevator.cell.x,
+            elevator.cell.y,
+            platform.z,
+            rules::isElevatorEngaged(context.level, state, elevator)
+                ? ", engaged"
+                : "");
+    }
     ImGui::BeginDisabled(context.inOverworld);
     result.solveCurrentScreen = ImGui::Button("Solve Current Screen");
     ImGui::EndDisabled();

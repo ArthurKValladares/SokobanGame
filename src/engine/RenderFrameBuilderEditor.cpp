@@ -1,6 +1,7 @@
 #include "engine/RenderFrameBuilder.hpp"
 
 #include "engine/AnimationCatalog.hpp"
+#include "engine/ElevatorVisuals.hpp"
 #include "engine/GateEffect.hpp"
 #include "engine/RenderFrameParts.hpp"
 #include "engine/RotatorVisuals.hpp"
@@ -291,6 +292,15 @@ private:
                 : Level::Rotator {}.color;
             renderTile.color = { color.x, color.y, color.z, 1.0f };
         }
+        if (tileTypeIsElevator(tile)) {
+            const auto found = std::ranges::find(
+                definition.elevators, localCell, &Level::Elevator::cell);
+            renderTile.color = elevatorPlatformColor(
+                found != definition.elevators.end()
+                    ? found->color
+                    : Level::Elevator {}.color,
+                1.0f);
+        }
         renderTile.pickable = false;
         renderTile.affectsCameraFit = false;
         const bool animatedActor =
@@ -512,31 +522,22 @@ private:
         RenderFrameData::Tile renderTile = tileVisual(
             tile, { x, y, z }, input_.manifest, input_.settings);
         if (tile == TileType::PressurePlate) {
-            const GridPosition3 cell { x, y, z };
-            const auto linkedTo = [cell](const auto& candidate) {
-                return std::ranges::find(candidate.pressurePlates, cell) !=
-                    candidate.pressurePlates.end();
-            };
-            const auto gate =
-                std::ranges::find_if(input_.editor.gates(), linkedTo);
-            const auto rotator =
-                std::ranges::find_if(input_.editor.rotators(), linkedTo);
-            // Gates win, matching Level::pressurePlateLinkColor.
-            if (gate != input_.editor.gates().end()) {
-                renderTile.color = {
-                    gate->color.x,
-                    gate->color.y,
-                    gate->color.z,
-                    1.0f,
-                };
-            } else if (rotator != input_.editor.rotators().end()) {
-                renderTile.color = {
-                    rotator->color.x,
-                    rotator->color.y,
-                    rotator->color.z,
-                    1.0f,
-                };
+            // In the editor a plate shows its own link color: the color is
+            // the link (see LevelEditor::linkGroups).
+            if (const std::optional<Vec3> color =
+                    input_.editor.linkColorAt({ x, y, z })) {
+                renderTile.color = { color->x, color->y, color->z, 1.0f };
             }
+        }
+        if (tileTypeIsElevator(tile)) {
+            const GridPosition3 cell { x, y, z };
+            const auto found = std::ranges::find(
+                input_.editor.elevators(), cell, &Level::Elevator::cell);
+            renderTile.color = elevatorPlatformColor(
+                found != input_.editor.elevators().end()
+                    ? found->color
+                    : Level::Elevator {}.color,
+                1.0f);
         }
         if (tileTypeIsRotator(tile)) {
             const GridPosition3 cell { x, y, z };
@@ -672,8 +673,42 @@ private:
                         static_cast<int>(y),
                         static_cast<int>(z),
                     });
+                    if (tileTypeIsElevator(tile)) {
+                        appendElevatorStops(frame, {
+                            static_cast<int>(x),
+                            static_cast<int>(y),
+                            static_cast<int>(z),
+                        });
+                    }
                 }
             }
+        }
+    }
+
+    // The other stops of the elevator authored at `cell`, as dithered
+    // platforms that cannot be picked, so the route reads in the editor.
+    void appendElevatorStops(RenderFrameData& frame, GridPosition3 cell) const
+    {
+        const auto found = std::ranges::find(
+            input_.editor.elevators(), cell, &Level::Elevator::cell);
+        if (found == input_.editor.elevators().end()) {
+            return;
+        }
+        for (const int stop : found->levels) {
+            if (stop == cell.z) {
+                continue;
+            }
+            RenderFrameData::Tile ghost = tileVisual(
+                TileType::Elevator,
+                { cell.x, cell.y, stop },
+                input_.manifest,
+                input_.settings);
+            ghost.color = elevatorPlatformColor(found->color, 1.0f);
+            ghost.isEditorPreview = true;
+            ghost.pickable = false;
+            ghost.showGrid = false;
+            ghost.affectsCameraFit = false;
+            frame.tiles.push_back(ghost);
         }
     }
 
@@ -905,6 +940,7 @@ RenderFrameData::Tile tileVisual(
     const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
     const bool conveyor = tileTypeIsConveyor(tile);
     const bool rotator = tileTypeIsRotator(tile);
+    const bool elevator = tileTypeIsElevator(tile);
     const float tileSize = rotator
         ? config::rotatorPlateWidthDepth
         : (surfaceEntity ? settings.geometry.surfaceEntityWidthDepth : 1.0f);
@@ -918,6 +954,9 @@ RenderFrameData::Tile tileVisual(
     if (tile == TileType::Ice) {
         color.w = config::iceTintAlpha;
     }
+    if (elevator) {
+        color = elevatorPlatformColor(Level::Elevator {}.color, 1.0f);
+    }
 
     RenderFrameData::Tile visual {
         .cell = cell,
@@ -927,12 +966,19 @@ RenderFrameData::Tile tileVisual(
         },
         .size = { tileSize, tileSize },
         .color = color,
-        .baseElevation = static_cast<float>(cell.z),
+        // An elevator platform is a thin slab whose top is flush with the
+        // top of its layer (see ElevatorVisuals.hpp).
+        .baseElevation = elevator
+            ? static_cast<float>(cell.z) + 1.0f -
+                config::elevatorPlatformHeight
+            : static_cast<float>(cell.z),
         // Conveyors are the reason this is shared: they are neither a surface
         // entity nor a solid block, so anything that only tests those two ends
         // up drawing them flat.
         .height = rotator
             ? config::rotatorPlateHeight
+            : elevator
+            ? config::elevatorPlatformHeight
             : surfaceEntity
             ? settings.geometry.surfaceEntityHeight
             : (conveyor
@@ -970,10 +1016,12 @@ RenderFrameData::Tile tileVisual(
             ? RenderSurfaceEffect::GroundSplat
             : RenderSurfaceEffect::Standard,
     };
-    applyTileScale(
-        visual,
-        settings.tileScale(
-            tileTypeIsPlayerStart(tile) ? TileType::Player : tile));
+    if (!elevator) {
+        applyTileScale(
+            visual,
+            settings.tileScale(
+                tileTypeIsPlayerStart(tile) ? TileType::Player : tile));
+    }
     return visual;
 }
 

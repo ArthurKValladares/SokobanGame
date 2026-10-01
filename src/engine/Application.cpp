@@ -510,6 +510,7 @@ Application::~Application()
         saveDevSession();
     }
     tools_->shutdownDetachedCamera(window_.nativeHandle());
+    tools_->shutdownEditorCursors();
     DebugUi::clearTabs();
 #endif
     renderer_.waitIdle();
@@ -1102,6 +1103,13 @@ void Application::update(
         ? std::min(overworldOverviewProgress_ + overviewStep, 1.0f)
         : std::max(overworldOverviewProgress_ - overviewStep, 0.0f);
 
+#if SOKOBAN_ENABLE_DEBUG_UI
+    // Last frame's board interaction decides the editor's tool cursor; any
+    // menu, modal or fly camera puts the ordinary cursor back.
+    tools_->updateEditorCursor(
+        !shellMenuOpen() && !tools_->draftExitConfirmationOpen &&
+        !detachedCameraActive && tools_->levelEditor.editingDocument());
+#endif
     if (shellMenuOpen()) {
         audioSystem_->update(dt, false, false);
         return;

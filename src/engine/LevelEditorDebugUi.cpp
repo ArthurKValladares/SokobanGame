@@ -1,12 +1,17 @@
 #include "engine/LevelEditorDebugUi.hpp"
 
+#include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/RenderTypes.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
+#include <cstdint>
 #include <exception>
+#include <optional>
 #include <string>
+#include <system_error>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -308,7 +313,7 @@ void LevelEditorDebugUi::draw(
                 nullptr,
                 toolTabFlags(LevelEditor::Tool::Tiles))) {
             activateToolTab(LevelEditor::Tool::Tiles);
-            drawTilePalette(editor, callbacks);
+            drawTilePalette(editor, bindings, callbacks);
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem(
@@ -368,9 +373,18 @@ void LevelEditorDebugUi::draw(
             actionBindingsDisplay(
                 bindings, InputAction::EditorStraightLine).c_str());
         ImGui::BulletText(
-            "%s + click: pick up the tile under the pointer",
+            "%s + click: eyedropper (the cursor turns into one) - pick up "
+            "the tile under the pointer, and the link color of a pressure "
+            "plate, gate, rotator or elevator",
             actionBindingsDisplay(
                 bindings, InputAction::EditorPickTile).c_str());
+        ImGui::BulletText(
+            "%s + click or drag: link-color brush (the cursor turns into a "
+            "brush dipped in the link color) - give each pressure plate, "
+            "gate, rotator or elevator touched the active link color; the "
+            "whole drag is one undo step",
+            actionBindingsDisplay(
+                bindings, InputAction::EditorPaintLinkColor).c_str());
         shortcut(InputAction::EditorRedo, "redo");
         shortcut(
             InputAction::EditorSave,
@@ -535,97 +549,98 @@ void LevelEditorDebugUi::syncDocumentPath(const LevelEditor& editor)
 
 namespace {
 
-// Shared Gate/Rotator link editor: a device picker, its color, and one
-// checkbox per Pressure tile in the document. `apply` receives the edited
-// links and color only when something changed.
-template <typename Record, typename Apply>
-void drawPlateLinkAssignments(
-    const LevelEditor& editor,
-    const std::vector<Record>& records,
-    std::optional<std::size_t>& selectedIndex,
-    const char* kind,
-    const char* emptyHint,
-    Apply&& apply)
+std::string cellText(GridPosition3 cell)
 {
-    ImGui::PushID(kind);
-    if (selectedIndex && *selectedIndex >= records.size()) {
-        selectedIndex.reset();
-    }
-    if (!selectedIndex && !records.empty()) {
-        selectedIndex = 0;
-    }
-    if (records.empty()) {
-        ImGui::TextDisabled("%s", emptyHint);
-        ImGui::PopID();
-        return;
-    }
-    const auto recordLabel = [&](const Record& record) {
-        return std::string(kind) + " (" + std::to_string(record.cell.x) + ", " +
-            std::to_string(record.cell.y) + ", " +
-            std::to_string(record.cell.z) + ")";
-    };
-    const std::string preview = recordLabel(records[*selectedIndex]);
-    if (ImGui::BeginCombo(kind, preview.c_str())) {
-        for (std::size_t index = 0; index < records.size(); ++index) {
-            const std::string label = recordLabel(records[index]);
-            if (ImGui::Selectable(label.c_str(), *selectedIndex == index)) {
-                selectedIndex = index;
-            }
-        }
-        ImGui::EndCombo();
-    }
+    return "(" + std::to_string(cell.x) + ", " + std::to_string(cell.y) +
+        ", " + std::to_string(cell.z) + ")";
+}
 
-    const std::size_t recordIndex = *selectedIndex;
-    Record edited = records[recordIndex];
-    const std::string colorLabel = std::string(kind) + " / Plate Color";
-    bool changed = ImGui::ColorEdit3(colorLabel.c_str(), &edited.color.x);
-    std::vector<GridPosition3> pressurePlates;
-    const Level::LayerRows& layers = editor.documentLayers();
-    for (std::size_t z = 0; z < layers.size(); ++z) {
-        for (std::size_t y = 0; y < layers[z].size(); ++y) {
-            for (std::size_t x = 0; x < layers[z][y].size(); ++x) {
-                const GridPosition3 cell {
-                    static_cast<int>(x),
-                    static_cast<int>(y),
-                    static_cast<int>(z),
-                };
-                // Includes pressure plates with something standing on them.
-                if (editor.documentPlateAt(cell) == TileType::PressurePlate) {
-                    pressurePlates.push_back(cell);
-                }
-            }
+// "2 plates -> Gate (4, 0, 1), Rotator (3, 0, 1)".
+std::string linkGroupText(const LevelEditor::LinkGroup& group)
+{
+    std::string text = std::to_string(group.pressurePlates.size()) +
+        (group.pressurePlates.size() == 1 ? " plate" : " plates");
+    std::vector<std::string> devices;
+    for (const GridPosition3 cell : group.gates) {
+        devices.push_back("Gate " + cellText(cell));
+    }
+    for (const GridPosition3 cell : group.rotators) {
+        devices.push_back("Rotator " + cellText(cell));
+    }
+    for (const GridPosition3 cell : group.elevators) {
+        devices.push_back("Elevator " + cellText(cell));
+    }
+    for (std::size_t i = 0; i < devices.size(); ++i) {
+        text += (i == 0 ? " -> " : ", ") + devices[i];
+    }
+    return text;
+}
+
+// "0, 3, 5, 7", "[0 3 5 7]" and similar: integers separated by commas,
+// spaces or semicolons, optionally bracketed. Empty when anything else is
+// in the text.
+std::optional<std::vector<int>> parseElevatorLevels(std::string_view text)
+{
+    std::vector<int> levels;
+    std::size_t position = 0;
+    const auto separator = [](char character) {
+        return character == ',' || character == ';' || character == '[' ||
+            character == ']' || std::isspace(static_cast<unsigned char>(character));
+    };
+    while (position < text.size()) {
+        if (separator(text[position])) {
+            ++position;
+            continue;
         }
-    }
-    ImGui::Text("Linked Pressure Plates (%zu available)", pressurePlates.size());
-    for (GridPosition3 plate : pressurePlates) {
-        bool linked = std::ranges::find(edited.pressurePlates, plate) !=
-            edited.pressurePlates.end();
-        const std::string label =
-            "(" + std::to_string(plate.x) + ", " +
-            std::to_string(plate.y) + ", " +
-            std::to_string(plate.z) + ")##plate_" +
-            std::to_string(plate.x) + "_" +
-            std::to_string(plate.y) + "_" +
-            std::to_string(plate.z);
-        if (ImGui::Checkbox(label.c_str(), &linked)) {
-            changed = true;
-            if (linked) {
-                edited.pressurePlates.push_back(plate);
-            } else {
-                std::erase(edited.pressurePlates, plate);
-            }
+        int value = 0;
+        const char* begin = text.data() + position;
+        const char* end = text.data() + text.size();
+        const auto [next, error] = std::from_chars(begin, end, value);
+        if (error != std::errc {} || next == begin ||
+            (next != end && !separator(*next))) {
+            return std::nullopt;
         }
+        levels.push_back(value);
+        position = static_cast<std::size_t>(next - text.data());
     }
-    if (changed) {
-        apply(recordIndex, std::move(edited.pressurePlates), edited.color);
+    return levels;
+}
+
+std::string formatElevatorLevels(const std::vector<int>& levels)
+{
+    std::string text;
+    for (std::size_t i = 0; i < levels.size(); ++i) {
+        text += (i == 0 ? "" : ", ") + std::to_string(levels[i]);
     }
-    ImGui::PopID();
+    return text;
+}
+
+// One full trip from the start: 0 -> 3 -> 5 -> 7 -> 5 -> 3 -> 0 for [0, 3, 5,
+// 7] starting at 0. Starting part-way along shows the trip from there.
+std::string elevatorCycleText(const Level::Elevator& elevator)
+{
+    if (elevator.levels.size() < 2) {
+        return "stays at layer " + std::to_string(elevator.cell.z);
+    }
+    const std::size_t stops = elevator.levels.size();
+    uint8_t phase = rules::elevatorInitialPhase(elevator);
+    std::string text = std::to_string(
+        elevator.levels[rules::elevatorStopIndex(stops, phase)]);
+    for (std::size_t step = 0; step < 2 * (stops - 1); ++step) {
+        phase = rules::elevatorNextPhase(stops, phase);
+        text += " -> " +
+            std::to_string(
+                elevator.levels[rules::elevatorStopIndex(stops, phase)]);
+    }
+    return text;
 }
 
 } // namespace
 
 void LevelEditorDebugUi::drawTilePalette(
-    LevelEditor& editor, const Callbacks& callbacks)
+    LevelEditor& editor,
+    const InputBindings& bindings,
+    const Callbacks& callbacks)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     if (!editor.recentTiles().empty()) {
@@ -710,35 +725,159 @@ void LevelEditorDebugUi::drawTilePalette(
         "off and leaves the plate.");
 
     ImGui::Separator();
-    ImGui::TextUnformatted("Gate Assignments");
+    ImGui::TextUnformatted("Links");
     ImGui::TextWrapped(
-        "Each gate opens only while all of its linked pressure plates are "
-        "occupied. Unlinked gates stay closed.");
-    drawPlateLinkAssignments(
-        editor,
-        editor.gates(),
-        selectedGateIndex_,
-        "Gate",
-        "Paint a Gate tile to configure it here.",
-        [&](std::size_t index, std::vector<GridPosition3> plates, Vec3 color) {
-            (void)editor.updateGate(index, std::move(plates), color);
-        });
+        "Gates, rotators and elevators are driven by every pressure plate of "
+        "their color: give plates and devices the same color to link them. A "
+        "gate opens while all of its plates are pressed; a rotator turns and "
+        "an elevator moves each time they all become pressed. A device with "
+        "no plates of its color never activates.");
+    Vec3 paintColor = editor.activeLinkColor();
+    if (ImGui::ColorEdit3("Link Color", &paintColor.x)) {
+        editor.setActiveLinkColor(paintColor);
+    }
+    const std::string pickKeys =
+        actionBindingsDisplay(bindings, InputAction::EditorPickTile);
+    const std::string brushKeys =
+        actionBindingsDisplay(bindings, InputAction::EditorPaintLinkColor);
+    ImGui::BulletText(
+        "New pressure plates, gates, rotators and elevators take this color.");
+    ImGui::BulletText(
+        "%s + click: eyedropper - picks up the color of the plate or device "
+        "clicked.",
+        pickKeys.c_str());
+    ImGui::BulletText(
+        "%s + click or drag: brush - paints the color onto each plate or "
+        "device it touches. Painting a plate or device tile over itself does "
+        "the same.",
+        brushKeys.c_str());
+
+    const std::vector<LevelEditor::LinkGroup> groups = editor.linkGroups();
+    if (selectedLinkGroup_ &&
+        std::ranges::none_of(groups, [&](const LevelEditor::LinkGroup& group) {
+            return LevelEditor::sameLinkColor(group.color, *selectedLinkGroup_);
+        })) {
+        selectedLinkGroup_.reset();
+    }
+    if (groups.empty()) {
+        ImGui::TextDisabled(
+            "Paint pressure plates and a gate, rotator or elevator to link them.");
+    }
+    for (std::size_t index = 0; index < groups.size(); ++index) {
+        const LevelEditor::LinkGroup& group = groups[index];
+        ImGui::PushID(static_cast<int>(index));
+        const bool selected = selectedLinkGroup_ &&
+            LevelEditor::sameLinkColor(*selectedLinkGroup_, group.color);
+        if (ImGui::ColorButton(
+                "##group",
+                ImVec4 { group.color.x, group.color.y, group.color.z, 1.0f },
+                ImGuiColorEditFlags_NoTooltip)) {
+            selectedLinkGroup_ = group.color;
+            editor.setActiveLinkColor(group.color);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Select this group and paint with its color.");
+        }
+        ImGui::SameLine();
+        const std::string text = linkGroupText(group);
+        if (selected) {
+            ImGui::TextColored(
+                ImGui::GetStyleColorVec4(ImGuiCol_CheckMark), "%s", text.c_str());
+        } else {
+            ImGui::TextWrapped("%s", text.c_str());
+        }
+        if (group.hasDevice() && group.pressurePlates.empty()) {
+            ImGui::TextColored(
+                ImVec4 { 1.0f, 0.65f, 0.3f, 1.0f },
+                "    No pressure plates of this color: never activates.");
+        } else if (!group.hasDevice()) {
+            ImGui::TextDisabled("    Drives nothing yet.");
+        }
+        ImGui::PopID();
+    }
+    ImGui::BeginDisabled(!selectedLinkGroup_ ||
+        LevelEditor::sameLinkColor(*selectedLinkGroup_, editor.activeLinkColor()));
+    if (ImGui::Button("Recolor Selected Group to Link Color") &&
+        selectedLinkGroup_) {
+        const Vec3 target = editor.activeLinkColor();
+        if (editor.recolorLinkGroup(*selectedLinkGroup_, target)) {
+            selectedLinkGroup_ = target;
+        }
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip(
+            "Gives every plate and device of the selected group the link "
+            "color. Choosing another group's color merges the two groups.");
+    }
 
     ImGui::Separator();
-    ImGui::TextUnformatted("Rotator Assignments");
+    ImGui::TextUnformatted("Elevator Stops");
     ImGui::TextWrapped(
-        "A rotator turns the unit standing on it a quarter turn each time all "
-        "of its linked pressure plates become occupied. Unlinked rotators "
-        "never turn.");
-    drawPlateLinkAssignments(
-        editor,
-        editor.rotators(),
-        selectedRotatorIndex_,
-        "Rotator",
-        "Paint a Rotator tile to configure it here.",
-        [&](std::size_t index, std::vector<GridPosition3> plates, Vec3 color) {
-            (void)editor.updateRotator(index, std::move(plates), color);
-        });
+        "An elevator platform moves to its next stop each time it activates, "
+        "carrying whatever stands on it, and turns back at the first and "
+        "last stop: 0, 3, 5, 7 travels 0 -> 3 -> 5 -> 7 -> 5 -> 3 -> 0. It "
+        "starts on its tile's layer, which must be one of the stops. A "
+        "blocked shaft cancels the move.");
+    const std::vector<Level::Elevator>& elevators = editor.elevators();
+    if (selectedElevatorIndex_ && *selectedElevatorIndex_ >= elevators.size()) {
+        selectedElevatorIndex_.reset();
+    }
+    if (!selectedElevatorIndex_ && !elevators.empty()) {
+        selectedElevatorIndex_ = 0;
+    }
+    if (elevators.empty()) {
+        ImGui::TextDisabled("Paint an Elevator tile to configure it here.");
+    } else {
+        const std::size_t index = *selectedElevatorIndex_;
+        const std::string preview = "Elevator " + cellText(elevators[index].cell);
+        if (ImGui::BeginCombo("Elevator", preview.c_str())) {
+            for (std::size_t candidate = 0; candidate < elevators.size(); ++candidate) {
+                const std::string label = "Elevator " +
+                    cellText(elevators[candidate].cell) + "##elevator" +
+                    std::to_string(candidate);
+                if (ImGui::Selectable(label.c_str(), candidate == index)) {
+                    selectedElevatorIndex_ = candidate;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        const Level::Elevator& elevator = elevators[*selectedElevatorIndex_];
+        // Rebuild the text whenever the record it describes changes
+        // underneath it (another elevator selected, undo, a layer inserted),
+        // but never while the user is typing in it.
+        const std::pair<std::size_t, std::vector<int>> source {
+            *selectedElevatorIndex_, elevator.levels,
+        };
+        if (elevatorLevelsSource_ != source && !elevatorLevelsEditing_) {
+            elevatorLevelsSource_ = source;
+            elevatorLevelsBuffer_ = formatElevatorLevels(elevator.levels);
+        }
+        ImGui::InputText("Stop Layers", &elevatorLevelsBuffer_);
+        elevatorLevelsEditing_ = ImGui::IsItemActive();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Layers the platform stops at, in travel order, e.g. "
+                "0, 3, 5, 7. Press Enter or click away to apply.");
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            const std::optional<std::vector<int>> parsed =
+                parseElevatorLevels(elevatorLevelsBuffer_);
+            elevatorLevelsError_ = !parsed;
+            if (parsed) {
+                (void)editor.setElevatorLevels(*selectedElevatorIndex_, *parsed);
+            }
+            // Show the stored stops again if the editor refuses these.
+            elevatorLevelsSource_.reset();
+        }
+        if (elevatorLevelsError_) {
+            ImGui::TextColored(
+                ImVec4 { 1.0f, 0.45f, 0.35f, 1.0f },
+                "Stops must be whole layer numbers, e.g. 0, 3, 5, 7.");
+        }
+        const std::string cycle = elevatorCycleText(elevator);
+        ImGui::TextWrapped("Cycle: %s", cycle.c_str());
+    }
 
     // These pictures are screenshots of the real render, so they go stale when
     // models, materials or lighting change.
@@ -753,6 +892,7 @@ void LevelEditorDebugUi::drawTilePalette(
     }
 #else
     (void)editor;
+    (void)bindings;
     (void)callbacks;
 #endif
 }

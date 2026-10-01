@@ -259,24 +259,66 @@ public:
     [[nodiscard]] const std::vector<Level::ScreenSelector>& selectors() const;
     [[nodiscard]] std::optional<std::size_t> selectedSelectorIndex() const;
     [[nodiscard]] const Level::ScreenSelector* selectedSelector() const;
+    // Gates, rotators and elevators of the document. In the editor a device
+    // is linked to every pressure plate of its color (see linkGroups), so
+    // these records carry their color but no explicit `pressurePlates`; the
+    // lists are filled in from the color groups when the document becomes a
+    // Level or is saved.
     [[nodiscard]] const std::vector<Level::Gate>& gates() const;
-    // Replaces one gate's authored links and display color as one undoable
-    // editor command. The gate cell itself is fixed by its Gate tile.
-    [[nodiscard]] bool updateGate(
-        std::size_t index,
-        std::vector<GridPosition3> pressurePlates,
-        Vec3 color);
     [[nodiscard]] const std::vector<Level::Rotator>& rotators() const;
+    [[nodiscard]] const std::vector<Level::Elevator>& elevators() const;
     // Plates authored beneath a unit or mirror (see Level::Plate).
     [[nodiscard]] const std::vector<Level::Plate>& coveredPlates() const;
     // The plate at `cell` in the document, uncovered or beneath something.
     [[nodiscard]] std::optional<TileType> documentPlateAt(GridPosition3 cell) const;
-    // The rotator equivalent of updateGate: links and color as one undoable
-    // command. The rotator's cell and direction come from its tile.
-    [[nodiscard]] bool updateRotator(
-        std::size_t index,
-        std::vector<GridPosition3> pressurePlates,
-        Vec3 color);
+
+    // Linking by color. Every pressure plate, gate, rotator and elevator has
+    // a link color; a device is driven by exactly the pressure plates that
+    // share its color, so giving several plates and devices one color links
+    // them all. Colors match as the 8-bit RGB the picker shows. This is an
+    // authoring idea only: the saved screen and the Level carry the explicit
+    // plate lists it produces.
+    struct LinkGroup {
+        Vec3 color {};
+        std::vector<GridPosition3> pressurePlates;
+        std::vector<GridPosition3> gates;
+        std::vector<GridPosition3> rotators;
+        std::vector<GridPosition3> elevators;
+
+        [[nodiscard]] bool hasDevice() const
+        {
+            return !gates.empty() || !rotators.empty() || !elevators.empty();
+        }
+    };
+    [[nodiscard]] static bool sameLinkColor(Vec3 left, Vec3 right);
+    // The color newly painted pressure plates and devices take. Painting a
+    // plate or device over the same tile recolors it to this color.
+    [[nodiscard]] Vec3 activeLinkColor() const;
+    void setActiveLinkColor(Vec3 color);
+    // Every pressure plate's color, in z/y/x order.
+    [[nodiscard]] const std::vector<Level::LinkColor>& pressurePlateColors() const;
+    // The link color of the pressure plate, gate, rotator or elevator at
+    // `cell`; empty when nothing linkable is there.
+    [[nodiscard]] std::optional<Vec3> linkColorAt(GridPosition3 cell) const;
+    // The pressure plates a device of `color` is driven by.
+    [[nodiscard]] std::vector<GridPosition3> linkedPressurePlates(Vec3 color) const;
+    // Every color in use, with its members, ordered by first appearance.
+    [[nodiscard]] std::vector<LinkGroup> linkGroups() const;
+    // Recolors the linkable thing at `cell`, one undoable command.
+    [[nodiscard]] bool setLinkColor(GridPosition3 cell, Vec3 color);
+    // The link-color brush: gives the topmost tile in the picked column
+    // (on the active layer while it is locked) the active link color, if it
+    // is a pressure plate, gate, rotator or elevator, or a unit standing on
+    // a pressure plate. Picks the same tile as pickTile.
+    [[nodiscard]] bool paintLinkColorAt(GridPosition3 pickedCell);
+    // Recolors every member of the group colored `from`, one undoable
+    // command. Choosing another group's color merges the two.
+    [[nodiscard]] bool recolorLinkGroup(Vec3 from, Vec3 to);
+    // An elevator's stops: the layers its platform travels between, in
+    // order. They must be distinct existing layers and include the layer the
+    // Elevator tile is on, which is where the platform starts. One undoable
+    // command.
+    [[nodiscard]] bool setElevatorLevels(std::size_t index, std::vector<int> levels);
     [[nodiscard]] bool editingOverworld() const;
     // The path shown in the UI, which the file browser changes on a single
     // click. It is a *selection*: the document in memory is unchanged until
@@ -306,6 +348,9 @@ private:
         std::vector<Level::Gate> gates;
         std::vector<Level::Rotator> rotators;
         std::vector<Level::Plate> plates;
+        std::vector<Level::Elevator> elevators;
+        // One per pressure plate, sorted by cell (see linkGroups).
+        std::vector<Level::LinkColor> plateColors;
         // Selected path (browser clicks move this).
         std::filesystem::path filePath;
         // Where `layers` was actually read from or written to. Empty for an
@@ -338,6 +383,9 @@ private:
         std::vector<Level::Gate> gates;
         std::vector<Level::Rotator> rotators;
         std::vector<Level::Plate> plates;
+        std::vector<Level::Elevator> elevators;
+        // One per pressure plate, sorted by cell (see linkGroups).
+        std::vector<Level::LinkColor> plateColors;
         std::filesystem::path filePath;
         // Undoing a load has to restore where the document came from too, or
         // the restored contents would be attributed to the wrong screen.
@@ -370,13 +418,11 @@ private:
     using ScreenIdentityRemaps = std::vector<ScreenIdentityRemap>;
 
     void recordDocumentChange(const DocumentSnapshot& before);
-    // Shared by updateGate/updateRotator. Sets the status and returns false
-    // when a color is out of range or a link does not name a distinct
-    // Pressure tile.
-    [[nodiscard]] bool validLinkUpdate(
-        const std::vector<GridPosition3>& pressurePlates,
-        Vec3 color,
-        std::string_view kind);
+    // The document as a level definition, with each device's plate list
+    // filled in from its color group and the colors of plates that drive
+    // nothing kept as editor-only link colors.
+    [[nodiscard]] Level::Definition linkedDefinition(
+        std::optional<CharacterType> character) const;
     void cacheActiveDraft();
     void noteRecentTile(TileType tile);
     [[nodiscard]] static std::filesystem::path draftKey(
@@ -411,6 +457,7 @@ private:
     // Set while a compound command (moveObject) makes intermediate changes
     // that it records itself.
     bool historySuppressed_ = false;
+    Vec3 activeLinkColor_ { 1.0f, 0.72f, 0.12f };
     std::vector<TileType> recentTiles_;
     std::map<std::filesystem::path, DraftState> drafts_;
     std::optional<DocumentSnapshot> decorationTransformBefore_;

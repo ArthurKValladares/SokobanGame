@@ -50,6 +50,7 @@ InputRouter::EventResult InputRouter::routeEvent(
             boundTo(InputAction::EditorDeleteTile) ||
             boundTo(InputAction::EditorMoveTile) ||
             boundTo(InputAction::EditorPickTile) ||
+            boundTo(InputAction::EditorPaintLinkColor) ||
             boundTo(InputAction::EditorStraightLine) ||
             boundTo(InputAction::EditorGizmoTranslate) ||
             boundTo(InputAction::EditorGizmoRotate) ||
@@ -193,6 +194,8 @@ InputRouter::Frame InputRouter::routeFrame(
                 pressed(InputAction::EditorToggleLayerLock),
             .recentTileSlot = recentTileSlot,
             .pickModifier = input.actionDown(InputAction::EditorPickTile),
+            .paintLinkColorModifier =
+                input.actionDown(InputAction::EditorPaintLinkColor),
             .lineConstraint =
                 input.actionDown(InputAction::EditorStraightLine),
             .deleting = input.actionDown(InputAction::EditorDeleteTile),

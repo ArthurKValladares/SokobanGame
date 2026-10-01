@@ -148,6 +148,24 @@ void collectMirrors(
     }
 }
 
+void collectElevators(
+    const GameState& before,
+    const GameState& after,
+    std::vector<StateDelta::ElevatorChange>& changes)
+{
+    const std::size_t count =
+        std::min(before.elevators.size(), after.elevators.size());
+    for (std::size_t index = 0; index < count; ++index) {
+        if (!(before.elevators[index] == after.elevators[index])) {
+            changes.push_back({
+                .index = index,
+                .before = before.elevators[index],
+                .after = after.elevators[index],
+            });
+        }
+    }
+}
+
 } // namespace
 
 StateDelta StateDelta::between(
@@ -159,6 +177,7 @@ StateDelta StateDelta::between(
         before.movables, after.movables, delta.movables);
     collect<EntityKind::Enemy>(before.enemies, after.enemies, delta.enemies);
     collectMirrors(before, after, delta.mirrors);
+    collectElevators(before, after, delta.elevators);
     return delta;
 }
 
@@ -169,6 +188,11 @@ void StateDelta::applyTo(GameState& state) const
     apply<EntityKind::Enemy>(enemies, state.enemies);
     for (const MirrorChange& change : mirrors) {
         rules::setMirrorQuarterTurns(state, change.cell, change.after);
+    }
+    for (const ElevatorChange& change : elevators) {
+        if (change.index < state.elevators.size()) {
+            state.elevators[change.index] = change.after;
+        }
     }
 }
 
@@ -183,18 +207,28 @@ StateDelta StateDelta::inverted() const
             .after = change.before,
         });
     }
+    std::vector<ElevatorChange> invertedElevators;
+    invertedElevators.reserve(elevators.size());
+    for (const ElevatorChange& change : elevators) {
+        invertedElevators.push_back({
+            .index = change.index,
+            .before = change.after,
+            .after = change.before,
+        });
+    }
     return {
         .players = invert(players),
         .movables = invert(movables),
         .enemies = invert(enemies),
         .mirrors = std::move(invertedMirrors),
+        .elevators = std::move(invertedElevators),
     };
 }
 
 bool StateDelta::empty() const
 {
     return players.empty() && movables.empty() && enemies.empty() &&
-        mirrors.empty();
+        mirrors.empty() && elevators.empty();
 }
 
 std::size_t StateDelta::changedEntityCount() const

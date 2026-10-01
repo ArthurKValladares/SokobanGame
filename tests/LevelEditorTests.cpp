@@ -13,6 +13,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -138,122 +139,202 @@ void testDocumentCommandsAndUndo()
     CHECK(editor.documentDepth() == 2);
 }
 
-void testGateLinksPersistAndFollowEditorCommands()
+using Plates = std::vector<GridPosition3>;
+
+void testColorGroupsBecomeExplicitLinks()
 {
-    TEST("gateLinksPersistAndFollowEditorCommands");
+    TEST("colorGroupsBecomeExplicitLinks");
     TemporaryProject project;
     LevelEditor editor = makeEditor(project);
-    editor.newDocument(5, 3, false);
+    editor.newDocument(7, 3, false);
 
-    const GridPosition3 plate { 1, 1, 1 };
-    const GridPosition3 gateCell { 2, 1, 1 };
-    CHECK(editor.setCell(plate, TileType::PressurePlate));
-    CHECK(editor.setCell(gateCell, TileType::Gate));
-    CHECK(editor.gates().size() == 1);
+    const Vec3 orange = editor.activeLinkColor();
+    const Vec3 blue { 0.2f, 0.4f, 1.0f };
+    const GridPosition3 plateA { 1, 1, 1 };
+    const GridPosition3 plateB { 2, 1, 1 };
+    const GridPosition3 gate { 3, 1, 1 };
+    const GridPosition3 rotator { 4, 1, 1 };
+    const GridPosition3 secondGate { 5, 1, 1 };
+
+    // Plates and a device painted in one color are linked.
+    CHECK(editor.setCell(plateA, TileType::PressurePlate));
+    CHECK(editor.setCell(plateB, TileType::PressurePlate));
+    CHECK(editor.setCell(gate, TileType::Gate));
+    CHECK(editor.linkColorAt(gate) == std::optional<Vec3>(orange));
+    // The editor records carry colors, never plate lists.
     CHECK(editor.gates()[0].pressurePlates.empty());
-    CHECK(editor.updateGate(0, { plate }, { 0.2f, 0.7f, 1.0f }));
-    CHECK(editor.gates()[0].pressurePlates ==
-        std::vector<GridPosition3> { plate });
-    CHECK(editor.documentToLevel().gateAt(gateCell) != nullptr);
+    CHECK(editor.documentToLevel().gateAt(gate)->pressurePlates ==
+        (Plates { plateA, plateB }));
 
+    // A rotator painted blue, and plate B repainted blue, form a second
+    // group; a second blue gate shares plate B with the rotator.
+    editor.setActiveLinkColor(blue);
+    CHECK(editor.setCell(rotator, TileType::RotatorClockwise));
+    CHECK(editor.setCell(plateB, TileType::PressurePlate));
+    CHECK(editor.linkColorAt(plateB) == std::optional<Vec3>(blue));
+    CHECK(!editor.setCell(plateB, TileType::PressurePlate));
+    CHECK(editor.setCell(secondGate, TileType::Gate));
+    {
+        const Level level = editor.documentToLevel();
+        CHECK(level.gateAt(gate)->pressurePlates == Plates { plateA });
+        CHECK(level.rotatorAt(rotator)->pressurePlates == Plates { plateB });
+        CHECK(level.gateAt(secondGate)->pressurePlates == Plates { plateB });
+    }
+    const std::vector<LevelEditor::LinkGroup> groups = editor.linkGroups();
+    CHECK(groups.size() == 2);
+    if (groups.size() == 2) {
+        CHECK(LevelEditor::sameLinkColor(groups[0].color, orange));
+        CHECK(groups[0].pressurePlates == Plates { plateA });
+        CHECK(groups[0].gates == Plates { gate });
+        CHECK(groups[1].pressurePlates == Plates { plateB });
+        CHECK(groups[1].gates == Plates { secondGate });
+        CHECK(groups[1].rotators == Plates { rotator });
+    }
+    // Colors that look the same in the picker are the same group.
+    CHECK(LevelEditor::sameLinkColor(blue, { 0.2001f, 0.4f, 1.0f }));
+    CHECK(editor.linkedPressurePlates({ 0.2001f, 0.4f, 1.0f }) ==
+        Plates { plateB });
+
+    // Recoloring one item is one undoable command.
+    CHECK(editor.setLinkColor(secondGate, orange));
+    CHECK(editor.documentToLevel().gateAt(secondGate)->pressurePlates ==
+        Plates { plateA });
     CHECK(editor.tryUndoEdit());
-    CHECK(editor.gates()[0].pressurePlates.empty());
-    CHECK(editor.tryRedoEdit());
-    CHECK(editor.gates()[0].color == Vec3({ 0.2f, 0.7f, 1.0f }));
+    CHECK(editor.linkColorAt(secondGate) == std::optional<Vec3>(blue));
+    CHECK(!editor.setLinkColor({ 0, 2, 1 }, orange));
+    CHECK(!editor.setLinkColor(gate, { 2.0f, 0.0f, 0.0f }));
 
-    const GridPosition3 movedGate { 3, 1, 1 };
-    CHECK(editor.beginMove(gateCell));
-    CHECK(editor.moveObject(movedGate));
-    CHECK(editor.gates().size() == 1);
-    CHECK(editor.gates()[0].cell == movedGate);
-    CHECK(editor.gates()[0].pressurePlates ==
-        std::vector<GridPosition3> { plate });
+    // Recoloring a whole group into another merges them.
+    CHECK(editor.recolorLinkGroup(blue, orange));
+    CHECK(editor.linkGroups().size() == 1);
+    CHECK(editor.documentToLevel().rotatorAt(rotator)->pressurePlates ==
+        (Plates { plateA, plateB }));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.linkGroups().size() == 2);
 
+    // A plate that drives nothing keeps its color through a save as an
+    // editor-only record; linked plates take theirs from their device.
+    const Vec3 green { 0.1f, 0.9f, 0.2f };
+    const GridPosition3 loose { 6, 1, 1 };
+    editor.setActiveLinkColor(green);
+    CHECK(editor.setCell(loose, TileType::PressurePlate));
     const std::filesystem::path path =
         project.source / "level0" / "screen0.scr";
     CHECK(editor.saveDocument(path));
+    std::ifstream saved(path);
+    const std::string text(
+        (std::istreambuf_iterator<char>(saved)),
+        std::istreambuf_iterator<char>());
+    CHECK(text.find("@linkcolor {\"cell\":[6,1,1]") != std::string::npos);
+    CHECK(text.find("@linkcolor {\"cell\":[1,1,1]") == std::string::npos);
     LevelEditor loaded = makeEditor(project);
     CHECK(loaded.loadDocument(path, false));
+    CHECK(loaded.pressurePlateColors() == editor.pressurePlateColors());
     CHECK(loaded.gates() == editor.gates());
+    CHECK(loaded.rotators() == editor.rotators());
+    CHECK(loaded.status().find("distinct colors") == std::string::npos);
+    // Gameplay sees only the explicit links.
+    const Level level = Level::loadFromFile(path);
+    CHECK(level.gateAt(gate)->pressurePlates == Plates { plateA });
+    CHECK(level.gateAt(secondGate)->pressurePlates == Plates { plateB });
 
-    CHECK(loaded.setCell(plate, TileType::Air));
-    CHECK(loaded.gates()[0].pressurePlates.empty());
+    // A moved plate keeps its color; an erased one leaves its group.
+    const GridPosition3 movedPlate { 1, 2, 1 };
+    CHECK(loaded.beginMove(plateA));
+    CHECK(loaded.moveObject(movedPlate));
+    CHECK(loaded.linkColorAt(movedPlate) == std::optional<Vec3>(orange));
+    CHECK(loaded.documentToLevel().gateAt(gate)->pressurePlates ==
+        Plates { movedPlate });
+    CHECK(loaded.setCell(movedPlate, TileType::Air));
+    CHECK(loaded.linkedPressurePlates(orange).empty());
     CHECK(loaded.tryUndoEdit());
-    CHECK(loaded.gates()[0].pressurePlates ==
-        std::vector<GridPosition3> { plate });
+    CHECK(loaded.linkedPressurePlates(orange) == Plates { movedPlate });
+
+    // The link-color brush recolors whatever linkable tile tops the column,
+    // including a pressure plate beneath a unit, and refuses anything else.
+    loaded.setActiveLinkColor(green);
+    CHECK(loaded.paintLinkColorAt({ secondGate.x, secondGate.y, 0 }));
+    CHECK(loaded.linkColorAt(secondGate) == std::optional<Vec3>(green));
+    CHECK(!loaded.paintLinkColorAt({ secondGate.x, secondGate.y, 0 }));
+    CHECK(!loaded.paintLinkColorAt({ 0, 2, 0 }));
+    CHECK(loaded.setCell({ loose.x, loose.y, loose.z }, TileType::Rock));
+    loaded.setActiveLinkColor(blue);
+    CHECK(loaded.paintLinkColorAt({ loose.x, loose.y, 0 }));
+    CHECK(loaded.linkColorAt(loose) == std::optional<Vec3>(blue));
+    // Locked to the ground layer, only ground is in reach.
+    loaded.setActiveLayer(0);
+    loaded.setLayerLocked(true);
+    CHECK(!loaded.paintLinkColorAt({ secondGate.x, secondGate.y, 0 }));
+    loaded.setLayerLocked(false);
+    // Strokes fold a drag into one undo step.
+    CHECK(loaded.beginStroke());
+    loaded.setActiveLinkColor(orange);
+    CHECK(loaded.paintLinkColorAt({ secondGate.x, secondGate.y, 0 }));
+    CHECK(loaded.paintLinkColorAt({ loose.x, loose.y, 0 }));
+    CHECK(loaded.endStroke());
+    CHECK(loaded.linkColorAt(loose) == std::optional<Vec3>(orange));
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.linkColorAt(secondGate) == std::optional<Vec3>(green));
+    CHECK(loaded.linkColorAt(loose) == std::optional<Vec3>(blue));
+
+    // Alt-click picking a linked tile picks up its color.
+    loaded.setActiveLinkColor(green);
+    CHECK(loaded.pickTile({ rotator.x, rotator.y, 0 }) ==
+        TileType::RotatorClockwise);
+    CHECK(LevelEditor::sameLinkColor(loaded.activeLinkColor(), blue));
 }
 
-void testRotatorLinksPersistAndFollowEditorCommands()
+void testExplicitLinksBecomeColorGroupsOnLoad()
 {
-    TEST("rotatorLinksPersistAndFollowEditorCommands");
+    TEST("explicitLinksBecomeColorGroupsOnLoad");
     TemporaryProject project;
-    LevelEditor editor = makeEditor(project);
-    editor.newDocument(6, 3, false);
-
-    const GridPosition3 plate { 1, 1, 1 };
-    const GridPosition3 rotatorCell { 2, 1, 1 };
-    CHECK(editor.setCell(plate, TileType::PressurePlate));
-    CHECK(editor.setCell(rotatorCell, TileType::RotatorClockwise));
-    CHECK(editor.rotators().size() == 1);
-    CHECK(editor.rotators()[0].cell == rotatorCell);
-    CHECK(editor.rotators()[0].pressurePlates.empty());
-    CHECK(editor.updateRotator(0, { plate }, { 0.9f, 0.4f, 0.1f }));
-    CHECK(editor.rotators()[0].pressurePlates ==
-        std::vector<GridPosition3> { plate });
-    CHECK(editor.documentToLevel().rotatorAt(rotatorCell) != nullptr);
-    CHECK(editor.documentToLevel().pressurePlateLinkColor(plate) ==
-        std::optional<Vec3>(Vec3 { 0.9f, 0.4f, 0.1f }));
-
-    // Invalid links are refused without touching the document.
-    CHECK(!editor.updateRotator(0, { { 0, 0, 1 } }, { 0.9f, 0.4f, 0.1f }));
-    CHECK(!editor.updateRotator(0, { plate, plate }, { 0.9f, 0.4f, 0.1f }));
-    CHECK(!editor.updateRotator(0, { plate }, { 2.0f, 0.4f, 0.1f }));
-    CHECK(editor.rotators()[0].pressurePlates ==
-        std::vector<GridPosition3> { plate });
-
-    CHECK(editor.tryUndoEdit());
-    CHECK(editor.rotators()[0].pressurePlates.empty());
-    CHECK(editor.tryRedoEdit());
-    CHECK(editor.rotators()[0].color == Vec3({ 0.9f, 0.4f, 0.1f }));
-
-    // Swapping the direction keeps the record and its links.
-    CHECK(editor.setCell(rotatorCell, TileType::RotatorCounterClockwise));
-    CHECK(editor.rotators().size() == 1);
-    CHECK(editor.rotators()[0].pressurePlates ==
-        std::vector<GridPosition3> { plate });
-
-    const GridPosition3 movedRotator { 4, 1, 1 };
-    CHECK(editor.beginMove(rotatorCell));
-    CHECK(editor.moveObject(movedRotator));
-    CHECK(editor.rotators().size() == 1);
-    CHECK(editor.rotators()[0].cell == movedRotator);
-    CHECK(editor.rotators()[0].pressurePlates ==
-        std::vector<GridPosition3> { plate });
-
-    const GridPosition3 movedPlate { 3, 1, 1 };
-    CHECK(editor.beginMove(plate));
-    CHECK(editor.moveObject(movedPlate));
-    CHECK(editor.rotators()[0].pressurePlates ==
-        std::vector<GridPosition3> { movedPlate });
-
+    std::filesystem::create_directories(project.source / "level0");
     const std::filesystem::path path =
         project.source / "level0" / "screen0.scr";
-    CHECK(editor.saveDocument(path));
-    LevelEditor loaded = makeEditor(project);
-    CHECK(loaded.loadDocument(path, false));
-    CHECK(loaded.rotators() == editor.rotators());
-    CHECK(loaded.documentLayers()[1][1][4] ==
-        tileTypeToChar(TileType::RotatorCounterClockwise));
+    const auto write = [&](const std::string& records) {
+        std::ofstream file(path);
+        file << records << "\n@layer 0\n.......\n\n@layer 1\nQPPGG..\n";
+    };
+    const GridPosition3 first { 1, 0, 1 };
+    const GridPosition3 second { 2, 0, 1 };
+    const GridPosition3 gateA { 3, 0, 1 };
+    const GridPosition3 gateB { 4, 0, 1 };
 
-    CHECK(loaded.setCell(movedPlate, TileType::Air));
-    CHECK(loaded.rotators()[0].pressurePlates.empty());
-    CHECK(loaded.setCell(movedRotator, TileType::Air));
-    CHECK(loaded.rotators().empty());
-    CHECK(loaded.tryUndoEdit());
-    CHECK(loaded.rotators().size() == 1);
-    CHECK(loaded.tryUndoEdit());
-    CHECK(loaded.rotators()[0].pressurePlates ==
-        std::vector<GridPosition3> { movedPlate });
+    // Two gates authored with the same color but different plates get
+    // distinct colors, so the links survive a save unchanged.
+    write(
+        "@gate {\"cell\":[3,0,1],\"color\":[1.0,0.72,0.12],\"plates\":[[1,0,1]]}\n"
+        "@gate {\"cell\":[4,0,1],\"color\":[1.0,0.72,0.12],\"plates\":[[2,0,1]]}");
+    LevelEditor editor = makeEditor(project);
+    CHECK(editor.loadDocument(path, false));
+    CHECK(editor.status().find("distinct colors") != std::string::npos);
+    CHECK(!LevelEditor::sameLinkColor(
+        editor.gates()[0].color, editor.gates()[1].color));
+    CHECK(editor.linkColorAt(first) == editor.linkColorAt(gateA));
+    CHECK(editor.linkColorAt(second) == editor.linkColorAt(gateB));
+    {
+        const Level level = editor.documentToLevel();
+        CHECK(level.gateAt(gateA)->pressurePlates == Plates { first });
+        CHECK(level.gateAt(gateB)->pressurePlates == Plates { second });
+    }
+
+    // Links colors cannot express are regrouped, and the editor says so.
+    write(
+        "@gate {\"cell\":[3,0,1],\"color\":[1.0,0.72,0.12],\"plates\":[[1,0,1],[2,0,1]]}\n"
+        "@gate {\"cell\":[4,0,1],\"color\":[0.2,0.4,1.0],\"plates\":[[1,0,1]]}");
+    LevelEditor regrouped = makeEditor(project);
+    CHECK(regrouped.loadDocument(path, false));
+    CHECK(regrouped.status().find("Check the links") != std::string::npos);
+
+    // Links that already match their colors load untouched.
+    write(
+        "@gate {\"cell\":[3,0,1],\"color\":[1.0,0.72,0.12],\"plates\":[[1,0,1],[2,0,1]]}\n"
+        "@gate {\"cell\":[4,0,1],\"color\":[1.0,0.72,0.12],\"plates\":[[1,0,1],[2,0,1]]}");
+    LevelEditor shared = makeEditor(project);
+    CHECK(shared.loadDocument(path, false));
+    CHECK(shared.status().find("distinct colors") == std::string::npos);
+    CHECK(shared.linkGroups().size() == 1);
+    CHECK(shared.gates()[0].color == Vec3({ 1.0f, 0.72f, 0.12f }));
 }
 
 void testUnitsAndMirrorsStackOnPlates()
@@ -274,7 +355,8 @@ void testUnitsAndMirrorsStackOnPlates()
     const GridPosition3 plate { 1, 1, 1 };
     CHECK(editor.setCell(plate, TileType::PressurePlate));
     CHECK(editor.setCell(rotatorCell, TileType::RotatorClockwise));
-    CHECK(editor.updateRotator(0, { plate }, { 0.3f, 0.6f, 0.9f }));
+    const Vec3 linkColor = editor.rotators()[0].color;
+    CHECK(editor.linkedPressurePlates(linkColor) == Plates { plate });
     CHECK(editor.setCell(rotatorCell, TileType::MirrorNorthWest));
     CHECK(top(rotatorCell) == TileType::MirrorNorthWest);
     const std::vector<Level::Plate> expectedPlates {
@@ -283,8 +365,7 @@ void testUnitsAndMirrorsStackOnPlates()
     CHECK(editor.coveredPlates() == expectedPlates);
     CHECK(editor.documentPlateAt(rotatorCell) == TileType::RotatorClockwise);
     CHECK(editor.rotators().size() == 1);
-    CHECK(editor.rotators()[0].pressurePlates ==
-        std::vector<GridPosition3> { plate });
+    CHECK(editor.rotators()[0].color == linkColor);
     // Painting the same stack again changes nothing.
     CHECK(!editor.setCell(rotatorCell, TileType::MirrorNorthWest));
     // Replacing the occupant keeps the plate.
@@ -305,7 +386,7 @@ void testUnitsAndMirrorsStackOnPlates()
     CHECK(editor.setCell(heroCell, TileType::PressurePlate));
     CHECK(top(heroCell) == TileType::Rogue);
     CHECK(editor.documentPlateAt(heroCell) == TileType::PressurePlate);
-    CHECK(editor.updateRotator(0, { plate, heroCell }, { 0.3f, 0.6f, 0.9f }));
+    CHECK(editor.linkedPressurePlates(linkColor) == (Plates { plate, heroCell }));
 
     const Level level = editor.documentToLevel();
     CHECK(level.coveredPlates().size() == 2);
@@ -326,10 +407,9 @@ void testUnitsAndMirrorsStackOnPlates()
     CHECK(loaded.coveredPlates().size() == 1);
     CHECK(loaded.documentLayers()[1][1][4] ==
         tileTypeToChar(TileType::PressurePlate));
-    CHECK(loaded.rotators()[0].pressurePlates.size() == 2);
+    CHECK(loaded.linkedPressurePlates(linkColor).size() == 2);
     CHECK(loaded.setCell(heroCell, TileType::Air));
-    CHECK(loaded.rotators()[0].pressurePlates ==
-        std::vector<GridPosition3> { plate });
+    CHECK(loaded.linkedPressurePlates(linkColor) == Plates { plate });
     CHECK(loaded.tryUndoEdit());
     CHECK(loaded.tryUndoEdit());
     CHECK(loaded.coveredPlates() == editor.coveredPlates());
@@ -357,6 +437,95 @@ void testUnitsAndMirrorsStackOnPlates()
     // Plates cannot be moved on top of anything.
     CHECK(mover.beginMove({ 3, 1, 1 }));
     CHECK(!mover.moveObject({ 4, 1, 1 }));
+}
+
+void testElevatorStopsPersistAndFollowEditorCommands()
+{
+    TEST("elevatorStopsPersistAndFollowEditorCommands");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(6, 3, false);
+
+    const GridPosition3 plate { 1, 1, 1 };
+    const GridPosition3 elevatorCell { 3, 1, 0 };
+    CHECK(editor.setCell(plate, TileType::PressurePlate));
+    CHECK(editor.setCell(elevatorCell, TileType::Elevator));
+    CHECK(editor.elevators().size() == 1);
+    CHECK(editor.elevators()[0].cell == elevatorCell);
+    // A new elevator stops only where it was painted.
+    CHECK(editor.elevators()[0].levels == std::vector<int> { 0 });
+    // Painted in the plate's color, it is linked to it.
+    const Vec3 color = editor.elevators()[0].color;
+    CHECK(editor.linkedPressurePlates(color) == Plates { plate });
+    // Two more layers for the platform to travel to.
+    CHECK(editor.setCell({ 5, 2, 3 }, TileType::Wall));
+    CHECK(editor.documentDepth() == 4);
+
+    CHECK(editor.setElevatorLevels(0, { 0, 3, 2 }));
+    CHECK(editor.elevators()[0].levels == (std::vector<int> { 0, 3, 2 }));
+    const Level level = editor.documentToLevel();
+    CHECK(level.elevatorAt(elevatorCell) != nullptr &&
+        level.elevatorAt(elevatorCell)->pressurePlates == Plates { plate });
+    CHECK(level.pressurePlateLinkColor(plate) == std::optional<Vec3>(color));
+
+    // Invalid stops are refused without touching the document.
+    CHECK(!editor.setElevatorLevels(0, { 1, 3 }));
+    CHECK(!editor.setElevatorLevels(0, { 0, 4 }));
+    CHECK(!editor.setElevatorLevels(0, { 0, 2, 2 }));
+    CHECK(!editor.setElevatorLevels(0, {}));
+    CHECK(!editor.setElevatorLevels(0, { 0, 3, 2 }));
+    CHECK(editor.elevators()[0].levels == (std::vector<int> { 0, 3, 2 }));
+
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.elevators()[0].levels == std::vector<int> { 0 });
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.elevators()[0].levels == (std::vector<int> { 0, 3, 2 }));
+
+    // Inserting a layer underneath shifts the elevator, its stops and links.
+    editor.setActiveLayer(0);
+    editor.addLayerBelow();
+    CHECK(editor.elevators()[0].cell == (GridPosition3 { 3, 1, 1 }));
+    CHECK(editor.elevators()[0].levels == (std::vector<int> { 1, 4, 3 }));
+    CHECK(editor.linkedPressurePlates(color) ==
+        (Plates { { 1, 1, 2 } }));
+    // Deleting a stop's layer drops just that stop.
+    editor.setActiveLayer(3);
+    editor.deleteActiveLayer();
+    CHECK(editor.elevators()[0].levels == (std::vector<int> { 1, 3 }));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.elevators()[0].cell == elevatorCell);
+    CHECK(editor.elevators()[0].levels == (std::vector<int> { 0, 3, 2 }));
+
+    // Moving the tile to another layer moves its own stop with it.
+    const GridPosition3 movedElevator { 4, 1, 1 };
+    CHECK(editor.beginMove(elevatorCell));
+    CHECK(editor.moveObject(movedElevator));
+    CHECK(editor.elevators().size() == 1);
+    CHECK(editor.elevators()[0].cell == movedElevator);
+    CHECK(editor.elevators()[0].levels == (std::vector<int> { 1, 3, 2 }));
+    CHECK(editor.elevators()[0].color == color);
+    CHECK(editor.documentToLevel().elevatorAt(movedElevator) != nullptr);
+
+    const std::filesystem::path path =
+        project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(path));
+    LevelEditor loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(path, false));
+    CHECK(loaded.elevators() == editor.elevators());
+    CHECK(loaded.documentLayers()[1][1][4] ==
+        tileTypeToChar(TileType::Elevator));
+
+    // Erasing a linked plate unlinks it; painting over the elevator removes
+    // its record, and undo brings both back.
+    CHECK(loaded.setCell(plate, TileType::Air));
+    CHECK(loaded.linkedPressurePlates(color).empty());
+    CHECK(loaded.setCell(movedElevator, TileType::Wall));
+    CHECK(loaded.elevators().empty());
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.elevators().size() == 1);
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.elevators() == editor.elevators());
 }
 
 void testTileValidationAndMultipleHeroPlacement()
@@ -1984,8 +2153,9 @@ void testReloadFromDiskKeepsDraftsAndIgnoresOwnSaves()
 int main()
 {
     testDocumentCommandsAndUndo();
-    testGateLinksPersistAndFollowEditorCommands();
-    testRotatorLinksPersistAndFollowEditorCommands();
+    testColorGroupsBecomeExplicitLinks();
+    testExplicitLinksBecomeColorGroupsOnLoad();
+    testElevatorStopsPersistAndFollowEditorCommands();
     testUnitsAndMirrorsStackOnPlates();
     testTileValidationAndMultipleHeroPlacement();
     testAddLayerBelowShiftsContentAndWaterAndIsUndoable();

@@ -7,7 +7,9 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <cstddef>
 #include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -22,6 +24,11 @@ constexpr std::string_view decorationPrefix = "@decoration ";
 constexpr std::string_view selectorPrefix = "@selector ";
 constexpr std::string_view gatePrefix = "@gate ";
 constexpr std::string_view rotatorPrefix = "@rotator ";
+constexpr std::string_view elevatorPrefix = "@elevator ";
+constexpr std::string_view linkColorPrefix = "@linkcolor ";
+// Far more stops than any board has layers; it keeps an elevator's cycle
+// phase (2 * stops - 2 values) inside GameState's 8-bit field.
+constexpr std::size_t maximumElevatorStops = 64;
 constexpr std::string_view platePrefix = "@plate ";
 
 using Json = nlohmann::json;
@@ -451,6 +458,43 @@ void validateLinkedRecord(
             " color components must be finite values from zero to one: " +
             std::string(sourceName));
     }
+    if constexpr (requires { record.levels; }) {
+        if (record.levels.empty()) {
+            throw std::runtime_error(
+                std::string(kind) + " must list at least one stop level: " +
+                std::string(sourceName));
+        }
+        if (record.levels.size() > maximumElevatorStops) {
+            throw std::runtime_error(
+                std::string(kind) + " lists more than " +
+                std::to_string(maximumElevatorStops) +
+                " stop levels: " + std::string(sourceName));
+        }
+        for (std::size_t i = 0; i < record.levels.size(); ++i) {
+            if (record.levels[i] < 0) {
+                throw std::runtime_error(
+                    std::string(kind) + " stop levels must not be negative: " +
+                    std::string(sourceName));
+            }
+            if (std::ranges::find(
+                    record.levels.begin(),
+                    record.levels.begin() + static_cast<std::ptrdiff_t>(i),
+                    record.levels[i]) !=
+                record.levels.begin() + static_cast<std::ptrdiff_t>(i)) {
+                throw std::runtime_error(
+                    std::string(kind) +
+                    " lists the same stop level more than once: " +
+                    std::string(sourceName));
+            }
+        }
+        if (std::ranges::find(record.levels, record.cell.z) ==
+            record.levels.end()) {
+            throw std::runtime_error(
+                std::string(kind) +
+                " stop levels must include the layer its tile is on: " +
+                std::string(sourceName));
+        }
+    }
     for (std::size_t i = 0; i < record.pressurePlates.size(); ++i) {
         const GridPosition3 plate = record.pressurePlates[i];
         if (plate.x < 0 || plate.y < 0 || plate.z < 0) {
@@ -517,6 +561,20 @@ Record parseLinkedRecord(
             }
             *components[i] = (*color)[i].get<float>();
         }
+        if constexpr (requires { record.levels; }) {
+            const auto levels = object.find("levels");
+            if (levels == object.end() || !levels->is_array()) {
+                throw std::runtime_error(
+                    lower + " 'levels' must be an array of layer numbers");
+            }
+            for (const Json& level : *levels) {
+                if (!level.is_number_integer()) {
+                    throw std::runtime_error(
+                        lower + " 'levels' must contain only integers");
+                }
+                record.levels.push_back(level.get<int>());
+            }
+        }
         validateLinkedRecord(record, sourceName, kind);
         return record;
     } catch (const nlohmann::json::exception& error) {
@@ -541,11 +599,14 @@ std::string serializeLinkedRecord(
     for (GridPosition3 plate : record.pressurePlates) {
         plates.push_back({ plate.x, plate.y, plate.z });
     }
-    const Json object {
+    Json object {
         { "cell", { record.cell.x, record.cell.y, record.cell.z } },
         { "plates", std::move(plates) },
         { "color", { record.color.x, record.color.y, record.color.z } },
     };
+    if constexpr (requires { record.levels; }) {
+        object["levels"] = record.levels;
+    }
     return std::string(prefix) + object.dump();
 }
 
@@ -644,6 +705,89 @@ void canonicalizePlates(
     }
 }
 
+Level::LinkColor parseLinkColor(
+    std::string_view payload, std::string_view sourceName)
+{
+    try {
+        const Json object = Json::parse(payload);
+        if (!object.is_object()) {
+            throw std::runtime_error("link color payload is not an object");
+        }
+        const auto cell = object.find("cell");
+        const auto color = object.find("color");
+        if (cell == object.end()) {
+            throw std::runtime_error("link color 'cell' is required");
+        }
+        if (color == object.end() || !color->is_array() ||
+            color->size() != 3) {
+            throw std::runtime_error(
+                "link color 'color' must be an array of three numbers");
+        }
+        Level::LinkColor record {
+            .cell = parseLinkedCell(*cell, "cell", sourceName, "Link color"),
+        };
+        float* components[] {
+            &record.color.x, &record.color.y, &record.color.z,
+        };
+        for (std::size_t i = 0; i < 3; ++i) {
+            if (!(*color)[i].is_number()) {
+                throw std::runtime_error(
+                    "link color 'color' must contain only numbers");
+            }
+            *components[i] = (*color)[i].get<float>();
+        }
+        return record;
+    } catch (const nlohmann::json::exception& error) {
+        throw std::runtime_error(
+            "Invalid link color JSON in " + std::string(sourceName) +
+            ": " + error.what());
+    } catch (const std::runtime_error& error) {
+        throw std::runtime_error(
+            "Invalid link color in " + std::string(sourceName) +
+            ": " + error.what());
+    }
+}
+
+std::string serializeLinkColor(const Level::LinkColor& record)
+{
+    const Json object {
+        { "cell", { record.cell.x, record.cell.y, record.cell.z } },
+        { "color", { record.color.x, record.color.y, record.color.z } },
+    };
+    return std::string(linkColorPrefix) + object.dump();
+}
+
+void canonicalizeLinkColors(
+    std::vector<Level::LinkColor>& records, std::string_view sourceName)
+{
+    std::ranges::sort(records, {}, [](const Level::LinkColor& record) {
+        return std::array { record.cell.z, record.cell.y, record.cell.x };
+    });
+    const auto validColor = [](float component) {
+        return std::isfinite(component) && component >= 0.0f &&
+            component <= 1.0f;
+    };
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        const Level::LinkColor& record = records[i];
+        if (record.cell.x < 0 || record.cell.y < 0 || record.cell.z < 0) {
+            throw std::runtime_error(
+                "Link color cell coordinates must not be negative: " +
+                std::string(sourceName));
+        }
+        if (!validColor(record.color.x) || !validColor(record.color.y) ||
+            !validColor(record.color.z)) {
+            throw std::runtime_error(
+                "Link color components must be finite values from zero to one: " +
+                std::string(sourceName));
+        }
+        if (i > 0 && records[i - 1].cell == record.cell) {
+            throw std::runtime_error(
+                "Level contains more than one link color at the same cell: " +
+                std::string(sourceName));
+        }
+    }
+}
+
 size_t tileIndex(uint32_t x, uint32_t y, uint32_t z, uint32_t width, uint32_t height)
 {
     return (static_cast<size_t>(z) * height + y) * width + x;
@@ -725,6 +869,8 @@ Level::Definition Level::parseDefinition(
                     line.starts_with(selectorPrefix) ||
                     line.starts_with(gatePrefix) ||
                     line.starts_with(rotatorPrefix) ||
+                    line.starts_with(elevatorPrefix) ||
+                    line.starts_with(linkColorPrefix) ||
                     line.starts_with(platePrefix);
             })) {
             throw std::runtime_error(
@@ -814,6 +960,29 @@ Level::Definition Level::parseDefinition(
             continue;
         }
 
+        if (line.starts_with(elevatorPrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Elevator metadata must appear before '@layer 0': " + source);
+            }
+            definition.elevators.push_back(parseLinkedRecord<Elevator>(
+                std::string_view(line).substr(elevatorPrefix.size()),
+                sourceName,
+                "Elevator"));
+            continue;
+        }
+
+        if (line.starts_with(linkColorPrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Link color metadata must appear before '@layer 0': " + source);
+            }
+            definition.linkColors.push_back(parseLinkColor(
+                std::string_view(line).substr(linkColorPrefix.size()),
+                sourceName));
+            continue;
+        }
+
         if (line.starts_with(waterPrefix)) {
             if (currentLayer) {
                 throw std::runtime_error(
@@ -896,7 +1065,9 @@ Level::Definition Level::parseDefinition(
 
     canonicalizeLinkedRecords(definition.gates, sourceName, "Gate");
     canonicalizeLinkedRecords(definition.rotators, sourceName, "Rotator");
+    canonicalizeLinkedRecords(definition.elevators, sourceName, "Elevator");
     canonicalizePlates(definition.plates, sourceName);
+    canonicalizeLinkColors(definition.linkColors, sourceName);
 
     return definition;
 }
@@ -918,6 +1089,8 @@ std::vector<std::string> Level::serializeDefinition(
         definition.selectors.empty() &&
         definition.gates.empty() &&
         definition.rotators.empty() &&
+        definition.elevators.empty() &&
+        definition.linkColors.empty() &&
         definition.plates.empty()) {
         return definition.layers.front();
     }
@@ -953,12 +1126,25 @@ std::vector<std::string> Level::serializeDefinition(
         lines.push_back(
             serializeLinkedRecord(rotator, rotatorPrefix, "Rotator"));
     }
+    std::vector<Elevator> elevators = definition.elevators;
+    std::ranges::sort(elevators, {}, [](const Elevator& elevator) {
+        return std::array { elevator.cell.z, elevator.cell.y, elevator.cell.x };
+    });
+    for (const Elevator& elevator : elevators) {
+        lines.push_back(
+            serializeLinkedRecord(elevator, elevatorPrefix, "Elevator"));
+    }
     std::vector<Plate> plates = definition.plates;
     std::ranges::sort(plates, {}, [](const Plate& plate) {
         return std::array { plate.cell.z, plate.cell.y, plate.cell.x };
     });
     for (const Plate& plate : plates) {
         lines.push_back(serializePlate(plate));
+    }
+    std::vector<LinkColor> linkColors = definition.linkColors;
+    canonicalizeLinkColors(linkColors, "serialized level");
+    for (const LinkColor& record : linkColors) {
+        lines.push_back(serializeLinkColor(record));
     }
     for (const Decoration& decoration : definition.decorations) {
         lines.push_back(serializeDecoration(decoration));
@@ -968,6 +1154,8 @@ std::vector<std::string> Level::serializeDefinition(
         !definition.selectors.empty() ||
         !definition.gates.empty() ||
         !definition.rotators.empty() ||
+        !definition.elevators.empty() ||
+        !definition.linkColors.empty() ||
         !definition.plates.empty()) {
         lines.emplace_back();
     }
@@ -1007,7 +1195,8 @@ Level Level::loadFromDefinition(
         definition.gates,
         definition.rotators,
         definition.plates,
-        definition.character.value_or(CharacterType::Rogue));
+        definition.character.value_or(CharacterType::Rogue),
+        definition.elevators);
 }
 
 Level Level::loadFromLayers(
@@ -1019,7 +1208,8 @@ Level Level::loadFromLayers(
     const std::vector<Gate>& gates,
     const std::vector<Rotator>& rotators,
     const std::vector<Plate>& plates,
-    CharacterType selectedCharacter)
+    CharacterType selectedCharacter,
+    const std::vector<Elevator>& elevators)
 {
     const std::string source(sourceName);
     if (sourceLayers.empty()) {
@@ -1060,6 +1250,8 @@ Level Level::loadFromLayers(
     canonicalizeLinkedRecords(level.gates_, sourceName, "Gate");
     level.rotators_ = rotators;
     canonicalizeLinkedRecords(level.rotators_, sourceName, "Rotator");
+    level.elevators_ = elevators;
+    canonicalizeLinkedRecords(level.elevators_, sourceName, "Elevator");
     level.coveredPlates_ = plates;
     canonicalizePlates(level.coveredPlates_, sourceName);
     for (const auto& layer : sourceLayers) {
@@ -1203,6 +1395,29 @@ Level Level::loadFromLayers(
             }
         }
     }
+    for (const Elevator& elevator : level.elevators_) {
+        if (!level.inBounds(elevator.cell) ||
+            level.authoredTileAt(
+                static_cast<uint32_t>(elevator.cell.x),
+                static_cast<uint32_t>(elevator.cell.y),
+                static_cast<uint32_t>(elevator.cell.z)) != TileType::Elevator) {
+            throw std::runtime_error(
+                "Elevator metadata cell must contain an Elevator tile: " + source);
+        }
+        for (const int stop : elevator.levels) {
+            if (stop >= static_cast<int>(level.depth_)) {
+                throw std::runtime_error(
+                    "Elevator stop levels must refer to existing layers: " +
+                    source);
+            }
+        }
+        for (GridPosition3 plate : elevator.pressurePlates) {
+            if (level.plateAt(plate) != TileType::PressurePlate) {
+                throw std::runtime_error(
+                    "Elevator links must refer to Pressure tiles: " + source);
+            }
+        }
+    }
     for (uint32_t z = 0; z < level.depth_; ++z) {
         for (uint32_t y = 0; y < level.height_; ++y) {
             for (uint32_t x = 0; x < level.width_; ++x) {
@@ -1212,6 +1427,12 @@ Level Level::loadFromLayers(
                     static_cast<int>(z),
                 };
                 const TileType authored = level.authoredTileAt(x, y, z);
+                if (authored == TileType::Elevator &&
+                    level.elevatorAt(cell) == nullptr) {
+                    throw std::runtime_error(
+                        "Every Elevator tile requires an '@elevator' metadata record: " +
+                        source);
+                }
                 if (authored == TileType::Gate &&
                     level.gateAt(cell) == nullptr) {
                     throw std::runtime_error(
@@ -1367,6 +1588,31 @@ const Level::Rotator* Level::rotatorForPressurePlate(GridPosition3 cell) const
     return found == rotators_.end() ? nullptr : &*found;
 }
 
+std::size_t Level::Elevator::startStop() const
+{
+    const auto found = std::ranges::find(levels, cell.z);
+    return found == levels.end()
+        ? 0
+        : static_cast<std::size_t>(std::distance(levels.begin(), found));
+}
+
+const Level::Elevator* Level::elevatorAt(GridPosition3 cell) const
+{
+    const auto found = std::ranges::find(elevators_, cell, &Elevator::cell);
+    return found == elevators_.end() ? nullptr : &*found;
+}
+
+const Level::Elevator* Level::elevatorForPressurePlate(GridPosition3 cell) const
+{
+    const auto found = std::ranges::find_if(
+        elevators_,
+        [cell](const Elevator& elevator) {
+            return std::ranges::find(elevator.pressurePlates, cell) !=
+                elevator.pressurePlates.end();
+        });
+    return found == elevators_.end() ? nullptr : &*found;
+}
+
 std::optional<TileType> Level::plateAt(GridPosition3 cell) const
 {
     if (!inBounds(cell)) {
@@ -1390,6 +1636,9 @@ std::optional<Vec3> Level::pressurePlateLinkColor(GridPosition3 cell) const
     }
     if (const Rotator* rotator = rotatorForPressurePlate(cell)) {
         return rotator->color;
+    }
+    if (const Elevator* elevator = elevatorForPressurePlate(cell)) {
+        return elevator->color;
     }
     return std::nullopt;
 }

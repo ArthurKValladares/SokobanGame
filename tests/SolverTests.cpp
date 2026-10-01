@@ -262,6 +262,18 @@ void testPackedStateKeyIncludesEveryDynamicField()
         solver::detail::makePackedStateKey(changed, activeController));
 
     changed = state;
+    changed.elevators.push_back({ .cell = { 1, 2, 0 }, .phase = 0 });
+    checkChanged(changed);
+    GameState moved = changed;
+    moved.elevators[0].cell.z = 3;
+    CHECK(solver::detail::makePackedStateKey(moved, activeController) !=
+        solver::detail::makePackedStateKey(changed, activeController));
+    moved = changed;
+    moved.elevators[0].phase = 2;
+    CHECK(solver::detail::makePackedStateKey(moved, activeController) !=
+        solver::detail::makePackedStateKey(changed, activeController));
+
+    changed = state;
     changed.players.push_back(state.players[0]);
     checkChanged(changed);
     changed = state;
@@ -307,6 +319,36 @@ void testSearchResultReplays()
     CHECK(result.statistics.solutionSignificantMoves.has_value());
     CHECK(result.statistics.solutionSignificantMoves.value_or(
         result.inputs.size()) < result.inputs.size());
+}
+
+void testSolverRidesElevators()
+{
+    TEST("solverRidesElevators");
+    // The End is on a ledge only the elevator reaches; the plate is on the
+    // platform, so stepping onto it is the ride.
+    const Level::Definition definition {
+        .layers = {
+            { "....=." },
+            { "  C P." },
+            { "     ." },
+            { "     E" },
+        },
+        .elevators = { Level::Elevator {
+            .cell = { 4, 0, 0 },
+            .pressurePlates = { { 4, 0, 1 } },
+            .levels = { 0, 2 },
+        } },
+    };
+    const Level level = Level::loadFromDefinition(definition, "elevator solver");
+    // The relaxed heuristic knows the elevator can carry a hero up.
+    const solver::detail::RelaxedHeuristic heuristic(level);
+    CHECK(heuristic.estimate(rules::initialState(level)) < 16);
+    const solver::Result result = solver::solve(level, { .maxStates = 10'000 });
+    CHECK(result.solved());
+    CHECK_MESSAGE(
+        solution::record(level, definition, result.inputs, "elevator solver")
+            .solved,
+        "elevator solution replays through the recording driver");
 }
 
 void testPrecomputedMirrorSuccessorReplays()
@@ -529,6 +571,7 @@ int main()
         testRelaxedHeuristicUsesMirrorTransport();
         testDeadPositionAnalysisIsConservativeAndFeatureAware();
         testPackedStateKeyIncludesEveryDynamicField();
+        testSolverRidesElevators();
         testSearchResultReplays();
         testPrecomputedMirrorSuccessorReplays();
         testExhaustionIsDistinctFromStateLimit();

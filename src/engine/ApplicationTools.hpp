@@ -22,6 +22,8 @@
 #include "engine/render/VulkanRenderer.hpp"
 #include "engine/ui/Ui.hpp"
 
+#include <SDL3/SDL_mouse.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -123,6 +125,16 @@ public:
     void releaseDetachedCameraMouse(SDL_Window* window);
     void shutdownDetachedCamera(SDL_Window* window);
     [[nodiscard]] bool detachedCameraActive() const;
+    // The level editor's tool cursors: the eyedropper while the Pick Tile key
+    // is held over the board and the link-color brush (tipped with the active
+    // link color) while the Paint Link Color key is. updateEditorInteraction
+    // decides which one the pointer wants; this shows it, or the ordinary
+    // cursor whenever `editorActive` is false (menus, draft play, panels).
+    // Called once a frame.
+    void updateEditorCursor(bool editorActive);
+    // Restores the system cursor and frees the tool cursors. Call while the
+    // window still exists.
+    void shutdownEditorCursors();
     [[nodiscard]] bool detachedCameraCapturingMouse() const;
     // A screen or draft was just solved: record it into solutions/ on a
     // worker thread (engine/SolutionStore.hpp). Jobs run one at a time, in
@@ -211,6 +223,27 @@ private:
         bool blocked = false;
     };
     std::optional<TileStroke> tileStroke_;
+
+    // A held-button link-color brush drag: every linkable tile it crosses
+    // takes the active color, as one undo step.
+    struct LinkColorStroke {
+        GridPosition last;
+    };
+    std::optional<LinkColorStroke> linkColorStroke_;
+
+    enum class EditorCursor {
+        Default,
+        Eyedropper,
+        Brush,
+    };
+    // What updateEditorInteraction found the pointer wants this frame.
+    EditorCursor wantedEditorCursor_ = EditorCursor::Default;
+    EditorCursor shownEditorCursor_ = EditorCursor::Default;
+    SDL_Cursor* eyedropperCursor_ = nullptr;
+    SDL_Cursor* brushCursor_ = nullptr;
+    // The link color the brush cursor was drawn with; it is redrawn when the
+    // active color changes.
+    Vec3 brushCursorColor_ {};
 
     void beginTileStroke(
         const InputRouter::EditorInput& input,

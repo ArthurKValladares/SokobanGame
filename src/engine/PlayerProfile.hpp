@@ -18,7 +18,7 @@ namespace sokoban {
 // change makes older saves and settings obsolete: SaveStore sets those files
 // aside and the player starts fresh. Bump this whenever the document shape
 // or its meaning changes.
-inline constexpr int currentPlayerProfileFormat = 33;
+inline constexpr int currentPlayerProfileFormat = 34;
 
 // Which top-level sections serialize() writes. Save-slot files carry only
 // progress and the shared settings file only settings; both sections are

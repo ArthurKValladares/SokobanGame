@@ -1,5 +1,6 @@
 #include "TestHarness.hpp"
 
+#include "engine/EditorCursorArt.hpp"
 #include "engine/EditorInteraction.hpp"
 
 #include <algorithm>
@@ -162,8 +163,44 @@ void testAxisConstraint()
 
 } // namespace
 
+void testEditorToolCursors()
+{
+    TEST("editorToolCursors");
+    namespace art = sokoban::editorCursorArt;
+    const auto check = [](const art::Image& image) {
+        CHECK(image.rgba.size() ==
+            static_cast<std::size_t>(art::size * art::size * 4));
+        // The tip under the hotspot is solid; the opposite corners are
+        // clear, so the cursor is a drawing and not a square.
+        CHECK(image.alphaAt(image.hotspotX, image.hotspotY) == 255);
+        CHECK(image.alphaAt(art::size - 1, art::size - 1) == 0);
+        CHECK(image.alphaAt(0, 0) == 0);
+        // Mostly transparent, with something drawn on it.
+        std::size_t opaque = 0;
+        for (int y = 0; y < art::size; ++y) {
+            for (int x = 0; x < art::size; ++x) {
+                opaque += image.alphaAt(x, y) > 128 ? 1U : 0U;
+            }
+        }
+        CHECK(opaque > 100);
+        CHECK(opaque < static_cast<std::size_t>(art::size * art::size / 2));
+    };
+    check(art::eyedropper());
+    const art::Image brush = art::brush({ 0.2f, 0.4f, 1.0f });
+    check(brush);
+    // The bristles carry the active link color.
+    const std::size_t bristle =
+        static_cast<std::size_t>((25 * art::size + 7) * 4);
+    CHECK(brush.rgba[bristle + 2] > 200);
+    CHECK(brush.rgba[bristle + 0] < 80);
+    const art::Image orange = art::brush({ 1.0f, 0.72f, 0.12f });
+    CHECK(orange.rgba[bristle + 0] > 200);
+    CHECK(orange.rgba[bristle + 2] < 80);
+}
+
 int main()
 {
+    testEditorToolCursors();
     testBrushPreviewTopologyAndCoverage();
     testEmptyBrushHasNoGeometry();
     testGizmoTargetsConstantPixelLength();

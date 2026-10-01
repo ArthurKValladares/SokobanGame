@@ -58,7 +58,8 @@ struct StateDelta {
     [[nodiscard]] StateDelta inverted() const;
 
     [[nodiscard]] bool empty() const;
-    // Entities only; mirror turns are not entities and have no ids.
+    // Entities only; mirror turns and elevator platforms are not entities and
+    // have no ids.
     [[nodiscard]] std::size_t changedEntityCount() const;
     // Entity ids use players, movables, enemies order, matching the delta's
     // application order. Appending preserves that order and intentionally
@@ -79,10 +80,22 @@ struct StateDelta {
         bool operator==(const MirrorChange&) const = default;
     };
 
+    // Elevator platforms are not entities either. Every elevator is always
+    // present in the state, in Level::elevators() order, so a change is keyed
+    // by that index.
+    struct ElevatorChange {
+        std::size_t index = 0;
+        GameState::Elevator before;
+        GameState::Elevator after;
+
+        bool operator==(const ElevatorChange&) const = default;
+    };
+
     std::vector<Change<GameState::Player>> players;
     std::vector<Change<GameState::Movable>> movables;
     std::vector<Change<GameState::Enemy>> enemies;
     std::vector<MirrorChange> mirrors;
+    std::vector<ElevatorChange> elevators;
 };
 
 } // namespace sokoban

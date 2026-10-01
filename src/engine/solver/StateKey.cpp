@@ -94,6 +94,16 @@ PackedStateKey makePackedStateKey(
                 mirror.cell.z, static_cast<std::uint32_t>(mirror.quarterTurns)));
         }
     }
+    // Elevators likewise: appended only on screens that have them, after a
+    // marker that keeps the tail unambiguous from the mirror section.
+    if (!state.elevators.empty()) {
+        words.push_back(0xE1E7A702U);
+        words.push_back(state.elevators.size());
+        for (const GameState::Elevator& elevator : state.elevators) {
+            words.push_back(packZAndFlags(
+                elevator.cell.z, static_cast<std::uint32_t>(elevator.phase)));
+        }
+    }
     return PackedStateKey(std::move(words));
 }
 

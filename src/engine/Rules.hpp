@@ -97,10 +97,26 @@ struct GameState {
         bool operator==(const TurnedMirror&) const = default;
     };
 
+    // Where an elevator's platform is, one entry per Level::elevators() record
+    // in the same order. Screens without elevators have an empty list.
+    struct Elevator {
+        // The platform's current cell: the authored column, at the layer of
+        // its current stop. The platform's top is flush with that layer's
+        // blocks, so riders stand in the cell above.
+        GridPosition3 cell {};
+        // Position in the back-and-forth cycle over the stops (see
+        // rules::elevatorStopIndex): 0..n-1 travelling forward through the
+        // authored list, then n..2n-3 travelling back.
+        uint8_t phase = 0;
+
+        bool operator==(const Elevator&) const = default;
+    };
+
     std::vector<Player> players;
     std::vector<Movable> movables;
     std::vector<Enemy> enemies;
     std::vector<TurnedMirror> turnedMirrors;
+    std::vector<Elevator> elevators;
 
     bool operator==(const GameState&) const = default;
 };
@@ -186,6 +202,28 @@ void setMirrorQuarterTurns(
 [[nodiscard]] std::optional<TileType> mirrorTileAt(
     const Level& level, const GameState& state, GridPosition3 cell);
 
+// Elevator cycles. With n stops the phase runs 0..2n-3: phases below n are
+// stops 0..n-1 travelling forward, later phases come back down the list, so
+// [0, 3, 5, 7] visits 0, 3, 5, 7, 5, 3, 0, 3, ... A single stop never moves.
+[[nodiscard]] std::size_t elevatorStopIndex(
+    std::size_t stopCount, uint8_t phase);
+[[nodiscard]] uint8_t elevatorNextPhase(std::size_t stopCount, uint8_t phase);
+// The phase an elevator starts in: at its authored layer, travelling forward.
+[[nodiscard]] uint8_t elevatorInitialPhase(const Level::Elevator& elevator);
+// Where elevator `index`'s platform currently is. States built without
+// elevator entries (hand-written tests) fall back to the authored cell.
+[[nodiscard]] GridPosition3 elevatorPlatformCell(
+    const Level& level, const GameState& state, std::size_t index);
+// The elevator whose platform currently occupies `cell`, if any.
+[[nodiscard]] std::optional<std::size_t> elevatorPlatformAt(
+    const Level& level, const GameState& state, GridPosition3 cell);
+// The static tile at `position` as the live board has it. Equal to
+// Level::tileAt except around elevators: an elevator's authored cell is open
+// shaft while its platform rests elsewhere, and the cell the platform rests in
+// reads as a solid Elevator block.
+[[nodiscard]] TileType liveTileAt(
+    const Level& level, const GameState& state, GridPosition3 position);
+
 // Live turret ids participating in at least one unobstructed pair where both
 // barrels face the other turret. These pairs fire without requiring movement.
 [[nodiscard]] std::vector<EntityId> mutuallyFacingTurrets(
@@ -194,11 +232,14 @@ void setMirrorQuarterTurns(
 
 // A cell entities may occupy, ignoring movables. The plane directly above the
 // top layer (z == depth) is intentionally allowed so entities can stand on
-// top-layer blocks. Gates are treated as potentially passable so static solver
-// estimates remain admissible; gameplay movement uses cellAllowsEntity.
+// top-layer blocks. Gates and elevator cells are treated as potentially
+// passable so static solver estimates remain admissible; gameplay movement
+// uses cellAllowsEntity.
 [[nodiscard]] bool staticCellAllowsEntity(const Level& level, GridPosition3 position);
 // State-aware static collision. A Gate cell allows entry only while every
-// pressure plate linked by its authored gate record has a live occupant.
+// pressure plate linked by its authored gate record has a live occupant. An
+// elevator platform blocks the cell it currently rests in, and an elevator's
+// authored cell is open while its platform is elsewhere.
 [[nodiscard]] bool cellAllowsEntity(
     const Level& level,
     const GameState& state,
@@ -230,6 +271,12 @@ void setMirrorQuarterTurns(
     const Level& level,
     const GameState& state,
     const Level::Rotator& rotator);
+// True while every pressure plate linked to the elevator has a live occupant.
+// Like a rotator, an elevator moves only on the step this becomes true.
+[[nodiscard]] bool isElevatorEngaged(
+    const Level& level,
+    const GameState& state,
+    const Level::Elevator& elevator);
 // Kept as a compatibility query for debug/presentation callers. End tiles no
 // longer have a locked state, so this always returns true.
 [[nodiscard]] bool isEndUnlocked(const Level& level, const GameState& state);

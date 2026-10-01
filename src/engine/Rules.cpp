@@ -154,7 +154,7 @@ FallResult fallTarget(
     GridPosition3 current = position;
     while (current.z > 0) {
         const GridPosition3 below { current.x, current.y, current.z - 1 };
-        const TileType support = tileAt(level, below);
+        const TileType support = liveTileAt(level, state, below);
 
         if (tileTypeIsSolidBlock(support) || occupiedBelow(below)) {
             return { .cell = current, .fallen = false };
@@ -335,6 +335,13 @@ GameState initialState(const Level& level)
     for (GridPosition3 position : level.enemyStarts()) {
         state.enemies.push_back({ .id = nextId++, .cell = position });
     }
+    state.elevators.reserve(level.elevators().size());
+    for (const Level::Elevator& elevator : level.elevators()) {
+        state.elevators.push_back({
+            .cell = elevator.cell,
+            .phase = elevatorInitialPhase(elevator),
+        });
+    }
 
     return state;
 }
@@ -513,6 +520,66 @@ std::optional<TileType> mirrorTileAt(
     return rotateMirrorTile(tile, mirrorQuarterTurnsAt(state, cell));
 }
 
+std::size_t elevatorStopIndex(std::size_t stopCount, uint8_t phase)
+{
+    if (stopCount <= 1) {
+        return 0;
+    }
+    const std::size_t period = 2 * (stopCount - 1);
+    const std::size_t wrapped = static_cast<std::size_t>(phase) % period;
+    return wrapped < stopCount ? wrapped : period - wrapped;
+}
+
+uint8_t elevatorNextPhase(std::size_t stopCount, uint8_t phase)
+{
+    if (stopCount <= 1) {
+        return 0;
+    }
+    const std::size_t period = 2 * (stopCount - 1);
+    return static_cast<uint8_t>(
+        (static_cast<std::size_t>(phase) % period + 1) % period);
+}
+
+uint8_t elevatorInitialPhase(const Level::Elevator& elevator)
+{
+    return static_cast<uint8_t>(elevator.startStop());
+}
+
+GridPosition3 elevatorPlatformCell(
+    const Level& level, const GameState& state, std::size_t index)
+{
+    return index < state.elevators.size()
+        ? state.elevators[index].cell
+        : level.elevators().at(index).cell;
+}
+
+std::optional<std::size_t> elevatorPlatformAt(
+    const Level& level, const GameState& state, GridPosition3 cell)
+{
+    for (std::size_t i = 0; i < level.elevators().size(); ++i) {
+        if (elevatorPlatformCell(level, state, i) == cell) {
+            return i;
+        }
+    }
+    return std::nullopt;
+}
+
+TileType liveTileAt(
+    const Level& level, const GameState& state, GridPosition3 position)
+{
+    if (!level.inBounds(position)) {
+        return TileType::Air;
+    }
+    const TileType tile = tileAt(level, position);
+    if (level.elevators().empty()) {
+        return tile;
+    }
+    if (elevatorPlatformAt(level, state, position)) {
+        return TileType::Elevator;
+    }
+    return tile == TileType::Elevator ? TileType::Air : tile;
+}
+
 bool staticCellAllowsEntity(const Level& level, GridPosition3 position)
 {
     if (position.x < 0 ||
@@ -528,7 +595,8 @@ bool staticCellAllowsEntity(const Level& level, GridPosition3 position)
     }
 
     const TileType tile = tileAt(level, position);
-    return tileTypeAllowsEntity(tile) || tile == TileType::Gate;
+    return tileTypeAllowsEntity(tile) || tile == TileType::Gate ||
+        tile == TileType::Elevator;
 }
 
 bool cellAllowsEntity(
@@ -536,6 +604,15 @@ bool cellAllowsEntity(
     const GameState& state,
     GridPosition3 position)
 {
+    if (!level.elevators().empty() && level.inBounds(position)) {
+        if (elevatorPlatformAt(level, state, position)) {
+            return false;
+        }
+        if (tileAt(level, position) == TileType::Elevator) {
+            // The authored cell, while the platform is somewhere else.
+            return true;
+        }
+    }
     if (!level.inBounds(position) ||
         tileAt(level, position) != TileType::Gate) {
         return staticCellAllowsEntity(level, position);
@@ -639,6 +716,19 @@ bool isRotatorEngaged(
             });
 }
 
+bool isElevatorEngaged(
+    const Level& level,
+    const GameState& state,
+    const Level::Elevator& elevator)
+{
+    return !elevator.pressurePlates.empty() &&
+        std::ranges::all_of(
+            elevator.pressurePlates,
+            [&](GridPosition3 plate) {
+                return isPressurePlateActive(level, state, plate);
+            });
+}
+
 namespace {
 
 // Per-rotator engagement, in Level::rotators() order.
@@ -719,6 +809,154 @@ RotatedOccupants applyRotatorActivations(
         }
     }
     return rotated;
+}
+
+// Per-elevator engagement, in Level::elevators() order.
+std::vector<char> elevatorEngagement(const Level& level, const GameState& state)
+{
+    std::vector<char> engaged(level.elevators().size(), 0);
+    for (std::size_t i = 0; i < engaged.size(); ++i) {
+        engaged[i] = isElevatorEngaged(level, state, level.elevators()[i]);
+    }
+    return engaged;
+}
+
+// Which state entities elevator activations carried.
+struct ElevatorRiders {
+    std::vector<std::size_t> players;
+    std::vector<std::size_t> movables;
+    std::vector<std::size_t> enemies;
+    std::vector<std::size_t> elevators;
+
+    [[nodiscard]] bool empty() const { return elevators.empty(); }
+};
+
+// One live unit standing in `cell`, as a state index. Units never share a
+// cell, so the first match is the only one.
+struct LiveUnitAt {
+    EntityKind kind = EntityKind::Player;
+    std::size_t index = 0;
+};
+
+std::optional<LiveUnitAt> liveUnitAt(const GameState& state, GridPosition3 cell)
+{
+    for (std::size_t i = 0; i < state.players.size(); ++i) {
+        if (!state.players[i].dead && state.players[i].cell == cell) {
+            return LiveUnitAt { EntityKind::Player, i };
+        }
+    }
+    for (std::size_t i = 0; i < state.movables.size(); ++i) {
+        const GameState::Movable& movable = state.movables[i];
+        if (!movable.fallen && !movable.dead && movable.cell == cell) {
+            return LiveUnitAt { EntityKind::Movable, i };
+        }
+    }
+    for (std::size_t i = 0; i < state.enemies.size(); ++i) {
+        const GameState::Enemy& enemy = state.enemies[i];
+        if (!enemy.fallen && !enemy.dead && enemy.cell == cell) {
+            return LiveUnitAt { EntityKind::Enemy, i };
+        }
+    }
+    return std::nullopt;
+}
+
+// Anything at all in `cell`, including fallen units filling water. A cell an
+// elevator moves through must hold none of it.
+bool anyUnitIn(const GameState& state, GridPosition3 cell)
+{
+    return liveUnitAt(state, cell).has_value() ||
+        fallenMovableAt(state, cell) != nullptr ||
+        fallenEnemyAt(state, cell) != nullptr;
+}
+
+// Moves every elevator whose linked plates became fully pressed since
+// `engagedBefore` was sampled one stop along its cycle, carrying the column
+// of live units stacked on its platform. The move is all or nothing: when any
+// cell the platform or its riders would pass through is blocked (by a static
+// tile, a closed gate, another platform or a unit that is not riding), the
+// elevator stays where it is and keeps its phase, so the activation is lost.
+// Elevators resolve in Level::elevators() order, each against the board the
+// previous one left.
+ElevatorRiders applyElevatorActivations(
+    const Level& level,
+    GameState& state,
+    const std::vector<char>& engagedBefore)
+{
+    ElevatorRiders riders;
+    if (state.elevators.size() != level.elevators().size()) {
+        return riders;
+    }
+    for (std::size_t e = 0; e < level.elevators().size(); ++e) {
+        const Level::Elevator& elevator = level.elevators()[e];
+        if ((e < engagedBefore.size() && engagedBefore[e]) ||
+            elevator.levels.size() < 2 ||
+            !isElevatorEngaged(level, state, elevator)) {
+            continue;
+        }
+        GameState::Elevator& platform = state.elevators[e];
+        const uint8_t nextPhase =
+            elevatorNextPhase(elevator.levels.size(), platform.phase);
+        const int targetZ = elevator.levels[
+            elevatorStopIndex(elevator.levels.size(), nextPhase)];
+        const GridPosition3 from = platform.cell;
+        const int delta = targetZ - from.z;
+        if (delta == 0) {
+            platform.phase = nextPhase;
+            continue;
+        }
+
+        // The stack standing on the platform, bottom first.
+        std::vector<LiveUnitAt> stack;
+        // The plane above the top layer holds units too (see
+        // staticCellAllowsEntity), so the stack may reach z == depth.
+        for (GridPosition3 cell { from.x, from.y, from.z + 1 };
+             cell.z <= static_cast<int>(level.depth());
+             ++cell.z) {
+            const std::optional<LiveUnitAt> unit = liveUnitAt(state, cell);
+            if (!unit) {
+                break;
+            }
+            stack.push_back(*unit);
+        }
+        const int stackHeight = static_cast<int>(stack.size());
+
+        // Cells the moving column sweeps into: above the stack going up,
+        // below the platform going down.
+        const int firstSwept = delta > 0 ? from.z + 1 + stackHeight : targetZ;
+        const int lastSwept = delta > 0 ? targetZ + stackHeight : from.z - 1;
+        bool blocked = false;
+        for (int z = firstSwept; z <= lastSwept && !blocked; ++z) {
+            const GridPosition3 cell { from.x, from.y, z };
+            blocked = !cellAllowsEntity(level, state, cell) ||
+                anyUnitIn(state, cell);
+        }
+        if (blocked) {
+            continue;
+        }
+
+        platform.cell.z = targetZ;
+        platform.phase = nextPhase;
+        riders.elevators.push_back(e);
+        for (const LiveUnitAt& unit : stack) {
+            switch (unit.kind) {
+            case EntityKind::Player:
+                state.players[unit.index].cell.z += delta;
+                riders.players.push_back(unit.index);
+                break;
+            case EntityKind::Movable:
+                state.movables[unit.index].cell.z += delta;
+                riders.movables.push_back(unit.index);
+                break;
+            case EntityKind::Enemy:
+                state.enemies[unit.index].cell.z += delta;
+                riders.enemies.push_back(unit.index);
+                break;
+            default:
+                break;
+            }
+        }
+    }
+    return riders;
 }
 
 } // namespace
@@ -1319,6 +1557,8 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
     // step can, so linked rotators fire here too.
     (void)applyRotatorActivations(
         level, after, rotatorEngagement(level, state));
+    (void)applyElevatorActivations(
+        level, after, elevatorEngagement(level, state));
     resolveEnemyAttacks(after);
     for (MirrorEntityPreview& entity : entities) {
         if (entity.player) {
@@ -1399,6 +1639,7 @@ public:
         , enemyMovedThisMicro_(after.enemies.size(), 0)
         , turretShots_(turretShots)
         , rotatorsEngagedAtStart_(rotatorEngagement(level, after))
+        , elevatorsEngagedAtStart_(elevatorEngagement(level, after))
     {
         for (Status& status : status_) {
             status.active = scope.wholeWorld();
@@ -1464,6 +1705,7 @@ public:
             }
         }
         resolveRotators();
+        resolveElevators();
     }
 
 private:
@@ -2484,6 +2726,56 @@ private:
         }
     }
 
+    // Elevators act after rotators, once the step's movement has settled, on
+    // the same edge rule. Carried units join the closure because they are
+    // written, and count as having just moved: a turret sees a unit carried
+    // into its line, and an enemy carried next to a hero (or a hero carried
+    // next to an enemy) attacks. A carried turret sweeps its line at the new
+    // level, like a turret a rotator has turned.
+    void resolveElevators()
+    {
+        const ElevatorRiders carried = applyElevatorActivations(
+            level_, after_, elevatorsEngagedAtStart_);
+        if (carried.empty()) {
+            return;
+        }
+        bool anyCarried = false;
+        for (const std::size_t index : carried.players) {
+            Status& status = status_[entityIndexForPlayer(index)];
+            status.active = true;
+            status.movedThisMicro = true;
+            anyCarried = true;
+        }
+        for (const std::size_t index : carried.enemies) {
+            Status& status = status_[entityIndexForEnemy(index)];
+            status.active = true;
+            status.movedThisMicro = true;
+            enemyMoved_[index] = true;
+            enemyMovedThisMicro_[index] = true;
+            anyCarried = true;
+        }
+        std::vector<char> sweeping(movableCount_, 0);
+        bool anyTurret = false;
+        for (const std::size_t index : carried.movables) {
+            status_[index].active = true;
+            status_[index].movedThisMicro = true;
+            anyCarried = true;
+            if (turretDirection(after_.movables[index])) {
+                sweeping[index] = 1;
+                anyTurret = true;
+            }
+        }
+        if (!anyCarried) {
+            return;
+        }
+        resolveTurretShots();
+        if (anyTurret) {
+            resolveTurretShots(&sweeping);
+        }
+        resolveAttacks();
+        markDeadEntitiesDone();
+    }
+
     // A turret normally reacts to movement, while two turrets aimed directly
     // at one another form an ambient volley without waiting for another actor.
     // Every live entity is still an occluder, so a rock between a turret and a
@@ -2861,6 +3153,9 @@ private:
     // rotator activates on the step that presses its last plate, never on a
     // step that merely leaves it pressed.
     std::vector<char> rotatorsEngagedAtStart_;
+    // Which elevators had every linked plate pressed when the step began; the
+    // same edge rule as rotators.
+    std::vector<char> elevatorsEngagedAtStart_;
 };
 
 } // namespace

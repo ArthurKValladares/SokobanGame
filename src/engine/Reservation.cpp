@@ -110,6 +110,80 @@ void addReservation(
     }
 }
 
+// Live units stacked directly on a platform resting in `platform`.
+int ridersAbove(const GameState& state, GridPosition3 platform)
+{
+    const auto occupied = [&](GridPosition3 cell) {
+        return std::ranges::any_of(
+                   state.players,
+                   [&](const GameState::Player& player) {
+                       return !player.dead && player.cell == cell;
+                   }) ||
+            std::ranges::any_of(
+                state.movables,
+                [&](const GameState::Movable& movable) {
+                    return !movable.fallen && !movable.dead &&
+                        movable.cell == cell;
+                }) ||
+            std::ranges::any_of(
+                state.enemies,
+                [&](const GameState::Enemy& enemy) {
+                    return !enemy.fallen && !enemy.dead && enemy.cell == cell;
+                });
+    };
+    int count = 0;
+    while (occupied({ platform.x, platform.y, platform.z + 1 + count })) {
+        ++count;
+    }
+    return count;
+}
+
+// An elevator that moves claims its whole shaft: every cell the platform and
+// the units it carries pass through, plus the cell just above the column,
+// which something walking onto the platform would otherwise enter while it
+// is leaving. Riders already claim where they start and finish; this covers
+// the cells in between. Claims run from the action's start to the instant
+// the move finishes, except the platform's final cell, which it keeps.
+void addElevatorReservations(
+    const plans::PlannedAction& planned, std::vector<Reservation>& into)
+{
+    const GameState& before = planned.action.before;
+    for (std::size_t index = 0; index < before.elevators.size(); ++index) {
+        GridPosition3 previous = before.elevators[index].cell;
+        const GameState* previousState = &before;
+        GridPosition3 resting = previous;
+        for (std::size_t leg = 0; leg < planned.legs.size(); ++leg) {
+            const GameState& state = planned.legs[leg];
+            if (index >= state.elevators.size()) {
+                break;
+            }
+            const GridPosition3 current = state.elevators[index].cell;
+            if (!(current == previous)) {
+                const int riders = ridersAbove(*previousState, previous);
+                const int low = std::min(previous.z, current.z);
+                const int high = std::max(previous.z, current.z) + riders + 1;
+                for (int z = low; z <= high; ++z) {
+                    addReservation(into, {
+                        .cell = { previous.x, previous.y, z },
+                        .firstStep = 0,
+                        .lastStep = static_cast<int>(leg) + 1,
+                    });
+                }
+                resting = current;
+            }
+            previous = current;
+            previousState = &state;
+        }
+        if (!(resting == before.elevators[index].cell)) {
+            addReservation(into, {
+                .cell = resting,
+                .firstStep = 0,
+                .lastStep = std::nullopt,
+            });
+        }
+    }
+}
+
 } // namespace
 
 bool Reservation::overlaps(const Reservation& other) const
@@ -200,6 +274,7 @@ ActionReservations reservationsFor(const PlannedAction& planned)
             });
         }
     }
+    addElevatorReservations(planned, result.cells);
     return result;
 }
 

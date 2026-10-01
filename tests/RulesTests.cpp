@@ -8,8 +8,12 @@
 #include "engine/StateDelta.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <iostream>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -1076,6 +1080,240 @@ void testStateDeltaCarriesMirrorTurns()
     CHECK(rules::mirrorQuarterTurnsAt(reset, cell(1, 1, 1)) == 0);
 }
 
+// Layer 0 holds the elevator platform at x=4 with a rock riding it at
+// (4, 0, 1). The hero walks left from x=2 onto the linked plate at x=0.
+Level makeElevatorLevel(
+    std::vector<int> levels,
+    std::string layerTwo = "      ")
+{
+    return Level::loadFromDefinition({
+        .layers = {
+            { "....=." },
+            { "P C R " },
+            { std::move(layerTwo) },
+            { "      " },
+        },
+        .elevators = { Level::Elevator {
+            .cell = cell(4, 0, 0),
+            .pressurePlates = { cell(0, 0, 1) },
+            .levels = std::move(levels),
+        } },
+    }, "elevator level");
+}
+
+// Steps off the plate and back on, which presses it once more.
+GameState repressElevatorPlate(const Level& level, GameState state)
+{
+    state = rules::step(level, state, MoveDirection::Right);
+    return rules::step(level, state, MoveDirection::Left);
+}
+
+void testElevatorCycleHelpers()
+{
+    TEST("elevatorCycleHelpers");
+    // [0, 3, 5, 7] travels 0 -> 3 -> 5 -> 7 -> 5 -> 3 -> 0.
+    const std::vector<std::size_t> expected { 0, 1, 2, 3, 2, 1, 0, 1 };
+    uint8_t phase = 0;
+    for (const std::size_t stop : expected) {
+        CHECK(rules::elevatorStopIndex(4, phase) == stop);
+        phase = rules::elevatorNextPhase(4, phase);
+    }
+    CHECK(rules::elevatorNextPhase(1, 0) == 0);
+    CHECK(rules::elevatorStopIndex(1, 0) == 0);
+    CHECK(rules::elevatorNextPhase(2, 1) == 0);
+
+    // A platform authored part-way along starts there, travelling forward.
+    const Level::Elevator middle {
+        .cell = cell(0, 0, 5),
+        .levels = { 0, 3, 5, 7 },
+    };
+    CHECK(rules::elevatorInitialPhase(middle) == 2);
+    const Level::Elevator last {
+        .cell = cell(0, 0, 7),
+        .levels = { 0, 3, 5, 7 },
+    };
+    CHECK(rules::elevatorStopIndex(
+              4, rules::elevatorNextPhase(4, rules::elevatorInitialPhase(last))) ==
+        2);
+}
+
+void testElevatorCarriesItsRidersAroundTheCycle()
+{
+    TEST("elevatorCarriesItsRidersAroundTheCycle");
+    const Level level = makeElevatorLevel({ 0, 2, 3 });
+    GameState state = rules::initialState(level);
+    CHECK(state.elevators.size() == 1);
+    CHECK(state.elevators[0].cell == cell(4, 0, 0));
+    CHECK(state.elevators[0].phase == 0);
+    CHECK(rules::liveTileAt(level, state, cell(4, 0, 0)) == TileType::Elevator);
+    CHECK(!rules::cellAllowsEntity(level, state, cell(4, 0, 0)));
+
+    state = rules::step(level, state, MoveDirection::Left);
+    CHECK(state.players[0].cell == cell(1, 0, 1));
+    CHECK(state.elevators[0].cell == cell(4, 0, 0));
+
+    // Pressing the plate lifts the platform and its rock to the next stop.
+    state = rules::step(level, state, MoveDirection::Left);
+    CHECK(state.players[0].cell == cell(0, 0, 1));
+    CHECK(state.elevators[0].cell == cell(4, 0, 2));
+    CHECK(state.elevators[0].phase == 1);
+    CHECK(state.movables[0].cell == cell(4, 0, 3));
+    CHECK(!state.movables[0].fallen);
+    CHECK(!rules::hasPendingMotion(level, state));
+    // The authored cell is open shaft now, and the platform is solid.
+    CHECK(rules::liveTileAt(level, state, cell(4, 0, 0)) == TileType::Air);
+    CHECK(rules::cellAllowsEntity(level, state, cell(4, 0, 0)));
+    CHECK(rules::liveTileAt(level, state, cell(4, 0, 2)) == TileType::Elevator);
+    CHECK(!rules::cellAllowsEntity(level, state, cell(4, 0, 2)));
+    CHECK(rules::elevatorPlatformAt(level, state, cell(4, 0, 2)) ==
+        std::optional<std::size_t>(0));
+
+    // Staying on the plate does not move it again.
+    state = rules::step(level, state, MoveDirection::Left);
+    CHECK(state.elevators[0].cell == cell(4, 0, 2));
+
+    // The top stop puts the rock on the plane above the top layer.
+    state = repressElevatorPlate(level, state);
+    CHECK(state.elevators[0].cell == cell(4, 0, 3));
+    CHECK(state.elevators[0].phase == 2);
+    CHECK(state.movables[0].cell == cell(4, 0, 4));
+
+    // Then it turns back: 3 -> 2 -> 0, and on round again.
+    state = repressElevatorPlate(level, state);
+    CHECK(state.elevators[0].cell == cell(4, 0, 2));
+    CHECK(state.elevators[0].phase == 3);
+    CHECK(state.movables[0].cell == cell(4, 0, 3));
+    state = repressElevatorPlate(level, state);
+    CHECK(state.elevators[0].cell == cell(4, 0, 0));
+    CHECK(state.elevators[0].phase == 0);
+    CHECK(state.movables[0].cell == cell(4, 0, 1));
+    state = repressElevatorPlate(level, state);
+    CHECK(state.elevators[0].cell == cell(4, 0, 2));
+    CHECK(state.elevators[0].phase == 1);
+}
+
+void testBlockedElevatorStaysAndKeepsItsPhase()
+{
+    TEST("blockedElevatorStaysAndKeepsItsPhase");
+    // A wall above the rock's destination blocks the climb.
+    const Level walled = makeElevatorLevel({ 0, 2 }, "    # ");
+    GameState state = rules::initialState(walled);
+    state.players[0].cell = cell(1, 0, 1);
+    state = rules::step(walled, state, MoveDirection::Left);
+    CHECK(state.players[0].cell == cell(0, 0, 1));
+    CHECK(state.elevators[0].cell == cell(4, 0, 0));
+    CHECK(state.elevators[0].phase == 0);
+    CHECK(state.movables[0].cell == cell(4, 0, 1));
+
+    // A unit standing in the shaft blocks the descent.
+    const Level level = makeElevatorLevel({ 0, 2 });
+    GameState raised = rules::initialState(level);
+    raised.players[0].cell = cell(1, 0, 1);
+    raised = rules::step(level, raised, MoveDirection::Left);
+    CHECK(raised.elevators[0].cell == cell(4, 0, 2));
+    raised.movables.push_back({
+        .id = 50,
+        .type = TileType::Rock,
+        .cell = cell(4, 0, 1),
+    });
+    const GameState blocked = repressElevatorPlate(level, raised);
+    CHECK(blocked.elevators[0].cell == cell(4, 0, 2));
+    CHECK(blocked.elevators[0].phase == 1);
+    CHECK(blocked.movables[0].cell == cell(4, 0, 3));
+
+    // An elevator with a single stop, or no linked plate, never moves.
+    const Level single = makeElevatorLevel({ 0 });
+    GameState still = rules::initialState(single);
+    still.players[0].cell = cell(1, 0, 1);
+    still = rules::step(single, still, MoveDirection::Left);
+    CHECK(still.elevators[0] == rules::initialState(single).elevators[0]);
+}
+
+void testHeroRidesAnElevatorAndTurretsSeeTheArrival()
+{
+    TEST("heroRidesAnElevatorAndTurretsSeeTheArrival");
+    // The plate sits on the platform itself, so stepping on rides it. The
+    // turret at the top stop faces west, across the cell the hero arrives in.
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "....=." },
+            { "  C P." },
+            { "     ." },
+            { "     w" },
+        },
+        .elevators = { Level::Elevator {
+            .cell = cell(4, 0, 0),
+            .pressurePlates = { cell(4, 0, 1) },
+            .levels = { 0, 2 },
+        } },
+    }, "elevator turret");
+    GameState state = rules::initialState(level);
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.players[0].cell == cell(3, 0, 1));
+    const rules::StepResult result =
+        rules::stepWithEvents(level, state, MoveDirection::Right);
+    CHECK(result.state.elevators[0].cell == cell(4, 0, 2));
+    CHECK(result.state.players[0].cell == cell(4, 0, 3));
+    CHECK(result.state.players[0].dead);
+    CHECK(!result.state.players[0].drowned);
+    CHECK(result.turretShots.size() == 1);
+    CHECK(result.turretShots.front().targetCell == cell(4, 0, 3));
+
+    // Without the turret the hero simply arrives, and the scoped step that
+    // moved it carries it too.
+    const Level quiet = Level::loadFromDefinition({
+        .layers = {
+            { "....=." },
+            { "  C P." },
+            { "     ." },
+            { "      " },
+        },
+        .elevators = { Level::Elevator {
+            .cell = cell(4, 0, 0),
+            .pressurePlates = { cell(4, 0, 1) },
+            .levels = { 0, 2 },
+        } },
+    }, "elevator ride");
+    GameState ride = rules::initialState(quiet);
+    ride.players[0].cell = cell(3, 0, 1);
+    const GameState arrived = rules::scopedStep(
+        quiet,
+        ride,
+        MoveDirection::Right,
+        {},
+        { .actors = { ride.players[0].id } });
+    CHECK(arrived.elevators[0].cell == cell(4, 0, 2));
+    CHECK(arrived.players[0].cell == cell(4, 0, 3));
+    CHECK(!arrived.players[0].dead);
+}
+
+void testStateDeltaCarriesElevators()
+{
+    TEST("stateDeltaCarriesElevators");
+    GameState before;
+    before.players.push_back({ .id = 1, .cell = cell(0, 0, 1) });
+    before.elevators.push_back({ .cell = cell(4, 0, 0), .phase = 0 });
+    before.elevators.push_back({ .cell = cell(5, 0, 1), .phase = 1 });
+    GameState after = before;
+    after.players[0].cell = cell(1, 0, 1);
+    after.elevators[1] = { .cell = cell(5, 0, 3), .phase = 2 };
+
+    const StateDelta delta = StateDelta::between(before, after);
+    CHECK(delta.elevators.size() == 1);
+    CHECK(delta.elevators[0].index == 1);
+    CHECK(delta.changedEntityCount() == 1);
+    CHECK(!delta.empty());
+    GameState applied = before;
+    delta.applyTo(applied);
+    CHECK(applied == after);
+    delta.inverted().applyTo(applied);
+    CHECK(applied == before);
+
+    GameState onlyElevator = before;
+    onlyElevator.elevators[0].phase = 1;
+    CHECK(!StateDelta::between(before, onlyElevator).empty());
+}
+
 void testPlayerCannotWalkIntoWater()
 {
     TEST("playerCannotWalkIntoWater");
@@ -2126,6 +2364,11 @@ int main()
     testMirrorOnRotatorTurnsAndReflectsDifferently();
     testMirrorOnPressurePlateHoldsItPressed();
     testStateDeltaCarriesMirrorTurns();
+    testElevatorCycleHelpers();
+    testElevatorCarriesItsRidersAroundTheCycle();
+    testBlockedElevatorStaysAndKeepsItsPhase();
+    testHeroRidesAnElevatorAndTurretsSeeTheArrival();
+    testStateDeltaCarriesElevators();
     testPlayerCannotWalkIntoWater();
     testPlayerCanSlideIntoWater();
     testRockFillsWater();

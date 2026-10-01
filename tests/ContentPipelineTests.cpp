@@ -1134,6 +1134,31 @@ void testUnsupportedGltfTextureSemanticsHaveContext()
         },
         "unsupported texture transform reports model, material and texture");
 
+    // A transform that changes nothing (the Kenney kits attach one naming
+    // only the texture coordinate set already in use) is accepted.
+    writeFile(
+        roots.assets / "models/hero.gltf",
+        R"json({
+  "asset":{"version":"2.0"},
+  "extensionsUsed":["KHR_texture_transform"],
+  "images":[{"name":"Paint image","uri":"data:image/png;base64,AAAA"}],
+  "textures":[{"name":"Paint texture","source":0}],
+  "materials":[{
+    "name":"Paint material",
+    "pbrMetallicRoughness":{"baseColorTexture":{
+      "index":0,
+      "extensions":{"KHR_texture_transform":{"texCoord":0}}
+    }}
+  }]
+})json");
+    bool identityAccepted = true;
+    try {
+        (void)sokoban::collectContentInventory(roots);
+    } catch (const std::exception&) {
+        identityAccepted = false;
+    }
+    CHECK_MESSAGE(identityAccepted, "identity texture transform is accepted");
+
     writeFile(
         roots.assets / "models/hero.gltf",
         R"json({

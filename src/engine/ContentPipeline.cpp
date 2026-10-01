@@ -382,6 +382,19 @@ TextureInterpretation interpretationForGltfTexture(
     return interpretation;
 }
 
+// Some exporters (the Kenney kits among them) attach KHR_texture_transform
+// to every texture with nothing but the texture coordinate set it already
+// uses. That changes nothing, so it needs no UV transform support.
+bool isIdentityTextureTransform(
+    const GltfTextureTransformDependency& transform,
+    uint32_t texcoord)
+{
+    return transform.offset.x == 0.0f && transform.offset.y == 0.0f &&
+        transform.scale.x == 1.0f && transform.scale.y == 1.0f &&
+        transform.rotation == 0.0f &&
+        (!transform.texcoord || *transform.texcoord == texcoord);
+}
+
 std::vector<ResolvedMaterialTexture> resolvedMaterialTexturesFrom(
     const GltfAssetDependencies& dependencies,
     const std::filesystem::path& document,
@@ -414,7 +427,8 @@ std::vector<ResolvedMaterialTexture> resolvedMaterialTexturesFrom(
                     " is unsupported; only TEXCOORD_0 and TEXCOORD_1 "
                     "are available");
             }
-            if (texture.transform) {
+            if (texture.transform &&
+                !isIdentityTextureTransform(*texture.transform, texture.texcoord)) {
                 throw std::runtime_error(
                     context +
                     ": KHR_texture_transform is unsupported until its "

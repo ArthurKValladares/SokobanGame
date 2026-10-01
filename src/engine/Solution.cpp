@@ -279,6 +279,28 @@ std::uint64_t levelDigest(const Level::Definition& definition)
         }
         hashBytes(hash, text + "\n");
     }
+    // Elevator links and stops decide which plates move which platforms and
+    // where to; hashed only when present, like rotators.
+    std::vector<Level::Elevator> elevators = definition.elevators;
+    std::ranges::sort(elevators, {}, [&](const Level::Elevator& elevator) {
+        return cellOrder(elevator.cell);
+    });
+    for (Level::Elevator& elevator : elevators) {
+        std::ranges::sort(elevator.pressurePlates, {}, cellOrder);
+        std::string text = "@elevator " + std::to_string(elevator.cell.x) +
+            "," + std::to_string(elevator.cell.y) + "," +
+            std::to_string(elevator.cell.z) + ":";
+        for (GridPosition3 plate : elevator.pressurePlates) {
+            text += " " + std::to_string(plate.x) + "," +
+                std::to_string(plate.y) + "," + std::to_string(plate.z);
+        }
+        text += " levels";
+        // Stop order is travel order, so it is hashed as authored.
+        for (const int stop : elevator.levels) {
+            text += " " + std::to_string(stop);
+        }
+        hashBytes(hash, text + "\n");
+    }
     // Plates authored beneath units change what the screen does from its
     // first step; hashed only when present, like rotators.
     std::vector<Level::Plate> plates = definition.plates;

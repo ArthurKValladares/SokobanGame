@@ -85,7 +85,7 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
                 model.attachments[0].rotateHalfTurn;
         }), "skinned attachment loaded");
     CHECK_MESSAGE(editor.animations().size() == 7, "animations loaded");
-    CHECK_MESSAGE(editor.tileEntries().size() == 20, "authored tile entries loaded");
+    CHECK_MESSAGE(editor.tileEntries().size() == 21, "authored tile entries loaded");
     CHECK_MESSAGE(editor.soundSets().size() == 3, "sound sets loaded");
     CHECK_MESSAGE(editor.musicTracks().size() == 4, "music tracks loaded");
     CHECK_MESSAGE(editor.validate(), "unchanged document validates");

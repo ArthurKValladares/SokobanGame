@@ -61,6 +61,7 @@ InputActionContext inputActionContext(InputAction action)
     case InputAction::EditorDeleteTile:
     case InputAction::EditorMoveTile:
     case InputAction::EditorPickTile:
+    case InputAction::EditorPaintLinkColor:
     case InputAction::EditorStraightLine:
     case InputAction::EditorRedo:
     case InputAction::EditorSave:
@@ -267,6 +268,10 @@ InputBindings defaultInputBindings()
         KeyboardBinding { "Left Alt" },
         KeyboardBinding { "Right Alt" },
     };
+    bindings.forAction(InputAction::EditorPaintLinkColor) = {
+        KeyboardBinding { "Left Ctrl" },
+        KeyboardBinding { "Right Ctrl" },
+    };
     bindings.forAction(InputAction::EditorStraightLine) = {
         KeyboardBinding { "Left Shift" },
         KeyboardBinding { "Right Shift" },
@@ -334,6 +339,7 @@ std::string_view inputActionName(InputAction action)
     case InputAction::PreviewScreen: return "previewScreen";
     case InputAction::CycleHero: return "cycleHero";
     case InputAction::EditorPickTile: return "editorPickTile";
+    case InputAction::EditorPaintLinkColor: return "editorPaintLinkColor";
     case InputAction::EditorStraightLine: return "editorStraightLine";
     case InputAction::EditorRedo: return "editorRedo";
     case InputAction::EditorSave: return "editorSave";

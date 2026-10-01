@@ -286,7 +286,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
 {
     rejectUnknownProperties(
         value,
-        { "players", "movables", "enemies", "turnedMirrors" },
+        { "players", "movables", "enemies", "turnedMirrors", "elevators" },
         context);
     GameState state;
     const Json& players = requiredProperty(value, "players", context);
@@ -417,6 +417,31 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
             rules::setMirrorQuarterTurns(state, cell, quarterTurns);
         }
     }
+    // Written only for screens with elevators: one entry per elevator, in
+    // the level's elevator order. Restore validates the values by replay.
+    if (value.contains("elevators")) {
+        const Json& elevators = value["elevators"];
+        if (!elevators.is_array()) {
+            fail(context, "property 'elevators' must be an array");
+        }
+        for (std::size_t i = 0; i < elevators.size(); ++i) {
+            const std::string elevatorContext = std::string(context) +
+                ".elevators[" + std::to_string(i) + "]";
+            const Json& item = elevators[i];
+            rejectUnknownProperties(item, { "cell", "phase" }, elevatorContext);
+            const uint64_t phase =
+                unsignedIntegerProperty(item, "phase", elevatorContext);
+            if (phase > 0xffU) {
+                fail(elevatorContext, "property 'phase' must be below 256");
+            }
+            state.elevators.push_back({
+                .cell = positionFromJson(
+                    requiredProperty(item, "cell", elevatorContext),
+                    elevatorContext + ".cell"),
+                .phase = static_cast<uint8_t>(phase),
+            });
+        }
+    }
     return state;
 }
 
@@ -488,6 +513,16 @@ OrderedJson gameStateToJson(const GameState& state)
         }
         result["turnedMirrors"] = std::move(mirrors);
     }
+    if (!state.elevators.empty()) {
+        OrderedJson elevators = OrderedJson::array();
+        for (const GameState::Elevator& elevator : state.elevators) {
+            elevators.push_back({
+                { "cell", positionToJson(elevator.cell) },
+                { "phase", elevator.phase },
+            });
+        }
+        result["elevators"] = std::move(elevators);
+    }
     return result;
 }
 
@@ -522,6 +557,9 @@ EntityKind entityKindFromJson(const Json& value, std::string_view context)
     if (kind == "enemy") {
         return EntityKind::Enemy;
     }
+    if (kind == "elevator") {
+        return EntityKind::Elevator;
+    }
     fail(context, "unknown entity kind '" + kind + "'");
 }
 
@@ -534,6 +572,8 @@ std::string_view entityKindName(EntityKind kind)
         return "movable";
     case EntityKind::Enemy:
         return "enemy";
+    case EntityKind::Elevator:
+        return "elevator";
     }
     return "player";
 }

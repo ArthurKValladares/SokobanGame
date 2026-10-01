@@ -125,6 +125,9 @@ public:
     [[nodiscard]] const std::vector<PlayerVisual>& players() const { return players_; }
     [[nodiscard]] const std::vector<EntityVisual>& movables() const { return movables_; }
     [[nodiscard]] const std::vector<EnemyVisual>& enemies() const { return enemies_; }
+    // One per GameState::elevators entry; renderPosition is the platform's
+    // cell, interpolated while an action carries it between stops.
+    [[nodiscard]] const std::vector<EntityVisual>& elevators() const { return elevators_; }
 
 private:
     struct TurretRecoil {
@@ -140,6 +143,7 @@ private:
     std::vector<PlayerVisual> players_;
     std::vector<EntityVisual> movables_;
     std::vector<EnemyVisual> enemies_;
+    std::vector<EntityVisual> elevators_;
     std::vector<TurretRecoil> turretRecoils_;
     const AnimationCatalog* animationCatalog_ = nullptr;
     // Where a reversed action's timeline is sampled from. The only piece of

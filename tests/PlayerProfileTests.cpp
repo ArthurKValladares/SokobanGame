@@ -414,6 +414,9 @@ void testActiveScreenCheckpointRoundTrip()
     after.movables.front().quarterTurns = 1;
     after.enemies.front().quarterTurns = 2;
     after.turnedMirrors.push_back({ .cell = { 2, 2, 1 }, .quarterTurns = 3 });
+    // Elevator platforms persist their cell and cycle phase.
+    before.elevators.push_back({ .cell = { 3, 1, 0 }, .phase = 0 });
+    after.elevators.push_back({ .cell = { 3, 1, 2 }, .phase = 1 });
 
     sokoban::GameplaySession::Action move {
         .before = before,
@@ -429,6 +432,18 @@ void testActiveScreenCheckpointRoundTrip()
                     .target = { sokoban::EntityKind::Player, 1 },
                     .from = { 1.0f, 0.0f, 1.0f },
                     .to = { 2.0f, 0.0f, 1.0f },
+                    .durationSeconds = 0.15f,
+                },
+                {
+                    .target = {
+                        sokoban::EntityKind::Elevator,
+                        sokoban::resolvedEntityId(
+                            sokoban::EntityKind::Elevator,
+                            sokoban::invalidEntityId,
+                            0),
+                    },
+                    .from = { 3.0f, 1.0f, 0.0f },
+                    .to = { 3.0f, 1.0f, 2.0f },
                     .durationSeconds = 0.15f,
                 },
             },
@@ -525,6 +540,18 @@ void testActiveScreenCheckpointRoundTrip()
     CHECK_MESSAGE(checkpointState["turnedMirrors"].size() == 1 &&
             checkpointState["turnedMirrors"][0]["quarterTurns"].get<int>() == 3,
         "checkpoint state persists turned mirrors");
+
+    CHECK_MESSAGE(checkpointState["elevators"].size() == 1 &&
+            checkpointState["elevators"][0]["phase"].get<int>() == 1 &&
+            checkpointState["elevators"][0]["cell"]["z"].get<int>() == 2,
+        "checkpoint state persists elevator platforms");
+
+    nlohmann::json badElevator = current;
+    badElevator["progress"]["activeScreen"]["session"]["state"]
+        ["elevators"][0]["phase"] = 300;
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(badElevator.dump());
+    }, "checkpoint rejects an out-of-range elevator phase");
 
     nlohmann::json duplicateMirror = current;
     auto& duplicateMirrors = duplicateMirror["progress"]["activeScreen"]

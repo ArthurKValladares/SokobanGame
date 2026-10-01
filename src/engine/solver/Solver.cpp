@@ -67,7 +67,9 @@ EntityId nextLivingController(
     return *(currentIt + 1);
 }
 
-// Only heroes changed: an ordinary walk (or a slide the walk set off).
+// Only heroes changed: an ordinary walk (or a slide the walk set off). A walk
+// that presses a plate and so turns a mirror or moves an elevator changed the
+// board, and is a significant action like a push.
 bool onlyPlayersMoved(const GameState& before, const GameState& after)
 {
     if (rules::anyPlayerDead(after) ||
@@ -75,7 +77,9 @@ bool onlyPlayersMoved(const GameState& before, const GameState& after)
         return false;
     }
     return before.movables == after.movables &&
-        before.enemies == after.enemies;
+        before.enemies == after.enemies &&
+        before.turnedMirrors == after.turnedMirrors &&
+        before.elevators == after.elevators;
 }
 
 struct DirectionTransition {

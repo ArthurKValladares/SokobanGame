@@ -1,0 +1,900 @@
+diff --git a/HANDOFF.md b/HANDOFF.md
+index 29d8382..d26df17 100755
+--- a/HANDOFF.md
++++ b/HANDOFF.md
+@@ -324,6 +324,12 @@ and the required real-device checks are recorded.
+   drive nothing and is never read by gameplay, the solver or solution
+   digests. Gameplay, rules and rendering must keep using the explicit
+   `pressurePlates` lists, never color comparisons.
++- The level editor's tool cursors (eyedropper while Pick Tile is held, a
++  brush tinted with the active link color while Paint Link Color is held)
++  are drawn in code (`EditorCursorArt.hpp`) and owned by `ApplicationTools`.
++  `updateEditorInteraction` records which one the pointer wants;
++  `Application::update` applies it once a frame, before any early return, so
++  menus, modals and the fly camera restore the system cursor.
+ - Elevators (`Level::Elevator`, tile `=`) keep their platforms in
+   `GameState::elevators`: one entry per level record, in record order, holding
+   the platform cell and cycle phase (`rules::elevatorStopIndex`/
+diff --git a/README.md b/README.md
+index 8c38646..0dff904 100755
+--- a/README.md
++++ b/README.md
+@@ -502,8 +502,11 @@ editor commands but does not own document or filesystem policy.
+   color; to make a rotator need two plates, give it and both plates one
+   color. Colors match as the 8-bit RGB the picker shows. Newly painted plates
+   and devices take the Link Color chosen in the Tiles palette; painting a
+-  plate or device over itself recolors it to that color, and `Alt`-clicking
+-  one picks its color up. The Links list shows each color group with its
++  plate or device over itself recolors it to that color. Holding `Alt` turns
++  the cursor into an eyedropper: clicking picks up the tile and, from a plate
++  or device, its link color. Holding `Ctrl` turns it into a brush dipped in
++  the Link Color: clicking or dragging gives every plate or device it
++  touches that color, the whole drag as one undo step. The Links list shows each color group with its
+   members, warns about devices with no plates, and can recolor a whole group
+   (choosing another group's color merges them). Colors are only an authoring
+   aid: saving writes each device's explicit `plates` list, which is all
+@@ -536,7 +539,8 @@ editor commands but does not own document or filesystem policy.
+   | `Ctrl+S` | Save the document back to the file it came from (or the ground splat map while painting it) |
+   | `F5` | Play the draft; `F5` again returns to the editor without the confirmation dialog |
+   | `Shift+F5` | Play a puzzle draft with its first hero moved to the cell under the pointer; the document is unchanged |
+-  | Hold `Alt` + click | Pick up the tile under the pointer |
++  | Hold `Alt` + click | Eyedropper: pick up the tile under the pointer, and its link color |
++  | Hold `Ctrl` + click or drag | Link-color brush: give each pressure plate or device touched the Link Color |
+   | `1`-`9` | Choose from the recent-tiles strip at the top of the Tiles palette |
+   | `PageUp` / `PageDown` | Change the active layer |
+   | `L` | Lock edits to the active layer |
+diff --git a/src/engine/Application.cpp b/src/engine/Application.cpp
+index 0488a37..9e5ed23 100755
+--- a/src/engine/Application.cpp
++++ b/src/engine/Application.cpp
+@@ -510,6 +510,7 @@ Application::~Application()
+         saveDevSession();
+     }
+     tools_->shutdownDetachedCamera(window_.nativeHandle());
++    tools_->shutdownEditorCursors();
+     DebugUi::clearTabs();
+ #endif
+     renderer_.waitIdle();
+@@ -1102,6 +1103,13 @@ void Application::update(
+         ? std::min(overworldOverviewProgress_ + overviewStep, 1.0f)
+         : std::max(overworldOverviewProgress_ - overviewStep, 0.0f);
+ 
++#if SOKOBAN_ENABLE_DEBUG_UI
++    // Last frame's board interaction decides the editor's tool cursor; any
++    // menu, modal or fly camera puts the ordinary cursor back.
++    tools_->updateEditorCursor(
++        !shellMenuOpen() && !tools_->draftExitConfirmationOpen &&
++        !detachedCameraActive && tools_->levelEditor.editingDocument());
++#endif
+     if (shellMenuOpen()) {
+         audioSystem_->update(dt, false, false);
+         return;
+diff --git a/src/engine/ApplicationTools.cpp b/src/engine/ApplicationTools.cpp
+index 836a78a..4b76dbe 100755
+--- a/src/engine/ApplicationTools.cpp
++++ b/src/engine/ApplicationTools.cpp
+@@ -4,6 +4,7 @@
+ #include "engine/ContentPipeline.hpp"
+ #include "engine/LevelCatalog.hpp"
+ #include "engine/DecorationAssetRegistry.hpp"
++#include "engine/EditorCursorArt.hpp"
+ #include "engine/EditorInteraction.hpp"
+ #include "engine/Log.hpp"
+ #include "engine/TileThumbnailBake.hpp"
+@@ -1242,6 +1243,92 @@ bool ApplicationTools::bakeTileThumbnails(
+ #endif
+ }
+ 
++namespace {
++
++SDL_Cursor* createEditorCursor(const editorCursorArt::Image& image)
++{
++    SDL_Surface* surface = SDL_CreateSurface(
++        editorCursorArt::size, editorCursorArt::size, SDL_PIXELFORMAT_RGBA32);
++    if (surface == nullptr) {
++        return nullptr;
++    }
++    const auto* source = image.rgba.data();
++    auto* destination = static_cast<std::uint8_t*>(surface->pixels);
++    const std::size_t rowBytes =
++        static_cast<std::size_t>(editorCursorArt::size) * 4U;
++    for (int row = 0; row < editorCursorArt::size; ++row) {
++        std::copy_n(
++            source + static_cast<std::size_t>(row) * rowBytes,
++            rowBytes,
++            destination + static_cast<std::size_t>(row) *
++                static_cast<std::size_t>(surface->pitch));
++    }
++    SDL_Cursor* cursor = SDL_CreateColorCursor(
++        surface, image.hotspotX, image.hotspotY);
++    SDL_DestroySurface(surface);
++    return cursor;
++}
++
++} // namespace
++
++void ApplicationTools::updateEditorCursor(bool editorActive)
++{
++    const EditorCursor wanted =
++        editorActive ? wantedEditorCursor_ : EditorCursor::Default;
++    SDL_Cursor* cursor = nullptr;
++    if (wanted == EditorCursor::Eyedropper) {
++        if (eyedropperCursor_ == nullptr) {
++            eyedropperCursor_ = createEditorCursor(editorCursorArt::eyedropper());
++        }
++        cursor = eyedropperCursor_;
++    } else if (wanted == EditorCursor::Brush) {
++        const Vec3 paint = levelEditor.activeLinkColor();
++        if (brushCursor_ != nullptr &&
++            !LevelEditor::sameLinkColor(paint, brushCursorColor_)) {
++            if (shownEditorCursor_ == EditorCursor::Brush) {
++                SDL_SetCursor(SDL_GetDefaultCursor());
++                shownEditorCursor_ = EditorCursor::Default;
++            }
++            SDL_DestroyCursor(brushCursor_);
++            brushCursor_ = nullptr;
++        }
++        if (brushCursor_ == nullptr) {
++            brushCursor_ = createEditorCursor(editorCursorArt::brush(paint));
++            brushCursorColor_ = paint;
++        }
++        cursor = brushCursor_;
++    }
++    if (wanted == shownEditorCursor_) {
++        return;
++    }
++    // Dear ImGui's backend only sets the cursor when the one it wants
++    // changes, and over the board it wants the arrow throughout, so it leaves
++    // ours alone; leaving a tool cursor restores the arrow ourselves.
++    if (cursor != nullptr) {
++        SDL_SetCursor(cursor);
++        shownEditorCursor_ = wanted;
++    } else {
++        SDL_SetCursor(SDL_GetDefaultCursor());
++        shownEditorCursor_ = EditorCursor::Default;
++    }
++}
++
++void ApplicationTools::shutdownEditorCursors()
++{
++    if (shownEditorCursor_ != EditorCursor::Default) {
++        SDL_SetCursor(SDL_GetDefaultCursor());
++        shownEditorCursor_ = EditorCursor::Default;
++    }
++    if (eyedropperCursor_ != nullptr) {
++        SDL_DestroyCursor(eyedropperCursor_);
++        eyedropperCursor_ = nullptr;
++    }
++    if (brushCursor_ != nullptr) {
++        SDL_DestroyCursor(brushCursor_);
++        brushCursor_ = nullptr;
++    }
++}
++
+ void ApplicationTools::updateEditorInteraction(
+     const InputRouter::EditorInput& input,
+     const VulkanRenderer::PreparedFrame* previousRenderFrame,
+@@ -1249,6 +1336,7 @@ void ApplicationTools::updateEditorInteraction(
+     Vec2 windowSize,
+     Vec2 pixelSize)
+ {
++    wantedEditorCursor_ = EditorCursor::Default;
+     hoverCell.reset();
+     pickedCell.reset();
+     hoverDecoration.reset();
+@@ -1257,6 +1345,11 @@ void ApplicationTools::updateEditorInteraction(
+         (void)levelEditor.endStroke();
+         tileStroke_.reset();
+     }
++    if (linkColorStroke_ &&
++        (!input.primaryDown || !input.paintLinkColorModifier)) {
++        (void)levelEditor.endStroke();
++        linkColorStroke_.reset();
++    }
+     if (!input.moving) {
+         levelEditor.cancelMove();
+     }
+@@ -1266,6 +1359,10 @@ void ApplicationTools::updateEditorInteraction(
+             (void)levelEditor.endSelectedDecorationTransform(false);
+         }
+         interruptTileStroke();
++        if (linkColorStroke_) {
++            (void)levelEditor.endStroke();
++            linkColorStroke_.reset();
++        }
+         if (input.undoPressed) {
+             (void)(splatPainter.active()
+                     ? splatPainter.undo()
+@@ -1289,6 +1386,16 @@ void ApplicationTools::updateEditorInteraction(
+         }
+         return;
+     }
++    // The pointer is over the board: show the tool a held key has turned
++    // the click into.
++    if (levelEditor.tool() == LevelEditor::Tool::Tiles &&
++        !splatPainter.active() && !input.moving) {
++        if (input.pickModifier) {
++            wantedEditorCursor_ = EditorCursor::Eyedropper;
++        } else if (input.paintLinkColorModifier) {
++            wantedEditorCursor_ = EditorCursor::Brush;
++        }
++    }
+     if (levelEditor.tool() == LevelEditor::Tool::Decorations &&
+         input.secondaryPressed && levelEditor.selectedDecoration()) {
+         if (decorationGizmo.dragging()) {
+@@ -1360,6 +1467,21 @@ void ApplicationTools::updateEditorInteraction(
+             }
+             return;
+         }
++        if (tilePainting && input.paintLinkColorModifier) {
++            const GridPosition column { clicked->x, clicked->y };
++            if (input.primaryPressed) {
++                interruptTileStroke();
++                (void)levelEditor.endStroke();
++                (void)levelEditor.beginStroke();
++                (void)levelEditor.paintLinkColorAt(*clicked);
++                linkColorStroke_ = LinkColorStroke { .last = column };
++            } else if (linkColorStroke_ && linkColorStroke_->last != column) {
++                // Each tile once per drag; the drag is one undo step.
++                (void)levelEditor.paintLinkColorAt(*clicked);
++                linkColorStroke_->last = column;
++            }
++            return;
++        }
+         if (tilePainting && tileStroke_ && !input.primaryPressed) {
+             continueTileStroke(input, *clicked);
+             return;
+diff --git a/src/engine/ApplicationTools.hpp b/src/engine/ApplicationTools.hpp
+index 9ac8739..11352a6 100755
+--- a/src/engine/ApplicationTools.hpp
++++ b/src/engine/ApplicationTools.hpp
+@@ -22,6 +22,8 @@
+ #include "engine/render/VulkanRenderer.hpp"
+ #include "engine/ui/Ui.hpp"
+ 
++#include <SDL3/SDL_mouse.h>
++
+ #include <cstddef>
+ #include <cstdint>
+ #include <deque>
+@@ -123,6 +125,16 @@ public:
+     void releaseDetachedCameraMouse(SDL_Window* window);
+     void shutdownDetachedCamera(SDL_Window* window);
+     [[nodiscard]] bool detachedCameraActive() const;
++    // The level editor's tool cursors: the eyedropper while the Pick Tile key
++    // is held over the board and the link-color brush (tipped with the active
++    // link color) while the Paint Link Color key is. updateEditorInteraction
++    // decides which one the pointer wants; this shows it, or the ordinary
++    // cursor whenever `editorActive` is false (menus, draft play, panels).
++    // Called once a frame.
++    void updateEditorCursor(bool editorActive);
++    // Restores the system cursor and frees the tool cursors. Call while the
++    // window still exists.
++    void shutdownEditorCursors();
+     [[nodiscard]] bool detachedCameraCapturingMouse() const;
+     // A screen or draft was just solved: record it into solutions/ on a
+     // worker thread (engine/SolutionStore.hpp). Jobs run one at a time, in
+@@ -212,6 +224,27 @@ private:
+     };
+     std::optional<TileStroke> tileStroke_;
+ 
++    // A held-button link-color brush drag: every linkable tile it crosses
++    // takes the active color, as one undo step.
++    struct LinkColorStroke {
++        GridPosition last;
++    };
++    std::optional<LinkColorStroke> linkColorStroke_;
++
++    enum class EditorCursor {
++        Default,
++        Eyedropper,
++        Brush,
++    };
++    // What updateEditorInteraction found the pointer wants this frame.
++    EditorCursor wantedEditorCursor_ = EditorCursor::Default;
++    EditorCursor shownEditorCursor_ = EditorCursor::Default;
++    SDL_Cursor* eyedropperCursor_ = nullptr;
++    SDL_Cursor* brushCursor_ = nullptr;
++    // The link color the brush cursor was drawn with; it is redrawn when the
++    // active color changes.
++    Vec3 brushCursorColor_ {};
++
+     void beginTileStroke(
+         const InputRouter::EditorInput& input,
+         GridPosition3 target,
+diff --git a/src/engine/EditorCursorArt.hpp b/src/engine/EditorCursorArt.hpp
+new file mode 100644
+index 0000000..38e9fc2
+--- /dev/null
++++ b/src/engine/EditorCursorArt.hpp
+@@ -0,0 +1,176 @@
++#pragma once
++
++#include "engine/Math.hpp"
++
++#include <algorithm>
++#include <array>
++#include <cmath>
++#include <cstdint>
++#include <vector>
++
++// Pixel art for the level editor's tool cursors: the eyedropper shown while
++// the Pick Tile key is held and the brush shown while the Paint Link Color
++// key is held. Drawn in code so there is no asset to ship; the caller turns
++// the pixels into an SDL cursor. Kept free of SDL so it can be tested
++// headless.
++namespace sokoban::editorCursorArt {
++
++inline constexpr int size = 32;
++
++struct Image {
++    // Row-major RGBA, 8 bits per channel, straight (not premultiplied) alpha.
++    std::vector<std::uint8_t> rgba;
++    int hotspotX = 0;
++    int hotspotY = 0;
++
++    [[nodiscard]] std::uint8_t alphaAt(int x, int y) const
++    {
++        return rgba[static_cast<std::size_t>((y * size + x) * 4 + 3)];
++    }
++};
++
++// One stroke of the drawing: a capsule from `from` to `to`.
++struct Capsule {
++    Vec2 from {};
++    Vec2 to {};
++    float radius = 1.0f;
++    Vec3 color {};
++};
++
++namespace detail {
++
++[[nodiscard]] inline float distanceToSegment(Vec2 point, Vec2 from, Vec2 to)
++{
++    const float dx = to.x - from.x;
++    const float dy = to.y - from.y;
++    const float lengthSquared = dx * dx + dy * dy;
++    float t = 0.0f;
++    if (lengthSquared > 0.0f) {
++        t = std::clamp(
++            ((point.x - from.x) * dx + (point.y - from.y) * dy) /
++                lengthSquared,
++            0.0f,
++            1.0f);
++    }
++    const float px = from.x + dx * t - point.x;
++    const float py = from.y + dy * t - point.y;
++    return std::sqrt(px * px + py * py);
++}
++
++// Later capsules paint over earlier ones. Around the whole shape runs a
++// dark outline and, outside that, a light halo, so the cursor reads on any
++// background. Edges are 4x4 supersampled.
++[[nodiscard]] inline Image rasterize(
++    const std::vector<Capsule>& capsules, int hotspotX, int hotspotY)
++{
++    constexpr float outline = 1.1f;
++    constexpr float halo = 1.0f;
++    constexpr int samples = 4;
++    Image image {
++        .rgba = std::vector<std::uint8_t>(
++            static_cast<std::size_t>(size * size * 4), 0),
++        .hotspotX = hotspotX,
++        .hotspotY = hotspotY,
++    };
++    for (int y = 0; y < size; ++y) {
++        for (int x = 0; x < size; ++x) {
++            float red = 0.0f;
++            float green = 0.0f;
++            float blue = 0.0f;
++            float alpha = 0.0f;
++            for (int sy = 0; sy < samples; ++sy) {
++                for (int sx = 0; sx < samples; ++sx) {
++                    const Vec2 point {
++                        static_cast<float>(x) +
++                            (static_cast<float>(sx) + 0.5f) / samples,
++                        static_cast<float>(y) +
++                            (static_cast<float>(sy) + 0.5f) / samples,
++                    };
++                    const Capsule* fill = nullptr;
++                    float nearestEdge = 1.0e9f;
++                    for (const Capsule& capsule : capsules) {
++                        const float distance = distanceToSegment(
++                            point, capsule.from, capsule.to);
++                        if (distance <= capsule.radius) {
++                            fill = &capsule;
++                        }
++                        nearestEdge = std::min(
++                            nearestEdge, distance - capsule.radius);
++                    }
++                    Vec3 color {};
++                    float coverage = 0.0f;
++                    if (fill != nullptr) {
++                        color = fill->color;
++                        coverage = 1.0f;
++                    } else if (nearestEdge <= outline) {
++                        color = { 0.05f, 0.05f, 0.06f };
++                        coverage = 1.0f;
++                    } else if (nearestEdge <= outline + halo) {
++                        color = { 1.0f, 1.0f, 1.0f };
++                        coverage = 0.75f;
++                    }
++                    red += color.x * coverage;
++                    green += color.y * coverage;
++                    blue += color.z * coverage;
++                    alpha += coverage;
++                }
++            }
++            const float count = static_cast<float>(samples * samples);
++            const std::size_t offset =
++                static_cast<std::size_t>((y * size + x) * 4);
++            const auto byte = [](float value) {
++                return static_cast<std::uint8_t>(
++                    std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
++            };
++            if (alpha > 0.0f) {
++                image.rgba[offset + 0] = byte(red / alpha);
++                image.rgba[offset + 1] = byte(green / alpha);
++                image.rgba[offset + 2] = byte(blue / alpha);
++            }
++            image.rgba[offset + 3] = byte(alpha / count);
++        }
++    }
++    return image;
++}
++
++} // namespace detail
++
++// A pipette leaning to the upper right, its tip at the lower-left corner,
++// which is the hotspot.
++[[nodiscard]] inline Image eyedropper()
++{
++    const Vec3 glass { 0.92f, 0.95f, 0.98f };
++    const Vec3 band { 0.55f, 0.58f, 0.62f };
++    const Vec3 bulb { 0.22f, 0.24f, 0.28f };
++    return detail::rasterize(
++        {
++            Capsule { { 3.0f, 29.0f }, { 6.0f, 26.0f }, 0.7f, glass },
++            Capsule { { 6.0f, 26.0f }, { 8.0f, 24.0f }, 1.3f, glass },
++            Capsule { { 8.0f, 24.0f }, { 17.0f, 15.0f }, 1.9f, glass },
++            Capsule { { 16.5f, 15.5f }, { 19.0f, 13.0f }, 3.4f, band },
++            Capsule { { 20.5f, 11.5f }, { 25.5f, 6.5f }, 4.2f, bulb },
++        },
++        3,
++        29);
++}
++
++// A paintbrush leaning to the upper right, its bristles dipped in `paint`
++// (the active link color); the bristle tip at the lower-left corner is the
++// hotspot.
++[[nodiscard]] inline Image brush(Vec3 paint)
++{
++    const Vec3 handle { 0.62f, 0.38f, 0.18f };
++    const Vec3 ferrule { 0.74f, 0.76f, 0.80f };
++    return detail::rasterize(
++        {
++            Capsule { { 14.5f, 17.5f }, { 27.5f, 4.5f }, 2.3f, handle },
++            Capsule { { 10.5f, 21.5f }, { 15.0f, 17.0f }, 3.2f, ferrule },
++            Capsule { { 7.5f, 24.5f }, { 10.5f, 21.5f }, 3.3f, paint },
++            Capsule { { 5.0f, 27.0f }, { 7.5f, 24.5f }, 2.4f, paint },
++            Capsule { { 3.0f, 29.0f }, { 5.0f, 27.0f }, 1.3f, paint },
++        },
++        3,
++        29);
++}
++
++} // namespace sokoban::editorCursorArt
+diff --git a/src/engine/InputBindings.cpp b/src/engine/InputBindings.cpp
+index a7dab28..1546624 100755
+--- a/src/engine/InputBindings.cpp
++++ b/src/engine/InputBindings.cpp
+@@ -61,6 +61,7 @@ InputActionContext inputActionContext(InputAction action)
+     case InputAction::EditorDeleteTile:
+     case InputAction::EditorMoveTile:
+     case InputAction::EditorPickTile:
++    case InputAction::EditorPaintLinkColor:
+     case InputAction::EditorStraightLine:
+     case InputAction::EditorRedo:
+     case InputAction::EditorSave:
+@@ -267,6 +268,10 @@ InputBindings defaultInputBindings()
+         KeyboardBinding { "Left Alt" },
+         KeyboardBinding { "Right Alt" },
+     };
++    bindings.forAction(InputAction::EditorPaintLinkColor) = {
++        KeyboardBinding { "Left Ctrl" },
++        KeyboardBinding { "Right Ctrl" },
++    };
+     bindings.forAction(InputAction::EditorStraightLine) = {
+         KeyboardBinding { "Left Shift" },
+         KeyboardBinding { "Right Shift" },
+@@ -334,6 +339,7 @@ std::string_view inputActionName(InputAction action)
+     case InputAction::PreviewScreen: return "previewScreen";
+     case InputAction::CycleHero: return "cycleHero";
+     case InputAction::EditorPickTile: return "editorPickTile";
++    case InputAction::EditorPaintLinkColor: return "editorPaintLinkColor";
+     case InputAction::EditorStraightLine: return "editorStraightLine";
+     case InputAction::EditorRedo: return "editorRedo";
+     case InputAction::EditorSave: return "editorSave";
+diff --git a/src/engine/InputBindings.hpp b/src/engine/InputBindings.hpp
+index 0ee512c..b1c4fb0 100755
+--- a/src/engine/InputBindings.hpp
++++ b/src/engine/InputBindings.hpp
+@@ -29,6 +29,9 @@ enum class InputAction {
+     // Level editor shortcuts (Debug developer builds). Held modifiers first,
+     // then commands.
+     EditorPickTile,
++    // Held: clicking a pressure plate, gate, rotator or elevator gives it the
++    // level editor's active link color.
++    EditorPaintLinkColor,
+     EditorStraightLine,
+     EditorRedo,
+     EditorSave,
+diff --git a/src/engine/InputRouter.cpp b/src/engine/InputRouter.cpp
+index 7dfae09..3ec110e 100755
+--- a/src/engine/InputRouter.cpp
++++ b/src/engine/InputRouter.cpp
+@@ -50,6 +50,7 @@ InputRouter::EventResult InputRouter::routeEvent(
+             boundTo(InputAction::EditorDeleteTile) ||
+             boundTo(InputAction::EditorMoveTile) ||
+             boundTo(InputAction::EditorPickTile) ||
++            boundTo(InputAction::EditorPaintLinkColor) ||
+             boundTo(InputAction::EditorStraightLine) ||
+             boundTo(InputAction::EditorGizmoTranslate) ||
+             boundTo(InputAction::EditorGizmoRotate) ||
+@@ -193,6 +194,8 @@ InputRouter::Frame InputRouter::routeFrame(
+                 pressed(InputAction::EditorToggleLayerLock),
+             .recentTileSlot = recentTileSlot,
+             .pickModifier = input.actionDown(InputAction::EditorPickTile),
++            .paintLinkColorModifier =
++                input.actionDown(InputAction::EditorPaintLinkColor),
+             .lineConstraint =
+                 input.actionDown(InputAction::EditorStraightLine),
+             .deleting = input.actionDown(InputAction::EditorDeleteTile),
+diff --git a/src/engine/InputRouter.hpp b/src/engine/InputRouter.hpp
+index ceadd15..5e5ebab 100755
+--- a/src/engine/InputRouter.hpp
++++ b/src/engine/InputRouter.hpp
+@@ -75,8 +75,12 @@ public:
+         bool toggleLayerLockPressed = false;
+         // Recent-tile shortcuts select slots 0-8.
+         std::optional<std::size_t> recentTileSlot;
+-        // Held: turns a click into the eyedropper.
++        // Held: turns a click into the eyedropper, which also picks up a
++        // pressure plate's or device's link color.
+         bool pickModifier = false;
++        // Held: turns a click (or drag) into the link-color brush, which gives
++        // each pressure plate or device it touches the active link color.
++        bool paintLinkColorModifier = false;
+         // Held: keeps a drag stroke on its starting row or column.
+         bool lineConstraint = false;
+         bool deleting = false;
+diff --git a/src/engine/LevelEditor.cpp b/src/engine/LevelEditor.cpp
+index ac9ad67..0a3fa6f 100755
+--- a/src/engine/LevelEditor.cpp
++++ b/src/engine/LevelEditor.cpp
+@@ -2210,6 +2210,39 @@ bool LevelEditor::setLinkColor(GridPosition3 cell, Vec3 color)
+     return true;
+ }
+ 
++bool LevelEditor::paintLinkColorAt(GridPosition3 pickedCell)
++{
++    const auto occupied = [&](int z) {
++        return charToTileType(
++                   document_.layers[static_cast<std::size_t>(z)]
++                                   [static_cast<std::size_t>(pickedCell.y)]
++                                   [static_cast<std::size_t>(pickedCell.x)])
++                   .value_or(TileType::Air) != TileType::Air;
++    };
++    if (pickedCell.x < 0 || pickedCell.y < 0 ||
++        pickedCell.x >= static_cast<int>(documentWidth()) ||
++        pickedCell.y >= static_cast<int>(documentHeight())) {
++        return false;
++    }
++    std::optional<GridPosition3> target;
++    for (int z = static_cast<int>(documentDepth()) - 1; z >= 0; --z) {
++        if (document_.layerLocked && z != document_.activeLayer) {
++            continue;
++        }
++        if (occupied(z)) {
++            target = GridPosition3 { pickedCell.x, pickedCell.y, z };
++            break;
++        }
++    }
++    if (!target || !linkColorAt(*target)) {
++        document_.status =
++            "The link-color brush paints pressure plates, gates, rotators "
++            "and elevators.";
++        return false;
++    }
++    return setLinkColor(*target, activeLinkColor_);
++}
++
+ bool LevelEditor::recolorLinkGroup(Vec3 from, Vec3 to)
+ {
+     if (sameColor(from, to)) {
+diff --git a/src/engine/LevelEditor.hpp b/src/engine/LevelEditor.hpp
+index 32ea46b..d94b2ce 100755
+--- a/src/engine/LevelEditor.hpp
++++ b/src/engine/LevelEditor.hpp
+@@ -306,6 +306,11 @@ public:
+     [[nodiscard]] std::vector<LinkGroup> linkGroups() const;
+     // Recolors the linkable thing at `cell`, one undoable command.
+     [[nodiscard]] bool setLinkColor(GridPosition3 cell, Vec3 color);
++    // The link-color brush: gives the topmost tile in the picked column
++    // (on the active layer while it is locked) the active link color, if it
++    // is a pressure plate, gate, rotator or elevator, or a unit standing on
++    // a pressure plate. Picks the same tile as pickTile.
++    [[nodiscard]] bool paintLinkColorAt(GridPosition3 pickedCell);
+     // Recolors every member of the group colored `from`, one undoable
+     // command. Choosing another group's color merges the two.
+     [[nodiscard]] bool recolorLinkGroup(Vec3 from, Vec3 to);
+diff --git a/src/engine/LevelEditorDebugUi.cpp b/src/engine/LevelEditorDebugUi.cpp
+index fe559f0..fe341d0 100755
+--- a/src/engine/LevelEditorDebugUi.cpp
++++ b/src/engine/LevelEditorDebugUi.cpp
+@@ -313,7 +313,7 @@ void LevelEditorDebugUi::draw(
+                 nullptr,
+                 toolTabFlags(LevelEditor::Tool::Tiles))) {
+             activateToolTab(LevelEditor::Tool::Tiles);
+-            drawTilePalette(editor, callbacks);
++            drawTilePalette(editor, bindings, callbacks);
+             ImGui::EndTabItem();
+         }
+         if (ImGui::BeginTabItem(
+@@ -373,9 +373,18 @@ void LevelEditorDebugUi::draw(
+             actionBindingsDisplay(
+                 bindings, InputAction::EditorStraightLine).c_str());
+         ImGui::BulletText(
+-            "%s + click: pick up the tile under the pointer",
++            "%s + click: eyedropper (the cursor turns into one) - pick up "
++            "the tile under the pointer, and the link color of a pressure "
++            "plate, gate, rotator or elevator",
+             actionBindingsDisplay(
+                 bindings, InputAction::EditorPickTile).c_str());
++        ImGui::BulletText(
++            "%s + click or drag: link-color brush (the cursor turns into a "
++            "brush dipped in the link color) - give each pressure plate, "
++            "gate, rotator or elevator touched the active link color; the "
++            "whole drag is one undo step",
++            actionBindingsDisplay(
++                bindings, InputAction::EditorPaintLinkColor).c_str());
+         shortcut(InputAction::EditorRedo, "redo");
+         shortcut(
+             InputAction::EditorSave,
+@@ -629,7 +638,9 @@ std::string elevatorCycleText(const Level::Elevator& elevator)
+ } // namespace
+ 
+ void LevelEditorDebugUi::drawTilePalette(
+-    LevelEditor& editor, const Callbacks& callbacks)
++    LevelEditor& editor,
++    const InputBindings& bindings,
++    const Callbacks& callbacks)
+ {
+ #if SOKOBAN_ENABLE_DEBUG_UI
+     if (!editor.recentTiles().empty()) {
+@@ -725,12 +736,21 @@ void LevelEditorDebugUi::drawTilePalette(
+     if (ImGui::ColorEdit3("Link Color", &paintColor.x)) {
+         editor.setActiveLinkColor(paintColor);
+     }
+-    if (ImGui::IsItemHovered()) {
+-        ImGui::SetTooltip(
+-            "New pressure plates, gates, rotators and elevators take this "
+-            "color. Paint one over itself to give it this color, or "
+-            "Alt-click one to pick its color up.");
+-    }
++    const std::string pickKeys =
++        actionBindingsDisplay(bindings, InputAction::EditorPickTile);
++    const std::string brushKeys =
++        actionBindingsDisplay(bindings, InputAction::EditorPaintLinkColor);
++    ImGui::BulletText(
++        "New pressure plates, gates, rotators and elevators take this color.");
++    ImGui::BulletText(
++        "%s + click: eyedropper - picks up the color of the plate or device "
++        "clicked.",
++        pickKeys.c_str());
++    ImGui::BulletText(
++        "%s + click or drag: brush - paints the color onto each plate or "
++        "device it touches. Painting a plate or device tile over itself does "
++        "the same.",
++        brushKeys.c_str());
+ 
+     const std::vector<LevelEditor::LinkGroup> groups = editor.linkGroups();
+     if (selectedLinkGroup_ &&
+@@ -872,6 +892,7 @@ void LevelEditorDebugUi::drawTilePalette(
+     }
+ #else
+     (void)editor;
++    (void)bindings;
+     (void)callbacks;
+ #endif
+ }
+diff --git a/src/engine/LevelEditorDebugUi.hpp b/src/engine/LevelEditorDebugUi.hpp
+index 27595b3..953761b 100755
+--- a/src/engine/LevelEditorDebugUi.hpp
++++ b/src/engine/LevelEditorDebugUi.hpp
+@@ -61,7 +61,10 @@ public:
+ 
+ private:
+     void drawGroundPaintTab(SplatPainter& painter, const Callbacks& callbacks);
+-    void drawTilePalette(LevelEditor& editor, const Callbacks& callbacks);
++    void drawTilePalette(
++        LevelEditor& editor,
++        const InputBindings& bindings,
++        const Callbacks& callbacks);
+     // The two halves of the decoration palette: the mesh library, and the
+     // inspector for whichever decoration is selected.
+     void drawDecorationMeshLibrary(
+diff --git a/src/engine/PlayerProfile.hpp b/src/engine/PlayerProfile.hpp
+index 6af6426..f196db1 100755
+--- a/src/engine/PlayerProfile.hpp
++++ b/src/engine/PlayerProfile.hpp
+@@ -18,7 +18,7 @@ namespace sokoban {
+ // change makes older saves and settings obsolete: SaveStore sets those files
+ // aside and the player starts fresh. Bump this whenever the document shape
+ // or its meaning changes.
+-inline constexpr int currentPlayerProfileFormat = 33;
++inline constexpr int currentPlayerProfileFormat = 34;
+ 
+ // Which top-level sections serialize() writes. Save-slot files carry only
+ // progress and the shared settings file only settings; both sections are
+diff --git a/src/engine/ui/OptionsMenu.cpp b/src/engine/ui/OptionsMenu.cpp
+index 3d95ff1..ef5b74c 100755
+--- a/src/engine/ui/OptionsMenu.cpp
++++ b/src/engine/ui/OptionsMenu.cpp
+@@ -157,6 +157,12 @@ constexpr std::array editorBindingRows {
+         "Eyedropper (hold)",
+         EditorControlsSection::Editing,
+     },
++    EditorBindingRow {
++        OptionsMenuRowId::EditorPaintLinkColor,
++        InputAction::EditorPaintLinkColor,
++        "Paint link color (hold)",
++        EditorControlsSection::Editing,
++    },
+     EditorBindingRow {
+         OptionsMenuRowId::EditorStraightLine,
+         InputAction::EditorStraightLine,
+@@ -464,6 +470,7 @@ std::optional<OptionsAction> activateRow(
+     case OptionsMenuRowId::EditorDeleteTile:
+     case OptionsMenuRowId::EditorMoveTile:
+     case OptionsMenuRowId::EditorPickTile:
++    case OptionsMenuRowId::EditorPaintLinkColor:
+     case OptionsMenuRowId::EditorStraightLine:
+     case OptionsMenuRowId::EditorRedo:
+     case OptionsMenuRowId::EditorSave:
+diff --git a/src/engine/ui/OptionsMenu.hpp b/src/engine/ui/OptionsMenu.hpp
+index 4c6908f..df98c3a 100755
+--- a/src/engine/ui/OptionsMenu.hpp
++++ b/src/engine/ui/OptionsMenu.hpp
+@@ -60,6 +60,7 @@ enum class OptionsMenuRowId {
+     EditorMoveTile,
+     EditorControlsSection,
+     EditorPickTile,
++    EditorPaintLinkColor,
+     EditorStraightLine,
+     EditorRedo,
+     EditorSave,
+diff --git a/tests/EditorInteractionTests.cpp b/tests/EditorInteractionTests.cpp
+index 48eff05..fa199b5 100755
+--- a/tests/EditorInteractionTests.cpp
++++ b/tests/EditorInteractionTests.cpp
+@@ -1,5 +1,6 @@
+ #include "TestHarness.hpp"
+ 
++#include "engine/EditorCursorArt.hpp"
+ #include "engine/EditorInteraction.hpp"
+ 
+ #include <algorithm>
+@@ -162,8 +163,44 @@ void testAxisConstraint()
+ 
+ } // namespace
+ 
++void testEditorToolCursors()
++{
++    TEST("editorToolCursors");
++    namespace art = sokoban::editorCursorArt;
++    const auto check = [](const art::Image& image) {
++        CHECK(image.rgba.size() ==
++            static_cast<std::size_t>(art::size * art::size * 4));
++        // The tip under the hotspot is solid; the opposite corners are
++        // clear, so the cursor is a drawing and not a square.
++        CHECK(image.alphaAt(image.hotspotX, image.hotspotY) == 255);
++        CHECK(image.alphaAt(art::size - 1, art::size - 1) == 0);
++        CHECK(image.alphaAt(0, 0) == 0);
++        // Mostly transparent, with something drawn on it.
++        std::size_t opaque = 0;
++        for (int y = 0; y < art::size; ++y) {
++            for (int x = 0; x < art::size; ++x) {
++                opaque += image.alphaAt(x, y) > 128 ? 1U : 0U;
++            }
++        }
++        CHECK(opaque > 100);
++        CHECK(opaque < static_cast<std::size_t>(art::size * art::size / 2));
++    };
++    check(art::eyedropper());
++    const art::Image brush = art::brush({ 0.2f, 0.4f, 1.0f });
++    check(brush);
++    // The bristles carry the active link color.
++    const std::size_t bristle =
++        static_cast<std::size_t>((25 * art::size + 7) * 4);
++    CHECK(brush.rgba[bristle + 2] > 200);
++    CHECK(brush.rgba[bristle + 0] < 80);
++    const art::Image orange = art::brush({ 1.0f, 0.72f, 0.12f });
++    CHECK(orange.rgba[bristle + 0] > 200);
++    CHECK(orange.rgba[bristle + 2] < 80);
++}
++
+ int main()
+ {
++    testEditorToolCursors();
+     testBrushPreviewTopologyAndCoverage();
+     testEmptyBrushHasNoGeometry();
+     testGizmoTargetsConstantPixelLength();
+diff --git a/tests/InputRouterTests.cpp b/tests/InputRouterTests.cpp
+index c3eb267..8019bad 100755
+--- a/tests/InputRouterTests.cpp
++++ b/tests/InputRouterTests.cpp
+@@ -417,6 +417,15 @@ void testEditorShortcuts()
+     frame = editorFrameAfter({ SDL_SCANCODE_LALT, SDL_SCANCODE_LSHIFT });
+     CHECK(frame.editor.pickModifier);
+     CHECK(frame.editor.lineConstraint);
++    CHECK(!frame.editor.paintLinkColorModifier);
++
++    // Ctrl alone holds the link-color brush, and still takes part in chords.
++    frame = editorFrameAfter({ SDL_SCANCODE_RCTRL });
++    CHECK(frame.editor.paintLinkColorModifier);
++    CHECK(!frame.editor.pickModifier);
++    frame = editorFrameAfter({ SDL_SCANCODE_LCTRL, SDL_SCANCODE_S });
++    CHECK(frame.editor.paintLinkColorModifier);
++    CHECK(frame.editor.savePressed);
+ 
+     // A focused text field owns the keyboard.
+     frame = editorFrameAfter(
+@@ -491,6 +500,9 @@ void testEditorShortcutsFollowRebinding()
+               .editor.recentTileSlot == std::optional<std::size_t> { 2 });
+     CHECK(frameAfter({ SDL_SCANCODE_LCTRL }).editor.pickModifier);
+     CHECK(!frameAfter({ SDL_SCANCODE_LALT }).editor.pickModifier);
++    // Taking Left Ctrl for the eyedropper leaves the brush on Right Ctrl.
++    CHECK(!frameAfter({ SDL_SCANCODE_LCTRL }).editor.paintLinkColorModifier);
++    CHECK(frameAfter({ SDL_SCANCODE_RCTRL }).editor.paintLinkColorModifier);
+ }
+ 
+ void testDraftPlaybackShortcuts()
+diff --git a/tests/LevelEditorTests.cpp b/tests/LevelEditorTests.cpp
+index 5a74473..fb50ea5 100755
+--- a/tests/LevelEditorTests.cpp
++++ b/tests/LevelEditorTests.cpp
+@@ -250,6 +250,33 @@ void testColorGroupsBecomeExplicitLinks()
+     CHECK(loaded.tryUndoEdit());
+     CHECK(loaded.linkedPressurePlates(orange) == Plates { movedPlate });
+ 
++    // The link-color brush recolors whatever linkable tile tops the column,
++    // including a pressure plate beneath a unit, and refuses anything else.
++    loaded.setActiveLinkColor(green);
++    CHECK(loaded.paintLinkColorAt({ secondGate.x, secondGate.y, 0 }));
++    CHECK(loaded.linkColorAt(secondGate) == std::optional<Vec3>(green));
++    CHECK(!loaded.paintLinkColorAt({ secondGate.x, secondGate.y, 0 }));
++    CHECK(!loaded.paintLinkColorAt({ 0, 2, 0 }));
++    CHECK(loaded.setCell({ loose.x, loose.y, loose.z }, TileType::Rock));
++    loaded.setActiveLinkColor(blue);
++    CHECK(loaded.paintLinkColorAt({ loose.x, loose.y, 0 }));
++    CHECK(loaded.linkColorAt(loose) == std::optional<Vec3>(blue));
++    // Locked to the ground layer, only ground is in reach.
++    loaded.setActiveLayer(0);
++    loaded.setLayerLocked(true);
++    CHECK(!loaded.paintLinkColorAt({ secondGate.x, secondGate.y, 0 }));
++    loaded.setLayerLocked(false);
++    // Strokes fold a drag into one undo step.
++    CHECK(loaded.beginStroke());
++    loaded.setActiveLinkColor(orange);
++    CHECK(loaded.paintLinkColorAt({ secondGate.x, secondGate.y, 0 }));
++    CHECK(loaded.paintLinkColorAt({ loose.x, loose.y, 0 }));
++    CHECK(loaded.endStroke());
++    CHECK(loaded.linkColorAt(loose) == std::optional<Vec3>(orange));
++    CHECK(loaded.tryUndoEdit());
++    CHECK(loaded.linkColorAt(secondGate) == std::optional<Vec3>(green));
++    CHECK(loaded.linkColorAt(loose) == std::optional<Vec3>(blue));
++
+     // Alt-click picking a linked tile picks up its color.
+     loaded.setActiveLinkColor(green);
+     CHECK(loaded.pickTile({ rotator.x, rotator.y, 0 }) ==

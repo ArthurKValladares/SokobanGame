@@ -1,6 +1,7 @@
 #include "engine/RenderFrameBuilder.hpp"
 
 #include "engine/AnimationCatalog.hpp"
+#include "engine/ElevatorVisuals.hpp"
 #include "engine/GateEffect.hpp"
 #include "engine/RenderFrameParts.hpp"
 #include "engine/RotatorVisuals.hpp"
@@ -224,8 +225,10 @@ void appendStaticTiles(
                     cell.tile == TileType::Ladder ||
                     cell.tile == TileType::Water ||
                     cell.tile == TileType::Gate ||
-                    tileTypeIsRotator(cell.tile)) {
-                    // Gates and rotators are drawn by their own passes.
+                    tileTypeIsRotator(cell.tile) ||
+                    tileTypeIsElevator(cell.tile)) {
+                    // Gates, rotators and elevator platforms are drawn by
+                    // their own passes.
                     continue;
                 }
                 RenderFrameData::Tile renderTile {
@@ -831,6 +834,44 @@ void appendGameplayWorld(
             },
             static_cast<float>(turning) * (pi * 0.5f) * smoothProgress,
             input.manifest);
+    }
+
+    // Platforms draw where the presentation has them, so they travel with
+    // their riders. The authored cell in the level grid was skipped above.
+    const auto& elevatorVisuals = input.presentation.elevators();
+    for (std::size_t index = 0; index < input.level.elevators().size(); ++index) {
+        const Level::Elevator& elevator = input.level.elevators()[index];
+        const GridPosition3 cell =
+            rules::elevatorPlatformCell(input.level, state, index);
+        const Vec3 position = index < elevatorVisuals.size()
+            ? elevatorVisuals[index].renderPosition
+            : Vec3 {
+                  static_cast<float>(cell.x),
+                  static_cast<float>(cell.y),
+                  static_cast<float>(cell.z),
+              };
+        const GridPosition3 drawnCell {
+            cell.x,
+            cell.y,
+            static_cast<int>(std::lround(position.z)),
+        };
+        if (input.visibleCell && !input.visibleCell(drawnCell)) {
+            continue;
+        }
+        const float brightness =
+            rules::isElevatorEngaged(input.level, state, elevator)
+            ? 1.0f
+            : config::elevatorIdleBrightness;
+        RenderFrameData::Tile platform = elevatorPlatformTile(
+            drawnCell,
+            position,
+            elevatorPlatformColor(elevator.color, brightness),
+            input.manifest.modelForTile(TileType::Elevator));
+        platform.renderableId =
+            resolvedEntityId(EntityKind::Elevator, invalidEntityId, index);
+        // No per-tile scale: scaling the slab would lift its top off the
+        // layer surface it has to be flush with.
+        frame.tiles.push_back(platform);
     }
 
     appendGameplayWaterAndShorelines(frame, input, state);

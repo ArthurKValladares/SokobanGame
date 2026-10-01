@@ -384,6 +384,165 @@ void testRotatorMetadataRoundTripAndValidation()
     }, "before '@layer 0'");
 }
 
+void testElevatorMetadataRoundTripAndValidation()
+{
+    TEST("elevatorMetadataRoundTripAndValidation");
+    const Level::Definition definition {
+        .layers = {
+            { "....=" },
+            { "CP.  " },
+            { "     " },
+            { "     " },
+        },
+        .elevators = { Level::Elevator {
+            .cell = { 4, 0, 0 },
+            .pressurePlates = { { 1, 0, 1 } },
+            .color = { 0.2f, 0.4f, 0.9f },
+            .levels = { 0, 3, 2 },
+        } },
+    };
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition(definition);
+    const auto record = std::ranges::find_if(
+        serialized,
+        [](const std::string& line) { return line.starts_with("@elevator "); });
+    CHECK(record != serialized.end());
+    // Stops keep their authored travel order.
+    CHECK(record != serialized.end() &&
+        record->find("\"levels\":[0,3,2]") != std::string::npos);
+    const Level::Definition parsed =
+        Level::parseDefinition(serialized, "elevator round trip");
+    CHECK(parsed == definition);
+
+    const Level level = Level::loadFromDefinition(parsed, "elevator level");
+    CHECK(tileTypeToChar(TileType::Elevator) == '=');
+    CHECK(charToTileType('=') == TileType::Elevator);
+    CHECK(tileTypeIsElevator(TileType::Elevator));
+    CHECK(tileTypeIsSolidBlock(TileType::Elevator));
+    CHECK(!tileTypeAllowsEntity(TileType::Elevator));
+    CHECK(level.elevators().size() == 1);
+    CHECK(level.elevatorAt({ 4, 0, 0 }) == &level.elevators().front());
+    CHECK(level.elevatorForPressurePlate({ 1, 0, 1 }) ==
+        &level.elevators().front());
+    CHECK(level.elevators().front().startStop() == 0);
+    CHECK(level.pressurePlateLinkColor({ 1, 0, 1 }) ==
+        std::optional<Vec3>(definition.elevators.front().color));
+    // The platform's starting cell supports a unit like any block.
+    CHECK(level.isWalkable({ 4, 0, 1 }));
+
+    const auto loadWith = [](std::vector<int> levels, std::string top) {
+        return [levels = std::move(levels), top = std::move(top)] {
+            (void)Level::loadFromDefinition({
+                .layers = {
+                    { "..=" },
+                    { "CP " },
+                    { std::string(top) },
+                },
+                .elevators = { Level::Elevator {
+                    .cell = { 2, 0, 0 },
+                    .pressurePlates = { { 1, 0, 1 } },
+                    .levels = levels,
+                } },
+            }, "elevator validation");
+        };
+    };
+    checkThrowsContaining(loadWith({ 1, 2 }, "   "), "include the layer");
+    checkThrowsContaining(loadWith({ 0, 3 }, "   "), "existing layers");
+    checkThrowsContaining(loadWith({ 0, 2, 0 }, "   "), "more than once");
+    checkThrowsContaining(loadWith({}, "   "), "at least one stop");
+    checkThrowsContaining(loadWith({ 0, -1 }, "   "), "must not be negative");
+    checkThrowsContaining([] {
+        (void)Level::loadFromDefinition({
+            .layers = { { "..=" }, { "C  " } },
+        }, "elevator missing metadata");
+    }, "requires an '@elevator'");
+    checkThrowsContaining([] {
+        (void)Level::loadFromDefinition({
+            .layers = { { "..." }, { "CP " } },
+            .elevators = { Level::Elevator {
+                .cell = { 2, 0, 0 },
+                .levels = { 0 },
+            } },
+        }, "elevator record without tile");
+    }, "must contain an Elevator tile");
+    checkThrowsContaining([] {
+        (void)Level::loadFromDefinition({
+            .layers = { { "..=" }, { "C. " } },
+            .elevators = { Level::Elevator {
+                .cell = { 2, 0, 0 },
+                .pressurePlates = { { 1, 0, 1 } },
+                .levels = { 0 },
+            } },
+        }, "elevator bad link");
+    }, "Pressure tiles");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            {
+                "@elevator {\"cell\":[2,0,0],\"plates\":[],\"color\":[1,1,1]}",
+                "@layer 0",
+                "..=",
+            },
+            "elevator without levels");
+    }, "'levels'");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            {
+                "@layer 0",
+                "..=",
+                "@elevator {\"cell\":[2,0,0],\"plates\":[],\"color\":[1,1,1],\"levels\":[0]}",
+            },
+            "elevator after layer");
+    }, "before '@layer 0'");
+}
+
+void testEditorLinkColorsRoundTripAndDoNotAffectGameplay()
+{
+    TEST("editorLinkColorsRoundTripAndDoNotAffectGameplay");
+    const Level::Definition definition {
+        .layers = { { "...." }, { "CPPG" } },
+        .gates = { Level::Gate {
+            .cell = { 3, 0, 1 },
+            .pressurePlates = { { 1, 0, 1 } },
+        } },
+        .linkColors = { Level::LinkColor {
+            .cell = { 2, 0, 1 },
+            .color = { 0.1f, 0.9f, 0.2f },
+        } },
+    };
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition(definition);
+    CHECK(std::ranges::count_if(serialized, [](const std::string& line) {
+        return line.starts_with("@linkcolor ");
+    }) == 1);
+    const Level::Definition parsed =
+        Level::parseDefinition(serialized, "link color round trip");
+    CHECK(parsed == definition);
+    // Gameplay reads only the explicit plate list.
+    const Level level = Level::loadFromDefinition(parsed, "link color level");
+    CHECK(level.gateAt({ 3, 0, 1 })->pressurePlates ==
+        (std::vector<GridPosition3> { { 1, 0, 1 } }));
+    CHECK(!level.pressurePlateLinkColor(GridPosition3 { 2, 0, 1 }).has_value());
+
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            {
+                "@linkcolor {\"cell\":[1,0,1],\"color\":[2,0,0]}",
+                "@layer 0",
+                "...",
+            },
+            "bad link color");
+    }, "from zero to one");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            {
+                "@layer 0",
+                "...",
+                "@linkcolor {\"cell\":[1,0,1],\"color\":[1,0,0]}",
+            },
+            "late link color");
+    }, "before '@layer 0'");
+}
+
 void testPlatePropertyAndCoveredPlateRecords()
 {
     TEST("platePropertyAndCoveredPlateRecords");
@@ -783,6 +942,8 @@ int main()
     testSelectorMetadataRoundTripAndLookup();
     testGateMetadataRoundTripAndValidation();
     testRotatorMetadataRoundTripAndValidation();
+    testElevatorMetadataRoundTripAndValidation();
+    testEditorLinkColorsRoundTripAndDoNotAffectGameplay();
     testPlatePropertyAndCoveredPlateRecords();
     testParserRejectsMalformedStructure();
     testLevelValidationErrors();

@@ -190,7 +190,8 @@ and the required real-device checks are recorded.
 
 - Recorded solutions (`engine/Solution.hpp`, `solutions/`) are matched to
   screens by `solution::levelDigest`, which hashes only what gameplay reads:
-  the layers with trailing spaces trimmed, the water layer and the hero.
+  the layers with trailing spaces trimmed, the water layer and the hero (plus
+  rotator, elevator and covered-plate records on screens that have them).
   If gameplay starts reading another part of the definition, add it to the
   digest. A replay applies each input with `solution::Driver` and waits for
   it and every slide, conveyor and enemy reaction to settle before the next
@@ -311,6 +312,48 @@ and the required real-device checks are recorded.
   mirrors never move. Rules read a mirror's current orientation through
   `rules::mirrorTileAt`. The solver heuristic still uses authored mirror
   orientations; that only affects search ordering.
+- Pressure-plate links are authored by color, and only in the editor.
+  `LevelEditor` keeps a color for every pressure plate
+  (`Document::plateColors`) and device; a device is linked to the plates of
+  its color (`linkGroups`, `linkedPressurePlates`, compared as 8-bit RGB).
+  Editor device records keep empty `pressurePlates`; `linkedDefinition` is
+  the single place colors become explicit lists, for saving, drafts and
+  `documentToLevel`. Loading derives colors from the explicit lists
+  (`colorLinks`), recoloring legacy groups so links survive a save.
+  `Level::LinkColor` (`@linkcolor`) stores only the colors of plates that
+  drive nothing and is never read by gameplay, the solver or solution
+  digests. Gameplay, rules and rendering must keep using the explicit
+  `pressurePlates` lists, never color comparisons.
+- The level editor's tool cursors (eyedropper while Pick Tile is held, a
+  brush tinted with the active link color while Paint Link Color is held)
+  are drawn in code (`EditorCursorArt.hpp`) and owned by `ApplicationTools`.
+  `updateEditorInteraction` records which one the pointer wants;
+  `Application::update` applies it once a frame, before any early return, so
+  menus, modals and the fly camera restore the system cursor.
+- Elevators (`Level::Elevator`, tile `=`) keep their platforms in
+  `GameState::elevators`: one entry per level record, in record order, holding
+  the platform cell and cycle phase (`rules::elevatorStopIndex`/
+  `elevatorNextPhase`). Activation uses the rotator edge rule and resolves in
+  `MicroStepResolver::resolveElevators` after rotators, and in mirror
+  activation. Rules that ask about static solidity or support around a
+  platform must use `rules::liveTileAt`/`cellAllowsEntity`, never
+  `Level::tileAt`, because the authored cell is open shaft once the platform
+  leaves. A move is all or nothing; a blocked shaft drops the press. Carried
+  units join the closure and count as moved for turrets and attacks.
+  `StateDelta::elevators` carries platform changes by index, the solver key
+  appends them only when present, the profile writes `elevators` only when
+  non-empty (no format bump), and solution digests hash elevator records only
+  for screens that have them. Reservations claim a moving platform's whole
+  shaft (`addElevatorReservations`). Presentation animates platforms as
+  `EntityKind::Elevator` motion tracks; a leg in which a platform moves runs
+  longer by its travel time (`config::elevatorSecondsPerLayerPerStep`), riders
+  walk first and then ride, and `GameplaySession` takes the longer timeline as
+  the action duration. Platform drawing keeps the model's top flush with the
+  top of its layer (`ElevatorVisuals.hpp`); do not apply per-tile scale to it.
+- The content pipeline accepts `KHR_texture_transform` only when it is an
+  identity (the Kenney kits attach one naming just the texture coordinate set
+  in use). Any real offset, scale, rotation or texcoord override is still
+  rejected until MeshMaterial represents UV transforms.
 - Starting a new game on a selected slot is one dependent shell command. The
   start action runs only after the slot switch commits successfully; a switch
   failure preserves the current profile and title error state.

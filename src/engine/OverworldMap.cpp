@@ -657,6 +657,14 @@ void OverworldMap::composeScreenGrid(
             }
             composed.rotators.push_back(std::move(translated));
         }
+        for (const Level::Elevator& authored : screen.definition.elevators) {
+            Level::Elevator translated = authored;
+            translated.cell = translate(screen, authored.cell);
+            for (GridPosition3& plate : translated.pressurePlates) {
+                plate = translate(screen, plate);
+            }
+            composed.elevators.push_back(std::move(translated));
+        }
         for (const Level::Plate& authored : screen.definition.plates) {
             composed.plates.push_back({
                 .cell = translate(screen, authored.cell),
