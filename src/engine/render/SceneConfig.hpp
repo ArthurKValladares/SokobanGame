@@ -22,7 +22,9 @@ inline constexpr float linkedObjectAuraWispStrength = 0.42f;
 // Per-tile render scales live in assets/manifest.json (tile entries).
 inline constexpr float conveyorTileHeight = 0.12f;
 
-inline constexpr float iceTintAlpha = 0.38f;
+// Multiplies the glass model's own authored 0.5 BLEND alpha, so 1.0 here is
+// a half-opaque block over the blurred scene behind it.
+inline constexpr float iceTintAlpha = 1.0f;
 inline constexpr float iceBlurRadiusPixels = 3.0f;
 
 inline constexpr Vec4 tileGridLineColor { 0.26f, 0.27f, 0.29f, 0.42f };

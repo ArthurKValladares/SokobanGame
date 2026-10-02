@@ -1385,6 +1385,20 @@ void appendGameplayEntities(
         const Vec2 turretRecoil = tileTypeIsTurret(movable.type)
             ? input.presentation.turretRecoilOffset(visual.target.id)
             : Vec2 {};
+        // Only a rotator plate's turn is animated. A portal crossing also
+        // changes quarterTurns, but that turn belongs to the moment the
+        // object passes through; animating it against turnProgress (which
+        // restarts every leg of a slide) spun the object the whole way.
+        const bool turnedByRotator =
+            movableIndex < input.projectedState.movables.size() &&
+            tileTypeIsRotator(
+                input.level
+                    .plateAt(input.projectedState.movables[movableIndex].cell)
+                    .value_or(TileType::Air));
+        const int animatedQuarterTurns = turnedByRotator
+            ? quarterTurnDeltaAt(
+                  state.movables, input.projectedState.movables, movableIndex)
+            : 0;
         RenderFrameData::Tile movableTile {
             .cell = movable.cell,
             .position = {
@@ -1404,10 +1418,7 @@ void appendGameplayEntities(
                 ? facingQuarterTurns(*rules::turretDirection(movable))
                 : static_cast<uint32_t>(movable.quarterTurns),
             .modelRotationOffsetRadians =
-                static_cast<float>(quarterTurnDeltaAt(
-                    state.movables,
-                    input.projectedState.movables,
-                    movableIndex)) *
+                static_cast<float>(animatedQuarterTurns) *
                 quarterTurnRadians * turnProgress,
         };
         applyTileScale(
