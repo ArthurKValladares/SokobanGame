@@ -1284,6 +1284,11 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/GltfDependencyTests.cpp
     )
+    sokoban_add_test(NAME minecart_assets
+        LIBS sokoban_core
+        ASSETS_ENV
+        SOURCES tests/MinecartAssetTests.cpp
+    )
     sokoban_add_test(NAME runtime_texture_catalog
         LIBS sokoban_core
         ASSET_DIR

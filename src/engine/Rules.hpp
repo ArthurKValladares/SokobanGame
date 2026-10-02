@@ -112,11 +112,22 @@ struct GameState {
         bool operator==(const Elevator&) const = default;
     };
 
+    // Current stop of each Level::minecarts() record, in the same order.
+    struct Minecart {
+        GridPosition3 cell {};
+        // Open routes use a back-and-forth phase; loops use a wrapping stop
+        // index. uint16 leaves ample room for authored board-sized routes.
+        uint16_t phase = 0;
+
+        bool operator==(const Minecart&) const = default;
+    };
+
     std::vector<Player> players;
     std::vector<Movable> movables;
     std::vector<Enemy> enemies;
     std::vector<TurnedMirror> turnedMirrors;
     std::vector<Elevator> elevators;
+    std::vector<Minecart> minecarts;
 
     bool operator==(const GameState&) const = default;
 };
@@ -217,10 +228,18 @@ void setMirrorQuarterTurns(
 // The elevator whose platform currently occupies `cell`, if any.
 [[nodiscard]] std::optional<std::size_t> elevatorPlatformAt(
     const Level& level, const GameState& state, GridPosition3 cell);
+[[nodiscard]] std::size_t minecartStopIndex(
+    const Level::MinecartRoute& route, uint16_t phase);
+[[nodiscard]] uint16_t minecartNextPhase(
+    const Level::MinecartRoute& route, uint16_t phase);
+[[nodiscard]] GridPosition3 minecartPlatformCell(
+    const Level& level, const GameState& state, std::size_t index);
+[[nodiscard]] std::optional<std::size_t> minecartPlatformAt(
+    const Level& level, const GameState& state, GridPosition3 cell);
 // The static tile at `position` as the live board has it. Equal to
-// Level::tileAt except around elevators: an elevator's authored cell is open
-// shaft while its platform rests elsewhere, and the cell the platform rests in
-// reads as a solid Elevator block.
+// Level::tileAt except around moving platforms: an elevator's authored cell is
+// open shaft while it rests elsewhere, and a minecart's authored cell reveals
+// its covered stop after it leaves. A live platform cell reads as solid.
 [[nodiscard]] TileType liveTileAt(
     const Level& level, const GameState& state, GridPosition3 position);
 
@@ -232,14 +251,14 @@ void setMirrorQuarterTurns(
 
 // A cell entities may occupy, ignoring movables. The plane directly above the
 // top layer (z == depth) is intentionally allowed so entities can stand on
-// top-layer blocks. Gates and elevator cells are treated as potentially
-// passable so static solver estimates remain admissible; gameplay movement
-// uses cellAllowsEntity.
+// top-layer blocks. Gates and moving-platform cells are treated as potentially
+// passable so static solver estimates remain admissible; gameplay movement uses
+// cellAllowsEntity.
 [[nodiscard]] bool staticCellAllowsEntity(const Level& level, GridPosition3 position);
 // State-aware static collision. A Gate cell allows entry only while every
 // pressure plate linked by its authored gate record has a live occupant. An
-// elevator platform blocks the cell it currently rests in, and an elevator's
-// authored cell is open while its platform is elsewhere.
+// A moving platform blocks the cell it currently rests in; its authored cell
+// is open, or reveals its covered rail stop, while it is elsewhere.
 [[nodiscard]] bool cellAllowsEntity(
     const Level& level,
     const GameState& state,
@@ -277,6 +296,10 @@ void setMirrorQuarterTurns(
     const Level& level,
     const GameState& state,
     const Level::Elevator& elevator);
+[[nodiscard]] bool isMinecartEngaged(
+    const Level& level,
+    const GameState& state,
+    const Level::Minecart& minecart);
 // Kept as a compatibility query for debug/presentation callers. End tiles no
 // longer have a locked state, so this always returns true.
 [[nodiscard]] bool isEndUnlocked(const Level& level, const GameState& state);

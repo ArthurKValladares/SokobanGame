@@ -528,6 +528,67 @@ void testElevatorStopsPersistAndFollowEditorCommands()
     CHECK(loaded.elevators() == editor.elevators());
 }
 
+void testMinecartRequiresStopAndPersistsRouteDirection()
+{
+    TEST("minecartRequiresStopAndPersistsRouteDirection");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(7, 3, false);
+
+    const GridPosition3 plate { 1, 1, 1 };
+    const GridPosition3 start { 3, 1, 1 };
+    const GridPosition3 destination { 5, 1, 1 };
+    CHECK(editor.setCell(plate, TileType::PressurePlate));
+    CHECK(!editor.setCell(start, TileType::Minecart));
+    CHECK(editor.setCell(start, TileType::RailStopEastWest));
+    CHECK(editor.setCell(start, TileType::Minecart));
+    CHECK(editor.minecarts().size() == 1);
+    CHECK(editor.documentPlateAt(start) == TileType::RailStopEastWest);
+    CHECK(editor.minecarts()[0].initialDirection == 1);
+    CHECK(editor.setMinecartInitialDirection(0, 3));
+    CHECK(!editor.setMinecartInitialDirection(0, 0));
+    CHECK(editor.minecarts()[0].initialDirection == 3);
+    const Vec3 color = editor.minecarts()[0].color;
+    CHECK(editor.linkedPressurePlates(color) == Plates { plate });
+
+    CHECK(editor.setCell({ 4, 1, 1 }, TileType::RailStraightEastWest));
+    CHECK(editor.setCell(destination, TileType::RailStopEastWest));
+    CHECK(editor.beginMove(start));
+    CHECK(editor.moveObject(destination));
+    CHECK(editor.minecarts()[0].cell == destination);
+    CHECK(editor.minecarts()[0].initialDirection == 3);
+    CHECK(editor.minecarts()[0].color == color);
+    CHECK(editor.documentPlateAt(start) == TileType::RailStopEastWest);
+    CHECK(editor.documentPlateAt(destination) == TileType::RailStopEastWest);
+
+    const Level level = editor.documentToLevel();
+    CHECK(level.minecartAt(destination) != nullptr);
+    CHECK(level.minecartAt(destination)->pressurePlates == Plates { plate });
+
+    const std::filesystem::path path =
+        project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(path));
+    LevelEditor loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(path, false));
+    CHECK(loaded.minecarts() == editor.minecarts());
+
+    // Moving onto a differently oriented stop keeps the cart record but
+    // chooses a valid exit for the new rail orientation.
+    const GridPosition3 verticalDestination { 5, 2, 1 };
+    CHECK(loaded.setCell(verticalDestination, TileType::RailStopNorthSouth));
+    CHECK(loaded.beginMove(destination));
+    CHECK(loaded.moveObject(verticalDestination));
+    CHECK(loaded.minecarts()[0].cell == verticalDestination);
+    CHECK(loaded.minecarts()[0].initialDirection == 0);
+    CHECK(loaded.documentToLevel().minecartAt(verticalDestination) != nullptr);
+
+    // Replacing the stop beneath the cart replaces the whole invalid stack,
+    // so an editor document can never retain a cart without a stop.
+    CHECK(loaded.setCell(verticalDestination, TileType::PressurePlate));
+    CHECK(loaded.minecarts().empty());
+    CHECK(loaded.documentPlateAt(verticalDestination) == TileType::PressurePlate);
+}
+
 void testTileValidationAndMultipleHeroPlacement()
 {
     TEST("tileValidationAndMultipleHeroPlacement");
@@ -2156,6 +2217,7 @@ int main()
     testColorGroupsBecomeExplicitLinks();
     testExplicitLinksBecomeColorGroupsOnLoad();
     testElevatorStopsPersistAndFollowEditorCommands();
+    testMinecartRequiresStopAndPersistsRouteDirection();
     testUnitsAndMirrorsStackOnPlates();
     testTileValidationAndMultipleHeroPlacement();
     testAddLayerBelowShiftsContentAndWaterAndIsUndoable();

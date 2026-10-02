@@ -104,6 +104,15 @@ PackedStateKey makePackedStateKey(
                 elevator.cell.z, static_cast<std::uint32_t>(elevator.phase)));
         }
     }
+    if (!state.minecarts.empty()) {
+        words.push_back(0xCA471702U);
+        words.push_back(state.minecarts.size());
+        for (const GameState::Minecart& minecart : state.minecarts) {
+            words.push_back(packPair(minecart.cell.x, minecart.cell.y));
+            words.push_back(packZAndFlags(
+                minecart.cell.z, static_cast<std::uint32_t>(minecart.phase)));
+        }
+    }
     return PackedStateKey(std::move(words));
 }
 

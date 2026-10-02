@@ -79,7 +79,8 @@ bool onlyPlayersMoved(const GameState& before, const GameState& after)
     return before.movables == after.movables &&
         before.enemies == after.enemies &&
         before.turnedMirrors == after.turnedMirrors &&
-        before.elevators == after.elevators;
+        before.elevators == after.elevators &&
+        before.minecarts == after.minecarts;
 }
 
 struct DirectionTransition {

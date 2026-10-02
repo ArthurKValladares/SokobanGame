@@ -624,6 +624,26 @@
       "preserveSourceScale": true
     },
     {
+      "name": "MinecartRailStraight",
+      "path": "custom/models/minecart_rail_straight.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "MinecartRailStop",
+      "path": "custom/models/minecart_rail_stop.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "MinecartRailCorner",
+      "path": "custom/models/minecart_rail_corner.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "MinecartHandcar",
+      "path": "custom/models/minecart_handcar.glb",
+      "preserveSourceScale": true
+    },
+    {
       "name": "ElevatorPlatform",
       "path": "Kenney Platformer Kit/Models/GLB format/platform.glb"
     }
@@ -762,6 +782,42 @@
     {
       "tile": "Elevator",
       "model": "ElevatorPlatform"
+    },
+    {
+      "tile": "Rail Straight North-South",
+      "model": "MinecartRailStraight"
+    },
+    {
+      "tile": "Rail Straight East-West",
+      "model": "MinecartRailStraight"
+    },
+    {
+      "tile": "Rail Corner North-East",
+      "model": "MinecartRailCorner"
+    },
+    {
+      "tile": "Rail Corner South-East",
+      "model": "MinecartRailCorner"
+    },
+    {
+      "tile": "Rail Corner South-West",
+      "model": "MinecartRailCorner"
+    },
+    {
+      "tile": "Rail Corner North-West",
+      "model": "MinecartRailCorner"
+    },
+    {
+      "tile": "Rail Stop North-South",
+      "model": "MinecartRailStop"
+    },
+    {
+      "tile": "Rail Stop East-West",
+      "model": "MinecartRailStop"
+    },
+    {
+      "tile": "Minecart",
+      "model": "MinecartHandcar"
     }
   ],
   "sounds": [

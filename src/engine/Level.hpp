@@ -68,6 +68,31 @@ public:
         bool operator==(const Elevator&) const = default;
     };
 
+    // A minecart's authored start and pressure links. `initialDirection` is
+    // 0/1/2/3 for north/east/south/west and chooses which side of its start
+    // stop the active route follows. Open tracks ping-pong on that side;
+    // closed tracks keep circling in that orientation.
+    struct Minecart {
+        GridPosition3 cell {};
+        std::vector<GridPosition3> pressurePlates;
+        Vec3 color { 0.86f, 0.54f, 0.18f };
+        uint8_t initialDirection = 0;
+
+        bool operator==(const Minecart&) const = default;
+    };
+
+    // Runtime route derived from the oriented rail tiles. Cells are ordered
+    // from the cart's start along its selected direction; stops are a subset
+    // in that same order and always begin with the starting stop.
+    struct MinecartRoute {
+        std::vector<GridPosition3> cells;
+        std::vector<GridPosition3> stops;
+        std::vector<std::size_t> stopCellIndices;
+        bool loop = false;
+
+        bool operator==(const MinecartRoute&) const = default;
+    };
+
     // A plate (see TileProperty::Plate) authored underneath something already
     // standing on it: the layer grid holds the occupant, this record the
     // plate. Plates with nothing on them stay in the grid as usual.
@@ -163,6 +188,7 @@ public:
         std::vector<Rotator> rotators;
         std::vector<Plate> plates;
         std::vector<Elevator> elevators;
+        std::vector<Minecart> minecarts;
         // Editor-only (see LinkColor); Level::loadFromDefinition ignores it.
         std::vector<LinkColor> linkColors;
         // Missing only for backwards-compatible legacy documents. Runtime
@@ -199,7 +225,8 @@ public:
         const std::vector<Rotator>& rotators = {},
         const std::vector<Plate>& plates = {},
         CharacterType selectedCharacter = CharacterType::Rogue,
-        const std::vector<Elevator>& elevators = {});
+        const std::vector<Elevator>& elevators = {},
+        const std::vector<Minecart>& minecarts = {});
     [[nodiscard]] static Definition parseDefinition(
         const std::vector<std::string>& lines,
         std::string_view sourceName);
@@ -230,6 +257,13 @@ public:
     // The elevator authored at `cell` (its starting cell), if any.
     [[nodiscard]] const Elevator* elevatorAt(GridPosition3 cell) const;
     [[nodiscard]] const Elevator* elevatorForPressurePlate(GridPosition3 cell) const;
+    [[nodiscard]] const std::vector<Minecart>& minecarts() const { return minecarts_; }
+    [[nodiscard]] const std::vector<MinecartRoute>& minecartRoutes() const
+    {
+        return minecartRoutes_;
+    }
+    [[nodiscard]] const Minecart* minecartAt(GridPosition3 cell) const;
+    [[nodiscard]] const Minecart* minecartForPressurePlate(GridPosition3 cell) const;
     // The color a pressure plate takes from the gate, rotator or elevator it
     // drives, in that order of precedence. Empty for unlinked plates.
     [[nodiscard]] std::optional<Vec3> pressurePlateLinkColor(GridPosition3 cell) const;
@@ -264,6 +298,8 @@ private:
     std::vector<Gate> gates_;
     std::vector<Rotator> rotators_;
     std::vector<Elevator> elevators_;
+    std::vector<Minecart> minecarts_;
+    std::vector<MinecartRoute> minecartRoutes_;
     std::vector<Plate> coveredPlates_;
     std::vector<GridPosition3> ends_;
     std::vector<TileType> tiles_;

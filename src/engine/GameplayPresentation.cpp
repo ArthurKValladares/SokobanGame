@@ -74,21 +74,80 @@ EntityTarget elevatorTarget(std::size_t index)
     };
 }
 
-// An elevator platform that moved during one action leg.
+EntityTarget minecartTarget(std::size_t index)
+{
+    return {
+        EntityKind::Minecart,
+        resolvedEntityId(EntityKind::Minecart, invalidEntityId, index),
+    };
+}
+
+// A moving platform that changed stops during one action leg.
 struct ElevatorMove {
+    EntityKind kind = EntityKind::Elevator;
     std::size_t index = 0;
     GridPosition3 from {};
     GridPosition3 to {};
     // When it sets off, and how long it travels, within the leg.
     float startSeconds = 0.0f;
     float durationSeconds = 0.0f;
+    // Minecarts follow every rail cell between stops. Elevators leave this
+    // empty and use their ordinary straight vertical interpolation.
+    std::vector<GridPosition3> path;
 };
+
+std::vector<GridPosition3> minecartPath(
+    const Level& level,
+    std::size_t index,
+    const GameState::Minecart& before,
+    const GameState::Minecart& after)
+{
+    if (index >= level.minecartRoutes().size()) {
+        return { before.cell, after.cell };
+    }
+    const Level::MinecartRoute& route = level.minecartRoutes()[index];
+    const std::size_t fromStop = rules::minecartStopIndex(route, before.phase);
+    const std::size_t toStop = rules::minecartStopIndex(route, after.phase);
+    if (fromStop >= route.stopCellIndices.size() ||
+        toStop >= route.stopCellIndices.size() || route.cells.empty() ||
+        route.stops[fromStop] != before.cell ||
+        route.stops[toStop] != after.cell) {
+        return { before.cell, after.cell };
+    }
+
+    std::vector<GridPosition3> path { before.cell };
+    const std::size_t from = route.stopCellIndices[fromStop];
+    const std::size_t to = route.stopCellIndices[toStop];
+    if (to > from) {
+        path.insert(
+            path.end(),
+            route.cells.begin() + static_cast<std::ptrdiff_t>(from + 1),
+            route.cells.begin() + static_cast<std::ptrdiff_t>(to + 1));
+    } else if (route.loop && fromStop + 1 == route.stops.size() &&
+               toStop == 0) {
+        path.insert(
+            path.end(),
+            route.cells.begin() + static_cast<std::ptrdiff_t>(from + 1),
+            route.cells.end());
+        path.push_back(route.cells.front());
+    } else {
+        for (std::size_t cell = from; cell > to; --cell) {
+            path.push_back(route.cells[cell - 1]);
+        }
+    }
+    return path.back() == after.cell
+        ? path
+        : std::vector<GridPosition3> { before.cell, after.cell };
+}
 
 // Platforms move once the leg's own movement has settled (the rules decide
 // activation from where units end up), so their travel follows the leg's
 // walking time, `stepSeconds`, instead of being squeezed into it.
-std::vector<ElevatorMove> elevatorMoves(
-    const GameState& before, const GameState& after, float stepSeconds)
+std::vector<ElevatorMove> platformMoves(
+    const GameState& before,
+    const GameState& after,
+    float stepSeconds,
+    const Level* level)
 {
     std::vector<ElevatorMove> moves;
     const std::size_t count =
@@ -100,6 +159,7 @@ std::vector<ElevatorMove> elevatorMoves(
             continue;
         }
         moves.push_back({
+            .kind = EntityKind::Elevator,
             .index = index,
             .from = from,
             .to = to,
@@ -109,11 +169,86 @@ std::vector<ElevatorMove> elevatorMoves(
                 static_cast<float>(std::abs(to.z - from.z)),
         });
     }
+    const std::size_t minecartCount =
+        std::min(before.minecarts.size(), after.minecarts.size());
+    for (std::size_t index = 0; index < minecartCount; ++index) {
+        const GridPosition3 from = before.minecarts[index].cell;
+        const GridPosition3 to = after.minecarts[index].cell;
+        if (from == to) {
+            continue;
+        }
+        std::vector<GridPosition3> path = level != nullptr
+            ? minecartPath(
+                  *level, index, before.minecarts[index], after.minecarts[index])
+            : std::vector<GridPosition3> { from, to };
+        std::size_t distance = 0;
+        for (std::size_t cell = 1; cell < path.size(); ++cell) {
+            distance += static_cast<std::size_t>(
+                std::abs(path[cell].x - path[cell - 1].x) +
+                std::abs(path[cell].y - path[cell - 1].y) +
+                std::abs(path[cell].z - path[cell - 1].z));
+        }
+        moves.push_back({
+            .kind = EntityKind::Minecart,
+            .index = index,
+            .from = from,
+            .to = to,
+            .startSeconds = stepSeconds,
+            .durationSeconds = stepSeconds *
+                config::elevatorSecondsPerLayerPerStep *
+                static_cast<float>(distance),
+            .path = std::move(path),
+        });
+    }
     return moves;
 }
 
+void addPlatformPathMotion(
+    PresentationTransactionBuilder& builder,
+    EntityTarget target,
+    const ElevatorMove& move,
+    Vec3 from,
+    Vec3 to)
+{
+    if (move.path.size() < 2) {
+        builder.addMotion({
+            .target = target,
+            .from = from,
+            .to = to,
+            .startSeconds = move.startSeconds,
+            .durationSeconds = move.durationSeconds,
+        });
+        return;
+    }
+
+    const Vec3 offset {
+        from.x - static_cast<float>(move.from.x),
+        from.y - static_cast<float>(move.from.y),
+        from.z - static_cast<float>(move.from.z),
+    };
+    const float segmentSeconds = move.durationSeconds /
+        static_cast<float>(move.path.size() - 1);
+    for (std::size_t segment = 1; segment < move.path.size(); ++segment) {
+        Vec3 segmentFrom = toVec3(move.path[segment - 1]);
+        Vec3 segmentTo = toVec3(move.path[segment]);
+        segmentFrom = segmentFrom + offset;
+        segmentTo = segmentTo + offset;
+        if (segment + 1 == move.path.size()) {
+            segmentTo = to;
+        }
+        builder.addMotion({
+            .target = target,
+            .from = segmentFrom,
+            .to = segmentTo,
+            .startSeconds = move.startSeconds +
+                segmentSeconds * static_cast<float>(segment - 1),
+            .durationSeconds = segmentSeconds,
+        });
+    }
+}
+
 // How much longer than its walking time a leg runs while platforms travel.
-float elevatorExtraSeconds(const std::vector<ElevatorMove>& moves)
+float platformExtraSeconds(const std::vector<ElevatorMove>& moves)
 {
     float extra = 0.0f;
     for (const ElevatorMove& move : moves) {
@@ -123,8 +258,9 @@ float elevatorExtraSeconds(const std::vector<ElevatorMove>& moves)
 }
 
 // The platform that carried a unit ending the leg in `after`, if one did: the
-// unit is in the platform's column, in the stack above where it arrived, and
-// its cell changed. Riders always move with their platform.
+// unit is in the platform's column, either on a minecart in the same cell or
+// in the stack above where it arrived, and its cell changed. Riders always
+// move with their platform.
 const ElevatorMove* rideOf(
     const std::vector<ElevatorMove>& moves,
     GridPosition3 before,
@@ -134,8 +270,18 @@ const ElevatorMove* rideOf(
         return nullptr;
     }
     for (const ElevatorMove& move : moves) {
-        if (after.x == move.to.x && after.y == move.to.y &&
-            after.z > move.to.z) {
+        const GridPosition3 delta {
+            move.to.x - move.from.x,
+            move.to.y - move.from.y,
+            move.to.z - move.from.z,
+        };
+        const GridPosition3 boarded {
+            after.x - delta.x,
+            after.y - delta.y,
+            after.z - delta.z,
+        };
+        if (boarded.x == move.from.x && boarded.y == move.from.y &&
+            boarded.z >= move.from.z) {
             return &move;
         }
     }
@@ -145,7 +291,11 @@ const ElevatorMove* rideOf(
 // Where a rider boarded: its final cell, before the platform carried it.
 GridPosition3 boardingCell(const ElevatorMove& move, GridPosition3 after)
 {
-    return { after.x, after.y, after.z - (move.to.z - move.from.z) };
+    return {
+        after.x - (move.to.x - move.from.x),
+        after.y - (move.to.y - move.from.y),
+        after.z - (move.to.z - move.from.z),
+    };
 }
 
 AnimationUse playerRestAnimation(const GameState::Player& player)
@@ -249,6 +399,7 @@ void GameplayPresentation::resetEntities(const GameState& state)
     movables_.clear();
     enemies_.clear();
     elevators_.clear();
+    minecarts_.clear();
     turretRecoils_.clear();
     syncToGameState(state);
 }
@@ -407,10 +558,11 @@ void GameplayPresentation::advanceAnimations(float dt, const GameState& state)
 
 ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     const GameplaySession::Action& action,
-    const std::vector<GameState>& legs) const
+    const std::vector<GameState>& legs,
+    const Level* level) const
 {
     if (legs.size() <= 1) {
-        return buildActionPresentation(action);
+        return buildActionPresentation(action, level);
     }
 
     // A chained slide is one action spanning several world steps. Interpolating
@@ -431,11 +583,11 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     // are momentum spending itself out; carrying either flag through would
     // play an effort animation for the whole length of a slide.
     //
-    // A leg in which an elevator moves runs longer by the platform's travel
+    // A leg in which a platform moves runs longer by its travel
     // time, and every later leg starts that much later.
     ActionPresentationTimeline timeline;
     float legStart = 0.0f;
-    float elevatorSeconds = 0.0f;
+    float platformSeconds = 0.0f;
     for (std::size_t leg = 0; leg < legs.size(); ++leg) {
         GameplaySession::Action legAction = action;
         legAction.before = leg == 0 ? action.before : legs[leg - 1];
@@ -446,26 +598,28 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
 
         timeline = concatenateTimelines(
             std::move(timeline),
-            buildActionPresentation(legAction),
+            buildActionPresentation(legAction, level),
             legStart);
-        const float extra = elevatorExtraSeconds(
-            elevatorMoves(legAction.before, legAction.after, stepDuration));
-        elevatorSeconds += extra;
+        const float extra = platformExtraSeconds(
+            platformMoves(
+                legAction.before, legAction.after, stepDuration, level));
+        platformSeconds += extra;
         legStart += stepDuration + extra;
     }
     // The action's own duration is authoritative: rounding across legs must not
-    // shorten or stretch it. Only elevator travel lengthens it.
-    timeline.durationSeconds = action.durationSeconds + elevatorSeconds;
+    // shorten or stretch it. Only platform travel lengthens it.
+    timeline.durationSeconds = action.durationSeconds + platformSeconds;
     return timeline;
 }
 
 ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
-    const GameplaySession::Action& action) const
+    const GameplaySession::Action& action,
+    const Level* level) const
 {
     PresentationTransactionBuilder builder(animationCatalog_);
     const float motionDuration = std::max(action.durationSeconds, 0.0f);
     const std::vector<ElevatorMove> elevators =
-        elevatorMoves(action.before, action.after, motionDuration);
+        platformMoves(action.before, action.after, motionDuration, level);
     // Carries `target` from its boarding cell to `after` once its platform
     // sets off; returns the cell the ordinary motion should end at.
     const auto addRide = [&](EntityTarget target,
@@ -477,13 +631,12 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
             return after;
         }
         const GridPosition3 boarded = boardingCell(*ride, after);
-        builder.addMotion({
-            .target = target,
-            .from = movableRenderTarget(boarded, fallen),
-            .to = movableRenderTarget(after, fallen),
-            .startSeconds = ride->startSeconds,
-            .durationSeconds = ride->durationSeconds,
-        });
+        addPlatformPathMotion(
+            builder,
+            target,
+            *ride,
+            movableRenderTarget(boarded, fallen),
+            movableRenderTarget(after, fallen));
         return boarded;
     };
 
@@ -509,7 +662,7 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
             target,
             playerRestAnimation(before),
             initialClipTime);
-        // A hero an elevator carries walks (if it did) to where it boarded,
+        // A hero a platform carries walks (if it did) to where it boarded,
         // then rides standing still.
         const ElevatorMove* ride = rideOf(elevators, before.cell, after.cell);
         const GridPosition3 walkedTo =
@@ -517,13 +670,12 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
         const Vec3 from = playerRenderTarget(before.cell, before.drowned);
         const Vec3 to = playerRenderTarget(walkedTo, after.drowned);
         if (ride != nullptr) {
-            builder.addMotion({
-                .target = target,
-                .from = to,
-                .to = playerRenderTarget(after.cell, after.drowned),
-                .startSeconds = ride->startSeconds,
-                .durationSeconds = ride->durationSeconds,
-            });
+            addPlatformPathMotion(
+                builder,
+                target,
+                *ride,
+                to,
+                playerRenderTarget(after.cell, after.drowned));
         }
         if (gridDistance(from, to) > 0.0001f) {
             const AnimationUse movementUse = action.playerPulling
@@ -572,13 +724,14 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     }
 
     for (const ElevatorMove& move : elevators) {
-        builder.addMotion({
-            .target = elevatorTarget(move.index),
-            .from = toVec3(move.from),
-            .to = toVec3(move.to),
-            .startSeconds = move.startSeconds,
-            .durationSeconds = move.durationSeconds,
-        });
+        addPlatformPathMotion(
+            builder,
+            move.kind == EntityKind::Minecart
+                ? minecartTarget(move.index)
+                : elevatorTarget(move.index),
+            move,
+            toVec3(move.from),
+            toVec3(move.to));
     }
 
     using IntentId = PresentationTransactionBuilder::AnimationIntentId;
@@ -710,15 +863,14 @@ void GameplayPresentation::beginAction(
         const std::size_t playerCount = std::min(
             action.before.players.size(), action.after.players.size());
         for (std::size_t index = 0; index < playerCount; ++index) {
-            // A hero only carried by an elevator did not walk anywhere.
+            // A hero only carried by a platform did not walk anywhere.
             const GridPosition3 before = action.before.players[index].cell;
             const GridPosition3 after = action.after.players[index].cell;
             if (before == after ||
-                (before.x == after.x && before.y == after.y &&
-                    rideOf(
-                        elevatorMoves(action.before, action.after, 0.0f),
-                        before,
-                        after) != nullptr)) {
+                rideOf(
+                    platformMoves(action.before, action.after, 0.0f, nullptr),
+                    before,
+                    after) != nullptr) {
                 continue;
             }
             const EntityId controller =
@@ -1045,6 +1197,12 @@ void GameplayPresentation::syncToGameState(const GameState& state)
         setImmediatePosition(
             elevators_[index], toVec3(state.elevators[index].cell));
     }
+    minecarts_.resize(state.minecarts.size());
+    for (std::size_t index = 0; index < state.minecarts.size(); ++index) {
+        minecarts_[index].target = minecartTarget(index);
+        setImmediatePosition(
+            minecarts_[index], toVec3(state.minecarts[index].cell));
+    }
 }
 
 float GameplayPresentation::conveyorBeltScrollOffset(
@@ -1091,6 +1249,11 @@ GameplayPresentation::EntityVisual* GameplayPresentation::findMotionVisual(
         const auto found = std::ranges::find(
             elevators_, target, &EntityVisual::target);
         return found == elevators_.end() ? nullptr : &*found;
+    }
+    if (target.kind == EntityKind::Minecart) {
+        const auto found = std::ranges::find(
+            minecarts_, target, &EntityVisual::target);
+        return found == minecarts_.end() ? nullptr : &*found;
     }
     const auto found = std::ranges::find_if(
         enemies_,

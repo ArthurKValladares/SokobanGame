@@ -184,6 +184,57 @@ void addElevatorReservations(
     }
 }
 
+// Minecart routes can bend between two stops. Planned state stores the stop
+// endpoints rather than every rail cell, so conservatively reserve their
+// bounding rectangle for the platform and its rider stack during the leg.
+void addMinecartReservations(
+    const plans::PlannedAction& planned, std::vector<Reservation>& into)
+{
+    const GameState& before = planned.action.before;
+    for (std::size_t index = 0; index < before.minecarts.size(); ++index) {
+        GridPosition3 previous = before.minecarts[index].cell;
+        const GameState* previousState = &before;
+        GridPosition3 resting = previous;
+        for (std::size_t leg = 0; leg < planned.legs.size(); ++leg) {
+            const GameState& state = planned.legs[leg];
+            if (index >= state.minecarts.size()) {
+                break;
+            }
+            const GridPosition3 current = state.minecarts[index].cell;
+            if (!(current == previous)) {
+                const int riders = ridersAbove(*previousState, previous);
+                for (int y = std::min(previous.y, current.y);
+                     y <= std::max(previous.y, current.y);
+                     ++y) {
+                    for (int x = std::min(previous.x, current.x);
+                         x <= std::max(previous.x, current.x);
+                         ++x) {
+                        for (int z = previous.z;
+                             z <= previous.z + riders + 1;
+                             ++z) {
+                            addReservation(into, {
+                                .cell = { x, y, z },
+                                .firstStep = 0,
+                                .lastStep = static_cast<int>(leg) + 1,
+                            });
+                        }
+                    }
+                }
+                resting = current;
+            }
+            previous = current;
+            previousState = &state;
+        }
+        if (!(resting == before.minecarts[index].cell)) {
+            addReservation(into, {
+                .cell = resting,
+                .firstStep = 0,
+                .lastStep = std::nullopt,
+            });
+        }
+    }
+}
+
 } // namespace
 
 bool Reservation::overlaps(const Reservation& other) const
@@ -275,6 +326,7 @@ ActionReservations reservationsFor(const PlannedAction& planned)
         }
     }
     addElevatorReservations(planned, result.cells);
+    addMinecartReservations(planned, result.cells);
     return result;
 }
 

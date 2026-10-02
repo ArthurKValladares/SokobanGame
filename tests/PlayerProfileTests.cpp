@@ -417,6 +417,9 @@ void testActiveScreenCheckpointRoundTrip()
     // Elevator platforms persist their cell and cycle phase.
     before.elevators.push_back({ .cell = { 3, 1, 0 }, .phase = 0 });
     after.elevators.push_back({ .cell = { 3, 1, 2 }, .phase = 1 });
+    // Minecarts use a wider cycle phase because rail routes can be longer.
+    before.minecarts.push_back({ .cell = { 1, 3, 0 }, .phase = 0 });
+    after.minecarts.push_back({ .cell = { 5, 3, 0 }, .phase = 257 });
 
     sokoban::GameplaySession::Action move {
         .before = before,
@@ -445,6 +448,18 @@ void testActiveScreenCheckpointRoundTrip()
                     .from = { 3.0f, 1.0f, 0.0f },
                     .to = { 3.0f, 1.0f, 2.0f },
                     .durationSeconds = 0.15f,
+                },
+                {
+                    .target = {
+                        sokoban::EntityKind::Minecart,
+                        sokoban::resolvedEntityId(
+                            sokoban::EntityKind::Minecart,
+                            sokoban::invalidEntityId,
+                            0),
+                    },
+                    .from = { 1.0f, 3.0f, 0.0f },
+                    .to = { 5.0f, 3.0f, 0.0f },
+                    .durationSeconds = 0.6f,
                 },
             },
             .animations = {
@@ -545,6 +560,14 @@ void testActiveScreenCheckpointRoundTrip()
             checkpointState["elevators"][0]["phase"].get<int>() == 1 &&
             checkpointState["elevators"][0]["cell"]["z"].get<int>() == 2,
         "checkpoint state persists elevator platforms");
+    CHECK_MESSAGE(checkpointState["minecarts"].size() == 1 &&
+            checkpointState["minecarts"][0]["phase"].get<int>() == 257 &&
+            checkpointState["minecarts"][0]["cell"]["x"].get<int>() == 5,
+        "checkpoint state persists minecart platforms");
+    CHECK_MESSAGE(
+        current["progress"]["activeScreen"]["session"]["undoStack"][0]
+            ["presentation"]["motions"][2]["target"]["kind"] == "minecart",
+        "checkpoint presentation persists minecart motion targets");
 
     nlohmann::json badElevator = current;
     badElevator["progress"]["activeScreen"]["session"]["state"]
@@ -552,6 +575,13 @@ void testActiveScreenCheckpointRoundTrip()
     checkThrows([&] {
         (void)sokoban::decodePlayerProfile(badElevator.dump());
     }, "checkpoint rejects an out-of-range elevator phase");
+
+    nlohmann::json badMinecart = current;
+    badMinecart["progress"]["activeScreen"]["session"]["state"]
+        ["minecarts"][0]["phase"] = 65'536;
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(badMinecart.dump());
+    }, "checkpoint rejects an out-of-range minecart phase");
 
     nlohmann::json duplicateMirror = current;
     auto& duplicateMirrors = duplicateMirror["progress"]["activeScreen"]

@@ -53,6 +53,19 @@ enum class TileType {
     // fully pressed it carries itself and whatever stands on it to the next
     // stop in its authored list of layers (see Level::Elevator).
     Elevator,
+    // Minecart track pieces. Each orientation is a tile type so screen files
+    // stay a compact character grid while all variants share three models.
+    RailStraightNorthSouth,
+    RailStraightEastWest,
+    RailCornerNorthEast,
+    RailCornerSouthEast,
+    RailCornerSouthWest,
+    RailCornerNorthWest,
+    RailStopNorthSouth,
+    RailStopEastWest,
+    // A moving platform authored on top of a Rail Stop (the stop is retained
+    // in an @plate record). Units may occupy and ride in the cart's cell.
+    Minecart,
     Count,
 };
 
@@ -65,6 +78,9 @@ enum class TileProperty : uint32_t {
     // pressure plate drives gates and rotators, a rotator turns what stands
     // on it, and an End is where heroes finish.
     Plate = 1U << 0U,
+    // Thin traversable floor geometry. Plates imply this visually; rails use
+    // it without gaining plate stacking/activation semantics.
+    Surface = 1U << 1U,
 };
 
 [[nodiscard]] constexpr TileProperty operator|(TileProperty left, TileProperty right)
@@ -124,6 +140,15 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::TurretSouth, 's', "Turret South", { 0.72f, 0.48f, 0.16f, 1.0f } },
     TileTypeDefinition { TileType::TurretWest, 'w', "Turret West", { 0.72f, 0.48f, 0.16f, 1.0f } },
     TileTypeDefinition { TileType::Elevator, '=', "Elevator", { 0.86f, 0.88f, 0.92f, 1.0f } },
+    TileTypeDefinition { TileType::RailStraightNorthSouth, '|', "Rail Straight North-South", { 1.0f, 1.0f, 1.0f, 1.0f }, {}, TileProperty::Surface },
+    TileTypeDefinition { TileType::RailStraightEastWest, '-', "Rail Straight East-West", { 1.0f, 1.0f, 1.0f, 1.0f }, {}, TileProperty::Surface },
+    TileTypeDefinition { TileType::RailCornerNorthEast, '5', "Rail Corner North-East", { 1.0f, 1.0f, 1.0f, 1.0f }, {}, TileProperty::Surface },
+    TileTypeDefinition { TileType::RailCornerSouthEast, '6', "Rail Corner South-East", { 1.0f, 1.0f, 1.0f, 1.0f }, {}, TileProperty::Surface },
+    TileTypeDefinition { TileType::RailCornerSouthWest, '7', "Rail Corner South-West", { 1.0f, 1.0f, 1.0f, 1.0f }, {}, TileProperty::Surface },
+    TileTypeDefinition { TileType::RailCornerNorthWest, '8', "Rail Corner North-West", { 1.0f, 1.0f, 1.0f, 1.0f }, {}, TileProperty::Surface },
+    TileTypeDefinition { TileType::RailStopNorthSouth, '!', "Rail Stop North-South", { 1.0f, 1.0f, 1.0f, 1.0f }, {}, TileProperty::Plate | TileProperty::Surface },
+    TileTypeDefinition { TileType::RailStopEastWest, '_', "Rail Stop East-West", { 1.0f, 1.0f, 1.0f, 1.0f }, {}, TileProperty::Plate | TileProperty::Surface },
+    TileTypeDefinition { TileType::Minecart, 'M', "Minecart", { 1.0f, 1.0f, 1.0f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -153,6 +178,17 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeIsDecorative(TileType type);
 [[nodiscard]] bool tileTypeIsRotator(TileType type);
 [[nodiscard]] bool tileTypeIsElevator(TileType type);
+[[nodiscard]] bool tileTypeIsRail(TileType type);
+[[nodiscard]] bool tileTypeIsRailStop(TileType type);
+[[nodiscard]] bool tileTypeIsMinecart(TileType type);
+// N/E/S/W connector bits used to validate and traverse a rail system.
+inline constexpr uint8_t railNorth = 1U << 0U;
+inline constexpr uint8_t railEast = 1U << 1U;
+inline constexpr uint8_t railSouth = 1U << 2U;
+inline constexpr uint8_t railWest = 1U << 3U;
+[[nodiscard]] uint8_t railConnectionMask(TileType type);
+// Clockwise turns from the north-south straight or north-east corner model.
+[[nodiscard]] std::optional<uint32_t> railOrientationQuarterTurns(TileType type);
 // Signed quarter turns one activation applies: +1 clockwise, -1
 // counter-clockwise (seen from above). Empty for every other tile.
 [[nodiscard]] std::optional<int> rotatorQuarterTurns(TileType type);

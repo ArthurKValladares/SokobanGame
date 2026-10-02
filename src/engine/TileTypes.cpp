@@ -74,7 +74,8 @@ bool tileTypeIsPlate(TileType type)
 
 bool tileTypeCanStandOnPlate(TileType type)
 {
-    return tileTypeOccupiesLevelCell(type) || tileTypeIsMirror(type);
+    return tileTypeOccupiesLevelCell(type) || tileTypeIsMirror(type) ||
+        tileTypeIsMinecart(type);
 }
 
 bool tileTypeOccupiesLevelCell(TileType type)
@@ -90,7 +91,7 @@ bool tileTypeIsSolidBlock(TileType type)
     // grid only knows where it was authored; rules ask about the live
     // position (see rules::elevatorPlatformAt).
     return type == TileType::Ground || type == TileType::Wall ||
-        type == TileType::Elevator;
+        type == TileType::Elevator || type == TileType::Minecart;
 }
 
 bool tileTypeSupportsEntity(TileType type)
@@ -104,12 +105,13 @@ bool tileTypeAllowsEntity(TileType type)
         type == TileType::Decorative ||
         type == TileType::Ladder ||
         tileTypeIsConveyor(type) ||
-        tileTypeIsPlate(type);
+        tileTypeIsPlate(type) || tileTypeIsRail(type);
 }
 
 bool tileTypeIsSurfaceEntity(TileType type)
 {
-    return tileTypeIsPlate(type);
+    return tileTypeIsPlate(type) ||
+        tileTypeHasProperty(type, TileProperty::Surface);
 }
 
 bool tileTypeIsPlayerStart(TileType type)
@@ -157,6 +159,63 @@ bool tileTypeIsRotator(TileType type)
 bool tileTypeIsElevator(TileType type)
 {
     return type == TileType::Elevator;
+}
+
+bool tileTypeIsRail(TileType type)
+{
+    return type == TileType::RailStraightNorthSouth ||
+        type == TileType::RailStraightEastWest ||
+        type == TileType::RailCornerNorthEast ||
+        type == TileType::RailCornerSouthEast ||
+        type == TileType::RailCornerSouthWest ||
+        type == TileType::RailCornerNorthWest ||
+        type == TileType::RailStopNorthSouth ||
+        type == TileType::RailStopEastWest;
+}
+
+bool tileTypeIsRailStop(TileType type)
+{
+    return type == TileType::RailStopNorthSouth ||
+        type == TileType::RailStopEastWest;
+}
+
+bool tileTypeIsMinecart(TileType type)
+{
+    return type == TileType::Minecart;
+}
+
+uint8_t railConnectionMask(TileType type)
+{
+    switch (type) {
+    case TileType::RailStraightNorthSouth:
+    case TileType::RailStopNorthSouth:
+        return railNorth | railSouth;
+    case TileType::RailStraightEastWest:
+    case TileType::RailStopEastWest:
+        return railEast | railWest;
+    case TileType::RailCornerNorthEast: return railNorth | railEast;
+    case TileType::RailCornerSouthEast: return railSouth | railEast;
+    case TileType::RailCornerSouthWest: return railSouth | railWest;
+    case TileType::RailCornerNorthWest: return railNorth | railWest;
+    default: return 0;
+    }
+}
+
+std::optional<uint32_t> railOrientationQuarterTurns(TileType type)
+{
+    switch (type) {
+    case TileType::RailStraightNorthSouth:
+    case TileType::RailStopNorthSouth:
+    case TileType::RailCornerNorthWest:
+        return 0;
+    case TileType::RailStraightEastWest:
+    case TileType::RailStopEastWest:
+    case TileType::RailCornerNorthEast:
+        return 1;
+    case TileType::RailCornerSouthEast: return 2;
+    case TileType::RailCornerSouthWest: return 3;
+    default: return std::nullopt;
+    }
 }
 
 std::optional<int> rotatorQuarterTurns(TileType type)

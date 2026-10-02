@@ -846,6 +846,86 @@ void testLevelValidationErrors()
     }, "supported walkable cell");
 }
 
+void testMinecartMetadataRoutesAndValidation()
+{
+    TEST("minecartMetadataRoutesAndValidation");
+    // The shared corner GLB is authored north-west. These rotations must
+    // agree with the connector masks or a track can look joined in the editor
+    // while route construction sees it as disconnected.
+    CHECK(railOrientationQuarterTurns(TileType::RailCornerNorthWest) == 0U);
+    CHECK(railOrientationQuarterTurns(TileType::RailCornerNorthEast) == 1U);
+    CHECK(railOrientationQuarterTurns(TileType::RailCornerSouthEast) == 2U);
+    CHECK(railOrientationQuarterTurns(TileType::RailCornerSouthWest) == 3U);
+    const Level::Definition eastDefinition {
+        .layers = {
+            { "......" },
+            { "_-M-_C" },
+        },
+        .plates = {
+            { .cell = { 2, 0, 1 }, .tile = TileType::RailStopEastWest },
+        },
+        .minecarts = { Level::Minecart {
+            .cell = { 2, 0, 1 },
+            .pressurePlates = {},
+            .initialDirection = 1,
+        } },
+        .character = CharacterType::Rogue,
+    };
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition(eastDefinition);
+    CHECK(Level::parseDefinition(serialized, "minecart round trip") ==
+        eastDefinition);
+
+    const Level east = Level::loadFromDefinition(eastDefinition, "east route");
+    CHECK(east.minecarts().size() == 1);
+    CHECK(east.minecartRoutes()[0].stops ==
+        (std::vector<GridPosition3> {
+            { 2, 0, 1 }, { 4, 0, 1 },
+        }));
+    CHECK(!east.minecartRoutes()[0].loop);
+
+    Level::Definition westDefinition = eastDefinition;
+    westDefinition.minecarts[0].initialDirection = 3;
+    const Level west = Level::loadFromDefinition(westDefinition, "west route");
+    CHECK(west.minecartRoutes()[0].stops ==
+        (std::vector<GridPosition3> {
+            { 2, 0, 1 }, { 0, 0, 1 },
+        }));
+
+    const Level loop = Level::loadFromDefinition({
+        .layers = {
+            { "....", "....", "...." },
+            { "6M7C", "| !P", "5_8." },
+        },
+        .plates = {
+            { .cell = { 1, 0, 1 }, .tile = TileType::RailStopEastWest },
+        },
+        .minecarts = { Level::Minecart {
+            .cell = { 1, 0, 1 },
+            .pressurePlates = { { 3, 1, 1 } },
+            .initialDirection = 1,
+        } },
+        .character = CharacterType::Rogue,
+    }, "loop route");
+    CHECK(loop.minecartRoutes()[0].loop);
+    CHECK(loop.minecartRoutes()[0].stops ==
+        (std::vector<GridPosition3> {
+            { 1, 0, 1 }, { 2, 1, 1 }, { 1, 2, 1 },
+        }));
+
+    Level::Definition missingStop = eastDefinition;
+    missingStop.plates.clear();
+    checkThrowsContaining([&] {
+        (void)Level::loadFromDefinition(missingStop, "missing stop");
+    }, "on top of a Rail Stop");
+
+    Level::Definition wrongDirection = eastDefinition;
+    wrongDirection.minecarts[0].initialDirection = 0;
+    checkThrowsContaining([&] {
+        (void)Level::loadFromDefinition(wrongDirection, "wrong direction");
+    }, "must follow its starting Rail Stop");
+}
+
 void testRaggedLayersNormalizeToAir()
 {
     TEST("raggedLayersNormalizeToAir");
@@ -947,6 +1027,7 @@ int main()
     testPlatePropertyAndCoveredPlateRecords();
     testParserRejectsMalformedStructure();
     testLevelValidationErrors();
+    testMinecartMetadataRoutesAndValidation();
     testRaggedLayersNormalizeToAir();
     testDecorativeTileIsSerializedAndGameplayTransparent();
     testLadderRequiresSameLayerGround();

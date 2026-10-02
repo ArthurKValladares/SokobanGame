@@ -93,13 +93,15 @@ public:
         float delaySeconds = 0.0f);
     [[nodiscard]] Vec2 turretRecoilOffset(EntityId turretId) const;
     [[nodiscard]] ActionPresentationTimeline buildActionPresentation(
-        const GameplaySession::Action& action) const;
+        const GameplaySession::Action& action,
+        const Level* level = nullptr) const;
     // Chain-aware: `legs` are the states the action passes through, one per
     // world step, so a slide animates tile by tile instead of interpolating
     // once from start to finish. One leg (or none) is the ordinary case above.
     [[nodiscard]] ActionPresentationTimeline buildActionPresentation(
         const GameplaySession::Action& action,
-        const std::vector<GameState>& legs) const;
+        const std::vector<GameState>& legs,
+        const Level* level = nullptr) const;
     [[nodiscard]] float reverseDuration(
         const GameplaySession::Action& action) const;
     // `worldState` is the session's current state, used to create and remove
@@ -128,6 +130,7 @@ public:
     // One per GameState::elevators entry; renderPosition is the platform's
     // cell, interpolated while an action carries it between stops.
     [[nodiscard]] const std::vector<EntityVisual>& elevators() const { return elevators_; }
+    [[nodiscard]] const std::vector<EntityVisual>& minecarts() const { return minecarts_; }
 
 private:
     struct TurretRecoil {
@@ -144,6 +147,7 @@ private:
     std::vector<EntityVisual> movables_;
     std::vector<EnemyVisual> enemies_;
     std::vector<EntityVisual> elevators_;
+    std::vector<EntityVisual> minecarts_;
     std::vector<TurretRecoil> turretRecoils_;
     const AnimationCatalog* animationCatalog_ = nullptr;
     // Where a reversed action's timeline is sampled from. The only piece of

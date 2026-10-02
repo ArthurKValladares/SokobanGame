@@ -58,7 +58,7 @@ struct StateDelta {
     [[nodiscard]] StateDelta inverted() const;
 
     [[nodiscard]] bool empty() const;
-    // Entities only; mirror turns and elevator platforms are not entities and
+    // Entities only; mirror turns and moving platforms are not entities and
     // have no ids.
     [[nodiscard]] std::size_t changedEntityCount() const;
     // Entity ids use players, movables, enemies order, matching the delta's
@@ -91,11 +91,20 @@ struct StateDelta {
         bool operator==(const ElevatorChange&) const = default;
     };
 
+    struct MinecartChange {
+        std::size_t index = 0;
+        GameState::Minecart before;
+        GameState::Minecart after;
+
+        bool operator==(const MinecartChange&) const = default;
+    };
+
     std::vector<Change<GameState::Player>> players;
     std::vector<Change<GameState::Movable>> movables;
     std::vector<Change<GameState::Enemy>> enemies;
     std::vector<MirrorChange> mirrors;
     std::vector<ElevatorChange> elevators;
+    std::vector<MinecartChange> minecarts;
 };
 
 } // namespace sokoban

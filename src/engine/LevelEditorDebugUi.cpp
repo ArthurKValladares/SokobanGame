@@ -5,6 +5,7 @@
 #include "engine/render/RenderTypes.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <cstdint>
@@ -574,6 +575,9 @@ std::string linkGroupText(const LevelEditor::LinkGroup& group)
     for (const GridPosition3 cell : group.elevators) {
         devices.push_back("Elevator " + cellText(cell));
     }
+    for (const GridPosition3 cell : group.minecarts) {
+        devices.push_back("Minecart " + cellText(cell));
+    }
     for (std::size_t i = 0; i < devices.size(); ++i) {
         text += (i == 0 ? " -> " : ", ") + devices[i];
     }
@@ -724,17 +728,18 @@ void LevelEditorDebugUi::drawTilePalette(
     const std::string_view selectedName = tileTypeName(editor.selectedTile());
     ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
     ImGui::TextWrapped(
-        "Plates (Pressure, End, Rotators) stack with units and mirrors: paint "
+        "Plates (Pressure, End, Rotators, Rail Stops) stack with units and mirrors; "
+        "a Minecart can only stack on a Rail Stop. Paint "
         "one onto the other in either order. Erasing lifts the unit or mirror "
         "off and leaves the plate.");
 
     ImGui::Separator();
     ImGui::TextUnformatted("Links");
     ImGui::TextWrapped(
-        "Gates, rotators and elevators are driven by every pressure plate of "
+        "Gates, rotators, elevators and minecarts are driven by every pressure plate of "
         "their color: give plates and devices the same color to link them. A "
         "gate opens while all of its plates are pressed; a rotator turns and "
-        "an elevator moves each time they all become pressed. A device with "
+        "an elevator or minecart moves each time they all become pressed. A device with "
         "no plates of its color never activates.");
     Vec3 paintColor = editor.activeLinkColor();
     if (ImGui::ColorEdit3("Link Color", &paintColor.x)) {
@@ -745,7 +750,7 @@ void LevelEditorDebugUi::drawTilePalette(
     const std::string brushKeys =
         actionBindingsDisplay(bindings, InputAction::EditorPaintLinkColor);
     ImGui::BulletText(
-        "New pressure plates, gates, rotators and elevators take this color.");
+        "New pressure plates, gates, rotators, elevators and minecarts take this color.");
     ImGui::BulletText(
         "%s + click: eyedropper - picks up the color of the plate or device "
         "clicked.",
@@ -765,7 +770,7 @@ void LevelEditorDebugUi::drawTilePalette(
     }
     if (groups.empty()) {
         ImGui::TextDisabled(
-            "Paint pressure plates and a gate, rotator or elevator to link them.");
+            "Paint pressure plates and a gate, rotator, elevator or minecart to link them.");
     }
     for (std::size_t index = 0; index < groups.size(); ++index) {
         const LevelEditor::LinkGroup& group = groups[index];
@@ -881,6 +886,61 @@ void LevelEditorDebugUi::drawTilePalette(
         }
         const std::string cycle = elevatorCycleText(elevator);
         ImGui::TextWrapped("Cycle: %s", cycle.c_str());
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Minecart Route Direction");
+    ImGui::TextWrapped(
+        "A minecart starts on a Rail Stop. Choose which of that stop's two "
+        "exits it follows first. An open route visits the stops on that side "
+        "and turns back at the end; a loop keeps circling in the chosen direction.");
+    const std::vector<Level::Minecart>& minecarts = editor.minecarts();
+    if (selectedMinecartIndex_ && *selectedMinecartIndex_ >= minecarts.size()) {
+        selectedMinecartIndex_.reset();
+    }
+    if (!selectedMinecartIndex_ && !minecarts.empty()) {
+        selectedMinecartIndex_ = 0;
+    }
+    if (minecarts.empty()) {
+        ImGui::TextDisabled(
+            "Paint a Minecart on a Rail Stop to configure it here.");
+    } else {
+        const std::size_t index = *selectedMinecartIndex_;
+        const std::string preview =
+            "Minecart " + cellText(minecarts[index].cell);
+        if (ImGui::BeginCombo("Minecart", preview.c_str())) {
+            for (std::size_t candidate = 0;
+                 candidate < minecarts.size();
+                 ++candidate) {
+                const std::string label = "Minecart " +
+                    cellText(minecarts[candidate].cell) + "##minecart" +
+                    std::to_string(candidate);
+                if (ImGui::Selectable(label.c_str(), candidate == index)) {
+                    selectedMinecartIndex_ = candidate;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        const Level::Minecart& minecart = minecarts[*selectedMinecartIndex_];
+        const TileType stop = editor.documentPlateAt(minecart.cell)
+            .value_or(TileType::Air);
+        const uint8_t mask = railConnectionMask(stop);
+        constexpr std::array<const char*, 4> names {
+            "North", "East", "South", "West",
+        };
+        for (uint8_t direction = 0; direction < 4; ++direction) {
+            if ((mask & static_cast<uint8_t>(1U << direction)) == 0) {
+                continue;
+            }
+            bool selected = minecart.initialDirection == direction;
+            if (ImGui::RadioButton(names[direction], selected)) {
+                (void)editor.setMinecartInitialDirection(
+                    *selectedMinecartIndex_, direction);
+            }
+            if (direction < 3) {
+                ImGui::SameLine();
+            }
+        }
     }
 
     // These pictures are screenshots of the real render, so they go stale when

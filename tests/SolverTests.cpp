@@ -351,6 +351,37 @@ void testSolverRidesElevators()
         "elevator solution replays through the recording driver");
 }
 
+void testSolverRidesMinecarts()
+{
+    TEST("solverRidesMinecarts");
+    // One hero starts on the cart while the other can press its switch. The
+    // rail span is not walkable without the cart, so the far End exercises
+    // the minecart transport edge in both the heuristic and the real search.
+    const Level::Definition definition {
+        .layers = {
+            { ".M--_..." },
+            { " C  EPEC" },
+        },
+        .plates = {
+            { .cell = { 1, 0, 0 }, .tile = TileType::RailStopEastWest },
+        },
+        .minecarts = { Level::Minecart {
+            .cell = { 1, 0, 0 },
+            .pressurePlates = { { 5, 0, 1 } },
+            .initialDirection = 1,
+        } },
+    };
+    const Level level = Level::loadFromDefinition(definition, "minecart solver");
+    const solver::detail::RelaxedHeuristic heuristic(level);
+    CHECK(heuristic.estimate(rules::initialState(level)) < 16);
+    const solver::Result result = solver::solve(level, { .maxStates = 20'000 });
+    CHECK(result.solved());
+    CHECK_MESSAGE(
+        solution::record(level, definition, result.inputs, "minecart solver")
+            .solved,
+        "minecart solution replays through the recording driver");
+}
+
 void testPrecomputedMirrorSuccessorReplays()
 {
     TEST("precomputedMirrorSuccessorReplays");
@@ -572,6 +603,7 @@ int main()
         testDeadPositionAnalysisIsConservativeAndFeatureAware();
         testPackedStateKeyIncludesEveryDynamicField();
         testSolverRidesElevators();
+        testSolverRidesMinecarts();
         testSearchResultReplays();
         testPrecomputedMirrorSuccessorReplays();
         testExhaustionIsDistinctFromStateLimit();

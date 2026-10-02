@@ -44,6 +44,7 @@ std::optional<MoveDirection> heldAxis(
 // started in one pass, and the newest is not the one the single-action setters
 // target.
 void startPresentation(
+    const Level& level,
     GameplaySession& session,
     GameplayPresentation& presentation,
     std::size_t actionId)
@@ -62,7 +63,7 @@ void startPresentation(
         }
         session.setActionPresentation(
             actionId,
-            presentation.buildActionPresentation(source, started->legs));
+            presentation.buildActionPresentation(source, started->legs, &level));
         // Re-fetched after every mutation: the setters write through the
         // scheduler, and holding a pointer across them invites a stale read.
         started = session.findInFlight(actionId);
@@ -100,6 +101,7 @@ std::size_t highestInFlightId(const GameplaySession& session)
 // assuming it is the only one would leave the others without a timeline, which
 // makes them instantaneous and commits them on the frame they started.
 void startNewPresentations(
+    const Level& level,
     GameplaySession& session,
     GameplayPresentation& presentation,
     std::size_t& watermark)
@@ -114,7 +116,7 @@ void startNewPresentations(
     // in-flight vector must not be iterated across a mutation.
     for (const std::size_t id : fresh) {
         watermark = std::max(watermark, id);
-        startPresentation(session, presentation, id);
+        startPresentation(level, session, presentation, id);
     }
 }
 
@@ -222,6 +224,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
                     session.lastWitchSwapDestinations();
             }
             startNewPresentations(
+                level,
                 session,
                 presentation,
                 presentedThrough);

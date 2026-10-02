@@ -259,7 +259,7 @@ public:
     [[nodiscard]] const std::vector<Level::ScreenSelector>& selectors() const;
     [[nodiscard]] std::optional<std::size_t> selectedSelectorIndex() const;
     [[nodiscard]] const Level::ScreenSelector* selectedSelector() const;
-    // Gates, rotators and elevators of the document. In the editor a device
+    // Gates, rotators, elevators and minecarts of the document. In the editor a device
     // is linked to every pressure plate of its color (see linkGroups), so
     // these records carry their color but no explicit `pressurePlates`; the
     // lists are filled in from the color groups when the document becomes a
@@ -267,6 +267,7 @@ public:
     [[nodiscard]] const std::vector<Level::Gate>& gates() const;
     [[nodiscard]] const std::vector<Level::Rotator>& rotators() const;
     [[nodiscard]] const std::vector<Level::Elevator>& elevators() const;
+    [[nodiscard]] const std::vector<Level::Minecart>& minecarts() const;
     // Plates authored beneath a unit or mirror (see Level::Plate).
     [[nodiscard]] const std::vector<Level::Plate>& coveredPlates() const;
     // The plate at `cell` in the document, uncovered or beneath something.
@@ -284,10 +285,12 @@ public:
         std::vector<GridPosition3> gates;
         std::vector<GridPosition3> rotators;
         std::vector<GridPosition3> elevators;
+        std::vector<GridPosition3> minecarts;
 
         [[nodiscard]] bool hasDevice() const
         {
-            return !gates.empty() || !rotators.empty() || !elevators.empty();
+            return !gates.empty() || !rotators.empty() || !elevators.empty() ||
+                !minecarts.empty();
         }
     };
     [[nodiscard]] static bool sameLinkColor(Vec3 left, Vec3 right);
@@ -319,6 +322,10 @@ public:
     // Elevator tile is on, which is where the platform starts. One undoable
     // command.
     [[nodiscard]] bool setElevatorLevels(std::size_t index, std::vector<int> levels);
+    // Chooses the first rail connector the cart follows from its starting
+    // stop: 0/1/2/3 are north/east/south/west.
+    [[nodiscard]] bool setMinecartInitialDirection(
+        std::size_t index, uint8_t direction);
     [[nodiscard]] bool editingOverworld() const;
     // The path shown in the UI, which the file browser changes on a single
     // click. It is a *selection*: the document in memory is unchanged until
@@ -349,6 +356,7 @@ private:
         std::vector<Level::Rotator> rotators;
         std::vector<Level::Plate> plates;
         std::vector<Level::Elevator> elevators;
+        std::vector<Level::Minecart> minecarts;
         // One per pressure plate, sorted by cell (see linkGroups).
         std::vector<Level::LinkColor> plateColors;
         // Selected path (browser clicks move this).
@@ -384,6 +392,7 @@ private:
         std::vector<Level::Rotator> rotators;
         std::vector<Level::Plate> plates;
         std::vector<Level::Elevator> elevators;
+        std::vector<Level::Minecart> minecarts;
         // One per pressure plate, sorted by cell (see linkGroups).
         std::vector<Level::LinkColor> plateColors;
         std::filesystem::path filePath;

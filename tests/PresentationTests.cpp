@@ -150,7 +150,11 @@ const AssetManifest& testManifest()
         { "name": "RotatorGear", "path": "rotator-gear.glb", "preserveSourceScale": true },
         { "name": "RotatorIconClockwise", "path": "rotator-icon-cw.glb", "preserveSourceScale": true },
         { "name": "RotatorIconCounterClockwise", "path": "rotator-icon-ccw.glb", "preserveSourceScale": true },
-        { "name": "ElevatorPlatform", "path": "platform.glb" }
+        { "name": "ElevatorPlatform", "path": "platform.glb" },
+        { "name": "MinecartRailStraight", "path": "rail-straight.glb", "preserveSourceScale": true },
+        { "name": "MinecartRailStop", "path": "rail-stop.glb", "preserveSourceScale": true },
+        { "name": "MinecartRailCorner", "path": "rail-corner.glb", "preserveSourceScale": true },
+        { "name": "MinecartHandcar", "path": "minecart.glb", "preserveSourceScale": true }
       ],
       "animations": [
         { "name": "Idle", "path": "a.glb", "role": "player-idle" },
@@ -180,7 +184,16 @@ const AssetManifest& testManifest()
         { "tile": "Enemy", "model": "Enemy" },
         { "tile": "Rotator Clockwise", "model": "RotatorClockwise" },
         { "tile": "Rotator Counter-Clockwise", "model": "RotatorCounterClockwise" },
-        { "tile": "Elevator", "model": "ElevatorPlatform" }
+        { "tile": "Elevator", "model": "ElevatorPlatform" },
+        { "tile": "Rail Straight North-South", "model": "MinecartRailStraight" },
+        { "tile": "Rail Straight East-West", "model": "MinecartRailStraight" },
+        { "tile": "Rail Corner North-East", "model": "MinecartRailCorner" },
+        { "tile": "Rail Corner South-East", "model": "MinecartRailCorner" },
+        { "tile": "Rail Corner South-West", "model": "MinecartRailCorner" },
+        { "tile": "Rail Corner North-West", "model": "MinecartRailCorner" },
+        { "tile": "Rail Stop North-South", "model": "MinecartRailStop" },
+        { "tile": "Rail Stop East-West", "model": "MinecartRailStop" },
+        { "tile": "Minecart", "model": "MinecartHandcar" }
       ]
     })json");
     return manifest;
@@ -1513,7 +1526,7 @@ void testElevatorPlatformIsFlushAndCarriesItsRider()
         .durationSeconds = 1.0f,
         .facingDirection = MoveDirection::Right,
     };
-    action.presentation = presentation.buildActionPresentation(action);
+    action.presentation = presentation.buildActionPresentation(action, &level);
     const EntityTarget elevatorTarget {
         EntityKind::Elevator,
         resolvedEntityId(EntityKind::Elevator, invalidEntityId, 0),
@@ -1600,6 +1613,192 @@ void testElevatorPlatformIsFlushAndCarriesItsRider()
         near(authored->baseElevation + authored->height, 1.0f));
     CHECK(ghost != editorPlatforms.end() &&
         near(ghost->baseElevation + ghost->height, 3.0f) && !ghost->pickable);
+}
+
+void testMinecartRendersOnItsStopAndCarriesItsRider()
+{
+    TEST("minecartRendersOnItsStopAndCarriesItsRider");
+    const Vec3 cartColor { 0.85f, 0.3f, 0.15f };
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "....." },
+            { "CPM-_" },
+            { "  R  " },
+        },
+        .plates = {
+            { .cell = { 2, 0, 1 }, .tile = TileType::RailStopEastWest },
+        },
+        .minecarts = { Level::Minecart {
+            .cell = { 2, 0, 1 },
+            .pressurePlates = { { 1, 0, 1 } },
+            .color = cartColor,
+            .initialDirection = 1,
+        } },
+        .character = CharacterType::Rogue,
+    }, "minecart presentation");
+    const AssetManifest& manifest = testManifest();
+    const RenderModel cartModel = manifest.modelForTile(TileType::Minecart);
+    const RenderModel stopModel =
+        manifest.modelForTile(TileType::RailStopEastWest);
+
+    const GameState start = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(start);
+    CHECK(presentation.minecarts().size() == 1);
+    const RenderFrameData idleFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest,
+        .level = level,
+        .state = start,
+        .moving = false,
+        .projectedState = start,
+        .presentation = presentation,
+        .settings = {},
+    });
+    CHECK(std::ranges::count_if(idleFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.model == cartModel &&
+                tile.cell == GridPosition3 { 2, 0, 1 };
+        }) == 1);
+    const auto coveredStop = std::ranges::find_if(idleFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.model == stopModel &&
+                tile.cell == GridPosition3 { 2, 0, 1 };
+        });
+    CHECK(coveredStop != idleFrame.tiles.end());
+    if (coveredStop != idleFrame.tiles.end()) {
+        // The covered stop must keep the same east-west orientation it had
+        // in the editor when gameplay begins.
+        CHECK(coveredStop->modelRotationQuarterTurns == 1);
+    }
+
+    const GameState arrived =
+        rules::step(level, start, MoveDirection::Right);
+    CHECK(arrived.minecarts[0].cell == (GridPosition3 { 4, 0, 1 }));
+    CHECK(arrived.movables[0].cell == (GridPosition3 { 4, 0, 2 }));
+    GameplaySession::Action action {
+        .before = start,
+        .after = arrived,
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Right,
+    };
+    action.presentation = presentation.buildActionPresentation(action, &level);
+    const EntityTarget cartTarget {
+        EntityKind::Minecart,
+        resolvedEntityId(EntityKind::Minecart, invalidEntityId, 0),
+    };
+    CHECK(std::ranges::any_of(action.presentation.motions,
+        [&](const ActionMotionTrack& track) {
+            return track.target == cartTarget &&
+                near(track.from.x, 2.0f) && near(track.to.x, 3.0f);
+        }));
+    CHECK(std::ranges::any_of(action.presentation.motions,
+        [&](const ActionMotionTrack& track) {
+            return track.target == cartTarget &&
+                near(track.from.x, 3.0f) && near(track.to.x, 4.0f);
+        }));
+    CHECK(near(action.presentation.durationSeconds,
+        1.0f + 2.0f * config::elevatorSecondsPerLayerPerStep));
+
+    presentation.beginAction(action, action.before);
+    presentation.seekAction(
+        action,
+        1.0f + config::elevatorSecondsPerLayerPerStep);
+    CHECK(presentation.minecarts()[0].moving);
+    CHECK(near(presentation.minecarts()[0].renderPosition.x, 3.0f));
+    CHECK(near(presentation.movables()[0].renderPosition.x, 3.0f));
+    CHECK(near(presentation.movables()[0].renderPosition.z, 2.0f));
+
+    const RenderFrameData movingFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest,
+        .level = level,
+        .state = start,
+        .moving = true,
+        .projectedState = arrived,
+        .presentation = presentation,
+        .settings = {},
+    });
+    const auto movingCart = std::ranges::find_if(
+        movingFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.model == cartModel;
+        });
+    CHECK(movingCart != movingFrame.tiles.end());
+    if (movingCart != movingFrame.tiles.end()) {
+        CHECK(near(movingCart->position.x, 3.0f));
+        CHECK(movingCart->color.x > movingCart->color.y);
+    }
+
+    // On a bend, the timeline follows each rail cell instead of cutting
+    // diagonally from one stop to the next.
+    const Level cornerLevel = Level::loadFromDefinition({
+        .layers = {
+            { "....", "....", "...." },
+            { "6M7C", "| !P", "5_8." },
+        },
+        .plates = {
+            { .cell = { 1, 0, 1 }, .tile = TileType::RailStopEastWest },
+        },
+        .minecarts = { Level::Minecart {
+            .cell = { 1, 0, 1 },
+            .pressurePlates = { { 3, 1, 1 } },
+            .initialDirection = 1,
+        } },
+        .character = CharacterType::Rogue,
+    }, "corner minecart presentation");
+    const GameState cornerStart = rules::initialState(cornerLevel);
+    const GameState cornerEnd =
+        rules::step(cornerLevel, cornerStart, MoveDirection::Down);
+    GameplaySession::Action cornerAction {
+        .before = cornerStart,
+        .after = cornerEnd,
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Down,
+    };
+    cornerAction.presentation =
+        presentation.buildActionPresentation(cornerAction, &cornerLevel);
+    std::vector<ActionMotionTrack> cornerTracks;
+    for (const ActionMotionTrack& track : cornerAction.presentation.motions) {
+        if (track.target == cartTarget) {
+            cornerTracks.push_back(track);
+        }
+    }
+    CHECK(cornerTracks.size() == 2);
+    if (cornerTracks.size() == 2) {
+        CHECK(near(cornerTracks[0].from.x, 1.0f) &&
+            near(cornerTracks[0].from.y, 0.0f) &&
+            near(cornerTracks[0].to.x, 2.0f) &&
+            near(cornerTracks[0].to.y, 0.0f));
+        CHECK(near(cornerTracks[1].from.x, 2.0f) &&
+            near(cornerTracks[1].from.y, 0.0f) &&
+            near(cornerTracks[1].to.x, 2.0f) &&
+            near(cornerTracks[1].to.y, 1.0f));
+    }
+    GameplayPresentation cornerPresentation;
+    cornerPresentation.resetEntities(cornerStart);
+    cornerPresentation.beginAction(cornerAction, cornerAction.before);
+    cornerPresentation.seekAction(
+        cornerAction,
+        1.0f + 1.5f * config::elevatorSecondsPerLayerPerStep);
+    const RenderFrameData cornerFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest,
+        .level = cornerLevel,
+        .state = cornerStart,
+        .moving = true,
+        .projectedState = cornerEnd,
+        .presentation = cornerPresentation,
+        .settings = {},
+    });
+    const auto cornerCart = std::ranges::find_if(
+        cornerFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.model == cartModel;
+        });
+    CHECK(cornerCart != cornerFrame.tiles.end());
+    if (cornerCart != cornerFrame.tiles.end()) {
+        CHECK(near(cornerCart->position.x, 2.0f));
+        CHECK(cornerCart->position.y > 0.0f && cornerCart->position.y < 1.0f);
+        CHECK(cornerCart->modelRotationQuarterTurns == 0);
+    }
 }
 
 void testTurnedHeroFacesItsNewDirectionSmoothly()
@@ -3412,6 +3611,7 @@ int main()
     testGateEnergyCubeFadesAndPressurePlateMatchesColor();
     testRotatorPlateSpinsWithTheUnitItTurns();
     testElevatorPlatformIsFlushAndCarriesItsRider();
+    testMinecartRendersOnItsStopAndCarriesItsRider();
     testTurnedHeroFacesItsNewDirectionSmoothly();
     testMirrorOnPlatesDrawsPlateAndTurns();
     testEditorDrawsPlatesBeneathTheirOccupants();

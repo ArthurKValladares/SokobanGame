@@ -1102,6 +1102,20 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
                 ? ", engaged"
                 : "");
     }
+    for (std::size_t index = 0; index < context.level.minecarts().size(); ++index) {
+        const Level::Minecart& minecart = context.level.minecarts()[index];
+        const GridPosition3 platform =
+            rules::minecartPlatformCell(context.level, state, index);
+        ImGui::Text(
+            "Minecart at (%d, %d, %d)%s%s",
+            platform.x,
+            platform.y,
+            platform.z,
+            context.level.minecartRoutes()[index].loop ? ", loop" : ", shuttle",
+            rules::isMinecartEngaged(context.level, state, minecart)
+                ? ", engaged"
+                : "");
+    }
     ImGui::BeginDisabled(context.inOverworld);
     result.solveCurrentScreen = ImGui::Button("Solve Current Screen");
     ImGui::EndDisabled();

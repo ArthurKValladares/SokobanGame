@@ -301,6 +301,21 @@ private:
                     : Level::Elevator {}.color,
                 1.0f);
         }
+        if (tileTypeIsMinecart(tile)) {
+            const auto found = std::ranges::find(
+                definition.minecarts, localCell, &Level::Minecart::cell);
+            const Vec3 color = found != definition.minecarts.end()
+                ? found->color
+                : Level::Minecart {}.color;
+            renderTile.color = { color.x, color.y, color.z, 1.0f };
+            const auto stop = std::ranges::find(
+                definition.plates, localCell, &Level::Plate::cell);
+            renderTile.modelRotationQuarterTurns = railOrientationQuarterTurns(
+                stop != definition.plates.end()
+                    ? stop->tile
+                    : TileType::Air)
+                .value_or(0);
+        }
         renderTile.pickable = false;
         renderTile.affectsCameraFit = false;
         const bool animatedActor =
@@ -538,6 +553,18 @@ private:
                     ? found->color
                     : Level::Elevator {}.color,
                 1.0f);
+        }
+        if (tileTypeIsMinecart(tile)) {
+            const GridPosition3 cell { x, y, z };
+            const auto found = std::ranges::find(
+                input_.editor.minecarts(), cell, &Level::Minecart::cell);
+            const Vec3 color = found != input_.editor.minecarts().end()
+                ? found->color
+                : Level::Minecart {}.color;
+            renderTile.color = { color.x, color.y, color.z, 1.0f };
+            renderTile.modelRotationQuarterTurns = railOrientationQuarterTurns(
+                input_.editor.documentPlateAt(cell).value_or(TileType::Air))
+                .value_or(0);
         }
         if (tileTypeIsRotator(tile)) {
             const GridPosition3 cell { x, y, z };
@@ -938,10 +965,13 @@ RenderFrameData::Tile tileVisual(
     const PresentationSettings& settings)
 {
     const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
+    const bool rail = tileTypeIsRail(tile);
     const bool conveyor = tileTypeIsConveyor(tile);
     const bool rotator = tileTypeIsRotator(tile);
     const bool elevator = tileTypeIsElevator(tile);
-    const float tileSize = rotator
+    const float tileSize = rail
+        ? 1.0f
+        : rotator
         ? config::rotatorPlateWidthDepth
         : (surfaceEntity ? settings.geometry.surfaceEntityWidthDepth : 1.0f);
     const float centeredOffset = (1.0f - tileSize) * 0.5f;
@@ -1001,14 +1031,15 @@ RenderFrameData::Tile tileVisual(
         .animationInstanceId = tileTypeIsPlayerStart(tile) || tile == TileType::Enemy
             ? authoredAnimationInstance(tile, cell)
             : uint64_t { 0 },
-        // Conveyors, turrets, and mirrors each carry an orientation in their
+        // Conveyors, turrets, mirrors, and rails carry an orientation in their
         // tile type. Each family rotates one shared model.
         .modelRotationQuarterTurns =
             rules::conveyorDirectionForTile(tile)
             ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
             : (rules::turretDirectionForTile(tile)
                     ? facingQuarterTurns(*rules::turretDirectionForTile(tile))
-                    : mirrorOrientationQuarterTurns(tile).value_or(0)),
+                    : railOrientationQuarterTurns(tile).value_or(
+                          mirrorOrientationQuarterTurns(tile).value_or(0))),
         .modelRotationOffsetRadians = tileTypeIsMirror(tile)
             ? config::mirrorModelRotationOffsetRadians
             : 0.0f,

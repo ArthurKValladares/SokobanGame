@@ -1314,6 +1314,215 @@ void testStateDeltaCarriesElevators()
     CHECK(!StateDelta::between(before, onlyElevator).empty());
 }
 
+Level makeOpenMinecartLevel(bool blockRiderDestination = false)
+{
+    std::string riders = "     ";
+    riders[2] = tileTypeToChar(TileType::Rock);
+    if (blockRiderDestination) {
+        riders[4] = tileTypeToChar(TileType::Wall);
+    }
+    return Level::loadFromDefinition({
+        .layers = {
+            { "....." },
+            { "CPM-_" },
+            { riders },
+        },
+        .plates = {
+            { .cell = cell(2, 0, 1), .tile = TileType::RailStopEastWest },
+        },
+        .minecarts = { Level::Minecart {
+            .cell = cell(2, 0, 1),
+            .pressurePlates = { cell(1, 0, 1) },
+            .initialDirection = 1,
+        } },
+        .character = CharacterType::Rogue,
+    }, "open minecart");
+}
+
+void testMinecartCarriesRiderAndPingPongsBetweenStops()
+{
+    TEST("minecartCarriesRiderAndPingPongsBetweenStops");
+    const Level level = makeOpenMinecartLevel();
+    GameState state = rules::initialState(level);
+    CHECK(state.minecarts.size() == 1);
+    CHECK(state.minecarts[0].cell == cell(2, 0, 1));
+    CHECK(level.minecartRoutes()[0].stops ==
+        (std::vector<GridPosition3> { cell(2, 0, 1), cell(4, 0, 1) }));
+
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.minecarts[0].cell == cell(4, 0, 1));
+    CHECK(state.movables[0].cell == cell(4, 0, 2));
+    CHECK(rules::liveTileAt(level, state, cell(2, 0, 1)) ==
+        TileType::RailStopEastWest);
+    CHECK(rules::liveTileAt(level, state, cell(4, 0, 1)) ==
+        TileType::Minecart);
+
+    // Staying pressed does not retrigger. Releasing and pressing again moves
+    // the open route back toward its starting stop.
+    CHECK(rules::step(level, state) == state);
+    state = rules::step(level, state, MoveDirection::Left);
+    CHECK(state.minecarts[0].cell == cell(4, 0, 1));
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.minecarts[0].cell == cell(2, 0, 1));
+    CHECK(state.movables[0].cell == cell(2, 0, 2));
+}
+
+void testMovableCanOccupyAndRideMinecartCell()
+{
+    TEST("movableCanOccupyAndRideMinecartCell");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "......." },
+            { "CRM-_ P" },
+        },
+        .plates = {
+            { .cell = cell(2, 0, 1), .tile = TileType::RailStopEastWest },
+        },
+        .minecarts = { Level::Minecart {
+            .cell = cell(2, 0, 1),
+            .pressurePlates = { cell(6, 0, 1) },
+            .initialDirection = 1,
+        } },
+        .character = CharacterType::Rogue,
+    }, "occupiable minecart");
+    GameState state = rules::initialState(level);
+
+    CHECK(rules::cellAllowsEntity(level, state, cell(2, 0, 1)));
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.movables[0].cell == cell(2, 0, 1));
+    CHECK(state.minecarts[0].cell == cell(2, 0, 1));
+
+    // Press the remote switch after the rock has boarded. It remains in the
+    // cart's rail cell for the whole trip and arrives at the next stop.
+    state.players[0].cell = cell(5, 0, 1);
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.minecarts[0].cell == cell(4, 0, 1));
+    CHECK(state.movables[0].cell == cell(4, 0, 1));
+}
+
+void testBlockedMinecartKeepsItsStopAndPhase()
+{
+    TEST("blockedMinecartKeepsItsStopAndPhase");
+    const Level level = makeOpenMinecartLevel(true);
+    const GameState state = rules::initialState(level);
+    const GameState pressed = rules::step(level, state, MoveDirection::Right);
+    CHECK(pressed.minecarts == state.minecarts);
+}
+
+void testMinecartLoopKeepsCirclingInSelectedDirection()
+{
+    TEST("minecartLoopKeepsCirclingInSelectedDirection");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "....", "....", "...." },
+            { "6M7C", "| !P", "5_8." },
+        },
+        .plates = {
+            { .cell = cell(1, 0, 1), .tile = TileType::RailStopEastWest },
+        },
+        .minecarts = { Level::Minecart {
+            .cell = cell(1, 0, 1),
+            .pressurePlates = { cell(3, 1, 1) },
+            .initialDirection = 1,
+        } },
+        .character = CharacterType::Rogue,
+    }, "minecart loop");
+    GameState state = rules::initialState(level);
+    const auto press = [&]() {
+        state = rules::step(level, state, MoveDirection::Down);
+    };
+    const auto release = [&]() {
+        state = rules::step(level, state, MoveDirection::Up);
+    };
+
+    press();
+    CHECK(state.minecarts[0].cell == cell(2, 1, 1));
+    release();
+    press();
+    CHECK(state.minecarts[0].cell == cell(1, 2, 1));
+    release();
+    press();
+    // A ping-pong route would return to (2,1); the loop continues around to
+    // its start and will head to (2,1) again on the next activation.
+    CHECK(state.minecarts[0].cell == cell(1, 0, 1));
+}
+
+void testScopedHeroActivatesAuthoredMinecartLoop()
+{
+    TEST("scopedHeroActivatesAuthoredMinecartLoop");
+    // Mirrors the editor setup from level5/screen2: a four-stop loop, two
+    // independently controlled heroes, and one linked pressure plate.
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            {
+                ".............",
+                ".............",
+                ".............",
+                ".............",
+                ".............",
+                ".............",
+                ".............",
+            },
+            {
+                "             ",
+                " 6----_----7 ",
+                " |         | ",
+                " !   KQ P  ! ",
+                " |         | ",
+                " 5----M----8 ",
+                "             ",
+            },
+        },
+        .plates = {
+            { .cell = cell(6, 5, 1), .tile = TileType::RailStopEastWest },
+        },
+        .minecarts = { Level::Minecart {
+            .cell = cell(6, 5, 1),
+            .pressurePlates = { cell(8, 3, 1) },
+            .initialDirection = 1,
+        } },
+    }, "authored minecart loop");
+    GameState state = rules::initialState(level);
+    CHECK(level.minecartRoutes()[0].loop);
+    CHECK(level.minecartRoutes()[0].stops.size() == 4);
+
+    const auto knight = std::ranges::find(
+        state.players, CharacterType::Knight, &GameState::Player::character);
+    CHECK(knight != state.players.end());
+    const std::size_t knightIndex = static_cast<std::size_t>(
+        knight - state.players.begin());
+    state.players[knightIndex].cell = cell(7, 3, 1);
+    const EntityId knightId = state.players[knightIndex].id;
+    state = rules::scopedStep(
+        level,
+        state,
+        MoveDirection::Right,
+        {},
+        { .actors = { knightId } });
+
+    CHECK(rules::isPressurePlateActive(level, state, cell(8, 3, 1)));
+    CHECK(state.minecarts[0].cell == cell(11, 3, 1));
+}
+
+void testStateDeltaCarriesMinecarts()
+{
+    TEST("stateDeltaCarriesMinecarts");
+    GameState before;
+    before.players.push_back({ .id = 1, .cell = cell(0, 0, 1) });
+    before.minecarts.push_back({ .cell = cell(2, 0, 1), .phase = 0 });
+    GameState after = before;
+    after.minecarts[0] = { .cell = cell(4, 0, 1), .phase = 1 };
+
+    const StateDelta delta = StateDelta::between(before, after);
+    CHECK(delta.minecarts.size() == 1);
+    CHECK(delta.minecarts[0].index == 0);
+    GameState applied = before;
+    delta.applyTo(applied);
+    CHECK(applied == after);
+    delta.inverted().applyTo(applied);
+    CHECK(applied == before);
+}
+
 void testPlayerCannotWalkIntoWater()
 {
     TEST("playerCannotWalkIntoWater");
@@ -2369,6 +2578,12 @@ int main()
     testBlockedElevatorStaysAndKeepsItsPhase();
     testHeroRidesAnElevatorAndTurretsSeeTheArrival();
     testStateDeltaCarriesElevators();
+    testMinecartCarriesRiderAndPingPongsBetweenStops();
+    testMovableCanOccupyAndRideMinecartCell();
+    testBlockedMinecartKeepsItsStopAndPhase();
+    testMinecartLoopKeepsCirclingInSelectedDirection();
+    testScopedHeroActivatesAuthoredMinecartLoop();
+    testStateDeltaCarriesMinecarts();
     testPlayerCannotWalkIntoWater();
     testPlayerCanSlideIntoWater();
     testRockFillsWater();

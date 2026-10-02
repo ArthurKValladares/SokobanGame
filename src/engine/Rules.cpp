@@ -152,6 +152,11 @@ FallResult fallTarget(
     OccupiedBelow occupiedBelow)
 {
     GridPosition3 current = position;
+    // A minecart is a low platform inside its rail cell, so a unit occupying
+    // that same cell is supported even when the rail is on the bottom layer.
+    if (minecartPlatformAt(level, state, current)) {
+        return { .cell = current, .fallen = false };
+    }
     while (current.z > 0) {
         const GridPosition3 below { current.x, current.y, current.z - 1 };
         const TileType support = liveTileAt(level, state, below);
@@ -341,6 +346,10 @@ GameState initialState(const Level& level)
             .cell = elevator.cell,
             .phase = elevatorInitialPhase(elevator),
         });
+    }
+    state.minecarts.reserve(level.minecarts().size());
+    for (const Level::Minecart& minecart : level.minecarts()) {
+        state.minecarts.push_back({ .cell = minecart.cell, .phase = 0 });
     }
 
     return state;
@@ -564,6 +573,52 @@ std::optional<std::size_t> elevatorPlatformAt(
     return std::nullopt;
 }
 
+std::size_t minecartStopIndex(
+    const Level::MinecartRoute& route, uint16_t phase)
+{
+    const std::size_t count = route.stops.size();
+    if (count <= 1) {
+        return 0;
+    }
+    if (route.loop) {
+        return static_cast<std::size_t>(phase) % count;
+    }
+    const std::size_t period = 2 * (count - 1);
+    const std::size_t wrapped = static_cast<std::size_t>(phase) % period;
+    return wrapped < count ? wrapped : period - wrapped;
+}
+
+uint16_t minecartNextPhase(
+    const Level::MinecartRoute& route, uint16_t phase)
+{
+    const std::size_t count = route.stops.size();
+    if (count <= 1) {
+        return 0;
+    }
+    const std::size_t period = route.loop ? count : 2 * (count - 1);
+    return static_cast<uint16_t>(
+        (static_cast<std::size_t>(phase) % period + 1) % period);
+}
+
+GridPosition3 minecartPlatformCell(
+    const Level& level, const GameState& state, std::size_t index)
+{
+    return index < state.minecarts.size()
+        ? state.minecarts[index].cell
+        : level.minecarts().at(index).cell;
+}
+
+std::optional<std::size_t> minecartPlatformAt(
+    const Level& level, const GameState& state, GridPosition3 cell)
+{
+    for (std::size_t i = 0; i < level.minecarts().size(); ++i) {
+        if (minecartPlatformCell(level, state, i) == cell) {
+            return i;
+        }
+    }
+    return std::nullopt;
+}
+
 TileType liveTileAt(
     const Level& level, const GameState& state, GridPosition3 position)
 {
@@ -571,13 +626,22 @@ TileType liveTileAt(
         return TileType::Air;
     }
     const TileType tile = tileAt(level, position);
-    if (level.elevators().empty()) {
+    if (level.elevators().empty() && level.minecarts().empty()) {
         return tile;
     }
     if (elevatorPlatformAt(level, state, position)) {
         return TileType::Elevator;
     }
-    return tile == TileType::Elevator ? TileType::Air : tile;
+    if (minecartPlatformAt(level, state, position)) {
+        return TileType::Minecart;
+    }
+    if (tile == TileType::Elevator) {
+        return TileType::Air;
+    }
+    if (tile == TileType::Minecart) {
+        return level.plateAt(position).value_or(TileType::Air);
+    }
+    return tile;
 }
 
 bool staticCellAllowsEntity(const Level& level, GridPosition3 position)
@@ -596,7 +660,7 @@ bool staticCellAllowsEntity(const Level& level, GridPosition3 position)
 
     const TileType tile = tileAt(level, position);
     return tileTypeAllowsEntity(tile) || tile == TileType::Gate ||
-        tile == TileType::Elevator;
+        tile == TileType::Elevator || tile == TileType::Minecart;
 }
 
 bool cellAllowsEntity(
@@ -604,12 +668,22 @@ bool cellAllowsEntity(
     const GameState& state,
     GridPosition3 position)
 {
-    if (!level.elevators().empty() && level.inBounds(position)) {
+    if ((!level.elevators().empty() || !level.minecarts().empty()) &&
+        level.inBounds(position)) {
         if (elevatorPlatformAt(level, state, position)) {
             return false;
         }
         if (tileAt(level, position) == TileType::Elevator) {
             // The authored cell, while the platform is somewhere else.
+            return true;
+        }
+        if (minecartPlatformAt(level, state, position)) {
+            // Unlike the full-height elevator block, the cart is a platform
+            // within the rail cell and may be occupied by a unit.
+            return true;
+        }
+        if (tileAt(level, position) == TileType::Minecart) {
+            // Reveal the stop rail when the cart has moved away.
             return true;
         }
     }
@@ -729,6 +803,19 @@ bool isElevatorEngaged(
             });
 }
 
+bool isMinecartEngaged(
+    const Level& level,
+    const GameState& state,
+    const Level::Minecart& minecart)
+{
+    return !minecart.pressurePlates.empty() &&
+        std::ranges::all_of(
+            minecart.pressurePlates,
+            [&](GridPosition3 plate) {
+                return isPressurePlateActive(level, state, plate);
+            });
+}
+
 namespace {
 
 // Per-rotator engagement, in Level::rotators() order.
@@ -817,6 +904,15 @@ std::vector<char> elevatorEngagement(const Level& level, const GameState& state)
     std::vector<char> engaged(level.elevators().size(), 0);
     for (std::size_t i = 0; i < engaged.size(); ++i) {
         engaged[i] = isElevatorEngaged(level, state, level.elevators()[i]);
+    }
+    return engaged;
+}
+
+std::vector<char> minecartEngagement(const Level& level, const GameState& state)
+{
+    std::vector<char> engaged(level.minecarts().size(), 0);
+    for (std::size_t i = 0; i < engaged.size(); ++i) {
+        engaged[i] = isMinecartEngaged(level, state, level.minecarts()[i]);
     }
     return engaged;
 }
@@ -949,6 +1045,155 @@ ElevatorRiders applyElevatorActivations(
                 break;
             case EntityKind::Enemy:
                 state.enemies[unit.index].cell.z += delta;
+                riders.enemies.push_back(unit.index);
+                break;
+            default:
+                break;
+            }
+        }
+    }
+    return riders;
+}
+
+struct MinecartRiders {
+    std::vector<std::size_t> players;
+    std::vector<std::size_t> movables;
+    std::vector<std::size_t> enemies;
+    std::vector<std::size_t> minecarts;
+
+    [[nodiscard]] bool empty() const { return minecarts.empty(); }
+};
+
+// Grid cells swept by one transition between adjacent stops in route order.
+// The starting cell is excluded and the destination is included.
+std::vector<GridPosition3> minecartSweepCells(
+    const Level::MinecartRoute& route,
+    std::size_t fromStop,
+    std::size_t toStop)
+{
+    std::vector<GridPosition3> result;
+    if (fromStop >= route.stopCellIndices.size() ||
+        toStop >= route.stopCellIndices.size() || route.cells.empty()) {
+        return result;
+    }
+    const std::size_t from = route.stopCellIndices[fromStop];
+    const std::size_t to = route.stopCellIndices[toStop];
+    if (to > from) {
+        result.insert(
+            result.end(),
+            route.cells.begin() + static_cast<std::ptrdiff_t>(from + 1),
+            route.cells.begin() + static_cast<std::ptrdiff_t>(to + 1));
+    } else if (route.loop && fromStop + 1 == route.stops.size() && toStop == 0) {
+        result.insert(
+            result.end(),
+            route.cells.begin() + static_cast<std::ptrdiff_t>(from + 1),
+            route.cells.end());
+        result.push_back(route.cells.front());
+    } else {
+        for (std::size_t index = from; index > to; --index) {
+            result.push_back(route.cells[index - 1]);
+        }
+    }
+    return result;
+}
+
+MinecartRiders applyMinecartActivations(
+    const Level& level,
+    GameState& state,
+    const std::vector<char>& engagedBefore)
+{
+    MinecartRiders riders;
+    if (state.minecarts.size() != level.minecarts().size() ||
+        level.minecartRoutes().size() != level.minecarts().size()) {
+        return riders;
+    }
+    for (std::size_t m = 0; m < level.minecarts().size(); ++m) {
+        const Level::Minecart& minecart = level.minecarts()[m];
+        const Level::MinecartRoute& route = level.minecartRoutes()[m];
+        if ((m < engagedBefore.size() && engagedBefore[m]) ||
+            route.stops.size() < 2 ||
+            !isMinecartEngaged(level, state, minecart)) {
+            continue;
+        }
+
+        GameState::Minecart& platform = state.minecarts[m];
+        const std::size_t fromStop = minecartStopIndex(route, platform.phase);
+        const uint16_t nextPhase = minecartNextPhase(route, platform.phase);
+        const std::size_t toStop = minecartStopIndex(route, nextPhase);
+        const GridPosition3 from = platform.cell;
+        const GridPosition3 target = route.stops[toStop];
+        const std::vector<GridPosition3> sweep =
+            minecartSweepCells(route, fromStop, toStop);
+        if (sweep.empty() || target == from) {
+            platform.phase = nextPhase;
+            continue;
+        }
+
+        // New carts carry an occupant in their own rail cell. Preserve the
+        // older above-cart form as well so existing authored levels continue
+        // to work; either form may have a contiguous stack above it.
+        const int firstRiderHeight = liveUnitAt(state, from) ? 0 : 1;
+        std::vector<LiveUnitAt> stack;
+        for (GridPosition3 cell {
+                 from.x, from.y, from.z + firstRiderHeight,
+             };
+             cell.z <= static_cast<int>(level.depth());
+             ++cell.z) {
+            const std::optional<LiveUnitAt> unit = liveUnitAt(state, cell);
+            if (!unit) {
+                break;
+            }
+            stack.push_back(*unit);
+        }
+
+        bool blocked = false;
+        for (const GridPosition3 railCell : sweep) {
+            const std::optional<std::size_t> other =
+                minecartPlatformAt(level, state, railCell);
+            if ((other && *other != m) || anyUnitIn(state, railCell)) {
+                blocked = true;
+                break;
+            }
+            for (int height = firstRiderHeight;
+                 height < firstRiderHeight + static_cast<int>(stack.size());
+                 ++height) {
+                const GridPosition3 riderCell {
+                    railCell.x, railCell.y, railCell.z + height,
+                };
+                if (!cellAllowsEntity(level, state, riderCell) ||
+                    anyUnitIn(state, riderCell)) {
+                    blocked = true;
+                    break;
+                }
+            }
+            if (blocked) {
+                break;
+            }
+        }
+        if (blocked) {
+            continue;
+        }
+
+        const int dx = target.x - from.x;
+        const int dy = target.y - from.y;
+        platform.cell = target;
+        platform.phase = nextPhase;
+        riders.minecarts.push_back(m);
+        for (const LiveUnitAt& unit : stack) {
+            switch (unit.kind) {
+            case EntityKind::Player:
+                state.players[unit.index].cell.x += dx;
+                state.players[unit.index].cell.y += dy;
+                riders.players.push_back(unit.index);
+                break;
+            case EntityKind::Movable:
+                state.movables[unit.index].cell.x += dx;
+                state.movables[unit.index].cell.y += dy;
+                riders.movables.push_back(unit.index);
+                break;
+            case EntityKind::Enemy:
+                state.enemies[unit.index].cell.x += dx;
+                state.enemies[unit.index].cell.y += dy;
                 riders.enemies.push_back(unit.index);
                 break;
             default:
@@ -1640,6 +1885,7 @@ public:
         , turretShots_(turretShots)
         , rotatorsEngagedAtStart_(rotatorEngagement(level, after))
         , elevatorsEngagedAtStart_(elevatorEngagement(level, after))
+        , minecartsEngagedAtStart_(minecartEngagement(level, after))
     {
         for (Status& status : status_) {
             status.active = scope.wholeWorld();
@@ -1706,6 +1952,7 @@ public:
         }
         resolveRotators();
         resolveElevators();
+        resolveMinecarts();
     }
 
 private:
@@ -2776,6 +3023,52 @@ private:
         markDeadEntitiesDone();
     }
 
+    // Minecarts use the elevator's edge-trigger and rider semantics, but move
+    // horizontally between stops derived from their oriented rail route.
+    void resolveMinecarts()
+    {
+        const MinecartRiders carried = applyMinecartActivations(
+            level_, after_, minecartsEngagedAtStart_);
+        if (carried.empty()) {
+            return;
+        }
+        bool anyCarried = false;
+        for (const std::size_t index : carried.players) {
+            Status& status = status_[entityIndexForPlayer(index)];
+            status.active = true;
+            status.movedThisMicro = true;
+            anyCarried = true;
+        }
+        for (const std::size_t index : carried.enemies) {
+            Status& status = status_[entityIndexForEnemy(index)];
+            status.active = true;
+            status.movedThisMicro = true;
+            enemyMoved_[index] = true;
+            enemyMovedThisMicro_[index] = true;
+            anyCarried = true;
+        }
+        std::vector<char> sweeping(movableCount_, 0);
+        bool anyTurret = false;
+        for (const std::size_t index : carried.movables) {
+            status_[index].active = true;
+            status_[index].movedThisMicro = true;
+            anyCarried = true;
+            if (turretDirection(after_.movables[index])) {
+                sweeping[index] = 1;
+                anyTurret = true;
+            }
+        }
+        if (!anyCarried) {
+            return;
+        }
+        resolveTurretShots();
+        if (anyTurret) {
+            resolveTurretShots(&sweeping);
+        }
+        resolveAttacks();
+        markDeadEntitiesDone();
+    }
+
     // A turret normally reacts to movement, while two turrets aimed directly
     // at one another form an ambient volley without waiting for another actor.
     // Every live entity is still an occluder, so a rock between a turret and a
@@ -3156,6 +3449,8 @@ private:
     // Which elevators had every linked plate pressed when the step began; the
     // same edge rule as rotators.
     std::vector<char> elevatorsEngagedAtStart_;
+    // Which minecarts had every linked plate pressed when the step began.
+    std::vector<char> minecartsEngagedAtStart_;
 };
 
 } // namespace

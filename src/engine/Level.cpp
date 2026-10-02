@@ -25,6 +25,7 @@ constexpr std::string_view selectorPrefix = "@selector ";
 constexpr std::string_view gatePrefix = "@gate ";
 constexpr std::string_view rotatorPrefix = "@rotator ";
 constexpr std::string_view elevatorPrefix = "@elevator ";
+constexpr std::string_view minecartPrefix = "@minecart ";
 constexpr std::string_view linkColorPrefix = "@linkcolor ";
 // Far more stops than any board has layers; it keeps an elevator's cycle
 // phase (2 * stops - 2 values) inside GameState's 8-bit field.
@@ -495,6 +496,14 @@ void validateLinkedRecord(
                 std::string(sourceName));
         }
     }
+    if constexpr (requires { record.initialDirection; }) {
+        if (record.initialDirection > 3) {
+            throw std::runtime_error(
+                std::string(kind) +
+                " initial direction must be 0 (north), 1 (east), 2 (south), or 3 (west): " +
+                std::string(sourceName));
+        }
+    }
     for (std::size_t i = 0; i < record.pressurePlates.size(); ++i) {
         const GridPosition3 plate = record.pressurePlates[i];
         if (plate.x < 0 || plate.y < 0 || plate.z < 0) {
@@ -575,6 +584,19 @@ Record parseLinkedRecord(
                 record.levels.push_back(level.get<int>());
             }
         }
+        if constexpr (requires { record.initialDirection; }) {
+            const auto direction = object.find("direction");
+            if (direction == object.end() || !direction->is_number_integer()) {
+                throw std::runtime_error(
+                    lower + " 'direction' must be an integer from 0 to 3");
+            }
+            const int value = direction->get<int>();
+            if (value < 0 || value > 3) {
+                throw std::runtime_error(
+                    lower + " 'direction' must be an integer from 0 to 3");
+            }
+            record.initialDirection = static_cast<uint8_t>(value);
+        }
         validateLinkedRecord(record, sourceName, kind);
         return record;
     } catch (const nlohmann::json::exception& error) {
@@ -606,6 +628,9 @@ std::string serializeLinkedRecord(
     };
     if constexpr (requires { record.levels; }) {
         object["levels"] = record.levels;
+    }
+    if constexpr (requires { record.initialDirection; }) {
+        object["direction"] = record.initialDirection;
     }
     return std::string(prefix) + object.dump();
 }
@@ -824,6 +849,131 @@ bool hasAdjacentGround(const Level& level, GridPosition3 position)
 
 } // namespace
 
+namespace {
+
+uint8_t railDirectionBit(uint8_t direction)
+{
+    return static_cast<uint8_t>(1U << direction);
+}
+
+uint8_t oppositeRailDirectionBit(uint8_t direction)
+{
+    return railDirectionBit(static_cast<uint8_t>((direction + 2U) % 4U));
+}
+
+GridPosition railDirectionOffset(uint8_t direction)
+{
+    constexpr std::array<GridPosition, 4> offsets {
+        GridPosition { 0, -1 },
+        GridPosition { 1, 0 },
+        GridPosition { 0, 1 },
+        GridPosition { -1, 0 },
+    };
+    return offsets.at(direction);
+}
+
+TileType railTileAt(const Level& level, GridPosition3 cell)
+{
+    if (!level.inBounds(cell)) {
+        return TileType::Air;
+    }
+    const std::optional<TileType> plate = level.plateAt(cell);
+    if (plate && tileTypeIsRail(*plate)) {
+        return *plate;
+    }
+    return level.tileAt(
+        static_cast<uint32_t>(cell.x),
+        static_cast<uint32_t>(cell.y),
+        static_cast<uint32_t>(cell.z));
+}
+
+bool railsConnect(
+    const Level& level,
+    GridPosition3 from,
+    uint8_t direction,
+    GridPosition3 to)
+{
+    return (railConnectionMask(railTileAt(level, from)) &
+               railDirectionBit(direction)) != 0 &&
+        (railConnectionMask(railTileAt(level, to)) &
+               oppositeRailDirectionBit(direction)) != 0;
+}
+
+Level::MinecartRoute buildMinecartRoute(
+    const Level& level,
+    const Level::Minecart& minecart,
+    std::string_view sourceName)
+{
+    Level::MinecartRoute route;
+    route.cells.push_back(minecart.cell);
+    route.stops.push_back(minecart.cell);
+    route.stopCellIndices.push_back(0);
+
+    const GridPosition firstOffset =
+        railDirectionOffset(minecart.initialDirection);
+    GridPosition3 previous = minecart.cell;
+    GridPosition3 current {
+        minecart.cell.x + firstOffset.x,
+        minecart.cell.y + firstOffset.y,
+        minecart.cell.z,
+    };
+    if (!railsConnect(
+            level, minecart.cell, minecart.initialDirection, current)) {
+        return route;
+    }
+
+    while (true) {
+        if (current == minecart.cell) {
+            route.loop = true;
+            break;
+        }
+        if (std::ranges::find(route.cells, current) != route.cells.end()) {
+            throw std::runtime_error(
+                "Minecart rail route intersects itself before returning to its start: " +
+                std::string(sourceName));
+        }
+        route.cells.push_back(current);
+        if (tileTypeIsRailStop(railTileAt(level, current))) {
+            route.stops.push_back(current);
+            route.stopCellIndices.push_back(route.cells.size() - 1);
+        }
+
+        const uint8_t connections = railConnectionMask(railTileAt(level, current));
+        bool foundNext = false;
+        GridPosition3 next {};
+        for (uint8_t direction = 0; direction < 4; ++direction) {
+            if ((connections & railDirectionBit(direction)) == 0) {
+                continue;
+            }
+            const GridPosition offset = railDirectionOffset(direction);
+            const GridPosition3 candidate {
+                current.x + offset.x,
+                current.y + offset.y,
+                current.z,
+            };
+            if (candidate == previous ||
+                !railsConnect(level, current, direction, candidate)) {
+                continue;
+            }
+            if (foundNext) {
+                throw std::runtime_error(
+                    "Minecart rail route branches: " +
+                    std::string(sourceName));
+            }
+            foundNext = true;
+            next = candidate;
+        }
+        if (!foundNext) {
+            break;
+        }
+        previous = current;
+        current = next;
+    }
+    return route;
+}
+
+} // namespace
+
 Level Level::loadFromFile(const std::filesystem::path& path)
 {
     return loadFromDefinition(loadDefinitionFromFile(path), path.string());
@@ -972,6 +1122,18 @@ Level::Definition Level::parseDefinition(
             continue;
         }
 
+        if (line.starts_with(minecartPrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Minecart metadata must appear before '@layer 0': " + source);
+            }
+            definition.minecarts.push_back(parseLinkedRecord<Minecart>(
+                std::string_view(line).substr(minecartPrefix.size()),
+                sourceName,
+                "Minecart"));
+            continue;
+        }
+
         if (line.starts_with(linkColorPrefix)) {
             if (currentLayer) {
                 throw std::runtime_error(
@@ -1066,6 +1228,7 @@ Level::Definition Level::parseDefinition(
     canonicalizeLinkedRecords(definition.gates, sourceName, "Gate");
     canonicalizeLinkedRecords(definition.rotators, sourceName, "Rotator");
     canonicalizeLinkedRecords(definition.elevators, sourceName, "Elevator");
+    canonicalizeLinkedRecords(definition.minecarts, sourceName, "Minecart");
     canonicalizePlates(definition.plates, sourceName);
     canonicalizeLinkColors(definition.linkColors, sourceName);
 
@@ -1090,6 +1253,7 @@ std::vector<std::string> Level::serializeDefinition(
         definition.gates.empty() &&
         definition.rotators.empty() &&
         definition.elevators.empty() &&
+        definition.minecarts.empty() &&
         definition.linkColors.empty() &&
         definition.plates.empty()) {
         return definition.layers.front();
@@ -1134,6 +1298,14 @@ std::vector<std::string> Level::serializeDefinition(
         lines.push_back(
             serializeLinkedRecord(elevator, elevatorPrefix, "Elevator"));
     }
+    std::vector<Minecart> minecarts = definition.minecarts;
+    std::ranges::sort(minecarts, {}, [](const Minecart& minecart) {
+        return std::array { minecart.cell.z, minecart.cell.y, minecart.cell.x };
+    });
+    for (const Minecart& minecart : minecarts) {
+        lines.push_back(
+            serializeLinkedRecord(minecart, minecartPrefix, "Minecart"));
+    }
     std::vector<Plate> plates = definition.plates;
     std::ranges::sort(plates, {}, [](const Plate& plate) {
         return std::array { plate.cell.z, plate.cell.y, plate.cell.x };
@@ -1155,6 +1327,7 @@ std::vector<std::string> Level::serializeDefinition(
         !definition.gates.empty() ||
         !definition.rotators.empty() ||
         !definition.elevators.empty() ||
+        !definition.minecarts.empty() ||
         !definition.linkColors.empty() ||
         !definition.plates.empty()) {
         lines.emplace_back();
@@ -1196,7 +1369,8 @@ Level Level::loadFromDefinition(
         definition.rotators,
         definition.plates,
         definition.character.value_or(CharacterType::Rogue),
-        definition.elevators);
+        definition.elevators,
+        definition.minecarts);
 }
 
 Level Level::loadFromLayers(
@@ -1209,7 +1383,8 @@ Level Level::loadFromLayers(
     const std::vector<Rotator>& rotators,
     const std::vector<Plate>& plates,
     CharacterType selectedCharacter,
-    const std::vector<Elevator>& elevators)
+    const std::vector<Elevator>& elevators,
+    const std::vector<Minecart>& minecarts)
 {
     const std::string source(sourceName);
     if (sourceLayers.empty()) {
@@ -1252,6 +1427,8 @@ Level Level::loadFromLayers(
     canonicalizeLinkedRecords(level.rotators_, sourceName, "Rotator");
     level.elevators_ = elevators;
     canonicalizeLinkedRecords(level.elevators_, sourceName, "Elevator");
+    level.minecarts_ = minecarts;
+    canonicalizeLinkedRecords(level.minecarts_, sourceName, "Minecart");
     level.coveredPlates_ = plates;
     canonicalizePlates(level.coveredPlates_, sourceName);
     for (const auto& layer : sourceLayers) {
@@ -1324,7 +1501,7 @@ Level Level::loadFromLayers(
                 if (covered != level.coveredPlates_.end()) {
                     if (!tileTypeCanStandOnPlate(*tile)) {
                         throw std::runtime_error(
-                            "A '@plate' record must lie beneath a unit or mirror, not '" +
+                            "A '@plate' record must lie beneath a unit or mirror (or a minecart), not '" +
                             std::string(tileTypeName(*tile)) + "': " + source);
                     }
                     ++matchedCoveredPlates;
@@ -1353,7 +1530,7 @@ Level Level::loadFromLayers(
 
     if (matchedCoveredPlates != level.coveredPlates_.size()) {
         throw std::runtime_error(
-            "A '@plate' record must lie beneath a unit or mirror: " + source);
+            "A '@plate' record must lie beneath a unit or mirror (or a minecart): " + source);
     }
 
     if (level.playerStarts_.empty()) {
@@ -1418,6 +1595,36 @@ Level Level::loadFromLayers(
             }
         }
     }
+    level.minecartRoutes_.reserve(level.minecarts_.size());
+    for (const Minecart& minecart : level.minecarts_) {
+        if (!level.inBounds(minecart.cell) ||
+            level.authoredTileAt(
+                static_cast<uint32_t>(minecart.cell.x),
+                static_cast<uint32_t>(minecart.cell.y),
+                static_cast<uint32_t>(minecart.cell.z)) != TileType::Minecart) {
+            throw std::runtime_error(
+                "Minecart metadata cell must contain a Minecart tile: " + source);
+        }
+        const TileType stop = level.plateAt(minecart.cell).value_or(TileType::Air);
+        if (!tileTypeIsRailStop(stop)) {
+            throw std::runtime_error(
+                "A Minecart must be authored on top of a Rail Stop: " + source);
+        }
+        if ((railConnectionMask(stop) &
+                railDirectionBit(minecart.initialDirection)) == 0) {
+            throw std::runtime_error(
+                "Minecart initial direction must follow its starting Rail Stop: " +
+                source);
+        }
+        for (GridPosition3 plate : minecart.pressurePlates) {
+            if (level.plateAt(plate) != TileType::PressurePlate) {
+                throw std::runtime_error(
+                    "Minecart links must refer to Pressure tiles: " + source);
+            }
+        }
+        level.minecartRoutes_.push_back(
+            buildMinecartRoute(level, minecart, sourceName));
+    }
     for (uint32_t z = 0; z < level.depth_; ++z) {
         for (uint32_t y = 0; y < level.height_; ++y) {
             for (uint32_t x = 0; x < level.width_; ++x) {
@@ -1431,6 +1638,12 @@ Level Level::loadFromLayers(
                     level.elevatorAt(cell) == nullptr) {
                     throw std::runtime_error(
                         "Every Elevator tile requires an '@elevator' metadata record: " +
+                        source);
+                }
+                if (authored == TileType::Minecart &&
+                    level.minecartAt(cell) == nullptr) {
+                    throw std::runtime_error(
+                        "Every Minecart tile requires an '@minecart' metadata record: " +
                         source);
                 }
                 if (authored == TileType::Gate &&
@@ -1613,6 +1826,23 @@ const Level::Elevator* Level::elevatorForPressurePlate(GridPosition3 cell) const
     return found == elevators_.end() ? nullptr : &*found;
 }
 
+const Level::Minecart* Level::minecartAt(GridPosition3 cell) const
+{
+    const auto found = std::ranges::find(minecarts_, cell, &Minecart::cell);
+    return found == minecarts_.end() ? nullptr : &*found;
+}
+
+const Level::Minecart* Level::minecartForPressurePlate(GridPosition3 cell) const
+{
+    const auto found = std::ranges::find_if(
+        minecarts_,
+        [cell](const Minecart& minecart) {
+            return std::ranges::find(minecart.pressurePlates, cell) !=
+                minecart.pressurePlates.end();
+        });
+    return found == minecarts_.end() ? nullptr : &*found;
+}
+
 std::optional<TileType> Level::plateAt(GridPosition3 cell) const
 {
     if (!inBounds(cell)) {
@@ -1639,6 +1869,9 @@ std::optional<Vec3> Level::pressurePlateLinkColor(GridPosition3 cell) const
     }
     if (const Elevator* elevator = elevatorForPressurePlate(cell)) {
         return elevator->color;
+    }
+    if (const Minecart* minecart = minecartForPressurePlate(cell)) {
+        return minecart->color;
     }
     return std::nullopt;
 }

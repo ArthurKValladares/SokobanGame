@@ -286,7 +286,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
 {
     rejectUnknownProperties(
         value,
-        { "players", "movables", "enemies", "turnedMirrors", "elevators" },
+        { "players", "movables", "enemies", "turnedMirrors", "elevators", "minecarts" },
         context);
     GameState state;
     const Json& players = requiredProperty(value, "players", context);
@@ -417,8 +417,8 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
             rules::setMirrorQuarterTurns(state, cell, quarterTurns);
         }
     }
-    // Written only for screens with elevators: one entry per elevator, in
-    // the level's elevator order. Restore validates the values by replay.
+    // Written only for screens with moving platforms: one entry per authored
+    // platform, in level order. Restore validates the values by replay.
     if (value.contains("elevators")) {
         const Json& elevators = value["elevators"];
         if (!elevators.is_array()) {
@@ -439,6 +439,29 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
                     requiredProperty(item, "cell", elevatorContext),
                     elevatorContext + ".cell"),
                 .phase = static_cast<uint8_t>(phase),
+            });
+        }
+    }
+    if (value.contains("minecarts")) {
+        const Json& minecarts = value["minecarts"];
+        if (!minecarts.is_array()) {
+            fail(context, "property 'minecarts' must be an array");
+        }
+        for (std::size_t i = 0; i < minecarts.size(); ++i) {
+            const std::string minecartContext = std::string(context) +
+                ".minecarts[" + std::to_string(i) + "]";
+            const Json& item = minecarts[i];
+            rejectUnknownProperties(item, { "cell", "phase" }, minecartContext);
+            const uint64_t phase =
+                unsignedIntegerProperty(item, "phase", minecartContext);
+            if (phase > 0xffffU) {
+                fail(minecartContext, "property 'phase' must be below 65536");
+            }
+            state.minecarts.push_back({
+                .cell = positionFromJson(
+                    requiredProperty(item, "cell", minecartContext),
+                    minecartContext + ".cell"),
+                .phase = static_cast<uint16_t>(phase),
             });
         }
     }
@@ -523,6 +546,16 @@ OrderedJson gameStateToJson(const GameState& state)
         }
         result["elevators"] = std::move(elevators);
     }
+    if (!state.minecarts.empty()) {
+        OrderedJson minecarts = OrderedJson::array();
+        for (const GameState::Minecart& minecart : state.minecarts) {
+            minecarts.push_back({
+                { "cell", positionToJson(minecart.cell) },
+                { "phase", minecart.phase },
+            });
+        }
+        result["minecarts"] = std::move(minecarts);
+    }
     return result;
 }
 
@@ -560,6 +593,9 @@ EntityKind entityKindFromJson(const Json& value, std::string_view context)
     if (kind == "elevator") {
         return EntityKind::Elevator;
     }
+    if (kind == "minecart") {
+        return EntityKind::Minecart;
+    }
     fail(context, "unknown entity kind '" + kind + "'");
 }
 
@@ -574,6 +610,8 @@ std::string_view entityKindName(EntityKind kind)
         return "enemy";
     case EntityKind::Elevator:
         return "elevator";
+    case EntityKind::Minecart:
+        return "minecart";
     }
     return "player";
 }

@@ -301,6 +301,22 @@ std::uint64_t levelDigest(const Level::Definition& definition)
         }
         hashBytes(hash, text + "\n");
     }
+    std::vector<Level::Minecart> minecarts = definition.minecarts;
+    std::ranges::sort(minecarts, {}, [&](const Level::Minecart& minecart) {
+        return cellOrder(minecart.cell);
+    });
+    for (Level::Minecart& minecart : minecarts) {
+        std::ranges::sort(minecart.pressurePlates, {}, cellOrder);
+        std::string text = "@minecart " + std::to_string(minecart.cell.x) +
+            "," + std::to_string(minecart.cell.y) + "," +
+            std::to_string(minecart.cell.z) + ":";
+        for (GridPosition3 plate : minecart.pressurePlates) {
+            text += " " + std::to_string(plate.x) + "," +
+                std::to_string(plate.y) + "," + std::to_string(plate.z);
+        }
+        text += " direction " + std::to_string(minecart.initialDirection);
+        hashBytes(hash, text + "\n");
+    }
     // Plates authored beneath units change what the screen does from its
     // first step; hashed only when present, like rotators.
     std::vector<Level::Plate> plates = definition.plates;

@@ -166,6 +166,24 @@ void collectElevators(
     }
 }
 
+void collectMinecarts(
+    const GameState& before,
+    const GameState& after,
+    std::vector<StateDelta::MinecartChange>& changes)
+{
+    const std::size_t count =
+        std::min(before.minecarts.size(), after.minecarts.size());
+    for (std::size_t index = 0; index < count; ++index) {
+        if (!(before.minecarts[index] == after.minecarts[index])) {
+            changes.push_back({
+                .index = index,
+                .before = before.minecarts[index],
+                .after = after.minecarts[index],
+            });
+        }
+    }
+}
+
 } // namespace
 
 StateDelta StateDelta::between(
@@ -178,6 +196,7 @@ StateDelta StateDelta::between(
     collect<EntityKind::Enemy>(before.enemies, after.enemies, delta.enemies);
     collectMirrors(before, after, delta.mirrors);
     collectElevators(before, after, delta.elevators);
+    collectMinecarts(before, after, delta.minecarts);
     return delta;
 }
 
@@ -192,6 +211,11 @@ void StateDelta::applyTo(GameState& state) const
     for (const ElevatorChange& change : elevators) {
         if (change.index < state.elevators.size()) {
             state.elevators[change.index] = change.after;
+        }
+    }
+    for (const MinecartChange& change : minecarts) {
+        if (change.index < state.minecarts.size()) {
+            state.minecarts[change.index] = change.after;
         }
     }
 }
@@ -216,19 +240,29 @@ StateDelta StateDelta::inverted() const
             .after = change.before,
         });
     }
+    std::vector<MinecartChange> invertedMinecarts;
+    invertedMinecarts.reserve(minecarts.size());
+    for (const MinecartChange& change : minecarts) {
+        invertedMinecarts.push_back({
+            .index = change.index,
+            .before = change.after,
+            .after = change.before,
+        });
+    }
     return {
         .players = invert(players),
         .movables = invert(movables),
         .enemies = invert(enemies),
         .mirrors = std::move(invertedMirrors),
         .elevators = std::move(invertedElevators),
+        .minecarts = std::move(invertedMinecarts),
     };
 }
 
 bool StateDelta::empty() const
 {
     return players.empty() && movables.empty() && enemies.empty() &&
-        mirrors.empty() && elevators.empty();
+        mirrors.empty() && elevators.empty() && minecarts.empty();
 }
 
 std::size_t StateDelta::changedEntityCount() const

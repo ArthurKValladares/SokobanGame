@@ -83,6 +83,7 @@ StaticRenderCell staticRenderCellFor(
 {
     const TileType tile = fallenTile.value_or(level.tileAt(x, y, z));
     const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
+    const bool rail = tileTypeIsRail(tile);
     const bool conveyor = tileTypeIsConveyor(tile);
     const bool submergedEntity = fallenTile.has_value();
     const float centeredOffset = (1.0f - surfaceEntitySize) * 0.5f;
@@ -90,10 +91,12 @@ StaticRenderCell staticRenderCellFor(
         .tile = tile,
         .active = tile != TileType::End || endUnlocked,
         .showGrid = !tileTypeIsPlayerStart(tile),
-        .size = surfaceEntity
+        .size = rail
+            ? Vec2 { 1.0f, 1.0f }
+            : surfaceEntity
             ? Vec2 { surfaceEntitySize, surfaceEntitySize }
             : Vec2 { 1.0f, 1.0f },
-        .positionOffset = surfaceEntity
+        .positionOffset = surfaceEntity && !rail
             ? Vec2 { centeredOffset, centeredOffset }
             : Vec2 {},
         .baseElevation = static_cast<float>(z) -
@@ -115,7 +118,8 @@ StaticRenderCell staticRenderCellFor(
                     : (rules::turretDirectionForTile(tile)
                             ? facingQuarterTurns(
                                   *rules::turretDirectionForTile(tile))
-                            : mirrorOrientationQuarterTurns(tile).value_or(0))),
+                            : railOrientationQuarterTurns(tile).value_or(
+                                  mirrorOrientationQuarterTurns(tile).value_or(0)))),
     };
 }
 
@@ -226,8 +230,9 @@ void appendStaticTiles(
                     cell.tile == TileType::Water ||
                     cell.tile == TileType::Gate ||
                     tileTypeIsRotator(cell.tile) ||
-                    tileTypeIsElevator(cell.tile)) {
-                    // Gates, rotators and elevator platforms are drawn by
+                    tileTypeIsElevator(cell.tile) ||
+                    tileTypeIsMinecart(cell.tile)) {
+                    // Gates, rotators and moving platforms are drawn by
                     // their own passes.
                     continue;
                 }
@@ -617,23 +622,26 @@ void appendGameplayWaterAndShorelines(
 }
 
 // Units standing on a plate leave it in the level grid, where the static pass
-// draws it. A mirror is itself a static tile, so a plate authored beneath one
-// is drawn here. Rotators draw from their records and need nothing extra.
+// draws it. Mirrors and minecarts cover their authored plate, so it is drawn
+// here. Rotators draw from their records and need nothing extra.
 void appendMirrorCoveredPlates(
     RenderFrameData& frame,
     const RenderFrameBuilder::GameplayInput& input,
     bool endUnlocked)
 {
-    const float size = input.settings.geometry.surfaceEntityWidthDepth;
-    const float offset = (1.0f - size) * 0.5f;
     for (const Level::Plate& plate : input.level.coveredPlates()) {
         const GridPosition3 cell = plate.cell;
+        const float size = tileTypeIsRail(plate.tile)
+            ? 1.0f
+            : input.settings.geometry.surfaceEntityWidthDepth;
+        const float offset = (1.0f - size) * 0.5f;
+        const TileType occupant = input.level.tileAt(
+            static_cast<uint32_t>(cell.x),
+            static_cast<uint32_t>(cell.y),
+            static_cast<uint32_t>(cell.z));
         if (tileTypeIsRotator(plate.tile) ||
             (input.visibleCell && !input.visibleCell(cell)) ||
-            !tileTypeIsMirror(input.level.tileAt(
-                static_cast<uint32_t>(cell.x),
-                static_cast<uint32_t>(cell.y),
-                static_cast<uint32_t>(cell.z)))) {
+            (!tileTypeIsMirror(occupant) && !tileTypeIsMinecart(occupant))) {
             continue;
         }
         Vec4 color = tileColor(
@@ -656,6 +664,8 @@ void appendMirrorCoveredPlates(
             .baseElevation = static_cast<float>(cell.z),
             .height = input.settings.geometry.surfaceEntityHeight,
             .model = input.manifest.modelForTile(plate.tile),
+            .modelRotationQuarterTurns =
+                railOrientationQuarterTurns(plate.tile).value_or(0),
         };
         applyTileScale(renderTile, input.settings.tileScale(plate.tile));
         frame.tiles.push_back(renderTile);
@@ -872,6 +882,67 @@ void appendGameplayWorld(
         // No per-tile scale: scaling the slab would lift its top off the
         // layer surface it has to be flush with.
         frame.tiles.push_back(platform);
+    }
+
+    const auto& minecartVisuals = input.presentation.minecarts();
+    for (std::size_t index = 0; index < input.level.minecarts().size(); ++index) {
+        const Level::Minecart& minecart = input.level.minecarts()[index];
+        const GridPosition3 cell =
+            rules::minecartPlatformCell(input.level, state, index);
+        const Vec3 position = index < minecartVisuals.size()
+            ? minecartVisuals[index].renderPosition
+            : Vec3 {
+                  static_cast<float>(cell.x),
+                  static_cast<float>(cell.y),
+                  static_cast<float>(cell.z),
+              };
+        const GridPosition3 drawnCell {
+            static_cast<int>(std::lround(position.x)),
+            static_cast<int>(std::lround(position.y)),
+            cell.z,
+        };
+        if (input.visibleCell && !input.visibleCell(drawnCell)) {
+            continue;
+        }
+        TileType rail = input.level.tileAt(
+            static_cast<uint32_t>(cell.x),
+            static_cast<uint32_t>(cell.y),
+            static_cast<uint32_t>(cell.z));
+        if (tileTypeIsMinecart(rail)) {
+            rail = input.level.plateAt(cell).value_or(TileType::Air);
+        }
+        if (index < minecartVisuals.size() && minecartVisuals[index].moving) {
+            const Vec3 direction =
+                minecartVisuals[index].animationEnd -
+                minecartVisuals[index].animationStart;
+            rail = std::abs(direction.x) >= std::abs(direction.y)
+                ? TileType::RailStraightEastWest
+                : TileType::RailStraightNorthSouth;
+        }
+        const float brightness =
+            rules::isMinecartEngaged(input.level, state, minecart)
+            ? 1.0f
+            : 0.82f;
+        RenderFrameData::Tile cartTile {
+            .cell = drawnCell,
+            .position = { position.x, position.y },
+            .size = { 1.0f, 1.0f },
+            .color = {
+                minecart.color.x * brightness,
+                minecart.color.y * brightness,
+                minecart.color.z * brightness,
+                1.0f,
+            },
+            .baseElevation = position.z,
+            .height = 1.0f,
+            .showGrid = false,
+            .model = input.manifest.modelForTile(TileType::Minecart),
+            .modelRotationQuarterTurns =
+                railOrientationQuarterTurns(rail).value_or(0),
+        };
+        cartTile.renderableId = resolvedEntityId(
+            EntityKind::Minecart, invalidEntityId, index);
+        frame.tiles.push_back(cartTile);
     }
 
     appendGameplayWaterAndShorelines(frame, input, state);

@@ -10,9 +10,9 @@ namespace sokoban::solver::detail {
 
 // Optimistic feature-aware cost model used to guide best-first search. Gates
 // are assumed open, water may already be bridged, mirror activations may
-// transport a hero independently, and an elevator may carry a hero between any
-// two of its stops. Those relaxed assumptions keep the graph
-// cheap while still representing authored floor geometry and mirror transport
+// transport a hero independently, and elevators and minecarts may carry a hero
+// between any two stops on their route. Those relaxed assumptions keep the
+// graph cheap while still representing authored floor geometry and transport
 // that Manhattan distance cannot see.
 class RelaxedHeuristic {
 public:

@@ -270,12 +270,12 @@ RelaxedHeuristic::RelaxedHeuristic(const Level& level)
         }
     }
 
-    // An elevator can hold a hero above any of its stops, and carry it from
-    // one to another. Optimistically every stop is reachable from every other
-    // in one move, whatever the platform's phase or what blocks the shaft.
-    std::vector<std::vector<std::size_t>> elevatorRiderCells;
+    // A platform can hold a hero above any of its stops and carry it from one
+    // to another. Optimistically every stop is reachable from every other in
+    // one move, whatever the platform's phase or what blocks its route.
+    std::vector<std::vector<std::size_t>> platformRiderCells;
     for (const Level::Elevator& elevator : level.elevators()) {
-        std::vector<std::size_t>& riders = elevatorRiderCells.emplace_back();
+        std::vector<std::size_t>& riders = platformRiderCells.emplace_back();
         for (const int stop : elevator.levels) {
             const GridPosition3 rider {
                 elevator.cell.x, elevator.cell.y, stop + 1,
@@ -291,9 +291,30 @@ RelaxedHeuristic::RelaxedHeuristic(const Level& level)
             riders.push_back(index(rider));
         }
     }
+    for (const Level::MinecartRoute& route : level.minecartRoutes()) {
+        std::vector<std::size_t>& riders = platformRiderCells.emplace_back();
+        for (const GridPosition3 stop : route.stops) {
+            // Carts are occupiable rail cells. Keep the legacy cell above the
+            // cart too so older levels remain admissible to the heuristic.
+            for (const GridPosition3 rider : {
+                     stop,
+                     GridPosition3 { stop.x, stop.y, stop.z + 1 },
+                 }) {
+                if (!inRange(rider) ||
+                    !rules::staticCellAllowsEntity(level, rider)) {
+                    continue;
+                }
+                if (!traversable_[index(rider)]) {
+                    traversable_[index(rider)] = true;
+                    ++traversableCellCount_;
+                }
+                riders.push_back(index(rider));
+            }
+        }
+    }
 
     std::vector<std::vector<std::size_t>> edges(cellCount_);
-    for (const std::vector<std::size_t>& riders : elevatorRiderCells) {
+    for (const std::vector<std::size_t>& riders : platformRiderCells) {
         for (const std::size_t from : riders) {
             for (const std::size_t to : riders) {
                 if (from != to) {
