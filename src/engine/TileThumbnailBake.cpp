@@ -4,6 +4,7 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/RenderFrameBuilder.hpp"
+#include "engine/RenderFrameParts.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
 #include "engine/render/MirrorConfig.hpp"
 
@@ -134,7 +135,11 @@ RenderFrameData buildBakeFrame(
         subject.animation = animations->animation(use);
         subject.animationTimeSeconds = 0.0f;
     }
-    frame.tiles.push_back(subject);
+    if (tile == TileType::Portal) {
+        renderFrameParts::appendPortalVisual(frame, subject);
+    } else {
+        frame.tiles.push_back(subject);
+    }
 
     if (tile == TileType::Ground) {
         frame.groundSplat = {

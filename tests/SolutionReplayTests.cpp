@@ -107,6 +107,15 @@ void testDigestTracksGameplayContentOnly()
     });
     CHECK(solution::levelDigest(linked) !=
         solution::levelDigest(walkAndPushDefinition));
+    auto portal = walkAndPushDefinition;
+    portal.portals.push_back(
+        { .cell = { 2, 1, 1 }, .color = { 0.2f, 0.4f, 1 } });
+    const auto portalDigest = solution::levelDigest(portal);
+    CHECK(portalDigest != solution::levelDigest(walkAndPushDefinition));
+    portal.portals[0].color.x = 0.2001f;
+    CHECK(solution::levelDigest(portal) == portalDigest);
+    portal.portals[0].color.x = 1.0f;
+    CHECK(solution::levelDigest(portal) != portalDigest);
 }
 
 void testReplayFailuresNameTheStepAndEntity()

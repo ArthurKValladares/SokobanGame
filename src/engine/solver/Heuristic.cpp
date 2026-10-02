@@ -337,6 +337,11 @@ RelaxedHeuristic::RelaxedHeuristic(const Level& level)
                     if (inRange(destination) &&
                         traversable_[index(destination)]) {
                         edges[index(source)].push_back(index(destination));
+                        if (const auto exit = level.portalExit(destination);
+                            exit && inRange(*exit) &&
+                            traversable_[index(*exit)]) {
+                            edges[index(source)].push_back(index(*exit));
+                        }
                     }
                 }
                 const std::optional<GridPosition3> reflected =
@@ -419,6 +424,10 @@ int RelaxedHeuristic::distanceToEnd(
 
 int RelaxedHeuristic::estimate(const GameState& state) const
 {
+    if (!level_.portals().empty()) {
+        // Portal-assisted mirror reflections can bypass ordinary walk edges.
+        return 0;
+    }
     std::vector<GridPosition3> heroes;
     for (const GameState::Player& player : state.players) {
         if (!player.dead) {

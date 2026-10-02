@@ -316,6 +316,15 @@ private:
                     : TileType::Air)
                 .value_or(0);
         }
+        if (tile == TileType::Portal) {
+            const auto portal = std::ranges::find(
+                definition.portals, localCell, &Level::Portal::cell);
+            if (portal != definition.portals.end()) {
+                renderTile.color = {
+                    portal->color.x, portal->color.y, portal->color.z, 1.0f
+                };
+            }
+        }
         renderTile.pickable = false;
         renderTile.affectsCameraFit = false;
         const bool animatedActor =
@@ -344,7 +353,11 @@ private:
                 appendLinkedObjectAura(frame, renderTile, link->color);
             }
         }
-        frame.tiles.push_back(renderTile);
+        if (tile == TileType::Portal) {
+            appendPortalVisual(frame, renderTile);
+        } else {
+            frame.tiles.push_back(renderTile);
+        }
     }
 
     void appendOverworldNeighbors(RenderFrameData& frame) const
@@ -545,6 +558,17 @@ private:
         // looking different from the tile the editor draws.
         RenderFrameData::Tile renderTile = tileVisual(
             tile, { x, y, z }, input_.manifest, input_.settings);
+        if (tile == TileType::Portal) {
+            const auto portal = std::ranges::find(
+                input_.editor.portals(),
+                GridPosition3 { x, y, z },
+                &Level::Portal::cell);
+            if (portal != input_.editor.portals().end()) {
+                renderTile.color = {
+                    portal->color.x, portal->color.y, portal->color.z, 1.0f
+                };
+            }
+        }
         if (tile == TileType::PressurePlate) {
             // In the editor a plate shows its own link color: the color is
             // the link (see LevelEditor::linkGroups).
@@ -622,7 +646,11 @@ private:
                 appendLinkedObjectAura(frame, renderTile, *linkColor);
             }
         }
-        frame.tiles.push_back(renderTile);
+        if (tile == TileType::Portal) {
+            appendPortalVisual(frame, renderTile);
+        } else {
+            frame.tiles.push_back(renderTile);
+        }
     }
 
     static void appendEditorPickCell(

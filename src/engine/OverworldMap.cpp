@@ -673,6 +673,13 @@ void OverworldMap::composeScreenGrid(
             }
             composed.minecarts.push_back(std::move(translated));
         }
+        for (const Level::Portal& authored : screen.definition.portals) {
+            composed.portals.push_back({
+                .cell = translate(screen, authored.cell),
+                .color = authored.color,
+                .scope = screen.id,
+            });
+        }
         for (const Level::ObjectLink& authored : screen.definition.objectLinks) {
             composed.objectLinks.push_back({
                 .cell = translate(screen, authored.cell),

@@ -270,7 +270,11 @@ void appendStaticTiles(
                         : RenderSurfaceEffect::Standard,
                 };
                 applyTileScale(renderTile, scaleForTile(cell.tile));
-                frame.tiles.push_back(renderTile);
+                if (cell.tile == TileType::Portal) {
+                    appendPortalVisual(frame, renderTile);
+                } else {
+                    frame.tiles.push_back(renderTile);
+                }
             }
         }
     }
@@ -668,7 +672,16 @@ void appendMirrorCoveredPlates(
                 railOrientationQuarterTurns(plate.tile).value_or(0),
         };
         applyTileScale(renderTile, input.settings.tileScale(plate.tile));
-        frame.tiles.push_back(renderTile);
+        if (plate.tile == TileType::Portal) {
+            if (const auto* portal = input.level.portalAt(cell)) {
+                renderTile.color = {
+                    portal->color.x, portal->color.y, portal->color.z, 1.0f
+                };
+            }
+            appendPortalVisual(frame, renderTile);
+        } else {
+            frame.tiles.push_back(renderTile);
+        }
     }
 }
 
@@ -753,6 +766,17 @@ void appendGameplayWorld(
                         rules::mirrorQuarterTurnsAt(
                             input.projectedState, position))) *
                     (pi * 0.5f) * turnProgress;
+            }
+            if (cell.tile == TileType::Portal) {
+                const Level::Portal* portal = input.level.portalAt(position);
+                const Vec3 color =
+                    portal ? portal->color : Vec3 { 0.64f, 0.30f, 1.0f };
+                const float strength =
+                    input.level.portalExit(position) ? 1.0f : 0.35f;
+                cell.colorOverride = Vec4 { color.x * strength,
+                                            color.y * strength,
+                                            color.z * strength,
+                                            1.0f };
             }
             if (cell.tile == TileType::PressurePlate) {
                 if (const std::optional<Vec3> linkColor =

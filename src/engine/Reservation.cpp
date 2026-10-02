@@ -325,6 +325,15 @@ ActionReservations reservationsFor(const PlannedAction& planned)
             });
         }
     }
+    for (const auto& cue : planned.portalTransits) {
+        const int last = static_cast<int>(cue.legIndex) + 1;
+        addReservation(
+            result.cells,
+            { .cell = cue.transit.entrance, .firstStep = 0, .lastStep = last });
+        addReservation(
+            result.cells,
+            { .cell = cue.transit.exit, .firstStep = 0, .lastStep = last });
+    }
     addElevatorReservations(planned, result.cells);
     addMinecartReservations(planned, result.cells);
     return result;

@@ -135,6 +135,10 @@ public:
         bool operator==(const ObjectLink&) const = default;
     };
 
+    // Exactly two entrances of one 8-bit RGB color, in one screen scope,
+    // form a pair. Other group sizes stay inactive while being authored.
+    using Portal = ObjectLink;
+
     struct Decoration {
         struct PointLight {
             // Offset in the decoration's local space. It is scaled and
@@ -204,6 +208,7 @@ public:
         std::vector<Elevator> elevators;
         std::vector<Minecart> minecarts;
         std::vector<ObjectLink> objectLinks;
+        std::vector<Portal> portals;
         // Editor-only (see LinkColor); Level::loadFromDefinition ignores it.
         std::vector<LinkColor> linkColors;
         // Missing only for backwards-compatible legacy documents. Runtime
@@ -242,7 +247,8 @@ public:
         CharacterType selectedCharacter = CharacterType::Rogue,
         const std::vector<Elevator>& elevators = {},
         const std::vector<Minecart>& minecarts = {},
-        const std::vector<ObjectLink>& objectLinks = {});
+        const std::vector<ObjectLink>& objectLinks = {},
+        const std::vector<Portal>& portals = {});
     [[nodiscard]] static Definition parseDefinition(
         const std::vector<std::string>& lines,
         std::string_view sourceName);
@@ -267,6 +273,13 @@ public:
     }
     [[nodiscard]] std::optional<Vec3> movableLinkColor(
         std::size_t movableIndex) const;
+    [[nodiscard]] const std::vector<Portal>& portals() const
+    {
+        return portals_;
+    }
+    [[nodiscard]] const Portal* portalAt(GridPosition3 cell) const;
+    [[nodiscard]] std::optional<GridPosition3> portalExit(
+        GridPosition3 cell) const;
     [[nodiscard]] bool movablesAreLinked(
         std::size_t left, std::size_t right) const;
     [[nodiscard]] const std::vector<GridPosition3>& enemyStarts() const { return enemyStarts_; }
@@ -318,6 +331,7 @@ private:
     std::vector<PlayerStart> playerStarts_;
     std::vector<MovableTile> movableTiles_;
     std::vector<ObjectLink> objectLinks_;
+    std::vector<Portal> portals_;
     std::vector<GridPosition3> enemyStarts_;
     std::vector<GridPosition3> pressurePlates_;
     std::vector<Gate> gates_;

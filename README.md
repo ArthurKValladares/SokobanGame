@@ -11,6 +11,9 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
   plates and elevators, goals, undo, restart, multi-screen levels, and completion tracking.
 - Ice, ladders, conveyors, falling, configurable water layers, and four
   directional mirror types that can reflect players and movable units.
+- Color-paired floor portals transport heroes and movable units, preserving
+  direction and slide or conveyor momentum; turret, mirror and witch sightlines
+  continue through their paired exits.
 - Animated enemies that track and attack adjacent players, participate in
   physical movement rules, and support skeleton-driven held-item attachments.
 - Animated mirror beams, destination ghosts, sound, and particle effects.
@@ -347,6 +350,18 @@ a plate authored beneath something already standing on it (see Plates below).
 A `@objectlink {"cell":[x,y,z],"color":[r,g,b]}` directive gives a rock,
 ice block, or turret a linked-object color. Movable objects of the same color
 repeat one another's successful moves when their own destination is available.
+A Portal (`O`) uses `@portal {"cell":[x,y,z],"color":[r,g,b]}` metadata.
+Exactly two entrances with the same 8-bit RGB color in one screen form a pair;
+other group sizes stay inactive. Entering one places a unit on the other,
+preserving its direction and incoming slide or conveyor momentum. The exit
+must be free, and arrival does not immediately send the unit back. Entrances
+can connect different layers, carry units pushed or pulled onto them, and pass
+turret, mirror and witch sightlines through the pair. Portal colors are
+independent of linked-object and pressure-plate groups of the same color.
+Units can be authored on a portal with `@plate` metadata. The editor's Portal
+brush uses the active Link Color; paint or recolor entrances with the existing
+color tools. A small playable example is [portals.scr](docs/examples/portals.scr).
+
 A `@linkcolor {"cell":[x,y,z],"color":[r,g,b]}` directive is level-editor
 bookkeeping: the color of a pressure plate that drives nothing yet (see Link
 Colors under Level Editor). Gameplay ignores it and reads links only from the

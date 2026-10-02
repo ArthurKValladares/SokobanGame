@@ -72,6 +72,12 @@ struct PlannedAction {
     // Transient presentation cues, just like legs: undo and save replay must
     // never fire a weapon merely because an old action is being reconstructed.
     std::vector<TurretShotCue> turretShots;
+    struct PortalCue {
+        rules::PortalTransit transit;
+        std::size_t legIndex = 0;
+        bool operator==(const PortalCue&) const = default;
+    };
+    std::vector<PortalCue> portalTransits;
 
     bool operator==(const PlannedAction&) const = default;
 };

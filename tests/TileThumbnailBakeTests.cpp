@@ -135,8 +135,9 @@ void testBakeFrameStandsTheTileOnAGroundBed()
         // cell rather than stacking on it, so it is one fewer.
         const std::size_t bedCells =
             tileThumbnails::bedSize * tileThumbnails::bedSize;
-        const std::size_t expected =
-            definition.type == TileType::Ground ? bedCells : bedCells + 1;
+        const std::size_t expected = definition.type == TileType::Ground
+            ? bedCells
+            : bedCells + (definition.type == TileType::Portal ? 5 : 1);
         CHECK(frame.tiles.size() == expected);
 
         // Every tile counts toward the camera fit. This is what makes the
@@ -266,6 +267,13 @@ void testSubjectMatchesTheTileTheEditorDraws()
             },
             testManifest(),
             testSettings());
+        if (definition.type == TileType::Portal) {
+            // Composite entrances have four raised rims around a dark center.
+            CHECK(frame.tiles.size() >= 5);
+            CHECK(subject.height < frame.tiles[frame.tiles.size() - 2].height);
+            CHECK(subject.color.x < expected.color.x);
+            continue;
+        }
         CHECK(subject.height == expected.height);
         CHECK(subject.size.x == expected.size.x);
         CHECK(subject.size.y == expected.size.y);

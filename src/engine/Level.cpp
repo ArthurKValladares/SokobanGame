@@ -26,6 +26,7 @@ constexpr std::string_view gatePrefix = "@gate ";
 constexpr std::string_view rotatorPrefix = "@rotator ";
 constexpr std::string_view elevatorPrefix = "@elevator ";
 constexpr std::string_view minecartPrefix = "@minecart ";
+constexpr std::string_view portalPrefix = "@portal ";
 constexpr std::string_view objectLinkPrefix = "@objectlink ";
 constexpr std::string_view linkColorPrefix = "@linkcolor ";
 // Far more stops than any board has layers; it keeps an elevator's cycle
@@ -676,7 +677,8 @@ Level::Plate parsePlate(std::string_view payload, std::string_view sourceName)
             tileTypeFromName(tile->get<std::string>());
         if (!type || !tileTypeIsPlate(*type)) {
             throw std::runtime_error(
-                "plate 'tile' must name a plate tile (Pressure, End or a Rotator)");
+                "plate 'tile' must name a plate tile (Pressure, End, Portal, "
+                "Rotator or Rail Stop)");
         }
         return Level::Plate {
             .cell = parseLinkedCell(*cell, "cell", sourceName, "Plate"),
@@ -1193,6 +1195,17 @@ Level::Definition Level::parseDefinition(
             continue;
         }
 
+        if (line.starts_with(portalPrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Portal metadata must appear before '@layer 0': " + source);
+            }
+            definition.portals.push_back(parseObjectLink(
+                std::string_view(line).substr(portalPrefix.size()),
+                sourceName));
+            continue;
+        }
+
         if (line.starts_with(objectLinkPrefix)) {
             if (currentLayer) {
                 throw std::runtime_error(
@@ -1300,6 +1313,7 @@ Level::Definition Level::parseDefinition(
     canonicalizeLinkedRecords(definition.elevators, sourceName, "Elevator");
     canonicalizeLinkedRecords(definition.minecarts, sourceName, "Minecart");
     canonicalizeObjectLinks(definition.objectLinks, sourceName);
+    canonicalizeObjectLinks(definition.portals, sourceName);
     canonicalizePlates(definition.plates, sourceName);
     canonicalizeLinkColors(definition.linkColors, sourceName);
 
@@ -1316,17 +1330,12 @@ Level::LayerRows Level::parseLayerRows(
 std::vector<std::string> Level::serializeDefinition(
     const Definition& definition)
 {
-    if (definition.layers.size() == 1 &&
-        !definition.character &&
-        !definition.waterLayer &&
-        definition.decorations.empty() &&
-        definition.selectors.empty() &&
-        definition.gates.empty() &&
-        definition.rotators.empty() &&
-        definition.elevators.empty() &&
-        definition.minecarts.empty() &&
-        definition.objectLinks.empty() &&
-        definition.linkColors.empty() &&
+    if (definition.layers.size() == 1 && !definition.character &&
+        !definition.waterLayer && definition.decorations.empty() &&
+        definition.selectors.empty() && definition.gates.empty() &&
+        definition.rotators.empty() && definition.elevators.empty() &&
+        definition.minecarts.empty() && definition.objectLinks.empty() &&
+        definition.portals.empty() && definition.linkColors.empty() &&
         definition.plates.empty()) {
         return definition.layers.front();
     }
@@ -1378,6 +1387,15 @@ std::vector<std::string> Level::serializeDefinition(
         lines.push_back(
             serializeLinkedRecord(minecart, minecartPrefix, "Minecart"));
     }
+    std::vector<Portal> portals = definition.portals;
+    canonicalizeObjectLinks(portals, "serialized level");
+    for (const Portal& portal : portals) {
+        const Json object {
+            { "cell", { portal.cell.x, portal.cell.y, portal.cell.z } },
+            { "color", { portal.color.x, portal.color.y, portal.color.z } },
+        };
+        lines.push_back(std::string(portalPrefix) + object.dump());
+    }
     std::vector<ObjectLink> objectLinks = definition.objectLinks;
     canonicalizeObjectLinks(objectLinks, "serialized level");
     for (const ObjectLink& objectLink : objectLinks) {
@@ -1399,15 +1417,11 @@ std::vector<std::string> Level::serializeDefinition(
         lines.push_back(serializeDecoration(decoration));
     }
     if (definition.character || definition.waterLayer ||
-        !definition.decorations.empty() ||
-        !definition.selectors.empty() ||
-        !definition.gates.empty() ||
-        !definition.rotators.empty() ||
-        !definition.elevators.empty() ||
-        !definition.minecarts.empty() ||
-        !definition.objectLinks.empty() ||
-        !definition.linkColors.empty() ||
-        !definition.plates.empty()) {
+        !definition.decorations.empty() || !definition.selectors.empty() ||
+        !definition.gates.empty() || !definition.rotators.empty() ||
+        !definition.elevators.empty() || !definition.minecarts.empty() ||
+        !definition.objectLinks.empty() || !definition.portals.empty() ||
+        !definition.linkColors.empty() || !definition.plates.empty()) {
         lines.emplace_back();
     }
     for (size_t layer = 0; layer < definition.layers.size(); ++layer) {
@@ -1449,7 +1463,8 @@ Level Level::loadFromDefinition(
         definition.character.value_or(CharacterType::Rogue),
         definition.elevators,
         definition.minecarts,
-        definition.objectLinks);
+        definition.objectLinks,
+        definition.portals);
 }
 
 Level Level::loadFromLayers(
@@ -1464,7 +1479,8 @@ Level Level::loadFromLayers(
     CharacterType selectedCharacter,
     const std::vector<Elevator>& elevators,
     const std::vector<Minecart>& minecarts,
-    const std::vector<ObjectLink>& objectLinks)
+    const std::vector<ObjectLink>& objectLinks,
+    const std::vector<Portal>& portals)
 {
     const std::string source(sourceName);
     if (sourceLayers.empty()) {
@@ -1509,6 +1525,8 @@ Level Level::loadFromLayers(
     canonicalizeLinkedRecords(level.elevators_, sourceName, "Elevator");
     level.minecarts_ = minecarts;
     canonicalizeLinkedRecords(level.minecarts_, sourceName, "Minecart");
+    level.portals_ = portals;
+    canonicalizeObjectLinks(level.portals_, sourceName);
     level.objectLinks_ = objectLinks;
     canonicalizeObjectLinks(level.objectLinks_, sourceName);
     level.coveredPlates_ = plates;
@@ -1613,6 +1631,13 @@ Level Level::loadFromLayers(
     if (matchedCoveredPlates != level.coveredPlates_.size()) {
         throw std::runtime_error(
             "A '@plate' record must lie beneath a unit or mirror (or a minecart): " + source);
+    }
+
+    for (const Portal& portal : level.portals_) {
+        if (level.plateAt(portal.cell) != TileType::Portal) {
+            throw std::runtime_error(
+                "Portal metadata cell must contain a Portal tile: " + source);
+        }
     }
 
     for (const ObjectLink& link : level.objectLinks_) {
@@ -1966,6 +1991,33 @@ std::optional<Vec3> Level::pressurePlateLinkColor(GridPosition3 cell) const
         return minecart->color;
     }
     return std::nullopt;
+}
+
+const Level::Portal* Level::portalAt(GridPosition3 cell) const
+{
+    const auto found = std::ranges::find(portals_, cell, &Portal::cell);
+    return found == portals_.end() ? nullptr : &*found;
+}
+
+std::optional<GridPosition3> Level::portalExit(GridPosition3 cell) const
+{
+    const Portal* entrance = portalAt(cell);
+    if (!entrance) {
+        return std::nullopt;
+    }
+    const Portal* exit = nullptr;
+    for (const Portal& candidate : portals_) {
+        if (candidate.cell == cell || candidate.scope != entrance->scope ||
+            objectLinkColorKey(candidate.color) !=
+                objectLinkColorKey(entrance->color)) {
+            continue;
+        }
+        if (exit) {
+            return std::nullopt;
+        }
+        exit = &candidate;
+    }
+    return exit ? std::optional<GridPosition3>(exit->cell) : std::nullopt;
 }
 
 std::optional<Vec3> Level::movableLinkColor(std::size_t movableIndex) const

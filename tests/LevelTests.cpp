@@ -1065,10 +1065,45 @@ void testFileLoadingHandlesCrLfAndMissingFiles()
     std::filesystem::remove_all(root, error);
 }
 
+void testPortalMetadata()
+{
+    TEST("portalMetadataRoundTripsAndValidatesCells");
+    const Level::Definition definition {
+        .layers = { { ".....", "....." }, { "CO   ", "   O " } },
+        .portals = { { .cell = { 1, 0, 1 }, .color = { 0.2f, 0.4f, 1.0f } },
+                     { .cell = { 3, 1, 1 }, .color = { 0.2f, 0.4f, 1.0f } } },
+    };
+    const auto lines = Level::serializeDefinition(definition);
+    const auto parsed = Level::parseDefinition(lines, "portal metadata");
+    CHECK(parsed == definition);
+    CHECK(
+        Level::loadFromDefinition(parsed, "portals").portalExit({ 1, 0, 1 }) ==
+        GridPosition3({ 3, 1, 1 }));
+    auto invalid = definition;
+    invalid.portals[0].cell = { 0, 0, 1 };
+    checkThrowsContaining(
+        [&] { (void)Level::loadFromDefinition(invalid, "bad cell"); },
+        "Portal metadata cell");
+    invalid = definition;
+    invalid.portals.push_back(invalid.portals.front());
+    checkThrowsContaining(
+        [&] { (void)Level::loadFromDefinition(invalid, "duplicate"); },
+        "same cell");
+    invalid = definition;
+    invalid.portals[0].color.x = 2.0f;
+    checkThrowsContaining(
+        [&] { (void)Level::loadFromDefinition(invalid, "invalid color"); },
+        "zero to one");
+    CHECK(tileTypeIsPlate(TileType::Portal));
+    CHECK(tileTypeAllowsEntity(TileType::Portal));
+    CHECK(!tileTypeIsMovableObject(TileType::Portal));
+}
+
 } // namespace
 
 int main()
 {
+    testPortalMetadata();
     testLegacyAndLayeredParsing();
     testSerializationRoundTrip();
     testCharacterMetadataRoundTripAndLegacyDefault();

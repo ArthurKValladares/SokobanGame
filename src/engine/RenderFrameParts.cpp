@@ -74,6 +74,45 @@ void appendLinkedObjectAura(
     frame.tiles.push_back(aura);
 }
 
+void appendPortalVisual(
+    RenderFrameData& frame,
+    const RenderFrameData::Tile& tile)
+{
+    // A hollow frame reads as an entrance even beneath a unit. All pieces
+    // share the same pick cell; geometry needs no external model asset.
+    constexpr float rim = 0.12f;
+    for (int side = 0; side < 4; ++side) {
+        RenderFrameData::Tile part = tile;
+        part.model = cubeModel;
+        part.height = 0.08f;
+        part.showGrid = false;
+        if (side < 2) {
+            part.size.y *= rim;
+            if (side == 1) {
+                part.position.y += tile.size.y * (1.0f - rim);
+            }
+        } else {
+            part.position.y += tile.size.y * rim;
+            part.size.y *= 1.0f - 2.0f * rim;
+            part.size.x *= rim;
+            if (side == 3) {
+                part.position.x += tile.size.x * (1.0f - rim);
+            }
+        }
+        frame.tiles.push_back(part);
+    }
+    RenderFrameData::Tile center = tile;
+    center.model = cubeModel;
+    center.position.x += tile.size.x * rim;
+    center.position.y += tile.size.y * rim;
+    center.size = { tile.size.x * (1.0f - 2.0f * rim),
+                    tile.size.y * (1.0f - 2.0f * rim) };
+    center.height = 0.015f;
+    center.color = shade(tile.color, 0.12f);
+    center.showGrid = false;
+    frame.tiles.push_back(center);
+}
+
 uint32_t facingQuarterTurns(MoveDirection direction)
 {
     switch (direction) {

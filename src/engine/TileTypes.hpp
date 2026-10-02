@@ -66,6 +66,7 @@ enum class TileType {
     // A moving platform authored on top of a Rail Stop (the stop is retained
     // in an @plate record). Units may occupy and ride in the cart's cell.
     Minecart,
+    Portal,
     Count,
 };
 
@@ -149,6 +150,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::RailStopNorthSouth, '!', "Rail Stop North-South", { 1.0f, 1.0f, 1.0f, 1.0f }, {}, TileProperty::Plate | TileProperty::Surface },
     TileTypeDefinition { TileType::RailStopEastWest, '_', "Rail Stop East-West", { 1.0f, 1.0f, 1.0f, 1.0f }, {}, TileProperty::Plate | TileProperty::Surface },
     TileTypeDefinition { TileType::Minecart, 'M', "Minecart", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::Portal, 'O', "Portal", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();

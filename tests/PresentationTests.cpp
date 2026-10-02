@@ -3656,10 +3656,58 @@ void testEnemyFacingAttackAndAnimationInstances()
     CHECK(near(presentation.players()[0].motion.renderPosition.x, 0.0f));
 }
 
+void testPortalPresentation()
+{
+    TEST("portalPresentationJumpsBetweenTheMouthsAndReverses");
+    const Level level = Level::loadFromDefinition(
+        {
+            .layers = { { "......", "......" }, { " CO   ", "   O  " } },
+            .portals = { { .cell = { 2, 0, 1 }, .color = { 0.2f, 0.4f, 1 } },
+                         { .cell = { 3, 1, 1 }, .color = { 0.2f, 0.4f, 1 } } },
+        },
+        "portal presentation");
+    const auto before = rules::initialState(level);
+    GameplaySession::Action action {
+        .before = before,
+        .after = rules::step(level, before, MoveDirection::Right),
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Right,
+    };
+    GameplayPresentation presentation;
+    presentation.resetEntities(before);
+    action.presentation = presentation.buildActionPresentation(action, &level);
+    CHECK(action.presentation.motions.size() == 2);
+    presentation.beginAction(action, before);
+    presentation.seekAction(action, 0.25f);
+    CHECK(near(presentation.players()[0].motion.renderPosition.y, 0));
+    CHECK(presentation.players()[0].motion.renderPosition.x < 2.01f);
+    presentation.seekAction(action, 0.75f);
+    CHECK(near(presentation.players()[0].motion.renderPosition.x, 3));
+    CHECK(near(presentation.players()[0].motion.renderPosition.y, 1));
+    action.reversed = true;
+    presentation.beginAction(action, action.after);
+    presentation.seekAction(action, 0.75f);
+    CHECK(near(presentation.players()[0].motion.renderPosition.y, 0));
+
+    const auto frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = before,
+        .projectedState = before,
+        .presentation = presentation,
+        .settings = {},
+    });
+    const auto count = std::ranges::count_if(frame.tiles, [](const auto& tile) {
+        return tile.cell == GridPosition3 { 2, 0, 1 };
+    });
+    CHECK(count == 5);
+}
+
 } // namespace
 
 int main()
 {
+    testPortalPresentation();
     try {
     testPresentationTransactionResolvesActorIndependentDependencies();
     testPresentationTransactionRejectsDependencyCycles();

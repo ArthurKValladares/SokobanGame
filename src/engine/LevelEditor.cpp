@@ -1322,6 +1322,14 @@ bool LevelEditor::moveObject(GridPosition3 destination)
             newColor->color = oldColor->color;
         }
     }
+    const auto oldPortal =
+        std::ranges::find(before.portals, move->source, &Level::Portal::cell);
+    const auto newPortal =
+        std::ranges::find(document_.portals, destination, &Level::Portal::cell);
+    if (move->tile == TileType::Portal && oldPortal != before.portals.end() &&
+        newPortal != document_.portals.end()) {
+        newPortal->color = oldPortal->color;
+    }
     if (tileTypeIsMovableObject(move->tile)) {
         const auto oldLink = std::ranges::find(
             before.objectLinks, move->source, &Level::ObjectLink::cell);
@@ -1581,9 +1589,9 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             // gives it the active link color. This is how an ordinary object
             // first joins a linked group.
             const bool linkable = tile == TileType::PressurePlate ||
-                tile == TileType::Gate || tileTypeIsRotator(tile) ||
-                tile == TileType::Elevator || tileTypeIsMinecart(tile) ||
-                tileTypeIsMovableObject(tile);
+                tile == TileType::Gate || tile == TileType::Portal ||
+                tileTypeIsRotator(tile) || tile == TileType::Elevator ||
+                tileTypeIsMinecart(tile) || tileTypeIsMovableObject(tile);
             const std::optional<Vec3> color = tileTypeIsMovableObject(tile)
                 ? objectLinkColorAt(translatedPosition)
                 : linkColorAt(translatedPosition);
@@ -1636,6 +1644,7 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             document_.plateColors, prependColumns, prependRows);
         translateLinkColors(
             document_.objectLinks, prependColumns, prependRows);
+        translateLinkColors(document_.portals, prependColumns, prependRows);
     }
 
     while (translatedPosition.z >= static_cast<int>(document_.layers.size())) {
@@ -1670,6 +1679,18 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
     if (tileTypeIsRotator(previousPlate) && !tileTypeIsRotator(paintedPlate)) {
         std::erase_if(document_.rotators, [&](const Level::Rotator& rotator) {
             return rotator.cell == translatedPosition;
+        });
+    }
+    if (previousPlate == TileType::Portal && paintedPlate != TileType::Portal) {
+        std::erase_if(document_.portals, [&](const Level::Portal& portal) {
+            return portal.cell == translatedPosition;
+        });
+    }
+    if (paintedPlate == TileType::Portal && previousPlate != TileType::Portal) {
+        document_.portals.push_back(
+            { .cell = translatedPosition, .color = activeLinkColor_ });
+        std::ranges::sort(document_.portals, {}, [](const auto& portal) {
+            return std::array { portal.cell.z, portal.cell.y, portal.cell.x };
         });
     }
     // A pressure plate keeps its link color while it stays; a new one takes
@@ -2176,6 +2197,11 @@ const std::vector<Level::Minecart>& LevelEditor::minecarts() const
     return document_.minecarts;
 }
 
+const std::vector<Level::Portal>& LevelEditor::portals() const
+{
+    return document_.portals;
+}
+
 const std::vector<Level::ObjectLink>& LevelEditor::objectLinks() const
 {
     return document_.objectLinks;
@@ -2266,6 +2292,9 @@ std::optional<Vec3> LevelEditor::linkColorAt(GridPosition3 cell) const
     if (const std::optional<Vec3> color = colorOf(document_.elevators)) {
         return color;
     }
+    if (const auto color = colorOf(document_.portals)) {
+        return color;
+    }
     return colorOf(document_.minecarts);
 }
 
@@ -2307,6 +2336,9 @@ std::vector<LevelEditor::LinkGroup> LevelEditor::linkGroups() const
     for (const Level::Minecart& minecart : document_.minecarts) {
         groupFor(minecart.color).minecarts.push_back(minecart.cell);
     }
+    for (const Level::Portal& portal : document_.portals) {
+        groupFor(portal.color).portals.push_back(portal.cell);
+    }
     for (const Level::ObjectLink& object : document_.objectLinks) {
         groupFor(object.color).objects.push_back(object.cell);
     }
@@ -2343,7 +2375,9 @@ bool LevelEditor::setLinkColor(GridPosition3 cell, Vec3 color)
         ? objectLinkColorAt(cell)
         : linkColorAt(cell);
     const bool unlinkedObject = movableObject && !current;
-    if (!current && !unlinkedObject) {
+    const bool unlinkedPortal =
+        !movableObject && tileAt(cell) == TileType::Portal && !current;
+    if (!current && !unlinkedObject && !unlinkedPortal) {
         document_.status =
             "Only pressure plates, devices and movable objects have link colors.";
         return false;
@@ -2352,6 +2386,12 @@ bool LevelEditor::setLinkColor(GridPosition3 cell, Vec3 color)
         return false;
     }
     const DocumentSnapshot before = captureDocumentSnapshot();
+    if (unlinkedPortal) {
+        document_.portals.push_back({ .cell = cell, .color = color });
+        std::ranges::sort(document_.portals, {}, [](const auto& portal) {
+            return std::array { portal.cell.z, portal.cell.y, portal.cell.x };
+        });
+    }
     if (unlinkedObject) {
         document_.objectLinks.push_back({ .cell = cell, .color = color });
         std::ranges::sort(document_.objectLinks, {}, [](const auto& link) {
@@ -2376,6 +2416,7 @@ bool LevelEditor::setLinkColor(GridPosition3 cell, Vec3 color)
         recolor(document_.rotators);
         recolor(document_.elevators);
         recolor(document_.minecarts);
+        recolor(document_.portals);
     }
     document_.dirty = true;
     const std::size_t linkedPlates = linkedPressurePlates(color).size();
@@ -2422,10 +2463,11 @@ bool LevelEditor::paintLinkColorAt(GridPosition3 pickedCell)
             document_.layers[static_cast<std::size_t>(target->z)]
                 [static_cast<std::size_t>(target->y)]
                 [static_cast<std::size_t>(target->x)]).value_or(TileType::Air));
-    if (!target || (!linkColorAt(*target) && !movableObject)) {
+    const bool portal = target && documentPlateAt(*target) == TileType::Portal;
+    if (!target || (!linkColorAt(*target) && !movableObject && !portal)) {
         document_.status =
             "The link-color brush paints pressure plates, gates, rotators, "
-            "elevators, minecarts and movable objects.";
+            "elevators, minecarts, portals and movable objects.";
         return false;
     }
     return setLinkColor(*target, activeLinkColor_);
@@ -2455,6 +2497,7 @@ bool LevelEditor::recolorLinkGroup(Vec3 from, Vec3 to)
     recolor(document_.elevators);
     recolor(document_.minecarts);
     recolor(document_.objectLinks);
+    recolor(document_.portals);
     if (!changed) {
         return false;
     }
@@ -2555,6 +2598,7 @@ Level::Definition LevelEditor::linkedDefinition(
         .elevators = document_.elevators,
         .minecarts = document_.minecarts,
         .objectLinks = document_.objectLinks,
+        .portals = document_.portals,
         .character = character,
     };
     // The color groups become explicit links here, and only here; nothing
@@ -2737,6 +2781,7 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     document_.elevators.clear();
     document_.minecarts.clear();
     document_.objectLinks.clear();
+    document_.portals.clear();
     document_.plates.clear();
     document_.plateColors.clear();
     document_.selectedDecoration.reset();
@@ -2797,6 +2842,9 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
     cropLinkedRecords(document_.rotators, width, height);
     cropLinkedRecords(document_.elevators, width, height);
     cropLinkedRecords(document_.minecarts, width, height);
+    std::erase_if(document_.portals, [&](const Level::Portal& portal) {
+        return portal.cell.x >= width || portal.cell.y >= height;
+    });
     std::erase_if(document_.plates, [&](const Level::Plate& plate) {
         return plate.cell.x >= width || plate.cell.y >= height;
     });
@@ -2866,6 +2914,11 @@ void LevelEditor::insertLayerAt(int insertionIndex, const char* status)
     for (Level::LinkColor& plate : document_.plateColors) {
         if (plate.cell.z >= insertionIndex) {
             ++plate.cell.z;
+        }
+    }
+    for (Level::Portal& portal : document_.portals) {
+        if (portal.cell.z >= insertionIndex) {
+            ++portal.cell.z;
         }
     }
     for (Level::ObjectLink& link : document_.objectLinks) {
@@ -2938,6 +2991,15 @@ void LevelEditor::deleteActiveLayer()
         }
         if (plate.cell.z > static_cast<int>(deletedLayer)) {
             --plate.cell.z;
+        }
+        return false;
+    });
+    std::erase_if(document_.portals, [&](Level::Portal& portal) {
+        if (portal.cell.z == static_cast<int>(deletedLayer)) {
+            return true;
+        }
+        if (portal.cell.z > static_cast<int>(deletedLayer)) {
+            --portal.cell.z;
         }
         return false;
     });
@@ -3096,6 +3158,7 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     document_.elevators = std::move(definition.elevators);
     document_.minecarts = std::move(definition.minecarts);
     document_.objectLinks = std::move(definition.objectLinks);
+    document_.portals = std::move(definition.portals);
     document_.plates = std::move(definition.plates);
     document_.plateColors = coloring.plateColors;
     document_.selectedDecoration.reset();
@@ -3150,6 +3213,7 @@ bool LevelEditor::reloadFromDisk()
             onDisk.elevators == current.elevators &&
             onDisk.minecarts == current.minecarts &&
             onDisk.objectLinks == current.objectLinks &&
+            onDisk.portals == current.portals &&
             onDisk.plates == current.plates &&
             onDisk.linkColors == current.linkColors) {
             return false;
@@ -3835,7 +3899,7 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
         before.elevators == after.elevators &&
         before.minecarts == after.minecarts &&
         before.objectLinks == after.objectLinks &&
-        before.plates == after.plates &&
+        before.portals == after.portals && before.plates == after.plates &&
         before.plateColors == after.plateColors &&
         before.filePath == after.filePath &&
         before.requestedWidth == after.requestedWidth &&
@@ -3865,6 +3929,7 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
     document_.elevators = snapshot.elevators;
     document_.minecarts = snapshot.minecarts;
     document_.objectLinks = snapshot.objectLinks;
+    document_.portals = snapshot.portals;
     document_.plateColors = snapshot.plateColors;
     document_.plates = snapshot.plates;
     document_.filePath = snapshot.filePath;
@@ -4014,6 +4079,7 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
         .elevators = document_.elevators,
         .minecarts = document_.minecarts,
         .objectLinks = document_.objectLinks,
+        .portals = document_.portals,
         .plateColors = document_.plateColors,
         .filePath = document_.filePath,
         .loadedPath = document_.loadedPath,

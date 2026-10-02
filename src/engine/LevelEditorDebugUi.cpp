@@ -569,6 +569,10 @@ std::string linkGroupText(const LevelEditor::LinkGroup& group)
         text += ", " + std::to_string(group.objects.size()) +
             (group.objects.size() == 1 ? " linked object" : " linked objects");
     }
+    if (!group.portals.empty()) {
+        text +=
+            ", " + std::to_string(group.portals.size()) + " portal entrances";
+    }
     std::vector<std::string> devices;
     for (const GridPosition3 cell : group.gates) {
         devices.push_back("Gate " + cellText(cell));
@@ -755,9 +759,9 @@ void LevelEditorDebugUi::drawTilePalette(
         actionBindingsDisplay(bindings, InputAction::EditorPickTile);
     const std::string brushKeys =
         actionBindingsDisplay(bindings, InputAction::EditorPaintLinkColor);
-    ImGui::BulletText(
-        "New pressure plates and devices take this color; paint it onto movable "
-        "objects to link them.");
+    ImGui::BulletText("New pressure plates, devices and portals take this "
+                      "color; paint it onto movable "
+                      "objects to link them.");
     ImGui::BulletText(
         "%s + click: eyedropper - picks up the color of the plate, device or linked object "
         "clicked.",
@@ -808,10 +812,16 @@ void LevelEditorDebugUi::drawTilePalette(
                 ImVec4 { 1.0f, 0.65f, 0.3f, 1.0f },
                 "    No pressure plates of this color: never activates.");
         }
+        if (!group.portals.empty() && group.portals.size() != 2) {
+            ImGui::TextDisabled(
+                "    Exactly two portals of this color form an active pair.");
+        }
         if (group.objects.size() == 1) {
             ImGui::TextDisabled(
                 "    Add another movable object of this color to link movement.");
-        } else if (!group.hasDevice() && group.objects.empty()) {
+        } else if (
+            !group.hasDevice() && group.objects.empty() &&
+            group.portals.empty()) {
             ImGui::TextDisabled("    Drives nothing yet.");
         }
         ImGui::PopID();

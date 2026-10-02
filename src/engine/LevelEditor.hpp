@@ -269,6 +269,7 @@ public:
     [[nodiscard]] const std::vector<Level::Elevator>& elevators() const;
     [[nodiscard]] const std::vector<Level::Minecart>& minecarts() const;
     [[nodiscard]] const std::vector<Level::ObjectLink>& objectLinks() const;
+    [[nodiscard]] const std::vector<Level::Portal>& portals() const;
     // Plates authored beneath a unit or mirror (see Level::Plate).
     [[nodiscard]] const std::vector<Level::Plate>& coveredPlates() const;
     // The plate at `cell` in the document, uncovered or beneath something.
@@ -285,6 +286,7 @@ public:
         std::vector<GridPosition3> elevators;
         std::vector<GridPosition3> minecarts;
         std::vector<GridPosition3> objects;
+        std::vector<GridPosition3> portals;
 
         [[nodiscard]] bool hasDevice() const
         {
@@ -361,6 +363,7 @@ private:
         // Only movable objects explicitly painted with the link brush appear
         // here; ordinary objects remain independent.
         std::vector<Level::ObjectLink> objectLinks;
+        std::vector<Level::Portal> portals;
         // One per pressure plate, sorted by cell (see linkGroups).
         std::vector<Level::LinkColor> plateColors;
         // Selected path (browser clicks move this).
@@ -398,6 +401,7 @@ private:
         std::vector<Level::Elevator> elevators;
         std::vector<Level::Minecart> minecarts;
         std::vector<Level::ObjectLink> objectLinks;
+        std::vector<Level::Portal> portals;
         // One per pressure plate, sorted by cell (see linkGroups).
         std::vector<Level::LinkColor> plateColors;
         std::filesystem::path filePath;

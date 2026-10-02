@@ -456,6 +456,30 @@ void testEmptyPlanClaimsNothing()
     CHECK(!table.conflict(claims, 0));
 }
 
+void testPortalReservations()
+{
+    TEST("portalTransitReservesBothMouthsAndLeavesTheGapFree");
+    const Level level = Level::loadFromDefinition(
+        {
+            .layers = { { "......", "......" }, { " CO   ", "   O  " } },
+            .portals = { { .cell = { 2, 0, 1 }, .color = { 1, 0, 0 } },
+                         { .cell = { 3, 1, 1 }, .color = { 1, 0, 0 } } },
+        },
+        "portal reservations");
+    const auto plan = plans::worldStep(
+        level, rules::initialState(level), MoveDirection::Right, {}, 0.2f);
+    CHECK(plan.has_value());
+    if (!plan) {
+        return;
+    }
+    const auto claims = plans::reservationsFor(*plan);
+    CHECK(holds(claims.cells, cell(2, 0), 0));
+    CHECK(holds(claims.cells, cell(3, 1), 0));
+    CHECK(!holds(claims.cells, cell(3, 0), 0));
+    CHECK(!holds(claims.cells, cell(2, 0), 2));
+    CHECK(holds(claims.cells, cell(3, 1), 2));
+}
+
 } // namespace
 
 void testEntitiesAnActionAddsAreClaimed()
@@ -516,6 +540,7 @@ void testEntitiesAnActionAddsAreClaimed()
 
 int main()
 {
+    testPortalReservations();
     testEntitiesAnActionAddsAreClaimed();
     testElevatorClaimsItsShaft();
     testOverlapRules();

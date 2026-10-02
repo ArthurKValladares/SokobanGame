@@ -8,8 +8,22 @@ namespace sokoban::plans {
 namespace {
 
 std::optional<MoveDirection> movementDirection(
-    GridPosition3 from, GridPosition3 to)
+    GridPosition3 from,
+    GridPosition3 to,
+    const Level* level = nullptr)
 {
+    if (level) {
+        for (const auto direction : { MoveDirection::Up,
+                                      MoveDirection::Right,
+                                      MoveDirection::Down,
+                                      MoveDirection::Left }) {
+            const auto exit =
+                level->portalExit(rules::movementTarget(from, direction));
+            if (exit && exit->x == to.x && exit->y == to.y && to.z <= exit->z) {
+                return direction;
+            }
+        }
+    }
     const int deltaX = to.x - from.x;
     const int deltaY = to.y - from.y;
     if (deltaX < 0) {
@@ -101,7 +115,8 @@ std::optional<MoveDirection> movementDirection(
         }
         const std::optional<MoveDirection> direction = movementDirection(
             before.players[playerIndex].cell,
-            after.players[playerIndex].cell);
+            after.players[playerIndex].cell,
+            &level);
         if (!direction) {
             continue;
         }
@@ -228,6 +243,9 @@ void addChanged(
     }
 
     plans::PlannedAction planned;
+    for (const auto& transit : firstStep.portalTransits) {
+        planned.portalTransits.push_back({ .transit = transit, .legIndex = 0 });
+    }
     planned.legs.push_back(current);
     for (rules::TurretShot& shot : firstStep.turretShots) {
         planned.turretShots.push_back({
@@ -266,6 +284,10 @@ void addChanged(
             current = std::move(next);
             planned.legs.push_back(current);
             const std::size_t legIndex = planned.legs.size() - 1;
+            for (const auto& transit : step.portalTransits) {
+                planned.portalTransits.push_back(
+                    { .transit = transit, .legIndex = legIndex });
+            }
             for (rules::TurretShot& shot : step.turretShots) {
                 planned.turretShots.push_back({
                     .shot = std::move(shot),
@@ -297,6 +319,15 @@ void addChanged(
         // conveyor rider or a sliding player still turns to face their travel.
         plan.facingDirection =
             plans::firstPlayerMovementDirection(plan.before, planned.legs.front());
+    }
+    if (!playerInput) {
+        for (const auto& cue : planned.portalTransits) {
+            if (cue.legIndex == 0 &&
+                cue.transit.target.kind == EntityKind::Player) {
+                plan.facingDirection = cue.transit.direction;
+                break;
+            }
+        }
     }
     return planned;
 }

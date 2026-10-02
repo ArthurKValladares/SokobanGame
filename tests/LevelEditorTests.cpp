@@ -1958,6 +1958,59 @@ void testOverworldPlayerTileMovesAcrossComponents()
     CHECK(map.level().playerStart() == GridPosition3({ 3, 1, 1 }));
 }
 
+void testPortalColorGroups()
+{
+    TEST("portalColorGroupsSurviveEditingAndSave");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(6, 3, false);
+    const Vec3 blue { 0.2f, 0.4f, 1.0f };
+    const Vec3 green { 0.2f, 1.0f, 0.3f };
+    const GridPosition3 first { 1, 0, 1 };
+    const GridPosition3 second { 4, 1, 1 };
+    const GridPosition3 moved { 4, 2, 1 };
+    editor.setActiveLinkColor(blue);
+    CHECK(editor.setCell(first, TileType::Portal));
+    CHECK(editor.setCell(second, TileType::Portal));
+    CHECK(editor.portals().size() == 2);
+    CHECK(editor.documentToLevel().portalExit(first) == second);
+    CHECK(editor.linkGroups()[0].portals.size() == 2);
+    CHECK(editor.beginMove(second));
+    CHECK(editor.moveObject(moved));
+    CHECK(editor.documentToLevel().portalExit(first) == moved);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentToLevel().portalExit(first) == second);
+    CHECK(editor.setLinkColor(first, green));
+    CHECK(!editor.documentToLevel().portalExit(first));
+    CHECK(editor.recolorLinkGroup(green, blue));
+    CHECK(editor.documentToLevel().portalExit(first) == second);
+    CHECK(editor.setCell(first, TileType::Rock));
+    CHECK(editor.setLinkColor(first, green));
+    const auto stacked = editor.documentToLevel();
+    CHECK(stacked.portalAt(first)->color == blue);
+    CHECK(stacked.movableLinkColor(0) == green);
+    const auto path = project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(path));
+    CHECK(readFile(path).find("@portal ") != std::string::npos);
+    LevelEditor loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(path, false));
+    CHECK(loaded.portals() == editor.portals());
+    CHECK(loaded.documentToLevel().portalExit(first) == second);
+    loaded.setActiveLayer(1);
+    loaded.addLayerBelow();
+    CHECK(
+        loaded.documentToLevel().portalExit({ 1, 0, 2 }) ==
+        GridPosition3({ 4, 1, 2 }));
+    CHECK(loaded.tryUndoEdit());
+    loaded.resizeDocument(3, 3);
+    CHECK(loaded.portals().size() == 1);
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.portals().size() == 2);
+    CHECK(loaded.setCell(second, TileType::Air));
+    CHECK(loaded.portals().size() == 1);
+    CHECK(!loaded.documentToLevel().portalExit(first));
+}
+
 } // namespace
 
 void testStrokeIsOneUndoStepAndRedoReplaysIt()
@@ -2264,6 +2317,7 @@ void testReloadFromDiskKeepsDraftsAndIgnoresOwnSaves()
 
 int main()
 {
+    testPortalColorGroups();
     testDocumentCommandsAndUndo();
     testColorGroupsBecomeExplicitLinks();
     testExplicitLinksBecomeColorGroupsOnLoad();

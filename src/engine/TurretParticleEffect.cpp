@@ -4,6 +4,7 @@
 #include "engine/ParticleConfig.hpp"
 
 #include <algorithm>
+#include <utility>
 
 namespace sokoban {
 
@@ -115,24 +116,46 @@ float emitTurretShotParticles(
     const float muzzleDelay = std::max(
         beamDelay - config::turretLaserAfterMuzzleSeconds,
         0.0f);
+    const auto segmentPoints = [&](std::size_t index) {
+        const auto& segment = shot.beamSegments[index];
+        const Vec3 from = index == 0 ? muzzle : Vec3 {
+            static_cast<float>(segment.from.x) + 0.5f,
+            static_cast<float>(segment.from.y) + 0.5f,
+            static_cast<float>(segment.from.z) + config::turretMuzzleElevation,
+        };
+        const Vec3 to = index + 1 == shot.beamSegments.size() ? target : Vec3 {
+            static_cast<float>(segment.to.x) + 0.5f,
+            static_cast<float>(segment.to.y) + 0.5f,
+            static_cast<float>(segment.to.z) + config::turretMuzzleElevation,
+        };
+        return std::pair { from, to };
+    };
+    float beamLength = shot.beamSegments.empty() ? length(target - muzzle) : 0.0f;
+    for (std::size_t index = 0; index < shot.beamSegments.size(); ++index) {
+        const auto [from, to] = segmentPoints(index);
+        beamLength += length(to - from);
+    }
+    const float beamSpeed = std::max(effects.laserBeam.speed, 0.001f);
     const float beamTravelSeconds = effects.laserBeam.fullLength
         ? std::max(effects.laserBeam.revealSeconds, 0.0f)
-        : length(target - muzzle) /
-            std::max(effects.laserBeam.speed, 0.001f);
+        : beamLength / beamSpeed;
     const float hitDelay = beamDelay + beamTravelSeconds;
 
     particles.emit(muzzle, effects.muzzleGlow, muzzleDelay);
     particles.emit(muzzle, effects.muzzleFlash, muzzleDelay);
-    particles.emitRibbon(
-        muzzle,
-        target,
-        effects.laserBeam,
-        beamDelay);
-    particles.emitRibbon(
-        muzzle,
-        target,
-        effects.laserBeamCore,
-        beamDelay);
+    if (shot.beamSegments.empty()) {
+        particles.emitRibbon(muzzle, target, effects.laserBeam, beamDelay);
+        particles.emitRibbon(muzzle, target, effects.laserBeamCore, beamDelay);
+    } else {
+        float traveled = 0.0f;
+        for (std::size_t index = 0; index < shot.beamSegments.size(); ++index) {
+            const auto [from, to] = segmentPoints(index);
+            const float delay = beamDelay + (effects.laserBeam.fullLength ? 0.0f : traveled / beamSpeed);
+            particles.emitRibbon(from, to, effects.laserBeam, delay);
+            particles.emitRibbon(from, to, effects.laserBeamCore, delay);
+            traveled += length(to - from);
+        }
+    }
     particles.emit(target, effects.impactGlow, hitDelay);
     particles.emit(target, effects.impactCore, hitDelay);
     return muzzleDelay;

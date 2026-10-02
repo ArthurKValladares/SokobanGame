@@ -640,6 +640,43 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
         return boarded;
     };
 
+    const auto addUnitMotion = [&](EntityTarget target,
+                                   GridPosition3 before,
+                                   GridPosition3 after,
+                                   Vec3 from,
+                                   Vec3 to) {
+        if (level) {
+            for (const auto& portal : level->portals()) {
+                const auto exit = level->portalExit(portal.cell);
+                if (exit && portal.cell.z == before.z &&
+                    std::abs(portal.cell.x - before.x) +
+                            std::abs(portal.cell.y - before.y) ==
+                        1 &&
+                    exit->x == after.x && exit->y == after.y &&
+                    after.z <= exit->z) {
+                    const Vec3 mouth = toVec3(portal.cell);
+                    const Vec3 emerged = toVec3(*exit);
+                    builder.addMotion(
+                        { .target = target,
+                          .from = from,
+                          .to = mouth,
+                          .durationSeconds = motionDuration * 0.5f });
+                    builder.addMotion(
+                        { .target = target,
+                          .from = emerged,
+                          .to = to,
+                          .startSeconds = motionDuration * 0.5f,
+                          .durationSeconds = motionDuration * 0.5f });
+                    return;
+                }
+            }
+        }
+        builder.addMotion({ .target = target,
+                            .from = from,
+                            .to = to,
+                            .durationSeconds = motionDuration });
+    };
+
     const std::size_t playerCount = std::min(
         action.before.players.size(),
         action.after.players.size());
@@ -686,12 +723,7 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
             if (visual != players_.end()) {
                 movementClipTime = visual->clipTimeFor(movementUse);
             }
-            builder.addMotion({
-                .target = target,
-                .from = from,
-                .to = to,
-                .durationSeconds = motionDuration,
-            });
+            addUnitMotion(target, before.cell, walkedTo, from, to);
             static_cast<void>(builder.addAnimation({
                 .target = target,
                 .use = movementUse,
@@ -714,12 +746,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
         const Vec3 from = movableRenderTarget(before.cell, before.fallen);
         const Vec3 to = movableRenderTarget(walkedTo, after.fallen);
         if (gridDistance(from, to) > 0.0001f) {
-            builder.addMotion({
-                .target = movableTarget(before, index),
-                .from = from,
-                .to = to,
-                .durationSeconds = motionDuration,
-            });
+            addUnitMotion(
+                movableTarget(before, index), before.cell, walkedTo, from, to);
         }
     }
 
@@ -762,12 +790,7 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
         const Vec3 from = movableRenderTarget(before.cell, before.fallen);
         const Vec3 to = movableRenderTarget(walkedTo, after.fallen);
         if (gridDistance(from, to) > 0.0001f) {
-            builder.addMotion({
-                .target = target,
-                .from = from,
-                .to = to,
-                .durationSeconds = motionDuration,
-            });
+            addUnitMotion(target, before.cell, walkedTo, from, to);
         }
 
         for (std::size_t playerIndex = 0;

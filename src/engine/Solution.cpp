@@ -337,6 +337,20 @@ std::uint64_t levelDigest(const Level::Definition& definition)
                 std::to_string(colorChannel(link.color.y)) + "," +
                 std::to_string(colorChannel(link.color.z)) + "\n");
     }
+    std::vector<Level::Portal> portals = definition.portals;
+    std::ranges::sort(portals, {}, [&](const auto& portal) {
+        return cellOrder(portal.cell);
+    });
+    for (const auto& portal : portals) {
+        hashBytes(
+            hash,
+            "@portal " + std::to_string(portal.cell.x) + "," +
+                std::to_string(portal.cell.y) + "," +
+                std::to_string(portal.cell.z) + ":" +
+                std::to_string(colorChannel(portal.color.x)) + "," +
+                std::to_string(colorChannel(portal.color.y)) + "," +
+                std::to_string(colorChannel(portal.color.z)) + "\n");
+    }
     // Plates authored beneath units change what the screen does from its
     // first step; hashed only when present, like rotators.
     std::vector<Level::Plate> plates = definition.plates;

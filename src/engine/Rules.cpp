@@ -1237,37 +1237,67 @@ bool turretHasLineOfSight(
     const GameState& state,
     GridPosition3 turret,
     MoveDirection direction,
-    GridPosition3 target)
+    GridPosition3 target,
+    std::vector<TurretRaySegment>* segments = nullptr)
 {
-    if (turret.z != target.z) {
-        return false;
-    }
-    const GridPosition ray = directionOffset(direction);
-    const int dx = target.x - turret.x;
-    const int dy = target.y - turret.y;
-    int distance = 0;
-    if (ray.x != 0 && dy == 0 && dx * ray.x > 0) {
-        distance = std::abs(dx);
-    } else if (ray.y != 0 && dx == 0 && dy * ray.y > 0) {
-        distance = std::abs(dy);
-    } else {
-        return false;
-    }
-
-    for (int step = 1; step < distance; ++step) {
-        const GridPosition3 cell {
-            turret.x + ray.x * step,
-            turret.y + ray.y * step,
-            turret.z,
-        };
-        if (!cellAllowsEntity(level, state, cell) ||
-            movableAt(state, cell) != nullptr ||
-            playerBlocksAt(state, cell) ||
-            enemyAt(state, cell) != nullptr) {
+    GridPosition3 segmentStart = turret;
+    GridPosition3 cell = turret;
+    std::vector<GridPosition3> visited;
+    while (true) {
+        cell = movementTarget(cell, direction);
+        if (std::ranges::find(visited, cell) != visited.end()) {
             return false;
         }
+        visited.push_back(cell);
+        if (!cellAllowsEntity(level, state, cell)) {
+            return false;
+        }
+        if (cell == target) {
+            if (segments) {
+                segments->push_back({ segmentStart, cell });
+            }
+            return true;
+        }
+        if (movableAt(state, cell) || playerBlocksAt(state, cell) ||
+            enemyAt(state, cell)) {
+            return false;
+        }
+        if (const auto exit = level.portalExit(cell)) {
+            if (segments) {
+                segments->push_back({ segmentStart, cell });
+            }
+            cell = *exit;
+            segmentStart = cell;
+            if (!cellAllowsEntity(level, state, cell)) {
+                return false;
+            }
+            if (cell == target) {
+                if (segments) {
+                    segments->push_back({ segmentStart, cell });
+                }
+                return true;
+            }
+            if (movableAt(state, cell) || playerBlocksAt(state, cell) ||
+                enemyAt(state, cell)) {
+                return false;
+            }
+        }
     }
-    return true;
+}
+
+std::vector<TurretRaySegment> turretBeamSegments(
+    const Level& level,
+    const GameState& state,
+    GridPosition3 from,
+    MoveDirection direction,
+    GridPosition3 to)
+{
+    std::vector<TurretRaySegment> segments;
+    if (!turretHasLineOfSight(level, state, from, direction, to, &segments) ||
+        segments.size() <= 1) {
+        return {};
+    }
+    return segments;
 }
 
 } // namespace
@@ -1347,6 +1377,7 @@ struct MirrorRays {
 struct MirrorHit {
     GridPosition3 cell {};
     GridPosition output {};
+    GridPosition input {};
     int distance = 0;
 };
 
@@ -1366,32 +1397,80 @@ std::optional<MirrorRays> mirrorRays(TileType tile)
     }
 }
 
-GridPosition3 rayCell(GridPosition3 origin, GridPosition ray, int distance)
+struct PortalRayPath {
+    GridPosition3 destination {};
+    std::vector<GridPosition3> cells;
+    std::vector<MirrorBeamSegment> segments;
+};
+
+PortalRayPath portalRayPath(
+    const Level& level,
+    GridPosition3 origin,
+    GridPosition ray,
+    int distance,
+    std::optional<GridPosition3> stop = std::nullopt)
 {
-    return {
-        origin.x + ray.x * distance,
-        origin.y + ray.y * distance,
-        origin.z,
-    };
+    PortalRayPath path { .destination = origin };
+    GridPosition3 segmentStart = origin;
+    for (int step = 0; step < distance; ++step) {
+        auto& cell = path.destination;
+        cell = { cell.x + ray.x, cell.y + ray.y, cell.z };
+        path.cells.push_back(cell);
+        if (stop && cell == *stop) {
+            break;
+        }
+        if (const auto exit = level.portalExit(cell)) {
+            path.segments.push_back({ segmentStart, cell });
+            cell = *exit;
+            path.cells.push_back(cell);
+            segmentStart = cell;
+            if (stop && cell == *stop) {
+                break;
+            }
+        }
+    }
+    path.segments.push_back({ segmentStart, path.destination });
+    return path;
 }
 
 std::optional<int> distanceAlongRay(
+    const Level& level,
     GridPosition3 origin,
     GridPosition3 target,
     GridPosition ray)
 {
-    if (origin.z != target.z) {
+    if (level.portals().empty()) {
+        const int dx = target.x - origin.x;
+        const int dy = target.y - origin.y;
+        if (origin.z == target.z && ray.x != 0 && dy == 0 && dx * ray.x > 0) {
+            return std::abs(dx);
+        }
+        if (origin.z == target.z && ray.y != 0 && dx == 0 && dy * ray.y > 0) {
+            return std::abs(dy);
+        }
         return std::nullopt;
     }
-    const int dx = target.x - origin.x;
-    const int dy = target.y - origin.y;
-    if (ray.x != 0 && dy == 0 && dx * ray.x > 0) {
-        return std::abs(dx);
+    // A portal can change elevation and apparent alignment, so distance is
+    // the number of physical ray steps rather than a coordinate difference.
+    GridPosition3 cell = origin;
+    std::vector<GridPosition3> visited;
+    for (int distance = 1;; ++distance) {
+        cell = { cell.x + ray.x, cell.y + ray.y, cell.z };
+        if (!level.inBounds(cell) ||
+            std::ranges::find(visited, cell) != visited.end()) {
+            return std::nullopt;
+        }
+        visited.push_back(cell);
+        if (cell == target) {
+            return distance;
+        }
+        if (const auto exit = level.portalExit(cell)) {
+            cell = *exit;
+            if (cell == target) {
+                return distance;
+            }
+        }
     }
-    if (ray.y != 0 && dx == 0 && dy * ray.y > 0) {
-        return std::abs(dy);
-    }
-    return std::nullopt;
 }
 
 bool entityBlocksSight(
@@ -1432,11 +1511,23 @@ bool inputRayIsClear(
     int distance,
     std::size_t entityIndex)
 {
-    for (int step = 1; step < distance; ++step) {
-        const GridPosition3 cell = rayCell(mirror, ray, step);
+    const PortalRayPath path = portalRayPath(level, mirror, ray, distance);
+    for (const auto cell : path.cells) {
         if (!cellAllowsEntity(level, state, cell) ||
             entityBlocksSight(state, cell, entityIndex)) {
             return false;
+        }
+        // The ignored source may occupy an entrance before it teleports.
+        const auto matchesSource = [&](const auto& units, std::size_t offset) {
+            return entityIndex >= offset &&
+                entityIndex - offset < units.size() &&
+                units[entityIndex - offset].cell == cell;
+        };
+        if (matchesSource(state.movables, 0) ||
+            matchesSource(state.players, state.movables.size()) ||
+            matchesSource(
+                state.enemies, state.movables.size() + state.players.size())) {
+            break;
         }
     }
     return true;
@@ -1449,9 +1540,8 @@ bool outputRayIsClear(
     GridPosition ray,
     int distance)
 {
-    for (int step = 1; step <= distance; ++step) {
-        if (!cellAllowsEntity(
-                level, state, rayCell(mirror, ray, step))) {
+    for (const auto cell : portalRayPath(level, mirror, ray, distance).cells) {
+        if (!cellAllowsEntity(level, state, cell)) {
             return false;
         }
     }
@@ -1471,47 +1561,59 @@ std::vector<MirrorHit> nearestMirrors(
         return nearest;
     }
 
-    for (uint32_t y = 0; y < level.height(); ++y) {
-        for (uint32_t x = 0; x < level.width(); ++x) {
-            const GridPosition3 mirror {
-                static_cast<int>(x),
-                static_cast<int>(y),
-                entityCell.z,
-            };
-            if (std::ranges::find(usedMirrors, mirror) != usedMirrors.end()) {
-                continue;
-            }
-            const std::optional<TileType> mirrorTile =
-                mirrorTileAt(level, state, mirror);
-            const std::optional<MirrorRays> rays =
-                mirrorTile ? mirrorRays(*mirrorTile) : std::nullopt;
-            if (!rays) {
-                continue;
-            }
-
-            const std::array pairs {
-                std::pair { rays->first, rays->second },
-                std::pair { rays->second, rays->first },
-            };
-            for (const auto& [input, output] : pairs) {
-                const std::optional<int> distance =
-                    distanceAlongRay(mirror, entityCell, input);
-                if (!distance ||
-                    !inputRayIsClear(
-                        level, state, mirror, input, *distance, entityIndex)) {
+    const uint32_t firstLayer =
+        level.portals().empty() ? static_cast<uint32_t>(entityCell.z) : 0;
+    const uint32_t lastLayer =
+        level.portals().empty() ? firstLayer + 1 : level.depth();
+    for (uint32_t z = firstLayer; z < lastLayer; ++z) {
+        for (uint32_t y = 0; y < level.height(); ++y) {
+            for (uint32_t x = 0; x < level.width(); ++x) {
+                const GridPosition3 mirror {
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(z),
+                };
+                if (std::ranges::find(usedMirrors, mirror) !=
+                    usedMirrors.end()) {
                     continue;
                 }
-                if (nearest.empty() || *distance < nearestDistance) {
-                    nearest.clear();
-                    nearest.push_back({ mirror, output, *distance });
-                    nearestDistance = *distance;
-                } else if (*distance == nearestDistance &&
-                    std::ranges::none_of(
-                        nearest,
-                        [&](const MirrorHit& existing) {
-                            return existing.cell == mirror;
-                        })) {
-                    nearest.push_back({ mirror, output, *distance });
+                const std::optional<TileType> mirrorTile =
+                    mirrorTileAt(level, state, mirror);
+                const std::optional<MirrorRays> rays =
+                    mirrorTile ? mirrorRays(*mirrorTile) : std::nullopt;
+                if (!rays) {
+                    continue;
+                }
+
+                const std::array pairs {
+                    std::pair { rays->first, rays->second },
+                    std::pair { rays->second, rays->first },
+                };
+                for (const auto& [input, output] : pairs) {
+                    const std::optional<int> distance =
+                        distanceAlongRay(level, mirror, entityCell, input);
+                    if (!distance ||
+                        !inputRayIsClear(
+                            level,
+                            state,
+                            mirror,
+                            input,
+                            *distance,
+                            entityIndex)) {
+                        continue;
+                    }
+                    if (nearest.empty() || *distance < nearestDistance) {
+                        nearest.clear();
+                        nearest.push_back({ mirror, output, input, *distance });
+                        nearestDistance = *distance;
+                    } else if (
+                        *distance == nearestDistance &&
+                        std::ranges::none_of(
+                            nearest, [&](const MirrorHit& existing) {
+                                return existing.cell == mirror;
+                            })) {
+                        nearest.push_back({ mirror, output, input, *distance });
+                    }
                 }
             }
         }
@@ -1578,11 +1680,21 @@ std::optional<std::vector<ReflectedPath>> reflectedPathsForEntity(
                 return std::nullopt;
             }
             PendingReflectionPath branch = path;
-            const GridPosition3 destination =
-                rayCell(hit->cell, hit->output, hit->distance);
+            const PortalRayPath output =
+                portalRayPath(level, hit->cell, hit->output, hit->distance);
+            const GridPosition3 destination = output.destination;
+            const PortalRayPath input = portalRayPath(
+                level, hit->cell, hit->input, hit->distance, path.cell);
             branch.usedMirrors.push_back(hit->cell);
-            branch.beamSegments.push_back({ path.cell, hit->cell });
-            branch.beamSegments.push_back({ hit->cell, destination });
+            for (auto segment = input.segments.rbegin();
+                 segment != input.segments.rend();
+                 ++segment) {
+                branch.beamSegments.push_back({ segment->to, segment->from });
+            }
+            branch.beamSegments.insert(
+                branch.beamSegments.end(),
+                output.segments.begin(),
+                output.segments.end());
             branch.cell = destination;
             pending.push_back(std::move(branch));
         }
@@ -1873,7 +1985,8 @@ public:
         std::optional<MoveDirection> playerInput,
         const StepRates& rates,
         const StepScope& scope,
-        std::vector<TurretShot>* turretShots = nullptr)
+        std::vector<TurretShot>* turretShots = nullptr,
+        std::vector<PortalTransit>* portalTransits = nullptr)
         : level_(level)
         , after_(after)
         , playerInput_(playerInput)
@@ -1886,6 +1999,7 @@ public:
         , enemyMovedThisMicro_(after.enemies.size(), 0)
         , movableMovedDirections_(movableCount_)
         , turretShots_(turretShots)
+        , portalTransits_(portalTransits)
         , rotatorsEngagedAtStart_(rotatorEngagement(level, after))
         , elevatorsEngagedAtStart_(elevatorEngagement(level, after))
         , minecartsEngagedAtStart_(minecartEngagement(level, after))
@@ -1929,6 +2043,8 @@ public:
                 mayPulse
                 ? std::optional<std::vector<char>> { enemyMoved_ }
                 : std::nullopt;
+            const std::size_t transitCount =
+                portalTransits_ ? portalTransits_->size() : 0;
             deriveIntents();
             const bool hasBardPulse = std::ranges::any_of(
                 status_,
@@ -1938,6 +2054,9 @@ public:
             anyMovement = resolveLinkedMoves() || anyMovement;
             settleBlocked();
             if (hasBardPulse && !anyBardMovedThisMicro()) {
+                if (portalTransits_) {
+                    portalTransits_->resize(transitCount);
+                }
                 after_ = *beforeBardPulse;
                 status_ = *statusesBeforeBardPulse;
                 enemyMoved_ = *enemiesBeforeBardPulse;
@@ -2059,6 +2178,100 @@ private:
         return index - movableCount_ - playerCount_;
     }
 
+    [[nodiscard]] GridPosition3 movementDestination(
+        GridPosition3 origin,
+        MoveDirection direction) const
+    {
+        const GridPosition3 entrance = movementTarget(origin, direction);
+        const auto exit = level_.portalExit(entrance);
+        if (!exit) {
+            return entrance;
+        }
+        return *exit;
+    }
+
+    [[nodiscard]] bool portalEntryClear(
+        GridPosition3 from,
+        MoveDirection direction,
+        const GameState& state) const
+    {
+        const auto entrance = movementTarget(from, direction);
+        return !level_.portalExit(entrance) ||
+            (!movableAt(state, entrance) && !playerBlocksAt(state, entrance) &&
+             !enemyAt(state, entrance));
+    }
+
+    [[nodiscard]] bool portalLandingSupported(
+        std::size_t index,
+        GridPosition3 exit) const
+    {
+        if (!cellAllowsEntity(level_, after_, exit)) {
+            return false;
+        }
+        if (isPlayer(index)) {
+            return playerFallTarget(
+                       level_, after_, playerIndexForEntity(index), exit)
+                .supported;
+        }
+        if (status_[index].bardDriven) {
+            return true;
+        }
+        return isEnemy(index)
+            ? enemyFallTarget(level_, after_, enemyIndexForEntity(index), exit)
+                  .supported
+            : movableFallTarget(level_, after_, index, exit).supported;
+    }
+
+    [[nodiscard]] bool occupied(GridPosition3 cell) const
+    {
+        return movableAt(after_, cell) || playerBlocksAt(after_, cell) ||
+            enemyAt(after_, cell);
+    }
+
+    [[nodiscard]] GridPosition3 transportedLanding(
+        GridPosition3 from,
+        MoveDirection direction,
+        GridPosition3 target) const
+    {
+        const GridPosition3 entrance = movementTarget(from, direction);
+        if (target == entrance) {
+            return level_.portalExit(entrance).value_or(target);
+        }
+        return target;
+    }
+
+    void recordPortalTransit(
+        EntityKind kind,
+        EntityId id,
+        std::size_t index,
+        GridPosition3 from,
+        MoveDirection direction,
+        GridPosition3 to)
+    {
+        const auto entrance = movementTarget(from, direction);
+        const auto exit = level_.portalExit(entrance);
+        if (portalTransits_ && exit && *exit == to) {
+            portalTransits_->push_back({
+                .target = { kind, resolvedEntityId(kind, id, index) },
+                .from = from,
+                .entrance = entrance,
+                .exit = *exit,
+                .direction = direction,
+            });
+        }
+    }
+
+    [[nodiscard]] bool portalCarriesMomentum(
+        GridPosition3 origin,
+        MoveDirection direction,
+        const std::optional<MoveDirection>& sliding) const
+    {
+        return level_.portalExit(movementTarget(origin, direction))
+                   .has_value() &&
+            (sliding.has_value() ||
+             conveyorDirectionAt(level_, origin).has_value());
+    }
+
     [[nodiscard]] std::optional<MoveDirection>& slidingOf(std::size_t index)
     {
         if (isPlayer(index)) {
@@ -2085,33 +2298,46 @@ private:
         std::size_t playerIndex,
         MoveDirection direction) const
     {
-        const GridPosition ray = directionOffset(direction);
-        const GridPosition3 origin = playerCell(after_, playerIndex);
-        for (int distance = 1;; ++distance) {
-            const GridPosition3 cell {
-                origin.x + ray.x * distance,
-                origin.y + ray.y * distance,
-                origin.z,
-            };
-            if (!cellAllowsEntity(level_, after_, cell)) {
+        GridPosition3 current = playerCell(after_, playerIndex);
+        std::vector<GridPosition3> visited;
+        const auto inspect =
+            [&](GridPosition3 cell) -> std::optional<ChainEntity> {
+            if (const auto* movable = movableAt(after_, cell)) {
+                return ChainEntity { .movable = true,
+                                     .index = static_cast<std::size_t>(
+                                         movable - after_.movables.data()) };
+            }
+            if (const auto* enemy = enemyAt(after_, cell)) {
+                return ChainEntity { .movable = false,
+                                     .index = static_cast<std::size_t>(
+                                         enemy - after_.enemies.data()) };
+            }
+            return std::nullopt;
+        };
+        while (true) {
+            current = movementTarget(current, direction);
+            if (!cellAllowsEntity(level_, after_, current) ||
+                std::ranges::find(visited, current) != visited.end()) {
                 return std::nullopt;
             }
-            if (const GameState::Movable* movable = movableAt(after_, cell)) {
-                return ChainEntity {
-                    .movable = true,
-                    .index = static_cast<std::size_t>(
-                        movable - after_.movables.data()),
-                };
+            visited.push_back(current);
+            if (const auto entity = inspect(current)) {
+                return entity;
             }
-            if (const GameState::Enemy* enemy = enemyAt(after_, cell)) {
-                return ChainEntity {
-                    .movable = false,
-                    .index = static_cast<std::size_t>(
-                        enemy - after_.enemies.data()),
-                };
-            }
-            if (playerBlocksAt(after_, cell, playerIndex)) {
+            if (playerBlocksAt(after_, current, playerIndex)) {
                 return std::nullopt;
+            }
+            if (const auto exit = level_.portalExit(current)) {
+                current = *exit;
+                if (!cellAllowsEntity(level_, after_, current)) {
+                    return std::nullopt;
+                }
+                if (const auto entity = inspect(current)) {
+                    return entity;
+                }
+                if (playerBlocksAt(after_, current, playerIndex)) {
+                    return std::nullopt;
+                }
             }
         }
     }
@@ -2336,7 +2562,7 @@ private:
             }
 
             if (status.intent) {
-                status.target = movementTarget(cellOf(i), *status.intent);
+                status.target = movementDestination(cellOf(i), *status.intent);
                 if (isPlayer(i) && status.inputDriven) {
                     const std::size_t playerIndex =
                         playerIndexForEntity(i);
@@ -2371,7 +2597,16 @@ private:
                 continue;
             }
             for (std::size_t j = i + 1; j < status_.size(); ++j) {
-                if (status_[j].target && *status_[i].target == *status_[j].target) {
+                const auto entryI = status_[i].intent
+                    ? movementTarget(cellOf(i), *status_[i].intent)
+                    : *status_[i].target;
+                const auto entryJ = status_[j].intent
+                    ? movementTarget(cellOf(j), *status_[j].intent)
+                    : status_[j].target.value_or(GridPosition3 {});
+                if (status_[j].target &&
+                    (*status_[i].target == *status_[j].target ||
+                     entryI == entryJ || entryI == *status_[j].target ||
+                     entryJ == *status_[i].target)) {
                     if (status_[i].bardDriven != status_[j].bardDriven) {
                         Status& follower = status_[i].bardDriven
                             ? status_[i]
@@ -2410,9 +2645,11 @@ private:
         if (blockerStatus.movedThisMicro) {
             return false;
         }
-        const GridPosition3 destination = movementTarget(
-            after_.movables[blockerIndex].cell, direction);
-        if (!cellAllowsEntity(level_, after_, destination) ||
+        const GridPosition3 destination =
+            movementDestination(after_.movables[blockerIndex].cell, direction);
+        if (!portalEntryClear(
+                after_.movables[blockerIndex].cell, direction, after_) ||
+            !cellAllowsEntity(level_, after_, destination) ||
             movableBlocksAt(after_, destination, blockerIndex) ||
             playerBlocksAt(after_, destination) ||
             enemyBlocksAt(after_, destination) ||
@@ -2504,8 +2741,9 @@ private:
                     continue;
                 }
                 const GridPosition3 destination =
-                    movementTarget(movable.cell, direction);
-                if (!cellAllowsEntity(level_, after_, destination) ||
+                    movementDestination(movable.cell, direction);
+                if (!portalEntryClear(movable.cell, direction, after_) ||
+                    !cellAllowsEntity(level_, after_, destination) ||
                     movableBlocksAt(after_, destination, index) ||
                     playerBlocksAt(after_, destination) ||
                     enemyBlocksAt(after_, destination) ||
@@ -2529,6 +2767,25 @@ private:
         Status& status = status_[index];
         const MoveDirection direction = *status.intent;
         const GridPosition3 target = *status.target;
+
+        const auto entrance = movementTarget(cellOf(index), direction);
+        const auto exit = level_.portalExit(entrance);
+        if (!status.contested && exit && target == *exit) {
+            if (occupied(*exit)) {
+                return false;
+            }
+            if (occupied(entrance)) {
+                if (!portalLandingSupported(index, *exit)) {
+                    cancelAndFinish(index, true);
+                    status.resolved = true;
+                    return true;
+                }
+                status.target = entrance;
+                const bool resolved = resolveMovable(index, anyMovement);
+                status.target = target;
+                return resolved;
+            }
+        }
 
         if (status.contested) {
             cancelAndFinish(index, true);
@@ -2587,6 +2844,25 @@ private:
         const std::size_t enemyIndex = enemyIndexForEntity(entityIndex);
         const MoveDirection direction = *status.intent;
         const GridPosition3 target = *status.target;
+
+        const auto entrance = movementTarget(cellOf(entityIndex), direction);
+        const auto exit = level_.portalExit(entrance);
+        if (!status.contested && exit && target == *exit) {
+            if (occupied(*exit)) {
+                return false;
+            }
+            if (occupied(entrance)) {
+                if (!portalLandingSupported(entityIndex, *exit)) {
+                    cancelAndFinish(entityIndex, true);
+                    status.resolved = true;
+                    return true;
+                }
+                status.target = entrance;
+                const bool resolved = resolveEnemy(entityIndex, anyMovement);
+                status.target = target;
+                return resolved;
+            }
+        }
 
         if (status.contested) {
             cancelAndFinish(entityIndex, true);
@@ -2653,6 +2929,25 @@ private:
         const std::size_t playerIndex = playerIndexForEntity(entityIndex);
         const MoveDirection direction = *status.intent;
         const GridPosition3 target = *status.target;
+
+        const auto entrance = movementTarget(cellOf(entityIndex), direction);
+        const auto exit = level_.portalExit(entrance);
+        if (!status.contested && exit && target == *exit) {
+            if (occupied(*exit)) {
+                return false;
+            }
+            if (occupied(entrance)) {
+                if (!portalLandingSupported(entityIndex, *exit)) {
+                    cancelAndFinish(entityIndex, true);
+                    status.resolved = true;
+                    return true;
+                }
+                status.target = entrance;
+                const bool resolved = resolvePlayer(entityIndex, anyMovement);
+                status.target = target;
+                return resolved;
+            }
+        }
 
         if (status.contested) {
             cancelAndFinish(entityIndex, true);
@@ -2739,9 +3034,8 @@ private:
         }
         if (after_.players[playerIndex].character.value_or(
                 level_.character()) == CharacterType::Druid) {
-            const GridPosition3 pullSource = movementTarget(
-                playerCell(after_, playerIndex),
-                oppositeDirection(direction));
+            const GridPosition3 pullSource = movementDestination(
+                playerCell(after_, playerIndex), oppositeDirection(direction));
             if (const GameState::Enemy* enemy = enemyAt(after_, pullSource)) {
                 const std::size_t enemyIndex = static_cast<std::size_t>(
                     enemy - after_.enemies.data());
@@ -2803,7 +3097,8 @@ private:
             }
             // The blocker has finished its own movement for this micro-step.
             // Direct input may push it.
-            const GridPosition3 pushTarget = movementTarget(target, direction);
+            const GridPosition3 pushTarget =
+                movementDestination(target, direction);
             const GameState::Enemy* pushedEnemy = enemyAt(after_, pushTarget);
             if (pushedEnemy != nullptr) {
                 const std::size_t enemyIndex = static_cast<std::size_t>(
@@ -2818,8 +3113,13 @@ private:
                     direction);
             const bool druid = after_.players[playerIndex].character.value_or(
                 level_.character()) == CharacterType::Druid;
+            const bool occupiedPortalExit =
+                level_.portalExit(movementTarget(target, direction)).has_value() &&
+                occupied(pushTarget);
             if (status.inputDriven && !druid &&
                 !status_[blockerIndex].movedThisMicro &&
+                !occupiedPortalExit &&
+                portalEntryClear(target, direction, after_) &&
                 cellAllowsEntity(level_, after_, pushTarget) &&
                 !movableBlocksAt(after_, pushTarget, blockerIndex) &&
                 !playerBlocksAt(after_, pushTarget, playerIndex) &&
@@ -2885,6 +3185,12 @@ private:
         GridPosition3 cell = firstCell;
         while (const std::optional<ChainEntity> entity =
                    pushableAt(after_, cell)) {
+            if (std::ranges::any_of(chain, [&](const ChainEntity& seen) {
+                    return seen.movable == entity->movable &&
+                        seen.index == entity->index;
+                })) {
+                return {};
+            }
             chain.push_back(*entity);
             cell = movementTarget(cell, direction);
         }
@@ -2905,9 +3211,11 @@ private:
                 if (status_[entity.index].movedThisMicro) {
                     return false;
                 }
-                const GridPosition3 destination = movementTarget(
+                const GridPosition3 destination = movementDestination(
                     trial.movables[entity.index].cell, direction);
-                if (!cellAllowsEntity(level_, trial, destination) ||
+                if (!portalEntryClear(
+                        trial.movables[entity.index].cell, direction, trial) ||
+                    !cellAllowsEntity(level_, trial, destination) ||
                     movableBlocksAt(trial, destination, entity.index) ||
                     enemyBlocksAt(trial, destination) ||
                     playerBlocksAt(trial, destination)) {
@@ -2921,9 +3229,11 @@ private:
                 trial.movables[entity.index].cell = fall.cell;
                 trial.movables[entity.index].fallen = fall.fallen;
             } else {
-                const GridPosition3 destination = movementTarget(
+                const GridPosition3 destination = movementDestination(
                     trial.enemies[entity.index].cell, direction);
-                if (!cellAllowsEntity(level_, trial, destination) ||
+                if (!portalEntryClear(
+                        trial.enemies[entity.index].cell, direction, trial) ||
+                    !cellAllowsEntity(level_, trial, destination) ||
                     movableBlocksAt(
                         trial, destination, trial.movables.size()) ||
                     enemyBlocksAt(trial, destination, entity.index) ||
@@ -2943,7 +3253,7 @@ private:
         for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
             const ChainEntity entity = *it;
             if (entity.movable) {
-                const GridPosition3 destination = movementTarget(
+                const GridPosition3 destination = movementDestination(
                     after_.movables[entity.index].cell, direction);
                 applyMovableMove(entity.index, direction, destination);
                 status_[entity.index].movedThisMicro = true;
@@ -2960,10 +3270,11 @@ private:
         std::size_t enemyIndex,
         MoveDirection direction) const
     {
-        const GridPosition3 destination = movementTarget(
-            after_.enemies[enemyIndex].cell,
-            direction);
-        return cellAllowsEntity(level_, after_, destination) &&
+        const GridPosition3 destination =
+            movementDestination(after_.enemies[enemyIndex].cell, direction);
+        return portalEntryClear(
+                   after_.enemies[enemyIndex].cell, direction, after_) &&
+            cellAllowsEntity(level_, after_, destination) &&
             !movableBlocksAt(after_, destination, after_.movables.size()) &&
             !playerBlocksAt(after_, destination) &&
             !enemyBlocksAt(after_, destination, enemyIndex) &&
@@ -2986,9 +3297,19 @@ private:
         MoveDirection direction,
         bool preserveElevation = false)
     {
-        const GridPosition3 destination = movementTarget(
+        const GridPosition3 destination =
+            movementDestination(after_.enemies[enemyIndex].cell, direction);
+        const bool portalMomentum = portalCarriesMomentum(
             after_.enemies[enemyIndex].cell,
-            direction);
+            direction,
+            after_.enemies[enemyIndex].sliding);
+        recordPortalTransit(
+            EntityKind::Enemy,
+            after_.enemies[enemyIndex].id,
+            enemyIndex,
+            after_.enemies[enemyIndex].cell,
+            direction,
+            destination);
         after_.enemies[enemyIndex].cell = destination;
         const FallResult fall = preserveElevation
             ? FallResult { .cell = destination, .supported = true }
@@ -2997,11 +3318,12 @@ private:
         after_.enemies[enemyIndex].fallen = fall.fallen;
         const bool fell = fall.cell != destination || fall.fallen;
         after_.enemies[enemyIndex].sliding =
-            (!fell && isIceFloor(level_, after_, fall.cell) &&
-                cellAllowsEntity(
-                    level_, after_, movementTarget(fall.cell, direction)))
-                ? std::optional<MoveDirection>(direction)
-                : std::nullopt;
+            (!fell &&
+             (portalMomentum || isIceFloor(level_, after_, fall.cell)) &&
+             cellAllowsEntity(
+                 level_, after_, movementDestination(fall.cell, direction)))
+            ? std::optional<MoveDirection>(direction)
+            : std::nullopt;
         Status& status = status_[entityIndexForEnemy(enemyIndex)];
         ++status.consumed;
         status.active = true;
@@ -3221,6 +3543,7 @@ private:
                         .turretCell = turret.cell,
                         .targetCell = target.cell,
                         .direction = *direction,
+                            .beamSegments = turretBeamSegments(level_, after_, turret.cell, *direction, target.cell),
                     });
                 }
             }
@@ -3255,6 +3578,7 @@ private:
                             .turretCell = turret.cell,
                             .targetCell = player.cell,
                             .direction = *direction,
+                            .beamSegments = turretBeamSegments(level_, after_, turret.cell, *direction, player.cell),
                         });
                     }
                 }
@@ -3287,6 +3611,7 @@ private:
                             .turretCell = turret.cell,
                             .targetCell = enemy.cell,
                             .direction = *direction,
+                            .beamSegments = turretBeamSegments(level_, after_, turret.cell, *direction, enemy.cell),
                         });
                     }
                 }
@@ -3405,6 +3730,19 @@ private:
         GridPosition3 target,
         bool preserveElevation = false)
     {
+        target =
+            transportedLanding(after_.movables[index].cell, direction, target);
+        const bool portalMomentum = portalCarriesMomentum(
+            after_.movables[index].cell,
+            direction,
+            after_.movables[index].sliding);
+        recordPortalTransit(
+            EntityKind::Movable,
+            after_.movables[index].id,
+            index,
+            after_.movables[index].cell,
+            direction,
+            target);
         movableMovedDirections_[index] = direction;
         after_.movables[index].cell = target;
         const FallResult fall = preserveElevation
@@ -3413,14 +3751,15 @@ private:
         const bool fell = fall.cell.z != target.z || fall.fallen;
         after_.movables[index].cell = fall.cell;
         after_.movables[index].fallen = fall.fallen;
-        const bool slippery = after_.movables[index].type == TileType::Ice ||
+        const bool slippery = portalMomentum ||
+            after_.movables[index].type == TileType::Ice ||
             isIceFloor(level_, after_, fall.cell);
         after_.movables[index].sliding =
             (!fell && slippery &&
-                cellAllowsEntity(
-                    level_, after_, movementTarget(fall.cell, direction)))
-                ? std::optional<MoveDirection>(direction)
-                : std::nullopt;
+             cellAllowsEntity(
+                 level_, after_, movementDestination(fall.cell, direction)))
+            ? std::optional<MoveDirection>(direction)
+            : std::nullopt;
         ++status_[index].consumed;
     }
 
@@ -3430,6 +3769,19 @@ private:
         GridPosition3 target)
     {
         const std::size_t playerIndex = playerIndexForEntity(entityIndex);
+        target = transportedLanding(
+            playerCell(after_, playerIndex), direction, target);
+        const bool portalMomentum = portalCarriesMomentum(
+            playerCell(after_, playerIndex),
+            direction,
+            playerSliding(after_, playerIndex));
+        recordPortalTransit(
+            EntityKind::Player,
+            after_.players[playerIndex].id,
+            playerIndex,
+            playerCell(after_, playerIndex),
+            direction,
+            target);
         playerCell(after_, playerIndex) = target;
         const FallResult fall =
             playerFallTarget(level_, after_, playerIndex, target);
@@ -3439,11 +3791,11 @@ private:
         after_.players[playerIndex].drowned = fall.fallen;
         playerSliding(after_, playerIndex) =
             (!fell && !playerDead(after_, playerIndex) &&
-                isIceFloor(level_, after_, fall.cell) &&
-                cellAllowsEntity(
-                    level_, after_, movementTarget(fall.cell, direction)))
-                ? std::optional<MoveDirection>(direction)
-                : std::nullopt;
+             (portalMomentum || isIceFloor(level_, after_, fall.cell)) &&
+             cellAllowsEntity(
+                 level_, after_, movementDestination(fall.cell, direction)))
+            ? std::optional<MoveDirection>(direction)
+            : std::nullopt;
         ++status_[entityIndex].consumed;
     }
 
@@ -3479,10 +3831,24 @@ private:
             return;
         }
 
-        // The destination is the cell a live player just vacated, so the
-        // resolver has already established that it is valid and supported.
+        // Leaving a portal can pull the follower through its paired mouth.
+        // The player's vacated cell is free, but the remote exit may be
+        // blocked.
+        const GridPosition3 pulledFrom = pulled->movable
+            ? after_.movables[pulled->index].cell
+            : after_.enemies[pulled->index].cell;
+        const GridPosition3 landing =
+            movementDestination(pulledFrom, direction);
+        if (!cellAllowsEntity(level_, after_, landing) || occupied(landing) ||
+            (pulled->movable
+                 ? !movableFallTarget(level_, after_, pulled->index, landing)
+                        .supported
+                 : !enemyFallTarget(level_, after_, pulled->index, landing)
+                        .supported)) {
+            return;
+        }
         if (pulled->movable) {
-            applyMovableMove(pulled->index, direction, vacated);
+            applyMovableMove(pulled->index, direction, landing);
             status_[pulled->index].resolved = true;
             status_[pulled->index].movedThisMicro = true;
             status_[pulled->index].done = false;
@@ -3519,6 +3885,7 @@ private:
     // micro-step. Linked groups react after ordinary resolution completes.
     std::vector<std::optional<MoveDirection>> movableMovedDirections_;
     std::vector<TurretShot>* turretShots_ = nullptr;
+    std::vector<PortalTransit>* portalTransits_ = nullptr;
     bool suppressBardInfluences_ = false;
     // Which rotators had every linked plate pressed when the step began. A
     // rotator activates on the step that presses its last plate, never on a
@@ -3579,7 +3946,8 @@ StepResult scopedStepWithEvents(
         playerInput,
         rates,
         scope,
-        &result.turretShots);
+        &result.turretShots,
+        &result.portalTransits);
     resolver.run();
     return result;
 }

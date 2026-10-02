@@ -53,6 +53,10 @@ void appendLinkedObjectAura(
     const RenderFrameData::Tile& object,
     Vec3 color);
 
+void appendPortalVisual(
+    RenderFrameData& frame,
+    const RenderFrameData::Tile& tile);
+
 uint32_t facingQuarterTurns(MoveDirection direction);
 
 // --------------------------------------------------------- Animation lookups

@@ -158,19 +158,36 @@ struct StepRates {
 // that a turret has a clear shot. Keeping this in the rules result means
 // visuals never have to guess whether a death came from a turret, an enemy, or
 // water, and a volley can retain every firing turret.
+struct TurretRaySegment {
+    GridPosition3 from {};
+    GridPosition3 to {};
+    bool operator==(const TurretRaySegment&) const = default;
+};
+
 struct TurretShot {
     EntityTarget turret;
     EntityTarget target;
     GridPosition3 turretCell {};
     GridPosition3 targetCell {};
     MoveDirection direction = MoveDirection::Up;
+    std::vector<TurretRaySegment> beamSegments;
 
     bool operator==(const TurretShot&) const = default;
+};
+
+struct PortalTransit {
+    EntityTarget target;
+    GridPosition3 from {};
+    GridPosition3 entrance {};
+    GridPosition3 exit {};
+    MoveDirection direction = MoveDirection::Up;
+    bool operator==(const PortalTransit&) const = default;
 };
 
 struct StepResult {
     GameState state;
     std::vector<TurretShot> turretShots;
+    std::vector<PortalTransit> portalTransits;
 
     bool operator==(const StepResult&) const = default;
 };
