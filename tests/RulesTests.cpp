@@ -2391,6 +2391,150 @@ void testTurretKillsAnotherTurretMovedIntoLineOfSight()
     CHECK(entered.players[0].cell == cell(2, 0, 1));
 }
 
+void testTurretsReactWhenBlockersLeaveTheirSightlines()
+{
+    TEST("turretsReactWhenBlockersLeaveTheirSightlines");
+    for (const char target : { 'C', 'N', 'n' }) {
+        for (const bool conveyor : { false, true }) {
+            const Level level = Level::loadFromDefinition({
+                .layers = { { ".....", ".....", "....." },
+                            { target == 'C' ? "     " : "C    ",
+                              std::string(conveyor ? "e v " : "e I ") + target,
+                              "     " } },
+            }, "exposed turret targets");
+            GameState state = rules::initialState(level);
+            if (conveyor) {
+                state.movables.push_back({
+                    .id = 99, .type = TileType::Ice, .cell = { 2, 1, 1 },
+                });
+            }
+            const auto ice = std::ranges::find(
+                state.movables, TileType::Ice, &GameState::Movable::type);
+            const std::size_t iceIndex = ice - state.movables.begin();
+            ice->sliding = conveyor
+                ? std::nullopt : std::optional { MoveDirection::Down };
+            const rules::StepScope scope { .actors = { ice->id } };
+            const auto result = rules::scopedStepWithEvents(
+                level, state, std::nullopt, {}, scope);
+            CHECK(result.state.movables[iceIndex].cell == cell(2, 2, 1));
+            CHECK(result.turretShots.size() == 1);
+            if (target == 'C') {
+                CHECK(result.state.players[0].dead);
+                CHECK(result.state.players[0].cell == state.players[0].cell);
+            } else if (target == 'N') {
+                CHECK(result.state.enemies[0].dead);
+            } else {
+                CHECK(rules::movableAt(result.state, cell(4, 1, 1)) == nullptr);
+            }
+
+            // A second obstruction still shields the stationary target.
+            state.movables.push_back({ .id = 100, .cell = { 3, 1, 1 } });
+            const auto blocked = rules::scopedStepWithEvents(
+                level, state, std::nullopt, {}, scope);
+            CHECK(blocked.turretShots.empty());
+        }
+    }
+
+    const Level unrelated = makeLevel({
+        { ".....", "....." }, { " I   ", "e   C" },
+    });
+    GameState state = rules::initialState(unrelated);
+    state.movables[0].sliding = MoveDirection::Right;
+    const auto result = rules::scopedStepWithEvents(
+        unrelated, state, std::nullopt, {},
+        rules::StepScope { .actors = { state.movables[0].id } });
+    CHECK(!result.state.players[0].dead);
+    CHECK(result.turretShots.empty());
+}
+
+void testDeviceChangesExposeStationaryTurretTargets()
+{
+    TEST("gateOpeningExposesStationaryTurretTarget");
+    const Level gate = Level::loadFromDefinition({
+        .layers = { { ".....", "....." }, { "RP   ", "e G C" } },
+        .gates = { { .cell = { 2, 1, 1 },
+                     .pressurePlates = { { 1, 0, 1 } } } },
+    }, "gate turret reaction");
+    GameState state = rules::initialState(gate);
+    state.movables[0].sliding = MoveDirection::Right;
+    const auto opened = rules::scopedStepWithEvents(
+        gate, state, std::nullopt, {},
+        rules::StepScope { .actors = { state.movables[0].id } });
+    CHECK(rules::isGateOpen(gate, opened.state, gate.gates().front()));
+    CHECK(opened.state.players[0].dead);
+    CHECK(opened.turretShots.size() == 1);
+
+    TEST("emptyElevatorUncoversStationaryTurretTarget");
+    const Level elevator = Level::loadFromDefinition({
+        .layers = { { ".....", "....." },
+                    { "RP   ", "e = C" },
+                    { "     ", "     " },
+                    { "     ", "     " } },
+        .elevators = { { .cell = { 2, 1, 1 },
+                         .pressurePlates = { { 1, 0, 1 } },
+                         .levels = { 1, 3 } } },
+    }, "empty elevator turret reaction");
+    state = rules::initialState(elevator);
+    state.movables[0].sliding = MoveDirection::Right;
+    const auto lifted = rules::scopedStepWithEvents(
+        elevator, state, std::nullopt, {},
+        rules::StepScope { .actors = { state.movables[0].id } });
+    CHECK(lifted.state.elevators[0].cell == cell(2, 1, 3));
+    CHECK(lifted.state.players[0].dead);
+    CHECK(lifted.turretShots.size() == 1);
+}
+
+void testTurretDeathsCanOpenAnotherTurretsSightline()
+{
+    TEST("turretDeathsCanOpenAnotherTurretsSightline");
+    const Level level = makeLevel({
+        { ".....", ".....", ".....", "....." },
+        { "     ", "e N C", "  I  ", "  n  " },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[1].sliding = MoveDirection::Right;
+    const auto result = rules::scopedStepWithEvents(
+        level, state, std::nullopt, {},
+        rules::StepScope { .actors = { state.movables[1].id } });
+    CHECK(result.state.enemies[0].dead);
+    CHECK(result.state.players[0].dead);
+    CHECK(result.turretShots.size() == 2);
+}
+
+void testPortalIceFallExposesStationaryHero()
+{
+    TEST("portalIceFallExposesStationaryHero");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { ".......", ".......", ".......", ".......", "......." },
+                    { ".......", ".......", ". .....", ".......", "......." },
+                    { " O     ", "       ", "   CI o", "       ", " n     " } },
+        .portals = { { .cell = { 1, 0, 2 }, .color = { 1, 1, 0 } },
+                     { .cell = { 6, 2, 2 }, .color = { 1, 1, 0 } } },
+    }, "portal ice fall");
+    GameState state = rules::initialState(level);
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.players[0].cell == cell(4, 2, 2));
+    CHECK(!state.players[0].dead);
+    for (int step = 0; step < 3; ++step) {
+        state = rules::scopedStep(
+            level, state, std::nullopt, {},
+            rules::StepScope { .actors = { state.movables[0].id } });
+        CHECK(!state.players[0].dead);
+    }
+    const auto result = rules::scopedStepWithEvents(
+        level, state, std::nullopt, {},
+        rules::StepScope { .actors = { state.movables[0].id } });
+    CHECK(result.state.movables[0].cell == cell(1, 2, 1));
+    CHECK(!result.state.movables[0].sliding);
+    CHECK(result.state.players[0].cell == cell(4, 2, 2));
+    CHECK(result.state.players[0].dead);
+    CHECK(result.turretShots.size() == 1);
+    if (!result.turretShots.empty()) {
+        CHECK(result.turretShots[0].beamSegments.size() == 2);
+        CHECK(result.turretShots[0].target.id == state.players[0].id);
+    }
+}
+
 void testMutuallyFacingTurretsDestroyEachOtherWithoutMovement()
 {
     TEST("mutuallyFacingTurretsDestroyEachOtherWithoutMovement");
@@ -2844,6 +2988,10 @@ void testPortals()
 
 int main()
 {
+    testTurretsReactWhenBlockersLeaveTheirSightlines();
+    testDeviceChangesExposeStationaryTurretTargets();
+    testTurretDeathsCanOpenAnotherTurretsSightline();
+    testPortalIceFallExposesStationaryHero();
     testPortals();
     testInitialState();
     testEachAuthoredHeroKeepsItsOwnCharacterAbility();

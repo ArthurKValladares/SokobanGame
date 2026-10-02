@@ -1975,9 +1975,9 @@ namespace {
 //
 // A scope restricts which entities may act. Out-of-scope entities keep every
 // passive role they had - they block, support, and stop slides - but derive no
-// intent and are never written, so a step can move one entity without deciding
-// the fate of the whole board. An empty scope means everything acts, which is
-// the behaviour every existing save was written against.
+// intent. An action can still pull a bystander into its closure by exposing it
+// to a turret or enemy. An empty scope means everything acts, which is the
+// behaviour every existing save was written against.
 class MicroStepResolver {
 public:
     MicroStepResolver(
@@ -2026,9 +2026,11 @@ public:
 
     void run()
     {
+        turretSightlines_ = captureTurretSightlines();
         // A mutual face-off is itself an event; it does not need some unrelated
         // actor to move before both turrets fire.
-        resolveTurretShots();
+        while (resolveTurretShots()) {
+        }
         markDeadEntitiesDone();
         bool anyMovement = true;
         while (anyMovement) {
@@ -2070,9 +2072,7 @@ public:
                 suppressBardInfluences_ = false;
             }
             if (anyMovement) {
-                resolveTurretShots();
-                resolveAttacks();
-                markDeadEntitiesDone();
+                resolveReactions();
             }
         }
         resolveRotators();
@@ -3319,8 +3319,7 @@ private:
             }
         }
         if (anyTurret) {
-            resolveTurretShots(&sweeping);
-            markDeadEntitiesDone();
+            resolveReactions(&sweeping);
         }
     }
 
@@ -3337,12 +3336,10 @@ private:
         if (carried.empty()) {
             return;
         }
-        bool anyCarried = false;
         for (const std::size_t index : carried.players) {
             Status& status = status_[entityIndexForPlayer(index)];
             status.active = true;
             status.movedThisMicro = true;
-            anyCarried = true;
         }
         for (const std::size_t index : carried.enemies) {
             Status& status = status_[entityIndexForEnemy(index)];
@@ -3350,28 +3347,13 @@ private:
             status.movedThisMicro = true;
             enemyMoved_[index] = true;
             enemyMovedThisMicro_[index] = true;
-            anyCarried = true;
         }
-        std::vector<char> sweeping(movableCount_, 0);
-        bool anyTurret = false;
         for (const std::size_t index : carried.movables) {
             status_[index].active = true;
             status_[index].movedThisMicro = true;
-            anyCarried = true;
-            if (turretDirection(after_.movables[index])) {
-                sweeping[index] = 1;
-                anyTurret = true;
-            }
         }
-        if (!anyCarried) {
-            return;
-        }
-        resolveTurretShots();
-        if (anyTurret) {
-            resolveTurretShots(&sweeping);
-        }
-        resolveAttacks();
-        markDeadEntitiesDone();
+        // An empty platform can also uncover a ray or change a gate's state.
+        resolveReactions();
     }
 
     // Minecarts use the elevator's edge-trigger and rider semantics, but move
@@ -3383,12 +3365,10 @@ private:
         if (carried.empty()) {
             return;
         }
-        bool anyCarried = false;
         for (const std::size_t index : carried.players) {
             Status& status = status_[entityIndexForPlayer(index)];
             status.active = true;
             status.movedThisMicro = true;
-            anyCarried = true;
         }
         for (const std::size_t index : carried.enemies) {
             Status& status = status_[entityIndexForEnemy(index)];
@@ -3396,38 +3376,74 @@ private:
             status.movedThisMicro = true;
             enemyMoved_[index] = true;
             enemyMovedThisMicro_[index] = true;
-            anyCarried = true;
         }
-        std::vector<char> sweeping(movableCount_, 0);
-        bool anyTurret = false;
         for (const std::size_t index : carried.movables) {
             status_[index].active = true;
             status_[index].movedThisMicro = true;
-            anyCarried = true;
-            if (turretDirection(after_.movables[index])) {
-                sweeping[index] = 1;
-                anyTurret = true;
+        }
+        resolveReactions();
+    }
+
+    // Track visibility by entity, including inactive targets. Comparing with
+    // the previous reaction catches a blocker moving/falling, a gate opening,
+    // or a platform moving away, without firing at unchanged idle sightlines.
+    using TurretSightlines = std::vector<std::vector<char>>;
+
+    [[nodiscard]] TurretSightlines captureTurretSightlines() const
+    {
+        TurretSightlines visible(movableCount_);
+        for (std::size_t turretIndex = 0; turretIndex < movableCount_;
+             ++turretIndex) {
+            const auto& turret = after_.movables[turretIndex];
+            const auto direction = turretDirection(turret);
+            if (turret.dead || turret.fallen || !direction) {
+                continue;
+            }
+            visible[turretIndex].resize(status_.size(), 0);
+            for (std::size_t target = 0; target < status_.size(); ++target) {
+                bool aliveTarget;
+                if (isPlayer(target)) {
+                    aliveTarget =
+                        !after_.players[playerIndexForEntity(target)].dead;
+                } else if (isEnemy(target)) {
+                    const auto& enemy =
+                        after_.enemies[enemyIndexForEntity(target)];
+                    aliveTarget = !enemy.dead && !enemy.fallen;
+                } else {
+                    const auto& movable = after_.movables[target];
+                    aliveTarget = target != turretIndex && !movable.dead &&
+                        !movable.fallen && turretDirection(movable).has_value();
+                }
+                visible[turretIndex][target] = aliveTarget &&
+                    turretHasLineOfSight(
+                        level_, after_, turret.cell, *direction, cellOf(target));
             }
         }
-        if (!anyCarried) {
-            return;
-        }
-        resolveTurretShots();
-        if (anyTurret) {
-            resolveTurretShots(&sweeping);
-        }
-        resolveAttacks();
+        return visible;
+    }
+
+    // Finish reactions before the next movement/device phase. Each volley
+    // sees one consistent board; its deaths can expose targets for the next
+    // volley. Each repeat kills at least one live entity, so chains terminate.
+    void resolveReactions(const std::vector<char>* sweepingTurrets = nullptr)
+    {
+        bool changed;
+        do {
+            changed = resolveTurretShots(sweepingTurrets);
+            changed = resolveAttacks() || changed;
+            sweepingTurrets = nullptr;
+        } while (changed);
         markDeadEntitiesDone();
     }
 
-    // A turret normally reacts to movement, while two turrets aimed directly
-    // at one another form an ambient volley without waiting for another actor.
-    // Every live entity is still an occluder, so a rock between a turret and a
-    // target keeps that target safe. Kills are collected before they are
-    // applied to make a volley observe one consistent board rather than
-    // letting the first death open a ray for the next turret.
-    void resolveTurretShots(const std::vector<char>* sweepingTurrets = nullptr)
+    // Movement and newly opened sightlines trigger shots. Mutually facing
+    // turrets remain an ambient event. Collect kills before applying them so
+    // the result never depends on turret iteration order within a volley.
+    [[nodiscard]] bool resolveTurretShots(
+        const std::vector<char>* sweepingTurrets = nullptr)
     {
+        TurretSightlines visible = captureTurretSightlines();
+        bool anyKilled = false;
         std::vector<char> killedPlayers(playerCount_, 0);
         std::vector<char> killedMovables(movableCount_, 0);
         std::vector<char> killedEnemies(after_.enemies.size(), 0);
@@ -3440,13 +3456,13 @@ private:
             if (turret.fallen || turret.dead || !direction) {
                 continue;
             }
-            // Only turrets a rotator has just turned sweep; ordinary shots
-            // still need the target to have moved.
-            const bool sweeping = sweepingTurrets != nullptr &&
-                (*sweepingTurrets)[turretIndex] != 0;
-            if (sweepingTurrets != nullptr && !sweeping) {
-                continue;
-            }
+            const bool sweeping = status_[turretIndex].movedThisMicro ||
+                (sweepingTurrets != nullptr &&
+                    (*sweepingTurrets)[turretIndex] != 0);
+            const auto newlyVisible = [&](std::size_t target) {
+                return turretSightlines_[turretIndex].empty() ||
+                    !turretSightlines_[turretIndex][target];
+            };
             for (std::size_t targetIndex = 0;
                  targetIndex < movableCount_;
                  ++targetIndex) {
@@ -3457,13 +3473,7 @@ private:
                     after_.movables[targetIndex];
                 const std::optional<MoveDirection> targetDirection =
                     turretDirection(target);
-                if (target.fallen || target.dead || !targetDirection ||
-                    !turretHasLineOfSight(
-                        level_,
-                        after_,
-                        turret.cell,
-                        *direction,
-                        target.cell)) {
+                if (!visible[turretIndex][targetIndex]) {
                     continue;
                 }
                 const bool faceEachOther = turretHasLineOfSight(
@@ -3473,12 +3483,14 @@ private:
                     *targetDirection,
                     turret.cell);
                 if (!sweeping && !status_[targetIndex].movedThisMicro &&
+                    !newlyVisible(targetIndex) &&
                     !(faceEachOther &&
                         (status_[turretIndex].active ||
                             status_[targetIndex].active))) {
                     continue;
                 }
                 killedMovables[targetIndex] = true;
+                anyKilled = true;
                 if (turretShots_ != nullptr) {
                     turretShots_->push_back({
                         .turret = {
@@ -3498,7 +3510,8 @@ private:
                         .turretCell = turret.cell,
                         .targetCell = target.cell,
                         .direction = *direction,
-                            .beamSegments = turretBeamSegments(level_, after_, turret.cell, *direction, target.cell),
+                        .beamSegments = turretBeamSegments(
+                            level_, after_, turret.cell, *direction, target.cell),
                     });
                 }
             }
@@ -3510,10 +3523,11 @@ private:
                 const GameState::Player& player =
                     after_.players[playerIndex];
                 if (!player.dead &&
-                    (sweeping || status_[entityIndex].movedThisMicro) &&
-                    turretHasLineOfSight(
-                        level_, after_, turret.cell, *direction, player.cell)) {
+                    (sweeping || status_[entityIndex].movedThisMicro ||
+                        newlyVisible(entityIndex)) &&
+                    visible[turretIndex][entityIndex]) {
                     killedPlayers[playerIndex] = true;
+                    anyKilled = true;
                     if (turretShots_ != nullptr) {
                         turretShots_->push_back({
                             .turret = {
@@ -3533,7 +3547,8 @@ private:
                             .turretCell = turret.cell,
                             .targetCell = player.cell,
                             .direction = *direction,
-                            .beamSegments = turretBeamSegments(level_, after_, turret.cell, *direction, player.cell),
+                            .beamSegments = turretBeamSegments(
+                                level_, after_, turret.cell, *direction, player.cell),
                         });
                     }
                 }
@@ -3543,10 +3558,11 @@ private:
                  ++enemyIndex) {
                 const GameState::Enemy& enemy = after_.enemies[enemyIndex];
                 if (!enemy.dead && !enemy.fallen &&
-                    (sweeping || enemyMovedThisMicro_[enemyIndex]) &&
-                    turretHasLineOfSight(
-                        level_, after_, turret.cell, *direction, enemy.cell)) {
+                    (sweeping || enemyMovedThisMicro_[enemyIndex] ||
+                        newlyVisible(entityIndexForEnemy(enemyIndex))) &&
+                    visible[turretIndex][entityIndexForEnemy(enemyIndex)]) {
                     killedEnemies[enemyIndex] = true;
+                    anyKilled = true;
                     if (turretShots_ != nullptr) {
                         turretShots_->push_back({
                             .turret = {
@@ -3566,13 +3582,15 @@ private:
                             .turretCell = turret.cell,
                             .targetCell = enemy.cell,
                             .direction = *direction,
-                            .beamSegments = turretBeamSegments(level_, after_, turret.cell, *direction, enemy.cell),
+                            .beamSegments = turretBeamSegments(
+                                level_, after_, turret.cell, *direction, enemy.cell),
                         });
                     }
                 }
             }
         }
 
+        turretSightlines_ = std::move(visible);
         for (std::size_t playerIndex = 0;
              playerIndex < playerCount_;
              ++playerIndex) {
@@ -3601,6 +3619,7 @@ private:
             movable.dead = true;
             movable.sliding.reset();
         }
+        return anyKilled;
     }
 
     void markDeadEntitiesDone()
@@ -3635,8 +3654,9 @@ private:
     // either it moved the player, or it shoved the enemy into place. The second
     // case pulls the victim into the closure, because it is about to be
     // written.
-    void resolveAttacks()
+    [[nodiscard]] bool resolveAttacks()
     {
+        bool anyKilled = false;
         for (std::size_t playerIndex = 0;
              playerIndex < playerCount_;
              ++playerIndex) {
@@ -3672,7 +3692,9 @@ private:
             player.dead = true;
             player.drowned = false;
             player.sliding.reset();
+            anyKilled = true;
         }
+        return anyKilled;
     }
 
     // Moves one tile, resolves the fall, and updates slide momentum.
@@ -3843,10 +3865,11 @@ private:
     std::vector<Status> status_;
     // Tracks whether enemy movement in this action caused a new attack.
     std::vector<char> enemyMoved_;
-    // Unlike the attack closure above, ordinary turret triggers are edge
-    // events: only motion in the current micro-step counts. Mutual turret
-    // volleys are the deliberate exception resolved before movement begins.
+    // Motion triggers count only in the current micro-step; visibility edges
+    // also catch targets exposed by blockers, devices, and previous deaths.
     std::vector<char> enemyMovedThisMicro_;
+    // Last volley's visibility, sampled before its kills are applied.
+    TurretSightlines turretSightlines_;
     // Direction of each successful movable displacement in the current
     // micro-step. Linked groups react after ordinary resolution completes.
     std::vector<std::optional<MoveDirection>> movableMovedDirections_;

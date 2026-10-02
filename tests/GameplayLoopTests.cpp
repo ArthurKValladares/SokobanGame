@@ -646,6 +646,67 @@ void testFacingTurretsStartAnAmbientMutualVolley()
     CHECK(session.state().movables[1].dead);
 }
 
+void testPortalIceFallFiresAtStationaryHeroAndUndoesTogether()
+{
+    TEST("portalIceFallFiresAtStationaryHeroAndUndoesTogether");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { ".......", ".......", ".......", ".......", "......." },
+                    { ".......", ".......", ". .....", ".......", "......." },
+                    { " O     ", "       ", "   CI o", "       ", " n     " } },
+        .portals = { { .cell = { 1, 0, 2 }, .color = { 1, 1, 0 } },
+                     { .cell = { 6, 2, 2 }, .color = { 1, 1, 0 } } },
+    }, "live portal ice fall");
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.25f);
+    const GameState initial = session.state();
+    GameplayPresentation presentation;
+    presentation.resetEntities(initial);
+    const auto started = GameplayLoop::update(
+        level, session, presentation,
+        { .right = { .pressed = true } }, 0.01f, false);
+    CHECK(started.turretShots.empty());
+    CHECK(session.inFlight().size() == 2);
+    if (session.inFlight().size() == 2) {
+        const auto& slide = session.inFlight()[1];
+        CHECK(slide.plan.after.players[0].dead);
+        CHECK(slide.turretShots.size() == 1);
+        CHECK(slide.portalTransits.size() == 1);
+        CHECK(slide.causalGroup == session.inFlight()[0].causalGroup);
+    }
+
+    std::size_t shots = 0;
+    bool fired = false;
+    for (int frame = 0; frame < 150; ++frame) {
+        const auto result = GameplayLoop::update(
+            level, session, presentation, {}, 0.01f, false);
+        shots += result.turretShots.size();
+        if (!result.turretShots.empty()) {
+            fired = true;
+            CHECK(session.state().movables[0].cell == GridPosition3({ 1, 2, 1 }));
+            CHECK(result.turretShots.front().shot.beamSegments.size() == 2);
+            CHECK(result.turretShots.front().impactDelaySeconds == 0.0f);
+        }
+        if (!fired) {
+            CHECK(!session.state().players[0].dead);
+        }
+    }
+    CHECK(shots == 1);
+    CHECK(session.state().players[0].cell == GridPosition3({ 4, 2, 2 }));
+    CHECK(session.state().players[0].dead);
+    CHECK(!session.moving());
+    CHECK(session.undoCount() == 1);
+    static_cast<void>(GameplayLoop::update(
+        level, session, presentation, { .undoPressed = true }, 0.01f, false));
+    for (int frame = 0; frame < 150; ++frame) {
+        const auto result = GameplayLoop::update(
+            level, session, presentation, {}, 0.01f, false);
+        CHECK(result.turretShots.empty());
+    }
+    CHECK(session.state() == initial);
+    CHECK(session.undoCount() == 0);
+}
+
 void testPortalCrossingsReachTheLivePresentation()
 {
     TEST("portalCrossingsReachTheLivePresentation");
@@ -694,6 +755,7 @@ void testPortalCrossingsReachTheLivePresentation()
 
 int main()
 {
+    testPortalIceFallFiresAtStationaryHeroAndUndoesTogether();
     testPortalCrossingsReachTheLivePresentation();
     testOpposingDirectionsAreNeutral();
     testSimulationTimingClampsLongFrames();
