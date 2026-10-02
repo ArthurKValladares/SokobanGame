@@ -2210,6 +2210,7 @@ private:
                     return pipelines_.water();
                 case PreparedSurfaceMaterial::MirrorEnergy:
                 case PreparedSurfaceMaterial::GateEnergy:
+                case PreparedSurfaceMaterial::LinkedObjectAura:
                     return pipelines_.mirrorEnergy();
                 case PreparedSurfaceMaterial::GroundSplat:
                     // Falls back to the flat tile shader when the manifest
@@ -2264,13 +2265,16 @@ private:
                     face.isEditorPreview);
             } else if (
                 face.material == PreparedSurfaceMaterial::MirrorEnergy ||
-                face.material == PreparedSurfaceMaterial::GateEnergy) {
+                face.material == PreparedSurfaceMaterial::GateEnergy ||
+                face.material == PreparedSurfaceMaterial::LinkedObjectAura) {
                 faceInstance = drawMirrorEnergyFace(
                     commandBuffer,
                     face.worldVertices,
                     face.color,
                     face.normal,
-                    frameData.effectAnimationTimeSeconds);
+                    frameData.effectAnimationTimeSeconds,
+                    face.material ==
+                        PreparedSurfaceMaterial::LinkedObjectAura);
             } else if (
                 face.material == PreparedSurfaceMaterial::GroundSplat &&
                 splatTextures.valid()) {
@@ -2471,6 +2475,8 @@ private:
             }
             const bool mirrorGhost =
                 tile.effect == RenderSurfaceEffect::MirrorEnergy;
+            const bool energyEffect = mirrorGhost ||
+                tile.effect == RenderSurfaceEffect::LinkedObjectAura;
             const bool skinned = models_.modelUsesGpuSkinning(tile.model);
             const VulkanModelResources::MaterialBinding material =
                 models_.materialForModel(tile.model);
@@ -2482,10 +2488,10 @@ private:
             // Mirror ghosts are translucent by construction. Everything else
             // in the opaque pass with a full-alpha tint skips the blend unit.
             const bool opaqueModel =
-                opaquePass && !mirrorGhost && constants.color.w >= 1.0f;
-            const uint32_t pipelineRank = (mirrorGhost ? 2U : 0U) +
+                opaquePass && !energyEffect && constants.color.w >= 1.0f;
+            const uint32_t pipelineRank = (energyEffect ? 2U : 0U) +
                 (skinned ? 1U : 0U) + (opaqueModel ? 0U : 4U);
-            const VkPipeline pipeline = mirrorGhost
+            const VkPipeline pipeline = energyEffect
                 ? (skinned ? pipelines_.skinnedMirrorEnergyModel()
                            : pipelines_.mirrorEnergyModel())
                 : opaqueModel
@@ -2796,28 +2802,37 @@ private:
         const std::array<Vec3, 4>& vertices,
         Vec4 color,
         Vec3 normal,
-        float animationTimeSeconds)
+        float animationTimeSeconds,
+        bool linkedAura = false)
     {
         beginQuadDraw(commandBuffer);
 
         const GpuDrawInstance constants {
             .vertices = quadVertices(vertices, worldSpaceQuad),
+            .passData = {
+                Vec4 { 0.0f, 0.0f, linkedAura ? 1.0f : 0.0f, 0.0f },
+                Vec4 {}, Vec4 {}, Vec4 {},
+            },
             .color = color,
             .normalAndAmbientRed = {
                 normal.x, normal.y, normal.z, 0.0f },
             .shadowOptions = {
-                config::mirrorEnergyScanlineFrequency,
-                config::mirrorEnergyScanlineSpeed,
-                config::mirrorEnergyScanlineStrength,
-                config::mirrorGhostTextureInfluence,
+                linkedAura ? 0.0f : config::mirrorEnergyScanlineFrequency,
+                linkedAura ? 0.0f : config::mirrorEnergyScanlineSpeed,
+                linkedAura ? 0.0f : config::mirrorEnergyScanlineStrength,
+                linkedAura ? 0.12f : config::mirrorGhostTextureInfluence,
             },
             .materialOptions = {
                 0.0f, 1.0f, 1.0f, animationTimeSeconds },
             .gridColor = {
-                config::mirrorGhostRimPower,
-                config::mirrorGhostRimStrength,
-                config::mirrorEnergyPulseSpeed,
-                config::mirrorEnergyPulseStrength,
+                linkedAura ? config::linkedObjectAuraRimPower
+                           : config::mirrorGhostRimPower,
+                linkedAura ? config::linkedObjectAuraRimStrength
+                           : config::mirrorGhostRimStrength,
+                linkedAura ? config::linkedObjectAuraWispSpeed
+                           : config::mirrorEnergyPulseSpeed,
+                linkedAura ? config::linkedObjectAuraWispStrength
+                           : config::mirrorEnergyPulseStrength,
             },
         };
         return writeDrawInstance(constants);
@@ -3211,6 +3226,9 @@ private:
         const SunAmbientLanes lanes = sunAmbientLanes(lighting);
         const bool mirrorEnergy =
             tile.effect == RenderSurfaceEffect::MirrorEnergy;
+        const bool linkedAura =
+            tile.effect == RenderSurfaceEffect::LinkedObjectAura;
+        const bool specialEnergy = mirrorEnergy || linkedAura;
         const float editorHighlightState =
             tile.editorDecorationHighlight ==
                     RenderFrameData::EditorDecorationHighlight::Selected
@@ -3239,7 +3257,7 @@ private:
                             !configuration_.wireframeEnabled
                         ? 1.0f
                         : 0.0f,
-                    0.0f,
+                    linkedAura ? 1.0f : 0.0f,
                     0.0f,
                 },
                 Vec4 {},
@@ -3252,10 +3270,10 @@ private:
             .sunDirectionAndAmbientGreen = lanes.sunDirectionAndAmbientGreen,
             .sunRadianceAndAmbientBlue = lanes.sunRadianceAndAmbientBlue,
             .shadowOptions = {
-                mirrorEnergy
+                specialEnergy
                     ? config::mirrorEnergyScanlineFrequency
                     : (lighting.shadows.enabled ? 1.0f : 0.0f),
-                mirrorEnergy
+                specialEnergy
                     ? config::mirrorEnergyScanlineSpeed
                     : std::clamp(
                           lighting.shadows.opacity *
@@ -3265,18 +3283,18 @@ private:
                                   1.0f),
                           0.0f,
                           1.0f),
-                mirrorEnergy
+                specialEnergy
                     ? config::mirrorEnergyScanlineStrength
                     : std::max(lighting.shadows.bias, 0.0f),
-                mirrorEnergy
-                    ? config::mirrorGhostTextureInfluence
+                specialEnergy
+                    ? (linkedAura ? 0.12f : config::mirrorGhostTextureInfluence)
                     : 0.0f,
             },
             .materialOptions = {
                 tile.blurBehind ? 1.0f : 0.0f,
                 tile.beltScrollOffset,
                 static_cast<float>(material.textureIndex),
-                mirrorEnergy
+                specialEnergy
                     ? effectAnimationTimeSeconds
                     : (editorHighlightState > 0.0f
                             ? effectAnimationTimeSeconds
@@ -3284,12 +3302,16 @@ private:
                                       ? -config::iceBlurRadiusPixels
                                       : config::iceBlurRadiusPixels)),
             },
-            .gridColor = mirrorEnergy
+            .gridColor = specialEnergy
                 ? Vec4 {
-                      config::mirrorGhostRimPower,
-                      config::mirrorGhostRimStrength,
-                      config::mirrorEnergyPulseSpeed,
-                      config::mirrorEnergyPulseStrength,
+                      linkedAura ? config::linkedObjectAuraRimPower
+                                 : config::mirrorGhostRimPower,
+                      linkedAura ? config::linkedObjectAuraRimStrength
+                                 : config::mirrorGhostRimStrength,
+                      linkedAura ? config::linkedObjectAuraWispSpeed
+                                 : config::mirrorEnergyPulseSpeed,
+                      linkedAura ? config::linkedObjectAuraWispStrength
+                                 : config::mirrorEnergyPulseStrength,
                   }
                 // xyz free; see above. The marker in w is what the fragment
                 // stage reads to decide the editor highlight and to keep the

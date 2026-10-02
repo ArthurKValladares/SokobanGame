@@ -48,7 +48,8 @@ bool staticallySupported(const Level& level, GridPosition3 cell)
 bool supportsStaticAnalysis(const Level& level)
 {
     if (level.pressurePlates().empty() || level.waterLayer() ||
-        !level.enemyStarts().empty() || level.playerStarts().empty()) {
+        !level.enemyStarts().empty() || level.playerStarts().empty() ||
+        !level.objectLinks().empty()) {
         return false;
     }
     const int elevation = level.pressurePlates().front().z;

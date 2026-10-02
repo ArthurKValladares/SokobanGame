@@ -13,6 +13,12 @@ inline constexpr float maximumSurfaceEntityWidthDepth = 1.0f;
 
 inline constexpr float minTileScale = 0.05f;
 inline constexpr float maxTileScale = 3.0f;
+inline constexpr float linkedObjectAuraScale = 1.12f;
+inline constexpr float linkedObjectAuraOpacity = 0.26f;
+inline constexpr float linkedObjectAuraRimPower = 1.35f;
+inline constexpr float linkedObjectAuraRimStrength = 1.8f;
+inline constexpr float linkedObjectAuraWispSpeed = 1.7f;
+inline constexpr float linkedObjectAuraWispStrength = 0.42f;
 // Per-tile render scales live in assets/manifest.json (tile entries).
 inline constexpr float conveyorTileHeight = 0.12f;
 

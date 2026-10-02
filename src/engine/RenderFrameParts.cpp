@@ -46,6 +46,34 @@ void applyTileScale(RenderFrameData::Tile& tile, float scale)
     tile.height *= scale;
 }
 
+void appendLinkedObjectAura(
+    RenderFrameData& frame,
+    const RenderFrameData::Tile& object,
+    Vec3 color)
+{
+    RenderFrameData::Tile aura = object;
+    const float oldHeight = aura.height;
+    applyTileScale(aura, config::linkedObjectAuraScale);
+    aura.baseElevation -= (aura.height - oldHeight) * 0.5f;
+    aura.color = {
+        color.x,
+        color.y,
+        color.z,
+        config::linkedObjectAuraOpacity,
+    };
+    aura.blurBehind = false;
+    aura.pickOnly = false;
+    aura.pickable = false;
+    aura.showGrid = false;
+    aura.affectsCameraFit = false;
+    aura.isPrimaryPlayer = false;
+    aura.effect = RenderSurfaceEffect::LinkedObjectAura;
+    if (aura.renderableId != 0) {
+        aura.renderableId ^= uint64_t { 1 } << 63;
+    }
+    frame.tiles.push_back(aura);
+}
+
 uint32_t facingQuarterTurns(MoveDirection direction)
 {
     switch (direction) {

@@ -1732,6 +1732,35 @@ void testTranslucentIsoFaceDoesNotOccludeOrCastShadows()
     }
 }
 
+void testLinkedObjectAuraIsTranslucentNonPickableAndShadowless()
+{
+    using namespace sokoban;
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 2;
+    frame.levelHeight = 2;
+    frame.levelDepth = 1;
+    frame.tiles.push_back({
+        .cell = { 0, 0, 0 },
+        .position = { -0.05f, -0.05f },
+        .size = { 1.1f, 1.1f },
+        .color = { 0.2f, 0.4f, 1.0f, 0.26f },
+        .height = 1.1f,
+        .pickable = false,
+        .showGrid = false,
+        .model = { 1 },
+        .effect = RenderSurfaceEffect::LinkedObjectAura,
+    });
+
+    const PreparedRenderScene scene = prepareScene(frame, { 800.0f, 600.0f });
+    CHECK(scene.hasTranslucentContent);
+    CHECK(scene.opaqueModelIndices.empty());
+    CHECK(scene.translucentModelIndices == (std::vector<std::size_t> { 0 }));
+    CHECK(scene.shadowModelIndices.empty());
+    CHECK(scene.shadowFaces.empty());
+    CHECK(scene.pickFaceIndices.empty());
+}
+
 void testAlphaTintedModelUsesTheTranslucentPass()
 {
     sokoban::RenderFrameData frame;
@@ -1914,6 +1943,7 @@ int main()
     testAdjacentWaterFacesSharePerspectiveCoordinates();
     testAdjacentModelsShareProjectiveCoordinates();
     testMirrorEnergyIsTranslucentNonPickableAndShadowless();
+    testLinkedObjectAuraIsTranslucentNonPickableAndShadowless();
     testTranslucentIsoFaceDoesNotOccludeOrCastShadows();
     testAlphaTintedModelUsesTheTranslucentPass();
     testParticlesBecomeSortedTranslucentBillboardsOnly();

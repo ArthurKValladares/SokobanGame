@@ -178,6 +178,56 @@ void testPushBlocked()
     CHECK(rules::step(rockBehind, rockState, MoveDirection::Right) == rockState);
 }
 
+void testLinkedObjectsRepeatSuccessfulMovesWhenAble()
+{
+    TEST("linkedObjectsRepeatSuccessfulMovesWhenAble");
+    const Vec3 blue { 0.2f, 0.4f, 1.0f };
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "......" }, { "CR RR " } },
+        .objectLinks = {
+            { .cell = cell(1, 0, 1), .color = blue },
+            { .cell = cell(3, 0, 1), .color = blue },
+            { .cell = cell(4, 0, 1), .color = blue },
+        },
+    }, "linked objects");
+    const GameState initial = rules::initialState(level);
+
+    // The two remote followers move tail-first, so adjacent group members can
+    // vacate into one another's old cells. A scoped action still pulls linked
+    // partners into its causal closure.
+    const GameState moved = rules::scopedStep(
+        level,
+        initial,
+        MoveDirection::Right,
+        {},
+        { .actors = { initial.players[0].id } });
+    CHECK(moved.players[0].cell == cell(1, 0, 1));
+    CHECK(moved.movables[0].cell == cell(2, 0, 1));
+    CHECK(moved.movables[1].cell == cell(4, 0, 1));
+    CHECK(moved.movables[2].cell == cell(5, 0, 1));
+}
+
+void testBlockedAndDifferentlyColoredLinkedObjectsStayPut()
+{
+    TEST("blockedAndDifferentlyColoredLinkedObjectsStayPut");
+    const Vec3 blue { 0.2f, 0.4f, 1.0f };
+    const Vec3 orange { 1.0f, 0.72f, 0.12f };
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "......." }, { "CR R#R " } },
+        .objectLinks = {
+            { .cell = cell(1, 0, 1), .color = blue },
+            { .cell = cell(3, 0, 1), .color = blue },
+            { .cell = cell(5, 0, 1), .color = orange },
+        },
+    }, "blocked linked objects");
+
+    const GameState moved = rules::step(
+        level, rules::initialState(level), MoveDirection::Right);
+    CHECK(moved.movables[0].cell == cell(2, 0, 1));
+    CHECK(moved.movables[1].cell == cell(3, 0, 1));
+    CHECK(moved.movables[2].cell == cell(5, 0, 1));
+}
+
 void testKnightPushesAnUnlimitedMixedChain()
 {
     TEST("knightPushesAnUnlimitedMixedChain");
@@ -2543,6 +2593,8 @@ int main()
     testStepIsPure();
     testPushRock();
     testPushBlocked();
+    testLinkedObjectsRepeatSuccessfulMovesWhenAble();
+    testBlockedAndDifferentlyColoredLinkedObjectsStayPut();
     testKnightPushesAnUnlimitedMixedChain();
     testKnightChainPushIsAtomicWhenItsTailIsBlocked();
     testKnightCanPushAnEnemyButStillSuffersItsAttack();

@@ -1376,6 +1376,10 @@ void appendGameplayEntities(
         applyTileScale(
             movableTile,
             input.settings.tileScale(movable.type));
+        if (const std::optional<Vec3> linkColor =
+                input.level.movableLinkColor(movableIndex)) {
+            appendLinkedObjectAura(frame, movableTile, *linkColor);
+        }
         frame.tiles.push_back(movableTile);
     }
 }

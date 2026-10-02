@@ -268,17 +268,15 @@ public:
     [[nodiscard]] const std::vector<Level::Rotator>& rotators() const;
     [[nodiscard]] const std::vector<Level::Elevator>& elevators() const;
     [[nodiscard]] const std::vector<Level::Minecart>& minecarts() const;
+    [[nodiscard]] const std::vector<Level::ObjectLink>& objectLinks() const;
     // Plates authored beneath a unit or mirror (see Level::Plate).
     [[nodiscard]] const std::vector<Level::Plate>& coveredPlates() const;
     // The plate at `cell` in the document, uncovered or beneath something.
     [[nodiscard]] std::optional<TileType> documentPlateAt(GridPosition3 cell) const;
 
-    // Linking by color. Every pressure plate, gate, rotator and elevator has
-    // a link color; a device is driven by exactly the pressure plates that
-    // share its color, so giving several plates and devices one color links
-    // them all. Colors match as the 8-bit RGB the picker shows. This is an
-    // authoring idea only: the saved screen and the Level carry the explicit
-    // plate lists it produces.
+    // Linking by color. Devices are driven by the pressure plates that share
+    // their color; movable objects in a color group repeat one another's
+    // successful moves. Colors match as the 8-bit RGB the picker shows.
     struct LinkGroup {
         Vec3 color {};
         std::vector<GridPosition3> pressurePlates;
@@ -286,6 +284,7 @@ public:
         std::vector<GridPosition3> rotators;
         std::vector<GridPosition3> elevators;
         std::vector<GridPosition3> minecarts;
+        std::vector<GridPosition3> objects;
 
         [[nodiscard]] bool hasDevice() const
         {
@@ -294,14 +293,16 @@ public:
         }
     };
     [[nodiscard]] static bool sameLinkColor(Vec3 left, Vec3 right);
-    // The color newly painted pressure plates and devices take. Painting a
-    // plate or device over the same tile recolors it to this color.
+    // The color newly painted pressure plates and devices take, and the color
+    // assigned by the link brush to movable objects.
     [[nodiscard]] Vec3 activeLinkColor() const;
     void setActiveLinkColor(Vec3 color);
     // Every pressure plate's color, in z/y/x order.
     [[nodiscard]] const std::vector<Level::LinkColor>& pressurePlateColors() const;
-    // The link color of the pressure plate, gate, rotator or elevator at
-    // `cell`; empty when nothing linkable is there.
+    [[nodiscard]] std::optional<Vec3> objectLinkColorAt(
+        GridPosition3 cell) const;
+    // The link color of the pressure plate, device, or linked movable object
+    // at `cell`; empty for an unlinked movable object.
     [[nodiscard]] std::optional<Vec3> linkColorAt(GridPosition3 cell) const;
     // The pressure plates a device of `color` is driven by.
     [[nodiscard]] std::vector<GridPosition3> linkedPressurePlates(Vec3 color) const;
@@ -311,8 +312,8 @@ public:
     [[nodiscard]] bool setLinkColor(GridPosition3 cell, Vec3 color);
     // The link-color brush: gives the topmost tile in the picked column
     // (on the active layer while it is locked) the active link color, if it
-    // is a pressure plate, gate, rotator or elevator, or a unit standing on
-    // a pressure plate. Picks the same tile as pickTile.
+    // is a pressure plate, device, rock, ice block, or turret. Picks the same
+    // visible tile as pickTile.
     [[nodiscard]] bool paintLinkColorAt(GridPosition3 pickedCell);
     // Recolors every member of the group colored `from`, one undoable
     // command. Choosing another group's color merges the two.
@@ -357,6 +358,9 @@ private:
         std::vector<Level::Plate> plates;
         std::vector<Level::Elevator> elevators;
         std::vector<Level::Minecart> minecarts;
+        // Only movable objects explicitly painted with the link brush appear
+        // here; ordinary objects remain independent.
+        std::vector<Level::ObjectLink> objectLinks;
         // One per pressure plate, sorted by cell (see linkGroups).
         std::vector<Level::LinkColor> plateColors;
         // Selected path (browser clicks move this).
@@ -393,6 +397,7 @@ private:
         std::vector<Level::Plate> plates;
         std::vector<Level::Elevator> elevators;
         std::vector<Level::Minecart> minecarts;
+        std::vector<Level::ObjectLink> objectLinks;
         // One per pressure plate, sorted by cell (see linkGroups).
         std::vector<Level::LinkColor> plateColors;
         std::filesystem::path filePath;

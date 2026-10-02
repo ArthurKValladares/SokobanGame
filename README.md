@@ -344,6 +344,9 @@ RGB color. Each Rotator tile likewise has an `@rotator` directive with the
 same fields, and each Elevator tile an `@elevator` directive with the same
 fields plus `levels`, its list of stop layers. A `@plate` directive records
 a plate authored beneath something already standing on it (see Plates below).
+A `@objectlink {"cell":[x,y,z],"color":[r,g,b]}` directive gives a rock,
+ice block, or turret a linked-object color. Movable objects of the same color
+repeat one another's successful moves when their own destination is available.
 A `@linkcolor {"cell":[x,y,z],"color":[r,g,b]}` directive is level-editor
 bookkeeping: the color of a pressure plate that drives nothing yet (see Link
 Colors under Level Editor). Gameplay ignores it and reads links only from the
@@ -355,6 +358,7 @@ explicit `plates` arrays. Metadata must appear before `@layer 0`.
 @gate {"cell":[4,1,1],"plates":[[1,1,1],[2,1,1]],"color":[1.0,0.72,0.12]}
 @rotator {"cell":[3,1,1],"plates":[[2,1,1]],"color":[0.24,0.62,0.92]}
 @elevator {"cell":[5,2,0],"color":[0.38,0.8,0.44],"levels":[0,3,5,7],"plates":[[1,1,1]]}
+@objectlink {"cell":[2,2,1],"color":[0.2,0.4,1.0]}
 @plate {"cell":[3,1,1],"tile":"Rotator Clockwise"}
 @decoration {"model":"Tree","position":[4.5,2.5,1.0],"rotation":[0.0,0.0,30.0],"scale":[1.0,1.0,1.25]}
 @decoration {"light":{"castsShadows":true,"color":[1.0,0.55,0.2],"intensity":3.0,"offset":[0.0,0.0,1.2],"range":6.0,"shadowBias":0.004,"shadowOpacity":0.9},"model":"Lantern","position":[2.5,1.5,1.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
@@ -367,7 +371,7 @@ explicit `plates` arrays. Metadata must appear before `@layer 0`.
 @layer 1
 ######
 #PP1G#
-#C   #
+#CR  #
 ```
 
 Common tile symbols:
@@ -396,6 +400,16 @@ listed in its `plates` array is occupied by a living player, movable object, or
 enemy; a Gate with no linked plates stays closed. The gate and its linked
 plates share the configured color in the game. Links are authored with link
 colors in the level editor (see Link Colors under Level Editor).
+
+Linked rocks, ice blocks, and turrets use their 8-bit RGB link color as a
+group identity. Whenever one moves for any reason, each other object of that
+color attempts the same one-cell direction; a partner whose destination is
+blocked simply stays put and does not cancel the original move. Adjacent
+partners are resolved front-to-back so a whole row can advance. Each linked
+object is surrounded by a translucent, animated smoky aura made from a
+slightly enlarged copy of its own model and tinted with the group color.
+Identical colors in separately authored overworld screens remain separate
+groups after those screens are composed.
 
 A Rotator is a cogwheel floor plate that units can stand on. Each time every
 pressure plate in its `plates` array becomes occupied (the same rule as a
@@ -496,24 +510,28 @@ surface angles to suppress shadow acne without erasing distant shadows.
 Debug builds expose the headless `LevelEditor` through ImGui. The UI invokes
 editor commands but does not own document or filesystem policy.
 
-- Link Colors: in the editor, every pressure plate, gate, rotator and
-  elevator has a link color, and a device is driven by exactly the pressure
-  plates of its color. To link a plate to two gates, give all three the same
-  color; to make a rotator need two plates, give it and both plates one
-  color. Colors match as the 8-bit RGB the picker shows. Newly painted plates
-  and devices take the Link Color chosen in the Tiles palette; painting a
-  plate or device over itself recolors it to that color. Holding `Alt` turns
+- Link Colors: in the editor, every pressure plate and device has a link
+  color, and a device is driven by exactly the pressure plates of its color.
+  Rocks, ice blocks, and turrets can also be painted into a color group; they
+  repeat the moves of the other movable objects in that group. To link a plate
+  to two gates, give all three the same color; to make a rotator need two
+  plates, give it and both plates one color. Colors match as the 8-bit RGB the
+  picker shows. Newly painted plates and devices take the Link Color chosen in
+  the Tiles palette; painting a linkable tile over itself recolors it to that
+  color. Holding `Alt` turns
   the cursor into an eyedropper: clicking picks up the tile and, from a plate
   or device, its link color. Holding `Ctrl` turns it into a brush dipped in
-  the Link Color: clicking or dragging gives every plate or device it
+  the Link Color: clicking or dragging gives every plate, device, or movable
+  object it
   touches that color, the whole drag as one undo step. While either key is
   held, that tool is all a click does, in any editor tool: nothing is
   placed, deleted, moved or painted onto the ground, and the tile preview is
   hidden. The Links list shows each color group with its
   members, warns about devices with no plates, and can recolor a whole group
   (choosing another group's color merges them). Colors are only an authoring
-  aid: saving writes each device's explicit `plates` list, which is all
-  gameplay reads. Screens authored before link colors open with their links
+  aid for plates and devices: saving writes each device's explicit `plates`
+  list. Movable-object colors remain gameplay metadata in `@objectlink`
+  records. Screens authored before link colors open with their links
   intact, giving devices that shared a color but not their plates distinct
   colors; links that colors cannot express at all are regrouped and the
   editor says so.
@@ -543,7 +561,7 @@ editor commands but does not own document or filesystem policy.
   | `F5` | Play the draft; `F5` again returns to the editor without the confirmation dialog |
   | `Shift+F5` | Play a puzzle draft with its first hero moved to the cell under the pointer; the document is unchanged |
   | Hold `Alt` + click | Eyedropper: pick up the tile under the pointer, and its link color |
-  | Hold `Ctrl` + click or drag | Link-color brush: give each pressure plate or device touched the Link Color |
+  | Hold `Ctrl` + click or drag | Link-color brush: give each pressure plate, device, or movable object touched the Link Color |
   | `1`-`9` | Choose from the recent-tiles strip at the top of the Tiles palette |
   | `PageUp` / `PageDown` | Change the active layer |
   | `L` | Lock edits to the active layer |

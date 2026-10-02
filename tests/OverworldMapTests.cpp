@@ -4,6 +4,7 @@
 #include "engine/GameplaySession.hpp"
 #include "engine/OverworldMap.hpp"
 #include "engine/OverworldView.hpp"
+#include "engine/Rules.hpp"
 #include "engine/render/FogOfWarConfig.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
 
@@ -235,6 +236,36 @@ void testNegativeSlotsNormalizeWithoutChangingIdentity()
     CHECK(map.screen(1)->origin == GridPosition({ 0, 0 }));
     CHECK(map.screen(2)->origin == GridPosition({ 3, 0 }));
     CHECK(map.level().playerStart() == GridPosition3({ 1, 1, 1 }));
+}
+
+void testObjectLinkColorsStayLocalToTheirAuthoredScreen()
+{
+    TEST("objectLinkColorsStayLocalToTheirAuthoredScreen");
+    TestProject project("object_link_scopes");
+    const Vec3 blue { 0.2f, 0.4f, 1.0f };
+    project.writeScreen(1, {
+        .layers = { { "...", "..." }, { "CR ", "   " } },
+        .objectLinks = {
+            { .cell = { 1, 0, 1 }, .color = blue },
+        },
+    });
+    project.writeScreen(2, {
+        .layers = { { "...", "..." }, { " R ", "   " } },
+        .objectLinks = {
+            { .cell = { 1, 0, 1 }, .color = blue },
+        },
+    });
+    project.writeLayout(eastWestLayout());
+
+    const OverworldMap map = OverworldMap::load(project.root);
+    CHECK(map.level().movableTiles().size() == 2);
+    CHECK(!map.level().movablesAreLinked(0, 1));
+    const GameState moved = rules::step(
+        map.level(),
+        rules::initialState(map.level()),
+        MoveDirection::Right);
+    CHECK(moved.movables[0].cell == GridPosition3({ 2, 0, 1 }));
+    CHECK(moved.movables[1].cell == GridPosition3({ 4, 0, 1 }));
 }
 
 void testActionAdmissionAndCameraTransition()
@@ -637,6 +668,7 @@ int main()
     testLayoutRoundTripIsCanonical();
     testCompositionAndGameplayCrossASeam();
     testNegativeSlotsNormalizeWithoutChangingIdentity();
+    testObjectLinkColorsStayLocalToTheirAuthoredScreen();
     testActionAdmissionAndCameraTransition();
     testLayoutValidationAndIndependentScreens();
     testSelectorOwnershipAndCoverage();

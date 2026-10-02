@@ -48,6 +48,11 @@ Vec4 shade(Vec4 color, float multiplier);
 
 void applyTileScale(RenderFrameData::Tile& tile, float scale);
 
+void appendLinkedObjectAura(
+    RenderFrameData& frame,
+    const RenderFrameData::Tile& object,
+    Vec3 color);
+
 uint32_t facingQuarterTurns(MoveDirection direction);
 
 // --------------------------------------------------------- Animation lookups

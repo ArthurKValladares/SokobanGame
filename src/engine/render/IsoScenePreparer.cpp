@@ -1072,7 +1072,8 @@ static void prepareAuxiliaryGeometry(
         const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
         if (tile.isEditorPreview || tile.pickOnly ||
             tile.effect == RenderSurfaceEffect::MirrorEnergy ||
-            tile.effect == RenderSurfaceEffect::GateEnergy) {
+            tile.effect == RenderSurfaceEffect::GateEnergy ||
+            tile.effect == RenderSurfaceEffect::LinkedObjectAura) {
             continue;
         }
         if (!tile.model.isCube()) {
@@ -1100,7 +1101,8 @@ static void prepareAuxiliaryGeometry(
     for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
         if (face.castsShadows &&
             face.effect != RenderSurfaceEffect::MirrorEnergy &&
-            face.effect != RenderSurfaceEffect::GateEnergy) {
+            face.effect != RenderSurfaceEffect::GateEnergy &&
+            face.effect != RenderSurfaceEffect::LinkedObjectAura) {
             appendShadowFace(face.vertices);
         }
     }
@@ -1265,7 +1267,8 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
         (request.blurBehind ||
                 request.material == PreparedSurfaceMaterial::Water ||
                 request.material == PreparedSurfaceMaterial::MirrorEnergy ||
-                request.material == PreparedSurfaceMaterial::GateEnergy
+                request.material == PreparedSurfaceMaterial::GateEnergy ||
+                request.material == PreparedSurfaceMaterial::LinkedObjectAura
                 ? scene.translucentFaceIndices
                 : scene.opaqueFaceIndices)
             .push_back(index);
@@ -1307,12 +1310,15 @@ void appendTileFaces(
             tile.pickable &&
             !tile.isEditorPreview &&
             tile.effect != RenderSurfaceEffect::MirrorEnergy &&
-            tile.effect != RenderSurfaceEffect::GateEnergy;
+            tile.effect != RenderSurfaceEffect::GateEnergy &&
+            tile.effect != RenderSurfaceEffect::LinkedObjectAura;
         const PreparedSurfaceMaterial tileMaterial =
             tile.effect == RenderSurfaceEffect::MirrorEnergy
             ? PreparedSurfaceMaterial::MirrorEnergy
             : tile.effect == RenderSurfaceEffect::GateEnergy
             ? PreparedSurfaceMaterial::GateEnergy
+            : tile.effect == RenderSurfaceEffect::LinkedObjectAura
+            ? PreparedSurfaceMaterial::LinkedObjectAura
             : PreparedSurfaceMaterial::Standard;
         // Splatting is a top-surface treatment: the sides of a ground
         // block keep the flat tile material.
@@ -1436,7 +1442,8 @@ void appendTileFaces(
         if (!tile.model.isCube() && !tile.pickOnly && mainSceneVisible) {
             (tile.blurBehind || tile.color.w < 1.0f ||
                     tile.effect == RenderSurfaceEffect::MirrorEnergy ||
-                    tile.effect == RenderSurfaceEffect::GateEnergy
+                    tile.effect == RenderSurfaceEffect::GateEnergy ||
+                    tile.effect == RenderSurfaceEffect::LinkedObjectAura
                     ? scene.translucentModelIndices
                     : scene.opaqueModelIndices)
                 .push_back(tileIndex);
@@ -1465,6 +1472,8 @@ void appendSourceIsoFaces(
                 ? PreparedSurfaceMaterial::MirrorEnergy
                 : source.effect == RenderSurfaceEffect::GateEnergy
                 ? PreparedSurfaceMaterial::GateEnergy
+                : source.effect == RenderSurfaceEffect::LinkedObjectAura
+                ? PreparedSurfaceMaterial::LinkedObjectAura
                 : PreparedSurfaceMaterial::Standard,
             .depth = faceDepth(scene.isoLayout, source.vertices),
         };
@@ -1478,7 +1487,8 @@ void appendSourceIsoFaces(
         if (scene.renderables[renderableIndex].mainSceneVisible) {
             (source.translucent ||
                     face.material == PreparedSurfaceMaterial::MirrorEnergy ||
-                    face.material == PreparedSurfaceMaterial::GateEnergy
+                    face.material == PreparedSurfaceMaterial::GateEnergy ||
+                    face.material == PreparedSurfaceMaterial::LinkedObjectAura
                     ? scene.translucentFaceIndices
                     : scene.opaqueFaceIndices)
                 .push_back(scene.isoFaces.size());

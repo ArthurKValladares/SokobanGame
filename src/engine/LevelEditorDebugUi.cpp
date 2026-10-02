@@ -565,6 +565,10 @@ std::string linkGroupText(const LevelEditor::LinkGroup& group)
 {
     std::string text = std::to_string(group.pressurePlates.size()) +
         (group.pressurePlates.size() == 1 ? " plate" : " plates");
+    if (!group.objects.empty()) {
+        text += ", " + std::to_string(group.objects.size()) +
+            (group.objects.size() == 1 ? " linked object" : " linked objects");
+    }
     std::vector<std::string> devices;
     for (const GridPosition3 cell : group.gates) {
         devices.push_back("Gate " + cellText(cell));
@@ -736,11 +740,13 @@ void LevelEditorDebugUi::drawTilePalette(
     ImGui::Separator();
     ImGui::TextUnformatted("Links");
     ImGui::TextWrapped(
-        "Gates, rotators, elevators and minecarts are driven by every pressure plate of "
-        "their color: give plates and devices the same color to link them. A "
-        "gate opens while all of its plates are pressed; a rotator turns and "
-        "an elevator or minecart moves each time they all become pressed. A device with "
-        "no plates of its color never activates.");
+        "Gates, rotators, elevators and minecarts are driven by every pressure "
+        "plate of their color: give plates and devices the same color to link "
+        "them. A gate opens while all of its plates are pressed; a rotator "
+        "turns and an elevator or minecart moves each time they all become "
+        "pressed. A device with no plates of its color never activates. "
+        "Movable objects of the same color repeat one another's successful "
+        "moves when their own path is clear.");
     Vec3 paintColor = editor.activeLinkColor();
     if (ImGui::ColorEdit3("Link Color", &paintColor.x)) {
         editor.setActiveLinkColor(paintColor);
@@ -750,14 +756,15 @@ void LevelEditorDebugUi::drawTilePalette(
     const std::string brushKeys =
         actionBindingsDisplay(bindings, InputAction::EditorPaintLinkColor);
     ImGui::BulletText(
-        "New pressure plates, gates, rotators, elevators and minecarts take this color.");
+        "New pressure plates and devices take this color; paint it onto movable "
+        "objects to link them.");
     ImGui::BulletText(
-        "%s + click: eyedropper - picks up the color of the plate or device "
+        "%s + click: eyedropper - picks up the color of the plate, device or linked object "
         "clicked.",
         pickKeys.c_str());
     ImGui::BulletText(
-        "%s + click or drag: brush - paints the color onto each plate or "
-        "device it touches. Painting a plate or device tile over itself does "
+        "%s + click or drag: brush - paints the color onto each plate, "
+        "device or movable object it touches. Painting a linkable tile over itself does "
         "the same.",
         brushKeys.c_str());
 
@@ -770,7 +777,8 @@ void LevelEditorDebugUi::drawTilePalette(
     }
     if (groups.empty()) {
         ImGui::TextDisabled(
-            "Paint pressure plates and a gate, rotator, elevator or minecart to link them.");
+            "Paint matching colors onto plates and devices, or onto two "
+            "movable objects, to link them.");
     }
     for (std::size_t index = 0; index < groups.size(); ++index) {
         const LevelEditor::LinkGroup& group = groups[index];
@@ -799,7 +807,11 @@ void LevelEditorDebugUi::drawTilePalette(
             ImGui::TextColored(
                 ImVec4 { 1.0f, 0.65f, 0.3f, 1.0f },
                 "    No pressure plates of this color: never activates.");
-        } else if (!group.hasDevice()) {
+        }
+        if (group.objects.size() == 1) {
+            ImGui::TextDisabled(
+                "    Add another movable object of this color to link movement.");
+        } else if (!group.hasDevice() && group.objects.empty()) {
             ImGui::TextDisabled("    Drives nothing yet.");
         }
         ImGui::PopID();
@@ -816,7 +828,7 @@ void LevelEditorDebugUi::drawTilePalette(
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip(
-            "Gives every plate and device of the selected group the link "
+            "Gives every plate, device and object of the selected group the link "
             "color. Choosing another group's color merges the two groups.");
     }
 

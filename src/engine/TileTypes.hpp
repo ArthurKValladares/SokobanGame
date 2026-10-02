@@ -175,6 +175,8 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeIsConveyor(TileType type);
 [[nodiscard]] bool tileTypeIsMirror(TileType type);
 [[nodiscard]] bool tileTypeIsTurret(TileType type);
+// Movable non-character units represented by GameState::Movable.
+[[nodiscard]] bool tileTypeIsMovableObject(TileType type);
 [[nodiscard]] bool tileTypeIsDecorative(TileType type);
 [[nodiscard]] bool tileTypeIsRotator(TileType type);
 [[nodiscard]] bool tileTypeIsElevator(TileType type);

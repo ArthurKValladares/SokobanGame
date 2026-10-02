@@ -100,6 +100,13 @@ void testDigestTracksGameplayContentOnly()
     moved.layers[1][1] = "   R  ";
     CHECK(solution::levelDigest(moved) !=
         solution::levelDigest(walkAndPushDefinition));
+    Level::Definition linked = walkAndPushDefinition;
+    linked.objectLinks.push_back({
+        .cell = { 2, 1, 1 },
+        .color = { 0.2f, 0.4f, 1.0f },
+    });
+    CHECK(solution::levelDigest(linked) !=
+        solution::levelDigest(walkAndPushDefinition));
 }
 
 void testReplayFailuresNameTheStepAndEntity()

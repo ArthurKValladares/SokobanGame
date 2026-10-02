@@ -335,6 +335,15 @@ private:
                   editorUse,
                   input_.worldAnimationTimeSeconds)
             : 0.0f;
+        if (tileTypeIsMovableObject(tile)) {
+            const auto link = std::ranges::find(
+                definition.objectLinks,
+                localCell,
+                &Level::ObjectLink::cell);
+            if (link != definition.objectLinks.end()) {
+                appendLinkedObjectAura(frame, renderTile, link->color);
+            }
+        }
         frame.tiles.push_back(renderTile);
     }
 
@@ -539,9 +548,17 @@ private:
         if (tile == TileType::PressurePlate) {
             // In the editor a plate shows its own link color: the color is
             // the link (see LevelEditor::linkGroups).
-            if (const std::optional<Vec3> color =
-                    input_.editor.linkColorAt({ x, y, z })) {
-                renderTile.color = { color->x, color->y, color->z, 1.0f };
+            const auto color = std::ranges::find(
+                input_.editor.pressurePlateColors(),
+                GridPosition3 { x, y, z },
+                &Level::LinkColor::cell);
+            if (color != input_.editor.pressurePlateColors().end()) {
+                renderTile.color = {
+                    color->color.x,
+                    color->color.y,
+                    color->color.z,
+                    1.0f,
+                };
             }
         }
         if (tileTypeIsElevator(tile)) {
@@ -599,6 +616,12 @@ private:
                   editorUse,
                   input_.worldAnimationTimeSeconds)
             : 0.0f;
+        if (!preview && !pickOnly && tileTypeIsMovableObject(tile)) {
+            if (const std::optional<Vec3> linkColor =
+                    input_.editor.objectLinkColorAt({ x, y, z })) {
+                appendLinkedObjectAura(frame, renderTile, *linkColor);
+            }
+        }
         frame.tiles.push_back(renderTile);
     }
 

@@ -27,6 +27,9 @@ enum class RenderSurfaceEffect {
     // Persistent energy barriers share the animated emissive shader with
     // mirror projections, but remain part of the normal world pass.
     GateEnergy,
+    // A slightly enlarged copy of a linked object's own model, shaded as a
+    // translucent animated wisp in that link group's color.
+    LinkedObjectAura,
     // Ground tops blend two ground textures through a splat map; see
     // shaders/ground_splat.frag.glsl.
     GroundSplat,

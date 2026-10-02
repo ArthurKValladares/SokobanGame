@@ -2524,6 +2524,74 @@ void testTurretMovablesUseTheirModelAndOrientation()
         }));
 }
 
+void testLinkedMovablesRenderScaledColorMatchedAuras()
+{
+    TEST("linkedMovablesRenderScaledColorMatchedAuras");
+    const Vec3 blue { 0.2f, 0.4f, 1.0f };
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "....." }, { "CR I " } },
+        .objectLinks = {
+            { .cell = { 1, 0, 1 }, .color = blue },
+            { .cell = { 3, 0, 1 }, .color = blue },
+        },
+    }, "linked aura frame");
+    const GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+
+    const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .moving = false,
+        .projectedState = {},
+        .presentation = presentation,
+        .settings = PresentationSettings {},
+    });
+    CHECK(std::ranges::count_if(
+        frame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.effect == RenderSurfaceEffect::LinkedObjectAura;
+        }) == 2);
+    for (const GameState::Movable& movable : state.movables) {
+        const auto object = std::ranges::find_if(
+            frame.tiles,
+            [&](const RenderFrameData::Tile& tile) {
+                return tile.cell == movable.cell &&
+                    tile.effect == RenderSurfaceEffect::Standard &&
+                    tile.model == testManifest().modelForTile(movable.type);
+            });
+        const auto aura = std::ranges::find_if(
+            frame.tiles,
+            [&](const RenderFrameData::Tile& tile) {
+                return tile.cell == movable.cell &&
+                    tile.effect == RenderSurfaceEffect::LinkedObjectAura;
+            });
+        CHECK(object != frame.tiles.end());
+        CHECK(aura != frame.tiles.end());
+        if (object == frame.tiles.end() || aura == frame.tiles.end()) {
+            continue;
+        }
+        CHECK(aura->model == object->model);
+        CHECK(near(aura->size.x, object->size.x * config::linkedObjectAuraScale));
+        CHECK(near(aura->size.y, object->size.y * config::linkedObjectAuraScale));
+        CHECK(near(aura->height, object->height * config::linkedObjectAuraScale));
+        CHECK(near(
+            aura->position.x + aura->size.x * 0.5f,
+            object->position.x + object->size.x * 0.5f));
+        CHECK(near(
+            aura->position.y + aura->size.y * 0.5f,
+            object->position.y + object->size.y * 0.5f));
+        CHECK(near(aura->color.x, blue.x));
+        CHECK(near(aura->color.y, blue.y));
+        CHECK(near(aura->color.z, blue.z));
+        CHECK(near(aura->color.w, config::linkedObjectAuraOpacity));
+        CHECK(!aura->pickable);
+        CHECK(!aura->showGrid);
+        CHECK(!aura->affectsCameraFit);
+    }
+}
+
 void testMirrorActivationBuildsBeamAndDestinationGhost()
 {
     TEST("mirrorActivationBuildsBeamAndDestinationGhost");
@@ -3621,6 +3689,7 @@ int main()
     testEditorSelectorMoveUsesFlagPreviews();
     testMirrorTilesUseTheirModelAndOrientation();
     testTurretMovablesUseTheirModelAndOrientation();
+    testLinkedMovablesRenderScaledColorMatchedAuras();
     testMirrorActivationBuildsBeamAndDestinationGhost();
     testPlayerCopiesRenderAndInterpolateTogether();
     testPlayerCopiesShareTheInputFacing();

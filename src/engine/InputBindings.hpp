@@ -29,7 +29,7 @@ enum class InputAction {
     // Level editor shortcuts (Debug developer builds). Held modifiers first,
     // then commands.
     EditorPickTile,
-    // Held: clicking a pressure plate, gate, rotator or elevator gives it the
+    // Held: clicking a pressure plate, device, or movable object gives it the
     // level editor's active link color.
     EditorPaintLinkColor,
     EditorStraightLine,

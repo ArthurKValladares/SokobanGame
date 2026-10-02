@@ -26,6 +26,7 @@ constexpr std::string_view gatePrefix = "@gate ";
 constexpr std::string_view rotatorPrefix = "@rotator ";
 constexpr std::string_view elevatorPrefix = "@elevator ";
 constexpr std::string_view minecartPrefix = "@minecart ";
+constexpr std::string_view objectLinkPrefix = "@objectlink ";
 constexpr std::string_view linkColorPrefix = "@linkcolor ";
 // Far more stops than any board has layers; it keeps an elevator's cycle
 // phase (2 * stops - 2 values) inside GameState's 8-bit field.
@@ -813,6 +814,62 @@ void canonicalizeLinkColors(
     }
 }
 
+Level::ObjectLink parseObjectLink(
+    std::string_view payload, std::string_view sourceName)
+{
+    const Level::LinkColor parsed = parseLinkColor(payload, sourceName);
+    return { .cell = parsed.cell, .color = parsed.color };
+}
+
+std::string serializeObjectLink(const Level::ObjectLink& record)
+{
+    const Json object {
+        { "cell", { record.cell.x, record.cell.y, record.cell.z } },
+        { "color", { record.color.x, record.color.y, record.color.z } },
+    };
+    return std::string(objectLinkPrefix) + object.dump();
+}
+
+void canonicalizeObjectLinks(
+    std::vector<Level::ObjectLink>& records, std::string_view sourceName)
+{
+    std::ranges::sort(records, {}, [](const Level::ObjectLink& record) {
+        return std::array { record.cell.z, record.cell.y, record.cell.x };
+    });
+    const auto validColor = [](float component) {
+        return std::isfinite(component) && component >= 0.0f &&
+            component <= 1.0f;
+    };
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        const Level::ObjectLink& record = records[i];
+        if (record.cell.x < 0 || record.cell.y < 0 || record.cell.z < 0) {
+            throw std::runtime_error(
+                "Object link cell coordinates must not be negative: " +
+                std::string(sourceName));
+        }
+        if (!validColor(record.color.x) || !validColor(record.color.y) ||
+            !validColor(record.color.z)) {
+            throw std::runtime_error(
+                "Object link color components must be finite values from zero to one: " +
+                std::string(sourceName));
+        }
+        if (i > 0 && records[i - 1].cell == record.cell) {
+            throw std::runtime_error(
+                "Level contains more than one object link at the same cell: " +
+                std::string(sourceName));
+        }
+    }
+}
+
+std::array<int, 3> objectLinkColorKey(Vec3 color)
+{
+    const auto channel = [](float value) {
+        return static_cast<int>(std::lround(
+            std::clamp(value, 0.0f, 1.0f) * 255.0f));
+    };
+    return { channel(color.x), channel(color.y), channel(color.z) };
+}
+
 size_t tileIndex(uint32_t x, uint32_t y, uint32_t z, uint32_t width, uint32_t height)
 {
     return (static_cast<size_t>(z) * height + y) * width + x;
@@ -1020,6 +1077,8 @@ Level::Definition Level::parseDefinition(
                     line.starts_with(gatePrefix) ||
                     line.starts_with(rotatorPrefix) ||
                     line.starts_with(elevatorPrefix) ||
+                    line.starts_with(minecartPrefix) ||
+                    line.starts_with(objectLinkPrefix) ||
                     line.starts_with(linkColorPrefix) ||
                     line.starts_with(platePrefix);
             })) {
@@ -1134,6 +1193,17 @@ Level::Definition Level::parseDefinition(
             continue;
         }
 
+        if (line.starts_with(objectLinkPrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Object link metadata must appear before '@layer 0': " + source);
+            }
+            definition.objectLinks.push_back(parseObjectLink(
+                std::string_view(line).substr(objectLinkPrefix.size()),
+                sourceName));
+            continue;
+        }
+
         if (line.starts_with(linkColorPrefix)) {
             if (currentLayer) {
                 throw std::runtime_error(
@@ -1229,6 +1299,7 @@ Level::Definition Level::parseDefinition(
     canonicalizeLinkedRecords(definition.rotators, sourceName, "Rotator");
     canonicalizeLinkedRecords(definition.elevators, sourceName, "Elevator");
     canonicalizeLinkedRecords(definition.minecarts, sourceName, "Minecart");
+    canonicalizeObjectLinks(definition.objectLinks, sourceName);
     canonicalizePlates(definition.plates, sourceName);
     canonicalizeLinkColors(definition.linkColors, sourceName);
 
@@ -1254,6 +1325,7 @@ std::vector<std::string> Level::serializeDefinition(
         definition.rotators.empty() &&
         definition.elevators.empty() &&
         definition.minecarts.empty() &&
+        definition.objectLinks.empty() &&
         definition.linkColors.empty() &&
         definition.plates.empty()) {
         return definition.layers.front();
@@ -1306,6 +1378,11 @@ std::vector<std::string> Level::serializeDefinition(
         lines.push_back(
             serializeLinkedRecord(minecart, minecartPrefix, "Minecart"));
     }
+    std::vector<ObjectLink> objectLinks = definition.objectLinks;
+    canonicalizeObjectLinks(objectLinks, "serialized level");
+    for (const ObjectLink& objectLink : objectLinks) {
+        lines.push_back(serializeObjectLink(objectLink));
+    }
     std::vector<Plate> plates = definition.plates;
     std::ranges::sort(plates, {}, [](const Plate& plate) {
         return std::array { plate.cell.z, plate.cell.y, plate.cell.x };
@@ -1328,6 +1405,7 @@ std::vector<std::string> Level::serializeDefinition(
         !definition.rotators.empty() ||
         !definition.elevators.empty() ||
         !definition.minecarts.empty() ||
+        !definition.objectLinks.empty() ||
         !definition.linkColors.empty() ||
         !definition.plates.empty()) {
         lines.emplace_back();
@@ -1370,7 +1448,8 @@ Level Level::loadFromDefinition(
         definition.plates,
         definition.character.value_or(CharacterType::Rogue),
         definition.elevators,
-        definition.minecarts);
+        definition.minecarts,
+        definition.objectLinks);
 }
 
 Level Level::loadFromLayers(
@@ -1384,7 +1463,8 @@ Level Level::loadFromLayers(
     const std::vector<Plate>& plates,
     CharacterType selectedCharacter,
     const std::vector<Elevator>& elevators,
-    const std::vector<Minecart>& minecarts)
+    const std::vector<Minecart>& minecarts,
+    const std::vector<ObjectLink>& objectLinks)
 {
     const std::string source(sourceName);
     if (sourceLayers.empty()) {
@@ -1429,6 +1509,8 @@ Level Level::loadFromLayers(
     canonicalizeLinkedRecords(level.elevators_, sourceName, "Elevator");
     level.minecarts_ = minecarts;
     canonicalizeLinkedRecords(level.minecarts_, sourceName, "Minecart");
+    level.objectLinks_ = objectLinks;
+    canonicalizeObjectLinks(level.objectLinks_, sourceName);
     level.coveredPlates_ = plates;
     canonicalizePlates(level.coveredPlates_, sourceName);
     for (const auto& layer : sourceLayers) {
@@ -1531,6 +1613,16 @@ Level Level::loadFromLayers(
     if (matchedCoveredPlates != level.coveredPlates_.size()) {
         throw std::runtime_error(
             "A '@plate' record must lie beneath a unit or mirror (or a minecart): " + source);
+    }
+
+    for (const ObjectLink& link : level.objectLinks_) {
+        const auto movable = std::ranges::find(
+            level.movableTiles_, link.cell, &MovableTile::position);
+        if (movable == level.movableTiles_.end()) {
+            throw std::runtime_error(
+                "Object link metadata cell must contain a movable object: " +
+                source);
+        }
     }
 
     if (level.playerStarts_.empty()) {
@@ -1874,6 +1966,35 @@ std::optional<Vec3> Level::pressurePlateLinkColor(GridPosition3 cell) const
         return minecart->color;
     }
     return std::nullopt;
+}
+
+std::optional<Vec3> Level::movableLinkColor(std::size_t movableIndex) const
+{
+    if (movableIndex >= movableTiles_.size()) {
+        return std::nullopt;
+    }
+    const auto found = std::ranges::find(
+        objectLinks_, movableTiles_[movableIndex].position, &ObjectLink::cell);
+    return found == objectLinks_.end()
+        ? std::nullopt
+        : std::optional<Vec3>(found->color);
+}
+
+bool Level::movablesAreLinked(std::size_t left, std::size_t right) const
+{
+    if (left >= movableTiles_.size() || right >= movableTiles_.size()) {
+        return false;
+    }
+    const auto linkFor = [&](std::size_t index) {
+        return std::ranges::find(
+            objectLinks_, movableTiles_[index].position, &ObjectLink::cell);
+    };
+    const auto leftLink = linkFor(left);
+    const auto rightLink = linkFor(right);
+    return leftLink != objectLinks_.end() && rightLink != objectLinks_.end() &&
+        leftLink->scope == rightLink->scope &&
+        objectLinkColorKey(leftLink->color) ==
+            objectLinkColorKey(rightLink->color);
 }
 
 } // namespace sokoban

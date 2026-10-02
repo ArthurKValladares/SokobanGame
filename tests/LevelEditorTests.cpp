@@ -250,8 +250,9 @@ void testColorGroupsBecomeExplicitLinks()
     CHECK(loaded.tryUndoEdit());
     CHECK(loaded.linkedPressurePlates(orange) == Plates { movedPlate });
 
-    // The link-color brush recolors whatever linkable tile tops the column,
-    // including a pressure plate beneath a unit, and refuses anything else.
+    // The link-color brush recolors whatever linkable tile tops the column.
+    // A movable object becomes its own linked member without changing the
+    // pressure plate beneath it.
     loaded.setActiveLinkColor(green);
     CHECK(loaded.paintLinkColorAt({ secondGate.x, secondGate.y, 0 }));
     CHECK(loaded.linkColorAt(secondGate) == std::optional<Vec3>(green));
@@ -261,6 +262,7 @@ void testColorGroupsBecomeExplicitLinks()
     loaded.setActiveLinkColor(blue);
     CHECK(loaded.paintLinkColorAt({ loose.x, loose.y, 0 }));
     CHECK(loaded.linkColorAt(loose) == std::optional<Vec3>(blue));
+    CHECK(loaded.linkedPressurePlates(green) == Plates { loose });
     // Locked to the ground layer, only ground is in reach.
     loaded.setActiveLayer(0);
     loaded.setLayerLocked(true);
@@ -335,6 +337,55 @@ void testExplicitLinksBecomeColorGroupsOnLoad()
     CHECK(shared.status().find("distinct colors") == std::string::npos);
     CHECK(shared.linkGroups().size() == 1);
     CHECK(shared.gates()[0].color == Vec3({ 1.0f, 0.72f, 0.12f }));
+}
+
+void testMovableObjectsJoinColorGroupsAndKeepLinksWhenMoved()
+{
+    TEST("movableObjectsJoinColorGroupsAndKeepLinksWhenMoved");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(5, 2, false);
+
+    const Vec3 blue { 0.2f, 0.4f, 1.0f };
+    const GridPosition3 first { 1, 0, 1 };
+    const GridPosition3 second { 3, 0, 1 };
+    const GridPosition3 movedFirst { 1, 1, 1 };
+    CHECK(editor.setCell(first, TileType::Rock));
+    CHECK(editor.setCell(second, TileType::Ice));
+    CHECK(!editor.objectLinkColorAt(first));
+
+    editor.setActiveLinkColor(blue);
+    CHECK(editor.paintLinkColorAt({ first.x, first.y, 0 }));
+    CHECK(editor.paintLinkColorAt({ second.x, second.y, 0 }));
+    CHECK(editor.objectLinks().size() == 2);
+    CHECK(editor.objectLinkColorAt(first) == std::optional<Vec3>(blue));
+    CHECK(editor.objectLinkColorAt(second) == std::optional<Vec3>(blue));
+    CHECK(editor.linkGroups().size() == 1);
+    if (!editor.linkGroups().empty()) {
+        CHECK(editor.linkGroups()[0].objects == (Plates { first, second }));
+    }
+    CHECK(editor.documentToLevel().movablesAreLinked(0, 1));
+
+    CHECK(editor.beginMove(first));
+    CHECK(editor.moveObject(movedFirst));
+    CHECK(!editor.objectLinkColorAt(first));
+    CHECK(editor.objectLinkColorAt(movedFirst) == std::optional<Vec3>(blue));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.objectLinkColorAt(first) == std::optional<Vec3>(blue));
+    CHECK(!editor.objectLinkColorAt(movedFirst));
+
+    const std::filesystem::path path =
+        project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(path));
+    CHECK(readFile(path).find("@objectlink ") != std::string::npos);
+    LevelEditor loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(path, false));
+    CHECK(loaded.objectLinks() == editor.objectLinks());
+    CHECK(loaded.documentToLevel().movablesAreLinked(0, 1));
+
+    CHECK(loaded.setCell(first, TileType::Air));
+    CHECK(!loaded.objectLinkColorAt(first));
+    CHECK(loaded.objectLinks().size() == 1);
 }
 
 void testUnitsAndMirrorsStackOnPlates()
@@ -2216,6 +2267,7 @@ int main()
     testDocumentCommandsAndUndo();
     testColorGroupsBecomeExplicitLinks();
     testExplicitLinksBecomeColorGroupsOnLoad();
+    testMovableObjectsJoinColorGroupsAndKeepLinksWhenMoved();
     testElevatorStopsPersistAndFollowEditorCommands();
     testMinecartRequiresStopAndPersistsRouteDirection();
     testUnitsAndMirrorsStackOnPlates();

@@ -121,6 +121,20 @@ public:
         }
     };
 
+    // A movable object participating in a color-linked group. Objects in the
+    // same authored screen with the same 8-bit editor color repeat one
+    // another's successful moves when their own destination is available.
+    struct ObjectLink {
+        GridPosition3 cell {};
+        Vec3 color {};
+        // Runtime-only namespace used when independently authored overworld
+        // screens are composed. Zero is the ordinary single-level namespace;
+        // it is deliberately not written to .scr files.
+        uint32_t scope = 0;
+
+        bool operator==(const ObjectLink&) const = default;
+    };
+
     struct Decoration {
         struct PointLight {
             // Offset in the decoration's local space. It is scaled and
@@ -189,6 +203,7 @@ public:
         std::vector<Plate> plates;
         std::vector<Elevator> elevators;
         std::vector<Minecart> minecarts;
+        std::vector<ObjectLink> objectLinks;
         // Editor-only (see LinkColor); Level::loadFromDefinition ignores it.
         std::vector<LinkColor> linkColors;
         // Missing only for backwards-compatible legacy documents. Runtime
@@ -226,7 +241,8 @@ public:
         const std::vector<Plate>& plates = {},
         CharacterType selectedCharacter = CharacterType::Rogue,
         const std::vector<Elevator>& elevators = {},
-        const std::vector<Minecart>& minecarts = {});
+        const std::vector<Minecart>& minecarts = {},
+        const std::vector<ObjectLink>& objectLinks = {});
     [[nodiscard]] static Definition parseDefinition(
         const std::vector<std::string>& lines,
         std::string_view sourceName);
@@ -245,6 +261,14 @@ public:
         return playerStarts_;
     }
     [[nodiscard]] const std::vector<MovableTile>& movableTiles() const { return movableTiles_; }
+    [[nodiscard]] const std::vector<ObjectLink>& objectLinks() const
+    {
+        return objectLinks_;
+    }
+    [[nodiscard]] std::optional<Vec3> movableLinkColor(
+        std::size_t movableIndex) const;
+    [[nodiscard]] bool movablesAreLinked(
+        std::size_t left, std::size_t right) const;
     [[nodiscard]] const std::vector<GridPosition3>& enemyStarts() const { return enemyStarts_; }
     [[nodiscard]] const std::vector<GridPosition3>& pressurePlates() const { return pressurePlates_; }
     [[nodiscard]] const std::vector<Gate>& gates() const { return gates_; }
@@ -293,6 +317,7 @@ private:
     CharacterType character_ = CharacterType::Rogue;
     std::vector<PlayerStart> playerStarts_;
     std::vector<MovableTile> movableTiles_;
+    std::vector<ObjectLink> objectLinks_;
     std::vector<GridPosition3> enemyStarts_;
     std::vector<GridPosition3> pressurePlates_;
     std::vector<Gate> gates_;

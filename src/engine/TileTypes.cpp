@@ -145,6 +145,12 @@ bool tileTypeIsTurret(TileType type)
         type == TileType::TurretWest;
 }
 
+bool tileTypeIsMovableObject(TileType type)
+{
+    return type == TileType::Rock || type == TileType::Ice ||
+        tileTypeIsTurret(type);
+}
+
 bool tileTypeIsDecorative(TileType type)
 {
     return type == TileType::Decorative;

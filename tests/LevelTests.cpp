@@ -543,6 +543,61 @@ void testEditorLinkColorsRoundTripAndDoNotAffectGameplay()
     }, "before '@layer 0'");
 }
 
+void testObjectLinksRoundTripAndValidateMovableCells()
+{
+    TEST("objectLinksRoundTripAndValidateMovableCells");
+    const Vec3 blue { 0.2f, 0.4f, 1.0f };
+    const Level::Definition definition {
+        .layers = { { "....." }, { "CR n " } },
+        .objectLinks = {
+            { .cell = { 1, 0, 1 }, .color = blue },
+            { .cell = { 3, 0, 1 }, .color = blue },
+        },
+    };
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition(definition);
+    CHECK(std::ranges::count_if(serialized, [](const std::string& line) {
+        return line.starts_with("@objectlink ");
+    }) == 2);
+    const Level::Definition parsed =
+        Level::parseDefinition(serialized, "object link round trip");
+    CHECK(parsed == definition);
+
+    const Level level = Level::loadFromDefinition(parsed, "object link level");
+    CHECK(level.objectLinks() == definition.objectLinks);
+    CHECK(level.movableLinkColor(0) == std::optional<Vec3>(blue));
+    CHECK(level.movableLinkColor(1) == std::optional<Vec3>(blue));
+    CHECK(level.movablesAreLinked(0, 1));
+    CHECK(!level.movablesAreLinked(0, 99));
+
+    checkThrowsContaining([] {
+        (void)Level::loadFromDefinition({
+            .layers = { { "..." }, { "C  " } },
+            .objectLinks = {
+                { .cell = { 1, 0, 1 }, .color = { 1.0f, 0.0f, 0.0f } },
+            },
+        }, "object link without object");
+    }, "must contain a movable object");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            {
+                "@objectlink {\"cell\":[1,0,1],\"color\":[2,0,0]}",
+                "@layer 0",
+                "...",
+            },
+            "bad object link color");
+    }, "from zero to one");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            {
+                "@layer 0",
+                "...",
+                "@objectlink {\"cell\":[1,0,1],\"color\":[1,0,0]}",
+            },
+            "late object link");
+    }, "before '@layer 0'");
+}
+
 void testPlatePropertyAndCoveredPlateRecords()
 {
     TEST("platePropertyAndCoveredPlateRecords");
@@ -1024,6 +1079,7 @@ int main()
     testRotatorMetadataRoundTripAndValidation();
     testElevatorMetadataRoundTripAndValidation();
     testEditorLinkColorsRoundTripAndDoNotAffectGameplay();
+    testObjectLinksRoundTripAndValidateMovableCells();
     testPlatePropertyAndCoveredPlateRecords();
     testParserRejectsMalformedStructure();
     testLevelValidationErrors();

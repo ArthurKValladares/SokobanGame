@@ -113,6 +113,36 @@ void main()
         vec3(1.0),
         normalizedTexture,
         textureInfluence * 0.55);
+    bool linkedAura = draw.passData[0].z > 0.5;
+    if (linkedAura) {
+        // Two differently-oriented, world-anchored waves keep the haze from
+        // reading as a scrolling texture. Their interference produces wisps
+        // that curl over the enlarged copy of the linked object's own mesh.
+        float time = draw.materialOptions.w * draw.gridColor.z;
+        float risingWisp = sin(
+            (inWorldPosition.x + inWorldPosition.y) * 7.3 - time +
+            sin(inWorldPosition.z * 10.7 + time * 0.61));
+        float crossWisp = sin(
+            (inWorldPosition.x - inWorldPosition.y) * 11.1 + time * 0.73 +
+            sin(inWorldPosition.z * 6.4 - time * 0.47));
+        float wisp = smoothstep(
+            -0.72,
+            0.86,
+            risingWisp * 0.68 + crossWisp * 0.32);
+        float breathing = 0.5 + 0.5 * sin(
+            time * 0.52 + inWorldPosition.z * 5.1);
+        float wispStrength = clamp(draw.gridColor.w, 0.0, 0.9);
+        float haze = mix(1.0 - wispStrength, 1.0 + wispStrength, wisp);
+        vec3 auraColor = draw.color.rgb * textureTint *
+            (detail * (0.48 + haze * 0.42) + rim * 0.72);
+        float alpha = draw.color.a * clamp(
+            0.30 + wisp * 0.42 + breathing * 0.12 + rim * 0.22,
+            0.0,
+            1.0);
+        outColor = vec4(auraColor, alpha);
+        return;
+    }
+
     vec3 energyColor =
         draw.color.rgb * textureTint *
         (detail * pulseScale * scanScale + rim);

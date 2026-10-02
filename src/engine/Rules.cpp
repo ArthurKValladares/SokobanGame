@@ -1853,6 +1853,8 @@ namespace {
 //                    by another entity that vacates its cell this micro-step
 //                    still advances; direct input may push a resolved
 //                    blocker. Each entity moves at most once per micro-step.
+//   linkedMoves    - successful movable displacements are repeated by the
+//                    other members of their color group when space permits.
 //   settleBlocked  - anything with an intent that could not move is in a
 //                    mutual block; blocked slide momentum does not survive.
 //
@@ -1882,6 +1884,7 @@ public:
         , status_(movableCount_ + playerCount_ + enemyCount_)
         , enemyMoved_(after.enemies.size(), 0)
         , enemyMovedThisMicro_(after.enemies.size(), 0)
+        , movableMovedDirections_(movableCount_)
         , turretShots_(turretShots)
         , rotatorsEngagedAtStart_(rotatorEngagement(level, after))
         , elevatorsEngagedAtStart_(elevatorEngagement(level, after))
@@ -1932,6 +1935,7 @@ public:
                 [](const Status& status) { return status.bardDriven; });
             markContested();
             anyMovement = resolveMoves();
+            anyMovement = resolveLinkedMoves() || anyMovement;
             settleBlocked();
             if (hasBardPulse && !anyBardMovedThisMicro()) {
                 after_ = *beforeBardPulse;
@@ -1941,6 +1945,7 @@ public:
                 deriveIntents();
                 markContested();
                 anyMovement = resolveMoves();
+                anyMovement = resolveLinkedMoves() || anyMovement;
                 settleBlocked();
                 suppressBardInfluences_ = false;
             }
@@ -2265,6 +2270,10 @@ private:
             status.bardDriven = false;
             status.witchSwapTarget.reset();
         }
+        std::fill(
+            movableMovedDirections_.begin(),
+            movableMovedDirections_.end(),
+            std::nullopt);
 
         deriveBardInfluences();
 
@@ -2445,6 +2454,71 @@ private:
                     : (isEnemy(i)
                             ? resolveEnemy(i, anyMovement)
                             : resolveMovable(i, anyMovement));
+            }
+        }
+        return anyMovement;
+    }
+
+    // A successful move is the trigger, not an intent: this catches pushes,
+    // pulls and chain movement as well as slides and conveyors. Followers are
+    // attempted farthest-first along the movement direction, allowing a row
+    // of linked objects to vacate into one another's cells. A blocked follower
+    // simply stays put and never cancels the move that triggered it.
+    [[nodiscard]] bool resolveLinkedMoves()
+    {
+        bool anyMovement = false;
+        std::vector<char> handled(movableCount_, 0);
+        for (std::size_t source = 0; source < movableCount_; ++source) {
+            if (handled[source] || !movableMovedDirections_[source] ||
+                !level_.movableLinkColor(source)) {
+                continue;
+            }
+
+            const MoveDirection direction = *movableMovedDirections_[source];
+            std::vector<std::size_t> members;
+            bool conflictingDirections = false;
+            for (std::size_t index = 0; index < movableCount_; ++index) {
+                if (!level_.movablesAreLinked(source, index)) {
+                    continue;
+                }
+                handled[index] = 1;
+                members.push_back(index);
+                if (movableMovedDirections_[index] &&
+                    *movableMovedDirections_[index] != direction) {
+                    conflictingDirections = true;
+                }
+            }
+            if (conflictingDirections) {
+                continue;
+            }
+
+            const GridPosition offset = directionOffset(direction);
+            std::ranges::sort(members, {}, [&](std::size_t index) {
+                const GridPosition3 cell = after_.movables[index].cell;
+                return -(cell.x * offset.x + cell.y * offset.y);
+            });
+            for (const std::size_t index : members) {
+                GameState::Movable& movable = after_.movables[index];
+                Status& status = status_[index];
+                if (status.movedThisMicro || movable.fallen || movable.dead) {
+                    continue;
+                }
+                const GridPosition3 destination =
+                    movementTarget(movable.cell, direction);
+                if (!cellAllowsEntity(level_, after_, destination) ||
+                    movableBlocksAt(after_, destination, index) ||
+                    playerBlocksAt(after_, destination) ||
+                    enemyBlocksAt(after_, destination) ||
+                    !movableFallTarget(level_, after_, index, destination)
+                         .supported) {
+                    continue;
+                }
+                applyMovableMove(index, direction, destination);
+                status.active = true;
+                status.resolved = true;
+                status.movedThisMicro = true;
+                status.done = false;
+                anyMovement = true;
             }
         }
         return anyMovement;
@@ -3331,6 +3405,7 @@ private:
         GridPosition3 target,
         bool preserveElevation = false)
     {
+        movableMovedDirections_[index] = direction;
         after_.movables[index].cell = target;
         const FallResult fall = preserveElevation
             ? FallResult { .cell = target, .supported = true }
@@ -3440,6 +3515,9 @@ private:
     // events: only motion in the current micro-step counts. Mutual turret
     // volleys are the deliberate exception resolved before movement begins.
     std::vector<char> enemyMovedThisMicro_;
+    // Direction of each successful movable displacement in the current
+    // micro-step. Linked groups react after ordinary resolution completes.
+    std::vector<std::optional<MoveDirection>> movableMovedDirections_;
     std::vector<TurretShot>* turretShots_ = nullptr;
     bool suppressBardInfluences_ = false;
     // Which rotators had every linked plate pressed when the step began. A

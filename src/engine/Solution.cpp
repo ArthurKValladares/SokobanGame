@@ -317,6 +317,26 @@ std::uint64_t levelDigest(const Level::Definition& definition)
         text += " direction " + std::to_string(minecart.initialDirection);
         hashBytes(hash, text + "\n");
     }
+    // Object-link colors are gameplay groups. Hash the same 8-bit channels
+    // the editor uses for equality so insignificant float spelling changes do
+    // not invalidate a recording while a real regrouping always does.
+    std::vector<Level::ObjectLink> objectLinks = definition.objectLinks;
+    std::ranges::sort(objectLinks, {}, [&](const Level::ObjectLink& link) {
+        return cellOrder(link.cell);
+    });
+    const auto colorChannel = [](float value) {
+        return static_cast<int>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+    };
+    for (const Level::ObjectLink& link : objectLinks) {
+        hashBytes(
+            hash,
+            "@objectlink " + std::to_string(link.cell.x) + "," +
+                std::to_string(link.cell.y) + "," +
+                std::to_string(link.cell.z) + ":" +
+                std::to_string(colorChannel(link.color.x)) + "," +
+                std::to_string(colorChannel(link.color.y)) + "," +
+                std::to_string(colorChannel(link.color.z)) + "\n");
+    }
     // Plates authored beneath units change what the screen does from its
     // first step; hashed only when present, like rotators.
     std::vector<Level::Plate> plates = definition.plates;
