@@ -11,9 +11,9 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
   plates and elevators, goals, undo, restart, multi-screen levels, and completion tracking.
 - Ice, ladders, conveyors, falling, configurable water layers, and four
   directional mirror types that can reflect players and movable units.
-- Color-paired floor portals transport heroes and movable units, preserving
-  direction and slide or conveyor momentum; turret, mirror and witch sightlines
-  continue through their paired exits.
+- Four color-paired edge portals transport heroes and movable units from
+  their front, rotating movement and sightlines to the exit orientation while
+  preserving slide or conveyor momentum. Swirling sparks mark the front.
 - Animated enemies that track and attack adjacent players, participate in
   physical movement rules, and support skeleton-driven held-item attachments.
 - Animated mirror beams, destination ghosts, sound, and particle effects.
@@ -350,17 +350,21 @@ a plate authored beneath something already standing on it (see Plates below).
 A `@objectlink {"cell":[x,y,z],"color":[r,g,b]}` directive gives a rock,
 ice block, or turret a linked-object color. Movable objects of the same color
 repeat one another's successful moves when their own destination is available.
-A Portal (`O`) uses `@portal {"cell":[x,y,z],"color":[r,g,b]}` metadata.
+Portals come in four edge types: North (`O`), East (`o`), South (`p`),
+and West (`q`). Each uses `@portal {"cell":[x,y,z],"color":[r,g,b]}` metadata.
 Exactly two entrances with the same 8-bit RGB color in one screen form a pair;
-other group sizes stay inactive. Entering one places a unit on the other,
-preserving its direction and incoming slide or conveyor momentum. The exit
-must be free, and arrival does not immediately send the unit back. Entrances
-can connect different layers, carry units pushed or pulled onto them, and pass
-turret, mirror and witch sightlines through the pair. Portal colors are
+other group sizes stay inactive. The front faces into the owning tile, marked
+by swirling colored sparks. Units can stand on or enter that tile normally.
+Only moving outward through its portal edge transports a unit, emerging into
+the paired portal's owning tile from its edge. Crossing from the back is an
+ordinary move. Direction rotates to point away from the exit edge, preserving
+incoming slide or conveyor momentum. The exit tile must be free.
+Portals can connect different layers and transport pushed units; turret,
+mirror and witch rays follow the same front-edge geometry. Their colors are
 independent of linked-object and pressure-plate groups of the same color.
-Units can be authored on a portal with `@plate` metadata. The editor's Portal
-brush uses the active Link Color; paint or recolor entrances with the existing
-color tools. A small playable example is [portals.scr](docs/examples/portals.scr).
+Units can be authored on a portal with `@plate` metadata. All four portal
+brushes use the active Link Color and the existing color tools.
+A playable example is [portals.scr](docs/examples/portals.scr).
 
 A `@linkcolor {"cell":[x,y,z],"color":[r,g,b]}` directive is level-editor
 bookkeeping: the color of a pressure plate that drives nothing yet (see Link

@@ -1970,8 +1970,17 @@ void testPortalColorGroups()
     const GridPosition3 second { 4, 1, 1 };
     const GridPosition3 moved { 4, 2, 1 };
     editor.setActiveLinkColor(blue);
-    CHECK(editor.setCell(first, TileType::Portal));
-    CHECK(editor.setCell(second, TileType::Portal));
+    CHECK(editor.setCell(first, TileType::PortalNorth));
+    CHECK(editor.setCell(second, TileType::PortalSouth));
+    CHECK(editor.setCell(first, TileType::PortalEast));
+    CHECK(editor.portals().size() == 2);
+    CHECK(editor.documentToLevel().portalAt(first)->color == blue);
+    CHECK(
+        editor.documentToLevel().portalCrossing(first, { 1, 0 })->direction ==
+        GridPosition({ 0, -1 }));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentToLevel().plateAt(first) == TileType::PortalNorth);
+    CHECK(editor.documentToLevel().portalAt(first)->color == blue);
     CHECK(editor.portals().size() == 2);
     CHECK(editor.documentToLevel().portalExit(first) == second);
     CHECK(editor.linkGroups()[0].portals.size() == 2);

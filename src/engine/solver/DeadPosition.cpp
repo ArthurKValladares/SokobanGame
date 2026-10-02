@@ -31,7 +31,7 @@ bool characterCannotPushChains(CharacterType character)
 bool tileChangesMovableReachability(TileType tile)
 {
     return tile == TileType::Ice || tile == TileType::Water ||
-        tile == TileType::Ladder || tile == TileType::Portal ||
+        tile == TileType::Ladder || tileTypeIsPortal(tile) ||
         tileTypeIsConveyor(tile) || tileTypeIsMirror(tile) ||
         tile == TileType::Gate || tileTypeIsElevator(tile);
 }

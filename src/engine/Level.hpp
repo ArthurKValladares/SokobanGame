@@ -280,6 +280,16 @@ public:
     [[nodiscard]] const Portal* portalAt(GridPosition3 cell) const;
     [[nodiscard]] std::optional<GridPosition3> portalExit(
         GridPosition3 cell) const;
+    struct PortalCrossing {
+        GridPosition3 exit {};
+        GridPosition direction {};
+        int quarterTurns = 0;
+    };
+    // Crossing from the owning tile through its outward edge activates the
+    // portal. Standing on it, entering its tile, and crossing its back do not.
+    [[nodiscard]] std::optional<PortalCrossing> portalCrossing(
+        GridPosition3 from,
+        GridPosition direction) const;
     [[nodiscard]] bool movablesAreLinked(
         std::size_t left, std::size_t right) const;
     [[nodiscard]] const std::vector<GridPosition3>& enemyStarts() const { return enemyStarts_; }

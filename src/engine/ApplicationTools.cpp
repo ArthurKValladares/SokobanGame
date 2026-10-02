@@ -1,4 +1,5 @@
 #include "engine/ApplicationTools.hpp"
+#include "engine/ParticleConfig.hpp"
 
 #include "engine/AtomicFile.hpp"
 #include "engine/ContentPipeline.hpp"
@@ -1157,6 +1158,8 @@ bool ApplicationTools::bakeTileThumbnails(
         manifest.findTextureIdByName(groundSplatDetailTextureName));
     requirements.requireTexture(
         manifest.findTextureIdByName(groundSplatMapTextureName));
+    requirements.requireTexture(
+        manifest.findTextureIdByName(config::turretGlowTextureName));
     renderer.waitForAssets(requirements);
 
     bool allSucceeded = true;
@@ -1166,6 +1169,12 @@ bool ApplicationTools::bakeTileThumbnails(
             continue;
         }
         try {
+            if (tileTypeIsPortal(definition.type)) {
+                RenderAssetRequirements portalRequirements;
+                portalRequirements.requireTexture(
+                    manifest.findTextureIdByName(config::turretGlowTextureName));
+                renderer.waitForAssets(portalRequirements);
+            }
             for (int warmup = 0; warmup < 2; ++warmup) {
                 SDL_PumpEvents();
                 ui.beginFrame(viewportSize, {}, false, false);

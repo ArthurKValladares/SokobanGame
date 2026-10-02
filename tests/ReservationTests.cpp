@@ -461,13 +461,21 @@ void testPortalReservations()
     TEST("portalTransitReservesBothMouthsAndLeavesTheGapFree");
     const Level level = Level::loadFromDefinition(
         {
-            .layers = { { "......", "......" }, { " CO   ", "   O  " } },
+            .layers = { { "......", "......" }, { " Co   ", "   p  " } },
             .portals = { { .cell = { 2, 0, 1 }, .color = { 1, 0, 0 } },
                          { .cell = { 3, 1, 1 }, .color = { 1, 0, 0 } } },
         },
         "portal reservations");
     const auto plan = plans::worldStep(
-        level, rules::initialState(level), MoveDirection::Right, {}, 0.2f);
+        level,
+        [&] {
+            auto state = rules::initialState(level);
+            state.players[0].cell = { 2, 0, 1 };
+            return state;
+        }(),
+        MoveDirection::Right,
+        {},
+        0.2f);
     CHECK(plan.has_value());
     if (!plan) {
         return;

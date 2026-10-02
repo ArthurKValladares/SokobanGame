@@ -1634,7 +1634,8 @@ Level Level::loadFromLayers(
     }
 
     for (const Portal& portal : level.portals_) {
-        if (level.plateAt(portal.cell) != TileType::Portal) {
+        if (!tileTypeIsPortal(
+                level.plateAt(portal.cell).value_or(TileType::Air))) {
             throw std::runtime_error(
                 "Portal metadata cell must contain a Portal tile: " + source);
         }
@@ -2018,6 +2019,30 @@ std::optional<GridPosition3> Level::portalExit(GridPosition3 cell) const
         exit = &candidate;
     }
     return exit ? std::optional<GridPosition3>(exit->cell) : std::nullopt;
+}
+
+std::optional<Level::PortalCrossing> Level::portalCrossing(
+    GridPosition3 from,
+    GridPosition direction) const
+{
+    const TileType entrance = plateAt(from).value_or(TileType::Air);
+    if (!tileTypeIsPortal(entrance) ||
+        portalEdgeOffset(entrance) != direction) {
+        return std::nullopt;
+    }
+    const auto exit = portalExit(from);
+    if (!exit || !tileTypeIsPortal(plateAt(*exit).value_or(TileType::Air))) {
+        return std::nullopt;
+    }
+    const GridPosition edge = portalEdgeOffset(*plateAt(*exit));
+    const GridPosition outgoing { -edge.x, -edge.y };
+    GridPosition rotated = direction;
+    int turns = 0;
+    while (rotated != outgoing) {
+        rotated = { -rotated.y, rotated.x };
+        ++turns;
+    }
+    return PortalCrossing { *exit, outgoing, turns };
 }
 
 std::optional<Vec3> Level::movableLinkColor(std::size_t movableIndex) const

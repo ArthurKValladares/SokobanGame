@@ -66,7 +66,10 @@ enum class TileType {
     // A moving platform authored on top of a Rail Stop (the stop is retained
     // in an @plate record). Units may occupy and ride in the cart's cell.
     Minecart,
-    Portal,
+    PortalNorth,
+    PortalEast,
+    PortalSouth,
+    PortalWest,
     Count,
 };
 
@@ -150,7 +153,10 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::RailStopNorthSouth, '!', "Rail Stop North-South", { 1.0f, 1.0f, 1.0f, 1.0f }, {}, TileProperty::Plate | TileProperty::Surface },
     TileTypeDefinition { TileType::RailStopEastWest, '_', "Rail Stop East-West", { 1.0f, 1.0f, 1.0f, 1.0f }, {}, TileProperty::Plate | TileProperty::Surface },
     TileTypeDefinition { TileType::Minecart, 'M', "Minecart", { 1.0f, 1.0f, 1.0f, 1.0f } },
-    TileTypeDefinition { TileType::Portal, 'O', "Portal", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::PortalNorth, 'O', "Portal North", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::PortalEast, 'o', "Portal East", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::PortalSouth, 'p', "Portal South", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::PortalWest, 'q', "Portal West", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -185,6 +191,21 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeIsRail(TileType type);
 [[nodiscard]] bool tileTypeIsRailStop(TileType type);
 [[nodiscard]] bool tileTypeIsMinecart(TileType type);
+[[nodiscard]] constexpr bool tileTypeIsPortal(TileType type)
+{
+    return type >= TileType::PortalNorth && type <= TileType::PortalWest;
+}
+// The edge normal points out of the owning tile; the active front faces in.
+[[nodiscard]] constexpr GridPosition portalEdgeOffset(TileType type)
+{
+    switch (type) {
+    case TileType::PortalNorth: return { 0, -1 };
+    case TileType::PortalEast: return { 1, 0 };
+    case TileType::PortalSouth: return { 0, 1 };
+    case TileType::PortalWest: return { -1, 0 };
+    default: return {};
+    }
+}
 // N/E/S/W connector bits used to validate and traverse a rail system.
 inline constexpr uint8_t railNorth = 1U << 0U;
 inline constexpr uint8_t railEast = 1U << 1U;

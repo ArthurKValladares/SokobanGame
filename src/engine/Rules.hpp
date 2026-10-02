@@ -161,6 +161,8 @@ struct StepRates {
 struct TurretRaySegment {
     GridPosition3 from {};
     GridPosition3 to {};
+    GridPosition fromEdge {};
+    GridPosition toEdge {};
     bool operator==(const TurretRaySegment&) const = default;
 };
 
@@ -180,7 +182,8 @@ struct PortalTransit {
     GridPosition3 from {};
     GridPosition3 entrance {};
     GridPosition3 exit {};
-    MoveDirection direction = MoveDirection::Up;
+    MoveDirection direction = MoveDirection::Up; // outgoing
+    MoveDirection entryDirection = MoveDirection::Up;
     bool operator==(const PortalTransit&) const = default;
 };
 
@@ -332,6 +335,8 @@ void setMirrorQuarterTurns(
 struct MirrorBeamSegment {
     GridPosition3 from {};
     GridPosition3 to {};
+    GridPosition fromEdge {};
+    GridPosition toEdge {};
 
     bool operator==(const MirrorBeamSegment&) const = default;
 };

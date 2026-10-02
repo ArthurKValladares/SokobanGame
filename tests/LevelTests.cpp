@@ -1094,9 +1094,9 @@ void testPortalMetadata()
     checkThrowsContaining(
         [&] { (void)Level::loadFromDefinition(invalid, "invalid color"); },
         "zero to one");
-    CHECK(tileTypeIsPlate(TileType::Portal));
-    CHECK(tileTypeAllowsEntity(TileType::Portal));
-    CHECK(!tileTypeIsMovableObject(TileType::Portal));
+    CHECK(tileTypeIsPlate(TileType::PortalNorth));
+    CHECK(tileTypeAllowsEntity(TileType::PortalNorth));
+    CHECK(!tileTypeIsMovableObject(TileType::PortalNorth));
 }
 
 } // namespace

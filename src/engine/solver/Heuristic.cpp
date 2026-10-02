@@ -334,14 +334,12 @@ RelaxedHeuristic::RelaxedHeuristic(const Level& level)
                     const GridPosition delta =
                         rules::directionOffset(direction);
                     const GridPosition3 destination = offset(source, delta);
-                    if (inRange(destination) &&
-                        traversable_[index(destination)]) {
-                        edges[index(source)].push_back(index(destination));
-                        if (const auto exit = level.portalExit(destination);
-                            exit && inRange(*exit) &&
-                            traversable_[index(*exit)]) {
-                            edges[index(source)].push_back(index(*exit));
+                    if (const auto crossing = level.portalCrossing(source, delta)) {
+                        if (inRange(crossing->exit) && traversable_[index(crossing->exit)]) {
+                            edges[index(source)].push_back(index(crossing->exit));
                         }
+                    } else if (inRange(destination) && traversable_[index(destination)]) {
+                        edges[index(source)].push_back(index(destination));
                     }
                 }
                 const std::optional<GridPosition3> reflected =

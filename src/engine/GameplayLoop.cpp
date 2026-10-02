@@ -63,7 +63,8 @@ void startPresentation(
         }
         session.setActionPresentation(
             actionId,
-            presentation.buildActionPresentation(source, started->legs, &level));
+            presentation.buildActionPresentation(
+                source, started->legs, &level, &started->portalTransits));
         // Re-fetched after every mutation: the setters write through the
         // scheduler, and holding a pointer across them invites a stale read.
         started = session.findInFlight(actionId);

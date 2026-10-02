@@ -118,16 +118,25 @@ float emitTurretShotParticles(
         0.0f);
     const auto segmentPoints = [&](std::size_t index) {
         const auto& segment = shot.beamSegments[index];
-        const Vec3 from = index == 0 ? muzzle : Vec3 {
-            static_cast<float>(segment.from.x) + 0.5f,
-            static_cast<float>(segment.from.y) + 0.5f,
-            static_cast<float>(segment.from.z) + config::turretMuzzleElevation,
-        };
-        const Vec3 to = index + 1 == shot.beamSegments.size() ? target : Vec3 {
-            static_cast<float>(segment.to.x) + 0.5f,
-            static_cast<float>(segment.to.y) + 0.5f,
-            static_cast<float>(segment.to.z) + config::turretMuzzleElevation,
-        };
+        const Vec3 from = index == 0 ? muzzle
+                                     : Vec3 {
+                                           static_cast<float>(segment.from.x) +
+                                               0.5f + segment.fromEdge.x * 0.5f,
+                                           static_cast<float>(segment.from.y) +
+                                               0.5f + segment.fromEdge.y * 0.5f,
+                                           static_cast<float>(segment.from.z) +
+                                               config::turretMuzzleElevation,
+                                       };
+        const Vec3 to = index + 1 == shot.beamSegments.size()
+            ? target
+            : Vec3 {
+                  static_cast<float>(segment.to.x) + 0.5f +
+                      segment.toEdge.x * 0.5f,
+                  static_cast<float>(segment.to.y) + 0.5f +
+                      segment.toEdge.y * 0.5f,
+                  static_cast<float>(segment.to.z) +
+                      config::turretMuzzleElevation,
+              };
         return std::pair { from, to };
     };
     float beamLength = shot.beamSegments.empty() ? length(target - muzzle) : 0.0f;

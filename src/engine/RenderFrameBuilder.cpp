@@ -3,14 +3,15 @@
 #include "engine/AnimationCatalog.hpp"
 #include "engine/ElevatorVisuals.hpp"
 #include "engine/GateEffect.hpp"
+#include "engine/ParticleConfig.hpp"
 #include "engine/RenderFrameParts.hpp"
 #include "engine/RotatorVisuals.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
-#include "engine/render/RenderAssetRequirements.hpp"
-#include "engine/render/SelectorRenderConfig.hpp"
 #include "engine/render/MirrorConfig.hpp"
+#include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/SceneConfig.hpp"
+#include "engine/render/SelectorRenderConfig.hpp"
 #include "engine/render/WaterGeometry.hpp"
 
 #include <algorithm>
@@ -129,11 +130,11 @@ struct MirrorRenderSegment {
     float opacity = 1.0f;
 };
 
-Vec3 toRenderPoint(GridPosition3 point)
+Vec3 toRenderPoint(GridPosition3 point, GridPosition edge = {})
 {
     return {
-        static_cast<float>(point.x),
-        static_cast<float>(point.y),
+        static_cast<float>(point.x) + edge.x * 0.5f,
+        static_cast<float>(point.y) + edge.y * 0.5f,
         static_cast<float>(point.z),
     };
 }
@@ -219,7 +220,8 @@ void appendStaticTiles(
     const AssetManifest& manifest,
     const Level& level,
     CellAt cellAt,
-    ScaleForTile scaleForTile)
+    ScaleForTile scaleForTile,
+    float timeSeconds)
 {
     for (uint32_t z = 0; z < level.depth(); ++z) {
         for (uint32_t y = 0; y < level.height(); ++y) {
@@ -270,8 +272,14 @@ void appendStaticTiles(
                         : RenderSurfaceEffect::Standard,
                 };
                 applyTileScale(renderTile, scaleForTile(cell.tile));
-                if (cell.tile == TileType::Portal) {
-                    appendPortalVisual(frame, renderTile);
+                if (tileTypeIsPortal(cell.tile)) {
+                    appendPortalVisual(
+                        frame,
+                        renderTile,
+                        cell.tile,
+                        timeSeconds,
+                        manifest.findTextureIdByName(
+                            config::turretGlowTextureName));
                 } else {
                     frame.tiles.push_back(renderTile);
                 }
@@ -672,13 +680,19 @@ void appendMirrorCoveredPlates(
                 railOrientationQuarterTurns(plate.tile).value_or(0),
         };
         applyTileScale(renderTile, input.settings.tileScale(plate.tile));
-        if (plate.tile == TileType::Portal) {
+        if (tileTypeIsPortal(plate.tile)) {
             if (const auto* portal = input.level.portalAt(cell)) {
                 renderTile.color = {
                     portal->color.x, portal->color.y, portal->color.z, 1.0f
                 };
             }
-            appendPortalVisual(frame, renderTile);
+            appendPortalVisual(
+                frame,
+                renderTile,
+                plate.tile,
+                input.presentation.worldAnimationTimeSeconds(),
+                input.manifest.findTextureIdByName(
+                    config::turretGlowTextureName));
         } else {
             frame.tiles.push_back(renderTile);
         }
@@ -767,7 +781,7 @@ void appendGameplayWorld(
                             input.projectedState, position))) *
                     (pi * 0.5f) * turnProgress;
             }
-            if (cell.tile == TileType::Portal) {
+            if (tileTypeIsPortal(cell.tile)) {
                 const Level::Portal* portal = input.level.portalAt(position);
                 const Vec3 color =
                     portal ? portal->color : Vec3 { 0.64f, 0.30f, 1.0f };
@@ -798,9 +812,8 @@ void appendGameplayWorld(
         input.manifest,
         input.level,
         staticCellAt,
-        [&](TileType tile) {
-            return input.settings.tileScale(tile);
-        });
+        [&](TileType tile) { return input.settings.tileScale(tile); },
+        input.presentation.worldAnimationTimeSeconds());
     appendMirrorCoveredPlates(frame, input, endUnlocked);
     appendDecorations(
         frame,
@@ -1440,23 +1453,25 @@ void appendMirrorEntitySegments(
          ++segmentIndex) {
         MirrorRenderSegment segment {
             .from = toRenderPoint(
-                entity.beamSegments[segmentIndex].from),
+                entity.beamSegments[segmentIndex].from,
+                entity.beamSegments[segmentIndex].fromEdge),
             .to = toRenderPoint(
-                entity.beamSegments[segmentIndex].to),
+                entity.beamSegments[segmentIndex].to,
+                entity.beamSegments[segmentIndex].toEdge),
             .opacity = previewOpacity,
         };
         if (animatePreview) {
             segment.from = interpolate(
                 segment.from,
                 toRenderPoint(
-                    matchingEndEntity
-                        ->beamSegments[segmentIndex].from),
+                    matchingEndEntity->beamSegments[segmentIndex].from,
+                    matchingEndEntity->beamSegments[segmentIndex].fromEdge),
                 progress);
             segment.to = interpolate(
                 segment.to,
                 toRenderPoint(
-                    matchingEndEntity
-                        ->beamSegments[segmentIndex].to),
+                    matchingEndEntity->beamSegments[segmentIndex].to,
+                    matchingEndEntity->beamSegments[segmentIndex].toEdge),
                 progress);
         }
         entitySegments.push_back(segment);

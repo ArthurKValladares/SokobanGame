@@ -1241,46 +1241,42 @@ bool turretHasLineOfSight(
     std::vector<TurretRaySegment>* segments = nullptr)
 {
     GridPosition3 segmentStart = turret;
+    GridPosition startEdge {};
     GridPosition3 cell = turret;
-    std::vector<GridPosition3> visited;
+    std::vector<std::pair<GridPosition3, MoveDirection>> visited;
     while (true) {
-        cell = movementTarget(cell, direction);
-        if (std::ranges::find(visited, cell) != visited.end()) {
+        const auto key = std::pair { cell, direction };
+        if (std::ranges::find(visited, key) != visited.end()) {
             return false;
         }
-        visited.push_back(cell);
+        visited.push_back(key);
+        if (const auto crossing =
+                level.portalCrossing(cell, directionOffset(direction))) {
+            if (segments) {
+                segments->push_back({ segmentStart,
+                                      cell,
+                                      startEdge,
+                                      directionOffset(direction) });
+            }
+            cell = crossing->exit;
+            direction = rotateDirection(direction, crossing->quarterTurns);
+            segmentStart = cell;
+            startEdge = portalEdgeOffset(*level.plateAt(cell));
+        } else {
+            cell = movementTarget(cell, direction);
+        }
         if (!cellAllowsEntity(level, state, cell)) {
             return false;
         }
         if (cell == target) {
             if (segments) {
-                segments->push_back({ segmentStart, cell });
+                segments->push_back({ segmentStart, cell, startEdge, {} });
             }
             return true;
         }
         if (movableAt(state, cell) || playerBlocksAt(state, cell) ||
             enemyAt(state, cell)) {
             return false;
-        }
-        if (const auto exit = level.portalExit(cell)) {
-            if (segments) {
-                segments->push_back({ segmentStart, cell });
-            }
-            cell = *exit;
-            segmentStart = cell;
-            if (!cellAllowsEntity(level, state, cell)) {
-                return false;
-            }
-            if (cell == target) {
-                if (segments) {
-                    segments->push_back({ segmentStart, cell });
-                }
-                return true;
-            }
-            if (movableAt(state, cell) || playerBlocksAt(state, cell) ||
-                enemyAt(state, cell)) {
-                return false;
-            }
         }
     }
 }
@@ -1412,24 +1408,24 @@ PortalRayPath portalRayPath(
 {
     PortalRayPath path { .destination = origin };
     GridPosition3 segmentStart = origin;
+    GridPosition startEdge {};
     for (int step = 0; step < distance; ++step) {
         auto& cell = path.destination;
-        cell = { cell.x + ray.x, cell.y + ray.y, cell.z };
+        if (const auto crossing = level.portalCrossing(cell, ray)) {
+            path.segments.push_back({ segmentStart, cell, startEdge, ray });
+            cell = crossing->exit;
+            ray = crossing->direction;
+            segmentStart = cell;
+            startEdge = portalEdgeOffset(*level.plateAt(cell));
+        } else {
+            cell = { cell.x + ray.x, cell.y + ray.y, cell.z };
+        }
         path.cells.push_back(cell);
         if (stop && cell == *stop) {
             break;
         }
-        if (const auto exit = level.portalExit(cell)) {
-            path.segments.push_back({ segmentStart, cell });
-            cell = *exit;
-            path.cells.push_back(cell);
-            segmentStart = cell;
-            if (stop && cell == *stop) {
-                break;
-            }
-        }
     }
-    path.segments.push_back({ segmentStart, path.destination });
+    path.segments.push_back({ segmentStart, path.destination, startEdge, {} });
     return path;
 }
 
@@ -1453,22 +1449,24 @@ std::optional<int> distanceAlongRay(
     // A portal can change elevation and apparent alignment, so distance is
     // the number of physical ray steps rather than a coordinate difference.
     GridPosition3 cell = origin;
-    std::vector<GridPosition3> visited;
+    std::vector<std::pair<GridPosition3, GridPosition>> visited;
     for (int distance = 1;; ++distance) {
-        cell = { cell.x + ray.x, cell.y + ray.y, cell.z };
-        if (!level.inBounds(cell) ||
-            std::ranges::find(visited, cell) != visited.end()) {
+        const auto key = std::pair { cell, ray };
+        if (std::ranges::find(visited, key) != visited.end()) {
             return std::nullopt;
         }
-        visited.push_back(cell);
+        visited.push_back(key);
+        if (const auto crossing = level.portalCrossing(cell, ray)) {
+            cell = crossing->exit;
+            ray = crossing->direction;
+        } else {
+            cell = { cell.x + ray.x, cell.y + ray.y, cell.z };
+        }
+        if (!level.inBounds(cell)) {
+            return std::nullopt;
+        }
         if (cell == target) {
             return distance;
-        }
-        if (const auto exit = level.portalExit(cell)) {
-            cell = *exit;
-            if (cell == target) {
-                return distance;
-            }
         }
     }
 }
@@ -1689,7 +1687,10 @@ std::optional<std::vector<ReflectedPath>> reflectedPathsForEntity(
             for (auto segment = input.segments.rbegin();
                  segment != input.segments.rend();
                  ++segment) {
-                branch.beamSegments.push_back({ segment->to, segment->from });
+                branch.beamSegments.push_back({ segment->to,
+                                                segment->from,
+                                                segment->toEdge,
+                                                segment->fromEdge });
             }
             branch.beamSegments.insert(
                 branch.beamSegments.end(),
@@ -2091,6 +2092,7 @@ private:
         // Persistent across micro-steps: movement budget consumed and
         // whether this entity's movement source is finished for the step.
         int consumed = 0;
+        std::optional<MoveDirection> inputDirection;
         bool done = false;
         // Whether this entity may act at all. Deliberately not folded into
         // `done`, which means "has finished acting": an entity that gets pushed
@@ -2182,12 +2184,9 @@ private:
         GridPosition3 origin,
         MoveDirection direction) const
     {
-        const GridPosition3 entrance = movementTarget(origin, direction);
-        const auto exit = level_.portalExit(entrance);
-        if (!exit) {
-            return entrance;
-        }
-        return *exit;
+        const auto crossing =
+            level_.portalCrossing(origin, directionOffset(direction));
+        return crossing ? crossing->exit : movementTarget(origin, direction);
     }
 
     [[nodiscard]] bool portalEntryClear(
@@ -2195,31 +2194,22 @@ private:
         MoveDirection direction,
         const GameState& state) const
     {
-        const auto entrance = movementTarget(from, direction);
-        return !level_.portalExit(entrance) ||
-            (!movableAt(state, entrance) && !playerBlocksAt(state, entrance) &&
-             !enemyAt(state, entrance));
+        const auto crossing =
+            level_.portalCrossing(from, directionOffset(direction));
+        return !crossing ||
+            (!movableAt(state, crossing->exit) &&
+             !playerBlocksAt(state, crossing->exit) &&
+             !enemyAt(state, crossing->exit));
     }
 
-    [[nodiscard]] bool portalLandingSupported(
-        std::size_t index,
-        GridPosition3 exit) const
+    [[nodiscard]] MoveDirection outgoingDirection(
+        GridPosition3 from,
+        MoveDirection direction) const
     {
-        if (!cellAllowsEntity(level_, after_, exit)) {
-            return false;
-        }
-        if (isPlayer(index)) {
-            return playerFallTarget(
-                       level_, after_, playerIndexForEntity(index), exit)
-                .supported;
-        }
-        if (status_[index].bardDriven) {
-            return true;
-        }
-        return isEnemy(index)
-            ? enemyFallTarget(level_, after_, enemyIndexForEntity(index), exit)
-                  .supported
-            : movableFallTarget(level_, after_, index, exit).supported;
+        const auto crossing =
+            level_.portalCrossing(from, directionOffset(direction));
+        return crossing ? rotateDirection(direction, crossing->quarterTurns)
+                        : direction;
     }
 
     [[nodiscard]] bool occupied(GridPosition3 cell) const
@@ -2233,9 +2223,10 @@ private:
         MoveDirection direction,
         GridPosition3 target) const
     {
-        const GridPosition3 entrance = movementTarget(from, direction);
-        if (target == entrance) {
-            return level_.portalExit(entrance).value_or(target);
+        const auto crossing =
+            level_.portalCrossing(from, directionOffset(direction));
+        if (crossing && target == movementTarget(from, direction)) {
+            return crossing->exit;
         }
         return target;
     }
@@ -2248,15 +2239,16 @@ private:
         MoveDirection direction,
         GridPosition3 to)
     {
-        const auto entrance = movementTarget(from, direction);
-        const auto exit = level_.portalExit(entrance);
-        if (portalTransits_ && exit && *exit == to) {
+        const auto crossing =
+            level_.portalCrossing(from, directionOffset(direction));
+        if (portalTransits_ && crossing && crossing->exit == to) {
             portalTransits_->push_back({
                 .target = { kind, resolvedEntityId(kind, id, index) },
                 .from = from,
-                .entrance = entrance,
-                .exit = *exit,
-                .direction = direction,
+                .entrance = from,
+                .exit = crossing->exit,
+                .direction = rotateDirection(direction, crossing->quarterTurns),
+                .entryDirection = direction,
             });
         }
     }
@@ -2266,8 +2258,10 @@ private:
         MoveDirection direction,
         const std::optional<MoveDirection>& sliding) const
     {
-        return level_.portalExit(movementTarget(origin, direction))
-                   .has_value() &&
+        return (level_.portalCrossing(origin, directionOffset(direction)) ||
+                level_.portalCrossing(
+                    movementTarget(origin, direction),
+                    directionOffset(direction))) &&
             (sliding.has_value() ||
              conveyorDirectionAt(level_, origin).has_value());
     }
@@ -2299,7 +2293,7 @@ private:
         MoveDirection direction) const
     {
         GridPosition3 current = playerCell(after_, playerIndex);
-        std::vector<GridPosition3> visited;
+        std::vector<std::pair<GridPosition3, MoveDirection>> visited;
         const auto inspect =
             [&](GridPosition3 cell) -> std::optional<ChainEntity> {
             if (const auto* movable = movableAt(after_, cell)) {
@@ -2315,29 +2309,26 @@ private:
             return std::nullopt;
         };
         while (true) {
-            current = movementTarget(current, direction);
-            if (!cellAllowsEntity(level_, after_, current) ||
-                std::ranges::find(visited, current) != visited.end()) {
+            const auto key = std::pair { current, direction };
+            if (std::ranges::find(visited, key) != visited.end()) {
                 return std::nullopt;
             }
-            visited.push_back(current);
+            visited.push_back(key);
+            if (const auto crossing = level_.portalCrossing(
+                    current, directionOffset(direction))) {
+                current = crossing->exit;
+                direction = rotateDirection(direction, crossing->quarterTurns);
+            } else {
+                current = movementTarget(current, direction);
+            }
+            if (!cellAllowsEntity(level_, after_, current)) {
+                return std::nullopt;
+            }
             if (const auto entity = inspect(current)) {
                 return entity;
             }
             if (playerBlocksAt(after_, current, playerIndex)) {
                 return std::nullopt;
-            }
-            if (const auto exit = level_.portalExit(current)) {
-                current = *exit;
-                if (!cellAllowsEntity(level_, after_, current)) {
-                    return std::nullopt;
-                }
-                if (const auto entity = inspect(current)) {
-                    return entity;
-                }
-                if (playerBlocksAt(after_, current, playerIndex)) {
-                    return std::nullopt;
-                }
             }
         }
     }
@@ -2367,7 +2358,7 @@ private:
         if (playerInput_) {
             if (status.consumed < rates_.playerMove) {
                 return PlayerMovementIntent {
-                    .direction = *playerInput_,
+                    .direction = status.inputDirection.value_or(*playerInput_),
                     .budget = rates_.playerMove,
                     .inputDriven = true,
                 };
@@ -2597,16 +2588,8 @@ private:
                 continue;
             }
             for (std::size_t j = i + 1; j < status_.size(); ++j) {
-                const auto entryI = status_[i].intent
-                    ? movementTarget(cellOf(i), *status_[i].intent)
-                    : *status_[i].target;
-                const auto entryJ = status_[j].intent
-                    ? movementTarget(cellOf(j), *status_[j].intent)
-                    : status_[j].target.value_or(GridPosition3 {});
                 if (status_[j].target &&
-                    (*status_[i].target == *status_[j].target ||
-                     entryI == entryJ || entryI == *status_[j].target ||
-                     entryJ == *status_[i].target)) {
+                    *status_[i].target == *status_[j].target) {
                     if (status_[i].bardDriven != status_[j].bardDriven) {
                         Status& follower = status_[i].bardDriven
                             ? status_[i]
@@ -2768,23 +2751,11 @@ private:
         const MoveDirection direction = *status.intent;
         const GridPosition3 target = *status.target;
 
-        const auto entrance = movementTarget(cellOf(index), direction);
-        const auto exit = level_.portalExit(entrance);
-        if (!status.contested && exit && target == *exit) {
-            if (occupied(*exit)) {
-                return false;
-            }
-            if (occupied(entrance)) {
-                if (!portalLandingSupported(index, *exit)) {
-                    cancelAndFinish(index, true);
-                    status.resolved = true;
-                    return true;
-                }
-                status.target = entrance;
-                const bool resolved = resolveMovable(index, anyMovement);
-                status.target = target;
-                return resolved;
-            }
+        const auto crossing =
+            level_.portalCrossing(cellOf(index), directionOffset(direction));
+        if (!status.contested && crossing && target == crossing->exit &&
+            occupied(crossing->exit)) {
+            return false;
         }
 
         if (status.contested) {
@@ -2845,23 +2816,11 @@ private:
         const MoveDirection direction = *status.intent;
         const GridPosition3 target = *status.target;
 
-        const auto entrance = movementTarget(cellOf(entityIndex), direction);
-        const auto exit = level_.portalExit(entrance);
-        if (!status.contested && exit && target == *exit) {
-            if (occupied(*exit)) {
-                return false;
-            }
-            if (occupied(entrance)) {
-                if (!portalLandingSupported(entityIndex, *exit)) {
-                    cancelAndFinish(entityIndex, true);
-                    status.resolved = true;
-                    return true;
-                }
-                status.target = entrance;
-                const bool resolved = resolveEnemy(entityIndex, anyMovement);
-                status.target = target;
-                return resolved;
-            }
+        const auto crossing = level_.portalCrossing(
+            cellOf(entityIndex), directionOffset(direction));
+        if (!status.contested && crossing && target == crossing->exit &&
+            occupied(crossing->exit)) {
+            return false;
         }
 
         if (status.contested) {
@@ -2930,23 +2889,12 @@ private:
         const MoveDirection direction = *status.intent;
         const GridPosition3 target = *status.target;
 
-        const auto entrance = movementTarget(cellOf(entityIndex), direction);
-        const auto exit = level_.portalExit(entrance);
-        if (!status.contested && exit && target == *exit) {
-            if (occupied(*exit)) {
-                return false;
-            }
-            if (occupied(entrance)) {
-                if (!portalLandingSupported(entityIndex, *exit)) {
-                    cancelAndFinish(entityIndex, true);
-                    status.resolved = true;
-                    return true;
-                }
-                status.target = entrance;
-                const bool resolved = resolvePlayer(entityIndex, anyMovement);
-                status.target = target;
-                return resolved;
-            }
+        const auto crossing = level_.portalCrossing(
+            cellOf(entityIndex), directionOffset(direction));
+        if (!status.contested && !status.witchSwapTarget && crossing &&
+            target == crossing->exit &&
+            occupied(crossing->exit)) {
+            return false;
         }
 
         if (status.contested) {
@@ -3114,7 +3062,8 @@ private:
             const bool druid = after_.players[playerIndex].character.value_or(
                 level_.character()) == CharacterType::Druid;
             const bool occupiedPortalExit =
-                level_.portalExit(movementTarget(target, direction)).has_value() &&
+                level_.portalCrossing(target, directionOffset(direction))
+                    .has_value() &&
                 occupied(pushTarget);
             if (status.inputDriven && !druid &&
                 !status_[blockerIndex].movedThisMicro &&
@@ -3192,6 +3141,9 @@ private:
                 return {};
             }
             chain.push_back(*entity);
+            if (level_.portalCrossing(cell, directionOffset(direction))) {
+                break;
+            }
             cell = movementTarget(cell, direction);
         }
         return chain;
@@ -3303,6 +3255,8 @@ private:
             after_.enemies[enemyIndex].cell,
             direction,
             after_.enemies[enemyIndex].sliding);
+        const MoveDirection outgoing =
+            outgoingDirection(after_.enemies[enemyIndex].cell, direction);
         recordPortalTransit(
             EntityKind::Enemy,
             after_.enemies[enemyIndex].id,
@@ -3310,6 +3264,7 @@ private:
             after_.enemies[enemyIndex].cell,
             direction,
             destination);
+        direction = outgoing;
         after_.enemies[enemyIndex].cell = destination;
         const FallResult fall = preserveElevation
             ? FallResult { .cell = destination, .supported = true }
@@ -3736,6 +3691,8 @@ private:
             after_.movables[index].cell,
             direction,
             after_.movables[index].sliding);
+        const MoveDirection outgoing =
+            outgoingDirection(after_.movables[index].cell, direction);
         recordPortalTransit(
             EntityKind::Movable,
             after_.movables[index].id,
@@ -3744,6 +3701,12 @@ private:
             direction,
             target);
         movableMovedDirections_[index] = direction;
+        if (const auto crossing = level_.portalCrossing(
+                after_.movables[index].cell, directionOffset(direction))) {
+            after_.movables[index].quarterTurns = addQuarterTurns(
+                after_.movables[index].quarterTurns, crossing->quarterTurns);
+        }
+        direction = outgoing;
         after_.movables[index].cell = target;
         const FallResult fall = preserveElevation
             ? FallResult { .cell = target, .supported = true }
@@ -3775,6 +3738,8 @@ private:
             playerCell(after_, playerIndex),
             direction,
             playerSliding(after_, playerIndex));
+        const MoveDirection outgoing =
+            outgoingDirection(playerCell(after_, playerIndex), direction);
         recordPortalTransit(
             EntityKind::Player,
             after_.players[playerIndex].id,
@@ -3782,6 +3747,8 @@ private:
             playerCell(after_, playerIndex),
             direction,
             target);
+        direction = outgoing;
+        status_[entityIndex].inputDirection = direction;
         playerCell(after_, playerIndex) = target;
         const FallResult fall =
             playerFallTarget(level_, after_, playerIndex, target);
@@ -3831,9 +3798,8 @@ private:
             return;
         }
 
-        // Leaving a portal can pull the follower through its paired mouth.
-        // The player's vacated cell is free, but the remote exit may be
-        // blocked.
+        // A follower enters the vacated tile normally; only crossing its
+        // own active edge can transport it to a remote exit.
         const GridPosition3 pulledFrom = pulled->movable
             ? after_.movables[pulled->index].cell
             : after_.enemies[pulled->index].cell;

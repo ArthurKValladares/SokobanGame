@@ -308,7 +308,8 @@ private:
         std::vector<GameState> legs = {},
         std::vector<plans::TurretShotCue> turretShots = {},
         std::size_t causalGroup = 0,
-        ActionDeferral deferral = {});
+        ActionDeferral deferral = {},
+        std::vector<plans::PlannedAction::PortalCue> portalTransits = {});
     [[nodiscard]] bool actionAdmissionAllows(const Action& action) const;
     [[nodiscard]] bool actionAdmissionAllows(
         const std::vector<ActionScheduler::Pending>& actions) const;
@@ -318,7 +319,9 @@ private:
         const Action& action,
         const std::vector<GameState>& legs,
         const std::vector<plans::TurretShotCue>& turretShots,
-        ActionDeferral deferral) const;
+        ActionDeferral deferral,
+        const std::vector<plans::PlannedAction::PortalCue>& portalTransits = {})
+        const;
     // Drops entities some action in flight is already moving.
     //
     // Nothing may plan for them: authoritative state does not change until an

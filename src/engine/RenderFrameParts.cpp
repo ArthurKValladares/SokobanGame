@@ -76,41 +76,91 @@ void appendLinkedObjectAura(
 
 void appendPortalVisual(
     RenderFrameData& frame,
-    const RenderFrameData::Tile& tile)
+    const RenderFrameData::Tile& tile,
+    TileType type,
+    float timeSeconds,
+    RenderTexture glowTexture)
 {
-    // A hollow frame reads as an entrance even beneath a unit. All pieces
-    // share the same pick cell; geometry needs no external model asset.
-    constexpr float rim = 0.12f;
-    for (int side = 0; side < 4; ++side) {
+    const GridPosition edge = portalEdgeOffset(type);
+    const Vec3 normal { static_cast<float>(edge.x),
+                        static_cast<float>(edge.y),
+                        0 };
+    const Vec3 tangent { -normal.y, normal.x, 0 };
+    const Vec3 center {
+        static_cast<float>(tile.cell.x) + 0.5f + normal.x * 0.5f,
+        static_cast<float>(tile.cell.y) + 0.5f + normal.y * 0.5f,
+        tile.baseElevation + 0.48f,
+    };
+    // A slim upright aperture on the actual grid edge, with a dark back.
+    // The five pieces retain the owning tile's pick cell in every view.
+    for (int side = 0; side < 5; ++side) {
+        const bool post = side < 2;
+        const float along = post ? (side == 0 ? -0.40f : 0.40f) : 0.0f;
+        const float vertical = side == 2 ? -0.43f : side == 3 ? 0.43f : 0.0f;
+        const Vec3 at = center + tangent * along + Vec3 { 0, 0, vertical };
+        const float width = post ? 0.07f : 0.87f;
+        const float height = post || side == 4 ? 0.90f : 0.07f;
+        const float depth = side == 4 ? 0.025f : 0.075f;
         RenderFrameData::Tile part = tile;
         part.model = cubeModel;
-        part.height = 0.08f;
+        part.size = edge.x == 0 ? Vec2 { width, depth } : Vec2 { depth, width };
+        part.position = { at.x - part.size.x * 0.5f,
+                          at.y - part.size.y * 0.5f };
+        part.baseElevation = at.z - height * 0.5f;
+        part.height = height;
+        part.color = side == 4 ? shade(tile.color, 0.09f) : tile.color;
         part.showGrid = false;
-        if (side < 2) {
-            part.size.y *= rim;
-            if (side == 1) {
-                part.position.y += tile.size.y * (1.0f - rim);
-            }
-        } else {
-            part.position.y += tile.size.y * rim;
-            part.size.y *= 1.0f - 2.0f * rim;
-            part.size.x *= rim;
-            if (side == 3) {
-                part.position.x += tile.size.x * (1.0f - rim);
-            }
-        }
         frame.tiles.push_back(part);
     }
-    RenderFrameData::Tile center = tile;
-    center.model = cubeModel;
-    center.position.x += tile.size.x * rim;
-    center.position.y += tile.size.y * rim;
-    center.size = { tile.size.x * (1.0f - 2.0f * rim),
-                    tile.size.y * (1.0f - 2.0f * rim) };
-    center.height = 0.015f;
-    center.color = shade(tile.color, 0.12f);
-    center.showGrid = false;
-    frame.tiles.push_back(center);
+    if (tile.pickOnly) {
+        return;
+    }
+    // Sparks spiral into an ellipse on the front (inside the owning tile).
+    // Analytic trajectories keep gameplay, editor, thumbnails and scrubbing
+    // consistent without spawning a separate long-lived particle emitter.
+    const float seed =
+        tile.cell.x * 0.37f + tile.cell.y * 0.61f + tile.cell.z * 0.19f;
+    for (int glow = 0; glow < 48; ++glow) {
+        const float angle = glow * (2.0f * pi / 48.0f) + timeSeconds * 1.5f;
+        frame.particles.push_back({
+            .position = center - normal * 0.045f +
+                tangent * (std::cos(angle) * 0.37f) +
+                Vec3 { 0, 0, std::sin(angle) * 0.39f },
+            .size = { 0.085f, 0.12f },
+            .billboardAlignment = tangent * -std::sin(angle) +
+                Vec3 { 0, 0, std::cos(angle) },
+            .billboardAlignmentUsesY = true,
+            .color = { tile.color.x, tile.color.y, tile.color.z, tile.color.w * 0.8f },
+            .emissiveStrength = 3.5f,
+            .texture = glowTexture,
+        });
+    }
+    for (int spark = 0; spark < 64; ++spark) {
+        const float cycle = spark / 64.0f + timeSeconds * 0.42f + seed;
+        const float phase = cycle - std::floor(cycle);
+        const float angle =
+            spark * 2.399963f + timeSeconds * 4.0f + phase * 5.0f;
+        const float radius = 1.0f + (1.0f - phase) * 0.30f;
+        const float front = 0.04f + (1.0f - phase) * 0.24f;
+        const Vec3 position = center - normal * front +
+            tangent * (std::cos(angle) * 0.36f * radius) +
+            Vec3 { 0, 0, std::sin(angle) * 0.34f * radius };
+        const float size = 0.04f + phase * 0.035f;
+        frame.particles.push_back({
+            .position = position,
+            .size = { size, size * 2.8f },
+            .rotationRadians = angle,
+            .billboardAlignment = tangent * -std::sin(angle) +
+                Vec3 { 0, 0, std::cos(angle) },
+            .billboardAlignmentUsesY = true,
+            .color = { tile.color.x,
+                       tile.color.y,
+                       tile.color.z,
+                       tile.color.w * (0.3f + phase * 0.65f) },
+            .emissiveStrength = 2.5f,
+            .texture = glowTexture,
+        });
+    }
 }
 
 uint32_t facingQuarterTurns(MoveDirection direction)

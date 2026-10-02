@@ -1326,7 +1326,7 @@ bool LevelEditor::moveObject(GridPosition3 destination)
         std::ranges::find(before.portals, move->source, &Level::Portal::cell);
     const auto newPortal =
         std::ranges::find(document_.portals, destination, &Level::Portal::cell);
-    if (move->tile == TileType::Portal && oldPortal != before.portals.end() &&
+    if (tileTypeIsPortal(move->tile) && oldPortal != before.portals.end() &&
         newPortal != document_.portals.end()) {
         newPortal->color = oldPortal->color;
     }
@@ -1589,7 +1589,7 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             // gives it the active link color. This is how an ordinary object
             // first joins a linked group.
             const bool linkable = tile == TileType::PressurePlate ||
-                tile == TileType::Gate || tile == TileType::Portal ||
+                tile == TileType::Gate || tileTypeIsPortal(tile) ||
                 tileTypeIsRotator(tile) || tile == TileType::Elevator ||
                 tileTypeIsMinecart(tile) || tileTypeIsMovableObject(tile);
             const std::optional<Vec3> color = tileTypeIsMovableObject(tile)
@@ -1681,12 +1681,12 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             return rotator.cell == translatedPosition;
         });
     }
-    if (previousPlate == TileType::Portal && paintedPlate != TileType::Portal) {
+    if (tileTypeIsPortal(previousPlate) && !tileTypeIsPortal(paintedPlate)) {
         std::erase_if(document_.portals, [&](const Level::Portal& portal) {
             return portal.cell == translatedPosition;
         });
     }
-    if (paintedPlate == TileType::Portal && previousPlate != TileType::Portal) {
+    if (tileTypeIsPortal(paintedPlate) && !tileTypeIsPortal(previousPlate)) {
         document_.portals.push_back(
             { .cell = translatedPosition, .color = activeLinkColor_ });
         std::ranges::sort(document_.portals, {}, [](const auto& portal) {
@@ -2376,7 +2376,7 @@ bool LevelEditor::setLinkColor(GridPosition3 cell, Vec3 color)
         : linkColorAt(cell);
     const bool unlinkedObject = movableObject && !current;
     const bool unlinkedPortal =
-        !movableObject && tileAt(cell) == TileType::Portal && !current;
+        !movableObject && tileTypeIsPortal(tileAt(cell)) && !current;
     if (!current && !unlinkedObject && !unlinkedPortal) {
         document_.status =
             "Only pressure plates, devices and movable objects have link colors.";
@@ -2463,7 +2463,8 @@ bool LevelEditor::paintLinkColorAt(GridPosition3 pickedCell)
             document_.layers[static_cast<std::size_t>(target->z)]
                 [static_cast<std::size_t>(target->y)]
                 [static_cast<std::size_t>(target->x)]).value_or(TileType::Air));
-    const bool portal = target && documentPlateAt(*target) == TileType::Portal;
+    const bool portal = target &&
+        tileTypeIsPortal(documentPlateAt(*target).value_or(TileType::Air));
     if (!target || (!linkColorAt(*target) && !movableObject && !portal)) {
         document_.status =
             "The link-color brush paints pressure plates, gates, rotators, "

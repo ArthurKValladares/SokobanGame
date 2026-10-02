@@ -137,7 +137,7 @@ void testBakeFrameStandsTheTileOnAGroundBed()
             tileThumbnails::bedSize * tileThumbnails::bedSize;
         const std::size_t expected = definition.type == TileType::Ground
             ? bedCells
-            : bedCells + (definition.type == TileType::Portal ? 5 : 1);
+            : bedCells + (tileTypeIsPortal(definition.type) ? 5 : 1);
         CHECK(frame.tiles.size() == expected);
 
         // Every tile counts toward the camera fit. This is what makes the
@@ -161,10 +161,14 @@ void testBakeFrameStandsTheTileOnAGroundBed()
         const auto centre = static_cast<float>(tileThumbnails::bedCentre);
         const float midX = subject.position.x + subject.size.x * 0.5f;
         const float midY = subject.position.y + subject.size.y * 0.5f;
-        CHECK(std::abs(midX - (centre + 0.5f)) < 0.001f);
-        CHECK(std::abs(midY - (centre + 0.5f)) < 0.001f);
+        const auto edge = portalEdgeOffset(definition.type);
+        CHECK(std::abs(midX - (centre + 0.5f + edge.x * 0.5f)) < 0.001f);
+        CHECK(std::abs(midY - (centre + 0.5f + edge.y * 0.5f)) < 0.001f);
         // Standing on the bed's surface, not sunk into or floating above it.
-        CHECK(subject.baseElevation == 0.0f);
+        CHECK(
+            std::abs(
+                subject.baseElevation -
+                (tileTypeIsPortal(definition.type) ? 0.03f : 0.0f)) < 0.001f);
     }
 }
 
@@ -267,11 +271,19 @@ void testSubjectMatchesTheTileTheEditorDraws()
             },
             testManifest(),
             testSettings());
-        if (definition.type == TileType::Portal) {
-            // Composite entrances have four raised rims around a dark center.
+        if (tileTypeIsPortal(definition.type)) {
+            // Composite edge entrances have an upright frame and a dark back.
             CHECK(frame.tiles.size() >= 5);
-            CHECK(subject.height < frame.tiles[frame.tiles.size() - 2].height);
+            CHECK(subject.height > 0.8f);
+            CHECK(frame.particles.size() == 112);
             CHECK(subject.color.x < expected.color.x);
+            const GridPosition edge = portalEdgeOffset(definition.type);
+            const float edgeX = subject.cell.x + 0.5f + edge.x * 0.5f;
+            const float edgeY = subject.cell.y + 0.5f + edge.y * 0.5f;
+            for (const auto& particle : frame.particles) {
+                CHECK((particle.position.x - edgeX) * edge.x +
+                    (particle.position.y - edgeY) * edge.y < 0.0f);
+            }
             continue;
         }
         CHECK(subject.height == expected.height);

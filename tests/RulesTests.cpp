@@ -2582,197 +2582,262 @@ void testShovingAnEnemyPullsItsVictimIntoTheClosure()
     CHECK(after.players[1].dead);
 }
 
-Level portalLevel(
-    Level::LayerRows layers,
-    GridPosition3 first = { 2, 0, 1 },
-    GridPosition3 second = { 3, 1, 1 })
+Level::Definition edgePortalDefinition(
+    TileType entrance = TileType::PortalEast,
+    TileType exit = TileType::PortalSouth)
 {
-    return Level::loadFromDefinition(
-        {
-            .layers = std::move(layers),
-            .portals = { { .cell = first, .color = { 0.2f, 0.4f, 1.0f } },
-                         { .cell = second, .color = { 0.2001f, 0.4f, 1.0f } } },
-        },
-        "portal rules");
+    Level::Definition definition;
+    definition.layers = {
+        std::vector<std::string>(8, "........"),
+        std::vector<std::string>(8, "        "),
+        std::vector<std::string>(8, "        "),
+        std::vector<std::string>(8, "........"),
+        std::vector<std::string>(8, "        "),
+    };
+    definition.layers[1][0][0] = 'C';
+    definition.layers[1][2][2] = tileTypeToChar(entrance);
+    definition.layers[4][5][5] = tileTypeToChar(exit);
+    definition.portals = {
+        { .cell = { 2, 2, 1 }, .color = { 0.2f, 0.4f, 1.0f } },
+        { .cell = { 5, 5, 4 }, .color = { 0.2001f, 0.4f, 1.0f } },
+    };
+    return definition;
 }
 
 void testPortals()
 {
-    TEST("portalsPreserveMovementAndMomentum");
-    const Level walk =
-        portalLevel({ { "......", "......" }, { " CO   ", "   O  " } });
-    const GameState start = rules::initialState(walk);
-    const auto arrival =
-        rules::stepWithEvents(walk, start, MoveDirection::Right);
-    CHECK(arrival.state.players[0].cell == cell(3, 1, 1));
-    CHECK(!arrival.state.players[0].sliding);
-    CHECK(arrival.portalTransits.size() == 1);
-    if (!arrival.portalTransits.empty()) {
-        CHECK(arrival.portalTransits[0].entrance == cell(2, 0, 1));
-        CHECK(arrival.portalTransits[0].exit == cell(3, 1, 1));
-        CHECK(arrival.portalTransits[0].direction == MoveDirection::Right);
+    TEST("edgePortalsOnlyActivateFromTheFrontInEveryOrientation");
+    const std::array types { TileType::PortalNorth,
+                             TileType::PortalEast,
+                             TileType::PortalSouth,
+                             TileType::PortalWest };
+    const std::array directions { MoveDirection::Up,
+                                  MoveDirection::Right,
+                                  MoveDirection::Down,
+                                  MoveDirection::Left };
+    for (std::size_t entry = 0; entry < types.size(); ++entry) {
+        for (std::size_t exit = 0; exit < types.size(); ++exit) {
+            const Level level = Level::loadFromDefinition(
+                edgePortalDefinition(types[entry], types[exit]),
+                "oriented portals");
+            auto state = rules::initialState(level);
+            state.players[0].cell = { 2, 2, 1 };
+            CHECK(rules::step(level, state) == state);
+            const auto crossed =
+                rules::stepWithEvents(level, state, directions[entry]);
+            CHECK(crossed.state.players[0].cell == cell(5, 5, 4));
+            CHECK(!crossed.state.players[0].sliding);
+            CHECK(crossed.portalTransits.size() == 1);
+            const MoveDirection outgoing = directions[(exit + 2) % 4];
+            if (!crossed.portalTransits.empty()) {
+                CHECK(crossed.portalTransits[0].entrance == cell(2, 2, 1));
+                CHECK(crossed.portalTransits[0].exit == cell(5, 5, 4));
+                CHECK(
+                    crossed.portalTransits[0].entryDirection ==
+                    directions[entry]);
+                CHECK(crossed.portalTransits[0].direction == outgoing);
+            }
+            CHECK(rules::step(level, crossed.state) == crossed.state);
+            const auto sideways =
+                rules::step(level, state, directions[(entry + 1) % 4]);
+            CHECK(
+                sideways.players[0].cell ==
+                rules::movementTarget(
+                    state.players[0].cell, directions[(entry + 1) % 4]));
+            state.players[0].cell =
+                rules::movementTarget({ 2, 2, 1 }, directions[entry]);
+            const auto fromBack = rules::stepWithEvents(
+                level, state, directions[(entry + 2) % 4]);
+            CHECK(fromBack.state.players[0].cell == cell(2, 2, 1));
+            CHECK(fromBack.portalTransits.empty());
+            state.players[0].cell = { 2, 2, 1 };
+            state.players[0].sliding = directions[entry];
+            auto sliding = rules::step(level, state);
+            CHECK(sliding.players[0].cell == cell(5, 5, 4));
+            CHECK(sliding.players[0].sliding == outgoing);
+            const auto fast =
+                rules::step(level, state, std::nullopt, { .slide = 3 });
+            CHECK(
+                fast.players[0].cell ==
+                rules::movementTarget({ 5, 5, 4 }, outgoing));
+            CHECK(!fast.players[0].sliding);
+            const auto walking = rules::step(level, rules::initialState(level));
+            CHECK(walking.players[0].cell == cell(0, 0, 1));
+            state.players[0].sliding.reset();
+            const auto fastWalk = rules::step(
+                level, state, directions[entry], { .playerMove = 3 });
+            CHECK(
+                fastWalk.players[0].cell ==
+                rules::movementTarget(
+                    rules::movementTarget({ 5, 5, 4 }, outgoing), outgoing));
+            state.movables.push_back(
+                { .type = TileType::Rock, .cell = { 5, 5, 4 } });
+            CHECK(rules::step(level, state, directions[entry]) == state);
+            auto rayState = rules::initialState(level);
+            rayState.movables.push_back(
+                { .type = TileType::TurretNorth,
+                  .cell = { 2, 2, 1 },
+                  .quarterTurns = static_cast<uint8_t>(entry) });
+            rayState.players[0].cell = rules::movementTarget(
+                rules::movementTarget({ 5, 5, 4 }, outgoing), outgoing);
+            CHECK(
+                rules::step(level, rayState, directions[exit]).players[0].dead);
+        }
     }
-    CHECK(rules::step(walk, arrival.state) == arrival.state);
-    CHECK(
-        rules::step(walk, arrival.state, MoveDirection::Right)
-            .players[0]
-            .cell == cell(4, 1, 1));
-    auto blocked = start;
-    blocked.movables.push_back({ .cell = { 3, 1, 1 } });
-    CHECK(rules::step(walk, blocked, MoveDirection::Right) == blocked);
-    auto occluded = start;
-    occluded.movables.push_back({ .cell = { 2, 0, 1 } });
-    const auto pushedMouth = rules::step(walk, occluded, MoveDirection::Right);
-    CHECK(pushedMouth.players[0].cell == cell(3, 1, 1));
-    CHECK(pushedMouth.movables[0].cell == cell(3, 0, 1));
 
-    const Level ice =
-        portalLevel({ { "......", "......" }, { "CIO   ", "   O #" } });
-    auto iceState =
-        rules::step(ice, rules::initialState(ice), MoveDirection::Right);
-    CHECK(iceState.players[0].cell == cell(1, 0, 1));
-    CHECK(iceState.movables[0].cell == cell(3, 1, 1));
-    CHECK(iceState.movables[0].sliding == MoveDirection::Right);
-    auto blockedPush = rules::initialState(ice);
-    blockedPush.enemies.push_back({ .cell = { 3, 1, 1 } });
-    CHECK(rules::step(ice, blockedPush, MoveDirection::Right) == blockedPush);
-    iceState = rules::step(ice, iceState);
-    CHECK(iceState.movables[0].cell == cell(4, 1, 1));
-    CHECK(!iceState.movables[0].sliding);
+    TEST("pushedIceAndTurretsRotateThroughPortalEdges");
+    const auto definition = edgePortalDefinition();
+    const Level level = Level::loadFromDefinition(definition, "push portals");
+    for (const TileType type :
+         { TileType::Rock, TileType::Ice, TileType::TurretEast }) {
+        auto state = rules::initialState(level);
+        state.players[0].cell = { 1, 2, 1 };
+        state.movables.push_back({ .type = type, .cell = { 2, 2, 1 } });
+        const auto pushed =
+            rules::stepWithEvents(level, state, MoveDirection::Right);
+        CHECK(pushed.state.players[0].cell == cell(2, 2, 1));
+        CHECK(pushed.state.movables[0].cell == cell(5, 5, 4));
+        CHECK(pushed.portalTransits.size() == 1);
+        if (type == TileType::Ice) {
+            CHECK(pushed.state.movables[0].sliding == MoveDirection::Up);
+            CHECK(
+                rules::step(level, pushed.state).movables[0].cell ==
+                cell(5, 4, 4));
+        }
+        if (type == TileType::TurretEast) {
+            CHECK(
+                rules::turretDirection(pushed.state.movables[0]) ==
+                MoveDirection::Up);
+        }
+        state.movables.push_back(
+            { .type = TileType::Rock, .cell = { 5, 5, 4 } });
+        CHECK(rules::step(level, state, MoveDirection::Right) == state);
+    }
 
-    auto slide = start;
-    slide.players[0].sliding = MoveDirection::Right;
-    slide = rules::step(walk, slide);
-    CHECK(slide.players[0].cell == cell(3, 1, 1));
-    CHECK(slide.players[0].sliding == MoveDirection::Right);
-    slide = rules::step(walk, slide);
-    CHECK(slide.players[0].cell == cell(4, 1, 1));
-    CHECK(!slide.players[0].sliding);
-    auto fast = start;
-    fast.players[0].sliding = MoveDirection::Right;
-    fast = rules::step(walk, fast, std::nullopt, { .slide = 3 });
-    CHECK(fast.players[0].cell == cell(4, 1, 1));
-
+    TEST("conveyorMomentumReachesAndCrossesTheEdge");
+    auto beltDefinition = definition;
+    beltDefinition.layers[1][2][1] = '>';
     const Level belt =
-        portalLevel({ { "......", "......" }, { "C>O   ", "   O  " } });
+        Level::loadFromDefinition(beltDefinition, "belt portals");
     auto rider = rules::initialState(belt);
-    rider.players[0].cell = { 1, 0, 1 };
+    rider.players[0].cell = { 1, 2, 1 };
     rider = rules::step(belt, rider);
-    CHECK(rider.players[0].cell == cell(3, 1, 1));
+    CHECK(rider.players[0].cell == cell(2, 2, 1));
     CHECK(rider.players[0].sliding == MoveDirection::Right);
+    rider = rules::step(belt, rider);
+    CHECK(rider.players[0].cell == cell(5, 5, 4));
+    CHECK(rider.players[0].sliding == MoveDirection::Up);
 
-    const Level enemy =
-        portalLevel({ { "......", "......" }, { "CNO   ", "   O  " } });
-    const auto shoved =
-        rules::step(enemy, rules::initialState(enemy), MoveDirection::Right);
-    CHECK(shoved.enemies[0].cell == cell(3, 1, 1));
-    CHECK(!shoved.players[0].dead);
+    TEST("knightChainStopsAtPortalAndDruidFollowerEntersVacatedTile");
+    auto knight = rules::initialState(level);
+    knight.players[0].cell = { 0, 2, 1 };
+    knight.players[0].character = CharacterType::Knight;
+    knight.movables.push_back({ .cell = { 1, 2, 1 } });
+    knight.movables.push_back({ .cell = { 2, 2, 1 } });
+    knight.movables.push_back({ .cell = { 3, 2, 1 } });
+    const auto chain = rules::step(level, knight, MoveDirection::Right);
+    CHECK(chain.players[0].cell == cell(1, 2, 1));
+    CHECK(chain.movables[0].cell == cell(2, 2, 1));
+    CHECK(chain.movables[1].cell == cell(5, 5, 4));
+    CHECK(chain.movables[2].cell == cell(3, 2, 1));
+    auto druid = rules::initialState(level);
+    druid.players[0].cell = { 2, 2, 1 };
+    druid.players[0].character = CharacterType::Druid;
+    druid.movables.push_back({ .cell = { 1, 2, 1 } });
+    const auto pulled = rules::step(level, druid, MoveDirection::Right);
+    CHECK(pulled.players[0].cell == cell(5, 5, 4));
+    CHECK(pulled.movables[0].cell == cell(2, 2, 1));
+    auto enemy = rules::initialState(level);
+    enemy.players[0].cell = { 1, 2, 1 };
+    enemy.enemies.push_back({ .cell = { 2, 2, 1 } });
+    CHECK(
+        rules::step(level, enemy, MoveDirection::Right).enemies[0].cell ==
+        cell(5, 5, 4));
 
-    TEST("turretRaysTraversePortalsAndRespectMouthBlockers");
-    const Level turret =
-        portalLevel({ { "......", "......" }, { "e O   ", "C  O  " } });
-    auto exposed = rules::initialState(turret);
-    exposed.players[0].cell = { 4, 1, 1 };
+    TEST("turretSightlinesTurnAtFrontEdgesAndRespectOccupants");
+    auto exposed = rules::initialState(level);
+    exposed.movables.push_back(
+        { .type = TileType::TurretEast, .cell = { 0, 2, 1 } });
+    exposed.players[0].cell = { 5, 3, 4 };
     const auto shot =
-        rules::stepWithEvents(turret, exposed, MoveDirection::Right);
+        rules::stepWithEvents(level, exposed, MoveDirection::Down);
     CHECK(shot.state.players[0].dead);
     CHECK(shot.turretShots.size() == 1);
     if (!shot.turretShots.empty()) {
         CHECK(shot.turretShots[0].beamSegments.size() == 2);
+        CHECK(shot.turretShots[0].beamSegments[0].toEdge == GridPosition({ 1, 0 }));
+        CHECK(shot.turretShots[0].beamSegments[1].fromEdge == GridPosition({ 0, 1 }));
     }
-    exposed.movables.push_back({ .cell = { 2, 0, 1 } });
-    CHECK(!rules::step(turret, exposed, MoveDirection::Right).players[0].dead);
+    exposed.movables.push_back({ .cell = { 2, 2, 1 } });
+    CHECK(!rules::step(level, exposed, MoveDirection::Down).players[0].dead);
+    exposed.movables.back().cell = { 5, 5, 4 };
+    CHECK(!rules::step(level, exposed, MoveDirection::Down).players[0].dead);
+    exposed.movables.pop_back();
+    exposed.movables[0].cell = { 3, 2, 1 };
+    exposed.movables[0].type = TileType::TurretWest;
+    CHECK(!rules::step(level, exposed, MoveDirection::Down).players[0].dead);
+    exposed.players[0].cell = { 1, 1, 1 };
+    CHECK(rules::step(level, exposed, MoveDirection::Down).players[0].dead);
 
-    TEST("knightChainsAndDruidPullsTraversePortalsAtomically");
-    const Level knight = portalLevel(
-        { { "......", "......" }, { "KRRO  ", "   O  " } }, { 3, 0, 1 });
-    const auto chain =
-        rules::step(knight, rules::initialState(knight), MoveDirection::Right);
-    CHECK(chain.players[0].cell == cell(1, 0, 1));
-    CHECK(chain.movables[0].cell == cell(2, 0, 1));
-    CHECK(chain.movables[1].cell == cell(3, 1, 1));
-    const Level druid =
-        portalLevel({ { "......", "......" }, { "URO   ", "   O  " } });
-    auto pulling = rules::initialState(druid);
-    pulling.players[0].cell = { 2, 0, 1 };
-    const auto pulled = rules::step(druid, pulling, MoveDirection::Right);
-    CHECK(pulled.players[0].cell == cell(3, 0, 1));
-    CHECK(pulled.movables[0].cell == cell(3, 1, 1));
-    pulling.movables.push_back({ .cell = { 3, 1, 1 } });
-    const auto obstructedPull =
-        rules::step(druid, pulling, MoveDirection::Right);
-    CHECK(obstructedPull.players[0].cell == cell(3, 0, 1));
-    CHECK(obstructedPull.movables[0].cell == cell(1, 0, 1));
+    TEST("witchSightlinesTurnThroughFrontEdges");
+    auto witch = rules::initialState(level);
+    witch.players[0].cell = { 1, 2, 1 };
+    witch.players[0].character = CharacterType::Witch;
+    witch.movables.push_back({ .cell = { 5, 3, 4 } });
+    const auto swapped = rules::step(level, witch, MoveDirection::Right);
+    CHECK(swapped.players[0].cell == cell(5, 3, 4));
+    CHECK(swapped.movables[0].cell == cell(1, 2, 1));
 
-    TEST("portalsWorkInAllDirectionsAndAcrossLayers");
-    for (const auto direction : { MoveDirection::Up,
-                                  MoveDirection::Right,
-                                  MoveDirection::Down,
-                                  MoveDirection::Left }) {
-        const Level level = Level::loadFromDefinition(
-            {
-                .layers = { { ".....", ".....", ".....", ".....", "....." },
-                            { "C    ", "     ", "  O  ", "     ", "     " },
-                            { "     ", "     ", "     ", "     ", "     " },
-                            { ".....", ".....", ".....", ".....", "....." },
-                            { "     ", "     ", "  O  ", "     ", "     " } },
-                .portals = { { .cell = { 2, 2, 1 }, .color = { 1, 0, 0 } },
-                             { .cell = { 2, 2, 4 }, .color = { 1, 0, 0 } } },
-            },
-            "cross-layer portals");
-        auto state = rules::initialState(level);
-        const auto delta = rules::directionOffset(direction);
-        state.players[0].cell = { 2 - delta.x, 2 - delta.y, 1 };
-        state.players[0].sliding = direction;
-        state = rules::step(level, state);
-        CHECK(state.players[0].cell == cell(2, 2, 4));
-        CHECK(state.players[0].sliding == direction);
-    }
+    TEST("inactiveColorGroupsHaveOrdinaryEdges");
+    auto unpaired = definition;
+    unpaired.portals[1].scope = 1;
+    const Level inactive =
+        Level::loadFromDefinition(unpaired, "unpaired portal");
+    auto state = rules::initialState(inactive);
+    state.players[0].cell = { 2, 2, 1 };
+    CHECK(!inactive.portalExit({ 2, 2, 1 }));
+    CHECK(
+        rules::step(inactive, state, MoveDirection::Right).players[0].cell ==
+        cell(3, 2, 1));
+    unpaired.portals[1].scope = 0;
+    unpaired.layers[1][4][4] = 'q';
+    unpaired.portals.push_back(
+        { .cell = { 4, 4, 1 }, .color = { 0.2f, 0.4f, 1.0f } });
+    const Level ambiguous =
+        Level::loadFromDefinition(unpaired, "ambiguous portal");
+    CHECK(!ambiguous.portalExit({ 2, 2, 1 }));
 
-    TEST("mirrorRaysCanExitThroughPortals");
+    TEST("mirrorOutputCrossesPortalEdges");
     const Level reflected = Level::loadFromDefinition(
         {
             .layers = { { "......", "......", "......", "......" },
-                        { " C    ", " O    ", " 2O   ", "    O " } },
+                        { " C    ", "      ", " 2o   ", "    q " } },
             .portals = { { .cell = { 2, 2, 1 }, .color = { 1, 0, 0 } },
                          { .cell = { 4, 3, 1 }, .color = { 1, 0, 0 } } },
         },
-        "mirror portals");
+        "mirror edge portals");
     const auto preview = rules::previewMirrorActivation(
         reflected, rules::initialState(reflected));
     CHECK(preview.has_value());
     if (preview) {
-        CHECK(preview->after.players[0].cell == cell(5, 3, 1));
+        CHECK(preview->after.players[0].cell == cell(4, 3, 1));
         CHECK(preview->entities[0].beamSegments.size() == 3);
     }
 
-    TEST("witchSightlinesTraversePortals");
-    const Level witch =
-        portalLevel({ { "......", "......" }, { "H O   ", "   O R" } });
-    const auto swapped =
-        rules::step(witch, rules::initialState(witch), MoveDirection::Right);
-    CHECK(swapped.players[0].cell == cell(5, 1, 1));
-    CHECK(swapped.movables[0].cell == cell(0, 0, 1));
-
-    TEST("inactivePortalGroupsStayTraversable");
-    auto definition = Level::Definition {
-        .layers = { { "......", "......" }, { " CO   ", "   O O" } },
-        .portals = { { .cell = { 2, 0, 1 }, .color = { 1, 0, 0 } },
-                     { .cell = { 3, 1, 1 }, .color = { 1, 0, 0 } },
-                     { .cell = { 5, 1, 1 }, .color = { 1, 0, 0 } } },
-    };
-    const auto ambiguous =
-        Level::loadFromDefinition(definition, "ambiguous portals");
-    CHECK(!ambiguous.portalExit({ 2, 0, 1 }));
-    CHECK(
-        rules::step(
-            ambiguous, rules::initialState(ambiguous), MoveDirection::Right)
-            .players[0]
-            .cell == cell(2, 0, 1));
-    definition.portals.pop_back();
-    definition.portals[1].scope = 1;
-    const auto scoped = Level::loadFromDefinition(definition, "scoped portals");
-    CHECK(!scoped.portalExit({ 2, 0, 1 }));
+    TEST("oneWayPortalRayCyclesTerminate");
+    const Level cycle = Level::loadFromDefinition(
+        {
+            .layers = { { "......" }, { "q o  H" } },
+            .portals = { { .cell = { 0, 0, 1 }, .color = { 1, 0, 0 } },
+                         { .cell = { 2, 0, 1 }, .color = { 1, 0, 0 } } },
+        },
+        "portal cycle");
+    auto cycleState = rules::initialState(cycle);
+    cycleState.players[0].cell = { 1, 0, 1 };
+    const auto loop =
+        rules::stepWithEvents(cycle, cycleState, MoveDirection::Right);
+    CHECK(loop.state.players[0].cell == cell(2, 0, 1));
+    CHECK(loop.portalTransits.empty());
 }
 
 } // namespace

@@ -94,14 +94,17 @@ public:
     [[nodiscard]] Vec2 turretRecoilOffset(EntityId turretId) const;
     [[nodiscard]] ActionPresentationTimeline buildActionPresentation(
         const GameplaySession::Action& action,
-        const Level* level = nullptr) const;
+        const Level* level = nullptr,
+        const std::vector<rules::PortalTransit>* transits = nullptr) const;
     // Chain-aware: `legs` are the states the action passes through, one per
     // world step, so a slide animates tile by tile instead of interpolating
     // once from start to finish. One leg (or none) is the ordinary case above.
     [[nodiscard]] ActionPresentationTimeline buildActionPresentation(
         const GameplaySession::Action& action,
         const std::vector<GameState>& legs,
-        const Level* level = nullptr) const;
+        const Level* level = nullptr,
+        const std::vector<plans::PlannedAction::PortalCue>* cues =
+            nullptr) const;
     [[nodiscard]] float reverseDuration(
         const GameplaySession::Action& action) const;
     // `worldState` is the session's current state, used to create and remove

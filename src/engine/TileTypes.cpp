@@ -42,6 +42,9 @@ std::string_view tileTypeName(TileType type)
 
 std::optional<TileType> tileTypeFromName(std::string_view name)
 {
+    if (name == "Portal") {
+        return TileType::PortalNorth;
+    }
     for (const TileTypeDefinition& definition : tileTypeDefinitionTable) {
         if (definition.name == name) {
             return definition.type;

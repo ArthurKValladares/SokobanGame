@@ -646,10 +646,55 @@ void testFacingTurretsStartAnAmbientMutualVolley()
     CHECK(session.state().movables[1].dead);
 }
 
+void testPortalCrossingsReachTheLivePresentation()
+{
+    TEST("portalCrossingsReachTheLivePresentation");
+    const Level level = Level::loadFromDefinition(
+        {
+            .layers = { { "......", "......", "......" },
+                        { "  C   ", "      ", "   p  " } },
+            .plates = { { .cell = { 2, 0, 1 }, .tile = TileType::PortalEast } },
+            .portals = { { .cell = { 2, 0, 1 }, .color = { 1, 0, 1 } },
+                         { .cell = { 3, 2, 1 }, .color = { 1, 0, 1 } } },
+        },
+        "live edge portals");
+    GameplaySession session;
+    session.reset(level);
+    session.setStepRates({ .playerMove = 3 });
+    session.setStepDurationSeconds(1.0f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    static_cast<void>(GameplayLoop::update(
+        level,
+        session,
+        presentation,
+        { .right = { .pressed = true } },
+        0.016f,
+        false));
+    const auto* action =
+        session.inFlight().empty() ? nullptr : &session.inFlight().front();
+    CHECK(action != nullptr);
+    if (action) {
+        CHECK(action->portalTransits.size() == 1);
+        CHECK(action->plan.after.players[0].cell == GridPosition3({ 3, 0, 1 }));
+        CHECK(action->plan.presentation.motions.size() == 2);
+        if (action->plan.presentation.motions.size() == 2) {
+            CHECK(
+                action->plan.presentation.motions[0].to ==
+                Vec3({ 2.5f, 0, 1 }));
+            CHECK(
+                action->plan.presentation.motions[1].from ==
+                Vec3({ 3, 2.5f, 1 }));
+            CHECK(action->plan.presentation.motions[1].to == Vec3({ 3, 0, 1 }));
+        }
+    }
+}
+
 } // namespace
 
 int main()
 {
+    testPortalCrossingsReachTheLivePresentation();
     testOpposingDirectionsAreNeutral();
     testSimulationTimingClampsLongFrames();
     testSimulationTimingScalesOneSharedDelta();

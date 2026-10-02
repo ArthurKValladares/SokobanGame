@@ -3661,12 +3661,13 @@ void testPortalPresentation()
     TEST("portalPresentationJumpsBetweenTheMouthsAndReverses");
     const Level level = Level::loadFromDefinition(
         {
-            .layers = { { "......", "......" }, { " CO   ", "   O  " } },
+            .layers = { { "......", "......" }, { " Co   ", "   p  " } },
             .portals = { { .cell = { 2, 0, 1 }, .color = { 0.2f, 0.4f, 1 } },
                          { .cell = { 3, 1, 1 }, .color = { 0.2f, 0.4f, 1 } } },
         },
         "portal presentation");
-    const auto before = rules::initialState(level);
+    auto before = rules::initialState(level);
+    before.players[0].cell = { 2, 0, 1 };
     GameplaySession::Action action {
         .before = before,
         .after = rules::step(level, before, MoveDirection::Right),
@@ -3679,11 +3680,13 @@ void testPortalPresentation()
     CHECK(action.presentation.motions.size() == 2);
     presentation.beginAction(action, before);
     presentation.seekAction(action, 0.25f);
+    CHECK(presentation.players()[0].facingQuarterTurns == 3);
     CHECK(near(presentation.players()[0].motion.renderPosition.y, 0));
-    CHECK(presentation.players()[0].motion.renderPosition.x < 2.01f);
+    CHECK(presentation.players()[0].motion.renderPosition.x > 2.0f);
     presentation.seekAction(action, 0.75f);
     CHECK(near(presentation.players()[0].motion.renderPosition.x, 3));
-    CHECK(near(presentation.players()[0].motion.renderPosition.y, 1));
+    CHECK(near(presentation.players()[0].motion.renderPosition.y, 1.25f));
+    CHECK(presentation.players()[0].facingQuarterTurns == 2);
     action.reversed = true;
     presentation.beginAction(action, action.after);
     presentation.seekAction(action, 0.75f);
@@ -3698,9 +3701,26 @@ void testPortalPresentation()
         .settings = {},
     });
     const auto count = std::ranges::count_if(frame.tiles, [](const auto& tile) {
-        return tile.cell == GridPosition3 { 2, 0, 1 };
+        return tile.cell == GridPosition3 { 2, 0, 1 } && !tile.isPrimaryPlayer;
     });
     CHECK(count == 5);
+    CHECK(frame.particles.size() == 224);
+    for (std::size_t i = 0; i < 112 && i < frame.particles.size(); ++i) {
+        CHECK(frame.particles[i].position.x < 3.0f);
+    }
+    for (std::size_t i = 112; i < frame.particles.size(); ++i) {
+        CHECK(frame.particles[i].position.y < 2.0f);
+    }
+    presentation.advanceClocks(0.25f, false);
+    const auto animatedFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = before,
+        .projectedState = before,
+        .presentation = presentation,
+        .settings = {},
+    });
+    CHECK(animatedFrame.particles[0].position != frame.particles[0].position);
 }
 
 } // namespace

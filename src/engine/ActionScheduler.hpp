@@ -64,6 +64,7 @@ public:
         // One-shot presentation events captured while the transient legs were
         // planned. They are consumed only by the live action admission path.
         std::vector<plans::TurretShotCue> turretShots;
+        std::vector<plans::PlannedAction::PortalCue> portalTransits;
         // Duration assigned by rules before presentation clips are installed.
         // Reaction cues use this clock so a long death animation cannot move
         // the firing point past the end of the movement that caused it.
@@ -116,6 +117,7 @@ public:
         ActionReservations reservations;
         std::vector<GameState> legs;
         std::vector<plans::TurretShotCue> turretShots;
+        std::vector<plans::PlannedAction::PortalCue> portalTransits;
         ActionDeferral deferral;
     };
 
@@ -150,7 +152,8 @@ public:
         std::vector<GameState> legs = {},
         std::size_t causalGroup = 0,
         ActionDeferral deferral = {},
-        std::vector<plans::TurretShotCue> turretShots = {});
+        std::vector<plans::TurretShotCue> turretShots = {},
+        std::vector<plans::PlannedAction::PortalCue> portalTransits = {});
 
     // Admits a whole causal group, or none of it.
     //

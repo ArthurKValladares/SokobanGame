@@ -3,14 +3,15 @@
 #include "engine/AnimationCatalog.hpp"
 #include "engine/ElevatorVisuals.hpp"
 #include "engine/GateEffect.hpp"
+#include "engine/ParticleConfig.hpp"
 #include "engine/RenderFrameParts.hpp"
 #include "engine/RotatorVisuals.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
-#include "engine/render/RenderAssetRequirements.hpp"
-#include "engine/render/SelectorRenderConfig.hpp"
 #include "engine/render/MirrorConfig.hpp"
+#include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/SceneConfig.hpp"
+#include "engine/render/SelectorRenderConfig.hpp"
 #include "engine/render/WaterGeometry.hpp"
 
 #include <algorithm>
@@ -316,7 +317,7 @@ private:
                     : TileType::Air)
                 .value_or(0);
         }
-        if (tile == TileType::Portal) {
+        if (tileTypeIsPortal(tile)) {
             const auto portal = std::ranges::find(
                 definition.portals, localCell, &Level::Portal::cell);
             if (portal != definition.portals.end()) {
@@ -353,8 +354,14 @@ private:
                 appendLinkedObjectAura(frame, renderTile, link->color);
             }
         }
-        if (tile == TileType::Portal) {
-            appendPortalVisual(frame, renderTile);
+        if (tileTypeIsPortal(tile)) {
+            appendPortalVisual(
+                frame,
+                renderTile,
+                tile,
+                input_.worldAnimationTimeSeconds,
+                input_.manifest.findTextureIdByName(
+                    config::turretGlowTextureName));
         } else {
             frame.tiles.push_back(renderTile);
         }
@@ -558,7 +565,7 @@ private:
         // looking different from the tile the editor draws.
         RenderFrameData::Tile renderTile = tileVisual(
             tile, { x, y, z }, input_.manifest, input_.settings);
-        if (tile == TileType::Portal) {
+        if (tileTypeIsPortal(tile)) {
             const auto portal = std::ranges::find(
                 input_.editor.portals(),
                 GridPosition3 { x, y, z },
@@ -646,8 +653,14 @@ private:
                 appendLinkedObjectAura(frame, renderTile, *linkColor);
             }
         }
-        if (tile == TileType::Portal) {
-            appendPortalVisual(frame, renderTile);
+        if (tileTypeIsPortal(tile)) {
+            appendPortalVisual(
+                frame,
+                renderTile,
+                tile,
+                input_.worldAnimationTimeSeconds,
+                input_.manifest.findTextureIdByName(
+                    config::turretGlowTextureName));
         } else {
             frame.tiles.push_back(renderTile);
         }

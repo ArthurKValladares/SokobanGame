@@ -2,6 +2,7 @@
 
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AssetManifest.hpp"
+#include "engine/ParticleConfig.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/RenderFrameParts.hpp"
@@ -135,8 +136,13 @@ RenderFrameData buildBakeFrame(
         subject.animation = animations->animation(use);
         subject.animationTimeSeconds = 0.0f;
     }
-    if (tile == TileType::Portal) {
-        renderFrameParts::appendPortalVisual(frame, subject);
+    if (tileTypeIsPortal(tile)) {
+        renderFrameParts::appendPortalVisual(
+            frame,
+            subject,
+            tile,
+            0.0f,
+            manifest.findTextureIdByName(config::turretGlowTextureName));
     } else {
         frame.tiles.push_back(subject);
     }

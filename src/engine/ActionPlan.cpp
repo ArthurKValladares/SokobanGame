@@ -18,8 +18,9 @@ std::optional<MoveDirection> movementDirection(
                                       MoveDirection::Down,
                                       MoveDirection::Left }) {
             const auto exit =
-                level->portalExit(rules::movementTarget(from, direction));
-            if (exit && exit->x == to.x && exit->y == to.y && to.z <= exit->z) {
+                level->portalCrossing(from, rules::directionOffset(direction));
+            if (exit && exit->exit.x == to.x && exit->exit.y == to.y &&
+                to.z <= exit->exit.z) {
                 return direction;
             }
         }

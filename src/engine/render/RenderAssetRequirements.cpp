@@ -211,6 +211,10 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
                 manifest.textureIdByName(textureName));
         }
     }
+    if (!level.portals().empty()) {
+        requirements.requireTexture(
+            manifest.findTextureIdByName(config::turretGlowTextureName));
+    }
     bool containsTurret = false;
     for (const Level::MovableTile& movable : level.movableTiles()) {
         requirements.requireModel(manifest.modelForTile(movable.type));

@@ -555,14 +555,24 @@ void GameplayPresentation::advanceAnimations(float dt, const GameState& state)
     }
 }
 
-
 ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     const GameplaySession::Action& action,
     const std::vector<GameState>& legs,
-    const Level* level) const
+    const Level* level,
+    const std::vector<plans::PlannedAction::PortalCue>* cues) const
 {
+    const auto legTransits = [&](std::size_t leg) {
+        std::vector<rules::PortalTransit> events;
+        if (cues) {
+            for (const auto& cue : *cues) {
+                if (cue.legIndex == leg) events.push_back(cue.transit);
+            }
+        }
+        return events;
+    };
     if (legs.size() <= 1) {
-        return buildActionPresentation(action, level);
+        const auto events = legTransits(0);
+        return buildActionPresentation(action, level, cues ? &events : nullptr);
     }
 
     // A chained slide is one action spanning several world steps. Interpolating
@@ -596,9 +606,10 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
         legAction.playerPushing = leg == 0 && action.playerPushing;
         legAction.playerPulling = leg == 0 && action.playerPulling;
 
+        const auto events = legTransits(leg);
         timeline = concatenateTimelines(
             std::move(timeline),
-            buildActionPresentation(legAction, level),
+            buildActionPresentation(legAction, level, cues ? &events : nullptr),
             legStart);
         const float extra = platformExtraSeconds(
             platformMoves(
@@ -614,7 +625,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
 
 ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     const GameplaySession::Action& action,
-    const Level* level) const
+    const Level* level,
+    const std::vector<rules::PortalTransit>* transits) const
 {
     PresentationTransactionBuilder builder(animationCatalog_);
     const float motionDuration = std::max(action.durationSeconds, 0.0f);
@@ -645,30 +657,63 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
                                    GridPosition3 after,
                                    Vec3 from,
                                    Vec3 to) {
-        if (level) {
-            for (const auto& portal : level->portals()) {
-                const auto exit = level->portalExit(portal.cell);
-                if (exit && portal.cell.z == before.z &&
-                    std::abs(portal.cell.x - before.x) +
-                            std::abs(portal.cell.y - before.y) ==
-                        1 &&
-                    exit->x == after.x && exit->y == after.y &&
-                    after.z <= exit->z) {
-                    const Vec3 mouth = toVec3(portal.cell);
-                    const Vec3 emerged = toVec3(*exit);
-                    builder.addMotion(
-                        { .target = target,
-                          .from = from,
-                          .to = mouth,
-                          .durationSeconds = motionDuration * 0.5f });
-                    builder.addMotion(
-                        { .target = target,
-                          .from = emerged,
-                          .to = to,
-                          .startSeconds = motionDuration * 0.5f,
-                          .durationSeconds = motionDuration * 0.5f });
-                    return;
+        if (level && transits) {
+            std::vector<std::pair<Vec3, Vec3>> physicalLegs;
+            Vec3 current = from;
+            for (const auto& transit : *transits) {
+                if (transit.target != target) continue;
+                const GridPosition entry =
+                    rules::directionOffset(transit.entryDirection);
+                const GridPosition exit =
+                    portalEdgeOffset(*level->plateAt(transit.exit));
+                physicalLegs.push_back(
+                    { current,
+                      toVec3(transit.entrance) +
+                          Vec3 { entry.x * 0.5f, entry.y * 0.5f, 0 } });
+                current = toVec3(transit.exit) +
+                    Vec3 { exit.x * 0.5f, exit.y * 0.5f, 0 };
+            }
+            if (!physicalLegs.empty()) {
+                physicalLegs.push_back({ current, to });
+                float distance = 0.0f;
+                for (const auto& [start, end] : physicalLegs)
+                    distance += length(end - start);
+                float startSeconds = 0.0f;
+                for (const auto& [start, end] : physicalLegs) {
+                    const float duration = motionDuration *
+                        length(end - start) / std::max(distance, 0.001f);
+                    builder.addMotion({ .target = target,
+                                        .from = start,
+                                        .to = end,
+                                        .startSeconds = startSeconds,
+                                        .durationSeconds = duration });
+                    startSeconds += duration;
                 }
+                return;
+            }
+        }
+        if (level && !transits) {
+            const auto exit = level->portalExit(before);
+            if (exit && exit->x == after.x && exit->y == after.y &&
+                after.z <= exit->z) {
+                const GridPosition entryEdge =
+                    portalEdgeOffset(*level->plateAt(before));
+                const GridPosition exitEdge =
+                    portalEdgeOffset(*level->plateAt(*exit));
+                const Vec3 mouth = toVec3(before) +
+                    Vec3 { entryEdge.x * 0.5f, entryEdge.y * 0.5f, 0 };
+                const Vec3 emerged = toVec3(*exit) +
+                    Vec3 { exitEdge.x * 0.5f, exitEdge.y * 0.5f, 0 };
+                builder.addMotion({ .target = target,
+                                    .from = from,
+                                    .to = mouth,
+                                    .durationSeconds = motionDuration * 0.5f });
+                builder.addMotion({ .target = target,
+                                    .from = emerged,
+                                    .to = to,
+                                    .startSeconds = motionDuration * 0.5f,
+                                    .durationSeconds = motionDuration * 0.5f });
+                return;
             }
         }
         builder.addMotion({ .target = target,
@@ -1061,6 +1106,35 @@ void GameplayPresentation::seekAction(
         }
         if (chosenTrackFor(track.target) != index) {
             continue;
+        }
+        // Face along the physical leg on either side of a portal jump.
+        // Ordinary continuous paths retain their control-group facing.
+        if (track.target.kind == EntityKind::Player) {
+            std::optional<Vec3> previousEnd;
+            bool jumped = false;
+            for (const auto& candidate : timeline.motions) {
+                if (candidate.target != track.target) continue;
+                jumped = jumped ||
+                    (previousEnd &&
+                     length(candidate.from - *previousEnd) > 0.001f);
+                previousEnd = candidate.to;
+            }
+            if (jumped) {
+                const auto player =
+                    std::ranges::find_if(players_, [&](const auto& candidate) {
+                        return candidate.motion.target == track.target;
+                    });
+                const Vec3 delta = track.to - track.from;
+                if (player != players_.end() && std::abs(delta.x) > 0.001f) {
+                    player->facingQuarterTurns = facingQuarterTurns(
+                        delta.x > 0 ? MoveDirection::Right
+                                    : MoveDirection::Left);
+                } else if (
+                    player != players_.end() && std::abs(delta.y) > 0.001f) {
+                    player->facingQuarterTurns = facingQuarterTurns(
+                        delta.y > 0 ? MoveDirection::Down : MoveDirection::Up);
+                }
+            }
         }
         const float end = track.startSeconds + track.durationSeconds;
         if (sourceTime < track.startSeconds ||

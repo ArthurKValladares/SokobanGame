@@ -107,7 +107,8 @@ ActionScheduler::tryStart(
     std::vector<GameState> legs,
     std::size_t causalGroup,
     ActionDeferral deferral,
-    std::vector<plans::TurretShotCue> turretShots)
+    std::vector<plans::TurretShotCue> turretShots,
+    std::vector<plans::PlannedAction::PortalCue> portalTransits)
 {
     // Rounded down deliberately. An action starting part-way through a step
     // gets claims that begin fractionally early, which can only make the check
@@ -140,6 +141,7 @@ ActionScheduler::tryStart(
         .plan = plan,
         .legs = std::move(legs),
         .turretShots = std::move(turretShots),
+        .portalTransits = std::move(portalTransits),
         .mechanicalDurationSeconds = plan.durationSeconds,
         // Counts up to zero first. The action is admitted and holds its claims
         // from now, so nothing can take the cells out from under it, but it
@@ -182,7 +184,8 @@ std::optional<ActionScheduler::Rejection> ActionScheduler::tryStartAll(
             std::move(pending.legs),
             causalGroup,
             pending.deferral,
-            std::move(pending.turretShots));
+            std::move(pending.turretShots),
+            std::move(pending.portalTransits));
         // Unreachable: every member was just checked against the same table,
         // and admitting a member of this group cannot refuse a later one - the
         // group is exempt from itself.

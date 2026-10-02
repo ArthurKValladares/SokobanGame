@@ -55,7 +55,10 @@ void appendLinkedObjectAura(
 
 void appendPortalVisual(
     RenderFrameData& frame,
-    const RenderFrameData::Tile& tile);
+    const RenderFrameData::Tile& tile,
+    TileType type,
+    float timeSeconds = 0.0f,
+    RenderTexture glowTexture = noTexture);
 
 uint32_t facingQuarterTurns(MoveDirection direction);
 
