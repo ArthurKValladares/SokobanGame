@@ -769,12 +769,21 @@ bool isGateOpen(
     const GameState& state,
     const Level::Gate& gate)
 {
-    return !gate.pressurePlates.empty() &&
+    // A closed gate is a solid block. Rocks and ice blocks cannot be
+    // destroyed, so one standing in the cell holds the gate open until it
+    // leaves. Heroes, enemies and turrets can die: the gate closes on them
+    // and kills them (see applyGateChanges).
+    if (const GameState::Movable* movable = movableAt(state, gate.cell);
+        movable != nullptr && !tileTypeIsTurret(movable->type)) {
+        return true;
+    }
+    const bool activated = !gate.pressurePlates.empty() &&
         std::ranges::all_of(
             gate.pressurePlates,
             [&](GridPosition3 plate) {
                 return isPressurePlateActive(level, state, plate);
             });
+    return activated != gate.startOpen;
 }
 
 bool isRotatorEngaged(
@@ -963,6 +972,180 @@ bool anyUnitIn(const GameState& state, GridPosition3 cell)
     return liveUnitAt(state, cell).has_value() ||
         fallenMovableAt(state, cell) != nullptr ||
         fallenEnemyAt(state, cell) != nullptr;
+}
+
+// Per-gate open state, in Level::gates() order.
+std::vector<char> gateOpenness(const Level& level, const GameState& state)
+{
+    std::vector<char> open(level.gates().size(), 0);
+    for (std::size_t i = 0; i < open.size(); ++i) {
+        open[i] = isGateOpen(level, state, level.gates()[i]);
+    }
+    return open;
+}
+
+// State indices of units, by kind.
+struct UnitIndices {
+    std::vector<std::size_t> players;
+    std::vector<std::size_t> movables;
+    std::vector<std::size_t> enemies;
+
+    [[nodiscard]] bool empty() const
+    {
+        return players.empty() && movables.empty() && enemies.empty();
+    }
+
+    void add(LiveUnitAt unit)
+    {
+        std::vector<std::size_t>& into = unit.kind == EntityKind::Player
+            ? players
+            : unit.kind == EntityKind::Movable ? movables
+                                               : enemies;
+        if (std::ranges::find(into, unit.index) == into.end()) {
+            into.push_back(unit.index);
+        }
+    }
+};
+
+// What gates opening and closing did to the units around them.
+struct GateChanges {
+    // Fell through a gate that opened beneath them.
+    UnitIndices dropped;
+    // Killed by a gate that closed on them.
+    UnitIndices crushed;
+
+    [[nodiscard]] bool empty() const
+    {
+        return dropped.empty() && crushed.empty();
+    }
+};
+
+// Lets one live unit fall from where it stands, as though it had just
+// stepped there. Returns false when it stays put: something still holds it,
+// or nothing below can (an all-air column), the same case in which a move is
+// rejected rather than leaving a unit standing on nothing.
+bool dropUnit(const Level& level, GameState& state, LiveUnitAt unit)
+{
+    switch (unit.kind) {
+    case EntityKind::Player: {
+        GameState::Player& player = state.players[unit.index];
+        const FallResult fall =
+            playerFallTarget(level, state, unit.index, player.cell);
+        if (!fall.supported || (fall.cell == player.cell && !fall.fallen)) {
+            return false;
+        }
+        player.cell = fall.cell;
+        player.dead = fall.fallen;
+        player.drowned = fall.fallen;
+        player.sliding.reset();
+        return true;
+    }
+    case EntityKind::Movable: {
+        GameState::Movable& movable = state.movables[unit.index];
+        const FallResult fall =
+            movableFallTarget(level, state, unit.index, movable.cell);
+        if (!fall.supported || (fall.cell == movable.cell && !fall.fallen)) {
+            return false;
+        }
+        movable.cell = fall.cell;
+        movable.fallen = fall.fallen;
+        movable.sliding.reset();
+        return true;
+    }
+    case EntityKind::Enemy: {
+        GameState::Enemy& enemy = state.enemies[unit.index];
+        const FallResult fall =
+            enemyFallTarget(level, state, unit.index, enemy.cell);
+        if (!fall.supported || (fall.cell == enemy.cell && !fall.fallen)) {
+            return false;
+        }
+        enemy.cell = fall.cell;
+        enemy.fallen = fall.fallen;
+        enemy.sliding.reset();
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+// Kills a hero, enemy or turret a gate has closed on. The body stays where
+// it is: a dead hero is left on the board like one an enemy struck, and dead
+// enemies and turrets stop blocking and rendering.
+void crushUnit(GameState& state, LiveUnitAt unit)
+{
+    switch (unit.kind) {
+    case EntityKind::Player:
+        state.players[unit.index].dead = true;
+        state.players[unit.index].sliding.reset();
+        break;
+    case EntityKind::Movable:
+        state.movables[unit.index].dead = true;
+        state.movables[unit.index].sliding.reset();
+        break;
+    case EntityKind::Enemy:
+        state.enemies[unit.index].dead = true;
+        state.enemies[unit.index].sliding.reset();
+        break;
+    default:
+        break;
+    }
+}
+
+// A closed gate is a solid block and an open gate is empty space.
+//
+// A gate that opens drops the column of live units resting on top of it,
+// bottom first so each lands on the one beneath it. `openBefore` holds each
+// gate's state when it was last looked at and is brought up to date; only a
+// gate that was closed then and is open now drops anything (the rotator edge
+// rule), so a unit that a bard holds over an already-open gate keeps floating
+// exactly as it would over any other gap.
+//
+// A closed gate with a live unit in its cell has just closed on it. Only
+// heroes, enemies and turrets can be there (a rock or ice block holds its
+// gate open, see isGateOpen), and the gate kills them.
+//
+// Landings and deaths can press or release further plates, so this repeats
+// until nothing changes.
+GateChanges applyGateChanges(
+    const Level& level,
+    GameState& state,
+    std::vector<char>& openBefore)
+{
+    GateChanges changes;
+    const std::vector<Level::Gate>& gates = level.gates();
+    openBefore.resize(gates.size(), 0);
+    bool changed = !gates.empty();
+    while (changed) {
+        changed = false;
+        std::vector<char> openNow = gateOpenness(level, state);
+        for (std::size_t g = 0; g < gates.size(); ++g) {
+            if (!openNow[g]) {
+                if (const std::optional<LiveUnitAt> occupant =
+                        liveUnitAt(state, gates[g].cell)) {
+                    crushUnit(state, *occupant);
+                    changes.crushed.add(*occupant);
+                    changed = true;
+                }
+                continue;
+            }
+            if (openBefore[g]) {
+                continue;
+            }
+            GridPosition3 cell = gates[g].cell;
+            ++cell.z;
+            for (std::optional<LiveUnitAt> unit = liveUnitAt(state, cell);
+                 unit;
+                 ++cell.z, unit = liveUnitAt(state, cell)) {
+                if (dropUnit(level, state, *unit)) {
+                    changes.dropped.add(*unit);
+                    changed = true;
+                }
+            }
+        }
+        openBefore = std::move(openNow);
+    }
+    return changes;
 }
 
 // Moves every elevator whose linked plates became fully pressed since
@@ -1911,13 +2094,20 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
     if (!liveCellsAreUnique(after) || after == state) {
         return std::nullopt;
     }
+    // Reflected units can open or close gates, dropping whatever rests on
+    // them or crushing whatever stands in them.
+    std::vector<char> gatesOpen = gateOpenness(level, state);
+    (void)applyGateChanges(level, after, gatesOpen);
     // Reflected units can land on pressure plates or rotators exactly as a
     // step can, so linked rotators fire here too.
     (void)applyRotatorActivations(
         level, after, rotatorEngagement(level, state));
     (void)applyElevatorActivations(
         level, after, elevatorEngagement(level, state));
+    (void)applyGateChanges(level, after, gatesOpen);
     resolveEnemyAttacks(after);
+    // An attack can empty a plate, opening or closing its gates.
+    (void)applyGateChanges(level, after, gatesOpen);
     for (MirrorEntityPreview& entity : entities) {
         if (entity.player) {
             entity.destination = playerCell(after, entity.resultPlayerIndex);
@@ -2004,6 +2194,7 @@ public:
         , rotatorsEngagedAtStart_(rotatorEngagement(level, after))
         , elevatorsEngagedAtStart_(elevatorEngagement(level, after))
         , minecartsEngagedAtStart_(minecartEngagement(level, after))
+        , gatesOpen_(gateOpenness(level, after))
     {
         for (Status& status : status_) {
             status.active = scope.wholeWorld();
@@ -2071,13 +2262,20 @@ public:
                 settleBlocked();
                 suppressBardInfluences_ = false;
             }
+            anyMovement = resolveGateChanges() || anyMovement;
             if (anyMovement) {
                 resolveReactions();
             }
         }
         resolveRotators();
         resolveElevators();
+        while (resolveGateChanges()) {
+            resolveReactions();
+        }
         resolveMinecarts();
+        while (resolveGateChanges()) {
+            resolveReactions();
+        }
     }
 
 private:
@@ -3291,6 +3489,58 @@ private:
         enemyMovedThisMicro_[enemyIndex] = true;
     }
 
+    // Gates act as soon as each micro-step's movement settles, so a unit
+    // sliding over a gate that opens falls through it there, and a hero in a
+    // gate that closes dies there. Dropped units join the closure because
+    // they are written, and count as having just moved for turrets and
+    // attacks. One that was not acting (scenery to this step) only falls: it
+    // must not pick up this step's input, and a belt it lands on moves it as
+    // pending motion on the next step. Crushed units are written too, and
+    // are finished.
+    [[nodiscard]] bool resolveGateChanges()
+    {
+        if (gatesOpen_.empty()) {
+            return false;
+        }
+        const GateChanges changes =
+            applyGateChanges(level_, after_, gatesOpen_);
+        const auto joinClosure = [this](std::size_t entity, bool finished) {
+            Status& status = status_[entity];
+            if (!status.active || finished) {
+                status.done = true;
+            }
+            status.active = true;
+            status.movedThisMicro = true;
+        };
+        const UnitIndices& dropped = changes.dropped;
+        for (const std::size_t index : dropped.players) {
+            joinClosure(entityIndexForPlayer(index), playerDead(after_, index));
+        }
+        for (const std::size_t index : dropped.movables) {
+            joinClosure(index, after_.movables[index].fallen);
+        }
+        for (const std::size_t index : dropped.enemies) {
+            joinClosure(entityIndexForEnemy(index), after_.enemies[index].fallen);
+            enemyMoved_[index] = true;
+            enemyMovedThisMicro_[index] = true;
+        }
+        const auto finish = [this](std::size_t entity) {
+            Status& status = status_[entity];
+            status.active = true;
+            status.done = true;
+        };
+        for (const std::size_t index : changes.crushed.players) {
+            finish(entityIndexForPlayer(index));
+        }
+        for (const std::size_t index : changes.crushed.movables) {
+            finish(index);
+        }
+        for (const std::size_t index : changes.crushed.enemies) {
+            finish(entityIndexForEnemy(index));
+        }
+        return !changes.empty();
+    }
+
     // Rotator plates act once the step's movement has settled: a plate is
     // pressed by where units end up, not by what passes over it mid-step.
     // Turned units join the action's closure because they are written. A
@@ -3885,6 +4135,10 @@ private:
     std::vector<char> elevatorsEngagedAtStart_;
     // Which minecarts had every linked plate pressed when the step began.
     std::vector<char> minecartsEngagedAtStart_;
+    // Which gates were open when last looked at (see applyGateChanges). Unlike
+    // the engagement samples above this is kept current through the step,
+    // so a gate that closes and opens again drops what has since stepped on.
+    std::vector<char> gatesOpen_;
 };
 
 } // namespace

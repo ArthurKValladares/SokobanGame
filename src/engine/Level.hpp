@@ -31,6 +31,10 @@ public:
         GridPosition3 cell {};
         std::vector<GridPosition3> pressurePlates;
         Vec3 color { 1.0f, 0.72f, 0.12f };
+        // Inverts the gate: open (empty) while its plates are not all
+        // pressed and closed (solid) once they are. Written as `startOpen`
+        // in the `@gate` record only when set.
+        bool startOpen = false;
 
         bool operator==(const Gate&) const = default;
     };

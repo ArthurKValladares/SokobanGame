@@ -53,11 +53,14 @@ inline void appendGateEffect(
 
     // Two nested surfaces supply the luminous volume. The existing energy
     // shader contributes scan lines, view-angle rim light, and a slow pulse.
+    // The shell fills the cell: a closed gate is a solid block that units
+    // stand on, so its top is flush with the layer's other blocks.
+    const float shellInset = config::gateEnergyInset;
     appendEnergyBox(
-        { x + 0.035f, y + 0.035f },
-        { 0.93f, 0.93f },
-        z + 0.035f,
-        0.93f,
+        { x + shellInset, y + shellInset },
+        { 1.0f - shellInset * 2.0f, 1.0f - shellInset * 2.0f },
+        z + shellInset,
+        1.0f - shellInset * 2.0f,
         config::gateEnergyShellAlpha);
     appendEnergyBox(
         { x + 0.12f, y + 0.12f },

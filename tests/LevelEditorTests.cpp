@@ -490,6 +490,40 @@ void testUnitsAndMirrorsStackOnPlates()
     CHECK(!mover.moveObject({ 4, 1, 1 }));
 }
 
+void testGateStartOpenIsAnUndoableGateSetting()
+{
+    TEST("gateStartOpenIsAnUndoableGateSetting");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(6, 3, false);
+
+    const GridPosition3 plate { 1, 1, 1 };
+    const GridPosition3 gate { 3, 1, 1 };
+    CHECK(editor.setCell(plate, TileType::PressurePlate));
+    CHECK(editor.setCell(gate, TileType::Gate));
+    CHECK(editor.gates().size() == 1);
+    CHECK(!editor.gates()[0].startOpen);
+
+    CHECK(editor.setGateStartOpen(0, true));
+    CHECK(editor.gates()[0].startOpen);
+    CHECK(!editor.setGateStartOpen(0, true));
+    CHECK(!editor.setGateStartOpen(1, true));
+    CHECK(editor.documentToLevel().gateAt(gate)->startOpen);
+
+    CHECK(editor.tryUndoEdit());
+    CHECK(!editor.gates()[0].startOpen);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.gates()[0].startOpen);
+
+    // Moving the gate keeps the setting.
+    const GridPosition3 moved { 4, 1, 1 };
+    CHECK(editor.beginMove(gate));
+    CHECK(editor.moveObject(moved));
+    CHECK(editor.gates().size() == 1);
+    CHECK(editor.gates()[0].cell == moved);
+    CHECK(editor.gates()[0].startOpen);
+}
+
 void testElevatorStopsPersistAndFollowEditorCommands()
 {
     TEST("elevatorStopsPersistAndFollowEditorCommands");
@@ -2332,6 +2366,7 @@ int main()
     testExplicitLinksBecomeColorGroupsOnLoad();
     testMovableObjectsJoinColorGroupsAndKeepLinksWhenMoved();
     testElevatorStopsPersistAndFollowEditorCommands();
+    testGateStartOpenIsAnUndoableGateSetting();
     testMinecartRequiresStopAndPersistsRouteDirection();
     testUnitsAndMirrorsStackOnPlates();
     testTileValidationAndMultipleHeroPlacement();

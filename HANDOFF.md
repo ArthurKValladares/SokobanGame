@@ -307,6 +307,24 @@ and the required real-device checks are recorded.
   records (`Level::Plate`, `Level::coveredPlates`) hold plates authored beneath
   an occupant; the editor keeps them in `document_.plates` and every command
   that moves, crops or deletes cells must update them like gate records.
+- Gates are full-tile blocks: closed is solid (blocks entry and sight,
+  supports units above through `cellAllowsEntity` in `fallTarget`), open is
+  Air. `rules::isGateOpen` is `activated != Gate::startOpen`, except that a
+  live rock or ice block in the cell holds the gate open (they cannot die).
+  Gate state stays derived (nothing in `GameState`). `applyGateChanges`
+  applies the consequences: a gate that was closed when last sampled and is
+  open now drops the live column on top of it, and a closed gate with a live
+  unit in its cell (a hero, enemy or turret) kills it in place; it repeats
+  until nothing changes. `MicroStepResolver` keeps `gatesOpen_` current and
+  runs it after every micro-step and after elevators and minecarts; mirror
+  activation runs it too. Dropped units join the closure as moved; a unit that
+  was outside the scope is also marked done so it cannot take the step's
+  input. Crushed units join the closure finished. A unit with nothing to land
+  on stays put (the rule that rejects moves into bottomless columns).
+  `startOpen` is written to `@gate` only when true, and solution digests hash
+  it only for start-open gates, so older digests are unchanged. The solver
+  heuristic treats a gate as floor (optimistic); gates already keep the
+  static dead-position proof off.
 - Mirrors turned by rotators live in `GameState::turnedMirrors` (sorted,
   non-zero only) and travel in `StateDelta::mirrors`, keyed by cell because
   mirrors never move. Rules read a mirror's current orientation through

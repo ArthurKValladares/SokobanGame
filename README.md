@@ -414,11 +414,23 @@ Decorative blocks render but have no gameplay, support, occupancy, camera-fit,
 or water-grid-bound semantics. New water layouts should use `@water N`; `W`
 remains supported for older screens.
 
-A closed Gate blocks every entity. It opens only while every pressure plate
+A closed Gate is a solid block that fills its whole tile: it blocks every
+entity and sightline, and units can stand on top of it, so a Gate on a floor
+layer works as a bridge or trapdoor. It opens only while every pressure plate
 listed in its `plates` array is occupied by a living player, movable object, or
-enemy; a Gate with no linked plates stays closed. The gate and its linked
-plates share the configured color in the game. Links are authored with link
-colors in the level editor (see Link Colors under Level Editor).
+enemy; a Gate with no linked plates stays closed. An optional
+`"startOpen":true` in its `@gate` record inverts it: open while its plates are
+not all pressed, closed while they are (an unlinked start-open Gate is always
+open). Set it with the Start Open checkbox under Gates in the level editor's
+Tiles palette, where such gates are drawn faded. An open Gate is empty space:
+units pass through it and fall through it. When a Gate opens, the column of
+units resting on top of it drops at once (bottom first), and can land on
+further plates. A Gate that closes on a hero, enemy or turret kills it; a rock
+or ice block in its cell cannot be destroyed and holds it open until it leaves.
+A unit with nothing below an opened Gate to land on stays where it is, as a
+move into a bottomless column is refused. The gate and its linked plates share
+the configured color in the game. Links are authored with link colors in the
+level editor (see Link Colors under Level Editor).
 
 Linked rocks, ice blocks, and turrets use their 8-bit RGB link color as a
 group identity. Whenever one moves for any reason, each other object of that

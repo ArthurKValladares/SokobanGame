@@ -732,6 +732,262 @@ void testPressurePlatesDoNotLockEnd()
     CHECK(rules::isAtUnlockedEnd(level, state));
 }
 
+void testClosedGateIsAFloorAndOpeningDropsTheStackOnIt()
+{
+    TEST("closedGateIsAFloorAndOpeningDropsTheStackOnIt");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "....." },
+            { "PC G " },
+            { "   R " },
+            { "   R " },
+        },
+        .gates = { Level::Gate {
+            .cell = cell(3, 0, 1),
+            .pressurePlates = { cell(0, 0, 1) },
+        } },
+    }, "gate bridge");
+    const GameState state = rules::initialState(level);
+    CHECK(state.movables.size() == 2);
+    CHECK(!rules::cellAllowsEntity(level, state, cell(3, 0, 1)));
+
+    const GameState opened = rules::step(level, state, MoveDirection::Left);
+    CHECK(opened.players[0].cell == cell(0, 0, 1));
+    CHECK(opened.movables[0].cell == cell(3, 0, 1));
+    CHECK(opened.movables[1].cell == cell(3, 0, 2));
+    CHECK(!opened.movables[0].fallen);
+
+    // Leaving the plate cannot close the gate on the rock now inside it.
+    const GameState released = rules::step(level, opened, MoveDirection::Right);
+    CHECK(released.players[0].cell == cell(1, 0, 1));
+    CHECK(rules::isGateOpen(level, released, level.gates().front()));
+    CHECK(released.movables[0].cell == cell(3, 0, 1));
+    CHECK(released.movables[1].cell == cell(3, 0, 2));
+}
+
+void testHeroWalksOnClosedGateAndFallsThroughOpenOne()
+{
+    TEST("heroWalksOnClosedGateAndFallsThroughOpenOne");
+    const auto makeGateLevel = [](const char* plateRow, bool rockOnPlate) {
+        std::vector<Level::Plate> plates;
+        if (rockOnPlate) {
+            plates.push_back({
+                .cell = cell(0, 0, 1),
+                .tile = TileType::PressurePlate,
+            });
+        }
+        return Level::loadFromDefinition({
+            .layers = {
+                { "...." },
+                { plateRow },
+                { " C  " },
+            },
+            .gates = { Level::Gate {
+                .cell = cell(2, 0, 1),
+                .pressurePlates = { cell(0, 0, 1) },
+            } },
+            .plates = plates,
+        }, "gate floor");
+    };
+
+    const Level closed = makeGateLevel("P#G#", false);
+    GameState state = rules::initialState(closed);
+    state = rules::step(closed, state, MoveDirection::Right);
+    CHECK(state.players[0].cell == cell(2, 0, 2));
+    state = rules::step(closed, state, MoveDirection::Right);
+    CHECK(state.players[0].cell == cell(3, 0, 2));
+
+    const Level open = makeGateLevel("R#G#", true);
+    const GameState start = rules::initialState(open);
+    CHECK(rules::isGateOpen(open, start, open.gates().front()));
+    const GameState fell = rules::step(open, start, MoveDirection::Right);
+    CHECK(fell.players[0].cell == cell(2, 0, 1));
+    CHECK(!fell.players[0].dead);
+}
+
+void testClosingGateCrushesKillableUnitsButNotBlocks()
+{
+    TEST("closingGateCrushesKillableUnitsButNotBlocks");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "......" },
+            { "G  PQK" },
+        },
+        .gates = { Level::Gate {
+            .cell = cell(0, 0, 1),
+            .pressurePlates = { cell(3, 0, 1) },
+        } },
+    }, "crushing gate");
+    const GameState initial = rules::initialState(level);
+    CHECK(initial.players.size() == 2);
+    // The rogue holds the plate; something stands in the open gate.
+    const auto withOccupant = [&](const auto& place) {
+        GameState state = initial;
+        state.players[0].cell = cell(3, 0, 1);
+        place(state);
+        CHECK(rules::isGateOpen(level, state, level.gates().front()));
+        return rules::scopedStep(
+            level,
+            state,
+            MoveDirection::Right,
+            {},
+            { .actors = { state.players[0].id } });
+    };
+
+    const GameState hero = withOccupant([](GameState& state) {
+        state.players[1].cell = cell(0, 0, 1);
+    });
+    CHECK(hero.players[0].cell == cell(4, 0, 1));
+    CHECK(hero.players[1].dead);
+    CHECK(!hero.players[1].drowned);
+    CHECK(hero.players[1].cell == cell(0, 0, 1));
+    CHECK(!rules::isGateOpen(level, hero, level.gates().front()));
+    CHECK(!rules::cellAllowsEntity(level, hero, cell(0, 0, 1)));
+
+    const GameState enemy = withOccupant([](GameState& state) {
+        state.enemies.push_back({ .id = 100, .cell = cell(0, 0, 1) });
+    });
+    CHECK(enemy.enemies[0].dead);
+    CHECK(!rules::isGateOpen(level, enemy, level.gates().front()));
+
+    const GameState turret = withOccupant([](GameState& state) {
+        state.movables.push_back({
+            .id = 101,
+            .type = TileType::TurretNorth,
+            .cell = cell(0, 0, 1),
+        });
+    });
+    CHECK(turret.movables[0].dead);
+    CHECK(!rules::isGateOpen(level, turret, level.gates().front()));
+
+    // Rocks and ice cannot die, so they hold the gate open instead.
+    for (const TileType block : { TileType::Rock, TileType::Ice }) {
+        const GameState held = withOccupant([block](GameState& state) {
+            state.movables.push_back({
+                .id = 102,
+                .type = block,
+                .cell = cell(0, 0, 1),
+            });
+        });
+        CHECK(held.players[0].cell == cell(4, 0, 1));
+        CHECK(!held.movables[0].dead);
+        CHECK(held.movables[0].cell == cell(0, 0, 1));
+        CHECK(rules::isGateOpen(level, held, level.gates().front()));
+    }
+}
+
+void testStartOpenGateInvertsAndClosesWhenPressed()
+{
+    TEST("startOpenGateInvertsAndClosesWhenPressed");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "....." },
+            { "PC G " },
+        },
+        .gates = { Level::Gate {
+            .cell = cell(3, 0, 1),
+            .pressurePlates = { cell(0, 0, 1) },
+            .startOpen = true,
+        } },
+    }, "start-open gate");
+    GameState state = rules::initialState(level);
+    CHECK(rules::isGateOpen(level, state, level.gates().front()));
+    CHECK(rules::cellAllowsEntity(level, state, cell(3, 0, 1)));
+    state.enemies.push_back({ .id = 100, .cell = cell(3, 0, 1) });
+
+    const GameState pressed = rules::step(level, state, MoveDirection::Left);
+    CHECK(pressed.players[0].cell == cell(0, 0, 1));
+    CHECK(!rules::isGateOpen(level, pressed, level.gates().front()));
+    CHECK(!rules::cellAllowsEntity(level, pressed, cell(3, 0, 1)));
+    CHECK(pressed.enemies[0].dead);
+
+    const GameState released = rules::step(level, pressed, MoveDirection::Right);
+    CHECK(released.players[0].cell == cell(1, 0, 1));
+    CHECK(rules::isGateOpen(level, released, level.gates().front()));
+
+    // An unlinked start-open gate never closes.
+    const Level unlinked = Level::loadFromDefinition({
+        .layers = { { "..." }, { "C G" } },
+        .gates = { Level::Gate { .cell = cell(2, 0, 1), .startOpen = true } },
+    }, "unlinked start-open gate");
+    CHECK(rules::isGateOpen(
+        unlinked, rules::initialState(unlinked), unlinked.gates().front()));
+}
+
+void testStartOpenGateDropsWhatRestsOnItWhenReleased()
+{
+    TEST("startOpenGateDropsWhatRestsOnItWhenReleased");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "......", "......" },
+            { "Q#G#  ", "      " },
+            { " K    ", "      " },
+        },
+        .gates = { Level::Gate {
+            .cell = cell(2, 0, 1),
+            .pressurePlates = { cell(0, 0, 1) },
+            .startOpen = true,
+        } },
+        .plates = { Level::Plate {
+            .cell = cell(0, 0, 1),
+            .tile = TileType::PressurePlate,
+        } },
+    }, "start-open trapdoor");
+    GameState state = rules::initialState(level);
+    CHECK(state.players.size() == 2);
+    CHECK(state.players[1].character == CharacterType::Knight);
+    // The rogue holds the plate, so the start-open gate is closed.
+    CHECK(!rules::isGateOpen(level, state, level.gates().front()));
+
+    // The knight walks out onto the closed gate.
+    state = rules::scopedStep(
+        level, state, MoveDirection::Right, {},
+        { .actors = { state.players[1].id } });
+    CHECK(state.players[1].cell == cell(2, 0, 2));
+
+    // The rogue leaves the plate; the gate opens beneath the knight.
+    state = rules::scopedStep(
+        level, state, MoveDirection::Down, {},
+        { .actors = { state.players[0].id } });
+    CHECK(state.players[0].cell == cell(0, 1, 1));
+    CHECK(rules::isGateOpen(level, state, level.gates().front()));
+    CHECK(state.players[1].cell == cell(2, 0, 1));
+    CHECK(!state.players[1].dead);
+}
+
+void testGateDropJoinsClosureWithoutTakingInput()
+{
+    TEST("gateDropJoinsClosureWithoutTakingInput");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "....." },
+            { "PQ G#" },
+            { "   K " },
+        },
+        .gates = { Level::Gate {
+            .cell = cell(3, 0, 1),
+            .pressurePlates = { cell(0, 0, 1) },
+        } },
+    }, "gate drop scope");
+    const GameState state = rules::initialState(level);
+    CHECK(state.players.size() == 2);
+    CHECK(state.players[1].character == CharacterType::Knight);
+    CHECK(state.players[1].cell == cell(3, 0, 2));
+
+    const GameState stepped = rules::scopedStep(
+        level,
+        state,
+        MoveDirection::Left,
+        {},
+        { .actors = { state.players[0].id } });
+    CHECK(stepped.players[0].cell == cell(0, 0, 1));
+    // The knight falls into the gate cell but does not walk on with the
+    // rogue's input.
+    CHECK(stepped.players[1].cell == cell(3, 0, 1));
+    CHECK(!stepped.players[1].dead);
+    CHECK(rules::isGateOpen(level, stepped, level.gates().front()));
+}
+
 void testClosedGateBlocksMovementAndLinkedPlateOpensIt()
 {
     TEST("closedGateBlocksMovementAndLinkedPlateOpensIt");
@@ -3023,6 +3279,12 @@ int main()
     testSlideMomentumOverridesInput();
     testPressurePlatesDoNotLockEnd();
     testClosedGateBlocksMovementAndLinkedPlateOpensIt();
+    testClosedGateIsAFloorAndOpeningDropsTheStackOnIt();
+    testHeroWalksOnClosedGateAndFallsThroughOpenOne();
+    testClosingGateCrushesKillableUnitsButNotBlocks();
+    testStartOpenGateInvertsAndClosesWhenPressed();
+    testStartOpenGateDropsWhatRestsOnItWhenReleased();
+    testGateDropJoinsClosureWithoutTakingInput();
     testRotatorTurnsOccupantOncePerPress();
     testCounterClockwiseRotatorAndPressedStart();
     testRotatedTurretReaimsAndFires();

@@ -116,6 +116,14 @@ void testDigestTracksGameplayContentOnly()
     CHECK(solution::levelDigest(portal) == portalDigest);
     portal.portals[0].color.x = 1.0f;
     CHECK(solution::levelDigest(portal) != portalDigest);
+
+    // Gates: only a start-open gate adds to the digest.
+    auto gated = walkAndPushDefinition;
+    gated.layers[1][2] = "G     ";
+    gated.gates.push_back({ .cell = { 0, 2, 1 } });
+    const auto gatedDigest = solution::levelDigest(gated);
+    gated.gates[0].startOpen = true;
+    CHECK(solution::levelDigest(gated) != gatedDigest);
 }
 
 void testReplayFailuresNameTheStepAndEntity()

@@ -272,7 +272,7 @@ private:
                 frame,
                 gate,
                 input_.manifest,
-                1.0f,
+                gate.startOpen ? config::gateStartOpenEditorOpacity : 1.0f,
                 input_.worldAnimationTimeSeconds);
             return;
         }
@@ -538,11 +538,16 @@ private:
                 ? *found
                 : Level::Gate { .cell = cell };
             if (!pickOnly) {
+                // A start-open gate is drawn faded: it is empty space
+                // until its plates are pressed.
                 appendGateEffect(
                     frame,
                     gate,
                     input_.manifest,
-                    preview ? 0.68f : 1.0f,
+                    (preview ? 0.68f : 1.0f) *
+                        (gate.startOpen
+                                ? config::gateStartOpenEditorOpacity
+                                : 1.0f),
                     input_.worldAnimationTimeSeconds);
             }
             frame.tiles.push_back({

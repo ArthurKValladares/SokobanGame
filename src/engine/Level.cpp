@@ -586,6 +586,16 @@ Record parseLinkedRecord(
                 record.levels.push_back(level.get<int>());
             }
         }
+        if constexpr (requires { record.startOpen; }) {
+            const auto startOpen = object.find("startOpen");
+            if (startOpen != object.end()) {
+                if (!startOpen->is_boolean()) {
+                    throw std::runtime_error(
+                        lower + " 'startOpen' must be true or false");
+                }
+                record.startOpen = startOpen->get<bool>();
+            }
+        }
         if constexpr (requires { record.initialDirection; }) {
             const auto direction = object.find("direction");
             if (direction == object.end() || !direction->is_number_integer()) {
@@ -630,6 +640,12 @@ std::string serializeLinkedRecord(
     };
     if constexpr (requires { record.levels; }) {
         object["levels"] = record.levels;
+    }
+    if constexpr (requires { record.startOpen; }) {
+        // Omitted when false so existing screens serialize unchanged.
+        if (record.startOpen) {
+            object["startOpen"] = true;
+        }
     }
     if constexpr (requires { record.initialDirection; }) {
         object["direction"] = record.initialDirection;

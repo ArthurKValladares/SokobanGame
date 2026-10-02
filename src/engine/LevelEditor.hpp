@@ -325,6 +325,9 @@ public:
     // Elevator tile is on, which is where the platform starts. One undoable
     // command.
     [[nodiscard]] bool setElevatorLevels(std::size_t index, std::vector<int> levels);
+    // Inverts a gate so it is open while its plates are released and closed
+    // while they are all pressed. One undoable command.
+    [[nodiscard]] bool setGateStartOpen(std::size_t index, bool startOpen);
     // Chooses the first rail connector the cart follows from its starting
     // stop: 0/1/2/3 are north/east/south/west.
     [[nodiscard]] bool setMinecartInitialDirection(

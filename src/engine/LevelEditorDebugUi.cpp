@@ -843,6 +843,47 @@ void LevelEditorDebugUi::drawTilePalette(
     }
 
     ImGui::Separator();
+    ImGui::TextUnformatted("Gates");
+    ImGui::TextWrapped(
+        "A closed gate is a solid block that units can stand on; an open gate "
+        "is empty space. A gate opens while all its linked plates are pressed, "
+        "or, when it starts open, closes while they are. Closing on a hero, "
+        "enemy or turret kills it; a rock or ice block holds it open.");
+    const std::vector<Level::Gate>& gates = editor.gates();
+    if (selectedGateIndex_ && *selectedGateIndex_ >= gates.size()) {
+        selectedGateIndex_.reset();
+    }
+    if (!selectedGateIndex_ && !gates.empty()) {
+        selectedGateIndex_ = 0;
+    }
+    if (gates.empty()) {
+        ImGui::TextDisabled("Paint a Gate tile to configure it here.");
+    } else {
+        const std::size_t index = *selectedGateIndex_;
+        const std::string preview = "Gate " + cellText(gates[index].cell);
+        if (ImGui::BeginCombo("Gate", preview.c_str())) {
+            for (std::size_t candidate = 0; candidate < gates.size(); ++candidate) {
+                const std::string label = "Gate " +
+                    cellText(gates[candidate].cell) + "##gate" +
+                    std::to_string(candidate);
+                if (ImGui::Selectable(label.c_str(), candidate == index)) {
+                    selectedGateIndex_ = candidate;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        bool startOpen = gates[*selectedGateIndex_].startOpen;
+        if (ImGui::Checkbox("Start Open", &startOpen)) {
+            (void)editor.setGateStartOpen(*selectedGateIndex_, startOpen);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Inverts the gate: open while its plates are released, closed "
+                "while they are all pressed. Drawn faded in the editor.");
+        }
+    }
+
+    ImGui::Separator();
     ImGui::TextUnformatted("Elevator Stops");
     ImGui::TextWrapped(
         "An elevator platform moves to its next stop each time it activates, "

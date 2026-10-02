@@ -495,6 +495,48 @@ void testElevatorMetadataRoundTripAndValidation()
     }, "before '@layer 0'");
 }
 
+void testGateStartOpenRoundTrips()
+{
+    TEST("gateStartOpenRoundTrips");
+    const Level::Definition definition {
+        .layers = { { "...." }, { "CPGG" } },
+        .gates = {
+            Level::Gate {
+                .cell = { 2, 0, 1 },
+                .pressurePlates = { { 1, 0, 1 } },
+            },
+            Level::Gate {
+                .cell = { 3, 0, 1 },
+                .pressurePlates = { { 1, 0, 1 } },
+                .startOpen = true,
+            },
+        },
+    };
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition(definition);
+    // Only the start-open gate writes the field, so older screens are
+    // unchanged by a save.
+    CHECK(std::ranges::count_if(serialized, [](const std::string& line) {
+        return line.find("startOpen") != std::string::npos;
+    }) == 1);
+    const Level::Definition parsed =
+        Level::parseDefinition(serialized, "start-open round trip");
+    CHECK(parsed == definition);
+    const Level level = Level::loadFromDefinition(parsed, "start-open level");
+    CHECK(!level.gateAt({ 2, 0, 1 })->startOpen);
+    CHECK(level.gateAt({ 3, 0, 1 })->startOpen);
+
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            {
+                "@gate {\"cell\":[1,0,0],\"plates\":[],\"color\":[1,1,1],\"startOpen\":1}",
+                "@layer 0",
+                ".G",
+            },
+            "start-open not a boolean");
+    }, "'startOpen'");
+}
+
 void testEditorLinkColorsRoundTripAndDoNotAffectGameplay()
 {
     TEST("editorLinkColorsRoundTripAndDoNotAffectGameplay");
@@ -1114,6 +1156,7 @@ int main()
     testRotatorMetadataRoundTripAndValidation();
     testElevatorMetadataRoundTripAndValidation();
     testEditorLinkColorsRoundTripAndDoNotAffectGameplay();
+    testGateStartOpenRoundTrips();
     testObjectLinksRoundTripAndValidateMovableCells();
     testPlatePropertyAndCoveredPlateRecords();
     testParserRejectsMalformedStructure();

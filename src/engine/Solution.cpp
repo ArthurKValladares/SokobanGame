@@ -317,6 +317,22 @@ std::uint64_t levelDigest(const Level::Definition& definition)
         text += " direction " + std::to_string(minecart.initialDirection);
         hashBytes(hash, text + "\n");
     }
+    // Start-open gates invert their gate's behaviour. Hashed only for such
+    // gates, so digests of screens without them stay unchanged. (Gate links
+    // themselves are still not part of the digest.)
+    std::vector<GridPosition3> startOpenGates;
+    for (const Level::Gate& gate : definition.gates) {
+        if (gate.startOpen) {
+            startOpenGates.push_back(gate.cell);
+        }
+    }
+    std::ranges::sort(startOpenGates, {}, cellOrder);
+    for (const GridPosition3 cell : startOpenGates) {
+        hashBytes(
+            hash,
+            "@gatestartopen " + std::to_string(cell.x) + "," +
+                std::to_string(cell.y) + "," + std::to_string(cell.z) + "\n");
+    }
     // Object-link colors are gameplay groups. Hash the same 8-bit channels
     // the editor uses for equality so insignificant float spelling changes do
     // not invalidate a recording while a real regrouping always does.

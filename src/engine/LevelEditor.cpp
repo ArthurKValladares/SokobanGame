@@ -2559,6 +2559,22 @@ bool LevelEditor::setElevatorLevels(std::size_t index, std::vector<int> levels)
     return true;
 }
 
+bool LevelEditor::setGateStartOpen(std::size_t index, bool startOpen)
+{
+    if (index >= document_.gates.size() ||
+        document_.gates[index].startOpen == startOpen) {
+        return false;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.gates[index].startOpen = startOpen;
+    document_.dirty = true;
+    document_.status = startOpen
+        ? "Gate now starts open and closes when its plates are pressed."
+        : "Gate now starts closed and opens when its plates are pressed.";
+    recordDocumentChange(before);
+    return true;
+}
+
 bool LevelEditor::setMinecartInitialDirection(
     std::size_t index, uint8_t direction)
 {

@@ -99,6 +99,7 @@ private:
     std::optional<LevelEditor::Tool> selectedToolTab_;
     // The link group (by color) the Links section recolors.
     std::optional<Vec3> selectedLinkGroup_;
+    std::optional<std::size_t> selectedGateIndex_;
     std::optional<std::size_t> selectedElevatorIndex_;
     std::optional<std::size_t> selectedMinecartIndex_;
     // The elevator stop list being typed, and which record (index and stops)

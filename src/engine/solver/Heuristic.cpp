@@ -261,10 +261,13 @@ RelaxedHeuristic::RelaxedHeuristic(const Level& level)
                 const GridPosition3 cell { x, y, z };
                 const std::optional<TileType> support =
                     level.supportingTileAt(cell);
+                // A gate is a floor while it is closed; optimistically,
+                // always (and also empty space, see staticCellAllowsEntity).
                 traversable_[index(cell)] =
                     rules::staticCellAllowsEntity(level, cell) && support &&
                     (tileTypeSupportsEntity(*support) ||
-                        *support == TileType::Water);
+                        *support == TileType::Water ||
+                        *support == TileType::Gate);
                 traversableCellCount_ += traversable_[index(cell)] ? 1 : 0;
             }
         }

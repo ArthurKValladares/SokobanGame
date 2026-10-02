@@ -39,9 +39,14 @@ inline constexpr std::string_view gateParticleTextureName = "ParticleGlow";
 inline constexpr float gateEnergyShellAlpha = 0.30f;
 inline constexpr float gateEnergyCoreAlpha = 0.12f;
 inline constexpr float gateEnergyEdgeAlpha = 0.88f;
-inline constexpr float gateEnergyInset = 0.055f;
+// A closed gate is a solid block, so its shell and rails fill the whole
+// cell; the hair of inset only keeps its faces off neighbouring blocks'.
+inline constexpr float gateEnergyInset = 0.002f;
 inline constexpr float gateEnergyEdgeThickness = 0.075f;
 inline constexpr uint32_t gateEnergyTileCount = 14;
+// Editor opacity of a gate that starts open (closes when its plates are
+// pressed), so it reads as the empty space it is during play.
+inline constexpr float gateStartOpenEditorOpacity = 0.35f;
 inline constexpr float gateCornerParticleOpacity = 0.42f;
 inline constexpr float gateCornerParticleEmissiveStrength = 2.8f;
 inline constexpr float gateCornerParticleSize = 0.38f;
