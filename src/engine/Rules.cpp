@@ -487,6 +487,10 @@ TileType rotateMirrorTile(TileType tile, int quarterTurns)
 
 uint8_t mirrorQuarterTurnsAt(const GameState& state, GridPosition3 cell)
 {
+    if (const GameState::Movable* mirror = movableAt(state, cell);
+        mirror && tileTypeIsMirror(mirror->type)) {
+        return mirror->quarterTurns;
+    }
     const auto found = std::ranges::find(
         state.turnedMirrors, cell, &GameState::TurnedMirror::cell);
     return found == state.turnedMirrors.end() ? uint8_t { 0 } : found->quarterTurns;
@@ -495,6 +499,13 @@ uint8_t mirrorQuarterTurnsAt(const GameState& state, GridPosition3 cell)
 void setMirrorQuarterTurns(
     GameState& state, GridPosition3 cell, uint8_t quarterTurns)
 {
+    for (GameState::Movable& mirror : state.movables) {
+        if (!mirror.fallen && !mirror.dead && mirror.cell == cell &&
+            tileTypeIsMirror(mirror.type)) {
+            mirror.quarterTurns = addQuarterTurns(quarterTurns, 0);
+            return;
+        }
+    }
     std::erase_if(state.turnedMirrors, [&](const GameState::TurnedMirror& mirror) {
         return mirror.cell == cell;
     });
@@ -514,19 +525,13 @@ void setMirrorQuarterTurns(
 }
 
 std::optional<TileType> mirrorTileAt(
-    const Level& level, const GameState& state, GridPosition3 cell)
+    const Level&, const GameState& state, GridPosition3 cell)
 {
-    if (!level.inBounds(cell)) {
-        return std::nullopt;
+    if (const GameState::Movable* mirror = movableAt(state, cell);
+        mirror && tileTypeIsMirror(mirror->type)) {
+        return rotateMirrorTile(mirror->type, mirror->quarterTurns);
     }
-    const TileType tile = level.tileAt(
-        static_cast<uint32_t>(cell.x),
-        static_cast<uint32_t>(cell.y),
-        static_cast<uint32_t>(cell.z));
-    if (!tileTypeIsMirror(tile)) {
-        return std::nullopt;
-    }
-    return rotateMirrorTile(tile, mirrorQuarterTurnsAt(state, cell));
+    return std::nullopt;
 }
 
 std::size_t elevatorStopIndex(std::size_t stopCount, uint8_t phase)
@@ -748,17 +753,10 @@ bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 p
 }
 
 bool isPressurePlateActive(
-    const Level& level,
+    const Level&,
     const GameState& state,
     GridPosition3 plate)
 {
-    if (level.inBounds(plate) &&
-        tileTypeIsMirror(level.tileAt(
-            static_cast<uint32_t>(plate.x),
-            static_cast<uint32_t>(plate.y),
-            static_cast<uint32_t>(plate.z)))) {
-        return true;
-    }
     return playerBlocksAt(state, plate) ||
         movableAt(state, plate) != nullptr ||
         enemyAt(state, plate) != nullptr;
@@ -784,6 +782,22 @@ bool isGateOpen(
                 return isPressurePlateActive(level, state, plate);
             });
     return activated != gate.startOpen;
+}
+
+bool isLockPlateEnabled(
+    const Level& level, const GameState& state, const Level::LockPlate& plate)
+{
+    const bool pressed = !plate.pressurePlates.empty() &&
+        std::ranges::all_of(plate.pressurePlates, [&](GridPosition3 cell) {
+            return isPressurePlateActive(level, state, cell);
+        });
+    return pressed != plate.startEnabled;
+}
+
+bool isUnitLocked(const Level& level, const GameState& state, GridPosition3 cell)
+{
+    const auto* plate = level.lockPlateAt(cell);
+    return plate && isLockPlateEnabled(level, state, *plate);
 }
 
 bool isRotatorEngaged(
@@ -842,12 +856,10 @@ struct RotatedOccupants {
     std::vector<std::size_t> players;
     std::vector<std::size_t> movables;
     std::vector<std::size_t> enemies;
-    std::vector<GridPosition3> mirrors;
 
     [[nodiscard]] bool empty() const
     {
-        return players.empty() && movables.empty() && enemies.empty() &&
-            mirrors.empty();
+        return players.empty() && movables.empty() && enemies.empty();
     }
 };
 
@@ -872,14 +884,6 @@ RotatedOccupants applyRotatorActivations(
             level.plateAt(rotator.cell).value_or(TileType::Air));
         if (!turns) {
             continue;
-        }
-        if (mirrorTileAt(level, state, rotator.cell)) {
-            setMirrorQuarterTurns(
-                state,
-                rotator.cell,
-                addQuarterTurns(
-                    mirrorQuarterTurnsAt(state, rotator.cell), *turns));
-            rotated.mirrors.push_back(rotator.cell);
         }
         for (std::size_t i = 0; i < state.players.size(); ++i) {
             GameState::Player& player = state.players[i];
@@ -942,6 +946,16 @@ struct LiveUnitAt {
     EntityKind kind = EntityKind::Player;
     std::size_t index = 0;
 };
+
+GridPosition3 unitCell(const GameState& state, LiveUnitAt unit)
+{
+    switch (unit.kind) {
+    case EntityKind::Player: return state.players[unit.index].cell;
+    case EntityKind::Movable: return state.movables[unit.index].cell;
+    case EntityKind::Enemy: return state.enemies[unit.index].cell;
+    default: return {};
+    }
+}
 
 std::optional<LiveUnitAt> liveUnitAt(const GameState& state, GridPosition3 cell)
 {
@@ -1026,6 +1040,9 @@ struct GateChanges {
 // rejected rather than leaving a unit standing on nothing.
 bool dropUnit(const Level& level, GameState& state, LiveUnitAt unit)
 {
+    if (isUnitLocked(level, state, unitCell(state, unit))) {
+        return false;
+    }
     switch (unit.kind) {
     case EntityKind::Player: {
         GameState::Player& player = state.players[unit.index];
@@ -1203,7 +1220,9 @@ ElevatorRiders applyElevatorActivations(
         // below the platform going down.
         const int firstSwept = delta > 0 ? from.z + 1 + stackHeight : targetZ;
         const int lastSwept = delta > 0 ? targetZ + stackHeight : from.z - 1;
-        bool blocked = false;
+        bool blocked = std::ranges::any_of(stack, [&](LiveUnitAt unit) {
+            return isUnitLocked(level, state, unitCell(state, unit));
+        });
         for (int z = firstSwept; z <= lastSwept && !blocked; ++z) {
             const GridPosition3 cell { from.x, from.y, z };
             blocked = !cellAllowsEntity(level, state, cell) ||
@@ -1329,7 +1348,12 @@ MinecartRiders applyMinecartActivations(
             stack.push_back(*unit);
         }
 
-        bool blocked = false;
+        bool blocked = std::ranges::any_of(stack, [&](LiveUnitAt unit) {
+            return isUnitLocked(level, state, unitCell(state, unit));
+        });
+        if (blocked) {
+            continue;
+        }
         for (const GridPosition3 railCell : sweep) {
             const std::optional<std::size_t> other =
                 minecartPlatformAt(level, state, railCell);
@@ -1528,6 +1552,7 @@ bool hasPendingMotion(const Level& level, const GameState& state)
     }
     for (std::size_t i = 0; i < state.players.size(); ++i) {
         if (!playerDead(state, i) &&
+            !isUnitLocked(level, state, playerCell(state, i)) &&
             (playerSliding(state, i) ||
                 conveyorDirectionAt(level, playerCell(state, i)))) {
             return true;
@@ -1536,11 +1561,13 @@ bool hasPendingMotion(const Level& level, const GameState& state)
 
     return std::ranges::any_of(state.movables, [&](const GameState::Movable& movable) {
         return !movable.fallen && !movable.dead &&
+            !isUnitLocked(level, state, movable.cell) &&
             (movable.sliding || conveyorDirectionAt(level, movable.cell).has_value());
     }) || std::ranges::any_of(
         state.enemies,
         [&](const GameState::Enemy& enemy) {
             return !enemy.fallen && !enemy.dead &&
+                !isUnitLocked(level, state, enemy.cell) &&
                 (enemy.sliding ||
                     conveyorDirectionAt(level, enemy.cell).has_value());
         });
@@ -1722,7 +1749,8 @@ bool outputRayIsClear(
     int distance)
 {
     for (const auto cell : portalRayPath(level, mirror, ray, distance).cells) {
-        if (!cellAllowsEntity(level, state, cell)) {
+        if (!cellAllowsEntity(level, state, cell) ||
+            mirrorTileAt(level, state, cell)) {
             return false;
         }
     }
@@ -1745,7 +1773,7 @@ std::vector<MirrorHit> nearestMirrors(
     const uint32_t firstLayer =
         level.portals().empty() ? static_cast<uint32_t>(entityCell.z) : 0;
     const uint32_t lastLayer =
-        level.portals().empty() ? firstLayer + 1 : level.depth();
+        level.portals().empty() ? firstLayer + 1 : level.depth() + 1;
     for (uint32_t z = firstLayer; z < lastLayer; ++z) {
         for (uint32_t y = 0; y < level.height(); ++y) {
             for (uint32_t x = 0; x < level.width(); ++x) {
@@ -1947,7 +1975,8 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
     for (std::size_t sourcePlayer = 0;
          sourcePlayer < originalPlayerCount;
          ++sourcePlayer) {
-        if (playerDead(state, sourcePlayer)) {
+        if (playerDead(state, sourcePlayer) ||
+            isUnitLocked(level, state, playerCell(state, sourcePlayer))) {
             continue;
         }
         const std::optional<std::vector<ReflectedPath>> reflectedPaths =
@@ -1998,7 +2027,10 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
     }
 
     for (std::size_t i = 0; i < state.movables.size(); ++i) {
-        if (state.movables[i].fallen || state.movables[i].dead) {
+        // Mirrors are reflectors, even though they now move as units.
+        if (state.movables[i].fallen || state.movables[i].dead ||
+            tileTypeIsMirror(state.movables[i].type) ||
+            isUnitLocked(level, state, state.movables[i].cell)) {
             continue;
         }
         const std::optional<std::vector<ReflectedPath>> reflectedPaths =
@@ -2023,7 +2055,8 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
     }
 
     for (std::size_t i = 0; i < state.enemies.size(); ++i) {
-        if (state.enemies[i].fallen || state.enemies[i].dead) {
+        if (state.enemies[i].fallen || state.enemies[i].dead ||
+            isUnitLocked(level, state, state.enemies[i].cell)) {
             continue;
         }
         const std::optional<std::vector<ReflectedPath>> reflectedPaths =
@@ -2541,7 +2574,8 @@ private:
         std::size_t playerIndex) const
     {
         const Status& status = status_[entityIndexForPlayer(playerIndex)];
-        if (status.done || !status.active || playerDead(after_, playerIndex)) {
+        if (status.done || !status.active || playerDead(after_, playerIndex) ||
+            isUnitLocked(level_, after_, playerCell(after_, playerIndex))) {
             return std::nullopt;
         }
         if (playerSliding(after_, playerIndex)) {
@@ -2700,6 +2734,10 @@ private:
             if (status.done || !status.active) {
                 continue;
             }
+            if (isUnitLocked(level_, after_, cellOf(i))) {
+                slidingOf(i).reset();
+                continue;
+            }
             if (isPlayer(i)) {
                 const std::size_t playerIndex = playerIndexForEntity(i);
                 if (const std::optional<PlayerMovementIntent> movement =
@@ -2823,7 +2861,8 @@ private:
         MoveDirection direction)
     {
         Status& blockerStatus = status_[blockerIndex];
-        if (blockerStatus.movedThisMicro) {
+        if (blockerStatus.movedThisMicro ||
+            isUnitLocked(level_, after_, after_.movables[blockerIndex].cell)) {
             return false;
         }
         const GridPosition3 destination =
@@ -2918,7 +2957,8 @@ private:
             for (const std::size_t index : members) {
                 GameState::Movable& movable = after_.movables[index];
                 Status& status = status_[index];
-                if (status.movedThisMicro || movable.fallen || movable.dead) {
+                if (status.movedThisMicro || movable.fallen || movable.dead ||
+                    isUnitLocked(level_, after_, movable.cell)) {
                     continue;
                 }
                 const GridPosition3 destination =
@@ -2946,6 +2986,11 @@ private:
     [[nodiscard]] bool resolveMovable(std::size_t index, bool& anyMovement)
     {
         Status& status = status_[index];
+        if (isUnitLocked(level_, after_, cellOf(index))) {
+            slidingOf(index).reset();
+            status.resolved = true;
+            return true;
+        }
         const MoveDirection direction = *status.intent;
         const GridPosition3 target = *status.target;
 
@@ -3010,6 +3055,11 @@ private:
         bool& anyMovement)
     {
         Status& status = status_[entityIndex];
+        if (isUnitLocked(level_, after_, cellOf(entityIndex))) {
+            slidingOf(entityIndex).reset();
+            status.resolved = true;
+            return true;
+        }
         const std::size_t enemyIndex = enemyIndexForEntity(entityIndex);
         const MoveDirection direction = *status.intent;
         const GridPosition3 target = *status.target;
@@ -3083,6 +3133,11 @@ private:
         bool& anyMovement)
     {
         Status& status = status_[entityIndex];
+        if (isUnitLocked(level_, after_, cellOf(entityIndex))) {
+            slidingOf(entityIndex).reset();
+            status.resolved = true;
+            return true;
+        }
         const std::size_t playerIndex = playerIndexForEntity(entityIndex);
         const MoveDirection direction = *status.intent;
         const GridPosition3 target = *status.target;
@@ -3097,6 +3152,10 @@ private:
 
         if (status.contested) {
             cancelAndFinish(entityIndex, true);
+            status.resolved = true;
+            return true;
+        }
+        if (status.witchSwapTarget && isUnitLocked(level_, after_, target)) {
             status.resolved = true;
             return true;
         }
@@ -3264,6 +3323,7 @@ private:
                     .has_value() &&
                 occupied(pushTarget);
             if (status.inputDriven && !druid &&
+                !isUnitLocked(level_, after_, target) &&
                 !status_[blockerIndex].movedThisMicro &&
                 !occupiedPortalExit &&
                 portalEntryClear(target, direction, after_) &&
@@ -3357,6 +3417,12 @@ private:
         GameState trial = after_;
         for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
             const ChainEntity entity = *it;
+            const GridPosition3 origin = entity.movable
+                ? trial.movables[entity.index].cell
+                : trial.enemies[entity.index].cell;
+            if (isUnitLocked(level_, trial, origin)) {
+                return false;
+            }
             if (entity.movable) {
                 if (status_[entity.index].movedThisMicro) {
                     return false;
@@ -3422,8 +3488,9 @@ private:
     {
         const GridPosition3 destination =
             movementDestination(after_.enemies[enemyIndex].cell, direction);
-        return portalEntryClear(
-                   after_.enemies[enemyIndex].cell, direction, after_) &&
+        return !isUnitLocked(level_, after_, after_.enemies[enemyIndex].cell) &&
+            portalEntryClear(
+                after_.enemies[enemyIndex].cell, direction, after_) &&
             cellAllowsEntity(level_, after_, destination) &&
             !movableBlocksAt(after_, destination, after_.movables.size()) &&
             !playerBlocksAt(after_, destination) &&
@@ -4059,7 +4126,7 @@ private:
                 const bool alreadyMoved = entity->movable
                     ? status_[entity->index].movedThisMicro
                     : enemyMovedThisMicro_[entity->index];
-                if (!alreadyMoved) {
+                if (!alreadyMoved && !isUnitLocked(level_, after_, pullSource)) {
                     pulled = entity;
                 }
             }

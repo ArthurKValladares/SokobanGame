@@ -85,10 +85,8 @@ struct GameState {
         bool operator==(const Enemy&) const = default;
     };
 
-    // A mirror a rotator plate has turned. Mirrors are static level tiles;
-    // only their orientation can change, so only turned mirrors are listed,
-    // sorted by cell (z, y, x) and never with zero quarter turns. An empty
-    // list means every mirror is as authored.
+    // Legacy checkpoint representation for turns of formerly static mirrors.
+    // Live mirrors are Movables; this list is retained for save compatibility.
     struct TurnedMirror {
         GridPosition3 cell {};
         // Clockwise quarter turns (1-3) from the authored mirror tile.
@@ -224,8 +222,8 @@ struct StepResult {
 // Quarter turns rotators have applied to the mirror at `cell` (0 if none).
 [[nodiscard]] uint8_t mirrorQuarterTurnsAt(
     const GameState& state, GridPosition3 cell);
-// Records the mirror at `cell` as turned by `quarterTurns`, keeping
-// GameState::turnedMirrors sorted and free of zero entries.
+// Updates a live mirror's orientation, or records a legacy static mirror turn
+// when no live mirror occupies the cell.
 void setMirrorQuarterTurns(
     GameState& state, GridPosition3 cell, uint8_t quarterTurns);
 // The mirror tile currently at `cell`, including rotator turns. Empty when
@@ -294,7 +292,7 @@ void setMirrorQuarterTurns(
 [[nodiscard]] bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 position);
 
 // A pressure plate is pressed by a live hero, movable or enemy, or by a
-// mirror authored on top of it (which holds it pressed for good).
+// a mirror unit currently standing on it.
 [[nodiscard]] bool isPressurePlateActive(
     const Level& level,
     const GameState& state,
@@ -306,6 +304,11 @@ void setMirrorQuarterTurns(
 // True while every pressure plate linked to the rotator has a live occupant.
 // A rotator turns its occupant only on the step this becomes true, so a unit
 // left standing on a pressed plate does not keep the rotator spinning.
+[[nodiscard]] bool isLockPlateEnabled(
+    const Level& level, const GameState& state, const Level::LockPlate& plate);
+[[nodiscard]] bool isUnitLocked(
+    const Level& level, const GameState& state, GridPosition3 cell);
+
 [[nodiscard]] bool isRotatorEngaged(
     const Level& level,
     const GameState& state,

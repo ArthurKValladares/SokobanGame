@@ -148,6 +148,7 @@ const AssetManifest& testManifest()
         { "name": "RotatorClockwise", "path": "rotator-cw.glb", "preserveSourceScale": true },
         { "name": "RotatorCounterClockwise", "path": "rotator-ccw.glb", "preserveSourceScale": true },
         { "name": "RotatorGear", "path": "rotator-gear.glb", "preserveSourceScale": true },
+        { "name": "LockPlate", "path": "lock.glb", "preserveSourceScale": true },
         { "name": "RotatorIconClockwise", "path": "rotator-icon-cw.glb", "preserveSourceScale": true },
         { "name": "RotatorIconCounterClockwise", "path": "rotator-icon-ccw.glb", "preserveSourceScale": true },
         { "name": "ElevatorPlatform", "path": "platform.glb" },
@@ -183,6 +184,7 @@ const AssetManifest& testManifest()
         { "tile": "Player", "model": "Hero" },
         { "tile": "Enemy", "model": "Enemy" },
         { "tile": "Rotator Clockwise", "model": "RotatorClockwise" },
+        { "tile": "Lock Plate", "model": "LockPlate" },
         { "tile": "Rotator Counter-Clockwise", "model": "RotatorCounterClockwise" },
         { "tile": "Elevator", "model": "ElevatorPlatform" },
         { "tile": "Rail Straight North-South", "model": "MinecartRailStraight" },
@@ -1311,6 +1313,66 @@ void testGateEnergyCubeFadesAndPressurePlateMatchesColor()
         [](const RenderFrameData::Tile& tile) {
             return tile.cell == GridPosition3 { 2, 0, 1 } && tile.pickOnly;
         }));
+}
+
+void testLockPlateRendersUnderOccupantsAndDimsWhenDisabled()
+{
+    TEST("lockPlateRendersUnderOccupantsAndDimsWhenDisabled");
+    const Vec3 color { 0.8f, 0.3f, 0.6f };
+    const GridPosition3 cell { 2, 0, 1 };
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "...." }, { "CPR " } },
+        .lockPlates = { { .cell = cell, .pressurePlates = { { 1, 0, 1 } },
+            .color = color, .startEnabled = true } },
+        .plates = { { .cell = cell, .tile = TileType::LockPlate } },
+    }, "lock visuals");
+    const auto& manifest = testManifest();
+    auto state = rules::initialState(level);
+    GameplayPresentation presentation;
+    const auto build = [&] {
+        presentation.resetEntities(state);
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = manifest, .level = level, .state = state,
+            .moving = false, .projectedState = state,
+            .presentation = presentation, .settings = {},
+        });
+    };
+    const auto plate = [&](const auto& frame) {
+        return std::ranges::find_if(frame.tiles, [&](const auto& tile) {
+            return tile.cell == cell && tile.model == manifest.modelForTile(TileType::LockPlate);
+        });
+    };
+    const auto enabled = build();
+    CHECK(std::ranges::count_if(enabled.tiles, [&](const auto& tile) {
+        return tile.cell == cell && tile.model == manifest.modelForTile(TileType::LockPlate);
+    }) == 1);
+    const auto enabledPlate = plate(enabled);
+    CHECK(enabledPlate != enabled.tiles.end());
+    if (enabledPlate != enabled.tiles.end()) {
+        CHECK(near(enabledPlate->color.x, color.x));
+        CHECK(near(enabledPlate->height, config::rotatorPlateHeight));
+    }
+    state.players[0].cell = { 1, 0, 1 };
+    const auto disabled = build();
+    const auto disabledPlate = plate(disabled);
+    CHECK(disabledPlate != disabled.tiles.end());
+    if (disabledPlate != disabled.tiles.end()) {
+        CHECK(near(disabledPlate->color.x, color.x * 0.45f));
+    }
+    LevelEditor editor;
+    editor.newDocument(4, 2, false);
+    editor.setActiveLinkColor(color);
+    CHECK(editor.setCell(cell, TileType::LockPlate));
+    CHECK(editor.setCell(cell, TileType::Rock));
+    const auto editorFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = {},
+    });
+    const auto editorPlate = plate(editorFrame);
+    CHECK(editorPlate != editorFrame.tiles.end());
+    if (editorPlate != editorFrame.tiles.end()) {
+        CHECK(near(editorPlate->color.x, color.x));
+        CHECK(near(editorPlate->size.x, config::rotatorPlateWidthDepth));
+    }
 }
 
 void testRotatorPlateSpinsWithTheUnitItTurns()
@@ -3745,6 +3807,7 @@ int main()
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();
     testGameplayVisibleCellFiltersComposedWorldFrame();
     testGateEnergyCubeFadesAndPressurePlateMatchesColor();
+    testLockPlateRendersUnderOccupantsAndDimsWhenDisabled();
     testRotatorPlateSpinsWithTheUnitItTurns();
     testElevatorPlatformIsFlushAndCarriesItsRider();
     testMinecartRendersOnItsStopAndCarriesItsRider();

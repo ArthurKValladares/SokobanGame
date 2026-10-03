@@ -58,8 +58,7 @@ struct StateDelta {
     [[nodiscard]] StateDelta inverted() const;
 
     [[nodiscard]] bool empty() const;
-    // Entities only; mirror turns and moving platforms are not entities and
-    // have no ids.
+    // Entities only; legacy static-mirror turns and platforms have no ids.
     [[nodiscard]] std::size_t changedEntityCount() const;
     // Entity ids use players, movables, enemies order, matching the delta's
     // application order. Appending preserves that order and intentionally
@@ -70,8 +69,7 @@ struct StateDelta {
 
     bool operator==(const StateDelta&) const = default;
 
-    // Mirrors are not entities: they never move, and only their orientation
-    // can change. They are keyed by cell; zero means "as authored".
+    // Legacy static-mirror turns. Live mirrors use movable entity changes.
     struct MirrorChange {
         GridPosition3 cell {};
         uint8_t before = 0;

@@ -708,15 +708,15 @@ void testPlatePropertyAndCoveredPlateRecords()
     // A unit standing on a plate leaves the plate in the static grid.
     CHECK(level.tileAt(0, 0, 1) == TileType::End);
     CHECK(level.tileAt(2, 0, 1) == TileType::PressurePlate);
-    // A mirror covers its plate, which stays reachable through plateAt.
-    CHECK(level.tileAt(3, 0, 1) == TileType::MirrorNorthWest);
+    // Mirrors leave their plate in the static grid, just like other units.
+    CHECK(level.tileAt(3, 0, 1) == TileType::RotatorClockwise);
     CHECK(level.plateAt({ 3, 0, 1 }) == TileType::RotatorClockwise);
     CHECK(level.plateAt({ 4, 0, 1 }) == TileType::RotatorCounterClockwise);
     CHECK(level.plateAt({ 5, 0, 1 }) == TileType::End);
     CHECK(!level.plateAt({ 0, 0, 0 }));
     CHECK(level.pressurePlates().size() == 2);
     CHECK(level.ends().size() == 2);
-    CHECK(level.movableTiles().size() == 1);
+    CHECK(level.movableTiles().size() == 2);
     CHECK(level.playerStarts().front().position == GridPosition3({ 0, 0, 1 }));
 
     const auto plateUnder = [](char occupant, TileType plate) {
@@ -727,10 +727,10 @@ void testPlatePropertyAndCoveredPlateRecords()
             .plates = { Level::Plate { .cell = { 2, 0, 1 }, .tile = plate } },
         };
     };
-    // An End under a mirror can never hold a hero, so it is not counted.
+    // Pushing the mirror away exposes the End for a hero.
     const Level coveredEnd = Level::loadFromDefinition(
         plateUnder('1', TileType::End), "end under mirror");
-    CHECK(coveredEnd.ends().empty());
+    CHECK(coveredEnd.ends().size() == 1);
     CHECK(coveredEnd.plateAt({ 2, 0, 1 }) == TileType::End);
 
     checkThrowsContaining([&] {
@@ -1141,10 +1141,41 @@ void testPortalMetadata()
     CHECK(!tileTypeIsMovableObject(TileType::PortalNorth));
 }
 
+
+void testLockPlateMetadata()
+{
+    TEST("lockPlateMetadata");
+    const Level::Definition definition {
+        .layers = { { "...." }, { "CPRJ" } },
+        .lockPlates = {
+            { .cell = { 2, 0, 1 }, .pressurePlates = { { 1, 0, 1 } }, .startEnabled = true },
+            { .cell = { 3, 0, 1 } },
+        },
+        .plates = { { .cell = { 2, 0, 1 }, .tile = TileType::LockPlate } },
+    };
+    const auto parsed = Level::parseDefinition(Level::serializeDefinition(definition), "lock roundtrip");
+    CHECK(parsed == definition);
+    const auto level = Level::loadFromDefinition(parsed, "lock");
+    CHECK(level.plateAt({ 2, 0, 1 }) == TileType::LockPlate);
+    CHECK(level.lockPlateForPressurePlate({ 1, 0, 1 }) == level.lockPlateAt({ 2, 0, 1 }));
+    CHECK(level.pressurePlateLinkColor({ 1, 0, 1 }) == definition.lockPlates[0].color);
+    CHECK(tileTypeFromName("Lock Plate") == TileType::LockPlate);
+    auto invalid = definition;
+    invalid.lockPlates.clear();
+    checkThrowsContaining([&] { (void)Level::loadFromDefinition(invalid, "missing"); }, "@lockplate");
+    invalid = definition;
+    invalid.lockPlates[0].pressurePlates = { { 0, 0, 1 } };
+    checkThrowsContaining([&] { (void)Level::loadFromDefinition(invalid, "bad link"); }, "Pressure tiles");
+    checkThrowsContaining([&] { (void)Level::parseDefinition({
+        "@lockplate {\"cell\":[0,0,1],\"plates\":[],\"color\":[1,1,1],\"startEnabled\":1}",
+        "@layer 0", "..", "@layer 1", "CJ" }, "bad toggle"); }, "startEnabled");
+}
+
 } // namespace
 
 int main()
 {
+    testLockPlateMetadata();
     testPortalMetadata();
     testLegacyAndLayeredParsing();
     testSerializationRoundTrip();

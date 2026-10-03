@@ -417,7 +417,9 @@ void testUnitsAndMirrorsStackOnPlates()
     CHECK(editor.documentPlateAt(rotatorCell) == TileType::RotatorClockwise);
     CHECK(editor.rotators().size() == 1);
     CHECK(editor.rotators()[0].color == linkColor);
-    // Painting the same stack again changes nothing.
+    // Repainting a movable mirror gives it the active object link color.
+    CHECK(editor.setCell(rotatorCell, TileType::MirrorNorthWest));
+    // Once linked, painting the same stack again changes nothing.
     CHECK(!editor.setCell(rotatorCell, TileType::MirrorNorthWest));
     // Replacing the occupant keeps the plate.
     CHECK(editor.setCell(rotatorCell, TileType::Rock));
@@ -2054,6 +2056,33 @@ void testPortalColorGroups()
     CHECK(!loaded.documentToLevel().portalExit(first));
 }
 
+
+void testLockPlateEditor()
+{
+    TEST("lockPlateEditor");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(6, 3, false);
+    const GridPosition3 lock { 2, 1, 1 }, pressure { 1, 1, 1 };
+    CHECK(editor.setCell(lock, TileType::LockPlate));
+    CHECK(editor.setCell(pressure, TileType::PressurePlate));
+    CHECK(editor.setCell(lock, TileType::Rock));
+    CHECK(editor.documentPlateAt(lock) == TileType::LockPlate);
+    CHECK(editor.setLockPlateStartEnabled(0, true));
+    CHECK(editor.tryUndoEdit());
+    CHECK(!editor.lockPlates()[0].startEnabled);
+    CHECK(editor.tryRedoEdit());
+    const auto definition = editor.documentDefinition();
+    CHECK(definition.lockPlates[0].startEnabled);
+    CHECK(definition.lockPlates[0].pressurePlates == std::vector<GridPosition3> { pressure });
+    CHECK(editor.linkGroups()[0].lockPlates == std::vector<GridPosition3> { lock });
+    CHECK(Level::parseDefinition(Level::serializeDefinition(definition), "editor lock").lockPlates == definition.lockPlates);
+    CHECK(editor.setCell(lock, TileType::Wall));
+    CHECK(editor.lockPlates().empty());
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.lockPlates()[0].startEnabled);
+}
+
 } // namespace
 
 void testStrokeIsOneUndoStepAndRedoReplaysIt()
@@ -2360,6 +2389,7 @@ void testReloadFromDiskKeepsDraftsAndIgnoresOwnSaves()
 
 int main()
 {
+    testLockPlateEditor();
     testPortalColorGroups();
     testDocumentCommandsAndUndo();
     testColorGroupsBecomeExplicitLinks();

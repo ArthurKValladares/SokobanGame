@@ -77,15 +77,14 @@ bool tileTypeIsPlate(TileType type)
 
 bool tileTypeCanStandOnPlate(TileType type)
 {
-    return tileTypeOccupiesLevelCell(type) || tileTypeIsMirror(type) ||
-        tileTypeIsMinecart(type);
+    return tileTypeOccupiesLevelCell(type) || tileTypeIsMinecart(type);
 }
 
 bool tileTypeOccupiesLevelCell(TileType type)
 {
     return tileTypeIsPlayerStart(type) || type == TileType::Rock ||
         type == TileType::Ice || type == TileType::Enemy ||
-        tileTypeIsTurret(type);
+        tileTypeIsTurret(type) || tileTypeIsMirror(type);
 }
 
 bool tileTypeIsSolidBlock(TileType type)
@@ -151,7 +150,7 @@ bool tileTypeIsTurret(TileType type)
 bool tileTypeIsMovableObject(TileType type)
 {
     return type == TileType::Rock || type == TileType::Ice ||
-        tileTypeIsTurret(type);
+        tileTypeIsTurret(type) || tileTypeIsMirror(type);
 }
 
 bool tileTypeIsDecorative(TileType type)

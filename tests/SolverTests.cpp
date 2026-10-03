@@ -92,9 +92,10 @@ void testRelaxedHeuristicUsesMirrorTransport()
 
     CHECK(heuristic.traversableCellCount() > 0);
     CHECK(heuristic.edgeCount() > 0);
-    CHECK(heuristic.mirrorEdgeCount() > 0);
-    // Plates are switches now, so the estimate follows the hero to the End.
-    CHECK(heuristic.estimate(rules::initialState(level)) == 3);
+    // Movable mirrors can create transport edges anywhere; fixed authored
+    // mirror edges cannot give an admissible estimate for these screens.
+    CHECK(heuristic.mirrorEdgeCount() == 0);
+    CHECK(heuristic.estimate(rules::initialState(level)) == 0);
 
     const Level assignmentLevel = Level::loadFromDefinition(
         assignmentHeuristicDefinition, "assignment heuristic test");

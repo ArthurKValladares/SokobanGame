@@ -70,6 +70,7 @@ enum class TileType {
     PortalEast,
     PortalSouth,
     PortalWest,
+    LockPlate,
     Count,
 };
 
@@ -157,6 +158,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::PortalEast, 'o', "Portal East", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::PortalSouth, 'p', "Portal South", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::PortalWest, 'q', "Portal West", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::LockPlate, 'J', "Lock Plate", { 0.70f, 0.48f, 0.90f, 1.0f }, {}, TileProperty::Plate },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -187,6 +189,10 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeIsMovableObject(TileType type);
 [[nodiscard]] bool tileTypeIsDecorative(TileType type);
 [[nodiscard]] bool tileTypeIsRotator(TileType type);
+[[nodiscard]] inline bool tileTypeIsLockPlate(TileType type)
+{
+    return type == TileType::LockPlate;
+}
 [[nodiscard]] bool tileTypeIsElevator(TileType type);
 [[nodiscard]] bool tileTypeIsRail(TileType type);
 [[nodiscard]] bool tileTypeIsRailStop(TileType type);

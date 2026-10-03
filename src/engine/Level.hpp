@@ -51,6 +51,16 @@ public:
         bool operator==(const Rotator&) const = default;
     };
 
+    // Holds occupants in place while enabled; linked plates invert the start state.
+    struct LockPlate {
+        GridPosition3 cell {};
+        std::vector<GridPosition3> pressurePlates;
+        Vec3 color { 0.70f, 0.48f, 0.90f };
+        bool startEnabled = false;
+
+        bool operator==(const LockPlate&) const = default;
+    };
+
     // An Elevator tile's authored record. The tile marks the platform's
     // starting cell; `levels` lists the layers the platform stops at, in
     // travel order, and always includes the starting layer. Activation follows
@@ -108,7 +118,7 @@ public:
     };
 
     // Level-editor bookkeeping, never read by gameplay. In the editor a
-    // pressure plate drives every gate, rotator and elevator of its color;
+    // pressure plate drives every gate, rotator, lock plate and elevator of its color;
     // saving turns those color groups into the explicit `pressurePlates`
     // lists above, which are what gameplay uses. Linked plates take their
     // color back from their device when a screen is loaded, so only a
@@ -208,6 +218,7 @@ public:
         std::vector<ScreenSelector> selectors;
         std::vector<Gate> gates;
         std::vector<Rotator> rotators;
+        std::vector<LockPlate> lockPlates;
         std::vector<Plate> plates;
         std::vector<Elevator> elevators;
         std::vector<Minecart> minecarts;
@@ -252,7 +263,8 @@ public:
         const std::vector<Elevator>& elevators = {},
         const std::vector<Minecart>& minecarts = {},
         const std::vector<ObjectLink>& objectLinks = {},
-        const std::vector<Portal>& portals = {});
+        const std::vector<Portal>& portals = {},
+        const std::vector<LockPlate>& lockPlates = {});
     [[nodiscard]] static Definition parseDefinition(
         const std::vector<std::string>& lines,
         std::string_view sourceName);
@@ -304,6 +316,9 @@ public:
     [[nodiscard]] const std::vector<Rotator>& rotators() const { return rotators_; }
     [[nodiscard]] const Rotator* rotatorAt(GridPosition3 cell) const;
     [[nodiscard]] const Rotator* rotatorForPressurePlate(GridPosition3 cell) const;
+    [[nodiscard]] const std::vector<LockPlate>& lockPlates() const { return lockPlates_; }
+    [[nodiscard]] const LockPlate* lockPlateAt(GridPosition3 cell) const;
+    [[nodiscard]] const LockPlate* lockPlateForPressurePlate(GridPosition3 cell) const;
     [[nodiscard]] const std::vector<Elevator>& elevators() const { return elevators_; }
     // The elevator authored at `cell` (its starting cell), if any.
     [[nodiscard]] const Elevator* elevatorAt(GridPosition3 cell) const;
@@ -315,12 +330,11 @@ public:
     }
     [[nodiscard]] const Minecart* minecartAt(GridPosition3 cell) const;
     [[nodiscard]] const Minecart* minecartForPressurePlate(GridPosition3 cell) const;
-    // The color a pressure plate takes from the gate, rotator or elevator it
+    // The color a pressure plate takes from the gate, rotator, lock plate or elevator it
     // drives, in that order of precedence. Empty for unlinked plates.
     [[nodiscard]] std::optional<Vec3> pressurePlateLinkColor(GridPosition3 cell) const;
     // The plate at `cell`, whether it is uncovered or has something authored
-    // on top of it. Units standing on a plate leave it in tileAt(); a mirror
-    // on a plate replaces it there, so rules that ask about plates use this.
+    // on top of it. Movable units, including mirrors, leave it in tileAt().
     [[nodiscard]] std::optional<TileType> plateAt(GridPosition3 cell) const;
     // Every `@plate` record (plates authored beneath an occupant).
     [[nodiscard]] const std::vector<Plate>& coveredPlates() const { return coveredPlates_; }
@@ -350,6 +364,7 @@ private:
     std::vector<GridPosition3> pressurePlates_;
     std::vector<Gate> gates_;
     std::vector<Rotator> rotators_;
+    std::vector<LockPlate> lockPlates_;
     std::vector<Elevator> elevators_;
     std::vector<Minecart> minecarts_;
     std::vector<MinecartRoute> minecartRoutes_;

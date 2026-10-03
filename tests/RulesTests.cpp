@@ -1270,6 +1270,75 @@ void testUnitsAuthoredOnPlatesUseThem()
     CHECK(rules::isGateOpen(startsDone, opening, startsDone.gates().front()));
 }
 
+void testMirrorsPushAndReflectFromTheirCurrentCell()
+{
+    TEST("mirrorsPushAndReflectFromTheirCurrentCell");
+    for (const TileType type : { TileType::MirrorNorthWest,
+             TileType::MirrorNorthEast, TileType::MirrorSouthWest,
+             TileType::MirrorSouthEast }) {
+        std::string row = "C";
+        row += tileTypeToChar(type);
+        row += "  #";
+        const Level level = Level::loadFromLayers(
+            { { "....." }, { row } }, "pushable mirror");
+        GameState before = rules::initialState(level);
+        CHECK(before.movables.size() == 1);
+        before.movables[0].quarterTurns = 1;
+        CHECK(level.tileAt(1, 0, 1) == TileType::Air);
+        const GameState pushed = rules::step(level, before, MoveDirection::Right);
+        CHECK(pushed.players[0].cell == cell(1, 0, 1));
+        CHECK(pushed.movables[0].cell == cell(2, 0, 1));
+        CHECK(pushed.movables[0].id == before.movables[0].id);
+        CHECK(rules::mirrorTileAt(level, pushed, cell(2, 0, 1)) ==
+            rules::rotateMirrorTile(type, 1));
+        CHECK(!rules::mirrorTileAt(level, pushed, cell(1, 0, 1)));
+        const StateDelta delta = StateDelta::between(before, pushed);
+        GameState undone = pushed;
+        delta.inverted().applyTo(undone);
+        CHECK(undone == before);
+        const GameState atWall = rules::step(level, pushed, MoveDirection::Right);
+        CHECK(rules::step(level, atWall, MoveDirection::Right) == atWall);
+    }
+
+    const Level level = Level::loadFromLayers({
+        { ".....", ".....", ".....", "....." },
+        { "     ", "     ", " C1  ", "     " },
+    }, "reflection after mirror push");
+    GameState pushed = rules::step(level, rules::initialState(level), MoveDirection::Right);
+    CHECK(pushed.movables[0].cell == cell(3, 2, 1));
+    pushed.players[0].cell = cell(3, 0, 1);
+    const auto reflected = rules::activateMirrors(level, pushed);
+    CHECK(reflected && reflected->players[0].cell == cell(1, 2, 1));
+    CHECK(reflected && reflected->movables[0] == pushed.movables[0]);
+    pushed.movables[0].fallen = true;
+    CHECK(!rules::mirrorTileAt(level, pushed, cell(3, 2, 1)));
+    CHECK(!rules::activateMirrors(level, pushed));
+}
+
+void testPushingMirrorReleasesPressurePlate()
+{
+    TEST("pushingMirrorReleasesPressurePlate");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "....." }, { "C1 G " } },
+        .gates = { Level::Gate {
+            .cell = cell(3, 0, 1),
+            .pressurePlates = { cell(1, 0, 1) },
+        } },
+        .plates = { Level::Plate {
+            .cell = cell(1, 0, 1), .tile = TileType::PressurePlate,
+        } },
+    }, "push mirror off pressure plate");
+    const GameState initial = rules::initialState(level);
+    CHECK(rules::isGateOpen(level, initial, level.gates().front()));
+    const GameState pushed = rules::step(level, initial, MoveDirection::Right);
+    CHECK(pushed.movables[0].cell == cell(2, 0, 1));
+    // The hero presses the plate until they leave it as well.
+    CHECK(rules::isGateOpen(level, pushed, level.gates().front()));
+    const GameState released = rules::step(level, pushed, MoveDirection::Left);
+    CHECK(!rules::isPressurePlateActive(level, released, cell(1, 0, 1)));
+    CHECK(!rules::isGateOpen(level, released, level.gates().front()));
+}
+
 void testMirrorOnRotatorTurnsAndReflectsDifferently()
 {
     TEST("mirrorOnRotatorTurnsAndReflectsDifferently");
@@ -1287,7 +1356,7 @@ void testMirrorOnRotatorTurnsAndReflectsDifferently()
             .tile = TileType::RotatorClockwise,
         } },
     }, "mirror on rotator");
-    CHECK(level.tileAt(2, 2, 1) == TileType::MirrorNorthWest);
+    CHECK(level.tileAt(2, 2, 1) == TileType::RotatorClockwise);
     CHECK(level.plateAt(cell(2, 2, 1)) == TileType::RotatorClockwise);
     GameState state = rules::initialState(level);
     CHECK(rules::mirrorTileAt(level, state, cell(2, 2, 1)) ==
@@ -1302,7 +1371,7 @@ void testMirrorOnRotatorTurnsAndReflectsDifferently()
     CHECK(rules::mirrorQuarterTurnsAt(state, cell(2, 2, 1)) == 1);
     CHECK(rules::mirrorTileAt(level, state, cell(2, 2, 1)) ==
         TileType::MirrorNorthEast);
-    CHECK(state.turnedMirrors.size() == 1);
+    CHECK(state.movables[0].quarterTurns == 1);
 
     // Turned clockwise, it now reflects the same hero east.
     GameState north = state;
@@ -1349,9 +1418,9 @@ void testMirrorOnPressurePlateHoldsItPressed()
     CHECK(rules::isPressurePlateActive(level, state, cell(2, 0, 1)));
     CHECK(rules::isGateOpen(level, state, level.gates().front()));
     // Held from the start, so the linked rotator never fires.
-    state.movables[0].cell = cell(4, 0, 1);
+    state.movables[1].cell = cell(4, 0, 1);
     state = rules::step(level, state, MoveDirection::Right);
-    CHECK(state.movables[0].quarterTurns == 0);
+    CHECK(state.movables[1].quarterTurns == 0);
 }
 
 void testStateDeltaCarriesMirrorTurns()
@@ -2251,10 +2320,10 @@ void testMirrorReflectsMovablesAndStopsAtNearestEntity()
 
     CHECK(after.has_value());
     CHECK(after && after->players[0].cell == state.players[0].cell);
-    CHECK(after && after->movables[0].type == TileType::Rock);
-    CHECK(after && after->movables[0].cell == cell(1, 2, 1));
+    CHECK(after && after->movables[1].type == TileType::Rock);
+    CHECK(after && after->movables[1].cell == cell(1, 2, 1));
     // The nearer rock occludes the ice on the same input ray.
-    CHECK(after && after->movables[1].cell == cell(2, 4, 1));
+    CHECK(after && after->movables[2].cell == cell(2, 4, 1));
 }
 
 void testMirrorReflectsEnemiesAsMovableEntities()
@@ -3240,10 +3309,131 @@ void testPortals()
     CHECK(loop.portalTransits.empty());
 }
 
+
+void testLockPlatesHoldAndReleaseUnits()
+{
+    TEST("lockPlatesHoldAndReleaseUnits");
+    // Every unit family can start on a lock and resists pushes and momentum.
+    for (const char unit : std::string("RI1nN")) {
+        std::string row = "C  ";
+        row[1] = unit;
+        const Level level = Level::loadFromDefinition({
+            .layers = { { "..." }, { row } },
+            .lockPlates = { Level::LockPlate {
+                .cell = cell(1, 0, 1), .startEnabled = true } },
+            .plates = { { .cell = cell(1, 0, 1), .tile = TileType::LockPlate } },
+        }, "locked unit");
+        GameState state = rules::initialState(level);
+        if (!state.movables.empty()) {
+            state.movables[0].sliding = MoveDirection::Right;
+        } else {
+            state.enemies[0].sliding = MoveDirection::Right;
+        }
+        CHECK(!rules::hasPendingMotion(level, state));
+        const auto after = rules::step(level, state, MoveDirection::Right);
+        if (!state.movables.empty()) {
+            CHECK(after.movables[0].cell == cell(1, 0, 1));
+        } else {
+            CHECK(after.enemies[0].cell == cell(1, 0, 1));
+        }
+        CHECK(after.players[0].cell == cell(0, 0, 1));
+    }
+    for (const CharacterType character : { CharacterType::Rogue, CharacterType::Knight,
+            CharacterType::Druid, CharacterType::Witch, CharacterType::Bard }) {
+        const Level level = Level::loadFromDefinition({
+            .layers = { { "...." }, { " CR " } },
+            .lockPlates = { Level::LockPlate {
+                .cell = cell(1, 0, 1), .startEnabled = true } },
+            .plates = { { .cell = cell(1, 0, 1), .tile = TileType::LockPlate } },
+            .character = character,
+        }, "locked hero");
+        const auto state = rules::initialState(level);
+        CHECK(rules::step(level, state, MoveDirection::Right).players[0].cell ==
+            cell(1, 0, 1));
+    }
+    // Start state is inverted only while ALL linked plates have live occupants.
+    for (bool startEnabled : { false, true }) {
+        const Level level = Level::loadFromDefinition({
+            .layers = { { "......" }, { "CPPR  " } },
+            .lockPlates = { Level::LockPlate {
+                .cell = cell(3, 0, 1),
+                .pressurePlates = { cell(1, 0, 1), cell(2, 0, 1) },
+                .startEnabled = startEnabled } },
+            .plates = { { .cell = cell(3, 0, 1), .tile = TileType::LockPlate } },
+        }, "linked lock");
+        auto state = rules::initialState(level);
+        CHECK(rules::isUnitLocked(level, state, cell(3, 0, 1)) == startEnabled);
+        state.players[0].cell = cell(2, 0, 1);
+        CHECK(rules::isUnitLocked(level, state, cell(3, 0, 1)) == startEnabled);
+        state.players.push_back({ .id = 99, .cell = cell(1, 0, 1) });
+        CHECK(rules::isUnitLocked(level, state, cell(3, 0, 1)) != startEnabled);
+        state.movables[0].sliding = MoveDirection::Right;
+        const auto after = rules::step(level, state, std::nullopt);
+        CHECK(after.movables[0].cell == (startEnabled ? cell(4, 0, 1) : cell(3, 0, 1)));
+        state.players.back().dead = true;
+        CHECK(rules::isUnitLocked(level, state, cell(3, 0, 1)) == startEnabled);
+    }
+    // A linked follower stays locked without cancelling the leader's push.
+    const Level linked = Level::loadFromDefinition({
+        .layers = { { ".....", "....." }, { "CR   ", " R   " } },
+        .lockPlates = { { .cell = cell(1, 1, 1), .startEnabled = true } },
+        .plates = { { .cell = cell(1, 1, 1), .tile = TileType::LockPlate } },
+        .objectLinks = { { .cell = cell(1, 0, 1), .color = { 1, 0, 0 } },
+            { .cell = cell(1, 1, 1), .color = { 1, 0, 0 } } },
+    }, "locked linked follower");
+    const auto linkedAfter = rules::step(linked, rules::initialState(linked), MoveDirection::Right);
+    CHECK(linkedAfter.movables[0].cell == cell(2, 0, 1));
+    CHECK(linkedAfter.movables[1].cell == cell(1, 1, 1));
+    // Mirror activation cannot transport a locked hero, rock or enemy.
+    for (char occupant : std::string("CRN")) {
+        auto layers = Level::LayerRows { { ".....", ".....", ".....", "....." },
+            { "     ", " C   ", "  2  ", "     " } };
+        layers[1][1][1] = occupant;
+        if (occupant != 'C') { layers[1][3][4] = 'C'; }
+        const Level mirror = Level::loadFromDefinition({
+            .layers = layers,
+            .lockPlates = { { .cell = cell(1, 1, 1), .startEnabled = true } },
+            .plates = { { .cell = cell(1, 1, 1), .tile = TileType::LockPlate } },
+        }, "locked mirror target");
+        const auto before = rules::initialState(mirror);
+        const auto after = rules::activateMirrors(mirror, before);
+        CHECK(!after || (after->players == before.players && after->movables == before.movables &&
+            after->enemies == before.enemies));
+    }
+    // Entry is allowed, but a fast walk stops on the enabled plate.
+    const Level entry = Level::loadFromDefinition({
+        .layers = { { "....." }, { "CJ   " } },
+        .lockPlates = { Level::LockPlate { .cell = cell(1, 0, 1), .startEnabled = true } },
+    }, "entry lock");
+    const auto entered = rules::step(entry, rules::initialState(entry), MoveDirection::Right,
+        { .playerMove = 3 });
+    CHECK(entered.players[0].cell == cell(1, 0, 1));
+    CHECK(rules::step(entry, entered, MoveDirection::Left).players[0].cell == cell(1, 0, 1));
+    // Knight chains stay atomic, and a druid may walk without pulling a locked follower.
+    for (const CharacterType character : { CharacterType::Knight, CharacterType::Druid,
+            CharacterType::Witch }) {
+        const Level level = Level::loadFromDefinition({
+            .layers = { { "......" }, { character == CharacterType::Druid ? " RC   " : " CRR  " } },
+            .lockPlates = { Level::LockPlate {
+                .cell = cell(character == CharacterType::Druid ? 1 : 3, 0, 1),
+                .startEnabled = true } },
+            .plates = { { .cell = cell(character == CharacterType::Druid ? 1 : 3, 0, 1),
+                .tile = TileType::LockPlate } },
+            .character = character,
+        }, "forced lock");
+        auto state = rules::initialState(level);
+        if (character == CharacterType::Witch) { state.movables[0].cell = cell(3, 0, 1); state.movables.pop_back(); }
+        const auto after = rules::step(level, state, MoveDirection::Right);
+        CHECK(after.movables == state.movables);
+        CHECK(after.players[0].cell == (character == CharacterType::Druid ? cell(3, 0, 1) : cell(1, 0, 1)));
+    }
+}
+
 } // namespace
 
 int main()
 {
+    testLockPlatesHoldAndReleaseUnits();
     testTurretsReactWhenBlockersLeaveTheirSightlines();
     testDeviceChangesExposeStationaryTurretTargets();
     testTurretDeathsCanOpenAnotherTurretsSightline();
@@ -3292,6 +3482,8 @@ int main()
     testRotationHelpers();
     testUnitsAuthoredOnPlatesUseThem();
     testMirrorOnRotatorTurnsAndReflectsDifferently();
+    testMirrorsPushAndReflectFromTheirCurrentCell();
+    testPushingMirrorReleasesPressurePlate();
     testMirrorOnPressurePlateHoldsItPressed();
     testStateDeltaCarriesMirrorTurns();
     testElevatorCycleHelpers();

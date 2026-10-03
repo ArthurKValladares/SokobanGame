@@ -609,6 +609,11 @@
       "preserveSourceScale": true
     },
     {
+      "name": "LockPlate",
+      "path": "custom/models/lock_plate.glb",
+      "preserveSourceScale": true
+    },
+    {
       "name": "RotatorGear",
       "path": "custom/models/rotator_gear.glb",
       "preserveSourceScale": true
@@ -770,6 +775,10 @@
       "tile": "Player",
       "model": "Rogue",
       "scale": 1.100000023841858
+    },
+    {
+      "tile": "Lock Plate",
+      "model": "LockPlate"
     },
     {
       "tile": "Rotator Clockwise",

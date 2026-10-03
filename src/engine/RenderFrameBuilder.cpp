@@ -232,6 +232,7 @@ void appendStaticTiles(
                     cell.tile == TileType::Water ||
                     cell.tile == TileType::Gate ||
                     tileTypeIsRotator(cell.tile) ||
+                    tileTypeIsLockPlate(cell.tile) ||
                     tileTypeIsElevator(cell.tile) ||
                     tileTypeIsMinecart(cell.tile)) {
                     // Gates, rotators and moving platforms are drawn by
@@ -634,9 +635,9 @@ void appendGameplayWaterAndShorelines(
 }
 
 // Units standing on a plate leave it in the level grid, where the static pass
-// draws it. Mirrors and minecarts cover their authored plate, so it is drawn
+// draws it. Minecarts cover their authored plate, so it is drawn
 // here. Rotators draw from their records and need nothing extra.
-void appendMirrorCoveredPlates(
+void appendMinecartCoveredPlates(
     RenderFrameData& frame,
     const RenderFrameBuilder::GameplayInput& input,
     bool endUnlocked)
@@ -651,15 +652,15 @@ void appendMirrorCoveredPlates(
             static_cast<uint32_t>(cell.x),
             static_cast<uint32_t>(cell.y),
             static_cast<uint32_t>(cell.z));
-        if (tileTypeIsRotator(plate.tile) ||
+        if (tileTypeIsRotator(plate.tile) || tileTypeIsLockPlate(plate.tile) ||
             (input.visibleCell && !input.visibleCell(cell)) ||
-            (!tileTypeIsMirror(occupant) && !tileTypeIsMinecart(occupant))) {
+            !tileTypeIsMinecart(occupant)) {
             continue;
         }
         Vec4 color = tileColor(
             plate.tile, plate.tile != TileType::End || endUnlocked);
         if (plate.tile == TileType::PressurePlate) {
-            // The mirror holds the plate pressed.
+            // The minecart holds the plate pressed.
             if (const std::optional<Vec3> linkColor =
                     input.level.pressurePlateLinkColor(cell)) {
                 color = { linkColor->x, linkColor->y, linkColor->z, 1.0f };
@@ -708,7 +709,6 @@ void appendGameplayWorld(
         input.presentation.players().at(primaryPlayerIndex(input));
     const auto& movableVisuals = input.presentation.movables();
     const bool endUnlocked = rules::isEndUnlocked(input.level, state);
-    const float turnProgress = inFlightActionProgress(input);
 
     frame.tiles.reserve(
         static_cast<std::size_t>(input.level.width()) *
@@ -767,20 +767,6 @@ void appendGameplayWorld(
                 input.settings.geometry.surfaceEntityHeight,
                 input.settings.geometry.surfaceEntityWidthDepth,
                 primaryPlayerVisual.facingQuarterTurns);
-            if (tileTypeIsMirror(cell.tile)) {
-                // Rotators turn mirrors; animate towards the projected turn.
-                const TileType turned =
-                    rules::mirrorTileAt(input.level, state, position)
-                        .value_or(cell.tile);
-                cell.modelRotationQuarterTurns =
-                    mirrorOrientationQuarterTurns(turned).value_or(0);
-                cell.modelRotationOffsetRadians =
-                    static_cast<float>(quarterTurnDelta(
-                        rules::mirrorQuarterTurnsAt(state, position),
-                        rules::mirrorQuarterTurnsAt(
-                            input.projectedState, position))) *
-                    (pi * 0.5f) * turnProgress;
-            }
             if (tileTypeIsPortal(cell.tile)) {
                 const Level::Portal* portal = input.level.portalAt(position);
                 const Vec3 color =
@@ -814,7 +800,7 @@ void appendGameplayWorld(
         staticCellAt,
         [&](TileType tile) { return input.settings.tileScale(tile); },
         input.presentation.worldAnimationTimeSeconds());
-    appendMirrorCoveredPlates(frame, input, endUnlocked);
+    appendMinecartCoveredPlates(frame, input, endUnlocked);
     appendDecorations(
         frame,
         input.level.decorations(),
@@ -881,6 +867,18 @@ void appendGameplayWorld(
             },
             static_cast<float>(turning) * (pi * 0.5f) * smoothProgress,
             input.manifest);
+    }
+
+    for (const auto& plate : input.level.lockPlates()) {
+        if (input.visibleCell && !input.visibleCell(plate.cell)) {
+            continue;
+        }
+        const float brightness = rules::isLockPlateEnabled(input.level, state, plate)
+            ? 1.0f : 0.45f;
+        frame.tiles.push_back(rotatorPlateTile(plate.cell,
+            { plate.color.x * brightness, plate.color.y * brightness,
+              plate.color.z * brightness, 1.0f },
+            input.manifest.modelForTile(TileType::LockPlate)));
     }
 
     // Platforms draw where the presentation has them, so they travel with
@@ -1416,8 +1414,11 @@ void appendGameplayEntities(
             // movables show the quarter turns rotators have applied.
             .modelRotationQuarterTurns = rules::turretDirection(movable)
                 ? facingQuarterTurns(*rules::turretDirection(movable))
-                : static_cast<uint32_t>(movable.quarterTurns),
+                : (mirrorOrientationQuarterTurns(movable.type).value_or(0) +
+                      static_cast<uint32_t>(movable.quarterTurns)) % 4,
             .modelRotationOffsetRadians =
+                (tileTypeIsMirror(movable.type)
+                        ? config::mirrorModelRotationOffsetRadians : 0.0f) +
                 static_cast<float>(animatedQuarterTurns) *
                 quarterTurnRadians * turnProgress,
         };

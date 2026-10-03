@@ -1334,6 +1334,76 @@ void testStaleCommandsAreDropped()
     CHECK(session.state().players[1].cell == cell(6, 1, 1));
 }
 
+void testMirrorPushCommitsRestoresAndUndoes()
+{
+    TEST("mirrorPushCommitsRestoresAndUndoes");
+    const Level level = makeLevel({ { "....." }, { "C2   " } });
+    GameplaySession session;
+    session.reset(level);
+    const GameState initial = session.state();
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.state() == initial);
+    CHECK(session.projectedState().movables[0].cell == cell(2, 0, 1));
+    finishAction(session);
+    const auto saved = session.snapshot();
+    GameplaySession restored;
+    CHECK(restored.restore(level, saved));
+    CHECK(restored.state() == session.state());
+    restored.queueUndo();
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state() == initial);
+}
+
+void testLegacyStaticMirrorsUpgradeOnRestore()
+{
+    TEST("legacyStaticMirrorsUpgradeOnRestore");
+    const Level level = makeLevel({ { "......" }, { "C1R N " } });
+    GameplaySession session;
+    session.reset(level);
+    auto legacy = session.snapshot();
+    legacy.state.movables.erase(legacy.state.movables.begin());
+    legacy.state.movables[0].id = 2;
+    legacy.state.enemies[0].id = 3;
+    CHECK(session.restore(level, legacy));
+    CHECK(session.state() == rules::initialState(level));
+
+    const Level rotatedLevel = Level::loadFromDefinition({
+        .layers = { { "....." }, { "PC 1R" } },
+        .rotators = { Level::Rotator {
+            .cell = cell(3, 0, 1),
+            .pressurePlates = { cell(0, 0, 1) },
+        } },
+        .plates = { Level::Plate {
+            .cell = cell(3, 0, 1), .tile = TileType::RotatorClockwise,
+        } },
+    }, "legacy rotated mirror history");
+    session.reset(rotatedLevel);
+    session.queueMove(MoveDirection::Left);
+    CHECK(session.tryStartNextAction(rotatedLevel, {}));
+    finishAction(session);
+    const GameState turned = session.state();
+    legacy = session.snapshot();
+    const auto downgrade = [](GameState& state) {
+        const uint8_t turns = state.movables[0].quarterTurns;
+        state.movables.erase(state.movables.begin());
+        state.movables[0].id = 2;
+        rules::setMirrorQuarterTurns(state, cell(3, 0, 1), turns);
+    };
+    downgrade(legacy.state);
+    for (auto& action : legacy.undoStack) {
+        downgrade(action.before);
+        downgrade(action.after);
+    }
+    CHECK(session.restore(rotatedLevel, legacy));
+    CHECK(session.state() == turned);
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(rotatedLevel, {}));
+    finishAction(session);
+    CHECK(session.state() == rules::initialState(rotatedLevel));
+}
+
 int main()
 {
     testElevatorRideCommitsUndoesAndRestores();
@@ -1371,6 +1441,8 @@ int main()
     testInvalidSnapshotIsRejectedWithoutMutation();
     testMirrorActionIsInstantUndoableAndRestorable();
     testMirrorDuplicationIsInstantUndoableAndRestorable();
+    testMirrorPushCommitsRestoresAndUndoes();
+    testLegacyStaticMirrorsUpgradeOnRestore();
 
     if (failures == 0) {
         std::cout << "GameplaySessionTests: " << checks << " checks passed\n";

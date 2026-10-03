@@ -197,8 +197,67 @@ void normalizeLegacyPlayers(GameState& state, const Level& level)
 void normalizeLegacySnapshot(
     GameplaySession::Snapshot& snapshot, const Level& level)
 {
+    const GameState initial = rules::initialState(level);
+    const std::size_t mirrorCount = std::ranges::count_if(
+        initial.movables, [](const GameState::Movable& unit) {
+            return tileTypeIsMirror(unit.type);
+        });
+    const auto upgradeMirrors = [&](GameState& state) {
+        if (mirrorCount == 0 ||
+            state.movables.size() + mirrorCount != initial.movables.size() ||
+            std::ranges::any_of(state.movables, [](const auto& unit) {
+                return tileTypeIsMirror(unit.type);
+            })) {
+            return;
+        }
+        // Adding mirrors to the authored entity order shifts object, enemy,
+        // and copied-hero ids. Apply the same mapping to every history state.
+        const EntityId playerCount = static_cast<EntityId>(initial.players.size());
+        const EntityId oldMovableCount = static_cast<EntityId>(state.movables.size());
+        const auto remap = [&](EntityId id) -> EntityId {
+            if (id == invalidEntityId || id <= playerCount) {
+                return id;
+            }
+            const EntityId oldIndex = id - playerCount - 1;
+            if (oldIndex < oldMovableCount) {
+                EntityId index = 0;
+                for (const auto& unit : initial.movables) {
+                    if (!tileTypeIsMirror(unit.type) && index++ == oldIndex) {
+                        return unit.id;
+                    }
+                }
+            }
+            return id + static_cast<EntityId>(mirrorCount);
+        };
+        for (auto& hero : state.players) {
+            hero.id = remap(hero.id);
+            hero.controller = remap(hero.controller);
+        }
+        for (auto& enemy : state.enemies) {
+            enemy.id = remap(enemy.id);
+        }
+        std::vector<GameState::Movable> upgraded;
+        upgraded.reserve(initial.movables.size());
+        std::size_t oldIndex = 0;
+        for (const auto& authored : initial.movables) {
+            if (tileTypeIsMirror(authored.type)) {
+                auto mirror = authored;
+                mirror.quarterTurns = rules::mirrorQuarterTurnsAt(state, mirror.cell);
+                upgraded.push_back(mirror);
+            } else {
+                auto unit = state.movables[oldIndex++];
+                unit.id = remap(unit.id);
+                upgraded.push_back(unit);
+            }
+        }
+        state.movables = std::move(upgraded);
+        state.turnedMirrors.clear();
+    };
+    upgradeMirrors(snapshot.state);
     normalizeLegacyPlayers(snapshot.state, level);
     for (GameplaySession::Action& action : snapshot.undoStack) {
+        upgradeMirrors(action.before);
+        upgradeMirrors(action.after);
         normalizeLegacyPlayers(action.before, level);
         normalizeLegacyPlayers(action.after, level);
     }

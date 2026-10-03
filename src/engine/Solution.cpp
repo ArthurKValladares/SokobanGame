@@ -279,6 +279,21 @@ std::uint64_t levelDigest(const Level::Definition& definition)
         }
         hashBytes(hash, text + "\n");
     }
+    std::vector<Level::LockPlate> lockPlates = definition.lockPlates;
+    std::ranges::sort(lockPlates, {}, [&](const Level::LockPlate& plate) {
+        return cellOrder(plate.cell);
+    });
+    for (auto& plate : lockPlates) {
+        std::ranges::sort(plate.pressurePlates, {}, cellOrder);
+        std::string text = "@lockplate " + std::to_string(plate.cell.x) + "," +
+            std::to_string(plate.cell.y) + "," + std::to_string(plate.cell.z) +
+            (plate.startEnabled ? ":enabled" : ":disabled");
+        for (GridPosition3 link : plate.pressurePlates) {
+            text += " " + std::to_string(link.x) + "," + std::to_string(link.y) +
+                "," + std::to_string(link.z);
+        }
+        hashBytes(hash, text + "\n");
+    }
     // Elevator links and stops decide which plates move which platforms and
     // where to; hashed only when present, like rotators.
     std::vector<Level::Elevator> elevators = definition.elevators;

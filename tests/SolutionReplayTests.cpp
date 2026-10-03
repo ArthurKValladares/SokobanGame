@@ -111,6 +111,15 @@ void testDigestTracksGameplayContentOnly()
     portal.portals.push_back(
         { .cell = { 2, 1, 1 }, .color = { 0.2f, 0.4f, 1 } });
     const auto portalDigest = solution::levelDigest(portal);
+    auto lock = walkAndPushDefinition;
+    lock.lockPlates.push_back({ .cell = { 2, 1, 1 } });
+    const auto lockDigest = solution::levelDigest(lock);
+    CHECK(lockDigest != solution::levelDigest(walkAndPushDefinition));
+    lock.lockPlates[0].startEnabled = true;
+    CHECK(solution::levelDigest(lock) != lockDigest);
+    const auto enabledDigest = solution::levelDigest(lock);
+    lock.lockPlates[0].pressurePlates.push_back({ 1, 1, 1 });
+    CHECK(solution::levelDigest(lock) != enabledDigest);
     CHECK(portalDigest != solution::levelDigest(walkAndPushDefinition));
     portal.portals[0].color.x = 0.2001f;
     CHECK(solution::levelDigest(portal) == portalDigest);

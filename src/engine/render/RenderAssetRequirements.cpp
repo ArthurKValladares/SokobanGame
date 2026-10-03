@@ -193,17 +193,10 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
             }
         }
     }
-    bool containsMirror = false;
-    for (uint32_t z = 0; z < level.depth() && !containsMirror; ++z) {
-        for (uint32_t y = 0; y < level.height() && !containsMirror; ++y) {
-            for (uint32_t x = 0; x < level.width(); ++x) {
-                if (tileTypeIsMirror(level.tileAt(x, y, z))) {
-                    containsMirror = true;
-                    break;
-                }
-            }
-        }
-    }
+    const bool containsMirror = std::ranges::any_of(
+        level.movableTiles(), [](const Level::MovableTile& unit) {
+            return tileTypeIsMirror(unit.type);
+        });
     if (containsMirror) {
         for (std::string_view textureName :
              config::mirrorSwapSmokeTextureNames) {

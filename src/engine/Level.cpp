@@ -24,6 +24,7 @@ constexpr std::string_view decorationPrefix = "@decoration ";
 constexpr std::string_view selectorPrefix = "@selector ";
 constexpr std::string_view gatePrefix = "@gate ";
 constexpr std::string_view rotatorPrefix = "@rotator ";
+constexpr std::string_view lockPlatePrefix = "@lockplate ";
 constexpr std::string_view elevatorPrefix = "@elevator ";
 constexpr std::string_view minecartPrefix = "@minecart ";
 constexpr std::string_view portalPrefix = "@portal ";
@@ -586,6 +587,16 @@ Record parseLinkedRecord(
                 record.levels.push_back(level.get<int>());
             }
         }
+        if constexpr (requires { record.startEnabled; }) {
+            const auto enabled = object.find("startEnabled");
+            if (enabled != object.end()) {
+                if (!enabled->is_boolean()) {
+                    throw std::runtime_error(
+                        lower + " 'startEnabled' must be true or false");
+                }
+                record.startEnabled = enabled->get<bool>();
+            }
+        }
         if constexpr (requires { record.startOpen; }) {
             const auto startOpen = object.find("startOpen");
             if (startOpen != object.end()) {
@@ -640,6 +651,11 @@ std::string serializeLinkedRecord(
     };
     if constexpr (requires { record.levels; }) {
         object["levels"] = record.levels;
+    }
+    if constexpr (requires { record.startEnabled; }) {
+        if (record.startEnabled) {
+            object["startEnabled"] = true;
+        }
     }
     if constexpr (requires { record.startOpen; }) {
         // Omitted when false so existing screens serialize unchanged.
@@ -1094,6 +1110,7 @@ Level::Definition Level::parseDefinition(
                     line.starts_with(selectorPrefix) ||
                     line.starts_with(gatePrefix) ||
                     line.starts_with(rotatorPrefix) ||
+                    line.starts_with(lockPlatePrefix) ||
                     line.starts_with(elevatorPrefix) ||
                     line.starts_with(minecartPrefix) ||
                     line.starts_with(objectLinkPrefix) ||
@@ -1184,6 +1201,17 @@ Level::Definition Level::parseDefinition(
                 std::string_view(line).substr(rotatorPrefix.size()),
                 sourceName,
                 "Rotator"));
+            continue;
+        }
+        if (line.starts_with(lockPlatePrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "LockPlate metadata must appear before '@layer 0': " + source);
+            }
+            definition.lockPlates.push_back(parseLinkedRecord<LockPlate>(
+                std::string_view(line).substr(lockPlatePrefix.size()),
+                sourceName,
+                "LockPlate"));
             continue;
         }
 
@@ -1326,6 +1354,7 @@ Level::Definition Level::parseDefinition(
 
     canonicalizeLinkedRecords(definition.gates, sourceName, "Gate");
     canonicalizeLinkedRecords(definition.rotators, sourceName, "Rotator");
+    canonicalizeLinkedRecords(definition.lockPlates, sourceName, "LockPlate");
     canonicalizeLinkedRecords(definition.elevators, sourceName, "Elevator");
     canonicalizeLinkedRecords(definition.minecarts, sourceName, "Minecart");
     canonicalizeObjectLinks(definition.objectLinks, sourceName);
@@ -1349,7 +1378,8 @@ std::vector<std::string> Level::serializeDefinition(
     if (definition.layers.size() == 1 && !definition.character &&
         !definition.waterLayer && definition.decorations.empty() &&
         definition.selectors.empty() && definition.gates.empty() &&
-        definition.rotators.empty() && definition.elevators.empty() &&
+        definition.rotators.empty() && definition.lockPlates.empty() &&
+        definition.elevators.empty() &&
         definition.minecarts.empty() && definition.objectLinks.empty() &&
         definition.portals.empty() && definition.linkColors.empty() &&
         definition.plates.empty()) {
@@ -1386,6 +1416,14 @@ std::vector<std::string> Level::serializeDefinition(
     for (const Rotator& rotator : rotators) {
         lines.push_back(
             serializeLinkedRecord(rotator, rotatorPrefix, "Rotator"));
+    }
+    std::vector<LockPlate> lockPlates = definition.lockPlates;
+    std::ranges::sort(lockPlates, {}, [](const LockPlate& lockPlate) {
+        return std::array { lockPlate.cell.z, lockPlate.cell.y, lockPlate.cell.x };
+    });
+    for (const LockPlate& lockPlate : lockPlates) {
+        lines.push_back(
+            serializeLinkedRecord(lockPlate, lockPlatePrefix, "LockPlate"));
     }
     std::vector<Elevator> elevators = definition.elevators;
     std::ranges::sort(elevators, {}, [](const Elevator& elevator) {
@@ -1435,6 +1473,7 @@ std::vector<std::string> Level::serializeDefinition(
     if (definition.character || definition.waterLayer ||
         !definition.decorations.empty() || !definition.selectors.empty() ||
         !definition.gates.empty() || !definition.rotators.empty() ||
+        !definition.lockPlates.empty() ||
         !definition.elevators.empty() || !definition.minecarts.empty() ||
         !definition.objectLinks.empty() || !definition.portals.empty() ||
         !definition.linkColors.empty() || !definition.plates.empty()) {
@@ -1480,7 +1519,8 @@ Level Level::loadFromDefinition(
         definition.elevators,
         definition.minecarts,
         definition.objectLinks,
-        definition.portals);
+        definition.portals,
+        definition.lockPlates);
 }
 
 Level Level::loadFromLayers(
@@ -1496,7 +1536,8 @@ Level Level::loadFromLayers(
     const std::vector<Elevator>& elevators,
     const std::vector<Minecart>& minecarts,
     const std::vector<ObjectLink>& objectLinks,
-    const std::vector<Portal>& portals)
+    const std::vector<Portal>& portals,
+    const std::vector<LockPlate>& lockPlates)
 {
     const std::string source(sourceName);
     if (sourceLayers.empty()) {
@@ -1537,6 +1578,8 @@ Level Level::loadFromLayers(
     canonicalizeLinkedRecords(level.gates_, sourceName, "Gate");
     level.rotators_ = rotators;
     canonicalizeLinkedRecords(level.rotators_, sourceName, "Rotator");
+    level.lockPlates_ = lockPlates;
+    canonicalizeLinkedRecords(level.lockPlates_, sourceName, "LockPlate");
     level.elevators_ = elevators;
     canonicalizeLinkedRecords(level.elevators_, sourceName, "Elevator");
     level.minecarts_ = minecarts;
@@ -1598,8 +1641,7 @@ Level Level::loadFromLayers(
                     }
                 }
 
-                if (*tile == TileType::Rock || *tile == TileType::Ice ||
-                    tileTypeIsTurret(*tile)) {
+                if (tileTypeIsMovableObject(*tile)) {
                     level.movableTiles_.push_back({
                         .type = *tile,
                         .position = position,
@@ -1610,8 +1652,7 @@ Level Level::loadFromLayers(
                     level.enemyStarts_.push_back(position);
                 }
 
-                // A unit standing on a plate leaves the plate in the static
-                // grid; a mirror is static itself and covers the plate.
+                // Movable units leave their covered plate in the static grid.
                 const auto covered = std::ranges::find(
                     level.coveredPlates_, position, &Plate::cell);
                 if (covered != level.coveredPlates_.end()) {
@@ -1635,9 +1676,7 @@ Level Level::loadFromLayers(
                 if (plate == TileType::PressurePlate) {
                     level.pressurePlates_.push_back(position);
                 }
-                // An End under a mirror can never hold a hero, so it is not
-                // one of the Ends completion waits for.
-                if (plate == TileType::End && !tileTypeIsMirror(*tile)) {
+                if (plate == TileType::End) {
                     level.ends_.push_back(position);
                 }
             }
@@ -1703,6 +1742,19 @@ Level Level::loadFromLayers(
             if (level.plateAt(plate) != TileType::PressurePlate) {
                 throw std::runtime_error(
                     "Rotator links must refer to Pressure tiles: " + source);
+            }
+        }
+    }
+    for (const LockPlate& lockPlate : level.lockPlates_) {
+        if (!tileTypeIsLockPlate(
+                level.plateAt(lockPlate.cell).value_or(TileType::Air))) {
+            throw std::runtime_error(
+                "LockPlate metadata cell must contain a LockPlate tile: " + source);
+        }
+        for (GridPosition3 plate : lockPlate.pressurePlates) {
+            if (level.plateAt(plate) != TileType::PressurePlate) {
+                throw std::runtime_error(
+                    "LockPlate links must refer to Pressure tiles: " + source);
             }
         }
     }
@@ -1790,6 +1842,12 @@ Level Level::loadFromLayers(
                     level.rotatorAt(cell) == nullptr) {
                     throw std::runtime_error(
                         "Every Rotator tile requires an '@rotator' metadata record: " +
+                        source);
+                }
+                if (tileTypeIsLockPlate(level.plateAt(cell).value_or(authored)) &&
+                    level.lockPlateAt(cell) == nullptr) {
+                    throw std::runtime_error(
+                        "Every LockPlate tile requires an '@lockplate' metadata record: " +
                         source);
                 }
             }
@@ -1924,6 +1982,12 @@ const Level::Rotator* Level::rotatorAt(GridPosition3 cell) const
     return found == rotators_.end() ? nullptr : &*found;
 }
 
+const Level::LockPlate* Level::lockPlateAt(GridPosition3 cell) const
+{
+    const auto found = std::ranges::find(lockPlates_, cell, &LockPlate::cell);
+    return found == lockPlates_.end() ? nullptr : &*found;
+}
+
 const Level::Rotator* Level::rotatorForPressurePlate(GridPosition3 cell) const
 {
     const auto found = std::ranges::find_if(
@@ -1933,6 +1997,17 @@ const Level::Rotator* Level::rotatorForPressurePlate(GridPosition3 cell) const
                 rotator.pressurePlates.end();
         });
     return found == rotators_.end() ? nullptr : &*found;
+}
+
+const Level::LockPlate* Level::lockPlateForPressurePlate(GridPosition3 cell) const
+{
+    const auto found = std::ranges::find_if(
+        lockPlates_,
+        [cell](const LockPlate& lockPlate) {
+            return std::ranges::find(lockPlate.pressurePlates, cell) !=
+                lockPlate.pressurePlates.end();
+        });
+    return found == lockPlates_.end() ? nullptr : &*found;
 }
 
 std::size_t Level::Elevator::startStop() const
@@ -2000,6 +2075,9 @@ std::optional<Vec3> Level::pressurePlateLinkColor(GridPosition3 cell) const
     }
     if (const Rotator* rotator = rotatorForPressurePlate(cell)) {
         return rotator->color;
+    }
+    if (const LockPlate* lockPlate = lockPlateForPressurePlate(cell)) {
+        return lockPlate->color;
     }
     if (const Elevator* elevator = elevatorForPressurePlate(cell)) {
         return elevator->color;

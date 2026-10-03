@@ -69,21 +69,21 @@ step up p1=12,9,2
 step right p1=13,9,2
 step down p1=13,10,2
 step down p1=13,11,2
-step right p1=14,11,2 m4=15,11,2
-step undo p1=13,11,2 m4=14,11,2
+step right p1=14,11,2 m8=15,11,2
+step undo p1=13,11,2 m8=14,11,2
 step up p1=13,10,2
 step right p1=14,10,2
-step down p1=14,11,2 m4=14,12,2
+step down p1=14,11,2 m8=14,12,2
 step right p1=15,11,2
 step down p1=15,12,2
-step left p1=14,12,2 m4=13,12,2
-step left p1=13,12,2 m4=12,12,2
-step left p1=12,12,2 m4=11,12,2
+step left p1=14,12,2 m8=13,12,2
+step left p1=13,12,2 m8=12,12,2
+step left p1=12,12,2 m8=11,12,2
 step up p1=12,11,2
 step up p1=12,10,2
 step right p1=13,10,2
 step up p1=13,9,2
-step interact m2=6,7,2 m3=6,8,2 m4=15,8,2
+step interact m2=6,7,2 m3=6,8,2 m8=15,8,2
 step up p1=13,8,2
 step up p1=13,7,2
 step up p1=13,6,2
@@ -95,4 +95,4 @@ step left p1=10,4,2
 step up p1=10,3,2
 step right p1=11,3,2
 step up p1=11,2,2
-step interact p1=16,7,2 m2=10,3,2 m3=10,12,2 m4=11,12,2
+step interact p1=16,7,2 m2=10,3,2 m3=10,12,2 m8=11,12,2

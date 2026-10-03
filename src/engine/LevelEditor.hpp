@@ -259,13 +259,15 @@ public:
     [[nodiscard]] const std::vector<Level::ScreenSelector>& selectors() const;
     [[nodiscard]] std::optional<std::size_t> selectedSelectorIndex() const;
     [[nodiscard]] const Level::ScreenSelector* selectedSelector() const;
-    // Gates, rotators, elevators and minecarts of the document. In the editor a device
+    // Gates, rotators, lock plates, elevators and minecarts of the document. In the editor a device
     // is linked to every pressure plate of its color (see linkGroups), so
     // these records carry their color but no explicit `pressurePlates`; the
     // lists are filled in from the color groups when the document becomes a
     // Level or is saved.
     [[nodiscard]] const std::vector<Level::Gate>& gates() const;
     [[nodiscard]] const std::vector<Level::Rotator>& rotators() const;
+    [[nodiscard]] const std::vector<Level::LockPlate>& lockPlates() const;
+    [[nodiscard]] bool setLockPlateStartEnabled(std::size_t index, bool startEnabled);
     [[nodiscard]] const std::vector<Level::Elevator>& elevators() const;
     [[nodiscard]] const std::vector<Level::Minecart>& minecarts() const;
     [[nodiscard]] const std::vector<Level::ObjectLink>& objectLinks() const;
@@ -283,6 +285,7 @@ public:
         std::vector<GridPosition3> pressurePlates;
         std::vector<GridPosition3> gates;
         std::vector<GridPosition3> rotators;
+        std::vector<GridPosition3> lockPlates;
         std::vector<GridPosition3> elevators;
         std::vector<GridPosition3> minecarts;
         std::vector<GridPosition3> objects;
@@ -290,7 +293,7 @@ public:
 
         [[nodiscard]] bool hasDevice() const
         {
-            return !gates.empty() || !rotators.empty() || !elevators.empty() ||
+            return !gates.empty() || !rotators.empty() || !lockPlates.empty() || !elevators.empty() ||
                 !minecarts.empty();
         }
     };
@@ -360,6 +363,7 @@ private:
         std::vector<Level::ScreenSelector> selectors;
         std::vector<Level::Gate> gates;
         std::vector<Level::Rotator> rotators;
+        std::vector<Level::LockPlate> lockPlates;
         std::vector<Level::Plate> plates;
         std::vector<Level::Elevator> elevators;
         std::vector<Level::Minecart> minecarts;
@@ -400,6 +404,7 @@ private:
         std::vector<Level::ScreenSelector> selectors;
         std::vector<Level::Gate> gates;
         std::vector<Level::Rotator> rotators;
+        std::vector<Level::LockPlate> lockPlates;
         std::vector<Level::Plate> plates;
         std::vector<Level::Elevator> elevators;
         std::vector<Level::Minecart> minecarts;

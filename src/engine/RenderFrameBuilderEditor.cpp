@@ -293,6 +293,14 @@ private:
                 : Level::Rotator {}.color;
             renderTile.color = { color.x, color.y, color.z, 1.0f };
         }
+        if (tileTypeIsLockPlate(tile)) {
+            const auto found = std::ranges::find(
+                definition.lockPlates, localCell, &Level::LockPlate::cell);
+            const Vec3 color = found != definition.lockPlates.end()
+                ? found->color
+                : Level::LockPlate {}.color;
+            renderTile.color = { color.x, color.y, color.z, 1.0f };
+        }
         if (tileTypeIsElevator(tile)) {
             const auto found = std::ranges::find(
                 definition.elevators, localCell, &Level::Elevator::cell);
@@ -626,6 +634,15 @@ private:
             const Vec3 color = found != input_.editor.rotators().end()
                 ? found->color
                 : Level::Rotator {}.color;
+            renderTile.color = { color.x, color.y, color.z, 1.0f };
+        }
+        if (tileTypeIsLockPlate(tile)) {
+            const GridPosition3 cell { x, y, z };
+            const auto found = std::ranges::find(
+                input_.editor.lockPlates(), cell, &Level::LockPlate::cell);
+            const Vec3 color = found != input_.editor.lockPlates().end()
+                ? found->color
+                : Level::LockPlate {}.color;
             renderTile.color = { color.x, color.y, color.z, 1.0f };
         }
         if (tileTypeIsPlayerStart(tile)) {
@@ -1036,7 +1053,7 @@ RenderFrameData::Tile tileVisual(
     const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
     const bool rail = tileTypeIsRail(tile);
     const bool conveyor = tileTypeIsConveyor(tile);
-    const bool rotator = tileTypeIsRotator(tile);
+    const bool rotator = tileTypeIsRotator(tile) || tileTypeIsLockPlate(tile);
     const bool elevator = tileTypeIsElevator(tile);
     const float tileSize = rail
         ? 1.0f

@@ -425,8 +425,11 @@ int RelaxedHeuristic::distanceToEnd(
 
 int RelaxedHeuristic::estimate(const GameState& state) const
 {
-    if (!level_.portals().empty()) {
-        // Portal-assisted mirror reflections can bypass ordinary walk edges.
+    if (!level_.portals().empty() || std::ranges::any_of(
+            level_.movableTiles(), [](const Level::MovableTile& unit) {
+                return tileTypeIsMirror(unit.type);
+            })) {
+        // Portals and movable mirrors can bypass the precomputed walk edges.
         return 0;
     }
     std::vector<GridPosition3> heroes;

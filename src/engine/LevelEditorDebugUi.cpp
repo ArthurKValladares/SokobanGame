@@ -376,13 +376,13 @@ void LevelEditorDebugUi::draw(
         ImGui::BulletText(
             "%s + click: eyedropper (the cursor turns into one) - pick up "
             "the tile under the pointer, and the link color of a pressure "
-            "plate, gate, rotator or elevator",
+            "plate, gate, rotator, lock plate or elevator",
             actionBindingsDisplay(
                 bindings, InputAction::EditorPickTile).c_str());
         ImGui::BulletText(
             "%s + click or drag: link-color brush (the cursor turns into a "
             "brush dipped in the link color) - give each pressure plate, "
-            "gate, rotator or elevator touched the active link color; the "
+            "gate, rotator, lock plate or elevator touched the active link color; the "
             "whole drag is one undo step",
             actionBindingsDisplay(
                 bindings, InputAction::EditorPaintLinkColor).c_str());
@@ -580,6 +580,9 @@ std::string linkGroupText(const LevelEditor::LinkGroup& group)
     for (const GridPosition3 cell : group.rotators) {
         devices.push_back("Rotator " + cellText(cell));
     }
+    for (const GridPosition3 cell : group.lockPlates) {
+        devices.push_back("Lock Plate " + cellText(cell));
+    }
     for (const GridPosition3 cell : group.elevators) {
         devices.push_back("Elevator " + cellText(cell));
     }
@@ -736,7 +739,7 @@ void LevelEditorDebugUi::drawTilePalette(
     const std::string_view selectedName = tileTypeName(editor.selectedTile());
     ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
     ImGui::TextWrapped(
-        "Plates (Pressure, End, Rotators, Rail Stops) stack with units and mirrors; "
+        "Plates (Pressure, End, Rotators, Lock Plates, Rail Stops) stack with units and mirrors; "
         "a Minecart can only stack on a Rail Stop. Paint "
         "one onto the other in either order. Erasing lifts the unit or mirror "
         "off and leaves the plate.");
@@ -744,7 +747,7 @@ void LevelEditorDebugUi::drawTilePalette(
     ImGui::Separator();
     ImGui::TextUnformatted("Links");
     ImGui::TextWrapped(
-        "Gates, rotators, elevators and minecarts are driven by every pressure "
+        "Gates, rotators, lock plates, elevators and minecarts are driven by every pressure "
         "plate of their color: give plates and devices the same color to link "
         "them. A gate opens while all of its plates are pressed; a rotator "
         "turns and an elevator or minecart moves each time they all become "
@@ -880,6 +883,45 @@ void LevelEditorDebugUi::drawTilePalette(
             ImGui::SetTooltip(
                 "Inverts the gate: open while its plates are released, closed "
                 "while they are all pressed. Drawn faded in the editor.");
+        }
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Lock Plates");
+    ImGui::TextWrapped(
+        "An enabled Lock Plate holds every unit on it in place, including heroes. "
+        "All pressure plates of its color must be pressed to invert its start state.");
+    const std::vector<Level::LockPlate>& lockPlates = editor.lockPlates();
+    if (selectedLockPlateIndex_ && *selectedLockPlateIndex_ >= lockPlates.size()) {
+        selectedLockPlateIndex_.reset();
+    }
+    if (!selectedLockPlateIndex_ && !lockPlates.empty()) {
+        selectedLockPlateIndex_ = 0;
+    }
+    if (lockPlates.empty()) {
+        ImGui::TextDisabled("Paint a Lock Plate tile to configure it here.");
+    } else {
+        const std::size_t index = *selectedLockPlateIndex_;
+        const std::string preview = "Lock Plate " + cellText(lockPlates[index].cell);
+        if (ImGui::BeginCombo("Lock Plate", preview.c_str())) {
+            for (std::size_t candidate = 0; candidate < lockPlates.size(); ++candidate) {
+                const std::string label = "Lock Plate " +
+                    cellText(lockPlates[candidate].cell) + "##lockplate" +
+                    std::to_string(candidate);
+                if (ImGui::Selectable(label.c_str(), candidate == index)) {
+                    selectedLockPlateIndex_ = candidate;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        bool startEnabled = lockPlates[*selectedLockPlateIndex_].startEnabled;
+        if (ImGui::Checkbox("Start Enabled", &startEnabled)) {
+            (void)editor.setLockPlateStartEnabled(*selectedLockPlateIndex_, startEnabled);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Enabled while plates are released; disabled while all are pressed. "
+                "Without linked plates, keeps its start state.");
         }
     }
 
