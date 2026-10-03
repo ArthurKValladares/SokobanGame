@@ -1209,6 +1209,103 @@ void testWaterLayerEditingPersistenceAndLayerRenumbering()
     CHECK(loaded.documentToLevel().waterLayer() == 1U);
 }
 
+void testBrowserSnapshotsRefreshAfterProjectChanges()
+{
+    TEST("browserSnapshotsRefreshAfterProjectChanges");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    const auto now = std::chrono::steady_clock::now();
+    CHECK(editor.levelBrowserSnapshot(now).empty());
+    CHECK(editor.deletedLevelBrowserSnapshot(now).empty());
+
+    editor.addLevelAt(0);
+    CHECK(editor.levelBrowserSnapshot(now).size() == 1);
+    auto level = editor.levelBrowserSnapshot(now).front();
+    editor.renameLevel(level, "Cached garden");
+    CHECK(editor.levelBrowserSnapshot(now).front().name == "Cached garden");
+    editor.renameScreen(level, 0, "First steps");
+    CHECK(editor.levelBrowserSnapshot(now).front().screens.front().name == "First steps");
+    editor.addScreenAt(level, 1);
+    CHECK(editor.levelBrowserSnapshot(now).front().screens.size() == 2);
+    level = editor.levelBrowserSnapshot(now).front();
+    editor.deleteScreen(level, 0);
+    CHECK(editor.levelBrowserSnapshot(now).front().screens.size() == 1);
+    editor.deleteLevel(level);
+    CHECK(editor.levelBrowserSnapshot(now).empty());
+    CHECK(editor.deletedLevelBrowserSnapshot(now).size() == 1);
+    auto deleted = editor.deletedLevelBrowserSnapshot(now).front().path;
+    editor.restoreDeletedLevel(deleted);
+    CHECK(editor.levelBrowserSnapshot(now).size() == 1);
+    CHECK(editor.deletedLevelBrowserSnapshot(now).empty());
+
+    // Saving a new screen invalidates even without a project transaction.
+    CHECK(editor.saveDocument(project.source / "level0/screen1.scr"));
+    CHECK(editor.levelBrowserSnapshot(now).front().screens.size() == 2);
+    // A partial save still publishes a source screen and must refresh the UI
+    // even though SaveResult's boolean conversion reports failure.
+    const auto mirrorBlocker = project.runtime / "level0/screen2.scr.tmp";
+    std::filesystem::create_directories(mirrorBlocker);
+    std::ofstream(mirrorBlocker / "blocker.txt") << "blocked";
+    const auto partialSave = editor.saveDocument(project.source / "level0/screen2.scr");
+    CHECK(partialSave.sourceSaved());
+    CHECK(partialSave.mirrorStale());
+    CHECK(editor.levelBrowserSnapshot(now).front().screens.size() == 3);
+    std::filesystem::remove_all(mirrorBlocker);
+    level = editor.levelBrowserSnapshot(now).front();
+    editor.deleteLevel(level);
+    deleted = editor.deletedLevelBrowserSnapshot(now).front().path;
+    CHECK(editor.permanentlyDelete(deleted));
+    CHECK(editor.deletedLevelBrowserSnapshot(now).empty());
+
+    const auto alternate = project.root / "alternate";
+    std::filesystem::create_directories(alternate / "level0");
+    std::ofstream(alternate / "level0/screen0.scr") << "GG\nGG\n";
+    CHECK(editor.setBrowserRoot(alternate));
+    CHECK(editor.levelBrowserSnapshot(now).size() == 1);
+    editor.initialize(project.source, project.runtime, 0, 0);
+    CHECK(editor.levelBrowserSnapshot(now).empty());
+}
+
+void testBrowserSnapshotsBoundExternalRefresh()
+{
+    TEST("browserSnapshotsBoundExternalRefresh");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.addLevelAt(0);
+    const auto now = std::chrono::steady_clock::now();
+    CHECK(editor.levelBrowserSnapshot(now).front().name.empty());
+    const auto* retained = editor.levelBrowserSnapshot(now).data();
+
+    std::ofstream(project.source / "level0/metadata.json") <<
+        R"({"format":1,"name":"Outside rename","screens":["Outside screen"]})";
+    std::ofstream(project.source / "level0/screen1.scr") << "GG\nGG\n";
+    std::filesystem::create_directories(project.source / "level1");
+    std::ofstream(project.source / "level1/screen0.scr") << "GG\nGG\n";
+    const auto beforeRefresh = now + LevelEditor::browserRefreshInterval -
+        std::chrono::milliseconds(1);
+    CHECK(editor.levelBrowserSnapshot(beforeRefresh).data() == retained);
+    CHECK(editor.levelBrowserSnapshot(beforeRefresh).front().name.empty());
+    CHECK(editor.levelBrowserSnapshot(beforeRefresh).front().screens.size() == 1);
+    CHECK(editor.levelBrowserSnapshot(beforeRefresh).size() == 1);
+    // Fresh command reads do not inherit the presentation's refresh delay.
+    CHECK(editor.collectLevelDirectories().front().screens.size() == 2);
+    const auto refresh = now + LevelEditor::browserRefreshInterval;
+    CHECK(editor.levelBrowserSnapshot(refresh).front().name == "Outside rename");
+    CHECK(editor.levelBrowserSnapshot(refresh).front().screens.size() == 2);
+    CHECK(editor.levelBrowserSnapshot(refresh).size() == 2);
+    CHECK(editor.levelBrowserSnapshot(refresh).front().screens.front().name == "Outside screen");
+
+    std::filesystem::remove(project.source / "level0/screen1.scr");
+    std::filesystem::remove_all(project.source / "level1");
+    CHECK(editor.levelBrowserSnapshot(refresh + LevelEditor::browserRefreshInterval)
+        .front().screens.size() == 1);
+    CHECK(editor.levelBrowserSnapshot(refresh + LevelEditor::browserRefreshInterval).size() == 1);
+    editor.deleteLevel(editor.collectLevelDirectories().front());
+    const auto deleted = editor.deletedLevelBrowserSnapshot(refresh).front().path;
+    std::filesystem::remove_all(deleted);
+    CHECK(editor.deletedLevelBrowserSnapshot(refresh + LevelEditor::browserRefreshInterval).empty());
+}
+
 void testProjectRenumberDeleteAndRestore()
 {
     TEST("projectRenumberDeleteAndRestore");
@@ -2413,6 +2510,8 @@ int main()
     testUndoRestoresTheLoadedDocumentPath();
     testWaterLayerEditingPersistenceAndLayerRenumbering();
     testProjectRenumberDeleteAndRestore();
+    testBrowserSnapshotsRefreshAfterProjectChanges();
+    testBrowserSnapshotsBoundExternalRefresh();
     testUndoAfterNewEditDoesNotReplayAbandonedBranch();
     testResizePreservesOverlapAndUsesLayerFill();
     testPaintingOutsideExpandsAndShiftsDocumentAtomically();

@@ -1323,8 +1323,7 @@ void LevelEditorDebugUi::drawSelectorPalette(LevelEditor& editor)
         "Then choose its level and screen below.");
     ImGui::TextUnformatted("Map controls: click to place/select, D + click to delete");
     ImGui::Text("Flags (%zu)", editor.selectors().size());
-    const std::vector<LevelEditor::LevelDirectory> levels =
-        editor.collectLevelDirectories();
+    const auto& levels = editor.levelBrowserSnapshot();
     if (ImGui::BeginListBox("##screen_selectors", ImVec2(-1.0f, 130.0f))) {
         for (std::size_t index = 0; index < editor.selectors().size(); ++index) {
             const Level::ScreenSelector& selector = editor.selectors()[index];
@@ -1809,7 +1808,7 @@ void LevelEditorDebugUi::drawActiveLevelsTab(LevelEditor& editor)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     SOKOBAN_PROFILE_SCOPE("Editor.Draw level browser");
-    const std::vector<LevelEditor::LevelDirectory> levels = editor.collectLevelDirectories();
+    const auto& levels = editor.levelBrowserSnapshot();
     bool browserChanged = false;
 
     if (ImGui::BeginChild("ActiveLevelFiles", ImVec2(0.0f, 210.0f), true)) {
@@ -1935,7 +1934,7 @@ void LevelEditorDebugUi::drawActiveLevelsTab(LevelEditor& editor)
 void LevelEditorDebugUi::drawDeletedLevelsTab(LevelEditor& editor)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    const std::vector<LevelEditor::LevelDirectory> deletedLevels = editor.collectDeletedLevels();
+    const auto& deletedLevels = editor.deletedLevelBrowserSnapshot();
     if (deletedLevels.empty()) {
         ImGui::TextUnformatted("No deleted levels.");
         return;

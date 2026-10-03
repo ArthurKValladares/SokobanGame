@@ -1,0 +1,93 @@
+# Render evidence — 100% scale, 4x MSAA
+
+- Device: NVIDIA GeForce RTX 4060 Laptop GPU (discrete)
+- Evidence location: level 5, screen 5
+- Developer workspace: hidden
+- CPU profiler: enabled
+- Effect fixture: none; 0 retained particles
+- Authored water: enabled
+- Water reflections: enabled
+- Swapchain: 2880x1800
+- Present mode: Mailbox
+- Scene target: 2880x1800
+- SSAO target: 1440x900
+- Atmosphere target: 720x450
+- Atmosphere coverage: 1 media, 5184000 / 5184000 full-resolution pixels (100.0% after scissoring)
+- Ambient occlusion: enabled
+- Evidence water fixture: disabled
+- Main-scene translucency: present
+- SSAO color snapshot: exercised
+- MSAA samples: 4
+- Scene depth: 32 bits
+- Draw calls: 58
+- Triangles: 22406
+- Prepared particles: 16
+- Particle draw calls: 1
+- Special-surface coverage: 92 water faces, 84 energy faces, 0 energy models, 0 blurred ice models
+- Render passes: 10
+- Point-shadow faces: 0 / 0 in range; 0 culled (0 face draws avoided)
+- Point-shadow cube faces: 0 rendered, 0 reused
+- Point-shadow quad submissions: 0 draws for 0 instances
+- Point-shadow models: 0 / 0 in range; 0 culled
+- Persistent renderables: 289 (visible 289, culled 0; bounds reused 289, rebuilt 0)
+- Main-scene frustum culling: enabled
+- Parallel scene preparation: enabled
+- Point-shadow range/cache optimizations: enabled
+- Recorder scratch reuse: enabled; 0 capacity growths this frame; 5120 bytes of model-recording capacity
+- Asset scheduling: average 0.003 ms, p95 0.004 ms, maximum 0.006 ms (120 samples)
+- Frame-fence wait: average 6.867 ms, p95 7.168 ms, maximum 7.415 ms (120 samples)
+- Asset maintenance: average 0.067 ms, p95 0.102 ms, maximum 0.167 ms (120 samples)
+- Image acquisition: average 0.010 ms, p95 0.015 ms, maximum 0.020 ms (120 samples)
+- Command recording: average 0.289 ms, p95 0.369 ms, maximum 0.448 ms (120 samples)
+- Submit/present: average 0.106 ms, p95 0.158 ms, maximum 0.182 ms (120 samples)
+-   Recorder setup: average 0.018 ms, p95 0.026 ms, maximum 0.061 ms (120 samples)
+-   Game command recording: average 0.205 ms, p95 0.277 ms, maximum 0.338 ms (120 samples)
+-     Shadow command recording: average 0.075 ms, p95 0.103 ms, maximum 0.162 ms (120 samples)
+-     Scene command recording: average 0.130 ms, p95 0.177 ms, maximum 0.220 ms (120 samples)
+-   SSAO command recording: average 0.023 ms, p95 0.029 ms, maximum 0.057 ms (120 samples)
+-   Atmosphere command recording: average 0.007 ms, p95 0.009 ms, maximum 0.011 ms (120 samples)
+-   Preview command recording: unavailable
+-   Output/UI command recording: average 0.020 ms, p95 0.026 ms, maximum 0.032 ms (120 samples)
+- Asset publication events: average 0.170 ms, p95 0.381 ms, maximum 0.458 ms (54 samples)
+- GPU shadows: average 0.064 ms, p95 0.055 ms, maximum 0.372 ms (120 samples)
+- GPU scene color/depth: average 5.550 ms, p95 5.822 ms, maximum 5.958 ms (120 samples)
+-   GPU scene raster/resolve: average 1.111 ms, p95 1.155 ms, maximum 1.302 ms (120 samples)
+-     GPU scene surfaces: average 0.260 ms, p95 0.289 ms, maximum 0.308 ms (120 samples)
+-     GPU scene models: average 0.411 ms, p95 0.436 ms, maximum 0.453 ms (120 samples)
+-   GPU scene depth publish: average 0.001 ms, p95 0.001 ms, maximum 0.001 ms (120 samples)
+-   GPU scene translucency: average 4.439 ms, p95 4.681 ms, maximum 4.820 ms (120 samples)
+-     GPU particles: average 0.001 ms, p95 0.001 ms, maximum 0.002 ms (120 samples)
+-   GPU mirror continuation: average 0.000 ms, p95 0.000 ms, maximum 0.001 ms (120 samples)
+- GPU SSAO: average 0.794 ms, p95 0.807 ms, maximum 0.827 ms (120 samples)
+-   GPU SSAO scene snapshot: average 0.198 ms, p95 0.201 ms, maximum 0.203 ms (120 samples)
+-   GPU SSAO occlusion: average 0.256 ms, p95 0.263 ms, maximum 0.287 ms (120 samples)
+-   GPU SSAO composite: average 0.340 ms, p95 0.344 ms, maximum 0.345 ms (120 samples)
+- GPU volumetric atmosphere: average 0.452 ms, p95 0.465 ms, maximum 0.483 ms (120 samples)
+-   GPU global atmosphere: average 0.452 ms, p95 0.465 ms, maximum 0.483 ms (120 samples)
+-     GPU ray integration: average 0.112 ms, p95 0.117 ms, maximum 0.141 ms (120 samples)
+-     GPU depth-aware composite: average 0.339 ms, p95 0.348 ms, maximum 0.351 ms (120 samples)
+-   GPU bounded fog volumes: average 0.000 ms, p95 0.000 ms, maximum 0.000 ms (120 samples)
+- GPU output/UI: average 0.714 ms, p95 0.720 ms, maximum 0.725 ms (120 samples)
+- Asset publications: 54 across 54 frames
+- Texture uploads: 25 submitted, 25 completed, 0 in flight
+- Scene preparation: average 0.127 ms, p95 0.174 ms, maximum 0.363 ms (120 samples)
+- Application frame (including profiler, excluding frame cap): average 7.593 ms, p95 7.913 ms, maximum 8.197 ms (120 samples)
+- Frame interval (including pacing): average 7.594 ms, p95 7.914 ms, maximum 8.198 ms (120 samples)
+- Frame pacing: average 0.000 ms, p95 0.000 ms, maximum 0.001 ms (120 samples)
+- Application update: average 0.007 ms, p95 0.012 ms, maximum 0.046 ms (120 samples)
+- Application UI: average 0.013 ms, p95 0.017 ms, maximum 0.027 ms (120 samples)
+- Application frame build/prepare: average 0.199 ms, p95 0.262 ms, maximum 0.515 ms (120 samples)
+- CPU frame: average 7.351 ms, p95 7.659 ms, maximum 7.992 ms (120 samples)
+- GPU frame: average 7.578 ms, p95 7.859 ms, maximum 8.000 ms (120 samples)
+- Process resident memory: 533.336 MiB (peak 545.199 MiB)
+- GPU allocation memory: 660.518 MiB in 50 allocations; 684.438 MiB reserved in blocks
+- Scene image: `scene-scale-100-msaa-4.png`
+- Filtered SSAO image: `occlusion-scale-100-msaa-4.png`
+
+Simulation: fixed 1/60 s steps. The final two images share the same simulation state and differ by the SSAO composite debug selector.
+
+## Ranked optimization candidates
+
+1. **Main scene rendering is the dominant GPU pass** (high, score 166.5)
+   - Evidence: Main scene rendering is the dominant GPU pass: 5.82 ms (74.1% of the GPU frame).
+   - Next experiment: Inspect overdraw, material complexity, MSAA cost, visibility, and resolution scaling with a GPU capture.

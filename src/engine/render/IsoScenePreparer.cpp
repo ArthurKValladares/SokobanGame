@@ -982,20 +982,28 @@ static void prepareAuxiliaryGeometry(
     shadowModelIndices.reserve(frameData.tiles.size());
 
     if (frameData.viewMode == RenderViewMode::Isometric3D) {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Prepare particles");
         for (const RenderFrameData::Particle& source : frameData.particles) {
             if (source.texture.isNone() || source.color.w <= 0.0f ||
                 source.size.x <= 0.0f || source.size.y <= 0.0f) {
                 continue;
             }
-            float cosine = std::cos(source.rotationRadians);
-            float sine = std::sin(source.rotationRadians);
-            const float projectedAlignmentX =
-                dot(source.billboardAlignment, isoLayout.cameraRight);
-            const float projectedAlignmentY =
-                dot(source.billboardAlignment, isoLayout.cameraUp);
-            const float projectedAlignmentLength = std::sqrt(
-                projectedAlignmentX * projectedAlignmentX +
-                projectedAlignmentY * projectedAlignmentY);
+            float projectedAlignmentX = 0.0f;
+            float projectedAlignmentY = 0.0f;
+            float projectedAlignmentLength = 0.0f;
+            if (source.billboardAlignment.x != 0.0f ||
+                source.billboardAlignment.y != 0.0f ||
+                source.billboardAlignment.z != 0.0f) {
+                projectedAlignmentX =
+                    dot(source.billboardAlignment, isoLayout.cameraRight);
+                projectedAlignmentY =
+                    dot(source.billboardAlignment, isoLayout.cameraUp);
+                projectedAlignmentLength = std::sqrt(
+                    projectedAlignmentX * projectedAlignmentX +
+                    projectedAlignmentY * projectedAlignmentY);
+            }
+            float cosine;
+            float sine;
             float sizeYScale = 1.0f;
             if (projectedAlignmentLength > 0.0001f) {
                 if (source.billboardAlignmentUsesY) {
@@ -1014,26 +1022,32 @@ static void prepareAuxiliaryGeometry(
                     sine = projectedAlignmentY /
                         projectedAlignmentLength;
                 }
+            } else {
+                cosine = std::cos(source.rotationRadians);
+                sine = std::sin(source.rotationRadians);
             }
-            const Vec3 right = add(
-                multiply(
-                    isoLayout.cameraRight,
-                    cosine * source.size.x * 0.5f),
-                multiply(
-                    isoLayout.cameraUp,
-                    sine * source.size.x * 0.5f));
-            const Vec3 up = add(
-                multiply(
-                    isoLayout.cameraUp,
-                    cosine * source.size.y * sizeYScale * 0.5f),
-                multiply(
-                    isoLayout.cameraRight,
-                    -sine * source.size.y * sizeYScale * 0.5f));
+            const float rightCosine = cosine * source.size.x * 0.5f;
+            const float rightSine = sine * source.size.x * 0.5f;
+            const float upCosine = cosine * source.size.y * sizeYScale * 0.5f;
+            const float upSine = -sine * source.size.y * sizeYScale * 0.5f;
+            const Vec3& cameraRight = isoLayout.cameraRight;
+            const Vec3& cameraUp = isoLayout.cameraUp;
+            const Vec3 right {
+                cameraRight.x * rightCosine + cameraUp.x * rightSine,
+                cameraRight.y * rightCosine + cameraUp.y * rightSine,
+                cameraRight.z * rightCosine + cameraUp.z * rightSine,
+            };
+            const Vec3 up {
+                cameraUp.x * upCosine + cameraRight.x * upSine,
+                cameraUp.y * upCosine + cameraRight.y * upSine,
+                cameraUp.z * upCosine + cameraRight.z * upSine,
+            };
+            const Vec3 diagonal = add(right, up);
             PreparedParticle particle {
                 .vertices = {
-                    subtract(source.position, add(right, up)),
+                    subtract(source.position, diagonal),
                     add(subtract(source.position, up), right),
-                    add(source.position, add(right, up)),
+                    add(source.position, diagonal),
                     add(subtract(source.position, right), up),
                 },
                 .color = source.color,
@@ -1049,17 +1063,22 @@ static void prepareAuxiliaryGeometry(
             };
             particles.push_back(particle);
         }
-        std::ranges::sort(
-            particles,
-            [](const PreparedParticle& left, const PreparedParticle& right) {
-                if (left.drawOnTop != right.drawOnTop) {
-                    return !left.drawOnTop;
-                }
-                if (left.drawOrder != right.drawOrder) {
-                    return left.drawOrder < right.drawOrder;
-                }
-                return left.depth > right.depth;
-            });
+        if (particles.size() > 1) {
+            SOKOBAN_PROFILE_SCOPE("Renderer.Sort particles");
+            // Sorting owned contiguous storage avoids the projection adapters
+            // that add measurable CPU cost at Debug effect-stress counts.
+            std::sort(
+                particles.data(), particles.data() + particles.size(),
+                [](const PreparedParticle& left, const PreparedParticle& right) {
+                    if (left.drawOnTop != right.drawOnTop) {
+                        return !left.drawOnTop;
+                    }
+                    if (left.drawOrder != right.drawOrder) {
+                        return left.drawOrder < right.drawOrder;
+                    }
+                    return left.depth > right.depth;
+                });
+        }
     }
 
     const auto appendShadowFace = [&](const std::array<Vec3, 4>& vertices) {
@@ -1609,12 +1628,11 @@ void IsoScenePreparer::appendWaterFaces(
                     top = std::min(top, footprint.top);
                     bottom = std::max(bottom, footprint.bottom);
                 } else if (bottom <= -1.0f) {
-                    left = std::min(left, footprint.left);
-                    right = std::max(right, footprint.right);
+                    // The left/right continuations own the exterior corners
+                    // and already reach the full visible Y range. Extending
+                    // this strip in X would shade those corners twice.
                     top = std::min(top, footprint.top);
                 } else if (top >= boardBottom + 1.0f) {
-                    left = std::min(left, footprint.left);
-                    right = std::max(right, footprint.right);
                     bottom = std::max(bottom, footprint.bottom);
                 }
             }

@@ -606,6 +606,16 @@ void runEditorBenchmarks(Suite& suite)
     suite.run("editor", "editor-level-browser-scan",
         "Filesystem enumeration and metadata parsing for the Level Editor browser.",
         1, 1, [&] { return static_cast<uint64_t>(editor.collectLevelDirectories().size()); });
+    (void)editor.levelBrowserSnapshot();
+    suite.run("editor", "editor-level-browser-snapshot",
+        "Repeated presentation reads between bounded filesystem refreshes.",
+        128, 2, [&] {
+            uint64_t result = 0;
+            for (int index = 0; index < 128; ++index) {
+                result += editor.levelBrowserSnapshot().size();
+            }
+            return result;
+        });
 }
 
 void runEffectBenchmarks(Suite& suite, sokoban::TaskSystem& tasks)

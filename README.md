@@ -225,7 +225,10 @@ slowdown and its controls:
 ```
 
 The CPU suite also measures repeated editor document classification and level
-browser scans. If `nvidia-smi` is available, GPU cases archive clocks,
+browser scans, plus repeated reads from the retained browser snapshot.
+The browser refreshes external changes within half a second and invalidates
+immediately after saves and project mutations. If `nvidia-smi` is available,
+GPU cases archive clocks,
 temperature, power, and throttling reasons before and after the run. Use those
 snapshots and the repeated baselines to identify hardware drift.
 

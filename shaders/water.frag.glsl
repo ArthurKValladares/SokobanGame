@@ -634,11 +634,10 @@ vec3 waterReflectionNormal(vec2 worldPosition, float rippleField)
 }
 
 bool projectReflectionSample(
-    vec3 worldPosition,
+    vec4 clip,
     out vec2 uv,
     out float deviceDepth)
 {
-    vec4 clip = frame.clipFromWorld * vec4(worldPosition, 1.0);
     if (clip.w <= 0.0001) {
         return false;
     }
@@ -663,6 +662,10 @@ bool traceWaterReflection(
     float jitter = bayer8x8(ivec2(gl_FragCoord.xy));
     float previousDistance = 0.0;
     float previousSeparation = -farDepth;
+    // Projection is linear in homogeneous coordinates. Transform the ray
+    // once rather than multiplying a matrix at every march/refinement step.
+    vec4 surfaceClip = frame.clipFromWorld * vec4(surfacePosition, 1.0);
+    vec4 directionClip = frame.clipFromWorld * vec4(reflectionDirection, 0.0);
     // The biased surface origin itself is known to be in front of anything
     // the opaque depth buffer can reflect. Keeping it as the first lower
     // bound also lets a very close object be refined from the first step.
@@ -676,12 +679,11 @@ bool traceWaterReflection(
             1.0);
         float distanceAlongRay = 0.04 +
             clampedMaximumDistance * pow(stepFraction, 1.65);
-        vec3 samplePosition =
-            surfacePosition + reflectionDirection * distanceAlongRay;
         vec2 sampleUv;
         float rayDeviceDepth;
         if (!projectReflectionSample(
-                samplePosition, sampleUv, rayDeviceDepth)) {
+                surfaceClip + directionClip * distanceAlongRay,
+                sampleUv, rayDeviceDepth)) {
             break;
         }
 
@@ -727,12 +729,10 @@ bool traceWaterReflection(
             for (int refinement = 0; refinement < 5; ++refinement) {
                 float middleDistance =
                     (lowerDistance + upperDistance) * 0.5;
-                vec3 middlePosition = surfacePosition +
-                    reflectionDirection * middleDistance;
                 vec2 middleUv;
                 float middleRayDeviceDepth;
                 if (!projectReflectionSample(
-                        middlePosition,
+                        surfaceClip + directionClip * middleDistance,
                         middleUv,
                         middleRayDeviceDepth)) {
                     lowerDistance = middleDistance;

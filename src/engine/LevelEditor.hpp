@@ -4,6 +4,7 @@
 #include "engine/LevelProjectStore.hpp"
 #include "engine/OverworldMap.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -233,6 +234,18 @@ public:
     [[nodiscard]] bool permanentlyDelete(const std::filesystem::path& path);
     [[nodiscard]] std::vector<LevelDirectory> collectLevelDirectories() const;
     [[nodiscard]] std::vector<LevelDirectory> collectDeletedLevels() const;
+    // Presentation listings reuse metadata between frames. Local project
+    // changes invalidate immediately; external edits (including deletions)
+    // become visible within this bounded refresh interval. Transactional
+    // commands continue to use the fresh collect methods above.
+    // References remain valid until that listing's next refresh.
+    static constexpr auto browserRefreshInterval = std::chrono::milliseconds(500);
+    [[nodiscard]] const std::vector<LevelDirectory>& levelBrowserSnapshot(
+        std::chrono::steady_clock::time_point now =
+            std::chrono::steady_clock::now()) const;
+    [[nodiscard]] const std::vector<LevelDirectory>& deletedLevelBrowserSnapshot(
+        std::chrono::steady_clock::time_point now =
+            std::chrono::steady_clock::now()) const;
     [[nodiscard]] static std::string selectorTargetLabel(
         const Level::ScreenSelector& selector,
         const std::vector<LevelDirectory>& levels);
@@ -474,6 +487,14 @@ private:
         const std::filesystem::path& path) const;
 
     Document document_;
+    struct BrowserSnapshot {
+        std::vector<LevelDirectory> levels;
+        std::chrono::steady_clock::time_point refreshedAt;
+        bool valid = false;
+    };
+    void invalidateBrowserSnapshots() const;
+    mutable BrowserSnapshot activeBrowserSnapshot_;
+    mutable BrowserSnapshot deletedBrowserSnapshot_;
     std::vector<EditActionRecord> editHistory_;
     std::vector<EditActionRecord> redoHistory_;
     // Open stroke: the snapshot from before its first change, plus how many

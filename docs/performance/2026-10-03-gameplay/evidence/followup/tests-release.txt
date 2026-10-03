@@ -1,0 +1,38 @@
+Internal ctest changing into directory: C:/Users/arthu/Documents/Projects/Sokoban Game/out/visual-studio
+Test project C:/Users/arthu/Documents/Projects/Sokoban Game/out/visual-studio
+      Start  1: vulkan_smoke
+ 1/14 Test  #1: vulkan_smoke .....................   Passed    0.61 sec
+      Start  3: command_line
+ 2/14 Test  #3: command_line .....................   Passed    0.09 sec
+      Start 29: frame_time_telemetry
+ 3/14 Test #29: frame_time_telemetry .............   Passed    0.02 sec
+      Start 30: profiler
+ 4/14 Test #30: profiler .........................   Passed    0.04 sec
+      Start 31: performance_analysis
+ 5/14 Test #31: performance_analysis .............   Passed    0.02 sec
+      Start 32: scene_preparation_allocations
+ 6/14 Test #32: scene_preparation_allocations ....   Passed    0.11 sec
+      Start 34: iso_scene_preparer
+ 7/14 Test #34: iso_scene_preparer ...............   Passed    0.02 sec
+      Start 35: level_editor
+ 8/14 Test #35: level_editor .....................   Passed    0.98 sec
+      Start 53: particles
+ 9/14 Test #53: particles ........................   Passed    0.02 sec
+      Start 54: performance_fixtures
+10/14 Test #54: performance_fixtures .............   Passed    0.02 sec
+      Start 64: gpu_abi
+11/14 Test #64: gpu_abi ..........................   Passed    0.03 sec
+      Start 66: scene_draw_lanes
+12/14 Test #66: scene_draw_lanes .................   Passed    0.02 sec
+      Start 67: nine_slice
+13/14 Test #67: nine_slice .......................   Passed    0.02 sec
+      Start 78: content_pipeline
+14/14 Test #78: content_pipeline .................   Passed    3.59 sec
+
+100% tests passed, 0 tests failed out of 14
+
+Label Time Summary:
+smoke     =   0.61 sec*proc (1 test)
+vulkan    =   0.61 sec*proc (1 test)
+
+Total Test time (real) =   5.60 sec

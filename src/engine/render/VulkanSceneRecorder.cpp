@@ -2699,6 +2699,15 @@ private:
                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                 pipelines_.scene());
             ++stats_.pipelineBinds;
+            // One topology command for the particle run. Instance writes do
+            // not change topology; repeating it per particle still sent
+            // thousands of redundant commands through Debug validation.
+            vkCmdSetPrimitiveTopology(
+                commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+            const auto particleCount = static_cast<uint32_t>(scene.particles.size());
+            stats_.visibleFaces += particleCount;
+            stats_.vertices += particleCount * 6;
+            stats_.triangles += particleCount * 2;
             bool depthTestEnabled = swapchain_.depthView() != VK_NULL_HANDLE;
             uint32_t firstParticleInstance = 0;
             uint32_t particleInstances = 0;
@@ -2720,7 +2729,7 @@ private:
                         desiredDepthTest ? VK_TRUE : VK_FALSE);
                     depthTestEnabled = desiredDepthTest;
                 }
-                const uint32_t instance = drawParticle(commandBuffer, particle);
+                const uint32_t instance = writeParticleInstance(particle);
                 // Keep alpha-blend order exactly as prepared. Bindless texture
                 // and nine-slice data already live in each instance. Split at
                 // depth-mode changes and nonconsecutive entries, including
@@ -2890,19 +2899,18 @@ private:
         return writeDrawInstance(constants);
     }
 
-    [[nodiscard]] uint32_t drawParticle(
-        VkCommandBuffer commandBuffer,
-        const PreparedParticle& particle)
+    [[nodiscard]] uint32_t writeParticleInstance(const PreparedParticle& particle)
     {
-        beginQuadDraw(commandBuffer);
-
         const float emission = std::max(particle.emissiveStrength, 0.0f);
-        const float quadWidth = length(
-            particle.vertices[1] - particle.vertices[0]);
-        const float quadHeight = length(
-            particle.vertices[3] - particle.vertices[0]);
-        const NineSliceDrawData nineSlice = nineSliceDrawData(
-            particle.textureNineSlice, { quadWidth, quadHeight });
+        NineSliceDrawData nineSlice {};
+        if (particle.textureNineSlice.enabled()) {
+            const float quadWidth = length(
+                particle.vertices[1] - particle.vertices[0]);
+            const float quadHeight = length(
+                particle.vertices[3] - particle.vertices[0]);
+            nineSlice = nineSliceDrawData(
+                particle.textureNineSlice, { quadWidth, quadHeight });
+        }
         const GpuDrawInstance constants {
             .vertices = quadVertices(particle.vertices, worldSpaceQuad),
             .passData = {

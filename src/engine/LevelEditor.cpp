@@ -602,6 +602,7 @@ void LevelEditor::initialize(
     document_.sourceLevelRoot = sourceLevelRoot;
     document_.runtimeLevelRoot = runtimeLevelRoot;
     document_.browserRoot = sourceLevelRoot;
+    invalidateBrowserSnapshots();
     sourceManifestPath_ = sourceManifestPath;
     runtimeManifestPath_ = runtimeManifestPath;
 
@@ -1076,6 +1077,7 @@ bool LevelEditor::setBrowserRoot(const std::filesystem::path& path)
     }
 
     document_.browserRoot = path;
+    invalidateBrowserSnapshots();
     document_.status = "Browser root changed.";
     return true;
 }
@@ -3431,6 +3433,7 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
     // The source is now authoritative even if refreshing its derived runtime
     // mirror fails. Keep the document dirty in that case so Save retries the
     // mirror, but accurately record where this in-memory document was saved.
+    invalidateBrowserSnapshots();
     document_.filePath = sourcePath;
     document_.loadedPath = sourcePath;
 
@@ -4289,6 +4292,39 @@ std::vector<LevelEditor::LevelDirectory> LevelEditor::collectLevelDirectories() 
     return levels;
 }
 
+void LevelEditor::invalidateBrowserSnapshots() const
+{
+    // Keep the vectors intact: UI commands can invalidate while iterating a
+    // listing. Rebuild lazily at the next presentation read.
+    activeBrowserSnapshot_.valid = false;
+    deletedBrowserSnapshot_.valid = false;
+}
+
+const std::vector<LevelEditor::LevelDirectory>& LevelEditor::levelBrowserSnapshot(
+    std::chrono::steady_clock::time_point now) const
+{
+    auto& snapshot = activeBrowserSnapshot_;
+    if (!snapshot.valid || now - snapshot.refreshedAt >= browserRefreshInterval) {
+        snapshot.levels = collectLevelDirectories();
+        snapshot.refreshedAt = now;
+        snapshot.valid = true;
+    }
+    return snapshot.levels;
+}
+
+const std::vector<LevelEditor::LevelDirectory>& LevelEditor::deletedLevelBrowserSnapshot(
+    std::chrono::steady_clock::time_point now) const
+{
+    auto& snapshot = deletedBrowserSnapshot_;
+    if (!snapshot.valid || now - snapshot.refreshedAt >= browserRefreshInterval) {
+        SOKOBAN_PROFILE_SCOPE("Editor.Scan deleted directories");
+        snapshot.levels = collectDeletedLevels();
+        snapshot.refreshedAt = now;
+        snapshot.valid = true;
+    }
+    return snapshot.levels;
+}
+
 std::string LevelEditor::selectorTargetLabel(
     const Level::ScreenSelector& selector,
     const std::vector<LevelDirectory>& levels)
@@ -4531,6 +4567,7 @@ bool LevelEditor::applyProjectMutation(
         runtimeRoot,
         mutation,
         companion);
+    invalidateBrowserSnapshots();
     if (!result.succeeded) {
         document_.status = result.originalsPreserved
             ? "Project change failed; original files were preserved: " +

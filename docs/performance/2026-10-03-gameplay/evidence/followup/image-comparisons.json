@@ -1,0 +1,54 @@
+[
+  {
+    "before": "water-before/scene-scale-100-msaa-4.png",
+    "after": "water-no-overlap/scene-scale-100-msaa-4.png",
+    "size": [
+      2880,
+      1800
+    ],
+    "changed_pixels": 8318,
+    "maximum_channel_difference": 1,
+    "mean_channel_difference": 0.0004094328703703704,
+    "before_png_sha256": "2cdc7af90dc91addd8e101a4164960cb398b9c2659d316812b38b9d70e38bca9",
+    "after_png_sha256": "9afc8bf488f38e8c09872832539208fa52d96d54f595f7a36bbe61b5e20d7c14"
+  },
+  {
+    "before": "water-no-overlap/scene-scale-100-msaa-4.png",
+    "after": "water-ray-projection/scene-scale-100-msaa-4.png",
+    "size": [
+      2880,
+      1800
+    ],
+    "changed_pixels": 47,
+    "maximum_channel_difference": 5,
+    "mean_channel_difference": 3.423996913580247e-06,
+    "before_png_sha256": "9afc8bf488f38e8c09872832539208fa52d96d54f595f7a36bbe61b5e20d7c14",
+    "after_png_sha256": "6bdf2b5e5474fb8e3e7c59391eb49c8a9dbb209f70285442159cffaeaf89d723"
+  },
+  {
+    "before": "water-boundary-old/scene-scale-75-msaa-1-water.png",
+    "after": "water-boundary-new/scene-scale-75-msaa-1-water.png",
+    "size": [
+      2160,
+      1350
+    ],
+    "changed_pixels": 4,
+    "maximum_channel_difference": 4,
+    "mean_channel_difference": 1.02880658436214e-06,
+    "before_png_sha256": "b8e2a96ca9bc04d2a0c1ca5e24f57c3e4837429709b0869d036a1c199b4d7922",
+    "after_png_sha256": "e3e7ca4d1a9dcc701b742d0c5e6dd71a145c31e9d2e2f78d1ee3ec04d4ae67c9"
+  },
+  {
+    "before": "particles-before/scene-scale-100-msaa-4.png",
+    "after": "particles-final/scene-scale-100-msaa-4.png",
+    "size": [
+      2880,
+      1800
+    ],
+    "changed_pixels": 0,
+    "maximum_channel_difference": 0,
+    "mean_channel_difference": 0.0,
+    "before_png_sha256": "7f143d83d94c1b8bc7b0ab64026b629fabe7360019d7deca25119db1b68a832d",
+    "after_png_sha256": "7f143d83d94c1b8bc7b0ab64026b629fabe7360019d7deca25119db1b68a832d"
+  }
+]

@@ -2471,8 +2471,7 @@ void Application::handleDraftPlaybackShortcuts(const InputRouter::Frame& input)
 RenderFrameData Application::buildEditorRenderFrame(
     const InputRouter::EditorInput& editorInput, float beltScrollOffset)
 {
-    const std::vector<LevelEditor::LevelDirectory> editorLevels =
-        tools_->levelEditor.collectLevelDirectories();
+    const auto& editorLevels = tools_->levelEditor.levelBrowserSnapshot();
     const std::optional<LevelEditor::MoveObject>& pendingMove =
         tools_->levelEditor.pendingMove();
     const std::optional<TileType> movedTile =

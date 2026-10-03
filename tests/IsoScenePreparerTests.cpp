@@ -1429,7 +1429,7 @@ void testExteriorWaterReachesVisiblePlaneFootprint()
             (face.gridSize.x <= 1.0f && face.gridSize.y <= 1.0f)) {
             continue;
         }
-        for (sokoban::Vec3 vertex : face.vertices) {
+        for (sokoban::Vec3 vertex : face.worldVertices) {
             minimumX = std::min(minimumX, vertex.x);
             minimumY = std::min(minimumY, vertex.y);
             maximumX = std::max(maximumX, vertex.x);
@@ -1441,6 +1441,44 @@ void testExteriorWaterReachesVisiblePlaneFootprint()
     CHECK(minimumY < -1.0f);
     CHECK(maximumX > 1.0f);
     CHECK(maximumY > 1.0f);
+
+    // The four continuation strips must cover each exterior corner once.
+    // Equal-height water cannot hide this overdraw with depth testing.
+    std::vector<const sokoban::PreparedIsoFace*> strips;
+    for (const auto& face : scene.isoFaces) {
+        if (face.material == sokoban::PreparedSurfaceMaterial::Water &&
+            !face.pickable) {
+            strips.push_back(&face);
+        }
+    }
+    CHECK(strips.size() == 4);
+    for (std::size_t first = 0; first < strips.size(); ++first) {
+        for (std::size_t second = first + 1; second < strips.size(); ++second) {
+            const auto& a = *strips[first];
+            const auto& b = *strips[second];
+            const float overlapX = std::min(
+                a.worldOrigin.x + a.gridSize.x,
+                b.worldOrigin.x + b.gridSize.x) -
+                std::max(a.worldOrigin.x, b.worldOrigin.x);
+            const float overlapY = std::min(
+                a.worldOrigin.y + a.gridSize.y,
+                b.worldOrigin.y + b.gridSize.y) -
+                std::max(a.worldOrigin.y, b.worldOrigin.y);
+            CHECK(overlapX <= 0.0001f || overlapY <= 0.0001f);
+        }
+    }
+    for (const float x : { minimumX + 0.1f, maximumX - 0.1f }) {
+        for (const float y : { minimumY + 0.1f, maximumY - 0.1f }) {
+            const auto coverage = std::ranges::count_if(strips,
+                [&](const auto* face) {
+                    return x > face->worldOrigin.x &&
+                        x < face->worldOrigin.x + face->gridSize.x &&
+                        y > face->worldOrigin.y &&
+                        y < face->worldOrigin.y + face->gridSize.y;
+                });
+            CHECK(coverage == 1);
+        }
+    }
 }
 
 void testDecorativeTileDoesNotAffectCameraFit()

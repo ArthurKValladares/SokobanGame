@@ -882,8 +882,7 @@ void ApplicationTools::drawSelectorLabels(
         !levelEditor.editingOverworld()) {
         return;
     }
-    const std::vector<LevelEditor::LevelDirectory> levels =
-        levelEditor.collectLevelDirectories();
+    const auto& levels = levelEditor.levelBrowserSnapshot();
     const std::vector<EditorInteraction::SelectorLabel> labels =
         EditorInteraction::selectorLabels(
             levelEditor.selectors(),

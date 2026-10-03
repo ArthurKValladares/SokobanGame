@@ -97,6 +97,10 @@ a 30% improvement across all screens.
 
 ## Remaining optimization priorities
 
+The first pass identified these targets. The follow-up below addresses the
+browser and particle costs and makes smaller water improvements; the procedural
+water field remains the main GPU target.
+
 1. **Water shading and fill cost on level 5, screen 5.** The controlled
    earlier controlled series below attributes approximately 4.5 ms of the GPU
    frame to water. Reflection sampling explains only part of that cost.
@@ -126,6 +130,114 @@ translucency as the dominant pass, but their absolute values are unsuitable
 for comparison with this earlier series. Hardware throttling is an additional
 cause of sustained slowdown; it needs consistent power/thermal conditions
 for trustworthy optimization comparisons.
+
+## Follow-up: browser, particle preparation, and water
+
+The browser now retains separate active/deleted listings instead of enumerating
+directories and parsing metadata on every draw. Save, project transactions,
+root changes, and reinitialization invalidate both snapshots immediately.
+Invalidation preserves the current vectors so a UI command cannot invalidate
+its own iteration. External additions, metadata edits, and deletions appear
+within a 500 ms refresh interval. The browser, selector assignments, selector
+labels, and editor frame builder share these snapshots. Structural commands
+continue to use fresh filesystem reads.
+
+Headless tests exercise immediate add, rename, screen deletion, level deletion,
+restore, permanent deletion, new-screen save (including a stale mirror), root
+change, and reinitialization. They also verify metadata/screen edits and level
+directory additions/deletions at the refresh boundary,
+without sleeping or changing the semantics of the fresh collection API.
+
+| Follow-up Debug capture, 240 frames | Before avg / p95 ms | After avg / p95 ms |
+|---|---:|---:|
+| [Screen 3 Level Editor UI](evidence/followup/editor-after.md) | 3.175 / 3.584 | 1.388 / 2.085 |
+| Screen 3 application frame | 8.352 / 9.800 | 6.165 / 7.321 |
+| [Mixed effects command recording](evidence/followup/particles-final.md) | 8.093 / 10.097 | 5.072 / 7.335 |
+| Mixed effects application frame | 17.200 / 20.441 | 14.179 / 16.749 |
+
+These are new before/after captures of the already-fixed game, rather than
+comparisons with the original 170–240 ms editor regression. Their baselines
+are archived [for the editor](evidence/followup/editor-before.md) and
+[for mixed effects](evidence/followup/particles-before.md). Hardware state still
+affects absolute frame times, so use the CPU scopes and submission changes to
+interpret the improvement.
+
+The [trace scope summary](evidence/followup/scope-summary.json) shows the browser
+draw dropping from 1.898 to 0.173 ms. The 240-frame post-cache trace contains
+six directory scans instead of one per frame. The [Debug CPU benchmark](evidence/followup/cpu-browser-debug.md)
+measures a fresh scan at 1.348 ms, versus 0.006 ms for **128** cached reads;
+the [Release benchmark](evidence/followup/cpu-editor-release.md) records 0.496 ms
+and 0.002 ms respectively. Cached access and filesystem refresh are now
+separate benchmark cases in both quick and full suites.
+
+Particle draw batching had left a redundant `vkCmdSetPrimitiveTopology` call
+for every particle. The recorder now sets topology once for the run, retains
+instance/draw statistics, and skips quad-length/nine-slice preparation for
+textures without sliced borders. The 4,592-particle mixed case still uses
+132 total draws and two particle draws. Removing these redundant commands
+is particularly useful with Debug Vulkan validation enabled.
+
+Billboard preparation now skips projection of zero alignment vectors, computes
+sine/cosine only when the rotation is needed, and reuses camera-basis scales
+and the billboard diagonal. Sorting uses the owned contiguous particle storage
+with the same comparator. New preparation/sort scopes distinguish projection
+from ordering. In matched intermediate/final traces, the particle task,
+including sorting, drops from 3.503 to 2.488 ms. Whole-scene preparation remains
+near 6 ms because this task overlaps other scene work; its savings should not
+be added directly to application-frame savings. The final mixed scene PNG
+is **pixel identical** to the follow-up baseline.
+
+Water's exterior continuation strips previously overlapped at the corners:
+left/right strips extended over the entire visible Y range, while top/bottom
+strips also extended across X. Top/bottom strips now keep their central X
+span, leaving the corners to the side strips. A geometry regression checks
+non-overlapping rectangles and exactly one covering strip at each exterior
+corner. This fixes redundant shading but did not produce a substantial timing
+gain at the measured screen 5 camera.
+
+Reflection tracing transforms the surface origin and ray direction once into
+homogeneous clip coordinates. March and refinement steps evaluate this line
+directly instead of multiplying the camera matrix for every sample. The ray
+steps, depth tests, quality settings, and reflection appearance are retained.
+Two comparisons showed small translucency savings: 4.439 → 4.369 ms, then
+4.391 → 4.331 ms in a shader-only repeat with the same geometry. This is about
+1–2%, close enough to mobile-GPU variation that it is **not a claim of a large
+water speedup**. The corresponding GPU clocks also differed (2415 versus
+2445 MHz), enough to account for much of that difference. Treat this as a
+reduction in repeated shader work, with an inconclusive measured speedup.
+Shader-only repeat metrics are archived
+[before](evidence/followup/water-old-repeat1.md) and
+[after](evidence/followup/water-new-repeat1.md).
+The [before hardware snapshot](evidence/followup/water-old-repeat-hardware.txt)
+and [after snapshot](evidence/followup/water-new-repeat-hardware.txt) record the
+clocks and no active thermal slowdown at the end of that pair.
+
+The normal screen 5 shader comparison changes 47 of 5,184,000 pixels, with a
+maximum five-value difference in an 8-bit channel. The boundary-crossing water
+fixture at 75% scale/1x MSAA changes four pixels, maximum four values. Visual
+inspection found no seam or missing water coverage. Removing corner overlap
+alone changes 8,318 pixels by at most one value. Captures remain in
+`out/performance-followup`; decoded-image comparison results are archived in
+[image comparisons](evidence/followup/image-comparisons.json).
+
+Branchless cellular minima, forced loop unrolling, and explicit early fragment
+tests did not yield useful gains in the measured case and were removed.
+Water still spends roughly 4.3 ms in translucency at full resolution. The
+larger next experiment is caching the static cellular feature data or
+evaluating the animated field once for reuse, with explicit handling of
+world coordinates, animation, projected caustics, and pixel footprints.
+Render scale, MSAA, and water/reflection defaults have not been reduced.
+
+The final Debug/Release builds pass the same 14 relevant CTests,
+including the warm zero-allocation scene regression. All six effect families
+also complete the full 40-sample [Release CPU suite](evidence/followup/cpu-effects-release.md).
+The final water SPIR-V passes `spirv-val`. Debug captures with required
+validation cover authored water at 4x MSAA, a boundary-crossing fixture at
+75% scale/8x MSAA, and the mixed effect stress. They report no Vulkan usage
+errors; the loader still reports this machine's stale external Epic overlay
+JSON registration. Test logs are archived for
+[Debug](evidence/followup/tests-debug.txt) and
+[Release](evidence/followup/tests-release.txt).
 
 ## Profiling and coverage fixes
 
