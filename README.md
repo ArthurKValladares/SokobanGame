@@ -187,7 +187,10 @@ cmake --build build --config Release --target performance-comprehensive
 The suite covers profiler overhead, process-memory sampling, frame-time
 statistics, frame-arena versus heap allocation, opaque draw sorting and
 batching, task dispatch and parallel scaling, and cold/warm plus
-serial/parallel scene preparation at multiple scene sizes. Every case uses the
+serial/parallel scene preparation at multiple scene sizes. Production effect
+fixtures also measure mirror/witch swaps, turret muzzle/ribbon/impact bursts,
+portal particles, blurred ice, gate/mirror energy, and linked-object auras,
+both individually and under combined emitter pressure. Every case uses the
 engine's bounded telemetry and CPU scopes, including worker-chunk scopes for
 parallel workloads. It writes `performance-report.md`,
 machine-readable `performance-results.json`, and a `cpu-trace.json` that opens
@@ -196,14 +199,38 @@ candidates such as task crossover points, cache value, and materially costly
 nonlinear scene scaling; compare numeric results only on the same machine
 and power state. Use `--filter scene-preparation` to isolate a group and
 `--quick` for a 12-sample run. `RunPerformanceSuites.ps1 -Quick` also runs a
-matched cold/warm application-startup pair plus a short baseline, point-light
-stress, and serial-scene GPU matrix. The startup report records construction,
+matched cold/warm application-startup pair plus baseline, point-light stress,
+serial-scene, level 5 screens 3/5, and all six effect GPU fixtures. Debug runs
+select the Level Editor in the developer workspace on puzzle/effect cases and add hidden
+workspace and disabled CPU-profiler controls. The startup report records construction,
 first-frame, and process wall time, while its logs break out Vulkan instance,
 device, swapchain, render-resource, pipeline, audio, and renderer phases. Its
 full mode adds render-scale, AO, translucency, frustum-culling, point-shadow,
-and command-recorder A/B captures, then repeats the baseline to expose thermal
-or power-state drift; every evidence report uses the same ranked analyzer as
-the live profiler.
+and command-recorder A/B captures, all seven level 5 screens, and screen 5
+water/reflections, render-scale, and 1x/8x MSAA controls. Repeated baselines
+expose thermal or power-state drift. Every evidence report uses the same
+ranked analyzer as the live profiler.
+
+Puzzle captures use a fixed 1/60 s simulation step. Brief effects are retained
+at a seeded visible phase so they remain present throughout warm-up and the
+final 120 measured frames. Reports include complete application frame time,
+frame intervals and pacing, update/UI/build costs, particle draw counts,
+special-shader coverage, and a separate GPU particle phase. Screenshot
+readback and encoding are excluded from the timing window. Debug evidence
+also exports the application CPU trace. To reproduce the reported Debug
+slowdown and its controls:
+
+```powershell
+.\tools\RunPerformanceSuites.ps1 -BuildDirectory out\visual-studio -Configuration Debug
+```
+
+The CPU suite also measures repeated editor document classification and level
+browser scans. If `nvidia-smi` is available, GPU cases archive clocks,
+temperature, power, and throttling reasons before and after the run. Use those
+snapshots and the repeated baselines to identify hardware drift.
+
+See [the October 3 investigation](docs/performance/2026-10-03-gameplay/README.md)
+for measurements, fixes, and the remaining optimization priorities.
 
 Every quick and full GPU matrix also records a `vsync-disabled` control. Its
 report names the presentation mode the driver actually selected, allowing a

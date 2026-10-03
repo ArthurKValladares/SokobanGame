@@ -119,6 +119,7 @@ public:
     [[nodiscard]] VkImage resolvedColorImage() const { return resolvedColorImage_.image; }
     [[nodiscard]] VkImageView resolvedColorView() const { return resolvedColorImage_.view; }
     [[nodiscard]] VkImage displayColorImage() const { return displayColorImage_.image; }
+    [[nodiscard]] VkImageLayout displayColorLayout() const { return displayColorLayout_; }
     [[nodiscard]] VkImageView displayColorView() const { return displayColorImage_.view; }
     [[nodiscard]] VkImageView renderColorView() const;
     [[nodiscard]] VkImageView resolveColorView() const;

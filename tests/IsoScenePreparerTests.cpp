@@ -454,6 +454,40 @@ void testExplicitCameraPoseBypassesBoardFit()
     CHECK(near(projected.y, 0.0f));
 }
 
+void testDetachedCameraRetainsFloorMarkerDepthSeparation()
+{
+    using namespace sokoban;
+
+    // D16 collapses these distinct surfaces with the detached camera's 0.05
+    // near plane. Exercise the actual GPU projection, including world-space
+    // translation, at both board-view and distant free-camera positions.
+    for (float distance : { 10.0f, 30.0f, 60.0f }) {
+        RenderFrameData frame = sceneFrame();
+        frame.cameraOverride = RenderFrameData::CameraOverride {
+            .position = { 1.5f, 1.5f, distance },
+            .forward = { 0.0f, 0.0f, -1.0f },
+            .verticalFovDegrees = 75.0f,
+        };
+        const PreparedRenderScene scene =
+            prepareScene(frame, { 1600.0f, 900.0f });
+        const Mat4 clipFromWorld =
+            isoClipFromWorld(scene.isoLayout, scene.renderExtent);
+        const Vec4 floorClip = transform(
+            clipFromWorld, Vec4 { 1.5f, 1.5f, 0.0f, 1.0f });
+        const Vec4 markerClip = transform(
+            clipFromWorld, Vec4 { 1.5f, 1.5f, 0.01f, 1.0f });
+        const float floorDepth = floorClip.z / floorClip.w;
+        const float markerDepth = markerClip.z / markerClip.w;
+        CHECK(markerDepth > 0.0f);
+        CHECK(floorDepth < 1.0f);
+        // D32 stores these floats directly; require more than one storage
+        // step so rounding at a shared triangle edge cannot erase the gap.
+        CHECK(std::nextafter(markerDepth, 1.0f) < floorDepth);
+        CHECK(std::round(markerDepth * 65535.0f) ==
+              std::round(floorDepth * 65535.0f));
+    }
+}
+
 bool containsCell(
     const sokoban::PreparedRenderScene& scene,
     sokoban::GridPosition3 cell)
@@ -1920,6 +1954,7 @@ int main()
     testPointShadowFaceCacheRequiresExactStableGeometry();
     testCameraLayoutUsesConfiguredAngles();
     testExplicitCameraPoseBypassesBoardFit();
+    testDetachedCameraRetainsFloorMarkerDepthSeparation();
     testPreparationCategorizesOneSharedFacePool();
     testPassListsAreDepthSorted();
     testOpaqueListEndsWithABackToFrontBlendedTail();

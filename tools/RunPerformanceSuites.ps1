@@ -52,6 +52,21 @@ function Invoke-Checked(
     }
 }
 
+function Write-HardwareSnapshot([string]$Path) {
+    # Optional, read-only metadata. Hardware throttling can dwarf a source
+    # change during a sustained GPU matrix; preserve the driver's own reasons.
+    if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+        $benchmarkExitCode = $LASTEXITCODE
+        try {
+            & nvidia-smi -q -d PERFORMANCE,TEMPERATURE,POWER,CLOCK 2>&1 |
+                Set-Content -LiteralPath $Path -Encoding utf8
+        } finally {
+            # Optional diagnostics must not change a benchmark's exit status.
+            $global:LASTEXITCODE = $benchmarkExitCode
+        }
+    }
+}
+
 if (-not $SkipBuild) {
     $targets = @("sokoban_performance_tests", "sokoban")
     $cmakeCache = Join-Path $buildRoot "CMakeCache.txt"
@@ -97,13 +112,43 @@ if ($null -ne $vulkanRunner) {
 }
 
 $gameExecutable = Resolve-Executable "sokoban"
-$frameCount = if ($Quick) { 120 } else { 360 }
+# The report retains the final 120 samples. Leave a separate warm-up window
+# for first-use model/texture uploads and shader compilation in every case.
+$frameCount = if ($Quick) { 240 } else { 420 }
 $scenarios = @(
     @{ Name = "baseline"; Arguments = @() },
     @{ Name = "vsync-disabled"; Arguments = @("--evidence-disable-vsync") },
     @{ Name = "point-light-stress"; Arguments = @("--evidence-point-light-stress") },
     @{ Name = "serial-scene-preparation"; Arguments = @("--serial-scene-preparation") }
 )
+$level5Arguments = @("--evidence-level", "5", "--evidence-animate", "--evidence-disable-vsync")
+if ($Configuration -eq "Debug") {
+    $level5Arguments += "--evidence-debug-ui"
+}
+foreach ($screen in $(if ($Quick) { @(3, 5) } else { @(0, 1, 2, 3, 4, 5, 6) })) {
+    $scenarios += @{
+        Name = "level5-screen$screen"
+        Arguments = $level5Arguments + @("--evidence-screen", "$screen")
+    }
+}
+foreach ($effect in @("mirror-swap", "witch-swap", "turret-volley", "portals", "special-blocks", "mixed-stress")) {
+    $scenarios += @{
+        Name = "effects-$effect"
+        Arguments = $level5Arguments + @("--evidence-screen", "3", "--evidence-effects", $effect)
+    }
+}
+if ($Configuration -eq "Debug") {
+    $scenarios += @(
+        @{
+            Name = "level5-screen3-menu-hidden"
+            Arguments = @("--evidence-level", "5", "--evidence-screen", "3", "--evidence-animate", "--evidence-disable-vsync")
+        },
+        @{
+            Name = "level5-screen3-profiler-disabled"
+            Arguments = $level5Arguments + @("--evidence-screen", "3", "--evidence-disable-profiler")
+        }
+    )
+}
 if (-not $Quick) {
     $scenarios += @(
         @{ Name = "render-scale-75"; Arguments = @("--evidence-render-scale", "75") },
@@ -118,6 +163,12 @@ if (-not $Quick) {
             )
         },
         @{ Name = "recorder-scratch-reuse-disabled"; Arguments = @("--disable-recorder-scratch-reuse") },
+        @{ Name = "level5-screen5-no-water"; Arguments = $level5Arguments + @("--evidence-screen", "5", "--evidence-disable-water") },
+        @{ Name = "level5-screen5-no-water-reflections"; Arguments = $level5Arguments + @("--evidence-screen", "5", "--evidence-disable-water-reflections") },
+        @{ Name = "level5-screen5-scale75"; Arguments = $level5Arguments + @("--evidence-screen", "5", "--evidence-render-scale", "75") },
+        @{ Name = "level5-screen5-msaa1"; Arguments = $level5Arguments + @("--evidence-screen", "5", "--evidence-msaa", "1") },
+        @{ Name = "level5-screen5-msaa8"; Arguments = $level5Arguments + @("--evidence-screen", "5", "--evidence-msaa", "8") },
+        @{ Name = "level5-screen5-repeat"; Arguments = $level5Arguments + @("--evidence-screen", "5") },
         @{ Name = "baseline-repeat"; Arguments = @() }
     )
 }
@@ -194,7 +245,9 @@ try {
             "--save-directory", $stateOutput,
             "--evidence-output", $scenarioOutput
         ) + $scenario.Arguments
+        Write-HardwareSnapshot (Join-Path $scenarioOutput "hardware-start.txt")
         Invoke-Checked $gameExecutable $arguments (Join-Path $scenarioOutput "run.log")
+        Write-HardwareSnapshot (Join-Path $scenarioOutput "hardware-end.txt")
     }
 } finally {
     Set-Location $originalLocation
@@ -206,6 +259,7 @@ $indexLines = @(
     "- Configuration: $Configuration",
     "- Mode: $(if ($Quick) { 'quick' } else { 'full' })",
     "- Evidence frames per GPU scenario: $frameCount",
+    "- When available, each GPU case includes NVIDIA hardware-start/end snapshots with clocks, temperature, power, and throttling reasons. Compare those and the repeated baselines before attributing timing drift to code.",
     "",
     "## CPU and engine workloads",
     "",
@@ -220,18 +274,22 @@ $indexLines = @(
     "",
     "## GPU evidence matrix",
     "",
-    "| Scenario | CPU avg / p95 ms | GPU avg / p95 ms | Scene prep avg / p95 ms | Top finding |",
-    "|---|---:|---:|---:|---|"
+    "| Scenario | Application avg / p95 ms | Renderer avg / p95 ms | GPU avg / p95 ms | Scene prep avg / p95 ms | Particles / draws | Top finding |",
+    "|---|---:|---:|---:|---:|---:|---|"
 )
 foreach ($scenario in $scenarios) {
     $metrics = Get-ChildItem -LiteralPath (Join-Path $outputRoot "gpu/$($scenario.Name)") `
-        -Filter "metrics-*.md" | Select-Object -First 1
+        -Filter "metrics-*.md" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($null -ne $metrics) {
         $relative = "gpu/$($scenario.Name)/$($metrics.Name)" -replace '\\', '/'
         $text = Get-Content -LiteralPath $metrics.FullName -Raw
         $cpu = [regex]::Match(
             $text,
             '(?m)^- CPU frame: average ([0-9.]+) ms, p95 ([0-9.]+) ms')
+        $application = [regex]::Match($text,
+            '(?m)^- Application frame \(including profiler, excluding frame cap\): average ([0-9.]+) ms, p95 ([0-9.]+) ms')
+        $particles = [regex]::Match($text, '(?m)^- Prepared particles: ([0-9]+)')
+        $particleDraws = [regex]::Match($text, '(?m)^- Particle draw calls: ([0-9]+)')
         $gpu = [regex]::Match(
             $text,
             '(?m)^- GPU frame: average ([0-9.]+) ms, p95 ([0-9.]+) ms')
@@ -253,7 +311,13 @@ foreach ($scenario in $scenarios) {
         $findingText = if ($topFinding.Success) {
             $topFinding.Groups[1].Value
         } else { "No rule-based bottleneck" }
-        $indexLines += "| [$($scenario.Name)]($relative) | $cpuText | $gpuText | $sceneText | $findingText |"
+        $applicationText = if ($application.Success) {
+            "$($application.Groups[1].Value) / $($application.Groups[2].Value)"
+        } else { "unavailable" }
+        $particleText = if ($particles.Success -and $particleDraws.Success) {
+            "$($particles.Groups[1].Value) / $($particleDraws.Groups[1].Value)"
+        } else { "unavailable" }
+        $indexLines += "| [$($scenario.Name)]($relative) | $applicationText | $cpuText | $gpuText | $sceneText | $particleText | $findingText |"
     }
 }
 if ($null -ne $vulkanRunner) {

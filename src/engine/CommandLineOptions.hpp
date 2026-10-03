@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/UserSettingsConfig.hpp"
+#include "engine/PerformanceFixtures.hpp"
 
 #include <charconv>
 #include <cstdint>
@@ -46,6 +47,14 @@ struct CommandLineOptions {
     bool evidenceWaterEnabled = false;
     bool evidencePointLightEnabled = false;
     bool evidencePointLightStressEnabled = false;
+    int evidenceLevel = -1;
+    int evidenceScreen = -1;
+    bool evidenceDebugUi = false;
+    bool evidenceProfilerEnabled = true;
+    bool evidenceAnimate = false;
+    std::string evidenceEffects;
+    bool evidenceWaterDisabled = false;
+    bool evidenceWaterReflectionsDisabled = false;
     // Diagnostic A/B switch for frame-preparation profiling.
     bool parallelScenePreparationEnabled = true;
     bool pointShadowOptimizationsEnabled = true;
@@ -123,7 +132,8 @@ struct CommandLineOptions {
             options.continueGame = true;
         } else if (argument == "--title") {
             options.showTitle = true;
-        } else if (argument == "--level" || argument == "--screen") {
+        } else if (argument == "--level" || argument == "--screen" ||
+            argument == "--evidence-level" || argument == "--evidence-screen") {
             if (index + 1 >= arguments.size()) {
                 return reject(
                     std::string(argument) + " needs a zero-based index");
@@ -141,8 +151,14 @@ struct CommandLineOptions {
                     " wants a non-negative integer, got '" +
                     std::string(value) + "'");
             }
-            (argument == "--level" ? options.startLevel : options.startScreen) =
-                parsedIndex;
+            if (argument == "--evidence-level") {
+                options.evidenceLevel = parsedIndex;
+            } else if (argument == "--evidence-screen") {
+                options.evidenceScreen = parsedIndex;
+            } else {
+                (argument == "--level" ? options.startLevel : options.startScreen) =
+                    parsedIndex;
+            }
         } else if (argument == "--edit") {
             if (index + 1 >= arguments.size()) {
                 return reject("--edit needs a level document path");
@@ -214,6 +230,22 @@ struct CommandLineOptions {
         } else if (argument == "--evidence-water") {
             options.evidenceWaterEnabled = true;
             evidenceWaterSpecified = true;
+        } else if (argument == "--evidence-debug-ui") {
+            options.evidenceDebugUi = true;
+        } else if (argument == "--evidence-disable-profiler") {
+            options.evidenceProfilerEnabled = false;
+        } else if (argument == "--evidence-animate") {
+            options.evidenceAnimate = true;
+        } else if (argument == "--evidence-effects") {
+            if (index + 1 >= arguments.size() ||
+                !isPerformanceEffectScenario(arguments[index + 1])) {
+                return reject("--evidence-effects needs mirror-swap, witch-swap, turret-volley, portals, special-blocks, or mixed-stress");
+            }
+            options.evidenceEffects = arguments[++index];
+        } else if (argument == "--evidence-disable-water") {
+            options.evidenceWaterDisabled = true;
+        } else if (argument == "--evidence-disable-water-reflections") {
+            options.evidenceWaterReflectionsDisabled = true;
         } else if (argument == "--serial-scene-preparation") {
             options.parallelScenePreparationEnabled = false;
         } else if (argument == "--evidence-point-light") {
@@ -309,6 +341,19 @@ struct CommandLineOptions {
         return reject(
             "--evidence-point-light and --evidence-point-light-stress are mutually exclusive");
     }
+    if (options.evidenceScreen >= 0 && options.evidenceLevel < 0) {
+        return reject("--evidence-screen requires --evidence-level");
+    }
+    if (options.evidenceWaterEnabled && options.evidenceWaterDisabled) {
+        return reject("--evidence-water and --evidence-disable-water are mutually exclusive");
+    }
+    if (options.evidenceOutputDirectory.empty() &&
+        (options.evidenceLevel >= 0 || options.evidenceDebugUi || options.evidenceAnimate ||
+            !options.evidenceEffects.empty() || options.evidenceWaterDisabled ||
+            options.evidenceWaterReflectionsDisabled ||
+            !options.evidenceProfilerEnabled)) {
+        return reject("Evidence scenario options require --evidence-output");
+    }
     return options;
 }
 
@@ -325,6 +370,11 @@ inline constexpr std::string_view commandLineUsage =
     "[--evidence-output <directory> "
     "--evidence-render-scale <25..100> [--evidence-msaa <1|2|4|8>] "
     "[--evidence-disable-vsync] "
+    "[--evidence-level <index> [--evidence-screen <index>]] "
+    "[--evidence-debug-ui] [--evidence-disable-profiler] "
+    "[--evidence-animate] "
+    "[--evidence-effects <scenario>] [--evidence-disable-water] "
+    "[--evidence-disable-water-reflections] "
     "[--evidence-disable-ao] "
     "[--evidence-disable-frustum-culling] [--evidence-water] "
     "[--evidence-point-light] "

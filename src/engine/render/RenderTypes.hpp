@@ -622,6 +622,11 @@ struct RenderStats {
     uint32_t preparedModels = 0;
     uint32_t unavailableModels = 0;
     uint32_t preparedParticles = 0;
+    uint32_t particleDrawCalls = 0;
+    uint32_t preparedWaterFaces = 0;
+    uint32_t preparedEnergyFaces = 0;
+    uint32_t preparedEnergyModels = 0;
+    uint32_t preparedBlurModels = 0;
     uint32_t persistentRenderables = 0;
     uint32_t reusedRenderableBounds = 0;
     uint32_t rebuiltRenderableBounds = 0;
@@ -698,6 +703,7 @@ struct RenderStats {
     RenderPhaseTiming gpuSceneModelsTiming {};
     RenderPhaseTiming gpuSceneDepthPublishTiming {};
     RenderPhaseTiming gpuSceneTranslucencyTiming {};
+    RenderPhaseTiming gpuParticleTiming {};
     RenderPhaseTiming gpuSceneMirrorContinuationTiming {};
     RenderPhaseTiming gpuSsaoTiming {};
     RenderPhaseTiming gpuSsaoSnapshotTiming {};

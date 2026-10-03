@@ -570,6 +570,7 @@ void ProfilerDebugUi::draw(const VulkanRenderer& renderer)
                 { "    Models", &stats.gpuSceneModelsTiming },
                 { "  Depth publish", &stats.gpuSceneDepthPublishTiming },
                 { "  Translucency", &stats.gpuSceneTranslucencyTiming },
+                { "    Particles", &stats.gpuParticleTiming },
                 { "  Mirror continuation",
                     &stats.gpuSceneMirrorContinuationTiming },
                 { "SSAO", &stats.gpuSsaoTiming },

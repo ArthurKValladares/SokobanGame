@@ -38,6 +38,8 @@ public:
 
     static void initialize();
     static void addTab(std::string name, DrawCallback callback);
+    // Select a docked tool once its window exists, including on first launch.
+    static void requestTabFocus(std::string name);
     // A menu in the workspace's main menu bar; the callback draws its items.
     static void addMenu(std::string name, DrawCallback callback);
     // A control drawn directly in the workspace's main menu bar.

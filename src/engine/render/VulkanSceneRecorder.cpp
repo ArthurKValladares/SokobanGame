@@ -474,6 +474,23 @@ public:
                 configuration_.rendererReconfigurationPending,
         };
 
+        stats_.preparedWaterFaces = static_cast<uint32_t>(std::ranges::count_if(
+            scene.isoFaces, [](const auto& face) {
+                return face.material == PreparedSurfaceMaterial::Water;
+            }));
+        stats_.preparedEnergyFaces = static_cast<uint32_t>(std::ranges::count_if(
+            scene.isoFaces, [](const auto& face) {
+                return face.material == PreparedSurfaceMaterial::GateEnergy ||
+                    face.material == PreparedSurfaceMaterial::MirrorEnergy ||
+                    face.material == PreparedSurfaceMaterial::LinkedObjectAura;
+            }));
+        for (const auto index : scene.translucentModelIndices) {
+            const auto& tile = frameData.tiles[index];
+            stats_.preparedBlurModels += tile.blurBehind ? 1U : 0U;
+            stats_.preparedEnergyModels +=
+                tile.effect == RenderSurfaceEffect::MirrorEnergy ||
+                tile.effect == RenderSurfaceEffect::LinkedObjectAura ? 1U : 0U;
+        }
         // Point-shadow quad batching borrows the ordinary draw-instance
         // buffer. Reserve a conservative upper bound for all later users so
         // a shadow-heavy frame cannot make visible scene or UI draws overflow.
@@ -1130,6 +1147,7 @@ private:
                 .content = mirrorPreviewOverFog
                     ? SceneContent::WithoutMirrorPreview
                     : SceneContent::Full,
+                .profileParticles = true,
             },
             { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
         gpuProfiler_.endPhase(
@@ -1793,6 +1811,7 @@ private:
         // translucency, and mirror replays share this function but must not
         // overwrite the main-scene face/model queries later in the frame.
         bool profileOpaqueGeometry = false;
+        bool profileParticles = false;
     };
 
     void recordScenePass(
@@ -1938,7 +1957,8 @@ private:
                 frameData,
                 translucentPass,
                 options.content,
-                options.profileOpaqueGeometry);
+                options.profileOpaqueGeometry,
+                options.profileParticles);
         } else {
             for (const RenderFrameData::Tile& tile :
                  frameData.tiles) {
@@ -2143,7 +2163,8 @@ private:
         const RenderFrameData& frameData,
         bool translucentPass,
         SceneContent content,
-        bool profileOpaqueGeometry)
+        bool profileOpaqueGeometry,
+        bool profileParticles)
     {
         const std::vector<std::size_t>& faceIndices =
             translucentPass
@@ -2668,27 +2689,58 @@ private:
         if (translucentPass &&
             content != SceneContent::MirrorPreviewOnly &&
             !scene.particles.empty()) {
+            SOKOBAN_PROFILE_SCOPE("Renderer.Record particles");
+            if (profileParticles) {
+                gpuProfiler_.beginPhase(commandBuffer,
+                    configuration_.descriptorFrameIndex, VulkanGpuPhase::SceneParticles);
+            }
             vkCmdBindPipeline(
                 commandBuffer,
                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                 pipelines_.scene());
             ++stats_.pipelineBinds;
             bool depthTestEnabled = swapchain_.depthView() != VK_NULL_HANDLE;
+            uint32_t firstParticleInstance = 0;
+            uint32_t particleInstances = 0;
+            const auto flushParticles = [&] {
+                if (particleInstances != 0) {
+                    drawQuadRun(commandBuffer, firstParticleInstance, particleInstances);
+                    ++stats_.particleDrawCalls;
+                    particleInstances = 0;
+                }
+            };
             for (const PreparedParticle& particle : scene.particles) {
                 const bool desiredDepthTest =
                     !particle.drawOnTop &&
                     swapchain_.depthView() != VK_NULL_HANDLE;
                 if (desiredDepthTest != depthTestEnabled) {
+                    flushParticles();
                     vkCmdSetDepthTestEnable(
                         commandBuffer,
                         desiredDepthTest ? VK_TRUE : VK_FALSE);
                     depthTestEnabled = desiredDepthTest;
                 }
-                drawQuadRun(
-                    commandBuffer, drawParticle(commandBuffer, particle), 1);
+                const uint32_t instance = drawParticle(commandBuffer, particle);
+                // Keep alpha-blend order exactly as prepared. Bindless texture
+                // and nine-slice data already live in each instance. Split at
+                // depth-mode changes and nonconsecutive entries, including
+                // repeated discard slots when the instance buffer is full.
+                if (particleInstances != 0 &&
+                    instance != firstParticleInstance + particleInstances) {
+                    flushParticles();
+                }
+                if (particleInstances == 0) {
+                    firstParticleInstance = instance;
+                }
+                ++particleInstances;
             }
+            flushParticles();
             if (!depthTestEnabled && swapchain_.depthView()) {
                 vkCmdSetDepthTestEnable(commandBuffer, VK_TRUE);
+            }
+            if (profileParticles) {
+                gpuProfiler_.endPhase(commandBuffer,
+                    configuration_.descriptorFrameIndex, VulkanGpuPhase::SceneParticles);
             }
         }
     }

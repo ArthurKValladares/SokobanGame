@@ -1,5 +1,8 @@
 #include "engine/FrameArena.hpp"
 #include "engine/PerformanceAnalysis.hpp"
+#include "engine/PerformanceFixtures.hpp"
+#include "engine/LevelEditor.hpp"
+#include "engine/AssetManifest.hpp"
 #include "engine/ProcessMemory.hpp"
 #include "engine/Profiler.hpp"
 #include "engine/TaskSystem.hpp"
@@ -582,6 +585,63 @@ void runSceneBenchmarks(Suite& suite, sokoban::TaskSystem& tasks)
     }
 }
 
+void runEditorBenchmarks(Suite& suite)
+{
+    const std::filesystem::path root(SOKOBAN_PERFORMANCE_LEVEL_DIR);
+    sokoban::LevelEditor editor;
+    editor.initialize(root, root, 5, 3);
+    if (editor.loadedDocumentPath().empty()) {
+        throw std::runtime_error("Editor benchmark requires level 5 screen 3");
+    }
+    suite.run("editor", "editor-puzzle-overworld-identity",
+        "Repeated palette/gameplay classification of a puzzle document with a composed overworld present.",
+        128, 2, [&] {
+            uint64_t result = 0;
+            for (int index = 0; index < 64; ++index) {
+                result += editor.editingOverworld() ? 1U : 0U;
+                result += editor.overworldScreenId().has_value() ? 1U : 0U;
+            }
+            return result;
+        });
+    suite.run("editor", "editor-level-browser-scan",
+        "Filesystem enumeration and metadata parsing for the Level Editor browser.",
+        1, 1, [&] { return static_cast<uint64_t>(editor.collectLevelDirectories().size()); });
+}
+
+void runEffectBenchmarks(Suite& suite, sokoban::TaskSystem& tasks)
+{
+    const auto manifest = sokoban::AssetManifest::loadFromFile(
+        std::filesystem::path(SOKOBAN_PERFORMANCE_ASSET_DIR) / "manifest.json");
+    for (const std::string scenario : { "mirror-swap", "witch-swap", "turret-volley",
+             "portals", "special-blocks", "mixed-stress" }) {
+        for (const uint32_t emitters : { 1U, suite.settings().full ? 32U : 8U }) {
+            sokoban::PerformanceEffectFixture fixture(manifest);
+            sokoban::RenderFrameData emitted;
+            emitted.levelWidth = emitted.levelHeight = 16;
+            const std::string suffix = scenario + '-' + std::to_string(emitters);
+            suite.run("effects", "effects-emission-" + suffix,
+                "Production burst/ribbon/portal/special-block emission, simulation and render-data export at a seeded visible phase.",
+                emitters, 2, [&] {
+                    emitted.tiles.clear();
+                    emitted.particles.clear();
+                    fixture.append(emitted, manifest, scenario, emitters);
+                    return static_cast<uint64_t>(emitted.particles.size() + emitted.tiles.size());
+                });
+            auto frame = makeScene(16);
+            fixture.append(frame, manifest, scenario, emitters);
+            sokoban::IsoScenePreparer preparer;
+            sokoban::PreparedRenderScene scene;
+            preparer.prepare(frame, { 1920.0f, 1080.0f }, scene, &tasks);
+            suite.run("effects", "effects-preparation-" + suffix,
+                "Warm particle billboard/ribbon projection, ordering, and special-surface scene preparation.",
+                frame.particles.size() + frame.tiles.size(), 2, [&] {
+                    preparer.prepare(frame, { 1920.0f, 1080.0f }, scene, &tasks);
+                    return static_cast<uint64_t>(scene.particles.size() + scene.isoFaces.size());
+                });
+        }
+    }
+}
+
 std::vector<sokoban::PerformanceFinding> analyzeBenchmarks(
     const std::vector<BenchmarkResult>& results)
 {
@@ -871,6 +931,8 @@ int main(int argc, char** argv)
         runDrawBenchmarks(suite);
         runTaskBenchmarks(suite, tasks);
         runSceneBenchmarks(suite, tasks);
+        runEditorBenchmarks(suite);
+        runEffectBenchmarks(suite, tasks);
         const sokoban::ProcessMemoryStatistics finalMemory =
             sokoban::processMemoryStatistics();
         writeReports(

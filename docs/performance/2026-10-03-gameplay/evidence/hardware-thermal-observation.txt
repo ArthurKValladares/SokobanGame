@@ -1,0 +1,39 @@
+
+==============NVSMI LOG==============
+
+Timestamp                                              : Sat Oct  3 16:23:05 2026
+Driver Version                                         : 610.88 [Deprecated; will be removed in CUDA 14.0. Use KMD Version instead]
+CUDA Version                                           : 13.3 [Deprecated; will be removed in CUDA 14.0. Use CUDA UMD Version instead]
+KMD Version                                            : 610.88
+CUDA UMD Version                                       : 13.3
+
+Attached GPUs                                          : 1
+GPU 00000000:01:00.0
+    Performance State                                  : P3
+    Clocks Event Reasons
+        Idle                                           : Not Active
+        Applications Clocks Setting                    : Not Active
+        SW Power Cap                                   : Not Active
+        HW Slowdown                                    : Not Active
+            HW Thermal Slowdown                        : Not Active
+            HW Power Brake Slowdown                    : Not Active
+        Sync Boost                                     : Not Active
+        SW Thermal Slowdown                            : Active
+        Display Clock Setting                          : Not Active
+    Clocks Event Reasons Counters
+        SW Power Capping                               : 4526400614 us
+        Sync Boost                                     : 0 us
+        SW Thermal Slowdown                            : 6753283547 us
+        HW Thermal Slowdown                            : 5000 us
+        HW Power Braking                               : 0 us
+    Sparse Operation Mode                              : N/A
+    Temperature
+        GPU Current Temp                               : 86 C
+        GPU Current T.Limit Temp                       : 1 C
+        GPU Shutdown T.Limit Temp Specification        : -12 C
+        GPU Slowdown T.Limit Temp Specification        : -2 C
+        GPU Max Operating T.Limit Temp Specification   : 0 C
+        GPU Target Temperature Specification           : 87 C
+        Memory Current Temp                            : N/A
+        Memory Max Operating T.Limit Temp Specification: N/A
+

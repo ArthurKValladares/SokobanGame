@@ -296,6 +296,40 @@ void testLargeCountFits()
     CHECK_MESSAGE(options.smokeFrames == 4294967296ULL, "the count is not truncated");
 }
 
+void testPerformanceScenarios()
+{
+    const auto options = parse({ "--smoke-frames", "420", "--evidence-output", "x",
+        "--evidence-level", "5", "--evidence-screen", "3", "--evidence-debug-ui",
+        "--evidence-animate", "--evidence-effects", "mixed-stress",
+        "--evidence-disable-water-reflections", "--evidence-disable-profiler" });
+    CHECK(!options.malformed);
+    CHECK(options.evidenceLevel == 5 && options.evidenceScreen == 3);
+    CHECK(options.evidenceDebugUi && options.evidenceAnimate);
+    CHECK(options.evidenceEffects == "mixed-stress");
+    CHECK(options.evidenceWaterReflectionsDisabled && !options.evidenceProfilerEnabled);
+    for (const auto flag : { "--evidence-debug-ui", "--evidence-animate",
+             "--evidence-disable-water", "--evidence-disable-water-reflections",
+             "--evidence-disable-profiler" }) {
+        CHECK(parse({ flag }).malformed);
+    }
+    CHECK(parse({ "--evidence-level", "5" }).malformed);
+    CHECK(parse({ "--evidence-level" }).malformed);
+    CHECK(parse({ "--evidence-level", "-1" }).malformed);
+    CHECK(parse({ "--smoke-frames", "420", "--evidence-output", "x",
+        "--evidence-screen", "2" }).malformed);
+    CHECK(parse({ "--evidence-effects" }).malformed);
+    CHECK(parse({ "--smoke-frames", "420", "--evidence-output", "x",
+        "--evidence-effects", "typo" }).malformed);
+    CHECK(parse({ "--smoke-frames", "420", "--evidence-output", "x",
+        "--evidence-water", "--evidence-disable-water" }).malformed);
+    for (const auto scenario : { "mirror-swap", "witch-swap", "turret-volley",
+             "portals", "special-blocks", "mixed-stress" }) {
+        CHECK(!parse({ "--smoke-frames", "420", "--evidence-output", "x",
+            "--evidence-effects", scenario }).malformed);
+        CHECK(parse({ "--evidence-effects", scenario }).malformed);
+    }
+}
+
 } // namespace
 
 int main()
@@ -305,6 +339,7 @@ int main()
     testMalformedInput();
     testLargeCountFits();
     testLaunchShortcuts();
+    testPerformanceScenarios();
     if (failures != 0) {
         std::cerr << "CommandLineOptionsTests: " << failures
                   << " CHECK_MESSAGE(s) failed\n";

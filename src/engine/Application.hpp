@@ -79,6 +79,14 @@ struct ApplicationOptions {
     bool evidenceWaterEnabled = false;
     bool evidencePointLightEnabled = false;
     bool evidencePointLightStressEnabled = false;
+    int evidenceLevel = -1;
+    int evidenceScreen = 0;
+    bool evidenceDebugUi = false;
+    bool evidenceProfilerEnabled = true;
+    bool evidenceAnimate = false;
+    std::string evidenceEffects;
+    bool evidenceWaterDisabled = false;
+    bool evidenceWaterReflectionsDisabled = false;
     bool parallelScenePreparationEnabled = true;
     bool pointShadowOptimizationsEnabled = true;
     bool recorderScratchReuseEnabled = true;
@@ -122,6 +130,7 @@ public:
 private:
     void captureEvidenceScene();
     void finishEvidenceCapture();
+    void appendEvidenceEffects(RenderFrameData& frame);
     void loadCurrentScreen();
     void openTitleScreen();
     [[nodiscard]] std::vector<SaveSlotInfo> saveSlotInfos() const;
@@ -309,6 +318,20 @@ private:
     bool evidenceWaterEnabled_ = false;
     bool evidencePointLightEnabled_ = false;
     bool evidencePointLightStressEnabled_ = false;
+    int evidenceLevel_ = -1;
+    int evidenceScreen_ = 0;
+    bool evidenceDebugUi_ = false;
+    bool evidenceAnimate_ = false;
+    std::string evidenceEffects_;
+    bool evidenceWaterDisabled_ = false;
+    bool evidenceWaterReflectionsDisabled_ = false;
+    std::optional<RenderFrameData> evidenceEffectSnapshot_;
+    FrameTimeTelemetry applicationFrameTelemetry_;
+    FrameTimeTelemetry applicationIntervalTelemetry_;
+    FrameTimeTelemetry applicationPacingTelemetry_;
+    FrameTimeTelemetry applicationUpdateTelemetry_;
+    FrameTimeTelemetry applicationUiTelemetry_;
+    FrameTimeTelemetry applicationBuildTelemetry_;
     bool evidenceSceneCaptured_ = false;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     float overworldOverviewProgress_ = 0.0f;

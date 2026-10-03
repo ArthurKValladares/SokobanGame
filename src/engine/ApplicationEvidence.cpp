@@ -3,6 +3,7 @@
 #include "engine/Log.hpp"
 #include "engine/PerformanceAnalysis.hpp"
 #include "engine/Profiler.hpp"
+#include "engine/PerformanceFixtures.hpp"
 #include "engine/render/PngWriter.hpp"
 
 #include <cstddef>
@@ -48,6 +49,34 @@ std::string evidenceSuffix(
 
 } // namespace
 
+void Application::appendEvidenceEffects(RenderFrameData& frame)
+{
+    if (evidenceEffects_.empty()) {
+        return;
+    }
+    if (!evidenceEffectSnapshot_) {
+        evidenceEffectSnapshot_.emplace();
+        evidenceEffectSnapshot_->levelWidth = frame.levelWidth;
+        evidenceEffectSnapshot_->levelHeight = frame.levelHeight;
+        PerformanceEffectFixture fixture(assetManifest_);
+        fixture.append(*evidenceEffectSnapshot_, assetManifest_, evidenceEffects_,
+            evidenceEffects_ == "mixed-stress" ? 32U : 8U);
+        if (evidenceEffectSnapshot_->particles.empty()) {
+            throw std::runtime_error("Evidence effect fixture emitted no particles");
+        }
+    }
+    for (const auto& particle : evidenceEffectSnapshot_->particles) {
+        if (!frame.particles.push_back(particle)) {
+            throw std::runtime_error("Evidence particles exceeded frame capacity");
+        }
+    }
+    for (const auto& tile : evidenceEffectSnapshot_->tiles) {
+        if (!frame.tiles.push_back(tile)) {
+            throw std::runtime_error("Evidence effects exceeded tile capacity");
+        }
+    }
+}
+
 void Application::captureEvidenceScene()
 {
     std::error_code error;
@@ -59,6 +88,25 @@ void Application::captureEvidenceScene()
     }
 
     evidenceStats_ = renderer_.renderStats();
+    if (evidenceEffectSnapshot_ &&
+        evidenceStats_.preparedParticles < evidenceEffectSnapshot_->particles.size()) {
+        throw std::runtime_error("Evidence particle fixture did not reach scene preparation");
+    }
+    if (evidenceEffectSnapshot_ && evidenceStats_.particleDrawCalls == 0) {
+        throw std::runtime_error("Evidence particles were prepared but not drawn");
+    }
+    if ((evidenceEffects_ == "special-blocks" || evidenceEffects_ == "mixed-stress") &&
+        (evidenceStats_.preparedEnergyFaces == 0 || evidenceStats_.preparedEnergyModels == 0 ||
+            evidenceStats_.preparedBlurModels == 0 || evidenceStats_.unavailableModels != 0)) {
+        throw std::runtime_error("Evidence special shaders did not reach the loaded scene path");
+    }
+    // A three-frame image capture takes its normal image before the first
+    // in-flight frame is reused and its queries collected. Performance runs
+    // must collect timestamps, while the existing minimal image path stays valid.
+    if (smokeFrames_ > 3 && evidenceStats_.gpuTimestampsSupported &&
+        !evidenceStats_.gpuFrameTiming.available) {
+        throw std::runtime_error("Evidence GPU timestamps were not collected");
+    }
     if (evidenceWaterEnabled_ &&
         !evidenceStats_.mainSceneHasTranslucency) {
         throw std::runtime_error(
@@ -120,6 +168,22 @@ void Application::finishEvidenceCapture()
            << evidenceStats_.activeSamples << "x MSAA\n\n";
     report << "- Device: " << renderer_.physicalDeviceName()
            << " (" << renderer_.physicalDeviceTypeName() << ")\n";
+    report << "- Evidence location: ";
+    if (evidenceLevel_ >= 0) {
+        report << "level " << evidenceLevel_ << ", screen " << evidenceScreen_;
+    } else {
+        report << "overworld";
+    }
+    report << "\n- Developer workspace: "
+           << (evidenceDebugUi_ ? "visible (Level Editor)" : "hidden")
+           << "\n- CPU profiler: "
+           << (CpuProfiler::instance().enabled() ? "enabled" : "disabled") << "\n";
+    report << "- Effect fixture: " << (evidenceEffects_.empty() ? "none" : evidenceEffects_)
+           << "; " << (evidenceEffectSnapshot_ ? evidenceEffectSnapshot_->particles.size() : 0)
+           << " retained particles\n";
+    report << "- Authored water: " << (evidenceWaterDisabled_ ? "disabled" : "enabled")
+           << "\n- Water reflections: "
+           << (evidenceWaterReflectionsDisabled_ ? "disabled" : "enabled") << "\n";
     report << "- Swapchain: " << evidenceStats_.swapchainWidth << 'x'
            << evidenceStats_.swapchainHeight << "\n";
     report << "- Present mode: " << renderer_.presentModeName() << "\n";
@@ -157,6 +221,12 @@ void Application::finishEvidenceCapture()
            << " bits\n";
     report << "- Draw calls: " << evidenceStats_.drawCalls << "\n";
     report << "- Triangles: " << evidenceStats_.triangles << "\n";
+    report << "- Prepared particles: " << evidenceStats_.preparedParticles << "\n";
+    report << "- Particle draw calls: " << evidenceStats_.particleDrawCalls << "\n";
+    report << "- Special-surface coverage: " << evidenceStats_.preparedWaterFaces
+           << " water faces, " << evidenceStats_.preparedEnergyFaces << " energy faces, "
+           << evidenceStats_.preparedEnergyModels << " energy models, "
+           << evidenceStats_.preparedBlurModels << " blurred ice models\n";
     report << "- Render passes: " << evidenceStats_.renderPasses << "\n";
     report << "- Point-shadow faces: "
            << evidenceStats_.pointShadowFacesInRange << " / "
@@ -253,6 +323,7 @@ void Application::finishEvidenceCapture()
     writePhase(
         "  GPU scene depth publish", evidenceStats_.gpuSceneDepthPublishTiming);
     writePhase("  GPU scene translucency", evidenceStats_.gpuSceneTranslucencyTiming);
+    writePhase("    GPU particles", evidenceStats_.gpuParticleTiming);
     writePhase(
         "  GPU mirror continuation",
         evidenceStats_.gpuSceneMirrorContinuationTiming);
@@ -286,6 +357,21 @@ void Application::finishEvidenceCapture()
     // no unavailable branch at all, and the GPU line's says why timestamps are
     // missing. Those differences are deliberate, so they stay written out.
     writePhase("Scene preparation", evidenceStats_.scenePreparationTiming);
+    const auto writeApplicationPhase = [&report](
+        std::string_view label, const FrameTimeTelemetry& telemetry) {
+        const FrameTimeSummary timing = telemetry.summary();
+        report << "- " << label << ": average " << timing.averageMilliseconds
+               << " ms, p95 " << timing.p95Milliseconds << " ms, maximum "
+               << timing.maximumMilliseconds << " ms (" << timing.sampleCount
+               << " samples)\n";
+    };
+    writeApplicationPhase("Application frame (including profiler, excluding frame cap)",
+        applicationFrameTelemetry_);
+    writeApplicationPhase("Frame interval (including pacing)", applicationIntervalTelemetry_);
+    writeApplicationPhase("Frame pacing", applicationPacingTelemetry_);
+    writeApplicationPhase("Application update", applicationUpdateTelemetry_);
+    writeApplicationPhase("Application UI", applicationUiTelemetry_);
+    writeApplicationPhase("Application frame build/prepare", applicationBuildTelemetry_);
     report << "- CPU frame: average "
            << evidenceStats_.cpuFrameTiming.averageMilliseconds << " ms, p95 "
            << evidenceStats_.cpuFrameTiming.p95Milliseconds << " ms, maximum "
@@ -316,16 +402,24 @@ void Application::finishEvidenceCapture()
     report << "- Scene image: `" << sceneName << "`\n";
     if (evidenceAmbientOcclusionEnabled_) {
         report << "- Filtered SSAO image: `" << occlusionName << "`\n";
-        report << "\nThe simulation was frozen for the run. The two images "
-                  "differ only by the SSAO composite debug selector.\n";
+        report << "\nSimulation: " << (evidenceAnimate_ ? "fixed 1/60 s steps" : "frozen")
+               << ". The final two images share the same simulation state "
+                  "and differ by the SSAO composite debug selector.\n";
     } else {
-        report << "\nThe simulation was frozen for the run. Ambient occlusion "
-                  "was disabled for the complete timing window.\n";
+        report << "\nSimulation: " << (evidenceAnimate_ ? "fixed 1/60 s steps" : "frozen")
+               << ". Ambient occlusion was disabled for the complete timing window.\n";
     }
     writePerformanceAnalysisMarkdown(
         report,
         analyzePerformance(
             evidenceStats_, CpuProfiler::instance().latestFrame()));
+    if (CpuProfiler::instance().enabled()) {
+        std::string error;
+        if (!CpuProfiler::instance().exportChromeTrace(
+                evidenceOutputDirectory_ / "cpu-trace.json", &error)) {
+            throw std::runtime_error("Could not export evidence CPU trace: " + error);
+        }
+    }
     if (!report) {
         throw std::runtime_error(
             "Could not finish evidence report '" + reportPath.string() + "'");

@@ -722,12 +722,13 @@ VulkanDeviceFeatureSupport VulkanDeviceContext::queryFeatureSupport(
 VulkanSceneDepthFormatSelection VulkanDeviceContext::querySceneDepthFormat(
     VkPhysicalDevice device) const
 {
-    // D16 halves the bandwidth and storage of the scene depth targets. D32 is
-    // retained as the conservative fallback for devices that cannot both
-    // render to and sample D16 at the sample counts they advertise.
+    // The detached camera keeps a close near plane while viewing distant
+    // floors and markers. D16 quantizes those surfaces to the same depth,
+    // causing diagonal seams and disappearing markers. Prefer D32 for the
+    // scene; retain D16 only for devices without sampled D32 support.
     constexpr std::array<VkFormat, 2> preferredFormats {
-        VK_FORMAT_D16_UNORM,
         VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_D16_UNORM,
     };
     std::array<VulkanSceneDepthFormatCandidate, preferredFormats.size()>
         candidates {};
@@ -753,14 +754,13 @@ VulkanSceneDepthFormatSelection VulkanDeviceContext::querySceneDepthFormat(
                 : 0,
         };
     }
-    // Do not buy the D16 optimization by silently removing an MSAA mode that
-    // D32 would have supported. The renderer exposes modes only through 8x,
-    // so higher hardware-only sample counts do not influence this choice.
+    // Preserve the MSAA modes supported by D32. The renderer exposes modes
+    // only through 8x, so higher hardware-only counts do not affect selection.
     constexpr VkSampleCountFlags rendererSampleCounts =
         VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_2_BIT |
         VK_SAMPLE_COUNT_4_BIT | VK_SAMPLE_COUNT_8_BIT;
     const VkSampleCountFlags preservedSampleCounts =
-        candidates.back().sampleCounts & rendererSampleCounts;
+        candidates.front().sampleCounts & rendererSampleCounts;
     return chooseVulkanSceneDepthFormat(
         candidates,
         preservedSampleCounts != 0

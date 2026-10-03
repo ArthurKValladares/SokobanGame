@@ -179,12 +179,12 @@ int main()
         VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
     const std::array preferredSceneDepth {
         sokoban::VulkanSceneDepthFormatCandidate {
-            .format = VK_FORMAT_D16_UNORM,
+            .format = VK_FORMAT_D32_SFLOAT,
             .optimalTilingFeatures = sceneDepthFeatures,
             .sampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT,
         },
         sokoban::VulkanSceneDepthFormatCandidate {
-            .format = VK_FORMAT_D32_SFLOAT,
+            .format = VK_FORMAT_D16_UNORM,
             .optimalTilingFeatures = sceneDepthFeatures,
             .sampleCounts = VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_8_BIT,
         },
@@ -192,24 +192,24 @@ int main()
     const auto preferredDepth =
         sokoban::chooseVulkanSceneDepthFormat(preferredSceneDepth);
     CHECK_MESSAGE(
-        preferredDepth.format == VK_FORMAT_D16_UNORM &&
+        preferredDepth.format == VK_FORMAT_D32_SFLOAT &&
             preferredDepth.sampleCounts ==
                 (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT),
-        "D16 scene depth is preferred when it supports attachment and sampling");
+        "D32 scene depth is preferred for close-near-plane camera precision");
 
     auto fallbackSceneDepth = preferredSceneDepth;
     fallbackSceneDepth[0].optimalTilingFeatures =
         VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
     CHECK_MESSAGE(
         sokoban::chooseVulkanSceneDepthFormat(fallbackSceneDepth).format ==
-            VK_FORMAT_D32_SFLOAT,
-        "scene depth falls back to D32 when D16 cannot be sampled");
+            VK_FORMAT_D16_UNORM,
+        "scene depth falls back to D16 when D32 cannot be sampled");
     CHECK_MESSAGE(
         sokoban::chooseVulkanSceneDepthFormat(
             preferredSceneDepth,
             VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_8_BIT).format ==
-            VK_FORMAT_D32_SFLOAT,
-        "scene depth preserves an MSAA mode supported by the D32 fallback");
+            VK_FORMAT_D16_UNORM,
+        "scene depth selection honors the required MSAA modes");
 
     auto unsupportedSceneDepth = fallbackSceneDepth;
     unsupportedSceneDepth[1].sampleCounts = 0;

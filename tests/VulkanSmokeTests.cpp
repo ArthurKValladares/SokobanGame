@@ -7,6 +7,7 @@
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/VulkanDeviceContext.hpp"
+#include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanTextureUploader.hpp"
@@ -266,6 +267,9 @@ struct StartupMetrics {
 
 void submitNoOp(sokoban::VulkanDeviceContext& deviceContext)
 {
+    sokoban::VulkanGpuProfiler profiler;
+    profiler.create(deviceContext.device(), deviceContext.timestampPeriodNanoseconds(),
+        deviceContext.graphicsTimestampValidBits(), 1);
     const VkCommandBufferAllocateInfo allocationInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool = deviceContext.commandPool(),
@@ -290,6 +294,12 @@ void submitNoOp(sokoban::VulkanDeviceContext& deviceContext)
         throw std::runtime_error(
             "vkBeginCommandBuffer failed: " + std::to_string(result));
     }
+    // Deliberately omit all optional phases. One unwritten query previously
+    // made the entire pool return NOT_READY and erased every GPU measurement.
+    profiler.beginFrame(commandBuffer, 0);
+    profiler.beginPhase(commandBuffer, 0, sokoban::VulkanGpuPhase::Scene);
+    profiler.endPhase(commandBuffer, 0, sokoban::VulkanGpuPhase::Scene);
+    profiler.endFrame(commandBuffer, 0);
     if (const VkResult result = vkEndCommandBuffer(commandBuffer);
         result != VK_SUCCESS) {
         vkFreeCommandBuffers(
@@ -337,6 +347,17 @@ void submitNoOp(sokoban::VulkanDeviceContext& deviceContext)
         throw std::runtime_error(
             "Vulkan no-op submission did not complete: " +
             std::to_string(waitResult));
+    }
+    if (profiler.supported()) {
+        profiler.markSubmitted(0);
+        profiler.collectCompletedFrame(0);
+        const auto frame = profiler.frameTimeSummary();
+        const auto scene = profiler.phaseTimeSummary(sokoban::VulkanGpuPhase::Scene);
+        const auto absent = profiler.phaseTimeSummary(sokoban::VulkanGpuPhase::AtmosphereVolumes);
+        if (frame.sampleCount != 1 || scene.sampleCount != 1 ||
+            absent.sampleCount != 1 || absent.maximumMilliseconds != 0.0) {
+            throw std::runtime_error("Optional GPU phases suppressed completed frame timestamps");
+        }
     }
 }
 
@@ -958,6 +979,35 @@ int main(int argc, char** argv)
             return 0;
         }
         sokoban::VulkanDeviceContext deviceContext(window.get());
+        // Cover the live device-query policy as well as the pure selector:
+        // a sampled D32 attachment must not be downgraded to D16, whose
+        // precision loses floor markers with the detached camera.
+        VkFormatProperties depthProperties {};
+        vkGetPhysicalDeviceFormatProperties(
+            deviceContext.physicalDevice(),
+            VK_FORMAT_D32_SFLOAT,
+            &depthProperties);
+        VkImageFormatProperties depthImageProperties {};
+        const VkResult depthImageResult = vkGetPhysicalDeviceImageFormatProperties(
+            deviceContext.physicalDevice(),
+            VK_FORMAT_D32_SFLOAT,
+            VK_IMAGE_TYPE_2D,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT,
+            0,
+            &depthImageProperties);
+        constexpr VkFormatFeatureFlags depthFeatures =
+            VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |
+            VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+        if ((depthProperties.optimalTilingFeatures & depthFeatures) ==
+                depthFeatures &&
+            depthImageResult == VK_SUCCESS &&
+            (depthImageProperties.sampleCounts & VK_SAMPLE_COUNT_1_BIT) != 0 &&
+            deviceContext.sceneDepthFormat() != VK_FORMAT_D32_SFLOAT) {
+            throw std::runtime_error(
+                "Scene depth lost detached-camera precision despite D32 support");
+        }
         exerciseMemoryAllocator(deviceContext);
         exerciseSkinnedPublicationRetry(deviceContext);
         exerciseBlockingAdmissionFailure(deviceContext);

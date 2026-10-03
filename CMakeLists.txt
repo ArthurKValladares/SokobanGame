@@ -531,6 +531,7 @@ add_library(sokoban_core STATIC
     src/engine/PresentationTransactionBuilder.cpp
     src/engine/ProcessMemory.cpp
     src/engine/Profiler.cpp
+    src/engine/PerformanceFixtures.cpp
     src/engine/RenderFrameBuilder.cpp
     src/engine/RenderFrameBuilderEditor.cpp
     src/engine/RenderFrameParts.cpp
@@ -1071,6 +1072,9 @@ if(SOKOBAN_BUILD_TESTS)
         tests/PerformanceSuite.cpp
     )
     target_include_directories(sokoban_performance_tests PRIVATE src)
+    target_compile_definitions(sokoban_performance_tests PRIVATE
+        SOKOBAN_PERFORMANCE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        SOKOBAN_PERFORMANCE_LEVEL_DIR="${LEVEL_SOURCE_DIR}")
     target_link_libraries(sokoban_performance_tests PRIVATE sokoban_core)
     sokoban_enable_warnings(sokoban_performance_tests)
     sokoban_enable_precompiled_headers(sokoban_performance_tests)
@@ -1341,6 +1345,11 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME particles
         LIBS sokoban_core
         SOURCES tests/ParticleSystemTests.cpp
+    )
+    sokoban_add_test(NAME performance_fixtures
+        LIBS sokoban_core
+        ASSETS_ENV
+        SOURCES tests/PerformanceFixturesTests.cpp
     )
     sokoban_add_test(NAME asset_requirements
         LIBS sokoban_core

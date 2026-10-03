@@ -1,6 +1,7 @@
 #include "engine/LevelEditorDebugUi.hpp"
 
 #include "engine/Rules.hpp"
+#include "engine/Profiler.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/RenderTypes.hpp"
 
@@ -161,6 +162,7 @@ void LevelEditorDebugUi::draw(
     const Callbacks& callbacks)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
+    SOKOBAN_PROFILE_SCOPE("Editor.Draw panel");
     ImGui::Text("Document");
     ImGui::SameLine();
     ImGui::TextUnformatted(editor.dirty() ? "modified" : "clean");
@@ -346,6 +348,7 @@ void LevelEditorDebugUi::draw(
     ImGui::Separator();
     if (ImGui::CollapsingHeader(
             "Tile Editing Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
+        SOKOBAN_PROFILE_SCOPE("Editor.Draw editing controls");
         ImGui::BulletText("Click: paint above the resolved tile");
         ImGui::BulletText(
             "%s + click: replace the resolved tile",
@@ -662,6 +665,7 @@ void LevelEditorDebugUi::drawTilePalette(
     const Callbacks& callbacks)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
+    SOKOBAN_PROFILE_SCOPE("Editor.Draw tile palette");
     if (!editor.recentTiles().empty()) {
         ImGui::Text("Recent");
         const std::vector<TileType>& recent = editor.recentTiles();
@@ -708,32 +712,36 @@ void LevelEditorDebugUi::drawTilePalette(
         1,
         static_cast<int>(
             (available + spacing) / (paletteButtonSize.x + spacing)));
-    int column = 0;
-    for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
-        if (definition.type == TileType::Water ||
-            (!editor.editingOverworld() &&
-             definition.type == TileType::Player) ||
-            (editor.editingOverworld() &&
-             (definition.type == TileType::Rogue ||
-              definition.type == TileType::Knight ||
-              definition.type == TileType::Druid ||
-              definition.type == TileType::Witch ||
-              definition.type == TileType::Bard)) ||
-            (editor.editingOverworld() &&
-             definition.type == TileType::End)) {
-            continue;
+    const bool editingOverworld = editor.editingOverworld();
+    {
+        SOKOBAN_PROFILE_SCOPE("Editor.Draw palette icons");
+        int column = 0;
+        for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
+            if (definition.type == TileType::Water ||
+                (!editingOverworld &&
+                 definition.type == TileType::Player) ||
+                (editingOverworld &&
+                 (definition.type == TileType::Rogue ||
+                  definition.type == TileType::Knight ||
+                  definition.type == TileType::Druid ||
+                  definition.type == TileType::Witch ||
+                  definition.type == TileType::Bard)) ||
+                (editingOverworld &&
+                 definition.type == TileType::End)) {
+                continue;
+            }
+            if (column % perRow != 0) {
+                ImGui::SameLine();
+            }
+            const auto thumbnail = static_cast<ImTextureID>(
+                callbacks.tileThumbnail
+                    ? callbacks.tileThumbnail(definition.type)
+                    : 0);
+            if (drawPaintButton(definition, editor.selectedTile(), thumbnail)) {
+                editor.setSelectedTile(definition.type);
+            }
+            ++column;
         }
-        if (column % perRow != 0) {
-            ImGui::SameLine();
-        }
-        const auto thumbnail = static_cast<ImTextureID>(
-            callbacks.tileThumbnail
-                ? callbacks.tileThumbnail(definition.type)
-                : 0);
-        if (drawPaintButton(definition, editor.selectedTile(), thumbnail)) {
-            editor.setSelectedTile(definition.type);
-        }
-        ++column;
     }
 
     const std::string_view selectedName = tileTypeName(editor.selectedTile());
@@ -1800,6 +1808,7 @@ void LevelEditorDebugUi::drawOverworldTab(
 void LevelEditorDebugUi::drawActiveLevelsTab(LevelEditor& editor)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
+    SOKOBAN_PROFILE_SCOPE("Editor.Draw level browser");
     const std::vector<LevelEditor::LevelDirectory> levels = editor.collectLevelDirectories();
     bool browserChanged = false;
 

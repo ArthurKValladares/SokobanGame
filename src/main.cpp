@@ -48,6 +48,14 @@ int runApplication(const sokoban::CommandLineOptions& options)
             .evidencePointLightEnabled = options.evidencePointLightEnabled,
             .evidencePointLightStressEnabled =
                 options.evidencePointLightStressEnabled,
+            .evidenceLevel = options.evidenceLevel,
+            .evidenceScreen = std::max(options.evidenceScreen, 0),
+            .evidenceDebugUi = options.evidenceDebugUi,
+            .evidenceProfilerEnabled = options.evidenceProfilerEnabled,
+            .evidenceAnimate = options.evidenceAnimate,
+            .evidenceEffects = options.evidenceEffects,
+            .evidenceWaterDisabled = options.evidenceWaterDisabled,
+            .evidenceWaterReflectionsDisabled = options.evidenceWaterReflectionsDisabled,
             .parallelScenePreparationEnabled =
                 options.parallelScenePreparationEnabled,
             .pointShadowOptimizationsEnabled =

@@ -6,6 +6,7 @@
 #include "engine/OverworldMapEditor.hpp"
 
 #include "engine/LevelCatalog.hpp"
+#include "engine/Profiler.hpp"
 #include "engine/OverworldMap.hpp"
 
 #include <algorithm>
@@ -2803,6 +2804,7 @@ const std::string& LevelEditor::status() const
 std::optional<OverworldScreenId> LevelEditor::overworldScreenIdForPath(
     const std::filesystem::path& path) const
 {
+    SOKOBAN_PROFILE_SCOPE("Editor.Resolve overworld screen");
     if (path.empty()) {
         return std::nullopt;
     }
@@ -2810,11 +2812,19 @@ std::optional<OverworldScreenId> LevelEditor::overworldScreenIdForPath(
     for (const std::filesystem::path& root : {
              document_.browserRoot,
              document_.sourceLevelRoot }) {
+        // Puzzle documents cannot belong to a composed overworld. This query
+        // is used throughout the editor UI; avoid reopening and parsing the
+        // layout for each palette button and each gameplay frame.
+        if (!pathStartsWith(normalizedPath,
+                normalizedAbsolutePath(root / "overworld"))) {
+            continue;
+        }
         const std::filesystem::path layoutPath = root / "overworld/layout.json";
         if (!std::filesystem::is_regular_file(layoutPath)) {
             continue;
         }
         try {
+            SOKOBAN_PROFILE_SCOPE("Editor.Parse overworld layout");
             const OverworldLayout layout = loadOverworldLayout(layoutPath);
             for (const OverworldScreenSpec& screen : layout.screens) {
                 if (normalizedAbsolutePath(root / "overworld" / screen.file) ==
@@ -4218,6 +4228,7 @@ bool LevelEditor::isActiveLevelDirectory(const LevelDirectory& level) const
 
 std::vector<LevelEditor::LevelDirectory> LevelEditor::collectLevelDirectories() const
 {
+    SOKOBAN_PROFILE_SCOPE("Editor.Scan level directories");
     std::vector<LevelDirectory> levels;
     std::error_code error;
     if (!std::filesystem::exists(document_.browserRoot, error)) {

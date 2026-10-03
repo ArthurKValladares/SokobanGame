@@ -246,6 +246,13 @@ Application::Application(ApplicationOptions options)
     , evidencePointLightEnabled_(options.evidencePointLightEnabled)
     , evidencePointLightStressEnabled_(
           options.evidencePointLightStressEnabled)
+    , evidenceLevel_(options.evidenceLevel)
+    , evidenceScreen_(options.evidenceScreen)
+    , evidenceDebugUi_(options.evidenceDebugUi)
+    , evidenceAnimate_(options.evidenceAnimate)
+    , evidenceEffects_(std::move(options.evidenceEffects))
+    , evidenceWaterDisabled_(options.evidenceWaterDisabled)
+    , evidenceWaterReflectionsDisabled_(options.evidenceWaterReflectionsDisabled)
 {
     log::info(log::Category::Persistence)
         << saveSlots_.progressStatus();
@@ -258,6 +265,12 @@ Application::Application(ApplicationOptions options)
     initialSettings.window.reset();
     applySettingsEffects(initialSettings);
     if (!evidenceOutputDirectory_.empty()) {
+        CpuProfiler::instance().setEnabled(options.evidenceProfilerEnabled);
+#if !SOKOBAN_ENABLE_DEBUG_UI
+        if (evidenceDebugUi_) {
+            throw std::invalid_argument("--evidence-debug-ui requires a Debug build");
+        }
+#endif
         // Evidence presentation policy is a process-local diagnostic override,
         // just like scale and MSAA above. Reapply it after user settings are
         // initialized so later swapchain recreation cannot silently return an
@@ -455,6 +468,9 @@ Application::Application(ApplicationOptions options)
             animationCatalog_ = tools_->animationCatalogEditor.catalog();
         }
     });
+    if (evidenceDebugUi_) {
+        DebugUi::requestTabFocus("Level Editor");
+    }
 #endif
 
     if (!SDL_AddEventWatch(
@@ -671,7 +687,7 @@ bool Application::drawUiFrame(
     const Vec2 pixelSize = window_.sizeInPixels();
 #if SOKOBAN_ENABLE_DEBUG_UI
     bool developerWorkspaceVisible =
-        evidenceOutputDirectory_.empty() &&
+        (evidenceOutputDirectory_.empty() || evidenceDebugUi_) &&
         !optionsMenu_.isOpen() && !titleScreen_.isOpen();
     if (!developerWorkspaceVisible) {
         tools_->releaseDetachedCameraMouse(window_.nativeHandle());
@@ -889,17 +905,29 @@ bool Application::run()
             << "Smoke run: starting a new game and rendering "
             << smokeFrames_ << " frames.";
         startNewGame();
+        if (evidenceLevel_ >= 0) {
+            const LevelLocation location { evidenceLevel_, evidenceScreen_ };
+            if (!campaign_.screenExists(location.level, location.screen) ||
+                !campaign_.startPuzzle(playerProfile_, location)) {
+                throw std::invalid_argument("Evidence puzzle screen does not exist");
+            }
+            loadCurrentScreen();
+        }
     } else if (evidenceOutputDirectory_.empty()) {
         applyLaunchRequest();
     }
     std::uint64_t renderedFrames = 0;
-#if SOKOBAN_ENABLE_DEBUG_UI
     CpuProfiler::instance().setCurrentThreadName("Main");
-#endif
+    auto previousFrameStart = std::chrono::steady_clock::now();
     while (running_) {
-#if SOKOBAN_ENABLE_DEBUG_UI
-        CpuProfileFrameScope profileFrame(renderedFrames + 1);
-#endif
+        const auto applicationFrameStart = std::chrono::steady_clock::now();
+        if (renderedFrames > 0 && !evidenceSceneCaptured_) {
+            applicationIntervalTelemetry_.record(
+                std::chrono::duration<double, std::milli>(
+                    applicationFrameStart - previousFrameStart).count());
+        }
+        previousFrameStart = applicationFrameStart;
+        CpuProfiler::instance().beginFrame(renderedFrames + 1);
         framePacer_.beginFrame();
 #if SOKOBAN_ENABLE_DEBUG_UI
         // Serviced here, between frames, where no ImGui or UI frame is open.
@@ -998,20 +1026,26 @@ bool Application::run()
         handleDraftPlaybackShortcuts(routedInput);
 #endif
         const float measuredDt = frameTimer_.tick(simulationTiming_);
-        // Evidence runs compare separate renderer configurations. Freezing
-        // simulation makes their scene/camera/animation inputs identical.
+        // Animated evidence advances by a fixed step, independent of GPU speed.
+        // Otherwise freeze the scene for the existing image A/B workflow.
         const float wallClockDt = evidenceOutputDirectory_.empty()
             ? measuredDt
-            : 0.0f;
+            : (evidenceAnimate_ && renderedFrames + 1 < smokeFrames_ ? 1.0f / 60.0f : 0.0f);
         const float dt = SimulationTiming::scaledDelta(
             wallClockDt,
             settingsCoordinator_.userSettings().gameplay.simulationSpeed);
+        const auto updateStart = std::chrono::steady_clock::now();
         {
             SOKOBAN_PROFILE_SCOPE("Application.Update");
             update(
                 dt,
                 routedInput,
                 preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
+        }
+        const auto uiStart = std::chrono::steady_clock::now();
+        if (!evidenceSceneCaptured_) {
+            applicationUpdateTelemetry_.record(
+                std::chrono::duration<double, std::milli>(uiStart - updateStart).count());
         }
         bool developerWorkspaceVisible = false;
         {
@@ -1020,11 +1054,21 @@ bool Application::run()
             // independent of the selected gameplay simulation speed.
             developerWorkspaceVisible = drawUiFrame(routedInput, wallClockDt);
         }
+        const auto buildStart = std::chrono::steady_clock::now();
+        if (!evidenceSceneCaptured_) {
+            applicationUiTelemetry_.record(
+                std::chrono::duration<double, std::milli>(buildStart - uiStart).count());
+        }
         {
             SOKOBAN_PROFILE_SCOPE("Application.Build render frame");
             preparedRenderFrame_ = renderer_.prepareFrame(
                 buildRenderFrame(routedInput.editor),
                 buildScreenPreviewRenderFrame());
+        }
+        if (!evidenceSceneCaptured_) {
+            applicationBuildTelemetry_.record(
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - buildStart).count());
         }
         {
             SOKOBAN_PROFILE_SCOPE("Application.Render");
@@ -1032,6 +1076,14 @@ bool Application::run()
                 *preparedRenderFrame_,
                 ui_.drawData(),
                 developerWorkspaceVisible);
+        }
+        // Publish CPU work before deliberate pacing and evidence readback.
+        // The application telemetry also includes the profiler's processing.
+        CpuProfiler::instance().endFrame();
+        if (!evidenceSceneCaptured_) {
+            applicationFrameTelemetry_.record(
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - applicationFrameStart).count());
         }
         if (!startupReported_) {
             startupReported_ = true;
@@ -1052,8 +1104,11 @@ bool Application::run()
             finishSmokeRunIfDue(renderedFrames);
         }
         if (running_) {
-            SOKOBAN_PROFILE_SCOPE("Application.Frame pacing");
+            const auto pacingStart = std::chrono::steady_clock::now();
             framePacer_.pace();
+            applicationPacingTelemetry_.record(
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - pacingStart).count());
         }
     }
     return !renderer_.hasFatalFailure();
@@ -2751,6 +2806,13 @@ RenderFrameData Application::buildRenderFrame(
         appendEvidenceWaterFixture(frame);
     }
     appendEvidencePointLights(frame);
+    appendEvidenceEffects(frame);
+    if (evidenceWaterDisabled_) {
+        frame.waterSurfaces.clear();
+    }
+    if (evidenceWaterReflectionsDisabled_) {
+        frame.waterRendering.reflectionStrength = 0.0f;
+    }
 #if SOKOBAN_ENABLE_DEBUG_UI
     tools_->applyDetachedCamera(frame);
 #endif

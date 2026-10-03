@@ -32,6 +32,12 @@ std::vector<DebugTab>& debugTabs()
     return tabs;
 }
 
+std::string& requestedTabFocus()
+{
+    static std::string name;
+    return name;
+}
+
 std::vector<DebugTab>& debugMenus()
 {
     static std::vector<DebugTab> menus;
@@ -1632,6 +1638,11 @@ void DebugUi::addTab(std::string name, DrawCallback callback)
     });
 }
 
+void DebugUi::requestTabFocus(std::string name)
+{
+    requestedTabFocus() = std::move(name);
+}
+
 void DebugUi::addMenu(std::string name, DrawCallback callback)
 {
     debugMenus().push_back({
@@ -1648,6 +1659,7 @@ void DebugUi::addTopBarControl(DrawCallback callback)
 void DebugUi::clearTabs()
 {
     debugTabs().clear();
+    requestedTabFocus().clear();
     debugMenus().clear();
     debugTopBarControls().clear();
 }
@@ -1713,6 +1725,11 @@ DebugUi::DrawResult DebugUi::draw(GameViewport gameViewport)
     for (DebugTab& tab : debugTabs()) {
         if (!tab.open) {
             continue;
+        }
+        if (tab.name == requestedTabFocus() &&
+            ImGui::FindWindowByName(tab.name.c_str()) != nullptr) {
+            ImGui::SetNextWindowFocus();
+            requestedTabFocus().clear();
         }
         if (toolsDockId != 0 &&
             ImGui::FindWindowSettingsByID(ImHashStr(tab.name.c_str())) ==

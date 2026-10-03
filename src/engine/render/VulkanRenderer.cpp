@@ -902,13 +902,9 @@ ImageData VulkanRenderer::captureRenderedFrame(std::optional<VkRect2D> region)
         // format PngWriter understands.
         activeResources_.swapchain->displayColorImage(),
         activeResources_.swapchain->colorFormat(),
-        // Both of the things this assumes hold only with the developer
-        // workspace hidden, which is how the thumbnail bake drives the
-        // renderer: the upscale blit leaves the display image a transfer
-        // source, and the game's UI composites onto the swapchain rather
-        // than onto this image. With the workspace visible the image is in
-        // SHADER_READ_ONLY_OPTIMAL and has the UI drawn on it.
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        // The workspace samples this image; the full-window path blits it.
+        // Capture restores whichever layout the last frame actually left.
+        activeResources_.swapchain->displayColorLayout(),
         rect.offset,
         rect.extent);
 }
@@ -1350,6 +1346,8 @@ RenderStats VulkanRenderer::renderStats() const
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SceneDepthPublish));
     stats.gpuSceneTranslucencyTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SceneTranslucency));
+    stats.gpuParticleTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SceneParticles));
     stats.gpuSceneMirrorContinuationTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(
             VulkanGpuPhase::SceneMirrorContinuation));

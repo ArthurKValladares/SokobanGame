@@ -19,6 +19,7 @@ enum class VulkanGpuPhase : uint32_t {
     SceneModels,
     SceneDepthPublish,
     SceneTranslucency,
+    SceneParticles,
     SceneMirrorContinuation,
     Ssao,
     SsaoSnapshot,
@@ -93,6 +94,9 @@ private:
     FrameTimeTelemetry frameTimeTelemetry_ {};
     std::array<FrameTimeTelemetry, phaseCount_> phaseTimeTelemetry_ {};
     std::vector<bool> submitted_;
+    // Optional passes need not write queries. Their absence must not prevent
+    // collecting the frame and every other phase from the same query pool.
+    mutable std::vector<uint64_t> recordedPhases_;
 };
 
 } // namespace sokoban

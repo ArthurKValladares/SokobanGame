@@ -60,6 +60,7 @@ void VulkanGpuProfiler::create(
     timestampValidBits_ = timestampValidBits;
     frameCount_ = frameCount;
     submitted_.assign(frameCount, false);
+    recordedPhases_.assign(frameCount, 0);
     vulkanDebug::setObjectName(
         device_, VK_OBJECT_TYPE_QUERY_POOL, queryPool_, "GPU frame timestamps");
 }
@@ -79,6 +80,7 @@ void VulkanGpuProfiler::destroy() noexcept
         telemetry.reset();
     }
     submitted_.clear();
+    recordedPhases_.clear();
 }
 
 void VulkanGpuProfiler::collectCompletedFrame(uint32_t frameIndex)
@@ -86,7 +88,11 @@ void VulkanGpuProfiler::collectCompletedFrame(uint32_t frameIndex)
     if (!supported() || frameIndex >= frameCount_ || !submitted_[frameIndex]) {
         return;
     }
-    std::array<uint64_t, queriesPerFrame_> timestamps {};
+    struct Timestamp {
+        uint64_t value = 0;
+        uint64_t available = 0;
+    };
+    std::array<Timestamp, queriesPerFrame_> timestamps {};
     const VkResult result = vkGetQueryPoolResults(
         device_,
         queryPool_,
@@ -94,28 +100,37 @@ void VulkanGpuProfiler::collectCompletedFrame(uint32_t frameIndex)
         static_cast<uint32_t>(timestamps.size()),
         sizeof(timestamps),
         timestamps.data(),
-        sizeof(uint64_t),
-        VK_QUERY_RESULT_64_BIT);
-    if (result == VK_SUCCESS) {
+        sizeof(Timestamp),
+        VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+    if (result != VK_SUCCESS && result != VK_NOT_READY) {
+        vkCheck(result, "vkGetQueryPoolResults timestamp profiler failed");
+    }
+    if (timestamps[0].available && timestamps[1].available) {
         frameTimeTelemetry_.record(vulkanTimestampDeltaMilliseconds(
-            timestamps[0],
-            timestamps[1],
+            timestamps[0].value,
+            timestamps[1].value,
             timestampPeriodNanoseconds_,
             timestampValidBits_));
         for (uint32_t phaseIndex = 0;
              phaseIndex < phaseCount_;
              ++phaseIndex) {
             const uint32_t queryIndex = 2 + phaseIndex * 2;
+            if ((recordedPhases_[frameIndex] & (uint64_t { 1 } << phaseIndex)) == 0) {
+                phaseTimeTelemetry_[phaseIndex].record(0.0);
+                continue;
+            }
+            if (!timestamps[queryIndex].available ||
+                !timestamps[queryIndex + 1].available) {
+                continue;
+            }
             phaseTimeTelemetry_[phaseIndex].record(
                 vulkanTimestampDeltaMilliseconds(
-                    timestamps[queryIndex],
-                    timestamps[queryIndex + 1],
+                    timestamps[queryIndex].value,
+                    timestamps[queryIndex + 1].value,
                     timestampPeriodNanoseconds_,
                     timestampValidBits_));
         }
         submitted_[frameIndex] = false;
-    } else if (result != VK_NOT_READY) {
-        vkCheck(result, "vkGetQueryPoolResults timestamp profiler failed");
     }
 }
 
@@ -126,6 +141,7 @@ void VulkanGpuProfiler::beginFrame(
     if (!supported() || frameIndex >= frameCount_) {
         return;
     }
+    recordedPhases_[frameIndex] = 0;
     vkCmdResetQueryPool(
         commandBuffer,
         queryPool_,
@@ -163,6 +179,8 @@ void VulkanGpuProfiler::endPhase(
         phase == VulkanGpuPhase::Count) {
         return;
     }
+    static_assert(phaseCount_ <= 64);
+    recordedPhases_[frameIndex] |= uint64_t { 1 } << static_cast<uint32_t>(phase);
     vkCmdWriteTimestamp2(
         commandBuffer,
         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
