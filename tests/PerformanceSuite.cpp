@@ -441,7 +441,7 @@ void runTaskBenchmarks(Suite& suite, sokoban::TaskSystem& tasks)
         [&] {
             futures.clear();
             for (uint64_t index = 0; index < taskCount; ++index) {
-                futures.push_back(tasks.enqueue([index] {
+                futures.push_back(tasks.enqueue([index]() -> uint64_t {
                     sokoban::CpuProfileScope scope(
                         "Benchmark.task enqueue worker");
                     return (index * 2654435761ULL) ^ (index >> 3U);
@@ -463,7 +463,7 @@ void runTaskBenchmarks(Suite& suite, sokoban::TaskSystem& tasks)
         [&] {
             uint64_t checksum = 0;
             for (uint64_t index = 0; index < taskCount; ++index) {
-                std::future<uint64_t> future = tasks.enqueue([index] {
+                std::future<uint64_t> future = tasks.enqueue([index]() -> uint64_t {
                     return index * 2654435761ULL;
                 });
                 checksum ^= future.get();

@@ -81,6 +81,18 @@ in Debug. In Visual Studio these appear in the build-preset dropdown as
 "Release: game + tests". "Headless tests (no Vulkan)" builds no game, and the
 "Shipping" entries produce player packages.
 
+The `dev` and `release` presets enable warnings-as-errors, matching Windows
+CI. To configure, build every target (including the performance runner), and
+run the current tests in one command, use a Developer PowerShell:
+
+```powershell
+cmake --workflow --preset dev-check
+cmake --workflow --preset release-check
+```
+
+`ctest` by itself runs existing executables; it does not rebuild changed
+sources. Use these workflows when checking a change before pushing.
+
 The Visual Studio solution generator still works and is what CI uses on
 Windows:
 
@@ -157,20 +169,35 @@ a bounded player-profile fuzz run, and the Vulkan-free headless preset without
 downloading the SDK. Repository branch protection should require every workflow
 check before merging to `main`.
 
-For local diagnostics with a Clang or GCC toolchain:
+The Linux jobs use the same `ci-debug`, `ci-release`, `ci-sanitize`,
+`ci-tidy`, and `ci-fuzz` presets available locally. These select GCC 13 or
+Clang/clang-tidy 18 explicitly and use separate directories in `out/`.
+On Ubuntu 24.04, including a WSL installation, install the dependencies
+listed in `.github/workflows/required-tests.yml` and expose its pinned
+Vulkan SDK. Run these from the repository root:
 
-```powershell
-cmake -S . -B build-sanitize -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug -DSOKOBAN_ENABLE_SANITIZERS=ON
-cmake --build build-sanitize --parallel
-ctest --test-dir build-sanitize --output-on-failure --no-tests=error
+```sh
+xvfb-run --auto-servernum cmake --workflow --preset ci-debug
+xvfb-run --auto-servernum cmake --workflow --preset ci-release
+xvfb-run --auto-servernum cmake --workflow --preset ci-sanitize
 
-cmake -S . -B build-tidy -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug -DSOKOBAN_ENABLE_CLANG_TIDY=ON
-cmake --build build-tidy --target sokoban --parallel
+cmake --preset ci-tidy
+cmake --build --preset ci-tidy --parallel
 
-cmake -S . -B build-fuzz -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug -DSOKOBAN_BUILD_TESTS=OFF -DSOKOBAN_BUILD_FUZZ_TESTS=ON
-cmake --build build-fuzz --target sokoban_player_profile_fuzz --parallel
-.\build-fuzz\sokoban_player_profile_fuzz.exe -max_len=65536 -max_total_time=60
+cmake --preset ci-fuzz
+cmake --build --preset ci-fuzz --parallel
+./out/ci-fuzz/sokoban_player_profile_fuzz -max_len=65536 -max_total_time=60
 ```
+
+The Windows workflows cover the MSVC build and CTest suites. Linux adds GCC
+and Clang diagnostics, platform-specific type and library behavior,
+ASan/UBSan, and static analysis; passing Windows tests does not establish that
+those checks pass. A 64-bit `uint64_t`, for example, aliases `unsigned long`
+on Linux and `unsigned long long` on Windows, which matters for templated
+types such as `std::future<T>`. CI also renders frames under lavapipe Vulkan
+validation and checks Vulkan-free core dependencies and committed line
+endings. The commands above cover the build, test, sanitizer, analysis, and
+fuzz jobs; the extra gates remain explicit steps in the workflow.
 
 Production code is compiled once into `sokoban_core`, `sokoban_ui`, and
 `sokoban_render_vulkan`; tests link those libraries rather than recompiling

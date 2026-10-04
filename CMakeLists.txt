@@ -397,12 +397,12 @@ function(sokoban_enable_warnings target)
         # wants the room to say why each one is on the list. This deliberately
         # passes no -checks argument, because one would override that file.
         #
-        # --header-filter stays here because it needs the absolute source
-        # directory, which the config file cannot know; it keeps diagnostics
-        # from third_party headers out of the gate.
+        # Accept both path separators: Windows diagnostics can use backslashes
+        # even though CMake normalizes CMAKE_CURRENT_SOURCE_DIR to forward
+        # slashes. A slash-only filter silently skips first-party headers.
         set(SOKOBAN_CLANG_TIDY_COMMAND
             "${SOKOBAN_CLANG_TIDY_EXECUTABLE}"
-            "--header-filter=^${CMAKE_CURRENT_SOURCE_DIR}/(src|tools)/"
+            "--header-filter=(^|[/\\\\])(src|tools)[/\\\\]"
         )
         set_property(TARGET ${target} PROPERTY CXX_CLANG_TIDY
             "${SOKOBAN_CLANG_TIDY_COMMAND}")
@@ -691,8 +691,8 @@ target_include_directories(sokoban_render_vulkan
         third_party/imgui
         third_party/imgui/backends
         third_party/imgui/misc/cpp
-        third_party/vma
 )
+target_include_directories(sokoban_render_vulkan SYSTEM PRIVATE third_party/vma)
 target_link_libraries(sokoban_render_vulkan
     PUBLIC
         sokoban_core

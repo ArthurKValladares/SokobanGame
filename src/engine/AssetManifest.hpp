@@ -24,17 +24,17 @@ struct AssetManifestJsonParser;
     return clipNumber == 0 ? 0 : clipNumber - 1;
 }
 
-enum class ModelGeometry {
+enum class ModelGeometry : uint8_t {
     Static,
     Skinned,
 };
 
-enum class TextureFilter {
+enum class TextureFilter : uint8_t {
     Nearest,
     Linear,
 };
 
-enum class ModelMaterialMode : uint32_t {
+enum class ModelMaterialMode : uint8_t {
     Untextured = 0,
     SingleTexture = 1,
     PrimitiveMaterials = 2,

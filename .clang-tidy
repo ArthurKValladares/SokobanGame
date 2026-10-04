@@ -25,10 +25,12 @@
 # `uppercase-literal-suffix` are house-style preferences this codebase has
 # already made the other way. None of them belongs in a gate.
 #
-# The top four are not. 104 of their 104 checks are about correctness and
-# cost, and 102 of them pass clean today - so they are enabled here. The two
-# remaining checks are excluded by name as documented policy exceptions. A
-# gate that starts red is a gate people learn to ignore.
+# The top four were enabled for correctness and cost, with two exclusions
+# documented below. The counts above describe the original measurement, not
+# a guarantee that the current tree passes. Run the complete ci-tidy preset:
+# runtime CTest suites and scans of changed files do not verify this gate.
+# CI pins LLVM 18 because wildcard check groups can gain checks in newer
+# LLVM releases; use that version when reproducing Linux findings.
 #
 # clang-analyzer-* stays, unchanged, for the reason it was there.
 
@@ -40,7 +42,8 @@ Checks: >
   concurrency-*,
   portability-*,
   -bugprone-easily-swappable-parameters,
-  -bugprone-unchecked-optional-access
+  -bugprone-unchecked-optional-access,
+  -portability-avoid-pragma-once
 
 # `bugprone-empty-catch` was enabled on 2026-09-09 after all seven intentional
 # exception barriers were documented and made explicit. A Clang 22 scan parsed
@@ -81,6 +84,10 @@ Checks: >
 #   Every site sampled is guarded, mostly by a short-circuiting `||` or an
 #   early `continue` that its dataflow model does not follow. Enabling it
 #   would gate on false positives.
+#
+#   portability-avoid-pragma-once was added in newer LLVM releases. This
+#   project uses #pragma once throughout and supports compilers that implement
+#   it; changing include-guard style does not belong in the correctness gate.
 
 WarningsAsErrors: '*'
-HeaderFilterRegex: '(^|/)(src|tools)/'
+HeaderFilterRegex: '(^|[/\\])(src|tools)[/\\]'

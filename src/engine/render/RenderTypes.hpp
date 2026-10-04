@@ -16,12 +16,12 @@
 
 namespace sokoban {
 
-enum class RenderViewMode {
+enum class RenderViewMode : uint8_t {
     TopDown2D,
     Isometric3D,
 };
 
-enum class RenderSurfaceEffect {
+enum class RenderSurfaceEffect : uint8_t {
     Standard,
     MirrorEnergy,
     // Persistent energy barriers share the animated emissive shader with
@@ -35,14 +35,14 @@ enum class RenderSurfaceEffect {
     GroundSplat,
 };
 
-enum class WaterShorelineEdge : uint32_t {
+enum class WaterShorelineEdge : uint8_t {
     NegativeY = 1U << 0,
     PositiveX = 1U << 1,
     PositiveY = 1U << 2,
     NegativeX = 1U << 3,
 };
 
-enum class WaterShorelineCorner : uint32_t {
+enum class WaterShorelineCorner : uint8_t {
     NegativeXNegativeY = 1U << 4,
     PositiveXNegativeY = 1U << 5,
     PositiveXPositiveY = 1U << 6,
@@ -204,7 +204,7 @@ struct RenderFrameData {
     static constexpr std::size_t overworldFogVolumeCapacity = tileCapacity;
     static constexpr std::size_t groundSplatRegionCapacity = 18;
     static constexpr std::size_t pointLightCapacity = 8;
-    enum class EditorDecorationHighlight {
+    enum class EditorDecorationHighlight : uint8_t {
         None,
         Hovered,
         Selected,
@@ -305,7 +305,7 @@ struct RenderFrameData {
             // image. A wrong mask does not look like a bug; it looks like
             // someone tuned the occlusion differently. This is the one click
             // that separates the two.
-            enum class Debug {
+            enum class Debug : uint8_t {
                 Off,
                 Occlusion,
                 AmbientMask,
@@ -454,7 +454,7 @@ struct RenderFrameData {
 
 #if SOKOBAN_ENABLE_DEBUG_UI
     struct DebugItemLink {
-        enum class Style { Dots, Arrows, BidirectionalArrows, Sightline, Stop };
+        enum class Style : uint8_t { Dots, Arrows, BidirectionalArrows, Sightline, Stop };
         Vec3 from {};
         Vec3 to {};
         Vec4 color {};
@@ -656,7 +656,6 @@ struct RenderStats {
     uint32_t rebuiltRenderableBounds = 0;
     uint32_t visibleRenderables = 0;
     uint32_t culledRenderables = 0;
-    bool frustumCullingEnabled = true;
     uint32_t visibleFaces = 0;
     uint32_t drawCalls = 0;
     uint32_t vertices = 0;
@@ -669,9 +668,6 @@ struct RenderStats {
     uint32_t swapchainWidth = 0;
     uint32_t swapchainHeight = 0;
     uint32_t swapchainImages = 0;
-    // FIFO modes deliberately synchronize queue progress with the display.
-    // WSI backpressure can surface at an otherwise ordinary frame-slot fence.
-    bool fifoPresentationEnabled = false;
     uint32_t renderWidth = 0;
     uint32_t renderHeight = 0;
     uint32_t ssaoWidth = 0;
@@ -684,11 +680,6 @@ struct RenderStats {
     uint32_t renderScalePercent = 100;
     uint32_t activeSamples = 1;
     uint32_t sceneDepthBits = 0;
-    bool parallelScenePreparationEnabled = true;
-    bool pointShadowOptimizationsEnabled = true;
-    bool recorderScratchReuseEnabled = true;
-    bool mainSceneHasTranslucency = false;
-    bool ssaoColorSnapshotCopied = false;
     RenderPhaseTiming assetSchedulingTiming {};
     RenderPhaseTiming frameFenceWaitTiming {};
     RenderPhaseTiming assetMaintenanceTiming {};
@@ -716,7 +707,6 @@ struct RenderStats {
     // report each had bespoke readers for them.
     RenderPhaseTiming scenePreparationTiming {};
     RenderPhaseTiming cpuFrameTiming {};
-    bool gpuTimestampsSupported = false;
     // Only written when the device reports timestamps, so an unsupported
     // device leaves this default-constructed rather than zeroed each frame.
     RenderPhaseTiming gpuFrameTiming {};
@@ -739,7 +729,6 @@ struct RenderStats {
     RenderPhaseTiming gpuAtmosphereGlobalCompositeTiming {};
     RenderPhaseTiming gpuAtmosphereVolumesTiming {};
     RenderPhaseTiming gpuOutputTiming {};
-    bool processMemoryAvailable = false;
     uint64_t processResidentBytes = 0;
     uint64_t processPeakResidentBytes = 0;
     uint64_t processPrivateBytes = 0;
@@ -761,7 +750,6 @@ struct RenderStats {
     uint32_t gpuMemoryHeapCount = 0;
     std::array<RenderMemoryHeapStats, maxRenderMemoryHeaps>
         gpuMemoryHeaps {};
-    bool wireframeEnabled = false;
     float wireframeLineWidth = 1.0f;
     uint64_t pipelineRebuilds = 0;
     uint64_t swapchainRecreations = 0;
@@ -769,6 +757,20 @@ struct RenderStats {
     uint64_t renderResourceReconfigurations = 0;
     uint64_t presentQueueRetirementWaits = 0;
     uint32_t retiredRenderResourceSets = 0;
+    // Keep byte-sized flags together to avoid padding between counters and
+    // phase timings. Stats are populated by name, never serialized by layout.
+    bool frustumCullingEnabled = true;
+    // FIFO modes deliberately synchronize queue progress with the display.
+    // WSI backpressure can surface at an otherwise ordinary frame-slot fence.
+    bool fifoPresentationEnabled = false;
+    bool parallelScenePreparationEnabled = true;
+    bool pointShadowOptimizationsEnabled = true;
+    bool recorderScratchReuseEnabled = true;
+    bool mainSceneHasTranslucency = false;
+    bool ssaoColorSnapshotCopied = false;
+    bool gpuTimestampsSupported = false;
+    bool processMemoryAvailable = false;
+    bool wireframeEnabled = false;
     bool rendererReconfigurationPending = false;
 };
 

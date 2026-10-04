@@ -8,7 +8,7 @@
 
 namespace sokoban {
 
-enum class TonemapCurve : uint32_t {
+enum class TonemapCurve : uint8_t {
     Clamp = 0,
     PbrNeutral = 1,
 };

@@ -92,64 +92,56 @@ jobs:
         include:
           - name: Tests (Debug)
             build_type: Debug
-            build_dir: build
+            preset: ci-debug
+            build_dir: out/ci-debug
             # Validation layers are compiled in only for Debug, so this is the
             # one configuration that hosts the render gate below. Keep the
             # smoke-test setting explicit because the runtime dependencies and
             # validation step are conditional on this matrix entry.
-            cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_BUILD_VULKAN_SMOKE_TESTS=ON -DSOKOBAN_WARNINGS_AS_ERRORS=ON
-            build_target: all
             run_tests: true
             run_fuzz: false
             run_smoke: true
             requires_vulkan: true
           - name: Tests (Release)
             build_type: Release
-            build_dir: build
-            cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_WARNINGS_AS_ERRORS=ON
-            build_target: all
+            preset: ci-release
+            build_dir: out/ci-release
             run_tests: true
             run_fuzz: false
             run_smoke: false
             requires_vulkan: true
           - name: Headless tests (no Vulkan SDK)
             build_type: Debug
+            preset: headless-tests
             build_dir: out/headless-tests
-            build_target: all
             run_tests: true
             run_fuzz: false
             run_smoke: false
             requires_vulkan: false
           - name: Sanitizers (ASan + UBSan)
             build_type: Debug
-            build_dir: build
-            cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_ENABLE_SANITIZERS=ON -DSOKOBAN_WARNINGS_AS_ERRORS=ON
-            build_target: all
+            preset: ci-sanitize
+            build_dir: out/ci-sanitize
             run_tests: true
             run_fuzz: false
             run_smoke: false
             requires_vulkan: true
-            compiler_options: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           - name: Static analysis (clang-tidy)
             build_type: Debug
-            build_dir: build
-            cmake_options: -DSOKOBAN_BUILD_TESTS=OFF -DSOKOBAN_ENABLE_CLANG_TIDY=ON
-            build_target: sokoban
+            preset: ci-tidy
+            build_dir: out/ci-tidy
             run_tests: false
             run_fuzz: false
             run_smoke: false
             requires_vulkan: true
-            compiler_options: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           - name: Fuzzing (player profile)
             build_type: Debug
-            build_dir: build
-            cmake_options: -DSOKOBAN_BUILD_TESTS=OFF -DSOKOBAN_BUILD_FUZZ_TESTS=ON
-            build_target: sokoban_player_profile_fuzz
+            preset: ci-fuzz
+            build_dir: out/ci-fuzz
             run_tests: false
             run_fuzz: true
             run_smoke: false
             requires_vulkan: true
-            compiler_options: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 
     steps:
       - name: Check out source
@@ -160,8 +152,10 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential \
-            clang \
-            clang-tidy \
+            gcc-13 \
+            g++-13 \
+            clang-18 \
+            clang-tidy-18 \
             libasound2-dev \
             libdbus-1-dev \
             libdecor-0-dev \
@@ -244,19 +238,10 @@ jobs:
         run: bash tools/check_core_is_vulkan_free.sh
 
       - name: Configure ${{ matrix.name }}
-        if: matrix.requires_vulkan
-        run: >-
-          cmake -S . -B build -G Ninja
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          ${{ matrix.compiler_options }}
-          ${{ matrix.cmake_options }}
-
-      - name: Configure ${{ matrix.name }}
-        if: matrix.requires_vulkan == false
-        run: cmake --preset headless-tests
+        run: cmake --preset ${{ matrix.preset }}
 
       - name: Build ${{ matrix.name }}
-        run: cmake --build ${{ matrix.build_dir }} --target ${{ matrix.build_target }} --parallel
+        run: cmake --build --preset ${{ matrix.preset }} --parallel
 
       - name: Test ${{ matrix.name }}
         if: matrix.run_tests
@@ -265,9 +250,7 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: >-
           xvfb-run --auto-servernum
-          ctest --test-dir ${{ matrix.build_dir }}
-          --build-config ${{ matrix.build_type }}
-          --output-on-failure --no-tests=error --timeout 60
+          ctest --preset ${{ matrix.preset }} --timeout 60
 
       - name: Fuzz player-profile decoding
         if: matrix.run_fuzz
@@ -275,7 +258,7 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: >-
-          ./build/sokoban_player_profile_fuzz
+          ./${{ matrix.build_dir }}/sokoban_player_profile_fuzz
           -max_len=65536 -max_total_time=60 -print_final_stats=1
 
       # The only step that exercises swapchain, pipelines, descriptors, the
@@ -313,7 +296,7 @@ jobs:
           # silent pass; the binary exits non-zero if validation reports
           # anything, so no log grepping is involved.
           xvfb-run --auto-servernum \
-            ./build/sokoban \
+            ./${{ matrix.build_dir }}/sokoban \
               --smoke-frames "${SMOKE_FRAMES}" \
               --require-validation \
               --save-directory "${saves}"

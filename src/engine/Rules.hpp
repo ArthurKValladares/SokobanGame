@@ -12,7 +12,7 @@
 
 namespace sokoban {
 
-enum class MoveDirection {
+enum class MoveDirection : uint8_t {
     Up,
     Down,
     Left,

@@ -168,7 +168,7 @@ std::optional<ActionScheduler::Rejection> ActionScheduler::tryStartAll(
         if (const std::optional<Rejection> owned =
                 ownershipConflict(pending.plan, causalGroup)) {
             ++admissionStats_.refusedByOwnership;
-            return *owned;
+            return owned;
         }
         const int baseStep = currentStep() + std::max(pending.deferral.steps, 0);
         if (const std::optional<ReservationTable::Conflict> conflict =

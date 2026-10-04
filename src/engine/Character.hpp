@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string_view>
 
@@ -7,7 +8,7 @@ namespace sokoban {
 
 // The character selected by a level. Gameplay abilities and the rendered
 // model both key off this value, while animations remain shared for now.
-enum class CharacterType {
+enum class CharacterType : uint8_t {
     Rogue,
     Knight,
     Druid,

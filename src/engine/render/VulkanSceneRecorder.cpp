@@ -440,8 +440,6 @@ public:
                 (previewScene ? previewScene->visibleRenderables : 0),
             .culledRenderables = scene.culledRenderables +
                 (previewScene ? previewScene->culledRenderables : 0),
-            .frustumCullingEnabled = scene.frustumCullingEnabled &&
-                (!previewScene || previewScene->frustumCullingEnabled),
             .swapchainWidth = extent.width,
             .swapchainHeight = extent.height,
             .swapchainImages = swapchain_.imageCount(),
@@ -454,8 +452,6 @@ public:
             .renderScalePercent = static_cast<uint32_t>(
                 swapchain_.renderScalePercent()),
             .activeSamples = configuration_.activeSamples,
-            .wireframeEnabled =
-                configuration_.wireframeEnabled,
             .wireframeLineWidth =
                 configuration_.wireframeLineWidth,
             .pipelineRebuilds =
@@ -470,6 +466,10 @@ public:
                 configuration_.presentQueueRetirementWaits,
             .retiredRenderResourceSets =
                 configuration_.retiredRenderResourceSets,
+            .frustumCullingEnabled = scene.frustumCullingEnabled &&
+                (!previewScene || previewScene->frustumCullingEnabled),
+            .wireframeEnabled =
+                configuration_.wireframeEnabled,
             .rendererReconfigurationPending =
                 configuration_.rendererReconfigurationPending,
         };

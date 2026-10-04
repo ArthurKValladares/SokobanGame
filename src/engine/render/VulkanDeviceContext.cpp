@@ -765,7 +765,7 @@ VulkanSceneDepthFormatSelection VulkanDeviceContext::querySceneDepthFormat(
         candidates,
         preservedSampleCounts != 0
             ? preservedSampleCounts
-            : VK_SAMPLE_COUNT_1_BIT);
+            : VkSampleCountFlags { VK_SAMPLE_COUNT_1_BIT });
 }
 
 } // namespace sokoban

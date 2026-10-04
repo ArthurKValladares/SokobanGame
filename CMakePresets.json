@@ -21,7 +21,8 @@
       },
       "cacheVariables": {
         "CMAKE_C_COMPILER": "cl",
-        "CMAKE_CXX_COMPILER": "cl"
+        "CMAKE_CXX_COMPILER": "cl",
+        "SOKOBAN_WARNINGS_AS_ERRORS": "ON"
       },
       "condition": {
         "type": "equals",
@@ -63,6 +64,79 @@
       }
     },
     {
+      "name": "linux-ci",
+      "hidden": true,
+      "description": "Shared Linux quality settings, used locally and by Required Tests CI. Requires the Linux SDL build dependencies and Vulkan SDK.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "gcc-13",
+        "CMAKE_CXX_COMPILER": "g++-13",
+        "SOKOBAN_BUILD_TESTS": "ON",
+        "SOKOBAN_WARNINGS_AS_ERRORS": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-clang-ci",
+      "hidden": true,
+      "inherits": "linux-ci",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang-18",
+        "CMAKE_CXX_COMPILER": "clang++-18"
+      }
+    },
+    {
+      "name": "ci-debug",
+      "displayName": "CI: GCC Debug",
+      "inherits": "linux-ci",
+      "cacheVariables": {
+        "SOKOBAN_BUILD_VULKAN_SMOKE_TESTS": "ON"
+      }
+    },
+    {
+      "name": "ci-release",
+      "displayName": "CI: GCC Release",
+      "inherits": "linux-ci",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "ci-sanitize",
+      "displayName": "CI: Clang ASan + UBSan",
+      "inherits": "linux-clang-ci",
+      "cacheVariables": {
+        "SOKOBAN_ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "ci-tidy",
+      "displayName": "CI: clang-tidy",
+      "inherits": "linux-clang-ci",
+      "cacheVariables": {
+        "SOKOBAN_BUILD_TESTS": "OFF",
+        "SOKOBAN_ENABLE_CLANG_TIDY": "ON",
+        "SOKOBAN_CLANG_TIDY_EXECUTABLE": "clang-tidy-18",
+        "SOKOBAN_WARNINGS_AS_ERRORS": "OFF"
+      }
+    },
+    {
+      "name": "ci-fuzz",
+      "displayName": "CI: player-profile fuzzing",
+      "inherits": "linux-clang-ci",
+      "cacheVariables": {
+        "SOKOBAN_BUILD_TESTS": "OFF",
+        "SOKOBAN_BUILD_FUZZ_TESTS": "ON",
+        "SOKOBAN_WARNINGS_AS_ERRORS": "OFF"
+      }
+    },
+    {
       "name": "shipping",
       "displayName": "Shipping package (x64)",
       "description": "Editor-free Release build with LTO and a separate PDB symbols package.",
@@ -97,6 +171,28 @@
     }
   ],
   "buildPresets": [
+    {
+      "name": "ci-debug",
+      "configurePreset": "ci-debug"
+    },
+    {
+      "name": "ci-release",
+      "configurePreset": "ci-release"
+    },
+    {
+      "name": "ci-sanitize",
+      "configurePreset": "ci-sanitize"
+    },
+    {
+      "name": "ci-tidy",
+      "configurePreset": "ci-tidy",
+      "targets": ["sokoban"]
+    },
+    {
+      "name": "ci-fuzz",
+      "configurePreset": "ci-fuzz",
+      "targets": ["sokoban_player_profile_fuzz"]
+    },
     {
       "name": "dev",
       "displayName": "Debug: game only",
@@ -166,6 +262,36 @@
   ],
   "testPresets": [
     {
+      "name": "linux-ci-tests",
+      "hidden": true,
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "timeout": 60
+      }
+    },
+    {
+      "name": "ci-debug",
+      "inherits": "linux-ci-tests",
+      "configurePreset": "ci-debug"
+    },
+    {
+      "name": "ci-release",
+      "inherits": "linux-ci-tests",
+      "configurePreset": "ci-release"
+    },
+    {
+      "name": "ci-sanitize",
+      "inherits": "linux-ci-tests",
+      "configurePreset": "ci-sanitize",
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+        "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"
+      }
+    },
+    {
       "name": "dev",
       "displayName": "Debug tests",
       "configurePreset": "dev",
@@ -201,6 +327,50 @@
       "execution": {
         "noTestsAction": "error"
       }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "dev-check",
+      "displayName": "Windows Debug: configure, build every target, test",
+      "steps": [
+        { "type": "configure", "name": "dev" },
+        { "type": "build", "name": "dev-all" },
+        { "type": "test", "name": "dev" }
+      ]
+    },
+    {
+      "name": "release-check",
+      "displayName": "Windows Release: configure, build every target, test",
+      "steps": [
+        { "type": "configure", "name": "release" },
+        { "type": "build", "name": "release-all" },
+        { "type": "test", "name": "release" }
+      ]
+    },
+    {
+      "name": "ci-debug",
+      "steps": [
+        { "type": "configure", "name": "ci-debug" },
+        { "type": "build", "name": "ci-debug" },
+        { "type": "test", "name": "ci-debug" }
+      ]
+    },
+    {
+      "name": "ci-release",
+      "steps": [
+        { "type": "configure", "name": "ci-release" },
+        { "type": "build", "name": "ci-release" },
+        { "type": "test", "name": "ci-release" }
+      ]
+    },
+    {
+      "name": "ci-sanitize",
+      "steps": [
+        { "type": "configure", "name": "ci-sanitize" },
+        { "type": "build", "name": "ci-sanitize" },
+        { "type": "test", "name": "ci-sanitize" }
+      ]
     }
   ],
   "packagePresets": [

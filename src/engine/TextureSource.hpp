@@ -7,23 +7,23 @@
 
 namespace sokoban {
 
-enum class TextureColorSpace {
+enum class TextureColorSpace : uint8_t {
     Srgb,
     Linear,
 };
 
-enum class TextureAddressMode {
+enum class TextureAddressMode : uint8_t {
     ClampToEdge,
     MirroredRepeat,
     Repeat,
 };
 
-enum class TextureMagnificationFilter {
+enum class TextureMagnificationFilter : uint8_t {
     Nearest,
     Linear,
 };
 
-enum class TextureMinificationFilter {
+enum class TextureMinificationFilter : uint8_t {
     Nearest,
     Linear,
     NearestMipmapNearest,
@@ -32,7 +32,7 @@ enum class TextureMinificationFilter {
     LinearMipmapLinear,
 };
 
-enum class MaterialTextureSemantic {
+enum class MaterialTextureSemantic : uint8_t {
     BaseColor,
     MetallicRoughness,
     Normal,

@@ -3,6 +3,7 @@
 #include "engine/Math.hpp"
 
 #include <algorithm>
+#include <cstdint>
 
 namespace sokoban {
 
@@ -10,7 +11,7 @@ namespace sokoban {
 // source pixels exactly. World-space effects do not have a pixel scale, so
 // they can fit the source texture's full width to the target width and use
 // that same uniform scale for all four corners and edge bands.
-enum class NineSliceScaleMode {
+enum class NineSliceScaleMode : uint8_t {
     PreserveSourcePixels,
     FitTargetWidth,
 };

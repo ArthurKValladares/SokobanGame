@@ -10,7 +10,7 @@
 
 namespace sokoban {
 
-enum class TileType {
+enum class TileType : uint8_t {
     Air,
     Ground,
     Wall,
@@ -76,7 +76,7 @@ enum class TileType {
 };
 
 // Behavioural traits shared by families of tiles. Combine with `|`.
-enum class TileProperty : uint32_t {
+enum class TileProperty : uint8_t {
     None = 0,
     // A floor plate: a thin tile that units, and mirrors, may occupy. Plates
     // may be authored with something already standing on them (see the
