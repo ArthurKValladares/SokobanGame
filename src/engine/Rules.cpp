@@ -2295,17 +2295,14 @@ public:
         bool anyMovement = true;
         while (anyMovement) {
             const bool mayPulse = anyBardHasMovementIntent();
-            const std::optional<GameState> beforeBardPulse = mayPulse
-                ? std::optional<GameState> { after_ }
-                : std::nullopt;
-            const std::optional<std::vector<Status>> statusesBeforeBardPulse =
-                mayPulse
-                ? std::optional<std::vector<Status>> { status_ }
-                : std::nullopt;
-            const std::optional<std::vector<char>> enemiesBeforeBardPulse =
-                mayPulse
-                ? std::optional<std::vector<char>> { enemyMoved_ }
-                : std::nullopt;
+            GameState beforeBardPulse;
+            std::vector<Status> statusesBeforeBardPulse;
+            std::vector<char> enemiesBeforeBardPulse;
+            if (mayPulse) {
+                beforeBardPulse = after_;
+                statusesBeforeBardPulse = status_;
+                enemiesBeforeBardPulse = enemyMoved_;
+            }
             const std::size_t transitCount =
                 portalTransits_ ? portalTransits_->size() : 0;
             deriveIntents();
@@ -2316,13 +2313,13 @@ public:
             anyMovement = resolveMoves();
             anyMovement = resolveLinkedMoves() || anyMovement;
             settleBlocked();
-            if (hasBardPulse && !anyBardMovedThisMicro()) {
+            if (mayPulse && hasBardPulse && !anyBardMovedThisMicro()) {
                 if (portalTransits_) {
                     portalTransits_->resize(transitCount);
                 }
-                after_ = *beforeBardPulse;
-                status_ = *statusesBeforeBardPulse;
-                enemyMoved_ = *enemiesBeforeBardPulse;
+                after_ = beforeBardPulse;
+                status_ = statusesBeforeBardPulse;
+                enemyMoved_ = enemiesBeforeBardPulse;
                 suppressBardInfluences_ = true;
                 deriveIntents();
                 markContested();

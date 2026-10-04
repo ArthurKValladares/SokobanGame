@@ -10,15 +10,17 @@ permissions:
 
 env:
   VULKAN_SDK_VERSION: 1.4.357.0
-  # Both pins were checked against LunarG's published checksums, which live at
+  # These pins were checked against LunarG's published checksums, which live at
   #   https://sdk.lunarg.com/sdk/sha/<version>/<platform>/<file>.txt
   # On a version bump, re-pin from there rather than from whatever a CI run
   # happened to download - a hash taken from the download only proves the
   # download was self-consistent, not that it came from LunarG:
   #   curl -sS https://sdk.lunarg.com/sdk/sha/$VER/linux/vulkan_sdk.tar.xz.txt
   #   curl -sS https://sdk.lunarg.com/sdk/sha/$VER/windows/vulkan_sdk.exe.txt
+  #   curl -sS https://sdk.lunarg.com/sdk/sha/$VER/windows/VulkanRT-X64-$VER-Components.zip.txt
   VULKAN_SDK_SHA256: 0f09bf6a0625e346bf004be70b92907e934a4c76606b323441b2baf3a5a0e66d
   VULKAN_SDK_WINDOWS_SHA256: 81f474711e9042f4cd22b31b2f7a8870db2e428b21586fb43dd80150be97310d
+  VULKAN_RUNTIME_WINDOWS_SHA256: a14672efed15aafc7f5a16572d35cd3a3416eadf670aeee3cdf50ee32d5fbf83
   # Frames the headless render gate draws before exiting. Enough to cross the
   # asset-publication ramp (one asset publishes per frame) and reach a steady
   # state where every pass is recording real work.
@@ -239,7 +241,7 @@ jobs:
       # the build that would otherwise be the first to notice.
       - name: Check sokoban_core is Vulkan-free
         if: matrix.build_type == 'Debug'
-        run: tools/check_core_is_vulkan_free.sh
+        run: bash tools/check_core_is_vulkan_free.sh
 
       - name: Configure ${{ matrix.name }}
         if: matrix.requires_vulkan
@@ -370,6 +372,45 @@ jobs:
           }
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Join-Path $sdk 'Bin' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      # The Windows SDK supplies the import library, but the loader DLL normally
+      # comes from a GPU driver. Hosted runners need it even for tests that never
+      # create a Vulkan device. Restore it independently of the SDK cache so a
+      # fresh runner always gets the runtime, including package-validation children.
+      - name: Restore Vulkan runtime
+        id: vulkan-runtime-cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.tool_cache }}\vulkan-runtime\${{ env.VULKAN_SDK_VERSION }}
+          key: vulkan-runtime-windows-x64-${{ env.VULKAN_SDK_VERSION }}-${{ env.VULKAN_RUNTIME_WINDOWS_SHA256 }}
+
+      - name: Install Vulkan runtime
+        if: steps.vulkan-runtime-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'vulkan-runtime.zip'
+          $file = "VulkanRT-X64-$env:VULKAN_SDK_VERSION-Components.zip"
+          $uri = "https://sdk.lunarg.com/sdk/download/$env:VULKAN_SDK_VERSION/windows/$file"
+          Invoke-WebRequest -Uri $uri -OutFile $archive -MaximumRetryCount 3
+          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          $expected = "$env:VULKAN_RUNTIME_WINDOWS_SHA256".Trim().ToLower()
+          if ($actual -ne $expected) {
+            throw "Vulkan runtime checksum mismatch. Expected $expected, downloaded $actual"
+          }
+          $root = Join-Path $env:RUNNER_TOOL_CACHE "vulkan-runtime\$env:VULKAN_SDK_VERSION"
+          Expand-Archive -LiteralPath $archive -DestinationPath $root -Force
+
+      - name: Expose Vulkan runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TOOL_CACHE "vulkan-runtime\$env:VULKAN_SDK_VERSION"
+          $runtime = Join-Path $root "VulkanRT-X64-$env:VULKAN_SDK_VERSION-Components\x64"
+          if (-not (Test-Path (Join-Path $runtime 'vulkan-1.dll'))) {
+            throw "vulkan-1.dll missing under $runtime"
+          }
+          $runtime | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Configure
         shell: pwsh
