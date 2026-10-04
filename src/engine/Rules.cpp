@@ -1,4 +1,5 @@
 #include "engine/Rules.hpp"
+#include "engine/TurretRayTrace.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1447,45 +1448,17 @@ bool turretHasLineOfSight(
     GridPosition3 target,
     std::vector<TurretRaySegment>* segments = nullptr)
 {
-    GridPosition3 segmentStart = turret;
-    GridPosition startEdge {};
-    GridPosition3 cell = turret;
-    std::vector<std::pair<GridPosition3, MoveDirection>> visited;
-    while (true) {
-        const auto key = std::pair { cell, direction };
-        if (std::ranges::find(visited, key) != visited.end()) {
-            return false;
-        }
-        visited.push_back(key);
-        if (const auto crossing =
-                level.portalCrossing(cell, directionOffset(direction))) {
-            if (segments) {
-                segments->push_back({ segmentStart,
-                                      cell,
-                                      startEdge,
-                                      directionOffset(direction) });
+    return traceTurretRay(turret, direction, target,
+        [&](GridPosition3 cell) {
+            if (!cellAllowsEntity(level, state, cell)) {
+                return TurretRayCell::Blocked;
             }
-            cell = crossing->exit;
-            direction = rotateDirection(direction, crossing->quarterTurns);
-            segmentStart = cell;
-            startEdge = portalEdgeOffset(*level.plateAt(cell));
-        } else {
-            cell = movementTarget(cell, direction);
-        }
-        if (!cellAllowsEntity(level, state, cell)) {
-            return false;
-        }
-        if (cell == target) {
-            if (segments) {
-                segments->push_back({ segmentStart, cell, startEdge, {} });
-            }
-            return true;
-        }
-        if (movableAt(state, cell) || playerBlocksAt(state, cell) ||
-            enemyAt(state, cell)) {
-            return false;
-        }
-    }
+            return movableAt(state, cell) || playerBlocksAt(state, cell) || enemyAt(state, cell)
+                ? TurretRayCell::Occupied : TurretRayCell::Open;
+        },
+        [&](GridPosition3 cell, MoveDirection ray) {
+            return level.portalCrossing(cell, directionOffset(ray));
+        }, segments);
 }
 
 std::vector<TurretRaySegment> turretBeamSegments(

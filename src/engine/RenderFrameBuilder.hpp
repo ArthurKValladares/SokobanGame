@@ -94,6 +94,9 @@ public:
         const LevelEditor& editor;
         const PresentationSettings& settings;
         const AnimationCatalog* animations = nullptr;
+#if SOKOBAN_ENABLE_DEBUG_UI
+        bool showDebugView = false;
+#endif
         std::optional<GridPosition3> hoverCell;
         std::optional<std::size_t> hoverDecoration;
         bool deleting = false;

@@ -128,6 +128,14 @@ constexpr std::array<VkVertexInputAttributeDescription, 4> skinnedPositionAttrib
     VkVertexInputAttributeDescription { 7, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, attachmentNodeIndex) },
 };
 
+#if SOKOBAN_ENABLE_DEBUG_UI
+constexpr std::array meshOutlineAttributes { meshAttributes[0], meshAttributes[1] };
+constexpr std::array skinnedOutlineAttributes {
+    skinnedAttributes[0], skinnedAttributes[1], skinnedAttributes[3],
+    skinnedAttributes[4], skinnedAttributes[5],
+};
+#endif
+
 } // namespace
 
 VulkanPipelineFactory::~VulkanPipelineFactory()
@@ -210,6 +218,26 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         shaders[17] = shaderModule(shaderCatalog::atmosphereCompositeFrag);
         shaders[18] = shaderModule(shaderCatalog::bloomExtractFrag);
         shaders[19] = shaderModule(shaderCatalog::bloomBlurFrag);
+#if SOKOBAN_ENABLE_DEBUG_UI
+        shaders[20] = shaderModule(shaderCatalog::debugOutlineVert);
+        shaders[21] = shaderModule(shaderCatalog::debugOutlineSkinnedVert);
+        shaders[22] = shaderModule(shaderCatalog::debugOutlineBoxVert);
+        shaders[23] = shaderModule(shaderCatalog::debugOutlineFrag);
+        shaders[24] = shaderModule(shaderCatalog::debugLinkFrag);
+        shaders[25] = shaderModule(shaderCatalog::debugLinkVert);
+        debugOutline_ = createScenePipeline(
+            shaders[20], shaders[23], VertexLayout::MeshOutline,
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat, false);
+        debugOutlineSkinned_ = createScenePipeline(
+            shaders[21], shaders[23], VertexLayout::SkinnedMeshOutline,
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat, false);
+        debugOutlineBox_ = createScenePipeline(
+            shaders[22], shaders[23], VertexLayout::None,
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat, false);
+        debugLink_ = createScenePipeline(
+            shaders[25], shaders[24], VertexLayout::None,
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat, false);
+#endif
 
         scene_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
@@ -295,6 +323,12 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         tonemap_ = createPostProcessPipeline(
             shaders[5], shaders[14], displayFormat);
         const std::array namedPipelines {
+#if SOKOBAN_ENABLE_DEBUG_UI
+            std::pair { debugOutline_, "Linked item outline pipeline" },
+            std::pair { debugOutlineSkinned_, "Linked item skinned outline pipeline" },
+            std::pair { debugOutlineBox_, "Linked item box outline pipeline" },
+            std::pair { debugLink_, "Dotted item link pipeline" },
+#endif
             std::pair { scene_, "Scene pipeline" },
             std::pair { sceneOpaque_, "Scene pipeline (opaque)" },
             std::pair { groundSplatOpaque_, "Ground splat pipeline (opaque)" },
@@ -357,6 +391,9 @@ void VulkanPipelineFactory::destroy()
             atmosphereCompositeMultisample_,
             bloomExtract_, bloomBlur_,
             worldTransition_, tonemap_,
+#if SOKOBAN_ENABLE_DEBUG_UI
+            debugOutline_, debugOutlineSkinned_, debugOutlineBox_, debugLink_,
+#endif
         };
         for (VkPipeline pipeline : pipelines) {
             if (pipeline) {
@@ -392,6 +429,12 @@ void VulkanPipelineFactory::destroy()
     bloomBlur_ = VK_NULL_HANDLE;
     worldTransition_ = VK_NULL_HANDLE;
     tonemap_ = VK_NULL_HANDLE;
+#if SOKOBAN_ENABLE_DEBUG_UI
+    debugOutline_ = VK_NULL_HANDLE;
+    debugOutlineSkinned_ = VK_NULL_HANDLE;
+    debugOutlineBox_ = VK_NULL_HANDLE;
+    debugLink_ = VK_NULL_HANDLE;
+#endif
     layout_ = VK_NULL_HANDLE;
     shadowFormat_ = VK_FORMAT_UNDEFINED;
     pipelineCache_ = VK_NULL_HANDLE;
@@ -458,6 +501,20 @@ VkPipelineVertexInputStateCreateInfo VulkanPipelineFactory::vertexInputFor(
         info.vertexAttributeDescriptionCount =
             static_cast<uint32_t>(skinnedPositionAttributes.size());
         break;
+#if SOKOBAN_ENABLE_DEBUG_UI
+    case VertexLayout::MeshOutline:
+        info.pVertexBindingDescriptions = &meshBinding;
+        info.pVertexAttributeDescriptions = meshOutlineAttributes.data();
+        info.vertexAttributeDescriptionCount =
+            static_cast<uint32_t>(meshOutlineAttributes.size());
+        break;
+    case VertexLayout::SkinnedMeshOutline:
+        info.pVertexBindingDescriptions = &skinnedBinding;
+        info.pVertexAttributeDescriptions = skinnedOutlineAttributes.data();
+        info.vertexAttributeDescriptionCount =
+            static_cast<uint32_t>(skinnedOutlineAttributes.size());
+        break;
+#endif
     }
     info.vertexBindingDescriptionCount = 1;
     return info;

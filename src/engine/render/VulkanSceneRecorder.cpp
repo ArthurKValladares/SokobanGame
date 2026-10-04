@@ -504,6 +504,9 @@ public:
                     prepared.opaqueModelIndices.size() +
                     prepared.translucentModelIndices.size()) +
                 prepared.particles.size() + data.waterSurfaces.size();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            reserve += data.debugItemOutlines.size() + data.debugItemLinks.size();
+#endif
             if (data.viewMode == RenderViewMode::TopDown2D) {
                 reserve += data.tiles.size() +
                     2ULL * (data.levelWidth + data.levelHeight + 2ULL);
@@ -1959,6 +1962,11 @@ private:
                 options.content,
                 options.profileOpaqueGeometry,
                 options.profileParticles);
+#if SOKOBAN_ENABLE_DEBUG_UI
+            if (translucentPass && options.content != SceneContent::MirrorPreviewOnly) {
+                drawDebugView(commandBuffer, scene, frameData);
+            }
+#endif
         } else {
             for (const RenderFrameData::Tile& tile :
                  frameData.tiles) {
@@ -1988,6 +1996,141 @@ private:
         }
         vkCmdEndRendering(commandBuffer);
     }
+
+#if SOKOBAN_ENABLE_DEBUG_UI
+    void drawDebugView(
+        VkCommandBuffer commandBuffer,
+        const PreparedRenderScene& scene,
+        const RenderFrameData& frameData)
+    {
+        if (frameData.debugItemOutlines.empty() && frameData.debugItemLinks.empty()) {
+            return;
+        }
+        vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+        vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_CLOCKWISE);
+        VkPipeline boundPipeline = VK_NULL_HANDLE;
+        for (const auto& tile : frameData.debugItemOutlines) {
+            const bool box = tile.model == cubeModel;
+            if (!box && !models_.tileReadyForDraw(tile, configuration_.descriptorFrameIndex)) {
+                continue;
+            }
+            const bool skinned = !box && models_.modelUsesGpuSkinning(tile.model);
+            const VkPipeline pipeline = box ? pipelines_.debugOutlineBox()
+                : skinned ? pipelines_.debugOutlineSkinned() : pipelines_.debugOutline();
+            if (pipeline != boundPipeline) {
+                vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+                ++stats_.pipelineBinds;
+                boundPipeline = pipeline;
+            }
+            vkCmdSetCullMode(commandBuffer, box ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_FRONT_BIT);
+            const uint32_t instance = writeDrawInstance(GpuDrawInstance {
+                .vertices = IsoScenePreparer::modelWorldTransform(tile),
+                .passData = { Vec4 {
+                    scene.renderExtent.x, scene.renderExtent.y, 2.0f, box ? 1.0f : 0.0f,
+                }, Vec4 {}, Vec4 {}, Vec4 {} },
+                .color = tile.color,
+            });
+            if (box) {
+                vkCmdDraw(commandBuffer, 36, 1, 0, instance);
+                ++stats_.drawCalls;
+                stats_.vertices += 36;
+                stats_.triangles += 12;
+                stats_.visibleFaces += 6;
+            } else {
+                const auto mesh = models_.meshForTile(tile, configuration_.descriptorFrameIndex);
+                drawModel(commandBuffer, mesh, 1, skinned ? mesh.firstInstance : instance, instance);
+            }
+        }
+        vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
+        vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+        // Draw links over the scene so walls and occupants cannot hide the
+        // relationship. Outlines retain depth testing against the actual scene.
+        vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE);
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.debugLink());
+        ++stats_.pipelineBinds;
+        const Mat4 clipFromWorld = isoClipFromWorld(scene.isoLayout, scene.renderExtent);
+        uint32_t runFirst = 0;
+        uint32_t runCount = 0;
+        const auto flush = [&] {
+            drawQuadRun(commandBuffer, runFirst, runCount);
+            runCount = 0;
+        };
+        for (const auto& link : frameData.debugItemLinks) {
+            Vec4 from = transform(clipFromWorld, toVec4(link.from, 1.0f));
+            Vec4 to = transform(clipFromWorld, toVec4(link.to, 1.0f));
+            // Clip before dividing by w, including for a detached debug camera.
+            float lower = 0.0f;
+            float upper = 1.0f;
+            const auto clipPlane = [&](float a, float b) {
+                if (a < 0.0f && b < 0.0f) { return false; }
+                if (a < 0.0f) { lower = std::max(lower, a / (a - b)); }
+                if (b < 0.0f) { upper = std::min(upper, a / (a - b)); }
+                return lower <= upper;
+            };
+            if (!clipPlane(from.w + from.x, to.w + to.x) ||
+                !clipPlane(from.w - from.x, to.w - to.x) ||
+                !clipPlane(from.w + from.y, to.w + to.y) ||
+                !clipPlane(from.w - from.y, to.w - to.y) ||
+                !clipPlane(from.z, to.z) ||
+                !clipPlane(from.w - from.z, to.w - to.z)) {
+                continue;
+            }
+            const Vec4 delta = to - from;
+            to = from + delta * upper;
+            from += delta * lower;
+            if (from.w <= 0.00001f || to.w <= 0.00001f) { continue; }
+            const Vec3 start = xyz(from / from.w);
+            const Vec3 end = xyz(to / to.w);
+            Vec2 pixels {
+                (end.x - start.x) * scene.renderExtent.x * 0.5f,
+                (end.y - start.y) * scene.renderExtent.y * 0.5f,
+            };
+            const float distance = length(pixels);
+            using Style = RenderFrameData::DebugItemLink::Style;
+            const bool marker = link.style == Style::Stop;
+            if (distance < 1.0f && !marker) { continue; }
+            if (marker) { pixels = { 1.0f, 0.0f }; }
+            const float directionLength = marker ? 1.0f : distance;
+            constexpr float dotRadius = 3.0f;
+            constexpr float dotBorder = 1.0f;
+            const float halfWidth = link.style == Style::Dots
+                ? dotRadius + dotBorder + 1.0f : 8.0f;
+            const float dotSpacing = link.style == Style::Dots ? 12.0f : 48.0f;
+            const float spacing = distance /
+                std::max(1.0f, std::round(distance / dotSpacing));
+            const Vec3 side {
+                -pixels.y / directionLength * (2.0f * halfWidth) / scene.renderExtent.x,
+                pixels.x / directionLength * (2.0f * halfWidth) / scene.renderExtent.y,
+                0.0f,
+            };
+            // Extend the quad so complete dots can sit at both top-center
+            // anchors. Fit the spacing to the segment to end on a dot too.
+            const Vec3 cap {
+                pixels.x / directionLength * (2.0f * halfWidth) / scene.renderExtent.x,
+                pixels.y / directionLength * (2.0f * halfWidth) / scene.renderExtent.y,
+                0.0f,
+            };
+            const uint32_t instance = writeDrawInstance(GpuDrawInstance {
+                .vertices = quadVertices({
+                    start - cap - side, end + cap - side,
+                    end + cap + side, start - cap + side,
+                }, clipSpaceQuad),
+                .passData = { Vec4 { spacing, dotRadius, dotBorder,
+                    static_cast<float>(link.style) }, Vec4 {}, Vec4 {}, Vec4 {} },
+                .color = link.color,
+                .materialOptions = { -halfWidth, distance + 2.0f * halfWidth, 2.0f * halfWidth, distance },
+            });
+            if (runCount && instance != runFirst + runCount) { flush(); }
+            if (!runCount) { runFirst = instance; }
+            ++runCount;
+            ++stats_.visibleFaces;
+            stats_.vertices += 6;
+            stats_.triangles += 2;
+        }
+        flush();
+        vkCmdSetDepthTestEnable(commandBuffer, swapchain_.depthView() ? VK_TRUE : VK_FALSE);
+    }
+#endif
 
     void recordOverlayRendering(
         VkCommandBuffer commandBuffer,

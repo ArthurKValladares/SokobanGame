@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -106,6 +107,13 @@ public:
 
         bool operator==(const MinecartRoute&) const = default;
     };
+
+    // Shared by validated levels and unfinished editor drafts. The lookup
+    // supplies the underlying rail even when a cart or unit covers it.
+    [[nodiscard]] static MinecartRoute buildMinecartRoute(
+        const Minecart& minecart,
+        const std::function<TileType(GridPosition3)>& railAt,
+        std::string_view sourceName);
 
     // A plate (see TileProperty::Plate) authored underneath something already
     // standing on it: the layer grid holds the occupant, this record the

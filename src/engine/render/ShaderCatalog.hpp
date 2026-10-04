@@ -68,6 +68,14 @@ inline constexpr std::string_view bloomExtractFrag = "bloom_extract.frag.glsl";
 inline constexpr std::string_view bloomBlurFrag = "bloom_blur.frag.glsl";
 inline constexpr std::string_view worldTransitionFrag =
     "world_transition.frag.glsl";
+#if SOKOBAN_ENABLE_DEBUG_UI
+inline constexpr std::string_view debugOutlineVert = "debug_outline.vert.glsl";
+inline constexpr std::string_view debugOutlineSkinnedVert = "debug_outline_skinned.vert.glsl";
+inline constexpr std::string_view debugOutlineBoxVert = "debug_outline_box.vert.glsl";
+inline constexpr std::string_view debugOutlineFrag = "debug_outline.frag.glsl";
+inline constexpr std::string_view debugLinkFrag = "debug_link.frag.glsl";
+inline constexpr std::string_view debugLinkVert = "debug_link.vert.glsl";
+#endif
 
 inline constexpr auto sources = std::to_array<std::string_view>({
     triangleVert,
@@ -90,6 +98,14 @@ inline constexpr auto sources = std::to_array<std::string_view>({
     bloomExtractFrag,
     bloomBlurFrag,
     worldTransitionFrag,
+#if SOKOBAN_ENABLE_DEBUG_UI
+    debugOutlineVert,
+    debugOutlineSkinnedVert,
+    debugOutlineBoxVert,
+    debugOutlineFrag,
+    debugLinkFrag,
+    debugLinkVert,
+#endif
 });
 
 // The compiled module's filename. The build writes one SPIR-V blob per source

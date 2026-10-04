@@ -58,6 +58,7 @@ public:
     // Refreshes the Path field after a save or load made outside this panel
     // (the Ctrl+S shortcut).
     void syncDocumentPath(const LevelEditor& editor);
+    [[nodiscard]] bool showDebugView() const { return showDebugView_; }
 
 private:
     void drawGroundPaintTab(SplatPainter& painter, const Callbacks& callbacks);
@@ -93,6 +94,7 @@ private:
     void drawPermanentDeleteConfirmation(LevelEditor& editor);
 
     std::string filePathBuffer_;
+    bool showDebugView_ = false;
     std::string browserRootBuffer_;
     std::string decorationFilter_;
     std::string decorationRegistrationStatus_;

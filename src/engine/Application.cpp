@@ -2527,6 +2527,7 @@ RenderFrameData Application::buildEditorRenderFrame(
         .editor = tools_->levelEditor,
         .settings = presentationSettings_,
         .animations = &animationCatalog_,
+        .showDebugView = tools_->levelEditorDebugUi.showDebugView(),
         .hoverCell = tools_->hoverCell,
         .hoverDecoration = tools_->hoverDecoration,
         .deleting =

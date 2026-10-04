@@ -95,6 +95,12 @@ public:
     // presentable one, which is why the range and encode decisions live in
     // its shader rather than scattered through the scene shaders.
     [[nodiscard]] VkPipeline tonemap() const { return tonemap_; }
+#if SOKOBAN_ENABLE_DEBUG_UI
+    [[nodiscard]] VkPipeline debugOutline() const { return debugOutline_; }
+    [[nodiscard]] VkPipeline debugOutlineSkinned() const { return debugOutlineSkinned_; }
+    [[nodiscard]] VkPipeline debugOutlineBox() const { return debugOutlineBox_; }
+    [[nodiscard]] VkPipeline debugLink() const { return debugLink_; }
+#endif
 
 private:
     enum class VertexLayout {
@@ -103,6 +109,10 @@ private:
         MeshPosition,
         SkinnedMesh,
         SkinnedMeshPosition,
+#if SOKOBAN_ENABLE_DEBUG_UI
+        MeshOutline,
+        SkinnedMeshOutline,
+#endif
     };
 
     // The bindings and attributes one layout needs. Shared by the scene and
@@ -186,6 +196,12 @@ private:
     VkPipeline bloomBlur_ = VK_NULL_HANDLE;
     VkPipeline worldTransition_ = VK_NULL_HANDLE;
     VkPipeline tonemap_ = VK_NULL_HANDLE;
+#if SOKOBAN_ENABLE_DEBUG_UI
+    VkPipeline debugOutline_ = VK_NULL_HANDLE;
+    VkPipeline debugOutlineSkinned_ = VK_NULL_HANDLE;
+    VkPipeline debugOutlineBox_ = VK_NULL_HANDLE;
+    VkPipeline debugLink_ = VK_NULL_HANDLE;
+#endif
 };
 
 } // namespace sokoban

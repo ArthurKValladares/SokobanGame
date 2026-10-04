@@ -1798,7 +1798,11 @@ void IsoScenePreparer::prepare(
     scene.hasTranslucentContent =
         !scene.translucentFaceIndices.empty() ||
         !scene.translucentModelIndices.empty() ||
-        !scene.particles.empty();
+        !scene.particles.empty()
+#if SOKOBAN_ENABLE_DEBUG_UI
+        || !frameData.debugItemOutlines.empty() || !frameData.debugItemLinks.empty()
+#endif
+        ;
 }
 
 std::optional<GridPosition3> IsoScenePreparer::pickGridCell(

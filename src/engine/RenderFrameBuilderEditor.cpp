@@ -8,6 +8,7 @@
 #include "engine/RotatorVisuals.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
+#include "engine/TurretRayTrace.hpp"
 #include "engine/render/MirrorConfig.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/SceneConfig.hpp"
@@ -17,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <stdexcept>
 
 // The editor frame, and `tileVisual`.
 //
@@ -77,6 +79,9 @@ public:
         RenderFrameData frame = initializeEditorFrame();
         appendOverworldNeighbors(frame);
         appendEditorLayers(frame);
+#if SOKOBAN_ENABLE_DEBUG_UI
+        appendDebugView(frame);
+#endif
         appendEditorPreviews(frame);
         appendEditorCamera(frame);
         applyEditorScrollingMaterials(frame);
@@ -84,6 +89,295 @@ public:
     }
 
 private:
+#if SOKOBAN_ENABLE_DEBUG_UI
+    void appendDebugView(RenderFrameData& frame) const
+    {
+        if (!input_.showDebugView) {
+            return;
+        }
+        if (arena_) {
+            frame.debugItemOutlines = FrameArray<RenderFrameData::Tile>(
+                *arena_, RenderFrameData::tileCapacity);
+            frame.debugItemLinks = FrameArray<RenderFrameData::DebugItemLink>(
+                *arena_, RenderFrameData::debugItemLinkCapacity);
+        }
+        const auto visible = [this](GridPosition3 cell) {
+            return (!layerLocked_ || cell.z == static_cast<int>(activeLayer_)) &&
+                pendingTileMoveSource() != cell;
+        };
+        const auto visualFor = [&](GridPosition3 cell, Vec3 color, bool plate) {
+            const TileType type = plate
+                ? input_.editor.documentPlateAt(cell).value_or(
+                      documentTileAt(cell))
+                : documentTileAt(cell);
+            auto tile = tileVisual(type, cell, input_.manifest, input_.settings);
+            // Gates use procedural energy geometry, not tileVisual's flat
+            // fallback. Their debug proxy spans the same unit-height cell.
+            if (type == TileType::Gate) {
+                tile.position = { static_cast<float>(cell.x), static_cast<float>(cell.y) };
+                tile.size = { 1.0f, 1.0f };
+                tile.baseElevation = static_cast<float>(cell.z);
+                tile.height = 1.0f;
+                tile.model = cubeModel;
+            }
+            // Match the cart's authored orientation on its underlying rail.
+            if (tileTypeIsMinecart(type)) {
+                tile.modelRotationQuarterTurns = railOrientationQuarterTurns(
+                    input_.editor.documentPlateAt(cell).value_or(TileType::Air))
+                    .value_or(0);
+            }
+            tile.color = { color.x, color.y, color.z, 1.0f };
+            tile.pickable = false;
+            tile.showGrid = false;
+            tile.affectsCameraFit = false;
+            return tile;
+        };
+        const auto anchor = [](const RenderFrameData::Tile& tile) {
+            return Vec3 {
+                tile.position.x + tile.size.x * 0.5f,
+                tile.position.y + tile.size.y * 0.5f,
+                tile.baseElevation + tile.height,
+            };
+        };
+        const auto outline = [&](const RenderFrameData::Tile& tile) {
+            if (visible(tile.cell) &&
+                frame.debugItemOutlines.size() < RenderFrameData::tileCapacity &&
+                !std::ranges::any_of(frame.debugItemOutlines, [&](const auto& existing) {
+                    return existing.cell == tile.cell && existing.model == tile.model;
+                })) {
+                frame.debugItemOutlines.push_back(tile);
+            }
+        };
+        const auto connect = [&](const RenderFrameData::Tile& from,
+                                 const RenderFrameData::Tile& to) {
+            if (visible(from.cell) && visible(to.cell) &&
+                from.cell != to.cell &&
+                frame.debugItemLinks.size() <
+                    RenderFrameData::debugItemLinkCapacity) {
+                frame.debugItemLinks.push_back({
+                    .from = anchor(from), .to = anchor(to), .color = from.color,
+                });
+            }
+        };
+        // These are the editor's 8-bit color groups, including unsaved edits.
+        // Explicit device pressurePlates lists are rebuilt only when saving.
+        const auto groups = input_.editor.linkGroups();
+        for (const auto& group : groups) {
+            if (group.hasDevice() && !group.pressurePlates.empty()) {
+                for (GridPosition3 cell : group.pressurePlates) {
+                    outline(visualFor(cell, group.color, true));
+                }
+                const auto devices = [&](const auto& cells, bool coveredPlate) {
+                    for (GridPosition3 cell : cells) {
+                        const auto device = visualFor(cell, group.color, coveredPlate);
+                        outline(device);
+                        for (GridPosition3 plate : group.pressurePlates) {
+                            connect(visualFor(plate, group.color, true), device);
+                        }
+                    }
+                };
+                devices(group.gates, false);
+                devices(group.rotators, true);
+                devices(group.lockPlates, true);
+                devices(group.elevators, false);
+                devices(group.minecarts, false);
+            }
+            // Movable groups synchronize together; a star keeps large groups
+            // readable without inventing pressure-plate links to the objects.
+            if (group.objects.size() > 1) {
+                const auto first = visualFor(group.objects.front(), group.color, false);
+                for (GridPosition3 cell : group.objects) {
+                    const auto object = visualFor(cell, group.color, false);
+                    outline(object);
+                    connect(first, object);
+                }
+            }
+            if (group.portals.size() == 2) {
+                const auto first = visualFor(group.portals[0], group.color, false);
+                const auto second = visualFor(group.portals[1], group.color, false);
+                outline(first);
+                outline(second);
+                connect(first, second);
+            }
+        }
+
+        using Style = RenderFrameData::DebugItemLink::Style;
+        const auto segment = [&](GridPosition3 fromCell, GridPosition3 toCell,
+                                 Vec3 from, Vec3 to, Vec3 color, Style style) {
+            if (visible(fromCell) && visible(toCell) &&
+                frame.debugItemLinks.size() < RenderFrameData::debugItemLinkCapacity) {
+                frame.debugItemLinks.push_back({ from, to,
+                    { color.x, color.y, color.z, 1.0f }, style });
+            }
+        };
+        const auto stop = [&](GridPosition3 cell, Vec3 position, Vec3 color) {
+            segment(cell, cell, position, position, color, Style::Stop);
+        };
+        for (const auto& elevator : input_.editor.elevators()) {
+            if (!visible(elevator.cell) || elevator.levels.size() < 2) {
+                continue;
+            }
+            const auto platform = visualFor(elevator.cell, elevator.color, false);
+            outline(platform);
+            const auto point = [&](int layer) {
+                Vec3 result = anchor(platform);
+                result.z += static_cast<float>(layer - elevator.cell.z);
+                return result;
+            };
+            for (std::size_t index = 1; index < elevator.levels.size(); ++index) {
+                const int from = elevator.levels[index - 1];
+                const int to = elevator.levels[index];
+                segment({ elevator.cell.x, elevator.cell.y, from },
+                    { elevator.cell.x, elevator.cell.y, to }, point(from), point(to),
+                    elevator.color, Style::BidirectionalArrows);
+            }
+            for (int layer : elevator.levels) {
+                stop({ elevator.cell.x, elevator.cell.y, layer }, point(layer), elevator.color);
+            }
+        }
+        const auto railAt = [&](GridPosition3 cell) {
+            return input_.editor.documentPlateAt(cell).value_or(documentTileAt(cell));
+        };
+        for (const auto& cart : input_.editor.minecarts()) {
+            if (!visible(cart.cell)) {
+                continue;
+            }
+            const auto platform = visualFor(cart.cell, cart.color, false);
+            outline(platform);
+            Level::MinecartRoute route;
+            try {
+                route = Level::buildMinecartRoute(cart, railAt, "level editor debug view");
+            } catch (const std::runtime_error&) {
+                // An unfinished branching track is not a playable cycle yet.
+                // Keep the cart highlighted while its rails are being edited.
+                continue;
+            }
+            const auto point = [&](GridPosition3 cell) {
+                return Vec3 { static_cast<float>(cell.x) + 0.5f,
+                    static_cast<float>(cell.y) + 0.5f, anchor(platform).z };
+            };
+            if (route.stops.size() > 1) {
+                // A shuttle never travels beyond its last stop, even when
+                // connected rail continues farther. Loops use the whole track.
+                const std::size_t count = route.loop ? route.cells.size()
+                    : route.stopCellIndices.back() + 1;
+                const Style style = route.loop ? Style::Arrows : Style::BidirectionalArrows;
+                for (std::size_t index = 1; index < count; ++index) {
+                    const auto from = route.cells[index - 1];
+                    const auto to = route.cells[index];
+                    segment(from, to, point(from), point(to), cart.color, style);
+                }
+                if (route.loop) {
+                    const auto from = route.cells.back();
+                    const auto to = route.cells.front();
+                    segment(from, to, point(from), point(to), cart.color, style);
+                }
+            }
+            for (GridPosition3 cell : route.stops) {
+                stop(cell, point(cell), cart.color);
+            }
+        }
+
+        const auto occupied = [&](GridPosition3 cell) {
+            return pendingTileMoveSource() != cell && tileTypeOccupiesLevelCell(documentTileAt(cell));
+        };
+        const auto rayCell = [&](GridPosition3 cell) {
+            if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+                cell.x >= static_cast<int>(input_.editor.documentWidth()) ||
+                cell.y >= static_cast<int>(input_.editor.documentHeight()) ||
+                cell.z >= static_cast<int>(layerCount_)) {
+                return rules::TurretRayCell::Blocked;
+            }
+            const TileType type = documentTileAt(cell);
+            if (occupied(cell)) {
+                return rules::TurretRayCell::Occupied;
+            }
+            if (type == TileType::Gate) {
+                const auto gate = std::ranges::find(input_.editor.gates(), cell, &Level::Gate::cell);
+                if (gate != input_.editor.gates().end()) {
+                    const auto plates = input_.editor.linkedPressurePlates(gate->color);
+                    const bool pressed = !plates.empty() && std::ranges::all_of(plates, occupied);
+                    if (pressed != gate->startOpen) {
+                        return rules::TurretRayCell::Open;
+                    }
+                }
+                return rules::TurretRayCell::Blocked;
+            }
+            return type == TileType::Minecart || tileTypeAllowsEntity(type)
+                ? rules::TurretRayCell::Open : rules::TurretRayCell::Blocked;
+        };
+        const auto portalCrossing = [&](GridPosition3 cell, MoveDirection direction)
+            -> std::optional<Level::PortalCrossing> {
+            const TileType entrance = input_.editor.documentPlateAt(cell).value_or(TileType::Air);
+            const GridPosition incoming = rules::directionOffset(direction);
+            if (!tileTypeIsPortal(entrance) || portalEdgeOffset(entrance) != incoming) {
+                return std::nullopt;
+            }
+            for (const auto& group : groups) {
+                if (group.portals.size() != 2 ||
+                    std::ranges::find(group.portals, cell) == group.portals.end()) {
+                    continue;
+                }
+                const auto exit = group.portals[group.portals[0] == cell ? 1 : 0];
+                const TileType exitTile = input_.editor.documentPlateAt(exit).value_or(TileType::Air);
+                if (!tileTypeIsPortal(exitTile) || pendingTileMoveSource() == exit) {
+                    return std::nullopt;
+                }
+                const GridPosition edge = portalEdgeOffset(exitTile);
+                const GridPosition outgoing { -edge.x, -edge.y };
+                GridPosition rotated = incoming;
+                int turns = 0;
+                while (rotated != outgoing) {
+                    rotated = { -rotated.y, rotated.x };
+                    ++turns;
+                }
+                return Level::PortalCrossing { exit, outgoing, turns };
+            }
+            return std::nullopt;
+        };
+        for (uint32_t z = 0; z < layerCount_; ++z) {
+            for (uint32_t y = 0; y < input_.editor.documentHeight(); ++y) {
+                for (uint32_t x = 0; x < input_.editor.documentWidth(); ++x) {
+                    const GridPosition3 cell { static_cast<int>(x), static_cast<int>(y), static_cast<int>(z) };
+                    if (!visible(cell)) { continue; }
+                    const TileType type = documentTileAt(cell);
+                    if (const auto direction = rules::turretDirectionForTile(type)) {
+                        const Vec3 color = input_.editor.objectLinkColorAt(cell)
+                            .value_or(Vec3 { 1.0f, 0.25f, 0.12f });
+                        outline(visualFor(cell, color, false));
+                        std::vector<rules::TurretRaySegment> rays;
+                        rules::traceTurretRay(cell, *direction, std::nullopt, rayCell, portalCrossing, &rays);
+                        const auto point = [](GridPosition3 position, GridPosition edge) {
+                            return Vec3 { static_cast<float>(position.x) + 0.5f + edge.x * 0.5f,
+                                static_cast<float>(position.y) + 0.5f + edge.y * 0.5f,
+                                static_cast<float>(position.z) + config::turretMuzzleElevation };
+                        };
+                        for (std::size_t index = 0; index < rays.size(); ++index) {
+                            const auto& ray = rays[index];
+                            Vec3 from = point(ray.from, ray.fromEdge);
+                            if (index == 0) {
+                                const auto offset = rules::directionOffset(*direction);
+                                from.x += offset.x * config::turretMuzzleForwardOffset;
+                                from.y += offset.y * config::turretMuzzleForwardOffset;
+                            }
+                            segment(ray.from, ray.to, from, point(ray.to, ray.toEdge), color, Style::Sightline);
+                        }
+                    }
+                    const TileType plate = input_.editor.documentPlateAt(cell).value_or(type);
+                    if (const auto direction = rules::conveyorDirectionForTile(plate)) {
+                        constexpr Vec3 color { 0.22f, 0.70f, 1.0f };
+                        Vec3 from { static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f,
+                            static_cast<float>(z) + config::surfaceEntityHeight };
+                        const auto offset = rules::directionOffset(*direction);
+                        const Vec3 delta { offset.x * 0.38f, offset.y * 0.38f, 0.0f };
+                        segment(cell, cell, from - delta, from + delta, color, Style::Arrows);
+                    }
+                }
+            }
+        }
+    }
+#endif
+
     [[nodiscard]] std::optional<GridPosition3> pendingTileMoveSource() const
     {
         const std::optional<LevelEditor::MoveObject>& move =

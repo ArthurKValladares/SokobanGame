@@ -979,26 +979,32 @@ TileType railTileAt(const Level& level, GridPosition3 cell)
 }
 
 bool railsConnect(
-    const Level& level,
+    const std::function<TileType(GridPosition3)>& railAt,
     GridPosition3 from,
     uint8_t direction,
     GridPosition3 to)
 {
-    return (railConnectionMask(railTileAt(level, from)) &
+    return (railConnectionMask(railAt(from)) &
                railDirectionBit(direction)) != 0 &&
-        (railConnectionMask(railTileAt(level, to)) &
+        (railConnectionMask(railAt(to)) &
                oppositeRailDirectionBit(direction)) != 0;
 }
 
-Level::MinecartRoute buildMinecartRoute(
-    const Level& level,
+} // namespace
+
+Level::MinecartRoute Level::buildMinecartRoute(
     const Level::Minecart& minecart,
+    const std::function<TileType(GridPosition3)>& railAt,
     std::string_view sourceName)
 {
     Level::MinecartRoute route;
     route.cells.push_back(minecart.cell);
     route.stops.push_back(minecart.cell);
     route.stopCellIndices.push_back(0);
+
+    if (minecart.initialDirection >= 4) {
+        return route;
+    }
 
     const GridPosition firstOffset =
         railDirectionOffset(minecart.initialDirection);
@@ -1009,7 +1015,7 @@ Level::MinecartRoute buildMinecartRoute(
         minecart.cell.z,
     };
     if (!railsConnect(
-            level, minecart.cell, minecart.initialDirection, current)) {
+            railAt, minecart.cell, minecart.initialDirection, current)) {
         return route;
     }
 
@@ -1024,12 +1030,12 @@ Level::MinecartRoute buildMinecartRoute(
                 std::string(sourceName));
         }
         route.cells.push_back(current);
-        if (tileTypeIsRailStop(railTileAt(level, current))) {
+        if (tileTypeIsRailStop(railAt(current))) {
             route.stops.push_back(current);
             route.stopCellIndices.push_back(route.cells.size() - 1);
         }
 
-        const uint8_t connections = railConnectionMask(railTileAt(level, current));
+        const uint8_t connections = railConnectionMask(railAt(current));
         bool foundNext = false;
         GridPosition3 next {};
         for (uint8_t direction = 0; direction < 4; ++direction) {
@@ -1043,7 +1049,7 @@ Level::MinecartRoute buildMinecartRoute(
                 current.z,
             };
             if (candidate == previous ||
-                !railsConnect(level, current, direction, candidate)) {
+                !railsConnect(railAt, current, direction, candidate)) {
                 continue;
             }
             if (foundNext) {
@@ -1062,8 +1068,6 @@ Level::MinecartRoute buildMinecartRoute(
     }
     return route;
 }
-
-} // namespace
 
 Level Level::loadFromFile(const std::filesystem::path& path)
 {
@@ -1809,7 +1813,8 @@ Level Level::loadFromLayers(
             }
         }
         level.minecartRoutes_.push_back(
-            buildMinecartRoute(level, minecart, sourceName));
+            buildMinecartRoute(minecart,
+                [&](GridPosition3 cell) { return railTileAt(level, cell); }, sourceName));
     }
     for (uint32_t z = 0; z < level.depth_; ++z) {
         for (uint32_t y = 0; y < level.height_; ++y) {

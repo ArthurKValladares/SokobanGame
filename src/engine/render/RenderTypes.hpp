@@ -452,6 +452,17 @@ struct RenderFrameData {
         float width = 0.0f;
     };
 
+#if SOKOBAN_ENABLE_DEBUG_UI
+    struct DebugItemLink {
+        enum class Style { Dots, Arrows, BidirectionalArrows, Sightline, Stop };
+        Vec3 from {};
+        Vec3 to {};
+        Vec4 color {};
+        Style style = Style::Dots;
+    };
+    static constexpr std::size_t debugItemLinkCapacity = 65536;
+#endif
+
     struct OutputTransform {
         float exposureEv = defaultExposureEv;
         TonemapCurve curve = TonemapCurve::PbrNeutral;
@@ -540,6 +551,12 @@ struct RenderFrameData {
     FrameArray<IsoFace> isoFaces;
     FrameArray<Particle> particles;
     FrameArray<OverworldFogVolume> overworldFogVolumes;
+#if SOKOBAN_ENABLE_DEBUG_UI
+    // Separate draw-only geometry: it never participates in picking, camera
+    // fitting, shadows or gameplay. Allocated only when the visualizer is on.
+    FrameArray<Tile> debugItemOutlines;
+    FrameArray<DebugItemLink> debugItemLinks;
+#endif
     GroundSplatTextures groundSplat {};
     std::array<GroundSplatRegion, groundSplatRegionCapacity>
         groundSplatRegions {};
@@ -577,7 +594,13 @@ struct RenderFrameData {
         arenaBytesFor<RenderFrameData::Particle>(
             RenderFrameData::particleCapacity) +
         arenaBytesFor<RenderFrameData::OverworldFogVolume>(
-            RenderFrameData::overworldFogVolumeCapacity);
+            RenderFrameData::overworldFogVolumeCapacity)
+#if SOKOBAN_ENABLE_DEBUG_UI
+        + arenaBytesFor<RenderFrameData::Tile>(RenderFrameData::tileCapacity)
+        + arenaBytesFor<RenderFrameData::DebugItemLink>(
+            RenderFrameData::debugItemLinkCapacity)
+#endif
+        ;
 }
 
 struct RenderPhaseTiming {

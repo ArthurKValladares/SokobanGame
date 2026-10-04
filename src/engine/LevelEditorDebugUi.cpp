@@ -226,6 +226,13 @@ void LevelEditorDebugUi::draw(
 
     ImGui::Separator();
     ImGui::Text("View: %s", editor.editingDocument() ? "editing draft" : editor.playingDraft() ? "playing draft" : "current screen");
+    ImGui::Checkbox("Show Debug View", &showDebugView_);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Shared-color outlines and dotted links; elevator stops and cart cycles; "
+            "turret sightlines and conveyor directions.\n"
+            "Arrows show travel direction; circles mark stops. Hidden layers follow the layer lock.");
+    }
     ImGui::BeginDisabled(editor.editingOverworld());
     const bool widthChanged = ImGui::InputInt("Width", &requestedWidth_);
     const bool heightChanged = ImGui::InputInt("Height", &requestedHeight_);

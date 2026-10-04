@@ -18,6 +18,7 @@
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/RotatorVisuals.hpp"
 #include "engine/render/CameraConfig.hpp"
+#include "engine/render/IsoScenePreparer.hpp"
 #include "engine/render/MirrorConfig.hpp"
 
 #include <algorithm>
@@ -2027,6 +2028,208 @@ void testEditorDrawsPlatesBeneathTheirOccupants()
     CHECK(end != frame.tiles.end() && !end->pickable);
 }
 
+#if SOKOBAN_ENABLE_DEBUG_UI
+void testEditorLinkedItemVisualization()
+{
+    TEST("editorLinkedItemVisualization");
+    LevelEditor editor;
+    editor.newDocument(6, 2, false);
+    editor.addLayerAbove();
+    editor.setLayerLocked(false);
+    const Vec3 color { 0.2f, 0.6f, 0.9f };
+    const Vec3 otherColor { 0.9f, 0.3f, 0.1f };
+    editor.setActiveLinkColor(color);
+    CHECK(editor.setCell({ 0, 0, 1 }, TileType::PressurePlate));
+    CHECK(editor.setCell({ 0, 0, 1 }, TileType::Rock));
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::PressurePlate));
+    CHECK(editor.setCell({ 2, 0, 1 }, TileType::Gate));
+    CHECK(editor.setCell({ 3, 0, 1 }, TileType::RotatorClockwise));
+    CHECK(editor.setCell({ 3, 0, 1 }, TileType::Rock));
+    CHECK(editor.setCell({ 4, 0, 1 }, TileType::LockPlate));
+    CHECK(editor.setCell({ 5, 0, 2 }, TileType::Elevator));
+    CHECK(editor.setCell({ 0, 1, 1 }, TileType::Rock));
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::Rock));
+    CHECK(editor.setLinkColor({ 0, 1, 1 }, color));
+    CHECK(editor.setLinkColor({ 1, 1, 1 }, color));
+    editor.setActiveLinkColor(otherColor);
+    CHECK(editor.setCell({ 4, 1, 1 }, TileType::Gate));
+    CHECK(editor.setCell({ 5, 1, 1 }, TileType::PressurePlate));
+    CHECK(editor.setLinkColor({ 5, 1, 1 }, { 0.3f, 0.9f, 0.3f }));
+
+    const AssetManifest& manifest = testManifest();
+    const auto build = [&](bool enabled) {
+        return RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = editor, .settings = {},
+            .showDebugView = enabled,
+        });
+    };
+    const auto disabled = build(false);
+    CHECK(disabled.debugItemOutlines.empty());
+    CHECK(disabled.debugItemLinks.empty());
+    const auto enabled = build(true);
+    CHECK(std::ranges::equal(disabled.tiles, enabled.tiles));
+    CHECK(enabled.debugItemOutlines.size() == 8);
+    CHECK(enabled.debugItemLinks.size() == 9);
+    for (const auto& outline : enabled.debugItemOutlines) {
+        CHECK(LevelEditor::sameLinkColor(xyz(outline.color), color));
+        CHECK(!outline.pickable && !outline.affectsCameraFit);
+    }
+    const auto covered = std::ranges::find(
+        enabled.debugItemOutlines, GridPosition3 { 0, 0, 1 },
+        &RenderFrameData::Tile::cell);
+    CHECK(covered != enabled.debugItemOutlines.end());
+    CHECK(covered->model == manifest.modelForTile(TileType::PressurePlate));
+    const auto rotator = std::ranges::find(
+        enabled.debugItemOutlines, GridPosition3 { 3, 0, 1 },
+        &RenderFrameData::Tile::cell);
+    CHECK(rotator != enabled.debugItemOutlines.end());
+    CHECK(rotator->model == manifest.modelForTile(TileType::RotatorClockwise));
+    CHECK(std::ranges::count_if(enabled.debugItemLinks, [](const auto& link) {
+        return link.to.z > 2.5f;
+    }) == 2);
+    const auto gate = std::ranges::find(
+        enabled.debugItemOutlines, GridPosition3 { 2, 0, 1 },
+        &RenderFrameData::Tile::cell);
+    CHECK(gate != enabled.debugItemOutlines.end());
+    CHECK(near(gate->height, 1.0f));
+    CHECK(std::ranges::count_if(enabled.debugItemLinks, [](const auto& link) {
+        return near(link.to.x, 2.5f) && near(link.to.y, 0.5f) && near(link.to.z, 2.0f);
+    }) == 2);
+    for (const auto& link : enabled.debugItemLinks) {
+        CHECK(LevelEditor::sameLinkColor(xyz(link.color), color));
+        for (Vec3 endpoint : { link.from, link.to }) {
+            CHECK(std::ranges::any_of(enabled.debugItemOutlines, [&](const auto& outline) {
+                return near(endpoint.x, outline.position.x + outline.size.x * 0.5f) &&
+                    near(endpoint.y, outline.position.y + outline.size.y * 0.5f) &&
+                    near(endpoint.z, outline.baseElevation + outline.height);
+            }));
+        }
+    }
+    IsoScenePreparer preparer;
+    PreparedRenderScene scene;
+    preparer.prepare(enabled, { 1280.0f, 720.0f }, scene);
+    CHECK(scene.hasTranslucentContent);
+    const auto picks = scene.pickFaceIndices.size();
+    preparer.prepare(disabled, { 1280.0f, 720.0f }, scene);
+    CHECK(scene.pickFaceIndices.size() == picks);
+
+    FrameArena arena("linked item visualization test", renderFrameArenaBytes());
+    const auto arenaFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = {},
+        .showDebugView = true,
+    }, arena);
+    CHECK(std::ranges::equal(arenaFrame.debugItemLinks, enabled.debugItemLinks,
+        [](const auto& left, const auto& right) {
+            return left.from == right.from && left.to == right.to && left.color == right.color;
+        }));
+    editor.setActiveLayer(1);
+    editor.setLayerLocked(true);
+    CHECK(build(true).debugItemLinks.size() == 7);
+    editor.setLayerLocked(false);
+    CHECK(editor.setLinkColor({ 2, 0, 1 }, otherColor));
+    CHECK(build(true).debugItemLinks.size() == 7);
+}
+
+void testEditorDebugRoutesAndSightlines()
+{
+    TEST("editorDebugRoutesAndSightlines");
+    using Style = RenderFrameData::DebugItemLink::Style;
+    LevelEditor editor;
+    editor.newDocument(8, 5, false);
+    editor.addLayerAbove();
+    editor.addLayerAbove();
+    editor.setLayerLocked(false);
+    const Vec3 cycleColor { 0.2f, 0.8f, 0.4f };
+    editor.setActiveLinkColor(cycleColor);
+    CHECK(editor.setCell({ 7, 4, 1 }, TileType::Elevator));
+    CHECK(editor.setElevatorLevels(0, { 1, 3, 2 }));
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::RailStopEastWest));
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::Minecart));
+    CHECK(editor.minecarts()[0].initialDirection == 1);
+    CHECK(editor.setCell({ 0, 0, 1 }, TileType::RailStopEastWest));
+    CHECK(editor.setCell({ 2, 0, 1 }, TileType::RailStraightEastWest));
+    CHECK(editor.setCell({ 3, 0, 1 }, TileType::RailStopEastWest));
+    CHECK(editor.setCell({ 4, 0, 1 }, TileType::RailStraightEastWest));
+    CHECK(editor.setCell({ 5, 0, 1 }, TileType::RailStraightEastWest));
+    CHECK(editor.setCell({ 1, 2, 1 }, TileType::RailStopEastWest));
+    CHECK(editor.setCell({ 1, 2, 1 }, TileType::Minecart));
+    CHECK(editor.minecarts()[1].initialDirection == 1);
+    CHECK(editor.setCell({ 2, 2, 1 }, TileType::RailCornerSouthWest));
+    CHECK(editor.setCell({ 2, 3, 1 }, TileType::RailStopNorthSouth));
+    CHECK(editor.setCell({ 2, 4, 1 }, TileType::RailCornerNorthWest));
+    CHECK(editor.setCell({ 1, 4, 1 }, TileType::RailStopEastWest));
+    CHECK(editor.setCell({ 0, 4, 1 }, TileType::RailCornerNorthEast));
+    CHECK(editor.setCell({ 0, 3, 1 }, TileType::RailStraightNorthSouth));
+    CHECK(editor.setCell({ 0, 2, 1 }, TileType::RailCornerSouthEast));
+    editor.setActiveLinkColor({ 0.8f, 0.2f, 0.9f });
+    CHECK(editor.setCell({ 3, 2, 1 }, TileType::TurretEast));
+    CHECK(editor.setCell({ 4, 2, 1 }, TileType::PortalEast));
+    CHECK(editor.setCell({ 6, 3, 1 }, TileType::PortalSouth));
+    CHECK(editor.setCell({ 6, 1, 1 }, TileType::Rock));
+    CHECK(editor.setCell({ 5, 4, 1 }, TileType::ConveyorLeft));
+    const auto build = [&] {
+        return RenderFrameBuilder::buildEditor({
+            .manifest = testManifest(), .editor = editor, .settings = {},
+            .showDebugView = true,
+        });
+    };
+    const auto frame = build();
+    CHECK(std::ranges::count(frame.debugItemLinks, Style::Stop,
+        &RenderFrameData::DebugItemLink::style) == 8);
+    CHECK(std::ranges::count(frame.debugItemLinks, Style::BidirectionalArrows,
+        &RenderFrameData::DebugItemLink::style) == 4);
+    CHECK(std::ranges::count(frame.debugItemLinks, Style::Arrows,
+        &RenderFrameData::DebugItemLink::style) == 9); // eight loop edges + conveyor
+    const auto elevatorLeg = std::ranges::find_if(frame.debugItemLinks, [](const auto& link) {
+        return link.style == Style::BidirectionalArrows && near(link.from.x, 7.5f);
+    });
+    CHECK(elevatorLeg != frame.debugItemLinks.end());
+    CHECK(near(elevatorLeg->from.z, 2.0f) && near(elevatorLeg->to.z, 4.0f));
+    CHECK(std::ranges::none_of(frame.debugItemLinks, [](const auto& link) {
+        return link.style == Style::BidirectionalArrows && near(link.from.y, 0.5f) &&
+            (link.from.x < 1.5f || link.to.x > 3.5f);
+    })); // selected branch only, no travel past the final stop
+    CHECK(editor.setMinecartInitialDirection(0, 3));
+    const auto west = build();
+    CHECK(std::ranges::count(west.debugItemLinks, Style::BidirectionalArrows,
+        &RenderFrameData::DebugItemLink::style) == 3);
+    CHECK(std::ranges::any_of(west.debugItemLinks, [](const auto& link) {
+        return link.style == Style::BidirectionalArrows && near(link.from.y, 0.5f) &&
+            near(link.from.x, 1.5f) && near(link.to.x, 0.5f);
+    }));
+    CHECK(editor.setMinecartInitialDirection(0, 1));
+    std::vector<RenderFrameData::DebugItemLink> rays;
+    for (const auto& link : frame.debugItemLinks) {
+        if (link.style == Style::Sightline) { rays.push_back(link); }
+    }
+    CHECK(rays.size() == 2);
+    CHECK(near(rays[0].from.x, 3.5f + config::turretMuzzleForwardOffset));
+    CHECK(near(rays[0].to.x, 5.0f) && near(rays[0].to.y, 2.5f));
+    CHECK(near(rays[1].from.x, 6.5f) && near(rays[1].from.y, 4.0f));
+    CHECK(near(rays[1].to.x, 6.5f) && near(rays[1].to.y, 1.5f));
+    CHECK(editor.setCell({ 4, 2, 1 }, TileType::Rock)); // covered entrance blocks traversal
+    auto blocked = build();
+    CHECK(std::ranges::count(blocked.debugItemLinks, Style::Sightline,
+        &RenderFrameData::DebugItemLink::style) == 1);
+    CHECK(editor.setCell({ 4, 2, 1 }, TileType::Air)); // uncover portal
+    CHECK(editor.setCell({ 6, 1, 1 }, TileType::Wall));
+    blocked = build();
+    const auto wallRay = std::ranges::find_if(blocked.debugItemLinks, [](const auto& link) {
+        return link.style == Style::Sightline && near(link.from.x, 6.5f);
+    });
+    CHECK(wallRay != blocked.debugItemLinks.end());
+    CHECK(near(wallRay->to.y, 2.0f)); // stop at the near wall face
+    editor.setActiveLayer(1);
+    editor.setLayerLocked(true);
+    const auto locked = build();
+    CHECK(std::ranges::count(locked.debugItemLinks, Style::Stop,
+        &RenderFrameData::DebugItemLink::style) == 6);
+    CHECK(std::ranges::all_of(locked.debugItemLinks, [](const auto& link) {
+        return link.from.z <= 2.0f && link.to.z <= 2.0f;
+    }));
+}
+#endif
+
 void testRotatedEnemyFacesHeroAgainOnNextAction()
 {
     TEST("rotatedEnemyFacesHeroAgainOnNextAction");
@@ -3814,6 +4017,10 @@ int main()
     testTurnedHeroFacesItsNewDirectionSmoothly();
     testMirrorOnPlatesDrawsPlateAndTurns();
     testEditorDrawsPlatesBeneathTheirOccupants();
+#if SOKOBAN_ENABLE_DEBUG_UI
+    testEditorLinkedItemVisualization();
+    testEditorDebugRoutesAndSightlines();
+#endif
     testRotatedEnemyFacesHeroAgainOnNextAction();
     testEditorFrameProvidesInvisibleExpansionBorderAndPreview();
     testEditorFrameShowsReadOnlyOverworldNeighbors();
