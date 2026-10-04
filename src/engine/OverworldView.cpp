@@ -176,7 +176,7 @@ OverworldView calculateOverworldView(
     if (destination == nullptr) {
         return view;
     }
-    view.destinationScreen = *projectedOwner;
+    view.destinationScreen = projectedOwner;
     view.transitionProgress = playerTransitionProgress(
         committedState, projectedState, primaryPlayerRenderPosition);
     view.cameraOffset = {

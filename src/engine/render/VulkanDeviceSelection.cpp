@@ -41,6 +41,9 @@ VulkanFeatureTierRejection featureTierRejection(
     if (!support.synchronization2) {
         return VulkanFeatureTierRejection::Synchronization2;
     }
+    if (!support.shaderDemoteToHelperInvocation) {
+        return VulkanFeatureTierRejection::ShaderDemoteToHelperInvocation;
+    }
     if (!support.imageCubeArray) {
         return VulkanFeatureTierRejection::ImageCubeArray;
     }
@@ -203,6 +206,8 @@ std::string_view vulkanFeatureTierRejectionMessage(
         return "requires dynamicRendering";
     case VulkanFeatureTierRejection::Synchronization2:
         return "requires synchronization2";
+    case VulkanFeatureTierRejection::ShaderDemoteToHelperInvocation:
+        return "requires shaderDemoteToHelperInvocation for fragment discard";
     case VulkanFeatureTierRejection::ImageCubeArray:
         return "requires imageCubeArray";
     case VulkanFeatureTierRejection::ExtendedDynamicState:

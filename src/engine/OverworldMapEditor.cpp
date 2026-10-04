@@ -479,8 +479,8 @@ bool OverworldMapEditor::save()
         return false;
     }
     if (selected && screen(*selected)) {
-        state_.selected = *selected;
-        savedState_.selected = *selected;
+        state_.selected = selected;
+        savedState_.selected = selected;
     }
     status_ = "Saved and validated the complete overworld project.";
     return true;

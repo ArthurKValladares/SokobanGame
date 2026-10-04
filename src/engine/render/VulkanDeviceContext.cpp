@@ -458,6 +458,9 @@ void VulkanDeviceContext::createDevice()
     VkPhysicalDeviceVulkan13Features vulkan13 {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
         .pNext = &extendedDynamicState,
+        // glslc can lower GLSL discard to OpDemoteToHelperInvocation for the
+        // Vulkan 1.3 target. Supported features must also be enabled here.
+        .shaderDemoteToHelperInvocation = VK_TRUE,
         .synchronization2 = VK_TRUE,
         .dynamicRendering = VK_TRUE,
     };
@@ -703,6 +706,8 @@ VulkanDeviceFeatureSupport VulkanDeviceContext::queryFeatureSupport(
             properties.limits.maxDescriptorSetSamplers,
         .dynamicRendering = vulkan13.dynamicRendering == VK_TRUE,
         .synchronization2 = vulkan13.synchronization2 == VK_TRUE,
+        .shaderDemoteToHelperInvocation =
+            vulkan13.shaderDemoteToHelperInvocation == VK_TRUE,
         .imageCubeArray = features.features.imageCubeArray == VK_TRUE,
         .extendedDynamicState =
             extendedDynamicState.extendedDynamicState == VK_TRUE,

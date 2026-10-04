@@ -22,6 +22,7 @@ struct VulkanDeviceFeatureSupport {
     uint32_t maxDescriptorSetSamplers = 0;
     bool dynamicRendering = false;
     bool synchronization2 = false;
+    bool shaderDemoteToHelperInvocation = false;
     bool imageCubeArray = false;
     bool extendedDynamicState = false;
     bool runtimeDescriptorArray = false;
@@ -43,6 +44,7 @@ enum class VulkanFeatureTierRejection : uint8_t {
     DescriptorSetSamplerCapacity,
     DynamicRendering,
     Synchronization2,
+    ShaderDemoteToHelperInvocation,
     ImageCubeArray,
     ExtendedDynamicState,
     RuntimeDescriptorArray,

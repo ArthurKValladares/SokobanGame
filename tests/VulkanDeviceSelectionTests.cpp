@@ -48,6 +48,7 @@ sokoban::VulkanDeviceFeatureSupport releaseFeatureSupport()
         .maxDescriptorSetSamplers = 32,
         .dynamicRendering = true,
         .synchronization2 = true,
+        .shaderDemoteToHelperInvocation = true,
         .imageCubeArray = true,
         .extendedDynamicState = true,
         .runtimeDescriptorArray = true,
@@ -258,6 +259,18 @@ int main()
     missingBaselineFeature.extendedDynamicState = false;
     CHECK_MESSAGE(!chooseReleaseTier(missingBaselineFeature).releaseCompatible,
         "ordinary draw-path features remain required for release");
+
+    auto missingDemoteFeature = releaseFeatureSupport();
+    missingDemoteFeature.shaderDemoteToHelperInvocation = false;
+    const auto missingDemoteTier = chooseReleaseTier(missingDemoteFeature);
+    CHECK_MESSAGE(!missingDemoteTier.releaseCompatible &&
+            missingDemoteTier.rejection ==
+                sokoban::VulkanFeatureTierRejection::ShaderDemoteToHelperInvocation,
+        "fragment discard support is checked before creating shader modules");
+    CHECK_MESSAGE(sokoban::vulkanFeatureTierRejectionMessage(
+            missingDemoteTier.rejection).find("shaderDemoteToHelperInvocation") !=
+            std::string_view::npos,
+        "an unsupported shader capability produces an actionable device diagnostic");
 
     auto insufficientLimits = releaseFeatureSupport();
     insufficientLimits.maxPerStageDescriptorSampledImages =

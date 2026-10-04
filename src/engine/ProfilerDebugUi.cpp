@@ -642,7 +642,10 @@ void ProfilerDebugUi::draw(const VulkanRenderer& renderer)
                 "Vulkan heaps",
                 5,
                 ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
-                    ImGuiTableFlags_SizingStretchProp)) {
+                    // A new docked tab can have zero measured column widths.
+                    // Equal weights avoid the proportional sizing 0/0 on
+                    // that first frame, before headers have been measured.
+                    ImGuiTableFlags_SizingStretchSame)) {
             ImGui::TableSetupColumn("Heap");
             ImGui::TableSetupColumn("Type");
             ImGui::TableSetupColumn("Usage");

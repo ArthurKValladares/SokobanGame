@@ -1353,7 +1353,7 @@ Level::Definition Level::parseDefinition(
                     "Layer headers must be sequential, starting with '@layer 0': " + source);
             }
             definition.layers.emplace_back();
-            currentLayer = *layer;
+            currentLayer = layer;
             continue;
         }
 
@@ -1737,7 +1737,7 @@ Level Level::loadFromLayers(
                     covered != level.coveredPlates_.end()
                     ? std::optional<TileType>(covered->tile)
                     : (tileTypeIsPlate(*tile)
-                            ? std::optional<TileType>(*tile)
+                            ? tile
                             : std::nullopt);
                 level.tiles_[tileIndex(x, y, z, level.width_, level.height_)] =
                     tileTypeOccupiesLevelCell(*tile)

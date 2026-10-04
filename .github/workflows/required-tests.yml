@@ -228,6 +228,10 @@ jobs:
           echo "CMAKE_PREFIX_PATH=${sdk}:${sdk}/lib/VulkanLoader" >> "${GITHUB_ENV}"
           echo "${sdk}/bin" >> "${GITHUB_PATH}"
 
+      - name: Select lavapipe and validation layers
+        if: matrix.requires_vulkan
+        run: bash tools/configure_ci_vulkan.sh
+
       # sokoban_core does not link Vulkan, and CMake enforces that only by
       # omission - so a core file that reaches vulkan.h through a header fails
       # at compile time with "cannot open source file", and only in a build
@@ -261,30 +265,13 @@ jobs:
           ./${{ matrix.build_dir }}/sokoban_player_profile_fuzz
           -max_len=65536 -max_total_time=60 -print_final_stats=1
 
-      # The only step that exercises swapchain, pipelines, descriptors, the
-      # shadow and SSAO passes and real draws. Everything above it either does
-      # not link Vulkan or stops at device creation.
+      # CTest covers device startup and a short validation-teardown run. This
+      # longer run crosses the asset-publication ramp and exercises swapchain,
+      # pipelines, descriptors, shadows, SSAO, and real draws in steady state.
       - name: Render frames under validation
         if: matrix.run_smoke
-        env:
-          # Pin lavapipe explicitly. Left to its own devices the loader may
-          # find another ICD on the runner image, and "which driver ran" is
-          # something a render gate should state rather than discover.
-          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         run: |
           set -euo pipefail
-          test -f "${VK_DRIVER_FILES}" \
-            || { echo "::error::lavapipe ICD manifest missing; is mesa-vulkan-drivers installed?"; exit 1; }
-
-          # The SDK loader is first on LD_LIBRARY_PATH, so point it at the
-          # SDK's own layer manifests rather than mixing in the apt package's.
-          layer_dir="${VULKAN_SDK}/share/vulkan/explicit_layer.d"
-          if [ ! -f "${layer_dir}/VkLayer_khronos_validation.json" ]; then
-            layer_dir=/usr/share/vulkan/explicit_layer.d
-          fi
-          test -f "${layer_dir}/VkLayer_khronos_validation.json" \
-            || { echo "::error::VK_LAYER_KHRONOS_validation manifest not found"; exit 1; }
-          export VK_LAYER_PATH="${layer_dir}"
           echo "Using ICD ${VK_DRIVER_FILES} and layers ${VK_LAYER_PATH}"
 
           # A throwaway profile directory: a smoke run writes a checkpoint on
@@ -296,7 +283,7 @@ jobs:
           # silent pass; the binary exits non-zero if validation reports
           # anything, so no log grepping is involved.
           xvfb-run --auto-servernum \
-            ./${{ matrix.build_dir }}/sokoban \
+            ./${{ matrix.build_dir }}/${{ matrix.build_type }}/sokoban \
               --smoke-frames "${SMOKE_FRAMES}" \
               --require-validation \
               --save-directory "${saves}"
