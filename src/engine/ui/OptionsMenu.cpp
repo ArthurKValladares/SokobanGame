@@ -116,7 +116,7 @@ constexpr std::array bindingRows {
     BindingRow {
         OptionsMenuRowId::ConfirmInteract,
         InputAction::MenuConfirm,
-        "Confirm / Interact",
+        "Confirm / Activate",
     },
     BindingRow {
         OptionsMenuRowId::PreviewScreen,

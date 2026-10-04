@@ -7,7 +7,7 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
 
 ## Current Features
 
-- Layered Sokoban movement with rocks, pressure-plate gates, rotator
+- Layered Sokoban movement with rocks, pressure-plate gates, pulse buttons, rotator
   plates and elevators, goals, undo, restart, multi-screen levels, and completion tracking.
 - Ice, ladders, conveyors, falling, configurable water layers, and four
   directional mirror types that can reflect players and movable units.
@@ -39,6 +39,15 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
   framing.
 - Colored point lights attachable to mesh decorations, with per-light local
   offset, intensity, range, and omnidirectional shadows that add to the sun.
+
+## Controls
+
+Space is Activate: it pulses every button occupied by a living hero and
+activates all eligible mirrors together, across all characters and copies.
+Buttons use `b` in screen grids (or `@plate ... b` beneath a starting unit),
+and share the pressure plates' link colors. A pulse triggers linked rotators,
+elevators and minecarts once per press; gates receive input through the next
+game step and then close, using their normal obstruction and crushing rules.
 
 ## Requirements
 

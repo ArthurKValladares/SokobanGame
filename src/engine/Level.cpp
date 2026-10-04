@@ -1743,7 +1743,7 @@ Level Level::loadFromLayers(
                     tileTypeOccupiesLevelCell(*tile)
                     ? plate.value_or(TileType::Air)
                     : *tile;
-                if (plate == TileType::PressurePlate) {
+                if (tileTypeIsSignalSource(plate.value_or(TileType::Air))) {
                     level.pressurePlates_.push_back(position);
                 }
                 if (plate == TileType::End) {
@@ -1796,9 +1796,9 @@ Level Level::loadFromLayers(
                 "Gate metadata cell must contain a Gate tile: " + source);
         }
         for (GridPosition3 plate : gate.pressurePlates) {
-            if (level.plateAt(plate) != TileType::PressurePlate) {
+            if (!tileTypeIsSignalSource(level.plateAt(plate).value_or(TileType::Air))) {
                 throw std::runtime_error(
-                    "Gate links must refer to Pressure tiles: " + source);
+                    "Gate links must refer to Pressure or Button tiles: " + source);
             }
         }
     }
@@ -1809,9 +1809,9 @@ Level Level::loadFromLayers(
                 "Rotator metadata cell must contain a Rotator tile: " + source);
         }
         for (GridPosition3 plate : rotator.pressurePlates) {
-            if (level.plateAt(plate) != TileType::PressurePlate) {
+            if (!tileTypeIsSignalSource(level.plateAt(plate).value_or(TileType::Air))) {
                 throw std::runtime_error(
-                    "Rotator links must refer to Pressure tiles: " + source);
+                    "Rotator links must refer to Pressure or Button tiles: " + source);
             }
         }
     }
@@ -1822,9 +1822,9 @@ Level Level::loadFromLayers(
                 "LockPlate metadata cell must contain a LockPlate tile: " + source);
         }
         for (GridPosition3 plate : lockPlate.pressurePlates) {
-            if (level.plateAt(plate) != TileType::PressurePlate) {
+            if (!tileTypeIsSignalSource(level.plateAt(plate).value_or(TileType::Air))) {
                 throw std::runtime_error(
-                    "LockPlate links must refer to Pressure tiles: " + source);
+                    "LockPlate links must refer to Pressure or Button tiles: " + source);
             }
         }
     }
@@ -1845,9 +1845,9 @@ Level Level::loadFromLayers(
             }
         }
         for (GridPosition3 plate : elevator.pressurePlates) {
-            if (level.plateAt(plate) != TileType::PressurePlate) {
+            if (!tileTypeIsSignalSource(level.plateAt(plate).value_or(TileType::Air))) {
                 throw std::runtime_error(
-                    "Elevator links must refer to Pressure tiles: " + source);
+                    "Elevator links must refer to Pressure or Button tiles: " + source);
             }
         }
     }
@@ -1873,9 +1873,9 @@ Level Level::loadFromLayers(
                 source);
         }
         for (GridPosition3 plate : minecart.pressurePlates) {
-            if (level.plateAt(plate) != TileType::PressurePlate) {
+            if (!tileTypeIsSignalSource(level.plateAt(plate).value_or(TileType::Air))) {
                 throw std::runtime_error(
-                    "Minecart links must refer to Pressure tiles: " + source);
+                    "Minecart links must refer to Pressure or Button tiles: " + source);
             }
         }
         level.minecartRoutes_.push_back(

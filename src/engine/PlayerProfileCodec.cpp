@@ -286,7 +286,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
 {
     rejectUnknownProperties(
         value,
-        { "players", "movables", "enemies", "turnedMirrors", "elevators", "minecarts" },
+        { "players", "movables", "enemies", "turnedMirrors", "elevators", "minecarts", "activeButtons" },
         context);
     GameState state;
     const Json& players = requiredProperty(value, "players", context);
@@ -465,6 +465,19 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
             });
         }
     }
+    if (value.contains("activeButtons")) {
+        const Json& buttons = value["activeButtons"];
+        if (!buttons.is_array()) {
+            fail(context, "property 'activeButtons' must be an array");
+        }
+        for (const Json& button : buttons) {
+            const GridPosition3 cell = positionFromJson(button, context);
+            if (std::ranges::find(state.activeButtons, cell) != state.activeButtons.end()) {
+                fail(context, "duplicate active button");
+            }
+            state.activeButtons.push_back(cell);
+        }
+    }
     return state;
 }
 
@@ -555,6 +568,13 @@ OrderedJson gameStateToJson(const GameState& state)
             });
         }
         result["minecarts"] = std::move(minecarts);
+    }
+    if (!state.activeButtons.empty()) {
+        OrderedJson buttons = OrderedJson::array();
+        for (const GridPosition3 cell : state.activeButtons) {
+            buttons.push_back(positionToJson(cell));
+        }
+        result["activeButtons"] = std::move(buttons);
     }
     return result;
 }

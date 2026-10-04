@@ -113,6 +113,14 @@ PackedStateKey makePackedStateKey(
                 minecart.cell.z, static_cast<std::uint32_t>(minecart.phase)));
         }
     }
+    if (!state.activeButtons.empty()) {
+        words.push_back(0xB0770A02U);
+        words.push_back(state.activeButtons.size());
+        for (const GridPosition3 button : state.activeButtons) {
+            words.push_back(packPair(button.x, button.y));
+            words.push_back(packZAndFlags(button.z, 0));
+        }
+    }
     return PackedStateKey(std::move(words));
 }
 

@@ -94,6 +94,73 @@ void testMoveCommitsAfterAnimation()
     CHECK(session.completedActionCount() == 1);
 }
 
+void testActivateButtonsAndMirrorsIsOneUndoableRestorableAction()
+{
+    TEST("activateButtonsAndMirrorsIsOneUndoableRestorableAction");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "...........", "...........", "...........", "...........", "..........." },
+            { "  Q     K  ", "           ", "  1     2  ", "           ", "     G     " },
+        },
+        .gates = { { .cell = cell(5, 4, 1),
+                     .pressurePlates = { cell(2, 0, 1), cell(8, 0, 1) } } },
+        .plates = { { cell(2, 0, 1), TileType::Button },
+                    { cell(8, 0, 1), TileType::Button } },
+    }, "session simultaneous Activate");
+    GameplaySession session;
+    session.reset(level);
+    const GameState before = session.state();
+    session.queueActivate();
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 1);
+    CHECK(session.activeAction().after.activeButtons.size() == 2);
+    CHECK(session.activeAction().after.players[0].cell == cell(0, 2, 1));
+    CHECK(session.activeAction().after.players[1].cell == cell(10, 2, 1));
+    finishAction(session);
+    const GameState pressed = session.state();
+    CHECK(session.undoCount() == 1);
+    CHECK(session.mirrorActivationSequence() == 1);
+    CHECK(session.playerMoveCount() == 0);
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == pressed);
+    session.queueMove(MoveDirection::Down);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().activeButtons.empty());
+    CHECK(!rules::isGateOpen(level, session.state(), level.gates()[0]));
+    CHECK(restored.restore(level, session.snapshot()));
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state() == pressed);
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state() == before);
+
+    // A button-only activation still creates a saveable action without
+    // emitting mirror-specific particles or sounds.
+    const Level buttonOnly = Level::loadFromDefinition({
+        .layers = { { "...." }, { "Q  G" } },
+        .gates = { { .cell = cell(3, 0, 1),
+                     .pressurePlates = { cell(0, 0, 1) } } },
+        .plates = { { cell(0, 0, 1), TileType::Button } },
+    }, "button only Activate");
+    session.reset(buttonOnly);
+    session.queueActivate();
+    CHECK(session.tryStartNextAction(buttonOnly, {}));
+    finishAction(session);
+    CHECK(session.mirrorActivationSequence() == 0);
+    CHECK(session.state().activeButtons.size() == 1);
+    CHECK(restored.restore(buttonOnly, session.snapshot()));
+    session.queueActivate();
+    CHECK(session.tryStartNextAction(buttonOnly, {}));
+    finishAction(session);
+    CHECK(session.undoCount() == 2);
+    CHECK(restored.restore(buttonOnly, session.snapshot()));
+}
+
 void testAuthoredHeroesMoveIndependentlyAndCycleInPlacementOrder()
 {
     TEST("authoredHeroesMoveIndependentlyAndCycleInPlacementOrder");
@@ -1406,6 +1473,7 @@ void testLegacyStaticMirrorsUpgradeOnRestore()
 
 int main()
 {
+    testActivateButtonsAndMirrorsIsOneUndoableRestorableAction();
     testElevatorRideCommitsUndoesAndRestores();
     testQueueIsBounded();
     testStaleCommandsAreDropped();

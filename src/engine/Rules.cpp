@@ -754,13 +754,31 @@ bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 p
 }
 
 bool isPressurePlateActive(
-    const Level&,
+    const Level& level,
     const GameState& state,
     GridPosition3 plate)
 {
+    if (level.plateAt(plate) == TileType::Button) {
+        return std::ranges::find(state.activeButtons, plate) !=
+            state.activeButtons.end();
+    }
     return playerBlocksAt(state, plate) ||
         movableAt(state, plate) != nullptr ||
         enemyAt(state, plate) != nullptr;
+}
+
+std::vector<GridPosition3> activatableButtons(
+    const Level& level, const GameState& state)
+{
+    std::vector<GridPosition3> buttons;
+    // Level order makes pulse state canonical regardless of hero vector order.
+    for (const GridPosition3 cell : level.pressurePlates()) {
+        if (level.plateAt(cell) == TileType::Button &&
+            playerBlocksAt(state, cell) && !isUnitLocked(level, state, cell)) {
+            buttons.push_back(cell);
+        }
+    }
+    return buttons;
 }
 
 bool isGateOpen(
@@ -1923,11 +1941,16 @@ bool liveCellsAreUnique(const GameState& state)
 
 } // namespace
 
-std::optional<MirrorActivationPreview> previewMirrorActivation(
+namespace {
+
+std::optional<MirrorActivationPreview> previewActivationImpl(
     const Level& level,
-    const GameState& state)
+    const GameState& state,
+    const GameState& signals,
+    bool reflect,
+    bool pulse)
 {
-    GameState after = state;
+    GameState after = signals;
     std::vector<MirrorEntityPreview> entities;
     bool anyReflected = false;
     const std::size_t originalPlayerCount = state.players.size();
@@ -1946,7 +1969,7 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
     }
 
     for (std::size_t sourcePlayer = 0;
-         sourcePlayer < originalPlayerCount;
+         reflect && sourcePlayer < originalPlayerCount;
          ++sourcePlayer) {
         if (playerDead(state, sourcePlayer) ||
             isUnitLocked(level, state, playerCell(state, sourcePlayer))) {
@@ -1955,7 +1978,7 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
         const std::optional<std::vector<ReflectedPath>> reflectedPaths =
             reflectedPathsForEntity(
                 level,
-                state,
+                signals,
                 playerCell(state, sourcePlayer),
                 state.movables.size() + sourcePlayer,
                 true);
@@ -1999,7 +2022,7 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
         }
     }
 
-    for (std::size_t i = 0; i < state.movables.size(); ++i) {
+    for (std::size_t i = 0; reflect && i < state.movables.size(); ++i) {
         // Mirrors are reflectors, even though they now move as units.
         if (state.movables[i].fallen || state.movables[i].dead ||
             tileTypeIsMirror(state.movables[i].type) ||
@@ -2008,7 +2031,7 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
         }
         const std::optional<std::vector<ReflectedPath>> reflectedPaths =
             reflectedPathsForEntity(
-                level, state, state.movables[i].cell, i, false);
+                level, signals, state.movables[i].cell, i, false);
         if (!reflectedPaths) {
             return std::nullopt;
         }
@@ -2027,7 +2050,7 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
         }
     }
 
-    for (std::size_t i = 0; i < state.enemies.size(); ++i) {
+    for (std::size_t i = 0; reflect && i < state.enemies.size(); ++i) {
         if (state.enemies[i].fallen || state.enemies[i].dead ||
             isUnitLocked(level, state, state.enemies[i].cell)) {
             continue;
@@ -2035,7 +2058,7 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
         const std::optional<std::vector<ReflectedPath>> reflectedPaths =
             reflectedPathsForEntity(
                 level,
-                state,
+                signals,
                 state.enemies[i].cell,
                 state.movables.size() + state.players.size() + i,
                 false);
@@ -2058,7 +2081,7 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
         }
     }
 
-    if (!anyReflected || !liveCellsAreUnique(after)) {
+    if ((!anyReflected && !pulse) || !liveCellsAreUnique(after)) {
         return std::nullopt;
     }
 
@@ -2097,19 +2120,27 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
         after.enemies[i].fallen = fall.fallen;
     }
 
-    if (!liveCellsAreUnique(after) || after == state) {
+    if (!liveCellsAreUnique(after) || (!pulse && after == state)) {
         return std::nullopt;
     }
     // Reflected units can open or close gates, dropping whatever rests on
     // them or crushing whatever stands in them.
     std::vector<char> gatesOpen = gateOpenness(level, state);
     (void)applyGateChanges(level, after, gatesOpen);
+    GameState engagementBefore = state;
+    if (pulse) {
+        // Each key press is a new edge, including consecutive presses while
+        // the hero remains on the same button.
+        engagementBefore.activeButtons.clear();
+    }
     // Reflected units can land on pressure plates or rotators exactly as a
     // step can, so linked rotators fire here too.
     (void)applyRotatorActivations(
-        level, after, rotatorEngagement(level, state));
+        level, after, rotatorEngagement(level, engagementBefore));
     (void)applyElevatorActivations(
-        level, after, elevatorEngagement(level, state));
+        level, after, elevatorEngagement(level, engagementBefore));
+    (void)applyMinecartActivations(
+        level, after, minecartEngagement(level, engagementBefore));
     (void)applyGateChanges(level, after, gatesOpen);
     resolveEnemyAttacks(after);
     // An attack can empty a plate, opening or closing its gates.
@@ -2130,6 +2161,38 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
         .after = std::move(after),
         .entities = std::move(entities),
     };
+}
+
+} // namespace
+
+std::optional<MirrorActivationPreview> previewMirrorActivation(
+    const Level& level, const GameState& state)
+{
+    return previewActivationImpl(level, state, state, true, false);
+}
+
+std::optional<MirrorActivationPreview> previewActivation(
+    const Level& level, const GameState& state)
+{
+    GameState signals = state;
+    signals.activeButtons = activatableButtons(level, state);
+    const bool pulse = !signals.activeButtons.empty();
+    auto preview = previewActivationImpl(level, state, signals, true, pulse);
+    // An invalid reflection has no eligible mirror transaction, but must not
+    // discard independent buttons occupied by other heroes.
+    if (!preview && pulse) {
+        preview = previewActivationImpl(level, state, signals, false, true);
+    }
+    return preview;
+}
+
+std::optional<GameState> activate(const Level& level, const GameState& state)
+{
+    auto preview = previewActivation(level, state);
+    if (!preview) {
+        return std::nullopt;
+    }
+    return std::move(preview->after);
 }
 
 std::optional<GameState> activateMirrors(
@@ -2279,6 +2342,12 @@ public:
             resolveReactions();
         }
         resolveMinecarts();
+        while (resolveGateChanges()) {
+            resolveReactions();
+        }
+        // A pulse supplies input for one complete step, including movement
+        // through its gates. Expiration uses normal gate crush/fall reactions.
+        after_.activeButtons.clear();
         while (resolveGateChanges()) {
             resolveReactions();
         }

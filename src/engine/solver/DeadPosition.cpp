@@ -47,6 +47,13 @@ bool staticallySupported(const Level& level, GridPosition3 cell)
 
 bool supportsStaticAnalysis(const Level& level)
 {
+    // Buttons require heroes and pulses; the rock-to-pressure-plate matching
+    // proof below is not valid for them.
+    if (std::ranges::any_of(level.pressurePlates(), [&](GridPosition3 cell) {
+            return level.plateAt(cell) == TileType::Button;
+        })) {
+        return false;
+    }
     if (level.pressurePlates().empty() || level.waterLayer() ||
         !level.enemyStarts().empty() || level.playerStarts().empty() ||
         !level.objectLinks().empty()) {

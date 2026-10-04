@@ -405,10 +405,12 @@ std::vector<GridPosition3> pressurePlateCells(const Level::Definition& definitio
 {
     std::vector<GridPosition3> cells;
     const char pressure = tileTypeToChar(TileType::PressurePlate);
+    const char button = tileTypeToChar(TileType::Button);
     for (std::size_t z = 0; z < definition.layers.size(); ++z) {
         for (std::size_t y = 0; y < definition.layers[z].size(); ++y) {
             for (std::size_t x = 0; x < definition.layers[z][y].size(); ++x) {
-                if (definition.layers[z][y][x] == pressure) {
+                if (definition.layers[z][y][x] == pressure ||
+                    definition.layers[z][y][x] == button) {
                     cells.push_back({
                         static_cast<int>(x),
                         static_cast<int>(y),
@@ -419,7 +421,7 @@ std::vector<GridPosition3> pressurePlateCells(const Level::Definition& definitio
         }
     }
     for (const Level::Plate& plate : definition.plates) {
-        if (plate.tile == TileType::PressurePlate) {
+        if (tileTypeIsSignalSource(plate.tile)) {
             cells.push_back(plate.cell);
         }
     }
@@ -1344,7 +1346,7 @@ bool LevelEditor::moveObject(GridPosition3 destination)
         }
     }
     // A moved pressure plate keeps its color, and so its group.
-    if (move->tile == TileType::PressurePlate) {
+    if (tileTypeIsSignalSource(move->tile)) {
         const auto oldColor = std::ranges::find(
             before.plateColors, move->source, &Level::LinkColor::cell);
         const auto newColor = std::ranges::find(
@@ -1620,7 +1622,7 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             // Painting a pressure plate, device or movable object over itself
             // gives it the active link color. This is how an ordinary object
             // first joins a linked group.
-            const bool linkable = tile == TileType::PressurePlate ||
+            const bool linkable = tileTypeIsSignalSource(tile) ||
                 tile == TileType::Gate || tileTypeIsPortal(tile) ||
                 tileTypeIsRotator(tile) || tileTypeIsLockPlate(tile) ||
                 tile == TileType::Elevator ||
@@ -1735,14 +1737,14 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
     }
     // A pressure plate keeps its link color while it stays; a new one takes
     // the active color.
-    if (previousPlate == TileType::PressurePlate &&
-        paintedPlate != TileType::PressurePlate) {
+    if (tileTypeIsSignalSource(previousPlate) &&
+        !tileTypeIsSignalSource(paintedPlate)) {
         std::erase_if(document_.plateColors, [&](const Level::LinkColor& plate) {
             return plate.cell == translatedPosition;
         });
     }
-    if (paintedPlate == TileType::PressurePlate &&
-        previousPlate != TileType::PressurePlate) {
+    if (tileTypeIsSignalSource(paintedPlate) &&
+        !tileTypeIsSignalSource(previousPlate)) {
         document_.plateColors.push_back({
             .cell = translatedPosition,
             .color = activeLinkColor_,

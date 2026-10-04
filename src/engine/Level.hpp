@@ -29,6 +29,8 @@ public:
         bool operator==(const ScreenSelector&) const = default;
     };
 
+    // The legacy pressurePlates field names include both pressure plates and
+    // pulse buttons. Every linked source must provide input to the device.
     struct Gate {
         GridPosition3 cell {};
         std::vector<GridPosition3> pressurePlates;

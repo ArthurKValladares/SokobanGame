@@ -59,6 +59,155 @@ void testInitialState()
     CHECK(!rules::hasPendingMotion(level, state));
 }
 
+void testButtonPulseLifetimeAndEligibility()
+{
+    TEST("buttonPulseLifetimeAndEligibility");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "........" }, { "Q R N  G" } },
+        .gates = { { .cell = cell(7, 0, 1),
+                     .pressurePlates = { cell(0, 0, 1) } } },
+        .plates = {
+            { cell(0, 0, 1), TileType::Button },
+            { cell(2, 0, 1), TileType::Button },
+            { cell(4, 0, 1), TileType::Button },
+        },
+    }, "button eligibility");
+    const GameState before = rules::initialState(level);
+    CHECK(!rules::isPressurePlateActive(level, before, cell(0, 0, 1)));
+    CHECK(rules::step(level, before) == before);
+    const auto pressed = rules::activate(level, before);
+    CHECK(pressed.has_value());
+    if (!pressed) { return; }
+    CHECK(pressed->activeButtons == std::vector<GridPosition3> { cell(0, 0, 1) });
+    CHECK(rules::isGateOpen(level, *pressed, level.gates()[0]));
+    CHECK(!rules::isPressurePlateActive(level, *pressed, cell(2, 0, 1)));
+    CHECK(!rules::isPressurePlateActive(level, *pressed, cell(4, 0, 1)));
+    const GameState expired = rules::step(level, *pressed);
+    CHECK(expired.activeButtons.empty());
+    CHECK(!rules::isGateOpen(level, expired, level.gates()[0]));
+    CHECK(expired.players[0].cell == before.players[0].cell);
+    GameState applied = before;
+    const StateDelta delta = StateDelta::between(before, *pressed);
+    CHECK(!delta.empty());
+    delta.applyTo(applied);
+    CHECK(applied == *pressed);
+    delta.inverted().applyTo(applied);
+    CHECK(applied == before);
+    applied.players[0].dead = true;
+    CHECK(!rules::activate(level, applied));
+
+    // Gates remain usable during the next step, and closing still crushes
+    // actors left inside them at that step's completion.
+    const Level crossing = Level::loadFromDefinition({
+        .layers = { { "....." }, { "QKG  " } },
+        .gates = { { .cell = cell(2, 0, 1),
+                     .pressurePlates = { cell(0, 0, 1) } } },
+        .plates = { { cell(0, 0, 1), TileType::Button } },
+    }, "pulse gate crossing");
+    const auto open = rules::activate(crossing, rules::initialState(crossing));
+    CHECK(open.has_value());
+    if (!open) { return; }
+    const rules::StepScope knight { .actors = { open->players[1].id } };
+    const GameState crossed = rules::scopedStep(
+        crossing, *open, MoveDirection::Right, { .playerMove = 2 }, knight);
+    CHECK(crossed.players[1].cell == cell(3, 0, 1));
+    CHECK(!crossed.players[1].dead);
+    CHECK(!rules::isGateOpen(crossing, crossed, crossing.gates()[0]));
+    const GameState crushed = rules::scopedStep(
+        crossing, *open, MoveDirection::Right, {}, knight);
+    CHECK(crushed.players[1].cell == cell(2, 0, 1));
+    CHECK(crushed.players[1].dead);
+}
+
+void testButtonsTriggerAllLinkedDevicesPerPress()
+{
+    TEST("buttonsTriggerAllLinkedDevicesPerPress");
+    const std::vector<GridPosition3> links {
+        cell(0, 0, 1), cell(0, 2, 1), cell(6, 0, 1)
+    };
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "....=...", "........", "........" },
+            { "Q R R R ", "  M-_   ", "K       " },
+            { "        ", "        ", "        " },
+            { "        ", "        ", "        " },
+        },
+        .rotators = { { .cell = cell(2, 0, 1), .pressurePlates = links } },
+        .plates = {
+            { cell(0, 0, 1), TileType::Button },
+            { cell(0, 2, 1), TileType::Button },
+            { cell(2, 0, 1), TileType::RotatorClockwise },
+            { cell(6, 0, 1), TileType::PressurePlate },
+            { cell(2, 1, 1), TileType::RailStopEastWest },
+        },
+        .elevators = { { .cell = cell(4, 0, 0), .pressurePlates = links,
+                         .levels = { 0, 2 } } },
+        .minecarts = { { .cell = cell(2, 1, 1), .pressurePlates = links,
+                         .initialDirection = 1 } },
+    }, "mixed button and pressure links");
+    const GameState before = rules::initialState(level);
+    CHECK(rules::step(level, before) == before);
+    const auto first = rules::activate(level, before);
+    CHECK(first.has_value());
+    if (!first) { return; }
+    CHECK(first->activeButtons.size() == 2);
+    CHECK(first->movables[0].quarterTurns == 1);
+    CHECK(first->elevators[0].cell == cell(4, 0, 2));
+    CHECK(first->movables[1].cell == cell(4, 0, 3));
+    CHECK(first->minecarts[0].cell == cell(4, 1, 1));
+    const auto second = rules::activate(level, *first);
+    CHECK(second.has_value());
+    if (!second) { return; }
+    CHECK(second->movables[0].quarterTurns == 2);
+    CHECK(second->elevators[0].cell == cell(4, 0, 0));
+    CHECK(second->minecarts[0].cell == cell(2, 1, 1));
+    const GameState expired = rules::step(level, *second);
+    CHECK(expired.activeButtons.empty());
+    CHECK(expired.movables[0].quarterTurns == 2);
+    CHECK(expired.elevators == second->elevators);
+    CHECK(expired.minecarts == second->minecarts);
+    GameState incomplete = before;
+    incomplete.players[1].cell = cell(1, 2, 1);
+    const auto partial = rules::activate(level, incomplete);
+    CHECK(partial.has_value());
+    CHECK(partial && partial->elevators == before.elevators);
+    CHECK(partial && partial->minecarts == before.minecarts);
+    CHECK(partial && partial->movables[0].quarterTurns == 0);
+}
+
+void testActivateCombinesMultipleMirrorsAndButtonsFromStartingBoard()
+{
+    TEST("activateCombinesMultipleMirrorsAndButtonsFromStartingBoard");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "...........", "...........", "...........", "...........", "..........." },
+            { "  Q     K  ", "           ", "b 1     2  ", "           ", "     G     " },
+        },
+        .gates = { { .cell = cell(5, 4, 1),
+                     .pressurePlates = { cell(2, 0, 1), cell(8, 0, 1) } } },
+        .plates = { { cell(2, 0, 1), TileType::Button },
+                    { cell(8, 0, 1), TileType::Button } },
+    }, "simultaneous Activate");
+    const GameState before = rules::initialState(level);
+    const auto preview = rules::previewActivation(level, before);
+    CHECK(preview.has_value());
+    if (!preview) { return; }
+    CHECK(preview->entities.size() == 2);
+    CHECK(preview->after.players[0].cell == cell(0, 2, 1));
+    CHECK(preview->after.players[1].cell == cell(10, 2, 1));
+    CHECK(preview->after.activeButtons ==
+        (std::vector<GridPosition3> { cell(2, 0, 1), cell(8, 0, 1) }));
+    CHECK(!rules::isPressurePlateActive(level, preview->after, cell(0, 2, 1)));
+    CHECK(rules::isGateOpen(level, preview->after, level.gates()[0]));
+    GameState reordered = before;
+    std::ranges::reverse(reordered.players);
+    const auto reversed = rules::previewActivation(level, reordered);
+    CHECK(reversed.has_value());
+    CHECK(reversed && reversed->after.activeButtons == preview->after.activeButtons);
+    CHECK(reversed && reversed->after.players[0].cell == cell(10, 2, 1));
+    CHECK(reversed && reversed->after.players[1].cell == cell(0, 2, 1));
+}
+
 void testEachAuthoredHeroKeepsItsOwnCharacterAbility()
 {
     TEST("eachAuthoredHeroKeepsItsOwnCharacterAbility");
@@ -3433,6 +3582,9 @@ void testLockPlatesHoldAndReleaseUnits()
 
 int main()
 {
+    testButtonPulseLifetimeAndEligibility();
+    testButtonsTriggerAllLinkedDevicesPerPress();
+    testActivateCombinesMultipleMirrorsAndButtonsFromStartingBoard();
     testLockPlatesHoldAndReleaseUnits();
     testTurretsReactWhenBlockersLeaveTheirSightlines();
     testDeviceChangesExposeStationaryTurretTargets();

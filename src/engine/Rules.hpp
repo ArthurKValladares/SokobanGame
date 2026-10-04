@@ -126,6 +126,10 @@ struct GameState {
     std::vector<TurnedMirror> turnedMirrors;
     std::vector<Elevator> elevators;
     std::vector<Minecart> minecarts;
+    // Button pulses remain high through the next world step, then expire.
+    // Eligibility is sampled before reflection, so copies cannot press newly
+    // reached buttons during the same Activate action.
+    std::vector<GridPosition3> activeButtons;
 
     bool operator==(const GameState&) const = default;
 };
@@ -291,12 +295,14 @@ void setMirrorQuarterTurns(
 // below the water surface and does not displace it.
 [[nodiscard]] bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 position);
 
-// A pressure plate is pressed by a live hero, movable or enemy, or by a
-// a mirror unit currently standing on it.
+// A pressure plate is pressed by a live hero, movable or enemy, or a mirror
+// standing on it. A Button supplies input only while its pulse is active.
 [[nodiscard]] bool isPressurePlateActive(
     const Level& level,
     const GameState& state,
     GridPosition3 plate);
+[[nodiscard]] std::vector<GridPosition3> activatableButtons(
+    const Level& level, const GameState& state);
 [[nodiscard]] bool isGateOpen(
     const Level& level,
     const GameState& state,
@@ -372,6 +378,13 @@ struct MirrorActivationPreview {
 [[nodiscard]] std::optional<MirrorActivationPreview> previewMirrorActivation(
     const Level& level,
     const GameState& state);
+
+// One Activate transaction: pulse every button occupied by a living hero and
+// reflect all eligible units, using the same starting board for eligibility.
+[[nodiscard]] std::optional<MirrorActivationPreview> previewActivation(
+    const Level& level, const GameState& state);
+[[nodiscard]] std::optional<GameState> activate(
+    const Level& level, const GameState& state);
 
 // Reflects every visible, non-fallen movable unit through mirrors as one
 // atomic transaction. Returns no state when nothing is reflected or any

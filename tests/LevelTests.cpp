@@ -337,7 +337,7 @@ void testGateMetadataRoundTripAndValidation()
                 .pressurePlates = { { 1, 0, 1 } },
             } },
         }, "gate bad link");
-    }, "Pressure tiles");
+    }, "Pressure or Button tiles");
 }
 
 void testRotatorMetadataRoundTripAndValidation()
@@ -407,7 +407,7 @@ void testRotatorMetadataRoundTripAndValidation()
                 .pressurePlates = { { 1, 0, 1 } },
             } },
         }, "rotator bad link");
-    }, "Pressure tiles");
+    }, "Pressure or Button tiles");
     checkThrowsContaining([] {
         (void)Level::loadFromDefinition({
             .layers = {
@@ -521,7 +521,7 @@ void testElevatorMetadataRoundTripAndValidation()
                 .levels = { 0 },
             } },
         }, "elevator bad link");
-    }, "Pressure tiles");
+    }, "Pressure or Button tiles");
     checkThrowsContaining([] {
         (void)Level::parseDefinition(
             {
@@ -1212,7 +1212,7 @@ void testLockPlateMetadata()
     checkThrowsContaining([&] { (void)Level::loadFromDefinition(invalid, "missing"); }, "@lockplate");
     invalid = definition;
     invalid.lockPlates[0].pressurePlates = { { 0, 0, 1 } };
-    checkThrowsContaining([&] { (void)Level::loadFromDefinition(invalid, "bad link"); }, "Pressure tiles");
+    checkThrowsContaining([&] { (void)Level::loadFromDefinition(invalid, "bad link"); }, "Pressure or Button tiles");
     checkThrowsContaining([&] { (void)Level::parseDefinition({
         "@lockplate {\"cell\":[0,0,1],\"plates\":[],\"color\":[1,1,1],\"startEnabled\":1}",
         "@layer 0", "..", "@layer 1", "CJ" }, "bad toggle"); }, "startEnabled");

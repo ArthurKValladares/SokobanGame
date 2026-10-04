@@ -71,6 +71,7 @@ enum class TileType {
     PortalSouth,
     PortalWest,
     LockPlate,
+    Button,
     Count,
 };
 
@@ -159,6 +160,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::PortalSouth, 'p', "Portal South", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::PortalWest, 'q', "Portal West", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::LockPlate, 'J', "Lock Plate", { 0.70f, 0.48f, 0.90f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::Button, 'b', "Button", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -171,6 +173,11 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeHasProperty(TileType type, TileProperty property);
 // Pressure plates, rotators and Ends: see TileProperty::Plate.
 [[nodiscard]] bool tileTypeIsPlate(TileType type);
+// Sources that drive linked devices: occupancy for pressure, Activate for buttons.
+[[nodiscard]] constexpr bool tileTypeIsSignalSource(TileType type)
+{
+    return type == TileType::PressurePlate || type == TileType::Button;
+}
 // What may stand on a plate, including when a screen is authored that way:
 // every unit that occupies a level cell (heroes, rocks, ice, turrets,
 // enemies) and mirrors.

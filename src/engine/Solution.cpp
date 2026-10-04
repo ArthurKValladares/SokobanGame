@@ -564,7 +564,7 @@ bool Driver::apply(Input input)
     case Input::Left: session_.queueMove(MoveDirection::Left); break;
     case Input::Right: session_.queueMove(MoveDirection::Right); break;
     case Input::CycleHero: session_.cycleActiveHero(); break;
-    case Input::Interact: session_.queueMirror(); break;
+    case Input::Interact: session_.queueActivate(); break;
     case Input::Undo: session_.queueUndo(); break;
     }
     return runUntilSettled();

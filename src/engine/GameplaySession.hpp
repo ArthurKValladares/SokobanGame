@@ -68,7 +68,8 @@ public:
     [[nodiscard]] bool restore(const Level& level, const Snapshot& snapshot);
 
     void queueMove(MoveDirection direction);
-    void queueMirror();
+    void queueActivate();
+    void queueMirror() { queueActivate(); }
     void queueUndo();
     void queueRestart();
     void cycleActiveHero();
@@ -208,7 +209,7 @@ public:
 private:
     enum class CommandType {
         Move,
-        Mirror,
+        Activate,
         Undo,
         Restart,
     };
@@ -270,7 +271,7 @@ private:
     // Entities an action already owns are left out, or the same motion would be
     // planned twice and the copy refused by the claims of the original.
     [[nodiscard]] StartOutcome tryStartAmbientMotion(const Level& level);
-    [[nodiscard]] StartOutcome tryStartMirrorAction(const Level& level);
+    [[nodiscard]] StartOutcome tryStartActivationAction(const Level& level);
     [[nodiscard]] StartOutcome tryStartUndoMove();
     [[nodiscard]] StartOutcome tryStartRestart(const Level& level);
     [[nodiscard]] StartOutcome tryStartHeldDirection(

@@ -97,6 +97,33 @@ void testIndependentActionsRunTogether()
     CHECK(scheduler.idle());
 }
 
+void testButtonPulseLifetimeCannotOverlapOtherWorldSteps()
+{
+    TEST("buttonPulseLifetimeCannotOverlapOtherWorldSteps");
+    ActionScheduler scheduler;
+    const GameState before = twoRocks();
+    scheduler.reset(before, 0.1f);
+    ActionPlan pulse { .before = before, .after = before, .durationSeconds = 0.1f };
+    pulse.after.activeButtons = { cell(0, 0) };
+    const auto [move, claims] = movePlan(before, 0, cell(6, 0), 0.5f);
+    CHECK(started(scheduler.tryStart(move, claims)));
+    CHECK(!started(scheduler.tryStart(pulse, {})));
+    (void)scheduler.advance(0.5f);
+    CHECK(started(scheduler.tryStart(pulse, {})));
+    CHECK(!started(scheduler.tryStart(move, claims)));
+    (void)scheduler.advance(0.1f);
+    CHECK(scheduler.state().activeButtons == pulse.after.activeButtons);
+    const GameState pressed = scheduler.state();
+    auto [first, firstClaims] = movePlan(pressed, 0, cell(7, 0), 0.5f);
+    first.after.activeButtons.clear();
+    auto [second, secondClaims] = movePlan(pressed, 1, cell(6, 9), 0.2f);
+    second.after.activeButtons.clear();
+    CHECK(started(scheduler.tryStart(first, firstClaims)));
+    CHECK(!started(scheduler.tryStart(second, secondClaims)));
+    (void)scheduler.advance(0.5f);
+    CHECK(scheduler.state().activeButtons.empty());
+}
+
 void testConflictingActionIsRefused()
 {
     TEST("conflictingActionIsRefused");
@@ -307,6 +334,7 @@ void testZeroDurationActionCompletesImmediately()
 
 int main()
 {
+    testButtonPulseLifetimeCannotOverlapOtherWorldSteps();
     testIndependentActionsRunTogether();
     testConflictingActionIsRefused();
     testCommitsAreDeltasNotWholeStates();

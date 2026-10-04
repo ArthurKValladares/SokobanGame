@@ -87,6 +87,10 @@ StaticRenderCell staticRenderCellFor(
     const bool rail = tileTypeIsRail(tile);
     const bool conveyor = tileTypeIsConveyor(tile);
     const bool submergedEntity = fallenTile.has_value();
+    if (tile == TileType::Button) {
+        surfaceEntitySize *= 0.6f;
+        surfaceEntityHeight *= 2.0f;
+    }
     const float centeredOffset = (1.0f - surfaceEntitySize) * 0.5f;
     return {
         .tile = tile,
@@ -661,7 +665,7 @@ void appendMinecartCoveredPlates(
         }
         Vec4 color = tileColor(
             plate.tile, plate.tile != TileType::End || endUnlocked);
-        if (plate.tile == TileType::PressurePlate) {
+        if (tileTypeIsSignalSource(plate.tile)) {
             // The minecart holds the plate pressed.
             if (const std::optional<Vec3> linkColor =
                     input.level.pressurePlateLinkColor(cell)) {
@@ -780,7 +784,7 @@ void appendGameplayWorld(
                                             color.z * strength,
                                             1.0f };
             }
-            if (cell.tile == TileType::PressurePlate) {
+            if (tileTypeIsSignalSource(cell.tile)) {
                 if (const std::optional<Vec3> linkColor =
                         input.level.pressurePlateLinkColor(position)) {
                     const float strength = rules::isPressurePlateActive(
@@ -1642,11 +1646,11 @@ void appendMirrorPreview(
 
     if (!rules::anyPlayerDead(state)) {
         std::optional<rules::MirrorActivationPreview> mirrorPreview =
-            rules::previewMirrorActivation(input.level, state);
+            rules::previewActivation(input.level, state);
         std::optional<rules::MirrorActivationPreview> actionEndPreview;
         if (input.moving &&
             !rules::anyPlayerDead(input.projectedState)) {
-            actionEndPreview = rules::previewMirrorActivation(
+            actionEndPreview = rules::previewActivation(
                 input.level, input.projectedState);
         }
         if (mirrorPreview) {

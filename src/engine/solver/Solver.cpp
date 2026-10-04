@@ -80,7 +80,7 @@ bool onlyPlayersMoved(const GameState& before, const GameState& after)
         before.enemies == after.enemies &&
         before.turnedMirrors == after.turnedMirrors &&
         before.elevators == after.elevators &&
-        before.minecarts == after.minecarts;
+        before.minecarts == after.minecarts && before.activeButtons == after.activeButtons;
 }
 
 struct DirectionTransition {
@@ -522,7 +522,7 @@ Result solve(const Level& level, const Options& options)
                     false);
             }
             std::optional<rules::MirrorActivationPreview> mirror =
-                rules::previewMirrorActivation(level, walks[walk].state);
+                rules::previewActivation(level, walks[walk].state);
             if (mirror) {
                 if (rules::anyPlayerDead(mirror->after)) {
                     ++result.statistics.playerDeathPrunes;

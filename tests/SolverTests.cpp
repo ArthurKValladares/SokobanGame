@@ -167,6 +167,9 @@ void testPackedStateKeyIncludesEveryDynamicField()
         state, activeController + 1));
 
     GameState changed = state;
+    changed.activeButtons = { { 1, 2, 3 } };
+    checkChanged(changed);
+    changed = state;
     ++changed.players[0].id;
     checkChanged(changed);
     changed = state;
@@ -350,6 +353,23 @@ void testSolverRidesElevators()
         solution::record(level, definition, result.inputs, "elevator solver")
             .solved,
         "elevator solution replays through the recording driver");
+}
+
+void testSolverActivatesButtonForAnotherHeroElevator()
+{
+    TEST("solverActivatesButtonForAnotherHeroElevator");
+    const Level::Definition definition {
+        .layers = { { "...=" }, { "QE K" }, { "    " }, { "   E" } },
+        .plates = { { { 0, 0, 1 }, TileType::Button } },
+        .elevators = { { .cell = { 3, 0, 0 },
+                         .pressurePlates = { { 0, 0, 1 } },
+                         .levels = { 0, 2 } } },
+    };
+    const Level level = Level::loadFromDefinition(definition, "button elevator solver");
+    const auto result = solver::solve(level, { .maxStates = 10'000 });
+    CHECK(result.solved());
+    CHECK(std::ranges::find(result.inputs, solution::Input::Interact) != result.inputs.end());
+    CHECK(solution::record(level, definition, result.inputs, "button elevator solver").solved);
 }
 
 void testSolverRidesMinecarts()
@@ -604,6 +624,7 @@ int main()
         testDeadPositionAnalysisIsConservativeAndFeatureAware();
         testPackedStateKeyIncludesEveryDynamicField();
         testSolverRidesElevators();
+        testSolverActivatesButtonForAnotherHeroElevator();
         testSolverRidesMinecarts();
         testSearchResultReplays();
         testPrecomputedMirrorSuccessorReplays();

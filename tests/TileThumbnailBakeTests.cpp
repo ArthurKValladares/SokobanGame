@@ -120,6 +120,20 @@ void testAirAndWaterAreNotBaked()
     return settings;
 }
 
+void testButtonIsSmallerAndRaisedAbovePressurePlate()
+{
+    TEST("buttonIsSmallerAndRaisedAbovePressurePlate");
+    const auto button = tileThumbnails::buildBakeFrame(
+        TileType::Button, testManifest(), testSettings()).tiles.back();
+    const auto pressure = tileThumbnails::buildBakeFrame(
+        TileType::PressurePlate, testManifest(), testSettings()).tiles.back();
+    CHECK(button.size.x < pressure.size.x);
+    CHECK(button.size.y < pressure.size.y);
+    CHECK(button.height > pressure.height);
+    CHECK(tileThumbnails::assetPathFor(TileType::Button) ==
+        "custom/thumbnails/tile_button.png");
+}
+
 void testBakeFrameStandsTheTileOnAGroundBed()
 {
     TEST("bakeFrameStandsTheTileOnAGroundBed");
@@ -421,6 +435,7 @@ int main()
 {
     testAssetPathsAreUniqueAndTidy();
     testAirAndWaterAreNotBaked();
+    testButtonIsSmallerAndRaisedAbovePressurePlate();
     testBakeFrameStandsTheTileOnAGroundBed();
     testBedIsNeutralAndFlat();
     testGroundIsBakedThroughTheSplatPath();

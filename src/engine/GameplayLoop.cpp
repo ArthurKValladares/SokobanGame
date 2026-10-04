@@ -170,7 +170,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
             session.activeHeroController() != before;
     }
     if (input.interactPressed) {
-        session.queueMirror();
+        session.queueActivate();
     }
     if (input.undoPressed) {
         session.queueUndo();

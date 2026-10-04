@@ -350,6 +350,44 @@ void testColorGroupsBecomeExplicitLinks()
     CHECK(LevelEditor::sameLinkColor(loaded.activeLinkColor(), blue));
 }
 
+void testButtonsKeepLinksThroughStackingConversionAndSave()
+{
+    TEST("buttonsKeepLinksThroughStackingConversionAndSave");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(7, 3, false);
+    const GridPosition3 button { 1, 1, 1 };
+    const GridPosition3 pressure { 2, 1, 1 };
+    const GridPosition3 gate { 3, 1, 1 };
+    CHECK(editor.setCell(button, TileType::Button));
+    CHECK(editor.setCell(pressure, TileType::PressurePlate));
+    CHECK(editor.setCell(gate, TileType::Gate));
+    CHECK(editor.documentToLevel().gateAt(gate)->pressurePlates ==
+        (Plates { button, pressure }));
+    CHECK(editor.setCell(button, TileType::Knight));
+    CHECK(editor.documentToLevel().plateAt(button) == TileType::Button);
+    CHECK(editor.documentToLevel().gateAt(gate)->pressurePlates ==
+        (Plates { button, pressure }));
+    const Vec3 blue { 0.2f, 0.4f, 1.0f };
+    editor.setActiveLinkColor(blue);
+    CHECK(editor.setCell(pressure, TileType::Button));
+    // Converting a signal source preserves its existing color and links.
+    CHECK(editor.documentToLevel().gateAt(gate)->pressurePlates ==
+        (Plates { button, pressure }));
+    CHECK(editor.setCell(pressure, TileType::Button));
+    CHECK(editor.linkColorAt(pressure) == std::optional<Vec3>(blue));
+    CHECK(editor.documentToLevel().gateAt(gate)->pressurePlates == Plates { button });
+    const Level level = editor.documentToLevel();
+    const auto path = project.source / "buttons.scr";
+    CHECK(editor.saveDocument(path).sourceSaved());
+    const Level reloaded = Level::loadFromFile(path);
+    CHECK(reloaded.plateAt(button) == TileType::Button);
+    CHECK(reloaded.gateAt(gate)->pressurePlates == level.gateAt(gate)->pressurePlates);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentToLevel().gateAt(gate)->pressurePlates ==
+        (Plates { button, pressure }));
+}
+
 void testExplicitLinksBecomeColorGroupsOnLoad()
 {
     TEST("explicitLinksBecomeColorGroupsOnLoad");
@@ -2550,6 +2588,7 @@ void testReloadFromDiskKeepsDraftsAndIgnoresOwnSaves()
 
 int main()
 {
+    testButtonsKeepLinksThroughStackingConversionAndSave();
     testPerScreenCameraEditingAndPersistence();
     testLockPlateEditor();
     testPortalColorGroups();

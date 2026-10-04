@@ -886,7 +886,7 @@ private:
                 };
             }
         }
-        if (tile == TileType::PressurePlate) {
+        if (tileTypeIsSignalSource(tile)) {
             // In the editor a plate shows its own link color: the color is
             // the link (see LevelEditor::linkGroups).
             const auto color = std::ranges::find(
@@ -1356,6 +1356,8 @@ RenderFrameData::Tile tileVisual(
         ? 1.0f
         : rotator
         ? config::rotatorPlateWidthDepth
+        : tile == TileType::Button
+        ? settings.geometry.surfaceEntityWidthDepth * 0.6f
         : (surfaceEntity ? settings.geometry.surfaceEntityWidthDepth : 1.0f);
     const float centeredOffset = (1.0f - tileSize) * 0.5f;
 
@@ -1392,6 +1394,8 @@ RenderFrameData::Tile tileVisual(
             ? config::rotatorPlateHeight
             : elevator
             ? config::elevatorPlatformHeight
+            : tile == TileType::Button
+            ? settings.geometry.surfaceEntityHeight * 2.0f
             : surfaceEntity
             ? settings.geometry.surfaceEntityHeight
             : (conveyor

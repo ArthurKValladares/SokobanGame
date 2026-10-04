@@ -19,7 +19,13 @@ std::optional<ActionScheduler::Rejection> ActionScheduler::ownershipConflict(
         if (causalGroup != 0 && action.causalGroup == causalGroup) {
             continue;
         }
-        if (StateDelta::between(action.plan.before, action.plan.after)
+        // Pulses affect collision across the board and expire on a world-step
+        // boundary. Serialize their lifetime so unrelated in-flight actions
+        // cannot observe or overwrite different versions of the same signal.
+        if (!plan.before.activeButtons.empty() || !plan.after.activeButtons.empty() ||
+            !action.plan.before.activeButtons.empty() ||
+            !action.plan.after.activeButtons.empty() ||
+            StateDelta::between(action.plan.before, action.plan.after)
                 .changesAny(wanted)) {
             return Rejection {
                 .blockedBy = action.id,

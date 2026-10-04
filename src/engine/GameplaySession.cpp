@@ -133,7 +133,7 @@ bool matchesForwardTransition(
     }
 
     if (const std::optional<GameState> reflected =
-            rules::activateMirrors(level, action.before)) {
+            rules::activate(level, action.before)) {
         if (*reflected == action.after &&
             action.playerMoveCountAfter == action.playerMoveCountBefore) {
             return true;
@@ -621,9 +621,9 @@ void GameplaySession::queueMove(MoveDirection direction)
     });
 }
 
-void GameplaySession::queueMirror()
+void GameplaySession::queueActivate()
 {
-    enqueue({ .type = CommandType::Mirror });
+    enqueue({ .type = CommandType::Activate });
 }
 
 void GameplaySession::queueUndo()
@@ -674,8 +674,8 @@ GameplaySession::StartOutcome GameplaySession::runCommand(
         return tryStartUndoMove();
     case CommandType::Restart:
         return tryStartRestart(level);
-    case CommandType::Mirror:
-        return tryStartMirrorAction(level);
+    case CommandType::Activate:
+        return tryStartActivationAction(level);
     case CommandType::Move:
         break;
     }
@@ -1111,12 +1111,12 @@ GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
     return StartOutcome::Impossible;
 }
 
-GameplaySession::StartOutcome GameplaySession::tryStartMirrorAction(
+GameplaySession::StartOutcome GameplaySession::tryStartActivationAction(
     const Level& level)
 {
     const GameState current = planningState();
     std::optional<rules::MirrorActivationPreview> activation =
-        rules::previewMirrorActivation(level, current);
+        rules::previewActivation(level, current);
     if (!activation) {
         return StartOutcome::Impossible;
     }
@@ -1138,7 +1138,9 @@ GameplaySession::StartOutcome GameplaySession::tryStartMirrorAction(
         return StartOutcome::Refused;
     }
     autoMotionPaused_ = false;
-    ++mirrorActivationSequence_;
+    if (!activation->entities.empty()) {
+        ++mirrorActivationSequence_;
+    }
     inputLog_.push_back(PlayerInput::Interact);
     return StartOutcome::Started;
 }

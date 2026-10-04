@@ -103,6 +103,12 @@ struct StateDelta {
     std::vector<MirrorChange> mirrors;
     std::vector<ElevatorChange> elevators;
     std::vector<MinecartChange> minecarts;
+    struct ButtonChange {
+        std::vector<GridPosition3> before;
+        std::vector<GridPosition3> after;
+        bool operator==(const ButtonChange&) const = default;
+    };
+    std::optional<ButtonChange> buttons;
 };
 
 } // namespace sokoban

@@ -789,7 +789,7 @@ void LevelEditorDebugUi::drawTilePalette(
     const std::string_view selectedName = tileTypeName(editor.selectedTile());
     ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
     ImGui::TextWrapped(
-        "Plates (Pressure, End, Rotators, Lock Plates, Rail Stops) stack with units and mirrors; "
+        "Plates (Pressure, Buttons, End, Rotators, Lock Plates, Rail Stops) stack with units and mirrors; "
         "a Minecart can only stack on a Rail Stop. Paint "
         "one onto the other in either order. Erasing lifts the unit or mirror "
         "off and leaves the plate.");
@@ -798,12 +798,16 @@ void LevelEditorDebugUi::drawTilePalette(
     ImGui::TextUnformatted("Links");
     ImGui::TextWrapped(
         "Gates, rotators, lock plates, elevators and minecarts are driven by every pressure "
-        "plate of their color: give plates and devices the same color to link "
+        "plate and button of their color: give sources and devices the same color to link "
         "them. A gate opens while all of its plates are pressed; a rotator "
         "turns and an elevator or minecart moves each time they all become "
         "pressed. A device with no plates of its color never activates. "
         "Movable objects of the same color repeat one another's successful "
         "moves when their own path is clear.");
+    ImGui::TextWrapped(
+        "Activate pulses every button occupied by a living hero and activates "
+        "all eligible mirrors together. Button pulses last through the next "
+        "game step; repeated presses trigger devices again without stepping off.");
     Vec3 paintColor = editor.activeLinkColor();
     if (ImGui::ColorEdit3("Link Color", &paintColor.x)) {
         editor.setActiveLinkColor(paintColor);
