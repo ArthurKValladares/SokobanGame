@@ -8,6 +8,7 @@
 #include <string_view>
 #include <variant>
 #include <vector>
+#include <cstdint>
 
 namespace sokoban {
 
@@ -15,7 +16,7 @@ class UiContext;
 class InputPromptCatalog;
 struct GamepadPresentation;
 
-enum class OptionsMenuPage {
+enum class OptionsMenuPage : uint8_t {
     Main,
     Graphics,
     Audio,
@@ -24,7 +25,7 @@ enum class OptionsMenuPage {
     QuitConfirmation,
 };
 
-enum class OptionsMenuRowId {
+enum class OptionsMenuRowId : uint8_t {
     Graphics,
     Audio,
     Controls,
@@ -89,13 +90,13 @@ enum class OptionsMenuRowId {
 };
 
 // The Editor Controls page shows one group of editor bindings at a time.
-enum class EditorControlsSection {
+enum class EditorControlsSection : uint8_t {
     Editing,
     Playtest,
     RecentTiles,
 };
 
-enum class OptionsMenuRowKind {
+enum class OptionsMenuRowKind : uint8_t {
     Button,
     SegmentedChoice,
     StepperChoice,
@@ -106,13 +107,13 @@ enum class OptionsMenuRowKind {
     Binding,
 };
 
-enum class OptionsMenuRowTone {
+enum class OptionsMenuRowTone : uint8_t {
     Normal,
     Accent,
     Danger,
 };
 
-enum class OptionsMenuSliderDisplay {
+enum class OptionsMenuSliderDisplay : uint8_t {
     Percent,
     ExposureEv,
 };

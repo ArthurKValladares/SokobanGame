@@ -207,7 +207,7 @@ public:
     void setActionDuration(std::size_t actionId, float durationSeconds);
 
 private:
-    enum class CommandType {
+    enum class CommandType : uint8_t {
         Move,
         Activate,
         Undo,
@@ -230,7 +230,7 @@ private:
     // enough; once the reservation table can refuse, a command that was refused
     // has to go back on the queue and one that was impossible must not, or a
     // player walking into a wall would retry it until it went stale.
-    enum class StartOutcome {
+    enum class StartOutcome : uint8_t {
         // Admitted, and now in flight.
         Started,
         // Nothing to do. There was no plan to make - the move is into a wall,

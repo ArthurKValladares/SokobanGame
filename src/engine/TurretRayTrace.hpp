@@ -4,10 +4,11 @@
 
 #include <algorithm>
 #include <utility>
+#include <cstdint>
 
 namespace sokoban::rules {
 
-enum class TurretRayCell { Open, Occupied, Blocked };
+enum class TurretRayCell : uint8_t { Open, Occupied, Blocked };
 
 // The rules and editor use the same traversal, including front-edge portal
 // crossings and loop detection. Queries let unfinished drafts supply their

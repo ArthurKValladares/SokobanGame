@@ -11,7 +11,7 @@
 
 namespace sokoban {
 
-enum class VulkanGpuPhase : uint32_t {
+enum class VulkanGpuPhase : uint8_t {
     Shadows,
     Scene,
     SceneRaster,

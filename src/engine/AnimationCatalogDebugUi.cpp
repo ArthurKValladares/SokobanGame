@@ -101,7 +101,7 @@ void AnimationCatalogDebugUi::drawTimelineEventList(
         ImGui::TextDisabled("No events attached to this animation.");
     }
     for (std::size_t i = 0; i < selectedEvents.size(); ++i) {
-        const AnimationCatalog::TimelineEvent event =
+        const AnimationCatalog::TimelineEvent& event =
             selectedEvents[i];
         ImGui::PushID(static_cast<int>(i));
         ImGui::TextUnformatted(event.id.c_str());

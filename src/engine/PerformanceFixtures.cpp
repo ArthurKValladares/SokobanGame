@@ -33,7 +33,7 @@ void PerformanceEffectFixture::append(RenderFrameData& frame,
             1 + static_cast<int>(index % static_cast<uint32_t>(width - 2)),
             1 + static_cast<int>((index / static_cast<uint32_t>(width - 2)) %
                 static_cast<uint32_t>(height - 2)), 1 };
-        const Vec3 origin { cell.x + 0.5f, cell.y + 0.5f, 1.5f };
+        const Vec3 origin { static_cast<float>(cell.x) + 0.5f, static_cast<float>(cell.y) + 0.5f, 1.5f };
         if (mixed || scenario == "mirror-swap") {
             particles_.emit(origin, mirror_);
         }

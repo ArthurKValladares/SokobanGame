@@ -178,7 +178,7 @@ public:
     // Why a publication was refused. Kept apart because they mean different
     // things: the first two are properties of the asset against the budget,
     // the third is a property of the moment.
-    enum class Block {
+    enum class Block : uint8_t {
         AssetLargerThanBudget,
         NoMipTailFits,
         NothingEvictable,

@@ -348,8 +348,8 @@ private:
                         std::vector<rules::TurretRaySegment> rays;
                         rules::traceTurretRay(cell, *direction, std::nullopt, rayCell, portalCrossing, &rays);
                         const auto point = [](GridPosition3 position, GridPosition edge) {
-                            return Vec3 { static_cast<float>(position.x) + 0.5f + edge.x * 0.5f,
-                                static_cast<float>(position.y) + 0.5f + edge.y * 0.5f,
+                            return Vec3 { static_cast<float>(position.x) + 0.5f + static_cast<float>(edge.x) * 0.5f,
+                                static_cast<float>(position.y) + 0.5f + static_cast<float>(edge.y) * 0.5f,
                                 static_cast<float>(position.z) + config::turretMuzzleElevation };
                         };
                         for (std::size_t index = 0; index < rays.size(); ++index) {
@@ -357,8 +357,8 @@ private:
                             Vec3 from = point(ray.from, ray.fromEdge);
                             if (index == 0) {
                                 const auto offset = rules::directionOffset(*direction);
-                                from.x += offset.x * config::turretMuzzleForwardOffset;
-                                from.y += offset.y * config::turretMuzzleForwardOffset;
+                                from.x += static_cast<float>(offset.x) * config::turretMuzzleForwardOffset;
+                                from.y += static_cast<float>(offset.y) * config::turretMuzzleForwardOffset;
                             }
                             segment(ray.from, ray.to, from, point(ray.to, ray.toEdge), color, Style::Sightline);
                         }
@@ -369,7 +369,7 @@ private:
                         Vec3 from { static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f,
                             static_cast<float>(z) + config::surfaceEntityHeight };
                         const auto offset = rules::directionOffset(*direction);
-                        const Vec3 delta { offset.x * 0.38f, offset.y * 0.38f, 0.0f };
+                        const Vec3 delta { static_cast<float>(offset.x) * 0.38f, static_cast<float>(offset.y) * 0.38f, 0.0f };
                         segment(cell, cell, from - delta, from + delta, color, Style::Arrows);
                     }
                 }

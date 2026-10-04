@@ -121,9 +121,9 @@ float emitTurretShotParticles(
         const Vec3 from = index == 0 ? muzzle
                                      : Vec3 {
                                            static_cast<float>(segment.from.x) +
-                                               0.5f + segment.fromEdge.x * 0.5f,
+                                               0.5f + static_cast<float>(segment.fromEdge.x) * 0.5f,
                                            static_cast<float>(segment.from.y) +
-                                               0.5f + segment.fromEdge.y * 0.5f,
+                                               0.5f + static_cast<float>(segment.fromEdge.y) * 0.5f,
                                            static_cast<float>(segment.from.z) +
                                                config::turretMuzzleElevation,
                                        };
@@ -131,9 +131,9 @@ float emitTurretShotParticles(
             ? target
             : Vec3 {
                   static_cast<float>(segment.to.x) + 0.5f +
-                      segment.toEdge.x * 0.5f,
+                      static_cast<float>(segment.toEdge.x) * 0.5f,
                   static_cast<float>(segment.to.y) + 0.5f +
-                      segment.toEdge.y * 0.5f,
+                      static_cast<float>(segment.toEdge.y) * 0.5f,
                   static_cast<float>(segment.to.z) +
                       config::turretMuzzleElevation,
               };

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace sokoban {
 
 // Two-sided world transition. The midpoint is deliberately held for one
@@ -22,7 +24,7 @@ public:
     [[nodiscard]] float amount() const;
 
 private:
-    enum class Phase {
+    enum class Phase : uint8_t {
         Idle,
         Closing,
         Opening,

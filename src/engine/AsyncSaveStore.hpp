@@ -24,12 +24,12 @@ class AsyncSaveStore {
 public:
     using Revision = std::uint64_t;
 
-    enum class Urgency {
+    enum class Urgency : uint8_t {
         Deferred,
         Immediate,
     };
 
-    enum class PersistenceOutcome {
+    enum class PersistenceOutcome : uint8_t {
         Persisted,
         RetryableFailure,
     };

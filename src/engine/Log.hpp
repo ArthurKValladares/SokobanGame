@@ -13,14 +13,14 @@
 
 namespace sokoban::log {
 
-enum class Level {
+enum class Level : uint8_t {
     Debug,
     Info,
     Warning,
     Error,
 };
 
-enum class Category {
+enum class Category : uint8_t {
     General,
     Application,
     Gameplay,
@@ -63,7 +63,7 @@ struct Configuration {
     std::chrono::milliseconds flushInterval { 1000 };
     // A zero limit deliberately disables file rotation. Otherwise the active
     // log is capped and the newest archived logs use .1, .2, ... suffixes.
-    std::uintmax_t maxFileBytes = 2 * 1024 * 1024;
+    std::uintmax_t maxFileBytes = std::uintmax_t { 2 } * 1024 * 1024;
     std::size_t maxArchivedFiles = 5;
     bool stderrEnabled = true;
 };

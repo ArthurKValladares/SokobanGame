@@ -11,7 +11,7 @@ namespace sokoban {
 // A mixed-material mesh can contribute to both scene passes without creating
 // another pipeline permutation. The recorder selects the relevant subset and
 // the fragment shader rejects primitives that belong to the other pass.
-enum class MaterialAlphaSelection : uint32_t {
+enum class MaterialAlphaSelection : uint8_t {
     All = 0,
     OpaqueAndMask = 1,
     BlendOnly = 2,

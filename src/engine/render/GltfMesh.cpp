@@ -8,18 +8,14 @@
 // than one buffer, a sparse accessor, any KHR_* extension, a glTF material,
 // or an animation's interpolation mode.
 //
-// The implementation is compiled here rather than in a translation unit of
-// its own, which is how stb_image is compiled into ImageData.cpp and
-// stb_truetype into FontAtlas.cpp. third_party/cgltf is a SYSTEM include, so
-// /W4 and clang-tidy leave those seven thousand lines alone while ASan and
-// UBSan still instrument them - which is where a parser fed files off the
-// internet belongs.
+// The upstream implementation is compiled separately in
+// CgltfImplementation.cpp so linting checks this adapter without analyzing
+// vendored internals. Sanitizers still instrument the parser and this adapter.
 //
 // Nothing above this file knows cgltf exists, and it must stay that way:
 // GltfMesh.hpp is library-agnostic on purpose so that swapping the parser
 // again is a change to one translation unit. See the fastgltf note under
 // Important Design Decisions in HANDOFF.md.
-#define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
 
 #include <algorithm>

@@ -7,12 +7,13 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <cstdint>
 
 namespace sokoban {
 
 class SaveStore {
 public:
-    enum class LoadDisposition {
+    enum class LoadDisposition : uint8_t {
         Loaded,
         // Nothing on disk; defaults returned without writing any file.
         CreatedDefault,
@@ -39,7 +40,7 @@ public:
         std::string message;
     };
 
-    enum class InspectionDisposition {
+    enum class InspectionDisposition : uint8_t {
         Missing,
         PrimaryValid,
         BackupValid,

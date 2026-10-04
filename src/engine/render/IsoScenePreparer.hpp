@@ -82,7 +82,7 @@ struct ModelTransformPoints {
     Vec3 zPoint {};
 };
 
-enum class PreparedSurfaceMaterial {
+enum class PreparedSurfaceMaterial : uint8_t {
     Standard,
     Water,
     MirrorEnergy,
@@ -142,7 +142,7 @@ struct PreparedParticle {
 // the preparer's cache may therefore advance while an older prepared frame is
 // still leased by the renderer.
 struct PreparedRenderable {
-    enum class Kind {
+    enum class Kind : uint8_t {
         Tile,
         WaterSurface,
         IsoFace,

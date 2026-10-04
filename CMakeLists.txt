@@ -154,11 +154,8 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf/cgltf.h")
         "which is what this tree is written against) into third_party/cgltf/. "
         "Only the reader is needed; cgltf_write.h is not used.")
 endif()
-# SYSTEM, like sokoban_json and sokoban_stb: the implementation is compiled
-# into GltfMesh.cpp by CGLTF_IMPLEMENTATION, which is how stb_image and
-# stb_truetype are already handled, and this is what keeps 7,000 lines of
-# vendored C out of /W4 and clang-tidy while leaving it inside ASan and UBSan
-# - which is where a parser fed hostile files belongs.
+# SYSTEM, like sokoban_json and sokoban_stb. Upstream implementation units
+# skip linting; the first-party adapters and sanitizer coverage stay enabled.
 add_library(sokoban_cgltf INTERFACE)
 target_include_directories(sokoban_cgltf SYSTEM INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf"
@@ -338,13 +335,26 @@ endif()
 # switching the gate on: compiling every file under src/ with GCC 11 and
 # -Wall -Wextra -Wpedantic produced 942 warnings, 940 of them the one
 # diagnostic suppressed below; the other two were fixed. So the gate costs
-# nothing to keep green. It is on in CI and off locally, because a warning
-# should stop a merge, not stop someone mid-edit.
+# nothing to keep green. CI and the dev/release presets treat warnings as
+# errors; custom configurations can opt out while investigating a warning.
 #
 # That census is a floor, not a guarantee: CI builds on ubuntu-24.04 with the
-# distribution's default GCC and its `clang` package, both newer than the GCC
+# pinned GCC 13 and Clang 18 toolchains, both newer than the GCC
 # that produced the count, and newer compilers know diagnostics older ones do
 # not. The first CI run with this on is the real measurement.
+# Anchor lint headers to this checkout's source directories. Escape regex
+# metacharacters in paths and accept both separators on Windows; matching any
+# directory named src would also select third_party/SDL/src.
+set(SOKOBAN_FIRST_PARTY_HEADER_FILTER "${CMAKE_CURRENT_SOURCE_DIR}")
+foreach(regex_character IN ITEMS "." "^" "$" "*" "+" "?" "(" ")" "[" "]" "{" "}" "|")
+    string(REPLACE "${regex_character}" "\\${regex_character}"
+        SOKOBAN_FIRST_PARTY_HEADER_FILTER "${SOKOBAN_FIRST_PARTY_HEADER_FILTER}")
+endforeach()
+string(REPLACE "/" "[/\\\\]" SOKOBAN_FIRST_PARTY_HEADER_FILTER
+    "${SOKOBAN_FIRST_PARTY_HEADER_FILTER}")
+set(SOKOBAN_FIRST_PARTY_HEADER_FILTER
+    "^${SOKOBAN_FIRST_PARTY_HEADER_FILTER}[/\\\\](src|tools)[/\\\\]")
+
 function(sokoban_enable_warnings target)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4 /permissive-)
@@ -385,6 +395,11 @@ function(sokoban_enable_warnings target)
     endif()
 
     if(SOKOBAN_ENABLE_CLANG_TIDY)
+        if(CMAKE_VERSION VERSION_LESS "3.27")
+            message(FATAL_ERROR
+                "clang-tidy builds require CMake 3.27 or newer to exclude "
+                "vendor implementation files with SKIP_LINTING")
+        endif()
         if(NOT SOKOBAN_CLANG_TIDY_EXECUTABLE)
             find_program(SOKOBAN_CLANG_TIDY_EXECUTABLE NAMES clang-tidy)
         endif()
@@ -402,7 +417,7 @@ function(sokoban_enable_warnings target)
         # slashes. A slash-only filter silently skips first-party headers.
         set(SOKOBAN_CLANG_TIDY_COMMAND
             "${SOKOBAN_CLANG_TIDY_EXECUTABLE}"
-            "--header-filter=(^|[/\\\\])(src|tools)[/\\\\]"
+            "--header-filter=${SOKOBAN_FIRST_PARTY_HEADER_FILTER}"
         )
         set_property(TARGET ${target} PROPERTY CXX_CLANG_TIDY
             "${SOKOBAN_CLANG_TIDY_COMMAND}")
@@ -565,6 +580,7 @@ add_library(sokoban_core STATIC
     src/engine/render/AtmosphereMath.cpp
     src/engine/render/AssetLoadScheduler.cpp
     src/engine/render/CompressedTextureArtifact.cpp
+    src/engine/render/CgltfImplementation.cpp
     src/engine/render/GltfMesh.cpp
     src/engine/render/FrameResourceTracker.cpp
     src/engine/render/FrameTimeTelemetry.cpp
@@ -572,6 +588,7 @@ add_library(sokoban_core STATIC
     src/engine/render/GpuMaterial.cpp
     src/engine/render/GpuSkinning.cpp
     src/engine/render/ImageData.cpp
+    src/engine/render/StbImageImplementation.cpp
     src/engine/render/MaterialRenderPolicy.cpp
     src/engine/render/OpaqueDrawSorter.cpp
     src/engine/render/PbrMaterial.cpp
@@ -590,7 +607,7 @@ add_library(sokoban_core STATIC
 )
 add_library(Sokoban::core ALIAS sokoban_core)
 target_include_directories(sokoban_core PUBLIC src)
-target_include_directories(sokoban_core PRIVATE third_party/miniaudio)
+target_include_directories(sokoban_core SYSTEM PRIVATE third_party/miniaudio)
 target_link_libraries(sokoban_core
     PUBLIC SDL3::SDL3
     PRIVATE Threads::Threads sokoban_json sokoban_stb sokoban_cgltf
@@ -626,6 +643,7 @@ add_library(sokoban_ui STATIC
     src/engine/InputRouter.cpp
     src/engine/ShellFlow.cpp
     src/engine/ui/FontAtlas.cpp
+    src/engine/ui/StbTruetypeImplementation.cpp
     src/engine/ui/InputPrompts.cpp
     src/engine/ui/MenuKit.cpp
     src/engine/ui/OptionsMenu.cpp
@@ -650,6 +668,19 @@ if(MSVC)
 else()
     set_source_files_properties(src/engine/MiniaudioImpl.cpp PROPERTIES COMPILE_OPTIONS -w)
 endif()
+
+# Compile vendor implementations without applying the first-party lint policy
+# or injecting the shared PCH into their macro-controlled headers.
+set(SOKOBAN_VENDOR_IMPLEMENTATION_SOURCES
+    src/engine/MiniaudioImpl.cpp
+    src/engine/render/CgltfImplementation.cpp
+    src/engine/render/StbImageImplementation.cpp
+    src/engine/render/VulkanMemoryAllocatorImplementation.cpp
+    src/engine/ui/StbTruetypeImplementation.cpp
+)
+set_source_files_properties(${SOKOBAN_VENDOR_IMPLEMENTATION_SOURCES}
+    ${SOKOBAN_IMGUI_SOURCES}
+    PROPERTIES SKIP_LINTING ON SKIP_PRECOMPILE_HEADERS ON)
 
 if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
 add_library(sokoban_render_vulkan STATIC
@@ -685,9 +716,8 @@ if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
         target_sources(sokoban_render_vulkan PRIVATE $<$<CONFIG:Debug>:${imgui_source}>)
     endforeach()
 endif()
-target_include_directories(sokoban_render_vulkan
-    PUBLIC src
-    PRIVATE
+target_include_directories(sokoban_render_vulkan PUBLIC src)
+target_include_directories(sokoban_render_vulkan SYSTEM PRIVATE
         third_party/imgui
         third_party/imgui/backends
         third_party/imgui/misc/cpp
@@ -718,13 +748,6 @@ else()
         src/engine/render/VulkanMemoryAllocatorImplementation.cpp
         PROPERTIES COMPILE_OPTIONS "-w")
 endif()
-# Third-party implementation units compile with their own configuration
-# macros and warning levels; they gain nothing from the shared PCH.
-set_source_files_properties(
-    src/engine/MiniaudioImpl.cpp
-    src/engine/render/VulkanMemoryAllocatorImplementation.cpp
-    ${SOKOBAN_IMGUI_SOURCES}
-    PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
 target_link_libraries(sokoban_content_tool PRIVATE sokoban_core)
 
@@ -841,6 +864,8 @@ add_dependencies(sokoban sokoban_content)
 target_include_directories(sokoban PRIVATE
     src
     "${CMAKE_CURRENT_BINARY_DIR}/generated"
+)
+target_include_directories(sokoban SYSTEM PRIVATE
     third_party/imgui
     third_party/imgui/backends
     third_party/imgui/misc/cpp
@@ -1105,11 +1130,6 @@ if(SOKOBAN_BUILD_TESTS)
             TIMEOUT 30
             SKIP_RETURN_CODE 77
         )
-        if(SOKOBAN_ENABLE_SANITIZERS)
-            set_property(TEST vulkan_smoke APPEND PROPERTY ENVIRONMENT
-                "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
-        endif()
-
         add_test(NAME application_validation_teardown
             COMMAND "${CMAKE_COMMAND}"
                 "-DSOKOBAN_EXECUTABLE=$<TARGET_FILE:sokoban>"
@@ -1120,6 +1140,13 @@ if(SOKOBAN_BUILD_TESTS)
             LABELS "vulkan;smoke"
             TIMEOUT 40
         )
+        if(SOKOBAN_ENABLE_SANITIZERS)
+            # Both tests initialize SDL/X11 and Vulkan. The application child
+            # inherits this environment from the CMake teardown verifier.
+            set_property(TEST vulkan_smoke application_validation_teardown
+                APPEND PROPERTY ENVIRONMENT
+                "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
+        endif()
     endif()
 
     # Header-only and dependency-free: the point is that the flags a CI gate

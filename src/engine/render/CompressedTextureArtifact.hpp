@@ -12,7 +12,7 @@
 
 namespace sokoban {
 
-enum class CompressedTextureFormat : uint32_t {
+enum class CompressedTextureFormat : uint8_t {
     Bc7Unorm = 145,
     Bc7Srgb = 146,
 };

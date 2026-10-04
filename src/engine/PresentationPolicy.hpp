@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace sokoban {
 
 // Presentation is deliberately a policy rather than a platform mode. The
@@ -12,7 +14,7 @@ struct PresentationPolicy {
     bool operator==(const PresentationPolicy&) const = default;
 };
 
-enum class PresentationMode {
+enum class PresentationMode : uint8_t {
     Fifo,
     Mailbox,
     Immediate,

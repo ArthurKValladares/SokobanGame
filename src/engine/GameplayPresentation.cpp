@@ -702,9 +702,9 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
                 physicalLegs.push_back(
                     { current,
                       toVec3(transit.entrance) +
-                          Vec3 { entry.x * 0.5f, entry.y * 0.5f, 0 } });
+                          Vec3 { static_cast<float>(entry.x) * 0.5f, static_cast<float>(entry.y) * 0.5f, 0 } });
                 current = toVec3(transit.exit) +
-                    Vec3 { exit.x * 0.5f, exit.y * 0.5f, 0 };
+                    Vec3 { static_cast<float>(exit.x) * 0.5f, static_cast<float>(exit.y) * 0.5f, 0 };
             }
             if (!physicalLegs.empty()) {
                 physicalLegs.push_back({ current, to });
@@ -734,9 +734,9 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
                 const GridPosition exitEdge =
                     portalEdgeOffset(*level->plateAt(*exit));
                 const Vec3 mouth = toVec3(before) +
-                    Vec3 { entryEdge.x * 0.5f, entryEdge.y * 0.5f, 0 };
+                    Vec3 { static_cast<float>(entryEdge.x) * 0.5f, static_cast<float>(entryEdge.y) * 0.5f, 0 };
                 const Vec3 emerged = toVec3(*exit) +
-                    Vec3 { exitEdge.x * 0.5f, exitEdge.y * 0.5f, 0 };
+                    Vec3 { static_cast<float>(exitEdge.x) * 0.5f, static_cast<float>(exitEdge.y) * 0.5f, 0 };
                 builder.addMotion({ .target = target,
                                     .from = from,
                                     .to = mouth,

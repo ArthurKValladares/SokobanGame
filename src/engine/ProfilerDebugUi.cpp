@@ -153,7 +153,8 @@ void drawFlameChart(const CpuProfileFrame& frame)
             continue;
         }
         threadY[thread.index] = height;
-        height += (maximumDepth[thread.index] + 1U) * rowHeight + threadGap;
+        height += static_cast<float>(maximumDepth[thread.index] + 1U) *
+            rowHeight + threadGap;
     }
     height = std::clamp(height, 80.0f, 420.0f);
     const float width = std::max(280.0f, ImGui::GetContentRegionAvail().x);

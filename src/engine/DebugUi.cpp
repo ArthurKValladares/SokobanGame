@@ -16,6 +16,7 @@
 #include <system_error>
 #include <utility>
 #include <vector>
+#include <cstdint>
 
 namespace sokoban {
 namespace {
@@ -50,7 +51,7 @@ std::vector<DebugUi::DrawCallback>& debugTopBarControls()
     return controls;
 }
 
-enum class DebugUiTheme {
+enum class DebugUiTheme : uint8_t {
     Dark,
     Light,
     Classic,
@@ -78,7 +79,7 @@ enum class DebugUiTheme {
     NuklearGray,
 };
 
-enum class DebugUiThemeGroup {
+enum class DebugUiThemeGroup : uint8_t {
     BuiltIn,
     Curated,
     ImGuiGallery,

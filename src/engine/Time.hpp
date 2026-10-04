@@ -9,18 +9,18 @@
 
 namespace sokoban {
 
-enum class SimulationSuspension : std::uint64_t {
+enum class SimulationSuspension : uint8_t {
     Minimized = 1U << 0,
     Backgrounded = 1U << 1,
 };
 
-enum class FramePacingSuspension : std::uint64_t {
+enum class FramePacingSuspension : uint8_t {
     Unfocused = 1U << 0,
     Minimized = 1U << 1,
     Backgrounded = 1U << 2,
 };
 
-enum class FramePacingActivity {
+enum class FramePacingActivity : uint8_t {
     Focused,
     Unfocused,
     Minimized,

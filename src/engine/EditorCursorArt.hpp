@@ -25,7 +25,8 @@ struct Image {
 
     [[nodiscard]] std::uint8_t alphaAt(int x, int y) const
     {
-        return rgba[static_cast<std::size_t>((y * size + x) * 4 + 3)];
+        return rgba[(static_cast<std::size_t>(y) * size +
+                     static_cast<std::size_t>(x)) * 4 + 3];
     }
 };
 
@@ -117,7 +118,8 @@ namespace detail {
             }
             const float count = static_cast<float>(samples * samples);
             const std::size_t offset =
-                static_cast<std::size_t>((y * size + x) * 4);
+                (static_cast<std::size_t>(y) * size +
+                 static_cast<std::size_t>(x)) * 4;
             const auto byte = [](float value) {
                 return static_cast<std::uint8_t>(
                     std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));

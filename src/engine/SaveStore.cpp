@@ -237,6 +237,7 @@ SaveStore::LoadResult SaveStore::load()
             } catch (const InvalidPlayerProfileData&) {
                 // Interrupted-write recovery may still have a newer valid
                 // temporary file or the displaced prior primary.
+                decodedPrimary.reset();
             }
         }
 
@@ -264,6 +265,7 @@ SaveStore::LoadResult SaveStore::load()
                     } catch (const std::exception&) {
                         // This candidate is not readable by the current
                         // process/build. A later backup may still be usable.
+                        continue;
                     }
                 }
             }

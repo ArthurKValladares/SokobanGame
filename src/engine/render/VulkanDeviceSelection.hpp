@@ -33,7 +33,7 @@ struct VulkanDeviceFeatureSupport {
     bool samplerAnisotropy = false;
 };
 
-enum class VulkanFeatureTierRejection {
+enum class VulkanFeatureTierRejection : uint8_t {
     None,
     Vulkan13,
     PushConstantCapacity,

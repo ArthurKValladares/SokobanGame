@@ -389,15 +389,15 @@ void Application::finishEvidenceCapture()
                << ")\n";
     }
     report << "- Process resident memory: "
-           << evidenceStats_.processResidentBytes / (1024.0 * 1024.0)
+           << static_cast<double>(evidenceStats_.processResidentBytes) / (1024.0 * 1024.0)
            << " MiB (peak "
-           << evidenceStats_.processPeakResidentBytes / (1024.0 * 1024.0)
+           << static_cast<double>(evidenceStats_.processPeakResidentBytes) / (1024.0 * 1024.0)
            << " MiB)\n";
     report << "- GPU allocation memory: "
-           << evidenceStats_.gpuMemoryAllocationBytes / (1024.0 * 1024.0)
+           << static_cast<double>(evidenceStats_.gpuMemoryAllocationBytes) / (1024.0 * 1024.0)
            << " MiB in " << evidenceStats_.gpuMemoryAllocationCount
            << " allocations; "
-           << evidenceStats_.gpuMemoryBlockBytes / (1024.0 * 1024.0)
+           << static_cast<double>(evidenceStats_.gpuMemoryBlockBytes) / (1024.0 * 1024.0)
            << " MiB reserved in blocks\n";
     report << "- Scene image: `" << sceneName << "`\n";
     if (evidenceAmbientOcclusionEnabled_) {

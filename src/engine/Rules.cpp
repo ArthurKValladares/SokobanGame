@@ -865,7 +865,8 @@ std::vector<char> rotatorEngagement(const Level& level, const GameState& state)
 {
     std::vector<char> engaged(level.rotators().size(), 0);
     for (std::size_t i = 0; i < engaged.size(); ++i) {
-        engaged[i] = isRotatorEngaged(level, state, level.rotators()[i]);
+        engaged[i] = static_cast<char>(
+            isRotatorEngaged(level, state, level.rotators()[i]));
     }
     return engaged;
 }
@@ -935,7 +936,8 @@ std::vector<char> elevatorEngagement(const Level& level, const GameState& state)
 {
     std::vector<char> engaged(level.elevators().size(), 0);
     for (std::size_t i = 0; i < engaged.size(); ++i) {
-        engaged[i] = isElevatorEngaged(level, state, level.elevators()[i]);
+        engaged[i] = static_cast<char>(
+            isElevatorEngaged(level, state, level.elevators()[i]));
     }
     return engaged;
 }
@@ -944,7 +946,8 @@ std::vector<char> minecartEngagement(const Level& level, const GameState& state)
 {
     std::vector<char> engaged(level.minecarts().size(), 0);
     for (std::size_t i = 0; i < engaged.size(); ++i) {
-        engaged[i] = isMinecartEngaged(level, state, level.minecarts()[i]);
+        engaged[i] = static_cast<char>(
+            isMinecartEngaged(level, state, level.minecarts()[i]));
     }
     return engaged;
 }
@@ -1012,7 +1015,7 @@ std::vector<char> gateOpenness(const Level& level, const GameState& state)
 {
     std::vector<char> open(level.gates().size(), 0);
     for (std::size_t i = 0; i < open.size(); ++i) {
-        open[i] = isGateOpen(level, state, level.gates()[i]);
+        open[i] = static_cast<char>(isGateOpen(level, state, level.gates()[i]));
     }
     return open;
 }
@@ -3770,9 +3773,9 @@ private:
                     aliveTarget = target != turretIndex && !movable.dead &&
                         !movable.fallen && turretDirection(movable).has_value();
                 }
-                visible[turretIndex][target] = aliveTarget &&
+                visible[turretIndex][target] = static_cast<char>(aliveTarget &&
                     turretHasLineOfSight(
-                        level_, after_, turret.cell, *direction, cellOf(target));
+                        level_, after_, turret.cell, *direction, cellOf(target)));
             }
         }
         return visible;

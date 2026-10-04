@@ -24,7 +24,7 @@ class OverworldMapEditor;
 class LevelEditor {
 public:
     struct SaveResult {
-        enum class Outcome {
+        enum class Outcome : uint8_t {
             Failed,
             Saved,
             SourceSavedMirrorStale,
@@ -58,7 +58,7 @@ public:
         operator bool() const noexcept { return succeeded(); }
     };
 
-    enum class Tool {
+    enum class Tool : uint8_t {
         Tiles,
         Decorations,
         Selectors,
@@ -67,7 +67,7 @@ public:
     // Movement is tool-independent: selectors carry extra assignment data,
     // but participate in picking and placement like other authored objects.
     struct MoveObject {
-        enum class Kind {
+        enum class Kind : uint8_t {
             Tile,
             ScreenSelector,
         };

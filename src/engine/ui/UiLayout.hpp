@@ -7,12 +7,12 @@
 
 namespace sokoban {
 
-enum class UiLayoutAxis {
+enum class UiLayoutAxis : uint8_t {
     Horizontal,
     Vertical,
 };
 
-enum class UiLayoutSizeKind {
+enum class UiLayoutSizeKind : uint8_t {
     Content,
     Fixed,
     Fill,

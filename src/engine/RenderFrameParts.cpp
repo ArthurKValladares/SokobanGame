@@ -119,9 +119,9 @@ void appendPortalVisual(
     // Analytic trajectories keep gameplay, editor, thumbnails and scrubbing
     // consistent without spawning a separate long-lived particle emitter.
     const float seed =
-        tile.cell.x * 0.37f + tile.cell.y * 0.61f + tile.cell.z * 0.19f;
+        static_cast<float>(tile.cell.x) * 0.37f + static_cast<float>(tile.cell.y) * 0.61f + static_cast<float>(tile.cell.z) * 0.19f;
     for (int glow = 0; glow < 48; ++glow) {
-        const float angle = glow * (2.0f * pi / 48.0f) + timeSeconds * 1.5f;
+        const float angle = static_cast<float>(glow) * (2.0f * pi / 48.0f) + timeSeconds * 1.5f;
         frame.particles.push_back({
             .position = center - normal * 0.045f +
                 tangent * (std::cos(angle) * 0.37f) +
@@ -136,10 +136,10 @@ void appendPortalVisual(
         });
     }
     for (int spark = 0; spark < 64; ++spark) {
-        const float cycle = spark / 64.0f + timeSeconds * 0.42f + seed;
+        const float cycle = static_cast<float>(spark) / 64.0f + timeSeconds * 0.42f + seed;
         const float phase = cycle - std::floor(cycle);
         const float angle =
-            spark * 2.399963f + timeSeconds * 4.0f + phase * 5.0f;
+            static_cast<float>(spark) * 2.399963f + timeSeconds * 4.0f + phase * 5.0f;
         const float radius = 1.0f + (1.0f - phase) * 0.30f;
         const float front = 0.04f + (1.0f - phase) * 0.24f;
         const Vec3 position = center - normal * front +

@@ -99,7 +99,7 @@ inline constexpr float clipSpaceQuad = 0.0f;
 //
 // shaders/include/DrawMode.glsl mirrors these values and DrawModeTests pins the
 // two together, so the numbering can no longer drift.
-enum class DrawMaterialMode : uint32_t {
+enum class DrawMaterialMode : uint8_t {
     Untextured = 0,
     ManifestTexture = 1,
     GltfMaterial = 2,

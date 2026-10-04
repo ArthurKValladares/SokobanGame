@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cstdint>
+
 namespace sokoban {
 
-enum class SaveSlotState {
+enum class SaveSlotState : uint8_t {
     Empty,
     Ready,
     Recoverable,

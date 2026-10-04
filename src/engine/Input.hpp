@@ -18,7 +18,7 @@
 
 namespace sokoban {
 
-enum class ActiveInputDevice {
+enum class ActiveInputDevice : uint8_t {
     KeyboardMouse,
     Gamepad,
 };
@@ -38,7 +38,7 @@ struct GamepadPresentation {
 // consumes actions; raw keyboard/mouse queries remain available for editor UI.
 class InputState {
 public:
-    enum class PressPolicy {
+    enum class PressPolicy : uint8_t {
         Record,
         Suppress,
     };
@@ -84,7 +84,7 @@ public:
     [[nodiscard]] std::size_t invalidBindingCount() const { return invalidBindingCount_; }
 
 private:
-    enum class CompiledBindingKind {
+    enum class CompiledBindingKind : uint8_t {
         Keyboard,
         GamepadButton,
         GamepadAxis,

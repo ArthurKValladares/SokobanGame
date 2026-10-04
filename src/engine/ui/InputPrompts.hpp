@@ -11,12 +11,13 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <cstdint>
 
 namespace sokoban {
 
 class AssetManifest;
 
-enum class InputPromptTheme {
+enum class InputPromptTheme : uint8_t {
     Keyboard,
     Generic,
     Xbox,

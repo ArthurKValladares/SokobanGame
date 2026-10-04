@@ -16,7 +16,7 @@
 
 namespace sokoban {
 
-enum class LoadState {
+enum class LoadState : uint8_t {
     Unrequested,
     Queued,
     Loading,
@@ -49,7 +49,7 @@ inline void throwIfFailed(
         path.string() + "'");
 }
 
-enum class PublishGate { Stop, Proceed };
+enum class PublishGate : uint8_t { Stop, Proceed };
 
 // Owns the asynchronous payload and every state transition shared by model,
 // texture, and animation publication. GPU resources remain in their typed

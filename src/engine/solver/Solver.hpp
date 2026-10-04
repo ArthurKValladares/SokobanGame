@@ -7,15 +7,16 @@
 #include <optional>
 #include <string_view>
 #include <vector>
+#include <cstdint>
 
 namespace sokoban::solver {
 
-enum class Strategy {
+enum class Strategy : uint8_t {
     BreadthFirst,
     BestFirst,
 };
 
-enum class Status {
+enum class Status : uint8_t {
     Solved,
     Exhausted,
     StateLimitReached,

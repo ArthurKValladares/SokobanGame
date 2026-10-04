@@ -619,6 +619,9 @@ std::string linkGroupText(const LevelEditor::LinkGroup& group)
             ", " + std::to_string(group.portals.size()) + " portal entrances";
     }
     std::vector<std::string> devices;
+    devices.reserve(group.gates.size() + group.rotators.size() +
+        group.lockPlates.size() + group.elevators.size() +
+        group.minecarts.size());
     for (const GridPosition3 cell : group.gates) {
         devices.push_back("Gate " + cellText(cell));
     }
@@ -1409,12 +1412,10 @@ void LevelEditorDebugUi::drawSelectorPalette(LevelEditor& editor)
         "Current: %s",
         LevelEditor::selectorTargetLabel(*selected, levels).c_str());
     std::string levelPreview = "Unassigned";
-    const LevelEditor::LevelDirectory* targetLevel = nullptr;
     if (target) {
         const auto found = std::ranges::find(
             levels, target->level, &LevelEditor::LevelDirectory::index);
         if (found != levels.end()) {
-            targetLevel = &*found;
             levelPreview = levelLabel(*found);
         } else {
             levelPreview = "Missing Level " +
@@ -1452,7 +1453,7 @@ void LevelEditorDebugUi::drawSelectorPalette(LevelEditor& editor)
     // invalidate the pointer captured above.
     selected = editor.selectedSelector();
     target = selected ? selected->target : std::nullopt;
-    targetLevel = nullptr;
+    const LevelEditor::LevelDirectory* targetLevel = nullptr;
     if (target) {
         const auto found = std::ranges::find(
             levels, target->level, &LevelEditor::LevelDirectory::index);

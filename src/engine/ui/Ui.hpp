@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <cstdint>
 
 namespace sokoban {
 
@@ -19,7 +20,7 @@ struct UiRect {
     Vec2 size {};
 };
 
-enum class UiDrawKind {
+enum class UiDrawKind : uint8_t {
     Solid,
     FontGlyph,
     Image,

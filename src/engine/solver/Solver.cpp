@@ -604,7 +604,7 @@ Result solve(const Level& level, const Options& options)
                     result.statistics);
             }
             PackedStateKey canonicalKey = successorSolved
-                ? rawKey
+                ? PackedStateKey(rawKey)
                 : std::move(region->canonical);
             if (!canonicalQueued.emplace(std::move(canonicalKey)).second) {
                 ++result.statistics.canonicalDuplicates;

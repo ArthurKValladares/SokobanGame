@@ -48,7 +48,7 @@ struct Section {
     std::string_view namePrefix;
 };
 
-enum class Kind {
+enum class Kind : uint8_t {
     Float,
     UInt,
     Color3,

@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <span>
@@ -310,7 +311,7 @@ struct Ray {
 // calls "top" appears at the bottom of the window. That does not affect any
 // test here, which is why the planes are also addressable by index.
 struct Frustum {
-    enum Side : std::size_t {
+    enum Side : std::uint8_t {
         Left = 0,
         Right = 1,
         Bottom = 2,

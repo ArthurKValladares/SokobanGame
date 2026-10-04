@@ -94,7 +94,6 @@ private:
     void drawPermanentDeleteConfirmation(LevelEditor& editor);
 
     std::string filePathBuffer_;
-    bool showDebugView_ = false;
     std::string browserRootBuffer_;
     std::string decorationFilter_;
     std::string decorationRegistrationStatus_;
@@ -109,21 +108,22 @@ private:
     // it was last filled from.
     std::string elevatorLevelsBuffer_;
     std::optional<std::pair<std::size_t, std::vector<int>>> elevatorLevelsSource_;
-    bool elevatorLevelsEditing_ = false;
-    bool elevatorLevelsError_ = false;
     int requestedWidth_ = 12;
     int requestedHeight_ = 8;
     std::optional<LevelEditor::LevelDirectory> pendingRenameLevel_;
     std::optional<int> pendingRenameScreen_;
     std::string renameBuffer_;
-    bool renamePopupOpen_ = false;
     std::optional<LevelEditor::LevelDirectory> pendingDeleteLevel_;
-    bool deleteLevelConfirmationOpen_ = false;
     std::filesystem::path pendingPermanentDeletePath_;
-    bool permanentDeleteConfirmationOpen_ = false;
     std::filesystem::path overworldEditorRoot_;
     int overworldMoveSlot_[2] { 0, 0 };
     int overworldRestoreSlot_[2] { 0, 0 };
+    bool showDebugView_ = false;
+    bool elevatorLevelsEditing_ = false;
+    bool elevatorLevelsError_ = false;
+    bool renamePopupOpen_ = false;
+    bool deleteLevelConfirmationOpen_ = false;
+    bool permanentDeleteConfirmationOpen_ = false;
 };
 
 } // namespace sokoban

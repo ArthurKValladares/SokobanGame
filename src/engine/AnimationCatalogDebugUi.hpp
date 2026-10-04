@@ -7,6 +7,7 @@
 
 #include <span>
 #include <string>
+#include <cstdint>
 
 namespace sokoban {
 
@@ -47,7 +48,7 @@ private:
         std::span<const AnimationUseDefinition> definitions);
     void drawTimelineEventEditor(const TimelineContext& timeline);
 
-    enum class TimelinePage {
+    enum class TimelinePage : uint8_t {
         EventList,
         EventEditor,
     };

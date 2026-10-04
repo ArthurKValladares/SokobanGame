@@ -60,7 +60,8 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_DISABLE_FIND_PACKAGE_Vulkan": "ON",
         "SOKOBAN_HEADLESS_TESTS_ONLY": "ON",
-        "SOKOBAN_WARNINGS_AS_ERRORS": "ON"
+        "SOKOBAN_WARNINGS_AS_ERRORS": "ON",
+        "SDL_WAYLAND": "OFF"
       }
     },
     {
@@ -74,7 +75,8 @@
         "CMAKE_C_COMPILER": "gcc-13",
         "CMAKE_CXX_COMPILER": "g++-13",
         "SOKOBAN_BUILD_TESTS": "ON",
-        "SOKOBAN_WARNINGS_AS_ERRORS": "ON"
+        "SOKOBAN_WARNINGS_AS_ERRORS": "ON",
+        "SDL_WAYLAND": "OFF"
       },
       "condition": {
         "type": "equals",

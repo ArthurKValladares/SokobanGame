@@ -6,10 +6,11 @@
 #include <iosfwd>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 namespace sokoban {
 
-enum class PerformancePriority {
+enum class PerformancePriority : uint8_t {
     Low,
     Medium,
     High,

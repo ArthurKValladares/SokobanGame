@@ -35,6 +35,7 @@
 #include <cmath>
 #include <optional>
 #include <vector>
+#include <cstdint>
 
 #ifndef SOKOBAN_ENABLE_DEBUG_UI
 // Deliberately fatal rather than defaulting to 0. This flag decides whether
@@ -1795,7 +1796,7 @@ private:
     // a subtly wrong frame rather than a crash - the opaque and translucent
     // passes differ in every one of them. Named at the call site instead, the
     // way FrameConfiguration and GltfMeshLoadOptions already are.
-    enum class SceneContent {
+    enum class SceneContent : uint8_t {
         Full,
         // Fog is a fullscreen composite, so mirror previews are withheld from
         // the ordinary translucent pass and replayed once that composite ends.

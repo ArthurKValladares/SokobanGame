@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <system_error>
 #include <utility>
+#include <cstdint>
 
 namespace sokoban::tuning {
 namespace {
@@ -110,7 +111,7 @@ std::pair<std::vector<Argument>, std::size_t> invocationArguments(
 std::string codeOnly(const std::string& text)
 {
     std::string code = text;
-    enum class State { Code, LineComment, BlockComment, String, Character };
+    enum class State : uint8_t { Code, LineComment, BlockComment, String, Character };
     State state = State::Code;
     for (std::size_t index = 0; index < code.size(); ++index) {
         const char character = text[index];

@@ -23,14 +23,14 @@ inline constexpr int currentPlayerProfileFormat = 35;
 // Which top-level sections serialize() writes. Save-slot files carry only
 // progress and the shared settings file only settings; both sections are
 // optional on read (missing sections decode as defaults).
-enum class ProfileSections {
+enum class ProfileSections : uint8_t {
     All,
     ProgressOnly,
     SettingsOnly,
 };
 
 struct PlayerProfile {
-    enum class WorldContext {
+    enum class WorldContext : uint8_t {
         Overworld,
         Puzzle,
     };

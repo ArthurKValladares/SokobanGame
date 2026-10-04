@@ -10,7 +10,7 @@
 
 namespace sokoban {
 
-enum class InputAction {
+enum class InputAction : uint8_t {
     MoveUp,
     MoveDown,
     MoveLeft,
@@ -63,7 +63,7 @@ inline constexpr int editorRecentTileActionCount = 9;
         static_cast<int>(InputAction::EditorRecentTile1) + slot);
 }
 
-enum class AxisDirection {
+enum class AxisDirection : uint8_t {
     Negative,
     Positive,
 };
@@ -122,7 +122,7 @@ struct InputBindings {
     bool operator==(const InputBindings&) const = default;
 };
 
-enum class BindingDeviceClass {
+enum class BindingDeviceClass : uint8_t {
     Keyboard,
     Gamepad,
 };
@@ -157,7 +157,7 @@ void assignBinding(
 // Which actions may share a binding: gameplay and menu actions never run
 // while a document is being edited, and editor actions only run then. Undo,
 // Back, and Play/Stop Draft are live in both.
-enum class InputActionContext {
+enum class InputActionContext : uint8_t {
     Gameplay,
     Editor,
     Global,

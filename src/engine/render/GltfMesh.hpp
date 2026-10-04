@@ -38,7 +38,7 @@ struct MeshVertex {
     uint32_t materialIndex = 0;
 };
 
-enum PrimitiveMaterialFlag : uint32_t {
+enum PrimitiveMaterialFlag : uint8_t {
     PrimitiveMaterialNone = 0,
     PrimitiveMaterialScrollV = 1U << 0U,
 };
@@ -63,7 +63,7 @@ struct PrimitiveMaterialBinding {
 
 // glTF's alpha handling, which decides whether a primitive belongs in the
 // opaque pass, is cut out against a threshold, or blends.
-enum class MaterialAlphaMode : uint32_t {
+enum class MaterialAlphaMode : uint8_t {
     Opaque = 0,
     Mask = 1,
     Blend = 2,
@@ -172,7 +172,7 @@ struct SkinnedPoseMatrices {
 // `interpolation` field entirely until A1 step two, so a STEP curve played as
 // though it were LERP and nothing said so, and a CUBICSPLINE clip failed to
 // load at all.
-enum class AnimationInterpolation {
+enum class AnimationInterpolation : uint8_t {
     Linear,
     Step,
     CubicSpline,
@@ -187,7 +187,7 @@ struct AnimationKeyframes {
     AnimationInterpolation interpolation = AnimationInterpolation::Linear;
 };
 
-enum class AnimationChannelPath {
+enum class AnimationChannelPath : uint8_t {
     Translation,
     Rotation,
     Scale,
@@ -208,7 +208,7 @@ struct GltfAnimationClip {
 // Sampling behavior belongs to the animation request, not to a particular
 // clip. Locomotion can loop a source while a death or attack using the same
 // loader must hold its terminal pose once its clock reaches the end.
-enum class AnimationPlaybackMode {
+enum class AnimationPlaybackMode : uint8_t {
     Loop,
     Clamp,
 };
@@ -238,7 +238,7 @@ struct GltfSourceTransform {
 // Read-only metadata used by content discovery before any image, buffer, or
 // GPU resource is loaded. These types deliberately describe glTF concepts in
 // engine-owned terms; cgltf remains private to GltfMesh.cpp.
-enum class GltfBufferSourceKind {
+enum class GltfBufferSourceKind : uint8_t {
     ExternalUri,
     DataUri,
     EmbeddedGlb,
@@ -252,7 +252,7 @@ struct GltfBufferDependency {
     uint64_t byteLength = 0;
 };
 
-enum class GltfImageSourceKind {
+enum class GltfImageSourceKind : uint8_t {
     ExternalUri,
     DataUri,
     BufferView,
@@ -274,7 +274,7 @@ struct GltfImageDependency {
 
 // Numeric values intentionally match glTF 2.0's sampler constants. The
 // names, defaults, and representation are ours rather than cgltf's.
-enum class GltfSamplerFilter : uint32_t {
+enum class GltfSamplerFilter : uint16_t {
     Unspecified = 0,
     Nearest = 9728,
     Linear = 9729,
@@ -284,7 +284,7 @@ enum class GltfSamplerFilter : uint32_t {
     LinearMipmapLinear = 9987,
 };
 
-enum class GltfSamplerWrap : uint32_t {
+enum class GltfSamplerWrap : uint16_t {
     ClampToEdge = 33071,
     MirroredRepeat = 33648,
     Repeat = 10497,

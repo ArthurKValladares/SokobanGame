@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <cstdint>
 
 namespace sokoban {
 
@@ -30,7 +31,7 @@ public:
         bool forwardedToInput = false;
     };
 
-    enum class BackAction {
+    enum class BackAction : uint8_t {
         None,
         CloseDraftConfirmation,
         OpenDraftConfirmation,

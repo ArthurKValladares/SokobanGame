@@ -253,10 +253,7 @@ private:
     VulkanRenderer renderer_;
     UiContext ui_;
     OptionsMenu optionsMenu_;
-    OptionsMenuView optionsMenuView_;
     TitleScreen titleScreen_;
-    // Pure shell routing; Application executes the commands it emits.
-    ShellFlow shellFlow_;
     std::unique_ptr<AudioSystem> audioSystem_;
     ParticleSystem particleSystem_;
     ParticleEffectDefinition mirrorSwapParticleEffect_;
@@ -272,7 +269,6 @@ private:
     CampaignSession campaign_;
     std::vector<LevelMetadata> levelMetadata_;
     InputState input_;
-    InputRouter inputRouter_;
     SimulationTiming simulationTiming_;
     FrameTimer frameTimer_;
     FramePacer framePacer_;
@@ -304,8 +300,6 @@ private:
     std::array<FrameArena, 2> renderFrameArenas_;
     std::size_t renderFrameArenaIndex_ = 0;
     std::uint64_t smokeFrames_ = 0;
-    bool launchContinue_ = false;
-    bool launchShowTitle_ = false;
     int launchLevel_ = -1;
     int launchScreen_ = 0;
     std::filesystem::path launchEditDocument_;
@@ -315,17 +309,9 @@ private:
 #endif
     std::filesystem::path evidenceOutputDirectory_;
     RenderStats evidenceStats_ {};
-    bool evidenceAmbientOcclusionEnabled_ = true;
-    bool evidenceWaterEnabled_ = false;
-    bool evidencePointLightEnabled_ = false;
-    bool evidencePointLightStressEnabled_ = false;
     int evidenceLevel_ = -1;
     int evidenceScreen_ = 0;
-    bool evidenceDebugUi_ = false;
-    bool evidenceAnimate_ = false;
     std::string evidenceEffects_;
-    bool evidenceWaterDisabled_ = false;
-    bool evidenceWaterReflectionsDisabled_ = false;
     std::optional<RenderFrameData> evidenceEffectSnapshot_;
     FrameTimeTelemetry applicationFrameTelemetry_;
     FrameTimeTelemetry applicationIntervalTelemetry_;
@@ -333,12 +319,28 @@ private:
     FrameTimeTelemetry applicationUpdateTelemetry_;
     FrameTimeTelemetry applicationUiTelemetry_;
     FrameTimeTelemetry applicationBuildTelemetry_;
-    bool evidenceSceneCaptured_ = false;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     float overworldOverviewProgress_ = 0.0f;
     std::optional<OverworldFogReveal> overworldFogReveal_;
-    bool screenPreviewActive_ = false;
     std::int64_t startupConstructionMicroseconds_ = 0;
+    // Group small routing states and flags; the initialization barrier above
+    // stays before renderer_ so its first surface sees the configured window.
+    OptionsMenuView optionsMenuView_;
+    // Pure shell routing; Application executes the commands it emits.
+    ShellFlow shellFlow_;
+    InputRouter inputRouter_;
+    bool launchContinue_ = false;
+    bool launchShowTitle_ = false;
+    bool evidenceAmbientOcclusionEnabled_ = true;
+    bool evidenceWaterEnabled_ = false;
+    bool evidencePointLightEnabled_ = false;
+    bool evidencePointLightStressEnabled_ = false;
+    bool evidenceDebugUi_ = false;
+    bool evidenceAnimate_ = false;
+    bool evidenceWaterDisabled_ = false;
+    bool evidenceWaterReflectionsDisabled_ = false;
+    bool evidenceSceneCaptured_ = false;
+    bool screenPreviewActive_ = false;
     bool startupReported_ = false;
     bool running_ = true;
 };

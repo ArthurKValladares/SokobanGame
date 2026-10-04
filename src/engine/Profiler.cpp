@@ -367,7 +367,7 @@ bool CpuProfiler::exportChromeTrace(
                        << "\",\"cat\":\"cpu\",\"ph\":\"X\","
                        << "\"pid\":1,\"tid\":" << event.threadIndex
                        << ",\"ts\":"
-                       << frame.traceStartMicroseconds +
+                       << static_cast<double>(frame.traceStartMicroseconds) +
                               event.startMilliseconds * 1000.0
                        << ",\"dur\":"
                        << event.durationMilliseconds * 1000.0 << '}';

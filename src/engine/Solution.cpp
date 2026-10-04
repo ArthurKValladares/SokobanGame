@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <cstdio>
 #include <limits>
 #include <sstream>
@@ -614,7 +615,7 @@ std::uint64_t levelDigest(const Level::Definition& definition)
         return cellOrder(link.cell);
     });
     const auto colorChannel = [](float value) {
-        return static_cast<int>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+    return static_cast<int>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
     };
     for (const Level::ObjectLink& link : objectLinks) {
         hashBytes(
@@ -1014,9 +1015,14 @@ ReplayReport replay(const Level& level, const Solution& solution)
                 return state.contains(pointer) ? state.at(pointer).dump()
                                                : "<missing>";
             };
-            return { .message = where + ": state " + path + " should be " +
-                         valueAt(expectedState) + " but is " +
-                         valueAt(currentState) };
+            std::string message = where;
+            message += ": state ";
+            message += path;
+            message += " should be ";
+            message += valueAt(expectedState);
+            message += " but is ";
+            message += valueAt(currentState);
+            return { .message = std::move(message) };
         }
         if (driver.solved() && index + 1 < solution.steps.size()) {
             return {

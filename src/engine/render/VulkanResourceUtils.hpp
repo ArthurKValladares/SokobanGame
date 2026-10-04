@@ -16,8 +16,8 @@ class VulkanMemoryAllocator;
 
 class VulkanError final : public std::runtime_error {
 public:
-    VulkanError(VkResult result, std::string message)
-        : std::runtime_error(std::move(message))
+    VulkanError(VkResult result, const std::string& message)
+        : std::runtime_error(message)
         , result_(result)
     {
     }

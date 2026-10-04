@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 
 #include <filesystem>
+#include <cstdint>
 
 namespace sokoban {
 
@@ -103,7 +104,7 @@ public:
 #endif
 
 private:
-    enum class VertexLayout {
+    enum class VertexLayout : uint8_t {
         None,
         Mesh,
         MeshPosition,
@@ -134,13 +135,13 @@ private:
     // leave it untouched, so a translucent surface inherits the mask of the
     // geometry behind it rather than blending garbage over it. Only a draw
     // targeting a display image still writes a real alpha.
-    enum class Target {
+    enum class Target : uint8_t {
         SceneBlended,
         SceneOpaque,
         Display,
     };
 
-    enum class PostProcessBlend {
+    enum class PostProcessBlend : uint8_t {
         Replace,
         Atmosphere,
     };

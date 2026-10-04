@@ -45,7 +45,7 @@ void writeOverworldLayout(
     const std::filesystem::path& path,
     const OverworldLayout& layout);
 
-enum class OverworldValidationMode {
+enum class OverworldValidationMode : uint8_t {
     // Allows unassigned selectors and incomplete puzzle-screen coverage while
     // authors build the map. Every assigned target must still exist.
     Structural,

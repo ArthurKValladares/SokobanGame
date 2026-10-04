@@ -42,7 +42,7 @@ struct VulkanMemoryStatistics {
     std::array<VulkanMemoryHeapStatistics, VK_MAX_MEMORY_HEAPS> heaps {};
 };
 
-enum class VulkanMemoryUsage {
+enum class VulkanMemoryUsage : uint8_t {
     DeviceLocal,
     HostSequentialWrite,
     HostReadback,

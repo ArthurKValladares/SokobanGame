@@ -5,7 +5,7 @@
 
 namespace sokoban {
 
-enum class AntiAliasingMode {
+enum class AntiAliasingMode : uint8_t {
     None,
     Msaa2x,
     Msaa4x,

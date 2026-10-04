@@ -4,12 +4,13 @@
 
 #include <optional>
 #include <string_view>
+#include <cstdint>
 
 struct SDL_Window;
 
 namespace sokoban {
 
-enum class VulkanFailure {
+enum class VulkanFailure : uint8_t {
     DeviceLost,
     SurfaceLost,
     UnsupportedHardware,

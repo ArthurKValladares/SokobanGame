@@ -8,6 +8,7 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include <cstdint>
 
 namespace sokoban {
 
@@ -70,7 +71,7 @@ using TitleAction = std::variant<
 // confirmation page).
 class TitleScreen {
 public:
-    enum class Page {
+    enum class Page : uint8_t {
         Main,
         SaveSlots,
         SlotDeleteConfirmation,

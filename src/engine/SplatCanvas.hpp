@@ -25,7 +25,7 @@ public:
     // and rescales every painted stroke.
     static constexpr uint32_t texelsPerTile = 32;
 
-    enum class BrushColor {
+    enum class BrushColor : uint8_t {
         // Paints toward the detail layer (rock).
         White,
         // Paints toward the base layer (grass).

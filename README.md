@@ -169,6 +169,15 @@ a bounded player-profile fuzz run, and the Vulkan-free headless preset without
 downloading the SDK. Repository branch protection should require every workflow
 check before merging to `main`.
 
+Clang-tidy builds require CMake 3.27 or newer and check the first-party
+adapters and headers. ImGui, miniaudio,
+VMA, cgltf, and stb implementation files skip linting, and vendor headers are
+system includes. Linux CI uses SDL's X11 backend under Xvfb, so its presets
+disable unused Wayland protocol generation. Automated smoke/evidence runs
+start windowed to avoid fullscreen requests that need a window manager.
+Both Vulkan sanitizer tests use `tests/lsan.supp` for known SDL/X11 and Vulkan
+loader allocations; leak detection remains enabled for other allocations.
+
 The Linux jobs use the same `ci-debug`, `ci-release`, `ci-sanitize`,
 `ci-tidy`, and `ci-fuzz` presets available locally. These select GCC 13 or
 Clang/clang-tidy 18 explicitly and use separate directories in `out/`.

@@ -5,10 +5,11 @@
 
 #include <cstddef>
 #include <vector>
+#include <cstdint>
 
 namespace sokoban::solver::detail {
 
-enum class DeadPositionReason {
+enum class DeadPositionReason : uint8_t {
     None,
     UnitCount,
     StaticMatching,

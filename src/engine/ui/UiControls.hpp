@@ -4,10 +4,11 @@
 
 #include <span>
 #include <string_view>
+#include <cstdint>
 
 namespace sokoban::uiControls {
 
-enum class ButtonTone {
+enum class ButtonTone : uint8_t {
     Normal,
     Accent,
     Danger,

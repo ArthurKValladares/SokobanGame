@@ -137,8 +137,8 @@ struct MirrorRenderSegment {
 Vec3 toRenderPoint(GridPosition3 point, GridPosition edge = {})
 {
     return {
-        static_cast<float>(point.x) + edge.x * 0.5f,
-        static_cast<float>(point.y) + edge.y * 0.5f,
+        static_cast<float>(point.x) + static_cast<float>(edge.x) * 0.5f,
+        static_cast<float>(point.y) + static_cast<float>(edge.y) * 0.5f,
         static_cast<float>(point.z),
     };
 }

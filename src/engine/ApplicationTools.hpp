@@ -179,10 +179,6 @@ public:
     std::optional<std::size_t> hoverDecoration;
     std::optional<Vec3> brushPoint;
     std::uint64_t uploadedSplatRevision = 0;
-    bool draftExitConfirmationOpen = false;
-    bool bakeThumbnailsRequested = false;
-    // Persisted in the developer session file (DevSession.hpp).
-    bool resumeOnLaunch = true;
 
 private:
     struct DetachedCameraState {
@@ -231,14 +227,11 @@ private:
     };
     std::optional<LinkColorStroke> linkColorStroke_;
 
-    enum class EditorCursor {
+    enum class EditorCursor : uint8_t {
         Default,
         Eyedropper,
         Brush,
     };
-    // What updateEditorInteraction found the pointer wants this frame.
-    EditorCursor wantedEditorCursor_ = EditorCursor::Default;
-    EditorCursor shownEditorCursor_ = EditorCursor::Default;
     SDL_Cursor* eyedropperCursor_ = nullptr;
     SDL_Cursor* brushCursor_ = nullptr;
     // The link color the brush cursor was drawn with; it is redrawn when the
@@ -268,7 +261,6 @@ private:
 public:
     // Source hot reload (DI-10). Application::serviceSourceWatcher drives it.
     SourceWatcher sourceWatcher;
-    bool sourceWatcherConfigured = false;
     std::uint64_t lastSourcePollTicks = 0;
     // Shown under the Asset Manifest tab after a manifest file changes.
     std::string manifestReloadStatus;
@@ -291,8 +283,6 @@ private:
     std::unique_ptr<ShaderHotReload> shaderHotReload_;
     std::string shaderReloadStatus_;
     std::string shaderReloadDiagnostics_;
-    bool shaderCompileFailed_ = false;
-    bool shaderWatchEnabled_ = true;
     std::uint64_t lastShaderPollTicks_ = 0;
 
     bool updateGroundPainting(
@@ -308,6 +298,20 @@ private:
     void persistManifestTexture(
         const std::string& name,
         const std::string& relativePath);
+
+public:
+    bool draftExitConfirmationOpen = false;
+    bool bakeThumbnailsRequested = false;
+    // Persisted in the developer session file (DevSession.hpp).
+    bool resumeOnLaunch = true;
+    bool sourceWatcherConfigured = false;
+
+private:
+    // What updateEditorInteraction found the pointer wants this frame.
+    EditorCursor wantedEditorCursor_ = EditorCursor::Default;
+    EditorCursor shownEditorCursor_ = EditorCursor::Default;
+    bool shaderCompileFailed_ = false;
+    bool shaderWatchEnabled_ = true;
 };
 
 } // namespace sokoban

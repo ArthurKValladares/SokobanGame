@@ -67,13 +67,20 @@ AssetLoadingBudget assetLoadingBudgetFor(const ApplicationOptions& options)
     return budget;
 }
 
-bool configureStartupWindow(Window& window, PlayerProfile& profile)
+bool configureStartupWindow(
+    Window& window, PlayerProfile& profile, bool smokeRun)
 {
     // Apply the persisted mode before Vulkan creates its surface and
     // swapchain. Creating a default window first and changing it after the
     // renderer exists forces an otherwise redundant swapchain generation
     // before frame one.
     profile.normalize();
+    // Automated renders need only the window's initial surface and extent.
+    // Xvfb has no window manager to acknowledge fullscreen/maximize requests,
+    // so keep the constructor's windowed mode for smoke and evidence runs.
+    if (smokeRun) {
+        return true;
+    }
     const UserSettings::Video& video = profile.settings.video;
     if (video.fullscreen) {
         window.setFullscreen(true);
@@ -174,7 +181,7 @@ Application::Application(ApplicationOptions options)
               : options.saveDirectoryOverride)
     , playerProfile_(saveSlots_.loadActiveProfile())
     , startupWindowConfigured_(
-          configureStartupWindow(window_, playerProfile_))
+          configureStartupWindow(window_, playerProfile_, options.smokeFrames != 0))
     , assetRoot_(runtimeContentRoot())
     , assetManifest_(AssetManifest::loadFromFile(assetRoot_ / "manifest.json"))
     , audioStartup_(std::async(std::launch::async, [this] {
@@ -230,8 +237,6 @@ Application::Application(ApplicationOptions options)
           FrameArena("render frame B", renderFrameArenaBytes()),
       }
     , smokeFrames_(options.smokeFrames)
-    , launchContinue_(options.continueGame)
-    , launchShowTitle_(options.showTitle)
     , launchLevel_(options.startLevel)
     , launchScreen_(options.startScreen)
     , launchEditDocument_(std::move(options.editDocument))
@@ -240,17 +245,19 @@ Application::Application(ApplicationOptions options)
 #endif
     , evidenceOutputDirectory_(
           std::move(options.evidenceOutputDirectory))
+    , evidenceLevel_(options.evidenceLevel)
+    , evidenceScreen_(options.evidenceScreen)
+    , evidenceEffects_(std::move(options.evidenceEffects))
+    , launchContinue_(options.continueGame)
+    , launchShowTitle_(options.showTitle)
     , evidenceAmbientOcclusionEnabled_(
           options.evidenceAmbientOcclusionEnabled)
     , evidenceWaterEnabled_(options.evidenceWaterEnabled)
     , evidencePointLightEnabled_(options.evidencePointLightEnabled)
     , evidencePointLightStressEnabled_(
           options.evidencePointLightStressEnabled)
-    , evidenceLevel_(options.evidenceLevel)
-    , evidenceScreen_(options.evidenceScreen)
     , evidenceDebugUi_(options.evidenceDebugUi)
     , evidenceAnimate_(options.evidenceAnimate)
-    , evidenceEffects_(std::move(options.evidenceEffects))
     , evidenceWaterDisabled_(options.evidenceWaterDisabled)
     , evidenceWaterReflectionsDisabled_(options.evidenceWaterReflectionsDisabled)
 {
@@ -2828,7 +2835,7 @@ RenderFrameData Application::buildRenderFrame(
                 playerProfile_.overworldDiscovery.screens,
                 overworldFogReveal_);
         for (RenderFrameData::OverworldFogVolume& volume : fogVolumes) {
-            if (!frame.overworldFogVolumes.push_back(std::move(volume))) {
+            if (!frame.overworldFogVolumes.push_back(volume)) {
                 break;
             }
         }

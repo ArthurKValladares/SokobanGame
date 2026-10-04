@@ -6,6 +6,7 @@
 #include <array>
 #include <optional>
 #include <vector>
+#include <cstdint>
 
 namespace sokoban {
 
@@ -13,13 +14,13 @@ namespace sokoban {
 // projected handles; this class owns hit testing and drag semantics.
 class DecorationGizmo {
 public:
-    enum class Mode {
+    enum class Mode : uint8_t {
         Translate,
         Rotate,
         Scale,
     };
 
-    enum class Axis {
+    enum class Axis : uint8_t {
         X,
         Y,
         Z,
