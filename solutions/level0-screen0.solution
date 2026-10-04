@@ -1,7 +1,9 @@
 # Sokoban 3D recorded solution. Replayed by the solution_replay test;
-# see README.md > Solutions. One input per step, then what it changed.
-format 1
+# see README.md > Solutions. One input per step, then what it changed and its complete settled state.
+format 2
 level-digest a7799b56118fdd89
 recorded-for level0/screen0
 step up p1=6,4,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[],"players":[{"cell":[6,4,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step up p1=6,3,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[],"players":[{"cell":[6,3,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}

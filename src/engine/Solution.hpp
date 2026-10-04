@@ -43,7 +43,7 @@ struct EntityChange {
 
     Kind kind = Kind::Player;
     EntityId id = invalidEntityId;
-    GridPosition3 cell {};
+    GridPosition3 cell { };
     bool dead = false;
     bool fallen = false;
     bool drowned = false;
@@ -54,6 +54,12 @@ struct EntityChange {
 struct Step {
     Input input = Input::Up;
     std::vector<EntityChange> changes;
+    // Complete settled state, including devices, momentum, identities and
+    // turns. The readable entity changes above are retained for movement
+    // diagnostics.
+    GameState state;
+    EntityId activeHeroController = invalidEntityId;
+    bool automaticMotionPaused = false;
 
     bool operator==(const Step&) const = default;
 };
@@ -69,8 +75,8 @@ struct Solution {
 };
 
 // Digest of what gameplay depends on: layers, water layer, character and,
-// when present, rotator links, elevator links and stops, minecart links and
-// direction, and plates authored beneath units.
+// when present, gate/rotator/lock links, elevator links and stops, minecart
+// links and direction, object/portal groups and plates authored beneath units.
 // Decorations and selectors do not affect a solution and are left out.
 [[nodiscard]] std::uint64_t levelDigest(const Level::Definition& definition);
 [[nodiscard]] std::string digestText(std::uint64_t digest);
@@ -103,6 +109,10 @@ public:
     {
         return session_.activeHeroController();
     }
+    [[nodiscard]] bool automaticMotionPaused() const
+    {
+        return session_.automaticMotionPaused();
+    }
     [[nodiscard]] bool solved() const;
     [[nodiscard]] bool anyPlayerDead() const;
 
@@ -115,7 +125,8 @@ private:
 };
 
 [[nodiscard]] std::vector<EntityChange> changesBetween(
-    const GameState& before, const GameState& after);
+    const GameState& before,
+    const GameState& after);
 
 struct Recording {
     bool solved = false;
@@ -138,7 +149,6 @@ struct ReplayReport {
     std::string message;
 };
 
-[[nodiscard]] ReplayReport replay(
-    const Level& level, const Solution& solution);
+[[nodiscard]] ReplayReport replay(const Level& level, const Solution& solution);
 
 } // namespace sokoban::solution

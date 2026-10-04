@@ -3,12 +3,16 @@
 #include "engine/Character.hpp"
 #include "engine/Rules.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstdio>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 namespace sokoban::solution {
@@ -38,12 +42,250 @@ void hashBytes(std::uint64_t& hash, std::string_view bytes)
     }
 }
 
+using Json = nlohmann::json;
+
+Json cellJson(GridPosition3 cell)
+{
+    return Json::array({ cell.x, cell.y, cell.z });
+}
+
+template <typename Integer> Integer exactInteger(const Json& value)
+{
+    if (!value.is_number_integer()) {
+        throw std::runtime_error("state expects an integer");
+    }
+    if (value.is_number_unsigned()) {
+        if (value.get<std::uint64_t>() >
+            static_cast<std::uint64_t>(std::numeric_limits<Integer>::max())) {
+            throw std::runtime_error("state integer is out of range");
+        }
+    } else {
+        const auto number = value.get<std::int64_t>();
+        if constexpr (std::is_unsigned_v<Integer>) {
+            if (number < 0 ||
+                static_cast<std::uint64_t>(number) >
+                    std::numeric_limits<Integer>::max()) {
+                throw std::runtime_error("state integer is out of range");
+            }
+        } else if (
+            number < std::numeric_limits<Integer>::min() ||
+            number > std::numeric_limits<Integer>::max()) {
+            throw std::runtime_error("state integer is out of range");
+        }
+    }
+    return value.get<Integer>();
+}
+
+GridPosition3 parseCell(const Json& value)
+{
+    if (!value.is_array() || value.size() != 3) {
+        throw std::runtime_error("state cell needs three coordinates");
+    }
+    return { exactInteger<int>(value[0]),
+             exactInteger<int>(value[1]),
+             exactInteger<int>(value[2]) };
+}
+
+Json directionJson(std::optional<MoveDirection> direction)
+{
+    return direction ? Json(static_cast<int>(*direction)) : Json(nullptr);
+}
+
+std::optional<MoveDirection> parseDirection(const Json& value)
+{
+    if (value.is_null()) return std::nullopt;
+    const int direction = exactInteger<int>(value);
+    if (direction < 0 || direction > static_cast<int>(MoveDirection::Right)) {
+        throw std::runtime_error("state has an unknown sliding direction");
+    }
+    return static_cast<MoveDirection>(direction);
+}
+
+uint8_t parseTurns(const Json& value)
+{
+    const auto turns = exactInteger<uint8_t>(value);
+    if (turns > 3) throw std::runtime_error("state quarterTurns must be 0-3");
+    return turns;
+}
+
+Json stateJson(
+    const GameState& state,
+    EntityId activeController,
+    bool motionPaused)
+{
+    Json result = {
+        { "activeHeroController", activeController },
+        { "automaticMotionPaused", motionPaused },
+        { "players", Json::array() },
+        { "movables", Json::array() },
+        { "enemies", Json::array() },
+        { "turnedMirrors", Json::array() },
+        { "elevators", Json::array() },
+        { "minecarts", Json::array() },
+        { "activeButtons", Json::array() },
+    };
+    for (const auto& player : state.players) {
+        result["players"].push_back(
+            {
+                { "id", player.id },
+                { "cell", cellJson(player.cell) },
+                { "character",
+                  player.character ? Json(characterTypeName(*player.character))
+                                   : Json(nullptr) },
+                { "controller", player.controller },
+                { "dead", player.dead },
+                { "drowned", player.drowned },
+                { "sliding", directionJson(player.sliding) },
+                { "quarterTurns", player.quarterTurns },
+            });
+    }
+    for (const auto& movable : state.movables) {
+        result["movables"].push_back(
+            {
+                { "id", movable.id },
+                { "type", tileTypeName(movable.type) },
+                { "cell", cellJson(movable.cell) },
+                { "dead", movable.dead },
+                { "fallen", movable.fallen },
+                { "sliding", directionJson(movable.sliding) },
+                { "quarterTurns", movable.quarterTurns },
+            });
+    }
+    for (const auto& enemy : state.enemies) {
+        result["enemies"].push_back(
+            {
+                { "id", enemy.id },
+                { "cell", cellJson(enemy.cell) },
+                { "dead", enemy.dead },
+                { "fallen", enemy.fallen },
+                { "sliding", directionJson(enemy.sliding) },
+                { "quarterTurns", enemy.quarterTurns },
+            });
+    }
+    for (const auto& mirror : state.turnedMirrors) {
+        result["turnedMirrors"].push_back(
+            {
+                { "cell", cellJson(mirror.cell) },
+                { "quarterTurns", mirror.quarterTurns },
+            });
+    }
+    for (const auto& elevator : state.elevators) {
+        result["elevators"].push_back(
+            {
+                { "cell", cellJson(elevator.cell) },
+                { "phase", elevator.phase },
+            });
+    }
+    for (const auto& minecart : state.minecarts) {
+        result["minecarts"].push_back(
+            {
+                { "cell", cellJson(minecart.cell) },
+                { "phase", minecart.phase },
+            });
+    }
+    for (const auto button : state.activeButtons) {
+        result["activeButtons"].push_back(cellJson(button));
+    }
+    return result;
+}
+
+void parseState(const Json& value, Step& step)
+{
+    GameState state;
+    step.activeHeroController =
+        exactInteger<EntityId>(value.at("activeHeroController"));
+    step.automaticMotionPaused = value.at("automaticMotionPaused").get<bool>();
+    const auto array = [&](const char* name) -> const Json& {
+        const auto& items = value.at(name);
+        if (!items.is_array()) {
+            throw std::runtime_error(
+                std::string("state '") + name + "' must be an array");
+        }
+        return items;
+    };
+    for (const auto& item : array("players")) {
+        std::optional<CharacterType> character;
+        if (!item.at("character").is_null()) {
+            character =
+                characterTypeFromName(item.at("character").get<std::string>());
+            if (!character)
+                throw std::runtime_error("state has an unknown character");
+        }
+        state.players.push_back(
+            {
+                .id = exactInteger<EntityId>(item.at("id")),
+                .cell = parseCell(item.at("cell")),
+                .character = character,
+                .controller = exactInteger<EntityId>(item.at("controller")),
+                .dead = item.at("dead").get<bool>(),
+                .drowned = item.at("drowned").get<bool>(),
+                .sliding = parseDirection(item.at("sliding")),
+                .quarterTurns = parseTurns(item.at("quarterTurns")),
+            });
+    }
+    for (const auto& item : array("movables")) {
+        const auto type = tileTypeFromName(item.at("type").get<std::string>());
+        if (!type)
+            throw std::runtime_error("state has an unknown movable type");
+        state.movables.push_back(
+            {
+                .id = exactInteger<EntityId>(item.at("id")),
+                .type = *type,
+                .cell = parseCell(item.at("cell")),
+                .fallen = item.at("fallen").get<bool>(),
+                .dead = item.at("dead").get<bool>(),
+                .sliding = parseDirection(item.at("sliding")),
+                .quarterTurns = parseTurns(item.at("quarterTurns")),
+            });
+    }
+    for (const auto& item : array("enemies")) {
+        state.enemies.push_back(
+            {
+                .id = exactInteger<EntityId>(item.at("id")),
+                .cell = parseCell(item.at("cell")),
+                .fallen = item.at("fallen").get<bool>(),
+                .dead = item.at("dead").get<bool>(),
+                .sliding = parseDirection(item.at("sliding")),
+                .quarterTurns = parseTurns(item.at("quarterTurns")),
+            });
+    }
+    for (const auto& item : array("turnedMirrors")) {
+        state.turnedMirrors.push_back(
+            { .cell = parseCell(item.at("cell")),
+              .quarterTurns = parseTurns(item.at("quarterTurns")) });
+    }
+    for (const auto& item : array("elevators")) {
+        state.elevators.push_back(
+            { .cell = parseCell(item.at("cell")),
+              .phase = exactInteger<uint8_t>(item.at("phase")) });
+    }
+    for (const auto& item : array("minecarts")) {
+        state.minecarts.push_back(
+            { .cell = parseCell(item.at("cell")),
+              .phase = exactInteger<uint16_t>(item.at("phase")) });
+    }
+    for (const auto& item : array("activeButtons")) {
+        state.activeButtons.push_back(parseCell(item));
+    }
+    // Reject unknown fields and coercions, rather than silently losing state.
+    if (stateJson(
+            state, step.activeHeroController, step.automaticMotionPaused) !=
+        value) {
+        throw std::runtime_error(
+            "state contains unknown or noncanonical fields");
+    }
+    step.state = std::move(state);
+}
+
 char kindLetter(EntityChange::Kind kind)
 {
     switch (kind) {
-    case EntityChange::Kind::Player: return 'p';
-    case EntityChange::Kind::Movable: return 'm';
-    case EntityChange::Kind::Enemy: return 'e';
+    case EntityChange::Kind::Player:
+        return 'p';
+    case EntityChange::Kind::Movable:
+        return 'm';
+    case EntityChange::Kind::Enemy:
+        return 'e';
     }
     return '?';
 }
@@ -51,17 +293,20 @@ char kindLetter(EntityChange::Kind kind)
 std::string_view kindWord(EntityChange::Kind kind)
 {
     switch (kind) {
-    case EntityChange::Kind::Player: return "player";
-    case EntityChange::Kind::Movable: return "movable";
-    case EntityChange::Kind::Enemy: return "enemy";
+    case EntityChange::Kind::Player:
+        return "player";
+    case EntityChange::Kind::Movable:
+        return "movable";
+    case EntityChange::Kind::Enemy:
+        return "enemy";
     }
     return "entity";
 }
 
 std::string cellText(GridPosition3 cell)
 {
-    return "(" + std::to_string(cell.x) + ", " + std::to_string(cell.y) +
-        ", " + std::to_string(cell.z) + ")";
+    return "(" + std::to_string(cell.x) + ", " + std::to_string(cell.y) + ", " +
+        std::to_string(cell.z) + ")";
 }
 
 std::string describe(const EntityChange& change)
@@ -81,8 +326,7 @@ std::string describe(const EntityChange& change)
 
 std::string label(const EntityChange& change)
 {
-    return std::string(kindWord(change.kind)) + " " +
-        std::to_string(change.id);
+    return std::string(kindWord(change.kind)) + " " + std::to_string(change.id);
 }
 
 std::vector<EntityChange> snapshotEntities(const GameState& state)
@@ -91,31 +335,34 @@ std::vector<EntityChange> snapshotEntities(const GameState& state)
     entities.reserve(
         state.players.size() + state.movables.size() + state.enemies.size());
     for (const GameState::Player& player : state.players) {
-        entities.push_back({
-            .kind = EntityChange::Kind::Player,
-            .id = player.id,
-            .cell = player.cell,
-            .dead = player.dead,
-            .drowned = player.drowned,
-        });
+        entities.push_back(
+            {
+                .kind = EntityChange::Kind::Player,
+                .id = player.id,
+                .cell = player.cell,
+                .dead = player.dead,
+                .drowned = player.drowned,
+            });
     }
     for (const GameState::Movable& movable : state.movables) {
-        entities.push_back({
-            .kind = EntityChange::Kind::Movable,
-            .id = movable.id,
-            .cell = movable.cell,
-            .dead = movable.dead,
-            .fallen = movable.fallen,
-        });
+        entities.push_back(
+            {
+                .kind = EntityChange::Kind::Movable,
+                .id = movable.id,
+                .cell = movable.cell,
+                .dead = movable.dead,
+                .fallen = movable.fallen,
+            });
     }
     for (const GameState::Enemy& enemy : state.enemies) {
-        entities.push_back({
-            .kind = EntityChange::Kind::Enemy,
-            .id = enemy.id,
-            .cell = enemy.cell,
-            .dead = enemy.dead,
-            .fallen = enemy.fallen,
-        });
+        entities.push_back(
+            {
+                .kind = EntityChange::Kind::Enemy,
+                .id = enemy.id,
+                .cell = enemy.cell,
+                .dead = enemy.dead,
+                .fallen = enemy.fallen,
+            });
     }
     return entities;
 }
@@ -125,7 +372,7 @@ int parseInt(std::string_view text, std::size_t line)
     int value = 0;
     const auto [end, error] =
         std::from_chars(text.data(), text.data() + text.size(), value);
-    if (error != std::errc {} || end != text.data() + text.size()) {
+    if (error != std::errc { } || end != text.data() + text.size()) {
         throw std::runtime_error(
             "solution line " + std::to_string(line) + ": '" +
             std::string(text) + "' is not a number");
@@ -147,13 +394,25 @@ EntityChange parseChange(std::string_view token, std::size_t line)
     }
     EntityChange change;
     switch (token.front()) {
-    case 'p': change.kind = EntityChange::Kind::Player; break;
-    case 'm': change.kind = EntityChange::Kind::Movable; break;
-    case 'e': change.kind = EntityChange::Kind::Enemy; break;
-    default: return fail("has an unknown entity kind");
+    case 'p':
+        change.kind = EntityChange::Kind::Player;
+        break;
+    case 'm':
+        change.kind = EntityChange::Kind::Movable;
+        break;
+    case 'e':
+        change.kind = EntityChange::Kind::Enemy;
+        break;
+    default:
+        return fail("has an unknown entity kind");
     }
-    change.id = static_cast<EntityId>(
-        parseInt(token.substr(1, equals - 1), line));
+    const std::string_view id = token.substr(1, equals - 1);
+    const auto [idEnd, idError] =
+        std::from_chars(id.data(), id.data() + id.size(), change.id);
+    if (idError != std::errc { } || idEnd != id.data() + id.size() ||
+        change.id == invalidEntityId) {
+        return fail("has an invalid entity id");
+    }
     std::string_view rest = token.substr(equals + 1);
     std::string_view flags;
     if (const std::size_t plus = rest.find('+');
@@ -161,16 +420,15 @@ EntityChange parseChange(std::string_view token, std::size_t line)
         flags = rest.substr(plus);
         rest = rest.substr(0, plus);
     }
-    std::array<int, 3> coordinates {};
+    std::array<int, 3> coordinates { };
     for (std::size_t axis = 0; axis < coordinates.size(); ++axis) {
         const std::size_t comma = rest.find(',');
         if ((axis < 2) == (comma == std::string_view::npos)) {
             return fail("needs three coordinates");
         }
         coordinates[axis] = parseInt(rest.substr(0, comma), line);
-        rest = comma == std::string_view::npos
-            ? std::string_view {}
-            : rest.substr(comma + 1);
+        rest = comma == std::string_view::npos ? std::string_view { }
+                                               : rest.substr(comma + 1);
     }
     change.cell = { coordinates[0], coordinates[1], coordinates[2] };
     while (!flags.empty()) {
@@ -186,9 +444,8 @@ EntityChange parseChange(std::string_view token, std::size_t line)
         } else {
             return fail("has an unknown flag");
         }
-        flags = next == std::string_view::npos
-            ? std::string_view {}
-            : flags.substr(next);
+        flags = next == std::string_view::npos ? std::string_view { }
+                                               : flags.substr(next);
     }
     return change;
 }
@@ -196,9 +453,8 @@ EntityChange parseChange(std::string_view token, std::size_t line)
 std::string changeToken(const EntityChange& change)
 {
     std::string token(1, kindLetter(change.kind));
-    token += std::to_string(change.id) + "=" +
-        std::to_string(change.cell.x) + "," +
-        std::to_string(change.cell.y) + "," +
+    token += std::to_string(change.id) + "=" + std::to_string(change.cell.x) +
+        "," + std::to_string(change.cell.y) + "," +
         std::to_string(change.cell.z);
     if (change.dead) {
         token += "+dead";
@@ -244,8 +500,9 @@ std::uint64_t levelDigest(const Level::Definition& definition)
             const std::size_t end = row.find_last_not_of(' ');
             hashBytes(
                 hash,
-                end == std::string::npos ? std::string_view {}
-                                         : std::string_view(row).substr(0, end + 1));
+                end == std::string::npos
+                    ? std::string_view { }
+                    : std::string_view(row).substr(0, end + 1));
             hashBytes(hash, "\n");
         }
     }
@@ -265,13 +522,13 @@ std::uint64_t levelDigest(const Level::Definition& definition)
     const auto cellOrder = [](GridPosition3 cell) {
         return std::array { cell.z, cell.y, cell.x };
     };
-    std::ranges::sort(rotators, {}, [&](const Level::Rotator& rotator) {
+    std::ranges::sort(rotators, { }, [&](const Level::Rotator& rotator) {
         return cellOrder(rotator.cell);
     });
     for (Level::Rotator& rotator : rotators) {
-        std::ranges::sort(rotator.pressurePlates, {}, cellOrder);
-        std::string text = "@rotator " + std::to_string(rotator.cell.x) +
-            "," + std::to_string(rotator.cell.y) + "," +
+        std::ranges::sort(rotator.pressurePlates, { }, cellOrder);
+        std::string text = "@rotator " + std::to_string(rotator.cell.x) + "," +
+            std::to_string(rotator.cell.y) + "," +
             std::to_string(rotator.cell.z) + ":";
         for (GridPosition3 plate : rotator.pressurePlates) {
             text += " " + std::to_string(plate.x) + "," +
@@ -280,28 +537,28 @@ std::uint64_t levelDigest(const Level::Definition& definition)
         hashBytes(hash, text + "\n");
     }
     std::vector<Level::LockPlate> lockPlates = definition.lockPlates;
-    std::ranges::sort(lockPlates, {}, [&](const Level::LockPlate& plate) {
+    std::ranges::sort(lockPlates, { }, [&](const Level::LockPlate& plate) {
         return cellOrder(plate.cell);
     });
     for (auto& plate : lockPlates) {
-        std::ranges::sort(plate.pressurePlates, {}, cellOrder);
+        std::ranges::sort(plate.pressurePlates, { }, cellOrder);
         std::string text = "@lockplate " + std::to_string(plate.cell.x) + "," +
             std::to_string(plate.cell.y) + "," + std::to_string(plate.cell.z) +
             (plate.startEnabled ? ":enabled" : ":disabled");
         for (GridPosition3 link : plate.pressurePlates) {
-            text += " " + std::to_string(link.x) + "," + std::to_string(link.y) +
-                "," + std::to_string(link.z);
+            text += " " + std::to_string(link.x) + "," +
+                std::to_string(link.y) + "," + std::to_string(link.z);
         }
         hashBytes(hash, text + "\n");
     }
     // Elevator links and stops decide which plates move which platforms and
     // where to; hashed only when present, like rotators.
     std::vector<Level::Elevator> elevators = definition.elevators;
-    std::ranges::sort(elevators, {}, [&](const Level::Elevator& elevator) {
+    std::ranges::sort(elevators, { }, [&](const Level::Elevator& elevator) {
         return cellOrder(elevator.cell);
     });
     for (Level::Elevator& elevator : elevators) {
-        std::ranges::sort(elevator.pressurePlates, {}, cellOrder);
+        std::ranges::sort(elevator.pressurePlates, { }, cellOrder);
         std::string text = "@elevator " + std::to_string(elevator.cell.x) +
             "," + std::to_string(elevator.cell.y) + "," +
             std::to_string(elevator.cell.z) + ":";
@@ -317,11 +574,11 @@ std::uint64_t levelDigest(const Level::Definition& definition)
         hashBytes(hash, text + "\n");
     }
     std::vector<Level::Minecart> minecarts = definition.minecarts;
-    std::ranges::sort(minecarts, {}, [&](const Level::Minecart& minecart) {
+    std::ranges::sort(minecarts, { }, [&](const Level::Minecart& minecart) {
         return cellOrder(minecart.cell);
     });
     for (Level::Minecart& minecart : minecarts) {
-        std::ranges::sort(minecart.pressurePlates, {}, cellOrder);
+        std::ranges::sort(minecart.pressurePlates, { }, cellOrder);
         std::string text = "@minecart " + std::to_string(minecart.cell.x) +
             "," + std::to_string(minecart.cell.y) + "," +
             std::to_string(minecart.cell.z) + ":";
@@ -332,27 +589,28 @@ std::uint64_t levelDigest(const Level::Definition& definition)
         text += " direction " + std::to_string(minecart.initialDirection);
         hashBytes(hash, text + "\n");
     }
-    // Start-open gates invert their gate's behaviour. Hashed only for such
-    // gates, so digests of screens without them stay unchanged. (Gate links
-    // themselves are still not part of the digest.)
-    std::vector<GridPosition3> startOpenGates;
-    for (const Level::Gate& gate : definition.gates) {
-        if (gate.startOpen) {
-            startOpenGates.push_back(gate.cell);
+    // Explicit plate links, including an empty list, determine gate behavior.
+    // Colors are editor bookkeeping; record/link ordering is not gameplay.
+    std::vector<Level::Gate> gates = definition.gates;
+    std::ranges::sort(gates, { }, [&](const Level::Gate& gate) {
+        return cellOrder(gate.cell);
+    });
+    for (auto& gate : gates) {
+        std::ranges::sort(gate.pressurePlates, { }, cellOrder);
+        std::string text = "@gate " + std::to_string(gate.cell.x) + "," +
+            std::to_string(gate.cell.y) + "," + std::to_string(gate.cell.z) +
+            (gate.startOpen ? ":open" : ":closed");
+        for (GridPosition3 plate : gate.pressurePlates) {
+            text += " " + std::to_string(plate.x) + "," +
+                std::to_string(plate.y) + "," + std::to_string(plate.z);
         }
-    }
-    std::ranges::sort(startOpenGates, {}, cellOrder);
-    for (const GridPosition3 cell : startOpenGates) {
-        hashBytes(
-            hash,
-            "@gatestartopen " + std::to_string(cell.x) + "," +
-                std::to_string(cell.y) + "," + std::to_string(cell.z) + "\n");
+        hashBytes(hash, text + "\n");
     }
     // Object-link colors are gameplay groups. Hash the same 8-bit channels
     // the editor uses for equality so insignificant float spelling changes do
     // not invalidate a recording while a real regrouping always does.
     std::vector<Level::ObjectLink> objectLinks = definition.objectLinks;
-    std::ranges::sort(objectLinks, {}, [&](const Level::ObjectLink& link) {
+    std::ranges::sort(objectLinks, { }, [&](const Level::ObjectLink& link) {
         return cellOrder(link.cell);
     });
     const auto colorChannel = [](float value) {
@@ -369,7 +627,7 @@ std::uint64_t levelDigest(const Level::Definition& definition)
                 std::to_string(colorChannel(link.color.z)) + "\n");
     }
     std::vector<Level::Portal> portals = definition.portals;
-    std::ranges::sort(portals, {}, [&](const auto& portal) {
+    std::ranges::sort(portals, { }, [&](const auto& portal) {
         return cellOrder(portal.cell);
     });
     for (const auto& portal : portals) {
@@ -385,7 +643,7 @@ std::uint64_t levelDigest(const Level::Definition& definition)
     // Plates authored beneath units change what the screen does from its
     // first step; hashed only when present, like rotators.
     std::vector<Level::Plate> plates = definition.plates;
-    std::ranges::sort(plates, {}, [&](const Level::Plate& plate) {
+    std::ranges::sort(plates, { }, [&](const Level::Plate& plate) {
         return cellOrder(plate.cell);
     });
     for (const Level::Plate& plate : plates) {
@@ -401,9 +659,11 @@ std::uint64_t levelDigest(const Level::Definition& definition)
 
 std::string digestText(std::uint64_t digest)
 {
-    std::array<char, 17> text {};
+    std::array<char, 17> text { };
     std::snprintf(
-        text.data(), text.size(), "%016llx",
+        text.data(),
+        text.size(),
+        "%016llx",
         static_cast<unsigned long long>(digest));
     return std::string(text.data());
 }
@@ -413,8 +673,8 @@ std::string serialize(const Solution& solution)
     std::string text =
         "# Sokoban 3D recorded solution. Replayed by the solution_replay "
         "test;\n# see README.md > Solutions. One input per step, then "
-        "what it changed.\n";
-    text += "format 1\n";
+        "what it changed and its complete settled state.\n";
+    text += "format 2\n";
     text += "level-digest " + digestText(solution.levelDigest) + "\n";
     if (!solution.recordedFor.empty()) {
         text += "recorded-for " + solution.recordedFor + "\n";
@@ -426,6 +686,13 @@ std::string serialize(const Solution& solution)
             text += " " + changeToken(change);
         }
         text += "\n";
+        text += "state " +
+            stateJson(
+                step.state,
+                step.activeHeroController,
+                step.automaticMotionPaused)
+                .dump() +
+            "\n";
     }
     return text;
 }
@@ -435,6 +702,7 @@ Solution parse(std::string_view text)
     Solution solution;
     bool sawFormat = false;
     bool sawDigest = false;
+    bool needsState = false;
     std::size_t lineNumber = 0;
     std::istringstream stream { std::string(text) };
     std::string line;
@@ -453,20 +721,27 @@ Solution parse(std::string_view text)
             throw std::runtime_error(
                 "solution line " + std::to_string(lineNumber) + ": " + why);
         };
+        if (needsState && keyword != "state") {
+            fail("each step must be followed by its state line");
+        }
         if (keyword == "format") {
             std::string version;
             words >> version;
-            if (version != "1") {
-                fail("unsupported format '" + version + "'");
+            if (version != "2") {
+                fail(
+                    "unsupported format '" + version +
+                    "'; re-record with format 2");
             }
+            if (sawFormat) fail("duplicate format line");
             sawFormat = true;
         } else if (keyword == "level-digest") {
+            if (sawDigest) fail("duplicate level-digest line");
             std::string digest;
             words >> digest;
             std::uint64_t value = 0;
             const auto [end, error] = std::from_chars(
                 digest.data(), digest.data() + digest.size(), value, 16);
-            if (digest.size() != 16 || error != std::errc {} ||
+            if (digest.size() != 16 || error != std::errc { } ||
                 end != digest.data() + digest.size()) {
                 fail("level-digest must be 16 hex digits");
             }
@@ -487,6 +762,17 @@ Solution parse(std::string_view text)
                 step.changes.push_back(parseChange(token, lineNumber));
             }
             solution.steps.push_back(std::move(step));
+            needsState = true;
+        } else if (keyword == "state") {
+            if (!needsState) fail("state must immediately follow a step");
+            std::string payload;
+            std::getline(words >> std::ws, payload);
+            try {
+                parseState(Json::parse(payload), solution.steps.back());
+            } catch (const std::exception& error) {
+                fail(std::string("invalid state: ") + error.what());
+            }
+            needsState = false;
         } else {
             fail("unknown keyword '" + keyword + "'");
         }
@@ -494,6 +780,10 @@ Solution parse(std::string_view text)
     if (!sawFormat || !sawDigest) {
         throw std::runtime_error(
             "solution is missing its format or level-digest line");
+    }
+    if (needsState) {
+        throw std::runtime_error(
+            "solution's final step is missing its state line");
     }
     return solution;
 }
@@ -521,21 +811,19 @@ bool Driver::settled() const
     // belts wait for the next step, and while a hero is dead nothing runs.
     return !session_.moving() &&
         (rules::anyPlayerDead(session_.state()) ||
-            session_.automaticMotionPaused() ||
-            !rules::hasPendingMotion(level_, session_.state()));
+         session_.automaticMotionPaused() ||
+         !rules::hasPendingMotion(level_, session_.state()));
 }
 
 bool Driver::runUntilSettled()
 {
     float elapsedSeconds = 0.0f;
-    for (int transition = 0;
-         transition < maximumSettleTransitions;
+    for (int transition = 0; transition < maximumSettleTransitions;
          ++transition) {
         // This is GameplayLoop's mechanical core without presentation work:
         // admit everything that can run concurrently, advance exactly to the
         // next completion, commit it, and repeat from the new world state.
-        while (session_.tryStartNextAction(level_, {})) {
-        }
+        while (session_.tryStartNextAction(level_, { })) { }
         if (settled()) {
             return true;
         }
@@ -559,13 +847,27 @@ bool Driver::runUntilSettled()
 bool Driver::apply(Input input)
 {
     switch (input) {
-    case Input::Up: session_.queueMove(MoveDirection::Up); break;
-    case Input::Down: session_.queueMove(MoveDirection::Down); break;
-    case Input::Left: session_.queueMove(MoveDirection::Left); break;
-    case Input::Right: session_.queueMove(MoveDirection::Right); break;
-    case Input::CycleHero: session_.cycleActiveHero(); break;
-    case Input::Interact: session_.queueActivate(); break;
-    case Input::Undo: session_.queueUndo(); break;
+    case Input::Up:
+        session_.queueMove(MoveDirection::Up);
+        break;
+    case Input::Down:
+        session_.queueMove(MoveDirection::Down);
+        break;
+    case Input::Left:
+        session_.queueMove(MoveDirection::Left);
+        break;
+    case Input::Right:
+        session_.queueMove(MoveDirection::Right);
+        break;
+    case Input::CycleHero:
+        session_.cycleActiveHero();
+        break;
+    case Input::Interact:
+        session_.queueActivate();
+        break;
+    case Input::Undo:
+        session_.queueUndo();
+        break;
     }
     return runUntilSettled();
 }
@@ -581,14 +883,14 @@ bool Driver::anyPlayerDead() const
 }
 
 std::vector<EntityChange> changesBetween(
-    const GameState& before, const GameState& after)
+    const GameState& before,
+    const GameState& after)
 {
     const std::vector<EntityChange> previous = snapshotEntities(before);
     std::vector<EntityChange> changes;
     for (const EntityChange& entity : snapshotEntities(after)) {
-        const auto match = std::ranges::find_if(
-            previous,
-            [&](const EntityChange& candidate) {
+        const auto match =
+            std::ranges::find_if(previous, [&](const EntityChange& candidate) {
                 return candidate.kind == entity.kind &&
                     candidate.id == entity.id;
             });
@@ -612,18 +914,21 @@ Recording record(
     for (std::size_t index = 0; index < inputs.size(); ++index) {
         const GameState before = driver.state();
         if (!driver.apply(inputs[index])) {
-            recording.error = "step " + std::to_string(index + 1) +
-                " never came to rest";
+            recording.error =
+                "step " + std::to_string(index + 1) + " never came to rest";
             return recording;
         }
-        recording.solution.steps.push_back({
-            .input = inputs[index],
-            .changes = changesBetween(before, driver.state()),
-        });
+        recording.solution.steps.push_back(
+            {
+                .input = inputs[index],
+                .changes = changesBetween(before, driver.state()),
+                .state = driver.state(),
+                .activeHeroController = driver.activeHeroController(),
+                .automaticMotionPaused = driver.automaticMotionPaused(),
+            });
         if (driver.solved() && index + 1 < inputs.size()) {
-            recording.error = "solved after step " +
-                std::to_string(index + 1) + " of " +
-                std::to_string(inputs.size());
+            recording.error = "solved after step " + std::to_string(index + 1) +
+                " of " + std::to_string(inputs.size());
             return recording;
         }
     }
@@ -641,8 +946,8 @@ ReplayReport replay(const Level& level, const Solution& solution)
     Driver driver(level);
     for (std::size_t index = 0; index < solution.steps.size(); ++index) {
         const Step& step = solution.steps[index];
-        const std::string where = "step " + std::to_string(index + 1) +
-            " of " + std::to_string(solution.steps.size()) + " (" +
+        const std::string where = "step " + std::to_string(index + 1) + " of " +
+            std::to_string(solution.steps.size()) + " (" +
             std::string(inputName(step.input)) + ")";
         const GameState before = driver.state();
         if (!driver.apply(step.input)) {
@@ -654,29 +959,27 @@ ReplayReport replay(const Level& level, const Solution& solution)
             snapshotEntities(driver.state());
         for (const EntityChange& expected : step.changes) {
             const auto found = std::ranges::find_if(
-                current,
-                [&](const EntityChange& candidate) {
+                current, [&](const EntityChange& candidate) {
                     return candidate.kind == expected.kind &&
                         candidate.id == expected.id;
                 });
             if (found == current.end()) {
                 return {
-                    .message = where + ": " + label(expected) +
-                        " no longer exists",
+                    .message =
+                        where + ": " + label(expected) + " no longer exists",
                 };
             }
             if (!(*found == expected)) {
                 return {
                     .message = where + ": " + label(expected) +
-                        " should be at " + describe(expected) +
-                        " but is at " + describe(*found),
+                        " should be at " + describe(expected) + " but is at " +
+                        describe(*found),
                 };
             }
         }
         for (const EntityChange& change : actual) {
             const bool expected = std::ranges::any_of(
-                step.changes,
-                [&](const EntityChange& candidate) {
+                step.changes, [&](const EntityChange& candidate) {
                     return candidate.kind == change.kind &&
                         candidate.id == change.id;
                 });
@@ -686,6 +989,34 @@ ReplayReport replay(const Level& level, const Solution& solution)
                         " unexpectedly changed to " + describe(change),
                 };
             }
+        }
+        if (step.state != driver.state() ||
+            step.activeHeroController != driver.activeHeroController() ||
+            step.automaticMotionPaused != driver.automaticMotionPaused()) {
+            const Json expectedState = stateJson(
+                step.state,
+                step.activeHeroController,
+                step.automaticMotionPaused);
+            const Json currentState = stateJson(
+                driver.state(),
+                driver.activeHeroController(),
+                driver.automaticMotionPaused());
+            const Json differences = Json::diff(expectedState, currentState);
+            if (differences.empty()) {
+                return { .message = where +
+                             ": gameplay state differs in a field absent from "
+                             "the recording codec" };
+            }
+            const Json& difference = differences.at(0);
+            const std::string path = difference.at("path").get<std::string>();
+            const Json::json_pointer pointer(path);
+            const auto valueAt = [&](const Json& state) {
+                return state.contains(pointer) ? state.at(pointer).dump()
+                                               : "<missing>";
+            };
+            return { .message = where + ": state " + path + " should be " +
+                         valueAt(expectedState) + " but is " +
+                         valueAt(currentState) };
         }
         if (driver.solved() && index + 1 < solution.steps.size()) {
             return {
@@ -703,8 +1034,8 @@ ReplayReport replay(const Level& level, const Solution& solution)
     }
     return {
         .passed = true,
-        .message = "solved in " + std::to_string(solution.steps.size()) +
-            " steps",
+        .message =
+            "solved in " + std::to_string(solution.steps.size()) + " steps",
     };
 }
 

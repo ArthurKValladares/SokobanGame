@@ -188,10 +188,20 @@ and the required real-device checks are recorded.
   modifiers fire, for held and pressed queries alike. Capture records a chord
   on the non-modifier key's press and a lone modifier key on its release.
 
-- Recorded solutions (`engine/Solution.hpp`, `solutions/`) are matched to
+- Recorded solutions (`engine/Solution.hpp`, `solutions/`) use format 2.
+  Each input carries its complete settled GameState, active hero controller
+  and automatic-motion pause state. Update the solution state codec and its
+  field-mutation/round-trip tests whenever GameState changes. Old formats are
+  rejected and must be re-recorded through the current Driver.
+  The `solution_replay` gate requires matching, passing recordings for all
+  current screens by default. `solutions/coverage.json` allows only explicit
+  unfinished-screen exceptions pinned to a gameplay digest and a reason;
+  gameplay edits or removed screens invalidate them.
+  Recordings are matched to
   screens by `solution::levelDigest`, which hashes only what gameplay reads:
   the layers with trailing spaces trimmed, the water layer and the hero (plus
-  rotator, elevator and covered-plate records on screens that have them).
+  gate/rotator/lock links, elevator/minecart records, object/portal groups,
+  and covered-plate records on screens that have them).
   If gameplay starts reading another part of the definition, add it to the
   digest. A replay applies each input with `solution::Driver` and waits for
   it and every slide, conveyor and enemy reaction to settle before the next
@@ -297,8 +307,8 @@ and the required real-device checks are recorded.
   read turret direction from the tile type alone. Profiles write the field only
   when non-zero and read it as optional, so no format bump was needed. The
   solver key includes it. Solution digests hash rotator links only for screens
-  that have rotators, which keeps older digests stable. Gate links are still
-  not part of the digest.
+  that have rotators. Gate links and start-open state are also hashed; changing
+  either requires a fresh recording.
 - Plates are the tiles with `TileProperty::Plate` (pressure plates, rotators,
   Ends). New plate kinds get the property in the tile table; code asks
   `tileTypeIsPlate`, and anything that asks "what plate is here" must use

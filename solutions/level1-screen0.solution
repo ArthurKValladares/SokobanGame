@@ -1,15 +1,25 @@
 # Sokoban 3D recorded solution. Replayed by the solution_replay test;
-# see README.md > Solutions. One input per step, then what it changed.
-format 1
+# see README.md > Solutions. One input per step, then what it changed and its complete settled state.
+format 2
 level-digest 64f327293005e8db
 recorded-for level1/screen0
 step right p1=3,2,1
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[6,2,1],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Rock"}],"players":[{"cell":[3,2,1],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=4,2,1
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[6,2,1],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Rock"}],"players":[{"cell":[4,2,1],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=5,2,1
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[6,2,1],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Rock"}],"players":[{"cell":[5,2,1],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=6,2,1 m2=7,2,1
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[7,2,1],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Rock"}],"players":[{"cell":[6,2,1],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=7,2,1 m2=8,2,1
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[8,2,1],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Rock"}],"players":[{"cell":[7,2,1],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step up p1=7,1,1
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[8,2,1],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Rock"}],"players":[{"cell":[7,1,1],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=8,1,1
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[8,2,1],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Rock"}],"players":[{"cell":[8,1,1],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=9,1,1
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[8,2,1],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Rock"}],"players":[{"cell":[9,1,1],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step down p1=9,2,1
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[8,2,1],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Rock"}],"players":[{"cell":[9,2,1],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=10,2,1
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[8,2,1],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Rock"}],"players":[{"cell":[10,2,1],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}

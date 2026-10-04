@@ -1,49 +1,93 @@
 # Sokoban 3D recorded solution. Replayed by the solution_replay test;
-# see README.md > Solutions. One input per step, then what it changed.
-format 1
-level-digest b41dadc86c6ffc96
+# see README.md > Solutions. One input per step, then what it changed and its complete settled state.
+format 2
+level-digest 6ca08651e44889c7
 recorded-for level2/screen1
 step down p1=4,8,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[6,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[4,8,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=5,8,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[6,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[5,8,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step up p1=5,7,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[6,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[5,7,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=6,7,2 m2=12,7,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[6,7,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=7,7,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[7,7,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=8,7,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[8,7,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=9,7,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[9,7,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step down p1=9,8,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[9,8,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step down p1=9,9,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[9,9,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=10,9,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[10,9,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step down p1=10,10,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[10,10,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=11,10,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[11,10,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step up p1=11,9,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[11,9,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=12,9,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[12,9,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step up p1=12,8,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,7,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[12,8,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step up p1=12,7,2 m2=12,6,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[12,7,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step left p1=11,7,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[11,7,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step up p1=11,6,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[11,6,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step up p1=11,5,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[11,5,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step up p1=11,4,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[11,4,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=12,4,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[12,4,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=13,4,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[13,4,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step down p1=13,5,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[13,5,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step down p1=13,6,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[12,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[13,6,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step left p1=12,6,2 m2=7,6,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[7,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[12,6,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step left p1=11,6,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[7,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[11,6,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step left p1=10,6,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[7,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[10,6,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step up p1=10,5,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[7,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[10,5,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step left p1=9,5,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[7,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[9,5,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step left p1=8,5,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[7,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[8,5,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step left p1=7,5,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[7,6,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[7,5,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step down p1=7,6,2 m2=7,8,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[7,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[7,6,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step down p1=7,7,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[7,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[7,7,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step left p1=6,7,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[7,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[6,7,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step down p1=6,8,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[7,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[6,8,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=7,8,2 m2=10,8,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[10,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[7,8,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=8,8,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[10,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[8,8,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=9,8,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[10,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[9,8,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step down p1=9,9,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[10,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[9,9,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=10,9,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[10,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[10,9,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=11,9,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[10,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[11,9,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=12,9,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[10,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[12,9,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=13,9,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[10,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[13,9,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step right p1=14,9,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[10,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Ice"}],"players":[{"cell":[14,9,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}

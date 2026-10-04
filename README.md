@@ -747,28 +747,45 @@ In Visual Studio's Open Folder mode, add arguments with the startup item's
 
 ## Solutions
 
-`solutions/` holds one recorded solution per puzzle screen. The
+`solutions/` holds one recorded solution per finished puzzle screen. The
 `solution_replay` test replays each one against the screen whose content
 matches it and fails, naming the step and the first hero, block or enemy
 that went somewhere else, when a rule change breaks a recording. It also
-fails if a recording solves its screen early. Screens without a recording
-are listed as notes, not failures.
+compares the complete settled gameplay state after every input, naming the
+first differing field, and fails if a recording solves its screen early.
+Missing, stale, malformed, or failing recordings for current finished screens
+fail the suite; all current screens require coverage by default.
+
+`solutions/coverage.json` may exempt an unfinished screen with its level and
+screen indices, current gameplay digest, and a nonempty reason. A gameplay edit
+or a removed screen invalidates that exception until it is reviewed. The
+minecart demonstration at level 5, screen 2 has no End tile and is the current
+exception. New finished screens must be solved and recorded before merging.
 
 A file looks like this:
 
 ```text
-format 1
+format 2
 level-digest a7799b56118fdd89
 recorded-for level0/screen0
 step up p1=6,4,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[],"players":[{"cell":[6,4,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step up p1=6,3,2
+state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[],"players":[{"cell":[6,3,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 ```
 
 Each `step` is one input (`up`, `down`, `left`, `right`, `cycle`,
 `interact`, `undo`) followed by what it changed: `p` players, `m` movable
 blocks and `e` enemies, each `id=x,y,z` with `+dead`, `+fallen` or
 `+drowned` when that changed. The digest covers the gameplay layers, water
-and hero, not decorations, so re-decorating a screen keeps its solution.
+and hero, gate links and start state, device links/stops, object and portal
+groups, and covered plates. Decorations and camera angles do not affect it,
+so re-decorating a screen keeps its solution. Each step must be followed by
+one complete JSON `state` line. It preserves entity identity, type, controller,
+position, death flags, slide momentum and rotation, mirror turns,
+elevator/minecart positions and phases, button pulses, the active hero, and
+automatic-motion pause state. Format 1 is rejected; re-record its inputs
+through the current Driver rather than migrating its old expectations.
 Solutions live outside `levels/` because the content pipeline rejects
 unexpected files there, and they are matched by digest, so renumbering
 screens does not break them. After changing a screen's layout, record it
@@ -852,6 +869,12 @@ The feature-aware best-first solver solves level 3 screen 2, which the earlier
 Manhattan-guided search could not solve after 5 million positions. Further
 ideas, roughly in order of payoff:
 
+- **Cooperative elevator search completeness.** Level 5 screen 1 has a verified
+  68-input production replay, but the current best-first search reported
+  exhausted after 25,593 generated positions. Investigate walking-region
+  canonicalization when one hero boards an elevator and another activates it.
+  That cause is not yet established; an exhausted search is not currently
+  proof that such a puzzle is unsolvable.
 - **More deadlock patterns.** Unit-count feasibility, static dead cells,
   complete rock-to-plate reachability matching, and sealed 2x2 rock/blocker
   freezes are implemented for the feature sets where each proof is sound. Next
