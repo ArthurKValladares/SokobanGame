@@ -403,6 +403,9 @@ private:
             ? RenderFrameData(*arena_)
             : RenderFrameData {};
         frame.viewMode = RenderViewMode::Isometric3D;
+        const CameraAngles angles = input_.editor.cameraAngles().value_or(CameraAngles {});
+        frame.cameraPitchDegrees = angles.pitchDegrees;
+        frame.cameraYawDegrees = angles.yawDegrees;
         frame.lighting = input_.settings.renderLighting();
         frame.gridOverlay = input_.settings.renderGridOverlay();
         frame.outputTransform = input_.settings.renderOutputTransform();

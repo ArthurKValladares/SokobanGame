@@ -506,6 +506,7 @@ struct RenderFrameData {
 
     RenderViewMode viewMode = RenderViewMode::TopDown2D;
     std::optional<float> cameraPitchDegrees;
+    std::optional<float> cameraYawDegrees;
     // An explicit perspective camera pose. Normal gameplay leaves this
     // unset and lets the scene preparer fit the authored board extent. The
     // Debug detached camera sets it so position and aim are independent of

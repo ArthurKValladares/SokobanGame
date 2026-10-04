@@ -204,7 +204,8 @@ IsoRenderLayout calculateIsoLayout(
         3.14159265358979323846f / 180.0f;
     const float pitch = frameData.cameraPitchDegrees.value_or(
         config::cameraPitchDegrees) * radiansPerDegree;
-    const float yaw = config::cameraYawDegrees * radiansPerDegree;
+    const float yaw = frameData.cameraYawDegrees.value_or(
+        config::cameraYawDegrees) * radiansPerDegree;
     const RenderFrameData::CameraExtent sourceCameraExtent =
         frameData.cameraExtent.value_or(RenderFrameData::CameraExtent {
             .width = frameData.levelWidth,

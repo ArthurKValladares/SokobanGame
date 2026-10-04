@@ -112,6 +112,7 @@ public:
     // PageUp/PageDown: moves the active layer and reports it in status().
     void stepActiveLayer(int delta);
     void setWaterLayer(std::optional<uint32_t> layer);
+    void setCameraAngles(std::optional<CameraAngles> angles);
     void setCharacter(CharacterType character);
     void setLayerLocked(bool locked);
     // The L shortcut; reports the new state in status().
@@ -255,6 +256,7 @@ public:
     [[nodiscard]] uint32_t documentDepth() const;
     [[nodiscard]] uint32_t activeLayer() const;
     [[nodiscard]] std::optional<uint32_t> waterLayer() const;
+    [[nodiscard]] std::optional<CameraAngles> cameraAngles() const;
     [[nodiscard]] CharacterType character() const;
     [[nodiscard]] bool layerLocked() const;
     [[nodiscard]] bool showOverworldNeighbors() const;
@@ -371,6 +373,7 @@ private:
     struct Document {
         Level::LayerRows layers;
         std::optional<uint32_t> waterLayer;
+        std::optional<CameraAngles> cameraAngles;
         std::optional<CharacterType> character;
         std::vector<Level::Decoration> decorations;
         std::vector<Level::ScreenSelector> selectors;
@@ -412,6 +415,7 @@ private:
     struct DocumentSnapshot {
         Level::LayerRows layers;
         std::optional<uint32_t> waterLayer;
+        std::optional<CameraAngles> cameraAngles;
         std::optional<CharacterType> character;
         std::vector<Level::Decoration> decorations;
         std::vector<Level::ScreenSelector> selectors;

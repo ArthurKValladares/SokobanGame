@@ -32,6 +32,8 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
   background prefetching for upcoming levels.
 - A transactional level editor whose document and filesystem logic do not
   depend on ImGui, SDL, or Vulkan.
+- Per-screen camera tilt and rotation authored in the level editor, with live
+  preview, undo/redo, and saved angles for puzzle and overworld screens.
 - Manifest-backed mesh decorations with free translation, Euler rotation, and
   non-uniform scale; they render without participating in gameplay or camera
   framing.
@@ -370,6 +372,14 @@ authored screen declares `@character rogue`, `@character knight`,
 directive default to the rogue.
 An optional `@water N` directive makes Air on that layer resolve to Water and
 extends the water beyond the authored board without expanding camera bounds.
+An optional `@camera {"pitch":45,"yaw":90}` directive sets that screen's camera
+angles in degrees. Pitch ranges from 0 (straight down) to 89, and yaw from
+-180 to 180, rotating the +Y viewpoint toward +X. Screens without it use the
+default 30-degree pitch and zero yaw. The level editor's **Screen Camera** panel
+provides **Tilt**, **Rotation**, and **Reset Camera To Default** controls; changes
+preview immediately and are saved with the screen. Gameplay, draft play, and
+screen previews use the authored angles, and the top-down control temporarily
+sets pitch to zero before returning to the authored tilt.
 Any number of `@decoration` directives may reference manifest model names and
 provide authored transforms. Each Gate tile has an accompanying `@gate`
 directive that identifies its cell, the pressure plates that open it, and its

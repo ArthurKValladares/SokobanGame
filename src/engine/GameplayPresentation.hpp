@@ -85,6 +85,10 @@ public:
         float targetDegrees,
         float dt,
         float transitionSeconds);
+    void updateCameraYaw(
+        float targetDegrees,
+        float dt,
+        float transitionSeconds);
     void advanceAnimations(float dt, const GameState& state);
     void advanceAnimations(float dt) { advanceAnimations(dt, {}); }
     void triggerTurretShot(
@@ -127,6 +131,7 @@ public:
         return animationTransitionTimeSeconds_;
     }
     [[nodiscard]] float cameraPitchDegrees() const { return cameraPitchDegrees_; }
+    [[nodiscard]] float cameraYawDegrees() const { return cameraYawDegrees_; }
     [[nodiscard]] const std::vector<PlayerVisual>& players() const { return players_; }
     [[nodiscard]] const std::vector<EntityVisual>& movables() const { return movables_; }
     [[nodiscard]] const std::vector<EnemyVisual>& enemies() const { return enemies_; }
@@ -166,6 +171,10 @@ private:
     float cameraPitchStartDegrees_ = 0.0f;
     float cameraPitchTargetDegrees_ = 0.0f;
     float cameraPitchTransitionElapsed_ = 0.0f;
+    float cameraYawDegrees_ = 0.0f;
+    float cameraYawStartDegrees_ = 0.0f;
+    float cameraYawTargetDegrees_ = 0.0f;
+    float cameraYawTransitionElapsed_ = 0.0f;
 };
 
 } // namespace sokoban

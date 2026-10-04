@@ -1144,13 +1144,16 @@ void Application::update(
         !detachedCameraActive && input.showOverworldMap &&
         campaign_.inOverworld() &&
         !editorDraftPlaying;
+    const CameraAngles cameraAngles = gameplayCameraAngles();
     presentation_.updateCameraPitch(
         (!detachedCameraActive &&
                 (input.showTopDownView || showOverworldMap))
             ? 0.0f
-            : config::cameraPitchDegrees,
+            : cameraAngles.pitchDegrees,
         dt,
         config::cameraPitchTransitionSeconds);
+    presentation_.updateCameraYaw(
+        cameraAngles.yawDegrees, dt, config::cameraPitchTransitionSeconds);
     const float overviewStep = config::cameraPitchTransitionSeconds <= 0.0f
         ? 1.0f
         : std::max(dt, 0.0f) / config::cameraPitchTransitionSeconds;
@@ -1635,7 +1638,6 @@ Application::buildScreenPreviewRenderFrame() const
         .conveyorBeltScrollOffset =
             screenPreviewPresentation_.conveyorBeltScrollOffset(
                 screenPreviewSession_.stepDurationSeconds()),
-        .cameraPitchDegrees = screenPreviewPresentation_.cameraPitchDegrees(),
         .levelLocation = *screenPreviewTarget_,
         .selectorState = [this](LevelLocation target) {
             return campaign_.selectorViewState(playerProfile_, target);
@@ -2643,6 +2645,36 @@ void Application::appendEvidencePointLights(RenderFrameData& frame) const
     }
 }
 
+CameraAngles Application::gameplayCameraAngles() const
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (tools_->levelEditor.editingDocument()) {
+        return tools_->levelEditor.cameraAngles().value_or(CameraAngles {});
+    }
+    const OverworldMap* draftOverworld = tools_->levelEditor.draftOverworldMap();
+    const bool editorDraftPlaying = tools_->levelEditor.playingDraft();
+#else
+    constexpr const OverworldMap* draftOverworld = nullptr;
+    constexpr bool editorDraftPlaying = false;
+#endif
+    const OverworldMap* overworld = draftOverworld
+        ? draftOverworld
+        : (!editorDraftPlaying && campaign_.inOverworld() && overworldMap_
+              ? &*overworldMap_
+              : nullptr);
+    if (overworld) {
+        const std::optional<OverworldScreenId> activeScreen = draftOverworld
+            ? CampaignSession::sharedPlayerScreen(*overworld, gameplaySession_.state())
+            : std::optional<OverworldScreenId> { campaign_.activeOverworldScreen() };
+        if (activeScreen) {
+            if (const OverworldScreenRuntime* screen = overworld->screen(*activeScreen)) {
+                return screen->definition.cameraAngles.value_or(CameraAngles {});
+            }
+        }
+    }
+    return level_.cameraAngles().value_or(CameraAngles {});
+}
+
 RenderFrameData Application::buildRenderFrame(
     const InputRouter::EditorInput& editorInput)
 {
@@ -2752,6 +2784,7 @@ RenderFrameData Application::buildRenderFrame(
         .animations = &animationCatalog_,
         .conveyorBeltScrollOffset = beltScrollOffset,
         .cameraPitchDegrees = presentation_.cameraPitchDegrees(),
+        .cameraYawDegrees = presentation_.cameraYawDegrees(),
         .cameraExtent = overworldView
             ? std::optional<RenderFrameData::CameraExtent> {
                   overworldView->cameraExtent }

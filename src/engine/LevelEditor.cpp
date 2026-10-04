@@ -726,6 +726,25 @@ void LevelEditor::setWaterLayer(std::optional<uint32_t> layer)
     recordDocumentChange(before);
 }
 
+void LevelEditor::setCameraAngles(std::optional<CameraAngles> angles)
+{
+    if (angles && !angles->valid()) {
+        document_.status =
+            "Camera tilt must be 0 to 89 degrees and rotation -180 to 180 degrees.";
+        return;
+    }
+    if (document_.cameraAngles == angles) {
+        return;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.cameraAngles = angles;
+    document_.dirty = true;
+    document_.status = angles
+        ? "Screen camera updated."
+        : "Screen camera reset to default.";
+    recordDocumentChange(before);
+}
+
 void LevelEditor::setCharacter(CharacterType character)
 {
     if (editingOverworld()) {
@@ -2109,6 +2128,11 @@ std::optional<uint32_t> LevelEditor::waterLayer() const
     return document_.waterLayer;
 }
 
+std::optional<CameraAngles> LevelEditor::cameraAngles() const
+{
+    return document_.cameraAngles;
+}
+
 CharacterType LevelEditor::character() const
 {
     for (const std::vector<std::string>& layer : document_.layers) {
@@ -2663,6 +2687,7 @@ Level::Definition LevelEditor::linkedDefinition(
     Level::Definition definition {
         .layers = document_.layers,
         .waterLayer = document_.waterLayer,
+        .cameraAngles = document_.cameraAngles,
         .decorations = document_.decorations,
         .selectors = document_.selectors,
         .gates = document_.gates,
@@ -2858,6 +2883,7 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     };
     document_.layers[1].front().front() = tileTypeToChar(TileType::Rogue);
     document_.waterLayer.reset();
+    document_.cameraAngles.reset();
     document_.character.reset();
     document_.decorations.clear();
     document_.selectors.clear();
@@ -3240,6 +3266,7 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
 
     document_.layers = std::move(definition.layers);
     document_.waterLayer = definition.waterLayer;
+    document_.cameraAngles = definition.cameraAngles;
     document_.character = definition.character;
     document_.decorations = std::move(definition.decorations);
     document_.selectors = std::move(definition.selectors);
@@ -3296,6 +3323,7 @@ bool LevelEditor::reloadFromDisk()
             linkedDefinition(document_.character);
         if (onDisk.layers == current.layers &&
             onDisk.waterLayer == current.waterLayer &&
+            onDisk.cameraAngles == current.cameraAngles &&
             onDisk.character == current.character &&
             onDisk.decorations == current.decorations &&
             onDisk.selectors == current.selectors &&
@@ -3984,6 +4012,7 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
     const DocumentSnapshot after = captureDocumentSnapshot();
     if (before.layers == after.layers &&
         before.waterLayer == after.waterLayer &&
+        before.cameraAngles == after.cameraAngles &&
         before.character == after.character &&
         before.decorations == after.decorations &&
         before.selectors == after.selectors &&
@@ -4015,6 +4044,7 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
     pendingMove_.reset();
     document_.layers = snapshot.layers;
     document_.waterLayer = snapshot.waterLayer;
+    document_.cameraAngles = snapshot.cameraAngles;
     document_.character = snapshot.character;
     document_.decorations = snapshot.decorations;
     document_.selectors = snapshot.selectors;
@@ -4165,6 +4195,7 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
     return {
         .layers = document_.layers,
         .waterLayer = document_.waterLayer,
+        .cameraAngles = document_.cameraAngles,
         .character = document_.character,
         .decorations = document_.decorations,
         .selectors = document_.selectors,

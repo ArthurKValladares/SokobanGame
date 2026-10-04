@@ -223,6 +223,7 @@ private:
 #endif
     // Evidence-only point-light fixtures, appended to a finished frame.
     void appendEvidencePointLights(RenderFrameData& frame) const;
+    [[nodiscard]] CameraAngles gameplayCameraAngles() const;
     [[nodiscard]] RenderFrameData buildRenderFrame(
         const InputRouter::EditorInput& editorInput);
 

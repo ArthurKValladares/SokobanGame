@@ -133,6 +133,31 @@ void move(GameplaySession& session, const Level& level, MoveDirection direction)
     finishAction(session);
 }
 
+void testCameraAnglesRemainSpecificToEachOverworldScreen()
+{
+    TEST("cameraAnglesRemainSpecificToEachOverworldScreen");
+    TestProject project("camera_angles");
+    auto west = westDefinition();
+    auto east = eastDefinition();
+    west.cameraAngles = CameraAngles { 45.0f, 90.0f };
+    east.cameraAngles = CameraAngles { 60.0f, -90.0f };
+    project.writeLayout(eastWestLayout());
+    project.writeScreen(1, west);
+    project.writeScreen(2, east);
+    const auto map = OverworldMap::load(project.root);
+    CHECK(map.screen(1)->definition.cameraAngles == west.cameraAngles);
+    CHECK(map.screen(2)->definition.cameraAngles == east.cameraAngles);
+    CHECK(!map.level().cameraAngles());
+
+    east.cameraAngles.reset();
+    const auto draft = OverworldMap::load(project.root, OverworldDraftOverride {
+        .definitions = { { .screen = 2, .definition = east } },
+    });
+    CHECK(draft.screen(1)->definition.cameraAngles == west.cameraAngles);
+    CHECK(!draft.screen(2)->definition.cameraAngles);
+    CHECK(map.screen(2)->definition.cameraAngles.has_value());
+}
+
 void testLayoutRoundTripIsCanonical()
 {
     TEST("layoutRoundTripIsCanonical");
@@ -665,6 +690,7 @@ void testDraftOverridesMustNameEachScreenOnce()
 
 int main()
 {
+    testCameraAnglesRemainSpecificToEachOverworldScreen();
     testLayoutRoundTripIsCanonical();
     testCompositionAndGameplayCrossASeam();
     testNegativeSlotsNormalizeWithoutChangingIdentity();

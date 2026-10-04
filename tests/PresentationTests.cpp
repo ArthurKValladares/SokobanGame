@@ -363,6 +363,79 @@ void testCameraPitchTransition()
     CHECK(near(presentation.cameraPitchDegrees(), 0.0f));
 }
 
+void testCameraYawTransitionTakesShortestTurn()
+{
+    TEST("cameraYawTransitionTakesShortestTurn");
+    GameplayPresentation presentation;
+    CHECK(near(presentation.cameraYawDegrees(), config::cameraYawDegrees));
+    presentation.updateCameraYaw(170.0f, 0.0f, 0.0f);
+    presentation.updateCameraYaw(-170.0f, 0.5f, 1.0f);
+    CHECK(near(std::abs(presentation.cameraYawDegrees()), 180.0f));
+    presentation.updateCameraYaw(-170.0f, 0.5f, 1.0f);
+    CHECK(near(presentation.cameraYawDegrees(), -170.0f));
+    presentation.updateCameraYaw(170.0f, 0.5f, 1.0f);
+    CHECK(near(std::abs(presentation.cameraYawDegrees()), 180.0f));
+    presentation.updateCameraYaw(170.0f, 0.5f, 1.0f);
+    CHECK(near(presentation.cameraYawDegrees(), 170.0f));
+    presentation.updateCameraYaw(90.0f, 0.5f, 1.0f);
+    CHECK(near(presentation.cameraYawDegrees(), 130.0f));
+    presentation.updateCameraYaw(0.0f, 0.5f, 1.0f);
+    CHECK(near(presentation.cameraYawDegrees(), 65.0f));
+    presentation.updateCameraYaw(0.0f, 0.5f, 1.0f);
+    CHECK(near(presentation.cameraYawDegrees(), 0.0f));
+}
+
+void testAuthoredCameraAnglesReachGameplayAndEditorFrames()
+{
+    TEST("authoredCameraAnglesReachGameplayAndEditorFrames");
+    const CameraAngles angles { 55.0f, -90.0f };
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "C." } },
+        .cameraAngles = angles,
+    }, "authored camera");
+    GameplaySession session;
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const PresentationSettings settings;
+    const RenderFrameBuilder::GameplayInput input {
+        .manifest = testManifest(),
+        .level = level,
+        .state = session.state(),
+        .projectedState = session.state(),
+        .presentation = presentation,
+        .settings = settings,
+    };
+    const auto frame = RenderFrameBuilder::buildGameplay(input);
+    CHECK(frame.cameraPitchDegrees == angles.pitchDegrees);
+    CHECK(frame.cameraYawDegrees == angles.yawDegrees);
+    auto overheadInput = input;
+    overheadInput.cameraPitchDegrees = 0.0f;
+    const auto overhead = RenderFrameBuilder::buildGameplay(overheadInput);
+    CHECK(overhead.cameraPitchDegrees == 0.0f);
+    CHECK(overhead.cameraYawDegrees == angles.yawDegrees);
+    overheadInput.cameraYawDegrees = 45.0f;
+    CHECK(RenderFrameBuilder::buildGameplay(overheadInput).cameraYawDegrees == 45.0f);
+
+    TemporaryEditorProject project;
+    LevelEditor editor;
+    editor.initialize(project.source, project.runtime, 0, 0);
+    editor.newDocument(4, 3, false);
+    editor.setCameraAngles(angles);
+    const RenderFrameBuilder::EditorInput editorInput {
+        .manifest = testManifest(),
+        .editor = editor,
+        .settings = settings,
+    };
+    const auto edited = RenderFrameBuilder::buildEditor(editorInput);
+    CHECK(edited.cameraPitchDegrees == frame.cameraPitchDegrees);
+    CHECK(edited.cameraYawDegrees == frame.cameraYawDegrees);
+    editor.setCameraAngles(std::nullopt);
+    const auto reset = RenderFrameBuilder::buildEditor(editorInput);
+    CHECK(reset.cameraPitchDegrees == config::cameraPitchDegrees);
+    CHECK(reset.cameraYawDegrees == config::cameraYawDegrees);
+}
+
 void testAnimationPreviewBuildsIsolatedStage()
 {
     TEST("animationPreviewBuildsIsolatedStage");
@@ -3997,6 +4070,8 @@ int main()
     testPresentationTransactionResolvesActorIndependentDependencies();
     testPresentationTransactionRejectsDependencyCycles();
     testCameraPitchTransition();
+    testCameraYawTransitionTakesShortestTurn();
+    testAuthoredCameraAnglesReachGameplayAndEditorFrames();
     testAnimationPreviewBuildsIsolatedStage();
     testSettingsNormalizeAndConvert();
     testPresentationResetClocksAndFallenTargets();

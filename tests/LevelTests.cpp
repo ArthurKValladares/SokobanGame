@@ -10,6 +10,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -70,6 +71,52 @@ void testSerializationRoundTrip()
     CHECK(serialized[3].empty());
     CHECK(serialized[4] == "@layer 1");
     CHECK(Level::parseLayerRows(serialized, "round trip") == layered);
+}
+
+void testCameraMetadataRoundTripAndValidation()
+{
+    TEST("cameraMetadataRoundTripAndValidation");
+    const CameraAngles angles { .pitchDegrees = 52.5f, .yawDegrees = -125.0f };
+    const Level::Definition definition {
+        .layers = { { "C." } },
+        .cameraAngles = angles,
+    };
+    const auto lines = Level::serializeDefinition(definition);
+    CHECK(lines.front().starts_with("@camera "));
+    const auto parsed = Level::parseDefinition(lines, "camera round trip");
+    CHECK(parsed == definition);
+    CHECK(Level::loadFromDefinition(parsed, "camera").cameraAngles() == angles);
+    CHECK(!Level::loadFromLines({ "C." }, "legacy").cameraAngles());
+    CHECK(Level::serializeDefinition({ .layers = { { "C." } } }) ==
+        std::vector<std::string> { "C." });
+
+    for (const std::string payload : {
+             "{}", "[]", "{\"pitch\":30}", "{\"pitch\":true,\"yaw\":0}",
+             "{\"pitch\":\"30\",\"yaw\":0}", "{\"pitch\":-1,\"yaw\":0}",
+             "{\"pitch\":90,\"yaw\":0}", "{\"pitch\":30,\"yaw\":181}",
+             "{\"pitch\":30,\"yaw\":-181}", "{\"pitch\":1e100,\"yaw\":0}",
+             "{invalid}" }) {
+        checkThrowsContaining([&] {
+            (void)Level::parseDefinition({ "@camera " + payload, "@layer 0", "C." }, "bad camera");
+        }, "amera");
+    }
+    checkThrowsContaining([&] {
+        (void)Level::parseDefinition({ lines.front(), lines.front(), "@layer 0", "C." }, "duplicate camera");
+    }, "more than one '@camera'");
+    checkThrowsContaining([&] {
+        (void)Level::parseDefinition({ "@layer 0", "C.", lines.front() }, "late camera");
+    }, "before '@layer 0'");
+    checkThrowsContaining([&] {
+        (void)Level::parseDefinition({ lines.front(), "C." }, "missing layers");
+    }, "requires explicit");
+    Level::Definition invalid = definition;
+    invalid.cameraAngles->pitchDegrees = std::numeric_limits<float>::infinity();
+    checkThrowsContaining([&] { (void)Level::serializeDefinition(invalid); }, "finite");
+    checkThrowsContaining([&] { (void)Level::loadFromDefinition(invalid, "bad camera"); }, "finite");
+    for (CameraAngles boundary : { CameraAngles { 0.0f, -180.0f }, CameraAngles { 89.0f, 180.0f } }) {
+        invalid.cameraAngles = boundary;
+        CHECK(Level::parseDefinition(Level::serializeDefinition(invalid), "boundary") == invalid);
+    }
 }
 
 void testCharacterMetadataRoundTripAndLegacyDefault()
@@ -1179,6 +1226,7 @@ int main()
     testPortalMetadata();
     testLegacyAndLayeredParsing();
     testSerializationRoundTrip();
+    testCameraMetadataRoundTripAndValidation();
     testCharacterMetadataRoundTripAndLegacyDefault();
     testWaterLayerMetadataAndTileResolution();
     testDecorationMetadataRoundTrip();

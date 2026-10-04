@@ -19,6 +19,7 @@ namespace {
 
 constexpr std::string_view layerPrefix = "@layer ";
 constexpr std::string_view waterPrefix = "@water ";
+constexpr std::string_view cameraPrefix = "@camera ";
 constexpr std::string_view characterPrefix = "@character ";
 constexpr std::string_view decorationPrefix = "@decoration ";
 constexpr std::string_view selectorPrefix = "@selector ";
@@ -36,6 +37,41 @@ constexpr std::size_t maximumElevatorStops = 64;
 constexpr std::string_view platePrefix = "@plate ";
 
 using Json = nlohmann::json;
+
+void validateCameraAngles(
+    const CameraAngles& angles, std::string_view sourceName)
+{
+    if (!angles.valid()) {
+        throw std::runtime_error(
+            "Camera angles must be finite, with pitch in [0, 89] and yaw in "
+            "[-180, 180]: " + std::string(sourceName));
+    }
+}
+
+CameraAngles parseCameraAngles(
+    std::string_view payload, std::string_view sourceName)
+{
+    try {
+        const Json object = Json::parse(payload);
+        if (!object.is_object() || !object.contains("pitch") ||
+            !object.at("pitch").is_number() || !object.contains("yaw") ||
+            !object.at("yaw").is_number()) {
+            throw std::runtime_error(
+                "Camera metadata requires numeric 'pitch' and 'yaw': " +
+                std::string(sourceName));
+        }
+        const CameraAngles angles {
+            .pitchDegrees = object.at("pitch").get<float>(),
+            .yawDegrees = object.at("yaw").get<float>(),
+        };
+        validateCameraAngles(angles, sourceName);
+        return angles;
+    } catch (const Json::exception& error) {
+        throw std::runtime_error(
+            "Invalid camera JSON in " + std::string(sourceName) +
+            ": " + error.what());
+    }
+}
 
 std::runtime_error unknownLevelCharacter(char value)
 {
@@ -1109,6 +1145,7 @@ Level::Definition Level::parseDefinition(
     if (!layered) {
         if (std::ranges::any_of(lines, [](const std::string& line) {
                 return line.starts_with(waterPrefix) ||
+                    line.starts_with(cameraPrefix) ||
                     line.starts_with(characterPrefix) ||
                     line.starts_with(decorationPrefix) ||
                     line.starts_with(selectorPrefix) ||
@@ -1130,6 +1167,20 @@ Level::Definition Level::parseDefinition(
     Definition definition;
     std::optional<uint32_t> currentLayer;
     for (const std::string& line : lines) {
+        if (line.starts_with(cameraPrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Camera metadata must appear before '@layer 0': " + source);
+            }
+            if (definition.cameraAngles) {
+                throw std::runtime_error(
+                    "Level contains more than one '@camera' directive: " + source);
+            }
+            definition.cameraAngles = parseCameraAngles(
+                std::string_view(line).substr(cameraPrefix.size()), sourceName);
+            continue;
+        }
+
         if (line.starts_with(characterPrefix)) {
             if (currentLayer) {
                 throw std::runtime_error(
@@ -1380,7 +1431,8 @@ std::vector<std::string> Level::serializeDefinition(
     const Definition& definition)
 {
     if (definition.layers.size() == 1 && !definition.character &&
-        !definition.waterLayer && definition.decorations.empty() &&
+        !definition.waterLayer && !definition.cameraAngles &&
+        definition.decorations.empty() &&
         definition.selectors.empty() && definition.gates.empty() &&
         definition.rotators.empty() && definition.lockPlates.empty() &&
         definition.elevators.empty() &&
@@ -1391,6 +1443,14 @@ std::vector<std::string> Level::serializeDefinition(
     }
 
     std::vector<std::string> lines;
+    if (definition.cameraAngles) {
+        validateCameraAngles(*definition.cameraAngles, "serialized level");
+        const Json object {
+            { "pitch", definition.cameraAngles->pitchDegrees },
+            { "yaw", definition.cameraAngles->yawDegrees },
+        };
+        lines.push_back(std::string(cameraPrefix) + object.dump());
+    }
     if (definition.character) {
         lines.push_back(
             std::string(characterPrefix) +
@@ -1475,6 +1535,7 @@ std::vector<std::string> Level::serializeDefinition(
         lines.push_back(serializeDecoration(decoration));
     }
     if (definition.character || definition.waterLayer ||
+        definition.cameraAngles ||
         !definition.decorations.empty() || !definition.selectors.empty() ||
         !definition.gates.empty() || !definition.rotators.empty() ||
         !definition.lockPlates.empty() ||
@@ -1510,7 +1571,10 @@ Level Level::loadFromDefinition(
     const Definition& definition,
     std::string_view sourceName)
 {
-    return loadFromLayers(
+    if (definition.cameraAngles) {
+        validateCameraAngles(*definition.cameraAngles, sourceName);
+    }
+    Level level = loadFromLayers(
         definition.layers,
         sourceName,
         definition.waterLayer,
@@ -1525,6 +1589,8 @@ Level Level::loadFromDefinition(
         definition.objectLinks,
         definition.portals,
         definition.lockPlates);
+    level.cameraAngles_ = definition.cameraAngles;
+    return level;
 }
 
 Level Level::loadFromLayers(

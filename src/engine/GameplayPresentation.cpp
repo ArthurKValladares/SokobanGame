@@ -389,6 +389,9 @@ GameplayPresentation::GameplayPresentation()
     : cameraPitchDegrees_(config::cameraPitchDegrees)
     , cameraPitchStartDegrees_(config::cameraPitchDegrees)
     , cameraPitchTargetDegrees_(config::cameraPitchDegrees)
+    , cameraYawDegrees_(config::cameraYawDegrees)
+    , cameraYawStartDegrees_(config::cameraYawDegrees)
+    , cameraYawTargetDegrees_(config::cameraYawDegrees)
 {
 }
 
@@ -471,7 +474,8 @@ void GameplayPresentation::updateCameraPitch(
     float dt,
     float transitionSeconds)
 {
-    targetDegrees = std::clamp(targetDegrees, 0.0f, 89.0f);
+    targetDegrees = std::clamp(
+        targetDegrees, 0.0f, CameraAngles::maximumPitchDegrees);
     dt = std::max(dt, 0.0f);
     transitionSeconds = std::max(transitionSeconds, 0.0f);
 
@@ -493,6 +497,35 @@ void GameplayPresentation::updateCameraPitch(
     const float eased = progress * progress * (3.0f - 2.0f * progress);
     cameraPitchDegrees_ = cameraPitchStartDegrees_ +
         (cameraPitchTargetDegrees_ - cameraPitchStartDegrees_) * eased;
+}
+
+void GameplayPresentation::updateCameraYaw(
+    float targetDegrees,
+    float dt,
+    float transitionSeconds)
+{
+    targetDegrees = std::remainder(targetDegrees, 360.0f);
+    dt = std::max(dt, 0.0f);
+    transitionSeconds = std::max(transitionSeconds, 0.0f);
+    if (std::abs(std::remainder(
+            targetDegrees - cameraYawTargetDegrees_, 360.0f)) > 0.0001f) {
+        cameraYawStartDegrees_ = cameraYawDegrees_;
+        cameraYawTargetDegrees_ = targetDegrees;
+        cameraYawTransitionElapsed_ = 0.0f;
+    }
+    if (transitionSeconds <= 0.0f) {
+        cameraYawDegrees_ = cameraYawTargetDegrees_;
+        cameraYawTransitionElapsed_ = 0.0f;
+        return;
+    }
+    cameraYawTransitionElapsed_ = std::min(
+        cameraYawTransitionElapsed_ + dt, transitionSeconds);
+    const float progress = cameraYawTransitionElapsed_ / transitionSeconds;
+    const float eased = progress * progress * (3.0f - 2.0f * progress);
+    const float turn = std::remainder(
+        cameraYawTargetDegrees_ - cameraYawStartDegrees_, 360.0f);
+    cameraYawDegrees_ = std::remainder(
+        cameraYawStartDegrees_ + turn * eased, 360.0f);
 }
 
 void GameplayPresentation::advanceAnimations(float dt, const GameState& state)

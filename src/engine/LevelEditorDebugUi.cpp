@@ -255,6 +255,41 @@ void LevelEditorDebugUi::draw(
     }
 
     ImGui::Separator();
+    if (ImGui::CollapsingHeader(
+            "Screen Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
+        CameraAngles angles = editor.cameraAngles().value_or(CameraAngles {});
+        const auto editAngle = [&] (
+            const char* label, float& value, float minimum, float maximum) {
+            const bool changed = ImGui::SliderFloat(
+                label, &value, minimum, maximum, "%.1f deg",
+                ImGuiSliderFlags_AlwaysClamp);
+            if (ImGui::IsItemActivated()) {
+                (void)editor.beginStroke();
+            }
+            if (changed) {
+                editor.setCameraAngles(angles);
+            }
+            if (ImGui::IsItemDeactivated()) {
+                editor.endStroke();
+            }
+        };
+        editAngle(
+            "Tilt", angles.pitchDegrees, 0.0f, CameraAngles::maximumPitchDegrees);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "0 degrees looks straight down; larger angles lower the camera.");
+        }
+        editAngle("Rotation", angles.yawDegrees, -180.0f, 180.0f);
+        ImGui::BeginDisabled(!editor.cameraAngles());
+        if (ImGui::Button("Reset Camera To Default")) {
+            editor.endStroke();
+            editor.setCameraAngles(std::nullopt);
+        }
+        ImGui::EndDisabled();
+        ImGui::TextDisabled("Saved with this screen. Preview updates live.");
+    }
+
+    ImGui::Separator();
     ImGui::Text("Layer %d of %d", static_cast<int>(editor.activeLayer()) + 1, static_cast<int>(editor.documentDepth()));
     int selectedLayer = static_cast<int>(editor.activeLayer());
     if (ImGui::SliderInt("Current Layer", &selectedLayer, 0, std::max(static_cast<int>(editor.documentDepth()) - 1, 0))) {

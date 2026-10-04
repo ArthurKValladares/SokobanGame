@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iterator>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -86,6 +87,69 @@ TreeSnapshot snapshotTree(const std::filesystem::path& root)
     }
     std::ranges::sort(snapshot, {}, &TreeSnapshot::value_type::first);
     return snapshot;
+}
+
+void testPerScreenCameraEditingAndPersistence()
+{
+    TEST("perScreenCameraEditingAndPersistence");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    const auto first = project.source / "level0" / "screen0.scr";
+    const auto second = project.source / "level0" / "screen1.scr";
+    const CameraAngles firstAngles { 45.0f, 90.0f };
+    const CameraAngles secondAngles { 60.0f, -135.0f };
+    editor.newDocument(4, 3, false);
+    CHECK(!editor.cameraAngles());
+    editor.setCameraAngles(firstAngles);
+    CHECK(editor.cameraAngles() == firstAngles);
+    CHECK(editor.documentDefinition().cameraAngles == firstAngles);
+    CHECK(editor.tryUndoEdit());
+    CHECK(!editor.cameraAngles());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.saveDocument(first));
+    CHECK(Level::loadFromFile(first).cameraAngles() == firstAngles);
+    CHECK(Level::loadFromFile(project.runtime / "level0" / "screen0.scr").cameraAngles() == firstAngles);
+    CHECK(!editor.reloadFromDisk());
+
+    editor.newDocument(4, 3, false);
+    CHECK(!editor.cameraAngles());
+    editor.setCameraAngles(secondAngles);
+    CHECK(editor.saveDocument(second));
+    CHECK(editor.openDocument(first));
+    CHECK(editor.cameraAngles() == firstAngles);
+    (void)editor.beginStroke();
+    editor.setCameraAngles(CameraAngles { 46.0f, 91.0f });
+    editor.setCameraAngles(CameraAngles { 50.0f, 100.0f });
+    editor.endStroke();
+    CHECK(editor.openDocument(second));
+    CHECK(editor.cameraAngles() == secondAngles);
+    CHECK(editor.openDocument(first));
+    CHECK(editor.cameraAngles() == (CameraAngles { 50.0f, 100.0f }));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.cameraAngles() == firstAngles);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.cameraAngles() == (CameraAngles { 50.0f, 100.0f }));
+    editor.setCameraAngles(CameraAngles { std::numeric_limits<float>::quiet_NaN(), 0.0f });
+    CHECK(editor.cameraAngles() == (CameraAngles { 50.0f, 100.0f }));
+    editor.setCameraAngles(std::nullopt);
+    CHECK(!editor.cameraAngles());
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.cameraAngles() == (CameraAngles { 50.0f, 100.0f }));
+    CHECK(editor.saveDocument(first));
+
+    auto onDisk = Level::loadDefinitionFromFile(first);
+    onDisk.cameraAngles = CameraAngles { 20.0f, -30.0f };
+    {
+        std::ofstream file(first, std::ios::trunc);
+        for (const auto& line : Level::serializeDefinition(onDisk)) {
+            file << line << '\n';
+        }
+    }
+    CHECK(editor.reloadFromDisk());
+    CHECK(editor.cameraAngles() == onDisk.cameraAngles);
+    CHECK(!editor.dirty());
+    CHECK(editor.openDocument(second));
+    CHECK(editor.cameraAngles() == secondAngles);
 }
 
 void testDocumentCommandsAndUndo()
@@ -2486,6 +2550,7 @@ void testReloadFromDiskKeepsDraftsAndIgnoresOwnSaves()
 
 int main()
 {
+    testPerScreenCameraEditingAndPersistence();
     testLockPlateEditor();
     testPortalColorGroups();
     testDocumentCommandsAndUndo();

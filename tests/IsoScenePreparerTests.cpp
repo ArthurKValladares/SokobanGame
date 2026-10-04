@@ -401,6 +401,26 @@ void testCameraLayoutUsesConfiguredAngles()
     CHECK(near(overhead.isoLayout.cameraRight.y, -std::sin(yaw)));
     CHECK(near(overhead.isoLayout.cameraUp.x, -std::sin(yaw)));
     CHECK(near(overhead.isoLayout.cameraUp.y, -std::cos(yaw)));
+
+    // Each viewpoint must rotate both the perspective pose and the overhead
+    // basis. This also covers the straight-down singularity at a custom yaw.
+    for (float authoredYaw : { -180.0f, -90.0f, 45.0f, 180.0f }) {
+        frame.cameraYawDegrees = authoredYaw;
+        const float yawRadians = authoredYaw * radiansPerDegree;
+        for (float authoredPitch : { 0.0f, 55.0f, 89.0f }) {
+            frame.cameraPitchDegrees = authoredPitch;
+            const auto rotated = prepareScene(frame, { 1920.0f, 1080.0f });
+            const auto& layout = rotated.isoLayout;
+            const float pitchRadians = authoredPitch * radiansPerDegree;
+            CHECK(near(layout.cameraPosition.x, 2.0f + std::sin(yawRadians) * std::sin(pitchRadians) * distance));
+            CHECK(near(layout.cameraPosition.y, 1.0f + std::cos(yawRadians) * std::sin(pitchRadians) * distance));
+            CHECK(near(layout.cameraPosition.z, std::cos(pitchRadians) * distance));
+            CHECK(near(layout.cameraRight.x, std::cos(yawRadians)));
+            CHECK(near(layout.cameraRight.y, -std::sin(yawRadians)));
+            CHECK(near(dot(layout.cameraRight, layout.cameraForward), 0.0f));
+            CHECK(near(dot(layout.cameraUp, layout.cameraForward), 0.0f));
+        }
+    }
 }
 
 void testExplicitCameraPoseBypassesBoardFit()
@@ -1025,6 +1045,34 @@ void testModelBackedPickFacesUseLogicalBounds()
         extent,
         frame.levelWidth,
         frame.levelHeight) == flag.cell));
+}
+
+void testPickingTracksAuthoredCameraAngles()
+{
+    using namespace sokoban;
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 3;
+    frame.levelHeight = 2;
+    frame.levelDepth = 1;
+    frame.tiles.push_back(cube(1, 0));
+    const Vec2 extent { 1600.0f, 900.0f };
+    for (float yaw : { -180.0f, -90.0f, 45.0f, 180.0f }) {
+        frame.cameraYawDegrees = yaw;
+        for (float pitch : { 0.0f, 55.0f }) {
+            frame.cameraPitchDegrees = pitch;
+            const auto scene = prepareScene(frame, extent);
+            const Vec3 projected = IsoScenePreparer::projectIsoPoint(
+                scene.isoLayout, extent, { 1.5f, 0.5f, 1.0f });
+            const Vec2 pixel {
+                (projected.x + 1.0f) * 0.5f * extent.x,
+                (1.0f - projected.y) * 0.5f * extent.y,
+            };
+            CHECK((IsoScenePreparer {}.pickGridCell(
+                scene, pixel, extent, frame.levelWidth, frame.levelHeight) ==
+                GridPosition3 { 1, 0, 0 }));
+        }
+    }
 }
 
 void testPickingHonorsConfiguredGridBorder()
@@ -2002,6 +2050,7 @@ int main()
     testModelWorldTransformComposesToTheClipTransform();
     testPickingConsumesPreparedFaces();
     testModelBackedPickFacesUseLogicalBounds();
+    testPickingTracksAuthoredCameraAngles();
     testPickingHonorsConfiguredGridBorder();
     testVirtualPickPlaneMatchesPreviewTopUnderPerspective();
     testTopDownPreparationSkipsIsoWork();

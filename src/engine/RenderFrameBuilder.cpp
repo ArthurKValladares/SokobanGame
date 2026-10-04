@@ -422,7 +422,9 @@ RenderFrameData initializeGameplayFrame(
         ? RenderFrameData(*arena)
         : RenderFrameData {};
     frame.viewMode = RenderViewMode::Isometric3D;
-    frame.cameraPitchDegrees = input.cameraPitchDegrees;
+    const CameraAngles angles = input.level.cameraAngles().value_or(CameraAngles {});
+    frame.cameraPitchDegrees = input.cameraPitchDegrees.value_or(angles.pitchDegrees);
+    frame.cameraYawDegrees = input.cameraYawDegrees.value_or(angles.yawDegrees);
     frame.lighting = input.settings.renderLighting();
     frame.gridOverlay = input.settings.renderGridOverlay();
     frame.outputTransform = input.settings.renderOutputTransform();

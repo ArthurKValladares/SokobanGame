@@ -62,6 +62,7 @@ public:
         const AnimationCatalog* animations = nullptr;
         float conveyorBeltScrollOffset = 0.0f;
         std::optional<float> cameraPitchDegrees;
+        std::optional<float> cameraYawDegrees;
         // Optional authored viewport. Composed overworlds provide the current
         // screen extent and a sub-cell offset while crossing a seam.
         std::optional<RenderFrameData::CameraExtent> cameraExtent;

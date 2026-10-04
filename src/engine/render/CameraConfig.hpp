@@ -1,11 +1,13 @@
 #pragma once
 
+#include "engine/CameraAngles.hpp"
+
 namespace sokoban::config {
 
 // Pitch is measured away from a straight-down view. Yaw rotates around the
 // vertical axis from the established +Y viewpoint toward +X.
-inline constexpr float cameraPitchDegrees = 30.0f;
-inline constexpr float cameraYawDegrees = 0.0f;
+inline constexpr float cameraPitchDegrees = CameraAngles::defaultPitchDegrees;
+inline constexpr float cameraYawDegrees = CameraAngles::defaultYawDegrees;
 inline constexpr float cameraVerticalFovDegrees = 35.0f;
 inline constexpr float cameraPitchTransitionSeconds = 0.15f;
 

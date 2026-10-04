@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Character.hpp"
+#include "engine/CameraAngles.hpp"
 #include "engine/Math.hpp"
 #include "engine/LevelLocation.hpp"
 #include "engine/TileTypes.hpp"
@@ -222,6 +223,7 @@ public:
     struct Definition {
         LayerRows layers;
         std::optional<uint32_t> waterLayer;
+        std::optional<CameraAngles> cameraAngles;
         std::vector<Decoration> decorations;
         std::vector<ScreenSelector> selectors;
         std::vector<Gate> gates;
@@ -348,6 +350,7 @@ public:
     [[nodiscard]] const std::vector<Plate>& coveredPlates() const { return coveredPlates_; }
     [[nodiscard]] const std::vector<GridPosition3>& ends() const { return ends_; }
     [[nodiscard]] std::optional<uint32_t> waterLayer() const { return waterLayer_; }
+    [[nodiscard]] std::optional<CameraAngles> cameraAngles() const { return cameraAngles_; }
     [[nodiscard]] const std::vector<Decoration>& decorations() const { return decorations_; }
     [[nodiscard]] const std::vector<ScreenSelector>& selectors() const { return selectors_; }
     [[nodiscard]] const ScreenSelector* selectorAt(GridPosition3 cell) const;
@@ -380,6 +383,7 @@ private:
     std::vector<GridPosition3> ends_;
     std::vector<TileType> tiles_;
     std::optional<uint32_t> waterLayer_;
+    std::optional<CameraAngles> cameraAngles_;
     std::vector<Decoration> decorations_;
     std::vector<ScreenSelector> selectors_;
 };
