@@ -1645,7 +1645,7 @@ Application::buildScreenPreviewRenderFrame() const
         .conveyorBeltScrollOffset =
             screenPreviewPresentation_.conveyorBeltScrollOffset(
                 screenPreviewSession_.stepDurationSeconds()),
-        .levelLocation = *screenPreviewTarget_,
+        .levelLocation = screenPreviewTarget_,
         .selectorState = [this](LevelLocation target) {
             return campaign_.selectorViewState(playerProfile_, target);
         },

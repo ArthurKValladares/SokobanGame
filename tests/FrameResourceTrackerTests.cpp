@@ -127,6 +127,23 @@ void testRetirementWithoutPendingFramesIsImmediate()
     CHECK(queue.empty());
 }
 
+void testDrainPreservesPendingEntriesBetweenCompletedOnes()
+{
+    sokoban::FrameRetirementQueue<int> queue;
+    std::vector<int> destroyed;
+    queue.retire(10, 0);
+    queue.retire(20, 0b10);
+    queue.retire(30, 0);
+    const auto destroy = [&](int resource) { destroyed.push_back(resource); };
+    queue.drainCompleted(destroy);
+    CHECK((destroyed == std::vector<int> { 10, 30 }));
+    CHECK(queue.size() == 1);
+    queue.completeFrame(1);
+    queue.drainCompleted(destroy);
+    CHECK((destroyed == std::vector<int> { 10, 30, 20 }));
+    CHECK(queue.empty());
+}
+
 } // namespace
 
 int main()
@@ -136,6 +153,7 @@ int main()
     testScratchStorageIsNeverReusedWhileLeased();
     testRetirementWaitsForEveryReferencingFrame();
     testRetirementWithoutPendingFramesIsImmediate();
+    testDrainPreservesPendingEntriesBetweenCompletedOnes();
 
     if (failures == 0) {
         std::cout << "FrameResourceTrackerTests: "

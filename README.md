@@ -186,17 +186,16 @@ listed in `.github/workflows/required-tests.yml` and expose its pinned
 Vulkan SDK. Run these from the repository root:
 
 ```sh
-xvfb-run --auto-servernum cmake --workflow --preset ci-debug
-xvfb-run --auto-servernum cmake --workflow --preset ci-release
-xvfb-run --auto-servernum cmake --workflow --preset ci-sanitize
-
-cmake --preset ci-tidy
-cmake --build --preset ci-tidy --parallel
-
-cmake --preset ci-fuzz
-cmake --build --preset ci-fuzz --parallel
-./out/ci-fuzz/sokoban_player_profile_fuzz -max_len=65536 -max_total_time=60
+bash tools/check_ci.sh                         # all six Linux configurations
+bash tools/check_ci.sh ci-release ci-tidy       # selected configurations
 ```
+
+This preflight checks the toolchain dependencies and SDK header version,
+selects lavapipe and validation layers using the CI helper, and runs the
+builds, CTest suites, bounded fuzz run, Vulkan-free core check, and Debug
+240-frame validation smoke. Independent configurations continue after a
+failure, and Ninja uses `-k 0` to report all available compile failures.
+It requires a real Linux environment; Git Bash cannot reproduce these gates.
 
 The Windows workflows cover the MSVC build and CTest suites. Linux adds GCC
 and Clang diagnostics, platform-specific type and library behavior,
@@ -205,8 +204,35 @@ those checks pass. A 64-bit `uint64_t`, for example, aliases `unsigned long`
 on Linux and `unsigned long long` on Windows, which matters for templated
 types such as `std::future<T>`. CI also renders frames under lavapipe Vulkan
 validation and checks Vulkan-free core dependencies and committed line
-endings. The commands above cover the build, test, sanitizer, analysis, and
-fuzz jobs; the extra gates remain explicit steps in the workflow.
+endings. The preflight covers the build and runtime gates; the committed
+line-ending check remains an explicit step in the workflow.
+
+As an additional Windows check, a portable GCC 13 toolchain can compile every
+configured first-party file from the Release compilation database:
+
+```powershell
+cmake --preset release
+python tools/check_compiler_warnings.py --database out/release/compile_commands.json --compiler C:/path/to/g++.exe
+```
+
+This audit produces real optimized `-O3 -Werror` object files, preserving the
+configuration's macros and include paths while omitting PCH and vendored
+implementation units. A syntax-only scan cannot find warnings that depend on
+optimization. The script checks all files even after failures and saves logs
+and `failures.json` under `out/compiler-warnings`. For a full clang-tidy policy
+scan using that GCC toolchain's standard-library headers, use a complete
+LLVM 18 distribution. Configure a separate Debug database with tests disabled,
+matching `ci-tidy`'s feature macros (from a Developer PowerShell):
+
+```powershell
+cmake -S . -B out/lint-audit -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSOKOBAN_BUILD_TESTS=OFF -DSOKOBAN_PRECOMPILED_HEADERS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+python tools/check_compiler_warnings.py --database out/lint-audit/compile_commands.json --compiler C:/path/to/g++.exe --tidy C:/path/to/clang-tidy.exe --sources-only --output out/compiler-tidy
+```
+
+These host audits supplement native builds. They still use Windows types,
+platform branches, SDK, and drivers, so they do not establish that Linux CI
+passes. Report each checked configuration separately; passing CTest alone
+does not verify Release compiler warnings or the complete lint policy.
 
 Production code is compiled once into `sokoban_core`, `sokoban_ui`, and
 `sokoban_render_vulkan`; tests link those libraries rather than recompiling

@@ -22,6 +22,7 @@
       "cacheVariables": {
         "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "SOKOBAN_WARNINGS_AS_ERRORS": "ON"
       },
       "condition": {
@@ -74,6 +75,7 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "gcc-13",
         "CMAKE_CXX_COMPILER": "g++-13",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "SOKOBAN_BUILD_TESTS": "ON",
         "SOKOBAN_WARNINGS_AS_ERRORS": "ON",
         "SDL_WAYLAND": "OFF"

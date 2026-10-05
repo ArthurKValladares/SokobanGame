@@ -32,11 +32,15 @@
 # CI pins LLVM 18 because wildcard check groups can gain checks in newer
 # LLVM releases; use that version when reproducing Linux findings.
 #
-# clang-analyzer-* stays, unchanged, for the reason it was there.
+# Keep the analyzer group, except its opt-in enum-cast checker. LLVM documents
+# that it rejects valid combinations of enum flags and should not be enabled
+# in projects using that pattern. Vulkan and the Windows SDK use those flags.
+# https://releases.llvm.org/18.1.8/tools/clang/docs/analyzer/checkers.html#optin-core-enumcastoutofrange-c-c
 
 Checks: >
   -*,
   clang-analyzer-*,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
   bugprone-*,
   performance-*,
   concurrency-*,
@@ -73,7 +77,7 @@ Checks: >
 # `performance-enum-size` followed after the internal profile-file state enum
 # adopted an explicit one-byte underlying type.
 #
-# Two are excluded on their merits rather than as a queue:
+# The following checks are excluded on their merits rather than as a queue:
 #
 #   bugprone-easily-swappable-parameters (56) fires on any run of same-typed
 #   parameters. The concern is real - the review has its own finding about

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <stdexcept>
 
 namespace {
 
@@ -204,6 +205,50 @@ void testArenaBackedFrameArrayKeepsItsFixedCapacity()
     CHECK(values.droppedCount() == 1);
 }
 
+struct ThrowingCopy {
+    int value = 0;
+    inline static bool fail = false;
+
+    explicit ThrowingCopy(int initial) : value(initial) {}
+    ThrowingCopy(const ThrowingCopy& other) : value(other.value)
+    {
+        if (fail) {
+            throw std::runtime_error("injected element copy failure");
+        }
+    }
+    ThrowingCopy& operator=(const ThrowingCopy&) = default;
+};
+
+void testFailedFrameArrayCopyPreservesDestination()
+{
+    sokoban::FrameArray<ThrowingCopy> source;
+    CHECK(source.push_back(ThrowingCopy(99)));
+    sokoban::FrameArena arena("copy test", sokoban::arenaBytesFor<ThrowingCopy>(2));
+    sokoban::FrameArray<ThrowingCopy> destination(arena, 2);
+    CHECK(destination.push_back(ThrowingCopy(7)));
+    const auto* originalData = destination.data();
+
+    bool threw = false;
+    ThrowingCopy::fail = true;
+    try {
+        destination = source;
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    ThrowingCopy::fail = false;
+    CHECK(threw);
+    CHECK(destination.arenaBacked());
+    CHECK(destination.data() == originalData);
+    CHECK(destination.size() == 1);
+    CHECK(destination.capacity() == 2);
+    CHECK(destination.front().value == 7);
+
+    destination = source;
+    CHECK(!destination.arenaBacked());
+    CHECK(destination.size() == 1);
+    CHECK(destination.front().value == 99);
+}
+
 void testRenderFrameTakesAllCollectionStorageInOneArena()
 {
     sokoban::FrameArena arena(
@@ -236,6 +281,7 @@ int main()
     testArenaArrayFromExhaustedArenaIsEmptyNotNull();
     testFrameArrayPreservesOwningCopySemantics();
     testArenaBackedFrameArrayKeepsItsFixedCapacity();
+    testFailedFrameArrayCopyPreservesDestination();
     testRenderFrameTakesAllCollectionStorageInOneArena();
 
     if (failures > 0) {

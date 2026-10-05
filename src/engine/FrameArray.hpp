@@ -2,6 +2,7 @@
 
 #include "engine/ArenaArray.hpp"
 
+#include <cassert>
 #include <initializer_list>
 #include <utility>
 #include <variant>
@@ -51,8 +52,11 @@ public:
         if (this == &other) {
             return *this;
         }
-        storage_.template emplace<std::vector<T>>(
-            other.begin(), other.end());
+        // Build the owning copy before replacing live storage. If allocation
+        // or an element copy throws, the destination stays valid; committing
+        // the variant through its non-throwing move cannot make it valueless.
+        FrameArray replacement(other);
+        storage_ = std::move(replacement.storage_);
         return *this;
     }
 
@@ -96,7 +100,11 @@ public:
 
     void clear() noexcept
     {
-        std::visit([](auto& values) { values.clear(); }, storage_);
+        if (auto* values = std::get_if<std::vector<T>>(&storage_)) {
+            values->clear();
+        } else {
+            arenaStorage().clear();
+        }
     }
 
     iterator erase(const_iterator first, const_iterator last)
@@ -119,16 +127,18 @@ public:
 
     [[nodiscard]] std::size_t size() const noexcept
     {
-        return std::visit([](const auto& values) {
-            return values.size();
-        }, storage_);
+        if (const auto* values = std::get_if<std::vector<T>>(&storage_)) {
+            return values->size();
+        }
+        return arenaStorage().size();
     }
 
     [[nodiscard]] std::size_t capacity() const noexcept
     {
-        return std::visit([](const auto& values) {
-            return values.capacity();
-        }, storage_);
+        if (const auto* values = std::get_if<std::vector<T>>(&storage_)) {
+            return values->capacity();
+        }
+        return arenaStorage().capacity();
     }
 
     [[nodiscard]] bool empty() const noexcept { return size() == 0; }
@@ -146,12 +156,17 @@ public:
 
     [[nodiscard]] T* data() noexcept
     {
-        return std::visit([](auto& values) { return values.data(); }, storage_);
+        if (auto* values = std::get_if<std::vector<T>>(&storage_)) {
+            return values->data();
+        }
+        return arenaStorage().data();
     }
     [[nodiscard]] const T* data() const noexcept
     {
-        return std::visit(
-            [](const auto& values) { return values.data(); }, storage_);
+        if (const auto* values = std::get_if<std::vector<T>>(&storage_)) {
+            return values->data();
+        }
+        return arenaStorage().data();
     }
     [[nodiscard]] iterator begin() noexcept { return data(); }
     [[nodiscard]] iterator end() noexcept { return data() + size(); }
@@ -174,6 +189,23 @@ public:
     [[nodiscard]] const T& back() const noexcept { return *(end() - 1); }
 
 private:
+    // Constructors and moves preserve an active alternative, and copy
+    // assignment commits only after its potentially throwing work succeeds.
+    // Unlike std::visit/std::get, this access cannot throw bad_variant_access.
+    [[nodiscard]] ArenaArray<T>& arenaStorage() noexcept
+    {
+        auto* values = std::get_if<ArenaArray<T>>(&storage_);
+        assert(values != nullptr);
+        return *values;
+    }
+
+    [[nodiscard]] const ArenaArray<T>& arenaStorage() const noexcept
+    {
+        const auto* values = std::get_if<ArenaArray<T>>(&storage_);
+        assert(values != nullptr);
+        return *values;
+    }
+
     std::variant<std::vector<T>, ArenaArray<T>> storage_;
 };
 

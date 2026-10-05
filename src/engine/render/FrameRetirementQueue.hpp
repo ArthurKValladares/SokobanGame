@@ -49,8 +49,12 @@ public:
                 continue;
             }
             destroy(entries_[index].resource);
-            entries_.erase(entries_.begin() +
-                static_cast<std::ptrdiff_t>(index));
+            if (index + 1 == entries_.size()) {
+                entries_.pop_back();
+            } else {
+                entries_.erase(entries_.begin() +
+                    static_cast<std::ptrdiff_t>(index));
+            }
         }
     }
 

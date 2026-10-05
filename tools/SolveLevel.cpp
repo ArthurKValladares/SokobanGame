@@ -128,6 +128,7 @@ void appendStatistics(
 } // namespace
 
 int main(int argc, char** argv)
+try
 {
     if (argc < 3) {
         std::cerr << "usage: sokoban_solve_level <levels-root> "
@@ -281,4 +282,9 @@ int main(int argc, char** argv)
         }
     }
     return failures == 0 ? 0 : 1;
+}
+catch (const std::exception& error)
+{
+    std::cerr << "sokoban_solve_level: " << error.what() << "\n";
+    return 1;
 }

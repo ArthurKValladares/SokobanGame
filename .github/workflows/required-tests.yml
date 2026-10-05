@@ -245,7 +245,8 @@ jobs:
         run: cmake --preset ${{ matrix.preset }}
 
       - name: Build ${{ matrix.name }}
-        run: cmake --build --preset ${{ matrix.preset }} --parallel
+        # Finish independent compile commands so one run reports every failure.
+        run: cmake --build --preset ${{ matrix.preset }} --parallel -- -k 0
 
       - name: Test ${{ matrix.name }}
         if: matrix.run_tests

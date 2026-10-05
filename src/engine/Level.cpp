@@ -1733,17 +1733,17 @@ Level Level::loadFromLayers(
                     }
                     ++matchedCoveredPlates;
                 }
-                const std::optional<TileType> plate =
+                const TileType plate =
                     covered != level.coveredPlates_.end()
-                    ? std::optional<TileType>(covered->tile)
+                    ? covered->tile
                     : (tileTypeIsPlate(*tile)
-                            ? tile
-                            : std::nullopt);
+                            ? *tile
+                            : TileType::Air);
                 level.tiles_[tileIndex(x, y, z, level.width_, level.height_)] =
                     tileTypeOccupiesLevelCell(*tile)
-                    ? plate.value_or(TileType::Air)
+                    ? plate
                     : *tile;
-                if (tileTypeIsSignalSource(plate.value_or(TileType::Air))) {
+                if (tileTypeIsSignalSource(plate)) {
                     level.pressurePlates_.push_back(position);
                 }
                 if (plate == TileType::End) {

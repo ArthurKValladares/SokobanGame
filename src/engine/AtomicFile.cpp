@@ -163,13 +163,13 @@ void installReplacement(
     }
 }
 
-#endif
-
 std::filesystem::path containingDirectory(const std::filesystem::path& path)
 {
     const std::filesystem::path directory = path.parent_path();
     return directory.empty() ? std::filesystem::path(".") : directory;
 }
+
+#endif
 
 } // namespace
 

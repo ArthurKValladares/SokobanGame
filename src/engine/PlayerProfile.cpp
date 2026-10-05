@@ -85,7 +85,7 @@ void PlayerProfile::recordLevelCompletion(
     }
     if (recordBests && completionTimeSeconds &&
         (!found->bestTimeSeconds || *completionTimeSeconds < *found->bestTimeSeconds)) {
-        found->bestTimeSeconds = *completionTimeSeconds;
+        found->bestTimeSeconds = completionTimeSeconds;
     }
     unlockedLevel = std::max(unlockedLevel, level + (unlockNextLevel ? 1 : 0));
     normalize();
@@ -182,7 +182,7 @@ void PlayerProfile::recordScreenCompletion(
     if (recordBests && completionTimeSeconds &&
         (!found->bestTimeSeconds ||
             *completionTimeSeconds < *found->bestTimeSeconds)) {
-        found->bestTimeSeconds = *completionTimeSeconds;
+        found->bestTimeSeconds = completionTimeSeconds;
     }
     normalize();
 }
