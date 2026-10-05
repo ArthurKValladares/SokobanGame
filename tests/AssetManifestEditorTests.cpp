@@ -151,6 +151,34 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
         "serialized document keeps format version");
 }
 
+void testAtmosphericRoundTrip(const std::filesystem::path& sourceManifest)
+{
+    TEST("atmosphericRoundTrip");
+    TemporaryManifest temporary(sourceManifest);
+    sokoban::AssetManifestEditor editor;
+    editor.initialize(temporary.file());
+    editor.addSoundSet();
+    const auto index = editor.soundSets().size() - 1;
+    auto sound = editor.soundSets()[index];
+    sound.atmosphere = sokoban::AssetManifest::Atmosphere {
+        .source = sokoban::AssetManifest::AtmosphericSource::Conveyor,
+        .audibleDistanceTiles = 4.0f,
+        .fullVolumeDistanceTiles = 0.5f,
+        .falloffExponent = 2.0f,
+    };
+    editor.updateSoundSet(index, sound);
+    CHECK(editor.save());
+    auto saved = sokoban::AssetManifest::loadFromFile(temporary.file());
+    CHECK(saved.soundSets()[index] == sound);
+    CHECK(saved.soundSets()[index].files.empty());
+    CHECK(saved.soundSets()[index - 1].atmosphere == editor.soundSets()[index - 1].atmosphere);
+    sound.atmosphere.reset();
+    editor.updateSoundSet(index, sound);
+    CHECK(editor.save());
+    saved = sokoban::AssetManifest::loadFromFile(temporary.file());
+    CHECK(!saved.soundSets()[index].atmosphere);
+}
+
 void testCollectionOperations(const std::filesystem::path& sourceManifest)
 {
     TemporaryManifest temporary(sourceManifest);
@@ -412,6 +440,7 @@ int main()
     const std::filesystem::path sourceManifest = *assetsRoot / "manifest.json";
 
     testRoundTripAndMutations(sourceManifest);
+    testAtmosphericRoundTrip(sourceManifest);
     testCollectionOperations(sourceManifest);
     testInvalidSavePreservesFile(sourceManifest);
     testSavePublishesAStartupValidRuntimeManifest(sourceManifest);

@@ -2,10 +2,12 @@
 
 #include "engine/AssetManifest.hpp"
 #include "engine/AudioConfig.hpp"
+#include "engine/AtmosphericAudio.hpp"
 
 #include <algorithm>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <string_view>
@@ -77,16 +79,23 @@ public:
     // pushed, a randomly chosen stone-drag loop plays seamlessly and fades out
     // when the push ends. Cart and elevator loops follow visible platform
     // travel and fade out while stationary or when gameplay is suspended.
+    // An absent listener (menus, transitions, editor, suspension) stops ambient
+    // loops. Distance uses grid units, including vertical separation.
     void update(float dt, bool playerWalking, bool pushingStone,
-        bool minecartMoving = false, bool elevatorMoving = false);
+        bool minecartMoving = false, bool elevatorMoving = false,
+        std::optional<Vec3> atmosphereListener = std::nullopt);
+    // Rebuild emitter positions and stop the previous world's atmosphere.
+    void setAtmosphericLevel(const Level& level);
 
     // Plays a decoded, non-looping variation from a manifest sound set. Delay
     // aligns turret audio with the scheduled muzzle effect. Footstep and
-    // stone-drag sets are reserved for their orchestrators.
+    // stone-drag and atmospheric sets are reserved for their orchestrators.
     void playOneShot(std::string_view soundSetName, float delaySeconds = 0.0f);
     // One shared loop per set stays phase-continuous while any matching
-    // platform moves. Stopping and restarting use short click-free fades.
-    void setLoopingSound(std::string_view soundSetName, bool playing);
+    // platform moves, or for a family of atmospheric tiles. Gain multiplies
+    // the set/SFX volumes and stays intact when those settings change.
+    // Stopping and restarting use short click-free fades.
+    void setLoopingSound(std::string_view soundSetName, bool playing, float gain = 1.0f);
 
 #if SOKOBAN_ENABLE_DEBUG_UI
     // Auditions an editor selection through this engine, without requiring
@@ -115,7 +124,7 @@ public:
     [[nodiscard]] float stoneDragVolume() const { return stoneDragVolume_; }
     void setFootstepIntervalSeconds(float seconds);
     [[nodiscard]] float footstepIntervalSeconds() const { return cadence_.intervalSeconds; }
-    // Re-reads the manifest's sound-set and music volumes (Debug hot reload
+    // Re-reads volumes and atmospheric settings (Debug hot reload
     // after AssetManifest::adoptLiveFields).
     void applyManifestVolumes();
     [[nodiscard]] bool available() const;
@@ -132,6 +141,7 @@ private:
     const AssetManifest* manifest_ = nullptr;
     std::mt19937 random_;
     FootstepCadence cadence_;
+    AtmosphericAudio atmosphere_;
     float masterVolume_ = config::masterVolume;
     float musicVolume_ = config::musicVolume;
     float soundVolume_ = config::soundVolume;

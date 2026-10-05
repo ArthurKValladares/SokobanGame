@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,6 +32,8 @@ struct AudioSystem::EngineHandle {
         int lastPlayed = -1;
         int activeLoop = -1;
         bool loopRequested = false;
+        float loopGain = 1.0f;
+        std::optional<AssetManifest::Atmosphere> atmosphere;
     };
 
     ma_engine engine {};
@@ -123,6 +126,7 @@ AudioSystem::AudioSystem(std::filesystem::path audioRoot, const AssetManifest& m
             engine_->oneShotSoundSets.emplace_back();
         oneShot.name = set.name;
         oneShot.volume = std::clamp(set.volume, 0.0f, 1.0f);
+        oneShot.atmosphere = set.atmosphere;
         loadSoundSet(
             engine_->engine,
             audioRoot_,
@@ -230,11 +234,35 @@ bool AudioSystem::available() const
     return engine_->engineInitialized && !engine_->loadedFootsteps.empty();
 }
 
+void AudioSystem::setAtmosphericLevel(const Level& level)
+{
+    for (const auto& set : engine_->oneShotSoundSets) {
+        if (set.atmosphere) {
+            setLoopingSound(set.name, false);
+        }
+    }
+    atmosphere_.reset(level);
+}
+
 void AudioSystem::update(float dt, bool playerWalking, bool pushingStone,
-    bool minecartMoving, bool elevatorMoving)
+    bool minecartMoving, bool elevatorMoving, std::optional<Vec3> atmosphereListener)
 {
     setLoopingSound("minecart-travel", minecartMoving && dt > 0.0f);
     setLoopingSound("elevator-moving", elevatorMoving && dt > 0.0f);
+    for (const auto& set : engine_->oneShotSoundSets) {
+        if (!set.atmosphere) {
+            continue;
+        }
+        const float target = atmosphereListener && dt > 0.0f && std::isfinite(dt)
+            ? atmosphere_.gain(*atmosphereListener, *set.atmosphere) : 0.0f;
+        if (target <= 0.0f) {
+            setLoopingSound(set.name, false);
+            continue;
+        }
+        const float current = set.loopRequested ? set.loopGain : 0.0f;
+        const float response = 1.0f - std::exp(-dt / config::atmosphereResponseSeconds);
+        setLoopingSound(set.name, true, current + (target - current) * response);
+    }
     const int due = cadence_.update(dt, playerWalking);
     if (due > 0 && available()) {
         // Multiple due steps in one frame collapse into a single sound;
@@ -263,7 +291,7 @@ void AudioSystem::playOneShot(std::string_view soundSetName, float delaySeconds)
         [&](const EngineHandle::OneShotSoundSet& set) {
             return set.name == soundSetName;
         });
-    if (found == engine_->oneShotSoundSets.end() || found->loaded.empty()) {
+    if (found == engine_->oneShotSoundSets.end() || found->loaded.empty() || found->atmosphere) {
         return;
     }
 
@@ -287,14 +315,24 @@ void AudioSystem::playOneShot(std::string_view soundSetName, float delaySeconds)
     ma_sound_start(&sound);
 }
 
-void AudioSystem::setLoopingSound(std::string_view soundSetName, bool playing)
+void AudioSystem::setLoopingSound(std::string_view soundSetName, bool playing, float gain)
 {
     if (!engine_->engineInitialized) {
         return;
     }
     const auto found = std::ranges::find_if(engine_->oneShotSoundSets,
         [&](const auto& set) { return set.name == soundSetName; });
-    if (found == engine_->oneShotSoundSets.end() || found->loopRequested == playing) {
+    if (found == engine_->oneShotSoundSets.end()) {
+        return;
+    }
+    if (playing) {
+        found->loopGain = std::clamp(gain, 0.0f, 1.0f);
+        if (found->activeLoop >= 0) {
+            ma_sound_set_volume(&found->sounds[static_cast<size_t>(found->activeLoop)],
+                soundVolume_ * found->volume * found->loopGain);
+        }
+    }
+    if (found->loopRequested == playing) {
         return;
     }
     found->loopRequested = playing;
@@ -316,7 +354,11 @@ void AudioSystem::setLoopingSound(std::string_view soundSetName, bool playing)
     ma_sound_set_start_time_in_milliseconds(&sound, 0);
     ma_sound_set_looping(&sound, MA_TRUE);
     ma_sound_seek_to_pcm_frame(&sound, 0);
-    ma_sound_set_volume(&sound, soundVolume_ * found->volume);
+    ma_sound_set_volume(&sound, soundVolume_ * found->volume * found->loopGain);
+    if (found->atmosphere) {
+        // Attenuation is calculated in tile units, not miniaudio world units.
+        ma_sound_set_spatialization_enabled(&sound, MA_FALSE);
+    }
     ma_sound_set_fade_in_milliseconds(&sound, 0.0f, 1.0f, dragFadeInMilliseconds);
     ma_sound_start(&sound);
 }
@@ -455,9 +497,11 @@ void AudioSystem::setSoundVolume(float volume)
     if (engine_->engineInitialized) {
         for (EngineHandle::OneShotSoundSet& set : engine_->oneShotSoundSets) {
             for (int index : set.loaded) {
+                ma_sound& sound = set.sounds[static_cast<size_t>(index)];
                 ma_sound_set_volume(
-                    &set.sounds[static_cast<size_t>(index)],
-                    soundVolume_ * set.volume);
+                    &sound,
+                    soundVolume_ * set.volume *
+                        (ma_sound_is_looping(&sound) ? set.loopGain : 1.0f));
             }
         }
     }
@@ -475,6 +519,14 @@ void AudioSystem::applyManifestVolumes()
     for (EngineHandle::OneShotSoundSet& set : engine_->oneShotSoundSets) {
         set.volume =
             std::clamp(manifest_->soundSetVolume(set.name), 0.0f, 1.0f);
+        const auto updated = std::ranges::find(manifest_->soundSets(), set.name,
+            &AssetManifest::SoundSet::name);
+        const auto atmosphere = updated == manifest_->soundSets().end()
+            ? std::nullopt : updated->atmosphere;
+        if (set.atmosphere && !atmosphere) {
+            setLoopingSound(set.name, false);
+        }
+        set.atmosphere = atmosphere;
     }
     setSoundVolume(soundVolume_);
     setMusicVolume(musicVolume_);

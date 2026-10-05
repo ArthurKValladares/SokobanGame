@@ -1372,7 +1372,9 @@ void Application::update(
         presentation_.minecarts(), [](const auto& cart) { return cart.moving; });
     const bool elevatorMoving = std::ranges::any_of(
         presentation_.elevators(), [](const auto& elevator) { return elevator.moving; });
-    audioSystem_->update(dt, playerMoving, pushing, minecartMoving, elevatorMoving);
+    audioSystem_->update(dt, playerMoving, pushing, minecartMoving, elevatorMoving,
+        AtmosphericAudio::listenerPosition(gameplaySession_.state(), presentation_,
+            gameplaySession_.activeHeroController()));
 }
 
 void Application::loadCurrentScreen()
@@ -1475,6 +1477,7 @@ bool Application::applyLevel(
         gameplaySession_.clearActionAdmissionPolicy();
     }
     presentation_.resetEntities(gameplaySession_.state());
+    audioSystem_->setAtmosphericLevel(level_);
     particleSystem_.reset();
     campaign_.markWorldLoaded();
     return restored;

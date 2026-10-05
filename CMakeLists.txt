@@ -508,6 +508,7 @@ add_library(sokoban_core STATIC
     src/engine/AsyncSaveStore.cpp
     src/engine/AssetManifest.cpp
     src/engine/AssetManifestEditor.cpp
+    src/engine/AtmosphericAudio.cpp
     src/engine/AudioSystem.cpp
     src/engine/CampaignSession.cpp
     src/engine/BoardLayout.cpp
@@ -1252,6 +1253,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME gameplay_loop
         LIBS sokoban_core
         SOURCES tests/GameplayLoopTests.cpp
+    )
+    sokoban_add_test(NAME atmospheric_audio
+        LIBS sokoban_core
+        SOURCES tests/AtmosphericAudioTests.cpp
     )
     sokoban_add_test(NAME frame_pacing
         LIBS sokoban_core

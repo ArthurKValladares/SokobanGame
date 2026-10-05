@@ -15,4 +15,7 @@ inline constexpr float minimumFootstepIntervalSeconds = 0.01f;
 inline constexpr float maximumFootstepIntervalSeconds = 1.0f;
 inline constexpr int maximumFootstepsPerUpdate = 4;
 
+// Smooth proximity gains across teleports, hero switches and frame boundaries.
+inline constexpr float atmosphereResponseSeconds = 0.06f;
+
 } // namespace sokoban::config

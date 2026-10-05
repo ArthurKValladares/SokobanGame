@@ -912,6 +912,28 @@
       "name": "gate-close",
       "files": ["custom/audio/gateClose.wav"],
       "volume": 0.55
+    },
+    {
+      "name": "portal-ambience",
+      "files": ["custom/audio/portalAtmosphereLoop.wav"],
+      "volume": 0.4,
+      "atmosphere": {
+        "source": "portal",
+        "audibleDistanceTiles": 2.0,
+        "fullVolumeDistanceTiles": 0.0,
+        "falloffExponent": 1.0
+      }
+    },
+    {
+      "name": "conveyor-ambience",
+      "files": ["custom/audio/conveyorAtmosphereLoop.wav"],
+      "volume": 0.4,
+      "atmosphere": {
+        "source": "conveyor",
+        "audibleDistanceTiles": 2.0,
+        "fullVolumeDistanceTiles": 0.0,
+        "falloffExponent": 1.0
+      }
     }
   ],
   "music": [

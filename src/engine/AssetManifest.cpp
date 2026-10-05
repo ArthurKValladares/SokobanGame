@@ -446,13 +446,47 @@ static void parseSounds(const Json& root, AssetManifest& manifest)
     for (std::size_t i = 0; i < sounds.size(); ++i) {
         const std::string context = indexedContext("sounds", i);
         const Json& soundJson = sounds[i];
-        rejectUnknownProperties(soundJson, { "name", "files", "volume" }, context);
+        rejectUnknownProperties(soundJson, { "name", "files", "volume", "atmosphere" }, context);
 
         AssetManifest::SoundSet sound;
         sound.name = requiredString(soundJson, "name", context);
         sound.volume = optionalFloat(soundJson, "volume", 1.0f, context);
         if (sound.volume < 0.0f) {
             fail(context, "volume must not be negative");
+        }
+        if (const auto it = soundJson.find("atmosphere"); it != soundJson.end()) {
+            const std::string atmosphereContext = context + ".atmosphere";
+            rejectUnknownProperties(*it,
+                { "source", "audibleDistanceTiles", "fullVolumeDistanceTiles", "falloffExponent" },
+                atmosphereContext);
+            AssetManifest::Atmosphere atmosphere;
+            const std::string source = requiredString(*it, "source", atmosphereContext);
+            if (source == "portal") {
+                atmosphere.source = AssetManifest::AtmosphericSource::Portal;
+            } else if (source == "conveyor") {
+                atmosphere.source = AssetManifest::AtmosphericSource::Conveyor;
+            } else {
+                fail(atmosphereContext, "source must be 'portal' or 'conveyor'");
+            }
+            atmosphere.audibleDistanceTiles = optionalFloat(*it, "audibleDistanceTiles",
+                atmosphere.audibleDistanceTiles, atmosphereContext);
+            atmosphere.fullVolumeDistanceTiles = optionalFloat(*it, "fullVolumeDistanceTiles",
+                atmosphere.fullVolumeDistanceTiles, atmosphereContext);
+            atmosphere.falloffExponent = optionalFloat(*it, "falloffExponent",
+                atmosphere.falloffExponent, atmosphereContext);
+            if (atmosphere.fullVolumeDistanceTiles < 0.0f ||
+                atmosphere.audibleDistanceTiles <= atmosphere.fullVolumeDistanceTiles) {
+                fail(atmosphereContext,
+                    "audibleDistanceTiles must exceed non-negative fullVolumeDistanceTiles");
+            }
+            if (atmosphere.falloffExponent <= 0.0f) {
+                fail(atmosphereContext, "falloffExponent must be positive");
+            }
+            if (sound.name == "footsteps" || sound.name == "stone-drag" ||
+                sound.name == "minecart-travel" || sound.name == "elevator-moving") {
+                fail(atmosphereContext, "movement sound sets cannot also be atmospheric loops");
+            }
+            sound.atmosphere = atmosphere;
         }
         const Json& files = requiredProperty(soundJson, "files", context);
         if (!files.is_array()) {
@@ -885,6 +919,7 @@ bool AssetManifest::adoptLiveFields(const AssetManifest& updated)
     if (structural.sounds_.size() == sounds_.size()) {
         for (std::size_t index = 0; index < sounds_.size(); ++index) {
             structural.sounds_[index].volume = sounds_[index].volume;
+            structural.sounds_[index].atmosphere = sounds_[index].atmosphere;
         }
     }
     if (structural.music_.size() == music_.size()) {

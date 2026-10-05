@@ -376,6 +376,16 @@ std::string AssetManifestEditor::serialize() const
         if (sound.volume != 1.0f) {
             item["volume"] = sound.volume;
         }
+        if (sound.atmosphere) {
+            const auto& atmosphere = *sound.atmosphere;
+            item["atmosphere"] = {
+                { "source", atmosphere.source == AssetManifest::AtmosphericSource::Portal
+                    ? "portal" : "conveyor" },
+                { "audibleDistanceTiles", atmosphere.audibleDistanceTiles },
+                { "fullVolumeDistanceTiles", atmosphere.fullVolumeDistanceTiles },
+                { "falloffExponent", atmosphere.falloffExponent },
+            };
+        }
         root["sounds"].push_back(std::move(item));
     }
 

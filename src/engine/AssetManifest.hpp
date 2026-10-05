@@ -157,10 +157,25 @@ public:
         bool operator==(const TileEntry&) const = default;
     };
 
+    enum class AtmosphericSource : uint8_t {
+        Portal,
+        Conveyor,
+    };
+
+    struct Atmosphere {
+        AtmosphericSource source = AtmosphericSource::Portal;
+        float audibleDistanceTiles = 2.0f;
+        float fullVolumeDistanceTiles = 0.0f;
+        float falloffExponent = 1.0f;
+
+        bool operator==(const Atmosphere&) const = default;
+    };
+
     struct SoundSet {
         std::string name;
         std::vector<std::string> files; // relative to the assets root
         float volume = 1.0f; // relative to the master volume
+        std::optional<Atmosphere> atmosphere; // proximity-driven shared loop
 
         bool operator==(const SoundSet&) const = default;
     };
@@ -233,7 +248,7 @@ public:
     // Returns 1.0 for unknown set names.
     [[nodiscard]] float soundSetVolume(std::string_view name) const;
     // Debug hot reload: takes the fields that can change while the game runs
-    // (tile scales, sound-set and music volumes) from `updated`, provided
+    // (tile scales, sound-set volumes/atmosphere, music volumes) from `updated`, provided
     // nothing else differs. Returns false, changing nothing, when anything
     // structural does: ids, paths, models, textures, roles, tile models.
     [[nodiscard]] bool adoptLiveFields(const AssetManifest& updated);

@@ -694,6 +694,46 @@ void AssetManifestDebugUi::drawSounds(AssetManifestEditor& editor, AudioSystem& 
                 sound.volume = std::max(sound.volume, 0.0f);
                 changed = true;
             }
+            bool atmospheric = sound.atmosphere.has_value();
+            const bool movementSound = sound.name == "footsteps" || sound.name == "stone-drag" ||
+                sound.name == "minecart-travel" || sound.name == "elevator-moving";
+            ImGui::BeginDisabled(movementSound);
+            if (ImGui::Checkbox("Atmospheric loop", &atmospheric)) {
+                sound.atmosphere = atmospheric
+                    ? std::optional(AssetManifest::Atmosphere {}) : std::nullopt;
+                changed = true;
+            }
+            ImGui::EndDisabled();
+            if (movementSound && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("This set plays during movement. Add a separate set for ambience.");
+            }
+            if (sound.atmosphere) {
+                auto& atmosphere = *sound.atmosphere;
+                int source = static_cast<int>(atmosphere.source);
+                if (ImGui::Combo("Tile source", &source, "Portal\0Conveyor\0")) {
+                    atmosphere.source = static_cast<AssetManifest::AtmosphericSource>(source);
+                    changed = true;
+                }
+                if (ImGui::DragFloat("Audible distance (tiles)", &atmosphere.audibleDistanceTiles,
+                        0.05f, 0.01f, 100.0f, "%.2f")) {
+                    atmosphere.audibleDistanceTiles = std::max(
+                        atmosphere.audibleDistanceTiles, atmosphere.fullVolumeDistanceTiles + 0.01f);
+                    changed = true;
+                }
+                if (ImGui::DragFloat("Full-volume distance (tiles)", &atmosphere.fullVolumeDistanceTiles,
+                        0.05f, 0.0f, atmosphere.audibleDistanceTiles - 0.01f, "%.2f")) {
+                    atmosphere.fullVolumeDistanceTiles = std::clamp(
+                        atmosphere.fullVolumeDistanceTiles, 0.0f, atmosphere.audibleDistanceTiles - 0.01f);
+                    changed = true;
+                }
+                if (ImGui::DragFloat("Falloff exponent", &atmosphere.falloffExponent,
+                        0.05f, 0.01f, 8.0f, "%.2f")) {
+                    atmosphere.falloffExponent = std::max(atmosphere.falloffExponent, 0.01f);
+                    changed = true;
+                }
+                ImGui::TextDisabled("1 = linear; higher values fade faster with distance.");
+                ImGui::TextWrapped("Nearby tiles share one loop at the nearest tile's volume.");
+            }
             ImGui::SeparatorText("Files");
             for (std::size_t fileIndex = 0; fileIndex < sound.files.size(); ++fileIndex) {
                 ImGui::PushID(static_cast<int>(fileIndex));

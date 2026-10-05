@@ -995,6 +995,25 @@ The original WAV effects in `assets/custom/audio/` can be regenerated with
 `python tools/generate_mechanic_audio.py` (NumPy required); both movement loops
 use periodic synthesis for seamless playback.
 
+Portals and conveyor belts also have atmospheric loops (`portal-ambience` and
+`conveyor-ambience`). They follow the controlled hero's animated position,
+including height: silent at or beyond two tiles, half volume at one tile,
+and the sound set's full volume on its tile. All matching tiles share one loop
+at the nearest tile's volume, so long belts and nearby parallel belts do not
+stack voices or become louder. Brief fades smooth entering/leaving range and
+hero switches. Menus, screen transitions, editor mode and suspension stop these
+loops; loading a screen or draft rebuilds the emitter positions.
+
+In the Asset Manifest sound editor, enable `Atmospheric loop` and choose its
+`Tile source`, `Audible distance (tiles)`, `Full-volume distance (tiles)`, and
+`Falloff exponent`. An exponent of 1 gives linear falloff; higher values fade
+faster. These settings and the set volume take effect after `Save` without
+restarting. In JSON they live in the sound entry's optional `atmosphere`
+object (`source`: `portal` or `conveyor`, `audibleDistanceTiles`,
+`fullVolumeDistanceTiles`, `falloffExponent`). The full-volume distance must be
+non-negative and less than the audible distance, and the exponent positive.
+Atmospheric sounds still use the global sound-effects and master volume.
+
 `assets/animation_catalog.json` is the source of truth for animation usage,
 playback tuning, and animation ordering. Each manifest animation records its
 validated source duration and a global speed. Every code-declared semantic use

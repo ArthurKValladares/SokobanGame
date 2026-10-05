@@ -718,15 +718,52 @@ void testRealManifestFile()
 
 } // namespace
 
+void testAtmosphericSchema()
+{
+    TEST("atmosphericSchema");
+    Json json = Json::parse(validManifest);
+    json["sounds"].push_back({ { "name", "ambience" }, { "files", Json::array() },
+        { "atmosphere", { { "source", "conveyor" } } } });
+    const auto defaults = sokoban::AssetManifest::parse(json.dump()).soundSets().back().atmosphere;
+    CHECK(defaults.has_value());
+    CHECK(defaults->source == sokoban::AssetManifest::AtmosphericSource::Conveyor);
+    CHECK(defaults->audibleDistanceTiles == 2.0f);
+    CHECK(defaults->fullVolumeDistanceTiles == 0.0f);
+    CHECK(defaults->falloffExponent == 1.0f);
+    const auto rejects = [&](Json atmosphere, const char* label) {
+        Json invalid = json;
+        invalid["sounds"].back()["atmosphere"] = std::move(atmosphere);
+        checkThrows([&] { (void)sokoban::AssetManifest::parse(invalid.dump()); }, label);
+    };
+    rejects({ { "source", "wind" } }, "unknown atmospheric source");
+    rejects(Json::object(), "missing atmospheric source");
+    rejects(nullptr, "atmosphere must be an object");
+    rejects({ { "source", "portal" }, { "audibleDistanceTiles", 0.0 } }, "empty audible range");
+    rejects({ { "source", "portal" }, { "fullVolumeDistanceTiles", -1.0 } }, "negative full volume range");
+    rejects({ { "source", "portal" }, { "fullVolumeDistanceTiles", 2.0 } }, "overlapping range endpoints");
+    rejects({ { "source", "portal" }, { "falloffExponent", 0.0 } }, "zero falloff exponent");
+    rejects({ { "source", "portal" }, { "falloffExponent", -1.0 } }, "negative falloff exponent");
+    rejects({ { "source", "portal" }, { "audibleDistanceTiles", 1e100 } }, "non-finite atmospheric range");
+    rejects({ { "source", "portal" }, { "audibleDistanceTiles", "two" } }, "non-numeric atmospheric range");
+    rejects({ { "source", "portal" }, { "radius", 2.0 } }, "misspelled atmospheric field");
+    json["sounds"].back()["name"] = "stone-drag";
+    checkThrows([&] { (void)sokoban::AssetManifest::parse(json.dump()); },
+        "movement orchestration cannot share an atmospheric voice");
+}
+
 void testLiveFieldsAdoptOnlyWhenNothingStructuralChanged()
 {
-    const Json base = Json::parse(validManifest);
+    Json base = Json::parse(validManifest);
+    base["sounds"].push_back({ { "name", "ambience" }, { "files", Json::array() },
+        { "atmosphere", { { "source", "portal" } } } });
     sokoban::AssetManifest live = sokoban::AssetManifest::parse(base.dump());
 
     Json tuned = base;
     tuned["tiles"][0]["scale"] = 1.5;
     tuned["sounds"][0]["volume"] = 0.6;
     tuned["music"][1]["volume"] = 0.4;
+    tuned["sounds"][1]["atmosphere"] = { { "source", "conveyor" },
+        { "audibleDistanceTiles", 4.0 }, { "fullVolumeDistanceTiles", 0.5 }, { "falloffExponent", 2.0 } };
     const sokoban::AssetManifest tunedManifest =
         sokoban::AssetManifest::parse(tuned.dump());
     CHECK(!(live == tunedManifest));
@@ -734,6 +771,10 @@ void testLiveFieldsAdoptOnlyWhenNothingStructuralChanged()
     CHECK(live == tunedManifest);
     CHECK(live.tileScale(sokoban::TileType::Wall) == 1.5f);
     CHECK(live.soundSetVolume("footsteps") == 0.6f);
+    CHECK(live.soundSets()[1].atmosphere->audibleDistanceTiles == 4.0f);
+    CHECK(live.soundSets()[1].atmosphere->fullVolumeDistanceTiles == 0.5f);
+    CHECK(live.soundSets()[1].atmosphere->falloffExponent == 2.0f);
+    CHECK(live.soundSets()[1].atmosphere->source == sokoban::AssetManifest::AtmosphericSource::Conveyor);
 
     Json structural = tuned;
     structural["textures"][1]["path"] = "textures/other.png";
@@ -747,6 +788,12 @@ void testLiveFieldsAdoptOnlyWhenNothingStructuralChanged()
     CHECK(!live.adoptLiveFields(
         sokoban::AssetManifest::parse(retiled.dump())));
     CHECK(live == before);
+
+    tuned["sounds"][1].erase("atmosphere");
+    CHECK(live.adoptLiveFields(sokoban::AssetManifest::parse(tuned.dump())));
+    CHECK(!live.soundSets()[1].atmosphere);
+    CHECK(live.adoptLiveFields(before));
+    CHECK(live.soundSets()[1].atmosphere.has_value());
 }
 
 int main()
@@ -759,6 +806,7 @@ int main()
     testDecorationMeshCanPreserveAuthoredScale();
     testRealManifestFile();
     testLiveFieldsAdoptOnlyWhenNothingStructuralChanged();
+    testAtmosphericSchema();
 
     if (failures != 0) {
         std::cerr << failures << " asset manifest checks failed\n";

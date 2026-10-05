@@ -1,7 +1,7 @@
 """Generate original, deterministic PCM sound effects; requires NumPy.
 
 Run from any directory. Loop oscillators and filtered noise are periodic, so
-the minecart and elevator files can wrap without a fade or a silent gap.
+the movement and atmospheric files can wrap without a fade or a silent gap.
 """
 
 from pathlib import Path
@@ -113,6 +113,24 @@ def main():
         latch *= np.exp(-latch_t * 65) * np.minimum(latch_t / 0.002, 1)
         signal += latch * (t >= latch_time) * envelope(t, duration)
         write("gateClose.wav" if closing else "gateOpen.wav", signal, 0.55)
+
+    duration = 4.0
+    t = np.arange(round(duration * RATE)) / RATE
+    # Slow, periodic phase modulation gives the portal an airy energy hum.
+    phase = 2 * np.pi * 82 * t + 0.8 * np.sin(2 * np.pi * 0.5 * t)
+    shimmer = np.sin(2 * np.pi * 492 * t + 1.2 * np.sin(2 * np.pi * 0.25 * t))
+    hum = 0.24 * np.sin(phase) + 0.08 * np.sin(phase * 2) + 0.04 * shimmer
+    signal = hum * (0.85 + 0.15 * np.cos(2 * np.pi * 0.5 * t))
+    signal += 0.04 * noise(len(t), 350, 2000)
+    write("portalAtmosphereLoop.wav", signal, 0.32, loop=True)
+
+    duration = 2.0
+    t = np.arange(round(duration * RATE)) / RATE
+    # Steady motor/roller texture, distinct from the minecart's wheel joints.
+    motor = 0.20 * np.sin(2 * np.pi * 96 * t) + 0.05 * np.sin(2 * np.pi * 192 * t)
+    rollers = 0.025 * np.sin(2 * np.pi * 672 * t) * (0.6 + 0.4 * np.cos(2 * np.pi * 12 * t))
+    signal = motor + rollers + 0.055 * noise(len(t), 100, 1800)
+    write("conveyorAtmosphereLoop.wav", signal, 0.35, loop=True)
 
 
 if __name__ == "__main__":
