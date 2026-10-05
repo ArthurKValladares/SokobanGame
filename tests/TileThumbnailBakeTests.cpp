@@ -151,7 +151,8 @@ void testBakeFrameStandsTheTileOnAGroundBed()
             tileThumbnails::bedSize * tileThumbnails::bedSize;
         const std::size_t expected = definition.type == TileType::Ground
             ? bedCells
-            : bedCells + (tileTypeIsPortal(definition.type) ? 5 : 1);
+            : bedCells + (tileTypeIsPortal(definition.type) ? 5
+                          : definition.type == TileType::MinecartGate ? 4 : 1);
         CHECK(frame.tiles.size() == expected);
 
         // Every tile counts toward the camera fit. This is what makes the
@@ -168,6 +169,15 @@ void testBakeFrameStandsTheTileOnAGroundBed()
         CHECK(frame.lighting.shadows.enabled);
         CHECK(frame.lighting.ambientOcclusion.enabled);
 
+        if (definition.type == TileType::MinecartGate) {
+            CHECK(frame.isoFaces.size() == 36);
+            for (const auto& face : frame.isoFaces) {
+                for (Vec3 point : face.vertices) {
+                    CHECK(point.z >= 0.0f && point.z < 1.0f);
+                }
+            }
+            continue;
+        }
         // The subject is the last tile and is centred on the centre cell. Its
         // footprint is checked by its midpoint rather than its corner because
         // a manifest tile scale above 1 legitimately overhangs the cell.
@@ -298,6 +308,11 @@ void testSubjectMatchesTheTileTheEditorDraws()
                 CHECK((particle.position.x - edgeX) * edge.x +
                     (particle.position.y - edgeY) * edge.y < 0.0f);
             }
+            continue;
+        }
+        if (definition.type == TileType::MinecartGate) {
+            CHECK(frame.isoFaces.size() == 36);
+            CHECK(frame.tiles.size() == tileThumbnails::bedSize * tileThumbnails::bedSize + 4);
             continue;
         }
         CHECK(subject.height == expected.height);

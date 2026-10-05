@@ -230,8 +230,9 @@ void removeLinkedRecordLayer(std::vector<Record>& records, int deletedLayer)
 // Plates (TileProperty::Plate) and what can stand on them stack instead of
 // replacing each other: painting a unit or mirror on a plate keeps the plate
 // underneath, painting a plate under a unit or mirror slides it beneath, and
-// erasing a stacked cell lifts the occupant off and leaves the plate. Any
-// other tile replaces the whole stack.
+// erasing a stacked cell lifts the occupant off and leaves the plate.
+// Minecart gates likewise retain any rail underneath. Other tiles replace
+// the whole stack.
 struct PaintedCell {
     TileType top = TileType::Air;
     std::optional<TileType> covered;
@@ -243,7 +244,8 @@ struct PaintedCell {
         if (covered) {
             return covered;
         }
-        return tileTypeIsPlate(top) ? std::optional<TileType>(top) : std::nullopt;
+        return tileTypeIsPlate(top) || tileTypeIsRail(top)
+            ? std::optional<TileType>(top) : std::nullopt;
     }
 };
 
@@ -254,12 +256,10 @@ PaintedCell stackPaint(PaintedCell current, TileType tile)
             ? PaintedCell { .top = *current.covered }
             : PaintedCell {};
     }
-    if (tileTypeIsPlate(tile) && tileTypeCanStandOnPlate(current.top) &&
-        (!tileTypeIsMinecart(current.top) || tileTypeIsRailStop(tile))) {
+    if (tileTypeCanCoverSurface(current.top, tile)) {
         return { .top = current.top, .covered = tile };
     }
-    if (tileTypeCanStandOnPlate(tile) && current.plate() &&
-        (!tileTypeIsMinecart(tile) || tileTypeIsRailStop(*current.plate()))) {
+    if (current.plate() && tileTypeCanCoverSurface(tile, *current.plate())) {
         return { .top = tile, .covered = current.plate() };
     }
     return { .top = tile };
@@ -1272,14 +1272,13 @@ bool LevelEditor::moveObject(GridPosition3 destination)
         document_.status = "The selected object no longer exists.";
         return false;
     }
-    // A unit or mirror may also be moved onto an unoccupied plate.
-    const bool ontoPlate = tileTypeIsMinecart(move->tile)
-        ? tileTypeIsRailStop(tileAt(destination))
-        : tileTypeCanStandOnPlate(move->tile) &&
-            tileTypeIsPlate(tileAt(destination));
+    // Units and mirrors may move onto plates; minecart gates onto rails.
+    const bool ontoPlate = tileTypeCanCoverSurface(move->tile, tileAt(destination));
     if ((tileAt(destination) != TileType::Air && !ontoPlate) ||
         selectorAt(destination) != document_.selectors.end()) {
-        document_.status = tileTypeCanStandOnPlate(move->tile)
+        document_.status = move->tile == TileType::MinecartGate
+            ? "Move destination must be empty or an unoccupied rail."
+            : tileTypeCanStandOnPlate(move->tile)
             ? "Move destination must be empty or an unoccupied plate."
             : "Move destination must be empty.";
         return false;

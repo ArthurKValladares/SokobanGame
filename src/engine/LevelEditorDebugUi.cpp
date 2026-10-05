@@ -793,7 +793,9 @@ void LevelEditorDebugUi::drawTilePalette(
     ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
     ImGui::TextWrapped(
         "Plates (Pressure, Buttons, End, Rotators, Lock Plates, Rail Stops) stack with units and mirrors; "
-        "a Minecart can only stack on a Rail Stop. Paint "
+        "a Minecart can only stack on a Rail Stop. A Minecart Gate stacks on "
+        "any rail and lifts for passing carts and their character riders; "
+        "loose blocks cannot pass, even aboard a cart. Paint "
         "one onto the other in either order. Erasing lifts the unit or mirror "
         "off and leaves the plate.");
 

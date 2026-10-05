@@ -614,6 +614,15 @@ a unit or mirror, stacks the two; erasing lifts the occupant off and leaves the
 plate; any other tile replaces the whole stack. Units and mirrors can also be
 moved onto an unoccupied plate.
 
+Minecart Gates use `g` in screen grids. Paint one onto any rail piece to keep
+the track underneath, or paint the rail beneath an existing gate. The editor
+saves that rail in an `@plate` record. The striped horizontal barrier aligns
+with the track and lifts as a cart passes, closing once it clears. Empty carts
+and carts carrying characters can pass in either direction; walking characters
+and loose blocks cannot. A block loaded onto a cart also stops it at the gate.
+A cart parked inside a gate holds it open until it departs. Gates need no
+pressure links, and removing one leaves its rail in place.
+
 Mirrors are pushable units and reflect from their current position. A mirror
 on a Rotator is turned by it, changing the corners it reflects between. A
 mirror presses a pressure plate while standing on it. Pushing a mirror off an

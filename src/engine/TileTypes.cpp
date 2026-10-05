@@ -80,6 +80,17 @@ bool tileTypeCanStandOnPlate(TileType type)
     return tileTypeOccupiesLevelCell(type) || tileTypeIsMinecart(type);
 }
 
+bool tileTypeCanCoverSurface(TileType occupant, TileType surface)
+{
+    if (occupant == TileType::MinecartGate) {
+        return tileTypeIsRail(surface);
+    }
+    if (tileTypeIsMinecart(occupant)) {
+        return tileTypeIsRailStop(surface);
+    }
+    return tileTypeOccupiesLevelCell(occupant) && tileTypeIsPlate(surface);
+}
+
 bool tileTypeOccupiesLevelCell(TileType type)
 {
     return tileTypeIsPlayerStart(type) || type == TileType::Rock ||

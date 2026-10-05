@@ -2028,6 +2028,99 @@ void testScopedHeroActivatesAuthoredMinecartLoop()
     CHECK(state.minecarts[0].cell == cell(11, 3, 1));
 }
 
+void testMinecartGateAdmitsCartsAndCharactersAndRejectsBlocks()
+{
+    TEST("minecartGateAdmitsCartsAndCharactersAndRejectsBlocks");
+    for (bool stopAtGate : { false, true }) {
+        Level::Definition definition {
+            .layers = { { "....." }, { stopAtGate ? "C Mgg" : "C Mg_" } },
+            .plates = {
+                { .cell = cell(0, 0, 1), .tile = TileType::Button },
+                { .cell = cell(2, 0, 1), .tile = TileType::RailStopEastWest },
+                { .cell = cell(3, 0, 1), .tile = TileType::RailStraightEastWest },
+            },
+            .minecarts = { Level::Minecart {
+                .cell = cell(2, 0, 1), .pressurePlates = { cell(0, 0, 1) },
+                .initialDirection = 1,
+            } },
+        };
+        if (stopAtGate) {
+            definition.plates.push_back({
+                .cell = cell(4, 0, 1), .tile = TileType::RailStopEastWest,
+            });
+        }
+        const Level level = Level::loadFromDefinition(definition, "minecart gate");
+        const GameState start = rules::initialState(level);
+        CHECK(!rules::cellAllowsEntity(level, start, cell(3, 0, 1)));
+        const auto emptyTrip = rules::activate(level, start);
+        CHECK(emptyTrip.has_value());
+        if (emptyTrip) {
+            CHECK(emptyTrip->minecarts[0].cell == cell(4, 0, 1));
+            if (stopAtGate) {
+                CHECK(!rules::cellAllowsEntity(level, *emptyTrip, cell(4, 0, 1)));
+            }
+        }
+        for (int riderHeight : { 0, 1 }) {
+            GameState boarded = start;
+            auto hero = boarded.players[0];
+            hero.id = 2;
+            hero.controller = 2;
+            hero.cell = cell(2, 0, 1 + riderHeight);
+            boarded.players.push_back(hero);
+            const auto trip = rules::activate(level, boarded);
+            CHECK(trip.has_value());
+            if (!trip) {
+                continue;
+            }
+            CHECK(trip->minecarts[0].cell == cell(4, 0, 1));
+            CHECK(trip->players[1].cell == cell(4, 0, 1 + riderHeight));
+            CHECK(!trip->players[1].dead);
+            GameState restored = *trip;
+            StateDelta::between(boarded, *trip).inverted().applyTo(restored);
+            CHECK(restored == boarded);
+            const GameState released = rules::step(level, *trip);
+            const auto returnTrip = rules::activate(level, released);
+            CHECK(returnTrip.has_value());
+            if (returnTrip) {
+                CHECK(returnTrip->minecarts[0].cell == cell(2, 0, 1));
+                CHECK(returnTrip->players[1].cell == cell(2, 0, 1 + riderHeight));
+            }
+        }
+        for (TileType block : { TileType::Rock, TileType::Ice,
+                 TileType::TurretEast, TileType::MirrorNorthWest }) {
+            for (int height : { 0, 1 }) {
+                GameState loaded = start;
+                loaded.movables.push_back({
+                    .id = 3, .type = block, .cell = cell(2, 0, 1 + height),
+                });
+                const auto blocked = rules::activate(level, loaded);
+                CHECK(blocked.has_value());
+                if (blocked) {
+                    CHECK(blocked->minecarts == loaded.minecarts);
+                    CHECK(blocked->movables[0].cell == loaded.movables[0].cell);
+                }
+            }
+        }
+    }
+
+    const Level walking = Level::loadFromDefinition(
+        { .layers = { { ".." }, { "Cg" } } }, "walking into cart gate");
+    const GameState walker = rules::initialState(walking);
+    CHECK(rules::step(walking, walker, MoveDirection::Right).players[0].cell ==
+        walker.players[0].cell);
+    for (TileType block : { TileType::Rock, TileType::Ice,
+             TileType::TurretEast, TileType::MirrorNorthWest }) {
+        std::string row = "C g";
+        row[1] = tileTypeToChar(block);
+        const Level pushing = Level::loadFromDefinition(
+            { .layers = { { "..." }, { row } } }, "pushing into cart gate");
+        const GameState before = rules::initialState(pushing);
+        const GameState after = rules::step(pushing, before, MoveDirection::Right);
+        CHECK(after.movables[0].cell == before.movables[0].cell);
+        CHECK(after.players[0].cell == before.players[0].cell);
+    }
+}
+
 void testStateDeltaCarriesMinecarts()
 {
     TEST("stateDeltaCarriesMinecarts");
@@ -3649,6 +3742,7 @@ int main()
     testMinecartLoopKeepsCirclingInSelectedDirection();
     testScopedHeroActivatesAuthoredMinecartLoop();
     testStateDeltaCarriesMinecarts();
+    testMinecartGateAdmitsCartsAndCharactersAndRejectsBlocks();
     testPlayerCannotWalkIntoWater();
     testPlayerCanSlideIntoWater();
     testRockFillsWater();

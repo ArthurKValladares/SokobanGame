@@ -674,6 +674,12 @@ bool cellAllowsEntity(
     const GameState& state,
     GridPosition3 position)
 {
+    // A cart at the gate does not grant entry to units walking or being
+    // pushed in from outside. Carried characters are admitted by the sweep.
+    if (level.inBounds(position) &&
+        tileAt(level, position) == TileType::MinecartGate) {
+        return false;
+    }
     if ((!level.elevators().empty() || !level.minecarts().empty()) &&
         level.inBounds(position)) {
         if (elevatorPlatformAt(level, state, position)) {
@@ -1377,6 +1383,13 @@ MinecartRiders applyMinecartActivations(
             continue;
         }
         for (const GridPosition3 railCell : sweep) {
+            const bool cartGate = tileAt(level, railCell) == TileType::MinecartGate;
+            if (cartGate && std::ranges::any_of(stack, [](LiveUnitAt unit) {
+                    return unit.kind == EntityKind::Movable;
+                })) {
+                blocked = true;
+                break;
+            }
             const std::optional<std::size_t> other =
                 minecartPlatformAt(level, state, railCell);
             if ((other && *other != m) || anyUnitIn(state, railCell)) {
@@ -1389,7 +1402,9 @@ MinecartRiders applyMinecartActivations(
                 const GridPosition3 riderCell {
                     railCell.x, railCell.y, railCell.z + height,
                 };
-                if (!cellAllowsEntity(level, state, riderCell) ||
+                const bool carriedThroughGate = cartGate && height == 0;
+                if ((!carriedThroughGate &&
+                        !cellAllowsEntity(level, state, riderCell)) ||
                     anyUnitIn(state, riderCell)) {
                     blocked = true;
                     break;

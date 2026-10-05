@@ -2586,6 +2586,49 @@ void testReloadFromDiskKeepsDraftsAndIgnoresOwnSaves()
     CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::Wall));
 }
 
+void testMinecartGateStacksOnRailsAndSurvivesEditing()
+{
+    TEST("minecartGateStacksOnRailsAndSurvivesEditing");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(6, 3, false);
+    const GridPosition3 gate { 2, 1, 1 };
+    const GridPosition3 destination { 4, 1, 1 };
+    CHECK(editor.setCell(gate, TileType::RailStraightEastWest));
+    CHECK(editor.setCell(gate, TileType::MinecartGate));
+    CHECK(editor.documentPlateAt(gate) == TileType::RailStraightEastWest);
+    CHECK(editor.documentToLevel().tileAt(2, 1, 1) == TileType::MinecartGate);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[1][1][2] == '-');
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers()[1][1][2] == 'g');
+    CHECK(editor.setCell(gate, TileType::RailCornerNorthEast));
+    CHECK(editor.documentLayers()[1][1][2] == 'g');
+    CHECK(editor.documentPlateAt(gate) == TileType::RailCornerNorthEast);
+    CHECK(editor.setCell(destination, TileType::RailStraightNorthSouth));
+    CHECK(editor.beginMove(gate));
+    CHECK(editor.moveObject(destination));
+    CHECK(editor.documentLayers()[1][1][2] == '5');
+    CHECK(editor.documentPlateAt(destination) == TileType::RailStraightNorthSouth);
+    CHECK(editor.documentLayers()[1][1][4] == 'g');
+    const auto path = project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(path));
+    LevelEditor loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(path, false));
+    CHECK(loaded.documentPlateAt(destination) == TileType::RailStraightNorthSouth);
+    CHECK(loaded.documentLayers()[1][1][4] == 'g');
+    CHECK(loaded.setCell(destination, TileType::Air));
+    CHECK(loaded.documentLayers()[1][1][4] == '|');
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.documentLayers()[1][1][4] == 'g');
+    // Painting the gate first also allows the rail to slide underneath.
+    const GridPosition3 standalone { 3, 2, 1 };
+    CHECK(loaded.setCell(standalone, TileType::MinecartGate));
+    CHECK(loaded.setCell(standalone, TileType::RailStopEastWest));
+    CHECK(loaded.documentPlateAt(standalone) == TileType::RailStopEastWest);
+    CHECK(loaded.documentLayers()[1][2][3] == 'g');
+}
+
 int main()
 {
     testButtonsKeepLinksThroughStackingConversionAndSave();
@@ -2599,6 +2642,7 @@ int main()
     testElevatorStopsPersistAndFollowEditorCommands();
     testGateStartOpenIsAnUndoableGateSetting();
     testMinecartRequiresStopAndPersistsRouteDirection();
+    testMinecartGateStacksOnRailsAndSurvivesEditing();
     testUnitsAndMirrorsStackOnPlates();
     testTileValidationAndMultipleHeroPlacement();
     testAddLayerBelowShiftsContentAndWaterAndIsUndoable();

@@ -7,6 +7,7 @@
 #include "engine/AnimationPreviewScene.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/ElevatorVisuals.hpp"
+#include "engine/MinecartGateVisuals.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/PresentationTransactionBuilder.hpp"
@@ -4061,6 +4062,99 @@ void testPortalPresentation()
     CHECK(animatedFrame.particles[0].position != frame.particles[0].position);
 }
 
+void testMinecartGateOpensForPassageAndClosesAfterUndo()
+{
+    TEST("minecartGateOpensForPassageAndClosesAfterUndo");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "........" }, { "C M-g-_ " } },
+        .plates = {
+            { .cell = { 0, 0, 1 }, .tile = TileType::Button },
+            { .cell = { 2, 0, 1 }, .tile = TileType::RailStopEastWest },
+            { .cell = { 4, 0, 1 }, .tile = TileType::RailStraightEastWest },
+        },
+        .minecarts = { { .cell = { 2, 0, 1 },
+            .pressurePlates = { { 0, 0, 1 } }, .initialDirection = 1 } },
+    }, "minecart gate presentation");
+    const GameState before = rules::initialState(level);
+    const auto after = rules::activate(level, before);
+    CHECK(after.has_value());
+    if (!after) {
+        return;
+    }
+    GameplayPresentation presentation;
+    presentation.resetEntities(before);
+    GameplaySession::Action action {
+        .before = before, .after = *after, .durationSeconds = 1.0f,
+    };
+    action.presentation = presentation.buildActionPresentation(action, &level);
+    const auto frame = [&] {
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(), .level = level, .state = before,
+            .moving = true, .projectedState = *after,
+            .presentation = presentation, .settings = {},
+        });
+    };
+    const auto armTop = [](const RenderFrameData& data) {
+        float top = 0.0f;
+        for (const auto& face : data.isoFaces) {
+            for (Vec3 vertex : face.vertices) {
+                top = std::max(top, vertex.z);
+            }
+        }
+        return top;
+    };
+    const auto closed = frame();
+    CHECK(closed.isoFaces.size() == 36);
+    CHECK(armTop(closed) < 1.8f);
+    CHECK(std::ranges::any_of(closed.tiles, [&](const auto& tile) {
+        return tile.cell == GridPosition3 { 4, 0, 1 } &&
+            tile.model == testManifest().modelForTile(TileType::RailStraightEastWest) &&
+            tile.modelRotationQuarterTurns == 1;
+    }));
+    presentation.beginAction(action, before);
+    const float atGateTime = 1.0f + 2.0f * config::elevatorSecondsPerLayerPerStep;
+    presentation.seekAction(action, atGateTime);
+    CHECK(near(presentation.minecarts()[0].renderPosition.x, 4.0f));
+    CHECK(armTop(frame()) > 2.4f);
+    presentation.seekAction(action, action.presentation.durationSeconds);
+    CHECK(near(armTop(frame()), armTop(closed)));
+    action.reversed = true;
+    presentation.beginAction(action, *after);
+    presentation.seekAction(action, action.presentation.durationSeconds - atGateTime);
+    CHECK(armTop(frame()) > 2.4f);
+    presentation.seekAction(action, action.presentation.durationSeconds);
+    CHECK(near(armTop(frame()), armTop(closed)));
+
+    const GridPosition3 gate { 4, 0, 1 };
+    CHECK(minecartGateOpenness(gate, { 3, 0, 1 }, {}, {}, false) == 0.0f);
+    CHECK(minecartGateOpenness(gate, { 4, 0, 1 }, {}, {}, false) == 1.0f);
+    const float halfOpen = minecartGateOpenness(gate,
+        { 3.3f, 0, 1 }, { 3, 0, 1 }, { 4, 0, 1 }, true);
+    CHECK(halfOpen > 0.0f && halfOpen < 1.0f);
+    CHECK(minecartGateOpenness(gate,
+        { 4, 1, 1 }, { 3, 1, 1 }, { 4, 1, 1 }, true) == 0.0f);
+
+    LevelEditor editor;
+    editor.newDocument(8, 2, false);
+    CHECK(editor.setCell(gate, TileType::RailStraightEastWest));
+    CHECK(editor.setCell(gate, TileType::MinecartGate));
+    const auto editorFrame = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(), .editor = editor, .settings = {},
+    });
+    CHECK(editorFrame.isoFaces.size() == closed.isoFaces.size());
+    for (std::size_t index = 0; index < closed.isoFaces.size(); ++index) {
+        CHECK(editorFrame.isoFaces[index].vertices == closed.isoFaces[index].vertices);
+    }
+    CHECK(std::ranges::any_of(editorFrame.tiles, [&](const auto& tile) {
+        return tile.cell == gate && tile.pickOnly;
+    }));
+    CHECK(editor.setCell(gate, TileType::RailStraightNorthSouth));
+    const auto turned = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(), .editor = editor, .settings = {},
+    });
+    CHECK(turned.isoFaces[0].vertices != editorFrame.isoFaces[0].vertices);
+}
+
 } // namespace
 
 int main()
@@ -4089,6 +4183,7 @@ int main()
     testRotatorPlateSpinsWithTheUnitItTurns();
     testElevatorPlatformIsFlushAndCarriesItsRider();
     testMinecartRendersOnItsStopAndCarriesItsRider();
+    testMinecartGateOpensForPassageAndClosesAfterUndo();
     testTurnedHeroFacesItsNewDirectionSmoothly();
     testMirrorOnPlatesDrawsPlateAndTurns();
     testEditorDrawsPlatesBeneathTheirOccupants();

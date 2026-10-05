@@ -2,6 +2,7 @@
 
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AssetManifest.hpp"
+#include "engine/MinecartGateVisuals.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/RenderFrameBuilder.hpp"
@@ -136,7 +137,11 @@ RenderFrameData buildBakeFrame(
         subject.animation = animations->animation(use);
         subject.animationTimeSeconds = 0.0f;
     }
-    if (tileTypeIsPortal(tile)) {
+    if (tile == TileType::MinecartGate) {
+        appendMinecartGateVisual(frame,
+            { static_cast<int>(bedCentre), static_cast<int>(bedCentre), 0 },
+            TileType::RailStraightNorthSouth);
+    } else if (tileTypeIsPortal(tile)) {
         renderFrameParts::appendPortalVisual(
             frame,
             subject,

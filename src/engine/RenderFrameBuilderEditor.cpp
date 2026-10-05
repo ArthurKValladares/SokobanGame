@@ -3,6 +3,7 @@
 #include "engine/AnimationCatalog.hpp"
 #include "engine/ElevatorVisuals.hpp"
 #include "engine/GateEffect.hpp"
+#include "engine/MinecartGateVisuals.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/RenderFrameParts.hpp"
 #include "engine/RotatorVisuals.hpp"
@@ -558,6 +559,13 @@ private:
             }
             return;
         }
+        if (tile == TileType::MinecartGate) {
+            const auto covered = std::ranges::find(
+                definition.plates, localCell, &Level::Plate::cell);
+            appendMinecartGateVisual(frame, cell,
+                covered != definition.plates.end() ? covered->tile : TileType::Air);
+            return;
+        }
         if (tile == TileType::Gate) {
             const auto found = std::ranges::find(
                 definition.gates, localCell, &Level::Gate::cell);
@@ -833,6 +841,28 @@ private:
                 { x, y, z },
                 tileAtForLadder,
                 preview);
+            return;
+        }
+        if (tile == TileType::MinecartGate) {
+            const GridPosition3 cell { x, y, z };
+            if (!pickOnly) {
+                TileType rail = input_.editor.documentPlateAt(cell).value_or(TileType::Air);
+                if (!tileTypeIsRail(rail)) {
+                    rail = documentTileAt(cell);
+                }
+                appendMinecartGateVisual(frame, cell, rail, 0.0f,
+                    preview ? 0.68f : 1.0f, true);
+                frame.tiles.back().isEditorPreview = preview;
+            } else {
+                frame.tiles.push_back({
+                    .cell = cell,
+                    .position = { static_cast<float>(x), static_cast<float>(y) },
+                    .baseElevation = static_cast<float>(z),
+                    .height = 1.0f,
+                    .pickOnly = true,
+                    .showGrid = false,
+                });
+            }
             return;
         }
         if (tile == TileType::Gate) {

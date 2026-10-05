@@ -1218,6 +1218,49 @@ void testLockPlateMetadata()
         "@layer 0", "..", "@layer 1", "CJ" }, "bad toggle"); }, "startEnabled");
 }
 
+void testMinecartGatePreservesRailsAndRoutes()
+{
+    TEST("minecartGatePreservesRailsAndRoutes");
+    CHECK(charToTileType('g') == TileType::MinecartGate);
+    CHECK(!tileTypeAllowsEntity(TileType::MinecartGate));
+    CHECK(!tileTypeSupportsEntity(TileType::MinecartGate));
+    for (TileType rail : { TileType::RailStraightNorthSouth,
+             TileType::RailStraightEastWest, TileType::RailCornerNorthEast,
+             TileType::RailCornerSouthEast, TileType::RailCornerSouthWest,
+             TileType::RailCornerNorthWest, TileType::RailStopNorthSouth,
+             TileType::RailStopEastWest }) {
+        const Level::Definition definition {
+            .layers = { { ".." }, { "Cg" } },
+            .plates = { { .cell = { 1, 0, 1 }, .tile = rail } },
+        };
+        const auto text = Level::serializeDefinition(definition);
+        const auto parsed = Level::parseDefinition(text, "gate rail round trip");
+        const Level level = Level::loadFromDefinition(parsed, "gate rail");
+        CHECK(level.tileAt(1, 0, 1) == TileType::MinecartGate);
+        CHECK(level.plateAt({ 1, 0, 1 }) == rail);
+        CHECK(Level::serializeDefinition(parsed) == text);
+    }
+    const Level loop = Level::loadFromDefinition({
+        .layers = { { "....", "....", "...." },
+                    { "6MgC", "| !P", "5_8." } },
+        .plates = {
+            { .cell = { 1, 0, 1 }, .tile = TileType::RailStopEastWest },
+            { .cell = { 2, 0, 1 }, .tile = TileType::RailCornerSouthWest },
+        },
+        .minecarts = { { .cell = { 1, 0, 1 },
+            .pressurePlates = { { 3, 1, 1 } }, .initialDirection = 1 } },
+    }, "gate over corner");
+    CHECK(loop.minecartRoutes()[0].loop);
+    CHECK(std::ranges::find(loop.minecartRoutes()[0].cells, GridPosition3 { 2, 0, 1 }) !=
+        loop.minecartRoutes()[0].cells.end());
+    checkThrowsContaining([] {
+        (void)Level::loadFromDefinition({
+            .layers = { { ".." }, { "Cg" } },
+            .plates = { { .cell = { 1, 0, 1 }, .tile = TileType::PressurePlate } },
+        }, "gate on wrong surface");
+    }, "compatible with its surface");
+}
+
 } // namespace
 
 int main()
@@ -1241,6 +1284,7 @@ int main()
     testParserRejectsMalformedStructure();
     testLevelValidationErrors();
     testMinecartMetadataRoutesAndValidation();
+    testMinecartGatePreservesRailsAndRoutes();
     testRaggedLayersNormalizeToAir();
     testDecorativeTileIsSerializedAndGameplayTransparent();
     testLadderRequiresSameLayerGround();

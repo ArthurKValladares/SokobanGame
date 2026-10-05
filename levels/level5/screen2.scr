@@ -1,4 +1,6 @@
 @minecart {"cell":[6,5,1],"color":[0.0,1.0,1.0],"direction":1,"plates":[[8,3,1]]}
+@plate {"cell":[1,2,1],"tile":"Rail Straight North-South"}
+@plate {"cell":[11,2,1],"tile":"Rail Straight North-South"}
 @plate {"cell":[6,5,1],"tile":"Rail Stop East-West"}
 
 @layer 0
@@ -13,7 +15,7 @@
 @layer 1
       E      
  6----_----7 
- |         | 
+#g#########g#
  ! E KQ P  ! 
  |         | 
  5----M----8 

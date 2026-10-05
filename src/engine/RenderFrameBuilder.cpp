@@ -3,6 +3,7 @@
 #include "engine/AnimationCatalog.hpp"
 #include "engine/ElevatorVisuals.hpp"
 #include "engine/GateEffect.hpp"
+#include "engine/MinecartGateVisuals.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/RenderFrameParts.hpp"
 #include "engine/RotatorVisuals.hpp"
@@ -69,6 +70,7 @@ struct StaticRenderCell {
     // through a rotator's quarter turn.
     float modelRotationOffsetRadians = 0.0f;
     std::optional<Vec4> colorOverride;
+    float gateOpenness = 0.0f;
 };
 
 StaticRenderCell staticRenderCellFor(
@@ -231,6 +233,15 @@ void appendStaticTiles(
         for (uint32_t y = 0; y < level.height(); ++y) {
             for (uint32_t x = 0; x < level.width(); ++x) {
                 const StaticRenderCell cell = cellAt(x, y, z);
+                if (cell.tile == TileType::MinecartGate) {
+                    const GridPosition3 position {
+                        static_cast<int>(x), static_cast<int>(y), static_cast<int>(z),
+                    };
+                    appendMinecartGateVisual(frame, position,
+                        level.plateAt(position).value_or(TileType::Air),
+                        cell.gateOpenness);
+                    continue;
+                }
                 if (cell.tile == TileType::Air ||
                     cell.tile == TileType::Ladder ||
                     cell.tile == TileType::Water ||
@@ -641,9 +652,9 @@ void appendGameplayWaterAndShorelines(
 }
 
 // Units standing on a plate leave it in the level grid, where the static pass
-// draws it. Minecarts cover their authored plate, so it is drawn
-// here. Rotators draw from their records and need nothing extra.
-void appendMinecartCoveredPlates(
+// draws it. Carts and minecart gates retain their covered rail in metadata,
+// so it is drawn here. Rotators draw from their records.
+void appendCoveredStaticSurfaces(
     RenderFrameData& frame,
     const RenderFrameBuilder::GameplayInput& input,
     bool endUnlocked)
@@ -660,7 +671,7 @@ void appendMinecartCoveredPlates(
             static_cast<uint32_t>(cell.z));
         if (tileTypeIsRotator(plate.tile) || tileTypeIsLockPlate(plate.tile) ||
             (input.visibleCell && !input.visibleCell(cell)) ||
-            !tileTypeIsMinecart(occupant)) {
+            (!tileTypeIsMinecart(occupant) && occupant != TileType::MinecartGate)) {
             continue;
         }
         Vec4 color = tileColor(
@@ -773,6 +784,23 @@ void appendGameplayWorld(
                 input.settings.geometry.surfaceEntityHeight,
                 input.settings.geometry.surfaceEntityWidthDepth,
                 primaryPlayerVisual.facingQuarterTurns);
+            if (cell.tile == TileType::MinecartGate) {
+                const auto& visuals = input.presentation.minecarts();
+                for (std::size_t index = 0; index < state.minecarts.size(); ++index) {
+                    const auto& cart = state.minecarts[index];
+                    const Vec3 cartPosition {
+                        static_cast<float>(cart.cell.x),
+                        static_cast<float>(cart.cell.y),
+                        static_cast<float>(cart.cell.z),
+                    };
+                    const float open = index < visuals.size()
+                        ? minecartGateOpenness(position, visuals[index].renderPosition,
+                              visuals[index].animationStart, visuals[index].animationEnd,
+                              visuals[index].moving)
+                        : minecartGateOpenness(position, cartPosition, {}, {}, false);
+                    cell.gateOpenness = std::max(cell.gateOpenness, open);
+                }
+            }
             if (tileTypeIsPortal(cell.tile)) {
                 const Level::Portal* portal = input.level.portalAt(position);
                 const Vec3 color =
@@ -806,7 +834,7 @@ void appendGameplayWorld(
         staticCellAt,
         [&](TileType tile) { return input.settings.tileScale(tile); },
         input.presentation.worldAnimationTimeSeconds());
-    appendMinecartCoveredPlates(frame, input, endUnlocked);
+    appendCoveredStaticSurfaces(frame, input, endUnlocked);
     appendDecorations(
         frame,
         input.level.decorations(),
@@ -949,7 +977,7 @@ void appendGameplayWorld(
             static_cast<uint32_t>(cell.x),
             static_cast<uint32_t>(cell.y),
             static_cast<uint32_t>(cell.z));
-        if (tileTypeIsMinecart(rail)) {
+        if (tileTypeIsMinecart(rail) || rail == TileType::MinecartGate) {
             rail = input.level.plateAt(cell).value_or(TileType::Air);
         }
         if (index < minecartVisuals.size() && minecartVisuals[index].moving) {

@@ -743,10 +743,10 @@ Level::Plate parsePlate(std::string_view payload, std::string_view sourceName)
         }
         const std::optional<TileType> type =
             tileTypeFromName(tile->get<std::string>());
-        if (!type || !tileTypeIsPlate(*type)) {
+        if (!type || (!tileTypeIsPlate(*type) && !tileTypeIsRail(*type))) {
             throw std::runtime_error(
                 "plate 'tile' must name a plate tile (Pressure, End, Portal, "
-                "Rotator or Rail Stop)");
+                "Rotator or Rail)");
         }
         return Level::Plate {
             .cell = parseLinkedCell(*cell, "cell", sourceName, "Plate"),
@@ -765,7 +765,7 @@ Level::Plate parsePlate(std::string_view payload, std::string_view sourceName)
 
 std::string serializePlate(const Level::Plate& plate)
 {
-    if (!tileTypeIsPlate(plate.tile)) {
+    if (!tileTypeIsPlate(plate.tile) && !tileTypeIsRail(plate.tile)) {
         throw std::runtime_error("Cannot serialize a plate record for a non-plate tile");
     }
     const Json object {
@@ -788,7 +788,7 @@ void canonicalizePlates(
                 "Plate cell coordinates must not be negative: " +
                 std::string(sourceName));
         }
-        if (!tileTypeIsPlate(plates[i].tile)) {
+        if (!tileTypeIsPlate(plates[i].tile) && !tileTypeIsRail(plates[i].tile)) {
             throw std::runtime_error(
                 "Plate records must name a plate tile: " +
                 std::string(sourceName));
@@ -1726,9 +1726,9 @@ Level Level::loadFromLayers(
                 const auto covered = std::ranges::find(
                     level.coveredPlates_, position, &Plate::cell);
                 if (covered != level.coveredPlates_.end()) {
-                    if (!tileTypeCanStandOnPlate(*tile)) {
+                    if (!tileTypeCanCoverSurface(*tile, covered->tile)) {
                         throw std::runtime_error(
-                            "A '@plate' record must lie beneath a unit or mirror (or a minecart), not '" +
+                            "A '@plate' record must lie beneath a unit or mirror (or a minecart or minecart gate) compatible with its surface, not '" +
                             std::string(tileTypeName(*tile)) + "': " + source);
                     }
                     ++matchedCoveredPlates;
@@ -1755,7 +1755,7 @@ Level Level::loadFromLayers(
 
     if (matchedCoveredPlates != level.coveredPlates_.size()) {
         throw std::runtime_error(
-            "A '@plate' record must lie beneath a unit or mirror (or a minecart): " + source);
+            "A '@plate' record must lie beneath a unit or mirror (or a minecart or minecart gate): " + source);
     }
 
     for (const Portal& portal : level.portals_) {

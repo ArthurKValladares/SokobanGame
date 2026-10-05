@@ -72,6 +72,8 @@ enum class TileType : uint8_t {
     PortalWest,
     LockPlate,
     Button,
+    // A rail-mounted barrier that admits carts and their character riders.
+    MinecartGate,
     Count,
 };
 
@@ -161,6 +163,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::PortalWest, 'q', "Portal West", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::LockPlate, 'J', "Lock Plate", { 0.70f, 0.48f, 0.90f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::Button, 'b', "Button", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::MinecartGate, 'g', "Minecart Gate", { 0.92f, 0.66f, 0.22f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -182,6 +185,8 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 // every unit that occupies a level cell (heroes, rocks, ice, turrets,
 // enemies) and mirrors.
 [[nodiscard]] bool tileTypeCanStandOnPlate(TileType type);
+// Valid authored overlays, including a gate over any rail piece.
+[[nodiscard]] bool tileTypeCanCoverSurface(TileType occupant, TileType surface);
 [[nodiscard]] bool tileTypeOccupiesLevelCell(TileType type);
 [[nodiscard]] bool tileTypeIsSolidBlock(TileType type);
 [[nodiscard]] bool tileTypeSupportsEntity(TileType type);
