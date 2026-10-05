@@ -33,7 +33,7 @@ option(SOKOBAN_ENABLE_VALIDATION "Enable Vulkan validation layers in debug build
 option(SOKOBAN_SHIPPING_BUILD
     "Configure a player-facing, editor-free release package" OFF)
 option(SOKOBAN_ENABLE_DEVELOPER_TOOLS
-    "Compile the Debug-only ImGui workspace and content-editing tools" ON)
+    "Compile the ImGui workspace and content-editing tools in Debug and RelWithDebInfo" ON)
 option(SOKOBAN_ENABLE_LTO
     "Enable interprocedural optimization for Release targets" OFF)
 option(SOKOBAN_INSTALL_EXTERNAL_SYMBOLS
@@ -78,7 +78,7 @@ if(SOKOBAN_HEADLESS_TESTS_ONLY)
     set(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS OFF CACHE BOOL
         "Build the hidden-window Vulkan device and submission smoke test" FORCE)
     set(SOKOBAN_ENABLE_DEVELOPER_TOOLS OFF CACHE BOOL
-        "Compile the Debug-only ImGui workspace and content-editing tools" FORCE)
+        "Compile the ImGui workspace and content-editing tools in Debug and RelWithDebInfo" FORCE)
 endif()
 
 if((SOKOBAN_BUILD_INSTALLER OR SOKOBAN_SIGN_ARTIFACTS) AND NOT WIN32)
@@ -99,7 +99,7 @@ if(SOKOBAN_SHIPPING_BUILD)
     set(SOKOBAN_ENABLE_VALIDATION OFF CACHE BOOL
         "Enable Vulkan validation layers in debug builds" FORCE)
     set(SOKOBAN_ENABLE_DEVELOPER_TOOLS OFF CACHE BOOL
-        "Compile the Debug-only ImGui workspace and content-editing tools" FORCE)
+        "Compile the ImGui workspace and content-editing tools in Debug and RelWithDebInfo" FORCE)
     set(SOKOBAN_BUILD_TESTS OFF CACHE BOOL
         "Build headless engine tests" FORCE)
     set(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS OFF CACHE BOOL
@@ -111,6 +111,12 @@ if(SOKOBAN_SHIPPING_BUILD)
     set(SOKOBAN_INCREMENTAL_CONTENT OFF CACHE BOOL
         "Skip unchanged content stages and cache compressed textures in the build tree" FORCE)
 endif()
+
+# Keep the public class-layout flag, ImGui/application sources and source-content
+# paths in agreement. RelWithDebInfo provides optimized authoring with symbols;
+# Release and MinSizeRel stay player-facing even when the option is enabled.
+set(SOKOBAN_DEVELOPER_TOOLS_ENABLED
+    "$<AND:$<CONFIG:Debug,RelWithDebInfo>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>")
 
 if(MSVC AND SOKOBAN_INSTALL_EXTERNAL_SYMBOLS)
     # Keep full symbolic information out of the player package while still
@@ -630,7 +636,7 @@ target_compile_definitions(sokoban_core PRIVATE
 # what made that failure silent; they now refuse to compile instead, and this
 # is the definition that keeps them satisfied.
 target_compile_definitions(sokoban_core PUBLIC
-    SOKOBAN_ENABLE_DEBUG_UI=$<IF:$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>,1,0>
+    "SOKOBAN_ENABLE_DEBUG_UI=$<IF:${SOKOBAN_DEVELOPER_TOOLS_ENABLED},1,0>"
 )
 if(UNIX AND NOT APPLE)
     # miniaudio dynamically loads native audio backends on Unix-like systems.
@@ -714,7 +720,8 @@ add_library(sokoban_render_vulkan STATIC
 add_library(Sokoban::render_vulkan ALIAS sokoban_render_vulkan)
 if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
     foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
-        target_sources(sokoban_render_vulkan PRIVATE $<$<CONFIG:Debug>:${imgui_source}>)
+        target_sources(sokoban_render_vulkan PRIVATE
+            "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:${imgui_source}>")
     endforeach()
 endif()
 target_include_directories(sokoban_render_vulkan PUBLIC src)
@@ -769,16 +776,16 @@ set(SOKOBAN_APPLICATION_SOURCES
 )
 if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
     list(APPEND SOKOBAN_APPLICATION_SOURCES
-        $<$<CONFIG:Debug>:src/engine/AnimationCatalogDebugUi.cpp>
-        $<$<CONFIG:Debug>:src/engine/AnimationPreviewDebugUi.cpp>
-        $<$<CONFIG:Debug>:src/engine/ApplicationTools.cpp>
-        $<$<CONFIG:Debug>:src/engine/ApplicationDebugUi.cpp>
-        $<$<CONFIG:Debug>:src/engine/AssetManifestDebugUi.cpp>
-        $<$<CONFIG:Debug>:src/engine/DebugUi.cpp>
-        $<$<CONFIG:Debug>:src/engine/LevelEditorDebugUi.cpp>
-        $<$<CONFIG:Debug>:src/engine/LogDebugUi.cpp>
-        $<$<CONFIG:Debug>:src/engine/ProfilerDebugUi.cpp>
-        $<$<CONFIG:Debug>:src/engine/TuningDebugUi.cpp>
+        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/AnimationCatalogDebugUi.cpp>"
+        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/AnimationPreviewDebugUi.cpp>"
+        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/ApplicationTools.cpp>"
+        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/ApplicationDebugUi.cpp>"
+        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/AssetManifestDebugUi.cpp>"
+        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/DebugUi.cpp>"
+        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/LevelEditorDebugUi.cpp>"
+        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/LogDebugUi.cpp>"
+        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/ProfilerDebugUi.cpp>"
+        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/TuningDebugUi.cpp>"
     )
 endif()
 add_executable(sokoban ${SOKOBAN_APPLICATION_SOURCES})
@@ -880,9 +887,9 @@ target_link_libraries(sokoban PRIVATE
 target_compile_definitions(sokoban PRIVATE
     SDL_MAIN_USE_CALLBACKS=0
     SOKOBAN_GAME_VERSION="${PROJECT_VERSION}"
-    $<$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>:SOKOBAN_SOURCE_LEVEL_DIR="${LEVEL_SOURCE_DIR}">
-    $<$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>:SOKOBAN_SOURCE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets">
-    $<$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>:SOKOBAN_SOURCE_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}">
+    "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:SOKOBAN_SOURCE_LEVEL_DIR=\"${LEVEL_SOURCE_DIR}\">"
+    "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:SOKOBAN_SOURCE_ASSET_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/assets\">"
+    "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:SOKOBAN_SOURCE_ROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\">"
 )
 
 if(MSVC AND SOKOBAN_INSTALL_EXTERNAL_SYMBOLS)

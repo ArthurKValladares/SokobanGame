@@ -110,6 +110,14 @@ jobs:
             run_fuzz: false
             run_smoke: false
             requires_vulkan: true
+          - name: Tests (Optimized editor)
+            build_type: RelWithDebInfo
+            preset: ci-dev-fast
+            build_dir: out/ci-dev-fast
+            run_tests: true
+            run_fuzz: false
+            run_smoke: false
+            requires_vulkan: true
           - name: Headless tests (no Vulkan SDK)
             build_type: Debug
             preset: headless-tests
@@ -296,7 +304,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        build_type: [Debug, Release]
+        build_type: [Debug, RelWithDebInfo, Release]
 
     steps:
       - name: Check out source

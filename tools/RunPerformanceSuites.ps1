@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$BuildDirectory = "out/visual-studio",
-    [ValidateSet("Debug", "Release")]
+    [ValidateSet("Debug", "RelWithDebInfo", "Release")]
     [string]$Configuration = "Release",
     [string]$OutputDirectory = "",
     [switch]$Quick,
@@ -122,7 +122,7 @@ $scenarios = @(
     @{ Name = "serial-scene-preparation"; Arguments = @("--serial-scene-preparation") }
 )
 $level5Arguments = @("--evidence-level", "5", "--evidence-animate", "--evidence-disable-vsync")
-if ($Configuration -eq "Debug") {
+if ($Configuration -in @("Debug", "RelWithDebInfo")) {
     $level5Arguments += "--evidence-debug-ui"
 }
 foreach ($screen in $(if ($Quick) { @(3, 5) } else { @(0, 1, 2, 3, 4, 5, 6) })) {
@@ -137,7 +137,7 @@ foreach ($effect in @("mirror-swap", "witch-swap", "turret-volley", "portals", "
         Arguments = $level5Arguments + @("--evidence-screen", "3", "--evidence-effects", $effect)
     }
 }
-if ($Configuration -eq "Debug") {
+if ($Configuration -in @("Debug", "RelWithDebInfo")) {
     $scenarios += @(
         @{
             Name = "level5-screen3-menu-hidden"

@@ -2,8 +2,8 @@
 # Run the Linux CI configurations locally, retaining every compile failure.
 set -euo pipefail
 if [ "${1:-}" = --help ]; then
-  echo "Usage: bash tools/check_ci.sh [ci-debug ci-release ci-tidy ci-sanitize headless-tests ci-fuzz]"
-  echo "Defaults to all six configurations; requires Linux, CI dependencies, and the pinned Vulkan SDK."
+  echo "Usage: bash tools/check_ci.sh [ci-debug ci-dev-fast ci-release ci-tidy ci-sanitize headless-tests ci-fuzz]"
+  echo "Defaults to all seven configurations; requires Linux, CI dependencies, and the pinned Vulkan SDK."
   exit 0
 fi
 if [ "$(uname -s)" != Linux ]; then
@@ -13,12 +13,12 @@ fi
 cd "$(dirname "$0")/.."
 presets=("$@")
 if [ "${#presets[@]}" -eq 0 ]; then
-  presets=(ci-debug ci-release ci-tidy ci-sanitize headless-tests ci-fuzz)
+  presets=(ci-debug ci-dev-fast ci-release ci-tidy ci-sanitize headless-tests ci-fuzz)
 fi
 needs_vulkan=false
 for preset in "${presets[@]}"; do
   case "$preset" in
-    ci-debug|ci-release|ci-tidy|ci-sanitize|ci-fuzz) needs_vulkan=true ;;
+    ci-debug|ci-dev-fast|ci-release|ci-tidy|ci-sanitize|ci-fuzz) needs_vulkan=true ;;
     headless-tests) ;;
     *) echo "Unknown CI preset: $preset" >&2; exit 1 ;;
   esac
@@ -54,7 +54,7 @@ run_preset() {
   cmake --preset "$preset" || return
   cmake --build --preset "$preset" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}" -- -k 0 || return
   case "$preset" in
-    ci-debug|ci-release|ci-sanitize|headless-tests)
+    ci-debug|ci-dev-fast|ci-release|ci-sanitize|headless-tests)
       xvfb-run --auto-servernum ctest --preset "$preset" --timeout 60 || return ;;
     ci-fuzz)
       ./out/ci-fuzz/sokoban_player_profile_fuzz -max_len=65536 -max_total_time=60 -print_final_stats=1 || return ;;

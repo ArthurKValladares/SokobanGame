@@ -19,7 +19,7 @@
 //
 // A *Config.hpp header declares its values with these macros instead of
 // `inline constexpr`. In builds without developer tools each one still is
-// exactly an `inline constexpr` constant. In Debug builds with the tools it is
+// exactly an `inline constexpr` constant. In builds with developer tools it is
 // an ordinary variable registered with sokoban::tuning, so the Tuning tab can
 // edit it while the game runs and write the edited value back into the
 // header's own source text. Call sites read `config::name` either way and do

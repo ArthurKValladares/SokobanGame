@@ -7,7 +7,7 @@
 namespace sokoban {
 
 // Where a developer left off, so a Debug launch can pick up there instead of
-// at the title screen. Written by Debug builds with developer tools when the
+// at the title screen. Written by builds with developer tools when the
 // application exits; never read or written by player builds.
 //
 // The game location itself is not stored here: the active save slot already

@@ -42,9 +42,21 @@
       }
     },
     {
+      "name": "dev-fast",
+      "displayName": "Optimized editor (Ninja, MSVC)",
+      "description": "RelWithDebInfo with the editor, developer tools, optimization and symbols. Vulkan validation is off; use dev for validation and debugging without optimization.",
+      "inherits": "windows-msvc-ninja",
+      "binaryDir": "${sourceDir}/out/dev-fast",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "SOKOBAN_ENABLE_DEVELOPER_TOOLS": "ON",
+        "SOKOBAN_ENABLE_VALIDATION": "OFF"
+      }
+    },
+    {
       "name": "release",
       "displayName": "Release (Ninja, MSVC)",
-      "description": "Optimized Windows build of the game and tests. The editor, developer tools, and validation exist only in Debug builds; use the shipping presets for player packages.",
+      "description": "Optimized Windows build of the game and tests without editor tools or validation. Use dev-fast for an optimized editor, and shipping presets for player packages.",
       "inherits": "windows-msvc-ninja",
       "binaryDir": "${sourceDir}/out/release",
       "cacheVariables": {
@@ -109,6 +121,16 @@
       "inherits": "linux-ci",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "ci-dev-fast",
+      "displayName": "CI: GCC optimized editor",
+      "inherits": "linux-ci",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "SOKOBAN_ENABLE_DEVELOPER_TOOLS": "ON",
+        "SOKOBAN_ENABLE_VALIDATION": "OFF"
       }
     },
     {
@@ -184,6 +206,10 @@
       "configurePreset": "ci-release"
     },
     {
+      "name": "ci-dev-fast",
+      "configurePreset": "ci-dev-fast"
+    },
+    {
       "name": "ci-sanitize",
       "configurePreset": "ci-sanitize"
     },
@@ -211,6 +237,21 @@
       "displayName": "Debug: game + tests",
       "description": "The game and every test runner the dev test preset uses.",
       "configurePreset": "dev"
+    },
+    {
+      "name": "dev-fast",
+      "displayName": "Optimized editor: game only",
+      "description": "The optimized game with editor tools, symbols and staged content.",
+      "configurePreset": "dev-fast",
+      "targets": [
+        "sokoban"
+      ]
+    },
+    {
+      "name": "dev-fast-all",
+      "displayName": "Optimized editor: game + tests",
+      "description": "The optimized editor and every test runner the dev-fast test preset uses.",
+      "configurePreset": "dev-fast"
     },
     {
       "name": "release",
@@ -287,6 +328,11 @@
       "configurePreset": "ci-release"
     },
     {
+      "name": "ci-dev-fast",
+      "inherits": "linux-ci-tests",
+      "configurePreset": "ci-dev-fast"
+    },
+    {
       "name": "ci-sanitize",
       "inherits": "linux-ci-tests",
       "configurePreset": "ci-sanitize",
@@ -299,6 +345,19 @@
       "name": "dev",
       "displayName": "Debug tests",
       "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "timeout": 120,
+        "jobs": 4
+      }
+    },
+    {
+      "name": "dev-fast",
+      "displayName": "Optimized editor tests",
+      "configurePreset": "dev-fast",
       "output": {
         "outputOnFailure": true
       },
@@ -344,6 +403,15 @@
       ]
     },
     {
+      "name": "dev-fast-check",
+      "displayName": "Windows optimized editor: configure, build every target, test",
+      "steps": [
+        { "type": "configure", "name": "dev-fast" },
+        { "type": "build", "name": "dev-fast-all" },
+        { "type": "test", "name": "dev-fast" }
+      ]
+    },
+    {
       "name": "release-check",
       "displayName": "Windows Release: configure, build every target, test",
       "steps": [
@@ -366,6 +434,14 @@
         { "type": "configure", "name": "ci-release" },
         { "type": "build", "name": "ci-release" },
         { "type": "test", "name": "ci-release" }
+      ]
+    },
+    {
+      "name": "ci-dev-fast",
+      "steps": [
+        { "type": "configure", "name": "ci-dev-fast" },
+        { "type": "build", "name": "ci-dev-fast" },
+        { "type": "test", "name": "ci-dev-fast" }
       ]
     },
     {

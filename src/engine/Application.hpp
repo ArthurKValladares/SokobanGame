@@ -94,7 +94,7 @@ struct ApplicationOptions {
     // deterministic residency stress/validation runs.
     std::uint64_t textureResidencyBudgetKiB = 0;
     // Launch shortcuts; see CommandLineOptions. The location and editor
-    // requests are honoured only by Debug builds with developer tools.
+    // requests are honoured only by builds with developer tools.
     bool continueGame = false;
     bool showTitle = false;
     int startLevel = -1;

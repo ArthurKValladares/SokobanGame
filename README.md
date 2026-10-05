@@ -3,7 +3,7 @@
 Sokoban 3D is a C++20, SDL3, and Vulkan 1.3 puzzle game and small game-engine
 codebase. It supports layered levels, animated 3D presentation, persistent save
 slots and settings, keyboard/gamepad remapping, a manifest-driven content
-pipeline, and a headless editor model exposed through Debug ImGui tools.
+pipeline, and a headless editor model exposed through ImGui developer tools.
 
 ## Current Features
 
@@ -73,20 +73,35 @@ cmake --build --preset dev        # the game and its content only
 ```
 
 `cmake --build --preset dev-all` also builds the tests, and
-`ctest --preset dev` runs them. The `release` configure preset is the same
-build optimized, in `out/release` (`release` and `release-all` build presets,
-`release` test preset); it has no editor or developer tools, which exist only
-in Debug. In Visual Studio these appear in the build-preset dropdown as
-"Debug: game only", "Debug: game + tests", "Release: game only", and
-"Release: game + tests". "Headless tests (no Vulkan)" builds no game, and the
-"Shipping" entries produce player packages.
+`ctest --preset dev` runs them.
 
-The `dev` and `release` presets enable warnings-as-errors, matching Windows
-CI. To configure, build every target (including the performance runner), and
-run the current tests in one command, use a Developer PowerShell:
+For faster level authoring and in-editor solver work, use `dev-fast`. It builds
+RelWithDebInfo with optimization and debugger symbols, retaining the full editor,
+profiler, live tuning, source-content discovery, and automatic solution recording.
+Vulkan validation is off, and optimized debugging may skip or reorder source
+lines. Use `dev` when investigating validation errors or stepping through code
+without optimization.
+
+```powershell
+cmake --preset dev-fast
+cmake --build --preset dev-fast
+.\out\dev-fast\RelWithDebInfo\sokoban.exe
+```
+
+`dev-fast-all` builds every target, and `ctest --preset dev-fast` runs its tests.
+The `release` preset builds the optimized game without editor tools in
+`out/release` (`release` and `release-all` build presets, `release` test preset).
+Visual Studio's dropdown includes game-only and game-with-tests entries for
+Debug, Optimized editor, and Release. "Headless tests (no Vulkan)" builds no
+game, and the "Shipping" entries produce player packages.
+
+The `dev`, `dev-fast`, and `release` presets enable warnings-as-errors, matching
+Windows CI. To configure, build every target (including the performance runner),
+and run the current tests in one command, use a Developer PowerShell:
 
 ```powershell
 cmake --workflow --preset dev-check
+cmake --workflow --preset dev-fast-check
 cmake --workflow --preset release-check
 ```
 
@@ -123,9 +138,13 @@ seven SDK-dependent tests: `vulkan_smoke`, `application_validation_teardown`,
 `gpu_abi`, and `texture_upload_plan`. All other test declarations and their
 production libraries are the same CMake targets used by full builds.
 
-Debug builds include the ImGui developer tools and can mirror edited source
-levels into staged runtime content. Release builds use only packaged,
-executable-relative assets.
+Debug and RelWithDebInfo include the ImGui developer tools when
+`SOKOBAN_ENABLE_DEVELOPER_TOOLS=ON` (the default), and can mirror edited source
+levels into staged runtime content. Set that option to `OFF` to omit the tools
+from either configuration. Release and MinSizeRel use only packaged,
+executable-relative assets. Shipping and headless presets force the tools off.
+Vulkan validation remains controlled separately by `SOKOBAN_ENABLE_VALIDATION`
+and is compiled in only for Debug.
 
 Sokoban's own libraries and the game compile with a precompiled header of
 common standard headers plus `Math.hpp` (and `<vulkan/vulkan.h>` for the
@@ -158,9 +177,9 @@ To run one suite directly, pass its CTest name: `sokoban_tests rules`
 executable per suite (`SOKOBAN_TEST_RUNNERS=OFF`); see `sokoban_add_test` in
 `CMakeLists.txt` for why.
 
-The `Required Tests` GitHub Actions workflow performs clean Debug and Release
-builds on Linux and Windows for every push and pull request. Linux runs the
-complete registered CTest matrix, including the hidden-window Vulkan device
+The `Required Tests` GitHub Actions workflow performs clean Debug, optimized
+editor, and Release builds on Linux and Windows for every push and pull request.
+Linux runs the complete registered CTest matrix, including the hidden-window Vulkan device
 smoke, and Debug additionally renders 240 frames under validation. Hosted
 Windows runners have no Vulkan ICD, so they omit device execution while still
 building the renderer and running the remaining tests and package gate. The
@@ -178,7 +197,7 @@ start windowed to avoid fullscreen requests that need a window manager.
 Both Vulkan sanitizer tests use `tests/lsan.supp` for known SDL/X11 and Vulkan
 loader allocations; leak detection remains enabled for other allocations.
 
-The Linux jobs use the same `ci-debug`, `ci-release`, `ci-sanitize`,
+The Linux jobs use the same `ci-debug`, `ci-dev-fast`, `ci-release`, `ci-sanitize`,
 `ci-tidy`, and `ci-fuzz` presets available locally. These select GCC 13 or
 Clang/clang-tidy 18 explicitly and use separate directories in `out/`.
 On Ubuntu 24.04, including a WSL installation, install the dependencies
@@ -186,7 +205,7 @@ listed in `.github/workflows/required-tests.yml` and expose its pinned
 Vulkan SDK. Run these from the repository root:
 
 ```sh
-bash tools/check_ci.sh                         # all six Linux configurations
+bash tools/check_ci.sh                         # all seven Linux configurations
 bash tools/check_ci.sh ci-release ci-tidy       # selected configurations
 ```
 
@@ -325,7 +344,7 @@ waiting stack instead of allocating `packaged_task`/`future` shared state;
 ## Shipping Package
 
 The Windows `shipping` preset produces an optimized, editor-free x64 build.
-It disables validation, tests, the Debug ImGui workspace, and all content
+It disables validation, tests, the ImGui workspace, and all content
 editing source files; enables MSVC LTO; and emits the optimized executable's
 PDB into a separate Symbols ZIP rather than the player-facing Runtime ZIP.
 
@@ -669,7 +688,7 @@ surface angles to suppress shadow acne without erasing distant shadows.
 
 ## Level Editor
 
-Debug builds expose the headless `LevelEditor` through ImGui. The UI invokes
+Developer builds expose the headless `LevelEditor` through ImGui. The UI invokes
 editor commands but does not own document or filesystem policy.
 
 - Link Colors: in the editor, every pressure plate and device has a link
@@ -731,7 +750,7 @@ editor commands but does not own document or filesystem policy.
   | `T` / `R` / `S` | Decoration gizmo: move / rotate / scale |
 
 - Every editor control above can be rebound under **Options > Controls >
-  Editor Controls** (Debug builds, Keyboard tab), which groups them as
+  Editor Controls** (developer builds, Keyboard tab), which groups them as
   Editing, Playtest and Recent Tiles. The Level Editor panel lists the
   current bindings. Editor-only bindings may reuse gameplay keys; Undo, Back
   and Play/Stop Draft are live in both and so conflict with both.
@@ -739,7 +758,7 @@ editor commands but does not own document or filesystem policy.
   water-layer numbering.
 - Painting one cell beyond an edge expands every layer transactionally.
 - The Mesh Decorations tool scans source `assets/` for `.gltf` and `.glb`
-  files in Debug builds. Any discovered mesh can be selected: an unregistered
+  files in developer builds. Any discovered mesh can be selected: an unregistered
   mesh is automatically added to the source and staged manifests, along with
   its external glTF buffer/image dependencies. A glTF using one external
   base-color atlas automatically reuses or registers that texture and binds it
@@ -755,7 +774,7 @@ editor commands but does not own document or filesystem policy.
 
 ## Developer Iteration Tools
 
-Debug builds with developer tools add these to the workspace:
+The `dev` and `dev-fast` builds add these to the workspace:
 
 - **Live profiler.** The Profiler tab charts total CPU, renderer CPU, and GPU
   frame time against an adjustable budget; shows a thread-aware CPU flame
@@ -798,7 +817,7 @@ Debug builds with developer tools add these to the workspace:
   - The animation catalog is reloaded unless the Animation tab has unsaved
     edits.
   - Models are not reloaded; restart for those.
-- **Resume on launch.** When a Debug session ends, the game records where
+- **Resume on launch.** When a developer session ends, the game records where
   you were in `dev-session.json` in the save directory. The next launch
   skips the title, continues the active save slot, and reopens the editor
   document you were editing. Turn this off in the **Session** menu, or
@@ -810,8 +829,8 @@ Launch options for jumping straight to what you are working on:
 | --- | --- |
 | `--continue` | Continue the active save slot instead of showing the title (any build). |
 | `--title` | Show the title even if the developer session would resume. |
-| `--level <n> [--screen <m>]` | Continue, then enter puzzle screen `m` (default 0) of level `n`. Debug developer builds only. |
-| `--edit <path>` | Continue, then open a level document in the editor, e.g. `--edit levels/level3/screen2.scr`. Debug developer builds only. |
+| `--level <n> [--screen <m>]` | Continue, then enter puzzle screen `m` (default 0) of level `n`. Developer builds only (`dev` and `dev-fast`). |
+| `--edit <path>` | Continue, then open a level document in the editor, e.g. `--edit levels/level3/screen2.scr`. Developer builds only (`dev` and `dev-fast`). |
 
 In Visual Studio's Open Folder mode, add arguments with the startup item's
 **Debug and Launch Settings** (`launch.vs.json`, kept under `.vs/`).
@@ -862,7 +881,7 @@ unexpected files there, and they are matched by digest, so renumbering
 screens does not break them. After changing a screen's layout, record it
 again.
 
-Debug builds record every solve automatically. When you solve a campaign
+Developer builds record every solve automatically. When you solve a campaign
 screen or an editor draft, a worker thread replays your inputs one at a time,
 waiting for each to finish, and stores the run as
 `level<L>-screen<S>.solution` if it is the first recording of that content
@@ -976,7 +995,7 @@ textures, animations, sounds, music, tile visuals, and material behavior. A
 normal build runs `sokoban_content`, validates all reachable content, compiles
 shaders, and stages only required files beside the executable.
 
-In Debug, the Developer Tools `Asset Manifest` tab's `Sounds` section supports
+The Developer Tools `Asset Manifest` tab's `Sounds` section supports
 native file selection through `Browse` and `+ File`. Files outside `assets/`
 are copied into `assets/custom/audio/` with unique names. `Play` auditions the
 selected file immediately through the game's audio engine, using the sound
@@ -1024,7 +1043,7 @@ speed multiplier, and may own normalized timeline events. A use may declare a
 drowning and other deaths without a concrete attacking enemy still begin
 immediately.
 
-Debug builds expose all of this in the Developer Tools `Animation` tab. The
+Developer builds expose all of this in the Developer Tools `Animation` tab. The
 Timeline Events section first presents a selected semantic use and its named
 event list. `Edit` and `Add New Event` open a focused editor with preview
 visibility, playback/frame-step controls, and one scrubber showing both source
@@ -1097,7 +1116,7 @@ staged assets, and third-party licenses.
   isolated 3x3 animation-authoring stage.
 - `src/engine/LevelEditor.*`: headless document, history, validation, and
   transactional project filesystem operations.
-- `src/engine/DecorationMeshCatalog.*`: Debug-authoring discovery of source
+- `src/engine/DecorationMeshCatalog.*`: Developer-authoring discovery of source
   GLTF/GLB files and their manifest-registration state.
 - `src/engine/DecorationAssetRegistry.*`: headless automatic manifest
   registration and staged dependency mirroring for selected decoration meshes.

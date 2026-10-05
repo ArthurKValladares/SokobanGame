@@ -15,7 +15,7 @@ namespace sokoban {
 class AssetManifest;
 class PresentationSettings;
 
-// Debug-only animation browser state and ImGui adapter. Application only
+// Developer-tools animation browser state and ImGui adapter. Application only
 // schedules update/draw calls; the browser owns scanning, selection, playback,
 // and renderer preview delegation.
 class AnimationPreviewDebugUi {

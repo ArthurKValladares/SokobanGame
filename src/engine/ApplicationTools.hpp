@@ -109,7 +109,7 @@ public:
     void drawShaderHotReloadOverlay(const VulkanRenderer& renderer);
     // The workspace's Session menu.
     void drawSessionMenu();
-    // The workspace's Camera menu and the Debug-only fly-camera lifecycle.
+    // The workspace's Camera menu and the developer fly-camera lifecycle.
     // Enabling starts at the last rendered camera pose; clicking the game
     // viewport captures relative mouse motion until Escape releases it.
     void drawDetachedCameraMenu(

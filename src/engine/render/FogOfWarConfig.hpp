@@ -7,7 +7,7 @@
 
 namespace sokoban::config {
 
-// Every value here is live-tunable in Debug builds (Developer Tools >
+// Every value here is live-tunable in developer builds (Developer Tools >
 // Tuning > Fog of war), and Save writes the edited literals back into this
 // file. See engine/Tuning.hpp for the declaration format.
 SOKOBAN_TUNING_SECTION(fogOfWarTuning,

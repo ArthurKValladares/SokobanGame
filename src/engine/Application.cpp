@@ -275,7 +275,7 @@ Application::Application(ApplicationOptions options)
         CpuProfiler::instance().setEnabled(options.evidenceProfilerEnabled);
 #if !SOKOBAN_ENABLE_DEBUG_UI
         if (evidenceDebugUi_) {
-            throw std::invalid_argument("--evidence-debug-ui requires a Debug build");
+            throw std::invalid_argument("--evidence-debug-ui requires developer tools");
         }
 #endif
         // Evidence presentation policy is a process-local diagnostic override,

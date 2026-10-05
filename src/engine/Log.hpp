@@ -92,7 +92,7 @@ struct Diagnostics {
 void configure(Configuration configuration);
 
 // Messages below this level are filtered before formatting or queueing.
-// Default Info; Debug builds may lower it to Debug.
+// Default Info; developer builds may lower it to Debug.
 void setMinimumLevel(Level level);
 
 // Asynchronously opens/replaces the append-only file sink on the writer

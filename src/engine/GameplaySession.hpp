@@ -159,7 +159,7 @@ public:
     }
     [[nodiscard]] int playerMoveCount() const { return playerMoveCount_; }
     // Every input that started an action (or switched hero) since the last
-    // reset, restore or restart, in order. Debug builds save it as a solution
+    // reset, restore or restart, in order. Developer builds save it as a solution
     // when a screen is solved; held-key repeats appear once per step.
     [[nodiscard]] const std::vector<PlayerInput>& inputLog() const
     {

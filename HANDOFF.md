@@ -65,7 +65,17 @@ ctest --preset dev
 ```
 
 `--preset release` (and `release-all`, `ctest --preset release`) is the same
-Ninja build optimized, in `out/release`, without the Debug-only editor tools.
+Ninja build optimized, in `out/release`, without editor tools.
+
+Optimized authoring uses `dev-fast`: RelWithDebInfo with the full editor, live
+tuning, profiler, source-content paths, automatic recordings and debugger
+symbols, without Vulkan validation. `dev-fast-all` builds every target;
+`ctest --preset dev-fast` tests it; `cmake --workflow --preset dev-fast-check`
+does all three steps. Run `out/dev-fast/RelWithDebInfo/sokoban.exe`.
+`SOKOBAN_ENABLE_DEVELOPER_TOOLS` enables tools in Debug and RelWithDebInfo;
+Release and MinSizeRel remain editor-free, and shipping/headless force it off.
+Keep `SOKOBAN_DEVELOPER_TOOLS_ENABLED` as the single CMake condition for the
+public class-layout flag, developer sources and source-content paths.
 
 Full Windows validation build (the Visual Studio generator, as CI uses):
 
@@ -153,7 +163,7 @@ and the required real-device checks are recorded.
 
 ## Developer iteration contracts
 
-- Shader hot reload (`ShaderHotReload`, Debug developer builds) compiles with
+- Shader hot reload (`ShaderHotReload`, developer builds) compiles with
   the same `SOKOBAN_GLSLC_FLAGS` list as the build rule; keep shader options
   in that one CMake list. Compiles run off the main thread into
   `<config>/shader-hot-reload/`, never inside the staged tree; a pass
@@ -169,7 +179,7 @@ and the required real-device checks are recorded.
   `SOKOBAN_TUNABLE_*` invocations; the `tuning` test checks that every
   registered header round-trips unchanged.
 - `dev-session.json` lives in the save directory and is read and written
-  only by Debug developer builds; smoke and evidence runs neither resume nor
+  only by developer builds; smoke and evidence runs neither resume nor
   save it. It never stores game progress, which stays in the save slot.
 - Level editor edits go through `LevelEditor::recordDocumentChange`. While a
   stroke is open (`beginStroke`/`endStroke`) it folds changes into one record,
@@ -216,7 +226,7 @@ and the required real-device checks are recorded.
   that decides where a recording lives: one `level<L>-screen<S>.solution`
   per current screen holding the shortest run (ties keep the file in
   place), unsaved-draft content in `solutions/drafts/` (gitignored), and
-  displaced recordings parked there instead of deleted. Debug builds call
+  displaced recordings parked there instead of deleted. Developer builds call
   it on a worker thread after every solve, once at startup and after any
   source level change; jobs run one at a time. It must stay free of game,
   UI and GPU state.
@@ -261,7 +271,7 @@ and the required real-device checks are recorded.
   Every returned solution must
   still pass through `solution::record`/`solution::Driver` before it is stored.
 - The source watcher (`SourceWatcher`, `Application::serviceSourceWatcher`,
-  Debug developer builds) polls stamps every 500 ms and never runs in smoke
+  developer builds) polls stamps every 500 ms and never runs in smoke
   or evidence runs. It writes only into the staged tree and content index,
   never into source. `LevelEditor::reloadFromDisk` refuses while the
   document is dirty or a stroke or transform is open, and ignores files that

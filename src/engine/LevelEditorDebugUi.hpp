@@ -32,7 +32,7 @@ public:
         // Rendered preview of a tile type for the palette, or 0 when there is
         // none to show (still loading, no model, or thumbnails unavailable).
         // An ImGui ImTextureID, typed as uint64_t so this header does not
-        // require imgui.h - which non-debug builds compile without.
+        // require imgui.h - which builds without developer tools omit.
         std::function<uint64_t(TileType)> tileThumbnail;
         // Re-bakes the palette pictures. Same work as the
         // --bake-tile-thumbnails command line, offered here because that flag

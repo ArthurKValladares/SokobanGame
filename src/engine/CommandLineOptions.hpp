@@ -63,9 +63,9 @@ struct CommandLineOptions {
     // normal renderer budget.
     std::uint64_t textureResidencyBudgetKiB = 0;
     // Developer launch shortcuts. --continue loads the active save slot
-    // instead of showing the title. --title shows the title even when a Debug
+    // instead of showing the title. --title shows the title even when a developer
     // session file would otherwise resume. --level/--screen and --edit need a
-    // Debug build with developer tools: the first continues and then enters
+    // build with developer tools: the first continues and then enters
     // that puzzle screen, the second opens a level document in the editor.
     bool continueGame = false;
     bool showTitle = false;
