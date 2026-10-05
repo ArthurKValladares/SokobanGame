@@ -1,0 +1,166 @@
+[16:36:33.566] [INFO] [APP] Session started: Sokoban 3D 0.1.0
+[16:36:35.783] [INFO] [RENDER] Vulkan validation [Loader Message]: No valid vk_loader_settings.json file found, no loader settings will be active
+[16:36:35.783] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_app_package_manifest_path: Failed to find mapping layers packages by family name
+[16:36:35.783] [INFO] [RENDER] Vulkan validation [Loader Message]: Checking for Layer Manifest files in Registry at HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ImplicitLayers
+[16:36:35.783] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_add_json_entry: Located json file "C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nv-vk64.json" from PnP registry: E
+[16:36:35.783] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_add_json_entry: Located json file "C:\WINDOWS\System32\DriverStore\FileRepository\amdvlk.inf_amd64_914ba89eaaafdf60\amd-vulkan64.json" from PnP registry: E
+[16:36:35.783] [INFO] [RENDER] Vulkan validation [Loader Message]: Located json file "C:\Program Files\RenderDoc\renderdoc.json" from registry "HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ImplicitLayers"
+[16:36:35.783] [INFO] [RENDER] Vulkan validation [Loader Message]: Located json file "C:\Program Files (x86)\Epic Games\Epic Online Services\managedArtifacts\98bc04bc842e4906993fd6d6644ffb8d\EOSOverlayVkLayer-Win64.json" from registry "HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ImplicitLayers"
+[16:36:35.783] [INFO] [RENDER] Vulkan validation [Loader Message]: Located json file "C:\Program Files (x86)\Steam\SteamOverlayVulkanLayer64.json" from registry "HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ImplicitLayers"
+[16:36:35.783] [INFO] [RENDER] Vulkan validation [Loader Message]: Located json file "C:\Program Files (x86)\Steam\SteamFossilizeVulkanLayer64.json" from registry "HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ImplicitLayers"
+[16:36:35.784] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nv-vk64.json (file version 1.0.1)
+[16:36:35.784] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\WINDOWS\System32\DriverStore\FileRepository\amdvlk.inf_amd64_914ba89eaaafdf60\amd-vulkan64.json (file version 1.0.0)
+[16:36:35.784] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\Program Files\RenderDoc\renderdoc.json (file version 1.1.2)
+[16:36:35.784] [ERROR] [RENDER] Vulkan validation [Loader Message]: loader_get_json: Failed to open JSON file C:\Program Files (x86)\Epic Games\Epic Online Services\managedArtifacts\98bc04bc842e4906993fd6d6644ffb8d\EOSOverlayVkLayer-Win64.json
+[16:36:35.784] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\Program Files (x86)\Steam\SteamOverlayVulkanLayer64.json (file version 1.0.0)
+[16:36:35.784] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\Program Files (x86)\Steam\SteamFossilizeVulkanLayer64.json (file version 1.0.0)
+[16:36:35.784] [INFO] [RENDER] Vulkan validation [Loader Message]: Checking for Layer Manifest files in Registry at HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers
+[16:36:35.784] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_files: opening device PCI\VEN_10DE&DEV_28E0&SUBSYS_33A81043&REV_A1\4&29511ab7&0&0009
+[16:36:35.784] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_entry: Device ID(2) Does not contain a value for "VulkanExplicitLayers"
+[16:36:35.784] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_files: unable to open child-device error:13
+[16:36:35.784] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_files: opening device PCI\VEN_1002&DEV_1900&SUBSYS_33A81043&REV_CB\4&98c338a&0&0041
+[16:36:35.784] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_entry: Device ID(3) Does not contain a value for "VulkanExplicitLayers"
+[16:36:35.784] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_files: Opening child device 36 - SWD\DRIVERENUM\AMDCP&5&369121B3&0
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_entry: Device ID(36) Does not contain a value for "VulkanExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_files: Opening child device 207 - SWD\DRIVERENUM\AMDFDANS&5&369121B3&0
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_entry: Device ID(207) Does not contain a value for "VulkanExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_files: Opening child device 203 - SWD\DRIVERENUM\AMDOCL&5&369121B3&0
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_entry: Device ID(203) Does not contain a value for "VulkanExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_files: Opening child device 259 - SWD\DRIVERENUM\AMDOGL&5&369121B3&0
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_entry: Device ID(259) Does not contain a value for "VulkanExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_files: Opening child device 260 - SWD\DRIVERENUM\AMDVLK&5&369121B3&0
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_entry: Device ID(260) Does not contain a value for "VulkanExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_files: Opening child device 246 - SWD\DRIVERENUM\AMDWIN&5&369121B3&0
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_entry: Device ID(246) Does not contain a value for "VulkanExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_files: Opening child device 184 - DISPLAY\SDC419C\5&369121B3&0&UID256
+[16:36:35.785] [DEBUG] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_files: GUID for 184 is not SoftwareComponent skipping
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_device_registry_files: found no registry files
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: Located json file "C:\VulkanSDK\1.4.309.0\Bin\VkLayer_api_dump.json" from registry "HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: Located json file "C:\VulkanSDK\1.4.309.0\Bin\VkLayer_gfxreconstruct.json" from registry "HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: Located json file "C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_synchronization2.json" from registry "HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: Located json file "C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_validation.json" from registry "HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: Located json file "C:\VulkanSDK\1.4.309.0\Bin\VkLayer_monitor.json" from registry "HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: Located json file "C:\VulkanSDK\1.4.309.0\Bin\VkLayer_screenshot.json" from registry "HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: Located json file "C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_profiles.json" from registry "HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: Located json file "C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_shader_object.json" from registry "HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: Located json file "C:\VulkanSDK\1.4.309.0\Bin\VkLayer_crash_diagnostic.json" from registry "HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
+[16:36:35.785] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\VulkanSDK\1.4.309.0\Bin\VkLayer_api_dump.json (file version 1.2.0)
+[16:36:35.786] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\VulkanSDK\1.4.309.0\Bin\VkLayer_gfxreconstruct.json (file version 1.2.0)
+[16:36:35.786] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_synchronization2.json (file version 1.2.0)
+[16:36:35.786] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_validation.json (file version 1.2.0)
+[16:36:35.786] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\VulkanSDK\1.4.309.0\Bin\VkLayer_monitor.json (file version 1.0.0)
+[16:36:35.787] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\VulkanSDK\1.4.309.0\Bin\VkLayer_screenshot.json (file version 1.2.0)
+[16:36:35.787] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_profiles.json (file version 1.2.1)
+[16:36:35.787] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_shader_object.json (file version 1.2.0)
+[16:36:35.787] [INFO] [RENDER] Vulkan validation [Loader Message]: Found manifest file C:\VulkanSDK\1.4.309.0\Bin\VkLayer_crash_diagnostic.json (file version 1.2.0)
+[16:36:35.788] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_get_app_package_manifest_path: Failed to find mapping layers packages by family name
+[16:36:35.788] [INFO] [RENDER] Vulkan validation [Loader Message]: Checking for Driver Manifest files in Registry at HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\Drivers
+[16:36:35.788] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_add_json_entry: Located json file "C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nv-vk64.json" from PnP registry: E
+[16:36:35.788] [INFO] [RENDER] Vulkan validation [Loader Message]: windows_add_json_entry: Located json file "C:\WINDOWS\System32\DriverStore\FileRepository\amdvlk.inf_amd64_914ba89eaaafdf60\amd-vulkan64.json" from PnP registry: E
+[16:36:35.788] [INFO] [RENDER] Vulkan validation [Loader Message]: Found no registry files in HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\Drivers
+[16:36:35.788] [INFO] [RENDER] Vulkan validation [Loader Message]: Found ICD manifest file C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nv-vk64.json, version 1.0.1
+[16:36:35.788] [DEBUG] [RENDER] Vulkan validation [Loader Message]: Searching for ICD drivers named .\nvoglv64.dll
+[16:36:35.788] [INFO] [RENDER] Vulkan validation [Loader Message]: Found ICD manifest file C:\WINDOWS\System32\DriverStore\FileRepository\amdvlk.inf_amd64_914ba89eaaafdf60\amd-vulkan64.json, version 1.0.0
+[16:36:35.788] [DEBUG] [RENDER] Vulkan validation [Loader Message]: Searching for ICD drivers named .\amdvlk64.dll
+[16:36:35.794] [DEBUG] [RENDER] Vulkan validation [Loader Message]: Loading layer library C:\VulkanSDK\1.4.309.0\Bin\.\VkLayer_khronos_validation.dll
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]: Insert instance layer "VK_LAYER_KHRONOS_validation" (C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_validation.dll)
+[16:36:35.794] [DEBUG] [RENDER] Vulkan validation [Loader Message]: Loading layer library C:\WINDOWS\System32\DriverStore\FileRepository\amdvlk.inf_amd64_914ba89eaaafdf60\.\amdvlk64.dll
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]: Insert instance layer "VK_LAYER_AMD_switchable_graphics" (C:\WINDOWS\System32\DriverStore\FileRepository\amdvlk.inf_amd64_914ba89eaaafdf60\amdvlk64.dll)
+[16:36:35.794] [DEBUG] [RENDER] Vulkan validation [Loader Message]: Loading layer library C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\.\nvoglv64.dll
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]: Insert instance layer "VK_LAYER_NV_present" (C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nvoglv64.dll)
+[16:36:35.794] [DEBUG] [RENDER] Vulkan validation [Loader Message]: Loading layer library C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\.\nvoglv64.dll
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]: Insert instance layer "VK_LAYER_NV_optimus" (C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nvoglv64.dll)
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]: vkCreateInstance layer callstack setup to:
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:    <Application>
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:      ||
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:    <Loader>
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:      ||
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:    VK_LAYER_NV_optimus
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Type: Implicit
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Enabled By: Implicit Layer
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:                Disable Env Var:  DISABLE_LAYER_NV_OPTIMUS_1
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Manifest: C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nv-vk64.json
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Library:  C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nvoglv64.dll
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:      ||
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:    VK_LAYER_NV_present
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Type: Implicit
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Enabled By: Implicit Layer
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:                Disable Env Var:  DISABLE_LAYER_NV_PRESENT_1
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Manifest: C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nv-vk64.json
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Library:  C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nvoglv64.dll
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:      ||
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:    VK_LAYER_AMD_switchable_graphics
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Type: Implicit
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Enabled By: Implicit Layer
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:                Disable Env Var:  DISABLE_LAYER_AMD_SWITCHABLE_GRAPHICS_1
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Manifest: C:\WINDOWS\System32\DriverStore\FileRepository\amdvlk.inf_amd64_914ba89eaaafdf60\amd-vulkan64.json
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Library:  C:\WINDOWS\System32\DriverStore\FileRepository\amdvlk.inf_amd64_914ba89eaaafdf60\amdvlk64.dll
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:      ||
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:    VK_LAYER_KHRONOS_validation
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Type: Explicit
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Enabled By: By the Application
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Manifest: C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_validation.json
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:            Library:  C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_validation.dll
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:      ||
+[16:36:35.794] [INFO] [RENDER] Vulkan validation [Loader Message]:    <Drivers>
+[16:36:35.984] [INFO] [AUDIO] Audio startup phase (us): total=288119
+[16:36:36.567] [INFO] [RENDER] Vulkan validation [WARNING-CreateInstance-status-message]: vkCreateInstance(): Khronos Validation Layer Active:
+    Current Enables: None.
+    Current Disables: None.
+
+[16:36:36.577] [INFO] [RENDER] Vulkan GPU: NVIDIA GeForce RTX 4060 Laptop GPU (discrete) with debug wireframe support; texture descriptor capacity 1024; scene depth D32_SFLOAT
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]: Inserted device layer "VK_LAYER_KHRONOS_validation" (C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_validation.dll)
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]: Failed to find vkGetDeviceProcAddr in layer "C:\WINDOWS\System32\DriverStore\FileRepository\amdvlk.inf_amd64_914ba89eaaafdf60\amdvlk64.dll"
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]: Inserted device layer "VK_LAYER_NV_present" (C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nvoglv64.dll)
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]: Inserted device layer "VK_LAYER_NV_optimus" (C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nvoglv64.dll)
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]: vkCreateDevice layer callstack setup to:
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:    <Application>
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:      ||
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:    <Loader>
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:      ||
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:    VK_LAYER_NV_optimus
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:            Type: Implicit
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:            Enabled By: Implicit Layer
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:                Disable Env Var:  DISABLE_LAYER_NV_OPTIMUS_1
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:            Manifest: C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nv-vk64.json
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:            Library:  C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nvoglv64.dll
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:      ||
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:    VK_LAYER_NV_present
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:            Type: Implicit
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:            Enabled By: Implicit Layer
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:                Disable Env Var:  DISABLE_LAYER_NV_PRESENT_1
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:            Manifest: C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nv-vk64.json
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:            Library:  C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nvoglv64.dll
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:      ||
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:    VK_LAYER_KHRONOS_validation
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:            Type: Explicit
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:            Enabled By: By the Application
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:            Manifest: C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_validation.json
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:            Library:  C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_validation.dll
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:      ||
+[16:36:36.577] [INFO] [RENDER] Vulkan validation [Loader Message]:    <Device>
+[16:36:36.578] [INFO] [RENDER] Vulkan validation [Loader Message]:        Using "NVIDIA GeForce RTX 4060 Laptop GPU" with driver: "C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nvoglv64.dll"
+[16:36:36.612] [INFO] [RENDER] Vulkan device startup phases (us): instance=795826 surface=28 physical-device=8877 logical-device=35535 allocator=70 command-pool=139 total=840477
+[16:36:37.260] [INFO] [RENDER] Swapchain startup phases (us): create=644014 attachments=1073
+[16:36:37.308] [WARN] [RENDER] Vulkan validation [WARNING-Shader-OutputNotConsumed]: vkCreateGraphicsPipelines(): pCreateInfos[0] (SPIR-V Interface) VK_SHADER_STAGE_VERTEX_BIT declared to output location 10 Component 0 but is not an Input declared by VK_SHADER_STAGE_FRAGMENT_BIT.
+[16:36:37.320] [WARN] [RENDER] Vulkan validation [WARNING-Shader-OutputNotConsumed]: vkCreateGraphicsPipelines(): pCreateInfos[0] (SPIR-V Interface) VK_SHADER_STAGE_VERTEX_BIT declared to output location 10 Component 0 but is not an Input declared by VK_SHADER_STAGE_FRAGMENT_BIT.
+[16:36:37.326] [WARN] [RENDER] Vulkan validation [WARNING-Shader-OutputNotConsumed]: vkCreateGraphicsPipelines(): pCreateInfos[0] (SPIR-V Interface) VK_SHADER_STAGE_VERTEX_BIT declared to output location 10 Component 0 but is not an Input declared by VK_SHADER_STAGE_FRAGMENT_BIT.
+[16:36:37.329] [WARN] [RENDER] Vulkan validation [WARNING-Shader-OutputNotConsumed]: vkCreateGraphicsPipelines(): pCreateInfos[0] (SPIR-V Interface) VK_SHADER_STAGE_VERTEX_BIT declared to output location 10 Component 0 but is not an Input declared by VK_SHADER_STAGE_FRAGMENT_BIT.
+[16:36:37.360] [INFO] [RENDER] Render-resource startup phases (us): swapchain=645195 ssao=166 atmosphere=36 bloom=62 prerequisite-wait=20 descriptors=1606 pipelines=97685 total=744775
+[16:36:37.360] [INFO] [RENDER] Vulkan swapchain: 1280x720, 3 images, FIFO, 4x MSAA; scene 1280x720 at 100% (3.6864 M sample-pixels), scene depth D32_SFLOAT
+[16:36:37.375] [INFO] [RENDER] Renderer startup phases (us): pipeline-cache=1940 shadow-resources=1480 ui-resources=240174 model-resources=53125 render-resources=744950 gpu-profiler=126 frame-resources=95 debug-ui=14991 thumbnails=21 total=762126
+[16:36:37.382] [INFO] [SAVE] Loaded player profile.
+[16:36:37.765] [INFO] [APP] Smoke run: starting a new game and rendering 240 frames.
+[16:36:37.794] [DEBUG] [GAMEPLAY] player entered the overworld
+[16:36:37.803] [DEBUG] [GAMEPLAY] player entered puzzle
+[16:36:37.814] [INFO] [APP] Application startup phases (us): construction=4198853 first-frame=4247686
+[16:36:41.354] [INFO] [RENDER] Archived render evidence at out/allocation-pass-validation-evidence
+[16:36:41.355] [INFO] [RENDER] Texture residency 6337008 / 268435456 bytes; mip levels 67 / 67; 0 reduced textures omitted 0 bytes.
+[16:36:41.355] [INFO] [RENDER] Residency evictions 0; capacity blocks 0 (0 larger than the budget, 0 no mip tail fits, 0 nothing evictable); dropped draws 0, dropped skinned poses 0; model residency 1028768 / 134217728 bytes (peak 1028768).
+[16:36:41.355] [INFO] [RENDER] Asset transient memory 0 bytes (peak 2097192); prepared payload 0 + 0 decoding bytes / 33554432 budget; prepared-budget deferrals 0, oversized starts 0; skinned packing 1 passes, 2 allocations, 655880 cumulative temporary bytes (peak 655880), 655880 upload bytes; queued source bytes 0 models, 0 textures, 0 animations; decoding source bytes 0 models, 0 textures, 0 animations; residency deferrals 0 models over 0 us, 0 textures over 0 us.
+[16:36:41.355] [INFO] [APP] Smoke run finished after 240 frames.
+[16:36:41.421] [DEBUG] [RENDER] Persisted Vulkan pipeline cache (607268 bytes)
+[16:36:41.510] [DEBUG] [RENDER] Vulkan validation [Loader Message]: Unloading layer library C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nvoglv64.dll
+[16:36:41.510] [DEBUG] [RENDER] Vulkan validation [Loader Message]: Unloading layer library C:\WINDOWS\System32\DriverStore\FileRepository\nvami.inf_amd64_46b14a8ba26be7f7\nvoglv64.dll
+[16:36:41.510] [DEBUG] [RENDER] Vulkan validation [Loader Message]: Unloading layer library C:\WINDOWS\System32\DriverStore\FileRepository\amdvlk.inf_amd64_914ba89eaaafdf60\amdvlk64.dll
+[16:36:41.512] [DEBUG] [RENDER] Vulkan validation [Loader Message]: Unloading layer library C:\VulkanSDK\1.4.309.0\Bin\VkLayer_khronos_validation.dll

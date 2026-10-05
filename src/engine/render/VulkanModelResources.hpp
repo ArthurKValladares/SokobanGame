@@ -527,6 +527,10 @@ private:
     FrameRetirementQueue<RetiredModelResources> retiredModels_;
     FrameRetirementQueue<RetiredTextureResources> retiredTextures_;
     AnimationController animationController_ {};
+    FrameArena animationFrameArena_ {
+        "animation requests",
+        arenaBytesFor<AnimationController::InstanceSkinningRequest>(
+            RenderFrameData::tileCapacity) };
     struct AnimatedMeshKey {
         uint32_t frameIndex = 0;
         uint64_t instanceId = 0;
@@ -534,17 +538,16 @@ private:
 
         bool operator==(const AnimatedMeshKey&) const = default;
     };
-    struct AnimatedMeshKeyHash {
-        std::size_t operator()(AnimatedMeshKey key) const
-        {
-            return std::hash<uint64_t> {}(
-                key.instanceId ^
-                (static_cast<uint64_t>(key.frameIndex) << 56) ^
-                (static_cast<uint64_t>(key.modelValue) << 24));
-        }
+    struct AnimatedMeshEntry {
+        AnimatedMeshKey key;
+        uint32_t paletteIndex = UINT32_MAX;
     };
-    std::unordered_map<AnimatedMeshKey, uint32_t, AnimatedMeshKeyHash>
-        skinnedInstances_;
+    // Fixed open-addressed tables, reset only when their GPU frame retires.
+    // Clearing an unordered_map retained buckets but reallocated every node.
+    std::array<std::array<AnimatedMeshEntry, maxSkinnedInstancesPerFrame * 2>,
+        gpuSkinningFrameCount> skinnedInstances_ {};
+    [[nodiscard]] AnimatedMeshEntry* skinningEntry(AnimatedMeshKey key);
+    [[nodiscard]] const AnimatedMeshEntry* skinningEntry(AnimatedMeshKey key) const;
     uint32_t activeSkinningFrame_ = UINT32_MAX;
     uint32_t skinningInstanceCount_ = 0;
     uint32_t drawInstanceCount_ = 0;

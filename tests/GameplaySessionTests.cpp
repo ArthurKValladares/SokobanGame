@@ -1471,11 +1471,44 @@ void testLegacyStaticMirrorsUpgradeOnRestore()
     CHECK(session.state() == rules::initialState(rotatedLevel));
 }
 
+void testPlanningCachesRefreshAfterWorldAndPolicyChanges()
+{
+    TEST("planningCachesRefreshAfterWorldAndPolicyChanges");
+    const Level level = makeLevel({ { "...." }, { "RC  " } });
+    GameplaySession session;
+    session.reset(level);
+    const GameplaySession::Controls left { .horizontalMove = MoveDirection::Left };
+    CHECK(!session.tryStartNextAction(level, left));
+    CHECK(!session.tryStartNextAction(level, left));
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.projectedStateView().players.front().cell == cell(2, 0, 1));
+    finishAction(session);
+    CHECK(session.tryStartNextAction(level, left));
+    finishAction(session);
+    CHECK(session.state().players.front().cell == cell(1, 0, 1));
+    CHECK(session.projectedStateView() == session.state());
+
+    session.setActionAdmissionPolicy([](const GameState&) { return false; });
+    const GameplaySession::Controls right { .horizontalMove = MoveDirection::Right };
+    CHECK(!session.tryStartNextAction(level, right));
+    CHECK(!session.tryStartNextAction(level, right));
+    session.clearActionAdmissionPolicy();
+    CHECK(session.tryStartNextAction(level, right));
+    finishAction(session);
+    CHECK(session.state().players.front().cell == cell(2, 0, 1));
+    session.reset(level);
+    CHECK(session.tryStartNextAction(level, right));
+    finishAction(session);
+    CHECK(session.state().players.front().cell == cell(2, 0, 1));
+}
+
 int main()
 {
     testActivateButtonsAndMirrorsIsOneUndoableRestorableAction();
     testElevatorRideCommitsUndoesAndRestores();
     testQueueIsBounded();
+    testPlanningCachesRefreshAfterWorldAndPolicyChanges();
     testStaleCommandsAreDropped();
     testIceSlideIsSettledAtTheMomentOfThePush();
     testAnEntityInFlightCannotBeTakenBySomethingElse();

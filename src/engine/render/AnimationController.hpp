@@ -53,6 +53,8 @@ public:
     [[nodiscard]] std::optional<SkinningRequest> update(const RenderFrameData& frameData);
     [[nodiscard]] std::vector<InstanceSkinningRequest> updateInstances(
         const RenderFrameData& frameData);
+    [[nodiscard]] FrameArray<InstanceSkinningRequest> updateInstances(
+        const RenderFrameData& frameData, FrameArena& arena);
 
 private:
     struct PlaybackState {
@@ -72,6 +74,9 @@ private:
         float transitionTimeSeconds,
         bool forceSample = false);
     void resetPlayback();
+    void updateInstancesInto(
+        const RenderFrameData& frameData,
+        FrameArray<InstanceSkinningRequest>& requests);
 
     // Indexed by RenderAnimation::value - 1; grown on demand.
     std::vector<GltfAnimationClip> clips_;

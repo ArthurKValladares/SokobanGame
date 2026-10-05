@@ -10,7 +10,8 @@ namespace sokoban::animationPreviewScene {
 RenderFrameData build(
     RenderModel model,
     const AssetManifest& manifest,
-    const PresentationSettings& settings)
+    const PresentationSettings& settings,
+    FrameArena* arena)
 {
     if (model.isCube() ||
         manifest.model(model).geometry != ModelGeometry::Skinned) {
@@ -18,7 +19,7 @@ RenderFrameData build(
             "animation preview requires a skinned manifest model");
     }
 
-    RenderFrameData frame;
+    RenderFrameData frame = arena ? RenderFrameData(*arena) : RenderFrameData();
     frame.viewMode = RenderViewMode::Isometric3D;
     frame.levelWidth = bedSize;
     frame.levelHeight = bedSize;

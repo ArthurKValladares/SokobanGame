@@ -17,6 +17,16 @@ struct UiRect;
 // down arrow. The arrow tip is the world-projected point above the actor.
 class SelectorPrompt {
 public:
+    // Borrows the saved binding until the bindings are edited.
+    [[nodiscard]] static const InputBinding* bindingView(
+        const InputBindings& bindings,
+        InputAction action,
+        BindingDeviceClass activeDevice);
+    [[nodiscard]] static std::string_view bindingLabel(
+        const InputBindings& bindings,
+        InputAction action,
+        BindingDeviceClass activeDevice,
+        FrameArena& arena);
     [[nodiscard]] static std::optional<InputBinding> binding(
         const InputBindings& bindings,
         InputAction action,

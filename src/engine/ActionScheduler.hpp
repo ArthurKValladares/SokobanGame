@@ -215,9 +215,18 @@ public:
     // would see that stale occupant. This view applies only completed legs;
     // future legs remain protected by reservations.
     [[nodiscard]] GameState stateAtCurrentProgress() const;
+    // Reference views survive only until the next scheduler mutation.
+    [[nodiscard]] const GameState& stateAtCurrentProgressView() const;
+    [[nodiscard]] const GameState& projectedStateView() const;
+    [[nodiscard]] uint64_t stateRevision() const { return stateRevision_; }
+    [[nodiscard]] uint64_t progressGeneration() const { return progressGeneration_; }
     // Direct replacement, for the paths that do not go through an action at
     // all: loading a screen, and restoring a save.
-    void setState(GameState state) { state_ = std::move(state); }
+    void setState(GameState state)
+    {
+        state_ = std::move(state);
+        ++stateRevision_;
+    }
     [[nodiscard]] bool idle() const { return inFlight_.empty(); }
     [[nodiscard]] const std::vector<InFlight>& inFlight() const
     {
@@ -252,6 +261,13 @@ private:
         const ActionPlan& plan, std::size_t causalGroup) const;
 
     GameState state_;
+    uint64_t stateRevision_ = 1;
+    mutable uint64_t progressRevision_ = 0;
+    mutable uint64_t progressGeneration_ = 0;
+    mutable uint64_t projectedRevision_ = 0;
+    mutable GameState progressState_;
+    mutable GameState projectedState_;
+    mutable std::vector<const GameState*> progressSources_;
     std::vector<InFlight> inFlight_;
     ReservationTable reservations_;
     float clockSeconds_ = 0.0f;

@@ -2,6 +2,22 @@
 
 #include "engine/TaskSystem.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
+#include "engine/render/AnimationController.hpp"
+#include "engine/AssetManifest.hpp"
+#include "engine/GameplayLoop.hpp"
+#include "engine/RenderFrameBuilder.hpp"
+#include "engine/OverworldView.hpp"
+#include "engine/Profiler.hpp"
+#include "engine/TurretRayTrace.hpp"
+#include "engine/AnimationPreviewScene.hpp"
+#include "engine/LevelEditor.hpp"
+#include "engine/InputRouter.hpp"
+#include "engine/render/RenderAssetRequirements.hpp"
+#include "engine/ui/FontAtlas.hpp"
+#include "engine/ui/TitleScreen.hpp"
+#include "engine/ui/OptionsMenu.hpp"
+#include "engine/ui/InputPrompts.hpp"
+#include "engine/ui/SelectorPrompt.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -150,6 +166,393 @@ void operator delete[](
 
 namespace {
 
+template <typename Function>
+void checkNoFrameAllocations(const char* name, Function&& function)
+{
+    for (int index = 0; index < 8; ++index) {
+        function();
+    }
+    const auto sample = allocationTracking::measure([&] {
+        for (int index = 0; index < 64; ++index) {
+            function();
+        }
+    });
+    std::cout << name << " count=" << sample.allocations
+              << " bytes=" << sample.bytes << '\n';
+    CHECK_MESSAGE(sample.allocations == 0, name);
+}
+
+void testGameplayFrameAllocations()
+{
+    using namespace sokoban;
+    const auto manifest = AssetManifest::loadFromFile(
+        std::filesystem::path(SOKOBAN_TEST_ASSET_DIR) / "manifest.json");
+    // A valid mirror preview exercises cached rules data and interpolated beams.
+    const Level level = Level::loadFromLayers({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "     ", "     ", "     ", "C 1  ", "     " },
+    }, "allocation fixture");
+    GameplaySession session;
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    PresentationSettings settings;
+    FrameArena arena("test render", renderFrameArenaBytes());
+    CHECK(session.activationPreview(level).has_value());
+    const auto draw = [&] {
+        arena.reset();
+        const auto& preview = session.activationPreview(level);
+        const auto& endPreview = session.activationPreview(level, true);
+        const auto frame = RenderFrameBuilder::buildGameplay({
+            .manifest = manifest,
+            .level = level,
+            .state = session.state(),
+            .moving = session.moving(),
+            .projectedState = session.projectedStateView(),
+            .presentation = presentation,
+            .settings = settings,
+            .levelLocation = LevelLocation { 0, 0 },
+            .cachedActivationPreviews = true,
+            .activationPreview = preview ? &*preview : nullptr,
+            .projectedActivationPreview = endPreview ? &*endPreview : nullptr,
+        }, arena);
+        CHECK(frame.tiles.arenaBacked());
+        CHECK(!arena.exhausted());
+    };
+    checkNoFrameAllocations("gameplay_render", draw);
+    checkNoFrameAllocations("idle_gameplay_update", [&] {
+        (void)GameplayLoop::update(level, session, presentation, {}, 0.0001f, false);
+    });
+
+    session.queueMove(MoveDirection::Down);
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.0001f, false);
+    CHECK(session.moving());
+    checkNoFrameAllocations("moving_gameplay_update", [&] {
+        (void)GameplayLoop::update(level, session, presentation, {}, 0.0001f, false);
+        (void)session.projectedStateView();
+        (void)session.activationPreview(level);
+        (void)session.activationPreview(level, true);
+    });
+    checkNoFrameAllocations("moving_gameplay_render", draw);
+    checkNoFrameAllocations("held_move_update", [&] {
+        GameplayLoop::InputFrame input;
+        input.down.down = true;
+        (void)GameplayLoop::update(level, session, presentation, input, 0.0001f, false);
+    });
+
+    const auto previewModel = manifest.playerModel();
+    checkNoFrameAllocations("animation_preview_scene", [&] {
+        arena.reset();
+        const auto frame = animationPreviewScene::build(previewModel, manifest, settings, &arena);
+        CHECK(frame.tiles.arenaBacked());
+    });
+}
+
+void testDualSceneFrameAllocations()
+{
+    using namespace sokoban;
+    const auto manifest = AssetManifest::loadFromFile(
+        std::filesystem::path(SOKOBAN_TEST_ASSET_DIR) / "manifest.json");
+    const auto level = Level::loadFromLayers({ { "....." }, { "C 1  " } }, "preview fixture");
+    GameplaySession session;
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    FrameArena arena("main and preview", 2 * renderFrameArenaBytes());
+    IsoScenePreparer mainPreparer;
+    IsoScenePreparer previewPreparer;
+    PreparedRenderScene mainScene;
+    PreparedRenderScene previewScene;
+    RenderAssetRequirements mainRequirements;
+    RenderAssetRequirements previewRequirements;
+    TaskSystem tasks(2);
+    checkNoFrameAllocations("main_and_selector_preview", [&] {
+        arena.reset();
+        const auto& activation = session.activationPreview(level);
+        const auto build = [&] {
+            return RenderFrameBuilder::buildGameplay({
+                .manifest = manifest, .level = level, .state = session.state(),
+                .projectedState = session.projectedStateView(), .presentation = presentation,
+                .settings = {}, .cachedActivationPreviews = true,
+                .activationPreview = activation ? &*activation : nullptr,
+            }, arena);
+        };
+        const auto main = build();
+        const auto preview = build();
+        tasks.parallelFor(2, 1, [&](std::size_t begin, std::size_t end) {
+            for (std::size_t index = begin; index < end; ++index) {
+                if (index == 0) mainPreparer.prepare(main, { 1280, 720 }, mainScene);
+                else previewPreparer.prepare(preview, { 960, 540 }, previewScene);
+            }
+        });
+        renderAssetRequirementsForFrame(main, mainRequirements);
+        renderAssetRequirementsForFrame(preview, previewRequirements);
+        mainRequirements.merge(previewRequirements);
+        CHECK(main.tiles.arenaBacked());
+        CHECK(preview.tiles.arenaBacked());
+        CHECK(!arena.exhausted());
+    });
+}
+
+void testEditorFrameAllocations()
+{
+    using namespace sokoban;
+    const auto manifest = AssetManifest::loadFromFile(
+        std::filesystem::path(SOKOBAN_TEST_ASSET_DIR) / "manifest.json");
+    LevelEditor editor;
+    editor.newDocument(5, 3, false);
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::TurretEast));
+    CHECK(editor.setCell({ 2, 1, 1 }, TileType::PressurePlate));
+    CHECK(editor.setCell({ 3, 1, 1 }, TileType::Gate));
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::RailStopEastWest));
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::Minecart));
+    CHECK(editor.setCell({ 2, 0, 1 }, TileType::RailStraightEastWest));
+    CHECK(editor.setCell({ 3, 0, 1 }, TileType::RailStopEastWest));
+    CHECK(editor.minecartRoutesView().size() == 1);
+    CHECK(editor.minecartRoutesView().front().has_value());
+    const auto originalRoute = *editor.minecartRoutesView().front();
+    CHECK(editor.setCell({ 2, 0, 1 }, TileType::Air));
+    CHECK(editor.minecartRoutesView().front()->cells.size() == 1);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.minecartRoutesView().front() == originalRoute);
+    const auto originalGroups = editor.linkGroups();
+    CHECK(editor.setLinkColor({ 3, 1, 1 }, { 0.1f, 0.2f, 0.3f }));
+    CHECK(editor.linkGroupsView().size() == originalGroups.size() + 1);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.linkGroupsView().size() == originalGroups.size());
+    Level::Definition neighbor;
+    neighbor.layers = { { "....." }, { "C    " } };
+    neighbor.layers[1][0][3] = tileTypeToChar(TileType::Gate);
+    neighbor.gates.push_back({ .cell = { 3, 0, 1 }, .pressurePlates = { { 2, 0, 1 } } });
+    const auto decorationModel = std::ranges::find_if(manifest.models(),
+        [](const auto& model) { return model.name.size() > 15; });
+    CHECK(decorationModel != manifest.models().end());
+    neighbor.decorations.push_back({ .model = decorationModel->name,
+        .position = { 0.5f, 0.5f, 1.0f } });
+    const std::array neighbors { RenderFrameBuilder::EditorInput::OverworldNeighbor {
+        .screen = 1, .origin = { 5, 0 }, .width = 5, .height = 1, .definition = &neighbor,
+    } };
+    FrameArena arena("editor test", renderFrameArenaBytes());
+    checkNoFrameAllocations("editor_render_with_neighbors", [&] {
+        arena.reset();
+        const auto frame = RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = editor, .settings = {},
+#if SOKOBAN_ENABLE_DEBUG_UI
+            .showDebugView = true,
+#endif
+            .overworldNeighbors = neighbors,
+        }, arena);
+        CHECK(frame.tiles.arenaBacked());
+        CHECK(!arena.exhausted());
+    });
+}
+
+void testTurretQueryAllocations()
+{
+    using namespace sokoban;
+    const auto openCell = [](GridPosition3) { return rules::TurretRayCell::Open; };
+    const auto loopPortal = [](GridPosition3 cell, MoveDirection)
+        -> std::optional<Level::PortalCrossing> {
+        return cell.x == 1
+            ? std::optional<Level::PortalCrossing> { { { 0, 0, 0 }, { 1, 0 }, 0 } }
+            : std::nullopt;
+    };
+    checkNoFrameAllocations("turret_loop_detection", [&] {
+        std::size_t segments = 0;
+        CHECK(!rules::traceTurretRayWithSegments({ 0, 0, 0 }, MoveDirection::Right,
+            std::nullopt, openCell, loopPortal, [&](const auto&) { ++segments; }));
+        CHECK(segments < 16);
+    });
+    const std::string row = std::string("C ") +
+        tileTypeToChar(TileType::TurretEast) + "  " + tileTypeToChar(TileType::TurretWest);
+    const auto level = Level::loadFromLayers({ { "......" }, { row } }, "turret query");
+    const auto state = rules::initialState(level);
+    checkNoFrameAllocations("turret_pending_motion", [&] {
+        CHECK(rules::hasPendingMotion(level, state));
+    });
+}
+
+void testAnimationRequestAllocations()
+{
+    using namespace sokoban;
+    AnimationController controller;
+    controller.configure(RenderModel { 1 }, RenderAnimation { 1 });
+    GltfAnimationClip clip;
+    clip.durationSeconds = 1.0f;
+    clip.channels.resize(1);
+    controller.setClip(RenderAnimation { 1 }, std::move(clip));
+    RenderFrameData frame;
+    frame.tiles.push_back({
+        .model = RenderModel { 1 },
+        .animation = RenderAnimation { 1 },
+        .animationInstanceId = 7,
+    });
+    FrameArena arena("animation test", 4096);
+    checkNoFrameAllocations("animation_requests", [&] {
+        arena.reset();
+        frame.animationTransitionTimeSeconds += 0.01f;
+        frame.tiles[0].animationTimeSeconds += 0.01f;
+        const auto requests = controller.updateInstances(frame, arena);
+        CHECK(requests.arenaBacked());
+        CHECK(requests.size() == 1);
+        CHECK(!arena.exhausted());
+    });
+}
+
+void testOverworldFrameAllocations()
+{
+    using namespace sokoban;
+    const auto map = OverworldMap::load(
+        std::filesystem::path(SOKOBAN_TEST_ASSET_DIR).parent_path() /
+            "levels/overworld");
+    const auto state = rules::initialState(map.level());
+    const auto cell = state.players.front().cell;
+    FrameArena arena("overworld test", renderFrameArenaBytes());
+    for (float overview : { 0.0f, 1.0f }) {
+        checkNoFrameAllocations("overworld_view_and_fog", [&] {
+            arena.reset();
+            const auto view = calculateOverworldView(map, map.startScreen(), state,
+                state, { static_cast<float>(cell.x), static_cast<float>(cell.y),
+                    static_cast<float>(cell.z) }, overview, &arena);
+            RenderFrameData frame(arena);
+            appendOverworldFogVolumes(frame.overworldFogVolumes, map,
+                view.visibleScreens, {});
+            CHECK(view.visibleScreens.arenaBacked());
+            CHECK(!view.visibleScreens.empty());
+            CHECK(frame.overworldFogVolumes.size() == view.visibleScreens.size());
+            CHECK(!arena.exhausted());
+        });
+    }
+}
+
+void testInputFrameAllocations()
+{
+    using namespace sokoban;
+    InputState input(false);
+    InputRouter router;
+    SDL_Event event {};
+    event.type = SDL_EVENT_KEY_DOWN;
+    event.key.scancode = SDL_SCANCODE_W;
+    for (const auto context : { InputRouter::RoutingContext {},
+            InputRouter::RoutingContext { .optionsOpen = true },
+            InputRouter::RoutingContext { .editorEditing = true } }) {
+        checkNoFrameAllocations("input_routing", [&] {
+            input.beginFrame();
+            input.handleEvent(event);
+            (void)router.routeFrame(input, context);
+            (void)input.activeGamepadPresentation();
+        });
+    }
+}
+
+void testMenuFrameAllocations()
+{
+    using namespace sokoban;
+    const auto font = FontAtlas::load(
+        std::filesystem::path(SOKOBAN_TEST_ASSET_DIR) / "ui/Karla-Regular.ttf");
+    UiContext ui(font);
+    OptionsMenuView view;
+    UserSettings settings;
+    for (const auto page : { OptionsMenuPage::Main, OptionsMenuPage::Graphics,
+            OptionsMenuPage::Audio, OptionsMenuPage::Controls,
+            OptionsMenuPage::EditorControls, OptionsMenuPage::QuitConfirmation }) {
+        OptionsMenuState state { .open = true, .page = page };
+        checkNoFrameAllocations("options_menu", [&] {
+            ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+            (void)view.draw(ui, { 1280.0f, 720.0f }, state, settings);
+            ui.endFrame();
+            CHECK(!ui.frameArena().exhausted());
+        });
+    }
+    const auto manifest = AssetManifest::loadFromFile(
+        std::filesystem::path(SOKOBAN_TEST_ASSET_DIR) / "manifest.json");
+    InputPromptCatalog prompts(SOKOBAN_TEST_ASSET_DIR, manifest);
+    for (const auto type : { SDL_GAMEPAD_TYPE_UNKNOWN, SDL_GAMEPAD_TYPE_XBOXONE,
+            SDL_GAMEPAD_TYPE_PS5, SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO,
+            SDL_GAMEPAD_TYPE_GAMECUBE }) {
+        const GamepadPresentation gamepad {
+            .type = type, .name = "A long unknown controller name for allocation testing",
+        };
+        OptionsMenuState state { .open = true, .page = OptionsMenuPage::Controls,
+            .controlsBindingDevice = BindingDeviceClass::Gamepad };
+        checkNoFrameAllocations("controller_binding_menu", [&] {
+            ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+            (void)view.draw(ui, { 1280.0f, 720.0f }, state, settings, &prompts, &gamepad);
+            ui.endFrame();
+            CHECK(!ui.frameArena().exhausted());
+        });
+    }
+    OptionsMenuState controls { .open = true, .page = OptionsMenuPage::EditorControls };
+    checkNoFrameAllocations("keyboard_binding_menu", [&] {
+        ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+        (void)view.draw(ui, { 1280.0f, 720.0f }, controls, settings, &prompts);
+        ui.endFrame();
+        CHECK(!ui.frameArena().exhausted());
+    });
+    InputBindings bindings = defaultInputBindings();
+    bindings.forAction(InputAction::MenuConfirm) = {
+        KeyboardBinding { "Keypad Enter", keyModifierAll },
+    };
+    const auto expectedEnter = SelectorPrompt::bindingLabel(bindings,
+        InputAction::MenuConfirm, BindingDeviceClass::Keyboard).value();
+    checkNoFrameAllocations("selector_prompts", [&] {
+        ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+        const auto enter = SelectorPrompt::bindingLabel(bindings,
+            InputAction::MenuConfirm, BindingDeviceClass::Keyboard, ui.frameArena());
+        const auto preview = SelectorPrompt::bindingLabel(bindings,
+            InputAction::PreviewScreen, BindingDeviceClass::Keyboard, ui.frameArena());
+        SelectorPrompt::draw(ui, { 400.0f, 400.0f }, enter, preview);
+        CHECK(enter == expectedEnter);
+        ui.endFrame();
+    });
+
+    TitleScreen title;
+    title.setSaveSlots({ { .state = SaveSlotState::Ready, .completedLevels = 12 },
+        { .state = SaveSlotState::Recoverable }, { .state = SaveSlotState::Empty } }, 0);
+    title.open();
+    const auto drawTitle = [&](const TitleScreenInput& input = {}) {
+        ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+        (void)title.draw(ui, { 1280.0f, 720.0f }, input);
+        ui.endFrame();
+        CHECK(!ui.frameArena().exhausted());
+    };
+    checkNoFrameAllocations("title_menu", [&] { drawTitle(); });
+    drawTitle({ .down = true });
+    drawTitle({ .confirm = true });
+    CHECK(title.page() == TitleScreen::Page::SaveSlots);
+    checkNoFrameAllocations("save_slots_menu", [&] { drawTitle(); });
+    drawTitle({ .right = true });
+    drawTitle({ .confirm = true });
+    CHECK(title.page() == TitleScreen::Page::SlotDeleteConfirmation);
+    checkNoFrameAllocations("delete_slot_menu", [&] { drawTitle(); });
+
+}
+
+void testProfilerFrameAllocations()
+{
+    using namespace sokoban;
+    CpuProfiler& profiler = CpuProfiler::instance();
+    profiler.setEnabled(true);
+    profiler.setPaused(false);
+    profiler.clearCapture();
+    profiler.setCurrentThreadName("Allocation audit thread");
+    uint64_t frameIndex = 0;
+    const auto frame = [&] {
+        profiler.beginFrame(++frameIndex);
+        {
+            CpuProfileScope outer("Allocation audit outer frame scope");
+            CpuProfileScope inner("Allocation audit nested scope");
+        }
+        profiler.endFrame();
+    };
+    // Each ring slot owns a historical frame; warm every retained slot.
+    for (std::size_t index = 0; index < CpuProfiler::capturedFrameCapacity * 2; ++index) {
+        frame();
+    }
+    checkNoFrameAllocations("profiler_capture", frame);
+    profiler.setEnabled(false);
+}
+
 sokoban::RenderFrameData makeScene(uint32_t edge)
 {
     sokoban::RenderFrameData frame;
@@ -255,8 +658,18 @@ void testWarmParallelForAllocationCounts()
 
 int main()
 {
+    std::cout << std::unitbuf;
     testWarmPreparationAllocationCounts();
     testWarmParallelForAllocationCounts();
+    testGameplayFrameAllocations();
+    testTurretQueryAllocations();
+    testEditorFrameAllocations();
+    testDualSceneFrameAllocations();
+    testAnimationRequestAllocations();
+    testOverworldFrameAllocations();
+    testInputFrameAllocations();
+    testMenuFrameAllocations();
+    testProfilerFrameAllocations();
     if (failures == 0) {
         std::cout << "ScenePreparationAllocationTests: " << checks
                   << " checks passed\n";

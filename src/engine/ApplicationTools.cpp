@@ -34,6 +34,18 @@
 #endif
 
 namespace sokoban {
+bool ApplicationTools::matchingOverworldEditorRoot()
+{
+    const auto& topologyRoot = overworldMapEditor.projectLevelRoot();
+    const auto& browserRoot = levelEditor.browserRoot();
+    if (topologyRoot != neighborTopologyRoot_ || browserRoot != neighborBrowserRoot_) {
+        neighborTopologyRoot_ = topologyRoot;
+        neighborBrowserRoot_ = browserRoot;
+        neighborRootsMatch_ = std::filesystem::absolute(topologyRoot).lexically_normal() ==
+            std::filesystem::absolute(browserRoot).lexically_normal();
+    }
+    return neighborRootsMatch_;
+}
 
 void ApplicationTools::initialize(
     const std::filesystem::path& sourceLevelRoot,

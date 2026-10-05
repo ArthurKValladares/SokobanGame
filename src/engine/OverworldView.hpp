@@ -23,7 +23,7 @@ struct OverworldView {
     RenderFrameData::CameraExtent overviewCameraExtent;
     float overviewProgress = 0.0f;
     Vec2 cameraOffset {};
-    std::vector<OverworldScreenId> visibleScreens;
+    FrameArray<OverworldScreenId> visibleScreens;
 };
 
 struct OverworldFogReveal {
@@ -45,13 +45,21 @@ struct OverworldFogReveal {
     const GameState& committedState,
     const GameState& projectedState,
     Vec3 primaryPlayerRenderPosition,
-    float overviewProgress = 0.0f);
+    float overviewProgress = 0.0f,
+    FrameArena* arena = nullptr);
 
 // Produces bounded participating-media volumes for visible, undiscovered
 // screens. A just-discovered screen remains in the result while its radial
 // reveal is active, then disappears completely at progress one.
 [[nodiscard]] std::vector<RenderFrameData::OverworldFogVolume>
 calculateOverworldFogVolumes(
+    const OverworldMap& map,
+    std::span<const OverworldScreenId> visibleScreens,
+    std::span<const OverworldScreenId> discoveredScreens,
+    std::optional<OverworldFogReveal> reveal = std::nullopt);
+
+void appendOverworldFogVolumes(
+    FrameArray<RenderFrameData::OverworldFogVolume>& volumes,
     const OverworldMap& map,
     std::span<const OverworldScreenId> visibleScreens,
     std::span<const OverworldScreenId> discoveredScreens,

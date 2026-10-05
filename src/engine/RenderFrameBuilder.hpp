@@ -80,6 +80,10 @@ public:
         // gets.
         std::optional<LevelLocation> levelLocation;
         std::function<ScreenSelectorViewState(LevelLocation)> selectorState;
+        // Live callers cache the owning rules result across presentation frames.
+        bool cachedActivationPreviews = false;
+        const rules::MirrorActivationPreview* activationPreview = nullptr;
+        const rules::MirrorActivationPreview* projectedActivationPreview = nullptr;
     };
 
     struct EditorInput {

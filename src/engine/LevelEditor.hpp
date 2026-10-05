@@ -328,6 +328,10 @@ public:
     [[nodiscard]] std::vector<GridPosition3> linkedPressurePlates(Vec3 color) const;
     // Every color in use, with its members, ordered by first appearance.
     [[nodiscard]] std::vector<LinkGroup> linkGroups() const;
+    // Derived document data retained until its exact source records change.
+    [[nodiscard]] const std::vector<LinkGroup>& linkGroupsView() const;
+    [[nodiscard]] const std::vector<std::optional<Level::MinecartRoute>>&
+        minecartRoutesView() const;
     // Recolors the linkable thing at `cell`, one undoable command.
     [[nodiscard]] bool setLinkColor(GridPosition3 cell, Vec3 color);
     // The link-color brush: gives the topmost tile in the picked column
@@ -490,6 +494,22 @@ private:
     [[nodiscard]] std::optional<OverworldScreenId> overworldScreenIdForPath(
         const std::filesystem::path& path) const;
 
+    struct LinkInput {
+        GridPosition3 cell;
+        Vec3 color;
+        uint8_t kind = 0;
+        bool operator==(const LinkInput& other) const
+        {
+            return cell == other.cell && color.x == other.color.x &&
+                color.y == other.color.y && color.z == other.color.z && kind == other.kind;
+        }
+    };
+    mutable std::vector<LinkInput> cachedLinkInputs_;
+    mutable std::vector<LinkGroup> cachedLinkGroups_;
+    mutable std::vector<std::vector<std::string>> cachedRouteLayers_;
+    mutable std::vector<Level::Plate> cachedRoutePlates_;
+    mutable std::vector<Level::Minecart> cachedRouteMinecarts_;
+    mutable std::vector<std::optional<Level::MinecartRoute>> cachedMinecartRoutes_;
     Document document_;
     struct BrowserSnapshot {
         std::vector<LevelDirectory> levels;

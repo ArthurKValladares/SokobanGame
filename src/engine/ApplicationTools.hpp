@@ -42,6 +42,7 @@ namespace sokoban {
 // bundle out of Application.hpp isolates runtime code from tool dependencies.
 class ApplicationTools {
 public:
+    [[nodiscard]] bool matchingOverworldEditorRoot();
     void initialize(
         const std::filesystem::path& sourceLevelRoot,
         const std::filesystem::path& sourceAssetRoot,
@@ -308,6 +309,9 @@ public:
 
 private:
     // What updateEditorInteraction found the pointer wants this frame.
+    std::filesystem::path neighborTopologyRoot_;
+    std::filesystem::path neighborBrowserRoot_;
+    bool neighborRootsMatch_ = false;
     EditorCursor wantedEditorCursor_ = EditorCursor::Default;
     EditorCursor shownEditorCursor_ = EditorCursor::Default;
     bool shaderCompileFailed_ = false;

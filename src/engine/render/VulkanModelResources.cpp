@@ -158,11 +158,11 @@ bool VulkanModelResources::tileReadyForDraw(
     const bool meshReady = modelReady(tile.model);
     const bool requiresPublishedPose = modelUsesGpuSkinning(tile.model);
     const bool posePublished = !requiresPublishedPose ||
-        skinnedInstances_.contains({
+        skinningEntry({
             frameIndex,
             tile.animationInstanceId,
             tile.model.value,
-        });
+        })->paletteIndex != UINT32_MAX;
     return modelInstanceReadyForDraw(
         meshReady, requiresPublishedPose, posePublished);
 }
@@ -339,7 +339,7 @@ void VulkanModelResources::destroy()
         // This interleaving is why the texture half is not a module with a
         // narrow interface: gathering these lines into a texture store's own
         // destroy() would only move the ordering constraint, not remove it.
-        skinnedInstances_.clear();
+        skinnedInstances_ = {};
         for (auto texture = textures_.rbegin(); texture != textures_.rend(); ++texture) {
             textureUploader_.destroyTextureUpload(texture->upload);
             textureUploader_.destroyTexture(
@@ -1372,8 +1372,9 @@ void VulkanModelResources::updateAnimations(
     if (activeSkinningFrame_ != frameIndex) {
         beginAnimationFrame(frameIndex);
     }
+    animationFrameArena_.reset();
     for (const AnimationController::InstanceSkinningRequest& request :
-         animationController_.updateInstances(frameData)) {
+         animationController_.updateInstances(frameData, animationFrameArena_)) {
         if (request.model.isCube() || request.model.index() >= models_.size()) {
             continue;
         }
@@ -1389,23 +1390,23 @@ void VulkanModelResources::updateAnimations(
             request.instanceId,
             request.model.value,
         };
-        auto [instance, inserted] = skinnedInstances_.try_emplace(key, 0);
-        if (inserted) {
+        AnimatedMeshEntry* instance = skinningEntry(key);
+        if (instance->paletteIndex == UINT32_MAX) {
             if (skinningInstanceCount_ >= maxSkinnedInstancesPerFrame) {
                 // Same reasoning as the draw-instance buffer: more skinned
                 // actors on screen than the palette holds is content, not a
                 // fault. Leave the instance unregistered and drop the entry -
                 // the recorder already skips an instance whose pose has not
                 // been published, which is exactly the state this leaves it in.
-                skinnedInstances_.erase(instance);
                 ++droppedSkinningInstances_;
                 continue;
             }
-            instance->second = skinningInstanceCount_++;
+            instance->key = key;
+            instance->paletteIndex = skinningInstanceCount_++;
         }
         writeSkinningInstance(
             frameIndex,
-            instance->second,
+            instance->paletteIndex,
             *model.skinnedSource,
             request.skinning);
     }
@@ -1416,16 +1417,34 @@ void VulkanModelResources::beginAnimationFrame(uint32_t frameIndex)
     if (frameIndex >= gpuSkinningFrameCount) {
         throw std::out_of_range("GPU skinning frame index is out of range");
     }
-    for (auto it = skinnedInstances_.begin(); it != skinnedInstances_.end();) {
-        if (it->first.frameIndex == frameIndex) {
-            it = skinnedInstances_.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    skinnedInstances_[frameIndex] = {};
     activeSkinningFrame_ = frameIndex;
     skinningInstanceCount_ = 0;
     drawInstanceCount_ = 0;
+}
+
+const VulkanModelResources::AnimatedMeshEntry*
+VulkanModelResources::skinningEntry(AnimatedMeshKey key) const
+{
+    if (key.frameIndex >= gpuSkinningFrameCount) {
+        throw std::out_of_range("GPU skinning frame index is out of range");
+    }
+    const auto& table = skinnedInstances_[key.frameIndex];
+    std::size_t index = std::hash<uint64_t> {}(
+        key.instanceId ^ (static_cast<uint64_t>(key.modelValue) << 32)) %
+        table.size();
+    // At most 256 live entries occupy 512 slots, so a probe always terminates.
+    while (table[index].paletteIndex != UINT32_MAX &&
+           !(table[index].key == key)) {
+        index = (index + 1) % table.size();
+    }
+    return &table[index];
+}
+
+VulkanModelResources::AnimatedMeshEntry*
+VulkanModelResources::skinningEntry(AnimatedMeshKey key)
+{
+    return const_cast<AnimatedMeshEntry*>(std::as_const(*this).skinningEntry(key));
 }
 
 uint32_t VulkanModelResources::writeDrawInstance(
@@ -1469,9 +1488,9 @@ VulkanModelResources::MeshView VulkanModelResources::meshForTile(
             LoadState::Ready) {
             throw std::runtime_error("Skinned model was used before it was ready");
         }
-        const auto instance = skinnedInstances_.find(
+        const AnimatedMeshEntry* instance = skinningEntry(
             { frameIndex, tile.animationInstanceId, tile.model.value });
-        if (instance == skinnedInstances_.end()) {
+        if (instance->paletteIndex == UINT32_MAX) {
             throw std::runtime_error(
                 "Skinned model instance pose was not published (model='" +
                 definition.name + "', modelId=" +
@@ -1491,7 +1510,7 @@ VulkanModelResources::MeshView VulkanModelResources::meshForTile(
             .indexOffset = geometryArena_.indexOffset(slot.skinnedGpu.allocation),
             .indexCount = slot.skinnedGpu.indexCount,
             .firstInstance = frameIndex * maxSkinnedInstancesPerFrame +
-                instance->second,
+                instance->paletteIndex,
             .skinned = true,
         };
     }

@@ -60,6 +60,8 @@ public:
     void endFrame();
 
     [[nodiscard]] const UiDrawData& drawData() const { return drawData_; }
+    // Scratch data is consumed during this frame and dies at beginFrame().
+    [[nodiscard]] FrameArena& frameArena() { return frameArena_; }
     // Arena tuning, for the Engine debug tab. bytesUsed() is this frame,
     // highWaterBytes() is the number the capacity should be derived from, and
     // droppedCommands() is what the budget cost the frame just drawn.

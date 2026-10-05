@@ -1,0 +1,7 @@
+FAIL [atmosphericRoundTrip] line 301: picker imports external audio
+FAIL [atmosphericRoundTrip] line 303: external audio is stored under custom/audio
+FAIL [atmosphericRoundTrip] line 305: second import appends a variation
+FAIL [atmosphericRoundTrip] line 307: imports do not overwrite existing files
+FAIL [atmosphericRoundTrip] line 309: import keeps file bytes
+FAIL [atmosphericRoundTrip] line 312: runtime receives selected sound bytes
+6 asset manifest editor checks failed

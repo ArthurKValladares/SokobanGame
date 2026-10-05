@@ -54,6 +54,54 @@ std::optional<std::string> SelectorPrompt::bindingLabel(
 }
 
 std::optional<InputBinding> SelectorPrompt::binding(
+    const InputBindings& bindings, InputAction action, BindingDeviceClass activeDevice)
+{
+    const auto* selected = bindingView(bindings, action, activeDevice);
+    return selected ? std::optional<InputBinding>(*selected) : std::nullopt;
+}
+
+std::string_view SelectorPrompt::bindingLabel(
+    const InputBindings& bindings, InputAction action,
+    BindingDeviceClass activeDevice, FrameArena& arena)
+{
+    const auto* selected = bindingView(bindings, action, activeDevice);
+    if (!selected) return {};
+    const auto visit = [&](auto append) {
+        if (const auto* keyboard = std::get_if<KeyboardBinding>(selected)) {
+            if ((keyboard->modifiers & keyModifierCtrl) != 0U) append("Ctrl+", false);
+            if ((keyboard->modifiers & keyModifierShift) != 0U) append("Shift+", false);
+            if ((keyboard->modifiers & keyModifierAlt) != 0U) append("Alt+", false);
+            append(keyboard->scancode, false);
+        } else if (const auto* button = std::get_if<GamepadButtonBinding>(selected)) {
+            const auto name = std::string_view(button->button);
+            if (name == "south") append("A", false);
+            else if (name == "east") append("B", false);
+            else if (name == "west") append("X", false);
+            else if (name == "north") append("Y", false);
+            else if (name == "rightshoulder") append("RB", false);
+            else if (name == "leftshoulder") append("LB", false);
+            else append(name, true);
+        } else {
+            const auto& axis = std::get<GamepadAxisBinding>(*selected);
+            append(axis.axis, true);
+            append(axis.direction == AxisDirection::Negative ? "-" : "+", false);
+        }
+    };
+    std::size_t size = 0;
+    visit([&](std::string_view part, bool) { size += part.size(); });
+    char* const label = arena.allocateUninitialized<char>(size);
+    if (!label) return {};
+    std::size_t offset = 0;
+    visit([&](std::string_view part, bool upper) {
+        for (unsigned char character : part) {
+            label[offset++] = upper ? static_cast<char>(std::toupper(character))
+                                   : static_cast<char>(character);
+        }
+    });
+    return { label, size };
+}
+
+const InputBinding* SelectorPrompt::bindingView(
     const InputBindings& bindings,
     InputAction action,
     BindingDeviceClass activeDevice)
@@ -80,9 +128,9 @@ std::optional<InputBinding> SelectorPrompt::binding(
         found = actionBindings.begin();
     }
     if (found == actionBindings.end()) {
-        return std::nullopt;
+        return nullptr;
     }
-    return *found;
+    return &*found;
 }
 
 void SelectorPrompt::draw(

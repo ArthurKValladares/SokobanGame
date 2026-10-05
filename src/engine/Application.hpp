@@ -182,7 +182,7 @@ private:
     void tryEnterSelector();
     [[nodiscard]] bool updateScreenPreview(bool requested, float dt);
     [[nodiscard]] std::optional<RenderFrameData>
-        buildScreenPreviewRenderFrame() const;
+        buildScreenPreviewRenderFrame(FrameArena& arena) const;
     void drawSelectorPrompt(const VulkanRenderer::PreparedFrame* frame);
     void drawScreenPreviewOverlay(Vec2 viewport);
     void drawAssetLoadingOverlay(Vec2 viewport);
@@ -220,7 +220,8 @@ private:
     // The editor's frame, which shares nothing with the gameplay one but the
     // manifest and the settings.
     [[nodiscard]] RenderFrameData buildEditorRenderFrame(
-        const InputRouter::EditorInput& editorInput, float beltScrollOffset);
+        const InputRouter::EditorInput& editorInput, float beltScrollOffset,
+        FrameArena& arena);
 #endif
     // Evidence-only point-light fixtures, appended to a finished frame.
     void appendEvidencePointLights(RenderFrameData& frame) const;
@@ -296,6 +297,7 @@ private:
     // Alternating means the arena being reset is never the one the previous
     // prepared frame points into, and the invariant stops being invisible.
     //
+    // Each arena holds both the main scene and the optional selector preview.
     // The cost is a second arena's worth of memory. Only one frame is ever
     // read back, so two is enough.
     std::array<FrameArena, 2> renderFrameArenas_;

@@ -47,7 +47,8 @@ public:
     explicit UiLayoutTree(
         UiLayoutAxis rootAxis = UiLayoutAxis::Vertical,
         UiLayoutInsets rootInsets = {},
-        float rootGap = 0.0f);
+        float rootGap = 0.0f,
+        FrameArena* arena = nullptr);
 
     [[nodiscard]] UiLayoutNode root() const { return 0; }
     [[nodiscard]] UiLayoutNode column(
@@ -84,7 +85,10 @@ private:
         UiLayoutInsets insets {};
         float gap = 0.0f;
         bool container = false;
-        std::vector<UiLayoutNode> children;
+        UiLayoutNode firstChild = 0;
+        UiLayoutNode lastChild = 0;
+        UiLayoutNode nextSibling = 0;
+        std::size_t childCount = 0;
         UiRect arrangedRect {};
     };
 
@@ -94,7 +98,7 @@ private:
     [[nodiscard]] const Node& checkedNode(UiLayoutNode node) const;
     [[nodiscard]] Node& checkedNode(UiLayoutNode node);
 
-    std::vector<Node> nodes_;
+    FrameArray<Node> nodes_;
     bool overflowed_ = false;
 };
 

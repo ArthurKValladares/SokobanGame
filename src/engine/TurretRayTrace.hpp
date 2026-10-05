@@ -14,31 +14,39 @@ enum class TurretRayCell : uint8_t { Open, Occupied, Blocked };
 // crossings and loop detection. Queries let unfinished drafts supply their
 // authored terrain and occupants without constructing a playable Level.
 // A blocked ray ends at the near edge of terrain, or at an occupant's center.
-template<class CellQuery, class PortalQuery>
-bool traceTurretRay(
+template<class CellQuery, class PortalQuery, class SegmentSink>
+bool traceTurretRayWithSegments(
     GridPosition3 turret,
     MoveDirection direction,
     std::optional<GridPosition3> target,
     CellQuery cellAt,
     PortalQuery portalAt,
-    std::vector<TurretRaySegment>* segments)
+    SegmentSink appendSegment)
 {
     GridPosition3 segmentStart = turret;
     GridPosition startEdge {};
     GridPosition3 cell = turret;
-    std::vector<std::pair<GridPosition3, MoveDirection>> visited;
+    // Brent's cycle detector retains one checkpoint instead of allocating a
+    // visited list for every sightline query. Traversal is deterministic while
+    // the board is unchanged, so repeating (cell, direction) proves a loop.
+    auto checkpoint = std::pair { cell, direction };
+    std::size_t power = 1;
+    std::size_t distance = 0;
     const auto finish = [&](GridPosition edge) {
-        if (segments) {
-            segments->push_back({ segmentStart, cell, startEdge, edge });
-        }
+        appendSegment(TurretRaySegment { segmentStart, cell, startEdge, edge });
     };
     while (true) {
         const auto key = std::pair { cell, direction };
-        if (std::ranges::find(visited, key) != visited.end()) {
+        if (distance != 0 && key == checkpoint) {
             finish({});
             return false;
         }
-        visited.push_back(key);
+        if (distance == power) {
+            checkpoint = key;
+            power *= 2;
+            distance = 0;
+        }
+        ++distance;
         if (const auto crossing = portalAt(cell, direction)) {
             finish(directionOffset(direction));
             cell = crossing->exit;
@@ -63,6 +71,23 @@ bool traceTurretRay(
             return false;
         }
     }
+}
+
+template<class CellQuery, class PortalQuery>
+bool traceTurretRay(
+    GridPosition3 turret,
+    MoveDirection direction,
+    std::optional<GridPosition3> target,
+    CellQuery cellAt,
+    PortalQuery portalAt,
+    std::vector<TurretRaySegment>* segments)
+{
+    return traceTurretRayWithSegments(turret, direction, target, cellAt, portalAt,
+        [segments](const TurretRaySegment& segment) {
+            if (segments) {
+                segments->push_back(segment);
+            }
+        });
 }
 
 } // namespace sokoban::rules

@@ -834,7 +834,7 @@ void LevelEditorDebugUi::drawTilePalette(
         "the same.",
         brushKeys.c_str());
 
-    const std::vector<LevelEditor::LinkGroup> groups = editor.linkGroups();
+    const auto& groups = editor.linkGroupsView();
     if (selectedLinkGroup_ &&
         std::ranges::none_of(groups, [&](const LevelEditor::LinkGroup& group) {
             return LevelEditor::sameLinkColor(group.color, *selectedLinkGroup_);

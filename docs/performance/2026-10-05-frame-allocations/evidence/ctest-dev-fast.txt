@@ -1,0 +1,215 @@
+Test project C:/Users/arthu/Documents/Projects/Sokoban Game/out/dev-fast
+      Start 52: asset_manifest_editor
+      Start 80: content_pipeline
+      Start  2: application_validation_teardown
+      Start 95: shipping_package_validation
+ 1/95 Test #52: asset_manifest_editor .............***Failed    0.24 sec
+FAIL [atmosphericRoundTrip] line 301: picker imports external audio
+FAIL [atmosphericRoundTrip] line 303: external audio is stored under custom/audio
+FAIL [atmosphericRoundTrip] line 305: second import appends a variation
+FAIL [atmosphericRoundTrip] line 307: imports do not overwrite existing files
+FAIL [atmosphericRoundTrip] line 309: import keeps file bytes
+FAIL [atmosphericRoundTrip] line 312: runtime receives selected sound bytes
+6 asset manifest editor checks failed
+
+      Start  1: vulkan_smoke
+ 2/95 Test  #1: vulkan_smoke ......................   Passed    1.61 sec
+      Start 36: level_editor
+ 3/95 Test #95: shipping_package_validation .......   Passed    3.32 sec
+      Start 85: shader_hot_reload
+ 4/95 Test #36: level_editor ......................   Passed    1.91 sec
+      Start 12: player_profile
+ 5/95 Test #12: player_profile ....................   Passed    0.32 sec
+      Start 13: save_slots
+ 6/95 Test #13: save_slots ........................   Passed    0.38 sec
+      Start 87: splat_painter
+ 7/95 Test #85: shader_hot_reload .................   Passed    1.28 sec
+      Start 79: overworld_map_editor
+ 8/95 Test #87: splat_painter .....................   Passed    0.30 sec
+      Start 74: logging
+ 9/95 Test #79: overworld_map_editor ..............   Passed    0.31 sec
+      Start 84: solution_replay
+10/95 Test #74: logging ...........................   Passed    0.19 sec
+      Start 10: overworld_map
+11/95 Test  #2: application_validation_teardown ...   Passed    4.95 sec
+      Start 33: scene_preparation_allocations
+12/95 Test #10: overworld_map .....................   Passed    0.13 sec
+      Start 43: runtime_texture_catalog
+13/95 Test #84: solution_replay ...................   Passed    0.19 sec
+      Start 88: png_writer
+14/95 Test #33: scene_preparation_allocations .....   Passed    0.23 sec
+      Start 37: decoration_mesh_catalog
+15/95 Test #43: runtime_texture_catalog ...........   Passed    0.17 sec
+      Start 75: crash_diagnostics
+16/95 Test #88: png_writer ........................   Passed    0.15 sec
+      Start 78: level_project_store
+17/95 Test #37: decoration_mesh_catalog ...........   Passed    0.15 sec
+      Start 17: ui
+18/95 Test #75: crash_diagnostics .................   Passed    0.12 sec
+      Start 86: splat_canvas
+19/95 Test #78: level_project_store ...............   Passed    0.13 sec
+      Start 51: asset_manifest
+20/95 Test #17: ui ................................   Passed    0.11 sec
+      Start 31: profiler
+21/95 Test #51: asset_manifest ....................   Passed    0.09 sec
+      Start 41: gltf_dependencies
+22/95 Test #86: splat_canvas ......................   Passed    0.13 sec
+      Start 16: image_data
+23/95 Test #31: profiler ..........................   Passed    0.07 sec
+      Start 77: atomic_file
+24/95 Test #41: gltf_dependencies .................   Passed    0.04 sec
+      Start 49: animation_catalog
+25/95 Test #16: image_data ........................   Passed    0.07 sec
+      Start 53: presentation
+26/95 Test #77: atomic_file .......................   Passed    0.07 sec
+      Start 81: dev_session
+27/95 Test #49: animation_catalog .................   Passed    0.07 sec
+      Start 83: source_watcher
+28/95 Test #53: presentation ......................   Passed    0.05 sec
+      Start  3: command_line
+29/95 Test #81: dev_session .......................   Passed    0.06 sec
+      Start 82: tuning
+30/95 Test #83: source_watcher ....................   Passed    0.05 sec
+      Start 65: gpu_abi
+31/95 Test  #3: command_line ......................   Passed    0.04 sec
+      Start 14: shell_flow
+32/95 Test #82: tuning ............................   Passed    0.05 sec
+      Start 63: gpu_skinning
+33/95 Test #65: gpu_abi ...........................   Passed    0.05 sec
+      Start 40: animation_controller
+34/95 Test #14: shell_flow ........................   Passed    0.05 sec
+      Start 11: gameplay_session
+35/95 Test #63: gpu_skinning ......................   Passed    0.04 sec
+      Start 76: frame_arena
+36/95 Test #40: animation_controller ..............   Passed    0.04 sec
+      Start 73: tasks
+37/95 Test #11: gameplay_session ..................   Passed    0.08 sec
+      Start  7: solver
+38/95 Test #76: frame_arena .......................   Passed    0.06 sec
+      Start 44: compressed_texture_artifact
+39/95 Test #73: tasks .............................   Passed    0.04 sec
+      Start  9: level_catalog
+40/95 Test  #7: solver ............................   Passed    0.04 sec
+      Start 56: asset_requirements
+41/95 Test #44: compressed_texture_artifact .......   Passed    0.05 sec
+      Start 71: texture_upload_plan
+42/95 Test  #9: level_catalog .....................   Passed    0.05 sec
+      Start 24: level_transition
+43/95 Test #56: asset_requirements ................   Passed    0.05 sec
+      Start 23: campaign_session
+44/95 Test #71: texture_upload_plan ...............   Passed    0.05 sec
+      Start 39: editor_interaction
+45/95 Test #24: level_transition ..................   Passed    0.03 sec
+      Start 18: title
+46/95 Test #23: campaign_session ..................   Passed    0.03 sec
+      Start 55: performance_fixtures
+47/95 Test #39: editor_interaction ................   Passed    0.03 sec
+      Start 89: ground_pick
+48/95 Test #18: title .............................   Passed    0.03 sec
+      Start 62: material_range_allocator
+49/95 Test #55: performance_fixtures ..............   Passed    0.03 sec
+      Start 61: upload_ring_allocator
+50/95 Test #89: ground_pick .......................   Passed    0.03 sec
+      Start 50: animation_event_sequencer
+51/95 Test #62: material_range_allocator ..........   Passed    0.03 sec
+      Start 42: minecart_assets
+52/95 Test #61: upload_ring_allocator .............   Passed    0.03 sec
+      Start 94: tile_thumbnail_bake
+53/95 Test #50: animation_event_sequencer .........   Passed    0.03 sec
+      Start 25: gameplay_loop
+54/95 Test #42: minecart_assets ...................   Passed    0.03 sec
+      Start 70: texture_descriptor_space
+55/95 Test #94: tile_thumbnail_bake ...............   Passed    0.03 sec
+      Start  8: level
+56/95 Test #25: gameplay_loop .....................   Passed    0.03 sec
+      Start 59: asset_load_scheduler
+57/95 Test #70: texture_descriptor_space ..........   Passed    0.03 sec
+      Start 15: input
+58/95 Test  #8: level .............................   Passed    0.03 sec
+      Start 67: scene_draw_lanes
+59/95 Test #59: asset_load_scheduler ..............   Passed    0.03 sec
+      Start 90: action_plan
+60/95 Test #15: input .............................   Passed    0.03 sec
+      Start  4: math
+61/95 Test #67: scene_draw_lanes ..................   Passed    0.02 sec
+      Start 30: frame_time_telemetry
+62/95 Test #90: action_plan .......................   Passed    0.02 sec
+      Start 92: reservation
+63/95 Test  #4: math ..............................   Passed    0.02 sec
+      Start 34: renderer_reconfiguration
+64/95 Test #30: frame_time_telemetry ..............   Passed    0.02 sec
+      Start 26: atmospheric_audio
+65/95 Test #92: reservation .......................   Passed    0.02 sec
+      Start 32: performance_analysis
+66/95 Test #34: renderer_reconfiguration ..........   Passed    0.02 sec
+      Start 57: asset_load_state
+67/95 Test #26: atmospheric_audio .................   Passed    0.03 sec
+      Start 66: draw_mode
+68/95 Test #32: performance_analysis ..............   Passed    0.03 sec
+      Start  6: rules
+69/95 Test #57: asset_load_state ..................   Passed    0.02 sec
+      Start 60: geometry_suballocator
+70/95 Test #66: draw_mode .........................   Passed    0.02 sec
+      Start 93: state_delta
+71/95 Test  #6: rules .............................   Passed    0.02 sec
+      Start 72: opaque_draw_sorter
+72/95 Test #60: geometry_suballocator .............   Passed    0.02 sec
+      Start 22: settings_coordinator
+73/95 Test #93: state_delta .......................   Passed    0.02 sec
+      Start 46: pbr_material
+74/95 Test #72: opaque_draw_sorter ................   Passed    0.02 sec
+      Start 21: input_router
+75/95 Test #22: settings_coordinator ..............   Passed    0.02 sec
+      Start 69: nine_slice
+76/95 Test #46: pbr_material ......................   Passed    0.02 sec
+      Start 48: atmosphere_math
+77/95 Test #21: input_router ......................   Passed    0.02 sec
+      Start 58: residency_budget
+78/95 Test #69: nine_slice ........................   Passed    0.02 sec
+      Start  5: geometry
+79/95 Test #48: atmosphere_math ...................   Passed    0.02 sec
+      Start 47: ssao_math
+80/95 Test #58: residency_budget ..................   Passed    0.02 sec
+      Start 35: iso_scene_preparer
+81/95 Test  #5: geometry ..........................   Passed    0.02 sec
+      Start 29: frame_resource_tracker
+82/95 Test #47: ssao_math .........................   Passed    0.02 sec
+      Start 45: tonemap
+83/95 Test #35: iso_scene_preparer ................   Passed    0.02 sec
+      Start 54: particles
+84/95 Test #29: frame_resource_tracker ............   Passed    0.02 sec
+      Start 38: decoration_gizmo
+85/95 Test #45: tonemap ...........................   Passed    0.02 sec
+      Start 91: action_scheduler
+86/95 Test #54: particles .........................   Passed    0.02 sec
+      Start 64: gpu_material
+87/95 Test #38: decoration_gizmo ..................   Passed    0.02 sec
+      Start 27: frame_pacing
+88/95 Test #91: action_scheduler ..................   Passed    0.02 sec
+      Start 68: water_cell_cache
+89/95 Test #64: gpu_material ......................   Passed    0.02 sec
+      Start 28: frame_descriptor_sync
+90/95 Test #27: frame_pacing ......................   Passed    0.02 sec
+      Start 20: vulkan_diagnostics
+91/95 Test #68: water_cell_cache ..................   Passed    0.02 sec
+      Start 19: vulkan_device_selection
+92/95 Test #28: frame_descriptor_sync .............   Passed    0.02 sec
+93/95 Test #20: vulkan_diagnostics ................   Passed    0.02 sec
+94/95 Test #19: vulkan_device_selection ...........   Passed    0.02 sec
+95/95 Test #80: content_pipeline ..................***Failed    7.17 sec
+UNEXPECTED EXCEPTION: sound set 'footsteps' escapes its content root: audio/missing.ogg
+
+
+98% tests passed, 2 tests failed out of 95
+
+Label Time Summary:
+packaging    =   3.32 sec*proc (1 test)
+smoke        =   6.56 sec*proc (2 tests)
+vulkan       =   6.56 sec*proc (2 tests)
+
+Total Test time (real) =   7.18 sec
+
+The following tests FAILED:
+	 52 - asset_manifest_editor (Failed)
+	 80 - content_pipeline (Failed)
+Errors while running CTest

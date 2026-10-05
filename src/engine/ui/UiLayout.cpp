@@ -35,7 +35,9 @@ UiLayoutSize axisSize(
 UiLayoutTree::UiLayoutTree(
     UiLayoutAxis rootAxis,
     UiLayoutInsets rootInsets,
-    float rootGap)
+    float rootGap,
+    FrameArena* arena)
+    : nodes_(arena ? FrameArray<Node>(*arena, 256) : FrameArray<Node>())
 {
     Node rootNode;
     rootNode.axis = rootAxis;
@@ -44,7 +46,9 @@ UiLayoutTree::UiLayoutTree(
     rootNode.insets = rootInsets;
     rootNode.gap = std::max(rootGap, 0.0f);
     rootNode.container = true;
-    nodes_.push_back(rootNode);
+    if (!nodes_.push_back(rootNode)) {
+        throw std::length_error("UI layout arena has no room for the root");
+    }
 }
 
 UiLayoutNode UiLayoutTree::column(
@@ -131,8 +135,17 @@ UiLayoutNode UiLayoutTree::addNode(UiLayoutNode parent, Node node)
         throw std::invalid_argument("UI layout children require a container parent");
     }
     const UiLayoutNode id = static_cast<UiLayoutNode>(nodes_.size());
-    nodes_.push_back(std::move(node));
-    checkedNode(parent).children.push_back(id);
+    if (!nodes_.push_back(std::move(node))) {
+        throw std::length_error("UI layout node budget exceeded");
+    }
+    Node& updatedParent = checkedNode(parent);
+    if (updatedParent.childCount == 0) {
+        updatedParent.firstChild = id;
+    } else {
+        checkedNode(updatedParent.lastChild).nextSibling = id;
+    }
+    updatedParent.lastChild = id;
+    ++updatedParent.childCount;
     return id;
 }
 
@@ -143,7 +156,8 @@ Vec2 UiLayoutTree::measuredSize(UiLayoutNode nodeId) const
     if (node.container) {
         float mainTotal = 0.0f;
         float crossMaximum = 0.0f;
-        for (UiLayoutNode child : node.children) {
+        for (UiLayoutNode child = node.firstChild; child != 0;
+             child = checkedNode(child).nextSibling) {
             const Vec2 childSize = measuredSize(child);
             mainTotal += axisValue(childSize, node.axis);
             crossMaximum = std::max(
@@ -153,8 +167,8 @@ Vec2 UiLayoutTree::measuredSize(UiLayoutNode nodeId) const
                         ? UiLayoutAxis::Vertical
                         : UiLayoutAxis::Horizontal));
         }
-        if (node.children.size() > 1) {
-            mainTotal += node.gap * static_cast<float>(node.children.size() - 1);
+        if (node.childCount > 1) {
+            mainTotal += node.gap * static_cast<float>(node.childCount - 1);
         }
         if (node.axis == UiLayoutAxis::Horizontal) {
             content = {
@@ -178,7 +192,7 @@ void UiLayoutTree::arrangeNode(UiLayoutNode nodeId, UiRect bounds)
 {
     Node& node = checkedNode(nodeId);
     node.arrangedRect = bounds;
-    if (!node.container || node.children.empty()) {
+    if (!node.container || node.childCount == 0) {
         return;
     }
 
@@ -198,13 +212,14 @@ void UiLayoutTree::arrangeNode(UiLayoutNode nodeId, UiRect bounds)
         node.axis == UiLayoutAxis::Horizontal
             ? UiLayoutAxis::Vertical
             : UiLayoutAxis::Horizontal);
-    const float totalGap = node.children.size() > 1
-        ? node.gap * static_cast<float>(node.children.size() - 1)
+    const float totalGap = node.childCount > 1
+        ? node.gap * static_cast<float>(node.childCount - 1)
         : 0.0f;
 
     float occupiedMain = totalGap;
     float fillWeight = 0.0f;
-    for (UiLayoutNode childId : node.children) {
+    for (UiLayoutNode childId = node.firstChild; childId != 0;
+         childId = checkedNode(childId).nextSibling) {
         const Node& child = checkedNode(childId);
         const UiLayoutSize mainSpecification = axisSize(
             child.width, child.height, node.axis);
@@ -220,7 +235,8 @@ void UiLayoutTree::arrangeNode(UiLayoutNode nodeId, UiRect bounds)
         ? inner.position.x
         : inner.position.y;
 
-    for (UiLayoutNode childId : node.children) {
+    for (UiLayoutNode childId = node.firstChild; childId != 0;
+         childId = checkedNode(childId).nextSibling) {
         const Node& child = checkedNode(childId);
         const Vec2 measured = measuredSize(childId);
         const UiLayoutSize mainSpecification = axisSize(

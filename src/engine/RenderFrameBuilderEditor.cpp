@@ -162,7 +162,7 @@ private:
         };
         // These are the editor's 8-bit color groups, including unsaved edits.
         // Explicit device pressurePlates lists are rebuilt only when saving.
-        const auto groups = input_.editor.linkGroups();
+        const auto& groups = input_.editor.linkGroupsView();
         for (const auto& group : groups) {
             if (group.hasDevice() && !group.pressurePlates.empty()) {
                 for (GridPosition3 cell : group.pressurePlates) {
@@ -236,23 +236,16 @@ private:
                 stop({ elevator.cell.x, elevator.cell.y, layer }, point(layer), elevator.color);
             }
         }
-        const auto railAt = [&](GridPosition3 cell) {
-            return input_.editor.documentPlateAt(cell).value_or(documentTileAt(cell));
-        };
-        for (const auto& cart : input_.editor.minecarts()) {
+        const auto& routes = input_.editor.minecartRoutesView();
+        for (std::size_t cartIndex = 0; cartIndex < input_.editor.minecarts().size(); ++cartIndex) {
+            const auto& cart = input_.editor.minecarts()[cartIndex];
             if (!visible(cart.cell)) {
                 continue;
             }
             const auto platform = visualFor(cart.cell, cart.color, false);
             outline(platform);
-            Level::MinecartRoute route;
-            try {
-                route = Level::buildMinecartRoute(cart, railAt, "level editor debug view");
-            } catch (const std::runtime_error&) {
-                // An unfinished branching track is not a playable cycle yet.
-                // Keep the cart highlighted while its rails are being edited.
-                continue;
-            }
+            if (!routes[cartIndex]) continue;
+            const auto& route = *routes[cartIndex];
             const auto point = [&](GridPosition3 cell) {
                 return Vec3 { static_cast<float>(cell.x) + 0.5f,
                     static_cast<float>(cell.y) + 0.5f, anchor(platform).z };
@@ -296,8 +289,15 @@ private:
             if (type == TileType::Gate) {
                 const auto gate = std::ranges::find(input_.editor.gates(), cell, &Level::Gate::cell);
                 if (gate != input_.editor.gates().end()) {
-                    const auto plates = input_.editor.linkedPressurePlates(gate->color);
-                    const bool pressed = !plates.empty() && std::ranges::all_of(plates, occupied);
+                    bool hasPlate = false;
+                    bool pressed = true;
+                    for (const auto& plate : input_.editor.pressurePlateColors()) {
+                        if (LevelEditor::sameLinkColor(plate.color, gate->color)) {
+                            hasPlate = true;
+                            pressed &= occupied(plate.cell);
+                        }
+                    }
+                    pressed &= hasPlate;
                     if (pressed != gate->startOpen) {
                         return rules::TurretRayCell::Open;
                     }
@@ -346,23 +346,23 @@ private:
                         const Vec3 color = input_.editor.objectLinkColorAt(cell)
                             .value_or(Vec3 { 1.0f, 0.25f, 0.12f });
                         outline(visualFor(cell, color, false));
-                        std::vector<rules::TurretRaySegment> rays;
-                        rules::traceTurretRay(cell, *direction, std::nullopt, rayCell, portalCrossing, &rays);
                         const auto point = [](GridPosition3 position, GridPosition edge) {
                             return Vec3 { static_cast<float>(position.x) + 0.5f + static_cast<float>(edge.x) * 0.5f,
                                 static_cast<float>(position.y) + 0.5f + static_cast<float>(edge.y) * 0.5f,
                                 static_cast<float>(position.z) + config::turretMuzzleElevation };
                         };
-                        for (std::size_t index = 0; index < rays.size(); ++index) {
-                            const auto& ray = rays[index];
+                        bool firstSegment = true;
+                        rules::traceTurretRayWithSegments(cell, *direction, std::nullopt,
+                            rayCell, portalCrossing, [&](const rules::TurretRaySegment& ray) {
                             Vec3 from = point(ray.from, ray.fromEdge);
-                            if (index == 0) {
+                            if (firstSegment) {
+                                firstSegment = false;
                                 const auto offset = rules::directionOffset(*direction);
                                 from.x += static_cast<float>(offset.x) * config::turretMuzzleForwardOffset;
                                 from.y += static_cast<float>(offset.y) * config::turretMuzzleForwardOffset;
                             }
                             segment(ray.from, ray.to, from, point(ray.to, ray.toEdge), color, Style::Sightline);
-                        }
+                        });
                     }
                     const TileType plate = input_.editor.documentPlateAt(cell).value_or(type);
                     if (const auto direction = rules::conveyorDirectionForTile(plate)) {
@@ -569,10 +569,11 @@ private:
         if (tile == TileType::Gate) {
             const auto found = std::ranges::find(
                 definition.gates, localCell, &Level::Gate::cell);
-            Level::Gate gate = found != definition.gates.end()
-                ? *found
-                : Level::Gate { .cell = localCell };
-            gate.cell = cell;
+            Level::Gate gate { .cell = cell };
+            if (found != definition.gates.end()) {
+                gate.color = found->color;
+                gate.startOpen = found->startOpen;
+            }
             appendGateEffect(
                 frame,
                 gate,
@@ -736,21 +737,15 @@ private:
                 }
             }
 
-            std::vector<Level::Decoration> decorations =
-                definition.decorations;
-            for (Level::Decoration& decoration : decorations) {
-                decoration.position.x +=
-                    static_cast<float>(neighbor.origin.x);
-                decoration.position.y +=
-                    static_cast<float>(neighbor.origin.y);
-            }
             appendDecorations(
                 frame,
-                decorations,
+                definition.decorations,
                 input_.manifest,
                 std::nullopt,
                 std::nullopt,
-                false);
+                false,
+                {},
+                neighbor.origin);
 
             for (Level::ScreenSelector selector : definition.selectors) {
                 if (layerLocked_ &&
@@ -869,9 +864,9 @@ private:
             const GridPosition3 cell { x, y, z };
             const auto found = std::ranges::find(
                 input_.editor.gates(), cell, &Level::Gate::cell);
-            const Level::Gate gate = found != input_.editor.gates().end()
-                ? *found
-                : Level::Gate { .cell = cell };
+            const Level::Gate fallback { .cell = cell };
+            const Level::Gate& gate = found != input_.editor.gates().end()
+                ? *found : fallback;
             if (!pickOnly) {
                 // A start-open gate is drawn faded: it is empty space
                 // until its plates are pressed.

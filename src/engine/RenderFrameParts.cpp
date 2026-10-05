@@ -505,13 +505,14 @@ void appendDecorations(
     std::optional<std::size_t> selected,
     std::optional<std::size_t> hovered,
     bool editorDecorations,
-    const std::function<bool(GridPosition3)>& visibleCell)
+    const std::function<bool(GridPosition3)>& visibleCell,
+    GridPosition origin)
 {
     for (std::size_t index = 0; index < decorations.size(); ++index) {
         const Level::Decoration& decoration = decorations[index];
         const GridPosition3 cell {
-            static_cast<int>(std::floor(decoration.position.x)),
-            static_cast<int>(std::floor(decoration.position.y)),
+            static_cast<int>(std::floor(decoration.position.x)) + origin.x,
+            static_cast<int>(std::floor(decoration.position.y)) + origin.y,
             static_cast<int>(std::floor(decoration.position.z)),
         };
         if (visibleCell && !visibleCell(cell)) {
@@ -523,8 +524,11 @@ void appendDecorations(
                 RenderFrameData::pointLightCapacity) {
             const Level::Decoration::PointLight& source =
                 *decoration.pointLight;
+            Vec3 lightPosition = decorationLightPosition(decoration);
+            lightPosition.x += static_cast<float>(origin.x);
+            lightPosition.y += static_cast<float>(origin.y);
             frame.lighting.pointLights[frame.lighting.pointLightCount++] = {
-                .position = decorationLightPosition(decoration),
+                .position = lightPosition,
                 .color = source.color,
                 .intensity = source.intensity,
                 .range = source.range,
@@ -540,12 +544,19 @@ void appendDecorations(
             : (hovered == index
                 ? RenderFrameData::EditorDecorationHighlight::Hovered
                 : RenderFrameData::EditorDecorationHighlight::None);
-        frame.tiles.push_back(decorationVisual(
+        auto tile = decorationVisual(
             decorations[index],
             manifest,
             false,
             editorDecorations ? std::optional<std::size_t>(index) : std::nullopt,
-            highlight));
+            highlight);
+        tile.cell.x += origin.x;
+        tile.cell.y += origin.y;
+        tile.position.x += static_cast<float>(origin.x);
+        tile.position.y += static_cast<float>(origin.y);
+        tile.modelTransform->translation.x += static_cast<float>(origin.x);
+        tile.modelTransform->translation.y += static_cast<float>(origin.y);
+        frame.tiles.push_back(tile);
     }
 }
 

@@ -7,6 +7,7 @@
 
 #include <array>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -50,10 +51,17 @@ public:
         const GamepadPresentation& gamepad = {}) const;
 
 private:
+    struct NameHash {
+        using is_transparent = void;
+        std::size_t operator()(std::string_view value) const noexcept
+        {
+            return std::hash<std::string_view> {}(value);
+        }
+    };
     struct Atlas {
         RenderTexture texture = noTexture;
-        std::unordered_map<std::string, UiRect> regions;
-        std::unordered_map<std::string, float> aspectRatios;
+        std::unordered_map<std::string, UiRect, NameHash, std::equal_to<>> regions;
+        std::unordered_map<std::string, float, NameHash, std::equal_to<>> aspectRatios;
     };
 
     std::array<Atlas, static_cast<std::size_t>(InputPromptTheme::Count)>

@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <string>
 #include <string_view>
 
@@ -156,7 +157,7 @@ std::optional<TitleAction> TitleScreen::drawMain(
     const int quitRowIndex = rows.add();
     navigate(rows, input);
 
-    menuKit::MenuPage page(26.0f, true);
+    menuKit::MenuPage page(26.0f, true, 1.0f, &ui.frameArena());
     UiLayoutTree& tree = page.tree;
     tree.spacer(tree.root(), 36.0f);
     const UiLayoutNode primaryRow = tree.item(tree.root(), 58.0f);
@@ -200,10 +201,12 @@ std::optional<TitleAction> TitleScreen::drawMain(
             slotPickForNewGame_ = true;
         }
     }
+    char saveSlotLabel[32] {};
+    std::snprintf(saveSlotLabel, sizeof(saveSlotLabel), "Save Slot %d", activeSlot_ + 1);
     if (showSaveSlots &&
         uiControls::button(
             ui, tree.rect(saveSlotsRow),
-            "Save Slot " + std::to_string(activeSlot_ + 1), {
+            saveSlotLabel, {
             .focused = selectedRow_ == saveSlotsRowIndex,
             .activate = input.confirm && selectedRow_ == saveSlotsRowIndex,
         })) {
@@ -240,9 +243,9 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
     const int backRowIndex = rows.add();
     navigate(rows, input);
 
-    menuKit::MenuPage page(26.0f, true);
+    menuKit::MenuPage page(26.0f, true, 1.0f, &ui.frameArena());
     UiLayoutTree& tree = page.tree;
-    std::vector<UiLayoutNode> slotRows;
+    FrameArray<UiLayoutNode> slotRows(ui.frameArena(), saveSlots_.size());
     slotRows.reserve(saveSlots_.size());
     for (std::size_t i = 0; i < saveSlots_.size(); ++i) {
         slotRows.push_back(tree.item(tree.root(), 58.0f));
@@ -323,7 +326,8 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
             pendingDeleteSlot_ = static_cast<int>(i);
         }
 
-        std::string status;
+        char statusBuffer[64] {};
+        std::string_view status;
         if (slot.state == SaveSlotState::Empty) {
             status = "Empty";
         } else if (slot.state == SaveSlotState::Recoverable) {
@@ -335,12 +339,20 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
         } else if (slot.completed) {
             status = "Completed!";
         } else {
-            status = slot.completedLevels > 0
-                ? std::to_string(slot.completedLevels) + " screens solved"
-                : "Overworld";
+            if (slot.completedLevels > 0) {
+                std::snprintf(statusBuffer, sizeof(statusBuffer),
+                    "%d screens solved", slot.completedLevels);
+                status = statusBuffer;
+            } else {
+                status = "Overworld";
+            }
         }
         if (active && !slotPickForNewGame_) {
-            status += "  (active)";
+            char activeStatus[64] {};
+            std::snprintf(activeStatus, sizeof(activeStatus), "%.*s  (active)",
+                static_cast<int>(status.size()), status.data());
+            std::copy_n(activeStatus, sizeof(activeStatus), statusBuffer);
+            status = statusBuffer;
         }
         const bool damaged = slot.state == SaveSlotState::Corrupt ||
             slot.state == SaveSlotState::Unavailable;
@@ -356,7 +368,7 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
     const bool hasError = !saveSlotError_.empty();
     ui.centeredText(tree.rect(notice),
         hasError
-            ? saveSlotError_
+            ? std::string_view(saveSlotError_)
             : (slotPickForNewGame_
                     ? ""
                     : "Right focuses a slot's Delete button"),
@@ -387,7 +399,7 @@ std::optional<TitleAction> TitleScreen::drawSlotDeleteConfirmation(
     const int confirmRowIndex = rows.add();
     navigate(rows, input);
 
-    menuKit::MenuPage page(26.0f, true);
+    menuKit::MenuPage page(26.0f, true, 1.0f, &ui.frameArena());
     UiLayoutTree& tree = page.tree;
     tree.spacer(tree.root(), 8.0f);
     const UiLayoutNode message = tree.item(tree.root(), 44.0f);
@@ -399,8 +411,9 @@ std::optional<TitleAction> TitleScreen::drawSlotDeleteConfirmation(
     tree.flexibleSpacer(tree.root());
     tree.arrange(panel);
 
-    page.drawHeader(ui,
-        "DELETE SLOT " + std::to_string(pendingDeleteSlot_ + 1) + "?", 44.0f);
+    char heading[32] {};
+    std::snprintf(heading, sizeof(heading), "DELETE SLOT %d?", pendingDeleteSlot_ + 1);
+    page.drawHeader(ui, heading, 44.0f);
     ui.centeredText(tree.rect(message),
         "Erase this save slot?",
         { 0.83f, 0.86f, 0.83f, 1.0f }, 22.0f);

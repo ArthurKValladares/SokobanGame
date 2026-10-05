@@ -1,4 +1,6 @@
 #include "engine/InputBindings.hpp"
+#include "engine/FrameArena.hpp"
+#include <cstring>
 
 #include <algorithm>
 #include <stdexcept>
@@ -167,6 +169,53 @@ std::string actionBindingsDisplay(
         result += bindingDisplayName(binding);
     }
     return result.empty() ? "Unbound" : result;
+}
+
+std::string_view actionBindingsDisplay(
+    const InputBindings& bindings, InputAction action,
+    BindingDeviceClass deviceClass, FrameArena& arena)
+{
+    const auto visitPieces = [&](auto append) {
+        bool first = true;
+        for (const auto& binding : bindings.forAction(action)) {
+            if (bindingDeviceClass(binding) != deviceClass) {
+                continue;
+            }
+            if (!first) {
+                append(" / ");
+            }
+            first = false;
+            if (const auto* key = std::get_if<KeyboardBinding>(&binding)) {
+                if ((key->modifiers & keyModifierCtrl) != 0U) { append("Ctrl+"); }
+                if ((key->modifiers & keyModifierShift) != 0U) { append("Shift+"); }
+                if ((key->modifiers & keyModifierAlt) != 0U) { append("Alt+"); }
+                append(key->scancode);
+            } else if (const auto* button = std::get_if<GamepadButtonBinding>(&binding)) {
+                append("Pad ");
+                append(button->button);
+            } else {
+                const auto& axis = std::get<GamepadAxisBinding>(binding);
+                append("Pad ");
+                append(axis.axis);
+                append(axis.direction == AxisDirection::Negative ? "-" : "+");
+            }
+        }
+    };
+    std::size_t bytes = 0;
+    visitPieces([&](std::string_view piece) { bytes += piece.size(); });
+    if (bytes == 0) {
+        return "Unbound";
+    }
+    char* const text = arena.allocateUninitialized<char>(bytes);
+    if (!text) {
+        return {};
+    }
+    std::size_t offset = 0;
+    visitPieces([&](std::string_view piece) {
+        std::memcpy(text + offset, piece.data(), piece.size());
+        offset += piece.size();
+    });
+    return { text, bytes };
 }
 
 void assignBinding(

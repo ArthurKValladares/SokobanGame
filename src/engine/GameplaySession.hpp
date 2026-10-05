@@ -8,6 +8,7 @@
 #include "engine/Rules.hpp"
 
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -99,6 +100,13 @@ public:
     // delta to the live state does, and the deltas are disjoint by construction
     // so the order they are applied in does not matter.
     [[nodiscard]] GameState projectedState() const;
+    [[nodiscard]] const GameState& projectedStateView() const
+    {
+        return scheduler_.projectedStateView();
+    }
+    // These owning previews survive frames; refresh at discrete world changes.
+    [[nodiscard]] const std::optional<rules::MirrorActivationPreview>&
+    activationPreview(const Level& level, bool projected = false) const;
 
     // Several actions can be in flight at once. The accessors below still speak
     // in terms of a single "active" action, resolving to the one that has been
@@ -184,20 +192,32 @@ public:
     [[nodiscard]] const rules::StepRates& stepRates() const { return stepRates_; }
 
     void setStepDurationSeconds(float durationSeconds);
-    void setStepRates(rules::StepRates rates) { stepRates_ = rates; }
+    void setStepRates(rules::StepRates rates)
+    {
+        if (!(stepRates_ == rates)) {
+            stepRates_ = rates;
+            ++planningPolicyRevision_;
+        }
+    }
     // Optional world-level invariant checked against the state projected after
     // each newly planned action. Composed overworlds use this to prevent one
     // input from leaving living players owned by different screens.
     //
     // The policy is runtime configuration, not checkpoint state. Reset and
     // restore deliberately preserve it so Application can install the map
-    // invariant once for the currently loaded world.
+    // invariant once for the currently loaded world. If its captured invariant
+    // changes, reinstall the policy to invalidate cached unsuccessful plans.
     using ActionAdmissionPolicy = std::function<bool(const GameState&)>;
     void setActionAdmissionPolicy(ActionAdmissionPolicy policy)
     {
         actionAdmissionPolicy_ = std::move(policy);
+        ++planningPolicyRevision_;
     }
-    void clearActionAdmissionPolicy() { actionAdmissionPolicy_ = {}; }
+    void clearActionAdmissionPolicy()
+    {
+        actionAdmissionPolicy_ = {};
+        ++planningPolicyRevision_;
+    }
     // Both target the oldest in-flight action. `GameplayLoop` installs a
     // timeline on the action it has just started, which is the oldest only
     // because it starts one at a time; the id overloads are what a caller
@@ -264,6 +284,8 @@ private:
     // precisely the stability bug this whole design exists to remove.
     [[nodiscard]] StartOutcome tryStartPlayerStep(
         const Level& level, MoveDirection input, EntityId controller);
+    [[nodiscard]] StartOutcome planPlayerStep(
+        const Level& level, MoveDirection input, EntityId controller);
     // Motion nobody asked for: entities still carrying momentum, and entities
     // standing on a belt.
     //
@@ -273,7 +295,9 @@ private:
     // Entities an action already owns are left out, or the same motion would be
     // planned twice and the copy refused by the claims of the original.
     [[nodiscard]] StartOutcome tryStartAmbientMotion(const Level& level);
+    [[nodiscard]] StartOutcome planAmbientMotion(const Level& level);
     [[nodiscard]] StartOutcome tryStartActivationAction(const Level& level);
+    [[nodiscard]] StartOutcome planActivationAction(const Level& level);
     [[nodiscard]] StartOutcome tryStartUndoMove();
     [[nodiscard]] StartOutcome tryStartRestart(const Level& level);
     [[nodiscard]] StartOutcome tryStartHeldDirection(
@@ -289,7 +313,30 @@ private:
         MoveDirection direction, EntityId controller) const;
     // Rules planning sees entities at the last world-step boundary they have
     // reached, while persistence and commits continue to use `state()`.
-    [[nodiscard]] GameState planningState() const;
+    [[nodiscard]] const GameState& planningState() const;
+    struct PlanningStamp {
+        const Level* level = nullptr;
+        uint64_t state = 0;
+        uint64_t progress = 0;
+        uint64_t policy = 0;
+        int reservationStep = 0;
+        bool operator==(const PlanningStamp&) const = default;
+    };
+    struct FailedPlanningAttempt {
+        PlanningStamp stamp;
+        EntityId controller = invalidEntityId;
+        StartOutcome outcome = StartOutcome::Impossible;
+        bool valid = false;
+    };
+    [[nodiscard]] PlanningStamp planningStamp(const Level& level) const;
+    uint64_t planningPolicyRevision_ = 1;
+    std::array<FailedPlanningAttempt, 4> failedPlayerAttempts_;
+    FailedPlanningAttempt failedAmbientAttempt_;
+    FailedPlanningAttempt failedActivationAttempt_;
+    mutable const Level* previewLevel_ = nullptr;
+    mutable std::array<uint64_t, 2> previewRevisions_ {};
+    mutable std::array<std::optional<rules::MirrorActivationPreview>, 2>
+        activationPreviews_;
     // Finds the completed action whose momentum an automatic continuation is
     // spending. A slide resumed after a checkpoint must still fold into that
     // cause so later player steps remain ordered behind it in history.

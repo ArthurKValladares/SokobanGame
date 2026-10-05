@@ -361,6 +361,9 @@ void GameplaySession::resetToState(
 
 void GameplaySession::setStepDurationSeconds(float durationSeconds)
 {
+    if (stepDurationSeconds_ != durationSeconds) {
+        ++planningPolicyRevision_;
+    }
     stepDurationSeconds_ = durationSeconds;
     scheduler_.setStepDurationSeconds(durationSeconds);
 }
@@ -401,17 +404,29 @@ float GameplaySession::activeActionElapsedSeconds() const
 
 GameState GameplaySession::projectedState() const
 {
-    GameState projected = state();
-    for (const ActionScheduler::InFlight& action : scheduler_.inFlight()) {
-        StateDelta::between(action.plan.before, action.plan.after)
-            .applyTo(projected);
-    }
-    return projected;
+    return projectedStateView();
 }
 
-GameState GameplaySession::planningState() const
+const GameState& GameplaySession::planningState() const
 {
-    return scheduler_.stateAtCurrentProgress();
+    return scheduler_.stateAtCurrentProgressView();
+}
+
+const std::optional<rules::MirrorActivationPreview>&
+GameplaySession::activationPreview(const Level& level, bool projected) const
+{
+    if (previewLevel_ != &level) {
+        previewLevel_ = &level;
+        previewRevisions_ = {};
+    }
+    const std::size_t index = projected ? 1 : 0;
+    if (previewRevisions_[index] != scheduler_.stateRevision()) {
+        const GameState& source = projected ? projectedStateView() : state();
+        activationPreviews_[index] = rules::anyPlayerDead(source)
+            ? std::nullopt : rules::previewActivation(level, source);
+        previewRevisions_[index] = scheduler_.stateRevision();
+    }
+    return activationPreviews_[index];
 }
 
 std::size_t GameplaySession::continuationCausalGroup(
@@ -725,7 +740,7 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
         }
     }
 
-    const GameState current = planningState();
+    const GameState& current = planningState();
     if (rules::anyPlayerDead(current)) {
         return controls.undoHeld &&
             tryStartUndoMove() == StartOutcome::Started;
@@ -765,14 +780,9 @@ std::vector<GameplaySession::TurretShotEvent>
 GameplaySession::takeReadyTurretShots()
 {
     std::vector<TurretShotEvent> ready;
-    std::vector<std::size_t> actionIds;
-    actionIds.reserve(scheduler_.inFlight().size());
-    for (const ActionScheduler::InFlight& action : scheduler_.inFlight()) {
-        actionIds.push_back(action.id);
-    }
-
-    for (const std::size_t actionId : actionIds) {
-        ActionScheduler::InFlight* action = scheduler_.find(actionId);
+    // Only cue flags change here; the in-flight vector is never resized.
+    for (const auto& current : scheduler_.inFlight()) {
+        ActionScheduler::InFlight* action = scheduler_.find(current.id);
         if (action == nullptr || action->elapsedSeconds < 0.0f) {
             continue;
         }
@@ -964,7 +974,28 @@ GameplaySession::StartOutcome GameplaySession::tryStartHeldMove(
 GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
     const Level& level, MoveDirection input, EntityId controller)
 {
-    const GameState current = planningState();
+    const PlanningStamp stamp = planningStamp(level);
+    auto& failed = failedPlayerAttempts_[static_cast<std::size_t>(input)];
+    if (failed.valid && failed.stamp == stamp && failed.controller == controller) {
+        return failed.outcome;
+    }
+    const StartOutcome outcome = planPlayerStep(level, input, controller);
+    failed = { stamp, controller, outcome, outcome != StartOutcome::Started };
+    return outcome;
+}
+
+GameplaySession::PlanningStamp GameplaySession::planningStamp(const Level& level) const
+{
+    // Refresh progress at mechanical leg boundaries before reading its generation.
+    (void)planningState();
+    return { &level, scheduler_.stateRevision(), scheduler_.progressGeneration(),
+        planningPolicyRevision_, scheduler_.currentStep() };
+}
+
+GameplaySession::StartOutcome GameplaySession::planPlayerStep(
+    const Level& level, MoveDirection input, EntityId controller)
+{
+    const GameState& current = planningState();
     std::optional<plans::PlannedAction> step = plans::planPlayerStep(
         level,
         current,
@@ -1062,7 +1093,19 @@ std::vector<EntityId> GameplaySession::withoutEntitiesInFlight(
 GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
     const Level& level)
 {
-    const GameState current = planningState();
+    const PlanningStamp stamp = planningStamp(level);
+    if (failedAmbientAttempt_.valid && failedAmbientAttempt_.stamp == stamp) {
+        return failedAmbientAttempt_.outcome;
+    }
+    const StartOutcome outcome = planAmbientMotion(level);
+    failedAmbientAttempt_ = { stamp, invalidEntityId, outcome,
+        outcome != StartOutcome::Started };
+    return outcome;
+}
+
+GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& level)
+{
+    const GameState& current = planningState();
     if (std::optional<plans::PlannedAction> volley = plans::planTurretVolley(
             level,
             current,
@@ -1140,7 +1183,19 @@ GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
 GameplaySession::StartOutcome GameplaySession::tryStartActivationAction(
     const Level& level)
 {
-    const GameState current = planningState();
+    const PlanningStamp stamp = planningStamp(level);
+    if (failedActivationAttempt_.valid && failedActivationAttempt_.stamp == stamp) {
+        return failedActivationAttempt_.outcome;
+    }
+    const StartOutcome outcome = planActivationAction(level);
+    failedActivationAttempt_ = { stamp, invalidEntityId, outcome,
+        outcome != StartOutcome::Started };
+    return outcome;
+}
+
+GameplaySession::StartOutcome GameplaySession::planActivationAction(const Level& level)
+{
+    const GameState& current = planningState();
     std::optional<rules::MirrorActivationPreview> activation =
         rules::previewActivation(level, current);
     if (!activation) {

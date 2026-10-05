@@ -3,6 +3,7 @@
 #include "engine/ArenaArray.hpp"
 
 #include <cassert>
+#include <algorithm>
 #include <initializer_list>
 #include <utility>
 #include <variant>
@@ -187,6 +188,11 @@ public:
     [[nodiscard]] const T& front() const noexcept { return *begin(); }
     [[nodiscard]] T& back() noexcept { return *(end() - 1); }
     [[nodiscard]] const T& back() const noexcept { return *(end() - 1); }
+
+    [[nodiscard]] bool operator==(const std::vector<T>& other) const
+    {
+        return std::ranges::equal(*this, other);
+    }
 
 private:
     // Constructors and moves preserve an active alternative, and copy

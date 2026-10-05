@@ -1514,11 +1514,12 @@ std::vector<TurretRaySegment> turretBeamSegments(
 
 } // namespace
 
-std::vector<EntityId> mutuallyFacingTurrets(
-    const Level& level,
-    const GameState& state)
+namespace {
+
+template <typename Visitor>
+bool visitMutuallyFacingTurrets(
+    const Level& level, const GameState& state, Visitor visitor)
 {
-    std::vector<EntityId> participants;
     for (std::size_t first = 0; first < state.movables.size(); ++first) {
         const GameState::Movable& a = state.movables[first];
         const std::optional<MoveDirection> aDirection =
@@ -1539,24 +1540,36 @@ std::vector<EntityId> mutuallyFacingTurrets(
                     level, state, b.cell, *bDirection, a.cell)) {
                 continue;
             }
-            const EntityId aId = resolvedEntityId(
-                EntityKind::Movable, a.id, first);
-            const EntityId bId = resolvedEntityId(
-                EntityKind::Movable, b.id, second);
-            if (std::ranges::find(participants, aId) == participants.end()) {
-                participants.push_back(aId);
-            }
-            if (std::ranges::find(participants, bId) == participants.end()) {
-                participants.push_back(bId);
+            if (visitor(first, second)) {
+                return true;
             }
         }
     }
+    return false;
+}
+
+} // namespace
+
+std::vector<EntityId> mutuallyFacingTurrets(const Level& level, const GameState& state)
+{
+    std::vector<EntityId> participants;
+    visitMutuallyFacingTurrets(level, state, [&](std::size_t first, std::size_t second) {
+        for (std::size_t index : { first, second }) {
+            const EntityId id = resolvedEntityId(EntityKind::Movable,
+                state.movables[index].id, index);
+            if (std::ranges::find(participants, id) == participants.end()) {
+                participants.push_back(id);
+            }
+        }
+        return false;
+    });
     return participants;
 }
 
 bool hasPendingMotion(const Level& level, const GameState& state)
 {
-    if (!mutuallyFacingTurrets(level, state).empty()) {
+    if (visitMutuallyFacingTurrets(level, state,
+            [](std::size_t, std::size_t) { return true; })) {
         return true;
     }
     for (std::size_t i = 0; i < state.players.size(); ++i) {

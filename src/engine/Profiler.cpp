@@ -1,10 +1,11 @@
 #include "engine/Profiler.hpp"
+#include "engine/ArenaArray.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <deque>
+#include <array>
 #include <fstream>
 #include <functional>
 #include <iomanip>
@@ -15,7 +16,6 @@
 #include <sstream>
 #include <thread>
 #include <tuple>
-#include <unordered_map>
 #include <utility>
 
 namespace sokoban {
@@ -84,67 +84,76 @@ struct ThreadLocalProfileState {
 
 thread_local ThreadLocalProfileState localState;
 
-void buildHotPaths(CpuProfileFrame& frame)
+void buildHotPaths(CpuProfileFrame& frame, FrameArena& arena)
 {
-    struct Totals {
-        uint64_t calls = 0;
-        double inclusive = 0.0;
-        double exclusive = 0.0;
-        double maximum = 0.0;
-    };
-    std::map<std::string, Totals, std::less<>> totals;
-
-    std::vector<std::size_t> order(frame.events.size());
-    for (std::size_t index = 0; index < order.size(); ++index) {
-        order[index] = index;
+    arena.reset();
+    ArenaArray<std::size_t> order(arena, frame.events.size());
+    double* childMilliseconds = arena.allocateUninitialized<double>(frame.events.size());
+    std::size_t* stack = arena.allocateUninitialized<std::size_t>(frame.events.size());
+    if (order.capacity() != frame.events.size() || !childMilliseconds || !stack) {
+        frame.hotPaths.clear();
+        return;
+    }
+    std::fill_n(childMilliseconds, frame.events.size(), 0.0);
+    for (std::size_t index = 0; index < frame.events.size(); ++index) {
+        order.push_back(index);
     }
     std::ranges::sort(order, {}, [&](std::size_t index) {
         const CpuProfileEvent& event = frame.events[index];
-        return std::tuple {
-            event.threadIndex, event.startMilliseconds, event.depth };
+        return std::tuple { event.threadIndex, event.startMilliseconds, event.depth };
     });
 
-    std::vector<double> childMilliseconds(frame.events.size(), 0.0);
-    std::vector<std::size_t> stack;
+    std::size_t stackSize = 0;
     uint32_t activeThread = std::numeric_limits<uint32_t>::max();
     for (std::size_t eventIndex : order) {
         const CpuProfileEvent& event = frame.events[eventIndex];
         if (event.threadIndex != activeThread) {
-            stack.clear();
+            stackSize = 0;
             activeThread = event.threadIndex;
         }
-        while (stack.size() > event.depth) {
-            stack.pop_back();
+        stackSize = std::min(stackSize, static_cast<std::size_t>(event.depth));
+        if (stackSize != 0) {
+            childMilliseconds[stack[stackSize - 1]] += event.durationMilliseconds;
         }
-        if (!stack.empty()) {
-            childMilliseconds[stack.back()] += event.durationMilliseconds;
-        }
-        stack.push_back(eventIndex);
+        stack[stackSize++] = eventIndex;
     }
 
-    for (std::size_t index = 0; index < frame.events.size(); ++index) {
-        const CpuProfileEvent& event = frame.events[index];
-        Totals& value = totals[event.name];
-        ++value.calls;
-        value.inclusive += event.durationMilliseconds;
-        value.exclusive += std::max(
-            0.0, event.durationMilliseconds - childMilliseconds[index]);
-        value.maximum = std::max(value.maximum, event.durationMilliseconds);
+    // Group equal names using the same arena indices, without map nodes.
+    std::size_t maximumNameBytes = 0;
+    for (const auto& event : frame.events) {
+        maximumNameBytes = std::max(maximumNameBytes, event.name.size());
     }
-    frame.hotPaths.reserve(totals.size());
-    for (const auto& [name, value] : totals) {
-        frame.hotPaths.push_back({
-            .name = name,
-            .calls = value.calls,
-            .inclusiveMilliseconds = value.inclusive,
-            .exclusiveMilliseconds = value.exclusive,
-            .maximumMilliseconds = value.maximum,
-        });
+    std::ranges::sort(order, {}, [&](std::size_t index) -> std::string_view {
+        return frame.events[index].name;
+    });
+    std::size_t hotPathCount = 0;
+    for (std::size_t first = 0; first < order.size();) {
+        const std::string& name = frame.events[order[first]].name;
+        if (hotPathCount == frame.hotPaths.size()) {
+            frame.hotPaths.emplace_back();
+        }
+        CpuHotPath& value = frame.hotPaths[hotPathCount++];
+        // Sorting moves names between slots. Give each slot room for any name
+        // in this frame so a change in timing/order does not force a new string.
+        value.name.reserve(maximumNameBytes);
+        value.name = name;
+        value.calls = 0;
+        value.inclusiveMilliseconds = 0.0;
+        value.exclusiveMilliseconds = 0.0;
+        value.maximumMilliseconds = 0.0;
+        do {
+            const std::size_t index = order[first++];
+            const CpuProfileEvent& event = frame.events[index];
+            ++value.calls;
+            value.inclusiveMilliseconds += event.durationMilliseconds;
+            value.exclusiveMilliseconds += std::max(
+                0.0, event.durationMilliseconds - childMilliseconds[index]);
+            value.maximumMilliseconds = std::max(
+                value.maximumMilliseconds, event.durationMilliseconds);
+        } while (first < order.size() && frame.events[order[first]].name == name);
     }
-    std::ranges::sort(
-        frame.hotPaths,
-        std::greater {},
-        &CpuHotPath::exclusiveMilliseconds);
+    frame.hotPaths.resize(hotPathCount);
+    std::ranges::sort(frame.hotPaths, std::greater {}, &CpuHotPath::exclusiveMilliseconds);
 }
 
 } // namespace
@@ -157,7 +166,12 @@ struct CpuProfiler::Impl {
     mutable std::mutex registryMutex;
     std::vector<std::unique_ptr<CpuThreadBuffer>> threadBuffers;
     mutable std::mutex captureMutex;
-    std::deque<CpuProfileFrame> captured;
+    // History owns these buffers across frames. Overwriting a ring slot retains
+    // its event/thread strings and vector capacity instead of freeing a deque node.
+    std::array<CpuProfileFrame, capturedFrameCapacity> captured;
+    std::size_t captureCount = 0;
+    std::size_t captureHead = 0;
+    FrameArena analysisArena { "CPU profiler analysis", 4 * 1024 * 1024 };
 
     CpuThreadBuffer* bufferForCurrentThread()
     {
@@ -248,19 +262,22 @@ void CpuProfiler::endFrame()
     const int64_t frameStart =
         impl_->frameStartNanoseconds.load(std::memory_order_acquire);
     const int64_t frameEnd = nowNanoseconds();
-    CpuProfileFrame frame {
-        .frameIndex = frameIndex,
-        .durationMilliseconds = nanosecondsToMilliseconds(frameEnd - frameStart),
-        .traceStartMicroseconds = frameStart / 1'000,
-    };
+    const std::scoped_lock captureLock(impl_->captureMutex);
+    CpuProfileFrame& frame = impl_->captured[impl_->captureHead];
+    frame.frameIndex = frameIndex;
+    frame.durationMilliseconds = nanosecondsToMilliseconds(frameEnd - frameStart);
+    frame.traceStartMicroseconds = frameStart / 1'000;
+    frame.droppedEvents = 0;
+    std::size_t eventCount = 0;
 
     {
         const std::scoped_lock registryLock(impl_->registryMutex);
-        frame.threads.reserve(impl_->threadBuffers.size());
+        frame.threads.resize(impl_->threadBuffers.size());
         for (const auto& ownedBuffer : impl_->threadBuffers) {
             CpuThreadBuffer& buffer = *ownedBuffer;
-            frame.threads.push_back({ buffer.index, buffer.name });
             const std::scoped_lock bufferLock(buffer.mutex);
+            frame.threads[buffer.index].index = buffer.index;
+            frame.threads[buffer.index].name = buffer.name;
             frame.droppedEvents += buffer.droppedEvents;
             buffer.droppedEvents = 0;
             auto event = buffer.events.begin();
@@ -269,15 +286,17 @@ void CpuProfiler::endFrame()
                 // become visible in the first snapshot taken after they
                 // finish instead of being silently discarded.
                 if (event->frameIndex <= frameIndex) {
-                    frame.events.push_back({
-                        .name = event->name ? event->name : "(unnamed)",
-                        .threadIndex = buffer.index,
-                        .depth = event->depth,
-                        .startMilliseconds = nanosecondsToMilliseconds(
-                            event->startNanoseconds - frameStart),
-                        .durationMilliseconds = nanosecondsToMilliseconds(
-                            event->endNanoseconds - event->startNanoseconds),
-                    });
+                    if (eventCount == frame.events.size()) {
+                        frame.events.emplace_back();
+                    }
+                    CpuProfileEvent& output = frame.events[eventCount++];
+                    output.name = event->name ? event->name : "(unnamed)";
+                    output.threadIndex = buffer.index;
+                    output.depth = event->depth;
+                    output.startMilliseconds = nanosecondsToMilliseconds(
+                        event->startNanoseconds - frameStart);
+                    output.durationMilliseconds = nanosecondsToMilliseconds(
+                        event->endNanoseconds - event->startNanoseconds);
                 }
                 if (event->frameIndex <= frameIndex) {
                     event = buffer.events.erase(event);
@@ -287,12 +306,10 @@ void CpuProfiler::endFrame()
             }
         }
     }
-    buildHotPaths(frame);
-    const std::scoped_lock captureLock(impl_->captureMutex);
-    impl_->captured.push_back(std::move(frame));
-    while (impl_->captured.size() > capturedFrameCapacity) {
-        impl_->captured.pop_front();
-    }
+    frame.events.resize(eventCount);
+    buildHotPaths(frame, impl_->analysisArena);
+    impl_->captureHead = (impl_->captureHead + 1) % capturedFrameCapacity;
+    impl_->captureCount = std::min(impl_->captureCount + 1, capturedFrameCapacity);
 }
 
 void CpuProfiler::setCurrentThreadName(const char* name)
@@ -305,21 +322,29 @@ void CpuProfiler::setCurrentThreadName(const char* name)
 CpuProfileFrame CpuProfiler::latestFrame() const
 {
     const std::scoped_lock lock(impl_->captureMutex);
-    return impl_->captured.empty()
+    return impl_->captureCount == 0
         ? CpuProfileFrame {}
-        : impl_->captured.back();
+        : impl_->captured[(impl_->captureHead + capturedFrameCapacity - 1) % capturedFrameCapacity];
 }
 
 std::vector<CpuProfileFrame> CpuProfiler::capturedFrames() const
 {
     const std::scoped_lock lock(impl_->captureMutex);
-    return { impl_->captured.begin(), impl_->captured.end() };
+    std::vector<CpuProfileFrame> frames;
+    frames.reserve(impl_->captureCount);
+    const std::size_t first =
+        (impl_->captureHead + capturedFrameCapacity - impl_->captureCount) % capturedFrameCapacity;
+    for (std::size_t index = 0; index < impl_->captureCount; ++index) {
+        frames.push_back(impl_->captured[(first + index) % capturedFrameCapacity]);
+    }
+    return frames;
 }
 
 void CpuProfiler::clearCapture()
 {
     const std::scoped_lock lock(impl_->captureMutex);
-    impl_->captured.clear();
+    impl_->captureCount = 0;
+    impl_->captureHead = 0;
 }
 
 bool CpuProfiler::exportChromeTrace(

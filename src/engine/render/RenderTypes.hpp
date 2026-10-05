@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -165,8 +166,13 @@ template <typename FindTextureByName>
     FindTextureByName findTextureByName,
     std::optional<LevelLocation> location)
 {
+    char name[64] {};
+    if (location) {
+        std::snprintf(name, sizeof(name), "GroundSplatMap%d_%d",
+            location->level, location->screen);
+    }
     const RenderTexture screenMap = location
-        ? findTextureByName(groundSplatMapTextureNameForScreen(*location))
+        ? findTextureByName(std::string_view(name))
         : noTexture;
     return {
         .base = findTextureByName(groundSplatBaseTextureName),
@@ -182,8 +188,9 @@ template <typename FindTextureByName>
     FindTextureByName findTextureByName,
     uint32_t screenId)
 {
-    const RenderTexture screenMap = findTextureByName(
-        groundSplatMapTextureNameForOverworldScreen(screenId));
+    char name[64] {};
+    std::snprintf(name, sizeof(name), "GroundSplatMapOverworld%u", screenId);
+    const RenderTexture screenMap = findTextureByName(std::string_view(name));
     return {
         .base = findTextureByName(groundSplatBaseTextureName),
         .detail = findTextureByName(groundSplatDetailTextureName),
@@ -587,7 +594,10 @@ struct RenderFrameData {
 
 [[nodiscard]] constexpr std::size_t renderFrameArenaBytes()
 {
-    return arenaBytesFor<RenderFrameData::Tile>(RenderFrameData::tileCapacity) +
+    // View lists and interpolated mirror beams share the frame's lifetime.
+    constexpr std::size_t scratchBytes = 2 * 1024 * 1024;
+    return scratchBytes +
+        arenaBytesFor<RenderFrameData::Tile>(RenderFrameData::tileCapacity) +
         arenaBytesFor<RenderFrameData::WaterSurface>(
             RenderFrameData::waterSurfaceCapacity) +
         arenaBytesFor<RenderFrameData::IsoFace>(

@@ -385,6 +385,7 @@ private:
     ReusableScratchPool<PreparedFrameScratch, preparedFrameSlotCount_>
         preparedFrameScratch_;
     RenderAssetRequirements frameAssetRequirements_;
+    RenderAssetRequirements previewAssetRequirements_;
     // Kept separate from asset loading: frame preparation waits for this
     // worker every frame and must not sit behind texture/model jobs.
     TaskSystem framePreparationTasks_ { 1 };

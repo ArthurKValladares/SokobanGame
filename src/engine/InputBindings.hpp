@@ -9,6 +9,7 @@
 #include <vector>
 
 namespace sokoban {
+class FrameArena;
 
 enum class InputAction : uint8_t {
     MoveUp,
@@ -143,6 +144,11 @@ enum class BindingDeviceClass : uint8_t {
     const InputBindings& bindings,
     InputAction action,
     BindingDeviceClass deviceClass);
+[[nodiscard]] std::string_view actionBindingsDisplay(
+    const InputBindings& bindings,
+    InputAction action,
+    BindingDeviceClass deviceClass,
+    FrameArena& arena);
 // Rebinds `action`: bindings identical to `candidate` are removed from every
 // action active in the same input context, and the action's bindings of the
 // candidate's exact kind (keyboard / pad button / pad axis) are replaced by

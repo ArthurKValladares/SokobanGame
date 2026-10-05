@@ -21,7 +21,8 @@ inline constexpr float cameraDistanceMultiplier = 4.0f;
 [[nodiscard]] RenderFrameData build(
     RenderModel model,
     const AssetManifest& manifest,
-    const PresentationSettings& settings);
+    const PresentationSettings& settings,
+    FrameArena* arena = nullptr);
 
 } // namespace animationPreviewScene
 } // namespace sokoban

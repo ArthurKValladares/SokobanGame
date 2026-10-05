@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -25,7 +26,8 @@ enum class ActiveInputDevice : uint8_t {
 
 struct GamepadPresentation {
     SDL_GamepadType type = SDL_GAMEPAD_TYPE_UNKNOWN;
-    std::string name;
+    // Borrows InputState device storage until the next device event.
+    std::string_view name;
     std::array<SDL_GamepadButtonLabel, 4> faceButtonLabels {
         SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN,
         SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN,

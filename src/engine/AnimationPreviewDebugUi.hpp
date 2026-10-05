@@ -38,7 +38,8 @@ public:
     [[nodiscard]] float catalogDurationSeconds() const;
     [[nodiscard]] std::optional<RenderFrameData> previewFrame(
         const AssetManifest& manifest,
-        const PresentationSettings& settings) const;
+        const PresentationSettings& settings,
+        FrameArena* arena = nullptr) const;
 
 private:
     struct PreviewSession {

@@ -433,7 +433,8 @@ void appendDecorations(
     std::optional<std::size_t> selected = std::nullopt,
     std::optional<std::size_t> hovered = std::nullopt,
     bool editorDecorations = false,
-    const std::function<bool(GridPosition3)>& visibleCell = {});
+    const std::function<bool(GridPosition3)>& visibleCell = {},
+    GridPosition origin = {});
 
 // ----------------------------------------------------------- Screen selector
 

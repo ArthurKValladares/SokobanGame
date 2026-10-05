@@ -102,8 +102,29 @@ std::optional<AnimationController::SkinningRequest> AnimationController::update(
 std::vector<AnimationController::InstanceSkinningRequest>
 AnimationController::updateInstances(const RenderFrameData& frameData)
 {
-    std::vector<InstanceSkinningRequest> requests;
+    FrameArray<InstanceSkinningRequest> requests;
     requests.reserve(frameData.tiles.size());
+    updateInstancesInto(frameData, requests);
+    return { requests.begin(), requests.end() };
+}
+
+FrameArray<AnimationController::InstanceSkinningRequest>
+AnimationController::updateInstances(
+    const RenderFrameData& frameData, FrameArena& arena)
+{
+    const auto count = std::ranges::count_if(frameData.tiles, [](const auto& tile) {
+        return tile.animationInstanceId != 0;
+    });
+    FrameArray<InstanceSkinningRequest> requests(
+        arena, static_cast<std::size_t>(count));
+    updateInstancesInto(frameData, requests);
+    return requests;
+}
+
+void AnimationController::updateInstancesInto(
+    const RenderFrameData& frameData,
+    FrameArray<InstanceSkinningRequest>& requests)
+{
     activePreviewClip_ = previewClip_;
     activePreviewTime_ = previewClip_ != nullptr
         ? previewTimeSeconds_
@@ -137,7 +158,6 @@ AnimationController::updateInstances(const RenderFrameData& frameData)
             });
         }
     }
-    return requests;
 }
 
 std::optional<AnimationController::SkinningRequest> AnimationController::updateTile(

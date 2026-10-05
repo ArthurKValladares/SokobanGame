@@ -143,17 +143,14 @@ void runConcurrently(
     BackgroundFn background,
     ForegroundFn foreground)
 {
-    std::future<void> backgroundResult = tasks.enqueue(
-        std::move(background));
-    try {
-        foreground();
-    } catch (...) {
-        // The background callable may still reference frame scratch. Keep it
-        // alive and quiescent before propagating the foreground failure.
-        backgroundResult.wait();
-        throw;
-    }
-    backgroundResult.get();
+    // parallelFor reuses its bounded coordination slot; enqueue/future builds
+    // an owning task and shared completion state on every preview frame.
+    tasks.parallelFor(2, 1, [&](std::size_t begin, std::size_t end) {
+        for (std::size_t index = begin; index < end; ++index) {
+            if (index == 0) background();
+            else foreground();
+        }
+    });
 }
 
 } // namespace
@@ -438,13 +435,16 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
     scratch->frameData = std::move(frameData);
     scratch->generation = nextPreparedFrameGeneration_++;
     scratch->previewFrameData = std::move(previewFrameData);
-    scratch->previewScene.reset();
+    if (!scratch->previewFrameData) {
+        scratch->previewScene.reset();
+    } else if (!scratch->previewScene) {
+        scratch->previewScene.emplace();
+    }
     const Vec2 mainExtent {
         static_cast<float>(extent.width),
         static_cast<float>(extent.height),
     };
     if (scratch->previewFrameData && parallelScenePreparationEnabled_) {
-        scratch->previewScene.emplace();
         const Vec2 previewExtent {
             mainExtent.x * 0.75f,
             mainExtent.y * 0.75f,
@@ -455,7 +455,7 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
         // required between them.
         runConcurrently(
             framePreparationTasks_,
-            [this, scratch, previewExtent] {
+            [this, &scratch, previewExtent] {
                 previewScenePreparer_.prepare(
                     *scratch->previewFrameData,
                     previewExtent,
@@ -472,7 +472,6 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
             scratch->frameData,
             mainExtent,
             scratch->scene);
-        scratch->previewScene.emplace();
         previewScenePreparer_.prepare(
             *scratch->previewFrameData,
             {
@@ -659,10 +658,9 @@ void VulkanRenderer::drawFrame(
     const RenderFrameData& frameData = prepared.frameData;
     renderAssetRequirementsForFrame(frameData, frameAssetRequirements_);
     if (prepared.previewFrameData) {
-        RenderAssetRequirements previewRequirements;
         renderAssetRequirementsForFrame(
-            *prepared.previewFrameData, previewRequirements);
-        frameAssetRequirements_.merge(previewRequirements);
+            *prepared.previewFrameData, previewAssetRequirements_);
+        frameAssetRequirements_.merge(previewAssetRequirements_);
     }
     for (const UiDrawCommand& command : uiDrawData.commands) {
         frameAssetRequirements_.requireTexture(command.texture);

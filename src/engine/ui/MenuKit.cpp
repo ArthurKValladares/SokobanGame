@@ -24,12 +24,13 @@ bool RowList::navigateCount(int& selectedRow, int rowCount, bool up, bool down)
 MenuPage::MenuPage(
     float afterHeader,
     bool withSubtitle,
-    float verticalScale)
+    float verticalScale,
+    FrameArena* arena)
     : tree(UiLayoutAxis::Vertical, {
           42.0f,
           34.0f * verticalScale,
           42.0f,
-          40.0f * verticalScale })
+          40.0f * verticalScale }, 0.0f, arena)
     , hasSubtitle(withSubtitle)
 {
     title = tree.item(tree.root(), 58.0f * verticalScale);

@@ -1484,8 +1484,8 @@ struct MirrorEntityPreviewContext {
 // them.
 void appendMirrorEntitySegments(
     const MirrorEntityPreviewContext& preview,
-    std::vector<MirrorRenderSegment>& entitySegments,
-    std::vector<MirrorRenderSegment>& beamSegments)
+    FrameArray<MirrorRenderSegment>& entitySegments,
+    FrameArray<MirrorRenderSegment>& beamSegments)
 {
     const rules::MirrorEntityPreview& entity = preview.entity;
     const rules::MirrorEntityPreview* matchingEndEntity =
@@ -1665,7 +1665,8 @@ void appendMirrorGhostTile(
 
 void appendMirrorPreview(
     RenderFrameData& frame,
-    const RenderFrameBuilder::GameplayInput& input)
+    const RenderFrameBuilder::GameplayInput& input,
+    FrameArena* arena = nullptr)
 {
     const GameState& state = input.state;
     const auto& playerVisuals = input.presentation.players();
@@ -1673,16 +1674,31 @@ void appendMirrorPreview(
     const auto& enemyVisuals = input.presentation.enemies();
 
     if (!rules::anyPlayerDead(state)) {
-        std::optional<rules::MirrorActivationPreview> mirrorPreview =
-            rules::previewActivation(input.level, state);
-        std::optional<rules::MirrorActivationPreview> actionEndPreview;
+        std::optional<rules::MirrorActivationPreview> ownedPreview;
+        std::optional<rules::MirrorActivationPreview> ownedEndPreview;
+        if (!input.cachedActivationPreviews) {
+            ownedPreview = rules::previewActivation(input.level, state);
+        }
+        const rules::MirrorActivationPreview* mirrorPreview = input.cachedActivationPreviews
+            ? input.activationPreview : (ownedPreview ? &*ownedPreview : nullptr);
+        const rules::MirrorActivationPreview* actionEndPreview = nullptr;
         if (input.moving &&
             !rules::anyPlayerDead(input.projectedState)) {
-            actionEndPreview = rules::previewActivation(
-                input.level, input.projectedState);
+            if (input.cachedActivationPreviews) {
+                actionEndPreview = input.projectedActivationPreview;
+            } else {
+                ownedEndPreview = rules::previewActivation(input.level, input.projectedState);
+                actionEndPreview = ownedEndPreview ? &*ownedEndPreview : nullptr;
+            }
         }
         if (mirrorPreview) {
-            std::vector<MirrorRenderSegment> beamSegments;
+            std::size_t beamCount = 0;
+            for (const auto& entity : mirrorPreview->entities) {
+                beamCount += entity.beamSegments.size();
+            }
+            FrameArray<MirrorRenderSegment> beamSegments = arena
+                ? FrameArray<MirrorRenderSegment>(*arena, beamCount)
+                : FrameArray<MirrorRenderSegment>();
             for (const rules::MirrorEntityPreview& entity :
                  mirrorPreview->entities) {
                 const rules::MirrorEntityPreview* matchingEndEntity = nullptr;
@@ -1735,7 +1751,9 @@ void appendMirrorPreview(
                           1.0f)
                     : 0.0f;
 
-                std::vector<MirrorRenderSegment> entitySegments;
+                FrameArray<MirrorRenderSegment> entitySegments = arena
+                    ? FrameArray<MirrorRenderSegment>(*arena, entity.beamSegments.size())
+                    : FrameArray<MirrorRenderSegment>();
                 entitySegments.reserve(entity.beamSegments.size());
                 const bool sameMirrorPath =
                     hasMatchingEndEntity &&
@@ -1872,7 +1890,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(
     RenderFrameData frame = initializeGameplayFrame(input, &arena);
     appendGameplayWorld(frame, input);
     appendGameplayEntities(frame, input);
-    appendMirrorPreview(frame, input);
+    appendMirrorPreview(frame, input, &arena);
     applyScrollingMaterials(frame, input);
     return frame;
 }

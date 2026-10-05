@@ -234,8 +234,8 @@ Application::Application(ApplicationOptions options)
     , tools_(std::make_unique<ApplicationTools>())
 #endif
     , renderFrameArenas_ {
-          FrameArena("render frame A", renderFrameArenaBytes()),
-          FrameArena("render frame B", renderFrameArenaBytes()),
+          FrameArena("render frame A", 2 * renderFrameArenaBytes()),
+          FrameArena("render frame B", 2 * renderFrameArenaBytes()),
       }
     , smokeFrames_(options.smokeFrames)
     , launchLevel_(options.startLevel)
@@ -1070,9 +1070,11 @@ bool Application::run()
         }
         {
             SOKOBAN_PROFILE_SCOPE("Application.Build render frame");
+            RenderFrameData frame = buildRenderFrame(routedInput.editor);
+            auto preview = buildScreenPreviewRenderFrame(
+                renderFrameArenas_[renderFrameArenaIndex_]);
             preparedRenderFrame_ = renderer_.prepareFrame(
-                buildRenderFrame(routedInput.editor),
-                buildScreenPreviewRenderFrame());
+                std::move(frame), std::move(preview));
         }
         if (!evidenceSceneCaptured_) {
             applicationBuildTelemetry_.record(
@@ -1635,15 +1637,15 @@ bool Application::updateScreenPreview(bool requested, float dt)
 }
 
 std::optional<RenderFrameData>
-Application::buildScreenPreviewRenderFrame() const
+Application::buildScreenPreviewRenderFrame(FrameArena& arena) const
 {
     if (!screenPreviewActive_ || !screenPreviewLevel_ ||
         !screenPreviewTarget_) {
         return std::nullopt;
     }
 
-    const GameState projectedState =
-        screenPreviewSession_.projectedState();
+    const GameState& projectedState = screenPreviewSession_.projectedStateView();
+    const auto& activationPreview = screenPreviewSession_.activationPreview(*screenPreviewLevel_);
     RenderFrameData frame = RenderFrameBuilder::buildGameplay({
         .manifest = assetManifest_,
         .level = *screenPreviewLevel_,
@@ -1662,7 +1664,9 @@ Application::buildScreenPreviewRenderFrame() const
         .selectorState = [this](LevelLocation target) {
             return campaign_.selectorViewState(playerProfile_, target);
         },
-    });
+        .cachedActivationPreviews = true,
+        .activationPreview = activationPreview ? &*activationPreview : nullptr,
+    }, arena);
     // The preview and live world can contain the same stable actor IDs. Keep
     // their GPU animation instances independent so one idle pose cannot
     // overwrite the other's skinning buffers.
@@ -1720,11 +1724,11 @@ void Application::drawSelectorPrompt(
         input_.activeDevice() == ActiveInputDevice::Gamepad
         ? BindingDeviceClass::Gamepad
         : BindingDeviceClass::Keyboard;
-    const std::optional<InputBinding> enterBinding =
-        SelectorPrompt::binding(
+    const InputBinding* enterBinding =
+        SelectorPrompt::bindingView(
             input_.bindings(), InputAction::MenuConfirm, device);
-    const std::optional<InputBinding> previewBinding =
-        SelectorPrompt::binding(
+    const InputBinding* previewBinding =
+        SelectorPrompt::bindingView(
             input_.bindings(), InputAction::PreviewScreen, device);
     if (arrowTip && enterBinding && previewBinding) {
         const GamepadPresentation gamepad = input_.activeGamepadPresentation();
@@ -1735,14 +1739,14 @@ void Application::drawSelectorPrompt(
         if (enterGlyph && previewGlyph) {
             SelectorPrompt::draw(ui_, *arrowTip, *enterGlyph, *previewGlyph);
         } else {
-            const std::optional<std::string> enterLabel =
+            const std::string_view enterLabel =
                 SelectorPrompt::bindingLabel(
-                    input_.bindings(), InputAction::MenuConfirm, device);
-            const std::optional<std::string> previewLabel =
+                    input_.bindings(), InputAction::MenuConfirm, device, ui_.frameArena());
+            const std::string_view previewLabel =
                 SelectorPrompt::bindingLabel(
-                    input_.bindings(), InputAction::PreviewScreen, device);
-            if (enterLabel && previewLabel) {
-                SelectorPrompt::draw(ui_, *arrowTip, *enterLabel, *previewLabel);
+                    input_.bindings(), InputAction::PreviewScreen, device, ui_.frameArena());
+            if (!enterLabel.empty() && !previewLabel.empty()) {
+                SelectorPrompt::draw(ui_, *arrowTip, enterLabel, previewLabel);
             }
         }
     }
@@ -1790,9 +1794,9 @@ void Application::drawAssetLoadingOverlay(Vec2 viewport)
         .size = { track.size.x * progress, track.size.y },
     }, { 0.24f, 0.70f, 0.95f, 1.0f });
 
-    const std::string detail = std::to_string(stats.readyRequestedAssets) +
-        " / " + std::to_string(stats.requestedAssets) +
-        " ready  -  " + std::to_string(pending) + " pending";
+    char detail[96] {};
+    std::snprintf(detail, sizeof(detail), "%u / %u ready  -  %u pending",
+        stats.readyRequestedAssets, stats.requestedAssets, pending);
     ui_.centeredText({
         .position = { panel.position.x, panel.position.y + 53.0f },
         .size = { panel.size.x, 20.0f },
@@ -2491,7 +2495,8 @@ void Application::handleDraftPlaybackShortcuts(const InputRouter::Frame& input)
 // Builds the editor-only frame from the open document, pending move,
 // neighbouring overworld screens, and palette selector state.
 RenderFrameData Application::buildEditorRenderFrame(
-    const InputRouter::EditorInput& editorInput, float beltScrollOffset)
+    const InputRouter::EditorInput& editorInput, float beltScrollOffset,
+    FrameArena& arena)
 {
     const auto& editorLevels = tools_->levelEditor.levelBrowserSnapshot();
     const std::optional<LevelEditor::MoveObject>& pendingMove =
@@ -2501,24 +2506,23 @@ RenderFrameData Application::buildEditorRenderFrame(
             pendingMove->kind == LevelEditor::MoveObject::Kind::Tile
         ? std::optional<TileType> { pendingMove->tile }
         : std::nullopt;
-    std::vector<RenderFrameBuilder::EditorInput::OverworldNeighbor>
-        overworldNeighbors;
+    ArenaArray<RenderFrameBuilder::EditorInput::OverworldNeighbor>
+        overworldNeighbors(arena, 8);
     const std::optional<OverworldScreenId> editedOverworldScreen =
         tools_->levelEditor.overworldScreenId();
     const OverworldMapEditor& topology = tools_->overworldMapEditor;
     const bool matchingTopologyRoot =
-        std::filesystem::absolute(topology.projectLevelRoot())
-            .lexically_normal() ==
-        std::filesystem::absolute(tools_->levelEditor.browserRoot())
-            .lexically_normal();
+        tools_->levelEditor.showOverworldNeighbors() &&
+        editedOverworldScreen && topology.loaded() &&
+        tools_->matchingOverworldEditorRoot();
     if (tools_->levelEditor.showOverworldNeighbors() &&
         editedOverworldScreen && topology.loaded() &&
         matchingTopologyRoot) {
         const OverworldScreenSpec* active =
             topology.screen(*editedOverworldScreen);
         if (active) {
-            for (const OverworldMapEditor::ScreenSummary& candidate :
-                 topology.screens()) {
+            for (const OverworldScreenSpec& candidate :
+                 topology.layout().screens) {
                 const int deltaX = candidate.slot.x - active->slot.x;
                 const int deltaY = candidate.slot.y - active->slot.y;
                 if ((deltaX == 0 && deltaY == 0) ||
@@ -2543,7 +2547,6 @@ RenderFrameData Application::buildEditorRenderFrame(
             }
         }
     }
-    FrameArena& arena = beginRenderFrameArena();
     return RenderFrameBuilder::buildEditor({
         .manifest = assetManifest_,
         .editor = tools_->levelEditor,
@@ -2699,20 +2702,21 @@ RenderFrameData Application::buildRenderFrame(
     const InputRouter::EditorInput& editorInput)
 {
     (void)editorInput;
+    FrameArena& arena = beginRenderFrameArena();
     const float beltScrollOffset =
         presentation_.conveyorBeltScrollOffset(
             gameplaySession_.stepDurationSeconds());
 #if SOKOBAN_ENABLE_DEBUG_UI
-    if (const std::optional<RenderFrameData> preview =
+    if (std::optional<RenderFrameData> preview =
             tools_->animationPreviewDebugUi.previewFrame(
-                assetManifest_, presentationSettings_)) {
-        RenderFrameData frame = *preview;
+                assetManifest_, presentationSettings_, &arena)) {
+        RenderFrameData frame = std::move(*preview);
         tools_->applyDetachedCamera(frame);
         return frame;
     }
     if (tools_->levelEditor.editingDocument()) {
         RenderFrameData frame =
-            buildEditorRenderFrame(editorInput, beltScrollOffset);
+            buildEditorRenderFrame(editorInput, beltScrollOffset, arena);
         tools_->applyDetachedCamera(frame);
         return frame;
     }
@@ -2724,7 +2728,7 @@ RenderFrameData Application::buildRenderFrame(
     }
 
     // Held by reference for the duration of the call, so it has to outlive it.
-    const GameState projectedState = gameplaySession_.projectedState();
+    const GameState& projectedState = gameplaySession_.projectedStateView();
 #if SOKOBAN_ENABLE_DEBUG_UI
     const OverworldMap* draftOverworld =
         tools_->levelEditor.draftOverworldMap();
@@ -2761,22 +2765,22 @@ RenderFrameData Application::buildRenderFrame(
             gameplaySession_.state(),
             projectedState,
             presentation_.players().front().motion.renderPosition,
-            overworldOverviewProgress_);
+            overworldOverviewProgress_, &arena);
     }
     std::function<bool(GridPosition3)> visibleOverworldCell;
-    std::vector<RenderFrameBuilder::GameplayInput::GroundSplatRegion>
-        groundSplatRegions;
+    ArenaArray<RenderFrameBuilder::GameplayInput::GroundSplatRegion>
+        groundSplatRegions(arena, overworldView ? overworldView->visibleScreens.size() : 0);
     if (overworldView && renderedOverworld) {
         visibleOverworldCell = [
             renderedOverworld,
-            visibleScreens = overworldView->visibleScreens
+            &overworldView
         ](GridPosition3 cell) {
             const std::optional<OverworldScreenId> owner =
                 renderedOverworld->screenAt(cell);
+            const auto& visibleScreens = overworldView->visibleScreens;
             return owner && std::ranges::find(visibleScreens, *owner) !=
                 visibleScreens.end();
         };
-        groundSplatRegions.reserve(overworldView->visibleScreens.size());
         for (OverworldScreenId screenId : overworldView->visibleScreens) {
             const OverworldScreenRuntime* screen =
                 renderedOverworld->screen(screenId);
@@ -2791,7 +2795,8 @@ RenderFrameData Application::buildRenderFrame(
             });
         }
     }
-    FrameArena& arena = beginRenderFrameArena();
+    const auto& activationPreview = gameplaySession_.activationPreview(level_);
+    const auto& projectedActivationPreview = gameplaySession_.activationPreview(level_, true);
     RenderFrameData frame = RenderFrameBuilder::buildGameplay({
         .manifest = assetManifest_,
         .level = level_,
@@ -2839,19 +2844,18 @@ RenderFrameData Application::buildRenderFrame(
         .selectorState = [this](LevelLocation target) {
             return campaign_.selectorViewState(playerProfile_, target);
         },
+        .cachedActivationPreviews = true,
+        .activationPreview = activationPreview ? &*activationPreview : nullptr,
+        .projectedActivationPreview = gameplaySession_.moving() && projectedActivationPreview
+            ? &*projectedActivationPreview : nullptr,
     }, arena);
     if (renderCampaignOverworld && overworldView && renderedOverworld) {
-        std::vector<RenderFrameData::OverworldFogVolume> fogVolumes =
-            calculateOverworldFogVolumes(
-                *renderedOverworld,
-                overworldView->visibleScreens,
-                playerProfile_.overworldDiscovery.screens,
-                overworldFogReveal_);
-        for (RenderFrameData::OverworldFogVolume& volume : fogVolumes) {
-            if (!frame.overworldFogVolumes.push_back(volume)) {
-                break;
-            }
-        }
+        appendOverworldFogVolumes(
+            frame.overworldFogVolumes,
+            *renderedOverworld,
+            overworldView->visibleScreens,
+            playerProfile_.overworldDiscovery.screens,
+            overworldFogReveal_);
     }
     particleSystem_.appendRenderData(frame);
     frame.levelTransitionAmount = levelTransition_.amount();

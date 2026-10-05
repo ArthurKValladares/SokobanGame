@@ -44,6 +44,7 @@ void ActionScheduler::reset(GameState state, float stepDurationSeconds)
 {
     admissionStats_ = {};
     state_ = std::move(state);
+    ++stateRevision_;
     inFlight_.clear();
     reservations_.clear();
     clockSeconds_ = 0.0f;
@@ -85,14 +86,48 @@ const GameState& ActionScheduler::InFlight::stateAtCurrentProgress() const
 
 GameState ActionScheduler::stateAtCurrentProgress() const
 {
-    GameState current = state_;
-    for (const InFlight& action : inFlight_) {
-        StateDelta::between(
-            action.plan.before,
-            action.stateAtCurrentProgress())
-            .applyTo(current);
+    return stateAtCurrentProgressView();
+}
+
+const GameState& ActionScheduler::stateAtCurrentProgressView() const
+{
+    if (inFlight_.empty()) {
+        return state_;
     }
-    return current;
+    bool changed = progressRevision_ != stateRevision_ ||
+        progressSources_.size() != inFlight_.size();
+    for (std::size_t index = 0; !changed && index < inFlight_.size(); ++index) {
+        changed = progressSources_[index] !=
+            &inFlight_[index].stateAtCurrentProgress();
+    }
+    if (changed) {
+        progressState_ = state_;
+        progressSources_.clear();
+        for (const InFlight& action : inFlight_) {
+            const GameState& source = action.stateAtCurrentProgress();
+            StateDelta::between(action.plan.before, source).applyTo(progressState_);
+            progressSources_.push_back(&source);
+        }
+        progressRevision_ = stateRevision_;
+        ++progressGeneration_;
+    }
+    return progressState_;
+}
+
+const GameState& ActionScheduler::projectedStateView() const
+{
+    if (inFlight_.empty()) {
+        return state_;
+    }
+    if (projectedRevision_ != stateRevision_) {
+        projectedState_ = state_;
+        for (const InFlight& action : inFlight_) {
+            StateDelta::between(action.plan.before, action.plan.after)
+                .applyTo(projectedState_);
+        }
+        projectedRevision_ = stateRevision_;
+    }
+    return projectedState_;
 }
 
 const ActionScheduler::InFlight* ActionScheduler::oldest() const
@@ -156,6 +191,7 @@ ActionScheduler::tryStart(
         .baseStep = baseStep,
         .causalGroup = causalGroup,
     });
+    ++stateRevision_;
     return Started { .id = id };
 }
 
@@ -262,6 +298,7 @@ std::vector<ActionScheduler::InFlight> ActionScheduler::commitFinished()
         reservations_.release(entry.id);
         completed.push_back(std::move(*found));
         inFlight_.erase(found);
+        ++stateRevision_;
     }
     return completed;
 }

@@ -2371,7 +2371,35 @@ std::vector<GridPosition3> LevelEditor::linkedPressurePlates(Vec3 color) const
 
 std::vector<LevelEditor::LinkGroup> LevelEditor::linkGroups() const
 {
-    std::vector<LinkGroup> groups;
+    return linkGroupsView();
+}
+
+const std::vector<LevelEditor::LinkGroup>& LevelEditor::linkGroupsView() const
+{
+    const auto visitInputs = [&](auto visit) {
+        const auto records = [&](const auto& values, uint8_t kind) {
+            for (const auto& value : values) visit(LinkInput { value.cell, value.color, kind });
+        };
+        records(document_.plateColors, 0);
+        records(document_.gates, 1);
+        records(document_.rotators, 2);
+        records(document_.lockPlates, 3);
+        records(document_.elevators, 4);
+        records(document_.minecarts, 5);
+        records(document_.portals, 6);
+        records(document_.objectLinks, 7);
+    };
+    std::size_t count = 0;
+    bool changed = false;
+    visitInputs([&](const LinkInput& input) {
+        changed |= count >= cachedLinkInputs_.size() || !(cachedLinkInputs_[count] == input);
+        ++count;
+    });
+    if (!changed && count == cachedLinkInputs_.size()) return cachedLinkGroups_;
+    cachedLinkInputs_.clear();
+    visitInputs([&](const LinkInput& input) { cachedLinkInputs_.push_back(input); });
+    auto& groups = cachedLinkGroups_;
+    groups.clear();
     const auto groupFor = [&](Vec3 color) -> LinkGroup& {
         const auto found = std::ranges::find_if(groups, [&](const LinkGroup& group) {
             return sameColor(group.color, color);
@@ -2406,6 +2434,47 @@ std::vector<LevelEditor::LinkGroup> LevelEditor::linkGroups() const
         groupFor(object.color).objects.push_back(object.cell);
     }
     return groups;
+}
+
+const std::vector<std::optional<Level::MinecartRoute>>&
+LevelEditor::minecartRoutesView() const
+{
+    if (document_.minecarts.empty()) {
+        cachedRouteMinecarts_.clear();
+        cachedMinecartRoutes_.clear();
+        return cachedMinecartRoutes_;
+    }
+    if (cachedRouteLayers_ == document_.layers && cachedRoutePlates_ == document_.plates &&
+        cachedRouteMinecarts_ == document_.minecarts) {
+        return cachedMinecartRoutes_;
+    }
+    cachedRouteLayers_ = document_.layers;
+    cachedRoutePlates_ = document_.plates;
+    cachedRouteMinecarts_ = document_.minecarts;
+    cachedMinecartRoutes_.clear();
+    cachedMinecartRoutes_.reserve(document_.minecarts.size());
+    const auto railAt = [this](GridPosition3 cell) {
+        if (const auto plate = documentPlateAt(cell)) return *plate;
+        if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+            cell.z >= static_cast<int>(document_.layers.size())) return TileType::Air;
+        const auto& layer = document_.layers[static_cast<std::size_t>(cell.z)];
+        if (cell.y >= static_cast<int>(layer.size()) ||
+            cell.x >= static_cast<int>(layer[static_cast<std::size_t>(cell.y)].size())) {
+            return TileType::Air;
+        }
+        return charToTileType(layer[static_cast<std::size_t>(cell.y)]
+            [static_cast<std::size_t>(cell.x)]).value_or(TileType::Air);
+    };
+    for (const auto& cart : document_.minecarts) {
+        try {
+            cachedMinecartRoutes_.push_back(Level::buildMinecartRoute(
+                cart, railAt, "level editor debug view"));
+        } catch (const std::runtime_error&) {
+            // An unfinished track has no route until another edit changes it.
+            cachedMinecartRoutes_.push_back(std::nullopt);
+        }
+    }
+    return cachedMinecartRoutes_;
 }
 
 bool LevelEditor::setLinkColor(GridPosition3 cell, Vec3 color)

@@ -1296,7 +1296,8 @@ if(SOKOBAN_BUILD_TESTS)
     )
     sokoban_add_test(NAME scene_preparation_allocations
         STANDALONE TARGET sokoban_scene_preparation_allocation_tests
-        LIBS sokoban_core
+        LIBS sokoban_ui
+        ASSET_DIR
         SOURCES tests/ScenePreparationAllocationTests.cpp
     )
     sokoban_add_test(NAME renderer_reconfiguration

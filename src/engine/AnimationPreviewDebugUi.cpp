@@ -429,7 +429,8 @@ float AnimationPreviewDebugUi::catalogDurationSeconds() const
 
 std::optional<RenderFrameData> AnimationPreviewDebugUi::previewFrame(
     const AssetManifest& manifest,
-    const PresentationSettings& settings) const
+    const PresentationSettings& settings,
+    FrameArena* arena) const
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     const PreviewSession* active = catalog_.active ? &catalog_ : nullptr;
@@ -438,11 +439,12 @@ std::optional<RenderFrameData> AnimationPreviewDebugUi::previewFrame(
     }
     if (active != nullptr && active->clip && !active->model.isCube()) {
         return animationPreviewScene::build(
-            active->model, manifest, settings);
+            active->model, manifest, settings, arena);
     }
 #else
     (void)manifest;
     (void)settings;
+    (void)arena;
 #endif
     return std::nullopt;
 }

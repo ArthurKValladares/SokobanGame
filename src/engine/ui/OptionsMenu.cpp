@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <string>
 #include <utility>
 
@@ -720,7 +721,7 @@ bool drawBindingRowPrompts(
     bool focused,
     float contentScale)
 {
-    std::vector<InputPromptGlyph> glyphs;
+    ArenaArray<InputPromptGlyph> glyphs(ui.frameArena(), bindings.forAction(action).size());
     for (const InputBinding& binding : bindings.forAction(action)) {
         if (bindingDeviceClass(binding) != device) continue;
         const std::optional<InputPromptGlyph> glyph =
@@ -780,7 +781,7 @@ bool drawBindingRowPrompts(
 
 // The main page: the four section buttons plus whatever the active game allows.
 void appendMainRows(
-    std::vector<OptionsMenuRow>& rows, const OptionsMenuState& state)
+    FrameArray<OptionsMenuRow>& rows, const OptionsMenuState& state)
 {
     rows.push_back({
         .id = OptionsMenuRowId::Graphics,
@@ -817,7 +818,7 @@ void appendMainRows(
 
 // The graphics page: the display, quality and scaling rows.
 void appendGraphicsRows(
-    std::vector<OptionsMenuRow>& rows,
+    FrameArray<OptionsMenuRow>& rows,
     const OptionsMenuState& state,
     const UserSettings& settings)
 {
@@ -907,7 +908,7 @@ void appendGraphicsRows(
 
 // The audio page's master and music volume sliders.
 void appendAudioRows(
-    std::vector<OptionsMenuRow>& rows, const UserSettings& settings)
+    FrameArray<OptionsMenuRow>& rows, const UserSettings& settings)
 {
     rows = {
         {
@@ -933,7 +934,7 @@ void appendAudioRows(
 
 // The gameplay bindings page.
 void appendControlsRows(
-    std::vector<OptionsMenuRow>& rows, const OptionsMenuState& state)
+    FrameArray<OptionsMenuRow>& rows, const OptionsMenuState& state)
 {
     rows.push_back({
         .id = OptionsMenuRowId::BindingDevice,
@@ -977,7 +978,7 @@ void appendControlsRows(
 
 // The editor bindings page.
 void appendEditorControlsRows(
-    std::vector<OptionsMenuRow>& rows, const OptionsMenuState& state)
+    FrameArray<OptionsMenuRow>& rows, const OptionsMenuState& state)
 {
     rows.push_back({
         .id = OptionsMenuRowId::EditorControlsSection,
@@ -1009,7 +1010,7 @@ void appendEditorControlsRows(
 
 // The quit confirmation: cancel, and the one row with a danger tone.
 void appendQuitConfirmationRows(
-    std::vector<OptionsMenuRow>& rows)
+    FrameArray<OptionsMenuRow>& rows)
 {
     rows = {
         {
@@ -1026,11 +1027,14 @@ void appendQuitConfirmationRows(
     };
 }
 
-std::vector<OptionsMenuRow> optionsMenuRows(
+FrameArray<OptionsMenuRow> optionsMenuFrameRows(
     const OptionsMenuState& state,
-    const UserSettings& settings)
+    const UserSettings& settings,
+    FrameArena* arena)
 {
-    std::vector<OptionsMenuRow> rows;
+    FrameArray<OptionsMenuRow> rows = arena
+        ? FrameArray<OptionsMenuRow>(*arena, 64)
+        : FrameArray<OptionsMenuRow>();
     switch (state.page) {
     case OptionsMenuPage::Main:
         appendMainRows(rows, state);
@@ -1052,6 +1056,14 @@ std::vector<OptionsMenuRow> optionsMenuRows(
         break;
     }
     return rows;
+}
+
+std::vector<OptionsMenuRow> optionsMenuRows(
+    const OptionsMenuState& state,
+    const UserSettings& settings)
+{
+    const auto rows = optionsMenuFrameRows(state, settings, nullptr);
+    return { rows.begin(), rows.end() };
 }
 
 OptionsMenuReduction reduceOptionsMenu(
@@ -1281,6 +1293,9 @@ std::optional<OptionsAction> OptionsMenu::handleInput(
     const UserSettings& settings,
     const OptionsMenuInput& input)
 {
+    if (!input.up && !input.down && !input.left && !input.right && !input.confirm) {
+        return std::nullopt;
+    }
     UserSettings current = settings;
     std::optional<OptionsAction> action;
     auto apply = [&](const OptionsMenuIntent& intent) {
@@ -1353,8 +1368,8 @@ struct OptionsRowDraw {
 // 248 lines, sharing only the row list.
 void layoutOptionsRows(
     menuKit::MenuPage& layout,
-    const std::vector<OptionsMenuRow>& rows,
-    std::vector<RowLayout>& rowLayouts,
+    const FrameArray<OptionsMenuRow>& rows,
+    FrameArray<RowLayout>& rowLayouts,
     const OptionsMenuState& state,
     bool compactGraphics,
     UiLayoutNode& controlsPrompt,
@@ -1454,7 +1469,7 @@ void drawTabsRow(const OptionsRowDraw& d)
     const bool focused = d.focused;
     std::optional<OptionsMenuIntent>& intent = d.intent;
 
-    std::vector<uiControls::ChoiceOption> choices;
+    FrameArray<uiControls::ChoiceOption> choices(ui.frameArena(), row.choices.size());
     choices.reserve(row.choices.size());
     for (const OptionsMenuChoice& choice : row.choices) {
         choices.push_back({ choice.value, choice.label });
@@ -1535,7 +1550,7 @@ void drawSegmentedChoiceRow(const OptionsRowDraw& d)
         row.label,
         { 0.83f, 0.86f, 0.83f, 1.0f },
         22.0f * d.contentScale);
-    std::vector<uiControls::ChoiceOption> choices;
+    FrameArray<uiControls::ChoiceOption> choices(ui.frameArena(), row.choices.size());
     choices.reserve(row.choices.size());
     for (const OptionsMenuChoice& choice : row.choices) {
         choices.push_back({ choice.value, choice.label });
@@ -1570,7 +1585,7 @@ void drawStepperChoiceRow(const OptionsRowDraw& d)
         row.label,
         { 0.83f, 0.86f, 0.83f, 1.0f },
         22.0f * d.contentScale);
-    std::vector<uiControls::ChoiceOption> choices;
+    FrameArray<uiControls::ChoiceOption> choices(ui.frameArena(), row.choices.size());
     choices.reserve(row.choices.size());
     for (const OptionsMenuChoice& choice : row.choices) {
         choices.push_back({ choice.value, choice.label });
@@ -1673,7 +1688,7 @@ void drawCustomRenderScaleRow(const OptionsRowDraw& d)
     float value = row.sliderValue;
     const bool sliderChanged = uiControls::slider(
         ui,
-        controlId + ".slider",
+        controlId,
         layout.tree.rect(rowLayout.control),
         value,
         0.25f,
@@ -1712,9 +1727,9 @@ void drawCustomRenderScaleRow(const OptionsRowDraw& d)
         .width = static_cast<uint32_t>(std::max(viewport.x, 0.0f)),
         .height = static_cast<uint32_t>(std::max(viewport.y, 0.0f)),
     }, effectiveScale);
-    const std::string resolution =
-        std::to_string(internal.width) + " x " +
-        std::to_string(internal.height) + " internal";
+    char resolution[64] {};
+    std::snprintf(resolution, sizeof(resolution), "%u x %u internal",
+        internal.width, internal.height);
     ui.text(
         layout.tree.rect(rowLayout.detail).position,
         resolution,
@@ -1778,7 +1793,8 @@ void drawBindingRow(const OptionsRowDraw& d)
                 : actionBindingsDisplay(
                       settings.input,
                       *action,
-                      state.controlsBindingDevice),
+                      state.controlsBindingDevice,
+                      ui.frameArena()),
             capturing
                 ? Vec4 { 0.98f, 0.84f, 0.42f, 1.0f }
                 : (focused
@@ -1803,8 +1819,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
     ui.rect(
         { { 0.0f, 0.0f }, viewport },
         { 0.015f, 0.020f, 0.021f, 0.78f });
-    const std::vector<OptionsMenuRow> rows =
-        optionsMenuRows(state, settings);
+    const auto rows = optionsMenuFrameRows(state, settings, &ui.frameArena());
     const bool compactGraphics =
         state.page == OptionsMenuPage::Graphics;
     const float afterHeader = bindingPage(state.page)
@@ -1815,8 +1830,11 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
     // viewport is shorter than that content, all vertical metrics and control
     // typography use one common scale, keeping every row and Back action in
     // bounds without maintaining a second set of per-page height estimates.
-    menuKit::MenuPage measurement(afterHeader);
-    std::vector<RowLayout> measuredRows(rows.size());
+    menuKit::MenuPage measurement(afterHeader, false, 1.0f, &ui.frameArena());
+    FrameArray<RowLayout> measuredRows(ui.frameArena(), rows.size());
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        measuredRows.push_back({});
+    }
     UiLayoutNode measuredControlsPrompt {};
     if (state.page == OptionsMenuPage::QuitConfirmation) {
         measurement.tree.spacer(measurement.tree.root(), 20.0f);
@@ -1850,8 +1868,12 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
     menuKit::MenuPage layout(
         afterHeader,
         false,
-        verticalScale);
-    std::vector<RowLayout> rowLayouts(rows.size());
+        verticalScale,
+        &ui.frameArena());
+    FrameArray<RowLayout> rowLayouts(ui.frameArena(), rows.size());
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        rowLayouts.push_back({});
+    }
     UiLayoutNode message {};
     UiLayoutNode controlsPrompt {};
     if (state.page == OptionsMenuPage::QuitConfirmation) {

@@ -59,7 +59,8 @@ struct MenuPage {
     explicit MenuPage(
         float afterHeader = 26.0f,
         bool withSubtitle = false,
-        float verticalScale = 1.0f);
+        float verticalScale = 1.0f,
+        FrameArena* arena = nullptr);
 
     void drawHeader(
         UiContext& ui,

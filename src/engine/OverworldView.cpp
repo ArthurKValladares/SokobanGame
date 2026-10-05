@@ -66,13 +66,19 @@ float playerTransitionProgress(
 }
 
 void includeNeighborhood(
-    std::vector<OverworldScreenId>& result,
+    FrameArray<OverworldScreenId>& result,
     const OverworldMap& map,
     OverworldScreenId center)
 {
-    for (OverworldScreenId screen : map.visibleNeighborhood(center)) {
-        if (std::ranges::find(result, screen) == result.end()) {
-            result.push_back(screen);
+    const auto* active = map.screen(center);
+    if (!active) {
+        return;
+    }
+    for (const auto& screen : map.screens()) {
+        if (std::abs(screen.slot.x - active->slot.x) <= 1 &&
+            std::abs(screen.slot.y - active->slot.y) <= 1 &&
+            std::ranges::find(result, screen.id) == result.end()) {
+            result.push_back(screen.id);
         }
     }
 }
@@ -131,7 +137,8 @@ OverworldView calculateOverworldView(
     const GameState& committedState,
     const GameState& projectedState,
     Vec3 primaryPlayerRenderPosition,
-    float overviewProgress)
+    float overviewProgress,
+    FrameArena* arena)
 {
     const OverworldScreenRuntime* active = map.screen(activeScreen);
     if (active == nullptr) {
@@ -152,8 +159,12 @@ OverworldView calculateOverworldView(
         },
         .overviewCameraExtent = wholeMapExtent(map),
         .overviewProgress = std::clamp(overviewProgress, 0.0f, 1.0f),
+        .visibleScreens = arena
+            ? FrameArray<OverworldScreenId>(*arena, map.screens().size())
+            : FrameArray<OverworldScreenId>(),
     };
     includeNeighborhood(view.visibleScreens, map, activeScreen);
+    std::ranges::sort(view.visibleScreens);
     if (view.overviewProgress > 0.0001f) {
         view.visibleScreens.clear();
         view.visibleScreens.reserve(map.screens().size());
@@ -197,8 +208,19 @@ calculateOverworldFogVolumes(
     std::span<const OverworldScreenId> discoveredScreens,
     std::optional<OverworldFogReveal> reveal)
 {
-    std::vector<RenderFrameData::OverworldFogVolume> volumes;
+    FrameArray<RenderFrameData::OverworldFogVolume> volumes;
     volumes.reserve(visibleScreens.size());
+    appendOverworldFogVolumes(volumes, map, visibleScreens, discoveredScreens, reveal);
+    return { volumes.begin(), volumes.end() };
+}
+
+void appendOverworldFogVolumes(
+    FrameArray<RenderFrameData::OverworldFogVolume>& volumes,
+    const OverworldMap& map,
+    std::span<const OverworldScreenId> visibleScreens,
+    std::span<const OverworldScreenId> discoveredScreens,
+    std::optional<OverworldFogReveal> reveal)
+{
     const float width = static_cast<float>(map.layout().screenWidth);
     const float height = static_cast<float>(map.layout().screenHeight);
     const float edgeFade = config::fogOfWarEdgeFadeDistance;
@@ -249,7 +271,6 @@ calculateOverworldFogVolumes(
         }
         volumes.push_back(volume);
     }
-    return volumes;
 }
 
 } // namespace sokoban
