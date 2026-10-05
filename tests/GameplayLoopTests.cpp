@@ -676,11 +676,14 @@ void testPortalIceFallFiresAtStationaryHeroAndUndoesTogether()
     }
 
     std::size_t shots = 0;
+    std::size_t portalSounds = 0;
     bool fired = false;
     for (int frame = 0; frame < 150; ++frame) {
         const auto result = GameplayLoop::update(
             level, session, presentation, {}, 0.01f, false);
         shots += result.turretShots.size();
+        portalSounds += static_cast<std::size_t>(std::ranges::count(
+            result.sounds, GameplaySound::PortalTravel));
         if (!result.turretShots.empty()) {
             fired = true;
             CHECK(session.state().movables[0].cell == GridPosition3({ 1, 2, 1 }));
@@ -692,6 +695,7 @@ void testPortalIceFallFiresAtStationaryHeroAndUndoesTogether()
         }
     }
     CHECK(shots == 1);
+    CHECK(portalSounds == 1);
     CHECK(session.state().players[0].cell == GridPosition3({ 4, 2, 2 }));
     CHECK(session.state().players[0].dead);
     CHECK(!session.moving());
@@ -702,6 +706,7 @@ void testPortalIceFallFiresAtStationaryHeroAndUndoesTogether()
         const auto result = GameplayLoop::update(
             level, session, presentation, {}, 0.01f, false);
         CHECK(result.turretShots.empty());
+        CHECK(result.sounds.empty());
     }
     CHECK(session.state() == initial);
     CHECK(session.undoCount() == 0);
@@ -751,10 +756,216 @@ void testPortalCrossingsReachTheLivePresentation()
     }
 }
 
+void testPressurePlateSoundsAreEdgesAndUndoIsSilent()
+{
+    TEST("pressurePlateSoundsAreEdgesAndUndoIsSilent");
+    const auto level = makeLevel({ { "....." }, { "CP  E" } });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto pressed = GameplayLoop::update(level, session, presentation,
+        { .right = { .pressed = true } }, 0.15f, false);
+    CHECK(std::ranges::count(pressed.sounds, GameplaySound::PressurePlatePress) == 1);
+    CHECK(GameplayLoop::update(level, session, presentation, {}, 0.2f, false).sounds.empty());
+    const auto released = GameplayLoop::update(level, session, presentation,
+        { .right = { .pressed = true } }, 0.15f, false);
+    CHECK(std::ranges::count(released.sounds, GameplaySound::PressurePlateRelease) == 1);
+    const auto undone = GameplayLoop::update(level, session, presentation,
+        { .undoPressed = true }, 0.4f, false);
+    CHECK(undone.sounds.empty());
+    CHECK(session.state().players[0].cell == GridPosition3({ 1, 0, 1 }));
+}
+
+void testEveryButtonPulseHasOneSound()
+{
+    TEST("everyButtonPulseHasOneSound");
+    const auto level = Level::loadFromDefinition({
+        .layers = { { "...." }, { "C  G" } },
+        .gates = { { .cell = { 3, 0, 1 }, .pressurePlates = { { 0, 0, 1 } } } },
+        .plates = { { { 0, 0, 1 }, TileType::Button } },
+    }, "button audio");
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    for (int pulse = 0; pulse < 2; ++pulse) {
+        const auto result = GameplayLoop::update(level, session, presentation,
+            { .interactPressed = true }, 0.15f, false);
+        CHECK(std::ranges::count(result.sounds, GameplaySound::ButtonPress) == 1);
+        CHECK(std::ranges::count(result.sounds, GameplaySound::GateOpen) == (pulse == 0 ? 1 : 0));
+        CHECK(std::ranges::count(result.sounds, GameplaySound::GateClose) == 0);
+        CHECK(!result.mirrorActivated);
+        CHECK(GameplayLoop::update(level, session, presentation, {}, 0.1f, false).sounds.empty());
+    }
+    const auto expired = GameplayLoop::update(level, session, presentation,
+        { .right = { .pressed = true } }, 0.15f, false);
+    CHECK(std::ranges::count(expired.sounds, GameplaySound::GateClose) == 1);
+    CHECK(std::ranges::count(expired.sounds, GameplaySound::GateOpen) == 0);
+}
+
+void testGateSoundsFollowOpenState()
+{
+    TEST("gateSoundsFollowOpenState");
+    for (const bool startOpen : { false, true }) {
+        const auto level = Level::loadFromDefinition({
+            .layers = { { "....." }, { "CP G " } },
+            .gates = { { .cell = { 3, 0, 1 },
+                .pressurePlates = { { 1, 0, 1 } }, .startOpen = startOpen } },
+        }, "gate audio");
+        GameplaySession session;
+        session.reset(level);
+        session.setStepDurationSeconds(0.1f);
+        GameplayPresentation presentation;
+        presentation.resetEntities(session.state());
+        const auto pressed = GameplayLoop::update(level, session, presentation,
+            { .right = { .pressed = true } }, 0.01f, false);
+        const auto onPress = startOpen ? GameplaySound::GateClose : GameplaySound::GateOpen;
+        const auto onRelease = startOpen ? GameplaySound::GateOpen : GameplaySound::GateClose;
+        CHECK(std::ranges::count(pressed.sounds, onPress) == 1);
+        CHECK(std::ranges::count(pressed.sounds, onRelease) == 0);
+        const auto landed = GameplayLoop::update(level, session, presentation, {}, 0.2f, false);
+        CHECK(std::ranges::count(landed.sounds, onPress) == 0);
+        CHECK(rules::isGateOpen(level, session.state(), level.gates()[0]) != startOpen);
+        const auto released = GameplayLoop::update(level, session, presentation,
+            { .left = { .pressed = true } }, 0.15f, false);
+        CHECK(std::ranges::count(released.sounds, onRelease) == 1);
+        CHECK(std::ranges::count(released.sounds, onPress) == 0);
+        CHECK(rules::isGateOpen(level, session.state(), level.gates()[0]) == startOpen);
+        CHECK(GameplayLoop::update(level, session, presentation, {}, 0.2f, false).sounds.empty());
+        const auto undone = GameplayLoop::update(level, session, presentation,
+            { .undoPressed = true }, 0.4f, false);
+        CHECK(undone.sounds.empty());
+        CHECK(rules::isGateOpen(level, session.state(), level.gates()[0]) != startOpen);
+    }
+}
+
+void testBlockedGateDoesNotPlayClosingSound()
+{
+    TEST("blockedGateDoesNotPlayClosingSound");
+    const auto level = Level::loadFromDefinition({
+        .layers = { { "....." }, { "PC G " }, { "   R " } },
+        .gates = { { .cell = { 3, 0, 1 }, .pressurePlates = { { 0, 0, 1 } } } },
+    }, "blocked gate audio");
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto opened = GameplayLoop::update(level, session, presentation,
+        { .left = { .pressed = true } }, 0.15f, false);
+    CHECK(std::ranges::count(opened.sounds, GameplaySound::GateOpen) == 1);
+    CHECK(session.state().movables[0].cell == GridPosition3({ 3, 0, 1 }));
+    const auto released = GameplayLoop::update(level, session, presentation,
+        { .right = { .pressed = true } }, 0.15f, false);
+    CHECK(std::ranges::count(released.sounds, GameplaySound::PressurePlateRelease) == 1);
+    CHECK(std::ranges::count(released.sounds, GameplaySound::GateClose) == 0);
+    CHECK(std::ranges::count(released.sounds, GameplaySound::GateOpen) == 0);
+    CHECK(rules::isGateOpen(level, session.state(), level.gates()[0]));
+}
+
+void testRotatorSoundRequiresAnActualTurn()
+{
+    TEST("rotatorSoundRequiresAnActualTurn");
+    const auto level = Level::loadFromDefinition({
+        .layers = { { "....." }, { "PC 1R" } },
+        .rotators = { { .cell = { 3, 0, 1 }, .pressurePlates = { { 0, 0, 1 } } } },
+        .plates = { { { 3, 0, 1 }, TileType::RotatorClockwise } },
+    }, "rotator audio");
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto result = GameplayLoop::update(level, session, presentation,
+        { .left = { .pressed = true } }, 0.15f, false);
+    CHECK(std::ranges::count(result.sounds, GameplaySound::RotatorTurn) == 1);
+    CHECK(GameplayLoop::update(level, session, presentation, {}, 0.2f, false).sounds.empty());
+}
+
+void testMinecartGateSoundFollowsTheMovingCart()
+{
+    TEST("minecartGateSoundFollowsTheMovingCart");
+    const auto level = Level::loadFromDefinition({
+        .layers = { { "....." }, { "CPMg_" } },
+        .plates = { { { 2, 0, 1 }, TileType::RailStopEastWest },
+                    { { 3, 0, 1 }, TileType::RailStraightEastWest } },
+        .minecarts = { { .cell = { 2, 0, 1 },
+            .pressurePlates = { { 1, 0, 1 } }, .initialDirection = 1 } },
+    }, "cart audio");
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto started = GameplayLoop::update(level, session, presentation,
+        { .right = { .pressed = true } }, 0.01f, false);
+    CHECK(std::ranges::count(started.sounds, GameplaySound::MinecartGateOpen) == 0);
+    CHECK(!presentation.minecarts()[0].moving);
+    std::size_t gateSounds = 0;
+    bool observedTravel = false;
+    for (int frame = 0; frame < 100; ++frame) {
+        const auto result = GameplayLoop::update(level, session, presentation, {}, 0.01f, false);
+        gateSounds += static_cast<std::size_t>(std::ranges::count(
+            result.sounds, GameplaySound::MinecartGateOpen));
+        observedTravel |= presentation.minecarts()[0].moving;
+    }
+    CHECK(gateSounds == 1);
+    CHECK(observedTravel);
+    CHECK(!presentation.minecarts()[0].moving);
+    CHECK(session.state().minecarts[0].cell == GridPosition3({ 4, 0, 1 }));
+}
+
+void testElevatorLoopUsesPlatformMotionOnly()
+{
+    TEST("elevatorLoopUsesPlatformMotionOnly");
+    const auto level = Level::loadFromDefinition({
+        .layers = { { "....=." }, { "  C P." }, { "     ." }, { "      " } },
+        .elevators = { { .cell = { 4, 0, 0 },
+            .pressurePlates = { { 4, 0, 1 } }, .levels = { 0, 2 } } },
+    }, "elevator audio");
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    static_cast<void>(GameplayLoop::update(level, session, presentation,
+        { .right = { .pressed = true } }, 0.15f, false));
+    CHECK(!presentation.elevators()[0].moving);
+    static_cast<void>(GameplayLoop::update(level, session, presentation,
+        { .right = { .pressed = true } }, 0.01f, false));
+    CHECK(!presentation.elevators()[0].moving);
+    bool observedTravel = false;
+    std::size_t platePresses = 0;
+    std::size_t plateReleases = 0;
+    for (int frame = 0; frame < 100; ++frame) {
+        const auto result = GameplayLoop::update(level, session, presentation, {}, 0.01f, false);
+        platePresses += static_cast<std::size_t>(std::ranges::count(
+            result.sounds, GameplaySound::PressurePlatePress));
+        plateReleases += static_cast<std::size_t>(std::ranges::count(
+            result.sounds, GameplaySound::PressurePlateRelease));
+        observedTravel |= presentation.elevators()[0].moving;
+    }
+    CHECK(platePresses == 1);
+    CHECK(plateReleases == 1);
+    CHECK(observedTravel);
+    CHECK(!presentation.elevators()[0].moving);
+    CHECK(session.state().elevators[0].cell == GridPosition3({ 4, 0, 2 }));
+}
+
 } // namespace
 
 int main()
 {
+    testPressurePlateSoundsAreEdgesAndUndoIsSilent();
+    testEveryButtonPulseHasOneSound();
+    testGateSoundsFollowOpenState();
+    testBlockedGateDoesNotPlayClosingSound();
+    testRotatorSoundRequiresAnActualTurn();
+    testMinecartGateSoundFollowsTheMovingCart();
+    testElevatorLoopUsesPlatformMotionOnly();
     testPortalIceFallFiresAtStationaryHeroAndUndoesTogether();
     testPortalCrossingsReachTheLivePresentation();
     testOpposingDirectionsAreNeutral();

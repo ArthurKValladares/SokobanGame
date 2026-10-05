@@ -75,12 +75,18 @@ public:
     // Advances gameplay audio. While the player is walking (or pushing), a
     // footstep variation plays on the cadence interval. While a stone is being
     // pushed, a randomly chosen stone-drag loop plays seamlessly and fades out
-    // when the push ends.
-    void update(float dt, bool playerWalking, bool pushingStone);
+    // when the push ends. Cart and elevator loops follow visible platform
+    // travel and fade out while stationary or when gameplay is suspended.
+    void update(float dt, bool playerWalking, bool pushingStone,
+        bool minecartMoving = false, bool elevatorMoving = false);
 
-    // Plays a decoded, non-looping variation from a manifest sound set. Sets
-    // used by the footstep and stone-drag orchestrators are reserved.
-    void playOneShot(std::string_view soundSetName);
+    // Plays a decoded, non-looping variation from a manifest sound set. Delay
+    // aligns turret audio with the scheduled muzzle effect. Footstep and
+    // stone-drag sets are reserved for their orchestrators.
+    void playOneShot(std::string_view soundSetName, float delaySeconds = 0.0f);
+    // One shared loop per set stays phase-continuous while any matching
+    // platform moves. Stopping and restarting use short click-free fades.
+    void setLoopingSound(std::string_view soundSetName, bool playing);
 
 #if SOKOBAN_ENABLE_DEBUG_UI
     // Auditions an editor selection through this engine, without requiring

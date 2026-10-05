@@ -1335,6 +1335,137 @@ void GameplayPresentation::syncToGameState(const GameState& state)
     }
 }
 
+std::vector<GameplaySoundCue> GameplayPresentation::buildActionSoundCues(
+    const Level& level,
+    const GameplaySession::Action& action,
+    const std::vector<GameState>& legs,
+    const std::vector<plans::PlannedAction::PortalCue>& portals,
+    float mechanicalDurationSeconds) const
+{
+    std::vector<GameplaySoundCue> cues;
+    if (action.reversed) {
+        return cues;
+    }
+    const std::size_t legCount = std::max<std::size_t>(legs.size(), 1);
+    const float stepSeconds = mechanicalDurationSeconds / static_cast<float>(legCount);
+    float legStart = 0.0f;
+    for (std::size_t leg = 0; leg < legCount; ++leg) {
+        const GameState& before = leg == 0 ? action.before : legs[leg - 1];
+        const GameState& after = legs.empty() ? action.after : legs[leg];
+        const auto moves = platformMoves(before, after, stepSeconds, &level);
+        const float legEnd = legStart + stepSeconds + platformExtraSeconds(moves);
+        // Gates fade toward the projected state while the leg moves. Start
+        // their sound with that fade, using the effective state so inverted
+        // gates and gates held open by blocks choose the correct effect.
+        for (const auto& gate : level.gates()) {
+            const bool wasOpen = rules::isGateOpen(level, before, gate);
+            const bool open = rules::isGateOpen(level, after, gate);
+            if (wasOpen != open) {
+                cues.push_back({ open ? GameplaySound::GateOpen
+                                     : GameplaySound::GateClose, legStart });
+            }
+        }
+        // Rules resolve boarding and platform travel together. Recover the
+        // boarding pose so a plate can press, start its elevator, and release
+        // when the rider leaves it, all within the same world-step leg.
+        GameState settled = after;
+        const auto boardingPositions = [&](auto& entities, const auto& starts) {
+            for (std::size_t index = 0; index < std::min(entities.size(), starts.size()); ++index) {
+                if (const auto* ride = rideOf(moves, starts[index].cell, entities[index].cell)) {
+                    entities[index].cell = boardingCell(*ride, entities[index].cell);
+                }
+            }
+        };
+        boardingPositions(settled.players, before.players);
+        boardingPositions(settled.movables, before.movables);
+        boardingPositions(settled.enemies, before.enemies);
+        const auto plateEdges = [&](const GameState& from, const GameState& to, float time) {
+            for (const auto plate : level.pressurePlates()) {
+                if (level.plateAt(plate) == TileType::Button) {
+                    continue;
+                }
+                const bool wasPressed = rules::isPressurePlateActive(level, from, plate);
+                const bool pressed = rules::isPressurePlateActive(level, to, plate);
+                if (wasPressed != pressed) {
+                    cues.push_back({ pressed ? GameplaySound::PressurePlatePress
+                                            : GameplaySound::PressurePlateRelease, time });
+                }
+            }
+        };
+        plateEdges(before, settled, legStart + stepSeconds);
+        plateEdges(settled, after, legEnd);
+        // Activation plans have no legs. Each pulse is a fresh press, even
+        // when consecutive Activate actions leave activeButtons identical.
+        const bool pulse = legs.empty() && !after.activeButtons.empty();
+        GameState engagementBefore = before;
+        if (pulse) {
+            engagementBefore.activeButtons.clear();
+            for (std::size_t button = 0; button < after.activeButtons.size(); ++button) {
+                cues.push_back({ GameplaySound::ButtonPress, legStart });
+            }
+        }
+        for (const auto& rotator : level.rotators()) {
+            if (!rules::isRotatorEngaged(level, engagementBefore, rotator) &&
+                rules::isRotatorEngaged(level, settled, rotator) &&
+                rules::isPressurePlateActive(level, settled, rotator.cell)) {
+                cues.push_back({ GameplaySound::RotatorTurn, legStart + stepSeconds });
+            }
+        }
+        legStart = legEnd;
+    }
+
+    const auto& motions = action.presentation.motions;
+    for (std::size_t index = 0; index < motions.size(); ++index) {
+        const auto& motion = motions[index];
+        if (motion.target.kind == EntityKind::Minecart) {
+            const GridPosition3 destination {
+                static_cast<int>(std::lround(motion.to.x)),
+                static_cast<int>(std::lround(motion.to.y)),
+                static_cast<int>(std::lround(motion.to.z)),
+            };
+            if (level.tileAt(destination.x, destination.y, destination.z) == TileType::MinecartGate &&
+                length(motion.to - motion.from) > 0.001f) {
+                // Match MinecartGateVisuals: opening begins when the cart
+                // reaches 0.95 tiles from the barrier on its incoming segment.
+                cues.push_back({ GameplaySound::MinecartGateOpen,
+                    motion.startSeconds + motion.durationSeconds * 0.05f });
+            }
+        }
+        if (portals.empty()) {
+            continue;
+        }
+        const ActionMotionTrack* previous = nullptr;
+        for (std::size_t prior = 0; prior < index; ++prior) {
+            if (motions[prior].target == motion.target) {
+                previous = &motions[prior];
+            }
+        }
+        if (previous == nullptr) {
+            continue;
+        }
+        for (const auto& portal : portals) {
+            if (portal.transit.target != motion.target) {
+                continue;
+            }
+            const auto entry = rules::directionOffset(portal.transit.entryDirection);
+            const auto exit = portalEdgeOffset(*level.plateAt(portal.transit.exit));
+            const auto mouth = toVec3(portal.transit.entrance) +
+                Vec3 { static_cast<float>(entry.x) * 0.5f,
+                       static_cast<float>(entry.y) * 0.5f, 0.0f };
+            const auto emerged = toVec3(portal.transit.exit) +
+                Vec3 { static_cast<float>(exit.x) * 0.5f,
+                       static_cast<float>(exit.y) * 0.5f, 0.0f };
+            if (length(previous->to - mouth) < 0.001f &&
+                length(motion.from - emerged) < 0.001f) {
+                cues.push_back({ GameplaySound::PortalTravel, motion.startSeconds });
+                break;
+            }
+        }
+    }
+    std::ranges::stable_sort(cues, {}, &GameplaySoundCue::triggerSeconds);
+    return cues;
+}
+
 float GameplayPresentation::conveyorBeltScrollOffset(
     float stepDurationSeconds) const
 {

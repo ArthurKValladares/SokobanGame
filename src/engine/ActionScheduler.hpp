@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/ActionPlan.hpp"
+#include "engine/GameplaySound.hpp"
 #include "engine/Reservation.hpp"
 #include "engine/Rules.hpp"
 
@@ -65,6 +66,7 @@ public:
         // planned. They are consumed only by the live action admission path.
         std::vector<plans::TurretShotCue> turretShots;
         std::vector<plans::PlannedAction::PortalCue> portalTransits;
+        std::vector<GameplaySoundCue> soundCues;
         // Duration assigned by rules before presentation clips are installed.
         // Reaction cues use this clock so a long death animation cannot move
         // the firing point past the end of the movement that caused it.

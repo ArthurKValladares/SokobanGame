@@ -1301,6 +1301,10 @@ void Application::update(
             shot.shot.turret.id,
             shot.shot.direction,
             recoilDelay);
+        audioSystem_->playOneShot("laser", recoilDelay);
+    }
+    for (const auto sound : gameplayResult.sounds) {
+        audioSystem_->playOneShot(soundSetName(sound));
     }
     if (gameplayResult.draftSolved) {
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -1364,7 +1368,11 @@ void Application::update(
             (player.animationUse == AnimationUse::PlayerPush ||
                 player.animationUse == AnimationUse::PlayerPull);
     }
-    audioSystem_->update(dt, playerMoving, pushing);
+    const bool minecartMoving = std::ranges::any_of(
+        presentation_.minecarts(), [](const auto& cart) { return cart.moving; });
+    const bool elevatorMoving = std::ranges::any_of(
+        presentation_.elevators(), [](const auto& elevator) { return elevator.moving; });
+    audioSystem_->update(dt, playerMoving, pushing, minecartMoving, elevatorMoving);
 }
 
 void Application::loadCurrentScreen()

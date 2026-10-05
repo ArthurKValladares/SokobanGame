@@ -86,6 +86,8 @@ public:
     // caused by movement become ready only after that movement leg has
     // finished; stationary volleys remain ready at action start.
     [[nodiscard]] std::vector<TurretShotEvent> takeReadyTurretShots();
+    [[nodiscard]] std::vector<GameplaySound> takeReadySounds();
+    void setActionSoundCues(std::size_t actionId, std::vector<GameplaySoundCue> cues);
 
     [[nodiscard]] const GameState& state() const { return scheduler_.state(); }
     [[nodiscard]] bool moving() const { return !scheduler_.idle(); }

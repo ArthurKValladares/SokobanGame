@@ -806,6 +806,32 @@ const GameState& GameplaySession::undoBaseState() const
     return undoHistory_.empty() ? undoBaseState_ : undoHistory_.back().after;
 }
 
+void GameplaySession::setActionSoundCues(
+    std::size_t actionId, std::vector<GameplaySoundCue> cues)
+{
+    if (auto* action = scheduler_.find(actionId)) {
+        action->soundCues = std::move(cues);
+    }
+}
+
+std::vector<GameplaySound> GameplaySession::takeReadySounds()
+{
+    std::vector<GameplaySound> ready;
+    for (const auto& current : scheduler_.inFlight()) {
+        auto* action = scheduler_.find(current.id);
+        if (action->plan.reversed || action->elapsedSeconds < 0.0f) {
+            continue;
+        }
+        for (auto& cue : action->soundCues) {
+            if (!cue.emitted && action->elapsedSeconds >= cue.triggerSeconds) {
+                cue.emitted = true;
+                ready.push_back(cue.sound);
+            }
+        }
+    }
+    return ready;
+}
+
 void GameplaySession::rebaseUndoFrom(std::size_t index)
 {
     for (std::size_t i = index; i < undoHistory_.size(); ++i) {

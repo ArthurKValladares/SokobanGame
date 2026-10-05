@@ -860,8 +860,58 @@
     {
       "name": "laser",
       "files": [
-        "audio/sound.ogg"
+        "Kenney Game Assets All-in-1 3.5.0/Audio/Sci-Fi Sounds/Audio/laserLarge_002.ogg"
       ]
+    },
+    {
+      "name": "minecart-travel",
+      "files": ["custom/audio/minecartTravelLoop.wav"],
+      "volume": 0.55
+    },
+    {
+      "name": "portal-travel",
+      "files": ["custom/audio/portalTravel.wav"],
+      "volume": 0.65
+    },
+    {
+      "name": "minecart-gate-open",
+      "files": ["custom/audio/minecartGateOpen.wav"],
+      "volume": 0.55
+    },
+    {
+      "name": "rotator-turn",
+      "files": ["custom/audio/rotatorTurn.wav"],
+      "volume": 0.55
+    },
+    {
+      "name": "pressure-plate-press",
+      "files": ["custom/audio/pressurePlatePress.wav"],
+      "volume": 0.65
+    },
+    {
+      "name": "pressure-plate-release",
+      "files": ["custom/audio/pressurePlateRelease.wav"],
+      "volume": 0.55
+    },
+    {
+      "name": "button-press",
+      "files": ["custom/audio/buttonPress.wav"],
+      "volume": 0.55
+    },
+    {
+      "name": "elevator-moving",
+      "files": ["custom/audio/elevatorMovingLoop.wav"],
+      "volume": 0.5
+    },
+    {
+      "name": "gate-open",
+      "files": ["custom/audio/gateOpen.wav"],
+      "volume": 0.55
+    },
+    {
+      "name": "gate-close",
+      "files": ["custom/audio/gateClose.wav"],
+      "volume": 0.55
     }
   ],
   "music": [

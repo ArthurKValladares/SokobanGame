@@ -74,6 +74,12 @@ void startPresentation(
             actionId, presentation.reverseDuration(started->plan));
         started = session.findInFlight(actionId);
     }
+    session.setActionSoundCues(
+        actionId,
+        presentation.buildActionSoundCues(
+            level, started->plan, started->legs, started->portalTransits,
+            started->mechanicalDurationSeconds));
+    started = session.findInFlight(actionId);
     presentation.beginAction(started->plan, session.state());
     // A deferred action holds its claims but has not begun, and its entities
     // are still being driven by the action that caused it. Seeking it to zero
@@ -132,6 +138,12 @@ void appendReadyTurretShots(
             .impactDelaySeconds = event.impactDelaySeconds,
         });
     }
+}
+
+void appendReadySounds(GameplaySession& session, GameplayLoop::UpdateResult& result)
+{
+    const auto ready = session.takeReadySounds();
+    result.sounds.insert(result.sounds.end(), ready.begin(), ready.end());
 }
 
 // Samples every action in flight at its own elapsed time. Each one clears and
@@ -231,6 +243,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
                 presentedThrough);
         }
         appendReadyTurretShots(session, result.turretShots);
+        appendReadySounds(session, result);
         if (!session.moving()) {
             return result;
         }
@@ -245,6 +258,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
                 0.0f);
         }
         appendReadyTurretShots(session, result.turretShots);
+        appendReadySounds(session, result);
         seekAllInFlight(session, presentation);
         if (!session.anyActionComplete()) {
             continue;

@@ -29,6 +29,8 @@ struct AudioSystem::EngineHandle {
         std::vector<ma_sound> sounds;
         std::vector<int> loaded;
         int lastPlayed = -1;
+        int activeLoop = -1;
+        bool loopRequested = false;
     };
 
     ma_engine engine {};
@@ -228,8 +230,11 @@ bool AudioSystem::available() const
     return engine_->engineInitialized && !engine_->loadedFootsteps.empty();
 }
 
-void AudioSystem::update(float dt, bool playerWalking, bool pushingStone)
+void AudioSystem::update(float dt, bool playerWalking, bool pushingStone,
+    bool minecartMoving, bool elevatorMoving)
 {
+    setLoopingSound("minecart-travel", minecartMoving && dt > 0.0f);
+    setLoopingSound("elevator-moving", elevatorMoving && dt > 0.0f);
     const int due = cadence_.update(dt, playerWalking);
     if (due > 0 && available()) {
         // Multiple due steps in one frame collapse into a single sound;
@@ -247,7 +252,7 @@ void AudioSystem::update(float dt, bool playerWalking, bool pushingStone)
     }
 }
 
-void AudioSystem::playOneShot(std::string_view soundSetName)
+void AudioSystem::playOneShot(std::string_view soundSetName, float delaySeconds)
 {
     if (!engine_->engineInitialized) {
         return;
@@ -271,9 +276,48 @@ void AudioSystem::playOneShot(std::string_view soundSetName)
     found->lastPlayed = pick;
 
     ma_sound& sound = found->sounds[static_cast<size_t>(pick)];
+    ma_sound_reset_stop_time_and_fade(&sound);
+    ma_sound_set_fade_in_milliseconds(&sound, 1.0f, 1.0f, 0);
     ma_sound_set_looping(&sound, MA_FALSE);
     ma_sound_set_volume(&sound, soundVolume_ * found->volume);
     ma_sound_seek_to_pcm_frame(&sound, 0);
+    ma_sound_set_start_time_in_milliseconds(
+        &sound, ma_engine_get_time_in_milliseconds(&engine_->engine) +
+            static_cast<ma_uint64>(std::max(delaySeconds, 0.0f) * 1000.0f));
+    ma_sound_start(&sound);
+}
+
+void AudioSystem::setLoopingSound(std::string_view soundSetName, bool playing)
+{
+    if (!engine_->engineInitialized) {
+        return;
+    }
+    const auto found = std::ranges::find_if(engine_->oneShotSoundSets,
+        [&](const auto& set) { return set.name == soundSetName; });
+    if (found == engine_->oneShotSoundSets.end() || found->loopRequested == playing) {
+        return;
+    }
+    found->loopRequested = playing;
+    if (!playing) {
+        if (found->activeLoop >= 0) {
+            ma_sound_stop_with_fade_in_milliseconds(
+                &found->sounds[static_cast<size_t>(found->activeLoop)], dragFadeOutMilliseconds);
+            found->activeLoop = -1;
+        }
+        return;
+    }
+    if (found->loaded.empty()) {
+        return;
+    }
+    const int pick = found->loaded[random_() % found->loaded.size()];
+    found->activeLoop = pick;
+    ma_sound& sound = found->sounds[static_cast<size_t>(pick)];
+    ma_sound_reset_stop_time_and_fade(&sound);
+    ma_sound_set_start_time_in_milliseconds(&sound, 0);
+    ma_sound_set_looping(&sound, MA_TRUE);
+    ma_sound_seek_to_pcm_frame(&sound, 0);
+    ma_sound_set_volume(&sound, soundVolume_ * found->volume);
+    ma_sound_set_fade_in_milliseconds(&sound, 0.0f, 1.0f, dragFadeInMilliseconds);
     ma_sound_start(&sound);
 }
 

@@ -111,6 +111,12 @@ public:
             nullptr) const;
     [[nodiscard]] float reverseDuration(
         const GameplaySession::Action& action) const;
+    [[nodiscard]] std::vector<GameplaySoundCue> buildActionSoundCues(
+        const Level& level,
+        const GameplaySession::Action& action,
+        const std::vector<GameState>& legs,
+        const std::vector<plans::PlannedAction::PortalCue>& portals,
+        float mechanicalDurationSeconds) const;
     // `worldState` is the session's current state, used to create and remove
     // visuals. Deliberately not taken from `action.before`: see the definition.
     void beginAction(

@@ -51,6 +51,7 @@ public:
         std::vector<GridPosition3> mirrorSwapDestinations;
         std::vector<GridPosition3> witchSwapDestinations;
         std::vector<TurretShotPresentation> turretShots;
+        std::vector<GameplaySound> sounds;
     };
 
     [[nodiscard]] static UpdateResult update(

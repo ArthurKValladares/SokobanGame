@@ -986,6 +986,15 @@ into staged runtime assets. New sound sets start empty, and empty sets or
 missing sound files do not block builds; staging warns and skips missing sound
 files. Other required assets and sound path containment remain validated.
 
+Gameplay sounds include portal travel, gates opening/closing, minecart gate opening, rotator turns,
+pressure plate press/release, button pulses, and the manifest's `laser` effect
+at turret muzzle flash time. `minecart-travel` and `elevator-moving` loop only
+while their platforms visibly move, with short start/stop fades. One-shot
+mechanic cues are transient and do not replay from undo or saved history.
+The original WAV effects in `assets/custom/audio/` can be regenerated with
+`python tools/generate_mechanic_audio.py` (NumPy required); both movement loops
+use periodic synthesis for seamless playback.
+
 `assets/animation_catalog.json` is the source of truth for animation usage,
 playback tuning, and animation ordering. Each manifest animation records its
 validated source duration and a global speed. Every code-declared semantic use
