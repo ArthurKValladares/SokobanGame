@@ -49,6 +49,7 @@ inline constexpr std::string_view triangleVert = "triangle.vert.glsl";
 inline constexpr std::string_view triangleFrag = "triangle.frag.glsl";
 inline constexpr std::string_view uiFrag = "ui.frag.glsl";
 inline constexpr std::string_view waterFrag = "water.frag.glsl";
+inline constexpr std::string_view waterCellsComp = "water_cells.comp.glsl";
 inline constexpr std::string_view mirrorEnergyFrag = "mirror_energy.frag.glsl";
 inline constexpr std::string_view groundSplatFrag = "ground_splat.frag.glsl";
 inline constexpr std::string_view shadowVert = "shadow.vert.glsl";
@@ -106,6 +107,7 @@ inline constexpr auto sources = std::to_array<std::string_view>({
     debugLinkFrag,
     debugLinkVert,
 #endif
+    waterCellsComp,
 });
 
 // The compiled module's filename. The build writes one SPIR-V blob per source

@@ -12,6 +12,7 @@ layout(location = 0) out vec4 outColor;
 
 #include "DrawInstance.glsl"
 #include "SceneFrame.glsl"
+#include "WaterCellFeatures.glsl"
 
 #define draw drawInstances.instances[inDrawInstance]
 
@@ -41,14 +42,6 @@ float bayer8x8(ivec2 pixel)
         42.0, 26.0, 38.0, 22.0, 41.0, 25.0, 37.0, 21.0);
     ivec2 wrapped = pixel & ivec2(7);
     return (thresholds[wrapped.y * 8 + wrapped.x] + 0.5) / 64.0;
-}
-
-vec2 hash22(vec2 value)
-{
-    vec3 value3 =
-        fract(vec3(value.xyx) * vec3(0.1031, 0.1030, 0.0973));
-    value3 += dot(value3, value3.yxz + 33.33);
-    return fract((value3.xx + value3.yz) * value3.zy);
 }
 
 float smoothValueNoise(vec2 position)
@@ -165,46 +158,21 @@ vec2 triangularLatticeCoordinates(vec2 position)
     return vec2(position.x - row * 0.5, row);
 }
 
-vec2 irregularCellPoint(vec2 cell)
-{
-    vec2 latticePoint = vec2(
-        cell.x + cell.y * 0.5,
-        cell.y * 0.8660254);
-    vec2 jitter = hash22(cell) - vec2(0.5);
-    return latticePoint + vec2(
-        jitter.x * 0.68 + jitter.y * 0.12,
-        jitter.y * 0.58 - jitter.x * 0.10);
-}
-
-float cellDistanceWeight(vec2 cell)
-{
-    return mix(
-        0.72,
-        1.34,
-        hash22(cell + vec2(19.17, 7.43)).x);
-}
-
 float irregularDistanceSquaredAndGradient(
     vec2 vectorToPoint,
-    vec2 cell,
+    WaterCellFeatures feature,
     out vec2 samplePositionGradient)
 {
-    vec2 randomAxis =
-        hash22(cell + vec2(41.73, 23.19)) * 2.0 - vec2(1.0);
-    randomAxis *= inversesqrt(
-        max(dot(randomAxis, randomAxis), 0.001));
+    vec2 randomAxis = feature.pointAndAxis.zw;
     vec2 perpendicular =
         vec2(-randomAxis.y, randomAxis.x);
-    float aspect = mix(
-        0.62,
-        1.48,
-        hash22(cell + vec2(3.11, 57.29)).y);
+    float aspect = feature.shape.x;
     float alongAxis = dot(vectorToPoint, randomAxis);
     float acrossAxis = dot(vectorToPoint, perpendicular);
     vec2 oriented = vec2(
         alongAxis * aspect,
         acrossAxis / aspect);
-    float weight = cellDistanceWeight(cell);
+    float weight = feature.shape.y;
     float aspectSquared = aspect * aspect;
     // vectorToPoint is featurePoint - samplePosition, so this is the
     // derivative with respect to samplePosition rather than vectorToPoint.
@@ -394,6 +362,7 @@ DifferentialVec2 cellularRippleSamplePositionAndDerivatives(
 
 void cellularRippleBoundary(
     vec2 samplePosition,
+    uint pattern,
     out float distanceToBoundary,
     out vec2 distanceGradient)
 {
@@ -409,13 +378,14 @@ void cellularRippleBoundary(
     for (int y = -1; y <= 1; ++y) {
         for (int x = -1; x <= 1; ++x) {
             vec2 cell = baseCell + vec2(x, y);
+            WaterCellFeatures feature = waterCellFeatures(cell, pattern);
             vec2 vectorToPoint =
-                irregularCellPoint(cell) - samplePosition;
+                feature.pointAndAxis.xy - samplePosition;
             vec2 candidateGradient;
             float distanceSquared =
                 irregularDistanceSquaredAndGradient(
                     vectorToPoint,
-                    cell,
+                    feature,
                     candidateGradient);
             if (distanceSquared < nearestDistanceSquared) {
                 secondDistanceSquared = nearestDistanceSquared;
@@ -476,6 +446,7 @@ vec2 cellularRippleBandsFromBoundary(
 
 vec2 cellularRippleBands(
     vec2 position,
+    uint pattern,
     float time,
     float crestHalfWidth,
     float haloWidth)
@@ -485,6 +456,7 @@ vec2 cellularRippleBands(
     vec2 distanceGradient;
     cellularRippleBoundary(
         samplePosition,
+        pattern,
         distanceToBoundary,
         distanceGradient);
     return cellularRippleBandsFromBoundary(
@@ -498,6 +470,7 @@ vec2 cellularRippleBands(
 
 vec2 projectedCellularRippleBands(
     vec2 samplePosition,
+    uint pattern,
     vec2 samplePositionDx,
     vec2 samplePositionDy,
     float time,
@@ -508,6 +481,7 @@ vec2 projectedCellularRippleBands(
     vec2 distanceGradient;
     cellularRippleBoundary(
         samplePosition,
+        pattern,
         distanceToBoundary,
         distanceGradient);
     float boundaryFootprint =
@@ -537,6 +511,7 @@ void waterRipplePatterns(
         vec2(time * 0.10, -time * 0.075);
     primary = cellularRippleBands(
         patternPosition,
+        0u,
         time,
         rippleCrestHalfWidth,
         rippleHaloWidth);
@@ -545,6 +520,7 @@ void waterRipplePatterns(
         vec2(2.31, -1.73);
     secondary = cellularRippleBands(
         secondaryPatternPosition,
+        1u,
         time + 1.40,
         rippleCrestHalfWidth * secondaryThicknessScale,
         rippleHaloWidth * secondaryThicknessScale);
@@ -569,6 +545,7 @@ void projectedWaterRipplePatterns(
             time);
     primary = projectedCellularRippleBands(
         primarySample.value,
+        0u,
         primarySample.dx,
         primarySample.dy,
         time,
@@ -589,6 +566,7 @@ void projectedWaterRipplePatterns(
             time + 1.40);
     secondary = projectedCellularRippleBands(
         secondarySample.value,
+        1u,
         secondarySample.dx,
         secondarySample.dy,
         time + 1.40,

@@ -1,4 +1,5 @@
 #include "engine/render/VulkanSceneRecorder.hpp"
+#include "engine/render/VulkanWaterCellCache.hpp"
 
 #include "engine/Profiler.hpp"
 #include "engine/render/AtmosphereMath.hpp"
@@ -340,6 +341,7 @@ public:
         , ssaoPass_(resources.ssaoPass)
         , atmospherePass_(resources.atmospherePass)
         , bloomPass_(resources.bloomPass)
+        , waterCellCache_(resources.waterCellCache)
         , descriptors_(resources.sceneDescriptors)
         , pipelines_(resources.pipelines)
         , models_(resources.modelResources)
@@ -554,6 +556,11 @@ public:
         vulkanDebug::beginLabel(
             device_, commandBuffer, "Sokoban frame", { 0.1f, 0.4f, 1.0f, 1.0f });
         gpuProfiler_.beginFrame(commandBuffer, configuration_.descriptorFrameIndex);
+        const RenderFrameData& waterFrame = frameData.waterSurfaces.empty() && previewFrameData
+            ? *previewFrameData : frameData;
+        waterCellCache_.record(commandBuffer, configuration_.descriptorFrameIndex,
+            pipelines_.waterCells(), pipelines_.waterCellsLayout(),
+            descriptors_.set(configuration_.descriptorFrameIndex), waterFrame);
         vulkanDebug::beginLabel(
             device_, commandBuffer, "Swapchain setup", { 0.3f, 0.7f, 1.0f, 1.0f });
         swapchain_.beginFrame(commandBuffer, imageIndex, stats_);
@@ -3731,6 +3738,7 @@ private:
     VulkanSsaoPass& ssaoPass_;
     VulkanAtmospherePass& atmospherePass_;
     VulkanBloomPass& bloomPass_;
+    VulkanWaterCellCache& waterCellCache_;
     VulkanSceneDescriptors& descriptors_;
     VulkanPipelineFactory& pipelines_;
     VulkanModelResources& models_;

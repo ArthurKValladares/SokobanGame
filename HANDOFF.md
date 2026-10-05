@@ -444,6 +444,13 @@ and the required real-device checks are recorded.
 - Projected water-ripple screen derivatives execute before the depth-dependent
   geometry branch. Conditional cellular searches may consume an analytically
   propagated footprint, but must not invoke implicit derivatives themselves.
+- Water's static cell features are shared by the compute cache and procedural
+  fallback in `WaterCellFeatures.glsl`. Binding 16 uses one buffer per frame in
+  flight; update only after that frame's fence and preserve the compute-write
+  to fragment-read barrier. Pipeline reloads invalidate both windows. Fragment
+  specialization constant 1 enables the cache; `--disable-water-cell-cache`
+  removes lookup work for a procedural performance control. Measurements and
+  image comparisons are in `docs/performance/2026-10-05-water/README.md`.
 - One-shot command-buffer and fence lifetime belongs to
   `vulkanResources::beginOneShotCommands` and `submitOneShotCommands`. Preserve
   their cleanup behavior and diagnostic labels.

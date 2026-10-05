@@ -164,6 +164,7 @@ if (-not $Quick) {
         },
         @{ Name = "recorder-scratch-reuse-disabled"; Arguments = @("--disable-recorder-scratch-reuse") },
         @{ Name = "level5-screen5-no-water"; Arguments = $level5Arguments + @("--evidence-screen", "5", "--evidence-disable-water") },
+        @{ Name = "level5-screen5-water-cache-disabled"; Arguments = $level5Arguments + @("--evidence-screen", "5", "--disable-water-cell-cache") },
         @{ Name = "level5-screen5-no-water-reflections"; Arguments = $level5Arguments + @("--evidence-screen", "5", "--evidence-disable-water-reflections") },
         @{ Name = "level5-screen5-scale75"; Arguments = $level5Arguments + @("--evidence-screen", "5", "--evidence-render-scale", "75") },
         @{ Name = "level5-screen5-msaa1"; Arguments = $level5Arguments + @("--evidence-screen", "5", "--evidence-msaa", "1") },

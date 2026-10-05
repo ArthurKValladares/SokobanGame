@@ -284,7 +284,9 @@ ShaderHotReload::Compiler glslcCompiler(
         command.insert(command.end(), arguments.begin(), arguments.end());
         const std::string_view stage = name.find(".vert.") != std::string::npos
             ? "-fshader-stage=vertex"
-            : "-fshader-stage=fragment";
+            : name.find(".comp.") != std::string::npos
+                ? "-fshader-stage=compute"
+                : "-fshader-stage=fragment";
         command.emplace_back(stage);
         command.push_back("-I");
         command.push_back(includeDirectory.string());

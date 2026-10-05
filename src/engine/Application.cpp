@@ -219,7 +219,8 @@ Application::Application(ApplicationOptions options)
           options.parallelScenePreparationEnabled,
           options.pointShadowOptimizationsEnabled,
           options.recorderScratchReuseEnabled,
-          options.showFailureDialogs)
+          options.showFailureDialogs,
+          options.waterCellCacheEnabled)
     , ui_(uiFont_)
     , audioSystem_(audioStartup_.get())
     , mirrorSwapParticleEffect_(

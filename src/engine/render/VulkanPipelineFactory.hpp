@@ -26,6 +26,7 @@ public:
         VkFormat shadowFormat = VK_FORMAT_UNDEFINED;
         VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT;
         bool wireframe = false;
+        bool waterCellCacheEnabled = true;
     };
 
     VulkanPipelineFactory() = default;
@@ -43,6 +44,8 @@ public:
     // opaque-pass surfaces that still carry a sub-1.0 alpha (editor previews).
     [[nodiscard]] VkPipeline scene() const { return scene_; }
     [[nodiscard]] VkPipeline water() const { return water_; }
+    [[nodiscard]] VkPipeline waterCells() const { return waterCells_; }
+    [[nodiscard]] VkPipelineLayout waterCellsLayout() const { return waterCellsLayout_; }
     [[nodiscard]] VkPipeline mirrorEnergy() const { return mirrorEnergy_; }
     [[nodiscard]] VkPipeline groundSplat() const { return groundSplat_; }
     [[nodiscard]] VkPipeline ui() const { return ui_; }
@@ -154,7 +157,8 @@ private:
         VkFormat depthFormat,
         VkFormat colorFormat,
         bool wireframe,
-        Target target = Target::SceneBlended) const;
+        Target target = Target::SceneBlended,
+        bool waterCellCacheEnabled = true) const;
     [[nodiscard]] VkPipeline createShadowPipeline(
         VkShaderModule vertexShader,
         VertexLayout vertexLayout) const;
@@ -178,6 +182,8 @@ private:
     VkPipeline modelOpaque_ = VK_NULL_HANDLE;
     VkPipeline skinnedModelOpaque_ = VK_NULL_HANDLE;
     VkPipeline water_ = VK_NULL_HANDLE;
+    VkPipeline waterCells_ = VK_NULL_HANDLE;
+    VkPipelineLayout waterCellsLayout_ = VK_NULL_HANDLE;
     VkPipeline mirrorEnergy_ = VK_NULL_HANDLE;
     VkPipeline groundSplat_ = VK_NULL_HANDLE;
     VkPipeline ui_ = VK_NULL_HANDLE;

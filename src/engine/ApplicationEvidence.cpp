@@ -263,6 +263,10 @@ void Application::finishEvidenceCapture()
                    ? "enabled"
                    : "disabled")
            << "\n";
+    report << "- Water cell cache: "
+           << (evidenceStats_.waterCellCacheEnabled ? "enabled" : "disabled")
+           << "; " << evidenceStats_.waterCellCacheBytes << " bytes; "
+           << evidenceStats_.waterCellCacheRebuilds << " rebuilds\n";
     report << "- Recorder scratch reuse: "
            << (evidenceStats_.recorderScratchReuseEnabled
                    ? "enabled"

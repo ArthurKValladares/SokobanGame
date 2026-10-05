@@ -766,6 +766,9 @@ struct RenderStats {
     bool parallelScenePreparationEnabled = true;
     bool pointShadowOptimizationsEnabled = true;
     bool recorderScratchReuseEnabled = true;
+    bool waterCellCacheEnabled = true;
+    uint64_t waterCellCacheRebuilds = 0;
+    uint64_t waterCellCacheBytes = 0;
     bool mainSceneHasTranslucency = false;
     bool ssaoColorSnapshotCopied = false;
     bool gpuTimestampsSupported = false;

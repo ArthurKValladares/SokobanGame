@@ -234,7 +234,7 @@ set(SHADER_CATALOG_HEADER
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${SHADER_CATALOG_HEADER}")
 file(READ "${SHADER_CATALOG_HEADER}" SHADER_CATALOG_TEXT)
-string(REGEX MATCHALL "\"[A-Za-z0-9_]+\\.(vert|frag)\\.glsl\""
+string(REGEX MATCHALL "\"[A-Za-z0-9_]+\\.(vert|frag|comp)\\.glsl\""
     SHADER_CATALOG_NAMES "${SHADER_CATALOG_TEXT}")
 list(LENGTH SHADER_CATALOG_NAMES SHADER_CATALOG_NAME_COUNT)
 # The catalog's array deduces its own size, so there is no declared count to
@@ -247,7 +247,7 @@ if(SHADER_CATALOG_NAME_COUNT LESS 1)
     message(FATAL_ERROR
         "Found no shader filenames in ${SHADER_CATALOG_HEADER}. Every entry "
         "must be a plain quoted string literal ending in .vert.glsl or "
-        ".frag.glsl; a name assembled from pieces is invisible here.")
+        ".frag.glsl or .comp.glsl; a name assembled from pieces is invisible here.")
 endif()
 set(SHADER_SOURCES)
 foreach(quoted_shader_name IN LISTS SHADER_CATALOG_NAMES)
@@ -288,6 +288,8 @@ foreach(shader_source IN LISTS SHADER_SOURCES)
         set(shader_stage vertex)
     elseif(shader_name MATCHES "\\.frag\\.")
         set(shader_stage fragment)
+    elseif(shader_name MATCHES "\\.comp\\.")
+        set(shader_stage compute)
     else()
         message(FATAL_ERROR "Unknown shader stage for ${shader_name}")
     endif()
@@ -710,6 +712,7 @@ add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanResourceUtils.cpp
     src/engine/render/VulkanSceneRecorder.cpp
     src/engine/render/VulkanSceneDescriptors.cpp
+    src/engine/render/VulkanWaterCellCache.cpp
     src/engine/render/VulkanShadowPass.cpp
     src/engine/render/VulkanFrameCapture.cpp
     src/engine/render/VulkanThumbnailPass.cpp
@@ -1453,6 +1456,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME scene_draw_lanes
         LIBS sokoban_core
         SOURCES tests/SceneDrawLanesTests.cpp
+    )
+    sokoban_add_test(NAME water_cell_cache
+        LIBS sokoban_core
+        SOURCES tests/WaterCellCacheTests.cpp
     )
     sokoban_add_test(NAME nine_slice
         LIBS sokoban_core

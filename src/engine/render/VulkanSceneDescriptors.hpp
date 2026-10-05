@@ -44,6 +44,7 @@ public:
         VulkanModelResources::SkinningBufferView skinning;
         VulkanModelResources::DrawInstanceBufferView drawInstances;
         VulkanModelResources::MaterialBufferView materials;
+        std::vector<VkDescriptorBufferInfo> waterCells;
     };
 
     VulkanSceneDescriptors() = default;

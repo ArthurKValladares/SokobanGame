@@ -21,6 +21,7 @@
 #include "engine/render/VulkanPipelineCache.hpp"
 #include "engine/render/VulkanPipelineFactory.hpp"
 #include "engine/render/VulkanSceneRecorder.hpp"
+#include "engine/render/VulkanWaterCellCache.hpp"
 #include "engine/render/VulkanSceneDescriptors.hpp"
 #include "engine/render/VulkanShadowPass.hpp"
 #include "engine/render/VulkanSsaoPass.hpp"
@@ -131,7 +132,8 @@ public:
         bool parallelScenePreparationEnabled = true,
         bool pointShadowOptimizationsEnabled = true,
         bool recorderScratchReuseEnabled = true,
-        bool showFailureDialogs = true);
+        bool showFailureDialogs = true,
+        bool waterCellCacheEnabled = true);
     ~VulkanRenderer();
 
     VulkanRenderer(const VulkanRenderer&) = delete;
@@ -296,6 +298,7 @@ private:
         std::unique_ptr<VulkanSsaoPass> ssaoPass;
         std::unique_ptr<VulkanAtmospherePass> atmospherePass;
         std::unique_ptr<VulkanBloomPass> bloomPass;
+        std::unique_ptr<VulkanWaterCellCache> waterCellCache;
         std::unique_ptr<VulkanSceneDescriptors> sceneDescriptors;
         std::unique_ptr<VulkanPipelineFactory> pipelines;
         VkDescriptorSet gameViewportTexture = VK_NULL_HANDLE;
@@ -415,6 +418,7 @@ private:
     bool pointShadowOptimizationsEnabled_ = true;
     bool recorderScratchReuseEnabled_ = true;
     bool showFailureDialogs_ = true;
+    bool waterCellCacheEnabled_ = true;
     uint64_t nextStatsFrameIndex_ = 1;
     std::optional<GameViewportDisplay> gameViewportDisplay_;
     uint64_t pipelineRebuilds_ = 0;

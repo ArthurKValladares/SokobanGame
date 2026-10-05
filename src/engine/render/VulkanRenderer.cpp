@@ -253,7 +253,8 @@ VulkanRenderer::VulkanRenderer(
     bool parallelScenePreparationEnabled,
     bool pointShadowOptimizationsEnabled,
     bool recorderScratchReuseEnabled,
-    bool showFailureDialogs)
+    bool showFailureDialogs,
+    bool waterCellCacheEnabled)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
     , runtimeTextureCatalog_(
@@ -269,6 +270,7 @@ VulkanRenderer::VulkanRenderer(
     , pointShadowOptimizationsEnabled_(pointShadowOptimizationsEnabled)
     , recorderScratchReuseEnabled_(recorderScratchReuseEnabled)
     , showFailureDialogs_(showFailureDialogs)
+    , waterCellCacheEnabled_(waterCellCacheEnabled)
 {
     using StartupClock = std::chrono::steady_clock;
     const StartupClock::time_point rendererSetupStarted = StartupClock::now();
@@ -744,6 +746,7 @@ void VulkanRenderer::drawFrame(
             .ssaoPass = *activeResources_.ssaoPass,
             .atmospherePass = *activeResources_.atmospherePass,
             .bloomPass = *activeResources_.bloomPass,
+            .waterCellCache = *activeResources_.waterCellCache,
             .sceneDescriptors =
                 *activeResources_.sceneDescriptors,
             .pipelines = *activeResources_.pipelines,
@@ -788,6 +791,9 @@ void VulkanRenderer::drawFrame(
     lastStats_.pointShadowOptimizationsEnabled =
         pointShadowOptimizationsEnabled_;
     lastStats_.recorderScratchReuseEnabled = recorderScratchReuseEnabled_;
+    lastStats_.waterCellCacheEnabled = activeResources_.waterCellCache->enabled();
+    lastStats_.waterCellCacheRebuilds = activeResources_.waterCellCache->rebuilds();
+    lastStats_.waterCellCacheBytes = activeResources_.waterCellCache->bytes();
     lastStats_.scenePreparationTiming =
         renderPhaseTiming(scenePreparationTimeTelemetry_.summary());
     const FrameTimeSummary gpuTiming = gpuProfiler_.frameTimeSummary();
@@ -1607,6 +1613,7 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
         .skinning = modelResources_.skinningBuffer(),
         .drawInstances = modelResources_.drawInstanceBuffer(),
         .materials = modelResources_.materialBuffer(),
+        .waterCells = resources.waterCellCache->buffers(),
     };
 }
 
@@ -1685,6 +1692,17 @@ VulkanRenderer::createRenderResources(
         startupPrerequisites->get();
     }
     const auto prerequisiteWaitMicroseconds = finishPhase();
+    uint32_t queueFamilyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(
+        deviceContext_.physicalDevice(), &queueFamilyCount, nullptr);
+    std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(
+        deviceContext_.physicalDevice(), &queueFamilyCount, queueFamilies.data());
+    const bool computeSupported = (queueFamilies.at(deviceContext_.queueFamilies().graphics)
+        .queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
+    resources.waterCellCache = std::make_unique<VulkanWaterCellCache>();
+    resources.waterCellCache->create(deviceContext_.memoryAllocator(),
+        maxFramesInFlight_, waterCellCacheEnabled_ && computeSupported);
     resources.sceneDescriptors =
         std::make_unique<VulkanSceneDescriptors>();
     resources.sceneDescriptors->create(
@@ -1734,6 +1752,7 @@ VulkanRenderer::createPipelines(
         .sampleCount =
             sampleCountForMode(settings.antiAliasing),
         .wireframe = settings.wireframe && deviceContext_.wireframeSupported(),
+        .waterCellCacheEnabled = resources.waterCellCache->enabled(),
     });
     ++pipelineRebuilds_;
     return pipelines;
@@ -1873,6 +1892,7 @@ void VulkanRenderer::applyPendingReconfiguration()
     RenderResourceSet retired;
     retired.pipelines = std::move(activeResources_.pipelines);
     activeResources_.pipelines = std::move(replacement);
+    activeResources_.waterCellCache->invalidate();
     ++activeResourceGeneration_;
     reconfigurationQueue_.commit(*plan);
     retireResources(

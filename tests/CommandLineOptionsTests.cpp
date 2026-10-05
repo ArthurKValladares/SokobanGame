@@ -47,6 +47,8 @@ void testEmptyIsANormalRun()
         "point-shadow optimizations are enabled by default");
     CHECK_MESSAGE(options.recorderScratchReuseEnabled,
         "recorder scratch reuse is enabled by default");
+    CHECK_MESSAGE(options.waterCellCacheEnabled,
+        "water cell cache is enabled by default");
     CHECK_MESSAGE(options.textureResidencyBudgetKiB == 0,
         "texture residency uses its production default");
 }
@@ -103,6 +105,10 @@ void testFlags()
         "transient recorder scratch invocation parses");
     CHECK_MESSAGE(!transientRecorderScratch.recorderScratchReuseEnabled,
         "recorder scratch control is read");
+    const auto uncachedWater = parse(
+        { "--smoke-frames", "120", "--disable-water-cell-cache" });
+    CHECK_MESSAGE(!uncachedWater.malformed, "uncached water invocation parses");
+    CHECK_MESSAGE(!uncachedWater.waterCellCacheEnabled, "water cell cache control is read");
 
     const sokoban::CommandLineOptions evidence = parse(
         { "--smoke-frames", "180", "--evidence-output", "/tmp/evidence",

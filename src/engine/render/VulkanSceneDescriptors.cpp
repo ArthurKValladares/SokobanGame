@@ -37,7 +37,7 @@ namespace {
 // it, and this file is the only record of that: the slot was retired and the
 // numbering was not compacted, because every later binding is named by hand in
 // the shaders that use it and renumbering would mean editing all of them to no
-// effect. **Do not reuse 2.** New bindings continue at 14; a reused 2 would
+// effect. **Do not reuse 2.** New bindings continue at 17; a reused 2 would
 // silently match any shader still carrying an old declaration.
 //
 // The array's size is deduced from the table rather than written beside it, so
@@ -70,6 +70,8 @@ constexpr auto sceneBindings = std::to_array<SceneBinding>({
     SceneBinding { 13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
     SceneBinding { 14, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
     SceneBinding { 15, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+    SceneBinding { 16, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT },
 });
 
 // The type a binding was declared with. Returning MAX_ENUM for an unknown
@@ -139,6 +141,8 @@ static_assert(
     "sceneSingleImageBindings must equal the number of sampler bindings in "
     "sceneBindings; the descriptor pool and the texture heap are both sized "
     "from it");
+static_assert(bindingsOfType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) <= 4,
+    "Storage bindings beyond Vulkan's minimum require device-limit checks");
 
 // Every binding here is one descriptor. The texture heap is the only
 // variable-count binding and it lives in its own set, which is what a variable
@@ -360,7 +364,7 @@ void VulkanSceneDescriptors::updateInternal(
     // and "resources are incomplete" told whoever hit it nothing about which
     // one. A missing entry here is a descriptor written from a null handle,
     // which validation catches but only on a validation build.
-    const std::array<std::pair<const char*, bool>, 14> required {
+    const std::array<std::pair<const char*, bool>, 15> required {
         std::pair { "shadow", resources.shadow.valid() },
         std::pair { "pointShadows", resources.pointShadows.valid() },
         std::pair { "sceneColor", resources.sceneColor.valid() },
@@ -375,6 +379,8 @@ void VulkanSceneDescriptors::updateInternal(
         std::pair { "skinning", resources.skinning.valid() },
         std::pair { "drawInstances", resources.drawInstances.valid() },
         std::pair { "materials", resources.materials.valid() },
+        std::pair { "waterCells", internalSetIndex / 2 < resources.waterCells.size()
+            && resources.waterCells[internalSetIndex / 2].buffer != VK_NULL_HANDLE },
     };
     for (const auto& [name, present] : required) {
         if (!present) {
@@ -413,6 +419,7 @@ void VulkanSceneDescriptors::updateInternal(
         .offset = 0,
         .range = resources.materials.range,
     };
+    const VkDescriptorBufferInfo& waterCells = resources.waterCells[internalSetIndex / 2];
     const VkDescriptorImageInfo sceneColor {
         .sampler = resources.sceneColor.sampler,
         .imageView = resources.sceneColor.imageView,
@@ -480,6 +487,7 @@ void VulkanSceneDescriptors::updateInternal(
         SceneWriteSource { 13, &atmosphere, nullptr },
         SceneWriteSource { 14, &bloomExtract, nullptr },
         SceneWriteSource { 15, &bloom, nullptr },
+        SceneWriteSource { 16, nullptr, &waterCells },
     };
 
     std::array<VkWriteDescriptorSet, sceneBindings.size()> writes {};

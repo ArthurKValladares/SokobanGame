@@ -326,6 +326,10 @@ snapshots and the repeated baselines to identify hardware drift.
 
 See [the October 3 investigation](docs/performance/2026-10-03-gameplay/README.md)
 for measurements, fixes, and the remaining optimization priorities.
+The [October 5 water follow-up](docs/performance/2026-10-05-water/README.md)
+records the static cell feature cache, paired GPU measurements and image
+comparisons. Use `--disable-water-cell-cache` for its procedural control;
+the full performance matrix includes this comparison on level 5, screen 5.
 
 Every quick and full GPU matrix also records a `vsync-disabled` control. Its
 report names the presentation mode the driver actually selected, allowing a

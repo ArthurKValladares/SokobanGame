@@ -978,6 +978,10 @@ if (ImGui::CollapsingHeader("Rendering Stats")) {
         renderStats.recorderScratchGrowths,
         static_cast<unsigned long long>(
             renderStats.recorderScratchCapacityBytes));
+    ImGui::Text("Water cell cache %s (%llu bytes, %llu rebuilds)",
+        renderStats.waterCellCacheEnabled ? "on" : "off",
+        static_cast<unsigned long long>(renderStats.waterCellCacheBytes),
+        static_cast<unsigned long long>(renderStats.waterCellCacheRebuilds));
     drawPhaseTimings(renderStats);
     ImGui::Text(
         "Asset publications %llu across %llu frames; texture uploads %llu/%llu complete (%u in flight)",

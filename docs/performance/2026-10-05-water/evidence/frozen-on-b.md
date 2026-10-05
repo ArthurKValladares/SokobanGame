@@ -1,0 +1,94 @@
+# Render evidence — 100% scale, 4x MSAA
+
+- Device: NVIDIA GeForce RTX 4060 Laptop GPU (discrete)
+- Evidence location: level 5, screen 5
+- Developer workspace: hidden
+- CPU profiler: enabled
+- Effect fixture: none; 0 retained particles
+- Authored water: enabled
+- Water reflections: enabled
+- Swapchain: 1280x720
+- Present mode: Mailbox
+- Scene target: 1280x720
+- SSAO target: 640x360
+- Atmosphere target: 320x180
+- Atmosphere coverage: 1 media, 921600 / 921600 full-resolution pixels (100.0% after scissoring)
+- Ambient occlusion: enabled
+- Evidence water fixture: disabled
+- Main-scene translucency: present
+- SSAO color snapshot: exercised
+- MSAA samples: 4
+- Scene depth: 32 bits
+- Draw calls: 58
+- Triangles: 22406
+- Prepared particles: 16
+- Particle draw calls: 1
+- Special-surface coverage: 92 water faces, 84 energy faces, 0 energy models, 0 blurred ice models
+- Render passes: 11
+- Point-shadow faces: 0 / 0 in range; 0 culled (0 face draws avoided)
+- Point-shadow cube faces: 0 rendered, 0 reused
+- Point-shadow quad submissions: 0 draws for 0 instances
+- Point-shadow models: 0 / 0 in range; 0 culled
+- Persistent renderables: 289 (visible 289, culled 0; bounds reused 289, rebuilt 0)
+- Main-scene frustum culling: enabled
+- Parallel scene preparation: enabled
+- Point-shadow range/cache optimizations: enabled
+- Water cell cache: enabled; 2097216 bytes; 2 rebuilds
+- Recorder scratch reuse: enabled; 0 capacity growths this frame; 5120 bytes of model-recording capacity
+- Asset scheduling: average 0.002 ms, p95 0.003 ms, maximum 0.005 ms (120 samples)
+- Frame-fence wait: average 1.011 ms, p95 1.092 ms, maximum 1.174 ms (120 samples)
+- Asset maintenance: average 0.029 ms, p95 0.041 ms, maximum 0.064 ms (120 samples)
+- Image acquisition: average 0.004 ms, p95 0.006 ms, maximum 0.009 ms (120 samples)
+- Command recording: average 0.155 ms, p95 0.197 ms, maximum 0.526 ms (120 samples)
+- Submit/present: average 0.052 ms, p95 0.076 ms, maximum 0.110 ms (120 samples)
+-   Recorder setup: average 0.008 ms, p95 0.013 ms, maximum 0.015 ms (120 samples)
+-   Game command recording: average 0.112 ms, p95 0.137 ms, maximum 0.443 ms (120 samples)
+-     Shadow command recording: average 0.044 ms, p95 0.056 ms, maximum 0.076 ms (120 samples)
+-     Scene command recording: average 0.067 ms, p95 0.082 ms, maximum 0.383 ms (120 samples)
+-   SSAO command recording: average 0.014 ms, p95 0.017 ms, maximum 0.043 ms (120 samples)
+-   Atmosphere command recording: average 0.004 ms, p95 0.005 ms, maximum 0.012 ms (120 samples)
+-   Preview command recording: unavailable
+-   Output/UI command recording: average 0.014 ms, p95 0.019 ms, maximum 0.031 ms (120 samples)
+- Asset publication events: average 0.122 ms, p95 0.280 ms, maximum 0.569 ms (54 samples)
+- GPU shadows: average 0.046 ms, p95 0.048 ms, maximum 0.049 ms (120 samples)
+- GPU scene color/depth: average 1.148 ms, p95 1.167 ms, maximum 1.176 ms (120 samples)
+-   GPU scene raster/resolve: average 0.463 ms, p95 0.478 ms, maximum 0.492 ms (120 samples)
+-     GPU scene surfaces: average 0.065 ms, p95 0.067 ms, maximum 0.087 ms (120 samples)
+-     GPU scene models: average 0.333 ms, p95 0.348 ms, maximum 0.362 ms (120 samples)
+-   GPU scene depth publish: average 0.001 ms, p95 0.001 ms, maximum 0.001 ms (120 samples)
+-   GPU scene translucency: average 0.684 ms, p95 0.695 ms, maximum 0.699 ms (120 samples)
+-     GPU particles: average 0.014 ms, p95 0.163 ms, maximum 0.164 ms (120 samples)
+-   GPU mirror continuation: average 0.000 ms, p95 0.000 ms, maximum 0.001 ms (120 samples)
+- GPU SSAO: average 0.106 ms, p95 0.108 ms, maximum 0.117 ms (120 samples)
+-   GPU SSAO scene snapshot: average 0.020 ms, p95 0.020 ms, maximum 0.020 ms (120 samples)
+-   GPU SSAO occlusion: average 0.045 ms, p95 0.046 ms, maximum 0.055 ms (120 samples)
+-   GPU SSAO composite: average 0.041 ms, p95 0.042 ms, maximum 0.042 ms (120 samples)
+- GPU volumetric atmosphere: average 0.074 ms, p95 0.076 ms, maximum 0.101 ms (120 samples)
+-   GPU global atmosphere: average 0.074 ms, p95 0.076 ms, maximum 0.101 ms (120 samples)
+-     GPU ray integration: average 0.021 ms, p95 0.022 ms, maximum 0.048 ms (120 samples)
+-     GPU depth-aware composite: average 0.052 ms, p95 0.053 ms, maximum 0.053 ms (120 samples)
+-   GPU bounded fog volumes: average 0.000 ms, p95 0.000 ms, maximum 0.000 ms (120 samples)
+- GPU output/UI: average 0.069 ms, p95 0.070 ms, maximum 0.089 ms (120 samples)
+- Asset publications: 54 across 54 frames
+- Texture uploads: 25 submitted, 25 completed, 0 in flight
+- Scene preparation: average 0.084 ms, p95 0.101 ms, maximum 0.302 ms (120 samples)
+- Application frame (including profiler, excluding frame cap): average 1.458 ms, p95 1.578 ms, maximum 2.022 ms (120 samples)
+- Frame interval (including pacing): average 1.458 ms, p95 1.579 ms, maximum 2.023 ms (120 samples)
+- Frame pacing: average 0.000 ms, p95 0.000 ms, maximum 0.001 ms (120 samples)
+- Application update: average 0.002 ms, p95 0.004 ms, maximum 0.006 ms (120 samples)
+- Application UI: average 0.019 ms, p95 0.030 ms, maximum 0.086 ms (120 samples)
+- Application frame build/prepare: average 0.143 ms, p95 0.165 ms, maximum 0.393 ms (120 samples)
+- CPU frame: average 1.262 ms, p95 1.383 ms, maximum 1.821 ms (120 samples)
+- GPU frame: average 1.446 ms, p95 1.473 ms, maximum 1.502 ms (120 samples)
+- Process resident memory: 449.664 MiB (peak 451.074 MiB)
+- GPU allocation memory: 336.627 MiB in 52 allocations; 411.875 MiB reserved in blocks
+- Scene image: `scene-scale-100-msaa-4.png`
+- Filtered SSAO image: `occlusion-scale-100-msaa-4.png`
+
+Simulation: frozen. The final two images share the same simulation state and differ by the SSAO composite debug selector.
+
+## Ranked optimization candidates
+
+1. **Main scene rendering is the dominant GPU pass** (high, score 174.8)
+   - Evidence: Main scene rendering is the dominant GPU pass: 1.17 ms (79.3% of the GPU frame).
+   - Next experiment: Inspect overdraw, material complexity, MSAA cost, visibility, and resolution scaling with a GPU capture.

@@ -6,6 +6,7 @@
 #include "engine/render/ShaderCatalog.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
+#include "engine/render/WaterCellCachePlan.hpp"
 
 #include <array>
 #include <cstddef>
@@ -177,6 +178,15 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         "vkCreatePipelineLayout failed");
     vulkanDebug::setObjectName(
         device_, VK_OBJECT_TYPE_PIPELINE_LAYOUT, layout_, "Scene pipeline layout");
+    const VkPushConstantRange cachePushConstants {
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .offset = 0,
+        .size = sizeof(WaterCellCachePlan),
+    };
+    layoutInfo.setLayoutCount = 1;
+    layoutInfo.pPushConstantRanges = &cachePushConstants;
+    vkCheck(vkCreatePipelineLayout(device_, &layoutInfo, nullptr, &waterCellsLayout_),
+        "Water cell cache pipeline layout creation failed");
 
     // Which attachment each pipeline draws into. Scene geometry and the
     // post-process passes that run before the tonemap write the scene target;
@@ -218,6 +228,19 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         shaders[17] = shaderModule(shaderCatalog::atmosphereCompositeFrag);
         shaders[18] = shaderModule(shaderCatalog::bloomExtractFrag);
         shaders[19] = shaderModule(shaderCatalog::bloomBlurFrag);
+        shaders.back() = shaderModule(shaderCatalog::waterCellsComp);
+        const VkComputePipelineCreateInfo cachePipelineInfo {
+            .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+            .stage = {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+                .module = shaders.back(),
+                .pName = "main",
+            },
+            .layout = waterCellsLayout_,
+        };
+        vkCheck(vkCreateComputePipelines(device_, pipelineCache_, 1,
+            &cachePipelineInfo, nullptr, &waterCells_), "Water cell cache pipeline creation failed");
 #if SOKOBAN_ENABLE_DEBUG_UI
         shaders[20] = shaderModule(shaderCatalog::debugOutlineVert);
         shaders[21] = shaderModule(shaderCatalog::debugOutlineSkinnedVert);
@@ -250,7 +273,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         water_ = createScenePipeline(
             shaders[0], shaders[8], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
-            createInfo.wireframe);
+            createInfo.wireframe, Target::SceneBlended, createInfo.waterCellCacheEnabled);
         mirrorEnergy_ = createScenePipeline(
             shaders[0], shaders[9], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
@@ -382,7 +405,7 @@ void VulkanPipelineFactory::destroy()
 {
     if (device_) {
         const std::array pipelines {
-            scene_, sceneOpaque_, water_, mirrorEnergy_, groundSplat_,
+            scene_, sceneOpaque_, water_, waterCells_, mirrorEnergy_, groundSplat_,
             groundSplatOpaque_, ui_, model_, modelOpaque_,
             mirrorEnergyModel_, skinnedModel_, skinnedModelOpaque_,
             skinnedMirrorEnergyModel_,
@@ -403,6 +426,9 @@ void VulkanPipelineFactory::destroy()
         if (layout_) {
             vkDestroyPipelineLayout(device_, layout_, nullptr);
         }
+        if (waterCellsLayout_) {
+            vkDestroyPipelineLayout(device_, waterCellsLayout_, nullptr);
+        }
     }
     scene_ = VK_NULL_HANDLE;
     sceneOpaque_ = VK_NULL_HANDLE;
@@ -410,6 +436,8 @@ void VulkanPipelineFactory::destroy()
     modelOpaque_ = VK_NULL_HANDLE;
     skinnedModelOpaque_ = VK_NULL_HANDLE;
     water_ = VK_NULL_HANDLE;
+    waterCells_ = VK_NULL_HANDLE;
+    waterCellsLayout_ = VK_NULL_HANDLE;
     mirrorEnergy_ = VK_NULL_HANDLE;
     groundSplat_ = VK_NULL_HANDLE;
     ui_ = VK_NULL_HANDLE;
@@ -528,7 +556,8 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
     VkFormat depthFormat,
     VkFormat colorFormat,
     bool wireframe,
-    Target target) const
+    Target target,
+    bool waterCellCacheEnabled) const
 {
     std::array<VkPipelineShaderStageCreateInfo, 2> stages {
         VkPipelineShaderStageCreateInfo {
@@ -548,18 +577,21 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
     // alpha. Attached to every scene pipeline rather than only the opaque
     // ones so that each states its answer instead of leaning on the default;
     // a shader that does not declare the constant is unaffected by it.
-    const VkBool32 writeAmbientMask =
-        target == Target::SceneOpaque ? VK_TRUE : VK_FALSE;
-    const VkSpecializationMapEntry ambientMaskEntry {
-        .constantID = 0,
-        .offset = 0,
-        .size = sizeof(VkBool32),
+    // Constant 1 selects the water cache; specializing it off eliminates the
+    // lookup branch and buffer reads from the procedural control pipeline.
+    const std::array<VkBool32, 2> specializationValues {
+        target == Target::SceneOpaque ? VK_TRUE : VK_FALSE,
+        waterCellCacheEnabled ? VK_TRUE : VK_FALSE,
+    };
+    const std::array<VkSpecializationMapEntry, 2> specializationEntries {
+        VkSpecializationMapEntry { 0, 0, sizeof(VkBool32) },
+        VkSpecializationMapEntry { 1, sizeof(VkBool32), sizeof(VkBool32) },
     };
     const VkSpecializationInfo specialization {
-        .mapEntryCount = 1,
-        .pMapEntries = &ambientMaskEntry,
-        .dataSize = sizeof(writeAmbientMask),
-        .pData = &writeAmbientMask,
+        .mapEntryCount = static_cast<uint32_t>(specializationEntries.size()),
+        .pMapEntries = specializationEntries.data(),
+        .dataSize = sizeof(specializationValues),
+        .pData = specializationValues.data(),
     };
     stages[1].pSpecializationInfo = &specialization;
 

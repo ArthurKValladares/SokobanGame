@@ -38,6 +38,7 @@
 
 #include "engine/render/GpuSkinning.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
+#include "engine/render/WaterCellCachePlan.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -397,6 +398,19 @@ constexpr uint32_t byteSize()
 std::vector<ExpectedBlock> expectedBlocks()
 {
     return {
+        ExpectedBlock {
+            .binding = 16,
+            .name = "WaterCellCache",
+            .memberOffsets = {
+                offsetof(WaterCellCachePlan, origins),
+                offsetof(WaterCellCachePlan, dimensions),
+                sizeof(WaterCellCachePlan),
+            },
+            .elementStride = std::nullopt,
+            .memberArrayStrides = { { 2u, WaterCellCachePlan::featureBytes } },
+            .memberKinds = { ScalarKind::Signed, ScalarKind::Unsigned,
+                ScalarKind::Aggregate },
+        },
         ExpectedBlock {
             .binding = 7,
             .name = "SceneFrameUniform",

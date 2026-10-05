@@ -59,6 +59,7 @@ struct CommandLineOptions {
     bool parallelScenePreparationEnabled = true;
     bool pointShadowOptimizationsEnabled = true;
     bool recorderScratchReuseEnabled = true;
+    bool waterCellCacheEnabled = true;
     // Diagnostic override for exercising residency pressure. Zero keeps the
     // normal renderer budget.
     std::uint64_t textureResidencyBudgetKiB = 0;
@@ -258,6 +259,8 @@ struct CommandLineOptions {
             options.pointShadowOptimizationsEnabled = false;
         } else if (argument == "--disable-recorder-scratch-reuse") {
             options.recorderScratchReuseEnabled = false;
+        } else if (argument == "--disable-water-cell-cache") {
+            options.waterCellCacheEnabled = false;
         } else if (argument == "--texture-residency-kib") {
             if (index + 1 >= arguments.size()) {
                 return reject("--texture-residency-kib needs a size");
@@ -366,6 +369,7 @@ inline constexpr std::string_view commandLineUsage =
     "[--serial-scene-preparation] "
     "[--disable-point-shadow-optimizations] "
     "[--disable-recorder-scratch-reuse] "
+    "[--disable-water-cell-cache] "
     "[--bake-tile-thumbnails] "
     "[--evidence-output <directory> "
     "--evidence-render-scale <25..100> [--evidence-msaa <1|2|4|8>] "

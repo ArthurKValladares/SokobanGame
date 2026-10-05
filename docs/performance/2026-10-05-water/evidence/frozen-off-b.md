@@ -1,0 +1,94 @@
+# Render evidence — 100% scale, 4x MSAA
+
+- Device: NVIDIA GeForce RTX 4060 Laptop GPU (discrete)
+- Evidence location: level 5, screen 5
+- Developer workspace: hidden
+- CPU profiler: enabled
+- Effect fixture: none; 0 retained particles
+- Authored water: enabled
+- Water reflections: enabled
+- Swapchain: 1280x720
+- Present mode: Mailbox
+- Scene target: 1280x720
+- SSAO target: 640x360
+- Atmosphere target: 320x180
+- Atmosphere coverage: 1 media, 921600 / 921600 full-resolution pixels (100.0% after scissoring)
+- Ambient occlusion: enabled
+- Evidence water fixture: disabled
+- Main-scene translucency: present
+- SSAO color snapshot: exercised
+- MSAA samples: 4
+- Scene depth: 32 bits
+- Draw calls: 58
+- Triangles: 22406
+- Prepared particles: 16
+- Particle draw calls: 1
+- Special-surface coverage: 92 water faces, 84 energy faces, 0 energy models, 0 blurred ice models
+- Render passes: 11
+- Point-shadow faces: 0 / 0 in range; 0 culled (0 face draws avoided)
+- Point-shadow cube faces: 0 rendered, 0 reused
+- Point-shadow quad submissions: 0 draws for 0 instances
+- Point-shadow models: 0 / 0 in range; 0 culled
+- Persistent renderables: 289 (visible 289, culled 0; bounds reused 289, rebuilt 0)
+- Main-scene frustum culling: enabled
+- Parallel scene preparation: enabled
+- Point-shadow range/cache optimizations: enabled
+- Water cell cache: disabled; 64 bytes; 0 rebuilds
+- Recorder scratch reuse: enabled; 0 capacity growths this frame; 5120 bytes of model-recording capacity
+- Asset scheduling: average 0.002 ms, p95 0.003 ms, maximum 0.006 ms (120 samples)
+- Frame-fence wait: average 1.181 ms, p95 1.353 ms, maximum 1.486 ms (120 samples)
+- Asset maintenance: average 0.035 ms, p95 0.058 ms, maximum 0.073 ms (120 samples)
+- Image acquisition: average 0.004 ms, p95 0.006 ms, maximum 0.009 ms (120 samples)
+- Command recording: average 0.167 ms, p95 0.208 ms, maximum 0.253 ms (120 samples)
+- Submit/present: average 0.053 ms, p95 0.070 ms, maximum 0.089 ms (120 samples)
+-   Recorder setup: average 0.008 ms, p95 0.012 ms, maximum 0.036 ms (120 samples)
+-   Game command recording: average 0.121 ms, p95 0.156 ms, maximum 0.187 ms (120 samples)
+-     Shadow command recording: average 0.045 ms, p95 0.059 ms, maximum 0.083 ms (120 samples)
+-     Scene command recording: average 0.076 ms, p95 0.101 ms, maximum 0.134 ms (120 samples)
+-   SSAO command recording: average 0.013 ms, p95 0.016 ms, maximum 0.019 ms (120 samples)
+-   Atmosphere command recording: average 0.004 ms, p95 0.005 ms, maximum 0.008 ms (120 samples)
+-   Preview command recording: unavailable
+-   Output/UI command recording: average 0.016 ms, p95 0.021 ms, maximum 0.044 ms (120 samples)
+- Asset publication events: average 0.117 ms, p95 0.252 ms, maximum 0.495 ms (54 samples)
+- GPU shadows: average 0.075 ms, p95 0.233 ms, maximum 0.258 ms (120 samples)
+- GPU scene color/depth: average 1.214 ms, p95 1.320 ms, maximum 1.343 ms (120 samples)
+-   GPU scene raster/resolve: average 0.293 ms, p95 0.489 ms, maximum 0.500 ms (120 samples)
+-     GPU scene surfaces: average 0.075 ms, p95 0.121 ms, maximum 0.124 ms (120 samples)
+-     GPU scene models: average 0.120 ms, p95 0.340 ms, maximum 0.365 ms (120 samples)
+-   GPU scene depth publish: average 0.001 ms, p95 0.001 ms, maximum 0.001 ms (120 samples)
+-   GPU scene translucency: average 0.921 ms, p95 1.130 ms, maximum 1.140 ms (120 samples)
+-     GPU particles: average 0.000 ms, p95 0.001 ms, maximum 0.001 ms (120 samples)
+-   GPU mirror continuation: average 0.000 ms, p95 0.000 ms, maximum 0.000 ms (120 samples)
+- GPU SSAO: average 0.149 ms, p95 0.272 ms, maximum 0.273 ms (120 samples)
+-   GPU SSAO scene snapshot: average 0.037 ms, p95 0.181 ms, maximum 0.183 ms (120 samples)
+-   GPU SSAO occlusion: average 0.049 ms, p95 0.047 ms, maximum 0.202 ms (120 samples)
+-   GPU SSAO composite: average 0.063 ms, p95 0.206 ms, maximum 0.207 ms (120 samples)
+- GPU volumetric atmosphere: average 0.094 ms, p95 0.241 ms, maximum 0.264 ms (120 samples)
+-   GPU global atmosphere: average 0.094 ms, p95 0.241 ms, maximum 0.264 ms (120 samples)
+-     GPU ray integration: average 0.039 ms, p95 0.186 ms, maximum 0.188 ms (120 samples)
+-     GPU depth-aware composite: average 0.055 ms, p95 0.054 ms, maximum 0.243 ms (120 samples)
+-   GPU bounded fog volumes: average 0.000 ms, p95 0.000 ms, maximum 0.000 ms (120 samples)
+- GPU output/UI: average 0.081 ms, p95 0.239 ms, maximum 0.263 ms (120 samples)
+- Asset publications: 54 across 54 frames
+- Texture uploads: 25 submitted, 25 completed, 0 in flight
+- Scene preparation: average 0.082 ms, p95 0.097 ms, maximum 0.128 ms (120 samples)
+- Application frame (including profiler, excluding frame cap): average 1.663 ms, p95 1.824 ms, maximum 2.383 ms (120 samples)
+- Frame interval (including pacing): average 1.664 ms, p95 1.825 ms, maximum 2.384 ms (120 samples)
+- Frame pacing: average 0.000 ms, p95 0.000 ms, maximum 0.001 ms (120 samples)
+- Application update: average 0.002 ms, p95 0.004 ms, maximum 0.006 ms (120 samples)
+- Application UI: average 0.020 ms, p95 0.033 ms, maximum 0.042 ms (120 samples)
+- Application frame build/prepare: average 0.141 ms, p95 0.172 ms, maximum 0.216 ms (120 samples)
+- CPU frame: average 1.450 ms, p95 1.627 ms, maximum 1.817 ms (120 samples)
+- GPU frame: average 1.635 ms, p95 1.783 ms, maximum 1.839 ms (120 samples)
+- Process resident memory: 450.375 MiB (peak 451.797 MiB)
+- GPU allocation memory: 334.627 MiB in 52 allocations; 411.875 MiB reserved in blocks
+- Scene image: `scene-scale-100-msaa-4.png`
+- Filtered SSAO image: `occlusion-scale-100-msaa-4.png`
+
+Simulation: frozen. The final two images share the same simulation state and differ by the SSAO composite debug selector.
+
+## Ranked optimization candidates
+
+1. **Main scene rendering is the dominant GPU pass** (high, score 166.5)
+   - Evidence: Main scene rendering is the dominant GPU pass: 1.32 ms (74.0% of the GPU frame).
+   - Next experiment: Inspect overdraw, material complexity, MSAA cost, visibility, and resolution scaling with a GPU capture.

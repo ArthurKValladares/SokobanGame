@@ -252,6 +252,16 @@ void testGlslcCompilerReportsSuccessAndErrors()
         static_cast<unsigned char>(spirv[0]) == 0x03 &&
         static_cast<unsigned char>(spirv[3]) == 0x07);
 
+    const auto compute = compiler({
+        .module = { "water_cells.comp.glsl", shaders / "water_cells.comp.glsl" },
+        .output = temp.path() / "water_cells.comp.glsl.spv",
+    });
+    CHECK_MESSAGE(compute.succeeded, compute.diagnostics.c_str());
+    const std::string computeSpirv = readFile(temp.path() / "water_cells.comp.glsl.spv");
+    CHECK(computeSpirv.size() > 4 &&
+        static_cast<unsigned char>(computeSpirv[0]) == 0x03 &&
+        static_cast<unsigned char>(computeSpirv[3]) == 0x07);
+
     const std::filesystem::path broken = temp.path() / "broken.frag.glsl";
     writeFile(broken, "#version 450\nvoid main() {\n    undefinedCall();\n}\n");
     const auto failed = compiler({
