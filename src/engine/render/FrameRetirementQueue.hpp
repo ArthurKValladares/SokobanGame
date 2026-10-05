@@ -49,12 +49,16 @@ public:
                 continue;
             }
             destroy(entries_[index].resource);
-            if (index + 1 == entries_.size()) {
-                entries_.pop_back();
-            } else {
-                entries_.erase(entries_.begin() +
-                    static_cast<std::ptrdiff_t>(index));
+            // Keep relocation bounds in element indices. GCC 13 can
+            // misdiagnose vector::erase's bulk move after inlining this
+            // method into a caller that grows and drains a small queue.
+            for (std::size_t next = index + 1; next < entries_.size(); ++next) {
+                entries_[next - 1].resource =
+                    std::move(entries_[next].resource);
+                entries_[next - 1].pendingFrameMask =
+                    entries_[next].pendingFrameMask;
             }
+            entries_.pop_back();
         }
     }
 

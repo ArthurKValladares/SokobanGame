@@ -5,6 +5,7 @@
 #include "engine/render/ReusableScratchPool.hpp"
 
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -144,6 +145,61 @@ void testDrainPreservesPendingEntriesBetweenCompletedOnes()
     CHECK(queue.empty());
 }
 
+void testDrainMovesOwnedResourcesWithoutLosingPendingEntries()
+{
+    sokoban::FrameRetirementQueue<std::unique_ptr<int>> queue;
+    std::vector<int> destroyed;
+    queue.retire(std::make_unique<int>(10), 0b01);
+    queue.retire(std::make_unique<int>(20), 0);
+    queue.retire(std::make_unique<int>(30), 0);
+    queue.retire(std::make_unique<int>(40), 0b10);
+    const auto destroy = [&](std::unique_ptr<int>& resource) {
+        CHECK(resource != nullptr);
+        if (resource) {
+            destroyed.push_back(*resource);
+            resource.reset();
+        }
+    };
+
+    queue.drainCompleted(destroy);
+    CHECK((destroyed == std::vector<int> { 20, 30 }));
+    CHECK(queue.size() == 2);
+    queue.completeFrame(0);
+    queue.drainCompleted(destroy);
+    CHECK((destroyed == std::vector<int> { 20, 30, 10 }));
+    CHECK(queue.size() == 1);
+    queue.completeFrame(1);
+    queue.drainCompleted(destroy);
+    CHECK((destroyed == std::vector<int> { 20, 30, 10, 40 }));
+    CHECK(queue.empty());
+}
+
+void testDrainRemovesEarlierEntriesWhenDestroyThrows()
+{
+    sokoban::FrameRetirementQueue<int> queue;
+    std::vector<int> destroyed;
+    queue.retire(10, 0);
+    queue.retire(20, 0);
+    queue.retire(30, 0b10);
+    CHECK_THROWS(std::runtime_error, queue.drainCompleted([&](int resource) {
+        if (resource == 20) {
+            throw std::runtime_error("injected destroy failure");
+        }
+        destroyed.push_back(resource);
+    }));
+    CHECK((destroyed == std::vector<int> { 10 }));
+    CHECK(queue.size() == 2);
+
+    const auto destroy = [&](int resource) { destroyed.push_back(resource); };
+    queue.drainCompleted(destroy);
+    CHECK((destroyed == std::vector<int> { 10, 20 }));
+    CHECK(queue.size() == 1);
+    queue.completeFrame(1);
+    queue.drainCompleted(destroy);
+    CHECK((destroyed == std::vector<int> { 10, 20, 30 }));
+    CHECK(queue.empty());
+}
+
 } // namespace
 
 int main()
@@ -154,6 +210,8 @@ int main()
     testRetirementWaitsForEveryReferencingFrame();
     testRetirementWithoutPendingFramesIsImmediate();
     testDrainPreservesPendingEntriesBetweenCompletedOnes();
+    testDrainMovesOwnedResourcesWithoutLosingPendingEntries();
+    testDrainRemovesEarlierEntriesWhenDestroyThrows();
 
     if (failures == 0) {
         std::cout << "FrameResourceTrackerTests: "
