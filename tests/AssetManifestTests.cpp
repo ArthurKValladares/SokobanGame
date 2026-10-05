@@ -296,9 +296,10 @@ void testDomainValidationFailures()
     checkJsonThrows([](Json& json) {
         json["music"].push_back({ { "level", 0 }, { "file", "again.ogg" } });
     }, "duplicate music level");
-    checkJsonThrows([](Json& json) {
-        json["sounds"].push_back({ { "name", "empty-set" }, { "files", Json::array() } });
-    }, "sound set without files");
+    Json draft = Json::parse(validManifest);
+    draft["sounds"].push_back({ { "name", "laser" }, { "files", Json::array() } });
+    const auto draftManifest = sokoban::AssetManifest::parse(draft.dump());
+    CHECK_MESSAGE(draftManifest.soundSet("laser").empty(), "draft sound set may have no files");
     checkJsonThrows([](Json& json) { json["sounds"][0]["volume"] = -1; },
         "negative sound volume");
     checkJsonThrows([](Json& json) {

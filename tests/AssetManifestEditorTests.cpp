@@ -86,7 +86,7 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
         }), "skinned attachment loaded");
     CHECK_MESSAGE(editor.animations().size() == 7, "animations loaded");
     CHECK_MESSAGE(editor.tileEntries().size() == 31, "authored tile entries loaded");
-    CHECK_MESSAGE(editor.soundSets().size() == 3, "sound sets loaded");
+    CHECK_MESSAGE(editor.soundSets().size() >= 3, "sound sets loaded, including authoring drafts");
     CHECK_MESSAGE(editor.musicTracks().size() == 4, "music tracks loaded");
     CHECK_MESSAGE(editor.validate(), "unchanged document validates");
 
@@ -181,6 +181,7 @@ void testCollectionOperations(const std::filesystem::path& sourceManifest)
     CHECK_MESSAGE(editor.animations().size() == animations + 1, "animation added");
     CHECK_MESSAGE(editor.tileEntries().size() == tiles + 1, "tile added");
     CHECK_MESSAGE(editor.soundSets().size() == sounds + 1, "sound set added");
+    CHECK_MESSAGE(editor.soundSets().back().files.empty(), "new sound set has no fake file path");
     CHECK_MESSAGE(editor.musicTracks().size() == music + 1, "music track added");
     CHECK_MESSAGE(editor.validate(), "default additions are schema-valid");
 
@@ -239,6 +240,59 @@ void testSavePublishesAStartupValidRuntimeManifest(
         readFile(temporary.file()) == readFile(runtimeManifest),
         "source and runtime manifests match");
     sokoban::validateContentPackage(runtimeRoot, "editor-test");
+}
+
+void testSoundSelection(const std::filesystem::path& sourceManifest)
+{
+    TemporaryManifest temporary(sourceManifest);
+    ScopedTestDirectory external("sokoban-sound-import-tests");
+    const auto assetRoot = temporary.file().parent_path();
+    const auto inside = assetRoot / "audio/inside sound.wav";
+    const auto outside = external.path() / "outside.wav";
+    std::filesystem::create_directories(inside.parent_path());
+    std::ofstream(inside, std::ios::binary) << "inside audio";
+    std::ofstream(outside, std::ios::binary) << "outside audio";
+
+    const auto runtimeRoot = assetRoot / "runtime";
+    std::filesystem::create_directories(runtimeRoot);
+    std::ofstream(runtimeRoot / "content.index", std::ios::binary)
+        << "format 1\ngame-version sound-test\n";
+    sokoban::AssetManifestEditor editor;
+    editor.initialize(temporary.file(), runtimeRoot / "manifest.json");
+    editor.addSoundSet();
+    const auto soundIndex = editor.soundSets().size() - 1;
+    auto sound = editor.soundSets()[soundIndex];
+    sound.name = "draft-laser";
+    editor.updateSoundSet(soundIndex, sound);
+    CHECK_MESSAGE(editor.save(), "empty draft sound set saves");
+    CHECK_MESSAGE(editor.chooseSoundFile(soundIndex, 0, inside), "picker appends asset file");
+    CHECK_MESSAGE(editor.soundSets()[soundIndex].files[0] == "audio/inside sound.wav",
+        "picker stores portable asset-relative paths");
+    CHECK_MESSAGE(editor.soundFilePath("audio/inside sound.wav") == std::filesystem::canonical(inside),
+        "unsaved selection resolves for preview");
+    CHECK_MESSAGE(editor.chooseSoundFile(soundIndex, 0, outside), "picker imports external audio");
+    CHECK_MESSAGE(editor.soundSets()[soundIndex].files[0] == "custom/audio/outside.wav",
+        "external audio is stored under custom/audio");
+    CHECK_MESSAGE(editor.dirty(), "selection marks document dirty");
+    CHECK_MESSAGE(editor.chooseSoundFile(soundIndex, 1, outside), "second import appends a variation");
+    CHECK_MESSAGE(editor.soundSets()[soundIndex].files[1] == "custom/audio/outside_2.wav",
+        "imports do not overwrite existing files");
+    CHECK_MESSAGE(readFile(assetRoot / "custom/audio/outside.wav") == "outside audio",
+        "import keeps file bytes");
+    CHECK_MESSAGE(editor.save(), "selected sounds publish with runtime manifest");
+    CHECK_MESSAGE(readFile(runtimeRoot / "custom/audio/outside_2.wav") == "outside audio",
+        "runtime receives selected sound bytes");
+    sokoban::validateContentPackage(runtimeRoot, "sound-test");
+    CHECK_MESSAGE(editor.reload(), "selected files reload");
+    const auto before = editor.serialize();
+    CHECK_MESSAGE(!editor.chooseSoundFile(soundIndex, 99, inside), "stale file slot rejected");
+    CHECK_MESSAGE(!editor.chooseSoundFile(soundIndex, 0, external.path() / "missing.wav"),
+        "missing selection rejected");
+    CHECK_MESSAGE(editor.serialize() == before, "failed selections preserve the document");
+    checkThrows([&] { (void)editor.soundFilePath("../outside.wav"); },
+        "preview rejects path traversal");
+    checkThrows([&] { (void)editor.soundFilePath(outside.string()); },
+        "preview rejects absolute manifest paths");
 }
 
 void testLevelAssociationsFollowInsertDeleteAndRestore()
@@ -361,6 +415,7 @@ int main()
     testCollectionOperations(sourceManifest);
     testInvalidSavePreservesFile(sourceManifest);
     testSavePublishesAStartupValidRuntimeManifest(sourceManifest);
+    testSoundSelection(sourceManifest);
     testLevelAssociationsFollowInsertDeleteAndRestore();
 
     if (failures != 0) {

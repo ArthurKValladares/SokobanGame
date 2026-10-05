@@ -398,7 +398,8 @@ Application::Application(ApplicationOptions options)
         tools_->logDebugUi.draw();
     });
     DebugUi::addTab("Asset Manifest", [this] {
-        tools_->assetManifestDebugUi.draw(tools_->assetManifestEditor);
+        tools_->assetManifestDebugUi.draw(
+            tools_->assetManifestEditor, *audioSystem_, window_.nativeHandle());
         tools_->drawManifestReloadStatus();
     });
     DebugUi::addTab("Level Editor", [this] {

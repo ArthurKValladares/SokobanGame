@@ -754,22 +754,22 @@
     {
       "tile": "Turret North",
       "model": "Turret",
-      "scale": 0.9
+      "scale": 0.8999999761581421
     },
     {
       "tile": "Turret East",
       "model": "Turret",
-      "scale": 0.9
+      "scale": 0.8999999761581421
     },
     {
       "tile": "Turret South",
       "model": "Turret",
-      "scale": 0.9
+      "scale": 0.8999999761581421
     },
     {
       "tile": "Turret West",
       "model": "Turret",
-      "scale": 0.9
+      "scale": 0.8999999761581421
     },
     {
       "tile": "Player",
@@ -856,6 +856,12 @@
         "Kenney Game Assets All-in-1 3.5.0/Audio/Foley Sounds/Audio/Woosh/woosh1.ogg"
       ],
       "volume": 0.800000011920929
+    },
+    {
+      "name": "laser",
+      "files": [
+        "audio/sound.ogg"
+      ]
     }
   ],
   "music": [

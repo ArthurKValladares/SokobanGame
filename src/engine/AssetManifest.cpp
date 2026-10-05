@@ -663,9 +663,6 @@ void AssetManifest::validateAndResolve()
     }
 
     for (const SoundSet& set : sounds_) {
-        if (set.files.empty()) {
-            throw std::runtime_error("asset manifest: sound set '" + set.name + "' has no files");
-        }
         if (duplicate(sounds_, set.name)) {
             throw std::runtime_error("asset manifest: duplicate sound set '" + set.name + "'");
         }

@@ -976,6 +976,16 @@ textures, animations, sounds, music, tile visuals, and material behavior. A
 normal build runs `sokoban_content`, validates all reachable content, compiles
 shaders, and stages only required files beside the executable.
 
+In Debug, the Developer Tools `Asset Manifest` tab's `Sounds` section supports
+native file selection through `Browse` and `+ File`. Files outside `assets/`
+are copied into `assets/custom/audio/` with unique names. `Play` auditions the
+selected file immediately through the game's audio engine, using the sound
+set, sound-effects, and master volumes; `Stop Preview` ends the audition.
+Selections can be previewed before saving. `Save` also copies selected sounds
+into staged runtime assets. New sound sets start empty, and empty sets or
+missing sound files do not block builds; staging warns and skips missing sound
+files. Other required assets and sound path containment remain validated.
+
 `assets/animation_catalog.json` is the source of truth for animation usage,
 playback tuning, and animation ordering. Each manifest animation records its
 validated source duration and a global speed. Every code-declared semantic use

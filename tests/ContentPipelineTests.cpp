@@ -1181,6 +1181,29 @@ void testUnsupportedGltfTextureSemanticsHaveContext()
         "unsupported UV set reports model, material and texture");
 }
 
+void testDraftSoundSets()
+{
+    ScopedTestDirectory temp("sokoban-content-draft-sounds");
+    const auto roots = createValidContent(temp.path());
+    const auto withDraft = replaceFirst(
+        manifest(),
+        "{ \"name\": \"footsteps\", \"files\": [\"audio/step.ogg\"] }",
+        "{ \"name\": \"footsteps\", \"files\": [\"audio/step.ogg\", \"audio/missing.ogg\"] },"
+        "{ \"name\": \"laser\", \"files\": [] }");
+    writeFile(roots.assets / "manifest.json", withDraft);
+    const auto output = temp.path() / "staged";
+    const auto inventory = sokoban::stageContent(roots, output, "draft-test");
+    CHECK_MESSAGE(contains(inventory, "audio/step.ogg"), "available sound variations staged");
+    CHECK_MESSAGE(!contains(inventory, "audio/missing.ogg"), "missing draft variation skipped");
+    sokoban::validateContentPackage(output, "draft-test");
+    writeFile(roots.assets / "audio/missing.ogg");
+    CHECK_MESSAGE(contains(sokoban::collectContentInventory(roots), "audio/missing.ogg"),
+        "a completed draft is included on the next build");
+    writeFile(roots.assets / "manifest.json", replaceFirst(withDraft, "audio/missing.ogg", "../outside.ogg"));
+    checkThrows([&] { (void)sokoban::collectContentInventory(roots); },
+        "missing sound paths still cannot escape assets");
+}
+
 void testValidationFailures()
 {
     ScopedTestDirectory temp("sokoban-content-pipeline");
@@ -1287,6 +1310,7 @@ int main()
         testEmbeddedGlbTextureSourcesEnterInventory();
         testGltfTextureTraversalIsRejected();
         testUnsupportedGltfTextureSemanticsHaveContext();
+        testDraftSoundSets();
         testValidationFailures();
     } catch (const std::exception& error) {
         std::cerr << "UNEXPECTED EXCEPTION: " << error.what() << '\n';

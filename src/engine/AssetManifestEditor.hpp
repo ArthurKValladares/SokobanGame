@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sokoban {
@@ -41,6 +42,14 @@ public:
     void updateTile(std::size_t index, AssetManifest::TileEntry tile);
     void updateSoundSet(std::size_t index, AssetManifest::SoundSet sound);
     void updateMusicTrack(std::size_t index, AssetManifest::MusicTrack track);
+
+    // fileIndex == files.size() appends a file. Files outside the source
+    // asset root are imported into custom/audio without overwriting assets.
+    [[nodiscard]] bool chooseSoundFile(
+        std::size_t soundIndex,
+        std::size_t fileIndex,
+        const std::filesystem::path& selected);
+    [[nodiscard]] std::filesystem::path soundFilePath(std::string_view file) const;
 
     void addTexture();
     void addModel();

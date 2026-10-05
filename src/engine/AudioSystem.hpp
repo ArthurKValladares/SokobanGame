@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <memory>
 #include <random>
+#include <string>
 #include <string_view>
 
 namespace sokoban {
@@ -80,6 +81,15 @@ public:
     // Plays a decoded, non-looping variation from a manifest sound set. Sets
     // used by the footstep and stone-drag orchestrators are reserved.
     void playOneShot(std::string_view soundSetName);
+
+#if SOKOBAN_ENABLE_DEBUG_UI
+    // Auditions an editor selection through this engine, without requiring
+    // the file or set to be present in the loaded gameplay manifest.
+    [[nodiscard]] bool previewSoundFile(
+        const std::filesystem::path& file, float volume, std::string& error);
+    void stopSoundPreview();
+    [[nodiscard]] bool soundPreviewPlaying() const;
+#endif
 
     // Starts the level's manifest soundtrack looping, crossfading from the
     // current track. Levels without music fade out. Re-requesting the level

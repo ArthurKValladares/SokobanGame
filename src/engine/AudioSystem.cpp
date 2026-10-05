@@ -44,6 +44,11 @@ struct AudioSystem::EngineHandle {
     std::vector<ma_sound> musicSounds;
     std::vector<int> loadedMusic;
     int activeMusic = -1;
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ma_sound previewSound {};
+    bool previewInitialized = false;
+    float previewVolume = 1.0f;
+#endif
 };
 
 namespace {
@@ -161,8 +166,62 @@ AudioSystem::~AudioSystem()
     for (int index : engine_->loadedMusic) {
         ma_sound_uninit(&engine_->musicSounds[static_cast<size_t>(index)]);
     }
+#if SOKOBAN_ENABLE_DEBUG_UI
+    stopSoundPreview();
+#endif
     ma_engine_uninit(&engine_->engine);
 }
+
+#if SOKOBAN_ENABLE_DEBUG_UI
+bool AudioSystem::previewSoundFile(
+    const std::filesystem::path& file, float volume, std::string& error)
+{
+    stopSoundPreview();
+    if (!engine_->engineInitialized) {
+        error = "Audio engine is unavailable.";
+        return false;
+    }
+#ifdef _WIN32
+    const ma_result result = ma_sound_init_from_file_w(
+        &engine_->engine, file.c_str(), MA_SOUND_FLAG_STREAM,
+        nullptr, nullptr, &engine_->previewSound);
+#else
+    const ma_result result = ma_sound_init_from_file(
+        &engine_->engine, file.c_str(), MA_SOUND_FLAG_STREAM,
+        nullptr, nullptr, &engine_->previewSound);
+#endif
+    if (result != MA_SUCCESS) {
+        error = "Cannot preview sound: " + std::string(ma_result_description(result));
+        return false;
+    }
+    engine_->previewInitialized = true;
+    engine_->previewVolume = std::clamp(volume, 0.0f, 1.0f);
+    ma_sound_set_looping(&engine_->previewSound, MA_FALSE);
+    ma_sound_set_volume(&engine_->previewSound, soundVolume_ * engine_->previewVolume);
+    const ma_result started = ma_sound_start(&engine_->previewSound);
+    if (started != MA_SUCCESS) {
+        error = "Cannot play sound: " + std::string(ma_result_description(started));
+        stopSoundPreview();
+        return false;
+    }
+    error.clear();
+    return true;
+}
+
+void AudioSystem::stopSoundPreview()
+{
+    if (engine_->previewInitialized) {
+        ma_sound_uninit(&engine_->previewSound);
+        engine_->previewInitialized = false;
+    }
+}
+
+bool AudioSystem::soundPreviewPlaying() const
+{
+    return engine_->previewInitialized &&
+        ma_sound_is_playing(&engine_->previewSound) == MA_TRUE;
+}
+#endif
 
 bool AudioSystem::available() const
 {
@@ -339,6 +398,11 @@ void AudioSystem::setFootstepVolume(float volume)
 void AudioSystem::setSoundVolume(float volume)
 {
     soundVolume_ = std::clamp(volume, 0.0f, 1.0f);
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (engine_->previewInitialized) {
+        ma_sound_set_volume(&engine_->previewSound, soundVolume_ * engine_->previewVolume);
+    }
+#endif
     if (engine_->engineInitialized && engine_->activeStoneDrag >= 0) {
         ma_sound_set_volume(
             &engine_->stoneDragSounds[static_cast<size_t>(engine_->activeStoneDrag)],

@@ -1,10 +1,13 @@
 #include "engine/AssetManifestDebugUi.hpp"
 
+#include "engine/AudioSystem.hpp"
 #include "engine/TileTypes.hpp"
 
 #include <algorithm>
 #include <array>
+#include <exception>
 #include <limits>
+#include <mutex>
 #include <string>
 
 #ifndef SOKOBAN_ENABLE_DEBUG_UI
@@ -17,6 +20,8 @@
 #endif
 
 #if SOKOBAN_ENABLE_DEBUG_UI
+#include <SDL3/SDL_dialog.h>
+#include <SDL3/SDL_error.h>
 #include <imgui.h>
 #include <imgui_stdlib.h>
 #endif
@@ -166,9 +171,91 @@ void drawEmptySection(const char* label)
 
 } // namespace
 
-void AssetManifestDebugUi::draw(AssetManifestEditor& editor)
+#if SOKOBAN_ENABLE_DEBUG_UI
+struct AssetManifestDebugUi::SoundFileDialog {
+    SoundFileRequest request;
+    std::filesystem::path manifestPath;
+    std::string document;
+    std::string defaultLocation;
+    std::mutex mutex;
+    bool finished = false;
+    std::filesystem::path selected;
+    std::string error;
+
+    static void SDLCALL complete(void* userdata, const char* const* files, int)
+    {
+        // SDL can invoke this on another thread, even after the UI is gone.
+        // The callback owns a shared reference and never touches the editor.
+        const std::unique_ptr<std::shared_ptr<SoundFileDialog>> owner(
+            static_cast<std::shared_ptr<SoundFileDialog>*>(userdata));
+        SoundFileDialog& result = **owner;
+        const std::lock_guard lock(result.mutex);
+        if (files == nullptr) {
+            result.error = SDL_GetError();
+        } else if (files[0] != nullptr) {
+            const std::string_view utf8(files[0]);
+            result.selected = std::filesystem::path(std::u8string(utf8.begin(), utf8.end()));
+        }
+        result.finished = true;
+    }
+};
+
+void AssetManifestDebugUi::beginSoundFileDialog(
+    AssetManifestEditor& editor, SDL_Window* window)
+{
+    if (!soundFileRequest_) {
+        return;
+    }
+    auto dialog = std::make_shared<SoundFileDialog>();
+    dialog->request = *soundFileRequest_;
+    dialog->manifestPath = editor.filePath();
+    dialog->document = editor.serialize();
+    const auto location = editor.filePath().parent_path().u8string();
+    dialog->defaultLocation.assign(location.begin(), location.end());
+    soundFileDialog_ = dialog;
+    soundFileRequest_.reset();
+    static constexpr SDL_DialogFileFilter filters[] {
+        { "Audio files", "ogg;wav;mp3;flac" },
+        { "All files", "*" },
+    };
+    SDL_ShowOpenFileDialog(
+        SoundFileDialog::complete,
+        new std::shared_ptr<SoundFileDialog>(dialog),
+        window, filters, static_cast<int>(std::size(filters)),
+        dialog->defaultLocation.c_str(), false);
+}
+
+void AssetManifestDebugUi::finishSoundFileDialog(AssetManifestEditor& editor)
+{
+    if (!soundFileDialog_) {
+        return;
+    }
+    const auto dialog = soundFileDialog_;
+    const std::lock_guard lock(dialog->mutex);
+    if (!dialog->finished) {
+        return;
+    }
+    soundFileDialog_.reset();
+    if (!dialog->error.empty()) {
+        soundStatus_ = "File picker failed: " + dialog->error;
+    } else if (!dialog->selected.empty()) {
+        if (editor.filePath() != dialog->manifestPath || editor.serialize() != dialog->document) {
+            soundStatus_ = "The manifest changed while choosing a file. Browse again.";
+        } else {
+            (void)editor.chooseSoundFile(
+                dialog->request.soundIndex, dialog->request.fileIndex, dialog->selected);
+            soundStatus_.clear();
+        }
+    }
+}
+#endif
+
+void AssetManifestDebugUi::draw(
+    AssetManifestEditor& editor, AudioSystem& audio, SDL_Window* window)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
+    finishSoundFileDialog(editor);
+    ImGui::BeginDisabled(soundFileDialog_ != nullptr);
     ImGui::TextUnformatted(editor.filePath().string().c_str());
     ImGui::SameLine();
     ImGui::TextDisabled(editor.dirty() ? "modified" : "clean");
@@ -235,7 +322,7 @@ void AssetManifestDebugUi::draw(AssetManifestEditor& editor)
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Sounds")) {
-            drawSounds(editor);
+            drawSounds(editor, audio);
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Music")) {
@@ -244,8 +331,12 @@ void AssetManifestDebugUi::draw(AssetManifestEditor& editor)
         }
         ImGui::EndTabBar();
     }
+    ImGui::EndDisabled();
+    beginSoundFileDialog(editor, window);
 #else
     (void)editor;
+    (void)audio;
+    (void)window;
 #endif
 }
 
@@ -288,7 +379,9 @@ void AssetManifestDebugUi::drawTextures(AssetManifestEditor& editor)
     for (std::size_t i = 0; i < editor.textures().size(); ++i) {
         AssetManifest::Texture texture = editor.textures()[i];
         ImGui::PushID(static_cast<int>(i));
-        const bool open = ImGui::TreeNode(texture.name.c_str());
+        // Editable labels must not become IDs: changing one would close the
+        // tree and replace every child widget's identity on each keystroke.
+        const bool open = ImGui::TreeNode("Texture", "%s", texture.name.c_str());
         const ItemAction action = drawItemActions(i, editor.textures().size());
         if (action.remove) {
             (void)editor.removeTexture(i);
@@ -333,7 +426,7 @@ void AssetManifestDebugUi::drawModels(AssetManifestEditor& editor)
     for (std::size_t i = 0; i < editor.models().size(); ++i) {
         AssetManifest::Model model = editor.models()[i];
         ImGui::PushID(static_cast<int>(i));
-        const bool open = ImGui::TreeNode(model.name.c_str());
+        const bool open = ImGui::TreeNode("Model", "%s", model.name.c_str());
         const ItemAction action = drawItemActions(i, editor.models().size());
         if (action.remove) {
             (void)editor.removeModel(i);
@@ -463,7 +556,7 @@ void AssetManifestDebugUi::drawAnimations(AssetManifestEditor& editor)
     for (std::size_t i = 0; i < editor.animations().size(); ++i) {
         AssetManifest::Animation animation = editor.animations()[i];
         ImGui::PushID(static_cast<int>(i));
-        const bool open = ImGui::TreeNode(animation.name.c_str());
+        const bool open = ImGui::TreeNode("Animation", "%s", animation.name.c_str());
         const ItemAction action = drawItemActions(i, editor.animations().size());
         if (action.remove) {
             (void)editor.removeAnimation(i);
@@ -517,7 +610,7 @@ void AssetManifestDebugUi::drawTiles(AssetManifestEditor& editor)
         AssetManifest::TileEntry tile = editor.tileEntries()[i];
         const std::string label(tileTypeName(tile.tile));
         ImGui::PushID(static_cast<int>(i));
-        const bool open = ImGui::TreeNode(label.c_str());
+        const bool open = ImGui::TreeNode("Tile", "%s", label.c_str());
         const ItemAction action = drawItemActions(i, editor.tileEntries().size());
         if (action.remove) {
             (void)editor.removeTile(i);
@@ -554,11 +647,22 @@ void AssetManifestDebugUi::drawTiles(AssetManifestEditor& editor)
 #endif
 }
 
-void AssetManifestDebugUi::drawSounds(AssetManifestEditor& editor)
+void AssetManifestDebugUi::drawSounds(AssetManifestEditor& editor, AudioSystem& audio)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     if (ImGui::Button("+ Sound Set")) {
         editor.addSoundSet();
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!audio.soundPreviewPlaying());
+    if (ImGui::Button("Stop Preview")) {
+        audio.stopSoundPreview();
+        soundStatus_.clear();
+    }
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("Empty sets and missing sound files are allowed while authoring.");
+    if (!soundStatus_.empty()) {
+        ImGui::TextWrapped("%s", soundStatus_.c_str());
     }
     if (editor.soundSets().empty()) {
         drawEmptySection("sound set");
@@ -566,7 +670,7 @@ void AssetManifestDebugUi::drawSounds(AssetManifestEditor& editor)
     for (std::size_t i = 0; i < editor.soundSets().size(); ++i) {
         AssetManifest::SoundSet sound = editor.soundSets()[i];
         ImGui::PushID(static_cast<int>(i));
-        const bool open = ImGui::TreeNode(sound.name.c_str());
+        const bool open = ImGui::TreeNode("Sound", "%s", sound.name.c_str());
         const ItemAction action = drawItemActions(i, editor.soundSets().size());
         if (action.remove) {
             (void)editor.removeSoundSet(i);
@@ -593,8 +697,23 @@ void AssetManifestDebugUi::drawSounds(AssetManifestEditor& editor)
             ImGui::SeparatorText("Files");
             for (std::size_t fileIndex = 0; fileIndex < sound.files.size(); ++fileIndex) {
                 ImGui::PushID(static_cast<int>(fileIndex));
-                ImGui::SetNextItemWidth(-40.0f);
+                ImGui::SetNextItemWidth(-180.0f);
                 changed = ImGui::InputText("##File", &sound.files[fileIndex]) || changed;
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Browse")) {
+                    soundFileRequest_ = SoundFileRequest { i, fileIndex };
+                }
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Play")) {
+                    try {
+                        const auto path = editor.soundFilePath(sound.files[fileIndex]);
+                        if (audio.previewSoundFile(path, sound.volume, soundStatus_)) {
+                            soundStatus_ = "Playing " + sound.files[fileIndex];
+                        }
+                    } catch (const std::exception& error) {
+                        soundStatus_ = error.what();
+                    }
+                }
                 ImGui::SameLine();
                 if (ImGui::SmallButton("X")) {
                     sound.files.erase(
@@ -609,8 +728,7 @@ void AssetManifestDebugUi::drawSounds(AssetManifestEditor& editor)
                 ImGui::PopID();
             }
             if (ImGui::SmallButton("+ File")) {
-                sound.files.push_back("audio/sound.ogg");
-                changed = true;
+                soundFileRequest_ = SoundFileRequest { i, sound.files.size() };
             }
             if (changed) {
                 editor.updateSoundSet(i, std::move(sound));
@@ -621,6 +739,7 @@ void AssetManifestDebugUi::drawSounds(AssetManifestEditor& editor)
     }
 #else
     (void)editor;
+    (void)audio;
 #endif
 }
 
@@ -637,7 +756,7 @@ void AssetManifestDebugUi::drawMusic(AssetManifestEditor& editor)
         AssetManifest::MusicTrack track = editor.musicTracks()[i];
         const std::string label = "Level " + std::to_string(track.level);
         ImGui::PushID(static_cast<int>(i));
-        const bool open = ImGui::TreeNode(label.c_str());
+        const bool open = ImGui::TreeNode("Music", "%s", label.c_str());
         const ItemAction action = drawItemActions(i, editor.musicTracks().size());
         if (action.remove) {
             (void)editor.removeMusicTrack(i);

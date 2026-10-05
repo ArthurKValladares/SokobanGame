@@ -92,6 +92,70 @@ void updateItem(std::vector<Item>& items, std::size_t index, Item item)
 
 } // namespace
 
+std::filesystem::path AssetManifestEditor::soundFilePath(std::string_view file) const
+{
+    const std::filesystem::path relative(file);
+    if (relative.empty() || relative.has_root_path()) {
+        throw std::runtime_error("Choose a sound file relative to the assets folder.");
+    }
+    const auto root = std::filesystem::canonical(filePath_.parent_path());
+    const auto absolute = std::filesystem::weakly_canonical(root / relative);
+    const auto contained = absolute.lexically_relative(root);
+    if (contained.empty() || *contained.begin() == "..") {
+        throw std::runtime_error("Sound file escapes the assets folder.");
+    }
+    if (!std::filesystem::is_regular_file(absolute)) {
+        throw std::runtime_error("Sound file is missing: " + relative.string());
+    }
+    return absolute;
+}
+
+bool AssetManifestEditor::chooseSoundFile(
+    std::size_t soundIndex,
+    std::size_t fileIndex,
+    const std::filesystem::path& selected)
+{
+    try {
+        if (soundIndex >= sounds_.size() || fileIndex > sounds_[soundIndex].files.size()) {
+            throw std::out_of_range("sound file selection no longer matches the document");
+        }
+        const auto source = std::filesystem::canonical(selected);
+        if (!std::filesystem::is_regular_file(source)) {
+            throw std::runtime_error("selected sound is not a regular file");
+        }
+        const auto root = std::filesystem::canonical(filePath_.parent_path());
+        auto relative = source.lexically_relative(root);
+        if (relative.empty() || relative.has_root_path() || *relative.begin() == "..") {
+            const auto importDirectory = root / "custom/audio";
+            const auto canonicalImport = std::filesystem::weakly_canonical(importDirectory);
+            const auto contained = canonicalImport.lexically_relative(root);
+            if (contained.empty() || contained.has_root_path() || *contained.begin() == "..") {
+                throw std::runtime_error("audio import folder escapes the assets folder");
+            }
+            std::filesystem::create_directories(canonicalImport);
+            auto destination = canonicalImport / source.filename();
+            for (std::size_t suffix = 2; std::filesystem::exists(destination); ++suffix) {
+                destination = canonicalImport /
+                    (source.stem().string() + "_" + std::to_string(suffix) + source.extension().string());
+            }
+            std::filesystem::copy_file(source, destination);
+            relative = destination.lexically_relative(root);
+        }
+        const std::string file = relative.generic_string();
+        if (fileIndex == sounds_[soundIndex].files.size()) {
+            sounds_[soundIndex].files.push_back(file);
+        } else {
+            sounds_[soundIndex].files[fileIndex] = file;
+        }
+        markChanged();
+        status_ = "Selected " + file;
+        return true;
+    } catch (const std::exception& error) {
+        status_ = "Sound selection failed: " + std::string(error.what());
+        return false;
+    }
+}
+
 void AssetManifestEditor::initialize(
     std::filesystem::path filePath,
     std::filesystem::path runtimePath)
@@ -152,6 +216,22 @@ bool AssetManifestEditor::save()
 
         atomicFile::write(filePath_, contents);
         if (!runtimePath_.empty() && !samePath(filePath_, runtimePath_)) {
+            // Publish newly selected sounds with the runtime manifest. Draft
+            // paths may still be missing, matching the staging policy.
+            for (const auto& sound : sounds_) {
+                for (const auto& file : sound.files) {
+                    if (!std::filesystem::exists(filePath_.parent_path() / file)) {
+                        continue;
+                    }
+                    const auto source = soundFilePath(file);
+                    const auto destination = runtimePath_.parent_path() / file;
+                    if (!samePath(source, destination)) {
+                        std::filesystem::create_directories(destination.parent_path());
+                        std::filesystem::copy_file(
+                            source, destination, std::filesystem::copy_options::overwrite_existing);
+                    }
+                }
+            }
             atomicFile::write(runtimePath_, contents);
             (void)refreshContentPackageIndex(runtimePath_.parent_path());
         }
@@ -400,7 +480,6 @@ void AssetManifestEditor::addSoundSet()
 {
     sounds_.push_back({
         .name = uniqueName("sound", sounds_),
-        .files = { "audio/sound.ogg" },
     });
     markChanged();
 }

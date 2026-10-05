@@ -9,6 +9,7 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
+#include "engine/Log.hpp"
 #include "engine/OverworldMap.hpp"
 #include "engine/render/ShaderCatalog.hpp"
 #include "engine/TileThumbnailBake.hpp"
@@ -112,7 +113,8 @@ bool isWithin(const std::filesystem::path& root, const std::filesystem::path& ca
 std::filesystem::path sourceFile(
     const std::filesystem::path& root,
     const std::filesystem::path& relative,
-    std::string_view label)
+    std::string_view label,
+    bool allowMissing = false)
 {
     const std::filesystem::path safeRelative = normalizedRelativePath(relative, label);
     std::error_code error;
@@ -121,6 +123,9 @@ std::filesystem::path sourceFile(
         throw std::runtime_error(std::string(label) + " escapes its content root: " + relative.string());
     }
     if (!std::filesystem::is_regular_file(candidate)) {
+        if (allowMissing && !std::filesystem::exists(candidate)) {
+            return {};
+        }
         throw std::runtime_error(std::string(label) + " is missing: " + candidate.string());
     }
     return candidate;
@@ -664,7 +669,16 @@ private:
         }
         for (const auto& soundSet : manifest.soundSets()) {
             for (const auto& file : soundSet.files) {
-                addAssetPath(file, "sound set '" + soundSet.name + "'");
+                const std::string label = "sound set '" + soundSet.name + "'";
+                // Sound sets may be authored before their files are chosen.
+                // AudioSystem already skips missing sounds at runtime. Still
+                // validate containment, including symlinks, before skipping.
+                if (sourceFile(roots_.assets, file, label, true).empty()) {
+                    log::warning(log::Category::Audio)
+                        << "Skipping missing file for " << label << ": " << file;
+                    continue;
+                }
+                addAssetPath(file, label);
             }
         }
         for (const auto& music : manifest.musicTracks()) {
