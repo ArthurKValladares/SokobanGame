@@ -1,5 +1,4 @@
-@groundsplat {"name":"Ground","base":"GroundGrass","detail":"GroundRock","mask":"GroundSplatMap2_0","color":[0.25,0.75,0.35]}
-@character rogue
+@groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap2_0","name":"Ground"}
 @water 1
 
 @layer 0
@@ -17,11 +16,11 @@ DDDDDDDDDDDDDDD
                
                
                
-   .... ....   
-   .... ....   
-   .... ....   
-   .... ....   
-   .... ....   
+   S.Xc aYca   
+   Y... VaAS   
+   FZaF caFF   
+   aX.F Y.VA   
+   YacS ZY.A   
                
 
 @layer 2
@@ -30,7 +29,7 @@ DDDDDDDDDDDDDDD
                
                
                
-     CR  E     
+     QR  E     
                
                
                

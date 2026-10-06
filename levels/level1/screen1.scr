@@ -1,12 +1,12 @@
-@groundsplat {"name":"Ground","base":"GroundGrass","detail":"GroundRock","mask":"GroundSplatMap1_1","color":[0.25,0.75,0.35]}
+@groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap1_1","name":"Ground"}
 @gate {"cell":[11,2,1],"color":[1.0,0.7200000286102295,0.11999999731779099],"plates":[[1,2,1],[5,2,1]]}
 
 @layer 0
-.............
-.............
-.............
-.............
-.............
+cacFYSYa.V.FV
+.aFFF.cXVaXc.
+.FFa.aZVXASSV
+cVXAVXYYASSFX
+VYFAX.ZZFSZFa
 
 @layer 1
    #   #   # 

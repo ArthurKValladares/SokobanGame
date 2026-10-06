@@ -1,4 +1,4 @@
-@groundsplat {"name":"Ground","base":"GroundGrass","detail":"GroundRock","mask":"GroundSplatMapOverworld1","color":[0.25,0.75,0.35]}
+@groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMapOverworld1","name":"Ground"}
 @character rogue
 @selector {"cell":[1,2,2],"id":1,"target":{"level":0,"screen":0}}
 @selector {"cell":[2,2,2],"id":2,"target":{"level":0,"screen":1}}
@@ -7,22 +7,22 @@
 @selector {"cell":[3,4,2],"id":5,"target":{"level":1,"screen":2}}
 
 @layer 0
-.........
-        .
-        .
-        .
-        .
-        .
-        .
+aAXSAX.Xa
+        Z
+        V
+        F
+        X
+        A
+        V
 
 @layer 1
          
-........ 
-........ 
-........ 
-........ 
-........ 
-........ 
+XaZaaXFY 
+c.ZV.XYX 
+aAX.FSa. 
+.caSYaFa 
+AYc.YYcS 
+AVAaVZ.V 
 
 @layer 2
          

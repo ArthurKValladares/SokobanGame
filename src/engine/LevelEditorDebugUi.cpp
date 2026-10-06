@@ -906,6 +906,13 @@ void LevelEditorDebugUi::drawTilePalette(
         }
     }
 
+    if (ImGui::Button("Randomize Rocks")) {
+        (void)editor.randomizeRocks();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Choose a random rock model for every ground tile on all layers of this screen. Undo restores the previous choices.");
+    }
+
     const std::string_view selectedName = tileTypeName(editor.selectedTile());
     if (tileTypeIsGround(editor.selectedTile())) {
         ImGui::Text("Selected: Ground Rock %02u", groundRockVariantFor(editor.selectedTile()) + 1U);

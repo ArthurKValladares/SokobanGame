@@ -759,6 +759,9 @@ editor commands but does not own document or filesystem policy.
   Existing `.` tiles use Rock 01; the other nine brushes save as the symbols
   above. Eyedropper, recent brushes, undo/redo, and moving a painted tile retain
   its chosen version and material assignment.
+  **Randomize Rocks**, below the tile selector, assigns a random version to
+  every ground tile on every layer of the edited screen. The whole action is
+  one undo/redo step and keeps each tile's splat assignment.
 - Link Colors: in the editor, every pressure plate and device has a link
   color, and a device is driven by exactly the pressure plates of its color.
   Rocks, ice blocks, and turrets can also be painted into a color group; they

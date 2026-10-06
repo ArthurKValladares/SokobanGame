@@ -15,6 +15,7 @@
 #include <cmath>
 #include <exception>
 #include <fstream>
+#include <random>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
@@ -1124,6 +1125,44 @@ bool LevelEditor::paintCell(GridPosition3 position)
 bool LevelEditor::eraseCell(GridPosition3 position)
 {
     return setCell(position, TileType::Air);
+}
+
+bool LevelEditor::randomizeRocks(std::optional<uint32_t> seed)
+{
+    // A toolbar command must not become part of a still-open paint stroke.
+    endStroke();
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    std::mt19937 random(seed ? *seed : std::random_device {}());
+    std::uniform_int_distribution<uint32_t> choose(
+        0, static_cast<uint32_t>(groundRockVariantCount - 1));
+    std::size_t rocks = 0;
+    std::size_t changed = 0;
+    for (auto& layer : document_.layers) {
+        for (auto& row : layer) {
+            for (char& character : row) {
+                const auto tile = charToTileType(character);
+                if (!tile || !tileTypeIsGround(*tile)) continue;
+                ++rocks;
+                const uint32_t variant = choose(random);
+                const TileType replacement = variant == 0 ? TileType::Ground
+                    : static_cast<TileType>(static_cast<uint32_t>(TileType::GroundRock02) + variant - 1);
+                const char replacementCharacter = tileTypeToChar(replacement);
+                changed += character != replacementCharacter;
+                character = replacementCharacter;
+            }
+        }
+    }
+    if (changed == 0) {
+        document_.status = rocks == 0 ? "No ground rocks to randomize."
+            : "Ground rock choices are unchanged.";
+        return false;
+    }
+    pendingMove_.reset();
+    document_.dirty = true;
+    document_.status = "Randomized " + std::to_string(rocks) +
+        " ground rocks (" + std::to_string(changed) + " changed).";
+    recordDocumentChange(before);
+    return true;
 }
 
 bool LevelEditor::beginStroke()

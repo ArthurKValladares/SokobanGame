@@ -1,16 +1,16 @@
-@groundsplat {"name":"Ground","base":"GroundGrass","detail":"GroundRock","mask":"GroundSplatMap","color":[0.25,0.75,0.35]}
+@groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap","name":"Ground"}
 @gate {"cell":[10,3,1],"color":[1.0,0.7200000286102295,0.11999999731779099],"plates":[[6,0,1],[6,6,1]]}
 @rotator {"cell":[6,3,1],"color":[0.23999999463558197,0.6200000047683716,0.9200000166893005],"plates":[[1,3,1]]}
 @plate {"cell":[6,3,1],"tile":"Rotator Counter-Clockwise"}
 
 @layer 0
-..... . .....
-.....   .....
-.............
-.............
-.............
-.....   .....
-..... . .....
+YaSAV Z .XYYa
+VaZZF   .VaZV
+.AAaZX.cXcYAF
+SccZAaYYF.aYV
+S.Z.AFYSXaVZY
+YVXcV   aVVVF
+c.AYS . ZYXcF
 
 @layer 1
       P      

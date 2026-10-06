@@ -1,17 +1,17 @@
-@groundsplat {"name":"Ground","base":"GroundGrass","detail":"GroundRock","mask":"GroundSplatMap","color":[0.25,0.75,0.35]}
+@groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap","name":"Ground"}
 @lockplate {"cell":[4,3,1],"color":[1.0,0.7200000286102295,0.11999999731779099],"plates":[[15,3,1]],"startEnabled":true}
 @lockplate {"cell":[12,3,1],"color":[0.0,1.0,1.0],"plates":[[1,3,1]],"startEnabled":true}
 @plate {"cell":[4,3,1],"tile":"Lock Plate"}
 @plate {"cell":[12,3,1],"tile":"Lock Plate"}
 
 @layer 0
-........ . . ....
-........ .   ....
-........ ........
-........ ........
-........ ........
-..   ... ........
-.. . ... ........
+aaSVVcVS Z X cXVA
+ZV.XFZFV F   AcSX
+aSaSXVAc XaYXZYFV
+.ZYYFVVF .ZYa..Aa
+AAYXaFaa Z.SVYaVA
+Fc   .XA .caYXA.A
+AX Y SYV FcZVFXca
 
 @layer 1
            E     

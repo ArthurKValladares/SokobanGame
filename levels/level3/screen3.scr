@@ -1,18 +1,17 @@
-@groundsplat {"name":"Ground","base":"GroundGrass","detail":"GroundRock","mask":"GroundSplatMap3_3","color":[0.25,0.75,0.35]}
-@character rogue
+@groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap3_3","name":"Ground"}
 
 @layer 0
-.............
-.............
-.............
-.............
-.............
-.............
-.............
-.............
-.............
-.............
-.............
+.ca.AcASZ.aS.
+cVSFXcY.FXcXV
+VVZYSZYcXZFaY
+SZVaAZXcZcAZF
+.SSSXXaFaFASX
+FXcYFYFVZc.Sc
+SS.ZVZFYZcFZV
+F..aYZFSaY.Ya
+FZScc.S.FXFZV
+VXcXX..S.YSFS
+SFccXZcVFAVXV
 
 @layer 1
       #      
@@ -20,7 +19,7 @@
       3      
              
  #        # #
-  E  C  N  E 
+  E  Q  N  E 
  # #      # #
              
       2      

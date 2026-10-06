@@ -1,4 +1,4 @@
-@groundsplat {"name":"Ground","base":"GroundGrass","detail":"GroundRock","mask":"GroundSplatMap3_2","color":[0.25,0.75,0.35]}
+@groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap3_2","name":"Ground"}
 @water 1
 @gate {"cell":[15,7,2],"color":[1.0,0.7200000286102295,0.11999999731779099],"plates":[[6,7,2],[6,8,2],[15,8,2]]}
 
@@ -21,18 +21,18 @@ DDDDDDDDDDDDDDDDDDDDDD
 @layer 1
                       
                       
-         ....         
-      ..........      
-      ..........      
-      ..........      
-        ......        
-      . ...... ..     
-      . ...... .      
-        ......        
-      ..........      
-      ..........      
-      ..........      
-         ....         
+         SSaV         
+      FSVFaXXcXc      
+      FXcc.ASScF      
+      .FYcA.YVaa      
+        FFFX.A        
+      c .VYZFa cF     
+      F YcaVFY A      
+        YYZZAa        
+      VFYX.ZZVaZ      
+      Va.cFaX.XA      
+      FZVcaSXcAA      
+         aVVA         
 
 @layer 2
                       

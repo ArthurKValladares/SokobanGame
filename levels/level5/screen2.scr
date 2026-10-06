@@ -1,17 +1,17 @@
-@groundsplat {"name":"Ground","base":"GroundGrass","detail":"GroundRock","mask":"GroundSplatMap","color":[0.25,0.75,0.35]}
+@groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap","name":"Ground"}
 @minecart {"cell":[6,5,1],"color":[0.0,1.0,1.0],"direction":1,"plates":[[8,3,1]]}
 @plate {"cell":[1,2,1],"tile":"Rail Straight North-South"}
 @plate {"cell":[11,2,1],"tile":"Rail Straight North-South"}
 @plate {"cell":[6,5,1],"tile":"Rail Stop East-West"}
 
 @layer 0
-.............
-.............
-.............
-.............
-.............
-.............
-.............
+S.Y.ZSZXFY.FV
+ZZ.XAYVYAAcYa
+FV.SaVVcAAAZV
+.ASXVaVAA.cca
+aFFX.Aa.XF.SS
+.VSAAAVaFVYXZ
+ZZS.ZFcccaSSS
 
 @layer 1
       E      

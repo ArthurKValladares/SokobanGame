@@ -2790,8 +2790,117 @@ void testRockGroundVariantsPreserveBrushesAndPaint()
     CHECK(ladder.tileAt(0, 0, 0) == TileType::GroundRock10);
 }
 
+void testRandomizeRocksPreservesAssignmentsAndGroupsUndo()
+{
+    TEST("randomizeRocksPreservesAssignmentsAndGroupsUndo");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(20, 10);
+    CHECK(editor.setCell({ 1, 1, 0 }, TileType::Wall));
+    CHECK(editor.setCell({ 4, 3, 1 }, TileType::Rock));
+    const auto* group = editorTilePalette::groupFor(TileType::Ground);
+    CHECK(group != nullptr);
+    if (!group) return;
+    int x = 0;
+    for (const auto tile : group->variants()) {
+        CHECK(editor.setCell({ x++, 8, 1 }, tile));
+    }
+    CHECK(editor.addGroundSplat({ "Meadow", "Grass", "Stone", "Mask", { 0, 1, 0 } }));
+    CHECK(editor.addGroundSplat({ "Sand", "Sand", "Stone", "Mask", { 1, 0, 0 } }));
+    CHECK(editor.paintGroundSplat({ 0, 1, 0 }));
+    CHECK(editor.paintGroundSplat({ 5, 8, 1 }));
+    editor.setSelectedTile(TileType::Wall);
+    editor.setActiveLayer(1);
+    const auto source = project.source / "level0/screen0.scr";
+    CHECK(editor.saveDocument(source));
+    const auto before = editor.documentDefinition();
+    CHECK(!editor.dirty());
+    CHECK(editor.randomizeRocks(12345U));
+    const auto randomized = editor.documentDefinition();
+    CHECK(editor.dirty());
+    CHECK(randomized.layers != before.layers);
+    CHECK(randomized.layers[1] != before.layers[1]);
+    CHECK(randomized.groundSplats == before.groundSplats);
+    CHECK(randomized.groundPaint == before.groundPaint);
+    CHECK(editor.selectedTile() == TileType::Wall);
+    CHECK(editor.activeLayer() == 1);
+    CHECK(Level::loadDefinitionFromFile(source).layers == before.layers);
+    std::array<bool, groundRockVariantCount> seen {};
+    for (std::size_t z = 0; z < before.layers.size(); ++z) {
+        for (std::size_t y = 0; y < before.layers[z].size(); ++y) {
+            for (std::size_t column = 0; column < before.layers[z][y].size(); ++column) {
+                const auto oldTile = charToTileType(before.layers[z][y][column]);
+                const auto newTile = charToTileType(randomized.layers[z][y][column]);
+                CHECK(oldTile && newTile);
+                if (oldTile && tileTypeIsGround(*oldTile)) {
+                    CHECK(newTile && tileTypeIsGround(*newTile));
+                    if (newTile && tileTypeIsGround(*newTile)) seen[groundRockVariantFor(*newTile)] = true;
+                } else {
+                    CHECK(oldTile == newTile);
+                }
+            }
+        }
+    }
+    CHECK(std::ranges::all_of(seen, [](bool chosen) { return chosen; }));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers() == before.layers);
+    CHECK(editor.groundPaint() == before.groundPaint);
+    CHECK(!editor.dirty());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers() == randomized.layers);
+    // The same seeded layout is a no-op, so it cannot add an undo record.
+    CHECK(!editor.randomizeRocks(12345U));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers() == before.layers);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers() == randomized.layers);
+    CHECK(editor.randomizeRocks(54321U));
+    const auto rerandomized = editor.documentDefinition();
+    CHECK(rerandomized.layers != randomized.layers);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers() == randomized.layers);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers() == rerandomized.layers);
+    CHECK(editor.saveDocument(source));
+    CHECK(Level::loadDefinitionFromFile(source).layers == rerandomized.layers);
+    CHECK(Level::loadDefinitionFromFile(project.runtime / "level0/screen0.scr").layers == rerandomized.layers);
+    CHECK(Level::loadDefinitionFromFile(source).groundPaint == before.groundPaint);
+}
+
+void testRandomizeRocksEndsStrokeAndHandlesNoGround()
+{
+    TEST("randomizeRocksEndsStrokeAndHandlesNoGround");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(10, 2);
+    const auto before = editor.documentLayers();
+    CHECK(editor.beginStroke());
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::Wall));
+    const auto painted = editor.documentLayers();
+    CHECK(editor.randomizeRocks(12345U));
+    CHECK(!editor.strokeActive());
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers() == painted);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers() == before);
+
+    editor.newDocument(1, 1);
+    CHECK(editor.setCell({ 0, 0, 0 }, TileType::Wall));
+    const auto source = project.source / "level0/screen0.scr";
+    CHECK(editor.saveDocument(source));
+    auto emptyEditor = makeEditor(project);
+    CHECK(emptyEditor.loadDocument(source, false));
+    const auto empty = emptyEditor.documentLayers();
+    CHECK(!emptyEditor.randomizeRocks(12345U));
+    CHECK(emptyEditor.documentLayers() == empty);
+    CHECK(!emptyEditor.dirty());
+    CHECK(!emptyEditor.tryUndoEdit());
+}
+
 int main()
 {
+    testRandomizeRocksPreservesAssignmentsAndGroupsUndo();
+    testRandomizeRocksEndsStrokeAndHandlesNoGround();
     testRockGroundVariantsPreserveBrushesAndPaint();
     testGroupedPalettePreservesDirectionalBrushes();
     TEST("lecternTextFollowsEditorTransactions");
