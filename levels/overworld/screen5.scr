@@ -1,0 +1,31 @@
+@lectern {"cell":[4,3,1],"text":"You are not strong enough to push more than one rock at the same time."}
+@lectern {"cell":[0,5,1],"text":"Move with W, A, S, D"}
+@lectern {"cell":[2,5,1],"text":"You can move into a rock to push them."}
+@lectern {"cell":[7,6,1],"text":"Press 'Space` to activate the mirror."}
+
+@layer 0
+.........
+.........
+        .
+.........
+.........
+.........
+.........
+
+@layer 1
+        #
+       3#
+        #
+ ###T## #
+  RR R   
+T#T# ## #
+C  R  #T#
+
+@layer 2
+         
+         
+         
+         
+         
+         
+         
