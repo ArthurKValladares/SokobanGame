@@ -200,6 +200,37 @@ void testAuthoredHeroesMoveIndependentlyAndCycleInPlacementOrder()
         session.state().players[0].controller);
 }
 
+void testActiveHeroCharacterFollowsSelectionAndCopies()
+{
+    TEST("activeHeroCharacterFollowsSelectionAndCopies");
+    const Level level = makeLevel({ { "....." }, { "QB K " } });
+    GameplaySession session;
+    session.reset(level);
+    CHECK(session.activeHeroCharacter() == CharacterType::Rogue);
+    session.cycleActiveHero();
+    CHECK(session.activeHeroCharacter() == CharacterType::Bard);
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.activeHeroCharacter() == CharacterType::Bard);
+    session.cycleActiveHero();
+    CHECK(session.activeHeroCharacter() == CharacterType::Knight);
+    session.cycleActiveHero();
+    CHECK(session.activeHeroCharacter() == CharacterType::Rogue);
+
+    auto state = session.state();
+    const auto controller = state.players[1].controller;
+    auto copy = state.players[1];
+    copy.id = 10000;
+    copy.cell = cell(4, 0, 1);
+    state.players[1].dead = true;
+    state.players.push_back(copy);
+    session.resetToState(state, controller);
+    CHECK(session.activeHeroCharacter() == CharacterType::Bard);
+    state.players.back().dead = true;
+    session.resetToState(state, controller);
+    CHECK(!session.activeHeroCharacter());
+}
+
 void testPushMetadata()
 {
     TEST("pushMetadata");
@@ -1523,6 +1554,7 @@ int main()
     testConcurrentPlayHistoryRoundTrips();
     testMoveCommitsAfterAnimation();
     testAuthoredHeroesMoveIndependentlyAndCycleInPlacementOrder();
+    testActiveHeroCharacterFollowsSelectionAndCopies();
     testPushMetadata();
     testUndoRoundTrip();
     testCompletedActionTelemetryTracksLongUndoLoop();

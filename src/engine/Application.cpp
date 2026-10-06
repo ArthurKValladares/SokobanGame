@@ -759,7 +759,18 @@ bool Application::drawUiFrame(
         renderer_.setGameViewportDisplay(std::nullopt);
     }
 #endif
-    if (screenPreviewActive_) {
+    if (const auto cell = gameplaySession_.readingLectern(); cell && !shellMenuOpen()) {
+        if (const auto* lectern = level_.lecternAt(*cell)) {
+            const BindingDeviceClass device = input_.activeDevice() == ActiveInputDevice::Gamepad
+                ? BindingDeviceClass::Gamepad : BindingDeviceClass::Keyboard;
+            const std::string_view closeLabel = SelectorPrompt::bindingLabel(
+                input_.bindings(),
+                InputAction::MenuConfirm, device, ui_.frameArena());
+            if (lecternDialog_.draw(ui_, pixelSize, lectern->text, closeLabel)) {
+                gameplaySession_.dismissLectern();
+            }
+        }
+    } else if (screenPreviewActive_) {
         drawScreenPreviewOverlay(pixelSize);
     } else {
         drawSelectorPrompt(
@@ -1194,6 +1205,8 @@ void Application::update(
     }
     if (tools_->levelEditor.editingDocument()) {
         audioSystem_->update(dt, false, false);
+        audioSystem_->playMusicForLevel(
+            campaign_.inOverworld() ? 0 : campaign_.currentLevel());
         if (!detachedCameraActive) {
             tools_->updateEditorInteraction(
                 input.editor,
@@ -1220,13 +1233,24 @@ void Application::update(
         return;
     }
 
-    if (updateScreenPreview(
+    if (!gameplaySession_.readingLectern() && updateScreenPreview(
             !detachedCameraActive && input.previewScreen,
             dt)) {
         audioSystem_->update(dt, false, false);
         return;
     }
 
+    if (gameplaySession_.readingLectern()) {
+        if (input.gameplay.interactPressed || input.gameplay.dismissPressed) {
+            gameplaySession_.dismissLectern();
+        } else {
+            lecternDialog_.turnPage(
+                input.gameplay.up.pressed || input.gameplay.left.pressed,
+                input.gameplay.down.pressed || input.gameplay.right.pressed);
+        }
+        audioSystem_->update(dt, false, false);
+        return;
+    }
     campaign_.addElapsedTime(dt);
     particleSystem_.update(dt);
     const GameplayLoop::UpdateResult gameplayResult = GameplayLoop::update(
@@ -1238,6 +1262,7 @@ void Application::update(
             : input.gameplay,
         dt,
         editorDraftPlaying);
+    if (gameplaySession_.readingLectern()) lecternDialog_.reset();
     if (gameplayResult.stateCommitted && campaign_.inOverworld() &&
         overworldMap_ && !editorDraftPlaying) {
         const std::optional<OverworldScreenId> playerScreen =
@@ -1378,6 +1403,9 @@ void Application::update(
     audioSystem_->update(dt, playerMoving, pushing, minecartMoving, elevatorMoving,
         AtmosphericAudio::listenerPosition(gameplaySession_.state(), presentation_,
             gameplaySession_.activeHeroController()));
+    audioSystem_->playMusicForLevel(
+        campaign_.inOverworld() ? 0 : campaign_.currentLevel(),
+        gameplaySession_.activeHeroCharacter());
 }
 
 void Application::loadCurrentScreen()
@@ -1416,8 +1444,6 @@ void Application::loadCurrentScreen()
     }
     campaign_.finishWorldLoad(playerProfile_);
     checkpointCurrentScreen(true);
-    audioSystem_->playMusicForLevel(
-        campaign_.inOverworld() ? 0 : campaign_.currentLevel());
     preloadUpcomingAssets();
 #if SOKOBAN_ENABLE_DEBUG_UI
     tools_->levelEditor.setPlayingDraft(false);
@@ -1481,6 +1507,9 @@ bool Application::applyLevel(
     }
     presentation_.resetEntities(gameplaySession_.state());
     audioSystem_->setAtmosphericLevel(level_);
+    audioSystem_->playMusicForLevel(
+        campaign_.inOverworld() ? 0 : campaign_.currentLevel(),
+        gameplaySession_.activeHeroCharacter());
     particleSystem_.reset();
     campaign_.markWorldLoaded();
     return restored;
@@ -2057,6 +2086,7 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
     InputRouter::RoutingContext context {
         .optionsOpen = optionsMenu_.isOpen(),
         .titleOpen = titleScreen_.isOpen(),
+        .lecternOpen = gameplaySession_.readingLectern().has_value() && !shellMenuOpen(),
         .keyboardCaptured = renderer_.wantsKeyboardCapture(),
         .mouseCaptured = renderer_.wantsMouseCapture(),
     };

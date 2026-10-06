@@ -690,6 +690,19 @@ void testDraftOverridesMustNameEachScreenOnce()
 
 int main()
 {
+    TEST("lecternTextTranslatesWithOverworldScreens");
+    {
+        TestProject project("lectern");
+        auto east = eastDefinition();
+        east.layers[1][1][1] = tileTypeToChar(TileType::Lectern);
+        east.lecterns = { { .cell = { 1, 1, 1 }, .text = "Explore the next island." } };
+        project.writeScreen(1, westDefinition());
+        project.writeScreen(2, east);
+        project.writeLayout(eastWestLayout());
+        const auto map = OverworldMap::load(project.root);
+        CHECK(map.level().lecternAt({ 4, 1, 1 }) != nullptr);
+        CHECK(map.level().lecternAt({ 4, 1, 1 })->text == east.lecterns[0].text);
+    }
     testCameraAnglesRemainSpecificToEachOverworldScreen();
     testLayoutRoundTripIsCanonical();
     testCompositionAndGameplayCrossASeam();

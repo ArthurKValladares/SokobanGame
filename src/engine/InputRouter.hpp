@@ -45,6 +45,7 @@ public:
         bool editorEditing = false;
         bool decorationPlacementReady = false;
         bool draftPlaying = false;
+        bool lecternOpen = false;
         bool draftExitConfirmationOpen = false;
         bool keyboardCaptured = false;
         bool mouseCaptured = false;

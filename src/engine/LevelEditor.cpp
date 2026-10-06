@@ -1300,6 +1300,9 @@ bool LevelEditor::moveObject(GridPosition3 destination)
     // setCell keeps gate metadata valid at every intermediate point. Restore
     // the authored relationships after the two-cell transaction completes.
     restoreRecordAfterMove(
+        document_.lecterns, before.lecterns, move->tile == TileType::Lectern,
+        move->source, destination);
+    restoreRecordAfterMove(
         document_.gates,
         before.gates,
         move->tile == TileType::Gate,
@@ -1666,6 +1669,10 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             selector.cell.x += prependColumns;
             selector.cell.y += prependRows;
         }
+        for (Level::Lectern& lectern : document_.lecterns) {
+            lectern.cell.x += prependColumns;
+            lectern.cell.y += prependRows;
+        }
         translateLinkedRecords(document_.gates, prependColumns, prependRows);
         translateLinkedRecords(
             document_.rotators, prependColumns, prependRows);
@@ -1705,6 +1712,14 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             [&](const Level::ObjectLink& link) {
                 return link.cell == translatedPosition;
             });
+    }
+    if (previous.top == TileType::Lectern && painted.top != TileType::Lectern) {
+        std::erase_if(document_.lecterns, [&](const Level::Lectern& lectern) {
+            return lectern.cell == translatedPosition;
+        });
+    }
+    if (painted.top == TileType::Lectern && previous.top != TileType::Lectern) {
+        document_.lecterns.push_back({ .cell = translatedPosition, .text = {} });
     }
     if (previous.top == TileType::Gate && painted.top != TileType::Gate) {
         std::erase_if(document_.gates, [&](const Level::Gate& gate) {
@@ -2227,6 +2242,24 @@ const Level::ScreenSelector* LevelEditor::selectedSelector() const
         return nullptr;
     }
     return &document_.selectors[*document_.selectedSelector];
+}
+
+const std::vector<Level::Lectern>& LevelEditor::lecterns() const
+{
+    return document_.lecterns;
+}
+
+bool LevelEditor::setLecternText(std::size_t index, std::string text)
+{
+    if (index >= document_.lecterns.size() || document_.lecterns[index].text == text) {
+        return false;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.lecterns[index].text = std::move(text);
+    document_.dirty = true;
+    document_.status = "Updated lectern text.";
+    recordDocumentChange(before);
+    return true;
 }
 
 const std::vector<Level::Gate>& LevelEditor::gates() const
@@ -2760,6 +2793,7 @@ Level::Definition LevelEditor::linkedDefinition(
         .cameraAngles = document_.cameraAngles,
         .decorations = document_.decorations,
         .selectors = document_.selectors,
+        .lecterns = document_.lecterns,
         .gates = document_.gates,
         .rotators = document_.rotators,
         .lockPlates = document_.lockPlates,
@@ -2957,6 +2991,7 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     document_.character.reset();
     document_.decorations.clear();
     document_.selectors.clear();
+    document_.lecterns.clear();
     document_.gates.clear();
     document_.rotators.clear();
     document_.lockPlates.clear();
@@ -3020,6 +3055,9 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
         *document_.selectedSelector >= document_.selectors.size()) {
         document_.selectedSelector.reset();
     }
+    std::erase_if(document_.lecterns, [&](const Level::Lectern& lectern) {
+        return lectern.cell.x >= width || lectern.cell.y >= height;
+    });
     cropLinkedRecords(document_.gates, width, height);
     cropLinkedRecords(document_.rotators, width, height);
     cropLinkedRecords(document_.lockPlates, width, height);
@@ -3084,6 +3122,9 @@ void LevelEditor::insertLayerAt(int insertionIndex, const char* status)
         if (selector.cell.z >= insertionIndex) {
             ++selector.cell.z;
         }
+    }
+    for (Level::Lectern& lectern : document_.lecterns) {
+        if (lectern.cell.z >= insertionIndex) ++lectern.cell.z;
     }
     shiftLinkedRecordsForInsertedLayer(document_.gates, insertionIndex);
     shiftLinkedRecordsForInsertedLayer(document_.rotators, insertionIndex);
@@ -3153,6 +3194,11 @@ void LevelEditor::deleteActiveLayer()
         *document_.selectedSelector >= document_.selectors.size()) {
         document_.selectedSelector.reset();
     }
+    std::erase_if(document_.lecterns, [&](Level::Lectern& lectern) {
+        if (lectern.cell.z == static_cast<int>(deletedLayer)) return true;
+        if (lectern.cell.z > static_cast<int>(deletedLayer)) --lectern.cell.z;
+        return false;
+    });
     removeLinkedRecordLayer(document_.gates, static_cast<int>(deletedLayer));
     removeLinkedRecordLayer(
         document_.rotators, static_cast<int>(deletedLayer));
@@ -3340,6 +3386,18 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     document_.character = definition.character;
     document_.decorations = std::move(definition.decorations);
     document_.selectors = std::move(definition.selectors);
+    document_.lecterns = std::move(definition.lecterns);
+    for (std::size_t z = 0; z < document_.layers.size(); ++z) {
+        for (std::size_t y = 0; y < document_.layers[z].size(); ++y) {
+            for (std::size_t x = 0; x < document_.layers[z][y].size(); ++x) {
+                const GridPosition3 cell { static_cast<int>(x), static_cast<int>(y), static_cast<int>(z) };
+                if (document_.layers[z][y][x] == tileTypeToChar(TileType::Lectern) &&
+                    std::ranges::find(document_.lecterns, cell, &Level::Lectern::cell) == document_.lecterns.end()) {
+                    document_.lecterns.push_back({ .cell = cell, .text = {} });
+                }
+            }
+        }
+    }
     document_.gates = std::move(definition.gates);
     document_.rotators = std::move(definition.rotators);
     document_.lockPlates = std::move(definition.lockPlates);
@@ -3397,6 +3455,7 @@ bool LevelEditor::reloadFromDisk()
             onDisk.character == current.character &&
             onDisk.decorations == current.decorations &&
             onDisk.selectors == current.selectors &&
+            onDisk.lecterns == current.lecterns &&
             onDisk.gates == current.gates &&
             onDisk.rotators == current.rotators &&
             onDisk.lockPlates == current.lockPlates &&
@@ -4086,6 +4145,7 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
         before.character == after.character &&
         before.decorations == after.decorations &&
         before.selectors == after.selectors &&
+        before.lecterns == after.lecterns &&
         before.gates == after.gates &&
         before.rotators == after.rotators &&
         before.lockPlates == after.lockPlates &&
@@ -4118,6 +4178,7 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
     document_.character = snapshot.character;
     document_.decorations = snapshot.decorations;
     document_.selectors = snapshot.selectors;
+    document_.lecterns = snapshot.lecterns;
     document_.gates = snapshot.gates;
     document_.rotators = snapshot.rotators;
     document_.lockPlates = snapshot.lockPlates;
@@ -4269,6 +4330,7 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
         .character = document_.character,
         .decorations = document_.decorations,
         .selectors = document_.selectors,
+        .lecterns = document_.lecterns,
         .gates = document_.gates,
         .rotators = document_.rotators,
         .lockPlates = document_.lockPlates,

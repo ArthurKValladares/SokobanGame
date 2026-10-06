@@ -1265,6 +1265,32 @@ void testMinecartGatePreservesRailsAndRoutes()
 
 int main()
 {
+    TEST("lecternMetadata");
+    const Level::Definition lecternDefinition {
+        .layers = { { "..." }, { "CT " } },
+        .lecterns = { { .cell = { 1, 0, 1 }, .text = "Use \"arrows\".\n\nPush the rock.\\" } },
+    };
+    const auto lecternLines = Level::serializeDefinition(lecternDefinition);
+    CHECK(Level::parseDefinition(lecternLines, "lectern").lecterns == lecternDefinition.lecterns);
+    const Level lecternLevel = Level::loadFromLines(lecternLines, "lectern");
+    CHECK(lecternLevel.lecternAt({ 1, 0, 1 }) != nullptr);
+    CHECK(lecternLevel.lecternAt({ 1, 0, 1 })->text == lecternDefinition.lecterns[0].text);
+    CHECK(!lecternLevel.isWalkable({ 1, 0, 1 }));
+    CHECK(!lecternLevel.lecternAt({ 0, 0, 1 }));
+    checkThrowsContaining([&] {
+        auto bad = lecternDefinition;
+        bad.lecterns.push_back(bad.lecterns[0]);
+        (void)Level::loadFromDefinition(bad, "duplicate");
+    }, "Duplicate lectern");
+    checkThrowsContaining([&] {
+        auto bad = lecternDefinition;
+        bad.lecterns[0].cell = { 0, 0, 1 };
+        (void)Level::loadFromDefinition(bad, "wrong tile");
+    }, "must reference");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition({ "@lectern {\"cell\":[1,0,1],\"text\":3}", "@layer 0", "CT" }, "bad text");
+    }, "Invalid lectern");
+    CHECK(Level::loadFromLayers({ { ".." }, { "CT" } }, "blank book").lecternAt({ 1, 0, 1 })->text.empty());
     testLockPlateMetadata();
     testPortalMetadata();
     testLegacyAndLayeredParsing();

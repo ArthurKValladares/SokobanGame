@@ -946,6 +946,34 @@ void LevelEditorDebugUi::drawTilePalette(
     }
 
     ImGui::Separator();
+    ImGui::TextUnformatted("Lecterns");
+    ImGui::TextWrapped("Walk into a lectern to read its text. Line breaks are preserved; long text uses pages.");
+    const auto& lecterns = editor.lecterns();
+    if (!selectedLecternIndex_ || *selectedLecternIndex_ >= lecterns.size()) {
+        selectedLecternIndex_ = lecterns.empty() ? std::nullopt : std::optional<std::size_t>(0);
+    }
+    if (lecterns.empty()) {
+        ImGui::TextDisabled("Paint a Lectern tile to configure its text here.");
+    } else {
+        const std::string preview = "Lectern " + cellText(lecterns[*selectedLecternIndex_].cell);
+        if (ImGui::BeginCombo("Lectern", preview.c_str())) {
+            for (std::size_t i = 0; i < lecterns.size(); ++i) {
+                const std::string label = "Lectern " + cellText(lecterns[i].cell);
+                if (ImGui::Selectable(label.c_str(), i == *selectedLecternIndex_)) selectedLecternIndex_ = i;
+            }
+            ImGui::EndCombo();
+        }
+        std::string text = lecterns[*selectedLecternIndex_].text;
+        const bool changed = ImGui::InputTextMultiline("Text##lectern", &text,
+            ImVec2(-1.0f, ImGui::GetTextLineHeight() * 7.0f));
+        if (ImGui::IsItemActivated()) (void)editor.beginStroke();
+        if (changed) {
+            (void)editor.setLecternText(*selectedLecternIndex_, std::move(text));
+        }
+        if (ImGui::IsItemDeactivated()) (void)editor.endStroke();
+    }
+
+    ImGui::Separator();
     ImGui::TextUnformatted("Lock Plates");
     ImGui::TextWrapped(
         "An enabled Lock Plate holds every unit on it in place, including heroes. "

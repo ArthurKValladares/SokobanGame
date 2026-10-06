@@ -959,6 +959,55 @@ void testElevatorLoopUsesPlatformMotionOnly()
 
 int main()
 {
+    TEST("lecternReadingPausesWithoutSpendingAMove");
+    const Level bookLevel = Level::loadFromDefinition({
+        .layers = { { "...." }, { "CT R" } },
+        .lecterns = { { .cell = { 1, 0, 1 }, .text = "Welcome!" } },
+    }, "book");
+    GameplaySession reader;
+    reader.reset(bookLevel);
+    GameplayPresentation readerPresentation;
+    readerPresentation.resetEntities(reader.state());
+    const GameState beforeReading = reader.state();
+    (void)GameplayLoop::update(bookLevel, reader, readerPresentation,
+        { .right = { true, true } }, .01f, false);
+    CHECK(reader.readingLectern() == GridPosition3({ 1, 0, 1 }));
+    CHECK(reader.state() == beforeReading);
+    CHECK(reader.playerMoveCount() == 0);
+    CHECK(reader.undoCount() == 0);
+    CHECK(reader.inputLog().empty());
+    (void)GameplayLoop::update(bookLevel, reader, readerPresentation,
+        { .right = { true, true }, .restartPressed = true }, 1.0f, false);
+    CHECK(reader.readingLectern().has_value());
+    CHECK(reader.state() == beforeReading);
+    (void)GameplayLoop::update(bookLevel, reader, readerPresentation,
+        { .right = { false, true }, .dismissPressed = true }, .01f, false);
+    CHECK(!reader.readingLectern());
+    (void)GameplayLoop::update(bookLevel, reader, readerPresentation,
+        { .right = { false, true } }, .01f, false);
+    CHECK(!reader.readingLectern());
+    (void)GameplayLoop::update(bookLevel, reader, readerPresentation, {}, .01f, false);
+    (void)GameplayLoop::update(bookLevel, reader, readerPresentation,
+        { .right = { true, true } }, .01f, true);
+    CHECK(reader.readingLectern().has_value());
+    reader.reset(bookLevel);
+    CHECK(!reader.readingLectern());
+    TEST("bufferedLecternBumpWaitsForMovement");
+    const Level bufferedBook = Level::loadFromLayers({ { "...." }, { "C T " } }, "buffered book");
+    reader.reset(bufferedBook);
+    readerPresentation.resetEntities(reader.state());
+    (void)GameplayLoop::update(bufferedBook, reader, readerPresentation,
+        { .right = { true, true } }, .01f, false);
+    CHECK(reader.moving());
+    (void)GameplayLoop::update(bufferedBook, reader, readerPresentation,
+        { .right = { true, false } }, .01f, false);
+    CHECK(!reader.readingLectern());
+    for (int i = 0; i < 50 && !reader.readingLectern(); ++i) {
+        (void)GameplayLoop::update(bufferedBook, reader, readerPresentation, {}, .01f, false);
+    }
+    CHECK(reader.readingLectern() == GridPosition3({ 2, 0, 1 }));
+    CHECK(reader.state().players[0].cell == GridPosition3({ 1, 0, 1 }));
+    CHECK(reader.playerMoveCount() == 1);
     testPressurePlateSoundsAreEdgesAndUndoIsSilent();
     testEveryButtonPulseHasOneSound();
     testGateSoundsFollowOpenState();

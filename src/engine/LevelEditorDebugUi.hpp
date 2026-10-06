@@ -100,6 +100,7 @@ private:
     std::optional<LevelEditor::Tool> selectedToolTab_;
     // The link group (by color) the Links section recolors.
     std::optional<Vec3> selectedLinkGroup_;
+    std::optional<std::size_t> selectedLecternIndex_;
     std::optional<std::size_t> selectedGateIndex_;
     std::optional<std::size_t> selectedLockPlateIndex_;
     std::optional<std::size_t> selectedElevatorIndex_;

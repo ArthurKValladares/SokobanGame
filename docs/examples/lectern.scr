@@ -1,0 +1,13 @@
+@lectern {"cell":[2,1,1],"text":"Welcome to Sokoban!\n\nWalk into this lectern whenever you want to read these instructions again.\n\nPush the rock onto the red goal. You can undo a move if you get stuck."}
+
+@layer 0
+.....
+.....
+.....
+.....
+
+@layer 1
+     
+ CT  
+  R E
+     

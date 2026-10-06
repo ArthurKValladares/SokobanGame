@@ -701,6 +701,11 @@ void OverworldMap::composeScreenGrid(
                 .tile = authored.tile,
             });
         }
+        for (const Level::Lectern& authored : screen.definition.lecterns) {
+            composed.lecterns.push_back({
+                .cell = translate(screen, authored.cell), .text = authored.text,
+            });
+        }
         for (const Level::ScreenSelector& authored : screen.definition.selectors) {
             if (nextRuntimeSelectorId == 0) {
                 throw std::runtime_error("overworld contains too many selectors");

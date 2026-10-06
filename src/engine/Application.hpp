@@ -30,6 +30,7 @@
 #include "engine/ui/InputPrompts.hpp"
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/TitleScreen.hpp"
+#include "engine/ui/LecternDialog.hpp"
 
 #include <array>
 #include <chrono>
@@ -254,6 +255,7 @@ private:
     InputPromptCatalog inputPrompts_;
     VulkanRenderer renderer_;
     UiContext ui_;
+    LecternDialog lecternDialog_;
     OptionsMenu optionsMenu_;
     TitleScreen titleScreen_;
     std::unique_ptr<AudioSystem> audioSystem_;

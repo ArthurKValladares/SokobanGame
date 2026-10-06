@@ -184,6 +184,7 @@ public:
         int level = 0;
         std::string file; // relative to the assets root
         float volume = 1.0f; // multiplies the global music volume
+        std::optional<CharacterType> character; // overrides level music while selected
 
         bool operator==(const MusicTrack&) const = default;
     };
@@ -256,6 +257,9 @@ public:
     bool operator==(const AssetManifest&) const = default;
     // Returns nullptr when the level has no soundtrack.
     [[nodiscard]] const std::string* musicForLevel(int level) const;
+    // A selected character's track takes precedence; otherwise use level music.
+    [[nodiscard]] const MusicTrack* musicTrackFor(
+        int level, std::optional<CharacterType> activeCharacter = std::nullopt) const;
 
 private:
     friend struct AssetManifestJsonParser;

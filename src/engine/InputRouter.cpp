@@ -95,6 +95,7 @@ InputRouter::BackAction InputRouter::backAction(
     if (!input.actionPressed(InputAction::MenuBack)) {
         return BackAction::None;
     }
+    if (context.lecternOpen) return BackAction::None;
     if (context.draftExitConfirmationOpen) {
         return BackAction::CloseDraftConfirmation;
     }
@@ -139,6 +140,7 @@ InputRouter::Frame InputRouter::routeFrame(
             .restartPressed = input.actionPressed(InputAction::Restart),
             .cycleHeroPressed = input.actionPressed(InputAction::CycleHero),
             .interactPressed = confirm,
+            .dismissPressed = input.actionPressed(InputAction::MenuBack),
         };
     }
     if (context.titleOpen && !context.optionsOpen) {

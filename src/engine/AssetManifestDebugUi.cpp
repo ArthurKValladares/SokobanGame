@@ -794,7 +794,9 @@ void AssetManifestDebugUi::drawMusic(AssetManifestEditor& editor)
     }
     for (std::size_t i = 0; i < editor.musicTracks().size(); ++i) {
         AssetManifest::MusicTrack track = editor.musicTracks()[i];
-        const std::string label = "Level " + std::to_string(track.level);
+        const std::string label = track.character
+            ? "Character: " + std::string(characterTypeName(*track.character))
+            : "Level " + std::to_string(track.level);
         ImGui::PushID(static_cast<int>(i));
         const bool open = ImGui::TreeNode("Music", "%s", label.c_str());
         const ItemAction action = drawItemActions(i, editor.musicTracks().size());
@@ -816,7 +818,18 @@ void AssetManifestDebugUi::drawMusic(AssetManifestEditor& editor)
         }
         if (open) {
             bool changed = false;
-            if (ImGui::InputInt("Level", &track.level)) {
+            bool characterTrack = track.character.has_value();
+            if (ImGui::Checkbox("Character soundtrack", &characterTrack)) {
+                track.character = characterTrack ? std::optional(CharacterType::Bard) : std::nullopt;
+                changed = true;
+            }
+            if (track.character) {
+                int character = static_cast<int>(*track.character);
+                if (ImGui::Combo("Character", &character, "Rogue\0Knight\0Druid\0Witch\0Bard\0")) {
+                    track.character = static_cast<CharacterType>(character);
+                    changed = true;
+                }
+            } else if (ImGui::InputInt("Level", &track.level)) {
                 track.level = std::max(track.level, 0);
                 changed = true;
             }

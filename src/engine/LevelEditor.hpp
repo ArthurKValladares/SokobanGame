@@ -272,6 +272,8 @@ public:
     [[nodiscard]] std::optional<std::size_t> selectedDecorationIndex() const;
     [[nodiscard]] const Level::Decoration* selectedDecoration() const;
     [[nodiscard]] const std::vector<Level::ScreenSelector>& selectors() const;
+    [[nodiscard]] const std::vector<Level::Lectern>& lecterns() const;
+    [[nodiscard]] bool setLecternText(std::size_t index, std::string text);
     [[nodiscard]] std::optional<std::size_t> selectedSelectorIndex() const;
     [[nodiscard]] const Level::ScreenSelector* selectedSelector() const;
     // Gates, rotators, lock plates, elevators and minecarts of the document. In the editor a device
@@ -381,6 +383,7 @@ private:
         std::optional<CharacterType> character;
         std::vector<Level::Decoration> decorations;
         std::vector<Level::ScreenSelector> selectors;
+        std::vector<Level::Lectern> lecterns;
         std::vector<Level::Gate> gates;
         std::vector<Level::Rotator> rotators;
         std::vector<Level::LockPlate> lockPlates;
@@ -423,6 +426,7 @@ private:
         std::optional<CharacterType> character;
         std::vector<Level::Decoration> decorations;
         std::vector<Level::ScreenSelector> selectors;
+        std::vector<Level::Lectern> lecterns;
         std::vector<Level::Gate> gates;
         std::vector<Level::Rotator> rotators;
         std::vector<Level::LockPlate> lockPlates;

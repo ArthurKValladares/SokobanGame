@@ -85,9 +85,13 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
                 model.attachments[0].rotateHalfTurn;
         }), "skinned attachment loaded");
     CHECK_MESSAGE(editor.animations().size() == 7, "animations loaded");
-    CHECK_MESSAGE(editor.tileEntries().size() == 31, "authored tile entries loaded");
+    CHECK_MESSAGE(editor.tileEntries().size() == 32, "authored tile entries loaded");
     CHECK_MESSAGE(editor.soundSets().size() >= 3, "sound sets loaded, including authoring drafts");
-    CHECK_MESSAGE(editor.musicTracks().size() == 4, "music tracks loaded");
+    CHECK_MESSAGE(std::ranges::count_if(editor.musicTracks(),
+        [](const auto& track) { return !track.character; }) == 4, "level music tracks loaded");
+    CHECK_MESSAGE(std::ranges::any_of(editor.musicTracks(), [](const auto& track) {
+        return track.character == sokoban::CharacterType::Bard && track.file.ends_with("Alpha Dance.ogg");
+    }), "bard soundtrack loaded");
     CHECK_MESSAGE(editor.validate(), "unchanged document validates");
 
     auto texture = editor.textures()[0];
@@ -177,6 +181,35 @@ void testAtmosphericRoundTrip(const std::filesystem::path& sourceManifest)
     CHECK(editor.save());
     saved = sokoban::AssetManifest::loadFromFile(temporary.file());
     CHECK(!saved.soundSets()[index].atmosphere);
+}
+
+void testCharacterMusicRoundTrip(const std::filesystem::path& sourceManifest)
+{
+    TEST("characterMusicRoundTrip");
+    TemporaryManifest temporary(sourceManifest);
+    sokoban::AssetManifestEditor editor;
+    editor.initialize(temporary.file());
+    const auto found = std::ranges::find_if(editor.musicTracks(), [](const auto& track) {
+        return track.character == sokoban::CharacterType::Bard;
+    });
+    CHECK(found != editor.musicTracks().end());
+    if (found == editor.musicTracks().end()) {
+        return;
+    }
+    const auto index = static_cast<std::size_t>(found - editor.musicTracks().begin());
+    auto track = *found;
+    track.volume = 0.625f;
+    editor.updateMusicTrack(index, track);
+    CHECK(editor.save());
+    auto saved = sokoban::AssetManifest::loadFromFile(temporary.file());
+    CHECK(saved.musicTracks()[index] == track);
+    CHECK(saved.musicTrackFor(0, sokoban::CharacterType::Bard)->volume == 0.625f);
+    track.character = sokoban::CharacterType::Rogue;
+    editor.updateMusicTrack(index, track);
+    CHECK(editor.save());
+    saved = sokoban::AssetManifest::loadFromFile(temporary.file());
+    CHECK(saved.musicTracks()[index].character == sokoban::CharacterType::Rogue);
+    CHECK(saved.musicForLevel(0) && saved.musicTrackFor(0, sokoban::CharacterType::Bard)->file == *saved.musicForLevel(0));
 }
 
 void testCollectionOperations(const std::filesystem::path& sourceManifest)
@@ -346,6 +379,7 @@ void testLevelAssociationsFollowInsertDeleteAndRestore()
         { "name": "DeadIdle", "path": "hero.glb", "role": "player-dead-idle" }
       ],
       "music": [
+        { "character": "bard", "file": "music/bard.ogg" },
         { "level": 0, "file": "music/first.ogg" },
         { "level": 1, "file": "music/second.ogg" }
       ]
@@ -380,9 +414,11 @@ void testLevelAssociationsFollowInsertDeleteAndRestore()
     CHECK_MESSAGE(inserted.musicForLevel(2) &&
             *inserted.musicForLevel(2) == "music/second.ogg",
         "music follows its logical level during insertion");
+    CHECK(inserted.musicTrackFor(99, sokoban::CharacterType::Bard)->file == "music/bard.ogg");
 
     const sokoban::DeletedLevelAssetAssociations archived =
         sokoban::captureLevelAssetAssociations(manifestPath, 0);
+    CHECK(archived.music && archived.music->file == "music/first.ogg");
     const std::filesystem::path deletedLevel = directory.path() / "DeletedLevel";
     std::filesystem::create_directories(deletedLevel);
     sokoban::writeDeletedLevelAssetAssociations(deletedLevel, archived);
@@ -410,6 +446,7 @@ void testLevelAssociationsFollowInsertDeleteAndRestore()
     CHECK_MESSAGE(deleted.musicForLevel(1) &&
             *deleted.musicForLevel(1) == "music/second.ogg",
         "later music shifts down after level deletion");
+    CHECK(deleted.musicTrackFor(99, sokoban::CharacterType::Bard)->file == "music/bard.ogg");
 
     const auto restoredArchive =
         sokoban::readDeletedLevelAssetAssociations(deletedLevel);
@@ -426,6 +463,7 @@ void testLevelAssociationsFollowInsertDeleteAndRestore()
     CHECK_MESSAGE(restored.musicForLevel(2) &&
             *restored.musicForLevel(2) == "music/first.ogg",
         "restored level recovers its original music");
+    CHECK(restored.musicTrackFor(99, sokoban::CharacterType::Bard)->file == "music/bard.ogg");
 }
 
 } // namespace
@@ -441,6 +479,7 @@ int main()
 
     testRoundTripAndMutations(sourceManifest);
     testAtmosphericRoundTrip(sourceManifest);
+    testCharacterMusicRoundTrip(sourceManifest);
     testCollectionOperations(sourceManifest);
     testInvalidSavePreservesFile(sourceManifest);
     testSavePublishesAStartupValidRuntimeManifest(sourceManifest);

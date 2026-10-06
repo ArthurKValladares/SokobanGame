@@ -225,6 +225,9 @@ void testBackPriority()
     input.beginFrame();
     pressKey(router, input, SDL_SCANCODE_ESCAPE);
 
+    CHECK(router.backAction(input, { .draftPlaying = true, .lecternOpen = true }) ==
+        sokoban::InputRouter::BackAction::None);
+    CHECK(router.routeFrame(input, { .lecternOpen = true }).gameplay.dismissPressed);
     CHECK(router.backAction(input, { .draftPlaying = true }) ==
         sokoban::InputRouter::BackAction::OpenDraftConfirmation);
     CHECK(router.backAction(

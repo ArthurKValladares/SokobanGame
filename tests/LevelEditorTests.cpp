@@ -2631,6 +2631,50 @@ void testMinecartGateStacksOnRailsAndSurvivesEditing()
 
 int main()
 {
+    TEST("lecternTextFollowsEditorTransactions");
+    {
+        TemporaryProject project;
+        auto editor = makeEditor(project);
+        editor.newDocument(5, 3, false);
+        CHECK(tileTypeIsPlayerStart(*charToTileType(editor.documentLayers()[1][0][0])));
+        CHECK(editor.setCell({ 1, 1, 1 }, TileType::Lectern));
+        CHECK(editor.lecterns().size() == 1);
+        CHECK(editor.setLecternText(0, "First line.\nSecond line."));
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.lecterns()[0].text.empty());
+        CHECK(editor.tryRedoEdit());
+        const std::string text = editor.lecterns()[0].text;
+        CHECK(editor.beginMove({ 1, 1, 1 }));
+        CHECK(editor.moveObject({ 3, 1, 1 }));
+        CHECK(editor.lecterns()[0].cell == GridPosition3({ 3, 1, 1 }));
+        CHECK(editor.lecterns()[0].text == text);
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.lecterns()[0].cell == GridPosition3({ 1, 1, 1 }));
+        editor.setActiveLayer(1);
+        editor.addLayerBelow();
+        CHECK(editor.lecterns()[0].cell.z == 2);
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.lecterns()[0].cell.z == 1);
+        const auto path = project.source / "lectern.scr";
+        CHECK(editor.saveDocument(path).sourceSaved());
+        CHECK(Level::loadFromFile(path).lecternAt({ 1, 1, 1 })->text == text);
+        CHECK(editor.setCell({ 1, 1, 1 }, TileType::Wall));
+        CHECK(editor.lecterns().empty());
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.lecterns()[0].text == text);
+        editor.resizeDocument(1, 1);
+        CHECK(editor.lecterns().empty());
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.lecterns()[0].text == text);
+        editor.setActiveLayer(1);
+        editor.deleteActiveLayer();
+        CHECK(editor.lecterns().empty());
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.lecterns()[0].text == text);
+        CHECK(editor.setCell({ -1, 0, 1 }, TileType::Wall));
+        CHECK(editor.lecterns()[0].cell == GridPosition3({ 2, 1, 1 }));
+        CHECK(editor.lecterns()[0].text == text);
+    }
     testButtonsKeepLinksThroughStackingConversionAndSave();
     testPerScreenCameraEditingAndPersistence();
     testLockPlateEditor();

@@ -718,6 +718,38 @@ void testRealManifestFile()
 
 } // namespace
 
+void testCharacterSoundtracks()
+{
+    TEST("characterSoundtracks");
+    using sokoban::CharacterType;
+    Json json = Json::parse(validManifest);
+    json["music"].push_back({ { "character", "bard" }, { "file", "audio/Alpha Dance.ogg" } });
+    auto manifest = sokoban::AssetManifest::parse(json.dump());
+    CHECK(manifest.musicTrackFor(0, CharacterType::Bard)->file == "audio/Alpha Dance.ogg");
+    CHECK(manifest.musicTrackFor(2, CharacterType::Bard)->file == "audio/Alpha Dance.ogg");
+    CHECK(manifest.musicTrackFor(99, CharacterType::Bard)->file == "audio/Alpha Dance.ogg");
+    CHECK(manifest.musicTrackFor(0, CharacterType::Knight)->file == "audio/track zero.ogg");
+    CHECK(manifest.musicTrackFor(2)->file == "audio/track two.ogg");
+    CHECK(manifest.musicTrackFor(99, CharacterType::Knight) == nullptr);
+    CHECK(*manifest.musicForLevel(0) == "audio/track zero.ogg");
+    CHECK(manifest.musicForLevel(99) == nullptr);
+    CHECK(manifest.musicTracks().back().volume == 1.0f);
+    json["music"].back()["volume"] = 0.3;
+    CHECK(manifest.adoptLiveFields(sokoban::AssetManifest::parse(json.dump())));
+    CHECK(manifest.musicTracks().back().volume == 0.3f);
+    const auto rejects = [&](const auto& mutate, const char* label) {
+        Json invalid = json;
+        mutate(invalid["music"]);
+        checkThrows([&] { (void)sokoban::AssetManifest::parse(invalid.dump()); }, label);
+    };
+    rejects([](Json& music) { music.back()["level"] = 0; }, "mixed character and level selectors");
+    rejects([](Json& music) { music.back()["character"] = "wizard"; }, "unknown music character");
+    rejects([](Json& music) { music.push_back(music.back()); }, "duplicate character soundtrack");
+    rejects([](Json& music) { music.back().erase("character"); }, "music needs a selector");
+    json["music"].back()["character"] = "rogue";
+    CHECK(!manifest.adoptLiveFields(sokoban::AssetManifest::parse(json.dump())));
+}
+
 void testAtmosphericSchema()
 {
     TEST("atmosphericSchema");
@@ -804,9 +836,23 @@ int main()
     testRuntimeTextureRegistration();
     testRuntimeDecorationModelRegistration();
     testDecorationMeshCanPreserveAuthoredScale();
+    if (const auto root = configuredTestAssetRoot()) {
+        const auto lectern = sokoban::loadGltfMesh(*root / "custom/models/lectern.glb",
+            { .preserveSourceScale = true });
+        CHECK(!lectern.vertices.empty());
+        CHECK(!lectern.indices.empty());
+        CHECK(lectern.indices.size() % 3 == 0);
+        CHECK(lectern.materials.size() == 7);
+        for (const auto& vertex : lectern.vertices) {
+            CHECK(vertex.position.x >= 0.0f && vertex.position.x <= 1.0f);
+            CHECK(vertex.position.y >= 0.0f && vertex.position.y <= 1.0f);
+            CHECK(vertex.position.z >= 0.0f && vertex.position.z <= 1.1f);
+        }
+    }
     testRealManifestFile();
     testLiveFieldsAdoptOnlyWhenNothingStructuralChanged();
     testAtmosphericSchema();
+    testCharacterSoundtracks();
 
     if (failures != 0) {
         std::cerr << failures << " asset manifest checks failed\n";

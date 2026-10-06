@@ -42,6 +42,18 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 
 ## Controls
 
+Lecterns are fixed blocks that open a reading box when a hero walks into them.
+Choose **Lectern** in the editor's tile palette, then select the stand in the
+**Lecterns** section and enter its text. Text supports line breaks, wraps to the
+box, and uses pages when needed. Use the page buttons or movement controls to
+change pages; Activate, Back, or **Close** dismisses the box. Gameplay pauses
+while reading, and reading does not spend a move. Release movement before
+opening the same book again.
+
+Screen grids use `T` for a lectern, with text stored before the layers as
+`@lectern {"cell":[2,1,1],"text":"First paragraph.\n\nSecond paragraph."}`.
+An example ready to open in the editor is `docs/examples/lectern.scr`.
+
 Space is Activate: it pulses every button occupied by a living hero and
 activates all eligible mirrors together, across all characters and copies.
 Buttons use `b` in screen grids (or `@plate ... b` beneath a starting unit),
@@ -1036,6 +1048,15 @@ object (`source`: `portal` or `conveyor`, `audibleDistanceTiles`,
 `fullVolumeDistanceTiles`, `falloffExponent`). The full-volume distance must be
 non-negative and less than the audible distance, and the exponent positive.
 Atmospheric sounds still use the global sound-effects and master volume.
+
+Selecting a bard replaces the level soundtrack with `Alpha Dance.ogg`, using a
+0.6-second crossfade in both directions. Switching to another hero restores
+the level soundtrack, or fades to silence if that level has no music. Repeated
+requests and rapid switches keep playing tracks' positions and fade levels.
+Character music is declared with `"character": "bard"` instead of `"level"`
+in a manifest music entry. The Music editor's `Character soundtrack` option
+exposes the selector and track volume; playback uses the music and master
+volume controls. Character tracks also apply to editor draft playback.
 
 `assets/animation_catalog.json` is the source of truth for animation usage,
 playback tuning, and animation ordering. Each manifest animation records its

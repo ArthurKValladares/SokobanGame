@@ -175,6 +175,10 @@ GameplayLoop::UpdateResult GameplayLoop::update(
     bool playingDraft)
 {
     UpdateResult result;
+    if (session.readingLectern()) {
+        if (input.interactPressed || input.dismissPressed) session.dismissLectern();
+        return result;
+    }
     if (input.cycleHeroPressed) {
         const EntityId before = session.activeHeroController();
         session.cycleActiveHero();
@@ -244,6 +248,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
         }
         appendReadyTurretShots(session, result.turretShots);
         appendReadySounds(session, result);
+        if (session.readingLectern()) return result;
         if (!session.moving()) {
             return result;
         }

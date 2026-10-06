@@ -22,6 +22,7 @@ constexpr std::string_view waterPrefix = "@water ";
 constexpr std::string_view cameraPrefix = "@camera ";
 constexpr std::string_view characterPrefix = "@character ";
 constexpr std::string_view decorationPrefix = "@decoration ";
+constexpr std::string_view lecternPrefix = "@lectern ";
 constexpr std::string_view selectorPrefix = "@selector ";
 constexpr std::string_view gatePrefix = "@gate ";
 constexpr std::string_view rotatorPrefix = "@rotator ";
@@ -474,6 +475,24 @@ GridPosition3 parseLinkedCell(
         }
     }
     return cell;
+}
+
+Level::Lectern parseLectern(std::string_view payload, std::string_view sourceName)
+{
+    try {
+        const Json object = Json::parse(payload);
+        if (!object.is_object() || !object.contains("cell") ||
+            !object.contains("text") || !object["text"].is_string()) {
+            throw std::runtime_error("expected an object with cell and text");
+        }
+        return {
+            .cell = parseLinkedCell(object["cell"], "cell", sourceName, "Lectern"),
+            .text = object["text"].get<std::string>(),
+        };
+    } catch (const std::exception& error) {
+        throw std::runtime_error("Invalid lectern in " + std::string(sourceName) +
+            ": " + error.what());
+    }
 }
 
 template <typename Record>
@@ -1149,6 +1168,7 @@ Level::Definition Level::parseDefinition(
                     line.starts_with(characterPrefix) ||
                     line.starts_with(decorationPrefix) ||
                     line.starts_with(selectorPrefix) ||
+                    line.starts_with(lecternPrefix) ||
                     line.starts_with(gatePrefix) ||
                     line.starts_with(rotatorPrefix) ||
                     line.starts_with(lockPlatePrefix) ||
@@ -1202,6 +1222,15 @@ Level::Definition Level::parseDefinition(
             continue;
         }
 
+        if (line.starts_with(lecternPrefix)) {
+            if (!definition.layers.empty()) {
+                throw std::runtime_error(
+                    "Lectern metadata must appear before '@layer 0': " + source);
+            }
+            definition.lecterns.push_back(parseLectern(
+                std::string_view(line).substr(lecternPrefix.size()), sourceName));
+            continue;
+        }
         if (line.starts_with(selectorPrefix)) {
             if (currentLayer) {
                 throw std::runtime_error(
@@ -1433,7 +1462,7 @@ std::vector<std::string> Level::serializeDefinition(
     if (definition.layers.size() == 1 && !definition.character &&
         !definition.waterLayer && !definition.cameraAngles &&
         definition.decorations.empty() &&
-        definition.selectors.empty() && definition.gates.empty() &&
+        definition.selectors.empty() && definition.lecterns.empty() && definition.gates.empty() &&
         definition.rotators.empty() && definition.lockPlates.empty() &&
         definition.elevators.empty() &&
         definition.minecarts.empty() && definition.objectLinks.empty() &&
@@ -1460,6 +1489,17 @@ std::vector<std::string> Level::serializeDefinition(
         lines.push_back(
             std::string(waterPrefix) +
             std::to_string(*definition.waterLayer));
+    }
+    std::vector<Lectern> lecterns = definition.lecterns;
+    std::ranges::sort(lecterns, {}, [](const Lectern& lectern) {
+        return std::array { lectern.cell.z, lectern.cell.y, lectern.cell.x };
+    });
+    for (const Lectern& lectern : lecterns) {
+        const Json object {
+            { "cell", { lectern.cell.x, lectern.cell.y, lectern.cell.z } },
+            { "text", lectern.text },
+        };
+        lines.push_back(std::string(lecternPrefix) + object.dump());
     }
     std::vector<ScreenSelector> selectors = definition.selectors;
     std::ranges::sort(selectors, {}, &ScreenSelector::id);
@@ -1537,6 +1577,7 @@ std::vector<std::string> Level::serializeDefinition(
     if (definition.character || definition.waterLayer ||
         definition.cameraAngles ||
         !definition.decorations.empty() || !definition.selectors.empty() ||
+        !definition.lecterns.empty() ||
         !definition.gates.empty() || !definition.rotators.empty() ||
         !definition.lockPlates.empty() ||
         !definition.elevators.empty() || !definition.minecarts.empty() ||
@@ -1588,7 +1629,8 @@ Level Level::loadFromDefinition(
         definition.minecarts,
         definition.objectLinks,
         definition.portals,
-        definition.lockPlates);
+        definition.lockPlates,
+        definition.lecterns);
     level.cameraAngles_ = definition.cameraAngles;
     return level;
 }
@@ -1607,7 +1649,8 @@ Level Level::loadFromLayers(
     const std::vector<Minecart>& minecarts,
     const std::vector<ObjectLink>& objectLinks,
     const std::vector<Portal>& portals,
-    const std::vector<LockPlate>& lockPlates)
+    const std::vector<LockPlate>& lockPlates,
+    const std::vector<Lectern>& lecterns)
 {
     const std::string source(sourceName);
     if (sourceLayers.empty()) {
@@ -1925,6 +1968,33 @@ Level Level::loadFromLayers(
         }
     }
 
+    level.lecterns_ = lecterns;
+    for (std::size_t i = 0; i < level.lecterns_.size(); ++i) {
+        const Lectern& lectern = level.lecterns_[i];
+        if (!level.inBounds(lectern.cell) ||
+            level.authoredTileAt(static_cast<uint32_t>(lectern.cell.x),
+                static_cast<uint32_t>(lectern.cell.y),
+                static_cast<uint32_t>(lectern.cell.z)) != TileType::Lectern) {
+            throw std::runtime_error("Lectern metadata must reference a Lectern tile: " + source);
+        }
+        for (std::size_t j = 0; j < i; ++j) {
+            if (level.lecterns_[j].cell == lectern.cell) {
+                throw std::runtime_error("Duplicate lectern cell: " + source);
+            }
+        }
+    }
+    // Unconfigured stands still read as a blank book while being authored.
+    for (uint32_t z = 0; z < level.depth_; ++z) {
+        for (uint32_t y = 0; y < level.height_; ++y) {
+            for (uint32_t x = 0; x < level.width_; ++x) {
+                const GridPosition3 cell { static_cast<int>(x), static_cast<int>(y), static_cast<int>(z) };
+                if (level.authoredTileAt(x, y, z) == TileType::Lectern && !level.lecternAt(cell)) {
+                    level.lecterns_.push_back({ .cell = cell, .text = {} });
+                }
+            }
+        }
+    }
+
     for (const ScreenSelector& selector : level.selectors_) {
         if (!level.isWalkable(selector.cell)) {
             throw std::runtime_error(
@@ -2024,6 +2094,12 @@ bool Level::isEnd(GridPosition3 position) const
         static_cast<uint32_t>(position.x),
         static_cast<uint32_t>(position.y),
         static_cast<uint32_t>(position.z)) == TileType::End;
+}
+
+const Level::Lectern* Level::lecternAt(GridPosition3 cell) const
+{
+    const auto found = std::ranges::find(lecterns_, cell, &Lectern::cell);
+    return found == lecterns_.end() ? nullptr : &*found;
 }
 
 const Level::ScreenSelector* Level::selectorAt(GridPosition3 cell) const

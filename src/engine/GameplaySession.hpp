@@ -74,6 +74,8 @@ public:
     void queueUndo();
     void queueRestart();
     void cycleActiveHero();
+    [[nodiscard]] std::optional<GridPosition3> readingLectern() const { return readingLectern_; }
+    void dismissLectern();
 
     [[nodiscard]] bool tryStartNextAction(const Level& level, const Controls& controls);
     void advanceActiveAction(float dt);
@@ -182,6 +184,7 @@ public:
     {
         return activeHeroController_;
     }
+    [[nodiscard]] std::optional<CharacterType> activeHeroCharacter() const;
     // How admissions have gone this screen, for deciding whether the
     // reservation machinery is earning its keep. See `AdmissionStats`.
     [[nodiscard]] const ActionScheduler::AdmissionStats& admissionStats() const
@@ -229,6 +232,8 @@ public:
     void setActionDuration(std::size_t actionId, float durationSeconds);
 
 private:
+    std::optional<GridPosition3> readingLectern_;
+    bool waitingForMoveRelease_ = false;
     enum class CommandType : uint8_t {
         Move,
         Activate,

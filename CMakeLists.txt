@@ -657,6 +657,7 @@ add_library(sokoban_ui STATIC
     src/engine/ui/MenuKit.cpp
     src/engine/ui/OptionsMenu.cpp
     src/engine/ui/SelectorPrompt.cpp
+    src/engine/ui/LecternDialog.cpp
     src/engine/ui/TitleScreen.cpp
     src/engine/ui/Ui.cpp
     src/engine/ui/UiControls.cpp

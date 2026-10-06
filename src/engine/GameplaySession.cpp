@@ -323,6 +323,8 @@ void GameplaySession::reset(const Level& level)
     undoBaseState_ = rules::initialState(level);
     scheduler_.reset(undoBaseState_, stepDurationSeconds_);
     pendingCommands_.clear();
+    readingLectern_.reset();
+    waitingForMoveRelease_ = false;
     undoHistory_.clear();
     undoGroups_.clear();
     nextCausalGroup_ = 1;
@@ -345,6 +347,8 @@ void GameplaySession::resetToState(
     undoBaseState_ = state;
     scheduler_.reset(undoBaseState_, stepDurationSeconds_);
     pendingCommands_.clear();
+    readingLectern_.reset();
+    waitingForMoveRelease_ = false;
     undoHistory_.clear();
     undoGroups_.clear();
     nextCausalGroup_ = 1;
@@ -581,6 +585,8 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
 
     scheduler_.reset(normalized.state, stepDurationSeconds_);
     pendingCommands_.clear();
+    readingLectern_.reset();
+    waitingForMoveRelease_ = false;
     // The stack was just validated against a replay from here, so it is exactly
     // the anchor the chain is built on.
     undoBaseState_ = rules::initialState(level);
@@ -618,6 +624,7 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
 
 void GameplaySession::enqueue(Command command)
 {
+    if (readingLectern_ || waitingForMoveRelease_) return;
     command.queuedAtSeconds = scheduler_.clockSeconds();
     // Full queue drops the oldest rather than refusing the newest: the most
     // recent input is the one the player still means.
@@ -649,6 +656,17 @@ void GameplaySession::queueUndo()
 void GameplaySession::queueRestart()
 {
     enqueue({ .type = CommandType::Restart });
+}
+
+std::optional<CharacterType> GameplaySession::activeHeroCharacter() const
+{
+    for (std::size_t index = 0; index < state().players.size(); ++index) {
+        const auto& player = state().players[index];
+        if (!player.dead && rules::playerControllerId(state(), index) == activeHeroController_) {
+            return player.character;
+        }
+    }
+    return std::nullopt;
 }
 
 void GameplaySession::cycleActiveHero()
@@ -706,6 +724,11 @@ GameplaySession::StartOutcome GameplaySession::runCommand(
 
 bool GameplaySession::tryStartNextAction(const Level& level, const Controls& controls)
 {
+    if (readingLectern_) return false;
+    if (waitingForMoveRelease_) {
+        if (controls.verticalMove || controls.horizontalMove) return false;
+        waitingForMoveRelease_ = false;
+    }
     // No one-at-a-time guard any more: what may run alongside what is the
     // reservation table's judgement, made per action against the cells it
     // actually needs, rather than a blanket refusal to have two.
@@ -730,6 +753,7 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
         case StartOutcome::Started:
             return true;
         case StartOutcome::Impossible:
+            if (readingLectern_) return false;
             continue;
         case StartOutcome::Refused:
             // Back where it came from, ahead of anything queued behind it, and
@@ -750,7 +774,7 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
         return true;
     }
 
-    return !autoMotionPaused_ &&
+    return !readingLectern_ && !autoMotionPaused_ &&
         rules::hasPendingMotion(level, current) &&
         tryStartAmbientMotion(level) == StartOutcome::Started;
 }
@@ -974,6 +998,27 @@ GameplaySession::StartOutcome GameplaySession::tryStartHeldMove(
 GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
     const Level& level, MoveDirection input, EntityId controller)
 {
+    if (readingLectern_) return StartOutcome::Impossible;
+    if (!level.lecterns().empty()) {
+        const GameState& current = planningState();
+        const GridPosition offset = rules::directionOffset(input);
+        for (std::size_t i = 0; i < current.players.size(); ++i) {
+            const auto& player = current.players[i];
+            if (player.dead || rules::playerControllerId(current, i) != controller ||
+                rules::isUnitLocked(level, current, player.cell)) continue;
+            const GridPosition3 destination {
+                player.cell.x + offset.x, player.cell.y + offset.y, player.cell.z,
+            };
+            if (level.lecternAt(destination)) {
+                // Buffered bumps wait until every animation has committed,
+                // so the reading box opens over a settled world.
+                if (moving()) return StartOutcome::Refused;
+                readingLectern_ = destination;
+                pendingCommands_.clear();
+                return StartOutcome::Impossible;
+            }
+        }
+    }
     const PlanningStamp stamp = planningStamp(level);
     auto& failed = failedPlayerAttempts_[static_cast<std::size_t>(input)];
     if (failed.valid && failed.stamp == stamp && failed.controller == controller) {
@@ -982,6 +1027,15 @@ GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
     const StartOutcome outcome = planPlayerStep(level, input, controller);
     failed = { stamp, controller, outcome, outcome != StartOutcome::Started };
     return outcome;
+}
+
+void GameplaySession::dismissLectern()
+{
+    if (!readingLectern_) return;
+    readingLectern_.reset();
+    pendingCommands_.clear();
+    // A held direction must be released before it can reopen the book.
+    waitingForMoveRelease_ = true;
 }
 
 GameplaySession::PlanningStamp GameplaySession::planningStamp(const Level& level) const

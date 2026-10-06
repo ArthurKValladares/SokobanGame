@@ -222,12 +222,20 @@ public:
         }
     };
 
+    struct Lectern {
+        GridPosition3 cell {};
+        std::string text;
+
+        bool operator==(const Lectern&) const = default;
+    };
+
     struct Definition {
         LayerRows layers;
         std::optional<uint32_t> waterLayer;
         std::optional<CameraAngles> cameraAngles;
         std::vector<Decoration> decorations;
         std::vector<ScreenSelector> selectors;
+        std::vector<Lectern> lecterns;
         std::vector<Gate> gates;
         std::vector<Rotator> rotators;
         std::vector<LockPlate> lockPlates;
@@ -276,7 +284,8 @@ public:
         const std::vector<Minecart>& minecarts = {},
         const std::vector<ObjectLink>& objectLinks = {},
         const std::vector<Portal>& portals = {},
-        const std::vector<LockPlate>& lockPlates = {});
+        const std::vector<LockPlate>& lockPlates = {},
+        const std::vector<Lectern>& lecterns = {});
     [[nodiscard]] static Definition parseDefinition(
         const std::vector<std::string>& lines,
         std::string_view sourceName);
@@ -356,6 +365,8 @@ public:
     [[nodiscard]] const std::vector<Decoration>& decorations() const { return decorations_; }
     [[nodiscard]] const std::vector<ScreenSelector>& selectors() const { return selectors_; }
     [[nodiscard]] const ScreenSelector* selectorAt(GridPosition3 cell) const;
+    [[nodiscard]] const std::vector<Lectern>& lecterns() const { return lecterns_; }
+    [[nodiscard]] const Lectern* lecternAt(GridPosition3 cell) const;
     [[nodiscard]] TileType authoredTileAt(uint32_t x, uint32_t y, uint32_t z = 0) const;
     [[nodiscard]] TileType tileAt(uint32_t x, uint32_t y, uint32_t z = 0) const;
     [[nodiscard]] std::optional<TileType> supportingTileAt(GridPosition3 position) const;
@@ -388,6 +399,7 @@ private:
     std::optional<CameraAngles> cameraAngles_;
     std::vector<Decoration> decorations_;
     std::vector<ScreenSelector> selectors_;
+    std::vector<Lectern> lecterns_;
 };
 
 } // namespace sokoban

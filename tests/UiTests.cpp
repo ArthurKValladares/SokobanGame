@@ -5,6 +5,7 @@
 #include "engine/ui/InputPrompts.hpp"
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/SelectorPrompt.hpp"
+#include "engine/ui/LecternDialog.hpp"
 #include "engine/ui/Ui.hpp"
 #include "engine/ui/UiConfig.hpp"
 #include "engine/ui/UiControls.hpp"
@@ -1308,6 +1309,29 @@ void testOptionsReducerDraftAndBindingSemantics()
 
 int main()
 {
+    TEST("lecternWrappingPreservesParagraphsAndSplitsLongWords");
+    const auto measure = [](std::string_view value) { return static_cast<float>(value.size()); };
+    CHECK(sokoban::LecternDialog::wrapText("One two three\n\nabcdefghi\n", 5.0f, measure) ==
+        std::vector<std::string>({ "One", "two", "three", "", "abcde", "fghi", "" }));
+    CHECK(sokoban::LecternDialog::wrapText("A\r\nB", 5.0f, measure) ==
+        std::vector<std::string>({ "A", "B" }));
+    {
+        const auto font = sokoban::FontAtlas::load(fontPath);
+        sokoban::UiContext ui(font);
+        sokoban::LecternDialog dialog;
+        for (const sokoban::Vec2 size : { sokoban::Vec2 { 640, 360 }, sokoban::Vec2 { 1920, 1080 } }) {
+            ui.beginFrame(size, {}, false, false);
+            CHECK(!dialog.draw(ui, size, std::string(4000, 'W'), "Space"));
+            for (const auto& command : ui.drawData().commands) {
+                CHECK(command.rect.position.x >= 0.0f);
+                CHECK(command.rect.position.y >= 0.0f);
+                CHECK(command.rect.position.x + command.rect.size.x <= size.x);
+                CHECK(command.rect.position.y + command.rect.size.y <= size.y);
+            }
+            CHECK(ui.droppedCommands() == 0);
+            ui.endFrame();
+        }
+    }
     testFontAtlasAndText();
     testUiFrameArenaCommandBudget();
     testReusableControls();

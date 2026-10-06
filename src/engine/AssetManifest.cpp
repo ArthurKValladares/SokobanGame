@@ -510,10 +510,20 @@ static void parseMusic(const Json& root, AssetManifest& manifest)
     for (std::size_t i = 0; i < music.size(); ++i) {
         const std::string context = indexedContext("music", i);
         const Json& musicJson = music[i];
-        rejectUnknownProperties(musicJson, { "level", "file", "volume" }, context);
+        rejectUnknownProperties(musicJson, { "level", "character", "file", "volume" }, context);
 
         AssetManifest::MusicTrack track;
-        track.level = requiredNonNegativeInt(musicJson, "level", context);
+        if (musicJson.contains("character")) {
+            if (musicJson.contains("level")) {
+                fail(context, "choose either 'level' or 'character' for a music track");
+            }
+            track.character = characterTypeFromName(requiredString(musicJson, "character", context));
+            if (!track.character) {
+                fail(context, "unknown character soundtrack");
+            }
+        } else {
+            track.level = requiredNonNegativeInt(musicJson, "level", context);
+        }
         track.file = requiredString(musicJson, "file", context);
         track.volume = optionalFloat(musicJson, "volume", 1.0f, context);
         if (track.volume < 0.0f) {
@@ -705,11 +715,15 @@ void AssetManifest::validateAndResolve()
     for (const MusicTrack& track : music_) {
         std::size_t count = 0;
         for (const MusicTrack& other : music_) {
-            count += other.level == track.level ? 1 : 0;
+            const bool same = track.character ? other.character == track.character
+                : !other.character && other.level == track.level;
+            count += same ? 1 : 0;
         }
         if (count > 1) {
             throw std::runtime_error(
-                "asset manifest: multiple music entries for level " + std::to_string(track.level));
+                "asset manifest: multiple music entries for " +
+                (track.character ? "character " + std::string(characterTypeName(*track.character))
+                                 : "level " + std::to_string(track.level)));
         }
     }
 }
@@ -871,9 +885,23 @@ float AssetManifest::soundSetVolume(std::string_view name) const
 
 const std::string* AssetManifest::musicForLevel(int level) const
 {
+    const MusicTrack* track = musicTrackFor(level);
+    return track ? &track->file : nullptr;
+}
+
+const AssetManifest::MusicTrack* AssetManifest::musicTrackFor(
+    int level, std::optional<CharacterType> activeCharacter) const
+{
+    if (activeCharacter) {
+        for (const MusicTrack& track : music_) {
+            if (track.character == activeCharacter) {
+                return &track;
+            }
+        }
+    }
     for (const MusicTrack& track : music_) {
-        if (track.level == level) {
-            return &track.file;
+        if (!track.character && track.level == level) {
+            return &track;
         }
     }
     return nullptr;

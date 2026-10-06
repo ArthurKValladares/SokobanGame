@@ -392,9 +392,13 @@ std::string AssetManifestEditor::serialize() const
     root["music"] = Json::array();
     for (const AssetManifest::MusicTrack& track : music_) {
         Json item = {
-            { "level", track.level },
             { "file", track.file },
         };
+        if (track.character) {
+            item["character"] = characterTypeName(*track.character);
+        } else {
+            item["level"] = track.level;
+        }
         if (track.volume != 1.0f) {
             item["volume"] = track.volume;
         }
@@ -498,7 +502,7 @@ void AssetManifestEditor::addMusicTrack()
 {
     int level = 0;
     while (std::ranges::any_of(music_, [&](const AssetManifest::MusicTrack& track) {
-        return track.level == level;
+        return !track.character && track.level == level;
     })) {
         ++level;
     }

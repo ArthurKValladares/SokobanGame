@@ -420,26 +420,27 @@ void AudioSystem::stopStoneDrag()
     engine_->activeStoneDrag = -1;
 }
 
-void AudioSystem::playMusicForLevel(int level)
+void AudioSystem::playMusicForLevel(int level, std::optional<CharacterType> activeCharacter)
 {
     if (!engine_->engineInitialized) {
         return;
     }
 
-    int target = -1;
     const auto& tracks = manifest_->musicTracks();
-    for (size_t i = 0; i < tracks.size(); ++i) {
-        if (tracks[i].level == level) {
-            target = static_cast<int>(i);
-            break;
-        }
-    }
+    const auto* track = manifest_->musicTrackFor(level, activeCharacter);
     const auto& loaded = engine_->loadedMusic;
-    if (target >= 0 &&
-        std::find(loaded.begin(), loaded.end(), target) == loaded.end()) {
-        log::warning(log::Category::Audio)
-            << "Audio: music track not loaded for level " << level;
-        target = -1;
+    const auto loadedIndex = [&](const AssetManifest::MusicTrack* candidate) {
+        if (candidate == nullptr) {
+            return -1;
+        }
+        const int index = static_cast<int>(candidate - tracks.data());
+        return std::ranges::find(loaded, index) == loaded.end() ? -1 : index;
+    };
+    int target = loadedIndex(track);
+    if (target < 0 && track && track->character) {
+        // Loading already reports missing/undecodable files once. A broken
+        // character track keeps the level music rather than muting it.
+        target = loadedIndex(manifest_->musicTrackFor(level));
     }
 
     if (target == engine_->activeMusic) {
@@ -457,22 +458,28 @@ void AudioSystem::playMusicForLevel(int level)
     }
 
     ma_sound& sound = engine_->musicSounds[static_cast<size_t>(target)];
+    const bool alreadyPlaying = ma_sound_is_playing(&sound) == MA_TRUE;
+    const float startGain = alreadyPlaying ? ma_sound_get_current_fade_volume(&sound) : 0.0f;
     ma_sound_reset_stop_time_and_fade(&sound);
+    ma_sound_set_start_time_in_milliseconds(&sound, 0);
     ma_sound_set_looping(&sound, MA_TRUE);
-    ma_sound_seek_to_pcm_frame(&sound, 0);
+    if (!alreadyPlaying) {
+        ma_sound_seek_to_pcm_frame(&sound, 0);
+    }
     ma_sound_set_volume(&sound, musicVolume_ * tracks[static_cast<size_t>(target)].volume);
-    ma_sound_set_fade_in_milliseconds(&sound, 0.0f, 1.0f, musicCrossfadeMilliseconds);
+    ma_sound_set_fade_in_milliseconds(&sound, startGain, 1.0f, musicCrossfadeMilliseconds);
     ma_sound_start(&sound);
 }
 
 void AudioSystem::setMusicVolume(float volume)
 {
     musicVolume_ = std::clamp(volume, 0.0f, 1.0f);
-    if (engine_->engineInitialized && engine_->activeMusic >= 0) {
-        const std::size_t active = static_cast<std::size_t>(engine_->activeMusic);
-        ma_sound_set_volume(
-            &engine_->musicSounds[active],
-            musicVolume_ * manifest_->musicTracks()[active].volume);
+    if (engine_->engineInitialized) {
+        for (const int index : engine_->loadedMusic) {
+            const auto slot = static_cast<std::size_t>(index);
+            ma_sound_set_volume(&engine_->musicSounds[slot],
+                musicVolume_ * manifest_->musicTracks()[slot].volume);
+        }
     }
 }
 

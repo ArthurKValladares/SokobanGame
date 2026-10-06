@@ -106,11 +106,11 @@ public:
     [[nodiscard]] bool soundPreviewPlaying() const;
 #endif
 
-    // Starts the level's manifest soundtrack looping, crossfading from the
-    // current track. Levels without music fade out. Re-requesting the level
-    // that is already playing is a no-op, so per-screen reloads within a
-    // level keep the soundtrack running seamlessly.
-    void playMusicForLevel(int level);
+    // The selected character's soundtrack overrides the level soundtrack.
+    // Selection changes crossfade; repeated requests keep the loop's phase.
+    // With neither character nor level music, the current track fades out.
+    void playMusicForLevel(
+        int level, std::optional<CharacterType> activeCharacter = std::nullopt);
 
     void setMasterVolume(float volume);
     [[nodiscard]] float masterVolume() const { return masterVolume_; }

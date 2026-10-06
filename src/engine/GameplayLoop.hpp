@@ -32,6 +32,7 @@ public:
         // activation; Application handles transitions such as entering a
         // selector.
         bool interactPressed = false;
+        bool dismissPressed = false;
     };
 
     struct UpdateResult {

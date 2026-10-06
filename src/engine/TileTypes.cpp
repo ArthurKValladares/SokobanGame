@@ -104,7 +104,8 @@ bool tileTypeIsSolidBlock(TileType type)
     // grid only knows where it was authored; rules ask about the live
     // position (see rules::elevatorPlatformAt).
     return type == TileType::Ground || type == TileType::Wall ||
-        type == TileType::Elevator || type == TileType::Minecart;
+        type == TileType::Elevator || type == TileType::Minecart ||
+        type == TileType::Lectern;
 }
 
 bool tileTypeSupportsEntity(TileType type)

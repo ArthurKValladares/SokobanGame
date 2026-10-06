@@ -133,6 +133,9 @@ void remapLevelAssetAssociations(
     std::vector<std::size_t> removedMusic;
     for (std::size_t index = 0; index < editor.musicTracks().size(); ++index) {
         AssetManifest::MusicTrack track = editor.musicTracks()[index];
+        if (track.character) {
+            continue;
+        }
         const auto destination = levelDestinations.find(track.level);
         if (destination == levelDestinations.end()) {
             continue;
@@ -163,7 +166,7 @@ DeletedLevelAssetAssociations captureLevelAssetAssociations(
         }
     }
     for (const AssetManifest::MusicTrack& track : manifest.musicTracks()) {
-        if (track.level == level) {
+        if (!track.character && track.level == level) {
             result.music = track;
             break;
         }
