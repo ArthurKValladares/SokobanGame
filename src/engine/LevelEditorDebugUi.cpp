@@ -948,6 +948,7 @@ void LevelEditorDebugUi::drawTilePalette(
     ImGui::Separator();
     ImGui::TextUnformatted("Lecterns");
     ImGui::TextWrapped("Walk into a lectern to read its text. Line breaks are preserved; long text uses pages.");
+    ImGui::TextWrapped("Use <!Move Up!>, <!Undo!>, or <!Activate!> to show the current binding icon. Unknown actions appear in red.");
     const auto& lecterns = editor.lecterns();
     if (!selectedLecternIndex_ || *selectedLecternIndex_ >= lecterns.size()) {
         selectedLecternIndex_ = lecterns.empty() ? std::nullopt : std::optional<std::size_t>(0);

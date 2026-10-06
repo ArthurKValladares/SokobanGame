@@ -1,0 +1,87 @@
+// Single action registry: identifier, saved name, display label, aliases (| separated),
+// input context, controls-menu group/order, and default bindings.
+// Keep existing entries in order: InputAction indexes and recent-tile slots use it.
+// Consumers define SOKOBAN_INPUT_ACTION before including this file.
+
+SOKOBAN_INPUT_ACTION(MoveUp, "moveUp", "Move up", "", Gameplay, Controls, 0,
+    KeyboardBinding { "W" }, GamepadButtonBinding { "dpup" },
+    GamepadAxisBinding { "lefty", AxisDirection::Negative })
+SOKOBAN_INPUT_ACTION(MoveDown, "moveDown", "Move down", "", Gameplay, Controls, 1,
+    KeyboardBinding { "S" }, GamepadButtonBinding { "dpdown" },
+    GamepadAxisBinding { "lefty", AxisDirection::Positive })
+SOKOBAN_INPUT_ACTION(MoveLeft, "moveLeft", "Move left", "", Gameplay, Controls, 2,
+    KeyboardBinding { "A" }, GamepadButtonBinding { "dpleft" },
+    GamepadAxisBinding { "leftx", AxisDirection::Negative })
+SOKOBAN_INPUT_ACTION(MoveRight, "moveRight", "Move right", "", Gameplay, Controls, 3,
+    KeyboardBinding { "D" }, GamepadButtonBinding { "dpright" },
+    GamepadAxisBinding { "leftx", AxisDirection::Positive })
+SOKOBAN_INPUT_ACTION(Undo, "undo", "Undo", "", Global, Controls, 4,
+    KeyboardBinding { "Z" }, GamepadButtonBinding { "west" })
+SOKOBAN_INPUT_ACTION(Restart, "restart", "Restart", "", Gameplay, Controls, 5,
+    KeyboardBinding { "R" }, GamepadButtonBinding { "north" })
+SOKOBAN_INPUT_ACTION(ShowTopDownView, "showTopDownView", "Current Screen Top-Down", "Top down view", Gameplay, Controls, 7,
+    KeyboardBinding { "T" })
+SOKOBAN_INPUT_ACTION(ShowOverworldMap, "showOverworldMap", "Whole Overworld Map", "Overworld map", Gameplay, Controls, 8,
+    KeyboardBinding { "Tab" }, GamepadAxisBinding { "lefttrigger", AxisDirection::Positive, 0.5f })
+SOKOBAN_INPUT_ACTION(MenuBack, "menuBack", "Menu back", "Back", Global, Hidden, 0,
+    KeyboardBinding { "Escape" }, GamepadButtonBinding { "start" })
+SOKOBAN_INPUT_ACTION(MenuConfirm, "menuConfirm", "Confirm / Activate", "Confirm|Activate", Gameplay, Controls, 9,
+    KeyboardBinding { "Space" }, GamepadButtonBinding { "south" })
+SOKOBAN_INPUT_ACTION(EditorReplaceTile, "editorReplaceTile", "Replace tile (hold)", "", Editor, EditorEditing, 0,
+    KeyboardBinding { "R" })
+SOKOBAN_INPUT_ACTION(EditorDeleteTile, "editorDeleteTile", "Delete tile (hold)", "", Editor, EditorEditing, 1,
+    KeyboardBinding { "D" })
+SOKOBAN_INPUT_ACTION(EditorMoveTile, "editorMoveTile", "Move tile object (hold)", "", Editor, EditorEditing, 2,
+    KeyboardBinding { "M" })
+SOKOBAN_INPUT_ACTION(PreviewScreen, "previewScreen", "Preview screen", "", Gameplay, Controls, 10,
+    KeyboardBinding { "V" }, GamepadButtonBinding { "rightshoulder" })
+SOKOBAN_INPUT_ACTION(CycleHero, "cycleHero", "Cycle active hero", "", Gameplay, Controls, 6,
+    KeyboardBinding { "Q" }, GamepadButtonBinding { "leftshoulder" })
+// Held modifiers accept either side of the keyboard.
+SOKOBAN_INPUT_ACTION(EditorPickTile, "editorPickTile", "Eyedropper (hold)", "", Editor, EditorEditing, 3,
+    KeyboardBinding { "Left Alt" }, KeyboardBinding { "Right Alt" })
+SOKOBAN_INPUT_ACTION(EditorPaintLinkColor, "editorPaintLinkColor", "Paint link color (hold)", "", Editor, EditorEditing, 4,
+    KeyboardBinding { "Left Ctrl" }, KeyboardBinding { "Right Ctrl" })
+SOKOBAN_INPUT_ACTION(EditorStraightLine, "editorStraightLine", "Straight drag (hold)", "", Editor, EditorEditing, 5,
+    KeyboardBinding { "Left Shift" }, KeyboardBinding { "Right Shift" })
+SOKOBAN_INPUT_ACTION(EditorRedo, "editorRedo", "Redo", "", Editor, EditorEditing, 6,
+    KeyboardBinding { "Y" }, KeyboardBinding { "Z", keyModifierCtrl | keyModifierShift })
+SOKOBAN_INPUT_ACTION(EditorSave, "editorSave", "Save document", "", Editor, EditorPlaytest, 0,
+    KeyboardBinding { "S", keyModifierCtrl })
+SOKOBAN_INPUT_ACTION(EditorPlayDraft, "editorPlayDraft", "Play / stop draft", "", Global, EditorPlaytest, 1,
+    KeyboardBinding { "F5" })
+SOKOBAN_INPUT_ACTION(EditorPlayFromCursor, "editorPlayFromCursor", "Play from cursor", "", Editor, EditorPlaytest, 2,
+    KeyboardBinding { "F5", keyModifierShift })
+SOKOBAN_INPUT_ACTION(EditorLayerUp, "editorLayerUp", "Layer up", "", Editor, EditorEditing, 7,
+    KeyboardBinding { "PageUp" })
+SOKOBAN_INPUT_ACTION(EditorLayerDown, "editorLayerDown", "Layer down", "", Editor, EditorEditing, 8,
+    KeyboardBinding { "PageDown" })
+SOKOBAN_INPUT_ACTION(EditorToggleLayerLock, "editorToggleLayerLock", "Lock to layer", "", Editor, EditorEditing, 9,
+    KeyboardBinding { "L" })
+SOKOBAN_INPUT_ACTION(EditorCycleTool, "editorCycleTool", "Next tool", "", Editor, EditorEditing, 10,
+    KeyboardBinding { "Tab" })
+// Gizmos and tile-editing commands may share keys: their tools are exclusive.
+SOKOBAN_INPUT_ACTION(EditorGizmoTranslate, "editorGizmoTranslate", "Gizmo: move", "", Editor, EditorEditing, 11,
+    KeyboardBinding { "T" })
+SOKOBAN_INPUT_ACTION(EditorGizmoRotate, "editorGizmoRotate", "Gizmo: rotate", "", Editor, EditorEditing, 12,
+    KeyboardBinding { "R" })
+SOKOBAN_INPUT_ACTION(EditorGizmoScale, "editorGizmoScale", "Gizmo: scale", "", Editor, EditorEditing, 13,
+    KeyboardBinding { "S" })
+SOKOBAN_INPUT_ACTION(EditorRecentTile1, "editorRecentTile1", "Recent tile 1", "", Editor, EditorRecentTiles, 0,
+    KeyboardBinding { "1" })
+SOKOBAN_INPUT_ACTION(EditorRecentTile2, "editorRecentTile2", "Recent tile 2", "", Editor, EditorRecentTiles, 1,
+    KeyboardBinding { "2" })
+SOKOBAN_INPUT_ACTION(EditorRecentTile3, "editorRecentTile3", "Recent tile 3", "", Editor, EditorRecentTiles, 2,
+    KeyboardBinding { "3" })
+SOKOBAN_INPUT_ACTION(EditorRecentTile4, "editorRecentTile4", "Recent tile 4", "", Editor, EditorRecentTiles, 3,
+    KeyboardBinding { "4" })
+SOKOBAN_INPUT_ACTION(EditorRecentTile5, "editorRecentTile5", "Recent tile 5", "", Editor, EditorRecentTiles, 4,
+    KeyboardBinding { "5" })
+SOKOBAN_INPUT_ACTION(EditorRecentTile6, "editorRecentTile6", "Recent tile 6", "", Editor, EditorRecentTiles, 5,
+    KeyboardBinding { "6" })
+SOKOBAN_INPUT_ACTION(EditorRecentTile7, "editorRecentTile7", "Recent tile 7", "", Editor, EditorRecentTiles, 6,
+    KeyboardBinding { "7" })
+SOKOBAN_INPUT_ACTION(EditorRecentTile8, "editorRecentTile8", "Recent tile 8", "", Editor, EditorRecentTiles, 7,
+    KeyboardBinding { "8" })
+SOKOBAN_INPUT_ACTION(EditorRecentTile9, "editorRecentTile9", "Recent tile 9", "", Editor, EditorRecentTiles, 8,
+    KeyboardBinding { "9" })

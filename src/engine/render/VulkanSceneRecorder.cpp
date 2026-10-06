@@ -2179,7 +2179,7 @@ private:
     {
         if (!debugLabelFont_ || debugLabelFont_->pixelHeight <= 0.0f) { return; }
         const auto& font = *debugLabelFont_;
-        constexpr float fontSize = 16.0f;
+        constexpr float fontSize = 32.0f;
         const float scale = fontSize / font.pixelHeight;
         const Mat4 clipFromWorld = isoClipFromWorld(input.prepared.isoLayout, input.prepared.renderExtent);
         const RenderFrameData::Lighting unlit {};
@@ -2202,9 +2202,9 @@ private:
                 width += font.glyphs[static_cast<std::size_t>(*character - 32)].advance * scale;
             }
             const float height = font.lineHeight * scale;
-            const Vec2 position { anchor.x - width * 0.5f, anchor.y - height - 6.0f };
+            const Vec2 position { anchor.x - width * 0.5f, anchor.y - height - 12.0f };
             draw({
-                .rect = { position - Vec2 { 4.0f, 2.0f }, { width + 8.0f, height + 4.0f } },
+                .rect = { position - Vec2 { 8.0f, 4.0f }, { width + 16.0f, height + 8.0f } },
                 .color = { 0.01f, 0.015f, 0.02f, 0.9f },
             });
             float cursor = position.x;

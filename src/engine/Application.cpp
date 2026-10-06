@@ -761,14 +761,13 @@ bool Application::drawUiFrame(
 #endif
     if (const auto cell = gameplaySession_.readingLectern(); cell && !shellMenuOpen()) {
         if (const auto* lectern = level_.lecternAt(*cell)) {
-            const BindingDeviceClass device = input_.activeDevice() == ActiveInputDevice::Gamepad
-                ? BindingDeviceClass::Gamepad : BindingDeviceClass::Keyboard;
-            const std::string_view closeLabel = SelectorPrompt::bindingLabel(
-                input_.bindings(),
-                InputAction::MenuConfirm, device, ui_.frameArena());
-            if (lecternDialog_.draw(ui_, pixelSize, lectern->text, closeLabel)) {
-                gameplaySession_.dismissLectern();
-            }
+            lecternDialog_.draw(ui_, pixelSize, lectern->text, {
+                .bindings = &input_.bindings(),
+                .prompts = &inputPrompts_,
+                .deviceClass = input_.activeDevice() == ActiveInputDevice::Gamepad
+                    ? BindingDeviceClass::Gamepad : BindingDeviceClass::Keyboard,
+                .gamepad = input_.activeGamepadPresentation(),
+            });
         }
     } else if (screenPreviewActive_) {
         drawScreenPreviewOverlay(pixelSize);
@@ -1240,19 +1239,16 @@ void Application::update(
         return;
     }
 
-    if (gameplaySession_.readingLectern()) {
-        if (input.gameplay.interactPressed || input.gameplay.dismissPressed) {
-            gameplaySession_.dismissLectern();
-        } else {
-            lecternDialog_.turnPage(
-                input.gameplay.up.pressed || input.gameplay.left.pressed,
-                input.gameplay.down.pressed || input.gameplay.right.pressed);
-        }
+    const auto readingBeforeUpdate = gameplaySession_.readingLectern();
+    if (readingBeforeUpdate && (input.gameplay.interactPressed || input.gameplay.dismissPressed)) {
+        gameplaySession_.dismissLectern();
         audioSystem_->update(dt, false, false);
         return;
     }
-    campaign_.addElapsedTime(dt);
-    particleSystem_.update(dt);
+    if (!readingBeforeUpdate) {
+        campaign_.addElapsedTime(dt);
+        particleSystem_.update(dt);
+    }
     const GameplayLoop::UpdateResult gameplayResult = GameplayLoop::update(
         level_,
         gameplaySession_,
@@ -1262,7 +1258,14 @@ void Application::update(
             : input.gameplay,
         dt,
         editorDraftPlaying);
-    if (gameplaySession_.readingLectern()) lecternDialog_.reset();
+    if (const auto reading = gameplaySession_.readingLectern(); reading && reading != readingBeforeUpdate) {
+        lecternDialog_.reset();
+    }
+    if (readingBeforeUpdate && (!gameplaySession_.readingLectern() ||
+        gameplaySession_.moving() || gameplayResult.stateCommitted)) {
+        campaign_.addElapsedTime(dt);
+        particleSystem_.update(dt);
+    }
     if (gameplayResult.stateCommitted && campaign_.inOverworld() &&
         overworldMap_ && !editorDraftPlaying) {
         const std::optional<OverworldScreenId> playerScreen =
@@ -1380,7 +1383,7 @@ void Application::update(
         campaign_.deferCheckpoint()) {
         checkpointCurrentScreen(true);
     }
-    if (campaign_.updateDeferredCheckpoint(
+    if (!gameplaySession_.readingLectern() && campaign_.updateDeferredCheckpoint(
             dt,
             gameplaySession_.moving(),
             editorDraftPlaying)) {

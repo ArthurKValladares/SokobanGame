@@ -175,23 +175,24 @@ GameplayLoop::UpdateResult GameplayLoop::update(
     bool playingDraft)
 {
     UpdateResult result;
-    if (session.readingLectern()) {
-        if (input.interactPressed || input.dismissPressed) session.dismissLectern();
+    const bool readingLectern = session.readingLectern().has_value();
+    if (readingLectern && (input.interactPressed || input.dismissPressed)) {
+        session.dismissLectern();
         return result;
     }
-    if (input.cycleHeroPressed) {
+    if (!readingLectern && input.cycleHeroPressed) {
         const EntityId before = session.activeHeroController();
         session.cycleActiveHero();
         result.activeHeroChanged =
             session.activeHeroController() != before;
     }
-    if (input.interactPressed) {
+    if (!readingLectern && input.interactPressed) {
         session.queueActivate();
     }
-    if (input.undoPressed) {
+    if (!readingLectern && input.undoPressed) {
         session.queueUndo();
     }
-    if (input.restartPressed) {
+    if (!readingLectern && input.restartPressed) {
         session.queueRestart();
     }
     if (const std::optional<MoveDirection> vertical =
@@ -248,7 +249,6 @@ GameplayLoop::UpdateResult GameplayLoop::update(
         }
         appendReadyTurretShots(session, result.turretShots);
         appendReadySounds(session, result);
-        if (session.readingLectern()) return result;
         if (!session.moving()) {
             return result;
         }

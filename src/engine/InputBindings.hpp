@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -12,48 +13,9 @@ namespace sokoban {
 class FrameArena;
 
 enum class InputAction : uint8_t {
-    MoveUp,
-    MoveDown,
-    MoveLeft,
-    MoveRight,
-    Undo,
-    Restart,
-    ShowTopDownView,
-    ShowOverworldMap,
-    MenuBack,
-    MenuConfirm,
-    EditorReplaceTile,
-    EditorDeleteTile,
-    EditorMoveTile,
-    PreviewScreen,
-    CycleHero,
-    // Level editor shortcuts (Debug developer builds). Held modifiers first,
-    // then commands.
-    EditorPickTile,
-    // Held: clicking a pressure plate, device, or movable object gives it the
-    // level editor's active link color.
-    EditorPaintLinkColor,
-    EditorStraightLine,
-    EditorRedo,
-    EditorSave,
-    EditorPlayDraft,
-    EditorPlayFromCursor,
-    EditorLayerUp,
-    EditorLayerDown,
-    EditorToggleLayerLock,
-    EditorCycleTool,
-    EditorGizmoTranslate,
-    EditorGizmoRotate,
-    EditorGizmoScale,
-    EditorRecentTile1,
-    EditorRecentTile2,
-    EditorRecentTile3,
-    EditorRecentTile4,
-    EditorRecentTile5,
-    EditorRecentTile6,
-    EditorRecentTile7,
-    EditorRecentTile8,
-    EditorRecentTile9,
+#define SOKOBAN_INPUT_ACTION(id, ...) id,
+#include "engine/InputActions.def"
+#undef SOKOBAN_INPUT_ACTION
     Count,
 };
 
@@ -168,6 +130,37 @@ enum class InputActionContext : uint8_t {
     Editor,
     Global,
 };
+enum class InputActionGroup : uint8_t {
+    Controls,
+    EditorEditing,
+    EditorPlaytest,
+    EditorRecentTiles,
+    Hidden,
+};
+
+struct InputActionDefinition {
+    InputAction action;
+    std::string_view name;
+    std::string_view label;
+    std::string_view aliases;
+    InputActionContext context;
+    InputActionGroup group;
+    int menuOrder;
+};
+
+inline constexpr std::array inputActionDefinitions {
+#define SOKOBAN_INPUT_ACTION(id, name, label, aliases, context, group, order, ...) \
+    InputActionDefinition { InputAction::id, name, label, aliases, \
+        InputActionContext::context, InputActionGroup::group, order },
+#include "engine/InputActions.def"
+#undef SOKOBAN_INPUT_ACTION
+};
+static_assert(inputActionDefinitions.size() == inputActionCount);
+
+[[nodiscard]] const InputActionDefinition& inputActionDefinition(InputAction action);
+// Resolves saved names, controls-menu labels, and aliases for tutorial markup.
+// Ignores case, whitespace, underscores, hyphens, and slashes.
+[[nodiscard]] std::optional<InputAction> findInputAction(std::string_view name);
 [[nodiscard]] InputActionContext inputActionContext(InputAction action);
 // "Ctrl+Shift+" style prefix for a modifier mask; empty for none.
 [[nodiscard]] std::string keyModifierPrefix(std::uint8_t modifiers);

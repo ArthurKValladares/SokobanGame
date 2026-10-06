@@ -86,211 +86,28 @@ BindingDeviceClass bindingDeviceFromChoice(int value)
         : BindingDeviceClass::Keyboard;
 }
 
-struct BindingRow {
-    OptionsMenuRowId row;
-    InputAction action;
-    std::string_view label;
-};
+// UI order comes from the same definitions as names, contexts, and defaults.
+constexpr auto orderedActionDefinitions = [] {
+    auto definitions = inputActionDefinitions;
+    std::ranges::sort(definitions, {}, &InputActionDefinition::menuOrder);
+    return definitions;
+}();
 
-constexpr std::array bindingRows {
-    BindingRow { OptionsMenuRowId::MoveUp, InputAction::MoveUp, "Move up" },
-    BindingRow { OptionsMenuRowId::MoveDown, InputAction::MoveDown, "Move down" },
-    BindingRow { OptionsMenuRowId::MoveLeft, InputAction::MoveLeft, "Move left" },
-    BindingRow { OptionsMenuRowId::MoveRight, InputAction::MoveRight, "Move right" },
-    BindingRow { OptionsMenuRowId::Undo, InputAction::Undo, "Undo" },
-    BindingRow { OptionsMenuRowId::Restart, InputAction::Restart, "Restart" },
-    BindingRow {
-        OptionsMenuRowId::CycleHero,
-        InputAction::CycleHero,
-        "Cycle active hero",
-    },
-    BindingRow {
-        OptionsMenuRowId::ShowTopDownView,
-        InputAction::ShowTopDownView,
-        "Current Screen Top-Down",
-    },
-    BindingRow {
-        OptionsMenuRowId::ShowOverworldMap,
-        InputAction::ShowOverworldMap,
-        "Whole Overworld Map",
-    },
-    BindingRow {
-        OptionsMenuRowId::ConfirmInteract,
-        InputAction::MenuConfirm,
-        "Confirm / Activate",
-    },
-    BindingRow {
-        OptionsMenuRowId::PreviewScreen,
-        InputAction::PreviewScreen,
-        "Preview screen",
-    },
-};
+OptionsMenuRowId rowForAction(InputAction action)
+{
+    return static_cast<OptionsMenuRowId>(
+        static_cast<int>(OptionsMenuRowId::MoveUp) + static_cast<int>(action));
+}
 
-struct EditorBindingRow {
-    OptionsMenuRowId row;
-    InputAction action;
-    std::string_view label;
-    EditorControlsSection section;
-};
-
-constexpr std::array editorBindingRows {
-    EditorBindingRow {
-        OptionsMenuRowId::EditorReplaceTile,
-        InputAction::EditorReplaceTile,
-        "Replace tile (hold)",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorDeleteTile,
-        InputAction::EditorDeleteTile,
-        "Delete tile (hold)",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorMoveTile,
-        InputAction::EditorMoveTile,
-        "Move tile object (hold)",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorPickTile,
-        InputAction::EditorPickTile,
-        "Eyedropper (hold)",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorPaintLinkColor,
-        InputAction::EditorPaintLinkColor,
-        "Paint link color (hold)",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorStraightLine,
-        InputAction::EditorStraightLine,
-        "Straight drag (hold)",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorRedo,
-        InputAction::EditorRedo,
-        "Redo",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorLayerUp,
-        InputAction::EditorLayerUp,
-        "Layer up",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorLayerDown,
-        InputAction::EditorLayerDown,
-        "Layer down",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorToggleLayerLock,
-        InputAction::EditorToggleLayerLock,
-        "Lock to layer",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorCycleTool,
-        InputAction::EditorCycleTool,
-        "Next tool",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorGizmoTranslate,
-        InputAction::EditorGizmoTranslate,
-        "Gizmo: move",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorGizmoRotate,
-        InputAction::EditorGizmoRotate,
-        "Gizmo: rotate",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorGizmoScale,
-        InputAction::EditorGizmoScale,
-        "Gizmo: scale",
-        EditorControlsSection::Editing,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorSave,
-        InputAction::EditorSave,
-        "Save document",
-        EditorControlsSection::Playtest,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorPlayDraft,
-        InputAction::EditorPlayDraft,
-        "Play / stop draft",
-        EditorControlsSection::Playtest,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorPlayFromCursor,
-        InputAction::EditorPlayFromCursor,
-        "Play from cursor",
-        EditorControlsSection::Playtest,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorRecentTile1,
-        InputAction::EditorRecentTile1,
-        "Recent tile 1",
-        EditorControlsSection::RecentTiles,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorRecentTile2,
-        InputAction::EditorRecentTile2,
-        "Recent tile 2",
-        EditorControlsSection::RecentTiles,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorRecentTile3,
-        InputAction::EditorRecentTile3,
-        "Recent tile 3",
-        EditorControlsSection::RecentTiles,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorRecentTile4,
-        InputAction::EditorRecentTile4,
-        "Recent tile 4",
-        EditorControlsSection::RecentTiles,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorRecentTile5,
-        InputAction::EditorRecentTile5,
-        "Recent tile 5",
-        EditorControlsSection::RecentTiles,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorRecentTile6,
-        InputAction::EditorRecentTile6,
-        "Recent tile 6",
-        EditorControlsSection::RecentTiles,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorRecentTile7,
-        InputAction::EditorRecentTile7,
-        "Recent tile 7",
-        EditorControlsSection::RecentTiles,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorRecentTile8,
-        InputAction::EditorRecentTile8,
-        "Recent tile 8",
-        EditorControlsSection::RecentTiles,
-    },
-    EditorBindingRow {
-        OptionsMenuRowId::EditorRecentTile9,
-        InputAction::EditorRecentTile9,
-        "Recent tile 9",
-        EditorControlsSection::RecentTiles,
-    },
-};
+InputActionGroup editorActionGroup(EditorControlsSection section)
+{
+    switch (section) {
+    case EditorControlsSection::Editing: return InputActionGroup::EditorEditing;
+    case EditorControlsSection::Playtest: return InputActionGroup::EditorPlaytest;
+    case EditorControlsSection::RecentTiles: return InputActionGroup::EditorRecentTiles;
+    }
+    return InputActionGroup::Hidden;
+}
 
 constexpr std::array editorControlsSectionChoices {
     OptionsMenuChoice { 0, "Editing" },
@@ -328,15 +145,11 @@ int displayIndex(const UserSettings& settings)
 
 std::optional<InputAction> actionForRow(OptionsMenuRowId row)
 {
-    const auto found = std::ranges::find(bindingRows, row, &BindingRow::row);
-    if (found != bindingRows.end()) {
-        return found->action;
-    }
-    const auto editorFound =
-        std::ranges::find(editorBindingRows, row, &EditorBindingRow::row);
-    return editorFound == editorBindingRows.end()
-        ? std::nullopt
-        : std::optional<InputAction>(editorFound->action);
+    const int index = static_cast<int>(row) - static_cast<int>(OptionsMenuRowId::MoveUp);
+    if (index < 0 || index >= static_cast<int>(inputActionCount)) return std::nullopt;
+    const auto& definition = inputActionDefinitions[static_cast<std::size_t>(index)];
+    return definition.group == InputActionGroup::Hidden
+        ? std::nullopt : std::optional<InputAction>(definition.action);
 }
 
 void setPage(OptionsMenuState& state, OptionsMenuPage page)
@@ -417,6 +230,10 @@ std::optional<OptionsAction> activateRow(
     const UserSettings& current,
     OptionsMenuRowId row)
 {
+    if (const auto action = actionForRow(row)) {
+        state.capturingAction = action;
+        return std::nullopt;
+    }
     UserSettings settings = current;
     switch (row) {
     case OptionsMenuRowId::Graphics:
@@ -456,45 +273,6 @@ std::optional<OptionsAction> activateRow(
             return changedSettings(std::move(settings), current);
         }
         break;
-    case OptionsMenuRowId::MoveUp:
-    case OptionsMenuRowId::MoveDown:
-    case OptionsMenuRowId::MoveLeft:
-    case OptionsMenuRowId::MoveRight:
-    case OptionsMenuRowId::Undo:
-    case OptionsMenuRowId::Restart:
-    case OptionsMenuRowId::CycleHero:
-    case OptionsMenuRowId::ShowTopDownView:
-    case OptionsMenuRowId::ShowOverworldMap:
-    case OptionsMenuRowId::ConfirmInteract:
-    case OptionsMenuRowId::PreviewScreen:
-    case OptionsMenuRowId::EditorReplaceTile:
-    case OptionsMenuRowId::EditorDeleteTile:
-    case OptionsMenuRowId::EditorMoveTile:
-    case OptionsMenuRowId::EditorPickTile:
-    case OptionsMenuRowId::EditorPaintLinkColor:
-    case OptionsMenuRowId::EditorStraightLine:
-    case OptionsMenuRowId::EditorRedo:
-    case OptionsMenuRowId::EditorSave:
-    case OptionsMenuRowId::EditorPlayDraft:
-    case OptionsMenuRowId::EditorPlayFromCursor:
-    case OptionsMenuRowId::EditorLayerUp:
-    case OptionsMenuRowId::EditorLayerDown:
-    case OptionsMenuRowId::EditorToggleLayerLock:
-    case OptionsMenuRowId::EditorCycleTool:
-    case OptionsMenuRowId::EditorGizmoTranslate:
-    case OptionsMenuRowId::EditorGizmoRotate:
-    case OptionsMenuRowId::EditorGizmoScale:
-    case OptionsMenuRowId::EditorRecentTile1:
-    case OptionsMenuRowId::EditorRecentTile2:
-    case OptionsMenuRowId::EditorRecentTile3:
-    case OptionsMenuRowId::EditorRecentTile4:
-    case OptionsMenuRowId::EditorRecentTile5:
-    case OptionsMenuRowId::EditorRecentTile6:
-    case OptionsMenuRowId::EditorRecentTile7:
-    case OptionsMenuRowId::EditorRecentTile8:
-    case OptionsMenuRowId::EditorRecentTile9:
-        state.capturingAction = actionForRow(row);
-        break;
     case OptionsMenuRowId::ResetBindings:
         if (!(settings.input == defaultInputBindings())) {
             settings.input = defaultInputBindings();
@@ -522,6 +300,8 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::MusicVolume:
     case OptionsMenuRowId::BindingDevice:
     case OptionsMenuRowId::EditorControlsSection:
+        break;
+    default:
         break;
     }
     return std::nullopt;
@@ -943,9 +723,10 @@ void appendControlsRows(
         .choiceValue = bindingDeviceChoice(
             state.controlsBindingDevice),
     });
-    for (const BindingRow& binding : bindingRows) {
+    for (const auto& binding : orderedActionDefinitions) {
+        if (binding.group != InputActionGroup::Controls) continue;
         rows.push_back({
-            .id = binding.row,
+            .id = rowForAction(binding.action),
             .kind = OptionsMenuRowKind::Binding,
             .label = binding.label,
             .tone = state.capturingAction == binding.action
@@ -987,12 +768,12 @@ void appendEditorControlsRows(
         .choiceValue =
             editorControlsSectionChoice(state.editorControlsSection),
     });
-    for (const EditorBindingRow& binding : editorBindingRows) {
-        if (binding.section != state.editorControlsSection) {
+    for (const auto& binding : orderedActionDefinitions) {
+        if (binding.group != editorActionGroup(state.editorControlsSection)) {
             continue;
         }
         rows.push_back({
-            .id = binding.row,
+            .id = rowForAction(binding.action),
             .kind = OptionsMenuRowKind::Binding,
             .label = binding.label,
             .tone = state.capturingAction == binding.action

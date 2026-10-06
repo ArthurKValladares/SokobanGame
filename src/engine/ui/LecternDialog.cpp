@@ -1,10 +1,12 @@
 #include "engine/ui/LecternDialog.hpp"
 
 #include "engine/ui/LecternConfig.hpp"
+#include "engine/ui/SelectorPrompt.hpp"
 #include "engine/ui/UiControls.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace sokoban {
 
@@ -49,8 +51,161 @@ std::vector<std::string> LecternDialog::wrapText(
     return lines;
 }
 
-bool LecternDialog::draw(UiContext& ui, Vec2 viewport,
-    std::string_view text, std::string_view closeBinding)
+void LecternDialog::rebuildLines(UiContext& ui, std::string_view text,
+    float width, float fontSize, const PromptContext& context)
+{
+    lines_.clear();
+    std::vector<Run> line;
+    float used = 0.0f;
+    std::string whitespace;
+    const auto finishLine = [&] {
+        lines_.push_back(std::move(line));
+        line.clear();
+        used = 0.0f;
+        whitespace.clear();
+    };
+    const auto appendRun = [&](Run run) {
+        used += run.width;
+        if (!run.glyph && !line.empty() && !line.back().glyph &&
+            line.back().error == run.error && line.back().scale == run.scale) {
+            line.back().text += run.text;
+            line.back().width += run.width;
+        } else {
+            line.push_back(std::move(run));
+        }
+    };
+    const auto appendWhitespace = [&] {
+        if (!line.empty() && !whitespace.empty()) {
+            const float spaceWidth = ui.measureText(whitespace, fontSize).x;
+            appendRun({ .text = whitespace, .width = spaceWidth });
+        }
+        whitespace.clear();
+    };
+    const auto appendWord = [&](std::string_view word, bool error) {
+        const float wordWidth = ui.measureText(word, fontSize).x;
+        const float spaceWidth = line.empty() ? 0.0f : ui.measureText(whitespace, fontSize).x;
+        if (!line.empty() && used + spaceWidth + std::min(wordWidth, width) > width) finishLine();
+        appendWhitespace();
+        if (wordWidth <= width) {
+            appendRun({ .text = std::string(word), .width = wordWidth, .error = error });
+            return;
+        }
+        // Oversized text and error messages can split; key combinations stay atomic.
+        std::size_t offset = 0;
+        while (offset < word.size()) {
+            std::size_t count = 0;
+            float extent = 0.0f;
+            while (offset + count < word.size()) {
+                const float advance = ui.measureText(word.substr(offset + count, 1), fontSize).x;
+                if (used + extent + advance > width) break;
+                extent += advance;
+                ++count;
+            }
+            if (count == 0 && !line.empty()) {
+                finishLine();
+                continue;
+            }
+            if (count == 0) {
+                count = 1;
+                extent = ui.measureText(word.substr(offset, 1), fontSize).x;
+            }
+            appendRun({ .text = std::string(word.substr(offset, count)), .width = extent, .error = error });
+            offset += count;
+            if (offset < word.size()) finishLine();
+        }
+    };
+    const auto appendText = [&](std::string_view value, bool error) {
+        std::size_t position = 0;
+        while (position < value.size()) {
+            if (value[position] == '\n') {
+                finishLine();
+                ++position;
+            } else if (value[position] == '\r') {
+                ++position;
+            } else if (value[position] == ' ' || value[position] == '\t') {
+                whitespace += value[position++];
+            } else {
+                const std::size_t end = value.find_first_of(" \t\r\n", position);
+                const std::size_t count = end == std::string_view::npos ? value.size() - position : end - position;
+                appendWord(value.substr(position, count), error);
+                position += count;
+            }
+        }
+    };
+    const auto appendBinding = [&](const InputBinding& binding) {
+        std::vector<Run> parts;
+        const auto appendPart = [&](const InputBinding& part) {
+            const auto glyph = context.prompts
+                ? context.prompts->glyphForBinding(part, context.gamepad) : std::nullopt;
+            if (glyph) {
+                parts.push_back({ .glyph = glyph, .width = fontSize * glyph->aspectRatio });
+            } else {
+                const std::string label = "[" + bindingDisplayName(part) + "]";
+                parts.push_back({ .text = label, .width = ui.measureText(label, fontSize).x });
+            }
+        };
+        if (const auto* key = std::get_if<KeyboardBinding>(&binding)) {
+            for (const KeyModifier modifier : { keyModifierCtrl, keyModifierShift, keyModifierAlt }) {
+                if ((key->modifiers & modifier) == 0U) continue;
+                const std::string scancode = modifier == keyModifierCtrl ? "Left Ctrl"
+                    : modifier == keyModifierShift ? "Left Shift" : "Left Alt";
+                appendPart(KeyboardBinding { scancode });
+                parts.push_back({ .text = "+", .width = ui.measureText("+", fontSize).x });
+            }
+            appendPart(KeyboardBinding { key->scancode });
+        } else {
+            appendPart(binding);
+        }
+        float extent = 0.0f;
+        for (const Run& part : parts) extent += part.width;
+        if (extent > width) {
+            const float fit = width / extent;
+            for (Run& part : parts) {
+                part.width *= fit;
+                part.scale = fit;
+            }
+            extent = width;
+        }
+        const float spaceWidth = line.empty() ? 0.0f : ui.measureText(whitespace, fontSize).x;
+        if (!line.empty() && used + spaceWidth + extent > width) finishLine();
+        appendWhitespace();
+        for (Run& part : parts) appendRun(std::move(part));
+    };
+
+    std::size_t position = 0;
+    while (position < text.size()) {
+        const std::size_t begin = text.find("<!", position);
+        if (begin == std::string_view::npos) {
+            appendText(text.substr(position), false);
+            break;
+        }
+        appendText(text.substr(position, begin - position), false);
+        const std::size_t end = text.find("!>", begin + 2);
+        const std::size_t newline = text.find('\n', begin + 2);
+        if (end == std::string_view::npos || (newline != std::string_view::npos && newline < end)) {
+            appendText("[Invalid keybind tag]", true);
+            position = newline == std::string_view::npos ? text.size() : newline;
+            continue;
+        }
+        const std::string_view name = text.substr(begin + 2, end - begin - 2);
+        const auto action = findInputAction(name);
+        const InputBinding* binding = action && context.bindings
+            ? SelectorPrompt::bindingView(*context.bindings, *action, context.deviceClass) : nullptr;
+        if (!action) appendText("[Unknown action: " + std::string(name) + "]", true);
+        else if (!binding) appendText("[Unbound action: " + std::string(name) + "]", true);
+        else appendBinding(*binding);
+        position = end + 2;
+    }
+    finishLine();
+}
+
+void LecternDialog::draw(UiContext& ui, Vec2 viewport, std::string_view text)
+{
+    draw(ui, viewport, text, {});
+}
+
+void LecternDialog::draw(UiContext& ui, Vec2 viewport, std::string_view text,
+    const PromptContext& context)
 {
     const float scale = std::min(viewport.x / 760.0f, viewport.y / 540.0f);
     const float padding = 32.0f * scale;
@@ -66,12 +221,24 @@ bool LecternDialog::draw(UiContext& ui, Vec2 viewport,
             std::max(config::lecternMinimumFontSize, config::lecternMaximumFontSize));
     }
     const float lineHeight = fontSize * 1.3f;
-    if (contents != cachedText_ || width != cachedWidth_ || fontSize != cachedFontSize_) {
+    const bool bindingsChanged = context.bindings
+        ? !cachedBindings_ || *cachedBindings_ != *context.bindings : cachedBindings_.has_value();
+    const auto theme = context.prompts
+        ? context.prompts->themeForGamepad(context.gamepad) : InputPromptTheme::Generic;
+    if (contents != cachedText_ || width != cachedWidth_ || fontSize != cachedFontSize_ ||
+        bindingsChanged || context.prompts != cachedPrompts_ || context.deviceClass != cachedDeviceClass_ ||
+        theme != cachedTheme_ || context.gamepad.type != cachedGamepadType_ ||
+        context.gamepad.faceButtonLabels != cachedFaceButtonLabels_) {
         cachedText_ = contents;
         cachedWidth_ = width;
         cachedFontSize_ = fontSize;
-        lines_ = wrapText(contents, width,
-            [&](std::string_view line) { return ui.measureText(line, fontSize).x; });
+        cachedBindings_ = context.bindings ? std::optional<InputBindings>(*context.bindings) : std::nullopt;
+        cachedPrompts_ = context.prompts;
+        cachedDeviceClass_ = context.deviceClass;
+        cachedTheme_ = theme;
+        cachedGamepadType_ = context.gamepad.type;
+        cachedFaceButtonLabels_ = context.gamepad.faceButtonLabels;
+        rebuildLines(ui, contents, width, fontSize, context);
     }
     const std::size_t perPage = static_cast<std::size_t>(std::max(1.0f,
         std::floor((size.y - 158.0f * scale) / lineHeight)));
@@ -89,9 +256,19 @@ bool LecternDialog::draw(UiContext& ui, Vec2 viewport,
     ui.rect({ { panel.position.x + padding, panel.position.y + 57.0f * scale },
         { size.x - padding * 2.0f, scale } }, { 0.43f, 0.34f, 0.22f, 1.0f });
     for (std::size_t i = 0; i < perPage && page_ * perPage + i < lines_.size(); ++i) {
-        ui.text({ panel.position.x + padding,
-            panel.position.y + 77.0f * scale + static_cast<float>(i) * lineHeight },
-            lines_[page_ * perPage + i], { 0.98f, 0.95f, 0.87f, 1.0f }, fontSize);
+        float x = panel.position.x + padding;
+        const float y = panel.position.y + 77.0f * scale + static_cast<float>(i) * lineHeight;
+        for (const Run& run : lines_[page_ * perPage + i]) {
+            const float runSize = fontSize * run.scale;
+            const Vec2 position { x, y + (fontSize - runSize) * 0.5f };
+            if (run.glyph) {
+                drawInputPromptGlyph(ui, { position, { run.width, runSize } }, *run.glyph);
+            } else {
+                ui.text(position, run.text, run.error ? Vec4 { 1.0f, 0.32f, 0.30f, 1.0f }
+                    : Vec4 { 0.98f, 0.95f, 0.87f, 1.0f }, runSize);
+            }
+            x += run.width;
+        }
     }
     const float footer = panel.position.y + size.y - 60.0f * scale;
     if (pageCount_ > 1) {
@@ -106,11 +283,10 @@ bool LecternDialog::draw(UiContext& ui, Vec2 viewport,
         ui.text({ panel.position.x + padding + 215.0f * scale, footer + 7.0f * scale },
             page, { 0.79f, 0.73f, 0.61f, 1.0f }, 18.0f * scale);
     }
-    const std::string close = closeBinding.empty() ? "Close" : "Close  [" + std::string(closeBinding) + "]";
-    return uiControls::button(ui,
-        { { panel.position.x + size.x - padding - 175.0f * scale, footer },
-            { 175.0f * scale, 36.0f * scale } }, close,
-        { .tone = uiControls::ButtonTone::Accent, .contentScale = scale });
+    constexpr std::string_view hint = "Move away to close";
+    const float hintSize = 18.0f * scale;
+    ui.text({ panel.position.x + size.x - padding - ui.measureText(hint, hintSize).x,
+        footer + 7.0f * scale }, hint, { 0.79f, 0.73f, 0.61f, 1.0f }, hintSize);
 }
 
 } // namespace sokoban

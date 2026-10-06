@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include <algorithm>
+#include <cctype>
 #include <stdexcept>
 #include <string>
 
@@ -52,54 +53,40 @@ BindingDeviceClass bindingDeviceClass(const InputBinding& binding)
         : BindingDeviceClass::Gamepad;
 }
 
+const InputActionDefinition& inputActionDefinition(InputAction action)
+{
+    return inputActionDefinitions[actionIndex(action)];
+}
+
 InputActionContext inputActionContext(InputAction action)
 {
-    switch (action) {
-    case InputAction::Undo:
-    case InputAction::MenuBack:
-    case InputAction::EditorPlayDraft:
-        return InputActionContext::Global;
-    case InputAction::EditorReplaceTile:
-    case InputAction::EditorDeleteTile:
-    case InputAction::EditorMoveTile:
-    case InputAction::EditorPickTile:
-    case InputAction::EditorPaintLinkColor:
-    case InputAction::EditorStraightLine:
-    case InputAction::EditorRedo:
-    case InputAction::EditorSave:
-    case InputAction::EditorPlayFromCursor:
-    case InputAction::EditorLayerUp:
-    case InputAction::EditorLayerDown:
-    case InputAction::EditorToggleLayerLock:
-    case InputAction::EditorCycleTool:
-    case InputAction::EditorGizmoTranslate:
-    case InputAction::EditorGizmoRotate:
-    case InputAction::EditorGizmoScale:
-    case InputAction::EditorRecentTile1:
-    case InputAction::EditorRecentTile2:
-    case InputAction::EditorRecentTile3:
-    case InputAction::EditorRecentTile4:
-    case InputAction::EditorRecentTile5:
-    case InputAction::EditorRecentTile6:
-    case InputAction::EditorRecentTile7:
-    case InputAction::EditorRecentTile8:
-    case InputAction::EditorRecentTile9:
-        return InputActionContext::Editor;
-    case InputAction::MoveUp:
-    case InputAction::MoveDown:
-    case InputAction::MoveLeft:
-    case InputAction::MoveRight:
-    case InputAction::Restart:
-    case InputAction::ShowTopDownView:
-    case InputAction::ShowOverworldMap:
-    case InputAction::MenuConfirm:
-    case InputAction::PreviewScreen:
-    case InputAction::CycleHero:
-        return InputActionContext::Gameplay;
-    case InputAction::Count:
-        break;
+    return inputActionDefinition(action).context;
+}
+
+std::optional<InputAction> findInputAction(std::string_view name)
+{
+    const auto normalize = [](std::string_view value) {
+        std::string result;
+        for (unsigned char c : value) {
+            if (std::isspace(c) || c == '_' || c == '-' || c == '/') continue;
+            result += static_cast<char>(std::tolower(c));
+        }
+        return result;
+    };
+    const std::string normalized = normalize(name);
+    if (normalized.empty()) return std::nullopt;
+    for (const auto& definition : inputActionDefinitions) {
+        if (normalize(definition.name) == normalized || normalize(definition.label) == normalized)
+            return definition.action;
+        std::string_view aliases = definition.aliases;
+        while (!aliases.empty()) {
+            const std::size_t end = aliases.find('|');
+            if (normalize(aliases.substr(0, end)) == normalized) return definition.action;
+            if (end == std::string_view::npos) break;
+            aliases.remove_prefix(end + 1);
+        }
     }
-    throw std::invalid_argument("invalid input action");
+    return std::nullopt;
 }
 
 std::string_view keyModifierName(KeyModifier modifier)
@@ -252,167 +239,16 @@ void assignBinding(
 InputBindings defaultInputBindings()
 {
     InputBindings bindings;
-    bindings.forAction(InputAction::MoveUp) = {
-        KeyboardBinding { "W" },
-        GamepadButtonBinding { "dpup" },
-        GamepadAxisBinding { "lefty", AxisDirection::Negative },
-    };
-    bindings.forAction(InputAction::MoveDown) = {
-        KeyboardBinding { "S" },
-        GamepadButtonBinding { "dpdown" },
-        GamepadAxisBinding { "lefty", AxisDirection::Positive },
-    };
-    bindings.forAction(InputAction::MoveLeft) = {
-        KeyboardBinding { "A" },
-        GamepadButtonBinding { "dpleft" },
-        GamepadAxisBinding { "leftx", AxisDirection::Negative },
-    };
-    bindings.forAction(InputAction::MoveRight) = {
-        KeyboardBinding { "D" },
-        GamepadButtonBinding { "dpright" },
-        GamepadAxisBinding { "leftx", AxisDirection::Positive },
-    };
-    bindings.forAction(InputAction::Undo) = {
-        KeyboardBinding { "Z" },
-        GamepadButtonBinding { "west" },
-    };
-    bindings.forAction(InputAction::Restart) = {
-        KeyboardBinding { "R" },
-        GamepadButtonBinding { "north" },
-    };
-    bindings.forAction(InputAction::ShowTopDownView) = {
-        KeyboardBinding { "T" },
-    };
-    bindings.forAction(InputAction::ShowOverworldMap) = {
-        KeyboardBinding { "Tab" },
-        GamepadAxisBinding {
-            "lefttrigger", AxisDirection::Positive, 0.5f },
-    };
-    bindings.forAction(InputAction::MenuBack) = {
-        KeyboardBinding { "Escape" },
-        GamepadButtonBinding { "start" },
-    };
-    bindings.forAction(InputAction::MenuConfirm) = {
-        KeyboardBinding { "Space" },
-        GamepadButtonBinding { "south" },
-    };
-    bindings.forAction(InputAction::EditorReplaceTile) = {
-        KeyboardBinding { "R" },
-    };
-    bindings.forAction(InputAction::EditorDeleteTile) = {
-        KeyboardBinding { "D" },
-    };
-    bindings.forAction(InputAction::EditorMoveTile) = {
-        KeyboardBinding { "M" },
-    };
-    bindings.forAction(InputAction::PreviewScreen) = {
-        KeyboardBinding { "V" },
-        GamepadButtonBinding { "rightshoulder" },
-    };
-    bindings.forAction(InputAction::CycleHero) = {
-        KeyboardBinding { "Q" },
-        GamepadButtonBinding { "leftshoulder" },
-    };
-    bindings.forAction(InputAction::EditorPickTile) = {
-        KeyboardBinding { "Left Alt" },
-        KeyboardBinding { "Right Alt" },
-    };
-    bindings.forAction(InputAction::EditorPaintLinkColor) = {
-        KeyboardBinding { "Left Ctrl" },
-        KeyboardBinding { "Right Ctrl" },
-    };
-    bindings.forAction(InputAction::EditorStraightLine) = {
-        KeyboardBinding { "Left Shift" },
-        KeyboardBinding { "Right Shift" },
-    };
-    bindings.forAction(InputAction::EditorRedo) = {
-        KeyboardBinding { "Y" },
-        KeyboardBinding { "Z", keyModifierCtrl | keyModifierShift },
-    };
-    bindings.forAction(InputAction::EditorSave) = {
-        KeyboardBinding { "S", keyModifierCtrl },
-    };
-    bindings.forAction(InputAction::EditorPlayDraft) = {
-        KeyboardBinding { "F5" },
-    };
-    bindings.forAction(InputAction::EditorPlayFromCursor) = {
-        KeyboardBinding { "F5", keyModifierShift },
-    };
-    bindings.forAction(InputAction::EditorLayerUp) = {
-        KeyboardBinding { "PageUp" },
-    };
-    bindings.forAction(InputAction::EditorLayerDown) = {
-        KeyboardBinding { "PageDown" },
-    };
-    bindings.forAction(InputAction::EditorToggleLayerLock) = {
-        KeyboardBinding { "L" },
-    };
-    bindings.forAction(InputAction::EditorCycleTool) = {
-        KeyboardBinding { "Tab" },
-    };
-    // Rotate shares R with Replace Tile on purpose: the gizmo exists only in
-    // the Decorations tool and Replace only in the Tiles tool.
-    bindings.forAction(InputAction::EditorGizmoTranslate) = {
-        KeyboardBinding { "T" },
-    };
-    bindings.forAction(InputAction::EditorGizmoRotate) = {
-        KeyboardBinding { "R" },
-    };
-    bindings.forAction(InputAction::EditorGizmoScale) = {
-        KeyboardBinding { "S" },
-    };
-    for (int slot = 0; slot < editorRecentTileActionCount; ++slot) {
-        bindings.forAction(editorRecentTileAction(slot)) = {
-            KeyboardBinding { std::to_string(slot + 1) },
-        };
-    }
+#define SOKOBAN_INPUT_ACTION(id, name, label, aliases, context, group, order, ...) \
+    bindings.forAction(InputAction::id) = { __VA_ARGS__ };
+#include "engine/InputActions.def"
+#undef SOKOBAN_INPUT_ACTION
     return bindings;
 }
 
 std::string_view inputActionName(InputAction action)
 {
-    switch (action) {
-    case InputAction::MoveUp: return "moveUp";
-    case InputAction::MoveDown: return "moveDown";
-    case InputAction::MoveLeft: return "moveLeft";
-    case InputAction::MoveRight: return "moveRight";
-    case InputAction::Undo: return "undo";
-    case InputAction::Restart: return "restart";
-    case InputAction::ShowTopDownView: return "showTopDownView";
-    case InputAction::ShowOverworldMap: return "showOverworldMap";
-    case InputAction::MenuBack: return "menuBack";
-    case InputAction::MenuConfirm: return "menuConfirm";
-    case InputAction::EditorReplaceTile: return "editorReplaceTile";
-    case InputAction::EditorDeleteTile: return "editorDeleteTile";
-    case InputAction::EditorMoveTile: return "editorMoveTile";
-    case InputAction::PreviewScreen: return "previewScreen";
-    case InputAction::CycleHero: return "cycleHero";
-    case InputAction::EditorPickTile: return "editorPickTile";
-    case InputAction::EditorPaintLinkColor: return "editorPaintLinkColor";
-    case InputAction::EditorStraightLine: return "editorStraightLine";
-    case InputAction::EditorRedo: return "editorRedo";
-    case InputAction::EditorSave: return "editorSave";
-    case InputAction::EditorPlayDraft: return "editorPlayDraft";
-    case InputAction::EditorPlayFromCursor: return "editorPlayFromCursor";
-    case InputAction::EditorLayerUp: return "editorLayerUp";
-    case InputAction::EditorLayerDown: return "editorLayerDown";
-    case InputAction::EditorToggleLayerLock: return "editorToggleLayerLock";
-    case InputAction::EditorCycleTool: return "editorCycleTool";
-    case InputAction::EditorGizmoTranslate: return "editorGizmoTranslate";
-    case InputAction::EditorGizmoRotate: return "editorGizmoRotate";
-    case InputAction::EditorGizmoScale: return "editorGizmoScale";
-    case InputAction::EditorRecentTile1: return "editorRecentTile1";
-    case InputAction::EditorRecentTile2: return "editorRecentTile2";
-    case InputAction::EditorRecentTile3: return "editorRecentTile3";
-    case InputAction::EditorRecentTile4: return "editorRecentTile4";
-    case InputAction::EditorRecentTile5: return "editorRecentTile5";
-    case InputAction::EditorRecentTile6: return "editorRecentTile6";
-    case InputAction::EditorRecentTile7: return "editorRecentTile7";
-    case InputAction::EditorRecentTile8: return "editorRecentTile8";
-    case InputAction::EditorRecentTile9: return "editorRecentTile9";
-    case InputAction::Count: break;
-    }
-    throw std::invalid_argument("invalid input action");
+    return inputActionDefinition(action).name;
 }
 
 InputAction inputActionFromName(std::string_view name)

@@ -45,14 +45,29 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 Lecterns are fixed blocks that open a reading box when a hero walks into them.
 Choose **Lectern** in the editor's tile palette, then select the stand in the
 **Lecterns** section and enter its text. Text supports line breaks, wraps to the
-box, and uses pages when needed. Use the page buttons or movement controls to
-change pages; Activate, Back, or **Close** dismisses the box. Gameplay pauses
-while reading, and reading does not spend a move. Release movement before
-opening the same book again.
+box, and uses pages when needed. Use the page buttons to change pages. Walk
+away from the lectern to close the box, or use Activate or Back (Escape by
+default). Blocked moves keep the text open. Gameplay pauses while reading
+without movement input, and opening the book does not spend a move. After using
+Activate or Back, release movement before opening the same book again.
 
 Screen grids use `T` for a lectern, with text stored before the layers as
 `@lectern {"cell":[2,1,1],"text":"First paragraph.\n\nSecond paragraph."}`.
 An example ready to open in the editor is `docs/examples/lectern.scr`.
+
+Embed current binding icons with tags such as `<!Move Up!>`, `<!Undo!>`,
+`<!Activate!>`, or `<!Menu Back!>`. Action names ignore case, spaces, hyphens,
+and underscores; internal names such as `moveUp` also work. Icons follow
+rebinding and switch between keyboard and controller prompts automatically.
+Modifier chords show all required keys. Unknown actions, unbound actions,
+and malformed tags show an inline error in red; keys without an atlas icon
+fall back to their binding label.
+
+Action identifiers, saved names, controls-menu labels, tutorial aliases, input
+contexts, and default keys are defined together in `src/engine/InputActions.def`.
+Add or change an action there; controls rows and lectern names are derived from
+that registry. Runtime input and prompts use the player's current `InputBindings`,
+including saved rebindings. Any controls-menu binding label also works in a lectern tag.
 
 All lecterns share optional **Minimum Font Size** and **Maximum Font Size**
 settings under **Tuning > Lecterns**, measured in screen pixels. Set either to

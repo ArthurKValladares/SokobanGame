@@ -955,6 +955,88 @@ void testElevatorLoopUsesPlatformMotionOnly()
     CHECK(session.state().elevators[0].cell == GridPosition3({ 4, 0, 2 }));
 }
 
+void testLecternClosesWhenReaderWalksAway()
+{
+    TEST("lecternClosesWhenReaderWalksAway");
+    const Level level = makeLevel({
+        { ".......", ".......", "......." },
+        { "   #   ", "   CT  ", "       " },
+    });
+    GameplaySession session;
+    session.setStepDurationSeconds(0.2f);
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto update = [&](GameplayLoop::InputFrame input, float dt = 0.01f) {
+        return GameplayLoop::update(level, session, presentation, input, dt, false);
+    };
+
+    (void)update({ .right = { true, true } });
+    CHECK(session.readingLectern() == GridPosition3({ 4, 1, 1 }));
+    CHECK(session.playerMoveCount() == 0);
+    const auto before = session.snapshot();
+    // Walking into the stand or a wall keeps the reading box open.
+    (void)update({ .right = { false, true } }, 0.3f);
+    (void)update({ .up = { true, true } }, 0.3f);
+    (void)update({}, 0.3f);
+    CHECK(session.readingLectern().has_value());
+    CHECK(session.snapshot() == before);
+
+    (void)update({ .left = { true, true } });
+    CHECK(!session.readingLectern());
+    CHECK(session.moving());
+    (void)update({}, 0.3f);
+    CHECK(session.state().players[0].cell == GridPosition3({ 2, 1, 1 }));
+    CHECK(session.playerMoveCount() == 1);
+    CHECK(session.undoCount() == 1);
+    CHECK(session.inputLog() == std::vector<PlayerInput> { PlayerInput::Left });
+    (void)update({ .undoPressed = true }, 0.3f);
+    CHECK(session.state().players[0].cell == GridPosition3({ 3, 1, 1 }));
+    CHECK(!session.readingLectern());
+    CHECK(session.playerMoveCount() == 0);
+
+    (void)update({ .right = { true, true } });
+    CHECK(session.readingLectern().has_value());
+    (void)update({ .left = { true, true } });
+    (void)update({ .left = { false, true } }, 0.21f);
+    (void)update({}, 0.3f);
+    CHECK(!session.readingLectern());
+    CHECK(session.state().players[0].cell == GridPosition3({ 1, 1, 1 }));
+    CHECK(session.playerMoveCount() == 2);
+}
+
+void testMovingMirrorCopyDoesNotCloseReadersLectern()
+{
+    TEST("movingMirrorCopyDoesNotCloseReadersLectern");
+    const Level level = makeLevel({
+        { ".......", ".......", "......." },
+        { "   #   ", "   CT  ", "       " },
+    });
+    auto state = rules::initialState(level);
+    auto copy = state.players[0];
+    copy.id += 1000;
+    copy.cell = { 1, 1, 1 };
+    state.players.push_back(copy);
+    GameplaySession session;
+    session.resetToState(state, state.players[0].controller);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    (void)GameplayLoop::update(level, session, presentation,
+        { .right = { true, true } }, 0.01f, false);
+    (void)GameplayLoop::update(level, session, presentation,
+        { .up = { true, true } }, 0.01f, false);
+    CHECK(session.readingLectern().has_value());
+    CHECK(session.moving());
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.3f, false);
+    CHECK(!session.moving());
+    CHECK(session.readingLectern().has_value());
+    CHECK(session.state().players[0].cell == GridPosition3({ 3, 1, 1 }));
+    CHECK(session.state().players[1].cell == GridPosition3({ 1, 0, 1 }));
+    (void)GameplayLoop::update(level, session, presentation,
+        { .left = { true, true } }, 0.01f, false);
+    CHECK(!session.readingLectern());
+}
+
 } // namespace
 
 int main()
@@ -1008,6 +1090,8 @@ int main()
     CHECK(reader.readingLectern() == GridPosition3({ 2, 0, 1 }));
     CHECK(reader.state().players[0].cell == GridPosition3({ 1, 0, 1 }));
     CHECK(reader.playerMoveCount() == 1);
+    testLecternClosesWhenReaderWalksAway();
+    testMovingMirrorCopyDoesNotCloseReadersLectern();
     testPressurePlateSoundsAreEdgesAndUndoIsSilent();
     testEveryButtonPulseHasOneSound();
     testGateSoundsFollowOpenState();

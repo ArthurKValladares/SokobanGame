@@ -1306,6 +1306,218 @@ void testOptionsReducerDraftAndBindingSemantics()
         sokoban::BindingDeviceClass::Keyboard) == "W");
 }
 
+void testLecternBindingPlaceholders()
+{
+    TEST("lecternBindingPlaceholdersTrackRebindingAndActiveDevice");
+    const auto manifest = sokoban::AssetManifest::loadFromFile(assetRoot / "manifest.json");
+    const sokoban::InputPromptCatalog prompts(assetRoot, manifest);
+    const auto font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+    sokoban::LecternDialog dialog;
+    auto bindings = sokoban::defaultInputBindings();
+    sokoban::LecternDialog::PromptContext context {
+        .bindings = &bindings, .prompts = &prompts,
+    };
+    const auto draw = [&](std::string_view text, sokoban::Vec2 size = { 1280, 720 }) {
+        ui.beginFrame(size, {}, false, false);
+        dialog.draw(ui, size, text, context);
+        ui.endFrame();
+        CHECK(ui.droppedCommands() == 0);
+        for (const auto& command : ui.drawData().commands) {
+            CHECK(command.rect.position.x >= 0.0f);
+            CHECK(command.rect.position.y >= 0.0f);
+            CHECK(command.rect.position.x + command.rect.size.x <= size.x);
+            CHECK(command.rect.position.y + command.rect.size.y <= size.y);
+        }
+    };
+    const auto images = [&] {
+        std::vector<sokoban::UiDrawCommand> result;
+        for (const auto& command : ui.drawData().commands) {
+            if (command.kind == sokoban::UiDrawKind::TextureImage) result.push_back(command);
+        }
+        return result;
+    };
+    const auto checkIcon = [&](std::size_t index, const sokoban::InputBinding& binding) {
+        const auto expected = prompts.glyphForBinding(binding, context.gamepad);
+        const auto actual = images();
+        CHECK(expected.has_value());
+        CHECK(index < actual.size());
+        if (!expected || index >= actual.size()) return;
+        CHECK(actual[index].texture == expected->texture);
+        CHECK(actual[index].uvRect.position == expected->uvRect.position);
+        CHECK(actual[index].uvRect.size == expected->uvRect.size);
+    };
+    const auto errorText = [&] {
+        std::string result;
+        for (const auto& command : ui.drawData().commands) {
+            if (command.kind != sokoban::UiDrawKind::FontGlyph ||
+                command.color.x < 0.99f || command.color.y > 0.4f || command.color.z > 0.4f) continue;
+            for (char c = '!'; c <= '~'; ++c) {
+                const auto& glyph = font.glyph(c);
+                if (command.uvRect.position == glyph.uv.position && command.uvRect.size == glyph.uv.size) {
+                    result += c;
+                    break;
+                }
+            }
+        }
+        return result;
+    };
+
+    constexpr std::string_view text = "Walk <!Move Up!> to go up.";
+    draw(text);
+    CHECK(images().size() == 1);
+    checkIcon(0, sokoban::KeyboardBinding { "W" });
+    CHECK(errorText().empty());
+    sokoban::assignBinding(bindings, sokoban::InputAction::MoveUp, sokoban::KeyboardBinding { "Up" });
+    draw(text);
+    CHECK(images().size() == 1);
+    checkIcon(0, sokoban::KeyboardBinding { "Up" });
+
+    sokoban::assignBinding(bindings, sokoban::InputAction::MoveUp,
+        sokoban::KeyboardBinding { "S", sokoban::keyModifierAll });
+    draw(text);
+    CHECK(images().size() == 4);
+    checkIcon(0, sokoban::KeyboardBinding { "Left Ctrl" });
+    checkIcon(1, sokoban::KeyboardBinding { "Left Shift" });
+    checkIcon(2, sokoban::KeyboardBinding { "Left Alt" });
+    checkIcon(3, sokoban::KeyboardBinding { "S" });
+    draw("<! mOvE_uP !>");
+    CHECK(images().size() == 4);
+
+    context.deviceClass = sokoban::BindingDeviceClass::Gamepad;
+    context.gamepad.type = SDL_GAMEPAD_TYPE_XBOXONE;
+    draw(text);
+    CHECK(images().size() == 1);
+    checkIcon(0, sokoban::GamepadButtonBinding { "dpup" });
+    draw("Press <!Activate!>.");
+    checkIcon(0, sokoban::GamepadButtonBinding { "south" });
+    context.gamepad.faceButtonLabels[0] = SDL_GAMEPAD_BUTTON_LABEL_B;
+    draw("Press <!Activate!>.");
+    checkIcon(0, sokoban::GamepadButtonBinding { "south" });
+    context.gamepad.type = SDL_GAMEPAD_TYPE_PS5;
+    context.gamepad.faceButtonLabels[0] = SDL_GAMEPAD_BUTTON_LABEL_CROSS;
+    draw("Press <!Activate!>.");
+    checkIcon(0, sokoban::GamepadButtonBinding { "south" });
+
+    context.deviceClass = sokoban::BindingDeviceClass::Keyboard;
+    draw("Press <!Confirm / Activate!>.");
+    checkIcon(0, sokoban::KeyboardBinding { "Space" });
+    draw("Bad <!Fly!> then <!Undo!>.");
+    CHECK(errorText() == "[Unknownaction:Fly]");
+    CHECK(images().size() == 1);
+    checkIcon(0, sokoban::KeyboardBinding { "Z" });
+    draw("Broken <!Move Up\nNext <!Undo!>");
+    CHECK(errorText() == "[Invalidkeybindtag]");
+    CHECK(images().size() == 1);
+
+    bindings.forAction(sokoban::InputAction::MoveUp).clear();
+    draw(text);
+    CHECK(images().empty());
+    CHECK(errorText() == "[Unboundaction:MoveUp]");
+    bindings.forAction(sokoban::InputAction::MoveUp) = { sokoban::KeyboardBinding { "Unsupported Key" } };
+    draw(text);
+    CHECK(images().empty());
+    CHECK(errorText().empty());
+
+    TEST("lecternIconsWrapAndPaginateWithoutSplittingChords");
+    const std::string paged = std::string(2000, 'W') + "\n<!Undo!>";
+    dialog.reset();
+    draw(paged, { 640, 360 });
+    CHECK(images().empty());
+    for (int page = 0; page < 50 && images().empty(); ++page) {
+        dialog.turnPage(false, true);
+        draw(paged, { 640, 360 });
+    }
+    CHECK(images().size() == 1);
+    checkIcon(0, sokoban::KeyboardBinding { "Z" });
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const float savedMinimum = sokoban::config::lecternMinimumFontSize;
+    const float savedMaximum = sokoban::config::lecternMaximumFontSize;
+    sokoban::config::lecternMinimumFontSize = 128.0f;
+    sokoban::config::lecternMaximumFontSize = 128.0f;
+    bindings.forAction(sokoban::InputAction::MoveUp) = {
+        sokoban::KeyboardBinding { "S", sokoban::keyModifierAll },
+    };
+    dialog.reset();
+    draw("<!Move Up!>", { 640, 360 });
+    const auto chord = images();
+    CHECK(chord.size() == 4);
+    for (const auto& glyph : chord) CHECK(glyph.rect.position.y == chord[0].rect.position.y);
+    sokoban::config::lecternMinimumFontSize = savedMinimum;
+    sokoban::config::lecternMaximumFontSize = savedMaximum;
+#endif
+}
+
+void testActionRegistryConsumers()
+{
+    TEST("everyControlsRowRebindsTheActionUsedByInputAndLecterns");
+    const auto manifest = sokoban::AssetManifest::loadFromFile(assetRoot / "manifest.json");
+    const sokoban::InputPromptCatalog prompts(assetRoot, manifest);
+    const auto font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+    sokoban::LecternDialog dialog;
+    const sokoban::KeyboardBinding candidate { "F12" };
+    const auto glyph = prompts.glyphForBinding(candidate, {});
+    CHECK(glyph.has_value());
+    for (const auto& definition : sokoban::inputActionDefinitions) {
+        sokoban::OptionsMenuState state { .open = true, .page = sokoban::OptionsMenuPage::Controls };
+        switch (definition.group) {
+        case sokoban::InputActionGroup::Hidden: continue;
+        case sokoban::InputActionGroup::Controls: break;
+        case sokoban::InputActionGroup::EditorEditing:
+            state.page = sokoban::OptionsMenuPage::EditorControls;
+            state.editorControlsSection = sokoban::EditorControlsSection::Editing;
+            break;
+        case sokoban::InputActionGroup::EditorPlaytest:
+            state.page = sokoban::OptionsMenuPage::EditorControls;
+            state.editorControlsSection = sokoban::EditorControlsSection::Playtest;
+            break;
+        case sokoban::InputActionGroup::EditorRecentTiles:
+            state.page = sokoban::OptionsMenuPage::EditorControls;
+            state.editorControlsSection = sokoban::EditorControlsSection::RecentTiles;
+            break;
+        }
+        const sokoban::UserSettings settings;
+        const auto rows = sokoban::optionsMenuRows(state, settings);
+        const auto row = std::ranges::find(rows, definition.label, &sokoban::OptionsMenuRow::label);
+        CHECK(row != rows.end());
+        if (row == rows.end()) continue;
+        CHECK(row->kind == sokoban::OptionsMenuRowKind::Binding);
+        auto capture = sokoban::reduceOptionsMenu(state, settings,
+            sokoban::options::intent::ActivateRow { row->id });
+        CHECK(capture.state.capturingAction == definition.action);
+        const auto rebound = sokoban::reduceOptionsMenu(capture.state, settings,
+            sokoban::options::intent::ProvideBinding { candidate });
+        CHECK(rebound.action.has_value());
+        if (!rebound.action) continue;
+        const auto* changed = std::get_if<sokoban::options::SettingsChanged>(&*rebound.action);
+        CHECK(changed != nullptr);
+        if (!changed) continue;
+        sokoban::InputState input(false);
+        input.setBindings(changed->settings.input);
+        SDL_Event event {};
+        event.type = SDL_EVENT_KEY_DOWN;
+        event.key.scancode = SDL_SCANCODE_F12;
+        input.handleEvent(event);
+        CHECK(input.actionPressed(definition.action));
+
+        ui.beginFrame({ 1280, 720 }, {}, false, false);
+        dialog.draw(ui, { 1280, 720 }, "Press <!" + std::string(definition.label) + "!>",
+            { .bindings = &input.bindings(), .prompts = &prompts });
+        ui.endFrame();
+        std::size_t icons = 0;
+        for (const auto& command : ui.drawData().commands) {
+            if (command.kind != sokoban::UiDrawKind::TextureImage) continue;
+            ++icons;
+            if (!glyph) continue;
+            CHECK(command.texture == glyph->texture);
+            CHECK(command.uvRect.position == glyph->uvRect.position);
+            CHECK(command.uvRect.size == glyph->uvRect.size);
+        }
+        CHECK(icons == 1);
+    }
+}
+
 } // namespace
 
 int main()
@@ -1322,7 +1534,7 @@ int main()
         sokoban::LecternDialog dialog;
         for (const sokoban::Vec2 size : { sokoban::Vec2 { 640, 360 }, sokoban::Vec2 { 1920, 1080 } }) {
             ui.beginFrame(size, {}, false, false);
-            CHECK(!dialog.draw(ui, size, std::string(4000, 'W'), "Space"));
+            dialog.draw(ui, size, std::string(4000, 'W'));
             for (const auto& command : ui.drawData().commands) {
                 CHECK(command.rect.position.x >= 0.0f);
                 CHECK(command.rect.position.y >= 0.0f);
@@ -1338,7 +1550,7 @@ int main()
         const float savedMaximum = sokoban::config::lecternMaximumFontSize;
         const auto renderedFontSize = [&](sokoban::Vec2 size) {
             ui.beginFrame(size, {}, false, false);
-            CHECK(!dialog.draw(ui, size, std::string(4000, 'W'), "Space"));
+            dialog.draw(ui, size, std::string(4000, 'W'));
             float result = 0.0f;
             const auto& glyph = font.glyph('W');
             for (const auto& command : ui.drawData().commands) {
@@ -1392,6 +1604,8 @@ int main()
     testReusableControls();
     testSelectorPromptShowsInteractAndPreviewBindings();
     testInputPromptCatalogUsesKeyboardAndControllerSpecificGlyphs();
+    testLecternBindingPlaceholders();
+    testActionRegistryConsumers();
     testScreenPreviewOverlayUsesCenteredSeventyFivePercentInset();
     testLayoutTree();
     testOptionsRemainReachableAtSupportedWindowSizes();

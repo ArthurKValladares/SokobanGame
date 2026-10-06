@@ -324,6 +324,7 @@ void GameplaySession::reset(const Level& level)
     scheduler_.reset(undoBaseState_, stepDurationSeconds_);
     pendingCommands_.clear();
     readingLectern_.reset();
+    readingHero_ = invalidEntityId;
     waitingForMoveRelease_ = false;
     undoHistory_.clear();
     undoGroups_.clear();
@@ -348,6 +349,7 @@ void GameplaySession::resetToState(
     scheduler_.reset(undoBaseState_, stepDurationSeconds_);
     pendingCommands_.clear();
     readingLectern_.reset();
+    readingHero_ = invalidEntityId;
     waitingForMoveRelease_ = false;
     undoHistory_.clear();
     undoGroups_.clear();
@@ -586,6 +588,7 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
     scheduler_.reset(normalized.state, stepDurationSeconds_);
     pendingCommands_.clear();
     readingLectern_.reset();
+    readingHero_ = invalidEntityId;
     waitingForMoveRelease_ = false;
     // The stack was just validated against a replay from here, so it is exactly
     // the anchor the chain is built on.
@@ -624,7 +627,7 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
 
 void GameplaySession::enqueue(Command command)
 {
-    if (readingLectern_ || waitingForMoveRelease_) return;
+    if ((readingLectern_ && command.type != CommandType::Move) || waitingForMoveRelease_) return;
     command.queuedAtSeconds = scheduler_.clockSeconds();
     // Full queue drops the oldest rather than refusing the newest: the most
     // recent input is the one the player still means.
@@ -671,6 +674,7 @@ std::optional<CharacterType> GameplaySession::activeHeroCharacter() const
 
 void GameplaySession::cycleActiveHero()
 {
+    if (readingLectern_) return;
     const GameState progress = planningState();
     std::vector<EntityId> controllers;
     for (std::size_t i = 0; i < progress.players.size(); ++i) {
@@ -724,7 +728,7 @@ GameplaySession::StartOutcome GameplaySession::runCommand(
 
 bool GameplaySession::tryStartNextAction(const Level& level, const Controls& controls)
 {
-    if (readingLectern_) return false;
+    if (readingLectern_ && moving()) return false;
     if (waitingForMoveRelease_) {
         if (controls.verticalMove || controls.horizontalMove) return false;
         waitingForMoveRelease_ = false;
@@ -749,11 +753,12 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
             continue;
         }
 
+        const auto readingBeforeCommand = readingLectern_;
         switch (runCommand(level, command, controls)) {
         case StartOutcome::Started:
             return true;
         case StartOutcome::Impossible:
-            if (readingLectern_) return false;
+            if (readingLectern_ && readingLectern_ != readingBeforeCommand) return false;
             continue;
         case StartOutcome::Refused:
             // Back where it came from, ahead of anything queued behind it, and
@@ -766,7 +771,7 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
 
     const GameState& current = planningState();
     if (rules::anyPlayerDead(current)) {
-        return controls.undoHeld &&
+        return !readingLectern_ && controls.undoHeld &&
             tryStartUndoMove() == StartOutcome::Started;
     }
 
@@ -966,7 +971,7 @@ bool GameplaySession::activeActionComplete() const
 GameplaySession::StartOutcome GameplaySession::tryStartHeldMove(
     const Level& level, const Controls& controls)
 {
-    if (controls.undoHeld) {
+    if (controls.undoHeld && !readingLectern_) {
         return tryStartUndoMove();
     }
 
@@ -975,12 +980,13 @@ GameplaySession::StartOutcome GameplaySession::tryStartHeldMove(
     // because the intended one is momentarily blocked would move the player
     // somewhere they did not ask to go.
     if (controls.verticalMove) {
+        const auto readingBeforeMove = readingLectern_;
         const StartOutcome outcome = tryStartHeldDirection(
             level,
             *controls.verticalMove,
             controls.horizontalMove,
             activeHeroController_);
-        if (outcome != StartOutcome::Impossible) {
+        if (outcome != StartOutcome::Impossible || readingLectern_ != readingBeforeMove) {
             return outcome;
         }
     }
@@ -998,7 +1004,6 @@ GameplaySession::StartOutcome GameplaySession::tryStartHeldMove(
 GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
     const Level& level, MoveDirection input, EntityId controller)
 {
-    if (readingLectern_) return StartOutcome::Impossible;
     if (!level.lecterns().empty()) {
         const GameState& current = planningState();
         const GridPosition offset = rules::directionOffset(input);
@@ -1014,6 +1019,7 @@ GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
                 // so the reading box opens over a settled world.
                 if (moving()) return StartOutcome::Refused;
                 readingLectern_ = destination;
+                readingHero_ = player.id;
                 pendingCommands_.clear();
                 return StartOutcome::Impossible;
             }
@@ -1033,6 +1039,7 @@ void GameplaySession::dismissLectern()
 {
     if (!readingLectern_) return;
     readingLectern_.reset();
+    readingHero_ = invalidEntityId;
     pendingCommands_.clear();
     // A held direction must be released before it can reopen the book.
     waitingForMoveRelease_ = true;
@@ -1117,6 +1124,19 @@ GameplaySession::StartOutcome GameplaySession::planPlayerStep(
     if (scheduler_.tryStartAll(std::move(batch), group)) {
         autoMotionPaused_ = wasPaused;
         return StartOutcome::Refused;
+    }
+    if (readingLectern_) {
+        const auto& destination = scheduler_.projectedStateView();
+        const auto hero = std::ranges::find(destination.players, readingHero_, &GameState::Player::id);
+        if (hero == destination.players.end() || hero->dead ||
+            hero->cell.z != readingLectern_->z ||
+            std::abs(hero->cell.x - readingLectern_->x) +
+                std::abs(hero->cell.y - readingLectern_->y) != 1) {
+            // Close as the admitted move starts, without suppressing held
+            // movement. A blocked move or a distant mirror copy cannot close it.
+            readingLectern_.reset();
+            readingHero_ = invalidEntityId;
+        }
     }
     if (!witchSwapEndpoints.empty()) {
         lastWitchSwapDestinations_ = witchSwapEndpoints;

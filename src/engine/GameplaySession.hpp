@@ -233,6 +233,7 @@ public:
 
 private:
     std::optional<GridPosition3> readingLectern_;
+    EntityId readingHero_ = invalidEntityId;
     bool waitingForMoveRelease_ = false;
     enum class CommandType : uint8_t {
         Move,

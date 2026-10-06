@@ -96,6 +96,40 @@ void testDefaultKeyboardBindings()
     CHECK(input.actionDown(sokoban::InputAction::ShowOverworldMap));
 }
 
+void testActionRegistry()
+{
+    TEST("actionRegistryHasUnambiguousNamesLabelsAliasesAndMenuOrder");
+    const auto defaults = sokoban::defaultInputBindings();
+    for (std::size_t index = 0; index < sokoban::inputActionCount; ++index) {
+        const auto& definition = sokoban::inputActionDefinitions[index];
+        CHECK(static_cast<std::size_t>(definition.action) == index);
+        CHECK(!definition.name.empty());
+        CHECK(!definition.label.empty());
+        CHECK(!defaults.forAction(definition.action).empty());
+        CHECK(sokoban::inputActionFromName(definition.name) == definition.action);
+        CHECK(sokoban::findInputAction(definition.name) == definition.action);
+        CHECK(sokoban::findInputAction(definition.label) == definition.action);
+        std::string_view aliases = definition.aliases;
+        while (!aliases.empty()) {
+            const auto end = aliases.find('|');
+            CHECK(sokoban::findInputAction(aliases.substr(0, end)) == definition.action);
+            if (end == std::string_view::npos) break;
+            aliases.remove_prefix(end + 1);
+        }
+        for (std::size_t other = index + 1; other < sokoban::inputActionCount; ++other) {
+            const auto& next = sokoban::inputActionDefinitions[other];
+            CHECK(definition.name != next.name);
+            CHECK(definition.group != next.group || definition.menuOrder != next.menuOrder);
+        }
+    }
+    CHECK(sokoban::findInputAction(" mOvE-uP ") == sokoban::InputAction::MoveUp);
+    CHECK(sokoban::findInputAction("Confirm / Activate") == sokoban::InputAction::MenuConfirm);
+    CHECK(sokoban::findInputAction("editor_save") == sokoban::InputAction::EditorSave);
+    CHECK(!sokoban::findInputAction("Fly"));
+    CHECK(!sokoban::findInputAction(""));
+    CHECK(!sokoban::findInputAction(" _- / "));
+}
+
 void testMenuConfirmBindings()
 {
     sokoban::InputState input(false);
@@ -384,6 +418,7 @@ void testChordCaptureAndContexts()
 
 int main()
 {
+    testActionRegistry();
     testDefaultKeyboardBindings();
     testMenuConfirmBindings();
     testKeyboardRemapping();
