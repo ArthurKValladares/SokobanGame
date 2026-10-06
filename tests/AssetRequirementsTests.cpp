@@ -29,6 +29,7 @@ const AssetManifest& testManifest()
         { "name": "Smoke10", "path": "smoke10.png" },
         { "name": "GroundGrass", "path": "grass.png" },
         { "name": "GroundRock", "path": "rock.png" },
+        { "name": "GroundRockSide", "path": "rock_side.png" },
         { "name": "GroundSplatMap", "path": "splat.png" },
         { "name": "GroundSplatMap0_0", "path": "splat0_0.png" },
         { "name": "GroundSplatMap0_1", "path": "splat0_1.png" },
@@ -151,8 +152,8 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.enemyAttackAnimation()));
     CHECK(requirements.modelCount() == 8);
     CHECK(requirements.animationCount() == 6);
-    // Three ground splat textures plus muzzle, glow, and the laser beam.
-    CHECK(requirements.textureCount() == 6);
+    // Three splat textures, side sandstone, muzzle, glow, and the laser beam.
+    CHECK(requirements.textureCount() == 7);
 
     const Level mirrorLevel = Level::loadFromLayers({
         { ".....", ".....", ".....", ".....", "....." },
@@ -160,8 +161,8 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     }, "mirror particle requirements");
     const RenderAssetRequirements mirrorRequirements =
         renderAssetRequirementsForLevel(mirrorLevel, manifest);
-    // Ten smoke textures plus the three ground splat textures.
-    CHECK(mirrorRequirements.textureCount() == 13);
+    // Ten smoke textures plus the three splat textures and side sandstone.
+    CHECK(mirrorRequirements.textureCount() == 14);
     CHECK(mirrorRequirements.contains(
         manifest.textureIdByName("Smoke01")));
     CHECK(mirrorRequirements.contains(
@@ -283,6 +284,7 @@ void testGroundSplatTexturesAreRequired()
         manifest.textureIdByName(groundSplatDetailTextureName)));
     CHECK(levelRequirements.contains(
         manifest.textureIdByName(groundSplatMapTextureName)));
+    CHECK(levelRequirements.contains(manifest.textureIdByName(groundRockSideTextureName)));
 
     RenderFrameData frame;
     frame.groundSplat = {
@@ -290,11 +292,13 @@ void testGroundSplatTexturesAreRequired()
         .detail = manifest.textureIdByName(groundSplatDetailTextureName),
         .splatMap = manifest.textureIdByName(groundSplatMapTextureName),
     };
+    frame.groundRockSideTexture = manifest.textureIdByName(groundRockSideTextureName);
     const RenderAssetRequirements frameRequirements =
         renderAssetRequirementsForFrame(frame);
     CHECK(frameRequirements.contains(frame.groundSplat.base));
     CHECK(frameRequirements.contains(frame.groundSplat.detail));
     CHECK(frameRequirements.contains(frame.groundSplat.splatMap));
+    CHECK(frameRequirements.contains(frame.groundRockSideTexture));
 
     frame.groundSplatRegionCount = 1;
     frame.groundSplatRegions[0] = {
@@ -382,9 +386,9 @@ void testPerScreenSplatMapsAreSelectedAndFallBack()
         renderAssetRequirementsForLevel(level, manifest);
     CHECK(unlocated.contains(shared));
 
-    // Exactly one splat map either way: base + detail + one map.
-    CHECK(first.textureCount() == 3);
-    CHECK(missing.textureCount() == 3);
+    // One splat map either way, plus base, detail, and the side sandstone.
+    CHECK(first.textureCount() == 4);
+    CHECK(missing.textureCount() == 4);
 
     // The name helper is what ties manifest entries to screens; if it drifts,
     // every screen silently falls back to the shared map.

@@ -76,8 +76,34 @@ enum class TileType : uint8_t {
     MinecartGate,
     // Fixed reading stand; walking into it opens its authored text.
     Lectern,
+    // Ground keeps its square collision volume and splat-painted top. These
+    // brushes select different compatible faceted cliff-side profiles.
+    GroundRock02,
+    GroundRock03,
+    GroundRock04,
+    GroundRock05,
+    GroundRock06,
+    GroundRock07,
+    GroundRock08,
+    GroundRock09,
+    GroundRock10,
     Count,
 };
+
+inline constexpr std::size_t groundRockVariantCount = 10;
+
+[[nodiscard]] constexpr bool tileTypeIsGround(TileType tile)
+{
+    return tile == TileType::Ground ||
+        (tile >= TileType::GroundRock02 && tile <= TileType::GroundRock10);
+}
+
+[[nodiscard]] constexpr uint32_t groundRockVariantFor(TileType tile)
+{
+    return tile >= TileType::GroundRock02 && tile <= TileType::GroundRock10
+        ? static_cast<uint32_t>(tile) - static_cast<uint32_t>(TileType::GroundRock02) + 1U
+        : 0U;
+}
 
 // Behavioural traits shared by families of tiles. Combine with `|`.
 enum class TileProperty : uint8_t {
@@ -167,6 +193,15 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::Button, 'b', "Button", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::MinecartGate, 'g', "Minecart Gate", { 0.92f, 0.66f, 0.22f, 1.0f } },
     TileTypeDefinition { TileType::Lectern, 'T', "Lectern", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::GroundRock02, 'A', "Ground Rock 02", { 0.82f, 0.82f, 0.84f, 1.0f } },
+    TileTypeDefinition { TileType::GroundRock03, 'F', "Ground Rock 03", { 0.82f, 0.82f, 0.84f, 1.0f } },
+    TileTypeDefinition { TileType::GroundRock04, 'S', "Ground Rock 04", { 0.82f, 0.82f, 0.84f, 1.0f } },
+    TileTypeDefinition { TileType::GroundRock05, 'V', "Ground Rock 05", { 0.82f, 0.82f, 0.84f, 1.0f } },
+    TileTypeDefinition { TileType::GroundRock06, 'X', "Ground Rock 06", { 0.82f, 0.82f, 0.84f, 1.0f } },
+    TileTypeDefinition { TileType::GroundRock07, 'Y', "Ground Rock 07", { 0.82f, 0.82f, 0.84f, 1.0f } },
+    TileTypeDefinition { TileType::GroundRock08, 'Z', "Ground Rock 08", { 0.82f, 0.82f, 0.84f, 1.0f } },
+    TileTypeDefinition { TileType::GroundRock09, 'a', "Ground Rock 09", { 0.82f, 0.82f, 0.84f, 1.0f } },
+    TileTypeDefinition { TileType::GroundRock10, 'c', "Ground Rock 10", { 0.82f, 0.82f, 0.84f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();

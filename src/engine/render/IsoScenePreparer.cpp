@@ -1098,6 +1098,12 @@ static void prepareAuxiliaryGeometry(
         }
         if (!tile.model.isCube()) {
             shadowModelIndices.push_back(tileIndex);
+            // Rock assets contain the sides; the painted top belongs to the
+            // tile renderer and must also close the body's shadow volume.
+            if (tile.groundTop || tile.effect == RenderSurfaceEffect::GroundSplat) {
+                const auto top = tileCorners(tile);
+                appendShadowFace({ top[4], top[5], top[6], top[7] });
+            }
             continue;
         }
 
@@ -1321,6 +1327,8 @@ void appendTileFaces(
         const float depth = tile.size.y;
         const float height = std::max(tile.height, 0.0f);
         const bool drawCube = tile.model.isCube() && !tile.pickOnly;
+        const bool drawTop = !tile.pickOnly &&
+            (drawCube || tile.groundTop || tile.effect == RenderSurfaceEffect::GroundSplat);
         // Authored model transforms describe how mesh-local coordinates
         // reach the world, but their unit cube is not necessarily the
         // model's logical editor hit box. Model-backed editor objects such
@@ -1344,10 +1352,10 @@ void appendTileFaces(
             : tile.effect == RenderSurfaceEffect::LinkedObjectAura
             ? PreparedSurfaceMaterial::LinkedObjectAura
             : PreparedSurfaceMaterial::Standard;
-        // Splatting is a top-surface treatment: the sides of a ground
-        // block keep the flat tile material.
+        // Splatting is a top-surface treatment; rocky sides use their own
+        // glTF geometry and materials without affecting the painted surface.
         const PreparedSurfaceMaterial topMaterial =
-            tile.effect == RenderSurfaceEffect::GroundSplat && drawCube
+            tile.effect == RenderSurfaceEffect::GroundSplat && !tile.pickOnly
             ? PreparedSurfaceMaterial::GroundSplat
             : tileMaterial;
         // Visual scaling can move an edge tile's origin into the neighboring
@@ -1368,7 +1376,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
-                .drawable = drawCube && mainSceneVisible,
+                .drawable = drawTop && mainSceneVisible,
                 .gridSize = { width, depth },
                 .material = topMaterial,
                 .shorelineMask = 0,
@@ -1456,7 +1464,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
-                .drawable = drawCube && mainSceneVisible,
+                .drawable = drawTop && mainSceneVisible,
                 .gridSize = { width, depth },
                 .material = topMaterial,
                 .shorelineMask = 0,
@@ -1765,12 +1773,12 @@ void IsoScenePreparer::prepare(
          tileIndex < frameData.tiles.size();
          ++tileIndex) {
         const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
-        const std::array<Vec3, 8> corners = tileCorners(tile);
+        const std::array<Vec3, 8> boundsCorners = tileCorners(tile);
         appendRenderable(culling,
             reconcileRenderable(
                 PreparedRenderable::Kind::Tile,
                 tileIndex,
-                corners,
+                boundsCorners,
                 tile.renderableId == 0 ? tile.cell : GridPosition3 {},
                 tile.model,
                 tile.renderableId,

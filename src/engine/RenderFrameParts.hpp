@@ -121,7 +121,7 @@ void appendLadderSegmentsForCell(
             ladderCell.y + offset.y,
             ladderCell.z,
         };
-        if (tileAt(groundCell) == TileType::Ground) {
+        if (tileTypeIsGround(tileAt(groundCell))) {
             appendLadderSegment(frame, ladderCell, groundCell, manifest, preview);
         }
     }

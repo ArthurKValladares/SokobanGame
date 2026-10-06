@@ -67,6 +67,7 @@ const AssetManifest& testManifest()
         { "name": "Tex", "path": "t.png" },
         { "name": "GroundGrass", "path": "grass.png" },
         { "name": "GroundRock", "path": "rock.png" },
+        { "name": "GroundRockSide", "path": "rock_side.png" },
         { "name": "GroundSplatMap", "path": "splat.png" },
         { "name": "GroundSplatMapOverworld7", "path": "overworld7.png" },
         { "name": "ParticleGlow", "path": "glow.png" }
@@ -4388,6 +4389,7 @@ void testConfigurableGroundSplats()
         .presentation = presentation, .settings = {},
     });
     const auto ground = std::ranges::find(frame.tiles, GridPosition3 { 1, 0, 0 }, &RenderFrameData::Tile::cell);
+    CHECK(frame.groundRockSideTexture == manifest.findTextureIdByName(groundRockSideTextureName));
     CHECK(ground != frame.tiles.end());
     CHECK(ground->groundSplat.has_value());
     CHECK(ground->groundSplat->base == manifest.findTextureIdByName("GroundRock"));
@@ -4395,6 +4397,8 @@ void testConfigurableGroundSplats()
     CHECK(ground->groundSplat->splatMap == manifest.findTextureIdByName("GroundSplatMapOverworld7"));
     const auto requirements = renderAssetRequirementsForLevel(level, manifest);
     CHECK(requirements.contains(manifest.findTextureIdByName("Tex")));
+    CHECK(requirements.contains(frame.groundRockSideTexture));
+    CHECK(renderAssetRequirementsForFrame(frame).contains(frame.groundRockSideTexture));
     CHECK(renderAssetRequirementsForFrame(frame).contains(manifest.findTextureIdByName("GroundSplatMapOverworld7")));
     PreparedRenderScene prepared;
     IsoScenePreparer {}.prepare(frame, { 800, 600 }, prepared);
@@ -4427,6 +4431,7 @@ void testConfigurableGroundSplats()
     CHECK(editor.paintGroundSplat({ 1, 0, 0 }));
     const auto editorFrame = RenderFrameBuilder::buildEditor({ .manifest = manifest, .editor = editor, .settings = {} });
     const auto editorGround = std::ranges::find(editorFrame.tiles, GridPosition3 { 1, 0, 0 }, &RenderFrameData::Tile::cell);
+    CHECK(editorFrame.groundRockSideTexture == frame.groundRockSideTexture);
     CHECK(editorGround != editorFrame.tiles.end());
     CHECK(editorGround->groundSplat == ground->groundSplat);
     editor.showGroundAssignmentColors() = true;

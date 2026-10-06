@@ -2721,7 +2721,8 @@ void testGroupedPalettePreservesDirectionalBrushes()
             // Picker captions strip only the family name, retaining the
             // distinct direction, including rail axes and rotator turns.
             CHECK(tileTypeName(variant).starts_with(group.name));
-            CHECK(tileTypeName(variant).size() > group.name.size() + 1);
+            CHECK(variant == TileType::Ground ||
+                tileTypeName(variant).size() > group.name.size() + 1);
             editor.setSelectedTile(variant);
             CHECK(editor.selectedTile() == variant);
             CHECK(editor.recentTiles().front() == variant);
@@ -2731,7 +2732,8 @@ void testGroupedPalettePreservesDirectionalBrushes()
         }
     }
     for (const auto& definition : tileTypeDefinitions()) {
-        const bool directional = tileTypeIsConveyor(definition.type) ||
+        const bool directional = tileTypeIsGround(definition.type) ||
+            tileTypeIsConveyor(definition.type) ||
             tileTypeIsMirror(definition.type) || tileTypeIsTurret(definition.type) ||
             tileTypeIsPortal(definition.type) || tileTypeIsRail(definition.type) ||
             tileTypeIsRotator(definition.type);
@@ -2744,8 +2746,53 @@ void testGroupedPalettePreservesDirectionalBrushes()
     CHECK(editor.selectedTile() == TileType::RailStopNorthSouth);
 }
 
+void testRockGroundVariantsPreserveBrushesAndPaint()
+{
+    TEST("rockGroundVariantsPreserveBrushesAndPaint");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(10, 2);
+    CHECK(editor.addGroundSplat({ "Grass", "Grass", "Stone", "Mask", { 0, 1, 0 } }));
+    CHECK(editor.addGroundSplat({ "Stone", "Stone", "Grass", "Mask", { 1, 0, 0 } }));
+    const auto* group = editorTilePalette::groupFor(TileType::Ground);
+    CHECK(group != nullptr);
+    if (!group) return;
+    CHECK(group->count == 10);
+    int x = 0;
+    for (TileType tile : group->variants()) {
+        CHECK(tileTypeIsSolidBlock(tile));
+        CHECK(tileTypeSupportsEntity(tile));
+        editor.setSelectedTile(tile);
+        // First paint a different variant so every replacement changes a cell.
+        CHECK(editor.setCell({ x, 1, 0 }, tile == TileType::GroundRock10
+            ? TileType::GroundRock09 : TileType::GroundRock10));
+        CHECK(editor.paintGroundSplat({ x, 1, 0 }));
+        CHECK(editor.paintCell({ x, 1, 0 }));
+        CHECK(editor.pickTile({ x, 1, 0 }) == tile);
+        CHECK(editor.selectedTile() == tile);
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.tryRedoEdit());
+        CHECK(editor.documentLayers()[0][1][static_cast<std::size_t>(x)] == tileTypeToChar(tile));
+        ++x;
+    }
+    CHECK(editor.groundPaint().size() == 10);
+    const auto source = project.source / "level0/screen0.scr";
+    CHECK(editor.saveDocument(source));
+    const auto definition = Level::loadDefinitionFromFile(source);
+    CHECK(definition.groundPaint == editor.groundPaint());
+    const auto level = Level::loadFromDefinition(definition, "all rock variants");
+    x = 0;
+    for (TileType tile : group->variants()) {
+        CHECK(level.tileAt(static_cast<uint32_t>(x++), 1, 0) == tile);
+    }
+    // Ladder validation must treat the new brushes exactly like old ground.
+    const auto ladder = Level::loadFromLayers({ { "cL" }, { "Q " } }, "rock-side ladder");
+    CHECK(ladder.tileAt(0, 0, 0) == TileType::GroundRock10);
+}
+
 int main()
 {
+    testRockGroundVariantsPreserveBrushesAndPaint();
     testGroupedPalettePreservesDirectionalBrushes();
     TEST("lecternTextFollowsEditorTransactions");
     {

@@ -465,6 +465,7 @@ private:
         // Overworld component dimensions are fixed by layout.json, and a
         // border would make a displayed neighbor look editable.
         frame.gridPickBorder = input_.editor.editingOverworld() ? 0U : 1U;
+        frame.groundRockSideTexture = input_.manifest.findTextureIdByName(groundRockSideTextureName);
         // Previews the edited screen's own map, so what the brush paints is
         // what is on screen. A scratch document belongs to no screen and falls
         // back to the shared map.
@@ -1505,9 +1506,11 @@ RenderFrameData::Tile tileVisual(
         .modelRotationOffsetRadians = tileTypeIsMirror(tile)
             ? config::mirrorModelRotationOffsetRadians
             : 0.0f,
-        .effect = tile == TileType::Ground
+        .effect = tileTypeIsGround(tile)
             ? RenderSurfaceEffect::GroundSplat
             : RenderSurfaceEffect::Standard,
+        .groundRockVariant = groundRockVariantFor(tile),
+        .groundTop = tileTypeIsGround(tile),
     };
     // Ladders must retain their one-unit repeat interval and wall offset.
     if (!elevator && tile != TileType::Ladder) {

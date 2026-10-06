@@ -269,7 +269,7 @@ std::optional<GridPosition3> ladderClimbTarget(
     }
 
     if (tileAt(level, ladderCell) != TileType::Ladder ||
-        tileAt(level, groundCell) != TileType::Ground) {
+        !tileTypeIsGround(tileAt(level, groundCell))) {
         return std::nullopt;
     }
 

@@ -2063,8 +2063,66 @@ void testAuthoredModelTransformSupportsPivotRotationAndNonUniformScale()
 
 } // namespace
 
+void testRockGroundModelsRetainPaintableTops()
+{
+    TEST("rockGroundModelsRetainPaintableTops");
+    using namespace sokoban;
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 2;
+    frame.levelHeight = 1;
+    frame.levelDepth = 2;
+    for (int x = 0; x < 2; ++x) {
+        auto tile = cube(x, 0);
+        tile.effect = RenderSurfaceEffect::GroundSplat;
+        tile.model = RenderModel { static_cast<uint32_t>(x + 1) };
+        frame.tiles.push_back(tile);
+    }
+    const Vec2 extent { 800, 600 };
+    const auto scene = prepareScene(frame, extent);
+    CHECK(std::ranges::count_if(scene.isoFaces, [](const auto& face) {
+        return face.material == PreparedSurfaceMaterial::GroundSplat;
+    }) == 2);
+    CHECK(scene.opaqueModelIndices.size() == 2);
+    CHECK(scene.shadowModelIndices.size() == 2);
+    CHECK(scene.shadowFaces.size() == 2);
+    // Only the paintable top is a drawn quad. Side picking retains square
+    // logical bounds, while visible rock sides come from the glTF assets.
+    for (const auto index : scene.opaqueFaceIndices) {
+        CHECK(scene.isoFaces[index].material == PreparedSurfaceMaterial::GroundSplat);
+    }
+    for (int x = 0; x < 2; ++x) {
+        const Vec3 world { static_cast<float>(x) + 0.5f, 0.5f, 1.0f };
+        const Vec3 projected = IsoScenePreparer::projectIsoPoint(scene.isoLayout, extent, world);
+        const Vec2 pixel { (projected.x + 1.0f) * extent.x * 0.5f,
+            (1.0f - projected.y) * extent.y * 0.5f };
+        const auto picked = IsoScenePreparer {}.pickGridCell(scene, pixel, extent, 2, 1);
+        CHECK(picked == GridPosition3({ x, 0, 0 }));
+        const auto painted = IsoScenePreparer {}.pickGroundPoint(scene, pixel, extent);
+        CHECK(painted.has_value());
+        if (painted) {
+            CHECK(near(painted->x, world.x));
+            CHECK(near(painted->y, world.y));
+            CHECK(near(painted->z, world.z));
+        }
+    }
+    for (auto& tile : frame.tiles) {
+        tile.groundTop = true;
+        tile.effect = RenderSurfaceEffect::Standard;
+        tile.color = { 1.0f, 0.0f, 0.0f, 1.0f };
+    }
+    const auto assigned = prepareScene(frame, extent);
+    CHECK(assigned.opaqueFaceIndices.size() == 2);
+    for (const auto index : assigned.opaqueFaceIndices) {
+        const auto& face = assigned.isoFaces[index];
+        CHECK(face.normal.z == 1.0f);
+        CHECK(face.color.x == 1.0f && face.color.y == 0.0f);
+    }
+}
+
 int main()
 {
+    testRockGroundModelsRetainPaintableTops();
     testParallelAuxiliaryPreparationMatchesSerialOutput();
     testPointShadowCastersAreRangeCulledConservatively();
     testPointShadowFaceCacheRequiresExactStableGeometry();

@@ -159,6 +159,7 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     requirements.requireTexture(splat.base);
     requirements.requireTexture(splat.detail);
     requirements.requireTexture(splat.splatMap);
+    requirements.requireTexture(manifest.findTextureIdByName(groundRockSideTextureName));
     for (const Level::GroundSplat& authored : level.groundSplats()) {
         requirements.requireTexture(manifest.findTextureIdByName(authored.base));
         requirements.requireTexture(manifest.findTextureIdByName(authored.detail));
@@ -270,6 +271,7 @@ void renderAssetRequirementsForFrame(
     requirements.requireTexture(frame.groundSplat.base);
     requirements.requireTexture(frame.groundSplat.detail);
     requirements.requireTexture(frame.groundSplat.splatMap);
+    requirements.requireTexture(frame.groundRockSideTexture);
     for (std::size_t index = 0;
          index < frame.groundSplatRegionCount;
          ++index) {

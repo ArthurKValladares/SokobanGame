@@ -1,0 +1,9 @@
+{
+  "mode": "built-in ImageGen",
+  "use_case": "style-transfer",
+  "reference": "assets/custom/textures/ground_rock.png",
+  "path": "assets/custom/textures/ground_rock_side.png",
+  "width": 1254,
+  "height": 1254,
+  "prompt": "Use the attached existing game ground-rock texture as the edit target and palette/style reference. Create a new companion texture for the SIDES of these same rocks: replace all the large slab boundaries and deep cracks with one continuous unbroken sandstone surface. Preserve the existing texture's warm pale sandy cream and ivory palette and simplified hand-painted fantasy game style.\n\nThe result should be a seamless repeating square sandstone albedo texture: warm beige stone, very subtle irregular flaked mineral patches, soft angular brush marks, fine granular mottling and tiny speckled pores. Small chipped mineral flecks and gently uneven weathering give surface texture, but contrast is restrained. Broad quiet areas and overlapping irregular painted patches, no obvious triangulation. Match the average creamy sand color of the input, not cool gray, not orange, not brown. The stone is solid bedrock: there are NO deep cracks, NO outlining between slabs, NO cobblestones, NO paving stones, NO fissures, NO carved patterns, NO large distinct rocks, NO moss or grass.\n\nProduction requirements: one full-bleed square opaque RGB image, 1024 x 1024 pixels, camera perpendicular to the surface, no perspective or dimensional objects, albedo only with even neutral illumination and no baked directional lighting or shadows. Seamlessly tile both horizontally and vertically with matching opposite edges and matching corners. Texture detail is evenly distributed and will wrap continuously across differently shaped rock faces in a 3D game. No border, no margins, no text, no scene, no foreground objects."
+}

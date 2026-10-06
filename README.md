@@ -579,6 +579,7 @@ Common tile symbols:
 | Symbol | Tile | Symbol | Tile |
 | --- | --- | --- | --- |
 | space | Air | `.` | Ground |
+| `A F S V X Y Z a c` | Ground rock versions 02–10 | | |
 | `#` | Wall | `C` | Player |
 | `Q K U H B` | Rogue / Knight / Druid / Witch / Bard starts | | |
 | `R` | Rock | `P` | Pressure plate |
@@ -746,6 +747,18 @@ surface angles to suppress shadow acne without erasing distant shadows.
 Developer builds expose the headless `LevelEditor` through ImGui. The UI invokes
 editor commands but does not own document or filesystem policy.
 
+- **Ground rock versions:** click **Ground** in the Tiles palette to open the
+  same thumbnail submenu used by mirrors and turrets, then choose **Rock 01–10**.
+  Each version uses an editable glTF rock body with broad fractured plates,
+  narrow chipped bevels, and warm sandstone grain. The ten explicit fracture
+  layouts are exported by `tools/make_ground_rock_models.py`; their visible
+  geometry and shadows use the regular model pipeline. Their square tops,
+  bottoms, and corner edges match, so different
+  versions join and stack. Gameplay uses the same square solid ground volume
+  for all versions, and their top surfaces retain the screen's splat painting.
+  Existing `.` tiles use Rock 01; the other nine brushes save as the symbols
+  above. Eyedropper, recent brushes, undo/redo, and moving a painted tile retain
+  its chosen version and material assignment.
 - Link Colors: in the editor, every pressure plate and device has a link
   color, and a device is driven by exactly the pressure plates of its color.
   Rocks, ice blocks, and turrets can also be painted into a color group; they

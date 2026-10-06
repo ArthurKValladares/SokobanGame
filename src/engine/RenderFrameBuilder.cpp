@@ -283,9 +283,11 @@ void appendStaticTiles(
                                 : 0.0f),
                     // Procedural ground tops blend grass/rock through the
                     // splat map; modelled tiles keep their own materials.
-                    .effect = cell.tile == TileType::Ground
+                    .effect = tileTypeIsGround(cell.tile)
                         ? RenderSurfaceEffect::GroundSplat
                         : RenderSurfaceEffect::Standard,
+                    .groundRockVariant = groundRockVariantFor(cell.tile),
+                    .groundTop = tileTypeIsGround(cell.tile),
                 };
                 applyTileScale(renderTile, scaleForTile(cell.tile));
                 if (tileTypeIsPortal(cell.tile)) {
@@ -478,6 +480,7 @@ RenderFrameData initializeGameplayFrame(
         input.cameraExtentTransitionProgress;
     frame.cameraOffset = input.cameraOffset;
     frame.groundSplat = groundSplatTextures(input.manifest, input.levelLocation);
+    frame.groundRockSideTexture = input.manifest.findTextureIdByName(groundRockSideTextureName);
     for (const RenderFrameBuilder::GameplayInput::GroundSplatRegion& source :
          input.groundSplatRegions) {
         if (frame.groundSplatRegionCount >=

@@ -9,10 +9,10 @@
 namespace sokoban::editorTilePalette {
 
 // Only the palette is grouped. Brushes and screen files still use the exact
-// directional tile type chosen in the picker or with the eyedropper.
+// variant tile type chosen in the picker or with the eyedropper.
 struct Group {
     std::string_view name;
-    std::array<TileType, 4> tiles;
+    std::array<TileType, groundRockVariantCount> tiles;
     std::size_t count;
 
     [[nodiscard]] constexpr std::span<const TileType> variants() const
@@ -31,7 +31,12 @@ struct Group {
     }
 };
 
-inline constexpr std::array<Group, 8> groups {{
+inline constexpr std::array<Group, 9> groups {{
+    { "Ground", { TileType::Ground, TileType::GroundRock02,
+                  TileType::GroundRock03, TileType::GroundRock04,
+                  TileType::GroundRock05, TileType::GroundRock06,
+                  TileType::GroundRock07, TileType::GroundRock08,
+                  TileType::GroundRock09, TileType::GroundRock10 }, 10 },
     { "Conveyor", { TileType::ConveyorUp, TileType::ConveyorRight,
                     TileType::ConveyorDown, TileType::ConveyorLeft }, 4 },
     { "Mirror", { TileType::MirrorNorthWest, TileType::MirrorNorthEast,

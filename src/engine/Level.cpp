@@ -984,10 +984,10 @@ bool hasAdjacentGround(const Level& level, GridPosition3 position)
         if (!level.inBounds(neighbor)) {
             continue;
         }
-        if (level.tileAt(
+        if (tileTypeIsGround(level.tileAt(
                 static_cast<uint32_t>(neighbor.x),
                 static_cast<uint32_t>(neighbor.y),
-                static_cast<uint32_t>(neighbor.z)) == TileType::Ground) {
+                static_cast<uint32_t>(neighbor.z)))) {
             return true;
         }
     }
@@ -1739,7 +1739,7 @@ void Level::validateGroundSplats(const Definition& definition, std::string_view 
             static_cast<std::size_t>(cell.z) >= definition.layers.size() ||
             static_cast<std::size_t>(cell.y) >= definition.layers[static_cast<std::size_t>(cell.z)].size() ||
             static_cast<std::size_t>(cell.x) >= definition.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)].size() ||
-            definition.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)] != tileTypeToChar(TileType::Ground))
+            !tileTypeIsGround(charToTileType(definition.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)]).value_or(TileType::Air)))
             fail("Ground paint must reference a ground tile inside the screen");
         for (std::size_t j = 0; j < i; ++j) {
             if (definition.groundPaint[j].cell == cell) fail("Duplicate ground paint cell");

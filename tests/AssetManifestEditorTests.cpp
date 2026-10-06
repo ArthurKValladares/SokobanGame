@@ -85,7 +85,9 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
                 model.attachments[0].rotateHalfTurn;
         }), "skinned attachment loaded");
     CHECK_MESSAGE(editor.animations().size() == 7, "animations loaded");
-    CHECK_MESSAGE(editor.tileEntries().size() == 32, "authored tile entries loaded");
+    CHECK_MESSAGE(editor.tileEntries().size() ==
+        sokoban::AssetManifest::loadFromFile(sourceManifest).tileEntries().size(),
+        "all authored tile entries loaded");
     CHECK_MESSAGE(editor.soundSets().size() >= 3, "sound sets loaded, including authoring drafts");
     CHECK_MESSAGE(std::ranges::count_if(editor.musicTracks(),
         [](const auto& track) { return !track.character; }) == 4, "level music tracks loaded");

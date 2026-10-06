@@ -103,7 +103,7 @@ RenderFrameData buildBakeFrame(
     // Ground is the one tile whose look comes from the splat shader rather
     // than a model, so it replaces the bed cell instead of standing on it -
     // otherwise it would z-fight with the grey underneath.
-    const bool replacesBedCell = tile == TileType::Ground;
+    const bool replacesBedCell = tileTypeIsGround(tile);
     if (replacesBedCell) {
         frame.tiles.erase(
             frame.tiles.begin() +
@@ -168,7 +168,8 @@ RenderFrameData buildBakeFrame(
         frame.tiles.push_back(subject);
     }
 
-    if (tile == TileType::Ground) {
+    if (tileTypeIsGround(tile)) {
+        frame.groundRockSideTexture = manifest.findTextureIdByName(groundRockSideTextureName);
         frame.groundSplat = {
             .base = manifest.findTextureIdByName(groundSplatBaseTextureName),
             .detail = manifest.findTextureIdByName(groundSplatDetailTextureName),

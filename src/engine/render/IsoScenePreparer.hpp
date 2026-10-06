@@ -89,7 +89,7 @@ enum class PreparedSurfaceMaterial : uint8_t {
     GateEnergy,
     LinkedObjectAura,
     // Splat-mapped ground: only the upward-facing top of a ground tile uses
-    // it, so the sides keep the flat tile color.
+    // it; the sides are authored glTF rock bodies with sandstone materials.
     GroundSplat,
 };
 
@@ -222,7 +222,7 @@ public:
     // painter's order this renderer used previously, and it hides a whole
     // class of defect, because with VK_COMPARE_OP_LESS_OR_EQUAL two
     // coincident opaque surfaces are resolved by whichever draws last. Tiles
-    // emit all four sides with no neighbour-based face removal, and faces
+    // emit all four sides, and faces
     // appended through RenderFrameData::isoFaces are not CPU back-face culled
     // at all, so exact ties do occur - most often where faces are near
     // edge-on, which is the far row at the top of the screen.

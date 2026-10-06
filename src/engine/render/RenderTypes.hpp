@@ -103,6 +103,7 @@ inline constexpr RenderTexture noTexture {};
 // that is resolved but never required would silently sample the fallback.
 inline constexpr std::string_view groundSplatBaseTextureName = "GroundGrass";
 inline constexpr std::string_view groundSplatDetailTextureName = "GroundRock";
+inline constexpr std::string_view groundRockSideTextureName = "GroundRockSide";
 inline constexpr std::string_view groundSplatMapTextureName = "GroundSplatMap";
 
 // Each screen may declare its own splat map as "GroundSplatMap<level>_<screen>".
@@ -412,6 +413,10 @@ struct RenderFrameData {
         // Per-tile authored material. Empty preserves the legacy screen fallback.
         std::optional<GroundSplatTextures> groundSplat;
         GridPosition groundSplatOrigin {};
+        uint32_t groundRockVariant = 0;
+        // Modelled rock bodies omit the top: keep its paint/color quad even
+        // when the editor temporarily shows assignment colors instead of splats.
+        bool groundTop = false;
 
         friend constexpr bool operator==(const Tile&, const Tile&) = default;
     };
@@ -578,6 +583,7 @@ struct RenderFrameData {
     FrameArray<DebugItemLabel> debugItemLabels;
 #endif
     GroundSplatTextures groundSplat {};
+    RenderTexture groundRockSideTexture = noTexture;
     std::array<GroundSplatRegion, groundSplatRegionCapacity>
         groundSplatRegions {};
     std::size_t groundSplatRegionCount = 0;

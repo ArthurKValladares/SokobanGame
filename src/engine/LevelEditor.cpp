@@ -1315,7 +1315,7 @@ bool LevelEditor::moveObject(GridPosition3 destination)
     restoreRecordAfterMove(
         document_.lecterns, before.lecterns, move->tile == TileType::Lectern,
         move->source, destination);
-    if (move->tile == TileType::Ground) {
+    if (tileTypeIsGround(move->tile)) {
         const auto paint = std::ranges::find(before.groundPaint, move->source, &Level::GroundPaint::cell);
         if (paint != before.groundPaint.end()) {
             document_.groundPaint.push_back({ .cell = destination, .splat = paint->splat });
@@ -1594,11 +1594,11 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             GridPosition { -1, 0 },
         };
         const bool adjacentGround = std::ranges::any_of(offsets, [&](GridPosition offset) {
-            return documentTileAt({
+            return tileTypeIsGround(documentTileAt({
                 translatedPosition.x + offset.x,
                 translatedPosition.y + offset.y,
                 translatedPosition.z,
-            }) == TileType::Ground;
+            }));
         });
         if (!adjacentGround) {
             document_.status = "Ladders must be next to ground on the same layer.";
@@ -1866,7 +1866,7 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
         });
     }
 
-    if (tile != TileType::Ground) {
+    if (!tileTypeIsGround(tile)) {
         std::erase_if(document_.groundPaint, [&](const Level::GroundPaint& paint) {
             return paint.cell == translatedPosition;
         });
@@ -4359,7 +4359,7 @@ bool LevelEditor::paintGroundSplat(GridPosition3 cell)
     if (!splat || cell.x < 0 || cell.y < 0 || cell.z < 0 ||
         cell.x >= static_cast<int>(documentWidth()) || cell.y >= static_cast<int>(documentHeight()) ||
         cell.z >= static_cast<int>(documentDepth()) ||
-        charToTileType(document_.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)]) != TileType::Ground) return false;
+        !tileTypeIsGround(charToTileType(document_.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)]).value_or(TileType::Air))) return false;
     const auto found = std::ranges::find(document_.groundPaint, cell, &Level::GroundPaint::cell);
     const bool isDefault = splat == &document_.groundSplats.front();
     if ((found == document_.groundPaint.end() && isDefault) ||

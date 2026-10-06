@@ -114,8 +114,9 @@ bool drawPaintButton(
     }
     if (ImGui::IsItemHovered()) {
         if (group != nullptr) {
-            ImGui::SetTooltip("%.*s: choose direction\n%.*s",
+            ImGui::SetTooltip("%.*s: choose %s\n%.*s",
                 static_cast<int>(group->name.size()), group->name.data(),
+                tileTypeIsGround(definition.type) ? "rock version" : "direction",
                 static_cast<int>(definition.name.size()), definition.name.data());
         } else {
             ImGui::SetTooltip("%.*s", static_cast<int>(definition.name.size()), definition.name.data());
@@ -869,8 +870,9 @@ void LevelEditorDebugUi::drawTilePalette(
                 }
             }
             if (group != nullptr && ImGui::BeginPopup("Direction")) {
-                ImGui::Text("%.*s direction",
-                    static_cast<int>(group->name.size()), group->name.data());
+                ImGui::Text("%.*s %s",
+                    static_cast<int>(group->name.size()), group->name.data(),
+                    tileTypeIsGround(definition.type) ? "rock version" : "direction");
                 ImGui::Separator();
                 if (ImGui::BeginTable("Variants", 2,
                         ImGuiTableFlags_SizingFixedFit)) {
@@ -883,10 +885,14 @@ void LevelEditorDebugUi::drawTilePalette(
                             editor.setSelectedTile(variant);
                             ImGui::CloseCurrentPopup();
                         }
-                        const auto direction = variantDefinition.name.substr(
-                            group->name.size() + 1);
-                        ImGui::TextUnformatted(direction.data(),
-                            direction.data() + direction.size());
+                        if (tileTypeIsGround(variant)) {
+                            ImGui::Text("Rock %02u", groundRockVariantFor(variant) + 1U);
+                        } else {
+                            const auto direction = variantDefinition.name.substr(
+                                group->name.size() + 1);
+                            ImGui::TextUnformatted(direction.data(),
+                                direction.data() + direction.size());
+                        }
                     }
                     ImGui::EndTable();
                 }
@@ -901,7 +907,11 @@ void LevelEditorDebugUi::drawTilePalette(
     }
 
     const std::string_view selectedName = tileTypeName(editor.selectedTile());
-    ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
+    if (tileTypeIsGround(editor.selectedTile())) {
+        ImGui::Text("Selected: Ground Rock %02u", groundRockVariantFor(editor.selectedTile()) + 1U);
+    } else {
+        ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
+    }
     ImGui::TextWrapped(
         "Plates (Pressure, Buttons, End, Rotators, Lock Plates, Rail Stops) stack with units and mirrors; "
         "a Minecart can only stack on a Rail Stop. A Minecart Gate stacks on "

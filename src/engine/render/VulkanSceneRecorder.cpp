@@ -3239,8 +3239,6 @@ private:
                 0.0f,
                 0.0f,
                 std::max(lighting.specularStrength, 0.0f),
-                // w was the Blinn-Phong exponent. Roughness replaced it in
-                // F3c and nothing reads this lane on a tile draw now.
                 0.0f,
             },
         };
@@ -3583,7 +3581,10 @@ private:
                 Vec4 {},
                 Vec4 {},
             },
-            .color = tile.color,
+            // Ground's top tint stays on its splat face. The rock body uses
+            // its authored sandstone factors rather than the green top tint.
+            .color = tile.effect == RenderSurfaceEffect::GroundSplat
+                ? Vec4 { 1.0f, 1.0f, 1.0f, tile.color.w } : tile.color,
             // xyz free; see above. w is the ambient term's red channel.
             .normalAndAmbientRed = { 0.0f, 0.0f, 0.0f, lanes.ambientRed },
             .sunDirectionAndAmbientGreen = lanes.sunDirectionAndAmbientGreen,

@@ -140,6 +140,12 @@
       "filter": "linear"
     },
     {
+      "name": "GroundRockSide",
+      "path": "custom/textures/ground_rock_side.png",
+      "tiling": true,
+      "filter": "linear"
+    },
+    {
       "name": "GroundSplatMap",
       "path": "custom/textures/ground_splat.png",
       "filter": "linear",
@@ -661,6 +667,56 @@
     {
       "name": "ElevatorPlatform",
       "path": "Kenney Platformer Kit/Models/GLB format/platform.glb"
+    },
+    {
+      "name": "GroundRock01",
+      "path": "custom/models/ground_rock_01.gltf",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRock02",
+      "path": "custom/models/ground_rock_02.gltf",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRock03",
+      "path": "custom/models/ground_rock_03.gltf",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRock04",
+      "path": "custom/models/ground_rock_04.gltf",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRock05",
+      "path": "custom/models/ground_rock_05.gltf",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRock06",
+      "path": "custom/models/ground_rock_06.gltf",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRock07",
+      "path": "custom/models/ground_rock_07.gltf",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRock08",
+      "path": "custom/models/ground_rock_08.gltf",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRock09",
+      "path": "custom/models/ground_rock_09.gltf",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRock10",
+      "path": "custom/models/ground_rock_10.gltf",
+      "preserveSourceScale": true
     }
   ],
   "animations": [
@@ -845,6 +901,46 @@
     {
       "tile": "Minecart",
       "model": "MinecartHandcar"
+    },
+    {
+      "tile": "Ground",
+      "model": "GroundRock01"
+    },
+    {
+      "tile": "Ground Rock 02",
+      "model": "GroundRock02"
+    },
+    {
+      "tile": "Ground Rock 03",
+      "model": "GroundRock03"
+    },
+    {
+      "tile": "Ground Rock 04",
+      "model": "GroundRock04"
+    },
+    {
+      "tile": "Ground Rock 05",
+      "model": "GroundRock05"
+    },
+    {
+      "tile": "Ground Rock 06",
+      "model": "GroundRock06"
+    },
+    {
+      "tile": "Ground Rock 07",
+      "model": "GroundRock07"
+    },
+    {
+      "tile": "Ground Rock 08",
+      "model": "GroundRock08"
+    },
+    {
+      "tile": "Ground Rock 09",
+      "model": "GroundRock09"
+    },
+    {
+      "tile": "Ground Rock 10",
+      "model": "GroundRock10"
     }
   ],
   "sounds": [
@@ -883,57 +979,79 @@
     },
     {
       "name": "minecart-travel",
-      "files": ["custom/audio/minecartTravelLoop.wav"],
+      "files": [
+        "custom/audio/minecartTravelLoop.wav"
+      ],
       "volume": 0.55
     },
     {
       "name": "portal-travel",
-      "files": ["custom/audio/portalTravel.wav"],
+      "files": [
+        "custom/audio/portalTravel.wav"
+      ],
       "volume": 0.65
     },
     {
       "name": "minecart-gate-open",
-      "files": ["custom/audio/minecartGateOpen.wav"],
+      "files": [
+        "custom/audio/minecartGateOpen.wav"
+      ],
       "volume": 0.55
     },
     {
       "name": "rotator-turn",
-      "files": ["custom/audio/rotatorTurn.wav"],
+      "files": [
+        "custom/audio/rotatorTurn.wav"
+      ],
       "volume": 0.55
     },
     {
       "name": "pressure-plate-press",
-      "files": ["custom/audio/pressurePlatePress.wav"],
+      "files": [
+        "custom/audio/pressurePlatePress.wav"
+      ],
       "volume": 0.65
     },
     {
       "name": "pressure-plate-release",
-      "files": ["custom/audio/pressurePlateRelease.wav"],
+      "files": [
+        "custom/audio/pressurePlateRelease.wav"
+      ],
       "volume": 0.55
     },
     {
       "name": "button-press",
-      "files": ["custom/audio/buttonPress.wav"],
+      "files": [
+        "custom/audio/buttonPress.wav"
+      ],
       "volume": 0.55
     },
     {
       "name": "elevator-moving",
-      "files": ["custom/audio/elevatorMovingLoop.wav"],
+      "files": [
+        "custom/audio/elevatorMovingLoop.wav"
+      ],
       "volume": 0.5
     },
     {
       "name": "gate-open",
-      "files": ["custom/audio/gateOpen.wav"],
+      "files": [
+        "custom/audio/gateOpen.wav"
+      ],
       "volume": 0.55
     },
     {
       "name": "gate-close",
-      "files": ["custom/audio/gateClose.wav"],
+      "files": [
+        "custom/audio/gateClose.wav"
+      ],
       "volume": 0.55
     },
     {
       "name": "portal-ambience",
-      "files": ["custom/audio/portalAtmosphereLoop.wav"],
+      "files": [
+        "custom/audio/portalAtmosphereLoop.wav"
+      ],
       "volume": 0.4,
       "atmosphere": {
         "source": "portal",
@@ -944,7 +1062,9 @@
     },
     {
       "name": "conveyor-ambience",
-      "files": ["custom/audio/conveyorAtmosphereLoop.wav"],
+      "files": [
+        "custom/audio/conveyorAtmosphereLoop.wav"
+      ],
       "volume": 0.4,
       "atmosphere": {
         "source": "conveyor",

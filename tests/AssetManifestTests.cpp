@@ -8,6 +8,8 @@
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
+#include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -837,6 +839,39 @@ int main()
     testRuntimeDecorationModelRegistration();
     testDecorationMeshCanPreserveAuthoredScale();
     if (const auto root = configuredTestAssetRoot()) {
+        const auto rockManifest = sokoban::AssetManifest::loadFromFile(*root / "manifest.json");
+        for (const auto& definition : sokoban::tileTypeDefinitions()) {
+            if (!sokoban::tileTypeIsGround(definition.type)) continue;
+            const auto model = rockManifest.modelForTile(definition.type);
+            CHECK(!model.isCube());
+            if (model.isCube()) continue;
+            const auto& asset = rockManifest.models()[model.index()];
+            CHECK(asset.preserveSourceScale);
+            const auto rock = sokoban::loadGltfMesh(*root / asset.path,
+                { .preserveSourceScale = true });
+            CHECK(!rock.vertices.empty());
+            CHECK(rock.indices.size() > 600);
+            CHECK(rock.materials.size() >= 25);
+            bool hasSteepChip = false;
+            for (const auto& vertex : rock.vertices) {
+                // Shallow ledges stay close to the square logical footprint.
+                // The unchanged top/bottom perimeters close tile joins.
+                CHECK(vertex.position.x >= -0.0301f && vertex.position.x <= 1.0301f);
+                CHECK(vertex.position.y >= -0.0301f && vertex.position.y <= 1.0301f);
+                CHECK(vertex.position.z >= -0.00001f && vertex.position.z <= 1.00001f);
+                hasSteepChip |= vertex.normal.z > 0.45f && vertex.normal.z < 0.99f;
+            }
+            CHECK(hasSteepChip);
+            for (const float x : { 0.0f, 1.0f }) {
+                for (const float y : { 0.0f, 1.0f }) {
+                    CHECK(std::ranges::any_of(rock.vertices, [x, y](const auto& vertex) {
+                        return std::abs(vertex.position.x - x) < 0.00001f &&
+                            std::abs(vertex.position.y - y) < 0.00001f &&
+                            std::abs(vertex.position.z - 1.0f) < 0.00001f;
+                    }));
+                }
+            }
+        }
         const auto lectern = sokoban::loadGltfMesh(*root / "custom/models/lectern.glb",
             { .preserveSourceScale = true });
         CHECK(!lectern.vertices.empty());

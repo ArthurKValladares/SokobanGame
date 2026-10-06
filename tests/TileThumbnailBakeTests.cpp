@@ -30,6 +30,7 @@ const AssetManifest& testManifest()
         { "name": "ParticleGlow", "path": "glow.png" },
         { "name": "GroundGrass", "path": "grass.png" },
         { "name": "GroundRock", "path": "rock.png" },
+        { "name": "GroundRockSide", "path": "rock_side.png" },
         { "name": "GroundSplatMap", "path": "splat.png" }
       ],
       "models": [
@@ -153,7 +154,7 @@ void testBakeFrameStandsTheTileOnAGroundBed()
         // cell rather than stacking on it, so it is one fewer.
         const std::size_t bedCells =
             tileThumbnails::bedSize * tileThumbnails::bedSize;
-        const std::size_t expected = definition.type == TileType::Ground
+        const std::size_t expected = tileTypeIsGround(definition.type)
             ? bedCells
             : bedCells + (definition.type == TileType::Gate
                           ? config::gateEnergyTileCount
@@ -274,6 +275,7 @@ void testGroundIsBakedThroughTheSplatPath()
             TileType::Ground, testManifest(), testSettings());
     CHECK(ground.tiles.back().effect == RenderSurfaceEffect::GroundSplat);
     CHECK(ground.groundSplat.valid());
+    CHECK(ground.groundRockSideTexture == testManifest().textureIdByName(groundRockSideTextureName));
 
     const RenderFrameData wall =
         tileThumbnails::buildBakeFrame(
@@ -340,7 +342,7 @@ void testSubjectMatchesTheTileTheEditorDraws()
             {
                 static_cast<int>(tileThumbnails::bedCentre),
                 static_cast<int>(tileThumbnails::bedCentre),
-                definition.type == TileType::Ground ? 0 : 1,
+                tileTypeIsGround(definition.type) ? 0 : 1,
             },
             testManifest(),
             testSettings());
