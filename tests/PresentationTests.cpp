@@ -4371,7 +4371,13 @@ void testMinecartGateOpensForPassageAndClosesAfterUndo()
 void testConfigurableGroundSplats()
 {
     TEST("configurableGroundSplats");
-    const auto& manifest = testManifest();
+    auto manifest = testManifest();
+    const RenderTexture rockNormal = manifest.addTexture({
+        .name = "GroundRockNormal", .path = "rock_normal.png", .tiling = true,
+        .filter = TextureFilter::Linear, .colorSpace = TextureColorSpace::Linear });
+    const RenderTexture customOrm = manifest.addTexture({
+        .name = "TexOrm", .path = "custom_orm.png", .tiling = true,
+        .filter = TextureFilter::Linear, .colorSpace = TextureColorSpace::Linear });
     Level::Definition definition {
         .layers = { { ".." }, { "C " } },
         .groundSplats = {
@@ -4395,11 +4401,18 @@ void testConfigurableGroundSplats()
     CHECK(ground->groundSplat->base == manifest.findTextureIdByName("GroundRock"));
     CHECK(ground->groundSplat->detail == manifest.findTextureIdByName("Tex"));
     CHECK(ground->groundSplat->splatMap == manifest.findTextureIdByName("GroundSplatMapOverworld7"));
+    CHECK(ground->groundSplat->baseNormal == rockNormal);
+    CHECK(ground->groundSplat->detailOrm == customOrm);
+    CHECK(ground->groundSplat->detailNormal.isNone());
     const auto requirements = renderAssetRequirementsForLevel(level, manifest);
     CHECK(requirements.contains(manifest.findTextureIdByName("Tex")));
+    CHECK(requirements.contains(rockNormal));
+    CHECK(requirements.contains(customOrm));
     CHECK(requirements.contains(frame.groundRockSideTexture));
     CHECK(renderAssetRequirementsForFrame(frame).contains(frame.groundRockSideTexture));
     CHECK(renderAssetRequirementsForFrame(frame).contains(manifest.findTextureIdByName("GroundSplatMapOverworld7")));
+    CHECK(renderAssetRequirementsForFrame(frame).contains(rockNormal));
+    CHECK(renderAssetRequirementsForFrame(frame).contains(customOrm));
     PreparedRenderScene prepared;
     IsoScenePreparer {}.prepare(frame, { 800, 600 }, prepared);
     const auto top = std::ranges::find_if(prepared.isoFaces, [](const PreparedIsoFace& face) {

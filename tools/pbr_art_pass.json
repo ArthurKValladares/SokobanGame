@@ -1,0 +1,972 @@
+{
+  "format": 1,
+  "models": [
+    {
+      "name": "BricksA",
+      "source": "KayKit Block Bits 1.0/Assets/gltf/bricks_A.gltf",
+      "skip": null,
+      "surface_rule": "stone",
+      "engine_tint": true
+    },
+    {
+      "name": "Stone",
+      "source": "KayKit Block Bits 1.0/Assets/gltf/stone.gltf",
+      "skip": null,
+      "surface_rule": "stone",
+      "engine_tint": true
+    },
+    {
+      "name": "Glass",
+      "source": "KayKit Block Bits 1.0/Assets/gltf/glass.gltf",
+      "skip": null,
+      "surface_rule": "glass"
+    },
+    {
+      "name": "Conveyor",
+      "source": "KayKit Platformer Pack 1.0/Assets/gltf/blue/conveyor_4x4x1_blue.gltf",
+      "skip": null,
+      "surface_rule": "conveyor"
+    },
+    {
+      "name": "ScreenSelectorAPlayable",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_blue.gltf",
+      "skip": null,
+      "surface_rule": "flag"
+    },
+    {
+      "name": "ScreenSelectorASolved",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_green.gltf",
+      "skip": null,
+      "surface_rule": "flag"
+    },
+    {
+      "name": "ScreenSelectorAUnavailable",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_red.gltf",
+      "skip": null,
+      "surface_rule": "flag"
+    },
+    {
+      "name": "ScreenSelectorBPlayable",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_blue.gltf",
+      "skip": null,
+      "surface_rule": "flag"
+    },
+    {
+      "name": "ScreenSelectorBSolved",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_green.gltf",
+      "skip": null,
+      "surface_rule": "flag"
+    },
+    {
+      "name": "ScreenSelectorBUnavailable",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_red.gltf",
+      "skip": null,
+      "surface_rule": "flag"
+    },
+    {
+      "name": "Turret",
+      "source": "KayKit Adventurers 2.0/Assets/gltf/turret_base.gltf",
+      "skip": null,
+      "surface_rule": "metal"
+    },
+    {
+      "name": "Rogue",
+      "source": "KayKit Adventurers 2.0/Characters/gltf/Rogue.glb",
+      "skip": null,
+      "surface_rule": "hero"
+    },
+    {
+      "name": "Knight",
+      "source": "KayKit Adventurers 2.0/Characters/gltf/Knight.glb",
+      "skip": null,
+      "surface_rule": "hero"
+    },
+    {
+      "name": "Druid",
+      "source": "KayKit Adventurers 2.0/Characters/gltf/Druid.glb",
+      "skip": null,
+      "surface_rule": "hero"
+    },
+    {
+      "name": "Witch",
+      "source": "KayKit Witch/characters/Witch.glb",
+      "skip": null,
+      "surface_rule": "hero"
+    },
+    {
+      "name": "Bard",
+      "source": "KayKit Magical Girl/characters/MagicalGirl.glb",
+      "skip": null,
+      "surface_rule": "hero"
+    },
+    {
+      "name": "Barbarian",
+      "source": "KayKit Adventurers 2.0/Characters/gltf/Barbarian.glb",
+      "skip": null,
+      "surface_rule": "hero"
+    },
+    {
+      "name": "PictureFrameLargeA",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/pictureframe_large_A.gltf",
+      "skip": null,
+      "surface_rule": "furniture"
+    },
+    {
+      "name": "Decoration_cactus_small_A",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/cactus_small_A.gltf",
+      "skip": null,
+      "surface_rule": "plant"
+    },
+    {
+      "name": "Decoration_swiper_yellow",
+      "source": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/swiper_yellow.gltf",
+      "skip": null,
+      "surface_rule": "paint"
+    },
+    {
+      "name": "Decoration_desk",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/desk.gltf",
+      "skip": null,
+      "surface_rule": "furniture"
+    },
+    {
+      "name": "Decoration_gameconsole_handheld",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/gameconsole_handheld.gltf",
+      "skip": null,
+      "surface_rule": "handheld"
+    },
+    {
+      "name": "Decoration_chair_C",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/chair_C.gltf",
+      "skip": null,
+      "surface_rule": "furniture"
+    },
+    {
+      "name": "Decoration_chair_B",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/chair_B.gltf",
+      "skip": null,
+      "surface_rule": "furniture"
+    },
+    {
+      "name": "Decoration_mousepad_A",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/mousepad_A.gltf",
+      "skip": null,
+      "surface_rule": "rubber"
+    },
+    {
+      "name": "Decoration_monitor",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/monitor.gltf",
+      "skip": null,
+      "surface_rule": "monitor"
+    },
+    {
+      "name": "Decoration_barrier_3x1x1_blue",
+      "source": "KayKit Platformer Pack 1.0/Assets/gltf/blue/barrier_3x1x1_blue.gltf",
+      "skip": null,
+      "surface_rule": "paint"
+    },
+    {
+      "name": "Decoration_rug_rectangle_stripes_B",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/rug_rectangle_stripes_B.gltf",
+      "skip": null,
+      "surface_rule": "cloth"
+    },
+    {
+      "name": "Decoration_arrow_crossbow",
+      "source": "KayKit Adventurers 2.0/Assets/gltf/arrow_crossbow.gltf",
+      "skip": null,
+      "surface_rule": "arrow"
+    },
+    {
+      "name": "Decoration_metal",
+      "source": "KayKit Block Bits 1.0/Assets/gltf/metal.gltf",
+      "skip": null,
+      "surface_rule": "metal"
+    },
+    {
+      "name": "Decoration_striped_block_blue",
+      "source": "KayKit Block Bits 1.0/Assets/gltf/striped_block_blue.gltf",
+      "skip": null,
+      "surface_rule": "paint"
+    },
+    {
+      "name": "Decoration_chair_A",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/chair_A.gltf",
+      "skip": null,
+      "surface_rule": "furniture"
+    },
+    {
+      "name": "Decoration_chair_desk_A",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/chair_desk_A.gltf",
+      "skip": null,
+      "surface_rule": "office-chair"
+    },
+    {
+      "name": "Decoration_keyboard",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/keyboard.gltf",
+      "skip": null,
+      "surface_rule": "keyboard"
+    },
+    {
+      "name": "Decoration_Rig_Large_MovementBasic",
+      "source": "KayKit Adventurers 2.0/Animations/gltf/Rig_Large/Rig_Large_MovementBasic.glb",
+      "skip": "Reference animation rig: retain neutral preview material.",
+      "surface_rule": "paint"
+    },
+    {
+      "name": "Decoration_Rig_Large_General",
+      "source": "KayKit Adventurers 2.0/Animations/gltf/Rig_Large/Rig_Large_General.glb",
+      "skip": "Reference animation rig: retain neutral preview material.",
+      "surface_rule": "paint"
+    },
+    {
+      "name": "Decoration_Rig_Medium_General",
+      "source": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
+      "skip": "Reference animation rig: retain neutral preview material.",
+      "surface_rule": "paint"
+    },
+    {
+      "name": "Decoration_star_yellow",
+      "source": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/star_yellow.gltf",
+      "skip": null,
+      "surface_rule": "paint"
+    },
+    {
+      "name": "Decoration_spring_pad_yellow",
+      "source": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/spring_pad_yellow.gltf",
+      "skip": null,
+      "surface_rule": "spring"
+    },
+    {
+      "name": "Decoration_coin_2_gold",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/coin_2_gold.gltf",
+      "skip": null,
+      "surface_rule": "brass"
+    },
+    {
+      "name": "Decoration_coin_2_copper",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/coin_2_copper.gltf",
+      "skip": null,
+      "surface_rule": "brass"
+    },
+    {
+      "name": "RotatorClockwise",
+      "source": "custom/models/rotator_clockwise.glb",
+      "skip": null,
+      "surface_rule": "mechanism"
+    },
+    {
+      "name": "RotatorCounterClockwise",
+      "source": "custom/models/rotator_counter_clockwise.glb",
+      "skip": null,
+      "surface_rule": "mechanism"
+    },
+    {
+      "name": "LockPlate",
+      "source": "custom/models/lock_plate.glb",
+      "skip": null,
+      "surface_rule": "mechanism"
+    },
+    {
+      "name": "Lectern",
+      "source": "custom/models/lectern.glb",
+      "skip": null,
+      "surface_rule": "named-materials"
+    },
+    {
+      "name": "Ladder",
+      "source": "custom/models/ladder.glb",
+      "skip": null,
+      "surface_rule": "named-materials"
+    },
+    {
+      "name": "RotatorGear",
+      "source": "custom/models/rotator_gear.glb",
+      "skip": null,
+      "surface_rule": "mechanism"
+    },
+    {
+      "name": "RotatorIconClockwise",
+      "source": "custom/models/rotator_icon_clockwise.glb",
+      "skip": null,
+      "surface_rule": "mechanism"
+    },
+    {
+      "name": "RotatorIconCounterClockwise",
+      "source": "custom/models/rotator_icon_counter_clockwise.glb",
+      "skip": null,
+      "surface_rule": "mechanism"
+    },
+    {
+      "name": "MinecartRailStraight",
+      "source": "custom/models/minecart_rail_straight.glb",
+      "skip": null,
+      "surface_rule": "named-materials"
+    },
+    {
+      "name": "MinecartRailStop",
+      "source": "custom/models/minecart_rail_stop.glb",
+      "skip": null,
+      "surface_rule": "named-materials"
+    },
+    {
+      "name": "MinecartRailCorner",
+      "source": "custom/models/minecart_rail_corner.glb",
+      "skip": null,
+      "surface_rule": "named-materials"
+    },
+    {
+      "name": "MinecartHandcar",
+      "source": "custom/models/minecart_handcar.glb",
+      "skip": null,
+      "surface_rule": "named-materials"
+    },
+    {
+      "name": "ElevatorPlatform",
+      "source": "Kenney Platformer Kit/Models/GLB format/platform.glb",
+      "skip": null,
+      "surface_rule": "wood"
+    },
+    {
+      "name": "GroundRock01",
+      "source": "custom/models/ground_rock_01.gltf",
+      "skip": null,
+      "surface_rule": "stone",
+      "terrain_material": "ground_rock_side"
+    },
+    {
+      "name": "GroundRock02",
+      "source": "custom/models/ground_rock_02.gltf",
+      "skip": null,
+      "surface_rule": "stone",
+      "terrain_material": "ground_rock_side"
+    },
+    {
+      "name": "GroundRock03",
+      "source": "custom/models/ground_rock_03.gltf",
+      "skip": null,
+      "surface_rule": "stone",
+      "terrain_material": "ground_rock_side"
+    },
+    {
+      "name": "GroundRock04",
+      "source": "custom/models/ground_rock_04.gltf",
+      "skip": null,
+      "surface_rule": "stone",
+      "terrain_material": "ground_rock_side"
+    },
+    {
+      "name": "GroundRock05",
+      "source": "custom/models/ground_rock_05.gltf",
+      "skip": null,
+      "surface_rule": "stone",
+      "terrain_material": "ground_rock_side"
+    },
+    {
+      "name": "GroundRock06",
+      "source": "custom/models/ground_rock_06.gltf",
+      "skip": null,
+      "surface_rule": "stone",
+      "terrain_material": "ground_rock_side"
+    },
+    {
+      "name": "GroundRock07",
+      "source": "custom/models/ground_rock_07.gltf",
+      "skip": null,
+      "surface_rule": "stone",
+      "terrain_material": "ground_rock_side"
+    },
+    {
+      "name": "GroundRock08",
+      "source": "custom/models/ground_rock_08.gltf",
+      "skip": null,
+      "surface_rule": "stone",
+      "terrain_material": "ground_rock_side"
+    },
+    {
+      "name": "GroundRock09",
+      "source": "custom/models/ground_rock_09.gltf",
+      "skip": null,
+      "surface_rule": "stone",
+      "terrain_material": "ground_rock_side"
+    },
+    {
+      "name": "GroundRock10",
+      "source": "custom/models/ground_rock_10.gltf",
+      "skip": null,
+      "surface_rule": "stone",
+      "terrain_material": "ground_rock_side"
+    }
+  ],
+  "attachments": [
+    {
+      "source": "KayKit Adventurers 2.0/Assets/gltf/axe_1handed.gltf",
+      "name": "BarbarianAxe",
+      "surface_rule": "axe"
+    }
+  ],
+  "profiles": [
+    {
+      "name": "wood",
+      "roughness": 0.78,
+      "metallic": 0,
+      "normal_gain": 1.8,
+      "cavity": 0.025
+    },
+    {
+      "name": "endgrain",
+      "roughness": 0.82,
+      "metallic": 0,
+      "normal_gain": 1.5,
+      "cavity": 0.025
+    },
+    {
+      "name": "stone",
+      "roughness": 0.9,
+      "metallic": 0,
+      "normal_gain": 2.2,
+      "cavity": 0.04
+    },
+    {
+      "name": "cloth",
+      "roughness": 0.9,
+      "metallic": 0,
+      "normal_gain": 1.25,
+      "cavity": 0
+    },
+    {
+      "name": "leather",
+      "roughness": 0.73,
+      "metallic": 0,
+      "normal_gain": 1.25,
+      "cavity": 0.012
+    },
+    {
+      "name": "steel",
+      "roughness": 0.4,
+      "metallic": 0.98,
+      "normal_gain": 0.45,
+      "cavity": 0
+    },
+    {
+      "name": "brass",
+      "roughness": 0.28,
+      "metallic": 0.98,
+      "normal_gain": 0.35,
+      "cavity": 0
+    },
+    {
+      "name": "paint",
+      "roughness": 0.46,
+      "metallic": 0,
+      "normal_gain": 0.4,
+      "cavity": 0
+    },
+    {
+      "name": "rubber",
+      "roughness": 0.93,
+      "metallic": 0,
+      "normal_gain": 0.8,
+      "cavity": 0
+    },
+    {
+      "name": "skin",
+      "roughness": 0.64,
+      "metallic": 0,
+      "normal_gain": 0.12,
+      "cavity": 0
+    },
+    {
+      "name": "hair",
+      "roughness": 0.8,
+      "metallic": 0,
+      "normal_gain": 0.65,
+      "cavity": 0
+    },
+    {
+      "name": "paper",
+      "roughness": 0.92,
+      "metallic": 0,
+      "normal_gain": 0.4,
+      "cavity": 0
+    },
+    {
+      "name": "ceramic",
+      "roughness": 0.3,
+      "metallic": 0,
+      "normal_gain": 0.12,
+      "cavity": 0
+    },
+    {
+      "name": "glass",
+      "roughness": 0.12,
+      "metallic": 0,
+      "normal_gain": 0,
+      "cavity": 0
+    },
+    {
+      "name": "foliage",
+      "roughness": 0.83,
+      "metallic": 0,
+      "normal_gain": 0.7,
+      "cavity": 0
+    },
+    {
+      "name": "display",
+      "roughness": 0.22,
+      "metallic": 0,
+      "normal_gain": 0,
+      "cavity": 0
+    }
+  ],
+  "material_overrides": {
+    "Oak": "wood",
+    "Oak bevel": "wood",
+    "Rung wood": "wood",
+    "Carved grain": "wood",
+    "Endgrain": "endgrain",
+    "Brass": "brass",
+    "Cover": "leather",
+    "Paper": "paper",
+    "Ink": "paper",
+    "Ribbon": "cloth",
+    "Forged iron": "steel",
+    "Iron pins": "steel",
+    "Warm Wood": "wood",
+    "Gunmetal": "steel",
+    "Dark Iron": "steel",
+    "Stop Red": "paint",
+    "Plate": "steel",
+    "Icon": "paint",
+    "glass": "glass",
+    "threads": "rubber"
+  },
+  "hero_palette_regions": {
+    "Rogue": [
+      [
+        [
+          0,
+          0,
+          0.125,
+          0.25
+        ],
+        "skin"
+      ],
+      [
+        [
+          0.125,
+          0,
+          0.25,
+          0.25
+        ],
+        "hair"
+      ],
+      [
+        [
+          0.25,
+          0,
+          0.625,
+          0.5
+        ],
+        "steel"
+      ],
+      [
+        [
+          0.625,
+          0,
+          0.875,
+          0.75
+        ],
+        "leather"
+      ],
+      [
+        [
+          0.875,
+          0,
+          1,
+          0.75
+        ],
+        "hair"
+      ],
+      [
+        [
+          0.5,
+          0.75,
+          0.875,
+          1
+        ],
+        "skin"
+      ]
+    ],
+    "Knight": [
+      [
+        [
+          0,
+          0,
+          0.125,
+          0.25
+        ],
+        "skin"
+      ],
+      [
+        [
+          0.125,
+          0,
+          0.25,
+          0.25
+        ],
+        "hair"
+      ],
+      [
+        [
+          0.25,
+          0,
+          0.625,
+          0.25
+        ],
+        "steel"
+      ],
+      [
+        [
+          0.125,
+          0.25,
+          0.5,
+          0.5
+        ],
+        "steel"
+      ],
+      [
+        [
+          0.5,
+          0.25,
+          0.625,
+          0.5
+        ],
+        "brass"
+      ],
+      [
+        [
+          0.625,
+          0,
+          0.875,
+          0.25
+        ],
+        "leather"
+      ],
+      [
+        [
+          0.875,
+          0,
+          1,
+          0.5
+        ],
+        "hair"
+      ],
+      [
+        [
+          0,
+          0.5,
+          0.125,
+          0.75
+        ],
+        "steel"
+      ],
+      [
+        [
+          0.125,
+          0.5,
+          0.25,
+          0.75
+        ],
+        "hair"
+      ],
+      [
+        [
+          0.5,
+          0.5,
+          0.75,
+          0.75
+        ],
+        "hair"
+      ],
+      [
+        [
+          0.75,
+          0.5,
+          1,
+          0.75
+        ],
+        "steel"
+      ]
+    ],
+    "Druid": [
+      [
+        [
+          0,
+          0,
+          0.125,
+          0.25
+        ],
+        "skin"
+      ],
+      [
+        [
+          0.125,
+          0,
+          0.25,
+          0.25
+        ],
+        "hair"
+      ],
+      [
+        [
+          0.25,
+          0,
+          0.625,
+          0.5
+        ],
+        "steel"
+      ],
+      [
+        [
+          0.625,
+          0,
+          0.875,
+          0.75
+        ],
+        "leather"
+      ],
+      [
+        [
+          0.875,
+          0,
+          1,
+          0.75
+        ],
+        "hair"
+      ],
+      [
+        [
+          0.75,
+          0.75,
+          0.875,
+          1
+        ],
+        "skin"
+      ]
+    ],
+    "Witch": [
+      [
+        [
+          0,
+          0,
+          0.125,
+          0.25
+        ],
+        "skin"
+      ],
+      [
+        [
+          0.125,
+          0,
+          0.25,
+          0.25
+        ],
+        "hair"
+      ],
+      [
+        [
+          0.25,
+          0,
+          0.625,
+          0.5
+        ],
+        "steel"
+      ],
+      [
+        [
+          0.625,
+          0,
+          0.875,
+          0.5
+        ],
+        "leather"
+      ],
+      [
+        [
+          0.875,
+          0,
+          1,
+          0.5
+        ],
+        "hair"
+      ],
+      [
+        [
+          0.125,
+          0.25,
+          0.25,
+          0.75
+        ],
+        "hair"
+      ],
+      [
+        [
+          0.625,
+          0.5,
+          0.75,
+          0.75
+        ],
+        "glass"
+      ]
+    ],
+    "Bard": [
+      [
+        [
+          0,
+          0,
+          0.125,
+          0.25
+        ],
+        "skin"
+      ],
+      [
+        [
+          0.125,
+          0,
+          0.25,
+          0.25
+        ],
+        "hair"
+      ],
+      [
+        [
+          0.25,
+          0,
+          0.625,
+          0.25
+        ],
+        "steel"
+      ],
+      [
+        [
+          0.625,
+          0,
+          0.875,
+          0.25
+        ],
+        "leather"
+      ],
+      [
+        [
+          0.875,
+          0,
+          1,
+          0.25
+        ],
+        "hair"
+      ],
+      [
+        [
+          0.375,
+          0.25,
+          0.5,
+          0.5
+        ],
+        "brass"
+      ]
+    ],
+    "Barbarian": [
+      [
+        [
+          0,
+          0,
+          0.125,
+          0.25
+        ],
+        "skin"
+      ],
+      [
+        [
+          0.125,
+          0,
+          0.25,
+          0.25
+        ],
+        "hair"
+      ],
+      [
+        [
+          0.25,
+          0,
+          0.625,
+          0.25
+        ],
+        "steel"
+      ],
+      [
+        [
+          0.625,
+          0,
+          0.875,
+          0.5
+        ],
+        "leather"
+      ],
+      [
+        [
+          0.875,
+          0,
+          1,
+          0.5
+        ],
+        "hair"
+      ],
+      [
+        [
+          0,
+          0.25,
+          0.5,
+          0.5
+        ],
+        "steel"
+      ],
+      [
+        [
+          0,
+          0.5,
+          0.125,
+          0.75
+        ],
+        "steel"
+      ],
+      [
+        [
+          0.125,
+          0.5,
+          0.25,
+          0.75
+        ],
+        "brass"
+      ],
+      [
+        [
+          0.5,
+          0.5,
+          0.75,
+          0.75
+        ],
+        "hair"
+      ],
+      [
+        [
+          0,
+          0.75,
+          0.125,
+          1
+        ],
+        "steel"
+      ]
+    ]
+  }
+}

@@ -150,13 +150,52 @@ struct GroundSplatTextures {
     RenderTexture base = noTexture;
     RenderTexture detail = noTexture;
     RenderTexture splatMap = noTexture;
+    RenderTexture baseNormal = noTexture;
+    RenderTexture detailNormal = noTexture;
+    RenderTexture baseOrm = noTexture;
+    RenderTexture detailOrm = noTexture;
     friend constexpr bool operator==(GroundSplatTextures, GroundSplatTextures) = default;
+
+    [[nodiscard]] constexpr std::array<RenderTexture, 7> sampledTextures() const
+    {
+        return { base, detail, splatMap, baseNormal, detailNormal, baseOrm, detailOrm };
+    }
 
     [[nodiscard]] constexpr bool valid() const
     {
         return !base.isNone() && !detail.isNone() && !splatMap.isNone();
     }
 };
+
+// Optional terrain data maps follow their albedo's manifest name: FooNormal
+// and FooOrm. Resolve in one place for default layers and editor assignments.
+// The stack buffer keeps this on the allocation-free frame-building path.
+template <typename FindTextureByName>
+[[nodiscard]] GroundSplatTextures groundSplatTexturesForMaterials(
+    FindTextureByName findTextureByName,
+    std::string_view baseName,
+    std::string_view detailName,
+    RenderTexture splatMap)
+{
+    const auto dataMap = [&](std::string_view name, const char* suffix) {
+        char mapName[256] {};
+        if (name.size() > sizeof(mapName) - 8) return noTexture;
+        const int length = std::snprintf(mapName, sizeof(mapName), "%.*s%s",
+            static_cast<int>(name.size()), name.data(), suffix);
+        return length > 0 && static_cast<std::size_t>(length) < sizeof(mapName)
+            ? findTextureByName(std::string_view(mapName, static_cast<std::size_t>(length)))
+            : noTexture;
+    };
+    return {
+        .base = findTextureByName(baseName),
+        .detail = findTextureByName(detailName),
+        .splatMap = splatMap,
+        .baseNormal = dataMap(baseName, "Normal"),
+        .detailNormal = dataMap(detailName, "Normal"),
+        .baseOrm = dataMap(baseName, "Orm"),
+        .detailOrm = dataMap(detailName, "Orm"),
+    };
+}
 
 // Single definition of "which textures does splatted ground sample", shared by
 // the frame builder and the requirement planner so the two cannot disagree
@@ -176,13 +215,11 @@ template <typename FindTextureByName>
     const RenderTexture screenMap = location
         ? findTextureByName(std::string_view(name))
         : noTexture;
-    return {
-        .base = findTextureByName(groundSplatBaseTextureName),
-        .detail = findTextureByName(groundSplatDetailTextureName),
-        .splatMap = screenMap.isNone()
+    return groundSplatTexturesForMaterials(findTextureByName,
+        groundSplatBaseTextureName, groundSplatDetailTextureName,
+        screenMap.isNone()
             ? findTextureByName(groundSplatMapTextureName)
-            : screenMap,
-    };
+            : screenMap);
 }
 
 template <typename FindTextureByName>
@@ -193,13 +230,11 @@ template <typename FindTextureByName>
     char name[64] {};
     std::snprintf(name, sizeof(name), "GroundSplatMapOverworld%u", screenId);
     const RenderTexture screenMap = findTextureByName(std::string_view(name));
-    return {
-        .base = findTextureByName(groundSplatBaseTextureName),
-        .detail = findTextureByName(groundSplatDetailTextureName),
-        .splatMap = screenMap.isNone()
+    return groundSplatTexturesForMaterials(findTextureByName,
+        groundSplatBaseTextureName, groundSplatDetailTextureName,
+        screenMap.isNone()
             ? findTextureByName(groundSplatMapTextureName)
-            : screenMap,
-    };
+            : screenMap);
 }
 
 struct RenderFrameData {

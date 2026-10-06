@@ -443,6 +443,16 @@ and the required real-device checks are recorded.
 - The scene target is floating-point linear light. Tonemapping writes linear
   values to the sRGB display attachment, which performs the only display encode.
   Player-facing UI is composed after tonemapping.
+- Terrain companion textures use `<albedo manifest name>Normal` and `...Orm`.
+  GroundSplatTextures resolves them for default, overworld and editor-assigned
+  layers; sampledTextures is the residency list. Ground passData[0] carries
+  base/detail normal handles in xy and base/detail ORM handles in zw;
+  passData[1].x carries specular strength. The splat and model shaders share
+  PbrLighting.glsl, retaining their distinct point-shadow tap counts. Terrain
+  maps are linear repeat data and use the color layers' world UVs and weights.
+  GroundRock model bodies use dedicated wall maps and UV0 tangents. Regenerate
+  terrain maps before model variants; see docs/pbr-art-pass.md for coverage and
+  remaining procedural-surface art gaps.
 - Scene alpha stores the ambient-to-total-lit ratio for opaque pixels so SSAO
   attenuates ambient contribution without darkening direct or emissive light.
   Blended scene pipelines preserve the opaque mask behind them.

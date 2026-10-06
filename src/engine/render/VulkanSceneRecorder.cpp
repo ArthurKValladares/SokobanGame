@@ -3248,9 +3248,8 @@ private:
     // Ground tops blended from two textures via a splat map. Lighting,
     // shadowing, grid, and dithering come from the same helpers drawFace uses,
     // so they now agree by construction rather than by being kept in step. Only
-    // the free push-constant slots differ: materialOptions.x carries the face's
-    // world origin X (opaque ground never blurs) and textureOptions carries the
-    // three one-based texture handles plus world origin Y.
+    // materialOptions.x and textureOptions.w carry the splat-local origin;
+    // passData carries the optional layer data maps and specular strength.
     [[nodiscard]] uint32_t drawGroundSplatFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
@@ -3269,6 +3268,15 @@ private:
         const SunAmbientLanes lanes = sunAmbientLanes(lighting);
         const GpuDrawInstance constants {
             .vertices = quadVertices(vertices, worldSpaceQuad),
+            .passData = {
+                Vec4 {
+                    static_cast<float>(textures.baseNormal.value),
+                    static_cast<float>(textures.detailNormal.value),
+                    static_cast<float>(textures.baseOrm.value),
+                    static_cast<float>(textures.detailOrm.value),
+                },
+                Vec4 { std::max(lighting.specularStrength, 0.0f), 0.0f, 0.0f, 0.0f },
+            },
             .color = color,
             .normalAndAmbientRed = {
                 normal.x,

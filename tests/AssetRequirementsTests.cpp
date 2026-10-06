@@ -333,6 +333,50 @@ void testGroundSplatTexturesAreRequired()
     CHECK(reused.empty());
 }
 
+void testTerrainPbrCompanionsAreRequired()
+{
+    TEST("terrainPbrCompanionsAreRequired");
+    AssetManifest manifest = testManifest();
+    for (const char* name : { "GroundGrassNormal", "GroundGrassOrm", "GroundRockNormal", "GroundRockOrm" }) {
+        CHECK(!manifest.addTexture({ .name = name, .path = std::string(name) + ".png",
+            .tiling = true, .filter = TextureFilter::Linear,
+            .colorSpace = TextureColorSpace::Linear }).isNone());
+    }
+    const auto find = [&manifest](std::string_view name) { return manifest.findTextureIdByName(name); };
+    const GroundSplatTextures defaults = groundSplatTexturesForScreen(find, std::nullopt);
+    CHECK(defaults.baseNormal == manifest.textureIdByName("GroundGrassNormal"));
+    CHECK(defaults.detailNormal == manifest.textureIdByName("GroundRockNormal"));
+    CHECK(defaults.baseOrm == manifest.textureIdByName("GroundGrassOrm"));
+    CHECK(defaults.detailOrm == manifest.textureIdByName("GroundRockOrm"));
+    const Level level = Level::loadFromLayers({ { "..." }, { "C.." } }, "terrain PBR residency");
+    const auto levelRequirements = renderAssetRequirementsForLevel(level, manifest);
+    for (RenderTexture texture : defaults.sampledTextures()) CHECK(levelRequirements.contains(texture));
+
+    // Editor-assigned layers may reverse base and detail. Resolve maps by the
+    // selected albedo, rather than reusing the default grass/rock ordering.
+    const GroundSplatTextures reversed = groundSplatTexturesForMaterials(find,
+        "GroundRock", "GroundGrass", defaults.splatMap);
+    CHECK(reversed.baseNormal == defaults.detailNormal);
+    CHECK(reversed.detailOrm == defaults.baseOrm);
+    RenderFrameData frame;
+    frame.tiles.push_back({ .groundSplat = reversed });
+    const auto tileRequirements = renderAssetRequirementsForFrame(frame);
+    for (RenderTexture texture : reversed.sampledTextures()) CHECK(tileRequirements.contains(texture));
+    frame.tiles.clear();
+    frame.groundSplatRegionCount = 1;
+    frame.groundSplatRegions[0].textures = groundSplatTexturesForOverworldScreen(find, 1);
+    const auto regionRequirements = renderAssetRequirementsForFrame(frame);
+    for (RenderTexture texture : frame.groundSplatRegions[0].textures.sampledTextures()) {
+        CHECK(regionRequirements.contains(texture));
+    }
+
+    const GroundSplatTextures legacy = groundSplatTexturesForMaterials(find,
+        "GroundGrass", "Smoke01", defaults.splatMap);
+    CHECK(legacy.valid());
+    CHECK(legacy.detailNormal.isNone());
+    CHECK(legacy.detailOrm.isNone());
+}
+
 void testPerScreenSplatMapsAreSelectedAndFallBack()
 {
     TEST("perScreenSplatMapsAreSelectedAndFallBack");
@@ -413,6 +457,7 @@ int main()
     testMergeDeduplicatesRequirements();
     testCubeAndNoneAreNeverRequirements();
     testGroundSplatTexturesAreRequired();
+    testTerrainPbrCompanionsAreRequired();
     testPerScreenSplatMapsAreSelectedAndFallBack();
 
     if (failures == 0) {

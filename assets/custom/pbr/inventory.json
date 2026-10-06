@@ -1,0 +1,767 @@
+{
+  "format": 1,
+  "models": [
+    {
+      "name": "BricksA",
+      "source": "KayKit Block Bits 1.0/Assets/gltf/bricks_A.gltf",
+      "output": "custom/pbr/models/BricksA.glb",
+      "triangles": 844,
+      "source_vertices": 962,
+      "output_vertices": 1148,
+      "surface_triangles": {
+        "stone": 844
+      }
+    },
+    {
+      "name": "Stone",
+      "source": "KayKit Block Bits 1.0/Assets/gltf/stone.gltf",
+      "output": "custom/pbr/models/Stone.glb",
+      "triangles": 1248,
+      "source_vertices": 1708,
+      "output_vertices": 2139,
+      "surface_triangles": {
+        "stone": 1248
+      }
+    },
+    {
+      "name": "Glass",
+      "source": "KayKit Block Bits 1.0/Assets/gltf/glass.gltf",
+      "output": "custom/pbr/models/Glass.glb",
+      "triangles": 216,
+      "source_vertices": 216,
+      "output_vertices": 216,
+      "surface_triangles": {
+        "glass": 216
+      }
+    },
+    {
+      "name": "Conveyor",
+      "source": "KayKit Platformer Pack 1.0/Assets/gltf/blue/conveyor_4x4x1_blue.gltf",
+      "output": "custom/pbr/models/Conveyor.glb",
+      "triangles": 1076,
+      "source_vertices": 1124,
+      "output_vertices": 1466,
+      "surface_triangles": {
+        "paint": 712,
+        "rubber": 108,
+        "steel": 256
+      }
+    },
+    {
+      "name": "ScreenSelectorAPlayable",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_blue.gltf",
+      "output": "custom/pbr/models/ScreenSelectorAPlayable.glb",
+      "triangles": 370,
+      "source_vertices": 288,
+      "output_vertices": 380,
+      "surface_triangles": {
+        "cloth": 210,
+        "paint": 160
+      }
+    },
+    {
+      "name": "ScreenSelectorASolved",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_green.gltf",
+      "output": "custom/pbr/models/ScreenSelectorASolved.glb",
+      "triangles": 370,
+      "source_vertices": 288,
+      "output_vertices": 380,
+      "surface_triangles": {
+        "cloth": 210,
+        "paint": 160
+      }
+    },
+    {
+      "name": "ScreenSelectorAUnavailable",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_red.gltf",
+      "output": "custom/pbr/models/ScreenSelectorAUnavailable.glb",
+      "triangles": 370,
+      "source_vertices": 288,
+      "output_vertices": 380,
+      "surface_triangles": {
+        "cloth": 210,
+        "paint": 160
+      }
+    },
+    {
+      "name": "ScreenSelectorBPlayable",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_blue.gltf",
+      "output": "custom/pbr/models/ScreenSelectorBPlayable.glb",
+      "triangles": 392,
+      "source_vertices": 316,
+      "output_vertices": 404,
+      "surface_triangles": {
+        "cloth": 232,
+        "paint": 160
+      }
+    },
+    {
+      "name": "ScreenSelectorBSolved",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_green.gltf",
+      "output": "custom/pbr/models/ScreenSelectorBSolved.glb",
+      "triangles": 392,
+      "source_vertices": 316,
+      "output_vertices": 404,
+      "surface_triangles": {
+        "cloth": 232,
+        "paint": 160
+      }
+    },
+    {
+      "name": "ScreenSelectorBUnavailable",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_red.gltf",
+      "output": "custom/pbr/models/ScreenSelectorBUnavailable.glb",
+      "triangles": 392,
+      "source_vertices": 316,
+      "output_vertices": 404,
+      "surface_triangles": {
+        "cloth": 232,
+        "paint": 160
+      }
+    },
+    {
+      "name": "Turret",
+      "source": "KayKit Adventurers 2.0/Assets/gltf/turret_base.gltf",
+      "output": "custom/pbr/models/Turret.glb",
+      "triangles": 1696,
+      "source_vertices": 2265,
+      "output_vertices": 2543,
+      "surface_triangles": {
+        "brass": 476,
+        "steel": 1220
+      }
+    },
+    {
+      "name": "Rogue",
+      "source": "KayKit Adventurers 2.0/Characters/gltf/Rogue.glb",
+      "output": "custom/pbr/models/Rogue.glb",
+      "triangles": 7562,
+      "source_vertices": 6422,
+      "output_vertices": 7888,
+      "surface_triangles": {
+        "cloth": 2900,
+        "hair": 2850,
+        "leather": 852,
+        "skin": 554,
+        "steel": 406
+      }
+    },
+    {
+      "name": "Knight",
+      "source": "KayKit Adventurers 2.0/Characters/gltf/Knight.glb",
+      "output": "custom/pbr/models/Knight.glb",
+      "triangles": 5800,
+      "source_vertices": 5328,
+      "output_vertices": 6363,
+      "surface_triangles": {
+        "cloth": 152,
+        "hair": 1564,
+        "leather": 514,
+        "skin": 428,
+        "steel": 3142
+      }
+    },
+    {
+      "name": "Druid",
+      "source": "KayKit Adventurers 2.0/Characters/gltf/Druid.glb",
+      "output": "custom/pbr/models/Druid.glb",
+      "triangles": 7784,
+      "source_vertices": 7481,
+      "output_vertices": 9039,
+      "surface_triangles": {
+        "cloth": 3762,
+        "hair": 627,
+        "leather": 1270,
+        "skin": 1389,
+        "steel": 736
+      }
+    },
+    {
+      "name": "Witch",
+      "source": "KayKit Witch/characters/Witch.glb",
+      "output": "custom/pbr/models/Witch.glb",
+      "triangles": 6210,
+      "source_vertices": 4866,
+      "output_vertices": 6197,
+      "surface_triangles": {
+        "cloth": 2356,
+        "glass": 24,
+        "hair": 1781,
+        "leather": 724,
+        "skin": 691,
+        "steel": 634
+      }
+    },
+    {
+      "name": "Bard",
+      "source": "KayKit Magical Girl/characters/MagicalGirl.glb",
+      "output": "custom/pbr/models/Bard.glb",
+      "triangles": 8548,
+      "source_vertices": 6970,
+      "output_vertices": 9058,
+      "surface_triangles": {
+        "brass": 60,
+        "cloth": 5208,
+        "hair": 2340,
+        "skin": 802,
+        "steel": 138
+      }
+    },
+    {
+      "name": "Barbarian",
+      "source": "KayKit Adventurers 2.0/Characters/gltf/Barbarian.glb",
+      "output": "custom/pbr/models/Barbarian.glb",
+      "triangles": 7123,
+      "source_vertices": 6050,
+      "output_vertices": 7711,
+      "surface_triangles": {
+        "cloth": 1652,
+        "hair": 2330,
+        "leather": 1153,
+        "skin": 1188,
+        "steel": 800
+      }
+    },
+    {
+      "name": "PictureFrameLargeA",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/pictureframe_large_A.gltf",
+      "output": "custom/pbr/models/PictureFrameLargeA.glb",
+      "triangles": 60,
+      "source_vertices": 88,
+      "output_vertices": 107,
+      "surface_triangles": {
+        "paper": 2,
+        "wood": 58
+      }
+    },
+    {
+      "name": "Decoration_cactus_small_A",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/cactus_small_A.gltf",
+      "output": "custom/pbr/models/Decoration_cactus_small_A.glb",
+      "triangles": 252,
+      "source_vertices": 244,
+      "output_vertices": 332,
+      "surface_triangles": {
+        "ceramic": 144,
+        "foliage": 108
+      }
+    },
+    {
+      "name": "Decoration_swiper_yellow",
+      "source": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/swiper_yellow.gltf",
+      "output": "custom/pbr/models/Decoration_swiper_yellow.glb",
+      "triangles": 918,
+      "source_vertices": 974,
+      "output_vertices": 1142,
+      "surface_triangles": {
+        "paint": 918
+      }
+    },
+    {
+      "name": "Decoration_desk",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/desk.gltf",
+      "output": "custom/pbr/models/Decoration_desk.glb",
+      "triangles": 330,
+      "source_vertices": 564,
+      "output_vertices": 632,
+      "surface_triangles": {
+        "wood": 330
+      }
+    },
+    {
+      "name": "Decoration_gameconsole_handheld",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/gameconsole_handheld.gltf",
+      "output": "custom/pbr/models/Decoration_gameconsole_handheld.glb",
+      "triangles": 278,
+      "source_vertices": 382,
+      "output_vertices": 476,
+      "surface_triangles": {
+        "display": 6,
+        "paint": 94,
+        "rubber": 178
+      }
+    },
+    {
+      "name": "Decoration_chair_C",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/chair_C.gltf",
+      "output": "custom/pbr/models/Decoration_chair_C.glb",
+      "triangles": 288,
+      "source_vertices": 340,
+      "output_vertices": 400,
+      "surface_triangles": {
+        "cloth": 180,
+        "wood": 108
+      }
+    },
+    {
+      "name": "Decoration_chair_B",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/chair_B.gltf",
+      "output": "custom/pbr/models/Decoration_chair_B.glb",
+      "triangles": 384,
+      "source_vertices": 498,
+      "output_vertices": 568,
+      "surface_triangles": {
+        "cloth": 216,
+        "wood": 168
+      }
+    },
+    {
+      "name": "Decoration_mousepad_A",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/mousepad_A.gltf",
+      "output": "custom/pbr/models/Decoration_mousepad_A.glb",
+      "triangles": 60,
+      "source_vertices": 60,
+      "output_vertices": 64,
+      "surface_triangles": {
+        "rubber": 60
+      }
+    },
+    {
+      "name": "Decoration_monitor",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/monitor.gltf",
+      "output": "custom/pbr/models/Decoration_monitor.glb",
+      "triangles": 168,
+      "source_vertices": 234,
+      "output_vertices": 252,
+      "surface_triangles": {
+        "display": 4,
+        "paint": 164
+      }
+    },
+    {
+      "name": "Decoration_barrier_3x1x1_blue",
+      "source": "KayKit Platformer Pack 1.0/Assets/gltf/blue/barrier_3x1x1_blue.gltf",
+      "output": "custom/pbr/models/Decoration_barrier_3x1x1_blue.glb",
+      "triangles": 212,
+      "source_vertices": 184,
+      "output_vertices": 192,
+      "surface_triangles": {
+        "paint": 212
+      }
+    },
+    {
+      "name": "Decoration_rug_rectangle_stripes_B",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/rug_rectangle_stripes_B.gltf",
+      "output": "custom/pbr/models/Decoration_rug_rectangle_stripes_B.glb",
+      "triangles": 68,
+      "source_vertices": 72,
+      "output_vertices": 96,
+      "surface_triangles": {
+        "cloth": 68
+      }
+    },
+    {
+      "name": "Decoration_arrow_crossbow",
+      "source": "KayKit Adventurers 2.0/Assets/gltf/arrow_crossbow.gltf",
+      "output": "custom/pbr/models/Decoration_arrow_crossbow.glb",
+      "triangles": 52,
+      "source_vertices": 73,
+      "output_vertices": 92,
+      "surface_triangles": {
+        "foliage": 22,
+        "steel": 18,
+        "wood": 12
+      }
+    },
+    {
+      "name": "Decoration_metal",
+      "source": "KayKit Block Bits 1.0/Assets/gltf/metal.gltf",
+      "output": "custom/pbr/models/Decoration_metal.glb",
+      "triangles": 672,
+      "source_vertices": 840,
+      "output_vertices": 912,
+      "surface_triangles": {
+        "steel": 672
+      }
+    },
+    {
+      "name": "Decoration_striped_block_blue",
+      "source": "KayKit Block Bits 1.0/Assets/gltf/striped_block_blue.gltf",
+      "output": "custom/pbr/models/Decoration_striped_block_blue.glb",
+      "triangles": 156,
+      "source_vertices": 160,
+      "output_vertices": 160,
+      "surface_triangles": {
+        "paint": 156
+      }
+    },
+    {
+      "name": "Decoration_chair_A",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/chair_A.gltf",
+      "output": "custom/pbr/models/Decoration_chair_A.glb",
+      "triangles": 308,
+      "source_vertices": 458,
+      "output_vertices": 500,
+      "surface_triangles": {
+        "cloth": 108,
+        "wood": 200
+      }
+    },
+    {
+      "name": "Decoration_chair_desk_A",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/chair_desk_A.gltf",
+      "output": "custom/pbr/models/Decoration_chair_desk_A.glb",
+      "triangles": 626,
+      "source_vertices": 706,
+      "output_vertices": 819,
+      "surface_triangles": {
+        "cloth": 218,
+        "paint": 280,
+        "rubber": 128
+      }
+    },
+    {
+      "name": "Decoration_keyboard",
+      "source": "KayKit Furniture Bits 1.0/Assets/gltf/keyboard.gltf",
+      "output": "custom/pbr/models/Decoration_keyboard.glb",
+      "triangles": 168,
+      "source_vertices": 276,
+      "output_vertices": 284,
+      "surface_triangles": {
+        "paint": 168
+      }
+    },
+    {
+      "name": "Decoration_Rig_Large_MovementBasic",
+      "source": "KayKit Adventurers 2.0/Animations/gltf/Rig_Large/Rig_Large_MovementBasic.glb",
+      "retained": "Reference animation rig: retain neutral preview material."
+    },
+    {
+      "name": "Decoration_Rig_Large_General",
+      "source": "KayKit Adventurers 2.0/Animations/gltf/Rig_Large/Rig_Large_General.glb",
+      "retained": "Reference animation rig: retain neutral preview material."
+    },
+    {
+      "name": "Decoration_Rig_Medium_General",
+      "source": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
+      "retained": "Reference animation rig: retain neutral preview material."
+    },
+    {
+      "name": "Decoration_star_yellow",
+      "source": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/star_yellow.gltf",
+      "output": "custom/pbr/models/Decoration_star_yellow.glb",
+      "triangles": 60,
+      "source_vertices": 100,
+      "output_vertices": 140,
+      "surface_triangles": {
+        "paint": 60
+      }
+    },
+    {
+      "name": "Decoration_spring_pad_yellow",
+      "source": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/spring_pad_yellow.gltf",
+      "output": "custom/pbr/models/Decoration_spring_pad_yellow.glb",
+      "triangles": 712,
+      "source_vertices": 547,
+      "output_vertices": 747,
+      "surface_triangles": {
+        "paint": 192,
+        "steel": 520
+      }
+    },
+    {
+      "name": "Decoration_coin_2_gold",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/coin_2_gold.gltf",
+      "output": "custom/pbr/models/Decoration_coin_2_gold.glb",
+      "triangles": 616,
+      "source_vertices": 634,
+      "output_vertices": 714,
+      "surface_triangles": {
+        "brass": 616
+      }
+    },
+    {
+      "name": "Decoration_coin_2_copper",
+      "source": "KayKit Board Game Bits 1.0/Assets/gltf/coin_2_copper.gltf",
+      "output": "custom/pbr/models/Decoration_coin_2_copper.glb",
+      "triangles": 616,
+      "source_vertices": 634,
+      "output_vertices": 714,
+      "surface_triangles": {
+        "brass": 616
+      }
+    },
+    {
+      "name": "RotatorClockwise",
+      "source": "custom/models/rotator_clockwise.glb",
+      "output": "custom/pbr/models/RotatorClockwise.glb",
+      "triangles": 762,
+      "source_vertices": 2286,
+      "output_vertices": 2286,
+      "surface_triangles": {
+        "paint": 330,
+        "steel": 432
+      }
+    },
+    {
+      "name": "RotatorCounterClockwise",
+      "source": "custom/models/rotator_counter_clockwise.glb",
+      "output": "custom/pbr/models/RotatorCounterClockwise.glb",
+      "triangles": 762,
+      "source_vertices": 2286,
+      "output_vertices": 2286,
+      "surface_triangles": {
+        "paint": 330,
+        "steel": 432
+      }
+    },
+    {
+      "name": "LockPlate",
+      "source": "custom/models/lock_plate.glb",
+      "output": "custom/pbr/models/LockPlate.glb",
+      "triangles": 640,
+      "source_vertices": 1920,
+      "output_vertices": 1920,
+      "surface_triangles": {
+        "paint": 240,
+        "steel": 400
+      }
+    },
+    {
+      "name": "Lectern",
+      "source": "custom/models/lectern.glb",
+      "output": "custom/pbr/models/Lectern.glb",
+      "triangles": 364,
+      "source_vertices": 1092,
+      "output_vertices": 1092,
+      "surface_triangles": {
+        "brass": 84,
+        "cloth": 12,
+        "endgrain": 56,
+        "leather": 12,
+        "paper": 144,
+        "wood": 56
+      }
+    },
+    {
+      "name": "Ladder",
+      "source": "custom/models/ladder.glb",
+      "output": "custom/pbr/models/Ladder.glb",
+      "triangles": 428,
+      "source_vertices": 1284,
+      "output_vertices": 1284,
+      "surface_triangles": {
+        "steel": 172,
+        "wood": 256
+      }
+    },
+    {
+      "name": "RotatorGear",
+      "source": "custom/models/rotator_gear.glb",
+      "output": "custom/pbr/models/RotatorGear.glb",
+      "triangles": 432,
+      "source_vertices": 1296,
+      "output_vertices": 1296,
+      "surface_triangles": {
+        "steel": 432
+      }
+    },
+    {
+      "name": "RotatorIconClockwise",
+      "source": "custom/models/rotator_icon_clockwise.glb",
+      "output": "custom/pbr/models/RotatorIconClockwise.glb",
+      "triangles": 330,
+      "source_vertices": 990,
+      "output_vertices": 990,
+      "surface_triangles": {
+        "paint": 330
+      }
+    },
+    {
+      "name": "RotatorIconCounterClockwise",
+      "source": "custom/models/rotator_icon_counter_clockwise.glb",
+      "output": "custom/pbr/models/RotatorIconCounterClockwise.glb",
+      "triangles": 330,
+      "source_vertices": 990,
+      "output_vertices": 990,
+      "surface_triangles": {
+        "paint": 330
+      }
+    },
+    {
+      "name": "MinecartRailStraight",
+      "source": "custom/models/minecart_rail_straight.glb",
+      "output": "custom/pbr/models/MinecartRailStraight.glb",
+      "triangles": 344,
+      "source_vertices": 1032,
+      "output_vertices": 1032,
+      "surface_triangles": {
+        "steel": 184,
+        "wood": 160
+      }
+    },
+    {
+      "name": "MinecartRailStop",
+      "source": "custom/models/minecart_rail_stop.glb",
+      "output": "custom/pbr/models/MinecartRailStop.glb",
+      "triangles": 408,
+      "source_vertices": 1224,
+      "output_vertices": 1224,
+      "surface_triangles": {
+        "paint": 32,
+        "steel": 216,
+        "wood": 160
+      }
+    },
+    {
+      "name": "MinecartRailCorner",
+      "source": "custom/models/minecart_rail_corner.glb",
+      "output": "custom/pbr/models/MinecartRailCorner.glb",
+      "triangles": 444,
+      "source_vertices": 1332,
+      "output_vertices": 1332,
+      "surface_triangles": {
+        "steel": 384,
+        "wood": 60
+      }
+    },
+    {
+      "name": "MinecartHandcar",
+      "source": "custom/models/minecart_handcar.glb",
+      "output": "custom/pbr/models/MinecartHandcar.glb",
+      "triangles": 656,
+      "source_vertices": 1968,
+      "output_vertices": 1968,
+      "surface_triangles": {
+        "steel": 496,
+        "wood": 160
+      }
+    },
+    {
+      "name": "ElevatorPlatform",
+      "source": "Kenney Platformer Kit/Models/GLB format/platform.glb",
+      "output": "custom/pbr/models/ElevatorPlatform.glb",
+      "triangles": 84,
+      "source_vertices": 168,
+      "output_vertices": 168,
+      "surface_triangles": {
+        "wood": 84
+      }
+    },
+    {
+      "name": "GroundRock01",
+      "source": "custom/models/ground_rock_01.gltf",
+      "output": "custom/pbr/models/GroundRock01.glb",
+      "triangles": 2611,
+      "source_vertices": 7833,
+      "output_vertices": 7833,
+      "surface_triangles": {
+        "stone": 2611
+      }
+    },
+    {
+      "name": "GroundRock02",
+      "source": "custom/models/ground_rock_02.gltf",
+      "output": "custom/pbr/models/GroundRock02.glb",
+      "triangles": 2251,
+      "source_vertices": 6753,
+      "output_vertices": 6753,
+      "surface_triangles": {
+        "stone": 2251
+      }
+    },
+    {
+      "name": "GroundRock03",
+      "source": "custom/models/ground_rock_03.gltf",
+      "output": "custom/pbr/models/GroundRock03.glb",
+      "triangles": 2176,
+      "source_vertices": 6528,
+      "output_vertices": 6528,
+      "surface_triangles": {
+        "stone": 2176
+      }
+    },
+    {
+      "name": "GroundRock04",
+      "source": "custom/models/ground_rock_04.gltf",
+      "output": "custom/pbr/models/GroundRock04.glb",
+      "triangles": 2581,
+      "source_vertices": 7743,
+      "output_vertices": 7743,
+      "surface_triangles": {
+        "stone": 2581
+      }
+    },
+    {
+      "name": "GroundRock05",
+      "source": "custom/models/ground_rock_05.gltf",
+      "output": "custom/pbr/models/GroundRock05.glb",
+      "triangles": 2396,
+      "source_vertices": 7188,
+      "output_vertices": 7188,
+      "surface_triangles": {
+        "stone": 2396
+      }
+    },
+    {
+      "name": "GroundRock06",
+      "source": "custom/models/ground_rock_06.gltf",
+      "output": "custom/pbr/models/GroundRock06.glb",
+      "triangles": 2201,
+      "source_vertices": 6603,
+      "output_vertices": 6603,
+      "surface_triangles": {
+        "stone": 2201
+      }
+    },
+    {
+      "name": "GroundRock07",
+      "source": "custom/models/ground_rock_07.gltf",
+      "output": "custom/pbr/models/GroundRock07.glb",
+      "triangles": 2436,
+      "source_vertices": 7308,
+      "output_vertices": 7308,
+      "surface_triangles": {
+        "stone": 2436
+      }
+    },
+    {
+      "name": "GroundRock08",
+      "source": "custom/models/ground_rock_08.gltf",
+      "output": "custom/pbr/models/GroundRock08.glb",
+      "triangles": 2516,
+      "source_vertices": 7548,
+      "output_vertices": 7548,
+      "surface_triangles": {
+        "stone": 2516
+      }
+    },
+    {
+      "name": "GroundRock09",
+      "source": "custom/models/ground_rock_09.gltf",
+      "output": "custom/pbr/models/GroundRock09.glb",
+      "triangles": 2231,
+      "source_vertices": 6693,
+      "output_vertices": 6693,
+      "surface_triangles": {
+        "stone": 2231
+      }
+    },
+    {
+      "name": "GroundRock10",
+      "source": "custom/models/ground_rock_10.gltf",
+      "output": "custom/pbr/models/GroundRock10.glb",
+      "triangles": 2301,
+      "source_vertices": 6903,
+      "output_vertices": 6903,
+      "surface_triangles": {
+        "stone": 2301
+      }
+    }
+  ],
+  "attachments": [
+    {
+      "name": "BarbarianAxe",
+      "source": "KayKit Adventurers 2.0/Assets/gltf/axe_1handed.gltf",
+      "output": "custom/pbr/models/BarbarianAxe.glb",
+      "triangles": 274,
+      "source_vertices": 340,
+      "output_vertices": 368,
+      "surface_triangles": {
+        "paint": 112,
+        "steel": 82,
+        "wood": 80
+      }
+    }
+  ]
+}

@@ -25,11 +25,9 @@ void applyGroundSplat(
     const Level::GroundSplat* splat = Level::groundSplatAt(splats, paint,
         { tile.cell.x - origin.x, tile.cell.y - origin.y, tile.cell.z });
     if (!splat) return;
-    tile.groundSplat = GroundSplatTextures {
-        .base = manifest.findTextureIdByName(splat->base),
-        .detail = manifest.findTextureIdByName(splat->detail),
-        .splatMap = manifest.findTextureIdByName(splat->mask),
-    };
+    tile.groundSplat = groundSplatTexturesForMaterials(
+        [&manifest](std::string_view name) { return manifest.findTextureIdByName(name); },
+        splat->base, splat->detail, manifest.findTextureIdByName(splat->mask));
     tile.groundSplatOrigin = origin;
     if (showColors) {
         tile.color = { splat->color.x, splat->color.y, splat->color.z, tile.color.w };

@@ -52,6 +52,13 @@ void RenderAssetRequirements::requireTexture(RenderTexture texture)
     }
 }
 
+void RenderAssetRequirements::requireGroundSplat(const GroundSplatTextures& textures)
+{
+    for (RenderTexture texture : textures.sampledTextures()) {
+        requireTexture(texture);
+    }
+}
+
 void RenderAssetRequirements::merge(const RenderAssetRequirements& other)
 {
     models_.resize(std::max(models_.size(), other.models_.size()), false);
@@ -156,14 +163,12 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
             return manifest.findTextureIdByName(name);
         },
         location);
-    requirements.requireTexture(splat.base);
-    requirements.requireTexture(splat.detail);
-    requirements.requireTexture(splat.splatMap);
+    requirements.requireGroundSplat(splat);
     requirements.requireTexture(manifest.findTextureIdByName(groundRockSideTextureName));
     for (const Level::GroundSplat& authored : level.groundSplats()) {
-        requirements.requireTexture(manifest.findTextureIdByName(authored.base));
-        requirements.requireTexture(manifest.findTextureIdByName(authored.detail));
-        requirements.requireTexture(manifest.findTextureIdByName(authored.mask));
+        requirements.requireGroundSplat(groundSplatTexturesForMaterials(
+            [&manifest](std::string_view name) { return manifest.findTextureIdByName(name); },
+            authored.base, authored.detail, manifest.findTextureIdByName(authored.mask)));
     }
 
     for (uint32_t z = 0; z < level.depth(); ++z) {
@@ -260,26 +265,20 @@ void renderAssetRequirementsForFrame(
         requirements.requireAnimation(tile.animation);
         requirements.requireAnimation(tile.animationFallback);
         if (tile.groundSplat) {
-            requirements.requireTexture(tile.groundSplat->base);
-            requirements.requireTexture(tile.groundSplat->detail);
-            requirements.requireTexture(tile.groundSplat->splatMap);
+            requirements.requireGroundSplat(*tile.groundSplat);
         }
     }
     for (const RenderFrameData::Particle& particle : frame.particles) {
         requirements.requireTexture(particle.texture);
     }
-    requirements.requireTexture(frame.groundSplat.base);
-    requirements.requireTexture(frame.groundSplat.detail);
-    requirements.requireTexture(frame.groundSplat.splatMap);
+    requirements.requireGroundSplat(frame.groundSplat);
     requirements.requireTexture(frame.groundRockSideTexture);
     for (std::size_t index = 0;
          index < frame.groundSplatRegionCount;
          ++index) {
         const GroundSplatTextures& textures =
             frame.groundSplatRegions[index].textures;
-        requirements.requireTexture(textures.base);
-        requirements.requireTexture(textures.detail);
-        requirements.requireTexture(textures.splatMap);
+        requirements.requireGroundSplat(textures);
     }
 }
 } // namespace sokoban

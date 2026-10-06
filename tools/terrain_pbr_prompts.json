@@ -1,0 +1,21 @@
+{
+  "tool": "Built-in ImageGen",
+  "use_case": "precise-object-edit",
+  "textures": {
+    "ground_grass": {
+      "input": "assets/custom/textures/ground_grass.png",
+      "output": "assets/custom/pbr/ground_grass_height_source.png",
+      "prompt": "Use case: precise-object-edit. Asset type: seamless PBR height texture for a stylized game. Input image is the edit target and exact layout reference. Convert it to a SINGLE pure grayscale height map at the same square dimensions, no other outputs. Stylized dry grassy earth with low rolling clods, raised small stone clusters and tiny tufted grass blades. Keep the broad earth almost flat and smooth; stones and tufts gently raised. Preserve every feature's exact position, scale, silhouette, orientation and footprint; do not add, move, remove or redraw features. Remove color and ALL baked directional lighting/shadows; gray intensity represents actual surface height only, mid gray flat plane, recessed crevices darker, raised facets lighter. Use moderate shallow relief, smooth slope transitions, no black/white clipping, no dramatic deep bumps. Seamless wrap in both directions; preserve edge continuity. Full-bleed orthographic texture; no frame, margins, text, symbols or normal-map colors. Do not generate a rendered scene or perspective."
+    },
+    "ground_rock": {
+      "input": "assets/custom/textures/ground_rock.png",
+      "output": "assets/custom/pbr/ground_rock_height_source.png",
+      "prompt": "Use case: precise-object-edit. Asset type: seamless PBR height texture for a stylized game. Input image is the edit target and exact layout reference. Convert it to a SINGLE pure grayscale height map at the same square dimensions, no other outputs. Stylized cracked sandstone paving: broad flat stone plateaus, recessed narrow crevices between the EXACT existing slabs, softly beveled chipped rims. Flat plate interiors with very subtle granular relief. Preserve every feature's exact position, scale, silhouette, orientation and footprint; do not add, move, remove or redraw features. Remove color and ALL baked directional lighting/shadows; gray intensity represents actual surface height only, mid gray flat plane, recessed crevices darker, raised facets lighter. Use moderate shallow relief, smooth slope transitions, no black/white clipping, no dramatic deep bumps. Seamless wrap in both directions; preserve edge continuity. Full-bleed orthographic texture; no frame, margins, text, symbols or normal-map colors. Do not generate a rendered scene or perspective."
+    },
+    "ground_rock_side": {
+      "input": "assets/custom/textures/ground_rock_side.png",
+      "output": "assets/custom/pbr/ground_rock_side_height_source.png",
+      "prompt": "Use case: precise-object-edit. Asset type: seamless PBR height texture for a stylized game. Input image is the edit target and exact layout reference. Convert it to a SINGLE pure grayscale height map at the same square dimensions, no other outputs. Stylized fine sandstone cliff/wall surface with the EXACT existing fine fissures and faceted mineral patches. Gently recessed cracks and subtle small chipped planes. Broad surface is almost flat. Preserve every feature's exact position, scale, silhouette, orientation and footprint; do not add, move, remove or redraw features. Remove color and ALL baked directional lighting/shadows; gray intensity represents actual surface height only, mid gray flat plane, recessed crevices darker, raised facets lighter. Use moderate shallow relief, smooth slope transitions, no black/white clipping, no dramatic deep bumps. Seamless wrap in both directions; preserve edge continuity. Full-bleed orthographic texture; no frame, margins, text, symbols or normal-map colors. Do not generate a rendered scene or perspective."
+    }
+  }
+}

@@ -17,6 +17,7 @@ public:
     void requireModel(RenderModel model);
     void requireAnimation(RenderAnimation animation);
     void requireTexture(RenderTexture texture);
+    void requireGroundSplat(const GroundSplatTextures& textures);
     void merge(const RenderAssetRequirements& other);
     void clear();
 

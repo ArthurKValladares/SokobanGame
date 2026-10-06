@@ -634,12 +634,12 @@ void testRealManifestFile()
     const sokoban::RenderModel rock = manifest.modelIdByName("Stone");
     CHECK_MESSAGE(
         manifest.model(wall).materialMode ==
-            sokoban::ModelMaterialMode::Untextured,
-        "wall keeps the bright engine tint instead of the dark glTF palette");
+            sokoban::ModelMaterialMode::Auto,
+        "wall uses PBR maps while its variant preserves the bright engine tint");
     CHECK_MESSAGE(
         manifest.model(rock).materialMode ==
-            sokoban::ModelMaterialMode::Untextured,
-        "rock keeps the bright engine tint instead of the dark glTF palette");
+            sokoban::ModelMaterialMode::Auto,
+        "rock uses PBR maps while its variant preserves the bright engine tint");
 
     const sokoban::RenderModel turret = manifest.modelIdByName("Turret");
     CHECK_MESSAGE(
@@ -649,12 +649,25 @@ void testRealManifestFile()
         sokoban::collectRuntimeTextureCatalog(*root, manifest);
     CHECK_MESSAGE(
         runtimeTextures.model(static_cast<uint32_t>(wall.index())).materialMode ==
-            sokoban::ModelMaterialMode::Untextured,
-        "wall runtime binding does not restore the authored base-color map");
+            sokoban::ModelMaterialMode::PrimitiveMaterials,
+        "wall runtime binding enables authored PBR maps");
     CHECK_MESSAGE(
         runtimeTextures.model(static_cast<uint32_t>(rock.index())).materialMode ==
-            sokoban::ModelMaterialMode::Untextured,
-        "rock runtime binding does not restore the authored base-color map");
+            sokoban::ModelMaterialMode::PrimitiveMaterials,
+        "rock runtime binding enables authored PBR maps");
+    for (const sokoban::RenderModel tintedModel : { wall, rock }) {
+        const sokoban::RuntimeModelTextures& textures =
+            runtimeTextures.model(static_cast<uint32_t>(tintedModel.index()));
+        CHECK_MESSAGE(!textures.primitiveMaterials.empty(), "tinted model has a PBR binding");
+        if (!textures.primitiveMaterials.empty()) {
+            const auto& binding = textures.primitiveMaterials.front();
+            CHECK_MESSAGE(!binding.bindBaseColorTexture,
+                "tinted model does not restore the dark vendor palette");
+            CHECK_MESSAGE(binding.normalTextureIndex.has_value() &&
+                    binding.metallicRoughnessTextureIndex.has_value(),
+                "tinted model resolves its normal and metallic-roughness maps");
+        }
+    }
     const sokoban::RuntimeModelTextures& turretTextures =
         runtimeTextures.model(static_cast<uint32_t>(turret.index()));
     CHECK_MESSAGE(

@@ -236,30 +236,66 @@
     {
       "name": "DecorationTexture_block_bits_texture",
       "path": "KayKit Block Bits 1.0/Assets/gltf/block_bits_texture.png"
+    },
+    {
+      "name": "GroundGrassNormal",
+      "path": "custom/pbr/ground_grass_normal.png",
+      "tiling": true,
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundGrassOrm",
+      "path": "custom/pbr/ground_grass_orm.png",
+      "tiling": true,
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundRockNormal",
+      "path": "custom/pbr/ground_rock_normal.png",
+      "tiling": true,
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundRockOrm",
+      "path": "custom/pbr/ground_rock_orm.png",
+      "tiling": true,
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundRockSideNormal",
+      "path": "custom/pbr/ground_rock_side_normal.png",
+      "tiling": true,
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundRockSideOrm",
+      "path": "custom/pbr/ground_rock_side_orm.png",
+      "tiling": true,
+      "filter": "linear",
+      "colorSpace": "linear"
     }
   ],
   "models": [
     {
       "name": "BricksA",
-      "path": "KayKit Block Bits 1.0/Assets/gltf/bricks_A.gltf",
-      "material": {
-        "mode": "none"
-      }
+      "path": "custom/pbr/models/BricksA.glb"
     },
     {
       "name": "Stone",
-      "path": "KayKit Block Bits 1.0/Assets/gltf/stone.gltf",
-      "material": {
-        "mode": "none"
-      }
+      "path": "custom/pbr/models/Stone.glb"
     },
     {
       "name": "Glass",
-      "path": "KayKit Block Bits 1.0/Assets/gltf/glass.gltf"
+      "path": "custom/pbr/models/Glass.glb"
     },
     {
       "name": "Conveyor",
-      "path": "KayKit Platformer Pack 1.0/Assets/gltf/blue/conveyor_4x4x1_blue.gltf",
+      "path": "custom/pbr/models/Conveyor.glb",
       "material": {
         "mode": "primitive-materials",
         "slots": [
@@ -275,7 +311,7 @@
     },
     {
       "name": "ScreenSelectorAPlayable",
-      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_blue.gltf",
+      "path": "custom/pbr/models/ScreenSelectorAPlayable.glb",
       "material": {
         "mode": "texture",
         "texture": "BoardGameBits"
@@ -284,7 +320,7 @@
     },
     {
       "name": "ScreenSelectorASolved",
-      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_green.gltf",
+      "path": "custom/pbr/models/ScreenSelectorASolved.glb",
       "material": {
         "mode": "texture",
         "texture": "BoardGameBits"
@@ -293,7 +329,7 @@
     },
     {
       "name": "ScreenSelectorAUnavailable",
-      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_red.gltf",
+      "path": "custom/pbr/models/ScreenSelectorAUnavailable.glb",
       "material": {
         "mode": "texture",
         "texture": "BoardGameBits"
@@ -302,7 +338,7 @@
     },
     {
       "name": "ScreenSelectorBPlayable",
-      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_blue.gltf",
+      "path": "custom/pbr/models/ScreenSelectorBPlayable.glb",
       "material": {
         "mode": "texture",
         "texture": "BoardGameBits"
@@ -311,7 +347,7 @@
     },
     {
       "name": "ScreenSelectorBSolved",
-      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_green.gltf",
+      "path": "custom/pbr/models/ScreenSelectorBSolved.glb",
       "material": {
         "mode": "texture",
         "texture": "BoardGameBits"
@@ -320,7 +356,7 @@
     },
     {
       "name": "ScreenSelectorBUnavailable",
-      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_red.gltf",
+      "path": "custom/pbr/models/ScreenSelectorBUnavailable.glb",
       "material": {
         "mode": "texture",
         "texture": "BoardGameBits"
@@ -329,13 +365,13 @@
     },
     {
       "name": "Turret",
-      "path": "KayKit Adventurers 2.0/Assets/gltf/turret_base.gltf",
+      "path": "custom/pbr/models/Turret.glb",
       "preserveAspectRatio": true,
       "rotateHalfTurn": true
     },
     {
       "name": "Rogue",
-      "path": "KayKit Adventurers 2.0/Characters/gltf/Rogue.glb",
+      "path": "custom/pbr/models/Rogue.glb",
       "geometry": "skinned",
       "material": {
         "mode": "texture",
@@ -347,7 +383,7 @@
     },
     {
       "name": "Knight",
-      "path": "KayKit Adventurers 2.0/Characters/gltf/Knight.glb",
+      "path": "custom/pbr/models/Knight.glb",
       "geometry": "skinned",
       "material": {
         "mode": "texture",
@@ -358,7 +394,7 @@
     },
     {
       "name": "Druid",
-      "path": "KayKit Adventurers 2.0/Characters/gltf/Druid.glb",
+      "path": "custom/pbr/models/Druid.glb",
       "geometry": "skinned",
       "material": {
         "mode": "texture",
@@ -369,21 +405,21 @@
     },
     {
       "name": "Witch",
-      "path": "KayKit Witch/characters/Witch.glb",
+      "path": "custom/pbr/models/Witch.glb",
       "geometry": "skinned",
       "preserveAspectRatio": true,
       "rotateHalfTurn": true
     },
     {
       "name": "Bard",
-      "path": "KayKit Magical Girl/characters/MagicalGirl.glb",
+      "path": "custom/pbr/models/Bard.glb",
       "geometry": "skinned",
       "preserveAspectRatio": true,
       "rotateHalfTurn": true
     },
     {
       "name": "Barbarian",
-      "path": "KayKit Adventurers 2.0/Characters/gltf/Barbarian.glb",
+      "path": "custom/pbr/models/Barbarian.glb",
       "geometry": "skinned",
       "material": {
         "mode": "texture",
@@ -393,7 +429,7 @@
       "rotateHalfTurn": true,
       "attachments": [
         {
-          "path": "KayKit Adventurers 2.0/Assets/gltf/axe_1handed.gltf",
+          "path": "custom/pbr/models/BarbarianAxe.glb",
           "node": "handslot.r",
           "rotateHalfTurn": true
         }
@@ -402,7 +438,7 @@
     },
     {
       "name": "PictureFrameLargeA",
-      "path": "KayKit Furniture Bits 1.0/Assets/gltf/pictureframe_large_A.gltf",
+      "path": "custom/pbr/models/PictureFrameLargeA.glb",
       "material": {
         "mode": "texture",
         "texture": "FurnitureBits"
@@ -411,7 +447,7 @@
     },
     {
       "name": "Decoration_cactus_small_A",
-      "path": "KayKit Furniture Bits 1.0/Assets/gltf/cactus_small_A.gltf",
+      "path": "custom/pbr/models/Decoration_cactus_small_A.glb",
       "material": {
         "mode": "texture",
         "texture": "FurnitureBits"
@@ -420,7 +456,7 @@
     },
     {
       "name": "Decoration_swiper_yellow",
-      "path": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/swiper_yellow.gltf",
+      "path": "custom/pbr/models/Decoration_swiper_yellow.glb",
       "material": {
         "mode": "texture",
         "texture": "PlatformerYellow"
@@ -429,7 +465,7 @@
     },
     {
       "name": "Decoration_desk",
-      "path": "KayKit Furniture Bits 1.0/Assets/gltf/desk.gltf",
+      "path": "custom/pbr/models/Decoration_desk.glb",
       "material": {
         "mode": "texture",
         "texture": "FurnitureBits"
@@ -438,7 +474,7 @@
     },
     {
       "name": "Decoration_gameconsole_handheld",
-      "path": "KayKit Furniture Bits 1.0/Assets/gltf/gameconsole_handheld.gltf",
+      "path": "custom/pbr/models/Decoration_gameconsole_handheld.glb",
       "material": {
         "mode": "texture",
         "texture": "FurnitureBits"
@@ -447,7 +483,7 @@
     },
     {
       "name": "Decoration_chair_C",
-      "path": "KayKit Furniture Bits 1.0/Assets/gltf/chair_C.gltf",
+      "path": "custom/pbr/models/Decoration_chair_C.glb",
       "material": {
         "mode": "texture",
         "texture": "FurnitureBits"
@@ -456,7 +492,7 @@
     },
     {
       "name": "Decoration_chair_B",
-      "path": "KayKit Furniture Bits 1.0/Assets/gltf/chair_B.gltf",
+      "path": "custom/pbr/models/Decoration_chair_B.glb",
       "material": {
         "mode": "texture",
         "texture": "FurnitureBits"
@@ -465,7 +501,7 @@
     },
     {
       "name": "Decoration_mousepad_A",
-      "path": "KayKit Furniture Bits 1.0/Assets/gltf/mousepad_A.gltf",
+      "path": "custom/pbr/models/Decoration_mousepad_A.glb",
       "material": {
         "mode": "texture",
         "texture": "FurnitureBits"
@@ -474,7 +510,7 @@
     },
     {
       "name": "Decoration_monitor",
-      "path": "KayKit Furniture Bits 1.0/Assets/gltf/monitor.gltf",
+      "path": "custom/pbr/models/Decoration_monitor.glb",
       "material": {
         "mode": "texture",
         "texture": "FurnitureBits"
@@ -483,7 +519,7 @@
     },
     {
       "name": "Decoration_barrier_3x1x1_blue",
-      "path": "KayKit Platformer Pack 1.0/Assets/gltf/blue/barrier_3x1x1_blue.gltf",
+      "path": "custom/pbr/models/Decoration_barrier_3x1x1_blue.glb",
       "material": {
         "mode": "texture",
         "texture": "Platformer"
@@ -492,7 +528,7 @@
     },
     {
       "name": "Decoration_rug_rectangle_stripes_B",
-      "path": "KayKit Furniture Bits 1.0/Assets/gltf/rug_rectangle_stripes_B.gltf",
+      "path": "custom/pbr/models/Decoration_rug_rectangle_stripes_B.glb",
       "material": {
         "mode": "texture",
         "texture": "FurnitureBits"
@@ -501,7 +537,7 @@
     },
     {
       "name": "Decoration_arrow_crossbow",
-      "path": "KayKit Adventurers 2.0/Assets/gltf/arrow_crossbow.gltf",
+      "path": "custom/pbr/models/Decoration_arrow_crossbow.glb",
       "material": {
         "mode": "texture",
         "texture": "DecorationTexture_rogue_texture"
@@ -510,7 +546,7 @@
     },
     {
       "name": "Decoration_metal",
-      "path": "KayKit Block Bits 1.0/Assets/gltf/metal.gltf",
+      "path": "custom/pbr/models/Decoration_metal.glb",
       "material": {
         "mode": "texture",
         "texture": "DecorationTexture_block_bits_texture"
@@ -519,7 +555,7 @@
     },
     {
       "name": "Decoration_striped_block_blue",
-      "path": "KayKit Block Bits 1.0/Assets/gltf/striped_block_blue.gltf",
+      "path": "custom/pbr/models/Decoration_striped_block_blue.glb",
       "material": {
         "mode": "texture",
         "texture": "DecorationTexture_block_bits_texture"
@@ -528,7 +564,7 @@
     },
     {
       "name": "Decoration_chair_A",
-      "path": "KayKit Furniture Bits 1.0/Assets/gltf/chair_A.gltf",
+      "path": "custom/pbr/models/Decoration_chair_A.glb",
       "material": {
         "mode": "texture",
         "texture": "FurnitureBits"
@@ -537,7 +573,7 @@
     },
     {
       "name": "Decoration_chair_desk_A",
-      "path": "KayKit Furniture Bits 1.0/Assets/gltf/chair_desk_A.gltf",
+      "path": "custom/pbr/models/Decoration_chair_desk_A.glb",
       "material": {
         "mode": "texture",
         "texture": "FurnitureBits"
@@ -546,7 +582,7 @@
     },
     {
       "name": "Decoration_keyboard",
-      "path": "KayKit Furniture Bits 1.0/Assets/gltf/keyboard.gltf",
+      "path": "custom/pbr/models/Decoration_keyboard.glb",
       "material": {
         "mode": "texture",
         "texture": "FurnitureBits"
@@ -570,7 +606,7 @@
     },
     {
       "name": "Decoration_star_yellow",
-      "path": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/star_yellow.gltf",
+      "path": "custom/pbr/models/Decoration_star_yellow.glb",
       "material": {
         "mode": "texture",
         "texture": "PlatformerYellow"
@@ -579,7 +615,7 @@
     },
     {
       "name": "Decoration_spring_pad_yellow",
-      "path": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/spring_pad_yellow.gltf",
+      "path": "custom/pbr/models/Decoration_spring_pad_yellow.glb",
       "material": {
         "mode": "texture",
         "texture": "PlatformerYellow"
@@ -588,7 +624,7 @@
     },
     {
       "name": "Decoration_coin_2_gold",
-      "path": "KayKit Board Game Bits 1.0/Assets/gltf/coin_2_gold.gltf",
+      "path": "custom/pbr/models/Decoration_coin_2_gold.glb",
       "material": {
         "mode": "texture",
         "texture": "BoardGameBits"
@@ -597,7 +633,7 @@
     },
     {
       "name": "Decoration_coin_2_copper",
-      "path": "KayKit Board Game Bits 1.0/Assets/gltf/coin_2_copper.gltf",
+      "path": "custom/pbr/models/Decoration_coin_2_copper.glb",
       "material": {
         "mode": "texture",
         "texture": "BoardGameBits"
@@ -606,116 +642,116 @@
     },
     {
       "name": "RotatorClockwise",
-      "path": "custom/models/rotator_clockwise.glb",
+      "path": "custom/pbr/models/RotatorClockwise.glb",
       "preserveSourceScale": true
     },
     {
       "name": "RotatorCounterClockwise",
-      "path": "custom/models/rotator_counter_clockwise.glb",
+      "path": "custom/pbr/models/RotatorCounterClockwise.glb",
       "preserveSourceScale": true
     },
     {
       "name": "LockPlate",
-      "path": "custom/models/lock_plate.glb",
+      "path": "custom/pbr/models/LockPlate.glb",
       "preserveSourceScale": true
     },
     {
       "name": "Lectern",
-      "path": "custom/models/lectern.glb",
+      "path": "custom/pbr/models/Lectern.glb",
       "preserveSourceScale": true
     },
     {
       "name": "Ladder",
-      "path": "custom/models/ladder.glb",
+      "path": "custom/pbr/models/Ladder.glb",
       "preserveSourceScale": true
     },
     {
       "name": "RotatorGear",
-      "path": "custom/models/rotator_gear.glb",
+      "path": "custom/pbr/models/RotatorGear.glb",
       "preserveSourceScale": true
     },
     {
       "name": "RotatorIconClockwise",
-      "path": "custom/models/rotator_icon_clockwise.glb",
+      "path": "custom/pbr/models/RotatorIconClockwise.glb",
       "preserveSourceScale": true
     },
     {
       "name": "RotatorIconCounterClockwise",
-      "path": "custom/models/rotator_icon_counter_clockwise.glb",
+      "path": "custom/pbr/models/RotatorIconCounterClockwise.glb",
       "preserveSourceScale": true
     },
     {
       "name": "MinecartRailStraight",
-      "path": "custom/models/minecart_rail_straight.glb",
+      "path": "custom/pbr/models/MinecartRailStraight.glb",
       "preserveSourceScale": true
     },
     {
       "name": "MinecartRailStop",
-      "path": "custom/models/minecart_rail_stop.glb",
+      "path": "custom/pbr/models/MinecartRailStop.glb",
       "preserveSourceScale": true
     },
     {
       "name": "MinecartRailCorner",
-      "path": "custom/models/minecart_rail_corner.glb",
+      "path": "custom/pbr/models/MinecartRailCorner.glb",
       "preserveSourceScale": true
     },
     {
       "name": "MinecartHandcar",
-      "path": "custom/models/minecart_handcar.glb",
+      "path": "custom/pbr/models/MinecartHandcar.glb",
       "preserveSourceScale": true
     },
     {
       "name": "ElevatorPlatform",
-      "path": "Kenney Platformer Kit/Models/GLB format/platform.glb"
+      "path": "custom/pbr/models/ElevatorPlatform.glb"
     },
     {
       "name": "GroundRock01",
-      "path": "custom/models/ground_rock_01.gltf",
+      "path": "custom/pbr/models/GroundRock01.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock02",
-      "path": "custom/models/ground_rock_02.gltf",
+      "path": "custom/pbr/models/GroundRock02.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock03",
-      "path": "custom/models/ground_rock_03.gltf",
+      "path": "custom/pbr/models/GroundRock03.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock04",
-      "path": "custom/models/ground_rock_04.gltf",
+      "path": "custom/pbr/models/GroundRock04.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock05",
-      "path": "custom/models/ground_rock_05.gltf",
+      "path": "custom/pbr/models/GroundRock05.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock06",
-      "path": "custom/models/ground_rock_06.gltf",
+      "path": "custom/pbr/models/GroundRock06.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock07",
-      "path": "custom/models/ground_rock_07.gltf",
+      "path": "custom/pbr/models/GroundRock07.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock08",
-      "path": "custom/models/ground_rock_08.gltf",
+      "path": "custom/pbr/models/GroundRock08.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock09",
-      "path": "custom/models/ground_rock_09.gltf",
+      "path": "custom/pbr/models/GroundRock09.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock10",
-      "path": "custom/models/ground_rock_10.gltf",
+      "path": "custom/pbr/models/GroundRock10.glb",
       "preserveSourceScale": true
     }
   ],

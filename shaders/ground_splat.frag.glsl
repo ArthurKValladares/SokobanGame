@@ -98,6 +98,7 @@ float gridMask()
 
 #define POINT_SHADOW_TAPS 1
 #include "PointShadow.glsl"
+#include "PbrLighting.glsl"
 
 // One-based handle -> texture array index; returns false when unresolved.
 bool resolveTexture(float handle, out int index)
@@ -107,6 +108,14 @@ bool resolveTexture(float handle, out int index)
     }
     index = max(int(handle - 1.0 + 0.5), 0);
     return true;
+}
+
+vec3 sampleGroundData(float handle, vec2 uv, vec3 fallback)
+{
+    int index = 0;
+    return resolveTexture(handle, index)
+        ? texture(modelTextures[nonuniformEXT(index)], uv).rgb
+        : fallback;
 }
 
 void main()
@@ -132,6 +141,7 @@ void main()
     vec2 uv = worldTile / GROUND_UV_TILES;
 
     vec4 materialColor = draw.color;
+    float weight = 0.0;
     int baseIndex = 0;
     int detailIndex = 0;
     int splatIndex = 0;
@@ -144,7 +154,6 @@ void main()
                 modelTextures[nonuniformEXT(detailIndex)], uv).rgb;
             // The splat map spans the board once. Its size tells us how many
             // tiles that is, so world tile -> 0..1 needs nothing pushed.
-            float weight = 0.0;
             if (resolveTexture(draw.textureOptions.z, splatIndex)) {
                 vec2 splatBoardTiles = max(
                     vec2(textureSize(
@@ -166,30 +175,45 @@ void main()
         materialColor.rgb *= blended;
     }
 
+    // Data maps use the exact same world UVs and splat weights as albedo.
+    // Unregistered companion maps retain a neutral normal and matte response.
+    vec3 baseNormal = sampleGroundData(draw.passData[0].x, uv, vec3(.5, .5, 1.0)) * 2.0 - 1.0;
+    vec3 detailNormal = sampleGroundData(draw.passData[0].y, uv, vec3(.5, .5, 1.0)) * 2.0 - 1.0;
+    vec3 tangentNormal = normalize(mix(baseNormal, detailNormal, clamp(weight, 0.0, 1.0)));
+    vec3 orm = mix(
+        sampleGroundData(draw.passData[0].z, uv, vec3(1.0, 1.0, 0.0)),
+        sampleGroundData(draw.passData[0].w, uv, vec3(1.0, 1.0, 0.0)),
+        clamp(weight, 0.0, 1.0));
     vec3 color = mix(materialColor.rgb, draw.gridColor.rgb, gridMask());
-    // Stays zero for anything unlit, so occlusion cannot touch a surface with
-    // no ambient term to occlude.
     float ambientMask = 0.0;
     if (length(inNormal) > 0.0001) {
-        vec3 normal = normalize(inNormal);
+        vec3 geometricNormal = normalize(inNormal);
+        // Ground UVs increase in world X and Y. Rebuild the frame for the
+        // supplied geometric normal instead of using the quad's default tangent.
+        vec3 tangent = normalize(vec3(1.0, 0.0, 0.0) -
+            geometricNormal * geometricNormal.x);
+        vec3 bitangent = cross(geometricNormal, tangent);
+        vec3 normal = normalize(tangent * tangentNormal.x +
+            bitangent * tangentNormal.y + geometricNormal * tangentNormal.z);
         vec3 lightDirection = length(draw.sunDirectionAndAmbientGreen.xyz) > 0.0001
             ? normalize(draw.sunDirectionAndAmbientGreen.xyz)
             : vec3(0.0, 0.0, 1.0);
-        // Lambert, matching the diffuse half of the Cook-Torrance model
-        // triangle.frag moved to in F3c. The ground and the models standing
-        // on it have to agree about where the terminator is; they used to
-        // share a wrapped-diffuse blend and this is what keeps them sharing
-        // one response now that the models are physically based. The ground
-        // stays specular-free, as it has always been.
-        float lambertDiffuse = max(dot(normal, lightDirection), 0.0);
-        float diffuse = lambertDiffuse;
         vec3 ambient = vec3(
             draw.normalAndAmbientRed.w,
             draw.sunDirectionAndAmbientGreen.w,
             draw.sunRadianceAndAmbientBlue.w);
-        float shadow = shadowFactor(inShadowPosition, lambertDiffuse);
+        float shadow = shadowFactor(inShadowPosition,
+            max(dot(geometricNormal, lightDirection), 0.0));
         float skyFill = smoothstep(-0.35, 1.0, normal.z);
-        vec3 pointDiffuseLighting = vec3(0.0);
+        float metallic = clamp(orm.b, 0.0, 1.0);
+        float roughness = clamp(orm.g, 0.045, 1.0);
+        vec3 f0 = mix(vec3(0.04), color, metallic);
+        vec3 diffuseAlbedo = color * (1.0 - metallic);
+        vec3 viewDirection = normalize(frame.cameraPositionAndNearPlane.xyz - inWorldPosition);
+        Shaded sun = shadeLight(normal, viewDirection, lightDirection,
+            draw.sunRadianceAndAmbientBlue.rgb * shadow, diffuseAlbedo, f0, roughness);
+        vec3 diffuseLight = sun.diffuse;
+        vec3 specularLight = sun.specular;
         int pointLightCount = clamp(int(frame.pointLightMeta.x + 0.5), 0, 8);
         for (int lightIndex = 0; lightIndex < pointLightCount; ++lightIndex) {
             PointLightData pointLight = frame.pointLights[lightIndex];
@@ -197,41 +221,25 @@ void main()
             float distanceSquared = dot(toLight, toLight);
             float normalizedDistanceSquared = distanceSquared *
                 pointLight.radianceAndInverseRangeSquared.w;
-            if (distanceSquared <= 0.00000001 ||
-                normalizedDistanceSquared >= 1.0) {
-                continue;
-            }
+            if (distanceSquared <= 0.00000001 || normalizedDistanceSquared >= 1.0) continue;
             vec3 pointDirection = toLight * inversesqrt(distanceSquared);
-            float pointLambert = max(dot(normal, pointDirection), 0.0);
-            if (pointLambert <= 0.0) {
-                continue;
-            }
-            float rangeWindow = 1.0 - normalizedDistanceSquared *
-                normalizedDistanceSquared;
-            float attenuation = rangeWindow * rangeWindow /
-                max(distanceSquared, 0.04);
-            pointDiffuseLighting +=
-                pointLight.radianceAndInverseRangeSquared.rgb * attenuation *
-                pointLambert * pointShadowFactorPrepared(
-                    pointLight, -toLight, -pointDirection, normal);
+            if (dot(normal, pointDirection) <= 0.0) continue;
+            float rangeWindow = 1.0 - normalizedDistanceSquared * normalizedDistanceSquared;
+            float attenuation = rangeWindow * rangeWindow / max(distanceSquared, 0.04);
+            vec3 radiance = pointLight.radianceAndInverseRangeSquared.rgb * attenuation *
+                pointShadowFactorPrepared(pointLight, -toLight, -pointDirection, geometricNormal);
+            Shaded point = shadeLight(normal, viewDirection, pointDirection,
+                radiance, diffuseAlbedo, f0, roughness);
+            diffuseLight += point.diffuse;
+            specularLight += point.specular;
         }
-        vec3 ambientTerm = ambient * (1.0 + skyFill * 0.35);
-        vec3 diffuseLighting = ambientTerm +
-            draw.sunRadianceAndAmbientBlue.rgb * diffuse * shadow +
-            pointDiffuseLighting;
-        // Weighed against the albedo, not against the light alone, so this
-        // means the same thing as the mask triangle.frag writes into the same
-        // channel: the share of the radiance leaving this pixel that came
-        // from ambient. The two used different definitions until F3c, and a
-        // saturated albedo pulled them apart, because the sun and the ambient
-        // term do not share a spectrum.
-        vec3 ambientContribution = ambientTerm * color;
-        color *= diffuseLighting;
-        ambientMask = clamp(
-            dot(ambientContribution, luminanceWeights) /
-                max(dot(color, luminanceWeights), 0.0001),
-            0.0,
-            1.0);
+        // Cavity AO and the scene's SSAO affect ambient only, as on model materials.
+        vec3 ambientContribution = ambient * (1.0 + skyFill * 0.35) *
+            (diffuseAlbedo + f0) * clamp(orm.r, 0.0, 1.0);
+        color = diffuseLight + ambientContribution +
+            specularLight * max(draw.passData[1].x, 0.0);
+        ambientMask = clamp(dot(ambientContribution, luminanceWeights) /
+            max(dot(color, luminanceWeights), 0.0001), 0.0, 1.0);
     }
 
     outColor = vec4(

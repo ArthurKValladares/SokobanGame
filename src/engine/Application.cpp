@@ -1483,9 +1483,7 @@ bool Application::applyLevel(
                         return assetManifest_.findTextureIdByName(name);
                     },
                     screenId);
-            requirements.requireTexture(textures.base);
-            requirements.requireTexture(textures.detail);
-            requirements.requireTexture(textures.splatMap);
+            requirements.requireGroundSplat(textures);
         }
     }
     renderer_.ensureAssets(requirements);

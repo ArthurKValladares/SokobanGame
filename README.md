@@ -1048,6 +1048,10 @@ static portion automatically.
 
 ## Content Pipeline
 
+The current model material pass, its coverage and regeneration commands are
+documented in [PBR art pass](docs/pbr-art-pass.md), including terrain maps,
+ground material blending, and the remaining procedural-surface art gaps.
+
 `assets/manifest.json` is the strict, versioned source of runtime models,
 textures, animations, sounds, music, tile visuals, and material behavior. A
 normal build runs `sokoban_content`, validates all reachable content, compiles

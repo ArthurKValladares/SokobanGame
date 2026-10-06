@@ -183,7 +183,9 @@ struct GpuDrawInstance {
     // use passData[0].x for the base index of their material range and y for
     // mixed-material back-face rejection. Nine-sliced textured quads use the
     // two-lane contract in NineSlice.hpp: source borders in passData[0] and
-    // target extent/scale in passData[1]. The full-screen SSAO pass uses this
+    // target extent/scale in passData[1]. Ground splats carry base/detail
+    // normal handles in passData[0].xy, base/detail ORM handles in zw, and
+    // the scene's specular strength in passData[1].x. The full-screen SSAO pass uses this
     // block for clipFromView while `vertices` carries its inverse; `color`
     // carries its physical sampling controls and `normalAndAmbientRed` carries
     // the half-resolution extent plus bilateral thresholds.
