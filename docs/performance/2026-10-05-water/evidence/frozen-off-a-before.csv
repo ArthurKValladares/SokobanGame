@@ -1,2 +1,0 @@
-timestamp, name, temperature.gpu, clocks.current.sm [MHz], clocks.current.memory [MHz], power.draw [W]
-2026/10/05 13:46:13.317, NVIDIA GeForce RTX 4060 Laptop GPU, 62, 1890 MHz, 7001 MHz, 13.22 W

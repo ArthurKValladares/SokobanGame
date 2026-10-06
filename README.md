@@ -8,7 +8,10 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 ## Current Features
 
 - Layered Sokoban movement with rocks, pressure-plate gates, pulse buttons, rotator
-  plates and elevators, goals, undo, restart, multi-screen levels, and completion tracking.
+  plates, lock plates, elevators, minecarts and rail gates, goals, undo, restart,
+  multi-screen levels, and completion tracking.
+- Rogue, knight, druid, witch and bard heroes with distinct movement abilities,
+  switchable hero control, and pushable mirrors that create hero copies.
 - Ice, ladders, conveyors, falling, configurable water layers, and four
   directional mirror types that can reflect players and movable units.
 - Four color-paired edge portals transport heroes and movable units from
@@ -42,7 +45,43 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 - Colored point lights attachable to mesh decorations, with per-light local
   offset, intensity, range, and omnidirectional shadows that add to the sun.
 
-## Controls
+## Default Controls
+
+| Action | Keyboard | Gamepad |
+| --- | --- | --- |
+| Move | `W`, `A`, `S`, `D` | D-pad or left stick |
+| Undo | `Z` | West button |
+| Restart | `R` | North button |
+| Cycle active hero | `Q` | Left shoulder |
+| Hold top-down view | `T` | Remappable |
+| Whole overworld map | `Tab` | Left trigger |
+| Preview screen | `V` | Right shoulder |
+| Confirm / interact (including mirrors) | `Space` | South button |
+| Menu back/options | `Escape` | Start button |
+
+Bindings can be changed from Options > Controls and are persisted in the
+shared settings profile. A keyboard binding may be a chord: hold Ctrl, Shift
+or Alt while pressing the key during capture. When several bindings on one key
+match the held modifiers, only the one needing the most modifiers fires, so
+`Ctrl+S` does not also move down.
+
+The ImGui workspace's top row provides a persistent 0x-10x Simulation Speed
+slider. Ctrl-clicking the slider accepts an arbitrary non-negative
+value, including values above 10x. Rendering and editor input stay at normal
+speed while gameplay, animation, transitions, timers, and particle effects
+advance from the same scaled simulation clock.
+
+Saves and settings are not migrated between profile formats while the game is
+in early development. When a build changes the format, files from older
+builds are renamed to `<name>.obsolete-format-<N>-<stamp>` in the save
+directory and the game starts fresh. Keyboard and Controller tabs show and remap their
+respective bindings independently. Binding rows and contextual gameplay
+prompts use Kenney Input Prompts glyphs. SDL3 identifies the active controller
+and supplies its physical face-button labels, so Xbox, PlayStation, Nintendo
+Switch, GameCube, and Steam Deck controls use their matching symbols; unknown
+controllers fall back to the generic glyph set.
+
+## Lecterns and Activate
 
 Lecterns are fixed blocks that open a reading box when a hero walks into them.
 Choose **Lectern** in the editor's tile palette, then select the stand in the
@@ -91,8 +130,12 @@ game step and then close, using their normal obstruction and crushing rules.
 - Vulkan SDK 1.3+ with `glslc` available for the game and renderer tests
 - A Vulkan-capable GPU and driver to run the game
 
-SDL3, miniaudio, nlohmann/json, stb, ImGui, and the Karla UI font are vendored.
-Texture decoding uses stb_image rather than platform-specific image APIs.
+SDL3, miniaudio, nlohmann/json, stb, ImGui, cgltf, VMA, and bc7enc16 are
+vendored. FreeType, HarfBuzz (including its GPU encoder), SheenBidi and
+libunibreak build from pinned local archives; Karla and Noto fallback fonts
+are included. No dependency download is required during configuration.
+See [text dependencies](third_party/text/README.md) for versions and licenses.
+Texture decoding uses stb_image.
 
 ## Build And Run
 
@@ -168,8 +211,9 @@ ctest --preset headless-tests
 ```
 
 `SOKOBAN_HEADLESS_TESTS_ONLY=ON` omits the game, content staging, renderer, and
-seven SDK-dependent tests: `vulkan_smoke`, `application_validation_teardown`,
-`vulkan_device_selection`, `vulkan_diagnostics`, `frame_descriptor_sync`,
+SDK-dependent tests: `vulkan_smoke`, `text_rendering`,
+`application_validation_teardown`, `vulkan_device_selection`,
+`vulkan_diagnostics`, `frame_descriptor_sync`,
 `gpu_abi`, and `texture_upload_plan`. All other test declarations and their
 production libraries are the same CMake targets used by full builds.
 
@@ -191,10 +235,12 @@ not use it (see the comment above `sokoban_enable_precompiled_headers` in
 
 ## Tests
 
-The project currently registers CTest suites covering rules, level parsing,
+CTest suites cover rules, level parsing,
 campaign and gameplay sessions, persistence, input routing,
 player UI, renderer state, scene preparation and picking, editor transactions,
-assets, animation, particles, tasks, logging, and content packaging.
+assets, animation, particles, tasks, logging, text rendering, and content
+packaging. Use `ctest --preset dev --show-only` to list the current registry;
+availability depends on platform and configuration.
 
 ```powershell
 cmake --build build --config Debug
@@ -203,10 +249,11 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure --no-tests=error
 ```
 
-Each suite is still its own CTest test, but suites are linked into a few
-runner executables instead of one program each: `sokoban_vulkan_tests` for
-suites that need the renderer, `sokoban_tests` for the rest, and
-`sokoban_profile_tests` on its own because it replaces global `operator new`.
+Most suites share runner executables: `sokoban_vulkan_tests` for suites that
+need the renderer and `sokoban_tests` for the others. `player_profile`,
+`scene_preparation_allocations`, and `text_rendering` have standalone
+executables for their allocation hooks or GPU fixture. CMake also registers
+the application teardown and Windows packaging gates separately.
 To run one suite directly, pass its CTest name: `sokoban_tests rules`
 (`sokoban_tests --list` prints them). Sanitizer builds default to one
 executable per suite (`SOKOBAN_TEST_RUNNERS=OFF`); see `sokoban_add_test` in
@@ -344,11 +391,11 @@ final 120 measured frames. Reports include complete application frame time,
 frame intervals and pacing, update/UI/build costs, particle draw counts,
 special-shader coverage, and a separate GPU particle phase. Screenshot
 readback and encoding are excluded from the timing window. Debug evidence
-also exports the application CPU trace. To reproduce the reported Debug
-slowdown and its controls:
+also exports the application CPU trace. To measure a Debug build and its
+developer-workspace controls:
 
 ```powershell
-.\tools\RunPerformanceSuites.ps1 -BuildDirectory out\visual-studio -Configuration Debug
+.\tools\RunPerformanceSuites.ps1 -BuildDirectory out\dev -Configuration Debug
 ```
 
 The CPU suite also measures repeated editor document classification and level
@@ -359,11 +406,8 @@ GPU cases archive clocks,
 temperature, power, and throttling reasons before and after the run. Use those
 snapshots and the repeated baselines to identify hardware drift.
 
-See [the October 3 investigation](docs/performance/2026-10-03-gameplay/README.md)
-for measurements, fixes, and the remaining optimization priorities.
-The [October 5 water follow-up](docs/performance/2026-10-05-water/README.md)
-records the static cell feature cache, paired GPU measurements and image
-comparisons. Use `--disable-water-cell-cache` for its procedural control;
+Water rendering caches static cell features. Use `--disable-water-cell-cache`
+for the procedural control;
 the full performance matrix includes this comparison on level 5, screen 5.
 
 Every quick and full GPU matrix also records a `vsync-disabled` control. Its
@@ -372,10 +416,11 @@ large FIFO frame-fence wait to be separated from GPU backpressure or an
 actionable synchronization stall. For an isolated comparison, pass
 `--evidence-disable-vsync` with an ordinary `--evidence-output` capture.
 
-`scene_preparation_allocations` is a separate deterministic CTest regression:
+`scene_preparation_allocations` is a standalone deterministic CTest regression:
 after warm-up, serial scene preparation, parallel scene preparation, and
 `TaskSystem::parallelFor` coordination must complete 64 representative runs
-with zero general-heap allocations. The parallel scene path uses
+with zero C++ general-heap allocations. It also checks warmed gameplay,
+editor, UI, input and profiler paths. The parallel scene path uses
 `TaskSystem::scopedTask`, whose callable and completion state stay on the
 waiting stack instead of allocating `packaged_task`/`future` shared state;
 `parallelFor` keeps its join-before-return coordination state there too.
@@ -460,44 +505,11 @@ the available log and dump paths and asks players to include them in a support
 report. The dump is intentionally kept out of the install folder; its matching
 PDB belongs in the separately retained Symbols ZIP.
 
-## Default Controls
-
-| Action | Keyboard | Gamepad |
-| --- | --- | --- |
-| Move | `W`, `A`, `S`, `D` | D-pad or left stick |
-| Undo | `Z` | West button |
-| Restart | `R` | North button |
-| Hold top-down view | `T` | Remappable |
-| Confirm / interact (including mirrors) | `Space` | South button |
-| Menu back/options | `Escape` | Start button |
-
-Bindings can be changed from Options > Controls and are persisted in the
-shared settings profile. A keyboard binding may be a chord: hold Ctrl, Shift
-or Alt while pressing the key during capture. When several bindings on one key
-match the held modifiers, only the one needing the most modifiers fires, so
-`Ctrl+S` does not also move down.
-
-The ImGui workspace's top row provides a persistent 0x-10x Simulation Speed
-slider. Ctrl-clicking the slider accepts an arbitrary non-negative
-value, including values above 10x. Rendering and editor input stay at normal
-speed while gameplay, animation, transitions, timers, and particle effects
-advance from the same scaled simulation clock.
-
-Saves and settings are not migrated between profile formats while the game is
-in early development. When a build changes the format, files from older
-builds are renamed to `<name>.obsolete-format-<N>-<stamp>` in the save
-directory and the game starts fresh. Keyboard and Controller tabs show and remap their
-respective bindings independently. Binding rows and contextual gameplay
-prompts use Kenney Input Prompts glyphs. SDL3 identifies the active controller
-and supplies its physical face-button labels, so Xbox, PlayStation, Nintendo
-Switch, GameCube, and Steam Deck controls use their matching symbols; unknown
-controllers fall back to the generic glyph set.
-
 ## Level Format
 
 Screens are text `.scr` files containing sequential `@layer N` sections. Each
 authored screen declares `@character rogue`, `@character knight`,
-`@character druid`, or `@character witch`; legacy screens without the
+`@character druid`, `@character witch`, or `@character bard`; screens without the
 directive default to the rogue.
 An optional `@water N` directive makes Air on that layer resolve to Water and
 extends the water beyond the authored board without expanding camera bounds.
@@ -570,6 +582,7 @@ Common tile symbols:
 | `#` | Wall | `C` | Player |
 | `Q K U H B` | Rogue / Knight / Druid / Witch / Bard starts | | |
 | `R` | Rock | `P` | Pressure plate |
+| `b` | Pulse button | `J` | Lock plate |
 | `G` | Gate | `E` | End |
 | `)` | Rotator (clockwise) | `(` | Rotator (counter-clockwise) |
 | `=` | Elevator platform | | |
@@ -577,6 +590,9 @@ Common tile symbols:
 | `W` | Legacy explicit water | | |
 | `^ v > <` | Conveyors | `1 2 3 4` | Mirror orientations |
 | `D` | Decorative block | `N` | Enemy |
+| `T` | Lectern | `M` | Minecart |
+| `g` | Minecart gate | `! _` | Rail stops (north/south, east/west) |
+| `O o p q` | Portals (north, east, south, west) | | |
 | `n e s w` | Turrets facing north/east/south/west | | |
 
 Decorative blocks render but have no gameplay, support, occupancy, camera-fit,
@@ -660,13 +676,13 @@ stop or no linked plates never moves. Its stops are edited under Elevator
 Stops in the ImGui Tiles palette: type them as `0, 3, 5, 7`, and the editor
 shows the other stops as dithered platforms.
 
-Pressure plates, Rotators and Ends share the Plate tile property
-(`TileProperty::Plate`): they are floor tiles that heroes, rocks, ice blocks,
-turrets, enemies and mirrors can stand on, and each reacts to what occupies it.
+Pressure plates, buttons, rotators, lock plates, portals, rail stops and Ends use
+the Plate tile property (`TileProperty::Plate`) to support authored occupants.
 A screen can start with something already on a plate: the layer grid holds the
 occupant and a `@plate {"cell":[x,y,z],"tile":"<plate name>"}` line records the
-plate beneath it (the tile name is `Pressure`, `End`, `Rotator Clockwise` or
-`Rotator Counter-Clockwise`). In the example above, a mirror starts on the
+plate beneath it. Use the display name from `src/engine/TileTypes.hpp`, such as
+`Pressure`, `End`, `Button`, `Lock Plate`, `Rotator Clockwise`, `Portal North`
+or `Rail Stop East-West`. In the example above, a mirror starts on the
 Rotator. In the editor, painting a unit or mirror onto a plate, or a plate under
 a unit or mirror, stacks the two; erasing lifts the occupant off and leaves the
 plate; any other tile replaces the whole stack. Units and mirrors can also be
@@ -687,7 +703,7 @@ mirror presses a pressure plate while standing on it. Pushing a mirror off an
 End exposes it for a hero, and that End counts towards completion.
 
 A screen is complete when every living hero stands on an End and every End
-holds a hero. Pressure plates no longer affect completion directly. A screen
+holds a hero. Pressure plates control devices rather than completion. A screen
 with more Ends than heroes therefore needs mirror copies of a hero to finish;
 a rock on an End does not count.
 
@@ -992,41 +1008,6 @@ already cover the required plates. Knights are excluded because chain pushes
 can break that pattern. Mechanics that can invalidate either proof disable its
 static portion automatically.
 
-### Improving the solver (future work)
-
-The feature-aware best-first solver solves level 3 screen 2, which the earlier
-Manhattan-guided search could not solve after 5 million positions. Further
-ideas, roughly in order of payoff:
-
-- **Cooperative elevator search completeness.** Level 5 screen 1 has a verified
-  68-input production replay, but the current best-first search reported
-  exhausted after 25,593 generated positions. Investigate walking-region
-  canonicalization when one hero boards an elevator and another activates it.
-  That cause is not yet established; an exhausted search is not currently
-  proof that such a puzzle is unsolvable.
-- **More deadlock patterns.** Unit-count feasibility, static dead cells,
-  complete rock-to-plate reachability matching, and sealed 2x2 rock/blocker
-  freezes are implemented for the feature sets where each proof is sound. Next
-  are recursive multi-rock freezes, larger wall groups, and feature-aware
-  proofs for water, mirrors, ice, and character abilities.
-- **Extend the relaxed estimate.** Distinct unit-to-plate assignment over
-  push, bridgeable-water, and mirror edges is implemented. Next, assign heroes
-  to Ends through their reachable walking components and price the rocks that
-  must actually be sacrificed to bridge water, plus ice and conveyor motion.
-- **Mirror-aware moves.** Treat "walk to a spot and interact with a mirror"
-  as one move and skip mirror activations that change nothing, so hero
-  copies do not multiply the search.
-- **More symmetry reduction.** Packed binary keys, walking-region
-  canonicalization, and cached walking-component membership are implemented.
-  Sorting truly interchangeable rocks (and proving which other entities are
-  interchangeable) would merge more equivalent positions without sacrificing
-  mechanic-specific identity.
-- **Iterative deepening (IDA\*)** so memory stops being the limit, and
-  running independent branches on several threads.
-- **Seeding from a human solve.** Start from a recorded solution and
-  search for shorter ones, which also checks that a screen still has the
-  intended difficulty after edits.
-
 ## Content Pipeline
 
 `assets/manifest.json` is the strict, versioned source of runtime models,
@@ -1132,17 +1113,6 @@ are prefetched to reduce level-transition stalls. Decoration model references
 participate in the same requirement collection, validation, staging, and
 prefetch path as gameplay models.
 
-## Release Package
-
-```powershell
-cmake --build build --config Release
-cmake --install build --config Release --prefix build\install
-cmake --build build --config Release --target package
-```
-
-CPack produces a platform/architecture-named ZIP containing the executable,
-staged assets, and third-party licenses.
-
 ## Architecture
 
 - `src/engine/Rules.*`: pure gameplay rules over `Level` and `GameState`.
@@ -1170,12 +1140,21 @@ staged assets, and third-party licenses.
   registration and staged dependency mirroring for selected decoration meshes.
 - `src/engine/Application.*`: composition, SDL event loop, and lifecycle.
 - `src/engine/ui/`: reusable player-facing UI and pure menu reduction.
+- `src/engine/ui/FontAtlas.*` and `TextLayout.*`: UTF-8
+  shaping, font fallback, text measurement, glyph caching and analytic icons.
 - `src/engine/render/`: Vulkan-free scene preparation plus decomposed Vulkan
   device, swapchain, pass, descriptor, model, pipeline, and recorder owners.
 - `src/engine/TaskSystem.*`, `AsyncSaveStore.*`, and `LogQueue.*`: background
   work for assets, persistence, and bounded asynchronous logging.
 - `shaders/`: GLSL compiled to SPIR-V by CMake.
-- `tests/`: headless regression suites.
+- `tests/`: SDK-independent regression suites, Vulkan fixtures, allocation
+  checks and the dedicated performance runner.
 
-See `HANDOFF.md` for implementation invariants, subsystem details, historical
-decisions, and guidance for continuing development.
+Source assets and their licenses, authored `levels/`, recorded `solutions/`,
+maintained `docs/` and examples, build/CI configuration, and tools belong in
+source control. Keep generated reports, screenshots, test output and temporary
+probes under ignored `out/` or a build directory. Dated reviews and completed
+implementation history remain available through Git history.
+
+See [HANDOFF.md](HANDOFF.md) for implementation invariants, current limitations
+and guidance for continuing development.

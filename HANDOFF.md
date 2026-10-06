@@ -1,10 +1,8 @@
 # Sokoban 3D handoff
 
-Updated 2026-09-14. This file contains current operating guidance and enduring
-contracts. The former chronological handoff is preserved at
-[`docs/history/HANDOFF-2026-09-09.md`](docs/history/HANDOFF-2026-09-09.md).
-The active code-quality assessment and its evidence are in
-[`docs/reviews/2026-09-11-code-quality/README.md`](docs/reviews/2026-09-11-code-quality/README.md).
+Updated 2026-10-06. This file describes current operating guidance, implementation
+contracts and known limitations. [README.md](README.md) covers player controls,
+authoring formats, supported commands and packaging.
 
 ## Current status
 
@@ -12,45 +10,70 @@ Sokoban 3D is a C++20, SDL3, Vulkan 1.3 project. Runtime content is declared by
 `assets/manifest.json`, staged by `sokoban_content`, and validated against
 `content.index` at startup.
 
-The full Windows configuration currently registers 86 CTest suites (85 on
-Linux). The Vulkan-free `headless-tests` preset registers 78; it omits seven
-SDK-dependent suites, while the Windows-only shipping-package gate accounts for
-the eighth difference. Do not copy these counts into new scripts. CTest is the source of
-truth.
+Gameplay includes five hero types, pushable mirrors and copies, linked movable
+objects, portals, buttons, rotators, lock plates, elevators, minecarts, and
+lecterns. Rules, replay and solver search share the production action planner.
+Developer builds expose transactional level/asset/animation editors, live tuning,
+shader reload, profiling and source watching.
 
-The 14 actionable findings in the September 3 code-quality review are resolved.
-Subsequent maintainability work has:
+The player UI shapes UTF-8 with HarfBuzz and SheenBidi, uses FreeType coverage
+for small text and analytic outlines for large text, and supports inline vector
+and texture icons. See [docs/text-rendering.md](docs/text-rendering.md).
 
-- introduced typed asynchronous persistence results and documented ownership;
-- centralized changed-entity interpretation, manifest texture identity, and
-  numbered puzzle paths;
-- added shared assertions and collision-safe scoped test directories;
-- completed immediate PBR material discovery for editor-appended models;
-- enabled warnings-as-errors for Linux and Windows CI; and
-- removed the obsolete undefined-member probe and stale shader commentary.
+CTest is the source of truth for suite availability: use
+`ctest --preset dev --show-only`. SDK-free builds omit renderer/device suites;
+the package gate is Windows-only. Keep counts out of scripts and operating
+instructions.
 
-The September 11 review records 13 recommendations with evidence, acceptance
-criteria, and an implementation order. Packets 1 through 5 were implemented on
-September 14: document/draft/selector and asset-association identity remapping,
-save-loading resilience, semantic setting-choice values, completion-safe
-concurrent presentation, prepared-texture invalidation, complete Vulkan
-descriptor-limit accounting, bounded residency admission, and failure-safe
-painted-texture replacement, plus defined water-ripple derivatives across
-depth-dependent geometry boundaries. The full 80-test Debug and Release
-registries pass in the warnings-as-errors configuration. Packets 6 and 7 are
-complete: options remain usable throughout the supported window range, failed
-slot selection cannot start a game against the previous slot, unreachable
-completion/selection menus and their plumbing are gone, and the review's local
-comment and indentation defects are corrected. Packet 8's automated final
-matrix is also complete: Debug and Release pass all 80 tests, a fresh
-Vulkan-disabled build passes all 72 headless tests, the shipping ZIP passes its
-fresh-extraction 240-frame gate, and a required-validation Debug run completes
-240 frames on the local NVIDIA GPU without validation errors. The remaining
-manual hardware, display, controller, signing, upgrade, and uninstall rows in
-`packaging/ReleaseValidation.md` are release-signoff work, not unfinished code
-review packets.
-Broader refactoring or efficiency work still requires a concrete maintenance
-problem or measurement.
+See Current validation and limitations below for the latest local baseline.
+Real-device, display, controller, signing, upgrade and uninstall acceptance
+remains release-signoff work in
+[packaging/ReleaseValidation.md](packaging/ReleaseValidation.md).
+
+## Current validation and limitations
+
+The October 6 local Windows rebuilds of `dev-all` and `dev-fast-all` completed
+with warnings-as-errors. `ctest --preset dev-fast` passed all 96 registered
+suites, including content imports/staging, solution replay, Vulkan smoke, text
+rendering and the package-validation fixture. `ctest --preset dev` passed
+95 of 96: `scene_preparation_allocations` reports allocations in warmed
+gameplay, editor, menu and profiler paths. Its scene-preparation and parallelFor
+checks remain allocation-free. The Debug failure is an open validation issue;
+the optimized configuration passes that suite. Reproduce it with
+`ctest --preset dev -R '^scene_preparation_allocations$' --output-on-failure`
+before claiming a passing Debug baseline. No source code changed in this
+documentation/output cleanup.
+
+Linux, sanitizer/static-analysis configurations, a fresh headless build, and
+Release/shipping packages were not rebuilt for this cleanup. A passing package
+fixture is not acceptance of a newly produced shipping ZIP. Follow the full
+release checklist before publication.
+
+Player profiles still use a fresh-start policy for older formats rather than
+migrations. Define compatibility before promising public-release save upgrades.
+Source models require a restart after edits. Text supports the configured
+fallback scripts; color emoji, bitmap-only fonts and a localization-resource
+system are not implemented. Additional scripts need licensed fallback fonts.
+
+## Text and lectern contracts
+
+- Measurement and drawing share cached `TextLayout` results. Keep shaping,
+  bidirectional ordering, grapheme boundaries and line breaking consistent;
+  never split UTF-8 or a binding chord while wrapping lectern text.
+- `FontAtlas` owns pinned HarfBuzz/FreeType integration and the analytic encoder.
+  Upgrade the HarfBuzz GPU encoder and `shaders/include/HbGpu.glsl` together.
+  Preserve fallback-face em scale, weight and baseline conventions. Detailed
+  atlas budgets and lifetime rules are in [docs/text-rendering.md](docs/text-rendering.md).
+- Atlas changes use fence-owned upload buffers and ordered sampling/write
+  barriers. Runtime glyph insertion must not require queue/device idle.
+  The display target remains at least native window resolution independently
+  of scene render scale, including the docked Game Viewport.
+- Input action names, saved keys, labels, aliases, contexts and defaults come
+  from `InputActions.def`. Lectern tags resolve that registry and the current
+  bindings/device theme. Unknown or unbound actions show an inline error.
+- Reading a lectern pauses gameplay when there is no movement input. Walking
+  away closes it; Activate or Back closes it and requires movement release
+  before reopening the same book. Font limits live in `ui/LecternConfig.hpp`.
 
 ## Build and validation
 
@@ -65,7 +88,9 @@ ctest --preset dev
 ```
 
 `--preset release` (and `release-all`, `ctest --preset release`) is the same
-Ninja build optimized, in `out/release`, without editor tools.
+Ninja build optimized, in `out/release`, without editor tools. The
+`dev-check`, `dev-fast-check` and `release-check` workflow presets each
+configure, build all targets and run their tests.
 
 Optimized authoring uses `dev-fast`: RelWithDebInfo with the full editor, live
 tuning, profiler, source-content paths, automatic recordings and debugger
@@ -315,15 +340,16 @@ and the required real-device checks are recorded.
 - Every unit carries `quarterTurns` (0-3, clockwise). Turret firing direction
   is `rules::turretDirection` (authored tile turned by `quarterTurns`); do not
   read turret direction from the tile type alone. Profiles write the field only
-  when non-zero and read it as optional, so no format bump was needed. The
+  when non-zero and read it as optional. The
   solver key includes it. Solution digests hash rotator links only for screens
   that have rotators. Gate links and start-open state are also hashed; changing
   either requires a fresh recording.
-- Plates are the tiles with `TileProperty::Plate` (pressure plates, rotators,
-  Ends). New plate kinds get the property in the tile table; code asks
+- Plates are the tiles with `TileProperty::Plate`, including pressure plates,
+  buttons, rotators, lock plates, portals, rail stops and Ends. New plate kinds get
+  the property in the tile table; code asks
   `tileTypeIsPlate`, and anything that asks "what plate is here" must use
-  `Level::plateAt`, not `tileAt`: a unit authored on a plate leaves the plate
-  in the static grid, but a mirror is itself static and covers it. `@plate`
+  `Level::plateAt`, not `tileAt`: movable units, including mirrors, leave the
+  underlying plate in the static grid. `@plate`
   records (`Level::Plate`, `Level::coveredPlates`) hold plates authored beneath
   an occupant; the editor keeps them in `document_.plates` and every command
   that moves, crops or deletes cells must update them like gate records.
@@ -345,11 +371,17 @@ and the required real-device checks are recorded.
   it only for start-open gates, so older digests are unchanged. The solver
   heuristic treats a gate as floor (optimistic); gates already keep the
   static dead-position proof off.
-- Mirrors turned by rotators live in `GameState::turnedMirrors` (sorted,
-  non-zero only) and travel in `StateDelta::mirrors`, keyed by cell because
-  mirrors never move. Rules read a mirror's current orientation through
-  `rules::mirrorTileAt`. The solver heuristic still uses authored mirror
-  orientations; that only affects search ordering.
+- Live mirrors are movable entities: position and rotation travel in
+  `GameState::movables` and `StateDelta::movables`. The cell-keyed
+  `turnedMirrors`/`StateDelta::mirrors` path supports static-mirror compatibility.
+  Rules resolve orientation through `rules::mirrorTileAt`; callers must use
+  live state for moved mirrors. Heuristics remain optimistic and affect search
+  ordering rather than acceptance.
+- Completion requires every living hero on an End and every End occupied by a
+  hero. Pressure plates drive devices; a rock or mirror on an End cannot satisfy
+  completion. Space/Activate pulses all buttons occupied by living heroes and
+  activates eligible mirrors together. Button state belongs in deltas, solver
+  identity and replay expectations.
 - Pressure-plate links are authored by color, and only in the editor.
   `LevelEditor` keeps a color for every pressure plate
   (`Document::plateColors`) and device; a device is linked to the plates of
@@ -383,7 +415,7 @@ and the required real-device checks are recorded.
   units join the closure and count as moved for turrets and attacks.
   `StateDelta::elevators` carries platform changes by index, the solver key
   appends them only when present, the profile writes `elevators` only when
-  non-empty (no format bump), and solution digests hash elevator records only
+  non-empty, and solution digests hash elevator records only
   for screens that have them. Reservations claim a moving platform's whole
   shaft (`addElevatorReservations`). Presentation animates platforms as
   `EntityKind::Elevator` motion tracks; a leg in which a platform moves runs
@@ -449,8 +481,8 @@ and the required real-device checks are recorded.
   flight; update only after that frame's fence and preserve the compute-write
   to fragment-read barrier. Pipeline reloads invalidate both windows. Fragment
   specialization constant 1 enables the cache; `--disable-water-cell-cache`
-  removes lookup work for a procedural performance control. Measurements and
-  image comparisons are in `docs/performance/2026-10-05-water/README.md`.
+  removes lookup work for a procedural performance control. Compare it using
+  `tools/RunPerformanceSuites.ps1` on the same hardware and power state.
 - One-shot command-buffer and fence lifetime belongs to
   `vulkanResources::beginOneShotCommands` and `submitOneShotCommands`. Preserve
   their cleanup behavior and diagnostic labels.
@@ -464,26 +496,25 @@ Do not split `VulkanModelResources` merely to reduce file length. Its texture,
 model, residency, publication, and retirement state has interleaved lifetimes;
 extract a component only when the new owner makes a transition easier to prove.
 
-Do not add a transfer queue, secondary command buffers, update-after-bind
-descriptors, or a new task/allocator architecture without a measured workload
-showing the current design is the bottleneck. Prior captures found the frame
-GPU-bound and publication work bounded to startup. Historical measurements and
-reproduction commands are in the archived handoff and `docs/render-evidence/`.
+Use a measured workload before adding a transfer queue, secondary command
+buffers, update-after-bind descriptors, or a new task/allocator architecture.
+Run the maintained performance suite and application evidence modes to establish
+current CPU/GPU costs, synchronization waits and publication pressure.
 
 Keep point-shadow sampling policy deliberate: the scene and ground select
 different tap counts from `shaders/include/PointShadow.glsl` because their cost
 scales differently. Validate changes with the point-light evidence modes.
 
-Startup construction now overlaps audio initialization and independent Vulkan
+Startup construction overlaps audio initialization and independent Vulkan
 resource setup, applies the saved window mode before the first swapchain, and
 emits first-frame plus Vulkan/audio subphase timings. The comprehensive
-performance runner records matched cold/warm application launches. Current
-measurements and remaining driver-owned costs are documented in
-`docs/performance/2026-09-29-startup/README.md`.
+performance runner records matched cold/warm application launches. Collect a
+fresh baseline when changing those paths.
 
 ## Documentation rule
 
-Update this file when an enduring contract, supported command, or immediate
-next step changes. Put dated measurements and completed implementation history
-under `docs/` and link them here. Do not append another chronological roadmap
-to the root handoff.
+Update this file when an enduring contract, supported command, current limitation
+or immediate next step changes. Keep maintained design documentation and examples
+under `docs/`; write generated reports, captures and temporary probes under
+ignored `out/` or the build directory. Completed history is available through Git.
+Replace stale validation results instead of appending a chronological roadmap.

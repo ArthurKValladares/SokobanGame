@@ -8,5 +8,13 @@ imgui.ini
 __pycache__/
 *.pyc
 
+# Generated diagnostics and local validation outputs.
+/Testing/
+/test-output/
+/performance-results/
+/profiling/
+/evidence/
+/Claude outputs/
+
 # Recordings of unsaved editor drafts (see README.md > Solutions).
 solutions/drafts/

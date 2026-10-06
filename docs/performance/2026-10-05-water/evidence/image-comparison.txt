@@ -1,8 +1,0 @@
-Frozen: original shader versus final cache
-pixels=921600; changed=84; >1=1; >5=0; max=3/255; mean=0.00003111/255
-Frozen: specialized procedural control versus final cache
-pixels=921600; changed=84; >1=1; >5=0; max=3/255; mean=0.00003111/255
-Animated: original shader versus final cache
-pixels=921600; changed=78; >1=0; >5=0; max=1/255; mean=0.00002821/255
-Animated: specialized procedural control versus final cache
-pixels=921600; changed=78; >1=0; >5=0; max=1/255; mean=0.00002821/255
