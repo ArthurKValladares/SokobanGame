@@ -739,7 +739,14 @@ void exerciseTextureReplacementRetry(
 
     sokoban::RenderAssetRequirements requirements;
     requirements.requireTexture(texture);
-    (void)resources.waitForAssets(requirements);
+    if (!resources.waitForAssets(requirements)) {
+        throw std::runtime_error(
+            "Blocking texture upload did not request a descriptor refresh");
+    }
+    if (resources.waitForAssets(requirements)) {
+        throw std::runtime_error(
+            "Already resident texture unnecessarily requested a descriptor refresh");
+    }
     if (vkDeviceWaitIdle(deviceContext.device()) != VK_SUCCESS) {
         throw std::runtime_error(
             "Texture replacement test could not finish its initial upload");

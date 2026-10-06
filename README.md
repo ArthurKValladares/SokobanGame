@@ -793,7 +793,7 @@ editor commands but does not own document or filesystem policy.
 
   | Key | Action |
   | --- | --- |
-  | `Ctrl+S` | Save the document back to the file it came from (or the ground splat map while painting it) |
+  | `Ctrl+S` | Save the document and, when painting a blend mask, that mask |
   | `F5` | Play the draft; `F5` again returns to the editor without the confirmation dialog |
   | `Shift+F5` | Play a puzzle draft with its first hero moved to the cell under the pointer; the document is unchanged |
   | Hold `Alt` + click | Eyedropper: pick up the tile under the pointer, and its link color |
@@ -812,6 +812,26 @@ editor commands but does not own document or filesystem policy.
 - `+ Layer Below` and `+ Layer Above` insert undoable Air layers and preserve
   water-layer numbering.
 - Painting one cell beyond an edge expands every layer transactionally.
+- **Ground Paint** supports any number of screen-local splat maps. **Add Splat
+  Map** creates a board-sized blend mask and registers it in the asset manifest.
+  Choose each map's name, **Base Texture**, **Detail Texture**, **Blend Mask**,
+  and unique **Assignment Color** from the panel. Texture selectors use the
+  manifest's registered textures; add other textures through the Asset Manifest
+  editor. The first map is the default for unassigned ground tiles.
+  Enable **Paint Tile Assignments**, select a map's color, and click or drag
+  across ground tiles. Each drag is one document undo step; assignments remain
+  independent on different layers. **Show Assignment Colors** displays the
+  assignment palette; turn it off to see the textured result.
+  **Paint Blend Mask** edits the selected map's blend: white adds its detail
+  texture, black returns to its base texture. Masks cover a screen once at 32
+  texels per tile and should use linear color space with clamped sampling.
+  Save the document to keep map definitions and tile assignments; **Save Map**
+  saves the blend-mask image. `Ctrl+S` saves both. Existing screens retain their
+  original grass/rock blend masks. Legacy documents without definitions keep
+  the previous screen-map/fallback behavior.
+  Screen files store definitions as `@groundsplat` JSON records with `name`,
+  `base`, `detail`, `mask`, and RGB `color`, and assignments as `@groundpaint`
+  records with `cell: [x,y,z]` and `splat` (the map name), before `@layer 0`.
 - The Mesh Decorations tool scans source `assets/` for `.gltf` and `.glb`
   files in developer builds. Any discovered mesh can be selected: an unregistered
   mesh is automatically added to the source and staged manifests, along with

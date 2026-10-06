@@ -1,3 +1,4 @@
+@groundsplat {"name":"Ground","base":"GroundGrass","detail":"GroundRock","mask":"GroundSplatMap","color":[0.25,0.75,0.35]}
 @portal {"cell":[1,0,2],"color":[1.0,0.7200000286102295,0.11999999731779099]}
 @portal {"cell":[9,3,2],"color":[1.0,0.7200000286102295,0.11999999731779099]}
 

@@ -614,10 +614,11 @@ void appendGameplayWaterAndShorelines(
                 if (input.visibleCell && !input.visibleCell(cell)) {
                     continue;
                 }
-                appendLadderRungsForCell(
+                appendLadderSegmentsForCell(
                     frame,
                     cell,
-                    levelTileAt);
+                    levelTileAt,
+                    input.manifest);
             }
         }
     }
@@ -1864,6 +1865,24 @@ void applyScrollingMaterials(
     const RenderFrameBuilder::GameplayInput& input)
 {
     for (RenderFrameData::Tile& tile : frame.tiles) {
+        if (tile.effect == RenderSurfaceEffect::GroundSplat) {
+            bool composed = false;
+            for (const auto& region : input.groundSplatRegions) {
+                if (tile.cell.x >= region.origin.x && tile.cell.y >= region.origin.y &&
+                    tile.cell.x < region.origin.x + static_cast<int>(region.width) &&
+                    tile.cell.y < region.origin.y + static_cast<int>(region.height)) {
+                    if (region.definition) {
+                        applyGroundSplat(tile, input.manifest,
+                            region.definition->groundSplats, region.definition->groundPaint, region.origin);
+                    }
+                    composed = true;
+                    break;
+                }
+            }
+            if (!composed) {
+                applyGroundSplat(tile, input.manifest, input.level.groundSplats(), input.level.groundPaint());
+            }
+        }
         if (!tile.model.isCube() &&
             input.manifest.model(tile.model).hasScrollingMaterial()) {
             tile.beltScrollOffset = input.conveyorBeltScrollOffset;

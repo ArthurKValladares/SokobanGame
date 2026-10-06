@@ -227,6 +227,7 @@ private:
         GridPosition last;
     };
     std::optional<LinkColorStroke> linkColorStroke_;
+    std::optional<GridPosition3> groundAssignmentLast_;
 
     enum class EditorCursor : uint8_t {
         Default,
@@ -296,7 +297,7 @@ private:
         const VulkanRenderer::PreparedFrame& previousRenderFrame,
         Vec2 pointerPixels,
         VulkanRenderer& renderer);
-    void persistManifestTexture(
+    bool persistManifestTexture(
         const std::string& name,
         const std::string& relativePath);
 

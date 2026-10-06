@@ -2472,9 +2472,9 @@ private:
             }
             const RenderFrameData::GroundSplatRegion* splatRegion =
                 frameData.groundSplatRegionAt(face.cell);
-            const GroundSplatTextures& splatTextures = splatRegion
-                ? splatRegion->textures
-                : frameData.groundSplat;
+            const GroundSplatTextures& splatTextures = face.groundSplat
+                ? *face.groundSplat
+                : splatRegion ? splatRegion->textures : frameData.groundSplat;
             // A face in the opaque list can still carry a sub-1.0 alpha - the
             // editor's ladder-rung preview does - and those must keep the
             // blend unit. Everything else in this pass writes coverage it
@@ -2556,8 +2556,10 @@ private:
             } else if (
                 face.material == PreparedSurfaceMaterial::GroundSplat &&
                 splatTextures.valid()) {
-                const Vec2 splatOrigin = splatRegion
-                    ? Vec2 {
+                const Vec2 splatOrigin = face.groundSplat
+                    ? Vec2 { face.worldOrigin.x - static_cast<float>(face.groundSplatOrigin.x),
+                             face.worldOrigin.y - static_cast<float>(face.groundSplatOrigin.y) }
+                    : splatRegion ? Vec2 {
                           face.worldOrigin.x -
                               static_cast<float>(splatRegion->origin.x),
                           face.worldOrigin.y -

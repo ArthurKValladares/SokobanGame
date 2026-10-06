@@ -1,3 +1,4 @@
+@groundsplat {"name":"Ground","base":"GroundGrass","detail":"GroundRock","mask":"GroundSplatMap","color":[0.25,0.75,0.35]}
 @lectern {"cell":[4,3,1],"text":"You are not strong enough to push more than one rock at the same time."}
 @lectern {"cell":[0,5,1],"text":"Move with <!Move Up!>, <!Move Left!>, <!Move Down!>, <!Move Right!>"}
 @lectern {"cell":[2,5,1],"text":"You can move into a rock to push them."}

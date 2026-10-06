@@ -17,6 +17,7 @@
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 #include "engine/RenderFrameBuilder.hpp"
+#include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/RotatorVisuals.hpp"
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
@@ -72,6 +73,7 @@ const AssetManifest& testManifest()
       ],
       "models": [
         { "name": "Stone", "path": "stone.gltf" },
+        { "name": "Ladder", "path": "ladder.glb", "preserveSourceScale": true },
         { "name": "Glass", "path": "glass.gltf" },
         { "name": "Bricks", "path": "bricks.gltf" },
         {
@@ -169,6 +171,7 @@ const AssetManifest& testManifest()
       ],
       "tiles": [
         { "tile": "Wall", "model": "Bricks" },
+        { "tile": "Ladder", "model": "Ladder" },
         { "tile": "Rock", "model": "Stone" },
         { "tile": "Ice", "model": "Glass" },
         { "tile": "Conveyor Up", "model": "Conveyor" },
@@ -1247,6 +1250,83 @@ void testGameplayVisibleCellFiltersComposedWorldFrame()
     CHECK(std::ranges::none_of(frame.tiles, [](const RenderFrameData::Tile& tile) {
         return tile.model == testManifest().modelForTile(TileType::Rock);
     }));
+}
+
+void testLadderSectionsJoinAndFaceEveryAdjacentGroundWall()
+{
+    TEST("ladderSectionsJoinAndFaceEveryAdjacentGroundWall");
+    const Level level = Level::loadFromLayers({
+        { "...", "...", "..." },
+        { "C. ", ".L.", " . " },
+        { " . ", ".L.", " . " },
+        { " . ", ".L.", " . " },
+    }, "stacked ladders");
+    const auto state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    PresentationSettings settings;
+    // A generic tile scale must never open gaps in a vertical ladder run.
+    settings.setTileScale(TileType::Ladder, 0.5f);
+    const auto frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(), .level = level, .state = state,
+        .projectedState = state, .presentation = presentation,
+        .settings = settings,
+    });
+    const auto ladder = testManifest().modelForTile(TileType::Ladder);
+    CHECK(!ladder.isCube());
+    CHECK(renderAssetRequirementsForLevel(level, testManifest()).contains(ladder));
+    CHECK(std::ranges::count(frame.tiles, ladder, &RenderFrameData::Tile::model) == 12);
+    for (int z = 1; z <= 3; ++z) {
+        for (uint32_t turn = 0; turn < 4; ++turn) {
+            const auto segment = std::ranges::find_if(frame.tiles, [&](const auto& tile) {
+                return tile.model == ladder && tile.cell.z == z &&
+                    tile.modelRotationQuarterTurns == turn;
+            });
+            CHECK(segment != frame.tiles.end());
+            if (segment == frame.tiles.end()) {
+                continue;
+            }
+            CHECK(segment->cell == GridPosition3({ 1, 1, z }));
+            CHECK(segment->position == Vec2({ 1.0f, 1.0f }));
+            CHECK(segment->size == Vec2({ 1.0f, 1.0f }));
+            CHECK(segment->height == 1.0f);
+            CHECK(segment->baseElevation == static_cast<float>(z));
+            CHECK(segment->color == Vec4({ 1, 1, 1, 1 }));
+            CHECK(!segment->showGrid);
+            const auto transform = IsoScenePreparer::modelTransformPoints(*segment);
+            CHECK(near(transform.zPoint.z - transform.origin.z, 1.0f));
+        }
+    }
+    LevelEditor editor;
+    editor.newDocument(3, 3, false);
+    for (int z = 1; z <= 3; ++z) {
+        while (static_cast<int>(editor.documentLayers().size()) <= z) {
+            editor.setActiveLayer(static_cast<uint32_t>(editor.documentLayers().size() - 1));
+            editor.addLayerAbove();
+        }
+        for (GridPosition neighbor : { GridPosition { 1, 0 }, { 2, 1 }, { 1, 2 }, { 0, 1 } }) {
+            CHECK(editor.setCell({ neighbor.x, neighbor.y, z }, TileType::Ground));
+        }
+        CHECK(editor.setCell({ 1, 1, z }, TileType::Ladder));
+    }
+    const auto edited = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(), .editor = editor, .settings = settings,
+    });
+    CHECK(std::ranges::count(edited.tiles, ladder, &RenderFrameData::Tile::model) == 12);
+    for (const auto& tile : frame.tiles) {
+        if (tile.model == ladder) {
+            CHECK(std::ranges::find(edited.tiles, tile) != edited.tiles.end());
+        }
+    }
+    editor.setActiveLayer(3);
+    const auto preview = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(), .editor = editor, .settings = settings,
+        .hoverCell = GridPosition3 { 1, 1, 3 },
+        .editorPreviewTile = TileType::Ladder,
+    });
+    CHECK(std::ranges::count_if(preview.tiles, [&](const auto& tile) {
+        return tile.model == ladder && tile.isEditorPreview && near(tile.color.w, 0.62f);
+    }) == 4);
 }
 
 void testGateEnergyCubeFadesAndPressurePlateMatchesColor()
@@ -4287,6 +4367,87 @@ void testMinecartGateOpensForPassageAndClosesAfterUndo()
     CHECK(turned.isoFaces[0].vertices != editorFrame.isoFaces[0].vertices);
 }
 
+void testConfigurableGroundSplats()
+{
+    TEST("configurableGroundSplats");
+    const auto& manifest = testManifest();
+    Level::Definition definition {
+        .layers = { { ".." }, { "C " } },
+        .groundSplats = {
+            { "Meadow", "GroundGrass", "GroundRock", "GroundSplatMap", { 0, 1, 0 } },
+            { "Other", "GroundRock", "Tex", "GroundSplatMapOverworld7", { 1, 0, 0 } },
+        },
+        .groundPaint = { { { 1, 0, 0 }, "Other" } },
+    };
+    const Level level = Level::loadFromDefinition(definition, "custom splats");
+    const auto state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    const auto frame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest, .level = level, .state = state, .projectedState = state,
+        .presentation = presentation, .settings = {},
+    });
+    const auto ground = std::ranges::find(frame.tiles, GridPosition3 { 1, 0, 0 }, &RenderFrameData::Tile::cell);
+    CHECK(ground != frame.tiles.end());
+    CHECK(ground->groundSplat.has_value());
+    CHECK(ground->groundSplat->base == manifest.findTextureIdByName("GroundRock"));
+    CHECK(ground->groundSplat->detail == manifest.findTextureIdByName("Tex"));
+    CHECK(ground->groundSplat->splatMap == manifest.findTextureIdByName("GroundSplatMapOverworld7"));
+    const auto requirements = renderAssetRequirementsForLevel(level, manifest);
+    CHECK(requirements.contains(manifest.findTextureIdByName("Tex")));
+    CHECK(renderAssetRequirementsForFrame(frame).contains(manifest.findTextureIdByName("GroundSplatMapOverworld7")));
+    PreparedRenderScene prepared;
+    IsoScenePreparer {}.prepare(frame, { 800, 600 }, prepared);
+    const auto top = std::ranges::find_if(prepared.isoFaces, [](const PreparedIsoFace& face) {
+        return face.cell == GridPosition3 { 1, 0, 0 } && face.material == PreparedSurfaceMaterial::GroundSplat;
+    });
+    CHECK(top != prepared.isoFaces.end());
+    if (top != prepared.isoFaces.end()) CHECK(top->groundSplat == ground->groundSplat);
+
+    // Composed screens retain local cell assignments and their own mask origin.
+    const Level composed = Level::loadFromLayers({ { "...." }, { "C   " } }, "composed ground");
+    const auto composedState = rules::initialState(composed);
+    const std::array regions { RenderFrameBuilder::GameplayInput::GroundSplatRegion {
+        .screenId = 7, .origin = { 2, 0 }, .width = 2, .height = 1, .definition = &definition,
+    } };
+    const auto composedFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest, .level = composed, .state = composedState, .projectedState = composedState,
+        .presentation = presentation, .settings = {}, .groundSplatRegions = regions,
+    });
+    const auto composedGround = std::ranges::find(composedFrame.tiles, GridPosition3 { 3, 0, 0 }, &RenderFrameData::Tile::cell);
+    CHECK(composedGround != composedFrame.tiles.end());
+    CHECK(composedGround->groundSplat == ground->groundSplat);
+    CHECK(composedGround->groundSplatOrigin == GridPosition({ 2, 0 }));
+
+    TemporaryEditorProject project;
+    LevelEditor editor;
+    editor.initialize(project.source, project.runtime, 0, 0);
+    editor.newDocument(2, 1);
+    for (const auto& splat : definition.groundSplats) CHECK(editor.addGroundSplat(splat));
+    CHECK(editor.paintGroundSplat({ 1, 0, 0 }));
+    const auto editorFrame = RenderFrameBuilder::buildEditor({ .manifest = manifest, .editor = editor, .settings = {} });
+    const auto editorGround = std::ranges::find(editorFrame.tiles, GridPosition3 { 1, 0, 0 }, &RenderFrameData::Tile::cell);
+    CHECK(editorGround != editorFrame.tiles.end());
+    CHECK(editorGround->groundSplat == ground->groundSplat);
+    editor.showGroundAssignmentColors() = true;
+    const auto colorFrame = RenderFrameBuilder::buildEditor({ .manifest = manifest, .editor = editor, .settings = {} });
+    const auto colorTile = std::ranges::find(colorFrame.tiles, GridPosition3 { 1, 0, 0 }, &RenderFrameData::Tile::cell);
+    CHECK(colorTile->effect == RenderSurfaceEffect::Standard);
+    CHECK(colorTile->color.x == 1 && colorTile->color.y == 0);
+    CHECK(editor.documentToLevel().groundPaint() == editor.groundPaint());
+
+    const std::array neighbors { RenderFrameBuilder::EditorInput::OverworldNeighbor {
+        .screen = 7, .origin = { -2, 0 }, .width = 2, .height = 1, .definition = &definition,
+    } };
+    const auto neighborFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = {}, .overworldNeighbors = neighbors,
+    });
+    const auto neighborGround = std::ranges::find(neighborFrame.tiles, GridPosition3 { -1, 0, 0 }, &RenderFrameData::Tile::cell);
+    CHECK(neighborGround != neighborFrame.tiles.end());
+    CHECK(neighborGround->groundSplat == ground->groundSplat);
+    CHECK(neighborGround->groundSplatOrigin == GridPosition({ -2, 0 }));
+}
+
 } // namespace
 
 int main()
@@ -4309,8 +4470,10 @@ int main()
     testSelectorFlagReflectsTargetCompletion();
     testDecorativeTileRendersWithoutChangingCameraExtent();
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();
+    testConfigurableGroundSplats();
     testGameplayVisibleCellFiltersComposedWorldFrame();
     testGateEnergyCubeFadesAndPressurePlateMatchesColor();
+    testLadderSectionsJoinAndFaceEveryAdjacentGroundWall();
     testLockPlateRendersUnderOccupantsAndDimsWhenDisabled();
     testRotatorPlateSpinsWithTheUnitItTurns();
     testElevatorPlatformIsFlushAndCarriesItsRider();

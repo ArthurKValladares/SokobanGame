@@ -428,6 +428,7 @@ Application::Application(ApplicationOptions options)
                     assetManifest_,
                     renderer_);
             },
+            .assetManifest = [this]() -> const AssetManifest& { return assetManifest_; },
             .tileThumbnail = [this](TileType tile) {
                 // VkDescriptorSet is what ImGui's Vulkan backend uses as a
                 // texture id; null means "no thumbnail, draw the swatch".
@@ -2822,6 +2823,7 @@ RenderFrameData Application::buildRenderFrame(
                 .origin = screen->origin,
                 .width = renderedOverworld->layout().screenWidth,
                 .height = renderedOverworld->layout().screenHeight,
+                .definition = &screen->definition,
             });
         }
     }

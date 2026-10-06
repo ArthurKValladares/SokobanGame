@@ -1,5 +1,7 @@
 #include "engine/LevelEditorDebugUi.hpp"
 
+#include "engine/EditorTilePalette.hpp"
+#include "engine/AssetManifest.hpp"
 #include "engine/Rules.hpp"
 #include "engine/Profiler.hpp"
 #include "engine/TileTypes.hpp"
@@ -45,9 +47,12 @@ constexpr ImVec2 paletteButtonSize { 93.6f, 83.2f };
 bool drawPaintButton(
     const TileTypeDefinition& definition,
     TileType selectedTile,
-    ImTextureID thumbnail)
+    ImTextureID thumbnail,
+    const editorTilePalette::Group* group = nullptr)
 {
-    const bool selected = selectedTile == definition.type;
+    const bool selected = group != nullptr
+        ? group->contains(selectedTile)
+        : selectedTile == definition.type;
     if (selected) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.50f, 0.85f, 1.0f));
     }
@@ -80,43 +85,41 @@ bool drawPaintButton(
             thumbnail,
             ImVec2(centre.x - side * 0.5f, centre.y - side * 0.5f),
             ImVec2(centre.x + side * 0.5f, centre.y + side * 0.5f));
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(
-                "%.*s",
-                static_cast<int>(definition.name.size()),
-                definition.name.data());
+    } else {
+        // Fall back to a colour swatch while a thumbnail is unavailable.
+        drawList->AddRectFilled(
+            swatchMin,
+            swatchMax,
+            ImGui::ColorConvertFloat4ToU32(ImVec4(color.x, color.y, color.z, color.w)),
+            2.0f);
+        drawList->AddRect(
+            swatchMin,
+            swatchMax,
+            ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.55f)),
+            2.0f);
+        if (definition.type == TileType::Air) {
+            const ImU32 airLine = ImGui::ColorConvertFloat4ToU32(ImVec4(0.62f, 0.68f, 0.76f, 0.9f));
+            drawList->AddLine(swatchMin, swatchMax, airLine, 1.5f);
+            drawList->AddLine(
+                ImVec2 { swatchMin.x, swatchMax.y },
+                ImVec2 { swatchMax.x, swatchMin.y },
+                airLine,
+                1.5f);
         }
-        ImGui::PopID();
-        if (selected) {
-            ImGui::PopStyleColor();
-        }
-        return clicked;
     }
-
-    // No thumbnail: either thumbnails are unavailable, the asset is still
-    // loading, or this tile is a procedural cube with no model - for which a
-    // flat colour swatch is an honest depiction anyway.
-    drawList->AddRectFilled(
-        swatchMin,
-        swatchMax,
-        ImGui::ColorConvertFloat4ToU32(ImVec4(color.x, color.y, color.z, color.w)),
-        2.0f);
-    drawList->AddRect(
-        swatchMin,
-        swatchMax,
-        ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.55f)),
-        2.0f);
-    if (definition.type == TileType::Air) {
-        const ImU32 airLine = ImGui::ColorConvertFloat4ToU32(ImVec4(0.62f, 0.68f, 0.76f, 0.9f));
-        drawList->AddLine(swatchMin, swatchMax, airLine, 1.5f);
-        drawList->AddLine(
-            ImVec2 { swatchMin.x, swatchMax.y },
-            ImVec2 { swatchMax.x, swatchMin.y },
-            airLine,
-            1.5f);
+    if (group != nullptr) {
+        drawList->AddText(
+            ImVec2(buttonMax.x - 20.0f, buttonMin.y + 2.0f),
+            ImGui::GetColorU32(ImGuiCol_Text), "...");
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%.*s", static_cast<int>(definition.name.size()), definition.name.data());
+        if (group != nullptr) {
+            ImGui::SetTooltip("%.*s: choose direction\n%.*s",
+                static_cast<int>(group->name.size()), group->name.data(),
+                static_cast<int>(definition.name.size()), definition.name.data());
+        } else {
+            ImGui::SetTooltip("%.*s", static_cast<int>(definition.name.size()), definition.name.data());
+        }
     }
     ImGui::PopID();
 
@@ -380,7 +383,7 @@ void LevelEditorDebugUi::draw(
         ImGui::EndTabBar();
     }
     ImGui::Separator();
-    drawGroundPaintTab(painter, callbacks);
+    drawGroundPaintTab(editor, painter, callbacks);
 
     if (!editor.status().empty()) {
         ImGui::Separator();
@@ -522,25 +525,88 @@ void drawBrushValue(
 #endif
 
 void LevelEditorDebugUi::drawGroundPaintTab(
-    SplatPainter& painter, const Callbacks& callbacks)
+    LevelEditor& editor, SplatPainter& painter, const Callbacks& callbacks)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     ImGui::Text("Ground Paint");
 
+    if (ImGui::Button("Add Splat Map") && callbacks.createGroundSplatMap) {
+        (void)callbacks.createGroundSplatMap();
+    }
+    ImGui::TextWrapped("Each map blends its base and detail textures. Choose its color, then paint ground tiles to assign them. The first map is the default.");
+    const Level::GroundSplat* selected = editor.selectedGroundSplat();
+    if (selected) {
+        std::size_t selectedIndex = static_cast<std::size_t>(selected - editor.groundSplats().data());
+        if (ImGui::BeginCombo("Splat Map", selected->name.c_str())) {
+            for (std::size_t i = 0; i < editor.groundSplats().size(); ++i) {
+                const auto& splat = editor.groundSplats()[i];
+                ImGui::PushID(static_cast<int>(i));
+                ImGui::ColorButton("##color", { splat.color.x, splat.color.y, splat.color.z, 1 });
+                ImGui::SameLine();
+                if (ImGui::Selectable(splat.name.c_str(), i == selectedIndex) &&
+                    (!painter.dirty() || painter.save())) {
+                    const bool paintingMask = painter.active();
+                    editor.selectGroundSplat(i);
+                    if (paintingMask && callbacks.openGroundPainting) (void)callbacks.openGroundPainting();
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndCombo();
+        }
+        selected = editor.selectedGroundSplat();
+        selectedIndex = static_cast<std::size_t>(selected - editor.groundSplats().data());
+        Level::GroundSplat edited = *selected;
+        bool changed = ImGui::InputText("Map Name", &edited.name);
+        changed |= ImGui::ColorEdit3("Assignment Color", &edited.color.x, ImGuiColorEditFlags_NoAlpha);
+        const auto textureChoice = [&](const char* label, std::string& name) {
+            bool picked = false;
+            if (ImGui::BeginCombo(label, name.c_str())) {
+                if (callbacks.assetManifest) {
+                    for (const auto& texture : callbacks.assetManifest().textures()) {
+                        if (ImGui::Selectable(texture.name.c_str(), texture.name == name)) {
+                            name = texture.name;
+                            picked = true;
+                        }
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            return picked;
+        };
+        changed |= textureChoice("Base Texture", edited.base);
+        changed |= textureChoice("Detail Texture", edited.detail);
+        const bool maskChanged = textureChoice("Blend Mask", edited.mask);
+        changed |= maskChanged;
+        if (changed) {
+            if (!maskChanged || !painter.dirty() || painter.save()) {
+                if (maskChanged) painter.close();
+                (void)editor.updateGroundSplat(selectedIndex, std::move(edited));
+            }
+        }
+        if (selectedIndex > 0 && ImGui::Button("Remove Splat Map")) {
+            if (!painter.dirty() || painter.save()) {
+                painter.close();
+                (void)editor.removeGroundSplat(selectedIndex);
+            }
+        }
+        bool assigning = editor.groundAssignmentPainting();
+        if (ImGui::Checkbox("Paint Tile Assignments", &assigning)) {
+            if (!painter.dirty() || painter.save()) {
+                painter.close();
+                editor.setGroundAssignmentPainting(assigning);
+            }
+        }
+        ImGui::Checkbox("Show Assignment Colors", &editor.showGroundAssignmentColors());
+        ImGui::TextDisabled("Save the document to keep maps and tile assignments.");
+        if (editor.groundAssignmentPainting()) return;
+    }
+
     if (!painter.active()) {
-        if (ImGui::Button("Paint Ground") && callbacks.openGroundPainting) {
+        if (ImGui::Button("Paint Blend Mask") && callbacks.openGroundPainting) {
             (void)callbacks.openGroundPainting();
         }
         ImGui::SameLine();
-        // A screen added in the editor has no map and no manifest entry yet.
-        // This does both, so that never means leaving the game to re-run the
-        // generator; it will not overwrite an existing map.
-        if (ImGui::Button("Create Splat Map") &&
-            callbacks.createGroundSplatMap) {
-            (void)callbacks.createGroundSplatMap();
-        }
-        ImGui::SameLine();
-        ImGui::TextDisabled("(edits this screen's splat map)");
+        ImGui::TextDisabled("(edits the selected map's blend mask)");
         if (!painter.status().empty()) {
             ImGui::TextWrapped("%s", painter.status().c_str());
         }
@@ -548,7 +614,7 @@ void LevelEditorDebugUi::drawGroundPaintTab(
     }
 
     if (ImGui::Button("Stop Painting")) {
-        painter.close();
+        if (!painter.dirty() || painter.save()) painter.close();
         return;
     }
     ImGui::SameLine();
@@ -570,9 +636,9 @@ void LevelEditorDebugUi::drawGroundPaintTab(
     ImGui::TextUnformatted("Color");
     ImGui::SameLine();
     // White adds the detail layer (rock), black returns to the base (grass).
-    ImGui::RadioButton("White (rock)", &color, 0);
+    ImGui::RadioButton("White (detail)", &color, 0);
     ImGui::SameLine();
-    ImGui::RadioButton("Black (grass)", &color, 1);
+    ImGui::RadioButton("Black (base)", &color, 1);
     brush.color = color == 0
         ? SplatCanvas::BrushColor::White
         : SplatCanvas::BrushColor::Black;
@@ -587,6 +653,7 @@ void LevelEditorDebugUi::drawGroundPaintTab(
         ImGui::TextWrapped("%s", painter.status().c_str());
     }
 #else
+    (void)editor;
     (void)painter;
     (void)callbacks;
 #endif
@@ -762,6 +829,10 @@ void LevelEditorDebugUi::drawTilePalette(
         SOKOBAN_PROFILE_SCOPE("Editor.Draw palette icons");
         int column = 0;
         for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
+            const auto* group = editorTilePalette::groupFor(definition.type);
+            if (group != nullptr && group->tiles.front() != definition.type) {
+                continue;
+            }
             if (definition.type == TileType::Water ||
                 (!editingOverworld &&
                  definition.type == TileType::Player) ||
@@ -778,13 +849,53 @@ void LevelEditorDebugUi::drawTilePalette(
             if (column % perRow != 0) {
                 ImGui::SameLine();
             }
-            const auto thumbnail = static_cast<ImTextureID>(
-                callbacks.tileThumbnail
-                    ? callbacks.tileThumbnail(definition.type)
-                    : 0);
-            if (drawPaintButton(definition, editor.selectedTile(), thumbnail)) {
-                editor.setSelectedTile(definition.type);
+            // Keep the selected direction visible on its single family button.
+            const TileType displayedTile = group != nullptr &&
+                    group->contains(editor.selectedTile())
+                ? editor.selectedTile() : definition.type;
+            const auto& displayedDefinition = tileTypeDefinitions()[
+                static_cast<std::size_t>(displayedTile)];
+            const auto thumbnailFor = [&](TileType tile) {
+                return static_cast<ImTextureID>(callbacks.tileThumbnail
+                    ? callbacks.tileThumbnail(tile) : 0);
+            };
+            ImGui::PushID(static_cast<int>(definition.type));
+            if (drawPaintButton(displayedDefinition, editor.selectedTile(),
+                    thumbnailFor(displayedTile), group)) {
+                if (group != nullptr) {
+                    ImGui::OpenPopup("Direction");
+                } else {
+                    editor.setSelectedTile(definition.type);
+                }
             }
+            if (group != nullptr && ImGui::BeginPopup("Direction")) {
+                ImGui::Text("%.*s direction",
+                    static_cast<int>(group->name.size()), group->name.data());
+                ImGui::Separator();
+                if (ImGui::BeginTable("Variants", 2,
+                        ImGuiTableFlags_SizingFixedFit)) {
+                    for (TileType variant : group->variants()) {
+                        ImGui::TableNextColumn();
+                        const auto& variantDefinition = tileTypeDefinitions()[
+                            static_cast<std::size_t>(variant)];
+                        if (drawPaintButton(variantDefinition,
+                                editor.selectedTile(), thumbnailFor(variant))) {
+                            editor.setSelectedTile(variant);
+                            ImGui::CloseCurrentPopup();
+                        }
+                        const auto direction = variantDefinition.name.substr(
+                            group->name.size() + 1);
+                        ImGui::TextUnformatted(direction.data(),
+                            direction.data() + direction.size());
+                    }
+                    ImGui::EndTable();
+                }
+                if (ImGui::SmallButton("Cancel")) {
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
             ++column;
         }
     }

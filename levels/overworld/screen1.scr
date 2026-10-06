@@ -1,3 +1,4 @@
+@groundsplat {"name":"Ground","base":"GroundGrass","detail":"GroundRock","mask":"GroundSplatMapOverworld1","color":[0.25,0.75,0.35]}
 @character rogue
 @selector {"cell":[1,2,2],"id":1,"target":{"level":0,"screen":0}}
 @selector {"cell":[2,2,2],"id":2,"target":{"level":0,"screen":1}}

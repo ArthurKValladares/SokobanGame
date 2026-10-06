@@ -120,6 +120,8 @@ struct PreparedIsoFace {
     PreparedSurfaceMaterial material = PreparedSurfaceMaterial::Standard;
     uint32_t shorelineMask = 0;
     float depth = 0.0f;
+    std::optional<GroundSplatTextures> groundSplat;
+    GridPosition groundSplatOrigin {};
 };
 
 struct PreparedParticle {

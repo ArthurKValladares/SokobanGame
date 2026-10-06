@@ -2,6 +2,7 @@
 
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AssetManifest.hpp"
+#include "engine/GateEffect.hpp"
 #include "engine/MinecartGateVisuals.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/PresentationSettings.hpp"
@@ -129,6 +130,10 @@ RenderFrameData buildBakeFrame(
     // must count toward the fit so the camera is identical for all of them.
     subject.showGrid = false;
     subject.affectsCameraFit = true;
+    if (tile == TileType::Ladder) {
+        // Centre the narrow wall-mounted section on the thumbnail bed.
+        subject.position.y += 0.38f;
+    }
     if (animations != nullptr &&
         (tileTypeIsPlayerStart(tile) || tile == TileType::Enemy)) {
         const AnimationUse use = tile == TileType::Enemy
@@ -137,7 +142,18 @@ RenderFrameData buildBakeFrame(
         subject.animation = animations->animation(use);
         subject.animationTimeSeconds = 0.0f;
     }
-    if (tile == TileType::MinecartGate) {
+    if (tile == TileType::Gate) {
+        // Gates have no model: their closed silhouette is the energy volume
+        // and its corner particles. Put that volume directly on the bed.
+        const std::size_t firstPart = frame.tiles.size();
+        appendGateEffect(frame,
+            Level::Gate { .cell = {
+                static_cast<int>(bedCentre), static_cast<int>(bedCentre), 0 } },
+            manifest, 1.0f, 0.0f);
+        for (std::size_t index = firstPart; index < frame.tiles.size(); ++index) {
+            frame.tiles[index].affectsCameraFit = true;
+        }
+    } else if (tile == TileType::MinecartGate) {
         appendMinecartGateVisual(frame,
             { static_cast<int>(bedCentre), static_cast<int>(bedCentre), 0 },
             TileType::RailStraightNorthSouth);

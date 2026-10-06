@@ -44,9 +44,8 @@ public:
         // painted map survives a restart without re-running the content
         // pipeline. Empty to skip.
         std::filesystem::path runtimeAssetRoot;
-        // Composed-overworld screens use stable screen IDs rather than a
-        // puzzle LevelLocation. Supplying the stable texture name lets the
-        // same painter edit either kind of document.
+        // The selected splat definition supplies its manifest mask name.
+        // Also supports stable-ID overworld maps and legacy screen conventions.
         std::optional<std::string> textureName;
     };
 

@@ -7,6 +7,7 @@
 #include "TestHarness.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/GateEffect.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/TileThumbnailBake.hpp"
@@ -26,6 +27,7 @@ const AssetManifest& testManifest()
     static const AssetManifest manifest = AssetManifest::parse(R"json({
       "format": 1,
       "textures": [
+        { "name": "ParticleGlow", "path": "glow.png" },
         { "name": "GroundGrass", "path": "grass.png" },
         { "name": "GroundRock", "path": "rock.png" },
         { "name": "GroundSplatMap", "path": "splat.png" }
@@ -34,6 +36,7 @@ const AssetManifest& testManifest()
         { "name": "Bricks", "path": "bricks.gltf" },
         { "name": "Hero", "path": "h.glb", "geometry": "skinned", "role": "player" },
         { "name": "Knight", "path": "k.glb", "geometry": "skinned" },
+        { "name": "Ladder", "path": "ladder.glb", "preserveSourceScale": true },
         { "name": "Druid", "path": "d.glb", "geometry": "skinned" },
         { "name": "Witch", "path": "w.glb", "geometry": "skinned" },
         { "name": "Bard", "path": "b.glb", "geometry": "skinned" }
@@ -47,6 +50,7 @@ const AssetManifest& testManifest()
       ],
       "tiles": [
         { "tile": "Wall", "model": "Bricks" },
+        { "tile": "Ladder", "model": "Ladder" },
         { "tile": "Player", "model": "Hero" }
       ]
     })json");
@@ -151,7 +155,9 @@ void testBakeFrameStandsTheTileOnAGroundBed()
             tileThumbnails::bedSize * tileThumbnails::bedSize;
         const std::size_t expected = definition.type == TileType::Ground
             ? bedCells
-            : bedCells + (tileTypeIsPortal(definition.type) ? 5
+            : bedCells + (definition.type == TileType::Gate
+                          ? config::gateEnergyTileCount
+                          : tileTypeIsPortal(definition.type) ? 5
                           : definition.type == TileType::MinecartGate ? 4 : 1);
         CHECK(frame.tiles.size() == expected);
 
@@ -169,6 +175,10 @@ void testBakeFrameStandsTheTileOnAGroundBed()
         CHECK(frame.lighting.shadows.enabled);
         CHECK(frame.lighting.ambientOcclusion.enabled);
 
+        if (definition.type == TileType::Gate) {
+            // A gate is a composite effect, not one model at the cell centre.
+            continue;
+        }
         if (definition.type == TileType::MinecartGate) {
             CHECK(frame.isoFaces.size() == 36);
             for (const auto& face : frame.isoFaces) {
@@ -187,7 +197,8 @@ void testBakeFrameStandsTheTileOnAGroundBed()
         const float midY = subject.position.y + subject.size.y * 0.5f;
         const auto edge = portalEdgeOffset(definition.type);
         CHECK(std::abs(midX - (centre + 0.5f + edge.x * 0.5f)) < 0.001f);
-        CHECK(std::abs(midY - (centre + 0.5f + edge.y * 0.5f)) < 0.001f);
+        const float ladderOffset = definition.type == TileType::Ladder ? 0.38f : 0.0f;
+        CHECK(std::abs(midY - (centre + 0.5f + edge.y * 0.5f + ladderOffset)) < 0.001f);
         // Standing on the bed's surface, not sunk into or floating above it.
         CHECK(
             std::abs(
@@ -212,6 +223,44 @@ void testBedIsNeutralAndFlat()
         CHECK(cell.model.isCube());
         CHECK(cell.color.x == tileThumbnails::bedColor.x);
     }
+}
+
+void testGateBakesTheClosedEnergyEffect()
+{
+    TEST("gateBakesTheClosedEnergyEffect");
+    const auto frame = tileThumbnails::buildBakeFrame(
+        TileType::Gate, testManifest(), testSettings());
+    CHECK(frame.particles.size() == config::gateCornerParticleCount);
+    const auto center = static_cast<int>(tileThumbnails::bedCentre);
+    RenderFrameData closedGate;
+    appendGateEffect(closedGate, Level::Gate { .cell = { center, center, 0 } },
+        testManifest(), 1.0f, 0.0f);
+    const std::size_t bedCells = tileThumbnails::bedSize * tileThumbnails::bedSize;
+    CHECK(frame.tiles.size() == bedCells + closedGate.tiles.size());
+    for (std::size_t index = 0; index < closedGate.tiles.size(); ++index) {
+        const auto& part = frame.tiles[bedCells + index];
+        const auto& expected = closedGate.tiles[index];
+        CHECK(part.effect == RenderSurfaceEffect::GateEnergy);
+        CHECK(!part.pickOnly);
+        CHECK(part.height == expected.height);
+        CHECK(part.baseElevation == expected.baseElevation);
+        CHECK(part.color.w == expected.color.w);
+        CHECK(part.color.w > 0.0f);
+        CHECK(part.baseElevation >= 0.0f);
+        CHECK(part.baseElevation + part.height <= 1.0f);
+    }
+    for (const auto& particle : frame.particles) {
+        CHECK(particle.texture == testManifest().findTextureIdByName(
+            config::gateParticleTextureName));
+        CHECK(particle.color.w > 0.0f);
+        CHECK(particle.position.z > 0.0f && particle.position.z < 1.0f);
+    }
+    PreparedRenderScene scene;
+    IsoScenePreparer {}.prepare(frame, { 800, 600 }, scene);
+    CHECK(!scene.particles.empty());
+    CHECK(std::ranges::any_of(scene.isoFaces, [](const auto& face) {
+        return face.material == PreparedSurfaceMaterial::GateEnergy;
+    }));
 }
 
 void testGroundIsBakedThroughTheSplatPath()
@@ -310,6 +359,10 @@ void testSubjectMatchesTheTileTheEditorDraws()
             }
             continue;
         }
+        if (definition.type == TileType::Gate) {
+            CHECK(subject.effect == RenderSurfaceEffect::GateEnergy);
+            continue;
+        }
         if (definition.type == TileType::MinecartGate) {
             CHECK(frame.isoFaces.size() == 36);
             CHECK(frame.tiles.size() == tileThumbnails::bedSize * tileThumbnails::bedSize + 4);
@@ -319,7 +372,8 @@ void testSubjectMatchesTheTileTheEditorDraws()
         CHECK(subject.size.x == expected.size.x);
         CHECK(subject.size.y == expected.size.y);
         CHECK(subject.position.x == expected.position.x);
-        CHECK(subject.position.y == expected.position.y);
+        CHECK(std::abs(subject.position.y - expected.position.y -
+            (definition.type == TileType::Ladder ? 0.38f : 0.0f)) < 0.0001f);
         CHECK(subject.modelRotationQuarterTurns ==
             expected.modelRotationQuarterTurns);
         CHECK(subject.modelRotationOffsetRadians ==
@@ -453,6 +507,7 @@ int main()
     testButtonIsSmallerAndRaisedAbovePressurePlate();
     testBakeFrameStandsTheTileOnAGroundBed();
     testBedIsNeutralAndFlat();
+    testGateBakesTheClosedEnergyEffect();
     testGroundIsBakedThroughTheSplatPath();
     testMirrorsBakeAtTheirOwnOrientation();
     testConveyorsBakeRotatedAndAtBeltHeight();

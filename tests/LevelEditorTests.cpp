@@ -4,6 +4,7 @@
 #include "TestHarness.hpp"
 
 #include "engine/LevelEditor.hpp"
+#include "engine/EditorTilePalette.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/OverworldMapEditor.hpp"
 #include "engine/TileTypes.hpp"
@@ -1207,7 +1208,21 @@ void testStructuralChangesPublishSplatAndMusicAssociations()
     editor.initialize(sourceLevels, runtimeLevels, 0, 0,
         sourceManifest, runtimeManifest);
     levels = editor.collectLevelDirectories();
+    CHECK(editor.openDocument(levels[0].screens[0].path));
+    CHECK(editor.addGroundSplat({ "Ground", "Grass", "Rock", "GroundSplatMap0_0", { 0, 1, 0 } }));
+    CHECK(editor.saveLoadedDocument());
+    CHECK(editor.addGroundSplat({ "Other", "Rock", "Sand", "GroundSplatMap0_1", { 1, 0, 0 } }));
+    CHECK(editor.paintGroundSplat({ 1, 0, 0 }));
     editor.addScreenAt(levels[0], 0);
+    const auto shifted = sourceLevels / "level0/screen1.scr";
+    CHECK(Level::loadDefinitionFromFile(shifted).groundSplats[0].mask == "GroundSplatMap0_1");
+    CHECK(editor.openDocument(shifted));
+    CHECK(editor.groundSplats()[0].mask == "GroundSplatMap0_1");
+    CHECK(editor.groundSplats()[1].mask == "GroundSplatMap0_2");
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.groundPaint().empty());
+    CHECK(editor.groundSplats()[0].mask == "GroundSplatMap0_1");
+    CHECK(editor.saveLoadedDocument());
     AssetManifest manifest = AssetManifest::loadFromFile(sourceManifest);
     CHECK(manifest.findTextureIdByName("GroundSplatMap0_0").isNone());
     CHECK(manifest.textureIdByName("GroundSplatMap0_1").index() == 0);
@@ -1220,6 +1235,7 @@ void testStructuralChangesPublishSplatAndMusicAssociations()
     CHECK(manifest.textureIdByName("GroundSplatMap1_1").index() == 0);
     CHECK(manifest.textureIdByName("GroundSplatMap1_2").index() == 1);
     CHECK(manifest.musicForLevel(1) != nullptr);
+    CHECK(Level::loadDefinitionFromFile(sourceLevels / "level1/screen1.scr").groundSplats[0].mask == "GroundSplatMap1_1");
     CHECK(manifest.musicForLevel(0) == nullptr);
 
     levels = editor.collectLevelDirectories();
@@ -1243,6 +1259,7 @@ void testStructuralChangesPublishSplatAndMusicAssociations()
     CHECK(manifest.musicForLevel(0) &&
         *manifest.musicForLevel(0) == "music/first.ogg");
     CHECK(readFile(sourceManifest) == readFile(runtimeManifest));
+    CHECK(Level::loadDefinitionFromFile(sourceLevels / "level0/screen1.scr").groundSplats[0].mask == "GroundSplatMap0_1");
 }
 
 void testUndoRestoresTheLoadedDocumentPath()
@@ -2282,6 +2299,67 @@ void testLockPlateEditor()
     CHECK(editor.lockPlates()[0].startEnabled);
 }
 
+void testGroundSplatEditing()
+{
+    TEST("groundSplatEditing");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(4, 3);
+    CHECK(editor.addGroundSplat({ "Meadow", "Grass", "Stone", "Mask", { 0, 1, 0 } }));
+    CHECK(editor.addGroundSplat({ "Sand", "Sand", "Mud", "SandMask", { 1, 0, 0 } }));
+    CHECK(editor.beginStroke());
+    CHECK(editor.paintGroundSplat({ 0, 0, 0 }));
+    CHECK(editor.paintGroundSplat({ 1, 0, 0 }));
+    CHECK(!editor.paintGroundSplat({ 1, 0, 1 }));
+    CHECK(editor.endStroke());
+    CHECK(editor.groundPaint().size() == 2);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.groundPaint().empty());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.groundPaint().size() == 2);
+    auto sand = editor.groundSplats()[1];
+    sand.name = "Desert"; sand.color = { 1, 1, 0 }; sand.base = "Beach";
+    CHECK(editor.updateGroundSplat(1, sand));
+    CHECK(editor.groundPaint()[0].splat == "Desert");
+    CHECK(editor.selectedGroundSplat()->name == "Desert");
+    const auto source = project.source / "level0/screen0.scr";
+    CHECK(editor.saveDocument(source));
+    const auto loaded = Level::loadDefinitionFromFile(source);
+    CHECK(loaded.groundSplats == editor.groundSplats());
+    CHECK(loaded.groundPaint == editor.groundPaint());
+    const auto mirrored = Level::loadDefinitionFromFile(project.runtime / "level0/screen0.scr");
+    CHECK(mirrored.groundSplats == loaded.groundSplats);
+    CHECK(mirrored.groundPaint == loaded.groundPaint);
+    editor.selectGroundSplat(0);
+    CHECK(editor.paintGroundSplat({ 0, 0, 0 }));
+    CHECK(editor.groundPaint().size() == 1);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.groundPaint().size() == 2);
+    CHECK(editor.setCell({ 1, 0, 0 }, TileType::Air));
+    CHECK(editor.groundPaint().size() == 1);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.groundPaint().size() == 2);
+    editor.setActiveLayer(0);
+    editor.addLayerBelow();
+    CHECK(editor.groundPaint()[0].cell.z == 1);
+    CHECK(editor.tryUndoEdit());
+    editor.resizeDocument(1, 1);
+    CHECK(editor.groundPaint().size() == 1);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.groundPaint().size() == 2);
+    CHECK(editor.removeGroundSplat(1));
+    CHECK(editor.groundPaint().empty());
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.groundPaint().size() == 2);
+    CHECK(!editor.removeGroundSplat(0));
+    for (int i = 0; i < 24; ++i) {
+        CHECK(editor.addGroundSplat({ "Extra " + std::to_string(i), "Grass", "Stone", "Mask",
+            { static_cast<float>(i + 1) / 255.0f, 0, 1 } }));
+    }
+    CHECK(editor.groundSplats().size() == 26);
+    CHECK(editor.documentDefinition().groundSplats.size() == 26);
+}
+
 } // namespace
 
 void testStrokeIsOneUndoStepAndRedoReplaysIt()
@@ -2629,8 +2707,46 @@ void testMinecartGateStacksOnRailsAndSurvivesEditing()
     CHECK(loaded.documentLayers()[1][2][3] == 'g');
 }
 
+void testGroupedPalettePreservesDirectionalBrushes()
+{
+    TEST("groupedPalettePreservesDirectionalBrushes");
+    std::array<int, tileTypeCount> membership {};
+    LevelEditor editor;
+    editor.newDocument(5, 3, false);
+    for (const auto& group : editorTilePalette::groups) {
+        CHECK(group.count >= 2 && group.count <= group.tiles.size());
+        for (TileType variant : group.variants()) {
+            ++membership[static_cast<std::size_t>(variant)];
+            CHECK(editorTilePalette::groupFor(variant) == &group);
+            // Picker captions strip only the family name, retaining the
+            // distinct direction, including rail axes and rotator turns.
+            CHECK(tileTypeName(variant).starts_with(group.name));
+            CHECK(tileTypeName(variant).size() > group.name.size() + 1);
+            editor.setSelectedTile(variant);
+            CHECK(editor.selectedTile() == variant);
+            CHECK(editor.recentTiles().front() == variant);
+            CHECK(editor.paintCell({ 2, 1, 1 }));
+            CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(variant));
+            CHECK(editor.setCell({ 2, 1, 1 }, TileType::Air));
+        }
+    }
+    for (const auto& definition : tileTypeDefinitions()) {
+        const bool directional = tileTypeIsConveyor(definition.type) ||
+            tileTypeIsMirror(definition.type) || tileTypeIsTurret(definition.type) ||
+            tileTypeIsPortal(definition.type) || tileTypeIsRail(definition.type) ||
+            tileTypeIsRotator(definition.type);
+        CHECK(membership[static_cast<std::size_t>(definition.type)] ==
+            (directional ? 1 : 0));
+    }
+    CHECK(editorTilePalette::groupFor(TileType::Gate) == nullptr);
+    CHECK(editorTilePalette::groupFor(TileType::Air) == nullptr);
+    CHECK(editor.selectRecentTile(1));
+    CHECK(editor.selectedTile() == TileType::RailStopNorthSouth);
+}
+
 int main()
 {
+    testGroupedPalettePreservesDirectionalBrushes();
     TEST("lecternTextFollowsEditorTransactions");
     {
         TemporaryProject project;
@@ -2679,6 +2795,7 @@ int main()
     testPerScreenCameraEditingAndPersistence();
     testLockPlateEditor();
     testPortalColorGroups();
+    testGroundSplatEditing();
     testDocumentCommandsAndUndo();
     testColorGroupsBecomeExplicitLinks();
     testExplicitLinksBecomeColorGroupsOnLoad();

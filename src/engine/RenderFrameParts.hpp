@@ -39,6 +39,12 @@
 
 namespace sokoban::renderFrameParts {
 
+void applyGroundSplat(
+    RenderFrameData::Tile& tile, const AssetManifest& manifest,
+    const std::vector<Level::GroundSplat>& splats,
+    const std::vector<Level::GroundPaint>& paint,
+    GridPosition origin = {}, bool showColors = false);
+
 // ---------------------------------------------- Small shared shaping helpers
 //
 // Used by both builders and by `tileVisual`. `shade` in particular is called
@@ -81,28 +87,23 @@ uint64_t authoredAnimationInstance(TileType tile, GridPosition3 cell);
 
 // ------------------------------------------------------------------- Ladders
 //
-// A ladder is drawn as rungs between the ladder cell and the ground beside
-// it, so the geometry depends on neighbours - which is why the per-cell entry
-// point is a template over however the caller answers "what tile is at".
+// One unit-height model section sits just outside each adjacent ground face.
+// Matching rail ends and periodic rungs allow any number of vertical sections.
+// Placement depends on neighbours, so both builders share the same lookup.
 
-void appendLadderRungFace(
-    RenderFrameData& frame,
-    GridPosition3 groundCell,
-    GridPosition3 ladderCell,
-    float rungCenter,
-    bool preview);
-
-void appendLadderRungs(
+void appendLadderSegment(
     RenderFrameData& frame,
     GridPosition3 ladderCell,
     GridPosition3 groundCell,
+    const AssetManifest& manifest,
     bool preview = false);
 
 template <typename TileAt>
-void appendLadderRungsForCell(
+void appendLadderSegmentsForCell(
     RenderFrameData& frame,
     GridPosition3 ladderCell,
     TileAt tileAt,
+    const AssetManifest& manifest,
     bool preview = false)
 {
     if (tileAt(ladderCell) != TileType::Ladder) {
@@ -121,7 +122,7 @@ void appendLadderRungsForCell(
             ladderCell.z,
         };
         if (tileAt(groundCell) == TileType::Ground) {
-            appendLadderRungs(frame, ladderCell, groundCell, preview);
+            appendLadderSegment(frame, ladderCell, groundCell, manifest, preview);
         }
     }
 }

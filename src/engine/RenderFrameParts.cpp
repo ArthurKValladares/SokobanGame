@@ -15,6 +15,28 @@
 
 namespace sokoban::renderFrameParts {
 
+void applyGroundSplat(
+    RenderFrameData::Tile& tile, const AssetManifest& manifest,
+    const std::vector<Level::GroundSplat>& splats,
+    const std::vector<Level::GroundPaint>& paint,
+    GridPosition origin, bool showColors)
+{
+    if (tile.effect != RenderSurfaceEffect::GroundSplat) return;
+    const Level::GroundSplat* splat = Level::groundSplatAt(splats, paint,
+        { tile.cell.x - origin.x, tile.cell.y - origin.y, tile.cell.z });
+    if (!splat) return;
+    tile.groundSplat = GroundSplatTextures {
+        .base = manifest.findTextureIdByName(splat->base),
+        .detail = manifest.findTextureIdByName(splat->detail),
+        .splatMap = manifest.findTextureIdByName(splat->mask),
+    };
+    tile.groundSplatOrigin = origin;
+    if (showColors) {
+        tile.color = { splat->color.x, splat->color.y, splat->color.z, tile.color.w };
+        tile.effect = RenderSurfaceEffect::Standard;
+    }
+}
+
 // ---------------------------------------------- Small shared shaping helpers
 
 Vec4 shade(Vec4 color, float multiplier)
@@ -212,92 +234,37 @@ uint64_t authoredAnimationInstance(TileType tile, GridPosition3 cell)
 
 // ------------------------------------------------------------------- Ladders
 
-void appendLadderRungFace(
-    RenderFrameData& frame,
-    GridPosition3 groundCell,
-    GridPosition3 ladderCell,
-    float rungCenter,
-    bool preview)
-{
-    constexpr float rungLengthInset = 0.10f;
-    constexpr float rungHalfThickness = 0.07f;
-    constexpr float faceOffset = 0.003f;
-
-    const Vec4 color = preview
-        ? Vec4 { 0.43f, 0.22f, 0.08f, 0.62f }
-        : tileColor(TileType::Ladder);
-    const float bottom =
-        static_cast<float>(groundCell.z) + rungCenter - rungHalfThickness;
-    const float top =
-        static_cast<float>(groundCell.z) + rungCenter + rungHalfThickness;
-    const float gx = static_cast<float>(groundCell.x);
-    const float gy = static_cast<float>(groundCell.y);
-
-    auto appendFace = [&](std::array<Vec3, 4> vertices, Vec3 normal) {
-        frame.isoFaces.push_back({
-            .vertices = vertices,
-            .normal = normal,
-            .color = color,
-        });
-    };
-
-    if (ladderCell.x < groundCell.x) {
-        const float x = gx - faceOffset;
-        const float y0 = gy + rungLengthInset;
-        const float y1 = gy + 1.0f - rungLengthInset;
-        appendFace({
-            Vec3 { x, y1, bottom },
-            Vec3 { x, y0, bottom },
-            Vec3 { x, y0, top },
-            Vec3 { x, y1, top },
-        }, { -1.0f, 0.0f, 0.0f });
-        return;
-    }
-    if (ladderCell.x > groundCell.x) {
-        const float x = gx + 1.0f + faceOffset;
-        const float y0 = gy + rungLengthInset;
-        const float y1 = gy + 1.0f - rungLengthInset;
-        appendFace({
-            Vec3 { x, y0, bottom },
-            Vec3 { x, y1, bottom },
-            Vec3 { x, y1, top },
-            Vec3 { x, y0, top },
-        }, { 1.0f, 0.0f, 0.0f });
-        return;
-    }
-    if (ladderCell.y < groundCell.y) {
-        const float y = gy - faceOffset;
-        const float x0 = gx + rungLengthInset;
-        const float x1 = gx + 1.0f - rungLengthInset;
-        appendFace({
-            Vec3 { x0, y, bottom },
-            Vec3 { x1, y, bottom },
-            Vec3 { x1, y, top },
-            Vec3 { x0, y, top },
-        }, { 0.0f, -1.0f, 0.0f });
-        return;
-    }
-    if (ladderCell.y > groundCell.y) {
-        const float y = gy + 1.0f + faceOffset;
-        const float x0 = gx + rungLengthInset;
-        const float x1 = gx + 1.0f - rungLengthInset;
-        appendFace({
-            Vec3 { x1, y, bottom },
-            Vec3 { x0, y, bottom },
-            Vec3 { x0, y, top },
-            Vec3 { x1, y, top },
-        }, { 0.0f, 1.0f, 0.0f });
-    }
-}
-
-void appendLadderRungs(
+void appendLadderSegment(
     RenderFrameData& frame,
     GridPosition3 ladderCell,
     GridPosition3 groundCell,
+    const AssetManifest& manifest,
     bool preview)
 {
-    appendLadderRungFace(frame, groundCell, ladderCell, 0.32f, preview);
-    appendLadderRungFace(frame, groundCell, ladderCell, 0.68f, preview);
+    // The source section is mounted on the north edge, facing into its cell.
+    // Rotate about the cell centre to reach every other ground-facing edge.
+    const uint32_t quarterTurns = groundCell.x > ladderCell.x
+        ? 1U
+        : groundCell.y > ladderCell.y
+        ? 2U
+        : groundCell.x < ladderCell.x
+        ? 3U
+        : 0U;
+    frame.tiles.push_back({
+        .cell = ladderCell,
+        .position = {
+            static_cast<float>(ladderCell.x),
+            static_cast<float>(ladderCell.y),
+        },
+        .color = { 1.0f, 1.0f, 1.0f, preview ? 0.62f : 1.0f },
+        .baseElevation = static_cast<float>(ladderCell.z),
+        .height = 1.0f,
+        .showGrid = false,
+        .isEditorPreview = preview,
+        .affectsCameraFit = false,
+        .model = manifest.modelForTile(TileType::Ladder),
+        .modelRotationQuarterTurns = quarterTurns,
+    });
 }
 
 // --------------------------------------------------------------------- Water

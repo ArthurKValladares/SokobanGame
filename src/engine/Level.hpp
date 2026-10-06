@@ -229,6 +229,25 @@ public:
         bool operator==(const Lectern&) const = default;
     };
 
+    // Stable manifest names, with a screen-local name and editor assignment color.
+    // The first entry is used by ground tiles without an explicit assignment.
+    struct GroundSplat {
+        std::string name;
+        std::string base;
+        std::string detail;
+        std::string mask;
+        Vec3 color { 0.25f, 0.75f, 0.35f };
+
+        bool operator==(const GroundSplat&) const = default;
+    };
+
+    struct GroundPaint {
+        GridPosition3 cell {};
+        std::string splat;
+
+        bool operator==(const GroundPaint&) const = default;
+    };
+
     struct Definition {
         LayerRows layers;
         std::optional<uint32_t> waterLayer;
@@ -249,6 +268,9 @@ public:
         // Missing only for backwards-compatible legacy documents. Runtime
         // levels always resolve it to Rogue.
         std::optional<CharacterType> character;
+
+        std::vector<GroundSplat> groundSplats;
+        std::vector<GroundPaint> groundPaint;
 
         bool operator==(const Definition&) const = default;
     };
@@ -291,6 +313,10 @@ public:
         std::string_view sourceName);
     [[nodiscard]] static std::vector<std::string> serializeDefinition(
         const Definition& definition);
+    static void validateGroundSplats(const Definition& definition, std::string_view sourceName);
+    [[nodiscard]] static const GroundSplat* groundSplatAt(
+        const std::vector<GroundSplat>& splats,
+        const std::vector<GroundPaint>& paint, GridPosition3 cell);
     [[nodiscard]] static LayerRows parseLayerRows(const std::vector<std::string>& lines, std::string_view sourceName);
     [[nodiscard]] static std::vector<std::string> serializeLayerRows(const LayerRows& layers);
 
@@ -367,6 +393,8 @@ public:
     [[nodiscard]] const ScreenSelector* selectorAt(GridPosition3 cell) const;
     [[nodiscard]] const std::vector<Lectern>& lecterns() const { return lecterns_; }
     [[nodiscard]] const Lectern* lecternAt(GridPosition3 cell) const;
+    [[nodiscard]] const std::vector<GroundSplat>& groundSplats() const { return groundSplats_; }
+    [[nodiscard]] const std::vector<GroundPaint>& groundPaint() const { return groundPaint_; }
     [[nodiscard]] TileType authoredTileAt(uint32_t x, uint32_t y, uint32_t z = 0) const;
     [[nodiscard]] TileType tileAt(uint32_t x, uint32_t y, uint32_t z = 0) const;
     [[nodiscard]] std::optional<TileType> supportingTileAt(GridPosition3 position) const;
@@ -400,6 +428,8 @@ private:
     std::vector<Decoration> decorations_;
     std::vector<ScreenSelector> selectors_;
     std::vector<Lectern> lecterns_;
+    std::vector<GroundSplat> groundSplats_;
+    std::vector<GroundPaint> groundPaint_;
 };
 
 } // namespace sokoban

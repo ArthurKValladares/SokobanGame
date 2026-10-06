@@ -36,6 +36,8 @@ constexpr std::string_view linkColorPrefix = "@linkcolor ";
 // phase (2 * stops - 2 values) inside GameState's 8-bit field.
 constexpr std::size_t maximumElevatorStops = 64;
 constexpr std::string_view platePrefix = "@plate ";
+constexpr std::string_view groundSplatPrefix = "@groundsplat ";
+constexpr std::string_view groundPaintPrefix = "@groundpaint ";
 
 using Json = nlohmann::json;
 
@@ -1176,7 +1178,9 @@ Level::Definition Level::parseDefinition(
                     line.starts_with(minecartPrefix) ||
                     line.starts_with(objectLinkPrefix) ||
                     line.starts_with(linkColorPrefix) ||
-                    line.starts_with(platePrefix);
+                    line.starts_with(platePrefix) ||
+                    line.starts_with(groundSplatPrefix) ||
+                    line.starts_with(groundPaintPrefix);
             })) {
             throw std::runtime_error(
                 "Level metadata requires explicit '@layer 0' sections: " + source);
@@ -1187,6 +1191,33 @@ Level::Definition Level::parseDefinition(
     Definition definition;
     std::optional<uint32_t> currentLayer;
     for (const std::string& line : lines) {
+        if (line.starts_with(groundSplatPrefix) || line.starts_with(groundPaintPrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error("Ground metadata must appear before '@layer 0': " + source);
+            }
+            try {
+                const bool splat = line.starts_with(groundSplatPrefix);
+                const Json object = Json::parse(std::string_view(line).substr(
+                    splat ? groundSplatPrefix.size() : groundPaintPrefix.size()));
+                if (splat) {
+                    definition.groundSplats.push_back({
+                        .name = object.at("name").get<std::string>(),
+                        .base = object.at("base").get<std::string>(),
+                        .detail = object.at("detail").get<std::string>(),
+                        .mask = object.at("mask").get<std::string>(),
+                        .color = parseDecorationVec3(object, "color", sourceName),
+                    });
+                } else {
+                    definition.groundPaint.push_back({
+                        .cell = parseLinkedCell(object.at("cell"), "cell", sourceName, "Ground paint"),
+                        .splat = object.at("splat").get<std::string>(),
+                    });
+                }
+            } catch (const Json::exception& error) {
+                throw std::runtime_error("Invalid ground JSON in " + source + ": " + error.what());
+            }
+            continue;
+        }
         if (line.starts_with(cameraPrefix)) {
             if (currentLayer) {
                 throw std::runtime_error(
@@ -1445,6 +1476,7 @@ Level::Definition Level::parseDefinition(
     canonicalizeObjectLinks(definition.portals, sourceName);
     canonicalizePlates(definition.plates, sourceName);
     canonicalizeLinkColors(definition.linkColors, sourceName);
+    validateGroundSplats(definition, sourceName);
 
     return definition;
 }
@@ -1459,6 +1491,7 @@ Level::LayerRows Level::parseLayerRows(
 std::vector<std::string> Level::serializeDefinition(
     const Definition& definition)
 {
+    validateGroundSplats(definition, "serialized level");
     if (definition.layers.size() == 1 && !definition.character &&
         !definition.waterLayer && !definition.cameraAngles &&
         definition.decorations.empty() &&
@@ -1467,11 +1500,33 @@ std::vector<std::string> Level::serializeDefinition(
         definition.elevators.empty() &&
         definition.minecarts.empty() && definition.objectLinks.empty() &&
         definition.portals.empty() && definition.linkColors.empty() &&
-        definition.plates.empty()) {
+        definition.plates.empty() && definition.groundSplats.empty() &&
+        definition.groundPaint.empty()) {
         return definition.layers.front();
     }
 
     std::vector<std::string> lines;
+    for (const GroundSplat& splat : definition.groundSplats) {
+        const Json object {
+            { "name", splat.name }, { "base", splat.base },
+            { "detail", splat.detail }, { "mask", splat.mask },
+            { "color", { splat.color.x, splat.color.y, splat.color.z } },
+        };
+        lines.push_back(std::string(groundSplatPrefix) + object.dump());
+    }
+    std::vector<GroundPaint> paint = definition.groundPaint;
+    std::ranges::sort(paint, [](const GroundPaint& a, const GroundPaint& b) {
+        if (a.cell.z != b.cell.z) return a.cell.z < b.cell.z;
+        if (a.cell.y != b.cell.y) return a.cell.y < b.cell.y;
+        return a.cell.x < b.cell.x;
+    });
+    for (const GroundPaint& tile : paint) {
+        const Json object {
+            { "cell", { tile.cell.x, tile.cell.y, tile.cell.z } },
+            { "splat", tile.splat },
+        };
+        lines.push_back(std::string(groundPaintPrefix) + object.dump());
+    }
     if (definition.cameraAngles) {
         validateCameraAngles(*definition.cameraAngles, "serialized level");
         const Json object {
@@ -1582,7 +1637,8 @@ std::vector<std::string> Level::serializeDefinition(
         !definition.lockPlates.empty() ||
         !definition.elevators.empty() || !definition.minecarts.empty() ||
         !definition.objectLinks.empty() || !definition.portals.empty() ||
-        !definition.linkColors.empty() || !definition.plates.empty()) {
+        !definition.linkColors.empty() || !definition.plates.empty() ||
+        !definition.groundSplats.empty() || !definition.groundPaint.empty()) {
         lines.emplace_back();
     }
     for (size_t layer = 0; layer < definition.layers.size(); ++layer) {
@@ -1632,7 +1688,63 @@ Level Level::loadFromDefinition(
         definition.lockPlates,
         definition.lecterns);
     level.cameraAngles_ = definition.cameraAngles;
+    validateGroundSplats(definition, sourceName);
+    level.groundSplats_ = definition.groundSplats;
+    level.groundPaint_ = definition.groundPaint;
     return level;
+}
+
+const Level::GroundSplat* Level::groundSplatAt(
+    const std::vector<GroundSplat>& splats,
+    const std::vector<GroundPaint>& paint, GridPosition3 cell)
+{
+    if (splats.empty()) return nullptr;
+    const auto assigned = std::ranges::find(paint, cell, &GroundPaint::cell);
+    if (assigned == paint.end()) return &splats.front();
+    const auto found = std::ranges::find(splats, assigned->splat, &GroundSplat::name);
+    return found == splats.end() ? &splats.front() : &*found;
+}
+
+void Level::validateGroundSplats(const Definition& definition, std::string_view sourceName)
+{
+    const auto fail = [&](const char* message) {
+        throw std::runtime_error(std::string(message) + ": " + std::string(sourceName));
+    };
+    const auto colorKey = [](Vec3 color) {
+        return std::array<int, 3> { static_cast<int>(std::lround(color.x * 255.0f)),
+            static_cast<int>(std::lround(color.y * 255.0f)),
+            static_cast<int>(std::lround(color.z * 255.0f)) };
+    };
+    for (std::size_t i = 0; i < definition.groundSplats.size(); ++i) {
+        const GroundSplat& splat = definition.groundSplats[i];
+        if (splat.name.empty() || splat.base.empty() || splat.detail.empty() || splat.mask.empty())
+            fail("Ground splat names and texture names must not be empty");
+        for (float component : { splat.color.x, splat.color.y, splat.color.z }) {
+            if (!std::isfinite(component) || component < 0 || component > 1)
+                fail("Ground splat colors must be finite and in [0, 1]");
+        }
+        for (std::size_t j = 0; j < i; ++j) {
+            if (definition.groundSplats[j].name == splat.name)
+                fail("Ground splat names must be unique within a screen");
+            if (colorKey(definition.groundSplats[j].color) == colorKey(splat.color))
+                fail("Ground splat colors must be unique within a screen");
+        }
+    }
+    for (std::size_t i = 0; i < definition.groundPaint.size(); ++i) {
+        const GroundPaint& paint = definition.groundPaint[i];
+        if (std::ranges::find(definition.groundSplats, paint.splat, &GroundSplat::name) == definition.groundSplats.end())
+            fail("Ground paint references an unknown splat map");
+        const GridPosition3 cell = paint.cell;
+        if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+            static_cast<std::size_t>(cell.z) >= definition.layers.size() ||
+            static_cast<std::size_t>(cell.y) >= definition.layers[static_cast<std::size_t>(cell.z)].size() ||
+            static_cast<std::size_t>(cell.x) >= definition.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)].size() ||
+            definition.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)] != tileTypeToChar(TileType::Ground))
+            fail("Ground paint must reference a ground tile inside the screen");
+        for (std::size_t j = 0; j < i; ++j) {
+            if (definition.groundPaint[j].cell == cell) fail("Duplicate ground paint cell");
+        }
+    }
 }
 
 Level Level::loadFromLayers(

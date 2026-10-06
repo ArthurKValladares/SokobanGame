@@ -159,6 +159,11 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     requirements.requireTexture(splat.base);
     requirements.requireTexture(splat.detail);
     requirements.requireTexture(splat.splatMap);
+    for (const Level::GroundSplat& authored : level.groundSplats()) {
+        requirements.requireTexture(manifest.findTextureIdByName(authored.base));
+        requirements.requireTexture(manifest.findTextureIdByName(authored.detail));
+        requirements.requireTexture(manifest.findTextureIdByName(authored.mask));
+    }
 
     for (uint32_t z = 0; z < level.depth(); ++z) {
         for (uint32_t y = 0; y < level.height(); ++y) {
@@ -253,6 +258,11 @@ void renderAssetRequirementsForFrame(
         requirements.requireModel(tile.model);
         requirements.requireAnimation(tile.animation);
         requirements.requireAnimation(tile.animationFallback);
+        if (tile.groundSplat) {
+            requirements.requireTexture(tile.groundSplat->base);
+            requirements.requireTexture(tile.groundSplat->detail);
+            requirements.requireTexture(tile.groundSplat->splatMap);
+        }
     }
     for (const RenderFrameData::Particle& particle : frame.particles) {
         requirements.requireTexture(particle.texture);

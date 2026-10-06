@@ -1,3 +1,4 @@
+@groundsplat {"name":"Ground","base":"GroundGrass","detail":"GroundRock","mask":"GroundSplatMap","color":[0.25,0.75,0.35]}
 @minecart {"cell":[6,5,1],"color":[0.0,1.0,1.0],"direction":1,"plates":[[8,3,1]]}
 @plate {"cell":[1,2,1],"tile":"Rail Straight North-South"}
 @plate {"cell":[11,2,1],"tile":"Rail Straight North-South"}

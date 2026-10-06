@@ -1261,6 +1261,43 @@ void testMinecartGatePreservesRailsAndRoutes()
     }, "compatible with its surface");
 }
 
+void testGroundSplatMetadata()
+{
+    TEST("groundSplatMetadata");
+    Level::Definition definition {
+        .layers = { { "..." }, { "C  " } },
+        .groundSplats = {
+            { "Meadow", "Grass", "Stone", "MeadowMask", { 0, 1, 0 } },
+            { "Sand", "Sand", "Mud", "SandMask", { 1, 0, 0 } },
+        },
+        .groundPaint = { { { 2, 0, 0 }, "Sand" } },
+    };
+    const auto lines = Level::serializeDefinition(definition);
+    const auto parsed = Level::parseDefinition(lines, "ground round trip");
+    CHECK(parsed.groundSplats == definition.groundSplats);
+    CHECK(parsed.groundPaint == definition.groundPaint);
+    const auto level = Level::loadFromDefinition(parsed, "ground runtime");
+    CHECK(level.groundSplats() == definition.groundSplats);
+    CHECK(Level::groundSplatAt(level.groundSplats(), level.groundPaint(), { 0, 0, 0 })->name == "Meadow");
+    CHECK(Level::groundSplatAt(level.groundSplats(), level.groundPaint(), { 2, 0, 0 })->name == "Sand");
+    CHECK(Level::groundSplatAt(level.groundSplats(), level.groundPaint(), { 2, 0, 1 })->name == "Meadow");
+    checkThrowsContaining([&] { auto bad = definition; bad.groundPaint[0].splat = "Missing";
+        (void)Level::serializeDefinition(bad); }, "unknown splat");
+    checkThrowsContaining([&] { auto bad = definition; bad.groundSplats[1].color = { 0, 1, 0 };
+        (void)Level::loadFromDefinition(bad, "duplicate colors"); }, "colors must be unique");
+    checkThrowsContaining([&] { auto bad = definition; bad.groundSplats[1].name = "Meadow";
+        (void)Level::serializeDefinition(bad); }, "names must be unique");
+    checkThrowsContaining([&] { auto bad = definition; bad.groundPaint.push_back(bad.groundPaint[0]);
+        (void)Level::serializeDefinition(bad); }, "Duplicate ground paint");
+    checkThrowsContaining([&] { auto bad = definition; bad.groundPaint[0].cell.z = 1;
+        (void)Level::serializeDefinition(bad); }, "ground tile inside");
+    checkThrowsContaining([&] { auto bad = definition; bad.groundSplats[0].color.x = -1;
+        (void)Level::serializeDefinition(bad); }, "finite and in");
+    checkThrowsContaining([&] { auto bad = definition; bad.groundSplats[0].mask.clear();
+        (void)Level::serializeDefinition(bad); }, "must not be empty");
+    CHECK(Level::parseDefinition({ "C." }, "legacy ground").groundSplats.empty());
+}
+
 } // namespace
 
 int main()
@@ -1293,6 +1330,7 @@ int main()
     CHECK(Level::loadFromLayers({ { ".." }, { "CT" } }, "blank book").lecternAt({ 1, 0, 1 })->text.empty());
     testLockPlateMetadata();
     testPortalMetadata();
+    testGroundSplatMetadata();
     testLegacyAndLayeredParsing();
     testSerializationRoundTrip();
     testCameraMetadataRoundTripAndValidation();

@@ -450,6 +450,9 @@ bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirem
     // resources, so evictions from this blocking path can retire immediately.
     retirementFrameMask_ = 0;
     requestAssets(requirements);
+    // The final readiness pass cannot see bindings published while draining
+    // CPU jobs: those textures are already resident by the time it runs.
+    bool descriptorsChanged = false;
 
     // This is an offline-only path. Let the normal bounded scheduler drain as
     // each completed job is published; gameplay never waits here.
@@ -471,7 +474,9 @@ bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirem
         }
         for (uint32_t textureIndex : textureSpace_.active()) {
             if (textures_[textureIndex].publication.readyForPublication()) {
-                published = publishTexture(textureIndex, true) || published;
+                const bool texturePublished = publishTexture(textureIndex, true);
+                descriptorsChanged = texturePublished || descriptorsChanged;
+                published = texturePublished || published;
             }
         }
         startQueuedAssets();
@@ -501,7 +506,8 @@ bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirem
         }
     }
 
-    bool descriptorsChanged = std::exchange(textureDescriptorsDirty_, false);
+    descriptorsChanged = std::exchange(textureDescriptorsDirty_, false) ||
+        descriptorsChanged;
     const std::vector<bool> textureRequirements = requiredTextures(requirements);
     for (std::size_t i = 0; i < textureRequirements.size(); ++i) {
         if (!textureRequirements[i]) {

@@ -149,6 +149,7 @@ struct GroundSplatTextures {
     RenderTexture base = noTexture;
     RenderTexture detail = noTexture;
     RenderTexture splatMap = noTexture;
+    friend constexpr bool operator==(GroundSplatTextures, GroundSplatTextures) = default;
 
     [[nodiscard]] constexpr bool valid() const
     {
@@ -408,6 +409,9 @@ struct RenderFrameData {
         std::optional<uint32_t> editorDecorationIndex;
         EditorDecorationHighlight editorDecorationHighlight =
             EditorDecorationHighlight::None;
+        // Per-tile authored material. Empty preserves the legacy screen fallback.
+        std::optional<GroundSplatTextures> groundSplat;
+        GridPosition groundSplatOrigin {};
 
         friend constexpr bool operator==(const Tile&, const Tile&) = default;
     };

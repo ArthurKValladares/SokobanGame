@@ -17,6 +17,8 @@
 
 namespace sokoban {
 
+class AssetManifest;
+
 // ImGui adapter for LevelEditor. This class owns presentation-only state and
 // delegates every editor operation to the headless model.
 class LevelEditorDebugUi {
@@ -29,6 +31,7 @@ public:
         std::function<bool()> openGroundPainting;
         // Creates and registers one for a screen that has none, then opens it.
         std::function<bool()> createGroundSplatMap;
+        std::function<const AssetManifest&()> assetManifest;
         // Rendered preview of a tile type for the palette, or 0 when there is
         // none to show (still loading, no model, or thumbnails unavailable).
         // An ImGui ImTextureID, typed as uint64_t so this header does not
@@ -61,7 +64,7 @@ public:
     [[nodiscard]] bool showDebugView() const { return showDebugView_; }
 
 private:
-    void drawGroundPaintTab(SplatPainter& painter, const Callbacks& callbacks);
+    void drawGroundPaintTab(LevelEditor& editor, SplatPainter& painter, const Callbacks& callbacks);
     void drawTilePalette(
         LevelEditor& editor,
         const InputBindings& bindings,

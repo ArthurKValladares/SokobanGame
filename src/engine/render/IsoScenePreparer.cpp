@@ -1245,6 +1245,8 @@ struct IsoFaceRequest {
     Vec2 gridSize {};
     PreparedSurfaceMaterial material {};
     uint32_t shorelineMask = 0;
+    std::optional<GroundSplatTextures> groundSplat;
+    GridPosition groundSplatOrigin {};
 };
 
 void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
@@ -1270,6 +1272,8 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
         .material = request.material,
         .shorelineMask = request.shorelineMask,
         .depth = faceDepth(scene.isoLayout, request.vertices),
+        .groundSplat = request.groundSplat,
+        .groundSplatOrigin = request.groundSplatOrigin,
     };
     for (std::size_t i = 0; i < request.vertices.size(); ++i) {
         face.worldVertices[i] = request.vertices[i];
@@ -1368,6 +1372,8 @@ void appendTileFaces(
                 .gridSize = { width, depth },
                 .material = topMaterial,
                 .shorelineMask = 0,
+                .groundSplat = tile.groundSplat,
+                .groundSplatOrigin = tile.groundSplatOrigin,
             });
         } else {
             appendIsoFace(scene, {
@@ -1454,6 +1460,8 @@ void appendTileFaces(
                 .gridSize = { width, depth },
                 .material = topMaterial,
                 .shorelineMask = 0,
+                .groundSplat = tile.groundSplat,
+                .groundSplatOrigin = tile.groundSplatOrigin,
             });
         }
 

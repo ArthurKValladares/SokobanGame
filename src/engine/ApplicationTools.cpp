@@ -550,6 +550,10 @@ bool ApplicationTools::openGroundPainting(
     // whenever a session is opened from a tool callback.
     levelEditor.setEditingDocument(true);
 
+    if (splatPainter.dirty() && !splatPainter.save()) return false;
+    levelEditor.setGroundAssignmentPainting(false);
+    levelEditor.showGroundAssignmentColors() = false;
+    const Level::GroundSplat* selectedSplat = levelEditor.selectedGroundSplat();
     const bool opened = splatPainter.open(
         {
             .documentPath = levelEditor.loadedDocumentPath(),
@@ -557,7 +561,8 @@ bool ApplicationTools::openGroundPainting(
             .boardTilesHigh = levelEditor.documentHeight(),
             .sourceAssetRoot = sourceAssetRoot,
             .runtimeAssetRoot = runtimeAssetRoot,
-            .textureName = levelEditor.overworldScreenId()
+            .textureName = selectedSplat ? std::optional<std::string> { selectedSplat->mask }
+                : levelEditor.overworldScreenId()
                 ? std::optional<std::string> {
                       groundSplatMapTextureNameForOverworldScreen(
                           *levelEditor.overworldScreenId()) }
@@ -590,27 +595,31 @@ bool ApplicationTools::createGroundSplatMap(
         return false;
     }
 
-    const CreatedSplatMap created = overworldScreen
-        ? createBlankSplatMapAt(
-              groundSplatMapAssetPathForOverworldScreen(*overworldScreen),
-              levelEditor.documentWidth(),
-              levelEditor.documentHeight(),
-              sourceAssetRoot,
-              runtimeAssetRoot)
-        : createBlankSplatMap(
-              *location,
-              levelEditor.documentWidth(),
-              levelEditor.documentHeight(),
-              sourceAssetRoot,
-              runtimeAssetRoot);
-    log::info(log::Category::Assets) << created.message;
-    if (!created.created) {
-        return false;
-    }
-
-    const std::string textureName = overworldScreen
+    if (splatPainter.dirty() && !splatPainter.save()) return false;
+    const bool first = levelEditor.groundSplats().empty();
+    const std::string prefix = overworldScreen
         ? groundSplatMapTextureNameForOverworldScreen(*overworldScreen)
         : groundSplatMapTextureNameForScreen(*location);
+    std::string textureName = prefix;
+    std::string relativePath = overworldScreen
+        ? groundSplatMapAssetPathForOverworldScreen(*overworldScreen)
+        : groundSplatMapAssetPathForScreen(*location);
+    std::string mapName = "Ground";
+    if (!first) {
+        std::size_t suffix = 1;
+        do {
+            textureName = prefix + "_" + std::to_string(suffix);
+            mapName = "Ground " + std::to_string(suffix + 1);
+            ++suffix;
+        } while (!manifest.findTextureIdByName(textureName).isNone() ||
+            std::ranges::find(levelEditor.groundSplats(), mapName, &Level::GroundSplat::name) != levelEditor.groundSplats().end());
+        relativePath = "custom/textures/" + textureName + ".png";
+    }
+    const CreatedSplatMap created = createBlankSplatMapAt(
+        relativePath, levelEditor.documentWidth(), levelEditor.documentHeight(), sourceAssetRoot, runtimeAssetRoot);
+    log::info(log::Category::Assets) << created.message;
+    if (!created.created) return false;
+
     if (manifest.findTextureIdByName(textureName).isNone()) {
         if (manifest.textures().size() >=
             renderer.textureDescriptorCapacity()) {
@@ -633,14 +642,35 @@ bool ApplicationTools::createGroundSplatMap(
             return false;
         }
         renderer.syncManifestTextures();
-        persistManifestTexture(textureName, created.relativePath);
+        if (!persistManifestTexture(textureName, created.relativePath)) return false;
     }
 
-    return openGroundPainting(
-        sourceAssetRoot, runtimeAssetRoot, manifest, renderer);
+    const Level::GroundSplat* selected = levelEditor.selectedGroundSplat();
+    Level::GroundSplat splat {
+        .name = mapName,
+        .base = selected ? selected->base : std::string(groundSplatBaseTextureName),
+        .detail = selected ? selected->detail : std::string(groundSplatDetailTextureName),
+        .mask = textureName,
+    };
+    // Generate a distinct 8-bit assignment color; authors can change it later.
+    for (uint32_t key = 0x40bf59; ; key = (key + 0x9e3779) & 0xffffff) {
+        splat.color = { static_cast<float>((key >> 16) & 255) / 255.0f,
+                        static_cast<float>((key >> 8) & 255) / 255.0f,
+                        static_cast<float>(key & 255) / 255.0f };
+        const auto same = [&](const Level::GroundSplat& existing) {
+            return std::lround(existing.color.x * 255) == std::lround(splat.color.x * 255) &&
+                std::lround(existing.color.y * 255) == std::lround(splat.color.y * 255) &&
+                std::lround(existing.color.z * 255) == std::lround(splat.color.z * 255);
+        };
+        if (!std::ranges::any_of(levelEditor.groundSplats(), same)) break;
+    }
+    if (!levelEditor.addGroundSplat(std::move(splat))) return false;
+    splatPainter.close();
+    levelEditor.setGroundAssignmentPainting(true);
+    return true;
 }
 
-void ApplicationTools::persistManifestTexture(
+bool ApplicationTools::persistManifestTexture(
     const std::string& name,
     const std::string& relativePath)
 {
@@ -659,9 +689,9 @@ void ApplicationTools::persistManifestTexture(
         log::error(log::Category::Assets)
             << "Could not write " << name << " to the source manifest: "
             << assetManifestEditor.status();
-        return;
+        return false;
     }
-
+    return true;
 }
 
 std::optional<std::string> ApplicationTools::registerDecorationMesh(
@@ -1171,6 +1201,8 @@ bool ApplicationTools::bakeTileThumbnails(
         manifest.findTextureIdByName(groundSplatMapTextureName));
     requirements.requireTexture(
         manifest.findTextureIdByName(config::turretGlowTextureName));
+    requirements.requireTexture(
+        manifest.findTextureIdByName(config::gateParticleTextureName));
     renderer.waitForAssets(requirements);
 
     bool allSucceeded = true;
@@ -1180,29 +1212,23 @@ bool ApplicationTools::bakeTileThumbnails(
             continue;
         }
         try {
-            if (tileTypeIsPortal(definition.type)) {
-                RenderAssetRequirements portalRequirements;
-                portalRequirements.requireTexture(
-                    manifest.findTextureIdByName(config::turretGlowTextureName));
-                renderer.waitForAssets(portalRequirements);
-            }
+            const RenderFrameData bakeFrame = bake::buildBakeFrame(
+                definition.type, manifest, settings, &animations);
+            // Residency may have evicted an effect texture since the initial
+            // preload. Wait for everything this particular picture samples.
+            renderer.waitForAssets(renderAssetRequirementsForFrame(bakeFrame));
             for (int warmup = 0; warmup < 2; ++warmup) {
                 SDL_PumpEvents();
                 ui.beginFrame(viewportSize, {}, false, false);
                 renderer.beginDebugUiFrame();
                 renderer.drawFrame(
-                    renderer.prepareFrame(bake::buildBakeFrame(
-                        definition.type,
-                        manifest,
-                        settings,
-                        &animations)),
+                    renderer.prepareFrame(bakeFrame),
                     ui.drawData());
             }
 
             const VkExtent2D extent = renderer.renderExtent();
             const bake::CropRect crop = bake::cropFor(
-                bake::buildBakeFrame(
-                    definition.type, manifest, settings, &animations),
+                bakeFrame,
                 extent.width,
                 extent.height);
             const ImageData captured = renderer.captureRenderedFrame(
@@ -1302,7 +1328,9 @@ void ApplicationTools::updateEditorCursor(bool editorActive)
         }
         cursor = eyedropperCursor_;
     } else if (wanted == EditorCursor::Brush) {
-        const Vec3 paint = levelEditor.activeLinkColor();
+        const Level::GroundSplat* ground = levelEditor.groundAssignmentPainting()
+            ? levelEditor.selectedGroundSplat() : nullptr;
+        const Vec3 paint = ground ? ground->color : levelEditor.activeLinkColor();
         if (brushCursor_ != nullptr &&
             !LevelEditor::sameLinkColor(paint, brushCursorColor_)) {
             if (shownEditorCursor_ == EditorCursor::Brush) {
@@ -1383,6 +1411,7 @@ void ApplicationTools::updateEditorInteraction(
             (void)levelEditor.endStroke();
             linkColorStroke_.reset();
         }
+        groundAssignmentLast_.reset();
         if (input.undoPressed) {
             (void)(splatPainter.active()
                     ? splatPainter.undo()
@@ -1597,8 +1626,9 @@ void ApplicationTools::handleEditorShortcuts(
     if (input.savePressed) {
         interruptTileStroke();
         if (splatPainter.active()) {
-            (void)splatPainter.save();
-        } else if (levelEditor.saveLoadedDocument().sourceSaved()) {
+            if (!splatPainter.save()) return;
+        }
+        if (levelEditor.saveLoadedDocument().sourceSaved()) {
             levelEditorDebugUi.syncDocumentPath(levelEditor);
         }
     }
@@ -1751,6 +1781,32 @@ bool ApplicationTools::updateGroundPainting(
     Vec2 pointerPixels,
     VulkanRenderer& renderer)
 {
+    if (levelEditor.groundAssignmentPainting()) {
+        wantedEditorCursor_ = EditorCursor::Brush;
+        if (!input.primaryDown) {
+            (void)levelEditor.endStroke();
+            groundAssignmentLast_.reset();
+            return true;
+        }
+        const auto cell = renderer.pickIsoGridCell(previousRenderFrame, pointerPixels);
+        if (cell) {
+            if (!levelEditor.strokeActive()) groundAssignmentLast_.reset();
+            (void)levelEditor.beginStroke();
+            if (groundAssignmentLast_ && groundAssignmentLast_->z == cell->z) {
+                for (const GridPosition column : EditorInteraction::gridLine(
+                         { groundAssignmentLast_->x, groundAssignmentLast_->y }, { cell->x, cell->y })) {
+                    (void)levelEditor.paintGroundSplat({ column.x, column.y, cell->z });
+                }
+            } else {
+                (void)levelEditor.paintGroundSplat(*cell);
+            }
+            groundAssignmentLast_ = cell;
+        } else {
+            groundAssignmentLast_.reset();
+        }
+        return true;
+    }
+    groundAssignmentLast_.reset();
     if (!splatPainter.active()) {
         return false;
     }

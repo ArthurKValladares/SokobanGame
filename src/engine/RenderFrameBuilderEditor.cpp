@@ -86,6 +86,24 @@ public:
         appendEditorPreviews(frame);
         appendEditorCamera(frame);
         applyEditorScrollingMaterials(frame);
+        for (RenderFrameData::Tile& tile : frame.tiles) {
+            if (tile.effect != RenderSurfaceEffect::GroundSplat) continue;
+            bool neighborTile = false;
+            for (const auto& neighbor : input_.overworldNeighbors) {
+                if (neighbor.definition && tile.cell.x >= neighbor.origin.x && tile.cell.y >= neighbor.origin.y &&
+                    tile.cell.x < neighbor.origin.x + static_cast<int>(neighbor.width) &&
+                    tile.cell.y < neighbor.origin.y + static_cast<int>(neighbor.height)) {
+                    applyGroundSplat(tile, input_.manifest,
+                        neighbor.definition->groundSplats, neighbor.definition->groundPaint, neighbor.origin);
+                    neighborTile = true;
+                    break;
+                }
+            }
+            if (!neighborTile) {
+                applyGroundSplat(tile, input_.manifest, input_.editor.groundSplats(),
+                    input_.editor.groundPaint(), {}, input_.editor.showGroundAssignmentColors());
+            }
+        }
         return frame;
     }
 
@@ -578,8 +596,8 @@ private:
         }
         if (tile == TileType::Ladder) {
             const std::size_t firstTile = frame.tiles.size();
-            appendLadderRungsForCell(
-                frame, cell, neighborTileAt, false);
+            appendLadderSegmentsForCell(
+                frame, cell, neighborTileAt, input_.manifest, false);
             for (std::size_t index = firstTile;
                  index < frame.tiles.size();
                  ++index) {
@@ -860,10 +878,11 @@ private:
                     }
                     return documentTileAt(position);
                 };
-            appendLadderRungsForCell(
+            appendLadderSegmentsForCell(
                 frame,
                 { x, y, z },
                 tileAtForLadder,
+                input_.manifest,
                 preview);
             return;
         }
@@ -1417,7 +1436,7 @@ RenderFrameData::Tile tileVisual(
 
     Vec4 color = tileColor(tile);
     if (tileTypeIsPlayerStart(tile) || tile == TileType::Enemy ||
-        tileTypeIsTurret(tile)) {
+        tileTypeIsTurret(tile) || tile == TileType::Ladder) {
         color = { 1.0f, 1.0f, 1.0f, 1.0f };
     }
     if (tile == TileType::Ice) {
@@ -1444,7 +1463,9 @@ RenderFrameData::Tile tileVisual(
         // Conveyors are the reason this is shared: they are neither a surface
         // entity nor a solid block, so anything that only tests those two ends
         // up drawing them flat.
-        .height = rotator
+        .height = tile == TileType::Ladder
+            ? 1.0f
+            : rotator
             ? config::rotatorPlateHeight
             : elevator
             ? config::elevatorPlatformHeight
@@ -1488,7 +1509,8 @@ RenderFrameData::Tile tileVisual(
             ? RenderSurfaceEffect::GroundSplat
             : RenderSurfaceEffect::Standard,
     };
-    if (!elevator) {
+    // Ladders must retain their one-unit repeat interval and wall offset.
+    if (!elevator && tile != TileType::Ladder) {
         applyTileScale(
             visual,
             settings.tileScale(

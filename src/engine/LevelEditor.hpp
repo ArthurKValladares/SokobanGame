@@ -155,6 +155,18 @@ public:
     // never-saved document has no such file and needs an explicit path.
     [[nodiscard]] SaveResult saveLoadedDocument();
     [[nodiscard]] Level::Definition documentDefinition() const;
+    [[nodiscard]] const std::vector<Level::GroundSplat>& groundSplats() const { return document_.groundSplats; }
+    [[nodiscard]] const std::vector<Level::GroundPaint>& groundPaint() const { return document_.groundPaint; }
+    bool addGroundSplat(Level::GroundSplat splat);
+    bool updateGroundSplat(std::size_t index, Level::GroundSplat splat);
+    bool removeGroundSplat(std::size_t index);
+    bool paintGroundSplat(GridPosition3 cell);
+    void selectGroundSplat(std::size_t index);
+    [[nodiscard]] const Level::GroundSplat* selectedGroundSplat() const;
+    void setGroundAssignmentPainting(bool enabled);
+    [[nodiscard]] bool groundAssignmentPainting() const { return groundAssignmentPainting_; }
+    [[nodiscard]] bool& showGroundAssignmentColors() { return showGroundAssignmentColors_; }
+    [[nodiscard]] bool showGroundAssignmentColors() const { return showGroundAssignmentColors_; }
     [[nodiscard]] Level documentToLevel() const;
     // `heroStart`, when given, is a picked board cell: playback moves the
     // draft's first hero start to the placement cell above it (puzzle
@@ -384,6 +396,8 @@ private:
         std::vector<Level::Decoration> decorations;
         std::vector<Level::ScreenSelector> selectors;
         std::vector<Level::Lectern> lecterns;
+        std::vector<Level::GroundSplat> groundSplats;
+        std::vector<Level::GroundPaint> groundPaint;
         std::vector<Level::Gate> gates;
         std::vector<Level::Rotator> rotators;
         std::vector<Level::LockPlate> lockPlates;
@@ -427,6 +441,8 @@ private:
         std::vector<Level::Decoration> decorations;
         std::vector<Level::ScreenSelector> selectors;
         std::vector<Level::Lectern> lecterns;
+        std::vector<Level::GroundSplat> groundSplats;
+        std::vector<Level::GroundPaint> groundPaint;
         std::vector<Level::Gate> gates;
         std::vector<Level::Rotator> rotators;
         std::vector<Level::LockPlate> lockPlates;
@@ -528,6 +544,9 @@ private:
     // Open stroke: the snapshot from before its first change, plus how many
     // cell edits it has absorbed.
     std::optional<DocumentSnapshot> strokeBefore_;
+    std::string selectedGroundSplatName_;
+    bool groundAssignmentPainting_ = false;
+    bool showGroundAssignmentColors_ = false;
     std::size_t strokeChanges_ = 0;
     // Set while a compound command (moveObject) makes intermediate changes
     // that it records itself.

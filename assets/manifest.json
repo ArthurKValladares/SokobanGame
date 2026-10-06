@@ -619,6 +619,11 @@
       "preserveSourceScale": true
     },
     {
+      "name": "Ladder",
+      "path": "custom/models/ladder.glb",
+      "preserveSourceScale": true
+    },
+    {
       "name": "RotatorGear",
       "path": "custom/models/rotator_gear.glb",
       "preserveSourceScale": true
@@ -788,6 +793,10 @@
     {
       "tile": "Lectern",
       "model": "Lectern"
+    },
+    {
+      "tile": "Ladder",
+      "model": "Ladder"
     },
     {
       "tile": "Rotator Clockwise",

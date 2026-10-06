@@ -22,6 +22,19 @@
 namespace sokoban {
 namespace {
 
+void remapGroundTextures(std::vector<Level::GroundSplat>& splats,
+    std::span<const LevelLocationAssociationRemap> remaps)
+{
+    for (Level::GroundSplat& splat : splats) {
+        for (std::string* name : { &splat.base, &splat.detail, &splat.mask }) {
+            const auto found = std::ranges::find_if(remaps, [&](const auto& remap) {
+                return remap.destination && *name == groundSplatMapTextureNameForScreen(remap.source);
+            });
+            if (found != remaps.end()) *name = groundSplatMapTextureNameForScreen(*found->destination);
+        }
+    }
+}
+
 std::filesystem::path normalizedAbsolutePath(const std::filesystem::path& path)
 {
     return std::filesystem::absolute(path).lexically_normal();
@@ -1302,6 +1315,12 @@ bool LevelEditor::moveObject(GridPosition3 destination)
     restoreRecordAfterMove(
         document_.lecterns, before.lecterns, move->tile == TileType::Lectern,
         move->source, destination);
+    if (move->tile == TileType::Ground) {
+        const auto paint = std::ranges::find(before.groundPaint, move->source, &Level::GroundPaint::cell);
+        if (paint != before.groundPaint.end()) {
+            document_.groundPaint.push_back({ .cell = destination, .splat = paint->splat });
+        }
+    }
     restoreRecordAfterMove(
         document_.gates,
         before.gates,
@@ -1673,6 +1692,10 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             lectern.cell.x += prependColumns;
             lectern.cell.y += prependRows;
         }
+        for (Level::GroundPaint& paint : document_.groundPaint) {
+            paint.cell.x += prependColumns;
+            paint.cell.y += prependRows;
+        }
         translateLinkedRecords(document_.gates, prependColumns, prependRows);
         translateLinkedRecords(
             document_.rotators, prependColumns, prependRows);
@@ -1843,6 +1866,11 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
         });
     }
 
+    if (tile != TileType::Ground) {
+        std::erase_if(document_.groundPaint, [&](const Level::GroundPaint& paint) {
+            return paint.cell == translatedPosition;
+        });
+    }
     document_.layers[static_cast<size_t>(translatedPosition.z)]
         [static_cast<size_t>(translatedPosition.y)]
         [static_cast<size_t>(translatedPosition.x)] =
@@ -2803,6 +2831,8 @@ Level::Definition LevelEditor::linkedDefinition(
         .objectLinks = document_.objectLinks,
         .portals = document_.portals,
         .character = character,
+        .groundSplats = document_.groundSplats,
+        .groundPaint = document_.groundPaint,
     };
     // The color groups become explicit links here, and only here; nothing
     // past this point ever compares colors.
@@ -2972,6 +3002,7 @@ std::optional<OverworldScreenId> LevelEditor::overworldScreenIdForPath(
 
 void LevelEditor::newDocument(int width, int height, bool recordHistory)
 {
+    setGroundAssignmentPainting(false);
     const DocumentSnapshot before = captureDocumentSnapshot();
     pendingMove_.reset();
     width = std::max(width, 1);
@@ -2992,6 +3023,8 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     document_.decorations.clear();
     document_.selectors.clear();
     document_.lecterns.clear();
+    document_.groundSplats.clear();
+    document_.groundPaint.clear();
     document_.gates.clear();
     document_.rotators.clear();
     document_.lockPlates.clear();
@@ -3057,6 +3090,9 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
     }
     std::erase_if(document_.lecterns, [&](const Level::Lectern& lectern) {
         return lectern.cell.x >= width || lectern.cell.y >= height;
+    });
+    std::erase_if(document_.groundPaint, [&](const Level::GroundPaint& paint) {
+        return paint.cell.x >= width || paint.cell.y >= height;
     });
     cropLinkedRecords(document_.gates, width, height);
     cropLinkedRecords(document_.rotators, width, height);
@@ -3151,6 +3187,9 @@ void LevelEditor::insertLayerAt(int insertionIndex, const char* status)
             ++link.cell.z;
         }
     }
+    for (Level::GroundPaint& paint : document_.groundPaint) {
+        if (paint.cell.z >= insertionIndex) ++paint.cell.z;
+    }
     document_.activeLayer = insertionIndex;
     document_.dirty = true;
     document_.status = status;
@@ -3197,6 +3236,11 @@ void LevelEditor::deleteActiveLayer()
     std::erase_if(document_.lecterns, [&](Level::Lectern& lectern) {
         if (lectern.cell.z == static_cast<int>(deletedLayer)) return true;
         if (lectern.cell.z > static_cast<int>(deletedLayer)) --lectern.cell.z;
+        return false;
+    });
+    std::erase_if(document_.groundPaint, [&](Level::GroundPaint& paint) {
+        if (paint.cell.z == static_cast<int>(deletedLayer)) return true;
+        if (paint.cell.z > static_cast<int>(deletedLayer)) --paint.cell.z;
         return false;
     });
     removeLinkedRecordLayer(document_.gates, static_cast<int>(deletedLayer));
@@ -3266,6 +3310,7 @@ LevelEditor::SaveResult LevelEditor::saveLoadedDocument()
 
 bool LevelEditor::openDocument(const std::filesystem::path& path)
 {
+    setGroundAssignmentPainting(false);
     const std::filesystem::path targetKey = draftKey(path);
     if (targetKey.empty()) {
         document_.status = "Cannot open an empty document path.";
@@ -3387,6 +3432,9 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     document_.decorations = std::move(definition.decorations);
     document_.selectors = std::move(definition.selectors);
     document_.lecterns = std::move(definition.lecterns);
+    document_.groundSplats = std::move(definition.groundSplats);
+    document_.groundPaint = std::move(definition.groundPaint);
+    groundAssignmentPainting_ = false;
     for (std::size_t z = 0; z < document_.layers.size(); ++z) {
         for (std::size_t y = 0; y < document_.layers[z].size(); ++y) {
             for (std::size_t x = 0; x < document_.layers[z][y].size(); ++x) {
@@ -4061,6 +4109,9 @@ void LevelEditor::restoreDeletedLevel(const std::filesystem::path& deletedLevelP
             identityRemaps.push_back({
                 .sourcePath = screen.path,
                 .destinationPath = restoredLevel / screen.path.filename(),
+                .sourceLocation = deletedAssociations ? std::optional<LevelLocation> {
+                    { deletedAssociations->originalLevel, screen.index } } : std::nullopt,
+                .destinationLocation = LevelLocation { restoredIndex, screen.index },
             });
         }
     }
@@ -4146,6 +4197,8 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
         before.decorations == after.decorations &&
         before.selectors == after.selectors &&
         before.lecterns == after.lecterns &&
+        before.groundSplats == after.groundSplats &&
+        before.groundPaint == after.groundPaint &&
         before.gates == after.gates &&
         before.rotators == after.rotators &&
         before.lockPlates == after.lockPlates &&
@@ -4179,6 +4232,8 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
     document_.decorations = snapshot.decorations;
     document_.selectors = snapshot.selectors;
     document_.lecterns = snapshot.lecterns;
+    document_.groundSplats = snapshot.groundSplats;
+    document_.groundPaint = snapshot.groundPaint;
     document_.gates = snapshot.gates;
     document_.rotators = snapshot.rotators;
     document_.lockPlates = snapshot.lockPlates;
@@ -4210,6 +4265,116 @@ Level::Definition LevelEditor::documentDefinition() const
 {
     return linkedDefinition(
         editingOverworld() ? document_.character : std::nullopt);
+}
+
+void LevelEditor::selectGroundSplat(std::size_t index)
+{
+    if (index < document_.groundSplats.size()) {
+        endStroke();
+        selectedGroundSplatName_ = document_.groundSplats[index].name;
+    }
+}
+
+const Level::GroundSplat* LevelEditor::selectedGroundSplat() const
+{
+    const auto found = std::ranges::find(document_.groundSplats,
+        selectedGroundSplatName_, &Level::GroundSplat::name);
+    return found != document_.groundSplats.end() ? &*found :
+        document_.groundSplats.empty() ? nullptr : &document_.groundSplats.front();
+}
+
+void LevelEditor::setGroundAssignmentPainting(bool enabled)
+{
+    endStroke();
+    groundAssignmentPainting_ = enabled && selectedGroundSplat();
+    if (groundAssignmentPainting_) {
+        document_.editingDocument = true;
+        showGroundAssignmentColors_ = true;
+    }
+}
+
+bool LevelEditor::addGroundSplat(Level::GroundSplat splat)
+{
+    Level::Definition candidate = documentDefinition();
+    candidate.groundSplats.push_back(splat);
+    try {
+        Level::validateGroundSplats(candidate, "editor ground splats");
+    } catch (const std::exception& error) {
+        document_.status = error.what();
+        return false;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.groundSplats.push_back(std::move(splat));
+    selectedGroundSplatName_ = document_.groundSplats.back().name;
+    document_.dirty = true;
+    recordDocumentChange(before);
+    return true;
+}
+
+bool LevelEditor::updateGroundSplat(std::size_t index, Level::GroundSplat splat)
+{
+    if (index >= document_.groundSplats.size() || document_.groundSplats[index] == splat) return false;
+    Level::Definition candidate = documentDefinition();
+    const std::string oldName = candidate.groundSplats[index].name;
+    candidate.groundSplats[index] = splat;
+    for (Level::GroundPaint& paint : candidate.groundPaint) {
+        if (paint.splat == oldName) paint.splat = splat.name;
+    }
+    try {
+        Level::validateGroundSplats(candidate, "editor ground splats");
+    } catch (const std::exception& error) {
+        document_.status = error.what();
+        return false;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.groundSplats = std::move(candidate.groundSplats);
+    document_.groundPaint = std::move(candidate.groundPaint);
+    if (selectedGroundSplatName_ == oldName) selectedGroundSplatName_ = splat.name;
+    document_.dirty = true;
+    recordDocumentChange(before);
+    return true;
+}
+
+bool LevelEditor::removeGroundSplat(std::size_t index)
+{
+    if (index >= document_.groundSplats.size()) return false;
+    // Keep a default for all unassigned ground. Deleting an additional map
+    // returns its tiles to that default without changing their geometry.
+    if (index == 0) {
+        document_.status = "The first splat map is the default for unpainted ground. Edit it instead.";
+        return false;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    const std::string name = document_.groundSplats[index].name;
+    std::erase_if(document_.groundPaint, [&](const Level::GroundPaint& paint) { return paint.splat == name; });
+    document_.groundSplats.erase(document_.groundSplats.begin() + static_cast<std::ptrdiff_t>(index));
+    document_.dirty = true;
+    recordDocumentChange(before);
+    return true;
+}
+
+bool LevelEditor::paintGroundSplat(GridPosition3 cell)
+{
+    const Level::GroundSplat* splat = selectedGroundSplat();
+    if (!splat || cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+        cell.x >= static_cast<int>(documentWidth()) || cell.y >= static_cast<int>(documentHeight()) ||
+        cell.z >= static_cast<int>(documentDepth()) ||
+        charToTileType(document_.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)]) != TileType::Ground) return false;
+    const auto found = std::ranges::find(document_.groundPaint, cell, &Level::GroundPaint::cell);
+    const bool isDefault = splat == &document_.groundSplats.front();
+    if ((found == document_.groundPaint.end() && isDefault) ||
+        (found != document_.groundPaint.end() && found->splat == splat->name)) return false;
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    if (isDefault) {
+        document_.groundPaint.erase(found);
+    } else if (found == document_.groundPaint.end()) {
+        document_.groundPaint.push_back({ .cell = cell, .splat = splat->name });
+    } else {
+        found->splat = splat->name;
+    }
+    document_.dirty = true;
+    recordDocumentChange(before);
+    return true;
 }
 
 std::optional<Level> LevelEditor::beginDraftPlayback(
@@ -4331,6 +4496,8 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
         .decorations = document_.decorations,
         .selectors = document_.selectors,
         .lecterns = document_.lecterns,
+        .groundSplats = document_.groundSplats,
+        .groundPaint = document_.groundPaint,
         .gates = document_.gates,
         .rotators = document_.rotators,
         .lockPlates = document_.lockPlates,
@@ -4643,6 +4810,11 @@ void LevelEditor::applyScreenIdentityRemaps(
         }
     };
     const auto remapSnapshot = [&](DocumentSnapshot& snapshot) {
+        std::vector<LevelLocationAssociationRemap> locations;
+        for (const auto& remap : remaps) {
+            if (remap.sourceLocation) locations.push_back({ *remap.sourceLocation, remap.destinationLocation });
+        }
+        remapGroundTextures(snapshot.groundSplats, locations);
         remapPath(snapshot.filePath);
         remapPath(snapshot.loadedPath);
         remapSelectors(snapshot.selectors);
@@ -4654,6 +4826,11 @@ void LevelEditor::applyScreenIdentityRemaps(
         }
     };
     const auto remapDocument = [&](Document& document) {
+        std::vector<LevelLocationAssociationRemap> locations;
+        for (const auto& remap : remaps) {
+            if (remap.sourceLocation) locations.push_back({ *remap.sourceLocation, remap.destinationLocation });
+        }
+        remapGroundTextures(document.groundSplats, locations);
         remapPath(document.filePath);
         remapPath(document.loadedPath);
         remapSelectors(document.selectors);
@@ -4728,7 +4905,23 @@ bool LevelEditor::applyProjectMutation(
     const LevelProjectStore::Result result = LevelProjectStore::transact(
         document_.browserRoot,
         runtimeRoot,
-        mutation,
+        [&](const std::filesystem::path& root) {
+            mutation(root);
+            std::vector<LevelLocationAssociationRemap> locations;
+            for (const auto& remap : screenIdentityRemaps) {
+                if (remap.sourceLocation) locations.push_back({ *remap.sourceLocation, remap.destinationLocation });
+            }
+            if (!locations.empty()) {
+                for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
+                    if (!entry.is_regular_file() || entry.path().extension() != ".scr" ||
+                        entry.path().lexically_relative(root).begin()->string() == "Deleted") continue;
+                    Level::Definition definition = Level::loadDefinitionFromFile(entry.path());
+                    const auto before = definition.groundSplats;
+                    remapGroundTextures(definition.groundSplats, locations);
+                    if (before != definition.groundSplats) writeScreenRows(entry.path(), Level::serializeDefinition(definition));
+                }
+            }
+        },
         companion);
     invalidateBrowserSnapshots();
     if (!result.succeeded) {

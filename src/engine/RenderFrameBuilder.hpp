@@ -40,6 +40,7 @@ public:
             GridPosition origin {};
             uint32_t width = 0;
             uint32_t height = 0;
+            const Level::Definition* definition = nullptr;
         };
 
         const AssetManifest& manifest;
