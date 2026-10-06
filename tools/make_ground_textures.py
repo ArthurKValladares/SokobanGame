@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the ground splatting textures.
+"""Generate missing ground splat maps and preserve authored material textures.
 
 Produces PNGs in `assets/custom/textures/`:
 
@@ -27,10 +27,14 @@ The material layers must tile seamlessly, because the world-grid UVs used by
 `shaders/ground_splat.frag.glsl` wrap across tile boundaries: any seam would
 appear as a hard grid line across the board.
 
-Everything is generated from value noise with a fixed seed, so re-running the
-script reproduces the exact same bytes (no diff churn). Only the standard
-library is used — PNGs are encoded by hand with `zlib` — so this runs on a
-bare Python install without Pillow/numpy.
+The committed grass and rock layers are authored painterly textures; their
+ImageGen prompts are saved in tools/ground_texture_prompts.json. Existing
+material layers are preserved. Missing layers can be filled with the legacy
+value-noise materials, or --regenerate-materials explicitly replaces them
+with those procedural fallbacks. The generated maps and fallback materials
+use fixed seeds, so regeneration reproduces the same bytes (no diff churn).
+Only the standard library is used — PNGs are encoded by hand with `zlib` — so
+this runs on a bare Python install without Pillow/numpy.
 
 Tweakable knobs live in the CONSTANTS block below:
 - TEXTURE_SIZE / SPLAT_SIZE: resolution of the layers and the blend map.
@@ -358,6 +362,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate the ground splatting textures.")
     parser.add_argument(
+        "--regenerate-materials",
+        action="store_true",
+        help="Replace the authored grass and rock textures with legacy "
+             "procedural noise materials. Off by default to preserve artwork.",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Regenerate splat maps that already exist. WITHOUT this flag "
@@ -373,29 +383,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     arguments = parser.parse_args(argv)
 
-    # The two material layers are pure functions of the constants above - there
-    # is nothing user-authored in them - so they are always rewritten.
-    grass = generate_material(
-        TEXTURE_SIZE,
-        GRASS_OCTAVES,
-        GRASS_BASE_FREQUENCY,
-        GRASS_COLOR_LOW,
-        GRASS_COLOR_HIGH,
-        GRASS_SPECKLE,
-        SEED,
-    )
-    write_png(OUTPUT_DIRECTORY / "ground_grass.png", grass, TEXTURE_SIZE, TEXTURE_SIZE)
-
-    rock = generate_material(
-        TEXTURE_SIZE,
-        ROCK_OCTAVES,
-        ROCK_BASE_FREQUENCY,
-        ROCK_COLOR_LOW,
-        ROCK_COLOR_HIGH,
-        ROCK_SPECKLE,
-        SEED + 1013,
-    )
-    write_png(OUTPUT_DIRECTORY / "ground_rock.png", rock, TEXTURE_SIZE, TEXTURE_SIZE)
+    materials = [
+        ("ground_grass.png", GRASS_OCTAVES, GRASS_BASE_FREQUENCY,
+         GRASS_COLOR_LOW, GRASS_COLOR_HIGH, GRASS_SPECKLE, SEED),
+        ("ground_rock.png", ROCK_OCTAVES, ROCK_BASE_FREQUENCY,
+         ROCK_COLOR_LOW, ROCK_COLOR_HIGH, ROCK_SPECKLE, SEED + 1013),
+    ]
+    for name, octaves, frequency, low, high, speckle, seed in materials:
+        destination = OUTPUT_DIRECTORY / name
+        if destination.is_file() and not arguments.regenerate_materials:
+            print(f"kept authored material {name}")
+            continue
+        material = generate_material(
+            TEXTURE_SIZE, octaves, frequency, low, high, speckle, seed)
+        write_png(destination, material, TEXTURE_SIZE, TEXTURE_SIZE)
 
     written = ["ground_grass.png", "ground_rock.png"]
     kept = 0
