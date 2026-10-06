@@ -749,9 +749,11 @@ editor commands but does not own document or filesystem policy.
 
 - **Ground rock versions:** click **Ground** in the Tiles palette to open the
   same thumbnail submenu used by mirrors and turrets, then choose **Rock 01–10**.
-  Each version uses an editable glTF rock body with broad fractured plates,
-  narrow chipped bevels, and warm sandstone grain. The ten explicit fracture
-  layouts are exported by `tools/make_ground_rock_models.py`; their visible
+  Each version uses an editable glTF rock body with three or four large
+  fractured plates per side, gently curved edges, rounded bevels, and warm
+  sandstone grain.
+  The ten explicit fracture layouts are exported by
+  `tools/make_ground_rock_models.py`; their visible
   geometry and shadows use the regular model pipeline. Their square tops,
   bottoms, and corner edges match, so different
   versions join and stack. Gameplay uses the same square solid ground volume

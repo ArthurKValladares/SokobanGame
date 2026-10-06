@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Export ten editable, static glTF rock bodies with authored fracture layouts.
 
-The broad stone plates have planar fronts and narrow, steep chipped bevels.
+The broad stone plates have planar fronts and gently curved, rounded bevels.
 Unlike the previous runtime displacement grid, reducing the depth does not
 flatten those bevels. Layouts are deliberately specified below, not randomized.
 Square perimeters stay intact; shallow ledges extend less than 3% of a tile.
@@ -17,18 +17,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 # Each pair is the centre of a broad fracture plate in face-local u/height.
-# Different counts and offset heights give long splits, shelves, and small chips.
+# Three or four plates per face give much larger rock patterns than the old
+# six/seven-plate layouts. Offset centres keep long splits and ledges irregular.
+# Every layout is clipped to the same square; its perimeter stays at depth zero
+# regardless of the layout, so any two variants can share an edge or stack.
 LAYOUTS = [
-    [(0.13,.23),(.44,.17),(.78,.30),(.16,.75),(.50,.64),(.82,.83),(.63,.93)],
-    [(.12,.48),(.39,.25),(.73,.15),(.91,.54),(.44,.80),(.73,.76)],
-    [(.20,.14),(.60,.23),(.90,.17),(.11,.69),(.38,.59),(.72,.65),(.40,.93)],
-    [(.13,.18),(.40,.43),(.77,.22),(.14,.86),(.60,.83),(.91,.67)],
-    [(.11,.27),(.42,.13),(.67,.40),(.92,.26),(.25,.72),(.58,.91),(.89,.80)],
-    [(.22,.35),(.59,.15),(.86,.48),(.12,.83),(.50,.74),(.79,.94)],
-    [(.12,.14),(.37,.34),(.75,.18),(.90,.75),(.57,.66),(.21,.78),(.52,.94)],
-    [(.17,.48),(.48,.18),(.81,.36),(.30,.91),(.59,.72),(.92,.89)],
-    [(.10,.22),(.39,.11),(.73,.32),(.93,.15),(.12,.80),(.45,.63),(.76,.85)],
-    [(.24,.19),(.66,.17),(.93,.50),(.12,.68),(.42,.82),(.73,.70),(.50,.48)],
+    [(.19,.24),(.76,.28),(.44,.80)],
+    [(.23,.19),(.74,.67),(.24,.83)],
+    [(.18,.51),(.70,.18),(.76,.86)],
+    [(.25,.18),(.81,.33),(.24,.81),(.73,.88)],
+    [(.20,.23),(.74,.17),(.55,.77)],
+    [(.20,.49),(.77,.33),(.65,.85)],
+    [(.15,.26),(.59,.19),(.26,.84),(.84,.73)],
+    [(.24,.18),(.46,.74),(.88,.51)],
+    [(.16,.70),(.59,.20),(.83,.85)],
+    [(.24,.19),(.78,.21),(.18,.85),(.66,.70)],
 ]
 # Short bevels give visible chipped edges within 7.5% of the original wall.
 BEVEL_WIDTHS = [.020, .015, .024, .018, .013, .022, .016]
@@ -99,6 +102,51 @@ def inset(poly,width):
     return result
 
 
+def curve_point(point, phase):
+    # One smooth deformation for the entire face bends both copies of every
+    # shared groove identically. It vanishes on the square tile perimeter.
+    u,z=point
+    envelope=math.sin(math.pi*u)*math.sin(math.pi*z)
+    return (u+envelope*(.035*math.sin(2*math.pi*z+phase)+
+                        .012*math.sin(2*math.pi*u-phase)),
+            z+envelope*(.028*math.sin(2*math.pi*u+phase*.7)+
+                        .010*math.sin(2*math.pi*z+phase)))
+
+
+def rounded_rings(poly,inner,phase):
+    # Round each front corner with a short quadratic arc. Its matching groove
+    # samples remain at the original junction, so plate junctions stay closed.
+    starts=[]
+    ends=[]
+    for i,p in enumerate(inner):
+        a,b=inner[i-1],inner[(i+1)%len(inner)]
+        previous=math.dist(a,p)
+        following=math.dist(b,p)
+        radius=min(.028,previous*.16,following*.16)
+        starts.append(tuple(p[k]+(a[k]-p[k])*radius/previous for k in range(2)))
+        ends.append(tuple(p[k]+(b[k]-p[k])*radius/following for k in range(2)))
+    outer_ring=[]
+    front_ring=[]
+    for i,p in enumerate(poly):
+        next_i=(i+1)%len(poly)
+        for step in range(4):
+            t=step/3
+            front=tuple((1-t)**2*starts[i][k]+2*t*(1-t)*inner[i][k]+
+                        t*t*ends[i][k] for k in range(2))
+            outer_ring.append(curve_point(p,phase))
+            front_ring.append(curve_point(front,phase))
+        # Sampling depends only on the shared outer edge length, so both
+        # neighboring plates have exactly the same curved groove segments.
+        segments=max(2,math.ceil(math.dist(p,poly[next_i])/.10))
+        for step in range(1,segments):
+            t=step/segments
+            outer=tuple(p[k]+t*(poly[next_i][k]-p[k]) for k in range(2))
+            front=tuple(ends[i][k]+t*(starts[next_i][k]-ends[i][k]) for k in range(2))
+            outer_ring.append(curve_point(outer,phase))
+            front_ring.append(curve_point(front,phase))
+    return outer_ring,front_ring
+
+
 def world(side,u,depth,z):
     # Positive depth is inward; negative depth makes a small chipped ledge.
     return [(u,depth,z),(1-depth,u,z),(1-u,1-depth,z),(depth,1-u,z)][side]
@@ -121,6 +169,18 @@ class Primitive:
             self.normals.append(normal)
             self.uvs.append((p[0 if side%2==0 else 1]/2.5,p[2]/2.5))
 
+    def smooth_normals(self):
+        # Smooth only within one plate: its rounded lip blends into the broad
+        # planar front, while separate plates retain distinct groove shading.
+        totals={}
+        keys=[tuple(round(c,8) for c in p) for p in self.positions]
+        for i in range(0,len(self.positions),3):
+            a,b,c=self.positions[i:i+3]
+            normal=cross(sub(b,a),sub(c,a))
+            for key in keys[i:i+3]:
+                totals[key]=tuple(x+y for x,y in zip(totals.get(key,(0,0,0)),normal))
+        self.normals=[unit(totals[key]) for key in keys]
+
 
 def rock(variant):
     primitives=[]
@@ -128,10 +188,11 @@ def rock(variant):
         layout=LAYOUTS[(variant+side*3)%10]
         if (variant+side)%2:
             layout=[(1-u,z) for u,z in layout]
+        phase=(variant+side*3)*.73
         for plate,poly in enumerate(cells(layout)):
             k=(plate+variant+side)%len(SHADES)
             width=BEVEL_WIDTHS[k]
-            inner=inset(poly,width)
+            outer_ring,inner=rounded_rings(poly,inset(poly,width),phase)
             centre=(sum(p[0] for p in inner)/len(inner),sum(p[1] for p in inner)/len(inner))
             # Small planar inclinations, plus steep bevels, avoid triangulated
             # noise while giving broad faces subtly different lighting.
@@ -140,19 +201,25 @@ def rock(variant):
             depth=lambda u,z: FRONT_DEPTHS[k]+tilt_u*(u-centre[0])+tilt_z*(z-centre[1])
             front=[world(side,u,depth(u,z),z) for u,z in inner]
             outer=[]
-            for u,z in poly:
-                perimeter=u<1e-7 or u>1-1e-7 or z<1e-7 or z>1-1e-7
-                # Shared groove vertices close every plate without gaps. The
-                # irregular path creates chips; it isn't a texture crack.
-                groove=0.0 if perimeter else .062+.010*z
+            middle=[]
+            for (u,z),(front_u,front_z) in zip(outer_ring,inner):
+                # Fade grooves into the unchanged perimeter continuously.
+                fade=max(0.,min(1.,min(u,1-u,z,1-z)/.08))
+                groove=(.062+.010*z)*fade*fade*(3-2*fade)
                 outer.append(world(side,u,groove,z))
+                t=.5
+                mid_u,mid_z=u+t*(front_u-u),z+t*(front_z-z)
+                mid_depth=groove+(depth(front_u,front_z)-groove)*t*(2-t)
+                middle.append(world(side,mid_u,mid_depth,mid_z))
             prim=Primitive(SHADES[k])
-            for j in range(1,len(front)-1):
-                prim.triangle(front[0],front[j],front[j+1],side)
+            centre_vertex=world(side,centre[0],depth(*centre),centre[1])
             for j in range(len(front)):
                 n=(j+1)%len(front)
-                prim.triangle(outer[j],outer[n],front[n],side)
-                prim.triangle(outer[j],front[n],front[j],side)
+                prim.triangle(centre_vertex,front[j],front[n],side)
+                for a,b in ((outer,middle),(middle,front)):
+                    prim.triangle(a[j],a[n],b[n],side)
+                    prim.triangle(a[j],b[n],b[j],side)
+            prim.smooth_normals()
             primitives.append(prim)
     # The square bottom allows arbitrary stacking; the separate splat top
     # closes the body at height one without hiding authored mesh materials.

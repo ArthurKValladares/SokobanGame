@@ -850,8 +850,10 @@ int main()
             const auto rock = sokoban::loadGltfMesh(*root / asset.path,
                 { .preserveSourceScale = true });
             CHECK(!rock.vertices.empty());
-            CHECK(rock.indices.size() > 600);
-            CHECK(rock.materials.size() >= 25);
+            CHECK(!rock.indices.empty());
+            CHECK(rock.indices.size() % 3 == 0);
+            // Three/four broad plates on each side plus the square bottom.
+            CHECK(rock.materials.size() >= 13 && rock.materials.size() <= 17);
             bool hasSteepChip = false;
             for (const auto& vertex : rock.vertices) {
                 // Shallow ledges stay close to the square logical footprint.
