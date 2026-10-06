@@ -37,6 +37,10 @@ public:
     VulkanSceneRecorder(const VulkanSceneRecorder&) = delete;
     VulkanSceneRecorder& operator=(const VulkanSceneRecorder&) = delete;
 
+#if SOKOBAN_ENABLE_DEBUG_UI
+    void setDebugLabelFont(const FontAtlas& font);
+#endif
+
     struct Resources {
         VkDevice device = VK_NULL_HANDLE;
         VulkanGpuProfiler& gpuProfiler;
@@ -119,6 +123,10 @@ public:
 private:
     friend class SceneRecordingSession;
     struct Scratch;
+#if SOKOBAN_ENABLE_DEBUG_UI
+    struct DebugLabelFont;
+    std::unique_ptr<DebugLabelFont> debugLabelFont_;
+#endif
 
     bool pointShadowCacheEnabled_ = true;
     bool scratchReuseEnabled_ = true;

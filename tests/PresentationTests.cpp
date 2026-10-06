@@ -2204,6 +2204,83 @@ void testEditorLinkedItemVisualization()
     CHECK(build(true).debugItemLinks.size() == 7);
 }
 
+void testEditorDebugCoordinateLabels()
+{
+    TEST("editorDebugCoordinateLabels");
+    LevelEditor editor;
+    editor.newDocument(8, 3, false);
+    editor.addLayerAbove();
+    editor.setLayerLocked(false);
+    CHECK(editor.setCell({ 0, 0, 1 }, TileType::Gate));
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::PressurePlate));
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::Rock));
+    CHECK(editor.setCell({ 2, 0, 1 }, TileType::Button));
+    CHECK(editor.setCell({ 2, 0, 1 }, TileType::Rogue));
+    CHECK(editor.setCell({ 3, 0, 1 }, TileType::Lectern));
+    CHECK(editor.setCell({ 4, 0, 1 }, TileType::LockPlate));
+    CHECK(editor.setCell({ 5, 0, 1 }, TileType::RotatorClockwise));
+    CHECK(editor.setCell({ 6, 0, 1 }, TileType::Elevator));
+    CHECK(editor.setCell({ 7, 0, 1 }, TileType::RailStraightEastWest));
+    CHECK(editor.setCell({ 7, 0, 1 }, TileType::MinecartGate));
+    CHECK(editor.setCell({ 0, 1, 1 }, TileType::PortalNorth));
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::TurretEast));
+    CHECK(editor.setCell({ 2, 1, 1 }, TileType::Rock));
+    CHECK(editor.setLinkColor({ 2, 1, 1 }, { 0.2f, 0.4f, 0.6f }));
+    CHECK(editor.setCell({ 3, 1, 1 }, TileType::Rock));
+    CHECK(editor.setCell({ 4, 1, 1 }, TileType::Ground));
+    CHECK(editor.setCell({ 5, 1, 1 }, TileType::End));
+    CHECK(editor.setCell({ 6, 1, 1 }, TileType::ConveyorRight));
+    CHECK(editor.setCell({ 7, 1, 1 }, TileType::RailStopEastWest));
+    CHECK(editor.setCell({ 7, 1, 1 }, TileType::Minecart));
+    CHECK(editor.setCell({ 3, 0, 2 }, TileType::Lectern));
+    const RenderFrameBuilder::EditorInput input {
+        .manifest = testManifest(), .editor = editor, .settings = {},
+        .showDebugView = true,
+    };
+    const auto frame = RenderFrameBuilder::buildEditor(input);
+    CHECK(frame.debugItemLabels.size() == 13);
+    for (int x = 0; x < 8; ++x) {
+        CHECK(std::ranges::count(frame.debugItemLabels, GridPosition3 { x, 0, 1 },
+            &RenderFrameData::DebugItemLabel::cell) == 1);
+    }
+    CHECK(std::ranges::none_of(frame.debugItemLabels, [](const auto& label) {
+        return label.cell.y == 1 && label.cell.x >= 3 && label.cell.x <= 6;
+    })); // ordinary terrain, unlinked rock, End and conveyor need no configuration label
+    const auto rock = std::ranges::find_if(frame.tiles, [](const auto& tile) {
+        return tile.cell == GridPosition3 { 1, 0, 1 } && tile.height > 0.5f;
+    });
+    const auto covered = std::ranges::find(frame.debugItemLabels, GridPosition3 { 1, 0, 1 },
+        &RenderFrameData::DebugItemLabel::cell);
+    CHECK(rock != frame.tiles.end() && covered != frame.debugItemLabels.end());
+    CHECK(near(covered->position.z, rock->baseElevation + rock->height));
+    const auto gate = std::ranges::find(frame.debugItemLabels, GridPosition3 { 0, 0, 1 },
+        &RenderFrameData::DebugItemLabel::cell);
+    CHECK(gate != frame.debugItemLabels.end());
+    CHECK(gate->position == (Vec3 { 0.5f, 0.5f, 2.0f }));
+    const auto cartGate = std::ranges::find(frame.debugItemLabels, GridPosition3 { 7, 0, 1 },
+        &RenderFrameData::DebugItemLabel::cell);
+    CHECK(cartGate != frame.debugItemLabels.end() && near(cartGate->position.z, 2.0f));
+    FrameArena arena("coordinate label test", renderFrameArenaBytes());
+    const auto arenaFrame = RenderFrameBuilder::buildEditor(input, arena);
+    CHECK(std::ranges::equal(frame.debugItemLabels, arenaFrame.debugItemLabels));
+    auto disabledInput = input;
+    disabledInput.showDebugView = false;
+    const auto disabled = RenderFrameBuilder::buildEditor(disabledInput);
+    CHECK(disabled.debugItemLabels.empty());
+    CHECK(std::ranges::equal(frame.tiles, disabled.tiles));
+    IsoScenePreparer preparer;
+    PreparedRenderScene scene;
+    preparer.prepare(frame, { 1280.0f, 720.0f }, scene);
+    const auto picks = scene.pickFaceIndices.size();
+    preparer.prepare(disabled, { 1280.0f, 720.0f }, scene);
+    CHECK(scene.pickFaceIndices.size() == picks);
+    editor.setActiveLayer(2);
+    editor.setLayerLocked(true);
+    const auto locked = RenderFrameBuilder::buildEditor(input);
+    CHECK(locked.debugItemLabels.size() == 1);
+    CHECK(locked.debugItemLabels[0].cell == (GridPosition3 { 3, 0, 2 }));
+}
+
 void testEditorDebugRoutesAndSightlines()
 {
     TEST("editorDebugRoutesAndSightlines");
@@ -2360,6 +2437,61 @@ void testRotatedEnemyFacesHeroAgainOnNextAction()
     undo.presentation = presentation.buildActionPresentation(undo);
     presentation.beginAction(undo, turned);
     CHECK(near(presentation.enemies()[0].rotatorYawOffsetRadians, 0.0f));
+}
+
+void testScaledEditorEdgeBlocksRemainPickable()
+{
+    TEST("scaledEditorEdgeBlocksRemainPickable");
+    LevelEditor editor;
+    editor.newDocument(9, 7, false);
+    PresentationSettings settings;
+    // Wall visuals can be slightly larger than their logical cells.
+    settings.setTileScale(TileType::Wall, 1.025f);
+    constexpr Vec2 extent { 1600.0f, 900.0f };
+    constexpr std::array<GridPosition3, 4> edgeCells {
+        GridPosition3 { 8, 0, 1 }, GridPosition3 { 0, 0, 1 },
+        GridPosition3 { 0, 6, 1 }, GridPosition3 { 8, 6, 1 },
+    };
+    for (const GridPosition3 cell : edgeCells) {
+        CHECK(editor.setCell(cell, TileType::Wall));
+    }
+    for (const float yaw : { 0.0f, 45.0f, -90.0f, 180.0f }) {
+        editor.setCameraAngles(CameraAngles { 30.0f, yaw });
+        for (const GridPosition3 cell : edgeCells) {
+            for (const bool deleting : { false, true }) {
+                const RenderFrameData frame = RenderFrameBuilder::buildEditor({
+                    .manifest = testManifest(),
+                    .editor = editor,
+                    .settings = settings,
+                    .hoverCell = deleting
+                        ? std::optional<GridPosition3> { cell }
+                        : std::nullopt,
+                    .deleting = deleting,
+                });
+                PreparedRenderScene scene;
+                const IsoScenePreparer preparer;
+                preparer.prepare(frame, extent, scene);
+                // Cover the far edge, middle and near edge of the block's top,
+                // including the invisible proxy used while deleting it.
+                for (const float yOffset : { 0.1f, 0.5f, 0.9f }) {
+                    const Vec3 clip = IsoScenePreparer::projectIsoPoint(
+                        scene.isoLayout, extent,
+                        { static_cast<float>(cell.x) + 0.5f,
+                            static_cast<float>(cell.y) + yOffset,
+                            static_cast<float>(cell.z) + 1.025f });
+                    const Vec2 pixel {
+                        (clip.x + 1.0f) * 0.5f * extent.x,
+                        (1.0f - clip.y) * 0.5f * extent.y,
+                    };
+                    // Fixed-size overworld screens have no expansion border.
+                    CHECK((preparer.pickGridCell(scene, pixel, extent,
+                        frame.levelWidth, frame.levelHeight, 0) == cell));
+                    CHECK((preparer.pickGridCell(scene, pixel, extent,
+                        frame.levelWidth, frame.levelHeight, 1) == cell));
+                }
+            }
+        }
+    }
 }
 
 void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
@@ -4189,9 +4321,11 @@ int main()
     testEditorDrawsPlatesBeneathTheirOccupants();
 #if SOKOBAN_ENABLE_DEBUG_UI
     testEditorLinkedItemVisualization();
+    testEditorDebugCoordinateLabels();
     testEditorDebugRoutesAndSightlines();
 #endif
     testRotatedEnemyFacesHeroAgainOnNextAction();
+    testScaledEditorEdgeBlocksRemainPickable();
     testEditorFrameProvidesInvisibleExpansionBorderAndPreview();
     testEditorFrameShowsReadOnlyOverworldNeighbors();
     testEditorSelectorMoveUsesFlagPreviews();

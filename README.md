@@ -54,6 +54,12 @@ Screen grids use `T` for a lectern, with text stored before the layers as
 `@lectern {"cell":[2,1,1],"text":"First paragraph.\n\nSecond paragraph."}`.
 An example ready to open in the editor is `docs/examples/lectern.scr`.
 
+All lecterns share optional **Minimum Font Size** and **Maximum Font Size**
+settings under **Tuning > Lecterns**, measured in screen pixels. Set either to
+`0` to leave that limit disabled. Changes apply immediately; **Save to header**
+stores them in `src/engine/ui/LecternConfig.hpp` for future builds. If the
+minimum exceeds the maximum, the minimum takes precedence.
+
 Space is Activate: it pulses every button occupied by a living hero and
 activates all eligible mirrors together, across all characters and copies.
 Buttons use `b` in screen grids (or `@plate ... b` beneath a starting unit),

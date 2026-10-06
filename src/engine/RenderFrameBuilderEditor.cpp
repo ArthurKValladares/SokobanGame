@@ -101,6 +101,8 @@ private:
                 *arena_, RenderFrameData::tileCapacity);
             frame.debugItemLinks = FrameArray<RenderFrameData::DebugItemLink>(
                 *arena_, RenderFrameData::debugItemLinkCapacity);
+            frame.debugItemLabels = FrameArray<RenderFrameData::DebugItemLabel>(
+                *arena_, RenderFrameData::tileCapacity);
         }
         const auto visible = [this](GridPosition3 cell) {
             return (!layerLocked_ || cell.z == static_cast<int>(activeLayer_)) &&
@@ -112,9 +114,9 @@ private:
                       documentTileAt(cell))
                 : documentTileAt(cell);
             auto tile = tileVisual(type, cell, input_.manifest, input_.settings);
-            // Gates use procedural energy geometry, not tileVisual's flat
-            // fallback. Their debug proxy spans the same unit-height cell.
-            if (type == TileType::Gate) {
+            // Procedural gates need a unit-height debug proxy instead of
+            // tileVisual's flat fallback.
+            if (type == TileType::Gate || type == TileType::MinecartGate) {
                 tile.position = { static_cast<float>(cell.x), static_cast<float>(cell.y) };
                 tile.size = { 1.0f, 1.0f };
                 tile.baseElevation = static_cast<float>(cell.z);
@@ -139,6 +141,18 @@ private:
                 tile.position.y + tile.size.y * 0.5f,
                 tile.baseElevation + tile.height,
             };
+        };
+        const auto configurable = [](TileType type) {
+            return tileTypeIsSignalSource(type) || type == TileType::Gate ||
+                tileTypeIsRotator(type) || type == TileType::LockPlate ||
+                type == TileType::Elevator || type == TileType::Minecart ||
+                tileTypeIsPortal(type) || type == TileType::Lectern ||
+                type == TileType::MinecartGate || tileTypeIsTurret(type);
+        };
+        const auto label = [&](GridPosition3 cell, Vec3 position) {
+            if (visible(cell) && frame.debugItemLabels.size() < RenderFrameData::tileCapacity) {
+                frame.debugItemLabels.push_back({ position, cell });
+            }
         };
         const auto outline = [&](const RenderFrameData::Tile& tile) {
             if (visible(tile.cell) &&
@@ -365,6 +379,12 @@ private:
                         });
                     }
                     const TileType plate = input_.editor.documentPlateAt(cell).value_or(type);
+                    if (configurable(type) || configurable(plate) ||
+                        input_.editor.objectLinkColorAt(cell)) {
+                        // One label per authored cell, even when a configurable
+                        // plate is covered. Lift it to the visible occupant's top.
+                        label(cell, anchor(visualFor(cell, { 1.0f, 1.0f, 1.0f }, false)));
+                    }
                     if (const auto direction = rules::conveyorDirectionForTile(plate)) {
                         constexpr Vec3 color { 0.22f, 0.70f, 1.0f };
                         Vec3 from { static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f,
@@ -375,6 +395,15 @@ private:
                     }
                 }
             }
+        }
+        for (const auto& selector : input_.editor.selectors()) {
+            if (pendingSelectorMoveId() == selector.id) { continue; }
+            if (std::ranges::any_of(frame.debugItemLabels, [&](const auto& existing) {
+                return existing.cell == selector.cell;
+            })) { continue; }
+            label(selector.cell, { static_cast<float>(selector.cell.x) + 0.5f,
+                static_cast<float>(selector.cell.y) + 0.5f,
+                static_cast<float>(selector.cell.z) + 1.0f });
         }
     }
 #endif

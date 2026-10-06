@@ -25,6 +25,7 @@
 #include "engine/render/VulkanSwapchainResources.hpp"
 
 #if SOKOBAN_ENABLE_DEBUG_UI
+#include "engine/ui/FontAtlas.hpp"
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
 #endif
@@ -34,6 +35,7 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <optional>
 #include <vector>
 #include <cstdint>
@@ -307,6 +309,28 @@ struct VulkanSceneRecorder::Scratch {
     }
 };
 
+#if SOKOBAN_ENABLE_DEBUG_UI
+struct VulkanSceneRecorder::DebugLabelFont {
+    std::array<FontGlyph, 95> glyphs;
+    float pixelHeight = 0.0f;
+    float ascent = 0.0f;
+    float lineHeight = 0.0f;
+};
+
+void VulkanSceneRecorder::setDebugLabelFont(const FontAtlas& font)
+{
+    // Retain only metrics and UVs; the uploaded font texture supplies pixels.
+    // This also avoids borrowing the constructor caller's FontAtlas lifetime.
+    debugLabelFont_ = std::make_unique<DebugLabelFont>();
+    for (std::size_t index = 0; index < debugLabelFont_->glyphs.size(); ++index) {
+        debugLabelFont_->glyphs[index] = font.glyph(static_cast<char>(index + 32));
+    }
+    debugLabelFont_->pixelHeight = font.pixelHeight();
+    debugLabelFont_->ascent = font.ascent();
+    debugLabelFont_->lineHeight = font.lineHeight();
+}
+#endif
+
 VulkanSceneRecorder::VulkanSceneRecorder()
     : scratch_(std::make_unique<Scratch>())
 {
@@ -345,6 +369,9 @@ public:
         , descriptors_(resources.sceneDescriptors)
         , pipelines_(resources.pipelines)
         , models_(resources.modelResources)
+#if SOKOBAN_ENABLE_DEBUG_UI
+        , debugLabelFont_(recorder.debugLabelFont_.get())
+#endif
         , configuration_(configuration)
         , pointShadowFaceCache_(recorder.pointShadowFaceCache_)
         , pointShadowModelStateScratch_(
@@ -509,6 +536,8 @@ public:
                 prepared.particles.size() + data.waterSurfaces.size();
 #if SOKOBAN_ENABLE_DEBUG_UI
             reserve += data.debugItemOutlines.size() + data.debugItemLinks.size();
+            reserve += data.debugItemLabels.size() *
+                (RenderFrameData::DebugItemLabel::textCapacity + 1ULL);
 #endif
             if (data.viewMode == RenderViewMode::TopDown2D) {
                 reserve += data.tiles.size() +
@@ -745,7 +774,8 @@ public:
                 uiDrawData,
                 true,
                 false,
-                false);
+                false,
+                &inputs.game);
             swapchain_.publishDisplayColor(commandBuffer, stats_);
             swapchain_.prepareSwapchainForUi(
                 commandBuffer, imageIndex, stats_);
@@ -769,7 +799,8 @@ public:
                 uiDrawData,
                 true,
                 true,
-                false);
+                false,
+                &inputs.game);
         }
         vulkanDebug::endLabel(device_, commandBuffer);
         vulkanDebug::beginLabel(
@@ -2140,6 +2171,61 @@ private:
     }
 #endif
 
+#if SOKOBAN_ENABLE_DEBUG_UI
+    void drawDebugCoordinateLabels(
+        VkCommandBuffer commandBuffer,
+        const VulkanSceneRecorder::SceneInput& input,
+        Vec2 viewport)
+    {
+        if (!debugLabelFont_ || debugLabelFont_->pixelHeight <= 0.0f) { return; }
+        const auto& font = *debugLabelFont_;
+        constexpr float fontSize = 16.0f;
+        const float scale = fontSize / font.pixelHeight;
+        const Mat4 clipFromWorld = isoClipFromWorld(input.prepared.isoLayout, input.prepared.renderExtent);
+        const RenderFrameData::Lighting unlit {};
+        const auto draw = [&](const UiDrawCommand& command) {
+            drawQuadRun(commandBuffer, drawUiRect(commandBuffer, command, viewport, unlit), 1);
+        };
+        for (const auto& label : input.frameData.debugItemLabels) {
+            const Vec4 clip = transform(clipFromWorld, toVec4(label.position, 1.0f));
+            if (clip.w <= 0.00001f || clip.z < 0.0f || clip.z > clip.w ||
+                std::abs(clip.x) > clip.w || std::abs(clip.y) > clip.w) {
+                continue;
+            }
+            const Vec2 anchor { (clip.x / clip.w * 0.5f + 0.5f) * viewport.x,
+                (0.5f - clip.y / clip.w * 0.5f) * viewport.y };
+            std::array<char, RenderFrameData::DebugItemLabel::textCapacity> text {};
+            std::snprintf(text.data(), text.size(), "(%d, %d, %d)",
+                label.cell.x, label.cell.y, label.cell.z);
+            float width = 0.0f;
+            for (const char* character = text.data(); *character; ++character) {
+                width += font.glyphs[static_cast<std::size_t>(*character - 32)].advance * scale;
+            }
+            const float height = font.lineHeight * scale;
+            const Vec2 position { anchor.x - width * 0.5f, anchor.y - height - 6.0f };
+            draw({
+                .rect = { position - Vec2 { 4.0f, 2.0f }, { width + 8.0f, height + 4.0f } },
+                .color = { 0.01f, 0.015f, 0.02f, 0.9f },
+            });
+            float cursor = position.x;
+            const float baseline = position.y + font.ascent * scale;
+            for (const char* character = text.data(); *character; ++character) {
+                const auto& glyph = font.glyphs[static_cast<std::size_t>(*character - 32)];
+                if (glyph.size.x > 0.0f && glyph.size.y > 0.0f) {
+                    draw({
+                        .kind = UiDrawKind::FontGlyph,
+                        .rect = { { cursor + glyph.offset.x * scale, baseline + glyph.offset.y * scale },
+                            glyph.size * scale },
+                        .uvRect = glyph.uv,
+                        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+                    });
+                }
+                cursor += glyph.advance * scale;
+            }
+        }
+    }
+#endif
+
     void recordOverlayRendering(
         VkCommandBuffer commandBuffer,
         VkImage colorImage,
@@ -2148,18 +2234,26 @@ private:
         const UiDrawData& uiDrawData,
         bool renderGameUi,
         bool renderImGui,
-        bool clearTarget)
+        bool clearTarget,
+        const VulkanSceneRecorder::SceneInput* debugScene = nullptr)
     {
         SOKOBAN_PROFILE_SCOPE("Renderer.Record UI overlay");
 #if !SOKOBAN_ENABLE_DEBUG_UI
         renderImGui = false;
+#endif
+        bool hasDebugLabels = false;
+#if SOKOBAN_ENABLE_DEBUG_UI
+        hasDebugLabels = renderGameUi && debugScene && debugLabelFont_ &&
+            !debugScene->frameData.debugItemLabels.empty();
+#else
+        (void)debugScene;
 #endif
         const bool hasGameUi =
             renderGameUi &&
             !uiDrawData.commands.empty() &&
             uiDrawData.viewportSize.x > 0.0f &&
             uiDrawData.viewportSize.y > 0.0f;
-        if (!hasGameUi && !renderImGui) {
+        if (!hasGameUi && !hasDebugLabels && !renderImGui) {
             return;
         }
         if (!clearTarget) {
@@ -2211,7 +2305,7 @@ private:
         vkCmdBeginRendering(commandBuffer, &renderingInfo);
         ++stats_.renderPasses;
 
-        if (hasGameUi) {
+        if (hasGameUi || hasDebugLabels) {
             const VkViewport viewport {
                 .x = 0.0f,
                 .y = static_cast<float>(
@@ -2249,16 +2343,19 @@ private:
                 commandBuffer, VK_COMPARE_OP_ALWAYS);
 
             const RenderFrameData::Lighting unlit {};
-            for (const UiDrawCommand& command :
-                 uiDrawData.commands) {
-                drawQuadRun(
-                    commandBuffer,
-                    drawUiRect(
+#if SOKOBAN_ENABLE_DEBUG_UI
+            if (hasDebugLabels) {
+                drawDebugCoordinateLabels(commandBuffer, *debugScene,
+                    { static_cast<float>(targetExtent.width), static_cast<float>(targetExtent.height) });
+            }
+#endif
+            if (hasGameUi) {
+                for (const UiDrawCommand& command : uiDrawData.commands) {
+                    drawQuadRun(
                         commandBuffer,
-                        command,
-                        uiDrawData.viewportSize,
-                        unlit),
-                    1);
+                        drawUiRect(commandBuffer, command, uiDrawData.viewportSize, unlit),
+                        1);
+                }
             }
         }
         if (renderImGui) {
@@ -3742,6 +3839,9 @@ private:
     VulkanSceneDescriptors& descriptors_;
     VulkanPipelineFactory& pipelines_;
     VulkanModelResources& models_;
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const VulkanSceneRecorder::DebugLabelFont* debugLabelFont_ = nullptr;
+#endif
     const VulkanSceneRecorder::FrameConfiguration& configuration_;
     PointShadowFaceCache& pointShadowFaceCache_;
     std::array<std::vector<PointShadowModelState>,

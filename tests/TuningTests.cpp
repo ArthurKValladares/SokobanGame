@@ -3,6 +3,7 @@
 
 #include "engine/Tuning.hpp"
 #include "engine/render/FogOfWarConfig.hpp"
+#include "engine/ui/LecternConfig.hpp"
 
 #include <cstdint>
 #include <filesystem>

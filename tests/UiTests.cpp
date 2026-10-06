@@ -6,6 +6,7 @@
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/SelectorPrompt.hpp"
 #include "engine/ui/LecternDialog.hpp"
+#include "engine/ui/LecternConfig.hpp"
 #include "engine/ui/Ui.hpp"
 #include "engine/ui/UiConfig.hpp"
 #include "engine/ui/UiControls.hpp"
@@ -1331,6 +1332,60 @@ int main()
             CHECK(ui.droppedCommands() == 0);
             ui.endFrame();
         }
+#if SOKOBAN_ENABLE_DEBUG_UI
+        TEST("lecternFontLimitsApplyGloballyAndUpdateLive");
+        const float savedMinimum = sokoban::config::lecternMinimumFontSize;
+        const float savedMaximum = sokoban::config::lecternMaximumFontSize;
+        const auto renderedFontSize = [&](sokoban::Vec2 size) {
+            ui.beginFrame(size, {}, false, false);
+            CHECK(!dialog.draw(ui, size, std::string(4000, 'W'), "Space"));
+            float result = 0.0f;
+            const auto& glyph = font.glyph('W');
+            for (const auto& command : ui.drawData().commands) {
+                CHECK(command.rect.position.x >= 0.0f);
+                CHECK(command.rect.position.y >= 0.0f);
+                CHECK(command.rect.position.x + command.rect.size.x <= size.x);
+                CHECK(command.rect.position.y + command.rect.size.y <= size.y);
+                if (command.kind == sokoban::UiDrawKind::FontGlyph &&
+                    command.uvRect.position == glyph.uv.position) {
+                    result = command.rect.size.x / glyph.size.x * font.pixelHeight();
+                }
+            }
+            CHECK(result > 0.0f);
+            CHECK(ui.droppedCommands() == 0);
+            ui.endFrame();
+            return result;
+        };
+        sokoban::config::lecternMinimumFontSize = 0.0f;
+        sokoban::config::lecternMaximumFontSize = 0.0f;
+        const float automaticSmall = renderedFontSize({ 640, 360 });
+        const float automaticLarge = renderedFontSize({ 1920, 1080 });
+        CHECK(automaticLarge > automaticSmall);
+
+        sokoban::config::lecternMinimumFontSize = 48.0f;
+        CHECK(sokoban::approximately(renderedFontSize({ 640, 360 }), 48.0f));
+        CHECK(sokoban::approximately(renderedFontSize({ 1920, 1080 }), automaticLarge));
+
+        sokoban::config::lecternMinimumFontSize = 0.0f;
+        sokoban::config::lecternMaximumFontSize = 32.0f;
+        CHECK(sokoban::approximately(renderedFontSize({ 1920, 1080 }), 32.0f));
+        CHECK(sokoban::approximately(renderedFontSize({ 640, 360 }), automaticSmall));
+
+        sokoban::config::lecternMinimumFontSize = 48.0f;
+        sokoban::config::lecternMaximumFontSize = 48.0f;
+        CHECK(sokoban::approximately(renderedFontSize({ 640, 360 }), 48.0f));
+        CHECK(sokoban::approximately(renderedFontSize({ 1920, 1080 }), 48.0f));
+        sokoban::config::lecternMaximumFontSize = 32.0f;
+        CHECK(sokoban::approximately(renderedFontSize({ 1920, 1080 }), 48.0f));
+        sokoban::config::lecternMinimumFontSize = 128.0f;
+        CHECK(sokoban::approximately(renderedFontSize({ 640, 360 }), 128.0f));
+
+        sokoban::config::lecternMinimumFontSize = 0.0f;
+        sokoban::config::lecternMaximumFontSize = 0.0f;
+        CHECK(sokoban::approximately(renderedFontSize({ 1920, 1080 }), automaticLarge));
+        sokoban::config::lecternMinimumFontSize = savedMinimum;
+        sokoban::config::lecternMaximumFontSize = savedMaximum;
+#endif
     }
     testFontAtlasAndText();
     testUiFrameArenaCommandBudget();

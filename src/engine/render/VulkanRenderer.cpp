@@ -287,6 +287,9 @@ VulkanRenderer::VulkanRenderer(
     sceneRecorder_.setPointShadowCacheEnabled(
         pointShadowOptimizationsEnabled_);
     sceneRecorder_.setScratchReuseEnabled(recorderScratchReuseEnabled_);
+#if SOKOBAN_ENABLE_DEBUG_UI
+    sceneRecorder_.setDebugLabelFont(uiFont);
+#endif
     depthFormat_ = deviceContext_.sceneDepthFormat();
     pipelineCache_.create(
         deviceContext_.device(),

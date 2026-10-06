@@ -468,6 +468,13 @@ struct RenderFrameData {
         Style style = Style::Dots;
     };
     static constexpr std::size_t debugItemLinkCapacity = 65536;
+    struct DebugItemLabel {
+        Vec3 position {};
+        GridPosition3 cell {};
+        // Three signed 32-bit coordinates, punctuation and the terminator.
+        static constexpr std::size_t textCapacity = 40;
+        bool operator==(const DebugItemLabel&) const = default;
+    };
 #endif
 
     struct OutputTransform {
@@ -564,6 +571,7 @@ struct RenderFrameData {
     // fitting, shadows or gameplay. Allocated only when the visualizer is on.
     FrameArray<Tile> debugItemOutlines;
     FrameArray<DebugItemLink> debugItemLinks;
+    FrameArray<DebugItemLabel> debugItemLabels;
 #endif
     GroundSplatTextures groundSplat {};
     std::array<GroundSplatRegion, groundSplatRegionCapacity>
@@ -610,6 +618,7 @@ struct RenderFrameData {
         + arenaBytesFor<RenderFrameData::Tile>(RenderFrameData::tileCapacity)
         + arenaBytesFor<RenderFrameData::DebugItemLink>(
             RenderFrameData::debugItemLinkCapacity)
+        + arenaBytesFor<RenderFrameData::DebugItemLabel>(RenderFrameData::tileCapacity)
 #endif
         ;
 }

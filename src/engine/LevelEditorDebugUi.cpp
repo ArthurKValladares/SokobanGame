@@ -230,7 +230,7 @@ void LevelEditorDebugUi::draw(
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
             "Shared-color outlines and dotted links; elevator stops and cart cycles; "
-            "turret sightlines and conveyor directions.\n"
+            "turret sightlines, conveyor directions and configurable-block coordinates.\n"
             "Arrows show travel direction; circles mark stops. Hidden layers follow the layer lock.");
     }
     ImGui::BeginDisabled(editor.editingOverworld());

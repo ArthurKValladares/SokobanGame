@@ -1121,6 +1121,36 @@ void testPickingHonorsConfiguredGridBorder()
         1) == sokoban::GridPosition3 { -1, 0, 0 }));
 }
 
+void testScaledBorderTileCannotLeakIntoBoardPicking()
+{
+    using namespace sokoban;
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 2;
+    frame.levelHeight = 2;
+    frame.levelDepth = 1;
+    auto borderCell = cube(2, 1);
+    borderCell.position = { 1.9875f, 0.9875f };
+    borderCell.size = { 1.025f, 1.025f };
+    borderCell.height = 1.025f;
+    frame.tiles.push_back(borderCell);
+
+    constexpr Vec2 extent { 1600.0f, 900.0f };
+    const PreparedRenderScene scene = prepareScene(frame, extent);
+    const Vec3 clip = IsoScenePreparer::projectIsoPoint(
+        scene.isoLayout, extent, { 2.5f, 1.5f, 1.025f });
+    const Vec2 pixel {
+        (clip.x + 1.0f) * 0.5f * extent.x,
+        (1.0f - clip.y) * 0.5f * extent.y,
+    };
+    const IsoScenePreparer preparer;
+    CHECK(!preparer.pickGridCell(
+        scene, pixel, extent, frame.levelWidth, frame.levelHeight));
+    CHECK((preparer.pickGridCell(
+        scene, pixel, extent, frame.levelWidth, frame.levelHeight, 1) ==
+        borderCell.cell));
+}
+
 void testVirtualPickPlaneMatchesPreviewTopUnderPerspective()
 {
     sokoban::RenderFrameData frame;
@@ -2052,6 +2082,7 @@ int main()
     testModelBackedPickFacesUseLogicalBounds();
     testPickingTracksAuthoredCameraAngles();
     testPickingHonorsConfiguredGridBorder();
+    testScaledBorderTileCannotLeakIntoBoardPicking();
     testVirtualPickPlaneMatchesPreviewTopUnderPerspective();
     testTopDownPreparationSkipsIsoWork();
     testPreparationReusesOutputWithoutStaleLists();

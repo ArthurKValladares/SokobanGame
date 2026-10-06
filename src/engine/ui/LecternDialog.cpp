@@ -1,5 +1,6 @@
 #include "engine/ui/LecternDialog.hpp"
 
+#include "engine/ui/LecternConfig.hpp"
 #include "engine/ui/UiControls.hpp"
 
 #include <algorithm>
@@ -51,15 +52,20 @@ std::vector<std::string> LecternDialog::wrapText(
 bool LecternDialog::draw(UiContext& ui, Vec2 viewport,
     std::string_view text, std::string_view closeBinding)
 {
-    const float scale = std::min({ 1.0f, viewport.x / 760.0f, viewport.y / 540.0f });
-    const float fontSize = 24.0f * scale;
-    const float lineHeight = 34.0f * scale;
+    const float scale = std::min(viewport.x / 760.0f, viewport.y / 540.0f);
     const float padding = 32.0f * scale;
     const Vec2 size { std::min(720.0f * scale, viewport.x - 24.0f * scale),
         std::min(480.0f * scale, viewport.y - 24.0f * scale) };
     const UiRect panel { { (viewport.x - size.x) * 0.5f, (viewport.y - size.y) * 0.5f }, size };
     const std::string_view contents = text.empty() ? "This book has no text yet." : text;
     const float width = size.x - padding * 2.0f;
+    // Keep the reading text proportional to the box, including on larger displays.
+    float fontSize = std::max(size.y / 15.0f, config::lecternMinimumFontSize);
+    if (config::lecternMaximumFontSize > 0.0f) {
+        fontSize = std::min(fontSize,
+            std::max(config::lecternMinimumFontSize, config::lecternMaximumFontSize));
+    }
+    const float lineHeight = fontSize * 1.3f;
     if (contents != cachedText_ || width != cachedWidth_ || fontSize != cachedFontSize_) {
         cachedText_ = contents;
         cachedWidth_ = width;

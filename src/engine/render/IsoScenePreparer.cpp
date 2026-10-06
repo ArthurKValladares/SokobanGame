@@ -1346,12 +1346,10 @@ void appendTileFaces(
             tile.effect == RenderSurfaceEffect::GroundSplat && drawCube
             ? PreparedSurfaceMaterial::GroundSplat
             : tileMaterial;
-        const GridPosition pickBoundsCell {
-            static_cast<int>(
-                std::floor(tile.position.x + 0.0001f)),
-            static_cast<int>(
-                std::floor(tile.position.y + 0.0001f)),
-        };
+        // Visual scaling can move an edge tile's origin into the neighboring
+        // cell. Bounds checks belong to its authored cell, even when its
+        // rendered geometry extends beyond the board.
+        const GridPosition pickBoundsCell { tile.cell.x, tile.cell.y };
 
         if (height <= 0.0f) {
             appendIsoFace(scene, {
