@@ -1,17 +1,17 @@
-@groundsplat {"name":"Ground","base":"GroundGrass","detail":"GroundRock","mask":"GroundSplatMap","color":[0.25,0.75,0.35]}
+@groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap","name":"Ground"}
 @lectern {"cell":[4,3,1],"text":"You are not strong enough to push more than one rock at the same time."}
 @lectern {"cell":[0,5,1],"text":"Move with <!Move Up!>, <!Move Left!>, <!Move Down!>, <!Move Right!>"}
 @lectern {"cell":[2,5,1],"text":"You can move into a rock to push them."}
 @lectern {"cell":[7,6,1],"text":"Press 'Space' to activate the mirror."}
 
 @layer 0
-.........
-.........
-        .
-.........
-.........
-.........
-.........
+XSSXAaXAX
+SFYZZcVAA
+        Y
+SSVFSAaVX
+AYZ.ccZ.A
+ZacZXAVYX
+aAXXSScFa
 
 @layer 1
          
@@ -20,7 +20,7 @@
  ###T## #
   RR R   
 T#T# ## #
-C  R  #T#
+C  R  #t#
 
 @layer 2
          

@@ -89,6 +89,7 @@ const AssetManifest& testManifest()
         },
         { "name": "Mirror", "path": "mirror.gltf" },
         { "name": "Turret", "path": "turret.gltf" },
+        { "name": "Lectern", "path": "lectern.glb" },
         {
           "name": "Decoration",
           "path": "decoration.gltf",
@@ -201,7 +202,11 @@ const AssetManifest& testManifest()
         { "tile": "Rail Corner North-West", "model": "MinecartRailCorner" },
         { "tile": "Rail Stop North-South", "model": "MinecartRailStop" },
         { "tile": "Rail Stop East-West", "model": "MinecartRailStop" },
-        { "tile": "Minecart", "model": "MinecartHandcar" }
+        { "tile": "Minecart", "model": "MinecartHandcar" },
+        { "tile": "Lectern", "model": "Lectern" },
+        { "tile": "Lectern North", "model": "Lectern" },
+        { "tile": "Lectern East", "model": "Lectern" },
+        { "tile": "Lectern West", "model": "Lectern" }
       ]
     })json");
     return manifest;
@@ -4466,10 +4471,83 @@ void testConfigurableGroundSplats()
     CHECK(neighborGround->groundSplatOrigin == GridPosition({ -2, 0 }));
 }
 
+void testLecternFacingInGameplayEditorAndPreviews()
+{
+    TEST("lecternFacingInGameplayEditorAndPreviews");
+    const AssetManifest& manifest = testManifest();
+    const RenderModel model = manifest.modelForTile(TileType::Lectern);
+    const GridPosition3 source { 1, 0, 1 };
+    const GridPosition3 destination { 2, 0, 1 };
+    constexpr std::array<uint32_t, 4> expectedTurns { 2, 3, 0, 1 };
+    constexpr std::array variants { TileType::LecternNorth, TileType::LecternEast,
+        TileType::LecternSouth, TileType::LecternWest };
+    const auto checkTile = [&](const auto& tiles, GridPosition3 cell,
+                               uint32_t turns, const char* context, bool preview = false) {
+        const auto tile = std::ranges::find_if(tiles, [&](const auto& candidate) {
+            return candidate.cell == cell && candidate.model == model &&
+                candidate.isEditorPreview == preview && !candidate.pickOnly;
+        });
+        CHECK_MESSAGE(tile != tiles.end(), context);
+        if (tile != tiles.end()) CHECK(tile->modelRotationQuarterTurns == turns);
+    };
+    for (uint8_t direction = 0; direction < 4; ++direction) {
+        LevelEditor editor;
+        editor.newDocument(4, 2, false);
+        editor.setSelectedTile(variants[direction]);
+        CHECK(editor.paintCell(source));
+        const Level level = editor.documentToLevel();
+        const GameState state = rules::initialState(level);
+        GameplayPresentation presentation;
+        presentation.resetEntities(state);
+        const auto gameplayFrame = RenderFrameBuilder::buildGameplay({
+            .manifest = manifest, .level = level, .state = state,
+            .projectedState = state, .presentation = presentation, .settings = {},
+        });
+        checkTile(gameplayFrame.tiles, source, expectedTurns[direction], "gameplay lectern");
+
+        const auto editorFrame = RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = editor, .settings = {},
+#if SOKOBAN_ENABLE_DEBUG_UI
+            .showDebugView = true,
+#endif
+        });
+        checkTile(editorFrame.tiles, source, expectedTurns[direction], "editor lectern");
+        const auto definition = editor.documentDefinition();
+        const std::array neighbors { RenderFrameBuilder::EditorInput::OverworldNeighbor {
+            .screen = 7, .origin = { 4, 0 }, .width = 4, .height = 2,
+            .definition = &definition,
+        } };
+        const auto neighborFrame = RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = editor, .settings = {},
+            .overworldNeighbors = neighbors,
+        });
+        checkTile(neighborFrame.tiles, { 5, 0, 1 }, expectedTurns[direction], "neighbor lectern");
+
+        const auto hoverFrame = RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = editor, .settings = {},
+            .hoverCell = source, .deleting = true,
+        });
+        checkTile(hoverFrame.tiles, source, expectedTurns[direction], "hover lectern preview", true);
+        CHECK(editor.beginMove(source));
+        const auto moveFrame = RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = editor, .settings = {},
+            .hoverCell = destination, .editorPreviewTile = variants[direction],
+        });
+        checkTile(moveFrame.tiles, source, expectedTurns[direction], "move source lectern preview", true);
+        checkTile(moveFrame.tiles, destination, expectedTurns[direction], "move destination lectern preview", true);
+        CHECK(editor.moveObject(destination));
+        const auto movedFrame = RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = editor, .settings = {},
+        });
+        checkTile(movedFrame.tiles, destination, expectedTurns[direction], "moved lectern");
+    }
+}
+
 } // namespace
 
 int main()
 {
+    testLecternFacingInGameplayEditorAndPreviews();
     testPortalPresentation();
     try {
     testPresentationTransactionResolvesActorIndependentDependencies();

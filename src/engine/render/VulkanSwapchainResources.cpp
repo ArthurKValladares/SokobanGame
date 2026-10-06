@@ -261,14 +261,17 @@ void VulkanSwapchainResources::endFrame(
 
 void VulkanSwapchainResources::ensureSceneColorReadable(
     VkCommandBuffer commandBuffer,
-    RenderStats& stats)
+    RenderStats& stats,
+    bool preview)
 {
-    if (!sceneColorImage_.image || sceneColorLayout_ != VK_IMAGE_LAYOUT_UNDEFINED) {
+    const VkImage image = preview ? previewSceneColorImage_.image : sceneColorImage_.image;
+    VkImageLayout& layout = preview ? previewSceneColorLayout_ : sceneColorLayout_;
+    if (!image || layout != VK_IMAGE_LAYOUT_UNDEFINED) {
         return;
     }
     vulkanResources::transitionImage(
         commandBuffer,
-        sceneColorImage_.image,
+        image,
         vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
         {},
         {
@@ -276,7 +279,7 @@ void VulkanSwapchainResources::ensureSceneColorReadable(
             VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         });
-    sceneColorLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     ++stats.imageBarriers;
 }
 
@@ -399,8 +402,11 @@ void VulkanSwapchainResources::synchronizeAtmosphereComposite(
 void VulkanSwapchainResources::copyResolvedSceneColor(
     VkCommandBuffer commandBuffer,
     RenderStats& stats,
-    std::optional<VkRect2D> region)
+    std::optional<VkRect2D> region,
+    bool preview)
 {
+    const VkImage sampledImage = preview ? previewSceneColorImage_.image : sceneColorImage_.image;
+    VkImageLayout& sampledLayout = preview ? previewSceneColorLayout_ : sceneColorLayout_;
     const VkRect2D copyRect = region.value_or(VkRect2D {
         .offset = { 0, 0 },
         .extent = renderExtent_,
@@ -429,16 +435,16 @@ void VulkanSwapchainResources::copyResolvedSceneColor(
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             }),
         vulkanResources::imageBarrier(
-            sceneColorImage_.image,
+            sampledImage,
             vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
             {
-                sceneColorLayout_ == VK_IMAGE_LAYOUT_UNDEFINED
+                sampledLayout == VK_IMAGE_LAYOUT_UNDEFINED
                     ? VK_PIPELINE_STAGE_2_NONE
                     : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                sceneColorLayout_ == VK_IMAGE_LAYOUT_UNDEFINED
+                sampledLayout == VK_IMAGE_LAYOUT_UNDEFINED
                     ? VK_ACCESS_2_NONE
                     : VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                sceneColorLayout_,
+                sampledLayout,
             },
             {
                 VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -482,7 +488,7 @@ void VulkanSwapchainResources::copyResolvedSceneColor(
         commandBuffer,
         resolvedColorImage_.image,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        sceneColorImage_.image,
+        sampledImage,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         1,
         &copyRegion);
@@ -503,7 +509,7 @@ void VulkanSwapchainResources::copyResolvedSceneColor(
                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             }),
         vulkanResources::imageBarrier(
-            sceneColorImage_.image,
+            sampledImage,
             vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
             {
                 VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -517,7 +523,7 @@ void VulkanSwapchainResources::copyResolvedSceneColor(
             }),
     };
     vulkanResources::transitionImages(commandBuffer, fromTransfer);
-    sceneColorLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    sampledLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     ++stats.imageBarriers;
 }
 
@@ -815,6 +821,7 @@ void VulkanSwapchainResources::createAttachments()
     renderExtent_ = { scaled.width, scaled.height };
     depthLayoutInitialized_ = false;
     sceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    previewSceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     displayColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     // Decided once here, before anything that renders into the scene is
     // created, because every scene attachment and every pipeline that targets
@@ -985,6 +992,12 @@ void VulkanSwapchainResources::createSceneColor()
         imageInfo,
         VK_IMAGE_ASPECT_COLOR_BIT,
         "Sampled scene color");
+    previewSceneColorImage_ = vulkanResources::createImage(
+        *allocator_,
+        device_,
+        imageInfo,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        "Sampled preview scene color");
 
     VkSamplerCreateInfo samplerInfo {
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -1054,12 +1067,14 @@ void VulkanSwapchainResources::destroyAttachments()
     sceneColorSampler_ = VK_NULL_HANDLE;
     vulkanResources::destroyImage(*allocator_, device_, displayColorImage_);
     vulkanResources::destroyImage(*allocator_, device_, sceneColorImage_);
+    vulkanResources::destroyImage(*allocator_, device_, previewSceneColorImage_);
     vulkanResources::destroyImage(*allocator_, device_, resolveDepthImage_);
     vulkanResources::destroyImage(*allocator_, device_, depthImage_);
     vulkanResources::destroyImage(*allocator_, device_, msaaColorImage_);
     vulkanResources::destroyImage(*allocator_, device_, resolvedColorImage_);
     renderExtent_ = {};
     sceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    previewSceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     displayColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     depthLayoutInitialized_ = false;
 }

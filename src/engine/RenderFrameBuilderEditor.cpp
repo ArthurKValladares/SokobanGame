@@ -164,7 +164,7 @@ private:
             return tileTypeIsSignalSource(type) || type == TileType::Gate ||
                 tileTypeIsRotator(type) || type == TileType::LockPlate ||
                 type == TileType::Elevator || type == TileType::Minecart ||
-                tileTypeIsPortal(type) || type == TileType::Lectern ||
+                tileTypeIsPortal(type) || tileTypeIsLectern(type) ||
                 type == TileType::MinecartGate || tileTypeIsTurret(type);
         };
         const auto label = [&](GridPosition3 cell, Vec3 position) {
@@ -1494,7 +1494,7 @@ RenderFrameData::Tile tileVisual(
         .animationInstanceId = tileTypeIsPlayerStart(tile) || tile == TileType::Enemy
             ? authoredAnimationInstance(tile, cell)
             : uint64_t { 0 },
-        // Conveyors, turrets, mirrors, and rails carry an orientation in their
+        // Conveyors, turrets, mirrors, rails and lecterns carry an orientation in their
         // tile type. Each family rotates one shared model.
         .modelRotationQuarterTurns =
             rules::conveyorDirectionForTile(tile)
@@ -1502,7 +1502,8 @@ RenderFrameData::Tile tileVisual(
             : (rules::turretDirectionForTile(tile)
                     ? facingQuarterTurns(*rules::turretDirectionForTile(tile))
                     : railOrientationQuarterTurns(tile).value_or(
-                          mirrorOrientationQuarterTurns(tile).value_or(0))),
+                          mirrorOrientationQuarterTurns(tile).value_or(
+                              lecternOrientationQuarterTurns(tile).value_or(0)))),
         .modelRotationOffsetRadians = tileTypeIsMirror(tile)
             ? config::mirrorModelRotationOffsetRadians
             : 0.0f,

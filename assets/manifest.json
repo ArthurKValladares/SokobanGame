@@ -883,7 +883,19 @@
       "model": "LockPlate"
     },
     {
-      "tile": "Lectern",
+      "tile": "Lectern South",
+      "model": "Lectern"
+    },
+    {
+      "tile": "Lectern North",
+      "model": "Lectern"
+    },
+    {
+      "tile": "Lectern East",
+      "model": "Lectern"
+    },
+    {
+      "tile": "Lectern West",
       "model": "Lectern"
     },
     {

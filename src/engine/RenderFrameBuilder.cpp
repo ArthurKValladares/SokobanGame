@@ -126,7 +126,8 @@ StaticRenderCell staticRenderCellFor(
                             ? facingQuarterTurns(
                                   *rules::turretDirectionForTile(tile))
                             : railOrientationQuarterTurns(tile).value_or(
-                                  mirrorOrientationQuarterTurns(tile).value_or(0)))),
+                                  mirrorOrientationQuarterTurns(tile).value_or(
+                                      lecternOrientationQuarterTurns(tile).value_or(0))))),
     };
 }
 

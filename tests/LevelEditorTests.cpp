@@ -2736,7 +2736,7 @@ void testGroupedPalettePreservesDirectionalBrushes()
             tileTypeIsConveyor(definition.type) ||
             tileTypeIsMirror(definition.type) || tileTypeIsTurret(definition.type) ||
             tileTypeIsPortal(definition.type) || tileTypeIsRail(definition.type) ||
-            tileTypeIsRotator(definition.type);
+            tileTypeIsRotator(definition.type) || tileTypeIsLectern(definition.type);
         CHECK(membership[static_cast<std::size_t>(definition.type)] ==
             (directional ? 1 : 0));
     }
@@ -2916,10 +2916,21 @@ int main()
         CHECK(editor.lecterns()[0].text.empty());
         CHECK(editor.tryRedoEdit());
         const std::string text = editor.lecterns()[0].text;
+        CHECK(editor.documentToLevel().tileAt(1, 1, 1) == TileType::LecternSouth);
+        CHECK(editor.setCell({ 1, 1, 1 }, TileType::LecternEast));
+        CHECK(editor.lecterns()[0].text == text);
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.documentToLevel().tileAt(1, 1, 1) == TileType::LecternSouth);
+        CHECK(editor.tryRedoEdit());
+        CHECK(editor.documentToLevel().tileAt(1, 1, 1) == TileType::LecternEast);
+        CHECK(!editor.setCell({ 1, 1, 1 }, TileType::LecternEast));
+        CHECK(editor.pickTile({ 1, 1, 1 }) == TileType::LecternEast);
+        CHECK(editor.selectedTile() == TileType::LecternEast);
         CHECK(editor.beginMove({ 1, 1, 1 }));
         CHECK(editor.moveObject({ 3, 1, 1 }));
         CHECK(editor.lecterns()[0].cell == GridPosition3({ 3, 1, 1 }));
         CHECK(editor.lecterns()[0].text == text);
+        CHECK(editor.documentToLevel().tileAt(3, 1, 1) == TileType::LecternEast);
         CHECK(editor.tryUndoEdit());
         CHECK(editor.lecterns()[0].cell == GridPosition3({ 1, 1, 1 }));
         editor.setActiveLayer(1);
@@ -2930,6 +2941,15 @@ int main()
         const auto path = project.source / "lectern.scr";
         CHECK(editor.saveDocument(path).sourceSaved());
         CHECK(Level::loadFromFile(path).lecternAt({ 1, 1, 1 })->text == text);
+        CHECK(Level::loadFromFile(path).tileAt(1, 1, 1) == TileType::LecternEast);
+        CHECK(!editor.dirty());
+        CHECK(editor.setCell({ 1, 1, 1 }, TileType::LecternWest));
+        CHECK(editor.dirty());
+        CHECK(editor.tryUndoEdit());
+        CHECK(!editor.dirty());
+        auto loaded = makeEditor(project);
+        CHECK(loaded.loadDocument(path, false));
+        CHECK(loaded.lecterns() == editor.lecterns());
         CHECK(editor.setCell({ 1, 1, 1 }, TileType::Wall));
         CHECK(editor.lecterns().empty());
         CHECK(editor.tryUndoEdit());
@@ -2946,6 +2966,7 @@ int main()
         CHECK(editor.setCell({ -1, 0, 1 }, TileType::Wall));
         CHECK(editor.lecterns()[0].cell == GridPosition3({ 2, 1, 1 }));
         CHECK(editor.lecterns()[0].text == text);
+        CHECK(editor.documentToLevel().tileAt(2, 1, 1) == TileType::LecternEast);
     }
     testButtonsKeepLinksThroughStackingConversionAndSave();
     testPerScreenCameraEditingAndPersistence();

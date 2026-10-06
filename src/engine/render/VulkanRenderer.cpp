@@ -1589,6 +1589,10 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
             .sampler = resources.swapchain->sceneColorSampler(),
             .imageView = resources.swapchain->sceneColorView(),
         },
+        .previewSceneColor = {
+            .sampler = resources.swapchain->sceneColorSampler(),
+            .imageView = resources.swapchain->previewSceneColorView(),
+        },
         // The scene target itself, for the tonemap pass. It is a colour
         // attachment for most of the frame; beginTonemap is what puts it in
         // the shader-read layout this binding declares.

@@ -46,6 +46,10 @@ constexpr float cropPadding = 0.35f;
 
 std::string assetPathFor(TileType tile)
 {
+    // Retain the existing thumbnail for the original south-facing stand.
+    if (tile == TileType::LecternSouth) {
+        return "custom/thumbnails/tile_lectern.png";
+    }
     return "custom/thumbnails/tile_" + slug(tileTypeName(tile)) + ".png";
 }
 

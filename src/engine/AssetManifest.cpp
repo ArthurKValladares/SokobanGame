@@ -206,12 +206,7 @@ int requiredNonNegativeInt(
 
 std::optional<TileType> tileTypeByName(std::string_view name)
 {
-    for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
-        if (definition.name == name) {
-            return definition.type;
-        }
-    }
-    return std::nullopt;
+    return tileTypeFromName(name);
 }
 
 std::string indexedContext(std::string_view array, std::size_t index)

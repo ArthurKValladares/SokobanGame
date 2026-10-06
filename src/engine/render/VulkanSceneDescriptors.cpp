@@ -365,10 +365,11 @@ void VulkanSceneDescriptors::updateInternal(
     // and "resources are incomplete" told whoever hit it nothing about which
     // one. A missing entry here is a descriptor written from a null handle,
     // which validation catches but only on a validation build.
-    const std::array<std::pair<const char*, bool>, 16> required {
+    const std::array<std::pair<const char*, bool>, 17> required {
         std::pair { "shadow", resources.shadow.valid() },
         std::pair { "pointShadows", resources.pointShadows.valid() },
         std::pair { "sceneColor", resources.sceneColor.valid() },
+        std::pair { "previewSceneColor", resources.previewSceneColor.valid() },
         std::pair { "sceneHdrColor", resources.sceneHdrColor.valid() },
         std::pair { "sceneDepth", resources.sceneDepth.valid() },
         std::pair { "ssao", resources.ssao.valid() },
@@ -422,10 +423,12 @@ void VulkanSceneDescriptors::updateInternal(
         .range = resources.materials.range,
     };
     const VkDescriptorBufferInfo& waterCells = resources.waterCells[internalSetIndex / 2];
+    const ImageBinding& sampledSceneColor = internalSetIndex % 2 == 0
+        ? resources.sceneColor : resources.previewSceneColor;
     const VkDescriptorImageInfo sceneColor {
-        .sampler = resources.sceneColor.sampler,
-        .imageView = resources.sceneColor.imageView,
-        .imageLayout = resources.sceneColor.imageLayout,
+        .sampler = sampledSceneColor.sampler,
+        .imageView = sampledSceneColor.imageView,
+        .imageLayout = sampledSceneColor.imageLayout,
     };
     const VkDescriptorImageInfo sceneHdrColor {
         .sampler = resources.sceneHdrColor.sampler,

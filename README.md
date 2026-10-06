@@ -84,16 +84,24 @@ controllers fall back to the generic glyph set.
 ## Lecterns and Activate
 
 Lecterns are fixed blocks that open a reading box when a hero walks into them.
-Choose **Lectern** in the editor's tile palette, then select the stand in the
-**Lecterns** section and enter its text. Text supports line breaks, wraps to the
-box, and uses pages when needed. Use the page buttons to change pages. Walk
+Click **Lectern** in the editor's tile palette to open the same direction
+submenu as turrets and portals. Choose North, East, South, or West, then paint
+the stand. Painting another direction over an existing lectern preserves its
+text and supports undo/redo. The eyedropper and Recent tiles retain the direction.
+Select the stand in the **Lecterns** section to enter its text.
+Text supports line breaks, wraps to the box, and uses pages when needed.
+Use the page buttons to change pages. Walk
 away from the lectern to close the box, or use Activate or Back (Escape by
 default). Blocked moves keep the text open. Gameplay pauses while reading
 without movement input, and opening the book does not spend a move. After using
 Activate or Back, release movement before opening the same book again.
 
-Screen grids use `T` for a lectern, with text stored before the layers as
+Screen grids use `t`, `j`, `T`, and `l` for lecterns facing North, East, South,
+and West, with text stored before the layers as
 `@lectern {"cell":[2,1,1],"text":"First paragraph.\n\nSecond paragraph."}`.
+Existing `T` tiles preserve their original south-facing orientation. Files
+saved with a `direction` metadata field also load with their chosen facing.
+Lecterns can be read from any side.
 An example ready to open in the editor is `docs/examples/lectern.scr`.
 
 Embed current binding icons with tags such as `<!Move Up!>`, `<!Undo!>`,
@@ -591,7 +599,7 @@ Common tile symbols:
 | `W` | Legacy explicit water | | |
 | `^ v > <` | Conveyors | `1 2 3 4` | Mirror orientations |
 | `D` | Decorative block | `N` | Enemy |
-| `T` | Lectern | `M` | Minecart |
+| `t j T l` | Lecterns facing north/east/south/west | `M` | Minecart |
 | `g` | Minecart gate | `! _` | Rail stops (north/south, east/west) |
 | `O o p q` | Portals (north, east, south, west) | | |
 | `n e s w` | Turrets facing north/east/south/west | | |

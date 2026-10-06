@@ -45,6 +45,9 @@ std::optional<TileType> tileTypeFromName(std::string_view name)
     if (name == "Portal") {
         return TileType::PortalNorth;
     }
+    if (name == "Lectern") {
+        return TileType::LecternSouth;
+    }
     for (const TileTypeDefinition& definition : tileTypeDefinitionTable) {
         if (definition.name == name) {
             return definition.type;
@@ -105,7 +108,7 @@ bool tileTypeIsSolidBlock(TileType type)
     // position (see rules::elevatorPlatformAt).
     return tileTypeIsGround(type) || type == TileType::Wall ||
         type == TileType::Elevator || type == TileType::Minecart ||
-        type == TileType::Lectern;
+        tileTypeIsLectern(type);
 }
 
 bool tileTypeSupportsEntity(TileType type)
@@ -157,6 +160,17 @@ bool tileTypeIsTurret(TileType type)
         type == TileType::TurretEast ||
         type == TileType::TurretSouth ||
         type == TileType::TurretWest;
+}
+
+std::optional<uint32_t> lecternOrientationQuarterTurns(TileType type)
+{
+    switch (type) {
+    case TileType::LecternSouth: return 0;
+    case TileType::LecternWest: return 1;
+    case TileType::LecternNorth: return 2;
+    case TileType::LecternEast: return 3;
+    default: return std::nullopt;
+    }
 }
 
 bool tileTypeIsMovableObject(TileType type)

@@ -13,6 +13,7 @@
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
 
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <set>
@@ -284,6 +285,22 @@ void testGroundIsBakedThroughTheSplatPath()
     CHECK(!wall.tiles.back().model.isCube());
 }
 
+void testLecternsBakeAllCardinalDirections()
+{
+    TEST("lecternsBakeAllCardinalDirections");
+    constexpr std::array variants { TileType::LecternNorth, TileType::LecternEast,
+        TileType::LecternSouth, TileType::LecternWest };
+    constexpr std::array<uint32_t, 4> turns { 2, 3, 0, 1 };
+    for (std::size_t i = 0; i < variants.size(); ++i) {
+        const auto frame = tileThumbnails::buildBakeFrame(
+            variants[i], testManifest(), testSettings());
+        CHECK(frame.tiles.back().modelRotationQuarterTurns == turns[i]);
+        CHECK(frame.tiles.back().height > 0.0f);
+    }
+    CHECK(tileThumbnails::assetPathFor(TileType::LecternSouth) ==
+        "custom/thumbnails/tile_lectern.png");
+}
+
 void testMirrorsBakeAtTheirOwnOrientation()
 {
     TEST("mirrorsBakeAtTheirOwnOrientation");
@@ -512,6 +529,7 @@ int main()
     testGateBakesTheClosedEnergyEffect();
     testGroundIsBakedThroughTheSplatPath();
     testMirrorsBakeAtTheirOwnOrientation();
+    testLecternsBakeAllCardinalDirections();
     testConveyorsBakeRotatedAndAtBeltHeight();
     testSubjectMatchesTheTileTheEditorDraws();
     testPerspectiveIsNoStrongerThanOnARealBoard();

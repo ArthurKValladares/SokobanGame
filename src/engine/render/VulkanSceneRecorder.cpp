@@ -761,6 +761,9 @@ public:
         vulkanDebug::endLabel(device_, commandBuffer);
         vulkanDebug::beginLabel(
             device_, commandBuffer, "UI composition", { 0.9f, 0.9f, 0.2f, 1.0f });
+        // Postprocessing can reuse the preview snapshot, but the inset's
+        // UI feather must sample the main view preserved before the preview.
+        previewDescriptor_ = false;
         if (configuration_.developerWorkspaceVisible) {
             // Compose the game's own UI onto the tonemapped display image,
             // then publish that image for ImGui's dockable Game Viewport. The
@@ -1235,6 +1238,7 @@ private:
         if (shadowPass_.valid() && pipelines_.shadow()) {
             recordShadowMapRendering(commandBuffer, frameData, scene);
         }
+        swapchain_.ensureSceneColorReadable(commandBuffer, stats_, true);
         recordScenePass(
             commandBuffer,
             colorView,
@@ -1253,9 +1257,10 @@ private:
             return;
         }
         swapchain_.publishSceneDepth(commandBuffer, stats_);
-        // Keep sceneColor as the untouched main view for the opacity feather.
-        // Preview translucency can also sample it naturally as the world
-        // visible behind the portal-like inset.
+        // Refracting water and blurred surfaces sample the preview's opaque
+        // geometry. The main descriptor still holds the untouched world for
+        // ScreenPreviewOverlay, so this copy cannot erase its edge feather.
+        swapchain_.copyResolvedSceneColor(commandBuffer, stats_, std::nullopt, true);
         recordScenePass(
             commandBuffer,
             colorView,
@@ -1365,11 +1370,13 @@ private:
             return;
         }
 
-        // Bloom reads the completed scene through the existing snapshot
-        // image. Keeping the live scene target as a color attachment avoids
+        // Bloom reads the completed scene through the active snapshot,
+        // preserving the main view for the preview's UI feather. Keeping
+        // the live scene target as a color attachment avoids
         // a read/write feedback path and lets beginTonemap retain its simple
         // attachment-to-sampled handoff.
-        swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
+        swapchain_.copyResolvedSceneColor(
+            commandBuffer, stats_, std::nullopt, previewDescriptor_);
 
         const VkExtent2D extent = bloomPass_.extent();
         const VkViewport viewport {
@@ -1785,7 +1792,8 @@ private:
 
         // Sample a copy: Vulkan does not permit the transition shader to read
         // and overwrite resolvedColorImage in the same draw.
-        swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
+        swapchain_.copyResolvedSceneColor(
+            commandBuffer, stats_, std::nullopt, previewDescriptor_);
 
         const VkExtent2D extent = swapchain_.renderExtent();
         const VkRenderingAttachmentInfo attachment {

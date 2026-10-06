@@ -479,7 +479,8 @@ GridPosition3 parseLinkedCell(
     return cell;
 }
 
-Level::Lectern parseLectern(std::string_view payload, std::string_view sourceName)
+Level::Lectern parseLectern(std::string_view payload, std::string_view sourceName,
+    std::optional<TileType>& legacyDirection)
 {
     try {
         const Json object = Json::parse(payload);
@@ -487,10 +488,19 @@ Level::Lectern parseLectern(std::string_view payload, std::string_view sourceNam
             !object.contains("text") || !object["text"].is_string()) {
             throw std::runtime_error("expected an object with cell and text");
         }
-        return {
+        Level::Lectern lectern {
             .cell = parseLinkedCell(object["cell"], "cell", sourceName, "Lectern"),
             .text = object["text"].get<std::string>(),
         };
+        if (const auto direction = object.find("direction"); direction != object.end()) {
+            if (!direction->is_number_integer() || *direction < 0 || *direction > 3) {
+                throw std::runtime_error("lectern 'direction' must be an integer from 0 to 3");
+            }
+            constexpr std::array directions { TileType::LecternNorth, TileType::LecternEast,
+                TileType::LecternSouth, TileType::LecternWest };
+            legacyDirection = directions[direction->get<std::size_t>()];
+        }
+        return lectern;
     } catch (const std::exception& error) {
         throw std::runtime_error("Invalid lectern in " + std::string(sourceName) +
             ": " + error.what());
@@ -1189,6 +1199,7 @@ Level::Definition Level::parseDefinition(
     }
 
     Definition definition;
+    std::vector<std::pair<GridPosition3, TileType>> legacyLecternDirections;
     std::optional<uint32_t> currentLayer;
     for (const std::string& line : lines) {
         if (line.starts_with(groundSplatPrefix) || line.starts_with(groundPaintPrefix)) {
@@ -1258,8 +1269,12 @@ Level::Definition Level::parseDefinition(
                 throw std::runtime_error(
                     "Lectern metadata must appear before '@layer 0': " + source);
             }
+            std::optional<TileType> legacyDirection;
             definition.lecterns.push_back(parseLectern(
-                std::string_view(line).substr(lecternPrefix.size()), sourceName));
+                std::string_view(line).substr(lecternPrefix.size()), sourceName, legacyDirection));
+            if (legacyDirection) {
+                legacyLecternDirections.emplace_back(definition.lecterns.back().cell, *legacyDirection);
+            }
             continue;
         }
         if (line.starts_with(selectorPrefix)) {
@@ -1464,6 +1479,21 @@ Level::Definition Level::parseDefinition(
                     std::to_string(selector.cell.y) + "," +
                     std::to_string(selector.cell.z) + ": " + source);
             }
+        }
+    }
+
+    // Accept files saved by the earlier metadata-based direction picker.
+    // Directional grid tiles are authoritative; only the legacy T is converted.
+    for (const auto& [cell, direction] : legacyLecternDirections) {
+        if (cell.z < 0 || cell.y < 0 || cell.x < 0 ||
+            static_cast<std::size_t>(cell.z) >= definition.layers.size() ||
+            static_cast<std::size_t>(cell.y) >= definition.layers[cell.z].size() ||
+            static_cast<std::size_t>(cell.x) >= definition.layers[cell.z][cell.y].size()) {
+            throw std::runtime_error("Lectern metadata must reference a Lectern tile: " + source);
+        }
+        char& tile = definition.layers[cell.z][cell.y][cell.x];
+        if (tile == tileTypeToChar(TileType::LecternSouth)) {
+            tile = tileTypeToChar(direction);
         }
     }
 
@@ -2084,9 +2114,9 @@ Level Level::loadFromLayers(
     for (std::size_t i = 0; i < level.lecterns_.size(); ++i) {
         const Lectern& lectern = level.lecterns_[i];
         if (!level.inBounds(lectern.cell) ||
-            level.authoredTileAt(static_cast<uint32_t>(lectern.cell.x),
+            !tileTypeIsLectern(level.authoredTileAt(static_cast<uint32_t>(lectern.cell.x),
                 static_cast<uint32_t>(lectern.cell.y),
-                static_cast<uint32_t>(lectern.cell.z)) != TileType::Lectern) {
+                static_cast<uint32_t>(lectern.cell.z)))) {
             throw std::runtime_error("Lectern metadata must reference a Lectern tile: " + source);
         }
         for (std::size_t j = 0; j < i; ++j) {
@@ -2100,7 +2130,7 @@ Level Level::loadFromLayers(
         for (uint32_t y = 0; y < level.height_; ++y) {
             for (uint32_t x = 0; x < level.width_; ++x) {
                 const GridPosition3 cell { static_cast<int>(x), static_cast<int>(y), static_cast<int>(z) };
-                if (level.authoredTileAt(x, y, z) == TileType::Lectern && !level.lecternAt(cell)) {
+                if (tileTypeIsLectern(level.authoredTileAt(x, y, z)) && !level.lecternAt(cell)) {
                     level.lecterns_.push_back({ .cell = cell, .text = {} });
                 }
             }

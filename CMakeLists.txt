@@ -1155,6 +1155,17 @@ if(SOKOBAN_BUILD_TESTS)
             target_include_directories(sokoban_text_rendering_tests SYSTEM PRIVATE third_party/imgui)
         endif()
         set_tests_properties(text_rendering PROPERTIES LABELS "vulkan;text" TIMEOUT 60 SKIP_RETURN_CODE 77)
+        sokoban_add_test(NAME preview_rendering
+            STANDALONE TARGET sokoban_preview_rendering_tests
+            LIBS sokoban_render_vulkan sokoban_ui
+            SOURCES tests/PreviewRenderingTests.cpp
+            DEFINITIONS SOKOBAN_PREVIEW_TEST_ASSETS="$<TARGET_FILE_DIR:sokoban>/assets"
+            DEPENDS sokoban_content
+        )
+        if(SOKOBAN_DEVELOPER_TOOLS_ENABLED)
+            target_include_directories(sokoban_preview_rendering_tests SYSTEM PRIVATE third_party/imgui)
+        endif()
+        set_tests_properties(preview_rendering PROPERTIES LABELS "vulkan;render" TIMEOUT 60)
         add_test(NAME application_validation_teardown
             COMMAND "${CMAKE_COMMAND}"
                 "-DSOKOBAN_EXECUTABLE=$<TARGET_FILE:sokoban>"
@@ -1166,9 +1177,9 @@ if(SOKOBAN_BUILD_TESTS)
             TIMEOUT 40
         )
         if(SOKOBAN_ENABLE_SANITIZERS)
-            # Both tests initialize SDL/X11 and Vulkan. The application child
+            # These tests initialize SDL/X11 and Vulkan. The application child
             # inherits this environment from the CMake teardown verifier.
-            set_property(TEST vulkan_smoke application_validation_teardown
+            set_property(TEST vulkan_smoke application_validation_teardown preview_rendering
                 APPEND PROPERTY ENVIRONMENT
                 "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
         endif()

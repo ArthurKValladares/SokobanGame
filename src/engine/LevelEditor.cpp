@@ -1352,7 +1352,7 @@ bool LevelEditor::moveObject(GridPosition3 destination)
     // setCell keeps gate metadata valid at every intermediate point. Restore
     // the authored relationships after the two-cell transaction completes.
     restoreRecordAfterMove(
-        document_.lecterns, before.lecterns, move->tile == TileType::Lectern,
+        document_.lecterns, before.lecterns, tileTypeIsLectern(move->tile),
         move->source, destination);
     if (tileTypeIsGround(move->tile)) {
         const auto paint = std::ranges::find(before.groundPaint, move->source, &Level::GroundPaint::cell);
@@ -1775,12 +1775,12 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
                 return link.cell == translatedPosition;
             });
     }
-    if (previous.top == TileType::Lectern && painted.top != TileType::Lectern) {
+    if (tileTypeIsLectern(previous.top) && !tileTypeIsLectern(painted.top)) {
         std::erase_if(document_.lecterns, [&](const Level::Lectern& lectern) {
             return lectern.cell == translatedPosition;
         });
     }
-    if (painted.top == TileType::Lectern && previous.top != TileType::Lectern) {
+    if (tileTypeIsLectern(painted.top) && !tileTypeIsLectern(previous.top)) {
         document_.lecterns.push_back({ .cell = translatedPosition, .text = {} });
     }
     if (previous.top == TileType::Gate && painted.top != TileType::Gate) {
@@ -3478,7 +3478,7 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
         for (std::size_t y = 0; y < document_.layers[z].size(); ++y) {
             for (std::size_t x = 0; x < document_.layers[z][y].size(); ++x) {
                 const GridPosition3 cell { static_cast<int>(x), static_cast<int>(y), static_cast<int>(z) };
-                if (document_.layers[z][y][x] == tileTypeToChar(TileType::Lectern) &&
+                if (tileTypeIsLectern(charToTileType(document_.layers[z][y][x]).value_or(TileType::Air)) &&
                     std::ranges::find(document_.lecterns, cell, &Level::Lectern::cell) == document_.lecterns.end()) {
                     document_.lecterns.push_back({ .cell = cell, .text = {} });
                 }

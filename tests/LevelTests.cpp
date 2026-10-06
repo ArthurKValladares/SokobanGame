@@ -1328,6 +1328,37 @@ int main()
         (void)Level::parseDefinition({ "@lectern {\"cell\":[1,0,1],\"text\":3}", "@layer 0", "CT" }, "bad text");
     }, "Invalid lectern");
     CHECK(Level::loadFromLayers({ { ".." }, { "CT" } }, "blank book").lecternAt({ 1, 0, 1 })->text.empty());
+    CHECK(lecternLevel.tileAt(1, 0, 1) == TileType::LecternSouth);
+    CHECK(Level::loadFromLines({
+        "@lectern {\"cell\":[1,0,1],\"text\":\"Legacy book\"}",
+        "@layer 0", "..", "@layer 1", "CT",
+    }, "legacy book").tileAt(1, 0, 1) == TileType::LecternSouth);
+    constexpr std::array lecternTiles { TileType::LecternNorth, TileType::LecternEast,
+        TileType::LecternSouth, TileType::LecternWest };
+    for (std::size_t direction = 0; direction < lecternTiles.size(); ++direction) {
+        auto rotated = lecternDefinition;
+        rotated.layers[1][0][1] = tileTypeToChar(lecternTiles[direction]);
+        const auto lines = Level::serializeDefinition(rotated);
+        CHECK(Level::parseDefinition(lines, "rotated book").lecterns == rotated.lecterns);
+        const auto level = Level::loadFromLines(lines, "rotated book");
+        CHECK(level.tileAt(1, 0, 1) == lecternTiles[direction]);
+        CHECK(level.lecternAt({ 1, 0, 1 })->text == rotated.lecterns[0].text);
+        CHECK(!level.isWalkable({ 1, 0, 1 }));
+        CHECK(Level::loadFromLines({
+            "@lectern {\"cell\":[1,0,1],\"text\":\"Book\",\"direction\":" + std::to_string(direction) + "}",
+            "@layer 0", "..", "@layer 1", "CT",
+        }, "metadata direction").tileAt(1, 0, 1) == lecternTiles[direction]);
+    }
+    for (const std::string value : { "-1", "4", "256", "4294967296", "18446744073709551615",
+             "1.5", "true", "null", "\"north\"" }) {
+        checkThrowsContaining([&] {
+            (void)Level::parseDefinition({
+                "@lectern {\"cell\":[1,0,1],\"text\":\"Book\",\"direction\":" + value + "}",
+                "@layer 0", "CT",
+            }, "bad direction");
+        }, "direction");
+    }
+    CHECK(tileTypeFromName("Lectern") == TileType::LecternSouth);
     testLockPlateMetadata();
     testPortalMetadata();
     testGroundSplatMetadata();

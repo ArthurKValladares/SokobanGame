@@ -59,7 +59,8 @@ public:
         VkCommandBuffer commandBuffer,
         uint32_t imageIndex,
         RenderStats& stats) const;
-    void ensureSceneColorReadable(VkCommandBuffer commandBuffer, RenderStats& stats);
+    void ensureSceneColorReadable(
+        VkCommandBuffer commandBuffer, RenderStats& stats, bool preview = false);
     // Orders one in-place atmosphere blend after preceding scene/medium color
     // writes without copying the target through the sampled scene image.
     void synchronizeAtmosphereComposite(
@@ -80,7 +81,8 @@ public:
     void copyResolvedSceneColor(
         VkCommandBuffer commandBuffer,
         RenderStats& stats,
-        std::optional<VkRect2D> region = std::nullopt);
+        std::optional<VkRect2D> region = std::nullopt,
+        bool preview = false);
     // Publishes the single-sample depth resolve directly for shader reads;
     // prepareSceneDepthAttachment restores it before another scene render.
     void publishSceneDepth(
@@ -116,6 +118,7 @@ public:
     [[nodiscard]] VkImage image(uint32_t index) const;
     [[nodiscard]] VkImageView imageView(uint32_t index) const;
     [[nodiscard]] VkImageView sceneColorView() const { return sceneColorImage_.view; }
+    [[nodiscard]] VkImageView previewSceneColorView() const { return previewSceneColorImage_.view; }
     [[nodiscard]] VkSampler sceneColorSampler() const { return sceneColorSampler_; }
     [[nodiscard]] VkImageView depthView() const { return depthImage_.view; }
     [[nodiscard]] VkImageView sampledDepthView() const;
@@ -174,9 +177,13 @@ private:
     vulkanResources::OwnedImage depthImage_ {};
     vulkanResources::OwnedImage resolveDepthImage_ {};
     vulkanResources::OwnedImage sceneColorImage_ {};
+    // Preview refraction needs its own opaque scene, while sceneColorImage_
+    // retains the completed main view for the inset's UI feather.
+    vulkanResources::OwnedImage previewSceneColorImage_ {};
     vulkanResources::OwnedImage displayColorImage_ {};
     VkSampler sceneColorSampler_ = VK_NULL_HANDLE;
     VkImageLayout sceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageLayout previewSceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     // There is one display image and more than one frame in flight, and in
     // the developer workspace ImGui samples it at the end of every frame.
     // The next frame's tonemap has to name that read as the thing it is

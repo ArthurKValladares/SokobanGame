@@ -27,6 +27,7 @@ public:
         ImageBinding shadow;
         ImageBinding pointShadows;
         ImageBinding sceneColor;
+        ImageBinding previewSceneColor;
         // The scene target itself, read by the tonemap pass. sceneColor above
         // is the *copy* the scene shaders sample mid-pass; this is the image
         // they render into.
