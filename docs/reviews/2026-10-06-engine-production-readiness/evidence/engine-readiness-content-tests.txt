@@ -1,0 +1,24 @@
+Internal ctest changing into directory: C:/Users/arthu/Documents/Projects/Sokoban Game/out/dev-fast
+Test project C:/Users/arthu/Documents/Projects/Sokoban Game/out/dev-fast
+    Start 52: asset_manifest_editor
+1/2 Test #52: asset_manifest_editor ............***Failed    0.26 sec
+FAIL [characterMusicRoundTrip] line 334: picker imports external audio
+FAIL [characterMusicRoundTrip] line 336: external audio is stored under custom/audio
+FAIL [characterMusicRoundTrip] line 338: second import appends a variation
+FAIL [characterMusicRoundTrip] line 340: imports do not overwrite existing files
+FAIL [characterMusicRoundTrip] line 342: import keeps file bytes
+FAIL [characterMusicRoundTrip] line 345: runtime receives selected sound bytes
+6 asset manifest editor checks failed
+
+    Start 80: content_pipeline
+2/2 Test #80: content_pipeline .................***Failed    3.83 sec
+UNEXPECTED EXCEPTION: sound set 'footsteps' escapes its content root: audio/missing.ogg
+
+
+0% tests passed, 2 tests failed out of 2
+
+Total Test time (real) =   4.10 sec
+
+The following tests FAILED:
+	 52 - asset_manifest_editor (Failed)
+	 80 - content_pipeline (Failed)

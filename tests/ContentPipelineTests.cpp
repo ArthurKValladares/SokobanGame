@@ -8,6 +8,7 @@
 #include "engine/render/ShaderCatalog.hpp"
 #include "engine/render/CompressedTextureArtifact.hpp"
 #include "engine/render/PngWriter.hpp"
+#include "engine/ui/UiConfig.hpp"
 
 #include <array>
 #include <cstring>
@@ -242,6 +243,12 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     writeTinyPng(assets / "textures/boardgame.png");
     writeFile(assets / "ui/Karla-Regular.ttf");
     writeFile(assets / "ui/OFL.txt", "font license");
+    for (const std::string_view font : sokoban::config::uiFallbackFontPaths) {
+        writeFile(assets / font);
+        auto license = std::filesystem::path(font);
+        license.replace_filename(license.stem().string() + "-OFL.txt");
+        writeFile(assets / license, "fallback font license");
+    }
     writeFile(assets / "custom/ui/main-menu-rogue-pushing-rock-4k.png");
     constexpr std::array<std::string_view, 7> inputPromptAtlases {
         "kenney_input-prompts_1.5/Keyboard & Mouse/keyboard-&-mouse_sheet_default.xml",

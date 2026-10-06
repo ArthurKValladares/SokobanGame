@@ -29,21 +29,24 @@ ImageData captureImageRegion(
     VkFormat sourceFormat,
     VkImageLayout sourceLayout,
     VkOffset2D offset,
-    VkExtent2D extent)
+    VkExtent2D extent,
+    VkExtent2D outputExtent)
 {
     if (extent.width == 0 || extent.height == 0) {
         throw std::runtime_error("Cannot capture a zero-sized region");
     }
 
     constexpr uint32_t channels = 4;
+    if (!outputExtent.width || !outputExtent.height) outputExtent = extent;
     const VkDeviceSize byteCount =
-        static_cast<VkDeviceSize>(extent.width) * extent.height * channels;
+        static_cast<VkDeviceSize>(outputExtent.width) * outputExtent.height * channels;
 
     VkBuffer staging = VK_NULL_HANDLE;
     VulkanAllocation stagingAllocation = nullptr;
     void* mapped = nullptr;
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
+    vulkanResources::OwnedImage resized;
 
     const auto cleanup = [&] {
         if (fence) {
@@ -53,6 +56,7 @@ ImageData captureImageRegion(
             vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         }
         allocator.destroyBuffer(staging, stagingAllocation);
+        vulkanResources::destroyImage(allocator, device, resized);
     };
 
     try {
@@ -86,19 +90,52 @@ ImageData captureImageRegion(
                 sourceLayout,
             },
             {
-                VK_PIPELINE_STAGE_2_COPY_BIT,
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                 VK_ACCESS_2_TRANSFER_READ_BIT,
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             });
 
+        VkImage copyImage = sourceImage;
+        VkOffset2D copyOffset = offset;
+        if (extent.width != outputExtent.width || extent.height != outputExtent.height) {
+            const VkImageCreateInfo imageInfo { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                .imageType = VK_IMAGE_TYPE_2D, .format = sourceFormat,
+                .extent = { outputExtent.width, outputExtent.height, 1 }, .mipLevels = 1, .arrayLayers = 1,
+                .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
+            resized = vulkanResources::createImage(allocator, device, imageInfo, VK_IMAGE_ASPECT_COLOR_BIT, "Capture resample");
+            vulkanResources::transitionImage(commandBuffer, resized.image,
+                vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT), {},
+                { VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL });
+            const VkImageBlit2 blit { .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2,
+                .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                .srcOffsets = { VkOffset3D { offset.x, offset.y, 0 },
+                    VkOffset3D { offset.x + static_cast<int32_t>(extent.width), offset.y + static_cast<int32_t>(extent.height), 1 } },
+                .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                .dstOffsets = { VkOffset3D { 0, 0, 0 },
+                    VkOffset3D { static_cast<int32_t>(outputExtent.width), static_cast<int32_t>(outputExtent.height), 1 } } };
+            const VkBlitImageInfo2 blitInfo { .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
+                .srcImage = sourceImage, .srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                .dstImage = resized.image, .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .regionCount = 1, .pRegions = &blit, .filter = VK_FILTER_LINEAR };
+            vkCmdBlitImage2(commandBuffer, &blitInfo);
+            vulkanResources::transitionImage(commandBuffer, resized.image,
+                vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+                { VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL },
+                { VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL });
+            copyImage = resized.image;
+            copyOffset = {};
+        }
+
         const VkBufferImageCopy region {
             .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-            .imageOffset = { offset.x, offset.y, 0 },
-            .imageExtent = { extent.width, extent.height, 1 },
+            .imageOffset = { copyOffset.x, copyOffset.y, 0 },
+            .imageExtent = { outputExtent.width, outputExtent.height, 1 },
         };
         vkCmdCopyImageToBuffer(
             commandBuffer,
-            sourceImage,
+            copyImage,
             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             staging,
             1,
@@ -111,7 +148,7 @@ ImageData captureImageRegion(
             sourceImage,
             vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
             {
-                VK_PIPELINE_STAGE_2_COPY_BIT,
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                 VK_ACCESS_2_TRANSFER_READ_BIT,
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             },
@@ -126,8 +163,8 @@ ImageData captureImageRegion(
             "vkWaitForFences capture failed");
 
         ImageData image;
-        image.width = extent.width;
-        image.height = extent.height;
+        image.width = outputExtent.width;
+        image.height = outputExtent.height;
         image.rgba.resize(static_cast<std::size_t>(byteCount));
         const auto* source = static_cast<const uint8_t*>(mapped);
         const bool swizzle = formatIsBgra(sourceFormat);

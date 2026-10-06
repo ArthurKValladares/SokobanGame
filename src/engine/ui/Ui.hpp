@@ -5,10 +5,12 @@
 #include "engine/Math.hpp"
 #include "engine/render/RenderTypes.hpp"
 #include "engine/ui/UiConfig.hpp"
+#include "engine/ui/TextLayout.hpp"
 
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <span>
 #include <cstdint>
 
 namespace sokoban {
@@ -36,6 +38,19 @@ struct UiDrawCommand {
     Vec4 effectOptions {};
     NineSlice nineSlice {};
     RenderTexture texture = noTexture;
+    uint32_t glyphCurveOffset = 0;
+    bool outlineGlyph = false;
+    float fontSize = 0.0f; // Requested display size, for UI diagnostics.
+};
+
+// A mixed line uses the same advance, baseline and draw order for text and
+// icons. Input bindings resolve to these identities before layout.
+struct UiInlineRun {
+    std::string_view text;
+    uint32_t vectorIcon = 0;
+    RenderTexture texture = noTexture;
+    UiRect uvRect { {}, { 1.0f, 1.0f } };
+    float iconAspectRatio = 1.0f;
 };
 
 struct UiDrawData {
@@ -107,11 +122,15 @@ public:
         Vec4 effectOptions = {});
     void panel(UiRect rect);
     void divider(UiRect rect);
-    void text(Vec2 position, std::string_view text, Vec4 color, float size = 24.0f);
+    void text(Vec2 position, std::string_view text, Vec4 color, float size = 24.0f,
+        GlyphRendering rendering = GlyphRendering::Automatic);
+    void inlineText(Vec2 position, std::span<const UiInlineRun> runs, Vec4 color, float size = 24.0f);
+    [[nodiscard]] Vec2 measureInlineText(std::span<const UiInlineRun> runs, float size = 24.0f) const;
     [[nodiscard]] Vec2 measureText(std::string_view text, float size = 24.0f) const;
     void centeredText(UiRect rect, std::string_view text, Vec4 color, float size = 24.0f);
 
 private:
+    void drawGlyph(Vec2 baseline, const struct FontGlyph& glyph, Vec4 color, float size);
     const FontAtlas* font_ = nullptr;
     // UI commands are consumed synchronously by drawFrame(), so none may
     // survive beginFrame(). Sized from the same budget the command array

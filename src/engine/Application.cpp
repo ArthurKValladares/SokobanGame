@@ -189,10 +189,7 @@ Application::Application(ApplicationOptions options)
       }))
     , animationCatalog_(AnimationCatalog::loadFromFile(
           assetRoot_ / "animation_catalog.json", assetManifest_))
-    , uiFont_(FontAtlas::load(
-          assetRoot_ / config::uiFontPath,
-          config::uiFontPixelHeight,
-          config::uiFontAtlasSize))
+    , uiFont_(FontAtlas::loadDefault(assetRoot_))
     , inputPrompts_(assetRoot_, assetManifest_)
     , renderer_(
           window_.nativeHandle(),

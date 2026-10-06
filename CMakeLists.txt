@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(Sokoban3D VERSION 0.1.0 LANGUAGES CXX)
+project(Sokoban3D VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -648,11 +648,13 @@ sokoban_enable_warnings(sokoban_core)
 sokoban_enable_precompiled_headers(sokoban_core)
 sokoban_enable_lto(sokoban_core)
 
+add_subdirectory(cmake/text)
+
 add_library(sokoban_ui STATIC
     src/engine/InputRouter.cpp
     src/engine/ShellFlow.cpp
     src/engine/ui/FontAtlas.cpp
-    src/engine/ui/StbTruetypeImplementation.cpp
+    src/engine/ui/TextLayout.cpp
     src/engine/ui/InputPrompts.cpp
     src/engine/ui/MenuKit.cpp
     src/engine/ui/OptionsMenu.cpp
@@ -667,7 +669,7 @@ add_library(Sokoban::ui ALIAS sokoban_ui)
 target_include_directories(sokoban_ui PUBLIC src)
 target_link_libraries(sokoban_ui
     PUBLIC sokoban_core
-    PRIVATE sokoban_stb
+    PRIVATE sokoban_text_dependencies
 )
 sokoban_enable_warnings(sokoban_ui)
 sokoban_enable_precompiled_headers(sokoban_ui)
@@ -1142,6 +1144,17 @@ if(SOKOBAN_BUILD_TESTS)
             TIMEOUT 30
             SKIP_RETURN_CODE 77
         )
+        sokoban_add_test(NAME text_rendering
+            STANDALONE TARGET sokoban_text_rendering_tests
+            LIBS sokoban_render_vulkan sokoban_ui
+            SOURCES tests/TextRenderingTests.cpp
+            DEFINITIONS SOKOBAN_TEXT_TEST_ASSETS="$<TARGET_FILE_DIR:sokoban>/assets"
+            DEPENDS sokoban_content
+        )
+        if(SOKOBAN_DEVELOPER_TOOLS_ENABLED)
+            target_include_directories(sokoban_text_rendering_tests SYSTEM PRIVATE third_party/imgui)
+        endif()
+        set_tests_properties(text_rendering PROPERTIES LABELS "vulkan;text" TIMEOUT 60 SKIP_RETURN_CODE 77)
         add_test(NAME application_validation_teardown
             COMMAND "${CMAKE_COMMAND}"
                 "-DSOKOBAN_EXECUTABLE=$<TARGET_FILE:sokoban>"
@@ -1680,6 +1693,17 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/LICENSE.txt"
     DESTINATION licenses
     RENAME SDL-LICENSE.txt
+    COMPONENT Runtime
+)
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/text/FreeType-LICENSE.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/text/HarfBuzz-LICENSE.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/text/HarfBuzz-GPU-LICENSE.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/text/SheenBidi-LICENSE.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/text/libunibreak-LICENSE.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/text/Unicode-LICENSE.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/text/Text-NOTICES.txt"
+    DESTINATION licenses
     COMPONENT Runtime
 )
 install(FILES

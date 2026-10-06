@@ -1,0 +1,17 @@
+This software uses the FreeType library, copyright its respective authors,
+under the FreeType License. See FreeType-LICENSE.txt.
+
+HarfBuzz is copyright its respective authors under the HarfBuzz license.
+The analytic GPU shader includes the Slug algorithm by Eric Lengyel.
+See HarfBuzz-LICENSE.txt and HarfBuzz-GPU-LICENSE.txt.
+
+SheenBidi is Copyright (C) 2014-2025 Muhammad Tayyab Akram,
+licensed under the Apache License, Version 2.0. See SheenBidi-LICENSE.txt.
+
+libunibreak is copyright Wu Yongwei, Tom Hacohen, Petr Filipsky and
+Andreas Roever under the zlib license. See libunibreak-LICENSE.txt.
+
+Unicode data is used under the Unicode License. See Unicode-LICENSE.txt.
+
+Noto fonts are licensed under the SIL Open Font License; each font's notice
+and license are included beside the font in assets/ui.

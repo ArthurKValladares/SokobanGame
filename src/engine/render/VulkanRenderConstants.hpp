@@ -15,7 +15,7 @@ namespace sokoban {
 // target itself, which the tonemap pass reads. The model texture array is the
 // remaining binding. Kept here so the descriptor pool sizing and the device
 // sampled-image limit check agree on the count.
-inline constexpr uint32_t sceneSingleImageBindings = 11;
+inline constexpr uint32_t sceneSingleImageBindings = 12;
 
 struct PointLightUniform {
     Vec4 positionAndRange {};

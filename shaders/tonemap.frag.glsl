@@ -21,6 +21,7 @@ layout(location = 0) out vec4 outColor;
 // Neutral), z = bloom intensity, w unused.
 layout(push_constant) uniform PushConstants
 {
+    layout(offset = 64) vec4 targetExtent;
     layout(offset = 128) vec4 params;
 } pc;
 
@@ -50,11 +51,10 @@ vec3 pbrNeutralToneMap(vec3 color)
 
 void main()
 {
-    // The scene target and the display image are the same extent, so this is
-    // a 1:1 fetch with no filtering. Scaling to the swapchain stays a
-    // separate blit.
-    vec3 color = texelFetch(sceneHdrColor, ivec2(gl_FragCoord.xy), 0).rgb;
-    vec2 uv = gl_FragCoord.xy / vec2(textureSize(sceneHdrColor, 0));
+    // Display resolution is independent of the scene render scale. This also
+    // keeps the docked game UI sharp when the scene is rendered below native.
+    vec2 uv = gl_FragCoord.xy / pc.targetExtent.xy;
+    vec3 color = texture(sceneHdrColor, uv).rgb;
     color += texture(bloomColor, uv).rgb * max(pc.params.z, 0.0);
 
     color = max(color, vec3(0.0)) * exp2(pc.params.x);

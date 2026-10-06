@@ -599,6 +599,12 @@ private:
             "animation_catalog.json",
             "animation catalog");
         addAssetPath(std::filesystem::path(config::uiFontPath), "UI font");
+        for (const std::string_view font : config::uiFallbackFontPaths) {
+            addAssetPath(std::filesystem::path(font), "UI fallback font");
+            auto license = std::filesystem::path(font);
+            license.replace_filename(license.stem().string() + "-OFL.txt");
+            addAssetPath(license, "UI fallback font license");
+        }
         addAssetPath(
             std::filesystem::path(config::titleBackgroundPath),
             "title background");

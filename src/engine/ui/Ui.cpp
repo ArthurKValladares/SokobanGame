@@ -4,6 +4,7 @@
 #include "engine/ui/FontAtlas.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace sokoban {
 
@@ -23,6 +24,7 @@ void UiContext::beginFrame(
     bool mouseDown,
     bool mousePressed)
 {
+    font_->beginFrame();
     // The head goes back to the start and last frame's commands cease to
     // exist. Nothing needs destroying first: the arena holds trivially
     // destructible data and the draw data owns none of it.
@@ -156,30 +158,57 @@ void UiContext::divider(UiRect rectValue)
     rect(rectValue, { 0.30f, 0.33f, 0.33f, 0.72f });
 }
 
-void UiContext::text(Vec2 position, std::string_view value, Vec4 color, float size)
+void UiContext::text(Vec2 position, std::string_view value, Vec4 color, float size, GlyphRendering rendering)
 {
-    const float scale = size / font_->pixelHeight();
-    float cursorX = position.x;
-    float baseline = position.y + font_->ascent() * scale;
-    for (char character : value) {
-        if (character == '\n') {
-            cursorX = position.x;
-            baseline += font_->lineHeight() * scale;
-            continue;
+    if (value.empty() || size <= 0.0f || color.w <= 0.0f) return;
+    const TextLayout& layout = font_->layoutText(value, size);
+    for (const PositionedGlyph& placed : layout.glyphs) {
+        Vec2 baseline { position.x + placed.position.x, position.y + layout.ascent + placed.position.y };
+        const FontGlyph glyph = font_->glyph(placed, size, rendering, baseline.x);
+        if (!glyph.outline) {
+            baseline.x = std::round(baseline.x * 4.0f) * 0.25f;
+            baseline.y = std::round(baseline.y);
         }
-        const FontGlyph& glyph = font_->glyph(character);
-        if (glyph.size.x > 0.0f && glyph.size.y > 0.0f) {
-            drawData_.commands.push_back({
-                .kind = UiDrawKind::FontGlyph,
-                .rect = {
-                    { cursorX + glyph.offset.x * scale, baseline + glyph.offset.y * scale },
-                    { glyph.size.x * scale, glyph.size.y * scale },
-                },
-                .uvRect = glyph.uv,
-                .color = color,
-            });
+        drawGlyph(baseline, glyph, color, size);
+    }
+}
+
+void UiContext::drawGlyph(Vec2 baseline, const FontGlyph& glyph, Vec4 color, float size)
+{
+    if (glyph.size.x <= 0.0f || glyph.size.y <= 0.0f) return;
+    drawData_.commands.push_back({ .kind = UiDrawKind::FontGlyph,
+        .rect = { baseline + glyph.offset, glyph.size }, .uvRect = glyph.uv, .color = color,
+        .glyphCurveOffset = glyph.curveOffset, .outlineGlyph = glyph.outline, .fontSize = size });
+}
+
+Vec2 UiContext::measureInlineText(std::span<const UiInlineRun> runs, float size) const
+{
+    Vec2 extent { 0.0f, font_->lineHeight() * size / font_->pixelHeight() };
+    for (const UiInlineRun& run : runs) {
+        if (run.vectorIcon) extent.x += font_->iconGlyph(run.vectorIcon, size).advance;
+        else if (!run.texture.isNone()) extent.x += size * run.iconAspectRatio;
+        else extent.x += measureText(run.text, size).x;
+    }
+    return extent;
+}
+
+void UiContext::inlineText(Vec2 position, std::span<const UiInlineRun> runs, Vec4 color, float size)
+{
+    if (size <= 0.0f || color.w <= 0.0f) return;
+    const float baseline = position.y + font_->ascent() * size / font_->pixelHeight();
+    for (const UiInlineRun& run : runs) {
+        if (run.vectorIcon) {
+            const FontGlyph glyph = font_->iconGlyph(run.vectorIcon, size);
+            drawGlyph({ position.x, baseline }, glyph, color, size);
+            position.x += glyph.advance;
+        } else if (!run.texture.isNone()) {
+            const float width = size * run.iconAspectRatio;
+            textureImage({ { position.x, baseline - size * 0.85f }, { width, size } }, run.texture, run.uvRect, color);
+            position.x += width;
+        } else {
+            text(position, run.text, color, size);
+            position.x += measureText(run.text, size).x;
         }
-        cursorX += glyph.advance * scale;
     }
 }
 

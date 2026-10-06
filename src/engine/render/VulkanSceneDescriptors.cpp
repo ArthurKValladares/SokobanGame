@@ -37,7 +37,7 @@ namespace {
 // it, and this file is the only record of that: the slot was retired and the
 // numbering was not compacted, because every later binding is named by hand in
 // the shaders that use it and renumbering would mean editing all of them to no
-// effect. **Do not reuse 2.** New bindings continue at 17; a reused 2 would
+// effect. **Do not reuse 2.** New bindings continue at 18; a reused 2 would
 // silently match any shader still carrying an old declaration.
 //
 // The array's size is deduced from the table rather than written beside it, so
@@ -72,6 +72,7 @@ constexpr auto sceneBindings = std::to_array<SceneBinding>({
     SceneBinding { 15, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
     SceneBinding { 16, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT },
+    SceneBinding { 17, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
 });
 
 // The type a binding was declared with. Returning MAX_ENUM for an unknown
@@ -364,7 +365,7 @@ void VulkanSceneDescriptors::updateInternal(
     // and "resources are incomplete" told whoever hit it nothing about which
     // one. A missing entry here is a descriptor written from a null handle,
     // which validation catches but only on a validation build.
-    const std::array<std::pair<const char*, bool>, 15> required {
+    const std::array<std::pair<const char*, bool>, 16> required {
         std::pair { "shadow", resources.shadow.valid() },
         std::pair { "pointShadows", resources.pointShadows.valid() },
         std::pair { "sceneColor", resources.sceneColor.valid() },
@@ -375,6 +376,7 @@ void VulkanSceneDescriptors::updateInternal(
         std::pair { "bloomExtract", resources.bloomExtract.valid() },
         std::pair { "bloom", resources.bloom.valid() },
         std::pair { "uiFont", resources.uiFont.valid() },
+        std::pair { "uiCurves", resources.uiCurves.valid() },
         std::pair { "titleBackground", resources.titleBackground.valid() },
         std::pair { "skinning", resources.skinning.valid() },
         std::pair { "drawInstances", resources.drawInstances.valid() },
@@ -465,6 +467,8 @@ void VulkanSceneDescriptors::updateInternal(
         .imageView = resources.titleBackground.imageView,
         .imageLayout = resources.titleBackground.imageLayout,
     };
+    const VkDescriptorImageInfo uiCurves { .sampler = resources.uiCurves.sampler,
+        .imageView = resources.uiCurves.imageView, .imageLayout = resources.uiCurves.imageLayout };
     // Thirteen hand-written VkWriteDescriptorSet blocks, in the binding order
     // 3, 4, 0, 1, 5, 6, ... - each repeating its binding number and its
     // descriptor type beside the one thing that actually differed. The order
@@ -488,6 +492,7 @@ void VulkanSceneDescriptors::updateInternal(
         SceneWriteSource { 14, &bloomExtract, nullptr },
         SceneWriteSource { 15, &bloom, nullptr },
         SceneWriteSource { 16, nullptr, &waterCells },
+        SceneWriteSource { 17, &uiCurves, nullptr },
     };
 
     std::array<VkWriteDescriptorSet, sceneBindings.size()> writes {};

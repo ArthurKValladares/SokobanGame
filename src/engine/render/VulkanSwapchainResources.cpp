@@ -638,8 +638,8 @@ void VulkanSwapchainResources::upscaleSceneToSwapchain(
         .srcOffsets = {
             VkOffset3D { 0, 0, 0 },
             VkOffset3D {
-                static_cast<int32_t>(renderExtent_.width),
-                static_cast<int32_t>(renderExtent_.height),
+                static_cast<int32_t>(displayExtent().width),
+                static_cast<int32_t>(displayExtent().height),
                 1,
             },
         },
@@ -1008,9 +1008,9 @@ void VulkanSwapchainResources::createSceneColor()
 }
 
 // What the tonemap pass writes: the scene at render extent, in the surface's
-// format, before any UI. Three readers want exactly that image and no other -
-// the upscale blit, the developer workspace's game viewport, and
-// captureRenderedFrame, whose thumbnails must not contain the interface.
+// format at at least native window resolution. The docked UI is composed here
+// so scene render scaling cannot lower its resolution. Full-window UI remains
+// a later swapchain overlay. Offline captures resample to scene coordinates.
 void VulkanSwapchainResources::createDisplayColor()
 {
     if (renderExtent_.width == 0 || renderExtent_.height == 0) {
@@ -1021,8 +1021,8 @@ void VulkanSwapchainResources::createDisplayColor()
         .imageType = VK_IMAGE_TYPE_2D,
         .format = colorFormat_,
         .extent = {
-            .width = renderExtent_.width,
-            .height = renderExtent_.height,
+            .width = displayExtent().width,
+            .height = displayExtent().height,
             .depth = 1,
         },
         .mipLevels = 1,

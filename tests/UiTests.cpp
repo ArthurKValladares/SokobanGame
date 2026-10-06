@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -49,9 +50,9 @@ const std::filesystem::path assetRoot =
 void testFontAtlasAndText()
 {
     const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
-    CHECK(font.width() == 512);
-    CHECK(font.height() == 512);
-    CHECK(font.pixels().size() == 512 * 512);
+    CHECK(font.width() == sokoban::config::uiFontAtlasSize);
+    CHECK(font.height() == sokoban::config::uiFontAtlasSize);
+    CHECK(font.pixels().size() == std::size_t(font.width()) * font.height());
     CHECK(std::ranges::any_of(font.pixels(), [](std::byte value) {
         return value != std::byte { 0 };
     }));
@@ -96,6 +97,82 @@ void testFontAtlasAndText()
     CHECK(nineSlice.scaleMode ==
         sokoban::NineSliceScaleMode::PreserveSourcePixels);
     CHECK(nineSlice.sourcePixelScale == 2.0f);
+}
+
+void testShapedTextAndScalableIcons()
+{
+    TEST("shapedTextAndScalableIcons");
+    auto font = sokoban::FontAtlas::loadDefault(assetRoot);
+    CHECK(font.measureText("To", 32).x < font.measureText("T", 32).x + font.measureText("o", 32).x);
+    const auto& shaped = font.layoutText("strong", 32);
+    CHECK(shaped.glyphs.size() == 6);
+    const auto n = shaped.glyphs[4];
+    const auto bitmap = font.glyph(n, 32, sokoban::GlyphRendering::Coverage);
+    const auto outline = font.glyph(n, 128);
+    const auto larger = font.glyph(n, 256);
+    CHECK(!bitmap.outline);
+    CHECK(outline.outline);
+    CHECK(outline.curveOffset == larger.curveOffset);
+    CHECK(sokoban::approximately(larger.size.x - 2, (outline.size.x - 2) * 2));
+    const auto x = static_cast<uint32_t>(std::lround(bitmap.uv.position.x * float(font.width())));
+    const auto y = static_cast<uint32_t>(std::lround(bitmap.uv.position.y * float(font.height())));
+    for (uint32_t row = 0; row < static_cast<uint32_t>(bitmap.size.y); ++row) {
+        CHECK(font.pixels()[std::size_t(y + row) * font.width() + x] == std::byte {});
+        CHECK(font.pixels()[std::size_t(y + row) * font.width() + x + static_cast<uint32_t>(bitmap.size.x) - 1] == std::byte {});
+    }
+    const auto phase = font.glyph(n, 32, sokoban::GlyphRendering::Coverage, 0.25f);
+    CHECK(phase.uv.position != bitmap.uv.position);
+    const uint64_t revision = font.updatesSince(0).revision;
+    (void)font.glyph(n, 32, sokoban::GlyphRendering::Coverage, 0.25f);
+    CHECK(font.updatesSince(revision).width == 0);
+
+    for (const std::string_view text : { "\xce\x95\xce\xbb\xce\xbb\xce\xb7\xce\xbd\xce\xb9\xce\xba\xce\xac",
+             "\xd9\x84\xd8\xa7", "\xd7\x90\xd7\x91\xd7\x92", "\xe0\xa4\x95\xe0\xa4\xbf" }) {
+        const auto& layout = font.layoutText(text, 36);
+        CHECK(!layout.glyphs.empty());
+        CHECK(std::ranges::all_of(layout.glyphs, [](auto glyph) { return glyph.id != 0 && glyph.face != 0; }));
+    }
+    const auto& hebrew = font.layoutText("\xd7\x90\xd7\x91\xd7\x92", 36);
+    CHECK(hebrew.glyphs.size() == 3);
+    CHECK(hebrew.glyphs.front().cluster == 4);
+    CHECK(hebrew.glyphs.back().cluster == 0);
+    const auto& joined = font.layoutText("\xd9\x84\xd8\xa7", 36);
+    const auto& isolatedLam = font.layoutText("\xd9\x84", 36);
+    const auto& isolatedAlef = font.layoutText("\xd8\xa7", 36);
+    CHECK(joined.glyphs.size() < 2 || joined.glyphs.front().id != isolatedAlef.glyphs.front().id ||
+        joined.glyphs.back().id != isolatedLam.glyphs.front().id); // Contextual Arabic joining.
+    CHECK(sokoban::textBoundaries("e\xcc\x81").size() == 1);
+    CHECK(sokoban::textBoundaries("\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x91\xa7").size() == 1);
+    CHECK(font.layoutText("bad\xff", 24).glyphs.size() == 4);
+    const auto wrapped = sokoban::LecternDialog::wrapText("e\xcc\x81" "e\xcc\x81", 1,
+        [](std::string_view text) { return float(sokoban::textBoundaries(text).size()); });
+    CHECK(wrapped.size() == 2);
+    CHECK(wrapped[0] == "e\xcc\x81");
+
+    using Command = sokoban::IconPathCommand;
+    const std::array path {
+        Command { Command::Kind::Move, { { 0.1f, 0.1f } } },
+        Command { Command::Kind::Line, { { 0.5f, 0.8f } } },
+        Command { Command::Kind::Line, { { 0.9f, 0.1f } } },
+        Command { Command::Kind::Close },
+    };
+    const uint32_t icon = font.registerIcon("controller.confirm", { path, 1 });
+    CHECK(font.findIcon("controller.confirm") == icon);
+    CHECK(font.findIcon("missing") == 0);
+    sokoban::UiContext ui(font);
+    const std::array runs { sokoban::UiInlineRun { .text = "Press " }, sokoban::UiInlineRun { .vectorIcon = icon },
+        sokoban::UiInlineRun { .text = " to continue" } };
+    const auto measured = ui.measureInlineText(runs, 64);
+    CHECK(sokoban::approximately(measured.x, ui.measureText("Press ", 64).x + 64 + ui.measureText(" to continue", 64).x));
+    ui.beginFrame({ 1280, 720 }, {}, false, false);
+    ui.inlineText({ 10, 10 }, runs, { 1, 1, 1, 1 }, 64);
+    ui.endFrame();
+    CHECK(std::ranges::all_of(ui.drawData().commands, [](auto command) { return command.outlineGlyph; }));
+    const auto glyph = font.iconGlyph(icon, 64);
+    CHECK(std::ranges::any_of(ui.drawData().commands, [&](auto command) { return command.glyphCurveOffset == glyph.curveOffset; }));
+    const auto layoutCount = font.cachedLayoutCount();
+    (void)ui.measureInlineText(runs, 64);
+    CHECK(font.cachedLayoutCount() == layoutCount);
 }
 
 void testReusableControls()
@@ -1353,8 +1430,15 @@ void testLecternBindingPlaceholders()
             if (command.kind != sokoban::UiDrawKind::FontGlyph ||
                 command.color.x < 0.99f || command.color.y > 0.4f || command.color.z > 0.4f) continue;
             for (char c = '!'; c <= '~'; ++c) {
-                const auto& glyph = font.glyph(c);
-                if (command.uvRect.position == glyph.uv.position && command.uvRect.size == glyph.uv.size) {
+                const auto& layout = font.layoutText(std::string_view(&c, 1), command.fontSize);
+                bool matches = false;
+                for (int phase = 0; phase < 4; ++phase) {
+                    const auto glyph = font.glyph(layout.glyphs.front(), command.fontSize,
+                        sokoban::GlyphRendering::Automatic, float(phase) * 0.25f);
+                    matches |= command.outlineGlyph == glyph.outline && command.glyphCurveOffset == glyph.curveOffset &&
+                        command.uvRect.position == glyph.uv.position && command.uvRect.size == glyph.uv.size;
+                }
+                if (matches) {
                     result += c;
                     break;
                 }
@@ -1552,15 +1636,14 @@ int main()
             ui.beginFrame(size, {}, false, false);
             dialog.draw(ui, size, std::string(4000, 'W'));
             float result = 0.0f;
-            const auto& glyph = font.glyph('W');
             for (const auto& command : ui.drawData().commands) {
                 CHECK(command.rect.position.x >= 0.0f);
                 CHECK(command.rect.position.y >= 0.0f);
                 CHECK(command.rect.position.x + command.rect.size.x <= size.x);
                 CHECK(command.rect.position.y + command.rect.size.y <= size.y);
                 if (command.kind == sokoban::UiDrawKind::FontGlyph &&
-                    command.uvRect.position == glyph.uv.position) {
-                    result = command.rect.size.x / glyph.size.x * font.pixelHeight();
+                    command.color.x > 0.97f && command.color.y > 0.94f) {
+                    result = command.fontSize;
                 }
             }
             CHECK(result > 0.0f);
@@ -1600,6 +1683,7 @@ int main()
 #endif
     }
     testFontAtlasAndText();
+    testShapedTextAndScalableIcons();
     testUiFrameArenaCommandBudget();
     testReusableControls();
     testSelectorPromptShowsInteractAndPreviewBindings();

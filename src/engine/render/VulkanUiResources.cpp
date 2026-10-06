@@ -6,6 +6,7 @@
 #include "engine/ui/FontAtlas.hpp"
 
 #include <cstring>
+#include <algorithm>
 #include <span>
 #include <stdexcept>
 
@@ -190,6 +191,7 @@ void VulkanUiResources::create(
     }
     device_ = device;
     allocator_ = &allocator;
+    font_ = &font;
     try {
         fontImage_ = uploadImage(
             allocator,
@@ -200,6 +202,15 @@ void VulkanUiResources::create(
             font.height(),
             VK_FORMAT_R8_UNORM,
             font.pixels());
+        std::vector<std::byte> emptyCurves;
+        if (font.curvePixels().empty()) {
+            emptyCurves.resize(std::size_t(FontAtlas::curveAtlasSize) * FontAtlas::curveAtlasSize * 8);
+        }
+        curveImage_ = uploadImage(allocator, device_, commandPool, graphicsQueue,
+            FontAtlas::curveAtlasSize, FontAtlas::curveAtlasSize, VK_FORMAT_R16G16B16A16_SINT,
+            emptyCurves.empty() ? std::span<const std::byte>(font.curvePixels()) : std::span<const std::byte>(emptyCurves));
+        fontRevision_ = font.updatesSince(0).revision;
+        curveRevision_ = font.updatesSince(0, true).revision;
         titleBackgroundImage_ = uploadImage(
             allocator,
             device_,
@@ -222,23 +233,85 @@ void VulkanUiResources::create(
         };
         vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler_),
             "vkCreateSampler UI images failed");
+        VkSamplerCreateInfo curveSamplerInfo = samplerInfo;
+        curveSamplerInfo.magFilter = VK_FILTER_NEAREST;
+        curveSamplerInfo.minFilter = VK_FILTER_NEAREST;
+        vkCheck(vkCreateSampler(device_, &curveSamplerInfo, nullptr, &curveSampler_),
+            "vkCreateSampler UI curves failed");
     } catch (...) {
         destroy();
         throw;
     }
 }
 
+void VulkanUiResources::recordFontUpdates(VkCommandBuffer commandBuffer, uint32_t frameIndex)
+{
+    const FontAtlasUpdate coverage = font_->updatesSince(fontRevision_);
+    const FontAtlasUpdate curves = font_->updatesSince(curveRevision_, true);
+    const VkDeviceSize coverageBytes = VkDeviceSize(coverage.width) * coverage.height;
+    const VkDeviceSize curveStart = (coverageBytes + 7) & ~VkDeviceSize(7);
+    const VkDeviceSize totalBytes = curveStart + VkDeviceSize(curves.width) * curves.height * 8;
+    if (!totalBytes) return;
+    Upload& upload = uploads_.at(frameIndex);
+    if (upload.capacity < totalBytes) {
+        allocator_->destroyBuffer(upload.buffer, upload.allocation);
+        upload = {};
+        const VkBufferCreateInfo info { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = totalBytes, .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
+        allocator_->createBuffer(info, VulkanMemoryUsage::HostSequentialWrite, upload.buffer,
+            upload.allocation, &upload.mapped, "UI glyph updates");
+        upload.capacity = totalBytes;
+    }
+    const auto copy = [&](const FontAtlasUpdate& rect, const std::vector<std::byte>& pixels,
+                          uint32_t side, uint32_t stride, VkDeviceSize offset, VkImage image) {
+        if (!rect.width || !rect.height) return;
+        auto* destination = static_cast<std::byte*>(upload.mapped) + offset;
+        for (uint32_t row = 0; row < rect.height; ++row) {
+            std::memcpy(destination + std::size_t(row) * rect.width * stride,
+                pixels.data() + (std::size_t(rect.y + row) * side + rect.x) * stride,
+                std::size_t(rect.width) * stride);
+        }
+        const auto range = vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+        const vulkanResources::ImageState sampled { VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        const vulkanResources::ImageState transferred { VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL };
+        vulkanResources::transitionImage(commandBuffer, image, range, sampled, transferred);
+        const VkBufferImageCopy region { .bufferOffset = offset,
+            .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+            .imageOffset = { static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y), 0 },
+            .imageExtent = { rect.width, rect.height, 1 } };
+        vkCmdCopyBufferToImage(commandBuffer, upload.buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        vulkanResources::transitionImage(commandBuffer, image, range, transferred, sampled);
+    };
+    copy(coverage, font_->pixels(), font_->width(), 1, 0, fontImage_.image);
+    copy(curves, font_->curvePixels(), FontAtlas::curveAtlasSize, 8, curveStart, curveImage_.image);
+    // HostSequentialWrite allocations require HOST_COHERENT memory.
+    fontRevision_ = coverage.revision;
+    curveRevision_ = curves.revision;
+}
+
 void VulkanUiResources::destroy()
 {
     if (device_) {
+        for (Upload& upload : uploads_) {
+            allocator_->destroyBuffer(upload.buffer, upload.allocation);
+            upload = {};
+        }
+        if (curveSampler_) vkDestroySampler(device_, curveSampler_, nullptr);
         if (sampler_) {
             vkDestroySampler(device_, sampler_, nullptr);
         }
         vulkanResources::destroyImage(
             *allocator_, device_, titleBackgroundImage_);
         vulkanResources::destroyImage(*allocator_, device_, fontImage_);
+        vulkanResources::destroyImage(*allocator_, device_, curveImage_);
     }
     sampler_ = VK_NULL_HANDLE;
+    curveSampler_ = VK_NULL_HANDLE;
+    curveImage_ = {};
+    font_ = nullptr;
+    fontRevision_ = 0; curveRevision_ = 0;
     titleBackgroundImage_ = {};
     fontImage_ = {};
     device_ = VK_NULL_HANDLE;

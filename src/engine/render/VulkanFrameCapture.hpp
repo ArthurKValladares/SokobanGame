@@ -18,6 +18,7 @@ class VulkanMemoryAllocator;
 // point of baking tile thumbnails this way rather than re-rendering models in
 // a bespoke pipeline that has to be kept in sync by hand.
 //
+// outputExtent optionally resamples the region on the GPU before readback.
 // Blocking and allocation-heavy: intended for offline capture (the thumbnail
 // bake), not per-frame use.
 [[nodiscard]] ImageData captureImageRegion(
@@ -29,6 +30,7 @@ class VulkanMemoryAllocator;
     VkFormat sourceFormat,
     VkImageLayout sourceLayout,
     VkOffset2D offset,
-    VkExtent2D extent);
+    VkExtent2D extent,
+    VkExtent2D outputExtent = {});
 
 } // namespace sokoban

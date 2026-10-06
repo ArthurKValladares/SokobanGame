@@ -18,6 +18,9 @@ layout(location = 0) out vec4 outColor;
 #include "DrawInstance.glsl"
 #include "NineSlice.glsl"
 
+#define HB_GPU_ATLAS_2D
+#include "HbGpu.glsl"
+
 #define draw drawInstances.instances[inDrawInstance]
 
 #include "DrawMode.glsl"
@@ -61,7 +64,9 @@ void main()
     int mode = int(draw.textureOptions.x + 0.5);
 
     if (mode == DRAW_MODE_FONT_GLYPH) {
-        color.a *= texture(uiFont, uv).r;
+        color.a *= draw.textureOptions.z > 0.5
+            ? _hb_gpu_slug(uv, 1.0 / max(fwidth(uv), vec2(0.00001)), uint(draw.textureOptions.y + 0.5))
+            : texture(uiFont, uv).r;
     } else if (mode == DRAW_MODE_TITLE_BACKGROUND) {
         color *= texture(titleBackground, uv);
     } else if (mode == DRAW_MODE_SCENE_IMAGE) {

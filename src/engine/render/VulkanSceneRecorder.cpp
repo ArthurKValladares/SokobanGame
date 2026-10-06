@@ -1,4 +1,5 @@
 #include "engine/render/VulkanSceneRecorder.hpp"
+#include "engine/render/VulkanUiResources.hpp"
 #include "engine/render/VulkanWaterCellCache.hpp"
 
 #include "engine/Profiler.hpp"
@@ -369,6 +370,7 @@ public:
         , descriptors_(resources.sceneDescriptors)
         , pipelines_(resources.pipelines)
         , models_(resources.modelResources)
+        , uiResources_(resources.uiResources)
 #if SOKOBAN_ENABLE_DEBUG_UI
         , debugLabelFont_(recorder.debugLabelFont_.get())
 #endif
@@ -582,6 +584,7 @@ public:
         vkCheck(
             vkBeginCommandBuffer(commandBuffer, &beginInfo),
             "vkBeginCommandBuffer failed");
+        uiResources_.recordFontUpdates(commandBuffer, configuration_.descriptorFrameIndex);
         vulkanDebug::beginLabel(
             device_, commandBuffer, "Sokoban frame", { 0.1f, 0.4f, 1.0f, 1.0f });
         gpuProfiler_.beginFrame(commandBuffer, configuration_.descriptorFrameIndex);
@@ -770,7 +773,7 @@ public:
                 commandBuffer,
                 swapchain_.displayColorImage(),
                 swapchain_.displayColorView(),
-                renderExtent,
+                swapchain_.displayExtent(),
                 uiDrawData,
                 true,
                 false,
@@ -1295,7 +1298,7 @@ private:
             return;
         }
 
-        const VkExtent2D extent = swapchain_.renderExtent();
+        const VkExtent2D extent = swapchain_.displayExtent();
         const VkRenderingAttachmentInfo attachment {
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .imageView = swapchain_.displayColorView(),
@@ -1331,6 +1334,7 @@ private:
             config::bloomIntensity,
             0.0f,
         };
+        pushConstants.passData[0] = { static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 0.0f };
 
         vkCmdBeginRendering(commandBuffer, &renderingInfo);
         ++stats_.renderPasses;
@@ -2350,12 +2354,17 @@ private:
             }
 #endif
             if (hasGameUi) {
+                uint32_t first = 0, count = 0;
                 for (const UiDrawCommand& command : uiDrawData.commands) {
-                    drawQuadRun(
-                        commandBuffer,
-                        drawUiRect(commandBuffer, command, uiDrawData.viewportSize, unlit),
-                        1);
+                    const uint32_t instance = drawUiRect(commandBuffer, command, uiDrawData.viewportSize, unlit);
+                    if (count && instance != first + count) {
+                        drawQuadRun(commandBuffer, first, count);
+                        count = 0;
+                    }
+                    if (!count) first = instance;
+                    ++count;
                 }
+                if (count) drawQuadRun(commandBuffer, first, count);
             }
         }
         if (renderImGui) {
@@ -3822,7 +3831,9 @@ private:
                 0.0f,
             },
             .textureOptions = {
-                materialMode, static_cast<float>(command.texture.value), 0.0f, 1.0f },
+                materialMode,
+                static_cast<float>(command.outlineGlyph ? command.glyphCurveOffset : command.texture.value),
+                command.outlineGlyph ? 1.0f : 0.0f, 1.0f },
         };
         return writeDrawInstance(constants);
     }
@@ -3839,6 +3850,7 @@ private:
     VulkanSceneDescriptors& descriptors_;
     VulkanPipelineFactory& pipelines_;
     VulkanModelResources& models_;
+    VulkanUiResources& uiResources_;
 #if SOKOBAN_ENABLE_DEBUG_UI
     const VulkanSceneRecorder::DebugLabelFont* debugLabelFont_ = nullptr;
 #endif

@@ -752,6 +752,7 @@ void VulkanRenderer::drawFrame(
                 *activeResources_.sceneDescriptors,
             .pipelines = *activeResources_.pipelines,
             .modelResources = modelResources_,
+            .uiResources = uiResources_,
         },
         {
             .descriptorFrameIndex = currentFrame_,
@@ -897,6 +898,19 @@ ImageData VulkanRenderer::captureRenderedFrame(std::optional<VkRect2D> region)
     const VkExtent2D full = activeResources_.swapchain->renderExtent();
     const VkRect2D rect =
         region.value_or(VkRect2D { .offset = { 0, 0 }, .extent = full });
+    if (rect.offset.x < 0 || rect.offset.y < 0 || !rect.extent.width || !rect.extent.height ||
+        uint64_t(rect.offset.x) + rect.extent.width > full.width ||
+        uint64_t(rect.offset.y) + rect.extent.height > full.height) {
+        throw std::invalid_argument("Frame capture region lies outside the scene");
+    }
+    const VkExtent2D display = activeResources_.swapchain->displayExtent();
+    const auto mapX = [&](uint32_t x) { return uint32_t(uint64_t(x) * display.width / full.width); };
+    const auto mapY = [&](uint32_t y) { return uint32_t(uint64_t(y) * display.height / full.height); };
+    const VkOffset2D offset { static_cast<int32_t>(mapX(static_cast<uint32_t>(rect.offset.x))),
+        static_cast<int32_t>(mapY(static_cast<uint32_t>(rect.offset.y))) };
+    const VkExtent2D captureExtent {
+        mapX(static_cast<uint32_t>(rect.offset.x) + rect.extent.width) - static_cast<uint32_t>(offset.x),
+        mapY(static_cast<uint32_t>(rect.offset.y) + rect.extent.height) - static_cast<uint32_t>(offset.y) };
 
     // Everything submitted must have landed before the copy reads the image.
     deviceContext_.waitIdle();
@@ -912,7 +926,8 @@ ImageData VulkanRenderer::captureRenderedFrame(std::optional<VkRect2D> region)
         // The workspace samples this image; the full-window path blits it.
         // Capture restores whichever layout the last frame actually left.
         activeResources_.swapchain->displayColorLayout(),
-        rect.offset,
+        offset,
+        captureExtent,
         rect.extent);
 }
 
@@ -1606,6 +1621,7 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
             .sampler = uiResources_.sampler(),
             .imageView = uiResources_.fontImageView(),
         },
+        .uiCurves = { .sampler = uiResources_.curveSampler(), .imageView = uiResources_.curveImageView() },
         .titleBackground = {
             .sampler = uiResources_.sampler(),
             .imageView = uiResources_.titleBackgroundImageView(),

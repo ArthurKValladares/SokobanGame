@@ -39,6 +39,7 @@ public:
         ImageBinding bloomExtract;
         ImageBinding bloom;
         ImageBinding uiFont;
+        ImageBinding uiCurves;
         ImageBinding titleBackground;
         std::vector<VulkanModelResources::TextureView> modelTextures;
         VulkanModelResources::SkinningBufferView skinning;

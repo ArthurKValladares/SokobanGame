@@ -26,6 +26,8 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
   GLTF models, skeletal animation, and real-font UI.
 - Main menu, save-slot selection, options, remappable SDL3 keyboard/gamepad
   input, and animated top-down camera pitch.
+- Shaped Unicode text with hinted small-size coverage, scalable analytic
+  outlines, and inline vector/texture icons. See [text rendering](docs/text-rendering.md).
 - Versioned profiles with atomic writes, backups, corrupt-save recovery,
   per-screen checkpoints, exact entity state, and undo-stack persistence.
 - Manifest-driven lazy asset loading with task-system CPU preparation and

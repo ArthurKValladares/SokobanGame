@@ -3,6 +3,7 @@
 #include "engine/ui/LecternConfig.hpp"
 #include "engine/ui/SelectorPrompt.hpp"
 #include "engine/ui/UiControls.hpp"
+#include "engine/ui/TextLayout.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -30,16 +31,21 @@ std::vector<std::string> LecternDialog::wrapText(
         if (!remaining.empty() && remaining.back() == '\r') remaining.remove_suffix(1);
         if (remaining.empty()) lines.emplace_back();
         while (!remaining.empty()) {
-            std::size_t fit = 0;
-            while (fit < remaining.size() &&
-                measure(remaining.substr(0, fit + 1)) <= width) ++fit;
-            fit = std::max(fit, std::size_t { 1 });
+            const auto boundaries = textBoundaries(remaining);
+            std::size_t fit = 0, opportunity = 0;
+            for (const TextBoundary boundary : boundaries) {
+                if (measure(remaining.substr(0, boundary.end)) > width) break;
+                fit = boundary.end;
+                if (boundary.lineBreak) opportunity = fit;
+            }
+            if (!fit) fit = boundaries.front().end;
             std::size_t count = fit;
             if (fit < remaining.size()) {
-                const std::size_t space = remaining.substr(0, fit + 1).find_last_of(" \t");
-                if (space != std::string_view::npos && space > 0) count = space;
+                if (opportunity) count = opportunity;
             }
-            lines.emplace_back(remaining.substr(0, count));
+            auto line = remaining.substr(0, count);
+            while (!line.empty() && (line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
+            lines.emplace_back(line);
             remaining.remove_prefix(count);
             while (!remaining.empty() && (remaining.front() == ' ' || remaining.front() == '\t')) {
                 remaining.remove_prefix(1);
@@ -65,12 +71,14 @@ void LecternDialog::rebuildLines(UiContext& ui, std::string_view text,
         whitespace.clear();
     };
     const auto appendRun = [&](Run run) {
-        used += run.width;
         if (!run.glyph && !line.empty() && !line.back().glyph &&
             line.back().error == run.error && line.back().scale == run.scale) {
+            used -= line.back().width;
             line.back().text += run.text;
-            line.back().width += run.width;
+            line.back().width = ui.measureText(line.back().text, fontSize * run.scale).x;
+            used += line.back().width;
         } else {
+            used += run.width;
             line.push_back(std::move(run));
         }
     };
@@ -92,22 +100,25 @@ void LecternDialog::rebuildLines(UiContext& ui, std::string_view text,
         }
         // Oversized text and error messages can split; key combinations stay atomic.
         std::size_t offset = 0;
+        const auto boundaries = textBoundaries(word);
         while (offset < word.size()) {
             std::size_t count = 0;
             float extent = 0.0f;
-            while (offset + count < word.size()) {
-                const float advance = ui.measureText(word.substr(offset + count, 1), fontSize).x;
-                if (used + extent + advance > width) break;
-                extent += advance;
-                ++count;
+            for (const TextBoundary boundary : boundaries) {
+                if (boundary.end <= offset) continue;
+                const float measured = ui.measureText(word.substr(offset, boundary.end - offset), fontSize).x;
+                if (used + measured > width) break;
+                extent = measured;
+                count = boundary.end - offset;
             }
             if (count == 0 && !line.empty()) {
                 finishLine();
                 continue;
             }
             if (count == 0) {
-                count = 1;
-                extent = ui.measureText(word.substr(offset, 1), fontSize).x;
+                const auto next = std::ranges::find_if(boundaries, [&](TextBoundary b) { return b.end > offset; });
+                count = next->end - offset;
+                extent = ui.measureText(word.substr(offset, count), fontSize).x;
             }
             appendRun({ .text = std::string(word.substr(offset, count)), .width = extent, .error = error });
             offset += count;
@@ -262,7 +273,9 @@ void LecternDialog::draw(UiContext& ui, Vec2 viewport, std::string_view text,
             const float runSize = fontSize * run.scale;
             const Vec2 position { x, y + (fontSize - runSize) * 0.5f };
             if (run.glyph) {
-                drawInputPromptGlyph(ui, { position, { run.width, runSize } }, *run.glyph);
+                const UiInlineRun inlineRun { .texture = run.glyph->texture,
+                    .uvRect = run.glyph->uvRect, .iconAspectRatio = run.glyph->aspectRatio };
+                ui.inlineText(position, std::span(&inlineRun, 1), { 1.0f, 1.0f, 1.0f, 1.0f }, runSize);
             } else {
                 ui.text(position, run.text, run.error ? Vec4 { 1.0f, 0.32f, 0.30f, 1.0f }
                     : Vec4 { 0.98f, 0.95f, 0.87f, 1.0f }, runSize);

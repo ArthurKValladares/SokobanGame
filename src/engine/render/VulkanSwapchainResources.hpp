@@ -7,6 +7,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <algorithm>
 #include <optional>
 #include <vector>
 
@@ -103,6 +104,10 @@ public:
     [[nodiscard]] VkFormat depthFormat() const { return depthFormat_; }
     [[nodiscard]] VkExtent2D extent() const { return extent_; }
     [[nodiscard]] VkExtent2D renderExtent() const { return renderExtent_; }
+    [[nodiscard]] VkExtent2D displayExtent() const
+    {
+        return { std::max(extent_.width, renderExtent_.width), std::max(extent_.height, renderExtent_.height) };
+    }
     [[nodiscard]] int renderScalePercent() const { return renderScalePercent_; }
     [[nodiscard]] VkPresentModeKHR presentMode() const { return presentMode_; }
     [[nodiscard]] uint32_t imageCount() const { return static_cast<uint32_t>(images_.size()); }

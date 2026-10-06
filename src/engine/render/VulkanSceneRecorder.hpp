@@ -15,6 +15,7 @@
 namespace sokoban {
 
 class VulkanModelResources;
+class VulkanUiResources;
 class VulkanGpuProfiler;
 class VulkanPipelineFactory;
 class VulkanSceneDescriptors;
@@ -53,6 +54,7 @@ public:
         VulkanSceneDescriptors& sceneDescriptors;
         VulkanPipelineFactory& pipelines;
         VulkanModelResources& modelResources;
+        VulkanUiResources& uiResources;
     };
 
     struct FrameConfiguration {
