@@ -49,12 +49,17 @@ void testEmptyIsANormalRun()
         "recorder scratch reuse is enabled by default");
     CHECK_MESSAGE(options.waterCellCacheEnabled,
         "water cell cache is enabled by default");
+    CHECK_MESSAGE(options.groundGeometryProcessingEnabled,
+        "ground geometry processing is enabled by default");
     CHECK_MESSAGE(options.textureResidencyBudgetKiB == 0,
         "texture residency uses its production default");
 }
 
 void testFlags()
 {
+    const auto groundControl = parse({ "--disable-ground-geometry" });
+    CHECK_MESSAGE(!groundControl.malformed && !groundControl.groundGeometryProcessingEnabled,
+        "ground geometry can be disabled for a matched comparison");
     const sokoban::CommandLineOptions bake = parse({ "--bake-tile-thumbnails" });
     CHECK_MESSAGE(!bake.malformed && bake.bakeTileThumbnails, "bake flag parses");
 

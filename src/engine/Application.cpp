@@ -294,6 +294,8 @@ Application::Application(ApplicationOptions options)
             options.evidenceFrustumCullingEnabled);
     }
     presentationSettings_.applyTileScales(assetManifest_);
+    presentationSettings_.geometry.processGroundGeometry =
+        options.groundGeometryProcessingEnabled;
     presentationSettings_.normalize();
     presentation_.setAnimationCatalog(&animationCatalog_);
     screenPreviewPresentation_.setAnimationCatalog(&animationCatalog_);

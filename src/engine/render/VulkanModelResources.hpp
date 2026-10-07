@@ -8,6 +8,7 @@
 #include "engine/render/FrameRetirementQueue.hpp"
 #include "engine/render/GpuMappedBuffer.hpp"
 #include "engine/render/GpuSkinning.hpp"
+#include "engine/render/GroundMeshGeometry.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/MaterialRangeAllocator.hpp"
 #include "engine/render/MaterialRenderPolicy.hpp"
@@ -48,6 +49,9 @@ public:
         VkBuffer indexBuffer = VK_NULL_HANDLE;
         VkDeviceSize indexOffset = 0;
         uint32_t indexCount = 0;
+        uint32_t unprocessedIndexCount = 0;
+        uint8_t groundSideMask = 0x0f;
+        bool groundGeometryVariant = false;
         uint32_t firstInstance = 0;
         bool skinned = false;
     };
@@ -347,7 +351,12 @@ private:
         bool compressed = false;
     };
 
-    using PreparedModel = std::variant<MeshData, SkinnedMeshData>;
+    struct PreparedStaticModel {
+        MeshData mesh;
+        GroundMeshVariants groundVariants {};
+    };
+
+    using PreparedModel = std::variant<PreparedStaticModel, SkinnedMeshData>;
 
     struct AdmissionDeferral {
         std::optional<std::chrono::steady_clock::time_point> since;
@@ -362,6 +371,7 @@ private:
         PreparedAssetPublication<PreparedModel> publication;
         GpuMesh gpu {};
         GpuSkinnedMesh skinnedGpu {};
+        GroundMeshVariants groundVariants {};
         uint64_t estimatedPreparedBytes = 0;
         uint64_t sourceBytes = 0;
         AdmissionDeferral admissionDeferral {};

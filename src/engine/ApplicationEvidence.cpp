@@ -221,6 +221,15 @@ void Application::finishEvidenceCapture()
            << " bits\n";
     report << "- Draw calls: " << evidenceStats_.drawCalls << "\n";
     report << "- Triangles: " << evidenceStats_.triangles << "\n";
+    report << "- Process ground geometry: "
+           << (presentationSettings_.geometry.processGroundGeometry ? "enabled" : "disabled")
+           << "\n";
+    report << "- Ground model triangles: "
+           << evidenceStats_.groundTrianglesAfterProcessing << " / "
+           << evidenceStats_.groundTrianglesBeforeProcessing
+           << " original submitted triangles\n";
+    report << "- Ground shadow triangles removed: "
+           << evidenceStats_.groundShadowTrianglesRemoved << "\n";
     report << "- Prepared particles: " << evidenceStats_.preparedParticles << "\n";
     report << "- Particle draw calls: " << evidenceStats_.particleDrawCalls << "\n";
     report << "- Special-surface coverage: " << evidenceStats_.preparedWaterFaces

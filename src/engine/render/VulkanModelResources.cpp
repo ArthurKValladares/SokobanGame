@@ -31,10 +31,35 @@ std::atomic_bool denyTextureResidencyAdmissionForTesting = false;
 template <typename PreparedModel>
 uint64_t modelPayloadBytes(const PreparedModel& model)
 {
-    if (const auto* mesh = std::get_if<MeshData>(&model)) {
-        return preparedPayloadBytes(*mesh);
+    return std::visit([](const auto& prepared) -> uint64_t {
+        if constexpr (std::is_same_v<std::decay_t<decltype(prepared)>,
+                SkinnedMeshData>) {
+            return preparedPayloadBytes(prepared);
+        } else {
+            return preparedPayloadBytes(prepared.mesh) +
+                sizeof(GroundMeshVariants);
+        }
+    }, model);
+}
+
+uint64_t staticModelPreparedEstimate(
+    const AssetManifest::Model& definition,
+    uint64_t sourcePreparedBytes)
+{
+    // Across all sixteen masks each side triangle appears eight times and
+    // the two bottom triangles sixteen times. Catalog metadata combines index
+    // and vertex bytes, so eight source payloads plus eight extra bottoms
+    // safely bound the result without opening source data on this thread.
+    const bool processGround = isProcessableGroundRockModel(definition);
+    const uint64_t multiplier = processGround ? 8 : 1;
+    const uint64_t overhead = sizeof(GroundMeshVariants) +
+        (processGround ? 48U * sizeof(uint32_t) : 0U);
+    if (sourcePreparedBytes >
+            (std::numeric_limits<uint64_t>::max() - overhead) /
+                multiplier) {
+        return std::numeric_limits<uint64_t>::max();
     }
-    return preparedPayloadBytes(std::get<SkinnedMeshData>(model));
+    return sourcePreparedBytes * multiplier + overhead;
 }
 
 uint64_t sourceFileBytes(const std::filesystem::path& path)
@@ -243,7 +268,8 @@ void VulkanModelResources::create(
             assetRoot_, manifest.models()[modelIndex]);
         RuntimeModelTextures mapped = remapRuntimeModelTextures(
             textureCatalog.model(modelIndex), logicalToDescriptor);
-        models_[modelIndex].estimatedPreparedBytes = mapped.preparedBytes;
+        models_[modelIndex].estimatedPreparedBytes = staticModelPreparedEstimate(
+            manifest.models()[modelIndex], mapped.preparedBytes);
         modelTextureDependencies_[modelIndex] =
             std::move(mapped.requiredTextures);
         modelMaterialBindings_[modelIndex] =
@@ -669,8 +695,9 @@ void VulkanModelResources::startModel(RenderModel model)
     const std::filesystem::path assetRoot = assetRoot_;
     const std::vector<AssetManifest::Model::Attachment> attachments =
         definition.attachments;
+    const bool processGround = isProcessableGroundRockModel(definition);
     slot.publication.startDecoding(taskSystem().enqueue(
-        [path, options, geometry, assetRoot, attachments]() -> PreparedModel {
+        [path, options, geometry, assetRoot, attachments, processGround]() -> PreparedModel {
             if (geometry == ModelGeometry::Skinned) {
                 SkinnedMeshData mesh = loadGltfSkinnedMesh(path, options);
                 for (const AssetManifest::Model::Attachment& attachment : attachments) {
@@ -686,7 +713,11 @@ void VulkanModelResources::startModel(RenderModel model)
                 }
                 return mesh;
             }
-            return loadGltfMesh(path, options);
+            PreparedStaticModel prepared { .mesh = loadGltfMesh(path, options) };
+            if (processGround) {
+                prepared.groundVariants = appendGroundMeshVariants(prepared.mesh);
+            }
+            return prepared;
         }));
 }
 
@@ -883,8 +914,10 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
     if (slot.publication.state() == LoadState::CpuReady) {
         try {
             PreparedModel& preparedModel = slot.publication.prepared();
-            if (std::holds_alternative<MeshData>(preparedModel)) {
-                const MeshData& mesh = std::get<MeshData>(preparedModel);
+            if (std::holds_alternative<PreparedStaticModel>(preparedModel)) {
+                const PreparedStaticModel& prepared =
+                    std::get<PreparedStaticModel>(preparedModel);
+                const MeshData& mesh = prepared.mesh;
                 const uint64_t bytes = meshBytes(mesh);
                 if (!makeModelResident(model, bytes)) {
                     recordAdmissionDeferral(
@@ -899,6 +932,10 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                 slot.materialCount =
                     static_cast<uint32_t>(mesh.materials.size());
                 slot.gpu = uploadMesh(mesh, slot.upload);
+                slot.groundVariants = prepared.groundVariants;
+                if (slot.groundVariants.processed) {
+                    slot.gpu.indexCount = slot.groundVariants.ranges[15].indexCount;
+                }
                 slot.gpuBytes = bytes;
                 modelResidency_.addResident(bytes);
             } else {
@@ -955,6 +992,7 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
             slot.materialBase = 0;
             slot.materialCount = 0;
             slot.materialPolicy = {};
+            slot.groundVariants = {};
             slot.skinnedSource.reset();
             resolveAdmissionDeferral(
                 slot.admissionDeferral, modelAdmissionDeferrals_);
@@ -1515,18 +1553,41 @@ VulkanModelResources::MeshView VulkanModelResources::meshForTile(
             .indexBuffer = geometryArena_.indexBuffer(slot.skinnedGpu.allocation),
             .indexOffset = geometryArena_.indexOffset(slot.skinnedGpu.allocation),
             .indexCount = slot.skinnedGpu.indexCount,
+            .unprocessedIndexCount = slot.skinnedGpu.indexCount,
             .firstInstance = frameIndex * maxSkinnedInstancesPerFrame +
                 instance->paletteIndex,
             .skinned = true,
         };
     }
     const GpuMesh& mesh = gpuMeshForModel(tile.model);
+    const GroundMeshVariants& variants = models_[tile.model.index()].groundVariants;
+    uint8_t mask = groundAllSides;
+    if (variants.processed && tile.groundSideMask != groundAllSides) {
+        std::array<bool, 4> validatedNeighbors {};
+        for (std::size_t side = 0; side < validatedNeighbors.size(); ++side) {
+            const RenderModel neighbor = tile.groundSideNeighbors[side];
+            if (!neighbor.isCube() && neighbor.index() < models_.size()) {
+                const ModelSlot& neighborSlot = models_[neighbor.index()];
+                validatedNeighbors[side] =
+                    neighborSlot.publication.state() == LoadState::Ready &&
+                    neighborSlot.groundVariants.processed;
+            }
+        }
+        mask = effectiveGroundSideMask(tile.groundSideMask, validatedNeighbors);
+    }
+    const GroundMeshIndexRange range = variants.processed
+        ? variants.ranges[mask]
+        : GroundMeshIndexRange { 0, mesh.indexCount };
     return {
         .vertexBuffer = geometryArena_.vertexBuffer(mesh.allocation),
         .vertexOffset = geometryArena_.vertexOffset(mesh.allocation),
         .indexBuffer = geometryArena_.indexBuffer(mesh.allocation),
-        .indexOffset = geometryArena_.indexOffset(mesh.allocation),
-        .indexCount = mesh.indexCount,
+        .indexOffset = geometryArena_.indexOffset(mesh.allocation) +
+            static_cast<VkDeviceSize>(range.firstIndex) * sizeof(uint32_t),
+        .indexCount = range.indexCount,
+        .unprocessedIndexCount = mesh.indexCount,
+        .groundSideMask = mask,
+        .groundGeometryVariant = variants.processed,
     };
 }
 
@@ -2121,7 +2182,8 @@ bool VulkanModelResources::syncManifestModels()
         RuntimeModelTextures mapped = remapRuntimeModelTextures(
             textureCatalog.model(static_cast<uint32_t>(modelIndex)),
             logicalToDescriptor);
-        models_[modelIndex].estimatedPreparedBytes = mapped.preparedBytes;
+        models_[modelIndex].estimatedPreparedBytes = staticModelPreparedEstimate(
+            manifest_->models()[modelIndex], mapped.preparedBytes);
         modelTextureDependencies_[modelIndex] =
             std::move(mapped.requiredTextures);
         modelMaterialBindings_[modelIndex] =

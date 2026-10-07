@@ -990,6 +990,13 @@ private:
                     .tile = tile,
                     .ready = ready,
                 });
+                if (ready && !skinned) {
+                    // Neighbour residency/validation can change the selected
+                    // indices while this tile itself remains ready. Include
+                    // that effective selection in the exact shadow-cache key.
+                    modelStates.back().tile.groundSideMask = models_.meshForTile(
+                        tile, configuration_.descriptorFrameIndex).groundSideMask;
+                }
             }
             if (pointShadowCacheEnabled_ && !hasSkinnedCaster &&
                 pointShadowFaceCache_.reusable(
@@ -2810,6 +2817,7 @@ private:
                     .material = std::bit_cast<uint32_t>(
                         draw.constants.textureOptions.x),
                     .mesh = draw.tile->model.value,
+                    .geometryVariant = draw.mesh.groundSideMask,
                     .fragmentState = draw.batchState,
                 },
                 .drawIndex = drawIndex,
@@ -3697,6 +3705,12 @@ private:
         ++stats_.drawCalls;
         stats_.vertices += mesh.indexCount * instanceCount;
         stats_.triangles += mesh.indexCount / 3 * instanceCount;
+        if (mesh.groundGeometryVariant) {
+            stats_.groundTrianglesBeforeProcessing +=
+                uint64_t { mesh.unprocessedIndexCount / 3 } * instanceCount;
+            stats_.groundTrianglesAfterProcessing +=
+                uint64_t { mesh.indexCount / 3 } * instanceCount;
+        }
     }
 
     void drawModelShadow(
@@ -3738,6 +3752,10 @@ private:
             &constants);
         vkCmdDrawIndexed(
             commandBuffer, mesh.indexCount, 1, 0, 0, mesh.firstInstance);
+        if (mesh.groundGeometryVariant) {
+            stats_.groundShadowTrianglesRemoved +=
+                (mesh.unprocessedIndexCount - mesh.indexCount) / 3;
+        }
     }
 
     void drawPointModelShadow(
@@ -3772,6 +3790,10 @@ private:
             &constants);
         vkCmdDrawIndexed(
             commandBuffer, mesh.indexCount, 1, 0, 0, mesh.firstInstance);
+        if (mesh.groundGeometryVariant) {
+            stats_.groundShadowTrianglesRemoved +=
+                (mesh.unprocessedIndexCount - mesh.indexCount) / 3;
+        }
     }
 
     [[nodiscard]] uint32_t drawUiRect(

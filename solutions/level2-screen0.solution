@@ -1,7 +1,7 @@
 # Sokoban 3D recorded solution. Replayed by the solution_replay test;
 # see README.md > Solutions. One input per step, then what it changed and its complete settled state.
 format 2
-level-digest 04231254fd7a7f41
+level-digest 2043493685ba5e2c
 recorded-for level2/screen0
 step right p1=6,5,2 m2=7,5,2+fallen
 state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[7,5,2],"dead":false,"fallen":true,"id":2,"quarterTurns":0,"sliding":null,"type":"Rock"}],"players":[{"cell":[6,5,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}

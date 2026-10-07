@@ -557,6 +557,7 @@ add_library(sokoban_core STATIC
     src/engine/Profiler.cpp
     src/engine/PerformanceFixtures.cpp
     src/engine/RenderFrameBuilder.cpp
+    src/engine/GroundGeometry.cpp
     src/engine/RenderFrameBuilderEditor.cpp
     src/engine/RenderFrameParts.cpp
     src/engine/render/RenderTypes.cpp
@@ -591,6 +592,7 @@ add_library(sokoban_core STATIC
     src/engine/render/CompressedTextureArtifact.cpp
     src/engine/render/CgltfImplementation.cpp
     src/engine/render/GltfMesh.cpp
+    src/engine/render/GroundMeshGeometry.cpp
     src/engine/render/FrameResourceTracker.cpp
     src/engine/render/FrameTimeTelemetry.cpp
     src/engine/render/GeometrySuballocator.cpp
@@ -1505,6 +1507,15 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME opaque_draw_sorter
         LIBS sokoban_core
         SOURCES tests/OpaqueDrawSorterTests.cpp
+    )
+    sokoban_add_test(NAME ground_geometry
+        LIBS sokoban_core
+        SOURCES tests/GroundGeometryTests.cpp
+    )
+    sokoban_add_test(NAME ground_mesh_geometry
+        LIBS sokoban_core
+        SOURCES tests/GroundMeshGeometryTests.cpp
+        ASSETS_ENV
     )
     sokoban_add_test(NAME tasks
         LIBS sokoban_core

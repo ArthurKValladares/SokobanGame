@@ -32,20 +32,24 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
-The October 6 local Windows rebuilds of `dev-all` and `dev-fast-all` completed
-with warnings-as-errors. `ctest --preset dev-fast` passed all 96 registered
-suites, including content imports/staging, solution replay, Vulkan smoke, text
-rendering and the package-validation fixture. `ctest --preset dev` passed
-95 of 96: `scene_preparation_allocations` reports allocations in warmed
+The October 6 ground geometry experiment built `dev-fast-all` and the Debug
+game with warnings-as-errors. `ctest --preset dev-fast` passed all 99 registered
+suites, including ground exposure/mesh validation, content imports/staging,
+solution replay, Vulkan smoke, text rendering and the package-validation
+fixture. A 240-frame Debug `--require-validation` capture with dense ground,
+water and point lights completed without VUID errors. Its missing Epic overlay
+manifest and unused shader-output warnings also occur in the prior baseline.
+
+The full Debug suite was not rebuilt or rerun for this experiment. Its prior
+baseline passed 95 of 96: `scene_preparation_allocations` reports allocations in warmed
 gameplay, editor, menu and profiler paths. Its scene-preparation and parallelFor
 checks remain allocation-free. The Debug failure is an open validation issue;
 the optimized configuration passes that suite. Reproduce it with
 `ctest --preset dev -R '^scene_preparation_allocations$' --output-on-failure`
-before claiming a passing Debug baseline. No source code changed in this
-documentation/output cleanup.
+before claiming a passing Debug baseline.
 
 Linux, sanitizer/static-analysis configurations, a fresh headless build, and
-Release/shipping packages were not rebuilt for this cleanup. A passing package
+Release/shipping packages were not rebuilt for this experiment. A passing package
 fixture is not acceptance of a newly produced shipping ZIP. Follow the full
 release checklist before publication.
 
@@ -440,6 +444,17 @@ and the required real-device checks are recorded.
 
 ## Renderer contracts
 
+- Ground geometry processing is a live ground-only experiment, with no baked
+  level format. Derive exposure from the final emitted tiles on the same layer;
+  hidden screens, scaled/transformed tiles and editor previews cannot occlude
+  eligible ground. Only the canonical GroundRock01–10 meshes may participate,
+  after validating all side patches and the bottom. A candidate hidden side
+  remains visible until its neighbor has a validated, resident mesh.
+  Index variants share original vertices/materials and retain the original
+  index prefix, painted top and bottom. Main draws, shadows, batching and the
+  point-shadow cache must use the resolved mask. Account for every appended
+  index in upload/residency budgets; compare draw calls and GPU time using
+  `--disable-ground-geometry` before expanding the experiment.
 - The scene target is floating-point linear light. Tonemapping writes linear
   values to the sRGB display attachment, which performs the only display encode.
   Player-facing UI is composed after tonemapping.

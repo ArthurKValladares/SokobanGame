@@ -63,6 +63,7 @@ int runApplication(const sokoban::CommandLineOptions& options)
             .recorderScratchReuseEnabled =
                 options.recorderScratchReuseEnabled,
             .waterCellCacheEnabled = options.waterCellCacheEnabled,
+            .groundGeometryProcessingEnabled = options.groundGeometryProcessingEnabled,
             .textureResidencyBudgetKiB = options.textureResidencyBudgetKiB,
             .continueGame = options.continueGame,
             .showTitle = options.showTitle,

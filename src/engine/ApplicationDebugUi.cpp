@@ -131,6 +131,12 @@ void drawTileGeometrySection(const ApplicationDebugUi::Context& context)
 {
     PresentationSettings& settings = context.settings;
 if (ImGui::CollapsingHeader("Tile Geometry")) {
+    ImGui::Checkbox("Process Ground Geometry", &settings.geometry.processGroundGeometry);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Remove shared sides between adjacent unit-scale ground tiles. "
+            "Turn off to compare the original geometry. Tops and picking stay intact.");
+    }
     float stepDurationSeconds =
         context.gameplaySession.stepDurationSeconds();
     ImGui::DragFloat(
@@ -1003,6 +1009,11 @@ if (ImGui::CollapsingHeader("Rendering Stats")) {
     }
     ImGui::Text("Draw calls %u", renderStats.drawCalls);
     ImGui::Text("Triangles %u", renderStats.triangles);
+    ImGui::Text("Ground triangles %llu / %llu original",
+        static_cast<unsigned long long>(renderStats.groundTrianglesAfterProcessing),
+        static_cast<unsigned long long>(renderStats.groundTrianglesBeforeProcessing));
+    ImGui::Text("Ground shadow triangles removed %llu",
+        static_cast<unsigned long long>(renderStats.groundShadowTrianglesRemoved));
     ImGui::Text("Vertices %u", renderStats.vertices);
     ImGui::Text("Pipelines bound %u", renderStats.pipelineBinds);
     ImGui::Text("Render passes %u", renderStats.renderPasses);

@@ -60,6 +60,26 @@ void testSkinnedItemsNeverShareAnInstanceBatch()
         "skinned work does not merge with static work");
 }
 
+void testGroundIndexVariantsKeepSeparateBatches()
+{
+    auto full = key(0, 0, 7);
+    full.geometryVariant = 15;
+    auto trimmed = full;
+    trimmed.geometryVariant = 3;
+    std::vector<sokoban::OpaqueDrawSortItem> items {
+        { .key = full, .drawIndex = 1, .instancable = true },
+        { .key = trimmed, .drawIndex = 2, .instancable = true },
+        { .key = full, .drawIndex = 3, .instancable = true },
+        { .key = trimmed, .drawIndex = 4, .instancable = true },
+    };
+    std::vector<sokoban::OpaqueDrawBatch> batches;
+    sokoban::sortOpaqueDraws(items, batches);
+    CHECK_MESSAGE(batches.size() == 2,
+        "different ground index selections never share an instance batch");
+    CHECK_MESSAGE(batches[0].itemCount == 2 && batches[1].itemCount == 2,
+        "matching ground variants still use instancing");
+}
+
 void testCallerOwnedBatchStorageIsReused()
 {
     std::vector<sokoban::OpaqueDrawSortItem> items {
@@ -94,6 +114,7 @@ int main()
 {
     testSortAndInstanceRepeatedOpaqueDraws();
     testSkinnedItemsNeverShareAnInstanceBatch();
+    testGroundIndexVariantsKeepSeparateBatches();
     testCallerOwnedBatchStorageIsReused();
     if (failures == 0) {
         std::cout << "OpaqueDrawSorterTests: passed\n";

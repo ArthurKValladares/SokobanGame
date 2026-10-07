@@ -74,6 +74,14 @@ struct RenderModel {
 
 inline constexpr RenderModel cubeModel {};
 
+// Visible rock-body sides in authored tile coordinates: north (-Y), east
+// (+X), south (+Y), west (-X). Ground tops and bottoms are always retained.
+inline constexpr uint8_t groundNorthSide = 1U << 0;
+inline constexpr uint8_t groundEastSide = 1U << 1;
+inline constexpr uint8_t groundSouthSide = 1U << 2;
+inline constexpr uint8_t groundWestSide = 1U << 3;
+inline constexpr uint8_t groundAllSides = 0x0f;
+
 // Runtime animation identity: 0 means "no animation"; any other value
 // addresses entry value-1 of the asset manifest's animation list.
 struct RenderAnimation {
@@ -452,6 +460,11 @@ struct RenderFrameData {
         // Modelled rock bodies omit the top: keep its paint/color quad even
         // when the editor temporarily shows assignment colors instead of splats.
         bool groundTop = false;
+        uint8_t groundSideMask = groundAllSides;
+        // Candidate occluders in north/east/south/west order. The resource
+        // layer restores a side until the neighbor's mesh is validated and
+        // resident, including after streaming failures or residency eviction.
+        std::array<RenderModel, 4> groundSideNeighbors {};
 
         friend constexpr bool operator==(const Tile&, const Tile&) = default;
     };
@@ -724,6 +737,11 @@ struct RenderStats {
     uint32_t drawCalls = 0;
     uint32_t vertices = 0;
     uint32_t triangles = 0;
+    // Submitted ground model geometry, excluding the separate painted tops.
+    // These counters include repeated scene/reflection submissions like triangles.
+    uint64_t groundTrianglesBeforeProcessing = 0;
+    uint64_t groundTrianglesAfterProcessing = 0;
+    uint64_t groundShadowTrianglesRemoved = 0;
     uint32_t pipelineBinds = 0;
     uint32_t renderPasses = 0;
     uint32_t imageBarriers = 0;

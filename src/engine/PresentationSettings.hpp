@@ -49,6 +49,9 @@ public:
     struct Geometry {
         float surfaceEntityHeight = 0.0f;
         float surfaceEntityWidthDepth = 0.0f;
+        // Derive exposed sides for the authored, unit-scale ground bodies.
+        // A live diagnostic toggle; the editable level and its tops stay intact.
+        bool processGroundGeometry = true;
     };
 
     PresentationSettings();

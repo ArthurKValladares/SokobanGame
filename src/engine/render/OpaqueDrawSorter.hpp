@@ -15,6 +15,8 @@ struct OpaqueDrawSortKey {
     uint32_t pipeline = 0;
     uint32_t material = 0;
     uint32_t mesh = 0;
+    // Shared vertex data can have different exposed-ground index ranges.
+    uint32_t geometryVariant = 0;
     std::array<uint32_t, 29> fragmentState {};
 
     auto operator<=>(const OpaqueDrawSortKey&) const = default;

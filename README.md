@@ -875,6 +875,23 @@ editor commands but does not own document or filesystem policy.
 
 ## Developer Iteration Tools
 
+Ground geometry processing removes shared rock sides between adjacent,
+opaque, unit-scale ground tiles. It preserves painted tops, bottoms, gameplay
+cells and editor picking. Validated source meshes share vertex data across
+exposure masks; main rendering and shadows use the same selected indices.
+Custom models, scaled ground and isolated editor previews retain their complete
+geometry. Exposure is derived from the current rendered level view, so edits
+and overworld screen visibility update it immediately; this experiment does
+not introduce a persisted level geometry format.
+
+Compare it live with **Tuning > Tile Geometry > Process Ground Geometry**, or
+launch a matched evidence capture with `--disable-ground-geometry`.
+Render statistics and evidence reports show ground triangles before/after
+processing and avoided shadow triangles. Index variants retain the vertex
+buffers, add shared index-buffer memory and can split instance batches;
+measure memory and draw calls alongside GPU time. Both comparison modes load
+the variants; disabling processing restores the complete draw indices.
+
 The `dev` and `dev-fast` builds add these to the workspace:
 
 - **Live profiler.** The Profiler tab charts total CPU, renderer CPU, and GPU

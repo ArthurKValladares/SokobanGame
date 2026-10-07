@@ -60,6 +60,7 @@ struct CommandLineOptions {
     bool pointShadowOptimizationsEnabled = true;
     bool recorderScratchReuseEnabled = true;
     bool waterCellCacheEnabled = true;
+    bool groundGeometryProcessingEnabled = true;
     // Diagnostic override for exercising residency pressure. Zero keeps the
     // normal renderer budget.
     std::uint64_t textureResidencyBudgetKiB = 0;
@@ -261,6 +262,8 @@ struct CommandLineOptions {
             options.recorderScratchReuseEnabled = false;
         } else if (argument == "--disable-water-cell-cache") {
             options.waterCellCacheEnabled = false;
+        } else if (argument == "--disable-ground-geometry") {
+            options.groundGeometryProcessingEnabled = false;
         } else if (argument == "--texture-residency-kib") {
             if (index + 1 >= arguments.size()) {
                 return reject("--texture-residency-kib needs a size");
@@ -381,6 +384,7 @@ inline constexpr std::string_view commandLineUsage =
     "[--evidence-disable-water-reflections] "
     "[--evidence-disable-ao] "
     "[--evidence-disable-frustum-culling] [--evidence-water] "
+    "[--disable-ground-geometry] "
     "[--evidence-point-light] "
     "[--evidence-point-light-stress]]";
 

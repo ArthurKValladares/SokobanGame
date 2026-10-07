@@ -349,6 +349,11 @@ void testPointShadowFaceCacheRequiresExactStableGeometry()
     models[0].tile.animationTimeSeconds = 0.25f;
     CHECK(!cache.reusable(0, light, faces, indices, models));
     models[0].tile.animationTimeSeconds = 0.0f;
+    models[0].tile.groundSideMask = 3;
+    CHECK_MESSAGE(!cache.reusable(0, light, faces, indices, models),
+        "a changed ground index selection invalidates cached point shadows");
+    models[0].tile.groundSideMask = groundAllSides;
+    CHECK(cache.reusable(0, light, faces, indices, models));
     models[0].ready = false;
     CHECK(!cache.reusable(0, light, faces, indices, models));
 

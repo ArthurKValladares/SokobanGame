@@ -3,6 +3,7 @@
 #include "engine/AnimationCatalog.hpp"
 #include "engine/ElevatorVisuals.hpp"
 #include "engine/GateEffect.hpp"
+#include "engine/GroundGeometry.hpp"
 #include "engine/MinecartGateVisuals.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/RenderFrameParts.hpp"
@@ -1903,6 +1904,9 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     appendGameplayEntities(frame, input);
     appendMirrorPreview(frame, input);
     applyScrollingMaterials(frame, input);
+    if (input.settings.geometry.processGroundGeometry) {
+        processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
+    }
     return frame;
 }
 
@@ -1915,6 +1919,9 @@ RenderFrameData RenderFrameBuilder::buildGameplay(
     appendGameplayEntities(frame, input);
     appendMirrorPreview(frame, input, &arena);
     applyScrollingMaterials(frame, input);
+    if (input.settings.geometry.processGroundGeometry) {
+        processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest, &arena);
+    }
     return frame;
 }
 
