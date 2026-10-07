@@ -7,12 +7,14 @@
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/GroundRimSurface.hpp"
+#include "engine/render/GroundChunkGeometry.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <optional>
 #include <ranges>
+#include <tuple>
 
 namespace sokoban {
 namespace {
@@ -947,9 +949,158 @@ PreparedRenderable IsoScenePreparer::reconcileRenderable(
     };
 }
 
+namespace {
+
+auto groundChunkCellKey(GridPosition3 cell)
+{
+    return std::tuple { cell.z, cell.y, cell.x };
+}
+
+bool validGroundChunkMaterial(
+    const RenderFrameData& frameData, const RenderFrameData::Tile& tile)
+{
+    if (tile.groundSplat) {
+        return tile.groundSplat->valid();
+    }
+    if (const auto* region = frameData.groundSplatRegionAt(tile.cell)) {
+        return region->textures.valid();
+    }
+    return frameData.groundSplat.valid();
+}
+
+void prepareGroundChunkDraws(PreparedRenderScene& scene,
+    const RenderFrameData& frameData, std::vector<std::size_t>& tileOrder)
+{
+    scene.groundChunks.reset();
+    scene.groundChunkDraws.clear();
+    scene.groundChunkTileMask.resize(frameData.tiles.size());
+    std::fill(scene.groundChunkTileMask.begin(), scene.groundChunkTileMask.end(), uint8_t { 0 });
+    if (!frameData.groundChunksRequested || !frameData.groundChunksReady ||
+        !frameData.groundChunks || frameData.viewMode != RenderViewMode::Isometric3D) {
+        return;
+    }
+    // Point-shadow caster lists still use the individual cap path. Keep the
+    // complete prototype on that path whenever a point shadow is active.
+    const std::size_t lightCount = std::min(frameData.lighting.pointLightCount,
+        RenderFrameData::pointLightCapacity);
+    for (std::size_t index = 0; index < lightCount; ++index) {
+        const auto& light = frameData.lighting.pointLights[index];
+        if (light.castsShadows && light.intensity > 0.0f &&
+            light.range > config::pointShadowNearPlane) {
+            return;
+        }
+    }
+
+    tileOrder.clear();
+    tileOrder.reserve(frameData.tiles.size());
+    for (std::size_t index = 0; index < frameData.tiles.size(); ++index) {
+        if (isGroundChunkTileEligible(frameData.tiles[index])) {
+            tileOrder.push_back(index);
+        }
+    }
+    std::ranges::sort(tileOrder, [&](std::size_t left, std::size_t right) {
+        return groundChunkCellKey(frameData.tiles[left].cell) <
+            groundChunkCellKey(frameData.tiles[right].cell);
+    });
+    scene.groundChunkDraws.reserve(frameData.groundChunks->chunks.size());
+    for (std::size_t chunkIndex = 0;
+         chunkIndex < frameData.groundChunks->chunks.size(); ++chunkIndex) {
+        const GroundChunk& chunk = frameData.groundChunks->chunks[chunkIndex];
+        PreparedGroundChunkDraw draw { .chunkIndex = chunkIndex };
+        if (chunk.tiles.empty() || chunk.tiles.size() > draw.tileIndices.size() ||
+            chunk.vertices.empty() || chunk.indices.empty() || chunk.indices.size() % 3 != 0) {
+            continue;
+        }
+        bool complete = true;
+        for (std::size_t slot = 0; slot < chunk.tiles.size(); ++slot) {
+            const auto& expected = chunk.tiles[slot];
+            const auto found = std::lower_bound(tileOrder.begin(), tileOrder.end(), expected.cell,
+                [&](std::size_t index, GridPosition3 cell) {
+                    return groundChunkCellKey(frameData.tiles[index].cell) < groundChunkCellKey(cell);
+                });
+            if (found == tileOrder.end()) {
+                complete = false;
+                break;
+            }
+            const std::size_t tileIndex = *found;
+            const auto& tile = frameData.tiles[tileIndex];
+            const bool duplicate = found + 1 != tileOrder.end() &&
+                frameData.tiles[*(found + 1)].cell == tile.cell;
+            if (tile.cell != expected.cell || duplicate ||
+                groundRimSurfaceKey(tile) != expected.key ||
+                scene.groundChunkTileMask[tileIndex] != 0 ||
+                !validGroundChunkMaterial(frameData, tile)) {
+                complete = false;
+                break;
+            }
+            // A malformed provider must not claim the same current tile twice.
+            for (std::size_t previous = 0; previous < slot; ++previous) {
+                if (draw.tileIndices[previous] == tileIndex) complete = false;
+            }
+            if (!complete) break;
+            draw.tileIndices[slot] = tileIndex;
+            if (tile.pickable) draw.pickableTiles |= uint64_t { 1 } << slot;
+        }
+        if (!complete) continue;
+        draw.tileCount = static_cast<uint32_t>(chunk.tiles.size());
+        for (std::size_t slot = 0; slot < draw.tileCount; ++slot) {
+            scene.groundChunkTileMask[draw.tileIndices[slot]] = 1;
+        }
+        scene.groundChunkDraws.push_back(draw);
+    }
+    if (!scene.groundChunkDraws.empty()) scene.groundChunks = frameData.groundChunks;
+}
+
+// Cap triangles are projected only while a pick is actually requested. The
+// prepared frame owns geometry and picking flags; no source-frame pointer or
+// projected rim-patch array needs to survive scene preparation.
+template <typename Visit>
+void visitGroundChunkPickFaces(const PreparedRenderScene& scene, Visit&& visit)
+{
+    if (!scene.groundChunks) return;
+    for (const auto& draw : scene.groundChunkDraws) {
+        if (draw.chunkIndex >= scene.groundChunks->chunks.size()) continue;
+        const GroundChunk& chunk = scene.groundChunks->chunks[draw.chunkIndex];
+        for (std::size_t first = 0; first + 2 < chunk.indices.size(); first += 3) {
+            const uint32_t a = chunk.indices[first];
+            const uint32_t b = chunk.indices[first + 1];
+            const uint32_t c = chunk.indices[first + 2];
+            if (a >= chunk.vertices.size() || b >= chunk.vertices.size() ||
+                c >= chunk.vertices.size()) continue;
+            const GroundChunkVertex& va = chunk.vertices[a];
+            const GroundChunkVertex& vb = chunk.vertices[b];
+            const GroundChunkVertex& vc = chunk.vertices[c];
+            if (va.tileSlot >= draw.tileCount || va.tileSlot >= chunk.tiles.size() ||
+                va.tileSlot != vb.tileSlot || va.tileSlot != vc.tileSlot) continue;
+            const std::array<Vec3, 4> world { va.position, vb.position, vc.position, vc.position };
+            if (!faceVisible(scene.isoLayout, world, va.normal)) continue;
+            const GridPosition3 cell = chunk.tiles[va.tileSlot].cell;
+            PreparedIsoFace face {
+                .worldVertices = world,
+                .normal = va.normal,
+                .cell = cell,
+                .pickBoundsCell = { cell.x, cell.y },
+                .pickable = (draw.pickableTiles & (uint64_t { 1 } << va.tileSlot)) != 0,
+                .groundRimSurface = true,
+                .material = PreparedSurfaceMaterial::GroundSplat,
+            };
+            for (std::size_t corner = 0; corner < world.size(); ++corner) {
+                face.vertices[corner] = IsoScenePreparer::projectIsoPoint(
+                    scene.isoLayout, scene.renderExtent, world[corner]);
+                face.clipW[corner] = std::max(dot(world[corner] - scene.isoLayout.cameraPosition,
+                    scene.isoLayout.cameraForward), 0.001f);
+            }
+            visit(face);
+        }
+    }
+}
+
+} // namespace
+
 static void prepareAuxiliaryGeometry(
     const RenderFrameData& frameData,
     const GroundRimSurfaceCache& groundRimSurfaces,
+    std::span<const uint8_t> groundChunkTileMask,
     const IsoRenderLayout& isoLayout,
     std::vector<PreparedParticle>& particles,
     std::vector<std::array<Vec3, 4>>& shadowFaces,
@@ -1093,7 +1244,8 @@ static void prepareAuxiliaryGeometry(
             shadowModelIndices.push_back(tileIndex);
             // Rock assets contain the sides; the painted top belongs to the
             // tile renderer and must also close the body's shadow volume.
-            if (tile.groundTop || tile.effect == RenderSurfaceEffect::GroundSplat) {
+            if ((tile.groundTop || tile.effect == RenderSurfaceEffect::GroundSplat) &&
+                groundChunkTileMask[tileIndex] == 0) {
                 const auto* rim = groundRimSurfaces.surfaceForTileIndex(tileIndex);
                 if (rim) {
                     for (std::size_t i = 0; i < rim->count; ++i) {
@@ -1329,11 +1481,12 @@ void appendTileFaces(
         const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
         const bool mainSceneVisible =
             scene.renderables[tileIndex].mainSceneVisible;
+        const bool chunked = scene.groundChunkTileMask[tileIndex] != 0;
         const float width = tile.size.x;
         const float depth = tile.size.y;
         const float height = std::max(tile.height, 0.0f);
         const bool drawCube = tile.model.isCube() && !tile.pickOnly;
-        const bool drawTop = !tile.pickOnly &&
+        const bool drawTop = !chunked && !tile.pickOnly &&
             (drawCube || tile.groundTop || tile.effect == RenderSurfaceEffect::GroundSplat);
         // Authored model transforms describe how mesh-local coordinates
         // reach the world, but their unit cube is not necessarily the
@@ -1476,12 +1629,13 @@ void appendTileFaces(
                 .gridSize = { width, depth },
                 // Keep the logical box for tile selection, but paint picking
                 // must hit the actual sloped surface rather than this plane.
-                .material = rim.count == 0 ? topMaterial : PreparedSurfaceMaterial::Standard,
+                .material = rim.count == 0 && !chunked
+                    ? topMaterial : PreparedSurfaceMaterial::Standard,
                 .shorelineMask = 0,
                 .groundSplat = tile.groundSplat,
                 .groundSplatOrigin = tile.groundSplatOrigin,
             });
-            for (std::size_t i = 0; i < rim.count; ++i) {
+            for (std::size_t i = 0; !chunked && i < rim.count; ++i) {
                 const auto& patch = rim.patches[i];
                 appendIsoFace(scene, {
                     .vertices = patch.vertices,
@@ -1769,6 +1923,7 @@ void IsoScenePreparer::prepare(
     scene.importedGroundRimSurfaces = static_cast<uint32_t>(
         groundRimSurfaceCache_.importedSurfaceCount());
     scene.groundRimArtifactImports = groundRimSurfaceCache_.bakedImportCount();
+    prepareGroundChunkDraws(scene, frameData, groundChunkTileOrder_);
 
     const auto prepareAuxiliary = [
                                       &frameData,
@@ -1777,6 +1932,7 @@ void IsoScenePreparer::prepare(
         prepareAuxiliaryGeometry(
             frameData,
             groundRimSurfaceCache_,
+            scene.groundChunkTileMask,
             scene.isoLayout,
             scene.particles,
             scene.shadowFaces,
@@ -1855,6 +2011,19 @@ void IsoScenePreparer::prepare(
             true);
     }
 
+    for (auto& draw : scene.groundChunkDraws) {
+        // Unlike the provisional rock-model bounds, these bounds enclose the
+        // actual immutable cap vertices. Keep every participating chunk for
+        // shadows and picking; only its main-scene draw is culled.
+        const Aabb bounds = scene.groundChunks->chunks[draw.chunkIndex].bounds;
+        const bool finiteBounds =
+            std::isfinite(bounds.minimum.x) && std::isfinite(bounds.minimum.y) &&
+            std::isfinite(bounds.minimum.z) && std::isfinite(bounds.maximum.x) &&
+            std::isfinite(bounds.maximum.y) && std::isfinite(bounds.maximum.z);
+        draw.mainSceneVisible = !frustumCulling_ || !bounds.valid() ||
+            !finiteBounds || intersects(mainSceneFrustum, bounds);
+    }
+
     if (frameData.viewMode == RenderViewMode::Isometric3D) {
         appendTileFaces(scene, frameData, groundRimSurfaceCache_);
         appendWaterFaces(scene, frameData, mainSceneFrustum);
@@ -1888,8 +2057,8 @@ std::optional<GridPosition3> IsoScenePreparer::pickGridCell(
 
     std::optional<GridPosition3> picked;
     float pickedDepth = std::numeric_limits<float>::max();
-    for (std::size_t faceIndex : scene.pickFaceIndices) {
-        const PreparedIsoFace& face = scene.isoFaces[faceIndex];
+    const auto considerFace = [&](const PreparedIsoFace& face) {
+        if (!face.pickable) return;
         std::array<Vec3, 4> pixelQuad {};
         std::array<Vec2, 4> pixelQuad2D {};
         for (std::size_t i = 0; i < face.vertices.size(); ++i) {
@@ -1911,7 +2080,7 @@ std::optional<GridPosition3> IsoScenePreparer::pickGridCell(
                     pixelQuad2D[0],
                     pixelQuad2D[2],
                     pixelQuad2D[3]))) {
-            continue;
+            return;
         }
         const std::optional<float> depth =
             pointDepthInQuad(pixelPosition, pixelQuad);
@@ -1923,11 +2092,15 @@ std::optional<GridPosition3> IsoScenePreparer::pickGridCell(
                 static_cast<int>(levelWidth) + pickBorder ||
             face.pickBoundsCell.y >=
                 static_cast<int>(levelHeight) + pickBorder) {
-            continue;
+            return;
         }
         picked = face.cell;
         pickedDepth = *depth;
+    };
+    for (std::size_t faceIndex : scene.pickFaceIndices) {
+        considerFace(scene.isoFaces[faceIndex]);
     }
+    visitGroundChunkPickFaces(scene, considerFace);
     return picked;
 }
 
@@ -1947,12 +2120,12 @@ std::optional<Vec3> IsoScenePreparer::pickGroundPoint(
     // layer other than the active one is drawn as a preview, and painting its
     // texture has nothing to do with which tile layer is being edited - the
     // ground you can see is the ground you can paint.
-    for (const PreparedIsoFace& face : scene.isoFaces) {
+    const auto considerFace = [&](const PreparedIsoFace& face) {
         // Only splattable tops are paintable. Block sides, non-ground tiles
         // and the editor's invisible pick planes all carry a different
         // material, and a brush stroke on them has nowhere to go.
         if (face.material != PreparedSurfaceMaterial::GroundSplat) {
-            continue;
+            return;
         }
 
         std::array<Vec3, 4> pixelQuad {};
@@ -1970,17 +2143,21 @@ std::optional<Vec3> IsoScenePreparer::pickGroundPoint(
         const std::optional<float> depth =
             pointDepthInQuad(pixelPosition, pixelQuad);
         if (!depth || *depth >= pickedDepth) {
-            continue;
+            return;
         }
         const std::optional<Vec3> worldPoint = worldPointInQuad(
             pixelPosition, pixelQuad2D, face.clipW, face.worldVertices);
         if (!worldPoint) {
-            continue;
+            return;
         }
 
         picked = worldPoint;
         pickedDepth = *depth;
+    };
+    for (const PreparedIsoFace& face : scene.isoFaces) {
+        considerFace(face);
     }
+    visitGroundChunkPickFaces(scene, considerFace);
     return picked;
 }
 

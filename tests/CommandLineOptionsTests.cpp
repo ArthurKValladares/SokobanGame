@@ -51,6 +51,12 @@ void testEmptyIsANormalRun()
         "water cell cache is enabled by default");
     CHECK_MESSAGE(options.groundGeometryProcessingEnabled,
         "ground geometry processing is enabled by default");
+    CHECK_MESSAGE(options.groundRimEnabled,
+        "smooth ground rims are enabled by default");
+    CHECK_MESSAGE(!options.groundChunksEnabled,
+        "ground chunk rendering is opt-in");
+    CHECK_MESSAGE(options.groundChunkMeshoptimizerEnabled,
+        "ground chunk mesh optimization is enabled by default");
     CHECK_MESSAGE(options.textureResidencyBudgetKiB == 0,
         "texture residency uses its production default");
 }
@@ -309,7 +315,7 @@ void testLargeCountFits()
 
 void testPerformanceScenarios()
 {
-    CHECK(!parse({}).groundRimEnabled);
+    CHECK(parse({}).groundRimEnabled);
     CHECK(!parse({ "--ground-rim" }).malformed);
     CHECK(parse({ "--ground-rim" }).groundRimEnabled);
     CHECK(parse({ "--evidence-ground-rim-fixture" }).malformed);
@@ -348,6 +354,59 @@ void testPerformanceScenarios()
     }
 }
 
+void testGroundChunkControls()
+{
+    TEST("ground chunk controls");
+    const auto chunks = parse({ "--ground-chunks" });
+    CHECK(!chunks.malformed && chunks.groundChunksEnabled);
+    CHECK(chunks.groundChunkMeshoptimizerEnabled);
+    CHECK(chunks.groundGeometryProcessingEnabled && chunks.groundRimEnabled);
+
+    const auto unoptimized = parse({ "--disable-ground-meshoptimizer" });
+    CHECK(!unoptimized.malformed && !unoptimized.groundChunkMeshoptimizerEnabled);
+    CHECK(!unoptimized.groundChunksEnabled);
+
+    for (const auto arguments : {
+             std::array<std::string_view, 2>{ "--ground-chunks",
+                 "--disable-ground-meshoptimizer" },
+             std::array<std::string_view, 2>{ "--disable-ground-meshoptimizer",
+                 "--ground-chunks" } }) {
+        const auto controls = parse({ arguments[0], arguments[1] });
+        CHECK(!controls.malformed && controls.groundChunksEnabled);
+        CHECK(!controls.groundChunkMeshoptimizerEnabled);
+    }
+
+    const auto evidence = parse({ "--smoke-frames", "240", "--evidence-output", "x",
+        "--ground-chunks", "--disable-ground-meshoptimizer", "--ground-rim",
+        "--evidence-ground-rim-fixture", "--disable-ground-geometry" });
+    CHECK(!evidence.malformed && evidence.groundChunksEnabled);
+    CHECK(!evidence.groundChunkMeshoptimizerEnabled);
+    CHECK(evidence.groundRimEnabled && evidence.evidenceGroundRimFixture);
+    CHECK(!evidence.groundGeometryProcessingEnabled);
+    CHECK(sokoban::commandLineUsage.find("[--ground-chunks]") != std::string_view::npos);
+    CHECK(sokoban::commandLineUsage.find("[--disable-ground-meshoptimizer]")
+        != std::string_view::npos);
+}
+
+void testGroundRimControls()
+{
+    TEST("ground rim controls");
+    const auto flat = parse({ "--disable-ground-rim" });
+    CHECK(!flat.malformed && !flat.groundRimEnabled);
+    CHECK(flat.groundGeometryProcessingEnabled);
+    CHECK(!flat.groundChunksEnabled && flat.groundChunkMeshoptimizerEnabled);
+
+    const auto enabledLast = parse({ "--disable-ground-rim", "--ground-rim" });
+    CHECK(!enabledLast.malformed && enabledLast.groundRimEnabled);
+    const auto disabledLast = parse({ "--ground-rim", "--disable-ground-rim" });
+    CHECK(!disabledLast.malformed && !disabledLast.groundRimEnabled);
+
+    const auto flatChunks = parse({ "--ground-chunks", "--disable-ground-rim" });
+    CHECK(!flatChunks.malformed && flatChunks.groundChunksEnabled);
+    CHECK(!flatChunks.groundRimEnabled && flatChunks.groundChunkMeshoptimizerEnabled);
+    CHECK(sokoban::commandLineUsage.find("[--disable-ground-rim]") != std::string_view::npos);
+}
+
 } // namespace
 
 int main()
@@ -358,6 +417,8 @@ int main()
     testLargeCountFits();
     testLaunchShortcuts();
     testPerformanceScenarios();
+    testGroundChunkControls();
+    testGroundRimControls();
     if (failures != 0) {
         std::cerr << "CommandLineOptionsTests: " << failures
                   << " CHECK_MESSAGE(s) failed\n";

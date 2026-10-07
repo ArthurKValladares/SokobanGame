@@ -223,6 +223,9 @@ uint64_t ordinarySceneDrawInstanceReserve(
         saturatedAdd(scene.opaqueFaceIndices.size(), scene.translucentFaceIndices.size()),
         saturatedAdd(scene.opaqueModelIndices.size(), scene.translucentModelIndices.size()));
     uint64_t reserve = saturatedAdd(scene.shadowFaces.size(), saturatedMultiply(sceneDraws, 2));
+    for (const auto& chunk : scene.groundChunkDraws) {
+        reserve = saturatedAdd(reserve, saturatedMultiply(chunk.tileCount, 2));
+    }
     reserve = saturatedAdd(reserve, scene.particles.size());
     reserve = saturatedAdd(reserve, frame.waterSurfaces.size());
 #if SOKOBAN_ENABLE_DEBUG_UI

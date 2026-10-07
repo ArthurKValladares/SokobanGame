@@ -1,6 +1,7 @@
 #include "ScopedTestDirectory.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/render/PngWriter.hpp"
+#include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanRenderer.hpp"
 #include "engine/ui/FontAtlas.hpp"
@@ -150,6 +151,141 @@ ImageData verifyPreview(SDL_Window* window, const std::filesystem::path& root,
     return capture(red, blue, true, false);
 }
 
+void verifyRimHeavyGroundChunkPublication(SDL_Window* window,
+    const std::filesystem::path& root, FontAtlas& font,
+    const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    renderer.setFrustumCullingEnabled(false);
+    constexpr uint32_t rowWidth = 30;
+    constexpr uint32_t tileCount = rowWidth * rowWidth;
+    constexpr uint64_t uploadLimit = 8ULL * 1024 * 1024;
+    const RenderModel ground = manifest.modelIdByName("GroundRock01");
+    const auto splat = groundSplatTexturesForScreen(
+        [&](std::string_view name) { return manifest.findTextureIdByName(name); },
+        std::nullopt);
+    verify(splat.valid(), "Ground chunk fixture is missing its splat textures");
+
+    const auto makeFrame = [&](bool chunks, bool optimize) {
+        RenderFrameData frame;
+        frame.viewMode = RenderViewMode::Isometric3D;
+        frame.levelWidth = rowWidth * 2;
+        frame.levelHeight = rowWidth * 2;
+        frame.levelDepth = 1;
+        // Pitch is measured from vertical. The long top-view lens keeps all
+        // 38 facets of every isolated rim facing the camera. Their individual
+        // cap draws exceed the ordinary reserve, but their chunks fit 8 MiB.
+        frame.cameraPitchDegrees = 0.0f;
+        frame.cameraDistanceMultiplier = 4.0f;
+        frame.lighting.ambient = { .color = { 1, 1, 1 }, .intensity = 1 };
+        frame.groundSplat = splat;
+        frame.groundChunksRequested = chunks;
+        frame.groundChunkMeshoptimizer = optimize;
+        frame.requestedGroundRimWidth = 0.12f;
+        frame.requestedGroundRimDepth = 0.10f;
+        for (uint32_t index = 0; index < tileCount; ++index) {
+            const int x = static_cast<int>((index % rowWidth) * 2);
+            const int y = static_cast<int>((index / rowWidth) * 2);
+            RenderFrameData::Tile tile {
+                .cell = { x, y, 0 },
+                .position = { static_cast<float>(x), static_cast<float>(y) },
+                .color = { 1, 1, 1, 1 },
+                .height = 1.0f,
+                .showGrid = false,
+                .model = ground,
+                .effect = RenderSurfaceEffect::GroundSplat,
+                .groundTop = true,
+            };
+            tile.groundGeometryEligible = true;
+            tile.groundSideMask = groundAllSides;
+            tile.groundRimSides = groundAllSides;
+            tile.groundRimWidth = frame.requestedGroundRimWidth;
+            tile.groundRimDepth = frame.requestedGroundRimDepth;
+            frame.tiles.push_back(tile);
+        }
+        return frame;
+    };
+    renderer.waitForAssets(renderAssetRequirementsForFrame(makeFrame(true, true)));
+    UiDrawData ui;
+    ui.viewportSize = { 640, 360 };
+    const auto draw = [&](bool chunks, bool optimize) {
+        renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+        ImGui::Render();
+#endif
+        renderer.drawFrame(renderer.prepareFrame(makeFrame(chunks, optimize)), ui);
+        verify(!renderer.hasFatalFailure(), "Ground chunk fixture failed to render");
+        verify(renderer.assetLoadingStats().droppedDrawInstances == 0,
+            "Rim-heavy chunk publication dropped draw instances");
+        const RenderStats stats = renderer.renderStats();
+        verify(stats.unavailableModels == 0 && stats.groundTrianglesBeforeProcessing > 0,
+            "Ground chunk fixture did not draw its preloaded rock bodies");
+        // Polling the real upload fence on the next frame stays deterministic
+        // even when the test machine submits the small render very quickly.
+        renderer.waitIdle();
+        return stats;
+    };
+    const auto verifyAdopted = [&](const RenderStats& stats, uint64_t uploads,
+                                  uint64_t rebuilds, bool optimize) {
+        verify(stats.groundChunkTiles == tileCount && stats.groundChunkDraws > 0,
+            "Rim-heavy view did not adopt every uploaded ground tile");
+        verify(!stats.groundRimBudgetFallback && stats.resolvedGroundRimTiles == tileCount,
+            "Uploaded ground chunks did not restore the requested body/cap rims");
+        verify(stats.groundChunkUploads == uploads && stats.groundChunkCacheRebuilds == rebuilds,
+            "Stable ground chunks repeatedly rebuilt or uploaded their geometry");
+        verify(stats.groundChunkGeometryBytes > 0 && stats.groundChunkGeometryBytes <= uploadLimit &&
+                stats.groundChunkOriginalBytes <= uploadLimit,
+            "Rim-heavy ground fixture exceeded the chunk upload limit");
+        verify(stats.groundChunksRequested && stats.groundChunkMeshoptimizer == optimize,
+            "Ground chunk request or optimizer mode was lost during publication");
+    };
+    const auto awaitAdoption = [&](RenderStats stats, uint64_t uploads,
+                                  uint64_t rebuilds, bool optimize) {
+        uint32_t frames = 1;
+        while (stats.groundChunkTiles != tileCount && frames < 8) {
+            stats = draw(true, optimize);
+            ++frames;
+        }
+        verifyAdopted(stats, uploads, rebuilds, optimize);
+        return stats;
+    };
+
+    const RenderStats first = draw(true, true);
+    verify(first.groundRimBudgetFallback && first.resolvedGroundRimTiles == 0 &&
+            first.groundChunkDraws == 0,
+        "Rim-heavy first frame did not exercise the unready flat fallback");
+    verify(first.groundChunkUploads == 1 && first.groundChunkCacheRebuilds == 1,
+        "Flat fallback replaced or failed to upload the requested rim generation");
+    const RenderStats adopted = awaitAdoption(first, 1, 1, true);
+    for (int repeat = 0; repeat < 3; ++repeat) {
+        const RenderStats stable = draw(true, true);
+        verifyAdopted(stable, 1, 1, true);
+        verify(stable.groundChunkCacheHits > adopted.groundChunkCacheHits,
+            "Warm rim-heavy frames did not reuse their compiled geometry");
+    }
+
+    const RenderStats disabled = draw(false, true);
+    verify(disabled.groundChunkDraws == 0 && disabled.groundRimBudgetFallback &&
+            disabled.resolvedGroundRimTiles == 0,
+        "Disabling chunks did not retain the coherent flat draw-budget fallback");
+    verify(disabled.groundChunkUploads == 1 && disabled.groundChunkCacheRebuilds == 1,
+        "Disabling chunks rebuilt or replaced the retained geometry");
+    verifyAdopted(draw(true, true), 1, 1, true);
+
+    const RenderStats changed = draw(true, false);
+    verify(changed.groundRimBudgetFallback && changed.resolvedGroundRimTiles == 0 &&
+            changed.groundChunkDraws == 0 && changed.groundChunkUploads == 2 &&
+            changed.groundChunkCacheRebuilds == 2,
+        "Optimizer replacement did not upload one retained generation through flat fallback");
+    (void)awaitAdoption(changed, 2, 2, false);
+    verifyAdopted(draw(true, false), 2, 2, false);
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a rim-heavy ground chunk publication error");
+    std::cout << "Rim-heavy ground chunks: " << tileCount
+              << " tiles adopted without publication starvation\n";
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -169,6 +305,8 @@ int main(int argc, char** argv)
             temp.path() / "cache.bin", AntiAliasingMode::None, 100);
         (void)verifyPreview(window.get(), root, font, manifest,
             temp.path() / "cache.bin", AntiAliasingMode::Msaa4x, 50);
+        verifyRimHeavyGroundChunkPublication(window.get(), root, font, manifest,
+            temp.path() / "cache.bin");
         if (argc > 1) {
             std::vector<uint8_t> pixels(image.rgba.size());
             std::transform(image.rgba.begin(), image.rgba.end(), pixels.begin(),

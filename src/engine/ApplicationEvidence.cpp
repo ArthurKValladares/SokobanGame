@@ -300,6 +300,23 @@ void Application::finishEvidenceCapture()
            << evidenceStats_.bakedGroundRimSurfaces << " cached from build output; "
            << evidenceStats_.importedGroundRimSurfaces << " imported this preparation; "
            << evidenceStats_.groundRimArtifactImports << " imports total\n";
+    report << "- Ground GPU chunks: "
+           << (evidenceStats_.groundChunksRequested ? "requested" : "disabled")
+           << "; meshoptimizer " << (evidenceStats_.groundChunkMeshoptimizer ? "enabled" : "disabled")
+           << "; " << evidenceStats_.groundChunkDraws << " main draws, "
+           << evidenceStats_.groundChunkTiles << " visible tiles\n";
+    report << "- Ground chunk payload: " << evidenceStats_.groundChunkOriginalBytes
+           << " original bytes -> " << evidenceStats_.groundChunkGeometryBytes
+           << " bytes; " << evidenceStats_.groundChunkInputVertices << " -> "
+           << evidenceStats_.groundChunkOutputVertices << " vertices\n";
+    report << "- Ground chunk cache model (16-entry ACMR): "
+           << evidenceStats_.groundChunkInputAcmr << " -> "
+           << evidenceStats_.groundChunkOutputAcmr << "\n";
+    report << "- Ground chunk residency: " << evidenceStats_.groundChunkResidentBytes
+           << " device bytes, " << evidenceStats_.groundChunkStagingBytes
+           << " staging bytes; " << evidenceStats_.groundChunkUploads << " uploads; "
+           << evidenceStats_.groundChunkCacheHits << " cache hits, "
+           << evidenceStats_.groundChunkCacheRebuilds << " rebuilds\n";
     report << "- Recorder scratch reuse: "
            << (evidenceStats_.recorderScratchReuseEnabled
                    ? "enabled"

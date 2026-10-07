@@ -139,6 +139,10 @@ if (ImGui::CollapsingHeader("Tile Geometry")) {
     }
     ImGui::BeginDisabled(!settings.geometry.processGroundGeometry);
     ImGui::Checkbox("Smooth Ground Rim (prototype)", &settings.geometry.smoothGroundRim);
+    ImGui::Checkbox("Ground Chunks (experiment)", &settings.geometry.groundChunks);
+    if (settings.geometry.groundChunks) {
+        ImGui::Checkbox("Meshoptimizer", &settings.geometry.groundChunkMeshoptimizer);
+    }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Shape exposed ground edges into uneven rock facets. Width and depth are nominal. "
             "Waits for validated ground meshes and falls back to flat tops if the draw budget is full.");
@@ -1009,6 +1013,20 @@ if (ImGui::CollapsingHeader("Rendering Stats")) {
         renderStats.bakedGroundRimSurfaces,
         renderStats.importedGroundRimSurfaces,
         static_cast<unsigned long long>(renderStats.groundRimArtifactImports));
+    ImGui::Text("Ground chunks %s: %u draws / %u tiles; meshoptimizer %s",
+        renderStats.groundChunksRequested ? "requested" : "off",
+        renderStats.groundChunkDraws, renderStats.groundChunkTiles,
+        renderStats.groundChunkMeshoptimizer ? "on" : "off");
+    ImGui::Text("Chunk payload %llu -> %llu bytes; GPU %llu + staging %llu; %llu uploads",
+        static_cast<unsigned long long>(renderStats.groundChunkOriginalBytes),
+        static_cast<unsigned long long>(renderStats.groundChunkGeometryBytes),
+        static_cast<unsigned long long>(renderStats.groundChunkResidentBytes),
+        static_cast<unsigned long long>(renderStats.groundChunkStagingBytes),
+        static_cast<unsigned long long>(renderStats.groundChunkUploads));
+    ImGui::Text("Chunk cache (16-entry ACMR) %.3f -> %.3f; %llu hits / %llu rebuilds",
+        renderStats.groundChunkInputAcmr, renderStats.groundChunkOutputAcmr,
+        static_cast<unsigned long long>(renderStats.groundChunkCacheHits),
+        static_cast<unsigned long long>(renderStats.groundChunkCacheRebuilds));
     drawPhaseTimings(renderStats);
     ImGui::Text(
         "Asset publications %llu across %llu frames; texture uploads %llu/%llu complete (%u in flight)",

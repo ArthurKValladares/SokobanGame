@@ -4,10 +4,12 @@
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/PointShadowFaceCache.hpp"
 #include "engine/render/GroundRimSurface.hpp"
+#include "engine/render/GroundChunkGeometry.hpp"
 #include "engine/render/ProcessedGroundArtifact.hpp"
 #include "engine/TaskSystem.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -129,6 +131,18 @@ void checkPreparationOutputsMatch(
     CHECK(expected.shadowFaces == actual.shadowFaces);
     CHECK(expected.shadowFaceBounds == actual.shadowFaceBounds);
     CHECK(expected.shadowModelIndices == actual.shadowModelIndices);
+    CHECK(expected.groundChunks == actual.groundChunks);
+    CHECK(expected.groundChunkTileMask == actual.groundChunkTileMask);
+    CHECK(expected.groundChunkDraws.size() == actual.groundChunkDraws.size());
+    for (std::size_t index = 0; index < expected.groundChunkDraws.size(); ++index) {
+        const auto& left = expected.groundChunkDraws[index];
+        const auto& right = actual.groundChunkDraws[index];
+        CHECK(left.chunkIndex == right.chunkIndex);
+        CHECK(left.tileIndices == right.tileIndices);
+        CHECK(left.tileCount == right.tileCount);
+        CHECK(left.mainSceneVisible == right.mainSceneVisible);
+        CHECK(left.pickableTiles == right.pickableTiles);
+    }
     CHECK(expected.pointShadowFaceCandidates ==
           actual.pointShadowFaceCandidates);
     CHECK(expected.pointShadowFacesInRange == actual.pointShadowFacesInRange);
@@ -2719,8 +2733,389 @@ void testBakedGroundRimSurfacesRespectResolvedFrames()
     }
 }
 
+namespace {
+
+sokoban::RenderFrameData chunkSceneFrame()
+{
+    using namespace sokoban;
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 3;
+    frame.levelHeight = 3;
+    frame.levelDepth = 3;
+    frame.cameraExtent = RenderFrameData::CameraExtent { 0, 0, 0, 3, 3, 3 };
+    frame.groundSplat = { .base = { 1 }, .detail = { 2 }, .splatMap = { 3 } };
+    for (int y = 0; y < 3; ++y) {
+        for (int x = 0; x < 3; ++x) {
+            auto tile = cube(x, y);
+            tile.model = { 1 };
+            tile.groundTop = true;
+            tile.groundGeometryEligible = true;
+            tile.effect = RenderSurfaceEffect::GroundSplat;
+            tile.groundRimSides = (x == 1 && y == 1) ? 0 : groundAllSides;
+            tile.groundRimWidth = 0.12f;
+            tile.groundRimDepth = 0.10f;
+            // A second height also exercises perspective-correct interpolation.
+            if (x == 2) {
+                tile.cell.z = 2;
+                tile.baseElevation = 2.0f;
+            }
+            frame.tiles.push_back(tile);
+        }
+    }
+    return frame;
+}
+
+using PositionTriangle = std::array<float, 9>;
+
+PositionTriangle positionTriangle(sokoban::Vec3 a, sokoban::Vec3 b, sokoban::Vec3 c)
+{
+    const std::array<sokoban::Vec3, 3> vertices { a, b, c };
+    PositionTriangle best {};
+    for (std::size_t rotation = 0; rotation < 3; ++rotation) {
+        PositionTriangle next {};
+        for (std::size_t corner = 0; corner < 3; ++corner) {
+            const auto& vertex = vertices[(corner + rotation) % 3];
+            next[corner * 3] = vertex.x;
+            next[corner * 3 + 1] = vertex.y;
+            next[corner * 3 + 2] = vertex.z;
+        }
+        if (rotation == 0 || next < best) best = next;
+    }
+    return best;
+}
+
+void appendQuadTriangles(std::vector<PositionTriangle>& triangles,
+    const std::array<sokoban::Vec3, 4>& vertices)
+{
+    triangles.push_back(positionTriangle(vertices[0], vertices[1], vertices[2]));
+    triangles.push_back(positionTriangle(vertices[0], vertices[2], vertices[3]));
+}
+
+std::vector<PositionTriangle> chunkTriangles(const sokoban::PreparedRenderScene& scene,
+    bool visibleOnly)
+{
+    using namespace sokoban;
+    std::vector<PositionTriangle> triangles;
+    if (!scene.groundChunks) return triangles;
+    for (const auto& draw : scene.groundChunkDraws) {
+        const auto& chunk = scene.groundChunks->chunks[draw.chunkIndex];
+        for (std::size_t first = 0; first < chunk.indices.size(); first += 3) {
+            const auto& a = chunk.vertices[chunk.indices[first]];
+            const auto& b = chunk.vertices[chunk.indices[first + 1]];
+            const auto& c = chunk.vertices[chunk.indices[first + 2]];
+            const Vec3 center = (a.position + b.position + c.position + c.position) * 0.25f;
+            if (visibleOnly && (!draw.mainSceneVisible ||
+                dot(a.normal, scene.isoLayout.cameraPosition - center) <= 0.0f)) continue;
+            triangles.push_back(positionTriangle(a.position, b.position, c.position));
+        }
+    }
+    std::sort(triangles.begin(), triangles.end());
+    return triangles;
+}
+
+sokoban::Vec2 pixelAtWorld(const sokoban::PreparedRenderScene& scene,
+    sokoban::Vec2 extent, sokoban::Vec3 world)
+{
+    const auto clip = sokoban::IsoScenePreparer::projectIsoPoint(scene.isoLayout,
+        scene.renderExtent, world);
+    return { (clip.x + 1.0f) * extent.x * 0.5f, (1.0f - clip.y) * extent.y * 0.5f };
+}
+
+void testReadyGroundChunksPreserveGeometryAndPicking()
+{
+    TEST("readyGroundChunksPreserveGeometryAndPicking");
+    using namespace sokoban;
+    constexpr Vec2 extent { 1280, 720 };
+    RenderFrameData frame = chunkSceneFrame();
+    IsoScenePreparer preparer;
+    preparer.setFrustumCulling(false);
+    PreparedRenderScene individual;
+    preparer.prepare(frame, extent, individual);
+    frame.groundChunksRequested = true;
+    frame.groundChunksReady = true;
+    frame.groundChunks = std::make_shared<const GroundChunkGeometry>(
+        compileGroundChunkGeometry(frame.tiles));
+    PreparedRenderScene chunked;
+    preparer.prepare(frame, extent, chunked);
+    CHECK(chunked.groundChunks == frame.groundChunks);
+    CHECK(chunked.groundChunkDraws.size() == 2);
+    CHECK(std::ranges::all_of(chunked.groundChunkTileMask, [](uint8_t value) { return value == 1; }));
+    CHECK(chunked.opaqueModelIndices == individual.opaqueModelIndices);
+    CHECK(chunked.shadowModelIndices == individual.shadowModelIndices);
+    CHECK(chunked.shadowFaces.empty());
+    CHECK(chunked.opaqueFaceIndices.empty());
+    CHECK(std::ranges::none_of(chunked.isoFaces, [](const auto& face) {
+        return face.groundRimSurface || face.material == PreparedSurfaceMaterial::GroundSplat;
+    }));
+    CHECK(!chunked.pickFaceIndices.empty());
+
+    std::vector<PositionTriangle> visible;
+    for (std::size_t index : individual.opaqueFaceIndices) {
+        appendQuadTriangles(visible, individual.isoFaces[index].worldVertices);
+    }
+    std::sort(visible.begin(), visible.end());
+    CHECK(visible == chunkTriangles(chunked, true));
+    std::vector<PositionTriangle> shadows;
+    for (const auto& face : individual.shadowFaces) appendQuadTriangles(shadows, face);
+    std::sort(shadows.begin(), shadows.end());
+    CHECK(shadows == chunkTriangles(chunked, false));
+
+    // Paint and cell picking sample flat centres, sloped rims, both levels,
+    // and projected overlaps. Compare to the established individual path.
+    for (const auto& tile : frame.tiles) {
+        for (float y : { 0.03f, 0.25f, 0.5f, 0.87f, 0.97f }) {
+            for (float x : { 0.03f, 0.25f, 0.5f, 0.87f, 0.97f }) {
+                const auto sample = sampleGroundRim({ x, y }, groundRimProfileForSurface(tile));
+                const Vec3 world { tile.position.x + x, tile.position.y + y,
+                    tile.baseElevation + tile.height - sample.drop };
+                const Vec2 pixel = pixelAtWorld(individual, extent, world);
+                const auto oldPoint = preparer.pickGroundPoint(individual, pixel, extent);
+                const auto newPoint = preparer.pickGroundPoint(chunked, pixel, extent);
+                CHECK(oldPoint.has_value() == newPoint.has_value());
+                if (oldPoint && newPoint) {
+                    CHECK(near(oldPoint->x, newPoint->x));
+                    CHECK(near(oldPoint->y, newPoint->y));
+                    CHECK(near(oldPoint->z, newPoint->z));
+                }
+                CHECK(preparer.pickGridCell(individual, pixel, extent, 3, 3) ==
+                    preparer.pickGridCell(chunked, pixel, extent, 3, 3));
+            }
+        }
+    }
+
+    TaskSystem tasks(2);
+    IsoScenePreparer serialPreparer;
+    IsoScenePreparer parallelPreparer;
+    PreparedRenderScene serial;
+    PreparedRenderScene parallel;
+    serialPreparer.prepare(frame, extent, serial);
+    parallelPreparer.prepare(frame, extent, parallel, &tasks);
+    checkPreparationOutputsMatch(serial, parallel);
+}
+
+void testGroundChunkPreparationFallsBackWholeChunks()
+{
+    TEST("groundChunkPreparationFallsBackWholeChunks");
+    using namespace sokoban;
+    constexpr Vec2 extent { 1280, 720 };
+    RenderFrameData frame = chunkSceneFrame();
+    frame.groundChunks = std::make_shared<const GroundChunkGeometry>(
+        compileGroundChunkGeometry(frame.tiles));
+    frame.groundChunksRequested = true;
+    const auto notReady = prepareScene(frame, extent);
+    CHECK(notReady.groundChunkDraws.empty());
+    CHECK(!notReady.shadowFaces.empty());
+    frame.groundChunksReady = true;
+    const auto ready = prepareScene(frame, extent);
+    CHECK(ready.groundChunkDraws.size() == 2);
+
+    // A stale member invalidates its whole layer/chunk, while other complete
+    // chunks can remain on the uploaded path. There is no partial cap removal.
+    frame.tiles[0].groundRimWidth = 0.17f;
+    const auto stale = prepareScene(frame, extent);
+    CHECK(stale.groundChunkDraws.size() == 1);
+    for (std::size_t index = 0; index < frame.tiles.size(); ++index) {
+        CHECK(stale.groundChunkTileMask[index] == (frame.tiles[index].cell.z == 2 ? 1 : 0));
+    }
+    frame.tiles[0].groundRimWidth = 0.12f;
+    frame.tiles[0].groundSplat = GroundSplatTextures {};
+    const auto invalidTileMaterial = prepareScene(frame, extent);
+    CHECK(invalidTileMaterial.groundChunkDraws.size() == 1);
+    CHECK(invalidTileMaterial.groundChunkTileMask[0] == 0);
+    frame.tiles[0].groundSplat.reset();
+    frame.groundSplatRegionCount = 1;
+    frame.groundSplatRegions[0] = { .origin = { 0, 0 }, .width = 1, .height = 1 };
+    CHECK(prepareScene(frame, extent).groundChunkDraws.size() == 1);
+    frame.groundSplatRegions[0].textures = frame.groundSplat;
+    CHECK(prepareScene(frame, extent).groundChunkDraws.size() == 2);
+    frame.groundSplatRegionCount = 0;
+    frame.groundSplat = {};
+    CHECK(prepareScene(frame, extent).groundChunkDraws.empty());
+    frame.groundSplat = { .base = { 1 }, .detail = { 2 }, .splatMap = { 3 } };
+
+    frame.tiles[0].isEditorPreview = true;
+    CHECK(prepareScene(frame, extent).groundChunkDraws.size() == 1);
+    frame.tiles[0].isEditorPreview = false;
+    frame.tiles.push_back(frame.tiles[0]);
+    CHECK(prepareScene(frame, extent).groundChunkDraws.size() == 1);
+    frame.tiles.erase(frame.tiles.end() - 1);
+    frame.lighting.pointLightCount = 1;
+    frame.lighting.pointLights[0] = { .position = { 1, 1, 5 }, .intensity = 1, .range = 10 };
+    const auto pointShadows = prepareScene(frame, extent);
+    CHECK(pointShadows.groundChunkDraws.empty());
+    CHECK(!pointShadows.shadowFaces.empty());
+    frame.lighting.pointLights[0].castsShadows = false;
+    CHECK(prepareScene(frame, extent).groundChunkDraws.size() == 2);
+    frame.groundChunksRequested = false;
+    CHECK(prepareScene(frame, extent).groundChunkDraws.empty());
+}
+
+void testGroundChunkFrustumCullingKeepsSunCastersAndPicking()
+{
+    TEST("groundChunkFrustumCullingKeepsSunCastersAndPicking");
+    using namespace sokoban;
+    constexpr Vec2 extent { 1280, 720 };
+    RenderFrameData frame = chunkSceneFrame();
+    const auto visibleTile = frame.tiles[0];
+    auto outsideTile = visibleTile;
+    outsideTile.cell = { 100, 0, 0 };
+    outsideTile.position = { 100.0f, 0.0f };
+    outsideTile.affectsCameraFit = false;
+    frame.tiles = { visibleTile, outsideTile };
+    frame.levelWidth = 101;
+    frame.cameraOverride = RenderFrameData::CameraOverride {
+        .position = { 0.5f, 0.5f, 8.0f },
+        .forward = { 0.0f, 0.0f, -1.0f },
+        .verticalFovDegrees = 45.0f,
+    };
+    IsoScenePreparer preparer;
+    PreparedRenderScene individual;
+    preparer.prepare(frame, extent, individual);
+    std::vector<PositionTriangle> individualSunTriangles;
+    for (const auto& face : individual.shadowFaces) {
+        appendQuadTriangles(individualSunTriangles, face);
+    }
+    std::sort(individualSunTriangles.begin(), individualSunTriangles.end());
+
+    frame.groundChunksRequested = true;
+    frame.groundChunksReady = true;
+    frame.groundChunks = std::make_shared<const GroundChunkGeometry>(
+        compileGroundChunkGeometry(frame.tiles));
+    const auto visibilityByTile = [](const PreparedRenderScene& scene) {
+        std::array<bool, 2> visible {};
+        for (const auto& draw : scene.groundChunkDraws) {
+            for (std::size_t slot = 0; slot < draw.tileCount; ++slot) {
+                CHECK(draw.tileIndices[slot] < visible.size());
+                if (draw.tileIndices[slot] < visible.size()) {
+                    visible[draw.tileIndices[slot]] = draw.mainSceneVisible;
+                }
+            }
+        }
+        return visible;
+    };
+
+    PreparedRenderScene culled;
+    preparer.prepare(frame, extent, culled);
+    CHECK(culled.groundChunks == frame.groundChunks);
+    CHECK(culled.groundChunkDraws.size() == 2);
+    const auto initialVisibility = visibilityByTile(culled);
+    CHECK(initialVisibility[0] && !initialVisibility[1]);
+    // The model-backed tiles deliberately fail open; the actual cap bounds
+    // still cull the second main draw. Both cap caster records stay present.
+    CHECK(culled.renderables[0].mainSceneVisible && culled.renderables[1].mainSceneVisible);
+    CHECK(culled.shadowFaces.empty());
+    CHECK(culled.shadowModelIndices == individual.shadowModelIndices);
+    CHECK(chunkTriangles(culled, false) == individualSunTriangles);
+    CHECK(std::ranges::all_of(culled.groundChunkTileMask,
+        [](uint8_t value) { return value == 1; }));
+    const Vec3 visibleWorld { 0.5f, 0.5f, 1.0f };
+    const Vec2 visiblePixel = pixelAtWorld(culled, extent, visibleWorld);
+    const auto visiblePaint = preparer.pickGroundPoint(culled, visiblePixel, extent);
+    const auto visibleCell = preparer.pickGridCell(culled, visiblePixel, extent, 101, 3);
+    CHECK(visiblePaint.has_value());
+    CHECK(visibleCell.has_value());
+
+    preparer.setFrustumCulling(false);
+    PreparedRenderScene unculled;
+    preparer.prepare(frame, extent, unculled);
+    const auto unculledVisibility = visibilityByTile(unculled);
+    CHECK(unculledVisibility[0] && unculledVisibility[1]);
+    CHECK(unculled.groundChunkDraws.size() == culled.groundChunkDraws.size());
+    CHECK(unculled.groundChunks == culled.groundChunks);
+    CHECK(unculled.groundChunkTileMask == culled.groundChunkTileMask);
+    CHECK(unculled.shadowFaces == culled.shadowFaces);
+    CHECK(unculled.shadowModelIndices == culled.shadowModelIndices);
+    CHECK(chunkTriangles(unculled, false) == individualSunTriangles);
+    CHECK(unculled.pickFaceIndices == culled.pickFaceIndices);
+    CHECK(preparer.pickGroundPoint(unculled, visiblePixel, extent) == visiblePaint);
+    CHECK(preparer.pickGridCell(unculled, visiblePixel, extent, 101, 3) == visibleCell);
+
+    preparer.setFrustumCulling(true);
+    frame.cameraOverride->position.x = 100.5f;
+    PreparedRenderScene movedCamera;
+    preparer.prepare(frame, extent, movedCamera);
+    const auto movedVisibility = visibilityByTile(movedCamera);
+    CHECK(!movedVisibility[0] && movedVisibility[1]);
+    CHECK(movedCamera.groundChunkDraws.size() == 2);
+    CHECK(movedCamera.shadowFaces.empty());
+    CHECK(chunkTriangles(movedCamera, false) == individualSunTriangles);
+    const Vec2 outsidePixel = pixelAtWorld(movedCamera, extent, { 100.5f, 0.5f, 1.0f });
+    CHECK(preparer.pickGroundPoint(movedCamera, outsidePixel, extent).has_value());
+    const auto outsideCell = preparer.pickGridCell(movedCamera, outsidePixel, extent, 101, 3);
+    CHECK(outsideCell.has_value());
+    if (outsideCell) CHECK(outsideCell->x == 100);
+
+    // Invalid bounds are never grounds for removing a valid participating cap.
+    const auto validGeometry = frame.groundChunks;
+    for (int invalidKind = 0; invalidKind < 3; ++invalidKind) {
+        auto invalid = std::make_shared<GroundChunkGeometry>(*validGeometry);
+        for (auto& chunk : invalid->chunks) {
+            if (invalidKind == 0) chunk.bounds = {};
+            if (invalidKind == 1) chunk.bounds.minimum.x = std::numeric_limits<float>::quiet_NaN();
+            if (invalidKind == 2) chunk.bounds.maximum.x = std::numeric_limits<float>::infinity();
+        }
+        frame.groundChunks = invalid;
+        PreparedRenderScene failOpen;
+        preparer.prepare(frame, extent, failOpen);
+        const auto failOpenVisibility = visibilityByTile(failOpen);
+        CHECK(failOpenVisibility[0] && failOpenVisibility[1]);
+        CHECK(failOpen.groundChunkDraws.size() == 2);
+        CHECK(failOpen.shadowFaces.empty());
+        CHECK(chunkTriangles(failOpen, false) == individualSunTriangles);
+    }
+}
+
+void testGroundChunkPickingRetainsOwnedFramesAndPickFlags()
+{
+    TEST("groundChunkPickingRetainsOwnedFramesAndPickFlags");
+    using namespace sokoban;
+    constexpr Vec2 extent { 1280, 720 };
+    RenderFrameData frame = chunkSceneFrame();
+    frame.groundChunksRequested = true;
+    frame.groundChunksReady = true;
+    GroundChunkGeometryCache cache;
+    frame.groundChunks = cache.update(frame.tiles);
+    IsoScenePreparer preparer;
+    PreparedRenderScene retained;
+    preparer.prepare(frame, extent, retained);
+    const auto oldGeometry = retained.groundChunks;
+    const Vec3 oldWorld { 0.5f, 0.5f, 1.0f };
+    const Vec2 oldPixel = pixelAtWorld(retained, extent, oldWorld);
+    const auto oldPaint = preparer.pickGroundPoint(retained, oldPixel, extent);
+    const auto oldCell = preparer.pickGridCell(retained, oldPixel, extent, 3, 3);
+    CHECK(oldPaint.has_value());
+    CHECK(oldCell.has_value());
+
+    for (auto& tile : frame.tiles) tile.pickable = false;
+    std::rotate(frame.tiles.begin(), frame.tiles.begin() + 1, frame.tiles.end());
+    frame.cameraYawDegrees = 57.0f;
+    PreparedRenderScene current;
+    preparer.prepare(frame, extent, current);
+    CHECK(current.groundChunks == oldGeometry);
+    CHECK(!preparer.pickGridCell(current, pixelAtWorld(current, extent, oldWorld), extent, 3, 3));
+    CHECK(preparer.pickGroundPoint(current, pixelAtWorld(current, extent, oldWorld), extent).has_value());
+    CHECK(preparer.pickGridCell(retained, oldPixel, extent, 3, 3) == oldCell);
+    CHECK(preparer.pickGroundPoint(retained, oldPixel, extent) == oldPaint);
+    for (auto& tile : frame.tiles) tile.baseElevation += 1.0f;
+    frame.groundChunks = cache.update(frame.tiles);
+    preparer.prepare(frame, extent, current);
+    CHECK(current.groundChunks != oldGeometry);
+    frame.groundChunks.reset();
+    cache.invalidate();
+    CHECK(retained.groundChunks == oldGeometry);
+    CHECK(preparer.pickGroundPoint(retained, oldPixel, extent) == oldPaint);
+    CHECK(preparer.pickGridCell(retained, oldPixel, extent, 3, 3) == oldCell);
+}
+
+} // namespace
+
 int main()
 {
+    testReadyGroundChunksPreserveGeometryAndPicking();
+    testGroundChunkPreparationFallsBackWholeChunks();
+    testGroundChunkFrustumCullingKeepsSunCastersAndPicking();
+    testGroundChunkPickingRetainsOwnedFramesAndPickFlags();
     testBakedGroundRimSurfacesRespectResolvedFrames();
     testGroundRimCacheKeepsOwnedScenesAndCurrentFrameState();
     testGroundRimPatchesCoverTheSharedProfile();

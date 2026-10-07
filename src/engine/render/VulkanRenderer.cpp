@@ -395,6 +395,8 @@ VulkanRenderer::VulkanRenderer(
     }
     const auto gpuProfilerMicroseconds = finishPhase();
     createFrameResources();
+    groundChunkGpuCache_.create(deviceContext_.memoryAllocator(), deviceContext_.device(),
+        deviceContext_.commandPool(), deviceContext_.graphicsQueue());
     const auto frameResourcesMicroseconds = finishPhase();
     initializeDebugUi();
     const auto debugUiMicroseconds = finishPhase();
@@ -451,6 +453,7 @@ VulkanRenderer::~VulkanRenderer()
 
     retiredResources_.clear();
     activeResources_ = {};
+    groundChunkGpuCache_.destroy();
     modelResources_.destroy();
     uiResources_.destroy();
 
@@ -474,6 +477,7 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
     scratch->groundRimBudgetFallback = false;
     scratch->previewFrameData = std::move(previewFrameData);
     resolveGroundRims(scratch->frameData, modelResources_, currentFrame_);
+    resolveGroundChunks(scratch->frameData);
     if (scratch->previewFrameData) {
         resolveGroundRims(*scratch->previewFrameData, modelResources_, currentFrame_);
     }
@@ -557,6 +561,24 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
     return frame;
 }
 
+bool VulkanRenderer::resolveGroundChunks(RenderFrameData& frame, bool publish)
+{
+    const auto previous = frame.groundChunks;
+    const bool wasReady = frame.groundChunksReady;
+    bool allowed = frame.groundChunksRequested && frame.viewMode == RenderViewMode::Isometric3D;
+    for (std::size_t i = 0; i < frame.lighting.pointLightCount &&
+            i < RenderFrameData::pointLightCapacity; ++i) {
+        const auto& light = frame.lighting.pointLights[i];
+        if (light.castsShadows && light.intensity > 0 && light.range > 0) allowed = false;
+    }
+    frame.groundChunks = allowed ? groundChunkGeometryCache_.update(frame.tiles,
+        frame.processedGroundArtifact.get(), frame.groundChunkMeshoptimizer) : nullptr;
+    frame.groundChunksReady = publish
+        ? groundChunkGpuCache_.update(frame.groundChunks, pendingFrameMask())
+        : groundChunkGpuCache_.readyFor(frame.groundChunks.get());
+    return previous != frame.groundChunks || wasReady != frame.groundChunksReady;
+}
+
 void VulkanRenderer::applyGroundRimBudgetFallback(
     const PreparedFrameScratch& prepared, std::size_t uiDrawCount)
 {
@@ -578,6 +600,10 @@ void VulkanRenderer::applyGroundRimBudgetFallback(
     if (!mainChanged && !previewChanged) return;
     prepared.groundRimBudgetFallback = true;
     if (mainChanged) {
+        // Keep the requested immutable generation while this frame uses flat
+        // caps. Replacing its key with fallback geometry would restart the rim
+        // upload every frame on views too large for individual rim cap draws.
+        prepared.frameData.groundChunksReady = false;
         scenePreparer_.prepare(prepared.frameData,
             prepared.scene.renderExtent, prepared.scene);
     }
@@ -765,8 +791,17 @@ void VulkanRenderer::drawFrame(
 
     runAssetMaintenance(prepared, frameData);
     const auto sceneExtent = activeResources_.swapchain->renderExtent();
-    if (resolveGroundRims(frameData, modelResources_, currentFrame_,
-            !prepared.groundRimBudgetFallback)) {
+    const bool rimsChanged = resolveGroundRims(frameData, modelResources_, currentFrame_,
+        !prepared.groundRimBudgetFallback);
+    bool chunksChanged = false;
+    if (prepared.groundRimBudgetFallback) {
+        // Publish the requested generation without applying it to this flat
+        // fallback frame. A fresh frame can adopt it once its fence signals.
+        groundChunkGpuCache_.update(frameData.groundChunks, pendingFrameMask());
+    } else {
+        chunksChanged = resolveGroundChunks(frameData, true);
+    }
+    if (rimsChanged || chunksChanged) {
         scenePreparer_.prepare(frameData,
             { static_cast<float>(sceneExtent.width), static_cast<float>(sceneExtent.height) },
             prepared.scene);
@@ -837,6 +872,7 @@ void VulkanRenderer::drawFrame(
                 *activeResources_.sceneDescriptors,
             .pipelines = *activeResources_.pipelines,
             .modelResources = modelResources_,
+            .groundChunkResources = groundChunkGpuCache_,
             .uiResources = uiResources_,
         },
         {
@@ -898,6 +934,33 @@ void VulkanRenderer::drawFrame(
         (previewScene ? previewScene->importedGroundRimSurfaces : 0);
     lastStats_.groundRimArtifactImports = prepared.scene.groundRimArtifactImports +
         (previewScene ? previewScene->groundRimArtifactImports : 0);
+    lastStats_.groundChunksRequested = frameData.groundChunksRequested;
+    lastStats_.groundChunkMeshoptimizer = frameData.groundChunkMeshoptimizer;
+    lastStats_.groundChunkResidentBytes = groundChunkGpuCache_.residentBytes();
+    lastStats_.groundChunkStagingBytes = groundChunkGpuCache_.stagingBytes();
+    lastStats_.groundChunkUploads = groundChunkGpuCache_.uploadCount();
+    lastStats_.groundChunkCacheHits = groundChunkGeometryCache_.hitCount();
+    lastStats_.groundChunkCacheRebuilds = groundChunkGeometryCache_.rebuildCount();
+    if (frameData.groundChunks) {
+        const auto& geometry = *frameData.groundChunks;
+        lastStats_.groundChunkGeometryBytes = geometry.geometryBytes;
+        lastStats_.groundChunkOriginalBytes = geometry.originalBytes;
+        double inputMisses = 0.0;
+        double outputMisses = 0.0;
+        uint64_t triangles = 0;
+        for (const auto& chunk : geometry.chunks) {
+            lastStats_.groundChunkInputVertices += chunk.inputVertexCount;
+            lastStats_.groundChunkOutputVertices += chunk.vertices.size();
+            const auto count = chunk.indices.size() / 3;
+            triangles += count;
+            inputMisses += chunk.inputAcmr * static_cast<double>(count);
+            outputMisses += chunk.outputAcmr * static_cast<double>(count);
+        }
+        if (triangles > 0) {
+            lastStats_.groundChunkInputAcmr = static_cast<float>(inputMisses / triangles);
+            lastStats_.groundChunkOutputAcmr = static_cast<float>(outputMisses / triangles);
+        }
+    }
     lastStats_.gpuTimestampsSupported = gpuProfiler_.supported();
     lastStats_.parallelScenePreparationEnabled =
         parallelScenePreparationEnabled_;
@@ -1947,6 +2010,7 @@ void VulkanRenderer::completeFrame(uint32_t frameIndex)
         return;
     }
     modelResources_.completeFrame(frameIndex);
+    groundChunkGpuCache_.completeFrame(frameIndex);
     const uint32_t completedBit = ~(1U << frameIndex);
     for (RetiredRenderResources& retired : retiredResources_) {
         retired.pendingFrameMask &= completedBit;

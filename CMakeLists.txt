@@ -505,6 +505,16 @@ if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
     sokoban_enable_lto(sokoban_content_tool)
 endif()
 
+add_library(sokoban_meshoptimizer STATIC
+    third_party/meshoptimizer/allocator.cpp
+    third_party/meshoptimizer/indexgenerator.cpp
+    third_party/meshoptimizer/vcacheoptimizer.cpp
+    third_party/meshoptimizer/vfetchoptimizer.cpp
+    third_party/meshoptimizer/indexanalyzer.cpp
+)
+target_include_directories(sokoban_meshoptimizer SYSTEM PUBLIC third_party/meshoptimizer)
+sokoban_enable_lto(sokoban_meshoptimizer)
+
 add_library(sokoban_core STATIC
     src/engine/ActionPlan.cpp
     src/engine/ActionScheduler.cpp
@@ -597,6 +607,8 @@ add_library(sokoban_core STATIC
     src/engine/render/GroundRimGeometry.cpp
     src/engine/render/GroundRimSurfaceCache.cpp
     src/engine/render/ProcessedGroundArtifact.cpp
+    src/engine/render/GroundChunkGeometry.cpp
+    src/engine/render/IndexedMeshOptimization.cpp
     src/engine/render/FrameResourceTracker.cpp
     src/engine/render/FrameTimeTelemetry.cpp
     src/engine/render/GeometrySuballocator.cpp
@@ -626,7 +638,7 @@ target_include_directories(sokoban_core SYSTEM PRIVATE third_party/miniaudio)
 target_link_libraries(sokoban_core
     PUBLIC SDL3::SDL3
     PRIVATE Threads::Threads sokoban_json sokoban_stb sokoban_cgltf
-        sokoban_bc7enc16
+        sokoban_bc7enc16 sokoban_meshoptimizer
 )
 if(WIN32)
     target_link_libraries(sokoban_core PRIVATE dbghelp psapi)
@@ -711,6 +723,7 @@ add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanDeviceSelection.cpp
     src/engine/render/VulkanGpuProfiler.cpp
     src/engine/render/VulkanGeometryArena.cpp
+    src/engine/render/VulkanGroundChunkCache.cpp
     src/engine/render/VulkanMemoryAllocator.cpp
     src/engine/render/VulkanMemoryAllocatorImplementation.cpp
     src/engine/render/VulkanModelResources.cpp
@@ -1531,6 +1544,14 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/ProcessedGroundArtifactTests.cpp
     )
+    sokoban_add_test(NAME indexed_mesh_optimization
+        LIBS sokoban_core
+        SOURCES tests/IndexedMeshOptimizationTests.cpp
+    )
+    sokoban_add_test(NAME ground_chunk_geometry
+        LIBS sokoban_core
+        SOURCES tests/GroundChunkGeometryTests.cpp
+    )
     sokoban_add_test(NAME ground_level_geometry
         STANDALONE TARGET sokoban_ground_level_geometry_tests
         LIBS sokoban_core
@@ -1771,6 +1792,11 @@ install(FILES
     RENAME cgltf-LICENSE.txt
     COMPONENT Runtime
 )
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/LICENSE.md"
+    DESTINATION licenses RENAME meshoptimizer-LICENSE.txt COMPONENT Runtime)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/README.sokoban.md"
+    DESTINATION licenses RENAME meshoptimizer-NOTICE.md COMPONENT Runtime)
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/LICENSE.txt")
     install(FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/LICENSE.txt"

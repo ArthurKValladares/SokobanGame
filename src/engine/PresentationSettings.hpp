@@ -52,7 +52,9 @@ public:
         // Derive exposed sides for the authored, unit-scale ground bodies.
         // A live diagnostic toggle; the editable level and its tops stay intact.
         bool processGroundGeometry = true;
-        bool smoothGroundRim = false;
+        bool smoothGroundRim = true;
+        bool groundChunks = false;
+        bool groundChunkMeshoptimizer = true;
         float groundRimWidth = 0.12f;
         float groundRimDepth = 0.10f;
     };

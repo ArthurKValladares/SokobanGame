@@ -18,6 +18,7 @@
 #include "engine/render/SceneDrawLanes.hpp"
 #include "engine/render/WaterConfig.hpp"
 #include "engine/render/VulkanModelResources.hpp"
+#include "engine/render/VulkanGroundChunkCache.hpp"
 #include "engine/render/VulkanPipelineFactory.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
@@ -371,6 +372,7 @@ public:
         , descriptors_(resources.sceneDescriptors)
         , pipelines_(resources.pipelines)
         , models_(resources.modelResources)
+        , groundChunks_(resources.groundChunkResources)
         , uiResources_(resources.uiResources)
 #if SOKOBAN_ENABLE_DEBUG_UI
         , debugLabelFont_(recorder.debugLabelFont_.get())
@@ -893,6 +895,7 @@ private:
         shadowPass_.begin(
             commandBuffer, pipelines_.shadow(), stats_);
         drawShadowFaces(commandBuffer, scene.shadowLayout, scene.shadowFaces);
+        drawGroundChunkShadows(commandBuffer, scene);
         VkPipeline boundModelPipeline = VK_NULL_HANDLE;
         for (std::size_t tileIndex : scene.shadowModelIndices) {
             const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
@@ -2431,6 +2434,12 @@ private:
                 VulkanGpuPhase::SceneFaces);
         }
         VkPipeline boundFacePipeline = flatScenePipeline(opaquePass);
+        if (!translucentPass && content != SceneContent::MirrorPreviewOnly &&
+            scene.groundChunks && !scene.groundChunkDraws.empty()) {
+            drawGroundChunks(commandBuffer, scene, frameData);
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, boundFacePipeline);
+            ++stats_.pipelineBinds;
+        }
         uint32_t runFirst = 0;
         uint32_t runCount = 0;
         const auto flushFaceRun = [&] {
@@ -3249,6 +3258,74 @@ private:
         return writeDrawInstance(constants);
     }
 
+    void drawGroundChunkShadows(VkCommandBuffer commandBuffer, const PreparedRenderScene& scene)
+    {
+        if (!scene.groundChunks || scene.groundChunkDraws.empty()) return;
+        shadowPass_.bindModelPipeline(commandBuffer, pipelines_.groundChunkShadow(), stats_);
+        bindDescriptorSet(commandBuffer);
+        const GpuDrawInstance constants {
+            .vertices = std::bit_cast<std::array<Vec4, 4>>(shadowClipFromWorld(scene.shadowLayout)) };
+        vkCmdPushConstants(commandBuffer, pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(constants), &constants);
+        for (const auto& draw : scene.groundChunkDraws) {
+            const auto mesh = groundChunks_.mesh(scene.groundChunks.get(), draw.chunkIndex);
+            if (!mesh.buffer) continue;
+            vkCmdBindVertexBuffers(commandBuffer, 0, 1, &mesh.buffer, &mesh.vertexOffset);
+            vkCmdBindIndexBuffer(commandBuffer, mesh.buffer, mesh.indexOffset, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
+            ++stats_.drawCalls; stats_.triangles += mesh.indexCount / 3;
+            stats_.vertices += mesh.indexCount;
+        }
+    }
+
+    void drawGroundChunks(VkCommandBuffer commandBuffer, const PreparedRenderScene& scene,
+        const RenderFrameData& frameData)
+    {
+        if (!scene.groundChunks || scene.groundChunkDraws.empty()) return;
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.groundChunkOpaque());
+        ++stats_.pipelineBinds;
+        vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+        vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_BACK_BIT);
+        vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_CLOCKWISE);
+        for (const auto& draw : scene.groundChunkDraws) {
+            if (!draw.mainSceneVisible) continue;
+            const auto mesh = groundChunks_.mesh(scene.groundChunks.get(), draw.chunkIndex);
+            if (!mesh.buffer) continue;
+            uint32_t firstInstance = 0;
+            for (uint32_t slot = 0; slot < draw.tileCount; ++slot) {
+                const auto& tile = frameData.tiles[draw.tileIndices[slot]];
+                const auto* region = frameData.groundSplatRegionAt(tile.cell);
+                const auto& textures = tile.groundSplat ? *tile.groundSplat
+                    : region ? region->textures : frameData.groundSplat;
+                const Vec2 paintOrigin = tile.groundSplat
+                    ? Vec2 { static_cast<float>(tile.groundSplatOrigin.x), static_cast<float>(tile.groundSplatOrigin.y) }
+                    : region ? Vec2 { static_cast<float>(region->origin.x), static_cast<float>(region->origin.y) }
+                    : Vec2 {};
+                const float top = tile.baseElevation + tile.height;
+                const std::array<Vec3, 4> corners { Vec3 {tile.position.x, tile.position.y, top},
+                    Vec3 {tile.position.x + 1, tile.position.y, top},
+                    Vec3 {tile.position.x + 1, tile.position.y + 1, top},
+                    Vec3 {tile.position.x, tile.position.y + 1, top} };
+                const std::array<float, 4> wallWeights = tile.groundRimWidth > 0
+                    ? std::array<float, 4> {1,1,1,1} : std::array<float, 4> {};
+                const uint32_t instance = drawGroundSplatFace(commandBuffer, corners, tile.color,
+                    {0,0,1}, frameData.lighting, tile.position - paintOrigin, {1,1},
+                    tile.showGrid ? frameData.gridOverlay.color : Vec4 {}, frameData.gridOverlay.width,
+                    false, textures, {static_cast<float>(tile.cell.x), static_cast<float>(tile.cell.y)}, wallWeights, false);
+                if (slot == 0) firstInstance = instance;
+                else if (instance != firstInstance + slot) throw std::logic_error("Ground chunk instances must be contiguous");
+            }
+            vkCmdBindVertexBuffers(commandBuffer, 0, 1, &mesh.buffer, &mesh.vertexOffset);
+            vkCmdBindIndexBuffer(commandBuffer, mesh.buffer, mesh.indexOffset, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, firstInstance);
+            ++stats_.drawCalls; ++stats_.groundChunkDraws; stats_.groundChunkTiles += draw.tileCount;
+            stats_.visibleFaces += mesh.indexCount / 3; stats_.triangles += mesh.indexCount / 3;
+            stats_.vertices += mesh.indexCount;
+        }
+        vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
+        vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    }
+
     // Ground tops blended from two textures via a splat map. Lighting,
     // shadowing, grid, and dithering come from the same helpers drawFace uses,
     // so they agree by construction. passData carries the optional layer data
@@ -3267,9 +3344,10 @@ private:
         bool isEditorPreview,
         const GroundSplatTextures& textures,
         Vec2 rimTileOrigin,
-        const std::array<float, 4>& rimWallCoverage)
+        const std::array<float, 4>& rimWallCoverage,
+        bool countGeometry = true)
     {
-        beginQuadDraw(commandBuffer);
+        if (countGeometry) beginQuadDraw(commandBuffer);
 
         const SunAmbientLanes lanes = sunAmbientLanes(lighting);
         const bool wallBlend = std::ranges::any_of(rimWallCoverage,
@@ -3462,6 +3540,11 @@ private:
             &batchConstants);
         bindDescriptorSet(commandBuffer);
         vkCmdDraw(commandBuffer, 6, instanceCount, 0, firstInstance);
+        // Count batched sun cap draws like indexed chunk shadows so the
+        // experiment compares submitted geometry and commands consistently.
+        ++stats_.drawCalls;
+        stats_.triangles += instanceCount * 2U;
+        stats_.vertices += instanceCount * 6U;
     }
 
     struct PointShadowFaceBatch {
@@ -3909,6 +3992,7 @@ private:
     VulkanSceneDescriptors& descriptors_;
     VulkanPipelineFactory& pipelines_;
     VulkanModelResources& models_;
+    VulkanGroundChunkCache& groundChunks_;
     VulkanUiResources& uiResources_;
 #if SOKOBAN_ENABLE_DEBUG_UI
     const VulkanSceneRecorder::DebugLabelFont* debugLabelFont_ = nullptr;

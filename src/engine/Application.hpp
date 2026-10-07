@@ -95,7 +95,9 @@ struct ApplicationOptions {
     bool recorderScratchReuseEnabled = true;
     bool waterCellCacheEnabled = true;
     bool groundGeometryProcessingEnabled = true;
-    bool groundRimEnabled = false;
+    bool groundRimEnabled = true;
+    bool groundChunksEnabled = false;
+    bool groundChunkMeshoptimizerEnabled = true;
     bool evidenceGroundRimFixture = false;
     // Zero keeps the production default. A non-zero override exists for
     // deterministic residency stress/validation runs.

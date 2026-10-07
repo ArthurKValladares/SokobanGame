@@ -9,6 +9,7 @@
 #include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/VulkanDeviceContext.hpp"
 #include "engine/render/VulkanGpuProfiler.hpp"
+#include "engine/render/VulkanGroundChunkCache.hpp"
 #include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanRenderer.hpp"
@@ -17,6 +18,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -24,6 +26,7 @@
 #include <filesystem>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -429,6 +432,173 @@ void exerciseMemoryAllocator(sokoban::VulkanDeviceContext& deviceContext)
     if (allocator.statistics().allocationCount != 0) {
         throw std::runtime_error(
             "VMA smoke allocations were not fully released");
+    }
+}
+
+void exerciseGroundChunkCacheLifecycle(sokoban::VulkanDeviceContext& deviceContext)
+{
+    using namespace sokoban;
+    const auto require = [](bool condition, const char* message) {
+        if (!condition) throw std::runtime_error(message);
+    };
+    const auto geometryAt = [](int origin) {
+        std::array<RenderFrameData::Tile, 2> tiles;
+        for (std::size_t index = 0; index < tiles.size(); ++index) {
+            auto& tile = tiles[index];
+            tile.cell = { origin + static_cast<int>(index) * groundChunkCellWidth, 0, 0 };
+            tile.position = { static_cast<float>(tile.cell.x), 0 };
+            tile.size = { 1, 1 };
+            tile.color = { 1, 1, 1, 1 };
+            tile.height = 1;
+            tile.model = { 1 };
+            tile.effect = RenderSurfaceEffect::GroundSplat;
+            tile.groundTop = true;
+            tile.groundGeometryEligible = true;
+        }
+        return std::make_shared<const GroundChunkGeometry>(
+            compileGroundChunkGeometry(tiles, nullptr, false));
+    };
+
+    VulkanMemoryAllocator& allocator = deviceContext.memoryAllocator();
+    const auto baseline = allocator.statistics();
+    VulkanGroundChunkCache cache;
+    cache.create(allocator, deviceContext.device(), deviceContext.commandPool(),
+        deviceContext.graphicsQueue());
+    std::array<VkCommandBuffer, 2> referencingFrames {};
+    std::array<VkFence, 2> referencingFences {};
+    const auto cleanup = [&] {
+        deviceContext.waitIdle();
+        for (std::size_t index = 0; index < referencingFrames.size(); ++index) {
+            if (referencingFences[index]) {
+                vkDestroyFence(deviceContext.device(), referencingFences[index], nullptr);
+                referencingFences[index] = VK_NULL_HANDLE;
+            }
+            if (referencingFrames[index]) {
+                vkFreeCommandBuffers(deviceContext.device(), deviceContext.commandPool(),
+                    1, &referencingFrames[index]);
+                referencingFrames[index] = VK_NULL_HANDLE;
+            }
+        }
+        cache.destroy();
+    };
+    try {
+        const auto first = geometryAt(0);
+        const auto second = geometryAt(-16);
+        require(first->chunks.size() == 2, "Chunk lifecycle fixture did not create two chunks");
+        require(!cache.update(first, 0) && !cache.readyFor(first.get()) &&
+                cache.mesh(first.get(), 0).buffer == VK_NULL_HANDLE && cache.uploadCount() == 1 &&
+                cache.stagingBytes() == first->geometryBytes,
+            "Ground chunk geometry published before its upload fence was collected");
+        deviceContext.waitIdle();
+        require(!cache.update({}, 0) && cache.readyFor(first.get()) && cache.stagingBytes() == 0,
+            "Disabling chunks left a completed upload's staging allocation retained");
+        require(cache.update(first, 0) && cache.readyFor(first.get()),
+            "Ground chunk upload did not publish after queue completion");
+        const auto firstMesh = cache.mesh(first.get(), 0);
+        const auto secondMesh = cache.mesh(first.get(), 1);
+        const uint64_t firstBytes = first->geometryBytes;
+        require(firstMesh.buffer != VK_NULL_HANDLE && firstMesh.buffer == secondMesh.buffer &&
+                firstMesh.vertexOffset == 0 && firstMesh.indexCount == 6 &&
+                firstMesh.indexOffset == first->chunks[0].vertices.size() * sizeof(GroundChunkVertex) &&
+                secondMesh.vertexOffset == firstMesh.indexOffset + 6 * sizeof(uint32_t) &&
+                secondMesh.indexOffset == secondMesh.vertexOffset +
+                    first->chunks[1].vertices.size() * sizeof(GroundChunkVertex) &&
+                secondMesh.indexCount == 6 &&
+                cache.mesh(first.get(), 2).buffer == VK_NULL_HANDLE &&
+                cache.mesh(second.get(), 0).buffer == VK_NULL_HANDLE &&
+                cache.residentBytes() == firstBytes &&
+                allocator.statistics().bufferCount == baseline.bufferCount + 1,
+            "Published ground chunk ranges or staging retirement are incorrect");
+        const auto warmAllocations = allocator.statistics().lifetimeAllocations;
+        for (int index = 0; index < 8; ++index) {
+            require(cache.update(first, 0) && cache.uploadCount() == 1,
+                "Warm ground chunk lookup submitted another upload");
+        }
+        require(allocator.statistics().lifetimeAllocations == warmAllocations,
+            "Warm ground chunk lookup allocated another GPU buffer");
+
+        // Two logical frame slots reference the first buffer. The commands
+        // use its actual vertex/index ranges, without a render pass or draw.
+        // Completion of one slot must not release the other slot's resources.
+        for (std::size_t index = 0; index < referencingFrames.size(); ++index) {
+            const VkCommandBufferAllocateInfo commandInfo {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                .commandPool = deviceContext.commandPool(),
+                .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                .commandBufferCount = 1,
+            };
+            require(vkAllocateCommandBuffers(deviceContext.device(), &commandInfo,
+                        &referencingFrames[index]) == VK_SUCCESS,
+                "Ground chunk lifecycle frame command allocation failed");
+            const VkCommandBufferBeginInfo beginInfo {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+            };
+            require(vkBeginCommandBuffer(referencingFrames[index], &beginInfo) == VK_SUCCESS,
+                "Ground chunk lifecycle frame command begin failed");
+            vkCmdBindVertexBuffers(referencingFrames[index], 0, 1,
+                &firstMesh.buffer, &firstMesh.vertexOffset);
+            vkCmdBindIndexBuffer(referencingFrames[index], firstMesh.buffer,
+                firstMesh.indexOffset, VK_INDEX_TYPE_UINT32);
+            require(vkEndCommandBuffer(referencingFrames[index]) == VK_SUCCESS,
+                "Ground chunk lifecycle frame command end failed");
+            const VkFenceCreateInfo fenceInfo { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+            require(vkCreateFence(deviceContext.device(), &fenceInfo, nullptr,
+                        &referencingFences[index]) == VK_SUCCESS,
+                "Ground chunk lifecycle frame fence creation failed");
+            const VkSubmitInfo submit {
+                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                .commandBufferCount = 1,
+                .pCommandBuffers = &referencingFrames[index],
+            };
+            require(vkQueueSubmit(deviceContext.graphicsQueue(), 1, &submit,
+                        referencingFences[index]) == VK_SUCCESS,
+                "Ground chunk lifecycle frame submission failed");
+        }
+        require(!cache.update(second, (1U << 0) | (1U << 1)) && cache.uploadCount() == 2 &&
+                !cache.readyFor(first.get()) && !cache.readyFor(second.get()) &&
+                cache.residentBytes() == firstBytes + second->geometryBytes,
+            "Ground chunk replacement dropped the referenced previous geometry");
+        deviceContext.waitIdle();
+        require(cache.update(second, 0) && allocator.statistics().bufferCount == baseline.bufferCount + 2,
+            "Ground chunk replacement did not retain the previous frame-owned buffer");
+        require(vkGetFenceStatus(deviceContext.device(), referencingFences[0]) == VK_SUCCESS,
+            "Ground chunk lifecycle first frame fence did not complete");
+        cache.completeFrame(0);
+        VkMemoryRequirements retainedRequirements {};
+        vkGetBufferMemoryRequirements(deviceContext.device(), firstMesh.buffer, &retainedRequirements);
+        require(retainedRequirements.size >= firstBytes &&
+                allocator.statistics().bufferCount == baseline.bufferCount + 2 &&
+                cache.residentBytes() == firstBytes + second->geometryBytes,
+            "Completing one frame released geometry still referenced by another frame");
+        require(vkGetFenceStatus(deviceContext.device(), referencingFences[1]) == VK_SUCCESS,
+            "Ground chunk lifecycle second frame fence did not complete");
+        cache.completeFrame(1);
+        require(allocator.statistics().bufferCount == baseline.bufferCount + 1 &&
+                cache.residentBytes() == second->geometryBytes && cache.readyFor(second.get()),
+            "Last ground chunk frame completion did not release retired geometry");
+
+        auto oversized = std::make_shared<GroundChunkGeometry>();
+        oversized->chunks.emplace_back().vertices.resize(
+            (8ULL * 1024 * 1024) / sizeof(GroundChunkVertex) + 1);
+        require(!cache.update(oversized, 0) && cache.uploadCount() == 2 &&
+                cache.readyFor(second.get()) && cache.residentBytes() == second->geometryBytes,
+            "Rejected oversized ground geometry replaced a valid resident entry");
+
+        // Teardown also covers an upload whose fence has never been polled.
+        const auto third = geometryAt(32);
+        require(!cache.update(third, 0) && cache.uploadCount() == 3 && !cache.readyFor(third.get()),
+            "Ground chunk uncollected-upload teardown fixture did not submit");
+        cleanup();
+        const auto final = allocator.statistics();
+        require(cache.residentBytes() == 0 && cache.stagingBytes() == 0 && !cache.readyFor(third.get()) &&
+                final.bufferCount == baseline.bufferCount && final.bufferBytes == baseline.bufferBytes,
+            "Ground chunk destroy leaked device or staging buffers");
+        cache.destroy();
+        std::cout << "Ground chunk uploads publish once, retain pending-frame geometry, and release all buffers\n";
+    } catch (...) {
+        cleanup();
+        throw;
     }
 }
 
@@ -1110,6 +1280,7 @@ int main(int argc, char** argv)
                 "Scene depth lost detached-camera precision despite D32 support");
         }
         exerciseMemoryAllocator(deviceContext);
+        exerciseGroundChunkCacheLifecycle(deviceContext);
         exerciseSkinnedPublicationRetry(deviceContext);
         exerciseBlockingAdmissionFailure(deviceContext);
         exerciseTextureReplacementRetry(deviceContext);

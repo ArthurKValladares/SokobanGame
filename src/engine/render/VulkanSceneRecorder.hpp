@@ -15,6 +15,7 @@
 namespace sokoban {
 
 class VulkanModelResources;
+class VulkanGroundChunkCache;
 class VulkanUiResources;
 class VulkanGpuProfiler;
 class VulkanPipelineFactory;
@@ -54,6 +55,7 @@ public:
         VulkanSceneDescriptors& sceneDescriptors;
         VulkanPipelineFactory& pipelines;
         VulkanModelResources& modelResources;
+        VulkanGroundChunkCache& groundChunkResources;
         VulkanUiResources& uiResources;
     };
 

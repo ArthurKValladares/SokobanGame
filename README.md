@@ -905,6 +905,40 @@ cache hits/rebuilds and retained bytes. Canonical gameplay and screen previews
 can seed these caches from validated build artifacts. Statistics also distinguish
 active baked surfaces, imports this preparation and cumulative imports.
 
+**Ground Chunks (experiment)** assembles eligible ground tops and rims into
+8x8-cell chunks per layer when resolved geometry changes, then uploads each
+immutable generation once to device-local vertex/index buffers. The geometry
+uses exact matching baked caps where available. Paint, tint and grid bindings
+remain per tile and refresh every frame. Main rendering and sun shadows draw
+the chunks directly; picking projects their indexed triangles on demand.
+Main chunk draws use their completed cap bounds for frustum culling; offscreen
+chunks still participate in sun shadows.
+The rock bodies continue using the shared exposure-mask index variants.
+
+Chunks are off by default. Enable them with **Smooth Ground Rim** and ground
+processing, or launch with `--ground-chunks` using the default rim settings. meshoptimizer v1.3
+performs exact full-attribute vertex deduplication, vertex-cache ordering and
+vertex-fetch compaction. It preserves triangle winding, normals, wall fade,
+material seams and degenerates; it does not simplify geometry. Compare with
+`--disable-ground-meshoptimizer` while retaining chunks, then omit
+`--ground-chunks` for the individual-cap control. Evidence includes payload
+bytes, vertex counts, a 16-entry cache-model ACMR, GPU/staging residency, upload
+counts and main chunk draws. ACMR is a model comparison, not a GPU measurement.
+
+This experiment applies to canonical isometric gameplay. Editor drafts and
+screen previews retain individual caps, and active point-shadow lights select
+the existing path for the entire view. Unready uploads, stale keys, ambiguous
+cells and invalid materials also retain individual caps. GPU uploads are bounded
+to 8 MiB per generation and 32 MiB of retained device buffers, plus transient
+staging storage. Replaced buffers retire after upload and referencing frame
+fences finish. Chunks are assembled in memory; `.grm` remains the cap artifact
+format. Uses meshoptimizer. Copyright (c) 2016-2026, Arseny Kapoulkine; its MIT
+license and pinned source notice are packaged under `licenses/`.
+
+The first experiment reduces cap preparation/recording work and chunk payload
+size. It remains opt-in: GPU cost increases in the measured overworld view,
+and point-shadow support and persisted chunk payloads are follow-up work.
+
 `sokoban_content` compiles the default 0.12/0.10 rim profile into
 `geometry/ground/levelN/screenM.grm` and one `geometry/ground/overworld.grm` for
 the fully composed overworld. Artifacts contain owning cap vertices, normals and
@@ -923,9 +957,10 @@ buffers, add shared index-buffer memory and can split instance batches;
 measure memory and draw calls alongside GPU time. Both comparison modes load
 the variants; disabling processing restores the complete draw indices.
 
-**Smooth Ground Rim (prototype)** is off by default in the same Tile Geometry
-section. Enable it with processing, then adjust **Rim Width** and **Rim Depth**
-in tile units, or launch with `--ground-rim`. The defaults are 0.12 tiles wide
+**Smooth Ground Rim (prototype)** is on by default in the same Tile Geometry
+section. Adjust **Rim Width** and **Rim Depth** in tile units. Disable the control
+or launch with `--disable-ground-rim` for flat caps; `--ground-rim` explicitly
+enables smoothing. It requires ground processing. The defaults are 0.12 tiles wide
 and 0.10 tiles deep. These are nominal dimensions: broad, uneven facets vary
 the inward width and corner height to match the rock walls' chipped character.
 The pattern is anchored to world grid corners, so adjacent model variants join
@@ -951,7 +986,7 @@ convex/concave corners, water and point-light shadows:
 .\out\dev-fast\RelWithDebInfo\sokoban.exe --smoke-frames 240 --evidence-output out\ground-rim-review --save-directory out\ground-rim-review-save --evidence-ground-rim-fixture --ground-rim
 ```
 
-Omit `--ground-rim` for the flat-cap control. Evidence reports record requested
+Use `--disable-ground-rim` for the flat-cap control. Evidence reports record requested
 settings, resolved rim tiles, draw-budget fallback, and boundary-cache hits,
 rebuilds and retained bytes. Large views that exceed the shared draw budget
 fall back to flat ground as a whole before recording. The prototype

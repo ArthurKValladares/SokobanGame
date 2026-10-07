@@ -2,6 +2,7 @@
 
 #include "engine/TaskSystem.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
+#include "engine/render/GroundChunkGeometry.hpp"
 #include "engine/render/ProcessedGroundArtifact.hpp"
 #include "engine/render/AnimationController.hpp"
 #include "engine/AssetManifest.hpp"
@@ -747,6 +748,73 @@ void testWarmGroundRimPreparationAllocations()
     CHECK(parallelScene.reusedGroundRimSurfaces == 4 * edge - 5);
 }
 
+void testWarmGroundChunkPreparationAllocations()
+{
+    using namespace sokoban;
+    constexpr uint32_t edge = 16;
+    constexpr Vec2 extent { 1920, 1080 };
+    RenderFrameData frame = makeScene(edge);
+    frame.lighting.pointLightCount = 0;
+    frame.cameraExtent = RenderFrameData::CameraExtent { 0, 0, 0, edge, edge, 1 };
+    frame.groundChunksRequested = true;
+    frame.groundChunksReady = true;
+    frame.groundSplat = { .base = { 1 }, .detail = { 2 }, .splatMap = { 3 } };
+    for (auto& tile : frame.tiles) {
+        tile.model = { 1 };
+        tile.renderableId = 0;
+        tile.groundTop = true;
+        tile.groundGeometryEligible = true;
+        tile.effect = RenderSurfaceEffect::GroundSplat;
+        tile.groundRimSides = static_cast<uint8_t>(
+            (tile.cell.x == 0 ? groundWestSide : 0) |
+            (tile.cell.y == 0 ? groundNorthSide : 0) |
+            (tile.cell.x == static_cast<int>(edge - 1) ? groundEastSide : 0) |
+            (tile.cell.y == static_cast<int>(edge - 1) ? groundSouthSide : 0));
+        tile.groundRimWidth = 0.12f;
+        tile.groundRimDepth = 0.10f;
+    }
+    GroundChunkGeometryCache geometryCache;
+    frame.groundChunks = geometryCache.update(frame.tiles);
+    const auto originalGeometry = frame.groundChunks;
+    TaskSystem tasks(2);
+    IsoScenePreparer serialPreparer;
+    IsoScenePreparer parallelPreparer;
+    PreparedRenderScene serial;
+    PreparedRenderScene parallel;
+    uint32_t step = 0;
+    const auto updateFrame = [&] {
+        ++step;
+        frame.cameraYawDegrees = (step % 2) == 0 ? 31.0f : 36.0f;
+        frame.groundSplat.splatMap = RenderTexture { (step % 2) == 0 ? 3U : 4U };
+        std::rotate(frame.tiles.begin(), frame.tiles.begin() + 1, frame.tiles.end());
+        frame.groundChunks = geometryCache.update(frame.tiles);
+    };
+    const auto pick = [&](const PreparedRenderScene& scene, const IsoScenePreparer& preparer) {
+        const Vec3 clip = IsoScenePreparer::projectIsoPoint(scene.isoLayout, extent, { 4.5f, 4.5f, 1 });
+        const Vec2 pixel { (clip.x + 1.0f) * extent.x * 0.5f, (1.0f - clip.y) * extent.y * 0.5f };
+        (void)preparer.pickGridCell(scene, pixel, extent, edge, edge);
+        (void)preparer.pickGroundPoint(scene, pixel, extent);
+    };
+    checkNoFrameAllocations("chunk_scene_camera_paint_reorder_serial", [&] {
+        updateFrame();
+        serialPreparer.prepare(frame, extent, serial);
+        pick(serial, serialPreparer);
+    });
+    CHECK(serial.groundChunks == originalGeometry);
+    CHECK(serial.groundChunkDraws.size() == 4);
+    CHECK(serial.shadowFaces.empty());
+    CHECK(serial.opaqueFaceIndices.empty());
+    checkNoFrameAllocations("chunk_scene_camera_paint_reorder_parallel", [&] {
+        updateFrame();
+        parallelPreparer.prepare(frame, extent, parallel, &tasks);
+        pick(parallel, parallelPreparer);
+    });
+    CHECK(parallel.groundChunks == originalGeometry);
+    CHECK(parallel.groundChunkDraws.size() == 4);
+    CHECK(parallel.shadowFaces.empty());
+    CHECK(parallel.opaqueFaceIndices.empty());
+}
+
 } // namespace
 
 int main()
@@ -754,6 +822,7 @@ int main()
     std::cout << std::unitbuf;
     testWarmPreparationAllocationCounts();
     testWarmGroundRimPreparationAllocations();
+    testWarmGroundChunkPreparationAllocations();
     testWarmParallelForAllocationCounts();
     testGameplayFrameAllocations();
     testTurretQueryAllocations();

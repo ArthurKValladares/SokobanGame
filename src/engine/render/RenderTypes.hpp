@@ -19,6 +19,7 @@
 namespace sokoban {
 
 struct ProcessedGroundArtifact;
+struct GroundChunkGeometry;
 
 enum class RenderViewMode : uint8_t {
     TopDown2D,
@@ -658,6 +659,11 @@ struct RenderFrameData {
     // Owning optional build output. Exact resolved geometry keys gate reuse;
     // editor drafts and changed profiles can still compile their surfaces live.
     std::shared_ptr<const ProcessedGroundArtifact> processedGroundArtifact;
+    bool groundChunksRequested = false;
+    bool groundChunkMeshoptimizer = true;
+    // The renderer resolves upload readiness before publishing cap lists.
+    std::shared_ptr<const GroundChunkGeometry> groundChunks;
+    bool groundChunksReady = false;
     RenderTexture groundRockSideTexture = noTexture;
     std::array<GroundSplatRegion, groundSplatRegionCapacity>
         groundSplatRegions {};
@@ -781,6 +787,21 @@ struct RenderStats {
     uint32_t bakedGroundRimSurfaces = 0;
     uint32_t importedGroundRimSurfaces = 0;
     uint64_t groundRimArtifactImports = 0;
+    uint32_t groundChunkDraws = 0;
+    uint32_t groundChunkTiles = 0;
+    uint64_t groundChunkGeometryBytes = 0;
+    uint64_t groundChunkOriginalBytes = 0;
+    uint64_t groundChunkResidentBytes = 0;
+    uint64_t groundChunkStagingBytes = 0;
+    uint64_t groundChunkUploads = 0;
+    uint64_t groundChunkCacheHits = 0;
+    uint64_t groundChunkCacheRebuilds = 0;
+    uint64_t groundChunkInputVertices = 0;
+    uint64_t groundChunkOutputVertices = 0;
+    float groundChunkInputAcmr = 0.0f;
+    float groundChunkOutputAcmr = 0.0f;
+    bool groundChunksRequested = false;
+    bool groundChunkMeshoptimizer = true;
     uint32_t pipelineBinds = 0;
     uint32_t renderPasses = 0;
     uint32_t imageBarriers = 0;

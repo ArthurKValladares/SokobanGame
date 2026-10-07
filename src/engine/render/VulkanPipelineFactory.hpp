@@ -67,6 +67,7 @@ public:
     {
         return groundSplatOpaque_;
     }
+    [[nodiscard]] VkPipeline groundChunkOpaque() const { return groundChunkOpaque_; }
     [[nodiscard]] VkPipeline modelOpaque() const { return modelOpaque_; }
     [[nodiscard]] VkPipeline skinnedModelOpaque() const
     {
@@ -75,6 +76,7 @@ public:
 
     [[nodiscard]] VkPipeline shadow() const { return shadow_; }
     [[nodiscard]] VkPipeline modelShadow() const { return modelShadow_; }
+    [[nodiscard]] VkPipeline groundChunkShadow() const { return groundChunkShadow_; }
     [[nodiscard]] VkPipeline skinnedModelShadow() const {
         return skinnedModelShadow_;
     }
@@ -111,6 +113,8 @@ private:
         None,
         Mesh,
         MeshPosition,
+        GroundChunk,
+        GroundChunkPosition,
         SkinnedMesh,
         SkinnedMeshPosition,
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -179,6 +183,7 @@ private:
     VkPipeline scene_ = VK_NULL_HANDLE;
     VkPipeline sceneOpaque_ = VK_NULL_HANDLE;
     VkPipeline groundSplatOpaque_ = VK_NULL_HANDLE;
+    VkPipeline groundChunkOpaque_ = VK_NULL_HANDLE;
     VkPipeline modelOpaque_ = VK_NULL_HANDLE;
     VkPipeline skinnedModelOpaque_ = VK_NULL_HANDLE;
     VkPipeline water_ = VK_NULL_HANDLE;
@@ -193,6 +198,7 @@ private:
     VkPipeline skinnedMirrorEnergyModel_ = VK_NULL_HANDLE;
     VkPipeline shadow_ = VK_NULL_HANDLE;
     VkPipeline modelShadow_ = VK_NULL_HANDLE;
+    VkPipeline groundChunkShadow_ = VK_NULL_HANDLE;
     VkPipeline skinnedModelShadow_ = VK_NULL_HANDLE;
     VkPipeline ssao_ = VK_NULL_HANDLE;
     VkPipeline ssaoComposite_ = VK_NULL_HANDLE;

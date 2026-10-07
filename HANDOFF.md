@@ -546,7 +546,32 @@ and the required real-device checks are recorded.
   state per-frame. Snapshot counters and retained bytes in each prepared scene
   for evidence; a cache hit does not eliminate projection/culling/sorting work.
   `compileGroundRimSurfaces` is the owning renderer-independent live compiler;
-  no merged terrain draw pipeline is introduced yet.
+  the optional chunk path below avoids per-frame cap projection and sorting.
+- `GroundChunkGeometryCache` compares exact sorted eligible cell and surface
+  keys, plus the optimizer flag, and owns immutable 8x8-cell chunks per layer.
+  Each vertex stores world position, facet normal, normalized quad coordinates,
+  all four wall-coverage weights and stable tile slot. Full-record deduplication,
+  cache ordering and fetch compaction use the pinned meshoptimizer v1.3 subset;
+  no simplification, quantization, degenerate removal or winding change occurs.
+  Material, camera and source-order changes reuse geometry. Exact baked cap
+  matches seed construction; `.grm` does not persist the chunk payload yet.
+  `PreparedGroundChunkDraw` requires a complete, unique, ready chunk with exact
+  keys and valid effective paint textures. It suppresses individual caps in
+  main/sun-shadow lists, while retaining body models and logical selection.
+  On-demand picking projects indexed triangles; old scenes own their generation
+  and captured per-slot pickability. Main chunks cull using completed cap AABBs;
+  invalid bounds fail open and sun caster records remain. Active point-shadow lights use the legacy
+  path. Canonical gameplay opts in through `--ground-chunks` with the default rim settings or
+  tuning; drafts and previews stay on the legacy path for this experiment.
+  `VulkanGroundChunkCache` publishes only after its upload fence signals; stale
+  generations remain until both upload and referencing frame fences finish.
+  Budget is 8 MiB per generation / 32 MiB retained device-local buffers, with
+  separately reported temporary staging bytes. Warm frames upload no geometry;
+  dynamic SSBO entries carry per-tile paint/tint/grid state. Preserve draw-budget
+  reserve for these entries and fallback caps while publication is pending.
+  Preserve the requested immutable generation through temporary flat draw-budget
+  fallback so its upload can finish and a fresh frame can adopt the rim chunks.
+  `--disable-ground-meshoptimizer` retains chunks for lossless-pass comparisons.
 - `GroundLevelGeometry` compiles authored static ground through `tileVisual`,
   manifest scales and shared exposure rules. Content staging writes versioned,
   bounded, checksummed `.grm` cap artifacts for every canonical screen and the
@@ -565,9 +590,10 @@ and the required real-device checks are recorded.
   GPU readiness and draw-budget fallback remain authoritative. Drafts use the
   live compiler. Cached baked provenance may outlive the provider; active baked
   count, imports this preparation and total imports describe different things.
-- The default-off **Smooth Ground Rim (prototype)** control, or `--ground-rim`,
+- The default-on **Smooth Ground Rim (prototype)** control, or `--ground-rim`,
   requests broad chipped facets with nominal tile-unit width/depth. It requires
-  ground processing. `GroundRimGeometry` and `GroundRim.glsl` share the same
+  ground processing. Disable it with the control or `--disable-ground-rim`.
+  `GroundRimGeometry` and `GroundRim.glsl` share the same
   triangulated height field. Integer hashes of world grid corners determine
   width and depth; exposed outer borders interpolate corner depths linearly
   so arbitrary authored body edge segments seal. Hidden cap borders share
@@ -602,7 +628,7 @@ and the required real-device checks are recorded.
   after every source mesh is resident and validated, and recheck after asset
   maintenance. Readiness changes must reprepare the cap scene and its shadows.
   `--evidence-ground-rim-fixture` requires a bounded `--evidence-output` run;
-  use it with and without `--ground-rim` to inspect boundaries and cap/body seams.
+  compare defaults against `--disable-ground-rim` to inspect boundaries and cap/body seams.
   Main/preview/UI share the existing draw-instance budget. Check the prepared
   scene reserve before recording and flatten both rim cohorts if it does not
   fit; point-shadow batches use the same reserve and can fall back to pushes.

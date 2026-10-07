@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -15,6 +16,7 @@
 namespace sokoban {
 
 class TaskSystem;
+struct GroundChunkGeometry;
 
 struct TileRenderLayout {
     Vec2 boardBottomLeft {};
@@ -170,6 +172,15 @@ struct PreparedPointShadowCasters {
     std::vector<std::size_t> modelTileIndices;
 };
 
+struct PreparedGroundChunkDraw {
+    std::size_t chunkIndex = 0;
+    std::array<std::size_t, 64> tileIndices {};
+    uint32_t tileCount = 0;
+    bool mainSceneVisible = false;
+    // Picking eligibility is a scene-owned snapshot indexed by stable tileSlot.
+    uint64_t pickableTiles = 0;
+};
+
 // CPU scene work shared by every pass in one submitted frame.
 // Index lists point into the source RenderFrameData or the face pool and keep
 // pass recording free of geometry regeneration, culling, and sorting.
@@ -194,6 +205,10 @@ struct PreparedRenderScene {
     std::vector<std::array<Vec3, 4>> shadowFaces;
     std::vector<Aabb> shadowFaceBounds;
     std::vector<std::size_t> shadowModelIndices;
+    // Immutable owning geometry remains valid when a newer frame rebuilds it.
+    std::shared_ptr<const GroundChunkGeometry> groundChunks;
+    std::vector<PreparedGroundChunkDraw> groundChunkDraws;
+    std::vector<uint8_t> groundChunkTileMask;
     std::array<PreparedPointShadowCasters,
         RenderFrameData::pointLightCapacity> pointShadowCasters;
     uint32_t pointShadowFaceCandidates = 0;
@@ -352,6 +367,7 @@ private:
     // Updated before auxiliary tasks start; visible and shadow preparation
     // read the same owning geometry, then copy it into frame-local outputs.
     mutable GroundRimSurfaceCache groundRimSurfaceCache_;
+    mutable std::vector<std::size_t> groundChunkTileOrder_;
     mutable uint64_t nextRenderableIdentity_ = 1;
     bool opaqueFrontToBackSort_ = true;
     bool frustumCulling_ = true;

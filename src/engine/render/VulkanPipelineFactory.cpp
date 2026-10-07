@@ -1,6 +1,7 @@
 #include "engine/render/VulkanPipelineFactory.hpp"
 
 #include "engine/render/GltfMesh.hpp"
+#include "engine/render/GroundChunkGeometry.hpp"
 #include "engine/render/GpuSkinning.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/ShaderCatalog.hpp"
@@ -52,6 +53,20 @@ constexpr VkVertexInputBindingDescription skinnedBinding {
     .binding = 0,
     .stride = sizeof(GpuSkinnedVertex),
     .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+};
+
+constexpr VkVertexInputBindingDescription groundChunkBinding {
+    .binding = 0,
+    .stride = sizeof(GroundChunkVertex),
+    .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+};
+
+constexpr std::array<VkVertexInputAttributeDescription, 5> groundChunkAttributes {
+    VkVertexInputAttributeDescription { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GroundChunkVertex, position) },
+    VkVertexInputAttributeDescription { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GroundChunkVertex, normal) },
+    VkVertexInputAttributeDescription { 2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(GroundChunkVertex, faceCoord) },
+    VkVertexInputAttributeDescription { 3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GroundChunkVertex, wallCoverage) },
+    VkVertexInputAttributeDescription { 4, 0, VK_FORMAT_R32_UINT, offsetof(GroundChunkVertex, tileSlot) },
 };
 
 // Locations 8 and 9 rather than 5 and 6 so that a static mesh and a
@@ -207,6 +222,9 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     // Indices are positional only so that the cleanup loop below has one
     // array to walk; nothing else depends on the order.
     std::array<VkShaderModule, shaderCatalog::sources.size()> shaders {};
+    // New chunk modules follow the existing optional debug slots; compute
+    // remains last in both developer and shipping catalogs.
+    constexpr std::size_t groundChunkShaderFirst = shaderCatalog::sources.size() - 4;
     try {
         shaders[0] = shaderModule(shaderCatalog::triangleVert);
         shaders[1] = shaderModule(shaderCatalog::triangleFrag);
@@ -228,6 +246,9 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         shaders[17] = shaderModule(shaderCatalog::atmosphereCompositeFrag);
         shaders[18] = shaderModule(shaderCatalog::bloomExtractFrag);
         shaders[19] = shaderModule(shaderCatalog::bloomBlurFrag);
+        shaders[groundChunkShaderFirst] = shaderModule(shaderCatalog::groundChunkVert);
+        shaders[groundChunkShaderFirst + 1] = shaderModule(shaderCatalog::groundChunkShadowVert);
+        shaders[groundChunkShaderFirst + 2] = shaderModule(shaderCatalog::groundChunkFrag);
         shaders.back() = shaderModule(shaderCatalog::waterCellsComp);
         const VkComputePipelineCreateInfo cachePipelineInfo {
             .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
@@ -286,6 +307,11 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             shaders[0], shaders[10], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe, Target::SceneOpaque);
+        groundChunkOpaque_ = createScenePipeline(
+            shaders[groundChunkShaderFirst], shaders[groundChunkShaderFirst + 2],
+            VertexLayout::GroundChunk,
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe, Target::SceneOpaque);
         // The game's UI has its own fragment path and composites after the
         // tonemap, onto the swapchain or onto the display image the developer
         // workspace publishes. It retains the shared instanced-quad vertex
@@ -320,6 +346,8 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             createInfo.wireframe);
         shadow_ = createShadowPipeline(shaders[2], VertexLayout::None);
         modelShadow_ = createShadowPipeline(shaders[4], VertexLayout::MeshPosition);
+        groundChunkShadow_ = createShadowPipeline(
+            shaders[groundChunkShaderFirst + 1], VertexLayout::GroundChunkPosition);
         skinnedModelShadow_ = createShadowPipeline(
             shaders[13], VertexLayout::SkinnedMeshPosition);
         ssao_ = createPostProcessPipeline(
@@ -355,6 +383,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             std::pair { scene_, "Scene pipeline" },
             std::pair { sceneOpaque_, "Scene pipeline (opaque)" },
             std::pair { groundSplatOpaque_, "Ground splat pipeline (opaque)" },
+            std::pair { groundChunkOpaque_, "Ground chunk pipeline (opaque)" },
             std::pair { modelOpaque_, "Model pipeline (opaque)" },
             std::pair {
                 skinnedModelOpaque_, "Skinned model pipeline (opaque)" },
@@ -368,6 +397,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             std::pair { skinnedMirrorEnergyModel_, "Skinned mirror energy model pipeline" },
             std::pair { shadow_, "Directional shadow pipeline" },
             std::pair { modelShadow_, "Model shadow pipeline" },
+            std::pair { groundChunkShadow_, "Ground chunk sun shadow pipeline" },
             std::pair { skinnedModelShadow_, "Skinned model shadow pipeline" },
             std::pair { ssao_, "SSAO pipeline" },
             std::pair { ssaoComposite_, "SSAO composite pipeline" },
@@ -407,6 +437,7 @@ void VulkanPipelineFactory::destroy()
         const std::array pipelines {
             scene_, sceneOpaque_, water_, waterCells_, mirrorEnergy_, groundSplat_,
             groundSplatOpaque_, ui_, model_, modelOpaque_,
+            groundChunkOpaque_, groundChunkShadow_,
             mirrorEnergyModel_, skinnedModel_, skinnedModelOpaque_,
             skinnedMirrorEnergyModel_,
             shadow_, modelShadow_, skinnedModelShadow_,
@@ -433,6 +464,8 @@ void VulkanPipelineFactory::destroy()
     scene_ = VK_NULL_HANDLE;
     sceneOpaque_ = VK_NULL_HANDLE;
     groundSplatOpaque_ = VK_NULL_HANDLE;
+    groundChunkOpaque_ = VK_NULL_HANDLE;
+    groundChunkShadow_ = VK_NULL_HANDLE;
     modelOpaque_ = VK_NULL_HANDLE;
     skinnedModelOpaque_ = VK_NULL_HANDLE;
     water_ = VK_NULL_HANDLE;
@@ -515,6 +548,17 @@ VkPipelineVertexInputStateCreateInfo VulkanPipelineFactory::vertexInputFor(
     case VertexLayout::MeshPosition:
         info.pVertexBindingDescriptions = &meshBinding;
         info.pVertexAttributeDescriptions = &meshPositionAttribute;
+        info.vertexAttributeDescriptionCount = 1;
+        break;
+    case VertexLayout::GroundChunk:
+        info.pVertexBindingDescriptions = &groundChunkBinding;
+        info.pVertexAttributeDescriptions = groundChunkAttributes.data();
+        info.vertexAttributeDescriptionCount =
+            static_cast<uint32_t>(groundChunkAttributes.size());
+        break;
+    case VertexLayout::GroundChunkPosition:
+        info.pVertexBindingDescriptions = &groundChunkBinding;
+        info.pVertexAttributeDescriptions = groundChunkAttributes.data();
         info.vertexAttributeDescriptionCount = 1;
         break;
     case VertexLayout::SkinnedMesh:

@@ -17,6 +17,7 @@
 #include "engine/render/VulkanAtmospherePass.hpp"
 #include "engine/render/VulkanBloomPass.hpp"
 #include "engine/render/VulkanGpuProfiler.hpp"
+#include "engine/render/VulkanGroundChunkCache.hpp"
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanPipelineCache.hpp"
 #include "engine/render/VulkanPipelineFactory.hpp"
@@ -297,6 +298,7 @@ private:
 
     void applyGroundRimBudgetFallback(
         const PreparedFrameScratch& prepared, std::size_t uiDrawCount);
+    bool resolveGroundChunks(RenderFrameData& frame, bool publish = false);
 
     struct RenderResourceSet {
         std::unique_ptr<VulkanSwapchainResources> swapchain;
@@ -371,6 +373,8 @@ private:
     VulkanUiResources uiResources_;
 
     VulkanModelResources modelResources_;
+    GroundChunkGeometryCache groundChunkGeometryCache_;
+    VulkanGroundChunkCache groundChunkGpuCache_;
     VulkanSceneRecorder sceneRecorder_;
     RendererReconfigurationQueue reconfigurationQueue_;
     RenderResourceSet activeResources_;

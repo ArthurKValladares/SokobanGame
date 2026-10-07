@@ -297,6 +297,8 @@ Application::Application(ApplicationOptions options)
     presentationSettings_.geometry.processGroundGeometry =
         options.groundGeometryProcessingEnabled;
     presentationSettings_.geometry.smoothGroundRim = options.groundRimEnabled;
+    presentationSettings_.geometry.groundChunks = options.groundChunksEnabled;
+    presentationSettings_.geometry.groundChunkMeshoptimizer = options.groundChunkMeshoptimizerEnabled;
     evidenceGroundRimFixture_ = options.evidenceGroundRimFixture;
     presentationSettings_.normalize();
     presentation_.setAnimationCatalog(&animationCatalog_);
@@ -2961,6 +2963,9 @@ RenderFrameData Application::buildRenderFrame(
             ? &*projectedActivationPreview : nullptr,
         .groundGeometryCache = &gameplayGroundGeometryCache_,
     }, arena);
+    frame.groundChunksRequested = !editorDraftPlaying && presentationSettings_.geometry.groundChunks &&
+        presentationSettings_.geometry.processGroundGeometry && presentationSettings_.geometry.smoothGroundRim;
+    frame.groundChunkMeshoptimizer = presentationSettings_.geometry.groundChunkMeshoptimizer;
     if (!editorDraftPlaying && !gameplayGroundGeometrySource_.empty() &&
         presentationSettings_.geometry.smoothGroundRim &&
         presentationSettings_.geometry.processGroundGeometry) {

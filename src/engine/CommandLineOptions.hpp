@@ -61,7 +61,9 @@ struct CommandLineOptions {
     bool recorderScratchReuseEnabled = true;
     bool waterCellCacheEnabled = true;
     bool groundGeometryProcessingEnabled = true;
-    bool groundRimEnabled = false;
+    bool groundRimEnabled = true;
+    bool groundChunksEnabled = false;
+    bool groundChunkMeshoptimizerEnabled = true;
     bool evidenceGroundRimFixture = false;
     // Diagnostic override for exercising residency pressure. Zero keeps the
     // normal renderer budget.
@@ -268,6 +270,12 @@ struct CommandLineOptions {
             options.groundGeometryProcessingEnabled = false;
         } else if (argument == "--ground-rim") {
             options.groundRimEnabled = true;
+        } else if (argument == "--disable-ground-rim") {
+            options.groundRimEnabled = false;
+        } else if (argument == "--ground-chunks") {
+            options.groundChunksEnabled = true;
+        } else if (argument == "--disable-ground-meshoptimizer") {
+            options.groundChunkMeshoptimizerEnabled = false;
         } else if (argument == "--evidence-ground-rim-fixture") {
             options.evidenceGroundRimFixture = true;
         } else if (argument == "--texture-residency-kib") {
@@ -375,6 +383,7 @@ inline constexpr std::string_view commandLineUsage =
     "[--level <index> [--screen <index>] | --edit <level document>] "
     "[--smoke-frames <positive integer>] "
     "[--save-directory <path>] [--require-validation] "
+    "[--ground-chunks] [--disable-ground-meshoptimizer] "
     "[--texture-residency-kib <1..16777216>] "
     "[--serial-scene-preparation] "
     "[--disable-point-shadow-optimizations] "
@@ -392,7 +401,7 @@ inline constexpr std::string_view commandLineUsage =
     "[--evidence-disable-ao] "
     "[--evidence-disable-frustum-culling] [--evidence-water] "
     "[--disable-ground-geometry] "
-    "[--ground-rim] [--evidence-ground-rim-fixture] "
+    "[--ground-rim] [--disable-ground-rim] [--evidence-ground-rim-fixture] "
     "[--evidence-point-light] "
     "[--evidence-point-light-stress]]";
 

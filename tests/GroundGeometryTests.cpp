@@ -205,7 +205,7 @@ void testGameplayVisibilityAndToggle()
     GameplayPresentation presentation;
     presentation.resetEntities(state);
     PresentationSettings settings;
-    settings.geometry.smoothGroundRim = true;
+    CHECK(settings.geometry.smoothGroundRim);
     GroundGeometryCache cache;
     RenderFrameBuilder::GameplayInput input {
         .manifest = manifest(), .level = level, .state = state,
