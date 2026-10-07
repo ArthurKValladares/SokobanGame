@@ -38,6 +38,9 @@ enum class RenderSurfaceEffect : uint8_t {
     // Ground tops blend two ground textures through a splat map; see
     // shaders/ground_splat.frag.glsl.
     GroundSplat,
+    // Authored plates keep their neutral housing while linked-color emissive
+    // surfaces carry an object-anchored animated energy pattern.
+    PlateEnergy,
 };
 
 enum class WaterShorelineEdge : uint8_t {

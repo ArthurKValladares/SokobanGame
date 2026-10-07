@@ -181,7 +181,10 @@ struct GpuDrawInstance {
     //
     // Water uses all four for its border and ripple parameters. Model draws
     // use passData[0].x for the base index of their material range and y for
-    // mixed-material back-face rejection. Nine-sliced textured quads use the
+    // mixed-material back-face rejection. z selects a linked-object aura,
+    // w selects authored plate energy, and passData[1].x carries the plate's
+    // animation clock independently of the editor-preview dither marker.
+    // Nine-sliced textured quads use the
     // two-lane contract in NineSlice.hpp: source borders in passData[0] and
     // target extent/scale in passData[1]. Ground splats carry base/detail
     // normal handles in passData[0].xy, base/detail ORM handles in zw, and

@@ -1388,6 +1388,7 @@ void testGateEnergyCubeFadesAndPressurePlateMatchesColor()
         });
     CHECK(closedPlate != closedFrame.tiles.end());
     CHECK(near(closedPlate->color.x, gateColor.x * 0.42f));
+    CHECK(closedPlate->effect == RenderSurfaceEffect::PlateEnergy);
 
     GameState open = closed;
     open.players[0].cell = { 1, 0, 1 };
@@ -2186,6 +2187,7 @@ void testEditorDrawsPlatesBeneathTheirOccupants()
     });
     CHECK(rock != frame.tiles.end() && rock->pickable);
     CHECK(end != frame.tiles.end() && !end->pickable);
+    CHECK(end != frame.tiles.end() && end->effect == RenderSurfaceEffect::PlateEnergy);
 }
 
 #if SOKOBAN_ENABLE_DEBUG_UI

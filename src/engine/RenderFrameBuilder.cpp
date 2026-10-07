@@ -287,6 +287,8 @@ void appendStaticTiles(
                     // splat map; modelled tiles keep their own materials.
                     .effect = tileTypeIsGround(cell.tile)
                         ? RenderSurfaceEffect::GroundSplat
+                        : (cell.tile == TileType::PressurePlate || cell.tile == TileType::End)
+                        ? RenderSurfaceEffect::PlateEnergy
                         : RenderSurfaceEffect::Standard,
                     .groundRockVariant = groundRockVariantFor(cell.tile),
                     .groundTop = tileTypeIsGround(cell.tile),
@@ -702,6 +704,9 @@ void appendCoveredStaticSurfaces(
             .model = input.manifest.modelForTile(plate.tile),
             .modelRotationQuarterTurns =
                 railOrientationQuarterTurns(plate.tile).value_or(0),
+            .effect = (plate.tile == TileType::PressurePlate || plate.tile == TileType::End)
+                ? RenderSurfaceEffect::PlateEnergy
+                : RenderSurfaceEffect::Standard,
         };
         applyTileScale(renderTile, input.settings.tileScale(plate.tile));
         if (tileTypeIsPortal(plate.tile)) {

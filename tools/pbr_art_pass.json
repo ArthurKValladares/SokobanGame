@@ -268,6 +268,16 @@
       "surface_rule": "mechanism"
     },
     {
+      "name": "PressurePlate",
+      "source": "custom/models/pressure_plate.glb",
+      "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "EndPlate",
+      "source": "custom/models/end_plate.glb",
+      "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
+    },
+    {
       "name": "Lectern",
       "source": "custom/models/lectern.glb",
       "skip": null,

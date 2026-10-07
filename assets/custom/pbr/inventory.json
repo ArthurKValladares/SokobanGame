@@ -518,6 +518,16 @@
       }
     },
     {
+      "name": "PressurePlate",
+      "source": "custom/models/pressure_plate.glb",
+      "retained": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "EndPlate",
+      "source": "custom/models/end_plate.glb",
+      "retained": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
+    },
+    {
       "name": "Lectern",
       "source": "custom/models/lectern.glb",
       "output": "custom/pbr/models/Lectern.glb",

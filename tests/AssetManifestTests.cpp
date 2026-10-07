@@ -887,6 +887,39 @@ int main()
                 }
             }
         }
+        for (const auto type : { sokoban::TileType::PressurePlate, sokoban::TileType::End }) {
+            const auto model = rockManifest.modelForTile(type);
+            CHECK(!model.isCube());
+            if (model.isCube()) continue;
+            const auto& asset = rockManifest.models()[model.index()];
+            CHECK(asset.preserveSourceScale);
+            const auto plate = sokoban::loadGltfMesh(*root / asset.path,
+                { .preserveSourceScale = true });
+            CHECK(!plate.vertices.empty() && !plate.indices.empty());
+            bool hasGreyHousing = false;
+            bool hasHdrInsert = false;
+            for (const auto& material : plate.materials) {
+                const auto emission = material.emissiveFactor;
+                if (emission.x > 1.0f && emission.y > 1.0f && emission.z > 1.0f) {
+                    hasHdrInsert = true;
+                } else if (emission.x == 0.0f && emission.y == 0.0f && emission.z == 0.0f) {
+                    const auto color = material.baseColorFactor;
+                    hasGreyHousing |= std::abs(color.x - color.y) < 0.08f &&
+                        std::abs(color.y - color.z) < 0.08f && color.x > 0.1f;
+                }
+            }
+            CHECK(hasGreyHousing && hasHdrInsert);
+            float maximumHeight = 0.0f;
+            for (const auto& vertex : plate.vertices) {
+                CHECK(std::isfinite(vertex.position.x) &&
+                    std::isfinite(vertex.position.y) && std::isfinite(vertex.position.z));
+                CHECK(vertex.position.x >= 0.0f && vertex.position.x <= 1.0f);
+                CHECK(vertex.position.y >= 0.0f && vertex.position.y <= 1.0f);
+                CHECK(vertex.position.z >= 0.0f);
+                maximumHeight = std::max(maximumHeight, vertex.position.z);
+            }
+            CHECK(type == sokoban::TileType::End ? maximumHeight > 2.0f : maximumHeight < 1.2f);
+        }
         const auto lectern = sokoban::loadGltfMesh(*root / "custom/models/lectern.glb",
             { .preserveSourceScale = true });
         CHECK(!lectern.vertices.empty());

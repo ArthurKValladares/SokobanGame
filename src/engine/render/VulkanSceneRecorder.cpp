@@ -3679,6 +3679,9 @@ private:
             // x is the base of the model's material range. y asks the fragment
             // shader to restore single-sided rejection per primitive when a
             // mixed double-sided model has disabled fixed-function culling.
+            // w enables authored plate energy; passData[1].x is its clock.
+            // Keeping that clock separate preserves the editor preview's
+            // negative materialOptions.w dither marker.
             .passData = {
                 Vec4 {
                     static_cast<float>(material.materialBase),
@@ -3688,9 +3691,10 @@ private:
                         ? 1.0f
                         : 0.0f,
                     linkedAura ? 1.0f : 0.0f,
-                    0.0f,
+                    tile.effect == RenderSurfaceEffect::PlateEnergy ? 1.0f : 0.0f,
                 },
-                Vec4 {},
+                Vec4 { tile.effect == RenderSurfaceEffect::PlateEnergy
+                    ? effectAnimationTimeSeconds : 0.0f, 0.0f, 0.0f, 0.0f },
                 Vec4 { tile.groundRimWidth, tile.groundRimDepth,
                     GroundRimProfile {}.bodyBand, static_cast<float>(tile.groundRimSides) },
                 Vec4 { static_cast<float>(tile.groundRimConcaveCorners),

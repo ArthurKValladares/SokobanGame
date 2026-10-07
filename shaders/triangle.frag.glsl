@@ -183,6 +183,25 @@ float gridMask()
 
 #include "PbrLighting.glsl"
 
+float plateEnergyPattern(vec2 uv, float time)
+{
+    // Both plate assets unwrap their luminous surfaces in local XY. The
+    // pattern follows the model through camera motion and tile rotation.
+    vec2 p = uv * 2.0 - 1.0;
+    vec2 warped = p + vec2(
+        sin(p.y * 6.0 + time * 0.8),
+        sin(p.x * 5.0 - time * 0.65)) * 0.10;
+    float flowingRibbon = smoothstep(0.60, 0.97,
+        sin(warped.x * 16.0 + warped.y * 5.0 - time * 1.4));
+    float crossingRibbon = smoothstep(0.76, 0.98,
+        sin(warped.y * 13.0 - warped.x * 4.0 + time * 0.9));
+    float radialSweep = smoothstep(0.72, 0.99,
+        sin(length(warped) * 19.0 - time * 1.8));
+    float flicker = sin(time * 2.2 + p.x * 4.0 + p.y * 3.0) * 0.035;
+    return 0.70 + flowingRibbon * 0.32 + crossingRibbon * 0.18 +
+        radialSweep * 0.14 + flicker;
+}
+
 void main()
 {
     applyEditorPreviewDither();
@@ -196,6 +215,15 @@ void main()
     vec4 materialColor = draw.color;
     int materialMode = int(draw.textureOptions.x + 0.5);
     bool modelDraw = isModelDraw(draw.gridColor);
+    bool plateEnergy = modelDraw && draw.passData[0].w > 0.5;
+    bool plateEmissive = plateEnergy &&
+        max(max(material.emissiveAndMetallic.r,
+            material.emissiveAndMetallic.g), material.emissiveAndMetallic.b) > 0.0;
+    if (plateEnergy && !plateEmissive) {
+        // Only luminous plate parts receive the gameplay/link tint. The grey
+        // metal surround keeps its authored color at every activation state.
+        materialColor.rgb = vec3(1.0);
+    }
     if (modelDraw) {
         // A mixed glTF mesh may be submitted to both passes. The recorder
         // selects the pass's material subset without multiplying pipelines.
@@ -418,6 +446,12 @@ void main()
                 materialTextureUv(
                     material.textureUvSets.w,
                     material.materialState.z)).rgb;
+        }
+        if (plateEmissive) {
+            // Emission remains HDR for the existing scene bloom pass. Tinting
+            // here also lets a locked End dim its core with its draw color.
+            emissive *= draw.color.rgb * plateEnergyPattern(
+                vec2(inFaceCoordU, inFaceCoordV), draw.passData[1].x);
         }
 
         color = diffuseLight + ambientContribution +

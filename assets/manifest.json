@@ -656,6 +656,16 @@
       "preserveSourceScale": true
     },
     {
+      "name": "PressurePlate",
+      "path": "custom/models/pressure_plate.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "EndPlate",
+      "path": "custom/models/end_plate.glb",
+      "preserveSourceScale": true
+    },
+    {
       "name": "Lectern",
       "path": "custom/pbr/models/Lectern.glb",
       "preserveSourceScale": true
@@ -881,6 +891,14 @@
     {
       "tile": "Lock Plate",
       "model": "LockPlate"
+    },
+    {
+      "tile": "Pressure",
+      "model": "PressurePlate"
+    },
+    {
+      "tile": "End",
+      "model": "EndPlate"
     },
     {
       "tile": "Lectern South",

@@ -136,6 +136,11 @@ void testButtonIsSmallerAndRaisedAbovePressurePlate()
     CHECK(button.size.x < pressure.size.x);
     CHECK(button.size.y < pressure.size.y);
     CHECK(button.height > pressure.height);
+    CHECK(pressure.effect == RenderSurfaceEffect::PlateEnergy);
+    CHECK(button.effect == RenderSurfaceEffect::Standard);
+    CHECK(tileThumbnails::buildBakeFrame(
+        TileType::End, testManifest(), testSettings()).tiles.back().effect ==
+        RenderSurfaceEffect::PlateEnergy);
     CHECK(tileThumbnails::assetPathFor(TileType::Button) ==
         "custom/thumbnails/tile_button.png");
 }

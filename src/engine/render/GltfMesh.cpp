@@ -472,10 +472,14 @@ MeshMaterial materialFrom(
         material.emissiveUvSet = static_cast<uint32_t>(
             std::max(source->emissive_texture.texcoord, 0));
     }
+    // glTF keeps the color factor in [0, 1]; the strength extension carries
+    // HDR radiance so authored energy surfaces can feed the bloom pass.
+    const float emissiveStrength = source->has_emissive_strength
+        ? source->emissive_strength.emissive_strength : 1.0f;
     material.emissiveFactor = {
-        source->emissive_factor[0],
-        source->emissive_factor[1],
-        source->emissive_factor[2],
+        source->emissive_factor[0] * emissiveStrength,
+        source->emissive_factor[1] * emissiveStrength,
+        source->emissive_factor[2] * emissiveStrength,
     };
     material.alphaCutoff = source->alpha_cutoff;
     material.alphaMode = alphaModeFrom(source->alpha_mode);

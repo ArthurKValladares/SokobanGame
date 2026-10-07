@@ -1522,6 +1522,8 @@ RenderFrameData::Tile tileVisual(
             : 0.0f,
         .effect = tileTypeIsGround(tile)
             ? RenderSurfaceEffect::GroundSplat
+            : (tile == TileType::PressurePlate || tile == TileType::End)
+            ? RenderSurfaceEffect::PlateEnergy
             : RenderSurfaceEffect::Standard,
         .groundRockVariant = groundRockVariantFor(tile),
         .groundTop = tileTypeIsGround(tile),

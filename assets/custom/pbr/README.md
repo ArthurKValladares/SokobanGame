@@ -28,3 +28,11 @@ height derivatives. Ground splats blend them in world UVs; the ten cliff models
 use the matching sandstone maps on their original UV0 with matching tangents.
 
 See `docs/pbr-art-pass.md` for coverage, regeneration and validation details.
+
+The pressure and end plates use native procedural PBR materials in
+`assets/custom/models/pressure_plate.glb` and `end_plate.glb`. Regenerate both
+with `tools/make_energy_plate_models.py`. Their grey metal frames remain neutral;
+only the emissive inserts receive the gameplay color. The end plate has a low
+spherical dome and a raised circular frame. `KHR_materials_emissive_strength`
+supplies HDR emission for bloom, and the plate surface shader animates energy
+over the inserts' local UVs in gameplay and the editor.

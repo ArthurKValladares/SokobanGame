@@ -552,6 +552,83 @@ void testPreservesAuthoredTangentFrameForNormalMapping()
     validateFrame(loadGltfMesh(model, options));
 }
 
+void testPreservesHdrEmissiveStrengthAndStandardEmission()
+{
+    TEST("preservesHdrEmissiveStrengthAndStandardEmission");
+    TempDirectory temp;
+    const std::filesystem::path model = temp.path() / "emissive-strength.glb";
+    const float inverseSqrt2 = 1.0f / std::sqrt(2.0f);
+    std::vector<uint8_t> binary;
+    for (float value : {
+             0.0f, 0.0f, 0.0f,
+             1.0f, 0.0f, 0.0f,
+             0.0f, 1.0f, 1.0f,
+             0.0f, -inverseSqrt2, inverseSqrt2,
+             0.0f, -inverseSqrt2, inverseSqrt2,
+             0.0f, -inverseSqrt2, inverseSqrt2,
+             0.0f, 0.0f,
+             1.0f, 0.0f,
+             0.0f, 1.0f,
+         }) {
+        appendFloat(binary, value);
+    }
+    appendUint16(binary, 0);
+    appendUint16(binary, 1);
+    appendUint16(binary, 2);
+    writeGlb(model, R"json({
+  "asset":{"version":"2.0"},
+  "extensionsUsed":["KHR_materials_emissive_strength"],
+  "buffers":[{"byteLength":102}],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":36},
+    {"buffer":0,"byteOffset":36,"byteLength":36},
+    {"buffer":0,"byteOffset":72,"byteLength":24},
+    {"buffer":0,"byteOffset":96,"byteLength":6}
+  ],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,1]},
+    {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
+    {"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},
+    {"bufferView":3,"componentType":5123,"count":3,"type":"SCALAR"}
+  ],
+  "materials":[
+    {"emissiveFactor":[0.25,0.5,1.0]},
+    {"emissiveFactor":[0.25,0.5,1.0],
+     "extensions":{"KHR_materials_emissive_strength":{"emissiveStrength":8.0}}},
+    {"emissiveFactor":[0.25,0.5,1.0],
+     "extensions":{"KHR_materials_emissive_strength":{"emissiveStrength":0.5}}},
+    {"extensions":{"KHR_materials_emissive_strength":{"emissiveStrength":64.0}}}
+  ],
+  "meshes":[{"primitives":[
+    {"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":3,"material":0},
+    {"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":3,"material":1},
+    {"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":3,"material":2},
+    {"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":3,"material":3}
+  ]}]
+})json", binary);
+
+    const MeshData mesh = loadGltfMesh(model);
+    CHECK(mesh.materials.size() == 4);
+    if (mesh.materials.size() != 4) {
+        return;
+    }
+    // Standard glTF emission keeps its original unit strength. The extension
+    // changes radiance, including values above one that bloom must receive.
+    CHECK(mesh.materials[0].emissiveFactor.x == 0.25f);
+    CHECK(mesh.materials[0].emissiveFactor.y == 0.5f);
+    CHECK(mesh.materials[0].emissiveFactor.z == 1.0f);
+    CHECK(mesh.materials[1].emissiveFactor.x == 2.0f);
+    CHECK(mesh.materials[1].emissiveFactor.y == 4.0f);
+    CHECK(mesh.materials[1].emissiveFactor.z == 8.0f);
+    CHECK(mesh.materials[2].emissiveFactor.x == 0.125f);
+    CHECK(mesh.materials[2].emissiveFactor.y == 0.25f);
+    CHECK(mesh.materials[2].emissiveFactor.z == 0.5f);
+    // Strength alone cannot turn a non-emissive housing into a light source.
+    CHECK(mesh.materials[3].emissiveFactor.x == 0.0f);
+    CHECK(mesh.materials[3].emissiveFactor.y == 0.0f);
+    CHECK(mesh.materials[3].emissiveFactor.z == 0.0f);
+}
+
 } // namespace
 
 int main()
@@ -561,6 +638,7 @@ int main()
     testInspectsEmbeddedGlbImage();
     testLoadsMaterialMapBindingsAndAuthoredParameters();
     testPreservesAuthoredTangentFrameForNormalMapping();
+    testPreservesHdrEmissiveStrengthAndStandardEmission();
 
     if (failures == 0) {
         std::cout << "GltfDependencyTests: " << checks << " checks passed\n";
