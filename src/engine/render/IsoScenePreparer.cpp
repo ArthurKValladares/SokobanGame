@@ -949,6 +949,7 @@ PreparedRenderable IsoScenePreparer::reconcileRenderable(
 
 static void prepareAuxiliaryGeometry(
     const RenderFrameData& frameData,
+    const GroundRimSurfaceCache& groundRimSurfaces,
     const IsoRenderLayout& isoLayout,
     std::vector<PreparedParticle>& particles,
     std::vector<std::array<Vec3, 4>>& shadowFaces,
@@ -963,8 +964,7 @@ static void prepareAuxiliaryGeometry(
 {
     particles.clear();
     particles.reserve(frameData.particles.size());
-    const std::size_t rimFaceReserve = static_cast<std::size_t>(
-        std::ranges::count_if(frameData.tiles, hasGroundRimSurface)) *
+    const std::size_t rimFaceReserve = groundRimSurfaces.surfaceCount() *
         GroundRimSurface::capacity;
     shadowFaces.clear();
     shadowFaces.reserve(
@@ -1094,10 +1094,10 @@ static void prepareAuxiliaryGeometry(
             // Rock assets contain the sides; the painted top belongs to the
             // tile renderer and must also close the body's shadow volume.
             if (tile.groundTop || tile.effect == RenderSurfaceEffect::GroundSplat) {
-                const auto rim = buildGroundRimSurface(tile);
-                if (rim.count != 0) {
-                    for (std::size_t i = 0; i < rim.count; ++i) {
-                        appendShadowFace(rim.patches[i].vertices);
+                const auto* rim = groundRimSurfaces.surfaceForTileIndex(tileIndex);
+                if (rim) {
+                    for (std::size_t i = 0; i < rim->count; ++i) {
+                        appendShadowFace(rim->patches[i].vertices);
                     }
                 } else {
                     const auto top = tileCorners(tile);
@@ -1319,8 +1319,10 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
 // the water step below records renderables, so only that one has to stay a
 // member.
 void appendTileFaces(
-    PreparedRenderScene& scene, const RenderFrameData& frameData)
+    PreparedRenderScene& scene, const RenderFrameData& frameData,
+    const GroundRimSurfaceCache& groundRimSurfaces)
 {
+    static constexpr GroundRimSurface emptyRim {};
     for (std::size_t tileIndex = 0;
          tileIndex < frameData.tiles.size();
          ++tileIndex) {
@@ -1362,7 +1364,8 @@ void appendTileFaces(
             tile.effect == RenderSurfaceEffect::GroundSplat && !tile.pickOnly
             ? PreparedSurfaceMaterial::GroundSplat
             : tileMaterial;
-        const GroundRimSurface rim = buildGroundRimSurface(tile);
+        const auto* cachedRim = groundRimSurfaces.surfaceForTileIndex(tileIndex);
+        const GroundRimSurface& rim = cachedRim ? *cachedRim : emptyRim;
         // Visual scaling can move an edge tile's origin into the neighboring
         // cell. Bounds checks belong to its authored cell, even when its
         // rendered geometry extends beyond the board.
@@ -1748,12 +1751,27 @@ void IsoScenePreparer::prepare(
         isoClipFromWorld(scene.isoLayout, scene.renderExtent));
     scene.hasTranslucentContent = false;
 
+    // Resolve all owning geometry before workers read it. Paint/material and
+    // projection state still comes from this frame, never from the cache.
+    {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Update ground rim surfaces");
+        groundRimSurfaceCache_.update(frameData.tiles);
+    }
+    scene.reusedGroundRimSurfaces = static_cast<uint32_t>(
+        groundRimSurfaceCache_.reusedSurfaceCount());
+    scene.generatedGroundRimSurfaces = static_cast<uint32_t>(
+        groundRimSurfaceCache_.generatedSurfaceCount());
+    scene.groundRimSurfaceCacheHits = groundRimSurfaceCache_.hitCount();
+    scene.groundRimSurfaceCacheRebuilds = groundRimSurfaceCache_.rebuildCount();
+    scene.groundRimSurfaceCacheBytes = groundRimSurfaceCache_.capacityBytes();
+
     const auto prepareAuxiliary = [
                                       &frameData,
                                       &scene,
                                       this] {
         prepareAuxiliaryGeometry(
             frameData,
+            groundRimSurfaceCache_,
             scene.isoLayout,
             scene.particles,
             scene.shadowFaces,
@@ -1774,8 +1792,7 @@ void IsoScenePreparer::prepare(
         prepareAuxiliary();
     }
 
-    const std::size_t rimFaceReserve = static_cast<std::size_t>(
-        std::ranges::count_if(frameData.tiles, hasGroundRimSurface)) *
+    const std::size_t rimFaceReserve = groundRimSurfaceCache_.surfaceCount() *
         GroundRimSurface::capacity;
     scene.isoFaces.reserve(
         frameData.tiles.size() * 5 + rimFaceReserve + frameData.waterSurfaces.size());
@@ -1834,7 +1851,7 @@ void IsoScenePreparer::prepare(
     }
 
     if (frameData.viewMode == RenderViewMode::Isometric3D) {
-        appendTileFaces(scene, frameData);
+        appendTileFaces(scene, frameData, groundRimSurfaceCache_);
         appendWaterFaces(scene, frameData, mainSceneFrustum);
         appendSourceIsoFaces(scene, frameData);
         orderIsoFaces(scene, opaqueFrontToBackSort_);

@@ -2,6 +2,7 @@
 
 #include "engine/Geometry.hpp"
 #include "engine/Math.hpp"
+#include "engine/render/GroundRimSurfaceCache.hpp"
 #include "engine/render/RenderTypes.hpp"
 
 #include <array>
@@ -204,6 +205,12 @@ struct PreparedRenderScene {
     uint32_t rebuiltRenderableBounds = 0;
     uint32_t visibleRenderables = 0;
     uint32_t culledRenderables = 0;
+    // Snapshots belong to this prepared scene, just like its owning face lists.
+    uint32_t reusedGroundRimSurfaces = 0;
+    uint32_t generatedGroundRimSurfaces = 0;
+    uint64_t groundRimSurfaceCacheHits = 0;
+    uint64_t groundRimSurfaceCacheRebuilds = 0;
+    uint64_t groundRimSurfaceCacheBytes = 0;
 };
 
 // Owns all Vulkan-free projection, culling, sorting, and picking behavior.
@@ -339,6 +346,9 @@ private:
     mutable std::vector<CachedRenderable> tileRenderableCache_;
     mutable std::vector<CachedRenderable> waterRenderableCache_;
     mutable std::vector<CachedRenderable> isoFaceRenderableCache_;
+    // Updated before auxiliary tasks start; visible and shadow preparation
+    // read the same owning geometry, then copy it into frame-local outputs.
+    mutable GroundRimSurfaceCache groundRimSurfaceCache_;
     mutable uint64_t nextRenderableIdentity_ = 1;
     bool opaqueFrontToBackSort_ = true;
     bool frustumCulling_ = true;

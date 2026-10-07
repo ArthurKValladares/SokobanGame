@@ -594,6 +594,7 @@ add_library(sokoban_core STATIC
     src/engine/render/GltfMesh.cpp
     src/engine/render/GroundMeshGeometry.cpp
     src/engine/render/GroundRimGeometry.cpp
+    src/engine/render/GroundRimSurfaceCache.cpp
     src/engine/render/FrameResourceTracker.cpp
     src/engine/render/FrameTimeTelemetry.cpp
     src/engine/render/GeometrySuballocator.cpp
@@ -1519,6 +1520,10 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/GroundMeshGeometryTests.cpp
         ASSETS_ENV
+    )
+    sokoban_add_test(NAME ground_rim_surface_cache
+        LIBS sokoban_core
+        SOURCES tests/GroundRimSurfaceCacheTests.cpp
     )
     sokoban_add_test(NAME tasks
         LIBS sokoban_core

@@ -142,6 +142,11 @@ void checkPreparationOutputsMatch(
     }
     CHECK(expected.opaqueBlendedFirst == actual.opaqueBlendedFirst);
     CHECK(expected.hasTranslucentContent == actual.hasTranslucentContent);
+    CHECK(expected.reusedGroundRimSurfaces == actual.reusedGroundRimSurfaces);
+    CHECK(expected.generatedGroundRimSurfaces == actual.generatedGroundRimSurfaces);
+    CHECK(expected.groundRimSurfaceCacheHits == actual.groundRimSurfaceCacheHits);
+    CHECK(expected.groundRimSurfaceCacheRebuilds == actual.groundRimSurfaceCacheRebuilds);
+    CHECK(expected.groundRimSurfaceCacheBytes == actual.groundRimSurfaceCacheBytes);
     CHECK(expected.isoFaces.size() == actual.isoFaces.size());
     CHECK(expected.renderables.size() == actual.renderables.size());
     CHECK(expected.particles.size() == actual.particles.size());
@@ -155,6 +160,10 @@ void checkPreparationOutputsMatch(
               actual.isoFaces[index].groundRimSurface);
         CHECK(expected.isoFaces[index].groundRimWallCoverage ==
               actual.isoFaces[index].groundRimWallCoverage);
+        CHECK(expected.isoFaces[index].material == actual.isoFaces[index].material);
+        CHECK(expected.isoFaces[index].groundSplat == actual.isoFaces[index].groundSplat);
+        CHECK(expected.isoFaces[index].groundSplatOrigin == actual.isoFaces[index].groundSplatOrigin);
+        CHECK(expected.isoFaces[index].color == actual.isoFaces[index].color);
     }
     for (std::size_t index = 0; index < expected.renderables.size(); ++index) {
         CHECK(expected.renderables[index].identity ==
@@ -239,6 +248,8 @@ void testParallelAuxiliaryPreparationMatchesSerialOutput()
                 return coverage == 1.0f;
             });
     }));
+    CHECK(serialScene.generatedGroundRimSurfaces == 1);
+    CHECK(serialScene.reusedGroundRimSurfaces == 0);
     checkPreparationOutputsMatch(serialScene, parallelScene);
 
     // A second frame also exercises retained-bound reuse on the foreground
@@ -255,6 +266,17 @@ void testParallelAuxiliaryPreparationMatchesSerialOutput()
     CHECK(preparationTasks.executedTaskCount() == 2);
     CHECK(serialScene.reusedRenderableBounds ==
           parallelScene.reusedRenderableBounds);
+    CHECK(serialScene.generatedGroundRimSurfaces == 0);
+    CHECK(serialScene.reusedGroundRimSurfaces == 1);
+    checkPreparationOutputsMatch(serialScene, parallelScene);
+
+    frame.tiles[2].groundRimWidth = 0.16f;
+    frame.tiles[2].color = { 0.2f, 0.7f, 0.3f, 1.0f };
+    frame.cameraYawDegrees = 27.0f;
+    serialPreparer.prepare(frame, extent, serialScene);
+    parallelPreparer.prepare(frame, extent, parallelScene, &preparationTasks);
+    CHECK(serialScene.generatedGroundRimSurfaces == 1);
+    CHECK(serialScene.reusedGroundRimSurfaces == 0);
     checkPreparationOutputsMatch(serialScene, parallelScene);
 }
 
@@ -2186,6 +2208,145 @@ void testRockGroundModelsRetainPaintableTops()
     }
 }
 
+void testGroundRimCacheKeepsOwnedScenesAndCurrentFrameState()
+{
+    TEST("groundRimCacheKeepsOwnedScenesAndCurrentFrameState");
+    using namespace sokoban;
+    constexpr Vec2 extent { 1280, 720 };
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 3;
+    frame.levelHeight = 3;
+    frame.cameraExtent = RenderFrameData::CameraExtent { 0, 0, 0, 3, 3, 1 };
+    frame.lighting.shadows.enabled = true;
+    frame.lighting.pointLightCount = 1;
+    frame.lighting.pointLights[0] = {
+        .position = { 1.5f, 1.5f, 4 }, .intensity = 1, .range = 10,
+    };
+    auto tile = cube(1, 1);
+    tile.model = { 1 };
+    tile.effect = RenderSurfaceEffect::GroundSplat;
+    tile.groundTop = true;
+    tile.groundRimSides = groundAllSides;
+    tile.groundRimWidth = 0.12f;
+    tile.groundRimDepth = 0.10f;
+    tile.groundSplat = GroundSplatTextures {
+        .base = { 1 }, .detail = { 2 }, .splatMap = { 3 }, .rimWall = { 4 },
+    };
+    frame.tiles.push_back(tile);
+    IsoScenePreparer preparer;
+    preparer.setFrustumCulling(false);
+    PreparedRenderScene retained;
+    preparer.prepare(frame, extent, retained);
+    CHECK(retained.generatedGroundRimSurfaces == 1);
+    CHECK(retained.reusedGroundRimSurfaces == 0);
+    CHECK(retained.groundRimSurfaceCacheBytes > 0);
+    CHECK(retained.shadowFaces.size() > 1);
+    CHECK(retained.pointShadowCasters[0].faceIndices.size() == retained.shadowFaces.size());
+    const PreparedRenderScene retainedSnapshot = retained;
+    const auto originalSurface = buildGroundRimSurface(frame.tiles[0]);
+    CHECK(originalSurface.count > 0);
+    const auto frontRimPoint = [&](const GroundRimSurface& surface) {
+        for (std::size_t index = 0; index < surface.count; ++index) {
+            const auto& patch = surface.patches[index];
+            const Vec3 point = (patch.vertices[0] + patch.vertices[1] + patch.vertices[2]) / 3.0f;
+            if (point.x > 1.5f && point.y > 1.5f && point.z < 1.0f) return point;
+        }
+        CHECK_MESSAGE(false, "front rim contains a sloped facet");
+        return Vec3 { 1.5f, 1.5f, 1 };
+    };
+    const Vec3 originalRimPoint = frontRimPoint(originalSurface);
+    const auto pixelFor = [&](const PreparedRenderScene& scene, Vec3 world) {
+        const Vec3 clip = IsoScenePreparer::projectIsoPoint(scene.isoLayout, extent, world);
+        return Vec2 { (clip.x + 1) * extent.x * 0.5f, (1 - clip.y) * extent.y * 0.5f };
+    };
+    const auto checkPaintPoint = [&](const PreparedRenderScene& scene, Vec3 world) {
+        const auto picked = preparer.pickGroundPoint(scene, pixelFor(scene, world), extent);
+        CHECK(picked.has_value());
+        if (picked) {
+            CHECK(near(picked->x, world.x));
+            CHECK(near(picked->y, world.y));
+            CHECK(near(picked->z, world.z));
+        }
+    };
+    checkPaintPoint(retained, originalRimPoint);
+
+    // Projection and painted materials are frame state, not cached geometry.
+    frame.cameraYawDegrees = 27.0f;
+    frame.cameraOffset = { 0.3f, -0.2f };
+    frame.tiles[0].color = { 0.2f, 0.6f, 0.4f, 1 };
+    frame.tiles[0].groundSplat->splatMap = { 13 };
+    frame.tiles[0].groundSplat->rimWall = { 14 };
+    frame.tiles[0].groundSplatOrigin = { -7, 9 };
+    PreparedRenderScene current;
+    preparer.prepare(frame, extent, current);
+    CHECK(current.generatedGroundRimSurfaces == 0);
+    CHECK(current.reusedGroundRimSurfaces == 1);
+    CHECK(current.groundRimSurfaceCacheHits > retained.groundRimSurfaceCacheHits);
+    CHECK(current.groundRimSurfaceCacheRebuilds == retained.groundRimSurfaceCacheRebuilds);
+    CHECK(current.shadowFaces == retained.shadowFaces);
+    bool projectionChanged = false;
+    for (const auto& face : current.isoFaces) {
+        const auto previous = std::ranges::find_if(retained.isoFaces,
+            [&](const auto& candidate) { return candidate.worldVertices == face.worldVertices; });
+        // Camera movement can change which facets pass CPU back-face culling.
+        if (previous != retained.isoFaces.end()) {
+            projectionChanged |= face.vertices != previous->vertices;
+        }
+        if (face.groundRimSurface) {
+            CHECK(std::find_if(originalSurface.patches.begin(),
+                originalSurface.patches.begin() + originalSurface.count,
+                [&](const auto& patch) { return patch.vertices == face.worldVertices; }) !=
+                originalSurface.patches.begin() + originalSurface.count);
+            CHECK(face.material == PreparedSurfaceMaterial::GroundSplat);
+            CHECK(face.groundSplat == frame.tiles[0].groundSplat);
+            CHECK(face.groundSplatOrigin == frame.tiles[0].groundSplatOrigin);
+            CHECK(face.color == frame.tiles[0].color);
+        }
+    }
+    CHECK(projectionChanged);
+    checkPaintPoint(current, originalRimPoint);
+
+    frame.tiles[0].effect = RenderSurfaceEffect::Standard;
+    preparer.prepare(frame, extent, current);
+    CHECK(current.generatedGroundRimSurfaces == 0);
+    CHECK(current.reusedGroundRimSurfaces == 1);
+    CHECK(!preparer.pickGroundPoint(current, pixelFor(current, originalRimPoint), extent));
+    for (const auto& face : current.isoFaces) {
+        if (face.groundRimSurface) CHECK(face.material == PreparedSurfaceMaterial::Standard);
+    }
+
+    // Readiness and draw-budget fallback both reprepare a resolved flat frame.
+    // Cached rim caps must disappear from picking and every shadow list.
+    frame.tiles[0].effect = RenderSurfaceEffect::GroundSplat;
+    frame.tiles[0].groundRimWidth = 0;
+    frame.tiles[0].groundRimDepth = 0;
+    preparer.prepare(frame, extent, current);
+    CHECK(current.generatedGroundRimSurfaces == 0);
+    CHECK(current.reusedGroundRimSurfaces == 0);
+    CHECK(current.shadowFaces.size() == 1);
+    CHECK(current.pointShadowCasters[0].faceIndices.size() == 1);
+    CHECK(std::ranges::none_of(current.isoFaces, [](const auto& face) { return face.groundRimSurface; }));
+    checkPaintPoint(current, { originalRimPoint.x, originalRimPoint.y, 1 });
+
+    frame.tiles[0].groundRimWidth = 0.19f;
+    frame.tiles[0].groundRimDepth = 0.14f;
+    preparer.prepare(frame, extent, current);
+    CHECK(current.generatedGroundRimSurfaces == 1);
+    CHECK(current.reusedGroundRimSurfaces == 0);
+    const auto rebuiltSurface = buildGroundRimSurface(frame.tiles[0]);
+    CHECK(current.shadowFaces.size() == rebuiltSurface.count);
+    CHECK(current.pointShadowCasters[0].faceIndices.size() == rebuiltSurface.count);
+    for (std::size_t index = 0; index < rebuiltSurface.count; ++index) {
+        CHECK(current.shadowFaces[index] == rebuiltSurface.patches[index].vertices);
+    }
+    CHECK(current.shadowFaces != retained.shadowFaces);
+    const Vec3 rebuiltRimPoint = frontRimPoint(rebuiltSurface);
+    checkPaintPoint(current, rebuiltRimPoint);
+    checkPaintPoint(retained, originalRimPoint);
+    checkPreparationOutputsMatch(retainedSnapshot, retained);
+}
+
 void testGroundRimPatchesCoverTheSharedProfile()
 {
     TEST("groundRimPatchesCoverTheSharedProfile");
@@ -2482,6 +2643,7 @@ void testGroundRimConcaveCornerJoinsAdjacentEdge()
 
 int main()
 {
+    testGroundRimCacheKeepsOwnedScenesAndCurrentFrameState();
     testGroundRimPatchesCoverTheSharedProfile();
     testGroundRimVisibleAndShadowCapsAgree();
     testGroundRimWallCoverageJoinsEveryNeighborhood();

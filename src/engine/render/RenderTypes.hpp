@@ -767,6 +767,11 @@ struct RenderStats {
     // flat. Requested smoothing can fall back while assets load or capacity is low.
     uint32_t resolvedGroundRimTiles = 0;
     bool groundRimBudgetFallback = false;
+    uint32_t reusedGroundRimSurfaces = 0;
+    uint32_t generatedGroundRimSurfaces = 0;
+    uint64_t groundRimSurfaceCacheHits = 0;
+    uint64_t groundRimSurfaceCacheRebuilds = 0;
+    uint64_t groundRimSurfaceCacheBytes = 0;
     uint32_t pipelineBinds = 0;
     uint32_t renderPasses = 0;
     uint32_t imageBarriers = 0;

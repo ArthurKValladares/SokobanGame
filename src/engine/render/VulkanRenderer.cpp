@@ -880,6 +880,18 @@ void VulkanRenderer::drawFrame(
     lastStats_.resolvedGroundRimTiles = resolvedRimTileCount(frameData) +
         (prepared.previewFrameData ? resolvedRimTileCount(*prepared.previewFrameData) : 0);
     lastStats_.groundRimBudgetFallback = prepared.groundRimBudgetFallback;
+    const auto* previewScene = prepared.previewScene
+        ? &*prepared.previewScene : nullptr;
+    lastStats_.reusedGroundRimSurfaces = prepared.scene.reusedGroundRimSurfaces +
+        (previewScene ? previewScene->reusedGroundRimSurfaces : 0);
+    lastStats_.generatedGroundRimSurfaces = prepared.scene.generatedGroundRimSurfaces +
+        (previewScene ? previewScene->generatedGroundRimSurfaces : 0);
+    lastStats_.groundRimSurfaceCacheHits = prepared.scene.groundRimSurfaceCacheHits +
+        (previewScene ? previewScene->groundRimSurfaceCacheHits : 0);
+    lastStats_.groundRimSurfaceCacheRebuilds = prepared.scene.groundRimSurfaceCacheRebuilds +
+        (previewScene ? previewScene->groundRimSurfaceCacheRebuilds : 0);
+    lastStats_.groundRimSurfaceCacheBytes = prepared.scene.groundRimSurfaceCacheBytes +
+        (previewScene ? previewScene->groundRimSurfaceCacheBytes : 0);
     lastStats_.gpuTimestampsSupported = gpuProfiler_.supported();
     lastStats_.parallelScenePreparationEnabled =
         parallelScenePreparationEnabled_;

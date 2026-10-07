@@ -32,6 +32,22 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
+The October 6 completed-rim-surface cache built `dev-fast-all` and the Debug
+game with warnings-as-errors. All 100 optimized suites passed across the full
+run, the corrected Iso/cache/allocation reruns and the same two unchanged audio
+suite reruns outside the sandbox. Warm serial/parallel rim preparation stays
+allocation-free during camera/paint changes, reordering and selective profile
+edits. The fixture and two real-screen captures match fresh pre-cache RGB images
+exactly, with unchanged draws, triangles and GPU allocation memory. Settled
+frames reuse all surfaces and generate none; retained capacity is roughly 3 KiB
+per active rim tile. Mean preparation time fell in the short matched captures,
+but real-screen p95 timings increased, so do not claim a frame-rate improvement.
+A 240-frame Debug fixture produced no VUID errors and matches the optimized
+image exactly; the existing Epic overlay loader error and unused shader-output
+warnings remain. Ignored evidence is in
+`out/ground-geometry/rim-surface-cache/comparison.md` with images, traces and logs.
+Full Debug, headless, Linux and shipping suites were not run for this change.
+
 The October 6 rim material fade built `dev-fast-all` and the Debug game with
 warnings-as-errors. All 99 optimized suites passed across the full run and the
 same two unchanged audio-suite reruns outside the sandbox. New checks cover
@@ -507,6 +523,19 @@ and the required real-device checks are recorded.
   owns separate gameplay, editor and screen-preview caches. Cache storage must
   retain capacity, and descriptions must not borrow frame or manifest pointers.
   GPU readiness remains a renderer decision and must not invalidate this cache.
+- `GroundRimSurfaceCache` owns completed world-space cap patches, normals and
+  wall coverage, keyed by exact resolved geometry inputs. It stores only active
+  rim surfaces and retains working capacity. Reordering tiles, painting and
+  camera movement reuse geometry; changed inputs rebuild affected surfaces.
+  Main and preview preparers own separate caches. Update before auxiliary tasks
+  start, then keep lookups immutable until those tasks finish. Prepared faces
+  and shadow lists own copies, so older frame leases survive subsequent updates.
+  Readiness and draw-budget fallback must update the cache from the newly
+  resolved flat/rim profiles before preparing either pass. Keep paint/material
+  state per-frame. Snapshot counters and retained bytes in each prepared scene
+  for evidence; a cache hit does not eliminate projection/culling/sorting work.
+  `compileGroundRimSurfaces` is the owning renderer-independent compiler; no
+  persisted level artifact or merged terrain draw pipeline is introduced yet.
 - The default-off **Smooth Ground Rim (prototype)** control, or `--ground-rim`,
   requests broad chipped facets with nominal tile-unit width/depth. It requires
   ground processing. `GroundRimGeometry` and `GroundRim.glsl` share the same

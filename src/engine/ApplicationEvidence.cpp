@@ -290,6 +290,12 @@ void Application::finishEvidenceCapture()
            << (evidenceStats_.waterCellCacheEnabled ? "enabled" : "disabled")
            << "; " << evidenceStats_.waterCellCacheBytes << " bytes; "
            << evidenceStats_.waterCellCacheRebuilds << " rebuilds\n";
+    report << "- Ground rim surface cache: "
+           << evidenceStats_.reusedGroundRimSurfaces << " reused, "
+           << evidenceStats_.generatedGroundRimSurfaces << " generated this preparation; "
+           << evidenceStats_.groundRimSurfaceCacheHits << " hits, "
+           << evidenceStats_.groundRimSurfaceCacheRebuilds << " rebuilds; "
+           << evidenceStats_.groundRimSurfaceCacheBytes << " retained bytes\n";
     report << "- Recorder scratch reuse: "
            << (evidenceStats_.recorderScratchReuseEnabled
                    ? "enabled"

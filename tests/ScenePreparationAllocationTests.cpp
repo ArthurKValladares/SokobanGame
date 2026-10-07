@@ -654,12 +654,101 @@ void testWarmParallelForAllocationCounts()
         "warm parallelFor coordination stays allocation free");
 }
 
+void testWarmGroundRimPreparationAllocations()
+{
+    using namespace sokoban;
+    constexpr uint32_t edge = 8;
+    RenderFrameData frame = makeScene(edge);
+    frame.cameraExtent = RenderFrameData::CameraExtent { 0, 0, 0, edge, edge, 1 };
+    for (auto& tile : frame.tiles) {
+        tile.model = { 1 };
+        tile.groundTop = true;
+        tile.effect = RenderSurfaceEffect::GroundSplat;
+        tile.groundRimSides = static_cast<uint8_t>(
+            (tile.cell.x == 0 ? groundWestSide : 0) |
+            (tile.cell.y == 0 ? groundNorthSide : 0) |
+            (tile.cell.x == static_cast<int>(edge - 1) ? groundEastSide : 0) |
+            (tile.cell.y == static_cast<int>(edge - 1) ? groundSouthSide : 0));
+        tile.groundRimWidth = 0.12f;
+        tile.groundRimDepth = 0.10f;
+        tile.groundSplat = GroundSplatTextures {
+            .base = { 1 }, .detail = { 2 }, .splatMap = { 3 }, .rimWall = { 4 },
+        };
+    }
+    TaskSystem tasks(2);
+    IsoScenePreparer serialPreparer;
+    IsoScenePreparer parallelPreparer;
+    PreparedRenderScene serialScene;
+    PreparedRenderScene parallelScene;
+    uint32_t step = 0;
+    const auto changePaintAndCamera = [&] {
+        ++step;
+        const bool alternate = (step % 2) != 0;
+        frame.cameraOffset = alternate ? Vec2 { 0.1f, -0.2f } : Vec2 { -0.2f, 0.1f };
+        frame.cameraYawDegrees = alternate ? 31.0f : 36.0f;
+        frame.tiles[0].color = alternate ? Vec4 { 0.2f, 0.4f, 0.7f, 1 } : Vec4 { 0.6f, 0.3f, 0.2f, 1 };
+        frame.tiles[0].groundSplat->splatMap = RenderTexture { alternate ? 5U : 6U };
+    };
+    const auto prepareSerial = [&] {
+        serialPreparer.prepare(frame, { 1920, 1080 }, serialScene);
+    };
+    const auto prepareParallel = [&] {
+        parallelPreparer.prepare(frame, { 1920, 1080 }, parallelScene, &tasks);
+    };
+    checkNoFrameAllocations("rim_scene_camera_and_paint_serial", [&] {
+        changePaintAndCamera();
+        prepareSerial();
+    });
+    CHECK(serialScene.reusedGroundRimSurfaces == 4 * edge - 4);
+    CHECK(serialScene.generatedGroundRimSurfaces == 0);
+    checkNoFrameAllocations("rim_scene_camera_and_paint_parallel", [&] {
+        changePaintAndCamera();
+        prepareParallel();
+    });
+    CHECK(parallelScene.reusedGroundRimSurfaces == 4 * edge - 4);
+    CHECK(parallelScene.generatedGroundRimSurfaces == 0);
+    checkNoFrameAllocations("rim_scene_reorder_serial", [&] {
+        std::rotate(frame.tiles.begin(), frame.tiles.begin() + 1, frame.tiles.end());
+        prepareSerial();
+    });
+    CHECK(serialScene.reusedGroundRimSurfaces == 4 * edge - 4);
+    CHECK(serialScene.generatedGroundRimSurfaces == 0);
+    checkNoFrameAllocations("rim_scene_reorder_parallel", [&] {
+        std::rotate(frame.tiles.begin(), frame.tiles.begin() + 1, frame.tiles.end());
+        prepareParallel();
+    });
+    CHECK(parallelScene.reusedGroundRimSurfaces == 4 * edge - 4);
+    CHECK(parallelScene.generatedGroundRimSurfaces == 0);
+    const auto editOneProfile = [&] {
+        const auto tile = std::find_if(frame.tiles.begin(), frame.tiles.end(),
+            [](const auto& candidate) { return candidate.cell == GridPosition3 { 0, 0, 0 }; });
+        CHECK(tile != frame.tiles.end());
+        if (tile != frame.tiles.end()) {
+            tile->groundRimWidth = tile->groundRimWidth == 0.12f ? 0.16f : 0.12f;
+            tile->groundRimDepth = tile->groundRimDepth == 0.10f ? 0.08f : 0.10f;
+        }
+    };
+    checkNoFrameAllocations("rim_scene_profile_edit_serial", [&] {
+        editOneProfile();
+        prepareSerial();
+    });
+    CHECK(serialScene.generatedGroundRimSurfaces == 1);
+    CHECK(serialScene.reusedGroundRimSurfaces == 4 * edge - 5);
+    checkNoFrameAllocations("rim_scene_profile_edit_parallel", [&] {
+        editOneProfile();
+        prepareParallel();
+    });
+    CHECK(parallelScene.generatedGroundRimSurfaces == 1);
+    CHECK(parallelScene.reusedGroundRimSurfaces == 4 * edge - 5);
+}
+
 } // namespace
 
 int main()
 {
     std::cout << std::unitbuf;
     testWarmPreparationAllocationCounts();
+    testWarmGroundRimPreparationAllocations();
     testWarmParallelForAllocationCounts();
     testGameplayFrameAllocations();
     testTurretQueryAllocations();

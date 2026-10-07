@@ -999,6 +999,12 @@ if (ImGui::CollapsingHeader("Rendering Stats")) {
         renderStats.waterCellCacheEnabled ? "on" : "off",
         static_cast<unsigned long long>(renderStats.waterCellCacheBytes),
         static_cast<unsigned long long>(renderStats.waterCellCacheRebuilds));
+    ImGui::Text("Ground rim surfaces %u reused / %u generated (%llu bytes; %llu hits / %llu rebuilds)",
+        renderStats.reusedGroundRimSurfaces,
+        renderStats.generatedGroundRimSurfaces,
+        static_cast<unsigned long long>(renderStats.groundRimSurfaceCacheBytes),
+        static_cast<unsigned long long>(renderStats.groundRimSurfaceCacheHits),
+        static_cast<unsigned long long>(renderStats.groundRimSurfaceCacheRebuilds));
     drawPhaseTimings(renderStats);
     ImGui::Text(
         "Asset publications %llu across %llu frames; texture uploads %llu/%llu complete (%u in flight)",

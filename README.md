@@ -893,6 +893,16 @@ previews therefore update boundaries automatically. Cache storage is retained
 across frames; this experiment does not introduce a persisted level geometry
 format or require a manual processing command.
 
+Scene preparation also caches the completed rim surfaces: world-space vertices,
+facet normals and wall-blend weights. Main rendering, ground picking and shadows
+consume the same geometry. Terrain, model, resolved boundary/profile and elevation
+changes update the affected surfaces; tile ordering, camera movement and painting
+reuse them while projection and material bindings still refresh each frame.
+Gameplay and screen previews keep separate surface caches. Capacity is retained
+across updates, and renderer statistics/evidence report reused/generated surfaces,
+cache hits/rebuilds and retained bytes. This remains an in-memory cache; level
+builds do not yet save processed surface artifacts.
+
 Compare it live with **Tuning > Tile Geometry > Process Ground Geometry**, or
 launch a matched evidence capture with `--disable-ground-geometry`.
 Render statistics and evidence reports show ground triangles before/after
