@@ -32,7 +32,18 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
-The October 6 ground geometry experiment built `dev-fast-all` and the Debug
+The October 6 cached-boundary/rim prototype also built `dev-fast-all` and the
+Debug game with warnings-as-errors. All 99 optimized suites passed across the
+full run and a two-suite rerun outside the sandbox; the sandbox denied an
+ancestor lookup in Windows missing-path resolution for the unchanged audio
+import tests. The actual renderer regression restores flat ground for 5,000
+isolated rim tiles without dropped draw instances, matching an explicitly flat
+frame exactly. A 240-frame Debug rim fixture reported 17 resolved rim tiles,
+all six point-shadow faces reused, and no VUID errors. Its RGB image matches
+the optimized fixture exactly. Detailed evidence is in ignored
+`out/ground-geometry/rim-prototype/comparison.md`.
+
+The preceding October 6 ground geometry experiment built `dev-fast-all` and the Debug
 game with warnings-as-errors. `ctest --preset dev-fast` passed all 99 registered
 suites, including ground exposure/mesh validation, content imports/staging,
 solution replay, Vulkan smoke, text rendering and the package-validation
@@ -445,16 +456,51 @@ and the required real-device checks are recorded.
 ## Renderer contracts
 
 - Ground geometry processing is a live ground-only experiment, with no baked
-  level format. Derive exposure from the final emitted tiles on the same layer;
-  hidden screens, scaled/transformed tiles and editor previews cannot occlude
-  eligible ground. Only the canonical GroundRock01–10 meshes may participate,
-  after validating all side patches and the bottom. A candidate hidden side
+  level format. Derive exposure from the final emitted tiles on the same layer.
+  Eligible terrain is opaque, fixed, unanimated unit ground at its authored
+  integer cell, using the canonical GroundRock01–10 source model contracts.
+  Hidden screens, custom models, scaled/transformed tiles and editor previews
+  cannot occlude eligible ground. Validate all side patches and the bottom
+  before using source index variants. A candidate hidden side
   remains visible until its neighbor has a validated, resident mesh.
   Index variants share original vertices/materials and retain the original
   index prefix, painted top and bottom. Main draws, shadows, batching and the
   point-shadow cache must use the resolved mask. Account for every appended
   index in upload/residency budgets; compare draw calls and GPU time using
   `--disable-ground-geometry` before expanding the experiment.
+- `ProcessedGround` is the Vulkan-free boundary description: cells are sorted
+  by layer/row/column, with exposed side masks, side/diagonal model identities,
+  and convex/concave corner masks. Side order is N/E/S/W; corner/diagonal order
+  is NW/NE/SE/SW. `GroundGeometryCache` compares exact sorted eligible cell/model
+  signatures, rather than trusting a hash. Ground edits, model assignments,
+  move/delete source previews and view/layer visibility changes rebuild it;
+  paint colors, unrelated actors and render-list ordering do not. Application
+  owns separate gameplay, editor and screen-preview caches. Cache storage must
+  retain capacity, and descriptions must not borrow frame or manifest pointers.
+  GPU readiness remains a renderer decision and must not invalidate this cache.
+- The default-off **Smooth Ground Rim (prototype)** control, or `--ground-rim`,
+  requests a planar chamfer with tile-unit width/depth. It requires ground
+  processing. `GroundRimGeometry` and `GroundRim.glsl` share the height field:
+  maximum exposed-edge ramps and minimum incident ramps at concave corners.
+  CPU cap tessellation, body deformation and shadows must agree on that field.
+  Compress only the upper body band; depth must remain below that band to keep
+  its deformation monotone. Preserve UVs and tangent handedness, transform
+  normals with the inverse transpose Jacobian and tangents with the forward
+  Jacobian.
+  Logical square cells and full-cell picking remain intact; paint follows the
+  visible cap. Resolve the treatment for the whole participating view only
+  after every source mesh is resident and validated, and recheck after asset
+  maintenance. Readiness changes must reprepare the cap scene and its shadows.
+  `--evidence-ground-rim-fixture` requires a bounded `--evidence-output` run;
+  use it with and without `--ground-rim` to inspect boundaries and cap/body seams.
+  Main/preview/UI share the existing draw-instance budget. Check the prepared
+  scene reserve before recording and flatten both rim cohorts if it does not
+  fit; point-shadow batches use the same reserve and can fall back to pushes.
+  Keep the fallback latched for that prepared-frame lease and report resolved
+  rim tiles/fallback in evidence. Curved rims, arbitrary mesh unions and
+  cross-layer terrain shaping remain
+  outside this prototype. Ground-body counters omit the extra cap geometry;
+  compare total triangles, draws, memory and timings before making cost claims.
 - The scene target is floating-point linear light. Tonemapping writes linear
   values to the sRGB display attachment, which performs the only display encode.
   Player-facing UI is composed after tonemapping.

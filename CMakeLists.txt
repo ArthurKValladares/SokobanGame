@@ -593,6 +593,7 @@ add_library(sokoban_core STATIC
     src/engine/render/CgltfImplementation.cpp
     src/engine/render/GltfMesh.cpp
     src/engine/render/GroundMeshGeometry.cpp
+    src/engine/render/GroundRimGeometry.cpp
     src/engine/render/FrameResourceTracker.cpp
     src/engine/render/FrameTimeTelemetry.cpp
     src/engine/render/GeometrySuballocator.cpp
@@ -1140,6 +1141,8 @@ if(SOKOBAN_BUILD_TESTS)
                 SOKOBAN_ENABLE_TEST_HOOKS=1
                 SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
                 SOKOBAN_GAME_VERSION="${PROJECT_VERSION}"
+                SOKOBAN_VULKAN_TEST_ASSETS="$<TARGET_FILE_DIR:sokoban>/assets"
+            DEPENDS sokoban_content
         )
         set_tests_properties(vulkan_smoke PROPERTIES
             LABELS "vulkan;smoke"

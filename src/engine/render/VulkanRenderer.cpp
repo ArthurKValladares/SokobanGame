@@ -4,6 +4,7 @@
 #include "engine/ProcessMemory.hpp"
 #include "engine/Profiler.hpp"
 #include "engine/render/ImageData.hpp"
+#include "engine/render/GroundRimGeometry.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanFrameCapture.hpp"
@@ -40,6 +41,39 @@
 
 namespace sokoban {
 namespace {
+
+// Resolve one recipe for all ground caps and bodies. Waiting for the complete
+// participating cohort avoids mismatched bevel heights at shared tile edges.
+// Recheck after asset maintenance, when publication or eviction can change it.
+bool resolveGroundRims(RenderFrameData& frame, const VulkanModelResources& models,
+    uint32_t frameIndex, bool allowRims = true)
+{
+    const float width = frame.requestedGroundRimWidth;
+    const float depth = frame.requestedGroundRimDepth;
+    bool supported = allowRims &&
+        groundRimProfileValid({ .width = width, .depth = depth });
+    if (supported) {
+        for (const auto& tile : frame.tiles) {
+            if (tile.groundGeometryEligible &&
+                (!models.modelReady(tile.model) ||
+                    !models.meshForTile(tile, frameIndex).groundGeometryVariant)) {
+                supported = false;
+                break;
+            }
+        }
+    }
+    bool changed = false;
+    for (auto& tile : frame.tiles) {
+        const bool boundary = tile.groundGeometryEligible &&
+            (tile.groundRimSides != 0 || tile.groundRimConcaveCorners != 0);
+        const float resolvedWidth = supported && boundary ? width : 0.0f;
+        const float resolvedDepth = supported && boundary ? depth : 0.0f;
+        changed |= tile.groundRimWidth != resolvedWidth || tile.groundRimDepth != resolvedDepth;
+        tile.groundRimWidth = resolvedWidth;
+        tile.groundRimDepth = resolvedDepth;
+    }
+    return changed;
+}
 
 double elapsedMilliseconds(std::chrono::steady_clock::time_point start)
 {
@@ -437,7 +471,12 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
         preparedFrameScratch_.acquire();
     scratch->frameData = std::move(frameData);
     scratch->generation = nextPreparedFrameGeneration_++;
+    scratch->groundRimBudgetFallback = false;
     scratch->previewFrameData = std::move(previewFrameData);
+    resolveGroundRims(scratch->frameData, modelResources_, currentFrame_);
+    if (scratch->previewFrameData) {
+        resolveGroundRims(*scratch->previewFrameData, modelResources_, currentFrame_);
+    }
     if (!scratch->previewFrameData) {
         scratch->previewScene.reset();
     } else if (!scratch->previewScene) {
@@ -493,6 +532,7 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
                 ? &framePreparationTasks_
                 : nullptr);
     }
+    applyGroundRimBudgetFallback(*scratch, 0);
     scenePreparationTimeTelemetry_.record(
         std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - preparationStart)
@@ -515,6 +555,36 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
     frame.generation = scratch->generation;
     frame.scratch = std::move(scratch);
     return frame;
+}
+
+void VulkanRenderer::applyGroundRimBudgetFallback(
+    const PreparedFrameScratch& prepared, std::size_t uiDrawCount)
+{
+    if (prepared.groundRimBudgetFallback ||
+        groundRimDrawInstanceBudgetFits(
+            ordinarySceneDrawInstanceReserve(prepared.frameData, prepared.scene),
+            prepared.previewFrameData && prepared.previewScene
+                ? ordinarySceneDrawInstanceReserve(
+                    *prepared.previewFrameData, *prepared.previewScene) : 0,
+            uiDrawCount, drawInstanceDiscardSlot)) {
+        return;
+    }
+    // Preserve the existing draw buffer and flat-ground capacity. Subdivided
+    // caps must never make an otherwise drawable view lose tiles or UI.
+    const bool mainChanged = resolveGroundRims(
+        prepared.frameData, modelResources_, currentFrame_, false);
+    const bool previewChanged = prepared.previewFrameData && resolveGroundRims(
+        *prepared.previewFrameData, modelResources_, currentFrame_, false);
+    if (!mainChanged && !previewChanged) return;
+    prepared.groundRimBudgetFallback = true;
+    if (mainChanged) {
+        scenePreparer_.prepare(prepared.frameData,
+            prepared.scene.renderExtent, prepared.scene);
+    }
+    if (previewChanged) {
+        previewScenePreparer_.prepare(*prepared.previewFrameData,
+            prepared.previewScene->renderExtent, *prepared.previewScene);
+    }
 }
 
 const VulkanRenderer::PreparedFrameScratch&
@@ -656,9 +726,8 @@ void VulkanRenderer::drawFrame(
     const auto cpuFrameStart = std::chrono::steady_clock::now();
     try {
     const auto assetSchedulingStart = std::chrono::steady_clock::now();
-    const PreparedFrameScratch& prepared =
-        resolvePreparedFrame(preparedFrame);
-    const RenderFrameData& frameData = prepared.frameData;
+    const PreparedFrameScratch& prepared = resolvePreparedFrame(preparedFrame);
+    RenderFrameData& frameData = prepared.frameData;
     renderAssetRequirementsForFrame(frameData, frameAssetRequirements_);
     if (prepared.previewFrameData) {
         renderAssetRequirementsForFrame(
@@ -695,6 +764,22 @@ void VulkanRenderer::drawFrame(
         elapsedMilliseconds(frameFenceWaitStart));
 
     runAssetMaintenance(prepared, frameData);
+    const auto sceneExtent = activeResources_.swapchain->renderExtent();
+    if (resolveGroundRims(frameData, modelResources_, currentFrame_,
+            !prepared.groundRimBudgetFallback)) {
+        scenePreparer_.prepare(frameData,
+            { static_cast<float>(sceneExtent.width), static_cast<float>(sceneExtent.height) },
+            prepared.scene);
+    }
+    if (prepared.previewFrameData &&
+        resolveGroundRims(*prepared.previewFrameData, modelResources_, currentFrame_,
+            !prepared.groundRimBudgetFallback)) {
+        previewScenePreparer_.prepare(*prepared.previewFrameData,
+            { static_cast<float>(sceneExtent.width) * 0.75f,
+                static_cast<float>(sceneExtent.height) * 0.75f },
+            *prepared.previewScene);
+    }
+    applyGroundRimBudgetFallback(prepared, uiDrawData.commands.size());
 
     uint32_t imageIndex = 0;
     const auto imageAcquisitionStart = std::chrono::steady_clock::now();
@@ -787,6 +872,14 @@ void VulkanRenderer::drawFrame(
         });
     commandRecordingTimeTelemetry_.record(
         elapsedMilliseconds(commandRecordingStart));
+    const auto resolvedRimTileCount = [](const RenderFrameData& data) {
+        return static_cast<uint32_t>(std::ranges::count_if(data.tiles, [](const auto& tile) {
+            return tile.groundGeometryEligible && tile.groundRimWidth > 0.0f;
+        }));
+    };
+    lastStats_.resolvedGroundRimTiles = resolvedRimTileCount(frameData) +
+        (prepared.previewFrameData ? resolvedRimTileCount(*prepared.previewFrameData) : 0);
+    lastStats_.groundRimBudgetFallback = prepared.groundRimBudgetFallback;
     lastStats_.gpuTimestampsSupported = gpuProfiler_.supported();
     lastStats_.parallelScenePreparationEnabled =
         parallelScenePreparationEnabled_;

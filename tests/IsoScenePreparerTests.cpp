@@ -3,6 +3,7 @@
 #include "engine/render/IsoScenePreparer.hpp"
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/PointShadowFaceCache.hpp"
+#include "engine/render/GroundRimSurface.hpp"
 #include "engine/TaskSystem.hpp"
 
 #include <algorithm>
@@ -148,6 +149,8 @@ void checkPreparationOutputsMatch(
         CHECK(expected.isoFaces[index].vertices ==
               actual.isoFaces[index].vertices);
         CHECK(expected.isoFaces[index].depth == actual.isoFaces[index].depth);
+        CHECK(expected.isoFaces[index].groundRimSurface ==
+              actual.isoFaces[index].groundRimSurface);
     }
     for (std::size_t index = 0; index < expected.renderables.size(); ++index) {
         CHECK(expected.renderables[index].identity ==
@@ -184,6 +187,10 @@ void testParallelAuxiliaryPreparationMatchesSerialOutput()
     using namespace sokoban;
 
     RenderFrameData frame = sceneFrame();
+    frame.tiles[2].groundTop = true;
+    frame.tiles[2].groundRimSides = groundNorthSide | groundWestSide;
+    frame.tiles[2].groundRimWidth = 0.12f;
+    frame.tiles[2].groundRimDepth = 0.10f;
     frame.particles = {
         {
             .position = { 0.5f, 0.5f, 0.7f },
@@ -219,6 +226,9 @@ void testParallelAuxiliaryPreparationMatchesSerialOutput()
         std::this_thread::yield();
     }
     CHECK(preparationTasks.executedTaskCount() == 1);
+    CHECK(std::ranges::any_of(serialScene.isoFaces, [](const auto& face) {
+        return face.groundRimSurface;
+    }));
     checkPreparationOutputsMatch(serialScene, parallelScene);
 
     // A second frame also exercises retained-bound reuse on the foreground
@@ -356,6 +366,47 @@ void testPointShadowFaceCacheRequiresExactStableGeometry()
     CHECK(cache.reusable(0, light, faces, indices, models));
     models[0].ready = false;
     CHECK(!cache.reusable(0, light, faces, indices, models));
+
+    // Profile changes affect the shared rock vertices even when the selected
+    // index range and the body's transform remain identical. The exact model
+    // key must invalidate all six point-shadow faces for each such change.
+    models[0].ready = true;
+    models[0].tile.model = { 1 };
+    models[0].tile.groundTop = true;
+    models[0].tile.groundRimWidth = 0.12f;
+    models[0].tile.groundRimDepth = 0.10f;
+    models[0].tile.groundRimSides = groundNorthSide | groundEastSide;
+    cache.markRendered(0, light, faces, indices, models);
+    CHECK(cache.reusable(0, light, faces, indices, models));
+    const RenderFrameData::Tile rimBaseline = models[0].tile;
+    const auto changedRim = [&](auto mutate, const char* reason) {
+        mutate(models[0].tile);
+        CHECK_MESSAGE(!cache.reusable(0, light, faces, indices, models), reason);
+        models[0].tile = rimBaseline;
+        CHECK(cache.reusable(0, light, faces, indices, models));
+    };
+    changedRim([](auto& tile) { tile.groundRimWidth += 0.01f; },
+        "rim width changes invalidate cached body shadows");
+    changedRim([](auto& tile) { tile.groundRimDepth += 0.01f; },
+        "rim depth changes invalidate cached body shadows");
+    changedRim([](auto& tile) { tile.groundRimSides = groundNorthSide; },
+        "rim exposure changes invalidate cached body shadows");
+    changedRim([](auto& tile) { tile.groundRimConcaveCorners = groundSouthWestCorner; },
+        "concave rim patches invalidate cached body shadows");
+    changedRim([](auto& tile) { tile.groundRimWidth = 0.0f; },
+        "disabling the rim invalidates its deformed body shadows");
+    models[0].tile.groundRimWidth = 0.0f;
+    cache.markRendered(0, light, faces, indices, models);
+    CHECK(cache.reusable(0, light, faces, indices, models));
+    models[0].tile = rimBaseline;
+    CHECK_MESSAGE(!cache.reusable(0, light, faces, indices, models),
+        "enabling the rim invalidates cached flat body shadows");
+    cache.markRendered(0, light, faces, indices, models);
+    models[0].ready = false;
+    CHECK_MESSAGE(!cache.reusable(0, light, faces, indices, models),
+        "ground model eviction invalidates the active rim shadow cohort");
+    models[0].ready = true;
+    CHECK(cache.reusable(0, light, faces, indices, models));
 
     cache.markRendered(0, light, faces, indices, noModels);
     cache.invalidate(0);
@@ -2125,8 +2176,137 @@ void testRockGroundModelsRetainPaintableTops()
     }
 }
 
+void testGroundRimPatchesCoverTheSharedProfile()
+{
+    TEST("groundRimPatchesCoverTheSharedProfile");
+    using namespace sokoban;
+    RenderFrameData::Tile tile {
+        .cell = { -2, 4, 2 }, .position = { -2, 4 },
+        .color = { 1, 1, 1, 1 }, .baseElevation = 2, .height = 1,
+        .model = { 1 }, .effect = RenderSurfaceEffect::GroundSplat,
+        .groundTop = true,
+    };
+    tile.groundRimWidth = 0.12f;
+    tile.groundRimDepth = 0.10f;
+    // Exhaustive masks include straight edges, convex mitres, concave
+    // corners and opposing edges. Triangles must reproduce the profile
+    // between knots, rather than merely matching its sampled vertices.
+    for (uint8_t sides = 0; sides < 16; ++sides) {
+        for (uint8_t corners = 0; corners < 16; ++corners) {
+            tile.groundRimSides = sides;
+            tile.groundRimConcaveCorners = corners;
+            const auto surface = buildGroundRimSurface(tile);
+            if (sides == 0 && corners == 0) {
+                CHECK(surface.count == 0);
+                continue;
+            }
+            CHECK(surface.count <= GroundRimSurface::capacity);
+            const GroundRimProfile profile {
+                .exposedSides = sides, .concaveCorners = corners,
+                .width = tile.groundRimWidth, .depth = tile.groundRimDepth,
+            };
+            float area = 0;
+            for (std::size_t i = 0; i < surface.count; ++i) {
+                const auto& patch = surface.patches[i];
+                CHECK(patch.normal.z > 0);
+                constexpr std::array<std::array<std::size_t, 3>, 2> triangles {{
+                    { 0, 1, 2 }, { 0, 2, 3 },
+                }};
+                for (const auto& triangle : triangles) {
+                    const Vec3 a = patch.vertices[triangle[0]];
+                    const Vec3 b = patch.vertices[triangle[1]];
+                    const Vec3 c = patch.vertices[triangle[2]];
+                    const float triangleArea = cross(b - a, c - a).z * 0.5f;
+                    area += triangleArea;
+                    if (triangleArea == 0) continue;
+                    const Vec3 centre = (a + b + c) / 3.0f;
+                    const float expected = tile.baseElevation + tile.height -
+                        sampleGroundRim({ centre.x - tile.position.x,
+                            centre.y - tile.position.y }, profile).drop;
+                    CHECK(std::abs(centre.z - expected) < 0.00001f);
+                }
+            }
+            CHECK(std::abs(area - 1.0f) < 0.00001f);
+        }
+    }
+    tile.groundRimSides = groundAllSides;
+    tile.isEditorPreview = true;
+    CHECK(buildGroundRimSurface(tile).count == 0);
+    tile.isEditorPreview = false;
+    tile.pickOnly = true;
+    CHECK(buildGroundRimSurface(tile).count == 0);
+}
+
+void testGroundRimVisibleAndShadowCapsAgree()
+{
+    TEST("groundRimVisibleAndShadowCapsAgree");
+    using namespace sokoban;
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 3;
+    frame.levelHeight = 3;
+    frame.levelDepth = 1;
+    auto tile = cube(1, 1);
+    tile.model = { 1 };
+    tile.effect = RenderSurfaceEffect::GroundSplat;
+    tile.groundTop = true;
+    tile.groundRimSides = groundAllSides;
+    tile.groundRimWidth = 0.12f;
+    tile.groundRimDepth = 0.10f;
+    frame.tiles.push_back(tile);
+    const auto expected = buildGroundRimSurface(tile);
+    const auto scene = prepareScene(frame, { 1280, 720 });
+    CHECK(scene.shadowFaces.size() == expected.count);
+    for (std::size_t i = 0; i < expected.count; ++i) {
+        CHECK(scene.shadowFaces[i] == expected.patches[i].vertices);
+    }
+    CHECK(!scene.opaqueFaceIndices.empty());
+    for (const auto index : scene.opaqueFaceIndices) {
+        const auto& face = scene.isoFaces[index];
+        CHECK(face.material == PreparedSurfaceMaterial::GroundSplat);
+        CHECK(face.gridSize == Vec2({ 1, 1 }));
+        CHECK(std::ranges::find(scene.shadowFaces, face.worldVertices) !=
+            scene.shadowFaces.end());
+    }
+    // Logical box remains available for selection without becoming a second,
+    // flat paintable surface above the chamfer.
+    CHECK(std::ranges::any_of(scene.isoFaces, [](const auto& face) {
+        return face.material == PreparedSurfaceMaterial::Standard &&
+            face.pickable && face.normal.z == 1;
+    }));
+    frame.tiles[0].groundRimWidth = 0;
+    const auto disabled = prepareScene(frame, { 1280, 720 });
+    CHECK(disabled.shadowFaces.size() == 1);
+    CHECK(disabled.opaqueFaceIndices.size() == 1);
+}
+
+void testGroundRimConcaveCornerJoinsAdjacentEdge()
+{
+    TEST("groundRimConcaveCornerJoinsAdjacentEdge");
+    using namespace sokoban;
+    const GroundRimProfile concave {
+        .exposedSides = 0, .concaveCorners = 2,
+    };
+    const GroundRimProfile northEdge {
+        .exposedSides = groundNorthSide,
+    };
+    for (int i = 0; i <= 100; ++i) {
+        const float y = static_cast<float>(i) / 100.0f;
+        const auto left = sampleGroundRim({ 1, y }, concave);
+        const auto right = sampleGroundRim({ 0, y }, northEdge);
+        CHECK(near(left.drop, right.drop));
+        CHECK(near(left.gradient.y, right.gradient.y));
+        // The body's upper edge and the cap use the identical drop.
+        const Vec3 body = deformGroundRockPosition({ 1, y, 1 }, concave);
+        CHECK(near(body.z, 1.0f - left.drop));
+    }
+}
+
 int main()
 {
+    testGroundRimPatchesCoverTheSharedProfile();
+    testGroundRimVisibleAndShadowCapsAgree();
+    testGroundRimConcaveCornerJoinsAdjacentEdge();
     testRockGroundModelsRetainPaintableTops();
     testParallelAuxiliaryPreparationMatchesSerialOutput();
     testPointShadowCastersAreRangeCulledConservatively();

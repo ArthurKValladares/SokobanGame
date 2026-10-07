@@ -296,6 +296,8 @@ Application::Application(ApplicationOptions options)
     presentationSettings_.applyTileScales(assetManifest_);
     presentationSettings_.geometry.processGroundGeometry =
         options.groundGeometryProcessingEnabled;
+    presentationSettings_.geometry.smoothGroundRim = options.groundRimEnabled;
+    evidenceGroundRimFixture_ = options.evidenceGroundRimFixture;
     presentationSettings_.normalize();
     presentation_.setAnimationCatalog(&animationCatalog_);
     screenPreviewPresentation_.setAnimationCatalog(&animationCatalog_);
@@ -1696,6 +1698,7 @@ Application::buildScreenPreviewRenderFrame(FrameArena& arena) const
         },
         .cachedActivationPreviews = true,
         .activationPreview = activationPreview ? &*activationPreview : nullptr,
+        .groundGeometryCache = &previewGroundGeometryCache_,
     }, arena);
     // The preview and live world can contain the same stable actor IDs. Keep
     // their GPU animation instances independent so one idle pose cannot
@@ -2621,6 +2624,7 @@ RenderFrameData Application::buildEditorRenderFrame(
                     level->screens.back().index == target.screen,
             };
         },
+        .groundGeometryCache = &editorGroundGeometryCache_,
     }, arena);
 }
 #endif
@@ -2729,11 +2733,68 @@ CameraAngles Application::gameplayCameraAngles() const
     return level_.cameraAngles().value_or(CameraAngles {});
 }
 
+RenderFrameData Application::buildGroundRimEvidenceFrame(FrameArena& arena) const
+{
+    RenderFrameData frame(arena);
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 10;
+    frame.levelHeight = 7;
+    frame.cameraExtent = RenderFrameData::CameraExtent { 0, 0, 0, 10, 7, 1 };
+    frame.cameraPitchDegrees = 40.0f;
+    frame.cameraYawDegrees = -35.0f;
+    frame.lighting = presentationSettings_.renderLighting();
+    frame.gridOverlay = presentationSettings_.renderGridOverlay();
+    frame.outputTransform = presentationSettings_.renderOutputTransform();
+    frame.waterRendering = presentationSettings_.water;
+    frame.waterGridBounds = { 0, 0, 10, 7 };
+    frame.groundSplat = groundSplatTexturesForScreen(
+        [this](std::string_view name) { return assetManifest_.findTextureIdByName(name); },
+        std::nullopt);
+    const auto append = [&](int x, int y) {
+        auto tile = tileVisual(TileType::Ground, { x, y, 0 }, assetManifest_, presentationSettings_);
+        constexpr std::array<std::string_view, 10> names {
+            "GroundRock01", "GroundRock02", "GroundRock03", "GroundRock04", "GroundRock05",
+            "GroundRock06", "GroundRock07", "GroundRock08", "GroundRock09", "GroundRock10",
+        };
+        if (auto model = assetManifest_.findModelIdByName(names[(x + y * 3) % 10])) {
+            tile.model = *model;
+        }
+        frame.tiles.push_back(tile);
+    };
+    for (int y = 1; y <= 3; ++y) for (int x = 1; x <= 3; ++x) {
+        if (x != 2 || y != 2) append(x, y);
+    }
+    for (int y = 1; y <= 2; ++y) for (int x = 6; x <= 7; ++x) append(x, y);
+    for (int x = 5; x <= 8; ++x) append(x, 5);
+    append(1, 5);
+    frame.waterSurfaces.push_back({ .cell = { 0, 1, 0 }, .position = { 0, 1 },
+        .size = { 1, 1 }, .color = { 0.2f, 0.4f, 0.7f, 1.0f }, .elevation = 0.85f });
+    frame.lighting.pointLights[0] = { .position = { 4, 3, 4 },
+        .color = { 1.0f, 0.82f, 0.65f }, .intensity = 5.0f, .range = 10.0f };
+    frame.lighting.pointLightCount = 1;
+    if (presentationSettings_.geometry.processGroundGeometry) {
+        processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, assetManifest_,
+            &arena, &gameplayGroundGeometryCache_);
+        if (presentationSettings_.geometry.smoothGroundRim) {
+            frame.requestedGroundRimWidth = presentationSettings_.geometry.groundRimWidth;
+            frame.requestedGroundRimDepth = presentationSettings_.geometry.groundRimDepth;
+            for (auto& tile : frame.tiles) if (tile.groundGeometryEligible) {
+                tile.groundRimWidth = frame.requestedGroundRimWidth;
+                tile.groundRimDepth = frame.requestedGroundRimDepth;
+            }
+        }
+    }
+    return frame;
+}
+
 RenderFrameData Application::buildRenderFrame(
     const InputRouter::EditorInput& editorInput)
 {
     (void)editorInput;
     FrameArena& arena = beginRenderFrameArena();
+    if (evidenceGroundRimFixture_) {
+        return buildGroundRimEvidenceFrame(arena);
+    }
     const float beltScrollOffset =
         presentation_.conveyorBeltScrollOffset(
             gameplaySession_.stepDurationSeconds());
@@ -2880,6 +2941,7 @@ RenderFrameData Application::buildRenderFrame(
         .activationPreview = activationPreview ? &*activationPreview : nullptr,
         .projectedActivationPreview = gameplaySession_.moving() && projectedActivationPreview
             ? &*projectedActivationPreview : nullptr,
+        .groundGeometryCache = &gameplayGroundGeometryCache_,
     }, arena);
     if (renderCampaignOverworld && overworldView && renderedOverworld) {
         appendOverworldFogVolumes(

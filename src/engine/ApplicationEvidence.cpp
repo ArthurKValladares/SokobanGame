@@ -224,6 +224,20 @@ void Application::finishEvidenceCapture()
     report << "- Process ground geometry: "
            << (presentationSettings_.geometry.processGroundGeometry ? "enabled" : "disabled")
            << "\n";
+    report << "- Ground rim requested: "
+           << (presentationSettings_.geometry.smoothGroundRim ? "enabled" : "disabled")
+           << "; width " << presentationSettings_.geometry.groundRimWidth
+           << ", depth " << presentationSettings_.geometry.groundRimDepth << " tiles\n";
+    report << "- Resolved ground rim tiles: " << evidenceStats_.resolvedGroundRimTiles
+           << "; draw-budget fallback "
+           << (evidenceStats_.groundRimBudgetFallback ? "active" : "inactive") << "\n";
+    report << "- Ground rim fixture: " << (evidenceGroundRimFixture_ ? "enabled" : "disabled") << "\n";
+    report << "- Ground boundary cache: " << gameplayGroundGeometryCache_.hitCount()
+           << " hits, " << gameplayGroundGeometryCache_.rebuildCount() << " builds; "
+           << gameplayGroundGeometryCache_.processed().cells.size() << " cells, "
+           << gameplayGroundGeometryCache_.processed().exposedSideCount << " exposed sides, "
+           << gameplayGroundGeometryCache_.processed().concaveCornerCount << " concave corners; "
+           << gameplayGroundGeometryCache_.capacityBytes() << " bytes retained\n";
     report << "- Ground model triangles: "
            << evidenceStats_.groundTrianglesAfterProcessing << " / "
            << evidenceStats_.groundTrianglesBeforeProcessing

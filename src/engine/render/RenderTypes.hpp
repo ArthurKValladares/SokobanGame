@@ -81,6 +81,10 @@ inline constexpr uint8_t groundEastSide = 1U << 1;
 inline constexpr uint8_t groundSouthSide = 1U << 2;
 inline constexpr uint8_t groundWestSide = 1U << 3;
 inline constexpr uint8_t groundAllSides = 0x0f;
+inline constexpr uint8_t groundNorthWestCorner = 1;
+inline constexpr uint8_t groundNorthEastCorner = 2;
+inline constexpr uint8_t groundSouthEastCorner = 4;
+inline constexpr uint8_t groundSouthWestCorner = 8;
 
 // Runtime animation identity: 0 means "no animation"; any other value
 // addresses entry value-1 of the asset manifest's animation list.
@@ -465,6 +469,13 @@ struct RenderFrameData {
         // layer restores a side until the neighbor's mesh is validated and
         // resident, including after streaming failures or residency eviction.
         std::array<RenderModel, 4> groundSideNeighbors {};
+        std::array<RenderModel, 4> groundDiagonalNeighbors {};
+        bool groundGeometryEligible = false;
+        // Candidate boundary recipe, then resolved before top/body preparation.
+        uint8_t groundRimSides = groundAllSides;
+        uint8_t groundRimConcaveCorners = 0;
+        float groundRimWidth = 0.0f;
+        float groundRimDepth = 0.0f;
 
         friend constexpr bool operator==(const Tile&, const Tile&) = default;
     };
@@ -631,6 +642,8 @@ struct RenderFrameData {
     FrameArray<DebugItemLabel> debugItemLabels;
 #endif
     GroundSplatTextures groundSplat {};
+    float requestedGroundRimWidth = 0.0f;
+    float requestedGroundRimDepth = 0.0f;
     RenderTexture groundRockSideTexture = noTexture;
     std::array<GroundSplatRegion, groundSplatRegionCapacity>
         groundSplatRegions {};
@@ -742,6 +755,10 @@ struct RenderStats {
     uint64_t groundTrianglesBeforeProcessing = 0;
     uint64_t groundTrianglesAfterProcessing = 0;
     uint64_t groundShadowTrianglesRemoved = 0;
+    // Resolved boundary treatment across main and preview; interior tiles stay
+    // flat. Requested smoothing can fall back while assets load or capacity is low.
+    uint32_t resolvedGroundRimTiles = 0;
+    bool groundRimBudgetFallback = false;
     uint32_t pipelineBinds = 0;
     uint32_t renderPasses = 0;
     uint32_t imageBarriers = 0;

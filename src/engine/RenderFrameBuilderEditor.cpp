@@ -106,7 +106,16 @@ public:
             }
         }
         if (input_.settings.geometry.processGroundGeometry) {
-            processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input_.manifest, arena_);
+            processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input_.manifest,
+                arena_, input_.groundGeometryCache);
+            if (input_.settings.geometry.smoothGroundRim) {
+                frame.requestedGroundRimWidth = input_.settings.geometry.groundRimWidth;
+                frame.requestedGroundRimDepth = input_.settings.geometry.groundRimDepth;
+                for (auto& tile : frame.tiles) if (tile.groundGeometryEligible) {
+                    tile.groundRimWidth = frame.requestedGroundRimWidth;
+                    tile.groundRimDepth = frame.requestedGroundRimDepth;
+                }
+            }
         }
         return frame;
     }

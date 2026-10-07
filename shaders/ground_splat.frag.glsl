@@ -32,9 +32,9 @@ layout(location = 0) out vec4 outColor;
 
 #include "SceneFrame.glsl"
 
-// Local origin of this face inside its splat region: X rides in the blur slot
-// (opaque ground never blurs) and Y in the last texture slot.
-#define SPLAT_LOCAL_ORIGIN (vec2(draw.materialOptions.x, draw.textureOptions.w))
+// The splat region's world origin is carried in draw.passData[1].yz. Using
+// world positions keeps both paint and tiled materials continuous across rim
+// subpatches.
 
 // One texture repeat spans this many board tiles. Larger = coarser detail.
 // This applies to the tiling grass/rock material layers only.
@@ -42,8 +42,7 @@ const float GROUND_UV_TILES = 4.0;
 
 // The splat map does NOT tile: one map covers one screen's board exactly, so
 // that painting a spot in the editor affects only that spot. Its coverage is
-// derived from its own dimensions rather than pushed per face, because the
-// 256-byte push-constant block is full - maps are authored at exactly
+// derived from its own dimensions: maps are authored at exactly
 // GROUND_SPLAT_TEXELS_PER_TILE texels per board tile, so
 // textureSize / texelsPerTile is the board size in tiles. Changing this
 // constant means regenerating every map (tools/make_ground_textures.py).
@@ -84,7 +83,7 @@ float gridMask()
         return 0.0;
     }
 
-    vec2 faceCoord = vec2(inFaceCoordU, inFaceCoordV);
+    vec2 faceCoord = inWorldPosition.xy;
     vec2 wrapped = fract(faceCoord);
     vec2 distanceToLine = min(wrapped, 1.0 - wrapped);
     vec2 coordPerPixel = max(fwidth(faceCoord), vec2(0.00001));
@@ -122,22 +121,9 @@ void main()
 {
     applyEditorPreviewDither();
 
-    // Face-local coords span the face's size in tiles. The recorder supplies
-    // a region-local origin for splat lookup, while the actual face vertices
-    // retain global coordinates for continuous material-layer tiling.
-    vec2 faceTiles = vec2(
-        max(draw.materialOptions.y, 0.0001),
-        max(draw.materialOptions.z, 0.0001));
-    vec2 faceCoord = vec2(inFaceCoordU, inFaceCoordV) * faceTiles;
-    vec2 splatLocalTile = SPLAT_LOCAL_ORIGIN + faceCoord;
-    // Genuinely global since C1. These corners used to arrive already
-    // projected, so this "world tile origin" was really a corner of the face
-    // in normalised device coordinates, and the material tiling it drives
-    // drifted with the camera.
-    vec2 globalOrigin = min(
-        min(draw.vertices[0].xy, draw.vertices[1].xy),
-        min(draw.vertices[2].xy, draw.vertices[3].xy));
-    vec2 worldTile = globalOrigin + faceCoord;
+    // Paint lookup is region-local; material layers use the global grid.
+    vec2 splatLocalTile = inWorldPosition.xy - draw.passData[1].yz;
+    vec2 worldTile = inWorldPosition.xy;
     vec2 uv = worldTile / GROUND_UV_TILES;
 
     vec4 materialColor = draw.color;

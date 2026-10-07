@@ -12,6 +12,7 @@
 #include "engine/CampaignSession.hpp"
 #include "engine/GameplayLoop.hpp"
 #include "engine/GameplayPresentation.hpp"
+#include "engine/GroundGeometry.hpp"
 #include "engine/InputRouter.hpp"
 #include "engine/Input.hpp"
 #include "engine/GameplaySession.hpp"
@@ -93,6 +94,8 @@ struct ApplicationOptions {
     bool recorderScratchReuseEnabled = true;
     bool waterCellCacheEnabled = true;
     bool groundGeometryProcessingEnabled = true;
+    bool groundRimEnabled = false;
+    bool evidenceGroundRimFixture = false;
     // Zero keeps the production default. A non-zero override exists for
     // deterministic residency stress/validation runs.
     std::uint64_t textureResidencyBudgetKiB = 0;
@@ -227,6 +230,7 @@ private:
 #endif
     // Evidence-only point-light fixtures, appended to a finished frame.
     void appendEvidencePointLights(RenderFrameData& frame) const;
+    [[nodiscard]] RenderFrameData buildGroundRimEvidenceFrame(FrameArena& arena) const;
     [[nodiscard]] CameraAngles gameplayCameraAngles() const;
     [[nodiscard]] RenderFrameData buildRenderFrame(
         const InputRouter::EditorInput& editorInput);
@@ -280,6 +284,9 @@ private:
     ApplicationTimingEventWatchState timingEventWatchState_ {
         &simulationTiming_, &framePacer_ };
     PresentationSettings presentationSettings_;
+    mutable GroundGeometryCache gameplayGroundGeometryCache_;
+    mutable GroundGeometryCache editorGroundGeometryCache_;
+    mutable GroundGeometryCache previewGroundGeometryCache_;
     SettingsCoordinator settingsCoordinator_;
     GameplayPresentation presentation_;
     LevelTransition levelTransition_;
@@ -339,6 +346,7 @@ private:
     bool launchShowTitle_ = false;
     bool evidenceAmbientOcclusionEnabled_ = true;
     bool evidenceWaterEnabled_ = false;
+    bool evidenceGroundRimFixture_ = false;
     bool evidencePointLightEnabled_ = false;
     bool evidencePointLightStressEnabled_ = false;
     bool evidenceDebugUi_ = false;

@@ -879,10 +879,19 @@ Ground geometry processing removes shared rock sides between adjacent,
 opaque, unit-scale ground tiles. It preserves painted tops, bottoms, gameplay
 cells and editor picking. Validated source meshes share vertex data across
 exposure masks; main rendering and shadows use the same selected indices.
-Custom models, scaled ground and isolated editor previews retain their complete
-geometry. Exposure is derived from the current rendered level view, so edits
-and overworld screen visibility update it immediately; this experiment does
-not introduce a persisted level geometry format.
+Only the shipped GroundRock01–10 source family participates. Custom models,
+scaled or transformed ground, animated objects and isolated editor previews
+retain their complete geometry. A shared side remains visible until the
+neighbor's actual mesh is resident and validated.
+
+The current rendered view supplies a cached boundary description with exposed
+sides, diagonal neighbors and convex/concave corners. Gameplay, the editor and
+screen previews keep separate caches. Changes to eligible ground cells, model
+assignments, layer visibility or overworld screen visibility rebuild it;
+tile ordering, paint colors and unrelated actors reuse it. Edits and move/delete
+previews therefore update boundaries automatically. Cache storage is retained
+across frames; this experiment does not introduce a persisted level geometry
+format or require a manual processing command.
 
 Compare it live with **Tuning > Tile Geometry > Process Ground Geometry**, or
 launch a matched evidence capture with `--disable-ground-geometry`.
@@ -891,6 +900,31 @@ processing and avoided shadow triangles. Index variants retain the vertex
 buffers, add shared index-buffer memory and can split instance batches;
 measure memory and draw calls alongside GPU time. Both comparison modes load
 the variants; disabling processing restores the complete draw indices.
+
+**Smooth Ground Rim (prototype)** is off by default in the same Tile Geometry
+section. Enable it with processing, then adjust **Rim Width** and **Rim Depth**
+in tile units, or launch with `--ground-rim`. The defaults are 0.12 tiles wide
+and 0.10 tiles deep. This is a planar chamfer: it lowers exposed top edges and
+their convex/concave corners, while deforming the upper rock body to meet the
+painted cap. It preserves paint coordinates and gameplay's square solid cells.
+The treatment waits until every participating ground mesh in that view is
+resident and validated, keeping neighboring cap and body heights consistent.
+Custom meshes and preview tiles remain untreated; continuous curved rims,
+arbitrary mesh unions and cross-layer terrain shaping are not implemented.
+
+Use the boundary fixture to inspect isolated tiles, adjacent variants, holes,
+convex/concave corners, water and point-light shadows:
+
+```powershell
+.\out\dev-fast\RelWithDebInfo\sokoban.exe --smoke-frames 240 --evidence-output out\ground-rim-review --save-directory out\ground-rim-review-save --evidence-ground-rim-fixture --ground-rim
+```
+
+Omit `--ground-rim` for the flat-cap control. Evidence reports record requested
+settings, resolved rim tiles, draw-budget fallback, and boundary-cache hits,
+rebuilds and retained bytes. Large views that exceed the shared draw budget
+fall back to flat ground as a whole before recording. The prototype
+adds cap geometry, so compare total triangles, draw calls and timings alongside
+the ground-body triangle counters.
 
 The `dev` and `dev-fast` builds add these to the workspace:
 

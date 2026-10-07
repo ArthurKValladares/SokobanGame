@@ -9,8 +9,11 @@
 #include "TestHarness.hpp"
 
 #include "engine/render/IsoScenePreparer.hpp"
+#include "engine/render/GroundRimSurface.hpp"
 
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 
 namespace {
@@ -301,6 +304,57 @@ void testEmptySceneIsSafe()
     CHECK(!preparer.pickGroundPoint(scene, { 640.0f, 360.0f }, outputExtent));
 }
 
+void testRimPaintPickingReturnsTheSlopedWorldSurface()
+{
+    TEST("rimPaintPickingReturnsTheSlopedWorldSurface");
+    const IsoScenePreparer preparer;
+    RenderFrameData frame = groundFrame(4, 4);
+    frame.tiles.clear();
+    RenderFrameData::Tile tile {
+        .cell = { 1, 1, 0 }, .position = { 1, 1 },
+        .color = { 1, 1, 1, 1 }, .height = 1,
+        .model = { 1 }, .effect = RenderSurfaceEffect::GroundSplat,
+        .groundTop = true,
+    };
+    tile.groundRimWidth = 0.12f;
+    tile.groundRimDepth = 0.10f;
+    // Straight edge, convex corner and concave corner. Aim at the triangle
+    // centres so the test proves barycentric XYZ interpolation, including
+    // triangles encoded in the quad path, rather than a flat-plane shortcut.
+    const std::array<std::array<uint8_t, 2>, 3> profiles {{
+        { groundSouthSide, 0 },
+        { static_cast<uint8_t>(groundSouthSide | groundEastSide), 0 },
+        { 0, 4 },
+    }};
+    for (const auto& profile : profiles) {
+        tile.groundRimSides = profile[0];
+        tile.groundRimConcaveCorners = profile[1];
+        frame.tiles.push_back(tile);
+        PreparedRenderScene scene;
+        preparer.prepare(frame, outputExtent, scene);
+        std::size_t slopedSamples = 0;
+        for (const auto index : scene.opaqueFaceIndices) {
+            const auto& face = scene.isoFaces[index];
+            if (face.material != PreparedSurfaceMaterial::GroundSplat ||
+                face.normal.z > 0.9999f) continue;
+            const Vec3 expected = (face.worldVertices[0] +
+                face.worldVertices[1] + face.worldVertices[2]) / 3.0f;
+            const Vec2 pixel = worldToPixel(scene, expected);
+            const auto picked = preparer.pickGroundPoint(scene, pixel, outputExtent);
+            CHECK(picked.has_value());
+            if (picked) {
+                CHECK(std::abs(picked->x - expected.x) < 0.0002f);
+                CHECK(std::abs(picked->y - expected.y) < 0.0002f);
+                CHECK(std::abs(picked->z - expected.z) < 0.0002f);
+            }
+            CHECK(preparer.pickGridCell(scene, pixel, outputExtent, 4, 4) == tile.cell);
+            ++slopedSamples;
+        }
+        CHECK(slopedSamples > 0);
+        frame.tiles.clear();
+    }
+}
+
 } // namespace
 
 int main()
@@ -314,6 +368,7 @@ int main()
     testEditorPreviewGroundIsStillPaintable();
     testPickOnlyPlanesAreNotPaintable();
     testEmptySceneIsSafe();
+    testRimPaintPickingReturnsTheSlopedWorldSurface();
 
     if (failures == 0) {
         std::cout << "GroundPickTests: " << checks << " checks passed\n";

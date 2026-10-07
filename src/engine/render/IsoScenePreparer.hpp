@@ -111,11 +111,12 @@ struct PreparedIsoFace {
     bool showGrid = false;
     bool isEditorPreview = false;
     bool pickable = false;
+    // Cap subpatches keep world-grid coordinates even in assignment-color mode.
+    bool groundRimSurface = false;
     Vec2 gridSize {};
     Vec2 worldOrigin {};
-    // World Z of the face's plane. Tile tops are flat, so one value covers
-    // the whole face. Needed to draw overlays that sit on the surface rather
-    // than at an assumed height.
+    // First corner's world Z, retained for flat-face overlays. Continuous
+    // ground picking interpolates worldVertices so sloped rim patches work.
     float worldHeight = 0.0f;
     PreparedSurfaceMaterial material = PreparedSurfaceMaterial::Standard;
     uint32_t shorelineMask = 0;

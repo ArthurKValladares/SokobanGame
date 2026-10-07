@@ -1,3 +1,4 @@
+#include "ScopedTestDirectory.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/AnimationCatalog.hpp"
 #include "engine/ContentPipeline.hpp"
@@ -10,11 +11,14 @@
 #include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanModelResources.hpp"
+#include "engine/render/VulkanRenderer.hpp"
 #include "engine/render/VulkanTextureUploader.hpp"
+#include "engine/ui/FontAtlas.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <exception>
 #include <filesystem>
@@ -955,6 +959,96 @@ PressureMetrics exercisePreparedAssetPressure(
     };
 }
 
+void exerciseGroundRimDrawBudgetFallback(SDL_Window* window)
+{
+    using namespace sokoban;
+    const auto assetRoot = std::filesystem::path(SOKOBAN_VULKAN_TEST_ASSETS);
+    const auto manifest = AssetManifest::loadFromFile(assetRoot / "manifest.json");
+    auto font = FontAtlas::loadDefault(assetRoot);
+    ScopedTestDirectory temporary("ground-rim-budget");
+    VulkanRenderer renderer(window, assetRoot, temporary.path() / "cache.bin",
+        manifest, font, AntiAliasingMode::None, 100,
+        { .vsync = false }, {}, false, true, true, false);
+    renderer.setFrustumCullingEnabled(false);
+    const auto ground = manifest.modelIdByName("GroundRock01");
+    RenderAssetRequirements requirements;
+    requirements.requireModel(ground);
+    renderer.waitForAssets(requirements);
+
+    constexpr uint32_t tileCount = 5000;
+    const auto scene = [&](bool requestedRim) {
+        RenderFrameData frame;
+        frame.viewMode = RenderViewMode::Isometric3D;
+        frame.levelWidth = 300;
+        frame.levelHeight = 200;
+        // Keep one inspectable tile in view. The other legal, isolated cells
+        // still participate in preparation with frustum culling disabled.
+        frame.cameraExtent = RenderFrameData::CameraExtent { 0, 0, 0, 4, 4, 1 };
+        frame.lighting.shadows.enabled = false;
+        frame.requestedGroundRimWidth = requestedRim ? 0.12f : 0.0f;
+        frame.requestedGroundRimDepth = requestedRim ? 0.10f : 0.0f;
+        for (uint32_t i = 0; i < tileCount; ++i) {
+            const int x = i == 0 ? 1 : 100 + static_cast<int>(i % 100) * 2;
+            const int y = i == 0 ? 1 : 100 + static_cast<int>(i / 100) * 2;
+            RenderFrameData::Tile tile {
+                .cell = { x, y, 0 },
+                .position = { static_cast<float>(x), static_cast<float>(y) },
+                .color = { 1, 1, 1, 1 }, .height = 1,
+                .showGrid = false, .model = ground,
+                .effect = RenderSurfaceEffect::GroundSplat,
+                .groundTop = true,
+            };
+            tile.groundGeometryEligible = true;
+            tile.groundSideMask = groundAllSides;
+            tile.groundRimSides = groundAllSides;
+            tile.groundRimWidth = frame.requestedGroundRimWidth;
+            tile.groundRimDepth = frame.requestedGroundRimDepth;
+            frame.tiles.push_back(tile);
+        }
+        return frame;
+    };
+    UiDrawData ui;
+    ui.viewportSize = { 32, 32 };
+    renderer.beginDebugUiFrame();
+    const auto fallback = renderer.prepareFrame(scene(true));
+    renderer.drawFrame(fallback, ui);
+    if (renderer.hasFatalFailure()) {
+        throw std::runtime_error(std::string(renderer.fatalFailureMessage()));
+    }
+    const auto fallbackStats = renderer.renderStats();
+    if (!fallbackStats.groundRimBudgetFallback ||
+        fallbackStats.resolvedGroundRimTiles != 0 ||
+        fallbackStats.unavailableModels != 0 ||
+        fallbackStats.groundTrianglesBeforeProcessing == 0 ||
+        fallbackStats.groundTrianglesAfterProcessing !=
+            fallbackStats.groundTrianglesBeforeProcessing ||
+        renderer.assetLoadingStats().droppedDrawInstances != 0) {
+        throw std::runtime_error(
+            "Ground rim budget fallback did not preserve loaded flat ground without dropped draws");
+    }
+    const auto pixel = renderer.projectToPixels(fallback, { 1.8f, 1.8f, 1.0f });
+    const auto picked = pixel ? renderer.pickIsoGroundPoint(fallback, *pixel) : std::nullopt;
+    if (!picked || std::abs(picked->z - 1.0f) > 0.0001f) {
+        throw std::runtime_error("Ground rim budget fallback left a lowered paintable cap");
+    }
+    const auto fallbackImage = renderer.captureRenderedFrame();
+    renderer.beginDebugUiFrame();
+    const auto flat = renderer.prepareFrame(scene(false));
+    renderer.drawFrame(flat, ui);
+    const auto flatImage = renderer.captureRenderedFrame();
+    if (renderer.hasFatalFailure() || renderer.renderStats().groundRimBudgetFallback ||
+        renderer.renderStats().resolvedGroundRimTiles != 0 ||
+        renderer.assetLoadingStats().droppedDrawInstances != 0 ||
+        fallbackImage.width != flatImage.width || fallbackImage.height != flatImage.height ||
+        fallbackImage.rgba != flatImage.rgba) {
+        throw std::runtime_error(
+            "Ground rim budget fallback caps and body differ from an explicitly flat frame");
+    }
+    renderer.waitIdle();
+    std::cout << "Ground rim budget fallback preserved " << tileCount
+              << " loaded ground bodies and flat caps without dropped draw instances\n";
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -1045,6 +1139,7 @@ int main(int argc, char** argv)
                 << " elapsed_us=" << pressure.elapsedMicroseconds << '\n';
         }
         submitNoOp(deviceContext);
+        exerciseGroundRimDrawBudgetFallback(window.get());
         std::cout << "Vulkan hidden-surface smoke test passed\n";
         return 0;
     } catch (const std::exception& error) {

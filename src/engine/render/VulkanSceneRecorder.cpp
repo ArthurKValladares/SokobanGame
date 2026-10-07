@@ -13,6 +13,7 @@
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/FogOfWarConfig.hpp"
 #include "engine/render/OpaqueDrawSorter.hpp"
+#include "engine/render/GroundRimGeometry.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/SceneDrawLanes.hpp"
 #include "engine/render/WaterConfig.hpp"
@@ -528,31 +529,11 @@ public:
         // a shadow-heavy frame cannot make visible scene or UI draws overflow.
         // If a light's batch does not fit beside this reserve, it retains the
         // capacity-independent push-constant path.
-        const auto ordinaryDrawReserve = [](const RenderFrameData& data,
-                                             const PreparedRenderScene& prepared) {
-            uint64_t reserve = prepared.shadowFaces.size() +
-                2ULL * (prepared.opaqueFaceIndices.size() +
-                    prepared.translucentFaceIndices.size() +
-                    prepared.opaqueModelIndices.size() +
-                    prepared.translucentModelIndices.size()) +
-                prepared.particles.size() + data.waterSurfaces.size();
-#if SOKOBAN_ENABLE_DEBUG_UI
-            reserve += data.debugItemOutlines.size() + data.debugItemLinks.size();
-            reserve += data.debugItemLabels.size() *
-                (RenderFrameData::DebugItemLabel::textCapacity + 1ULL);
-#endif
-            if (data.viewMode == RenderViewMode::TopDown2D) {
-                reserve += data.tiles.size() +
-                    2ULL * (data.levelWidth + data.levelHeight + 2ULL);
-            }
-            return reserve;
-        };
-        pointShadowDrawInstanceReserve_ = ordinaryDrawReserve(
-            frameData, scene) + uiDrawData.commands.size() + 64ULL;
-        if (previewFrameData && previewScene) {
-            pointShadowDrawInstanceReserve_ += ordinaryDrawReserve(
-                *previewFrameData, *previewScene);
-        }
+        pointShadowDrawInstanceReserve_ = ordinaryFrameDrawInstanceReserve(
+            ordinarySceneDrawInstanceReserve(frameData, scene),
+            previewFrameData && previewScene
+                ? ordinarySceneDrawInstanceReserve(*previewFrameData, *previewScene) : 0,
+            uiDrawData.commands.size());
 
         const auto setupStart = std::chrono::steady_clock::now();
         // The camera the whole frame renders through. Built here rather than
@@ -2608,7 +2589,9 @@ private:
                         : Vec4 {},
                     face.gridSize,
                     frameData.gridOverlay.width,
-                    face.isEditorPreview);
+                    face.isEditorPreview,
+                    false,
+                    face.groundRimSurface);
             }
             // Entries are handed out in order, so a run is simply a
             // contiguous span of them. The guard is defensive: if anything
@@ -3223,7 +3206,8 @@ private:
         Vec2 gridSize = {},
         float gridLineWidth = 0.0f,
         bool isEditorPreview = false,
-        bool clipSpace = false)
+        bool clipSpace = false,
+        bool groundRimSurface = false)
     {
         beginQuadDraw(commandBuffer);
 
@@ -3231,6 +3215,8 @@ private:
         const GpuDrawInstance constants {
             .vertices = quadVertices(
                 vertices, clipSpace ? clipSpaceQuad : worldSpaceQuad),
+            .passData = { Vec4 {}, Vec4 {}, Vec4 {},
+                Vec4 { 0.0f, 0.0f, 0.0f, groundRimSurface ? 1.0f : 0.0f } },
             .color = color,
             .normalAndAmbientRed = {
                 normal.x,
@@ -3263,9 +3249,8 @@ private:
 
     // Ground tops blended from two textures via a splat map. Lighting,
     // shadowing, grid, and dithering come from the same helpers drawFace uses,
-    // so they now agree by construction rather than by being kept in step. Only
-    // materialOptions.x and textureOptions.w carry the splat-local origin;
-    // passData carries the optional layer data maps and specular strength.
+    // so they agree by construction. passData carries the optional layer data
+    // maps, specular strength, and the splat region's world origin.
     [[nodiscard]] uint32_t drawGroundSplatFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
@@ -3291,7 +3276,12 @@ private:
                     static_cast<float>(textures.baseOrm.value),
                     static_cast<float>(textures.detailOrm.value),
                 },
-                Vec4 { std::max(lighting.specularStrength, 0.0f), 0.0f, 0.0f, 0.0f },
+                Vec4 {
+                    std::max(lighting.specularStrength, 0.0f),
+                    vertices[0].x - worldOrigin.x,
+                    vertices[0].y - worldOrigin.y,
+                    0.0f,
+                },
             },
             .color = color,
             .normalAndAmbientRed = {
@@ -3602,8 +3592,9 @@ private:
                     0.0f,
                 },
                 Vec4 {},
-                Vec4 {},
-                Vec4 {},
+                Vec4 { tile.groundRimWidth, tile.groundRimDepth,
+                    GroundRimProfile {}.bodyBand, static_cast<float>(tile.groundRimSides) },
+                Vec4 { static_cast<float>(tile.groundRimConcaveCorners), 0.0f, 0.0f, 0.0f },
             },
             // Ground's top tint stays on its splat face. The rock body uses
             // its authored sandstone factors rather than the green top tint.
@@ -3732,6 +3723,10 @@ private:
                     layout, transform.yPoint),
                 IsoScenePreparer::projectShadowPoint(
                     layout, transform.zPoint)),
+            .passData = { Vec4 {}, Vec4 {},
+                Vec4 { tile.groundRimWidth, tile.groundRimDepth,
+                    GroundRimProfile {}.bodyBand, static_cast<float>(tile.groundRimSides) },
+                Vec4 { static_cast<float>(tile.groundRimConcaveCorners), 0.0f, 0.0f, 0.0f } },
         };
         const VkBuffer vertexBuffer = mesh.vertexBuffer;
         const VkDeviceSize offset = mesh.vertexOffset;
@@ -3774,6 +3769,10 @@ private:
                 projectPointShadow(light, cubeFace, transform.xPoint),
                 projectPointShadow(light, cubeFace, transform.yPoint),
                 projectPointShadow(light, cubeFace, transform.zPoint)),
+            .passData = { Vec4 {}, Vec4 {},
+                Vec4 { tile.groundRimWidth, tile.groundRimDepth,
+                    GroundRimProfile {}.bodyBand, static_cast<float>(tile.groundRimSides) },
+                Vec4 { static_cast<float>(tile.groundRimConcaveCorners), 0.0f, 0.0f, 0.0f } },
         };
         const VkBuffer vertexBuffer = mesh.vertexBuffer;
         const VkDeviceSize offset = mesh.vertexOffset;

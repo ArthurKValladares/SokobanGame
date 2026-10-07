@@ -284,12 +284,19 @@ private:
     // swapchain image, not by frame slot. See SwapchainPresentSemaphores.
 
     struct PreparedFrameScratch {
-        RenderFrameData frameData;
-        PreparedRenderScene scene;
-        std::optional<RenderFrameData> previewFrameData;
-        std::optional<PreparedRenderScene> previewScene;
+        // Fence-owned publication can change rim support after preparation.
+        // The renderer updates caps/bodies together before recording, retaining
+        // the lease/generation for picking that final rendered frame.
+        mutable RenderFrameData frameData;
+        mutable PreparedRenderScene scene;
+        mutable std::optional<RenderFrameData> previewFrameData;
+        mutable std::optional<PreparedRenderScene> previewScene;
+        mutable bool groundRimBudgetFallback = false;
         uint64_t generation = 0;
     };
+
+    void applyGroundRimBudgetFallback(
+        const PreparedFrameScratch& prepared, std::size_t uiDrawCount);
 
     struct RenderResourceSet {
         std::unique_ptr<VulkanSwapchainResources> swapchain;

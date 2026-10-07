@@ -68,6 +68,10 @@ void PresentationSettings::applyTileScales(const AssetManifest& manifest)
 
 void PresentationSettings::normalize()
 {
+    geometry.groundRimWidth = std::isfinite(geometry.groundRimWidth)
+        ? std::clamp(geometry.groundRimWidth, 0.02f, 0.25f) : 0.12f;
+    geometry.groundRimDepth = std::isfinite(geometry.groundRimDepth)
+        ? std::clamp(geometry.groundRimDepth, 0.01f, 0.20f) : 0.10f;
     outputTransform.exposureEv = normalizedExposureEv(
         outputTransform.exposureEv);
     lighting.sunAzimuthDegrees = std::clamp(

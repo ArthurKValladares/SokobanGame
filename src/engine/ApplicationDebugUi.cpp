@@ -137,6 +137,17 @@ if (ImGui::CollapsingHeader("Tile Geometry")) {
             "Remove shared sides between adjacent unit-scale ground tiles. "
             "Turn off to compare the original geometry. Tops and picking stay intact.");
     }
+    ImGui::BeginDisabled(!settings.geometry.processGroundGeometry);
+    ImGui::Checkbox("Smooth Ground Rim (prototype)", &settings.geometry.smoothGroundRim);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Bevel exposed ground edges and corners using the cached boundary. "
+            "Waits for validated ground meshes and falls back to flat tops if the draw budget is full.");
+    }
+    if (settings.geometry.smoothGroundRim) {
+        ImGui::SliderFloat("Rim Width", &settings.geometry.groundRimWidth, 0.02f, 0.25f, "%.2f tiles");
+        ImGui::SliderFloat("Rim Depth", &settings.geometry.groundRimDepth, 0.01f, 0.20f, "%.2f tiles");
+    }
+    ImGui::EndDisabled();
     float stepDurationSeconds =
         context.gameplaySession.stepDurationSeconds();
     ImGui::DragFloat(
@@ -1014,6 +1025,9 @@ if (ImGui::CollapsingHeader("Rendering Stats")) {
         static_cast<unsigned long long>(renderStats.groundTrianglesBeforeProcessing));
     ImGui::Text("Ground shadow triangles removed %llu",
         static_cast<unsigned long long>(renderStats.groundShadowTrianglesRemoved));
+    ImGui::Text("Resolved rim tiles %u; draw-budget fallback %s",
+        renderStats.resolvedGroundRimTiles,
+        renderStats.groundRimBudgetFallback ? "active" : "inactive");
     ImGui::Text("Vertices %u", renderStats.vertices);
     ImGui::Text("Pipelines bound %u", renderStats.pipelineBinds);
     ImGui::Text("Render passes %u", renderStats.renderPasses);

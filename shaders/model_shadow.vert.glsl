@@ -1,4 +1,7 @@
 #version 460
+#extension GL_GOOGLE_include_directive : require
+
+#include "GroundRim.glsl"
 
 layout(location = 0) in vec3 inPosition;
 
@@ -23,5 +26,7 @@ void main()
         pc.shadowFromModel[1],
         pc.shadowFromModel[2],
         pc.shadowFromModel[3]);
-    gl_Position = shadowTransform * vec4(inPosition, 1.0);
+    GroundRimDeformation rim = groundRimDeformation(
+        inPosition, pc.passData[2], uint(pc.passData[3].x + 0.5));
+    gl_Position = shadowTransform * vec4(rim.position, 1.0);
 }

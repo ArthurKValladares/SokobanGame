@@ -6,6 +6,7 @@
 #include "engine/BoardLayout.hpp"
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
+#include "engine/render/GroundRimSurface.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -672,23 +673,13 @@ std::optional<Vec3> triangleWeights(Vec2 point, Vec2 a, Vec2 b, Vec2 c)
     return Vec3 { weightA, weightB, weightC };
 }
 
-// Face-local coordinates of the four quad corners, matching the faceCoords
-// table in triangle.vert.glsl. Painting has to agree with the shader about
-// which corner is the origin, or strokes land mirrored.
-constexpr std::array<Vec2, 4> faceCornerCoords {
-    Vec2 { 0.0f, 0.0f },
-    Vec2 { 1.0f, 0.0f },
-    Vec2 { 1.0f, 1.0f },
-    Vec2 { 0.0f, 1.0f },
-};
-
-// Face-local coordinate under `point`, perspective-corrected using the stored
-// clip w of each corner. Affine interpolation would bias every stroke toward
-// the corner nearest the camera.
-std::optional<Vec2> faceCoordInQuad(
+// Interpolate the actual surface, including sloped rim patches. Correcting
+// screen weights by clip W makes this agree with the GPU's world position.
+std::optional<Vec3> worldPointInQuad(
     Vec2 point,
     const std::array<Vec2, 4>& pixelQuad,
-    const std::array<float, 4>& clipW)
+    const std::array<float, 4>& clipW,
+    const std::array<Vec3, 4>& worldVertices)
 {
     constexpr std::array<std::array<std::size_t, 3>, 2> triangles {
         std::array<std::size_t, 3> { 0, 1, 2 },
@@ -707,18 +698,17 @@ std::optional<Vec2> faceCoordInQuad(
             weights->x, weights->y, weights->z,
         };
         float total = 0.0f;
-        Vec2 accumulated {};
+        Vec3 accumulated {};
         for (std::size_t i = 0; i < triangle.size(); ++i) {
             const std::size_t corner = triangle[i];
             const float w = screenWeights[i] / std::max(clipW[corner], 0.001f);
             total += w;
-            accumulated.x += faceCornerCoords[corner].x * w;
-            accumulated.y += faceCornerCoords[corner].y * w;
+            accumulated += worldVertices[corner] * w;
         }
         if (std::abs(total) <= 0.00001f) {
             continue;
         }
-        return Vec2 { accumulated.x / total, accumulated.y / total };
+        return accumulated / total;
     }
     return std::nullopt;
 }
@@ -973,12 +963,15 @@ static void prepareAuxiliaryGeometry(
 {
     particles.clear();
     particles.reserve(frameData.particles.size());
+    const std::size_t rimFaceReserve = static_cast<std::size_t>(
+        std::ranges::count_if(frameData.tiles, hasGroundRimSurface)) *
+        GroundRimSurface::capacity;
     shadowFaces.clear();
     shadowFaces.reserve(
-        frameData.tiles.size() * 5 + frameData.isoFaces.size());
+        frameData.tiles.size() * 5 + rimFaceReserve + frameData.isoFaces.size());
     shadowFaceBounds.clear();
     shadowFaceBounds.reserve(
-        frameData.tiles.size() * 5 + frameData.isoFaces.size());
+        frameData.tiles.size() * 5 + rimFaceReserve + frameData.isoFaces.size());
     shadowModelIndices.clear();
     shadowModelIndices.reserve(frameData.tiles.size());
 
@@ -1101,8 +1094,15 @@ static void prepareAuxiliaryGeometry(
             // Rock assets contain the sides; the painted top belongs to the
             // tile renderer and must also close the body's shadow volume.
             if (tile.groundTop || tile.effect == RenderSurfaceEffect::GroundSplat) {
-                const auto top = tileCorners(tile);
-                appendShadowFace({ top[4], top[5], top[6], top[7] });
+                const auto rim = buildGroundRimSurface(tile);
+                if (rim.count != 0) {
+                    for (std::size_t i = 0; i < rim.count; ++i) {
+                        appendShadowFace(rim.patches[i].vertices);
+                    }
+                } else {
+                    const auto top = tileCorners(tile);
+                    appendShadowFace({ top[4], top[5], top[6], top[7] });
+                }
             }
             continue;
         }
@@ -1247,6 +1247,7 @@ struct IsoFaceRequest {
     bool showGrid = false;
     bool editorPreview = false;
     bool pickable = false;
+    bool groundRimSurface = false;
     bool drawable = false;
     Vec2 gridSize {};
     PreparedSurfaceMaterial material {};
@@ -1269,6 +1270,7 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
         .showGrid = request.showGrid,
         .isEditorPreview = request.editorPreview,
         .pickable = request.pickable,
+        .groundRimSurface = request.groundRimSurface,
         .gridSize = request.gridSize,
         .worldOrigin = {
             request.vertices[0].x,
@@ -1358,6 +1360,7 @@ void appendTileFaces(
             tile.effect == RenderSurfaceEffect::GroundSplat && !tile.pickOnly
             ? PreparedSurfaceMaterial::GroundSplat
             : tileMaterial;
+        const GroundRimSurface rim = buildGroundRimSurface(tile);
         // Visual scaling can move an edge tile's origin into the neighboring
         // cell. Bounds checks belong to its authored cell, even when its
         // rendered geometry extends beyond the board.
@@ -1464,13 +1467,36 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
-                .drawable = drawTop && mainSceneVisible,
+                .drawable = drawTop && mainSceneVisible && rim.count == 0,
                 .gridSize = { width, depth },
-                .material = topMaterial,
+                // Keep the logical box for tile selection, but paint picking
+                // must hit the actual sloped surface rather than this plane.
+                .material = rim.count == 0 ? topMaterial : PreparedSurfaceMaterial::Standard,
                 .shorelineMask = 0,
                 .groundSplat = tile.groundSplat,
                 .groundSplatOrigin = tile.groundSplatOrigin,
             });
+            for (std::size_t i = 0; i < rim.count; ++i) {
+                const auto& patch = rim.patches[i];
+                appendIsoFace(scene, {
+                    .vertices = patch.vertices,
+                    .normal = patch.normal,
+                    .color = tile.color,
+                    .cell = tile.cell,
+                    .pickBoundsCell = pickBoundsCell,
+                    .blurBehind = tile.blurBehind,
+                    .showGrid = tile.showGrid,
+                    .editorPreview = tile.isEditorPreview,
+                    .pickable = pickable,
+                    .groundRimSurface = true,
+                    .drawable = drawTop && mainSceneVisible,
+                    .gridSize = { width, depth },
+                    .material = topMaterial,
+                    .shorelineMask = 0,
+                    .groundSplat = tile.groundSplat,
+                    .groundSplatOrigin = tile.groundSplatOrigin,
+                });
+            }
         }
 
         if (!tile.model.isCube() && !tile.pickOnly && mainSceneVisible) {
@@ -1745,13 +1771,16 @@ void IsoScenePreparer::prepare(
         prepareAuxiliary();
     }
 
+    const std::size_t rimFaceReserve = static_cast<std::size_t>(
+        std::ranges::count_if(frameData.tiles, hasGroundRimSurface)) *
+        GroundRimSurface::capacity;
     scene.isoFaces.reserve(
-        frameData.tiles.size() * 5 + frameData.waterSurfaces.size());
-    scene.opaqueFaceIndices.reserve(frameData.tiles.size() * 3);
+        frameData.tiles.size() * 5 + rimFaceReserve + frameData.waterSurfaces.size());
+    scene.opaqueFaceIndices.reserve(frameData.tiles.size() * 3 + rimFaceReserve);
     scene.translucentFaceIndices.reserve(
         frameData.tiles.size() + frameData.waterSurfaces.size());
     scene.pickFaceIndices.reserve(
-        frameData.tiles.size() * 3 + frameData.waterSurfaces.size());
+        frameData.tiles.size() * 3 + rimFaceReserve + frameData.waterSurfaces.size());
     scene.renderables.reserve(
         frameData.tiles.size() + frameData.waterSurfaces.size() +
         frameData.isoFaces.size());
@@ -1918,19 +1947,13 @@ std::optional<Vec3> IsoScenePreparer::pickGroundPoint(
         if (!depth || *depth >= pickedDepth) {
             continue;
         }
-        const std::optional<Vec2> faceCoord =
-            faceCoordInQuad(pixelPosition, pixelQuad2D, face.clipW);
-        if (!faceCoord) {
+        const std::optional<Vec3> worldPoint = worldPointInQuad(
+            pixelPosition, pixelQuad2D, face.clipW, face.worldVertices);
+        if (!worldPoint) {
             continue;
         }
 
-        // Same reconstruction the shader performs, so the painted texel is the
-        // one under the cursor.
-        picked = Vec3 {
-            face.worldOrigin.x + faceCoord->x * face.gridSize.x,
-            face.worldOrigin.y + faceCoord->y * face.gridSize.y,
-            face.worldHeight,
-        };
+        picked = worldPoint;
         pickedDepth = *depth;
     }
     return picked;

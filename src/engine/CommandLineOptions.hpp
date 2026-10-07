@@ -61,6 +61,8 @@ struct CommandLineOptions {
     bool recorderScratchReuseEnabled = true;
     bool waterCellCacheEnabled = true;
     bool groundGeometryProcessingEnabled = true;
+    bool groundRimEnabled = false;
+    bool evidenceGroundRimFixture = false;
     // Diagnostic override for exercising residency pressure. Zero keeps the
     // normal renderer budget.
     std::uint64_t textureResidencyBudgetKiB = 0;
@@ -264,6 +266,10 @@ struct CommandLineOptions {
             options.waterCellCacheEnabled = false;
         } else if (argument == "--disable-ground-geometry") {
             options.groundGeometryProcessingEnabled = false;
+        } else if (argument == "--ground-rim") {
+            options.groundRimEnabled = true;
+        } else if (argument == "--evidence-ground-rim-fixture") {
+            options.evidenceGroundRimFixture = true;
         } else if (argument == "--texture-residency-kib") {
             if (index + 1 >= arguments.size()) {
                 return reject("--texture-residency-kib needs a size");
@@ -357,6 +363,7 @@ struct CommandLineOptions {
         (options.evidenceLevel >= 0 || options.evidenceDebugUi || options.evidenceAnimate ||
             !options.evidenceEffects.empty() || options.evidenceWaterDisabled ||
             options.evidenceWaterReflectionsDisabled ||
+            options.evidenceGroundRimFixture ||
             !options.evidenceProfilerEnabled)) {
         return reject("Evidence scenario options require --evidence-output");
     }
@@ -385,6 +392,7 @@ inline constexpr std::string_view commandLineUsage =
     "[--evidence-disable-ao] "
     "[--evidence-disable-frustum-culling] [--evidence-water] "
     "[--disable-ground-geometry] "
+    "[--ground-rim] [--evidence-ground-rim-fixture] "
     "[--evidence-point-light] "
     "[--evidence-point-light-stress]]";
 

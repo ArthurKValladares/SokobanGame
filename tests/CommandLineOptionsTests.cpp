@@ -309,6 +309,13 @@ void testLargeCountFits()
 
 void testPerformanceScenarios()
 {
+    CHECK(!parse({}).groundRimEnabled);
+    CHECK(!parse({ "--ground-rim" }).malformed);
+    CHECK(parse({ "--ground-rim" }).groundRimEnabled);
+    CHECK(parse({ "--evidence-ground-rim-fixture" }).malformed);
+    const auto rim = parse({ "--smoke-frames", "240", "--evidence-output", "x",
+        "--ground-rim", "--evidence-ground-rim-fixture" });
+    CHECK(!rim.malformed && rim.groundRimEnabled && rim.evidenceGroundRimFixture);
     const auto options = parse({ "--smoke-frames", "420", "--evidence-output", "x",
         "--evidence-level", "5", "--evidence-screen", "3", "--evidence-debug-ui",
         "--evidence-animate", "--evidence-effects", "mixed-stress",

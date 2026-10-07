@@ -15,6 +15,7 @@
 namespace sokoban {
 
 class AnimationCatalog;
+class GroundGeometryCache;
 
 // How a tile type looks: footprint, height, colour, model, rotation and scale.
 //
@@ -85,6 +86,7 @@ public:
         bool cachedActivationPreviews = false;
         const rules::MirrorActivationPreview* activationPreview = nullptr;
         const rules::MirrorActivationPreview* projectedActivationPreview = nullptr;
+        GroundGeometryCache* groundGeometryCache = nullptr;
     };
 
     struct EditorInput {
@@ -120,6 +122,7 @@ public:
         // screen. Origins are relative to the active screen's local origin.
         std::span<const OverworldNeighbor> overworldNeighbors;
         std::function<ScreenSelectorViewState(LevelLocation)> selectorState;
+        GroundGeometryCache* groundGeometryCache = nullptr;
     };
 
     [[nodiscard]] static RenderFrameData buildGameplay(const GameplayInput& input);

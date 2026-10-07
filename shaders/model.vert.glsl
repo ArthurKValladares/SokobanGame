@@ -32,6 +32,7 @@ layout(location = 10) flat out uint outMaterialIndex;
 #include "SceneFrame.glsl"
 
 #include "DrawInstance.glsl"
+#include "GroundRim.glsl"
 
 #define draw drawInstances.instances[gl_InstanceIndex]
 
@@ -55,7 +56,9 @@ void main()
         draw.vertices[2],
         draw.vertices[3]);
 
-    vec3 worldPosition = (worldTransform * vec4(inPosition, 1.0)).xyz;
+    GroundRimDeformation rim = groundRimDeformation(
+        inPosition, draw.passData[2], uint(draw.passData[3].x + 0.5));
+    vec3 worldPosition = (worldTransform * vec4(rim.position, 1.0)).xyz;
     gl_Position = frame.clipFromWorld * vec4(worldPosition, 1.0);
     outWorldPosition = worldPosition;
     outShadowPosition = sunShadowFromWorld(worldPosition);
@@ -63,7 +66,7 @@ void main()
     outFaceCoordV = inUv.y;
     outUv1 = inUv1;
     outMaterialIndex = inMaterialIndex;
-    vec3 normal = inNormal;
+    vec3 normal = groundRimDeformNormal(inNormal, rim);
     // Rotation and scale are already in worldFromModel: its first three
     // columns are the model's axes, so their lengths are the scale and the
     // columns divided by that are the rotation. This used to rebuild the same
@@ -93,5 +96,6 @@ void main()
     // A tangent transforms by the matrix itself. The fragment stage projects
     // it back onto the interpolated normal's plane before normal-map use,
     // which completes the frame after non-uniform scale and interpolation.
-    outTangent = vec4(normalize(modelToWorld * inTangent.xyz), inTangent.w);
+    outTangent = vec4(normalize(modelToWorld *
+        groundRimDeformTangent(inTangent.xyz, rim)), inTangent.w);
 }

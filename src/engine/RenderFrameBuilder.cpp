@@ -1905,7 +1905,16 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     appendMirrorPreview(frame, input);
     applyScrollingMaterials(frame, input);
     if (input.settings.geometry.processGroundGeometry) {
-        processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
+        processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest,
+            nullptr, input.groundGeometryCache);
+        if (input.settings.geometry.smoothGroundRim) {
+            frame.requestedGroundRimWidth = input.settings.geometry.groundRimWidth;
+            frame.requestedGroundRimDepth = input.settings.geometry.groundRimDepth;
+            for (auto& tile : frame.tiles) if (tile.groundGeometryEligible) {
+                tile.groundRimWidth = frame.requestedGroundRimWidth;
+                tile.groundRimDepth = frame.requestedGroundRimDepth;
+            }
+        }
     }
     return frame;
 }
@@ -1920,7 +1929,16 @@ RenderFrameData RenderFrameBuilder::buildGameplay(
     appendMirrorPreview(frame, input, &arena);
     applyScrollingMaterials(frame, input);
     if (input.settings.geometry.processGroundGeometry) {
-        processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest, &arena);
+        processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest,
+            &arena, input.groundGeometryCache);
+        if (input.settings.geometry.smoothGroundRim) {
+            frame.requestedGroundRimWidth = input.settings.geometry.groundRimWidth;
+            frame.requestedGroundRimDepth = input.settings.geometry.groundRimDepth;
+            for (auto& tile : frame.tiles) if (tile.groundGeometryEligible) {
+                tile.groundRimWidth = frame.requestedGroundRimWidth;
+                tile.groundRimDepth = frame.requestedGroundRimDepth;
+            }
+        }
     }
     return frame;
 }

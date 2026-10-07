@@ -163,7 +163,10 @@ float gridMask()
         return 0.0;
     }
 
-    vec2 faceCoord = vec2(inFaceCoordU, inFaceCoordV);
+    // Ground rim caps are split into subpatches; the editor grid still follows
+    // whole tiles when assignment colors use this material.
+    vec2 faceCoord = draw.passData[3].w > 0.5
+        ? inWorldPosition.xy : vec2(inFaceCoordU, inFaceCoordV);
     vec2 wrapped = fract(faceCoord);
     vec2 distanceToLine = min(wrapped, 1.0 - wrapped);
     vec2 coordPerPixel = max(fwidth(faceCoord), vec2(0.00001));
