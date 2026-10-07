@@ -4383,6 +4383,12 @@ void testConfigurableGroundSplats()
     const RenderTexture customOrm = manifest.addTexture({
         .name = "TexOrm", .path = "custom_orm.png", .tiling = true,
         .filter = TextureFilter::Linear, .colorSpace = TextureColorSpace::Linear });
+    const RenderTexture sideNormal = manifest.addTexture({
+        .name = "GroundRockSideNormal", .path = "side_normal.png", .tiling = true,
+        .filter = TextureFilter::Linear, .colorSpace = TextureColorSpace::Linear });
+    const RenderTexture sideOrm = manifest.addTexture({
+        .name = "GroundRockSideOrm", .path = "side_orm.png", .tiling = true,
+        .filter = TextureFilter::Linear, .colorSpace = TextureColorSpace::Linear });
     Level::Definition definition {
         .layers = { { ".." }, { "C " } },
         .groundSplats = {
@@ -4409,15 +4415,25 @@ void testConfigurableGroundSplats()
     CHECK(ground->groundSplat->baseNormal == rockNormal);
     CHECK(ground->groundSplat->detailOrm == customOrm);
     CHECK(ground->groundSplat->detailNormal.isNone());
+    CHECK(frame.groundSplat.rimWall == frame.groundRockSideTexture);
+    CHECK(frame.groundSplat.rimWallNormal == sideNormal);
+    CHECK(frame.groundSplat.rimWallOrm == sideOrm);
+    CHECK(ground->groundSplat->rimWall == frame.groundRockSideTexture);
+    CHECK(ground->groundSplat->rimWallNormal == sideNormal);
+    CHECK(ground->groundSplat->rimWallOrm == sideOrm);
     const auto requirements = renderAssetRequirementsForLevel(level, manifest);
     CHECK(requirements.contains(manifest.findTextureIdByName("Tex")));
     CHECK(requirements.contains(rockNormal));
     CHECK(requirements.contains(customOrm));
     CHECK(requirements.contains(frame.groundRockSideTexture));
+    CHECK(requirements.contains(sideNormal));
+    CHECK(requirements.contains(sideOrm));
     CHECK(renderAssetRequirementsForFrame(frame).contains(frame.groundRockSideTexture));
     CHECK(renderAssetRequirementsForFrame(frame).contains(manifest.findTextureIdByName("GroundSplatMapOverworld7")));
     CHECK(renderAssetRequirementsForFrame(frame).contains(rockNormal));
     CHECK(renderAssetRequirementsForFrame(frame).contains(customOrm));
+    CHECK(renderAssetRequirementsForFrame(frame).contains(sideNormal));
+    CHECK(renderAssetRequirementsForFrame(frame).contains(sideOrm));
     PreparedRenderScene prepared;
     IsoScenePreparer {}.prepare(frame, { 800, 600 }, prepared);
     const auto top = std::ranges::find_if(prepared.isoFaces, [](const PreparedIsoFace& face) {
@@ -4450,6 +4466,8 @@ void testConfigurableGroundSplats()
     const auto editorFrame = RenderFrameBuilder::buildEditor({ .manifest = manifest, .editor = editor, .settings = {} });
     const auto editorGround = std::ranges::find(editorFrame.tiles, GridPosition3 { 1, 0, 0 }, &RenderFrameData::Tile::cell);
     CHECK(editorFrame.groundRockSideTexture == frame.groundRockSideTexture);
+    CHECK(editorFrame.groundSplat.rimWallNormal == sideNormal);
+    CHECK(editorFrame.groundSplat.rimWallOrm == sideOrm);
     CHECK(editorGround != editorFrame.tiles.end());
     CHECK(editorGround->groundSplat == ground->groundSplat);
     editor.showGroundAssignmentColors() = true;

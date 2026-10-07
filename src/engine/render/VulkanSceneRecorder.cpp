@@ -2575,7 +2575,9 @@ private:
                         : Vec4 {},
                     frameData.gridOverlay.width,
                     face.isEditorPreview,
-                    splatTextures);
+                    splatTextures,
+                    Vec2 { static_cast<float>(face.cell.x), static_cast<float>(face.cell.y) },
+                    face.groundRimWallCoverage);
             } else {
                 faceInstance = drawFace(
                     commandBuffer,
@@ -3250,7 +3252,8 @@ private:
     // Ground tops blended from two textures via a splat map. Lighting,
     // shadowing, grid, and dithering come from the same helpers drawFace uses,
     // so they agree by construction. passData carries the optional layer data
-    // maps, specular strength, and the splat region's world origin.
+    // maps, specular strength, the splat region's world origin, and rim wall
+    // coverage. Unpublished wall maps retain the ordinary painted material.
     [[nodiscard]] uint32_t drawGroundSplatFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
@@ -3262,11 +3265,20 @@ private:
         Vec4 gridColor,
         float gridLineWidth,
         bool isEditorPreview,
-        const GroundSplatTextures& textures)
+        const GroundSplatTextures& textures,
+        Vec2 rimTileOrigin,
+        const std::array<float, 4>& rimWallCoverage)
     {
         beginQuadDraw(commandBuffer);
 
         const SunAmbientLanes lanes = sunAmbientLanes(lighting);
+        const bool wallBlend = std::ranges::any_of(rimWallCoverage,
+            [](float coverage) { return coverage > 0.0f; }) &&
+            models_.textureReady(textures.rimWall);
+        const auto wallHandle = [&](RenderTexture texture) {
+            return wallBlend && models_.textureReady(texture)
+                ? static_cast<float>(texture.value) : 0.0f;
+        };
         const GpuDrawInstance constants {
             .vertices = quadVertices(vertices, worldSpaceQuad),
             .passData = {
@@ -3282,6 +3294,10 @@ private:
                     vertices[0].y - worldOrigin.y,
                     0.0f,
                 },
+                Vec4 { wallHandle(textures.rimWall), wallHandle(textures.rimWallNormal),
+                    wallHandle(textures.rimWallOrm), 0.0f },
+                Vec4 { rimWallCoverage[0], rimWallCoverage[1],
+                    rimWallCoverage[2], rimWallCoverage[3] },
             },
             .color = color,
             .normalAndAmbientRed = {
@@ -3295,7 +3311,7 @@ private:
             .shadowOptions = faceShadowOptions(
                 lighting, gridColor, gridLineWidth, gridSize),
             .materialOptions = {
-                worldOrigin.x,
+                rimTileOrigin.x,
                 gridSize.x,
                 gridSize.y,
                 isEditorPreview
@@ -3307,7 +3323,7 @@ private:
                 static_cast<float>(textures.base.value),
                 static_cast<float>(textures.detail.value),
                 static_cast<float>(textures.splatMap.value),
-                worldOrigin.y,
+                rimTileOrigin.y,
             },
         };
         return writeDrawInstance(constants);

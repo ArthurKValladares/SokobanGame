@@ -1611,6 +1611,19 @@ VulkanModelResources::MaterialBinding VulkanModelResources::materialForModel(
     };
 }
 
+bool VulkanModelResources::textureReady(RenderTexture texture) const noexcept
+{
+    if (texture.isNone() || texture.index() >= textures_.size() ||
+        !textureSpace_.isManifestTexture(static_cast<uint32_t>(texture.index()))) {
+        return false;
+    }
+    const TextureSlot& slot = textures_[texture.index()];
+    const LoadState state = slot.publication.state();
+    return (state == LoadState::Uploading || state == LoadState::Ready) &&
+        slot.gpu.image.image != VK_NULL_HANDLE &&
+        slot.gpu.image.view != VK_NULL_HANDLE && slot.gpu.sampler != VK_NULL_HANDLE;
+}
+
 std::vector<VulkanModelResources::TextureView> VulkanModelResources::textures() const
 {
     // Every allocated descriptor is initialized. Nonresident manifest entries

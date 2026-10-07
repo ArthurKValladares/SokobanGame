@@ -912,6 +912,11 @@ borders remain straight between their corner heights, sealing the existing
 wall segments; the inner edge has irregular widths and facet breaks. The upper
 rock body deforms to meet the painted cap. Paint coordinates and gameplay's
 square solid cells remain intact.
+Across the rim, the wall's sandstone texture fades into the painted ground,
+including its normal and roughness maps. The fade follows the irregular facets
+and retains the wall's tile-local texture mapping at the outer border. Flat
+ground keeps its existing paint. Missing or unpublished wall textures leave
+the painted material in place.
 The treatment waits until every participating ground mesh in that view is
 resident and validated, keeping neighboring cap and body heights consistent.
 Custom meshes and preview tiles remain untreated; continuous curved rims,

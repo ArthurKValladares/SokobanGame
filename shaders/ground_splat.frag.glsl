@@ -117,6 +117,22 @@ vec3 sampleGroundData(float handle, vec2 uv, vec3 fallback)
         : fallback;
 }
 
+float rimWallCoverage()
+{
+    // The quad's UV coordinates identify its two standard triangles even on
+    // irregular facets. Interpolate the four supplied vertex weights using
+    // those triangles, rather than approximating the rim by world distance.
+    vec2 coordinate = clamp(vec2(inFaceCoordU, inFaceCoordV) /
+        max(draw.materialOptions.yz, vec2(0.000001)), 0.0, 1.0);
+    float u = coordinate.x;
+    float v = coordinate.y;
+    vec4 weights = draw.passData[3];
+    float coverage = v <= u
+        ? weights.x * (1.0 - u) + weights.y * (u - v) + weights.z * v
+        : weights.x * (1.0 - v) + weights.z * u + weights.w * (v - u);
+    return smoothstep(0.05, 0.95, coverage);
+}
+
 void main()
 {
     applyEditorPreviewDither();
@@ -170,6 +186,52 @@ void main()
         sampleGroundData(draw.passData[0].z, uv, vec3(1.0, 1.0, 0.0)),
         sampleGroundData(draw.passData[0].w, uv, vec3(1.0, 1.0, 0.0)),
         clamp(weight, 0.0, 1.0));
+
+    float wallCoverage = 0.0;
+    float wallNsWeight = 0.5;
+    vec3 wallNsNormal = vec3(0.0, 0.0, 1.0);
+    vec3 wallEwNormal = vec3(0.0, 0.0, 1.0);
+    vec2 wallHandedness = vec2(1.0);
+    int wallIndex = 0;
+    bool wallMaterialReady = resolveTexture(draw.passData[2].x, wallIndex);
+    // This branch depends only on the draw's published texture handles.
+    // Sample both projections throughout the facet so implicit derivatives
+    // remain defined where coverage fades to zero.
+    if (wallMaterialReady) {
+        vec2 local = clamp(inWorldPosition.xy -
+            vec2(draw.materialOptions.x, draw.textureOptions.w), 0.0, 1.0);
+        vec2 distanceToSide = min(local, 1.0 - local);
+        vec2 squaredDistance = distanceToSide * distanceToSide;
+        float totalSquaredDistance = squaredDistance.x + squaredDistance.y;
+        wallNsWeight = totalSquaredDistance > 0.0
+            ? squaredDistance.x / totalSquaredDistance : 0.5;
+        // Authored wall UV0 uses the positive tile-local tangent axis and
+        // source height divided by 2.5. Its lowered upper border still has
+        // V=0.4; continue that texture inward over the lip without sliding it
+        // with the deformed height or the board's world origin.
+        vec2 nsUv = vec2(local.x, 1.0 + distanceToSide.y) / 2.5;
+        vec2 ewUv = vec2(local.y, 1.0 + distanceToSide.x) / 2.5;
+        vec3 wallAlbedo = mix(
+            texture(modelTextures[nonuniformEXT(wallIndex)], ewUv).rgb,
+            texture(modelTextures[nonuniformEXT(wallIndex)], nsUv).rgb,
+            wallNsWeight) * vec3(0.91, 0.9009, 0.8827);
+        wallNsNormal = sampleGroundData(draw.passData[2].y, nsUv,
+            vec3(0.5, 0.5, 1.0)) * 2.0 - 1.0;
+        wallEwNormal = sampleGroundData(draw.passData[2].y, ewUv,
+            vec3(0.5, 0.5, 1.0)) * 2.0 - 1.0;
+        vec3 wallOrm = mix(
+            sampleGroundData(draw.passData[2].z, ewUv, vec3(1.0, 1.0, 0.0)),
+            sampleGroundData(draw.passData[2].z, nsUv, vec3(1.0, 1.0, 0.0)),
+            wallNsWeight);
+        wallOrm.r = mix(1.0, wallOrm.r, 0.6);
+        wallHandedness = vec2(local.y > 0.5 ? -1.0 : 1.0,
+            local.x > 0.5 ? 1.0 : -1.0);
+        wallCoverage = rimWallCoverage();
+        // The rock retains its sandstone factor. Painted-ground tint belongs
+        // to the ground material and fades out toward the exposed border.
+        materialColor.rgb = mix(materialColor.rgb, wallAlbedo, wallCoverage);
+        orm = mix(orm, wallOrm, wallCoverage);
+    }
     vec3 color = mix(materialColor.rgb, draw.gridColor.rgb, gridMask());
     float ambientMask = 0.0;
     if (length(inNormal) > 0.0001) {
@@ -181,6 +243,22 @@ void main()
         vec3 bitangent = cross(geometricNormal, tangent);
         vec3 normal = normalize(tangent * tangentNormal.x +
             bitangent * tangentNormal.y + geometricNormal * tangentNormal.z);
+        if (wallMaterialReady) {
+            // Wall U follows +X on north/south and +Y on east/west. Rebuild
+            // each normal-map frame on the cap, preserving the wall's V
+            // handedness before blending the mapped normals in world space.
+            vec3 ewTangent = normalize(vec3(0.0, 1.0, 0.0) -
+                geometricNormal * geometricNormal.y);
+            vec3 nsMappedNormal = normalize(tangent * wallNsNormal.x +
+                bitangent * (wallNsNormal.y * wallHandedness.x) +
+                geometricNormal * wallNsNormal.z);
+            vec3 ewMappedNormal = normalize(ewTangent * wallEwNormal.x +
+                cross(geometricNormal, ewTangent) *
+                    (wallEwNormal.y * wallHandedness.y) +
+                geometricNormal * wallEwNormal.z);
+            vec3 wallNormal = normalize(mix(ewMappedNormal, nsMappedNormal, wallNsWeight));
+            normal = normalize(mix(normal, wallNormal, wallCoverage));
+        }
         vec3 lightDirection = length(draw.sunDirectionAndAmbientGreen.xyz) > 0.0001
             ? normalize(draw.sunDirectionAndAmbientGreen.xyz)
             : vec3(0.0, 0.0, 1.0);

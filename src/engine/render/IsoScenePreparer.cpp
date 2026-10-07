@@ -1248,6 +1248,7 @@ struct IsoFaceRequest {
     bool editorPreview = false;
     bool pickable = false;
     bool groundRimSurface = false;
+    std::array<float, 4> groundRimWallCoverage {};
     bool drawable = false;
     Vec2 gridSize {};
     PreparedSurfaceMaterial material {};
@@ -1271,6 +1272,7 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
         .isEditorPreview = request.editorPreview,
         .pickable = request.pickable,
         .groundRimSurface = request.groundRimSurface,
+        .groundRimWallCoverage = request.groundRimWallCoverage,
         .gridSize = request.gridSize,
         .worldOrigin = {
             request.vertices[0].x,
@@ -1489,6 +1491,7 @@ void appendTileFaces(
                     .editorPreview = tile.isEditorPreview,
                     .pickable = pickable,
                     .groundRimSurface = true,
+                    .groundRimWallCoverage = patch.wallCoverage,
                     .drawable = drawTop && mainSceneVisible,
                     .gridSize = { width, depth },
                     .material = topMaterial,

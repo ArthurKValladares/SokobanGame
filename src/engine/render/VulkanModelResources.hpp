@@ -298,6 +298,11 @@ public:
         const RenderFrameData::Tile& tile,
         uint32_t frameIndex) const;
     [[nodiscard]] const AssetManifest& manifest() const { return *manifest_; }
+    // Matches descriptor publication: uploads already submitted to the
+    // graphics queue and completed images can both be sampled by later draws.
+    // None, unpublished, and non-manifest handles return false without
+    // allocating the descriptor snapshot returned by textures().
+    [[nodiscard]] bool textureReady(RenderTexture texture) const noexcept;
     [[nodiscard]] std::vector<TextureView> textures() const;
     [[nodiscard]] uint32_t textureCount() const;
     [[nodiscard]] LoadingStats loadingStats() const;

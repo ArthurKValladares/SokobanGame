@@ -337,7 +337,8 @@ void testTerrainPbrCompanionsAreRequired()
 {
     TEST("terrainPbrCompanionsAreRequired");
     AssetManifest manifest = testManifest();
-    for (const char* name : { "GroundGrassNormal", "GroundGrassOrm", "GroundRockNormal", "GroundRockOrm" }) {
+    for (const char* name : { "GroundGrassNormal", "GroundGrassOrm", "GroundRockNormal", "GroundRockOrm",
+             "GroundRockSideNormal", "GroundRockSideOrm" }) {
         CHECK(!manifest.addTexture({ .name = name, .path = std::string(name) + ".png",
             .tiling = true, .filter = TextureFilter::Linear,
             .colorSpace = TextureColorSpace::Linear }).isNone());
@@ -348,6 +349,10 @@ void testTerrainPbrCompanionsAreRequired()
     CHECK(defaults.detailNormal == manifest.textureIdByName("GroundRockNormal"));
     CHECK(defaults.baseOrm == manifest.textureIdByName("GroundGrassOrm"));
     CHECK(defaults.detailOrm == manifest.textureIdByName("GroundRockOrm"));
+    CHECK(defaults.rimWall == manifest.textureIdByName("GroundRockSide"));
+    CHECK(defaults.rimWallNormal == manifest.textureIdByName("GroundRockSideNormal"));
+    CHECK(defaults.rimWallOrm == manifest.textureIdByName("GroundRockSideOrm"));
+    CHECK(defaults.sampledTextures().size() == 10);
     const Level level = Level::loadFromLayers({ { "..." }, { "C.." } }, "terrain PBR residency");
     const auto levelRequirements = renderAssetRequirementsForLevel(level, manifest);
     for (RenderTexture texture : defaults.sampledTextures()) CHECK(levelRequirements.contains(texture));
@@ -358,6 +363,9 @@ void testTerrainPbrCompanionsAreRequired()
         "GroundRock", "GroundGrass", defaults.splatMap);
     CHECK(reversed.baseNormal == defaults.detailNormal);
     CHECK(reversed.detailOrm == defaults.baseOrm);
+    CHECK(reversed.rimWall == defaults.rimWall);
+    CHECK(reversed.rimWallNormal == defaults.rimWallNormal);
+    CHECK(reversed.rimWallOrm == defaults.rimWallOrm);
     RenderFrameData frame;
     frame.tiles.push_back({ .groundSplat = reversed });
     const auto tileRequirements = renderAssetRequirementsForFrame(frame);
@@ -375,6 +383,68 @@ void testTerrainPbrCompanionsAreRequired()
     CHECK(legacy.valid());
     CHECK(legacy.detailNormal.isNone());
     CHECK(legacy.detailOrm.isNone());
+}
+
+void testRimWallTextureFallbacksAndPreviewRequirements()
+{
+    TEST("rimWallTextureFallbacksAndPreviewRequirements");
+    AssetManifest manifest = testManifest();
+    const auto find = [&manifest](std::string_view name) {
+        return manifest.findTextureIdByName(name);
+    };
+    const GroundSplatTextures albedoOnly = groundSplatTexturesForScreen(find, std::nullopt);
+    CHECK(albedoOnly.valid());
+    CHECK(albedoOnly.rimWall == manifest.textureIdByName(groundRockSideTextureName));
+    CHECK(albedoOnly.rimWallNormal.isNone());
+    CHECK(albedoOnly.rimWallOrm.isNone());
+
+    const GroundSplatTextures missingWall = groundSplatTexturesForScreen(
+        [&](std::string_view name) {
+            return name.starts_with(groundRockSideTextureName) ? noTexture : find(name);
+        }, std::nullopt);
+    CHECK(missingWall.valid());
+    CHECK(missingWall.base == albedoOnly.base);
+    CHECK(missingWall.detail == albedoOnly.detail);
+    CHECK(missingWall.splatMap == albedoOnly.splatMap);
+    CHECK(missingWall.rimWall.isNone());
+    CHECK(missingWall.rimWallNormal.isNone());
+    CHECK(missingWall.rimWallOrm.isNone());
+
+    const RenderTexture normal = manifest.addTexture({
+        .name = "GroundRockSideNormal", .path = "side_normal.png",
+        .tiling = true, .filter = TextureFilter::Linear,
+        .colorSpace = TextureColorSpace::Linear });
+    const RenderTexture orm = manifest.addTexture({
+        .name = "GroundRockSideOrm", .path = "side_orm.png",
+        .tiling = true, .filter = TextureFilter::Linear,
+        .colorSpace = TextureColorSpace::Linear });
+    const GroundSplatTextures complete = groundSplatTexturesForOverworldScreen(find, 1);
+    CHECK(complete.rimWallNormal == normal);
+    CHECK(complete.rimWallOrm == orm);
+    const GroundSplatTextures missingAlbedo = groundSplatTexturesForMaterials(
+        [&](std::string_view name) {
+            return name == groundRockSideTextureName ? noTexture : find(name);
+        }, "GroundGrass", "GroundRock", complete.splatMap);
+    CHECK(missingAlbedo.valid());
+    CHECK(missingAlbedo.rimWall.isNone());
+    CHECK(missingAlbedo.rimWallNormal == normal);
+    CHECK(missingAlbedo.rimWallOrm == orm);
+
+    // Preview frames contribute their own ground requirements to the same
+    // visible asset set, even when the main frame has no wall material.
+    RenderFrameData mainFrame;
+    mainFrame.groundSplat = missingWall;
+    RenderFrameData previewFrame;
+    previewFrame.groundSplat = complete;
+    RenderAssetRequirements requirements = renderAssetRequirementsForFrame(mainFrame);
+    CHECK(!requirements.contains(complete.rimWall));
+    CHECK(!requirements.contains(normal));
+    CHECK(!requirements.contains(orm));
+    requirements.merge(renderAssetRequirementsForFrame(previewFrame));
+    CHECK(requirements.contains(complete.rimWall));
+    CHECK(requirements.contains(normal));
+    CHECK(requirements.contains(orm));
+    CHECK(!requirements.contains(noTexture));
 }
 
 void testPerScreenSplatMapsAreSelectedAndFallBack()
@@ -458,6 +528,7 @@ int main()
     testCubeAndNoneAreNeverRequirements();
     testGroundSplatTexturesAreRequired();
     testTerrainPbrCompanionsAreRequired();
+    testRimWallTextureFallbacksAndPreviewRequirements();
     testPerScreenSplatMapsAreSelectedAndFallBack();
 
     if (failures == 0) {

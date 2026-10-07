@@ -113,6 +113,7 @@ struct PreparedIsoFace {
     bool pickable = false;
     // Cap subpatches keep world-grid coordinates even in assignment-color mode.
     bool groundRimSurface = false;
+    std::array<float, 4> groundRimWallCoverage {};
     Vec2 gridSize {};
     Vec2 worldOrigin {};
     // First corner's world Z, retained for flat-face overlays. Continuous

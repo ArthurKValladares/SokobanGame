@@ -32,6 +32,20 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
+The October 6 rim material fade built `dev-fast-all` and the Debug game with
+warnings-as-errors. All 99 optimized suites passed across the full run and the
+same two unchanged audio-suite reruns outside the sandbox. New checks cover
+wall-map requirements in default/custom/editor/preview materials, coverage
+interpolation at every neighbor layout, and serial/parallel metadata parity.
+The 240-frame Debug fixture reported no VUID errors and exactly matches the
+optimized RGB image; the flat fixture also exactly matches its prior image.
+The known Epic overlay loader error remains. Evidence is in ignored
+`out/ground-geometry/rim-material-fade/`, including comparison crops (before
+above, fade below), `pixel-check.json`, and test/build logs. The material-only
+change retains 25 fixture draws, 24,222 submitted triangles and the same GPU
+allocation memory. Full Debug, headless, Linux and shipping suites were not
+run for this revision.
+
 The October 6 irregular-rim revision built `dev-fast-all` and the Debug game
 with warnings-as-errors. All 99 optimized suites passed across the full run and
 the same two unchanged audio-suite reruns outside the sandbox. Coverage includes
@@ -503,6 +517,23 @@ and the required real-device checks are recorded.
   Irregular inner strip knots straddle the tile midpoint; their inset widths
   stay below the corner diagonals and 0.40 tiles to keep the central fan valid.
   CPU cap tessellation, body deformation and shadows must agree on that field.
+  Rim patches carry per-vertex wall coverage: lowered border vertices are one,
+  flat inner vertices are zero. Preserve coverage through preparation and
+  triangle encoding. GroundSplat passData[2].xyz holds published wall
+  albedo/normal/ORM handles; passData[3] holds the four coverage weights.
+  materialOptions.x and textureOptions.w hold the source tile origin for
+  wall UVs; passData[1].yz still holds the independent paint-region origin.
+  Interpolate coverage on the same quad triangles, then smooth it in the
+  fragment shader. Blend wall/paint albedo, ORM and world-space normals before
+  lighting. Wall UV0 uses tile-local tangent and source height / 2.5, so the
+  lowered outer border starts at V=0.4. Blend side projections at corners and
+  preserve N/E versus S/W normal handedness. The cap uses an average sandstone
+  tint; authored wall plates retain their individual factors and inherited
+  per-tile UV seams. Missing/unpublished wall albedo disables the material
+  blend; optional data maps have neutral fallbacks. Require all rim maps via
+  GroundSplatTextures::sampledTextures and check publication without allocating
+  a descriptor snapshot. Geometry, shadow silhouettes and draw counts stay
+  unchanged by this material treatment.
   Compress only the upper body band; maximum varied depth (1.35 times nominal)
   must remain below that band to keep
   its deformation monotone. Preserve UVs and tangent handedness, transform

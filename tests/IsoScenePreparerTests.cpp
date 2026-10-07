@@ -11,9 +11,11 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <ranges>
 #include <thread>
 #include <unordered_set>
+#include <vector>
 
 namespace {
 
@@ -151,6 +153,8 @@ void checkPreparationOutputsMatch(
         CHECK(expected.isoFaces[index].depth == actual.isoFaces[index].depth);
         CHECK(expected.isoFaces[index].groundRimSurface ==
               actual.isoFaces[index].groundRimSurface);
+        CHECK(expected.isoFaces[index].groundRimWallCoverage ==
+              actual.isoFaces[index].groundRimWallCoverage);
     }
     for (std::size_t index = 0; index < expected.renderables.size(); ++index) {
         CHECK(expected.renderables[index].identity ==
@@ -228,6 +232,12 @@ void testParallelAuxiliaryPreparationMatchesSerialOutput()
     CHECK(preparationTasks.executedTaskCount() == 1);
     CHECK(std::ranges::any_of(serialScene.isoFaces, [](const auto& face) {
         return face.groundRimSurface;
+    }));
+    CHECK(std::ranges::any_of(serialScene.isoFaces, [](const auto& face) {
+        return face.groundRimSurface &&
+            std::ranges::any_of(face.groundRimWallCoverage, [](float coverage) {
+                return coverage == 1.0f;
+            });
     }));
     checkPreparationOutputsMatch(serialScene, parallelScene);
 
@@ -2214,6 +2224,12 @@ void testGroundRimPatchesCoverTheSharedProfile()
                 for (std::size_t i = 0; i < surface.count; ++i) {
                     const auto& patch = surface.patches[i];
                     CHECK(patch.normal.z > 0);
+                    for (std::size_t vertex = 0; vertex < patch.vertices.size(); ++vertex) {
+                        const float expectedCoverage =
+                            patch.vertices[vertex].z < tile.baseElevation + tile.height
+                            ? 1.0f : 0.0f;
+                        CHECK(patch.wallCoverage[vertex] == expectedCoverage);
+                    }
                     constexpr std::array<std::array<std::size_t, 3>, 2> triangles {{
                         { 0, 1, 2 }, { 0, 2, 3 },
                     }};
@@ -2278,6 +2294,19 @@ void testGroundRimVisibleAndShadowCapsAgree()
         CHECK(face.gridSize == Vec2({ 1, 1 }));
         CHECK(std::ranges::find(scene.shadowFaces, face.worldVertices) !=
             scene.shadowFaces.end());
+        const auto patchEnd = expected.patches.begin() + expected.count;
+        const auto patch = std::find_if(expected.patches.begin(), patchEnd,
+            [&](const auto& candidate) { return candidate.vertices == face.worldVertices; });
+        CHECK(patch != patchEnd);
+        if (patch != patchEnd) {
+            CHECK(face.groundRimSurface);
+            CHECK(face.groundRimWallCoverage == patch->wallCoverage);
+        }
+    }
+    for (const auto& face : scene.isoFaces) {
+        if (!face.groundRimSurface) {
+            CHECK((face.groundRimWallCoverage == std::array<float, 4> {}));
+        }
     }
     // Logical box remains available for selection without becoming a second,
     // flat paintable surface above the chamfer.
@@ -2289,6 +2318,136 @@ void testGroundRimVisibleAndShadowCapsAgree()
     const auto disabled = prepareScene(frame, { 1280, 720 });
     CHECK(disabled.shadowFaces.size() == 1);
     CHECK(disabled.opaqueFaceIndices.size() == 1);
+    const auto checkNoWallCoverage = [](const PreparedRenderScene& flatScene) {
+        for (const auto& face : flatScene.isoFaces) {
+            CHECK(!face.groundRimSurface);
+            CHECK((face.groundRimWallCoverage == std::array<float, 4> {}));
+        }
+    };
+    checkNoWallCoverage(disabled);
+    frame.tiles[0].groundRimWidth = 0.12f;
+    frame.tiles[0].groundRimSides = 0;
+    frame.tiles[0].groundRimConcaveCorners = 0;
+    checkNoWallCoverage(prepareScene(frame, { 1280, 720 }));
+    frame.tiles[0].groundRimSides = groundAllSides;
+    frame.tiles[0].isEditorPreview = true;
+    checkNoWallCoverage(prepareScene(frame, { 1280, 720 }));
+    frame.tiles[0].isEditorPreview = false;
+    frame.tiles[0].pickOnly = true;
+    checkNoWallCoverage(prepareScene(frame, { 1280, 720 }));
+}
+
+float interpolatedRimWallCoverage(
+    const sokoban::GroundRimSurface& surface, sokoban::Vec2 point)
+{
+    if (surface.count == 0) return 0.0f;
+    constexpr std::array<std::array<std::size_t, 3>, 2> triangles {{
+        { 0, 1, 2 }, { 0, 2, 3 },
+    }};
+    std::optional<float> coverage;
+    for (std::size_t index = 0; index < surface.count; ++index) {
+        const auto& patch = surface.patches[index];
+        for (const auto& triangle : triangles) {
+            const auto a = patch.vertices[triangle[0]];
+            const auto b = patch.vertices[triangle[1]];
+            const auto c = patch.vertices[triangle[2]];
+            const float determinant = (b.x - a.x) * (c.y - a.y) -
+                (b.y - a.y) * (c.x - a.x);
+            if (determinant == 0.0f) continue;
+            const float u = ((point.x - a.x) * (c.y - a.y) -
+                (point.y - a.y) * (c.x - a.x)) / determinant;
+            const float v = ((b.x - a.x) * (point.y - a.y) -
+                (b.y - a.y) * (point.x - a.x)) / determinant;
+            if (u < -0.00001f || v < -0.00001f || u + v > 1.00001f) continue;
+            const float interpolated = patch.wallCoverage[triangle[0]] * (1.0f - u - v) +
+                patch.wallCoverage[triangle[1]] * u + patch.wallCoverage[triangle[2]] * v;
+            CHECK(interpolated >= -0.0001f && interpolated <= 1.0001f);
+            // A point on a patch boundary may belong to several triangles.
+            // Their interpolated weights must form one continuous field.
+            if (coverage) CHECK(near(*coverage, interpolated));
+            else coverage = interpolated;
+        }
+    }
+    CHECK(coverage.has_value());
+    return coverage.value_or(0.0f);
+}
+
+void testGroundRimWallCoverageJoinsEveryNeighborhood()
+{
+    TEST("groundRimWallCoverageJoinsEveryNeighborhood");
+    using namespace sokoban;
+    constexpr std::array<GridPosition, 8> offsets {
+        GridPosition { 0, -1 }, GridPosition { 1, 0 },
+        GridPosition { 0, 1 }, GridPosition { -1, 0 },
+        GridPosition { -1, -1 }, GridPosition { 1, -1 },
+        GridPosition { 1, 1 }, GridPosition { -1, 1 },
+    };
+    constexpr std::array<std::array<std::size_t, 2>, 4> incidentSides {{
+        { 0, 3 }, { 0, 1 }, { 2, 1 }, { 2, 3 },
+    }};
+    for (Vec2 origin : { Vec2 { 0, 0 }, Vec2 { 17, 23 }, Vec2 { -19, -7 } }) {
+        for (uint32_t neighborhood = 0; neighborhood < 256; ++neighborhood) {
+            const auto occupied = [&](GridPosition cell) {
+                if (cell == GridPosition {}) return true;
+                for (std::size_t index = 0; index < offsets.size(); ++index) {
+                    if (cell == offsets[index]) return (neighborhood & (1U << index)) != 0;
+                }
+                return false;
+            };
+            const auto surfaceFor = [&](GridPosition cell) {
+                auto tile = cube(cell.x, cell.y);
+                tile.position = origin + tile.position;
+                tile.model = { 1 };
+                tile.groundTop = true;
+                tile.groundRimSides = 0;
+                tile.groundRimWidth = 0.12f;
+                tile.groundRimDepth = 0.10f;
+                std::array<bool, 4> cardinal {};
+                for (std::size_t side = 0; side < cardinal.size(); ++side) {
+                    cardinal[side] = occupied({ cell.x + offsets[side].x,
+                        cell.y + offsets[side].y });
+                    if (!cardinal[side]) tile.groundRimSides |= static_cast<uint8_t>(1U << side);
+                }
+                for (std::size_t corner = 0; corner < incidentSides.size(); ++corner) {
+                    if (cardinal[incidentSides[corner][0]] && cardinal[incidentSides[corner][1]] &&
+                        !occupied({ cell.x + offsets[4 + corner].x, cell.y + offsets[4 + corner].y })) {
+                        tile.groundRimConcaveCorners |= static_cast<uint8_t>(1U << corner);
+                    }
+                }
+                return buildGroundRimSurface(tile);
+            };
+            const auto center = surfaceFor({});
+            for (std::size_t side = 0; side < 4; ++side) {
+                if (!occupied(offsets[side])) continue;
+                const auto neighbor = surfaceFor(offsets[side]);
+                const bool horizontal = side == 0 || side == 2;
+                const float border = horizontal ? origin.y + (side == 2 ? 1.0f : 0.0f)
+                    : origin.x + (side == 1 ? 1.0f : 0.0f);
+                const float start = horizontal ? origin.x : origin.y;
+                std::vector<float> knots { start, start + 1.0f };
+                for (const auto* surface : { &center, &neighbor }) {
+                    for (std::size_t index = 0; index < surface->count; ++index) {
+                        for (const auto vertex : surface->patches[index].vertices) {
+                            if ((horizontal ? vertex.y : vertex.x) == border) {
+                                knots.push_back(horizontal ? vertex.x : vertex.y);
+                            }
+                        }
+                    }
+                }
+                std::ranges::sort(knots);
+                knots.erase(std::unique(knots.begin(), knots.end()), knots.end());
+                const auto checkAt = [&](float along) {
+                    const Vec2 point = horizontal ? Vec2 { along, border } : Vec2 { border, along };
+                    CHECK(near(interpolatedRimWallCoverage(center, point),
+                        interpolatedRimWallCoverage(neighbor, point)));
+                };
+                for (std::size_t index = 0; index < knots.size(); ++index) {
+                    checkAt(knots[index]);
+                    if (index > 0) checkAt((knots[index - 1] + knots[index]) * 0.5f);
+                }
+            }
+        }
+    }
 }
 
 void testGroundRimConcaveCornerJoinsAdjacentEdge()
@@ -2325,6 +2484,7 @@ int main()
 {
     testGroundRimPatchesCoverTheSharedProfile();
     testGroundRimVisibleAndShadowCapsAgree();
+    testGroundRimWallCoverageJoinsEveryNeighborhood();
     testGroundRimConcaveCornerJoinsAdjacentEdge();
     testRockGroundModelsRetainPaintableTops();
     testParallelAuxiliaryPreparationMatchesSerialOutput();

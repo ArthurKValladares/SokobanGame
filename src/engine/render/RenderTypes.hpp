@@ -157,7 +157,8 @@ inline constexpr std::string_view groundSplatMapTextureName = "GroundSplatMap";
 }
 
 // Textures blended on splatted ground tops. Unset ids fall back to the flat
-// tile color, so a manifest without these entries still renders.
+// tile color, so a manifest without these entries still renders. The optional
+// wall material is sampled only across processed ground rims.
 struct GroundSplatTextures {
     RenderTexture base = noTexture;
     RenderTexture detail = noTexture;
@@ -166,11 +167,15 @@ struct GroundSplatTextures {
     RenderTexture detailNormal = noTexture;
     RenderTexture baseOrm = noTexture;
     RenderTexture detailOrm = noTexture;
+    RenderTexture rimWall = noTexture;
+    RenderTexture rimWallNormal = noTexture;
+    RenderTexture rimWallOrm = noTexture;
     friend constexpr bool operator==(GroundSplatTextures, GroundSplatTextures) = default;
 
-    [[nodiscard]] constexpr std::array<RenderTexture, 7> sampledTextures() const
+    [[nodiscard]] constexpr std::array<RenderTexture, 10> sampledTextures() const
     {
-        return { base, detail, splatMap, baseNormal, detailNormal, baseOrm, detailOrm };
+        return { base, detail, splatMap, baseNormal, detailNormal, baseOrm, detailOrm,
+            rimWall, rimWallNormal, rimWallOrm };
     }
 
     [[nodiscard]] constexpr bool valid() const
@@ -206,6 +211,9 @@ template <typename FindTextureByName>
         .detailNormal = dataMap(detailName, "Normal"),
         .baseOrm = dataMap(baseName, "Orm"),
         .detailOrm = dataMap(detailName, "Orm"),
+        .rimWall = findTextureByName(groundRockSideTextureName),
+        .rimWallNormal = dataMap(groundRockSideTextureName, "Normal"),
+        .rimWallOrm = dataMap(groundRockSideTextureName, "Orm"),
     };
 }
 

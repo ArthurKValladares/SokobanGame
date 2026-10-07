@@ -11,6 +11,9 @@ namespace sokoban {
 
 struct GroundRimSurfacePatch {
     std::array<Vec3, 4> vertices {};
+    // Triangle-interpolated wall coverage: lowered border=1, flat interior=0.
+    // Smooth the interpolated coverage in the material shader, not per vertex.
+    std::array<float, 4> wallCoverage {};
     Vec3 normal {};
 };
 
@@ -59,6 +62,7 @@ struct GroundRimSurface {
                 tile.position.x + local.x, tile.position.y + local.y,
                 tile.baseElevation + tile.height - (1.0f - local.z),
             };
+            patch.wallCoverage[vertex] = local.z < 1.0f ? 1.0f : 0.0f;
         }
         patch.normal = normalize(cross(patch.vertices[1] - patch.vertices[0],
             patch.vertices[2] - patch.vertices[0]));
