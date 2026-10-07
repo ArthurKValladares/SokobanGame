@@ -2,6 +2,7 @@
 
 #include "engine/TaskSystem.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
+#include "engine/render/ProcessedGroundArtifact.hpp"
 #include "engine/render/AnimationController.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/GameplayLoop.hpp"
@@ -680,6 +681,8 @@ void testWarmGroundRimPreparationAllocations()
     IsoScenePreparer parallelPreparer;
     PreparedRenderScene serialScene;
     PreparedRenderScene parallelScene;
+    frame.processedGroundArtifact = std::make_shared<const ProcessedGroundArtifact>(
+        buildProcessedGroundArtifact(frame.tiles, 123));
     uint32_t step = 0;
     const auto changePaintAndCamera = [&] {
         ++step;
@@ -701,12 +704,14 @@ void testWarmGroundRimPreparationAllocations()
     });
     CHECK(serialScene.reusedGroundRimSurfaces == 4 * edge - 4);
     CHECK(serialScene.generatedGroundRimSurfaces == 0);
+    CHECK(serialScene.bakedGroundRimSurfaces == 4 * edge - 4);
     checkNoFrameAllocations("rim_scene_camera_and_paint_parallel", [&] {
         changePaintAndCamera();
         prepareParallel();
     });
     CHECK(parallelScene.reusedGroundRimSurfaces == 4 * edge - 4);
     CHECK(parallelScene.generatedGroundRimSurfaces == 0);
+    CHECK(parallelScene.bakedGroundRimSurfaces == 4 * edge - 4);
     checkNoFrameAllocations("rim_scene_reorder_serial", [&] {
         std::rotate(frame.tiles.begin(), frame.tiles.begin() + 1, frame.tiles.end());
         prepareSerial();
@@ -732,13 +737,13 @@ void testWarmGroundRimPreparationAllocations()
         editOneProfile();
         prepareSerial();
     });
-    CHECK(serialScene.generatedGroundRimSurfaces == 1);
+    CHECK(serialScene.generatedGroundRimSurfaces + serialScene.importedGroundRimSurfaces == 1);
     CHECK(serialScene.reusedGroundRimSurfaces == 4 * edge - 5);
     checkNoFrameAllocations("rim_scene_profile_edit_parallel", [&] {
         editOneProfile();
         prepareParallel();
     });
-    CHECK(parallelScene.generatedGroundRimSurfaces == 1);
+    CHECK(parallelScene.generatedGroundRimSurfaces + parallelScene.importedGroundRimSurfaces == 1);
     CHECK(parallelScene.reusedGroundRimSurfaces == 4 * edge - 5);
 }
 

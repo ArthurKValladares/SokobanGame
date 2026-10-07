@@ -211,6 +211,9 @@ struct PreparedRenderScene {
     uint64_t groundRimSurfaceCacheHits = 0;
     uint64_t groundRimSurfaceCacheRebuilds = 0;
     uint64_t groundRimSurfaceCacheBytes = 0;
+    uint32_t bakedGroundRimSurfaces = 0;
+    uint32_t importedGroundRimSurfaces = 0;
+    uint64_t groundRimArtifactImports = 0;
 };
 
 // Owns all Vulkan-free projection, culling, sorting, and picking behavior.

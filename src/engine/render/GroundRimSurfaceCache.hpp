@@ -10,6 +10,8 @@
 
 namespace sokoban {
 
+struct ProcessedGroundArtifact;
+
 // Owning, renderer-independent compiler output in source-tile order. No
 // pointers into the input frame survive compilation; flat tiles are omitted.
 struct CompiledGroundRimSurface {
@@ -31,17 +33,24 @@ struct CompiledGroundRimSurface {
 // preparation must copy their patches into its own leased frame storage.
 class GroundRimSurfaceCache {
 public:
-    void update(std::span<const RenderFrameData::Tile> tiles);
+    void update(std::span<const RenderFrameData::Tile> tiles,
+        const ProcessedGroundArtifact* artifact = nullptr);
     [[nodiscard]] const GroundRimSurface* surfaceForTileIndex(
         std::size_t tileIndex) const noexcept;
 
     [[nodiscard]] std::size_t surfaceCount() const noexcept { return entries_.size(); }
     [[nodiscard]] bool lastUpdateReused() const noexcept { return lastUpdateReused_; }
     // Surface counters describe source-tile occurrences in the latest update.
-    // Changed keys regenerate only their own patches; unchanged keys reuse
-    // retained slots even when the source tiles were reordered.
+    // Changed keys import matching artifact patches or regenerate only their
+    // own patches; unchanged keys reuse retained slots through reordering.
     [[nodiscard]] std::size_t reusedSurfaceCount() const noexcept { return reusedSurfaceCount_; }
     [[nodiscard]] std::size_t generatedSurfaceCount() const noexcept { return generatedSurfaceCount_; }
+    [[nodiscard]] std::size_t importedSurfaceCount() const noexcept { return importedSurfaceCount_; }
+    // Current active baked occurrences retain provenance when the artifact
+    // provider changes or disappears. The cumulative count records copies,
+    // including a new import after invalidation.
+    [[nodiscard]] std::size_t bakedSurfaceCount() const noexcept { return bakedSurfaceCount_; }
+    [[nodiscard]] uint64_t bakedImportCount() const noexcept { return bakedImportCount_; }
     // Cumulative counters describe update calls, never read-only lookups. A
     // hit has the same complete active key set; a rebuild has a changed set
     // or follows invalidation. The first update, including flat-only, rebuilds.
@@ -54,11 +63,12 @@ public:
     void invalidate() noexcept;
 
 private:
-    using Key = std::array<uint32_t, 9>;
+    using Key = GroundRimSurfaceKey;
 
     struct Entry {
         Key key {};
         std::size_t surfaceSlot = 0;
+        bool baked = false;
     };
 
     struct Candidate {
@@ -71,7 +81,6 @@ private:
         std::size_t surfaceSlot = 0;
     };
 
-    [[nodiscard]] static Key keyFor(const RenderFrameData::Tile& tile) noexcept;
     void rebuildMappings();
 
     // Surface slots remain stable through edits. Removed entries return slots
@@ -88,6 +97,9 @@ private:
     uint64_t rebuildCount_ = 0;
     std::size_t reusedSurfaceCount_ = 0;
     std::size_t generatedSurfaceCount_ = 0;
+    std::size_t importedSurfaceCount_ = 0;
+    std::size_t bakedSurfaceCount_ = 0;
+    uint64_t bakedImportCount_ = 0;
     bool valid_ = false;
     bool lastUpdateReused_ = false;
 };

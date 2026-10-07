@@ -1005,6 +1005,10 @@ if (ImGui::CollapsingHeader("Rendering Stats")) {
         static_cast<unsigned long long>(renderStats.groundRimSurfaceCacheBytes),
         static_cast<unsigned long long>(renderStats.groundRimSurfaceCacheHits),
         static_cast<unsigned long long>(renderStats.groundRimSurfaceCacheRebuilds));
+    ImGui::Text("Baked ground rim surfaces %u (%u imported; %llu total imports)",
+        renderStats.bakedGroundRimSurfaces,
+        renderStats.importedGroundRimSurfaces,
+        static_cast<unsigned long long>(renderStats.groundRimArtifactImports));
     drawPhaseTimings(renderStats);
     ImGui::Text(
         "Asset publications %llu across %llu frames; texture uploads %llu/%llu complete (%u in flight)",

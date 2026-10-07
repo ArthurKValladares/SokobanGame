@@ -205,6 +205,17 @@ different bytes for the same input. Shipping presets set
 is built with Release flags in every configuration from
 `cmake/bc7enc16/`.
 
+The persisted rim stage was verified with `dev-fast-all`, all 102 optimized
+CTest suites (the two Windows missing-audio-path suites passed outside the
+filesystem sandbox), and a `dev` validation capture. Geometry staging produced
+26 artifacts / 1,304 cap surfaces / 2,821,840 bytes; a subsequent stage skipped
+the unchanged package. Level 3 screen 3, level 5 screen 0 and the initial
+overworld imported all 44, 46 and 138 resolved caps respectively. Their scene
+and SSAO images, plus the live-only rim fixture, match the prior runtime-cache
+captures pixel for pixel. The 240-frame Debug capture exercised 44 baked caps
+with zero VUID messages; existing loader/unused-shader-output diagnostics remain.
+Local evidence is under `out/ground-geometry/processed-artifacts/` (ignored).
+
 For shipping artifacts and human GPU acceptance, follow
 [`packaging/ReleaseValidation.md`](packaging/ReleaseValidation.md). A package is
 acceptable only after the bounded package gate succeeds from a fresh extraction
@@ -500,8 +511,8 @@ and the required real-device checks are recorded.
 
 ## Renderer contracts
 
-- Ground geometry processing is a live ground-only experiment, with no baked
-  level format. Derive exposure from the final emitted tiles on the same layer.
+- Ground geometry processing derives exposure from the final emitted tiles on
+  the same layer, even when loading baked rim caps.
   Eligible terrain is opaque, fixed, unanimated unit ground at its authored
   integer cell, using the canonical GroundRock01–10 source model contracts.
   Hidden screens, custom models, scaled/transformed tiles and editor previews
@@ -534,8 +545,26 @@ and the required real-device checks are recorded.
   resolved flat/rim profiles before preparing either pass. Keep paint/material
   state per-frame. Snapshot counters and retained bytes in each prepared scene
   for evidence; a cache hit does not eliminate projection/culling/sorting work.
-  `compileGroundRimSurfaces` is the owning renderer-independent compiler; no
-  persisted level artifact or merged terrain draw pipeline is introduced yet.
+  `compileGroundRimSurfaces` is the owning renderer-independent live compiler;
+  no merged terrain draw pipeline is introduced yet.
+- `GroundLevelGeometry` compiles authored static ground through `tileVisual`,
+  manifest scales and shared exposure rules. Content staging writes versioned,
+  bounded, checksummed `.grm` cap artifacts for every canonical screen and the
+  fully composed overworld in normalized world coordinates, with package-index
+  entries. Increment `processedGroundArtifactCompilerRevision` when topology,
+  fracture, normals, coverage or geometry-key semantics change. The incremental
+  stage verifies full artifact parsing and current semantic fingerprints before
+  skipping; missing/corrupt/stale derived geometry must trigger a restage.
+  `RuntimeGroundGeometryStore` checks the semantic fingerprint before publishing
+  an owning immutable artifact. Main/preview stores are separate; stable source
+  and boundary revision performs no I/O or allocation. Invalidate on canonical
+  publication and manifest reload. A cached miss retries after invalidation or
+  revision change, so new build output may require a level reload for adoption.
+  Frames retain artifact ownership after store changes. Surface-cache import
+  requires exact resolved model/origin/elevation/mask/profile keys; visibility,
+  GPU readiness and draw-budget fallback remain authoritative. Drafts use the
+  live compiler. Cached baked provenance may outlive the provider; active baked
+  count, imports this preparation and total imports describe different things.
 - The default-off **Smooth Ground Rim (prototype)** control, or `--ground-rim`,
   requests broad chipped facets with nominal tile-unit width/depth. It requires
   ground processing. `GroundRimGeometry` and `GroundRim.glsl` share the same

@@ -4,10 +4,32 @@
 #include "engine/render/RenderTypes.hpp"
 
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 
 namespace sokoban {
+
+// Exact geometry identity shared by the live cache and prepared artifacts.
+// Float bits preserve authored operation order and distinguish signed zero;
+// projected faces, materials, source indices, and GPU state are excluded.
+using GroundRimSurfaceKey = std::array<uint32_t, 9>;
+
+[[nodiscard]] inline GroundRimSurfaceKey groundRimSurfaceKey(
+    const RenderFrameData::Tile& tile) noexcept
+{
+    return {
+        tile.model.value,
+        std::bit_cast<uint32_t>(tile.position.x),
+        std::bit_cast<uint32_t>(tile.position.y),
+        std::bit_cast<uint32_t>(tile.baseElevation),
+        std::bit_cast<uint32_t>(tile.height),
+        static_cast<uint32_t>(tile.groundRimSides),
+        static_cast<uint32_t>(tile.groundRimConcaveCorners),
+        std::bit_cast<uint32_t>(tile.groundRimWidth),
+        std::bit_cast<uint32_t>(tile.groundRimDepth),
+    };
+}
 
 struct GroundRimSurfacePatch {
     std::array<Vec3, 4> vertices {};

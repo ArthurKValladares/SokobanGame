@@ -2,15 +2,19 @@
 #include "TestHarness.hpp"
 
 #include "engine/ContentPipeline.hpp"
+#include "engine/GroundLevelGeometry.hpp"
 #include "engine/LevelEditor.hpp"
+#include "engine/OverworldMap.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/ShaderCatalog.hpp"
 #include "engine/render/CompressedTextureArtifact.hpp"
 #include "engine/render/PngWriter.hpp"
+#include "engine/render/ProcessedGroundArtifact.hpp"
 #include "engine/ui/UiConfig.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -477,8 +481,9 @@ void testInventoryAndStaging()
     const sokoban::ContentInventory staged = sokoban::stageContent(roots, output, "1.2.3");
     CHECK_MESSAGE(
         staged.files.size() ==
-            inventory.files.size() + inventory.textureSources.size(),
-        "stage returns source and generated texture artifacts");
+            inventory.files.size() + inventory.textureSources.size() +
+                inventory.groundGeometrySources.size(),
+        "stage returns source and generated texture and geometry artifacts");
     CHECK_MESSAGE(std::filesystem::is_regular_file(output / "content.index"), "content index written");
     CHECK_MESSAGE(
         std::ifstream(output / "content.index").good(),
@@ -551,6 +556,139 @@ std::map<std::string, std::string> packageFiles(const std::filesystem::path& roo
         }
     }
     return files;
+}
+
+void writeGroundArtifact(const std::filesystem::path& path,
+    const sokoban::ProcessedGroundArtifact& artifact)
+{
+    const std::vector<std::byte> bytes = sokoban::serializeProcessedGroundArtifact(artifact);
+    writeFile(path, std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+}
+
+void addProcessableGroundFixture(const sokoban::ContentSourceRoots& roots)
+{
+    std::string contents = readFile(roots.assets / "manifest.json");
+    contents = replaceFirst(std::move(contents), "\"models\": [", R"json("models": [
+      {"name":"GroundRock01","path":"custom/models/ground_rock_01.gltf",
+       "preserveSourceScale":true,"material":{"mode":"none"}},)json");
+    contents = replaceFirst(std::move(contents), "\"animations\": [", R"json(
+      "tiles":[{"tile":"Ground","model":"GroundRock01"}],
+      "animations": [)json");
+    writeFile(roots.assets / "manifest.json", contents);
+    // Cap generation uses the validated authored ground family contract and
+    // needs no GPU upload or mesh decode. Staging still resolves this document.
+    writeFile(roots.assets / "custom/models/ground_rock_01.gltf",
+        R"json({"asset":{"version":"2.0"}})json");
+}
+
+void testGroundArtifactsAreGeneratedAndIndexed()
+{
+    TEST("groundArtifactsAreGeneratedAndIndexed");
+    ScopedTestDirectory temp("sokoban-content-pipeline");
+    const auto roots = createValidContent(temp.path());
+    const auto inventory = sokoban::collectContentInventory(roots);
+    CHECK(inventory.groundGeometrySources.size() == 2);
+    const std::filesystem::path output = temp.path() / "ground-package/assets";
+    const std::string authored = readFile(roots.levels / "level0/screen0.scr");
+    const auto staged = sokoban::stageContent(roots, output, "1.2.3");
+    for (const auto& source : inventory.groundGeometrySources) {
+        CHECK(!source.composedOverworld);
+        const auto relative = sokoban::groundGeometryArtifactPath(source.source);
+        CHECK(contains(staged, relative.generic_string()));
+        CHECK_MESSAGE(readFile(output / "content.index").find(relative.generic_string()) != std::string::npos,
+            "every generated ground artifact is indexed");
+        const auto artifact = sokoban::loadProcessedGroundArtifact(output / relative);
+        CHECK_MESSAGE(artifact.entries.empty(), "procedural ground produces a valid empty artifact");
+        const auto level = sokoban::Level::loadFromFile(roots.levels / source.source);
+        const auto manifestData = sokoban::AssetManifest::loadFromFile(roots.assets / "manifest.json");
+        CHECK(artifact.sourceFingerprint == sokoban::levelGroundGeometryFingerprint(level, manifestData));
+    }
+    CHECK(readFile(roots.levels / "level0/screen0.scr") == authored);
+    CHECK(readFile(output / "levels/level0/screen0.scr") == authored);
+    sokoban::validateContentPackage(output, "1.2.3");
+
+    std::string customManifest = readFile(roots.assets / "manifest.json");
+    customManifest = replaceFirst(std::move(customManifest), "\"animations\": [",
+        "\"tiles\":[{\"tile\":\"Ground\",\"model\":\"ScreenSelectorAPlayable\"}],\n\"animations\": [");
+    writeFile(roots.assets / "manifest.json", customManifest);
+    (void)sokoban::stageContent(roots, output, "1.2.3");
+    const auto customGround = sokoban::loadProcessedGroundArtifact(
+        output / sokoban::groundGeometryArtifactPath("level0/screen0.scr"));
+    CHECK_MESSAGE(customGround.entries.empty(), "custom ground also produces a valid empty artifact");
+}
+
+void testGroundArtifactSkipRecoversMissingCorruptAndStaleOutput()
+{
+    TEST("groundArtifactSkipRecoversMissingCorruptAndStaleOutput");
+    ScopedTestDirectory temp("sokoban-content-pipeline");
+    const auto roots = createValidContent(temp.path());
+    addProcessableGroundFixture(roots);
+    const auto output = temp.path() / "ground-package/assets";
+    const auto cleanOutput = temp.path() / "ground-clean/assets";
+    sokoban::ContentStageOptions options {
+        .textureCache = temp.path() / "texture-cache",
+        .skipWhenUpToDate = true,
+        .toolIdentity = "ground-tool",
+        .encoderThreads = 1,
+    };
+    const auto artifactPath = output / sokoban::groundGeometryArtifactPath("level0/screen0.scr");
+    (void)sokoban::stageContent(roots, output, "1.2.3", options);
+    CHECK(!sokoban::loadProcessedGroundArtifact(artifactPath).entries.empty());
+    (void)sokoban::stageContent(roots, cleanOutput, "1.2.3");
+    CHECK(packageFiles(output) == packageFiles(cleanOutput));
+    const auto skipped = sokoban::stageContent(roots, output, "1.2.3", options);
+    const auto clean = sokoban::stageContent(roots, cleanOutput, "1.2.3");
+    CHECK(skipped.upToDate);
+    CHECK(skipped.inventory.files.size() == clean.files.size());
+    CHECK(skipped.inventory.totalBytes == clean.totalBytes);
+
+    std::filesystem::remove(artifactPath);
+    CHECK(!sokoban::stageContent(roots, output, "1.2.3", options).upToDate);
+    CHECK(packageFiles(output) == packageFiles(cleanOutput));
+
+    std::string corrupt = readFile(artifactPath);
+    CHECK(!corrupt.empty());
+    if (!corrupt.empty()) corrupt.back() ^= 1;
+    writeFile(artifactPath, corrupt);
+    // Same-sized output damage leaves content.index and its stage digest
+    // untouched. Full artifact parsing, not the index alone, detects it.
+    CHECK(!sokoban::stageContent(roots, output, "1.2.3", options).upToDate);
+    CHECK(packageFiles(output) == packageFiles(cleanOutput));
+
+    // Format 1 records the canonical rim width at byte 32. A package with
+    // incompatible baked-profile metadata must be regenerated, too.
+    std::string outdatedProfile = readFile(artifactPath);
+    CHECK(outdatedProfile.size() > 32);
+    if (outdatedProfile.size() > 32) outdatedProfile[32] ^= 1;
+    writeFile(artifactPath, outdatedProfile);
+    CHECK(!sokoban::stageContent(roots, output, "1.2.3", options).upToDate);
+    CHECK(packageFiles(output) == packageFiles(cleanOutput));
+
+    auto stale = sokoban::loadProcessedGroundArtifact(artifactPath);
+    stale.sourceFingerprint ^= uint64_t { 1 };
+    writeGroundArtifact(artifactPath, stale);
+    CHECK(!sokoban::stageContent(roots, output, "1.2.3", options).upToDate);
+    CHECK(packageFiles(output) == packageFiles(cleanOutput));
+
+    const auto sourcePath = roots.levels / "level0/screen0.scr";
+    const auto modified = std::filesystem::last_write_time(sourcePath);
+    const auto originalFingerprint = sokoban::loadProcessedGroundArtifact(artifactPath).sourceFingerprint;
+    std::string edited = readFile(sourcePath);
+    edited = replaceFirst(std::move(edited), "@layer 0\n...", "@layer 0\n ..");
+    writeFile(sourcePath, edited);
+    std::filesystem::last_write_time(sourcePath, modified);
+    // A size/mtime preserving geometry edit defeats the old stage record, but
+    // its semantic fingerprint still forces a fresh bake.
+    CHECK(!sokoban::stageContent(roots, output, "1.2.3", options).upToDate);
+    CHECK(sokoban::loadProcessedGroundArtifact(artifactPath).sourceFingerprint != originalFingerprint);
+    CHECK(sokoban::stageContent(roots, output, "1.2.3", options).upToDate);
+    (void)sokoban::stageContent(roots, cleanOutput, "1.2.3");
+    CHECK(packageFiles(output) == packageFiles(cleanOutput));
+
+    const std::string record = readFile(temp.path() / "ground-package/assets.stage-record");
+    CHECK(record.find("ground-format ") != std::string::npos);
+    CHECK(record.find("ground-compiler ") != std::string::npos);
+    CHECK(record.find("ground-profile ") != std::string::npos);
 }
 
 void testIncrementalStagingMatchesACleanStage()
@@ -811,6 +949,9 @@ void testComposedOverworldIsValidatedAndStaged()
     CHECK_MESSAGE(
         !contains(inventory, "levels/overworld.scr"),
         "legacy overworld omitted when layout exists");
+    CHECK(inventory.groundGeometrySources.size() == 3);
+    CHECK(std::ranges::count_if(inventory.groundGeometrySources,
+        [](const auto& source) { return source.composedOverworld; }) == 1);
 
     const std::filesystem::path output =
         temp.path() / "composed-package/assets";
@@ -823,6 +964,14 @@ void testComposedOverworldIsValidatedAndStaged()
         std::filesystem::is_regular_file(
             output / "levels/overworld/screen1.scr"),
         "composed screen staged");
+    const auto composedArtifact = sokoban::loadProcessedGroundArtifact(
+        output / sokoban::groundGeometryArtifactPath("overworld/layout.json"));
+    const auto map = sokoban::OverworldMap::load(roots.levels / "overworld");
+    const auto manifestData = sokoban::AssetManifest::loadFromFile(roots.assets / "manifest.json");
+    CHECK(composedArtifact.sourceFingerprint ==
+        sokoban::levelGroundGeometryFingerprint(map.level(), manifestData));
+    CHECK(sokoban::groundGeometryArtifactPath("overworld/layout.json") ==
+        sokoban::groundGeometryArtifactPath("overworld.scr"));
 }
 
 void testBakedThumbnailsAreStaged()
@@ -1307,6 +1456,8 @@ int main()
         testInventoryAndStaging();
         testStagedContentIndexValidation();
         testIncrementalStagingMatchesACleanStage();
+        testGroundArtifactsAreGeneratedAndIndexed();
+        testGroundArtifactSkipRecoversMissingCorruptAndStaleOutput();
         testRuntimeIndexRefreshTracksEditorMutations();
         testLevelEditorPublishesAStartupValidPackage();
         testUnassignedLegacySelectorIsStaged();

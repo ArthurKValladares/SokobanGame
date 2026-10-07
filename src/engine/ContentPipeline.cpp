@@ -9,9 +9,11 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
+#include "engine/GroundLevelGeometry.hpp"
 #include "engine/Log.hpp"
 #include "engine/OverworldMap.hpp"
 #include "engine/render/ShaderCatalog.hpp"
+#include "engine/render/ProcessedGroundArtifact.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/TaskSystem.hpp"
@@ -19,6 +21,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <charconv>
 #include <chrono>
 #include <cctype>
@@ -492,6 +495,10 @@ public:
         }
         inventory.textureSources = textureSources_;
         inventory.materialTextures = materialTextures_;
+        std::ranges::sort(groundGeometrySources_, {}, [](const ContentGroundGeometrySource& source) {
+            return source.source.generic_string();
+        });
+        inventory.groundGeometrySources = std::move(groundGeometrySources_);
         return inventory;
     }
 
@@ -765,6 +772,7 @@ private:
             overworldMap = OverworldMap::load(overworldRoot);
             overworld = &overworldMap->level();
             overworldDiagnosticPath = &layoutPath;
+            groundGeometrySources_.push_back({ std::filesystem::path("overworld") / "layout.json", true });
             addFile(
                 overworldRoot,
                 "layout.json",
@@ -789,6 +797,7 @@ private:
             legacyOverworld = Level::loadFromFile(legacyOverworldPath);
             overworld = &*legacyOverworld;
             overworldDiagnosticPath = &legacyOverworldPath;
+            groundGeometrySources_.push_back({ "overworld.scr", false });
             addFile(
                 roots_.levels,
                 "overworld.scr",
@@ -859,6 +868,7 @@ private:
                 validateDecorations(level, screenFile.path());
                 const std::filesystem::path relative = screenFile.path().lexically_relative(roots_.levels);
                 addFile(roots_.levels, relative, std::filesystem::path("levels") / relative, "level screen");
+                groundGeometrySources_.push_back({ relative, false });
             }
 
             const std::filesystem::path metadataPath =
@@ -961,6 +971,7 @@ private:
     std::unordered_set<std::string> textureSourceKeys_;
     std::vector<TextureSourceIdentity> textureSources_;
     std::vector<ResolvedMaterialTexture> materialTextures_;
+    std::vector<ContentGroundGeometrySource> groundGeometrySources_;
 };
 
 void ensureSafeOutputRoot(
@@ -1575,6 +1586,11 @@ std::string stageInputRecord(
     record += "game-version " + std::string(gameVersion) + '\n';
     record += "tool " + std::string(toolIdentity) + '\n';
     record += "encoder " + std::string(compressedTextureEncoderRevision) + '\n';
+    record += "ground-format " + std::to_string(processedGroundArtifactFormatVersion) + '\n';
+    record += "ground-compiler " + std::to_string(processedGroundArtifactCompilerRevision) + '\n';
+    record += "ground-profile " +
+        std::to_string(std::bit_cast<uint32_t>(processedGroundArtifactRimWidth)) + ' ' +
+        std::to_string(std::bit_cast<uint32_t>(processedGroundArtifactRimDepth)) + '\n';
     for (const std::filesystem::path* root :
          { &roots.assets, &roots.levels, &roots.shaders }) {
         record += "root " +
@@ -1596,7 +1612,21 @@ std::string stageInputRecord(
         record += "texture " + textDigest(textureSourceIdentityKey(identity)) +
             '\n';
     }
+    for (const ContentGroundGeometrySource& source : inventory.groundGeometrySources) {
+        record += "ground " + source.source.generic_string() + ' ' +
+            (source.composedOverworld ? "composed " : "screen ") +
+            groundGeometryArtifactPath(source.source).generic_string() + '\n';
+    }
     return record;
+}
+
+Level loadGroundGeometrySource(
+    const ContentSourceRoots& roots, const ContentGroundGeometrySource& source)
+{
+    if (source.composedOverworld) {
+        return OverworldMap::load((roots.levels / source.source).parent_path()).level();
+    }
+    return Level::loadFromFile(roots.levels / source.source);
 }
 
 std::filesystem::path stageRecordPath(const std::filesystem::path& outputRoot)
@@ -1636,6 +1666,7 @@ ContentStageReport stageContent(
     ContentStageReport report;
     report.inventory = collectContentInventory(roots);
     ContentInventory& inventory = report.inventory;
+    const AssetManifest geometryManifest = AssetManifest::loadFromFile(roots.assets / "manifest.json");
     const std::filesystem::path recordPath = stageRecordPath(outputRoot);
     const std::string inputRecord = stageInputRecord(
         roots, inventory, gameVersion, options.toolIdentity);
@@ -1647,19 +1678,37 @@ ContentStageReport stageContent(
             stagedIndexDigest(outputRoot);
         if (record && indexDigest &&
             *record == inputRecord + "output-index " + *indexDigest + '\n') {
-            // Report the package as it stands, generated artifacts included,
-            // so callers see the same totals as the stage that produced it.
-            for (const TextureSourceIdentity& identity :
-                 inventory.textureSources) {
-                const std::filesystem::path relative =
-                    compressedTextureArtifactPath(identity);
-                const std::uintmax_t size =
-                    std::filesystem::file_size(outputRoot / relative, error);
-                inventory.files.push_back({ {}, relative, error ? 0 : size, true });
-                inventory.totalBytes += error ? 0 : size;
+            try {
+                // The stage record checks inputs and the index, while
+                // package validation checks actual file coverage and sizes.
+                // Ground artifacts additionally verify their full contents
+                // and current semantic source, including same-metadata edits.
+                validateContentPackage(outputRoot, gameVersion);
+                ContentInventory skippedInventory = inventory;
+                const auto appendGenerated = [&](const std::filesystem::path& relative) {
+                    const std::uintmax_t size = std::filesystem::file_size(outputRoot / relative);
+                    skippedInventory.files.push_back({ {}, relative, size, true });
+                    skippedInventory.totalBytes += size;
+                };
+                for (const TextureSourceIdentity& identity : inventory.textureSources) {
+                    appendGenerated(compressedTextureArtifactPath(identity));
+                }
+                for (const ContentGroundGeometrySource& source : inventory.groundGeometrySources) {
+                    const std::filesystem::path relative = groundGeometryArtifactPath(source.source);
+                    const ProcessedGroundArtifact artifact = loadProcessedGroundArtifact(outputRoot / relative);
+                    const Level level = loadGroundGeometrySource(roots, source);
+                    if (artifact.sourceFingerprint != levelGroundGeometryFingerprint(level, geometryManifest)) {
+                        throw std::runtime_error("staged ground artifact has a stale geometry fingerprint");
+                    }
+                    appendGenerated(relative);
+                }
+                report.inventory = std::move(skippedInventory);
+                report.upToDate = true;
+                return report;
+            } catch (const std::runtime_error&) {
+                // Disposable derived output can be missing, corrupt, or stale
+                // despite an unchanged index. Rebuild a clean package below.
             }
-            report.upToDate = true;
-            return report;
         }
     }
     // A stale record must not survive into a stage that fails part way.
@@ -1685,7 +1734,8 @@ ContentStageReport stageContent(
         }
 
         std::unordered_set<std::string> packagePaths;
-        packagePaths.reserve(inventory.files.size() + inventory.textureSources.size());
+        packagePaths.reserve(inventory.files.size() + inventory.textureSources.size() +
+            inventory.groundGeometrySources.size());
         for (const ContentFile& file : inventory.files) {
             packagePaths.insert(contentPathKey(file.destination));
         }
@@ -1768,6 +1818,22 @@ ContentStageReport stageContent(
             if (!cache.store(artifacts[index].cacheKey, artifacts[index].bytes)) {
                 ++report.textureCacheWriteFailures;
             }
+        }
+
+        for (const ContentGroundGeometrySource& source : inventory.groundGeometrySources) {
+            const std::filesystem::path relative = groundGeometryArtifactPath(source.source);
+            if (!packagePaths.insert(contentPathKey(relative)).second) {
+                throw std::runtime_error("ground geometry artifact path collides with another package file: " +
+                    relative.string());
+            }
+            const Level level = loadGroundGeometrySource(roots, source);
+            const std::vector<std::byte> bytes = serializeProcessedGroundArtifact(
+                compileLevelGroundGeometry(level, geometryManifest));
+            std::filesystem::create_directories((stagingRoot / relative).parent_path());
+            atomicFile::write(stagingRoot / relative, std::string_view(
+                reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+            inventory.files.push_back({ {}, relative, bytes.size(), true });
+            inventory.totalBytes += bytes.size();
         }
 
         atomicFile::write(

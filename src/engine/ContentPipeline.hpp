@@ -42,6 +42,13 @@ struct ResolvedMaterialTexture {
     float scale = 1.0f;
 };
 
+struct ContentGroundGeometrySource {
+    // Relative to the level source root: one playable .scr, legacy overworld
+    // .scr, or overworld/layout.json for the composed map's normalized grid.
+    std::filesystem::path source;
+    bool composedOverworld = false;
+};
+
 struct ContentInventory {
     std::vector<ContentFile> files;
     // Unique decoded-image identities required by manifest textures and glTF
@@ -50,6 +57,9 @@ struct ContentInventory {
     // One entry per authored material use. Unlike textureSources this is not
     // deduplicated: it preserves the material-to-resource mapping and UV data.
     std::vector<ResolvedMaterialTexture> materialTextures;
+    // Derived ground caps are built separately from the authored files. This
+    // also describes valid empty artifacts for procedural/custom ground.
+    std::vector<ContentGroundGeometrySource> groundGeometrySources;
     std::uintmax_t totalBytes = 0;
 };
 
@@ -107,6 +117,8 @@ struct ContentStageOptions {
     // content.index all match the record the previous successful stage wrote
     // beside outputRoot (<outputRoot>.stage-record). Anything that rewrites
     // the staged index, such as an editor publication, forces the next stage.
+    // Generated ground artifacts must also parse and match current semantic
+    // geometry fingerprints; missing or damaged package files force restaging.
     bool skipWhenUpToDate = false;
     // Folded into that record so a rebuilt tool restages. The content tool
     // passes its own executable's size and modification time.
@@ -119,7 +131,7 @@ struct ContentStageOptions {
 struct ContentStageReport {
     ContentInventory inventory;
     // True when skipWhenUpToDate found nothing to do. The inventory still
-    // describes the staged package, compressed textures included.
+    // describes the staged package, generated textures and geometry included.
     bool upToDate = false;
     std::size_t texturesEncoded = 0;
     std::size_t texturesFromCache = 0;

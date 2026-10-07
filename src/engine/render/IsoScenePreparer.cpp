@@ -1755,7 +1755,7 @@ void IsoScenePreparer::prepare(
     // projection state still comes from this frame, never from the cache.
     {
         SOKOBAN_PROFILE_SCOPE("Renderer.Update ground rim surfaces");
-        groundRimSurfaceCache_.update(frameData.tiles);
+        groundRimSurfaceCache_.update(frameData.tiles, frameData.processedGroundArtifact.get());
     }
     scene.reusedGroundRimSurfaces = static_cast<uint32_t>(
         groundRimSurfaceCache_.reusedSurfaceCount());
@@ -1764,6 +1764,11 @@ void IsoScenePreparer::prepare(
     scene.groundRimSurfaceCacheHits = groundRimSurfaceCache_.hitCount();
     scene.groundRimSurfaceCacheRebuilds = groundRimSurfaceCache_.rebuildCount();
     scene.groundRimSurfaceCacheBytes = groundRimSurfaceCache_.capacityBytes();
+    scene.bakedGroundRimSurfaces = static_cast<uint32_t>(
+        groundRimSurfaceCache_.bakedSurfaceCount());
+    scene.importedGroundRimSurfaces = static_cast<uint32_t>(
+        groundRimSurfaceCache_.importedSurfaceCount());
+    scene.groundRimArtifactImports = groundRimSurfaceCache_.bakedImportCount();
 
     const auto prepareAuxiliary = [
                                       &frameData,

@@ -1437,6 +1437,8 @@ void Application::loadCurrentScreen()
         restore.snapshot ? &*restore.snapshot : nullptr,
         location,
         campaign_.inOverworld() && overworldMap_.has_value());
+    gameplayGroundGeometrySource_ = (campaign_.inOverworld() && overworldMap_
+        ? path / "layout.json" : path).lexically_relative(assetRoot_ / "levels");
     if (restore.checkpointMatched && !restored) {
         log::warning(log::Category::Persistence)
             << "Discarded invalid gameplay checkpoint for "
@@ -1491,6 +1493,8 @@ bool Application::applyLevel(
         }
     }
     renderer_.ensureAssets(requirements);
+    gameplayGroundGeometryStore_.invalidate();
+    gameplayGroundGeometrySource_.clear();
     level_ = std::move(level);
     bool restored = snapshot && gameplaySession_.restore(level_, *snapshot);
     if (restored && composedOverworld && overworldMap_ &&
@@ -1652,6 +1656,10 @@ bool Application::updateScreenPreview(bool requested, float dt)
                 screenPreviewSession_.state());
             screenPreviewLevel_ = std::move(preview);
             screenPreviewTarget_ = *selector->target;
+            previewGroundGeometryStore_.invalidate();
+            previewGroundGeometrySource_ = screenPath(
+                selector->target->level, selector->target->screen)
+                .lexically_relative(assetRoot_ / "levels");
         } catch (const std::exception& error) {
             log::error(log::Category::Gameplay)
                 << "Could not preview screen "
@@ -1700,6 +1708,12 @@ Application::buildScreenPreviewRenderFrame(FrameArena& arena) const
         .activationPreview = activationPreview ? &*activationPreview : nullptr,
         .groundGeometryCache = &previewGroundGeometryCache_,
     }, arena);
+    if (presentationSettings_.geometry.smoothGroundRim &&
+        presentationSettings_.geometry.processGroundGeometry) {
+        frame.processedGroundArtifact = previewGroundGeometryStore_.get(
+            previewGroundGeometrySource_, *screenPreviewLevel_, assetManifest_,
+            previewGroundGeometryCache_.rebuildCount(), assetRoot_);
+    }
     // The preview and live world can contain the same stable actor IDs. Keep
     // their GPU animation instances independent so one idle pose cannot
     // overwrite the other's skinning buffers.
@@ -2391,6 +2405,8 @@ void Application::reloadSourceLevel(const std::filesystem::path& source)
         return;
     }
     mirrorIntoRuntime(source, assetRoot_ / "levels" / relative);
+    gameplayGroundGeometryStore_.invalidate();
+    previewGroundGeometryStore_.invalidate();
     (void)refreshContentPackageIndex(assetRoot_);
     // A saved draft may now match a recording waiting in solutions/drafts/.
     tools_->requestSolutionReconcile();
@@ -2475,6 +2491,8 @@ void Application::reloadSourceManifest(const std::filesystem::path& source)
     mirrorIntoRuntime(source, assetRoot_ / "manifest.json");
     (void)refreshContentPackageIndex(assetRoot_);
     presentationSettings_.applyTileScales(assetManifest_);
+    gameplayGroundGeometryStore_.invalidate();
+    previewGroundGeometryStore_.invalidate();
     audioSystem_->applyManifestVolumes();
     tools_->manifestReloadStatus =
         "Applied manifest.json live (tile scales and volumes).";
@@ -2943,6 +2961,13 @@ RenderFrameData Application::buildRenderFrame(
             ? &*projectedActivationPreview : nullptr,
         .groundGeometryCache = &gameplayGroundGeometryCache_,
     }, arena);
+    if (!editorDraftPlaying && !gameplayGroundGeometrySource_.empty() &&
+        presentationSettings_.geometry.smoothGroundRim &&
+        presentationSettings_.geometry.processGroundGeometry) {
+        frame.processedGroundArtifact = gameplayGroundGeometryStore_.get(
+            gameplayGroundGeometrySource_, level_, assetManifest_,
+            gameplayGroundGeometryCache_.rebuildCount(), assetRoot_);
+    }
     if (renderCampaignOverworld && overworldView && renderedOverworld) {
         appendOverworldFogVolumes(
             frame.overworldFogVolumes,

@@ -890,8 +890,9 @@ screen previews keep separate caches. Changes to eligible ground cells, model
 assignments, layer visibility or overworld screen visibility rebuild it;
 tile ordering, paint colors and unrelated actors reuse it. Edits and move/delete
 previews therefore update boundaries automatically. Cache storage is retained
-across frames; this experiment does not introduce a persisted level geometry
-format or require a manual processing command.
+across frames. Content builds save processed rim caps automatically; edited or
+newly exposed boundaries regenerate when their exact geometry inputs differ
+from the bake.
 
 Scene preparation also caches the completed rim surfaces: world-space vertices,
 facet normals and wall-blend weights. Main rendering, ground picking and shadows
@@ -900,8 +901,19 @@ changes update the affected surfaces; tile ordering, camera movement and paintin
 reuse them while projection and material bindings still refresh each frame.
 Gameplay and screen previews keep separate surface caches. Capacity is retained
 across updates, and renderer statistics/evidence report reused/generated surfaces,
-cache hits/rebuilds and retained bytes. This remains an in-memory cache; level
-builds do not yet save processed surface artifacts.
+cache hits/rebuilds and retained bytes. Canonical gameplay and screen previews
+can seed these caches from validated build artifacts. Statistics also distinguish
+active baked surfaces, imports this preparation and cumulative imports.
+
+`sokoban_content` compiles the default 0.12/0.10 rim profile into
+`geometry/ground/levelN/screenM.grm` and one `geometry/ground/overworld.grm` for
+the fully composed overworld. Artifacts contain owning cap vertices, normals and
+wall-blend weights; rock body index variants and shader deformation still use
+the existing runtime path. The artifact loader checks format/compiler versions,
+size bounds, checksum, geometry and a semantic source fingerprint. Unavailable,
+stale or invalid artifacts use live generation. Different rim settings, changed
+visibility boundaries and editor drafts also retain live generation. Source
+level files remain editable, and no manual processing command is required.
 
 Compare it live with **Tuning > Tile Geometry > Process Ground Geometry**, or
 launch a matched evidence capture with `--disable-ground-geometry`.
@@ -1134,7 +1146,8 @@ ground material blending, and the remaining procedural-surface art gaps.
 `assets/manifest.json` is the strict, versioned source of runtime models,
 textures, animations, sounds, music, tile visuals, and material behavior. A
 normal build runs `sokoban_content`, validates all reachable content, compiles
-shaders, and stages only required files beside the executable.
+shaders and ground rim artifacts, and stages the required files beside the
+executable. Generated geometry is included in the package's `content.index`.
 
 The Developer Tools `Asset Manifest` tab's `Sounds` section supports
 native file selection through `Browse` and `+ File`. Files outside `assets/`
@@ -1222,7 +1235,11 @@ Outside the shipping presets, staging is incremental
 (`SOKOBAN_INCREMENTAL_CONTENT`). The tool still collects and validates the
 inventory on every build, but it leaves the staged tree alone when a record
 beside it (`assets.stage-record`) shows that no source file, the tool, and the
-staged `content.index` have changed. When a stage does run, BC7 textures come
+staged `content.index` have changed. A skip also validates package coverage and
+sizes, parses every ground artifact and compares its semantic fingerprint with
+the current source ground. Missing, corrupt or stale derived geometry triggers
+a clean restage, including ground edits that preserve file size and timestamp.
+When a stage does run, BC7 textures come
 from a per-configuration cache in the build tree (`content-cache/<config>/`),
 keyed by the bytes of every file a texture reads, so only changed textures are
 re-encoded. Deleting the cache is always safe. The shipping presets turn both

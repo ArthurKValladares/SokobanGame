@@ -4,6 +4,7 @@
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/PointShadowFaceCache.hpp"
 #include "engine/render/GroundRimSurface.hpp"
+#include "engine/render/ProcessedGroundArtifact.hpp"
 #include "engine/TaskSystem.hpp"
 
 #include <algorithm>
@@ -2641,8 +2642,86 @@ void testGroundRimConcaveCornerJoinsAdjacentEdge()
     }
 }
 
+void testBakedGroundRimSurfacesRespectResolvedFrames()
+{
+    TEST("bakedGroundRimSurfacesRespectResolvedFrames");
+    using namespace sokoban;
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 3;
+    frame.levelHeight = 3;
+    auto tile = cube(1, 1);
+    tile.model = { 1 };
+    tile.effect = RenderSurfaceEffect::GroundSplat;
+    tile.groundTop = true;
+    tile.groundRimWidth = 0.12f;
+    tile.groundRimDepth = 0.10f;
+    frame.tiles.push_back(tile);
+    frame.processedGroundArtifact = std::make_shared<const ProcessedGroundArtifact>(
+        buildProcessedGroundArtifact(frame.tiles, 42));
+    IsoScenePreparer preparer;
+    PreparedRenderScene prepared;
+    preparer.prepare(frame, { 1280, 720 }, prepared);
+    CHECK(prepared.bakedGroundRimSurfaces == 1);
+    CHECK(prepared.importedGroundRimSurfaces == 1);
+    CHECK(prepared.generatedGroundRimSurfaces == 0);
+    CHECK(prepared.groundRimArtifactImports == 1);
+    const auto bakedShadowFaces = prepared.shadowFaces;
+    const PreparedRenderScene retained = prepared;
+    preparer.prepare(frame, { 1280, 720 }, prepared);
+    CHECK(prepared.bakedGroundRimSurfaces == 1);
+    CHECK(prepared.importedGroundRimSurfaces == 0);
+    CHECK(prepared.reusedGroundRimSurfaces == 1);
+    CHECK(prepared.shadowFaces == bakedShadowFaces);
+
+    // Readiness/budget resolution stays authoritative over a matching artifact.
+    frame.tiles[0].groundRimWidth = 0;
+    preparer.prepare(frame, { 1280, 720 }, prepared);
+    CHECK(prepared.bakedGroundRimSurfaces == 0);
+    CHECK(prepared.importedGroundRimSurfaces == 0);
+    CHECK(prepared.shadowFaces.size() == 1);
+    CHECK(std::ranges::none_of(prepared.isoFaces,
+        [](const auto& face) { return face.groundRimSurface; }));
+
+    // A tuned profile misses the build output and compiles current geometry.
+    frame.tiles[0].groundRimWidth = 0.17f;
+    preparer.prepare(frame, { 1280, 720 }, prepared);
+    CHECK(prepared.generatedGroundRimSurfaces == 1);
+    CHECK(prepared.bakedGroundRimSurfaces == 0);
+    CHECK(prepared.shadowFaces != bakedShadowFaces);
+    frame.tiles[0].groundRimWidth = 0.12f;
+    preparer.prepare(frame, { 1280, 720 }, prepared);
+    CHECK(prepared.bakedGroundRimSurfaces == 1);
+    CHECK(prepared.importedGroundRimSurfaces == 1);
+    CHECK(prepared.shadowFaces == bakedShadowFaces);
+
+    // A changed visible boundary cannot use a cap built for another mask.
+    frame.tiles[0].groundRimSides = groundNorthSide;
+    preparer.prepare(frame, { 1280, 720 }, prepared);
+    CHECK(prepared.generatedGroundRimSurfaces == 1);
+    CHECK(prepared.bakedGroundRimSurfaces == 0);
+    CHECK(prepared.shadowFaces != bakedShadowFaces);
+    CHECK(retained.shadowFaces == bakedShadowFaces);
+
+    // Discarding the provider leaves previously prepared owning faces intact.
+    frame.processedGroundArtifact.reset();
+    frame.tiles[0].groundRimSides = groundAllSides;
+    IsoScenePreparer livePreparer;
+    PreparedRenderScene live;
+    livePreparer.prepare(frame, { 1280, 720 }, live);
+    CHECK(live.generatedGroundRimSurfaces == 1);
+    CHECK(live.bakedGroundRimSurfaces == 0);
+    CHECK(live.shadowFaces == bakedShadowFaces);
+    CHECK(live.isoFaces.size() == retained.isoFaces.size());
+    for (std::size_t index = 0; index < live.isoFaces.size(); ++index) {
+        CHECK(live.isoFaces[index].worldVertices == retained.isoFaces[index].worldVertices);
+        CHECK(live.isoFaces[index].groundRimWallCoverage == retained.isoFaces[index].groundRimWallCoverage);
+    }
+}
+
 int main()
 {
+    testBakedGroundRimSurfacesRespectResolvedFrames();
     testGroundRimCacheKeepsOwnedScenesAndCurrentFrameState();
     testGroundRimPatchesCoverTheSharedProfile();
     testGroundRimVisibleAndShadowCapsAgree();

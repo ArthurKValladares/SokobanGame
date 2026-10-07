@@ -13,6 +13,7 @@
 #include "engine/GameplayLoop.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/GroundGeometry.hpp"
+#include "engine/GroundLevelGeometry.hpp"
 #include "engine/InputRouter.hpp"
 #include "engine/Input.hpp"
 #include "engine/GameplaySession.hpp"
@@ -287,6 +288,10 @@ private:
     mutable GroundGeometryCache gameplayGroundGeometryCache_;
     mutable GroundGeometryCache editorGroundGeometryCache_;
     mutable GroundGeometryCache previewGroundGeometryCache_;
+    mutable RuntimeGroundGeometryStore gameplayGroundGeometryStore_;
+    mutable RuntimeGroundGeometryStore previewGroundGeometryStore_;
+    std::filesystem::path gameplayGroundGeometrySource_;
+    std::filesystem::path previewGroundGeometrySource_;
     SettingsCoordinator settingsCoordinator_;
     GameplayPresentation presentation_;
     LevelTransition levelTransition_;

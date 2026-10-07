@@ -10,12 +10,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace sokoban {
+
+struct ProcessedGroundArtifact;
 
 enum class RenderViewMode : uint8_t {
     TopDown2D,
@@ -652,6 +655,9 @@ struct RenderFrameData {
     GroundSplatTextures groundSplat {};
     float requestedGroundRimWidth = 0.0f;
     float requestedGroundRimDepth = 0.0f;
+    // Owning optional build output. Exact resolved geometry keys gate reuse;
+    // editor drafts and changed profiles can still compile their surfaces live.
+    std::shared_ptr<const ProcessedGroundArtifact> processedGroundArtifact;
     RenderTexture groundRockSideTexture = noTexture;
     std::array<GroundSplatRegion, groundSplatRegionCapacity>
         groundSplatRegions {};
@@ -772,6 +778,9 @@ struct RenderStats {
     uint64_t groundRimSurfaceCacheHits = 0;
     uint64_t groundRimSurfaceCacheRebuilds = 0;
     uint64_t groundRimSurfaceCacheBytes = 0;
+    uint32_t bakedGroundRimSurfaces = 0;
+    uint32_t importedGroundRimSurfaces = 0;
+    uint64_t groundRimArtifactImports = 0;
     uint32_t pipelineBinds = 0;
     uint32_t renderPasses = 0;
     uint32_t imageBarriers = 0;

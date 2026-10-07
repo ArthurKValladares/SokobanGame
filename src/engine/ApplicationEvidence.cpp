@@ -296,6 +296,10 @@ void Application::finishEvidenceCapture()
            << evidenceStats_.groundRimSurfaceCacheHits << " hits, "
            << evidenceStats_.groundRimSurfaceCacheRebuilds << " rebuilds; "
            << evidenceStats_.groundRimSurfaceCacheBytes << " retained bytes\n";
+    report << "- Baked ground rim surfaces: "
+           << evidenceStats_.bakedGroundRimSurfaces << " cached from build output; "
+           << evidenceStats_.importedGroundRimSurfaces << " imported this preparation; "
+           << evidenceStats_.groundRimArtifactImports << " imports total\n";
     report << "- Recorder scratch reuse: "
            << (evidenceStats_.recorderScratchReuseEnabled
                    ? "enabled"

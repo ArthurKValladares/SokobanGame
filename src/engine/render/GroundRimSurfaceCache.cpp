@@ -1,7 +1,7 @@
 #include "engine/render/GroundRimSurfaceCache.hpp"
+#include "engine/render/ProcessedGroundArtifact.hpp"
 
 #include <algorithm>
-#include <bit>
 #include <limits>
 
 namespace sokoban {
@@ -20,25 +20,6 @@ std::vector<CompiledGroundRimSurface> compileGroundRimSurfaces(
     return result;
 }
 
-GroundRimSurfaceCache::Key GroundRimSurfaceCache::keyFor(
-    const RenderFrameData::Tile& tile) noexcept
-{
-    // Bits provide an exact, deterministic total ordering without relying on
-    // floating-point comparison or accepting hash collisions. Separate height
-    // and base inputs preserve the builder's floating-point operation order.
-    return {
-        tile.model.value,
-        std::bit_cast<uint32_t>(tile.position.x),
-        std::bit_cast<uint32_t>(tile.position.y),
-        std::bit_cast<uint32_t>(tile.baseElevation),
-        std::bit_cast<uint32_t>(tile.height),
-        static_cast<uint32_t>(tile.groundRimSides),
-        static_cast<uint32_t>(tile.groundRimConcaveCorners),
-        std::bit_cast<uint32_t>(tile.groundRimWidth),
-        std::bit_cast<uint32_t>(tile.groundRimDepth),
-    };
-}
-
 void GroundRimSurfaceCache::rebuildMappings()
 {
     mappings_.clear();
@@ -49,13 +30,15 @@ void GroundRimSurfaceCache::rebuildMappings()
     std::ranges::sort(mappings_, {}, &Mapping::tileIndex);
 }
 
-void GroundRimSurfaceCache::update(std::span<const RenderFrameData::Tile> tiles)
+void GroundRimSurfaceCache::update(std::span<const RenderFrameData::Tile> tiles,
+    const ProcessedGroundArtifact* artifact)
 {
     try {
+        importedSurfaceCount_ = 0;
         candidates_.clear();
         for (std::size_t tileIndex = 0; tileIndex < tiles.size(); ++tileIndex) {
             if (hasGroundRimSurface(tiles[tileIndex])) {
-                candidates_.push_back({ keyFor(tiles[tileIndex]), tileIndex });
+                candidates_.push_back({ groundRimSurfaceKey(tiles[tileIndex]), tileIndex });
             }
         }
         std::ranges::sort(candidates_, [](const Candidate& left, const Candidate& right) {
@@ -119,13 +102,24 @@ void GroundRimSurfaceCache::update(std::span<const RenderFrameData::Tile> tiles)
                 entry.surfaceSlot = freeSlots_.back();
                 freeSlots_.pop_back();
             }
-            surfaces_[entry.surfaceSlot] = buildGroundRimSurface(tiles[candidates_[index].tileIndex]);
-            ++generatedSurfaceCount_;
+            const GroundRimSurface* baked = artifact ? artifact->find(entry.key) : nullptr;
+            if (baked) {
+                surfaces_[entry.surfaceSlot] = *baked;
+                entry.baked = true;
+                ++importedSurfaceCount_;
+            } else {
+                surfaces_[entry.surfaceSlot] = buildGroundRimSurface(tiles[candidates_[index].tileIndex]);
+                entry.baked = false;
+                ++generatedSurfaceCount_;
+            }
         }
         entries_.swap(workingEntries_);
         workingEntries_.clear();
         rebuildMappings();
         valid_ = true;
+        bakedSurfaceCount_ = static_cast<std::size_t>(std::ranges::count_if(
+            entries_, &Entry::baked));
+        bakedImportCount_ += importedSurfaceCount_;
         ++rebuildCount_;
     } catch (...) {
         // No partially remapped or overwritten surface can become a future
@@ -159,6 +153,8 @@ void GroundRimSurfaceCache::invalidate() noexcept
     lastUpdateReused_ = false;
     reusedSurfaceCount_ = 0;
     generatedSurfaceCount_ = 0;
+    importedSurfaceCount_ = 0;
+    bakedSurfaceCount_ = 0;
     surfaces_.clear();
     freeSlots_.clear();
     entries_.clear();

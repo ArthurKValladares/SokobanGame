@@ -558,6 +558,7 @@ add_library(sokoban_core STATIC
     src/engine/PerformanceFixtures.cpp
     src/engine/RenderFrameBuilder.cpp
     src/engine/GroundGeometry.cpp
+    src/engine/GroundLevelGeometry.cpp
     src/engine/RenderFrameBuilderEditor.cpp
     src/engine/RenderFrameParts.cpp
     src/engine/render/RenderTypes.cpp
@@ -595,6 +596,7 @@ add_library(sokoban_core STATIC
     src/engine/render/GroundMeshGeometry.cpp
     src/engine/render/GroundRimGeometry.cpp
     src/engine/render/GroundRimSurfaceCache.cpp
+    src/engine/render/ProcessedGroundArtifact.cpp
     src/engine/render/FrameResourceTracker.cpp
     src/engine/render/FrameTimeTelemetry.cpp
     src/engine/render/GeometrySuballocator.cpp
@@ -1524,6 +1526,15 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME ground_rim_surface_cache
         LIBS sokoban_core
         SOURCES tests/GroundRimSurfaceCacheTests.cpp
+    )
+    sokoban_add_test(NAME processed_ground_artifact
+        LIBS sokoban_core
+        SOURCES tests/ProcessedGroundArtifactTests.cpp
+    )
+    sokoban_add_test(NAME ground_level_geometry
+        STANDALONE TARGET sokoban_ground_level_geometry_tests
+        LIBS sokoban_core
+        SOURCES tests/GroundLevelGeometryTests.cpp
     )
     sokoban_add_test(NAME tasks
         LIBS sokoban_core
