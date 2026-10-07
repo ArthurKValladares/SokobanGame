@@ -3594,7 +3594,8 @@ private:
                 Vec4 {},
                 Vec4 { tile.groundRimWidth, tile.groundRimDepth,
                     GroundRimProfile {}.bodyBand, static_cast<float>(tile.groundRimSides) },
-                Vec4 { static_cast<float>(tile.groundRimConcaveCorners), 0.0f, 0.0f, 0.0f },
+                Vec4 { static_cast<float>(tile.groundRimConcaveCorners),
+                    tile.position.x, tile.position.y, 0.0f },
             },
             // Ground's top tint stays on its splat face. The rock body uses
             // its authored sandstone factors rather than the green top tint.
@@ -3726,7 +3727,8 @@ private:
             .passData = { Vec4 {}, Vec4 {},
                 Vec4 { tile.groundRimWidth, tile.groundRimDepth,
                     GroundRimProfile {}.bodyBand, static_cast<float>(tile.groundRimSides) },
-                Vec4 { static_cast<float>(tile.groundRimConcaveCorners), 0.0f, 0.0f, 0.0f } },
+                Vec4 { static_cast<float>(tile.groundRimConcaveCorners),
+                    tile.position.x, tile.position.y, 0.0f } },
         };
         const VkBuffer vertexBuffer = mesh.vertexBuffer;
         const VkDeviceSize offset = mesh.vertexOffset;
@@ -3772,7 +3774,8 @@ private:
             .passData = { Vec4 {}, Vec4 {},
                 Vec4 { tile.groundRimWidth, tile.groundRimDepth,
                     GroundRimProfile {}.bodyBand, static_cast<float>(tile.groundRimSides) },
-                Vec4 { static_cast<float>(tile.groundRimConcaveCorners), 0.0f, 0.0f, 0.0f } },
+                Vec4 { static_cast<float>(tile.groundRimConcaveCorners),
+                    tile.position.x, tile.position.y, 0.0f } },
         };
         const VkBuffer vertexBuffer = mesh.vertexBuffer;
         const VkDeviceSize offset = mesh.vertexOffset;

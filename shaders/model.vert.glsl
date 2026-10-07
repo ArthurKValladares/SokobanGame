@@ -57,7 +57,7 @@ void main()
         draw.vertices[3]);
 
     GroundRimDeformation rim = groundRimDeformation(
-        inPosition, draw.passData[2], uint(draw.passData[3].x + 0.5));
+        inPosition, draw.passData[2], uint(draw.passData[3].x + 0.5), draw.passData[3].yz);
     vec3 worldPosition = (worldTransform * vec4(rim.position, 1.0)).xyz;
     gl_Position = frame.clipFromWorld * vec4(worldPosition, 1.0);
     outWorldPosition = worldPosition;

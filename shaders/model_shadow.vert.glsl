@@ -27,6 +27,6 @@ void main()
         pc.shadowFromModel[2],
         pc.shadowFromModel[3]);
     GroundRimDeformation rim = groundRimDeformation(
-        inPosition, pc.passData[2], uint(pc.passData[3].x + 0.5));
+        inPosition, pc.passData[2], uint(pc.passData[3].x + 0.5), pc.passData[3].yz);
     gl_Position = shadowTransform * vec4(rim.position, 1.0);
 }

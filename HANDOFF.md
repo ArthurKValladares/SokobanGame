@@ -32,6 +32,21 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
+The October 6 irregular-rim revision built `dev-fast-all` and the Debug game
+with warnings-as-errors. All 99 optimized suites passed across the full run and
+the same two unchanged audio-suite reruns outside the sandbox. Coverage includes
+all 256 neighbor layouts at several world origins, exact joins along the actual
+20 source/PBR model borders, positive facet areas/Jacobians, paint picking,
+shadow consistency and the 5,000-cell draw-budget fallback. A 240-frame Debug
+fixture reported no VUID errors; its RGB capture exactly matches the optimized
+capture. The known Epic overlay loader error remains. Ignored evidence is in
+`out/ground-geometry/irregular-rim/`: comparison crops show the uniform rim above
+the new irregular rim, and `pixel-check.json` records the exact Debug comparison.
+Matched flat/irregular fixture captures retain 25 draws and the same GPU
+allocation memory; irregular caps add 1,044 submitted triangles. This is a
+short visual experiment, not a performance guarantee. Full Debug, headless,
+Linux and shipping checks were not run for this revision.
+
 The October 6 cached-boundary/rim prototype also built `dev-fast-all` and the
 Debug game with warnings-as-errors. All 99 optimized suites passed across the
 full run and a two-suite rerun outside the sandbox; the sandbox denied an
@@ -479,11 +494,17 @@ and the required real-device checks are recorded.
   retain capacity, and descriptions must not borrow frame or manifest pointers.
   GPU readiness remains a renderer decision and must not invalidate this cache.
 - The default-off **Smooth Ground Rim (prototype)** control, or `--ground-rim`,
-  requests a planar chamfer with tile-unit width/depth. It requires ground
-  processing. `GroundRimGeometry` and `GroundRim.glsl` share the height field:
-  maximum exposed-edge ramps and minimum incident ramps at concave corners.
+  requests broad chipped facets with nominal tile-unit width/depth. It requires
+  ground processing. `GroundRimGeometry` and `GroundRim.glsl` share the same
+  triangulated height field. Integer hashes of world grid corners determine
+  width and depth; exposed outer borders interpolate corner depths linearly
+  so arbitrary authored body edge segments seal. Hidden cap borders share
+  corner radii/ramps, and concave corner patches use the opposite diagonal.
+  Irregular inner strip knots straddle the tile midpoint; their inset widths
+  stay below the corner diagonals and 0.40 tiles to keep the central fan valid.
   CPU cap tessellation, body deformation and shadows must agree on that field.
-  Compress only the upper body band; depth must remain below that band to keep
+  Compress only the upper body band; maximum varied depth (1.35 times nominal)
+  must remain below that band to keep
   its deformation monotone. Preserve UVs and tangent handedness, transform
   normals with the inverse transpose Jacobian and tangents with the forward
   Jacobian.

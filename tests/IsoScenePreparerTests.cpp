@@ -2188,45 +2188,56 @@ void testGroundRimPatchesCoverTheSharedProfile()
     };
     tile.groundRimWidth = 0.12f;
     tile.groundRimDepth = 0.10f;
-    // Exhaustive masks include straight edges, convex mitres, concave
-    // corners and opposing edges. Triangles must reproduce the profile
-    // between knots, rather than merely matching its sampled vertices.
-    for (uint8_t sides = 0; sides < 16; ++sides) {
-        for (uint8_t corners = 0; corners < 16; ++corners) {
-            tile.groundRimSides = sides;
-            tile.groundRimConcaveCorners = corners;
-            const auto surface = buildGroundRimSurface(tile);
-            if (sides == 0 && corners == 0) {
-                CHECK(surface.count == 0);
-                continue;
-            }
-            CHECK(surface.count <= GroundRimSurface::capacity);
-            const GroundRimProfile profile {
-                .exposedSides = sides, .concaveCorners = corners,
-                .width = tile.groundRimWidth, .depth = tile.groundRimDepth,
-            };
-            float area = 0;
-            for (std::size_t i = 0; i < surface.count; ++i) {
-                const auto& patch = surface.patches[i];
-                CHECK(patch.normal.z > 0);
-                constexpr std::array<std::array<std::size_t, 3>, 2> triangles {{
-                    { 0, 1, 2 }, { 0, 2, 3 },
-                }};
-                for (const auto& triangle : triangles) {
-                    const Vec3 a = patch.vertices[triangle[0]];
-                    const Vec3 b = patch.vertices[triangle[1]];
-                    const Vec3 c = patch.vertices[triangle[2]];
-                    const float triangleArea = cross(b - a, c - a).z * 0.5f;
-                    area += triangleArea;
-                    if (triangleArea == 0) continue;
-                    const Vec3 centre = (a + b + c) / 3.0f;
-                    const float expected = tile.baseElevation + tile.height -
-                        sampleGroundRim({ centre.x - tile.position.x,
-                            centre.y - tile.position.y }, profile).drop;
-                    CHECK(std::abs(centre.z - expected) < 0.00001f);
+    // Exhaustive masks at positive and negative world origins include
+    // straight edges, convex and concave corners, and opposing edges. Each
+    // cap triangle must reproduce the actual field throughout its interior.
+    for (Vec2 origin : { Vec2 { 0, 0 }, Vec2 { 17, 23 },
+             Vec2 { -19, -7 }, Vec2 { 8, -11 } }) {
+        tile.position = origin;
+        CHECK(groundRimProfileForSurface(tile).origin == origin);
+        for (uint8_t sides = 0; sides < 16; ++sides) {
+            for (uint8_t corners = 0; corners < 16; ++corners) {
+                tile.groundRimSides = sides;
+                tile.groundRimConcaveCorners = corners;
+                const auto surface = buildGroundRimSurface(tile);
+                if (sides == 0 && corners == 0) {
+                    CHECK(surface.count == 0);
+                    continue;
                 }
+                CHECK(surface.count <= GroundRimSurface::capacity);
+                const GroundRimProfile profile {
+                    .exposedSides = sides, .concaveCorners = corners,
+                    .width = tile.groundRimWidth, .depth = tile.groundRimDepth,
+                    .origin = tile.position,
+                };
+                float area = 0;
+                for (std::size_t i = 0; i < surface.count; ++i) {
+                    const auto& patch = surface.patches[i];
+                    CHECK(patch.normal.z > 0);
+                    constexpr std::array<std::array<std::size_t, 3>, 2> triangles {{
+                        { 0, 1, 2 }, { 0, 2, 3 },
+                    }};
+                    for (const auto& triangle : triangles) {
+                        const Vec3 a = patch.vertices[triangle[0]];
+                        const Vec3 b = patch.vertices[triangle[1]];
+                        const Vec3 c = patch.vertices[triangle[2]];
+                        const float triangleArea = cross(b - a, c - a).z * 0.5f;
+                        area += triangleArea;
+                        if (triangleArea == 0) continue;
+                        CHECK(triangleArea > 0);
+                        for (Vec3 point : { (a + b + c) / 3.0f,
+                                 a * 0.2f + b * 0.3f + c * 0.5f }) {
+                            const auto sample = sampleGroundRim(
+                                { point.x - tile.position.x, point.y - tile.position.y }, profile);
+                            const float expected = tile.baseElevation + tile.height - sample.drop;
+                            CHECK(std::abs(point.z - expected) < 0.00001f);
+                            CHECK(std::abs(patch.normal.x / patch.normal.z - sample.gradient.x) < 0.0001f);
+                            CHECK(std::abs(patch.normal.y / patch.normal.z - sample.gradient.y) < 0.0001f);
+                        }
+                    }
+                }
+                CHECK(std::abs(area - 1.0f) < 0.00001f);
             }
-            CHECK(std::abs(area - 1.0f) < 0.00001f);
         }
     }
     tile.groundRimSides = groundAllSides;
@@ -2284,21 +2295,29 @@ void testGroundRimConcaveCornerJoinsAdjacentEdge()
 {
     TEST("groundRimConcaveCornerJoinsAdjacentEdge");
     using namespace sokoban;
-    const GroundRimProfile concave {
-        .exposedSides = 0, .concaveCorners = 2,
-    };
-    const GroundRimProfile northEdge {
-        .exposedSides = groundNorthSide,
-    };
-    for (int i = 0; i <= 100; ++i) {
-        const float y = static_cast<float>(i) / 100.0f;
-        const auto left = sampleGroundRim({ 1, y }, concave);
-        const auto right = sampleGroundRim({ 0, y }, northEdge);
-        CHECK(near(left.drop, right.drop));
-        CHECK(near(left.gradient.y, right.gradient.y));
-        // The body's upper edge and the cap use the identical drop.
-        const Vec3 body = deformGroundRockPosition({ 1, y, 1 }, concave);
-        CHECK(near(body.z, 1.0f - left.drop));
+    for (Vec2 origin : { Vec2 { 0, 0 }, Vec2 { 17, 23 },
+             Vec2 { -19, -7 }, Vec2 { 8, -11 } }) {
+        const GroundRimProfile concave {
+            .exposedSides = 0, .concaveCorners = groundNorthEastCorner, .origin = origin,
+        };
+        const GroundRimProfile northEdge {
+            .exposedSides = groundNorthSide, .origin = origin + Vec2 { 1, 0 },
+        };
+        for (int i = 0; i <= 100; ++i) {
+            const float y = static_cast<float>(i) / 100.0f;
+            const auto left = sampleGroundRim({ 1, y }, concave);
+            const auto right = sampleGroundRim({ 0, y }, northEdge);
+            CHECK(near(left.drop, right.drop));
+            // Corner vertices belong to multiple facets with distinct
+            // derivatives. Heights agree there; the shared edge's tangent
+            // derivative agrees throughout its interior.
+            if (i > 0 && i < 100) {
+                CHECK(near(left.gradient.y, right.gradient.y));
+            }
+            // The body's upper edge and the cap use the identical drop.
+            const Vec3 body = deformGroundRockPosition({ 1, y, 1 }, concave);
+            CHECK(near(body.z, 1.0f - left.drop));
+        }
     }
 }
 

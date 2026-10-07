@@ -904,9 +904,14 @@ the variants; disabling processing restores the complete draw indices.
 **Smooth Ground Rim (prototype)** is off by default in the same Tile Geometry
 section. Enable it with processing, then adjust **Rim Width** and **Rim Depth**
 in tile units, or launch with `--ground-rim`. The defaults are 0.12 tiles wide
-and 0.10 tiles deep. This is a planar chamfer: it lowers exposed top edges and
-their convex/concave corners, while deforming the upper rock body to meet the
-painted cap. It preserves paint coordinates and gameplay's square solid cells.
+and 0.10 tiles deep. These are nominal dimensions: broad, uneven facets vary
+the inward width and corner height to match the rock walls' chipped character.
+The pattern is anchored to world grid corners, so adjacent model variants join
+and the shape stays stable while painting or moving the camera. Exposed outer
+borders remain straight between their corner heights, sealing the existing
+wall segments; the inner edge has irregular widths and facet breaks. The upper
+rock body deforms to meet the painted cap. Paint coordinates and gameplay's
+square solid cells remain intact.
 The treatment waits until every participating ground mesh in that view is
 resident and validated, keeping neighboring cap and body heights consistent.
 Custom meshes and preview tiles remain untreated; continuous curved rims,

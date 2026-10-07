@@ -140,7 +140,7 @@ if (ImGui::CollapsingHeader("Tile Geometry")) {
     ImGui::BeginDisabled(!settings.geometry.processGroundGeometry);
     ImGui::Checkbox("Smooth Ground Rim (prototype)", &settings.geometry.smoothGroundRim);
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Bevel exposed ground edges and corners using the cached boundary. "
+        ImGui::SetTooltip("Shape exposed ground edges into uneven rock facets. Width and depth are nominal. "
             "Waits for validated ground meshes and falls back to flat tops if the draw budget is full.");
     }
     if (settings.geometry.smoothGroundRim) {
