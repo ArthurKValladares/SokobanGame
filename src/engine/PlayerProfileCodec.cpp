@@ -286,7 +286,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
 {
     rejectUnknownProperties(
         value,
-        { "players", "movables", "enemies", "turnedMirrors", "elevators", "minecarts", "activeButtons" },
+        { "players", "movables", "enemies", "turnedMirrors", "elevators", "minecarts", "wardrobes", "activeButtons" },
         context);
     GameState state;
     const Json& players = requiredProperty(value, "players", context);
@@ -465,6 +465,32 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
             });
         }
     }
+
+    if (value.contains("wardrobes")) {
+        const Json& wardrobes = value["wardrobes"];
+        if (!wardrobes.is_array()) {
+            fail(context, "property 'wardrobes' must be an array");
+        }
+        for (std::size_t i = 0; i < wardrobes.size(); ++i) {
+            const std::string wardrobeContext = std::string(context) +
+                ".wardrobes[" + std::to_string(i) + "]";
+            const Json& item = wardrobes[i];
+            rejectUnknownProperties(
+                item, { "cell", "character" }, wardrobeContext);
+            const std::optional<CharacterType> character =
+                characterTypeFromName(stringProperty(
+                    item, "character", wardrobeContext));
+            if (!character) {
+                fail(wardrobeContext, "unknown wardrobe character");
+            }
+            state.wardrobes.push_back({
+                .cell = positionFromJson(
+                    requiredProperty(item, "cell", wardrobeContext),
+                    wardrobeContext + ".cell"),
+                .character = *character,
+            });
+        }
+    }
     if (value.contains("activeButtons")) {
         const Json& buttons = value["activeButtons"];
         if (!buttons.is_array()) {
@@ -568,6 +594,16 @@ OrderedJson gameStateToJson(const GameState& state)
             });
         }
         result["minecarts"] = std::move(minecarts);
+    }
+    if (!state.wardrobes.empty()) {
+        OrderedJson wardrobes = OrderedJson::array();
+        for (const GameState::Wardrobe& wardrobe : state.wardrobes) {
+            wardrobes.push_back({
+                { "cell", positionToJson(wardrobe.cell) },
+                { "character", characterTypeName(wardrobe.character) },
+            });
+        }
+        result["wardrobes"] = std::move(wardrobes);
     }
     if (!state.activeButtons.empty()) {
         OrderedJson buttons = OrderedJson::array();

@@ -52,6 +52,30 @@
         0,
         1
       ]
+    },
+    {
+      "id": 7,
+      "file": "screen7.scr",
+      "slot": [
+        1,
+        -2
+      ]
+    },
+    {
+      "id": 8,
+      "file": "screen8.scr",
+      "slot": [
+        2,
+        -1
+      ]
+    },
+    {
+      "id": 9,
+      "file": "screen9.scr",
+      "slot": [
+        2,
+        -2
+      ]
     }
   ]
 }

@@ -239,6 +239,45 @@ void testEachAuthoredHeroKeepsItsOwnCharacterAbility()
     CHECK(knightMove.movables[3].cell == cell(3, 1, 1));
 }
 
+void testWardrobeSwapsCharactersAndRemembersThePreviousOne()
+{
+    TEST("wardrobeSwapsCharactersAndRemembersThePreviousOne");
+    const Level level = makeLevel({
+        { "..." },
+        { "C9 " },
+    }, CharacterType::Lorekeeper);
+    const GameState initial = rules::initialState(level);
+    CHECK(initial.players.size() == 1);
+    CHECK(initial.players[0].character == CharacterType::Lorekeeper);
+    CHECK(initial.wardrobes == (std::vector<GameState::Wardrobe> {
+        { .cell = cell(1, 0, 1), .character = CharacterType::Rogue },
+    }));
+
+    const GameState changed = rules::step(level, initial, MoveDirection::Right);
+    CHECK(changed.players[0].cell == cell(1, 0, 1));
+    CHECK(changed.players[0].character == CharacterType::Rogue);
+    CHECK(changed.wardrobes[0].character == CharacterType::Lorekeeper);
+
+    const GameState steppedAway =
+        rules::step(level, changed, MoveDirection::Left);
+    const GameState restored =
+        rules::step(level, steppedAway, MoveDirection::Right);
+    CHECK(restored.players[0].character == CharacterType::Lorekeeper);
+    CHECK(restored.wardrobes[0].character == CharacterType::Rogue);
+}
+
+void testLorekeeperUsesRogueMovementRules()
+{
+    TEST("lorekeeperUsesRogueMovementRules");
+    const Level level = makeLevel({
+        { "...." },
+        { "CRR " },
+    }, CharacterType::Lorekeeper);
+    const GameState state = rules::initialState(level);
+    CHECK(state.players[0].character == CharacterType::Lorekeeper);
+    CHECK(rules::step(level, state, MoveDirection::Right) == state);
+}
+
 void testStepMovesPlayer()
 {
     TEST("stepMovesPlayer");
@@ -3686,6 +3725,8 @@ int main()
     testPortals();
     testInitialState();
     testEachAuthoredHeroKeepsItsOwnCharacterAbility();
+    testWardrobeSwapsCharactersAndRemembersThePreviousOne();
+    testLorekeeperUsesRogueMovementRules();
     testStepMovesPlayer();
     testDecorativeTileDoesNotBlockMovement();
     testStepIsPure();

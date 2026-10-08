@@ -31,12 +31,16 @@ struct Group {
     }
 };
 
-inline constexpr std::array<Group, 10> groups {{
+inline constexpr std::array<Group, 12> groups {{
     { "Ground", { TileType::Ground, TileType::GroundRock02,
                   TileType::GroundRock03, TileType::GroundRock04,
                   TileType::GroundRock05, TileType::GroundRock06,
                   TileType::GroundRock07, TileType::GroundRock08,
                   TileType::GroundRock09, TileType::GroundRock10 }, 10 },
+    { "Wall", { TileType::Wall, TileType::WallStone02,
+                TileType::WallStone03, TileType::WallStone04,
+                TileType::WallStone05, TileType::WallStone06,
+                TileType::WallStone07, TileType::WallStone08 }, wallStoneVariantCount },
     { "Conveyor", { TileType::ConveyorUp, TileType::ConveyorRight,
                     TileType::ConveyorDown, TileType::ConveyorLeft }, 4 },
     { "Mirror", { TileType::MirrorNorthWest, TileType::MirrorNorthEast,
@@ -57,6 +61,12 @@ inline constexpr std::array<Group, 10> groups {{
                        TileType::RailCornerNorthWest }, 4 },
     { "Rail Stop", { TileType::RailStopNorthSouth,
                      TileType::RailStopEastWest }, 2 },
+    { "Wardrobe", { TileType::WardrobeLorekeeper,
+                     TileType::WardrobeRogue,
+                     TileType::WardrobeKnight,
+                     TileType::WardrobeDruid,
+                     TileType::WardrobeWitch,
+                     TileType::WardrobeBard }, 6 },
 }};
 
 [[nodiscard]] constexpr const Group* groupFor(TileType tile)

@@ -194,6 +194,7 @@ void testCompositionAndGameplayCrossASeam()
     CHECK(map.level().width() == 6);
     CHECK(map.level().height() == 2);
     CHECK(map.level().depth() == 2);
+    CHECK(map.level().character() == CharacterType::Lorekeeper);
     CHECK(map.level().playerStart() == GridPosition3({ 1, 1, 1 }));
     CHECK(map.screenAt({ 2, 1, 1 }) ==
         std::optional<OverworldScreenId> { 1 });
@@ -215,6 +216,7 @@ void testCompositionAndGameplayCrossASeam()
 
     GameplaySession session;
     session.reset(map.level());
+    CHECK(session.state().players[0].character == CharacterType::Lorekeeper);
     session.setStepDurationSeconds(0.01f);
     move(session, map.level(), MoveDirection::Right);
     CHECK(session.state().players[0].cell == GridPosition3({ 2, 1, 1 }));
@@ -530,7 +532,7 @@ void testLayoutValidationAndIndependentScreens()
         project.writeLayout(eastWestLayout());
         checkThrowsContaining(
             [&] { (void)OverworldMap::load(project.root); },
-            "must use character rogue");
+            "must use character lorekeeper");
     }
 }
 

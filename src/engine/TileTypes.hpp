@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/Character.hpp"
 #include "engine/Math.hpp"
 
 #include <array>
@@ -23,7 +24,7 @@ enum class TileType : uint8_t {
     RotatorCounterClockwise,
     // Legacy generic player start. New puzzle documents author a concrete
     // Rogue, Knight, Druid, Witch, or Bard tile; overworld documents retain
-    // this tile for backwards compatibility with their single rogue.
+    // this tile for backwards compatibility with their single Lorekeeper.
     Player,
     Rogue,
     Knight,
@@ -91,10 +92,39 @@ enum class TileType : uint8_t {
     LecternNorth,
     LecternEast,
     LecternWest,
+    WardrobeLorekeeper,
+    WardrobeRogue,
+    WardrobeKnight,
+    WardrobeDruid,
+    WardrobeWitch,
+    WardrobeBard,
+    // Stone wall brushes share a solid cell but retain their authored model.
+    // The original Wall and '#' remain the first variant for existing levels.
+    WallStone02,
+    WallStone03,
+    WallStone04,
+    WallStone05,
+    WallStone06,
+    WallStone07,
+    WallStone08,
     Count,
 };
 
 inline constexpr std::size_t groundRockVariantCount = 10;
+inline constexpr std::size_t wallStoneVariantCount = 8;
+
+[[nodiscard]] constexpr bool tileTypeIsWall(TileType tile)
+{
+    return tile == TileType::Wall ||
+        (tile >= TileType::WallStone02 && tile <= TileType::WallStone08);
+}
+
+[[nodiscard]] constexpr uint32_t wallStoneVariantFor(TileType tile)
+{
+    return tile >= TileType::WallStone02 && tile <= TileType::WallStone08
+        ? static_cast<uint32_t>(tile) - static_cast<uint32_t>(TileType::WallStone02) + 1U
+        : 0U;
+}
 
 [[nodiscard]] constexpr bool tileTypeIsGround(TileType tile)
 {
@@ -149,7 +179,7 @@ inline constexpr auto tileTypeCount = static_cast<std::size_t>(TileType::Count);
 inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitionTable {
     TileTypeDefinition { TileType::Air, ' ', "Air", { 0.0f, 0.0f, 0.0f, 0.0f } },
     TileTypeDefinition { TileType::Ground, '.', "Ground", { 0.82f, 0.82f, 0.84f, 1.0f } },
-    TileTypeDefinition { TileType::Wall, '#', "Wall", { 0.62f, 0.32f, 0.09f, 1.0f } },
+    TileTypeDefinition { TileType::Wall, '#', "Wall", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::End, 'E', "End", { 1.0f, 0.46f, 0.045f, 1.0f }, { 0.22f, 0.065f, 0.012f, 1.0f }, TileProperty::Plate },
     TileTypeDefinition { TileType::PressurePlate, 'P', "Pressure", { 0.92f, 0.12f, 0.10f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::Gate, 'G', "Gate", { 1.0f, 0.72f, 0.12f, 0.82f }, { 1.0f, 0.72f, 0.12f, 0.0f } },
@@ -209,6 +239,19 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::LecternNorth, 't', "Lectern North", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::LecternEast, 'j', "Lectern East", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::LecternWest, 'l', "Lectern West", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WardrobeLorekeeper, '0', "Wardrobe Lorekeeper", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WardrobeRogue, '9', "Wardrobe Rogue", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WardrobeKnight, '+', "Wardrobe Knight", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WardrobeDruid, '*', "Wardrobe Druid", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WardrobeWitch, '/', "Wardrobe Witch", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WardrobeBard, '?', "Wardrobe Bard", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WallStone02, 'd', "Wall Stone 02", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WallStone03, 'f', "Wall Stone 03", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WallStone04, 'h', "Wall Stone 04", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WallStone05, 'i', "Wall Stone 05", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WallStone06, 'k', "Wall Stone 06", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WallStone07, 'm', "Wall Stone 07", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WallStone08, 'r', "Wall Stone 08", { 1.0f, 1.0f, 1.0f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -242,6 +285,37 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeIsConveyor(TileType type);
 [[nodiscard]] bool tileTypeIsMirror(TileType type);
 [[nodiscard]] bool tileTypeIsTurret(TileType type);
+[[nodiscard]] constexpr bool tileTypeIsWardrobe(TileType type)
+{
+    return type >= TileType::WardrobeLorekeeper &&
+        type <= TileType::WardrobeBard;
+}
+[[nodiscard]] constexpr std::optional<CharacterType> wardrobeCharacterForTile(
+    TileType type)
+{
+    switch (type) {
+    case TileType::WardrobeLorekeeper: return CharacterType::Lorekeeper;
+    case TileType::WardrobeRogue: return CharacterType::Rogue;
+    case TileType::WardrobeKnight: return CharacterType::Knight;
+    case TileType::WardrobeDruid: return CharacterType::Druid;
+    case TileType::WardrobeWitch: return CharacterType::Witch;
+    case TileType::WardrobeBard: return CharacterType::Bard;
+    default: return std::nullopt;
+    }
+}
+[[nodiscard]] constexpr TileType wardrobeTileForCharacter(
+    CharacterType character)
+{
+    switch (character) {
+    case CharacterType::Lorekeeper: return TileType::WardrobeLorekeeper;
+    case CharacterType::Rogue: return TileType::WardrobeRogue;
+    case CharacterType::Knight: return TileType::WardrobeKnight;
+    case CharacterType::Druid: return TileType::WardrobeDruid;
+    case CharacterType::Witch: return TileType::WardrobeWitch;
+    case CharacterType::Bard: return TileType::WardrobeBard;
+    }
+    return TileType::WardrobeLorekeeper;
+}
 [[nodiscard]] constexpr bool tileTypeIsLectern(TileType type)
 {
     return type == TileType::LecternSouth || type == TileType::LecternNorth ||

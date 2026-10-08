@@ -116,7 +116,8 @@ bool drawPaintButton(
         if (group != nullptr) {
             ImGui::SetTooltip("%.*s: choose %s\n%.*s",
                 static_cast<int>(group->name.size()), group->name.data(),
-                tileTypeIsGround(definition.type) ? "rock version" : "direction",
+                tileTypeIsGround(definition.type) ? "rock version"
+                    : tileTypeIsWall(definition.type) ? "stone version" : "direction",
                 static_cast<int>(definition.name.size()), definition.name.data());
         } else {
             ImGui::SetTooltip("%.*s", static_cast<int>(definition.name.size()), definition.name.data());
@@ -872,7 +873,13 @@ void LevelEditorDebugUi::drawTilePalette(
             if (group != nullptr && ImGui::BeginPopup("Direction")) {
                 ImGui::Text("%.*s %s",
                     static_cast<int>(group->name.size()), group->name.data(),
-                    tileTypeIsGround(definition.type) ? "rock version" : "direction");
+                    tileTypeIsGround(definition.type)
+                        ? "rock version"
+                        : tileTypeIsWall(definition.type)
+                            ? "stone version"
+                        : tileTypeIsWardrobe(definition.type)
+                            ? "character"
+                            : "direction");
                 ImGui::Separator();
                 if (ImGui::BeginTable("Variants", 2,
                         ImGuiTableFlags_SizingFixedFit)) {
@@ -887,6 +894,8 @@ void LevelEditorDebugUi::drawTilePalette(
                         }
                         if (tileTypeIsGround(variant)) {
                             ImGui::Text("Rock %02u", groundRockVariantFor(variant) + 1U);
+                        } else if (tileTypeIsWall(variant)) {
+                            ImGui::Text("Stone %02u", wallStoneVariantFor(variant) + 1U);
                         } else {
                             const auto direction = variantDefinition.name.substr(
                                 group->name.size() + 1);

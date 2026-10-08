@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <optional>
@@ -492,6 +493,10 @@ void testRealManifestFile()
         AssetManifest::loadFromFile(*root / "manifest.json");
     CHECK_MESSAGE(!manifest.playerModel().isCube(), "real manifest has a player model");
     CHECK_MESSAGE(
+        manifest.characterModel(sokoban::CharacterType::Lorekeeper) ==
+            manifest.modelIdByName("Lorekeeper"),
+        "real manifest resolves the lorekeeper character model");
+    CHECK_MESSAGE(
         manifest.characterModel(sokoban::CharacterType::Knight) ==
             manifest.modelIdByName("Knight"),
         "real manifest resolves the knight character model");
@@ -627,6 +632,43 @@ void testRealManifestFile()
         "real manifest has the turret laser texture");
     CHECK_MESSAGE(manifest.musicForLevel(3) != nullptr, "real manifest level 3 music");
     CHECK_MESSAGE(!manifest.modelForTile(sokoban::TileType::Wall).isCube(), "real manifest wall model");
+    constexpr std::array wallTiles {
+        sokoban::TileType::Wall, sokoban::TileType::WallStone02,
+        sokoban::TileType::WallStone03, sokoban::TileType::WallStone04,
+        sokoban::TileType::WallStone05, sokoban::TileType::WallStone06,
+        sokoban::TileType::WallStone07, sokoban::TileType::WallStone08,
+    };
+    for (std::size_t index = 0; index < wallTiles.size(); ++index) {
+        const auto tile = wallTiles[index];
+        const std::string suffix = "0" + std::to_string(index + 1);
+        const auto model = manifest.modelForTile(tile);
+        CHECK(model == manifest.modelIdByName("WallStone" + suffix));
+        CHECK(manifest.model(model).path == "custom/models/wall_stone_" + suffix + ".glb");
+        CHECK(manifest.model(model).materialMode == sokoban::ModelMaterialMode::Auto);
+        CHECK(manifest.tileScale(tile) == 1.0f);
+        CHECK(sokoban::tileColor(tile) == sokoban::Vec4({ 1, 1, 1, 1 }));
+        const auto mesh = sokoban::loadGltfMesh(*root / manifest.model(model).path);
+        CHECK(!mesh.vertices.empty() && !mesh.indices.empty());
+        CHECK(mesh.indices.size() % 3 == 0);
+        CHECK(!mesh.materials.empty());
+        for (const auto& material : mesh.materials) {
+            CHECK(material.metallicFactor == 0.0f);
+            CHECK(material.roughnessFactor >= 0.85f && material.roughnessFactor <= 1.0f);
+            CHECK(material.alphaMode == sokoban::MaterialAlphaMode::Opaque);
+        }
+        for (const auto& vertex : mesh.vertices) {
+            CHECK(std::isfinite(vertex.position.x) && std::isfinite(vertex.position.y) &&
+                std::isfinite(vertex.position.z));
+            CHECK(vertex.position.x >= -0.00001f && vertex.position.x <= 1.00001f);
+            CHECK(vertex.position.y >= -0.00001f && vertex.position.y <= 1.00001f);
+            CHECK(vertex.position.z >= -0.00001f && vertex.position.z <= 1.00001f);
+            CHECK(std::isfinite(vertex.normal.x) && std::isfinite(vertex.normal.y) &&
+                std::isfinite(vertex.normal.z));
+            CHECK(std::abs(sokoban::dot(vertex.normal, vertex.normal) - 1.0f) < 0.0001f);
+            CHECK(std::isfinite(vertex.tangent.x) && std::isfinite(vertex.tangent.y) &&
+                std::isfinite(vertex.tangent.z) && std::isfinite(vertex.tangent.w));
+        }
+    }
     CHECK_MESSAGE(manifest.modelForTile(sokoban::TileType::Decorative).isCube(),
         "real manifest decorative block defaults to procedural cube");
 
@@ -647,6 +689,37 @@ void testRealManifestFile()
         "turret uses its authored glTF material without a manifest override");
     const sokoban::RuntimeTextureCatalog runtimeTextures =
         sokoban::collectRuntimeTextureCatalog(*root, manifest);
+    for (const auto tile : wallTiles) {
+        const auto model = manifest.modelForTile(tile);
+        const auto& textures =
+            runtimeTextures.model(static_cast<uint32_t>(model.index()));
+        CHECK_MESSAGE(textures.materialMode == sokoban::ModelMaterialMode::PrimitiveMaterials,
+            "stone wall uses its authored quarry-marble material");
+        CHECK_MESSAGE(!textures.primitiveMaterials.empty(), "stone wall has material bindings");
+        for (const auto& binding : textures.primitiveMaterials) {
+            CHECK_MESSAGE(binding.bindBaseColorTexture, "stone wall binds its authored albedo");
+            CHECK_MESSAGE(binding.normalTextureIndex.has_value() &&
+                    binding.metallicRoughnessTextureIndex.has_value() &&
+                    binding.occlusionTextureIndex.has_value(),
+                "stone wall binds normal, roughness/metallic and ambient occlusion maps");
+            if (binding.bindBaseColorTexture) {
+                CHECK(runtimeTextures.textures().at(binding.textureIndex)
+                          .identity.interpretation.colorSpace == sokoban::TextureColorSpace::Srgb);
+            }
+            for (const auto dataMap : std::array { binding.normalTextureIndex,
+                     binding.metallicRoughnessTextureIndex, binding.occlusionTextureIndex }) {
+                if (dataMap) {
+                    const auto& interpretation =
+                        runtimeTextures.textures().at(*dataMap).identity.interpretation;
+                    CHECK(interpretation.colorSpace == sokoban::TextureColorSpace::Linear);
+                    CHECK(interpretation.magFilter == sokoban::TextureMagnificationFilter::Linear);
+                    CHECK(interpretation.minFilter == sokoban::TextureMinificationFilter::LinearMipmapLinear);
+                    CHECK(interpretation.wrapU == sokoban::TextureAddressMode::Repeat);
+                    CHECK(interpretation.wrapV == sokoban::TextureAddressMode::Repeat);
+                }
+            }
+        }
+    }
     CHECK_MESSAGE(
         runtimeTextures.model(static_cast<uint32_t>(wall.index())).materialMode ==
             sokoban::ModelMaterialMode::PrimitiveMaterials,

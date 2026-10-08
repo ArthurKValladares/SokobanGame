@@ -230,6 +230,41 @@ uint64_t authoredAnimationInstance(TileType tile, GridPosition3 cell)
         (x & 0xfffffU);
 }
 
+void appendWardrobeMarker(
+    RenderFrameData& frame,
+    GridPosition3 cell,
+    CharacterType character,
+    const AssetManifest& manifest,
+    RenderAnimation idleAnimation,
+    float animationTimeSeconds,
+    bool editorPreview)
+{
+    constexpr float markerSize = 0.30f;
+    RenderFrameData::Tile marker {
+        .cell = cell,
+        .position = {
+            static_cast<float>(cell.x) + (1.0f - markerSize) * 0.5f,
+            static_cast<float>(cell.y) + (1.0f - markerSize) * 0.5f,
+        },
+        .size = { markerSize, markerSize },
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        // Perch the miniature on the brass crown at the top of the arches.
+        .baseElevation = static_cast<float>(cell.z) + 1.15f,
+        .height = markerSize,
+        .pickable = false,
+        .showGrid = false,
+        .isEditorPreview = editorPreview,
+        .affectsCameraFit = false,
+        .model = manifest.characterModel(character),
+        .animation = idleAnimation,
+        .animationInstanceId = authoredAnimationInstance(
+            wardrobeTileForCharacter(character), cell),
+        .animationLoops = true,
+        .animationTimeSeconds = animationTimeSeconds,
+    };
+    frame.tiles.push_back(marker);
+}
+
 // ------------------------------------------------------------------- Ladders
 
 void appendLadderSegment(

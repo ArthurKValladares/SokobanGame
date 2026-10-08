@@ -9,6 +9,46 @@
       "engine_tint": true
     },
     {
+      "name": "WallStone01",
+      "source": "custom/models/wall_stone_01.glb",
+      "skip": "artist-authored stone"
+    },
+    {
+      "name": "WallStone02",
+      "source": "custom/models/wall_stone_02.glb",
+      "skip": "artist-authored stone"
+    },
+    {
+      "name": "WallStone03",
+      "source": "custom/models/wall_stone_03.glb",
+      "skip": "artist-authored stone"
+    },
+    {
+      "name": "WallStone04",
+      "source": "custom/models/wall_stone_04.glb",
+      "skip": "artist-authored stone"
+    },
+    {
+      "name": "WallStone05",
+      "source": "custom/models/wall_stone_05.glb",
+      "skip": "artist-authored stone"
+    },
+    {
+      "name": "WallStone06",
+      "source": "custom/models/wall_stone_06.glb",
+      "skip": "artist-authored stone"
+    },
+    {
+      "name": "WallStone07",
+      "source": "custom/models/wall_stone_07.glb",
+      "skip": "artist-authored stone"
+    },
+    {
+      "name": "WallStone08",
+      "source": "custom/models/wall_stone_08.glb",
+      "skip": "artist-authored stone"
+    },
+    {
       "name": "Stone",
       "source": "KayKit Block Bits 1.0/Assets/gltf/stone.gltf",
       "skip": null,
@@ -74,6 +114,11 @@
       "source": "KayKit Adventurers 2.0/Characters/gltf/Rogue.glb",
       "skip": null,
       "surface_rule": "hero"
+    },
+    {
+      "name": "Lorekeeper",
+      "source": "KayKit Lorekeeper/characters/Lorekeeper.glb",
+      "skip": "Vendor-authored skinned character with embedded materials."
     },
     {
       "name": "Knight",
@@ -288,6 +333,11 @@
       "source": "custom/models/ladder.glb",
       "skip": null,
       "surface_rule": "named-materials"
+    },
+    {
+      "name": "Wardrobe",
+      "source": "custom/models/wardrobe.glb",
+      "skip": "Native procedural PBR materials; regenerate with make_wardrobe_model.mjs."
     },
     {
       "name": "RotatorGear",

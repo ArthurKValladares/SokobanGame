@@ -352,6 +352,13 @@ GameState initialState(const Level& level)
     for (const Level::Minecart& minecart : level.minecarts()) {
         state.minecarts.push_back({ .cell = minecart.cell, .phase = 0 });
     }
+    state.wardrobes.reserve(level.wardrobes().size());
+    for (const Level::Wardrobe& wardrobe : level.wardrobes()) {
+        state.wardrobes.push_back({
+            .cell = wardrobe.cell,
+            .character = wardrobe.character,
+        });
+    }
 
     return state;
 }
@@ -2705,8 +2712,9 @@ private:
         for (std::size_t playerIndex = 0;
              playerIndex < playerCount_;
              ++playerIndex) {
-            if (after_.players[playerIndex].character.value_or(
-                    level_.character()) != CharacterType::Bard) {
+            if (characterBehavior(
+                    after_.players[playerIndex].character.value_or(
+                        level_.character())) != CharacterType::Bard) {
                 continue;
             }
             const std::optional<PlayerMovementIntent> bardIntent =
@@ -2746,8 +2754,9 @@ private:
         for (std::size_t playerIndex = 0;
              playerIndex < playerCount_;
              ++playerIndex) {
-            if (after_.players[playerIndex].character.value_or(
-                    level_.character()) == CharacterType::Bard &&
+            if (characterBehavior(
+                    after_.players[playerIndex].character.value_or(
+                        level_.character())) == CharacterType::Bard &&
                 status_[entityIndexForPlayer(playerIndex)].movedThisMicro) {
                 return true;
             }
@@ -2760,8 +2769,9 @@ private:
         for (std::size_t playerIndex = 0;
              playerIndex < playerCount_;
              ++playerIndex) {
-            if (after_.players[playerIndex].character.value_or(
-                    level_.character()) == CharacterType::Bard &&
+            if (characterBehavior(
+                    after_.players[playerIndex].character.value_or(
+                        level_.character())) == CharacterType::Bard &&
                 movementIntentForPlayer(playerIndex)) {
                 return true;
             }
@@ -2863,8 +2873,9 @@ private:
                 if (isPlayer(i) && status.inputDriven) {
                     const std::size_t playerIndex =
                         playerIndexForEntity(i);
-                    if (after_.players[playerIndex].character.value_or(
-                            level_.character()) == CharacterType::Witch) {
+                    if (characterBehavior(
+                            after_.players[playerIndex].character.value_or(
+                                level_.character())) == CharacterType::Witch) {
                         status.witchSwapTarget = visibleMovableForWitch(
                             playerIndex, *status.intent);
                     }
@@ -3307,8 +3318,9 @@ private:
         if (playerBlocksAt(after_, target, playerIndex)) {
             return false;
         }
-        if (after_.players[playerIndex].character.value_or(
-                level_.character()) == CharacterType::Druid) {
+        if (characterBehavior(
+                after_.players[playerIndex].character.value_or(
+                    level_.character())) == CharacterType::Druid) {
             const GridPosition3 pullSource = movementDestination(
                 playerCell(after_, playerIndex), oppositeDirection(direction));
             if (const GameState::Enemy* enemy = enemyAt(after_, pullSource)) {
@@ -3320,8 +3332,9 @@ private:
             }
         }
         if (status.inputDriven &&
-            after_.players[playerIndex].character.value_or(
-                level_.character()) == CharacterType::Knight) {
+            characterBehavior(
+                after_.players[playerIndex].character.value_or(
+                    level_.character())) == CharacterType::Knight) {
             const std::vector<ChainEntity> chain = pushChainAt(target, direction);
             if (!chain.empty()) {
                 // A movable with its own unresolved intent gets the same chance
@@ -3349,8 +3362,9 @@ private:
             if (!status_[entityIndexForEnemy(enemyIndex)].resolved) {
                 return false;
             }
-            const bool rogue = after_.players[playerIndex].character.value_or(
-                level_.character()) == CharacterType::Rogue;
+            const bool rogue = characterBehavior(
+                after_.players[playerIndex].character.value_or(
+                    level_.character())) == CharacterType::Rogue;
             if (status.inputDriven && rogue &&
                 !enemyMovedThisMicro_[enemyIndex] &&
                 pushEnemy(enemyIndex, direction)) {
@@ -3386,8 +3400,9 @@ private:
                 canPushEnemy(
                     static_cast<std::size_t>(pushedEnemy - after_.enemies.data()),
                     direction);
-            const bool druid = after_.players[playerIndex].character.value_or(
-                level_.character()) == CharacterType::Druid;
+            const bool druid = characterBehavior(
+                after_.players[playerIndex].character.value_or(
+                    level_.character())) == CharacterType::Druid;
             const bool occupiedPortalExit =
                 level_.portalCrossing(target, directionOffset(direction))
                     .has_value() &&
@@ -4172,7 +4187,25 @@ private:
                  level_, after_, movementDestination(fall.cell, direction)))
             ? std::optional<MoveDirection>(direction)
             : std::nullopt;
+        if (!fell && !playerDead(after_, playerIndex)) {
+            applyWardrobeSwap(playerIndex);
+        }
         ++status_[entityIndex].consumed;
+    }
+
+    void applyWardrobeSwap(std::size_t playerIndex)
+    {
+        const GridPosition3 cell = playerCell(after_, playerIndex);
+        const auto found = std::ranges::find(
+            after_.wardrobes, cell, &GameState::Wardrobe::cell);
+        if (found == after_.wardrobes.end()) {
+            return;
+        }
+        GameState::Player& player = after_.players[playerIndex];
+        const CharacterType previous = player.character.value_or(
+            level_.character());
+        player.character = found->character;
+        found->character = previous;
     }
 
     // Druids drag the movable unit immediately behind them into the cell they
@@ -4187,8 +4220,9 @@ private:
         const std::size_t playerIndex = playerIndexForEntity(entityIndex);
         const GridPosition3 vacated = playerCell(after_, playerIndex);
         std::optional<ChainEntity> pulled;
-        if (after_.players[playerIndex].character.value_or(
-                level_.character()) == CharacterType::Druid) {
+        if (characterBehavior(
+                after_.players[playerIndex].character.value_or(
+                    level_.character())) == CharacterType::Druid) {
             const GridPosition3 pullSource =
                 movementTarget(vacated, oppositeDirection(direction));
             if (const std::optional<ChainEntity> entity =

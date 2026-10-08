@@ -198,6 +198,11 @@ void normalizeLegacySnapshot(
     GameplaySession::Snapshot& snapshot, const Level& level)
 {
     const GameState initial = rules::initialState(level);
+    const auto upgradeWardrobes = [&initial](GameState& state) {
+        if (state.wardrobes.empty() && !initial.wardrobes.empty()) {
+            state.wardrobes = initial.wardrobes;
+        }
+    };
     const std::size_t mirrorCount = std::ranges::count_if(
         initial.movables, [](const GameState::Movable& unit) {
             return tileTypeIsMirror(unit.type);
@@ -254,10 +259,13 @@ void normalizeLegacySnapshot(
         state.turnedMirrors.clear();
     };
     upgradeMirrors(snapshot.state);
+    upgradeWardrobes(snapshot.state);
     normalizeLegacyPlayers(snapshot.state, level);
     for (GameplaySession::Action& action : snapshot.undoStack) {
         upgradeMirrors(action.before);
         upgradeMirrors(action.after);
+        upgradeWardrobes(action.before);
+        upgradeWardrobes(action.after);
         normalizeLegacyPlayers(action.before, level);
         normalizeLegacyPlayers(action.after, level);
     }

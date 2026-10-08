@@ -1257,8 +1257,8 @@ Level::Definition Level::parseDefinition(
             definition.character = characterTypeFromName(name);
             if (!definition.character) {
                 throw std::runtime_error(
-                    "Invalid character metadata; expected '@character rogue' or "
-                    "'@character knight', '@character druid', or "
+                    "Invalid character metadata; expected '@character lorekeeper', "
+                    "'@character rogue', '@character knight', '@character druid', "
                     "'@character witch', or '@character bard': " + source);
             }
             continue;
@@ -1896,6 +1896,14 @@ Level Level::loadFromLayers(
                     }
                 }
 
+                if (const std::optional<CharacterType> wardrobeCharacter =
+                        wardrobeCharacterForTile(*tile)) {
+                    level.wardrobes_.push_back({
+                        .cell = position,
+                        .character = *wardrobeCharacter,
+                    });
+                }
+
                 if (tileTypeIsMovableObject(*tile)) {
                     level.movableTiles_.push_back({
                         .type = *tile,
@@ -2248,6 +2256,12 @@ const Level::ScreenSelector* Level::selectorAt(GridPosition3 cell) const
 {
     const auto found = std::ranges::find(selectors_, cell, &ScreenSelector::cell);
     return found == selectors_.end() ? nullptr : &*found;
+}
+
+const Level::Wardrobe* Level::wardrobeAt(GridPosition3 cell) const
+{
+    const auto found = std::ranges::find(wardrobes_, cell, &Wardrobe::cell);
+    return found == wardrobes_.end() ? nullptr : &*found;
 }
 
 const Level::Gate* Level::gateAt(GridPosition3 cell) const

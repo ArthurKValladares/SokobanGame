@@ -164,8 +164,92 @@ void testCharacterMetadataRoundTripAndLegacyDefault()
     CHECK(Level::parseDefinition(bardSerialized, "bard round trip") ==
         bardDefinition);
 
+    Level::Definition lorekeeperDefinition = definition;
+    lorekeeperDefinition.character = CharacterType::Lorekeeper;
+    const std::vector<std::string> lorekeeperSerialized =
+        Level::serializeDefinition(lorekeeperDefinition);
+    CHECK(lorekeeperSerialized[0] == "@character lorekeeper");
+    CHECK(Level::parseDefinition(
+        lorekeeperSerialized, "lorekeeper round trip") == lorekeeperDefinition);
+
     const Level legacy = Level::loadFromLines({ "C." }, "legacy rogue");
     CHECK(legacy.character() == CharacterType::Rogue);
+}
+
+void testWardrobeVariantsRoundTripAndRemainTraversable()
+{
+    TEST("wardrobeVariantsRoundTripAndRemainTraversable");
+    const Level::Definition definition {
+        .layers = {
+            { "......." },
+            { "C09+*/?" },
+        },
+        .character = CharacterType::Lorekeeper,
+    };
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition(definition);
+    CHECK(Level::parseDefinition(serialized, "wardrobe round trip") ==
+        definition);
+
+    const Level level = Level::loadFromDefinition(definition, "wardrobes");
+    const std::array<CharacterType, 6> characters {
+        CharacterType::Lorekeeper,
+        CharacterType::Rogue,
+        CharacterType::Knight,
+        CharacterType::Druid,
+        CharacterType::Witch,
+        CharacterType::Bard,
+    };
+    CHECK(level.wardrobes().size() == characters.size());
+    for (std::size_t i = 0; i < characters.size(); ++i) {
+        const GridPosition3 position { static_cast<int>(i + 1), 0, 1 };
+        CHECK(level.isWalkable(position));
+        const Level::Wardrobe* wardrobe = level.wardrobeAt(position);
+        CHECK(wardrobe != nullptr);
+        CHECK(wardrobe && wardrobe->character == characters[i]);
+        CHECK(wardrobeTileForCharacter(characters[i]) ==
+            level.tileAt(position.x, position.y, position.z));
+    }
+}
+
+void testStoneWallVariantsRoundTripAndSupportUnits()
+{
+    TEST("stoneWallVariantsRoundTripAndSupportUnits");
+    const Level::Definition definition {
+        .layers = {
+            { "........." },
+            { "C#dfhikmr" },
+            { "         " },
+        },
+    };
+    const auto serialized = Level::serializeDefinition(definition);
+    CHECK(Level::parseDefinition(serialized, "stone wall round trip") == definition);
+    const Level level = Level::loadFromLines(serialized, "stone walls");
+    const std::array walls {
+        TileType::Wall, TileType::WallStone02, TileType::WallStone03,
+        TileType::WallStone04, TileType::WallStone05, TileType::WallStone06,
+        TileType::WallStone07, TileType::WallStone08,
+    };
+    CHECK(walls.size() == wallStoneVariantCount);
+    CHECK(tileTypeToChar(TileType::Wall) == '#');
+    for (std::size_t i = 0; i < walls.size(); ++i) {
+        const int x = static_cast<int>(i + 1);
+        const TileType tile = walls[i];
+        CHECK(level.tileAt(x, 0, 1) == tile);
+        CHECK(charToTileType(tileTypeToChar(tile)) == tile);
+        CHECK(tileTypeFromName(tileTypeName(tile)) == tile);
+        CHECK(tileTypeIsWall(tile));
+        CHECK(wallStoneVariantFor(tile) == i);
+        CHECK(tileTypeIsSolidBlock(tile));
+        CHECK(tileTypeSupportsEntity(tile));
+        CHECK(!tileTypeAllowsEntity(tile));
+        CHECK(!tileTypeIsGround(tile));
+        CHECK(!level.isWalkable({ x, 0, 1 }));
+        CHECK(level.isWalkable({ x, 0, 2 }));
+        CHECK(level.supportingTileAt({ x, 0, 2 }) == tile);
+    }
+    CHECK(!tileTypeIsWall(TileType::Ground));
+    CHECK(!tileTypeIsWall(TileType::Rock));
 }
 
 void testWaterLayerMetadataAndTileResolution()
@@ -852,7 +936,7 @@ void testParserRejectsMalformedStructure()
         (void)Level::parseDefinition(
             { "@character wizard", "@layer 0", "C" },
             "unknown character");
-    }, "expected '@character rogue' or '@character knight'");
+    }, "expected '@character lorekeeper'");
     checkThrowsContaining([] {
         (void)Level::parseDefinition(
             { "@character rogue", "@character knight", "@layer 0", "C" },
@@ -972,7 +1056,7 @@ void testLevelValidationErrors()
     CHECK(multipleHeroes.playerStarts()[3].character == CharacterType::Witch);
     CHECK(multipleHeroes.playerStarts()[4].character == CharacterType::Bard);
     checkThrowsContaining([] {
-        (void)Level::loadFromLayers({ { "C?" } }, "unknown tile");
+        (void)Level::loadFromLayers({ { "C~" } }, "unknown tile");
     }, "Unknown level tile");
     checkThrowsContaining([] {
         (void)Level::loadFromLayers({ { "..." }, { "LC " } }, "unsupported ladder");
@@ -1366,6 +1450,8 @@ int main()
     testSerializationRoundTrip();
     testCameraMetadataRoundTripAndValidation();
     testCharacterMetadataRoundTripAndLegacyDefault();
+    testWardrobeVariantsRoundTripAndRemainTraversable();
+    testStoneWallVariantsRoundTripAndSupportUnits();
     testWaterLayerMetadataAndTileResolution();
     testDecorationMetadataRoundTrip();
     testSelectorMetadataRoundTripAndLookup();

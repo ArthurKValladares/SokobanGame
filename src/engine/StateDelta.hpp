@@ -97,12 +97,21 @@ struct StateDelta {
         bool operator==(const MinecartChange&) const = default;
     };
 
+    struct WardrobeChange {
+        GridPosition3 cell {};
+        CharacterType before = CharacterType::Lorekeeper;
+        CharacterType after = CharacterType::Lorekeeper;
+
+        bool operator==(const WardrobeChange&) const = default;
+    };
+
     std::vector<Change<GameState::Player>> players;
     std::vector<Change<GameState::Movable>> movables;
     std::vector<Change<GameState::Enemy>> enemies;
     std::vector<MirrorChange> mirrors;
     std::vector<ElevatorChange> elevators;
     std::vector<MinecartChange> minecarts;
+    std::vector<WardrobeChange> wardrobes;
     struct ButtonChange {
         std::vector<GridPosition3> before;
         std::vector<GridPosition3> after;

@@ -764,7 +764,7 @@ void LevelEditor::setCameraAngles(std::optional<CameraAngles> angles)
 void LevelEditor::setCharacter(CharacterType character)
 {
     if (editingOverworld()) {
-        document_.status = "Overworld hero placement is fixed to the rogue.";
+        document_.status = "Overworld hero placement is fixed to the Lorekeeper.";
         return;
     }
     const DocumentSnapshot before = captureDocumentSnapshot();
@@ -2218,6 +2218,9 @@ std::optional<CameraAngles> LevelEditor::cameraAngles() const
 
 CharacterType LevelEditor::character() const
 {
+    if (editingOverworld()) {
+        return CharacterType::Lorekeeper;
+    }
     for (const std::vector<std::string>& layer : document_.layers) {
         for (const std::string& row : layer) {
             for (char encoded : row) {

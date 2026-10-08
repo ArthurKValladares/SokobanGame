@@ -1191,6 +1191,11 @@ bool ApplicationTools::bakeTileThumbnails(
             requirements.requireModel(manifest.characterModel(character));
         } else {
             requirements.requireModel(manifest.modelForTile(definition.type));
+            if (const std::optional<CharacterType> wardrobeCharacter =
+                    wardrobeCharacterForTile(definition.type)) {
+                requirements.requireModel(
+                    manifest.characterModel(*wardrobeCharacter));
+            }
         }
     }
     requirements.requireTexture(

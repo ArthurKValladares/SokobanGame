@@ -169,6 +169,19 @@ RenderFrameData buildBakeFrame(
             0.0f,
             manifest.findTextureIdByName(config::turretGlowTextureName));
     } else {
+        if (const std::optional<CharacterType> character =
+                wardrobeCharacterForTile(tile)) {
+            renderFrameParts::appendWardrobeMarker(
+                frame,
+                subject.cell,
+                *character,
+                manifest,
+                animations != nullptr
+                    ? animations->animation(AnimationUse::ThumbnailPlayerIdle)
+                    : manifest.playerIdleAnimation(),
+                0.0f);
+            frame.tiles.back().baseElevation = 1.15f;
+        }
         frame.tiles.push_back(subject);
     }
 

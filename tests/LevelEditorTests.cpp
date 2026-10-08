@@ -1627,7 +1627,7 @@ void testInvalidLoadLeavesDocumentUntouched()
     const std::filesystem::path invalidPath = project.root / "invalid.scr";
     {
         std::ofstream file(invalidPath);
-        file << "@layer 0\n....\n\n@layer 1\n????\n";
+        file << "@layer 0\n....\n\n@layer 1\n~~~~\n";
     }
 
     CHECK(!editor.loadDocument(invalidPath));
@@ -2721,7 +2721,7 @@ void testGroupedPalettePreservesDirectionalBrushes()
             // Picker captions strip only the family name, retaining the
             // distinct direction, including rail axes and rotator turns.
             CHECK(tileTypeName(variant).starts_with(group.name));
-            CHECK(variant == TileType::Ground ||
+            CHECK(variant == TileType::Ground || variant == TileType::Wall ||
                 tileTypeName(variant).size() > group.name.size() + 1);
             editor.setSelectedTile(variant);
             CHECK(editor.selectedTile() == variant);
@@ -2733,17 +2733,20 @@ void testGroupedPalettePreservesDirectionalBrushes()
     }
     for (const auto& definition : tileTypeDefinitions()) {
         const bool directional = tileTypeIsGround(definition.type) ||
+            tileTypeIsWall(definition.type) ||
             tileTypeIsConveyor(definition.type) ||
             tileTypeIsMirror(definition.type) || tileTypeIsTurret(definition.type) ||
             tileTypeIsPortal(definition.type) || tileTypeIsRail(definition.type) ||
-            tileTypeIsRotator(definition.type) || tileTypeIsLectern(definition.type);
+            tileTypeIsRotator(definition.type) || tileTypeIsLectern(definition.type) ||
+            tileTypeIsWardrobe(definition.type);
         CHECK(membership[static_cast<std::size_t>(definition.type)] ==
             (directional ? 1 : 0));
     }
     CHECK(editorTilePalette::groupFor(TileType::Gate) == nullptr);
     CHECK(editorTilePalette::groupFor(TileType::Air) == nullptr);
+    const TileType secondRecent = editor.recentTiles()[1];
     CHECK(editor.selectRecentTile(1));
-    CHECK(editor.selectedTile() == TileType::RailStopNorthSouth);
+    CHECK(editor.selectedTile() == secondRecent);
 }
 
 void testRockGroundVariantsPreserveBrushesAndPaint()
@@ -2788,6 +2791,42 @@ void testRockGroundVariantsPreserveBrushesAndPaint()
     // Ladder validation must treat the new brushes exactly like old ground.
     const auto ladder = Level::loadFromLayers({ { "cL" }, { "Q " } }, "rock-side ladder");
     CHECK(ladder.tileAt(0, 0, 0) == TileType::GroundRock10);
+}
+
+void testStoneWallVariantsPreserveBrushesAndSave()
+{
+    TEST("stoneWallVariantsPreserveBrushesAndSave");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(10, 3);
+    const auto* group = editorTilePalette::groupFor(TileType::Wall);
+    CHECK(group != nullptr);
+    if (!group) return;
+    CHECK(group->count == wallStoneVariantCount);
+    int x = 1;
+    for (TileType tile : group->variants()) {
+        editor.setSelectedTile(tile);
+        CHECK(editor.selectedTile() == tile);
+        CHECK(editor.paintCell({ x, 1, 1 }));
+        CHECK(editor.pickTile({ x, 1, 1 }) == tile);
+        CHECK(editor.recentTiles().front() == tile);
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.documentLayers()[1][1][static_cast<std::size_t>(x)] == ' ');
+        CHECK(editor.tryRedoEdit());
+        CHECK(editor.documentLayers()[1][1][static_cast<std::size_t>(x)] == tileTypeToChar(tile));
+        ++x;
+    }
+    const auto source = project.source / "level0/screen0.scr";
+    CHECK(editor.saveDocument(source).sourceSaved());
+    const auto level = Level::loadFromFile(source);
+    auto loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(source, false));
+    x = 1;
+    for (TileType tile : group->variants()) {
+        CHECK(level.tileAt(x, 1, 1) == tile);
+        CHECK(loaded.pickTile({ x, 1, 1 }) == tile);
+        ++x;
+    }
 }
 
 void testRandomizeRocksPreservesAssignmentsAndGroupsUndo()
@@ -2902,6 +2941,7 @@ int main()
     testRandomizeRocksPreservesAssignmentsAndGroupsUndo();
     testRandomizeRocksEndsStrokeAndHandlesNoGround();
     testRockGroundVariantsPreserveBrushesAndPaint();
+    testStoneWallVariantsPreserveBrushesAndSave();
     testGroupedPalettePreservesDirectionalBrushes();
     TEST("lecternTextFollowsEditorTransactions");
     {

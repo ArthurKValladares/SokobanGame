@@ -9,6 +9,7 @@ namespace sokoban {
 // The character selected by a level. Gameplay abilities and the rendered
 // model both key off this value, while animations remain shared for now.
 enum class CharacterType : uint8_t {
+    Lorekeeper,
     Rogue,
     Knight,
     Druid,
@@ -20,6 +21,8 @@ enum class CharacterType : uint8_t {
     CharacterType character)
 {
     switch (character) {
+    case CharacterType::Lorekeeper:
+        return "lorekeeper";
     case CharacterType::Rogue:
         return "rogue";
     case CharacterType::Knight:
@@ -37,6 +40,9 @@ enum class CharacterType : uint8_t {
 [[nodiscard]] constexpr std::optional<CharacterType> characterTypeFromName(
     std::string_view name)
 {
+    if (name == "lorekeeper") {
+        return CharacterType::Lorekeeper;
+    }
     if (name == "rogue") {
         return CharacterType::Rogue;
     }
@@ -53,6 +59,18 @@ enum class CharacterType : uint8_t {
         return CharacterType::Bard;
     }
     return std::nullopt;
+}
+
+// Lorekeeper is the overworld avatar. It intentionally inherits the Rogue's
+// established rule set; the distinct value exists so rendering, saves and
+// wardrobes can retain the selected appearance without inventing a new
+// gameplay ability.
+[[nodiscard]] constexpr CharacterType characterBehavior(
+    CharacterType character)
+{
+    return character == CharacterType::Lorekeeper
+        ? CharacterType::Rogue
+        : character;
 }
 
 } // namespace sokoban

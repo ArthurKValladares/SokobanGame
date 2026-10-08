@@ -825,7 +825,7 @@ void AssetManifestDebugUi::drawMusic(AssetManifestEditor& editor)
             }
             if (track.character) {
                 int character = static_cast<int>(*track.character);
-                if (ImGui::Combo("Character", &character, "Rogue\0Knight\0Druid\0Witch\0Bard\0")) {
+                if (ImGui::Combo("Character", &character, "Lorekeeper\0Rogue\0Knight\0Druid\0Witch\0Bard\0")) {
                     track.character = static_cast<CharacterType>(character);
                     changed = true;
                 }

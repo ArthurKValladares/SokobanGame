@@ -85,6 +85,18 @@ float animationTimeFor(
 
 uint64_t authoredAnimationInstance(TileType tile, GridPosition3 cell);
 
+// The wardrobe's static crossed arches and its offered character are separate
+// draws. Reusing the playable skinned model keeps the miniature recognizable
+// and lets a runtime swap update the sign without duplicating six GLBs.
+void appendWardrobeMarker(
+    RenderFrameData& frame,
+    GridPosition3 cell,
+    CharacterType character,
+    const AssetManifest& manifest,
+    RenderAnimation idleAnimation,
+    float animationTimeSeconds,
+    bool editorPreview = false);
+
 // ------------------------------------------------------------------- Ladders
 //
 // One unit-height model section sits just outside each adjacent ground face.

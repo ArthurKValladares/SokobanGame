@@ -397,6 +397,11 @@ void testActiveScreenCheckpointRoundTrip()
         .cell = { 2, 0, 1 },
     });
     before.enemies.push_back({ .id = 3, .cell = { 4, 0, 1 } });
+    before.players[0].character = sokoban::CharacterType::Lorekeeper;
+    before.wardrobes.push_back({
+        .cell = { 2, 0, 1 },
+        .character = sokoban::CharacterType::Rogue,
+    });
     sokoban::GameState after = before;
     after.players[0].cell = { 2, 0, 1 };
     after.players[0].sliding = sokoban::MoveDirection::Right;
@@ -409,6 +414,8 @@ void testActiveScreenCheckpointRoundTrip()
     after.movables.front().dead = true;
     after.movables.front().sliding = sokoban::MoveDirection::Right;
     after.enemies.front().cell = { 5, 0, 1 };
+    after.players[0].character = sokoban::CharacterType::Rogue;
+    after.wardrobes[0].character = sokoban::CharacterType::Lorekeeper;
     // Rotator plates leave quarter turns on any unit.
     after.players[0].quarterTurns = 3;
     after.movables.front().quarterTurns = 1;
@@ -565,6 +572,9 @@ void testActiveScreenCheckpointRoundTrip()
             checkpointState["minecarts"][0]["phase"].get<int>() == 257 &&
             checkpointState["minecarts"][0]["cell"]["x"].get<int>() == 5,
         "checkpoint state persists minecart platforms");
+    CHECK_MESSAGE(checkpointState["wardrobes"].size() == 1 &&
+            checkpointState["wardrobes"][0]["character"] == "lorekeeper",
+        "checkpoint state persists wardrobe characters");
     CHECK_MESSAGE(
         current["progress"]["activeScreen"]["session"]["undoStack"][0]
             ["presentation"]["motions"][2]["target"]["kind"] == "minecart",

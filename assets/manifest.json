@@ -286,6 +286,38 @@
       "path": "custom/pbr/models/BricksA.glb"
     },
     {
+      "name": "WallStone01",
+      "path": "custom/models/wall_stone_01.glb"
+    },
+    {
+      "name": "WallStone02",
+      "path": "custom/models/wall_stone_02.glb"
+    },
+    {
+      "name": "WallStone03",
+      "path": "custom/models/wall_stone_03.glb"
+    },
+    {
+      "name": "WallStone04",
+      "path": "custom/models/wall_stone_04.glb"
+    },
+    {
+      "name": "WallStone05",
+      "path": "custom/models/wall_stone_05.glb"
+    },
+    {
+      "name": "WallStone06",
+      "path": "custom/models/wall_stone_06.glb"
+    },
+    {
+      "name": "WallStone07",
+      "path": "custom/models/wall_stone_07.glb"
+    },
+    {
+      "name": "WallStone08",
+      "path": "custom/models/wall_stone_08.glb"
+    },
+    {
       "name": "Stone",
       "path": "custom/pbr/models/Stone.glb"
     },
@@ -366,6 +398,13 @@
     {
       "name": "Turret",
       "path": "custom/pbr/models/Turret.glb",
+      "preserveAspectRatio": true,
+      "rotateHalfTurn": true
+    },
+    {
+      "name": "Lorekeeper",
+      "path": "KayKit Lorekeeper/characters/Lorekeeper.glb",
+      "geometry": "skinned",
       "preserveAspectRatio": true,
       "rotateHalfTurn": true
     },
@@ -676,6 +715,11 @@
       "preserveSourceScale": true
     },
     {
+      "name": "Wardrobe",
+      "path": "custom/models/wardrobe.glb",
+      "preserveSourceScale": true
+    },
+    {
       "name": "RotatorGear",
       "path": "custom/pbr/models/RotatorGear.glb",
       "preserveSourceScale": true
@@ -812,8 +856,35 @@
   "tiles": [
     {
       "tile": "Wall",
-      "model": "BricksA",
-      "scale": 1.024999976158142
+      "model": "WallStone01"
+    },
+    {
+      "tile": "Wall Stone 02",
+      "model": "WallStone02"
+    },
+    {
+      "tile": "Wall Stone 03",
+      "model": "WallStone03"
+    },
+    {
+      "tile": "Wall Stone 04",
+      "model": "WallStone04"
+    },
+    {
+      "tile": "Wall Stone 05",
+      "model": "WallStone05"
+    },
+    {
+      "tile": "Wall Stone 06",
+      "model": "WallStone06"
+    },
+    {
+      "tile": "Wall Stone 07",
+      "model": "WallStone07"
+    },
+    {
+      "tile": "Wall Stone 08",
+      "model": "WallStone08"
     },
     {
       "tile": "Rock",
@@ -919,6 +990,30 @@
     {
       "tile": "Ladder",
       "model": "Ladder"
+    },
+    {
+      "tile": "Wardrobe Lorekeeper",
+      "model": "Wardrobe"
+    },
+    {
+      "tile": "Wardrobe Rogue",
+      "model": "Wardrobe"
+    },
+    {
+      "tile": "Wardrobe Knight",
+      "model": "Wardrobe"
+    },
+    {
+      "tile": "Wardrobe Druid",
+      "model": "Wardrobe"
+    },
+    {
+      "tile": "Wardrobe Witch",
+      "model": "Wardrobe"
+    },
+    {
+      "tile": "Wardrobe Bard",
+      "model": "Wardrobe"
     },
     {
       "tile": "Rotator Clockwise",

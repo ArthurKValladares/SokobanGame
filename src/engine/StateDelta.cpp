@@ -184,6 +184,25 @@ void collectMinecarts(
     }
 }
 
+void collectWardrobes(
+    const GameState& before,
+    const GameState& after,
+    std::vector<StateDelta::WardrobeChange>& changes)
+{
+    for (const GameState::Wardrobe& current : after.wardrobes) {
+        const auto previous = std::ranges::find(
+            before.wardrobes, current.cell, &GameState::Wardrobe::cell);
+        if (previous != before.wardrobes.end() &&
+            previous->character != current.character) {
+            changes.push_back({
+                .cell = current.cell,
+                .before = previous->character,
+                .after = current.character,
+            });
+        }
+    }
+}
+
 } // namespace
 
 StateDelta StateDelta::between(
@@ -197,6 +216,7 @@ StateDelta StateDelta::between(
     collectMirrors(before, after, delta.mirrors);
     collectElevators(before, after, delta.elevators);
     collectMinecarts(before, after, delta.minecarts);
+    collectWardrobes(before, after, delta.wardrobes);
     if (before.activeButtons != after.activeButtons) {
         delta.buttons = ButtonChange { before.activeButtons, after.activeButtons };
     }
@@ -222,6 +242,13 @@ void StateDelta::applyTo(GameState& state) const
     for (const MinecartChange& change : minecarts) {
         if (change.index < state.minecarts.size()) {
             state.minecarts[change.index] = change.after;
+        }
+    }
+    for (const WardrobeChange& change : wardrobes) {
+        const auto found = std::ranges::find(
+            state.wardrobes, change.cell, &GameState::Wardrobe::cell);
+        if (found != state.wardrobes.end()) {
+            found->character = change.after;
         }
     }
 }
@@ -255,6 +282,15 @@ StateDelta StateDelta::inverted() const
             .after = change.before,
         });
     }
+    std::vector<WardrobeChange> invertedWardrobes;
+    invertedWardrobes.reserve(wardrobes.size());
+    for (const WardrobeChange& change : wardrobes) {
+        invertedWardrobes.push_back({
+            .cell = change.cell,
+            .before = change.after,
+            .after = change.before,
+        });
+    }
     return {
         .players = invert(players),
         .movables = invert(movables),
@@ -262,6 +298,7 @@ StateDelta StateDelta::inverted() const
         .mirrors = std::move(invertedMirrors),
         .elevators = std::move(invertedElevators),
         .minecarts = std::move(invertedMinecarts),
+        .wardrobes = std::move(invertedWardrobes),
         .buttons = buttons
             ? std::optional<ButtonChange> { { buttons->after, buttons->before } }
             : std::nullopt,
@@ -271,7 +308,8 @@ StateDelta StateDelta::inverted() const
 bool StateDelta::empty() const
 {
     return players.empty() && movables.empty() && enemies.empty() &&
-        mirrors.empty() && elevators.empty() && minecarts.empty() && !buttons;
+        mirrors.empty() && elevators.empty() && minecarts.empty() &&
+        wardrobes.empty() && !buttons;
 }
 
 std::size_t StateDelta::changedEntityCount() const

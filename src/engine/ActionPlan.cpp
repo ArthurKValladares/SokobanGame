@@ -67,7 +67,7 @@ std::optional<MoveDirection> movementDirection(
     MoveDirection playerInput)
 {
     for (const GameState::Player& player : before.players) {
-        if (player.character.value_or(level.character()) ==
+        if (characterBehavior(player.character.value_or(level.character())) ==
             CharacterType::Witch) {
             continue;
         }
@@ -110,8 +110,9 @@ std::optional<MoveDirection> movementDirection(
     for (std::size_t playerIndex = 0;
          playerIndex < playerCount;
          ++playerIndex) {
-        if (before.players[playerIndex].character.value_or(
-                level.character()) != CharacterType::Druid) {
+        if (characterBehavior(
+                before.players[playerIndex].character.value_or(
+                    level.character())) != CharacterType::Druid) {
             continue;
         }
         const std::optional<MoveDirection> direction = movementDirection(

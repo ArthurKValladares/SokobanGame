@@ -116,7 +116,8 @@ StaticRenderCell staticRenderCellFor(
                     : (tileTypeIsSolidBlock(tile) ||
                               tileTypeOccupiesLevelCell(tile) ||
                               tileTypeIsMirror(tile) ||
-                              tileTypeIsDecorative(tile)
+                              tileTypeIsDecorative(tile) ||
+                              tileTypeIsWardrobe(tile)
                             ? 1.0f
                             : 0.0f)),
         .modelRotationQuarterTurns = tileTypeIsPlayerStart(tile)
@@ -845,6 +846,24 @@ void appendGameplayWorld(
         staticCellAt,
         [&](TileType tile) { return input.settings.tileScale(tile); },
         input.presentation.worldAnimationTimeSeconds());
+    for (const GameState::Wardrobe& wardrobe : state.wardrobes) {
+        if (input.visibleCell && !input.visibleCell(wardrobe.cell)) {
+            continue;
+        }
+        appendWardrobeMarker(
+            frame,
+            wardrobe.cell,
+            wardrobe.character,
+            input.manifest,
+            animationFor(
+                input.animations,
+                AnimationUse::PlayerIdle,
+                input.manifest.playerIdleAnimation()),
+            animationTimeFor(
+                input.animations,
+                AnimationUse::PlayerIdle,
+                input.presentation.worldAnimationTimeSeconds()));
+    }
     appendCoveredStaticSurfaces(frame, input, endUnlocked);
     appendDecorations(
         frame,

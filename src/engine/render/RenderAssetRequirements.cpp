@@ -132,6 +132,10 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     for (const Level::PlayerStart& player : level.playerStarts()) {
         requirements.requireModel(manifest.characterModel(player.character));
     }
+    for (const Level::Wardrobe& wardrobe : level.wardrobes()) {
+        requirements.requireModel(
+            manifest.characterModel(wardrobe.character));
+    }
     auto requireUse = [&](AnimationUse use, RenderAnimation fallback) {
         requirements.requireAnimation(
             animations != nullptr ? animations->animation(use) : fallback);

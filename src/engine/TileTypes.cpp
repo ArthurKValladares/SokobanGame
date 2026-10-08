@@ -106,7 +106,7 @@ bool tileTypeIsSolidBlock(TileType type)
     // An elevator is solid wherever its platform currently rests. The level
     // grid only knows where it was authored; rules ask about the live
     // position (see rules::elevatorPlatformAt).
-    return tileTypeIsGround(type) || type == TileType::Wall ||
+    return tileTypeIsGround(type) || tileTypeIsWall(type) ||
         type == TileType::Elevator || type == TileType::Minecart ||
         tileTypeIsLectern(type);
 }
@@ -121,6 +121,7 @@ bool tileTypeAllowsEntity(TileType type)
     return type == TileType::Air ||
         type == TileType::Decorative ||
         type == TileType::Ladder ||
+        tileTypeIsWardrobe(type) ||
         tileTypeIsConveyor(type) ||
         tileTypeIsPlate(type) || tileTypeIsRail(type);
 }

@@ -231,10 +231,13 @@ void validateComponentDefinition(
             "all overworld screens must use the same optional water layer; " +
             name + " differs");
     }
-    if (definition.character.value_or(CharacterType::Rogue) !=
-        CharacterType::Rogue) {
+    const CharacterType authoredCharacter = definition.character.value_or(
+        CharacterType::Lorekeeper);
+    if (authoredCharacter != CharacterType::Lorekeeper &&
+        authoredCharacter != CharacterType::Rogue) {
         throw std::runtime_error(
-            "overworld screen " + name + " must use character rogue");
+            "overworld screen " + name +
+            " must use character lorekeeper (legacy rogue is also accepted)");
     }
     for (std::size_t z = 0; z < definition.layers.size(); ++z) {
         const auto& layer = definition.layers[z];
@@ -523,7 +526,7 @@ OverworldMap OverworldMap::load(
 
     Level::Definition composed;
     composed.waterLayer = commonWaterLayer;
-    composed.character = CharacterType::Rogue;
+    composed.character = CharacterType::Lorekeeper;
     composed.layers.assign(
         maximumDepth,
         std::vector<std::string>(

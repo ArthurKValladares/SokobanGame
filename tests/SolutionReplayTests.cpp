@@ -85,6 +85,38 @@ void testRecordSerializeParse()
     }, "changes need three coordinates");
 }
 
+void testWardrobeStateSurvivesSolutionRoundTrip()
+{
+    TEST("wardrobeStateSurvivesSolutionRoundTrip");
+    const Level::Definition definition {
+        .layers = {
+            { "..." },
+            { "C9E" },
+        },
+        .character = CharacterType::Lorekeeper,
+    };
+    const Level level = Level::loadFromDefinition(definition, "wardrobe solution");
+    const std::vector<Input> inputs { Input::Right, Input::Right };
+    const solution::Recording recording = solution::record(
+        level,
+        definition,
+        inputs,
+        "wardrobe solution");
+    CHECK_MESSAGE(recording.solved, recording.error.c_str());
+    CHECK(recording.solution.steps.size() == 2);
+    if (recording.solution.steps.size() != 2) return;
+    CHECK(recording.solution.steps[0].state.players[0].character ==
+        CharacterType::Rogue);
+    CHECK(recording.solution.steps[0].state.wardrobes[0].character ==
+        CharacterType::Lorekeeper);
+
+    const std::string text = solution::serialize(recording.solution);
+    CHECK(text.find("\"wardrobes\"") != std::string::npos);
+    const solution::Solution parsed = solution::parse(text);
+    CHECK(parsed == recording.solution);
+    CHECK(solution::replay(level, parsed).passed);
+}
+
 void testDigestTracksGameplayContentOnly()
 {
     TEST("digestTracksGameplayContentOnly");
@@ -367,6 +399,7 @@ int main()
 {
     try {
         testRecordSerializeParse();
+        testWardrobeStateSurvivesSolutionRoundTrip();
         testDigestTracksGameplayContentOnly();
         testReplayFailuresNameTheStepAndEntity();
         testStoreKeepsOneShortestRecordingPerScreen();

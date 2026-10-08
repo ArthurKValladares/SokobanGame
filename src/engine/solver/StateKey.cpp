@@ -113,6 +113,15 @@ PackedStateKey makePackedStateKey(
                 minecart.cell.z, static_cast<std::uint32_t>(minecart.phase)));
         }
     }
+    if (!state.wardrobes.empty()) {
+        words.push_back(0xA4D20BE2U);
+        words.push_back(state.wardrobes.size());
+        for (const GameState::Wardrobe& wardrobe : state.wardrobes) {
+            words.push_back(packPair(wardrobe.cell.x, wardrobe.cell.y));
+            words.push_back(packZAndFlags(
+                wardrobe.cell.z, enumCode(wardrobe.character)));
+        }
+    }
     if (!state.activeButtons.empty()) {
         words.push_back(0xB0770A02U);
         words.push_back(state.activeButtons.size());

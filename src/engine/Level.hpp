@@ -287,6 +287,16 @@ public:
         bool operator==(const PlayerStart&) const = default;
     };
 
+    // A traversable character exchanger. The authored character is copied
+    // into GameState and becomes mutable there so undo, replay and saves can
+    // preserve which character the wardrobe currently offers.
+    struct Wardrobe {
+        GridPosition3 cell {};
+        CharacterType character = CharacterType::Lorekeeper;
+
+        bool operator==(const Wardrobe&) const = default;
+    };
+
     static Level loadFromFile(const std::filesystem::path& path);
     [[nodiscard]] static Definition loadDefinitionFromFile(
         const std::filesystem::path& path);
@@ -329,6 +339,11 @@ public:
     {
         return playerStarts_;
     }
+    [[nodiscard]] const std::vector<Wardrobe>& wardrobes() const
+    {
+        return wardrobes_;
+    }
+    [[nodiscard]] const Wardrobe* wardrobeAt(GridPosition3 cell) const;
     [[nodiscard]] const std::vector<MovableTile>& movableTiles() const { return movableTiles_; }
     [[nodiscard]] const std::vector<ObjectLink>& objectLinks() const
     {
@@ -409,6 +424,7 @@ private:
     GridPosition3 playerStart_ {};
     CharacterType character_ = CharacterType::Rogue;
     std::vector<PlayerStart> playerStarts_;
+    std::vector<Wardrobe> wardrobes_;
     std::vector<MovableTile> movableTiles_;
     std::vector<ObjectLink> objectLinks_;
     std::vector<Portal> portals_;

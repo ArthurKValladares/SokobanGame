@@ -241,6 +241,33 @@ void testDeltaOfEqualStatesChangesNothing()
     CHECK(live == untouched);
 }
 
+void testWardrobeChangesApplyAndInvert()
+{
+    TEST("wardrobeChangesApplyAndInvert");
+    GameState before = twoPlayersAndARock();
+    before.players[0].character = CharacterType::Lorekeeper;
+    before.wardrobes.push_back({
+        .cell = cell(1, 0, 1),
+        .character = CharacterType::Rogue,
+    });
+    GameState after = before;
+    after.players[0].character = CharacterType::Rogue;
+    after.wardrobes[0].character = CharacterType::Lorekeeper;
+
+    const StateDelta delta = StateDelta::between(before, after);
+    CHECK(delta.players.size() == 1);
+    CHECK(delta.wardrobes.size() == 1);
+    CHECK(delta.wardrobes[0].cell == cell(1, 0, 1));
+    CHECK(delta.wardrobes[0].before == CharacterType::Rogue);
+    CHECK(delta.wardrobes[0].after == CharacterType::Lorekeeper);
+
+    GameState state = before;
+    delta.applyTo(state);
+    CHECK(state == after);
+    delta.inverted().applyTo(state);
+    CHECK(state == before);
+}
+
 } // namespace
 
 int main()
@@ -255,6 +282,7 @@ int main()
     testWholesaleReplacementLikeRestart();
     testStatesWithoutIdsFallBackToPosition();
     testDeltaOfEqualStatesChangesNothing();
+    testWardrobeChangesApplyAndInvert();
 
     if (failures == 0) {
         std::cout << "StateDeltaTests: " << checks << " checks passed\n";

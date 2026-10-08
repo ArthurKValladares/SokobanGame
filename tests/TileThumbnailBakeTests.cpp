@@ -37,11 +37,13 @@ const AssetManifest& testManifest()
       "models": [
         { "name": "Bricks", "path": "bricks.gltf" },
         { "name": "Hero", "path": "h.glb", "geometry": "skinned", "role": "player" },
+        { "name": "Lorekeeper", "path": "lorekeeper.glb", "geometry": "skinned" },
         { "name": "Knight", "path": "k.glb", "geometry": "skinned" },
         { "name": "Ladder", "path": "ladder.glb", "preserveSourceScale": true },
         { "name": "Druid", "path": "d.glb", "geometry": "skinned" },
         { "name": "Witch", "path": "w.glb", "geometry": "skinned" },
-        { "name": "Bard", "path": "b.glb", "geometry": "skinned" }
+        { "name": "Bard", "path": "b.glb", "geometry": "skinned" },
+        { "name": "Wardrobe", "path": "wardrobe.glb", "preserveSourceScale": true }
       ],
       "animations": [
         { "name": "Idle", "path": "a.glb", "role": "player-idle" },
@@ -53,7 +55,13 @@ const AssetManifest& testManifest()
       "tiles": [
         { "tile": "Wall", "model": "Bricks" },
         { "tile": "Ladder", "model": "Ladder" },
-        { "tile": "Player", "model": "Hero" }
+        { "tile": "Player", "model": "Hero" },
+        { "tile": "Wardrobe Lorekeeper", "model": "Wardrobe" },
+        { "tile": "Wardrobe Rogue", "model": "Wardrobe" },
+        { "tile": "Wardrobe Knight", "model": "Wardrobe" },
+        { "tile": "Wardrobe Druid", "model": "Wardrobe" },
+        { "tile": "Wardrobe Witch", "model": "Wardrobe" },
+        { "tile": "Wardrobe Bard", "model": "Wardrobe" }
       ]
     })json");
     return manifest;
@@ -165,17 +173,21 @@ void testBakeFrameStandsTheTileOnAGroundBed()
             : bedCells + (definition.type == TileType::Gate
                           ? config::gateEnergyTileCount
                           : tileTypeIsPortal(definition.type) ? 5
-                          : definition.type == TileType::MinecartGate ? 4 : 1);
+                          : definition.type == TileType::MinecartGate ? 4
+                          : tileTypeIsWardrobe(definition.type) ? 2 : 1);
         CHECK(frame.tiles.size() == expected);
 
         // Every tile counts toward the camera fit. This is what makes the
         // camera identical for every thumbnail: fitting to the subject alone
         // framed a flat tile and a tall one at completely different scales.
+        std::size_t nonFittingTiles = 0;
         for (const RenderFrameData::Tile& tile : frame.tiles) {
-            CHECK(tile.affectsCameraFit);
+            nonFittingTiles += tile.affectsCameraFit ? 0U : 1U;
             CHECK(!tile.showGrid);
             CHECK(!tile.isEditorPreview);
         }
+        CHECK(nonFittingTiles ==
+            (tileTypeIsWardrobe(definition.type) ? 1U : 0U));
 
         // Lighting is carried through, or the capture would have no shadows
         // and no ambient occlusion - the whole reason for the bed.

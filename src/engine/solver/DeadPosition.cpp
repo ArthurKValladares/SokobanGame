@@ -19,13 +19,14 @@ constexpr std::array directions {
 
 bool characterUsesOrdinaryPushes(CharacterType character)
 {
+    character = characterBehavior(character);
     return character == CharacterType::Rogue ||
         character == CharacterType::Knight;
 }
 
 bool characterCannotPushChains(CharacterType character)
 {
-    return character == CharacterType::Rogue;
+    return characterBehavior(character) == CharacterType::Rogue;
 }
 
 bool tileChangesMovableReachability(TileType tile)
@@ -33,7 +34,8 @@ bool tileChangesMovableReachability(TileType tile)
     return tile == TileType::Ice || tile == TileType::Water ||
         tile == TileType::Ladder || tileTypeIsPortal(tile) ||
         tileTypeIsConveyor(tile) || tileTypeIsMirror(tile) ||
-        tile == TileType::Gate || tileTypeIsElevator(tile);
+        tile == TileType::Gate || tileTypeIsElevator(tile) ||
+        tileTypeIsWardrobe(tile);
 }
 
 bool staticallySupported(const Level& level, GridPosition3 cell)

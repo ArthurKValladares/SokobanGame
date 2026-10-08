@@ -120,12 +120,20 @@ struct GameState {
         bool operator==(const Minecart&) const = default;
     };
 
+    struct Wardrobe {
+        GridPosition3 cell {};
+        CharacterType character = CharacterType::Lorekeeper;
+
+        bool operator==(const Wardrobe&) const = default;
+    };
+
     std::vector<Player> players;
     std::vector<Movable> movables;
     std::vector<Enemy> enemies;
     std::vector<TurnedMirror> turnedMirrors;
     std::vector<Elevator> elevators;
     std::vector<Minecart> minecarts;
+    std::vector<Wardrobe> wardrobes;
     // Button pulses remain high through the next world step, then expire.
     // Eligibility is sampled before reflection, so copies cannot press newly
     // reached buttons during the same Activate action.

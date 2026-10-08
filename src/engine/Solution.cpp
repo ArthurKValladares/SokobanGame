@@ -123,6 +123,7 @@ Json stateJson(
         { "turnedMirrors", Json::array() },
         { "elevators", Json::array() },
         { "minecarts", Json::array() },
+        { "wardrobes", Json::array() },
         { "activeButtons", Json::array() },
     };
     for (const auto& player : state.players) {
@@ -182,6 +183,13 @@ Json stateJson(
             {
                 { "cell", cellJson(minecart.cell) },
                 { "phase", minecart.phase },
+            });
+    }
+    for (const auto& wardrobe : state.wardrobes) {
+        result["wardrobes"].push_back(
+            {
+                { "cell", cellJson(wardrobe.cell) },
+                { "character", characterTypeName(wardrobe.character) },
             });
     }
     for (const auto button : state.activeButtons) {
@@ -265,13 +273,33 @@ void parseState(const Json& value, Step& step)
             { .cell = parseCell(item.at("cell")),
               .phase = exactInteger<uint16_t>(item.at("phase")) });
     }
+    const bool hasWardrobes = value.contains("wardrobes");
+    if (hasWardrobes) {
+        for (const auto& item : array("wardrobes")) {
+            const std::optional<CharacterType> character =
+                characterTypeFromName(item.at("character").get<std::string>());
+            if (!character) {
+                throw std::runtime_error("state has an unknown wardrobe character");
+            }
+            state.wardrobes.push_back({
+                .cell = parseCell(item.at("cell")),
+                .character = *character,
+            });
+        }
+    }
     for (const auto& item : array("activeButtons")) {
         state.activeButtons.push_back(parseCell(item));
     }
     // Reject unknown fields and coercions, rather than silently losing state.
-    if (stateJson(
-            state, step.activeHeroController, step.automaticMotionPaused) !=
-        value) {
+    Json canonical = stateJson(
+        state, step.activeHeroController, step.automaticMotionPaused);
+    // Recorded solutions created before wardrobes existed have no such key.
+    // Preserve that canonical legacy form while still rejecting every other
+    // unknown field or coercion.
+    if (!hasWardrobes) {
+        canonical.erase("wardrobes");
+    }
+    if (canonical != value) {
         throw std::runtime_error(
             "state contains unknown or noncanonical fields");
     }

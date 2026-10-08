@@ -650,7 +650,10 @@ private:
             renderTile.model = input_.manifest.characterModel(
                 characterForStartTile(
                     tile,
-                    definition.character.value_or(CharacterType::Rogue)));
+                    input_.editor.editingOverworld()
+                        ? CharacterType::Lorekeeper
+                        : definition.character.value_or(
+                              CharacterType::Rogue)));
         }
         if (tileTypeIsRotator(tile)) {
             const auto found = std::ranges::find(
@@ -739,6 +742,24 @@ private:
                     config::turretGlowTextureName));
         } else {
             frame.tiles.push_back(renderTile);
+            if (const std::optional<CharacterType> character =
+                    wardrobeCharacterForTile(tile)) {
+                appendWardrobeMarker(
+                    frame,
+                    cell,
+                    *character,
+                    input_.manifest,
+                    animationFor(
+                        input_.animations,
+                        AnimationUse::EditorPlayerIdle,
+                        input_.manifest.playerIdleAnimation()),
+                    animationTimeFor(
+                        input_.animations,
+                        AnimationUse::EditorPlayerIdle,
+                        input_.worldAnimationTimeSeconds));
+                frame.tiles.back().pickable = false;
+                frame.tiles.back().affectsCameraFit = false;
+            }
         }
     }
 
@@ -1069,6 +1090,25 @@ private:
                     config::turretGlowTextureName));
         } else {
             frame.tiles.push_back(renderTile);
+            if (!pickOnly) {
+                if (const std::optional<CharacterType> character =
+                        wardrobeCharacterForTile(tile)) {
+                    appendWardrobeMarker(
+                        frame,
+                        { x, y, z },
+                        *character,
+                        input_.manifest,
+                        animationFor(
+                            input_.animations,
+                            AnimationUse::EditorPlayerIdle,
+                            input_.manifest.playerIdleAnimation()),
+                        animationTimeFor(
+                            input_.animations,
+                            AnimationUse::EditorPlayerIdle,
+                            input_.worldAnimationTimeSeconds),
+                        preview);
+                }
+            }
         }
     }
 
@@ -1492,7 +1532,8 @@ RenderFrameData::Tile tileVisual(
                     : (tileTypeIsSolidBlock(tile) ||
                               tileTypeOccupiesLevelCell(tile) ||
                               tileTypeIsMirror(tile) ||
-                              tileTypeIsDecorative(tile)
+                              tileTypeIsDecorative(tile) ||
+                              tileTypeIsWardrobe(tile)
                             ? 1.0f
                             : 0.0f)),
         .blurBehind = tile == TileType::Ice,

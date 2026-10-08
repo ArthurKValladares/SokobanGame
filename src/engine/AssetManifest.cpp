@@ -767,6 +767,8 @@ const AssetManifest::TileVisual& AssetManifest::tileVisual(TileType type) const
 RenderModel AssetManifest::characterModel(CharacterType character) const
 {
     switch (character) {
+    case CharacterType::Lorekeeper:
+        return modelIdByName("Lorekeeper");
     case CharacterType::Rogue:
         return playerModel_;
     case CharacterType::Knight:
