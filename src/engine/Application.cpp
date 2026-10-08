@@ -434,6 +434,13 @@ Application::Application(ApplicationOptions options)
                     assetManifest_,
                     renderer_);
             },
+            .createGroundBlendMask = [this] {
+                return tools_->createGroundBlendMask(
+                    SOKOBAN_SOURCE_ASSET_DIR,
+                    assetRoot_,
+                    assetManifest_,
+                    renderer_);
+            },
             .assetManifest = [this]() -> const AssetManifest& { return assetManifest_; },
             .tileThumbnail = [this](TileType tile) {
                 // VkDescriptorSet is what ImGui's Vulkan backend uses as a

@@ -1769,8 +1769,8 @@ void Level::validateGroundSplats(const Definition& definition, std::string_view 
             static_cast<std::size_t>(cell.z) >= definition.layers.size() ||
             static_cast<std::size_t>(cell.y) >= definition.layers[static_cast<std::size_t>(cell.z)].size() ||
             static_cast<std::size_t>(cell.x) >= definition.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)].size() ||
-            !tileTypeIsGround(charToTileType(definition.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)]).value_or(TileType::Air)))
-            fail("Ground paint must reference a ground tile inside the screen");
+            !tileTypeHasSplatTop(charToTileType(definition.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)]).value_or(TileType::Air)))
+            fail("Ground paint must reference a ground or cliff tile inside the screen");
         for (std::size_t j = 0; j < i; ++j) {
             if (definition.groundPaint[j].cell == cell) fail("Duplicate ground paint cell");
         }

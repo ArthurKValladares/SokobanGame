@@ -116,7 +116,8 @@ bool drawPaintButton(
         if (group != nullptr) {
             ImGui::SetTooltip("%.*s: choose %s\n%.*s",
                 static_cast<int>(group->name.size()), group->name.data(),
-                tileTypeIsGround(definition.type) ? "rock version"
+                tileTypeIsCliffWall(definition.type) ? "cliff style"
+                    : tileTypeIsGround(definition.type) ? "rock version"
                     : tileTypeIsWall(definition.type) ? "stone version" : "direction",
                 static_cast<int>(definition.name.size()), definition.name.data());
         } else {
@@ -533,9 +534,11 @@ void LevelEditorDebugUi::drawGroundPaintTab(
     ImGui::Text("Ground Paint");
 
     if (ImGui::Button("Add Splat Map") && callbacks.createGroundSplatMap) {
-        (void)callbacks.createGroundSplatMap();
+        groundPaintActionStatus_ = callbacks.createGroundSplatMap()
+            ? std::string {}
+            : "Could not add the splat map. Check Logs for details.";
     }
-    ImGui::TextWrapped("Each map blends its base and detail textures. Choose its color, then paint ground tiles to assign them. The first map is the default.");
+    ImGui::TextWrapped("Each map blends its base and detail textures. Choose its color, then paint ground or cliff tops to assign them. The first map is the default.");
     const Level::GroundSplat* selected = editor.selectedGroundSplat();
     if (selected) {
         std::size_t selectedIndex = static_cast<std::size_t>(selected - editor.groundSplats().data());
@@ -585,6 +588,14 @@ void LevelEditorDebugUi::drawGroundPaintTab(
                 (void)editor.updateGroundSplat(selectedIndex, std::move(edited));
             }
         }
+        if (ImGui::Button("New Blend Mask") && callbacks.createGroundBlendMask) {
+            groundPaintActionStatus_ = callbacks.createGroundBlendMask()
+                ? std::string {}
+                : "Could not create the blend mask. Check Logs for details.";
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Creates a blank PNG for this map and starts painting. The previous mask is kept.");
+        }
         if (selectedIndex > 0 && ImGui::Button("Remove Splat Map")) {
             if (!painter.dirty() || painter.save()) {
                 painter.close();
@@ -600,7 +611,10 @@ void LevelEditorDebugUi::drawGroundPaintTab(
         }
         ImGui::Checkbox("Show Assignment Colors", &editor.showGroundAssignmentColors());
         ImGui::TextDisabled("Save the document to keep maps and tile assignments.");
-        if (editor.groundAssignmentPainting()) return;
+    }
+
+    if (!groundPaintActionStatus_.empty()) {
+        ImGui::TextWrapped("%s", groundPaintActionStatus_.c_str());
     }
 
     if (!painter.active()) {
@@ -873,7 +887,9 @@ void LevelEditorDebugUi::drawTilePalette(
             if (group != nullptr && ImGui::BeginPopup("Direction")) {
                 ImGui::Text("%.*s %s",
                     static_cast<int>(group->name.size()), group->name.data(),
-                    tileTypeIsGround(definition.type)
+                    tileTypeIsCliffWall(definition.type)
+                        ? "style"
+                        : tileTypeIsGround(definition.type)
                         ? "rock version"
                         : tileTypeIsWall(definition.type)
                             ? "stone version"
@@ -892,7 +908,9 @@ void LevelEditorDebugUi::drawTilePalette(
                             editor.setSelectedTile(variant);
                             ImGui::CloseCurrentPopup();
                         }
-                        if (tileTypeIsGround(variant)) {
+                        if (tileTypeIsCliffWall(variant)) {
+                            ImGui::Text("Style %02u", cliffWallVariantFor(variant) + 1U);
+                        } else if (tileTypeIsGround(variant)) {
                             ImGui::Text("Rock %02u", groundRockVariantFor(variant) + 1U);
                         } else if (tileTypeIsWall(variant)) {
                             ImGui::Text("Stone %02u", wallStoneVariantFor(variant) + 1U);
@@ -926,7 +944,7 @@ void LevelEditorDebugUi::drawTilePalette(
         (void)editor.randomizeWalls();
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Choose a random stone model for every wall tile on all layers of this screen. Undo restores the previous choices.");
+        ImGui::SetTooltip("Choose a random variant for every wall tile on all layers of this screen, preserving stone or cliff style. Undo restores the previous choices.");
     }
 
     const std::string_view selectedName = tileTypeName(editor.selectedTile());
@@ -934,6 +952,9 @@ void LevelEditorDebugUi::drawTilePalette(
         ImGui::Text("Selected: Ground Rock %02u", groundRockVariantFor(editor.selectedTile()) + 1U);
     } else {
         ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
+    }
+    if (tileTypeIsCliffWall(editor.selectedTile())) {
+        ImGui::TextWrapped("Cliff shapes join automatically. Paint their tops with Ground Paint.");
     }
     ImGui::TextWrapped(
         "Plates (Pressure, Buttons, End, Rotators, Lock Plates, Rail Stops) stack with units and mirrors; "

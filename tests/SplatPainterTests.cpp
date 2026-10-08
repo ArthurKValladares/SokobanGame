@@ -13,10 +13,12 @@
 #include "engine/render/PngWriter.hpp"
 #include "engine/render/TextureSourceLoader.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 
 namespace {
@@ -105,6 +107,13 @@ void writeBytes(
     stream.write(
         reinterpret_cast<const char*>(bytes.data()),
         static_cast<std::streamsize>(bytes.size()));
+}
+
+std::vector<char> readBytes(const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    return { std::istreambuf_iterator<char>(stream),
+        std::istreambuf_iterator<char>() };
 }
 
 void testScreenPathParsing()
@@ -678,6 +687,165 @@ void testCreatedMapIsImmediatelyPaintable()
     CHECK(painter.save());
 }
 
+void testUniqueBlankMapSkipsRegisteredAndUnregisteredMasks()
+{
+    TEST("uniqueBlankMapSkipsRegisteredAndUnregisteredMasks");
+    const TemporaryDirectory directory;
+    const std::filesystem::path source = directory.path() / "assets";
+    const std::filesystem::path staged = directory.path() / "staged";
+    AssetManifest manifest = testManifest();
+    (void)manifest.addTexture({
+        .name = "GroundSplatMap2_1_BlendMask_1",
+        .path = "custom/textures/registered_elsewhere.png",
+    });
+    (void)manifest.addTexture({
+        .name = "RegisteredUnderAnotherName",
+        .path = "custom/textures/nested/../GroundSplatMap2_1_BlendMask_2.png",
+    });
+    (void)manifest.addTexture({
+        .name = "RegisteredWithOtherSeparators",
+        .path = "custom\\textures\\.\\GroundSplatMap2_1_BlendMask_3.png",
+    });
+
+    const std::filesystem::path sourcePaint = source / "custom/textures/"
+        "GroundSplatMap2_1_BlendMask_4.png";
+    const std::filesystem::path runtimePaint = staged / "custom/textures/"
+        "GroundSplatMap2_1_BlendMask_5.png";
+    std::filesystem::create_directories(sourcePaint.parent_path());
+    std::filesystem::create_directories(runtimePaint.parent_path());
+    writeGrayscalePng(sourcePaint, 8, 4, std::vector<uint8_t>(32, 199));
+    writeGrayscalePng(runtimePaint, 6, 3, std::vector<uint8_t>(18, 103));
+    const std::vector<char> originalSource = readBytes(sourcePaint);
+    const std::vector<char> originalRuntime = readBytes(runtimePaint);
+
+    const CreatedSplatMap first = createUniqueBlankSplatMap(
+        "GroundSplatMap2_1", 10, 6, source, staged, manifest);
+    CHECK(first.created);
+    CHECK(first.textureName == "GroundSplatMap2_1_BlendMask_6");
+    CHECK(first.relativePath ==
+        "custom/textures/GroundSplatMap2_1_BlendMask_6.png");
+    const std::optional<SplatCanvas> canvas = SplatCanvas::fromImage(
+        loadRgbaImage(source / first.relativePath));
+    CHECK(canvas.has_value());
+    CHECK(canvas && canvas->width() == 10 * SplatCanvas::texelsPerTile);
+    CHECK(canvas && canvas->height() == 6 * SplatCanvas::texelsPerTile);
+    CHECK(canvas && std::all_of(canvas->weights().begin(),
+        canvas->weights().end(), [](uint8_t weight) { return weight == 0; }));
+    const std::vector<char> firstBytes = readBytes(source / first.relativePath);
+    CHECK(!firstBytes.empty());
+    CHECK(readBytes(staged / first.relativePath) == firstBytes);
+
+    // Repeated clicks must allocate a fresh path even before the caller has
+    // added the first result to the in-memory or on-disk manifest.
+    const CreatedSplatMap second = createUniqueBlankSplatMap(
+        "GroundSplatMap2_1", 4, 3, source, staged, manifest);
+    CHECK(second.created);
+    CHECK(second.textureName == "GroundSplatMap2_1_BlendMask_7");
+    CHECK(second.relativePath != first.relativePath);
+    CHECK(readBytes(source / first.relativePath) == firstBytes);
+    CHECK(readBytes(staged / first.relativePath) == firstBytes);
+    CHECK(readBytes(sourcePaint) == originalSource);
+    CHECK(readBytes(runtimePaint) == originalRuntime);
+    CHECK(!std::filesystem::exists(staged / "custom/textures/"
+        "GroundSplatMap2_1_BlendMask_4.png"));
+    CHECK(!std::filesystem::exists(source / "custom/textures/"
+        "GroundSplatMap2_1_BlendMask_5.png"));
+}
+
+void testUniqueBlankMapCanReplaceAnExplicitMaskWithoutLosingPaint()
+{
+    TEST("uniqueBlankMapCanReplaceAnExplicitMaskWithoutLosingPaint");
+    const TemporaryDirectory directory;
+    const SplatPainter::OpenRequest oldRequest =
+        requestFor(directory, "level2/screen1.scr");
+    AssetManifest manifest = testManifest();
+    SplatPainter originalPainter;
+    CHECK(originalPainter.open(oldRequest, manifest));
+    originalPainter.brush() = solidWhite;
+    CHECK(originalPainter.beginStroke({ 6.0f, 3.0f }));
+    originalPainter.endStroke();
+    CHECK(originalPainter.save());
+    const std::filesystem::path oldSource = oldRequest.sourceAssetRoot /
+        "custom/textures/ground_splat_level2_screen1.png";
+    const std::filesystem::path oldRuntime = oldRequest.runtimeAssetRoot /
+        "custom/textures/ground_splat_level2_screen1.png";
+    const std::vector<char> paintedBytes = readBytes(oldSource);
+
+    const CreatedSplatMap created = createUniqueBlankSplatMap(
+        "GroundSplatMap2_1", 13, 7,
+        oldRequest.sourceAssetRoot, oldRequest.runtimeAssetRoot, manifest);
+    CHECK(created.created);
+    (void)manifest.addTexture({
+        .name = created.textureName,
+        .path = created.relativePath,
+        .tiling = false,
+        .filter = TextureFilter::Linear,
+        .colorSpace = TextureColorSpace::Linear,
+    });
+
+    // An explicit selected map also works in an unsaved document; its mask
+    // identity does not have to be derived from a puzzle screen's filename.
+    SplatPainter::OpenRequest newRequest = oldRequest;
+    newRequest.documentPath = directory.path() / "draft.scr";
+    newRequest.textureName = created.textureName;
+    SplatPainter freshPainter;
+    CHECK(freshPainter.open(newRequest, manifest));
+    CHECK(freshPainter.active());
+    CHECK(!freshPainter.dirty());
+    CHECK(freshPainter.canvas().weightAt(
+        6 * SplatCanvas::texelsPerTile, 3 * SplatCanvas::texelsPerTile) == 0);
+    freshPainter.brush() = solidWhite;
+    CHECK(freshPainter.beginStroke({ 2.0f, 2.0f }));
+    freshPainter.endStroke();
+    CHECK(freshPainter.save());
+    CHECK(readBytes(oldSource) == paintedBytes);
+    CHECK(readBytes(oldRuntime) == paintedBytes);
+    CHECK(readBytes(newRequest.sourceAssetRoot / created.relativePath) ==
+        readBytes(newRequest.runtimeAssetRoot / created.relativePath));
+}
+
+void testUniqueBlankMapKeepsUnrestrictedNamesInsideTextures()
+{
+    TEST("uniqueBlankMapKeepsUnrestrictedNamesInsideTextures");
+    const TemporaryDirectory directory;
+    const std::filesystem::path source = directory.path() / "assets";
+    const CreatedSplatMap created = createUniqueBlankSplatMap(
+        "../../custom\\mask: name", 2, 2, source, {}, testManifest());
+    CHECK(created.created);
+    CHECK(created.textureName.find_first_of("./\\: ") == std::string::npos);
+    CHECK(std::filesystem::path(created.relativePath).parent_path() ==
+        std::filesystem::path("custom/textures"));
+    CHECK((source / created.relativePath).lexically_relative(source).parent_path()
+        == std::filesystem::path("custom/textures"));
+    CHECK(std::filesystem::exists(source / created.relativePath));
+}
+
+void testUniqueBlankMapRejectsInvalidRequestsBeforeWriting()
+{
+    TEST("uniqueBlankMapRejectsInvalidRequestsBeforeWriting");
+    const TemporaryDirectory directory;
+    const std::filesystem::path source = directory.path() / "assets";
+    const std::filesystem::path staged = directory.path() / "staged";
+    const CreatedSplatMap emptyBoard = createUniqueBlankSplatMap(
+        "GroundSplatMap2_1", 0, 7, source, staged, testManifest());
+    CHECK(!emptyBoard.created);
+    CHECK(!emptyBoard.message.empty());
+    const CreatedSplatMap emptyName = createUniqueBlankSplatMap(
+        "", 13, 7, source, staged, testManifest());
+    CHECK(!emptyName.created);
+    CHECK(!emptyName.message.empty());
+
+    // A filename component longer than filesystem limits makes inspection
+    // fail. Do not assume it means an unused name and start writing files.
+    std::filesystem::create_directories(source / "custom/textures");
+    const CreatedSplatMap uninspectable = createUniqueBlankSplatMap(
+        std::string(40000, 'x'), 13, 7, source, staged, testManifest());
+    CHECK(!uninspectable.created);
+    CHECK(uninspectable.message.find("inspect") != std::string::npos);
+    CHECK(std::filesystem::is_empty(source / "custom/textures"));
+    CHECK(!std::filesystem::exists(staged));
+}
+
 void testCloseResetsEverything()
 {
     TEST("closeResetsEverything");
@@ -727,6 +895,10 @@ int main()
     testCreateBlankSplatMapNeverOverwrites();
     testCreateBlankSplatMapRejectsAnEmptyBoard();
     testCreatedMapIsImmediatelyPaintable();
+    testUniqueBlankMapSkipsRegisteredAndUnregisteredMasks();
+    testUniqueBlankMapCanReplaceAnExplicitMaskWithoutLosingPaint();
+    testUniqueBlankMapKeepsUnrestrictedNamesInsideTextures();
+    testUniqueBlankMapRejectsInvalidRequestsBeforeWriting();
     testCloseResetsEverything();
 
     if (failures == 0) {

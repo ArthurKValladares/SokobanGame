@@ -1,4 +1,9 @@
 @groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap","name":"Ground"}
+@groundsplat {"base":"WallMoss","color":[0.8705882430076599,0.9647058844566345,0.8235294222831726],"detail":"WallSlateRock","mask":"GroundSplatMap5_5_1","name":"Ground 2"}
+@groundpaint {"cell":[14,1,2],"splat":"Ground 2"}
+@groundpaint {"cell":[16,1,2],"splat":"Ground 2"}
+@groundpaint {"cell":[14,5,2],"splat":"Ground 2"}
+@groundpaint {"cell":[16,5,2],"splat":"Ground 2"}
 @water 1
 @gate {"cell":[3,3,1],"color":[0.0,1.0,1.0],"plates":[[15,3,2]],"startOpen":true}
 @gate {"cell":[4,3,1],"color":[0.0,1.0,1.0],"plates":[[15,3,2]],"startOpen":true}
@@ -29,9 +34,9 @@ ScS   .aaAX   YSZ
 
 @layer 2
                P 
-        P     #G#
+        P     xGu
                R 
  R      QU     P 
                  
-        P     #G#
+        P     xGu
               E E

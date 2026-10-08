@@ -125,6 +125,9 @@ struct CreatedSplatMap {
     // Manifest-relative path, ready to become a texture entry.
     std::string relativePath;
     std::string message;
+    // Filled by createUniqueBlankSplatMap so the caller can register the new
+    // file and assign its manifest name to the selected splat definition.
+    std::string textureName;
 };
 
 // Writes a blank board-sized splat map for `location` into the source assets
@@ -148,5 +151,16 @@ struct CreatedSplatMap {
     uint32_t boardTilesHigh,
     const std::filesystem::path& sourceAssetRoot,
     const std::filesystem::path& runtimeAssetRoot);
+
+// Allocates a fresh mask name and path, skipping both registered textures and
+// files left in either asset tree. Unlike createBlankSplatMapAt, this always
+// creates a new blank map instead of reusing an existing painted file.
+[[nodiscard]] CreatedSplatMap createUniqueBlankSplatMap(
+    std::string textureNamePrefix,
+    uint32_t boardTilesWide,
+    uint32_t boardTilesHigh,
+    const std::filesystem::path& sourceAssetRoot,
+    const std::filesystem::path& runtimeAssetRoot,
+    const AssetManifest& manifest);
 
 } // namespace sokoban

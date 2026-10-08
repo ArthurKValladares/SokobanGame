@@ -476,6 +476,11 @@ struct RenderFrameData {
         std::optional<GroundSplatTextures> groundSplat;
         GridPosition groundSplatOrigin {};
         uint32_t groundRockVariant = 0;
+        bool cliffWall = false;
+        uint32_t cliffWallVariant = 0;
+        // Actual selected body exposure, in world N/E/S/W order. The native
+        // tapered upper boundary uses it to shape the renderer-owned cap.
+        uint8_t cliffWallSideMask = groundAllSides;
         // Modelled rock bodies omit the top: keep its paint/color quad even
         // when the editor temporarily shows assignment colors instead of splats.
         bool groundTop = false;

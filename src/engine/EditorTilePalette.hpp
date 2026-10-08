@@ -31,7 +31,7 @@ struct Group {
     }
 };
 
-inline constexpr std::array<Group, 12> groups {{
+inline constexpr std::array<Group, 13> groups {{
     { "Ground", { TileType::Ground, TileType::GroundRock02,
                   TileType::GroundRock03, TileType::GroundRock04,
                   TileType::GroundRock05, TileType::GroundRock06,
@@ -41,6 +41,7 @@ inline constexpr std::array<Group, 12> groups {{
                 TileType::WallStone03, TileType::WallStone04,
                 TileType::WallStone05, TileType::WallStone06,
                 TileType::WallStone07, TileType::WallStone08 }, wallStoneVariantCount },
+    { "Cliff Wall", { TileType::CliffWall, TileType::CliffWall02 }, cliffWallVariantCount },
     { "Conveyor", { TileType::ConveyorUp, TileType::ConveyorRight,
                     TileType::ConveyorDown, TileType::ConveyorLeft }, 4 },
     { "Mirror", { TileType::MirrorNorthWest, TileType::MirrorNorthEast,

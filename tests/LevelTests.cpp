@@ -1374,12 +1374,54 @@ void testGroundSplatMetadata()
     checkThrowsContaining([&] { auto bad = definition; bad.groundPaint.push_back(bad.groundPaint[0]);
         (void)Level::serializeDefinition(bad); }, "Duplicate ground paint");
     checkThrowsContaining([&] { auto bad = definition; bad.groundPaint[0].cell.z = 1;
-        (void)Level::serializeDefinition(bad); }, "ground tile inside");
+        (void)Level::serializeDefinition(bad); }, "ground or cliff tile inside");
     checkThrowsContaining([&] { auto bad = definition; bad.groundSplats[0].color.x = -1;
         (void)Level::serializeDefinition(bad); }, "finite and in");
     checkThrowsContaining([&] { auto bad = definition; bad.groundSplats[0].mask.clear();
         (void)Level::serializeDefinition(bad); }, "must not be empty");
     CHECK(Level::parseDefinition({ "C." }, "legacy ground").groundSplats.empty());
+}
+
+void testCliffWallStylesAreSolidAndSaveSplatAssignments()
+{
+    TEST("cliffWallStylesAreSolidAndSaveSplatAssignments");
+    const Level::Definition definition {
+        .layers = { { "..." }, { "Cux" }, { "   " } },
+        .groundSplats = {
+            { "Meadow", "Grass", "Stone", "MeadowMask", { 0, 1, 0 } },
+            { "Sand", "Sand", "Mud", "SandMask", { 1, 0, 0 } },
+        },
+        .groundPaint = { { { 1, 0, 1 }, "Sand" }, { { 2, 0, 1 }, "Sand" } },
+    };
+    const auto serialized = Level::serializeDefinition(definition);
+    CHECK(Level::parseDefinition(serialized, "cliff styles") == definition);
+    const Level level = Level::loadFromLines(serialized, "cliff styles");
+    const std::array cliffs { TileType::CliffWall, TileType::CliffWall02 };
+    CHECK(cliffs.size() == cliffWallVariantCount);
+    for (std::size_t index = 0; index < cliffs.size(); ++index) {
+        const int x = static_cast<int>(index + 1);
+        const TileType tile = cliffs[index];
+        CHECK(level.tileAt(x, 0, 1) == tile);
+        CHECK(tileTypeFromName(tileTypeName(tile)) == tile);
+        CHECK(charToTileType(tileTypeToChar(tile)) == tile);
+        CHECK(cliffWallVariantFor(tile) == index);
+        CHECK(tileTypeIsCliffWall(tile) && tileTypeIsWall(tile));
+        CHECK(!tileTypeIsGround(tile));
+        CHECK(tileTypeHasSplatTop(tile));
+        CHECK(tileTypeIsSolidBlock(tile) && tileTypeSupportsEntity(tile));
+        CHECK(!tileTypeAllowsEntity(tile));
+        CHECK(!level.isWalkable({ x, 0, 1 }));
+        CHECK(level.isWalkable({ x, 0, 2 }));
+        CHECK(level.supportingTileAt({ x, 0, 2 }) == tile);
+        CHECK(Level::groundSplatAt(level.groundSplats(), level.groundPaint(), { x, 0, 1 })->name == "Sand");
+    }
+    CHECK(tileTypeHasSplatTop(TileType::GroundRock10));
+    CHECK(!tileTypeHasSplatTop(TileType::WallStone02));
+    checkThrowsContaining([&] {
+        auto stone = definition;
+        stone.layers[1][0][1] = '#';
+        (void)Level::serializeDefinition(stone);
+    }, "ground or cliff tile inside");
 }
 
 } // namespace
@@ -1446,6 +1488,7 @@ int main()
     testLockPlateMetadata();
     testPortalMetadata();
     testGroundSplatMetadata();
+    testCliffWallStylesAreSolidAndSaveSplatAssignments();
     testLegacyAndLayeredParsing();
     testSerializationRoundTrip();
     testCameraMetadataRoundTripAndValidation();

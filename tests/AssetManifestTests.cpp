@@ -14,6 +14,7 @@
 #include <iostream>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -567,6 +568,30 @@ void testRealManifestFile()
         CHECK_MESSAGE(texture.filter == sokoban::TextureFilter::Linear,
             "real manifest ground material layer filters smoothly");
     }
+    for (std::string_view name : { "WallSlateRock", "WallMoss" }) {
+        const std::string stem = name == "WallSlateRock" ? "wall_slate_rock" : "wall_moss";
+        for (std::string_view suffix : { "", "Normal", "Orm" }) {
+            const sokoban::RenderTexture id = manifest.findTextureIdByName(std::string(name)+std::string(suffix));
+            CHECK_MESSAGE(!id.isNone(), "real manifest declares the wall paint material and PBR maps");
+            if (id.isNone()) continue;
+            const AssetManifest::Texture& texture = manifest.textures()[id.index()];
+            const std::string path = suffix.empty() ? "custom/textures/"+stem+".png"
+                : "custom/pbr/"+stem+(suffix == "Normal" ? "_normal.png" : "_orm.png");
+            CHECK(texture.path == path);
+            CHECK(texture.tiling && texture.filter == sokoban::TextureFilter::Linear);
+            CHECK(texture.colorSpace == (suffix.empty() ? sokoban::TextureColorSpace::Srgb
+                : sokoban::TextureColorSpace::Linear));
+            CHECK(std::filesystem::is_regular_file(*root / texture.path));
+        }
+    }
+    const auto wallPaint = sokoban::groundSplatTexturesForMaterials(
+        [&manifest](std::string_view name) { return manifest.findTextureIdByName(name); },
+        "WallMoss", "WallSlateRock", manifest.textureIdByName(sokoban::groundSplatMapTextureName));
+    CHECK(wallPaint.valid());
+    CHECK(wallPaint.baseNormal == manifest.textureIdByName("WallMossNormal"));
+    CHECK(wallPaint.baseOrm == manifest.textureIdByName("WallMossOrm"));
+    CHECK(wallPaint.detailNormal == manifest.textureIdByName("WallSlateRockNormal"));
+    CHECK(wallPaint.detailOrm == manifest.textureIdByName("WallSlateRockOrm"));
     // Splat maps are the opposite: weight data spanning the board once. They
     // must NOT repeat (a painted spot would echo across the board) and must
     // NOT be sRGB (a painted 0.5 has to reach the shader as a 0.5 weight).
@@ -689,6 +714,40 @@ void testRealManifestFile()
         "turret uses its authored glTF material without a manifest override");
     const sokoban::RuntimeTextureCatalog runtimeTextures =
         sokoban::collectRuntimeTextureCatalog(*root, manifest);
+    const std::array<std::pair<std::string_view, std::string_view>, 6> cliffShapes {{
+        { "Island", "island" }, { "End", "end" }, { "Strip", "strip" },
+        { "Corner", "corner" }, { "Edge", "edge" }, { "Interior", "interior" },
+    }};
+    for (const auto& [name, file] : cliffShapes) {
+        for (const bool second : { false, true }) {
+            const std::string modelName = "CliffWall" + std::string(name) + (second ? "B" : "A");
+            const auto model = manifest.modelIdByName(modelName);
+            CHECK(!model.isCube());
+            if (model.isCube()) continue;
+            const auto& asset = manifest.model(model);
+            CHECK(asset.path == "custom/models/cliff_walls/cliff_wall_" + std::string(file) + (second ? "_b.glb" : "_a.glb"));
+            CHECK(asset.preserveSourceScale && !asset.rotateHalfTurn);
+            const auto mesh = sokoban::loadGltfMesh(*root / asset.path, { .preserveSourceScale = true });
+            CHECK(!mesh.vertices.empty() && !mesh.indices.empty());
+            CHECK(std::ranges::all_of(mesh.materials, [](const auto& material) {
+                return !material.doubleSided && material.alphaMode == sokoban::MaterialAlphaMode::Opaque;
+            }));
+            const auto& textures = runtimeTextures.model(static_cast<uint32_t>(model.index()));
+            CHECK(textures.materialMode == sokoban::ModelMaterialMode::PrimitiveMaterials);
+            if (name != "Interior") {
+                CHECK(std::ranges::any_of(textures.primitiveMaterials, [](const auto& binding) {
+                    return binding.bindBaseColorTexture && binding.normalTextureIndex.has_value() &&
+                        binding.metallicRoughnessTextureIndex.has_value();
+                }));
+            }
+        }
+    }
+    for (const auto tile : { sokoban::TileType::CliffWall, sokoban::TileType::CliffWall02 }) {
+        CHECK(manifest.modelForTile(tile) == manifest.modelIdByName(
+            tile == sokoban::TileType::CliffWall ? "CliffWallIslandA" : "CliffWallIslandB"));
+        CHECK(manifest.tileScale(tile) == 1.0f);
+        CHECK(sokoban::tileColor(tile) == sokoban::Vec4({ 1, 1, 1, 1 }));
+    }
     for (const auto tile : wallTiles) {
         const auto model = manifest.modelForTile(tile);
         const auto& textures =

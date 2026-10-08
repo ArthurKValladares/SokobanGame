@@ -3702,7 +3702,8 @@ private:
             },
             // Ground's top tint stays on its splat face. The rock body uses
             // its authored sandstone factors rather than the green top tint.
-            .color = tile.effect == RenderSurfaceEffect::GroundSplat
+            .color = tile.effect == RenderSurfaceEffect::GroundSplat ||
+                    (tile.groundTop && tile.effect == RenderSurfaceEffect::Standard)
                 ? Vec4 { 1.0f, 1.0f, 1.0f, tile.color.w } : tile.color,
             // xyz free; see above. w is the ambient term's red channel.
             .normalAndAmbientRed = { 0.0f, 0.0f, 0.0f, lanes.ambientRed },

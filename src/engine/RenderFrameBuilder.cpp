@@ -1,6 +1,7 @@
 #include "engine/RenderFrameBuilder.hpp"
 
 #include "engine/AnimationCatalog.hpp"
+#include "engine/CliffWallGeometry.hpp"
 #include "engine/ElevatorVisuals.hpp"
 #include "engine/GateEffect.hpp"
 #include "engine/GroundGeometry.hpp"
@@ -286,13 +287,15 @@ void appendStaticTiles(
                                 : 0.0f),
                     // Procedural ground tops blend grass/rock through the
                     // splat map; modelled tiles keep their own materials.
-                    .effect = tileTypeIsGround(cell.tile)
+                    .effect = tileTypeHasSplatTop(cell.tile)
                         ? RenderSurfaceEffect::GroundSplat
                         : (cell.tile == TileType::PressurePlate || cell.tile == TileType::End)
                         ? RenderSurfaceEffect::PlateEnergy
                         : RenderSurfaceEffect::Standard,
                     .groundRockVariant = groundRockVariantFor(cell.tile),
-                    .groundTop = tileTypeIsGround(cell.tile),
+                    .cliffWall = tileTypeIsCliffWall(cell.tile),
+                    .cliffWallVariant = cliffWallVariantFor(cell.tile),
+                    .groundTop = tileTypeHasSplatTop(cell.tile),
                 };
                 applyTileScale(renderTile, scaleForTile(cell.tile));
                 if (tileTypeIsPortal(cell.tile)) {
@@ -1928,6 +1931,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     appendGameplayEntities(frame, input);
     appendMirrorPreview(frame, input);
     applyScrollingMaterials(frame, input);
+    processCliffWallGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
     if (input.settings.geometry.processGroundGeometry) {
         processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest,
             nullptr, input.groundGeometryCache);
@@ -1952,6 +1956,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(
     appendGameplayEntities(frame, input);
     appendMirrorPreview(frame, input, &arena);
     applyScrollingMaterials(frame, input);
+    processCliffWallGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
     if (input.settings.geometry.processGroundGeometry) {
         processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest,
             &arena, input.groundGeometryCache);

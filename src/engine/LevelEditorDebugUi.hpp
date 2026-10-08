@@ -29,8 +29,10 @@ public:
         // Opens the splat map for the document being edited. Returns false
         // when it has none; the painter's status says why.
         std::function<bool()> openGroundPainting;
-        // Creates and registers one for a screen that has none, then opens it.
+        // Adds a map with its own registered mask and selects tile assignments.
         std::function<bool()> createGroundSplatMap;
+        // Gives the selected map a fresh blank mask and starts mask painting.
+        std::function<bool()> createGroundBlendMask;
         std::function<const AssetManifest&()> assetManifest;
         // Rendered preview of a tile type for the palette, or 0 when there is
         // none to show (still loading, no model, or thumbnails unavailable).
@@ -100,6 +102,7 @@ private:
     std::string browserRootBuffer_;
     std::string decorationFilter_;
     std::string decorationRegistrationStatus_;
+    std::string groundPaintActionStatus_;
     std::optional<LevelEditor::Tool> selectedToolTab_;
     // The link group (by color) the Links section recolors.
     std::optional<Vec3> selectedLinkGroup_;

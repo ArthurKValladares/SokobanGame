@@ -185,7 +185,7 @@ RenderFrameData buildBakeFrame(
         frame.tiles.push_back(subject);
     }
 
-    if (tileTypeIsGround(tile)) {
+    if (tileTypeHasSplatTop(tile)) {
         frame.groundRockSideTexture = manifest.findTextureIdByName(groundRockSideTextureName);
         frame.groundSplat = groundSplatTexturesForScreen(
             [&manifest](std::string_view name) { return manifest.findTextureIdByName(name); },

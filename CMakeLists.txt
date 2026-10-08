@@ -568,6 +568,7 @@ add_library(sokoban_core STATIC
     src/engine/PerformanceFixtures.cpp
     src/engine/RenderFrameBuilder.cpp
     src/engine/GroundGeometry.cpp
+    src/engine/CliffWallGeometry.cpp
     src/engine/GroundLevelGeometry.cpp
     src/engine/RenderFrameBuilderEditor.cpp
     src/engine/RenderFrameParts.cpp
@@ -744,6 +745,10 @@ add_library(sokoban_render_vulkan STATIC
 )
 add_library(Sokoban::render_vulkan ALIAS sokoban_render_vulkan)
 if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
+    # The editor adapter is shared with its real ImGui interaction tests.
+    # This library already owns ImGui; player builds omit the adapter.
+    target_sources(sokoban_render_vulkan PRIVATE
+        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/LevelEditorDebugUi.cpp>")
     foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
         target_sources(sokoban_render_vulkan PRIVATE
             "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:${imgui_source}>")
@@ -807,7 +812,6 @@ if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
         "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/ApplicationDebugUi.cpp>"
         "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/AssetManifestDebugUi.cpp>"
         "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/DebugUi.cpp>"
-        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/LevelEditorDebugUi.cpp>"
         "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/LogDebugUi.cpp>"
         "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/ProfilerDebugUi.cpp>"
         "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/TuningDebugUi.cpp>"
@@ -1358,6 +1362,17 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/LevelEditorTests.cpp
     )
+    if(SOKOBAN_ENABLE_DEVELOPER_TOOLS AND NOT SOKOBAN_HEADLESS_TESTS_ONLY)
+        sokoban_add_test(NAME level_editor_debug_ui
+            STANDALONE TARGET sokoban_level_editor_debug_ui_tests
+            LIBS sokoban_render_vulkan
+            SOURCES tests/LevelEditorDebugUiTests.cpp
+        )
+        target_include_directories(sokoban_level_editor_debug_ui_tests SYSTEM PRIVATE
+            third_party/imgui)
+        set_tests_properties(level_editor_debug_ui PROPERTIES
+            LABELS "editor;imgui" TIMEOUT 30 SKIP_RETURN_CODE 77)
+    endif()
     sokoban_add_test(NAME decoration_mesh_catalog
         LIBS sokoban_core
         SOURCES tests/DecorationMeshCatalogTests.cpp
@@ -1530,6 +1545,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME ground_geometry
         LIBS sokoban_core
         SOURCES tests/GroundGeometryTests.cpp
+    )
+    sokoban_add_test(NAME cliff_wall_geometry
+        LIBS sokoban_core
+        SOURCES tests/CliffWallGeometryTests.cpp
     )
     sokoban_add_test(NAME ground_mesh_geometry
         LIBS sokoban_core

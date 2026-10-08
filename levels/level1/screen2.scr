@@ -1,4 +1,52 @@
 @groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap1_2","name":"Ground"}
+@groundsplat {"base":"WallMoss","color":[0.8705882430076599,0.9647058844566345,0.8235294222831726],"detail":"WallSlateRock","mask":"GroundSplatMap1_2_1","name":"Wall"}
+@groundpaint {"cell":[0,0,1],"splat":"Wall"}
+@groundpaint {"cell":[1,0,1],"splat":"Wall"}
+@groundpaint {"cell":[2,0,1],"splat":"Wall"}
+@groundpaint {"cell":[3,0,1],"splat":"Wall"}
+@groundpaint {"cell":[4,0,1],"splat":"Wall"}
+@groundpaint {"cell":[5,0,1],"splat":"Wall"}
+@groundpaint {"cell":[6,0,1],"splat":"Wall"}
+@groundpaint {"cell":[7,0,1],"splat":"Wall"}
+@groundpaint {"cell":[8,0,1],"splat":"Wall"}
+@groundpaint {"cell":[0,1,1],"splat":"Wall"}
+@groundpaint {"cell":[4,1,1],"splat":"Wall"}
+@groundpaint {"cell":[8,1,1],"splat":"Wall"}
+@groundpaint {"cell":[0,2,1],"splat":"Wall"}
+@groundpaint {"cell":[7,2,1],"splat":"Wall"}
+@groundpaint {"cell":[8,2,1],"splat":"Wall"}
+@groundpaint {"cell":[0,3,1],"splat":"Wall"}
+@groundpaint {"cell":[4,3,1],"splat":"Wall"}
+@groundpaint {"cell":[8,3,1],"splat":"Wall"}
+@groundpaint {"cell":[0,4,1],"splat":"Wall"}
+@groundpaint {"cell":[1,4,1],"splat":"Wall"}
+@groundpaint {"cell":[2,4,1],"splat":"Wall"}
+@groundpaint {"cell":[4,4,1],"splat":"Wall"}
+@groundpaint {"cell":[5,4,1],"splat":"Wall"}
+@groundpaint {"cell":[7,4,1],"splat":"Wall"}
+@groundpaint {"cell":[8,4,1],"splat":"Wall"}
+@groundpaint {"cell":[0,5,1],"splat":"Wall"}
+@groundpaint {"cell":[8,5,1],"splat":"Wall"}
+@groundpaint {"cell":[0,6,1],"splat":"Wall"}
+@groundpaint {"cell":[4,6,1],"splat":"Wall"}
+@groundpaint {"cell":[8,6,1],"splat":"Wall"}
+@groundpaint {"cell":[0,7,1],"splat":"Wall"}
+@groundpaint {"cell":[2,7,1],"splat":"Wall"}
+@groundpaint {"cell":[4,7,1],"splat":"Wall"}
+@groundpaint {"cell":[5,7,1],"splat":"Wall"}
+@groundpaint {"cell":[7,7,1],"splat":"Wall"}
+@groundpaint {"cell":[8,7,1],"splat":"Wall"}
+@groundpaint {"cell":[0,8,1],"splat":"Wall"}
+@groundpaint {"cell":[2,8,1],"splat":"Wall"}
+@groundpaint {"cell":[3,8,1],"splat":"Wall"}
+@groundpaint {"cell":[4,8,1],"splat":"Wall"}
+@groundpaint {"cell":[5,8,1],"splat":"Wall"}
+@groundpaint {"cell":[6,8,1],"splat":"Wall"}
+@groundpaint {"cell":[7,8,1],"splat":"Wall"}
+@groundpaint {"cell":[8,8,1],"splat":"Wall"}
+@groundpaint {"cell":[0,9,1],"splat":"Wall"}
+@groundpaint {"cell":[1,9,1],"splat":"Wall"}
+@groundpaint {"cell":[2,9,1],"splat":"Wall"}
 @gate {"cell":[1,7,1],"color":[1.0,0.7200000286102295,0.11999999731779099],"plates":[[1,1,1],[3,7,1]]}
 
 @layer 0
@@ -14,13 +62,13 @@ V.ZaYXAFY
 YYS      
 
 @layer 1
-rh#dikmir
-#P  f   m
-i QRR  mm
-r   r R d
-ihfRhmR##
-m  R    i
-r   d   f
-mGdPhk km
-mErkdkkf#
-drd      
+uuxxuxxuu
+uP  u   u
+u QRR  uu
+u   x R x
+xxxRuxRuu
+u  R    x
+u   x   x
+uGuPuu uu
+xExxuuxuu
+uxu      

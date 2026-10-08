@@ -1,4 +1,13 @@
 @groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap2_1","name":"Ground"}
+@groundsplat {"base":"WallMoss","color":[0.8705882430076599,0.9647058844566345,0.8235294222831726],"detail":"WallSlateRock","mask":"GroundSplatMap2_1_1","name":"Wall"}
+@groundpaint {"cell":[13,7,2],"splat":"Wall"}
+@groundpaint {"cell":[13,8,2],"splat":"Wall"}
+@groundpaint {"cell":[14,8,2],"splat":"Wall"}
+@groundpaint {"cell":[15,8,2],"splat":"Wall"}
+@groundpaint {"cell":[15,9,2],"splat":"Wall"}
+@groundpaint {"cell":[13,10,2],"splat":"Wall"}
+@groundpaint {"cell":[14,10,2],"splat":"Wall"}
+@groundpaint {"cell":[15,10,2],"splat":"Wall"}
 @water 1
 @gate {"cell":[13,9,2],"color":[1.0,0.7200000286102295,0.11999999731779099],"plates":[[10,8,2]]}
 
@@ -38,11 +47,11 @@ DDD             DDD
                    
                    
                    
-            m      
-      d            
-    Q I      #     
-          Pm d#f   
-       k     GEk   
-             ff#   
+            d      
+      h            
+    Q I      u     
+          Pr uxx   
+       #     GEx   
+             xxx   
                    
                    

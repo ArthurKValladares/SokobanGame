@@ -1,4 +1,16 @@
 @groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap","name":"Ground"}
+@groundsplat {"base":"WallMoss","color":[0.8705882430076599,0.9647058844566345,0.8235294222831726],"detail":"WallSlateRock","mask":"GroundSplatMap5_2_1","name":"Ground 2"}
+@groundpaint {"cell":[0,2,1],"splat":"Ground 2"}
+@groundpaint {"cell":[2,2,1],"splat":"Ground 2"}
+@groundpaint {"cell":[3,2,1],"splat":"Ground 2"}
+@groundpaint {"cell":[4,2,1],"splat":"Ground 2"}
+@groundpaint {"cell":[5,2,1],"splat":"Ground 2"}
+@groundpaint {"cell":[6,2,1],"splat":"Ground 2"}
+@groundpaint {"cell":[7,2,1],"splat":"Ground 2"}
+@groundpaint {"cell":[8,2,1],"splat":"Ground 2"}
+@groundpaint {"cell":[9,2,1],"splat":"Ground 2"}
+@groundpaint {"cell":[10,2,1],"splat":"Ground 2"}
+@groundpaint {"cell":[12,2,1],"splat":"Ground 2"}
 @minecart {"cell":[6,5,1],"color":[0.0,1.0,1.0],"direction":1,"plates":[[8,3,1]]}
 @plate {"cell":[1,2,1],"tile":"Rail Straight North-South"}
 @plate {"cell":[11,2,1],"tile":"Rail Straight North-South"}
@@ -16,7 +28,7 @@ ZZS.ZFcccaSSS
 @layer 1
       E      
  6----_----7 
-#g#########g#
+xgxuxuuuxxxgx
  ! E KQ P  ! 
  |         | 
  5----M----8 

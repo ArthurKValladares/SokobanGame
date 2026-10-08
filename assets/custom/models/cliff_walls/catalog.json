@@ -1,0 +1,679 @@
+{
+  "format": 1,
+  "family": "CliffWalls",
+  "description": "Native Blender modular cool-grey cliff bodies with broad staggered rock courses, a moderate exposed-side and convex-corner taper and a jagged flat painted top; no decorative rim stones. Twelve bodies form two automatically joining Cliff Wall styles. Renderer-owned splat tops match the native per-mask/per-variant upper boundary. Island-A cap retained for authoring preview.",
+  "coordinateSystem": {
+    "horizontalAxes": "XY",
+    "upAxis": "Z",
+    "tileOrigin": [
+      0,
+      0,
+      0
+    ],
+    "tileSize": [
+      1,
+      1,
+      1
+    ],
+    "topHeight": 1,
+    "directions": {
+      "north": [
+        0,
+        -1,
+        0
+      ],
+      "east": [
+        1,
+        0,
+        0
+      ],
+      "south": [
+        0,
+        1,
+        0
+      ],
+      "west": [
+        -1,
+        0,
+        0
+      ]
+    },
+    "gltfSourceAxes": "Blender XYZ exports as glTF XZ-Y; preserveSourceScale restores engine XYZ"
+  },
+  "contract": {
+    "preserveSourceScale": true,
+    "rotateHalfTurn": false,
+    "bodyIncludesTop": false,
+    "rendererOwnedSplatTop": true,
+    "sharedTop": "cliff_wall_top.glb",
+    "seamProfile": "cliff-wall-slightly-stronger-taper-v4",
+    "sideBits": {
+      "north": 1,
+      "east": 2,
+      "south": 4,
+      "west": 8
+    },
+    "quarterTurns": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "quarterTurnConvention": "Counterclockwise about tile center (0.5,0.5,0.5) in engine XY; north rotates to east",
+    "endpointProfileOrder": [
+      "height",
+      "inwardDepth"
+    ],
+    "endpointProfile": [
+      [
+        0,
+        0
+      ],
+      [
+        0.03,
+        0
+      ],
+      [
+        0.29,
+        0
+      ],
+      [
+        0.305,
+        0
+      ],
+      [
+        0.335,
+        0
+      ],
+      [
+        0.36,
+        0
+      ],
+      [
+        0.67,
+        0
+      ],
+      [
+        0.685,
+        0
+      ],
+      [
+        0.715,
+        0
+      ],
+      [
+        0.745,
+        0
+      ],
+      [
+        0.94,
+        0
+      ],
+      [
+        0.965,
+        0
+      ],
+      [
+        1,
+        0
+      ]
+    ],
+    "collarCoordinates": [
+      0,
+      0.08333333333333333,
+      0.9166666666666666,
+      1
+    ],
+    "soilLipHeight": 0.035,
+    "concaveCornerMask": 0,
+    "materialSlots": {
+      "rock": [
+        "CliffRock_North",
+        "CliffRock_East",
+        "CliffRock_South",
+        "CliffRock_West"
+      ],
+      "soil": [
+        "CliffSoil_North",
+        "CliffSoil_East",
+        "CliffSoil_South",
+        "CliffSoil_West"
+      ],
+      "bottom": "CliffBottom",
+      "topPreview": "CliffTop_SplatPreview"
+    },
+    "textureCoordinates": "TEXCOORD_0",
+    "normalConvention": "OpenGL +Y tangent-space; float4 tangent w is +1 or -1",
+    "ormChannels": {
+      "red": "ambientOcclusion",
+      "green": "roughness",
+      "blue": "metallic"
+    },
+    "previewMaterials": "Cliff-only cool-grey linear base factors over the existing ground-side PBR maps; shared ground images unchanged. Native grass caps preview the world-coordinate renderer splat surface.",
+    "coreRelief": {
+      "maxOutward": 0.035,
+      "maxInset": 0.175
+    },
+    "upperLipTransition": {
+      "topBoundaryHeight": 1,
+      "preserveEndpointCollars": true,
+      "maximumTopInset": 0.07986,
+      "form": "Exposed faces and convex corners taper into a jagged planar cap; joining collars remain exact",
+      "endpointCollarScope": "Occupied-neighbor joins only"
+    },
+    "sharedTopPurpose": "Tapered island-A authoring preview only; runtime uses the per-mask/per-variant footprint",
+    "removedRimDecorationCount": 84,
+    "rimRockCount": 0,
+    "coolSlateMaterial": {
+      "rockBaseColorFactor": [
+        0.25,
+        0.32,
+        0.52,
+        1
+      ],
+      "soilAndBottomBaseColorFactor": [
+        0.035,
+        0.045,
+        0.065,
+        1
+      ],
+      "normalScale": 0.55,
+      "roughnessSource": "Existing ground_rock_side_orm.png",
+      "groundTexturesUnchanged": true
+    },
+    "topFootprint": {
+      "boundarySampleCount": 48,
+      "samplesPerSide": 12,
+      "samplesClockwise": [
+        "north",
+        "east",
+        "south",
+        "west"
+      ],
+      "parameter": "u = sample / 12; the final endpoint is the next side first sample",
+      "insetProfiles": {
+        "a": [
+          0.0,
+          0.0,
+          0.0429,
+          0.066,
+          0.05808,
+          0.07788,
+          0.06864,
+          0.0594,
+          0.07392,
+          0.05478,
+          0.03762,
+          0.0,
+          0.0
+        ],
+        "b": [
+          0.0,
+          0.0,
+          0.05412,
+          0.04026,
+          0.07128,
+          0.05808,
+          0.07986,
+          0.06468,
+          0.05544,
+          0.06864,
+          0.04884,
+          0.0,
+          0.0
+        ]
+      },
+      "hiddenSideInset": 0,
+      "topHeight": 1,
+      "preserveEndpointCollars": true,
+      "logicalCellUnchanged": true,
+      "rendererFanQuads": 24,
+      "drawPaintAndShadowShareFootprint": true,
+      "convexCornerTaper": {
+        "activation": "Both incident cardinal sides exposed",
+        "radius": 0.16666666666666666,
+        "topAxisInset": {
+          "a": 0.0605,
+          "b": 0.066
+        },
+        "formula": "Inward XY shift = c * clamp(z,0,1) * clamp(1-dx/r,0,1) * clamp(1-dy/r,0,1), using original XY",
+        "baseUnchanged": true,
+        "occupiedNeighborJoinsUnchanged": true,
+        "concaveJunctionsUnchanged": true
+      },
+      "endpointCollarScope": "Occupied-neighbor joins only"
+    },
+    "collarScope": "Occupied-neighbor joins only; convex exposed/exposed corner collars taper inward",
+    "convexCornerTaper": {
+      "activation": "Both incident cardinal sides exposed",
+      "radius": 0.16666666666666666,
+      "topAxisInset": {
+        "a": 0.0605,
+        "b": 0.066
+      },
+      "formula": "Inward XY shift = c * clamp(z,0,1) * clamp(1-dx/r,0,1) * clamp(1-dy/r,0,1), using original XY",
+      "baseUnchanged": true,
+      "occupiedNeighborJoinsUnchanged": true,
+      "concaveJunctionsUnchanged": true
+    },
+    "taperStrengthIncrease": "10 percent over revision3; occupied-neighbor join collars retained"
+  },
+  "models": [
+    {
+      "name": "CliffWallIslandA",
+      "path": "cliff_wall_island_a.glb",
+      "kind": "body",
+      "type": "island",
+      "variant": "a",
+      "exposedSideMask": 15,
+      "connectionSideMask": 0,
+      "sharedTop": "cliff_wall_top.glb",
+      "rimRockCounts": {
+        "north": 0,
+        "east": 0,
+        "south": 0,
+        "west": 0
+      },
+      "renderBounds": {
+        "minimum": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "maximum": [
+          1.003928780555725,
+          1.0,
+          1.0
+        ]
+      },
+      "topFootprintVariant": "a",
+      "topFootprintSideMask": 15
+    },
+    {
+      "name": "CliffWallIslandB",
+      "path": "cliff_wall_island_b.glb",
+      "kind": "body",
+      "type": "island",
+      "variant": "b",
+      "exposedSideMask": 15,
+      "connectionSideMask": 0,
+      "sharedTop": "cliff_wall_top.glb",
+      "rimRockCounts": {
+        "north": 0,
+        "east": 0,
+        "south": 0,
+        "west": 0
+      },
+      "renderBounds": {
+        "minimum": [
+          0.0,
+          -0.0008393701282329857,
+          0.0
+        ],
+        "maximum": [
+          1.0,
+          1.002804160118103,
+          1.0
+        ]
+      },
+      "topFootprintVariant": "b",
+      "topFootprintSideMask": 15
+    },
+    {
+      "name": "CliffWallEndA",
+      "path": "cliff_wall_end_a.glb",
+      "kind": "body",
+      "type": "end",
+      "variant": "a",
+      "exposedSideMask": 11,
+      "connectionSideMask": 4,
+      "sharedTop": "cliff_wall_top.glb",
+      "rimRockCounts": {
+        "north": 0,
+        "east": 0,
+        "south": 0,
+        "west": 0
+      },
+      "renderBounds": {
+        "minimum": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "maximum": [
+          1.0039196014404297,
+          1.0,
+          1.0
+        ]
+      },
+      "topFootprintVariant": "a",
+      "topFootprintSideMask": 11
+    },
+    {
+      "name": "CliffWallEndB",
+      "path": "cliff_wall_end_b.glb",
+      "kind": "body",
+      "type": "end",
+      "variant": "b",
+      "exposedSideMask": 11,
+      "connectionSideMask": 4,
+      "sharedTop": "cliff_wall_top.glb",
+      "rimRockCounts": {
+        "north": 0,
+        "east": 0,
+        "south": 0,
+        "west": 0
+      },
+      "renderBounds": {
+        "minimum": [
+          0.0,
+          -0.0007313500973396003,
+          0.0
+        ],
+        "maximum": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "topFootprintVariant": "b",
+      "topFootprintSideMask": 11
+    },
+    {
+      "name": "CliffWallStripA",
+      "path": "cliff_wall_strip_a.glb",
+      "kind": "body",
+      "type": "strip",
+      "variant": "a",
+      "exposedSideMask": 5,
+      "connectionSideMask": 10,
+      "sharedTop": "cliff_wall_top.glb",
+      "rimRockCounts": {
+        "north": 0,
+        "east": 0,
+        "south": 0,
+        "west": 0
+      },
+      "renderBounds": {
+        "minimum": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "maximum": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "topFootprintVariant": "a",
+      "topFootprintSideMask": 5
+    },
+    {
+      "name": "CliffWallStripB",
+      "path": "cliff_wall_strip_b.glb",
+      "kind": "body",
+      "type": "strip",
+      "variant": "b",
+      "exposedSideMask": 5,
+      "connectionSideMask": 10,
+      "sharedTop": "cliff_wall_top.glb",
+      "rimRockCounts": {
+        "north": 0,
+        "east": 0,
+        "south": 0,
+        "west": 0
+      },
+      "renderBounds": {
+        "minimum": [
+          0.0,
+          -0.0008393701282329857,
+          0.0
+        ],
+        "maximum": [
+          1.0,
+          1.002804160118103,
+          1.0
+        ]
+      },
+      "topFootprintVariant": "b",
+      "topFootprintSideMask": 5
+    },
+    {
+      "name": "CliffWallCornerA",
+      "path": "cliff_wall_corner_a.glb",
+      "kind": "body",
+      "type": "corner",
+      "variant": "a",
+      "exposedSideMask": 3,
+      "connectionSideMask": 12,
+      "sharedTop": "cliff_wall_top.glb",
+      "rimRockCounts": {
+        "north": 0,
+        "east": 0,
+        "south": 0,
+        "west": 0
+      },
+      "renderBounds": {
+        "minimum": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "maximum": [
+          1.0039196014404297,
+          1.0,
+          1.0
+        ]
+      },
+      "topFootprintVariant": "a",
+      "topFootprintSideMask": 3
+    },
+    {
+      "name": "CliffWallCornerB",
+      "path": "cliff_wall_corner_b.glb",
+      "kind": "body",
+      "type": "corner",
+      "variant": "b",
+      "exposedSideMask": 3,
+      "connectionSideMask": 12,
+      "sharedTop": "cliff_wall_top.glb",
+      "rimRockCounts": {
+        "north": 0,
+        "east": 0,
+        "south": 0,
+        "west": 0
+      },
+      "renderBounds": {
+        "minimum": [
+          0.0,
+          -0.0007313500973396003,
+          0.0
+        ],
+        "maximum": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "topFootprintVariant": "b",
+      "topFootprintSideMask": 3
+    },
+    {
+      "name": "CliffWallEdgeA",
+      "path": "cliff_wall_edge_a.glb",
+      "kind": "body",
+      "type": "edge",
+      "variant": "a",
+      "exposedSideMask": 1,
+      "connectionSideMask": 14,
+      "sharedTop": "cliff_wall_top.glb",
+      "rimRockCounts": {
+        "north": 0,
+        "east": 0,
+        "south": 0,
+        "west": 0
+      },
+      "renderBounds": {
+        "minimum": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "maximum": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "topFootprintVariant": "a",
+      "topFootprintSideMask": 1
+    },
+    {
+      "name": "CliffWallEdgeB",
+      "path": "cliff_wall_edge_b.glb",
+      "kind": "body",
+      "type": "edge",
+      "variant": "b",
+      "exposedSideMask": 1,
+      "connectionSideMask": 14,
+      "sharedTop": "cliff_wall_top.glb",
+      "rimRockCounts": {
+        "north": 0,
+        "east": 0,
+        "south": 0,
+        "west": 0
+      },
+      "renderBounds": {
+        "minimum": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "maximum": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "topFootprintVariant": "b",
+      "topFootprintSideMask": 1
+    },
+    {
+      "name": "CliffWallInteriorA",
+      "path": "cliff_wall_interior_a.glb",
+      "kind": "body",
+      "type": "interior",
+      "variant": "a",
+      "exposedSideMask": 0,
+      "connectionSideMask": 15,
+      "sharedTop": "cliff_wall_top.glb",
+      "rimRockCounts": {
+        "north": 0,
+        "east": 0,
+        "south": 0,
+        "west": 0
+      },
+      "renderBounds": {
+        "minimum": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "maximum": [
+          1.0,
+          1.0,
+          0.0
+        ]
+      },
+      "topFootprintVariant": "a",
+      "topFootprintSideMask": 0
+    },
+    {
+      "name": "CliffWallInteriorB",
+      "path": "cliff_wall_interior_b.glb",
+      "kind": "body",
+      "type": "interior",
+      "variant": "b",
+      "exposedSideMask": 0,
+      "connectionSideMask": 15,
+      "sharedTop": "cliff_wall_top.glb",
+      "rimRockCounts": {
+        "north": 0,
+        "east": 0,
+        "south": 0,
+        "west": 0
+      },
+      "renderBounds": {
+        "minimum": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "maximum": [
+          1.0,
+          1.0,
+          0.0
+        ]
+      },
+      "topFootprintVariant": "b",
+      "topFootprintSideMask": 0
+    },
+    {
+      "name": "CliffWallIslandAPreviewTop",
+      "path": "cliff_wall_top.glb",
+      "kind": "top",
+      "type": "top",
+      "variant": "a",
+      "exposedSideMask": 15,
+      "renderBounds": {
+        "minimum": [
+          0.030249999836087227,
+          0.030249999836087227,
+          1.0
+        ],
+        "maximum": [
+          0.9697499871253967,
+          0.9697499871253967,
+          1.0
+        ]
+      },
+      "purpose": "Tapered island-A preview cap; not registered or shared by runtime shapes"
+    }
+  ],
+  "authoring": {
+    "source": "../../source/cliff_walls.blend",
+    "documentation": "../../source/cliff_walls/README.md",
+    "exportFinalizer": "../../../../tools/finalize_cliff_gltf.py",
+    "bodyUvLayer": "TerrainUV",
+    "bodyUvLayerCount": 1,
+    "revision": "Native Blender MCP edit: slightly stronger face and corner taper; wall slate/moss splat materials"
+  },
+  "runtimeIntegration": {
+    "manifest": "../../../manifest.json",
+    "paletteGroup": "Cliff Wall",
+    "registeredBodyModels": 12,
+    "sharedTopRegistered": false,
+    "automaticShapeSelection": true,
+    "splatPainting": true,
+    "styles": [
+      {
+        "tile": "Cliff Wall",
+        "character": "u",
+        "variant": "a",
+        "defaultModel": "CliffWallIslandA"
+      },
+      {
+        "tile": "Cliff Wall 02",
+        "character": "x",
+        "variant": "b",
+        "defaultModel": "CliffWallIslandB"
+      }
+    ],
+    "paintedTopFollowsBodyFootprint": true,
+    "wallTopMaterials": [
+      "WallSlateRock",
+      "WallMoss"
+    ]
+  }
+}

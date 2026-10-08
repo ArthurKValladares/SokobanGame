@@ -4,6 +4,7 @@
 #include "engine/TaskSystem.hpp"
 
 #include "engine/BoardLayout.hpp"
+#include "engine/CliffWallGeometry.hpp"
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/GroundRimSurface.hpp"
@@ -968,6 +969,13 @@ bool validGroundChunkMaterial(
     return frameData.groundSplat.valid();
 }
 
+std::size_t cliffTopFaceReserve(std::span<const RenderFrameData::Tile> tiles)
+{
+    return static_cast<std::size_t>(std::ranges::count_if(tiles, [](const auto& tile) {
+        return tile.cliffWall && !tile.model.isCube();
+    })) * cliffWallTopPatchCount;
+}
+
 void prepareGroundChunkDraws(PreparedRenderScene& scene,
     const RenderFrameData& frameData, std::vector<std::size_t>& tileOrder)
 {
@@ -1117,12 +1125,13 @@ static void prepareAuxiliaryGeometry(
     particles.reserve(frameData.particles.size());
     const std::size_t rimFaceReserve = groundRimSurfaces.surfaceCount() *
         GroundRimSurface::capacity;
+    const std::size_t cliffFaceReserve = cliffTopFaceReserve(frameData.tiles);
     shadowFaces.clear();
     shadowFaces.reserve(
-        frameData.tiles.size() * 5 + rimFaceReserve + frameData.isoFaces.size());
+        frameData.tiles.size() * 5 + rimFaceReserve + cliffFaceReserve + frameData.isoFaces.size());
     shadowFaceBounds.clear();
     shadowFaceBounds.reserve(
-        frameData.tiles.size() * 5 + rimFaceReserve + frameData.isoFaces.size());
+        frameData.tiles.size() * 5 + rimFaceReserve + cliffFaceReserve + frameData.isoFaces.size());
     shadowModelIndices.clear();
     shadowModelIndices.reserve(frameData.tiles.size());
 
@@ -1247,7 +1256,9 @@ static void prepareAuxiliaryGeometry(
             if ((tile.groundTop || tile.effect == RenderSurfaceEffect::GroundSplat) &&
                 groundChunkTileMask[tileIndex] == 0) {
                 const auto* rim = groundRimSurfaces.surfaceForTileIndex(tileIndex);
-                if (rim) {
+                if (tile.cliffWall) {
+                    for (const auto& patch : cliffWallTopPatches(tile)) appendShadowFace(patch);
+                } else if (rim) {
                     for (std::size_t i = 0; i < rim->count; ++i) {
                         appendShadowFace(rim->patches[i].vertices);
                     }
@@ -1486,6 +1497,7 @@ void appendTileFaces(
         const float depth = tile.size.y;
         const float height = std::max(tile.height, 0.0f);
         const bool drawCube = tile.model.isCube() && !tile.pickOnly;
+        const bool cliffTop = tile.cliffWall && !tile.model.isCube();
         const bool drawTop = !chunked && !tile.pickOnly &&
             (drawCube || tile.groundTop || tile.effect == RenderSurfaceEffect::GroundSplat);
         // Authored model transforms describe how mesh-local coordinates
@@ -1537,9 +1549,9 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
-                .drawable = drawTop && mainSceneVisible,
+                .drawable = drawTop && mainSceneVisible && !cliffTop,
                 .gridSize = { width, depth },
-                .material = topMaterial,
+                .material = cliffTop ? PreparedSurfaceMaterial::Standard : topMaterial,
                 .shorelineMask = 0,
                 .groundSplat = tile.groundSplat,
                 .groundSplatOrigin = tile.groundSplatOrigin,
@@ -1625,17 +1637,17 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
-                .drawable = drawTop && mainSceneVisible && rim.count == 0,
+                .drawable = drawTop && mainSceneVisible && rim.count == 0 && !cliffTop,
                 .gridSize = { width, depth },
                 // Keep the logical box for tile selection, but paint picking
                 // must hit the actual sloped surface rather than this plane.
-                .material = rim.count == 0 && !chunked
+                .material = rim.count == 0 && !chunked && !cliffTop
                     ? topMaterial : PreparedSurfaceMaterial::Standard,
                 .shorelineMask = 0,
                 .groundSplat = tile.groundSplat,
                 .groundSplatOrigin = tile.groundSplatOrigin,
             });
-            for (std::size_t i = 0; !chunked && i < rim.count; ++i) {
+            for (std::size_t i = 0; !chunked && !cliffTop && i < rim.count; ++i) {
                 const auto& patch = rim.patches[i];
                 appendIsoFace(scene, {
                     .vertices = patch.vertices,
@@ -1653,6 +1665,28 @@ void appendTileFaces(
                     .gridSize = { width, depth },
                     .material = topMaterial,
                     .shorelineMask = 0,
+                    .groundSplat = tile.groundSplat,
+                    .groundSplatOrigin = tile.groundSplatOrigin,
+                });
+            }
+        }
+
+        if (cliffTop && !chunked && !tile.pickOnly) {
+            for (const auto& patch : cliffWallTopPatches(tile)) {
+                appendIsoFace(scene, {
+                    .vertices = patch,
+                    .normal = { 0, 0, 1 },
+                    .color = tile.color,
+                    .cell = tile.cell,
+                    .pickBoundsCell = pickBoundsCell,
+                    .blurBehind = tile.blurBehind,
+                    .showGrid = tile.showGrid,
+                    .editorPreview = tile.isEditorPreview,
+                    .pickable = pickable,
+                    .groundRimSurface = true,
+                    .drawable = drawTop && mainSceneVisible,
+                    .gridSize = { width, depth },
+                    .material = topMaterial,
                     .groundSplat = tile.groundSplat,
                     .groundSplatOrigin = tile.groundSplatOrigin,
                 });
@@ -1955,13 +1989,14 @@ void IsoScenePreparer::prepare(
 
     const std::size_t rimFaceReserve = groundRimSurfaceCache_.surfaceCount() *
         GroundRimSurface::capacity;
+    const std::size_t cliffFaceReserve = cliffTopFaceReserve(frameData.tiles);
     scene.isoFaces.reserve(
-        frameData.tiles.size() * 5 + rimFaceReserve + frameData.waterSurfaces.size());
-    scene.opaqueFaceIndices.reserve(frameData.tiles.size() * 3 + rimFaceReserve);
+        frameData.tiles.size() * 5 + rimFaceReserve + cliffFaceReserve + frameData.waterSurfaces.size());
+    scene.opaqueFaceIndices.reserve(frameData.tiles.size() * 3 + rimFaceReserve + cliffFaceReserve);
     scene.translucentFaceIndices.reserve(
-        frameData.tiles.size() + frameData.waterSurfaces.size());
+        frameData.tiles.size() + cliffFaceReserve + frameData.waterSurfaces.size());
     scene.pickFaceIndices.reserve(
-        frameData.tiles.size() * 3 + rimFaceReserve + frameData.waterSurfaces.size());
+        frameData.tiles.size() * 3 + rimFaceReserve + cliffFaceReserve + frameData.waterSurfaces.size());
     scene.renderables.reserve(
         frameData.tiles.size() + frameData.waterSurfaces.size() +
         frameData.isoFaces.size());

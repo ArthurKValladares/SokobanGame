@@ -588,6 +588,7 @@ Common tile symbols:
 | --- | --- | --- | --- |
 | space | Air | `.` | Ground |
 | `A F S V X Y Z a c` | Ground rock versions 02–10 | | |
+| `u` | Cliff Wall (style 01) | `x` | Cliff Wall (style 02) |
 | `#` | Wall | `C` | Player |
 | `Q K U H B` | Rogue / Knight / Druid / Witch / Bard starts | | |
 | `R` | Rock | `P` | Pressure plate |
@@ -772,6 +773,12 @@ editor commands but does not own document or filesystem policy.
   **Randomize Rocks**, below the tile selector, assigns a random version to
   every ground tile on every layer of the edited screen. The whole action is
   one undo/redo step and keeps each tile's splat assignment.
+- **Cliff walls:** click **Cliff Wall** to choose between two rock styles.
+  The body automatically selects and rotates the matching module for all
+  sixteen neighboring cliff patterns, including corners and filled interiors.
+  Their flat tops use **Ground Paint** for assigned splat maps and blend-mask
+  painting. **Randomize Walls** keeps each tile's stone or cliff family and
+  preserves its paint assignment.
 - Link Colors: in the editor, every pressure plate and device has a link
   color, and a device is driven by exactly the pressure plates of its color.
   Rocks, ice blocks, and turrets can also be painted into a color group; they
@@ -843,13 +850,16 @@ editor commands but does not own document or filesystem policy.
   Choose each map's name, **Base Texture**, **Detail Texture**, **Blend Mask**,
   and unique **Assignment Color** from the panel. Texture selectors use the
   manifest's registered textures; add other textures through the Asset Manifest
-  editor. The first map is the default for unassigned ground tiles.
+  editor. The first map is the default for unassigned ground and cliff tops.
   Enable **Paint Tile Assignments**, select a map's color, and click or drag
-  across ground tiles. Each drag is one document undo step; assignments remain
+  across ground or cliff tops. Each drag is one document undo step; assignments remain
   independent on different layers. **Show Assignment Colors** displays the
   assignment palette; turn it off to see the textured result.
   **Paint Blend Mask** edits the selected map's blend: white adds its detail
-  texture, black returns to its base texture. Masks cover a screen once at 32
+  texture, black returns to its base texture. It remains available while painting
+  tile assignments; clicking it switches to blend-mask painting. **New Blend
+  Mask** creates and registers a fresh blank PNG for the selected map and opens
+  it for painting, keeping the previous mask file. Masks cover a screen once at 32
   texels per tile and should use linear color space with clamped sampling.
   Save the document to keep map definitions and tile assignments; **Save Map**
   saves the blend-mask image. `Ctrl+S` saves both. Existing screens retain their

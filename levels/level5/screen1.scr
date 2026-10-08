@@ -1,4 +1,11 @@
 @groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap","name":"Ground"}
+@groundsplat {"base":"WallMoss","color":[0.8705882430076599,0.9647058844566345,0.8235294222831726],"detail":"WallSlateRock","mask":"GroundSplatMap5_1_1","name":"Ground 2"}
+@groundpaint {"cell":[1,0,1],"splat":"Ground 2"}
+@groundpaint {"cell":[1,1,1],"splat":"Ground 2"}
+@groundpaint {"cell":[1,2,1],"splat":"Ground 2"}
+@groundpaint {"cell":[1,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[1,5,1],"splat":"Ground 2"}
+@groundpaint {"cell":[1,6,1],"splat":"Ground 2"}
 @gate {"cell":[1,3,1],"color":[1.0,0.7200000286102295,0.11999999731779099],"plates":[[11,1,2],[12,6,2]]}
 @elevator {"cell":[9,6,0],"color":[0.0,1.0,0.9900331497192383],"levels":[0,1,3],"plates":[[6,6,1]]}
 
@@ -12,13 +19,13 @@ ScYcXSVFSAAaA
 F.aZSXZFF=FcY
 
 @layer 1
- #        aFc
-E#        .c.
- #        Z.V
+ u        aFc
+Ex        .c.
+ u        Z.V
  G   KQ   caZ
- #        aXY
-E#        aXZ
- #    P   YVY
+ x        aXY
+Ex        aXZ
+ x    P   YVY
 
 @layer 2
              

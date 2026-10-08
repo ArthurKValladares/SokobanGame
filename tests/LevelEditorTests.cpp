@@ -2322,6 +2322,21 @@ void testGroundSplatEditing()
     CHECK(editor.updateGroundSplat(1, sand));
     CHECK(editor.groundPaint()[0].splat == "Desert");
     CHECK(editor.selectedGroundSplat()->name == "Desert");
+    // Replacing a map's mask keeps its materials and painted tile assignments,
+    // and document undo can restore the previous mask reference.
+    const auto assignments = editor.groundPaint();
+    const auto previousSplats = editor.groundSplats();
+    sand.mask = "ReplacementMask";
+    CHECK(editor.updateGroundSplat(1, sand));
+    CHECK(editor.selectedGroundSplat() && *editor.selectedGroundSplat() == sand);
+    CHECK(editor.groundSplats()[0] == previousSplats[0]);
+    CHECK(editor.groundPaint() == assignments);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.groundSplats() == previousSplats);
+    CHECK(editor.groundPaint() == assignments);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.selectedGroundSplat() && *editor.selectedGroundSplat() == sand);
+    CHECK(editor.groundPaint() == assignments);
     const auto source = project.source / "level0/screen0.scr";
     CHECK(editor.saveDocument(source));
     const auto loaded = Level::loadDefinitionFromFile(source);
@@ -2722,6 +2737,7 @@ void testGroupedPalettePreservesDirectionalBrushes()
             // distinct direction, including rail axes and rotator turns.
             CHECK(tileTypeName(variant).starts_with(group.name));
             CHECK(variant == TileType::Ground || variant == TileType::Wall ||
+                variant == TileType::CliffWall ||
                 tileTypeName(variant).size() > group.name.size() + 1);
             editor.setSelectedTile(variant);
             CHECK(editor.selectedTile() == variant);
@@ -2827,6 +2843,62 @@ void testStoneWallVariantsPreserveBrushesAndSave()
         CHECK(loaded.pickTile({ x, 1, 1 }) == tile);
         ++x;
     }
+}
+
+void testCliffWallSplatAssignmentsSurviveEditingAndMove()
+{
+    TEST("cliffWallSplatAssignmentsSurviveEditingAndMove");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(6, 3);
+    const auto* group = editorTilePalette::groupFor(TileType::CliffWall);
+    CHECK(group != nullptr);
+    if (!group) return;
+    CHECK(group->name == "Cliff Wall");
+    CHECK(group->count == cliffWallVariantCount);
+    CHECK(editorTilePalette::groupFor(TileType::CliffWall02) == group);
+    CHECK(!editorTilePalette::groupFor(TileType::Wall)->contains(TileType::CliffWall));
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::CliffWall));
+    CHECK(editor.setCell({ 2, 0, 1 }, TileType::CliffWall02));
+    CHECK(editor.addGroundSplat({ "Meadow", "Grass", "Stone", "Mask", { 0, 1, 0 } }));
+    CHECK(editor.addGroundSplat({ "Sand", "Sand", "Stone", "SandMask", { 1, 0, 0 } }));
+    CHECK(editor.beginStroke());
+    CHECK(editor.paintGroundSplat({ 1, 0, 1 }));
+    CHECK(editor.paintGroundSplat({ 2, 0, 1 }));
+    CHECK(!editor.paintGroundSplat({ 3, 0, 1 }));
+    CHECK(editor.endStroke());
+    CHECK(editor.groundPaint().size() == 2);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.groundPaint().empty());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.groundPaint().size() == 2);
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::CliffWall02));
+    CHECK(editor.groundPaint().size() == 2);
+    CHECK(editor.pickTile({ 1, 0, 1 }) == TileType::CliffWall02);
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::WallStone02));
+    CHECK(editor.groundPaint().size() == 1);
+    CHECK(!editor.paintGroundSplat({ 1, 0, 1 }));
+    CHECK(editor.tryUndoEdit());
+    const auto beforeMove = editor.documentDefinition();
+    CHECK(editor.beginMove({ 1, 0, 1 }));
+    CHECK(editor.moveObject({ 4, 0, 1 }));
+    CHECK(editor.pickTile({ 4, 0, 1 }) == TileType::CliffWall02);
+    CHECK(Level::groundSplatAt(editor.groundSplats(), editor.groundPaint(), { 4, 0, 1 })->name == "Sand");
+    CHECK(editor.documentLayers()[1][0][1] == ' ');
+    CHECK(editor.groundPaint().size() == 2);
+    const auto afterMove = editor.documentDefinition();
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentDefinition() == beforeMove);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentDefinition() == afterMove);
+    const auto source = project.source / "level0/screen0.scr";
+    CHECK(editor.saveDocument(source).sourceSaved());
+    CHECK(Level::loadDefinitionFromFile(source) == afterMove);
+    CHECK(Level::loadDefinitionFromFile(project.runtime / "level0/screen0.scr") == afterMove);
+    auto loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(source, false));
+    CHECK(loaded.pickTile({ 4, 0, 1 }) == TileType::CliffWall02);
+    CHECK(loaded.groundPaint() == afterMove.groundPaint);
 }
 
 void testRandomizeRocksPreservesAssignmentsAndGroupsUndo()
@@ -2960,6 +3032,11 @@ void testRandomizeWallsPreservesDocumentAndGroupsUndo()
     CHECK(authored.setCell({ 4, 5, 1 }, TileType::Rogue));
     CHECK(authored.addGroundSplat({ "Meadow", "Grass", "Stone", "Mask", { 0, 1, 0 } }));
     CHECK(authored.addGroundSplat({ "Sand", "Sand", "Stone", "Mask", { 1, 0, 0 } }));
+    for (int x = 5; x < 20; ++x) {
+        CHECK(authored.setCell({ x, 4, 0 }, x % 2 == 0 ? TileType::CliffWall : TileType::CliffWall02));
+        CHECK(authored.setCell({ x, 4, 1 }, x % 2 == 0 ? TileType::CliffWall02 : TileType::CliffWall));
+    }
+    CHECK(authored.paintGroundSplat({ 5, 4, 1 }));
     CHECK(authored.setCell({ 0, 5, 0 }, TileType::GroundRock09));
     CHECK(authored.paintGroundSplat({ 0, 5, 0 }));
     authored.setCameraAngles(CameraAngles { 45.0f, 90.0f });
@@ -2986,14 +3063,19 @@ void testRandomizeWallsPreservesDocumentAndGroupsUndo()
     CHECK(editor.activeLayer() == 1);
     CHECK(Level::loadDefinitionFromFile(source) == before);
     std::array<bool, wallStoneVariantCount> seen {};
+    std::array<bool, cliffWallVariantCount> seenCliffs {};
     for (std::size_t z = 0; z < before.layers.size(); ++z) {
         for (std::size_t y = 0; y < before.layers[z].size(); ++y) {
             for (std::size_t x = 0; x < before.layers[z][y].size(); ++x) {
                 const auto oldTile = charToTileType(before.layers[z][y][x]);
                 const auto newTile = charToTileType(randomized.layers[z][y][x]);
                 CHECK(oldTile && newTile);
-                if (oldTile && tileTypeIsWall(*oldTile)) {
+                if (oldTile && tileTypeIsCliffWall(*oldTile)) {
+                    CHECK(newTile && tileTypeIsCliffWall(*newTile));
+                    if (newTile && tileTypeIsCliffWall(*newTile)) seenCliffs[cliffWallVariantFor(*newTile)] = true;
+                } else if (oldTile && tileTypeIsWall(*oldTile)) {
                     CHECK(newTile && tileTypeIsWall(*newTile));
+                    CHECK(newTile && !tileTypeIsCliffWall(*newTile));
                     if (newTile && tileTypeIsWall(*newTile)) seen[wallStoneVariantFor(*newTile)] = true;
                 } else {
                     CHECK(oldTile == newTile);
@@ -3002,6 +3084,7 @@ void testRandomizeWallsPreservesDocumentAndGroupsUndo()
         }
     }
     CHECK(std::ranges::all_of(seen, [](bool chosen) { return chosen; }));
+    CHECK(std::ranges::all_of(seenCliffs, [](bool chosen) { return chosen; }));
     CHECK(editor.tryUndoEdit());
     CHECK(editor.documentDefinition() == before);
     CHECK(!editor.dirty());
@@ -3129,6 +3212,7 @@ int main()
     testLockPlateEditor();
     testPortalColorGroups();
     testGroundSplatEditing();
+    testCliffWallSplatAssignmentsSurviveEditingAndMove();
     testDocumentCommandsAndUndo();
     testColorGroupsBecomeExplicitLinks();
     testExplicitLinksBecomeColorGroupsOnLoad();

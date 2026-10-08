@@ -436,6 +436,120 @@ void writeGlb(
         static_cast<std::streamsize>(bytes.size()));
 }
 
+void testAutoBindingsIncludeConstantOnlyMaterialSlots()
+{
+    TEST("autoBindingsIncludeConstantOnlyMaterialSlots");
+    ScopedTestDirectory temp("sokoban-mixed-materials");
+    std::vector<uint8_t> binary;
+    for (float value : {
+             0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+             0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f,
+             0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f }) {
+        appendUint32(binary, std::bit_cast<uint32_t>(value));
+    }
+    for (uint32_t index : { 0U, 1U, 2U }) {
+        appendUint32(binary, index);
+    }
+    const auto writeFixture = [&](std::string_view name, bool textured) {
+        const std::string firstMaterial = textured
+            ? R"json({"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}})json"
+            : "{}";
+        writeGlb(temp.path() / name,
+            std::string(R"json({
+  "asset":{"version":"2.0"},
+  "buffers":[{"byteLength":108}],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":36},
+    {"buffer":0,"byteOffset":36,"byteLength":36},
+    {"buffer":0,"byteOffset":72,"byteLength":24},
+    {"buffer":0,"byteOffset":96,"byteLength":12}
+  ],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
+    {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
+    {"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},
+    {"bufferView":3,"componentType":5125,"count":3,"type":"SCALAR"}
+  ],
+  "images":[{"uri":"base.png"}],
+  "textures":[{"source":0}],
+  "materials":[)json") + firstMaterial + R"json(,{},
+    {"pbrMetallicRoughness":{"baseColorFactor":[0.25,0.5,0.75,1],"metallicFactor":0,"roughnessFactor":0.875}}
+  ],
+  "meshes":[{"primitives":[
+    {"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":3,"material":0},
+    {"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":3,"material":2}
+  ]}]
+})json", binary);
+    };
+    writeFixture("mixed.glb", true);
+    writeFixture("constant.glb", false);
+
+    AssetManifest manifest;
+    (void)manifest.addTexture({ .name = "Override", .path = "override.png" });
+    const RenderModel automatic = manifest.addModel({
+        .name = "Automatic", .path = "mixed.glb",
+    });
+    const RenderModel explicitMapping = manifest.addModel({
+        .name = "Explicit", .path = "mixed.glb",
+        .materialMode = ModelMaterialMode::PrimitiveMaterials,
+        .primitiveMaterials = { { .textureName = "Override" } },
+    });
+    const RenderModel constant = manifest.addModel({
+        .name = "Constant", .path = "constant.glb",
+    });
+    const RuntimeTextureCatalog catalog =
+        collectRuntimeTextureCatalog(temp.path(), manifest);
+    CHECK(catalog.discoveredTextureCount() == 1U);
+    const RuntimeModelTextures& automaticModel = catalog.model(
+        static_cast<uint32_t>(automatic.index()));
+    CHECK(automaticModel.requiredTextures.size() == 1U);
+    CHECK(automaticModel.primitiveMaterials.size() == 3U);
+    CHECK(automaticModel.primitiveMaterials[0].bindBaseColorTexture);
+    CHECK(!automaticModel.primitiveMaterials[1].bindBaseColorTexture);
+    CHECK(!automaticModel.primitiveMaterials[2].bindBaseColorTexture);
+
+    const std::vector<uint32_t> descriptorMapping { 7U, 9U };
+    GltfMeshLoadOptions options;
+    options.preserveSourceScale = true;
+    options.primitiveMaterials = remapRuntimeModelTextures(
+        automaticModel, descriptorMapping).primitiveMaterials;
+    const MeshData mesh = loadGltfMesh(temp.path() / "mixed.glb", options);
+    CHECK(mesh.materials.size() == 3U);
+    CHECK(mesh.vertices.size() == 6U);
+    CHECK(mesh.vertices.back().materialIndex == 2U);
+    CHECK(mesh.materials[0].baseColorTexture == 10U);
+    CHECK(mesh.materials[1].baseColorTexture == 0U);
+    const MeshMaterial& untextured = mesh.materials[2];
+    CHECK(untextured.baseColorTexture == 0U);
+    CHECK(untextured.normalTexture == 0U);
+    CHECK(untextured.metallicRoughnessTexture == 0U);
+    CHECK(untextured.emissiveTexture == 0U);
+    CHECK(untextured.occlusionTexture == 0U);
+    CHECK(untextured.baseColorFactor.x == 0.25f);
+    CHECK(untextured.baseColorFactor.y == 0.5f);
+    CHECK(untextured.baseColorFactor.z == 0.75f);
+    CHECK(untextured.metallicFactor == 0.0f);
+    CHECK(untextured.roughnessFactor == 0.875f);
+
+    const RuntimeModelTextures& constantModel = catalog.model(
+        static_cast<uint32_t>(constant.index()));
+    CHECK(constantModel.requiredTextures.empty());
+    CHECK(constantModel.primitiveMaterials.size() == 3U);
+    for (const PrimitiveMaterialBinding& binding : constantModel.primitiveMaterials) {
+        CHECK(!binding.bindBaseColorTexture);
+    }
+    options.primitiveMaterials = constantModel.primitiveMaterials;
+    CHECK(loadGltfMesh(temp.path() / "constant.glb", options).materials[0]
+        .baseColorTexture == 0U);
+
+    options.primitiveMaterials = catalog.model(
+        static_cast<uint32_t>(explicitMapping.index())).primitiveMaterials;
+    CHECK(options.primitiveMaterials.size() == 1U);
+    checkThrows([&] {
+        (void)loadGltfMesh(temp.path() / "mixed.glb", options);
+    });
+}
+
 void testLoadsEverySupportedSourceForm()
 {
     TEST("loadsEverySupportedSourceForm");
@@ -613,6 +727,7 @@ int main()
 {
     testBuildsDeduplicatedPerModelCatalog();
     testEditorAppendedModelMatchesStartupPbrBindings();
+    testAutoBindingsIncludeConstantOnlyMaterialSlots();
     testReconciliationRejectsDescriptorExhaustionWithoutMutation();
     testLoadsEverySupportedSourceForm();
     testPreparedTextureSelectsArtifactOrSourceFallback();

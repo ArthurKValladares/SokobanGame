@@ -1,4 +1,27 @@
 @groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap","name":"Ground"}
+@groundsplat {"base":"WallMoss","color":[0.8705882430076599,0.9647058844566345,0.8235294222831726],"detail":"WallSlateRock","mask":"GroundSplatMap5_3_1","name":"Ground 2"}
+@groundpaint {"cell":[7,1,1],"splat":"Ground 2"}
+@groundpaint {"cell":[7,2,1],"splat":"Ground 2"}
+@groundpaint {"cell":[7,3,1],"splat":"Ground 2"}
+@groundpaint {"cell":[0,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[1,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[2,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[4,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[5,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[6,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[7,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[8,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[9,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[10,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[12,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[13,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[14,4,1],"splat":"Ground 2"}
+@groundpaint {"cell":[7,5,1],"splat":"Ground 2"}
+@groundpaint {"cell":[7,6,1],"splat":"Ground 2"}
+@groundpaint {"cell":[7,7,1],"splat":"Ground 2"}
+@groundpaint {"cell":[7,8,1],"splat":"Ground 2"}
+@groundpaint {"cell":[7,9,1],"splat":"Ground 2"}
+@groundpaint {"cell":[7,10,1],"splat":"Ground 2"}
 @gate {"cell":[3,4,1],"color":[0.0,0.9843137264251709,1.0],"plates":[[6,5,1],[14,5,1]]}
 @gate {"cell":[11,4,1],"color":[0.0,0.9843137264251709,1.0],"plates":[[6,5,1],[14,5,1]]}
 @objectlink {"cell":[8,9,1],"color":[1.0,0.7200000286102295,0.11999999731779099]}
@@ -19,13 +42,13 @@ cFZ.AVZ.     VA
 
 @layer 1
                
-       #       
-   E   #   E   
-       #       
-###G#######G###
-      P#      P
-       #       
-       #       
-       #       
-       #R Q    
-QR     #       
+       u       
+   E   x   E   
+       u       
+xxxGuuuxuxuGxuu
+      Px      P
+       u       
+       u       
+       x       
+       xR Q    
+QR     u       

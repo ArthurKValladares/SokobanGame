@@ -1,4 +1,11 @@
 @groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap","name":"Ground"}
+@groundsplat {"base":"WallMoss","color":[0.8705882430076599,0.9647058844566345,0.8235294222831726],"detail":"WallSlateRock","mask":"GroundSplatMap4_0_1","name":"Wall"}
+@groundpaint {"cell":[4,0,1],"splat":"Wall"}
+@groundpaint {"cell":[4,1,1],"splat":"Wall"}
+@groundpaint {"cell":[4,2,1],"splat":"Wall"}
+@groundpaint {"cell":[4,4,1],"splat":"Wall"}
+@groundpaint {"cell":[4,5,1],"splat":"Wall"}
+@groundpaint {"cell":[4,6,1],"splat":"Wall"}
 
 @layer 0
 aa..acZSZ
@@ -10,13 +17,13 @@ cSVVFXXS.
 c.aacFaZF
 
 @layer 1
-    #    
-    #    
-    #    
+    x    
+    x    
+    x    
  K RRR  E
-    #    
-    #    
-    #    
+    u    
+    u    
+    x    
 
 @layer 2
          

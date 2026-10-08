@@ -272,8 +272,24 @@ RuntimeTextureCatalog collectRuntimeTextureCatalog(
          modelIndex < manifest.models().size();
          ++modelIndex) {
         const AssetManifest::Model& model = manifest.models()[modelIndex];
+        const GltfAssetDependencies& dependencies = inspect(model.path);
+        RuntimeModelTextures& runtime = catalog.models_[modelIndex];
+        if (model.materialMode == ModelMaterialMode::Auto &&
+            runtime.primitiveMaterials.size() < dependencies.materials.size()) {
+            // Texture discovery cannot see constant-only material slots. Auto
+            // bindings still cover those slots so the loader retains their
+            // authored factors without treating them as missing overrides.
+            // Explicit manifest mappings keep their existing slot validation.
+            const std::size_t previousSize = runtime.primitiveMaterials.size();
+            runtime.primitiveMaterials.resize(dependencies.materials.size());
+            for (std::size_t index = previousSize;
+                 index < runtime.primitiveMaterials.size();
+                 ++index) {
+                runtime.primitiveMaterials[index].bindBaseColorTexture = false;
+            }
+        }
         const GltfPreparedSizeMetadata& prepared =
-            inspect(model.path).preparedSizes;
+            dependencies.preparedSizes;
         uint64_t bytes = model.geometry == ModelGeometry::Skinned
             ? prepared.skinnedMeshBytes
             : prepared.staticMeshBytes;
@@ -285,7 +301,7 @@ RuntimeTextureCatalog collectRuntimeTextureCatalog(
             bytes = saturatedAdd(bytes, attachmentPrepared.materialBytes);
             bytes = saturatedAdd(bytes, sizeof(SkinnedAttachment));
         }
-        catalog.models_[modelIndex].preparedBytes = bytes;
+        runtime.preparedBytes = bytes;
     }
     for (uint32_t animationIndex = 0;
          animationIndex < manifest.animations().size();

@@ -1,6 +1,7 @@
 #include "engine/RenderFrameBuilder.hpp"
 
 #include "engine/AnimationCatalog.hpp"
+#include "engine/CliffWallGeometry.hpp"
 #include "engine/ElevatorVisuals.hpp"
 #include "engine/GateEffect.hpp"
 #include "engine/GroundGeometry.hpp"
@@ -105,6 +106,7 @@ public:
                     input_.editor.groundPaint(), {}, input_.editor.showGroundAssignmentColors());
             }
         }
+        processCliffWallGeometry({ frame.tiles.data(), frame.tiles.size() }, input_.manifest);
         if (input_.settings.geometry.processGroundGeometry) {
             processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input_.manifest,
                 arena_, input_.groundGeometryCache);
@@ -1561,13 +1563,15 @@ RenderFrameData::Tile tileVisual(
         .modelRotationOffsetRadians = tileTypeIsMirror(tile)
             ? config::mirrorModelRotationOffsetRadians
             : 0.0f,
-        .effect = tileTypeIsGround(tile)
+        .effect = tileTypeHasSplatTop(tile)
             ? RenderSurfaceEffect::GroundSplat
             : (tile == TileType::PressurePlate || tile == TileType::End)
             ? RenderSurfaceEffect::PlateEnergy
             : RenderSurfaceEffect::Standard,
         .groundRockVariant = groundRockVariantFor(tile),
-        .groundTop = tileTypeIsGround(tile),
+        .cliffWall = tileTypeIsCliffWall(tile),
+        .cliffWallVariant = cliffWallVariantFor(tile),
+        .groundTop = tileTypeHasSplatTop(tile),
     };
     // Ladders must retain their one-unit repeat interval and wall offset.
     if (!elevator && tile != TileType::Ladder) {

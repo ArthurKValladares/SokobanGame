@@ -1172,6 +1172,8 @@ bool LevelEditor::randomizeWalls(std::optional<uint32_t> seed)
     std::mt19937 random(seed ? *seed : std::random_device {}());
     std::uniform_int_distribution<uint32_t> choose(
         0, static_cast<uint32_t>(wallStoneVariantCount - 1));
+    std::uniform_int_distribution<uint32_t> chooseCliff(
+        0, static_cast<uint32_t>(cliffWallVariantCount - 1));
     std::size_t walls = 0;
     std::size_t changed = 0;
     for (auto& layer : document_.layers) {
@@ -1180,9 +1182,12 @@ bool LevelEditor::randomizeWalls(std::optional<uint32_t> seed)
                 const auto tile = charToTileType(character);
                 if (!tile || !tileTypeIsWall(*tile)) continue;
                 ++walls;
-                const uint32_t variant = choose(random);
-                const TileType replacement = variant == 0 ? TileType::Wall
-                    : static_cast<TileType>(static_cast<uint32_t>(TileType::WallStone02) + variant - 1);
+                const bool cliff = tileTypeIsCliffWall(*tile);
+                const uint32_t variant = cliff ? chooseCliff(random) : choose(random);
+                const TileType replacement = cliff
+                    ? (variant == 0 ? TileType::CliffWall : TileType::CliffWall02)
+                    : variant == 0 ? TileType::Wall
+                        : static_cast<TileType>(static_cast<uint32_t>(TileType::WallStone02) + variant - 1);
                 const char replacementCharacter = tileTypeToChar(replacement);
                 changed += character != replacementCharacter;
                 character = replacementCharacter;
@@ -1191,7 +1196,7 @@ bool LevelEditor::randomizeWalls(std::optional<uint32_t> seed)
     }
     if (changed == 0) {
         document_.status = walls == 0 ? "No walls to randomize."
-            : "Wall stone choices are unchanged.";
+            : "Wall choices are unchanged.";
         return false;
     }
     pendingMove_.reset();
@@ -1391,7 +1396,7 @@ bool LevelEditor::moveObject(GridPosition3 destination)
     restoreRecordAfterMove(
         document_.lecterns, before.lecterns, tileTypeIsLectern(move->tile),
         move->source, destination);
-    if (tileTypeIsGround(move->tile)) {
+    if (tileTypeHasSplatTop(move->tile)) {
         const auto paint = std::ranges::find(before.groundPaint, move->source, &Level::GroundPaint::cell);
         if (paint != before.groundPaint.end()) {
             document_.groundPaint.push_back({ .cell = destination, .splat = paint->splat });
@@ -1942,7 +1947,7 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
         });
     }
 
-    if (!tileTypeIsGround(tile)) {
+    if (!tileTypeHasSplatTop(tile)) {
         std::erase_if(document_.groundPaint, [&](const Level::GroundPaint& paint) {
             return paint.cell == translatedPosition;
         });
@@ -4438,7 +4443,7 @@ bool LevelEditor::paintGroundSplat(GridPosition3 cell)
     if (!splat || cell.x < 0 || cell.y < 0 || cell.z < 0 ||
         cell.x >= static_cast<int>(documentWidth()) || cell.y >= static_cast<int>(documentHeight()) ||
         cell.z >= static_cast<int>(documentDepth()) ||
-        !tileTypeIsGround(charToTileType(document_.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)]).value_or(TileType::Air))) return false;
+        !tileTypeHasSplatTop(charToTileType(document_.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)]).value_or(TileType::Air))) return false;
     const auto found = std::ranges::find(document_.groundPaint, cell, &Level::GroundPaint::cell);
     const bool isDefault = splat == &document_.groundSplats.front();
     if ((found == document_.groundPaint.end() && isDefault) ||

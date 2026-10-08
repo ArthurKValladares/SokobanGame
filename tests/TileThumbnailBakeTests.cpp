@@ -43,7 +43,9 @@ const AssetManifest& testManifest()
         { "name": "Druid", "path": "d.glb", "geometry": "skinned" },
         { "name": "Witch", "path": "w.glb", "geometry": "skinned" },
         { "name": "Bard", "path": "b.glb", "geometry": "skinned" },
-        { "name": "Wardrobe", "path": "wardrobe.glb", "preserveSourceScale": true }
+        { "name": "Wardrobe", "path": "wardrobe.glb", "preserveSourceScale": true },
+        { "name": "CliffWallIslandA", "path": "cliff_a.glb", "preserveSourceScale": true },
+        { "name": "CliffWallIslandB", "path": "cliff_b.glb", "preserveSourceScale": true }
       ],
       "animations": [
         { "name": "Idle", "path": "a.glb", "role": "player-idle" },
@@ -54,6 +56,8 @@ const AssetManifest& testManifest()
       ],
       "tiles": [
         { "tile": "Wall", "model": "Bricks" },
+        { "tile": "Cliff Wall", "model": "CliffWallIslandA" },
+        { "tile": "Cliff Wall 02", "model": "CliffWallIslandB" },
         { "tile": "Ladder", "model": "Ladder" },
         { "tile": "Player", "model": "Hero" },
         { "tile": "Wardrobe Lorekeeper", "model": "Wardrobe" },
@@ -300,6 +304,15 @@ void testGroundIsBakedThroughTheSplatPath()
             TileType::Wall, testManifest(), testSettings());
     CHECK(wall.tiles.back().effect == RenderSurfaceEffect::Standard);
     CHECK(!wall.tiles.back().model.isCube());
+    for (const auto type : { TileType::CliffWall, TileType::CliffWall02 }) {
+        const auto cliff = tileThumbnails::buildBakeFrame(type, testManifest(), testSettings());
+        CHECK(cliff.tiles.back().model == testManifest().modelForTile(type));
+        CHECK(cliff.tiles.back().effect == RenderSurfaceEffect::GroundSplat);
+        CHECK(cliff.tiles.back().groundTop);
+        CHECK(cliff.groundSplat.valid());
+        CHECK(cliff.groundRockSideTexture == testManifest().textureIdByName(groundRockSideTextureName));
+        CHECK(cliff.tiles.size() == tileThumbnails::bedSize * tileThumbnails::bedSize + 1);
+    }
 }
 
 void testLecternsBakeAllCardinalDirections()

@@ -8,8 +8,10 @@
 #include "engine/render/CompressedTextureArtifact.hpp"
 #include "engine/render/PngWriter.hpp"
 
+#include <algorithm>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <system_error>
 #include <utility>
 
@@ -103,6 +105,84 @@ CreatedSplatMap createBlankSplatMapAt(
         : "Created a blank " + sourcePath.filename().string() +
             " (" + std::to_string(boardTilesWide) + "x" +
             std::to_string(boardTilesHigh) + " tiles).";
+    return result;
+}
+
+CreatedSplatMap createUniqueBlankSplatMap(
+    std::string textureNamePrefix,
+    uint32_t boardTilesWide,
+    uint32_t boardTilesHigh,
+    const std::filesystem::path& sourceAssetRoot,
+    const std::filesystem::path& runtimeAssetRoot,
+    const AssetManifest& manifest)
+{
+    CreatedSplatMap result;
+    if (boardTilesWide == 0 || boardTilesHigh == 0) {
+        result.message = "That document has no board to make a map for.";
+        return result;
+    }
+    if (textureNamePrefix.empty()) {
+        result.message = "A new blend mask needs a valid texture name prefix.";
+        return result;
+    }
+    // Manifest names are unrestricted strings, but mask files must stay in
+    // custom/textures even when a map uses spaces or path-like punctuation.
+    for (char& character : textureNamePrefix) {
+        const bool safe = (character >= 'a' && character <= 'z') ||
+            (character >= 'A' && character <= 'Z') ||
+            (character >= '0' && character <= '9') || character == '_';
+        if (!safe) {
+            character = '_';
+        }
+    }
+
+    const auto normalizedPath = [](std::string path) {
+        std::replace(path.begin(), path.end(), '\\', '/');
+        return std::filesystem::path(path).lexically_normal().generic_string();
+    };
+
+    for (uint64_t suffix = 1; suffix < std::numeric_limits<uint64_t>::max();
+         ++suffix) {
+        const std::string textureName = textureNamePrefix + "_BlendMask_" +
+            std::to_string(suffix);
+        const std::string relativePath =
+            "custom/textures/" + textureName + ".png";
+        bool occupied = !manifest.findTextureIdByName(textureName).isNone();
+        for (const AssetManifest::Texture& texture : manifest.textures()) {
+            occupied |= normalizedPath(texture.path) == relativePath;
+        }
+        if (occupied) {
+            continue;
+        }
+
+        // An unregistered file can still contain someone's painted work.
+        // Inspect both trees before creating anything, so a runtime-only mask
+        // is never overwritten while publishing a newly allocated source map.
+        for (const std::filesystem::path& root :
+             { sourceAssetRoot, runtimeAssetRoot }) {
+            if (root.empty()) {
+                continue;
+            }
+            std::error_code error;
+            occupied |= std::filesystem::exists(root / relativePath, error);
+            if (error) {
+                result.message = "Could not inspect the blend mask: " +
+                    error.message();
+                return result;
+            }
+        }
+        if (occupied) {
+            continue;
+        }
+
+        result = createBlankSplatMapAt(
+            relativePath, boardTilesWide, boardTilesHigh,
+            sourceAssetRoot, runtimeAssetRoot);
+        result.textureName = textureName;
+        return result;
+    }
+
+    result.message = "Could not find an unused blend mask name.";
     return result;
 }
 

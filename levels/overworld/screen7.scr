@@ -1,3 +1,14 @@
+@groundsplat {"base":"GroundGrass","color":[0.250980406999588,0.7490196228027344,0.3490196168422699],"detail":"GroundRock","mask":"GroundSplatMapOverworld7","name":"Ground"}
+@groundsplat {"base":"WallMoss","color":[0.8705882430076599,0.9647058844566345,0.8235294222831726],"detail":"WallSlateRock","mask":"GroundSplatMapOverworld7_1","name":"Wall"}
+@groundpaint {"cell":[0,6,2],"splat":"Wall"}
+@groundpaint {"cell":[1,6,2],"splat":"Wall"}
+@groundpaint {"cell":[2,6,2],"splat":"Wall"}
+@groundpaint {"cell":[3,6,2],"splat":"Wall"}
+@groundpaint {"cell":[4,6,2],"splat":"Wall"}
+@groundpaint {"cell":[5,6,2],"splat":"Wall"}
+@groundpaint {"cell":[7,6,2],"splat":"Wall"}
+@groundpaint {"cell":[8,6,2],"splat":"Wall"}
+
 @layer 0
          
          
@@ -23,4 +34,4 @@ Za.XVXAYS
          
          
          
-###### ##
+uuuuxu xu

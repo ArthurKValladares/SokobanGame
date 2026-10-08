@@ -107,15 +107,30 @@ enum class TileType : uint8_t {
     WallStone06,
     WallStone07,
     WallStone08,
+    // The two cliff styles select modular bodies from neighbouring cliff
+    // occupancy and retain the same paintable splat top as ground.
+    CliffWall,
+    CliffWall02,
     Count,
 };
 
 inline constexpr std::size_t groundRockVariantCount = 10;
 inline constexpr std::size_t wallStoneVariantCount = 8;
+inline constexpr std::size_t cliffWallVariantCount = 2;
+
+[[nodiscard]] constexpr bool tileTypeIsCliffWall(TileType tile)
+{
+    return tile == TileType::CliffWall || tile == TileType::CliffWall02;
+}
+
+[[nodiscard]] constexpr uint32_t cliffWallVariantFor(TileType tile)
+{
+    return tile == TileType::CliffWall02 ? 1U : 0U;
+}
 
 [[nodiscard]] constexpr bool tileTypeIsWall(TileType tile)
 {
-    return tile == TileType::Wall ||
+    return tileTypeIsCliffWall(tile) || tile == TileType::Wall ||
         (tile >= TileType::WallStone02 && tile <= TileType::WallStone08);
 }
 
@@ -137,6 +152,11 @@ inline constexpr std::size_t wallStoneVariantCount = 8;
     return tile >= TileType::GroundRock02 && tile <= TileType::GroundRock10
         ? static_cast<uint32_t>(tile) - static_cast<uint32_t>(TileType::GroundRock02) + 1U
         : 0U;
+}
+
+[[nodiscard]] constexpr bool tileTypeHasSplatTop(TileType tile)
+{
+    return tileTypeIsGround(tile) || tileTypeIsCliffWall(tile);
 }
 
 // Behavioural traits shared by families of tiles. Combine with `|`.
@@ -252,6 +272,8 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::WallStone06, 'k', "Wall Stone 06", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::WallStone07, 'm', "Wall Stone 07", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::WallStone08, 'r', "Wall Stone 08", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::CliffWall, 'u', "Cliff Wall", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::CliffWall02, 'x', "Cliff Wall 02", { 1.0f, 1.0f, 1.0f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();

@@ -670,6 +670,58 @@ bool ApplicationTools::createGroundSplatMap(
     return true;
 }
 
+bool ApplicationTools::createGroundBlendMask(
+    const std::filesystem::path& sourceAssetRoot,
+    const std::filesystem::path& runtimeAssetRoot,
+    AssetManifest& manifest,
+    VulkanRenderer& renderer)
+{
+    const Level::GroundSplat* selected = levelEditor.selectedGroundSplat();
+    if (!selected) {
+        log::warning(log::Category::Assets)
+            << "Select or add a splat map before creating its blend mask.";
+        return false;
+    }
+    const std::size_t selectedIndex =
+        static_cast<std::size_t>(selected - levelEditor.groundSplats().data());
+    Level::GroundSplat edited = *selected;
+    if (splatPainter.dirty() && !splatPainter.save()) return false;
+    if (manifest.textures().size() >= renderer.textureDescriptorCapacity()) {
+        log::error(log::Category::Assets)
+            << "Could not create a blend mask; the runtime texture descriptor "
+               "heap is full (capacity "
+            << renderer.textureDescriptorCapacity() << ").";
+        return false;
+    }
+
+    const CreatedSplatMap created = createUniqueBlankSplatMap(
+        edited.mask,
+        levelEditor.documentWidth(),
+        levelEditor.documentHeight(),
+        sourceAssetRoot,
+        runtimeAssetRoot,
+        manifest);
+    log::info(log::Category::Assets) << created.message;
+    if (!created.created) return false;
+    if (!persistManifestTexture(created.textureName, created.relativePath)) return false;
+    const RenderTexture added = manifest.addTexture({
+        .name = created.textureName,
+        .path = created.relativePath,
+        .tiling = false,
+        .filter = TextureFilter::Linear,
+        .colorSpace = TextureColorSpace::Linear,
+    });
+    if (added.isNone()) {
+        log::error(log::Category::Assets)
+            << "Could not register " << created.textureName << ".";
+        return false;
+    }
+    renderer.syncManifestTextures();
+    edited.mask = created.textureName;
+    if (!levelEditor.updateGroundSplat(selectedIndex, std::move(edited))) return false;
+    return openGroundPainting(sourceAssetRoot, runtimeAssetRoot, manifest, renderer);
+}
+
 bool ApplicationTools::persistManifestTexture(
     const std::string& name,
     const std::string& relativePath)

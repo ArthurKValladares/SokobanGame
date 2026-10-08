@@ -1,4 +1,5 @@
 #include "engine/render/RenderAssetRequirements.hpp"
+#include "engine/CliffWallGeometry.hpp"
 #include "engine/render/SelectorRenderConfig.hpp"
 
 #include "engine/AnimationCatalog.hpp"
@@ -189,6 +190,16 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
                 }
                 const TileType tile = level.tileAt(x, y, z);
                 requirements.requireModel(manifest.modelForTile(tile));
+                if (tileTypeIsCliffWall(tile)) {
+                    // The visible body is selected from adjacency, including
+                    // after editor changes; warm every shape for this variant.
+                    for (const auto& shapes : cliffWallModelNames) {
+                        if (const auto model = manifest.findModelIdByName(
+                                shapes[cliffWallVariantFor(tile)])) {
+                            requirements.requireModel(*model);
+                        }
+                    }
+                }
                 // A plate under a mirror is not in the grid; ask for it too.
                 const std::optional<TileType> plate = level.plateAt({
                     static_cast<int>(x),
