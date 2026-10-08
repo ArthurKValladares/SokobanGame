@@ -16,11 +16,12 @@ cool gray, broken mineral veins, and sparse ochre weathering, painted in the
 same style as the ground textures. The marble remains nonmetallic and mostly
 matte, with variation across fresh and weathered surface patches.
 
-The latest height pass raises selected large capstones and lowers some of their
-neighbors, varying which section leads in each wall. Their lower edges remain
-fixed to preserve the closed joints. Major stone tops shift by -0.02 to +0.065
-units, while the horizontal footprint and stone arrangements remain unchanged.
-Small raised accents move with their supporting stones so they remain visible.
+Each wall now has four or five main upper sections with unequal widths and
+modest height tiers. Small raised badges and short stacked pieces were removed;
+their larger neighbors extend across those areas to simplify the in-game
+silhouette and reduce seams. Existing chamfers, broad facets, and chips remain
+on the surviving stones. Fixed lower cap edges and the recessed backing keep
+the assembly closed within its original horizontal tile footprint.
 
 The joints have recessed stone backing, so gaps between the visible stones
 do not show through the wall. Large faces have pronounced broad facets, and
@@ -35,8 +36,9 @@ stone islands and a joined backing core; use Select Linked in Edit Mode to
 edit a stone independently. The `RockSurface` vertex group identifies the
 visible stone shells for future surface edits.
 
-`QuarryUV` is UV0: cube projection at a consistent 1.35-unit texture scale,
-with different image crops for the individual stones and wall variants.
+`QuarryUV` is UV0: the original cube projection uses a 1.35-unit texture scale,
+with different image crops for the individual stones and wall variants. The
+simplified stones retain those crops as their faces extend into adjacent areas.
 Mapping offsets are baked into the UV coordinates. Geometry and closed joints
 are unchanged by the material pass. Three images are packed in the Blender
 source and shared by the exported GLBs in `../pbr/wall_quarry_marble/`:
