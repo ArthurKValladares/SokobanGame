@@ -1165,6 +1165,43 @@ bool LevelEditor::randomizeRocks(std::optional<uint32_t> seed)
     return true;
 }
 
+bool LevelEditor::randomizeWalls(std::optional<uint32_t> seed)
+{
+    endStroke();
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    std::mt19937 random(seed ? *seed : std::random_device {}());
+    std::uniform_int_distribution<uint32_t> choose(
+        0, static_cast<uint32_t>(wallStoneVariantCount - 1));
+    std::size_t walls = 0;
+    std::size_t changed = 0;
+    for (auto& layer : document_.layers) {
+        for (auto& row : layer) {
+            for (char& character : row) {
+                const auto tile = charToTileType(character);
+                if (!tile || !tileTypeIsWall(*tile)) continue;
+                ++walls;
+                const uint32_t variant = choose(random);
+                const TileType replacement = variant == 0 ? TileType::Wall
+                    : static_cast<TileType>(static_cast<uint32_t>(TileType::WallStone02) + variant - 1);
+                const char replacementCharacter = tileTypeToChar(replacement);
+                changed += character != replacementCharacter;
+                character = replacementCharacter;
+            }
+        }
+    }
+    if (changed == 0) {
+        document_.status = walls == 0 ? "No walls to randomize."
+            : "Wall stone choices are unchanged.";
+        return false;
+    }
+    pendingMove_.reset();
+    document_.dirty = true;
+    document_.status = "Randomized " + std::to_string(walls) +
+        " walls (" + std::to_string(changed) + " changed).";
+    recordDocumentChange(before);
+    return true;
+}
+
 bool LevelEditor::beginStroke()
 {
     if (strokeBefore_) {

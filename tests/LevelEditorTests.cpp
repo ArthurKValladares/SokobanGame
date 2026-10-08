@@ -2936,8 +2936,124 @@ void testRandomizeRocksEndsStrokeAndHandlesNoGround()
     CHECK(!emptyEditor.tryUndoEdit());
 }
 
+void testRandomizeWallsPreservesDocumentAndGroupsUndo()
+{
+    TEST("randomizeWallsPreservesDocumentAndGroupsUndo");
+    TemporaryProject project;
+    auto authored = makeEditor(project);
+    authored.newDocument(20, 6);
+    const auto* group = editorTilePalette::groupFor(TileType::Wall);
+    CHECK(group != nullptr);
+    if (!group) return;
+    for (int z = 0; z < 2; ++z) {
+        for (int y = 0; y < 4; ++y) {
+            for (int x = 0; x < 20; ++x) {
+                CHECK(authored.setCell({ x, y, z }, group->variants()[
+                    static_cast<std::size_t>(x) % wallStoneVariantCount]));
+            }
+        }
+    }
+    CHECK(authored.setCell({ 0, 4, 1 }, TileType::Rock));
+    CHECK(authored.setCell({ 1, 4, 1 }, TileType::PressurePlate));
+    CHECK(authored.setCell({ 2, 4, 1 }, TileType::Gate));
+    // The wall rows replace the default start; keep a valid playable fixture.
+    CHECK(authored.setCell({ 4, 5, 1 }, TileType::Rogue));
+    CHECK(authored.addGroundSplat({ "Meadow", "Grass", "Stone", "Mask", { 0, 1, 0 } }));
+    CHECK(authored.addGroundSplat({ "Sand", "Sand", "Stone", "Mask", { 1, 0, 0 } }));
+    CHECK(authored.setCell({ 0, 5, 0 }, TileType::GroundRock09));
+    CHECK(authored.paintGroundSplat({ 0, 5, 0 }));
+    authored.setCameraAngles(CameraAngles { 45.0f, 90.0f });
+    authored.setWaterLayer(0U);
+    const auto source = project.source / "level0/screen0.scr";
+    CHECK(authored.saveDocument(source));
+    auto editor = makeEditor(project);
+    const bool loaded = editor.loadDocument(source, false);
+    CHECK(loaded);
+    if (!loaded) return;
+    editor.setSelectedTile(TileType::GroundRock03);
+    editor.setActiveLayer(1);
+    const auto before = editor.documentDefinition();
+    CHECK(!editor.dirty());
+    CHECK(editor.randomizeWalls(12345U));
+    const auto randomized = editor.documentDefinition();
+    CHECK(editor.dirty());
+    CHECK(randomized.layers[0] != before.layers[0]);
+    CHECK(randomized.layers[1] != before.layers[1]);
+    auto expected = before;
+    expected.layers = randomized.layers;
+    CHECK(randomized == expected);
+    CHECK(editor.selectedTile() == TileType::GroundRock03);
+    CHECK(editor.activeLayer() == 1);
+    CHECK(Level::loadDefinitionFromFile(source) == before);
+    std::array<bool, wallStoneVariantCount> seen {};
+    for (std::size_t z = 0; z < before.layers.size(); ++z) {
+        for (std::size_t y = 0; y < before.layers[z].size(); ++y) {
+            for (std::size_t x = 0; x < before.layers[z][y].size(); ++x) {
+                const auto oldTile = charToTileType(before.layers[z][y][x]);
+                const auto newTile = charToTileType(randomized.layers[z][y][x]);
+                CHECK(oldTile && newTile);
+                if (oldTile && tileTypeIsWall(*oldTile)) {
+                    CHECK(newTile && tileTypeIsWall(*newTile));
+                    if (newTile && tileTypeIsWall(*newTile)) seen[wallStoneVariantFor(*newTile)] = true;
+                } else {
+                    CHECK(oldTile == newTile);
+                }
+            }
+        }
+    }
+    CHECK(std::ranges::all_of(seen, [](bool chosen) { return chosen; }));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentDefinition() == before);
+    CHECK(!editor.dirty());
+    CHECK(!editor.canUndo());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentDefinition() == randomized);
+    CHECK(!editor.randomizeWalls(12345U));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentDefinition() == before);
+    CHECK(!editor.canUndo());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.saveDocument(source));
+    CHECK(Level::loadDefinitionFromFile(source) == randomized);
+    CHECK(Level::loadDefinitionFromFile(project.runtime / "level0/screen0.scr") == randomized);
+}
+
+void testRandomizeWallsEndsStrokeAndHandlesNoWalls()
+{
+    TEST("randomizeWallsEndsStrokeAndHandlesNoWalls");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(10, 2);
+    CHECK(editor.setCell({ 0, 1, 1 }, TileType::WallStone02));
+    const auto before = editor.documentLayers();
+    CHECK(editor.beginStroke());
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::Wall));
+    const auto painted = editor.documentLayers();
+    CHECK(editor.randomizeWalls(12345U));
+    CHECK(!editor.strokeActive());
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers() == painted);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers() == before);
+
+    editor.newDocument(2, 2, false);
+    CHECK(editor.setCell({ 0, 0, 0 }, TileType::GroundRock09));
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::Rock));
+    const auto source = project.source / "level0/screen0.scr";
+    CHECK(editor.saveDocument(source));
+    auto emptyEditor = makeEditor(project);
+    CHECK(emptyEditor.loadDocument(source, false));
+    const auto empty = emptyEditor.documentDefinition();
+    CHECK(!emptyEditor.randomizeWalls(12345U));
+    CHECK(emptyEditor.documentDefinition() == empty);
+    CHECK(!emptyEditor.dirty());
+    CHECK(!emptyEditor.canUndo());
+}
+
 int main()
 {
+    testRandomizeWallsPreservesDocumentAndGroupsUndo();
+    testRandomizeWallsEndsStrokeAndHandlesNoWalls();
     testRandomizeRocksPreservesAssignmentsAndGroupsUndo();
     testRandomizeRocksEndsStrokeAndHandlesNoGround();
     testRockGroundVariantsPreserveBrushesAndPaint();

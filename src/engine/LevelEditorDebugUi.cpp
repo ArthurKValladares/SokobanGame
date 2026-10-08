@@ -921,6 +921,13 @@ void LevelEditorDebugUi::drawTilePalette(
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Choose a random rock model for every ground tile on all layers of this screen. Undo restores the previous choices.");
     }
+    ImGui::SameLine();
+    if (ImGui::Button("Randomize Walls")) {
+        (void)editor.randomizeWalls();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Choose a random stone model for every wall tile on all layers of this screen. Undo restores the previous choices.");
+    }
 
     const std::string_view selectedName = tileTypeName(editor.selectedTile());
     if (tileTypeIsGround(editor.selectedTile())) {

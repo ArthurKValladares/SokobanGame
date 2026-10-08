@@ -186,6 +186,8 @@ public:
     // Randomizes ground rock variants on every document layer as one undo
     // step, preserving tile assignments. A seed gives repeatable layouts.
     bool randomizeRocks(std::optional<uint32_t> seed = std::nullopt);
+    // Randomizes wall stone variants on every document layer as one undo step.
+    bool randomizeWalls(std::optional<uint32_t> seed = std::nullopt);
     // A stroke groups every change made until endStroke() into one undo
     // record, so a drag that paints forty cells undoes in one step. Undo,
     // redo and document switches end an open stroke first.

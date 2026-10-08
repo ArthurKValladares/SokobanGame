@@ -16,6 +16,12 @@ cool gray, broken mineral veins, and sparse ochre weathering, painted in the
 same style as the ground textures. The marble remains nonmetallic and mostly
 matte, with variation across fresh and weathered surface patches.
 
+The latest height pass raises selected large capstones and lowers some of their
+neighbors, varying which section leads in each wall. Their lower edges remain
+fixed to preserve the closed joints. Major stone tops shift by -0.02 to +0.065
+units, while the horizontal footprint and stone arrangements remain unchanged.
+Small raised accents move with their supporting stones so they remain visible.
+
 The joints have recessed stone backing, so gaps between the visible stones
 do not show through the wall. Large faces have pronounced broad facets, and
 edges have varied bevels, irregularities, and readable localized chips baked
@@ -35,7 +41,9 @@ Mapping offsets are baked into the UV coordinates. Geometry and closed joints
 are unchanged by the material pass. Three images are packed in the Blender
 source and shared by the exported GLBs in `../pbr/wall_quarry_marble/`:
 
-- `albedo.png`: 1024-square sRGB painted base color, white material factor.
+- `albedo.png`: 1024-square sRGB painted base color, neutral 0.85 linear RGB
+  material factor for a slightly darker marble. Blender's Color Multiply node
+  exports this factor directly; the original texture artwork remains intact.
 - `normal.png`: aligned linear OpenGL/Blender +Y tangent-space detail; normal
   strength 1, with encoded relief around 8 degrees at the 90th percentile.
 - `orm.png`: linear R = weak local cavity AO, G = roughness, B = metallic 0.
