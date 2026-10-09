@@ -3862,6 +3862,96 @@ void testFilledWaterUpdatesEdgesAndRoundedCornerCaps()
     }
 }
 
+void testWaterRipplesFollowPlayerAndEnemySurfaceContact()
+{
+    TEST("waterRipplesFollowPlayerAndEnemySurfaceContact");
+    const Level level = Level::loadFromLayers({ { ".WW." }, { "C   " } },
+        "water impact presentation");
+    GameState before = stateWithPlayer({ 0, 0, 1 });
+    before.enemies.push_back({ .cell = { 3, 0, 1 } });
+    before.movables.push_back({ .type = TileType::Rock, .cell = { 3, 0, 2 } });
+    GameState after = before;
+    after.players[0].cell = { 1, 0, 1 };
+    after.players[0].dead = true;
+    after.players[0].drowned = true;
+    after.enemies[0].cell = { 2, 0, 1 };
+    after.enemies[0].fallen = true;
+    after.movables[0].cell.z = 1;
+    GameplayPresentation presentation;
+    presentation.resetEntities(before);
+    GameplaySession::Action action { .before = before, .after = after,
+        .durationSeconds = 1.0f };
+    action.presentation = presentation.buildActionPresentation(action, &level);
+    presentation.scheduleWaterEntries(level, action, {}, 1.0f);
+    const auto frameAt = [&] {
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(), .level = level, .state = before,
+            .moving = true, .projectedState = after,
+            .presentation = presentation, .settings = {},
+        });
+    };
+    CHECK(frameAt().waterRippleCount == 0);
+    // The hero continues below the water after touching it, so its impact is
+    // earlier than the enemy whose motion ends exactly at the water surface.
+    presentation.advanceWaterRipples(0.6f);
+    const auto playerContact = frameAt();
+    CHECK(playerContact.waterRippleCount == 1);
+    CHECK(near(playerContact.waterRipples[0].position.x, 1.5f));
+    CHECK(near(playerContact.waterRipples[0].position.z, 0.82f));
+    CHECK(near(playerContact.waterRipples[0].ageSeconds, 0.01f));
+    presentation.advanceWaterRipples(0.5f);
+    const auto both = frameAt();
+    CHECK(both.waterRippleCount == 2);
+    CHECK(near(both.waterRipples[1].position.x, 2.5f));
+    CHECK(near(both.waterRipples[1].ageSeconds, 0.1f));
+    // Render sampling is side-effect free; repeated seeks cannot duplicate an
+    // emission, and finishing the action leaves its rings running.
+    presentation.beginAction(action, before);
+    presentation.seekAction(action, 1.0f);
+    presentation.seekAction(action, 1.0f);
+    presentation.finishAction(after);
+    CHECK(frameAt().waterRippleCount == 2);
+    presentation.advanceWaterRipples(config::waterImpactRippleLifetimeSeconds);
+    CHECK(frameAt().waterRippleCount == 0);
+    presentation.scheduleWaterEntries(level, action, {}, 1.0f, 1.1f);
+    CHECK(frameAt().waterRippleCount == 2);
+    presentation.resetEntities(after);
+    CHECK(frameAt().waterRippleCount == 0);
+}
+
+void testWaterRippleScheduleHasAFixedBudget()
+{
+    TEST("waterRippleScheduleHasAFixedBudget");
+    const std::size_t count = RenderFrameData::waterRippleCapacity + 5;
+    const Level level = Level::loadFromLayers({
+        { std::string(count, 'W') },
+        { std::string("C") + std::string(count - 1, ' ') },
+    }, "bounded water impacts");
+    GameState before = stateWithPlayer({ 0, 0, 2 });
+    for (std::size_t index = 0; index < count; ++index) {
+        before.movables.push_back({ .type = TileType::Rock,
+            .cell = { static_cast<int>(index), 0, 2 } });
+    }
+    GameState after = before;
+    for (auto& movable : after.movables) {
+        movable.cell.z = 1;
+        movable.fallen = true;
+    }
+    GameplayPresentation presentation;
+    presentation.resetEntities(before);
+    GameplaySession::Action action { .before = before, .after = after,
+        .durationSeconds = 1.0f };
+    action.presentation = presentation.buildActionPresentation(action, &level);
+    presentation.scheduleWaterEntries(level, action, {}, 1.0f);
+    presentation.advanceWaterRipples(1.1f);
+    RenderFrameData frame;
+    presentation.appendWaterRippleRenderData(frame);
+    CHECK(frame.waterRippleCount == RenderFrameData::waterRippleCapacity);
+    CHECK(near(frame.waterRipples[0].position.x, 5.5f));
+    CHECK(near(frame.waterRipples[frame.waterRippleCount - 1].position.x,
+        static_cast<float>(count) - 0.5f));
+}
+
 void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
 {
     TEST("drownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition");
@@ -4620,6 +4710,8 @@ int main()
     testWaterLayerBuildsUnboundedNonPickableExterior();
     testFilledWaterUpdatesEdgesAndRoundedCornerCaps();
     testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition();
+    testWaterRipplesFollowPlayerAndEnemySurfaceContact();
+    testWaterRippleScheduleHasAFixedBudget();
     testGameplayFrameBuildsManifestDecorationInstances();
     testEnemyFacingAttackAndAnimationInstances();
     } catch (const std::exception& error) {

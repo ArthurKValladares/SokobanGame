@@ -50,10 +50,14 @@ struct SceneFrameUniform {
     std::array<PointLightUniform, RenderFrameData::pointLightCapacity>
         pointLights {};
     Vec4 pointLightMeta {};
+    // xyz is the impact's world-space surface position; w is age in seconds.
+    std::array<Vec4, RenderFrameData::waterRippleCapacity> waterRipples {};
+    // x is the active count; y is the ripple lifetime in seconds.
+    Vec4 waterRippleMeta {};
 };
 
 static_assert(sizeof(PointLightUniform) == 48);
-static_assert(sizeof(SceneFrameUniform) == 544);
+static_assert(sizeof(SceneFrameUniform) == 816);
 
 // The camera and sun transforms a frame renders through, in the form the
 // uniform buffer wants them. Built by the recorder from the prepared scene's

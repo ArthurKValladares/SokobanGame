@@ -5,6 +5,7 @@
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
+#include "engine/render/WaterConfig.hpp"
 
 #include <algorithm>
 #include <array>
@@ -625,7 +626,8 @@ void VulkanSceneDescriptors::updateFrame(
     uint32_t setIndex,
     const RenderFrameData::Lighting& lighting,
     const SceneCamera& camera,
-    bool preview) const
+    bool preview,
+    std::span<const RenderFrameData::WaterRipple> waterRipples) const
 {
     const uint32_t internalSetIndex = setIndex * 2 + (preview ? 1U : 0U);
     if (internalSetIndex >= frameBuffers_.size() ||
@@ -672,6 +674,25 @@ void VulkanSceneDescriptors::updateFrame(
         };
     }
     uniform.pointLightMeta.x = static_cast<float>(count);
+    std::size_t rippleCount = 0;
+    for (const RenderFrameData::WaterRipple& ripple : waterRipples) {
+        if (ripple.ageSeconds < 0.0f ||
+            ripple.ageSeconds >= config::waterImpactRippleLifetimeSeconds) {
+            continue;
+        }
+        if (rippleCount == uniform.waterRipples.size()) {
+            break;
+        }
+        uniform.waterRipples[rippleCount++] = {
+            ripple.position.x, ripple.position.y, ripple.position.z,
+            ripple.ageSeconds,
+        };
+    }
+    uniform.waterRippleMeta = {
+        static_cast<float>(rippleCount),
+        config::waterImpactRippleLifetimeSeconds,
+        0.0f, 0.0f,
+    };
     std::memcpy(
         frameBuffers_[internalSetIndex].mapped(),
         &uniform,

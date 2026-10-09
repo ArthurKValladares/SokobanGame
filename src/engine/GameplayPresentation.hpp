@@ -95,6 +95,18 @@ public:
         EntityId turretId,
         MoveDirection direction,
         float delaySeconds = 0.0f);
+    // Scheduled once when an action is admitted. Action-local motion and leg
+    // states locate the contact; negative elapsed time keeps deferred entries
+    // pending until their action actually reaches the water.
+    void scheduleWaterEntries(
+        const Level& level,
+        const GameplaySession::Action& action,
+        const std::vector<GameState>& legs,
+        float mechanicalDurationSeconds,
+        float elapsedSeconds = 0.0f);
+    void advanceWaterRipples(float dt);
+    void clearWaterRipples();
+    void appendWaterRippleRenderData(RenderFrameData& frame) const;
     [[nodiscard]] Vec2 turretRecoilOffset(EntityId turretId) const;
     [[nodiscard]] ActionPresentationTimeline buildActionPresentation(
         const GameplaySession::Action& action,
@@ -163,6 +175,9 @@ private:
     std::vector<EntityVisual> elevators_;
     std::vector<EntityVisual> minecarts_;
     std::vector<TurretRecoil> turretRecoils_;
+    std::array<RenderFrameData::WaterRipple,
+        RenderFrameData::waterRippleCapacity> waterRipples_ {};
+    std::size_t waterRippleCount_ = 0;
     const AnimationCatalog* animationCatalog_ = nullptr;
     // Where a reversed action's timeline is sampled from. The only piece of
     // per-action state the presentation keeps; three sibling members were

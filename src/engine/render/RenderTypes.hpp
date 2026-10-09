@@ -275,6 +275,7 @@ struct RenderFrameData {
     static constexpr std::size_t overworldFogVolumeCapacity = tileCapacity;
     static constexpr std::size_t groundSplatRegionCapacity = 18;
     static constexpr std::size_t pointLightCapacity = 8;
+    static constexpr std::size_t waterRippleCapacity = 16;
     enum class EditorDecorationHighlight : uint8_t {
         None,
         Hovered,
@@ -529,6 +530,13 @@ struct RenderFrameData {
         bool pickable = true;
     };
 
+    // A transient disturbance evaluated on water surfaces at this elevation.
+    // Keeping it in world space makes rings continuous across tile boundaries.
+    struct WaterRipple {
+        Vec3 position {};
+        float ageSeconds = 0.0f;
+    };
+
     struct Particle {
         Vec3 position {};
         Vec2 size { 1.0f, 1.0f };
@@ -639,6 +647,8 @@ struct RenderFrameData {
     GridOverlay gridOverlay {};
     OutputTransform outputTransform {};
     WaterRendering waterRendering = defaultWaterRendering();
+    std::array<WaterRipple, waterRippleCapacity> waterRipples {};
+    uint32_t waterRippleCount = 0;
     uint32_t levelWidth = 0;
     uint32_t levelHeight = 0;
     uint32_t levelDepth = 1;

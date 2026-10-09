@@ -21,7 +21,9 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -149,6 +151,213 @@ ImageData verifyPreview(SDL_Window* window, const std::filesystem::path& root,
     // Return to an opaque preview after sampling depth, then back to water.
     (void)capture(red, blue, false);
     return capture(red, blue, true, false);
+}
+
+struct RippleImageDifference {
+    double weight = 0.0;
+    double radiusPixels = 0.0;
+    double peak = 0.0;
+};
+
+RippleImageDifference rippleImageDifference(const ImageData& baseline,
+    const ImageData& image)
+{
+    double weight = 0.0;
+    double weightedX = 0.0;
+    double weightedY = 0.0;
+    double weightedRadiusSquared = 0.0;
+    double peak = 0.0;
+    for (uint32_t y = 0; y < image.height; ++y) {
+        for (uint32_t x = 0; x < image.width; ++x) {
+            const std::size_t pixel = (std::size_t(y) * image.width + x) * 4;
+            double pixelDifference = 0.0;
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                pixelDifference += std::abs(
+                    std::to_integer<int>(baseline.rgba[pixel + channel]) -
+                    std::to_integer<int>(image.rgba[pixel + channel]));
+            }
+            pixelDifference /= 3.0;
+            weight += pixelDifference;
+            weightedX += pixelDifference * x;
+            weightedY += pixelDifference * y;
+            weightedRadiusSquared += pixelDifference * (double(x) * x + double(y) * y);
+            peak = std::max(peak, pixelDifference);
+        }
+    }
+    double radius = 0.0;
+    if (weight > 0.0) {
+        const double centerX = weightedX / weight;
+        const double centerY = weightedY / weight;
+        radius = std::sqrt(std::max(0.0,
+            weightedRadiusSquared / weight - centerX * centerX - centerY * centerY));
+    }
+    return { weight, radius, peak };
+}
+
+void saveRippleEvidence(const std::filesystem::path& path, const ImageData& image)
+{
+    std::vector<uint8_t> pixels(image.rgba.size());
+    std::transform(image.rgba.begin(), image.rgba.end(), pixels.begin(),
+        [](std::byte b) { return std::to_integer<uint8_t>(b); });
+    writeRgbaPng(path, image.width, image.height, pixels);
+}
+
+void verifyWaterEntryRipples(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    UiContext ui(font);
+    const auto makeFrame = [](std::optional<float> rippleAge, bool water = true,
+                              float rippleElevation = 1.82f) {
+        RenderFrameData frame = scene({ 0.16f, 0.18f, 0.22f, 1.0f }, water);
+        frame.levelWidth = 8;
+        frame.levelHeight = 8;
+        // A vertical view makes the radial spread measurable without assuming
+        // a particular perspective camera's world-to-screen projection.
+        frame.cameraPitchDegrees = 0.0f;
+        frame.tiles.front().size = { 8.0f, 8.0f };
+        frame.waterAnimationTimeSeconds = 0.7f;
+        if (water) {
+            frame.waterSurfaces.front().size = { 8.0f, 8.0f };
+            frame.waterGridBounds = { .width = 8, .height = 8 };
+            frame.waterRendering.visualizeCausticsOnly = false;
+            frame.waterRendering.primaryRippleOpacity = 0.0f;
+            frame.waterRendering.secondaryRippleOpacity = 0.0f;
+        }
+        if (rippleAge) {
+            frame.waterRipples[0] = {
+                .position = { 4.0f, 4.0f, rippleElevation },
+                .ageSeconds = *rippleAge,
+            };
+            frame.waterRippleCount = 1;
+        }
+        return frame;
+    };
+    const auto capture = [&](const RenderFrameData& main,
+                             const std::optional<RenderFrameData>& preview = std::nullopt) {
+        // Repeat across both frame slots: per-view ripple uniforms must not
+        // depend on whichever descriptor slot was used in the prior capture.
+        for (int frame = 0; frame < 3; ++frame) {
+            ui.beginFrame({ 640, 360 }, {}, false, false);
+            if (preview) {
+                ScreenPreviewOverlay::draw(ui, { 640, 360 });
+            }
+            ui.endFrame();
+            renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            ImGui::Render();
+#endif
+            renderer.drawFrame(renderer.prepareFrame(main, preview), ui.drawData(), bool(preview));
+            verify(!renderer.hasFatalFailure(), "Water-entry ripple fixture failed to render");
+        }
+        return renderer.captureRenderedFrame();
+    };
+
+    const ImageData baseline = capture(makeFrame(std::nullopt));
+    const ImageData early = capture(makeFrame(0.16f));
+    const ImageData expanded = capture(makeFrame(0.55f));
+    const ImageData fading = capture(makeFrame(1.35f));
+    const ImageData expired = capture(makeFrame(1.5f));
+    const auto earlyDifference = rippleImageDifference(baseline, early);
+    const auto expandedDifference = rippleImageDifference(baseline, expanded);
+    const auto fadingDifference = rippleImageDifference(baseline, fading);
+    std::cout << "Water-entry ripple: early radius=" << earlyDifference.radiusPixels
+              << ", expanded radius=" << expandedDifference.radiusPixels
+              << ", expanded peak=" << expandedDifference.peak
+              << ", fading peak=" << fadingDifference.peak << '\n';
+
+    // Keep snapshots on failures as well as passes, under the ignored output
+    // directory, so the actual shaded ring can be reviewed independently.
+    const std::filesystem::path evidence = std::filesystem::current_path() /
+        "out" / "water-ripple-evidence";
+    std::filesystem::create_directories(evidence);
+    saveRippleEvidence(evidence / "baseline.png", baseline);
+    saveRippleEvidence(evidence / "early.png", early);
+    saveRippleEvidence(evidence / "expanded.png", expanded);
+    saveRippleEvidence(evidence / "fading.png", fading);
+    saveRippleEvidence(evidence / "expired.png", expired);
+
+    verify(earlyDifference.weight > 200.0 && earlyDifference.peak > 5.0,
+        "Water-entry ripple did not visibly alter the shaded water");
+    verify(expandedDifference.radiusPixels > earlyDifference.radiusPixels * 1.5,
+        "Water-entry ripple did not expand away from its impact point");
+    verify(expandedDifference.peak > 5.0 &&
+            fadingDifference.peak < expandedDifference.peak * 0.6,
+        "Water-entry ripple did not fade before its lifetime ended");
+    verify(rippleImageDifference(baseline, expired).weight == 0.0,
+        "Expired water-entry ripple still changed the water image");
+    verify(rippleImageDifference(baseline,
+            capture(makeFrame(0.55f, true, 2.82f))).weight == 0.0,
+        "Water-entry ripple leaked onto water at another elevation");
+    const ImageData land = capture(makeFrame(std::nullopt, false));
+    verify(rippleImageDifference(land, capture(makeFrame(0.55f, false))).weight == 0.0,
+        "Water-entry ripple changed an opaque land-only frame");
+
+    const RenderFrameData quiet = makeFrame(std::nullopt);
+    const RenderFrameData active = makeFrame(0.16f);
+    const ImageData previewBaseline = capture(quiet, quiet);
+    const ImageData mainRipple = capture(active, quiet);
+    const ImageData previewRipple = capture(quiet, active);
+    const uint32_t xBegin = previewBaseline.width * 2 / 5;
+    const uint32_t xEnd = previewBaseline.width * 3 / 5;
+    const uint32_t yBegin = previewBaseline.height * 2 / 5;
+    const uint32_t yEnd = previewBaseline.height * 3 / 5;
+    verify(difference(previewBaseline, mainRipple, xBegin, yBegin, xEnd, yEnd) == 0.0,
+        "Main-view water-entry ripple leaked into the preview's water uniforms");
+    verify(difference(previewBaseline, previewRipple, xBegin, yBegin, xEnd, yEnd) > 0.1,
+        "Preview water did not render its own water-entry ripple");
+    saveRippleEvidence(evidence / "preview.png", previewRipple);
+
+    // Match a .15 s sample of the default .25 s move: one horizontal unit,
+    // then a .18 unit sink. The block has moved .708 units and the effect is
+    // .044 s old after its leading edge first touched water. A completed-step
+    // trigger would hide the entire effect in this common one-tile pool case.
+    constexpr float moveDurationSeconds = 0.25f;
+    constexpr float pathDistance = 1.18f;
+    constexpr float sampleTimeSeconds = 0.15f;
+    constexpr float blockPositionX = sampleTimeSeconds / moveDurationSeconds * pathDistance;
+    constexpr float contactSeconds = moveDurationSeconds * 0.5f / pathDistance;
+    RenderFrameData smallPool = makeFrame(std::nullopt);
+    smallPool.levelWidth = 3;
+    smallPool.levelHeight = 3;
+    smallPool.tiles.front().size = { 3.0f, 3.0f };
+    smallPool.tiles.front().height = 0.35f;
+    smallPool.waterSurfaces.front().position = { 1.0f, 1.0f };
+    smallPool.waterSurfaces.front().size = { 1.0f, 1.0f };
+    smallPool.waterSurfaces.front().elevation = 0.82f;
+    smallPool.waterGridBounds = { .width = 3, .height = 3 };
+    smallPool.tiles.push_back({
+        .position = { 0.0f, 1.0f },
+        .color = { 0.30f, 0.32f, 0.35f, 1.0f },
+        .height = 1.0f,
+        .showGrid = false,
+    });
+    smallPool.tiles.push_back({
+        .position = { blockPositionX, 1.0f },
+        .color = { 0.62f, 0.30f, 0.08f, 1.0f },
+        .baseElevation = 1.0f,
+        .height = 1.0f,
+        .showGrid = false,
+    });
+    const ImageData enteringBlockBaseline = capture(smallPool);
+    smallPool.waterRipples[0] = {
+        .position = { 1.5f, 1.5f, 0.82f },
+        .ageSeconds = sampleTimeSeconds - contactSeconds,
+    };
+    smallPool.waterRippleCount = 1;
+    const ImageData enteringBlockRipple = capture(smallPool);
+    saveRippleEvidence(evidence / "entering-block-baseline.png", enteringBlockBaseline);
+    saveRippleEvidence(evidence / "entering-block-ripple.png", enteringBlockRipple);
+    const auto enteringBlockDifference = rippleImageDifference(
+        enteringBlockBaseline, enteringBlockRipple);
+    std::cout << "One-tile pool entering block: ripple weight="
+              << enteringBlockDifference.weight << ", peak="
+              << enteringBlockDifference.peak << '\n';
+    verify(enteringBlockDifference.weight > 200.0 && enteringBlockDifference.peak > 5.0,
+        "Water-entry ripple was hidden by the block before it finished entering a one-tile pool");
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a water-entry ripple rendering error");
 }
 
 void verifyRimHeavyGroundChunkPublication(SDL_Window* window,
@@ -301,6 +510,14 @@ int main(int argc, char** argv)
         auto font = FontAtlas::loadDefault(root);
         const auto manifest = AssetManifest::loadFromFile(root / "manifest.json");
         ScopedTestDirectory temp("preview-rendering");
+        if (argc > 1 && std::string_view(argv[1]) == "--water-entry-ripples") {
+            verifyWaterEntryRipples(window.get(), root, font, manifest,
+                temp.path() / "cache.bin");
+            verify(vulkanDebug::validationErrorCount() == 0,
+                "Vulkan validation reported a water-entry ripple rendering error");
+            std::cout << "Water-entry ripple GPU regression passed\n";
+            return 0;
+        }
         const auto image = verifyPreview(window.get(), root, font, manifest,
             temp.path() / "cache.bin", AntiAliasingMode::None, 100);
         (void)verifyPreview(window.get(), root, font, manifest,

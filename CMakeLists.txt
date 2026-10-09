@@ -1192,6 +1192,10 @@ if(SOKOBAN_BUILD_TESTS)
             target_include_directories(sokoban_preview_rendering_tests SYSTEM PRIVATE third_party/imgui)
         endif()
         set_tests_properties(preview_rendering PROPERTIES LABELS "vulkan;render" TIMEOUT 60)
+        add_test(NAME water_entry_ripples
+            COMMAND sokoban_preview_rendering_tests --water-entry-ripples
+        )
+        set_tests_properties(water_entry_ripples PROPERTIES LABELS "vulkan;render;water" TIMEOUT 60)
         add_test(NAME application_validation_teardown
             COMMAND "${CMAKE_COMMAND}"
                 "-DSOKOBAN_EXECUTABLE=$<TARGET_FILE:sokoban>"
@@ -1205,7 +1209,7 @@ if(SOKOBAN_BUILD_TESTS)
         if(SOKOBAN_ENABLE_SANITIZERS)
             # These tests initialize SDL/X11 and Vulkan. The application child
             # inherits this environment from the CMake teardown verifier.
-            set_property(TEST vulkan_smoke application_validation_teardown preview_rendering
+            set_property(TEST vulkan_smoke application_validation_teardown preview_rendering water_entry_ripples
                 APPEND PROPERTY ENVIRONMENT
                 "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
         endif()

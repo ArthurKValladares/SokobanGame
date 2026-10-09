@@ -550,16 +550,24 @@ public:
                 .nearPlane = std::max(source.isoLayout.nearestDepth, 0.001f),
             };
         };
+        const auto ripplesFor = [](const RenderFrameData& source) {
+            return std::span<const RenderFrameData::WaterRipple>(
+                source.waterRipples.data(),
+                std::min<std::size_t>(source.waterRippleCount,
+                    source.waterRipples.size()));
+        };
         descriptors_.updateFrame(
             configuration_.descriptorFrameIndex,
             frameData.lighting,
             cameraFor(scene),
-            false);
+            false,
+            ripplesFor(frameData));
         descriptors_.updateFrame(
             configuration_.descriptorFrameIndex,
             previewFrameData ? previewFrameData->lighting : frameData.lighting,
             cameraFor(previewScene ? *previewScene : scene),
-            true);
+            true,
+            ripplesFor(previewFrameData ? *previewFrameData : frameData));
 
         const VkCommandBufferBeginInfo beginInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,

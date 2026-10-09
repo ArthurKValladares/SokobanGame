@@ -1933,6 +1933,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     RenderFrameData frame = initializeGameplayFrame(input);
     appendGameplayWorld(frame, input);
     appendGameplayEntities(frame, input);
+    input.presentation.appendWaterRippleRenderData(frame);
     appendMirrorPreview(frame, input);
     applyScrollingMaterials(frame, input);
     processCliffWallGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
@@ -1959,6 +1960,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(
     RenderFrameData frame = initializeGameplayFrame(input, &arena);
     appendGameplayWorld(frame, input);
     appendGameplayEntities(frame, input);
+    input.presentation.appendWaterRippleRenderData(frame);
     appendMirrorPreview(frame, input, &arena);
     applyScrollingMaterials(frame, input);
     processCliffWallGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);

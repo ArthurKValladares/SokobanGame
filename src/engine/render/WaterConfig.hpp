@@ -36,6 +36,7 @@ inline constexpr float waterRippleHaloStrength = 0.08f;
 inline constexpr float waterRippleCrestStrength = 0.50f;
 inline constexpr float waterSecondaryRippleThicknessScale = 0.48f;
 inline constexpr float waterUnderwaterCausticStrength = 0.22f;
+inline constexpr float waterImpactRippleLifetimeSeconds = 1.5f;
 
 inline constexpr float minimumWaterRippleSpatialFrequency = 0.1f;
 inline constexpr float maximumWaterRippleSpatialFrequency = 6.0f;

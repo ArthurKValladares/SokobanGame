@@ -3,7 +3,7 @@
 
 // Camera and lighting for the whole frame. Mirrors SceneFrameUniform and
 // PointLightUniform in VulkanRenderConstants.hpp, whose static_asserts pin the
-// 544-byte and 48-byte sizes.
+// 816-byte and 48-byte sizes.
 struct PointLightData
 {
     vec4 positionAndRange;
@@ -19,6 +19,8 @@ layout(std140, set = 0, binding = 7) uniform SceneFrame
     vec4 cameraPositionAndNearPlane;
     PointLightData pointLights[8];
     vec4 pointLightMeta;
+    vec4 waterRipples[16];
+    vec4 waterRippleMeta;
 } frame;
 
 #endif

@@ -81,6 +81,9 @@ void startPresentation(
             started->mechanicalDurationSeconds));
     started = session.findInFlight(actionId);
     presentation.beginAction(started->plan, session.state());
+    presentation.scheduleWaterEntries(
+        level, started->plan, started->legs,
+        started->mechanicalDurationSeconds, started->elapsedSeconds);
     // A deferred action holds its claims but has not begun, and its entities
     // are still being driven by the action that caused it. Seeking it to zero
     // would snap them to where that action is going to leave them, cutting its
@@ -194,6 +197,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
     }
     if (!readingLectern && input.restartPressed) {
         session.queueRestart();
+        presentation.clearWaterRipples();
     }
     if (const std::optional<MoveDirection> vertical =
             pressedVertical(input)) {
@@ -250,12 +254,14 @@ GameplayLoop::UpdateResult GameplayLoop::update(
         appendReadyTurretShots(session, result.turretShots);
         appendReadySounds(session, result);
         if (!session.moving()) {
+            presentation.advanceWaterRipples(remainingTime);
             return result;
         }
 
         const float step = std::min(
             remainingTime, session.timeToNextCompletion());
         remainingTime -= step;
+        presentation.advanceWaterRipples(step);
         session.advanceActiveAction(step);
         for (UpdateResult::TurretShotPresentation& shot : result.turretShots) {
             shot.impactDelaySeconds = std::max(
@@ -281,6 +287,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
                 result.draftSolved = true;
             } else {
                 result.screenSolved = true;
+                presentation.advanceWaterRipples(remainingTime);
                 return result;
             }
         } else {

@@ -29,6 +29,65 @@ const float reflectionDistanceThicknessScale = 0.018;
 const float reflectionNormalScale = 0.018;
 const float reflectionMaximumSlope = 0.32;
 
+float smoothValueNoise(vec2 position);
+
+// Impact rings share the surface's world coordinates, so they cross adjacent
+// water tiles and are naturally clipped by banks, filled cells and opaque
+// objects. Surface height keeps stacked pools independent.
+vec2 waterImpactRipples(vec2 worldPosition, float elevation)
+{
+    float pixelWidth = max(length(fwidth(worldPosition)) * 0.65, 0.002);
+    vec2 bands = vec2(0.0);
+    int count = clamp(int(frame.waterRippleMeta.x + 0.5), 0, 16);
+    float lifetime = max(frame.waterRippleMeta.y, 0.001);
+    for (int impact = 0; impact < count; ++impact) {
+        vec4 ripple = frame.waterRipples[impact];
+        if (abs(elevation - ripple.z) > 0.015 ||
+            ripple.w < 0.0 || ripple.w >= lifetime) {
+            continue;
+        }
+        vec2 offset = worldPosition - ripple.xy;
+        float distanceFromImpact = length(offset);
+        vec2 direction = offset / max(distanceFromImpact, 0.0001);
+        // A smooth, seeded angular field gives each impact an uneven outline.
+        // Sampling direction directly avoids an angle seam, while sharing the
+        // field between pulses keeps them part of the same disturbance.
+        vec2 seed = hash22(ripple.xy + vec2(ripple.z, 19.7)) * 23.0;
+        vec2 drift = vec2(ripple.w * 0.12, -ripple.w * 0.09);
+        float coarseShape = smoothValueNoise(direction * 2.2 + seed + drift);
+        float fineShape = smoothValueNoise(direction * 5.3 + seed.yx - drift * 0.6);
+        float shape = (coarseShape * 2.0 - 1.0) * 0.72 +
+            (fineShape * 2.0 - 1.0) * 0.28;
+        float distanceFootprint = fwidth(distanceFromImpact);
+        float shapeFootprint = fwidth(shape);
+        float remaining = 1.0 - ripple.w / lifetime;
+        float fade = remaining * remaining;
+        for (int pulse = 0; pulse < 3; ++pulse) {
+            float waveAge = ripple.w - float(pulse) * 0.16;
+            if (waveAge < 0.0) {
+                continue;
+            }
+            float radius = 0.25 + waveAge * 1.65;
+            float warpAmplitude = min(radius * 0.22, 0.24);
+            float warpedRadius = radius + shape * warpAmplitude;
+            float halfWidth = (0.028 + waveAge * 0.018) *
+                mix(0.75, 1.45, fineShape);
+            float ringPixelWidth = max(pixelWidth,
+                (distanceFootprint + shapeFootprint * warpAmplitude) * 0.65);
+            float distanceFromRing = abs(distanceFromImpact - warpedRadius);
+            float crest = 1.0 - smoothstep(
+                halfWidth, halfWidth + ringPixelWidth, distanceFromRing);
+            float halo = 1.0 - smoothstep(
+                halfWidth, halfWidth + 0.09 + ringPixelWidth, distanceFromRing);
+            float strength = fade * smoothstep(0.0, 0.035, waveAge) *
+                (1.0 - float(pulse) * 0.18) *
+                mix(0.4, 1.0, smoothstep(0.1, 0.8, coarseShape));
+            bands = max(bands, vec2(halo, crest) * strength);
+        }
+    }
+    return bands;
+}
+
 float bayer8x8(ivec2 pixel)
 {
     const float thresholds[64] = float[64](
@@ -984,6 +1043,7 @@ void main()
         secondaryThicknessScale,
         caustics,
         secondaryCaustics);
+    vec2 impactRipples = waterImpactRipples(worldPosition, inWorldPosition.z);
 
     // Treat the shared ripple field as a thin refractive lens. Its
     // screen-space gradient points toward the neighboring scene sample that
@@ -993,7 +1053,8 @@ void main()
     float diffractionField =
         caustics.x * 0.70 + caustics.y * 0.30 +
         secondaryCaustics.x * 0.20 +
-        secondaryCaustics.y * 0.10;
+        secondaryCaustics.y * 0.10 +
+        impactRipples.x * 0.25 + impactRipples.y * 0.55;
     vec2 diffractionGradient = vec2(
         dFdx(diffractionField),
         dFdy(diffractionField));
@@ -1203,6 +1264,10 @@ void main()
         finalWaterColor,
         vec3(0.94, 0.98, 1.00),
         foamStrength);
+    finalWaterColor = mix(
+        finalWaterColor,
+        vec3(0.78, 0.94, 1.00),
+        clamp(impactRipples.x * 0.12 + impactRipples.y * 0.82, 0.0, 1.0));
 
     outColor = vec4(finalWaterColor, 1.0);
 }

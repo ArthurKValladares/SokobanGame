@@ -9,6 +9,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace sokoban {
@@ -68,7 +69,8 @@ public:
         uint32_t setIndex,
         const RenderFrameData::Lighting& lighting,
         const SceneCamera& camera,
-        bool preview = false) const;
+        bool preview = false,
+        std::span<const RenderFrameData::WaterRipple> waterRipples = {}) const;
 
     [[nodiscard]] VkDescriptorSetLayout layout() const { return layout_; }
     [[nodiscard]] VkDescriptorSetLayout textureLayout() const

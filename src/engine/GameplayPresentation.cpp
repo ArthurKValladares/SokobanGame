@@ -6,6 +6,7 @@
 #include "engine/render/AnimationConfig.hpp"
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/WaterGeometry.hpp"
+#include "engine/render/WaterConfig.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -404,6 +405,7 @@ void GameplayPresentation::resetEntities(const GameState& state)
     elevators_.clear();
     minecarts_.clear();
     turretRecoils_.clear();
+    clearWaterRipples();
     syncToGameState(state);
 }
 
@@ -441,6 +443,148 @@ void GameplayPresentation::triggerTurretShot(
         .direction = direction,
         .ageSeconds = -std::max(delaySeconds, 0.0f),
     });
+}
+
+void GameplayPresentation::scheduleWaterEntries(
+    const Level& level,
+    const GameplaySession::Action& action,
+    const std::vector<GameState>& legs,
+    float mechanicalDurationSeconds,
+    float elapsedSeconds)
+{
+    if (action.reversed) {
+        clearWaterRipples();
+        return;
+    }
+    const std::size_t legCount = std::max<std::size_t>(legs.size(), 1);
+    const float stepSeconds = std::max(mechanicalDurationSeconds, 0.0f) /
+        static_cast<float>(legCount);
+    float legStart = 0.0f;
+    for (std::size_t leg = 0; leg < legCount; ++leg) {
+        const GameState& before = leg == 0 ? action.before : legs[leg - 1];
+        const GameState& after = legs.empty() ? action.after : legs[leg];
+        const float legEnd = legStart + stepSeconds + platformExtraSeconds(
+            platformMoves(before, after, stepSeconds, &level));
+        const auto schedule = [&](EntityTarget target, GridPosition3 cell) {
+            if (level.supportingTileAt(cell) != TileType::Water) {
+                return;
+            }
+            const float elevation = static_cast<float>(cell.z) -
+                config::waterDepthBelowGround;
+            float contactSeconds = legEnd;
+            // Portals split one entity's motion into physical tracks. Locate
+            // the arrival track, then use the same axis order as grid motion:
+            // horizontal travel precedes downward travel through the surface.
+            for (const ActionMotionTrack& track : action.presentation.motions) {
+                if (track.target != target ||
+                    track.startSeconds + 0.0001f < legStart ||
+                    track.startSeconds > legEnd + 0.0001f ||
+                    track.startSeconds + track.durationSeconds > legEnd + 0.0001f ||
+                    std::abs(track.to.x - static_cast<float>(cell.x)) > 0.0001f ||
+                    std::abs(track.to.y - static_cast<float>(cell.y)) > 0.0001f ||
+                    track.to.z > elevation + 0.0001f) {
+                    continue;
+                }
+                const float distance = gridDistance(track.from, track.to);
+                const float horizontalDistance =
+                    std::abs(track.to.x - track.from.x) +
+                    std::abs(track.to.y - track.from.y);
+                const bool enteringAcrossSurface =
+                    target.kind == EntityKind::Movable &&
+                    horizontalDistance > 0.0001f &&
+                    track.from.z <= static_cast<float>(cell.z) + 0.0001f;
+                // A moving block starts disturbing the cell when its leading
+                // half enters the water. Waiting until it finishes sinking
+                // would fill an isolated water tile before any ring is drawn.
+                // Drops from above still wait to reach the surface elevation.
+                const float contactDistance = enteringAcrossSurface
+                    ? std::max(horizontalDistance - 0.5f, 0.0f)
+                    : horizontalDistance +
+                        std::max(track.from.z - elevation, 0.0f);
+                const float fraction = distance > 0.0001f
+                    ? std::clamp(contactDistance / distance, 0.0f, 1.0f)
+                    : 0.0f;
+                contactSeconds = track.startSeconds +
+                    track.durationSeconds * fraction;
+            }
+            if (waterRippleCount_ == waterRipples_.size()) {
+                // A fixed budget keeps effects bounded even on crowded boards.
+                // Retire the oldest admission when every slot is occupied.
+                std::move(waterRipples_.begin() + 1, waterRipples_.end(),
+                    waterRipples_.begin());
+                --waterRippleCount_;
+            }
+            waterRipples_[waterRippleCount_++] = {
+                .position = {
+                    static_cast<float>(cell.x) + 0.5f,
+                    static_cast<float>(cell.y) + 0.5f,
+                    elevation,
+                },
+                .ageSeconds = elapsedSeconds - contactSeconds,
+            };
+        };
+        // Stable identities also cover mirror copies added by this action.
+        const auto entries = [&](const auto& from, const auto& to,
+                                 auto targetOf, auto submerged) {
+            for (std::size_t index = 0; index < to.size(); ++index) {
+                if (!submerged(to[index])) {
+                    continue;
+                }
+                const EntityTarget target = targetOf(to[index], index);
+                bool wasSubmerged = false;
+                if (index < from.size() && targetOf(from[index], index) == target) {
+                    wasSubmerged = submerged(from[index]);
+                } else {
+                    for (std::size_t prior = 0; prior < from.size(); ++prior) {
+                        if (targetOf(from[prior], prior) == target) {
+                            wasSubmerged = submerged(from[prior]);
+                            break;
+                        }
+                    }
+                }
+                if (!wasSubmerged) {
+                    schedule(target, to[index].cell);
+                }
+            }
+        };
+        entries(before.players, after.players, playerTarget,
+            [](const auto& player) { return player.drowned; });
+        entries(before.movables, after.movables, movableTarget,
+            [](const auto& movable) { return movable.fallen; });
+        entries(before.enemies, after.enemies, enemyTarget,
+            [](const auto& enemy) { return enemy.fallen; });
+        legStart = legEnd;
+    }
+}
+
+void GameplayPresentation::advanceWaterRipples(float dt)
+{
+    std::size_t retained = 0;
+    for (std::size_t index = 0; index < waterRippleCount_; ++index) {
+        auto ripple = waterRipples_[index];
+        ripple.ageSeconds += std::max(dt, 0.0f);
+        if (ripple.ageSeconds < config::waterImpactRippleLifetimeSeconds) {
+            waterRipples_[retained++] = ripple;
+        }
+    }
+    waterRippleCount_ = retained;
+}
+
+void GameplayPresentation::clearWaterRipples()
+{
+    waterRippleCount_ = 0;
+}
+
+void GameplayPresentation::appendWaterRippleRenderData(RenderFrameData& frame) const
+{
+    for (std::size_t index = 0; index < waterRippleCount_; ++index) {
+        const auto& ripple = waterRipples_[index];
+        if (ripple.ageSeconds >= 0.0f &&
+            ripple.ageSeconds < config::waterImpactRippleLifetimeSeconds &&
+            frame.waterRippleCount < frame.waterRipples.size()) {
+            frame.waterRipples[frame.waterRippleCount++] = ripple;
+        }
+    }
 }
 
 Vec2 GameplayPresentation::turretRecoilOffset(EntityId turretId) const

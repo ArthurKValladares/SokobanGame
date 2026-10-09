@@ -1039,6 +1039,92 @@ void testMovingMirrorCopyDoesNotCloseReadersLectern()
 
 } // namespace
 
+void testWaterRippleStartsAtContactAndPersistsAfterCommit()
+{
+    TEST("waterRippleStartsAtContactAndPersistsAfterCommit");
+    const Level level = makeLevel({ { "..W." }, { "CR  " } });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.25f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto update = [&](GameplayLoop::InputFrame input, float dt) {
+        (void)GameplayLoop::update(level, session, presentation, input, dt, false);
+    };
+    const auto ripples = [&] {
+        RenderFrameData frame;
+        presentation.appendWaterRippleRenderData(frame);
+        return frame;
+    };
+    const float entrySeconds = 0.25f * 0.5f / 1.18f;
+    update({ .right = { .pressed = true } }, 0.1f);
+    CHECK(ripples().waterRippleCount == 0);
+    update({}, 0.05f);
+    CHECK(ripples().waterRippleCount == 1);
+    CHECK(!session.state().movables[0].fallen);
+    CHECK(rules::isUnfilledWater(level, session.state(), { 2, 0, 1 }));
+    update({}, 0.11f);
+    CHECK(session.state().movables[0].fallen);
+    const auto contact = ripples();
+    CHECK(contact.waterRippleCount == 1);
+    if (contact.waterRippleCount == 1) {
+        CHECK(std::abs(contact.waterRipples[0].position.x - 2.5f) < 0.0001f);
+        CHECK(std::abs(contact.waterRipples[0].position.y - 0.5f) < 0.0001f);
+        CHECK(std::abs(contact.waterRipples[0].position.z - 0.82f) < 0.0001f);
+        CHECK(std::abs(contact.waterRipples[0].ageSeconds -
+            (0.26f - entrySeconds)) < 0.0001f);
+    }
+    update({}, 0.2f);
+    CHECK(ripples().waterRippleCount == 1);
+    CHECK(std::abs(ripples().waterRipples[0].ageSeconds -
+        (0.46f - entrySeconds)) < 0.0001f);
+    // Undo removes the entry effect and reversing the recorded motion cannot
+    // emit another one. A later forward push still produces a fresh ripple.
+    update({ .undoPressed = true }, 0.01f);
+    CHECK(ripples().waterRippleCount == 0);
+    update({}, 0.4f);
+    CHECK(!session.state().movables[0].fallen);
+    CHECK(ripples().waterRippleCount == 0);
+    update({ .right = { .pressed = true } }, 0.3f);
+    CHECK(ripples().waterRippleCount == 1);
+    update({ .restartPressed = true }, 0.01f);
+    CHECK(ripples().waterRippleCount == 0);
+}
+
+void testDeferredWaterEntryMatchesLongFrameCatchUp()
+{
+    TEST("deferredWaterEntryMatchesLongFrameCatchUp");
+    const Level level = makeLevel({ { "....W." }, { "CI    " } });
+    const auto run = [&](bool split) {
+        GameplaySession session;
+        session.reset(level);
+        session.setStepDurationSeconds(0.25f);
+        GameplayPresentation presentation;
+        presentation.resetEntities(session.state());
+        (void)GameplayLoop::update(level, session, presentation,
+            { .right = { .pressed = true } }, split ? 0.6f : 0.9f, false);
+        if (split) {
+            RenderFrameData pending;
+            presentation.appendWaterRippleRenderData(pending);
+            CHECK(pending.waterRippleCount == 0);
+            (void)GameplayLoop::update(level, session, presentation, {}, 0.3f, false);
+        }
+        CHECK(session.state().movables[0].fallen);
+        RenderFrameData frame;
+        presentation.appendWaterRippleRenderData(frame);
+        return frame;
+    };
+    const auto split = run(true);
+    const auto catchUp = run(false);
+    CHECK(split.waterRippleCount == 1);
+    CHECK(catchUp.waterRippleCount == 1);
+    const float entrySeconds = 0.5f + 0.25f * 0.5f / 1.18f;
+    CHECK(std::abs(split.waterRipples[0].ageSeconds -
+        (0.9f - entrySeconds)) < 0.0001f);
+    CHECK(std::abs(split.waterRipples[0].ageSeconds -
+        catchUp.waterRipples[0].ageSeconds) < 0.0001f);
+}
+
 int main()
 {
     TEST("lecternReadingPausesWithoutSpendingAMove");
@@ -1120,6 +1206,8 @@ int main()
     testTurretShotCueWaitsForMovementToFinish();
     testPushedTurretWaitsUntilItLandsBeforeVolleyStarts();
     testFacingTurretsStartAnAmbientMutualVolley();
+    testWaterRippleStartsAtContactAndPersistsAfterCommit();
+    testDeferredWaterEntryMatchesLongFrameCatchUp();
 
     if (failures == 0) {
         std::cout << "GameplayLoopTests: " << checks << " checks passed\n";

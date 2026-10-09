@@ -420,19 +420,24 @@ std::vector<ExpectedBlock> expectedBlocks()
                 offsetof(SceneFrameUniform, cameraPositionAndNearPlane),
                 offsetof(SceneFrameUniform, pointLights),
                 offsetof(SceneFrameUniform, pointLightMeta),
+                offsetof(SceneFrameUniform, waterRipples),
+                offsetof(SceneFrameUniform, waterRippleMeta),
             },
             // A uniform block: its members sit directly in the block.
             .elementStride = std::nullopt,
             // The std140 trap. An array of 48-byte structs keeps a 48-byte
             // stride only because 48 is already a multiple of 16; a member
             // that broke that would silently move every light after the first.
-            .memberArrayStrides = { { 3u, byteSize<PointLightUniform>() } },
+            .memberArrayStrides = { { 3u, byteSize<PointLightUniform>() },
+                { 5u, byteSize<Vec4>() } },
             .memberKinds = {
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, clipFromWorld),
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, shadowFromWorld),
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, cameraPositionAndNearPlane),
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, pointLights),
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, pointLightMeta),
+                SOKOBAN_MEMBER_KIND(SceneFrameUniform, waterRipples),
+                SOKOBAN_MEMBER_KIND(SceneFrameUniform, waterRippleMeta),
             },
         },
         ExpectedBlock {
