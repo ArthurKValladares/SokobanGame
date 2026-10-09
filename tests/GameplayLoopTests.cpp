@@ -1036,6 +1036,146 @@ void testMinecartGateSoundFollowsTheMovingCart()
     CHECK(session.state().minecarts[0].cell == GridPosition3({ 4, 0, 1 }));
 }
 
+void testButtonMinecartAnimatesRiderRepeatedPulsesAndUndo()
+{
+    TEST("buttonMinecartAnimatesRiderRepeatedPulsesAndUndo");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "......" }, { "Q M-g_" }, { "  K   " } },
+        .plates = { { { 0, 0, 1 }, TileType::Button },
+                    { { 2, 0, 1 }, TileType::RailStopEastWest },
+                    { { 4, 0, 1 }, TileType::RailStraightEastWest } },
+        .minecarts = { { .cell = { 2, 0, 1 },
+            .pressurePlates = { { 0, 0, 1 } }, .initialDirection = 1 } },
+    }, "button cart and rider");
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.2f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto update = [&](GameplayLoop::InputFrame input, float dt) {
+        return GameplayLoop::update(level, session, presentation, input, dt, false);
+    };
+    const auto checkRider = [&] {
+        checkNear(presentation.players()[1].motion.renderPosition.x,
+            presentation.minecarts()[0].renderPosition.x, "rider follows cart");
+        checkNear(presentation.players()[1].motion.renderPosition.z,
+            2.0f, "rider keeps elevation");
+    };
+
+    const auto started = update({ .interactPressed = true }, 0.01f);
+    CHECK(std::ranges::count(started.sounds, GameplaySound::ButtonPress) == 1);
+    CHECK(std::ranges::count(started.sounds, GameplaySound::MinecartGateOpen) == 0);
+    CHECK(presentation.minecarts()[0].moving);
+    CHECK(presentation.minecarts()[0].renderPosition.x > 2.0f);
+    CHECK(presentation.minecarts()[0].renderPosition.x < 3.0f);
+    checkRider();
+    const auto beforeGate = update({}, 0.11f);
+    CHECK(std::ranges::count(beforeGate.sounds, GameplaySound::MinecartGateOpen) == 0);
+    checkNear(presentation.minecarts()[0].renderPosition.x, 3.0f,
+        "cart reaches intermediate rail cell");
+    const auto atGate = update({}, 0.01f);
+    CHECK(std::ranges::count(atGate.sounds, GameplaySound::MinecartGateOpen) == 1);
+    CHECK(presentation.minecarts()[0].moving);
+    checkRider();
+    const auto finished = update({}, 0.25f);
+    CHECK(std::ranges::count(finished.sounds, GameplaySound::MinecartGateOpen) == 0);
+    CHECK(!presentation.minecarts()[0].moving);
+    CHECK(session.state().minecarts[0].cell == GridPosition3({ 5, 0, 1 }));
+    CHECK(session.state().players[1].cell == GridPosition3({ 5, 0, 2 }));
+
+    // The same occupied button can pulse again and send the cart back.
+    const auto repeated = update({ .interactPressed = true }, 0.01f);
+    CHECK(std::ranges::count(repeated.sounds, GameplaySound::ButtonPress) == 1);
+    CHECK(std::ranges::count(repeated.sounds, GameplaySound::MinecartGateOpen) == 1);
+    CHECK(presentation.minecarts()[0].moving);
+    CHECK(presentation.minecarts()[0].renderPosition.x < 5.0f);
+    CHECK(presentation.minecarts()[0].renderPosition.x > 4.0f);
+    checkRider();
+    (void)update({}, 0.4f);
+    CHECK(session.state().minecarts[0].cell == GridPosition3({ 2, 0, 1 }));
+    CHECK(session.playerMoveCount() == 0);
+
+    const auto undone = update({ .undoPressed = true }, 0.06f);
+    CHECK(undone.sounds.empty());
+    CHECK(presentation.minecarts()[0].moving);
+    CHECK(presentation.minecarts()[0].renderPosition.x > 2.0f);
+    CHECK(presentation.minecarts()[0].renderPosition.x < 3.0f);
+    checkRider();
+    CHECK(update({}, 0.4f).sounds.empty());
+    CHECK(!session.moving());
+    CHECK(session.state().minecarts[0].cell == GridPosition3({ 5, 0, 1 }));
+    CHECK(session.state().players[1].cell == GridPosition3({ 5, 0, 2 }));
+}
+
+void testSwitchMinecartTravelUsesConfiguredStepDuration()
+{
+    TEST("switchMinecartTravelUsesConfiguredStepDuration");
+    for (const TileType source : { TileType::Button, TileType::LeverEast }) {
+        const Level level = Level::loadFromDefinition({
+            .layers = { { "......" }, { "Q M--_" } },
+            .plates = { { { 0, 0, 1 }, source },
+                        { { 2, 0, 1 }, TileType::RailStopEastWest } },
+            .minecarts = { { .cell = { 2, 0, 1 },
+                .pressurePlates = { { 0, 0, 1 } }, .initialDirection = 1 } },
+        }, "switch cart speed");
+        float durations[2] {};
+        for (int speed = 0; speed < 2; ++speed) {
+            GameplaySession session;
+            session.reset(level);
+            session.setStepDurationSeconds(speed == 0 ? 0.2f : 0.4f);
+            GameplayPresentation presentation;
+            presentation.resetEntities(session.state());
+            (void)GameplayLoop::update(level, session, presentation,
+                { .interactPressed = true }, 0.01f, false);
+            CHECK(presentation.minecarts()[0].moving);
+            CHECK(session.moving());
+            if (!session.moving()) { continue; }
+            durations[speed] = session.activeAction().durationSeconds;
+            (void)GameplayLoop::update(level, session, presentation, {},
+                durations[speed] * 0.5f - 0.01f, false);
+            CHECK(presentation.minecarts()[0].moving);
+            checkNear(presentation.minecarts()[0].renderPosition.x, 3.5f,
+                "switch cart halfway between stops");
+            (void)GameplayLoop::update(level, session, presentation, {},
+                durations[speed] * 0.5f + 0.01f, false);
+            CHECK(!session.moving());
+            CHECK(session.state().minecarts[0].cell == GridPosition3({ 5, 0, 1 }));
+        }
+        checkNear(durations[1], durations[0] * 2.0f,
+            "cart travel duration scales with configured step duration");
+    }
+}
+
+void testButtonElevatorAnimatesItsRider()
+{
+    TEST("buttonElevatorAnimatesItsRider");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "....=." }, { "Q   R " }, { "      " }, { "      " } },
+        .plates = { { { 0, 0, 1 }, TileType::Button } },
+        .elevators = { { .cell = { 4, 0, 0 },
+            .pressurePlates = { { 0, 0, 1 } }, .levels = { 0, 2 } } },
+    }, "button elevator and rider");
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.4f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto started = GameplayLoop::update(level, session, presentation,
+        { .interactPressed = true }, 0.1f, false);
+    CHECK(std::ranges::count(started.sounds, GameplaySound::ButtonPress) == 1);
+    CHECK(presentation.elevators()[0].moving);
+    CHECK(presentation.elevators()[0].renderPosition.z > 0.0f);
+    CHECK(presentation.elevators()[0].renderPosition.z < 2.0f);
+    checkNear(presentation.movables()[0].renderPosition.z,
+        presentation.elevators()[0].renderPosition.z + 1.0f,
+        "button elevator carries rider throughout travel");
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.5f, false);
+    CHECK(!session.moving());
+    CHECK(!presentation.elevators()[0].moving);
+    CHECK(session.state().elevators[0].cell == GridPosition3({ 4, 0, 2 }));
+    CHECK(session.state().movables[0].cell == GridPosition3({ 4, 0, 3 }));
+}
+
 void testElevatorLoopUsesPlatformMotionOnly()
 {
     TEST("elevatorLoopUsesPlatformMotionOnly");
@@ -1304,6 +1444,9 @@ int main()
     testBlockedGateDoesNotPlayClosingSound();
     testRotatorSoundRequiresAnActualTurn();
     testMinecartGateSoundFollowsTheMovingCart();
+    testButtonMinecartAnimatesRiderRepeatedPulsesAndUndo();
+    testSwitchMinecartTravelUsesConfiguredStepDuration();
+    testButtonElevatorAnimatesItsRider();
     testElevatorLoopUsesPlatformMotionOnly();
     testPortalIceFallFiresAtStationaryHeroAndUndoesTogether();
     testPortalCrossingsReachTheLivePresentation();

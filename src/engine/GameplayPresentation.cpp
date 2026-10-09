@@ -148,8 +148,13 @@ std::vector<ElevatorMove> platformMoves(
     const GameState& before,
     const GameState& after,
     float stepSeconds,
-    const Level* level)
+    const Level* level,
+    float activationStepSeconds = config::stepDurationSeconds)
 {
+    // Activate has no walking phase, but its platforms still travel at the
+    // configured world-step speed. Keep that scale separate from departure.
+    const float travelStepSeconds = stepSeconds > 0.0f
+        ? stepSeconds : std::max(activationStepSeconds, 0.0f);
     std::vector<ElevatorMove> moves;
     const std::size_t count =
         std::min(before.elevators.size(), after.elevators.size());
@@ -165,7 +170,7 @@ std::vector<ElevatorMove> platformMoves(
             .from = from,
             .to = to,
             .startSeconds = stepSeconds,
-            .durationSeconds = stepSeconds *
+            .durationSeconds = travelStepSeconds *
                 config::elevatorSecondsPerLayerPerStep *
                 static_cast<float>(std::abs(to.z - from.z)),
         });
@@ -195,7 +200,7 @@ std::vector<ElevatorMove> platformMoves(
             .from = from,
             .to = to,
             .startSeconds = stepSeconds,
-            .durationSeconds = stepSeconds *
+            .durationSeconds = travelStepSeconds *
                 config::elevatorSecondsPerLayerPerStep *
                 static_cast<float>(distance),
             .path = std::move(path),
@@ -538,7 +543,8 @@ void GameplayPresentation::scheduleWaterEntries(
     const GameplaySession::Action& action,
     const std::vector<GameState>& legs,
     float mechanicalDurationSeconds,
-    float elapsedSeconds)
+    float elapsedSeconds,
+    float activationStepSeconds)
 {
     if (action.reversed) {
         clearWaterRipples();
@@ -552,7 +558,7 @@ void GameplayPresentation::scheduleWaterEntries(
         const GameState& before = leg == 0 ? action.before : legs[leg - 1];
         const GameState& after = legs.empty() ? action.after : legs[leg];
         const float legEnd = legStart + stepSeconds + platformExtraSeconds(
-            platformMoves(before, after, stepSeconds, &level));
+            platformMoves(before, after, stepSeconds, &level, activationStepSeconds));
         const auto schedule = [&](EntityTarget target, GridPosition3 cell) {
             if (level.supportingTileAt(cell) != TileType::Water) {
                 return;
@@ -824,7 +830,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     const GameplaySession::Action& action,
     const std::vector<GameState>& legs,
     const Level* level,
-    const std::vector<plans::PlannedAction::PortalCue>* cues) const
+    const std::vector<plans::PlannedAction::PortalCue>* cues,
+    float activationStepSeconds) const
 {
     const auto legTransits = [&](std::size_t leg) {
         std::vector<rules::PortalTransit> events;
@@ -838,7 +845,7 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     if (legs.size() <= 1) {
         const auto events = legTransits(0);
         return buildActionPresentationLeg(
-            action, level, cues ? &events : nullptr, legs.empty());
+            action, level, cues ? &events : nullptr, legs.empty(), activationStepSeconds);
     }
 
     // A chained slide is one action spanning several world steps. Interpolating
@@ -875,11 +882,12 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
         const auto events = legTransits(leg);
         timeline = concatenateTimelines(
             std::move(timeline),
-            buildActionPresentationLeg(legAction, level, cues ? &events : nullptr, false),
+            buildActionPresentationLeg(
+                legAction, level, cues ? &events : nullptr, false, activationStepSeconds),
             legStart);
         const float extra = platformExtraSeconds(
             platformMoves(
-                legAction.before, legAction.after, stepDuration, level));
+                legAction.before, legAction.after, stepDuration, level, activationStepSeconds));
         platformSeconds += extra;
         legStart += stepDuration + extra;
     }
@@ -892,21 +900,23 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
 ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     const GameplaySession::Action& action,
     const Level* level,
-    const std::vector<rules::PortalTransit>* transits) const
+    const std::vector<rules::PortalTransit>* transits,
+    float activationStepSeconds) const
 {
-    return buildActionPresentationLeg(action, level, transits, true);
+    return buildActionPresentationLeg(action, level, transits, true, activationStepSeconds);
 }
 
 ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
     const GameplaySession::Action& action,
     const Level* level,
     const std::vector<rules::PortalTransit>* transits,
-    bool buttonPulse) const
+    bool buttonPulse,
+    float activationStepSeconds) const
 {
     PresentationTransactionBuilder builder(animationCatalog_);
     const float motionDuration = std::max(action.durationSeconds, 0.0f);
     const std::vector<ElevatorMove> elevators =
-        platformMoves(action.before, action.after, motionDuration, level);
+        platformMoves(action.before, action.after, motionDuration, level, activationStepSeconds);
     // Carries `target` from its boarding cell to `after` once its platform
     // sets off; returns the cell the ordinary motion should end at.
     const auto addRide = [&](EntityTarget target,
@@ -1621,7 +1631,8 @@ std::vector<GameplaySoundCue> GameplayPresentation::buildActionSoundCues(
     const GameplaySession::Action& action,
     const std::vector<GameState>& legs,
     const std::vector<plans::PlannedAction::PortalCue>& portals,
-    float mechanicalDurationSeconds) const
+    float mechanicalDurationSeconds,
+    float activationStepSeconds) const
 {
     std::vector<GameplaySoundCue> cues;
     if (action.reversed) {
@@ -1633,7 +1644,7 @@ std::vector<GameplaySoundCue> GameplayPresentation::buildActionSoundCues(
     for (std::size_t leg = 0; leg < legCount; ++leg) {
         const GameState& before = leg == 0 ? action.before : legs[leg - 1];
         const GameState& after = legs.empty() ? action.after : legs[leg];
-        const auto moves = platformMoves(before, after, stepSeconds, &level);
+        const auto moves = platformMoves(before, after, stepSeconds, &level, activationStepSeconds);
         const float legEnd = legStart + stepSeconds + platformExtraSeconds(moves);
         // Gates fade toward the projected state while the leg moves. Start
         // their sound with that fade, using the effective state so inverted

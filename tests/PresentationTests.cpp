@@ -467,7 +467,8 @@ void testPressureControlsFollowLegsOccupantsAndBoarding()
     ride.reversed = false;
     ride.durationSeconds = 0.0f;
     ride.presentation = presentation.buildActionPresentation(ride, &elevator);
-    CHECK(near(ride.presentation.durationSeconds, 0.24f));
+    CHECK(near(ride.presentation.durationSeconds,
+        2.0f * config::stepDurationSeconds * config::elevatorSecondsPerLayerPerStep));
     presentation.beginAction(ride, before);
     presentation.seekAction(ride, 0.06f);
     CHECK(near(presentation.controlActivation({ 3, 0, 1 }).value_or(-1.0f), 0.5f));
@@ -475,6 +476,9 @@ void testPressureControlsFollowLegsOccupantsAndBoarding()
     CHECK(near(presentation.controlActivation({ 3, 0, 1 }).value_or(-1.0f), 1.0f));
     presentation.seekAction(ride, 0.18f);
     CHECK(near(presentation.controlActivation({ 3, 0, 1 }).value_or(-1.0f), 0.5f));
+    CHECK(presentation.elevators()[0].moving);
+    CHECK(presentation.elevators()[0].renderPosition.z > 0.0f);
+    CHECK(presentation.elevators()[0].renderPosition.z < 2.0f);
 }
 
 void testCameraPitchTransition()

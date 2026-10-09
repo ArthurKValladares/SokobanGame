@@ -64,7 +64,8 @@ void startPresentation(
         session.setActionPresentation(
             actionId,
             presentation.buildActionPresentation(
-                source, started->legs, &level, &started->portalTransits));
+                source, started->legs, &level, &started->portalTransits,
+                session.stepDurationSeconds()));
         // Re-fetched after every mutation: the setters write through the
         // scheduler, and holding a pointer across them invites a stale read.
         started = session.findInFlight(actionId);
@@ -78,12 +79,13 @@ void startPresentation(
         actionId,
         presentation.buildActionSoundCues(
             level, started->plan, started->legs, started->portalTransits,
-            started->mechanicalDurationSeconds));
+            started->mechanicalDurationSeconds, session.stepDurationSeconds()));
     started = session.findInFlight(actionId);
     presentation.beginAction(started->plan, session.state());
     presentation.scheduleWaterEntries(
         level, started->plan, started->legs,
-        started->mechanicalDurationSeconds, started->elapsedSeconds);
+        started->mechanicalDurationSeconds, started->elapsedSeconds,
+        session.stepDurationSeconds());
     // A deferred action holds its claims but has not begun, and its entities
     // are still being driven by the action that caused it. Seeking it to zero
     // would snap them to where that action is going to leave them, cutting its

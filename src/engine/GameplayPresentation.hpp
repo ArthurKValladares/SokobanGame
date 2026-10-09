@@ -103,15 +103,20 @@ public:
         const GameplaySession::Action& action,
         const std::vector<GameState>& legs,
         float mechanicalDurationSeconds,
-        float elapsedSeconds = 0.0f);
+        float elapsedSeconds = 0.0f,
+        float activationStepSeconds = config::stepDurationSeconds);
     void advanceWaterRipples(float dt);
     void clearWaterRipples();
     void appendWaterRippleRenderData(RenderFrameData& frame) const;
     [[nodiscard]] Vec2 turretRecoilOffset(EntityId turretId) const;
+    // Zero-time activations still move platforms at the current world-step
+    // speed. Use activationStepSeconds for their travel without delaying
+    // departure or adding travel time to mirror reflections.
     [[nodiscard]] ActionPresentationTimeline buildActionPresentation(
         const GameplaySession::Action& action,
         const Level* level = nullptr,
-        const std::vector<rules::PortalTransit>* transits = nullptr) const;
+        const std::vector<rules::PortalTransit>* transits = nullptr,
+        float activationStepSeconds = config::stepDurationSeconds) const;
     // Chain-aware: `legs` are the states the action passes through, one per
     // world step, so a slide animates tile by tile instead of interpolating
     // once from start to finish. One leg (or none) is the ordinary case above.
@@ -120,7 +125,8 @@ public:
         const std::vector<GameState>& legs,
         const Level* level = nullptr,
         const std::vector<plans::PlannedAction::PortalCue>* cues =
-            nullptr) const;
+            nullptr,
+        float activationStepSeconds = config::stepDurationSeconds) const;
     [[nodiscard]] float reverseDuration(
         const GameplaySession::Action& action) const;
     [[nodiscard]] std::vector<GameplaySoundCue> buildActionSoundCues(
@@ -128,7 +134,8 @@ public:
         const GameplaySession::Action& action,
         const std::vector<GameState>& legs,
         const std::vector<plans::PlannedAction::PortalCue>& portals,
-        float mechanicalDurationSeconds) const;
+        float mechanicalDurationSeconds,
+        float activationStepSeconds = config::stepDurationSeconds) const;
     // `worldState` is the session's current state, used to create and remove
     // visuals. Deliberately not taken from `action.before`: see the definition.
     void beginAction(
@@ -180,7 +187,8 @@ private:
         const GameplaySession::Action& action,
         const Level* level,
         const std::vector<rules::PortalTransit>* transits,
-        bool buttonPulse) const;
+        bool buttonPulse,
+        float activationStepSeconds) const;
 
     std::vector<PlayerVisual> players_;
     std::vector<EntityVisual> movables_;
