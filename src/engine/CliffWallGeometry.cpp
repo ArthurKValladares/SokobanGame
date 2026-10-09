@@ -1,8 +1,6 @@
 #include "engine/CliffWallGeometry.hpp"
 
 #include <algorithm>
-#include <limits>
-#include <tuple>
 #include <vector>
 
 namespace sokoban {
@@ -19,11 +17,6 @@ bool compatibleCliff(const RenderFrameData::Tile& tile)
         tile.position == Vec2 { static_cast<float>(tile.cell.x),
             static_cast<float>(tile.cell.y) } &&
         (tile.isEditorPreview || tile.baseElevation == static_cast<float>(tile.cell.z));
-}
-
-bool cellLess(GridPosition3 left, GridPosition3 right)
-{
-    return std::tie(left.z, left.y, left.x) < std::tie(right.z, right.y, right.x);
 }
 
 } // namespace
@@ -56,7 +49,7 @@ void processCliffWallGeometry(
     for (const auto& tile : tiles) {
         if (compatibleCliff(tile) && !tile.isEditorPreview) occupied.push_back(tile.cell);
     }
-    std::ranges::sort(occupied, cellLess);
+    std::ranges::sort(occupied, tileModuleCellLess);
     occupied.erase(std::unique(occupied.begin(), occupied.end()), occupied.end());
     std::array<std::array<std::optional<RenderModel>, 2>, 6> models;
     for (std::size_t shape = 0; shape < models.size(); ++shape) {
@@ -64,24 +57,11 @@ void processCliffWallGeometry(
             models[shape][variant] = manifest.findModelIdByName(cliffWallModelNames[shape][variant]);
         }
     }
-    constexpr std::array<GridPosition, 4> offsets {{ { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } }};
     for (auto& tile : tiles) {
         if (!tile.cliffWall) continue;
         const std::size_t variant = tile.cliffWallVariant % 2;
-        uint8_t exposed = groundAllSides;
-        if (compatibleCliff(tile)) {
-            for (std::size_t side = 0; side < offsets.size(); ++side) {
-                const auto offset = offsets[side];
-                if ((offset.x < 0 && tile.cell.x == std::numeric_limits<int>::min()) ||
-                    (offset.x > 0 && tile.cell.x == std::numeric_limits<int>::max()) ||
-                    (offset.y < 0 && tile.cell.y == std::numeric_limits<int>::min()) ||
-                    (offset.y > 0 && tile.cell.y == std::numeric_limits<int>::max())) continue;
-                const GridPosition3 neighbor { tile.cell.x + offset.x, tile.cell.y + offset.y, tile.cell.z };
-                if (std::binary_search(occupied.begin(), occupied.end(), neighbor, cellLess)) {
-                    exposed &= static_cast<uint8_t>(~(1U << side));
-                }
-            }
-        }
+        const uint8_t exposed = compatibleCliff(tile)
+            ? tileModuleExposedSides(tile.cell, occupied) : groundAllSides;
         const auto selected = cliffWallModuleForMask(exposed);
         if (const auto model = models[selected.shapeIndex][variant]) {
             tile.model = *model;

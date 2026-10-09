@@ -1,5 +1,6 @@
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/CliffWallGeometry.hpp"
+#include "engine/GroundTileGeometry.hpp"
 #include "engine/render/SelectorRenderConfig.hpp"
 
 #include "engine/AnimationCatalog.hpp"
@@ -190,6 +191,17 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
                 }
                 const TileType tile = level.tileAt(x, y, z);
                 requirements.requireModel(manifest.modelForTile(tile));
+                if (tileTypeIsGround(tile)) {
+                    const RenderModel base = manifest.modelForTile(tile);
+                    if (!base.isCube() && authoredGroundTileVariant(manifest.model(base))) {
+                        for (std::size_t shape = 0; shape < tileModuleCanonicalMasks.size(); ++shape) {
+                            if (const auto model = manifest.findModelIdByName(
+                                    groundTileModelName(shape, groundRockVariantFor(tile)))) {
+                                requirements.requireModel(*model);
+                            }
+                        }
+                    }
+                }
                 if (tileTypeIsCliffWall(tile)) {
                     // The visible body is selected from adjacency, including
                     // after editor changes; warm every shape for this variant.

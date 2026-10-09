@@ -835,14 +835,13 @@ void testUniqueBlankMapRejectsInvalidRequestsBeforeWriting()
     CHECK(!emptyName.created);
     CHECK(!emptyName.message.empty());
 
-    // A filename component longer than filesystem limits makes inspection
-    // fail. Do not assume it means an unused name and start writing files.
-    std::filesystem::create_directories(source / "custom/textures");
-    const CreatedSplatMap uninspectable = createUniqueBlankSplatMap(
-        std::string(40000, 'x'), 13, 7, source, staged, testManifest());
-    CHECK(!uninspectable.created);
-    CHECK(uninspectable.message.find("inspect") != std::string::npos);
-    CHECK(std::filesystem::is_empty(source / "custom/textures"));
+    // Some filesystems treat an oversized filename as absent rather than an
+    // inspection error. Reject it consistently before creating either tree.
+    const CreatedSplatMap oversizedName = createUniqueBlankSplatMap(
+        std::string(300, 'x'), 13, 7, source, staged, testManifest());
+    CHECK(!oversizedName.created);
+    CHECK(oversizedName.message.find("too long") != std::string::npos);
+    CHECK(!std::filesystem::exists(source));
     CHECK(!std::filesystem::exists(staged));
 }
 

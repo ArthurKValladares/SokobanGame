@@ -131,15 +131,15 @@ void drawTileGeometrySection(const ApplicationDebugUi::Context& context)
 {
     PresentationSettings& settings = context.settings;
 if (ImGui::CollapsingHeader("Tile Geometry")) {
-    ImGui::Checkbox("Process Ground Geometry", &settings.geometry.processGroundGeometry);
+    ImGui::Checkbox("Process Legacy Ground Geometry", &settings.geometry.processGroundGeometry);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
-            "Remove shared sides between adjacent unit-scale ground tiles. "
-            "Turn off to compare the original geometry. Tops and picking stay intact.");
+            "Remove shared sides from legacy ground models. "
+            "Native ground and cliff modules always select their authored shapes automatically.");
     }
     ImGui::BeginDisabled(!settings.geometry.processGroundGeometry);
-    ImGui::Checkbox("Smooth Ground Rim (prototype)", &settings.geometry.smoothGroundRim);
-    ImGui::Checkbox("Ground Chunks (experiment)", &settings.geometry.groundChunks);
+    ImGui::Checkbox("Smooth Legacy Ground Rim", &settings.geometry.smoothGroundRim);
+    ImGui::Checkbox("Legacy Ground Chunks", &settings.geometry.groundChunks);
     if (settings.geometry.groundChunks) {
         ImGui::Checkbox("Meshoptimizer", &settings.geometry.groundChunkMeshoptimizer);
     }

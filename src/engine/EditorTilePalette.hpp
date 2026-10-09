@@ -70,6 +70,13 @@ inline constexpr std::array<Group, 13> groups {{
                      TileType::WardrobeBard }, 6 },
 }};
 
+// These families use neighboring tiles to choose their visible terrain faces.
+// Quarry walls keep their separate authored models in the ordinary palette.
+[[nodiscard]] constexpr bool isTerrain(TileType tile)
+{
+    return tileTypeIsGround(tile) || tileTypeIsCliffWall(tile);
+}
+
 [[nodiscard]] constexpr const Group* groupFor(TileType tile)
 {
     for (const Group& group : groups) {

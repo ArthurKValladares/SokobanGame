@@ -5,6 +5,7 @@
 #include "engine/ElevatorVisuals.hpp"
 #include "engine/GateEffect.hpp"
 #include "engine/GroundGeometry.hpp"
+#include "engine/GroundTileGeometry.hpp"
 #include "engine/MinecartGateVisuals.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/RenderFrameParts.hpp"
@@ -107,6 +108,7 @@ public:
             }
         }
         processCliffWallGeometry({ frame.tiles.data(), frame.tiles.size() }, input_.manifest);
+        processGroundTileGeometry({ frame.tiles.data(), frame.tiles.size() }, input_.manifest, arena_);
         if (input_.settings.geometry.processGroundGeometry) {
             processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input_.manifest,
                 arena_, input_.groundGeometryCache);
@@ -1502,6 +1504,8 @@ RenderFrameData::Tile tileVisual(
         color = elevatorPlatformColor(Level::Elevator {}.color, 1.0f);
     }
 
+    const RenderModel model = tileTypeIsPlayerStart(tile)
+        ? manifest.characterModel(characterForStartTile(tile)) : manifest.modelForTile(tile);
     RenderFrameData::Tile visual {
         .cell = cell,
         .position = {
@@ -1541,9 +1545,7 @@ RenderFrameData::Tile tileVisual(
         .blurBehind = tile == TileType::Ice,
         .showGrid = !tileTypeIsPlayerStart(tile),
         .affectsCameraFit = tileTypeAffectsCameraFit(tile),
-        .model = tileTypeIsPlayerStart(tile)
-            ? manifest.characterModel(characterForStartTile(tile))
-            : manifest.modelForTile(tile),
+        .model = model,
         .animation = tileTypeIsPlayerStart(tile) || tile == TileType::Enemy
             ? manifest.playerIdleAnimation()
             : noAnimation,
@@ -1569,6 +1571,8 @@ RenderFrameData::Tile tileVisual(
             ? RenderSurfaceEffect::PlateEnergy
             : RenderSurfaceEffect::Standard,
         .groundRockVariant = groundRockVariantFor(tile),
+        .groundModule = tileTypeIsGround(tile) && !model.isCube() &&
+            authoredGroundTileVariant(manifest.model(model)).has_value(),
         .cliffWall = tileTypeIsCliffWall(tile),
         .cliffWallVariant = cliffWallVariantFor(tile),
         .groundTop = tileTypeHasSplatTop(tile),

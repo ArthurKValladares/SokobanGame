@@ -16,6 +16,10 @@ namespace sokoban {
 [[nodiscard]] ProcessedGroundArtifact compileLevelGroundGeometry(
     const Level& level, const AssetManifest& manifest);
 
+// Native modules already contain their final edges/sides. Only legacy source
+// models need a generated .grm package artifact or runtime artifact lookup.
+[[nodiscard]] bool levelHasLegacyGroundGeometry(const Level& level, const AssetManifest& manifest);
+
 // Stable semantic identity of the authored ground and its model eligibility.
 // Camera, paint, actors, non-ground cells and surrounding empty extent are
 // excluded. Compiler revision and the baked rim profile are included.

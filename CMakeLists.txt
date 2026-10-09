@@ -569,6 +569,7 @@ add_library(sokoban_core STATIC
     src/engine/RenderFrameBuilder.cpp
     src/engine/GroundGeometry.cpp
     src/engine/CliffWallGeometry.cpp
+    src/engine/GroundTileGeometry.cpp
     src/engine/GroundLevelGeometry.cpp
     src/engine/RenderFrameBuilderEditor.cpp
     src/engine/RenderFrameParts.cpp
@@ -1549,6 +1550,11 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME cliff_wall_geometry
         LIBS sokoban_core
         SOURCES tests/CliffWallGeometryTests.cpp
+    )
+    sokoban_add_test(NAME ground_tile_geometry
+        LIBS sokoban_core sokoban_json
+        SOURCES tests/GroundTileGeometryTests.cpp
+        ASSETS_ENV
     )
     sokoban_add_test(NAME ground_mesh_geometry
         LIBS sokoban_core

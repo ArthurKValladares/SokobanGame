@@ -2,6 +2,7 @@
 
 #include "engine/AssetManifest.hpp"
 #include "engine/render/RenderTypes.hpp"
+#include "engine/TileModuleGeometry.hpp"
 
 #include <algorithm>
 #include <array>
@@ -78,25 +79,12 @@ inline constexpr std::array<float, 2> cliffWallCornerTaperAmounts { .0605f, .066
 [[nodiscard]] std::array<std::array<Vec3, 4>, cliffWallTopPatchCount> cliffWallTopPatches(
     const RenderFrameData::Tile& tile);
 
-struct CliffWallModule {
-    std::size_t shapeIndex;
-    uint32_t quarterTurns;
-};
+using CliffWallModule = TileModule;
 
 // Native unit-cell modules rotate about the cell center, North toward East.
 [[nodiscard]] constexpr CliffWallModule cliffWallModuleForMask(uint8_t mask)
 {
-    constexpr std::array<uint8_t, 6> canonicalMasks { 15, 11, 5, 3, 1, 0 };
-    mask &= groundAllSides;
-    for (std::size_t shape = 0; shape < canonicalMasks.size(); ++shape) {
-        for (uint32_t turn = 0; turn < 4; ++turn) {
-            const uint8_t rotated = static_cast<uint8_t>(
-                ((canonicalMasks[shape] << turn) |
-                    (canonicalMasks[shape] >> (4 - turn))) & groundAllSides);
-            if (rotated == mask) return { shape, turn };
-        }
-    }
-    return { 0, 0 };
+    return tileModuleForMask(mask);
 }
 
 // Resolve authored and hover-preview cliffs against emitted, same-height

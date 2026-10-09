@@ -1,4 +1,5 @@
 #include "engine/GroundLevelGeometry.hpp"
+#include "engine/GroundTileGeometry.hpp"
 
 #include "engine/GroundGeometry.hpp"
 #include "engine/PresentationSettings.hpp"
@@ -120,6 +121,16 @@ uint64_t levelGroundGeometryFingerprint(const Level& level, const AssetManifest&
     return hash.value();
 }
 
+bool levelHasLegacyGroundGeometry(const Level& level, const AssetManifest& manifest)
+{
+    bool found = false;
+    forEachAuthoredGround(level, [&](TileType type, GridPosition3) {
+        const RenderModel model = manifest.modelForTile(type);
+        if (model.isCube() || !authoredGroundTileVariant(manifest.model(model))) found = true;
+    });
+    return found;
+}
+
 ProcessedGroundArtifact compileLevelGroundGeometry(const Level& level,
     const AssetManifest& manifest)
 {
@@ -177,6 +188,14 @@ std::shared_ptr<const ProcessedGroundArtifact> RuntimeGroundGeometryStore::get(
         contentRoot_ == contentRoot;
     if (sameSource && sourceRevision_ == sourceRevision) return artifact_;
 
+    if (!levelHasLegacyGroundGeometry(level, manifest)) {
+        invalidate();
+        sourcePath_ = relativeSource;
+        contentRoot_ = contentRoot;
+        sourceRevision_ = sourceRevision;
+        initialized_ = true;
+        return {};
+    }
     const uint64_t fingerprint = levelGroundGeometryFingerprint(level, manifest);
     if (sameSource && artifact_ && artifact_->sourceFingerprint == fingerprint) {
         sourceRevision_ = sourceRevision;

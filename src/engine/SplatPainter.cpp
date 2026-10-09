@@ -125,6 +125,17 @@ CreatedSplatMap createUniqueBlankSplatMap(
         result.message = "A new blend mask needs a valid texture name prefix.";
         return result;
     }
+    // Keep the entire generated filename within portable component limits.
+    // Some filesystems report an oversized path as missing instead of setting
+    // an inspection error, so check before attempting any file operation.
+    constexpr std::size_t reservedFilenameLength =
+        sizeof("_BlendMask_") - 1 +
+        std::numeric_limits<uint64_t>::digits10 + 1 + sizeof(".png") - 1;
+    if (textureNamePrefix.size() > 255 - reservedFilenameLength) {
+        result.message =
+            "The selected mask name is too long to create a new blend mask file.";
+        return result;
+    }
     // Manifest names are unrestricted strings, but mask files must stay in
     // custom/textures even when a map uses spaces or path-like punctuation.
     for (char& character : textureNamePrefix) {

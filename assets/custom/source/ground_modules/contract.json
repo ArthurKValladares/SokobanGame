@@ -1,0 +1,48 @@
+{
+  "format": 2,
+  "families": [
+    {
+      "name": "island",
+      "mask": 15
+    },
+    {
+      "name": "end",
+      "mask": 11
+    },
+    {
+      "name": "strip",
+      "mask": 5
+    },
+    {
+      "name": "corner",
+      "mask": 3
+    },
+    {
+      "name": "edge",
+      "mask": 1
+    },
+    {
+      "name": "interior",
+      "mask": 0
+    }
+  ],
+  "source": "../ground_modules.blend",
+  "capSurfaces": "cap_surfaces.json",
+  "variantCount": 10,
+  "canonicalCapsPerVariant": 25,
+  "nativeCapCount": 250,
+  "cornerWidth": 0.12,
+  "lipDepth": 0.09,
+  "outerLipHeight": 0.91,
+  "upperBodyBand": 0.3,
+  "topHeight": 1,
+  "sidePanels": 3,
+  "sideStations": [0.12, 0.37, 0.70, 0.88],
+  "variantMiddleWidths": [[0.105, 0.159], [0.151, 0.107], [0.116, 0.145], [0.139, 0.092], [0.099, 0.154], [0.148, 0.120], [0.112, 0.163], [0.155, 0.104], [0.127, 0.149], [0.143, 0.098]],
+  "bodyRecessInset": 0.055,
+  "bodySealStations": [0, 0.12, 0.37, 0.70, 0.88, 1],
+  "preserveOriginalXY": true,
+  "microscopicCleanupTolerance": 0.0005,
+  "concaveCornerMasks": [9, 3, 6, 12],
+  "neighborOffsets": [[0, -1], [1, 0], [0, 1], [-1, 0], [-1, -1], [1, -1], [1, 1], [-1, 1]]
+}

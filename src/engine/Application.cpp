@@ -11,6 +11,7 @@
 #endif
 
 #include "engine/ParticleConfig.hpp"
+#include "engine/GroundTileGeometry.hpp"
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/CompressedTextureArtifact.hpp"
 #include "engine/render/ImageData.hpp"
@@ -2785,6 +2786,7 @@ RenderFrameData Application::buildGroundRimEvidenceFrame(FrameArena& arena) cons
         };
         if (auto model = assetManifest_.findModelIdByName(names[(x + y * 3) % 10])) {
             tile.model = *model;
+            tile.groundRockVariant = static_cast<uint32_t>((x + y * 3) % 10);
         }
         frame.tiles.push_back(tile);
     };
@@ -2799,6 +2801,7 @@ RenderFrameData Application::buildGroundRimEvidenceFrame(FrameArena& arena) cons
     frame.lighting.pointLights[0] = { .position = { 4, 3, 4 },
         .color = { 1.0f, 0.82f, 0.65f }, .intensity = 5.0f, .range = 10.0f };
     frame.lighting.pointLightCount = 1;
+    processGroundTileGeometry({ frame.tiles.data(), frame.tiles.size() }, assetManifest_, &arena);
     if (presentationSettings_.geometry.processGroundGeometry) {
         processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, assetManifest_,
             &arena, &gameplayGroundGeometryCache_);

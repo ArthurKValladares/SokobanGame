@@ -932,52 +932,52 @@
     },
     {
       "name": "GroundRock01",
-      "path": "custom/pbr/models/GroundRock01.glb",
+      "path": "custom/models/ground_modules/ground_island_01.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock02",
-      "path": "custom/pbr/models/GroundRock02.glb",
+      "path": "custom/models/ground_modules/ground_island_02.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock03",
-      "path": "custom/pbr/models/GroundRock03.glb",
+      "path": "custom/models/ground_modules/ground_island_03.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock04",
-      "path": "custom/pbr/models/GroundRock04.glb",
+      "path": "custom/models/ground_modules/ground_island_04.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock05",
-      "path": "custom/pbr/models/GroundRock05.glb",
+      "path": "custom/models/ground_modules/ground_island_05.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock06",
-      "path": "custom/pbr/models/GroundRock06.glb",
+      "path": "custom/models/ground_modules/ground_island_06.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock07",
-      "path": "custom/pbr/models/GroundRock07.glb",
+      "path": "custom/models/ground_modules/ground_island_07.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock08",
-      "path": "custom/pbr/models/GroundRock08.glb",
+      "path": "custom/models/ground_modules/ground_island_08.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock09",
-      "path": "custom/pbr/models/GroundRock09.glb",
+      "path": "custom/models/ground_modules/ground_island_09.glb",
       "preserveSourceScale": true
     },
     {
       "name": "GroundRock10",
-      "path": "custom/pbr/models/GroundRock10.glb",
+      "path": "custom/models/ground_modules/ground_island_10.glb",
       "preserveSourceScale": true
     },
     {
@@ -1038,6 +1038,256 @@
     {
       "name": "CliffWallInteriorB",
       "path": "custom/models/cliff_walls/cliff_wall_interior_b.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEnd01",
+      "path": "custom/models/ground_modules/ground_end_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEnd02",
+      "path": "custom/models/ground_modules/ground_end_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEnd03",
+      "path": "custom/models/ground_modules/ground_end_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEnd04",
+      "path": "custom/models/ground_modules/ground_end_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEnd05",
+      "path": "custom/models/ground_modules/ground_end_05.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEnd06",
+      "path": "custom/models/ground_modules/ground_end_06.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEnd07",
+      "path": "custom/models/ground_modules/ground_end_07.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEnd08",
+      "path": "custom/models/ground_modules/ground_end_08.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEnd09",
+      "path": "custom/models/ground_modules/ground_end_09.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEnd10",
+      "path": "custom/models/ground_modules/ground_end_10.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockStrip01",
+      "path": "custom/models/ground_modules/ground_strip_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockStrip02",
+      "path": "custom/models/ground_modules/ground_strip_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockStrip03",
+      "path": "custom/models/ground_modules/ground_strip_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockStrip04",
+      "path": "custom/models/ground_modules/ground_strip_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockStrip05",
+      "path": "custom/models/ground_modules/ground_strip_05.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockStrip06",
+      "path": "custom/models/ground_modules/ground_strip_06.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockStrip07",
+      "path": "custom/models/ground_modules/ground_strip_07.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockStrip08",
+      "path": "custom/models/ground_modules/ground_strip_08.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockStrip09",
+      "path": "custom/models/ground_modules/ground_strip_09.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockStrip10",
+      "path": "custom/models/ground_modules/ground_strip_10.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockCorner01",
+      "path": "custom/models/ground_modules/ground_corner_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockCorner02",
+      "path": "custom/models/ground_modules/ground_corner_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockCorner03",
+      "path": "custom/models/ground_modules/ground_corner_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockCorner04",
+      "path": "custom/models/ground_modules/ground_corner_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockCorner05",
+      "path": "custom/models/ground_modules/ground_corner_05.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockCorner06",
+      "path": "custom/models/ground_modules/ground_corner_06.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockCorner07",
+      "path": "custom/models/ground_modules/ground_corner_07.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockCorner08",
+      "path": "custom/models/ground_modules/ground_corner_08.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockCorner09",
+      "path": "custom/models/ground_modules/ground_corner_09.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockCorner10",
+      "path": "custom/models/ground_modules/ground_corner_10.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEdge01",
+      "path": "custom/models/ground_modules/ground_edge_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEdge02",
+      "path": "custom/models/ground_modules/ground_edge_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEdge03",
+      "path": "custom/models/ground_modules/ground_edge_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEdge04",
+      "path": "custom/models/ground_modules/ground_edge_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEdge05",
+      "path": "custom/models/ground_modules/ground_edge_05.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEdge06",
+      "path": "custom/models/ground_modules/ground_edge_06.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEdge07",
+      "path": "custom/models/ground_modules/ground_edge_07.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEdge08",
+      "path": "custom/models/ground_modules/ground_edge_08.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEdge09",
+      "path": "custom/models/ground_modules/ground_edge_09.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockEdge10",
+      "path": "custom/models/ground_modules/ground_edge_10.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockInterior01",
+      "path": "custom/models/ground_modules/ground_interior_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockInterior02",
+      "path": "custom/models/ground_modules/ground_interior_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockInterior03",
+      "path": "custom/models/ground_modules/ground_interior_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockInterior04",
+      "path": "custom/models/ground_modules/ground_interior_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockInterior05",
+      "path": "custom/models/ground_modules/ground_interior_05.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockInterior06",
+      "path": "custom/models/ground_modules/ground_interior_06.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockInterior07",
+      "path": "custom/models/ground_modules/ground_interior_07.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockInterior08",
+      "path": "custom/models/ground_modules/ground_interior_08.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockInterior09",
+      "path": "custom/models/ground_modules/ground_interior_09.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "GroundRockInterior10",
+      "path": "custom/models/ground_modules/ground_interior_10.glb",
       "preserveSourceScale": true
     }
   ],

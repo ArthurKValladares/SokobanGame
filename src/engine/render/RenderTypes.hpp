@@ -476,6 +476,12 @@ struct RenderFrameData {
         std::optional<GroundSplatTextures> groundSplat;
         GridPosition groundSplatOrigin {};
         uint32_t groundRockVariant = 0;
+        // Native ground bodies contain the exposed rock sides. Their authored
+        // broad chamfer and flat cap use a serialized native surface lookup;
+        // loaded meshes need no deformation or generated side-index variants.
+        bool groundModule = false;
+        uint8_t groundModuleSideMask = groundAllSides;
+        uint8_t groundModuleConcaveCorners = 0;
         bool cliffWall = false;
         uint32_t cliffWallVariant = 0;
         // Actual selected body exposure, in world N/E/S/W order. The native

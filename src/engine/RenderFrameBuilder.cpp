@@ -5,6 +5,7 @@
 #include "engine/ElevatorVisuals.hpp"
 #include "engine/GateEffect.hpp"
 #include "engine/GroundGeometry.hpp"
+#include "engine/GroundTileGeometry.hpp"
 #include "engine/MinecartGateVisuals.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/RenderFrameParts.hpp"
@@ -258,6 +259,7 @@ void appendStaticTiles(
                     // their own passes.
                     continue;
                 }
+                const RenderModel model = manifest.modelForTile(cell.tile);
                 RenderFrameData::Tile renderTile {
                     .cell = {
                         static_cast<int>(x),
@@ -278,7 +280,7 @@ void appendStaticTiles(
                     .showGrid = cell.showGrid,
                     .affectsCameraFit =
                         tileTypeAffectsCameraFit(cell.tile),
-                    .model = manifest.modelForTile(cell.tile),
+                    .model = model,
                     .modelRotationQuarterTurns = cell.modelRotationQuarterTurns,
                     .modelRotationOffsetRadians =
                         cell.modelRotationOffsetRadians +
@@ -293,6 +295,8 @@ void appendStaticTiles(
                         ? RenderSurfaceEffect::PlateEnergy
                         : RenderSurfaceEffect::Standard,
                     .groundRockVariant = groundRockVariantFor(cell.tile),
+                    .groundModule = tileTypeIsGround(cell.tile) && !model.isCube() &&
+                        authoredGroundTileVariant(manifest.model(model)).has_value(),
                     .cliffWall = tileTypeIsCliffWall(cell.tile),
                     .cliffWallVariant = cliffWallVariantFor(cell.tile),
                     .groundTop = tileTypeHasSplatTop(cell.tile),
@@ -1932,6 +1936,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     appendMirrorPreview(frame, input);
     applyScrollingMaterials(frame, input);
     processCliffWallGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
+    processGroundTileGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
     if (input.settings.geometry.processGroundGeometry) {
         processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest,
             nullptr, input.groundGeometryCache);
@@ -1957,6 +1962,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(
     appendMirrorPreview(frame, input, &arena);
     applyScrollingMaterials(frame, input);
     processCliffWallGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
+    processGroundTileGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest, &arena);
     if (input.settings.geometry.processGroundGeometry) {
         processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest,
             &arena, input.groundGeometryCache);

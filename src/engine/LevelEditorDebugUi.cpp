@@ -831,7 +831,6 @@ void LevelEditorDebugUi::drawTilePalette(
             }
         }
     }
-    ImGui::Text("Paint");
     // Wrap to the panel width instead of one long row, which these buttons are
     // far too wide for.
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
@@ -841,10 +840,12 @@ void LevelEditorDebugUi::drawTilePalette(
         static_cast<int>(
             (available + spacing) / (paletteButtonSize.x + spacing)));
     const bool editingOverworld = editor.editingOverworld();
-    {
-        SOKOBAN_PROFILE_SCOPE("Editor.Draw palette icons");
+    const auto drawPaletteIcons = [&](bool terrain) {
         int column = 0;
         for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
+            if (editorTilePalette::isTerrain(definition.type) != terrain) {
+                continue;
+            }
             const auto* group = editorTilePalette::groupFor(definition.type);
             if (group != nullptr && group->tiles.front() != definition.type) {
                 continue;
@@ -865,6 +866,7 @@ void LevelEditorDebugUi::drawTilePalette(
             if (column % perRow != 0) {
                 ImGui::SameLine();
             }
+            ImGui::BeginGroup();
             // Keep the selected direction visible on its single family button.
             const TileType displayedTile = group != nullptr &&
                     group->contains(editor.selectedTile())
@@ -929,22 +931,33 @@ void LevelEditorDebugUi::drawTilePalette(
                 ImGui::EndPopup();
             }
             ImGui::PopID();
+            if (terrain && group != nullptr) {
+                ImGui::TextUnformatted(group->name.data(), group->name.data() + group->name.size());
+            }
+            ImGui::EndGroup();
             ++column;
         }
-    }
-
-    if (ImGui::Button("Randomize Rocks")) {
-        (void)editor.randomizeRocks();
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Choose a random rock model for every ground tile on all layers of this screen. Undo restores the previous choices.");
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Randomize Walls")) {
-        (void)editor.randomizeWalls();
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Choose a random variant for every wall tile on all layers of this screen, preserving stone or cliff style. Undo restores the previous choices.");
+    };
+    {
+        SOKOBAN_PROFILE_SCOPE("Editor.Draw palette icons");
+        if (ImGui::CollapsingHeader("Terrain", ImGuiTreeNodeFlags_DefaultOpen)) {
+            drawPaletteIcons(true);
+            if (ImGui::Button("Randomize Ground")) {
+                (void)editor.randomizeRocks();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Choose a random style for every ground tile on all layers of this screen. Undo restores the previous choices.");
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Randomize Walls")) {
+                (void)editor.randomizeWalls();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Choose a random variant for every wall tile on all layers of this screen, preserving its stone or cliff family. Undo restores the previous choices.");
+            }
+        }
+        ImGui::Text("Paint");
+        drawPaletteIcons(false);
     }
 
     const std::string_view selectedName = tileTypeName(editor.selectedTile());
@@ -953,8 +966,8 @@ void LevelEditorDebugUi::drawTilePalette(
     } else {
         ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
     }
-    if (tileTypeIsCliffWall(editor.selectedTile())) {
-        ImGui::TextWrapped("Cliff shapes join automatically. Paint their tops with Ground Paint.");
+    if (tileTypeHasSplatTop(editor.selectedTile())) {
+        ImGui::TextWrapped("Terrain shapes join automatically. Paint their tops with Ground Paint.");
     }
     ImGui::TextWrapped(
         "Plates (Pressure, Buttons, End, Rotators, Lock Plates, Rail Stops) stack with units and mirrors; "

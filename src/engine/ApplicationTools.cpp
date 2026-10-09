@@ -1228,40 +1228,6 @@ bool ApplicationTools::bakeTileThumbnails(
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     namespace bake = tileThumbnails;
-    RenderAssetRequirements requirements;
-    for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
-        if (tileTypeIsPlayerStart(definition.type)) {
-            const CharacterType character = definition.type == TileType::Knight
-                ? CharacterType::Knight
-                : definition.type == TileType::Druid
-                    ? CharacterType::Druid
-                    : definition.type == TileType::Witch
-                        ? CharacterType::Witch
-                        : definition.type == TileType::Bard
-                            ? CharacterType::Bard
-                            : CharacterType::Rogue;
-            requirements.requireModel(manifest.characterModel(character));
-        } else {
-            requirements.requireModel(manifest.modelForTile(definition.type));
-            if (const std::optional<CharacterType> wardrobeCharacter =
-                    wardrobeCharacterForTile(definition.type)) {
-                requirements.requireModel(
-                    manifest.characterModel(*wardrobeCharacter));
-            }
-        }
-    }
-    requirements.requireTexture(
-        manifest.findTextureIdByName(groundSplatBaseTextureName));
-    requirements.requireTexture(
-        manifest.findTextureIdByName(groundSplatDetailTextureName));
-    requirements.requireTexture(
-        manifest.findTextureIdByName(groundSplatMapTextureName));
-    requirements.requireTexture(
-        manifest.findTextureIdByName(config::turretGlowTextureName));
-    requirements.requireTexture(
-        manifest.findTextureIdByName(config::gateParticleTextureName));
-    renderer.waitForAssets(requirements);
-
     bool allSucceeded = true;
     int baked = 0;
     for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
@@ -1271,8 +1237,8 @@ bool ApplicationTools::bakeTileThumbnails(
         try {
             const RenderFrameData bakeFrame = bake::buildBakeFrame(
                 definition.type, manifest, settings, &animations);
-            // Residency may have evicted an effect texture since the initial
-            // preload. Wait for everything this particular picture samples.
+            // Load one picture at a time so the entire palette does not fill
+            // the shared upload ring before rendering can consume it.
             renderer.waitForAssets(renderAssetRequirementsForFrame(bakeFrame));
             for (int warmup = 0; warmup < 2; ++warmup) {
                 SDL_PumpEvents();

@@ -756,21 +756,27 @@ surface angles to suppress shadow acne without erasing distant shadows.
 Developer builds expose the headless `LevelEditor` through ImGui. The UI invokes
 editor commands but does not own document or filesystem policy.
 
-- **Ground rock versions:** click **Ground** in the Tiles palette to open the
+- **Terrain tiles:** open **Tiles > Terrain** for the **Ground** and **Cliff
+  Wall** groups. **Randomize Ground** and **Randomize Walls** sit directly
+  below these groups.
+- **Ground rock versions:** click **Ground** in Terrain to open the
   same thumbnail submenu used by mirrors and turrets, then choose **Rock 01–10**.
-  Each version uses an editable glTF rock body with three or four large
+  Each version uses an editable Blender rock body with three or four large
   fractured plates per side, gently curved edges, rounded bevels, and warm
-  sandstone grain.
-  The ten explicit fracture layouts are exported by
-  `tools/make_ground_rock_models.py`; their visible
-  geometry and shadows use the regular model pipeline. Their square tops,
-  bottoms, and corner edges match, so different
-  versions join and stack. Gameplay uses the same square solid ground volume
-  for all versions, and their top surfaces retain the screen's splat painting.
+  sandstone grain. Each style has six native GLB shapes: standalone, end,
+  strip, corner, edge and interior. Placement automatically selects and rotates
+  the body shape for all sixteen cardinal neighbor configurations. Their broad
+  chamfers and exposed sides are authored in
+  `assets/custom/source/ground_modules.blend`; the game neither deforms these
+  meshes nor trims their indices. Diagonal gaps select authored concave caps
+  so L-shaped joints stay closed. Fully surrounded tiles draw only a flat top.
+  Mixed styles share exact corner ramps, and their separate paintable caps
+  retain screen splats across both the center and chamfer. Gameplay keeps the
+  same square solid cell.
   Existing `.` tiles use Rock 01; the other nine brushes save as the symbols
   above. Eyedropper, recent brushes, undo/redo, and moving a painted tile retain
   its chosen version and material assignment.
-  **Randomize Rocks**, below the tile selector, assigns a random version to
+  **Randomize Ground** assigns a random version to
   every ground tile on every layer of the edited screen. The whole action is
   one undo/redo step and keeps each tile's splat assignment.
 - **Cliff walls:** click **Cliff Wall** to choose between two rock styles.
@@ -885,11 +891,31 @@ editor commands but does not own document or filesystem policy.
 
 ## Developer Iteration Tools
 
-Ground geometry processing removes shared rock sides between adjacent,
+The current ground kit and cliff walls share the six-shape neighbor resolver.
+Only same-height, opaque, unit-scale tiles in their own terrain family join.
+The native ground library contains sixty body GLBs and 250 authored top
+surfaces. Three broad shallow chamfer panels per side replace the narrow
+toothed edge. A literal lookup serialized from the Blender tops supplies
+rendering, shadows and blend-mask picking; world-space paint coordinates
+survive rotations. Interior ground skips the body draw and uses one square
+cap when no diagonal gap requires a concave wedge. Content staging packages
+the native meshes and shared PBR
+maps without generating ground rim artifacts for native-only screens.
+See [the ground source contract](assets/custom/source/ground_modules/README.md)
+for Blender editing and export requirements.
+
+### Legacy ground experiments
+
+The **Legacy** geometry controls below apply only to the original ground
+source paths and existing experimental fixtures. Native terrain uses its
+authored shapes regardless of these settings.
+
+Legacy ground geometry processing removes shared rock sides between adjacent,
 opaque, unit-scale ground tiles. It preserves painted tops, bottoms, gameplay
 cells and editor picking. Validated source meshes share vertex data across
 exposure masks; main rendering and shadows use the same selected indices.
-Only the shipped GroundRock01–10 source family participates. Custom models,
+Only the old `custom/pbr/models/GroundRock01–10.glb` source family participates.
+Native ground modules, custom models,
 scaled or transformed ground, animated objects and isolated editor previews
 retain their complete geometry. A shared side remains visible until the
 neighbor's actual mesh is resident and validated.
@@ -959,7 +985,7 @@ stale or invalid artifacts use live generation. Different rim settings, changed
 visibility boundaries and editor drafts also retain live generation. Source
 level files remain editable, and no manual processing command is required.
 
-Compare it live with **Tuning > Tile Geometry > Process Ground Geometry**, or
+Compare it live with **Tuning > Tile Geometry > Process Legacy Ground Geometry**, or
 launch a matched evidence capture with `--disable-ground-geometry`.
 Render statistics and evidence reports show ground triangles before/after
 processing and avoided shadow triangles. Index variants retain the vertex
@@ -1002,6 +1028,8 @@ rebuilds and retained bytes. Large views that exceed the shared draw budget
 fall back to flat ground as a whole before recording. The prototype
 adds cap geometry, so compare total triangles, draw calls and timings alongside
 the ground-body triangle counters.
+
+### Build tools
 
 The `dev` and `dev-fast` builds add these to the workspace:
 

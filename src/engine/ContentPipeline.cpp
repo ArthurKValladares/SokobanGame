@@ -772,7 +772,9 @@ private:
             overworldMap = OverworldMap::load(overworldRoot);
             overworld = &overworldMap->level();
             overworldDiagnosticPath = &layoutPath;
-            groundGeometrySources_.push_back({ std::filesystem::path("overworld") / "layout.json", true });
+            if (levelHasLegacyGroundGeometry(*overworld, *manifest_)) {
+                groundGeometrySources_.push_back({ std::filesystem::path("overworld") / "layout.json", true });
+            }
             addFile(
                 overworldRoot,
                 "layout.json",
@@ -797,7 +799,9 @@ private:
             legacyOverworld = Level::loadFromFile(legacyOverworldPath);
             overworld = &*legacyOverworld;
             overworldDiagnosticPath = &legacyOverworldPath;
-            groundGeometrySources_.push_back({ "overworld.scr", false });
+            if (levelHasLegacyGroundGeometry(*overworld, *manifest_)) {
+                groundGeometrySources_.push_back({ "overworld.scr", false });
+            }
             addFile(
                 roots_.levels,
                 "overworld.scr",
@@ -868,7 +872,9 @@ private:
                 validateDecorations(level, screenFile.path());
                 const std::filesystem::path relative = screenFile.path().lexically_relative(roots_.levels);
                 addFile(roots_.levels, relative, std::filesystem::path("levels") / relative, "level screen");
-                groundGeometrySources_.push_back({ relative, false });
+                if (levelHasLegacyGroundGeometry(level, *manifest_)) {
+                    groundGeometrySources_.push_back({ relative, false });
+                }
             }
 
             const std::filesystem::path metadataPath =

@@ -63,7 +63,7 @@ struct GroundRimSurface {
 [[nodiscard]] inline bool hasGroundRimSurface(
     const RenderFrameData::Tile& tile) noexcept
 {
-    return tile.groundTop && !tile.model.isCube() && !tile.pickOnly &&
+    return tile.groundTop && !tile.groundModule && !tile.cliffWall && !tile.model.isCube() && !tile.pickOnly &&
         !tile.isEditorPreview &&
         (tile.groundRimSides != 0 || tile.groundRimConcaveCorners != 0) &&
         groundRimProfileValid(groundRimProfileForSurface(tile));

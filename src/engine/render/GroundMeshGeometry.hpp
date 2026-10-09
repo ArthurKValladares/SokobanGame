@@ -22,8 +22,9 @@ struct GroundMeshVariants {
     bool processed = false;
 };
 
-// Only the authored, unit-scale ground-rock family has the coverage contract
-// required by the experiment. Custom models retain their original geometry.
+// The legacy source ground-rock family has the coverage contract required by
+// generated side-index variants. Native ground_modules GLBs contain their
+// final sides/chamfer and custom models retain their original geometry.
 [[nodiscard]] bool isProcessableGroundRockModel(
     const AssetManifest::Model& model) noexcept;
 

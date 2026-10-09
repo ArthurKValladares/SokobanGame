@@ -581,6 +581,29 @@ void addProcessableGroundFixture(const sokoban::ContentSourceRoots& roots)
         R"json({"asset":{"version":"2.0"}})json");
 }
 
+void testNativeGroundModulesNeedNoGeneratedGroundArtifacts()
+{
+    TEST("nativeGroundModulesNeedNoGeneratedGroundArtifacts");
+    ScopedTestDirectory temp("sokoban-content-native-ground");
+    const auto roots = createValidContent(temp.path());
+    addProcessableGroundFixture(roots);
+    constexpr std::string_view nativePath = "custom/models/ground_modules/ground_island_01.glb";
+    auto contents = readFile(roots.assets / "manifest.json");
+    contents = replaceFirst(std::move(contents), "custom/models/ground_rock_01.gltf", std::string(nativePath));
+    writeFile(roots.assets / "manifest.json", contents);
+    writeGlb(roots.assets / nativePath, R"json({"asset":{"version":"2.0"}})json", {});
+    const auto inventory = sokoban::collectContentInventory(roots);
+    CHECK(inventory.groundGeometrySources.empty());
+    CHECK(contains(inventory, nativePath));
+    const auto authored = readFile(roots.levels / "level0/screen0.scr");
+    const auto output = temp.path() / "package/assets";
+    const auto staged = sokoban::stageContent(roots, output, "1.2.3");
+    CHECK(contains(staged, nativePath));
+    CHECK(!std::filesystem::exists(output / "geometry/ground"));
+    CHECK(readFile(output / "levels/level0/screen0.scr") == authored);
+    sokoban::validateContentPackage(output, "1.2.3");
+}
+
 void testGroundArtifactsAreGeneratedAndIndexed()
 {
     TEST("groundArtifactsAreGeneratedAndIndexed");
@@ -1457,6 +1480,7 @@ int main()
         testStagedContentIndexValidation();
         testIncrementalStagingMatchesACleanStage();
         testGroundArtifactsAreGeneratedAndIndexed();
+        testNativeGroundModulesNeedNoGeneratedGroundArtifacts();
         testGroundArtifactSkipRecoversMissingCorruptAndStaleOutput();
         testRuntimeIndexRefreshTracksEditorMutations();
         testLevelEditorPublishesAStartupValidPackage();

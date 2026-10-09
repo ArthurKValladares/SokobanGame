@@ -2,6 +2,7 @@
 #include "TestHarness.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/GroundTileGeometry.hpp"
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
 
@@ -997,27 +998,28 @@ int main()
             CHECK(!rock.vertices.empty());
             CHECK(!rock.indices.empty());
             CHECK(rock.indices.size() % 3 == 0);
-            // Three/four broad plates on each side plus the square bottom.
+            // Three/four broad plates per exposed side, seal ledge and backing.
             CHECK(rock.materials.size() >= 13 && rock.materials.size() <= 17);
             bool hasSteepChip = false;
             for (const auto& vertex : rock.vertices) {
                 // Shallow ledges stay close to the square logical footprint.
-                // The unchanged top/bottom perimeters close tile joins.
+                // Native sides end at the lowered authored chamfer lip.
                 CHECK(vertex.position.x >= -0.0301f && vertex.position.x <= 1.0301f);
                 CHECK(vertex.position.y >= -0.0301f && vertex.position.y <= 1.0301f);
-                CHECK(vertex.position.z >= -0.00001f && vertex.position.z <= 1.00001f);
+                CHECK(vertex.position.z >= -0.00001f && vertex.position.z <= 0.91002f);
                 hasSteepChip |= vertex.normal.z > 0.45f && vertex.normal.z < 0.99f;
             }
             CHECK(hasSteepChip);
-            for (const float x : { 0.0f, 1.0f }) {
-                for (const float y : { 0.0f, 1.0f }) {
-                    CHECK(std::ranges::any_of(rock.vertices, [x, y](const auto& vertex) {
-                        return std::abs(vertex.position.x - x) < 0.00001f &&
-                            std::abs(vertex.position.y - y) < 0.00001f &&
-                            std::abs(vertex.position.z - 1.0f) < 0.00001f;
-                    }));
-                }
-            }
+            CHECK(asset.path.starts_with("custom/models/ground_modules/ground_island_"));
+            CHECK(std::ranges::any_of(rock.vertices, [](const auto& vertex) {
+                return std::abs(vertex.position.z - .91f) < .00002f;
+            }));
+            const auto& cap = sokoban::groundTileCanonicalTopSurface(
+                0, sokoban::groundRockVariantFor(definition.type), 0);
+            CHECK(cap.count > 1 && cap.count <= sokoban::groundTileTopPatchCapacity);
+            CHECK(std::ranges::any_of(cap.faces(), [](const auto& patch) {
+                return patch.normal.z > 0 && patch.normal.z < .99f;
+            }));
         }
         for (const auto type : { sokoban::TileType::PressurePlate, sokoban::TileType::End }) {
             const auto model = rockManifest.modelForTile(type);
