@@ -799,9 +799,13 @@ std::string serializePlate(const Level::Plate& plate)
     if (!tileTypeIsPlate(plate.tile) && !tileTypeIsRail(plate.tile)) {
         throw std::runtime_error("Cannot serialize a plate record for a non-plate tile");
     }
+    // Retain the original spelling for the north placement so unchanged
+    // legacy screens keep their serialized content and map fingerprints.
+    const auto name = plate.tile == TileType::ButtonNorth
+        ? std::string_view("Button") : tileTypeName(plate.tile);
     const Json object {
         { "cell", { plate.cell.x, plate.cell.y, plate.cell.z } },
-        { "tile", std::string(tileTypeName(plate.tile)) },
+        { "tile", std::string(name) },
     };
     return std::string(platePrefix) + object.dump();
 }

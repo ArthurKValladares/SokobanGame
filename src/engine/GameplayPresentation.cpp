@@ -1525,7 +1525,7 @@ std::vector<GameplaySoundCue> GameplayPresentation::buildActionSoundCues(
         boardingPositions(settled.enemies, before.enemies);
         const auto plateEdges = [&](const GameState& from, const GameState& to, float time) {
             for (const auto plate : level.pressurePlates()) {
-                if (level.plateAt(plate) == TileType::Button) {
+                if (tileTypeIsButton(level.plateAt(plate).value_or(TileType::Air))) {
                     continue;
                 }
                 const bool wasPressed = rules::isPressurePlateActive(level, from, plate);

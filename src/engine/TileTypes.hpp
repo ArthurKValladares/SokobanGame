@@ -73,6 +73,7 @@ enum class TileType : uint8_t {
     PortalWest,
     LockPlate,
     Button,
+    ButtonNorth = Button,
     // A rail-mounted barrier that admits carts and their character riders.
     MinecartGate,
     // Fixed reading stand; walking into it opens its authored text.
@@ -111,6 +112,11 @@ enum class TileType : uint8_t {
     // occupancy and retain the same paintable splat top as ground.
     CliffWall,
     CliffWall02,
+    // Edge-mounted buttons face the center of their owning cell. The original
+    // Button and 'b' remain the north placement for existing screen files.
+    ButtonEast,
+    ButtonSouth,
+    ButtonWest,
     Count,
 };
 
@@ -244,7 +250,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::PortalSouth, 'p', "Portal South", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::PortalWest, 'q', "Portal West", { 0.64f, 0.30f, 1.0f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::LockPlate, 'J', "Lock Plate", { 0.70f, 0.48f, 0.90f, 1.0f }, {}, TileProperty::Plate },
-    TileTypeDefinition { TileType::Button, 'b', "Button", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::ButtonNorth, 'b', "Button North", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::MinecartGate, 'g', "Minecart Gate", { 0.92f, 0.66f, 0.22f, 1.0f } },
     TileTypeDefinition { TileType::LecternSouth, 'T', "Lectern South", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::GroundRock02, 'A', "Ground Rock 02", { 0.82f, 0.82f, 0.84f, 1.0f } },
@@ -274,6 +280,9 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::WallStone08, 'r', "Wall Stone 08", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::CliffWall, 'u', "Cliff Wall", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::CliffWall02, 'x', "Cliff Wall 02", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::ButtonEast, 'y', "Button East", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::ButtonSouth, 'z', "Button South", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::ButtonWest, '~', "Button West", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -286,10 +295,17 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeHasProperty(TileType type, TileProperty property);
 // Pressure plates, rotators and Ends: see TileProperty::Plate.
 [[nodiscard]] bool tileTypeIsPlate(TileType type);
+[[nodiscard]] constexpr bool tileTypeIsButton(TileType type)
+{
+    return type == TileType::ButtonNorth || type == TileType::ButtonEast ||
+        type == TileType::ButtonSouth || type == TileType::ButtonWest;
+}
+// Clockwise turns from the north-edge button model, which faces south inward.
+[[nodiscard]] std::optional<uint32_t> buttonOrientationQuarterTurns(TileType type);
 // Sources that drive linked devices: occupancy for pressure, Activate for buttons.
 [[nodiscard]] constexpr bool tileTypeIsSignalSource(TileType type)
 {
-    return type == TileType::PressurePlate || type == TileType::Button;
+    return type == TileType::PressurePlate || tileTypeIsButton(type);
 }
 // What may stand on a plate, including when a screen is authored that way:
 // every unit that occupies a level cell (heroes, rocks, ice, turrets,

@@ -50,6 +50,10 @@ std::string assetPathFor(TileType tile)
     if (tile == TileType::LecternSouth) {
         return "custom/thumbnails/tile_lectern.png";
     }
+    // The original button is the north placement; keep its existing icon path.
+    if (tile == TileType::ButtonNorth) {
+        return "custom/thumbnails/tile_button.png";
+    }
     return "custom/thumbnails/tile_" + slug(tileTypeName(tile)) + ".png";
 }
 

@@ -872,6 +872,11 @@
       "preserveSourceScale": true
     },
     {
+      "name": "PulseButton",
+      "path": "custom/models/pulse_button.glb",
+      "preserveSourceScale": true
+    },
+    {
       "name": "EndPlate",
       "path": "custom/models/end_plate.glb",
       "preserveSourceScale": true
@@ -1448,6 +1453,22 @@
     {
       "tile": "Pressure",
       "model": "PressurePlate"
+    },
+    {
+      "tile": "Button North",
+      "model": "PulseButton"
+    },
+    {
+      "tile": "Button East",
+      "model": "PulseButton"
+    },
+    {
+      "tile": "Button South",
+      "model": "PulseButton"
+    },
+    {
+      "tile": "Button West",
+      "model": "PulseButton"
     },
     {
       "tile": "End",

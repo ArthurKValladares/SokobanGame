@@ -318,6 +318,11 @@
       "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
     },
     {
+      "name": "PulseButton",
+      "source": "custom/models/pulse_button.glb",
+      "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
+    },
+    {
       "name": "EndPlate",
       "source": "custom/models/end_plate.glb",
       "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."

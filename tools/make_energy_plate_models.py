@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministically author the pressure and end plates from simple geometry.
+"""Deterministically author the energy plates and pedestal button.
 
 Coordinates use the engine's unit tile convention: x east, y south, z up.
 The asset manifest must load these with preserveSourceScale. At the default
@@ -8,6 +8,10 @@ the pressure plate remains a low, recessed pad. Positive-emissive materials
 are white so the plate shader can apply its link/activation color without
 tinting the grey housing. UV0 is the engine x/y projection used by the energy
 animation. All emission uses valid KHR_materials_emissive_strength factors.
+
+The pulse button uses unit scale on every axis. Its raised pedestal sits near
+the north tile edge, with the round press face tilted 45 degrees toward the
+tile center (+y). Quarter turns around (.5, .5) supply the other three edges.
 
 Only Python's standard library is required. Re-running produces identical GLBs.
 """
@@ -230,6 +234,115 @@ def end_geometry():
     return meshes
 
 
+def pulse_button_geometry():
+    """A compact inward-facing button on a pedestal at character hip height."""
+    names = ("Housing", "BeveledSteel", "Recess", "EnergyPanel", "Engraving", "EnergyInlay")
+    meshes = {name: Primitive() for name in names}
+    # Position the middle of the press face, rather than the pedestal edge,
+    # at .60 units above the floor for the 1.1-unit player character.
+    face_center_height = .60
+    pedestal_rise = face_center_height - (.26 + .041 * math.sqrt(.5))
+
+    def pedestal_outline(width, depth):
+        return [(.5 + (x - .5) * width, .19 + (y - .5) * depth)
+                for x, y in pillow_outline(.48)]
+
+    base = pedestal_outline(.46, .33)
+    shoulder = pedestal_outline(.42, .29)
+    meshes["Housing"].fan((.5, .19), base, 0, False)
+    meshes["Housing"].prism_walls(base, 0, .069)
+    band(meshes["BeveledSteel"], base, shoulder, .069, .102)
+    meshes["Housing"].fan((.5, .19), shoulder, .102, True)
+    # A recessed seam separates the wide foot from the narrower sloping mount.
+    band(meshes["Engraving"], pedestal_outline(.461, .331),
+         pedestal_outline(.459, .329), .029, .036)
+
+    # The support's sloping top follows the back of the 45-degree control face.
+    support = [(.352, .059), (.648, .059), (.668, .079), (.668, .273),
+               (.648, .293), (.352, .293), (.332, .273), (.332, .079)]
+    bottom = .102
+    height = lambda y: .303 + pedestal_rise - (y - .059) * .72
+    center = (.5, .176, height(.176))
+    meshes["Housing"].fan((.5, .176), support, bottom, False)
+    for i, p in enumerate(support):
+        q = support[(i + 1) % len(support)]
+        outward = (q[1] - p[1], p[0] - q[0], 0)
+        meshes["Housing"].quad((*p, bottom), (*q, bottom),
+                               (*q, height(q[1])), (*p, height(p[1])), outward)
+        meshes["BeveledSteel"].triangle(center, (*p, height(p[1])),
+                                       (*q, height(q[1])), (0, .72, 1))
+    # Rear vents and a front status inlay give the pedestal a mechanical body.
+    for x in (.401, .433, .465, .497, .529, .561, .593):
+        meshes["Recess"].quad((x, .0585, .148 + pedestal_rise),
+                              (x + .013, .0585, .148 + pedestal_rise),
+                              (x + .013, .0585, .219 + pedestal_rise),
+                              (x, .0585, .219 + pedestal_rise), (0, -1, 0))
+    meshes["Recess"].quad((.442, .294, .111 + pedestal_rise),
+                          (.558, .294, .111 + pedestal_rise),
+                          (.558, .294, .128 + pedestal_rise),
+                          (.442, .294, .128 + pedestal_rise), (0, 1, 0))
+    meshes["EnergyInlay"].quad((.451, .2945, .116 + pedestal_rise),
+                               (.549, .2945, .116 + pedestal_rise),
+                               (.549, .2945, .123 + pedestal_rise),
+                               (.451, .2945, .123 + pedestal_rise), (0, 1, 0))
+
+    # Author the round control in a local XY plane, then tilt it toward +y.
+    face = {name: Primitive() for name in names}
+    outer = circle_outline(.175)
+    face["Housing"].fan(CENTER, outer, -.068, False)
+    face["Housing"].prism_walls(outer, -.068, -.020)
+    band(face["BeveledSteel"], outer, circle_outline(.159), -.020, .013)
+    band(face["Housing"], circle_outline(.159), circle_outline(.143), .013, .013)
+    band(face["BeveledSteel"], circle_outline(.143), circle_outline(.134), .013, .003)
+    band(face["Recess"], circle_outline(.134), circle_outline(.121), .003, -.011)
+    face["Recess"].prism_walls(circle_outline(.121), -.011, .018)
+    # The luminous press cap has a short sidewall and a softly beveled face.
+    face["EnergyPanel"].prism_walls(circle_outline(.120), .008, .025)
+    band(face["EnergyPanel"], circle_outline(.120), circle_outline(.109), .025, .041)
+    face["EnergyPanel"].fan(CENTER, circle_outline(.109), .041, True)
+    band(face["Engraving"], circle_outline(.085), circle_outline(.080), .042, .042)
+    # Three restrained grooves keep the face tactile and button-shaped.
+    for offset in (-.018, 0, .018):
+        ribbon(face["Engraving"], [(.471, .5 + offset), (.529, .5 + offset)], .004, .043)
+    for sector in range(8):
+        start = math.radians(sector * 45 + 7)
+        end = math.radians(sector * 45 + 38)
+        arc_strip(face["Recess"], .147, .157, start, end, .0125, .0145)
+        arc_strip(face["EnergyInlay"], .149, .155, start, end, .0145, .017)
+
+    def small_circle(x, y, radius, segments=24):
+        return [(x + radius * math.cos(2 * math.pi * i / segments),
+                 y + radius * math.sin(2 * math.pi * i / segments))
+                for i in range(segments)]
+
+    # Four slotted bezel screws sit on the outer steel shoulder, clear of inlays.
+    for quarter in range(4):
+        angle = math.radians(quarter * 90 + 45)
+        x, y = .5 + .166 * math.cos(angle), .5 + .166 * math.sin(angle)
+        head = small_circle(x, y, .009)
+        face["Recess"].fan((x, y), small_circle(x, y, .011), -.0055, True)
+        face["BeveledSteel"].prism_walls(head, -.006, .005)
+        band(face["BeveledSteel"], head, small_circle(x, y, .007), .005, .008)
+        face["BeveledSteel"].fan((x, y), small_circle(x, y, .007), .008, True)
+        ribbon(face["Engraving"], [(x - .005, y), (x + .005, y)], .0025, .0085)
+
+    tilt = math.sqrt(.5)
+    for name, local in face.items():
+        mesh = meshes[name]
+        mesh.positions.extend((x, .20 + (y - .5) * tilt + z * tilt,
+                               .26 + pedestal_rise - (y - .5) * tilt + z * tilt)
+                              for x, y, z in local.positions)
+        mesh.normals.extend((x, y * tilt + z * tilt, -y * tilt + z * tilt)
+                            for x, y, z in local.normals)
+    # Two mounting bolts in the visible corners of the pedestal's foot.
+    for x in (.317, .683):
+        y = .29
+        bolt = small_circle(x, y, .008)
+        prism(meshes["BeveledSteel"], bolt, .104, .112)
+        ribbon(meshes["Engraving"], [(x - .005, y), (x + .005, y)], .0025, .113)
+    return meshes
+
+
 def validate_geometry(meshes):
     """Reject degeneracy, non-unit normals, invalid winding and tile overhangs."""
     for name, mesh in meshes.items():
@@ -298,6 +411,7 @@ def write_glb(path, meshes):
 def main():
     write_glb(OUTPUT_DIRECTORY / "pressure_plate.glb", pressure_geometry())
     write_glb(OUTPUT_DIRECTORY / "end_plate.glb", end_geometry())
+    write_glb(OUTPUT_DIRECTORY / "pulse_button.glb", pulse_button_geometry())
 
 
 if __name__ == "__main__":

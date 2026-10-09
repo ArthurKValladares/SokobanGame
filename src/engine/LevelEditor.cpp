@@ -413,18 +413,16 @@ Vec3 freshLinkColor(const std::vector<std::array<long, 3>>& used)
     return unlinkedPlateColor;
 }
 
-// Every pressure plate in a definition, uncovered or beneath an occupant, in
+// Every signal source in a definition, uncovered or beneath an occupant, in
 // z/y/x order.
 std::vector<GridPosition3> pressurePlateCells(const Level::Definition& definition)
 {
     std::vector<GridPosition3> cells;
-    const char pressure = tileTypeToChar(TileType::PressurePlate);
-    const char button = tileTypeToChar(TileType::Button);
     for (std::size_t z = 0; z < definition.layers.size(); ++z) {
         for (std::size_t y = 0; y < definition.layers[z].size(); ++y) {
             for (std::size_t x = 0; x < definition.layers[z][y].size(); ++x) {
-                if (definition.layers[z][y][x] == pressure ||
-                    definition.layers[z][y][x] == button) {
+                const auto tile = charToTileType(definition.layers[z][y][x]);
+                if (tile && tileTypeIsSignalSource(*tile)) {
                     cells.push_back({
                         static_cast<int>(x),
                         static_cast<int>(y),

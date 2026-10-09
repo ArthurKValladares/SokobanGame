@@ -676,12 +676,17 @@ std::uint64_t levelDigest(const Level::Definition& definition)
         return cellOrder(plate.cell);
     });
     for (const Level::Plate& plate : plates) {
+        // The original button now appears as "Button North" in the editor.
+        // Keep its preexisting digest spelling so recorded solutions still
+        // match unchanged screens containing a covered legacy button.
+        const auto name = plate.tile == TileType::ButtonNorth
+            ? std::string_view("Button") : tileTypeName(plate.tile);
         hashBytes(
             hash,
             "@plate " + std::to_string(plate.cell.x) + "," +
                 std::to_string(plate.cell.y) + "," +
                 std::to_string(plate.cell.z) + ":" +
-                std::string(tileTypeName(plate.tile)) + "\n");
+                std::string(name) + "\n");
     }
     return hash;
 }

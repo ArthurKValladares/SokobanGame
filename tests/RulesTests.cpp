@@ -175,6 +175,41 @@ void testButtonsTriggerAllLinkedDevicesPerPress()
     CHECK(partial && partial->movables[0].quarterTurns == 0);
 }
 
+void testButtonPlacementsShareActivationRules()
+{
+    TEST("buttonPlacementsShareActivationRules");
+    for (const TileType button : { TileType::ButtonNorth, TileType::ButtonEast,
+             TileType::ButtonSouth, TileType::ButtonWest }) {
+        std::string row = "Q R G";
+        row[1] = tileTypeToChar(button);
+        const Level level = Level::loadFromDefinition({
+            .layers = { { "....." }, { row } },
+            .gates = { { .cell = cell(4, 0, 1),
+                         .pressurePlates = { cell(0, 0, 1) } } },
+            .plates = { { cell(0, 0, 1), button }, { cell(2, 0, 1), button } },
+        }, "directional button eligibility");
+        const GameState before = rules::initialState(level);
+        CHECK(rules::activatableButtons(level, before) ==
+            std::vector<GridPosition3> { cell(0, 0, 1) });
+        CHECK(!rules::isPressurePlateActive(level, before, cell(0, 0, 1)));
+        CHECK(!rules::isPressurePlateActive(level, before, cell(2, 0, 1)));
+        const auto pressed = rules::activate(level, before);
+        CHECK(pressed.has_value());
+        if (!pressed) continue;
+        CHECK(rules::isGateOpen(level, *pressed, level.gates()[0]));
+        CHECK(pressed->activeButtons == std::vector<GridPosition3> { cell(0, 0, 1) });
+        GameState expired = rules::step(level, *pressed);
+        CHECK(expired.activeButtons.empty());
+        CHECK(!rules::isGateOpen(level, expired, level.gates()[0]));
+        expired.players[0].cell = cell(1, 0, 1);
+        CHECK(rules::activatableButtons(level, expired) ==
+            std::vector<GridPosition3> { cell(1, 0, 1) });
+        const auto direct = rules::activate(level, expired);
+        CHECK(direct && direct->activeButtons ==
+            std::vector<GridPosition3> { cell(1, 0, 1) });
+    }
+}
+
 void testActivateCombinesMultipleMirrorsAndButtonsFromStartingBoard()
 {
     TEST("activateCombinesMultipleMirrorsAndButtonsFromStartingBoard");
@@ -3715,6 +3750,7 @@ void testLockPlatesHoldAndReleaseUnits()
 int main()
 {
     testButtonPulseLifetimeAndEligibility();
+    testButtonPlacementsShareActivationRules();
     testButtonsTriggerAllLinkedDevicesPerPress();
     testActivateCombinesMultipleMirrorsAndButtonsFromStartingBoard();
     testLockPlatesHoldAndReleaseUnits();

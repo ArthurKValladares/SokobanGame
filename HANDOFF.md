@@ -1,6 +1,6 @@
 # Sokoban 3D handoff
 
-Updated 2026-10-06. This file describes current operating guidance, implementation
+Updated 2026-10-09. This file describes current operating guidance, implementation
 contracts and known limitations. [README.md](README.md) covers player controls,
 authoring formats, supported commands and packaging.
 
@@ -31,6 +31,20 @@ remains release-signoff work in
 [packaging/ReleaseValidation.md](packaging/ReleaseValidation.md).
 
 ## Current validation and limitations
+
+The October 9 button revision adds a compact, inward-facing round control on a
+raised steel pedestal and four edge placements in the existing palette submenu.
+Legacy `b`/`Button` records, covered-plate serialization and solution digests
+remain compatible. `dev-fast-all` builds with warnings-as-errors; 106 of 108
+optimized suites pass across the full run and corrected editor/thumbnail
+reruns. The unchanged `vulkan_smoke` and `preview_rendering` ground fixtures
+expect processed-ground counters that native ground modules do not populate.
+A 900-frame isolated showcase renders all four buttons and link colors without
+dropped draws; the four palette thumbnails were baked and staged. Geometry
+validation and deterministic regeneration pass. The art audit still lacks 62
+preexisting ground/cliff model review entries. The face-center height correction
+also built the Debug game; full Debug tests, Linux and shipping builds were not
+run for this revision. Evidence is in ignored `out/button-art/`.
 
 The October 6 completed-rim-surface cache built `dev-fast-all` and the Debug
 game with warnings-as-errors. All 100 optimized suites passed across the full

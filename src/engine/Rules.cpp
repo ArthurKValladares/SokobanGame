@@ -771,7 +771,7 @@ bool isPressurePlateActive(
     const GameState& state,
     GridPosition3 plate)
 {
-    if (level.plateAt(plate) == TileType::Button) {
+    if (tileTypeIsButton(level.plateAt(plate).value_or(TileType::Air))) {
         return std::ranges::find(state.activeButtons, plate) !=
             state.activeButtons.end();
     }
@@ -786,7 +786,7 @@ std::vector<GridPosition3> activatableButtons(
     std::vector<GridPosition3> buttons;
     // Level order makes pulse state canonical regardless of hero vector order.
     for (const GridPosition3 cell : level.pressurePlates()) {
-        if (level.plateAt(cell) == TileType::Button &&
+        if (tileTypeIsButton(level.plateAt(cell).value_or(TileType::Air)) &&
             playerBlocksAt(state, cell) && !isUnitLocked(level, state, cell)) {
             buttons.push_back(cell);
         }

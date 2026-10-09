@@ -1479,16 +1479,17 @@ RenderFrameData::Tile tileVisual(
     const PresentationSettings& settings)
 {
     const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
+    const bool button = tileTypeIsButton(tile);
     const bool rail = tileTypeIsRail(tile);
     const bool conveyor = tileTypeIsConveyor(tile);
     const bool rotator = tileTypeIsRotator(tile) || tileTypeIsLockPlate(tile);
     const bool elevator = tileTypeIsElevator(tile);
-    const float tileSize = rail
+    // Buttons keep their authored compact footprint and edge placement
+    // inside a unit tile transform, just like the other source-scale models.
+    const float tileSize = rail || button
         ? 1.0f
         : rotator
         ? config::rotatorPlateWidthDepth
-        : tile == TileType::Button
-        ? settings.geometry.surfaceEntityWidthDepth * 0.6f
         : (surfaceEntity ? settings.geometry.surfaceEntityWidthDepth : 1.0f);
     const float centeredOffset = (1.0f - tileSize) * 0.5f;
 
@@ -1523,14 +1524,12 @@ RenderFrameData::Tile tileVisual(
         // Conveyors are the reason this is shared: they are neither a surface
         // entity nor a solid block, so anything that only tests those two ends
         // up drawing them flat.
-        .height = tile == TileType::Ladder
+        .height = tile == TileType::Ladder || button
             ? 1.0f
             : rotator
             ? config::rotatorPlateHeight
             : elevator
             ? config::elevatorPlatformHeight
-            : tile == TileType::Button
-            ? settings.geometry.surfaceEntityHeight * 2.0f
             : surfaceEntity
             ? settings.geometry.surfaceEntityHeight
             : (conveyor
@@ -1552,8 +1551,8 @@ RenderFrameData::Tile tileVisual(
         .animationInstanceId = tileTypeIsPlayerStart(tile) || tile == TileType::Enemy
             ? authoredAnimationInstance(tile, cell)
             : uint64_t { 0 },
-        // Conveyors, turrets, mirrors, rails and lecterns carry an orientation in their
-        // tile type. Each family rotates one shared model.
+        // Conveyors, turrets, mirrors, rails, lecterns and buttons carry an
+        // orientation in their tile type. Each family rotates one shared model.
         .modelRotationQuarterTurns =
             rules::conveyorDirectionForTile(tile)
             ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
@@ -1561,13 +1560,14 @@ RenderFrameData::Tile tileVisual(
                     ? facingQuarterTurns(*rules::turretDirectionForTile(tile))
                     : railOrientationQuarterTurns(tile).value_or(
                           mirrorOrientationQuarterTurns(tile).value_or(
-                              lecternOrientationQuarterTurns(tile).value_or(0)))),
+                              lecternOrientationQuarterTurns(tile).value_or(
+                                  buttonOrientationQuarterTurns(tile).value_or(0))))),
         .modelRotationOffsetRadians = tileTypeIsMirror(tile)
             ? config::mirrorModelRotationOffsetRadians
             : 0.0f,
         .effect = tileTypeHasSplatTop(tile)
             ? RenderSurfaceEffect::GroundSplat
-            : (tile == TileType::PressurePlate || tile == TileType::End)
+            : (tile == TileType::PressurePlate || button || tile == TileType::End)
             ? RenderSurfaceEffect::PlateEnergy
             : RenderSurfaceEffect::Standard,
         .groundRockVariant = groundRockVariantFor(tile),

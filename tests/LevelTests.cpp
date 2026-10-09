@@ -56,6 +56,63 @@ void testLegacyAndLayeredParsing()
     CHECK(layers[1] == std::vector<std::string>({ "C R" }));
 }
 
+void testButtonPlacementsRoundTripAndKeepPlateSemantics()
+{
+    TEST("buttonPlacementsRoundTripAndKeepPlateSemantics");
+    constexpr std::array buttons { TileType::ButtonNorth, TileType::ButtonEast,
+        TileType::ButtonSouth, TileType::ButtonWest };
+    const Level::Definition definition {
+        .layers = { { "......" }, { "Qbyz~G" } },
+        .gates = { { .cell = { 5, 0, 1 },
+                     .pressurePlates = { { 1, 0, 1 }, { 2, 0, 1 },
+                                        { 3, 0, 1 }, { 4, 0, 1 } } } },
+    };
+    const auto lines = Level::serializeDefinition(definition);
+    CHECK(Level::parseDefinition(lines, "button placements") == definition);
+    const Level level = Level::loadFromLines(lines, "button placements");
+    CHECK(level.pressurePlates().size() == buttons.size());
+    for (std::size_t index = 0; index < buttons.size(); ++index) {
+        const TileType tile = buttons[index];
+        const GridPosition3 cell { static_cast<int>(index + 1), 0, 1 };
+        CHECK(level.tileAt(cell.x, cell.y, cell.z) == tile);
+        CHECK(level.plateAt(cell) == tile);
+        CHECK(level.isWalkable(cell));
+        CHECK(tileTypeIsButton(tile) && tileTypeIsSignalSource(tile));
+        CHECK(tileTypeIsPlate(tile) && tileTypeIsSurfaceEntity(tile));
+        CHECK(!tileTypeIsSolidBlock(tile));
+        CHECK(buttonOrientationQuarterTurns(tile) == index);
+        CHECK(charToTileType(tileTypeToChar(tile)) == tile);
+        CHECK(tileTypeFromName(tileTypeName(tile)) == tile);
+    }
+
+    auto covered = definition;
+    covered.layers[1][0] = "QRRRRG";
+    for (std::size_t index = 0; index < buttons.size(); ++index) {
+        covered.plates.push_back({ { static_cast<int>(index + 1), 0, 1 }, buttons[index] });
+    }
+    const auto coveredLines = Level::serializeDefinition(covered);
+    CHECK(Level::parseDefinition(coveredLines, "covered button placements") == covered);
+    const Level coveredLevel = Level::loadFromLines(coveredLines, "covered button placements");
+    CHECK(coveredLevel.pressurePlates() == level.pressurePlates());
+    for (std::size_t index = 0; index < buttons.size(); ++index) {
+        CHECK(coveredLevel.plateAt({ static_cast<int>(index + 1), 0, 1 }) == buttons[index]);
+    }
+    CHECK(TileType::Button == TileType::ButtonNorth);
+    CHECK(tileTypeToChar(TileType::Button) == 'b');
+    CHECK(tileTypeFromName("Button") == TileType::ButtonNorth);
+    CHECK(!tileTypeIsButton(TileType::PressurePlate));
+    CHECK(!buttonOrientationQuarterTurns(TileType::PressurePlate));
+    const auto legacyCovered = Level::parseDefinition({
+        "@plate {\"cell\":[0,0,1],\"tile\":\"Button\"}",
+        "@layer 0", ".", "@layer 1", "Q",
+    }, "legacy covered button");
+    CHECK(legacyCovered.plates[0].tile == TileType::ButtonNorth);
+    const auto legacyLines = Level::serializeDefinition(legacyCovered);
+    CHECK(std::ranges::find(legacyLines,
+        "@plate {\"cell\":[0,0,1],\"tile\":\"Button\"}") != legacyLines.end());
+    CHECK(Level::parseDefinition(legacyLines, "saved legacy button") == legacyCovered);
+}
+
 void testSerializationRoundTrip()
 {
     TEST("serializationRoundTrip");
@@ -1056,7 +1113,7 @@ void testLevelValidationErrors()
     CHECK(multipleHeroes.playerStarts()[3].character == CharacterType::Witch);
     CHECK(multipleHeroes.playerStarts()[4].character == CharacterType::Bard);
     checkThrowsContaining([] {
-        (void)Level::loadFromLayers({ { "C~" } }, "unknown tile");
+        (void)Level::loadFromLayers({ { "C$" } }, "unknown tile");
     }, "Unknown level tile");
     checkThrowsContaining([] {
         (void)Level::loadFromLayers({ { "..." }, { "LC " } }, "unsupported ladder");
@@ -1490,6 +1547,7 @@ int main()
     testGroundSplatMetadata();
     testCliffWallStylesAreSolidAndSaveSplatAssignments();
     testLegacyAndLayeredParsing();
+    testButtonPlacementsRoundTripAndKeepPlateSemantics();
     testSerializationRoundTrip();
     testCameraMetadataRoundTripAndValidation();
     testCharacterMetadataRoundTripAndLegacyDefault();

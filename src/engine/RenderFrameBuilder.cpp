@@ -89,29 +89,30 @@ StaticRenderCell staticRenderCellFor(
 {
     const TileType tile = fallenTile.value_or(level.tileAt(x, y, z));
     const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
+    const bool button = tileTypeIsButton(tile);
     const bool rail = tileTypeIsRail(tile);
     const bool conveyor = tileTypeIsConveyor(tile);
     const bool submergedEntity = fallenTile.has_value();
-    if (tile == TileType::Button) {
-        surfaceEntitySize *= 0.6f;
-        surfaceEntityHeight *= 2.0f;
-    }
     const float centeredOffset = (1.0f - surfaceEntitySize) * 0.5f;
     return {
         .tile = tile,
         .active = tile != TileType::End || endUnlocked,
         .showGrid = !tileTypeIsPlayerStart(tile),
-        .size = rail
+        // The compact button and its edge-mounted pedestal are authored in
+        // tile coordinates; a unit transform retains that offset and shape.
+        .size = rail || button
             ? Vec2 { 1.0f, 1.0f }
             : surfaceEntity
             ? Vec2 { surfaceEntitySize, surfaceEntitySize }
             : Vec2 { 1.0f, 1.0f },
-        .positionOffset = surfaceEntity && !rail
+        .positionOffset = surfaceEntity && !rail && !button
             ? Vec2 { centeredOffset, centeredOffset }
             : Vec2 {},
         .baseElevation = static_cast<float>(z) -
             (submergedEntity ? config::waterDepthBelowGround : 0.0f),
-        .height = surfaceEntity
+        .height = button
+            ? 1.0f
+            : surfaceEntity
             ? surfaceEntityHeight
             : (conveyor
                     ? config::conveyorTileHeight
@@ -131,7 +132,8 @@ StaticRenderCell staticRenderCellFor(
                                   *rules::turretDirectionForTile(tile))
                             : railOrientationQuarterTurns(tile).value_or(
                                   mirrorOrientationQuarterTurns(tile).value_or(
-                                      lecternOrientationQuarterTurns(tile).value_or(0))))),
+                                      lecternOrientationQuarterTurns(tile).value_or(
+                                          buttonOrientationQuarterTurns(tile).value_or(0)))))),
     };
 }
 
@@ -291,7 +293,8 @@ void appendStaticTiles(
                     // splat map; modelled tiles keep their own materials.
                     .effect = tileTypeHasSplatTop(cell.tile)
                         ? RenderSurfaceEffect::GroundSplat
-                        : (cell.tile == TileType::PressurePlate || cell.tile == TileType::End)
+                        : (cell.tile == TileType::PressurePlate ||
+                              tileTypeIsButton(cell.tile) || cell.tile == TileType::End)
                         ? RenderSurfaceEffect::PlateEnergy
                         : RenderSurfaceEffect::Standard,
                     .groundRockVariant = groundRockVariantFor(cell.tile),
@@ -677,7 +680,8 @@ void appendCoveredStaticSurfaces(
 {
     for (const Level::Plate& plate : input.level.coveredPlates()) {
         const GridPosition3 cell = plate.cell;
-        const float size = tileTypeIsRail(plate.tile)
+        const bool button = tileTypeIsButton(plate.tile);
+        const float size = tileTypeIsRail(plate.tile) || button
             ? 1.0f
             : input.settings.geometry.surfaceEntityWidthDepth;
         const float offset = (1.0f - size) * 0.5f;
@@ -693,10 +697,14 @@ void appendCoveredStaticSurfaces(
         Vec4 color = tileColor(
             plate.tile, plate.tile != TileType::End || endUnlocked);
         if (tileTypeIsSignalSource(plate.tile)) {
-            // The minecart holds the plate pressed.
             if (const std::optional<Vec3> linkColor =
                     input.level.pressurePlateLinkColor(cell)) {
-                color = { linkColor->x, linkColor->y, linkColor->z, 1.0f };
+                // A cart holds pressure plates down, but buttons glow fully
+                // only during a pulse, just as they do in the static pass.
+                const float strength = rules::isPressurePlateActive(
+                    input.level, input.state, cell) ? 1.0f : 0.42f;
+                color = { linkColor->x * strength, linkColor->y * strength,
+                    linkColor->z * strength, 1.0f };
             }
         }
         RenderFrameData::Tile renderTile {
@@ -708,11 +716,13 @@ void appendCoveredStaticSurfaces(
             .size = { size, size },
             .color = color,
             .baseElevation = static_cast<float>(cell.z),
-            .height = input.settings.geometry.surfaceEntityHeight,
+            .height = button ? 1.0f : input.settings.geometry.surfaceEntityHeight,
             .model = input.manifest.modelForTile(plate.tile),
             .modelRotationQuarterTurns =
-                railOrientationQuarterTurns(plate.tile).value_or(0),
-            .effect = (plate.tile == TileType::PressurePlate || plate.tile == TileType::End)
+                railOrientationQuarterTurns(plate.tile).value_or(
+                    buttonOrientationQuarterTurns(plate.tile).value_or(0)),
+            .effect = (plate.tile == TileType::PressurePlate || button ||
+                          plate.tile == TileType::End)
                 ? RenderSurfaceEffect::PlateEnergy
                 : RenderSurfaceEffect::Standard,
         };

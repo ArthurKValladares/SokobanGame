@@ -1021,7 +1021,8 @@ int main()
                 return patch.normal.z > 0 && patch.normal.z < .99f;
             }));
         }
-        for (const auto type : { sokoban::TileType::PressurePlate, sokoban::TileType::End }) {
+        for (const auto type : { sokoban::TileType::PressurePlate, sokoban::TileType::End,
+                 sokoban::TileType::Button }) {
             const auto model = rockManifest.modelForTile(type);
             CHECK(!model.isCube());
             if (model.isCube()) continue;
@@ -1053,6 +1054,27 @@ int main()
                 maximumHeight = std::max(maximumHeight, vertex.position.z);
             }
             CHECK(type == sokoban::TileType::End ? maximumHeight > 2.0f : maximumHeight < 1.2f);
+            if (sokoban::tileTypeIsButton(type)) {
+                CHECK(asset.path == "custom/models/pulse_button.glb");
+                CHECK(maximumHeight > 0.65f && maximumHeight < 0.75f);
+                // Height is measured at the middle of the round press face,
+                // not the housing's top edge or the pedestal's front lip.
+                CHECK(std::ranges::any_of(plate.vertices, [](const auto& vertex) {
+                    return std::abs(vertex.position.x - .5f) < .00002f &&
+                        std::abs(vertex.position.y - .2289914f) < .00002f &&
+                        std::abs(vertex.position.z - .60f) < .00002f;
+                }));
+                // Authored at the north edge with enough space for a hero in
+                // the center; all placements rotate this same compact model.
+                for (const auto& vertex : plate.vertices) {
+                    CHECK(vertex.position.x > 0.25f && vertex.position.x < 0.75f);
+                    CHECK(vertex.position.y > 0.0f && vertex.position.y < 0.4f);
+                }
+                for (const auto variant : { sokoban::TileType::ButtonEast,
+                         sokoban::TileType::ButtonSouth, sokoban::TileType::ButtonWest }) {
+                    CHECK(rockManifest.modelForTile(variant) == model);
+                }
+            }
         }
         const auto lectern = sokoban::loadGltfMesh(*root / "custom/models/lectern.glb",
             { .preserveSourceScale = true });

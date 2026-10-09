@@ -126,8 +126,12 @@ minimum exceeds the maximum, the minimum takes precedence.
 
 Space is Activate: it pulses every button occupied by a living hero and
 activates all eligible mirrors together, across all characters and copies.
-Buttons use `b` in screen grids (or `@plate ... b` beneath a starting unit),
-and share the pressure plates' link colors. A pulse triggers linked rotators,
+Buttons use `b`, `y`, `z`, and `~` for north, east, south, and west edge
+placements in screen grids, and share the pressure plates' link colors. Each
+round button sits on a raised metal pedestal facing the center of its tile.
+Choose its edge in the Button palette submenu, like other directional tiles.
+Existing `b` buttons and the `Button` plate name use the north placement.
+A pulse triggers linked rotators,
 elevators and minecarts once per press; gates receive input through the next
 game step and then close, using their normal obstruction and crushing rules.
 
@@ -592,7 +596,7 @@ Common tile symbols:
 | `#` | Wall | `C` | Player |
 | `Q K U H B` | Rogue / Knight / Druid / Witch / Bard starts | | |
 | `R` | Rock | `P` | Pressure plate |
-| `b` | Pulse button | `J` | Lock plate |
+| `b y z ~` | Pulse buttons at north/east/south/west edges | `J` | Lock plate |
 | `G` | Gate | `E` | End |
 | `)` | Rotator (clockwise) | `(` | Rotator (counter-clockwise) |
 | `=` | Elevator platform | | |
@@ -691,7 +695,8 @@ the Plate tile property (`TileProperty::Plate`) to support authored occupants.
 A screen can start with something already on a plate: the layer grid holds the
 occupant and a `@plate {"cell":[x,y,z],"tile":"<plate name>"}` line records the
 plate beneath it. Use the display name from `src/engine/TileTypes.hpp`, such as
-`Pressure`, `End`, `Button`, `Lock Plate`, `Rotator Clockwise`, `Portal North`
+`Pressure`, `End`, `Button North`, `Button East`, `Button South`, `Button West`,
+`Lock Plate`, `Rotator Clockwise`, `Portal North`
 or `Rail Stop East-West`. In the example above, a mirror starts on the
 Rotator. In the editor, painting a unit or mirror onto a plate, or a plate under
 a unit or mirror, stacks the two; erasing lifts the occupant off and leaves the

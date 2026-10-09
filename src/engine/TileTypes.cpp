@@ -48,6 +48,9 @@ std::optional<TileType> tileTypeFromName(std::string_view name)
     if (name == "Lectern") {
         return TileType::LecternSouth;
     }
+    if (name == "Button") {
+        return TileType::ButtonNorth;
+    }
     for (const TileTypeDefinition& definition : tileTypeDefinitionTable) {
         if (definition.name == name) {
             return definition.type;
@@ -76,6 +79,17 @@ bool tileTypeHasProperty(TileType type, TileProperty property)
 bool tileTypeIsPlate(TileType type)
 {
     return tileTypeHasProperty(type, TileProperty::Plate);
+}
+
+std::optional<uint32_t> buttonOrientationQuarterTurns(TileType type)
+{
+    switch (type) {
+    case TileType::ButtonNorth: return 0;
+    case TileType::ButtonEast: return 1;
+    case TileType::ButtonSouth: return 2;
+    case TileType::ButtonWest: return 3;
+    default: return std::nullopt;
+    }
 }
 
 bool tileTypeCanStandOnPlate(TileType type)

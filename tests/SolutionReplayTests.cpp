@@ -167,6 +167,28 @@ void testDigestTracksGameplayContentOnly()
     CHECK(solution::levelDigest(gated) != gatedDigest);
 }
 
+void testLegacyCoveredButtonKeepsRecordedSolutionDigest()
+{
+    TEST("legacyCoveredButtonKeepsRecordedSolutionDigest");
+    const auto definition = Level::parseDefinition({
+        "@plate {\"cell\":[0,0,1],\"tile\":\"Button\"}",
+        "@layer 0", "...", "@layer 1", "Q E",
+    }, "legacy covered button");
+    // FNV-1a digest of this screen before the directional button names were
+    // introduced, including the original '@plate 0,0,1:Button' spelling.
+    constexpr std::uint64_t legacyDigest = 0xd2de77cf99b1263fULL;
+    CHECK(solution::levelDigest(definition) == legacyDigest);
+    const auto saved = Level::parseDefinition(
+        Level::serializeDefinition(definition), "saved covered button");
+    CHECK(solution::levelDigest(saved) == legacyDigest);
+    const Level level = Level::loadFromDefinition(saved, "covered button replay");
+    const std::vector<Input> inputs { Input::Right, Input::Right };
+    const auto recording = solution::record(level, saved, inputs, "legacy button");
+    CHECK(recording.solved);
+    CHECK(recording.solution.levelDigest == legacyDigest);
+    CHECK(solution::replay(level, recording.solution).passed);
+}
+
 void testReplayFailuresNameTheStepAndEntity()
 {
     TEST("replayFailuresNameTheStepAndEntity");
@@ -401,6 +423,7 @@ int main()
         testRecordSerializeParse();
         testWardrobeStateSurvivesSolutionRoundTrip();
         testDigestTracksGameplayContentOnly();
+        testLegacyCoveredButtonKeepsRecordedSolutionDigest();
         testReplayFailuresNameTheStepAndEntity();
         testStoreKeepsOneShortestRecordingPerScreen();
         testRecordedSolutionsStillSolveTheirScreens();

@@ -10,14 +10,17 @@
 #include "engine/GateEffect.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/RenderFrameBuilder.hpp"
+#include "engine/Rules.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <iostream>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -40,6 +43,7 @@ const AssetManifest& testManifest()
         { "name": "Lorekeeper", "path": "lorekeeper.glb", "geometry": "skinned" },
         { "name": "Knight", "path": "k.glb", "geometry": "skinned" },
         { "name": "Ladder", "path": "ladder.glb", "preserveSourceScale": true },
+        { "name": "PulseButton", "path": "pulse_button.glb", "preserveSourceScale": true },
         { "name": "Druid", "path": "d.glb", "geometry": "skinned" },
         { "name": "Witch", "path": "w.glb", "geometry": "skinned" },
         { "name": "Bard", "path": "b.glb", "geometry": "skinned" },
@@ -59,6 +63,10 @@ const AssetManifest& testManifest()
         { "tile": "Cliff Wall", "model": "CliffWallIslandA" },
         { "tile": "Cliff Wall 02", "model": "CliffWallIslandB" },
         { "tile": "Ladder", "model": "Ladder" },
+        { "tile": "Button North", "model": "PulseButton" },
+        { "tile": "Button East", "model": "PulseButton" },
+        { "tile": "Button South", "model": "PulseButton" },
+        { "tile": "Button West", "model": "PulseButton" },
         { "tile": "Player", "model": "Hero" },
         { "tile": "Wardrobe Lorekeeper", "model": "Wardrobe" },
         { "tile": "Wardrobe Rogue", "model": "Wardrobe" },
@@ -138,23 +146,163 @@ void testAirAndWaterAreNotBaked()
     return settings;
 }
 
-void testButtonIsSmallerAndRaisedAbovePressurePlate()
+constexpr std::array buttonVariants { TileType::ButtonNorth, TileType::ButtonEast,
+    TileType::ButtonSouth, TileType::ButtonWest };
+
+void testButtonsRetainAuthoredEdgePlacementAndEnergyMaterials()
 {
-    TEST("buttonIsSmallerAndRaisedAbovePressurePlate");
-    const auto button = tileThumbnails::buildBakeFrame(
-        TileType::Button, testManifest(), testSettings()).tiles.back();
-    const auto pressure = tileThumbnails::buildBakeFrame(
-        TileType::PressurePlate, testManifest(), testSettings()).tiles.back();
-    CHECK(button.size.x < pressure.size.x);
-    CHECK(button.size.y < pressure.size.y);
-    CHECK(button.height > pressure.height);
-    CHECK(pressure.effect == RenderSurfaceEffect::PlateEnergy);
-    CHECK(button.effect == RenderSurfaceEffect::Standard);
+    TEST("buttonsRetainAuthoredEdgePlacementAndEnergyMaterials");
+    const auto& manifest = testManifest();
+    const auto model = manifest.modelIdByName("PulseButton");
+    CHECK(!model.isCube());
+    CHECK(manifest.model(model).preserveSourceScale);
+    PresentationSettings settings = testSettings();
+    settings.geometry.surfaceEntityWidthDepth = 0.5f;
+    settings.geometry.surfaceEntityHeight = 0.08f;
+    constexpr GridPosition3 cell { 1, 1, 1 };
+    constexpr std::array<Vec2, 4> anchors {
+        Vec2 { 1.5f, 1.19f }, Vec2 { 1.81f, 1.5f },
+        Vec2 { 1.5f, 1.81f }, Vec2 { 1.19f, 1.5f },
+    };
+    for (std::size_t index = 0; index < buttonVariants.size(); ++index) {
+        const auto button = tileVisual(buttonVariants[index], cell, manifest, settings);
+        // Compact dimensions and the pedestal's height live in the model.
+        // Scaling it like a pressure plate would move it off its authored edge.
+        CHECK(button.model == model);
+        CHECK(button.size == Vec2({ 1.0f, 1.0f }));
+        CHECK(button.position == Vec2({ 1.0f, 1.0f }));
+        CHECK(button.height == 1.0f);
+        CHECK(button.modelRotationQuarterTurns == index);
+        // PlateEnergy tints the authored emissive face while retaining the
+        // housing's neutral materials, including when its pulse is dimmed.
+        CHECK(button.effect == RenderSurfaceEffect::PlateEnergy);
+        const auto transform = IsoScenePreparer::modelTransformPoints(button);
+        const Vec2 xAxis { transform.xPoint.x - transform.origin.x,
+            transform.xPoint.y - transform.origin.y };
+        const Vec2 yAxis { transform.yPoint.x - transform.origin.x,
+            transform.yPoint.y - transform.origin.y };
+        const Vec2 anchor { transform.origin.x + xAxis.x * 0.5f + yAxis.x * 0.19f,
+            transform.origin.y + xAxis.y * 0.5f + yAxis.y * 0.19f };
+        CHECK(std::abs(anchor.x - anchors[index].x) < 0.0001f);
+        CHECK(std::abs(anchor.y - anchors[index].y) < 0.0001f);
+        // The base model faces along local +y, toward the tile's centre.
+        CHECK(yAxis.x * (1.5f - anchor.x) + yAxis.y * (1.5f - anchor.y) > 0.3f);
+        const auto baked = tileThumbnails::buildBakeFrame(
+            buttonVariants[index], manifest, settings).tiles.back();
+        CHECK(baked.model == model);
+        CHECK(baked.modelRotationQuarterTurns == index);
+        CHECK(baked.size == button.size);
+        CHECK(baked.height == button.height);
+        CHECK(baked.effect == button.effect);
+    }
+    CHECK(tileThumbnails::buildBakeFrame(
+        TileType::PressurePlate, manifest, settings).tiles.back().effect ==
+        RenderSurfaceEffect::PlateEnergy);
     CHECK(tileThumbnails::buildBakeFrame(
         TileType::End, testManifest(), testSettings()).tiles.back().effect ==
         RenderSurfaceEffect::PlateEnergy);
-    CHECK(tileThumbnails::assetPathFor(TileType::Button) ==
+    CHECK(tileThumbnails::assetPathFor(TileType::ButtonNorth) ==
         "custom/thumbnails/tile_button.png");
+    CHECK(tileThumbnails::assetPathFor(TileType::ButtonEast) ==
+        "custom/thumbnails/tile_button_east.png");
+    CHECK(tileThumbnails::assetPathFor(TileType::ButtonSouth) ==
+        "custom/thumbnails/tile_button_south.png");
+    CHECK(tileThumbnails::assetPathFor(TileType::ButtonWest) ==
+        "custom/thumbnails/tile_button_west.png");
+}
+
+void testButtonsMatchAcrossGameplayEditorPreviewAndCoveredCells()
+{
+    TEST("buttonsMatchAcrossGameplayEditorPreviewAndCoveredCells");
+    const auto& manifest = testManifest();
+    const auto& settings = testSettings();
+    const auto model = manifest.modelIdByName("PulseButton");
+    constexpr GridPosition3 cell { 1, 1, 1 };
+    constexpr GridPosition3 previewCell { 2, 1, 1 };
+    constexpr Vec3 linkColor { 0.2f, 0.7f, 1.0f };
+    const auto buttonAt = [&](const RenderFrameData& frame, GridPosition3 position,
+                              bool preview = false) -> const RenderFrameData::Tile* {
+        const auto found = std::ranges::find_if(frame.tiles, [&](const auto& tile) {
+            return tile.cell == position && tile.model == model &&
+                tile.isEditorPreview == preview;
+        });
+        CHECK(found != frame.tiles.end());
+        return found == frame.tiles.end() ? nullptr : &*found;
+    };
+    const auto checkGeometry = [&](const RenderFrameData::Tile* tile, TileType variant,
+                                   GridPosition3 position) {
+        if (tile == nullptr) {
+            return;
+        }
+        const auto expected = tileVisual(variant, position, manifest, settings);
+        CHECK(tile->size == expected.size);
+        CHECK(tile->position == expected.position);
+        CHECK(tile->height == expected.height);
+        // Preview models lift slightly to avoid coincident surfaces; their
+        // translucency is rendered through the preview flag's dither path.
+        const float previewLift = tile->isEditorPreview ? 0.02f : 0.0f;
+        CHECK(std::abs(tile->baseElevation - expected.baseElevation - previewLift) < 0.0001f);
+        CHECK(tile->modelRotationQuarterTurns == expected.modelRotationQuarterTurns);
+        CHECK(tile->effect == RenderSurfaceEffect::PlateEnergy);
+    };
+    for (const TileType variant : buttonVariants) {
+        LevelEditor editor;
+        editor.newDocument(4, 3, false);
+        editor.setActiveLinkColor(linkColor);
+        CHECK(editor.setCell(cell, variant));
+        CHECK(editor.setCell({ 3, 1, 1 }, TileType::Gate));
+        const auto edited = RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = editor, .settings = settings,
+        });
+        const auto editorButton = buttonAt(edited, cell);
+        checkGeometry(editorButton, variant, cell);
+        if (editorButton != nullptr) {
+            CHECK(editorButton->color == Vec4({ linkColor.x, linkColor.y, linkColor.z, 1.0f }));
+        }
+        const auto preview = RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = editor, .settings = settings,
+            .hoverCell = previewCell, .editorPreviewTile = variant,
+        });
+        const auto ghost = buttonAt(preview, previewCell, true);
+        checkGeometry(ghost, variant, previewCell);
+        if (ghost != nullptr) {
+            CHECK(ghost->color == tileColor(variant));
+            CHECK(ghost->isEditorPreview && !ghost->pickOnly);
+        }
+        for (const bool covered : { false, true }) {
+            if (covered) {
+                CHECK(editor.setCell(cell, TileType::Rock));
+                CHECK(editor.documentPlateAt(cell) == variant);
+                const auto coveredEditor = RenderFrameBuilder::buildEditor({
+                    .manifest = manifest, .editor = editor, .settings = settings,
+                });
+                const auto coveredButton = buttonAt(coveredEditor, cell);
+                checkGeometry(coveredButton, variant, cell);
+                CHECK(coveredButton != nullptr && !coveredButton->pickable);
+            }
+            const auto level = editor.documentToLevel();
+            auto state = rules::initialState(level);
+            GameplayPresentation presentation;
+            presentation.resetEntities(state);
+            for (const bool pulsing : { false, true }) {
+                state.activeButtons = pulsing ? std::vector<GridPosition3> { cell }
+                                              : std::vector<GridPosition3> {};
+                const auto gameplay = RenderFrameBuilder::buildGameplay({
+                    .manifest = manifest, .level = level, .state = state,
+                    .projectedState = state, .presentation = presentation,
+                    .settings = settings,
+                });
+                const auto gameplayButton = buttonAt(gameplay, cell);
+                checkGeometry(gameplayButton, variant, cell);
+                if (gameplayButton != nullptr) {
+                    const float strength = pulsing ? 1.0f : 0.42f;
+                    CHECK(std::abs(gameplayButton->color.x - linkColor.x * strength) < 0.001f);
+                    CHECK(std::abs(gameplayButton->color.y - linkColor.y * strength) < 0.001f);
+                    CHECK(std::abs(gameplayButton->color.z - linkColor.z * strength) < 0.001f);
+                }
+            }
+        }
+    }
 }
 
 void testBakeFrameStandsTheTileOnAGroundBed()
@@ -553,7 +701,8 @@ int main()
 {
     testAssetPathsAreUniqueAndTidy();
     testAirAndWaterAreNotBaked();
-    testButtonIsSmallerAndRaisedAbovePressurePlate();
+    testButtonsRetainAuthoredEdgePlacementAndEnergyMaterials();
+    testButtonsMatchAcrossGameplayEditorPreviewAndCoveredCells();
     testBakeFrameStandsTheTileOnAGroundBed();
     testBedIsNeutralAndFlat();
     testGateBakesTheClosedEnergyEffect();
