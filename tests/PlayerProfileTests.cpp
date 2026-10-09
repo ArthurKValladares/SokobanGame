@@ -24,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace allocationTracking {
 
@@ -498,6 +499,11 @@ void testActiveScreenCheckpointRoundTrip()
                     },
                 },
             },
+            .controls = {
+                { { 1, 1, 1 }, 0.0f, 1.0f, 0.0f, 0.22f },
+                { { 2, 1, 1 }, 0.0f, 1.0f, 0.0f, 0.07f },
+                { { 2, 1, 1 }, 1.0f, 0.0f, 0.10f, 0.12f },
+            },
         },
     };
     profile.activeScreen = sokoban::PlayerProfile::ActiveScreen {
@@ -543,6 +549,29 @@ void testActiveScreenCheckpointRoundTrip()
     CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["undoStack"][0]
             ["presentation"]["animations"].size() == 2,
         "undo presentation timeline is persisted");
+    CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["undoStack"][0]
+            ["presentation"]["controls"].size() == 3,
+        "undo persists exact per-cell control motion, including both pulse segments");
+    nlohmann::json oldControls = current;
+    oldControls["progress"]["activeScreen"]["session"]["undoStack"][0]
+        ["presentation"].erase("controls");
+    auto expectedOldControls = profile;
+    expectedOldControls.activeScreen->session.undoStack[0].presentation.controls.clear();
+    CHECK_MESSAGE(sokoban::decodePlayerProfile(oldControls.dump()).profile == expectedOldControls,
+        "existing checkpoints without control timelines keep loading");
+    for (const auto& [property, invalidValue] : std::vector<std::pair<std::string, nlohmann::json>> {
+             { "from", -0.1 }, { "to", 1.1 }, { "from", 1e100 },
+             { "startSeconds", -0.1 }, { "durationSeconds", -0.1 },
+             { "durationSeconds", 2.0 },
+             { "cell", { { "x", 1.5 }, { "y", 0 }, { "z", 1 } } },
+         }) {
+        nlohmann::json invalid = current;
+        invalid["progress"]["activeScreen"]["session"]["undoStack"][0]
+            ["presentation"]["controls"][0][property] = invalidValue;
+        checkThrows([&] {
+            (void)sokoban::decodePlayerProfile(invalid.dump());
+        }, "checkpoint rejects invalid control travel, time or cell");
+    }
     CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["undoStack"][0]
             ["playerPulling"].get<bool>(),
         "undo action pull presentation state is persisted");

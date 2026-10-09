@@ -756,7 +756,7 @@ GameplaySession::Action undoActionFromJson(
     const std::string presentationContext =
         std::string(context) + ".presentation";
     rejectUnknownProperties(presentation, {
-        "durationSeconds", "motions", "animations",
+        "durationSeconds", "motions", "animations", "controls",
     }, presentationContext);
     action.presentation.durationSeconds =
         floatProperty(presentation, "durationSeconds", presentationContext);
@@ -867,6 +867,40 @@ GameplaySession::Action undoActionFromJson(
         }
         action.presentation.animations.push_back(std::move(track));
     }
+    // Older checkpoints have no control tracks. Their exact settled states
+    // still restore, and their recorded actor timelines remain usable.
+    if (presentation.contains("controls")) {
+        const Json& controls = presentation["controls"];
+        if (!controls.is_array()) {
+            fail(presentationContext, "property 'controls' must be an array");
+        }
+        for (std::size_t i = 0; i < controls.size(); ++i) {
+            const Json& encoded = controls[i];
+            const std::string controlContext = presentationContext +
+                ".controls[" + std::to_string(i) + "]";
+            rejectUnknownProperties(encoded, {
+                "cell", "from", "to", "startSeconds", "durationSeconds",
+            }, controlContext);
+            ActionControlTrack control {
+                .cell = positionFromJson(
+                    requiredProperty(encoded, "cell", controlContext), controlContext + ".cell"),
+                .from = floatProperty(encoded, "from", controlContext),
+                .to = floatProperty(encoded, "to", controlContext),
+                .startSeconds = floatProperty(encoded, "startSeconds", controlContext),
+                .durationSeconds = floatProperty(encoded, "durationSeconds", controlContext),
+            };
+            if (control.from < 0.0f || control.from > 1.0f ||
+                control.to < 0.0f || control.to > 1.0f) {
+                fail(controlContext, "control activation must be between zero and one");
+            }
+            if (control.startSeconds < 0.0f || control.durationSeconds < 0.0f ||
+                control.startSeconds + control.durationSeconds >
+                    action.presentation.durationSeconds + 0.0001f) {
+                fail(controlContext, "control track is outside the timeline");
+            }
+            action.presentation.controls.push_back(control);
+        }
+    }
     return action;
 }
 
@@ -905,6 +939,16 @@ OrderedJson undoActionToJson(const GameplaySession::Action& action)
             { "segments", std::move(segments) },
         });
     }
+    OrderedJson controls = OrderedJson::array();
+    for (const ActionControlTrack& control : action.presentation.controls) {
+        controls.push_back({
+            { "cell", positionToJson(control.cell) },
+            { "from", control.from },
+            { "to", control.to },
+            { "startSeconds", control.startSeconds },
+            { "durationSeconds", control.durationSeconds },
+        });
+    }
     return {
         { "after", gameStateToJson(action.after) },
         { "playerPushing", action.playerPushing },
@@ -915,6 +959,7 @@ OrderedJson undoActionToJson(const GameplaySession::Action& action)
             { "durationSeconds", action.presentation.durationSeconds },
             { "motions", std::move(motions) },
             { "animations", std::move(animations) },
+            { "controls", std::move(controls) },
         } },
     };
 }

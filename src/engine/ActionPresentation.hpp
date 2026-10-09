@@ -50,6 +50,18 @@ struct ActionAnimationTrack {
     bool operator==(const ActionAnimationTrack&) const = default;
 };
 
+// Normalized mechanical travel of one surface control: up/off is zero and
+// down/on is one. A button pulse has separate press and release tracks.
+struct ActionControlTrack {
+    GridPosition3 cell {};
+    float from = 0.0f;
+    float to = 0.0f;
+    float startSeconds = 0.0f;
+    float durationSeconds = 0.0f;
+
+    bool operator==(const ActionControlTrack&) const = default;
+};
+
 // Recorded with a gameplay action. Forward playback and undo both seek this
 // exact transaction; reversing an action never reconstructs mechanic-specific
 // animation ordering from state snapshots.
@@ -57,10 +69,12 @@ struct ActionPresentationTimeline {
     float durationSeconds = 0.0f;
     std::vector<ActionMotionTrack> motions;
     std::vector<ActionAnimationTrack> animations;
+    std::vector<ActionControlTrack> controls;
 
     [[nodiscard]] bool empty() const
     {
-        return durationSeconds <= 0.0f && motions.empty() && animations.empty();
+        return durationSeconds <= 0.0f && motions.empty() && animations.empty() &&
+            controls.empty();
     }
 
     bool operator==(const ActionPresentationTimeline&) const = default;

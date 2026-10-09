@@ -189,6 +189,12 @@ ActionPresentationTimeline concatenateTimelines(
         earlier.motions.push_back(shifted);
     }
 
+    for (const ActionControlTrack& control : later.controls) {
+        ActionControlTrack shifted = control;
+        shifted.startSeconds += offset;
+        earlier.controls.push_back(shifted);
+    }
+
     for (const ActionAnimationTrack& track : later.animations) {
         const auto existing = std::ranges::find(
             earlier.animations, track.target, &ActionAnimationTrack::target);

@@ -1304,6 +1304,36 @@
       "name": "GroundRockInterior10",
       "path": "custom/models/ground_modules/ground_interior_10.glb",
       "preserveSourceScale": true
+    },
+    {
+      "name": "LeverBase",
+      "path": "custom/models/lever_base.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "LeverHandle",
+      "path": "custom/models/lever_handle.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "PulseButtonBase",
+      "path": "custom/models/pulse_button_base.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "PulseButtonCap",
+      "path": "custom/models/pulse_button_cap.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "PressurePlateBase",
+      "path": "custom/models/pressure_plate_base.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "PressurePlatePad",
+      "path": "custom/models/pressure_plate_pad.glb",
+      "preserveSourceScale": true
     }
   ],
   "animations": [

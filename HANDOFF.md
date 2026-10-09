@@ -32,6 +32,25 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
+Activation controls now animate during gameplay: levers swing between their
+two positions, buttons press and spring back on each Activate, and pressure
+plates lower while occupied and rise after departure. The procedural generator
+also exports fixed/moving component pairs; gameplay uses existing affine model
+transforms while editor previews and thumbnails retain the combined models.
+Control travel is recorded in action timelines for chained movement, concurrent
+actions, undo/restart and profile persistence. Legacy profiles without control
+tracks still restore their settled poses. Lever/button cycles take .22 seconds;
+pressure travel takes up to .12 seconds, including zero-time mirror actions.
+Both Debug and optimized game packages contain the six new component models.
+Both builds pass with warnings-as-errors. Across the broad optimized run and
+the corrected frame-fixture rerun, 106 of 108 suites pass; the unchanged
+`vulkan_smoke` and `preview_rendering` ground-fixture failures remain. The new
+coverage checks repeated pulses, occupancy and release, mirror/boarding edges,
+concurrent completion, chained movement, reverse playback, legacy profiles,
+all cardinal placements and component transforms/materials/shadows. An isolated
+80-frame Vulkan capture completes without dropped draws. Real-render evidence
+and an animated preview are in ignored `out/control-animation/`.
+
 The October 9 lever addition uses four cardinal edge placements in the
 existing palette submenu. Activate toggles each lever occupied by a living
 hero; its on signal persists across movement and later steps. Lever state is

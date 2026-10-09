@@ -1,5 +1,6 @@
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/CliffWallGeometry.hpp"
+#include "engine/ControlVisuals.hpp"
 #include "engine/GroundTileGeometry.hpp"
 #include "engine/render/SelectorRenderConfig.hpp"
 
@@ -191,6 +192,10 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
                 }
                 const TileType tile = level.tileAt(x, y, z);
                 requirements.requireModel(manifest.modelForTile(tile));
+                if (const auto parts = controlModelParts(manifest, tile)) {
+                    requirements.requireModel(parts->base);
+                    requirements.requireModel(parts->moving);
+                }
                 if (tileTypeIsLever(tile)) {
                     if (const auto onModel = manifest.findModelIdByName("LeverOn")) {
                         requirements.requireModel(*onModel);
@@ -225,6 +230,10 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
                 });
                 if (plate && *plate != tile) {
                     requirements.requireModel(manifest.modelForTile(*plate));
+                    if (const auto parts = controlModelParts(manifest, *plate)) {
+                        requirements.requireModel(parts->base);
+                        requirements.requireModel(parts->moving);
+                    }
                     if (tileTypeIsLever(*plate)) {
                         if (const auto onModel = manifest.findModelIdByName("LeverOn")) {
                             requirements.requireModel(*onModel);

@@ -15,6 +15,8 @@ tile center (+y). Quarter turns around (.5, .5) supply the other three edges.
 The lever has shallow top-quarter steel caps around an open floor slot.
 Its wooden shaft throws along the tile edge (+/-x for north), about a low
 transverse y-axis hinge, with a short link-colored grip and off/on poses.
+Complete models remain available for editor previews. Separate base and moving
+assembly models share their original coordinates for rigid gameplay animation.
 
 Only Python's standard library is required. Re-running produces identical GLBs.
 """
@@ -180,6 +182,32 @@ def pressure_geometry():
     return meshes
 
 
+def inward_walls(mesh, outline, z0, z1):
+    """A cavity's walls face its interior, unlike an outside prism surface."""
+    for i, p in enumerate(outline):
+        q = outline[(i + 1) % len(outline)]
+        mesh.quad((*p, z0), (*q, z0), (*q, z1), (*p, z1),
+                  (p[1] - q[1], q[0] - p[0], 0))
+
+
+def pressure_components():
+    """The fixed rim and pad, with .30 units of downward source-Z travel."""
+    meshes = pressure_geometry()
+    moving = ("EnergyPanel", "Engraving", "EnergyInlay")
+    base = {name: mesh for name, mesh in meshes.items() if name not in moving}
+    pad = {name: mesh for name, mesh in meshes.items() if name in moving}
+
+    # Continue the existing recess below the resting pad. The skirt tapers
+    # inward so its faces never coincide with the fixed cavity walls. At full
+    # press the pad occupies z=.32..451, clear of the floor at z=.30.
+    opening, skirt = pillow_outline(.388), pillow_outline(.386)
+    inward_walls(base["Recess"], opening, .30, .73)
+    base["Recess"].fan(CENTER, opening, .30, True)
+    band(pad["EnergyPanel"], opening, skirt, .73, .62, up=False)
+    pad["EnergyPanel"].fan(CENTER, skirt, .62, False)
+    return base, pad
+
+
 def spherical_lens(mesh, radius=.315, base=.40, rise=2.30, rings=18):
     """Smooth spherical-cap profile after the default tile height/width scaling."""
     max_phi = math.radians(75)
@@ -295,8 +323,8 @@ def control_pedestal_geometry():
     return meshes, pedestal_rise
 
 
-def pulse_button_geometry():
-    """A compact inward-facing button on a pedestal at character hip height."""
+def pulse_button_geometry(components=False):
+    """The complete button, or its exact fixed/pressable triangle partition."""
     meshes, pedestal_rise = control_pedestal_geometry()
     names = tuple(meshes)
 
@@ -318,6 +346,11 @@ def pulse_button_geometry():
     # Three restrained grooves keep the face tactile and button-shaped.
     for offset in (-.018, 0, .018):
         ribbon(face["Engraving"], [(.471, .5 + offset), (.529, .5 + offset)], .004, .043)
+    # Capture the cap before adding the stationary bezel's engraved screws.
+    # Material alone cannot identify the moving grooves: the pedestal and
+    # bezel deliberately use the same engraving material.
+    cap_counts = {name: len(face[name].positions)
+                  for name in ("EnergyPanel", "Engraving")} if components else {}
     for sector in range(8):
         start = math.radians(sector * 45 + 7)
         end = math.radians(sector * 45 + 38)
@@ -341,8 +374,11 @@ def pulse_button_geometry():
         ribbon(face["Engraving"], [(x - .005, y), (x + .005, y)], .0025, .0085)
 
     tilt = math.sqrt(.5)
+    cap_offsets = {}
     for name, local in face.items():
         mesh = meshes[name]
+        if name in cap_counts:
+            cap_offsets[name] = len(mesh.positions)
         mesh.positions.extend((x, .20 + (y - .5) * tilt + z * tilt,
                                .26 + pedestal_rise - (y - .5) * tilt + z * tilt)
                               for x, y, z in local.positions)
@@ -354,7 +390,40 @@ def pulse_button_geometry():
         bolt = small_circle(x, y, .008)
         prism(meshes["BeveledSteel"], bolt, .104, .112)
         ribbon(meshes["Engraving"], [(x - .005, y), (x + .005, y)], .0025, .113)
+    if components:
+        cap = {name: Primitive() for name in cap_counts}
+        for name, count in cap_counts.items():
+            start = cap_offsets[name]
+            cap[name].positions = meshes[name].positions[start:start + count]
+            cap[name].normals = meshes[name].normals[start:start + count]
+            del meshes[name].positions[start:start + count]
+            del meshes[name].normals[start:start + count]
+        return {name: mesh for name, mesh in meshes.items() if mesh.positions}, cap
     return meshes
+
+
+def pulse_button_components():
+    """Button parts; cap travel is .024 along engine (0,-sqrt(.5),-sqrt(.5))."""
+    base, cap = pulse_button_geometry(components=True)
+    hidden_base, hidden_cap = Primitive(), Primitive()
+    # The original seat ends at local depth -.011. Continue it far enough
+    # behind the face to cover the .024-unit press without an open hole.
+    inward_walls(hidden_base, circle_outline(.121), -.035, -.011)
+    hidden_base.fan(CENTER, circle_outline(.121), -.035, True)
+    # Complete the cap behind its original sidewall. Its slight inward taper
+    # clears the seat, and its pressed underside stays above depth -.035.
+    band(hidden_cap, circle_outline(.120), circle_outline(.119), .008, -.004, up=False)
+    hidden_cap.fan(CENTER, circle_outline(.119), -.004, False)
+    face_origin_z = .60 - .041 * math.sqrt(.5)
+    tilt = math.sqrt(.5)
+    for target, local in ((base["Recess"], hidden_base),
+                          (cap["EnergyPanel"], hidden_cap)):
+        target.positions.extend((x, .20 + (y - .5) * tilt + z * tilt,
+                                 face_origin_z - (y - .5) * tilt + z * tilt)
+                                for x, y, z in local.positions)
+        target.normals.extend((x, y * tilt + z * tilt, -y * tilt + z * tilt)
+                              for x, y, z in local.normals)
+    return base, cap
 
 
 def axial_profile(mesh, origin, axis, profile, segments=32, radial_axis=None):
@@ -475,6 +544,18 @@ def lever_geometry(active=False):
     return meshes
 
 
+def lever_components():
+    """The fixed housing and original off handle, hinged at (.5,.20,.135).
+
+    Rotating the handle +40 degrees around engine Y reaches the on pose.
+    The wood and colored grip move as one solid assembly.
+    """
+    meshes = lever_geometry(False)
+    moving = ("LeverWood", "LeverGrip")
+    return ({name: mesh for name, mesh in meshes.items() if name not in moving},
+            {name: mesh for name, mesh in meshes.items() if name in moving})
+
+
 def validate_geometry(meshes):
     """Reject degeneracy, non-unit normals, invalid winding and tile overhangs."""
     for name, mesh in meshes.items():
@@ -546,6 +627,13 @@ def main():
     write_glb(OUTPUT_DIRECTORY / "pulse_button.glb", pulse_button_geometry())
     write_glb(OUTPUT_DIRECTORY / "lever_off.glb", lever_geometry(False))
     write_glb(OUTPUT_DIRECTORY / "lever_on.glb", lever_geometry(True))
+    for prefix, moving_name, components in (
+            ("pressure_plate", "pad", pressure_components()),
+            ("pulse_button", "cap", pulse_button_components()),
+            ("lever", "handle", lever_components())):
+        base, moving = components
+        write_glb(OUTPUT_DIRECTORY / f"{prefix}_base.glb", base)
+        write_glb(OUTPUT_DIRECTORY / f"{prefix}_{moving_name}.glb", moving)
 
 
 if __name__ == "__main__":

@@ -333,6 +333,36 @@
       "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
     },
     {
+      "name": "LeverBase",
+      "source": "custom/models/lever_base.glb",
+      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "LeverHandle",
+      "source": "custom/models/lever_handle.glb",
+      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "PulseButtonBase",
+      "source": "custom/models/pulse_button_base.glb",
+      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "PulseButtonCap",
+      "source": "custom/models/pulse_button_cap.glb",
+      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "PressurePlateBase",
+      "source": "custom/models/pressure_plate_base.glb",
+      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "PressurePlatePad",
+      "source": "custom/models/pressure_plate_pad.glb",
+      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
+    },
+    {
       "name": "EndPlate",
       "source": "custom/models/end_plate.glb",
       "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."

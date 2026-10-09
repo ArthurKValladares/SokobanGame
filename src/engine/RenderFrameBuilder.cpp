@@ -2,6 +2,7 @@
 
 #include "engine/AnimationCatalog.hpp"
 #include "engine/CliffWallGeometry.hpp"
+#include "engine/ControlVisuals.hpp"
 #include "engine/ElevatorVisuals.hpp"
 #include "engine/GateEffect.hpp"
 #include "engine/GroundGeometry.hpp"
@@ -13,6 +14,7 @@
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/MirrorConfig.hpp"
+#include "engine/render/IsoScenePreparer.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/SelectorRenderConfig.hpp"
@@ -76,6 +78,77 @@ struct StaticRenderCell {
     std::optional<Vec4> colorOverride;
     float gateOpenness = 0.0f;
 };
+
+void appendControlComponents(
+    RenderFrameData& frame, const RenderFrameBuilder::GameplayInput& input)
+{
+    constexpr float halfPi = 1.57079632679489661923f;
+    constexpr float leverSwing = 40.0f * halfPi / 90.0f;
+    constexpr float buttonPress = 0.024f * 0.7071067811865475244f;
+    const std::size_t originalTileCount = frame.tiles.size();
+    for (std::size_t index = 0; index < originalTileCount; ++index) {
+        const RenderFrameData::Tile original = frame.tiles[index];
+        if (original.pickOnly || original.isEditorPreview || original.modelTransform ||
+            original.effect != RenderSurfaceEffect::PlateEnergy) {
+            continue;
+        }
+        const auto control = input.level.plateAt(original.cell);
+        if (!control) {
+            continue;
+        }
+        const auto parts = controlModelParts(input.manifest, *control);
+        if (!parts) {
+            continue;
+        }
+        const bool lever = tileTypeIsLever(*control);
+        const auto leverOn = lever ? input.manifest.findModelIdByName("LeverOn")
+                                   : std::nullopt;
+        const bool combinedPose = original.model == input.manifest.modelForTile(*control) ||
+            (leverOn && original.model == *leverOn);
+        if (!combinedPose) {
+            continue;
+        }
+        const float settledActivation = tileTypeIsButton(*control) ? 0.0f
+            : rules::isPressurePlateActive(input.level, input.state, original.cell) ? 1.0f : 0.0f;
+        const float activation = std::clamp(
+            input.presentation.controlActivation(original.cell).value_or(settledActivation),
+            0.0f, 1.0f);
+        Vec3 pivot {};
+        Vec3 movement {};
+        if (lever) {
+            pivot = { 0.5f, 0.20f, 0.135f };
+        } else if (tileTypeIsButton(*control)) {
+            movement = { 0.0f, -buttonPress * activation, -buttonPress * activation };
+        } else {
+            movement.z = -0.30f * activation;
+        }
+        const ModelTransformPoints transform = IsoScenePreparer::modelTransformPoints(original);
+        const Vec3 xAxis = subtract(transform.xPoint, transform.origin);
+        const Vec3 yAxis = subtract(transform.yPoint, transform.origin);
+        const Vec3 zAxis = subtract(transform.zPoint, transform.origin);
+        const Vec3 translatedPivot = add(pivot, movement);
+        const Vec3 worldPivot = add(transform.origin,
+            add(add(multiply(xAxis, translatedPivot.x), multiply(yAxis, translatedPivot.y)),
+                multiply(zAxis, translatedPivot.z)));
+
+        frame.tiles[index].model = parts->base;
+        RenderFrameData::Tile moving = original;
+        moving.model = parts->moving;
+        // The base retains the logical cell's hit box and camera extent.
+        // Different component model ids distinguish their retained renderables.
+        moving.pickable = false;
+        moving.affectsCameraFit = false;
+        moving.modelTransform = RenderFrameData::ModelTransform {
+            .translation = worldPivot,
+            .rotationRadians = { 0.0f, lever ? leverSwing * activation : 0.0f,
+                static_cast<float>(original.modelRotationQuarterTurns % 4) * halfPi +
+                    original.modelRotationOffsetRadians },
+            .scale = { original.size.x, original.size.y, original.height },
+            .pivot = pivot,
+        };
+        frame.tiles.push_back(moving);
+    }
+}
 
 StaticRenderCell staticRenderCellFor(
     const Level& level,
@@ -1963,6 +2036,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     appendGameplayEntities(frame, input);
     input.presentation.appendWaterRippleRenderData(frame);
     appendMirrorPreview(frame, input);
+    appendControlComponents(frame, input);
     applyScrollingMaterials(frame, input);
     processCliffWallGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
     processGroundTileGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
@@ -1990,6 +2064,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(
     appendGameplayEntities(frame, input);
     input.presentation.appendWaterRippleRenderData(frame);
     appendMirrorPreview(frame, input, &arena);
+    appendControlComponents(frame, input);
     applyScrollingMaterials(frame, input);
     processCliffWallGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
     processGroundTileGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest, &arena);

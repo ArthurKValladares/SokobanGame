@@ -976,6 +976,110 @@ void testLiveFieldsAdoptOnlyWhenNothingStructuralChanged()
     CHECK(live.soundSets()[1].atmosphere.has_value());
 }
 
+void testRealMechanicalControlComponents(
+    const std::filesystem::path& root,
+    const sokoban::AssetManifest& manifest,
+    const sokoban::MeshData& onLever)
+{
+    TEST("realMechanicalControlComponents");
+    constexpr std::array<std::string_view, 6> names {
+        "LeverBase", "LeverHandle", "PulseButtonBase", "PulseButtonCap",
+        "PressurePlateBase", "PressurePlatePad" };
+    std::array<sokoban::MeshData, names.size()> parts;
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        const auto& asset = manifest.model(manifest.modelIdByName(names[index]));
+        CHECK(asset.preserveSourceScale);
+        parts[index] = sokoban::loadGltfMesh(root / asset.path,
+            { .preserveSourceScale = true });
+        const auto& mesh = parts[index];
+        CHECK(!mesh.vertices.empty() && !mesh.indices.empty());
+        CHECK(mesh.indices.size() % 3 == 0);
+        for (const auto& vertex : mesh.vertices) {
+            const auto p = vertex.position;
+            const auto n = vertex.normal;
+            CHECK(std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z));
+            CHECK(std::isfinite(n.x) && std::isfinite(n.y) && std::isfinite(n.z));
+            CHECK(p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1);
+            CHECK(p.z >= 0 && p.z < 1.2f);
+            CHECK(vertex.materialIndex < mesh.materials.size());
+        }
+        for (const auto vertexIndex : mesh.indices) CHECK(vertexIndex < mesh.vertices.size());
+    }
+    const auto& [leverBase, leverHandle, buttonBase, buttonCap, pressureBase, pressurePad] = parts;
+    const auto wood = [](const sokoban::MeshMaterial& material) {
+        const auto color = material.baseColorFactor;
+        return material.emissiveFactor == sokoban::Vec3 {} &&
+            material.metallicFactor < .1f && color.x > color.y * 1.3f &&
+            color.y > color.z * 1.25f && color.x > .15f;
+    };
+    const auto grip = [](const sokoban::MeshMaterial& material) {
+        const auto emission = material.emissiveFactor;
+        return emission.x > 0 && emission.x <= .5f &&
+            std::abs(emission.x - emission.y) < .00001f &&
+            std::abs(emission.x - emission.z) < .00001f &&
+            material.baseColorFactor.x > .7f;
+    };
+    CHECK(std::ranges::none_of(leverBase.materials, wood));
+    CHECK(std::ranges::none_of(leverBase.materials, grip));
+    CHECK(std::ranges::any_of(leverHandle.materials, wood));
+    CHECK(std::ranges::any_of(leverHandle.materials, grip));
+    CHECK(std::ranges::all_of(leverHandle.materials, [&](const auto& material) {
+        return wood(material) || grip(material);
+    }));
+
+    // Compare the real rigidly transformed off assembly to the independently
+    // authored on model, including normals and the wood/grip material order.
+    constexpr sokoban::Vec3 pivot { .5f, .20f, .135f };
+    constexpr sokoban::Vec3 rotation { 0, 40.0f * 3.14159265358979323846f / 180.0f, 0 };
+    std::size_t movingIndex = 0;
+    for (const auto& endpoint : onLever.vertices) {
+        const auto& material = onLever.materials[endpoint.materialIndex];
+        if (!wood(material) && !grip(material)) continue;
+        CHECK(movingIndex < leverHandle.vertices.size());
+        if (movingIndex >= leverHandle.vertices.size()) break;
+        const auto& source = leverHandle.vertices[movingIndex++];
+        const auto& sourceMaterial = leverHandle.materials[source.materialIndex];
+        CHECK(sourceMaterial.baseColorFactor == material.baseColorFactor);
+        CHECK(sourceMaterial.emissiveFactor == material.emissiveFactor);
+        CHECK(sokoban::distance(pivot + sokoban::rotateEulerXyz(source.position - pivot, rotation),
+            endpoint.position) < .00002f);
+        CHECK(sokoban::distance(sokoban::rotateEulerXyz(source.normal, rotation),
+            endpoint.normal) < .00002f);
+    }
+    CHECK(movingIndex == leverHandle.vertices.size());
+
+    // The pad and its ornaments descend into a closed well, with the skirt
+    // still above its floor at full press; the rim stays in the base model.
+    CHECK(std::ranges::none_of(pressureBase.materials, [](const auto& material) {
+        return material.emissiveFactor.x > 0;
+    }));
+    CHECK(std::ranges::any_of(pressureBase.vertices, [&](const auto& vertex) {
+        return std::abs(vertex.position.z - .30f) < .00001f && vertex.normal.z > .99f &&
+            pressureBase.materials[vertex.materialIndex].baseColorFactor.x < .1f;
+    }));
+    for (const auto& vertex : pressurePad.vertices) CHECK(vertex.position.z - .30f > .30f);
+
+    // The moving round cap owns the luminous press face and its grooves.
+    // Stationary bezel/status inlays stay separate from that face material.
+    CHECK(std::ranges::none_of(buttonBase.materials, [](const auto& material) {
+        return material.emissiveFactor.x > 1 && material.emissiveFactor.x < 3;
+    }));
+    CHECK(std::ranges::any_of(buttonCap.materials, [](const auto& material) {
+        return material.emissiveFactor.x > 1 && material.emissiveFactor.x < 3;
+    }));
+    const float tilt = std::sqrt(.5f);
+    const sokoban::Vec3 faceOrigin { .5f, .20f, .60f - .041f * tilt };
+    const sokoban::Vec3 faceNormal { 0, tilt, tilt };
+    const sokoban::Vec3 press = faceNormal * -.024f;
+    float maximumPressedDepth = -1;
+    for (const auto& vertex : buttonCap.vertices) {
+        const float depth = sokoban::dot(vertex.position + press - faceOrigin, faceNormal);
+        CHECK(depth > -.035f); // The hidden barrel clears the recessed floor.
+        maximumPressedDepth = std::max(maximumPressedDepth, depth);
+    }
+    CHECK(maximumPressedDepth > .013f && maximumPressedDepth < .020f);
+}
+
 int main()
 {
     testValidManifest();
@@ -1233,6 +1337,7 @@ int main()
         }
         CHECK(maximumThrowX > 0.3f);
         CHECK(maximumTravelY < 0.00002f);
+        testRealMechanicalControlComponents(*root, rockManifest, onLever);
         const auto lectern = sokoban::loadGltfMesh(*root / "custom/models/lectern.glb",
             { .preserveSourceScale = true });
         CHECK(!lectern.vertices.empty());

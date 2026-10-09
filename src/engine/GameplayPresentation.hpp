@@ -157,8 +157,16 @@ public:
     // cell, interpolated while an action carries it between stops.
     [[nodiscard]] const std::vector<EntityVisual>& elevators() const { return elevators_; }
     [[nodiscard]] const std::vector<EntityVisual>& minecarts() const { return minecarts_; }
+    // Missing samples use the settled gameplay state. Buttons rest released
+    // even while their logical signal remains active through a world step.
+    [[nodiscard]] std::optional<float> controlActivation(GridPosition3 cell) const;
 
 private:
+    struct ControlVisual {
+        GridPosition3 cell {};
+        float activation = 0.0f;
+    };
+
     struct TurretRecoil {
         EntityId turretId = invalidEntityId;
         MoveDirection direction = MoveDirection::Up;
@@ -168,12 +176,18 @@ private:
     static void setImmediatePosition(EntityVisual& visual, Vec3 target);
     [[nodiscard]] EntityVisual* findMotionVisual(EntityTarget target);
     [[nodiscard]] AnimatedActorVisual* findAnimatedVisual(EntityTarget target);
+    [[nodiscard]] ActionPresentationTimeline buildActionPresentationLeg(
+        const GameplaySession::Action& action,
+        const Level* level,
+        const std::vector<rules::PortalTransit>* transits,
+        bool buttonPulse) const;
 
     std::vector<PlayerVisual> players_;
     std::vector<EntityVisual> movables_;
     std::vector<EnemyVisual> enemies_;
     std::vector<EntityVisual> elevators_;
     std::vector<EntityVisual> minecarts_;
+    std::vector<ControlVisual> controls_;
     std::vector<TurretRecoil> turretRecoils_;
     std::array<RenderFrameData::WaterRipple,
         RenderFrameData::waterRippleCapacity> waterRipples_ {};

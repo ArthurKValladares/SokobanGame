@@ -811,6 +811,9 @@ editor commands but does not own document or filesystem policy.
   and covered occupants; undo/redo, the eyedropper and Recent tiles retain the
   chosen placement. Levers keep their on/off state during play until activated
   again, while buttons supply one-step pulses.
+  During play, lever handles swing between positions and button caps press
+  down and spring back. Pressure plates lower under an occupying unit and
+  remain pressed until it leaves. These motions also follow undo and restart.
 - Link Colors: in the editor, every pressure plate, button, lever and device has a link
   color, and a device is driven by exactly the sources of its color.
   Rocks, ice blocks, and turrets can also be painted into a color group; they

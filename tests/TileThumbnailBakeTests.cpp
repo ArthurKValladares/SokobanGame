@@ -6,6 +6,8 @@
 
 #include "TestHarness.hpp"
 
+#include "engine/ControlVisuals.hpp"
+#include "engine/FrameArena.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/GateEffect.hpp"
 #include "engine/PresentationSettings.hpp"
@@ -27,9 +29,9 @@ namespace {
 
 using namespace sokoban;
 
-const AssetManifest& testManifest()
+const AssetManifest& testManifest(bool components = false)
 {
-    static const AssetManifest manifest = AssetManifest::parse(R"json({
+    static constexpr std::string_view definition = R"json({
       "format": 1,
       "textures": [
         { "name": "ParticleGlow", "path": "glow.png" },
@@ -82,8 +84,26 @@ const AssetManifest& testManifest()
         { "tile": "Wardrobe Witch", "model": "Wardrobe" },
         { "tile": "Wardrobe Bard", "model": "Wardrobe" }
       ]
-    })json");
-    return manifest;
+    })json";
+    static const AssetManifest manifest = AssetManifest::parse(definition);
+    static const AssetManifest componentManifest = [] {
+        std::string json(definition);
+        constexpr std::string_view modelMarker = "\"models\": [";
+        json.insert(json.find(modelMarker) + modelMarker.size(), R"json(
+          { "name": "LeverBase", "path": "lever_base.glb", "preserveSourceScale": true },
+          { "name": "LeverHandle", "path": "lever_handle.glb", "preserveSourceScale": true },
+          { "name": "PulseButtonBase", "path": "button_base.glb", "preserveSourceScale": true },
+          { "name": "PulseButtonCap", "path": "button_cap.glb", "preserveSourceScale": true },
+          { "name": "PressurePlate", "path": "plate.glb", "preserveSourceScale": true },
+          { "name": "PressurePlateBase", "path": "plate_base.glb", "preserveSourceScale": true },
+          { "name": "PressurePlatePad", "path": "plate_pad.glb", "preserveSourceScale": true },
+        )json");
+        constexpr std::string_view tileMarker = "\"tiles\": [";
+        json.insert(json.find(tileMarker) + tileMarker.size(),
+            R"json({ "tile": "Pressure", "model": "PressurePlate" },)json");
+        return AssetManifest::parse(json);
+    }();
+    return components ? componentManifest : manifest;
 }
 
 void testAssetPathsAreUniqueAndTidy()
@@ -366,6 +386,161 @@ void testEdgeControlsMatchAcrossGameplayEditorPreviewAndCoveredCells()
                     CHECK(std::abs(gameplayButton->color.x - linkColor.x * strength) < 0.001f);
                     CHECK(std::abs(gameplayButton->color.y - linkColor.y * strength) < 0.001f);
                     CHECK(std::abs(gameplayButton->color.z - linkColor.z * strength) < 0.001f);
+                }
+            }
+        }
+    }
+}
+
+void testRigidControlComponentsFollowPresentation()
+{
+    TEST("rigidControlComponentsFollowPresentation");
+    const auto& manifest = testManifest(true);
+    const auto& settings = testSettings();
+    constexpr GridPosition3 cell { 1, 1, 1 };
+    constexpr Vec3 linkColor { 0.2f, 0.7f, 1.0f };
+    constexpr float halfPi = 1.57079632679489661923f;
+    constexpr std::array variants { TileType::ButtonNorth, TileType::ButtonEast,
+        TileType::ButtonSouth, TileType::ButtonWest, TileType::LeverNorth,
+        TileType::LeverEast, TileType::LeverSouth, TileType::LeverWest,
+        TileType::PressurePlate };
+    const auto worldPoint = [](const RenderFrameData::Tile& tile, Vec3 source) {
+        const auto transform = IsoScenePreparer::modelTransformPoints(tile);
+        return add(transform.origin,
+            add(add(multiply(subtract(transform.xPoint, transform.origin), source.x),
+                    multiply(subtract(transform.yPoint, transform.origin), source.y)),
+                multiply(subtract(transform.zPoint, transform.origin), source.z)));
+    };
+    const auto nearPoint = [](Vec3 actual, Vec3 expected) {
+        CHECK(std::abs(actual.x - expected.x) < 0.00002f);
+        CHECK(std::abs(actual.y - expected.y) < 0.00002f);
+        CHECK(std::abs(actual.z - expected.z) < 0.00002f);
+    };
+    FrameArena arena("control component tests", renderFrameArenaBytes());
+    for (const auto variant : variants) {
+        for (const bool covered : { false, true }) {
+            LevelEditor editor;
+            editor.newDocument(3, 3, false);
+            editor.setActiveLinkColor(linkColor);
+            CHECK(editor.setCell(cell, variant));
+            CHECK(editor.setCell({ 2, 1, 1 }, TileType::Gate));
+            if (covered) CHECK(editor.setCell(cell, TileType::Rock));
+            const auto level = editor.documentToLevel();
+            CHECK(level.pressurePlateLinkColor(cell) == std::optional(linkColor));
+            const std::array<std::string_view, 2> names = tileTypeIsLever(variant)
+                ? std::array<std::string_view, 2> { "LeverBase", "LeverHandle" }
+                : tileTypeIsButton(variant)
+                ? std::array<std::string_view, 2> { "PulseButtonBase", "PulseButtonCap" }
+                : std::array<std::string_view, 2> { "PressurePlateBase", "PressurePlatePad" };
+            const ControlModelParts parts {
+                manifest.modelIdByName(names[0]), manifest.modelIdByName(names[1]),
+            };
+            const auto required = renderAssetRequirementsForLevel(level, manifest);
+            CHECK(required.contains(manifest.modelForTile(variant)));
+            CHECK(required.contains(parts.base) && required.contains(parts.moving));
+
+            auto state = rules::initialState(level);
+            if (tileTypeIsLever(variant)) state.activeLevers = { cell };
+            else if (tileTypeIsButton(variant)) state.activeButtons = { cell };
+            else if (!covered) state.players.front().cell = cell;
+            GameplayPresentation presentation;
+            presentation.resetEntities(state);
+            GameplaySession::Action action {
+                .before = state, .after = state, .durationSeconds = 1.0f,
+                .presentation = { .durationSeconds = 1.0f,
+                    .controls = { { .cell = cell, .from = 0.0f, .to = 1.0f,
+                        .startSeconds = 0.0f, .durationSeconds = 1.0f } } },
+            };
+            presentation.beginAction(action, state);
+            const auto rest = tileVisual(variant, cell, manifest, settings);
+            const auto buildFrame = [&] {
+                return RenderFrameBuilder::buildGameplay({
+                    .manifest = manifest, .level = level, .state = state,
+                    .projectedState = state, .presentation = presentation, .settings = settings,
+                });
+            };
+            const auto findPart = [&](const RenderFrameData& frame, RenderModel model) {
+                return std::ranges::find_if(frame.tiles, [&](const auto& tile) {
+                    return tile.cell == cell && tile.model == model;
+                });
+            };
+            for (const float value : { 0.0f, 0.5f, 1.0f }) {
+                presentation.seekAction(action, value);
+                const auto frame = buildFrame();
+                const auto base = findPart(frame, parts.base);
+                const auto moving = findPart(frame, parts.moving);
+                CHECK(base != frame.tiles.end() && moving != frame.tiles.end());
+                if (base == frame.tiles.end() || moving == frame.tiles.end()) continue;
+                CHECK(!base->modelTransform.has_value() && moving->modelTransform.has_value());
+                CHECK(base->position == rest.position && base->size == rest.size);
+                CHECK(base->height == rest.height && base->baseElevation == rest.baseElevation);
+                CHECK(base->modelRotationQuarterTurns == rest.modelRotationQuarterTurns);
+                CHECK(base->pickable == rest.pickable && !moving->pickable);
+                CHECK(base->affectsCameraFit && !moving->affectsCameraFit);
+                CHECK(base->color == moving->color);
+                CHECK(base->color == Vec4({ linkColor.x, linkColor.y, linkColor.z, 1.0f }));
+                CHECK(base->effect == RenderSurfaceEffect::PlateEnergy &&
+                    moving->effect == RenderSurfaceEffect::PlateEnergy);
+                CHECK(findPart(frame, manifest.modelForTile(variant)) == frame.tiles.end());
+
+                Vec3 source { 0.5f, 0.5f, 0.73f };
+                Vec3 posed = source;
+                if (tileTypeIsLever(variant)) {
+                    constexpr Vec3 hinge { 0.5f, 0.20f, 0.135f };
+                    source = { 0.5f - 0.835f * std::sin(20.0f * halfPi / 90.0f), 0.20f,
+                        0.135f + 0.835f * std::cos(20.0f * halfPi / 90.0f) };
+                    posed = add(hinge, rotateEulerXyz(subtract(source, hinge),
+                        { 0.0f, value * 40.0f * halfPi / 90.0f, 0.0f }));
+                    nearPoint(worldPoint(*moving, hinge), worldPoint(rest, hinge));
+                } else if (tileTypeIsButton(variant)) {
+                    source = { 0.5f, 0.2289914f, 0.60f };
+                    posed = add(source, { 0.0f, -0.01697056275f * value,
+                        -0.01697056275f * value });
+                } else {
+                    posed.z -= 0.30f * value;
+                }
+                nearPoint(worldPoint(*moving, source), worldPoint(rest, posed));
+
+                PreparedRenderScene scene;
+                IsoScenePreparer preparer;
+                preparer.prepare(frame, { 800.0f, 600.0f }, scene);
+                CHECK(std::ranges::find(scene.shadowModelIndices,
+                    static_cast<std::size_t>(base - frame.tiles.begin())) != scene.shadowModelIndices.end());
+                CHECK(std::ranges::find(scene.shadowModelIndices,
+                    static_cast<std::size_t>(moving - frame.tiles.begin())) != scene.shadowModelIndices.end());
+                CHECK(scene.renderables[base - frame.tiles.begin()].identity !=
+                    scene.renderables[moving - frame.tiles.begin()].identity);
+                const auto actualShadow = IsoScenePreparer::projectShadowPoint(
+                    scene.shadowLayout, worldPoint(*moving, source));
+                const auto expectedShadow = IsoScenePreparer::projectShadowPoint(
+                    scene.shadowLayout, worldPoint(rest, posed));
+                nearPoint({ actualShadow.x, actualShadow.y, actualShadow.z },
+                    { expectedShadow.x, expectedShadow.y, expectedShadow.z });
+
+                arena.reset();
+                const auto arenaFrame = RenderFrameBuilder::buildGameplay({
+                    .manifest = manifest, .level = level, .state = state,
+                    .projectedState = state, .presentation = presentation, .settings = settings,
+                }, arena);
+                CHECK(frame.tiles.size() == arenaFrame.tiles.size() &&
+                    std::equal(frame.tiles.begin(), frame.tiles.end(), arenaFrame.tiles.begin()));
+            }
+            presentation.finishAction(state);
+            const auto settled = buildFrame();
+            const auto moving = findPart(settled, parts.moving);
+            CHECK(moving != settled.tiles.end());
+            if (moving != settled.tiles.end()) {
+                // Button pulse lifetime does not hold its cap down; occupied
+                // pads and latched levers retain their settled mechanical pose.
+                if (tileTypeIsButton(variant)) {
+                    nearPoint(worldPoint(*moving, { 0.5f, 0.2289914f, 0.60f }),
+                        worldPoint(rest, { 0.5f, 0.2289914f, 0.60f }));
+                } else if (variant == TileType::PressurePlate) {
+                    nearPoint(worldPoint(*moving, { 0.5f, 0.5f, 0.73f }),
+                        worldPoint(rest, { 0.5f, 0.5f, 0.43f }));
+                } else {
+                    CHECK(std::abs(moving->modelTransform->rotationRadians.y -
+                        40.0f * halfPi / 90.0f) < 0.00001f);
                 }
             }
         }
@@ -804,6 +979,7 @@ int main()
     testAirAndWaterAreNotBaked();
     testEdgeControlsRetainAuthoredPlacementAndEnergyMaterials();
     testEdgeControlsMatchAcrossGameplayEditorPreviewAndCoveredCells();
+    testRigidControlComponentsFollowPresentation();
     testLeversClickOnceInEitherDirectionAndStaySilentWhileLatched();
     testBakeFrameStandsTheTileOnAGroundBed();
     testBedIsNeutralAndFlat();

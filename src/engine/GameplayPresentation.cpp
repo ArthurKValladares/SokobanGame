@@ -299,6 +299,93 @@ GridPosition3 boardingCell(const ElevatorMove& move, GridPosition3 after)
     };
 }
 
+// Recover the pose between walking onto a platform and riding it. Both control
+// motion and sound edges need this intermediate occupancy, which endpoints
+// alone lose when a rider presses and leaves a plate within one leg.
+GameState boardingState(
+    const GameState& before,
+    const GameState& after,
+    const std::vector<ElevatorMove>& moves)
+{
+    GameState settled = after;
+    const auto boardingPositions = [&](auto& entities, const auto& starts) {
+        for (std::size_t index = 0; index < std::min(entities.size(), starts.size()); ++index) {
+            if (const auto* ride = rideOf(moves, starts[index].cell, entities[index].cell)) {
+                entities[index].cell = boardingCell(*ride, entities[index].cell);
+            }
+        }
+    };
+    boardingPositions(settled.players, before.players);
+    boardingPositions(settled.movables, before.movables);
+    boardingPositions(settled.enemies, before.enemies);
+    return settled;
+}
+
+void appendControlTracks(
+    ActionPresentationTimeline& timeline,
+    const GameplaySession::Action& action,
+    const Level& level,
+    const std::vector<ElevatorMove>& moves,
+    bool buttonPulse)
+{
+    constexpr float pressureTravelSeconds = 0.12f;
+    constexpr float leverTravelSeconds = 0.22f;
+    constexpr float buttonPressSeconds = 0.07f;
+    constexpr float buttonReleaseStartSeconds = 0.10f;
+    constexpr float buttonReleaseSeconds = 0.12f;
+    const float motionSeconds = std::max(action.durationSeconds, 0.0f);
+    const float platformSeconds = platformExtraSeconds(moves);
+    const GameState settled = boardingState(action.before, action.after, moves);
+    const auto add = [&](GridPosition3 cell, float from, float to, float start, float duration) {
+        timeline.controls.push_back({ cell, from, to, start, duration });
+        timeline.durationSeconds = std::max(timeline.durationSeconds, start + duration);
+    };
+    const auto pressureEdge = [&](GridPosition3 cell, const GameState& from,
+                                  const GameState& to, float start, float duration) {
+        const bool wasPressed = rules::isPressurePlateActive(level, from, cell);
+        const bool pressed = rules::isPressurePlateActive(level, to, cell);
+        if (wasPressed == pressed) return;
+        const float travel = duration > 0.0f
+            ? std::min(pressureTravelSeconds, duration)
+            : pressureTravelSeconds;
+        // A departing foot releases early; an arriving foot presses near the
+        // end of its movement. Platform travel is a separate phase.
+        float edgeStart = start + (pressed ? std::max(duration - travel, 0.0f) : 0.0f);
+        // Reflection has no mechanical travel time. Give its pressure edges
+        // visible travel too, and keep an instantaneous boarding press/release
+        // in order instead of putting both at time zero.
+        for (const ActionControlTrack& previous : timeline.controls) {
+            if (previous.cell == cell) {
+                edgeStart = std::max(edgeStart, previous.startSeconds + previous.durationSeconds);
+            }
+        }
+        add(cell, wasPressed ? 1.0f : 0.0f, pressed ? 1.0f : 0.0f,
+            edgeStart, travel);
+    };
+    for (const GridPosition3 cell : level.pressurePlates()) {
+        const TileType tile = level.plateAt(cell).value_or(TileType::Air);
+        if (tileTypeIsButton(tile)) {
+            // Each Activate is a fresh physical cycle, including consecutive
+            // pulses whose logical before/after states are identical.
+            if (buttonPulse && std::ranges::find(action.after.activeButtons, cell) !=
+                    action.after.activeButtons.end()) {
+                add(cell, 0.0f, 1.0f, 0.0f, buttonPressSeconds);
+                add(cell, 1.0f, 0.0f, buttonReleaseStartSeconds, buttonReleaseSeconds);
+            }
+        } else if (tileTypeIsLever(tile)) {
+            const bool wasOn = rules::isPressurePlateActive(level, action.before, cell);
+            const bool on = rules::isPressurePlateActive(level, action.after, cell);
+            if (wasOn != on) {
+                add(cell, wasOn ? 1.0f : 0.0f, on ? 1.0f : 0.0f,
+                    0.0f, leverTravelSeconds);
+            }
+        } else {
+            pressureEdge(cell, action.before, settled, 0.0f, motionSeconds);
+            pressureEdge(cell, settled, action.after, motionSeconds, platformSeconds);
+        }
+    }
+}
+
 AnimationUse playerRestAnimation(const GameState::Player& player)
 {
     return player.dead ? AnimationUse::PlayerDeadIdle : AnimationUse::PlayerIdle;
@@ -404,6 +491,7 @@ void GameplayPresentation::resetEntities(const GameState& state)
     enemies_.clear();
     elevators_.clear();
     minecarts_.clear();
+    controls_.clear();
     turretRecoils_.clear();
     clearWaterRipples();
     syncToGameState(state);
@@ -749,7 +837,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     };
     if (legs.size() <= 1) {
         const auto events = legTransits(0);
-        return buildActionPresentation(action, level, cues ? &events : nullptr);
+        return buildActionPresentationLeg(
+            action, level, cues ? &events : nullptr, legs.empty());
     }
 
     // A chained slide is one action spanning several world steps. Interpolating
@@ -786,7 +875,7 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
         const auto events = legTransits(leg);
         timeline = concatenateTimelines(
             std::move(timeline),
-            buildActionPresentation(legAction, level, cues ? &events : nullptr),
+            buildActionPresentationLeg(legAction, level, cues ? &events : nullptr, false),
             legStart);
         const float extra = platformExtraSeconds(
             platformMoves(
@@ -804,6 +893,15 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     const GameplaySession::Action& action,
     const Level* level,
     const std::vector<rules::PortalTransit>* transits) const
+{
+    return buildActionPresentationLeg(action, level, transits, true);
+}
+
+ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
+    const GameplaySession::Action& action,
+    const Level* level,
+    const std::vector<rules::PortalTransit>* transits,
+    bool buttonPulse) const
 {
     PresentationTransactionBuilder builder(animationCatalog_);
     const float motionDuration = std::max(action.durationSeconds, 0.0f);
@@ -1075,7 +1173,11 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
         }
     }
 
-    return builder.build();
+    ActionPresentationTimeline timeline = builder.build();
+    if (level) {
+        appendControlTracks(timeline, action, *level, elevators, buttonPulse);
+    }
+    return timeline;
 }
 
 float GameplayPresentation::reverseDuration(
@@ -1227,6 +1329,33 @@ void GameplayPresentation::seekAction(
             : elapsed,
         0.0f,
         timeline.durationSeconds);
+    for (std::size_t index = 0; index < timeline.controls.size(); ++index) {
+        const ActionControlTrack& track = timeline.controls[index];
+        std::size_t chosen = index;
+        for (std::size_t other = 0; other < timeline.controls.size(); ++other) {
+            const ActionControlTrack& candidate = timeline.controls[other];
+            if (candidate.cell != track.cell) continue;
+            const float current = timeline.controls[chosen].startSeconds;
+            const bool candidateBegun = candidate.startSeconds <= sourceTime;
+            const bool currentBegun = current <= sourceTime;
+            if ((candidateBegun && (!currentBegun || candidate.startSeconds > current)) ||
+                (!candidateBegun && !currentBegun && candidate.startSeconds < current)) {
+                chosen = other;
+            }
+        }
+        if (chosen != index) continue;
+        const float progress = track.durationSeconds > 0.0f
+            ? std::clamp((sourceTime - track.startSeconds) / track.durationSeconds, 0.0f, 1.0f)
+            : (sourceTime >= track.startSeconds ? 1.0f : 0.0f);
+        const float smooth = progress * progress * (3.0f - 2.0f * progress);
+        const float activation = std::lerp(track.from, track.to, smooth);
+        const auto visual = std::ranges::find(controls_, track.cell, &ControlVisual::cell);
+        if (visual == controls_.end()) {
+            controls_.push_back({ track.cell, activation });
+        } else {
+            visual->activation = activation;
+        }
+    }
     // Only the entities this action drives. Clearing every visual would be
     // fine while one action exists, but with two in flight whichever seeks last
     // would stop the other's entities dead every frame.
@@ -1389,7 +1518,15 @@ void GameplayPresentation::seekAction(
 void GameplayPresentation::finishAction(const GameState& state)
 {
     syncToGameState(state);
+    controls_.clear();
     reverseSourceStartSeconds_ = 0.0f;
+}
+
+std::optional<float> GameplayPresentation::controlActivation(GridPosition3 cell) const
+{
+    const auto visual = std::ranges::find(controls_, cell, &ControlVisual::cell);
+    return visual == controls_.end() ? std::nullopt
+                                    : std::optional<float>(visual->activation);
 }
 
 void GameplayPresentation::syncToGameState(const GameState& state)
@@ -1512,17 +1649,7 @@ std::vector<GameplaySoundCue> GameplayPresentation::buildActionSoundCues(
         // Rules resolve boarding and platform travel together. Recover the
         // boarding pose so a plate can press, start its elevator, and release
         // when the rider leaves it, all within the same world-step leg.
-        GameState settled = after;
-        const auto boardingPositions = [&](auto& entities, const auto& starts) {
-            for (std::size_t index = 0; index < std::min(entities.size(), starts.size()); ++index) {
-                if (const auto* ride = rideOf(moves, starts[index].cell, entities[index].cell)) {
-                    entities[index].cell = boardingCell(*ride, entities[index].cell);
-                }
-            }
-        };
-        boardingPositions(settled.players, before.players);
-        boardingPositions(settled.movables, before.movables);
-        boardingPositions(settled.enemies, before.enemies);
+        const GameState settled = boardingState(before, after, moves);
         const auto plateEdges = [&](const GameState& from, const GameState& to, float time) {
             for (const auto plate : level.pressurePlates()) {
                 const TileType tile = level.plateAt(plate).value_or(TileType::Air);

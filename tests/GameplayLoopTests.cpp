@@ -290,7 +290,7 @@ void testCompletingActionPreservesConcurrentPresentation()
     TEST("completingActionPreservesConcurrentPresentation");
     const Level level = makeLevel({
         { "..........", ".........." },
-        { "CI      # ", "          " },
+        { "CI  P   # ", "          " },
     });
 
     const auto makeSession = [&] {
@@ -322,6 +322,8 @@ void testCompletingActionPreservesConcurrentPresentation()
     CHECK(session.inFlight().size() == 2);
     CHECK(std::abs(
         presentation.movables().front().renderPosition.x - 3.5f) < 0.0001f);
+    CHECK(presentation.controlActivation({ 4, 0, 1 }).value_or(0.0f) > 0.0f);
+    CHECK(presentation.controlActivation({ 4, 0, 1 }).value_or(1.0f) < 1.0f);
 
     // The player completes exactly at the frame boundary while the block's
     // longer slide survives. Its visual must remain sampled at that boundary.
@@ -332,6 +334,7 @@ void testCompletingActionPreservesConcurrentPresentation()
     CHECK(std::abs(
         presentation.movables().front().renderPosition.x - 4.0f) < 0.0001f);
     CHECK(presentation.movables().front().moving);
+    CHECK(std::abs(presentation.controlActivation({ 4, 0, 1 }).value_or(-1.0f) - 1.0f) < 0.0001f);
 
     update({}, 0.015625f);
     CHECK(std::abs(
@@ -414,6 +417,43 @@ void testMirrorInputCommitsAnInstantAction()
     CHECK(session.state().players[0].cell == (GridPosition3 { 0, 2, 1 }));
     CHECK(session.playerMoveCount() == 0);
     CHECK(session.undoCount() == 1);
+}
+
+void testInstantMirrorActivationAnimatesPressureEdges()
+{
+    TEST("instantMirrorActivationAnimatesPressureEdges");
+    const GridPosition3 source { 2, 4, 1 };
+    const GridPosition3 destination { 0, 2, 1 };
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { ".....", ".....", ".....", ".....", "....." },
+            { "     ", "     ", "P 3  ", "     ", "  C  " },
+        },
+        .plates = { { source, TileType::PressurePlate } },
+    }, "instant pressure reflection");
+    GameplaySession session;
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto update = [&](GameplayLoop::InputFrame input, float dt) {
+        return GameplayLoop::update(level, session, presentation, input, dt, false);
+    };
+    const auto activation = update({ .interactPressed = true }, 0.06f);
+    CHECK(activation.mirrorActivated);
+    CHECK(session.moving());
+    CHECK(session.state().players[0].cell == source);
+    CHECK(std::abs(presentation.controlActivation(source).value_or(-1.0f) - 0.5f) < 0.0001f);
+    CHECK(std::abs(presentation.controlActivation(destination).value_or(-1.0f) - 0.5f) < 0.0001f);
+    update({}, 0.07f);
+    CHECK(!session.moving());
+    CHECK(session.state().players[0].cell == destination);
+    CHECK(!presentation.controlActivation(source));
+    CHECK(!presentation.controlActivation(destination));
+    update({ .undoPressed = true }, 0.06f);
+    CHECK(std::abs(presentation.controlActivation(source).value_or(-1.0f) - 0.5f) < 0.0001f);
+    CHECK(std::abs(presentation.controlActivation(destination).value_or(-1.0f) - 0.5f) < 0.0001f);
+    update({}, 0.07f);
+    CHECK(session.state().players[0].cell == source);
 }
 
 void testRejectedMirrorInputDoesNotEmitActivation()
@@ -754,6 +794,84 @@ void testPortalCrossingsReachTheLivePresentation()
             CHECK(action->plan.presentation.motions[1].to == Vec3({ 3, 0, 1 }));
         }
     }
+}
+
+void testButtonCyclesRepeatWithoutHoldingTheCapDown()
+{
+    TEST("buttonCyclesRepeatWithoutHoldingTheCapDown");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "...." }, { "C   " } },
+        .plates = { { { 0, 0, 1 }, TileType::ButtonEast } },
+    }, "button motion");
+    GameplaySession session;
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto update = [&](GameplayLoop::InputFrame input, float dt) {
+        (void)GameplayLoop::update(level, session, presentation, input, dt, false);
+    };
+    for (int pulse = 0; pulse < 2; ++pulse) {
+        update({ .interactPressed = true }, 0.035f);
+        CHECK(session.moving());
+        CHECK(std::abs(presentation.controlActivation({ 0, 0, 1 }).value_or(-1.0f) - 0.5f) < 0.0001f);
+        if (pulse == 1) {
+            CHECK(session.activeAction().before.activeButtons == session.activeAction().after.activeButtons);
+        }
+        update({}, 0.05f);
+        CHECK(std::abs(presentation.controlActivation({ 0, 0, 1 }).value_or(-1.0f) - 1.0f) < 0.0001f);
+        update({}, 0.075f);
+        CHECK(std::abs(presentation.controlActivation({ 0, 0, 1 }).value_or(-1.0f) - 0.5f) < 0.0001f);
+        update({}, 0.061f);
+        CHECK(!session.moving());
+        CHECK(session.state().activeButtons == std::vector<GridPosition3>({ { 0, 0, 1 } }));
+        CHECK(!presentation.controlActivation({ 0, 0, 1 }));
+    }
+    update({ .right = { .pressed = true } }, 0.03f);
+    CHECK(!presentation.controlActivation({ 0, 0, 1 }));
+    update({}, 0.5f);
+    CHECK(session.state().activeButtons.empty());
+    CHECK(!presentation.controlActivation({ 0, 0, 1 }));
+}
+
+void testLeverMotionPersistsAndReversesThroughUndoAndRestart()
+{
+    TEST("leverMotionPersistsAndReversesThroughUndoAndRestart");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "...." }, { "C   " } },
+        .plates = { { { 0, 0, 1 }, TileType::LeverWest } },
+    }, "lever motion");
+    GameplaySession session;
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto update = [&](GameplayLoop::InputFrame input, float dt) {
+        (void)GameplayLoop::update(level, session, presentation, input, dt, false);
+    };
+    update({ .interactPressed = true }, 0.11f);
+    CHECK(session.moving());
+    CHECK(session.state().activeLevers.empty());
+    CHECK(std::abs(presentation.controlActivation({ 0, 0, 1 }).value_or(-1.0f) - 0.5f) < 0.0001f);
+    update({}, 0.12f);
+    CHECK(!session.state().activeLevers.empty());
+    CHECK(!presentation.controlActivation({ 0, 0, 1 }));
+
+    // Restored history retains the immutable surface timeline used by undo.
+    const auto saved = session.snapshot();
+    CHECK(session.restore(level, saved));
+    presentation.resetEntities(session.state());
+    update({ .undoPressed = true }, 0.055f);
+    CHECK(std::abs(presentation.controlActivation({ 0, 0, 1 }).value_or(-1.0f) - 0.84375f) < 0.0001f);
+    update({}, 0.2f);
+    CHECK(session.state().activeLevers.empty());
+    CHECK(!presentation.controlActivation({ 0, 0, 1 }));
+
+    update({ .interactPressed = true }, 0.3f);
+    CHECK(!session.state().activeLevers.empty());
+    update({ .restartPressed = true }, 0.11f);
+    CHECK(std::abs(presentation.controlActivation({ 0, 0, 1 }).value_or(-1.0f) - 0.5f) < 0.0001f);
+    update({}, 0.2f);
+    CHECK(session.state().activeLevers.empty());
+    CHECK(!presentation.controlActivation({ 0, 0, 1 }));
 }
 
 void testPressurePlateSoundsAreEdgesAndUndoIsSilent()
@@ -1180,6 +1298,8 @@ int main()
     testMovingMirrorCopyDoesNotCloseReadersLectern();
     testPressurePlateSoundsAreEdgesAndUndoIsSilent();
     testEveryButtonPulseHasOneSound();
+    testButtonCyclesRepeatWithoutHoldingTheCapDown();
+    testLeverMotionPersistsAndReversesThroughUndoAndRestart();
     testGateSoundsFollowOpenState();
     testBlockedGateDoesNotPlayClosingSound();
     testRotatorSoundRequiresAnActualTurn();
@@ -1199,6 +1319,7 @@ int main()
     testCompletingActionPreservesConcurrentPresentation();
     testMoveAdvancesSessionAndPresentation();
     testMirrorInputCommitsAnInstantAction();
+    testInstantMirrorActivationAnimatesPressureEdges();
     testRejectedMirrorInputDoesNotEmitActivation();
     testWitchSwapEmitsBothParticleEndpointsOnce();
     testSolvedScreenAndDraftOutcomesDiffer();

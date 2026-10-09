@@ -333,6 +333,150 @@ void testPresentationTransactionRejectsDependencyCycles()
     CHECK(threw);
 }
 
+void testControlTracksComposeSeekAndReverse()
+{
+    TEST("controlTracksComposeSeekAndReverse");
+    const GridPosition3 button { 1, 0, 1 };
+    const GridPosition3 lever { 2, 0, 1 };
+    GameState state;
+    GameplaySession::Action pulse {
+        .before = state, .after = state,
+        .presentation = {
+            .durationSeconds = 0.22f,
+            .controls = {
+                { button, 0.0f, 1.0f, 0.0f, 0.07f },
+                { button, 1.0f, 0.0f, 0.10f, 0.12f },
+            },
+        },
+    };
+    GameplaySession::Action toggle {
+        .before = state, .after = state,
+        .presentation = {
+            .durationSeconds = 1.0f,
+            .controls = { { lever, 0.0f, 1.0f, 0.0f, 1.0f } },
+        },
+    };
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    CHECK(!presentation.controlActivation(button));
+    presentation.beginAction(pulse, state);
+    presentation.seekAction(pulse, 0.035f);
+    CHECK(near(presentation.controlActivation(button).value_or(-1.0f), 0.5f));
+    presentation.beginAction(toggle, state);
+    presentation.seekAction(toggle, 0.5f);
+    CHECK(near(presentation.controlActivation(lever).value_or(-1.0f), 0.5f));
+    CHECK(near(presentation.controlActivation(button).value_or(-1.0f), 0.5f));
+    presentation.seekAction(pulse, 0.085f);
+    CHECK(near(presentation.controlActivation(button).value_or(-1.0f), 1.0f));
+    presentation.seekAction(pulse, 0.16f);
+    CHECK(near(presentation.controlActivation(button).value_or(-1.0f), 0.5f));
+    presentation.seekAction(pulse, 0.22f);
+    CHECK(near(presentation.controlActivation(button).value_or(-1.0f), 0.0f));
+
+    GameplaySession::Action joined = toggle;
+    joined.presentation = concatenateTimelines(toggle.presentation,
+        ActionPresentationTimeline {
+            .durationSeconds = 1.0f,
+            .controls = { { lever, 1.0f, 0.0f, 0.0f, 1.0f } },
+        }, 1.0f);
+    presentation.beginAction(joined, state);
+    presentation.seekAction(joined, 0.25f);
+    CHECK(near(presentation.controlActivation(lever).value_or(-1.0f), 0.15625f));
+    presentation.seekAction(joined, 1.5f);
+    CHECK(near(presentation.controlActivation(lever).value_or(-1.0f), 0.5f));
+    joined.reversed = true;
+    presentation.beginAction(joined, state);
+    presentation.seekAction(joined, 1.75f);
+    CHECK(near(presentation.controlActivation(lever).value_or(-1.0f), 0.15625f));
+    presentation.finishAction(state);
+    CHECK(!presentation.controlActivation(lever));
+    presentation.seekAction(pulse, 0.035f);
+    presentation.resetEntities(state);
+    CHECK(!presentation.controlActivation(button));
+}
+
+void testPressureControlsFollowLegsOccupantsAndBoarding()
+{
+    TEST("pressureControlsFollowLegsOccupantsAndBoarding");
+    const Level level = Level::loadFromLayers({ { "....." }, { "CP P " } }, "control legs");
+    GameState start = rules::initialState(level);
+    std::vector<GameState> legs;
+    for (int x = 1; x <= 4; ++x) {
+        GameState leg = start;
+        leg.players[0].cell.x = x;
+        legs.push_back(leg);
+    }
+    GameplayPresentation presentation;
+    presentation.resetEntities(start);
+    GameplaySession::Action walk {
+        .before = start, .after = legs.back(), .durationSeconds = 2.0f,
+    };
+    walk.presentation = presentation.buildActionPresentation(walk, legs, &level);
+    CHECK(walk.presentation.controls.size() == 4);
+    presentation.beginAction(walk, start);
+    presentation.seekAction(walk, 0.44f);
+    CHECK(near(presentation.controlActivation({ 1, 0, 1 }).value_or(-1.0f), 0.5f));
+    CHECK(near(presentation.controlActivation({ 3, 0, 1 }).value_or(-1.0f), 0.0f));
+    presentation.seekAction(walk, 0.56f);
+    CHECK(near(presentation.controlActivation({ 1, 0, 1 }).value_or(-1.0f), 0.5f));
+    presentation.seekAction(walk, 1.44f);
+    CHECK(near(presentation.controlActivation({ 3, 0, 1 }).value_or(-1.0f), 0.5f));
+
+    // These are the same occupancy rules used by gate signals: living heroes,
+    // blocks and enemies press; dead/fallen units and empty carts do not.
+    for (int occupant = 0; occupant < 7; ++occupant) {
+        GameState after = start;
+        if (occupant == 0 || occupant == 3) {
+            after.players[0].cell = { 1, 0, 1 };
+            after.players[0].dead = occupant == 3;
+        } else if (occupant == 1 || occupant == 4) {
+            after.movables.push_back({ .cell = { 1, 0, 1 }, .fallen = occupant == 4 });
+        } else if (occupant == 2 || occupant == 5) {
+            after.enemies.push_back({ .cell = { 1, 0, 1 }, .dead = occupant == 5 });
+        } else {
+            after.minecarts.push_back({ .cell = { 1, 0, 1 } });
+        }
+        GameplaySession::Action action { .before = start, .after = after, .durationSeconds = 1.0f };
+        const auto timeline = presentation.buildActionPresentation(action, &level);
+        CHECK(timeline.controls.size() == (occupant < 3 ? 1 : 0));
+    }
+
+    const Level elevator = Level::loadFromDefinition({
+        .layers = { { "...=." }, { "  CP." }, { "    ." }, { "     " } },
+        .elevators = { { .cell = { 3, 0, 0 }, .pressurePlates = { { 3, 0, 1 } }, .levels = { 0, 2 } } },
+    }, "control boarding");
+    const GameState before = rules::initialState(elevator);
+    const GameState after = rules::step(elevator, before, MoveDirection::Right);
+    CHECK(after.players[0].cell == GridPosition3({ 3, 0, 3 }));
+    GameplaySession::Action ride { .before = before, .after = after, .durationSeconds = 1.0f };
+    ride.presentation = presentation.buildActionPresentation(ride, &elevator);
+    CHECK(ride.presentation.controls.size() == 2);
+    presentation.resetEntities(before);
+    presentation.beginAction(ride, before);
+    presentation.seekAction(ride, 0.94f);
+    CHECK(near(presentation.controlActivation({ 3, 0, 1 }).value_or(-1.0f), 0.5f));
+    presentation.seekAction(ride, 1.0f);
+    CHECK(near(presentation.controlActivation({ 3, 0, 1 }).value_or(-1.0f), 1.0f));
+    presentation.seekAction(ride, 1.06f);
+    CHECK(near(presentation.controlActivation({ 3, 0, 1 }).value_or(-1.0f), 0.5f));
+    ride.reversed = true;
+    presentation.beginAction(ride, after);
+    presentation.seekAction(ride, ride.presentation.durationSeconds - 0.94f);
+    CHECK(near(presentation.controlActivation({ 3, 0, 1 }).value_or(-1.0f), 0.5f));
+
+    ride.reversed = false;
+    ride.durationSeconds = 0.0f;
+    ride.presentation = presentation.buildActionPresentation(ride, &elevator);
+    CHECK(near(ride.presentation.durationSeconds, 0.24f));
+    presentation.beginAction(ride, before);
+    presentation.seekAction(ride, 0.06f);
+    CHECK(near(presentation.controlActivation({ 3, 0, 1 }).value_or(-1.0f), 0.5f));
+    presentation.seekAction(ride, 0.12f);
+    CHECK(near(presentation.controlActivation({ 3, 0, 1 }).value_or(-1.0f), 1.0f));
+    presentation.seekAction(ride, 0.18f);
+    CHECK(near(presentation.controlActivation({ 3, 0, 1 }).value_or(-1.0f), 0.5f));
+}
+
 void testCameraPitchTransition()
 {
     TEST("cameraPitchTransition");
@@ -4662,6 +4806,8 @@ int main()
     try {
     testPresentationTransactionResolvesActorIndependentDependencies();
     testPresentationTransactionRejectsDependencyCycles();
+    testControlTracksComposeSeekAndReverse();
+    testPressureControlsFollowLegsOccupantsAndBoarding();
     testCameraPitchTransition();
     testCameraYawTransitionTakesShortestTurn();
     testAuthoredCameraAnglesReachGameplayAndEditorFrames();
