@@ -130,6 +130,14 @@ PackedStateKey makePackedStateKey(
             words.push_back(packZAndFlags(button.z, 0));
         }
     }
+    if (!state.activeLevers.empty()) {
+        words.push_back(0x1E7E2A02U);
+        words.push_back(state.activeLevers.size());
+        for (const GridPosition3 lever : state.activeLevers) {
+            words.push_back(packPair(lever.x, lever.y));
+            words.push_back(packZAndFlags(lever.z, 0));
+        }
+    }
     return PackedStateKey(std::move(words));
 }
 

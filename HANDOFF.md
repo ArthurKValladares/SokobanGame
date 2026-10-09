@@ -11,7 +11,7 @@ Sokoban 3D is a C++20, SDL3, Vulkan 1.3 project. Runtime content is declared by
 `content.index` at startup.
 
 Gameplay includes five hero types, pushable mirrors and copies, linked movable
-objects, portals, buttons, rotators, lock plates, elevators, minecarts, and
+objects, portals, buttons, persistent levers, rotators, lock plates, elevators, minecarts, and
 lecterns. Rules, replay and solver search share the production action planner.
 Developer builds expose transactional level/asset/animation editors, live tuning,
 shader reload, profiling and source watching.
@@ -31,6 +31,70 @@ remains release-signoff work in
 [packaging/ReleaseValidation.md](packaging/ReleaseValidation.md).
 
 ## Current validation and limitations
+
+The October 9 lever addition uses four cardinal edge placements in the
+existing palette submenu. Activate toggles each lever occupied by a living
+hero; its on signal persists across movement and later steps. Lever state is
+included in deltas, checkpoints, profiles, solver identity and solution replay.
+Existing profile states and format-2 recordings without `activeLevers` read as
+all levers off. The optimized `dev-fast-all` and Debug game builds pass with
+warnings-as-errors. Across the full optimized run and the corrected reflection
+fixture rerun, 106 of 108 suites pass; the two existing ground-rendering failures
+described below remain. The lever regressions cover persistent signals, mixed
+linked devices, reflection eligibility, concurrency, undo/restart, profile
+round trips, recorded solutions, solver search, render model selection,
+preloading and all four editor placements. Both 900-frame geometry showcases
+complete without dropped draws or queued assets. Four thumbnails and both
+deterministically generated lever models are staged in both game builds.
+Evidence is in ignored `out/lever-art/`; full Debug tests were not run.
+
+The subsequent lever art revision replaces the tilted control panel with a
+long bar between two thick arched steel cheeks and a deep open travel slot.
+The north model's housing and handle throw follow X, parallel to the north
+tile edge; the existing cardinal rotations align the other placements. Its
+hinge remains at .60 units above the floor. Gameplay and link contracts are
+unchanged. Both game builds pass, and the six optimized model, thumbnail,
+asset-requirement, scene-preparer and editor suites pass. Geometry validation
+and deterministic regeneration pass. Both 900-frame geometry captures finish
+without dropped draws or queued assets; regenerated thumbnails and models are
+staged in Debug and optimized packages. Evidence is in ignored
+`out/lever-classic/`. The full suite was not repeated for this art revision.
+
+The next lever revision simplifies the foot and fasteners, narrows the arched
+supports, and reduces their thickness from .075 to .038 units. The entire
+handle now uses its assigned link color through the existing `PlateEnergy`
+material path; modest .25 emission keeps the color subdued and the steel
+neutral. Geometry validation, deterministic regeneration and the six relevant
+optimized suites pass, including assigned-color editor previews and actual
+handle material checks. Both 900-frame pose captures complete without dropped
+draws or queued assets. The four refreshed thumbnails and both models are
+staged in Debug and optimized packages. Evidence is in ignored
+`out/lever-simple/`; the full suite was not repeated for this art revision.
+
+The wooden-shaft lever revision uses small quarter-circle steel cheeks reaching
+.333 units and a low .24-unit hinge. The wooden shaft continues through the
+hinge into a physically recessed slot; only the separate short upper grip
+uses the assigned link color. The tip reaches .917 units. Geometry and
+deterministic regeneration checks pass, as do the six relevant optimized
+suites with shaft-to-slot, wood/grip material, attachment and support-height
+checks. Both 900-frame pose captures complete without dropped draws or queued
+assets. Both models and all four refreshed thumbnails are staged in Debug
+and optimized packages. Evidence is in ignored `out/lever-quarter/`; the full
+suite was not repeated for this art revision.
+
+The current lever keeps the symmetric top quarter of a circle's height,
+with a horizontal chord on the foot. Its crown reaches .193 units, and the
+wooden shaft pivots at .135 units while continuing into the recessed slot.
+The shaft body radius is .026 units; the assigned-color grip has a .056-unit
+radius and .185-unit length. The transverse metal axle has been removed.
+Lever-only housing and steel materials use .58 roughness, leaving the shared
+plate and button materials intact. The full lever height is .924 units.
+Geometry, deterministic generation and independent slot-triangle checks
+pass, as do the six relevant optimized suites including a centered-crown
+regression. Both 900-frame pose captures finish without dropped draws or
+queued assets. Both models and all four refreshed thumbnails are staged in
+Debug and optimized packages. Evidence is in ignored `out/lever-matte/`;
+the full suite was not repeated for this art revision.
 
 The October 9 button revision adds a compact, inward-facing round control on a
 raised steel pedestal and four edge placements in the existing palette submenu.
@@ -313,6 +377,8 @@ and the required real-device checks are recorded.
   and automatic-motion pause state. Update the solution state codec and its
   field-mutation/round-trip tests whenever GameState changes. Old formats are
   rejected and must be re-recorded through the current Driver.
+  `activeLevers` records the cells of levers left on; missing means empty in
+  existing format-2 recordings. New recordings emit it even when empty.
   The `solution_replay` gate requires matching, passing recordings for all
   current screens by default. `solutions/coverage.json` allows only explicit
   unfinished-screen exceptions pinned to a gameplay digest and a reason;
@@ -430,7 +496,7 @@ and the required real-device checks are recorded.
   that have rotators. Gate links and start-open state are also hashed; changing
   either requires a fresh recording.
 - Plates are the tiles with `TileProperty::Plate`, including pressure plates,
-  buttons, rotators, lock plates, portals, rail stops and Ends. New plate kinds get
+  buttons, levers, rotators, lock plates, portals, rail stops and Ends. New plate kinds get
   the property in the tile table; code asks
   `tileTypeIsPlate`, and anything that asks "what plate is here" must use
   `Level::plateAt`, not `tileAt`: movable units, including mirrors, leave the
@@ -464,11 +530,18 @@ and the required real-device checks are recorded.
   ordering rather than acceptance.
 - Completion requires every living hero on an End and every End occupied by a
   hero. Pressure plates drive devices; a rock or mirror on an End cannot satisfy
-  completion. Space/Activate pulses all buttons occupied by living heroes and
-  activates eligible mirrors together. Button state belongs in deltas, solver
-  identity and replay expectations.
-- Pressure-plate links are authored by color, and only in the editor.
-  `LevelEditor` keeps a color for every pressure plate
+  completion. Space/Activate pulses all buttons and toggles all levers occupied
+  by living heroes, and activates eligible mirrors together. Button pulses
+  expire after the next step; lever signals persist until toggled again.
+  Both states belong in deltas, solver identity and replay expectations.
+- Buttons and levers use N/E/S/W edge placements facing the owning cell's
+  center. Button characters are `b`, `y`, `z`, `~`; lever characters are `%`,
+  `&`, `[`, `]`. The original Button value, `b`, legacy `Button` plate spelling
+  and solution digest remain north-compatible. Append new enum variants to
+  preserve existing raw tile IDs. Use `buttonOrientationQuarterTurns` and
+  `leverOrientationQuarterTurns` from the north-edge asset orientation.
+- Signal-source links are authored by color, and only in the editor.
+  `LevelEditor` keeps a color for every pressure plate, button and lever
   (`Document::plateColors`) and device; a device is linked to the plates of
   its color (`linkGroups`, `linkedPressurePlates`, compared as 8-bit RGB).
   Editor device records keep empty `pressurePlates`; `linkedDefinition` is

@@ -428,6 +428,7 @@ void testActiveScreenCheckpointRoundTrip()
     before.minecarts.push_back({ .cell = { 1, 3, 0 }, .phase = 0 });
     after.minecarts.push_back({ .cell = { 5, 3, 0 }, .phase = 257 });
     after.activeButtons = { { 2, 1, 1 }, { 4, 1, 1 } };
+    after.activeLevers = { { 1, 1, 1 }, { 3, 1, 1 } };
 
     sokoban::GameplaySession::Action move {
         .before = before,

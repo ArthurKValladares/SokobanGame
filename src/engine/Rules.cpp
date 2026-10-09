@@ -775,6 +775,10 @@ bool isPressurePlateActive(
         return std::ranges::find(state.activeButtons, plate) !=
             state.activeButtons.end();
     }
+    if (tileTypeIsLever(level.plateAt(plate).value_or(TileType::Air))) {
+        return std::ranges::find(state.activeLevers, plate) !=
+            state.activeLevers.end();
+    }
     return playerBlocksAt(state, plate) ||
         movableAt(state, plate) != nullptr ||
         enemyAt(state, plate) != nullptr;
@@ -792,6 +796,19 @@ std::vector<GridPosition3> activatableButtons(
         }
     }
     return buttons;
+}
+
+std::vector<GridPosition3> activatableLevers(
+    const Level& level, const GameState& state)
+{
+    std::vector<GridPosition3> levers;
+    for (const GridPosition3 cell : level.pressurePlates()) {
+        if (tileTypeIsLever(level.plateAt(cell).value_or(TileType::Air)) &&
+            playerBlocksAt(state, cell) && !isUnitLocked(level, state, cell)) {
+            levers.push_back(cell);
+        }
+    }
+    return levers;
 }
 
 bool isGateOpen(
@@ -1986,7 +2003,8 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
     const GameState& state,
     const GameState& signals,
     bool reflect,
-    bool pulse)
+    bool pulse,
+    bool toggled = false)
 {
     GameState after = signals;
     std::vector<MirrorEntityPreview> entities;
@@ -2119,7 +2137,7 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
         }
     }
 
-    if ((!anyReflected && !pulse) || !liveCellsAreUnique(after)) {
+    if ((!anyReflected && !pulse && !toggled) || !liveCellsAreUnique(after)) {
         return std::nullopt;
     }
 
@@ -2158,7 +2176,7 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
         after.enemies[i].fallen = fall.fallen;
     }
 
-    if (!liveCellsAreUnique(after) || (!pulse && after == state)) {
+    if (!liveCellsAreUnique(after) || (!pulse && !toggled && after == state)) {
         return std::nullopt;
     }
     // Reflected units can open or close gates, dropping whatever rests on
@@ -2215,11 +2233,29 @@ std::optional<MirrorActivationPreview> previewActivation(
     GameState signals = state;
     signals.activeButtons = activatableButtons(level, state);
     const bool pulse = !signals.activeButtons.empty();
-    auto preview = previewActivationImpl(level, state, signals, true, pulse);
+    const auto levers = activatableLevers(level, state);
+    const bool toggled = !levers.empty();
+    if (toggled) {
+        signals.activeLevers.clear();
+        // Sample every switch from the starting board, then store the result
+        // in level order. Reflection copies cannot toggle new destinations.
+        for (const GridPosition3 cell : level.pressurePlates()) {
+            if (!tileTypeIsLever(level.plateAt(cell).value_or(TileType::Air))) {
+                continue;
+            }
+            const bool wasOn = std::ranges::find(state.activeLevers, cell) !=
+                state.activeLevers.end();
+            const bool flip = std::ranges::find(levers, cell) != levers.end();
+            if (wasOn != flip) {
+                signals.activeLevers.push_back(cell);
+            }
+        }
+    }
+    auto preview = previewActivationImpl(level, state, signals, true, pulse, toggled);
     // An invalid reflection has no eligible mirror transaction, but must not
-    // discard independent buttons occupied by other heroes.
-    if (!preview && pulse) {
-        preview = previewActivationImpl(level, state, signals, false, true);
+    // discard independent switches occupied by other heroes.
+    if (!preview && (pulse || toggled)) {
+        preview = previewActivationImpl(level, state, signals, false, pulse, toggled);
     }
     return preview;
 }

@@ -7,7 +7,7 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 
 ## Current Features
 
-- Layered Sokoban movement with rocks, pressure-plate gates, pulse buttons, rotator
+- Layered Sokoban movement with rocks, pressure-plate gates, pulse buttons, persistent levers, rotator
   plates, lock plates, elevators, minecarts and rail gates, goals, undo, restart,
   multi-screen levels, and completion tracking.
 - Rogue, knight, druid, witch and bard heroes with distinct movement abilities,
@@ -56,7 +56,7 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 | Hold top-down view | `T` | Remappable |
 | Whole overworld map | `Tab` | Left trigger |
 | Preview screen | `V` | Right shoulder |
-| Confirm / interact (including mirrors) | `Space` | South button |
+| Confirm / interact (mirrors, buttons and levers) | `Space` | South button |
 | Menu back/options | `Escape` | Start button |
 
 Bindings can be changed from Options > Controls and are persisted in the
@@ -124,7 +124,7 @@ settings under **Tuning > Lecterns**, measured in screen pixels. Set either to
 stores them in `src/engine/ui/LecternConfig.hpp` for future builds. If the
 minimum exceeds the maximum, the minimum takes precedence.
 
-Space is Activate: it pulses every button occupied by a living hero and
+Space is Activate: it pulses every button and toggles every lever occupied by a living hero, and
 activates all eligible mirrors together, across all characters and copies.
 Buttons use `b`, `y`, `z`, and `~` for north, east, south, and west edge
 placements in screen grids, and share the pressure plates' link colors. Each
@@ -134,6 +134,19 @@ Existing `b` buttons and the `Button` plate name use the north placement.
 A pulse triggers linked rotators,
 elevators and minecarts once per press; gates receive input through the next
 game step and then close, using their normal obstruction and crushing rules.
+
+Levers use `%`, `&`, `[`, and `]` for north, east, south, and west edge
+placements. Their long housing and handle travel run parallel to the chosen
+tile edge. A thick wooden shaft extends into the base slot between two shallow,
+matte steel supports shaped from the top quarter of a circle. A chunky top grip
+uses the assigned link color. Choose their edge in the Lever palette submenu.
+They start off; Activate switches an occupied lever on, and another Activate
+switches it off.
+An on lever keeps supplying its linked devices after the hero moves away and
+across later game steps. Pressure plates, buttons and levers can share one
+link color; a device reacts when all its linked sources are active. Lever
+state participates in undo, restart,
+saved checkpoints and solution replay.
 
 ## Requirements
 
@@ -535,7 +548,7 @@ screen previews use the authored angles, and the top-down control temporarily
 sets pitch to zero before returning to the authored tilt.
 Any number of `@decoration` directives may reference manifest model names and
 provide authored transforms. Each Gate tile has an accompanying `@gate`
-directive that identifies its cell, the pressure plates that open it, and its
+directive that identifies its cell, the pressure plates, buttons or levers that drive it, and its
 RGB color. Each Rotator tile likewise has an `@rotator` directive with the
 same fields, and each Elevator tile an `@elevator` directive with the same
 fields plus `levels`, its list of stop layers. A `@plate` directive records
@@ -560,7 +573,7 @@ brushes use the active Link Color and the existing color tools.
 A playable example is [portals.scr](docs/examples/portals.scr).
 
 A `@linkcolor {"cell":[x,y,z],"color":[r,g,b]}` directive is level-editor
-bookkeeping: the color of a pressure plate that drives nothing yet (see Link
+bookkeeping: the color of a pressure plate, button or lever that drives nothing yet (see Link
 Colors under Level Editor). Gameplay ignores it and reads links only from the
 explicit `plates` arrays. Metadata must appear before `@layer 0`.
 
@@ -597,6 +610,7 @@ Common tile symbols:
 | `Q K U H B` | Rogue / Knight / Druid / Witch / Bard starts | | |
 | `R` | Rock | `P` | Pressure plate |
 | `b y z ~` | Pulse buttons at north/east/south/west edges | `J` | Lock plate |
+| `% & [ ]` | Toggle levers at north/east/south/west edges | | |
 | `G` | Gate | `E` | End |
 | `)` | Rotator (clockwise) | `(` | Rotator (counter-clockwise) |
 | `=` | Elevator platform | | |
@@ -615,11 +629,12 @@ remains supported for older screens.
 
 A closed Gate is a solid block that fills its whole tile: it blocks every
 entity and sightline, and units can stand on top of it, so a Gate on a floor
-layer works as a bridge or trapdoor. It opens only while every pressure plate
-listed in its `plates` array is occupied by a living player, movable object, or
-enemy; a Gate with no linked plates stays closed. An optional
+layer works as a bridge or trapdoor. It opens only while every source listed
+in its `plates` array is active: pressure plates respond to living players,
+movable objects or enemies, buttons supply pulses, and levers supply their
+persistent on state. A Gate with no linked sources stays closed. An optional
 `"startOpen":true` in its `@gate` record inverts it: open while its plates are
-not all pressed, closed while they are (an unlinked start-open Gate is always
+not all active, closed while they are (an unlinked start-open Gate is always
 open). Set it with the Start Open checkbox under Gates in the level editor's
 Tiles palette, where such gates are drawn faded. An open Gate is empty space:
 units pass through it and fall through it. When a Gate opens, the column of
@@ -642,7 +657,7 @@ Identical colors in separately authored overworld screens remain separate
 groups after those screens are composed.
 
 A Rotator is a cogwheel floor plate that units can stand on. Each time every
-pressure plate in its `plates` array becomes occupied (the same rule as a
+source in its `plates` array becomes active (the same rule as a
 Gate), it turns the living unit standing on it a quarter turn: clockwise for
 `)`, counter-clockwise for `(`. It fires once per press; staying on the plate
 does nothing more, and a plate already pressed when a step begins does not
@@ -651,8 +666,8 @@ turned turret fires along its new direction, immediately shooting any hero,
 enemy or turret already standing in that line. A turned enemy keeps
 that turn only until the board next changes, then goes back to facing the
 nearest hero. A Rotator with no linked
-plates never turns. The plate, its icon (a darker shade of the same color) and
-its linked pressure plates share the configured color; a pressure plate linked
+sources never turns. The plate, its icon (a darker shade of the same color) and
+its linked sources share the configured color; a pressure plate linked
 to both a Gate and a Rotator shows the Gate's color. The plate models are
 generated by `tools/make_rotator_models.py`.
 
@@ -660,9 +675,9 @@ A Lock Plate (`J`) holds any living unit standing on it in place, including
 heroes, rocks, ice, mirrors, turrets and enemies. Units may enter it or start
 on it using `@plate` stacking. It prevents walking, slides, pushes, pulls,
 linked movement and teleportation while enabled. The editor links it to all
-pressure plates of its color and provides a **Start Enabled** toggle. With
-the toggle off, pressing every linked plate enables the lock; with it on,
-pressing them disables the lock. Without links it keeps its start state.
+pressure plates, buttons and levers of its color and provides a **Start Enabled** toggle. With
+the toggle off, activating every linked source enables the lock; with it on,
+activating them disables the lock. Without links it keeps its start state.
 Its screen record is `@lockplate` with `cell`, `plates`, `color`, and optional
 `startEnabled: true`. The rounded-square plate and padlock model is generated by
 `tools/make_lock_plate_model.py`; disabled locks appear dimmed in gameplay.
@@ -672,8 +687,8 @@ An Elevator is a moving platform, drawn with the Kenney Platformer Kit
 on layer L is a solid block in that cell whose top is flush with the top of
 the other layer-L blocks, so units stand on it from layer L + 1. Its
 `levels` list holds the layers it stops at, in travel order, and must include
-the tile's own layer (where it starts). Each time every pressure plate in its
-`plates` array becomes occupied (the rotator rule: once per press) it moves
+the tile's own layer (where it starts). Each time every source in its
+`plates` array becomes active (the rotator rule: once per activation) it moves
 one stop along the list and turns back at either end, so `[0, 3, 5, 7]`
 travels 0 -> 3 -> 5 -> 7 -> 5 -> 3 -> 0 -> 3 and so on. A platform authored
 part-way along the list starts there, heading towards the end of the list.
@@ -690,12 +705,13 @@ stop or no linked plates never moves. Its stops are edited under Elevator
 Stops in the ImGui Tiles palette: type them as `0, 3, 5, 7`, and the editor
 shows the other stops as dithered platforms.
 
-Pressure plates, buttons, rotators, lock plates, portals, rail stops and Ends use
+Pressure plates, buttons, levers, rotators, lock plates, portals, rail stops and Ends use
 the Plate tile property (`TileProperty::Plate`) to support authored occupants.
 A screen can start with something already on a plate: the layer grid holds the
 occupant and a `@plate {"cell":[x,y,z],"tile":"<plate name>"}` line records the
 plate beneath it. Use the display name from `src/engine/TileTypes.hpp`, such as
 `Pressure`, `End`, `Button North`, `Button East`, `Button South`, `Button West`,
+`Lever North`, `Lever East`, `Lever South`, `Lever West`,
 `Lock Plate`, `Rotator Clockwise`, `Portal North`
 or `Rail Stop East-West`. In the example above, a mirror starts on the
 Rotator. In the editor, painting a unit or mirror onto a plate, or a plate under
@@ -790,8 +806,13 @@ editor commands but does not own document or filesystem policy.
   Their flat tops use **Ground Paint** for assigned splat maps and blend-mask
   painting. **Randomize Walls** keeps each tile's stone or cliff family and
   preserves its paint assignment.
-- Link Colors: in the editor, every pressure plate and device has a link
-  color, and a device is driven by exactly the pressure plates of its color.
+- Buttons and levers: click their palette family to choose North, East, South
+  or West in the direction submenu. Changing placement preserves link colors
+  and covered occupants; undo/redo, the eyedropper and Recent tiles retain the
+  chosen placement. Levers keep their on/off state during play until activated
+  again, while buttons supply one-step pulses.
+- Link Colors: in the editor, every pressure plate, button, lever and device has a link
+  color, and a device is driven by exactly the sources of its color.
   Rocks, ice blocks, and turrets can also be painted into a color group; they
   repeat the moves of the other movable objects in that group. To link a plate
   to two gates, give all three the same color; to make a rotator need two
@@ -807,7 +828,7 @@ editor commands but does not own document or filesystem policy.
   held, that tool is all a click does, in any editor tool: nothing is
   placed, deleted, moved or painted onto the ground, and the tile preview is
   hidden. The Links list shows each color group with its
-  members, warns about devices with no plates, and can recolor a whole group
+  members, warns about devices with no sources, and can recolor a whole group
   (choosing another group's color merges them). Colors are only an authoring
   aid for plates and devices: saving writes each device's explicit `plates`
   list. Movable-object colors remain gameplay metadata in `@objectlink`
@@ -841,7 +862,7 @@ editor commands but does not own document or filesystem policy.
   | `F5` | Play the draft; `F5` again returns to the editor without the confirmation dialog |
   | `Shift+F5` | Play a puzzle draft with its first hero moved to the cell under the pointer; the document is unchanged |
   | Hold `Alt` + click | Eyedropper: pick up the tile under the pointer, and its link color |
-  | Hold `Ctrl` + click or drag | Link-color brush: give each pressure plate, device, or movable object touched the Link Color |
+  | Hold `Ctrl` + click or drag | Link-color brush: give each pressure plate, button, lever, device, or movable object touched the Link Color |
   | `1`-`9` | Choose from the recent-tiles strip at the top of the Tiles palette |
   | `PageUp` / `PageDown` | Change the active layer |
   | `L` | Lock edits to the active layer |
@@ -1121,9 +1142,9 @@ format 2
 level-digest a7799b56118fdd89
 recorded-for level0/screen0
 step up p1=6,4,2
-state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[],"players":[{"cell":[6,4,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
+state {"activeButtons":[],"activeHeroController":1,"activeLevers":[],"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[],"players":[{"cell":[6,4,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 step up p1=6,3,2
-state {"activeButtons":[],"activeHeroController":1,"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[],"players":[{"cell":[6,3,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
+state {"activeButtons":[],"activeHeroController":1,"activeLevers":[],"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[],"players":[{"cell":[6,3,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[]}
 ```
 
 Each `step` is one input (`up`, `down`, `left`, `right`, `cycle`,
@@ -1135,8 +1156,10 @@ groups, and covered plates. Decorations and camera angles do not affect it,
 so re-decorating a screen keeps its solution. Each step must be followed by
 one complete JSON `state` line. It preserves entity identity, type, controller,
 position, death flags, slide momentum and rotation, mirror turns,
-elevator/minecart positions and phases, button pulses, the active hero, and
-automatic-motion pause state. Format 1 is rejected; re-record its inputs
+elevator/minecart positions and phases, button pulses, persistent on-lever
+cells in `activeLevers`, the active hero, and automatic-motion pause state.
+Existing format-2 recordings without `activeLevers` load with every lever off.
+Format 1 is rejected; re-record its inputs
 through the current Driver rather than migrating its old expectations.
 Solutions live outside `levels/` because the content pipeline rejects
 unexpected files there, and they are matched by digest, so renumbering

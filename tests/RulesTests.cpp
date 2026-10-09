@@ -210,6 +210,201 @@ void testButtonPlacementsShareActivationRules()
     }
 }
 
+void testLeversLatchAndToggleForEveryPlacement()
+{
+    TEST("leversLatchAndToggleForEveryPlacement");
+    for (const TileType lever : { TileType::LeverNorth, TileType::LeverEast,
+             TileType::LeverSouth, TileType::LeverWest }) {
+        std::string row = "Q R G";
+        row[1] = tileTypeToChar(lever);
+        const Level level = Level::loadFromDefinition({
+            .layers = { { "....." }, { row } },
+            .gates = { { .cell = cell(4, 0, 1),
+                         .pressurePlates = { cell(0, 0, 1) } } },
+            .plates = { { cell(0, 0, 1), lever }, { cell(2, 0, 1), lever } },
+        }, "directional lever activation");
+        const GameState before = rules::initialState(level);
+        CHECK(before.activeLevers.empty());
+        CHECK(rules::step(level, before) == before);
+        CHECK(rules::activatableLevers(level, before) ==
+            std::vector<GridPosition3> { cell(0, 0, 1) });
+        CHECK(!rules::isPressurePlateActive(level, before, cell(2, 0, 1)));
+        const auto on = rules::activate(level, before);
+        CHECK(on.has_value());
+        if (!on) continue;
+        CHECK(on->activeButtons.empty());
+        CHECK(on->activeLevers == std::vector<GridPosition3> { cell(0, 0, 1) });
+        CHECK(rules::isGateOpen(level, *on, level.gates()[0]));
+        const GameState away = rules::step(level, *on, MoveDirection::Right);
+        CHECK(away.players[0].cell == cell(1, 0, 1));
+        CHECK(away.activeLevers == on->activeLevers);
+        CHECK(rules::isGateOpen(level, away, level.gates()[0]));
+        CHECK(rules::step(level, away) == away);
+        const GameState returned = rules::step(level, away, MoveDirection::Left);
+        const auto off = rules::activate(level, returned);
+        CHECK(off.has_value());
+        CHECK(off && off->activeLevers.empty());
+        CHECK(off && !rules::isGateOpen(level, *off, level.gates()[0]));
+        GameState dead = before;
+        dead.players[0].dead = true;
+        CHECK(rules::activatableLevers(level, dead).empty());
+        CHECK(!rules::activate(level, dead));
+        GameState applied = before;
+        const auto delta = StateDelta::between(before, *on);
+        CHECK(!delta.empty());
+        delta.applyTo(applied);
+        CHECK(applied == *on);
+        delta.inverted().applyTo(applied);
+        CHECK(applied == before);
+    }
+}
+
+void testLeversAndButtonsDriveLinkedDevicesOnRisingEdges()
+{
+    TEST("leversAndButtonsDriveLinkedDevicesOnRisingEdges");
+    const std::vector<GridPosition3> links {
+        cell(0, 0, 1), cell(0, 2, 1), cell(6, 0, 1)
+    };
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "....=...", "........", "........" },
+            { "Q R R R ", "  M-_   ", "K       " },
+            { "        ", "        ", "        " },
+            { "        ", "        ", "        " },
+        },
+        .rotators = { { .cell = cell(2, 0, 1), .pressurePlates = links } },
+        .plates = {
+            { cell(0, 0, 1), TileType::LeverNorth },
+            { cell(0, 2, 1), TileType::ButtonWest },
+            { cell(2, 0, 1), TileType::RotatorClockwise },
+            { cell(6, 0, 1), TileType::PressurePlate },
+            { cell(2, 1, 1), TileType::RailStopEastWest },
+        },
+        .elevators = { { .cell = cell(4, 0, 0), .pressurePlates = links,
+                         .levels = { 0, 2 } } },
+        .minecarts = { { .cell = cell(2, 1, 1), .pressurePlates = links,
+                         .initialDirection = 1 } },
+    }, "mixed lever button pressure links");
+    const GameState before = rules::initialState(level);
+    const auto first = rules::activate(level, before);
+    CHECK(first.has_value());
+    if (!first) return;
+    CHECK(first->activeLevers.size() == 1);
+    CHECK(first->activeButtons.size() == 1);
+    CHECK(first->movables[0].quarterTurns == 1);
+    CHECK(first->elevators[0].cell == cell(4, 0, 2));
+    CHECK(first->minecarts[0].cell == cell(4, 1, 1));
+    const auto off = rules::activate(level, *first);
+    CHECK(off.has_value());
+    if (!off) return;
+    CHECK(off->activeLevers.empty());
+    CHECK(off->movables == first->movables);
+    CHECK(off->elevators == first->elevators);
+    CHECK(off->minecarts == first->minecarts);
+    const auto onAgain = rules::activate(level, *off);
+    CHECK(onAgain.has_value());
+    if (!onAgain) return;
+    CHECK(onAgain->movables[0].quarterTurns == 2);
+    CHECK(onAgain->elevators[0].cell == cell(4, 0, 0));
+    CHECK(onAgain->minecarts[0].cell == cell(2, 1, 1));
+    const GameState settled = rules::step(level, *onAgain);
+    CHECK(settled.activeButtons.empty());
+    CHECK(settled.activeLevers == onAgain->activeLevers);
+    CHECK(settled.elevators == onAgain->elevators);
+    CHECK(settled.minecarts == onAgain->minecarts);
+}
+
+void testLeverActivationUsesStartingBoardAndCanonicalOrder()
+{
+    TEST("leverActivationUsesStartingBoardAndCanonicalOrder");
+    Level::LayerRows layers {
+        { "...........", "...........", "...........", "...........", "..........." },
+        { "  Q     K  ", "           ", "  1     2  ", "           ", "     G     " },
+    };
+    layers[1][2][0] = tileTypeToChar(TileType::LeverSouth);
+    layers[1][2][10] = tileTypeToChar(TileType::LeverWest);
+    layers[1][3][5] = tileTypeToChar(TileType::LeverNorth);
+    const Level level = Level::loadFromDefinition({
+        .layers = layers,
+        .gates = { { .cell = cell(5, 4, 1),
+                     .pressurePlates = { cell(2, 0, 1), cell(5, 3, 1) } } },
+        .plates = {
+            { cell(2, 0, 1), TileType::LeverNorth },
+            { cell(8, 0, 1), TileType::LeverEast },
+        },
+    }, "simultaneous lever reflection");
+    GameState before = rules::initialState(level);
+    before.activeLevers = { cell(8, 0, 1), cell(0, 2, 1), cell(5, 3, 1) };
+    const auto preview = rules::previewActivation(level, before);
+    CHECK(preview.has_value());
+    if (!preview) return;
+    CHECK(preview->entities.size() == 2);
+    CHECK(preview->after.players[0].cell == cell(0, 2, 1));
+    CHECK(preview->after.players[1].cell == cell(10, 2, 1));
+    // Both occupied sources flip; unoccupied latches retain their state.
+    // Landing on another switch during reflection cannot toggle it yet.
+    CHECK(preview->after.activeLevers == (std::vector<GridPosition3> {
+        cell(2, 0, 1), cell(0, 2, 1), cell(5, 3, 1) }));
+    CHECK(!rules::isPressurePlateActive(level, preview->after, cell(10, 2, 1)));
+    CHECK(rules::isGateOpen(level, preview->after, level.gates()[0]));
+    std::ranges::reverse(before.players);
+    std::ranges::reverse(before.activeLevers);
+    const auto reversed = rules::previewActivation(level, before);
+    CHECK(reversed && reversed->after.activeLevers == preview->after.activeLevers);
+
+    // Mirror-created copies also wait until the next Activate to flip the
+    // destination's lever, whether that destination is currently on or off.
+    Level::LayerRows copyLayers {
+        { ".....", ".....", ".....", ".....", "....." },
+        { "  3  ", "     ", "  Q  ", "     ", "  2  " },
+    };
+    copyLayers[1][0][0] = tileTypeToChar(TileType::LeverEast);
+    copyLayers[1][4][4] = tileTypeToChar(TileType::LeverWest);
+    const Level copies = Level::loadFromDefinition({
+        .layers = copyLayers,
+        .plates = { { cell(2, 2, 1), TileType::LeverNorth } },
+    }, "lever reflection copies");
+    GameState original = rules::initialState(copies);
+    original.activeLevers = { cell(4, 4, 1) };
+    const auto duplicated = rules::previewActivation(copies, original);
+    CHECK(duplicated.has_value());
+    CHECK(duplicated && duplicated->after.players.size() == 2);
+    CHECK(duplicated && duplicated->after.activeLevers ==
+        (std::vector<GridPosition3> { cell(2, 2, 1), cell(4, 4, 1) }));
+}
+
+void testInvalidReflectionPreservesIndependentLeverAndButtonActivation()
+{
+    TEST("invalidReflectionPreservesIndependentLeverAndButtonActivation");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { ".....", ".....", ".....", ".....", "....." },
+            { "Q   K", "     ", " #3  ", "     ", "  C G" },
+        },
+        .gates = { { .cell = cell(4, 4, 1),
+                     .pressurePlates = { cell(0, 0, 1), cell(4, 0, 1) } } },
+        .plates = { { cell(0, 0, 1), TileType::LeverSouth },
+                    { cell(4, 0, 1), TileType::ButtonEast } },
+    }, "lever invalid reflection fallback");
+    const GameState before = rules::initialState(level);
+    CHECK(!rules::previewMirrorActivation(level, before));
+    const auto on = rules::previewActivation(level, before);
+    CHECK(on.has_value());
+    if (!on) return;
+    CHECK(on->entities.empty());
+    CHECK(on->after.players == before.players);
+    CHECK(on->after.activeLevers == std::vector<GridPosition3> { cell(0, 0, 1) });
+    CHECK(on->after.activeButtons == std::vector<GridPosition3> { cell(4, 0, 1) });
+    CHECK(rules::isGateOpen(level, on->after, level.gates()[0]));
+    const auto off = rules::previewActivation(level, on->after);
+    CHECK(off.has_value());
+    CHECK(off && off->entities.empty());
+    CHECK(off && off->after.players == before.players);
+    CHECK(off && off->after.activeLevers.empty());
+    CHECK(off && off->after.activeButtons == on->after.activeButtons);
+    CHECK(off && !rules::isGateOpen(level, off->after, level.gates()[0]));
+}
+
 void testActivateCombinesMultipleMirrorsAndButtonsFromStartingBoard()
 {
     TEST("activateCombinesMultipleMirrorsAndButtonsFromStartingBoard");
@@ -3749,6 +3944,10 @@ void testLockPlatesHoldAndReleaseUnits()
 
 int main()
 {
+    testLeverActivationUsesStartingBoardAndCanonicalOrder();
+    testInvalidReflectionPreservesIndependentLeverAndButtonActivation();
+    testLeversLatchAndToggleForEveryPlacement();
+    testLeversAndButtonsDriveLinkedDevicesOnRisingEdges();
     testButtonPulseLifetimeAndEligibility();
     testButtonPlacementsShareActivationRules();
     testButtonsTriggerAllLinkedDevicesPerPress();

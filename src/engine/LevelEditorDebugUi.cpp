@@ -432,7 +432,7 @@ void LevelEditorDebugUi::draw(
                 bindings, InputAction::EditorPickTile).c_str());
         ImGui::BulletText(
             "%s + click or drag: link-color brush (the cursor turns into a "
-            "brush dipped in the link color) - give each pressure plate, "
+            "brush dipped in the link color) - give each pressure plate, button, lever, "
             "gate, rotator, lock plate or elevator touched the active link color; the "
             "whole drag is one undo step",
             actionBindingsDisplay(
@@ -688,11 +688,11 @@ std::string cellText(GridPosition3 cell)
         ", " + std::to_string(cell.z) + ")";
 }
 
-// "2 plates -> Gate (4, 0, 1), Rotator (3, 0, 1)".
+// "2 sources -> Gate (4, 0, 1), Rotator (3, 0, 1)".
 std::string linkGroupText(const LevelEditor::LinkGroup& group)
 {
     std::string text = std::to_string(group.pressurePlates.size()) +
-        (group.pressurePlates.size() == 1 ? " plate" : " plates");
+        (group.pressurePlates.size() == 1 ? " source" : " sources");
     if (!group.objects.empty()) {
         text += ", " + std::to_string(group.objects.size()) +
             (group.objects.size() == 1 ? " linked object" : " linked objects");
@@ -970,7 +970,7 @@ void LevelEditorDebugUi::drawTilePalette(
         ImGui::TextWrapped("Terrain shapes join automatically. Paint their tops with Ground Paint.");
     }
     ImGui::TextWrapped(
-        "Plates (Pressure, Buttons, End, Rotators, Lock Plates, Rail Stops) stack with units and mirrors; "
+        "Plates (Pressure, Buttons, Levers, End, Rotators, Lock Plates, Rail Stops) stack with units and mirrors; "
         "a Minecart can only stack on a Rail Stop. A Minecart Gate stacks on "
         "any rail and lifts for passing carts and their character riders; "
         "loose blocks cannot pass, even aboard a cart. Paint "
@@ -981,16 +981,17 @@ void LevelEditorDebugUi::drawTilePalette(
     ImGui::TextUnformatted("Links");
     ImGui::TextWrapped(
         "Gates, rotators, lock plates, elevators and minecarts are driven by every pressure "
-        "plate and button of their color: give sources and devices the same color to link "
-        "them. A gate opens while all of its plates are pressed; a rotator "
+        "plate, button and lever of their color: give sources and devices the same color to link "
+        "them. A gate opens while all of its sources are active; a rotator "
         "turns and an elevator or minecart moves each time they all become "
-        "pressed. A device with no plates of its color never activates. "
+        "active. A device with no sources of its color never activates. "
         "Movable objects of the same color repeat one another's successful "
         "moves when their own path is clear.");
     ImGui::TextWrapped(
-        "Activate pulses every button occupied by a living hero and activates "
+        "Activate pulses every button and toggles every lever occupied by a living hero, and activates "
         "all eligible mirrors together. Button pulses last through the next "
-        "game step; repeated presses trigger devices again without stepping off.");
+        "game step; repeated presses trigger devices again without stepping off. "
+        "A lever stays on or off until activated again.");
     Vec3 paintColor = editor.activeLinkColor();
     if (ImGui::ColorEdit3("Link Color", &paintColor.x)) {
         editor.setActiveLinkColor(paintColor);
@@ -999,7 +1000,7 @@ void LevelEditorDebugUi::drawTilePalette(
         actionBindingsDisplay(bindings, InputAction::EditorPickTile);
     const std::string brushKeys =
         actionBindingsDisplay(bindings, InputAction::EditorPaintLinkColor);
-    ImGui::BulletText("New pressure plates, devices and portals take this "
+    ImGui::BulletText("New pressure plates, buttons, levers, devices and portals take this "
                       "color; paint it onto movable "
                       "objects to link them.");
     ImGui::BulletText(
@@ -1050,7 +1051,7 @@ void LevelEditorDebugUi::drawTilePalette(
         if (group.hasDevice() && group.pressurePlates.empty()) {
             ImGui::TextColored(
                 ImVec4 { 1.0f, 0.65f, 0.3f, 1.0f },
-                "    No pressure plates of this color: never activates.");
+                "    No signal sources of this color: never activates.");
         }
         if (!group.portals.empty() && group.portals.size() != 2) {
             ImGui::TextDisabled(
@@ -1086,7 +1087,7 @@ void LevelEditorDebugUi::drawTilePalette(
     ImGui::TextUnformatted("Gates");
     ImGui::TextWrapped(
         "A closed gate is a solid block that units can stand on; an open gate "
-        "is empty space. A gate opens while all its linked plates are pressed, "
+        "is empty space. A gate opens while all its linked sources are active, "
         "or, when it starts open, closes while they are. Closing on a hero, "
         "enemy or turret kills it; a rock or ice block holds it open.");
     const std::vector<Level::Gate>& gates = editor.gates();
@@ -1156,7 +1157,7 @@ void LevelEditorDebugUi::drawTilePalette(
     ImGui::TextUnformatted("Lock Plates");
     ImGui::TextWrapped(
         "An enabled Lock Plate holds every unit on it in place, including heroes. "
-        "All pressure plates of its color must be pressed to invert its start state.");
+        "All signal sources of its color must be active to invert its start state.");
     const std::vector<Level::LockPlate>& lockPlates = editor.lockPlates();
     if (selectedLockPlateIndex_ && *selectedLockPlateIndex_ >= lockPlates.size()) {
         selectedLockPlateIndex_.reset();

@@ -191,6 +191,11 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
                 }
                 const TileType tile = level.tileAt(x, y, z);
                 requirements.requireModel(manifest.modelForTile(tile));
+                if (tileTypeIsLever(tile)) {
+                    if (const auto onModel = manifest.findModelIdByName("LeverOn")) {
+                        requirements.requireModel(*onModel);
+                    }
+                }
                 if (tileTypeIsGround(tile)) {
                     const RenderModel base = manifest.modelForTile(tile);
                     if (!base.isCube() && authoredGroundTileVariant(manifest.model(base))) {
@@ -220,6 +225,11 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
                 });
                 if (plate && *plate != tile) {
                     requirements.requireModel(manifest.modelForTile(*plate));
+                    if (tileTypeIsLever(*plate)) {
+                        if (const auto onModel = manifest.findModelIdByName("LeverOn")) {
+                            requirements.requireModel(*onModel);
+                        }
+                    }
                 }
                 if (tileTypeIsRotator(plate.value_or(tile))) {
                     if (const std::optional<RotatorModelParts> parts =

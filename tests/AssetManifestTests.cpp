@@ -1076,6 +1076,163 @@ int main()
                 }
             }
         }
+        TEST("realLeverAssetsPreserveBothHandlePositionsAndNeutralHousing");
+        std::array<sokoban::MeshData, 2> leverMeshes;
+        constexpr std::array<std::string_view, 2> leverModels { "LeverOff", "LeverOn" };
+        constexpr std::array<std::string_view, 2> leverPaths {
+            "custom/models/lever_off.glb", "custom/models/lever_on.glb" };
+        for (std::size_t state = 0; state < leverModels.size(); ++state) {
+            const auto model = rockManifest.modelIdByName(leverModels[state]);
+            CHECK(!model.isCube());
+            const auto& asset = rockManifest.model(model);
+            CHECK(asset.path == leverPaths[state]);
+            CHECK(asset.preserveSourceScale);
+            leverMeshes[state] = sokoban::loadGltfMesh(*root / asset.path,
+                { .preserveSourceScale = true });
+            const auto& lever = leverMeshes[state];
+            CHECK(!lever.vertices.empty() && lever.indices.size() > 3000);
+            bool hasNeutralHousing = false;
+            std::optional<std::size_t> gripMaterial;
+            std::optional<std::size_t> woodMaterial;
+            std::optional<std::size_t> slotMaterial;
+            for (std::size_t index = 0; index < lever.materials.size(); ++index) {
+                const auto& material = lever.materials[index];
+                const auto emission = material.emissiveFactor;
+                if (std::max({ emission.x, emission.y, emission.z }) > 0.0f) {
+                    // Positive emission selects the PlateEnergy link tint for
+                    // the upper grip's albedo too; keep emission restrained.
+                    CHECK(!gripMaterial.has_value());
+                    gripMaterial = index;
+                    CHECK(emission.x > 0.0f && emission.x <= 0.5f);
+                    CHECK(std::abs(emission.x - emission.y) < 0.00001f &&
+                        std::abs(emission.y - emission.z) < 0.00001f);
+                    const auto color = material.baseColorFactor;
+                    CHECK(color.x > 0.7f && color.x <= 1.0f);
+                    CHECK(std::abs(color.x - color.y) < 0.00001f &&
+                        std::abs(color.y - color.z) < 0.00001f);
+                } else if (emission == sokoban::Vec3({ 0, 0, 0 })) {
+                    const auto color = material.baseColorFactor;
+                    hasNeutralHousing |= std::abs(color.x - color.y) < 0.08f &&
+                        std::abs(color.y - color.z) < 0.08f && color.x > 0.1f;
+                    if (color.x > color.y * 1.3f && color.y > color.z * 1.25f &&
+                        color.x > 0.15f) {
+                        CHECK(!woodMaterial.has_value());
+                        woodMaterial = index;
+                        CHECK(material.metallicFactor < 0.1f);
+                    }
+                    if (std::max({ color.x, color.y, color.z }) < 0.1f) {
+                        slotMaterial = index;
+                    }
+                }
+            }
+            CHECK(hasNeutralHousing && gripMaterial.has_value() &&
+                woodMaterial.has_value() && slotMaterial.has_value());
+            sokoban::Vec3 minimum { 1, 1, 1 };
+            sokoban::Vec3 maximum {};
+            float woodMinimumZ = 1.0f;
+            float woodMaximumZ = 0.0f;
+            float gripMinimumZ = 1.0f;
+            float gripMaximumZ = 0.0f;
+            float slotMinimumZ = 1.0f;
+            float housingMaximumZ = 0.0f;
+            sokoban::Vec3 lowestGripPoint {};
+            for (const auto& vertex : lever.vertices) {
+                const auto position = vertex.position;
+                CHECK(std::isfinite(position.x) && std::isfinite(position.y) &&
+                    std::isfinite(position.z));
+                CHECK(position.x > 0.0f && position.x < 1.0f);
+                CHECK(position.y > 0.0f && position.y < 0.4f);
+                CHECK(position.z >= 0.0f && position.z < 1.0f);
+                minimum.x = std::min(minimum.x, position.x);
+                minimum.y = std::min(minimum.y, position.y);
+                minimum.z = std::min(minimum.z, position.z);
+                maximum.x = std::max(maximum.x, position.x);
+                maximum.y = std::max(maximum.y, position.y);
+                maximum.z = std::max(maximum.z, position.z);
+                if (woodMaterial == vertex.materialIndex) {
+                    woodMinimumZ = std::min(woodMinimumZ, position.z);
+                    woodMaximumZ = std::max(woodMaximumZ, position.z);
+                }
+                if (gripMaterial == vertex.materialIndex) {
+                    if (position.z < gripMinimumZ) {
+                        gripMinimumZ = position.z;
+                        lowestGripPoint = position;
+                    }
+                    gripMaximumZ = std::max(gripMaximumZ, position.z);
+                }
+                if (slotMaterial == vertex.materialIndex) {
+                    slotMinimumZ = std::min(slotMinimumZ, position.z);
+                }
+                if (woodMaterial != vertex.materialIndex && gripMaterial != vertex.materialIndex) {
+                    housingMaximumZ = std::max(housingMaximumZ, position.z);
+                }
+            }
+            // Wood reaches the low slot, with a separate short colored grip
+            // at its top rather than tinting the whole shaft.
+            const float woodSpan = woodMaximumZ - woodMinimumZ;
+            const float gripSpan = gripMaximumZ - gripMinimumZ;
+            CHECK(woodMinimumZ <= slotMinimumZ + 0.00001f);
+            CHECK(housingMaximumZ < maximum.z * 0.5f);
+            // The rounded support's crown is centered on the handle axis,
+            // unlike a one-sided quarter-disc whose crown sits at one edge.
+            bool hasCenteredSupportCrown = false;
+            for (const auto& vertex : lever.vertices) {
+                if (woodMaterial == vertex.materialIndex || gripMaterial == vertex.materialIndex ||
+                    std::abs(vertex.position.z - housingMaximumZ) >= 0.00001f) {
+                    continue;
+                }
+                CHECK(std::abs(vertex.position.x - 0.5f) < 0.00001f);
+                hasCenteredSupportCrown = true;
+            }
+            CHECK(hasCenteredSupportCrown);
+            CHECK(gripSpan > 0.0f && woodSpan > gripSpan * 2.0f);
+            CHECK(gripMinimumZ > woodMinimumZ + woodSpan * 0.7f);
+            CHECK(std::abs(gripMaximumZ - maximum.z) < 0.00001f);
+            float closestWoodGripDistance = 1.0f;
+            for (const auto& vertex : lever.vertices) {
+                if (woodMaterial != vertex.materialIndex) {
+                    continue;
+                }
+                const auto position = vertex.position;
+                closestWoodGripDistance = std::min(closestWoodGripDistance,
+                    std::hypot(position.x - lowestGripPoint.x,
+                        position.y - lowestGripPoint.y, position.z - lowestGripPoint.z));
+            }
+            CHECK(closestWoodGripDistance < maximum.z * 0.05f);
+            // A broad base runs parallel to the north edge; its compact
+            // depth leaves the middle of the tile open in either state.
+            CHECK(maximum.x - minimum.x > (maximum.y - minimum.y) * 1.5f);
+            CHECK(minimum.z == 0.0f && maximum.z > 0.6f);
+            if (state == 0) {
+                for (const auto variant : { sokoban::TileType::LeverNorth,
+                         sokoban::TileType::LeverEast, sokoban::TileType::LeverSouth,
+                         sokoban::TileType::LeverWest }) {
+                    CHECK(rockManifest.modelForTile(variant) == model);
+                    CHECK(rockManifest.tileScale(variant) == 1.0f);
+                }
+            }
+        }
+        // The handle throws along X around a Y hinge. Comparing matching
+        // authored vertices catches a diagonal throw or accidental yaw in
+        // the assets without pinning the handle to an exact top height.
+        const auto& offLever = leverMeshes[0];
+        const auto& onLever = leverMeshes[1];
+        CHECK(offLever.indices == onLever.indices);
+        CHECK(offLever.vertices.size() == onLever.vertices.size());
+        float maximumThrowX = 0.0f;
+        float maximumTravelY = 0.0f;
+        for (std::size_t index = 0;
+             index < std::min(offLever.vertices.size(), onLever.vertices.size()); ++index) {
+            const auto& offVertex = offLever.vertices[index];
+            const auto& onVertex = onLever.vertices[index];
+            CHECK(offVertex.materialIndex == onVertex.materialIndex);
+            maximumThrowX = std::max(maximumThrowX,
+                std::abs(onVertex.position.x - offVertex.position.x));
+            maximumTravelY = std::max(maximumTravelY,
+                std::abs(onVertex.position.y - offVertex.position.y));
+        }
+        CHECK(maximumThrowX > 0.3f);
+        CHECK(maximumTravelY < 0.00002f);
         const auto lectern = sokoban::loadGltfMesh(*root / "custom/models/lectern.glb",
             { .preserveSourceScale = true });
         CHECK(!lectern.vertices.empty());

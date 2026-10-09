@@ -161,6 +161,58 @@ void testActivateButtonsAndMirrorsIsOneUndoableRestorableAction()
     CHECK(restored.restore(buttonOnly, session.snapshot()));
 }
 
+void testLeverStateCommitsRestoresUndoesAndRestarts()
+{
+    TEST("leverStateCommitsRestoresUndoesAndRestarts");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "...." }, { "Q  G" } },
+        .gates = { { .cell = cell(3, 0, 1),
+                     .pressurePlates = { cell(0, 0, 1) } } },
+        .plates = { { cell(0, 0, 1), TileType::LeverEast } },
+    }, "lever session");
+    GameplaySession session;
+    session.reset(level);
+    const GameState before = session.state();
+    session.queueActivate();
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.state() == before);
+    CHECK(session.activeAction().after.activeLevers.size() == 1);
+    finishAction(session);
+    const GameState on = session.state();
+    CHECK(rules::isGateOpen(level, on, level.gates()[0]));
+    CHECK(session.mirrorActivationSequence() == 0);
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == on);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().activeLevers == on.activeLevers);
+    CHECK(restored.restore(level, session.snapshot()));
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state() == on);
+    session.queueActivate();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().activeLevers.empty());
+    CHECK(restored.restore(level, session.snapshot()));
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state() == on);
+    session.queueRestart();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state() == before);
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state() == on);
+    CHECK(restored.restore(level, session.snapshot()));
+}
+
 void testAuthoredHeroesMoveIndependentlyAndCycleInPlacementOrder()
 {
     TEST("authoredHeroesMoveIndependentlyAndCycleInPlacementOrder");
@@ -1536,6 +1588,7 @@ void testPlanningCachesRefreshAfterWorldAndPolicyChanges()
 
 int main()
 {
+    testLeverStateCommitsRestoresUndoesAndRestarts();
     testActivateButtonsAndMirrorsIsOneUndoableRestorableAction();
     testElevatorRideCommitsUndoesAndRestores();
     testQueueIsBounded();

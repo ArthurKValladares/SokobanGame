@@ -117,6 +117,31 @@ void testWardrobeStateSurvivesSolutionRoundTrip()
     CHECK(solution::replay(level, parsed).passed);
 }
 
+void testLeverStateSurvivesSolutionRoundTrip()
+{
+    TEST("leverStateSurvivesSolutionRoundTrip");
+    const Level::Definition definition {
+        .layers = { { "...." }, { "Q GE" } },
+        .gates = { { .cell = { 2, 0, 1 }, .pressurePlates = { { 0, 0, 1 } } } },
+        .plates = { { { 0, 0, 1 }, TileType::LeverWest } },
+    };
+    const Level level = Level::loadFromDefinition(definition, "lever solution");
+    const std::vector<Input> inputs { Input::Interact, Input::Interact,
+        Input::Interact, Input::Right, Input::Right, Input::Right };
+    const auto recording = solution::record(level, definition, inputs, "lever solution");
+    CHECK_MESSAGE(recording.solved, recording.error.c_str());
+    CHECK(recording.solution.steps.size() == inputs.size());
+    if (recording.solution.steps.size() != inputs.size()) return;
+    CHECK(recording.solution.steps[0].state.activeLevers.size() == 1);
+    CHECK(recording.solution.steps[1].state.activeLevers.empty());
+    CHECK(recording.solution.steps[5].state.activeLevers.size() == 1);
+    const std::string text = solution::serialize(recording.solution);
+    CHECK(text.find("\"activeLevers\"") != std::string::npos);
+    const auto parsed = solution::parse(text);
+    CHECK(parsed == recording.solution);
+    CHECK(solution::replay(level, parsed).passed);
+}
+
 void testDigestTracksGameplayContentOnly()
 {
     TEST("digestTracksGameplayContentOnly");
@@ -422,6 +447,7 @@ int main()
     try {
         testRecordSerializeParse();
         testWardrobeStateSurvivesSolutionRoundTrip();
+        testLeverStateSurvivesSolutionRoundTrip();
         testDigestTracksGameplayContentOnly();
         testLegacyCoveredButtonKeepsRecordedSolutionDigest();
         testReplayFailuresNameTheStepAndEntity();

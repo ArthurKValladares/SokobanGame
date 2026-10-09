@@ -877,6 +877,16 @@
       "preserveSourceScale": true
     },
     {
+      "name": "LeverOff",
+      "path": "custom/models/lever_off.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "LeverOn",
+      "path": "custom/models/lever_on.glb",
+      "preserveSourceScale": true
+    },
+    {
       "name": "EndPlate",
       "path": "custom/models/end_plate.glb",
       "preserveSourceScale": true
@@ -1469,6 +1479,22 @@
     {
       "tile": "Button West",
       "model": "PulseButton"
+    },
+    {
+      "tile": "Lever North",
+      "model": "LeverOff"
+    },
+    {
+      "tile": "Lever East",
+      "model": "LeverOff"
+    },
+    {
+      "tile": "Lever South",
+      "model": "LeverOff"
+    },
+    {
+      "tile": "Lever West",
+      "model": "LeverOff"
     },
     {
       "tile": "End",

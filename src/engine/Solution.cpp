@@ -125,6 +125,7 @@ Json stateJson(
         { "minecarts", Json::array() },
         { "wardrobes", Json::array() },
         { "activeButtons", Json::array() },
+        { "activeLevers", Json::array() },
     };
     for (const auto& player : state.players) {
         result["players"].push_back(
@@ -194,6 +195,9 @@ Json stateJson(
     }
     for (const auto button : state.activeButtons) {
         result["activeButtons"].push_back(cellJson(button));
+    }
+    for (const auto lever : state.activeLevers) {
+        result["activeLevers"].push_back(cellJson(lever));
     }
     return result;
 }
@@ -290,6 +294,16 @@ void parseState(const Json& value, Step& step)
     for (const auto& item : array("activeButtons")) {
         state.activeButtons.push_back(parseCell(item));
     }
+    const bool hasLevers = value.contains("activeLevers");
+    if (hasLevers) {
+        for (const auto& item : array("activeLevers")) {
+            const GridPosition3 cell = parseCell(item);
+            if (std::ranges::find(state.activeLevers, cell) != state.activeLevers.end()) {
+                throw std::runtime_error("state has a duplicate active lever");
+            }
+            state.activeLevers.push_back(cell);
+        }
+    }
     // Reject unknown fields and coercions, rather than silently losing state.
     Json canonical = stateJson(
         state, step.activeHeroController, step.automaticMotionPaused);
@@ -298,6 +312,9 @@ void parseState(const Json& value, Step& step)
     // unknown field or coercion.
     if (!hasWardrobes) {
         canonical.erase("wardrobes");
+    }
+    if (!hasLevers) {
+        canonical.erase("activeLevers");
     }
     if (canonical != value) {
         throw std::runtime_error(

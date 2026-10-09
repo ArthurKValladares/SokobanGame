@@ -113,6 +113,48 @@ void testButtonPlacementsRoundTripAndKeepPlateSemantics()
     CHECK(Level::parseDefinition(legacyLines, "saved legacy button") == legacyCovered);
 }
 
+void testLeverPlacementsRoundTripAndKeepPlateSemantics()
+{
+    TEST("leverPlacementsRoundTripAndKeepPlateSemantics");
+    constexpr std::array levers { TileType::LeverNorth, TileType::LeverEast,
+        TileType::LeverSouth, TileType::LeverWest };
+    const Level::Definition definition {
+        .layers = { { "......" }, { "Q%&[]G" } },
+        .gates = { { .cell = { 5, 0, 1 },
+                     .pressurePlates = { { 1, 0, 1 }, { 2, 0, 1 },
+                                        { 3, 0, 1 }, { 4, 0, 1 } } } },
+    };
+    const auto lines = Level::serializeDefinition(definition);
+    CHECK(Level::parseDefinition(lines, "lever placements") == definition);
+    const Level level = Level::loadFromLines(lines, "lever placements");
+    CHECK(level.pressurePlates().size() == levers.size());
+    auto covered = definition;
+    covered.layers[1][0] = "QRRRRG";
+    for (std::size_t index = 0; index < levers.size(); ++index) {
+        const TileType tile = levers[index];
+        const GridPosition3 cell { static_cast<int>(index + 1), 0, 1 };
+        CHECK(level.plateAt(cell) == tile);
+        CHECK(level.isWalkable(cell));
+        CHECK(tileTypeIsLever(tile) && tileTypeIsSignalSource(tile));
+        CHECK(tileTypeIsPlate(tile) && tileTypeIsSurfaceEntity(tile));
+        CHECK(!tileTypeIsSolidBlock(tile));
+        CHECK(leverOrientationQuarterTurns(tile) == index);
+        CHECK(charToTileType(tileTypeToChar(tile)) == tile);
+        CHECK(tileTypeFromName(tileTypeName(tile)) == tile);
+        covered.plates.push_back({ cell, tile });
+    }
+    const auto coveredLines = Level::serializeDefinition(covered);
+    CHECK(Level::parseDefinition(coveredLines, "covered lever placements") == covered);
+    const Level coveredLevel = Level::loadFromLines(coveredLines, "covered lever placements");
+    CHECK(coveredLevel.pressurePlates() == level.pressurePlates());
+    for (std::size_t index = 0; index < levers.size(); ++index) {
+        CHECK(coveredLevel.plateAt({ static_cast<int>(index + 1), 0, 1 }) == levers[index]);
+    }
+    CHECK(tileTypeFromName("Lever") == TileType::LeverNorth);
+    CHECK(!tileTypeIsLever(TileType::ButtonNorth));
+    CHECK(!leverOrientationQuarterTurns(TileType::ButtonNorth));
+}
+
 void testSerializationRoundTrip()
 {
     TEST("serializationRoundTrip");
@@ -478,7 +520,7 @@ void testGateMetadataRoundTripAndValidation()
                 .pressurePlates = { { 1, 0, 1 } },
             } },
         }, "gate bad link");
-    }, "Pressure or Button tiles");
+    }, "Pressure, Button or Lever tiles");
 }
 
 void testRotatorMetadataRoundTripAndValidation()
@@ -548,7 +590,7 @@ void testRotatorMetadataRoundTripAndValidation()
                 .pressurePlates = { { 1, 0, 1 } },
             } },
         }, "rotator bad link");
-    }, "Pressure or Button tiles");
+    }, "Pressure, Button or Lever tiles");
     checkThrowsContaining([] {
         (void)Level::loadFromDefinition({
             .layers = {
@@ -662,7 +704,7 @@ void testElevatorMetadataRoundTripAndValidation()
                 .levels = { 0 },
             } },
         }, "elevator bad link");
-    }, "Pressure or Button tiles");
+    }, "Pressure, Button or Lever tiles");
     checkThrowsContaining([] {
         (void)Level::parseDefinition(
             {
@@ -1353,7 +1395,7 @@ void testLockPlateMetadata()
     checkThrowsContaining([&] { (void)Level::loadFromDefinition(invalid, "missing"); }, "@lockplate");
     invalid = definition;
     invalid.lockPlates[0].pressurePlates = { { 0, 0, 1 } };
-    checkThrowsContaining([&] { (void)Level::loadFromDefinition(invalid, "bad link"); }, "Pressure or Button tiles");
+    checkThrowsContaining([&] { (void)Level::loadFromDefinition(invalid, "bad link"); }, "Pressure, Button or Lever tiles");
     checkThrowsContaining([&] { (void)Level::parseDefinition({
         "@lockplate {\"cell\":[0,0,1],\"plates\":[],\"color\":[1,1,1],\"startEnabled\":1}",
         "@layer 0", "..", "@layer 1", "CJ" }, "bad toggle"); }, "startEnabled");
@@ -1548,6 +1590,7 @@ int main()
     testCliffWallStylesAreSolidAndSaveSplatAssignments();
     testLegacyAndLayeredParsing();
     testButtonPlacementsRoundTripAndKeepPlateSemantics();
+    testLeverPlacementsRoundTripAndKeepPlateSemantics();
     testSerializationRoundTrip();
     testCameraMetadataRoundTripAndValidation();
     testCharacterMetadataRoundTripAndLegacyDefault();

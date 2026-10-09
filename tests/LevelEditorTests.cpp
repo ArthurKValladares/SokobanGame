@@ -436,6 +436,53 @@ void testButtonPlacementsKeepLinksThroughRotationStackingAndSave()
     CHECK(loaded.documentToLevel().gateAt(gate)->pressurePlates == sources);
 }
 
+void testLeverPlacementsKeepLinksThroughConversionRotationAndSave()
+{
+    TEST("leverPlacementsKeepLinksThroughConversionRotationAndSave");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(7, 3, false);
+    constexpr std::array levers { TileType::LeverNorth, TileType::LeverEast,
+        TileType::LeverSouth, TileType::LeverWest };
+    const Vec3 red { 0.9f, 0.1f, 0.2f };
+    const Vec3 blue { 0.1f, 0.2f, 0.9f };
+    const GridPosition3 gate { 5, 1, 1 };
+    Plates sources;
+    editor.setActiveLinkColor(red);
+    for (std::size_t index = 0; index < levers.size(); ++index) {
+        sources.push_back({ static_cast<int>(index + 1), 1, 1 });
+        CHECK(editor.setCell(sources.back(),
+            index % 2 == 0 ? TileType::PressurePlate : TileType::ButtonEast));
+    }
+    CHECK(editor.setCell(gate, TileType::Gate));
+    editor.setActiveLinkColor(blue);
+    for (std::size_t index = 0; index < levers.size(); ++index) {
+        CHECK(editor.setCell(sources[index], levers[index]));
+        CHECK(editor.linkColorAt(sources[index]) == std::optional<Vec3>(red));
+    }
+    CHECK(editor.documentToLevel().gateAt(gate)->pressurePlates == sources);
+    CHECK(editor.setCell(sources[1], TileType::Knight));
+    CHECK(editor.setCell(sources[1], TileType::LeverWest));
+    CHECK(editor.documentPlateAt(sources[1]) == TileType::LeverWest);
+    CHECK(editor.linkColorAt(sources[1]) == std::optional<Vec3>(red));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentPlateAt(sources[1]) == TileType::LeverEast);
+    CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::Knight));
+    CHECK(editor.documentToLevel().gateAt(gate)->pressurePlates == sources);
+    CHECK(editor.pickTile(sources[3]) == TileType::LeverWest);
+    CHECK(editor.selectedTile() == TileType::LeverWest);
+    const auto path = project.source / "levers.scr";
+    CHECK(editor.saveDocument(path).sourceSaved());
+    const Level reloaded = Level::loadFromFile(path);
+    CHECK(reloaded.gateAt(gate)->pressurePlates == sources);
+    for (std::size_t index = 0; index < levers.size(); ++index) {
+        CHECK(reloaded.plateAt(sources[index]) == levers[index]);
+    }
+    auto loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(path, false));
+    CHECK(loaded.documentToLevel().gateAt(gate)->pressurePlates == sources);
+}
+
 void testExplicitLinksBecomeColorGroupsOnLoad()
 {
     TEST("explicitLinksBecomeColorGroupsOnLoad");
@@ -2801,7 +2848,8 @@ void testGroupedPalettePreservesDirectionalBrushes()
             tileTypeIsMirror(definition.type) || tileTypeIsTurret(definition.type) ||
             tileTypeIsPortal(definition.type) || tileTypeIsRail(definition.type) ||
             tileTypeIsRotator(definition.type) || tileTypeIsLectern(definition.type) ||
-            tileTypeIsWardrobe(definition.type) || tileTypeIsButton(definition.type);
+            tileTypeIsWardrobe(definition.type) || tileTypeIsButton(definition.type) ||
+            tileTypeIsLever(definition.type);
         CHECK(membership[static_cast<std::size_t>(definition.type)] ==
             (directional ? 1 : 0));
     }
@@ -3256,6 +3304,7 @@ int main()
     }
     testButtonsKeepLinksThroughStackingConversionAndSave();
     testButtonPlacementsKeepLinksThroughRotationStackingAndSave();
+    testLeverPlacementsKeepLinksThroughConversionRotationAndSave();
     testPerScreenCameraEditingAndPersistence();
     testLockPlateEditor();
     testPortalColorGroups();

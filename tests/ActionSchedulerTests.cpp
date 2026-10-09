@@ -124,6 +124,31 @@ void testButtonPulseLifetimeCannotOverlapOtherWorldSteps()
     CHECK(scheduler.state().activeButtons.empty());
 }
 
+void testLeverTransitionsSerializeButSteadySignalsAllowConcurrentMovement()
+{
+    TEST("leverTransitionsSerializeButSteadySignalsAllowConcurrentMovement");
+    ActionScheduler scheduler;
+    const GameState before = twoRocks();
+    scheduler.reset(before, 0.1f);
+    ActionPlan toggle { .before = before, .after = before, .durationSeconds = 0.1f };
+    toggle.after.activeLevers = { cell(0, 0) };
+    const auto [move, claims] = movePlan(before, 0, cell(6, 0), 0.5f);
+    CHECK(started(scheduler.tryStart(move, claims)));
+    CHECK(!started(scheduler.tryStart(toggle, {})));
+    (void)scheduler.advance(0.5f);
+    CHECK(started(scheduler.tryStart(toggle, {})));
+    CHECK(!started(scheduler.tryStart(move, claims)));
+    (void)scheduler.advance(0.1f);
+    CHECK(scheduler.state().activeLevers == toggle.after.activeLevers);
+    const GameState on = scheduler.state();
+    const auto [first, firstClaims] = movePlan(on, 0, cell(7, 0), 0.5f);
+    const auto [second, secondClaims] = movePlan(on, 1, cell(6, 9), 0.2f);
+    CHECK(started(scheduler.tryStart(first, firstClaims)));
+    CHECK(started(scheduler.tryStart(second, secondClaims)));
+    (void)scheduler.advance(0.5f);
+    CHECK(scheduler.state().activeLevers == toggle.after.activeLevers);
+}
+
 void testConflictingActionIsRefused()
 {
     TEST("conflictingActionIsRefused");
@@ -334,6 +359,7 @@ void testZeroDurationActionCompletesImmediately()
 
 int main()
 {
+    testLeverTransitionsSerializeButSteadySignalsAllowConcurrentMovement();
     testButtonPulseLifetimeCannotOverlapOtherWorldSteps();
     testIndependentActionsRunTogether();
     testConflictingActionIsRefused();

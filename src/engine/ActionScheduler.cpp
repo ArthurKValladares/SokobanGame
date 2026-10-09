@@ -19,12 +19,13 @@ std::optional<ActionScheduler::Rejection> ActionScheduler::ownershipConflict(
         if (causalGroup != 0 && action.causalGroup == causalGroup) {
             continue;
         }
-        // Pulses affect collision across the board and expire on a world-step
-        // boundary. Serialize their lifetime so unrelated in-flight actions
-        // cannot observe or overwrite different versions of the same signal.
+        // Pulses and lever transitions affect collision across the board.
+        // Serialize these changes so other actions cannot use stale signals.
         if (!plan.before.activeButtons.empty() || !plan.after.activeButtons.empty() ||
             !action.plan.before.activeButtons.empty() ||
             !action.plan.after.activeButtons.empty() ||
+            plan.before.activeLevers != plan.after.activeLevers ||
+            action.plan.before.activeLevers != action.plan.after.activeLevers ||
             StateDelta::between(action.plan.before, action.plan.after)
                 .changesAny(wanted)) {
             return Rejection {

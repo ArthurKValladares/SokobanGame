@@ -51,6 +51,9 @@ std::optional<TileType> tileTypeFromName(std::string_view name)
     if (name == "Button") {
         return TileType::ButtonNorth;
     }
+    if (name == "Lever") {
+        return TileType::LeverNorth;
+    }
     for (const TileTypeDefinition& definition : tileTypeDefinitionTable) {
         if (definition.name == name) {
             return definition.type;
@@ -88,6 +91,17 @@ std::optional<uint32_t> buttonOrientationQuarterTurns(TileType type)
     case TileType::ButtonEast: return 1;
     case TileType::ButtonSouth: return 2;
     case TileType::ButtonWest: return 3;
+    default: return std::nullopt;
+    }
+}
+
+std::optional<uint32_t> leverOrientationQuarterTurns(TileType type)
+{
+    switch (type) {
+    case TileType::LeverNorth: return 0;
+    case TileType::LeverEast: return 1;
+    case TileType::LeverSouth: return 2;
+    case TileType::LeverWest: return 3;
     default: return std::nullopt;
     }
 }

@@ -118,6 +118,12 @@ struct StateDelta {
         bool operator==(const ButtonChange&) const = default;
     };
     std::optional<ButtonChange> buttons;
+    struct LeverChange {
+        std::vector<GridPosition3> before;
+        std::vector<GridPosition3> after;
+        bool operator==(const LeverChange&) const = default;
+    };
+    std::optional<LeverChange> levers;
 };
 
 } // namespace sokoban

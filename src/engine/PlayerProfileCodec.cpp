@@ -286,7 +286,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
 {
     rejectUnknownProperties(
         value,
-        { "players", "movables", "enemies", "turnedMirrors", "elevators", "minecarts", "wardrobes", "activeButtons" },
+        { "players", "movables", "enemies", "turnedMirrors", "elevators", "minecarts", "wardrobes", "activeButtons", "activeLevers" },
         context);
     GameState state;
     const Json& players = requiredProperty(value, "players", context);
@@ -504,6 +504,19 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
             state.activeButtons.push_back(cell);
         }
     }
+    if (value.contains("activeLevers")) {
+        const Json& levers = value["activeLevers"];
+        if (!levers.is_array()) {
+            fail(context, "property 'activeLevers' must be an array");
+        }
+        for (const Json& lever : levers) {
+            const GridPosition3 cell = positionFromJson(lever, context);
+            if (std::ranges::find(state.activeLevers, cell) != state.activeLevers.end()) {
+                fail(context, "duplicate active lever");
+            }
+            state.activeLevers.push_back(cell);
+        }
+    }
     return state;
 }
 
@@ -611,6 +624,13 @@ OrderedJson gameStateToJson(const GameState& state)
             buttons.push_back(positionToJson(cell));
         }
         result["activeButtons"] = std::move(buttons);
+    }
+    if (!state.activeLevers.empty()) {
+        OrderedJson levers = OrderedJson::array();
+        for (const GridPosition3 cell : state.activeLevers) {
+            levers.push_back(positionToJson(cell));
+        }
+        result["activeLevers"] = std::move(levers);
     }
     return result;
 }

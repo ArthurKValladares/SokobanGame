@@ -117,6 +117,11 @@ enum class TileType : uint8_t {
     ButtonEast,
     ButtonSouth,
     ButtonWest,
+    // Edge-mounted levers retain their on/off signal until activated again.
+    LeverNorth,
+    LeverEast,
+    LeverSouth,
+    LeverWest,
     Count,
 };
 
@@ -283,6 +288,10 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::ButtonEast, 'y', "Button East", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::ButtonSouth, 'z', "Button South", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::ButtonWest, '~', "Button West", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::LeverNorth, '%', "Lever North", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::LeverEast, '&', "Lever East", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::LeverSouth, '[', "Lever South", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::LeverWest, ']', "Lever West", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -302,10 +311,17 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 }
 // Clockwise turns from the north-edge button model, which faces south inward.
 [[nodiscard]] std::optional<uint32_t> buttonOrientationQuarterTurns(TileType type);
-// Sources that drive linked devices: occupancy for pressure, Activate for buttons.
+[[nodiscard]] constexpr bool tileTypeIsLever(TileType type)
+{
+    return type >= TileType::LeverNorth && type <= TileType::LeverWest;
+}
+// Clockwise turns from the north-edge lever model, which faces south inward.
+[[nodiscard]] std::optional<uint32_t> leverOrientationQuarterTurns(TileType type);
+// Sources that drive linked devices: occupancy for pressure, Activate for
+// button pulses and persistent lever toggles.
 [[nodiscard]] constexpr bool tileTypeIsSignalSource(TileType type)
 {
-    return type == TileType::PressurePlate || tileTypeIsButton(type);
+    return type == TileType::PressurePlate || tileTypeIsButton(type) || tileTypeIsLever(type);
 }
 // What may stand on a plate, including when a screen is authored that way:
 // every unit that occupies a level cell (heroes, rocks, ice, turrets,

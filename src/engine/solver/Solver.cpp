@@ -82,7 +82,8 @@ bool onlyPlayersMoved(const GameState& before, const GameState& after)
         before.elevators == after.elevators &&
         before.minecarts == after.minecarts &&
         before.wardrobes == after.wardrobes &&
-        before.activeButtons == after.activeButtons;
+        before.activeButtons == after.activeButtons &&
+        before.activeLevers == after.activeLevers;
 }
 
 struct DirectionTransition {

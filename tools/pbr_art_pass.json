@@ -323,6 +323,16 @@
       "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
     },
     {
+      "name": "LeverOff",
+      "source": "custom/models/lever_off.glb",
+      "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "LeverOn",
+      "source": "custom/models/lever_on.glb",
+      "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
+    },
+    {
       "name": "EndPlate",
       "source": "custom/models/end_plate.glb",
       "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."

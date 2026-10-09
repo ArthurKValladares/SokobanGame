@@ -1995,7 +1995,7 @@ Level Level::loadFromLayers(
         for (GridPosition3 plate : gate.pressurePlates) {
             if (!tileTypeIsSignalSource(level.plateAt(plate).value_or(TileType::Air))) {
                 throw std::runtime_error(
-                    "Gate links must refer to Pressure or Button tiles: " + source);
+                    "Gate links must refer to Pressure, Button or Lever tiles: " + source);
             }
         }
     }
@@ -2008,7 +2008,7 @@ Level Level::loadFromLayers(
         for (GridPosition3 plate : rotator.pressurePlates) {
             if (!tileTypeIsSignalSource(level.plateAt(plate).value_or(TileType::Air))) {
                 throw std::runtime_error(
-                    "Rotator links must refer to Pressure or Button tiles: " + source);
+                    "Rotator links must refer to Pressure, Button or Lever tiles: " + source);
             }
         }
     }
@@ -2021,7 +2021,7 @@ Level Level::loadFromLayers(
         for (GridPosition3 plate : lockPlate.pressurePlates) {
             if (!tileTypeIsSignalSource(level.plateAt(plate).value_or(TileType::Air))) {
                 throw std::runtime_error(
-                    "LockPlate links must refer to Pressure or Button tiles: " + source);
+                    "LockPlate links must refer to Pressure, Button or Lever tiles: " + source);
             }
         }
     }
@@ -2044,7 +2044,7 @@ Level Level::loadFromLayers(
         for (GridPosition3 plate : elevator.pressurePlates) {
             if (!tileTypeIsSignalSource(level.plateAt(plate).value_or(TileType::Air))) {
                 throw std::runtime_error(
-                    "Elevator links must refer to Pressure or Button tiles: " + source);
+                    "Elevator links must refer to Pressure, Button or Lever tiles: " + source);
             }
         }
     }
@@ -2072,7 +2072,7 @@ Level Level::loadFromLayers(
         for (GridPosition3 plate : minecart.pressurePlates) {
             if (!tileTypeIsSignalSource(level.plateAt(plate).value_or(TileType::Air))) {
                 throw std::runtime_error(
-                    "Minecart links must refer to Pressure or Button tiles: " + source);
+                    "Minecart links must refer to Pressure, Button or Lever tiles: " + source);
             }
         }
         level.minecartRoutes_.push_back(

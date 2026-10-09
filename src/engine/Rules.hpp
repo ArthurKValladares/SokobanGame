@@ -138,6 +138,9 @@ struct GameState {
     // Eligibility is sampled before reflection, so copies cannot press newly
     // reached buttons during the same Activate action.
     std::vector<GridPosition3> activeButtons;
+    // Levers latch until another Activate action toggles them off. Cells are
+    // stored in Level::pressurePlates() order, independent of hero order.
+    std::vector<GridPosition3> activeLevers;
 
     bool operator==(const GameState&) const = default;
 };
@@ -304,12 +307,14 @@ void setMirrorQuarterTurns(
 [[nodiscard]] bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 position);
 
 // A pressure plate is pressed by a live hero, movable or enemy, or a mirror
-// standing on it. A Button supplies input only while its pulse is active.
+// standing on it. Buttons pulse; levers supply input while latched on.
 [[nodiscard]] bool isPressurePlateActive(
     const Level& level,
     const GameState& state,
     GridPosition3 plate);
 [[nodiscard]] std::vector<GridPosition3> activatableButtons(
+    const Level& level, const GameState& state);
+[[nodiscard]] std::vector<GridPosition3> activatableLevers(
     const Level& level, const GameState& state);
 [[nodiscard]] bool isGateOpen(
     const Level& level,
@@ -387,8 +392,8 @@ struct MirrorActivationPreview {
     const Level& level,
     const GameState& state);
 
-// One Activate transaction: pulse every button occupied by a living hero and
-// reflect all eligible units, using the same starting board for eligibility.
+// One Activate transaction: pulse occupied buttons, toggle occupied levers,
+// and reflect eligible units, using the same starting board for eligibility.
 [[nodiscard]] std::optional<MirrorActivationPreview> previewActivation(
     const Level& level, const GameState& state);
 [[nodiscard]] std::optional<GameState> activate(

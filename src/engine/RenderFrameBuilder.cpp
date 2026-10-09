@@ -72,6 +72,7 @@ struct StaticRenderCell {
     // Extra yaw on top of the tile's own orientation, e.g. a mirror part-way
     // through a rotator's quarter turn.
     float modelRotationOffsetRadians = 0.0f;
+    std::optional<RenderModel> modelOverride;
     std::optional<Vec4> colorOverride;
     float gateOpenness = 0.0f;
 };
@@ -89,7 +90,10 @@ StaticRenderCell staticRenderCellFor(
 {
     const TileType tile = fallenTile.value_or(level.tileAt(x, y, z));
     const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
-    const bool button = tileTypeIsButton(tile);
+    const bool edgeControl = tileTypeIsButton(tile) || tileTypeIsLever(tile);
+    const uint32_t edgeControlQuarterTurns = tileTypeIsLever(tile)
+        ? leverOrientationQuarterTurns(tile).value_or(0)
+        : buttonOrientationQuarterTurns(tile).value_or(0);
     const bool rail = tileTypeIsRail(tile);
     const bool conveyor = tileTypeIsConveyor(tile);
     const bool submergedEntity = fallenTile.has_value();
@@ -98,19 +102,19 @@ StaticRenderCell staticRenderCellFor(
         .tile = tile,
         .active = tile != TileType::End || endUnlocked,
         .showGrid = !tileTypeIsPlayerStart(tile),
-        // The compact button and its edge-mounted pedestal are authored in
+        // Edge controls and their pedestals are authored in
         // tile coordinates; a unit transform retains that offset and shape.
-        .size = rail || button
+        .size = rail || edgeControl
             ? Vec2 { 1.0f, 1.0f }
             : surfaceEntity
             ? Vec2 { surfaceEntitySize, surfaceEntitySize }
             : Vec2 { 1.0f, 1.0f },
-        .positionOffset = surfaceEntity && !rail && !button
+        .positionOffset = surfaceEntity && !rail && !edgeControl
             ? Vec2 { centeredOffset, centeredOffset }
             : Vec2 {},
         .baseElevation = static_cast<float>(z) -
             (submergedEntity ? config::waterDepthBelowGround : 0.0f),
-        .height = button
+        .height = edgeControl
             ? 1.0f
             : surfaceEntity
             ? surfaceEntityHeight
@@ -123,7 +127,9 @@ StaticRenderCell staticRenderCellFor(
                               tileTypeIsWardrobe(tile)
                             ? 1.0f
                             : 0.0f)),
-        .modelRotationQuarterTurns = tileTypeIsPlayerStart(tile)
+        .modelRotationQuarterTurns = edgeControl
+            ? edgeControlQuarterTurns
+            : tileTypeIsPlayerStart(tile)
             ? playerFacingQuarterTurns
             : (rules::conveyorDirectionForTile(tile)
                     ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
@@ -132,8 +138,7 @@ StaticRenderCell staticRenderCellFor(
                                   *rules::turretDirectionForTile(tile))
                             : railOrientationQuarterTurns(tile).value_or(
                                   mirrorOrientationQuarterTurns(tile).value_or(
-                                      lecternOrientationQuarterTurns(tile).value_or(
-                                          buttonOrientationQuarterTurns(tile).value_or(0)))))),
+                                      lecternOrientationQuarterTurns(tile).value_or(0))))),
     };
 }
 
@@ -261,7 +266,8 @@ void appendStaticTiles(
                     // their own passes.
                     continue;
                 }
-                const RenderModel model = manifest.modelForTile(cell.tile);
+                const RenderModel model = cell.modelOverride.value_or(
+                    manifest.modelForTile(cell.tile));
                 RenderFrameData::Tile renderTile {
                     .cell = {
                         static_cast<int>(x),
@@ -294,7 +300,8 @@ void appendStaticTiles(
                     .effect = tileTypeHasSplatTop(cell.tile)
                         ? RenderSurfaceEffect::GroundSplat
                         : (cell.tile == TileType::PressurePlate ||
-                              tileTypeIsButton(cell.tile) || cell.tile == TileType::End)
+                              tileTypeIsButton(cell.tile) || tileTypeIsLever(cell.tile) ||
+                              cell.tile == TileType::End)
                         ? RenderSurfaceEffect::PlateEnergy
                         : RenderSurfaceEffect::Standard,
                     .groundRockVariant = groundRockVariantFor(cell.tile),
@@ -680,8 +687,11 @@ void appendCoveredStaticSurfaces(
 {
     for (const Level::Plate& plate : input.level.coveredPlates()) {
         const GridPosition3 cell = plate.cell;
-        const bool button = tileTypeIsButton(plate.tile);
-        const float size = tileTypeIsRail(plate.tile) || button
+        const bool edgeControl = tileTypeIsButton(plate.tile) || tileTypeIsLever(plate.tile);
+        const uint32_t edgeControlQuarterTurns = tileTypeIsLever(plate.tile)
+            ? leverOrientationQuarterTurns(plate.tile).value_or(0)
+            : buttonOrientationQuarterTurns(plate.tile).value_or(0);
+        const float size = tileTypeIsRail(plate.tile) || edgeControl
             ? 1.0f
             : input.settings.geometry.surfaceEntityWidthDepth;
         const float offset = (1.0f - size) * 0.5f;
@@ -716,12 +726,16 @@ void appendCoveredStaticSurfaces(
             .size = { size, size },
             .color = color,
             .baseElevation = static_cast<float>(cell.z),
-            .height = button ? 1.0f : input.settings.geometry.surfaceEntityHeight,
-            .model = input.manifest.modelForTile(plate.tile),
+            .height = edgeControl ? 1.0f : input.settings.geometry.surfaceEntityHeight,
+            .model = tileTypeIsLever(plate.tile) &&
+                    std::ranges::find(input.state.activeLevers, cell) != input.state.activeLevers.end()
+                ? input.manifest.findModelIdByName("LeverOn").value_or(
+                      input.manifest.modelForTile(plate.tile))
+                : input.manifest.modelForTile(plate.tile),
             .modelRotationQuarterTurns =
-                railOrientationQuarterTurns(plate.tile).value_or(
-                    buttonOrientationQuarterTurns(plate.tile).value_or(0)),
-            .effect = (plate.tile == TileType::PressurePlate || button ||
+                edgeControl ? edgeControlQuarterTurns
+                            : railOrientationQuarterTurns(plate.tile).value_or(0),
+            .effect = (plate.tile == TileType::PressurePlate || edgeControl ||
                           plate.tile == TileType::End)
                 ? RenderSurfaceEffect::PlateEnergy
                 : RenderSurfaceEffect::Standard,
@@ -813,6 +827,10 @@ void appendGameplayWorld(
                 input.settings.geometry.surfaceEntityHeight,
                 input.settings.geometry.surfaceEntityWidthDepth,
                 primaryPlayerVisual.facingQuarterTurns);
+            if (tileTypeIsLever(cell.tile) &&
+                std::ranges::find(state.activeLevers, position) != state.activeLevers.end()) {
+                cell.modelOverride = input.manifest.findModelIdByName("LeverOn");
+            }
             if (cell.tile == TileType::MinecartGate) {
                 const auto& visuals = input.presentation.minecarts();
                 for (std::size_t index = 0; index < state.minecarts.size(); ++index) {

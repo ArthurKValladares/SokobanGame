@@ -170,6 +170,9 @@ void testPackedStateKeyIncludesEveryDynamicField()
     changed.activeButtons = { { 1, 2, 3 } };
     checkChanged(changed);
     changed = state;
+    changed.activeLevers = { { 1, 2, 3 } };
+    checkChanged(changed);
+    changed = state;
     ++changed.players[0].id;
     checkChanged(changed);
     changed = state;
@@ -370,6 +373,21 @@ void testSolverActivatesButtonForAnotherHeroElevator()
     CHECK(result.solved());
     CHECK(std::ranges::find(result.inputs, solution::Input::Interact) != result.inputs.end());
     CHECK(solution::record(level, definition, result.inputs, "button elevator solver").solved);
+}
+
+void testSolverLatchesLeverToCrossGate()
+{
+    TEST("solverLatchesLeverToCrossGate");
+    const Level::Definition definition {
+        .layers = { { "...." }, { "Q GE" } },
+        .gates = { { .cell = { 2, 0, 1 }, .pressurePlates = { { 0, 0, 1 } } } },
+        .plates = { { { 0, 0, 1 }, TileType::LeverSouth } },
+    };
+    const Level level = Level::loadFromDefinition(definition, "lever gate solver");
+    const auto result = solver::solve(level, { .maxStates = 10'000 });
+    CHECK(result.solved());
+    CHECK(std::ranges::find(result.inputs, solution::Input::Interact) != result.inputs.end());
+    CHECK(solution::record(level, definition, result.inputs, "lever gate solver").solved);
 }
 
 void testSolverRidesMinecarts()
@@ -625,6 +643,7 @@ int main()
         testPackedStateKeyIncludesEveryDynamicField();
         testSolverRidesElevators();
         testSolverActivatesButtonForAnotherHeroElevator();
+        testSolverLatchesLeverToCrossGate();
         testSolverRidesMinecarts();
         testSearchResultReplays();
         testPrecomputedMirrorSuccessorReplays();

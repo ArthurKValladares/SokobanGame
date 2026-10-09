@@ -420,6 +420,32 @@ void buttonPickerOffersFourPlacementsAndKeepsSelectedBrush()
     }
 }
 
+void leverPickerOffersFourPlacementsAndKeepsSelectedBrush()
+{
+    TEST("leverPickerOffersFourPlacementsAndKeepsSelectedBrush");
+    EditorPanel panel(LevelEditor::Tool::Tiles);
+    const auto* group = editorTilePalette::groupFor(TileType::LeverNorth);
+    CHECK(group != nullptr);
+    if (!group) return;
+    CHECK(group->variants().size() == 4);
+    for (const TileType variant : group->variants()) {
+        const auto selected = panel.editor.selectedTile();
+        panel.clickIcon(group->contains(selected) ? selected : TileType::LeverNorth);
+        const auto picker = panel.frame();
+        CHECK(picker.text.find("Lever direction") != std::string::npos);
+        CHECK(std::ranges::count_if(picker.icons, [](const EditorPanel::Icon& icon) {
+            return iconIsInPopup(icon) && tileTypeIsLever(icon.tile);
+        }) == 4);
+        panel.clickIcon(variant, true);
+        CHECK(panel.editor.selectedTile() == variant);
+        CHECK(std::ranges::find(panel.editor.recentTiles(), variant) != panel.editor.recentTiles().end());
+        CHECK(std::ranges::count_if(panel.frame().icons, [variant](const EditorPanel::Icon& icon) {
+            return !iconIsInPopup(icon) && tileTypeIsLever(icon.tile) && icon.tile == variant;
+        }) == 1);
+    }
+    CHECK(panel.shows("A lever stays on or off until activated again."));
+}
+
 void terrainRandomizeButtonsKeepAssignmentsAndUndo()
 {
     TEST("terrainRandomizeButtonsKeepAssignmentsAndUndo");
@@ -482,6 +508,7 @@ int main()
         terrainSectionCollapsesWithoutHidingQuarryWalls();
         terrainPickersKeepEveryStyleAndRecentBrushes();
         buttonPickerOffersFourPlacementsAndKeepsSelectedBrush();
+        leverPickerOffersFourPlacementsAndKeepsSelectedBrush();
         terrainRandomizeButtonsKeepAssignmentsAndUndo();
     } catch (const std::exception& error) {
         std::cerr << "Editor ImGui regression failed: " << error.what() << '\n';

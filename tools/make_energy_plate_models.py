@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministically author the energy plates and pedestal button.
+"""Deterministically author the energy plates, pedestal button and lever.
 
 Coordinates use the engine's unit tile convention: x east, y south, z up.
 The asset manifest must load these with preserveSourceScale. At the default
@@ -12,6 +12,9 @@ animation. All emission uses valid KHR_materials_emissive_strength factors.
 The pulse button uses unit scale on every axis. Its raised pedestal sits near
 the north tile edge, with the round press face tilted 45 degrees toward the
 tile center (+y). Quarter turns around (.5, .5) supply the other three edges.
+The lever has shallow top-quarter steel caps around an open floor slot.
+Its wooden shaft throws along the tile edge (+/-x for north), about a low
+transverse y-axis hinge, with a short link-colored grip and off/on poses.
 
 Only Python's standard library is required. Re-running produces identical GLBs.
 """
@@ -53,6 +56,10 @@ MATERIALS = {
     "EnergyPanel": material("EnergyPanel", (.65, .65, .65), .05, .52, 2.5),
     "EnergyLens": material("EnergyLens", (.70, .70, .70), .10, .33, 3.0),
     "EnergyInlay": material("EnergyInlay", (.82, .82, .82), .15, .40, 5.0),
+    "LeverWood": material("LeverWood", (.30, .16, .075), .0, .72),
+    "LeverGrip": material("LeverGrip", (.80, .80, .80), .05, .55, .25),
+    "LeverHousing": material("LeverHousing", (.255, .278, .310), .50, .58),
+    "LeverSteel": material("LeverSteel", (.425, .448, .480), .55, .58),
 }
 
 
@@ -234,8 +241,8 @@ def end_geometry():
     return meshes
 
 
-def pulse_button_geometry():
-    """A compact inward-facing button on a pedestal at character hip height."""
+def control_pedestal_geometry():
+    """The hip-height, north-edge pedestal for the pulse button."""
     names = ("Housing", "BeveledSteel", "Recess", "EnergyPanel", "Engraving", "EnergyInlay")
     meshes = {name: Primitive() for name in names}
     # Position the middle of the press face, rather than the pedestal edge,
@@ -285,6 +292,13 @@ def pulse_button_geometry():
                                (.549, .2945, .116 + pedestal_rise),
                                (.549, .2945, .123 + pedestal_rise),
                                (.451, .2945, .123 + pedestal_rise), (0, 1, 0))
+    return meshes, pedestal_rise
+
+
+def pulse_button_geometry():
+    """A compact inward-facing button on a pedestal at character hip height."""
+    meshes, pedestal_rise = control_pedestal_geometry()
+    names = tuple(meshes)
 
     # Author the round control in a local XY plane, then tilt it toward +y.
     face = {name: Primitive() for name in names}
@@ -340,6 +354,124 @@ def pulse_button_geometry():
         bolt = small_circle(x, y, .008)
         prism(meshes["BeveledSteel"], bolt, .104, .112)
         ribbon(meshes["Engraving"], [(x - .005, y), (x + .005, y)], .0025, .113)
+    return meshes
+
+
+def axial_profile(mesh, origin, axis, profile, segments=32, radial_axis=None):
+    """Closed metal shafts and rounded grips, swept about an arbitrary axis."""
+    axis = _normalized(axis)
+    reference = (0, 0, 1) if abs(axis[2]) < .9 else (0, 1, 0)
+    u = _normalized(radial_axis if radial_axis is not None else _cross(axis, reference))
+    v = _cross(axis, u)
+
+    def ring_point(distance, radius, segment):
+        angle = 2 * math.pi * segment / segments
+        return tuple(origin[i] + axis[i] * distance +
+                     radius * (u[i] * math.cos(angle) + v[i] * math.sin(angle))
+                     for i in range(3))
+
+    for (a, ra), (b, rb) in zip(profile, profile[1:]):
+        for segment in range(segments):
+            angle = 2 * math.pi * (segment + .5) / segments
+            outward = tuple(u[i] * math.cos(angle) + v[i] * math.sin(angle) for i in range(3))
+            mesh.quad(ring_point(a, ra, segment), ring_point(a, ra, segment + 1),
+                      ring_point(b, rb, segment + 1), ring_point(b, rb, segment), outward)
+    for (distance, radius), sign in ((profile[0], -1), (profile[-1], 1)):
+        center = tuple(origin[i] + axis[i] * distance for i in range(3))
+        for segment in range(segments):
+            mesh.triangle(center, ring_point(distance, radius, segment),
+                          ring_point(distance, radius, segment + 1),
+                          tuple(component * sign for component in axis))
+
+
+def lever_geometry(active=False):
+    """A wooden floor lever between the symmetric top quarters of a circle.
+
+    The north housing runs east/west, parallel to its tile edge. Only the
+    handle rotates: off leans west, on leans east around the y-axis hinge.
+    """
+    names = ("LeverHousing", "LeverSteel", "Recess", "LeverWood", "LeverGrip")
+    meshes = {name: Primitive() for name in names}
+    housing, steel = meshes["LeverHousing"], meshes["LeverSteel"]
+
+    def foot_outline(width, depth):
+        return [(.5 + (x - .5) * width, .20 + (y - .5) * depth)
+                for x, y in pillow_outline(.48)]
+
+    outer, shoulder = foot_outline(.56, .29), foot_outline(.52, .25)
+    housing.fan((.5, .20), outer, 0, False)
+    housing.prism_walls(outer, 0, .043)
+    band(steel, outer, shoulder, .043, .063)
+
+    # Match the angular samples of the foot to a rectangular opening. The
+    # top is an annulus, so it leaves a physical hole down to the dark floor.
+    channel = []
+    for step in range(SEGMENTS):
+        angle = 2 * math.pi * step / SEGMENTS
+        c, s = math.cos(angle), math.sin(angle)
+        radius = min(.221 / max(abs(c), 1e-12), .050 / max(abs(s), 1e-12))
+        channel.append((.5 + radius * c, .20 + radius * s))
+    band(housing, shoulder, channel, .063, .063)
+    meshes["Recess"].fan((.5, .20), channel, .012, True)
+    for i, p in enumerate(channel):
+        q = channel[(i + 1) % len(channel)]
+        meshes["Recess"].quad((*p, .012), (*q, .012), (*q, .063), (*p, .063),
+                              (p[1] - q[1], q[0] - p[0], 0))
+
+    # Keep only the upper quarter of a complete circle's height. A symmetric
+    # 30..150-degree arc closes with a horizontal chord directly on the foot.
+    # The circle itself is centered below the foot; only this shallow cap exists.
+    arch = []
+    for step in range(49):
+        angle = math.pi / 6 + math.pi * 2 / 3 * step / 48
+        height = .063 if step in (0, 48) else -.067 + .26 * math.sin(angle)
+        arch.append((.5 + .26 * math.cos(angle), height))
+    inset = [(.5 + (x - .5) * .96, .11 + (z - .11) * .96) for x, z in arch]
+
+    def arch_cheek(y0, y1, rear_material, front_material):
+        center = tuple(sum(p[i] for p in inset) / len(inset) for i in range(2))
+        for i, p in enumerate(arch):
+            j = (i + 1) % len(arch)
+            q, ip, iq = arch[j], inset[i], inset[j]
+            outward = (q[1] - p[1], 0, p[0] - q[0])
+            housing.quad((p[0], y0 + .006, p[1]),
+                         (q[0], y0 + .006, q[1]),
+                         (q[0], y1 - .006, q[1]),
+                         (p[0], y1 - .006, p[1]), outward)
+            for y, rim_y, sign, material_name in (
+                    (y0, y0 + .006, -1, rear_material),
+                    (y1, y1 - .006, 1, front_material)):
+                normal = (0, sign, 0)
+                steel.quad((ip[0], y, ip[1]), (iq[0], y, iq[1]),
+                           (q[0], rim_y, q[1]), (p[0], rim_y, p[1]), normal)
+                meshes[material_name].triangle((center[0], y, center[1]),
+                                               (ip[0], y, ip[1]), (iq[0], y, iq[1]), normal)
+
+    arch_cheek(.112, .150, "LeverSteel", "Recess")
+    arch_cheek(.250, .288, "Recess", "LeverSteel")
+
+    def small_circle(x, y, radius, segments=24):
+        return [(x + radius * math.cos(2 * math.pi * i / segments),
+                 y + radius * math.sin(2 * math.pi * i / segments))
+                for i in range(segments)]
+
+    # The wood passes directly between the caps with no cross-slot metal tube.
+    pivot = (.5, .20, .135)
+
+    angle = math.radians(20)
+    direction = ((1 if active else -1) * math.sin(angle), 0, math.cos(angle))
+    # The mostly wooden shaft continues through the hinge and into the slit,
+    # below its floor. The upper grip overlaps the wood so no join floats.
+    axial_profile(meshes["LeverWood"], pivot, direction,
+                  [(-.135, .020), (-.110, .026), (.645, .026), (.675, .025)],
+                  radial_axis=(0, 1, 0))
+    axial_profile(meshes["LeverGrip"], pivot, direction,
+                  [(.650, .036), (.665, .056), (.810, .056), (.825, .041), (.835, 0)],
+                  radial_axis=(0, 1, 0))
+
+    # Just two round fasteners secure the simple foot to the ground.
+    for x in (.269, .731):
+        prism(steel, small_circle(x, .20, .010), .063, .077)
     return meshes
 
 
@@ -412,6 +544,8 @@ def main():
     write_glb(OUTPUT_DIRECTORY / "pressure_plate.glb", pressure_geometry())
     write_glb(OUTPUT_DIRECTORY / "end_plate.glb", end_geometry())
     write_glb(OUTPUT_DIRECTORY / "pulse_button.glb", pulse_button_geometry())
+    write_glb(OUTPUT_DIRECTORY / "lever_off.glb", lever_geometry(False))
+    write_glb(OUTPUT_DIRECTORY / "lever_on.glb", lever_geometry(True))
 
 
 if __name__ == "__main__":

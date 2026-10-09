@@ -49,10 +49,11 @@ bool staticallySupported(const Level& level, GridPosition3 cell)
 
 bool supportsStaticAnalysis(const Level& level)
 {
-    // Buttons require heroes and pulses; the rock-to-pressure-plate matching
+    // Manual switches require hero activation, so the rock-to-plate matching
     // proof below is not valid for them.
     if (std::ranges::any_of(level.pressurePlates(), [&](GridPosition3 cell) {
-            return tileTypeIsButton(level.plateAt(cell).value_or(TileType::Air));
+            const TileType tile = level.plateAt(cell).value_or(TileType::Air);
+            return tileTypeIsButton(tile) || tileTypeIsLever(tile);
         })) {
         return false;
     }

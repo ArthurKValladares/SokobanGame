@@ -2654,7 +2654,7 @@ bool LevelEditor::setLinkColor(GridPosition3 cell, Vec3 color)
         !movableObject && tileTypeIsPortal(tileAt(cell)) && !current;
     if (!current && !unlinkedObject && !unlinkedPortal) {
         document_.status =
-            "Only pressure plates, devices and movable objects have link colors.";
+            "Only signal sources, devices and movable objects have link colors.";
         return false;
     }
     if (current && sameColor(*current, color)) {
@@ -2702,7 +2702,7 @@ bool LevelEditor::setLinkColor(GridPosition3 cell, Vec3 color)
             return sameColor(object.color, color);
         });
     document_.status = "Recolored; that color now groups " +
-        std::to_string(linkedPlates) + " pressure plate" +
+        std::to_string(linkedPlates) + " signal source" +
         (linkedPlates == 1 ? "" : "s") + " and " +
         std::to_string(linkedObjects) + " movable object" +
         (linkedObjects == 1 ? "" : "s") + ".";
@@ -2743,7 +2743,7 @@ bool LevelEditor::paintLinkColorAt(GridPosition3 pickedCell)
         tileTypeIsPortal(documentPlateAt(*target).value_or(TileType::Air));
     if (!target || (!linkColorAt(*target) && !movableObject && !portal)) {
         document_.status =
-            "The link-color brush paints pressure plates, gates, rotators, lock plates, "
+            "The link-color brush paints pressure plates, buttons, levers, gates, rotators, lock plates, "
             "elevators, minecarts, portals and movable objects.";
         return false;
     }

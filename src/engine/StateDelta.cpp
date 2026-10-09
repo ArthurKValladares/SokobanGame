@@ -220,6 +220,9 @@ StateDelta StateDelta::between(
     if (before.activeButtons != after.activeButtons) {
         delta.buttons = ButtonChange { before.activeButtons, after.activeButtons };
     }
+    if (before.activeLevers != after.activeLevers) {
+        delta.levers = LeverChange { before.activeLevers, after.activeLevers };
+    }
     return delta;
 }
 
@@ -230,6 +233,9 @@ void StateDelta::applyTo(GameState& state) const
     apply<EntityKind::Enemy>(enemies, state.enemies);
     if (buttons) {
         state.activeButtons = buttons->after;
+    }
+    if (levers) {
+        state.activeLevers = levers->after;
     }
     for (const MirrorChange& change : mirrors) {
         rules::setMirrorQuarterTurns(state, change.cell, change.after);
@@ -302,6 +308,9 @@ StateDelta StateDelta::inverted() const
         .buttons = buttons
             ? std::optional<ButtonChange> { { buttons->after, buttons->before } }
             : std::nullopt,
+        .levers = levers
+            ? std::optional<LeverChange> { { levers->after, levers->before } }
+            : std::nullopt,
     };
 }
 
@@ -309,7 +318,7 @@ bool StateDelta::empty() const
 {
     return players.empty() && movables.empty() && enemies.empty() &&
         mirrors.empty() && elevators.empty() && minecarts.empty() &&
-        wardrobes.empty() && !buttons;
+        wardrobes.empty() && !buttons && !levers;
 }
 
 std::size_t StateDelta::changedEntityCount() const

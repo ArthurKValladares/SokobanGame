@@ -13,6 +13,7 @@
 #include "engine/Rules.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
+#include "engine/render/RenderAssetRequirements.hpp"
 
 #include <algorithm>
 #include <array>
@@ -44,6 +45,8 @@ const AssetManifest& testManifest()
         { "name": "Knight", "path": "k.glb", "geometry": "skinned" },
         { "name": "Ladder", "path": "ladder.glb", "preserveSourceScale": true },
         { "name": "PulseButton", "path": "pulse_button.glb", "preserveSourceScale": true },
+        { "name": "LeverOff", "path": "lever_off.glb", "preserveSourceScale": true },
+        { "name": "LeverOn", "path": "lever_on.glb", "preserveSourceScale": true },
         { "name": "Druid", "path": "d.glb", "geometry": "skinned" },
         { "name": "Witch", "path": "w.glb", "geometry": "skinned" },
         { "name": "Bard", "path": "b.glb", "geometry": "skinned" },
@@ -67,6 +70,10 @@ const AssetManifest& testManifest()
         { "tile": "Button East", "model": "PulseButton" },
         { "tile": "Button South", "model": "PulseButton" },
         { "tile": "Button West", "model": "PulseButton" },
+        { "tile": "Lever North", "model": "LeverOff" },
+        { "tile": "Lever East", "model": "LeverOff" },
+        { "tile": "Lever South", "model": "LeverOff" },
+        { "tile": "Lever West", "model": "LeverOff" },
         { "tile": "Player", "model": "Hero" },
         { "tile": "Wardrobe Lorekeeper", "model": "Wardrobe" },
         { "tile": "Wardrobe Rogue", "model": "Wardrobe" },
@@ -146,33 +153,45 @@ void testAirAndWaterAreNotBaked()
     return settings;
 }
 
-constexpr std::array buttonVariants { TileType::ButtonNorth, TileType::ButtonEast,
-    TileType::ButtonSouth, TileType::ButtonWest };
+constexpr std::array edgeControlVariants { TileType::ButtonNorth, TileType::ButtonEast,
+    TileType::ButtonSouth, TileType::ButtonWest, TileType::LeverNorth,
+    TileType::LeverEast, TileType::LeverSouth, TileType::LeverWest };
 
-void testButtonsRetainAuthoredEdgePlacementAndEnergyMaterials()
+void testEdgeControlsRetainAuthoredPlacementAndEnergyMaterials()
 {
-    TEST("buttonsRetainAuthoredEdgePlacementAndEnergyMaterials");
+    TEST("edgeControlsRetainAuthoredPlacementAndEnergyMaterials");
     const auto& manifest = testManifest();
-    const auto model = manifest.modelIdByName("PulseButton");
-    CHECK(!model.isCube());
-    CHECK(manifest.model(model).preserveSourceScale);
     PresentationSettings settings = testSettings();
     settings.geometry.surfaceEntityWidthDepth = 0.5f;
     settings.geometry.surfaceEntityHeight = 0.08f;
     constexpr GridPosition3 cell { 1, 1, 1 };
-    constexpr std::array<Vec2, 4> anchors {
+    constexpr std::array<Vec2, 4> buttonAnchors {
         Vec2 { 1.5f, 1.19f }, Vec2 { 1.81f, 1.5f },
         Vec2 { 1.5f, 1.81f }, Vec2 { 1.19f, 1.5f },
     };
-    for (std::size_t index = 0; index < buttonVariants.size(); ++index) {
-        const auto button = tileVisual(buttonVariants[index], cell, manifest, settings);
+    constexpr std::array<Vec2, 4> leverAnchors {
+        Vec2 { 1.5f, 1.20f }, Vec2 { 1.80f, 1.5f },
+        Vec2 { 1.5f, 1.80f }, Vec2 { 1.20f, 1.5f },
+    };
+    constexpr std::array<Vec2, 4> edgeTangents {
+        Vec2 { 1, 0 }, Vec2 { 0, 1 }, Vec2 { -1, 0 }, Vec2 { 0, -1 },
+    };
+    for (std::size_t index = 0; index < edgeControlVariants.size(); ++index) {
+        const TileType variant = edgeControlVariants[index];
+        const bool lever = tileTypeIsLever(variant);
+        const auto model = manifest.modelIdByName(
+            lever ? "LeverOff" : "PulseButton");
+        CHECK(!model.isCube());
+        CHECK(manifest.model(model).preserveSourceScale);
+        const auto button = tileVisual(variant, cell, manifest, settings);
         // Compact dimensions and the pedestal's height live in the model.
         // Scaling it like a pressure plate would move it off its authored edge.
         CHECK(button.model == model);
         CHECK(button.size == Vec2({ 1.0f, 1.0f }));
         CHECK(button.position == Vec2({ 1.0f, 1.0f }));
         CHECK(button.height == 1.0f);
-        CHECK(button.modelRotationQuarterTurns == index);
+        CHECK(button.modelRotationQuarterTurns == index % 4);
+        CHECK(button.modelRotationOffsetRadians == 0.0f);
         // PlateEnergy tints the authored emissive face while retaining the
         // housing's neutral materials, including when its pulse is dimmed.
         CHECK(button.effect == RenderSurfaceEffect::PlateEnergy);
@@ -181,16 +200,25 @@ void testButtonsRetainAuthoredEdgePlacementAndEnergyMaterials()
             transform.xPoint.y - transform.origin.y };
         const Vec2 yAxis { transform.yPoint.x - transform.origin.x,
             transform.yPoint.y - transform.origin.y };
-        const Vec2 anchor { transform.origin.x + xAxis.x * 0.5f + yAxis.x * 0.19f,
-            transform.origin.y + xAxis.y * 0.5f + yAxis.y * 0.19f };
-        CHECK(std::abs(anchor.x - anchors[index].x) < 0.0001f);
-        CHECK(std::abs(anchor.y - anchors[index].y) < 0.0001f);
-        // The base model faces along local +y, toward the tile's centre.
-        CHECK(yAxis.x * (1.5f - anchor.x) + yAxis.y * (1.5f - anchor.y) > 0.3f);
+        const float anchorY = lever ? 0.20f : 0.19f;
+        const Vec2 anchor { transform.origin.x + xAxis.x * 0.5f + yAxis.x * anchorY,
+            transform.origin.y + xAxis.y * 0.5f + yAxis.y * anchorY };
+        const auto& anchors = lever ? leverAnchors : buttonAnchors;
+        CHECK(std::abs(anchor.x - anchors[index % 4].x) < 0.0001f);
+        CHECK(std::abs(anchor.y - anchors[index % 4].y) < 0.0001f);
+        if (lever) {
+            // The long base and handle throw run along local X, parallel to
+            // the north/south edge or east/west edge after a cardinal turn.
+            CHECK(xAxis == edgeTangents[index % 4]);
+        } else {
+            // The button's face points along local +Y toward the tile centre.
+            CHECK(yAxis.x * (1.5f - anchor.x) + yAxis.y * (1.5f - anchor.y) > 0.3f);
+        }
         const auto baked = tileThumbnails::buildBakeFrame(
-            buttonVariants[index], manifest, settings).tiles.back();
+            variant, manifest, settings).tiles.back();
         CHECK(baked.model == model);
-        CHECK(baked.modelRotationQuarterTurns == index);
+        CHECK(baked.modelRotationQuarterTurns == index % 4);
+        CHECK(baked.modelRotationOffsetRadians == 0.0f);
         CHECK(baked.size == button.size);
         CHECK(baked.height == button.height);
         CHECK(baked.effect == button.effect);
@@ -209,18 +237,25 @@ void testButtonsRetainAuthoredEdgePlacementAndEnergyMaterials()
         "custom/thumbnails/tile_button_south.png");
     CHECK(tileThumbnails::assetPathFor(TileType::ButtonWest) ==
         "custom/thumbnails/tile_button_west.png");
+    CHECK(tileThumbnails::assetPathFor(TileType::LeverNorth) ==
+        "custom/thumbnails/tile_lever_north.png");
+    CHECK(tileThumbnails::assetPathFor(TileType::LeverEast) ==
+        "custom/thumbnails/tile_lever_east.png");
+    CHECK(tileThumbnails::assetPathFor(TileType::LeverSouth) ==
+        "custom/thumbnails/tile_lever_south.png");
+    CHECK(tileThumbnails::assetPathFor(TileType::LeverWest) ==
+        "custom/thumbnails/tile_lever_west.png");
 }
 
-void testButtonsMatchAcrossGameplayEditorPreviewAndCoveredCells()
+void testEdgeControlsMatchAcrossGameplayEditorPreviewAndCoveredCells()
 {
-    TEST("buttonsMatchAcrossGameplayEditorPreviewAndCoveredCells");
+    TEST("edgeControlsMatchAcrossGameplayEditorPreviewAndCoveredCells");
     const auto& manifest = testManifest();
     const auto& settings = testSettings();
-    const auto model = manifest.modelIdByName("PulseButton");
     constexpr GridPosition3 cell { 1, 1, 1 };
     constexpr GridPosition3 previewCell { 2, 1, 1 };
     constexpr Vec3 linkColor { 0.2f, 0.7f, 1.0f };
-    const auto buttonAt = [&](const RenderFrameData& frame, GridPosition3 position,
+    const auto buttonAt = [&](const RenderFrameData& frame, GridPosition3 position, RenderModel model,
                               bool preview = false) -> const RenderFrameData::Tile* {
         const auto found = std::ranges::find_if(frame.tiles, [&](const auto& tile) {
             return tile.cell == position && tile.model == model &&
@@ -243,9 +278,21 @@ void testButtonsMatchAcrossGameplayEditorPreviewAndCoveredCells()
         const float previewLift = tile->isEditorPreview ? 0.02f : 0.0f;
         CHECK(std::abs(tile->baseElevation - expected.baseElevation - previewLift) < 0.0001f);
         CHECK(tile->modelRotationQuarterTurns == expected.modelRotationQuarterTurns);
+        CHECK(tile->modelRotationOffsetRadians == 0.0f);
+        if (tileTypeIsLever(variant)) {
+            constexpr std::array<Vec2, 4> edgeTangents {
+                Vec2 { 1, 0 }, Vec2 { 0, 1 }, Vec2 { -1, 0 }, Vec2 { 0, -1 },
+            };
+            const auto transform = IsoScenePreparer::modelTransformPoints(*tile);
+            CHECK(Vec2({ transform.xPoint.x - transform.origin.x,
+                      transform.xPoint.y - transform.origin.y }) ==
+                edgeTangents[leverOrientationQuarterTurns(variant).value_or(0)]);
+        }
         CHECK(tile->effect == RenderSurfaceEffect::PlateEnergy);
     };
-    for (const TileType variant : buttonVariants) {
+    for (const TileType variant : edgeControlVariants) {
+        const bool lever = tileTypeIsLever(variant);
+        const auto offModel = manifest.modelForTile(variant);
         LevelEditor editor;
         editor.newDocument(4, 3, false);
         editor.setActiveLinkColor(linkColor);
@@ -254,7 +301,7 @@ void testButtonsMatchAcrossGameplayEditorPreviewAndCoveredCells()
         const auto edited = RenderFrameBuilder::buildEditor({
             .manifest = manifest, .editor = editor, .settings = settings,
         });
-        const auto editorButton = buttonAt(edited, cell);
+        const auto editorButton = buttonAt(edited, cell, offModel);
         checkGeometry(editorButton, variant, cell);
         if (editorButton != nullptr) {
             CHECK(editorButton->color == Vec4({ linkColor.x, linkColor.y, linkColor.z, 1.0f }));
@@ -263,11 +310,23 @@ void testButtonsMatchAcrossGameplayEditorPreviewAndCoveredCells()
             .manifest = manifest, .editor = editor, .settings = settings,
             .hoverCell = previewCell, .editorPreviewTile = variant,
         });
-        const auto ghost = buttonAt(preview, previewCell, true);
+        const auto ghost = buttonAt(preview, previewCell, offModel, true);
         checkGeometry(ghost, variant, previewCell);
         if (ghost != nullptr) {
             CHECK(ghost->color == tileColor(variant));
             CHECK(ghost->isEditorPreview && !ghost->pickOnly);
+        }
+        if (lever) {
+            const auto assignedPreview = RenderFrameBuilder::buildEditor({
+                .manifest = manifest, .editor = editor, .settings = settings,
+                .hoverCell = cell, .editorPreviewTile = variant,
+            });
+            const auto assignedGhost = buttonAt(assignedPreview, cell, offModel, true);
+            checkGeometry(assignedGhost, variant, cell);
+            if (assignedGhost != nullptr) {
+                CHECK(assignedGhost->color ==
+                    Vec4({ linkColor.x, linkColor.y, linkColor.z, 1.0f }));
+            }
         }
         for (const bool covered : { false, true }) {
             if (covered) {
@@ -276,23 +335,31 @@ void testButtonsMatchAcrossGameplayEditorPreviewAndCoveredCells()
                 const auto coveredEditor = RenderFrameBuilder::buildEditor({
                     .manifest = manifest, .editor = editor, .settings = settings,
                 });
-                const auto coveredButton = buttonAt(coveredEditor, cell);
+                const auto coveredButton = buttonAt(coveredEditor, cell, offModel);
                 checkGeometry(coveredButton, variant, cell);
                 CHECK(coveredButton != nullptr && !coveredButton->pickable);
             }
             const auto level = editor.documentToLevel();
+            if (lever) {
+                const auto required = renderAssetRequirementsForLevel(level, manifest);
+                CHECK(required.contains(offModel));
+                CHECK(required.contains(manifest.modelIdByName("LeverOn")));
+            }
             auto state = rules::initialState(level);
             GameplayPresentation presentation;
             presentation.resetEntities(state);
             for (const bool pulsing : { false, true }) {
-                state.activeButtons = pulsing ? std::vector<GridPosition3> { cell }
-                                              : std::vector<GridPosition3> {};
+                auto& active = lever ? state.activeLevers : state.activeButtons;
+                active = pulsing ? std::vector<GridPosition3> { cell }
+                                 : std::vector<GridPosition3> {};
                 const auto gameplay = RenderFrameBuilder::buildGameplay({
                     .manifest = manifest, .level = level, .state = state,
                     .projectedState = state, .presentation = presentation,
                     .settings = settings,
                 });
-                const auto gameplayButton = buttonAt(gameplay, cell);
+                const auto expectedModel = lever && pulsing
+                    ? manifest.modelIdByName("LeverOn") : offModel;
+                const auto gameplayButton = buttonAt(gameplay, cell, expectedModel);
                 checkGeometry(gameplayButton, variant, cell);
                 if (gameplayButton != nullptr) {
                     const float strength = pulsing ? 1.0f : 0.42f;
@@ -302,6 +369,40 @@ void testButtonsMatchAcrossGameplayEditorPreviewAndCoveredCells()
                 }
             }
         }
+    }
+}
+
+void testLeversClickOnceInEitherDirectionAndStaySilentWhileLatched()
+{
+    TEST("leversClickOnceInEitherDirectionAndStaySilentWhileLatched");
+    for (const auto variant : { TileType::LeverNorth, TileType::LeverEast,
+             TileType::LeverSouth, TileType::LeverWest }) {
+        LevelEditor editor;
+        editor.newDocument(3, 3, false);
+        constexpr GridPosition3 cell { 1, 1, 1 };
+        CHECK(editor.setCell(cell, variant));
+        const auto level = editor.documentToLevel();
+        const auto off = rules::initialState(level);
+        auto on = off;
+        on.activeLevers = { cell };
+        GameplayPresentation presentation;
+        presentation.resetEntities(off);
+        const auto soundCues = [&](const GameState& before, const GameState& after,
+                                   bool reversed = false) {
+            return presentation.buildActionSoundCues(level, {
+                .before = before, .after = after, .reversed = reversed,
+            }, {}, {}, 0.1f);
+        };
+        for (const auto& cues : { soundCues(off, on), soundCues(on, off) }) {
+            CHECK(cues.size() == 1);
+            if (!cues.empty()) {
+                CHECK(cues.front().sound == GameplaySound::ButtonPress);
+                CHECK(cues.front().triggerSeconds == 0.0f);
+            }
+        }
+        CHECK(soundCues(on, on).empty());
+        CHECK(soundCues(off, off).empty());
+        CHECK(soundCues(on, off, true).empty());
     }
 }
 
@@ -701,8 +802,9 @@ int main()
 {
     testAssetPathsAreUniqueAndTidy();
     testAirAndWaterAreNotBaked();
-    testButtonsRetainAuthoredEdgePlacementAndEnergyMaterials();
-    testButtonsMatchAcrossGameplayEditorPreviewAndCoveredCells();
+    testEdgeControlsRetainAuthoredPlacementAndEnergyMaterials();
+    testEdgeControlsMatchAcrossGameplayEditorPreviewAndCoveredCells();
+    testLeversClickOnceInEitherDirectionAndStaySilentWhileLatched();
     testBakeFrameStandsTheTileOnAGroundBed();
     testBedIsNeutralAndFlat();
     testGateBakesTheClosedEnergyEffect();

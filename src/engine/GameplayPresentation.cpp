@@ -1525,7 +1525,8 @@ std::vector<GameplaySoundCue> GameplayPresentation::buildActionSoundCues(
         boardingPositions(settled.enemies, before.enemies);
         const auto plateEdges = [&](const GameState& from, const GameState& to, float time) {
             for (const auto plate : level.pressurePlates()) {
-                if (tileTypeIsButton(level.plateAt(plate).value_or(TileType::Air))) {
+                const TileType tile = level.plateAt(plate).value_or(TileType::Air);
+                if (tileTypeIsButton(tile) || tileTypeIsLever(tile)) {
                     continue;
                 }
                 const bool wasPressed = rules::isPressurePlateActive(level, from, plate);
@@ -1545,6 +1546,15 @@ std::vector<GameplaySoundCue> GameplayPresentation::buildActionSoundCues(
         if (pulse) {
             engagementBefore.activeButtons.clear();
             for (std::size_t button = 0; button < after.activeButtons.size(); ++button) {
+                cues.push_back({ GameplaySound::ButtonPress, legStart });
+            }
+        }
+        // A toggle has one mechanical click in either direction. Reuse the
+        // existing control press sound without pressure-plate edge sounds.
+        for (const auto source : level.pressurePlates()) {
+            if (tileTypeIsLever(level.plateAt(source).value_or(TileType::Air)) &&
+                rules::isPressurePlateActive(level, before, source) !=
+                    rules::isPressurePlateActive(level, after, source)) {
                 cues.push_back({ GameplaySound::ButtonPress, legStart });
             }
         }
