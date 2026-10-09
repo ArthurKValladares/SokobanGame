@@ -3,6 +3,7 @@
 #include "engine/Level.hpp"
 #include "engine/LevelProjectStore.hpp"
 #include "engine/OverworldMap.hpp"
+#include "engine/TileDecorations.hpp"
 
 #include <chrono>
 #include <cstddef>
@@ -61,6 +62,7 @@ public:
     enum class Tool : uint8_t {
         Tiles,
         Decorations,
+        TileDecorations,
         Selectors,
     };
 
@@ -120,7 +122,7 @@ public:
     void setShowOverworldNeighbors(bool show);
     void setSelectedTile(TileType tile);
     void setTool(Tool tool);
-    // Tiles -> Decorations -> Selectors (overworld screens only) -> Tiles.
+    // Tiles -> Decorations -> TileDecorations -> Selectors (overworld only) -> Tiles.
     void cycleTool();
     // Recently chosen tiles, newest first. A tile keeps its slot until newer
     // choices push it out, so number-key shortcuts stay stable while you
@@ -132,6 +134,14 @@ public:
     // active layer when the layer is locked). Returns the picked tile.
     std::optional<TileType> pickTile(GridPosition3 pickedCell);
     void setSelectedDecorationModel(std::string modelName);
+    void setTileDecorationBrush(TileDecorations::Brush brush);
+    [[nodiscard]] const TileDecorations::Brush& tileDecorationBrush() const;
+    [[nodiscard]] std::string_view selectedTileDecorationModel() const;
+    [[nodiscard]] bool decorationToolActive() const;
+    [[nodiscard]] bool placingDecoration() const;
+    // Both the rendered ghost and the placement command use this transform.
+    [[nodiscard]] std::optional<Level::Decoration> decorationPlacementPreview(
+        GridPosition3 surfaceCell) const;
     void selectDocument(const std::filesystem::path& path);
     [[nodiscard]] bool setBrowserRoot(const std::filesystem::path& path);
 
@@ -431,6 +441,8 @@ private:
         TileType selectedTile = TileType::Wall;
         Tool tool = Tool::Tiles;
         std::string selectedDecorationModel;
+        TileDecorations::Brush tileDecorationBrush;
+        bool tileDecorationPlacementEnabled = true;
         std::optional<std::size_t> selectedDecoration;
         std::optional<std::size_t> selectedSelector;
         bool layerLocked = false;

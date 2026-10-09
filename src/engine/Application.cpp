@@ -570,6 +570,9 @@ void Application::saveDevSession() const
     case LevelEditor::Tool::Decorations:
         session.tool = "decorations";
         break;
+    case LevelEditor::Tool::TileDecorations:
+        session.tool = "tile-decorations";
+        break;
     case LevelEditor::Tool::Selectors:
         session.tool = "selectors";
         break;
@@ -658,6 +661,8 @@ void Application::applyLaunchRequest()
             if (session && session->editorDocument == editDocument) {
                 if (session->tool == "decorations") {
                     editor.setTool(LevelEditor::Tool::Decorations);
+                } else if (session->tool == "tile-decorations") {
+                    editor.setTool(LevelEditor::Tool::TileDecorations);
                 } else if (session->tool == "selectors") {
                     editor.setTool(LevelEditor::Tool::Selectors);
                 } else {
@@ -2122,8 +2127,7 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
     context.editorEditing = tools_->levelEditor.editingDocument();
     context.decorationPlacementReady =
         context.editorEditing &&
-        tools_->levelEditor.tool() == LevelEditor::Tool::Decorations &&
-        !tools_->levelEditor.selectedDecorationModel().empty();
+        tools_->levelEditor.placingDecoration();
     context.draftPlaying = tools_->levelEditor.playingDraft();
     context.draftExitConfirmationOpen = tools_->draftExitConfirmationOpen;
 #endif

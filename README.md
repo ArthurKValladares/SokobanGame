@@ -42,6 +42,8 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 - Manifest-backed mesh decorations with free translation, Euler rotation, and
   non-uniform scale; they render without participating in gameplay or camera
   framing.
+- Tile Decorations palette with grass and pebbles, four edge layouts, four
+  variations per layout, and quarter-turn rotation for tile-sized placement.
 - Colored point lights attachable to mesh decorations, with per-light local
   offset, intensity, range, and omnidirectional shadows that add to the sun.
 
@@ -869,7 +871,7 @@ editor commands but does not own document or filesystem policy.
   | `1`-`9` | Choose from the recent-tiles strip at the top of the Tiles palette |
   | `PageUp` / `PageDown` | Change the active layer |
   | `L` | Lock edits to the active layer |
-  | `Tab` | Cycle Tiles, Mesh Decorations and (overworld) Screen Selectors |
+  | `Tab` | Cycle Tiles, Mesh Decorations, Tile Decorations and (overworld) Screen Selectors |
   | `T` / `R` / `S` | Decoration gizmo: move / rotate / scale |
 
 - Every editor control above can be rebound under **Options > Controls >
@@ -914,6 +916,17 @@ editor commands but does not own document or filesystem policy.
   cursor, selected, translated, rotated, non-uniformly scaled, duplicated,
   deleted, and undone. A selected decoration can attach or detach a point
   light and edit all of its lighting and shadow settings in place.
+- **Tile Decorations**, next to Mesh Decorations, offers the Blender-authored
+  **Pebbles** and **Grass** sets. Choose one edge, two adjacent edges, two
+  opposite edges, or three edges, then one of four variations. **Rotate Left**
+  and **Rotate Right** turn the brush by 90 degrees; the diagram shows the
+  decorated edges in world directions. Click a tile to place the decoration
+  on its top surface. **Cancel Placement** (or Back, `Escape` by default) stops
+  the brush; **Place Selected** resumes it. Right-click deselects a placed item.
+  Placed tile decorations have their own list and share the mesh transform
+  gizmos, duplicate/delete, undo/redo, and document saving. The 32 models retain
+  their authored tile dimensions and embedded palettes. A complete gallery is
+  available in `docs/examples/tile-decorations.scr`.
 - Source saves, runtime mirroring, screen/level insertion and renumbering,
   soft deletion, restore, and guarded permanent deletion are handled by the
   tested editor/project APIs.

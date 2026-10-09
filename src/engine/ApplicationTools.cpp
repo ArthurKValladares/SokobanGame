@@ -34,6 +34,18 @@
 #endif
 
 namespace sokoban {
+namespace {
+
+bool selectedDecorationMatchesTool(const LevelEditor& editor)
+{
+    const auto* selected = editor.selectedDecoration();
+    return selected && editor.decorationToolActive() &&
+        TileDecorations::isTileDecoration(selected->model) ==
+            (editor.tool() == LevelEditor::Tool::TileDecorations);
+}
+
+} // namespace
+
 bool ApplicationTools::matchingOverworldEditorRoot()
 {
     const auto& topologyRoot = overworldMapEditor.projectLevelRoot();
@@ -530,7 +542,7 @@ ApplicationTools::decorationGizmoGeometry(
     const VulkanRenderer::PreparedFrame& frame) const
 {
     const Level::Decoration* decoration = levelEditor.selectedDecoration();
-    if (!decoration || levelEditor.tool() != LevelEditor::Tool::Decorations) {
+    if (!selectedDecorationMatchesTool(levelEditor)) {
         return std::nullopt;
     }
     return EditorInteraction::decorationGizmoGeometry(
@@ -1447,6 +1459,12 @@ void ApplicationTools::updateEditorInteraction(
         return;
     }
     handleEditorShortcuts(input);
+    // A tab switch can happen while a gizmo owns the pointer. Stop its
+    // transform before the hidden decoration can consume another drag update.
+    if (decorationGizmo.dragging() && !selectedDecorationMatchesTool(levelEditor)) {
+        decorationGizmo.endDrag();
+        (void)levelEditor.endSelectedDecorationTransform(false);
+    }
     if (input.pointerCaptured) {
         if (tileStroke_) {
             tileStroke_->resumeWithoutLine = true;
@@ -1467,7 +1485,7 @@ void ApplicationTools::updateEditorInteraction(
             input, previousRenderFrame, renderer, windowSize, pixelSize);
         return;
     }
-    if (levelEditor.tool() == LevelEditor::Tool::Decorations &&
+    if (levelEditor.decorationToolActive() &&
         input.secondaryPressed && levelEditor.selectedDecoration()) {
         if (decorationGizmo.dragging()) {
             decorationGizmo.endDrag();
@@ -1496,7 +1514,7 @@ void ApplicationTools::updateEditorInteraction(
             input, *previousRenderFrame, pointerPixels, renderer)) {
         return;
     }
-    if (levelEditor.tool() == LevelEditor::Tool::Decorations) {
+    if (levelEditor.decorationToolActive()) {
         if (input.translateGizmoPressed) {
             decorationGizmo.setMode(DecorationGizmo::Mode::Translate);
         } else if (input.rotateGizmoPressed) {
@@ -1513,7 +1531,7 @@ void ApplicationTools::updateEditorInteraction(
             renderer.pickIsoGridCell(*previousRenderFrame, pointerPixels)) {
         GridPosition3 target = *clicked;
         const bool editingDecorations =
-            levelEditor.tool() == LevelEditor::Tool::Decorations;
+            levelEditor.decorationToolActive();
         const bool editingSelectors =
             levelEditor.tool() == LevelEditor::Tool::Selectors;
         const bool deleting = input.deleting && !editingDecorations;
@@ -1568,7 +1586,7 @@ void ApplicationTools::updateEditorInteraction(
         }
     } else if (tileStroke_) {
         tileStroke_->resumeWithoutLine = true;
-    } else if (levelEditor.tool() == LevelEditor::Tool::Decorations &&
+    } else if (levelEditor.decorationToolActive() &&
                input.primaryPressed) {
         levelEditor.clearDecorationSelection();
     } else if (levelEditor.tool() == LevelEditor::Tool::Selectors &&

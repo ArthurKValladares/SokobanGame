@@ -832,6 +832,9 @@ void LevelEditor::cycleTool()
         document_.tool = Tool::Decorations;
         break;
     case Tool::Decorations:
+        document_.tool = Tool::TileDecorations;
+        break;
+    case Tool::TileDecorations:
         document_.tool = editingOverworld() ? Tool::Selectors : Tool::Tiles;
         break;
     case Tool::Selectors:
@@ -842,8 +845,10 @@ void LevelEditor::cycleTool()
     document_.status = document_.tool == Tool::Tiles
         ? "Tool: Tiles."
         : document_.tool == Tool::Decorations
-            ? "Tool: Decorations."
-            : "Tool: Selectors.";
+            ? "Tool: Mesh Decorations."
+            : document_.tool == Tool::TileDecorations
+                ? "Tool: Tile Decorations."
+                : "Tool: Selectors.";
 }
 
 void LevelEditor::noteRecentTile(TileType tile)
@@ -939,6 +944,64 @@ void LevelEditor::setSelectedDecorationModel(std::string modelName)
 {
     document_.selectedDecorationModel = std::move(modelName);
     document_.tool = Tool::Decorations;
+}
+
+void LevelEditor::setTileDecorationBrush(TileDecorations::Brush brush)
+{
+    document_.tileDecorationBrush = TileDecorations::normalized(brush);
+    document_.tileDecorationPlacementEnabled = true;
+    document_.tool = Tool::TileDecorations;
+}
+
+const TileDecorations::Brush& LevelEditor::tileDecorationBrush() const
+{
+    return document_.tileDecorationBrush;
+}
+
+std::string_view LevelEditor::selectedTileDecorationModel() const
+{
+    return TileDecorations::modelName(document_.tileDecorationBrush);
+}
+
+bool LevelEditor::decorationToolActive() const
+{
+    return document_.tool == Tool::Decorations ||
+        document_.tool == Tool::TileDecorations;
+}
+
+bool LevelEditor::placingDecoration() const
+{
+    return document_.tool == Tool::TileDecorations
+        ? document_.tileDecorationPlacementEnabled
+        : document_.tool == Tool::Decorations &&
+            !document_.selectedDecorationModel.empty();
+}
+
+std::optional<Level::Decoration> LevelEditor::decorationPlacementPreview(
+    GridPosition3 surfaceCell) const
+{
+    if (!placingDecoration() ||
+        surfaceCell.x < 0 || surfaceCell.y < 0 || surfaceCell.z < 0 ||
+        surfaceCell.x >= static_cast<int>(documentWidth()) ||
+        surfaceCell.y >= static_cast<int>(documentHeight())) {
+        return std::nullopt;
+    }
+    const bool tileDecoration = document_.tool == Tool::TileDecorations;
+    return Level::Decoration {
+        .model = tileDecoration
+            ? std::string(selectedTileDecorationModel())
+            : document_.selectedDecorationModel,
+        .position = {
+            static_cast<float>(surfaceCell.x) + 0.5f,
+            static_cast<float>(surfaceCell.y) + 0.5f,
+            static_cast<float>(surfaceCell.z),
+        },
+        .rotationDegrees = {
+            0.0f, 0.0f, tileDecoration
+                ? static_cast<float>(document_.tileDecorationBrush.quarterTurns) * 90.0f
+                : 0.0f,
+        },
+    };
 }
 
 bool LevelEditor::placeSelector(GridPosition3 cell)
@@ -1981,8 +2044,8 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
 
 bool LevelEditor::placeDecoration(GridPosition3 surfaceCell)
 {
-    if (document_.selectedDecorationModel.empty()) {
-        document_.status = "Select a registered decoration mesh first.";
+    if (!placingDecoration()) {
+        document_.status = "Select a decoration to place first.";
         return false;
     }
     if (surfaceCell.x < 0 || surfaceCell.y < 0 || surfaceCell.z < 0 ||
@@ -1992,26 +2055,27 @@ bool LevelEditor::placeDecoration(GridPosition3 surfaceCell)
         return false;
     }
 
+    const auto decoration = decorationPlacementPreview(surfaceCell);
+    if (!decoration) {
+        return false;
+    }
     const DocumentSnapshot before = captureDocumentSnapshot();
-    document_.decorations.push_back({
-        .model = document_.selectedDecorationModel,
-        .position = {
-            static_cast<float>(surfaceCell.x) + 0.5f,
-            static_cast<float>(surfaceCell.y) + 0.5f,
-            static_cast<float>(surfaceCell.z),
-        },
-    });
+    document_.decorations.push_back(*decoration);
     document_.selectedDecoration = document_.decorations.size() - 1;
     document_.dirty = true;
     document_.status = "Placed decoration " +
-        document_.selectedDecorationModel + ".";
+        decoration->model + ".";
     recordDocumentChange(before);
     return true;
 }
 
 void LevelEditor::cancelDecorationPlacement()
 {
-    document_.selectedDecorationModel.clear();
+    if (document_.tool == Tool::TileDecorations) {
+        document_.tileDecorationPlacementEnabled = false;
+    } else {
+        document_.selectedDecorationModel.clear();
+    }
     document_.status = "Cancelled decoration placement.";
 }
 
@@ -2021,7 +2085,8 @@ bool LevelEditor::selectDecoration(std::size_t index)
         return false;
     }
     document_.selectedDecoration = index;
-    document_.tool = Tool::Decorations;
+    document_.tool = TileDecorations::isTileDecoration(document_.decorations[index].model)
+        ? Tool::TileDecorations : Tool::Decorations;
     return true;
 }
 

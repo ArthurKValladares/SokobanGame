@@ -79,6 +79,8 @@ private:
     void drawDecorationPalette(
         LevelEditor& editor,
         const Callbacks& callbacks);
+    void drawTileDecorationPalette(LevelEditor& editor, const Callbacks& callbacks);
+    void drawPlacedDecorations(LevelEditor& editor, bool tileDecorations);
     void drawSelectorPalette(LevelEditor& editor);
     void drawFileBrowser(
         LevelEditor& editor,

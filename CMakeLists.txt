@@ -1386,6 +1386,11 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/DecorationGizmoTests.cpp
     )
+    sokoban_add_test(NAME tile_decoration_assets
+        LIBS sokoban_core
+        ASSETS_ENV
+        SOURCES tests/TileDecorationAssetsTests.cpp
+    )
     sokoban_add_test(NAME editor_interaction
         LIBS sokoban_core
         SOURCES tests/EditorInteractionTests.cpp

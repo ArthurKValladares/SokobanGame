@@ -60,6 +60,11 @@ public:
             ]
         })json"))
     {
+        for (const auto& entry : TileDecorations::catalog) {
+            if (manifest_.addModel({ .name = std::string(entry.model), .path = "decoration.glb" }).isCube()) {
+                throw std::runtime_error("Could not initialize tile decoration UI fixture");
+            }
+        }
         auto& io = ImGui::GetIO();
         io.IniFilename = nullptr;
         io.LogFilename = nullptr;
@@ -188,6 +193,30 @@ public:
         const auto visibleLabel = text.substr(0, text.find("##"));
         if (!located.buttonCenter || located.text.find(visibleLabel) == std::string::npos) {
             throw std::runtime_error(std::string("Missing palette control: ") + label);
+        }
+        clickAt(*located.buttonCenter);
+    }
+
+    void clickToolTab(const char* label)
+    {
+        (void)frame();
+        ImGuiWindow* window = ImGui::FindWindowByName("Editor regression");
+        const ImGuiID tabBar = ImHashStr("LevelEditorToolTabs", 0, window->ID);
+        const auto located = frame(nullptr, Widget { ImHashStr(label, 0, tabBar), window });
+        if (!located.buttonCenter) throw std::runtime_error(std::string("Missing tool tab: ") + label);
+        clickAt(*located.buttonCenter);
+        (void)frame();
+    }
+
+    void clickToolControl(const char* label)
+    {
+        (void)frame();
+        ImGuiWindow* window = ImGui::FindWindowByName("Editor regression");
+        const ImGuiID tabBar = ImHashStr("LevelEditorToolTabs", 0, window->ID);
+        const ImGuiID tab = ImHashStr("Tile Decorations", 0, tabBar);
+        const auto located = frame(nullptr, Widget { ImHashStr(label, 0, tab), window });
+        if (!located.buttonCenter || located.text.find(label) == std::string::npos) {
+            throw std::runtime_error(std::string("Missing tile decoration control: ") + label);
         }
         clickAt(*located.buttonCenter);
     }
@@ -496,6 +525,67 @@ void terrainRandomizeButtonsKeepAssignmentsAndUndo()
     CHECK(panel.editor.documentDefinition() == wallsRandomized);
 }
 
+void tileDecorationTabChoosesBrushAndKeepsPlacedListsSeparate()
+{
+    TEST("tileDecorationTabChoosesBrushAndKeepsPlacedListsSeparate");
+    EditorPanel panel(LevelEditor::Tool::Tiles);
+    panel.clickToolTab("Tile Decorations");
+    CHECK(panel.editor.tool() == LevelEditor::Tool::TileDecorations);
+    CHECK(panel.shows("Placed Tile Decorations (0)"));
+    panel.clickToolControl("Pebbles");
+    panel.clickToolControl("Two adjacent edges");
+    panel.clickToolControl("Variation 4");
+    panel.clickToolControl("Rotate Right");
+    CHECK(panel.editor.selectedTileDecorationModel() == "TileDecorationPebblesCorner04");
+    CHECK(panel.editor.tileDecorationBrush().quarterTurns == 1);
+    CHECK(panel.shows("Edges: East + South"));
+    CHECK(panel.editor.placeDecoration({ 2, 1, 1 }));
+    CHECK(panel.shows("Placed Tile Decorations (1)"));
+    CHECK(panel.shows("Transform: TileDecorationPebblesCorner04"));
+    panel.clickToolControl("Duplicate");
+    CHECK(panel.editor.decorations().size() == 2);
+    panel.clickToolControl("Delete");
+    CHECK(panel.editor.decorations().size() == 1);
+    panel.clickToolControl("Cancel Placement");
+    CHECK(!panel.editor.placingDecoration());
+    panel.clickToolControl("Place Selected");
+    CHECK(panel.editor.placingDecoration());
+    CHECK(panel.editor.tileDecorationBrush().quarterTurns == 1);
+
+    panel.clickToolTab("Mesh Decorations");
+    CHECK(panel.editor.tool() == LevelEditor::Tool::Decorations);
+    CHECK(panel.shows("Placed Meshes (0)"));
+    CHECK(!panel.shows("Transform: TileDecorationPebblesCorner04"));
+    panel.editor.setSelectedDecorationModel("Hero");
+    CHECK(panel.editor.placeDecoration({ 0, 0, 0 }));
+    CHECK(panel.shows("Placed Meshes (1)"));
+    CHECK(panel.shows("Transform: Hero"));
+    panel.clickToolTab("Tile Decorations");
+    CHECK(panel.editor.tool() == LevelEditor::Tool::TileDecorations);
+    CHECK(panel.shows("Placed Tile Decorations (1)"));
+    CHECK(!panel.shows("Transform: Hero"));
+    CHECK(panel.editor.selectedTileDecorationModel() == "TileDecorationPebblesCorner04");
+    CHECK(panel.editor.tileDecorationBrush().quarterTurns == 1);
+    panel.clickToolControl("Grass");
+    panel.clickToolControl("Two opposite edges");
+    panel.clickToolControl("Variation 2");
+    panel.clickToolControl("Rotate Left");
+    CHECK(panel.editor.selectedTileDecorationModel() == "TileDecorationGrassStrip02");
+    CHECK(panel.editor.tileDecorationBrush().quarterTurns == 0);
+    CHECK(panel.shows("Edges: North + South"));
+    CHECK(panel.editor.selectedDecorationModel() == "Hero");
+
+    // World selection requests a tab switch while the old tab is still active.
+    CHECK(panel.editor.selectDecoration(1));
+    (void)panel.frame();
+    CHECK(panel.shows("Placed Meshes (1)"));
+    CHECK(panel.editor.tool() == LevelEditor::Tool::Decorations);
+    CHECK(panel.editor.selectDecoration(0));
+    (void)panel.frame();
+    CHECK(panel.shows("Placed Tile Decorations (1)"));
+    CHECK(panel.editor.tool() == LevelEditor::Tool::TileDecorations);
+}
+
 } // namespace
 #endif
 
@@ -510,6 +600,7 @@ int main()
         buttonPickerOffersFourPlacementsAndKeepsSelectedBrush();
         leverPickerOffersFourPlacementsAndKeepsSelectedBrush();
         terrainRandomizeButtonsKeepAssignmentsAndUndo();
+        tileDecorationTabChoosesBrushAndKeepsPlacedListsSeparate();
     } catch (const std::exception& error) {
         std::cerr << "Editor ImGui regression failed: " << error.what() << '\n';
         return 1;

@@ -1416,26 +1416,10 @@ private:
             }
         }
 
-        if (input_.editor.tool() == LevelEditor::Tool::Decorations &&
-            !input_.editor.selectedDecorationModel().empty() &&
-            !input_.hoverDecoration &&
-            input_.hoverCell &&
-            input_.hoverCell->x >= 0 &&
-            input_.hoverCell->y >= 0 &&
-            input_.hoverCell->x < static_cast<int>(frame.levelWidth) &&
-            input_.hoverCell->y < static_cast<int>(frame.levelHeight) &&
-            input_.hoverCell->z >= 0) {
-            frame.tiles.push_back(decorationVisual(
-                {
-                    .model = input_.editor.selectedDecorationModel(),
-                    .position = {
-                        static_cast<float>(input_.hoverCell->x) + 0.5f,
-                        static_cast<float>(input_.hoverCell->y) + 0.5f,
-                        static_cast<float>(input_.hoverCell->z),
-                    },
-                },
-                input_.manifest,
-                true));
+        if (!input_.hoverDecoration && input_.hoverCell) {
+            if (const auto preview = input_.editor.decorationPlacementPreview(*input_.hoverCell)) {
+                frame.tiles.push_back(decorationVisual(*preview, input_.manifest, true));
+            }
         }
     }
 

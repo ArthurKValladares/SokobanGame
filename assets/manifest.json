@@ -1334,6 +1334,166 @@
       "name": "PressurePlatePad",
       "path": "custom/models/pressure_plate_pad.glb",
       "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesEdge01",
+      "path": "custom/models/tile_decorations/tile_pebbles_edge_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesEdge02",
+      "path": "custom/models/tile_decorations/tile_pebbles_edge_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesEdge03",
+      "path": "custom/models/tile_decorations/tile_pebbles_edge_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesEdge04",
+      "path": "custom/models/tile_decorations/tile_pebbles_edge_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesCorner01",
+      "path": "custom/models/tile_decorations/tile_pebbles_corner_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesCorner02",
+      "path": "custom/models/tile_decorations/tile_pebbles_corner_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesCorner03",
+      "path": "custom/models/tile_decorations/tile_pebbles_corner_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesCorner04",
+      "path": "custom/models/tile_decorations/tile_pebbles_corner_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesStrip01",
+      "path": "custom/models/tile_decorations/tile_pebbles_strip_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesStrip02",
+      "path": "custom/models/tile_decorations/tile_pebbles_strip_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesStrip03",
+      "path": "custom/models/tile_decorations/tile_pebbles_strip_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesStrip04",
+      "path": "custom/models/tile_decorations/tile_pebbles_strip_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesEnd01",
+      "path": "custom/models/tile_decorations/tile_pebbles_end_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesEnd02",
+      "path": "custom/models/tile_decorations/tile_pebbles_end_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesEnd03",
+      "path": "custom/models/tile_decorations/tile_pebbles_end_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationPebblesEnd04",
+      "path": "custom/models/tile_decorations/tile_pebbles_end_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassEdge01",
+      "path": "custom/models/tile_decorations/tile_grass_edge_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassEdge02",
+      "path": "custom/models/tile_decorations/tile_grass_edge_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassEdge03",
+      "path": "custom/models/tile_decorations/tile_grass_edge_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassEdge04",
+      "path": "custom/models/tile_decorations/tile_grass_edge_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassCorner01",
+      "path": "custom/models/tile_decorations/tile_grass_corner_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassCorner02",
+      "path": "custom/models/tile_decorations/tile_grass_corner_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassCorner03",
+      "path": "custom/models/tile_decorations/tile_grass_corner_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassCorner04",
+      "path": "custom/models/tile_decorations/tile_grass_corner_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassStrip01",
+      "path": "custom/models/tile_decorations/tile_grass_strip_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassStrip02",
+      "path": "custom/models/tile_decorations/tile_grass_strip_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassStrip03",
+      "path": "custom/models/tile_decorations/tile_grass_strip_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassStrip04",
+      "path": "custom/models/tile_decorations/tile_grass_strip_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassEnd01",
+      "path": "custom/models/tile_decorations/tile_grass_end_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassEnd02",
+      "path": "custom/models/tile_decorations/tile_grass_end_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassEnd03",
+      "path": "custom/models/tile_decorations/tile_grass_end_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationGrassEnd04",
+      "path": "custom/models/tile_decorations/tile_grass_end_04.glb",
+      "preserveSourceScale": true
     }
   ],
   "animations": [

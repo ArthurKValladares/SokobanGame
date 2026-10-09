@@ -32,6 +32,27 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
+The Tile Decorations tab now sits between Mesh Decorations and Screen Selectors.
+It offers the Blender-authored grass and pebble sets: four edge layouts, four
+variations each, and quarter-turn rotation with a world-edge diagram. All 32
+GLBs are registered with source scale and embedded palette materials retained.
+Placement and the hover ghost share the same transform, including raised tile
+surfaces and rotation. These use ordinary saved decoration records and the
+existing gizmos, undo/redo, duplicate/delete, and source/runtime publication.
+The two decoration palettes keep independent brushes and filtered placed lists;
+world selection activates the matching tab, and hidden-family gizmos are disabled.
+The tab also resumes with the developer session.
+
+The optimized all-target build and Debug game build pass with warnings-as-errors.
+The focused editor, actual ImGui mouse interaction, placement/presentation,
+manifest, asset loader, content pipeline, asset requirements, and developer
+session suites pass. `docs/examples/tile-decorations.scr` is a complete gallery.
+An isolated 900-frame Vulkan run renders all 32 variants with no queued assets
+remaining and zero dropped draws; evidence is in ignored
+`out/tile-decoration-game-review/capture/`. Native tools need unsandboxed access
+locally: sandboxed MSVC reports C1902 for its PDB server, and sandboxed content
+staging reports access denied while resolving its output directory.
+
 Activation controls now animate during gameplay: levers swing between their
 two positions, buttons press and spring back on each Activate, and pressure
 plates lower while occupied and rise after departure. The procedural generator

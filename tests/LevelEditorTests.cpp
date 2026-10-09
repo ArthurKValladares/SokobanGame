@@ -1927,6 +1927,138 @@ void testDecorationTransformSessionCoalescesUndoAndCanCancel()
     CHECK(*editor.selectedDecoration() == beforeCancel);
 }
 
+void testTileDecorationCatalogAndSurfacePlacement()
+{
+    TEST("tileDecorationCatalogAndSurfacePlacement");
+    CHECK(TileDecorations::catalog.size() == 32);
+    for (std::size_t index = 0; index < TileDecorations::catalog.size(); ++index) {
+        const auto& entry = TileDecorations::catalog[index];
+        const TileDecorations::Brush brush {
+            entry.style, entry.layout, entry.variant, 0,
+        };
+        CHECK(TileDecorations::modelName(brush) == entry.model);
+        CHECK(TileDecorations::brushForModel(entry.model) == brush);
+        CHECK(TileDecorations::isTileDecoration(entry.model));
+        for (std::size_t other = index + 1; other < TileDecorations::catalog.size(); ++other) {
+            CHECK(entry.model != TileDecorations::catalog[other].model);
+        }
+    }
+    CHECK(!TileDecorations::isTileDecoration("Stone"));
+    CHECK(!TileDecorations::isTileDecoration("TileDecorationGrassEdge05"));
+
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(3, 2, false);
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::Wall));
+    editor.setTileDecorationBrush({
+        TileDecorations::Style::Grass, TileDecorations::Layout::Corner, 2, 3,
+    });
+    CHECK(editor.tool() == LevelEditor::Tool::TileDecorations);
+    CHECK(editor.decorationToolActive());
+    CHECK(editor.placingDecoration());
+    CHECK(editor.selectedTileDecorationModel() == "TileDecorationGrassCorner03");
+    const auto surface = editor.resolveEditTarget({ 1, 1, 0 }, false, false);
+    CHECK((surface == GridPosition3 { 1, 1, 2 }));
+    const auto preview = editor.decorationPlacementPreview(surface);
+    CHECK(preview.has_value());
+    if (!preview) return;
+    CHECK(preview->position.x == 1.5f);
+    CHECK(preview->position.y == 1.5f);
+    CHECK(preview->position.z == 2.0f);
+    CHECK(preview->rotationDegrees.x == 0.0f);
+    CHECK(preview->rotationDegrees.y == 0.0f);
+    CHECK(preview->rotationDegrees.z == 270.0f);
+    CHECK(preview->scale.x == 1.0f && preview->scale.y == 1.0f && preview->scale.z == 1.0f);
+    CHECK(editor.placeDecoration(surface));
+    CHECK(editor.selectedDecoration() && *editor.selectedDecoration() == *preview);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.decorations().empty());
+    CHECK(editor.documentToLevel().tileAt(1, 1, 1) == TileType::Wall);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.decorations().size() == 1);
+    CHECK(editor.decorations().front() == *preview);
+
+    CHECK(editor.beginSelectedDecorationTransform());
+    auto moved = *preview;
+    moved.position.x += 0.25f;
+    CHECK(editor.previewSelectedDecorationTransform(moved));
+    CHECK(editor.endSelectedDecorationTransform());
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.decorations().front() == *preview);
+    CHECK(editor.duplicateSelectedDecoration());
+    CHECK(editor.decorations().size() == 2);
+    CHECK(editor.deleteSelectedDecoration());
+    CHECK(editor.decorations().size() == 1);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.decorations().size() == 2);
+
+    const auto path = project.source / "level0" / "screen0.scr";
+    const auto placed = editor.decorations();
+    CHECK(editor.saveDocument(path));
+    CHECK(Level::loadFromFile(path).decorations() == placed);
+    CHECK(Level::loadFromFile(project.runtime / "level0" / "screen0.scr").decorations() == placed);
+    auto loaded = makeEditor(project);
+    CHECK(loaded.decorations() == placed);
+    CHECK(loaded.selectDecoration(0));
+    CHECK(loaded.tool() == LevelEditor::Tool::TileDecorations);
+
+    editor.setLayerLocked(true);
+    editor.setActiveLayer(1);
+    CHECK((editor.resolveEditTarget({ 1, 1, 0 }, false, false) == GridPosition3 { 1, 1, 1 }));
+    CHECK(!editor.decorationPlacementPreview({ -1, 0, 1 }));
+    CHECK(!editor.placeDecoration({ 3, 0, 1 }));
+    CHECK(editor.decorations() == placed);
+}
+
+void testTileAndMeshDecorationBrushesStayIndependent()
+{
+    TEST("tileAndMeshDecorationBrushesStayIndependent");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(4, 3, false);
+    editor.setSelectedDecorationModel("Stone");
+    CHECK(editor.placeDecoration({ 1, 1, 1 }));
+    const TileDecorations::Brush brush {
+        TileDecorations::Style::Pebbles, TileDecorations::Layout::Strip, 3, 1,
+    };
+    editor.setTileDecorationBrush(brush);
+    CHECK(editor.placeDecoration({ 2, 1, 1 }));
+    CHECK(editor.decorations()[1].model == "TileDecorationPebblesStrip04");
+    CHECK(editor.decorations()[1].rotationDegrees.z == 90.0f);
+    CHECK(editor.selectedDecorationModel() == "Stone");
+    editor.setSelectedDecorationModel("Tree");
+    CHECK(editor.tool() == LevelEditor::Tool::Decorations);
+    CHECK(editor.tileDecorationBrush() == brush);
+    CHECK(editor.placeDecoration({ 3, 1, 1 }));
+    CHECK(editor.decorations()[2].model == "Tree");
+    CHECK(editor.decorations()[2].rotationDegrees.z == 0.0f);
+    CHECK(editor.selectDecoration(1));
+    CHECK(editor.tool() == LevelEditor::Tool::TileDecorations);
+    CHECK(editor.selectedDecorationModel() == "Tree");
+    CHECK(editor.tileDecorationBrush() == brush);
+    CHECK(editor.selectDecoration(0));
+    CHECK(editor.tool() == LevelEditor::Tool::Decorations);
+    CHECK(editor.selectedDecorationModel() == "Tree");
+    editor.setTool(LevelEditor::Tool::TileDecorations);
+    CHECK(editor.placingDecoration());
+    editor.cancelDecorationPlacement();
+    CHECK(!editor.placingDecoration());
+    CHECK(!editor.placeDecoration({ 2, 2, 1 }));
+    CHECK(editor.tileDecorationBrush() == brush);
+    CHECK(editor.selectedDecorationModel() == "Tree");
+    editor.setTool(LevelEditor::Tool::Decorations);
+    CHECK(editor.placingDecoration());
+    CHECK(editor.decorationPlacementPreview({ 2, 2, 1 })->model == "Tree");
+    editor.setTileDecorationBrush(brush);
+    CHECK(editor.placingDecoration());
+    CHECK(editor.decorationPlacementPreview({ 2, 2, 1 })->rotationDegrees.z == 90.0f);
+    editor.setTileDecorationBrush({ brush.style, brush.layout, 7, 5 });
+    CHECK(editor.tileDecorationBrush() == brush);
+    editor.setTool(LevelEditor::Tool::Tiles);
+    CHECK(!editor.decorationToolActive());
+    CHECK(!editor.placingDecoration());
+}
+
 void testSelectorEditingPersistenceUndoAndProjectRemapping()
 {
     TEST("selectorEditingPersistenceUndoAndProjectRemapping");
@@ -2648,7 +2780,19 @@ void testEyedropperRecentTilesAndToolCycling()
     editor.setTool(LevelEditor::Tool::Tiles);
     editor.cycleTool();
     CHECK(editor.tool() == LevelEditor::Tool::Decorations);
+    editor.cycleTool();
+    CHECK(editor.tool() == LevelEditor::Tool::TileDecorations);
     // Selectors only exist on overworld screens.
+    editor.cycleTool();
+    CHECK(editor.tool() == LevelEditor::Tool::Tiles);
+
+    CHECK(editor.saveDocument(project.source / "overworld.scr"));
+    editor.cycleTool();
+    CHECK(editor.tool() == LevelEditor::Tool::Decorations);
+    editor.cycleTool();
+    CHECK(editor.tool() == LevelEditor::Tool::TileDecorations);
+    editor.cycleTool();
+    CHECK(editor.tool() == LevelEditor::Tool::Selectors);
     editor.cycleTool();
     CHECK(editor.tool() == LevelEditor::Tool::Tiles);
 }
@@ -3344,6 +3488,8 @@ int main()
     testFailedRenumberPreservesSourceAndRuntimeTrees();
     testDecorationEditingPersistenceAndUndo();
     testDecorationTransformSessionCoalescesUndoAndCanCancel();
+    testTileDecorationCatalogAndSurfacePlacement();
+    testTileAndMeshDecorationBrushesStayIndependent();
     testSelectorEditingPersistenceUndoAndProjectRemapping();
     testMoveTileIsAtomicAndUndoable();
     testComposedOverworldDocumentsArePathAwareAndTransactional();

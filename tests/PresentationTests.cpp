@@ -4180,6 +4180,84 @@ void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
     }
 }
 
+void testTileDecorationHoverPreviewMatchesRaisedSurfacePlacement()
+{
+    TEST("tileDecorationHoverPreviewMatchesRaisedSurfacePlacement");
+    AssetManifest manifest = testManifest();
+    const RenderModel decoration = manifest.addModel({
+        .name = "TileDecorationGrassCorner03",
+        .path = "tile_grass_corner_03.glb",
+        .preserveSourceScale = true,
+    });
+    CHECK(!decoration.isCube());
+
+    LevelEditor editor;
+    editor.newDocument(3, 3, false);
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::Wall));
+    // Leave the other decoration palette populated to catch previews that
+    // accidentally read its brush instead of the active tile decoration.
+    editor.setSelectedDecorationModel("Decoration");
+    editor.setTileDecorationBrush({
+        TileDecorations::Style::Grass, TileDecorations::Layout::Corner, 2, 3,
+    });
+    const GridPosition3 surface =
+        editor.resolveEditTarget({ 1, 1, 0 }, false, false);
+    CHECK((surface == GridPosition3 { 1, 1, 2 }));
+    const auto placement = editor.decorationPlacementPreview(surface);
+    CHECK(placement.has_value());
+    if (!placement) return;
+    CHECK(placement->model == "TileDecorationGrassCorner03");
+
+    const RenderFrameData hoverFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest,
+        .editor = editor,
+        .settings = {},
+        .hoverCell = surface,
+    });
+    const auto preview = std::ranges::find_if(
+        hoverFrame.tiles,
+        [decoration](const RenderFrameData::Tile& tile) {
+            return tile.model == decoration && tile.isEditorPreview;
+        });
+    CHECK(preview != hoverFrame.tiles.end());
+    if (preview == hoverFrame.tiles.end()) return;
+    CHECK(preview->cell == surface);
+    CHECK(!preview->pickable);
+    CHECK(!preview->affectsCameraFit);
+    CHECK(!preview->showGrid);
+    CHECK(near(preview->baseElevation, 2.0f));
+    CHECK(preview->modelTransform.has_value());
+    if (!preview->modelTransform) return;
+    const auto& transform = *preview->modelTransform;
+    CHECK((transform.translation == Vec3 { 1.5f, 1.5f, 2.0f }));
+    CHECK(transform.translation == placement->position);
+    CHECK(near(transform.rotationRadians.x, 0.0f));
+    CHECK(near(transform.rotationRadians.y, 0.0f));
+    CHECK(near(transform.rotationRadians.z, 4.71238898038f));
+    CHECK((transform.scale == Vec3 { 1.0f, 1.0f, 1.0f }));
+    CHECK((transform.pivot == Vec3 { 0.0f, 0.0f, 0.0f }));
+    CHECK(editor.decorations().empty());
+
+    CHECK(editor.placeDecoration(surface));
+    CHECK(editor.decorations().size() == 1);
+    if (editor.decorations().empty()) return;
+    CHECK(editor.decorations().front() == *placement);
+    const RenderFrameData placedFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest,
+        .editor = editor,
+        .settings = {},
+    });
+    const auto placed = std::ranges::find_if(
+        placedFrame.tiles,
+        [decoration](const RenderFrameData::Tile& tile) {
+            return tile.model == decoration && !tile.isEditorPreview;
+        });
+    CHECK(placed != placedFrame.tiles.end());
+    if (placed != placedFrame.tiles.end()) {
+        CHECK(placed->modelTransform == preview->modelTransform);
+    }
+}
+
 void testGameplayFrameBuildsManifestDecorationInstances()
 {
     TEST("gameplayFrameBuildsManifestDecorationInstances");
@@ -4862,6 +4940,7 @@ int main()
     testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition();
     testWaterRipplesFollowPlayerAndEnemySurfaceContact();
     testWaterRippleScheduleHasAFixedBudget();
+    testTileDecorationHoverPreviewMatchesRaisedSurfacePlacement();
     testGameplayFrameBuildsManifestDecorationInstances();
     testEnemyFacingAttackAndAnimationInstances();
     } catch (const std::exception& error) {

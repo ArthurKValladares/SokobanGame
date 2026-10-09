@@ -376,6 +376,14 @@ void LevelEditorDebugUi::draw(
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem(
+                "Tile Decorations",
+                nullptr,
+                toolTabFlags(LevelEditor::Tool::TileDecorations))) {
+            activateToolTab(LevelEditor::Tool::TileDecorations);
+            drawTileDecorationPalette(editor, callbacks);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem(
                 "Screen Selectors",
                 nullptr,
                 toolTabFlags(LevelEditor::Tool::Selectors))) {
@@ -1351,6 +1359,9 @@ void LevelEditorDebugUi::drawDecorationMeshLibrary(
                 ImVec2(0.0f, 190.0f),
                 true)) {
             for (const DecorationMeshCatalog::Entry& mesh : meshes) {
+                if (TileDecorations::isTileDecoration(mesh.modelName)) {
+                    continue;
+                }
                 const std::string path = mesh.relativePath.generic_string();
                 if (!containsInsensitive(path, decorationFilter_) &&
                     !containsInsensitive(mesh.modelName, decorationFilter_)) {
@@ -1538,7 +1549,118 @@ void LevelEditorDebugUi::drawDecorationPalette(
 
     drawDecorationMeshLibrary(editor, callbacks);
     ImGui::Separator();
-    ImGui::Text("Placed Meshes (%zu)", editor.decorations().size());
+    drawPlacedDecorations(editor, false);
+#else
+    (void)editor;
+    (void)callbacks;
+#endif
+}
+
+void LevelEditorDebugUi::drawTileDecorationPalette(
+    LevelEditor& editor, const Callbacks& callbacks)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    auto brush = editor.tileDecorationBrush();
+    bool changed = false;
+    ImGui::TextUnformatted("Style");
+    for (const auto style : TileDecorations::styles) {
+        if (style != TileDecorations::styles.front()) ImGui::SameLine();
+        if (ImGui::RadioButton(TileDecorations::styleLabel(style).data(), brush.style == style)) {
+            brush.style = style;
+            changed = true;
+        }
+    }
+    ImGui::TextUnformatted("Edge layout");
+    for (const auto layout : TileDecorations::layouts) {
+        if (ImGui::RadioButton(TileDecorations::layoutLabel(layout).data(), brush.layout == layout)) {
+            brush.layout = layout;
+            changed = true;
+        }
+    }
+    ImGui::TextUnformatted("Variation");
+    for (uint8_t variant = 0; variant < TileDecorations::variantCount; ++variant) {
+        if (variant != 0) ImGui::SameLine();
+        const std::string label = "Variation " + std::to_string(variant + 1);
+        if (ImGui::RadioButton(label.c_str(), brush.variant == variant)) {
+            brush.variant = variant;
+            changed = true;
+        }
+    }
+
+    if (ImGui::Button("Rotate Left")) {
+        brush.quarterTurns = (brush.quarterTurns + 3) % 4;
+        changed = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Rotate Right")) {
+        brush.quarterTurns = (brush.quarterTurns + 1) % 4;
+        changed = true;
+    }
+    if (changed) editor.setTileDecorationBrush(brush);
+
+    // The diagram follows world north (-Y), independent of camera rotation.
+    constexpr std::array<uint8_t, 4> edgeMasks { 1, 3, 5, 11 };
+    const uint8_t mask = edgeMasks[static_cast<std::size_t>(brush.layout)];
+    const unsigned turns = brush.quarterTurns;
+    const unsigned rotatedMask = ((mask << turns) | (mask >> (4 - turns))) & 15;
+    constexpr std::array<const char*, 4> edgeNames { "North", "East", "South", "West" };
+    std::string edges;
+    for (std::size_t edge = 0; edge < edgeNames.size(); ++edge) {
+        if ((rotatedMask & (1u << edge)) == 0) continue;
+        if (!edges.empty()) edges += " + ";
+        edges += edgeNames[edge];
+    }
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const std::array<ImVec2, 4> corners {{
+        { origin.x + 8.0f, origin.y + 8.0f },
+        { origin.x + 64.0f, origin.y + 8.0f },
+        { origin.x + 64.0f, origin.y + 64.0f },
+        { origin.x + 8.0f, origin.y + 64.0f },
+    }};
+    auto* drawList = ImGui::GetWindowDrawList();
+    drawList->AddRectFilled(corners[0], corners[2], IM_COL32(70, 73, 61, 255), 3.0f);
+    for (std::size_t edge = 0; edge < corners.size(); ++edge) {
+        const bool decorated = (rotatedMask & (1u << edge)) != 0;
+        drawList->AddLine(corners[edge], corners[(edge + 1) % corners.size()],
+            decorated ? IM_COL32(159, 211, 91, 255) : IM_COL32(120, 124, 111, 255),
+            decorated ? 5.0f : 1.0f);
+    }
+    ImGui::Dummy({ 72.0f, 72.0f });
+    ImGui::SameLine();
+    ImGui::TextWrapped("Edges: %s\nRotation: %u degrees", edges.c_str(), turns * 90);
+
+    const auto model = editor.selectedTileDecorationModel();
+    const bool available = callbacks.assetManifest &&
+        callbacks.assetManifest().findModelIdByName(model).has_value();
+    ImGui::BeginDisabled(!available);
+    if (ImGui::Button("Place Selected")) editor.setTileDecorationBrush(brush);
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!editor.placingDecoration());
+    if (ImGui::Button("Cancel Placement")) editor.cancelDecorationPlacement();
+    ImGui::EndDisabled();
+    if (!available) {
+        ImGui::TextWrapped("This decoration is missing from the asset manifest.");
+    } else {
+        ImGui::TextWrapped("Click a tile to place. Click a placed decoration to select it. "
+                           "Right-click deselects it. Place Selected resumes placement after canceling.");
+    }
+    ImGui::Separator();
+    drawPlacedDecorations(editor, true);
+#else
+    (void)editor;
+    (void)callbacks;
+#endif
+}
+
+void LevelEditorDebugUi::drawPlacedDecorations(LevelEditor& editor, bool tileDecorations)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const auto matches = [tileDecorations](const Level::Decoration& decoration) {
+        return TileDecorations::isTileDecoration(decoration.model) == tileDecorations;
+    };
+    const auto count = static_cast<std::size_t>(std::ranges::count_if(editor.decorations(), matches));
+    ImGui::Text(tileDecorations ? "Placed Tile Decorations (%zu)" : "Placed Meshes (%zu)", count);
     if (ImGui::BeginListBox(
             "##placed_decorations",
             ImVec2(-1.0f, 120.0f))) {
@@ -1547,6 +1669,7 @@ void LevelEditorDebugUi::drawDecorationPalette(
              ++index) {
             const Level::Decoration& decoration =
                 editor.decorations()[index];
+            if (!matches(decoration)) continue;
             const std::string label =
                 std::to_string(index + 1) + ": " + decoration.model;
             const bool selected =
@@ -1558,10 +1681,12 @@ void LevelEditorDebugUi::drawDecorationPalette(
         ImGui::EndListBox();
     }
 
-    drawSelectedDecorationInspector(editor);
+    if (const auto* selected = editor.selectedDecoration(); selected && matches(*selected)) {
+        drawSelectedDecorationInspector(editor);
+    }
 #else
     (void)editor;
-    (void)callbacks;
+    (void)tileDecorations;
 #endif
 }
 
