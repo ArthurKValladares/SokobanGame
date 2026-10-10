@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only audit of the Blender tile-decoration catalog and its 32 GLBs.
+"""Read-only audit of the Blender tile-decoration catalog and its 48 GLBs.
 
 Run with Python 3.10 or later; no third-party modules are required. Geometry
 is checked in Blender coordinates (glTF x,y,z maps back to x,-z,y). Node
@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "assets/custom/source/tile_decorations/catalog.json"
 DEFAULT_MODELS = ROOT / "assets/custom/models/tile_decorations"
 CONFIGURATIONS = {"edge": 1, "corner": 3, "strip": 5, "end": 11}
-STYLES = ("pebbles", "grass")
+STYLES = ("pebbles", "grass", "moss")
 COMPONENTS = {5120: ("b", 1), 5121: ("B", 1), 5122: ("h", 2),
               5123: ("H", 2), 5125: ("I", 4), 5126: ("f", 4)}
 WIDTHS = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4,
@@ -264,8 +264,18 @@ def audit_model(path, entry):
                     and len(indices) % 3 == 0, "Invalid triangle indices")
             indices = [row[0] for row in indices]
             require(all(0 <= i < len(positions) for i in indices), "Triangle index outside vertex stream")
+            if entry["configuration"] == "strip":
+                require(all(abs(z) >= 0.20-TOLERANCE for _, _, z in positions),
+                        "Opposite-edge decoration has vertices inside the empty center band")
             for offset in range(0, len(indices), 3):
                 a, b, c = [positions[i] for i in indices[offset:offset+3]]
+                if entry["configuration"] == "strip":
+                    # glTF Z is negative Blender/game Y. All three vertices
+                    # must stay in one band; an edge-to-edge triangle would
+                    # cover the middle even if its vertices were outside it.
+                    ys = [-point[2] for point in (a, b, c)]
+                    require(max(ys) <= -0.20+TOLERANCE or min(ys) >= 0.20-TOLERANCE,
+                            "Opposite-edge decoration has a triangle crossing the empty center band")
                 u, v = [b[j]-a[j] for j in range(3)], [c[j]-a[j] for j in range(3)]
                 cross = (u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0])
                 require(sum(x*x for x in cross) > 1e-22, "Degenerate geometry triangle")
@@ -276,8 +286,18 @@ def audit_model(path, entry):
     upper = [max(p[i] for p in points) for i in range(3)]
     require(all(lower[i] >= -0.5-TOLERANCE and upper[i] <= 0.5+TOLERANCE for i in (0, 1)),
             f"Decoration exceeds one-tile footprint: {lower}, {upper}")
+    # Layout masks describe actual border contact, not just which part of the
+    # tile contains the cluster. Check every requested edge independently.
+    edge_extents = ((lower[1], -0.5, "north"), (upper[0], 0.5, "east"),
+                    (upper[1], 0.5, "south"), (lower[0], -0.5, "west"))
+    for edge, (actual, target, name) in enumerate(edge_extents):
+        if entry["edge_mask"] & (1 << edge):
+            require(abs(actual-target) <= TOLERANCE,
+                    f"Decoration does not touch requested {name} edge: {actual}")
     require(lower[2] >= -0.03-TOLERANCE and 0 < upper[2] < 0.3,
             f"Decoration height exceeds intended surface range: {lower[2]}..{upper[2]}")
+    if entry["style"] == "moss":
+        require(upper[2] <= 0.13+TOLERANCE, "Moss must remain a low cushion against the tile")
     bounds = entry.get("bounds")
     if isinstance(bounds, dict):
         expected_min = bounds.get("min", bounds.get("minimum"))
@@ -291,6 +311,16 @@ def audit_model(path, entry):
             "Catalog bounds disagree with exported mesh")
     require(entry.get("triangles") == triangle_count, "Catalog triangle count disagrees with exported mesh")
     require(entry.get("vertex_count") == vertex_count, "Catalog vertex count disagrees with exported mesh")
+    if entry["configuration"] == "strip":
+        foci = entry.get("focal_points")
+        require(isinstance(foci, list) and len(foci) == 2,
+                "Opposite-edge decoration requires separate north and south focal points")
+        for focus in foci:
+            finite_vector(focus, 3, "Opposite-edge focal point")
+        require(foci[0][1] <= -0.20 and foci[1][1] >= 0.20,
+                "Opposite-edge focal points must lie in their perimeter bands")
+        require(close_vector(entry.get("focal_point", []), foci[0]),
+                "Primary focal point must match the north-edge focus")
     # Sorting unique points rejects variants that only differ in vertex order.
     canonical = sorted({tuple(round(x, 7) for x in p) for p in points})
     fingerprint = hashlib.sha256(json.dumps(canonical, separators=(",", ":")).encode()).hexdigest()
@@ -302,7 +332,7 @@ def audit_model(path, entry):
 def audit(catalog_path, models_path):
     catalog = json.loads(catalog_path.read_text(encoding="utf-8-sig"))
     entries = catalog.get("assets") if isinstance(catalog, dict) else catalog
-    require(isinstance(entries, list) and len(entries) == 32, "Expected exactly 32 catalog assets")
+    require(isinstance(entries, list) and len(entries) == 48, "Expected exactly 48 catalog assets")
     expected = {(style, config, variant) for style in STYLES for config in CONFIGURATIONS for variant in range(1, 5)}
     seen, paths, identifiers, reports, errors, warnings = set(), set(), set(), [], [], []
     for entry in entries:

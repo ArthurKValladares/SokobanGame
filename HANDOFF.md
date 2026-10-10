@@ -1,6 +1,6 @@
 # Sokoban 3D handoff
 
-Updated 2026-10-09. This file describes current operating guidance, implementation
+Updated 2026-10-10. This file describes current operating guidance, implementation
 contracts and known limitations. [README.md](README.md) covers player controls,
 authoring formats, supported commands and packaging.
 
@@ -32,9 +32,54 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
+Moss is the third tile-decoration style: sixteen smooth, low green cushion
+meshes with small yellow flecks, matching the four layouts and four variations
+of grass and pebbles. The same native Blender file now contains 48 assets,
+three-style close-ups and a twelve-layout comparison. All 48 models are
+registered with embedded palettes and source scale; the editor's Moss control
+uses the existing Random, rotation, layer lock and explicit selection behavior.
+The saved example gallery contains all 48 variants. The original 32 GLBs are
+byte-for-byte unchanged by the moss addition.
+Both game builds and all ten focused regression suites pass. The Python audit
+passes for all 48 exports, and a 900-frame Vulkan comparison renders every layout
+for all three styles with no dropped draws or pending assets; evidence is in
+ignored `out/tile-decoration-moss-review/capture/`.
+
+Decoration layer locking now uses the unit-height interval containing each
+pivot. Locked editor rendering, picking, point lights, placed lists and
+inspectors exclude other layers without renumbering saved decoration indices.
+Placement and preview use the active layer; selection, transforms, duplicate
+and delete enforce the same scope. Switching layer or lock state ends the
+current transform session. Tile-brush rotation accepts viewport shortcuts
+after passive editor-panel focus, while active inputs, menus and modals retain
+keyboard capture, so the first placement can rotate before a viewport click.
+Both game builds and the ten focused regression suites pass, including actual
+ImGui layer-list interaction, passive-focus rotation, edit guards and rendered
+decoration/light filtering.
+
+The preceding tile-decoration update aligns the original 32 native meshes with their
+requested tile boundaries. Edge/corner layouts translate; three-edge layouts
+also stretch horizontally. Opposite-edge layouts combine two independent
+perimeter clusters on north and south, leaving the center clear. Height,
+topology, palettes and the soft density falloff remain intact. The Blender
+source, exports, catalog and preview images are refreshed. Python auditing and
+the real game-loader asset suite require exact contact with every decorated edge
+and verify opposite-edge triangles stay in their respective perimeter bands.
+New mesh and tile-decoration placements preserve the prior selection rather
+than selecting themselves. Editing requires an explicit world or list selection;
+undo/redo retain that selection behavior.
+The palette now offers Random: its concrete preview stays stable until a
+successful placement, then another variant is chosen without immediate repeats.
+The remappable editor rotate action (`R` by default) rotates the brush during
+tile placement, with ordinary gizmo rotation retained after placement is canceled.
+Both game builds and the focused editor, actual ImGui interaction, input routing,
+asset, presentation and content suites pass. A 900-frame in-game close-up covers
+both styles and all four layouts with zero dropped draws and no pending asset
+work; evidence is in ignored `out/tile-decoration-edge-review/capture/`.
+
 The Tile Decorations tab now sits between Mesh Decorations and Screen Selectors.
-It offers the Blender-authored grass and pebble sets: four edge layouts, four
-variations each, and quarter-turn rotation with a world-edge diagram. All 32
+It offers the Blender-authored grass, pebble and moss sets: four edge layouts, four
+variations each, and quarter-turn rotation with a world-edge diagram. All 48
 GLBs are registered with source scale and embedded palette materials retained.
 Placement and the hover ghost share the same transform, including raised tile
 surfaces and rotation. These use ordinary saved decoration records and the

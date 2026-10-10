@@ -1494,6 +1494,86 @@
       "name": "TileDecorationGrassEnd04",
       "path": "custom/models/tile_decorations/tile_grass_end_04.glb",
       "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossEdge01",
+      "path": "custom/models/tile_decorations/tile_moss_edge_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossEdge02",
+      "path": "custom/models/tile_decorations/tile_moss_edge_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossEdge03",
+      "path": "custom/models/tile_decorations/tile_moss_edge_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossEdge04",
+      "path": "custom/models/tile_decorations/tile_moss_edge_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossCorner01",
+      "path": "custom/models/tile_decorations/tile_moss_corner_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossCorner02",
+      "path": "custom/models/tile_decorations/tile_moss_corner_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossCorner03",
+      "path": "custom/models/tile_decorations/tile_moss_corner_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossCorner04",
+      "path": "custom/models/tile_decorations/tile_moss_corner_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossStrip01",
+      "path": "custom/models/tile_decorations/tile_moss_strip_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossStrip02",
+      "path": "custom/models/tile_decorations/tile_moss_strip_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossStrip03",
+      "path": "custom/models/tile_decorations/tile_moss_strip_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossStrip04",
+      "path": "custom/models/tile_decorations/tile_moss_strip_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossEnd01",
+      "path": "custom/models/tile_decorations/tile_moss_end_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossEnd02",
+      "path": "custom/models/tile_decorations/tile_moss_end_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossEnd03",
+      "path": "custom/models/tile_decorations/tile_moss_end_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationMossEnd04",
+      "path": "custom/models/tile_decorations/tile_moss_end_04.glb",
+      "preserveSourceScale": true
     }
   ],
   "animations": [

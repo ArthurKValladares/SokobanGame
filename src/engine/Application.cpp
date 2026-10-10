@@ -2128,6 +2128,10 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
     context.decorationPlacementReady =
         context.editorEditing &&
         tools_->levelEditor.placingDecoration();
+    context.tileDecorationPlacementReady = context.decorationPlacementReady &&
+        tools_->levelEditor.tool() == LevelEditor::Tool::TileDecorations;
+    context.editorViewportShortcutsAllowed =
+        renderer_.allowsViewportShortcuts();
     context.draftPlaying = tools_->levelEditor.playingDraft();
     context.draftExitConfirmationOpen = tools_->draftExitConfirmationOpen;
 #endif

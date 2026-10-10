@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <map>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -135,6 +136,7 @@ public:
     std::optional<TileType> pickTile(GridPosition3 pickedCell);
     void setSelectedDecorationModel(std::string modelName);
     void setTileDecorationBrush(TileDecorations::Brush brush);
+    void rotateTileDecorationBrush(int quarterTurns = 1);
     [[nodiscard]] const TileDecorations::Brush& tileDecorationBrush() const;
     [[nodiscard]] std::string_view selectedTileDecorationModel() const;
     [[nodiscard]] bool decorationToolActive() const;
@@ -216,6 +218,9 @@ public:
     void cancelDecorationPlacement();
     [[nodiscard]] bool selectDecoration(std::size_t index);
     void clearDecorationSelection();
+    // A decoration belongs to the unit-height layer containing its pivot.
+    // Shared by edit guards, visible lists and world picking while locked.
+    [[nodiscard]] bool decorationEditable(const Level::Decoration& decoration) const;
     [[nodiscard]] bool updateSelectedDecoration(
         const Level::Decoration& decoration);
     // Gizmo drags preview many transforms but produce one undo record. The
@@ -571,6 +576,7 @@ private:
     bool historySuppressed_ = false;
     Vec3 activeLinkColor_ { 1.0f, 0.72f, 0.12f };
     std::vector<TileType> recentTiles_;
+    std::mt19937 tileDecorationRandom_ { std::random_device {}() };
     std::map<std::filesystem::path, DraftState> drafts_;
     std::optional<DocumentSnapshot> decorationTransformBefore_;
     std::optional<MoveObject> pendingMove_;

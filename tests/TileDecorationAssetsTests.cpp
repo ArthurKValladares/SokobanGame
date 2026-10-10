@@ -38,7 +38,7 @@ struct Bounds {
     };
 };
 
-void checkDecorationMesh(const MeshData& mesh, bool grass, std::string_view layout)
+void checkDecorationMesh(const MeshData& mesh, std::string_view style, std::string_view layout)
 {
     CHECK(!mesh.vertices.empty());
     CHECK(!mesh.indices.empty());
@@ -80,9 +80,10 @@ void checkDecorationMesh(const MeshData& mesh, bool grass, std::string_view layo
     CHECK(paletteUvs);
     CHECK(validMaterialIndices);
     CHECK(maximumU > minimumU || maximumV > minimumV);
-    CHECK(std::ranges::all_of(mesh.indices, [&](uint32_t index) {
+    const bool validIndices = std::ranges::all_of(mesh.indices, [&](uint32_t index) {
         return index < mesh.vertices.size();
-    }));
+    });
+    CHECK(validIndices);
 
     // Partial-edge meshes retain the authored tile-centred pivot and their
     // shallow surface height. Fitting to a unit cube would break both.
@@ -93,20 +94,43 @@ void checkDecorationMesh(const MeshData& mesh, bool grass, std::string_view layo
     CHECK(bounds.minimum.z >= -0.0151f);
     CHECK(bounds.minimum.z < 0.0f);
     CHECK(bounds.maximum.z > 0.01f);
-    CHECK(bounds.maximum.z <= (grass ? 0.1701f : 0.0601f));
+    const float maximumHeight = style == "Grass" ? 0.1701f :
+        style == "Moss" ? 0.1301f : 0.0601f;
+    CHECK(bounds.maximum.z <= maximumHeight);
+    // Every authored layout includes north. Additional edges must meet the
+    // same tile boundary rather than leaving an inset band of bare ground.
+    CHECK(std::abs(bounds.minimum.y + 0.5f) <= 0.0001f);
     if (layout == "Edge") {
         CHECK(bounds.maximum.y < 0.0f);
-        CHECK(bounds.minimum.y < -0.30f);
+    } else if (layout == "Corner") {
+        CHECK(std::abs(bounds.maximum.x - 0.5f) <= 0.0001f);
     } else if (layout == "Strip") {
-        CHECK(bounds.minimum.y < -0.30f);
-        CHECK(bounds.maximum.y > 0.30f);
+        CHECK(std::abs(bounds.maximum.y - 0.5f) <= 0.0001f);
+        CHECK(std::ranges::all_of(mesh.vertices, [](const MeshVertex& vertex) {
+            return std::abs(vertex.position.y) >= 0.20f - 0.00002f;
+        }));
+        if (validIndices) {
+            bool trianglesStayAtEdges = true;
+            for (std::size_t offset = 0; offset + 2 < mesh.indices.size(); offset += 3) {
+                const float a = mesh.vertices[mesh.indices[offset]].position.y;
+                const float b = mesh.vertices[mesh.indices[offset + 1]].position.y;
+                const float c = mesh.vertices[mesh.indices[offset + 2]].position.y;
+                trianglesStayAtEdges &= std::max({ a, b, c }) <= -0.20f + 0.00002f ||
+                    std::min({ a, b, c }) >= 0.20f - 0.00002f;
+            }
+            CHECK(trianglesStayAtEdges);
+        }
+    } else if (layout == "End") {
+        CHECK(std::abs(bounds.minimum.x + 0.5f) <= 0.0001f);
+        CHECK(std::abs(bounds.maximum.x - 0.5f) <= 0.0001f);
     }
 
     if (mesh.materials.size() == 1) {
         const MeshMaterial& material = mesh.materials[0];
         CHECK(material.alphaMode == MaterialAlphaMode::Opaque);
         CHECK(material.metallicFactor == 0.0f);
-        CHECK(std::abs(material.roughnessFactor - (grass ? 0.85f : 0.91f)) < 0.001f);
+        const float roughness = style == "Grass" ? 0.85f : style == "Moss" ? 0.94f : 0.91f;
+        CHECK(std::abs(material.roughnessFactor - roughness) < 0.001f);
         CHECK(material.baseColorTexture != 0);
         CHECK(material.baseColorUvSet == 0);
     }
@@ -119,7 +143,7 @@ void testGameReadyTileDecorations()
     const AssetManifest manifest = AssetManifest::loadFromFile(assets / "manifest.json");
     const RuntimeTextureCatalog textures = collectRuntimeTextureCatalog(assets, manifest);
     std::vector<Level::Decoration> decorations;
-    for (const std::string_view style : { "Pebbles", "Grass" }) {
+    for (const std::string_view style : { "Pebbles", "Grass", "Moss" }) {
         for (const std::string_view layout : { "Edge", "Corner", "Strip", "End" }) {
             for (int variant = 1; variant <= 4; ++variant) {
                 const std::string name = "TileDecoration" + std::string(style) +
@@ -164,16 +188,16 @@ void testGameReadyTileDecorations()
                     .preserveSourceScale = definition.preserveSourceScale,
                     .primitiveMaterials = runtime.primitiveMaterials,
                 });
-                checkDecorationMesh(mesh, style == "Grass", layout);
+                checkDecorationMesh(mesh, style, layout);
                 decorations.push_back({ .model = name, .position = { 0.5f, 0.5f, 1.0f } });
             }
         }
     }
     TEST("tile decoration level requirements");
-    CHECK(decorations.size() == 32);
+    CHECK(decorations.size() == 48);
     CHECK(std::ranges::count_if(manifest.models(), [](const auto& model) {
         return model.name.starts_with("TileDecoration");
-    }) == 32);
+    }) == 48);
     const Level level = Level::loadFromLayers({ { "." }, { "C" } },
         "tile decorations", std::nullopt, decorations);
     const RenderAssetRequirements requirements = renderAssetRequirementsForLevel(level, manifest);

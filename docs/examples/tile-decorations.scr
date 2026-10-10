@@ -32,29 +32,46 @@
 @decoration {"model":"TileDecorationGrassEnd02","position":[12.5,7.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
 @decoration {"model":"TileDecorationGrassEnd03","position":[14.5,7.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
 @decoration {"model":"TileDecorationGrassEnd04","position":[16.5,7.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossEdge01","position":[19.5,1.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossEdge02","position":[21.5,1.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossEdge03","position":[23.5,1.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossEdge04","position":[25.5,1.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossCorner01","position":[19.5,3.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossCorner02","position":[21.5,3.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossCorner03","position":[23.5,3.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossCorner04","position":[25.5,3.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossStrip01","position":[19.5,5.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossStrip02","position":[21.5,5.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossStrip03","position":[23.5,5.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossStrip04","position":[25.5,5.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossEnd01","position":[19.5,7.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossEnd02","position":[21.5,7.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossEnd03","position":[23.5,7.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationMossEnd04","position":[25.5,7.5,1],"rotation":[0,0,0],"scale":[1,1,1]}
 
 @layer 0
-                  
- . . . .  . . . . 
-                  
- . . . .  . . . . 
-                  
- . . . .  . . . . 
-                  
- . . . .  . . . . 
-                  
-       ....       
-                  
+                           
+ . . . .  . . . .  . . . . 
+                           
+ . . . .  . . . .  . . . . 
+                           
+ . . . .  . . . .  . . . . 
+                           
+ . . . .  . . . .  . . . . 
+                           
+       ....                
+                           
 
 @layer 1
-                  
-                  
-                  
-                  
-                  
-                  
-                  
-                  
-                  
-        Q E       
-                  
+                           
+                           
+                           
+                           
+                           
+                           
+                           
+                           
+                           
+        Q E                
+                           
+

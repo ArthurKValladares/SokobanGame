@@ -205,7 +205,11 @@ InputRouter::Frame InputRouter::routeFrame(
             .moving = input.actionDown(InputAction::EditorMoveTile),
             .translateGizmoPressed =
                 pressed(InputAction::EditorGizmoTranslate),
-            .rotateGizmoPressed = pressed(InputAction::EditorGizmoRotate),
+            .rotateGizmoPressed = !context.tileDecorationPlacementReady &&
+                pressed(InputAction::EditorGizmoRotate),
+            .rotateTileDecorationPressed = context.tileDecorationPlacementReady &&
+                context.editorViewportShortcutsAllowed &&
+                input.actionPressed(InputAction::EditorGizmoRotate),
             .scaleGizmoPressed = pressed(InputAction::EditorGizmoScale),
             .pointerCaptured = context.mouseCaptured,
         };

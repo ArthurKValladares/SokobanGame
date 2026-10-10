@@ -160,6 +160,9 @@ public:
     void beginDebugUiFrame();
     [[nodiscard]] bool wantsKeyboardCapture() const;
     [[nodiscard]] bool wantsMouseCapture() const;
+    // Palette focus alone should not swallow a brush shortcut before the
+    // first viewport click. Active widgets and popups still own input.
+    [[nodiscard]] bool allowsViewportShortcuts() const;
     [[nodiscard]] std::optional<GridPosition3> pickIsoGridCell(
         const PreparedFrame& frame,
         Vec2 pixelPosition) const;

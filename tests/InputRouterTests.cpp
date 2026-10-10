@@ -307,6 +307,153 @@ void testEditorGizmoShortcutsRespectKeyboardCapture()
     CHECK(!frame.editor.scaleGizmoPressed);
 }
 
+void testTileDecorationRotationUsesOneExclusivePress()
+{
+    TEST("tileDecorationRotationUsesOneExclusivePress");
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    const sokoban::InputRouter::RoutingContext placing {
+        .editorEditing = true,
+        .decorationPlacementReady = true,
+        .tileDecorationPlacementReady = true,
+        .editorViewportShortcutsAllowed = true,
+    };
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_R);
+    auto frame = router.routeFrame(input, placing);
+    CHECK(frame.editor.rotateTileDecorationPressed);
+    CHECK(!frame.editor.rotateGizmoPressed);
+    CHECK(!frame.gameplay.restartPressed);
+
+    // Holding R, including an OS key-repeat event, must not turn again.
+    input.beginFrame();
+    frame = router.routeFrame(input, placing);
+    CHECK(!frame.editor.rotateTileDecorationPressed);
+    CHECK(!frame.editor.rotateGizmoPressed);
+    SDL_Event repeat = keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_R);
+    repeat.key.repeat = true;
+    (void)router.routeEvent(repeat, input, { .editorEditing = true });
+    CHECK(!router.routeFrame(input, placing).editor.rotateTileDecorationPressed);
+
+    (void)router.routeEvent(
+        keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_R), input, {});
+    pressKey(router, input, SDL_SCANCODE_R);
+    frame = router.routeFrame(input, placing);
+    CHECK(frame.editor.rotateTileDecorationPressed);
+    CHECK(!frame.editor.rotateGizmoPressed);
+
+    // Canceling placement restores R's existing gizmo behavior. The mesh
+    // decoration tool continues to use its gizmo even while a mesh is armed.
+    frame = router.routeFrame(input, { .editorEditing = true });
+    CHECK(frame.editor.rotateGizmoPressed);
+    CHECK(!frame.editor.rotateTileDecorationPressed);
+    frame = router.routeFrame(input, {
+        .editorEditing = true, .decorationPlacementReady = true,
+    });
+    CHECK(frame.editor.rotateGizmoPressed);
+    CHECK(!frame.editor.rotateTileDecorationPressed);
+}
+
+void testTileDecorationRotationRespectsRebindingAndCapture()
+{
+    TEST("tileDecorationRotationRespectsRebindingAndCapture");
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    sokoban::InputBindings bindings = sokoban::defaultInputBindings();
+    sokoban::assignBinding(
+        bindings, sokoban::InputAction::EditorGizmoRotate,
+        sokoban::KeyboardBinding { "P" });
+    input.setBindings(bindings);
+    sokoban::InputRouter::RoutingContext placing {
+        .editorEditing = true,
+        .decorationPlacementReady = true,
+        .tileDecorationPlacementReady = true,
+        .editorViewportShortcutsAllowed = true,
+    };
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_R);
+    CHECK(!router.routeFrame(input, placing).editor.rotateTileDecorationPressed);
+    pressKey(router, input, SDL_SCANCODE_P);
+    auto frame = router.routeFrame(input, placing);
+    CHECK(frame.editor.rotateTileDecorationPressed);
+    CHECK(!frame.editor.rotateGizmoPressed);
+
+    placing.keyboardCaptured = true;
+    placing.editorViewportShortcutsAllowed = false;
+    frame = router.routeFrame(input, placing);
+    CHECK(!frame.editor.rotateTileDecorationPressed);
+    CHECK(!frame.editor.rotateGizmoPressed);
+    placing.keyboardCaptured = false;
+    placing.editorViewportShortcutsAllowed = true;
+    placing.optionsOpen = true;
+    frame = router.routeFrame(input, placing);
+    CHECK(!frame.editor.rotateTileDecorationPressed);
+    CHECK(!frame.editor.rotateGizmoPressed);
+    placing.optionsOpen = false;
+    placing.titleOpen = true;
+    CHECK(!router.routeFrame(input, placing).editor.rotateTileDecorationPressed);
+    placing.titleOpen = false;
+
+    // Capture updates physical key state without queuing a rotation for when
+    // focus returns to the viewport.
+    input.beginFrame();
+    (void)router.routeEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_P), input, {});
+    (void)router.routeEvent(
+        keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_P), input,
+        { .bindingCapture = true, .editorEditing = true });
+    CHECK(!router.routeFrame(input, placing).editor.rotateTileDecorationPressed);
+}
+
+void testTileDecorationRotationAfterPaletteFocus()
+{
+    TEST("tileDecorationRotationAfterPaletteFocus");
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    sokoban::InputRouter::RoutingContext placing {
+        .editorEditing = true,
+        .decorationPlacementReady = true,
+        .tileDecorationPlacementReady = true,
+        // Clicking a palette radio button or Place Selected leaves passive
+        // keyboard focus in the panel until the first viewport click.
+        .keyboardCaptured = true,
+        .editorViewportShortcutsAllowed = true,
+    };
+    input.beginFrame();
+    const auto result = router.routeEvent(
+        keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_R), input,
+        { .keyboardCaptured = true, .editorEditing = true });
+    CHECK(result.forwardedToInput);
+    SDL_Event click {};
+    click.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    click.button.button = SDL_BUTTON_LEFT;
+    (void)router.routeEvent(click, input, {});
+    auto frame = router.routeFrame(input, placing);
+    CHECK(frame.editor.rotateTileDecorationPressed);
+    CHECK(frame.editor.primaryPressed);
+    CHECK(!frame.editor.rotateGizmoPressed);
+    CHECK(!frame.gameplay.restartPressed);
+
+    // Hovering the palette or an active text/numeric field or popup keeps
+    // ownership of the key. Permission only bypasses passive focus.
+    placing.editorViewportShortcutsAllowed = false;
+    frame = router.routeFrame(input, placing);
+    CHECK(!frame.editor.rotateTileDecorationPressed);
+    CHECK(!frame.editor.rotateGizmoPressed);
+    placing.keyboardCaptured = false;
+    frame = router.routeFrame(input, placing);
+    CHECK(!frame.editor.rotateTileDecorationPressed);
+    CHECK(!frame.editor.rotateGizmoPressed);
+
+    // Returning to the viewport with R held must not queue a missed turn.
+    input.beginFrame();
+    placing.editorViewportShortcutsAllowed = true;
+    CHECK(!router.routeFrame(input, placing).editor.rotateTileDecorationPressed);
+    (void)router.routeEvent(
+        keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_R), input, {});
+    pressKey(router, input, SDL_SCANCODE_R);
+    CHECK(router.routeFrame(input, placing).editor.rotateTileDecorationPressed);
+}
+
 void testEditorPointerExposesPressAndHold()
 {
     sokoban::InputRouter router;
@@ -578,6 +725,9 @@ int main()
     testEditorPointerExposesPressAndHold();
     testEditorPointerExposesSecondaryPress();
     testEditorGizmoShortcutsRespectKeyboardCapture();
+    testTileDecorationRotationUsesOneExclusivePress();
+    testTileDecorationRotationRespectsRebindingAndCapture();
+    testTileDecorationRotationAfterPaletteFocus();
     testEditorShortcuts();
     testDraftPlaybackShortcuts();
     testEditorShortcutsFollowRebinding();

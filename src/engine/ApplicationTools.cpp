@@ -40,6 +40,7 @@ bool selectedDecorationMatchesTool(const LevelEditor& editor)
 {
     const auto* selected = editor.selectedDecoration();
     return selected && editor.decorationToolActive() &&
+        editor.decorationEditable(*selected) &&
         TileDecorations::isTileDecoration(selected->model) ==
             (editor.tool() == LevelEditor::Tool::TileDecorations);
 }
@@ -1461,7 +1462,9 @@ void ApplicationTools::updateEditorInteraction(
     handleEditorShortcuts(input);
     // A tab switch can happen while a gizmo owns the pointer. Stop its
     // transform before the hidden decoration can consume another drag update.
-    if (decorationGizmo.dragging() && !selectedDecorationMatchesTool(levelEditor)) {
+    if (decorationGizmo.dragging() &&
+        (!selectedDecorationMatchesTool(levelEditor) ||
+         !levelEditor.transformingSelectedDecoration())) {
         decorationGizmo.endDrag();
         (void)levelEditor.endSelectedDecorationTransform(false);
     }
@@ -1693,6 +1696,11 @@ void ApplicationTools::handleEditorShortcuts(
     if (input.toggleLayerLockPressed) {
         levelEditor.toggleLayerLock();
     }
+    if (input.rotateTileDecorationPressed &&
+        levelEditor.tool() == LevelEditor::Tool::TileDecorations &&
+        levelEditor.placingDecoration()) {
+        levelEditor.rotateTileDecorationBrush();
+    }
 }
 
 void ApplicationTools::interruptTileStroke()
@@ -1781,6 +1789,11 @@ bool ApplicationTools::updateDecorationEditing(
 {
     hoverDecoration = renderer.pickDecoration(
         previousRenderFrame, pointerPixels);
+    if (hoverDecoration &&
+        (*hoverDecoration >= levelEditor.decorations().size() ||
+         !levelEditor.decorationEditable(levelEditor.decorations()[*hoverDecoration]))) {
+        hoverDecoration.reset();
+    }
 
     if (decorationGizmo.dragging()) {
         if (!input.primaryDown) {

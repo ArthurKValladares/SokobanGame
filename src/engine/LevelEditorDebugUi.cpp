@@ -380,7 +380,7 @@ void LevelEditorDebugUi::draw(
                 nullptr,
                 toolTabFlags(LevelEditor::Tool::TileDecorations))) {
             activateToolTab(LevelEditor::Tool::TileDecorations);
-            drawTileDecorationPalette(editor, callbacks);
+            drawTileDecorationPalette(editor, bindings, callbacks);
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem(
@@ -1424,7 +1424,7 @@ void LevelEditorDebugUi::drawSelectedDecorationInspector(LevelEditor& editor)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     const Level::Decoration* selected = editor.selectedDecoration();
-    if (!selected) {
+    if (!selected || !editor.decorationEditable(*selected)) {
         return;
     }
 
@@ -1557,7 +1557,7 @@ void LevelEditorDebugUi::drawDecorationPalette(
 }
 
 void LevelEditorDebugUi::drawTileDecorationPalette(
-    LevelEditor& editor, const Callbacks& callbacks)
+    LevelEditor& editor, const InputBindings& bindings, const Callbacks& callbacks)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     auto brush = editor.tileDecorationBrush();
@@ -1581,10 +1581,19 @@ void LevelEditorDebugUi::drawTileDecorationPalette(
     for (uint8_t variant = 0; variant < TileDecorations::variantCount; ++variant) {
         if (variant != 0) ImGui::SameLine();
         const std::string label = "Variation " + std::to_string(variant + 1);
-        if (ImGui::RadioButton(label.c_str(), brush.variant == variant)) {
+        if (ImGui::RadioButton(label.c_str(), !brush.randomVariation && brush.variant == variant)) {
             brush.variant = variant;
+            brush.randomVariation = false;
             changed = true;
         }
+    }
+    if (ImGui::RadioButton("Random", brush.randomVariation)) {
+        brush.randomVariation = true;
+        changed = true;
+    }
+    if (brush.randomVariation) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("New variation after each placement");
     }
 
     if (ImGui::Button("Rotate Left")) {
@@ -1596,7 +1605,12 @@ void LevelEditorDebugUi::drawTileDecorationPalette(
         brush.quarterTurns = (brush.quarterTurns + 1) % 4;
         changed = true;
     }
-    if (changed) editor.setTileDecorationBrush(brush);
+    if (changed) {
+        editor.setTileDecorationBrush(brush);
+        brush = editor.tileDecorationBrush();
+    }
+    ImGui::TextDisabled("%s: rotate brush while placing",
+        actionBindingsDisplay(bindings, InputAction::EditorGizmoRotate).c_str());
 
     // The diagram follows world north (-Y), independent of camera rotation.
     constexpr std::array<uint8_t, 4> edgeMasks { 1, 3, 5, 11 };
@@ -1649,6 +1663,7 @@ void LevelEditorDebugUi::drawTileDecorationPalette(
     drawPlacedDecorations(editor, true);
 #else
     (void)editor;
+    (void)bindings;
     (void)callbacks;
 #endif
 }
@@ -1656,8 +1671,9 @@ void LevelEditorDebugUi::drawTileDecorationPalette(
 void LevelEditorDebugUi::drawPlacedDecorations(LevelEditor& editor, bool tileDecorations)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    const auto matches = [tileDecorations](const Level::Decoration& decoration) {
-        return TileDecorations::isTileDecoration(decoration.model) == tileDecorations;
+    const auto matches = [&editor, tileDecorations](const Level::Decoration& decoration) {
+        return TileDecorations::isTileDecoration(decoration.model) == tileDecorations &&
+            editor.decorationEditable(decoration);
     };
     const auto count = static_cast<std::size_t>(std::ranges::count_if(editor.decorations(), matches));
     ImGui::Text(tileDecorations ? "Placed Tile Decorations (%zu)" : "Placed Meshes (%zu)", count);

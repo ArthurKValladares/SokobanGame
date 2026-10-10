@@ -44,11 +44,16 @@ public:
         bool titleOpen = false;
         bool editorEditing = false;
         bool decorationPlacementReady = false;
+        bool tileDecorationPlacementReady = false;
         bool draftPlaying = false;
         bool lecternOpen = false;
         bool draftExitConfirmationOpen = false;
         bool keyboardCaptured = false;
         bool mouseCaptured = false;
+        // The pointer is over the game viewport with no active widget,
+        // text input, popup or modal. Passive palette focus may still set
+        // keyboardCaptured until the next viewport click.
+        bool editorViewportShortcutsAllowed = false;
     };
 
     struct PointerInput {
@@ -90,6 +95,9 @@ public:
         bool moving = false;
         bool translateGizmoPressed = false;
         bool rotateGizmoPressed = false;
+        // The configured rotate action turns the tile-decoration brush while
+        // placing, leaving the selected decoration's gizmo mode unchanged.
+        bool rotateTileDecorationPressed = false;
         bool scaleGizmoPressed = false;
         bool pointerCaptured = false;
     };

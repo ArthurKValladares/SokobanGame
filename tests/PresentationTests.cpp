@@ -4240,6 +4240,7 @@ void testTileDecorationHoverPreviewMatchesRaisedSurfacePlacement()
 
     CHECK(editor.placeDecoration(surface));
     CHECK(editor.decorations().size() == 1);
+    CHECK(!editor.selectedDecorationIndex());
     if (editor.decorations().empty()) return;
     CHECK(editor.decorations().front() == *placement);
     const RenderFrameData placedFrame = RenderFrameBuilder::buildEditor({
@@ -4255,7 +4256,136 @@ void testTileDecorationHoverPreviewMatchesRaisedSurfacePlacement()
     CHECK(placed != placedFrame.tiles.end());
     if (placed != placedFrame.tiles.end()) {
         CHECK(placed->modelTransform == preview->modelTransform);
+        CHECK(placed->editorDecorationHighlight ==
+            RenderFrameData::EditorDecorationHighlight::None);
     }
+
+    CHECK(editor.selectDecoration(0));
+    const RenderFrameData selectedFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest,
+        .editor = editor,
+        .settings = {},
+    });
+    const auto selected = std::ranges::find_if(
+        selectedFrame.tiles,
+        [decoration](const RenderFrameData::Tile& tile) {
+            return tile.model == decoration && !tile.isEditorPreview;
+        });
+    CHECK(selected != selectedFrame.tiles.end());
+    if (selected != selectedFrame.tiles.end()) {
+        CHECK(selected->editorDecorationHighlight ==
+            RenderFrameData::EditorDecorationHighlight::Selected);
+    }
+}
+
+void testEditorLayerLockFiltersDecorationsAndTheirLights()
+{
+    TEST("editorLayerLockFiltersDecorationsAndTheirLights");
+    AssetManifest manifest = testManifest();
+    const RenderModel tileModel = manifest.addModel({
+        .name = "TileDecorationGrassEdge01",
+        .path = "tile_grass_edge_01.glb",
+        .preserveSourceScale = true,
+    });
+    const RenderModel meshModel = manifest.modelIdByName("Decoration");
+    LevelEditor editor;
+    editor.newDocument(4, 1, false);
+    editor.addLayerAbove();
+    editor.setLayerLocked(false);
+    constexpr std::array elevations { 0.75f, 1.0f, 1.999f, 2.0f };
+    for (std::size_t index = 0; index < elevations.size(); ++index) {
+        if (index % 2 == 0) {
+            editor.setSelectedDecorationModel("Decoration");
+        } else {
+            editor.setTileDecorationBrush({
+                TileDecorations::Style::Grass, TileDecorations::Layout::Edge, 0, 0,
+            });
+        }
+        CHECK(editor.placeDecoration({ static_cast<int>(index), 0,
+            static_cast<int>(elevations[index]) }));
+        CHECK(editor.selectDecoration(index));
+        auto decoration = *editor.selectedDecoration();
+        decoration.position.z = elevations[index];
+        decoration.pointLight = Level::Decoration::PointLight {};
+        decoration.pointLight->intensity = static_cast<float>(index + 1);
+        CHECK(editor.updateSelectedDecoration(decoration));
+    }
+    const auto definition = editor.documentDefinition();
+    const std::array neighbors { RenderFrameBuilder::EditorInput::OverworldNeighbor {
+        .screen = 7, .origin = { 4, 0 }, .width = 4, .height = 1,
+        .definition = &definition,
+    } };
+    const auto build = [&] {
+        return RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = editor, .settings = {},
+            .hoverDecoration = 0, .overworldNeighbors = neighbors,
+        });
+    };
+    const auto isDecoration = [=](const RenderFrameData::Tile& tile) {
+        return tile.model == meshModel || tile.model == tileModel;
+    };
+    const auto unlocked = build();
+    CHECK(std::ranges::count_if(unlocked.tiles, isDecoration) == 8);
+    CHECK(unlocked.lighting.pointLightCount == 8);
+
+    editor.setActiveLayer(1);
+    editor.setLayerLocked(true);
+    const auto locked = build();
+    CHECK(std::ranges::count_if(locked.tiles, isDecoration) == 4);
+    CHECK(locked.lighting.pointLightCount == 4);
+    for (const auto& tile : locked.tiles) {
+        if (!isDecoration(tile)) continue;
+        CHECK(tile.cell.z == 1);
+        CHECK(tile.editorDecorationHighlight ==
+            RenderFrameData::EditorDecorationHighlight::None);
+        if (tile.cell.x < 4) {
+            CHECK(tile.editorDecorationIndex.has_value());
+            CHECK(tile.editorDecorationIndex == 1U || tile.editorDecorationIndex == 2U);
+        } else {
+            CHECK(!tile.editorDecorationIndex);
+            CHECK(!tile.pickable);
+        }
+    }
+    for (uint32_t index = 0; index < locked.lighting.pointLightCount; ++index) {
+        const auto& light = locked.lighting.pointLights[index];
+        CHECK(light.intensity == 2.0f || light.intensity == 3.0f);
+        CHECK(light.emitterTileIndex.has_value());
+        if (light.emitterTileIndex) {
+            CHECK(*light.emitterTileIndex < locked.tiles.size());
+            if (*light.emitterTileIndex < locked.tiles.size()) {
+                CHECK(isDecoration(locked.tiles[*light.emitterTileIndex]));
+            }
+        }
+    }
+
+    CHECK(editor.selectDecoration(2));
+    const auto selected = build();
+    const auto selectedTile = std::ranges::find_if(selected.tiles, [](const auto& tile) {
+        return tile.editorDecorationIndex == 2U;
+    });
+    CHECK(selectedTile != selected.tiles.end());
+    if (selectedTile != selected.tiles.end()) {
+        CHECK(selectedTile->editorDecorationHighlight ==
+            RenderFrameData::EditorDecorationHighlight::Selected);
+    }
+
+    editor.setActiveLayer(0);
+    const auto lower = build();
+    CHECK(std::ranges::count_if(lower.tiles, isDecoration) == 2);
+    CHECK(lower.lighting.pointLightCount == 2);
+    CHECK(std::ranges::none_of(lower.tiles, [](const auto& tile) {
+        return tile.editorDecorationIndex && *tile.editorDecorationIndex != 0;
+    }));
+    editor.setActiveLayer(2);
+    const auto upper = build();
+    CHECK(std::ranges::count_if(upper.tiles, isDecoration) == 2);
+    CHECK(upper.lighting.pointLightCount == 2);
+    CHECK(std::ranges::none_of(upper.tiles, [](const auto& tile) {
+        return tile.editorDecorationIndex && *tile.editorDecorationIndex != 3;
+    }));
+    editor.setLayerLocked(false);
+    CHECK(std::ranges::count_if(build().tiles, isDecoration) == 8);
+    CHECK(editor.documentDefinition() == definition);
 }
 
 void testGameplayFrameBuildsManifestDecorationInstances()
@@ -4941,6 +5071,7 @@ int main()
     testWaterRipplesFollowPlayerAndEnemySurfaceContact();
     testWaterRippleScheduleHasAFixedBudget();
     testTileDecorationHoverPreviewMatchesRaisedSurfacePlacement();
+    testEditorLayerLockFiltersDecorationsAndTheirLights();
     testGameplayFrameBuildsManifestDecorationInstances();
     testEnemyFacingAttackAndAnimationInstances();
     } catch (const std::exception& error) {

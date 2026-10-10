@@ -221,6 +221,29 @@ public:
         clickAt(*located.buttonCenter);
     }
 
+    void clickPlacedDecoration(std::size_t index)
+    {
+        (void)frame();
+        ImGuiWindow* parent = ImGui::FindWindowByName("Editor regression");
+        const ImGuiID tabBar = ImHashStr("LevelEditorToolTabs", 0, parent->ID);
+        const char* tabName = editor.tool() == LevelEditor::Tool::TileDecorations
+            ? "Tile Decorations" : "Mesh Decorations";
+        const ImGuiID tab = ImHashStr(tabName, 0, tabBar);
+        const ImGuiID child = ImHashStr("##placed_decorations", 0, tab);
+        ImGuiWindow* list = nullptr;
+        for (ImGuiWindow* window : context_->Windows) {
+            if (window->Active && window->ParentWindow == parent && window->ChildId == child) {
+                list = window;
+                break;
+            }
+        }
+        if (!list) throw std::runtime_error("Missing placed decoration list");
+        const std::string label = std::to_string(index + 1) + ": " + editor.decorations().at(index).model;
+        const auto located = frame(nullptr, Widget { ImHashStr(label.c_str(), 0, list->ID), list });
+        if (!located.buttonCenter) throw std::runtime_error("Missing placed decoration item");
+        clickAt(*located.buttonCenter);
+    }
+
     void clickIcon(TileType tile, bool inPopup = false)
     {
         const auto visible = frame();
@@ -541,6 +564,10 @@ void tileDecorationTabChoosesBrushAndKeepsPlacedListsSeparate()
     CHECK(panel.shows("Edges: East + South"));
     CHECK(panel.editor.placeDecoration({ 2, 1, 1 }));
     CHECK(panel.shows("Placed Tile Decorations (1)"));
+    CHECK(!panel.editor.selectedDecorationIndex());
+    CHECK(!panel.shows("Transform: TileDecorationPebblesCorner04"));
+    panel.clickPlacedDecoration(0);
+    CHECK(panel.editor.selectedDecorationIndex() == 0U);
     CHECK(panel.shows("Transform: TileDecorationPebblesCorner04"));
     panel.clickToolControl("Duplicate");
     CHECK(panel.editor.decorations().size() == 2);
@@ -559,6 +586,8 @@ void tileDecorationTabChoosesBrushAndKeepsPlacedListsSeparate()
     panel.editor.setSelectedDecorationModel("Hero");
     CHECK(panel.editor.placeDecoration({ 0, 0, 0 }));
     CHECK(panel.shows("Placed Meshes (1)"));
+    CHECK(!panel.shows("Transform: Hero"));
+    panel.clickPlacedDecoration(1);
     CHECK(panel.shows("Transform: Hero"));
     panel.clickToolTab("Tile Decorations");
     CHECK(panel.editor.tool() == LevelEditor::Tool::TileDecorations);
@@ -575,6 +604,26 @@ void tileDecorationTabChoosesBrushAndKeepsPlacedListsSeparate()
     CHECK(panel.shows("Edges: North + South"));
     CHECK(panel.editor.selectedDecorationModel() == "Hero");
 
+    panel.clickToolControl("Random");
+    CHECK(panel.editor.tileDecorationBrush().randomVariation);
+    CHECK(panel.shows("New variation after each placement"));
+    CHECK(panel.shows("R: rotate brush while placing"));
+    const auto preview = panel.editor.decorationPlacementPreview({ 3, 2, 1 });
+    CHECK(preview.has_value());
+    const auto explicitlySelected = panel.editor.selectedDecorationIndex();
+    CHECK(panel.editor.placeDecoration({ 3, 2, 1 }));
+    if (preview) CHECK(panel.editor.decorations().back() == *preview);
+    CHECK(panel.editor.selectedDecorationIndex() == explicitlySelected);
+    CHECK(!panel.shows("Transform: TileDecorationGrassStrip"));
+    const auto nextVariant = panel.editor.tileDecorationBrush().variant;
+    panel.clickToolControl("Rotate Right");
+    CHECK(panel.editor.tileDecorationBrush().randomVariation);
+    CHECK(panel.editor.tileDecorationBrush().variant == nextVariant);
+    CHECK(panel.editor.tileDecorationBrush().quarterTurns == 1);
+    panel.clickToolControl("Variation 3");
+    CHECK(!panel.editor.tileDecorationBrush().randomVariation);
+    CHECK(panel.editor.tileDecorationBrush().variant == 2);
+
     // World selection requests a tab switch while the old tab is still active.
     CHECK(panel.editor.selectDecoration(1));
     (void)panel.frame();
@@ -582,8 +631,96 @@ void tileDecorationTabChoosesBrushAndKeepsPlacedListsSeparate()
     CHECK(panel.editor.tool() == LevelEditor::Tool::Decorations);
     CHECK(panel.editor.selectDecoration(0));
     (void)panel.frame();
-    CHECK(panel.shows("Placed Tile Decorations (1)"));
+    CHECK(panel.shows("Placed Tile Decorations (2)"));
     CHECK(panel.editor.tool() == LevelEditor::Tool::TileDecorations);
+}
+
+void decorationListsAndInspectorsRespectLayerLock()
+{
+    TEST("decorationListsAndInspectorsRespectLayerLock");
+    EditorPanel panel(LevelEditor::Tool::TileDecorations);
+    panel.editor.setLayerLocked(false);
+    panel.editor.setTileDecorationBrush({
+        TileDecorations::Style::Grass, TileDecorations::Layout::Edge, 0, 0,
+    });
+    CHECK(panel.editor.placeDecoration({ 0, 0, 0 }));
+    CHECK(panel.editor.placeDecoration({ 0, 0, 1 }));
+    panel.editor.setSelectedDecorationModel("Hero");
+    CHECK(panel.editor.placeDecoration({ 1, 0, 0 }));
+    CHECK(panel.editor.placeDecoration({ 1, 0, 1 }));
+    CHECK(panel.editor.selectDecoration(0));
+    panel.editor.setActiveLayer(1);
+    panel.editor.setLayerLocked(true);
+    CHECK(panel.shows("Placed Tile Decorations (1)"));
+    CHECK(!panel.shows("Transform: TileDecorationGrassEdge01"));
+    CHECK(!panel.shows("1: TileDecorationGrassEdge01"));
+    CHECK(panel.shows("2: TileDecorationGrassEdge01"));
+    panel.clickPlacedDecoration(1);
+    CHECK(panel.editor.selectedDecorationIndex() == 1U);
+    CHECK(panel.shows("Transform: TileDecorationGrassEdge01"));
+
+    panel.clickToolTab("Mesh Decorations");
+    CHECK(panel.shows("Placed Meshes (1)"));
+    CHECK(!panel.shows("3: Hero"));
+    CHECK(panel.shows("4: Hero"));
+    panel.clickPlacedDecoration(3);
+    CHECK(panel.editor.selectedDecorationIndex() == 3U);
+    CHECK(panel.shows("Transform: Hero"));
+    panel.editor.setActiveLayer(0);
+    CHECK(!panel.shows("Transform: Hero"));
+    CHECK(panel.shows("Placed Meshes (1)"));
+    CHECK(panel.shows("3: Hero"));
+    CHECK(!panel.shows("4: Hero"));
+    panel.clickPlacedDecoration(2);
+    CHECK(panel.editor.selectedDecorationIndex() == 2U);
+    CHECK(panel.shows("Transform: Hero"));
+
+    panel.editor.setLayerLocked(false);
+    CHECK(panel.shows("Placed Meshes (2)"));
+    panel.clickToolTab("Tile Decorations");
+    CHECK(panel.shows("Placed Tile Decorations (2)"));
+    CHECK(panel.editor.decorations().size() == 4);
+}
+
+void mossPaletteOffersEveryLayoutAndVariation()
+{
+    TEST("mossPaletteOffersEveryLayoutAndVariation");
+    EditorPanel panel(LevelEditor::Tool::TileDecorations);
+    panel.clickToolControl("Moss");
+    CHECK(panel.editor.tileDecorationBrush().style == TileDecorations::Style::Moss);
+    for (const auto& [label, name] : {
+             std::pair { "One edge", "Edge" },
+             std::pair { "Two adjacent edges", "Corner" },
+             std::pair { "Two opposite edges", "Strip" },
+             std::pair { "Three edges", "End" },
+         }) {
+        panel.clickToolControl(label);
+        for (int variant = 1; variant <= 4; ++variant) {
+            const std::string variation = "Variation " + std::to_string(variant);
+            panel.clickToolControl(variation.c_str());
+            const std::string expected = "TileDecorationMoss" + std::string(name) +
+                "0" + std::to_string(variant);
+            CHECK(panel.editor.selectedTileDecorationModel() == expected);
+            CHECK(!panel.editor.tileDecorationBrush().randomVariation);
+            CHECK(panel.editor.placingDecoration());
+        }
+    }
+    panel.clickToolControl("Rotate Right");
+    CHECK(panel.editor.tileDecorationBrush().quarterTurns == 1);
+    CHECK(panel.shows("Edges: North + East + South"));
+    panel.clickToolControl("Random");
+    CHECK(panel.editor.tileDecorationBrush().randomVariation);
+    const auto preview = panel.editor.decorationPlacementPreview({ 3, 2, 1 });
+    CHECK(preview.has_value());
+    CHECK(panel.editor.placeDecoration({ 3, 2, 1 }));
+    if (preview) CHECK(panel.editor.decorations().back() == *preview);
+    CHECK(panel.editor.decorations().back().model.starts_with("TileDecorationMossEnd"));
+    CHECK(!panel.editor.selectedDecorationIndex());
+    if (preview) CHECK(panel.editor.selectedTileDecorationModel() != preview->model);
+    panel.clickPlacedDecoration(0);
+    CHECK(panel.editor.selectedDecorationIndex() == 0U);
+    CHECK(panel.editor.tool() == LevelEditor::Tool::TileDecorations);
+    CHECK(panel.shows("Transform: TileDecorationMossEnd"));
 }
 
 } // namespace
@@ -601,6 +738,8 @@ int main()
         leverPickerOffersFourPlacementsAndKeepsSelectedBrush();
         terrainRandomizeButtonsKeepAssignmentsAndUndo();
         tileDecorationTabChoosesBrushAndKeepsPlacedListsSeparate();
+        decorationListsAndInspectorsRespectLayerLock();
+        mossPaletteOffersEveryLayoutAndVariation();
     } catch (const std::exception& error) {
         std::cerr << "Editor ImGui regression failed: " << error.what() << '\n';
         return 1;

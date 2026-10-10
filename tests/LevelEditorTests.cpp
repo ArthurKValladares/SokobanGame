@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -1831,6 +1832,8 @@ void testDecorationEditingPersistenceAndUndo()
     CHECK(editor.tool() == LevelEditor::Tool::Decorations);
     CHECK(editor.placeDecoration({ 1, 1, 1 }));
     CHECK(editor.decorations().size() == 1);
+    CHECK(!editor.selectedDecorationIndex());
+    CHECK(editor.selectDecoration(0));
     CHECK(editor.selectedDecorationIndex() == 0U);
     CHECK(editor.decorations()[0].model == "Stone");
     CHECK(editor.decorations()[0].position.x == 1.5f);
@@ -1897,6 +1900,7 @@ void testDecorationTransformSessionCoalescesUndoAndCanCancel()
     editor.newDocument(3, 2, false);
     editor.setSelectedDecorationModel("Stone");
     CHECK(editor.placeDecoration({ 1, 1, 1 }));
+    CHECK(editor.selectDecoration(0));
     const Level::Decoration original = *editor.selectedDecoration();
 
     CHECK(editor.beginSelectedDecorationTransform());
@@ -1918,6 +1922,7 @@ void testDecorationTransformSessionCoalescesUndoAndCanCancel()
     CHECK(editor.decorations().empty());
 
     CHECK(editor.placeDecoration({ 1, 1, 1 }));
+    CHECK(editor.selectDecoration(0));
     const Level::Decoration beforeCancel = *editor.selectedDecoration();
     CHECK(editor.beginSelectedDecorationTransform());
     transformed = beforeCancel;
@@ -1930,7 +1935,7 @@ void testDecorationTransformSessionCoalescesUndoAndCanCancel()
 void testTileDecorationCatalogAndSurfacePlacement()
 {
     TEST("tileDecorationCatalogAndSurfacePlacement");
-    CHECK(TileDecorations::catalog.size() == 32);
+    CHECK(TileDecorations::catalog.size() == 48);
     for (std::size_t index = 0; index < TileDecorations::catalog.size(); ++index) {
         const auto& entry = TileDecorations::catalog[index];
         const TileDecorations::Brush brush {
@@ -1970,7 +1975,8 @@ void testTileDecorationCatalogAndSurfacePlacement()
     CHECK(preview->rotationDegrees.z == 270.0f);
     CHECK(preview->scale.x == 1.0f && preview->scale.y == 1.0f && preview->scale.z == 1.0f);
     CHECK(editor.placeDecoration(surface));
-    CHECK(editor.selectedDecoration() && *editor.selectedDecoration() == *preview);
+    CHECK(!editor.selectedDecoration());
+    CHECK(editor.decorations().back() == *preview);
     CHECK(editor.tryUndoEdit());
     CHECK(editor.decorations().empty());
     CHECK(editor.documentToLevel().tileAt(1, 1, 1) == TileType::Wall);
@@ -1978,6 +1984,7 @@ void testTileDecorationCatalogAndSurfacePlacement()
     CHECK(editor.decorations().size() == 1);
     CHECK(editor.decorations().front() == *preview);
 
+    CHECK(editor.selectDecoration(0));
     CHECK(editor.beginSelectedDecorationTransform());
     auto moved = *preview;
     moved.position.x += 0.25f;
@@ -2057,6 +2064,431 @@ void testTileAndMeshDecorationBrushesStayIndependent()
     editor.setTool(LevelEditor::Tool::Tiles);
     CHECK(!editor.decorationToolActive());
     CHECK(!editor.placingDecoration());
+}
+
+void testRandomTileDecorationPreviewMatchesEachPlacement()
+{
+    TEST("randomTileDecorationPreviewMatchesEachPlacement");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(4, 3, false);
+    editor.setTileDecorationBrush({
+        TileDecorations::Style::Grass, TileDecorations::Layout::Corner, 0, 1, true,
+    });
+    const GridPosition3 surface { 2, 1, 1 };
+    CHECK(editor.tileDecorationBrush().randomVariation);
+    CHECK(editor.tileDecorationBrush().variant < TileDecorations::variantCount);
+    const auto firstPreview = editor.decorationPlacementPreview(surface);
+    CHECK(firstPreview.has_value());
+    if (!firstPreview) return;
+    CHECK(editor.decorationPlacementPreview(surface) == firstPreview);
+    CHECK(editor.decorationPlacementPreview({ 1, 1, 1 })->model == firstPreview->model);
+    CHECK(!editor.placeDecoration({ -1, 0, 1 }));
+    CHECK(editor.decorationPlacementPreview(surface) == firstPreview);
+
+    for (int placement = 0; placement < 16; ++placement) {
+        const auto preview = editor.decorationPlacementPreview(surface);
+        CHECK(preview.has_value());
+        if (!preview) return;
+        const uint8_t variant = editor.tileDecorationBrush().variant;
+        CHECK(preview->rotationDegrees.z == 90.0f);
+        CHECK(editor.placeDecoration(surface));
+        CHECK(editor.decorations().back() == *preview);
+        CHECK(!editor.selectedDecorationIndex());
+        CHECK(!editor.selectedDecoration());
+        CHECK(editor.tileDecorationBrush().randomVariation);
+        CHECK(editor.tileDecorationBrush().variant < TileDecorations::variantCount);
+        CHECK(editor.tileDecorationBrush().variant != variant);
+        const auto nextPreview = editor.decorationPlacementPreview(surface);
+        CHECK(nextPreview && nextPreview->model != preview->model);
+        CHECK(editor.decorationPlacementPreview(surface) == nextPreview);
+    }
+
+    const auto placed = editor.decorations();
+    const auto nextPreview = editor.decorationPlacementPreview(surface);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.decorations().size() == placed.size() - 1);
+    CHECK(editor.decorationPlacementPreview(surface) == nextPreview);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.decorations() == placed);
+    CHECK(!editor.selectedDecoration());
+    CHECK(editor.decorationPlacementPreview(surface) == nextPreview);
+    const auto path = project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(path));
+    CHECK(Level::loadFromFile(path).decorations() == placed);
+    CHECK(Level::loadFromFile(project.runtime / "level0" / "screen0.scr").decorations() == placed);
+}
+
+void testRandomTileDecorationBrushChangesKeepPendingVariant()
+{
+    TEST("randomTileDecorationBrushChangesKeepPendingVariant");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(4, 3, false);
+    editor.setTileDecorationBrush({
+        TileDecorations::Style::Grass, TileDecorations::Layout::Edge, 0, 0, true,
+    });
+    const auto pendingVariant = editor.tileDecorationBrush().variant;
+    auto brush = editor.tileDecorationBrush();
+    brush.style = TileDecorations::Style::Pebbles;
+    brush.layout = TileDecorations::Layout::End;
+    brush.variant = static_cast<uint8_t>((pendingVariant + 1) % TileDecorations::variantCount);
+    editor.setTileDecorationBrush(brush);
+    CHECK(editor.tileDecorationBrush().variant == pendingVariant);
+    CHECK(editor.tileDecorationBrush().style == TileDecorations::Style::Pebbles);
+    CHECK(editor.tileDecorationBrush().layout == TileDecorations::Layout::End);
+    CHECK(editor.tileDecorationBrush().randomVariation);
+
+    const GridPosition3 surface { 2, 1, 1 };
+    const auto model = editor.selectedTileDecorationModel();
+    editor.rotateTileDecorationBrush();
+    CHECK(editor.tileDecorationBrush().quarterTurns == 1);
+    CHECK(editor.tileDecorationBrush().variant == pendingVariant);
+    CHECK(editor.tileDecorationBrush().randomVariation);
+    CHECK(editor.selectedTileDecorationModel() == model);
+    CHECK(editor.decorationPlacementPreview(surface)->rotationDegrees.z == 90.0f);
+    editor.rotateTileDecorationBrush(3);
+    CHECK(editor.tileDecorationBrush().quarterTurns == 0);
+    editor.rotateTileDecorationBrush(-1);
+    CHECK(editor.tileDecorationBrush().quarterTurns == 3);
+    editor.rotateTileDecorationBrush(std::numeric_limits<int>::max());
+    CHECK(editor.tileDecorationBrush().quarterTurns == 2);
+    editor.rotateTileDecorationBrush(std::numeric_limits<int>::min());
+    CHECK(editor.tileDecorationBrush().quarterTurns == 2);
+    CHECK(editor.tileDecorationBrush().variant == pendingVariant);
+
+    editor.cancelDecorationPlacement();
+    CHECK(!editor.placingDecoration());
+    editor.setTileDecorationBrush(editor.tileDecorationBrush());
+    CHECK(editor.placingDecoration());
+    CHECK(editor.tileDecorationBrush().variant == pendingVariant);
+    editor.setSelectedDecorationModel("Stone");
+    CHECK(editor.placeDecoration(surface));
+    CHECK(editor.tileDecorationBrush().variant == pendingVariant);
+    const auto placedMesh = editor.decorations().back();
+    editor.setTool(LevelEditor::Tool::TileDecorations);
+    editor.rotateTileDecorationBrush();
+    CHECK(editor.decorations().back() == placedMesh);
+    CHECK(editor.tileDecorationBrush().variant == pendingVariant);
+
+    brush = editor.tileDecorationBrush();
+    brush.randomVariation = false;
+    brush.variant = 2;
+    editor.setTileDecorationBrush(brush);
+    const auto fixed = editor.decorationPlacementPreview(surface);
+    CHECK(fixed && fixed->model == "TileDecorationPebblesEnd03");
+    CHECK(editor.placeDecoration(surface));
+    CHECK(editor.decorations().back() == *fixed);
+    CHECK(editor.tileDecorationBrush().variant == 2);
+    CHECK(!editor.tileDecorationBrush().randomVariation);
+    CHECK(editor.decorationPlacementPreview(surface) == fixed);
+    CHECK(editor.placeDecoration(surface));
+    CHECK(editor.decorations().back() == *fixed);
+    editor.rotateTileDecorationBrush();
+    CHECK(editor.tileDecorationBrush().variant == 2);
+    CHECK(!editor.tileDecorationBrush().randomVariation);
+}
+
+void testMossBrushPlacementAndRoundTrip()
+{
+    TEST("mossBrushPlacementAndRoundTrip");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(5, 3, false);
+    editor.setActiveLayer(1);
+    editor.setLayerLocked(true);
+    editor.setTileDecorationBrush({
+        TileDecorations::Style::Moss, TileDecorations::Layout::Edge, 0, 0, true,
+    });
+    for (std::size_t index = 0; index < TileDecorations::layouts.size(); ++index) {
+        auto brush = editor.tileDecorationBrush();
+        brush.layout = TileDecorations::layouts[index];
+        editor.setTileDecorationBrush(brush);
+        editor.rotateTileDecorationBrush();
+        const GridPosition3 target { static_cast<int>(index), 1, 0 };
+        const auto preview = editor.decorationPlacementPreview(target);
+        CHECK(preview.has_value());
+        if (!preview) return;
+        CHECK(preview->model.starts_with("TileDecorationMoss"));
+        CHECK(preview->position.z == 1.0f);
+        CHECK(preview->rotationDegrees.z == static_cast<float>(((index + 1) % 4) * 90));
+        CHECK(!editor.placeDecoration({ -1, 1, 0 }));
+        CHECK(editor.decorationPlacementPreview(target) == preview);
+        CHECK(editor.placeDecoration(target));
+        CHECK(editor.decorations().back() == *preview);
+        CHECK(!editor.selectedDecorationIndex());
+        const auto next = editor.decorationPlacementPreview(target);
+        CHECK(next && next->model != preview->model);
+    }
+
+    const auto placed = editor.decorations();
+    const auto path = project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(path));
+    CHECK(Level::loadFromFile(path).decorations() == placed);
+    CHECK(Level::loadFromFile(project.runtime / "level0" / "screen0.scr").decorations() == placed);
+    auto loaded = makeEditor(project);
+    CHECK(loaded.decorations() == placed);
+    CHECK(loaded.selectDecoration(0));
+    CHECK(loaded.tool() == LevelEditor::Tool::TileDecorations);
+    loaded.setTileDecorationBrush({
+        TileDecorations::Style::Moss, TileDecorations::Layout::End, 3, 2,
+    });
+    const auto fixed = loaded.decorationPlacementPreview({ 4, 1, 1 });
+    CHECK(fixed && fixed->model == "TileDecorationMossEnd04");
+    CHECK(fixed && fixed->rotationDegrees.z == 180.0f);
+    CHECK(loaded.placeDecoration({ 4, 1, 1 }));
+    CHECK(loaded.decorations().back() == *fixed);
+    CHECK(loaded.decorationPlacementPreview({ 4, 1, 1 }) == fixed);
+}
+
+void testDecorationPlacementRequiresExplicitSelection()
+{
+    TEST("decorationPlacementRequiresExplicitSelection");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(4, 3, false);
+    editor.setSelectedDecorationModel("Stone");
+    CHECK(!editor.selectedDecoration());
+    for (int x = 1; x <= 2; ++x) {
+        CHECK(editor.placeDecoration({ x, 1, 1 }));
+        CHECK(!editor.selectedDecorationIndex());
+        CHECK(!editor.selectedDecoration());
+        CHECK(!editor.beginSelectedDecorationTransform());
+        CHECK(!editor.updateSelectedDecoration(editor.decorations().back()));
+    }
+
+    CHECK(editor.selectDecoration(0));
+    auto selected = *editor.selectedDecoration();
+    selected.position.z += 0.25f;
+    CHECK(editor.beginSelectedDecorationTransform());
+    CHECK(editor.previewSelectedDecorationTransform(selected));
+    CHECK(editor.endSelectedDecorationTransform());
+    CHECK(*editor.selectedDecoration() == selected);
+    editor.setTileDecorationBrush({
+        TileDecorations::Style::Grass, TileDecorations::Layout::Corner, 0, 1, true,
+    });
+    for (int x = 1; x <= 2; ++x) {
+        const auto preview = editor.decorationPlacementPreview({ x, 2, 1 });
+        CHECK(preview.has_value());
+        CHECK(editor.placeDecoration({ x, 2, 1 }));
+        CHECK(editor.decorations().back() == *preview);
+        CHECK(editor.selectedDecorationIndex() == 0U);
+        CHECK(*editor.selectedDecoration() == selected);
+    }
+    editor.setSelectedDecorationModel("Tree");
+    CHECK(editor.placeDecoration({ 3, 1, 1 }));
+    CHECK(editor.selectedDecorationIndex() == 0U);
+    CHECK(*editor.selectedDecoration() == selected);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.decorations().size() == 4);
+    CHECK(editor.selectedDecorationIndex() == 0U);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.decorations().size() == 5);
+    CHECK(editor.selectedDecorationIndex() == 0U);
+    CHECK(*editor.selectedDecoration() == selected);
+
+    CHECK(editor.selectDecoration(2));
+    CHECK(editor.tool() == LevelEditor::Tool::TileDecorations);
+    const auto original = *editor.selectedDecoration();
+    auto transformed = original;
+    transformed.position.x += 0.125f;
+    CHECK(editor.updateSelectedDecoration(transformed));
+    CHECK(*editor.selectedDecoration() == transformed);
+    CHECK(editor.tryUndoEdit());
+    CHECK(*editor.selectedDecoration() == original);
+    editor.clearDecorationSelection();
+    CHECK(editor.placeDecoration({ 3, 2, 1 }));
+    CHECK(!editor.selectedDecorationIndex());
+    CHECK(!editor.beginSelectedDecorationTransform());
+}
+
+void testDecorationPlacementHonorsLockedLayerAndPendingVariation()
+{
+    TEST("decorationPlacementHonorsLockedLayerAndPendingVariation");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(4, 3, false);
+    editor.addLayerAbove();
+    editor.setActiveLayer(0);
+    editor.setLayerLocked(true);
+    editor.setSelectedDecorationModel("Stone");
+    const auto meshPreview = editor.decorationPlacementPreview({ 1, 1, 2 });
+    CHECK(meshPreview && meshPreview->position.z == 0.0f);
+    CHECK(editor.placeDecoration({ 1, 1, 2 }));
+    CHECK(editor.decorations().back() == *meshPreview);
+    CHECK(!editor.selectedDecorationIndex());
+
+    editor.setActiveLayer(1);
+    editor.setTileDecorationBrush({
+        TileDecorations::Style::Grass, TileDecorations::Layout::Corner, 0, 3, true,
+    });
+    const auto tilePreview = editor.decorationPlacementPreview({ 2, 1, 2 });
+    CHECK(tilePreview && tilePreview->position.z == 1.0f);
+    CHECK(tilePreview && tilePreview->rotationDegrees.z == 270.0f);
+    CHECK(editor.decorationPlacementPreview({ 2, 1, 0 }) == tilePreview);
+    CHECK(!editor.placeDecoration({ -1, 1, 2 }));
+    CHECK(editor.decorationPlacementPreview({ 2, 1, 2 }) == tilePreview);
+    CHECK(editor.placeDecoration({ 2, 1, 2 }));
+    CHECK(editor.decorations().back() == *tilePreview);
+    CHECK(!editor.selectedDecorationIndex());
+    const auto nextPreview = editor.decorationPlacementPreview({ 2, 1, 0 });
+    CHECK(nextPreview && nextPreview->model != tilePreview->model);
+    CHECK(nextPreview && nextPreview->position.z == 1.0f);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.decorations().size() == 1);
+    CHECK(editor.decorationPlacementPreview({ 2, 1, 2 }) == nextPreview);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.decorations().back() == *tilePreview);
+    CHECK(editor.decorationPlacementPreview({ 2, 1, 2 }) == nextPreview);
+
+    editor.setActiveLayer(2);
+    CHECK(editor.decorationPlacementPreview({ 2, 1, 0 })->position.z == 2.0f);
+    CHECK(editor.decorationPlacementPreview({ 2, 1, 0 })->model == nextPreview->model);
+    editor.setLayerLocked(false);
+    CHECK(editor.decorationPlacementPreview({ 2, 1, 0 })->position.z == 0.0f);
+    CHECK(editor.decorationPlacementPreview({ 2, 1, 0 })->model == nextPreview->model);
+    CHECK(editor.placeDecoration({ 2, 1, 0 }));
+    CHECK(editor.decorations().back().position.z == 0.0f);
+}
+
+void testDecorationLayerLockProtectsSelectionAndTransformBoundaries()
+{
+    TEST("decorationLayerLockProtectsSelectionAndTransformBoundaries");
+    for (const auto* model : { "Stone", "TileDecorationGrassCorner01", "TileDecorationMossCorner01" }) {
+        TemporaryProject project;
+        auto author = makeEditor(project);
+        author.newDocument(4, 3, false);
+        author.setSelectedDecorationModel(model);
+        CHECK(author.placeDecoration({ 1, 1, 1 }));
+        CHECK(author.selectDecoration(0));
+        auto original = *author.selectedDecoration();
+        original.position.z = 1.25f;
+        CHECK(author.updateSelectedDecoration(original));
+        CHECK(author.saveDocument(project.source / "level0" / "screen0.scr"));
+        auto editor = makeEditor(project);
+        CHECK(!editor.canUndo());
+        CHECK(!editor.canRedo());
+        CHECK(!editor.dirty());
+        CHECK(editor.selectDecoration(0));
+        editor.setActiveLayer(1);
+        editor.setLayerLocked(true);
+        CHECK(editor.decorationEditable(original));
+
+        auto boundary = original;
+        boundary.position.z = 1.0f;
+        CHECK(editor.decorationEditable(boundary));
+        boundary.position.z = std::nextafter(2.0f, 1.0f);
+        CHECK(editor.decorationEditable(boundary));
+        boundary.position.z = 2.0f;
+        CHECK(!editor.decorationEditable(boundary));
+        boundary.position.z = std::nextafter(1.0f, 0.0f);
+        CHECK(!editor.decorationEditable(boundary));
+        CHECK(!editor.updateSelectedDecoration(boundary));
+        CHECK(editor.beginSelectedDecorationTransform());
+        boundary.position.z = 2.0f;
+        CHECK(!editor.previewSelectedDecorationTransform(boundary));
+        CHECK(*editor.selectedDecoration() == original);
+        CHECK(editor.endSelectedDecorationTransform());
+        CHECK(!editor.canUndo());
+
+        // A retained selection cannot be edited or reselected on another layer.
+        editor.setActiveLayer(0);
+        CHECK(editor.selectedDecorationIndex() == 0U);
+        CHECK(!editor.decorationEditable(*editor.selectedDecoration()));
+        boundary.position.z = 0.75f;
+        CHECK(editor.decorationEditable(boundary));
+        CHECK(!editor.selectDecoration(0));
+        CHECK(!editor.updateSelectedDecoration(boundary));
+        CHECK(!editor.beginSelectedDecorationTransform());
+        CHECK(!editor.previewSelectedDecorationTransform(boundary));
+        CHECK(!editor.duplicateSelectedDecoration());
+        CHECK(!editor.deleteSelectedDecoration());
+        CHECK(editor.decorations().size() == 1);
+        CHECK(*editor.selectedDecoration() == original);
+        CHECK(!editor.canUndo());
+        CHECK(!editor.canRedo());
+        CHECK(!editor.dirty());
+        boundary.position.z = 0.0f;
+        CHECK(editor.decorationEditable(boundary));
+        boundary.position.z = -0.001f;
+        CHECK(!editor.decorationEditable(boundary));
+        boundary.position.z = 1.0f;
+        CHECK(!editor.decorationEditable(boundary));
+
+        editor.setActiveLayer(1);
+        CHECK(editor.selectDecoration(0));
+        auto moved = original;
+        moved.position.z = 1.75f;
+        CHECK(editor.updateSelectedDecoration(moved));
+        CHECK(*editor.selectedDecoration() == moved);
+        CHECK(editor.tryUndoEdit());
+        CHECK(*editor.selectedDecoration() == original);
+        CHECK(!editor.canUndo());
+        CHECK(editor.canRedo());
+        // Rejected cross-layer changes preserve an existing redo branch.
+        moved.position.z = 2.0f;
+        CHECK(!editor.updateSelectedDecoration(moved));
+        CHECK(editor.canRedo());
+        CHECK(editor.tryRedoEdit());
+        CHECK(editor.selectedDecoration()->position.z == 1.75f);
+
+        editor.setActiveLayer(0);
+        editor.setLayerLocked(false);
+        CHECK(editor.decorationEditable(*editor.selectedDecoration()));
+        CHECK(editor.selectDecoration(0));
+        CHECK(editor.updateSelectedDecoration(moved));
+        CHECK(editor.selectedDecoration()->position.z == 2.0f);
+        CHECK(editor.duplicateSelectedDecoration());
+        CHECK(editor.decorations().size() == 2);
+        CHECK(editor.deleteSelectedDecoration());
+        CHECK(editor.decorations().size() == 1);
+    }
+}
+
+void testDecorationLayerContextChangesCommitActiveTransform()
+{
+    TEST("decorationLayerContextChangesCommitActiveTransform");
+    for (int change = 0; change < 4; ++change) {
+        TemporaryProject project;
+        auto author = makeEditor(project);
+        author.newDocument(3, 2, false);
+        author.setSelectedDecorationModel("Stone");
+        CHECK(author.placeDecoration({ 1, 1, 1 }));
+        CHECK(author.saveDocument(project.source / "level0" / "screen0.scr"));
+        auto editor = makeEditor(project);
+        editor.setActiveLayer(1);
+        editor.setLayerLocked(change == 0 || change == 3);
+        CHECK(editor.selectDecoration(0));
+        const auto original = *editor.selectedDecoration();
+        auto moved = original;
+        moved.position.x += 0.5f;
+        if (change == 1 || change == 2) moved.position.z = 0.75f;
+        CHECK(editor.beginSelectedDecorationTransform());
+        CHECK(editor.previewSelectedDecorationTransform(moved));
+
+        // Reapplying the same context leaves the live drag intact.
+        editor.setActiveLayer(1);
+        editor.setLayerLocked(editor.layerLocked());
+        CHECK(editor.transformingSelectedDecoration());
+        if (change == 0) editor.setActiveLayer(0);
+        if (change == 1) editor.setLayerLocked(true);
+        if (change == 2) editor.toggleLayerLock();
+        if (change == 3) editor.setLayerLocked(false);
+        CHECK(!editor.transformingSelectedDecoration());
+        CHECK(*editor.selectedDecoration() == moved);
+        CHECK(!editor.previewSelectedDecorationTransform(original));
+        if (change != 3) {
+            CHECK(!editor.decorationEditable(*editor.selectedDecoration()));
+            CHECK(!editor.beginSelectedDecorationTransform());
+            CHECK(!editor.deleteSelectedDecoration());
+        }
+        CHECK(editor.tryUndoEdit());
+        CHECK(*editor.selectedDecoration() == original);
+        CHECK(!editor.canUndo());
+        CHECK(editor.tryRedoEdit());
+        CHECK(*editor.selectedDecoration() == moved);
+        CHECK(!editor.transformingSelectedDecoration());
+    }
 }
 
 void testSelectorEditingPersistenceUndoAndProjectRemapping()
@@ -3490,6 +3922,13 @@ int main()
     testDecorationTransformSessionCoalescesUndoAndCanCancel();
     testTileDecorationCatalogAndSurfacePlacement();
     testTileAndMeshDecorationBrushesStayIndependent();
+    testRandomTileDecorationPreviewMatchesEachPlacement();
+    testRandomTileDecorationBrushChangesKeepPendingVariant();
+    testMossBrushPlacementAndRoundTrip();
+    testDecorationPlacementRequiresExplicitSelection();
+    testDecorationPlacementHonorsLockedLayerAndPendingVariation();
+    testDecorationLayerLockProtectsSelectionAndTransformBoundaries();
+    testDecorationLayerContextChangesCommitActiveTransform();
     testSelectorEditingPersistenceUndoAndProjectRemapping();
     testMoveTileIsAtomicAndUndoable();
     testComposedOverworldDocumentsArePathAwareAndTransactional();

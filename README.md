@@ -42,7 +42,7 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 - Manifest-backed mesh decorations with free translation, Euler rotation, and
   non-uniform scale; they render without participating in gameplay or camera
   framing.
-- Tile Decorations palette with grass and pebbles, four edge layouts, four
+- Tile Decorations palette with grass, pebbles and moss, four edge layouts, four
   variations per layout, and quarter-turn rotation for tile-sized placement.
 - Colored point lights attachable to mesh decorations, with per-light local
   offset, intensity, range, and omnidirectional shadows that add to the sun.
@@ -881,6 +881,10 @@ editor commands but does not own document or filesystem policy.
   and Play/Stop Draft are live in both and so conflict with both.
 - `+ Layer Below` and `+ Layer Above` insert undoable Air layers and preserve
   water-layer numbering.
+- **Lock Edits To Current Layer** also filters mesh and tile decorations by
+  their pivot height. Decorations on other layers are hidden and cannot be
+  selected or edited. Placement uses the active layer, and transforms stay
+  within it while the lock is enabled.
 - Painting one cell beyond an edge expands every layer transactionally.
 - **Ground Paint** supports any number of screen-local splat maps. **Add Splat
   Map** creates a board-sized blend mask and registers it in the asset manifest.
@@ -917,15 +921,25 @@ editor commands but does not own document or filesystem policy.
   deleted, and undone. A selected decoration can attach or detach a point
   light and edit all of its lighting and shadow settings in place.
 - **Tile Decorations**, next to Mesh Decorations, offers the Blender-authored
-  **Pebbles** and **Grass** sets. Choose one edge, two adjacent edges, two
-  opposite edges, or three edges, then one of four variations. **Rotate Left**
-  and **Rotate Right** turn the brush by 90 degrees; the diagram shows the
+  **Pebbles**, **Grass** and **Moss** sets. Moss forms low, rounded green clumps
+  with small yellow flecks. Choose one edge, two adjacent edges, two
+  opposite edges, or three edges, then one of four variations or **Random**.
+  Random places the variation shown in the hover preview, then chooses a
+  different variation for the next placement. **Rotate Left**, **Rotate Right**,
+  and `R` while placing turn the brush by 90 degrees; `R` follows the remappable
+  editor rotate binding. Over the viewport, rotation works immediately after
+  choosing a palette control. Active text fields and open menus retain their
+  keyboard input. The diagram shows the
   decorated edges in world directions. Click a tile to place the decoration
-  on its top surface. **Cancel Placement** (or Back, `Escape` by default) stops
+  on its top surface. Placement leaves selection unchanged; click a placed
+  decoration or its list entry to select it for editing.
+  **Cancel Placement** (or Back, `Escape` by default) stops
   the brush; **Place Selected** resumes it. Right-click deselects a placed item.
   Placed tile decorations have their own list and share the mesh transform
-  gizmos, duplicate/delete, undo/redo, and document saving. The 32 models retain
-  their authored tile dimensions and embedded palettes. A complete gallery is
+  gizmos, duplicate/delete, undo/redo, and document saving. The 48 models retain
+  their authored tile dimensions and embedded palettes, with each layout
+  touching its decorated tile edges. The opposite-edge layout has separate
+  bands on both borders and leaves the tile center clear. A complete gallery is
   available in `docs/examples/tile-decorations.scr`.
 - Source saves, runtime mirroring, screen/level insertion and renumbering,
   soft deletion, restore, and guarded permanent deletion are handled by the

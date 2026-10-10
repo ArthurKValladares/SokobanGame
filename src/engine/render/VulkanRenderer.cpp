@@ -1181,6 +1181,21 @@ bool VulkanRenderer::wantsMouseCapture() const
 #endif
 }
 
+bool VulkanRenderer::allowsViewportShortcuts() const
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (!ImGui::GetCurrentContext()) {
+        return true;
+    }
+    const auto& io = ImGui::GetIO();
+    return !wantsMouseCapture() && !io.WantTextInput &&
+        !ImGui::IsAnyItemActive() &&
+        !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopup);
+#else
+    return true;
+#endif
+}
+
 void VulkanRenderer::setGameViewportDisplay(
     std::optional<GameViewportDisplay> display)
 {

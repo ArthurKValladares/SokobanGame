@@ -32,7 +32,7 @@ scene = bpy.data.scenes.new(SCENE_NAME)
 bpy.context.window.scene = scene
 scene.unit_settings.system = 'METRIC'
 scene.unit_settings.scale_length = 1
-assets_collection = bpy.data.collections.new('Decoration assets | 32 meshes')
+assets_collection = bpy.data.collections.new('Decoration assets | 48 meshes')
 display_collection = bpy.data.collections.new('Presentation | do not export')
 scene.collection.children.link(assets_collection)
 scene.collection.children.link(display_collection)
@@ -52,7 +52,9 @@ PALETTES = {
     'pebbles': [(0.59,.60,.46), (.67,.67,.52), (.74,.73,.58), (.79,.77,.62),
                 (.65,.64,.51), (.72,.70,.55), (.83,.80,.66), (.60,.63,.52)],
     'grass': [(.31,.46,.075), (.42,.58,.10), (.53,.65,.15), (.65,.73,.24),
-              (.24,.43,.065), (.37,.55,.08), (.59,.69,.20), (.73,.78,.31)]}
+              (.24,.43,.065), (.37,.55,.08), (.59,.69,.20), (.73,.78,.31)],
+    'moss': [(.25,.40,.055), (.34,.48,.075), (.43,.56,.105), (.50,.61,.14),
+             (.38,.52,.08), (.57,.66,.18), (.85,.82,.36), (.96,.91,.54)]}
 
 
 def palette_material(style):
@@ -70,7 +72,8 @@ def palette_material(style):
     image.file_format = 'PNG'
     image.save()
     image.pack()
-    mat = solid_material('TileDetails_' + style, (.6,.6,.6), .91 if style == 'pebbles' else .85)
+    mat = solid_material('TileDetails_' + style, (.6,.6,.6),
+                         {'pebbles':.91,'grass':.85,'moss':.94}[style])
     tex = mat.node_tree.nodes.new('ShaderNodeTexImage')
     tex.image = image
     tex.interpolation = 'Linear'
@@ -85,6 +88,7 @@ materials = {style: palette_material(style) for style in PALETTES}
 class MeshBuilder:
     def __init__(self):
         self.vertices, self.faces, self.swatches = [], [], []
+        self.focal_points = []
 
     def island(self, verts, faces, swatches):
         offset = len(self.vertices)
@@ -97,6 +101,9 @@ class MeshBuilder:
         mesh.from_pydata(self.vertices, [], self.faces)
         mesh.materials.append(material)
         mesh.update()
+        if material.name.startswith('TileDetails_moss'):
+            for polygon in mesh.polygons:
+                polygon.use_smooth = True
         # Recalculate outward normals on every disconnected closed stone/blade.
         bm = bmesh.new()
         bm.from_mesh(mesh)
@@ -187,30 +194,24 @@ def decoration_focus(config, variation):
     shift=(-.018,.018,-.009,.009)[variation]
     if config=='corner':
         return (.337+shift*.45,-.337+shift*.25)
-    if config=='strip':
-        return (shift,shift*.35)
     return (shift,-.34+(-.006,.008,.004,-.003)[variation])
 
 
 def trail_lengths(config, focus):
     x,y=focus
-    if config=='edge':
+    if config in ('edge','strip'):
         return (x+.415,.415-x)
     if config=='corner':
         return (x+.415,.415-y)
-    if config=='strip':
-        return (y+.415,.415-y)
     return (x+.34+.415-y,.34-x+.415-y)
 
 
 def trail_point(config, focus, branch, distance):
     x,y=focus
-    if config=='edge':
+    if config in ('edge','strip'):
         return (x+branch*distance,y,branch,0)
     if config=='corner':
         return (x-distance,y,-1,0) if branch<0 else (x,y+distance,0,1)
-    if config=='strip':
-        return (x,y+branch*distance,0,branch)
     turn=x+.34 if branch<0 else .34-x
     if distance<=turn:
         return (x+branch*distance,y,branch,0)
@@ -312,9 +313,130 @@ def make_grass(builder, config, variation, rng):
                       (.014+.041*weight)*rng.uniform(.85,1.10),rng.choice([0,1,2,4]))
 
 
+def moss_clump(builder, x, y, radius, height, rng, swatch):
+    """A closed, soft cushion with a gently irregular scalloped silhouette."""
+    n=8
+    rotation=rng.uniform(0,math.tau)
+    elongation=rng.uniform(.79,1.08)
+    radial=[rng.uniform(.88,1.10) for _ in range(n)]
+    verts=[]
+    for ring,(scale,z) in enumerate(((.69,-.006),(1,.24*height),
+                                    (.91,.65*height),(.55,.93*height))):
+        for j in range(n):
+            angle=j*math.tau/n+rotation
+            jitter=rng.uniform(-.025,.025)*height if ring else 0
+            verts.append((x+math.cos(angle)*radius*radial[j]*scale,
+                          y+math.sin(angle)*radius*elongation*radial[j]*scale,z+jitter))
+    verts.append((x+.05*radius,y-.04*radius,height))
+    faces=[tuple(reversed(range(n)))]
+    swatches=[max(0,swatch-1)]
+    for ring in range(3):
+        for j in range(n):
+            faces.append((ring*n+j,ring*n+(j+1)%n,(ring+1)*n+(j+1)%n,(ring+1)*n+j))
+            swatches.append(swatch if ring<2 else min(5,swatch+1))
+    for j in range(n):
+        faces.append((3*n+j,3*n+(j+1)%n,4*n))
+        swatches.append(min(5,swatch+1))
+    builder.island(verts,faces,swatches)
+    # Pale seed-like flecks nest into the cushion instead of floating above it.
+    # Closed little tetrahedra keep the asset opaque and manifold.
+    for _ in range(rng.choices((0,1,2,3),weights=(3,4,2,1))[0]):
+        angle=rng.uniform(0,math.tau)
+        distance=radius*rng.uniform(.10,.50)
+        px=x+math.cos(angle)*distance
+        py=y+math.sin(angle)*distance*elongation
+        pz=height*(.975-.13*distance/radius)
+        size=radius*rng.uniform(.040,.068)
+        fleck=[(px-size,py-size*.65,pz),(px+size,py-size*.65,pz),
+               (px,py+size,pz),(px,py,pz+size*1.3)]
+        builder.island(fleck,[(0,2,1),(0,1,3),(1,2,3),(2,0,3)],
+                       [6,7,7,6])
+
+
+def make_moss(builder, config, variation, rng):
+    focus=decoration_focus(config,variation)
+    placed=[]
+
+    def cushion(x,y,radius,shade=None):
+        if any(math.hypot(x-a,y-b)<.74*(radius+r) for a,b,r in placed):
+            return False
+        placed.append((x,y,radius))
+        moss_clump(builder,x,y,radius,radius*rng.uniform(.88,1.22),rng,
+                   rng.choice([1,2,3,4]) if shade is None else shade)
+        return True
+
+    cushion(*focus,.069,3)
+    # Touching cushions share one broad focus, then taper into smaller lobes.
+    for attempt in range(100):
+        angle=rng.uniform(0,math.tau)
+        radius=.112*math.sqrt(rng.random())
+        x=focus[0]+math.cos(angle)*radius
+        y=focus[1]+math.sin(angle)*radius*.76
+        cushion(x,y,rng.uniform(.026,.046)*(1-.18*radius/.112))
+        if len(placed)>=10:
+            break
+    for x,y,tx,ty,weight,distance in trail_samples(config,variation,rng):
+        width=.006+.032*weight
+        rows=(-1,1) if rng.random()<.65*weight else (0,)
+        for side in rows:
+            offset=side*width+rng.uniform(-.008,.008)
+            size=(.010+.035*weight)*rng.uniform(.87,1.10)
+            cushion(x-ty*offset,y+tx*offset,size)
+
+
+def align_decoration_edges(builder, config, focus):
+    """Meet the requested tile borders without clipping individual pieces.
+
+    Translate one-edge/corner clusters as a whole. Three-edge clusters need a
+    positive X stretch to reach both side borders. Z, topology and palette
+    assignments stay unchanged; MeshBuilder.object recalculates normals after
+    this transform. Opposite-edge layouts are assembled from two edge bands.
+    """
+    if not builder.vertices or config not in ('edge','corner','end'):
+        raise ValueError('Cannot align an empty or unknown decoration layout')
+    minimum_x=min(point[0] for point in builder.vertices)
+    maximum_x=max(point[0] for point in builder.vertices)
+    minimum_y=min(point[1] for point in builder.vertices)
+    scale_x=scale_y=1.0
+    offset_x=offset_y=0.0
+    offset_y=-.5-minimum_y
+    if config=='corner':
+        offset_x=.5-maximum_x
+    elif config=='end':
+        if maximum_x<=minimum_x:
+            raise ValueError('Three-edge decoration needs a positive X span')
+        scale_x=1.0/(maximum_x-minimum_x)
+        offset_x=-.5-minimum_x*scale_x
+    builder.vertices=[(x*scale_x+offset_x,y*scale_y+offset_y,z)
+                      for x,y,z in builder.vertices]
+    return [focus[0]*scale_x+offset_x,focus[1]*scale_y+offset_y,0]
+
+
+def make_opposite_edge_decoration(builder, style, variation, rng):
+    """Two independent perimeter clusters with an open middle of the tile."""
+    maker={'pebbles':make_pebbles,'grass':make_grass,'moss':make_moss}[style]
+    for south in (False,True):
+        edge=MeshBuilder()
+        edge_rng=random.Random(rng.getrandbits(64))
+        maker(edge,'edge',variation,edge_rng)
+        focus=align_decoration_edges(edge,'edge',decoration_focus('edge',variation))
+        if south:
+            # A rigid half turn preserves the individual stones/leaves and
+            # their soft taper, while moving north-border contact to south.
+            edge.vertices=[(-x,-y,z) for x,y,z in edge.vertices]
+            focus=[-focus[0],-focus[1],focus[2]]
+        builder.island(edge.vertices,edge.faces,edge.swatches)
+        builder.focal_points.append(focus)
+    return builder.focal_points[0]
+
+
 def make_decoration(builder, style, config, variation, rng):
-    (make_pebbles if style=='pebbles' else make_grass)(builder,config,variation,rng)
-    return [*decoration_focus(config,variation),0]
+    if config=='strip':
+        return make_opposite_edge_decoration(builder,style,variation,rng)
+    {'pebbles':make_pebbles,'grass':make_grass,'moss':make_moss}[style](builder,config,variation,rng)
+    focus=align_decoration_edges(builder,config,decoration_focus(config,variation))
+    builder.focal_points=[focus]
+    return focus
 
 
 def link_display(obj):
@@ -362,18 +484,19 @@ def label(text, location, size, bold=False, mat=ink):
 
 
 tile_mats={'pebbles':solid_material('Presentation | sandstone',(.57,.44,.26)),
-           'grass':solid_material('Presentation | meadow',(.39,.46,.18))}
+           'grass':solid_material('Presentation | meadow',(.39,.46,.18)),
+           'moss':solid_material('Presentation | moss stone',(.50,.49,.32))}
 board_mat=solid_material('Presentation | warm paper',(.80,.79,.70))
-display_box('Catalog backdrop',(5,3.7,-.18),(13.1,9.8,.10),board_mat,.08)
-label('T I L E   D E T A I L S',(5,7.75,-.119),.36,True)
-label('Pebbles & meadow grass  /  modular edge dressing',(5,7.30,-.119),.16,False,secondary)
-for style,offset in [('pebbles',0),('grass',6.0)]:
+display_box('Catalog backdrop',(8,3.7,-.18),(19.1,9.8,.10),board_mat,.08)
+label('T I L E   D E T A I L S',(8,7.75,-.119),.36,True)
+label('Pebbles, meadow grass & moss  /  modular edge dressing',(8,7.30,-.119),.16,False,secondary)
+for style,offset in [('pebbles',0),('grass',6.0),('moss',12.0)]:
     label(style.upper(),(offset+1.95,6.65,-.119),.24,True)
     label('four variations per layout',(offset+1.95,6.33,-.119),.115,False,secondary)
 
 catalog=[]
 objects=[]
-for style_index,style in enumerate(('pebbles','grass')):
+for style_index,style in enumerate(('pebbles','grass','moss')):
     for row,(config,mask,edges,title) in enumerate(CONFIGS):
         for variation in range(4):
             rng=random.Random(44071+style_index*17003+row*713+variation*101)
@@ -398,13 +521,13 @@ for style_index,style in enumerate(('pebbles','grass')):
             obj.data.calc_loop_triangles()
             coords=[v.co for v in obj.data.vertices]
             catalog.append({'id':name,'style':style,'configuration':config,'variant':variation+1,
-                            'edge_mask':mask,'focal_point':focus,
+                            'edge_mask':mask,'focal_point':focus,'focal_points':builder.focal_points,
                             'model':f'assets/custom/models/tile_decorations/{name}.glb',
                             'triangles':len(obj.data.loop_triangles),'vertex_count':len(coords),
                             'bounds':{'min':[min(p[i] for p in coords) for i in range(3)],
                                       'max':[max(p[i] for p in coords) for i in range(3)]}})
 
-label('32 MESHES     /     1 × 1 TILE     /     ROTATE IN QUARTER TURNS',(5,-.86,-.119),.14,True,secondary)
+label('48 MESHES     /     1 × 1 TILE     /     ROTATE IN QUARTER TURNS',(8,-.86,-.119),.14,True,secondary)
 
 # Soft orthographic studio lighting, set up in the native file for re-rendering.
 world=bpy.data.worlds.new('TileDetails | studio')
@@ -423,7 +546,7 @@ def area_light(name,location,power,size):
     obj=bpy.data.objects.new(name,data)
     display_collection.objects.link(obj)
     obj.location=location
-    obj.rotation_euler=(Vector((5,3,0))-obj.location).to_track_quat('-Z','Y').to_euler()
+    obj.rotation_euler=(Vector((8,3,0))-obj.location).to_track_quat('-Z','Y').to_euler()
     return obj
 
 
@@ -432,15 +555,15 @@ area_light('Studio | sky fill',(11,5,8),950,7)
 camera_data=bpy.data.cameras.new('TileDetails camera')
 camera=bpy.data.objects.new('TileDetails camera',camera_data)
 display_collection.objects.link(camera)
-target=Vector((4.95,3.52,0))
+target=Vector((7.95,3.52,0))
 camera.location=target+Vector((0,-7.7,19))
 camera.rotation_euler=(target-camera.location).to_track_quat('-Z','Y').to_euler()
 camera.data.type='ORTHO'
-camera.data.ortho_scale=13.2
+camera.data.ortho_scale=19.2
 scene.camera=camera
 scene.render.engine='BLENDER_EEVEE'
-scene.render.resolution_x=2560
-scene.render.resolution_y=1920
+scene.render.resolution_x=3200
+scene.render.resolution_y=1800
 scene.render.resolution_percentage=100
 scene.render.image_settings.file_format='PNG'
 scene.render.filepath=str(PREVIEWS/'tile_decorations_catalog.png')
@@ -469,7 +592,7 @@ for obj in objects:
     record['vertex_count']=sum(exported['accessors'][p['attributes']['POSITION']]['count']
                                for m in exported['meshes'] for p in m['primitives'])
 
-manifest={'version':1,'revision':'Single focal cluster with softer taper and open center',
+manifest={'version':1,'revision':'Pebbles, grass and moss perimeter clusters with an open opposite-edge center',
           'tile_size':1,'coordinates':'Blender X/Y horizontal, Z up; origin at tile center and surface',
           'north':'-Y','placement_z':0,'preserveSourceScale':True,
           'configurations':{name:{'edge_mask':mask,'edges':[('N','E','S','W')[i] for i in edges]}

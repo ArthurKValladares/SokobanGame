@@ -7,10 +7,10 @@
 
 namespace sokoban::TileDecorations {
 
-enum class Style : uint8_t { Pebbles, Grass };
+enum class Style : uint8_t { Pebbles, Grass, Moss };
 enum class Layout : uint8_t { Edge, Corner, Strip, End };
 
-inline constexpr std::array styles { Style::Pebbles, Style::Grass };
+inline constexpr std::array styles { Style::Pebbles, Style::Grass, Style::Moss };
 inline constexpr std::array layouts {
     Layout::Edge, Layout::Corner, Layout::Strip, Layout::End,
 };
@@ -21,6 +21,8 @@ struct Brush {
     Layout layout = Layout::Edge;
     uint8_t variant = 0;
     uint8_t quarterTurns = 0;
+    // In Random mode, variant is the stable preview for the next placement.
+    bool randomVariation = false;
 
     bool operator==(const Brush&) const = default;
 };
@@ -32,7 +34,7 @@ struct Entry {
     std::string_view model;
 };
 
-inline constexpr std::array<Entry, 32> catalog {{
+inline constexpr std::array<Entry, 48> catalog {{
     { Style::Pebbles, Layout::Edge, 0, "TileDecorationPebblesEdge01" },
     { Style::Pebbles, Layout::Edge, 1, "TileDecorationPebblesEdge02" },
     { Style::Pebbles, Layout::Edge, 2, "TileDecorationPebblesEdge03" },
@@ -65,11 +67,32 @@ inline constexpr std::array<Entry, 32> catalog {{
     { Style::Grass, Layout::End, 1, "TileDecorationGrassEnd02" },
     { Style::Grass, Layout::End, 2, "TileDecorationGrassEnd03" },
     { Style::Grass, Layout::End, 3, "TileDecorationGrassEnd04" },
+    { Style::Moss, Layout::Edge, 0, "TileDecorationMossEdge01" },
+    { Style::Moss, Layout::Edge, 1, "TileDecorationMossEdge02" },
+    { Style::Moss, Layout::Edge, 2, "TileDecorationMossEdge03" },
+    { Style::Moss, Layout::Edge, 3, "TileDecorationMossEdge04" },
+    { Style::Moss, Layout::Corner, 0, "TileDecorationMossCorner01" },
+    { Style::Moss, Layout::Corner, 1, "TileDecorationMossCorner02" },
+    { Style::Moss, Layout::Corner, 2, "TileDecorationMossCorner03" },
+    { Style::Moss, Layout::Corner, 3, "TileDecorationMossCorner04" },
+    { Style::Moss, Layout::Strip, 0, "TileDecorationMossStrip01" },
+    { Style::Moss, Layout::Strip, 1, "TileDecorationMossStrip02" },
+    { Style::Moss, Layout::Strip, 2, "TileDecorationMossStrip03" },
+    { Style::Moss, Layout::Strip, 3, "TileDecorationMossStrip04" },
+    { Style::Moss, Layout::End, 0, "TileDecorationMossEnd01" },
+    { Style::Moss, Layout::End, 1, "TileDecorationMossEnd02" },
+    { Style::Moss, Layout::End, 2, "TileDecorationMossEnd03" },
+    { Style::Moss, Layout::End, 3, "TileDecorationMossEnd04" },
 }};
 
 [[nodiscard]] constexpr std::string_view styleLabel(Style style)
 {
-    return style == Style::Pebbles ? "Pebbles" : "Grass";
+    switch (style) {
+    case Style::Pebbles: return "Pebbles";
+    case Style::Grass: return "Grass";
+    case Style::Moss: return "Moss";
+    }
+    return "Grass";
 }
 
 [[nodiscard]] constexpr std::string_view layoutLabel(Layout layout)
@@ -85,7 +108,8 @@ inline constexpr std::array<Entry, 32> catalog {{
 
 [[nodiscard]] constexpr Brush normalized(Brush brush)
 {
-    if (brush.style != Style::Pebbles && brush.style != Style::Grass) {
+    if (brush.style != Style::Pebbles && brush.style != Style::Grass &&
+        brush.style != Style::Moss) {
         brush.style = Style::Grass;
     }
     if (brush.layout != Layout::Edge && brush.layout != Layout::Corner &&

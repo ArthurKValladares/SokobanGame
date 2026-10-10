@@ -707,7 +707,11 @@ int LevelEditor::requestedHeight() const
 void LevelEditor::setActiveLayer(int layer)
 {
     const int lastLayer = std::max(static_cast<int>(document_.layers.size()) - 1, 0);
-    document_.activeLayer = std::clamp(layer, 0, lastLayer);
+    const int nextLayer = std::clamp(layer, 0, lastLayer);
+    if (nextLayer != document_.activeLayer) {
+        (void)endSelectedDecorationTransform();
+        document_.activeLayer = nextLayer;
+    }
 }
 
 void LevelEditor::stepActiveLayer(int delta)
@@ -801,12 +805,15 @@ void LevelEditor::setCharacter(CharacterType character)
 
 void LevelEditor::setLayerLocked(bool locked)
 {
+    if (locked != document_.layerLocked) {
+        (void)endSelectedDecorationTransform();
+    }
     document_.layerLocked = locked;
 }
 
 void LevelEditor::toggleLayerLock()
 {
-    document_.layerLocked = !document_.layerLocked;
+    setLayerLocked(!document_.layerLocked);
     document_.status = document_.layerLocked
         ? "Edits locked to layer " +
             std::to_string(document_.activeLayer + 1) + "."
@@ -948,9 +955,29 @@ void LevelEditor::setSelectedDecorationModel(std::string modelName)
 
 void LevelEditor::setTileDecorationBrush(TileDecorations::Brush brush)
 {
-    document_.tileDecorationBrush = TileDecorations::normalized(brush);
+    brush = TileDecorations::normalized(brush);
+    if (brush.randomVariation) {
+        if (document_.tileDecorationBrush.randomVariation) {
+            // Style, layout, orientation and resume actions retain the next
+            // variant already shown by the placement preview.
+            brush.variant = document_.tileDecorationBrush.variant;
+        } else {
+            std::uniform_int_distribution<uint32_t> choose(
+                0, TileDecorations::variantCount - 1);
+            brush.variant = static_cast<uint8_t>(choose(tileDecorationRandom_));
+        }
+    }
+    document_.tileDecorationBrush = brush;
     document_.tileDecorationPlacementEnabled = true;
     document_.tool = Tool::TileDecorations;
+}
+
+void LevelEditor::rotateTileDecorationBrush(int quarterTurns)
+{
+    auto brush = document_.tileDecorationBrush;
+    brush.quarterTurns = static_cast<uint8_t>(
+        (brush.quarterTurns + quarterTurns % 4 + 4) % 4);
+    setTileDecorationBrush(brush);
 }
 
 const TileDecorations::Brush& LevelEditor::tileDecorationBrush() const
@@ -980,6 +1007,9 @@ bool LevelEditor::placingDecoration() const
 std::optional<Level::Decoration> LevelEditor::decorationPlacementPreview(
     GridPosition3 surfaceCell) const
 {
+    if (document_.layerLocked) {
+        surfaceCell.z = document_.activeLayer;
+    }
     if (!placingDecoration() ||
         surfaceCell.x < 0 || surfaceCell.y < 0 || surfaceCell.z < 0 ||
         surfaceCell.x >= static_cast<int>(documentWidth()) ||
@@ -2048,6 +2078,9 @@ bool LevelEditor::placeDecoration(GridPosition3 surfaceCell)
         document_.status = "Select a decoration to place first.";
         return false;
     }
+    if (document_.layerLocked) {
+        surfaceCell.z = document_.activeLayer;
+    }
     if (surfaceCell.x < 0 || surfaceCell.y < 0 || surfaceCell.z < 0 ||
         surfaceCell.x >= static_cast<int>(documentWidth()) ||
         surfaceCell.y >= static_cast<int>(documentHeight())) {
@@ -2061,11 +2094,20 @@ bool LevelEditor::placeDecoration(GridPosition3 surfaceCell)
     }
     const DocumentSnapshot before = captureDocumentSnapshot();
     document_.decorations.push_back(*decoration);
-    document_.selectedDecoration = document_.decorations.size() - 1;
     document_.dirty = true;
     document_.status = "Placed decoration " +
         decoration->model + ".";
     recordDocumentChange(before);
+    if (document_.tool == Tool::TileDecorations &&
+        document_.tileDecorationBrush.randomVariation) {
+        // Each of the other variants is equally likely. Never immediately
+        // repeat the one just placed, and only roll after a successful edit.
+        std::uniform_int_distribution<uint32_t> step(
+            1, TileDecorations::variantCount - 1);
+        auto& variant = document_.tileDecorationBrush.variant;
+        variant = static_cast<uint8_t>(
+            (variant + step(tileDecorationRandom_)) % TileDecorations::variantCount);
+    }
     return true;
 }
 
@@ -2084,6 +2126,10 @@ bool LevelEditor::selectDecoration(std::size_t index)
     if (index >= document_.decorations.size()) {
         return false;
     }
+    if (!decorationEditable(document_.decorations[index])) {
+        document_.status = "Decoration is outside the locked layer.";
+        return false;
+    }
     document_.selectedDecoration = index;
     document_.tool = TileDecorations::isTileDecoration(document_.decorations[index].model)
         ? Tool::TileDecorations : Tool::Decorations;
@@ -2093,6 +2139,13 @@ bool LevelEditor::selectDecoration(std::size_t index)
 void LevelEditor::clearDecorationSelection()
 {
     document_.selectedDecoration.reset();
+}
+
+bool LevelEditor::decorationEditable(const Level::Decoration& decoration) const
+{
+    const float layer = static_cast<float>(document_.activeLayer);
+    return !document_.layerLocked ||
+        (decoration.position.z >= layer && decoration.position.z < layer + 1.0f);
 }
 
 bool LevelEditor::updateSelectedDecoration(
@@ -2109,6 +2162,10 @@ bool LevelEditor::updateSelectedDecoration(
 
     Level::Decoration& current =
         document_.decorations[*document_.selectedDecoration];
+    if (!decorationEditable(current) || !decorationEditable(decoration)) {
+        document_.status = "Decoration edits are locked to the current layer.";
+        return false;
+    }
     if (current == decoration) {
         return false;
     }
@@ -2127,6 +2184,10 @@ bool LevelEditor::beginSelectedDecorationTransform()
         *document_.selectedDecoration >= document_.decorations.size()) {
         return false;
     }
+    if (!decorationEditable(document_.decorations[*document_.selectedDecoration])) {
+        document_.status = "Decoration is outside the locked layer.";
+        return false;
+    }
     decorationTransformBefore_ = captureDocumentSnapshot();
     return true;
 }
@@ -2142,6 +2203,10 @@ bool LevelEditor::previewSelectedDecorationTransform(
     }
     Level::Decoration& current =
         document_.decorations[*document_.selectedDecoration];
+    if (!decorationEditable(current) || !decorationEditable(decoration)) {
+        document_.status = "Decoration edits are locked to the current layer.";
+        return false;
+    }
     if (current == decoration) {
         return false;
     }
@@ -2212,6 +2277,10 @@ bool LevelEditor::duplicateSelectedDecoration()
         *document_.selectedDecoration >= document_.decorations.size()) {
         return false;
     }
+    if (!decorationEditable(document_.decorations[*document_.selectedDecoration])) {
+        document_.status = "Decoration is outside the locked layer.";
+        return false;
+    }
     const DocumentSnapshot before = captureDocumentSnapshot();
     Level::Decoration duplicate =
         document_.decorations[*document_.selectedDecoration];
@@ -2229,6 +2298,10 @@ bool LevelEditor::deleteSelectedDecoration()
 {
     if (!document_.selectedDecoration ||
         *document_.selectedDecoration >= document_.decorations.size()) {
+        return false;
+    }
+    if (!decorationEditable(document_.decorations[*document_.selectedDecoration])) {
+        document_.status = "Decoration is outside the locked layer.";
         return false;
     }
     const DocumentSnapshot before = captureDocumentSnapshot();

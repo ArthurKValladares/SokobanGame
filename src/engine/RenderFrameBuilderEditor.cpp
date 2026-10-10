@@ -830,7 +830,10 @@ private:
                 std::nullopt,
                 std::nullopt,
                 false,
-                {},
+                [this](GridPosition3 cell) {
+                    return !layerLocked_ ||
+                        cell.z == static_cast<int>(activeLayer_);
+                },
                 neighbor.origin);
 
             for (Level::ScreenSelector selector : definition.selectors) {
@@ -1332,7 +1335,11 @@ private:
             input_.manifest,
             input_.editor.selectedDecorationIndex(),
             input_.hoverDecoration,
-            true);
+            true,
+            [this](GridPosition3 cell) {
+                return !layerLocked_ ||
+                    cell.z == static_cast<int>(activeLayer_);
+            });
         const std::optional<uint32_t> movingSelector =
             pendingSelectorMoveId();
         for (const Level::ScreenSelector& selector :
