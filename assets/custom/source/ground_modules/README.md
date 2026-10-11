@@ -46,21 +46,39 @@ bottom rebuild tools. They are excluded from previews and runtime exports.
 
 **GroundShoulderConstructionSources** stores independent frozen copies of
 all 240 accepted chunky regular and floating-bottom bodies from before the
-collar removal. The current explicit shoulder rebuild reads these meshes;
+collar removal. The historical explicit shoulder rebuild reads these meshes;
 it never derives a new transition from already remodeled or artist-edited
 bodies. Keep this hidden collection intact and out of runtime exports.
 
-Regular revision 2 bodies retain the exact `GroundModuleRecess` backing and
+**GroundRegularReliefConstructionSources** stores independent frozen copies
+of the 120 accepted regular revision 2 bodies after collar removal. The
+current explicit relief rebuild reads only these meshes and never rebuilds
+from already detailed bodies. Keep this collection hidden and intact.
+
+Regular revision 3 bodies retain the exact `GroundModuleRecess` backing and
 original two-triangle flat base at Z=0. Chamfered bodies keep their level lip
 at Z=0.91; square bodies keep their full-height seal at Z=1. Closed unequal
 faceted boulders form the visible sides and broad lower ledges, with a square
-overall shape. Their accepted geometry and UV charts remain intact.
+overall shape. Their accepted vertices, rock edges and UV charts stay fixed.
 Interior bodies remain the two original base faces with no rock masses.
+
+`RegularReliefRevision=1` adds a little unevenness inside a sparse selection
+of broad exposed `BoulderMassNN` and `ShoulderRockNN` triangles. Each selected
+triangle becomes three facets around an inward interior point; no original
+vertex or edge moves. The point uses barycentric UV interpolation from its
+parent face, retaining the existing materials and texture scale. Depths are
+sampled from 0.0036..0.006 tile units, then clamped to 0.06 times the minimum
+distance to an original triangle edge and an absolute 0.0072 maximum. Faces
+close to overlapping masses are excluded so the new facets do not expose
+neighboring rocks through their interiors. Caps, lip seals, backing, bases,
+body bounds, all twenty regular interior meshes and all floating-bottom
+geometry are unchanged. The detail intentionally makes selected rock faces
+slightly concave; their closed shells retain their original outside edges.
 
 `ShoulderTransitionRevision=1` removes only the old outer vertical collar
 at Z>=0.78 from both regular bodies and revision 5 floating bottoms. The
 horizontal cap-lip seals, recessed backing, bases, and all accepted
-`BoulderMassNN` and `FloatingRockNN` surfaces remain intact. New closed
+`BoulderMassNN` outlines and `FloatingRockNN` surfaces remain intact. Closed
 `ShoulderRockNN` masses rise from Z>=0.4 to within approximately 0.001..0.004
 tile units of the lip, continuing the chunky rock faces into the cap.
 Regular shoulders stay within X/Y=0..1. Bottom shoulders allow a 0.04
@@ -156,66 +174,76 @@ python tools/serialize_ground_caps.py --square --check
 The serializer transfers the native vertices, normals and material coverage;
 it neither creates geometry nor edits the Blender meshes.
 
-Export all 240 existing regular and floating-bottom bodies, in both top
-profiles, with:
+Export the 120 existing regular bodies, in both top profiles, with:
 
 ```text
-blender --background assets/custom/source/ground_modules.blend --python tools/sculpt_ground_shoulders.py
+blender --background assets/custom/source/ground_modules.blend --python tools/sculpt_regular_ground_relief.py
 ```
 
-Normal export preserves native artist edits and writes the ignored
-`out/ground-modules/shoulder-source-audit.json` snapshot. `-- --audit-only`
-refreshes that snapshot without exporting. The explicit rebuild is:
+Normal export preserves native artist edits, leaves bottom exports untouched
+and writes the ignored `out/ground-modules/regular-relief-source-audit.json`
+snapshot of all 240 bodies. `-- --audit-only` refreshes that snapshot without
+exporting. The explicit rebuild is:
 
 ```text
-blender --background assets/custom/source/ground_modules.blend --python tools/sculpt_ground_shoulders.py -- --remodel-shoulders
+blender --background assets/custom/source/ground_modules.blend --python tools/sculpt_regular_ground_relief.py -- --remodel-regular-relief
 ```
 
-This rebuild replaces current body mesh edits using the 240 frozen accepted
-meshes in **GroundShoulderConstructionSources** and updates linked previews.
-It removes the vertical collar and adds the editable shoulders, preserving
-accepted boulder/floating-rock forms, UVs, horizontal lip seals, recessed
-backing and bases. It does not rebuild the authored caps.
+This rebuild replaces regular body mesh edits using the 120 frozen accepted
+revision 2 meshes in **GroundRegularReliefConstructionSources** and updates
+linked previews. It adds only the shallow face detail described above, keeps
+the original edges and cap contacts, and leaves bottom bodies and authored
+caps alone. Bodies record the parent face, barycentric point and depth in
+`RegularReliefFaces`, with `RegularReliefMaximumDepth=0.0072`.
+
+To export all 240 current native bodies without remodeling, use
+`tools/sculpt_ground_shoulders.py` normally. Its explicit
+`-- --remodel-shoulders` option reconstructs the historical regular revision 2
+and bottom revision 5 transition from **GroundShoulderConstructionSources**;
+it removes subsequent regular relief and other artist edits.
 
 Blender 5 may write both image URI and bufferView. The existing
 `tools/finalize_cliff_gltf.py` finalizer can normalize these ground files too;
 its `finalize(path)` API removes only the redundant image field and preserves
-binary mesh payloads. Finalize all 240 exported ground GLBs, not only the
-regular or floating subset. For example, from PowerShell:
+binary mesh payloads. Finalize each body exported in the current pass. For
+the regular-only relief exporter, from PowerShell:
 
 ```powershell
-$groundModels = Get-ChildItem assets/custom/models/ground_modules/ground_*.glb | ForEach-Object { $_.FullName }
-python tools/finalize_cliff_gltf.py @groundModels
+$regularGroundModels = Get-ChildItem assets/custom/models/ground_modules/ground_*.glb | Where-Object { $_.Name -notlike 'ground_bottom_*' } | ForEach-Object { $_.FullName }
+python tools/finalize_cliff_gltf.py @regularGroundModels
 ```
 
+When exporting all 240 bodies, finalize the bottom subset as well.
 Tangents are exported from the native meshes with both UV streams; check
 them in the mesh audit rather than applying a tangent-repair pass.
 
 Run the independent mesh and seam audit from the project root:
 
 ```text
-python tools/validate_ground_shoulders.py
-python tests/ValidateGroundShouldersTests.py
-python tests/ValidateShoulderCoverageTests.py
+python tools/validate_regular_relief.py
 ```
 
-The default audit reads `out/ground-modules/shoulder-source-audit.json` and
-writes `out/ground-modules/shoulder-transition-validation.json`. Its frozen
-accepted library is
-`out/ground-modules/pre-shoulder-transition-20261011-175324/`, containing all
-240 pre-transition GLBs, the original source and frozen role snapshots.
-Keep that local baseline intact for retention proofs.
+The default audit reads `out/ground-modules/regular-relief-source-audit.json`
+and writes `out/ground-modules/regular-relief-validation.json`. Its frozen
+accepted library is `out/ground-modules/pre-regular-relief-20261011/`,
+containing the accepted shoulder source, all 240 exports, role snapshots and
+protected cap/PBR hashes. Keep this local baseline intact for retention
+proofs. Native and in-game review evidence uses
+`out/ground-modules/regular-relief-native-preview.png` and
+`out/ground-modules/regular-relief-{gallery,normal}/`.
 
-The current audit compares retained surfaces against the frozen accepted
-240-body library, protects both cap files and shared PBR maps, and checks
-closed rooted shoulders, native/exported face ownership, unit bounds and
-exposed-side overhang taper. It retains native cap, neighbor-pattern,
+The current audit proves that only the recorded regular triangle interiors
+change. Original vertices and edges, untouched face streams, materials and
+UV interpolation are checked against the accepted shoulder revision. It
+checks bounded inward depth, child-face coverage of each parent triangle,
+closed rock shells and exact protection of all bottom exports, cap files and
+shared PBR maps. It retains native cap, neighbor-pattern,
 mixed-style seam, stepped-contact and stacked-contact checks. Shoulder
 coverage is measured just below each lip at two heights; broad rock support
 must cover at least 80% of every exposed side within the existing 0.055
 backing depth. The report includes continuous covered intervals and gap
-sizes. Destructive fixtures exercise missing shoulders, narrow spikes,
-inset faces, missing height slices and side rotations.
+sizes. The historical shoulder audit and its destructive fixtures remain
+available for their matching earlier source revision.
 The `ground_tile_geometry` C++ suite additionally loads every actual GLB
 through the engine and checks module selection, materials, painting,
 shadow/pick footprints, editor updates and surrounded-top rendering.
@@ -231,8 +259,8 @@ The **GroundBottomModules** collection contains 120 editable combined bodies:
 six connection shapes, ten stone styles, and both chamfered and square top
 profiles. **GroundModules_BottomPreview** shows isolated tiles, a strip, a
 corner, a larger island and a stack. Revision 5 shares the collar-free
-shoulder transition with regular revision 2; authored caps and shared PBR
-maps are reused.
+shoulder transition introduced in regular revision 2; authored caps and
+shared PBR maps are reused.
 
 The accepted revision 4 bodies supplied a backing core derived from the
 original fractured walls, recessed below local Z=0.78. Unequal closed faceted boulders embed
@@ -272,13 +300,14 @@ Drawing, shadows, camera framing and thumbnails account for the exposed-side
 overhang and depth. Logical placement, collision and picking stay within the
 original unit cell.
 
-Use the combined shoulder export and audit workflow above for current
-floating bodies as well as regular ones.
+Normal `tools/sculpt_ground_shoulders.py` exports floating bodies together
+with regular bodies. The regular relief exporter leaves floating meshes and
+exports untouched, while its independent validator checks their preservation.
 
 ## Historical revision tools
 
 The earlier exporters remain available for older source revisions and
-retention comparisons. They are not the current 240-body rebuild workflow:
+retention comparisons. They are not the current regular relief rebuild:
 
 ```text
 blender --background assets/custom/source/ground_modules.blend --python tools/export_chunky_ground_modules.py -- --remodel-regular
@@ -304,3 +333,9 @@ python tests/ValidateGroundBottomsTests.py
 Those older audits deliberately require the former preserved upper band and
 their respective regular/bottom revision metadata. Keep their recorded
 baselines intact rather than replacing them to make current geometry pass.
+The shoulder audit likewise retains its exact regular revision 2/bottom
+revision 5 contract. Its evidence remains in
+`out/ground-modules/shoulder-transition-validation.json`, with tests in
+`tests/ValidateGroundShouldersTests.py` and
+`tests/ValidateShoulderCoverageTests.py`. Use the separate current relief
+validator rather than weakening those earlier checks.

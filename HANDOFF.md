@@ -34,28 +34,42 @@ remains release-signoff work in
 
 Ground has 240 native bodies and 310 authored tops in the existing Blender
 source: six connection shapes, ten styles, both top profiles, and regular or
-floating-island bottoms. Regular revision 2 and bottom revision 5 replace the
-old outer collar above Z=0.78 with unequal closed rock shoulders rooted below
-it at Z>=0.40. Broad uneven crowns continue the side rocks up to the authored
+floating-island bottoms. Regular revision 3 and bottom revision 5 retain the
+collar-free transition: unequal closed rock shoulders rooted at Z>=0.40
+replace the former outer collar above Z=0.78. Broad uneven crowns continue
+the side rocks up to the authored
 beveled or square cap. Exact horizontal lip seals, recessed joining panels,
-regular flat Z=0 bases, accepted lower boulders and floating fragments remain
-intact. Retained corners preserve both UV charts and the native compressed
-normal records, avoiding Blender normal reencoding drift.
+regular flat Z=0 bases, accepted lower boulder outlines and floating fragments
+remain intact. Retained corners preserve both UV charts and the native
+compressed normal records, avoiding Blender normal reencoding drift.
+`RegularReliefRevision=1` adds sparse inward facets to broad regular
+`BoulderMassNN` and `ShoulderRockNN` triangle interiors. Every original
+vertex and rock edge stays fixed; backing, bases, cap contacts and overall
+bounds stay intact. Sampled depths are 0.0036..0.006 tile units, clamped to
+0.06 times the minimum distance to an original triangle edge and an absolute
+0.0072 maximum. Faces near overlapping rocks are excluded to avoid exposing
+their neighbors through the new facets. Bottom bodies and all twenty regular
+interior meshes keep their accepted geometry.
 Regular rocks stay inside the unit XY footprint; interior regular bodies remain
 two base triangles. Bottom hidden connection planes meet at fixed Z=-0.34;
 exposed sides may bulge at most 0.04 tile units, tapering to zero at the shoulder
 roof. Bottom geometry extends no deeper than Z=-1. Distinct per-rock insets
 avoid coplanar face artifacts. Editable groups include `ShoulderRockNN`,
 `CapLipSeal`, the original core selections, `BoulderMassNN` and `FloatingRockNN`.
-Normal `tools/sculpt_ground_shoulders.py` exports preserve artist edits across
-all 240 bodies. Only `-- --remodel-shoulders` reconstructs their transitions
-from hidden accepted `GroundShoulderConstructionSources`. Each GLB is exported
-to a sibling temporary file before replacement. Finalize all exports with
+Normal `tools/sculpt_regular_ground_relief.py` exports preserve artist edits
+and update only the 120 regular bodies. `-- --audit-only` snapshots all 240
+bodies without exporting. Only `-- --remodel-regular-relief` reconstructs the
+new detail from hidden accepted revision 2 regular meshes in
+`GroundRegularReliefConstructionSources`. Each GLB is exported to a sibling
+temporary file before replacement. Finalize the regular exports with
 `tools/finalize_cliff_gltf.py` without tangent repair. Authored cap tables and
-shared PBR maps stay unchanged. Older regular/bottom remodel commands rebuild
-their historical designs from `GroundModuleConstructionSources`; they are
-outside the current shoulder workflow. Current reconstruction always uses the
-frozen accepted chunky bodies, while normal export preserves subsequent edits.
+shared PBR maps stay unchanged. Normal `tools/sculpt_ground_shoulders.py`
+exports still preserve all 240 current native bodies, but its explicit
+`-- --remodel-shoulders` rebuilds the earlier regular revision 2/bottom revision
+5 transition from `GroundShoulderConstructionSources` and removes later
+regular relief edits. Older regular/bottom remodel commands rebuild historical
+designs from `GroundModuleConstructionSources`. Keep all frozen construction
+collections intact and out of runtime exports.
 Same-layer connected ground groups touching ground one layer above within
 the surrounding 3x3 cells select square bodies and caps, closing direct
 stacks, steps and diagonal contacts. Disconnected exposed ground keeps its
@@ -71,9 +85,37 @@ only relevant bottom-cell margins, preserving distant overworld framing.
 The GPU material table holds 4096 entries; a catalog-wide regression checks
 the current 1721 slots including fallback and attachments fit.
 
-Debug and optimized builds pass, with ten focused ground, rendering, material
-and thumbnail suites passing in each configuration. The independent current
-audit checks all 240 bodies against frozen accepted chunky exports. Exact
+Use `tools/validate_regular_relief.py` for the current kit. It compares regular
+detail against the accepted shoulder revision, checks the original vertices
+and edges plus bounded inward triangle refinement, and protects all bottom
+exports. It retains cap, seam, stacked-contact, stepped-contact and near-lip
+coverage checks. Current evidence uses
+`out/ground-modules/regular-relief-validation.json`,
+`out/ground-modules/regular-relief-native-preview.png` and the
+`out/ground-modules/regular-relief-{gallery,normal}/` capture directories.
+Historical shoulder and regular/bottom validators keep their matching
+baselines and deliberately enforce their earlier exact geometry.
+
+The current relief audit passes all 240 bodies: 564 shallow facets across
+100 exposed regular bodies, with a maximum inward depth of 0.005973 tile.
+Every original regular vertex and edge, untouched export corner stream,
+all 120 bottom GLBs, 310 caps and shared PBR maps are preserved. The twenty
+base-only regular interior bodies keep their geometry. All 15 destructive
+relief fixtures and ten optimized ground/rendering/material suites pass.
+Normal Debug and optimized content packages each stage 838 files
+(201,143,424 bytes), including all 240 source-matching model hashes; evidence
+is in `out/ground-modules/regular-relief-normal-staging.json`.
+Two fresh 1,200-frame animated Vulkan captures cover the gallery and normal
+view, with no warnings, asset errors, capacity blocks, dropped draws or
+pending load queues. Both received visual review. Their staged model hashes
+match the independent geometry audit; model residency is 47,461,964 of
+134,217,728 bytes. See
+`out/ground-modules/regular-relief-runtime-evidence.json`.
+
+The accepted shoulder-transition baseline passed Debug and optimized builds,
+with ten focused ground, rendering, material and thumbnail suites passing in
+each configuration. Its independent audit checked all 240 bodies against
+frozen accepted chunky exports. Exact
 retained positions, normals, both UV streams, material factors and samplers
 pass, including all accepted lower boulders and floating fragments. All 680
 new shoulders are closed, convex and rooted; 960 slices prove near-lip rock
@@ -82,11 +124,11 @@ by hashes. All 310 caps, 33,800 mixed cap joins, 6,400 backing joins, 7,200
 stacked contacts and 28,800 stepped contacts pass, as do 25,600 mixed underside
 joins and 12,800 supported contacts. Twenty-seven destructive fixture methods
 reject altered retention, normals, samplers, bounds, coverage and topology.
-Use `tools/validate_ground_shoulders.py` for the current kit. Historical
-regular/bottom validators and their approved baselines remain unchanged.
+`tools/validate_ground_shoulders.py` and its reference reports now document
+that historical transition revision.
 
-Four final animated 1200-frame Vulkan captures cover all regular families and
-styles, normal and lower camera angles, three-high stacks, support examples
+Four accepted shoulder-transition animated 1200-frame Vulkan captures cover
+all regular families and styles, normal and lower camera angles, three-high stacks, support examples
 and water with zero asset errors, dropped draws, pending loads or residency
 blocks. Model residency is 47,174,708 of 134,217,728 bytes. Both normal game
 outputs contain all 240 source-matching GLBs and validated content indexes
@@ -97,7 +139,7 @@ in each configuration. Evidence is in
 `out/ground-modules/shoulder-transition-normal-staging.json`. The runtime
 report cross-checks all 240 staged model hashes against the independent audit.
 Compact metrics, finalized-export proof, previews and native source snapshots
-remain in ignored `out/ground-modules/`. The current transition preserves
+remain in ignored `out/ground-modules/`. That transition preserved
 1,144 accepted boulders, 190 floating rocks and 191,939 export triangles;
 near-lip coverage is at least 98.50% across all 960 checked slices.
 The broader Debug

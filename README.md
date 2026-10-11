@@ -972,10 +972,18 @@ neighboring and stacked tiles; regular interiors keep only the two base
 triangles. Both regular and floating bodies now have closed rock shoulders
 that continue directly into the authored beveled or square cap. The earlier
 vertical collar above Z=0.78 is removed; horizontal lip seals, cap geometry,
-accepted boulders and floating fragments retain their shapes and UVs.
+accepted boulder outlines and floating fragments retain their shapes and UVs.
 Editable `ShoulderRockNN` groups isolate the new shoulders, which start at
-Z=0.4 and finish just beneath the cap lip. Regular bodies are revision 2,
+Z=0.4 and finish just beneath the cap lip. Regular bodies are revision 3,
 floating bottoms revision 5, with `ShoulderTransitionRevision=1` on both.
+`RegularReliefRevision=1` adds sparse, shallow unevenness inside broad regular
+`BoulderMassNN` and `ShoulderRockNN` faces. Original vertices and rock edges
+stay fixed, preserving the square outline, cap contacts, backing and base.
+Triangle interiors receive small inward facets, with sampled depths of
+0.0036..0.006 tile units, additionally limited by face width and a 0.0072
+hard maximum. Faces close to overlapping rocks are left alone. The twenty
+regular interior bodies retain their original two base triangles; floating
+bottoms are unchanged by this detail pass.
 Unsupported ground selects a floating-island body with a recessed core
 derived from the original fractured walls. Unequal closed faceted boulders
 embed into the core, forming overlapping side clusters, deep creases and an
@@ -995,15 +1003,16 @@ support, including hidden editor layers. Air, water, thin plates and moving plat
 leave the underside exposed. Drawing, shadows, camera framing and thumbnails
 include its visual overhang and depth; gameplay cells and editor picking keep
 their unit bounds.
-Export all 240 current bodies with `tools/sculpt_ground_shoulders.py` in
-Blender, then finalize every ground GLB with `tools/finalize_cliff_gltf.py`.
-Normal exports preserve native mesh edits. The explicit
-`-- --remodel-shoulders` option rebuilds the transition from 240 frozen
-accepted meshes in `GroundShoulderConstructionSources`; it replaces current
-mesh edits while preserving their accepted boulders, fragments, lip seals,
-backing and bases. `tools/validate_ground_shoulders.py` is the current mesh
-and seam audit. Earlier regular/bottom rebuild and audit commands describe
-historical revisions.
+Export the 120 current regular bodies with
+`tools/sculpt_regular_ground_relief.py` in Blender, then finalize those GLBs
+with `tools/finalize_cliff_gltf.py`. Normal export preserves native edits and
+leaves bottom exports alone. The explicit `-- --remodel-regular-relief`
+option rebuilds the subtle face detail from frozen accepted revision 2
+regular bodies in `GroundRegularReliefConstructionSources`, replacing later
+regular mesh edits. `tools/validate_regular_relief.py` is the current mesh
+and seam audit. `tools/sculpt_ground_shoulders.py` can still export all 240
+native bodies without remodeling. Its explicit shoulder rebuild, earlier
+regular/bottom rebuilds and their validators describe historical revisions.
 See [the ground source contract](assets/custom/source/ground_modules/README.md)
 for Blender editing and export requirements.
 
