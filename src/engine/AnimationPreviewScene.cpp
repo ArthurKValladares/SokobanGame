@@ -21,6 +21,7 @@ RenderFrameData build(
 
     RenderFrameData frame = arena ? RenderFrameData(*arena) : RenderFrameData();
     frame.viewMode = RenderViewMode::Isometric3D;
+    frame.skyCloudsEnabled = false;
     frame.levelWidth = bedSize;
     frame.levelHeight = bedSize;
     frame.levelDepth = 2;

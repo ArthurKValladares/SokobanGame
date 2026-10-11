@@ -2003,6 +2003,42 @@ private:
         vkCmdSetDepthCompareOp(
             commandBuffer, VK_COMPARE_OP_LESS_OR_EQUAL);
 
+        if (frameData.viewMode == RenderViewMode::Isometric3D &&
+            frameData.skyCloudsEnabled && !translucentPass && !loadColor) {
+            // Draw before geometry so refraction, fog and the preview inset
+            // all see the same sky. Leave depth clear and the ambient mask at
+            // zero: clouds must neither occlude tiles nor receive SSAO.
+            GpuDrawInstance sky {};
+            sky.vertices = matrixColumns(inverse(
+                isoClipFromWorld(scene.isoLayout, scene.renderExtent)));
+            sky.passData[0] = {
+                static_cast<float>(renderArea.offset.x),
+                static_cast<float>(renderArea.offset.y),
+                static_cast<float>(renderArea.extent.width),
+                static_cast<float>(renderArea.extent.height),
+            };
+            sky.passData[1].x = frameData.effectAnimationTimeSeconds;
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                pipelines_.skyClouds());
+            ++stats_.pipelineBinds;
+            vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE);
+            vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+            vkCmdPushConstants(commandBuffer, pipelines_.layout(),
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                0, sizeof(sky), &sky);
+            vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+            ++stats_.drawCalls;
+            stats_.vertices += 3;
+            ++stats_.triangles;
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                flatScenePipeline(true));
+            ++stats_.pipelineBinds;
+            vkCmdSetDepthTestEnable(commandBuffer,
+                swapchain_.depthView() ? VK_TRUE : VK_FALSE);
+            vkCmdSetDepthWriteEnable(commandBuffer,
+                swapchain_.depthView() && writeDepth ? VK_TRUE : VK_FALSE);
+        }
+
         if (frameData.viewMode == RenderViewMode::Isometric3D) {
             drawIsoFrame(
                 commandBuffer,

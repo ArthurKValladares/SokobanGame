@@ -72,6 +72,7 @@ inline constexpr std::string_view bloomExtractFrag = "bloom_extract.frag.glsl";
 inline constexpr std::string_view bloomBlurFrag = "bloom_blur.frag.glsl";
 inline constexpr std::string_view worldTransitionFrag =
     "world_transition.frag.glsl";
+inline constexpr std::string_view skyCloudsFrag = "sky_clouds.frag.glsl";
 #if SOKOBAN_ENABLE_DEBUG_UI
 inline constexpr std::string_view debugOutlineVert = "debug_outline.vert.glsl";
 inline constexpr std::string_view debugOutlineSkinnedVert = "debug_outline_skinned.vert.glsl";
@@ -88,9 +89,6 @@ inline constexpr auto sources = std::to_array<std::string_view>({
     waterFrag,
     mirrorEnergyFrag,
     groundSplatFrag,
-    groundChunkVert,
-    groundChunkShadowVert,
-    groundChunkFrag,
     shadowVert,
     modelVert,
     modelShadowVert,
@@ -113,6 +111,10 @@ inline constexpr auto sources = std::to_array<std::string_view>({
     debugLinkFrag,
     debugLinkVert,
 #endif
+    skyCloudsFrag,
+    groundChunkVert,
+    groundChunkShadowVert,
+    groundChunkFrag,
     waterCellsComp,
 });
 

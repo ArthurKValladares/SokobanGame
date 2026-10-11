@@ -621,6 +621,9 @@ struct RenderFrameData {
     }
 
     RenderViewMode viewMode = RenderViewMode::TopDown2D;
+    // Procedural, world-space cloud layers below the islands. Asset thumbnails
+    // can retain their neutral studio background by disabling this.
+    bool skyCloudsEnabled = true;
     std::optional<float> cameraPitchDegrees;
     std::optional<float> cameraYawDegrees;
     // An explicit perspective camera pose. Normal gameplay leaves this

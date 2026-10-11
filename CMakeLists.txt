@@ -1170,6 +1170,16 @@ if(SOKOBAN_BUILD_TESTS)
             TIMEOUT 30
             SKIP_RETURN_CODE 77
         )
+        if(SOKOBAN_TEST_RUNNERS)
+            add_test(NAME sky_clouds COMMAND sokoban_vulkan_tests vulkan_smoke --sky-clouds)
+        else()
+            add_test(NAME sky_clouds COMMAND sokoban_vulkan_smoke_tests --sky-clouds)
+        endif()
+        set_tests_properties(sky_clouds PROPERTIES
+            LABELS "vulkan;render;sky"
+            TIMEOUT 60
+            SKIP_RETURN_CODE 77
+        )
         sokoban_add_test(NAME text_rendering
             STANDALONE TARGET sokoban_text_rendering_tests
             LIBS sokoban_render_vulkan sokoban_ui
@@ -1209,7 +1219,7 @@ if(SOKOBAN_BUILD_TESTS)
         if(SOKOBAN_ENABLE_SANITIZERS)
             # These tests initialize SDL/X11 and Vulkan. The application child
             # inherits this environment from the CMake teardown verifier.
-            set_property(TEST vulkan_smoke application_validation_teardown preview_rendering water_entry_ripples
+            set_property(TEST vulkan_smoke sky_clouds application_validation_teardown preview_rendering water_entry_ripples
                 APPEND PROPERTY ENVIRONMENT
                 "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
         endif()

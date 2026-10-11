@@ -63,6 +63,7 @@ public:
     // every covered sample, which at 4x-8x MSAA is the dominant cost of an
     // otherwise trivial fragment.
     [[nodiscard]] VkPipeline sceneOpaque() const { return sceneOpaque_; }
+    [[nodiscard]] VkPipeline skyClouds() const { return skyClouds_; }
     [[nodiscard]] VkPipeline groundSplatOpaque() const
     {
         return groundSplatOpaque_;
@@ -182,6 +183,7 @@ private:
     VkPipelineLayout layout_ = VK_NULL_HANDLE;
     VkPipeline scene_ = VK_NULL_HANDLE;
     VkPipeline sceneOpaque_ = VK_NULL_HANDLE;
+    VkPipeline skyClouds_ = VK_NULL_HANDLE;
     VkPipeline groundSplatOpaque_ = VK_NULL_HANDLE;
     VkPipeline groundChunkOpaque_ = VK_NULL_HANDLE;
     VkPipeline modelOpaque_ = VK_NULL_HANDLE;

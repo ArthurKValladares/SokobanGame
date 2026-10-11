@@ -18,6 +18,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -27,6 +28,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -1219,6 +1221,154 @@ void exerciseGroundRimDrawBudgetFallback(SDL_Window* window)
               << " loaded ground bodies and flat caps without dropped draw instances\n";
 }
 
+void exerciseAnimatedSkyClouds(SDL_Window* window)
+{
+    using namespace sokoban;
+    const auto require = [](bool condition, const char* message) {
+        if (!condition) throw std::runtime_error(message);
+    };
+    const auto assetRoot = std::filesystem::path(SOKOBAN_VULKAN_TEST_ASSETS);
+    const auto manifest = AssetManifest::loadFromFile(assetRoot / "manifest.json");
+    auto font = FontAtlas::loadDefault(assetRoot);
+    ScopedTestDirectory temporary("animated-sky-clouds");
+    VulkanRenderer renderer(window, assetRoot, temporary.path() / "cache.bin",
+        manifest, font, AntiAliasingMode::None, 100,
+        { .vsync = false }, {}, false, true, true, false);
+    UiDrawData ui;
+    ui.viewportSize = { 32, 32 };
+    std::optional<Vec2> solidPixel;
+    const auto capture = [&](bool enabled, float seconds,
+                             RenderViewMode mode = RenderViewMode::Isometric3D,
+                             bool solid = false, float pitch = 60.0f,
+                             float yaw = 0.0f,
+                             std::optional<RenderFrameData::CameraOverride> camera = std::nullopt) {
+        RenderFrameData frame;
+        frame.viewMode = mode;
+        frame.levelWidth = 8;
+        frame.levelHeight = 8;
+        frame.cameraExtent = RenderFrameData::CameraExtent { 0, 0, 0, 8, 8, 1 };
+        frame.cameraPitchDegrees = pitch;
+        frame.cameraYawDegrees = yaw;
+        frame.cameraOverride = camera;
+        frame.skyCloudsEnabled = enabled;
+        frame.effectAnimationTimeSeconds = seconds;
+        frame.lighting.shadows.enabled = false;
+        frame.lighting.ambient = { .color = { 1, 1, 1 }, .intensity = 1.0f };
+        if (solid) {
+            // Cover the view so bloom from bright background clouds cannot
+            // change a surface sample despite correct opaque depth/coverage.
+            frame.tiles.push_back({
+                .cell = { -32, -32, 0 }, .position = { -32, -32 }, .size = { 64, 64 },
+                .color = { 0.12f, 0.7f, 0.18f, 1.0f }, .height = 1.0f,
+                .showGrid = false, .affectsCameraFit = false,
+            });
+        }
+        renderer.beginDebugUiFrame();
+        const auto prepared = renderer.prepareFrame(std::move(frame));
+        if (solid) {
+            solidPixel = renderer.projectToPixels(prepared, { 3, 3, 1 });
+        }
+        renderer.drawFrame(prepared, ui);
+        require(!renderer.hasFatalFailure(), "Sky cloud frame failed to render");
+        auto image = renderer.captureRenderedFrame();
+        require(image.width != 0 && image.height != 0 &&
+                image.rgba.size() == std::size_t(image.width) * image.height * 4,
+            "Sky cloud capture was empty or incomplete");
+        return image;
+    };
+    const auto difference = [&](const ImageData& left, const ImageData& right) {
+        require(left.width == right.width && left.height == right.height,
+            "Sky cloud capture dimensions changed between identical views");
+        uint64_t total = 0;
+        for (std::size_t pixel = 0; pixel < left.rgba.size(); pixel += 4) {
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                total += static_cast<uint64_t>(std::abs(
+                    std::to_integer<int>(left.rgba[pixel + channel]) -
+                    std::to_integer<int>(right.rgba[pixel + channel])));
+            }
+        }
+        return double(total) / (double(left.width) * double(left.height) * 3.0);
+    };
+
+    const auto initial = capture(true, 0.0f);
+    const auto repeated = capture(true, 0.0f);
+    const auto nearby = capture(true, 1.0f);
+    const auto later = capture(true, 45.0f);
+    require(initial.rgba == repeated.rgba,
+        "Sky clouds changed when presentation time and camera were unchanged");
+    int minimumBrightness = 3 * 255;
+    int maximumBrightness = 0;
+    for (std::size_t pixel = 0; pixel < initial.rgba.size(); pixel += 4) {
+        const int brightness = std::to_integer<int>(initial.rgba[pixel]) +
+            std::to_integer<int>(initial.rgba[pixel + 1]) +
+            std::to_integer<int>(initial.rgba[pixel + 2]);
+        minimumBrightness = std::min(minimumBrightness, brightness);
+        maximumBrightness = std::max(maximumBrightness, brightness);
+    }
+    require(maximumBrightness - minimumBrightness > 18,
+        "Sky cloud background has no visible spatial variation");
+    const double nearbyChange = difference(initial, nearby);
+    const double laterChange = difference(initial, later);
+    require(laterChange > 0.05 && laterChange > nearbyChange && nearbyChange < 6.0,
+        "Sky cloud presentation clock did not produce a gentle visible drift");
+
+    const auto disabled = capture(false, 45.0f);
+    const auto topDown = capture(true, 45.0f, RenderViewMode::TopDown2D);
+    require(disabled.rgba == topDown.rgba,
+        "Sky clouds changed the existing top-down background");
+    for (std::size_t pixel = 4; pixel < disabled.rgba.size(); ++pixel) {
+        require(disabled.rgba[pixel] == disabled.rgba[pixel % 4],
+            "Disabling sky clouds did not preserve the uniform clear background");
+    }
+
+    const auto vertical = capture(true, 0.0f, RenderViewMode::Isometric3D, false, 0.0f);
+    const auto rotated = capture(true, 0.0f, RenderViewMode::Isometric3D, false, 60.0f, 75.0f);
+    const auto horizontal = capture(true, 0.0f, RenderViewMode::Isometric3D, false,
+        60.0f, 0.0f, RenderFrameData::CameraOverride {
+            .position = { 4, -4, 8 }, .forward = { 0, 1, -0.001f },
+        });
+    const auto upward = capture(true, 0.0f, RenderViewMode::Isometric3D, false,
+        60.0f, 0.0f, RenderFrameData::CameraOverride {
+            .position = { 4, -4, 8 }, .forward = { 0, 1, 1 },
+        });
+    for (const auto* image : { &vertical, &rotated, &horizontal, &upward }) {
+        require(difference(*image, disabled) > 10.0,
+            "Sky clouds disappeared for an authored or detached camera angle");
+        for (std::size_t pixel = 0; pixel < image->rgba.size(); pixel += 4) {
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                const int value = std::to_integer<int>(image->rgba[pixel + channel]);
+                require(value > 0 && value < 255,
+                    "Sky cloud camera reconstruction produced a black or saturated pixel");
+            }
+        }
+    }
+    require(difference(initial, rotated) > 0.05,
+        "Rotating the camera did not change its world-space cloud view");
+
+    const auto solidDisabled = capture(false, 0.0f, RenderViewMode::Isometric3D, true);
+    const auto solidEnabled = capture(true, 0.0f, RenderViewMode::Isometric3D, true);
+    require(solidPixel && std::isfinite(solidPixel->x) && std::isfinite(solidPixel->y) &&
+            solidPixel->x >= 0 && solidPixel->y >= 0 &&
+            solidPixel->x < static_cast<float>(solidEnabled.width) &&
+            solidPixel->y < static_cast<float>(solidEnabled.height),
+        "Sky cloud fixture could not project its opaque tile");
+    const auto pixelOffset = (std::size_t(solidPixel->y) * solidEnabled.width +
+        std::size_t(solidPixel->x)) * 4;
+    bool solidVisible = false;
+    for (std::size_t channel = 0; channel < 3; ++channel) {
+        require(solidEnabled.rgba[pixelOffset + channel] ==
+                solidDisabled.rgba[pixelOffset + channel],
+            "Sky clouds overwrote or changed an opaque surface");
+        solidVisible = solidVisible || solidDisabled.rgba[pixelOffset + channel] !=
+            disabled.rgba[pixelOffset + channel];
+    }
+    require(solidVisible, "Sky cloud fixture did not draw its opaque tile");
+    renderer.waitIdle();
+    std::cout << "Sky clouds vary across the view and drift deterministically: one-second change="
+              << nearbyChange << ", 45-second change=" << laterChange
+              << "; disabled, top-down and opaque geometry remain intact\n";
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -1226,6 +1376,10 @@ int main(int argc, char** argv)
     try {
         const SdlVideo video;
         const SdlWindow window;
+        if (argc == 2 && std::string_view(argv[1]) == "--sky-clouds") {
+            exerciseAnimatedSkyClouds(window.get());
+            return 0;
+        }
         if (argc == 2 &&
             std::string_view(argv[1]) == "--benchmark-startup") {
             const StartupMetrics metrics = benchmarkStartup(window.get());
@@ -1311,6 +1465,7 @@ int main(int argc, char** argv)
         }
         submitNoOp(deviceContext);
         exerciseGroundRimDrawBudgetFallback(window.get());
+        exerciseAnimatedSkyClouds(window.get());
         std::cout << "Vulkan hidden-surface smoke test passed\n";
         return 0;
     } catch (const std::exception& error) {

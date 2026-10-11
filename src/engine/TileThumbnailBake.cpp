@@ -72,6 +72,7 @@ RenderFrameData buildBakeFrame(
 {
     RenderFrameData frame;
     frame.viewMode = RenderViewMode::Isometric3D;
+    frame.skyCloudsEnabled = false;
     frame.levelWidth = bedSize;
     frame.levelHeight = bedSize;
     frame.levelDepth = 2;

@@ -222,8 +222,9 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     // Indices are positional only so that the cleanup loop below has one
     // array to walk; nothing else depends on the order.
     std::array<VkShaderModule, shaderCatalog::sources.size()> shaders {};
-    // New chunk modules follow the existing optional debug slots; compute
-    // remains last in both developer and shipping catalogs.
+    // Sky and chunk modules follow the existing optional debug slots;
+    // compute remains last in both developer and shipping catalogs.
+    constexpr std::size_t skyCloudsShader = shaderCatalog::sources.size() - 5;
     constexpr std::size_t groundChunkShaderFirst = shaderCatalog::sources.size() - 4;
     try {
         shaders[0] = shaderModule(shaderCatalog::triangleVert);
@@ -246,6 +247,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         shaders[17] = shaderModule(shaderCatalog::atmosphereCompositeFrag);
         shaders[18] = shaderModule(shaderCatalog::bloomExtractFrag);
         shaders[19] = shaderModule(shaderCatalog::bloomBlurFrag);
+        shaders[skyCloudsShader] = shaderModule(shaderCatalog::skyCloudsFrag);
         shaders[groundChunkShaderFirst] = shaderModule(shaderCatalog::groundChunkVert);
         shaders[groundChunkShaderFirst + 1] = shaderModule(shaderCatalog::groundChunkShadowVert);
         shaders[groundChunkShaderFirst + 2] = shaderModule(shaderCatalog::groundChunkFrag);
@@ -291,6 +293,12 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             shaders[0], shaders[1], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe, Target::SceneOpaque);
+        // The sky draws before scene geometry into the same HDR/MSAA target.
+        // Its fragment alpha is zero, so SSAO has no ambient surface to shade.
+        skyClouds_ = createScenePipeline(
+            shaders[5], shaders[skyCloudsShader], VertexLayout::None,
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            false, Target::SceneOpaque);
         water_ = createScenePipeline(
             shaders[0], shaders[8], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
@@ -382,6 +390,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
 #endif
             std::pair { scene_, "Scene pipeline" },
             std::pair { sceneOpaque_, "Scene pipeline (opaque)" },
+            std::pair { skyClouds_, "Layered sky clouds pipeline" },
             std::pair { groundSplatOpaque_, "Ground splat pipeline (opaque)" },
             std::pair { groundChunkOpaque_, "Ground chunk pipeline (opaque)" },
             std::pair { modelOpaque_, "Model pipeline (opaque)" },
@@ -435,7 +444,7 @@ void VulkanPipelineFactory::destroy()
 {
     if (device_) {
         const std::array pipelines {
-            scene_, sceneOpaque_, water_, waterCells_, mirrorEnergy_, groundSplat_,
+            scene_, sceneOpaque_, skyClouds_, water_, waterCells_, mirrorEnergy_, groundSplat_,
             groundSplatOpaque_, ui_, model_, modelOpaque_,
             groundChunkOpaque_, groundChunkShadow_,
             mirrorEnergyModel_, skinnedModel_, skinnedModelOpaque_,
@@ -463,6 +472,7 @@ void VulkanPipelineFactory::destroy()
     }
     scene_ = VK_NULL_HANDLE;
     sceneOpaque_ = VK_NULL_HANDLE;
+    skyClouds_ = VK_NULL_HANDLE;
     groundSplatOpaque_ = VK_NULL_HANDLE;
     groundChunkOpaque_ = VK_NULL_HANDLE;
     groundChunkShadow_ = VK_NULL_HANDLE;

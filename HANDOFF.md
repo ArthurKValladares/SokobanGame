@@ -1,6 +1,6 @@
 # Sokoban 3D handoff
 
-Updated 2026-10-10. This file describes current operating guidance, implementation
+Updated 2026-10-11. This file describes current operating guidance, implementation
 contracts and known limitations. [README.md](README.md) covers player controls,
 authoring formats, supported commands and packaging.
 
@@ -31,6 +31,15 @@ remains release-signoff work in
 [packaging/ReleaseValidation.md](packaging/ReleaseValidation.md).
 
 ## Current validation and limitations
+
+The floating-island sky uses three independently drifting procedural cloud
+layers with world-space parallax. Debug and optimized game builds pass, as do
+the focused sky, water-entry ripple, GPU ABI, shader reload, scene preparation,
+content pipeline and thumbnail suites. A 240-frame Debug capture and optimized
+puzzle/water captures complete with zero dropped draws. The older Vulkan smoke
+and preview suites fail in their processed-ground fixtures because GroundRock01
+now uses a native island module; their variant-triangle counters remain zero.
+The same failures occur with the sky disabled. Their preview-inset checks pass.
 
 Moss is the third tile-decoration style: sixteen smooth, low green cushion
 meshes with small yellow flecks, matching the four layouts and four variations
@@ -825,6 +834,13 @@ and the required real-device checks are recorded.
 - Scene alpha stores the ambient-to-total-lit ratio for opaque pixels so SSAO
   attenuates ambient contribution without darkening direct or emissive light.
   Blended scene pipelines preserve the opaque mask behind them.
+- The 3D sky draws once at the start of each initial opaque scene pass,
+  including preview insets. Its three procedural cloud planes use fixed
+  negative world Z heights and the shared effect animation clock for parallax
+  and drift. It writes zero ambient-mask alpha and no depth, and is present
+  in water refraction, atmosphere and world transitions. Thumbnail and animation
+  preview studio frames disable `skyCloudsEnabled`. Shader colors are linear;
+  tuning lives in `shaders/sky_clouds.frag.glsl` and supports shader hot reload.
 - Set 0 contains scene/frame resources. Set 1 contains the variable-count
   sampled-texture heap and is the only binding in that set.
 - Manifest textures own stable low descriptor indices. Discovered glTF textures
