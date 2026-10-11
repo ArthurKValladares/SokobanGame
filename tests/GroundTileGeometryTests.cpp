@@ -967,7 +967,7 @@ void testAllNativeGlbsLoadWithStrictPbrBindings()
                     for (const auto& vertex : mesh.vertices) {
                         CHECK(std::isfinite(vertex.position.x) && std::isfinite(vertex.position.y) && std::isfinite(vertex.position.z));
                         CHECK(vertex.position.z >= (bottom ? -groundTileBottomDepth : 0) - .00002f && vertex.position.z <= lipHeight + .00002f);
-                        if (bottom && vertex.position.z < .78f) {
+                        if (bottom) {
                             const float minimumX = (masks[shape] & groundWestSide) ? -groundTileBottomOverhang : 0.0f;
                             const float maximumX = 1 + ((masks[shape] & groundEastSide) ? groundTileBottomOverhang : 0.0f);
                             const float minimumY = (masks[shape] & groundNorthSide) ? -groundTileBottomOverhang : 0.0f;
@@ -1007,7 +1007,6 @@ void testAllNativeGlbsLoadWithStrictPbrBindings()
                             const auto& bounds = scene.renderables[0].worldBounds;
                             const auto transform = IsoScenePreparer::modelTransformPoints(tile);
                             for (const auto& vertex : mesh.vertices) {
-                                if (vertex.position.z >= .78f) continue;
                                 const Vec3 world = transform.origin +
                                     (transform.xPoint - transform.origin) * vertex.position.x +
                                     (transform.yPoint - transform.origin) * vertex.position.y +

@@ -34,31 +34,28 @@ remains release-signoff work in
 
 Ground has 240 native bodies and 310 authored tops in the existing Blender
 source: six connection shapes, ten styles, both top profiles, and regular or
-floating-island bottoms. The current V4 bottom bodies recess the original
-walls below Z=0.78 into a backing core and embed unequal closed faceted
-boulders into it. Broad slanted shoulders, overlapping lower masses and deep
-creases form the visible sides and underside. The upper band at Z>=0.78,
-both UV charts and authored caps remain intact. Hidden connection planes
-retain unit bounds and meet at fixed Z=-0.34 across styles and rotations.
-Lower geometry may bulge 0.04 tile units on exposed sides and extends no
-deeper than Z=-1. The accepted V3 boulder and floating-rock forms receive a
-small affine XY compression, preserving every Z coordinate, face, UV chart,
-group and core position. `-- --tighten-bottom-borders` applies the adjustment
-to existing native bodies without rebuilding them. Normal exports preserve artist edits;
-`-- --remodel-bottom-variants` explicitly rebuilds all bottom variants using
-`tools/sculpt_ground_bottoms.py`. The source includes an assembled preview
-scene and editable `IslandCore`, `IslandRockWalls`, `IslandUnderside`,
-`BoulderMassNN` and `FloatingRockNN` vertex groups.
-The 120 regular chamfered/square bodies now use the same closed, faceted
-boulder construction, contained inside the unit XY footprint with flat Z=0
-bases. Original geometry at Z>=0.78, recessed joining panels, their UVs and
-the two base triangles are retained. Unequal broad rocks and low ledges replace
-the lower outer plates; tiny per-mass insets prevent coplanar face artifacts.
-Interior bodies remain two base triangles. Regular native edits are exported
-with `tools/export_chunky_ground_modules.py`; only `-- --remodel-regular`
-rebuilds them. Hidden `GroundModuleConstructionSources` preserve original
-inputs for both explicit rebuild workflows. Accepted V4 bottom GLBs, authored
-cap tables and shared PBR maps remain unchanged by the regular remodeling.
+floating-island bottoms. Regular revision 2 and bottom revision 5 replace the
+old outer collar above Z=0.78 with unequal closed rock shoulders rooted below
+it at Z>=0.40. Broad uneven crowns continue the side rocks up to the authored
+beveled or square cap. Exact horizontal lip seals, recessed joining panels,
+regular flat Z=0 bases, accepted lower boulders and floating fragments remain
+intact. Retained corners preserve both UV charts and the native compressed
+normal records, avoiding Blender normal reencoding drift.
+Regular rocks stay inside the unit XY footprint; interior regular bodies remain
+two base triangles. Bottom hidden connection planes meet at fixed Z=-0.34;
+exposed sides may bulge at most 0.04 tile units, tapering to zero at the shoulder
+roof. Bottom geometry extends no deeper than Z=-1. Distinct per-rock insets
+avoid coplanar face artifacts. Editable groups include `ShoulderRockNN`,
+`CapLipSeal`, the original core selections, `BoulderMassNN` and `FloatingRockNN`.
+Normal `tools/sculpt_ground_shoulders.py` exports preserve artist edits across
+all 240 bodies. Only `-- --remodel-shoulders` reconstructs their transitions
+from hidden accepted `GroundShoulderConstructionSources`. Each GLB is exported
+to a sibling temporary file before replacement. Finalize all exports with
+`tools/finalize_cliff_gltf.py` without tangent repair. Authored cap tables and
+shared PBR maps stay unchanged. Older regular/bottom remodel commands rebuild
+their historical designs from `GroundModuleConstructionSources`; they are
+outside the current shoulder workflow. Current reconstruction always uses the
+frozen accepted chunky bodies, while normal export preserves subsequent edits.
 Same-layer connected ground groups touching ground one layer above within
 the surrounding 3x3 cells select square bodies and caps, closing direct
 stacks, steps and diagonal contacts. Disconnected exposed ground keeps its
@@ -72,36 +69,37 @@ of depth and exposed-side bulges for drawing, shadows and thumbnails; logical
 picks/collision stay unit cells. Explicit/interpolated camera extents include
 only relevant bottom-cell margins, preserving distant overworld framing.
 The GPU material table holds 4096 entries; a catalog-wide regression checks
-the current 2105 slots including fallback and attachments fit.
+the current 1721 slots including fallback and attachments fit.
 
 Debug and optimized builds pass, with ten focused ground, rendering, material
-and thumbnail suites passing in each configuration. The explicit chunky
-regular audit checks all 120 bodies and 580 closed rooted boulders against
-frozen pre-remodel exports. Exact backing/base faces, normals, UVs and PBR
-bindings, original upper-band coverage, source ownership and unit lower bounds
-pass. All 310 caps, 33,800 mixed cap joins, 6,400 backing joins, 7,200 stacked
-contacts and 28,800 stepped contacts pass. Separate hashes protect the 120
-accepted V4 bottom exports, both cap tables and 16 legacy/PBR reference files.
-Destructive fixtures reject altered retention, materials, bounds, topology
-and ownership. The new 122-entry regular/cap reference for bottom audits is
-emitted only after the strict regular audit passes; old baselines stay intact.
-Use `tools/validate_ground_modules.py --regular-revision chunky-v1` for the
-current kit. The unqualified command deliberately audits the legacy revision.
+and thumbnail suites passing in each configuration. The independent current
+audit checks all 240 bodies against frozen accepted chunky exports. Exact
+retained positions, normals, both UV streams, material factors and samplers
+pass, including all accepted lower boulders and floating fragments. All 680
+new shoulders are closed, convex and rooted; 960 slices prove near-lip rock
+coverage. Authored cap tables and 16 legacy/PBR reference files are protected
+by hashes. All 310 caps, 33,800 mixed cap joins, 6,400 backing joins, 7,200
+stacked contacts and 28,800 stepped contacts pass, as do 25,600 mixed underside
+joins and 12,800 supported contacts. Twenty-seven destructive fixture methods
+reject altered retention, normals, samplers, bounds, coverage and topology.
+Use `tools/validate_ground_shoulders.py` for the current kit. Historical
+regular/bottom validators and their approved baselines remain unchanged.
 
 Four final animated 1200-frame Vulkan captures cover all regular families and
 styles, normal and lower camera angles, three-high stacks, support examples
 and water with zero asset errors, dropped draws, pending loads or residency
-blocks. Model residency is 57,655,532 of 134,217,728 bytes. Both normal game
-outputs contain all 240 source-matching GLBs and validated content indexes.
-Evidence is in `out/ground-modules/regular-chunky-validation.json`,
-`out/ground-modules/regular-chunky-runtime-evidence.json` and
-`out/ground-modules/normal-staged-content-validation.json`; previews and native
-source snapshots remain in ignored `out/ground-modules/`. The accepted V4
-shape proof remains in `bottom-v4-source-shape-validation.json`. Revalidation
-against the approved regular reference passes in
-`out/ground-modules/bottom-v4-after-regular-validation.json`, including all
-120 bottom bodies, 564 rooted boulders, 190 separated floating rocks, 25,600
-mixed underside joins and 12,800 contacts with the new regular bodies.
+blocks. Model residency is 47,174,708 of 134,217,728 bytes. Both normal game
+outputs contain all 240 source-matching GLBs and validated content indexes
+(838 files, 200,755,256 bytes). Final asset tests pass 5,973,781 geometry checks
+in each configuration. Evidence is in
+`out/ground-modules/shoulder-transition-validation.json`,
+`out/ground-modules/shoulder-transition-runtime-evidence.json` and
+`out/ground-modules/shoulder-transition-normal-staging.json`. The runtime
+report cross-checks all 240 staged model hashes against the independent audit.
+Compact metrics, finalized-export proof, previews and native source snapshots
+remain in ignored `out/ground-modules/`. The current transition preserves
+1,144 accepted boulders, 190 floating rocks and 191,939 export triangles;
+near-lip coverage is at least 98.50% across all 960 checked slices.
 The broader Debug
 allocation suite still reports 16-byte debug-container allocations across
 unrelated paths; its optimized counterpart passed the earlier runtime baseline.

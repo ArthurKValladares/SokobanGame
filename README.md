@@ -966,37 +966,44 @@ same-layer connected group. Their full-height rock bodies and flat tops
 close gaps between layers while keeping shared edges aligned. Isolated
 terrain retains the chamfered profile. Gameplay, editor placement and hover
 previews resolve these profiles automatically.
-The 120 regular bodies now use closed faceted boulders below local Z=0.78,
-clipped to the unit XY footprint and Z=0.02..0.777. Their original upper
-band, recessed backing and flat Z=0 base remain intact, so they retain square
-contacts for neighboring and stacked tiles. Regular interiors keep only the
-two original base triangles. Hidden `GroundModuleConstructionSources`
-preserve the original native meshes for explicit regular and bottom rebuilds.
-Normal exports with `tools/export_chunky_ground_modules.py` preserve artist
-edits; `-- --remodel-regular` explicitly rebuilds the regular bodies from
-those construction sources without changing the accepted floating bottoms.
+Regular bodies use closed faceted boulders with a square overall outline.
+Their recessed backing and original flat Z=0 base retain square contacts for
+neighboring and stacked tiles; regular interiors keep only the two base
+triangles. Both regular and floating bodies now have closed rock shoulders
+that continue directly into the authored beveled or square cap. The earlier
+vertical collar above Z=0.78 is removed; horizontal lip seals, cap geometry,
+accepted boulders and floating fragments retain their shapes and UVs.
+Editable `ShoulderRockNN` groups isolate the new shoulders, which start at
+Z=0.4 and finish just beneath the cap lip. Regular bodies are revision 2,
+floating bottoms revision 5, with `ShoulderTransitionRevision=1` on both.
 Unsupported ground selects a floating-island body with a recessed core
 derived from the original fractured walls. Unequal closed faceted boulders
 embed into the core, forming overlapping side clusters, deep creases and an
-irregular rocky underside with varied detached rocks. The original top band
-from local Z=0.78, authored caps and shared PBR maps stay intact. All six
+irregular rocky underside with varied detached rocks. The authored caps and
+shared PBR maps stay intact. All six
 connection shapes and ten styles have both top profiles. Hidden connection
 planes retain the unit footprint and meet at Z=-0.34 across rotations and
 mixed styles. A small lateral compression brings the accepted rock shapes
 closer to the tile borders while preserving their facets, UVs and heights.
 Below Z=0.78, rocks may overhang by at most 0.04 tile units on exposed sides
-only; their maximum depth remains one tile, down to Z=-1.
+only. The new bottom shoulders taper that margin toward zero at their roof;
+connected sides retain the unit footprint. Regular shoulders remain inside
+the unit footprint. Maximum bottom depth remains one tile, down to Z=-1.
 Only the lowest unsupported ground in a stack receives the underside. Static
 ground, walls, cliffs, decorative blocks and live ice directly below provide
 support, including hidden editor layers. Air, water, thin plates and moving platforms
 leave the underside exposed. Drawing, shadows, camera framing and thumbnails
 include its visual overhang and depth; gameplay cells and editor picking keep
 their unit bounds.
-Normal Blender exports preserve mesh edits; the explicit
-`-- --remodel-bottom-variants` option rebuilds all 120 bottom bodies using
-`tools/sculpt_ground_bottoms.py`. The separate
-`-- --tighten-bottom-borders` option applies the lateral compression to
-existing boulder and floating-rock groups without rebuilding their shapes.
+Export all 240 current bodies with `tools/sculpt_ground_shoulders.py` in
+Blender, then finalize every ground GLB with `tools/finalize_cliff_gltf.py`.
+Normal exports preserve native mesh edits. The explicit
+`-- --remodel-shoulders` option rebuilds the transition from 240 frozen
+accepted meshes in `GroundShoulderConstructionSources`; it replaces current
+mesh edits while preserving their accepted boulders, fragments, lip seals,
+backing and bases. `tools/validate_ground_shoulders.py` is the current mesh
+and seam audit. Earlier regular/bottom rebuild and audit commands describe
+historical revisions.
 See [the ground source contract](assets/custom/source/ground_modules/README.md)
 for Blender editing and export requirements.
 
