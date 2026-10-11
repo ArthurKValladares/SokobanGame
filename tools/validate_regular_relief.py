@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter, defaultdict
+import copy
 import json
 from pathlib import Path
 import re
+import struct
 
 import numpy as np
 
@@ -29,6 +31,8 @@ MAXIMUM_DEPTH = .0072
 POSITION_TOLERANCE = 2e-7
 UV_TOLERANCE = 2e-7
 ROLE = re.compile(r"(?:BoulderMass|ShoulderRock)\d+")
+RECESS_BASE_COLOR = [.61, .48, .28, 1]
+RECESS_COLOR_TOLERANCE = 1e-6
 
 
 def oriented_key(values):
@@ -214,16 +218,77 @@ def audit_closed_roles(roles, old_roles, label):
     return reports
 
 
-def audit_materials(document, accepted, label):
+def accepted_recess_color(data, accepted, recess_factor, label):
+    """Undo only the explicitly contracted backing color for exact comparison."""
+    result = copy.deepcopy(data)
+    if recess_factor is None:
+        return result
+    original = {material.get("name"): material for material in accepted["materials"]}
+    for material in result["materials"]:
+        if material.get("name") != "GroundModuleRecess":
+            continue
+        factor = material.get("pbrMetallicRoughness", {}).get("baseColorFactor")
+        native.require(isinstance(factor, list) and len(factor) == 4
+                       and all(type(value) in (int, float) and np.isfinite(value)
+                               and abs(value-expected) <= RECESS_COLOR_TOLERANCE
+                               for value, expected in zip(factor, recess_factor)),
+                       f"{label}: recess base color differs from the explicit sandstone contract")
+        native.require("GroundModuleRecess" in original,
+                       f"{label}: unexpected new recess material")
+        old_pbr = original["GroundModuleRecess"].get("pbrMetallicRoughness", {})
+        if "baseColorFactor" in old_pbr:
+            material["pbrMetallicRoughness"]["baseColorFactor"] = copy.deepcopy(old_pbr["baseColorFactor"])
+        else:
+            material["pbrMetallicRoughness"].pop("baseColorFactor")
+    return result
+
+
+def non_json_glb_chunks(path):
+    """Retain every binary and extension chunk, including padding bytes."""
+    raw = path.read_bytes()
+    native.require(len(raw) >= 12, f"{path.name}: truncated GLB header")
+    magic, version, length = struct.unpack_from("<III", raw)
+    native.require(magic == 0x46546C67 and version == 2 and length == len(raw),
+                   f"{path.name}: invalid GLB header")
+    chunks, cursor, json_chunks = [], 12, 0
+    while cursor < length:
+        native.require(cursor+8 <= length, f"{path.name}: truncated GLB chunk header")
+        size, kind = struct.unpack_from("<II", raw, cursor)
+        end = cursor+8+size
+        native.require(size % 4 == 0 and end <= length, f"{path.name}: invalid GLB chunk length")
+        if kind == 0x4E4F534A:
+            json_chunks += 1
+        else:
+            chunks.append((kind, raw[cursor+8:end]))
+        cursor = end
+    native.require(json_chunks == 1, f"{path.name}: expected exactly one GLB JSON chunk")
+    return chunks
+
+
+def audit_bottom_material_revision(document, accepted, recess_factor, label):
+    native.require(accepted_recess_color(document.data, accepted.data, recess_factor, label) == accepted.data,
+                   f"{label}: protected bottom JSON changed beyond the recess base color")
+    native.require(non_json_glb_chunks(document.path) == non_json_glb_chunks(accepted.path),
+                   f"{label}: protected bottom binary or extension chunk changed")
+    return {"bottom_geometry_and_other_gltf_metadata_identical": True,
+            "bottom_non_json_glb_chunks_byte_identical": True}
+
+
+def audit_materials(document, accepted, label, recess_factor=None):
     actual = {m.get("name"): shoulder.material_signature(document, m) for m in document.data["materials"]}
     old = {m.get("name"): shoulder.material_signature(accepted, m) for m in accepted.data["materials"]}
+    if recess_factor is not None:
+        actual = accepted_recess_color({"materials": list(actual.values())},
+                                       {"materials": list(old.values())}, recess_factor, label)
+        actual = {material.get("name"): material for material in actual["materials"]}
     native.require(actual == old and len(actual) == len(document.data["materials"]) == len(accepted.data["materials"]),
                    f"{label}: original material table, PBR maps or sampler state changed")
     for item in document.data.get("images", []):
         native.require("uri" in item and "bufferView" not in item, f"{label}: unfinalized relief image")
         path = native.resource_path(document.path.parent, item["uri"])
         native.require(path.is_relative_to(native.ASSETS) and path.suffix.lower() == ".png", f"{label}: invalid PBR map")
-    return {"all_original_materials_texture_maps_and_samplers_identical": True}
+    return {"all_other_original_materials_texture_maps_and_samplers_identical": True,
+            "recess_base_color_factor": recess_factor}
 
 
 def audit_reference_protection(before, protected, models):
@@ -249,15 +314,19 @@ def audit_reference_protection(before, protected, models):
             "historical_baselines_and_validators_unchanged": True, "image_dependencies": sorted(dependencies)}
 
 
-def audit_body(path, reference, row, accepted):
+def audit_body(path, reference, row, accepted, recess_factor=None):
     bottom, square = row["bottom"], row["squareTop"]
     body, old_body = row["body"], accepted["body"]
     lip, exposed = (1 if square else .91), row["exposedSideMask"]
     roles, source_report = audit_source_refinement(body, old_body, bottom, exposed, lip, path.name)
     if bottom:
-        native.require(native.digest(path) == native.digest(reference), f"{path.name}: protected bottom GLB changed")
+        if recess_factor is None:
+            native.require(native.digest(path) == native.digest(reference), f"{path.name}: protected bottom GLB changed")
+            export_report = {"bottom_glb_byte_identical": True}
+        else:
+            export_report = audit_bottom_material_revision(Document(path), Document(reference), recess_factor, path.name)
         return None, {"file": path.relative_to(ROOT).as_posix(), "sha256": native.digest(path), "bottom": True,
-                      **source_report, "bottom_glb_byte_identical": True}
+                      **source_report, **export_report}
     properties = body["properties"]
     native.require(properties.get("RegularDesignRevision") == 3 and properties.get("RegularReliefRevision") == 1
                    and properties.get("RegularReliefMaximumDepth") == MAXIMUM_DEPTH
@@ -274,7 +343,7 @@ def audit_body(path, reference, row, accepted):
     primitives, old = native.read_primitives(document), native.read_primitives(old_document)
     streams, old_streams = rock.texture_coordinates(document), rock.texture_coordinates(old_document)
     export_report = audit_export_refinement(primitives, old, streams, old_streams, body, old_body, path.name)
-    materials = audit_materials(document, old_document, path.name)
+    materials = audit_materials(document, old_document, path.name, recess_factor)
     retained = regular.audit_retained_geometry(primitives, old, streams, old_streams, path.name)
     old_roles = shoulder.source_roles(old_body, False, "Accepted "+path.name)
     closed = audit_closed_roles(roles, old_roles, path.name)
@@ -298,6 +367,10 @@ def main():
     parser.add_argument("--square-source-audit", type=Path, default=native.DEFAULT_SQUARE_SOURCE_AUDIT)
     args = parser.parse_args()
     contract = json.loads(args.contract.read_text(encoding="utf-8"))
+    recess_factor = contract.get("recessMaterialBaseColorFactor")
+    native.require(("recessMaterialBaseColorFactor" not in contract and "recessMaterialRevision" not in contract)
+                   or (recess_factor == RECESS_BASE_COLOR and contract.get("recessMaterialRevision") == 1),
+                   "Unexpected explicit recess material revision/color contract")
     native.require(contract.get("regularDesignRevision") == 3 and contract.get("regularReliefRevision") == 1
                    and contract.get("bottomDesignRevision") == 5 and contract.get("shoulderTransitionRevision") == 1
                    and contract.get("regularReliefMaximumDepth") == MAXIMUM_DEPTH,
@@ -325,9 +398,12 @@ def main():
     minimum.update((args.contract.parent/contract[name]).relative_to(ROOT).as_posix() for name in ("capSurfaces", "squareCapSurfaces"))
     native.require(minimum <= set(protected), "Protected reference omits accepted bottoms, caps or PBR files")
     for name, expected in protected.items():
-        native.require(native.digest(ROOT/name) == expected, f"Protected file changed: {name}")
         if name in bottom_names:
             native.require(expected == old_hashes[Path(name).name], f"Protected bottom reference was rewritten: {name}")
+        if name not in bottom_names or recess_factor is None:
+            native.require(native.digest(ROOT/name) == expected, f"Protected file changed: {name}")
+        # Revised bottoms are checked against the frozen accepted reference
+        # below: only the declared color may differ, with all binary bytes fixed.
     reference_protection = audit_reference_protection(before, protected, args.models)
     loaded, reports = {False: {}, True: {}}, []
     for identity, row in current.items():
@@ -337,7 +413,7 @@ def main():
         name = f"ground_{'bottom_' if bottom else ''}{'square_' if square else ''}{family}_{variant+1:02d}.glb"
         path, reference = args.models/name, args.accepted_root/"models"/name
         native.require(native.digest(reference) == old_hashes[name], f"Frozen accepted GLB changed: {name}")
-        primitives, report = audit_body(path, reference, row, accepted[identity])
+        primitives, report = audit_body(path, reference, row, accepted[identity], recess_factor)
         if not bottom:
             loaded[square][(family, variant)] = primitives
         reports.append(report)
@@ -352,7 +428,8 @@ def main():
     square_source = native.audit_native_source_v2(args.square_source_audit, args.contract, square_contract, loaded[True], square_caps)
     selected = [report for report in reports if report.get("selected_faces")]
     result = {"status": "PASS", "regular_design_revision": 3, "regular_relief_revision": 1, "bottom_revision": 5,
-              "native_models": 240, "modified_regular_models": len(selected), "unchanged_bottom_models": 120,
+              "recess_material_revision": contract.get("recessMaterialRevision"), "recess_base_color_factor": recess_factor,
+              "native_models": 240, "modified_regular_models": len(selected), "unchanged_bottom_geometry_models": 120,
               "unchanged_regular_interior_models": 20, "selected_rock_faces": sum(r["selected_faces"] for r in reports),
               "maximum_relief_depth": max(r["maximum_relief_depth"] for r in selected),
               "source_snapshot_sha256": native.digest(args.source_audit), "accepted_source_snapshot_sha256": native.digest(source_path),

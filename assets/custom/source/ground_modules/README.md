@@ -62,6 +62,18 @@ faceted boulders form the visible sides and broad lower ledges, with a square
 overall shape. Their accepted vertices, rock edges and UV charts stay fixed.
 Interior bodies remain the two original base faces with no rock masses.
 
+Recess material revision 1 gives `GroundModuleRecess` a warm sandstone
+base color of `[0.61, 0.48, 0.28, 1]` in linear RGBA, approximately 90% of
+the rock texture's median albedo after its plate material factors. The
+exposed backing closely matches the stone color and value while retaining
+shaded crevices. `contract.json` records this color. Run
+`tools/update_ground_recess_material.py` inside background Blender with
+`-- --apply` to synchronize the shared native material and GLB material
+records; ordinary Python with `--verify` checks the exports. This update
+preserves every GLB binary chunk and all other material parameters exactly.
+The current relief validator permits only this contracted color change
+against the frozen geometry baselines, including floating-bottom bodies.
+
 `RegularReliefRevision=1` adds a little unevenness inside a sparse selection
 of broad exposed `BoulderMassNN` and `ShoulderRockNN` triangles. Each selected
 triangle becomes three facets around an inward interior point; no original

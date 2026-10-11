@@ -40,6 +40,8 @@
   "sideStations": [0.12, 0.37, 0.70, 0.88],
   "variantMiddleWidths": [[0.105, 0.159], [0.151, 0.107], [0.116, 0.145], [0.139, 0.092], [0.099, 0.154], [0.148, 0.120], [0.112, 0.163], [0.155, 0.104], [0.127, 0.149], [0.143, 0.098]],
   "bodyRecessInset": 0.055,
+  "recessMaterialRevision": 1,
+  "recessMaterialBaseColorFactor": [0.61, 0.48, 0.28, 1],
   "bodySealStations": [0, 0.12, 0.37, 0.70, 0.88, 1],
   "preserveOriginalXY": true,
   "microscopicCleanupTolerance": 0.0005,

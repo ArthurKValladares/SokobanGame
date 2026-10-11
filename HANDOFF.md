@@ -32,6 +32,32 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
+Ground recess material revision 1 replaces the near-black backing visible
+between rock masses with warm sandstone, linear RGBA `[0.61, 0.48, 0.28, 1]`,
+approximately 90% of the texture's median albedo after plate material factors.
+The native shared `GroundModuleRecess` material and 200 exposed-body GLBs use
+the color in the ground contract; the 40 interior bodies remain unchanged.
+`tools/update_ground_recess_material.py` synchronizes native and exported
+materials without changing any GLB binary chunk, geometry or other material
+parameter. `tools/validate_regular_relief.py` accepts only this explicit
+color revision while protecting the frozen accepted files and all binary
+payloads. The earlier whole-file bottom hashes below describe their accepted
+geometry baseline before this material-only revision.
+The updated full-kit audit passes all 240 bodies, and native geometry plus
+all GLB binary chunks match the pre-fix kit. Five focused asset/material/
+content suites and 29 existing validator fixtures pass. Debug and optimized
+1,200-frame captures reproduce level 3 screen 0 with the corrected crevices,
+no dropped draws and empty asset queues. Debug's loader/shader-interface
+messages also occur with the original material; optimized captures are clean.
+Evidence is in ignored `out/ground-material/recess-runtime-verification.json`
+and `out/ground-material/recess-relief-validation.json`.
+The final warmer color is verified against the previous kit across all 240
+exports with every binary chunk and other material setting preserved. Both
+normal builds match the source hashes; a fresh 1,200-frame optimized capture
+has no warnings, dropped draws or pending assets. See
+`out/ground-material/texture-match-runtime-verification.json` and
+`out/ground-material/texture-match-export-verification.json`.
+
 Ground has 240 native bodies and 310 authored tops in the existing Blender
 source: six connection shapes, ten styles, both top profiles, and regular or
 floating-island bottoms. Regular revision 3 and bottom revision 5 retain the
