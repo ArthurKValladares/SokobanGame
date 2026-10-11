@@ -3,6 +3,7 @@
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/GateEffect.hpp"
+#include "engine/GroundTileGeometry.hpp"
 #include "engine/MinecartGateVisuals.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/PresentationSettings.hpp"
@@ -196,6 +197,7 @@ RenderFrameData buildBakeFrame(
             [&manifest](std::string_view name) { return manifest.findTextureIdByName(name); },
             std::nullopt);
     }
+    if (replacesBedCell) processGroundTileGeometry({ frame.tiles.data(), frame.tiles.size() }, manifest);
     return frame;
 }
 
@@ -220,10 +222,33 @@ CropRect cropFor(
     float minY = static_cast<float>(height);
     float maxX = 0.0f;
     float maxY = 0.0f;
-    // The subject occupies the centre cell and may stand a unit tall.
-    for (const float x : { centre, centre + 1.0f }) {
-        for (const float y : { centre, centre + 1.0f }) {
-            for (const float z : { 0.0f, 1.0f }) {
+    Vec3 subjectMinimum { centre, centre, 0.0f };
+    Vec3 subjectMaximum { centre + 1.0f, centre + 1.0f, 1.0f };
+    // Only the subject's rocky bottom extends the usual crop. The neutral
+    // bed and multipart icons retain their existing framing.
+    for (const auto& renderable : scene.renderables) {
+        if (renderable.kind != PreparedRenderable::Kind::Tile ||
+            renderable.sourceIndex >= frame.tiles.size()) continue;
+        const auto& tile = frame.tiles[renderable.sourceIndex];
+        if (!tile.groundModule || !tile.groundModuleBottom ||
+            tile.cell.x != static_cast<int>(bedCentre) ||
+            tile.cell.y != static_cast<int>(bedCentre)) continue;
+        const auto& bounds = renderable.worldBounds;
+        if (!bounds.valid()) continue;
+        subjectMinimum = {
+            std::min(subjectMinimum.x, bounds.minimum.x),
+            std::min(subjectMinimum.y, bounds.minimum.y),
+            std::min(subjectMinimum.z, bounds.minimum.z),
+        };
+        subjectMaximum = {
+            std::max(subjectMaximum.x, bounds.maximum.x),
+            std::max(subjectMaximum.y, bounds.maximum.y),
+            std::max(subjectMaximum.z, bounds.maximum.z),
+        };
+    }
+    for (const float x : { subjectMinimum.x, subjectMaximum.x }) {
+        for (const float y : { subjectMinimum.y, subjectMaximum.y }) {
+            for (const float z : { subjectMinimum.z, subjectMaximum.z }) {
                 const Vec3 clip = IsoScenePreparer::projectIsoPoint(
                     scene.isoLayout, scene.renderExtent, { x, y, z });
                 const float pixelX =

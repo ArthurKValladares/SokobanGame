@@ -172,7 +172,29 @@ std::array<Vec3, 8> tileCorners(const RenderFrameData::Tile& tile)
         };
     }
 
-    return logicalTileCorners(tile);
+    auto result = logicalTileCorners(tile);
+    if (tile.groundModule && tile.groundModuleBottom) {
+        const uint8_t sides = tile.groundModuleSideMask;
+        const float left = tile.position.x -
+            ((sides & groundWestSide) ? groundTileBottomOverhang * tile.size.x : 0.0f);
+        const float right = tile.position.x + tile.size.x +
+            ((sides & groundEastSide) ? groundTileBottomOverhang * tile.size.x : 0.0f);
+        const float nearY = tile.position.y -
+            ((sides & groundNorthSide) ? groundTileBottomOverhang * tile.size.y : 0.0f);
+        const float farY = tile.position.y + tile.size.y +
+            ((sides & groundSouthSide) ? groundTileBottomOverhang * tile.size.y : 0.0f);
+        // The mask is already in world-cell orientation. The enclosing box
+        // covers the lower rocks without changing the model transform or
+        // the logical faces used for picking.
+        for (std::size_t corner = 0; corner < result.size(); ++corner) {
+            result[corner].x = corner % 4 == 0 || corner % 4 == 3 ? left : right;
+            result[corner].y = corner % 4 < 2 ? nearY : farY;
+        }
+        for (std::size_t corner = 0; corner < 4; ++corner) {
+            result[corner].z -= groundTileBottomDepth * std::max(tile.height, 0.0f);
+        }
+    }
+    return result;
 }
 
 TileRenderLayout calculateTileLayout(
@@ -364,11 +386,37 @@ IsoRenderLayout calculateIsoLayout(
     const float nearY = cameraExtent.originY;
     const float right = left + cameraExtent.width;
     const float farY = nearY + cameraExtent.height;
-    const float bottom = cameraExtent.originZ;
-    const float top = bottom + std::max(cameraExtent.depth, 1.0f);
+    float fitLeft = left;
+    float fitRight = right;
+    float fitNearY = nearY;
+    float fitFarY = farY;
+    float bottom = cameraExtent.originZ;
+    const float top = cameraExtent.originZ + std::max(cameraExtent.depth, 1.0f);
+    // An authored screen extent owns its framing, including during overworld
+    // pans. Relevant undersides may extend it by their exposed-side margin
+    // and depth; surrounding screens still contribute depth alone.
+    if (frameData.cameraExtent) {
+        for (const auto& tile : frameData.tiles) {
+            if (!tile.groundModule || !tile.groundModuleBottom || tile.isEditorPreview || !tile.affectsCameraFit ||
+                tile.position.x + tile.size.x <= left || tile.position.x >= right ||
+                tile.position.y + tile.size.y <= nearY || tile.position.y >= farY ||
+                tile.baseElevation < cameraExtent.originZ || tile.baseElevation >= top) continue;
+            bottom = std::min(bottom, tile.baseElevation - groundTileBottomDepth * std::max(tile.height, 0.0f));
+            const auto visual = tileCorners(tile);
+            const uint8_t sides = tile.groundModuleSideMask;
+            const float xMargin = groundTileBottomOverhang * tile.size.x;
+            const float yMargin = groundTileBottomOverhang * tile.size.y;
+            // A partially intersecting cell during a pan cannot pull the fit
+            // past this small margin beyond the authored/interpolated extent.
+            if (sides & groundWestSide) fitLeft = std::min(fitLeft, std::max(visual[0].x, left - xMargin));
+            if (sides & groundEastSide) fitRight = std::max(fitRight, std::min(visual[1].x, right + xMargin));
+            if (sides & groundNorthSide) fitNearY = std::min(fitNearY, std::max(visual[0].y, nearY - yMargin));
+            if (sides & groundSouthSide) fitFarY = std::max(fitFarY, std::min(visual[2].y, farY + yMargin));
+        }
+    }
     for (Vec3 point : corners(Aabb {
-             Vec3 { left, nearY, bottom },
-             Vec3 { right, farY, top },
+             Vec3 { fitLeft, fitNearY, bottom },
+             Vec3 { fitRight, fitFarY, top },
          })) {
         if (frameData.cameraOverride) {
             includeDepth(point);
@@ -1255,7 +1303,7 @@ static void prepareAuxiliaryGeometry(
             continue;
         }
         if (!tile.model.isCube()) {
-            if (!tile.groundModule || tile.groundModuleSideMask != 0) shadowModelIndices.push_back(tileIndex);
+            if (!tile.groundModule || tile.groundModuleSideMask != 0 || tile.groundModuleBottom) shadowModelIndices.push_back(tileIndex);
             // Rock assets contain the sides; the painted top belongs to the
             // tile renderer and must also close the body's shadow volume.
             if ((tile.groundTop || tile.effect == RenderSurfaceEffect::GroundSplat) &&
@@ -1710,7 +1758,7 @@ void appendTileFaces(
         }
 
         if (!tile.model.isCube() && !tile.pickOnly && mainSceneVisible &&
-            (!tile.groundModule || tile.groundModuleSideMask != 0)) {
+            (!tile.groundModule || tile.groundModuleSideMask != 0 || tile.groundModuleBottom)) {
             (tile.blurBehind || tile.color.w < 1.0f ||
                     tile.effect == RenderSurfaceEffect::MirrorEnergy ||
                     tile.effect == RenderSurfaceEffect::GateEnergy ||

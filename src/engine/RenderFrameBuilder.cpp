@@ -2002,6 +2002,20 @@ void applyScrollingMaterials(
     const RenderFrameBuilder::GameplayInput& input)
 {
     for (RenderFrameData::Tile& tile : frame.tiles) {
+        if (tile.groundModule && tile.cell.z > 0) {
+            const GridPosition3 below { tile.cell.x, tile.cell.y, tile.cell.z - 1 };
+            if (input.level.inBounds(below)) {
+                // Visibility never changes whether native rock may extend
+                // into the lower cell. Thin surfaces and water leave it free.
+                const TileType support = input.level.tileAt(
+                    static_cast<uint32_t>(below.x), static_cast<uint32_t>(below.y), static_cast<uint32_t>(below.z));
+                // Ice belongs to live movable state, never its authored cell.
+                tile.groundModuleSupported = support != TileType::Ice && groundTileBottomSupport(support);
+                if (const auto* movable = rules::movableAt(input.state, below)) {
+                    tile.groundModuleSupported = tile.groundModuleSupported || movable->type == TileType::Ice;
+                }
+            }
+        }
         if (tile.effect == RenderSurfaceEffect::GroundSplat) {
             bool composed = false;
             for (const auto& region : input.groundSplatRegions) {

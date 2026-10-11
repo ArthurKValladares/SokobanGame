@@ -794,7 +794,8 @@ editor commands but does not own document or filesystem policy.
   chamfers and exposed sides are authored in
   `assets/custom/source/ground_modules.blend`; the game neither deforms these
   meshes nor trims their indices. Diagonal gaps select authored concave caps
-  so L-shaped joints stay closed. Fully surrounded tiles draw only a flat top.
+  so L-shaped joints stay closed. Supported, fully surrounded tiles draw only
+  a flat top; floating interiors retain their underside.
   Mixed styles share exact corner ramps, and their separate paintable caps
   retain screen splats across both the center and chamfer. Gameplay keeps the
   same square solid cell.
@@ -951,14 +952,42 @@ editor commands but does not own document or filesystem policy.
 
 The current ground kit and cliff walls share the six-shape neighbor resolver.
 Only same-height, opaque, unit-scale tiles in their own terrain family join.
-The native ground library contains sixty body GLBs and 250 authored top
+The native ground library contains 240 body GLBs and 310 authored top
 surfaces. Three broad shallow chamfer panels per side replace the narrow
 toothed edge. A literal lookup serialized from the Blender tops supplies
 rendering, shadows and blend-mask picking; world-space paint coordinates
-survive rotations. Interior ground skips the body draw and uses one square
-cap when no diagonal gap requires a concave wedge. Content staging packages
+survive rotations. Supported interior ground skips the body draw and uses one
+square cap when no diagonal gap requires a concave wedge. Content staging packages
 the native meshes and shared PBR
 maps without generating ground rim artifacts for native-only screens.
+Ground touching another ground cell one layer above, including steps,
+diagonal corners and direct stacks, uses square-top variants across its
+same-layer connected group. Their full-height rock bodies and flat tops
+close gaps between layers while keeping shared edges aligned. Isolated
+terrain retains the chamfered profile. Gameplay, editor placement and hover
+previews resolve these profiles automatically.
+Unsupported ground selects a floating-island body with a recessed core
+derived from the original fractured walls. Unequal closed faceted boulders
+embed into the core, forming overlapping side clusters, deep creases and an
+irregular rocky underside with varied detached rocks. The original top band
+from local Z=0.78, authored caps and shared PBR maps stay intact. All six
+connection shapes and ten styles have both top profiles. Hidden connection
+planes retain the unit footprint and meet at Z=-0.34 across rotations and
+mixed styles. A small lateral compression brings the accepted rock shapes
+closer to the tile borders while preserving their facets, UVs and heights.
+Below Z=0.78, rocks may overhang by at most 0.04 tile units on exposed sides
+only; their maximum depth remains one tile, down to Z=-1.
+Only the lowest unsupported ground in a stack receives the underside. Static
+ground, walls, cliffs, decorative blocks and live ice directly below provide
+support, including hidden editor layers. Air, water, thin plates and moving platforms
+leave the underside exposed. Drawing, shadows, camera framing and thumbnails
+include its visual overhang and depth; gameplay cells and editor picking keep
+their unit bounds.
+Normal Blender exports preserve mesh edits; the explicit
+`-- --remodel-bottom-variants` option rebuilds all 120 bottom bodies using
+`tools/sculpt_ground_bottoms.py`. The separate
+`-- --tighten-bottom-borders` option applies the lateral compression to
+existing boulder and floating-rock groups without rebuilding their shapes.
 See [the ground source contract](assets/custom/source/ground_modules/README.md)
 for Blender editing and export requirements.
 

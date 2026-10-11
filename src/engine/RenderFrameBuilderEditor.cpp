@@ -90,6 +90,19 @@ public:
         appendEditorCamera(frame);
         applyEditorScrollingMaterials(frame);
         for (RenderFrameData::Tile& tile : frame.tiles) {
+            if (tile.groundModule && tile.cell.z > 0) {
+                const GridPosition3 below { tile.cell.x, tile.cell.y, tile.cell.z - 1 };
+                TileType support = documentTileAt(below);
+                for (const auto& neighbor : input_.overworldNeighbors) {
+                    if (!neighbor.definition || below.x < neighbor.origin.x || below.y < neighbor.origin.y ||
+                        below.x >= neighbor.origin.x + static_cast<int>(neighbor.width) ||
+                        below.y >= neighbor.origin.y + static_cast<int>(neighbor.height)) continue;
+                    support = definitionTileAt(*neighbor.definition,
+                        { below.x - neighbor.origin.x, below.y - neighbor.origin.y, below.z });
+                    break;
+                }
+                tile.groundModuleSupported = pendingTileMoveSource() != below && groundTileBottomSupport(support);
+            }
             if (tile.effect != RenderSurfaceEffect::GroundSplat) continue;
             bool neighborTile = false;
             for (const auto& neighbor : input_.overworldNeighbors) {

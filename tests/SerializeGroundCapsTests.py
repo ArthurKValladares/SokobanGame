@@ -15,6 +15,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "tools/serialize_ground_caps.py"
@@ -44,6 +45,15 @@ def fixture() -> dict:
 
 def encode(document: dict) -> bytes:
     return json.dumps(document).encode("utf-8")
+
+
+def square_fixture() -> dict:
+    document = fixture()
+    document["models"] = [model for model in document["models"] if model["concaveCorners"] == 0]
+    for model in document["models"]:
+        model["object"] += "_Square"
+        model["wallCoverage"] = [[0, 0, 0, 0]]
+    return document
 
 
 class SerializeGroundCapsTests(unittest.TestCase):
@@ -201,6 +211,96 @@ class SerializeGroundCapsTests(unittest.TestCase):
                 self.document["models"][0]["wallCoverage"][0].pop()
                 source.write_bytes(encode(self.document))
                 self.assertEqual(SERIALIZER.main(arguments), 1)
+                self.assertEqual(output.read_bytes(), b"stale")
+
+
+class SerializeSquareGroundCapsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.document = square_fixture()
+
+    def reject(self, message: str) -> None:
+        with self.assertRaisesRegex(SERIALIZER.CapDataError, message):
+            SERIALIZER.load_records(encode(self.document), square=True)
+
+    def test_sixty_square_caps_are_sorted_and_copied_literally(self) -> None:
+        # A different first corner and signed zero must survive serialization;
+        # the serializer must not replace the authored quad with a new square.
+        model = self.document["models"][0]
+        model["faces"] = [[2, 3, 0, 1]]
+        model["vertices"][0][0] = -0.0
+        model["normals"] = [[-0.0, 0.0, 1.0]]
+        self.document["models"].reverse()
+        source = encode(self.document)
+        records = SERIALIZER.load_records(source, square=True)
+        self.assertEqual(len(records), 60)
+        self.assertEqual([(record.variant, record.shape_index) for record in records],
+                         [(variant, shape) for variant in range(10) for shape in range(6)])
+        self.assertTrue(all(record.concave_corners == 0 for record in records))
+        self.assertEqual(records[0].patches[0].vertices,
+                         ((1, 1, 1), (0, 1, 1), (-0.0, 0, 1), (1, 0, 1)))
+        header = SERIALIZER.serialize_header(records, hashlib.sha256(source).hexdigest(), square=True)
+        self.assertIn("inline constexpr std::array<std::array<GroundTileCapSurface, 6>, 10> groundTileSquareCaps", header)
+        self.assertEqual(header.count("        GroundTileCapSurface {"), 60)
+        self.assertEqual(header.count("GroundTileSurfacePatch {"), 60)
+        self.assertIn(hashlib.sha256(source).hexdigest(), header)
+        self.assertIn(".normal = Vec3{.x=-0.0f,.y=0.0f,.z=1.0f}", header)
+        self.assertIn("Vec3{.x=-0.0f,.y=0.0f,.z=1.0f}", header)
+        self.assertNotIn("groundTileNativeCapIndices", header)
+        self.assertEqual(header, SERIALIZER.serialize_header(records, hashlib.sha256(source).hexdigest(), square=True))
+
+    def test_square_mode_requires_complete_unique_contract(self) -> None:
+        self.document["models"].pop()
+        self.reject("exactly 60")
+        self.document = square_fixture()
+        self.document["models"][-1] = copy.deepcopy(self.document["models"][0])
+        self.reject("duplicate variant/shape/concave key")
+        self.document = square_fixture()
+        self.document["models"][3]["concaveCorners"] = 8
+        self.reject("square caps require concaveCorners=0")
+        self.document = square_fixture()
+        self.document["models"][0]["exposedSideMask"] = 0
+        self.reject("not canonical")
+
+    def test_square_mode_rejects_inset_lowered_or_painted_caps(self) -> None:
+        self.document["models"][0]["vertices"][0][0] = 0.01
+        self.reject("one full unit-cell quad at z=1")
+        self.document = square_fixture()
+        for vertex in self.document["models"][0]["vertices"]:
+            vertex[2] = 0.99
+        self.reject("one full unit-cell quad at z=1")
+        self.document = square_fixture()
+        self.document["models"][0]["wallCoverage"][0][0] = 0.25
+        self.reject("wallCoverage must be zero")
+        self.document = square_fixture()
+        self.document["models"][0]["faces"] = [[0, 1, 2]]
+        self.document["models"][0]["wallCoverage"] = [[0, 0, 0]]
+        self.reject("one full unit-cell quad at z=1")
+
+    def test_square_defaults_check_and_explicit_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="serialize_square_caps_", dir=Path(__file__).parent) as temporary:
+            source = Path(temporary) / "square.json"
+            output = Path(temporary) / "square.hpp"
+            source.write_bytes(encode(self.document))
+            with (patch.object(SERIALIZER, "DEFAULT_SQUARE_INPUT", source),
+                  patch.object(SERIALIZER, "DEFAULT_SQUARE_OUTPUT", output),
+                  redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO())):
+                self.assertEqual(SERIALIZER.main(["--square", "--check"]), 1)
+                self.assertFalse(output.exists())
+                self.assertEqual(SERIALIZER.main(["--square"]), 0)
+                before = output.read_bytes()
+                self.assertIn(b"groundTileSquareCaps", before)
+                self.assertEqual(SERIALIZER.main(["--square", "--check"]), 0)
+                self.assertEqual(before, output.read_bytes())
+                explicit = Path(temporary) / "explicit.hpp"
+                self.assertEqual(SERIALIZER.main(["--square", "--input", str(source),
+                                                  "--output", str(explicit)]), 0)
+                self.assertEqual(before, explicit.read_bytes())
+                output.write_bytes(b"stale")
+                self.assertEqual(SERIALIZER.main(["--square", "--check"]), 1)
+                self.assertEqual(output.read_bytes(), b"stale")
+                self.document["models"][0]["wallCoverage"][0][0] = 0.25
+                source.write_bytes(encode(self.document))
+                self.assertEqual(SERIALIZER.main(["--square"]), 1)
                 self.assertEqual(output.read_bytes(), b"stale")
 
 

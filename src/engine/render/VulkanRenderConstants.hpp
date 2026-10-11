@@ -308,15 +308,11 @@ struct MeshMaterial;
 // without constructing Vulkan resources.
 [[nodiscard]] GpuMaterial gpuMaterialFrom(const MeshMaterial& material);
 
-// How many materials may be resident at once. A model claims a contiguous
-// range when it publishes and gives it back when residency evicts it, which
-// is why the ranges are repacked rather than merely marked free: a base index
-// is read off the model slot at record time and never baked into anything
-// that outlives a frame, so moving one costs nothing. Four per model of the
-// manifest cap is far more than any real model uses - the whole current
-// manifest needs forty-one - and if "Material buffer is exhausted" ever
-// appears, this is the knob.
-inline constexpr uint32_t maxModelMaterials = 1024;
+// Models claim contiguous material ranges until their last frame retires.
+// All four ground profiles plus the rest of the authored catalog require 2273
+// entries including the fallback and attachments. Keep room for editor imports
+// and retired ranges; GroundTileGeometryTests checks the full catalog fits.
+inline constexpr uint32_t maxModelMaterials = 4096;
 
 // Which entry of the draw-instance buffer a draw should read. Only the
 // skinned-model pipeline needs it: gl_InstanceIndex is already spoken for

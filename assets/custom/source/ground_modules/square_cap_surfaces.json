@@ -1,0 +1,3127 @@
+{
+  "format": 2,
+  "source": "../ground_modules.blend",
+  "coordinateSystem": "Blender XY horizontal, Z up; local unit cell",
+  "models": [
+    {
+      "variant": 0,
+      "shapeIndex": 0,
+      "exposedSideMask": 15,
+      "concaveCorners": 0,
+      "object": "GroundSquareIsland01_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 0,
+      "shapeIndex": 1,
+      "exposedSideMask": 11,
+      "concaveCorners": 0,
+      "object": "GroundSquareEnd01_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 0,
+      "shapeIndex": 2,
+      "exposedSideMask": 5,
+      "concaveCorners": 0,
+      "object": "GroundSquareStrip01_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 0,
+      "shapeIndex": 3,
+      "exposedSideMask": 3,
+      "concaveCorners": 0,
+      "object": "GroundSquareCorner01_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 0,
+      "shapeIndex": 4,
+      "exposedSideMask": 1,
+      "concaveCorners": 0,
+      "object": "GroundSquareEdge01_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 0,
+      "shapeIndex": 5,
+      "exposedSideMask": 0,
+      "concaveCorners": 0,
+      "object": "GroundSquareInterior01_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 1,
+      "shapeIndex": 0,
+      "exposedSideMask": 15,
+      "concaveCorners": 0,
+      "object": "GroundSquareIsland02_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 1,
+      "shapeIndex": 1,
+      "exposedSideMask": 11,
+      "concaveCorners": 0,
+      "object": "GroundSquareEnd02_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 1,
+      "shapeIndex": 2,
+      "exposedSideMask": 5,
+      "concaveCorners": 0,
+      "object": "GroundSquareStrip02_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 1,
+      "shapeIndex": 3,
+      "exposedSideMask": 3,
+      "concaveCorners": 0,
+      "object": "GroundSquareCorner02_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 1,
+      "shapeIndex": 4,
+      "exposedSideMask": 1,
+      "concaveCorners": 0,
+      "object": "GroundSquareEdge02_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 1,
+      "shapeIndex": 5,
+      "exposedSideMask": 0,
+      "concaveCorners": 0,
+      "object": "GroundSquareInterior02_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 2,
+      "shapeIndex": 0,
+      "exposedSideMask": 15,
+      "concaveCorners": 0,
+      "object": "GroundSquareIsland03_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 2,
+      "shapeIndex": 1,
+      "exposedSideMask": 11,
+      "concaveCorners": 0,
+      "object": "GroundSquareEnd03_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 2,
+      "shapeIndex": 2,
+      "exposedSideMask": 5,
+      "concaveCorners": 0,
+      "object": "GroundSquareStrip03_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 2,
+      "shapeIndex": 3,
+      "exposedSideMask": 3,
+      "concaveCorners": 0,
+      "object": "GroundSquareCorner03_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 2,
+      "shapeIndex": 4,
+      "exposedSideMask": 1,
+      "concaveCorners": 0,
+      "object": "GroundSquareEdge03_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 2,
+      "shapeIndex": 5,
+      "exposedSideMask": 0,
+      "concaveCorners": 0,
+      "object": "GroundSquareInterior03_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 3,
+      "shapeIndex": 0,
+      "exposedSideMask": 15,
+      "concaveCorners": 0,
+      "object": "GroundSquareIsland04_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 3,
+      "shapeIndex": 1,
+      "exposedSideMask": 11,
+      "concaveCorners": 0,
+      "object": "GroundSquareEnd04_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 3,
+      "shapeIndex": 2,
+      "exposedSideMask": 5,
+      "concaveCorners": 0,
+      "object": "GroundSquareStrip04_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 3,
+      "shapeIndex": 3,
+      "exposedSideMask": 3,
+      "concaveCorners": 0,
+      "object": "GroundSquareCorner04_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 3,
+      "shapeIndex": 4,
+      "exposedSideMask": 1,
+      "concaveCorners": 0,
+      "object": "GroundSquareEdge04_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 3,
+      "shapeIndex": 5,
+      "exposedSideMask": 0,
+      "concaveCorners": 0,
+      "object": "GroundSquareInterior04_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 4,
+      "shapeIndex": 0,
+      "exposedSideMask": 15,
+      "concaveCorners": 0,
+      "object": "GroundSquareIsland05_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 4,
+      "shapeIndex": 1,
+      "exposedSideMask": 11,
+      "concaveCorners": 0,
+      "object": "GroundSquareEnd05_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 4,
+      "shapeIndex": 2,
+      "exposedSideMask": 5,
+      "concaveCorners": 0,
+      "object": "GroundSquareStrip05_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 4,
+      "shapeIndex": 3,
+      "exposedSideMask": 3,
+      "concaveCorners": 0,
+      "object": "GroundSquareCorner05_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 4,
+      "shapeIndex": 4,
+      "exposedSideMask": 1,
+      "concaveCorners": 0,
+      "object": "GroundSquareEdge05_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 4,
+      "shapeIndex": 5,
+      "exposedSideMask": 0,
+      "concaveCorners": 0,
+      "object": "GroundSquareInterior05_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 5,
+      "shapeIndex": 0,
+      "exposedSideMask": 15,
+      "concaveCorners": 0,
+      "object": "GroundSquareIsland06_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 5,
+      "shapeIndex": 1,
+      "exposedSideMask": 11,
+      "concaveCorners": 0,
+      "object": "GroundSquareEnd06_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 5,
+      "shapeIndex": 2,
+      "exposedSideMask": 5,
+      "concaveCorners": 0,
+      "object": "GroundSquareStrip06_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 5,
+      "shapeIndex": 3,
+      "exposedSideMask": 3,
+      "concaveCorners": 0,
+      "object": "GroundSquareCorner06_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 5,
+      "shapeIndex": 4,
+      "exposedSideMask": 1,
+      "concaveCorners": 0,
+      "object": "GroundSquareEdge06_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 5,
+      "shapeIndex": 5,
+      "exposedSideMask": 0,
+      "concaveCorners": 0,
+      "object": "GroundSquareInterior06_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 6,
+      "shapeIndex": 0,
+      "exposedSideMask": 15,
+      "concaveCorners": 0,
+      "object": "GroundSquareIsland07_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 6,
+      "shapeIndex": 1,
+      "exposedSideMask": 11,
+      "concaveCorners": 0,
+      "object": "GroundSquareEnd07_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 6,
+      "shapeIndex": 2,
+      "exposedSideMask": 5,
+      "concaveCorners": 0,
+      "object": "GroundSquareStrip07_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 6,
+      "shapeIndex": 3,
+      "exposedSideMask": 3,
+      "concaveCorners": 0,
+      "object": "GroundSquareCorner07_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 6,
+      "shapeIndex": 4,
+      "exposedSideMask": 1,
+      "concaveCorners": 0,
+      "object": "GroundSquareEdge07_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 6,
+      "shapeIndex": 5,
+      "exposedSideMask": 0,
+      "concaveCorners": 0,
+      "object": "GroundSquareInterior07_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 7,
+      "shapeIndex": 0,
+      "exposedSideMask": 15,
+      "concaveCorners": 0,
+      "object": "GroundSquareIsland08_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 7,
+      "shapeIndex": 1,
+      "exposedSideMask": 11,
+      "concaveCorners": 0,
+      "object": "GroundSquareEnd08_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 7,
+      "shapeIndex": 2,
+      "exposedSideMask": 5,
+      "concaveCorners": 0,
+      "object": "GroundSquareStrip08_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 7,
+      "shapeIndex": 3,
+      "exposedSideMask": 3,
+      "concaveCorners": 0,
+      "object": "GroundSquareCorner08_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 7,
+      "shapeIndex": 4,
+      "exposedSideMask": 1,
+      "concaveCorners": 0,
+      "object": "GroundSquareEdge08_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 7,
+      "shapeIndex": 5,
+      "exposedSideMask": 0,
+      "concaveCorners": 0,
+      "object": "GroundSquareInterior08_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 8,
+      "shapeIndex": 0,
+      "exposedSideMask": 15,
+      "concaveCorners": 0,
+      "object": "GroundSquareIsland09_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 8,
+      "shapeIndex": 1,
+      "exposedSideMask": 11,
+      "concaveCorners": 0,
+      "object": "GroundSquareEnd09_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 8,
+      "shapeIndex": 2,
+      "exposedSideMask": 5,
+      "concaveCorners": 0,
+      "object": "GroundSquareStrip09_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 8,
+      "shapeIndex": 3,
+      "exposedSideMask": 3,
+      "concaveCorners": 0,
+      "object": "GroundSquareCorner09_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 8,
+      "shapeIndex": 4,
+      "exposedSideMask": 1,
+      "concaveCorners": 0,
+      "object": "GroundSquareEdge09_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 8,
+      "shapeIndex": 5,
+      "exposedSideMask": 0,
+      "concaveCorners": 0,
+      "object": "GroundSquareInterior09_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 9,
+      "shapeIndex": 0,
+      "exposedSideMask": 15,
+      "concaveCorners": 0,
+      "object": "GroundSquareIsland10_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 9,
+      "shapeIndex": 1,
+      "exposedSideMask": 11,
+      "concaveCorners": 0,
+      "object": "GroundSquareEnd10_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 9,
+      "shapeIndex": 2,
+      "exposedSideMask": 5,
+      "concaveCorners": 0,
+      "object": "GroundSquareStrip10_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 9,
+      "shapeIndex": 3,
+      "exposedSideMask": 3,
+      "concaveCorners": 0,
+      "object": "GroundSquareCorner10_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 9,
+      "shapeIndex": 4,
+      "exposedSideMask": 1,
+      "concaveCorners": 0,
+      "object": "GroundSquareEdge10_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "variant": 9,
+      "shapeIndex": 5,
+      "exposedSideMask": 0,
+      "concaveCorners": 0,
+      "object": "GroundSquareInterior10_Top",
+      "vertices": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "faces": [
+        [
+          0,
+          1,
+          2,
+          3
+        ]
+      ],
+      "normals": [
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "wallCoverage": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    }
+  ]
+}

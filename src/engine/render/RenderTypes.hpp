@@ -483,6 +483,12 @@ struct RenderFrameData {
         bool groundModule = false;
         uint8_t groundModuleSideMask = groundAllSides;
         uint8_t groundModuleConcaveCorners = 0;
+        // Square authored bodies and caps close contacts with higher layers.
+        bool groundModuleSquare = false;
+        // Only unsupported cells use native jagged undersides. Support is
+        // resolved from the actual world/document, independently of visibility.
+        bool groundModuleSupported = false;
+        bool groundModuleBottom = false;
         bool cliffWall = false;
         uint32_t cliffWallVariant = 0;
         // Actual selected body exposure, in world N/E/S/W order. The native

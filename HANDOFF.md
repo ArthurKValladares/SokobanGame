@@ -32,6 +32,65 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
+Ground has 240 native bodies and 310 authored tops in the existing Blender
+source: six connection shapes, ten styles, both top profiles, and regular or
+floating-island bottoms. The current V4 bottom bodies recess the original
+walls below Z=0.78 into a backing core and embed unequal closed faceted
+boulders into it. Broad slanted shoulders, overlapping lower masses and deep
+creases form the visible sides and underside. The upper band at Z>=0.78,
+both UV charts and authored caps remain intact. Hidden connection planes
+retain unit bounds and meet at fixed Z=-0.34 across styles and rotations.
+Lower geometry may bulge 0.04 tile units on exposed sides and extends no
+deeper than Z=-1. The accepted V3 boulder and floating-rock forms receive a
+small affine XY compression, preserving every Z coordinate, face, UV chart,
+group and core position. `-- --tighten-bottom-borders` applies the adjustment
+to existing native bodies without rebuilding them. Normal exports preserve artist edits;
+`-- --remodel-bottom-variants` explicitly rebuilds all bottom variants using
+`tools/sculpt_ground_bottoms.py`. The source includes an assembled preview
+scene and editable `IslandCore`, `IslandRockWalls`, `IslandUnderside`,
+`BoulderMassNN` and `FloatingRockNN` vertex groups. The original 120 regular
+and square GLBs, cap tables and shared PBR maps remain unchanged.
+Same-layer connected ground groups touching ground one layer above within
+the surrounding 3x3 cells select square bodies and caps, closing direct
+stacks, steps and diagonal contacts. Disconnected exposed ground keeps its
+chamfer. Gameplay, editor previews, painting, shadows and residency share
+the selection. The square exporter preserves native edits on normal export.
+Unsupported cells select bottom bodies independently of top profile. Full
+level/editor support includes ground, walls, cliffs, decorative blocks and
+live ice directly below, including hidden layers; water, air, thin plates
+and moving platforms leave bottoms exposed. Visual bounds include one cell
+of depth and exposed-side bulges for drawing, shadows and thumbnails; logical
+picks/collision stay unit cells. Explicit/interpolated camera extents include
+only relevant bottom-cell margins, preserving distant overworld framing.
+The GPU material table holds 4096 entries; a catalog-wide regression checks
+the current 2273 slots including fallback and attachments fit.
+
+Debug and optimized game builds pass, with ten focused ground, rendering,
+material and thumbnail suites passing in each configuration. Independent
+audits cover all 240 bodies and 310 caps, including 7,200 stacked contacts and
+28,800 stepped contacts. The revised 120 bottom exports match their editable
+native source and retain the upper geometry, both UV streams and PBR bindings
+across 823,928 bidirectional samples. All 25,600 mixed-style underside joins,
+12,800 mixed supported contacts, 564 rooted closed boulders and 190 separated
+floating rocks pass. The 122
+original body/cap files remain byte-identical; shared original PBR hashes also
+pass. Twenty-two destructive audit fixtures reject the earlier collar/tooth-ring
+design, disconnected or flattened masses, intersecting floaters and damaged
+seams, UVs or floors. The accepted-shape audit checks all 120 native meshes
+against the preserved V3 baseline, including unchanged topology and depth,
+the exact intended rock-position transform and all exported material/UV corners.
+
+Four final animated 1200-frame Vulkan captures cover the revised underside
+gallery, normal and lower camera angles, support examples and water with zero
+asset errors, dropped draws, pending loads or residency blocks. Model residency
+is 69,827,528 of 134,217,728 bytes. Final audit and runtime evidence are
+`out/ground-modules/bottom-v4-validation.json`,
+`out/ground-modules/bottom-v4-source-shape-validation.json` and
+`out/ground-modules/bottom-v4-runtime-evidence.json`; previews and native
+source snapshots remain in ignored `out/ground-modules/`. The broader Debug
+allocation suite still reports 16-byte debug-container allocations across
+unrelated paths; its optimized counterpart passed the earlier runtime baseline.
+
 The floating-island sky uses three independently drifting procedural cloud
 layers with world-space parallax. Debug and optimized game builds pass, as do
 the focused sky, water-entry ripple, GPU ABI, shader reload, scene preparation,

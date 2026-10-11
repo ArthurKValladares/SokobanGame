@@ -2,9 +2,10 @@
 """Read-only audit of the native Blender ground bodies and broad splat caps.
 
 The JSON authoring contract defines the six canonical exposure masks. The
-audit reads every exported GLB and the actual native cap mesh table. Eight
+audit reads every chamfered/square GLB and both actual native cap tables. Eight
 neighbors determine concave corners; compatible two-cell neighborhoods check
-mixed-style height and material-coverage traces. No model geometry is created
+mixed-style height and material-coverage traces. Square tops additionally
+check stepped contacts and vertically stacked ground. No geometry is created
 or modified by this tool.
 Use --record-baseline before authoring to retain the original map hashes.
 """
@@ -31,6 +32,8 @@ DEFAULT_MODELS = ASSETS / "custom/models/ground_modules"
 DEFAULT_OUTPUT = ROOT / "out/ground-modules/native-validation.json"
 DEFAULT_BASELINE = ROOT / "out/ground-modules/original-ground-hashes.json"
 DEFAULT_SOURCE_AUDIT = ROOT / "out/ground-modules/native-source-audit.json"
+DEFAULT_SQUARE_SOURCE_AUDIT = ROOT / "out/ground-modules/square-source-audit.json"
+DEFAULT_KIT_BASELINE = ROOT / "out/ground-modules/original-module-hashes.json"
 TOLERANCE = 2e-5
 
 
@@ -79,6 +82,15 @@ def record_baseline(path):
     value = {file.relative_to(ROOT).as_posix(): digest(file) for file in sorted(files)}
     write_json(path, value)
     return {"files": len(value), "baseline": str(path.relative_to(ROOT))}
+
+
+def record_kit_baseline(path, models, contract_path):
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    files = [models / f'ground_{family["name"]}_{variant+1:02}.glb'
+             for family in contract["families"] for variant in range(10)]
+    files.append(contract_path.parent / contract["capSurfaces"])
+    write_json(path, {file.relative_to(ROOT).as_posix(): digest(file) for file in sorted(files)})
+    return {"files": len(files), "baseline": str(path.relative_to(ROOT))}
 
 
 def verify_baseline(path):
@@ -235,6 +247,7 @@ def audit_body_v2(path, family, variant, contract):
     primitives = read_primitives(document)
     exposed = family["mask"]
     original = Document(original_models()[variant])
+    preservation_depth = contract.get("preservationLipDepth", contract["lipDepth"])
     source_materials = {}
     for index, material in enumerate(original.data["materials"]):
         points = np.concatenate([blender_points(original.accessor(p["attributes"]["POSITION"]))
@@ -242,7 +255,7 @@ def audit_body_v2(path, family, variant, contract):
         side = source_material_side(original, index)
         expected = points.copy()
         if side >= 0:
-            expected[:, 2] -= contract["lipDepth"] * np.clip((expected[:, 2]-(1-contract["upperBodyBand"])) / contract["upperBodyBand"], 0, 1)
+            expected[:, 2] -= preservation_depth * np.clip((expected[:, 2]-(1-contract["upperBodyBand"])) / contract["upperBodyBand"], 0, 1)
         source_materials[material["name"]] = (side, material_maps(original, material), expected)
     pngs = set()
     for image in document.data.get("images", []):
@@ -277,7 +290,14 @@ def audit_body_v2(path, family, variant, contract):
                                     for station in contract["bodySealStations"] for inset in (0, contract["bodyRecessInset"])])
             # New seal vertices and the original shells are checked separately.
             native_distance = np.linalg.norm(primitive.points[:, None, :]-seal_points[None, :, :], axis=2).min(axis=1)
-            source_distance = np.linalg.norm(primitive.points[:, None, :]-expected[None, :, :], axis=2).min(axis=1)
+            preservation_points = primitive.points.copy()
+            if "preservationLipDepth" in contract:
+                # Undoing the shallow lip expands old microscopic cleanup in
+                # Z. Compare in its original authored frame so the existing
+                # cleanup tolerance remains exact, with no loosened XY test.
+                preservation_points[:, 2] -= preservation_depth * np.clip(
+                    (preservation_points[:, 2]-(1-contract["upperBodyBand"])) / contract["upperBodyBand"], 0, 1)
+            source_distance = np.linalg.norm(preservation_points[:, None, :]-expected[None, :, :], axis=2).min(axis=1)
             require(np.all((native_distance < TOLERANCE) | (source_distance <= contract["microscopicCleanupTolerance"]+TOLERANCE)),
                     f"{path.name}: original shell moved in XY or has nonuniform height compression")
             native_face = np.all(native_distance[primitive.triangles] < TOLERANCE, axis=1)
@@ -469,6 +489,46 @@ def read_native_caps(path, contract):
                   "projected_area_per_cap": 1, "every_cap_is_an_oriented_manifold_disk": True}
 
 
+def read_square_caps(path, contract):
+    data = json.loads(path.read_text(encoding="utf-8"))
+    require(data["format"] == 2 and len(data["models"]) == contract["squareNativeCapCount"] == 60,
+            "Incorrect square native cap table format/count")
+    caps, names = {}, set()
+    corners = {(0, 0), (1, 0), (1, 1), (0, 1)}
+    for row in data["models"]:
+        variant, shape, exposed, concave = (row[name] for name in
+                                            ("variant", "shapeIndex", "exposedSideMask", "concaveCorners"))
+        key = (variant, shape, concave)
+        require(0 <= variant < 10 and 0 <= shape < 6 and concave == 0 and key not in caps,
+                "Invalid or repeated canonical square cap")
+        require(exposed == contract["families"][shape]["mask"], "Square cap exposure differs from its body")
+        require(row["object"] not in names, "Two square caps share an editable object name")
+        names.add(row["object"])
+        points = np.asarray(row["vertices"], dtype=float)
+        faces, normals = row["faces"], np.asarray(row["normals"], dtype=float)
+        require(points.shape == (4, 3) and np.isfinite(points).all()
+                and np.allclose(points[:, 2], 1, atol=TOLERANCE, rtol=0)
+                and {tuple(np.rint(point[:2]).astype(int)) for point in points} == corners
+                and np.allclose(points[:, :2], np.rint(points[:, :2]), atol=TOLERANCE, rtol=0),
+                "Square cap must retain the complete exact unit footprint at Z=1")
+        require(len(faces) == 1 and len(faces[0]) == 4 and set(faces[0]) == set(range(4)),
+                "Square cap must be a single quad using every corner")
+        require(normals.shape == (1, 3) and np.allclose(normals, [[0, 0, 1]], atol=TOLERANCE, rtol=0),
+                "Square cap normal is not the flat upward normal")
+        coverage = row["wallCoverage"]
+        require(len(coverage) == 1 and len(coverage[0]) == 4
+                and np.allclose(coverage[0], 0, atol=TOLERANCE, rtol=0),
+                "Square cap retains a rock/chamfer material transition")
+        triangles, area = audit_cap_disk(points, faces, row["object"])
+        caps[key] = {"points": points, "faces": faces, "normals": normals,
+                     "coverage": dict(zip(faces[0], coverage[0])), "triangles": triangles,
+                     "object": row["object"], "area": area}
+    expected = {(variant, shape, 0) for variant in range(10) for shape in range(6)}
+    require(set(caps) == expected, "Square cap table is missing a style/family")
+    return caps, {"native_editable_caps": len(caps), "single_quad_caps": len(caps),
+                  "full_unit_square_at_z_1": True, "wall_coverage_is_zero": True}
+
+
 def cap_for_state(caps, contract, variant, state):
     exposed, concave = state
     family, turns = canonical_for_mask(contract, exposed)
@@ -585,6 +645,8 @@ def audit_native_source_v2(path, contract_path, contract, loaded, caps):
                     and source["properties"]["ExposedSideMask"] == exposed,
                     "Native source properties disagree with exported shape")
         require(body["properties"]["GroundModuleShape"] == shape, "Incorrect source body family")
+        require(abs(body["properties"]["NativeLipHeight"]-contract["outerLipHeight"]) < TOLERANCE,
+                "Source body lip metadata differs from its actual exported envelope")
         points = np.concatenate([primitive.points for primitive in loaded[key]])
         require(np.allclose(points.min(axis=0), body["bounds"]["min"], atol=TOLERANCE, rtol=0)
                 and np.allclose(points.max(axis=0), body["bounds"]["max"], atol=TOLERANCE, rtol=0),
@@ -665,6 +727,90 @@ def audit_body_cap_closure_v2(loaded, caps, contract):
             "outer_lip_height": contract["outerLipHeight"], "body_has_no_overlapping_chamfer": True}
 
 
+def body_bottom(body, label):
+    faces = np.concatenate([primitive.points[primitive.triangles] for primitive in body])
+    bottom = faces[np.all(np.abs(faces[:, :, 2]) < TOLERANCE, axis=1)]
+    require(len(bottom) == 2, f"{label}: expected two complete native bottom triangles")
+    points = bottom.reshape(-1, 3)
+    # Native bottoms face down; reverse them for the projected manifold audit.
+    triangles = np.arange(6).reshape(2, 3)[:, ::-1]
+    audit_cap_disk(points, triangles.tolist(), label)
+    return {"points": points, "faces": triangles.tolist(), "coverage": dict.fromkeys(range(6), 0)}
+
+
+def audit_square_contacts(loaded, square_loaded, caps, contract):
+    lip_checks, border_checks, stacked_checks, stepped_checks, backing_checks = 0, 0, 0, 0, 0
+    square_height = contract["squareOuterLipHeight"]
+    require(abs(square_height-1) < TOLERANCE, "Square bodies must reach the full tile height")
+    bottom_traces = []
+    # Both cap choices can sit above square ground; validate the actual native
+    # lower faces rather than assuming their advertised unit bounds close it.
+    for kit_name, kit in (("chamfer", loaded), ("square", square_loaded)):
+        for key, body in kit.items():
+            bottom = body_bottom(body, f"{kit_name} {key} bottom")
+            bottom_traces.append([cap_edge_trace(bottom, side) for side in range(4)])
+    for (variant, shape, _), cap in caps.items():
+        family = contract["families"][shape]
+        body = square_loaded[(family["name"], variant)]
+        points = np.concatenate([primitive.points for primitive in body])
+        for side in range(4):
+            trace = cap_edge_trace(cap, side)
+            for station in (0, 1, *contract["bodySealStations"]):
+                require(np.allclose(sample_trace(trace, station), [square_height, 0], atol=TOLERANCE, rtol=0),
+                        "Square top has a lowered, missing or rock-covered perimeter")
+                border_checks += 1
+                if family["mask"] & (1 << side):
+                    point = side_point(side, station, height=square_height)
+                    require(np.min(np.linalg.norm(points-point, axis=1)) < TOLERANCE,
+                            "Square cap does not close its actual full-height rock seal")
+                    lip_checks += 1
+            # A higher neighboring tile's original bottom reaches the same
+            # shared edge at world Z=1; the lower cap must reach it at every
+            # source segment endpoint and midpoint, for every style/family.
+            for bottom in bottom_traces:
+                upper = bottom[(side+2) % 4]
+                stations = sorted({0, 1, *[u for edge in (trace, upper) for segment in edge for u in segment[:2]]})
+                for station in stations + [(a+b)/2 for a, b in zip(stations, stations[1:])]:
+                    require(abs(sample_trace(trace, station)[0]-(sample_trace(upper, station)[0]+1)) < TOLERANCE,
+                            "Square lower top leaves a stepped contact gap against a higher tile")
+                stepped_checks += 1
+        for bottom in bottom_traces:
+            for side in range(4):
+                for station in (0, .25, .5, .75, 1):
+                    require(abs(sample_trace(cap_edge_trace(cap, side), station)[0]
+                                -sample_trace(bottom[side], station)[0]-1) < TOLERANCE,
+                            "Square lower top leaves a vertical stack perimeter gap")
+            stacked_checks += 1
+        # Each recessed backing must fill the complete height, including the
+        # former .91..1 chamfer band. Check projected area and boundary frames.
+        backing = np.concatenate([primitive.points[primitive.triangles] for primitive in body
+                                  if primitive.material.get("name") == "GroundModuleRecess"], axis=0) if family["mask"] else []
+        for side in range(4):
+            if not family["mask"] & (1 << side):
+                continue
+            axis = 1 if side % 2 == 0 else 0
+            plane = contract["bodyRecessInset"] if side in (0, 3) else 1-contract["bodyRecessInset"]
+            panels = backing[np.all(np.abs(backing[:, :, axis]-plane) < TOLERANCE, axis=1)]
+            projected = panels[:, :, [1-axis, 2]]
+            vectors = projected[:, 1:]-projected[:, :1]
+            area = np.abs(vectors[:, 0, 0]*vectors[:, 1, 1]-vectors[:, 0, 1]*vectors[:, 1, 0]).sum()/2
+            require(abs(area-square_height) < TOLERANCE,
+                    "Square backing leaves a gap in its full-height rectangular coverage")
+            for station in contract["bodySealStations"]:
+                for height in (0, square_height):
+                    expected = side_point(side, station, contract["bodyRecessInset"], height)
+                    require(np.min(np.linalg.norm(panels.reshape(-1, 3)-expected, axis=1)) < TOLERANCE,
+                            "Square backing misses a full-height frame endpoint")
+                    backing_checks += 1
+    return {"native_full_height_body_cap_lip_checks": lip_checks,
+            "square_cap_perimeter_checks": border_checks,
+            "actual_mixed_style_canonical_stacked_contacts": stacked_checks,
+            "actual_mixed_style_canonical_stepped_contacts": stepped_checks,
+            "full_height_backing_frame_checks": backing_checks,
+            "chamfer_and_square_upper_bottoms_are_complete_unit_disks": True,
+            "no_runtime_vertex_deformation": True}
+
+
 def write_fixture(destination):
     destination = destination.resolve()
     require(destination.is_relative_to(ROOT / "out"), "Fixture must stay in ignored out tree")
@@ -730,14 +876,19 @@ def main():
     parser.add_argument("--models", type=Path, default=DEFAULT_MODELS)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
+    parser.add_argument("--kit-baseline", type=Path, default=DEFAULT_KIT_BASELINE,
+                        help="Pre-authoring hashes of the sixty existing modules and chamfer caps")
     parser.add_argument("--source-audit", type=Path, default=DEFAULT_SOURCE_AUDIT,
                         help="Actual Blender object snapshot; checked when this JSON exists")
+    parser.add_argument("--square-source-audit", type=Path, default=DEFAULT_SQUARE_SOURCE_AUDIT,
+                        help="Actual Blender square object snapshot; checked when this JSON exists")
     parser.add_argument("--record-baseline", action="store_true")
     parser.add_argument("--write-fixture", type=Path)
     parser.add_argument("--fixture-only", action="store_true")
     args = parser.parse_args()
     if args.record_baseline:
-        print(json.dumps(record_baseline(args.baseline)))
+        print(json.dumps({"originals": record_baseline(args.baseline),
+                          "chamfer_kit": record_kit_baseline(args.kit_baseline, args.models, args.contract)}))
         return
     fixture = write_fixture(args.write_fixture) if args.write_fixture else None
     if args.fixture_only:
@@ -746,8 +897,10 @@ def main():
         return
     contract = json.loads(args.contract.read_text(encoding="utf-8"))
     require(contract["format"] == 2 and contract["nativeCapCount"] == 250
-            and contract["preserveOriginalXY"] is True, "Unexpected native broad-rim contract")
+            and contract["preserveOriginalXY"] is True and contract["squareNativeCapCount"] == 60,
+            "Unexpected native chamfer/square contract")
     original_count = verify_baseline(args.baseline)
+    original_kit_count = verify_baseline(args.kit_baseline)
     loaded, models = {}, []
     for family in contract["families"]:
         for variant in range(10):
@@ -760,18 +913,48 @@ def main():
     topology = audit_caps_v2(caps, contract)
     closure = audit_body_cap_closure_v2(loaded, caps, contract)
     source = audit_native_source_v2(args.source_audit, args.contract, contract, loaded, caps) if args.source_audit.is_file() else None
+    square_contract = {**contract, "lipDepth": 0, "outerLipHeight": contract["squareOuterLipHeight"],
+                       "preservationLipDepth": contract["lipDepth"]}
+    square_loaded, square_models = {}, []
+    for family in contract["families"]:
+        for variant in range(10):
+            path = args.models / f'ground_square_{family["name"]}_{variant+1:02}.glb'
+            primitives, report = audit_body_v2(path, family, variant, square_contract)
+            square_loaded[(family["name"], variant)] = primitives
+            report.pop("uniform_upper_band_compression")
+            report["original_shell_height_restored"] = True
+            square_models.append(report)
+    square_cap_path = Path(os.path.abspath(args.contract.parent/contract["squareCapSurfaces"])).resolve()
+    square_caps, native_square_caps = read_square_caps(square_cap_path, contract)
+    square_contacts = audit_square_contacts(loaded, square_loaded, square_caps, contract)
+    square_source = None
+    if args.square_source_audit.is_file():
+        square_source = audit_native_source_v2(args.square_source_audit, args.contract, square_contract,
+                                              square_loaded, square_caps)
+        rows = json.loads(args.square_source_audit.read_text(encoding="utf-8"))
+        require(all(row["body"]["properties"].get("SquareTop") is True for row in rows),
+                "Editable square source body lacks its square placement metadata")
     result = {"status": "PASS", "contract_format": 2, "native_models": len(models), "identity_node_models": len(models),
               "preserved_original_model_and_map_hashes": original_count,
+              "preserved_original_chamfer_kit_hashes": original_kit_count,
               "cap_surfaces_sha256": digest(cap_path), "native_caps": native_caps,
               "caps_and_joins": topology, "body_cap_closure": closure,
               "interior_bodies_have_only_two_bottom_triangles": True,
               "hidden_side_geometry_removed_in_native_files": True, "models": models}
+    result["square_modules"] = {"native_models": len(square_models), "identity_node_models": len(square_models),
+                                "cap_surfaces_sha256": digest(square_cap_path), "native_caps": native_square_caps,
+                                "layer_contacts": square_contacts, "selection": contract["squareSelection"],
+                                "models": square_models}
     if source:
         result["native_source"] = source
+    if square_source:
+        result["square_modules"]["native_source"] = square_source
     if fixture:
         result["fixture"] = fixture
     write_json(args.output, result)
-    print(json.dumps({key: value for key, value in result.items() if key != "models"}))
+    summary = {key: value for key, value in result.items() if key not in ("models", "square_modules")}
+    summary["square_modules"] = {key: value for key, value in result["square_modules"].items() if key != "models"}
+    print(json.dumps(summary))
 
 
 if __name__ == "__main__":

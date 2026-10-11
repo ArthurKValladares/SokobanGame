@@ -205,9 +205,13 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
                     const RenderModel base = manifest.modelForTile(tile);
                     if (!base.isCube() && authoredGroundTileVariant(manifest.model(base))) {
                         for (std::size_t shape = 0; shape < tileModuleCanonicalMasks.size(); ++shape) {
-                            if (const auto model = manifest.findModelIdByName(
-                                    groundTileModelName(shape, groundRockVariantFor(tile)))) {
-                                requirements.requireModel(*model);
+                            for (const bool square : { false, true }) {
+                                for (const bool bottom : { false, true }) {
+                                    if (const auto model = manifest.findModelIdByName(
+                                            groundTileModelName(shape, groundRockVariantFor(tile), square, bottom))) {
+                                        requirements.requireModel(*model);
+                                    }
+                                }
                             }
                         }
                     }
