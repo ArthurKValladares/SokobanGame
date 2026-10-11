@@ -67,6 +67,10 @@ def add_body(original, collection, stem, variant, mask):
         body.name = stem + "_Body"
         body.data = mesh
         collection.objects.link(body)
+        # Construction seeds are hidden references, not runtime/preview bodies.
+        body.hide_render = False
+        if "ConstructionOnly" in body:
+            del body["ConstructionOnly"]
     else:
         previous = body.data
         # Preview instances share the authored mesh and must follow revisions.
@@ -340,7 +344,8 @@ def add_variants(scene, remodel=False):
                 original_stem = f"Ground{'Square' if square else ''}{family.title()}{variant+1:02d}"
                 body = bpy.data.objects.get(stem + "_Body")
                 if body is None or remodel:
-                    body = add_body(bpy.data.objects[original_stem + "_Body"], collection, stem, variant, MASKS[shape])
+                    seed = bpy.data.objects.get(original_stem.replace('Ground','GroundConstruction',1) + "_Body")
+                    body = add_body(seed or bpy.data.objects[original_stem + "_Body"], collection, stem, variant, MASKS[shape])
                 body.location = (shape*1.8 + (36 if square else 24), variant*2.2, 0)
                 body["GroundModuleVariant"] = variant
                 body["GroundModuleShape"] = family

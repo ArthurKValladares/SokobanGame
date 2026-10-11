@@ -1090,6 +1090,7 @@ int main()
     testDecorationMeshCanPreserveAuthoredScale();
     if (const auto root = configuredTestAssetRoot()) {
         const auto rockManifest = sokoban::AssetManifest::loadFromFile(*root / "manifest.json");
+        const auto rockTextures = sokoban::collectRuntimeTextureCatalog(*root, rockManifest);
         for (const auto& definition : sokoban::tileTypeDefinitions()) {
             if (!sokoban::tileTypeIsGround(definition.type)) continue;
             const auto model = rockManifest.modelForTile(definition.type);
@@ -1102,10 +1103,70 @@ int main()
             CHECK(!rock.vertices.empty());
             CHECK(!rock.indices.empty());
             CHECK(rock.indices.size() % 3 == 0);
-            // Three/four broad plates per exposed side, seal ledge and backing.
-            CHECK(rock.materials.size() >= 13 && rock.materials.size() <= 17);
+            // Native boulders reuse the original sandstone palette, but glTF
+            // omits lower-plate slots no longer referenced by geometry.
+            const auto variant = sokoban::groundRockVariantFor(definition.type);
+            const std::string legacyName = "GroundRock" +
+                std::string(variant < 9 ? "0" : "") + std::to_string(variant + 1) + ".glb";
+            const auto legacyPath = *root / "custom/pbr/models" / legacyName;
+            const auto legacy = sokoban::loadGltfMesh(legacyPath, { .preserveSourceScale = true });
+            const auto nativeMaterials = sokoban::inspectGltfAssetDependencies(*root / asset.path);
+            const auto legacyMaterials = sokoban::inspectGltfAssetDependencies(legacyPath);
+            CHECK(legacy.materials.size() >= 13 && legacy.materials.size() <= 17);
+            CHECK(rock.materials.size() > 1 && rock.materials.size() <= legacy.materials.size() + 1);
+            CHECK(rock.materials.size() == nativeMaterials.materials.size());
+            CHECK(sokoban::authoredGroundTileVariant(asset) == variant);
+            const auto& textures = rockTextures.model(static_cast<uint32_t>(model.index()));
+            CHECK(textures.materialMode == sokoban::ModelMaterialMode::PrimitiveMaterials);
+            CHECK(textures.primitiveMaterials.size() == rock.materials.size());
+            const auto expectMap = [&](std::optional<uint32_t> index, std::string_view filename,
+                                       sokoban::TextureColorSpace colorSpace) {
+                CHECK(index.has_value());
+                if (!index) return;
+                const auto& identity = rockTextures.textures().at(*index).identity;
+                const auto* source = std::get_if<sokoban::ExternalTextureSource>(&identity.source);
+                CHECK(source && source->path.filename() == filename);
+                CHECK(identity.interpretation.colorSpace == colorSpace);
+            };
+            std::size_t recessCount = 0;
+            for (std::size_t slot = 0; slot < rock.materials.size(); ++slot) {
+                const auto& material = rock.materials[slot];
+                const auto& binding = textures.primitiveMaterials.at(slot);
+                std::string_view name = nativeMaterials.materials.at(slot).name;
+                if (name == "GroundModuleRecess") {
+                    ++recessCount;
+                    CHECK(!binding.bindBaseColorTexture && !binding.normalTextureIndex &&
+                        !binding.metallicRoughnessTextureIndex && !binding.occlusionTextureIndex);
+                    CHECK(material.doubleSided && material.metallicFactor == 0 && material.roughnessFactor > .9f);
+                    continue;
+                }
+                // Blender adds a numeric suffix to identically named styles.
+                name = name.substr(0, name.find('.'));
+                const auto original = std::ranges::find(legacyMaterials.materials, name,
+                    &sokoban::GltfMaterialDependency::name);
+                CHECK(original != legacyMaterials.materials.end());
+                if (original == legacyMaterials.materials.end()) continue;
+                const auto& palette = legacy.materials.at(static_cast<std::size_t>(original - legacyMaterials.materials.begin()));
+                CHECK(std::abs(material.baseColorFactor.x - palette.baseColorFactor.x) < .00001f &&
+                    std::abs(material.baseColorFactor.y - palette.baseColorFactor.y) < .00001f &&
+                    std::abs(material.baseColorFactor.z - palette.baseColorFactor.z) < .00001f &&
+                    std::abs(material.baseColorFactor.w - palette.baseColorFactor.w) < .00001f);
+                CHECK(material.emissiveFactor == palette.emissiveFactor);
+                CHECK(std::abs(material.metallicFactor - palette.metallicFactor) < .00001f);
+                CHECK(std::abs(material.roughnessFactor - palette.roughnessFactor) < .00001f);
+                CHECK(std::abs(material.normalScale - palette.normalScale) < .00001f);
+                CHECK(std::abs(material.occlusionStrength - palette.occlusionStrength) < .00001f);
+                CHECK(!material.doubleSided && material.alphaMode == sokoban::MaterialAlphaMode::Opaque);
+                expectMap(binding.bindBaseColorTexture ? std::optional(binding.textureIndex) : std::nullopt,
+                    "ground_rock_side.png", sokoban::TextureColorSpace::Srgb);
+                expectMap(binding.normalTextureIndex, "ground_rock_side_normal.png", sokoban::TextureColorSpace::Linear);
+                expectMap(binding.metallicRoughnessTextureIndex, "ground_rock_side_orm.png", sokoban::TextureColorSpace::Linear);
+                CHECK(binding.occlusionTextureIndex == binding.metallicRoughnessTextureIndex);
+            }
+            CHECK(recessCount == 1);
             bool hasSteepChip = false;
             for (const auto& vertex : rock.vertices) {
+                CHECK(vertex.materialIndex < rock.materials.size());
                 // Shallow ledges stay close to the square logical footprint.
                 // Native sides end at the lowered authored chamfer lip.
                 CHECK(vertex.position.x >= -0.0301f && vertex.position.x <= 1.0301f);

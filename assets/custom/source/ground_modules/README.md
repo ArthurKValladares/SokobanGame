@@ -3,8 +3,8 @@
 `../ground_modules.blend` is the editable Blender source for 240 body
 GLBs in `../../models/ground_modules/`. Ten existing sandstone styles each
 have six shapes in both chamfered and square-top profiles, with regular and
-floating-island bottoms. The original GLBs
-and their six shared PBR maps remain unchanged as references.
+floating-island bottoms. The ten imported reference GLBs and their six
+shared PBR maps remain separate from the editable native kit.
 
 | Shape | Exposed sides | Canonical mask |
 | --- | --- | --- |
@@ -36,17 +36,31 @@ additional editable Body/Top pairs. **GroundModules_LayerPreview** shows
 mixed-style raised terrain and a three-layer stack. Square bodies restore
 the original shell height to Z=1 and extend the rock seal and backing to
 that height. Their tops are full unit-cell quads at Z=1, with no chamfer or
-wall-blend band. Their original horizontal coordinates, fracture details,
-UV charts and PBR maps are retained.
+wall-blend band. The upper band retains its original horizontal coordinates,
+fracture details, UV charts and PBR bindings.
 
-Bodies keep the original fractured stone shells and PBR material regions.
-Hidden sides are removed in the native meshes. Chamfered bodies end at a shallow,
-level lip at Z=0.91. A small rock ledge and recessed backing close cracks
-between shells. Original horizontal positions remain intact; the earlier
-diagonal XY corner taper is removed. Microscopic duplicate vertices were
-merged within 0.0005 tile units to remove acute degenerate tangent frames.
-Large stone UV charts remain intact. Normals are flat facet normals, with
-valid tangent frames exported for the normal maps.
+The hidden **GroundModuleConstructionSources** collection stores independent
+copies of all 120 original regular and square native bodies. Treat these
+construction meshes as immutable references: explicit regular remodeling
+and bottom rebuilding read them, rather than deriving a new design from
+already remodeled or artist-edited bodies. They are excluded from previews
+and runtime exports.
+
+Regular bodies retain the original fractured upper band at Z>=0.78, the
+exact `GroundModuleRecess` backing, and the original two-triangle flat base
+at Z=0. Chamfered bodies keep their level lip at Z=0.91; square bodies keep
+their full-height seal at Z=1. Below the upper band, closed unequal faceted
+boulders form the visible sides and broad lower ledges. These new masses
+stay within X/Y=0..1 and Z=0.02..0.777, leaving neighboring and stacked
+contacts square. Interior bodies remain the two original base faces with
+no boulder masses. The authored caps and shared PBR maps are independent of
+this regular body revision.
+
+`RegularCore` covers the retained geometry, with `UpperRockBand`,
+`RecessBacking` and `FlatBase` subsets for editing. `BoulderMassNN` groups
+isolate the closed rock masses. Original upper-band and backing UV charts
+are retained; new boulders have flat facet normals and their own UVs for the
+shared stone materials.
 
 ## Coordinates and seams
 
@@ -112,7 +126,8 @@ selects these models in gameplay, editor drafts and previews.
 Export the selected Body from the active **GroundModules** scene as glTF
 Binary, with normals, tangents, both UV layers, original external PNG images,
 no animations and an identity object/node transform. Do not export the source
-reference scene or cap objects. Keep relative PNG dependencies inside assets.
+reference scene, construction meshes or cap objects. Keep relative PNG
+dependencies inside assets.
 Base color is sRGB; normal and packed AO/roughness/metallic maps are linear.
 
 After exporting the actual native top meshes into `cap_surfaces.json`, update
@@ -127,6 +142,21 @@ python tools/serialize_ground_caps.py --square --check
 
 The serializer transfers the native vertices, normals and material coverage;
 it neither creates geometry nor edits the Blender meshes.
+
+Export the 120 existing regular chamfered and square bodies with:
+
+```text
+blender --background assets/custom/source/ground_modules.blend --python tools/export_chunky_ground_modules.py
+```
+
+Normal export preserves artist mesh edits and writes an ignored native-source
+snapshot. `-- --audit-only` refreshes that snapshot without exporting.
+The explicit `-- --remodel-regular` option rebuilds all regular bodies from
+**GroundModuleConstructionSources**, replaces their mesh edits, and updates
+linked preview meshes. It preserves the original upper band, backing and
+flat base; it does not rebuild caps or the accepted revision 4 floating
+bottoms. Finalize the resulting `ground_[square_]<shape>_<style>.glb` files
+as described below.
 
 For square bodies and tops, export the existing native source with:
 
@@ -149,19 +179,28 @@ binary mesh payloads. No tangent repair is needed for the current export.
 Run the independent mesh and seam audit from the project root:
 
 ```text
-python tools/validate_ground_modules.py
+python tools/validate_ground_modules.py --regular-revision chunky-v1 --output out/ground-modules/regular-chunky-validation.json --approve-bottom-baseline out/ground-modules/regular-chunky-approved-bottom-hashes.json
+python tests/ValidateRegularGroundTests.py
 ```
 
-Before a new authoring pass, run the audit with `--record-baseline` to
-record hashes of the legacy meshes/PBR maps and existing chamfered kit in
-ignored `out/ground-modules/`. The audit requires those local baselines
-when checking that an authoring pass preserves its references.
+Before regular remodeling, preserve the pre-remodel body exports in
+`out/ground-modules/pre-regular-chunky-models/`, their hashes in
+`pre-regular-chunky-regular-hashes.json`, and protected bottom/cap/reference
+hashes in `pre-regular-chunky-protected-hashes.json` in the same output
+directory. The revision audit requires these local baselines. The separate
+`--record-baseline` option records the imported meshes/PBR maps and earlier
+chamfered-kit hashes; it does not replace the pre-remodel snapshots.
 
-It checks all sixty files, shared PBR dependencies, finite normals/tangents,
-native body/cap closure, all 250 native tops, all 256 neighbor patterns and
-mixed-style three-dimensional seam traces.
-It also checks all sixty square bodies and tops, stepped and stacked
-contacts, complete backing coverage, and preserved original kit hashes.
+The explicit regular-revision audit compares the upper band, backing and
+flat base against frozen pre-remodel exports. It checks closed boulder
+volumes, editable group ownership and unit bounds while protecting accepted
+revision 4 bottoms, authored caps, imported references and PBR maps through
+separate local baselines. It retains the native cap, neighbor-pattern,
+mixed-style seam, stepped-contact and stacked-contact checks. Destructive
+fixtures exercise retention, bounds and topology failures. The unqualified
+audit remains available for the earlier regular-body revision. The approved
+regular/cap reference file is written only after this full audit passes; the
+earlier baselines stay intact for historical comparisons and retention proofs.
 The `ground_tile_geometry` C++ suite additionally loads every actual GLB
 through the engine and checks module selection, materials, painting,
 shadow/pick footprints, editor updates and surrounded-top rendering.
@@ -176,8 +215,9 @@ source, contract and documentation are not staged into runtime packages.
 The **GroundBottomModules** collection contains 120 editable combined bodies:
 six connection shapes, ten stone styles, and both chamfered and square top
 profiles. **GroundModules_BottomPreview** shows isolated tiles, a strip, a
-corner, a larger island and a stack. The original 120 regular and square body
-GLBs, authored caps and shared PBR maps remain unchanged.
+corner, a larger island and a stack. Their accepted revision 4 geometry is
+independent of the regular chunky body revision; authored caps and shared
+PBR maps are reused.
 
 Revision 4 bodies retain a backing core derived from the original fractured
 walls, recessed below local Z=0.78. Unequal closed faceted boulders embed
@@ -225,8 +265,10 @@ blender --background assets/custom/source/ground_modules.blend --python tools/ex
 Normal export preserves artist edits. `-- --add-bottom-variants` adds only
 missing native objects when upgrading an older source. The explicit
 `-- --remodel-bottom-variants` option rebuilds all 120 bottom variants from
-the regular source bodies using `tools/sculpt_ground_bottoms.py`; it replaces
-their mesh edits and updates linked preview meshes. The helper constructs
+the immutable original bodies in **GroundModuleConstructionSources** using
+`tools/sculpt_ground_bottoms.py`; it replaces their mesh edits and updates
+linked preview meshes. Normal export leaves the accepted bottom geometry
+intact. The helper constructs
 the accepted rock forms with a raw 0.12 exposed-side margin before the final
 compression to 0.04. `-- --tighten-bottom-borders` applies that compression
 to the existing `BoulderMassNN` and `FloatingRockNN` groups without rebuilding
@@ -236,7 +278,7 @@ source snapshot without exporting. Finalize the new
 described above, then run:
 
 ```text
-python tools/validate_ground_bottoms.py
+python tools/validate_ground_bottoms.py --baseline out/ground-modules/regular-chunky-approved-bottom-hashes.json --output out/ground-modules/bottom-v4-after-regular-validation.json
 python tests/ValidateGroundBottomsTests.py
 ```
 
@@ -244,8 +286,8 @@ The independent audit compares the preserved top band, materials and both UV
 streams. It checks the core, triangulated floor, convex boulder
 volumes, their attachment graph, detached-rock gaps and size variation,
 source/export triangle ownership, and exposed-side overhang limits. Rotated
-mixed-style hidden joins meet at Z=-0.34. Its local baseline protects the
-original 120 regular and square bodies, both cap files and PBR maps.
+mixed-style hidden joins meet at Z=-0.34. Local baselines protect approved
+regular body exports, both cap files, imported references and PBR maps.
 Destructive audit fixtures reject pasted-on geometry, unrooted or open
 boulders, hidden-side overhang, missing surface gaps and changes to the
 preserved upper band. Runtime tests cover unsupported placement,

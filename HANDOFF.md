@@ -48,8 +48,17 @@ to existing native bodies without rebuilding them. Normal exports preserve artis
 `-- --remodel-bottom-variants` explicitly rebuilds all bottom variants using
 `tools/sculpt_ground_bottoms.py`. The source includes an assembled preview
 scene and editable `IslandCore`, `IslandRockWalls`, `IslandUnderside`,
-`BoulderMassNN` and `FloatingRockNN` vertex groups. The original 120 regular
-and square GLBs, cap tables and shared PBR maps remain unchanged.
+`BoulderMassNN` and `FloatingRockNN` vertex groups.
+The 120 regular chamfered/square bodies now use the same closed, faceted
+boulder construction, contained inside the unit XY footprint with flat Z=0
+bases. Original geometry at Z>=0.78, recessed joining panels, their UVs and
+the two base triangles are retained. Unequal broad rocks and low ledges replace
+the lower outer plates; tiny per-mass insets prevent coplanar face artifacts.
+Interior bodies remain two base triangles. Regular native edits are exported
+with `tools/export_chunky_ground_modules.py`; only `-- --remodel-regular`
+rebuilds them. Hidden `GroundModuleConstructionSources` preserve original
+inputs for both explicit rebuild workflows. Accepted V4 bottom GLBs, authored
+cap tables and shared PBR maps remain unchanged by the regular remodeling.
 Same-layer connected ground groups touching ground one layer above within
 the surrounding 3x3 cells select square bodies and caps, closing direct
 stacks, steps and diagonal contacts. Disconnected exposed ground keeps its
@@ -63,31 +72,37 @@ of depth and exposed-side bulges for drawing, shadows and thumbnails; logical
 picks/collision stay unit cells. Explicit/interpolated camera extents include
 only relevant bottom-cell margins, preserving distant overworld framing.
 The GPU material table holds 4096 entries; a catalog-wide regression checks
-the current 2273 slots including fallback and attachments fit.
+the current 2105 slots including fallback and attachments fit.
 
-Debug and optimized game builds pass, with ten focused ground, rendering,
-material and thumbnail suites passing in each configuration. Independent
-audits cover all 240 bodies and 310 caps, including 7,200 stacked contacts and
-28,800 stepped contacts. The revised 120 bottom exports match their editable
-native source and retain the upper geometry, both UV streams and PBR bindings
-across 823,928 bidirectional samples. All 25,600 mixed-style underside joins,
-12,800 mixed supported contacts, 564 rooted closed boulders and 190 separated
-floating rocks pass. The 122
-original body/cap files remain byte-identical; shared original PBR hashes also
-pass. Twenty-two destructive audit fixtures reject the earlier collar/tooth-ring
-design, disconnected or flattened masses, intersecting floaters and damaged
-seams, UVs or floors. The accepted-shape audit checks all 120 native meshes
-against the preserved V3 baseline, including unchanged topology and depth,
-the exact intended rock-position transform and all exported material/UV corners.
+Debug and optimized builds pass, with ten focused ground, rendering, material
+and thumbnail suites passing in each configuration. The explicit chunky
+regular audit checks all 120 bodies and 580 closed rooted boulders against
+frozen pre-remodel exports. Exact backing/base faces, normals, UVs and PBR
+bindings, original upper-band coverage, source ownership and unit lower bounds
+pass. All 310 caps, 33,800 mixed cap joins, 6,400 backing joins, 7,200 stacked
+contacts and 28,800 stepped contacts pass. Separate hashes protect the 120
+accepted V4 bottom exports, both cap tables and 16 legacy/PBR reference files.
+Destructive fixtures reject altered retention, materials, bounds, topology
+and ownership. The new 122-entry regular/cap reference for bottom audits is
+emitted only after the strict regular audit passes; old baselines stay intact.
+Use `tools/validate_ground_modules.py --regular-revision chunky-v1` for the
+current kit. The unqualified command deliberately audits the legacy revision.
 
-Four final animated 1200-frame Vulkan captures cover the revised underside
-gallery, normal and lower camera angles, support examples and water with zero
-asset errors, dropped draws, pending loads or residency blocks. Model residency
-is 69,827,528 of 134,217,728 bytes. Final audit and runtime evidence are
-`out/ground-modules/bottom-v4-validation.json`,
-`out/ground-modules/bottom-v4-source-shape-validation.json` and
-`out/ground-modules/bottom-v4-runtime-evidence.json`; previews and native
-source snapshots remain in ignored `out/ground-modules/`. The broader Debug
+Four final animated 1200-frame Vulkan captures cover all regular families and
+styles, normal and lower camera angles, three-high stacks, support examples
+and water with zero asset errors, dropped draws, pending loads or residency
+blocks. Model residency is 57,655,532 of 134,217,728 bytes. Both normal game
+outputs contain all 240 source-matching GLBs and validated content indexes.
+Evidence is in `out/ground-modules/regular-chunky-validation.json`,
+`out/ground-modules/regular-chunky-runtime-evidence.json` and
+`out/ground-modules/normal-staged-content-validation.json`; previews and native
+source snapshots remain in ignored `out/ground-modules/`. The accepted V4
+shape proof remains in `bottom-v4-source-shape-validation.json`. Revalidation
+against the approved regular reference passes in
+`out/ground-modules/bottom-v4-after-regular-validation.json`, including all
+120 bottom bodies, 564 rooted boulders, 190 separated floating rocks, 25,600
+mixed underside joins and 12,800 contacts with the new regular bodies.
+The broader Debug
 allocation suite still reports 16-byte debug-container allocations across
 unrelated paths; its optimized counterpart passed the earlier runtime baseline.
 

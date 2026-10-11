@@ -872,6 +872,16 @@ def write_fixture(destination):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--regular-revision", choices=("legacy", "chunky-v1"), default="legacy",
+                        help="Explicitly audit new chunky regular bodies; legacy shell/hash checks stay the default")
+    parser.add_argument("--regular-source-audit", type=Path, default=ROOT / "out/ground-modules/regular-chunky-source-audit.json")
+    parser.add_argument("--pre-regular-models", type=Path, default=ROOT / "out/ground-modules/pre-regular-chunky-models")
+    parser.add_argument("--regular-protected-baseline", type=Path, default=ROOT / "out/ground-modules/pre-regular-chunky-protected-hashes.json")
+    parser.add_argument("--regular-reference-baseline", type=Path, default=ROOT / "out/ground-modules/pre-regular-chunky-regular-hashes.json")
+    parser.add_argument("--pre-regular-kit-baseline", type=Path, default=ROOT / "out/ground-modules/bottom-original-kit-hashes.json")
+    parser.add_argument("--accepted-bottom-audit", type=Path, default=ROOT / "out/ground-modules/bottom-v4-validation.json")
+    parser.add_argument("--approve-bottom-baseline", type=Path,
+                        help="Write a new regular/cap reference baseline only after the explicit chunky audit passes")
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     parser.add_argument("--models", type=Path, default=DEFAULT_MODELS)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
@@ -895,6 +905,11 @@ def main():
         require(fixture is not None, "--fixture-only requires --write-fixture")
         print(json.dumps(fixture))
         return
+    if args.regular_revision == "chunky-v1":
+        from validate_regular_ground import audit_from_native_args
+        audit_from_native_args(args, fixture)
+        return
+    require(args.approve_bottom_baseline is None, "Approved regular baseline requires the explicit chunky-v1 audit")
     contract = json.loads(args.contract.read_text(encoding="utf-8"))
     require(contract["format"] == 2 and contract["nativeCapCount"] == 250
             and contract["preserveOriginalXY"] is True and contract["squareNativeCapCount"] == 60,

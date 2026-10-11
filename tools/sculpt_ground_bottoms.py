@@ -57,7 +57,7 @@ def exact_hull_faces(points):
     return faces
 
 
-def rock_hull(center, radii, rng, mask):
+def rock_hull(center, radii, rng, mask, z_bounds=(-.995, .777)):
     """A skewed, chamfered block: broad faces, blunt corners, unequal shoulders."""
     rotation = Euler((rng.choice((-1, 1))*rng.uniform(.18, .42), rng.choice((-1, 1))*rng.uniform(.20, .48),
                       rng.uniform(-.58, .58))).to_matrix()
@@ -81,7 +81,7 @@ def rock_hull(center, radii, rng, mask):
                               (-MAX_OVERHANG if mask & 1 else 0, 1+MAX_OVERHANG if mask & 4 else 1))
                     for i in (0, 1):
                         p[i] = max(bounds[i][0], min(bounds[i][1], p[i]))
-                    p.z = max(-.995, min(.777, p.z))
+                    p.z = max(z_bounds[0], min(z_bounds[1], p.z))
                     points.append(p)
     rock = bmesh.new()
     for point in points:

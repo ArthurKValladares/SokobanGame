@@ -966,6 +966,15 @@ same-layer connected group. Their full-height rock bodies and flat tops
 close gaps between layers while keeping shared edges aligned. Isolated
 terrain retains the chamfered profile. Gameplay, editor placement and hover
 previews resolve these profiles automatically.
+The 120 regular bodies now use closed faceted boulders below local Z=0.78,
+clipped to the unit XY footprint and Z=0.02..0.777. Their original upper
+band, recessed backing and flat Z=0 base remain intact, so they retain square
+contacts for neighboring and stacked tiles. Regular interiors keep only the
+two original base triangles. Hidden `GroundModuleConstructionSources`
+preserve the original native meshes for explicit regular and bottom rebuilds.
+Normal exports with `tools/export_chunky_ground_modules.py` preserve artist
+edits; `-- --remodel-regular` explicitly rebuilds the regular bodies from
+those construction sources without changing the accepted floating bottoms.
 Unsupported ground selects a floating-island body with a recessed core
 derived from the original fractured walls. Unequal closed faceted boulders
 embed into the core, forming overlapping side clusters, deep creases and an
