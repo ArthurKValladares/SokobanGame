@@ -57,10 +57,10 @@ public:
 
 class SdlWindow final {
 public:
-    SdlWindow()
+    explicit SdlWindow(int width = 32, int height = 32)
     {
         window_ = SDL_CreateWindow(
-            "Sokoban Vulkan smoke test", 32, 32,
+            "Sokoban Vulkan smoke test", width, height,
             SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN);
         if (!window_) {
             throw std::runtime_error(
@@ -1221,7 +1221,7 @@ void exerciseGroundRimDrawBudgetFallback(SDL_Window* window)
               << " loaded ground bodies and flat caps without dropped draw instances\n";
 }
 
-void exerciseAnimatedSkyClouds(SDL_Window* window)
+void exerciseAnimatedSkyClouds()
 {
     using namespace sokoban;
     const auto require = [](bool condition, const char* message) {
@@ -1231,11 +1231,12 @@ void exerciseAnimatedSkyClouds(SDL_Window* window)
     const auto manifest = AssetManifest::loadFromFile(assetRoot / "manifest.json");
     auto font = FontAtlas::loadDefault(assetRoot);
     ScopedTestDirectory temporary("animated-sky-clouds");
-    VulkanRenderer renderer(window, assetRoot, temporary.path() / "cache.bin",
+    const SdlWindow window(1024, 1024);
+    VulkanRenderer renderer(window.get(), assetRoot, temporary.path() / "cache.bin",
         manifest, font, AntiAliasingMode::None, 100,
         { .vsync = false }, {}, false, true, true, false);
     UiDrawData ui;
-    ui.viewportSize = { 32, 32 };
+    ui.viewportSize = { 1024, 1024 };
     std::optional<Vec2> solidPixel;
     const auto capture = [&](bool enabled, float seconds,
                              RenderViewMode mode = RenderViewMode::Isometric3D,
@@ -1363,9 +1364,39 @@ void exerciseAnimatedSkyClouds(SDL_Window* window)
             disabled.rgba[pixelOffset + channel];
     }
     require(solidVisible, "Sky cloud fixture did not draw its opaque tile");
+
+    // A 32-pixel fixture rarely samples a moving noise-cell boundary. At
+    // this resolution, several boundaries cross pixel centers in one
+    // millisecond. Continuous cloud density and analytic lighting can change
+    // by at most a couple of display steps over that interval; mismatched
+    // hashes for a shared lattice corner produce abrupt, much larger pops.
+    int maximumTemporalChange = 0;
+    for (float seconds : { 0.0f, 45.0f, 120.0f }) {
+        const auto before = capture(true, seconds, RenderViewMode::Isometric3D,
+            false, 60.0f, 0.0f);
+        const auto after = capture(true, seconds + 0.001f, RenderViewMode::Isometric3D,
+            false, 60.0f, 0.0f);
+        require(before.width >= 1024 && before.height >= 1024,
+            "Sky cloud continuity fixture did not render at its requested resolution");
+        require(before.width == after.width && before.height == after.height,
+            "Sky cloud continuity capture dimensions changed between identical views");
+        for (std::size_t pixel = 0; pixel < before.rgba.size(); pixel += 4) {
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                maximumTemporalChange = std::max(maximumTemporalChange, std::abs(
+                    std::to_integer<int>(before.rgba[pixel + channel]) -
+                    std::to_integer<int>(after.rgba[pixel + channel])));
+            }
+        }
+    }
+    if (maximumTemporalChange > 2) {
+        throw std::runtime_error(
+            "Sky cloud animation has a discontinuity at a moving noise-cell boundary: "
+            "maximum millisecond RGB change=" + std::to_string(maximumTemporalChange));
+    }
     renderer.waitIdle();
     std::cout << "Sky clouds vary across the view and drift deterministically: one-second change="
               << nearbyChange << ", 45-second change=" << laterChange
+              << "; maximum millisecond change=" << maximumTemporalChange
               << "; disabled, top-down and opaque geometry remain intact\n";
 }
 
@@ -1377,7 +1408,7 @@ int main(int argc, char** argv)
         const SdlVideo video;
         const SdlWindow window;
         if (argc == 2 && std::string_view(argv[1]) == "--sky-clouds") {
-            exerciseAnimatedSkyClouds(window.get());
+            exerciseAnimatedSkyClouds();
             return 0;
         }
         if (argc == 2 &&
@@ -1465,7 +1496,7 @@ int main(int argc, char** argv)
         }
         submitNoOp(deviceContext);
         exerciseGroundRimDrawBudgetFallback(window.get());
-        exerciseAnimatedSkyClouds(window.get());
+        exerciseAnimatedSkyClouds();
         std::cout << "Vulkan hidden-surface smoke test passed\n";
         return 0;
     } catch (const std::exception& error) {

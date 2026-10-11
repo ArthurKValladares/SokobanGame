@@ -14,25 +14,34 @@ layout(push_constant) uniform PushConstants
     layout(offset = 80) vec4 animation;
 } pc;
 
-float hashCloud(vec2 p)
+float hashCloud(ivec2 cell)
 {
-    vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
-    q += dot(q, q.yzx + 33.33);
-    return fract((q.x + q.y) * q.z);
+    // Adjacent cells must agree exactly on their shared corners. Floating
+    // hashes can round (cell + 1) * constant differently after GPU multiply-add
+    // contraction, amplifying the difference into visible lattice seams.
+    uvec2 p = uvec2(cell);
+    uint h = (p.x * 0x8da6b343u) ^ (p.y * 0xd8163841u);
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    h ^= h >> 15;
+    h *= 0x846ca68bu;
+    h ^= h >> 16;
+    // Keep 24 bits so conversion to float is exact, including negative cells.
+    return float(h >> 8) * (1.0 / 16777216.0);
 }
 
 // Value and analytic XY gradient. Lighting uses the slope of the billows,
 // avoiding extra noise evaluations or screen derivatives at cloud edges.
 vec3 cloudNoise(vec2 p)
 {
-    vec2 cell = floor(p);
+    ivec2 cell = ivec2(floor(p));
     vec2 f = fract(p);
     vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
     vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
     float a = hashCloud(cell);
-    float b = hashCloud(cell + vec2(1.0, 0.0));
-    float c = hashCloud(cell + vec2(0.0, 1.0));
-    float d = hashCloud(cell + vec2(1.0));
+    float b = hashCloud(cell + ivec2(1, 0));
+    float c = hashCloud(cell + ivec2(0, 1));
+    float d = hashCloud(cell + ivec2(1));
     float k = a - b - c + d;
     return vec3(a + (b - a) * u.x + (c - a) * u.y + k * u.x * u.y,
         du * (vec2(b - a, c - a) + k * u.yx));

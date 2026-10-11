@@ -180,6 +180,12 @@ puzzle/water captures complete with zero dropped draws. The older Vulkan smoke
 and preview suites fail in their processed-ground fixtures because GroundRock01
 now uses a native island module; their variant-triangle counters remain zero.
 The same failures occur with the sky disabled. Their preview-inset checks pass.
+Cloud lattice corners now use integer hashing to remove seams caused by GPU
+floating-point contraction. The 1024-square sky regression samples 1 ms steps
+at 0, 45 and 120 seconds: the original shader jumps by 16 RGB steps, while the
+fix changes by at most 1 in both Debug and optimized builds. A 1,200-frame
+optimized render and 240-frame Debug validation render complete with zero
+dropped draws. Evidence is in ignored `out/cloud-seam-review/`.
 
 Moss is the third tile-decoration style: sixteen smooth, low green cushion
 meshes with small yellow flecks, matching the four layouts and four variations
@@ -981,6 +987,8 @@ and the required real-device checks are recorded.
   in water refraction, atmosphere and world transitions. Thumbnail and animation
   preview studio frames disable `skyCloudsEnabled`. Shader colors are linear;
   tuning lives in `shaders/sky_clouds.frag.glsl` and supports shader hot reload.
+  Noise corners use integer coordinates and hashing so neighboring cells agree
+  exactly; floating hashes can introduce seams through multiply-add contraction.
 - Set 0 contains scene/frame resources. Set 1 contains the variable-count
   sampled-texture heap and is the only binding in that set.
 - Manifest textures own stable low descriptor indices. Discovered glTF textures
