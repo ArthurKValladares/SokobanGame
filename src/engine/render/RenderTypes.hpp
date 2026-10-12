@@ -41,6 +41,11 @@ enum class RenderSurfaceEffect : uint8_t {
     // Authored plates keep their neutral housing while linked-color emissive
     // surfaces carry an object-anchored animated energy pattern.
     PlateEnergy,
+    // Upright oval doorway with animated luminous rings and a dark center.
+    PortalEnergy,
+    // Diffuse light extending along the doorway's facing axis. Shares the
+    // portal shader, with an explicit mode independent of quad orientation.
+    PortalBeam,
 };
 
 enum class WaterShorelineEdge : uint8_t {

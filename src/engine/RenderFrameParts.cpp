@@ -107,78 +107,92 @@ void appendPortalVisual(
                         static_cast<float>(edge.y),
                         0 };
     const Vec3 tangent { -normal.y, normal.x, 0 };
-    const Vec3 center {
+    const Vec3 edgeCenter {
         static_cast<float>(tile.cell.x) + 0.5f + normal.x * 0.5f,
         static_cast<float>(tile.cell.y) + 0.5f + normal.y * 0.5f,
-        tile.baseElevation + 0.48f,
+        tile.baseElevation,
     };
-    // A slim upright aperture on the actual grid edge, with a dark back.
-    // The five pieces retain the owning tile's pick cell in every view.
-    for (int side = 0; side < 5; ++side) {
-        const bool post = side < 2;
-        const float along = post ? (side == 0 ? -0.40f : 0.40f) : 0.0f;
-        const float vertical = side == 2 ? -0.43f : side == 3 ? 0.43f : 0.0f;
-        const Vec3 at = center + tangent * along + Vec3 { 0, 0, vertical };
-        const float width = post ? 0.07f : 0.87f;
-        const float height = post || side == 4 ? 0.90f : 0.07f;
-        const float depth = side == 4 ? 0.025f : 0.075f;
-        RenderFrameData::Tile part = tile;
-        part.model = cubeModel;
-        part.size = edge.x == 0 ? Vec2 { width, depth } : Vec2 { depth, width };
-        part.position = { at.x - part.size.x * 0.5f,
-                          at.y - part.size.y * 0.5f };
-        part.baseElevation = at.z - height * 0.5f;
-        part.height = height;
-        part.color = side == 4 ? shade(tile.color, 0.09f) : tile.color;
-        part.showGrid = false;
-        frame.tiles.push_back(part);
-    }
+    // The doorway and its pick target share the actual crossing edge. Only
+    // the diffuse beam extends into the owning tile, along the facing axis.
+    RenderFrameData::Tile aperture = tile;
+    aperture.model = cubeModel;
+    aperture.size = edge.x == 0 ? Vec2 { 1.0f, 0.12f } : Vec2 { 0.12f, 1.0f };
+    aperture.position = { edgeCenter.x - aperture.size.x * 0.5f,
+                          edgeCenter.y - aperture.size.y * 0.5f };
+    aperture.height = 1.60f;
+    aperture.pickOnly = true;
+    aperture.interactionOutline = false;
+    aperture.showGrid = false;
+    frame.tiles.push_back(aperture);
     if (tile.pickOnly) {
         return;
     }
-    // Sparks spiral into an ellipse on the front (inside the owning tile).
-    // Analytic trajectories keep gameplay, editor, thumbnails and scrubbing
-    // consistent without spawning a separate long-lived particle emitter.
+
     const float seed =
         static_cast<float>(tile.cell.x) * 0.37f + static_cast<float>(tile.cell.y) * 0.61f + static_cast<float>(tile.cell.z) * 0.19f;
-    for (int glow = 0; glow < 48; ++glow) {
-        const float angle = static_cast<float>(glow) * (2.0f * pi / 48.0f) + timeSeconds * 1.5f;
-        frame.particles.push_back({
-            .position = center - normal * 0.045f +
-                tangent * (std::cos(angle) * 0.37f) +
-                Vec3 { 0, 0, std::sin(angle) * 0.39f },
-            .size = { 0.085f, 0.12f },
-            .billboardAlignment = tangent * -std::sin(angle) +
-                Vec3 { 0, 0, std::cos(angle) },
-            .billboardAlignmentUsesY = true,
-            .color = { tile.color.x, tile.color.y, tile.color.z, tile.color.w * 0.8f },
-            .emissiveStrength = 3.5f,
-            .texture = glowTexture,
+    const Vec3 center = edgeCenter - normal * 0.018f + Vec3 { 0, 0, 0.80f };
+    const auto appendEnergyPlane = [&](Vec3 at, Vec3 right, Vec3 up,
+                                       float opacity, RenderSurfaceEffect effect) {
+        frame.isoFaces.push_back({
+            .vertices = { at - right - up, at + right - up,
+                          at + right + up, at - right + up },
+            .normal = normalize(cross(right, up)),
+            .color = { tile.color.x, tile.color.y, tile.color.z, tile.color.w * opacity },
+            .effect = effect,
+            .translucent = true,
+            .castsShadows = false,
         });
+    };
+
+    // A single upright quad holds the animated nested ovals and the dark
+    // aperture, so overlapping translucent disks cannot cover the rings.
+    appendEnergyPlane(center, tangent * 0.53f, Vec3 { 0, 0, 0.86f },
+        1.0f, RenderSurfaceEffect::PortalEnergy);
+
+    // Radial sheets share a smooth density field. Their long axis follows
+    // the cardinal facing direction, fading away from the doorway instead
+    // of turning into an upward column or individual electrical trails.
+    constexpr float beamLength = 1.10f;
+    constexpr int beamSheetCount = 12;
+    const Vec3 beamAxis = normal * -beamLength;
+    const Vec3 beamCenter = center + beamAxis * 0.5f;
+    for (int sheet = 0; sheet < beamSheetCount; ++sheet) {
+        const float angle = static_cast<float>(sheet) * pi /
+            static_cast<float>(beamSheetCount);
+        const Vec3 transverse = tangent * (std::cos(angle) * 0.49f) +
+            Vec3 { 0, 0, std::sin(angle) * 0.76f };
+        appendEnergyPlane(beamCenter, transverse, beamAxis * 0.5f,
+            0.12f, RenderSurfaceEffect::PortalBeam);
     }
-    for (int spark = 0; spark < 64; ++spark) {
-        const float cycle = static_cast<float>(spark) / 64.0f + timeSeconds * 0.42f + seed;
+
+    // Small round motes float slowly through the energy. Squared sampling
+    // concentrates them near its center and mouth; no elongated streaks.
+    constexpr int moteCount = 64;
+    for (int spark = 0; spark < moteCount; ++spark) {
+        const float index = static_cast<float>(spark);
+        const float cycle = index / static_cast<float>(moteCount) +
+            timeSeconds * (0.10f + index * 0.0007f) + seed;
         const float phase = cycle - std::floor(cycle);
-        const float angle =
-            static_cast<float>(spark) * 2.399963f + timeSeconds * 4.0f + phase * 5.0f;
-        const float radius = 1.0f + (1.0f - phase) * 0.30f;
-        const float front = 0.04f + (1.0f - phase) * 0.24f;
-        const Vec3 position = center - normal * front +
-            tangent * (std::cos(angle) * 0.36f * radius) +
-            Vec3 { 0, 0, std::sin(angle) * 0.34f * radius };
-        const float size = 0.04f + phase * 0.035f;
+        const float angle = index * 2.399963f + timeSeconds * 0.16f;
+        const float sample = index * 0.618034f + 0.21f;
+        const float radialSample = sample - std::floor(sample);
+        const float radius = radialSample * radialSample;
+        const Vec3 position = center - normal * (1.05f * std::pow(phase, 1.7f)) +
+            tangent * (std::cos(angle) * radius * 0.42f +
+                std::sin(timeSeconds * 0.8f + index) * 0.012f) +
+            Vec3 { 0, 0, std::sin(angle) * radius * 0.62f +
+                std::sin(timeSeconds * 0.63f + index * 1.3f) * 0.025f };
+        const float fade = std::pow(1.0f - phase, 0.6f);
+        const float twinkle = 0.75f + 0.25f * std::sin(timeSeconds * 2.1f + index * 1.9f);
+        const float size = 0.008f + 0.006f * (0.5f + 0.5f * std::sin(index * 2.7f));
         frame.particles.push_back({
             .position = position,
-            .size = { size, size * 2.8f },
-            .rotationRadians = angle,
-            .billboardAlignment = tangent * -std::sin(angle) +
-                Vec3 { 0, 0, std::cos(angle) },
-            .billboardAlignmentUsesY = true,
-            .color = { tile.color.x,
-                       tile.color.y,
-                       tile.color.z,
-                       tile.color.w * (0.3f + phase * 0.65f) },
-            .emissiveStrength = 2.5f,
+            .size = { size, size },
+            .color = { tile.color.x * 0.75f + 0.25f,
+                       tile.color.y * 0.75f + 0.25f,
+                       tile.color.z * 0.75f + 0.25f,
+                       tile.color.w * (0.11f + std::sin(pi * phase) * 0.14f) * fade * twinkle },
+            .emissiveStrength = 2.0f,
             .texture = glowTexture,
         });
     }

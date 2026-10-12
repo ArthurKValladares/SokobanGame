@@ -4784,16 +4784,46 @@ void testPortalPresentation()
         .presentation = presentation,
         .settings = {},
     });
-    const auto count = std::ranges::count_if(frame.tiles, [](const auto& tile) {
-        return tile.cell == GridPosition3 { 2, 0, 1 } && !tile.isPrimaryPlayer;
-    });
-    CHECK(count == 5);
-    CHECK(frame.particles.size() == 224);
-    for (std::size_t i = 0; i < 112 && i < frame.particles.size(); ++i) {
-        CHECK(frame.particles[i].position.x < 3.0f);
+    constexpr std::array portalCells { GridPosition3 { 2, 0, 1 },
+        GridPosition3 { 3, 1, 1 } };
+    constexpr std::size_t sparksPerPortal = 64;
+    CHECK(frame.particles.size() == portalCells.size() * sparksPerPortal);
+    for (std::size_t portal = 0; portal < portalCells.size(); ++portal) {
+        const GridPosition3 cell = portalCells[portal];
+        // The entrance stays pickable without a solid rectangular frame.
+        CHECK(std::ranges::count_if(frame.tiles, [cell](const auto& tile) {
+            return tile.cell == cell && !tile.isPrimaryPlayer;
+        }) == 1);
+        CHECK(std::ranges::any_of(frame.tiles, [cell](const auto& tile) {
+            return tile.cell == cell && tile.pickOnly && tile.pickable &&
+                tile.height > 1.0f && !tile.interactionOutline;
+        }));
+        const auto edge = portalEdgeOffset(*level.plateAt(cell));
+        const Vec3 normal { static_cast<float>(edge.x), static_cast<float>(edge.y), 0.0f };
+        const Vec3 tangent { -normal.y, normal.x, 0.0f };
+        const Vec3 edgeCentre { cell.x + 0.5f + normal.x * 0.5f,
+            cell.y + 0.5f + normal.y * 0.5f, static_cast<float>(cell.z) };
+        for (std::size_t index = portal * sparksPerPortal;
+             index < (portal + 1) * sparksPerPortal && index < frame.particles.size();
+             ++index) {
+            const Vec3 offset = frame.particles[index].position - edgeCentre;
+            CHECK(dot(offset, normal) < 0.0f && dot(offset, normal) > -1.2f);
+            CHECK(std::abs(dot(offset, tangent)) < 0.5f);
+            CHECK(offset.z > 0.0f && offset.z < 1.6f);
+        }
     }
-    for (std::size_t i = 112; i < frame.particles.size(); ++i) {
-        CHECK(frame.particles[i].position.y < 2.0f);
+    CHECK(std::ranges::count_if(frame.isoFaces, [](const auto& face) {
+        return face.effect == RenderSurfaceEffect::PortalEnergy;
+    }) == static_cast<std::ptrdiff_t>(portalCells.size()));
+    CHECK(std::ranges::count_if(frame.isoFaces, [](const auto& face) {
+        return face.effect == RenderSurfaceEffect::PortalBeam;
+    }) == 12 * static_cast<std::ptrdiff_t>(portalCells.size()));
+    for (const auto& face : frame.isoFaces) {
+        if (face.effect == RenderSurfaceEffect::PortalEnergy ||
+            face.effect == RenderSurfaceEffect::PortalBeam) {
+            CHECK(face.translucent);
+            CHECK(!face.castsShadows);
+        }
     }
     presentation.advanceClocks(0.25f, false);
     const auto animatedFrame = RenderFrameBuilder::buildGameplay({

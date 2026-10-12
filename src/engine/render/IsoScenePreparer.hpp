@@ -94,6 +94,8 @@ enum class PreparedSurfaceMaterial : uint8_t {
     // Splat-mapped ground: only the upward-facing top of a ground tile uses
     // it; the sides are authored glTF rock bodies with sandstone materials.
     GroundSplat,
+    PortalEnergy,
+    PortalBeam,
 };
 
 struct PreparedIsoFace {

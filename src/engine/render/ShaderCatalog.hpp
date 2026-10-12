@@ -51,6 +51,7 @@ inline constexpr std::string_view uiFrag = "ui.frag.glsl";
 inline constexpr std::string_view waterFrag = "water.frag.glsl";
 inline constexpr std::string_view waterCellsComp = "water_cells.comp.glsl";
 inline constexpr std::string_view mirrorEnergyFrag = "mirror_energy.frag.glsl";
+inline constexpr std::string_view portalEnergyFrag = "portal_energy.frag.glsl";
 inline constexpr std::string_view groundSplatFrag = "ground_splat.frag.glsl";
 inline constexpr std::string_view groundChunkVert = "ground_chunk.vert.glsl";
 inline constexpr std::string_view groundChunkShadowVert = "ground_chunk_shadow.vert.glsl";
@@ -111,6 +112,7 @@ inline constexpr auto sources = std::to_array<std::string_view>({
     debugLinkFrag,
     debugLinkVert,
 #endif
+    portalEnergyFrag,
     skyCloudsFrag,
     groundChunkVert,
     groundChunkShadowVert,

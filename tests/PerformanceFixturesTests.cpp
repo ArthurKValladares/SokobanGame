@@ -27,6 +27,20 @@ int main()
                 return particle.billboardAlignmentUsesY;
             }));
         }
+        if (std::string_view(scenario) == "portals" ||
+            std::string_view(scenario) == "mixed-stress") {
+            CHECK(std::ranges::any_of(frame.isoFaces, [](const auto& face) {
+                return face.effect == sokoban::RenderSurfaceEffect::PortalEnergy;
+            }));
+            CHECK(std::ranges::any_of(frame.isoFaces, [](const auto& face) {
+                return face.effect == sokoban::RenderSurfaceEffect::PortalBeam;
+            }));
+            CHECK(std::ranges::all_of(frame.isoFaces, [](const auto& face) {
+                return (face.effect != sokoban::RenderSurfaceEffect::PortalEnergy &&
+                           face.effect != sokoban::RenderSurfaceEffect::PortalBeam) ||
+                    (face.translucent && !face.castsShadows);
+            }));
+        }
         if (std::string_view(scenario) == "special-blocks" ||
             std::string_view(scenario) == "mixed-stress") {
             for (const auto effect : { sokoban::RenderSurfaceEffect::GateEnergy,
@@ -41,10 +55,13 @@ int main()
             }));
         }
         const auto frozenCount = frame.particles.size();
+        const auto frozenFaceCount = frame.isoFaces.size();
         frame.tiles.clear();
         frame.particles.clear();
+        frame.isoFaces.clear();
         fixture.append(frame, manifest, scenario, 8);
         CHECK(frame.particles.size() == frozenCount);
+        CHECK(frame.isoFaces.size() == frozenFaceCount);
     }
     if (failures) return 1;
     std::cout << "Performance effect fixtures passed\n";

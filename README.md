@@ -569,8 +569,11 @@ repeat one another's successful moves when their own destination is available.
 Portals come in four edge types: North (`O`), East (`o`), South (`p`),
 and West (`q`). Each uses `@portal {"cell":[x,y,z],"color":[r,g,b]}` metadata.
 Exactly two entrances with the same 8-bit RGB color in one screen form a pair;
-other group sizes stay inactive. The front faces into the owning tile, marked
-by swirling colored sparks. Units can stand on or enter that tile normally.
+other group sizes stay inactive. An upright elongated oval marks the tile's
+cardinal edge, with animated light rings around a dark cool-purple center.
+A soft horizontal glow fades into the owning tile, carrying tiny scattered
+points of light that are densest near the center. The rings and glow use the
+pair's color. Units can stand on or enter that tile normally.
 Only moving outward through its portal edge transports a unit, emerging into
 the paired portal's owning tile from its edge. Crossing from the back is an
 ordinary move. Direction rotates to point away from the exit edge, preserving

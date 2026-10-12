@@ -898,6 +898,23 @@ and the required real-device checks are recorded.
   point-shadow cache must use the resolved mask. Account for every appended
   index in upload/residency budgets; compare draw calls and GPU time using
   `--disable-ground-geometry` before expanding the experiment.
+- Portals share `renderFrameParts::appendPortalVisual` across gameplay, editor
+  and thumbnails. An invisible upright hull retains the authored edge's pick
+  cell and camera bounds. The elongated oval aperture stands upright on that
+  cardinal edge; its horizontal face normal follows that edge's cardinal axis.
+  Animated rings surround a nearly black cool-purple center, and a diffuse
+  horizontal beam fades away from it without defined trails. Tiny subtle dots
+  concentrate near the center. The aperture uses `PortalEnergy`; twelve radial
+  axial sheets use `PortalBeam`, with translucent, two-sided HDR rendering and
+  no shadows. Composite `PortalEnergy` after the beam and other translucent
+  faces so the dark core covers their intersections, while retaining depth
+  testing against the opaque world. The 64 tiny round dots reuse `ParticleGlow`.
+  Shader animation uses the existing effect clock. Evidence fixtures must
+  retain `isoFaces` as well as particles and tiles so their rings and beams
+  reach the same renderer path. Thumbnail crops include the energy geometry.
+  Visual Studio's default launch uses `out/dev/Debug/sokoban.exe`; rebuilding
+  `dev-fast` leaves that executable unchanged. Verify the user's launch build
+  and capture an authored portal screen from that executable after changes.
 - `ProcessedGround` is the Vulkan-free boundary description: cells are sorted
   by layer/row/column, with exposed side masks, side/diagonal model identities,
   and convex/concave corner masks. Side order is N/E/S/W; corner/diagonal order

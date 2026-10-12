@@ -47,6 +47,7 @@ public:
     [[nodiscard]] VkPipeline waterCells() const { return waterCells_; }
     [[nodiscard]] VkPipelineLayout waterCellsLayout() const { return waterCellsLayout_; }
     [[nodiscard]] VkPipeline mirrorEnergy() const { return mirrorEnergy_; }
+    [[nodiscard]] VkPipeline portalEnergy() const { return portalEnergy_; }
     [[nodiscard]] VkPipeline groundSplat() const { return groundSplat_; }
     [[nodiscard]] VkPipeline ui() const { return ui_; }
     [[nodiscard]] VkPipeline model() const { return model_; }
@@ -190,6 +191,7 @@ private:
     VkPipeline waterCells_ = VK_NULL_HANDLE;
     VkPipelineLayout waterCellsLayout_ = VK_NULL_HANDLE;
     VkPipeline mirrorEnergy_ = VK_NULL_HANDLE;
+    VkPipeline portalEnergy_ = VK_NULL_HANDLE;
     VkPipeline groundSplat_ = VK_NULL_HANDLE;
     VkPipeline ui_ = VK_NULL_HANDLE;
     VkPipeline model_ = VK_NULL_HANDLE;

@@ -1298,6 +1298,8 @@ static void prepareAuxiliaryGeometry(
         const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
         if (tile.isEditorPreview || tile.pickOnly ||
             tile.effect == RenderSurfaceEffect::MirrorEnergy ||
+            tile.effect == RenderSurfaceEffect::PortalEnergy ||
+            tile.effect == RenderSurfaceEffect::PortalBeam ||
             tile.effect == RenderSurfaceEffect::GateEnergy ||
             tile.effect == RenderSurfaceEffect::LinkedObjectAura) {
             continue;
@@ -1346,6 +1348,8 @@ static void prepareAuxiliaryGeometry(
     for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
         if (face.castsShadows &&
             face.effect != RenderSurfaceEffect::MirrorEnergy &&
+            face.effect != RenderSurfaceEffect::PortalEnergy &&
+            face.effect != RenderSurfaceEffect::PortalBeam &&
             face.effect != RenderSurfaceEffect::GateEnergy &&
             face.effect != RenderSurfaceEffect::LinkedObjectAura) {
             appendShadowFace(face.vertices);
@@ -1520,6 +1524,8 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
         (request.blurBehind ||
                 request.material == PreparedSurfaceMaterial::Water ||
                 request.material == PreparedSurfaceMaterial::MirrorEnergy ||
+                request.material == PreparedSurfaceMaterial::PortalEnergy ||
+                request.material == PreparedSurfaceMaterial::PortalBeam ||
                 request.material == PreparedSurfaceMaterial::GateEnergy ||
                 request.material == PreparedSurfaceMaterial::LinkedObjectAura
                 ? scene.translucentFaceIndices
@@ -1569,11 +1575,17 @@ void appendTileFaces(
             tile.pickable &&
             !tile.isEditorPreview &&
             tile.effect != RenderSurfaceEffect::MirrorEnergy &&
+            tile.effect != RenderSurfaceEffect::PortalEnergy &&
+            tile.effect != RenderSurfaceEffect::PortalBeam &&
             tile.effect != RenderSurfaceEffect::GateEnergy &&
             tile.effect != RenderSurfaceEffect::LinkedObjectAura;
         const PreparedSurfaceMaterial tileMaterial =
             tile.effect == RenderSurfaceEffect::MirrorEnergy
             ? PreparedSurfaceMaterial::MirrorEnergy
+            : tile.effect == RenderSurfaceEffect::PortalEnergy
+            ? PreparedSurfaceMaterial::PortalEnergy
+            : tile.effect == RenderSurfaceEffect::PortalBeam
+            ? PreparedSurfaceMaterial::PortalBeam
             : tile.effect == RenderSurfaceEffect::GateEnergy
             ? PreparedSurfaceMaterial::GateEnergy
             : tile.effect == RenderSurfaceEffect::LinkedObjectAura
@@ -1761,6 +1773,8 @@ void appendTileFaces(
             (!tile.groundModule || tile.groundModuleSideMask != 0 || tile.groundModuleBottom)) {
             (tile.blurBehind || tile.color.w < 1.0f ||
                     tile.effect == RenderSurfaceEffect::MirrorEnergy ||
+                    tile.effect == RenderSurfaceEffect::PortalEnergy ||
+                    tile.effect == RenderSurfaceEffect::PortalBeam ||
                     tile.effect == RenderSurfaceEffect::GateEnergy ||
                     tile.effect == RenderSurfaceEffect::LinkedObjectAura
                     ? scene.translucentModelIndices
@@ -1789,6 +1803,10 @@ void appendSourceIsoFaces(
             .material =
                 source.effect == RenderSurfaceEffect::MirrorEnergy
                 ? PreparedSurfaceMaterial::MirrorEnergy
+                : source.effect == RenderSurfaceEffect::PortalEnergy
+                ? PreparedSurfaceMaterial::PortalEnergy
+                : source.effect == RenderSurfaceEffect::PortalBeam
+                ? PreparedSurfaceMaterial::PortalBeam
                 : source.effect == RenderSurfaceEffect::GateEnergy
                 ? PreparedSurfaceMaterial::GateEnergy
                 : source.effect == RenderSurfaceEffect::LinkedObjectAura
@@ -1806,6 +1824,8 @@ void appendSourceIsoFaces(
         if (scene.renderables[renderableIndex].mainSceneVisible) {
             (source.translucent ||
                     face.material == PreparedSurfaceMaterial::MirrorEnergy ||
+                    face.material == PreparedSurfaceMaterial::PortalEnergy ||
+                    face.material == PreparedSurfaceMaterial::PortalBeam ||
                     face.material == PreparedSurfaceMaterial::GateEnergy ||
                     face.material == PreparedSurfaceMaterial::LinkedObjectAura
                     ? scene.translucentFaceIndices
@@ -1869,9 +1889,19 @@ void orderIsoFaces(PreparedRenderScene& scene, bool opaqueFrontToBackSort)
         std::ranges::sort(scene.opaqueFaceIndices, fartherFirst);
         scene.opaqueBlendedFirst = scene.opaqueFaceIndices.size();
     }
-    // Translucent geometry has no such freedom: blending is order
-    // dependent, so it must stay farthest first.
-    std::ranges::sort(scene.translucentFaceIndices, fartherFirst);
+    // Composite the portal opening over its diffuse energy. Otherwise the
+    // axial sheets paint their intersections across the nearly black core.
+    // Keep ordinary translucency, and openings amongst themselves, in depth
+    // order. Opaque-world depth testing still occludes every effect.
+    std::ranges::sort(scene.translucentFaceIndices,
+        [&](std::size_t left, std::size_t right) {
+            const bool leftOpening =
+                scene.isoFaces[left].material == PreparedSurfaceMaterial::PortalEnergy;
+            const bool rightOpening =
+                scene.isoFaces[right].material == PreparedSurfaceMaterial::PortalEnergy;
+            if (leftOpening != rightOpening) return !leftOpening;
+            return fartherFirst(left, right);
+        });
 }
 
 } // namespace

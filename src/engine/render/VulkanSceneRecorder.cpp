@@ -517,6 +517,8 @@ public:
         stats_.preparedEnergyFaces = static_cast<uint32_t>(std::ranges::count_if(
             scene.isoFaces, [](const auto& face) {
                 return face.material == PreparedSurfaceMaterial::GateEnergy ||
+                    face.material == PreparedSurfaceMaterial::PortalEnergy ||
+                    face.material == PreparedSurfaceMaterial::PortalBeam ||
                     face.material == PreparedSurfaceMaterial::MirrorEnergy ||
                     face.material == PreparedSurfaceMaterial::LinkedObjectAura;
             }));
@@ -2617,6 +2619,9 @@ private:
                 case PreparedSurfaceMaterial::GateEnergy:
                 case PreparedSurfaceMaterial::LinkedObjectAura:
                     return pipelines_.mirrorEnergy();
+                case PreparedSurfaceMaterial::PortalEnergy:
+                case PreparedSurfaceMaterial::PortalBeam:
+                    return pipelines_.portalEnergy();
                 case PreparedSurfaceMaterial::GroundSplat:
                     // Falls back to the flat tile shader when the manifest
                     // does not provide the ground textures.
@@ -2668,6 +2673,15 @@ private:
                     frameData.waterRendering,
                     scene.isoLayout,
                     face.isEditorPreview);
+            } else if (face.material == PreparedSurfaceMaterial::PortalEnergy ||
+                       face.material == PreparedSurfaceMaterial::PortalBeam) {
+                faceInstance = drawPortalEnergyFace(
+                    commandBuffer,
+                    face.worldVertices,
+                    face.color,
+                    face.normal,
+                    frameData.effectAnimationTimeSeconds,
+                    face.material == PreparedSurfaceMaterial::PortalBeam);
             } else if (
                 face.material == PreparedSurfaceMaterial::MirrorEnergy ||
                 face.material == PreparedSurfaceMaterial::GateEnergy ||
@@ -3253,6 +3267,25 @@ private:
         ++stats_.visibleFaces;
         stats_.vertices += 6;
         stats_.triangles += 2;
+    }
+
+    [[nodiscard]] uint32_t drawPortalEnergyFace(
+        VkCommandBuffer commandBuffer,
+        const std::array<Vec3, 4>& vertices,
+        Vec4 color,
+        Vec3 normal,
+        float animationTimeSeconds,
+        bool beam)
+    {
+        beginQuadDraw(commandBuffer);
+        const GpuDrawInstance constants {
+            .vertices = quadVertices(vertices, worldSpaceQuad),
+            .passData = { Vec4 { beam ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f } },
+            .color = color,
+            .normalAndAmbientRed = { normal.x, normal.y, normal.z, 0.0f },
+            .materialOptions = { 0.0f, 1.0f, 1.0f, animationTimeSeconds },
+        };
+        return writeDrawInstance(constants);
     }
 
     [[nodiscard]] uint32_t drawMirrorEnergyFace(

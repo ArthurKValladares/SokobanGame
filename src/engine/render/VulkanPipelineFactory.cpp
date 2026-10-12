@@ -220,8 +220,9 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     // Indices are positional only so that the cleanup loop below has one
     // array to walk; nothing else depends on the order.
     std::array<VkShaderModule, shaderCatalog::sources.size()> shaders {};
-    // Sky and chunk modules follow the shared outlines and optional debug links;
+    // Portal, sky and chunk modules follow outlines and optional debug links;
     // compute remains last in both developer and shipping catalogs.
+    constexpr std::size_t portalEnergyShader = shaderCatalog::sources.size() - 6;
     constexpr std::size_t skyCloudsShader = shaderCatalog::sources.size() - 5;
     constexpr std::size_t groundChunkShaderFirst = shaderCatalog::sources.size() - 4;
     try {
@@ -245,6 +246,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         shaders[17] = shaderModule(shaderCatalog::atmosphereCompositeFrag);
         shaders[18] = shaderModule(shaderCatalog::bloomExtractFrag);
         shaders[19] = shaderModule(shaderCatalog::bloomBlurFrag);
+        shaders[portalEnergyShader] = shaderModule(shaderCatalog::portalEnergyFrag);
         shaders[skyCloudsShader] = shaderModule(shaderCatalog::skyCloudsFrag);
         shaders[groundChunkShaderFirst] = shaderModule(shaderCatalog::groundChunkVert);
         shaders[groundChunkShaderFirst + 1] = shaderModule(shaderCatalog::groundChunkShadowVert);
@@ -303,6 +305,10 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             createInfo.wireframe, Target::SceneBlended, createInfo.waterCellCacheEnabled);
         mirrorEnergy_ = createScenePipeline(
             shaders[0], shaders[9], VertexLayout::None,
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe);
+        portalEnergy_ = createScenePipeline(
+            shaders[0], shaders[portalEnergyShader], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe);
         groundSplat_ = createScenePipeline(
@@ -396,6 +402,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
                 skinnedModelOpaque_, "Skinned model pipeline (opaque)" },
             std::pair { water_, "Water pipeline" },
             std::pair { mirrorEnergy_, "Mirror energy pipeline" },
+            std::pair { portalEnergy_, "Portal rings and energy beam pipeline" },
             std::pair { groundSplat_, "Ground splat pipeline" },
             std::pair { ui_, "UI pipeline" },
             std::pair { model_, "Model pipeline" },
@@ -442,7 +449,7 @@ void VulkanPipelineFactory::destroy()
 {
     if (device_) {
         const std::array pipelines {
-            scene_, sceneOpaque_, skyClouds_, water_, waterCells_, mirrorEnergy_, groundSplat_,
+            scene_, sceneOpaque_, skyClouds_, water_, waterCells_, mirrorEnergy_, portalEnergy_, groundSplat_,
             groundSplatOpaque_, ui_, model_, modelOpaque_,
             groundChunkOpaque_, groundChunkShadow_,
             mirrorEnergyModel_, skinnedModel_, skinnedModelOpaque_,
@@ -481,6 +488,7 @@ void VulkanPipelineFactory::destroy()
     waterCells_ = VK_NULL_HANDLE;
     waterCellsLayout_ = VK_NULL_HANDLE;
     mirrorEnergy_ = VK_NULL_HANDLE;
+    portalEnergy_ = VK_NULL_HANDLE;
     groundSplat_ = VK_NULL_HANDLE;
     ui_ = VK_NULL_HANDLE;
     model_ = VK_NULL_HANDLE;

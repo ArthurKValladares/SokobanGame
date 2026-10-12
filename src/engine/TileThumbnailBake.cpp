@@ -168,6 +168,23 @@ RenderFrameData buildBakeFrame(
             { static_cast<int>(bedCentre), static_cast<int>(bedCentre), 0 },
             TileType::RailStraightNorthSouth);
     } else if (tileTypeIsPortal(tile)) {
+        // Keep transparent light legible on a neutral studio bed. The taller
+        // crop also reaches above the ordinary bed, so extend its backdrop
+        // without changing the authored camera extent or its pick targets.
+        frame.lighting.atmosphere.enabled = false;
+        frame.lighting.sun.color = { 1.0f, 1.0f, 1.0f };
+        frame.lighting.ambient.color = { 1.0f, 1.0f, 1.0f };
+        // A diagonal view keeps every cardinal doorway visible rather than
+        // presenting east/west apertures exactly edge-on.
+        frame.cameraYawDegrees = 45.0f;
+        frame.cameraPitchDegrees = 55.0f;
+        frame.isoFaces.push_back({
+            .vertices = { Vec3 { -30, -30, -0.01f }, Vec3 { 33, -30, -0.01f },
+                          Vec3 { 33, 33, -0.01f }, Vec3 { -30, 33, -0.01f } },
+            .normal = { 0, 0, 1 },
+            .color = bedColor,
+            .castsShadows = false,
+        });
         renderFrameParts::appendPortalVisual(
             frame,
             subject,
@@ -245,6 +262,24 @@ CropRect cropFor(
             std::max(subjectMaximum.y, bounds.maximum.y),
             std::max(subjectMaximum.z, bounds.maximum.z),
         };
+    }
+    // Include both the taller doorway and its horizontal plume, so no
+    // cardinal orientation clips the soft glow at the icon's edge.
+    for (const auto& face : frame.isoFaces) {
+        if (face.effect != RenderSurfaceEffect::PortalEnergy &&
+            face.effect != RenderSurfaceEffect::PortalBeam) continue;
+        for (const Vec3 point : face.vertices) {
+            subjectMinimum = {
+                std::min(subjectMinimum.x, point.x),
+                std::min(subjectMinimum.y, point.y),
+                std::min(subjectMinimum.z, point.z),
+            };
+            subjectMaximum = {
+                std::max(subjectMaximum.x, point.x),
+                std::max(subjectMaximum.y, point.y),
+                std::max(subjectMaximum.z, point.z),
+            };
+        }
     }
     for (const float x : { subjectMinimum.x, subjectMaximum.x }) {
         for (const float y : { subjectMinimum.y, subjectMaximum.y }) {

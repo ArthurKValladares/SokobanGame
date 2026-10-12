@@ -12,6 +12,7 @@
 #include "engine/GateEffect.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/RenderFrameBuilder.hpp"
+#include "engine/RenderFrameParts.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
@@ -600,7 +601,6 @@ void testBakeFrameStandsTheTileOnAGroundBed()
             ? bedCells
             : bedCells + (definition.type == TileType::Gate
                           ? config::gateEnergyTileCount
-                          : tileTypeIsPortal(definition.type) ? 5
                           : definition.type == TileType::MinecartGate ? 5
                           : tileTypeIsWardrobe(definition.type) ? 2 : 1);
         CHECK(frame.tiles.size() == expected);
@@ -665,10 +665,7 @@ void testBakeFrameStandsTheTileOnAGroundBed()
         const float ladderOffset = definition.type == TileType::Ladder ? 0.38f : 0.0f;
         CHECK(std::abs(midY - (centre + 0.5f + edge.y * 0.5f + ladderOffset)) < 0.001f);
         // Standing on the bed's surface, not sunk into or floating above it.
-        CHECK(
-            std::abs(
-                subject.baseElevation -
-                (tileTypeIsPortal(definition.type) ? 0.03f : 0.0f)) < 0.001f);
+        CHECK(std::abs(subject.baseElevation) < 0.001f);
     }
 }
 
@@ -836,11 +833,13 @@ void testSubjectMatchesTheTileTheEditorDraws()
             testManifest(),
             testSettings());
         if (tileTypeIsPortal(definition.type)) {
-            // Composite edge entrances have an upright frame and a dark back.
-            CHECK(frame.tiles.size() >= 5);
-            CHECK(subject.height > 0.8f);
-            CHECK(frame.particles.size() == 112);
-            CHECK(subject.color.x < expected.color.x);
+            // Energy is drawn separately from the invisible edge pick hull.
+            CHECK(subject.pickOnly);
+            CHECK(subject.pickable);
+            CHECK(subject.height > 1.0f);
+            CHECK(!frame.isoFaces.empty());
+            CHECK(!frame.particles.empty());
+            CHECK(subject.color == expected.color);
             const GridPosition edge = portalEdgeOffset(definition.type);
             const float edgeX = subject.cell.x + 0.5f + edge.x * 0.5f;
             const float edgeY = subject.cell.y + 0.5f + edge.y * 0.5f;
@@ -875,6 +874,155 @@ void testSubjectMatchesTheTileTheEditorDraws()
         CHECK(subject.effect == expected.effect);
         CHECK(subject.color.x == expected.color.x);
         CHECK(subject.color.w == expected.color.w);
+    }
+}
+
+void testPortalsRetainEdgePickingAndFaceEachCardinalDirection()
+{
+    TEST("portalsRetainEdgePickingAndFaceEachCardinalDirection");
+    for (const TileType type : { TileType::PortalNorth, TileType::PortalEast,
+             TileType::PortalSouth, TileType::PortalWest }) {
+        auto tile = tileVisual(type, { 3, 4, 2 }, testManifest(), testSettings());
+        tile.baseElevation = 2.5f;
+        tile.color = { 0.2f, 0.7f, 1.0f, 0.8f };
+        const auto glow = testManifest().textureIdByName("ParticleGlow");
+        RenderFrameData first;
+        RenderFrameData later;
+        renderFrameParts::appendPortalVisual(first, tile, type, 0.0f, glow);
+        renderFrameParts::appendPortalVisual(later, tile, type, 0.2f, glow);
+
+        CHECK(first.tiles.size() == 1);
+        CHECK(later.tiles.size() == first.tiles.size());
+        const auto& hull = first.tiles.front();
+        CHECK(hull.cell == tile.cell);
+        CHECK(hull.pickOnly && hull.pickable);
+        CHECK(hull.affectsCameraFit);
+        CHECK(hull.baseElevation == tile.baseElevation);
+        CHECK(hull.height > 1.0f && hull.height < 2.0f);
+        const auto edge = portalEdgeOffset(type);
+        const Vec3 normal { static_cast<float>(edge.x), static_cast<float>(edge.y), 0.0f };
+        const Vec3 tangent { -normal.y, normal.x, 0.0f };
+        const Vec3 edgeCentre {
+            tile.cell.x + 0.5f + edge.x * 0.5f,
+            tile.cell.y + 0.5f + edge.y * 0.5f,
+            tile.baseElevation,
+        };
+        CHECK(std::abs(hull.position.x + hull.size.x * 0.5f - edgeCentre.x) < 0.0001f);
+        CHECK(std::abs(hull.position.y + hull.size.y * 0.5f - edgeCentre.y) < 0.0001f);
+
+        std::size_t uprightApertures = 0;
+        std::size_t horizontalBeams = 0;
+        CHECK(later.isoFaces.size() == first.isoFaces.size());
+        for (const auto& face : first.isoFaces) {
+            CHECK(face.effect == RenderSurfaceEffect::PortalEnergy ||
+                face.effect == RenderSurfaceEffect::PortalBeam);
+            CHECK(face.translucent);
+            CHECK(!face.castsShadows);
+            for (const Vec3 point : face.vertices) {
+                // The transparent quad border extends slightly beyond the
+                // visible oval, while remaining on the entrance side.
+                CHECK(point.z >= tile.baseElevation - 0.07f);
+                CHECK(point.z <= tile.baseElevation + hull.height + 0.07f);
+                CHECK(dot(point - edgeCentre, normal) <= 0.0001f);
+            }
+            if (face.effect == RenderSurfaceEffect::PortalEnergy) {
+                ++uprightApertures;
+                CHECK(std::abs(dot(face.normal, normal)) > 0.999f);
+                CHECK(std::abs(face.normal.z) < 0.0001f);
+                const Vec3 across = face.vertices[1] - face.vertices[0];
+                const Vec3 upright = face.vertices[3] - face.vertices[0];
+                CHECK(std::abs(dot(across, tangent)) > 0.8f);
+                CHECK(std::abs(across.z) < 0.0001f);
+                CHECK(upright.z > length(across) * 1.5f);
+                CHECK(std::abs(dot(upright, normal)) < 0.0001f);
+                CHECK(std::abs(dot(upright, tangent)) < 0.0001f);
+                for (const Vec3 point : face.vertices) {
+                    CHECK(std::abs(dot(point - edgeCentre, normal)) < 0.05f);
+                }
+            } else {
+                ++horizontalBeams;
+                // Beam UVs run from the upright portal into its owning tile;
+                // none of the axial sheets may turn into an upward column.
+                const Vec3 axis = face.vertices[3] - face.vertices[0];
+                CHECK(dot(axis, normal) < -0.8f);
+                CHECK(std::abs(dot(axis, tangent)) < 0.0001f);
+                CHECK(std::abs(axis.z) < 0.0001f);
+                CHECK(std::abs(dot(face.normal, normal)) < 0.0001f);
+                CHECK(std::abs(dot(face.vertices[0] - edgeCentre, normal)) < 0.05f);
+                CHECK(std::abs(dot(face.vertices[1] - edgeCentre, normal)) < 0.05f);
+            }
+        }
+        CHECK(uprightApertures == 1);
+        CHECK(horizontalBeams == 12);
+        CHECK(first.particles.size() == 64);
+        CHECK(later.particles.size() == first.particles.size());
+        bool sparksMoved = false;
+        std::size_t dotsNearAxis = 0;
+        for (std::size_t index = 0; index < first.particles.size(); ++index) {
+            const auto& spark = first.particles[index];
+            CHECK(spark.texture == glow);
+            CHECK(spark.size.x > 0.0f && spark.size.y > 0.0f);
+            CHECK(spark.size.x <= 0.016f && spark.size.y <= 0.016f);
+            CHECK(spark.size.y / spark.size.x < 1.25f);
+            CHECK(spark.size.x / spark.size.y < 1.25f);
+            CHECK(spark.emissiveStrength > 1.0f && spark.emissiveStrength <= 2.5f);
+            CHECK(spark.color.w <= 0.33f);
+            CHECK(spark.position.z >= tile.baseElevation);
+            CHECK(spark.position.z <= tile.baseElevation + hull.height);
+            const Vec3 offset = spark.position - edgeCentre;
+            CHECK(dot(offset, normal) < 0.0f);
+            CHECK(dot(offset, normal) > -1.2f);
+            const float across = dot(offset, tangent) / 0.49f;
+            const float vertical = (offset.z - 0.8f) / 0.76f;
+            dotsNearAxis += across * across + vertical * vertical < 0.25f ? 1U : 0U;
+            sparksMoved |= spark.position != later.particles[index].position;
+        }
+        CHECK(sparksMoved);
+        CHECK(dotsNearAxis > first.particles.size() / 2);
+
+        // The dark opening composites after its beam and other translucent
+        // faces, from either side of the level, so sheet intersections cannot
+        // paint bright fans across its center.
+        auto otherEnergy = first.isoFaces.front();
+        otherEnergy.effect = RenderSurfaceEffect::MirrorEnergy;
+        otherEnergy.color.w = 0.4f;
+        first.isoFaces.push_back(otherEnergy);
+        first.viewMode = RenderViewMode::Isometric3D;
+        first.levelWidth = first.levelHeight = 8;
+        first.cameraPitchDegrees = 55.0f;
+        for (const float yaw : { 45.0f, 225.0f }) {
+            first.cameraYawDegrees = yaw;
+            PreparedRenderScene scene;
+            IsoScenePreparer preparer;
+            preparer.setFrustumCulling(false);
+            preparer.prepare(first, { 1280.0f, 720.0f }, scene);
+            bool reachedAperture = false;
+            std::size_t preparedBeams = 0;
+            std::size_t preparedApertures = 0;
+            for (const std::size_t faceIndex : scene.translucentFaceIndices) {
+                const auto material = scene.isoFaces[faceIndex].material;
+                if (material == PreparedSurfaceMaterial::PortalEnergy) {
+                    reachedAperture = true;
+                    ++preparedApertures;
+                } else {
+                    CHECK(!reachedAperture);
+                }
+                preparedBeams += material == PreparedSurfaceMaterial::PortalBeam ? 1U : 0U;
+            }
+            CHECK(preparedApertures == 1);
+            CHECK(preparedBeams == 12);
+            CHECK(scene.shadowFaces.empty());
+        }
+
+        // A covered portal contributes its pick hull without shining through
+        // the covering object or emitting particles into it.
+        tile.pickOnly = true;
+        RenderFrameData covered;
+        renderFrameParts::appendPortalVisual(covered, tile, type, 0.2f, glow);
+        CHECK(covered.tiles.size() == 1);
+        CHECK(covered.tiles.front().cell == tile.cell);
+        CHECK(covered.isoFaces.empty());
+        CHECK(covered.particles.empty());
     }
 }
 
@@ -984,6 +1132,42 @@ void testCropFramesTheSubjectCell()
             std::min(width, height) <= 64);
     }
 
+    // The upright oval and horizontal beam extend beyond an ordinary tile.
+    // Both materials must survive the crop for every entrance orientation.
+    constexpr uint32_t portalWidth = 1280;
+    constexpr uint32_t portalHeight = 720;
+    for (const TileType type : { TileType::PortalNorth, TileType::PortalEast,
+             TileType::PortalSouth, TileType::PortalWest }) {
+        const auto portalFrame = tileThumbnails::buildBakeFrame(
+            type, testManifest(), testSettings());
+        const auto crop = tileThumbnails::cropFor(
+            portalFrame, portalWidth, portalHeight);
+        PreparedRenderScene scene;
+        const IsoScenePreparer preparer;
+        preparer.prepare(portalFrame,
+            { static_cast<float>(portalWidth), static_cast<float>(portalHeight) },
+            scene);
+        bool includesTallEnergy = false;
+        for (const auto& face : portalFrame.isoFaces) {
+            if (face.effect != RenderSurfaceEffect::PortalEnergy &&
+                face.effect != RenderSurfaceEffect::PortalBeam) continue;
+            for (const Vec3 point : face.vertices) {
+                includesTallEnergy |= point.z > 1.0f;
+                const Vec3 clip = IsoScenePreparer::projectIsoPoint(
+                    scene.isoLayout, scene.renderExtent, point);
+                const float pixelX = (clip.x + 1.0f) * 0.5f *
+                    static_cast<float>(portalWidth);
+                const float pixelY = (1.0f - clip.y) * 0.5f *
+                    static_cast<float>(portalHeight);
+                CHECK(pixelX >= static_cast<float>(crop.x));
+                CHECK(pixelX <= static_cast<float>(crop.x) + static_cast<float>(crop.width));
+                CHECK(pixelY >= static_cast<float>(crop.y));
+                CHECK(pixelY <= static_cast<float>(crop.y) + static_cast<float>(crop.height));
+            }
+        }
+        CHECK(includesTallEnergy);
+    }
+
     // Degenerate extents must not produce a zero or negative rectangle.
     const tileThumbnails::CropRect tiny = tileThumbnails::cropFor(frame, 1, 1);
     CHECK(tiny.width >= 1);
@@ -1010,6 +1194,7 @@ int main()
     testLecternsBakeAllCardinalDirections();
     testConveyorsBakeRotatedAndAtBeltHeight();
     testSubjectMatchesTheTileTheEditorDraws();
+    testPortalsRetainEdgePickingAndFaceEachCardinalDirection();
     testPerspectiveIsNoStrongerThanOnARealBoard();
     testCropFramesTheSubjectCell();
 

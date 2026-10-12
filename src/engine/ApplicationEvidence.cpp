@@ -75,6 +75,11 @@ void Application::appendEvidenceEffects(RenderFrameData& frame)
             throw std::runtime_error("Evidence effects exceeded tile capacity");
         }
     }
+    for (const auto& face : evidenceEffectSnapshot_->isoFaces) {
+        if (!frame.isoFaces.push_back(face)) {
+            throw std::runtime_error("Evidence effects exceeded face capacity");
+        }
+    }
 }
 
 void Application::captureEvidenceScene()
@@ -94,6 +99,11 @@ void Application::captureEvidenceScene()
     }
     if (evidenceEffectSnapshot_ && evidenceStats_.particleDrawCalls == 0) {
         throw std::runtime_error("Evidence particles were prepared but not drawn");
+    }
+    if ((evidenceEffects_ == "portals" || evidenceEffects_ == "mixed-stress") &&
+        (evidenceStats_.preparedEnergyFaces == 0 ||
+            !evidenceStats_.mainSceneHasTranslucency)) {
+        throw std::runtime_error("Evidence portals did not reach the translucent energy path");
     }
     if ((evidenceEffects_ == "special-blocks" || evidenceEffects_ == "mixed-stress") &&
         (evidenceStats_.preparedEnergyFaces == 0 || evidenceStats_.preparedEnergyModels == 0 ||
