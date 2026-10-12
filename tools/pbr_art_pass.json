@@ -1,8 +1,9 @@
 {
-  "format": 1,
+  "format": 2,
   "models": [
     {
       "name": "BricksA",
+      "ownership": "generated",
       "source": "KayKit Block Bits 1.0/Assets/gltf/bricks_A.gltf",
       "skip": null,
       "surface_rule": "stone",
@@ -10,502 +11,2388 @@
     },
     {
       "name": "WallStone01",
+      "ownership": "retained",
       "source": "custom/models/wall_stone_01.glb",
       "skip": "artist-authored stone"
     },
     {
       "name": "WallStone02",
+      "ownership": "retained",
       "source": "custom/models/wall_stone_02.glb",
       "skip": "artist-authored stone"
     },
     {
       "name": "WallStone03",
+      "ownership": "retained",
       "source": "custom/models/wall_stone_03.glb",
       "skip": "artist-authored stone"
     },
     {
       "name": "WallStone04",
+      "ownership": "retained",
       "source": "custom/models/wall_stone_04.glb",
       "skip": "artist-authored stone"
     },
     {
       "name": "WallStone05",
+      "ownership": "retained",
       "source": "custom/models/wall_stone_05.glb",
       "skip": "artist-authored stone"
     },
     {
       "name": "WallStone06",
+      "ownership": "retained",
       "source": "custom/models/wall_stone_06.glb",
       "skip": "artist-authored stone"
     },
     {
       "name": "WallStone07",
+      "ownership": "retained",
       "source": "custom/models/wall_stone_07.glb",
       "skip": "artist-authored stone"
     },
     {
       "name": "WallStone08",
+      "ownership": "retained",
       "source": "custom/models/wall_stone_08.glb",
       "skip": "artist-authored stone"
     },
     {
       "name": "Stone",
+      "ownership": "retained",
       "source": "custom/models/chunky_boulder.glb",
       "skip": "artist-authored painted boulder"
     },
     {
       "name": "Glass",
+      "ownership": "generated",
       "source": "KayKit Block Bits 1.0/Assets/gltf/glass.gltf",
       "skip": null,
       "surface_rule": "glass"
     },
     {
       "name": "Conveyor",
+      "ownership": "generated",
       "source": "KayKit Platformer Pack 1.0/Assets/gltf/blue/conveyor_4x4x1_blue.gltf",
       "skip": null,
       "surface_rule": "conveyor"
     },
     {
       "name": "ScreenSelectorAPlayable",
+      "ownership": "generated",
       "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_blue.gltf",
       "skip": null,
       "surface_rule": "flag"
     },
     {
       "name": "ScreenSelectorASolved",
+      "ownership": "generated",
       "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_green.gltf",
       "skip": null,
       "surface_rule": "flag"
     },
     {
       "name": "ScreenSelectorAUnavailable",
+      "ownership": "generated",
       "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_red.gltf",
       "skip": null,
       "surface_rule": "flag"
     },
     {
       "name": "ScreenSelectorBPlayable",
+      "ownership": "generated",
       "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_blue.gltf",
       "skip": null,
       "surface_rule": "flag"
     },
     {
       "name": "ScreenSelectorBSolved",
+      "ownership": "generated",
       "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_green.gltf",
       "skip": null,
       "surface_rule": "flag"
     },
     {
       "name": "ScreenSelectorBUnavailable",
+      "ownership": "generated",
       "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_red.gltf",
       "skip": null,
       "surface_rule": "flag"
     },
     {
       "name": "Turret",
+      "ownership": "generated",
       "source": "KayKit Adventurers 2.0/Assets/gltf/turret_base.gltf",
       "skip": null,
       "surface_rule": "metal"
     },
     {
+      "name": "Lorekeeper",
+      "ownership": "retained",
+      "source": "KayKit Lorekeeper/characters/Lorekeeper.glb",
+      "skip": "Vendor-authored skinned character with embedded materials."
+    },
+    {
       "name": "Rogue",
+      "ownership": "generated",
       "source": "KayKit Adventurers 2.0/Characters/gltf/Rogue.glb",
       "skip": null,
       "surface_rule": "hero"
     },
     {
-      "name": "Lorekeeper",
-      "source": "KayKit Lorekeeper/characters/Lorekeeper.glb",
-      "skip": "Vendor-authored skinned character with embedded materials."
-    },
-    {
       "name": "Knight",
+      "ownership": "generated",
       "source": "KayKit Adventurers 2.0/Characters/gltf/Knight.glb",
       "skip": null,
       "surface_rule": "hero"
     },
     {
       "name": "Druid",
+      "ownership": "generated",
       "source": "KayKit Adventurers 2.0/Characters/gltf/Druid.glb",
       "skip": null,
       "surface_rule": "hero"
     },
     {
       "name": "Witch",
+      "ownership": "generated",
       "source": "KayKit Witch/characters/Witch.glb",
       "skip": null,
       "surface_rule": "hero"
     },
     {
       "name": "Bard",
+      "ownership": "generated",
       "source": "KayKit Magical Girl/characters/MagicalGirl.glb",
       "skip": null,
       "surface_rule": "hero"
     },
     {
       "name": "Barbarian",
+      "ownership": "generated",
       "source": "KayKit Adventurers 2.0/Characters/gltf/Barbarian.glb",
       "skip": null,
       "surface_rule": "hero"
     },
     {
       "name": "PictureFrameLargeA",
+      "ownership": "generated",
       "source": "KayKit Furniture Bits 1.0/Assets/gltf/pictureframe_large_A.gltf",
       "skip": null,
       "surface_rule": "furniture"
     },
     {
       "name": "Decoration_cactus_small_A",
+      "ownership": "generated",
       "source": "KayKit Furniture Bits 1.0/Assets/gltf/cactus_small_A.gltf",
       "skip": null,
       "surface_rule": "plant"
     },
     {
       "name": "Decoration_swiper_yellow",
+      "ownership": "generated",
       "source": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/swiper_yellow.gltf",
       "skip": null,
       "surface_rule": "paint"
     },
     {
       "name": "Decoration_desk",
+      "ownership": "generated",
       "source": "KayKit Furniture Bits 1.0/Assets/gltf/desk.gltf",
       "skip": null,
       "surface_rule": "furniture"
     },
     {
       "name": "Decoration_gameconsole_handheld",
+      "ownership": "generated",
       "source": "KayKit Furniture Bits 1.0/Assets/gltf/gameconsole_handheld.gltf",
       "skip": null,
       "surface_rule": "handheld"
     },
     {
       "name": "Decoration_chair_C",
+      "ownership": "generated",
       "source": "KayKit Furniture Bits 1.0/Assets/gltf/chair_C.gltf",
       "skip": null,
       "surface_rule": "furniture"
     },
     {
       "name": "Decoration_chair_B",
+      "ownership": "generated",
       "source": "KayKit Furniture Bits 1.0/Assets/gltf/chair_B.gltf",
       "skip": null,
       "surface_rule": "furniture"
     },
     {
       "name": "Decoration_mousepad_A",
+      "ownership": "generated",
       "source": "KayKit Furniture Bits 1.0/Assets/gltf/mousepad_A.gltf",
       "skip": null,
       "surface_rule": "rubber"
     },
     {
       "name": "Decoration_monitor",
+      "ownership": "generated",
       "source": "KayKit Furniture Bits 1.0/Assets/gltf/monitor.gltf",
       "skip": null,
       "surface_rule": "monitor"
     },
     {
       "name": "Decoration_barrier_3x1x1_blue",
+      "ownership": "generated",
       "source": "KayKit Platformer Pack 1.0/Assets/gltf/blue/barrier_3x1x1_blue.gltf",
       "skip": null,
       "surface_rule": "paint"
     },
     {
       "name": "Decoration_rug_rectangle_stripes_B",
+      "ownership": "generated",
       "source": "KayKit Furniture Bits 1.0/Assets/gltf/rug_rectangle_stripes_B.gltf",
       "skip": null,
       "surface_rule": "cloth"
     },
     {
       "name": "Decoration_arrow_crossbow",
+      "ownership": "generated",
       "source": "KayKit Adventurers 2.0/Assets/gltf/arrow_crossbow.gltf",
       "skip": null,
       "surface_rule": "arrow"
     },
     {
       "name": "Decoration_metal",
+      "ownership": "generated",
       "source": "KayKit Block Bits 1.0/Assets/gltf/metal.gltf",
       "skip": null,
       "surface_rule": "metal"
     },
     {
       "name": "Decoration_striped_block_blue",
+      "ownership": "generated",
       "source": "KayKit Block Bits 1.0/Assets/gltf/striped_block_blue.gltf",
       "skip": null,
       "surface_rule": "paint"
     },
     {
       "name": "Decoration_chair_A",
+      "ownership": "generated",
       "source": "KayKit Furniture Bits 1.0/Assets/gltf/chair_A.gltf",
       "skip": null,
       "surface_rule": "furniture"
     },
     {
       "name": "Decoration_chair_desk_A",
+      "ownership": "generated",
       "source": "KayKit Furniture Bits 1.0/Assets/gltf/chair_desk_A.gltf",
       "skip": null,
       "surface_rule": "office-chair"
     },
     {
       "name": "Decoration_keyboard",
+      "ownership": "generated",
       "source": "KayKit Furniture Bits 1.0/Assets/gltf/keyboard.gltf",
       "skip": null,
       "surface_rule": "keyboard"
     },
     {
       "name": "Decoration_Rig_Large_MovementBasic",
+      "ownership": "retained",
       "source": "KayKit Adventurers 2.0/Animations/gltf/Rig_Large/Rig_Large_MovementBasic.glb",
-      "skip": "Reference animation rig: retain neutral preview material.",
-      "surface_rule": "paint"
+      "skip": "Reference animation rig: retain neutral preview material."
     },
     {
       "name": "Decoration_Rig_Large_General",
+      "ownership": "retained",
       "source": "KayKit Adventurers 2.0/Animations/gltf/Rig_Large/Rig_Large_General.glb",
-      "skip": "Reference animation rig: retain neutral preview material.",
-      "surface_rule": "paint"
+      "skip": "Reference animation rig: retain neutral preview material."
     },
     {
       "name": "Decoration_Rig_Medium_General",
+      "ownership": "retained",
       "source": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
-      "skip": "Reference animation rig: retain neutral preview material.",
-      "surface_rule": "paint"
+      "skip": "Reference animation rig: retain neutral preview material."
     },
     {
       "name": "Decoration_star_yellow",
+      "ownership": "generated",
       "source": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/star_yellow.gltf",
       "skip": null,
       "surface_rule": "paint"
     },
     {
       "name": "Decoration_spring_pad_yellow",
+      "ownership": "generated",
       "source": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/spring_pad_yellow.gltf",
       "skip": null,
       "surface_rule": "spring"
     },
     {
       "name": "Decoration_coin_2_gold",
+      "ownership": "generated",
       "source": "KayKit Board Game Bits 1.0/Assets/gltf/coin_2_gold.gltf",
       "skip": null,
       "surface_rule": "brass"
     },
     {
       "name": "Decoration_coin_2_copper",
+      "ownership": "generated",
       "source": "KayKit Board Game Bits 1.0/Assets/gltf/coin_2_copper.gltf",
       "skip": null,
       "surface_rule": "brass"
     },
     {
       "name": "RotatorClockwise",
+      "ownership": "generated",
       "source": "custom/models/rotator_clockwise.glb",
       "skip": null,
       "surface_rule": "mechanism"
     },
     {
       "name": "RotatorCounterClockwise",
+      "ownership": "generated",
       "source": "custom/models/rotator_counter_clockwise.glb",
       "skip": null,
       "surface_rule": "mechanism"
     },
     {
       "name": "LockPlate",
+      "ownership": "generated",
       "source": "custom/models/lock_plate.glb",
       "skip": null,
       "surface_rule": "mechanism"
     },
     {
       "name": "PressurePlate",
+      "ownership": "retained",
       "source": "custom/models/pressure_plate.glb",
       "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
     },
     {
       "name": "PulseButton",
+      "ownership": "retained",
       "source": "custom/models/pulse_button.glb",
       "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
     },
     {
       "name": "LeverOff",
+      "ownership": "retained",
       "source": "custom/models/lever_off.glb",
       "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
     },
     {
       "name": "LeverOn",
+      "ownership": "retained",
       "source": "custom/models/lever_on.glb",
       "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
     },
     {
-      "name": "LeverBase",
-      "source": "custom/models/lever_base.glb",
-      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
-    },
-    {
-      "name": "LeverHandle",
-      "source": "custom/models/lever_handle.glb",
-      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
-    },
-    {
-      "name": "PulseButtonBase",
-      "source": "custom/models/pulse_button_base.glb",
-      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
-    },
-    {
-      "name": "PulseButtonCap",
-      "source": "custom/models/pulse_button_cap.glb",
-      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
-    },
-    {
-      "name": "PressurePlateBase",
-      "source": "custom/models/pressure_plate_base.glb",
-      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
-    },
-    {
-      "name": "PressurePlatePad",
-      "source": "custom/models/pressure_plate_pad.glb",
-      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
-    },
-    {
       "name": "EndPlate",
+      "ownership": "retained",
       "source": "custom/models/end_plate.glb",
       "skip": "Native procedural PBR and emissive materials; regenerate with make_energy_plate_models.py."
     },
     {
       "name": "Lectern",
+      "ownership": "generated",
       "source": "custom/models/lectern.glb",
       "skip": null,
       "surface_rule": "named-materials"
     },
     {
       "name": "Ladder",
+      "ownership": "generated",
       "source": "custom/models/ladder.glb",
       "skip": null,
       "surface_rule": "named-materials"
     },
     {
       "name": "Wardrobe",
+      "ownership": "retained",
       "source": "custom/models/wardrobe.glb",
       "skip": "Native procedural PBR materials; regenerate with make_wardrobe_model.mjs."
     },
     {
       "name": "RotatorGear",
+      "ownership": "generated",
       "source": "custom/models/rotator_gear.glb",
       "skip": null,
       "surface_rule": "mechanism"
     },
     {
       "name": "RotatorIconClockwise",
+      "ownership": "generated",
       "source": "custom/models/rotator_icon_clockwise.glb",
       "skip": null,
       "surface_rule": "mechanism"
     },
     {
       "name": "RotatorIconCounterClockwise",
+      "ownership": "generated",
       "source": "custom/models/rotator_icon_counter_clockwise.glb",
       "skip": null,
       "surface_rule": "mechanism"
     },
     {
       "name": "MinecartRailStraight",
+      "ownership": "generated",
       "source": "custom/models/minecart_rail_straight.glb",
       "skip": null,
       "surface_rule": "named-materials"
     },
     {
       "name": "MinecartRailStop",
+      "ownership": "generated",
       "source": "custom/models/minecart_rail_stop.glb",
       "skip": null,
       "surface_rule": "named-materials"
     },
     {
       "name": "MinecartRailCorner",
+      "ownership": "generated",
       "source": "custom/models/minecart_rail_corner.glb",
       "skip": null,
       "surface_rule": "named-materials"
     },
     {
       "name": "MinecartHandcar",
+      "ownership": "generated",
       "source": "custom/models/minecart_handcar.glb",
       "skip": null,
       "surface_rule": "named-materials"
     },
     {
       "name": "ElevatorPlatform",
+      "ownership": "generated",
       "source": "Kenney Platformer Kit/Models/GLB format/platform.glb",
       "skip": null,
       "surface_rule": "wood"
     },
     {
       "name": "GroundRock01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_island_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRock02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_island_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRock03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_island_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRock04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_island_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRock05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_island_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRock06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_island_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRock07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_island_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRock08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_island_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRock09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_island_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRock10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_island_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "CliffWallIslandA",
+      "ownership": "retained",
+      "source": "custom/models/cliff_walls/cliff_wall_island_a.glb",
+      "skip": "Native Blender cliff geometry and PBR; retain cliff_walls.blend exports and finalize with finalize_cliff_gltf.py."
+    },
+    {
+      "name": "CliffWallIslandB",
+      "ownership": "retained",
+      "source": "custom/models/cliff_walls/cliff_wall_island_b.glb",
+      "skip": "Native Blender cliff geometry and PBR; retain cliff_walls.blend exports and finalize with finalize_cliff_gltf.py."
+    },
+    {
+      "name": "CliffWallEndA",
+      "ownership": "retained",
+      "source": "custom/models/cliff_walls/cliff_wall_end_a.glb",
+      "skip": "Native Blender cliff geometry and PBR; retain cliff_walls.blend exports and finalize with finalize_cliff_gltf.py."
+    },
+    {
+      "name": "CliffWallEndB",
+      "ownership": "retained",
+      "source": "custom/models/cliff_walls/cliff_wall_end_b.glb",
+      "skip": "Native Blender cliff geometry and PBR; retain cliff_walls.blend exports and finalize with finalize_cliff_gltf.py."
+    },
+    {
+      "name": "CliffWallStripA",
+      "ownership": "retained",
+      "source": "custom/models/cliff_walls/cliff_wall_strip_a.glb",
+      "skip": "Native Blender cliff geometry and PBR; retain cliff_walls.blend exports and finalize with finalize_cliff_gltf.py."
+    },
+    {
+      "name": "CliffWallStripB",
+      "ownership": "retained",
+      "source": "custom/models/cliff_walls/cliff_wall_strip_b.glb",
+      "skip": "Native Blender cliff geometry and PBR; retain cliff_walls.blend exports and finalize with finalize_cliff_gltf.py."
+    },
+    {
+      "name": "CliffWallCornerA",
+      "ownership": "retained",
+      "source": "custom/models/cliff_walls/cliff_wall_corner_a.glb",
+      "skip": "Native Blender cliff geometry and PBR; retain cliff_walls.blend exports and finalize with finalize_cliff_gltf.py."
+    },
+    {
+      "name": "CliffWallCornerB",
+      "ownership": "retained",
+      "source": "custom/models/cliff_walls/cliff_wall_corner_b.glb",
+      "skip": "Native Blender cliff geometry and PBR; retain cliff_walls.blend exports and finalize with finalize_cliff_gltf.py."
+    },
+    {
+      "name": "CliffWallEdgeA",
+      "ownership": "retained",
+      "source": "custom/models/cliff_walls/cliff_wall_edge_a.glb",
+      "skip": "Native Blender cliff geometry and PBR; retain cliff_walls.blend exports and finalize with finalize_cliff_gltf.py."
+    },
+    {
+      "name": "CliffWallEdgeB",
+      "ownership": "retained",
+      "source": "custom/models/cliff_walls/cliff_wall_edge_b.glb",
+      "skip": "Native Blender cliff geometry and PBR; retain cliff_walls.blend exports and finalize with finalize_cliff_gltf.py."
+    },
+    {
+      "name": "CliffWallInteriorA",
+      "ownership": "retained",
+      "source": "custom/models/cliff_walls/cliff_wall_interior_a.glb",
+      "skip": "Native Blender cliff geometry and PBR; retain cliff_walls.blend exports and finalize with finalize_cliff_gltf.py."
+    },
+    {
+      "name": "CliffWallInteriorB",
+      "ownership": "retained",
+      "source": "custom/models/cliff_walls/cliff_wall_interior_b.glb",
+      "skip": "Native Blender cliff geometry and PBR; retain cliff_walls.blend exports and finalize with finalize_cliff_gltf.py."
+    },
+    {
+      "name": "GroundRockEnd01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_end_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEnd02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_end_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEnd03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_end_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEnd04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_end_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEnd05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_end_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEnd06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_end_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEnd07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_end_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEnd08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_end_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEnd09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_end_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEnd10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_end_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockStrip01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_strip_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockStrip02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_strip_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockStrip03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_strip_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockStrip04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_strip_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockStrip05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_strip_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockStrip06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_strip_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockStrip07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_strip_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockStrip08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_strip_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockStrip09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_strip_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockStrip10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_strip_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockCorner01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_corner_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockCorner02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_corner_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockCorner03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_corner_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockCorner04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_corner_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockCorner05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_corner_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockCorner06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_corner_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockCorner07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_corner_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockCorner08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_corner_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockCorner09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_corner_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockCorner10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_corner_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEdge01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_edge_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEdge02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_edge_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEdge03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_edge_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEdge04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_edge_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEdge05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_edge_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEdge06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_edge_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEdge07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_edge_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEdge08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_edge_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEdge09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_edge_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockEdge10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_edge_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockInterior01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_interior_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockInterior02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_interior_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockInterior03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_interior_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockInterior04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_interior_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockInterior05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_interior_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockInterior06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_interior_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockInterior07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_interior_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockInterior08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_interior_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockInterior09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_interior_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockInterior10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_interior_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquare01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_island_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquare02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_island_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquare03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_island_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquare04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_island_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquare05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_island_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquare06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_island_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquare07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_island_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquare08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_island_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquare09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_island_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquare10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_island_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEnd01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_end_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEnd02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_end_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEnd03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_end_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEnd04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_end_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEnd05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_end_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEnd06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_end_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEnd07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_end_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEnd08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_end_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEnd09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_end_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEnd10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_end_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareStrip01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_strip_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareStrip02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_strip_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareStrip03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_strip_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareStrip04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_strip_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareStrip05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_strip_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareStrip06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_strip_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareStrip07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_strip_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareStrip08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_strip_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareStrip09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_strip_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareStrip10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_strip_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareCorner01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_corner_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareCorner02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_corner_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareCorner03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_corner_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareCorner04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_corner_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareCorner05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_corner_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareCorner06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_corner_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareCorner07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_corner_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareCorner08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_corner_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareCorner09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_corner_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareCorner10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_corner_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEdge01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_edge_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEdge02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_edge_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEdge03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_edge_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEdge04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_edge_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEdge05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_edge_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEdge06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_edge_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEdge07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_edge_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEdge08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_edge_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEdge09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_edge_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareEdge10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_edge_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareInterior01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_interior_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareInterior02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_interior_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareInterior03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_interior_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareInterior04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_interior_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareInterior05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_interior_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareInterior06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_interior_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareInterior07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_interior_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareInterior08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_interior_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareInterior09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_interior_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockSquareInterior10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_square_interior_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottom01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_island_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottom02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_island_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottom03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_island_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottom04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_island_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottom05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_island_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottom06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_island_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottom07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_island_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottom08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_island_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottom09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_island_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottom10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_island_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEnd01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_end_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEnd02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_end_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEnd03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_end_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEnd04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_end_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEnd05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_end_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEnd06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_end_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEnd07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_end_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEnd08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_end_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEnd09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_end_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEnd10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_end_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomStrip01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_strip_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomStrip02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_strip_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomStrip03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_strip_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomStrip04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_strip_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomStrip05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_strip_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomStrip06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_strip_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomStrip07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_strip_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomStrip08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_strip_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomStrip09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_strip_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomStrip10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_strip_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomCorner01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_corner_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomCorner02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_corner_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomCorner03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_corner_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomCorner04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_corner_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomCorner05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_corner_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomCorner06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_corner_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomCorner07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_corner_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomCorner08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_corner_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomCorner09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_corner_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomCorner10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_corner_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEdge01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_edge_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEdge02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_edge_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEdge03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_edge_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEdge04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_edge_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEdge05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_edge_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEdge06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_edge_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEdge07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_edge_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEdge08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_edge_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEdge09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_edge_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomEdge10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_edge_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomInterior01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_interior_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomInterior02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_interior_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomInterior03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_interior_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomInterior04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_interior_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomInterior05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_interior_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomInterior06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_interior_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomInterior07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_interior_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomInterior08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_interior_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomInterior09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_interior_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomInterior10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_interior_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquare01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_island_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquare02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_island_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquare03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_island_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquare04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_island_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquare05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_island_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquare06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_island_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquare07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_island_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquare08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_island_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquare09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_island_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquare10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_island_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEnd01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_end_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEnd02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_end_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEnd03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_end_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEnd04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_end_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEnd05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_end_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEnd06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_end_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEnd07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_end_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEnd08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_end_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEnd09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_end_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEnd10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_end_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareStrip01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_strip_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareStrip02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_strip_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareStrip03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_strip_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareStrip04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_strip_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareStrip05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_strip_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareStrip06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_strip_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareStrip07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_strip_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareStrip08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_strip_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareStrip09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_strip_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareStrip10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_strip_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareCorner01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_corner_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareCorner02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_corner_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareCorner03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_corner_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareCorner04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_corner_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareCorner05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_corner_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareCorner06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_corner_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareCorner07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_corner_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareCorner08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_corner_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareCorner09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_corner_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareCorner10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_corner_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEdge01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_edge_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEdge02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_edge_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEdge03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_edge_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEdge04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_edge_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEdge05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_edge_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEdge06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_edge_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEdge07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_edge_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEdge08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_edge_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEdge09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_edge_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareEdge10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_edge_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareInterior01",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_interior_01.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareInterior02",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_interior_02.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareInterior03",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_interior_03.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareInterior04",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_interior_04.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareInterior05",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_interior_05.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareInterior06",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_interior_06.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareInterior07",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_interior_07.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareInterior08",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_interior_08.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareInterior09",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_interior_09.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "GroundRockBottomSquareInterior10",
+      "ownership": "retained",
+      "source": "custom/models/ground_modules/ground_bottom_square_interior_10.glb",
+      "skip": "Native Blender ground geometry and PBR; export ground_modules.blend with sculpt_ground_shoulders.py; retain authored meshes."
+    },
+    {
+      "name": "LeverBase",
+      "ownership": "retained",
+      "source": "custom/models/lever_base.glb",
+      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "LeverHandle",
+      "ownership": "retained",
+      "source": "custom/models/lever_handle.glb",
+      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "PulseButtonBase",
+      "ownership": "retained",
+      "source": "custom/models/pulse_button_base.glb",
+      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "PulseButtonCap",
+      "ownership": "retained",
+      "source": "custom/models/pulse_button_cap.glb",
+      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "PressurePlateBase",
+      "ownership": "retained",
+      "source": "custom/models/pressure_plate_base.glb",
+      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "PressurePlatePad",
+      "ownership": "retained",
+      "source": "custom/models/pressure_plate_pad.glb",
+      "skip": "Native procedural activation component; regenerate with make_energy_plate_models.py."
+    },
+    {
+      "name": "TileDecorationPebblesEdge01",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_edge_01.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesEdge02",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_edge_02.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesEdge03",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_edge_03.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesEdge04",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_edge_04.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesCorner01",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_corner_01.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesCorner02",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_corner_02.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesCorner03",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_corner_03.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesCorner04",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_corner_04.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesStrip01",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_strip_01.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesStrip02",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_strip_02.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesStrip03",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_strip_03.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesStrip04",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_strip_04.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesEnd01",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_end_01.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesEnd02",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_end_02.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesEnd03",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_end_03.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationPebblesEnd04",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_pebbles_end_04.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassEdge01",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_edge_01.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassEdge02",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_edge_02.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassEdge03",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_edge_03.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassEdge04",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_edge_04.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassCorner01",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_corner_01.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassCorner02",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_corner_02.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassCorner03",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_corner_03.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassCorner04",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_corner_04.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassStrip01",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_strip_01.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassStrip02",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_strip_02.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassStrip03",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_strip_03.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassStrip04",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_strip_04.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassEnd01",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_end_01.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassEnd02",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_end_02.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassEnd03",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_end_03.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationGrassEnd04",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_grass_end_04.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossEdge01",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_edge_01.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossEdge02",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_edge_02.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossEdge03",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_edge_03.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossEdge04",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_edge_04.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossCorner01",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_corner_01.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossCorner02",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_corner_02.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossCorner03",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_corner_03.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossCorner04",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_corner_04.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossStrip01",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_strip_01.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossStrip02",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_strip_02.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossStrip03",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_strip_03.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossStrip04",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_strip_04.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossEnd01",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_end_01.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossEnd02",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_end_02.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossEnd03",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_end_03.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationMossEnd04",
+      "ownership": "retained",
+      "source": "custom/models/tile_decorations/tile_moss_end_04.glb",
+      "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    }
+  ],
+  "attachments": [
+    {
+      "name": "BarbarianAxe",
+      "ownership": "generated",
+      "model": "Barbarian",
+      "slot": 0,
+      "source": "KayKit Adventurers 2.0/Assets/gltf/axe_1handed.gltf",
+      "surface_rule": "axe"
+    }
+  ],
+  "legacy_models": [
+    {
+      "name": "LegacyGroundRock01",
+      "ownership": "generated",
       "source": "custom/models/ground_rock_01.gltf",
       "skip": null,
       "surface_rule": "stone",
       "terrain_material": "ground_rock_side"
     },
     {
-      "name": "GroundRock02",
+      "name": "LegacyGroundRock02",
+      "ownership": "generated",
       "source": "custom/models/ground_rock_02.gltf",
       "skip": null,
       "surface_rule": "stone",
       "terrain_material": "ground_rock_side"
     },
     {
-      "name": "GroundRock03",
+      "name": "LegacyGroundRock03",
+      "ownership": "generated",
       "source": "custom/models/ground_rock_03.gltf",
       "skip": null,
       "surface_rule": "stone",
       "terrain_material": "ground_rock_side"
     },
     {
-      "name": "GroundRock04",
+      "name": "LegacyGroundRock04",
+      "ownership": "generated",
       "source": "custom/models/ground_rock_04.gltf",
       "skip": null,
       "surface_rule": "stone",
       "terrain_material": "ground_rock_side"
     },
     {
-      "name": "GroundRock05",
+      "name": "LegacyGroundRock05",
+      "ownership": "generated",
       "source": "custom/models/ground_rock_05.gltf",
       "skip": null,
       "surface_rule": "stone",
       "terrain_material": "ground_rock_side"
     },
     {
-      "name": "GroundRock06",
+      "name": "LegacyGroundRock06",
+      "ownership": "generated",
       "source": "custom/models/ground_rock_06.gltf",
       "skip": null,
       "surface_rule": "stone",
       "terrain_material": "ground_rock_side"
     },
     {
-      "name": "GroundRock07",
+      "name": "LegacyGroundRock07",
+      "ownership": "generated",
       "source": "custom/models/ground_rock_07.gltf",
       "skip": null,
       "surface_rule": "stone",
       "terrain_material": "ground_rock_side"
     },
     {
-      "name": "GroundRock08",
+      "name": "LegacyGroundRock08",
+      "ownership": "generated",
       "source": "custom/models/ground_rock_08.gltf",
       "skip": null,
       "surface_rule": "stone",
       "terrain_material": "ground_rock_side"
     },
     {
-      "name": "GroundRock09",
+      "name": "LegacyGroundRock09",
+      "ownership": "generated",
       "source": "custom/models/ground_rock_09.gltf",
       "skip": null,
       "surface_rule": "stone",
       "terrain_material": "ground_rock_side"
     },
     {
-      "name": "GroundRock10",
+      "name": "LegacyGroundRock10",
+      "ownership": "generated",
       "source": "custom/models/ground_rock_10.gltf",
       "skip": null,
       "surface_rule": "stone",
       "terrain_material": "ground_rock_side"
-    }
-  ],
-  "attachments": [
-    {
-      "source": "KayKit Adventurers 2.0/Assets/gltf/axe_1handed.gltf",
-      "name": "BarbarianAxe",
-      "surface_rule": "axe"
     }
   ],
   "profiles": [

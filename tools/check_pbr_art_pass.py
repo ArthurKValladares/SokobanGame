@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Validate PBR assets against source geometry, animation and material intent."""
+"""Audit generated PBR assets and verify ownership of retained model assets."""
 from __future__ import annotations
 
+import argparse
 import json
 from collections import Counter
+from urllib.parse import unquote
 
 import numpy as np
 from PIL import Image
 
 from pbr_gltf import ASSETS, ROOT, Document
+from pbr_art_ownership import generated_output, validate_ownership
 
 
 def require(condition, message):
@@ -139,31 +142,96 @@ def check_terrain(manifest):
     print("PASS: all three terrain map pairs, linear repeat samplers, nonmetallic matte response and level decoration coverage.")
 
 
+def check_retained_dependencies(path):
+    """Check availability, without imposing generated PBR geometry on authored art."""
+    asset = ASSETS / path
+    require(asset.is_file(), f"Retained model is missing: {path}")
+    document = Document(asset)
+    for resource in (*document.data.get("buffers", []), *document.data.get("images", [])):
+        uri = resource.get("uri")
+        if uri and not uri.startswith("data:"):
+            dependency = asset.parent / unquote(uri)
+            require(dependency.is_file(), f"{path}: missing dependency {uri}")
+
+
+def check_material_profiles(generated_specs):
+    if not generated_specs:
+        return
+    inventory = json.loads((ASSETS / "custom/pbr/inventory.json").read_text())
+    generated = {spec["name"]: spec for spec in generated_specs}
+    rows = {}
+    # The inventory may predate a retained-art migration. Only the current
+    # generated names contribute evidence for their intended surface profiles.
+    for row in inventory["models"]:
+        name = row["name"]
+        if name not in generated:
+            continue
+        require(name not in rows, f"{name}: duplicate generated inventory row")
+        spec = generated[name]
+        require(row.get("source") == spec["source"], f"{name}: inventory source is stale")
+        require(row.get("output") == generated_output(spec), f"{name}: inventory output is stale")
+        rows[name] = row
+    require(set(rows) == set(generated),
+            f"Generated inventory is missing models: {', '.join(sorted(set(generated) - set(rows)))}")
+    responses = Counter()
+    for row in rows.values():
+        responses.update(row.get("surface_triangles", {}))
+    require(all(responses[profile] > 0 for profile in ("skin", "cloth", "steel", "brass")),
+            "Missing intended material separation in current generated models")
+    for name in ("Decoration_monitor", "Decoration_gameconsole_handheld"):
+        if name in generated:
+            row = rows[name]
+            require(0 < row["surface_triangles"].get("display", 0) < row["triangles"],
+                    f"{name}: display mask missing")
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--include-legacy", action="store_true",
+                        help="Also audit opt-in legacy PBR variants after generating them.")
+    args = parser.parse_args()
     config = json.loads((ROOT / "tools/pbr_art_pass.json").read_text())
     manifest = json.loads((ASSETS / "manifest.json").read_text())
-    definitions = {m["name"]: m for m in manifest["models"]}
+    definitions = validate_ownership(config, manifest)
     check_terrain(manifest)
-    require(set(definitions) == {s["name"] for s in config["models"]}, "Manifest inventory needs an art review update")
-    count = triangles = 0
+    generated_specs = []
+    retained_paths = set()
+    generated_attachment_slots = {(spec["model"], spec["slot"])
+                                  for spec in config["attachments"]}
+    triangles = retained = 0
     for spec in config["models"]:
-        if spec.get("skip"):
-            require(definitions[spec["name"]]["path"] == spec["source"], "Reference rig changed")
+        definition = definitions[spec["name"]]
+        retained_paths.update(attachment["path"]
+                              for slot, attachment in enumerate(definition.get("attachments", []))
+                              if (spec["name"], slot) not in generated_attachment_slots)
+        if spec["ownership"] == "retained":
+            retained += 1
+            retained_paths.add(definition["path"])
             continue
-        triangles += check_model(spec, definitions[spec["name"]]["path"])
-        count += 1
+        require(definition["path"] == generated_output(spec),
+                f"{spec['name']}: manifest does not publish the generated model")
+        triangles += check_model(spec, definition["path"])
+        generated_specs.append(spec)
+    for path in sorted(retained_paths):
+        check_retained_dependencies(path)
     for spec in config["attachments"]:
-        triangles += check_model(spec, f"custom/pbr/models/{spec['name']}.glb")
-    inventory = json.loads((ASSETS / "custom/pbr/inventory.json").read_text())
-    responses = Counter()
-    for row in inventory["models"]:
-        responses.update(row.get("surface_triangles", {}))
-    require(responses["skin"] > 0 and responses["cloth"] > 0 and responses["steel"] > 0 and responses["brass"] > 0, "Missing intended material separation")
-    for name in ("Decoration_monitor", "Decoration_gameconsole_handheld"):
-        row = next(r for r in inventory["models"] if r["name"] == name)
-        require(0 < row["surface_triangles"].get("display", 0) < row["triangles"], f"{name}: display mask missing")
-    print(f"PASS: {count} model variants, {len(config['attachments'])} attachment; {triangles:,} triangles retain original geometry, UV0, skinning and animation.")
-    print("PASS: detail UVs, tangent frames, material channels, display masks and manifest coverage.")
+        attachment = definitions[spec["model"]]["attachments"][spec["slot"]]
+        require(attachment["path"] == generated_output(spec),
+                f"{spec['name']}: manifest does not publish the generated attachment")
+        triangles += check_model(spec, generated_output(spec))
+    check_material_profiles(generated_specs)
+    print(f"PASS: {len(generated_specs)} generated model variants and {len(config['attachments'])} generated attachments; {triangles:,} triangles retain original geometry, UV0, skinning and animation.")
+    print("PASS: generated detail UVs, tangent frames, material channels and display masks.")
+    print(f"PASS: explicit ownership covers {len(definitions)} registered models; {retained} retained models, undeclared attachments and their dependencies exist (authored geometry not audited here).")
+    if args.include_legacy:
+        legacy_triangles = 0
+        legacy_specs = config.get("legacy_models", [])
+        for spec in legacy_specs:
+            output = generated_output(spec)
+            require((ASSETS / output).is_file(),
+                    f"{spec['name']}: opt-in legacy variant is missing; generate with --include-legacy first")
+            legacy_triangles += check_model(spec, output)
+        print(f"PASS: {len(legacy_specs)} opt-in legacy variants; {legacy_triangles:,} triangles retain source geometry and generated material channels.")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Author game-ready PBR variants from the 64-model manifest inventory.
+"""Author game-ready PBR variants from an explicitly owned manifest inventory.
 
 Requires Pillow and numpy. Run from any directory. Vendor and procedural source
 models remain intact. UV0, skinning, morphs, transforms and animation are retained;
@@ -19,6 +19,7 @@ import numpy as np
 from PIL import Image, ImageFilter
 
 from pbr_gltf import ASSETS, ROOT, Document, palette_sample, write_glb
+from pbr_art_ownership import generated_output, validate_ownership
 
 CONFIG = ROOT / "tools/pbr_art_pass.json"
 OUTPUT = ASSETS / "custom/pbr"
@@ -148,13 +149,37 @@ def surface_for(config, spec, material, mesh_name, uv, color, center, face_norma
     raise ValueError(f"Unreviewed surface rule: {rule}")
 
 
-def author_model(config, spec):
+def source_document(spec):
     source = Document(ASSETS / spec["source"])
     for material in source.data.get("materials", []):
         if any(key in material for key in ("normalTexture", "occlusionTexture", "emissiveTexture")) or "metallicRoughnessTexture" in material.get("pbrMetallicRoughness", {}):
             raise ValueError(f"Source has authored PBR maps; review them before reauthoring UVs: {spec['source']}")
+    return source
+
+
+def preflight(config, manifest, include_legacy=False):
+    """Validate ownership and inputs before creating maps, models or reports."""
+    definitions = validate_ownership(config, manifest)
+    for spec in config["models"]:
+        if spec["ownership"] == "retained":
+            if not (ASSETS / spec["source"]).is_file():
+                raise ValueError(f"Missing retained model: {spec['source']}")
+        else:
+            source_document(spec)
+    for spec in config.get("attachments", []):
+        source_document(spec)
+    if include_legacy:
+        for spec in config.get("legacy_models", []):
+            source_document(spec)
+    if not (OUTPUT / "surface_height_source.png").is_file():
+        raise ValueError("Missing shared height source: custom/pbr/surface_height_source.png")
+    return definitions
+
+
+def author_model(config, spec):
+    source = source_document(spec)
     data = copy.deepcopy(source.data)
-    output = OUTPUT / "models" / (spec["name"] + ".glb")
+    output = ASSETS / generated_output(spec)
     binary = bytearray()
     offsets = []
     for buffer in source.buffers:
@@ -303,36 +328,49 @@ def author_model(config, spec):
             "surface_triangles": dict(sorted(counts.items()))}
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--update-manifest", action="store_true", help="Point registered models to the authored variants.")
-    args = parser.parse_args()
+    parser.add_argument("--check-only", action="store_true", help="Validate ownership and source inputs without writing files.")
+    parser.add_argument("--include-legacy", action="store_true", help="Also author unregistered Legacy models into separate output files.")
+    args = parser.parse_args(argv)
     config = json.loads(CONFIG.read_text())
     manifest_path = ASSETS / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
-    definitions = {m["name"]: m for m in manifest["models"]}
+    manifest_snapshot = manifest_path.read_bytes()
+    manifest = json.loads(manifest_snapshot)
+    definitions = preflight(config, manifest, args.include_legacy)
+    if args.check_only:
+        generated = sum(spec["ownership"] == "generated" for spec in config["models"])
+        legacy = len(config.get("legacy_models", [])) if args.include_legacy else 0
+        print(f"Ownership and inputs validated: {generated} generated models, "
+              f"{len(config['models']) - generated} retained models, "
+              f"{len(config.get('attachments', []))} generated attachments, {legacy} legacy models. No files written.")
+        return
+    (OUTPUT / "models").mkdir(parents=True, exist_ok=True)
     make_maps(config)
-    report = {"format": 1, "models": [], "attachments": []}
+    report = {"format": 2, "models": [], "attachments": [], "legacy_models": []}
     for spec in config["models"]:
-        if spec.get("skip"):
+        if spec["ownership"] == "retained":
             report["models"].append({"name": spec["name"], "source": spec["source"], "retained": spec["skip"]})
             continue
         definition = definitions[spec["name"]]
         row = author_model(config, spec)
         report["models"].append(row)
         if args.update_manifest:
-            definition["path"] = row["output"]
+            definition["path"] = generated_output(spec)
             if definition.get("material", {}).get("mode") == "none":
                 definition.pop("material")
         print(f"{spec['name']}: {row['triangles']} triangles, {row['surface_triangles']}")
-    for spec in config["attachments"]:
+    for spec in config.get("attachments", []):
         row = author_model(config, spec)
         report["attachments"].append(row)
         if args.update_manifest:
-            for definition in manifest["models"]:
-                for attachment in definition.get("attachments", []):
-                    if attachment["path"] in {spec["source"], row["output"]}:
-                        attachment["path"] = row["output"]
+            definitions[spec["model"]]["attachments"][spec["slot"]]["path"] = generated_output(spec)
+    if args.include_legacy:
+        for spec in config.get("legacy_models", []):
+            report["legacy_models"].append(author_model(config, spec))
+    if args.update_manifest and manifest_path.read_bytes() != manifest_snapshot:
+        raise ValueError("Manifest changed during generation; publication cancelled. Review the new ownership plan and rerun.")
     save_text(OUTPUT / "inventory.json", json.dumps(report, indent=2) + "\n")
     if args.update_manifest:
         save_text(manifest_path, json.dumps(manifest, indent=2) + "\n")
