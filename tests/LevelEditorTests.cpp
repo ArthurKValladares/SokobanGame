@@ -3349,6 +3349,128 @@ void testReloadFromDiskKeepsDraftsAndIgnoresOwnSaves()
     CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::Wall));
 }
 
+void testReloadFromDiskAdoptsGroundMetadataOnlyEdits()
+{
+    for (const bool editPaint : { true, false }) {
+        TEST(editPaint ? "reloadFromDiskAdoptsGroundPaintOnlyEdits"
+                       : "reloadFromDiskAdoptsGroundSplatsOnlyEdits");
+        TemporaryProject project;
+        LevelEditor editor = makeEditor(project);
+        const auto path = project.source / "level0/screen0.scr";
+        editor.newDocument(4, 3, false);
+        CHECK(editor.addGroundSplat({ "Meadow", "Grass", "Stone", "Mask", { 0, 1, 0 } }));
+        CHECK(editor.addGroundSplat({ "Sand", "Sand", "Mud", "SandMask", { 1, 0, 0 } }));
+        CHECK(editor.paintGroundSplat({ 0, 0, 0 }));
+        CHECK(editor.saveDocument(path));
+        const auto original = Level::loadDefinitionFromFile(path);
+
+        // Both undo and redo histories must survive an unchanged reload, but
+        // neither may refer back to stale contents after an outside edit.
+        CHECK(editor.setCell({ 3, 2, 1 }, TileType::Wall));
+        CHECK(editor.tryUndoEdit());
+        CHECK(!editor.dirty());
+        CHECK(editor.canUndo());
+        CHECK(editor.canRedo());
+        CHECK(!editor.reloadFromDisk());
+        CHECK(editor.canUndo());
+        CHECK(editor.canRedo());
+
+        auto onDisk = original;
+        if (editPaint) {
+            onDisk.groundPaint = {
+                { .cell = { 1, 0, 0 }, .splat = "Sand" },
+                { .cell = { 2, 0, 0 }, .splat = "Sand" },
+            };
+        } else {
+            onDisk.groundSplats[1].mask = "OutsideMask";
+            onDisk.groundSplats[1].color = { 0, 0, 1 };
+        }
+        {
+            std::ofstream file(path, std::ios::trunc);
+            for (const auto& line : Level::serializeDefinition(onDisk)) {
+                file << line << '\n';
+            }
+        }
+        CHECK(editor.reloadFromDisk());
+        CHECK(editor.groundSplats() == onDisk.groundSplats);
+        CHECK(editor.groundPaint() == onDisk.groundPaint);
+        CHECK(editor.documentDefinition() == onDisk);
+        CHECK(!editor.dirty());
+        CHECK(!editor.canUndo());
+        CHECK(!editor.canRedo());
+        CHECK(!editor.reloadFromDisk());
+
+        // A later unrelated edit and Save must preserve the adopted metadata
+        // in both the source file and the derived runtime copy.
+        CHECK(editor.setCell({ 3, 2, 1 }, TileType::Wall));
+        CHECK(editor.saveLoadedDocument());
+        const auto expected = editor.documentDefinition();
+        CHECK(Level::loadDefinitionFromFile(path) == expected);
+        CHECK(Level::loadDefinitionFromFile(
+            project.runtime / "level0/screen0.scr") == expected);
+        CHECK(editor.groundSplats() == onDisk.groundSplats);
+        CHECK(editor.groundPaint() == onDisk.groundPaint);
+        CHECK(!editor.reloadFromDisk());
+        CHECK(editor.canUndo());
+        CHECK(!editor.canRedo());
+    }
+}
+
+void testGroundPaintOrderingDoesNotReloadOrClearHistory()
+{
+    TEST("groundPaintOrderingDoesNotReloadOrClearHistory");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    const auto path = project.source / "level0/screen0.scr";
+    editor.newDocument(4, 3, false);
+    CHECK(editor.addGroundSplat({ "Meadow", "Grass", "Stone", "Mask", { 0, 1, 0 } }));
+    CHECK(editor.addGroundSplat({ "Sand", "Sand", "Mud", "SandMask", { 1, 0, 0 } }));
+    CHECK(editor.paintGroundSplat({ 2, 0, 0 }));
+    CHECK(editor.paintGroundSplat({ 1, 0, 0 }));
+    CHECK(editor.paintGroundSplat({ 0, 0, 0 }));
+    CHECK(editor.saveDocument(path));
+    const auto before = editor.documentDefinition();
+    CHECK(Level::loadDefinitionFromFile(path).groundPaint != before.groundPaint);
+    CHECK(editor.setCell({ 3, 2, 1 }, TileType::Wall));
+    CHECK(editor.tryUndoEdit());
+    CHECK(!editor.dirty());
+    CHECK(editor.canUndo());
+    CHECK(editor.canRedo());
+    CHECK(!editor.reloadFromDisk());
+    CHECK(editor.documentDefinition() == before);
+    CHECK(editor.canUndo());
+    CHECK(editor.canRedo());
+
+    // Reordering only assignment records is also a semantic no-op, even when
+    // an external tool writes a different order from both editor and serializer.
+    auto rows = Level::serializeDefinition(before);
+    const auto first = std::find_if(rows.begin(), rows.end(), [](const auto& row) {
+        return row.starts_with("@groundpaint ");
+    });
+    CHECK(first != rows.end());
+    if (first == rows.end()) return;
+    const auto second = std::find_if(first + 1, rows.end(), [](const auto& row) {
+        return row.starts_with("@groundpaint ");
+    });
+    CHECK(second != rows.end());
+    if (second == rows.end()) return;
+    std::swap(*first, *second);
+    {
+        std::ofstream file(path, std::ios::trunc);
+        for (const auto& line : rows) {
+            file << line << '\n';
+        }
+    }
+    CHECK(!editor.reloadFromDisk());
+    CHECK(editor.documentDefinition() == before);
+    CHECK(!editor.dirty());
+    CHECK(editor.canUndo());
+    CHECK(editor.canRedo());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers()[1][2][3] == tileTypeToChar(TileType::Wall));
+    CHECK(editor.groundPaint() == before.groundPaint);
+}
+
 void testMinecartGateStacksOnRailsAndSurvivesEditing()
 {
     TEST("minecartGateStacksOnRailsAndSurvivesEditing");
@@ -4178,6 +4300,8 @@ int main()
     testPlayFromCursorMovesTheFirstHeroWithoutEditing();
     testSaveShortcutAndLayerStepping();
     testReloadFromDiskKeepsDraftsAndIgnoresOwnSaves();
+    testReloadFromDiskAdoptsGroundMetadataOnlyEdits();
+    testGroundPaintOrderingDoesNotReloadOrClearHistory();
 
     if (failures == 0) {
         std::cout << "LevelEditorTests: " << checks << " checks passed\n";

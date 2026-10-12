@@ -3833,29 +3833,13 @@ bool LevelEditor::reloadFromDisk()
     try {
         Level::Definition onDisk = Level::loadDefinitionFromFile(path);
         (void)padToRectangle(onDisk);
-        std::ranges::sort(onDisk.tileRotations, {}, [](const Level::TileRotation& rotation) {
-            return std::array { rotation.cell.z, rotation.cell.y, rotation.cell.x };
-        });
-        // The editor's own saves land here too; they change nothing.
+        // Compare all persisted content in its canonical serialized order.
+        // The editor's own saves and reordered records must preserve history,
+        // while changes to any metadata must be adopted before the next save.
         const Level::Definition current =
             linkedDefinition(document_.character);
-        if (onDisk.layers == current.layers &&
-            onDisk.tileRotations == current.tileRotations &&
-            onDisk.waterLayer == current.waterLayer &&
-            onDisk.cameraAngles == current.cameraAngles &&
-            onDisk.character == current.character &&
-            onDisk.decorations == current.decorations &&
-            onDisk.selectors == current.selectors &&
-            onDisk.lecterns == current.lecterns &&
-            onDisk.gates == current.gates &&
-            onDisk.rotators == current.rotators &&
-            onDisk.lockPlates == current.lockPlates &&
-            onDisk.elevators == current.elevators &&
-            onDisk.minecarts == current.minecarts &&
-            onDisk.objectLinks == current.objectLinks &&
-            onDisk.portals == current.portals &&
-            onDisk.plates == current.plates &&
-            onDisk.linkColors == current.linkColors) {
+        if (Level::serializeDefinition(onDisk) ==
+            Level::serializeDefinition(current)) {
             return false;
         }
     } catch (const std::exception&) {
