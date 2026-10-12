@@ -50,10 +50,8 @@
     },
     {
       "name": "Stone",
-      "source": "KayKit Block Bits 1.0/Assets/gltf/stone.gltf",
-      "skip": null,
-      "surface_rule": "stone",
-      "engine_tint": true
+      "source": "custom/models/chunky_boulder.glb",
+      "skip": "artist-authored painted boulder"
     },
     {
       "name": "Glass",

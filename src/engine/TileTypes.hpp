@@ -222,7 +222,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::Druid, 'U', "Druid", { 0.35f, 0.72f, 0.28f, 1.0f } },
     TileTypeDefinition { TileType::Witch, 'H', "Witch", { 0.62f, 0.25f, 0.82f, 1.0f } },
     TileTypeDefinition { TileType::Bard, 'B', "Bard", { 0.94f, 0.44f, 0.82f, 1.0f } },
-    TileTypeDefinition { TileType::Rock, 'R', "Rock", { 0.20f, 0.10f, 0.04f, 1.0f } },
+    TileTypeDefinition { TileType::Rock, 'R', "Rock", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::Ice, 'I', "Ice", { 0.18f, 0.80f, 0.76f, 1.0f } },
     TileTypeDefinition { TileType::Water, 'W', "Water", { 0.08f, 0.34f, 0.78f, 1.0f } },
     TileTypeDefinition { TileType::Ladder, 'L', "Ladder", { 0.43f, 0.22f, 0.08f, 1.0f } },

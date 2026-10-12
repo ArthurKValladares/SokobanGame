@@ -491,7 +491,8 @@
     },
     {
       "name": "Stone",
-      "path": "custom/pbr/models/Stone.glb"
+      "path": "custom/models/chunky_boulder.glb",
+      "preserveAspectRatio": true
     },
     {
       "name": "Glass",
@@ -2555,7 +2556,8 @@
     },
     {
       "tile": "Rock",
-      "model": "Stone"
+      "model": "Stone",
+      "scale": 0.93
     },
     {
       "tile": "Ice",

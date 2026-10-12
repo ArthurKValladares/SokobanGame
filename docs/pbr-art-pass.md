@@ -41,8 +41,13 @@ Skinning attributes, skeletons, transforms, animation curves and triangle geomet
 are preserved. The conveyor's scrolling material uses separate UV0 maps so its
 animation never crosses atlas cells. All ten GroundRock bodies now use the
 dedicated wall maps on UV0, with tangents derived from that UV basis. Their UV1
-atlas remains available for diagnostics. BricksA and Stone omit the vendor color image
-and keep a white base factor so their gameplay tint remains authoritative.
+atlas remains available for diagnostics. BricksA omits the vendor color image
+and keeps a white base factor so its gameplay tint remains authoritative.
+Stone now uses the artist-authored `custom/models/chunky_boulder.glb`, with a
+packed terracotta-and-slate albedo and matte dielectric material. Rock uses a
+white draw tint, preserved aspect ratio, and a 0.93 tile scale to keep the
+painted boulder inside one cell. The PBR generator retains this authored asset;
+its editable source is `custom/source/chunky_boulder.blend`.
 
 Cavity AO is deliberately weak and applies only to wood, leather and stone. It
 is derived surface detail, not a geometry AO bake. Large-scale contact uses the
@@ -100,7 +105,7 @@ and every original source path.
 | Registered model | Surface responses / decision |
 | --- | --- |
 | BricksA | stone |
-| Stone | stone |
+| Stone | Artist-authored painted boulder; retain baked albedo and matte material |
 | Glass | glass |
 | Conveyor | paint, rubber, steel |
 | ScreenSelectorAPlayable | cloth, paint |

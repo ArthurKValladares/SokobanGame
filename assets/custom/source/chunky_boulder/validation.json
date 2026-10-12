@@ -1,0 +1,84 @@
+{
+  "asset": "assets/custom/models/chunky_boulder.glb",
+  "validation": "passed",
+  "glb_bytes": 656216,
+  "scenes": 1,
+  "meshes": 1,
+  "nodes": 1,
+  "identity_node_transform": true,
+  "materials": [
+    {
+      "doubleSided": true,
+      "name": "Boulder_PaintedTerracottaAndSlate.003",
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 0
+        },
+        "metallicFactor": 0,
+        "roughnessFactor": 0.9200000166893005
+      }
+    }
+  ],
+  "triangles": 3798,
+  "exported_vertices": 2677,
+  "gltf_position_min": [
+    -0.5001341104507446,
+    0.0,
+    -0.4493144750595093
+  ],
+  "gltf_position_max": [
+    0.524517834186554,
+    0.9540055990219116,
+    0.4983326196670532
+  ],
+  "gltf_extent": [
+    1.0246520042419434,
+    0.9540055990219116,
+    0.9476470947265625
+  ],
+  "blender_xyz_dimensions": [
+    1.0246520042419434,
+    0.9476470947265625,
+    0.9540055990219116
+  ],
+  "images": [
+    {
+      "mimeType": "image/png",
+      "size": [
+        1024,
+        1024
+      ],
+      "embedded": true
+    }
+  ],
+  "primitive_checks": [
+    {
+      "primitive": 0,
+      "vertices": 2677,
+      "triangles": 3798,
+      "attributes": [
+        "POSITION",
+        "NORMAL",
+        "TEXCOORD_0"
+      ],
+      "normal_length_range": [
+        0.9999998807907104,
+        1.0000001192092896
+      ],
+      "uv_min": [
+        0.011879662051796913,
+        0.01187962293624878
+      ],
+      "uv_max": [
+        0.9819002747535706,
+        0.9881203770637512
+      ],
+      "minimum_double_triangle_area": 1.0797139182727733e-08,
+      "degenerate_triangles": 0
+    }
+  ],
+  "all_accessor_values_finite": true,
+  "all_buffer_views_within_bounds": true,
+  "stage_meshes_exported": false,
+  "cameras_skins_animations_exported": false
+}

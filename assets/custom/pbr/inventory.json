@@ -14,14 +14,8 @@
     },
     {
       "name": "Stone",
-      "source": "KayKit Block Bits 1.0/Assets/gltf/stone.gltf",
-      "output": "custom/pbr/models/Stone.glb",
-      "triangles": 1248,
-      "source_vertices": 1708,
-      "output_vertices": 2139,
-      "surface_triangles": {
-        "stone": 1248
-      }
+      "source": "custom/models/chunky_boulder.glb",
+      "retained": "artist-authored painted boulder"
     },
     {
       "name": "Glass",

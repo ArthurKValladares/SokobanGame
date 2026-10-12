@@ -687,6 +687,9 @@ void Application::applyLaunchRequest()
 #if SOKOBAN_ENABLE_DEBUG_UI
 bool Application::bakeTileThumbnails()
 {
+    // The offline bake requests each icon's assets separately. Startup world
+    // prefetches would also drain here and exhaust the shared upload ring.
+    renderer_.cancelQueuedAssetPrefetches();
     return tools_->bakeTileThumbnails(
         renderer_,
         ui_,
