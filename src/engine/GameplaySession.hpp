@@ -304,7 +304,7 @@ private:
     [[nodiscard]] StartOutcome planAmbientMotion(const Level& level);
     [[nodiscard]] StartOutcome tryStartActivationAction(const Level& level);
     [[nodiscard]] StartOutcome planActivationAction(const Level& level);
-    [[nodiscard]] StartOutcome tryStartUndoMove();
+    [[nodiscard]] StartOutcome tryStartUndoMove(const Level& level);
     [[nodiscard]] StartOutcome tryStartRestart(const Level& level);
     [[nodiscard]] StartOutcome tryStartHeldDirection(
         const Level& level,
@@ -361,6 +361,7 @@ private:
     // promised for it.
     [[nodiscard]] bool beginAction(
         const Action& action,
+        bool pressurePlateActivityChanged,
         std::vector<GameState> legs = {},
         std::vector<plans::TurretShotCue> turretShots = {},
         std::size_t causalGroup = 0,
@@ -373,6 +374,7 @@ private:
     // derived from the cells its entities pass through.
     [[nodiscard]] ActionScheduler::Pending makePending(
         const Action& action,
+        bool pressurePlateActivityChanged,
         const std::vector<GameState>& legs,
         const std::vector<plans::TurretShotCue>& turretShots,
         ActionDeferral deferral,

@@ -1586,8 +1586,151 @@ void testPlanningCachesRefreshAfterWorldAndPolicyChanges()
     CHECK(session.state().players.front().cell == cell(2, 0, 1));
 }
 
+void testPressurePlateChangesSerializeDistantGateMoves()
+{
+    TEST("pressurePlateChangesSerializeDistantGateMoves");
+    for (bool press : { false, true }) {
+        for (bool plateFirst : { false, true }) {
+            const Level level = Level::loadFromDefinition({
+                .layers = {
+                    { "........", "........", "........" },
+                    { press ? "CP      " : " C      ",
+                      "        ", "     CG " },
+                },
+                .gates = { { .cell = cell(6, 2, 1),
+                    .pressurePlates = { cell(1, 0, 1) },
+                    .startOpen = press } },
+                .plates = press ? std::vector<Level::Plate> {}
+                    : std::vector<Level::Plate> {
+                        { cell(1, 0, 1), TileType::PressurePlate } },
+            }, "distant pressure plate and gate concurrency");
+            GameplaySession session;
+            session.reset(level);
+            const GameState initial = session.state();
+            CHECK(rules::isGateOpen(level, initial, level.gates()[0]));
+            if (!plateFirst) {
+                session.cycleActiveHero();
+            }
+            session.queueMove(MoveDirection::Right);
+            CHECK(session.tryStartNextAction(level, {}));
+            session.cycleActiveHero();
+            session.queueMove(MoveDirection::Right);
+            const auto admissions = session.admissionStats();
+            CHECK(!session.tryStartNextAction(level, {}));
+            CHECK(session.inFlight().size() == 1);
+            CHECK(session.admissionStats().refusedByReservation ==
+                admissions.refusedByReservation + 1);
+
+            GameplaySession restored;
+            CHECK(restored.restore(level, session.snapshot()));
+            CHECK(restored.state() == initial);
+            finishAction(session);
+            CHECK(!session.moving());
+            const GameState firstCommitted = session.state();
+            CHECK(restored.restore(level, session.snapshot()));
+            CHECK(restored.state() == firstCommitted);
+
+            if (plateFirst) {
+                CHECK(session.state().players[0].cell ==
+                    cell(press ? 1 : 2, 0, 1));
+                CHECK(!rules::isGateOpen(level, session.state(), level.gates()[0]));
+                // The buffered gate move is replanned after commit. Its
+                // formerly open destination is now solid, so it cannot run.
+                CHECK(!session.tryStartNextAction(level, {}));
+                CHECK(session.state().players[1].cell == cell(5, 2, 1));
+                CHECK(!session.state().players[1].dead);
+            } else {
+                CHECK(session.state().players[1].cell == cell(6, 2, 1));
+                CHECK(!session.state().players[1].dead);
+                CHECK(rules::isGateOpen(level, session.state(), level.gates()[0]));
+                // No new input: the refused plate move survives and is
+                // replanned with the other hero now inside the gate.
+                CHECK(session.tryStartNextAction(level, {}));
+                CHECK(session.inFlight().size() == 1);
+                finishAction(session);
+                CHECK(!rules::isGateOpen(level, session.state(), level.gates()[0]));
+                CHECK(session.state().players[1].dead);
+                CHECK(restored.restore(level, session.snapshot()));
+                CHECK(restored.state() == session.state());
+                const auto valid = restored.snapshot();
+                auto survivingVictim = session.snapshot();
+                survivingVictim.state.players[1].dead = false;
+                survivingVictim.undoStack.back().after.players[1].dead = false;
+                CHECK(!restored.restore(level, survivingVictim));
+                CHECK(restored.snapshot() == valid);
+                auto extraMove = session.snapshot();
+                ++extraMove.playerMoveCount;
+                ++extraMove.undoStack.back().playerMoveCountAfter;
+                CHECK(!restored.restore(level, extraMove));
+                CHECK(restored.snapshot() == valid);
+                restored.queueUndo();
+                CHECK(restored.tryStartNextAction(level, {}));
+                finishAction(restored);
+                CHECK(restored.state() == firstCommitted);
+                CHECK(!restored.state().players[1].dead);
+            }
+
+            restored.queueUndo();
+            CHECK(restored.tryStartNextAction(level, {}));
+            finishAction(restored);
+            CHECK(restored.state() == initial);
+            CHECK(restored.undoCount() == 0);
+            CHECK(restored.playerMoveCount() == 0);
+        }
+    }
+}
+
+void testFastPressurePlateCrossingSerializesAndRetriesDistantMovement()
+{
+    TEST("fastPressurePlateCrossingSerializesAndRetriesDistantMovement");
+    const Level level = Level::loadFromDefinition({
+        .layers = {
+            { "........", "........", "........" },
+            { "CP      ", "        ", "     CG " },
+        },
+        .gates = { { .cell = cell(6, 2, 1),
+            .pressurePlates = { cell(1, 0, 1) }, .startOpen = true } },
+    }, "fast transient pressure plate concurrency");
+    GameplaySession session;
+    session.reset(level);
+    session.setStepRates({ .playerMove = 2 });
+    const GameState initial = session.state();
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeAction().before.players[0].cell == cell(0, 0, 1));
+    CHECK(session.activeAction().after.players[0].cell == cell(2, 0, 1));
+    CHECK(rules::isGateOpen(level, session.activeAction().before, level.gates()[0]));
+    CHECK(rules::isGateOpen(level, session.activeAction().after, level.gates()[0]));
+    session.cycleActiveHero();
+    session.queueMove(MoveDirection::Right);
+    CHECK(!session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 1);
+    finishAction(session);
+    const GameState crossedPlate = session.state();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().players[1].cell == cell(7, 2, 1));
+    CHECK(!session.state().players[1].dead);
+    CHECK(session.playerMoveCount() == 2);
+
+    GameplaySession restored;
+    restored.setStepRates(session.stepRates());
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == session.state());
+    restored.queueUndo();
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state() == crossedPlate);
+    restored.queueUndo();
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state() == initial);
+}
+
 int main()
 {
+    testPressurePlateChangesSerializeDistantGateMoves();
+    testFastPressurePlateCrossingSerializesAndRetriesDistantMovement();
     testLeverStateCommitsRestoresUndoesAndRestarts();
     testActivateButtonsAndMirrorsIsOneUndoableRestorableAction();
     testElevatorRideCommitsUndoesAndRestores();

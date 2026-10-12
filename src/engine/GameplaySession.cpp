@@ -147,6 +147,35 @@ bool matchesForwardTransition(
         return true;
     }
 
+    // Input belongs to one controller group. A gate closing can also change
+    // another hero by killing it; replaying every changed hero as an input
+    // actor would instead let the victim walk out of the gate. Try the actual
+    // controller scopes, still requiring the entire state and count to match.
+    std::vector<EntityId> triedControllers;
+    for (std::size_t i = 0; i < action.before.players.size(); ++i) {
+        if (action.before.players[i].dead) {
+            continue;
+        }
+        const EntityId controller = rules::playerControllerId(action.before, i);
+        if (std::ranges::find(triedControllers, controller) !=
+            triedControllers.end()) {
+            continue;
+        }
+        triedControllers.push_back(controller);
+        rules::StepScope scope;
+        for (std::size_t j = 0; j < action.before.players.size(); ++j) {
+            const auto& player = action.before.players[j];
+            if (!player.dead &&
+                rules::playerControllerId(action.before, j) == controller) {
+                scope.actors.push_back(
+                    resolvedEntityId(EntityKind::Player, player.id, j));
+            }
+        }
+        if (replayMatches(level, action, rates, scope)) {
+            return true;
+        }
+    }
+
     // Then scoped, for entries a concurrent schedule produced.
     //
     // An entry no longer holds a whole-world transition: it holds what one
@@ -710,13 +739,13 @@ GameplaySession::StartOutcome GameplaySession::runCommand(
     // than held: the world cannot move again until the death is taken back.
     if (rules::anyPlayerDead(planningState())) {
         return command.type == CommandType::Undo
-            ? tryStartUndoMove()
+            ? tryStartUndoMove(level)
             : StartOutcome::Impossible;
     }
 
     switch (command.type) {
     case CommandType::Undo:
-        return tryStartUndoMove();
+        return tryStartUndoMove(level);
     case CommandType::Restart:
         return tryStartRestart(level);
     case CommandType::Activate:
@@ -741,9 +770,8 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
         if (controls.verticalMove || controls.horizontalMove) return false;
         waitingForMoveRelease_ = false;
     }
-    // No one-at-a-time guard any more: what may run alongside what is the
-    // reservation table's judgement, made per action against the cells it
-    // actually needs, rather than a blanket refusal to have two.
+    // Concurrent admission is decided per action from entity ownership, cell
+    // paths and world signal transitions.
     //
     // Undo and restart keep their own `moving()` checks. Those are not about
     // cells - they rewrite the whole world, so they cannot share it with an
@@ -780,7 +808,7 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
     const GameState& current = planningState();
     if (rules::anyPlayerDead(current)) {
         return !readingLectern_ && controls.undoHeld &&
-            tryStartUndoMove() == StartOutcome::Started;
+            tryStartUndoMove(level) == StartOutcome::Started;
     }
 
     if (tryStartHeldMove(level, controls) == StartOutcome::Started) {
@@ -980,7 +1008,7 @@ GameplaySession::StartOutcome GameplaySession::tryStartHeldMove(
     const Level& level, const Controls& controls)
 {
     if (controls.undoHeld && !readingLectern_) {
-        return tryStartUndoMove();
+        return tryStartUndoMove(level);
     }
 
     // Only an impossible move falls through to the other axis. A refusal is
@@ -1094,6 +1122,7 @@ GameplaySession::StartOutcome GameplaySession::planPlayerStep(
     std::vector<ActionScheduler::Pending> batch;
     batch.push_back(makePending(
         step->action,
+        step->pressurePlateActivityChanged,
         step->legs,
         step->turretShots,
         ActionDeferral {},
@@ -1114,6 +1143,7 @@ GameplaySession::StartOutcome GameplaySession::planPlayerStep(
         slide->action.playerMoveCountAfter = step->action.playerMoveCountAfter;
         batch.push_back(makePending(
             slide->action,
+            slide->pressurePlateActivityChanged,
             slide->legs,
             slide->turretShots,
             ActionDeferral { .steps = stepLegs, .seconds = stepDuration },
@@ -1202,6 +1232,7 @@ GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& le
         }
         return beginAction(
                    volley->action,
+                   volley->pressurePlateActivityChanged,
                    std::move(volley->legs),
                    std::move(volley->turretShots),
                    0,
@@ -1228,6 +1259,7 @@ GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& le
         const std::size_t group = continuationCausalGroup(slide->action);
         return beginAction(
                    slide->action,
+                   slide->pressurePlateActivityChanged,
                    std::move(slide->legs),
                    std::move(slide->turretShots),
                    group,
@@ -1250,6 +1282,7 @@ GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& le
         }
         return beginAction(
                    ride->action,
+                   ride->pressurePlateActivityChanged,
                    std::move(ride->legs),
                    std::move(ride->turretShots),
                    0,
@@ -1296,7 +1329,7 @@ GameplaySession::StartOutcome GameplaySession::planActivationAction(const Level&
         lastMirrorSwapDestinations_.clear();
         return StartOutcome::Impossible;
     }
-    if (!beginAction(action)) {
+    if (!beginAction(action, activation->pressurePlateActivityChanged)) {
         lastMirrorSwapDestinations_.clear();
         return StartOutcome::Refused;
     }
@@ -1308,7 +1341,7 @@ GameplaySession::StartOutcome GameplaySession::planActivationAction(const Level&
     return StartOutcome::Started;
 }
 
-GameplaySession::StartOutcome GameplaySession::tryStartUndoMove()
+GameplaySession::StartOutcome GameplaySession::tryStartUndoMove(const Level& level)
 {
     if (undoHistory_.empty()) {
         return StartOutcome::Impossible;
@@ -1333,7 +1366,8 @@ GameplaySession::StartOutcome GameplaySession::tryStartUndoMove()
     if (!actionAdmissionAllows(action)) {
         return StartOutcome::Impossible;
     }
-    if (!beginAction(action)) {
+    if (!beginAction(action, rules::pressurePlateActivityChanged(
+            level, action.before, action.after))) {
         return StartOutcome::Refused;
     }
     autoMotionPaused_ = true;
@@ -1361,7 +1395,8 @@ GameplaySession::StartOutcome GameplaySession::tryStartRestart(
     if (!actionAdmissionAllows(*action)) {
         return StartOutcome::Impossible;
     }
-    if (!beginAction(*action)) {
+    if (!beginAction(*action, rules::pressurePlateActivityChanged(
+            level, action->before, action->after))) {
         return StartOutcome::Refused;
     }
     autoMotionPaused_ = false;
@@ -1459,6 +1494,7 @@ void GameplaySession::setActionDuration(
 
 bool GameplaySession::beginAction(
     const Action& action,
+    bool pressurePlateActivityChanged,
     std::vector<GameState> legs,
     std::vector<plans::TurretShotCue> turretShots,
     std::size_t causalGroup,
@@ -1466,7 +1502,8 @@ bool GameplaySession::beginAction(
     std::vector<plans::PlannedAction::PortalCue> portalTransits)
 {
     const ActionReservations claims =
-        makePending(action, legs, turretShots, deferral, portalTransits)
+        makePending(action, pressurePlateActivityChanged,
+            legs, turretShots, deferral, portalTransits)
             .reservations;
     return std::holds_alternative<ActionScheduler::Started>(scheduler_.tryStart(
         action,
@@ -1506,6 +1543,7 @@ bool GameplaySession::actionAdmissionAllows(
 
 ActionScheduler::Pending GameplaySession::makePending(
     const Action& action,
+    bool pressurePlateActivityChanged,
     const std::vector<GameState>& legs,
     const std::vector<plans::TurretShotCue>& turretShots,
     ActionDeferral deferral,
@@ -1513,9 +1551,8 @@ ActionScheduler::Pending GameplaySession::makePending(
 {
     // Two different needs, deliberately not conflated.
     //
-    // Reservations are derived from the cells an action's entities pass
-    // through, so they need at least one leg or the action claims nothing at
-    // all and conflicts with nothing.
+    // Movement claims are derived from the cells an action's entities pass
+    // through, so they need at least one leg or the action claims no cells.
     //
     // The presentation reads legs to animate a chain tile by tile, and a
     // single-step action must carry none - handing it a synthetic leg sends it
@@ -1529,6 +1566,7 @@ ActionScheduler::Pending GameplaySession::makePending(
         .action = action,
         .legs = legs.empty() ? std::vector<GameState> { action.after } : legs,
         .portalTransits = portalTransits,
+        .pressurePlateActivityChanged = pressurePlateActivityChanged,
     };
     return ActionScheduler::Pending {
         .plan = action,

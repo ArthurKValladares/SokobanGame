@@ -43,9 +43,8 @@ void collectTracks(
         // reservation table would reject a player step on the far side of the
         // board from a sliding block.
         //
-        // An entity another action depends on staying put is not this action's
-        // to hold. Nothing needs it to be: an outcome is settled when its plan
-        // is made and is meant not to change, so there is nothing to protect.
+        // Stationary dependencies are not movement claims. Changes to physical
+        // plate signals are protected separately by the world signal claim.
         //
         // One the action creates is involved by definition.
         const bool involved = !existedBefore ||
@@ -254,7 +253,9 @@ namespace plans {
 
 ActionReservations reservationsFor(const PlannedAction& planned)
 {
-    ActionReservations result;
+    ActionReservations result {
+        .pressurePlateActivityChanged = planned.pressurePlateActivityChanged,
+    };
     if (planned.legs.empty()) {
         return result;
     }
@@ -371,7 +372,10 @@ void ReservationTable::admit(
     entries_.push_back({
         .actionId = actionId,
         .causalGroup = causalGroup,
-        .reservations = { .cells = offsetBy(reservations.cells, baseStep) },
+        .reservations = {
+            .cells = offsetBy(reservations.cells, baseStep),
+            .pressurePlateActivityChanged = reservations.pressurePlateActivityChanged,
+        },
     });
 }
 
@@ -416,6 +420,18 @@ std::optional<ReservationTable::Conflict> ReservationTable::conflict(
     for (const Entry& entry : entries_) {
         if (exemptGroup != 0 && entry.causalGroup == exemptGroup) {
             continue;
+        }
+        // Cell paths cannot describe every reader of a plate: gates also
+        // change support and turret sightlines elsewhere on the board. Hold
+        // signal-changing actions exclusive until they commit, in either
+        // admission order, while allowing their own planned consequences.
+        if (reservations.pressurePlateActivityChanged ||
+            entry.reservations.pressurePlateActivityChanged) {
+            return Conflict {
+                .heldBy = entry.actionId,
+                .cell = {},
+                .step = baseStep,
+            };
         }
         // Two entities exchanging cells needs no separate check any more. Each
         // one's claim on its destination begins at its own instant 0, where the

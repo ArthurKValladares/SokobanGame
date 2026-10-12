@@ -59,6 +59,25 @@ void testInitialState()
     CHECK(!rules::hasPendingMotion(level, state));
 }
 
+void testPressurePlateActivityTracksIntermediateFastSteps()
+{
+    TEST("pressurePlateActivityTracksIntermediateFastSteps");
+    const Level level = makeLevel({ { "....." }, { "CP   " } });
+    const GameState before = rules::initialState(level);
+    const auto fast = rules::stepWithEvents(
+        level, before, MoveDirection::Right, { .playerMove = 2 });
+    CHECK(fast.state.players[0].cell == cell(2, 0, 1));
+    CHECK(!rules::isPressurePlateActive(level, before, cell(1, 0, 1)));
+    CHECK(!rules::isPressurePlateActive(level, fast.state, cell(1, 0, 1)));
+    CHECK(fast.pressurePlateActivityChanged);
+
+    // Ordinary movement past the plate does not acquire a signal claim.
+    const auto steady = rules::stepWithEvents(
+        level, fast.state, MoveDirection::Right, {});
+    CHECK(steady.state.players[0].cell == cell(3, 0, 1));
+    CHECK(!steady.pressurePlateActivityChanged);
+}
+
 void testButtonPulseLifetimeAndEligibility()
 {
     TEST("buttonPulseLifetimeAndEligibility");
@@ -3944,6 +3963,7 @@ void testLockPlatesHoldAndReleaseUnits()
 
 int main()
 {
+    testPressurePlateActivityTracksIntermediateFastSteps();
     testLeverActivationUsesStartingBoardAndCanonicalOrder();
     testInvalidReflectionPreservesIndependentLeverAndButtonActivation();
     testLeversLatchAndToggleForEveryPlacement();

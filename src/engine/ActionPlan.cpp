@@ -245,6 +245,7 @@ void addChanged(
     }
 
     plans::PlannedAction planned;
+    planned.pressurePlateActivityChanged = firstStep.pressurePlateActivityChanged;
     for (const auto& transit : firstStep.portalTransits) {
         planned.portalTransits.push_back({ .transit = transit, .legIndex = 0 });
     }
@@ -273,6 +274,9 @@ void addChanged(
                         : anySlideMomentumWithin(current, closure))) {
             rules::StepResult step = rules::scopedStepWithEvents(
                 level, current, std::nullopt, rates, chainScope);
+            planned.pressurePlateActivityChanged =
+                planned.pressurePlateActivityChanged ||
+                step.pressurePlateActivityChanged;
             GameState next = std::move(step.state);
             if (next == current) {
                 // Momentum that cannot be spent - nothing would change by

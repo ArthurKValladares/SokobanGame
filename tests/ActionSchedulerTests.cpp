@@ -76,6 +76,8 @@ void testIndependentActionsRunTogether()
     const auto [second, secondClaims] =
         movePlan(scheduler.state(), 1, cell(6, 9), 0.2f);
 
+    CHECK(!firstClaims.pressurePlateActivityChanged);
+    CHECK(!secondClaims.pressurePlateActivityChanged);
     CHECK(started(scheduler.tryStart(first, firstClaims)));
     // Nowhere near the first, so it starts while that one is still running.
     CHECK(started(scheduler.tryStart(second, secondClaims)));
@@ -147,6 +149,113 @@ void testLeverTransitionsSerializeButSteadySignalsAllowConcurrentMovement()
     CHECK(started(scheduler.tryStart(second, secondClaims)));
     (void)scheduler.advance(0.5f);
     CHECK(scheduler.state().activeLevers == toggle.after.activeLevers);
+}
+
+void testPressurePlateTransitionsSerializeBothAdmissionOrders()
+{
+    TEST("pressurePlateTransitionsSerializeBothAdmissionOrders");
+    for (bool transitionFirst : { false, true }) {
+        ActionScheduler scheduler;
+        scheduler.reset(twoRocks(), 0.1f);
+        auto [first, firstClaims] =
+            movePlan(scheduler.state(), 0, cell(6, 0), 0.2f);
+        auto [second, secondClaims] =
+            movePlan(scheduler.state(), 1, cell(6, 9), 0.2f);
+        firstClaims.pressurePlateActivityChanged = transitionFirst;
+        secondClaims.pressurePlateActivityChanged = !transitionFirst;
+
+        CHECK(started(scheduler.tryStart(first, firstClaims)));
+        const auto refused = scheduler.tryStart(second, secondClaims);
+        CHECK(!started(refused));
+        if (const auto* rejection =
+                std::get_if<ActionScheduler::Rejection>(&refused)) {
+            CHECK(rejection->blockedBy == scheduler.inFlight().front().id);
+        }
+        CHECK(scheduler.inFlight().size() == 1);
+        CHECK(scheduler.admissionStats().refusedByReservation == 1);
+        CHECK(scheduler.admissionStats().refusedByOwnership == 0);
+
+        (void)scheduler.advance(0.2f);
+        CHECK(scheduler.idle());
+        auto [retry, retryClaims] =
+            movePlan(scheduler.state(), 1, cell(6, 9), 0.2f);
+        retryClaims.pressurePlateActivityChanged = !transitionFirst;
+        CHECK(started(scheduler.tryStart(retry, retryClaims)));
+        (void)scheduler.advance(0.2f);
+        CHECK(scheduler.state().movables[0].cell == cell(6, 0));
+        CHECK(scheduler.state().movables[1].cell == cell(6, 9));
+    }
+}
+
+void testPressurePlateTransitionExemptsItsOwnCausalGroup()
+{
+    TEST("pressurePlateTransitionExemptsItsOwnCausalGroup");
+    ActionScheduler scheduler;
+    scheduler.reset(twoRocks(), 0.1f);
+    auto [first, firstClaims] =
+        movePlan(scheduler.state(), 0, cell(6, 0), 0.2f);
+    auto [second, secondClaims] =
+        movePlan(scheduler.state(), 1, cell(6, 9), 0.2f);
+    firstClaims.pressurePlateActivityChanged = true;
+    CHECK(started(scheduler.tryStart(first, firstClaims, {}, 17)));
+    CHECK(started(scheduler.tryStart(second, secondClaims, {}, 17)));
+    CHECK(scheduler.inFlight().size() == 2);
+
+    ActionPlan unrelated {
+        .before = scheduler.state(),
+        .after = scheduler.state(),
+        .durationSeconds = 0.1f,
+    };
+    CHECK(!started(scheduler.tryStart(unrelated, {}, {}, 18)));
+    (void)scheduler.advance(0.2f);
+    CHECK(scheduler.idle());
+    CHECK(started(scheduler.tryStart(unrelated, {}, {}, 18)));
+
+    scheduler.reset(twoRocks(), 0.1f);
+    CHECK(!scheduler.tryStartAll({
+        { .plan = first, .reservations = firstClaims },
+        { .plan = second, .reservations = secondClaims },
+    }, 17));
+    CHECK(scheduler.inFlight().size() == 2);
+    (void)scheduler.advance(0.2f);
+    CHECK(scheduler.state().movables[0].cell == cell(6, 0));
+    CHECK(scheduler.state().movables[1].cell == cell(6, 9));
+}
+
+void testPressurePlateTransitionRejectsAnEntireBatch()
+{
+    TEST("pressurePlateTransitionRejectsAnEntireBatch");
+    ActionScheduler scheduler;
+    scheduler.reset(twoRocks(), 0.1f);
+    const auto [running, runningClaims] =
+        movePlan(scheduler.state(), 0, cell(6, 0), 0.2f);
+    const auto [independent, independentClaims] =
+        movePlan(scheduler.state(), 1, cell(6, 9), 0.2f);
+    CHECK(started(scheduler.tryStart(running, runningClaims)));
+    ActionPlan transition {
+        .before = scheduler.state(),
+        .after = scheduler.state(),
+        .durationSeconds = 0.2f,
+    };
+    ActionReservations transitionClaims;
+    transitionClaims.pressurePlateActivityChanged = true;
+    CHECK(scheduler.tryStartAll({
+        { .plan = independent, .reservations = independentClaims },
+        { .plan = transition, .reservations = transitionClaims },
+    }, 19).has_value());
+    CHECK(scheduler.inFlight().size() == 1);
+    CHECK(scheduler.admissionStats().admitted == 1);
+
+    // The acceptable prefix was not admitted and left no claims or IDs behind.
+    const auto admitted = scheduler.tryStart(independent, independentClaims);
+    CHECK(started(admitted));
+    if (const auto* action = std::get_if<ActionScheduler::Started>(&admitted)) {
+        CHECK(action->id == 2);
+    }
+    CHECK(scheduler.inFlight().size() == 2);
+    (void)scheduler.advance(0.2f);
+    CHECK(scheduler.state().movables[0].cell == cell(6, 0));
+    CHECK(scheduler.state().movables[1].cell == cell(6, 9));
 }
 
 void testConflictingActionIsRefused()
@@ -359,6 +468,9 @@ void testZeroDurationActionCompletesImmediately()
 
 int main()
 {
+    testPressurePlateTransitionsSerializeBothAdmissionOrders();
+    testPressurePlateTransitionExemptsItsOwnCausalGroup();
+    testPressurePlateTransitionRejectsAnEntireBatch();
     testLeverTransitionsSerializeButSteadySignalsAllowConcurrentMovement();
     testButtonPulseLifetimeCannotOverlapOtherWorldSteps();
     testIndependentActionsRunTogether();

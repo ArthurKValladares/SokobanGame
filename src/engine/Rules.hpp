@@ -204,6 +204,9 @@ struct StepResult {
     GameState state;
     std::vector<TurretShot> turretShots;
     std::vector<PortalTransit> portalTransits;
+    // Includes activity that changes and returns to its starting value within
+    // one world step. Transient planning metadata, never part of GameState.
+    bool pressurePlateActivityChanged = false;
 
     bool operator==(const StepResult&) const = default;
 };
@@ -312,6 +315,13 @@ void setMirrorQuarterTurns(
     const Level& level,
     const GameState& state,
     GridPosition3 plate);
+
+// Physical pressure plates only: buttons and levers have explicit signal
+// state. Useful when an action has endpoints but no intermediate rule events.
+[[nodiscard]] bool pressurePlateActivityChanged(
+    const Level& level,
+    const GameState& before,
+    const GameState& after);
 [[nodiscard]] std::vector<GridPosition3> activatableButtons(
     const Level& level, const GameState& state);
 [[nodiscard]] std::vector<GridPosition3> activatableLevers(
@@ -382,6 +392,7 @@ struct MirrorEntityPreview {
 struct MirrorActivationPreview {
     GameState after;
     std::vector<MirrorEntityPreview> entities;
+    bool pressurePlateActivityChanged = false;
 
     bool operator==(const MirrorActivationPreview&) const = default;
 };

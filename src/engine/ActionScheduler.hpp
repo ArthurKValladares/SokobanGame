@@ -125,14 +125,9 @@ public:
 
     // Why admissions were refused, so it can be measured rather than assumed.
     //
-    // The two counters answer a question the design has carried as an open risk
-    // from the start: whether the space-time reservation machinery earns its
-    // complexity. Entity ownership is the simple rule - an entity another
-    // action is already moving is off limits. Reservations are the elaborate
-    // one, and they exist only to catch actions whose entities are disjoint but
-    // whose paths cross. If `refusedByReservation` stays near zero in real
-    // play while ownership carries every refusal, the elaborate half is dead
-    // weight and can go.
+    // Entity ownership protects moving entities. Reservations protect crossing
+    // paths and world signal transitions. These counters distinguish those
+    // admission constraints.
     struct AdmissionStats {
         std::size_t admitted = 0;
         std::size_t refusedByOwnership = 0;

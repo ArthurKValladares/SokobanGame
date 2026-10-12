@@ -290,7 +290,7 @@ void testCompletingActionPreservesConcurrentPresentation()
     TEST("completingActionPreservesConcurrentPresentation");
     const Level level = makeLevel({
         { "..........", ".........." },
-        { "CI  P   # ", "          " },
+        { "CI      # ", "          " },
     });
 
     const auto makeSession = [&] {
@@ -322,8 +322,6 @@ void testCompletingActionPreservesConcurrentPresentation()
     CHECK(session.inFlight().size() == 2);
     CHECK(std::abs(
         presentation.movables().front().renderPosition.x - 3.5f) < 0.0001f);
-    CHECK(presentation.controlActivation({ 4, 0, 1 }).value_or(0.0f) > 0.0f);
-    CHECK(presentation.controlActivation({ 4, 0, 1 }).value_or(1.0f) < 1.0f);
 
     // The player completes exactly at the frame boundary while the block's
     // longer slide survives. Its visual must remain sampled at that boundary.
@@ -334,7 +332,6 @@ void testCompletingActionPreservesConcurrentPresentation()
     CHECK(std::abs(
         presentation.movables().front().renderPosition.x - 4.0f) < 0.0001f);
     CHECK(presentation.movables().front().moving);
-    CHECK(std::abs(presentation.controlActivation({ 4, 0, 1 }).value_or(-1.0f) - 1.0f) < 0.0001f);
 
     update({}, 0.015625f);
     CHECK(std::abs(
@@ -363,6 +360,65 @@ void testCompletingActionPreservesConcurrentPresentation()
     CHECK(std::abs(
         presentation.movables().front().renderPosition.x - 4.125f) < 0.0001f);
     CHECK(presentation.movables().front().moving);
+}
+
+void testPressurePlateSlidePreservesQueuedMovementAndPresentation()
+{
+    TEST("pressurePlateSlidePreservesQueuedMovementAndPresentation");
+    const Level level = makeLevel({
+        { "..........", ".........." },
+        { "CI  P   # ", "          " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.125f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto update = [&](GameplayLoop::InputFrame input, float dt) {
+        static_cast<void>(GameplayLoop::update(
+            level, session, presentation, input, dt, false));
+    };
+
+    update({ .right = { .pressed = true, .down = true } }, 0.0625f);
+    update({}, 0.0625f);
+    update({}, 0.0625f);
+    update({}, 0.0625f);
+    update({ .down = { .pressed = true, .down = true } }, 0.0625f);
+
+    // The slide crosses a plate, so its signal changes hold the queued player
+    // step off until the whole slide commits. Its presentation still advances.
+    CHECK(session.inFlight().size() == 1);
+    CHECK(session.state().players.front().cell == (GridPosition3 { 1, 0, 1 }));
+    CHECK(std::abs(
+        presentation.movables().front().renderPosition.x - 3.5f) < 0.0001f);
+    CHECK(presentation.controlActivation({ 4, 0, 1 }).value_or(0.0f) > 0.0f);
+    CHECK(presentation.controlActivation({ 4, 0, 1 }).value_or(1.0f) < 1.0f);
+
+    update({}, 0.0625f);
+    CHECK(session.inFlight().size() == 1);
+    CHECK(session.state().players.front().cell == (GridPosition3 { 1, 0, 1 }));
+    CHECK(std::abs(
+        presentation.movables().front().renderPosition.x - 4.0f) < 0.0001f);
+    CHECK(presentation.movables().front().moving);
+    CHECK(std::abs(
+        presentation.controlActivation({ 4, 0, 1 }).value_or(-1.0f) - 1.0f) <
+        0.0001f);
+
+    // No further input: the original queued step must survive refusal and
+    // start after the slide, including when completion lands on a frame edge.
+    for (int frame = 0; frame < 30; ++frame) {
+        update({}, 0.0625f);
+    }
+    CHECK(!session.moving());
+    CHECK(session.state().players.front().cell == (GridPosition3 { 1, 1, 1 }));
+    CHECK(session.state().movables.front().cell == (GridPosition3 { 7, 0, 1 }));
+    CHECK(session.playerMoveCount() == 2);
+    CHECK(!rules::isPressurePlateActive(level, session.state(), { 4, 0, 1 }));
+    CHECK(presentation.movables().front().renderPosition.x == 7.0f);
+    CHECK(!presentation.movables().front().moving);
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == session.state());
 }
 
 void testMoveAdvancesSessionAndPresentation()
@@ -1460,6 +1516,7 @@ int main()
     testChainedSlideIsDrawnTileByTile();
     testHeldMoveFollowsDirectlyBehindSlide();
     testCompletingActionPreservesConcurrentPresentation();
+    testPressurePlateSlidePreservesQueuedMovementAndPresentation();
     testMoveAdvancesSessionAndPresentation();
     testMirrorInputCommitsAnInstantAction();
     testInstantMirrorActivationAnimatesPressureEdges();

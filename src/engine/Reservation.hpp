@@ -23,9 +23,13 @@ struct Reservation {
     bool operator==(const Reservation&) const = default;
 };
 
-// Every cell an action claims, and the span for which it claims it.
+// Movement claims plus any exclusive claim on physical plate signals.
 struct ActionReservations {
     std::vector<Reservation> cells;
+    // A physical plate can change collision, support and reactions anywhere
+    // on the board. Such actions hold the world signal state until commit;
+    // unrelated actions may overlap only while those signals stay unchanged.
+    bool pressurePlateActivityChanged = false;
 
     bool operator==(const ActionReservations&) const = default;
 };
@@ -41,12 +45,13 @@ namespace plans {
 // The claims of every action currently in flight.
 //
 // Two actions conflict when their claims touch the same cell over an
-// overlapping span.
+// overlapping span, or either changes physical pressure-plate activity.
 class ReservationTable {
 public:
     struct Conflict {
         // The action already in flight that the newcomer would disturb.
         std::size_t heldBy = 0;
+        // World signal conflicts have no single offending cell and use {}.
         GridPosition3 cell {};
         int step = 0;
 

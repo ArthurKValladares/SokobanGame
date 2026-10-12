@@ -12,6 +12,22 @@
 namespace sokoban::rules {
 namespace {
 
+// Compare against the immutable input rather than copying every intermediate
+// board. Once a physical plate differs, later reactions cannot undo the fact
+// that this action changed a signal along the way.
+struct PressurePlateActivityTracker {
+    const Level& level;
+    const GameState& before;
+    bool* changed = nullptr;
+
+    void observe(const GameState& state) const
+    {
+        if (changed != nullptr && !*changed) {
+            *changed = pressurePlateActivityChanged(level, before, state);
+        }
+    }
+};
+
 [[nodiscard]] MoveDirection oppositeDirection(MoveDirection direction)
 {
     switch (direction) {
@@ -787,6 +803,22 @@ bool isPressurePlateActive(
         enemyAt(state, plate) != nullptr;
 }
 
+bool pressurePlateActivityChanged(
+    const Level& level,
+    const GameState& before,
+    const GameState& after)
+{
+    for (const GridPosition3 plate : level.pressurePlates()) {
+        if (level.plateAt(plate).value_or(TileType::Air) ==
+                TileType::PressurePlate &&
+            isPressurePlateActive(level, before, plate) !=
+                isPressurePlateActive(level, after, plate)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::vector<GridPosition3> activatableButtons(
     const Level& level, const GameState& state)
 {
@@ -1182,8 +1214,10 @@ void crushUnit(GameState& state, LiveUnitAt unit)
 GateChanges applyGateChanges(
     const Level& level,
     GameState& state,
-    std::vector<char>& openBefore)
+    std::vector<char>& openBefore,
+    const PressurePlateActivityTracker& plateActivity)
 {
+    plateActivity.observe(state);
     GateChanges changes;
     const std::vector<Level::Gate>& gates = level.gates();
     openBefore.resize(gates.size(), 0);
@@ -1196,6 +1230,7 @@ GateChanges applyGateChanges(
                 if (const std::optional<LiveUnitAt> occupant =
                         liveUnitAt(state, gates[g].cell)) {
                     crushUnit(state, *occupant);
+                    plateActivity.observe(state);
                     changes.crushed.add(*occupant);
                     changed = true;
                 }
@@ -1210,6 +1245,7 @@ GateChanges applyGateChanges(
                  unit;
                  ++cell.z, unit = liveUnitAt(state, cell)) {
                 if (dropUnit(level, state, *unit)) {
+                    plateActivity.observe(state);
                     changes.dropped.add(*unit);
                     changed = true;
                 }
@@ -1231,8 +1267,10 @@ GateChanges applyGateChanges(
 ElevatorRiders applyElevatorActivations(
     const Level& level,
     GameState& state,
-    const std::vector<char>& engagedBefore)
+    const std::vector<char>& engagedBefore,
+    const PressurePlateActivityTracker& plateActivity)
 {
+    plateActivity.observe(state);
     ElevatorRiders riders;
     if (state.elevators.size() != level.elevators().size()) {
         return riders;
@@ -1308,6 +1346,7 @@ ElevatorRiders applyElevatorActivations(
                 break;
             }
         }
+        plateActivity.observe(state);
     }
     return riders;
 }
@@ -1357,8 +1396,10 @@ std::vector<GridPosition3> minecartSweepCells(
 MinecartRiders applyMinecartActivations(
     const Level& level,
     GameState& state,
-    const std::vector<char>& engagedBefore)
+    const std::vector<char>& engagedBefore,
+    const PressurePlateActivityTracker& plateActivity)
 {
+    plateActivity.observe(state);
     MinecartRiders riders;
     if (state.minecarts.size() != level.minecarts().size() ||
         level.minecartRoutes().size() != level.minecarts().size()) {
@@ -1471,6 +1512,7 @@ MinecartRiders applyMinecartActivations(
                 break;
             }
         }
+        plateActivity.observe(state);
     }
     return riders;
 }
@@ -2010,6 +2052,10 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
     bool toggled = false)
 {
     GameState after = signals;
+    bool pressurePlateActivityChanged = false;
+    const PressurePlateActivityTracker plateActivity {
+        level, state, &pressurePlateActivityChanged,
+    };
     std::vector<MirrorEntityPreview> entities;
     bool anyReflected = false;
     const std::size_t originalPlayerCount = state.players.size();
@@ -2185,7 +2231,7 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
     // Reflected units can open or close gates, dropping whatever rests on
     // them or crushing whatever stands in them.
     std::vector<char> gatesOpen = gateOpenness(level, state);
-    (void)applyGateChanges(level, after, gatesOpen);
+    (void)applyGateChanges(level, after, gatesOpen, plateActivity);
     GameState engagementBefore = state;
     if (pulse) {
         // Each key press is a new edge, including consecutive presses while
@@ -2197,13 +2243,13 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
     (void)applyRotatorActivations(
         level, after, rotatorEngagement(level, engagementBefore));
     (void)applyElevatorActivations(
-        level, after, elevatorEngagement(level, engagementBefore));
+        level, after, elevatorEngagement(level, engagementBefore), plateActivity);
     (void)applyMinecartActivations(
-        level, after, minecartEngagement(level, engagementBefore));
-    (void)applyGateChanges(level, after, gatesOpen);
+        level, after, minecartEngagement(level, engagementBefore), plateActivity);
+    (void)applyGateChanges(level, after, gatesOpen, plateActivity);
     resolveEnemyAttacks(after);
     // An attack can empty a plate, opening or closing its gates.
-    (void)applyGateChanges(level, after, gatesOpen);
+    (void)applyGateChanges(level, after, gatesOpen, plateActivity);
     for (MirrorEntityPreview& entity : entities) {
         if (entity.player) {
             entity.destination = playerCell(after, entity.resultPlayerIndex);
@@ -2219,6 +2265,7 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
     return MirrorActivationPreview {
         .after = std::move(after),
         .entities = std::move(entities),
+        .pressurePlateActivityChanged = pressurePlateActivityChanged,
     };
 }
 
@@ -2318,14 +2365,17 @@ class MicroStepResolver {
 public:
     MicroStepResolver(
         const Level& level,
+        const GameState& before,
         GameState& after,
         std::optional<MoveDirection> playerInput,
         const StepRates& rates,
         const StepScope& scope,
         std::vector<TurretShot>* turretShots = nullptr,
-        std::vector<PortalTransit>* portalTransits = nullptr)
+        std::vector<PortalTransit>* portalTransits = nullptr,
+        bool* pressurePlateActivityChanged = nullptr)
         : level_(level)
         , after_(after)
+        , plateActivity_ { level, before, pressurePlateActivityChanged }
         , playerInput_(playerInput)
         , rates_(rates)
         , movableCount_(after.movables.size())
@@ -3691,10 +3741,13 @@ private:
     [[nodiscard]] bool resolveGateChanges()
     {
         if (gatesOpen_.empty()) {
+            // Locks and moving platforms also read physical plate activity,
+            // as can a later action on a board without gates.
+            plateActivity_.observe(after_);
             return false;
         }
         const GateChanges changes =
-            applyGateChanges(level_, after_, gatesOpen_);
+            applyGateChanges(level_, after_, gatesOpen_, plateActivity_);
         const auto joinClosure = [this](std::size_t entity, bool finished) {
             Status& status = status_[entity];
             if (!status.active || finished) {
@@ -3773,7 +3826,7 @@ private:
     void resolveElevators()
     {
         const ElevatorRiders carried = applyElevatorActivations(
-            level_, after_, elevatorsEngagedAtStart_);
+            level_, after_, elevatorsEngagedAtStart_, plateActivity_);
         if (carried.empty()) {
             return;
         }
@@ -3802,7 +3855,7 @@ private:
     void resolveMinecarts()
     {
         const MinecartRiders carried = applyMinecartActivations(
-            level_, after_, minecartsEngagedAtStart_);
+            level_, after_, minecartsEngagedAtStart_, plateActivity_);
         if (carried.empty()) {
             return;
         }
@@ -4060,6 +4113,7 @@ private:
             movable.dead = true;
             movable.sliding.reset();
         }
+        plateActivity_.observe(after_);
         return anyKilled;
     }
 
@@ -4135,6 +4189,7 @@ private:
             player.sliding.reset();
             anyKilled = true;
         }
+        plateActivity_.observe(after_);
         return anyKilled;
     }
 
@@ -4317,6 +4372,7 @@ private:
 
     const Level& level_;
     GameState& after_;
+    const PressurePlateActivityTracker plateActivity_;
     const std::optional<MoveDirection> playerInput_;
     const StepRates& rates_;
     const std::size_t movableCount_;
@@ -4380,7 +4436,7 @@ GameState scopedStep(
     const StepScope& scope)
 {
     GameState after = state;
-    MicroStepResolver resolver(level, after, playerInput, rates, scope);
+    MicroStepResolver resolver(level, state, after, playerInput, rates, scope);
     resolver.run();
     return after;
 }
@@ -4395,12 +4451,14 @@ StepResult scopedStepWithEvents(
     StepResult result { .state = state };
     MicroStepResolver resolver(
         level,
+        state,
         result.state,
         playerInput,
         rates,
         scope,
         &result.turretShots,
-        &result.portalTransits);
+        &result.portalTransits,
+        &result.pressurePlateActivityChanged);
     resolver.run();
     return result;
 }
