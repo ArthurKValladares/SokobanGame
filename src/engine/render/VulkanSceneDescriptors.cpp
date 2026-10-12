@@ -693,6 +693,12 @@ void VulkanSceneDescriptors::updateFrame(
         config::waterImpactRippleLifetimeSeconds,
         0.0f, 0.0f,
     };
+    uniform.stylizedSurface = {
+        lighting.stylization.diffuseSoftness,
+        lighting.stylization.normalDetail,
+        lighting.stylization.roughnessFloor,
+        0.0f,
+    };
     std::memcpy(
         frameBuffers_[internalSetIndex].mapped(),
         &uniform,

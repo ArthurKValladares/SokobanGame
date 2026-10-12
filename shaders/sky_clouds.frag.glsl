@@ -89,11 +89,11 @@ vec3 compositeCloudLayer(vec3 below, vec3 camera, vec3 ray,
     vec3 normal = normalize(vec3(-field.yz * 1.35, 1.0));
     vec3 sun = normalize(vec3(-0.55, -0.45, 0.70));
     float light = clamp(dot(normal, sun), 0.0, 1.0);
-    vec3 shade = vec3(0.38, 0.48, 0.62);
-    vec3 lit = vec3(0.86, 0.89, 0.91);
+    vec3 shade = vec3(0.32, 0.32, 0.57);
+    vec3 lit = vec3(0.92, 0.76, 0.67);
     vec3 color = mix(shade, lit, 0.32 + light * 0.68);
-    // Thin wisps blend into blue air; the distant sea loses contrast.
-    color = mix(color, vec3(0.57, 0.66, 0.77), haze);
+    // Thin wisps blend into lavender air; the distant sea loses contrast.
+    color = mix(color, vec3(0.52, 0.48, 0.68), haze);
     return mix(below, color, alpha);
 }
 
@@ -105,7 +105,7 @@ void main()
     vec3 camera = frame.cameraPositionAndNearPlane.xyz;
     vec3 ray = normalize(farPoint.xyz / farPoint.w - camera);
     float horizon = pow(1.0 - abs(ray.z), 3.0);
-    vec3 sky = mix(vec3(0.27, 0.42, 0.61), vec3(0.63, 0.72, 0.82), horizon);
+    vec3 sky = mix(vec3(0.25, 0.29, 0.53), vec3(0.68, 0.52, 0.61), horizon);
     // A hazy, almost continuous distant sea, a broken middle bank, and sparse
     // nearer wisps. Fixed world heights give genuine parallax during orbit,
     // top-down view and overworld zoom, without attaching clouds to the camera.

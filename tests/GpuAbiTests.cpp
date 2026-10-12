@@ -422,6 +422,7 @@ std::vector<ExpectedBlock> expectedBlocks()
                 offsetof(SceneFrameUniform, pointLightMeta),
                 offsetof(SceneFrameUniform, waterRipples),
                 offsetof(SceneFrameUniform, waterRippleMeta),
+                offsetof(SceneFrameUniform, stylizedSurface),
             },
             // A uniform block: its members sit directly in the block.
             .elementStride = std::nullopt,
@@ -438,6 +439,7 @@ std::vector<ExpectedBlock> expectedBlocks()
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, pointLightMeta),
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, waterRipples),
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, waterRippleMeta),
+                SOKOBAN_MEMBER_KIND(SceneFrameUniform, stylizedSurface),
             },
         },
         ExpectedBlock {

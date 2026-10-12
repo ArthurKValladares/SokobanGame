@@ -515,6 +515,19 @@ if (ImGui::CollapsingHeader("Lighting")) {
     ImGui::TextDisabled(
         "Lower model shadow receive reduces harsh self-shadowing.");
 
+    ImGui::SliderFloat(
+        "Diffuse Softness", &lighting.stylization.diffuseSoftness,
+        0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("Softens the transition from light to shade.");
+    ImGui::SliderFloat(
+        "Normal Detail", &lighting.stylization.normalDetail,
+        0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("Lower values smooth texture surface detail.");
+    ImGui::SliderFloat(
+        "Roughness Floor", &lighting.stylization.roughnessFloor,
+        0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("Raises minimum roughness for broader highlights.");
+
     ImGui::Checkbox(
         "Ambient Occlusion",
         &lighting.ambientOcclusionEnabled);

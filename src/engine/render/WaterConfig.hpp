@@ -10,21 +10,21 @@
 
 namespace sokoban::config {
 
-inline constexpr Vec4 waterSurfaceColor { 0.03f, 0.34f, 0.68f, 0.72f };
+inline constexpr Vec4 waterSurfaceColor { 0.12f, 0.18f, 0.46f, 0.72f };
 
 inline constexpr float waterToneSpatialFrequency = 0.38f;
-inline constexpr float waterDarkToneMultiplier = 0.78f;
-inline constexpr float waterLightToneMultiplier = 1.08f;
-inline constexpr float waterToneTransitionWidth = 0.035f;
+inline constexpr float waterDarkToneMultiplier = 0.90f;
+inline constexpr float waterLightToneMultiplier = 1.04f;
+inline constexpr float waterToneTransitionWidth = 0.05f;
 inline constexpr float waterToneSpeed = 0.08f;
 
 inline constexpr Vec3 waterSecondaryRippleColor {
-    0.34f,
-    0.64f,
-    0.80f,
+    0.42f,
+    0.48f,
+    0.78f,
 };
-inline constexpr float waterPrimaryRippleOpacity = 0.5f;
-inline constexpr float waterSecondaryRippleOpacity = 0.10f;
+inline constexpr float waterPrimaryRippleOpacity = 0.22f;
+inline constexpr float waterSecondaryRippleOpacity = 0.08f;
 inline constexpr float waterRippleSpatialFrequency = 1.5f;
 inline constexpr float waterRippleSpeed = 1.15f;
 inline constexpr float waterRefractionStrength = 0.0045f;
@@ -33,9 +33,9 @@ inline constexpr float waterReflectionMaxDistance = 12.0f;
 inline constexpr float waterRippleCrestHalfWidth = 0.038f;
 inline constexpr float waterRippleHaloWidth = 0.085f;
 inline constexpr float waterRippleHaloStrength = 0.08f;
-inline constexpr float waterRippleCrestStrength = 0.50f;
+inline constexpr float waterRippleCrestStrength = 0.35f;
 inline constexpr float waterSecondaryRippleThicknessScale = 0.48f;
-inline constexpr float waterUnderwaterCausticStrength = 0.22f;
+inline constexpr float waterUnderwaterCausticStrength = 0.10f;
 inline constexpr float waterImpactRippleLifetimeSeconds = 1.5f;
 
 inline constexpr float minimumWaterRippleSpatialFrequency = 0.1f;
@@ -54,11 +54,11 @@ inline constexpr float minimumWaterSecondaryRippleThicknessScale = 0.05f;
 inline constexpr float maximumWaterSecondaryRippleThicknessScale = 2.0f;
 
 inline constexpr Vec3 waterTileBorderColor {
-    0.52f,
-    0.72f,
-    0.84f,
+    0.58f,
+    0.60f,
+    0.86f,
 };
-inline constexpr float waterGridLineOpacity = 0.24f;
+inline constexpr float waterGridLineOpacity = 0.12f;
 inline constexpr float waterTileBorderWidth = 0.014f;
 inline constexpr float waterTileBorderWarpAmplitude = 0.035f;
 inline constexpr float waterTileBorderWarpFrequency = 4.2f;

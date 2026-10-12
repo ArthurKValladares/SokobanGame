@@ -1,9 +1,9 @@
 #ifndef SOKOBAN_PBR_LIGHTING_GLSL
 #define SOKOBAN_PBR_LIGHTING_GLSL
 
-// Cook-Torrance GGX. F3c replaced a wrapped-diffuse Blinn-Phong whose gloss
-// came from two scene-wide knobs, so every surface in a level was equally
-// shiny no matter what its glTF said.
+// Cook-Torrance GGX with an art-directed diffuse response. Material metallic
+// and roughness still distinguish surfaces; the frame's stylization controls
+// soften diffuse forms and broaden highlights without changing the assets.
 //
 // The pi that belongs under the Lambert term is folded into the light instead
 // of divided out of the surface, which is the same thing as scaling every
@@ -11,6 +11,27 @@
 // existing level threefold, and the specular below carries the matching pi so
 // the two stay in the proportion the physics puts them in.
 const float pi = 3.14159265359;
+
+vec3 stylizedNormal(vec3 geometricNormal, vec3 mappedNormal)
+{
+    return normalize(mix(geometricNormal, mappedNormal,
+        clamp(frame.stylizedSurface.y, 0.0, 1.0)));
+}
+
+float stylizedRoughness(float roughness)
+{
+    return clamp(max(roughness, frame.stylizedSurface.z), 0.045, 1.0);
+}
+
+float stylizedDiffuse(float normalDotLight)
+{
+    // Broaden the positive hemisphere continuously, keeping its terminator
+    // at zero. A wrap into negative N.L would disagree with the shadow and
+    // point-light visibility gates and illuminate the backs of walls.
+    float response = 1.0 - 0.5 * clamp(frame.stylizedSurface.x, 0.0, 1.0);
+    return normalDotLight /
+        (normalDotLight * (1.0 - response) + response);
+}
 
 float distributionGgx(float normalDotHalf, float roughness)
 {
@@ -73,7 +94,8 @@ Shaded shadeLight(
     // The pi here is the one folded into the light above.
     result.specular = incoming * fresnel * distribution * geometry * pi /
         max(4.0 * normalDotView * normalDotLight, 0.0001);
-    result.diffuse = incoming * (vec3(1.0) - fresnel) * diffuseAlbedo;
+    result.diffuse = radiance * stylizedDiffuse(normalDotLight) *
+        (vec3(1.0) - fresnel) * diffuseAlbedo;
     return result;
 }
 

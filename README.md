@@ -1171,6 +1171,12 @@ The `dev` and `dev-fast` builds add these to the workspace:
   edited literals back into that header, so the next build compiles them as
   the new defaults. Builds without developer tools compile the same
   declarations as plain `constexpr` constants.
+- **Lighting panel.** Tune warm sun and cool ambient fill, plus live
+  **Diffuse Softness**, **Normal Detail**, and **Roughness Floor** sliders.
+  Defaults live in `src/engine/render/LightingConfig.hpp`; these controls
+  are separate from the Tuning tab's **Save to header** registry. Water has
+  its own `WaterConfig.hpp`, and sky colors live in its shader. See
+  [stylized rendering](docs/stylized-rendering.md) for tuning and limits.
 - **Source watcher.** Every half second the game checks the source
   `levels/` tree, `assets/manifest.json`, `assets/animation_catalog.json`
   and every texture the manifest names, and applies edits made outside the

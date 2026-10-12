@@ -54,10 +54,12 @@ struct SceneFrameUniform {
     std::array<Vec4, RenderFrameData::waterRippleCapacity> waterRipples {};
     // x is the active count; y is the ripple lifetime in seconds.
     Vec4 waterRippleMeta {};
+    // x is diffuse softness; y is normal detail; z is the roughness floor.
+    Vec4 stylizedSurface {};
 };
 
 static_assert(sizeof(PointLightUniform) == 48);
-static_assert(sizeof(SceneFrameUniform) == 816);
+static_assert(sizeof(SceneFrameUniform) == 832);
 
 // The camera and sun transforms a frame renders through, in the form the
 // uniform buffer wants them. Built by the recorder from the prepared scene's

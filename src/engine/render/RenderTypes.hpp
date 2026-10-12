@@ -403,6 +403,13 @@ struct RenderFrameData {
             float anisotropy = 0.0f;
         };
 
+        struct Stylization {
+            // Neutral defaults keep standalone and studio frames unchanged.
+            float diffuseSoftness = 0.0f;
+            float normalDetail = 1.0f;
+            float roughnessFloor = 0.0f;
+        };
+
         DirectionalLight sun {};
         AmbientLight ambient {};
         std::array<PointLight, pointLightCapacity> pointLights {};
@@ -412,6 +419,7 @@ struct RenderFrameData {
         Atmosphere atmosphere {};
         float specularStrength = 0.0f;
         float modelShadowReceive = 0.0f;
+        Stylization stylization {};
     };
 
     struct ModelTransform {

@@ -39,6 +39,7 @@ public:
         bool shadowsEnabled = false;
         float shadowOpacity = 0.0f;
         float shadowBias = 0.0f;
+        RenderFrameData::Lighting::Stylization stylization {};
     };
 
     struct Grid {

@@ -32,6 +32,22 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
+The October 11 stylized rendering pass uses peach sunlight, periwinkle ambient
+fill, stronger and longer cast shadows, lavender atmosphere/sky, and quieter
+water ripples. Models and terrain share continuous diffuse softening,
+normal-detail attenuation and a roughness floor; live Lighting sliders snapshot
+these through the appended `SceneFrameUniform::stylizedSurface` lane (832 bytes
+total). Standalone frame surface defaults remain neutral. Assets, HDR/sRGB,
+ambient-only SSAO, output tonemapping and render-pass count are preserved.
+See [stylized rendering](docs/stylized-rendering.md) for controls and defaults.
+Debug and optimized builds pass, as do the focused presentation, material,
+output, ABI, shader reload, atmosphere, SSAO and thumbnail suites. Matched
+1,200-frame puzzle and water captures have no dropped draws or pending assets;
+the Debug validation capture has no VUID messages and retains the existing
+overlay-loader and unused shader-output messages. GPU smoke/preview still fail
+the native-ground fixture counters documented below. Evidence is in ignored
+`out/stylized-render/`.
+
 Ground recess material revision 1 replaces the near-black backing visible
 between rock masses with warm sandstone, linear RGBA `[0.61, 0.48, 0.28, 1]`,
 approximately 90% of the texture's median albedo after plate material factors.

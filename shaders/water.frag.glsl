@@ -1209,8 +1209,8 @@ void main()
         secondaryRippleStrength);
 
     vec3 rippleColor = mix(
-        vec3(0.22, 0.62, 0.80),
-        vec3(0.70, 0.88, 0.94),
+        vec3(0.36, 0.43, 0.76),
+        vec3(0.76, 0.78, 0.96),
         caustics.y);
     float rippleHaloStrength =
         max(draw.sunRadianceAndAmbientBlue.y, 0.0);

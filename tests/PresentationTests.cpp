@@ -29,6 +29,7 @@
 #include <cmath>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <ranges>
 
 namespace {
@@ -756,6 +757,57 @@ void testSettingsNormalizeAndConvert()
     CHECK(near(exposureMultiplier(0.0f), 1.0f));
     CHECK(near(exposureMultiplier(1.0f), 2.0f));
     CHECK(near(exposureMultiplier(-1.0f), 0.5f));
+}
+
+void testStylizationNormalizationAndFrameSnapshot()
+{
+    TEST("stylizationNormalizationAndFrameSnapshot");
+    PresentationSettings settings;
+    settings.lighting.stylization = {
+        .diffuseSoftness = -0.5f,
+        .normalDetail = 1.5f,
+        .roughnessFloor = -0.5f,
+    };
+    settings.normalize();
+    CHECK(near(settings.lighting.stylization.diffuseSoftness, 0.0f));
+    CHECK(near(settings.lighting.stylization.normalDetail, 1.0f));
+    CHECK(near(settings.lighting.stylization.roughnessFloor, 0.0f));
+
+    settings.lighting.stylization = {
+        .diffuseSoftness = 1.5f,
+        .normalDetail = -0.5f,
+        .roughnessFloor = 1.5f,
+    };
+    settings.normalize();
+    CHECK(near(settings.lighting.stylization.diffuseSoftness, 1.0f));
+    CHECK(near(settings.lighting.stylization.normalDetail, 0.0f));
+    CHECK(near(settings.lighting.stylization.roughnessFloor, 1.0f));
+
+    settings.lighting.stylization = {
+        .diffuseSoftness = std::numeric_limits<float>::quiet_NaN(),
+        .normalDetail = std::numeric_limits<float>::infinity(),
+        .roughnessFloor = -std::numeric_limits<float>::infinity(),
+    };
+    settings.normalize();
+    const RenderFrameData::Lighting::Stylization neutral;
+    CHECK(near(settings.lighting.stylization.diffuseSoftness,
+        neutral.diffuseSoftness));
+    CHECK(near(settings.lighting.stylization.normalDetail,
+        neutral.normalDetail));
+    CHECK(near(settings.lighting.stylization.roughnessFloor,
+        neutral.roughnessFloor));
+
+    settings.lighting.stylization = {
+        .diffuseSoftness = 0.2f,
+        .normalDetail = 0.8f,
+        .roughnessFloor = 0.4f,
+    };
+    settings.normalize();
+    const RenderFrameData::Lighting frameLighting = settings.renderLighting();
+    settings.lighting.stylization = {};
+    CHECK(near(frameLighting.stylization.diffuseSoftness, 0.2f));
+    CHECK(near(frameLighting.stylization.normalDetail, 0.8f));
+    CHECK(near(frameLighting.stylization.roughnessFloor, 0.4f));
 }
 
 void testPresentationResetClocksAndFallenTargets()
@@ -5025,6 +5077,7 @@ int main()
     testAuthoredCameraAnglesReachGameplayAndEditorFrames();
     testAnimationPreviewBuildsIsolatedStage();
     testSettingsNormalizeAndConvert();
+    testStylizationNormalizationAndFrameSnapshot();
     testPresentationResetClocksAndFallenTargets();
     testPresentationInterpolatesActionsAndClips();
     testLoopedAnimationPhasesContinueAcrossActionsAndLegs();

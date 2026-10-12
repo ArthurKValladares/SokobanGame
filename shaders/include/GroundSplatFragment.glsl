@@ -260,6 +260,7 @@ void main()
             vec3 wallNormal = normalize(mix(ewMappedNormal, nsMappedNormal, wallNsWeight));
             normal = normalize(mix(normal, wallNormal, wallCoverage));
         }
+        normal = stylizedNormal(geometricNormal, normal);
         vec3 lightDirection = length(draw.sunDirectionAndAmbientGreen.xyz) > 0.0001
             ? normalize(draw.sunDirectionAndAmbientGreen.xyz)
             : vec3(0.0, 0.0, 1.0);
@@ -271,7 +272,7 @@ void main()
             max(dot(geometricNormal, lightDirection), 0.0));
         float skyFill = smoothstep(-0.35, 1.0, normal.z);
         float metallic = clamp(orm.b, 0.0, 1.0);
-        float roughness = clamp(orm.g, 0.045, 1.0);
+        float roughness = stylizedRoughness(orm.g);
         vec3 f0 = mix(vec3(0.04), color, metallic);
         vec3 diffuseAlbedo = color * (1.0 - metallic);
         vec3 viewDirection = normalize(frame.cameraPositionAndNearPlane.xyz - inWorldPosition);

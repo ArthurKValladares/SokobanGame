@@ -36,6 +36,8 @@ layout(location = 0) out vec4 outColor;
 #define draw drawInstances.instances[inDrawInstance]
 
 #include "Material.glsl"
+#include "SceneFrame.glsl"
+#include "PbrLighting.glsl"
 
 // Entry zero is reserved as the published-nothing fallback: an untextured
 // white surface. A base of zero means the model has not published, and its
@@ -94,6 +96,8 @@ vec3 mappedSurfaceNormal(Material material)
             geometricNormal * tangentNormal.z);
     }
 
+    result = stylizedNormal(geometricNormal, result);
+
     // glTF double-sided back faces reverse their final shading normal before
     // lighting. Flipping after the normal-map transform keeps neutral and
     // perturbed samples consistent with the same rule.
@@ -102,8 +106,6 @@ vec3 mappedSurfaceNormal(Material material)
     }
     return result;
 }
-
-#include "SceneFrame.glsl"
 
 #include "DrawMode.glsl"
 
@@ -180,8 +182,6 @@ float gridMask()
 
 #define POINT_SHADOW_TAPS 5
 #include "PointShadow.glsl"
-
-#include "PbrLighting.glsl"
 
 float plateEnergyPattern(vec2 uv, float time)
 {
@@ -339,7 +339,7 @@ void main()
         metallic = clamp(metallic, 0.0, 1.0);
         // GGX cannot represent a perfect delta with this finite sampling
         // path, so preserve the established floor after applying the map.
-        roughness = clamp(roughness, 0.045, 1.0);
+        roughness = stylizedRoughness(roughness);
         // Dielectrics reflect about 4% head-on; a metal reflects its own
         // colour and has no diffuse lobe at all.
         vec3 f0 = mix(vec3(0.04), color, metallic);

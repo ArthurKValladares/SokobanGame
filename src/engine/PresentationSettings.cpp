@@ -44,6 +44,11 @@ PresentationSettings::PresentationSettings()
           .shadowsEnabled = config::shadowsEnabled,
           .shadowOpacity = config::shadowOpacity,
           .shadowBias = config::shadowBias,
+          .stylization = {
+              .diffuseSoftness = config::diffuseSoftness,
+              .normalDetail = config::normalDetail,
+              .roughnessFloor = config::roughnessFloor,
+          },
       }
     , grid {
           .color = config::tileGridLineColor,
@@ -127,6 +132,13 @@ void PresentationSettings::normalize()
         lighting.shadowOpacity, 0.0f, config::maximumShadowOpacity);
     lighting.shadowBias = std::clamp(
         lighting.shadowBias, 0.0f, config::maximumShadowBias);
+    auto& stylization = lighting.stylization;
+    stylization.diffuseSoftness = std::isfinite(stylization.diffuseSoftness)
+        ? std::clamp(stylization.diffuseSoftness, 0.0f, 1.0f) : 0.0f;
+    stylization.normalDetail = std::isfinite(stylization.normalDetail)
+        ? std::clamp(stylization.normalDetail, 0.0f, 1.0f) : 1.0f;
+    stylization.roughnessFloor = std::isfinite(stylization.roughnessFloor)
+        ? std::clamp(stylization.roughnessFloor, 0.0f, 1.0f) : 0.0f;
 
     grid.color.w = std::clamp(grid.color.w, 0.0f, 1.0f);
     grid.lineWidth = std::clamp(
@@ -260,6 +272,7 @@ RenderFrameData::Lighting PresentationSettings::renderLighting() const
         },
         .specularStrength = lighting.specularStrength,
         .modelShadowReceive = lighting.modelShadowReceive,
+        .stylization = lighting.stylization,
     };
 }
 
