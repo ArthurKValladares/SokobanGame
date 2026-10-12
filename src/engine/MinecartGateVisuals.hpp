@@ -51,7 +51,8 @@ inline void appendMinecartGateVisual(
     float openness = 0.0f,
     float opacity = 1.0f,
     bool pickable = false,
-    uint32_t authoredQuarterTurns = 0)
+    uint32_t authoredQuarterTurns = 0,
+    bool preview = false)
 {
     const std::size_t firstTile = frame.tiles.size();
     const std::size_t firstFace = frame.isoFaces.size();
@@ -77,6 +78,8 @@ inline void appendMinecartGateVisual(
                 .height = height,
                 .pickable = false,
                 .showGrid = false,
+                .isEditorPreview = preview,
+                .interactionOutline = true,
             });
     };
     const Vec4 iron { 0.20f, 0.24f, 0.27f, 1.0f };
@@ -137,6 +140,32 @@ inline void appendMinecartGateVisual(
                 });
         }
     }
+    // One continuous hull follows the striped boom. The existing source
+    // faces own its color and depth; this pick-only volume adds no duplicate
+    // geometry or shadow, and avoids outlining every stripe seam.
+    constexpr float halfPi = 1.57079632679489661923f;
+    frame.tiles.push_back({
+        .cell = cell,
+        .position = { x, y },
+        .color = { 1.0f, 1.0f, 1.0f, opacity },
+        .baseElevation = z,
+        .height = 1.0f,
+        .pickOnly = true,
+        .pickable = false,
+        .showGrid = false,
+        .isEditorPreview = preview,
+        .affectsCameraFit = false,
+        .interactionOutline = true,
+        .interactionOutlineOnly = true,
+        .modelTransform = RenderFrameData::ModelTransform {
+            // The across-Y case starts at the other transverse edge so the
+            // local axes retain positive handedness after a quarter turn.
+            .translation = armPoint(0.0f, acrossY ? 0.56f : 0.44f, -0.055f),
+            .rotationRadians = { 0.0f, -angle, acrossY ? halfPi : 0.0f },
+            .scale = { 0.86f, 0.12f, 0.11f },
+            .pivot = {},
+        },
+    });
     if (pickable) {
         frame.tiles.push_back(
             {
@@ -146,6 +175,7 @@ inline void appendMinecartGateVisual(
                 .height = 1.0f,
                 .pickOnly = true,
                 .showGrid = false,
+                .isEditorPreview = preview,
             });
     }
     // Rotate the entire procedural device about its cell, including the boom
@@ -158,6 +188,14 @@ inline void appendMinecartGateVisual(
             const Vec2 local { tile.position.x - x, tile.position.y - y };
             tile.position = { x + 1.0f - local.y - tile.size.y, y + local.x };
             std::swap(tile.size.x, tile.size.y);
+            if (tile.modelTransform) {
+                auto& transform = *tile.modelTransform;
+                const Vec3 origin = transform.translation;
+                transform.translation = {
+                    x + 1.0f - (origin.y - y), y + (origin.x - x), origin.z,
+                };
+                transform.rotationRadians.z += halfPi;
+            }
         }
     }
     for (std::size_t index = firstFace; index < frame.isoFaces.size(); ++index) {

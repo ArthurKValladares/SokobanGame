@@ -72,6 +72,7 @@ struct RotatorModelParts {
         .color = color,
         .baseElevation = static_cast<float>(cell.z),
         .height = config::rotatorPlateHeight,
+        .interactionOutline = true,
         .model = model,
     };
 }

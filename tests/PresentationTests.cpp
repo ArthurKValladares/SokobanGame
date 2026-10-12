@@ -3348,6 +3348,8 @@ void testLinkedMovablesRenderScaledColorMatchedAuras()
         CHECK(!aura->pickable);
         CHECK(!aura->showGrid);
         CHECK(!aura->affectsCameraFit);
+        CHECK(object->interactionOutline);
+        CHECK(!aura->interactionOutline);
     }
 }
 
@@ -3415,6 +3417,7 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
         CHECK(ghost->modelRotationQuarterTurns == presentation.players().front().facingQuarterTurns);
         CHECK(ghost->authoredRotationQuarterTurns == 0);
         CHECK(sameColor(ghost->color, config::mirrorGhostColor));
+        CHECK(!ghost->interactionOutline);
     }
 
     const std::size_t energyFaceCount = std::ranges::count_if(
@@ -5235,6 +5238,145 @@ void testAuthoredMinecartGateRotationTurnsPostsBoomAndPickBounds()
             CHECK(near(post.position.y + post.size.y * 0.5f, center.y));
         }
     }
+    const auto hullCorners = [](const RenderFrameData::Tile& tile) {
+        const auto transform = IsoScenePreparer::modelTransformPoints(tile);
+        const Vec3 origin = transform.origin;
+        const Vec3 xAxis = transform.xPoint - origin;
+        const Vec3 yAxis = transform.yPoint - origin;
+        const Vec3 zAxis = transform.zPoint - origin;
+        return std::array { origin, origin + xAxis, origin + xAxis + yAxis,
+            origin + yAxis, origin + zAxis, origin + xAxis + zAxis,
+            origin + xAxis + yAxis + zAxis, origin + yAxis + zAxis };
+    };
+    for (const TileType rail : {
+             TileType::RailStraightNorthSouth, TileType::RailStraightEastWest }) {
+        for (const float openness : { 0.0f, 0.4f, 1.0f }) {
+            for (uint32_t turns = 0; turns < 4; ++turns) {
+                RenderFrameData frame;
+                appendMinecartGateVisual(frame, cell, rail, openness,
+                    1.0f, true, turns);
+                const auto proxy = std::ranges::find_if(frame.tiles, [](const auto& tile) {
+                    return tile.interactionOutlineOnly;
+                });
+                CHECK(proxy != frame.tiles.end());
+                if (proxy == frame.tiles.end()) {
+                    continue;
+                }
+                CHECK(proxy->interactionOutline);
+                CHECK(proxy->pickOnly && !proxy->pickable);
+                CHECK(!proxy->affectsCameraFit);
+                CHECK(!proxy->isEditorPreview);
+                CHECK(proxy->modelTransform.has_value());
+                CHECK(std::ranges::count_if(frame.tiles, [](const auto& tile) {
+                    return tile.interactionOutlineOnly;
+                }) == 1);
+                // Every corner of the outline hull coincides with an outside
+                // corner of the actual boom, through opening and rotation.
+                for (const Vec3 corner : hullCorners(*proxy)) {
+                    CHECK(std::ranges::any_of(frame.isoFaces, [&](const auto& face) {
+                        return std::ranges::any_of(face.vertices, [&](Vec3 vertex) {
+                            return distance(corner, vertex) < 0.00001f;
+                        });
+                    }));
+                }
+                PreparedRenderScene prepared;
+                IsoScenePreparer {}.prepare(frame, { 800, 600 }, prepared);
+                CHECK(std::ranges::none_of(prepared.pickFaceIndices, [&](std::size_t index) {
+                    return prepared.isoFaces[index].color == proxy->color;
+                }));
+            }
+        }
+    }
+    RenderFrameData preview;
+    appendMinecartGateVisual(preview, cell, TileType::RailStraightNorthSouth,
+        0.4f, 0.68f, true, 2, true);
+    const auto previewProxy = std::ranges::find_if(preview.tiles, [](const auto& tile) {
+        return tile.interactionOutlineOnly;
+    });
+    CHECK(previewProxy != preview.tiles.end());
+    if (previewProxy != preview.tiles.end()) {
+        CHECK(previewProxy->isEditorPreview);
+        CHECK(near(previewProxy->color.w, 0.68f));
+    }
+}
+
+void testInteractionOutlinesFollowGameplayRoles()
+{
+    TEST("interactionOutlinesFollowGameplayRoles");
+    const AssetManifest& manifest = testManifest();
+    CHECK(!RenderFrameData::Tile {}.interactionOutline);
+    for (const TileType type : {
+             TileType::Player, TileType::Knight, TileType::Enemy,
+             TileType::Rock, TileType::Ice, TileType::MirrorSouthEast,
+             TileType::TurretWest, TileType::PressurePlate,
+             TileType::ButtonEast, TileType::LeverWest,
+             TileType::RotatorClockwise, TileType::LockPlate,
+             TileType::End, TileType::Elevator, TileType::Minecart,
+             TileType::MinecartGate, TileType::PortalNorth,
+             TileType::LecternEast, TileType::WardrobeRogue,
+             TileType::Ladder, TileType::ConveyorUp }) {
+        CHECK(tileVisual(type, { 0, 0, 1 }, manifest, {}).interactionOutline);
+    }
+    for (const TileType type : {
+             TileType::Air, TileType::Ground, TileType::GroundRock10,
+             TileType::Wall, TileType::WallStone08, TileType::CliffWall02,
+             TileType::Water, TileType::Decorative,
+             TileType::RailStraightEastWest, TileType::RailCornerNorthWest,
+             TileType::RailStopEastWest }) {
+        CHECK(!tileVisual(type, { 0, 0, 1 }, manifest, {}).interactionOutline);
+    }
+
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "........." }, { "CRIND#P^1" } },
+        // Reusing a pushable rock's model as scenery must not give it the
+        // interaction cue that the actual rock receives.
+        .decorations = { { .model = "Stone", .position = { 4.5f, 0.5f, 1.0f } } },
+        .objectLinks = { { .cell = { 1, 0, 1 }, .color = { 0.2f, 0.4f, 1.0f } } },
+    }, "interaction outline roles");
+    const GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    const auto frame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest, .level = level, .state = state,
+        .projectedState = state, .presentation = presentation, .settings = {},
+    });
+    bool foundReusedDecoration = false;
+    for (const auto& tile : frame.tiles) {
+        if (tile.modelTransform && tile.model == manifest.modelForTile(TileType::Rock)) {
+            foundReusedDecoration = true;
+            CHECK(!tile.interactionOutline);
+        } else if (tile.effect == RenderSurfaceEffect::LinkedObjectAura ||
+                   tile.effect == RenderSurfaceEffect::MirrorEnergy) {
+            CHECK(!tile.interactionOutline);
+        } else if (tile.cell.z == 0 || tile.cell.x == 4 || tile.cell.x == 5) {
+            CHECK(!tile.interactionOutline);
+        } else {
+            CHECK(tile.interactionOutline);
+        }
+    }
+    CHECK(foundReusedDecoration);
+    CHECK(std::ranges::any_of(frame.tiles, [](const auto& tile) {
+        return tile.isPrimaryPlayer && tile.interactionOutline;
+    }));
+    CHECK(std::ranges::any_of(frame.tiles, [&](const auto& tile) {
+        return tile.model == manifest.enemyModel() && tile.interactionOutline;
+    }));
+
+    LevelEditor editor;
+    editor.newDocument(9, 1, false);
+    for (int x = 1; x < 9; ++x) {
+        CHECK(editor.setCell({ x, 0, 1 },
+            charToTileType("CRIND#P^1"[x]).value()));
+    }
+    const auto edited = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = {},
+    });
+    for (const auto& tile : edited.tiles) {
+        if (tile.pickOnly || tile.cell.z != 1) {
+            continue;
+        }
+        CHECK(tile.interactionOutline == (tile.cell.x != 4 && tile.cell.x != 5));
+    }
 }
 
 } // namespace
@@ -5246,6 +5388,7 @@ int main()
     try {
     testAuthoredTileRotationsMatchEditorPreviewsAndGameplay();
     testAuthoredMinecartGateRotationTurnsPostsBoomAndPickBounds();
+    testInteractionOutlinesFollowGameplayRoles();
     testPresentationTransactionResolvesActorIndependentDependencies();
     testPresentationTransactionRejectsDependencyCycles();
     testControlTracksComposeSeekAndReverse();

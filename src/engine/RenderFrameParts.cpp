@@ -87,6 +87,7 @@ void appendLinkedObjectAura(
     aura.showGrid = false;
     aura.affectsCameraFit = false;
     aura.isPrimaryPlayer = false;
+    aura.interactionOutline = false;
     aura.effect = RenderSurfaceEffect::LinkedObjectAura;
     if (aura.renderableId != 0) {
         aura.renderableId ^= uint64_t { 1 } << 63;
@@ -255,6 +256,7 @@ void appendWardrobeMarker(
         .showGrid = false,
         .isEditorPreview = editorPreview,
         .affectsCameraFit = false,
+        .interactionOutline = true,
         .model = manifest.characterModel(character),
         .animation = idleAnimation,
         .animationInstanceId = authoredAnimationInstance(
@@ -295,6 +297,7 @@ void appendLadderSegment(
         .showGrid = false,
         .isEditorPreview = preview,
         .affectsCameraFit = false,
+        .interactionOutline = true,
         .model = manifest.modelForTile(TileType::Ladder),
         .modelRotationQuarterTurns = quarterTurns,
     });
@@ -615,6 +618,7 @@ void appendSelector(
         .showGrid = false,
         .isEditorPreview = preview,
         .affectsCameraFit = false,
+        .interactionOutline = true,
         .model = model,
         .modelTransform = RenderFrameData::ModelTransform {
             .translation = translation,

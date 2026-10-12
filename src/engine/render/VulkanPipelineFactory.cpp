@@ -144,13 +144,11 @@ constexpr std::array<VkVertexInputAttributeDescription, 4> skinnedPositionAttrib
     VkVertexInputAttributeDescription { 7, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, attachmentNodeIndex) },
 };
 
-#if SOKOBAN_ENABLE_DEBUG_UI
 constexpr std::array meshOutlineAttributes { meshAttributes[0], meshAttributes[1] };
 constexpr std::array skinnedOutlineAttributes {
     skinnedAttributes[0], skinnedAttributes[1], skinnedAttributes[3],
     skinnedAttributes[4], skinnedAttributes[5],
 };
-#endif
 
 } // namespace
 
@@ -222,7 +220,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     // Indices are positional only so that the cleanup loop below has one
     // array to walk; nothing else depends on the order.
     std::array<VkShaderModule, shaderCatalog::sources.size()> shaders {};
-    // Sky and chunk modules follow the existing optional debug slots;
+    // Sky and chunk modules follow the shared outlines and optional debug links;
     // compute remains last in both developer and shipping catalogs.
     constexpr std::size_t skyCloudsShader = shaderCatalog::sources.size() - 5;
     constexpr std::size_t groundChunkShaderFirst = shaderCatalog::sources.size() - 4;
@@ -264,22 +262,22 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         };
         vkCheck(vkCreateComputePipelines(device_, pipelineCache_, 1,
             &cachePipelineInfo, nullptr, &waterCells_), "Water cell cache pipeline creation failed");
-#if SOKOBAN_ENABLE_DEBUG_UI
-        shaders[20] = shaderModule(shaderCatalog::debugOutlineVert);
-        shaders[21] = shaderModule(shaderCatalog::debugOutlineSkinnedVert);
-        shaders[22] = shaderModule(shaderCatalog::debugOutlineBoxVert);
-        shaders[23] = shaderModule(shaderCatalog::debugOutlineFrag);
-        shaders[24] = shaderModule(shaderCatalog::debugLinkFrag);
-        shaders[25] = shaderModule(shaderCatalog::debugLinkVert);
-        debugOutline_ = createScenePipeline(
+        shaders[20] = shaderModule(shaderCatalog::outlineVert);
+        shaders[21] = shaderModule(shaderCatalog::outlineSkinnedVert);
+        shaders[22] = shaderModule(shaderCatalog::outlineBoxVert);
+        shaders[23] = shaderModule(shaderCatalog::outlineFrag);
+        outline_ = createScenePipeline(
             shaders[20], shaders[23], VertexLayout::MeshOutline,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat, false);
-        debugOutlineSkinned_ = createScenePipeline(
+        outlineSkinned_ = createScenePipeline(
             shaders[21], shaders[23], VertexLayout::SkinnedMeshOutline,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat, false);
-        debugOutlineBox_ = createScenePipeline(
+        outlineBox_ = createScenePipeline(
             shaders[22], shaders[23], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat, false);
+#if SOKOBAN_ENABLE_DEBUG_UI
+        shaders[24] = shaderModule(shaderCatalog::debugLinkFrag);
+        shaders[25] = shaderModule(shaderCatalog::debugLinkVert);
         debugLink_ = createScenePipeline(
             shaders[25], shaders[24], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat, false);
@@ -382,10 +380,10 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         tonemap_ = createPostProcessPipeline(
             shaders[5], shaders[14], displayFormat);
         const std::array namedPipelines {
+            std::pair { outline_, "Item outline pipeline" },
+            std::pair { outlineSkinned_, "Item skinned outline pipeline" },
+            std::pair { outlineBox_, "Item box outline pipeline" },
 #if SOKOBAN_ENABLE_DEBUG_UI
-            std::pair { debugOutline_, "Linked item outline pipeline" },
-            std::pair { debugOutlineSkinned_, "Linked item skinned outline pipeline" },
-            std::pair { debugOutlineBox_, "Linked item box outline pipeline" },
             std::pair { debugLink_, "Dotted item link pipeline" },
 #endif
             std::pair { scene_, "Scene pipeline" },
@@ -454,8 +452,9 @@ void VulkanPipelineFactory::destroy()
             atmosphereCompositeMultisample_,
             bloomExtract_, bloomBlur_,
             worldTransition_, tonemap_,
+            outline_, outlineSkinned_, outlineBox_,
 #if SOKOBAN_ENABLE_DEBUG_UI
-            debugOutline_, debugOutlineSkinned_, debugOutlineBox_, debugLink_,
+            debugLink_,
 #endif
         };
         for (VkPipeline pipeline : pipelines) {
@@ -500,10 +499,10 @@ void VulkanPipelineFactory::destroy()
     bloomBlur_ = VK_NULL_HANDLE;
     worldTransition_ = VK_NULL_HANDLE;
     tonemap_ = VK_NULL_HANDLE;
+    outline_ = VK_NULL_HANDLE;
+    outlineSkinned_ = VK_NULL_HANDLE;
+    outlineBox_ = VK_NULL_HANDLE;
 #if SOKOBAN_ENABLE_DEBUG_UI
-    debugOutline_ = VK_NULL_HANDLE;
-    debugOutlineSkinned_ = VK_NULL_HANDLE;
-    debugOutlineBox_ = VK_NULL_HANDLE;
     debugLink_ = VK_NULL_HANDLE;
 #endif
     layout_ = VK_NULL_HANDLE;
@@ -583,7 +582,6 @@ VkPipelineVertexInputStateCreateInfo VulkanPipelineFactory::vertexInputFor(
         info.vertexAttributeDescriptionCount =
             static_cast<uint32_t>(skinnedPositionAttributes.size());
         break;
-#if SOKOBAN_ENABLE_DEBUG_UI
     case VertexLayout::MeshOutline:
         info.pVertexBindingDescriptions = &meshBinding;
         info.pVertexAttributeDescriptions = meshOutlineAttributes.data();
@@ -596,7 +594,6 @@ VkPipelineVertexInputStateCreateInfo VulkanPipelineFactory::vertexInputFor(
         info.vertexAttributeDescriptionCount =
             static_cast<uint32_t>(skinnedOutlineAttributes.size());
         break;
-#endif
     }
     info.vertexBindingDescriptionCount = 1;
     return info;

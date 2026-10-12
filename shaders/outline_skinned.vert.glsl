@@ -16,7 +16,7 @@ layout(location = 7) flat out uint outDrawInstance;
 #include "DrawInstance.glsl"
 layout(push_constant) uniform PushConstants { uint drawInstance; } pc;
 #define draw drawInstances.instances[pc.drawInstance]
-#include "DebugOutline.glsl"
+#include "Outline.glsl"
 void main()
 {
     vec4 position = vec4(0.0);

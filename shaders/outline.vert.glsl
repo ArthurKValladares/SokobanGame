@@ -8,7 +8,7 @@ layout(location = 7) flat out uint outDrawInstance;
 #include "SceneFrame.glsl"
 #include "DrawInstance.glsl"
 #define draw drawInstances.instances[gl_InstanceIndex]
-#include "DebugOutline.glsl"
+#include "Outline.glsl"
 void main()
 {
     outDrawInstance = uint(gl_InstanceIndex);

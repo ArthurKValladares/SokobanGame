@@ -362,6 +362,7 @@ void appendStaticTiles(
                     .showGrid = cell.showGrid,
                     .affectsCameraFit =
                         tileTypeAffectsCameraFit(cell.tile),
+                    .interactionOutline = tileTypeHasInteractionOutline(cell.tile),
                     .model = model,
                     .renderableId = cell.renderableId,
                     .modelRotationQuarterTurns = cell.modelRotationQuarterTurns,
@@ -802,6 +803,7 @@ void appendCoveredStaticSurfaces(
             .color = color,
             .baseElevation = static_cast<float>(cell.z),
             .height = edgeControl ? 1.0f : input.settings.geometry.surfaceEntityHeight,
+            .interactionOutline = tileTypeHasInteractionOutline(plate.tile),
             .model = tileTypeIsLever(plate.tile) &&
                     std::ranges::find(input.state.activeLevers, cell) != input.state.activeLevers.end()
                 ? input.manifest.findModelIdByName("LeverOn").value_or(
@@ -1152,6 +1154,7 @@ void appendGameplayWorld(
             .baseElevation = position.z,
             .height = 1.0f,
             .showGrid = false,
+            .interactionOutline = true,
             .model = input.manifest.modelForTile(TileType::Minecart),
             .modelRotationQuarterTurns =
                 railOrientationQuarterTurns(rail).value_or(0),
@@ -1443,6 +1446,7 @@ void appendGameplayEntities(
             .height = 1.0f,
             .showGrid = false,
             .affectsCameraFit = false,
+            .interactionOutline = true,
             .isPrimaryPlayer = primary,
             .model = input.manifest.characterModel(
                 state.players[playerIndex].character.value_or(
@@ -1494,6 +1498,7 @@ void appendGameplayEntities(
             .height = 1.0f,
             .showGrid = false,
             .affectsCameraFit = false,
+            .interactionOutline = true,
             .model = input.manifest.enemyModel(),
             .animation = animationFor(
                 input.animations,
@@ -1590,6 +1595,7 @@ void appendGameplayEntities(
             .height = 1.0f,
             .blurBehind = movable.type == TileType::Ice,
             .affectsCameraFit = false,
+            .interactionOutline = tileTypeHasInteractionOutline(movable.type),
             .model = input.manifest.modelForTile(movable.type),
             .renderableId = visual.target.id,
             // Turrets face their (possibly rotated) firing direction; other
@@ -1745,6 +1751,7 @@ void appendMirrorGhostTile(
         .height = 1.0f,
         .showGrid = false,
         .affectsCameraFit = false,
+        .interactionOutline = false,
         .model = entity.player
             ? input.manifest.characterModel(
                   state.players[entity.playerIndex].character.value_or(

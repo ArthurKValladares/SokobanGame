@@ -1,4 +1,4 @@
-// Shared by static and skinned inverted-hull outlines. Width stays in pixels
+// Shared by gameplay and debug static/skinned inverted-hull outlines. Width stays in pixels
 // as the camera, viewport and model scale change.
 void outlinePosition(vec3 position, vec3 normal)
 {
@@ -7,6 +7,15 @@ void outlinePosition(vec3 position, vec3 normal)
     vec3 worldPosition = (world * vec4(position, 1.0)).xyz;
     vec3 worldNormal = normalize(transpose(inverse(mat3(world))) * normal);
     vec4 clip = frame.clipFromWorld * vec4(worldPosition, 1.0);
+    if (draw.passData[0].w > 1.5) {
+        // Transparent surfaces have no self-depth to mask an expanded hull.
+        // Keep their contour on the visible surface at grazing view angles.
+        gl_Position = clip;
+        outFaceCoordU = dot(worldNormal,
+            normalize(frame.cameraPositionAndNearPlane.xyz - worldPosition));
+        outFaceCoordV = 0.0;
+        return;
+    }
     vec4 displaced = frame.clipFromWorld * vec4(worldPosition + worldNormal, 1.0);
     vec2 extent = draw.passData[0].xy;
     vec2 direction = (displaced.xy * clip.w - clip.xy * displaced.w) * extent;

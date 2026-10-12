@@ -601,13 +601,13 @@ void testBakeFrameStandsTheTileOnAGroundBed()
             : bedCells + (definition.type == TileType::Gate
                           ? config::gateEnergyTileCount
                           : tileTypeIsPortal(definition.type) ? 5
-                          : definition.type == TileType::MinecartGate ? 4
+                          : definition.type == TileType::MinecartGate ? 5
                           : tileTypeIsWardrobe(definition.type) ? 2 : 1);
         CHECK(frame.tiles.size() == expected);
 
-        // Every tile counts toward the camera fit. This is what makes the
-        // camera identical for every thumbnail: fitting to the subject alone
-        // framed a flat tile and a tall one at completely different scales.
+        // Visible geometry counts toward the camera fit, except the perched
+        // wardrobe marker. Hidden outline hulls must not change that framing.
+        // Fitting to the subject alone framed flat and tall tiles differently.
         std::size_t nonFittingTiles = 0;
         for (const RenderFrameData::Tile& tile : frame.tiles) {
             nonFittingTiles += tile.affectsCameraFit ? 0U : 1U;
@@ -615,7 +615,8 @@ void testBakeFrameStandsTheTileOnAGroundBed()
             CHECK(!tile.isEditorPreview);
         }
         CHECK(nonFittingTiles ==
-            (tileTypeIsWardrobe(definition.type) ? 1U : 0U));
+            (tileTypeIsWardrobe(definition.type) ||
+                    definition.type == TileType::MinecartGate ? 1U : 0U));
 
         // Lighting is carried through, or the capture would have no shadows
         // and no ambient occlusion - the whole reason for the bed.
@@ -628,6 +629,23 @@ void testBakeFrameStandsTheTileOnAGroundBed()
         }
         if (definition.type == TileType::MinecartGate) {
             CHECK(frame.isoFaces.size() == 36);
+            CHECK(std::ranges::count_if(frame.tiles, [](const auto& tile) {
+                return !tile.pickOnly && tile.height > 0.0f;
+            }) == 4);
+            const auto proxy = std::ranges::find_if(frame.tiles, [](const auto& tile) {
+                return tile.interactionOutlineOnly;
+            });
+            CHECK(proxy != frame.tiles.end());
+            CHECK(std::ranges::count_if(frame.tiles, [](const auto& tile) {
+                return tile.interactionOutlineOnly;
+            }) == 1);
+            if (proxy != frame.tiles.end()) {
+                CHECK(proxy->pickOnly);
+                CHECK(!proxy->pickable);
+                CHECK(!proxy->affectsCameraFit);
+                CHECK(proxy->interactionOutline);
+                CHECK(proxy->modelTransform.has_value());
+            }
             for (const auto& face : frame.isoFaces) {
                 for (Vec3 point : face.vertices) {
                     CHECK(point.z >= 0.0f && point.z < 1.0f);
@@ -838,7 +856,10 @@ void testSubjectMatchesTheTileTheEditorDraws()
         }
         if (definition.type == TileType::MinecartGate) {
             CHECK(frame.isoFaces.size() == 36);
-            CHECK(frame.tiles.size() == tileThumbnails::bedSize * tileThumbnails::bedSize + 4);
+            CHECK(frame.tiles.size() == tileThumbnails::bedSize * tileThumbnails::bedSize + 5);
+            CHECK(subject.interactionOutlineOnly && subject.interactionOutline);
+            CHECK(subject.pickOnly && !subject.pickable);
+            CHECK(!subject.affectsCameraFit);
             continue;
         }
         CHECK(subject.height == expected.height);

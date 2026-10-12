@@ -13,6 +13,7 @@
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/FogOfWarConfig.hpp"
 #include "engine/render/OpaqueDrawSorter.hpp"
+#include "engine/render/OutlineConfig.hpp"
 #include "engine/render/GroundRimGeometry.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/SceneDrawLanes.hpp"
@@ -2047,7 +2048,9 @@ private:
                 translucentPass,
                 options.content,
                 options.profileOpaqueGeometry,
-                options.profileParticles);
+                options.profileParticles,
+                { static_cast<float>(renderArea.extent.width),
+                  static_cast<float>(renderArea.extent.height) });
 #if SOKOBAN_ENABLE_DEBUG_UI
             if (translucentPass && options.content != SceneContent::MirrorPreviewOnly) {
                 drawDebugView(commandBuffer, scene, frameData);
@@ -2083,6 +2086,80 @@ private:
         vkCmdEndRendering(commandBuffer);
     }
 
+    void drawInteractionOutlines(
+        VkCommandBuffer commandBuffer,
+        const PreparedRenderScene& scene,
+        const RenderFrameData& frameData,
+        bool translucentPass,
+        Vec2 viewportExtent)
+    {
+        if (configuration_.wireframeEnabled || !swapchain_.depthView()) {
+            return;
+        }
+        const float renderScale = static_cast<float>(swapchain_.renderExtent().width) /
+            static_cast<float>(std::max(1U, swapchain_.displayExtent().width));
+        VkPipeline boundPipeline = VK_NULL_HANDLE;
+        for (std::size_t tileIndex = 0; tileIndex < frameData.tiles.size(); ++tileIndex) {
+            const auto& tile = frameData.tiles[tileIndex];
+            if (!tile.interactionOutline || (tile.pickOnly && !tile.interactionOutlineOnly) ||
+                tile.isEditorPreview ||
+                tile.color.w <= 0.0f || tile.height <= 0.0f ||
+                (tile.effect != RenderSurfaceEffect::Standard &&
+                    tile.effect != RenderSurfaceEffect::PlateEnergy) ||
+                !scene.renderables[tileIndex].mainSceneVisible) {
+                continue;
+            }
+            const bool box = tile.model.isCube();
+            if (!box && !models_.tileReadyForDraw(tile, configuration_.descriptorFrameIndex)) {
+                continue;
+            }
+            const bool transparent = tile.blurBehind || (!box &&
+                !models_.materialForModel(tile.model).policy.hasOpaqueOrMask);
+            if (transparent != translucentPass) {
+                continue;
+            }
+            const bool skinned = !box && models_.modelUsesGpuSkinning(tile.model);
+            const VkPipeline pipeline = box ? pipelines_.outlineBox()
+                : skinned ? pipelines_.outlineSkinned() : pipelines_.outline();
+            if (pipeline != boundPipeline) {
+                vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+                ++stats_.pipelineBinds;
+                boundPipeline = pipeline;
+            }
+            // Opaque hull interiors are masked by scene depth. Glass instead
+            // uses a contour on its visible surface to preserve transparency.
+            vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+            vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_CLOCKWISE);
+            vkCmdSetCullMode(commandBuffer,
+                transparent ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_FRONT_BIT);
+            Vec4 color = config::interactionOutlineColor;
+            color.w *= std::clamp(tile.color.w, 0.0f, 1.0f);
+            const uint32_t instance = writeDrawInstance(GpuDrawInstance {
+                .vertices = IsoScenePreparer::modelWorldTransform(tile),
+                .passData = { Vec4 {
+                    viewportExtent.x, viewportExtent.y,
+                    config::interactionOutlineWidthPixels * renderScale,
+                    transparent ? (box ? 1.0f : 2.0f) : 0.0f,
+                }, Vec4 {}, Vec4 {}, Vec4 {} },
+                .color = color,
+            });
+            if (box) {
+                vkCmdDraw(commandBuffer, 36, 1, 0, instance);
+                ++stats_.drawCalls;
+                stats_.vertices += 36;
+                stats_.triangles += 12;
+                stats_.visibleFaces += 6;
+            } else {
+                const auto mesh = models_.meshForTile(tile, configuration_.descriptorFrameIndex);
+                drawModel(commandBuffer, mesh, 1, skinned ? mesh.firstInstance : instance, instance);
+            }
+        }
+        if (boundPipeline != VK_NULL_HANDLE) {
+            vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
+            vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+        }
+    }
+
 #if SOKOBAN_ENABLE_DEBUG_UI
     void drawDebugView(
         VkCommandBuffer commandBuffer,
@@ -2101,8 +2178,8 @@ private:
                 continue;
             }
             const bool skinned = !box && models_.modelUsesGpuSkinning(tile.model);
-            const VkPipeline pipeline = box ? pipelines_.debugOutlineBox()
-                : skinned ? pipelines_.debugOutlineSkinned() : pipelines_.debugOutline();
+            const VkPipeline pipeline = box ? pipelines_.outlineBox()
+                : skinned ? pipelines_.outlineSkinned() : pipelines_.outline();
             if (pipeline != boundPipeline) {
                 vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
                 ++stats_.pipelineBinds;
@@ -2464,7 +2541,8 @@ private:
         bool translucentPass,
         SceneContent content,
         bool profileOpaqueGeometry,
-        bool profileParticles)
+        bool profileParticles,
+        Vec2 viewportExtent)
     {
         const std::vector<std::size_t>& faceIndices =
             translucentPass
@@ -2998,6 +3076,12 @@ private:
         if (boundFrontFace != VK_FRONT_FACE_COUNTER_CLOCKWISE) {
             vkCmdSetFrontFace(
                 commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+        }
+        if (content != SceneContent::MirrorPreviewOnly) {
+            // Opaque contours enter the color source used by water/ice;
+            // translucent pieces receive theirs before particles are drawn.
+            drawInteractionOutlines(
+                commandBuffer, scene, frameData, translucentPass, viewportExtent);
         }
         if (translucentPass &&
             content != SceneContent::MirrorPreviewOnly &&

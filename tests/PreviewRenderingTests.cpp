@@ -14,6 +14,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -23,6 +24,7 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -200,6 +202,225 @@ void saveRippleEvidence(const std::filesystem::path& path, const ImageData& imag
     std::transform(image.rgba.begin(), image.rgba.end(), pixels.begin(),
         [](std::byte b) { return std::to_integer<uint8_t>(b); });
     writeRgbaPng(path, image.width, image.height, pixels);
+}
+
+double verifyInteractionOutlineImage(const ImageData& baseline,
+    const ImageData& outlined, bool requireBlueSilhouette = true)
+{
+    verify(baseline.width == outlined.width && baseline.height == outlined.height,
+        "Interaction outline changed the capture extent");
+    const auto channel = [](const ImageData& image, std::size_t pixel, int component) {
+        return std::to_integer<int>(image.rgba[pixel * 4 + component]);
+    };
+    // The warm cube is the only colored geometry. Locate its actual rasterized
+    // footprint so the checks also work after the renderer changes resolution.
+    uint32_t left = baseline.width;
+    uint32_t top = baseline.height;
+    uint32_t right = 0;
+    uint32_t bottom = 0;
+    uint32_t cubePixels = 0;
+    for (uint32_t y = 0; y < baseline.height; ++y) {
+        for (uint32_t x = 0; x < baseline.width; ++x) {
+            const std::size_t pixel = std::size_t(y) * baseline.width + x;
+            if (channel(baseline, pixel, 0) > channel(baseline, pixel, 1) + 30 &&
+                channel(baseline, pixel, 1) > channel(baseline, pixel, 2) + 10) {
+                left = std::min(left, x);
+                top = std::min(top, y);
+                right = std::max(right, x);
+                bottom = std::max(bottom, y);
+                ++cubePixels;
+            }
+        }
+    }
+    verify(cubePixels > 100, "Interaction outline fixture did not render its warm cube");
+    const int margin = std::max(3, static_cast<int>(std::ceil(
+        6.0 * baseline.width / 640.0)));
+    verify(int(right) - int(left) > margin * 2 && int(bottom) - int(top) > margin * 2,
+        "Interaction outline fixture cube is too small to test its interior");
+    double weight = 0.0;
+    uint32_t bluePixels = 0;
+    uint32_t darkenedPixels = 0;
+    for (uint32_t y = 0; y < baseline.height; ++y) {
+        for (uint32_t x = 0; x < baseline.width; ++x) {
+            const std::size_t pixel = std::size_t(y) * baseline.width + x;
+            int total = 0;
+            int peak = 0;
+            for (int component = 0; component < 3; ++component) {
+                const int delta = std::abs(channel(baseline, pixel, component) -
+                    channel(outlined, pixel, component));
+                total += delta;
+                peak = std::max(peak, delta);
+            }
+            weight += total / 3.0;
+            const bool inside = int(x) > int(left) + margin &&
+                int(x) < int(right) - margin && int(y) > int(top) + margin &&
+                int(y) < int(bottom) - margin;
+            const bool outside = int(x) < int(left) - margin ||
+                int(x) > int(right) + margin || int(y) < int(top) - margin ||
+                int(y) > int(bottom) + margin;
+            if (inside) {
+                verify(peak <= 1, "Interaction outline repainted the cube's interior");
+            }
+            if (outside) {
+                verify(peak <= 1, "Interaction outline changed unflagged terrain");
+            }
+            if (channel(baseline, pixel, 0) > channel(outlined, pixel, 0) + 10) {
+                ++darkenedPixels;
+            }
+            // Undersampling blends the navy hull into the neutral floor. It
+            // must still darken that floor and move its hue toward blue, even
+            // when the resulting RGB channels differ by only one step.
+            if (peak > 10 && channel(outlined, pixel, 2) > channel(outlined, pixel, 0) &&
+                channel(outlined, pixel, 2) > channel(outlined, pixel, 1) &&
+                channel(outlined, pixel, 0) < channel(baseline, pixel, 0)) {
+                ++bluePixels;
+            }
+        }
+    }
+    verify(darkenedPixels > 8, "Interaction outline did not shade any contour pixels");
+    if (requireBlueSilhouette) {
+        verify(bluePixels > 8, "Interaction outline did not produce a dark blue silhouette");
+    }
+    // Captures have the internal render dimensions. Dividing the changed
+    // color energy by image area compares the same display-pixel-width ring
+    // at different render scales, while retaining antialiasing coverage.
+    return weight / (double(baseline.width) * baseline.height);
+}
+
+void verifyInteractionOutlines(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    UiContext ui(font);
+    const auto makeFrame = [](bool outline, bool occluded = false) {
+        RenderFrameData frame = scene({ 0.55f, 0.55f, 0.55f, 1.0f }, false);
+        frame.skyCloudsEnabled = false;
+        frame.lighting.sun.intensity = 0.0f;
+        frame.cameraOverride = RenderFrameData::CameraOverride {
+            .position = { 2.0f, 2.0f, 10.0f },
+            .forward = { 0.0f, 0.0f, -1.0f },
+        };
+        frame.tiles.push_back({
+            .position = { 1.0f, 1.0f },
+            .size = { 2.0f, 2.0f },
+            .color = { 0.75f, 0.33f, 0.12f, 1.0f },
+            .baseElevation = 1.0f,
+            .height = 1.0f,
+            .showGrid = false,
+            .interactionOutline = outline,
+        });
+        if (occluded) {
+            // A larger opaque block covers the entire outlined hull. Toggling
+            // the hidden object's flag must leave every output pixel intact.
+            frame.tiles.push_back({
+                .position = { 0.5f, 0.5f },
+                .size = { 3.0f, 3.0f },
+                .color = { 0.55f, 0.55f, 0.55f, 1.0f },
+                .baseElevation = 3.0f,
+                .height = 0.3f,
+                .showGrid = false,
+            });
+        }
+        return frame;
+    };
+    const auto captureFrame = [&](const RenderFrameData& frame) {
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            ui.beginFrame({ 640, 360 }, {}, false, false);
+            ui.endFrame();
+            renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            ImGui::Render();
+#endif
+            renderer.drawFrame(renderer.prepareFrame(frame), ui.drawData());
+            verify(!renderer.hasFatalFailure(), "Interaction outline fixture failed to render");
+        }
+        return renderer.captureRenderedFrame();
+    };
+    const auto capture = [&](bool outline, bool occluded = false) {
+        return captureFrame(makeFrame(outline, occluded));
+    };
+    const auto evidence = std::filesystem::current_path() / "out" / "interaction-outline-evidence";
+    std::filesystem::create_directories(evidence);
+    double referenceWeight = 0.0;
+    uint32_t referenceWidth = 0;
+    for (const auto samples : std::array { AntiAliasingMode::None, AntiAliasingMode::Msaa4x }) {
+        // Establish the reference at 100% before testing undersampling.
+        for (int scale : std::array { 100, 50, 75 }) {
+            renderer.setAntiAliasingMode(samples);
+            renderer.setRenderScalePercent(scale);
+            const ImageData baseline = capture(false);
+            const ImageData outlined = capture(true);
+            const std::string label = std::to_string(scale) +
+                (samples == AntiAliasingMode::None ? "-1x" : "-msaa4x");
+            saveRippleEvidence(evidence / (label + "-baseline.png"), baseline);
+            saveRippleEvidence(evidence / (label + "-outlined.png"), outlined);
+            // At undersampled/MSAA edges the navy can share every covered
+            // pixel with the orange face. Assert its unblended hue at 100%;
+            // the other scales still require a dark contour, intact interior
+            // and stable coverage rather than an impossible pure-blue pixel.
+            const double weight = verifyInteractionOutlineImage(baseline, outlined, scale == 100);
+            if (referenceWeight == 0.0) {
+                referenceWeight = weight;
+                referenceWidth = baseline.width;
+            }
+            verify(baseline.width == referenceWidth * static_cast<uint32_t>(scale) / 100,
+                "Interaction outline fixture did not apply its requested render scale");
+            std::cout << "Interaction outline " << label << ": normalized coverage=" << weight
+                      << ", reference ratio=" << weight / referenceWeight << '\n';
+            verify(weight > referenceWeight * 0.45 && weight < referenceWeight * 1.75,
+                "Interaction outline width changed with render scale or MSAA");
+            const ImageData occludedBaseline = capture(false, true);
+            const ImageData occludedOutline = capture(true, true);
+            verify(difference(occludedBaseline, occludedOutline, 0, 0,
+                    occludedBaseline.width, occludedBaseline.height) == 0.0,
+                "Interaction outline showed through an opaque occluder");
+        }
+    }
+    renderer.setAntiAliasingMode(AntiAliasingMode::Msaa4x);
+    renderer.setRenderScalePercent(100);
+    RenderFrameData transparentCube = makeFrame(false);
+    transparentCube.tiles.back().blurBehind = true;
+    transparentCube.tiles.back().color = { 1.0f, 0.30f, 0.03f, 0.65f };
+    const ImageData transparentBaseline = captureFrame(transparentCube);
+    transparentCube.tiles.back().interactionOutline = true;
+    const ImageData transparentOutlined = captureFrame(transparentCube);
+    saveRippleEvidence(evidence / "transparent-cube-baseline.png", transparentBaseline);
+    saveRippleEvidence(evidence / "transparent-cube-outlined.png", transparentOutlined);
+    // A translucent navy edge over the orange face can retain an orange hue;
+    // the opaque cases above verify hue, while this case checks its coverage.
+    (void)verifyInteractionOutlineImage(transparentBaseline, transparentOutlined, false);
+
+    const auto glass = manifest.findModelIdByName("Glass");
+    verify(glass.has_value(), "Interaction outline fixture is missing the Glass model");
+    RenderFrameData glassFrame = makeFrame(false);
+    glassFrame.tiles.back().model = *glass;
+    glassFrame.tiles.back().color = { 1.0f, 1.0f, 1.0f, 1.0f };
+    renderer.waitForAssets(renderAssetRequirementsForFrame(glassFrame));
+    const ImageData glassBaseline = captureFrame(glassFrame);
+    verify(renderer.renderStats().unavailableModels == 0,
+        "Interaction outline Glass fixture did not finish loading its model");
+    const uint32_t glassBaselineDraws = renderer.renderStats().drawCalls;
+    glassFrame.tiles.back().interactionOutline = true;
+    const ImageData glassOutlined = captureFrame(glassFrame);
+    verify(renderer.renderStats().drawCalls > glassBaselineDraws,
+        "Interaction outline did not draw the resident transparent Glass model");
+    saveRippleEvidence(evidence / "glass-baseline.png", glassBaseline);
+    saveRippleEvidence(evidence / "glass-outlined.png", glassOutlined);
+    verify(difference(glassBaseline, glassOutlined, 0, 0,
+            glassBaseline.width, glassBaseline.height) > 0.0,
+        "Interaction outline did not visibly contour the transparent Glass model");
+    // Transparent geometry contributes no self-depth. An expanded back hull
+    // would consequently paint the whole center navy; a surface contour must
+    // preserve the view through the broad, camera-facing part of real Glass.
+    const double glassInteriorChange = difference(glassBaseline, glassOutlined,
+        glassBaseline.width * 48 / 100, glassBaseline.height * 46 / 100,
+        glassBaseline.width * 52 / 100, glassBaseline.height * 54 / 100);
+    std::cout << "Transparent Glass: interior change=" << glassInteriorChange << '\n';
+    verify(glassInteriorChange < 0.1,
+        "Interaction outline filled the transparent Glass model's interior");
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported an interaction outline rendering error");
 }
 
 void verifyWaterEntryRipples(SDL_Window* window, const std::filesystem::path& root,
@@ -510,6 +731,12 @@ int main(int argc, char** argv)
         auto font = FontAtlas::loadDefault(root);
         const auto manifest = AssetManifest::loadFromFile(root / "manifest.json");
         ScopedTestDirectory temp("preview-rendering");
+        if (argc > 1 && std::string_view(argv[1]) == "--interaction-outlines") {
+            verifyInteractionOutlines(window.get(), root, font, manifest,
+                temp.path() / "cache.bin");
+            std::cout << "Interaction outline GPU regression passed\n";
+            return 0;
+        }
         if (argc > 1 && std::string_view(argv[1]) == "--water-entry-ripples") {
             verifyWaterEntryRipples(window.get(), root, font, manifest,
                 temp.path() / "cache.bin");

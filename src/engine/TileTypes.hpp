@@ -392,6 +392,20 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeIsRail(TileType type);
 [[nodiscard]] bool tileTypeIsRailStop(TileType type);
 [[nodiscard]] bool tileTypeIsMinecart(TileType type);
+// Gameplay pieces that benefit from a readable silhouette. Terrain, water,
+// decorative blocks and passive rail pieces stay unoutlined.
+[[nodiscard]] inline bool tileTypeHasInteractionOutline(TileType type)
+{
+    if (tileTypeIsRail(type)) {
+        return false;
+    }
+    return tileTypeIsPlayerStart(type) || type == TileType::Enemy ||
+        tileTypeIsMovableObject(type) || tileTypeIsPlate(type) ||
+        type == TileType::Gate || type == TileType::MinecartGate ||
+        tileTypeIsElevator(type) || tileTypeIsMinecart(type) ||
+        tileTypeIsLectern(type) || tileTypeIsWardrobe(type) ||
+        type == TileType::Ladder || tileTypeIsConveyor(type);
+}
 [[nodiscard]] constexpr bool tileTypeIsPortal(TileType type)
 {
     return type >= TileType::PortalNorth && type <= TileType::PortalWest;

@@ -53,6 +53,7 @@ inline constexpr float elevatorSecondsPerLayerPerStep = 0.6f;
         .baseElevation =
             position.z + 1.0f - config::elevatorPlatformHeight,
         .height = config::elevatorPlatformHeight,
+        .interactionOutline = true,
         .model = model,
     };
 }

@@ -973,7 +973,7 @@ private:
                     rail = documentTileAt(cell);
                 }
                 appendMinecartGateVisual(frame, cell, rail, 0.0f,
-                    preview ? 0.68f : 1.0f, true, rotation);
+                    preview ? 0.68f : 1.0f, true, rotation, preview);
                 frame.tiles.back().isEditorPreview = preview;
             } else {
                 frame.tiles.push_back({
@@ -1291,6 +1291,7 @@ private:
             ghost.pickable = false;
             ghost.showGrid = false;
             ghost.affectsCameraFit = false;
+            ghost.interactionOutline = false;
             applyAuthoredTileRotation(ghost, input_.editor.tileRotationQuarterTurns(cell));
             frame.tiles.push_back(ghost);
         }
@@ -1578,6 +1579,7 @@ RenderFrameData::Tile tileVisual(
         .blurBehind = tile == TileType::Ice,
         .showGrid = !tileTypeIsPlayerStart(tile),
         .affectsCameraFit = tileTypeAffectsCameraFit(tile),
+        .interactionOutline = tileTypeHasInteractionOutline(tile),
         .model = model,
         .animation = tileTypeIsPlayerStart(tile) || tile == TileType::Enemy
             ? manifest.playerIdleAnimation()

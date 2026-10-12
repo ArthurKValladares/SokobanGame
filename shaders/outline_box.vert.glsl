@@ -6,6 +6,7 @@ layout(location = 7) flat out uint outDrawInstance;
 #include "SceneFrame.glsl"
 #include "DrawInstance.glsl"
 #define draw drawInstances.instances[gl_InstanceIndex]
+#include "Outline.glsl"
 const int indices[6] = int[6](0, 1, 2, 0, 2, 3);
 const vec2 uv[4] = vec2[4](vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 1));
 // Outward CCW winding, matching glTF before the negative-height viewport.
@@ -20,11 +21,17 @@ void main()
 {
     int corner = indices[gl_VertexIndex % 6];
     vec3 position = corners[(gl_VertexIndex / 6) * 4 + corner];
+    outDrawInstance = uint(gl_InstanceIndex);
+    if (draw.passData[0].w < 0.5) {
+        // Procedural gameplay blocks use the same expanded silhouette as
+        // models. Debug bounds retain their original per-face edge overlay.
+        outlinePosition(position, normalize(position - vec3(0.5)));
+        return;
+    }
     mat4 world = mat4(draw.vertices[0], draw.vertices[1],
                       draw.vertices[2], draw.vertices[3]);
     gl_Position = frame.clipFromWorld * world * vec4(position, 1.0);
     gl_Position.z -= 0.00001 * gl_Position.w;
     outFaceCoordU = uv[corner].x;
     outFaceCoordV = uv[corner].y;
-    outDrawInstance = uint(gl_InstanceIndex);
 }

@@ -449,6 +449,12 @@ struct RenderFrameData {
         bool showGrid = true;
         bool isEditorPreview = false;
         bool affectsCameraFit = true;
+        // A thin silhouette identifies functional gameplay pieces. Authored
+        // decorations keep this false even when they reuse a gameplay model.
+        bool interactionOutline = false;
+        // A pick-only volume may supply the silhouette of procedural faces
+        // without adding color geometry, picking, shadows or camera bounds.
+        bool interactionOutlineOnly = false;
         // Identifies the actor an in-world UI prompt should follow. This is
         // deliberately presentation data: overlays must anchor to the same
         // prepared tile that is rendered, not to a live gameplay cell.

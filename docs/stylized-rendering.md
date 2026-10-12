@@ -6,6 +6,20 @@ detail, and broader material highlights make the existing models read more
 like painted forms. The same surface treatment applies to model and terrain
 materials, including point-light illumination.
 
+Interactive pieces have a thin, cool dark-blue contour: heroes and enemies,
+movable rocks/mirrors/ice, controls, platforms and the other functional puzzle
+objects. Ground, walls, rails, decorative blocks and freely placed decorations
+remain unoutlined, even when a decoration reuses an interactive object's model.
+Energy volumes, auras and destination ghosts retain their own effects.
+
+Outline color and width are in
+[`OutlineConfig.hpp`](../src/engine/render/OutlineConfig.hpp). The default width
+is 1.5 display pixels, independent of model size, camera distance and internal
+render scale. Static and animated opaque models use depth-tested expanded
+backfaces; transparent ice uses a contour on the visible surface so its interior
+stays transparent. Contours draw within the existing scene passes, before
+particles and output processing, and do not cast shadows or affect picking.
+
 ## Live tuning
 
 Open the **Lighting** panel in a developer build. Start with **Sun Color**,
