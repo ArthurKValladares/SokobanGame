@@ -58,12 +58,13 @@ std::filesystem::path pathFromUtf8(const char* text)
         std::u8string(reinterpret_cast<const char8_t*>(text)));
 }
 
-cgltf_result readFileForCgltf(
+cgltf_result readFileForCgltfImpl(
     const cgltf_memory_options* memoryOptions,
     const cgltf_file_options* fileOptions,
     const char* path,
     cgltf_size* size,
-    void** data)
+    void** data,
+    bool metadataOnly)
 {
     (void)fileOptions;
     // Mirrors cgltf_default_file_read's ownership contract exactly: the block
@@ -83,15 +84,78 @@ cgltf_result readFileForCgltf(
     stream.seekg(0);
 
     const auto fileSize = static_cast<cgltf_size>(length);
+    cgltf_size readSize = fileSize;
+    cgltf_size parseSize = fileSize;
+    if (metadataOnly) {
+        // cgltf_parse_file normally reads every byte of a GLB, including its
+        // BIN payload. Catalog discovery only needs JSON. Inspect the same
+        // container headers cgltf checks, then give its JSON parser that
+        // chunk alone; mesh and image loading keep the complete-file path.
+        if (fileSize < 12) {
+            return cgltf_result_data_too_short;
+        }
+        std::array<uint8_t, 20> header {};
+        if (!stream.read(reinterpret_cast<char*>(header.data()), 12)) {
+            return cgltf_result_io_error;
+        }
+        const auto word = [](const uint8_t* bytes) {
+            return static_cast<uint32_t>(bytes[0]) |
+                (static_cast<uint32_t>(bytes[1]) << 8U) |
+                (static_cast<uint32_t>(bytes[2]) << 16U) |
+                (static_cast<uint32_t>(bytes[3]) << 24U);
+        };
+        if (word(header.data()) == 0x46546C67U) {
+            const uint32_t version = word(header.data() + 4);
+            if (version != 2) {
+                return version < 2
+                    ? cgltf_result_legacy_gltf
+                    : cgltf_result_unknown_format;
+            }
+            if (word(header.data() + 8) > fileSize || fileSize < 20) {
+                return cgltf_result_data_too_short;
+            }
+            if (!stream.read(reinterpret_cast<char*>(header.data() + 12), 8)) {
+                return cgltf_result_io_error;
+            }
+            readSize = word(header.data() + 12);
+            if (readSize > fileSize - 20) {
+                return cgltf_result_data_too_short;
+            }
+            if (word(header.data() + 16) != 0x4E4F534AU) {
+                return cgltf_result_unknown_format;
+            }
+            const cgltf_size remaining = fileSize - 20 - readSize;
+            if (remaining >= 8) {
+                stream.seekg(static_cast<std::streamoff>(20 + readSize));
+                std::array<uint8_t, 8> binaryHeader {};
+                if (!stream.read(
+                        reinterpret_cast<char*>(binaryHeader.data()), 8)) {
+                    return cgltf_result_io_error;
+                }
+                if (word(binaryHeader.data()) > remaining - 8) {
+                    return cgltf_result_data_too_short;
+                }
+                if (word(binaryHeader.data() + 4) != 0x004E4942U) {
+                    return cgltf_result_unknown_format;
+                }
+            }
+            stream.seekg(20);
+            // cgltf_parse's format sniffing requires twelve bytes, even for
+            // JSON. Padding preserves parsing of unusually short GLB JSON.
+            parseSize = std::max<cgltf_size>(readSize, 12);
+        } else {
+            stream.seekg(0);
+        }
+    }
     void* buffer = allocate
-        ? allocate(memoryOptions->user_data, fileSize)
-        : std::malloc(fileSize != 0 ? fileSize : 1);
+        ? allocate(memoryOptions->user_data, parseSize)
+        : std::malloc(parseSize != 0 ? parseSize : 1);
     if (!buffer) {
         return cgltf_result_out_of_memory;
     }
-    if (fileSize != 0 &&
+    if (readSize != 0 &&
         !stream.read(static_cast<char*>(buffer),
-            static_cast<std::streamsize>(fileSize))) {
+            static_cast<std::streamsize>(readSize))) {
         if (release) {
             release(memoryOptions->user_data, buffer);
         } else {
@@ -100,9 +164,35 @@ cgltf_result readFileForCgltf(
         return cgltf_result_io_error;
     }
 
-    *size = fileSize;
+    if (parseSize > readSize) {
+        std::memset(static_cast<char*>(buffer) + readSize, ' ',
+            parseSize - readSize);
+    }
+    *size = parseSize;
     *data = buffer;
     return cgltf_result_success;
+}
+
+cgltf_result readFileForCgltf(
+    const cgltf_memory_options* memoryOptions,
+    const cgltf_file_options* fileOptions,
+    const char* path,
+    cgltf_size* size,
+    void** data)
+{
+    return readFileForCgltfImpl(
+        memoryOptions, fileOptions, path, size, data, false);
+}
+
+cgltf_result readMetadataFileForCgltf(
+    const cgltf_memory_options* memoryOptions,
+    const cgltf_file_options* fileOptions,
+    const char* path,
+    cgltf_size* size,
+    void** data)
+{
+    return readFileForCgltfImpl(
+        memoryOptions, fileOptions, path, size, data, true);
 }
 
 void releaseFileForCgltf(
@@ -148,12 +238,15 @@ cgltf_options cgltfOptions()
     return options;
 }
 
-// Structure only: the JSON or the GLB's JSON chunk, with no buffer resolved.
-// Enough to answer what a file contains, which is all listGltfAnimationNames
-// wants - and it deliberately still answers for a file whose .bin is missing.
-Document parseDocument(const std::filesystem::path& path)
+// Metadata parsing retains JSON only, including for GLBs. Full parsing keeps
+// the BIN chunk available for cgltf_load_buffers in loadDocument below.
+Document parseDocument(const std::filesystem::path& path, bool metadataOnly)
 {
-    const cgltf_options options = cgltfOptions();
+    cgltf_options options = cgltfOptions();
+    if (metadataOnly) {
+        options.file.read = &readMetadataFileForCgltf;
+        options.type = cgltf_file_type_gltf;
+    }
     const std::string narrowPath = utf8Path(path);
 
     cgltf_data* parsed = nullptr;
@@ -191,7 +284,7 @@ void validateDocumentStructure(
 // retired the previous loader's one-buffer-only limit.
 Document loadDocument(const std::filesystem::path& path)
 {
-    Document document = parseDocument(path);
+    Document document = parseDocument(path, false);
     const cgltf_options options = cgltfOptions();
     const std::string narrowPath = utf8Path(path);
     const cgltf_result result =
@@ -1017,7 +1110,7 @@ GltfSourceTransform makeGltfSourceTransform(
 GltfAssetDependencies inspectGltfAssetDependencies(
     const std::filesystem::path& path)
 {
-    const Document document = parseDocument(path);
+    const Document document = parseDocument(path, true);
     validateDocumentStructure(*document, path);
     const cgltf_data& data = *document;
 
@@ -1446,7 +1539,7 @@ std::vector<std::string> listGltfAnimationNames(const std::filesystem::path& pat
 {
     std::vector<std::string> names;
     try {
-        const Document document = parseDocument(path);
+        const Document document = parseDocument(path, true);
         const cgltf_data& data = *document;
         names.reserve(data.animations_count);
         for (cgltf_size i = 0; i < data.animations_count; ++i) {

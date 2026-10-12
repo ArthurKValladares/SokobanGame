@@ -5,11 +5,13 @@
 #include <chrono>
 #include <bit>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -298,6 +300,120 @@ void testInspectsEmbeddedGlbImage()
     CHECK(dependencies.materials[0].textures.size() == 1);
     CHECK(dependencies.materials[0].textures[0].imageIndex == 0U);
     CHECK(!dependencies.materials[0].textures[0].samplerIndex.has_value());
+}
+
+void testMetadataInspectionPreservesGlbContainerValidation()
+{
+    TEST("metadataInspectionPreservesGlbContainerValidation");
+    TempDirectory temp;
+    const std::filesystem::path model = temp.path() / "container.glb";
+    const std::string json = R"json({
+      "asset":{"version":"2.0"},
+      "buffers":[{"byteLength":8}],
+      "bufferViews":[{"buffer":0,"byteLength":8}],
+      "animations":[{"name":"Idle","samplers":[],"channels":[]}]
+    })json";
+    const std::vector<uint8_t> binary { 1, 2, 3, 4, 5, 6, 7, 8 };
+    const auto reset = [&] { writeGlb(model, json, binary); };
+    const auto replaceWord = [&](uint64_t offset, uint32_t value) {
+        std::vector<uint8_t> bytes;
+        appendUint32(bytes, value);
+        std::fstream stream(model,
+            std::ios::binary | std::ios::in | std::ios::out);
+        stream.seekp(static_cast<std::streamoff>(offset));
+        stream.write(reinterpret_cast<const char*>(bytes.data()), 4);
+    };
+    const auto reject = [&](std::string_view result) {
+        // The metadata reader must reject the same malformed containers as
+        // the complete-file parser used when loading their buffer payloads.
+        const auto checkError = [&](auto&& operation) {
+            try {
+                operation();
+                CHECK(false);
+            } catch (const std::runtime_error& error) {
+                CHECK(std::string_view(error.what()).find(result) !=
+                    std::string_view::npos);
+            }
+        };
+        checkError([&] { (void)inspectGltfAssetDependencies(model); });
+        checkError([&] { (void)loadGltfBufferViewBytes(model, 0); });
+        CHECK(listGltfAnimationNames(model).empty());
+    };
+    const auto checkNames = [&] {
+        CHECK(listGltfAnimationNames(model) ==
+            std::vector<std::string> { "Idle" });
+    };
+
+    reset();
+    const uint64_t completeSize = std::filesystem::file_size(model);
+    const uint64_t binaryHeaderOffset = completeSize - binary.size() - 8;
+    CHECK(inspectGltfAssetDependencies(model).buffers[0].byteLength == 8);
+    CHECK(loadGltfBufferViewBytes(model, 0) ==
+        std::vector<std::byte>({ std::byte { 1 }, std::byte { 2 },
+            std::byte { 3 }, std::byte { 4 }, std::byte { 5 },
+            std::byte { 6 }, std::byte { 7 }, std::byte { 8 } }));
+    checkNames();
+
+    // A truncation is still caught without reading the binary payload,
+    // both through the declared file length and the BIN chunk length.
+    std::filesystem::resize_file(model, completeSize - 1);
+    reject("data too short");
+    replaceWord(8, static_cast<uint32_t>(completeSize - 1));
+    reject("data too short");
+
+    reset();
+    replaceWord(12, static_cast<uint32_t>(completeSize));
+    reject("data too short");
+    reset();
+    replaceWord(16, 0);
+    reject("unknown format");
+    reset();
+    replaceWord(binaryHeaderOffset + 4, 0);
+    reject("unknown format");
+    reset();
+    replaceWord(4, 1);
+    reject("legacy glTF 1.0");
+    reset();
+    replaceWord(4, 3);
+    reject("unknown format");
+    reset();
+    std::filesystem::resize_file(model, 19);
+    replaceWord(8, 19);
+    reject("data too short");
+
+    // cgltf accepts a JSON-only GLB, fewer than eight trailing bytes, a
+    // declared length smaller than the file, and data after a valid BIN.
+    // Retain those behaviors while inspecting only the relevant headers.
+    reset();
+    std::filesystem::resize_file(model, binaryHeaderOffset);
+    replaceWord(8, static_cast<uint32_t>(binaryHeaderOffset));
+    CHECK(inspectGltfAssetDependencies(model).buffers.size() == 1);
+    checkNames();
+    std::filesystem::resize_file(model, binaryHeaderOffset + 4);
+    replaceWord(8, static_cast<uint32_t>(binaryHeaderOffset + 4));
+    CHECK(inspectGltfAssetDependencies(model).buffers.size() == 1);
+    checkNames();
+    reset();
+    replaceWord(8, 20);
+    CHECK(inspectGltfAssetDependencies(model).buffers.size() == 1);
+    checkNames();
+    reset();
+    std::filesystem::resize_file(model, completeSize + 16);
+    CHECK(inspectGltfAssetDependencies(model).buffers.size() == 1);
+    CHECK(loadGltfBufferViewBytes(model, 0).size() == 8);
+    checkNames();
+
+    // JSON extraction still delegates schema/reference validation to cgltf.
+    writeGlb(model, R"json({"asset":{"version":"2.0"},
+        "buffers":[{"byteLength":4}],
+        "bufferViews":[{"buffer":0,"byteLength":8}]})json", binary);
+    try {
+        (void)inspectGltfAssetDependencies(model);
+        CHECK(false);
+    } catch (const std::runtime_error& error) {
+        CHECK(std::string_view(error.what()).find("Invalid glTF file") !=
+            std::string_view::npos);
+    }
 }
 
 void testLoadsMaterialMapBindingsAndAuthoredParameters()
@@ -636,6 +752,7 @@ int main()
     testInspectsExternalAndDataUriDependenciesWithoutLoadingThem();
     testEstimatesPreparedPayloadFromDocumentStructure();
     testInspectsEmbeddedGlbImage();
+    testMetadataInspectionPreservesGlbContainerValidation();
     testLoadsMaterialMapBindingsAndAuthoredParameters();
     testPreservesAuthoredTangentFrameForNormalMapping();
     testPreservesHdrEmissiveStrengthAndStandardEmission();

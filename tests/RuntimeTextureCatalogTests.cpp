@@ -663,6 +663,19 @@ void testPreparedTextureSelectsArtifactOrSourceFallback()
     checkThrows([&] {
         (void)loadPreparedTextureSource(temp.path(), source, true);
     });
+    checkThrows([&] {
+        (void)inspectPreparedTextureSourceBytes(temp.path(), source, true);
+    });
+
+    TextureInterpretation linear = source.interpretation;
+    linear.colorSpace = TextureColorSpace::Linear;
+    writeBytes(artifactPath, buildBc7Ktx2(rgba, linear));
+    checkThrows([&] {
+        (void)loadPreparedTextureSource(temp.path(), source, true);
+    });
+    checkThrows([&] {
+        (void)inspectPreparedTextureSourceBytes(temp.path(), source, true);
+    });
 }
 
 void testManifestTextureIdentityIsShared()

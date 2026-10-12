@@ -42,6 +42,20 @@
 namespace sokoban {
 namespace {
 
+RuntimeTextureCatalog collectTimedRuntimeTextureCatalog(
+    const std::filesystem::path& assetRoot,
+    const AssetManifest& manifest)
+{
+    const auto started = std::chrono::steady_clock::now();
+    RuntimeTextureCatalog catalog =
+        collectRuntimeTextureCatalog(assetRoot, manifest);
+    log::info(log::Category::Rendering)
+        << "Asset startup phase (us): texture-catalog="
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now() - started).count();
+    return catalog;
+}
+
 // Resolve one recipe for all ground caps and bodies. Waiting for the complete
 // participating cohort avoids mismatched bevel heights at shared tile edges.
 // Recheck after asset maintenance, when publication or eviction can change it.
@@ -289,7 +303,7 @@ VulkanRenderer::VulkanRenderer(
     : window_(window)
     , assetRoot_(std::move(assetRoot))
     , runtimeTextureCatalog_(
-          collectRuntimeTextureCatalog(assetRoot_, manifest))
+          collectTimedRuntimeTextureCatalog(assetRoot_, manifest))
     , deviceContext_(window, runtimeTextureCatalog_.textures().size())
     , reconfigurationQueue_({
           .antiAliasing = antiAliasingMode,
@@ -297,6 +311,7 @@ VulkanRenderer::VulkanRenderer(
           .wireframe = false,
       })
     , presentationPolicy_(presentationPolicy)
+    , maxAssetPublicationsPerFrame_(assetLoadingBudget.maxPublicationsPerFrame)
     , parallelScenePreparationEnabled_(parallelScenePreparationEnabled)
     , pointShadowOptimizationsEnabled_(pointShadowOptimizationsEnabled)
     , recorderScratchReuseEnabled_(recorderScratchReuseEnabled)
@@ -639,7 +654,8 @@ void VulkanRenderer::runAssetMaintenance(
     modelResources_.retireCompletedUploads();
     const auto assetPublicationStart = std::chrono::steady_clock::now();
     const VulkanModelResources::PublicationResult publication =
-        modelResources_.publishReadyAssets(1, pendingFrameMask());
+        modelResources_.publishReadyAssets(
+            maxAssetPublicationsPerFrame_, pendingFrameMask());
     const double assetPublicationMilliseconds =
         elapsedMilliseconds(assetPublicationStart);
     if (publication.publications != 0) {

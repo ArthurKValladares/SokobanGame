@@ -43,6 +43,18 @@
 namespace sokoban {
 namespace {
 
+template<class Load>
+auto timedAssetStartup(std::string_view phase, Load&& load)
+{
+    const auto started = std::chrono::steady_clock::now();
+    auto result = std::forward<Load>(load)();
+    log::info(log::Category::Application)
+        << "Asset startup phase (us): " << phase << '='
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now() - started).count();
+    return result;
+}
+
 AntiAliasingMode antiAliasingModeForSamples(int samples)
 {
     switch (samples) {
@@ -183,15 +195,25 @@ Application::Application(ApplicationOptions options)
     , playerProfile_(saveSlots_.loadActiveProfile())
     , startupWindowConfigured_(
           configureStartupWindow(window_, playerProfile_, options.smokeFrames != 0))
-    , assetRoot_(runtimeContentRoot())
-    , assetManifest_(AssetManifest::loadFromFile(assetRoot_ / "manifest.json"))
+    , assetRoot_(timedAssetStartup("content-validation", [] {
+          return runtimeContentRoot();
+      }))
+    , assetManifest_(timedAssetStartup("manifest", [this] {
+          return AssetManifest::loadFromFile(assetRoot_ / "manifest.json");
+      }))
     , audioStartup_(std::async(std::launch::async, [this] {
           return std::make_unique<AudioSystem>(assetRoot_, assetManifest_);
       }))
-    , animationCatalog_(AnimationCatalog::loadFromFile(
-          assetRoot_ / "animation_catalog.json", assetManifest_))
-    , uiFont_(FontAtlas::loadDefault(assetRoot_))
-    , inputPrompts_(assetRoot_, assetManifest_)
+    , animationCatalog_(timedAssetStartup("animation-catalog", [this] {
+          return AnimationCatalog::loadFromFile(
+              assetRoot_ / "animation_catalog.json", assetManifest_);
+      }))
+    , uiFont_(timedAssetStartup("font-atlas", [this] {
+          return FontAtlas::loadDefault(assetRoot_);
+      }))
+    , inputPrompts_(timedAssetStartup("input-prompts", [this] {
+          return InputPromptCatalog(assetRoot_, assetManifest_);
+      }))
     , renderer_(
           window_.nativeHandle(),
           assetRoot_,

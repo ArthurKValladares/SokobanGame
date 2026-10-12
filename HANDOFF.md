@@ -32,6 +32,16 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
+Asset metadata discovery and the configured publication-cap regression pass
+in Debug and optimized builds, alongside ten focused asset/content suites.
+An optimized 1,200-frame capture drains every asset queue with no dropped draws
+or capacity blocks. Three alternating warm launch pairs reduce median model
+resource setup from 96.6 to 23.4 ms; overall first-frame time remains about
+2.3 seconds, with no demonstrated improvement. Evidence is in ignored
+`out/asset-loading-review/`. The broader asset-manifest suite has two stale
+Stone material assertions, also reproduced with the unchanged Debug runner:
+the current boulder authors a base-color texture without normal/ORM maps.
+
 The October 12 editor rotation pass moves default Replace to Q and adds
 Rotate on R for tile and tile-decoration placement. Direction-only palette
 families have one entry; style/behavior choices retain their submenus.
@@ -1082,6 +1092,17 @@ resource setup, applies the saved window mode before the first swapchain, and
 emits first-frame plus Vulkan/audio subphase timings. The comprehensive
 performance runner records matched cold/warm application launches. Collect a
 fresh baseline when changing those paths.
+
+Asset discovery reads only GLB JSON and KTX2 headers, mip indices and format
+descriptors; actual background loads still read the full payload. Both metadata
+paths preserve container validation, and KTX2 estimates include mip descriptors
+so prepared-memory admission matches the loaded payload. The renderer honors
+`AssetLoadingBudget::maxPublicationsPerFrame` (default one). Startup asset logs
+include validation, manifest/catalog, font and prompt phases; the comprehensive
+runner retains them in `AssetPhasesMicroseconds`. The Vulkan startup benchmark
+uses staged game assets and retires uploads between bounded publications to
+avoid exhausting the upload ring. Its `--asset-publication-budget` mode checks
+the renderer's non-default publication cap independently of other smoke fixtures.
 
 ## Documentation rule
 

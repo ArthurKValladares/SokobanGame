@@ -194,6 +194,11 @@ try {
         $firstFrame = [regex]::Match(
             $startupText,
             'Application startup phases \(us\): construction=([0-9]+) first-frame=([0-9]+)')
+        $assetPhases = [ordered]@{}
+        foreach ($phase in [regex]::Matches(
+            $startupText, 'Asset startup phase \(us\): ([a-z-]+)=([0-9]+)')) {
+            $assetPhases[$phase.Groups[1].Value] = [uint64]$phase.Groups[2].Value
+        }
         $startupMeasurements += [pscustomobject]@{
             Name = $startupCase
             ConstructionMicroseconds = if ($firstFrame.Success) {
@@ -204,6 +209,7 @@ try {
             } else { $null }
             ElapsedMicroseconds = [math]::Round(
                 $stopwatch.Elapsed.TotalMilliseconds * 1000.0)
+            AssetPhasesMicroseconds = $assetPhases
             Log = "$startupCase.log"
         }
     }

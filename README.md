@@ -408,6 +408,12 @@ select the Level Editor in the developer workspace on puzzle/effect cases and ad
 workspace and disabled CPU-profiler controls. The startup report records construction,
 first-frame, and process wall time, while its logs break out Vulkan instance,
 device, swapchain, render-resource, pipeline, audio, and renderer phases. Its
+`Asset startup phase (us)` logs also measure content validation, manifest and
+animation catalog loading, font and input-prompt preparation, and runtime
+texture discovery; the startup JSON retains these in `AssetPhasesMicroseconds`.
+Discovery reads GLB JSON and compressed-texture metadata without loading mesh
+or mip payloads. The Vulkan startup benchmark separately measures CPU decoding
+and upload through the point where all requested assets are resident. Its
 full mode adds render-scale, AO, translucency, frustum-culling, point-shadow,
 and command-recorder A/B captures, all seven level 5 screens, and screen 5
 water/reflections, render-scale, and 1x/8x MSAA controls. Repeated baselines

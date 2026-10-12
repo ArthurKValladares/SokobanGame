@@ -168,7 +168,7 @@ struct StartupMetrics {
     StartupMetrics result;
     const Clock::time_point benchmarkStarted = Clock::now();
     const std::filesystem::path assetRoot =
-        std::filesystem::path(SDL_GetBasePath()) / "assets";
+        std::filesystem::path(SOKOBAN_VULKAN_TEST_ASSETS);
 
     Clock::time_point phaseStarted = Clock::now();
     sokoban::validateContentPackage(assetRoot, SOKOBAN_GAME_VERSION);
@@ -255,9 +255,8 @@ struct StartupMetrics {
     const Clock::time_point uploadDeadline =
         phaseStarted + std::chrono::seconds(30);
     do {
-        (void)resources.publishReadyAssets(
-            std::numeric_limits<std::size_t>::max());
         resources.retireCompletedUploads();
+        (void)resources.publishReadyAssets(1);
         stats = resources.loadingStats();
         if (stats.readyRequestedAssets == stats.requestedAssets) {
             break;
@@ -1131,6 +1130,63 @@ PressureMetrics exercisePreparedAssetPressure(
     };
 }
 
+void exerciseRendererAssetPublicationBudget(SDL_Window* window)
+{
+    using namespace sokoban;
+    const auto assetRoot = std::filesystem::path(SOKOBAN_VULKAN_TEST_ASSETS);
+    const auto manifest = AssetManifest::loadFromFile(assetRoot / "manifest.json");
+    auto font = FontAtlas::loadDefault(assetRoot);
+    ScopedTestDirectory temporary("asset-publication-budget");
+    VulkanRenderer renderer(window, assetRoot, temporary.path() / "cache.bin",
+        manifest, font, AntiAliasingMode::None, 100,
+        { .vsync = false },
+        { .maxConcurrentCpuJobs = 4, .maxPublicationsPerFrame = 2,
+            .preparedAssetBytes = 128ULL * 1024ULL * 1024ULL },
+        false, true, true, false);
+    RenderAssetRequirements requirements;
+    for (const char* name : { "BricksA", "WallStone01", "WallStone02" }) {
+        requirements.requireModel(manifest.modelIdByName(name));
+    }
+    renderer.preloadAssets(requirements);
+    UiDrawData ui;
+    ui.viewportSize = { 32, 32 };
+    const auto draw = [&] {
+        renderer.beginDebugUiFrame();
+        const auto frame = renderer.prepareFrame(RenderFrameData {});
+        renderer.drawFrame(frame, ui);
+        if (renderer.hasFatalFailure()) {
+            throw std::runtime_error(std::string(renderer.fatalFailureMessage()));
+        }
+    };
+
+    // Hold all three models at the same publication boundary so the test
+    // measures the per-frame budget independently of decode completion order.
+    ResidencyHold hold;
+    const auto deadline = Clock::now() + std::chrono::seconds(30);
+    while (renderer.assetLoadingStats().modelStages.cpuReady != 3 &&
+        Clock::now() < deadline) {
+        draw();
+        if (renderer.assetLoadingStats().failedAssets != 0) {
+            throw std::runtime_error("Publication budget fixture failed to decode");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (renderer.assetLoadingStats().modelStages.cpuReady != 3) {
+        throw std::runtime_error("Publication budget fixture did not become CPU-ready");
+    }
+    const uint64_t before = renderer.renderStats().assetPublications;
+    hold.release();
+    draw();
+    const auto after = renderer.assetLoadingStats();
+    if (renderer.renderStats().assetPublications - before != 2 ||
+        after.modelStages.cpuReady != 1 || after.modelStages.uploading != 2) {
+        throw std::runtime_error(
+            "Renderer did not publish exactly the configured two assets in one frame");
+    }
+    renderer.waitIdle();
+    std::cout << "Renderer honored the configured two-asset publication budget\n";
+}
+
 void exerciseGroundRimDrawBudgetFallback(SDL_Window* window)
 {
     using namespace sokoban;
@@ -1412,6 +1468,11 @@ int main(int argc, char** argv)
             return 0;
         }
         if (argc == 2 &&
+            std::string_view(argv[1]) == "--asset-publication-budget") {
+            exerciseRendererAssetPublicationBudget(window.get());
+            return 0;
+        }
+        if (argc == 2 &&
             std::string_view(argv[1]) == "--benchmark-startup") {
             const StartupMetrics metrics = benchmarkStartup(window.get());
             std::cout
@@ -1495,6 +1556,7 @@ int main(int argc, char** argv)
                 << " elapsed_us=" << pressure.elapsedMicroseconds << '\n';
         }
         submitNoOp(deviceContext);
+        exerciseRendererAssetPublicationBudget(window.get());
         exerciseGroundRimDrawBudgetFallback(window.get());
         exerciseAnimatedSkyClouds();
         std::cout << "Vulkan hidden-surface smoke test passed\n";

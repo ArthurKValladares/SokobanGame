@@ -32,6 +32,18 @@ struct CompressedTextureArtifact {
     [[nodiscard]] uint64_t residentBytes() const;
 };
 
+struct CompressedTextureArtifactMetadata {
+    CompressedTextureFormat format = CompressedTextureFormat::Bc7Srgb;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t mipLevels = 0;
+    uint64_t residentBytes = 0;
+
+    // Matches the logical payload retained by a loaded artifact, including
+    // each mip's descriptor. Inspection never allocates the mip payloads.
+    [[nodiscard]] uint64_t preparedBytes() const;
+};
+
 // The stable identity digest keeps source URIs out of package paths. Sampling
 // and colour-space interpretation are part of the digest, so incompatible
 // views of the same source bytes never share a Vulkan image.
@@ -64,6 +76,10 @@ inline constexpr std::string_view compressedTextureEncoderRevision =
     std::span<const std::byte> bytes,
     const std::filesystem::path& diagnosticPath = {});
 [[nodiscard]] CompressedTextureArtifact loadBc7Ktx2(
+    const std::filesystem::path& path);
+// Reads only the header, level index and data-format descriptor. Uses the same
+// structural validation as loading, including payload bounds against file size.
+[[nodiscard]] CompressedTextureArtifactMetadata inspectBc7Ktx2(
     const std::filesystem::path& path);
 
 } // namespace sokoban

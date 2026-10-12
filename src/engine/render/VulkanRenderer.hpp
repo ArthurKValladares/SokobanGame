@@ -429,6 +429,7 @@ private:
     FrameTimeTelemetry assetPublicationEventTimeTelemetry_ {};
     uint64_t assetPublications_ = 0;
     uint64_t assetPublicationFrames_ = 0;
+    std::size_t maxAssetPublicationsPerFrame_ = 1;
     bool parallelScenePreparationEnabled_ = true;
     bool pointShadowOptimizationsEnabled_ = true;
     bool recorderScratchReuseEnabled_ = true;

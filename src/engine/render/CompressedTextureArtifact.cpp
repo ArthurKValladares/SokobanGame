@@ -231,6 +231,101 @@ std::string diagnosticLabel(const std::filesystem::path& path)
         std::string(reason));
 }
 
+CompressedTextureArtifactMetadata validateKtx2Header(
+    std::span<const std::byte> bytes,
+    const std::filesystem::path& path)
+{
+    if (bytes.size() < ktx2HeaderBytes ||
+        !std::equal(ktx2Identifier.begin(), ktx2Identifier.end(), bytes.begin())) {
+        invalidKtx(path, "bad identifier or truncated header");
+    }
+    const uint32_t formatValue = readU32(bytes, 12);
+    if (formatValue != static_cast<uint32_t>(CompressedTextureFormat::Bc7Unorm) &&
+        formatValue != static_cast<uint32_t>(CompressedTextureFormat::Bc7Srgb)) {
+        invalidKtx(path, "format is not BC7 UNORM or BC7 SRGB");
+    }
+    CompressedTextureArtifactMetadata metadata {
+        .format = static_cast<CompressedTextureFormat>(formatValue),
+        .width = readU32(bytes, 20),
+        .height = readU32(bytes, 24),
+        .mipLevels = readU32(bytes, 40),
+    };
+    if (readU32(bytes, 16) != 1 || metadata.width == 0 || metadata.height == 0 ||
+        readU32(bytes, 28) != 0 || readU32(bytes, 32) != 0 ||
+        readU32(bytes, 36) != 1 || metadata.mipLevels == 0 ||
+        metadata.mipLevels > mipCount(metadata.width, metadata.height) ||
+        readU32(bytes, 44) != 0) {
+        invalidKtx(path, "unsupported texture shape or header fields");
+    }
+    if (readU32(bytes, 48) != ktx2HeaderBytes + metadata.mipLevels * 24U ||
+        readU32(bytes, 52) != dfdBytes) {
+        invalidKtx(path, "invalid BC7 data format descriptor");
+    }
+    return metadata;
+}
+
+struct Ktx2MipRange {
+    uint64_t offset = 0;
+    uint64_t length = 0;
+};
+
+struct Ktx2Layout {
+    CompressedTextureArtifactMetadata metadata;
+    // A uint32_t image dimension has at most 32 mip levels. Keeping this
+    // bounded avoids allocations proportional to untrusted header values.
+    std::array<Ktx2MipRange, 32> mips {};
+};
+
+Ktx2Layout validateKtx2Layout(
+    std::span<const std::byte> bytes,
+    uint64_t fileBytes,
+    const std::filesystem::path& path)
+{
+    Ktx2Layout layout { .metadata = validateKtx2Header(bytes, path) };
+    CompressedTextureArtifactMetadata& metadata = layout.metadata;
+    const uint32_t dfdOffset = ktx2HeaderBytes + metadata.mipLevels * 24U;
+    if (static_cast<uint64_t>(dfdOffset) + dfdBytes > bytes.size() ||
+        readU32(bytes, dfdOffset) != dfdBytes ||
+        (readU32(bytes, dfdOffset + 12U) & 0xFFU) != 134U ||
+        readU32(bytes, dfdOffset + 16U) != 0x00000303U ||
+        (readU32(bytes, dfdOffset + 20U) & 0xFFU) != 16U) {
+        invalidKtx(path, "invalid BC7 data format descriptor");
+    }
+    const uint32_t expectedTransfer =
+        metadata.format == CompressedTextureFormat::Bc7Srgb ? 2U : 1U;
+    if (((readU32(bytes, dfdOffset + 12U) >> 16U) & 0xFFU) != expectedTransfer) {
+        invalidKtx(path, "format and transfer function disagree");
+    }
+
+    for (uint32_t level = 0; level < metadata.mipLevels; ++level) {
+        const std::size_t index = ktx2HeaderBytes + level * 24U;
+        const uint64_t offset = readU64(bytes, index);
+        const uint64_t length = readU64(bytes, index + 8U);
+        const uint64_t uncompressedLength = readU64(bytes, index + 16U);
+        const uint64_t blocksWide =
+            (static_cast<uint64_t>(std::max(metadata.width >> level, 1U)) + 3U) / 4U;
+        const uint64_t blocksHigh =
+            (static_cast<uint64_t>(std::max(metadata.height >> level, 1U)) + 3U) / 4U;
+        if (blocksWide > std::numeric_limits<uint64_t>::max() / 16U / blocksHigh) {
+            invalidKtx(path, "mip level is too large");
+        }
+        const uint64_t expectedLength = blocksWide * blocksHigh * 16U;
+        if (length != expectedLength || uncompressedLength != length ||
+            offset % 16U != 0 || offset > fileBytes ||
+            length > fileBytes - offset ||
+            length > std::numeric_limits<uint64_t>::max() - metadata.residentBytes) {
+            invalidKtx(path, "invalid mip level offset or size");
+        }
+        layout.mips[level] = { .offset = offset, .length = length };
+        metadata.residentBytes += length;
+    }
+    if (metadata.residentBytes > std::numeric_limits<uint64_t>::max() -
+            static_cast<uint64_t>(metadata.mipLevels) * sizeof(CompressedTextureMip)) {
+        invalidKtx(path, "prepared mip payload is too large");
+    }
+    return layout;
+}
+
 } // namespace
 
 uint64_t CompressedTextureArtifact::residentBytes() const
@@ -240,6 +335,12 @@ uint64_t CompressedTextureArtifact::residentBytes() const
         [](uint64_t total, const CompressedTextureMip& mip) {
             return total + mip.bytes.size();
         });
+}
+
+uint64_t CompressedTextureArtifactMetadata::preparedBytes() const
+{
+    return residentBytes + static_cast<uint64_t>(mipLevels) *
+        sizeof(CompressedTextureMip);
 }
 
 std::filesystem::path compressedTextureArtifactPath(
@@ -446,83 +547,25 @@ CompressedTextureArtifact parseBc7Ktx2(
     std::span<const std::byte> bytes,
     const std::filesystem::path& diagnosticPath)
 {
-    try {
-        if (bytes.size() < ktx2HeaderBytes ||
-            !std::equal(ktx2Identifier.begin(), ktx2Identifier.end(),
-                bytes.begin())) {
-            invalidKtx(diagnosticPath, "bad identifier or truncated header");
-        }
-        const uint32_t formatValue = readU32(bytes, 12);
-        if (formatValue != static_cast<uint32_t>(
-                CompressedTextureFormat::Bc7Unorm) &&
-            formatValue != static_cast<uint32_t>(
-                CompressedTextureFormat::Bc7Srgb)) {
-            invalidKtx(diagnosticPath, "format is not BC7 UNORM or BC7 SRGB");
-        }
-        const uint32_t width = readU32(bytes, 20);
-        const uint32_t height = readU32(bytes, 24);
-        const uint32_t levelCount = readU32(bytes, 40);
-        if (readU32(bytes, 16) != 1 || width == 0 || height == 0 ||
-            readU32(bytes, 28) != 0 || readU32(bytes, 32) != 0 ||
-            readU32(bytes, 36) != 1 || levelCount == 0 ||
-            levelCount > mipCount(width, height) ||
-            readU32(bytes, 44) != 0) {
-            invalidKtx(diagnosticPath, "unsupported texture shape or header fields");
-        }
-        const uint32_t dfdOffset = readU32(bytes, 48);
-        const uint32_t dfdLength = readU32(bytes, 52);
-        if (dfdOffset != ktx2HeaderBytes + levelCount * 24U ||
-            dfdLength != dfdBytes ||
-            static_cast<uint64_t>(dfdOffset) + dfdLength > bytes.size() ||
-            readU32(bytes, dfdOffset) != dfdBytes ||
-            (readU32(bytes, dfdOffset + 12U) & 0xFFU) != 134U ||
-            readU32(bytes, dfdOffset + 16U) != 0x00000303U ||
-            (readU32(bytes, dfdOffset + 20U) & 0xFFU) != 16U) {
-            invalidKtx(diagnosticPath, "invalid BC7 data format descriptor");
-        }
-        const uint32_t expectedTransfer =
-            formatValue == static_cast<uint32_t>(
-                CompressedTextureFormat::Bc7Srgb)
-            ? 2U
-            : 1U;
-        if (((readU32(bytes, dfdOffset + 12U) >> 16U) & 0xFFU) !=
-            expectedTransfer) {
-            invalidKtx(diagnosticPath, "format and transfer function disagree");
-        }
-
-        CompressedTextureArtifact result {
-            .format = static_cast<CompressedTextureFormat>(formatValue),
-            .width = width,
-            .height = height,
-        };
-        result.mips.reserve(levelCount);
-        for (uint32_t level = 0; level < levelCount; ++level) {
-            const std::size_t index = ktx2HeaderBytes + level * 24U;
-            const uint64_t offset = readU64(bytes, index);
-            const uint64_t length = readU64(bytes, index + 8U);
-            const uint64_t uncompressedLength = readU64(bytes, index + 16U);
-            const uint32_t mipWidth = std::max(width >> level, 1U);
-            const uint32_t mipHeight = std::max(height >> level, 1U);
-            const uint64_t expectedLength =
-                static_cast<uint64_t>((mipWidth + 3U) / 4U) *
-                ((mipHeight + 3U) / 4U) * 16U;
-            if (length != expectedLength || uncompressedLength != length ||
-                offset % 16U != 0 || offset > bytes.size() ||
-                length > bytes.size() - offset) {
-                invalidKtx(diagnosticPath, "invalid mip level offset or size");
-            }
-            result.mips.push_back({
-                .width = mipWidth,
-                .height = mipHeight,
-                .bytes = std::vector<std::byte>(
-                    bytes.begin() + static_cast<std::ptrdiff_t>(offset),
-                    bytes.begin() + static_cast<std::ptrdiff_t>(offset + length)),
-            });
-        }
-        return result;
-    } catch (const std::out_of_range&) {
-        invalidKtx(diagnosticPath, "truncated level index");
+    const Ktx2Layout layout = validateKtx2Layout(bytes, bytes.size(), diagnosticPath);
+    const CompressedTextureArtifactMetadata& metadata = layout.metadata;
+    CompressedTextureArtifact result {
+        .format = metadata.format,
+        .width = metadata.width,
+        .height = metadata.height,
+    };
+    result.mips.reserve(metadata.mipLevels);
+    for (uint32_t level = 0; level < metadata.mipLevels; ++level) {
+        const Ktx2MipRange& mip = layout.mips[level];
+        result.mips.push_back({
+            .width = std::max(metadata.width >> level, 1U),
+            .height = std::max(metadata.height >> level, 1U),
+            .bytes = std::vector<std::byte>(
+                bytes.begin() + static_cast<std::ptrdiff_t>(mip.offset),
+                bytes.begin() + static_cast<std::ptrdiff_t>(mip.offset + mip.length)),
+        });
     }
+    return result;
 }
 
 CompressedTextureArtifact loadBc7Ktx2(const std::filesystem::path& path)
@@ -544,6 +587,43 @@ CompressedTextureArtifact loadBc7Ktx2(const std::filesystem::path& path)
         throw std::runtime_error("Cannot read BC7 KTX2 artifact: " + path.string());
     }
     return parseBc7Ktx2(bytes, path);
+}
+
+CompressedTextureArtifactMetadata inspectBc7Ktx2(const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary | std::ios::ate);
+    if (!stream) {
+        throw std::runtime_error("Cannot open BC7 KTX2 artifact: " + path.string());
+    }
+    const std::streampos end = stream.tellg();
+    if (end < 0) {
+        throw std::runtime_error("Cannot size BC7 KTX2 artifact: " + path.string());
+    }
+    const uint64_t fileBytes = static_cast<uint64_t>(end);
+    if (fileBytes < ktx2HeaderBytes) {
+        invalidKtx(path, "bad identifier or truncated header");
+    }
+
+    std::array<std::byte, ktx2HeaderBytes + 32U * 24U + dfdBytes> bytes {};
+    stream.seekg(0);
+    stream.read(reinterpret_cast<char*>(bytes.data()), ktx2HeaderBytes);
+    if (!stream) {
+        throw std::runtime_error("Cannot read BC7 KTX2 artifact: " + path.string());
+    }
+    const CompressedTextureArtifactMetadata header =
+        validateKtx2Header(std::span(bytes).first(ktx2HeaderBytes), path);
+    const std::size_t metadataBytes =
+        ktx2HeaderBytes + header.mipLevels * 24U + dfdBytes;
+    if (metadataBytes > fileBytes) {
+        invalidKtx(path, "invalid BC7 data format descriptor");
+    }
+    stream.read(reinterpret_cast<char*>(bytes.data() + ktx2HeaderBytes),
+        static_cast<std::streamsize>(metadataBytes - ktx2HeaderBytes));
+    if (!stream) {
+        throw std::runtime_error("Cannot read BC7 KTX2 artifact: " + path.string());
+    }
+    return validateKtx2Layout(std::span(bytes).first(metadataBytes), fileBytes, path)
+        .metadata;
 }
 
 } // namespace sokoban

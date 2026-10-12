@@ -1,4 +1,5 @@
 #include "TestHarness.hpp"
+#include "ScopedTestDirectory.hpp"
 
 #include "engine/render/CompressedTextureArtifact.hpp"
 #include "engine/render/TextureMipResidency.hpp"
@@ -9,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <span>
 #include <stdexcept>
 #include <vector>
 
@@ -28,6 +30,32 @@ sokoban::ImageData oddImage()
             static_cast<std::byte>(pixel == 7 ? 96U : 255U);
     }
     return image;
+}
+
+void writeArtifact(
+    const std::filesystem::path& path,
+    std::span<const std::byte> bytes)
+{
+    std::ofstream stream(path, std::ios::binary);
+    stream.write(reinterpret_cast<const char*>(bytes.data()),
+        static_cast<std::streamsize>(bytes.size()));
+    if (!stream) {
+        throw std::runtime_error("Cannot write test KTX2 artifact");
+    }
+}
+
+void writeU32(std::vector<std::byte>& bytes, std::size_t offset, uint32_t value)
+{
+    for (uint32_t shift = 0; shift < 32; shift += 8) {
+        bytes[offset++] = static_cast<std::byte>(value >> shift);
+    }
+}
+
+void writeU64(std::vector<std::byte>& bytes, std::size_t offset, uint64_t value)
+{
+    for (uint32_t shift = 0; shift < 64; shift += 8) {
+        bytes[offset++] = static_cast<std::byte>(value >> shift);
+    }
 }
 
 void testRoundTripPreservesFormatDimensionsAndMipBytes()
@@ -92,27 +120,96 @@ void testLinearNonMipmappedArtifactAndStableIdentityPath()
 
 void testMalformedArtifactsAreRejected()
 {
+    const ScopedTestDirectory temp("sokoban-ktx2-inspection");
+    const std::filesystem::path path = temp.path() / "malformed.ktx2";
+    const auto reject = [&](const std::vector<std::byte>& malformed,
+                            const char* label) {
+        writeArtifact(path, malformed);
+        checkThrows([&] { (void)sokoban::parseBc7Ktx2(malformed); }, label);
+        checkThrows([&] { (void)sokoban::loadBc7Ktx2(path); }, label);
+        checkThrows([&] { (void)sokoban::inspectBc7Ktx2(path); }, label);
+    };
     sokoban::TextureInterpretation interpretation {};
-    std::vector<std::byte> bytes =
+    const std::vector<std::byte> bytes =
         sokoban::buildBc7Ktx2(oddImage(), interpretation);
 
     std::vector<std::byte> badIdentifier = bytes;
     badIdentifier[0] = std::byte { 0 };
-    checkThrows(
-        [&] { (void)sokoban::parseBc7Ktx2(badIdentifier); },
-        "bad KTX2 identifier rejected");
+    reject(badIdentifier, "bad KTX2 identifier rejected");
 
-    std::vector<std::byte> truncated(bytes.begin(), bytes.begin() + 90);
-    checkThrows(
-        [&] { (void)sokoban::parseBc7Ktx2(truncated); },
-        "truncated level payload rejected");
+    reject(std::vector<std::byte>(bytes.begin(), bytes.begin() + 20),
+        "truncated header rejected");
+    reject(std::vector<std::byte>(bytes.begin(), bytes.begin() + 90),
+        "truncated level index rejected");
+    reject(std::vector<std::byte>(bytes.begin(), bytes.begin() + 160),
+        "truncated data format descriptor rejected");
+    reject(std::vector<std::byte>(bytes.begin(), bytes.end() - 1),
+        "truncated mip payload rejected even during metadata inspection");
 
     std::vector<std::byte> wrongTransfer = bytes;
     // DFD begins at 80 + 3 * 24 = 152. Transfer is byte 2 of model word.
     wrongTransfer[152 + 12 + 2] = std::byte { 1 };
-    checkThrows(
-        [&] { (void)sokoban::parseBc7Ktx2(wrongTransfer); },
-        "sRGB Vulkan format with linear DFD rejected");
+    reject(wrongTransfer, "sRGB Vulkan format with linear DFD rejected");
+
+    std::vector<std::byte> wrongDescriptor = bytes;
+    writeU32(wrongDescriptor, 48, 0xFFFFFFF0U);
+    reject(wrongDescriptor, "out-of-range data format descriptor rejected");
+
+    std::vector<std::byte> wrongLevelCount = bytes;
+    writeU32(wrongLevelCount, 40, 0xFFFFFFFFU);
+    reject(wrongLevelCount, "unbounded mip count rejected before reading metadata");
+
+    std::vector<std::byte> wrongOffset = bytes;
+    writeU64(wrongOffset, 80, static_cast<uint64_t>(bytes.size()) + 16U);
+    reject(wrongOffset, "out-of-range mip offset rejected");
+    writeU64(wrongOffset, 80, 193);
+    reject(wrongOffset, "unaligned mip offset rejected");
+
+    std::vector<std::byte> wrongLength = bytes;
+    writeU64(wrongLength, 88, 16);
+    reject(wrongLength, "wrong mip payload length rejected");
+    writeU64(wrongLength, 88, 32);
+    writeU64(wrongLength, 96, 16);
+    reject(wrongLength, "mismatched uncompressed length rejected");
+
+    std::vector<std::byte> oversizedDimensions = bytes;
+    writeU32(oversizedDimensions, 20, 0xFFFFFFFFU);
+    writeU32(oversizedDimensions, 24, 0xFFFFFFFFU);
+    writeU64(oversizedDimensions, 88, 0);
+    writeU64(oversizedDimensions, 96, 0);
+    reject(oversizedDimensions, "overflowing mip dimensions rejected");
+}
+
+void testMetadataInspectionMatchesLoadedPayload()
+{
+    const ScopedTestDirectory temp("sokoban-ktx2-metadata");
+    const std::filesystem::path path = temp.path() / "texture.ktx2";
+    for (const auto colorSpace : {
+             sokoban::TextureColorSpace::Srgb,
+             sokoban::TextureColorSpace::Linear,
+         }) {
+        for (const auto minFilter : {
+                 sokoban::TextureMinificationFilter::Linear,
+                 sokoban::TextureMinificationFilter::LinearMipmapLinear,
+             }) {
+            const std::vector<std::byte> bytes = sokoban::buildBc7Ktx2(
+                oddImage(), { .colorSpace = colorSpace, .minFilter = minFilter });
+            writeArtifact(path, bytes);
+            const sokoban::CompressedTextureArtifact loaded = sokoban::loadBc7Ktx2(path);
+            const sokoban::CompressedTextureArtifactMetadata metadata =
+                sokoban::inspectBc7Ktx2(path);
+            CHECK(metadata.format == loaded.format);
+            CHECK(metadata.width == loaded.width);
+            CHECK(metadata.height == loaded.height);
+            CHECK(metadata.mipLevels == loaded.mips.size());
+            CHECK(metadata.residentBytes == loaded.residentBytes());
+            CHECK(metadata.preparedBytes() == loaded.residentBytes() +
+                loaded.mips.size() * sizeof(sokoban::CompressedTextureMip));
+        }
+    }
+    checkThrows([&] {
+        (void)sokoban::inspectBc7Ktx2(temp.path() / "missing.ktx2");
+    }, "missing artifact inspection is reported");
 }
 
 void testMipResidencyChoosesTheFinestCompleteTailThatFits()
@@ -202,6 +299,7 @@ int main()
     testRoundTripPreservesFormatDimensionsAndMipBytes();
     testLinearNonMipmappedArtifactAndStableIdentityPath();
     testMalformedArtifactsAreRejected();
+    testMetadataInspectionMatchesLoadedPayload();
     testMipResidencyChoosesTheFinestCompleteTailThatFits();
     testInvalidationCoversEveryInterpretationOfOneSource();
 

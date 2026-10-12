@@ -92,7 +92,7 @@ std::vector<std::byte> dataUriBytes(const std::string& uri)
     return decodeBase64(std::string_view(uri).substr(comma + 1));
 }
 
-std::optional<CompressedTextureArtifact> preparedBc7Artifact(
+std::optional<std::filesystem::path> preparedBc7ArtifactPath(
     const std::filesystem::path& assetRoot,
     const TextureSourceIdentity& identity,
     bool supportsBc7)
@@ -106,17 +106,23 @@ std::optional<CompressedTextureArtifact> preparedBc7Artifact(
     if (!std::filesystem::is_regular_file(artifactPath, error)) {
         return std::nullopt;
     }
-    CompressedTextureArtifact artifact = loadBc7Ktx2(artifactPath);
+    return artifactPath;
+}
+
+void validateArtifactColorSpace(
+    CompressedTextureFormat format,
+    const TextureSourceIdentity& identity,
+    const std::filesystem::path& artifactPath)
+{
     const CompressedTextureFormat expected =
         identity.interpretation.colorSpace == TextureColorSpace::Srgb
         ? CompressedTextureFormat::Bc7Srgb
         : CompressedTextureFormat::Bc7Unorm;
-    if (artifact.format != expected) {
+    if (format != expected) {
         throw std::runtime_error(
             "Compressed texture artifact has the wrong colour space: " +
             artifactPath.string());
     }
-    return artifact;
 }
 
 uint64_t inspectRgbaTextureSourceBytes(
@@ -181,9 +187,11 @@ PreparedTextureSource loadPreparedTextureSource(
     const TextureSourceIdentity& identity,
     bool supportsBc7)
 {
-    if (std::optional<CompressedTextureArtifact> artifact =
-            preparedBc7Artifact(assetRoot, identity, supportsBc7)) {
-        return std::move(*artifact);
+    if (const std::optional<std::filesystem::path> path =
+            preparedBc7ArtifactPath(assetRoot, identity, supportsBc7)) {
+        CompressedTextureArtifact artifact = loadBc7Ktx2(*path);
+        validateArtifactColorSpace(artifact.format, identity, *path);
+        return artifact;
     }
     return loadRgbaTextureSource(assetRoot, identity.source);
 }
@@ -208,9 +216,11 @@ uint64_t inspectPreparedTextureSourceBytes(
     const TextureSourceIdentity& identity,
     bool supportsBc7)
 {
-    if (const std::optional<CompressedTextureArtifact> artifact =
-            preparedBc7Artifact(assetRoot, identity, supportsBc7)) {
-        return preparedTexturePayloadBytes(*artifact);
+    if (const std::optional<std::filesystem::path> path =
+            preparedBc7ArtifactPath(assetRoot, identity, supportsBc7)) {
+        const CompressedTextureArtifactMetadata metadata = inspectBc7Ktx2(*path);
+        validateArtifactColorSpace(metadata.format, identity, *path);
+        return metadata.preparedBytes();
     }
     return inspectRgbaTextureSourceBytes(assetRoot, identity.source);
 }
