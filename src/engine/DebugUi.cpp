@@ -1739,7 +1739,14 @@ DebugUi::DrawResult DebugUi::draw(GameViewport gameViewport)
             ImGui::SetNextWindowDockID(toolsDockId, ImGuiCond_FirstUseEver);
         }
         if (ImGui::Begin(tab.name.c_str(), &tab.open)) {
-            tab.callback();
+            // Begin permits hidden, newly created dock tabs to submit their
+            // contents for first-frame sizing. Their dock already supplies a
+            // size, and callbacks can load editor files and GPU thumbnails.
+            // Keep that work lazy until the tab is actually selected.
+            const ImGuiWindow* window = ImGui::GetCurrentWindow();
+            if (!window->DockIsActive || window->DockTabIsVisible) {
+                tab.callback();
+            }
         }
         ImGui::End();
     }

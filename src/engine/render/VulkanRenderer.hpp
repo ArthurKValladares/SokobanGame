@@ -365,6 +365,9 @@ private:
     SDL_Window* window_ = nullptr;
     std::filesystem::path assetRoot_;
     RuntimeTextureCatalog runtimeTextureCatalog_;
+    // Declared after the catalog so exception unwinding joins discovery before
+    // destroying the catalog or asset root its worker and join callback use.
+    std::future<RuntimeTextureCatalog> catalogStartup_;
     VulkanDeviceContext deviceContext_;
     VulkanPipelineCache pipelineCache_;
     VulkanGpuProfiler gpuProfiler_;

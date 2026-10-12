@@ -10,7 +10,10 @@ namespace sokoban {
 
 class AssetManifest;
 class AnimationCatalog;
+class CampaignSession;
 class Level;
+class OverworldMap;
+struct PlayerProfile;
 
 class RenderAssetRequirements {
 public:
@@ -43,10 +46,26 @@ private:
     const AssetManifest& manifest,
     std::optional<LevelLocation> location = std::nullopt,
     const AnimationCatalog* animations = nullptr);
+// Warm action clips and brief effects before their first use. This excludes
+// models and terrain textures, allowing composed worlds to stream those from
+// their visible frames without losing an actor's first pose or effect burst.
+[[nodiscard]] RenderAssetRequirements renderActionAssetRequirementsForLevel(
+    const Level& level,
+    const AssetManifest& manifest,
+    const AnimationCatalog* animations = nullptr);
 [[nodiscard]] RenderAssetRequirements renderAssetRequirementsForFrame(
     const RenderFrameData& frame);
 void renderAssetRequirementsForFrame(
     const RenderFrameData& frame,
     RenderAssetRequirements& requirements);
+
+// Plans speculative puzzle work without reading any screen files. A loaded
+// puzzle warms only its immediate successor. In the overworld, warm selectable
+// flags on the active authored screen; crossing to another screen refreshes
+// the plan. A legacy single-screen overworld uses its authored target list.
+[[nodiscard]] std::vector<LevelLocation> puzzleAssetPrefetchTargets(
+    const CampaignSession& campaign,
+    const PlayerProfile& profile,
+    const OverworldMap* overworldMap = nullptr);
 
 } // namespace sokoban

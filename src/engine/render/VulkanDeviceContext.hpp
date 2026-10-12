@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string_view>
 
 namespace sokoban {
@@ -30,6 +31,12 @@ public:
     VulkanDeviceContext(
         SDL_Window* window,
         std::size_t requiredTextureDescriptors = 1);
+    // Resolve the exact content requirement after instance/surface creation,
+    // before selecting hardware. CPU asset discovery can run concurrently;
+    // every Vulkan and SDL operation still runs on the calling thread.
+    VulkanDeviceContext(
+        SDL_Window* window,
+        std::function<std::size_t()> resolveTextureDescriptorRequirement);
     ~VulkanDeviceContext();
 
     VulkanDeviceContext(const VulkanDeviceContext&) = delete;

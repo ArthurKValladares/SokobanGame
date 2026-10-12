@@ -71,14 +71,17 @@ bool supportsValidationLayer()
 VulkanDeviceContext::VulkanDeviceContext(
     SDL_Window* window,
     std::size_t requiredTextureDescriptors)
+    : VulkanDeviceContext(window, [requiredTextureDescriptors] {
+          return requiredTextureDescriptors;
+      })
+{
+}
+
+VulkanDeviceContext::VulkanDeviceContext(
+    SDL_Window* window,
+    std::function<std::size_t()> resolveTextureDescriptorRequirement)
     : window_(window)
 {
-    if (requiredTextureDescriptors > std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error(
-            "Texture descriptor requirement is outside the supported range");
-    }
-    requiredTextureDescriptors_ = std::max(
-        static_cast<uint32_t>(requiredTextureDescriptors), 1U);
     try {
         using StartupClock = std::chrono::steady_clock;
         const StartupClock::time_point started = StartupClock::now();
@@ -95,6 +98,15 @@ VulkanDeviceContext::VulkanDeviceContext(
         const auto instanceMicroseconds = finishPhase();
         createSurface();
         const auto surfaceMicroseconds = finishPhase();
+        const std::size_t requiredTextureDescriptors =
+            resolveTextureDescriptorRequirement();
+        if (requiredTextureDescriptors > std::numeric_limits<uint32_t>::max()) {
+            throw std::runtime_error(
+                "Texture descriptor requirement is outside the supported range");
+        }
+        requiredTextureDescriptors_ = std::max(
+            static_cast<uint32_t>(requiredTextureDescriptors), 1U);
+        const auto textureRequirementMicroseconds = finishPhase();
         pickPhysicalDevice();
         const auto physicalDeviceMicroseconds = finishPhase();
         createDevice();
@@ -110,6 +122,7 @@ VulkanDeviceContext::VulkanDeviceContext(
             << "Vulkan device startup phases (us): instance="
             << instanceMicroseconds
             << " surface=" << surfaceMicroseconds
+            << " texture-requirement-wait=" << textureRequirementMicroseconds
             << " physical-device=" << physicalDeviceMicroseconds
             << " logical-device=" << logicalDeviceMicroseconds
             << " allocator=" << allocatorMicroseconds
@@ -275,6 +288,14 @@ void VulkanDeviceContext::waitIdle() const
 
 void VulkanDeviceContext::createInstance()
 {
+    auto phaseStarted = std::chrono::steady_clock::now();
+    const auto finishPhase = [&phaseStarted]() {
+        const auto now = std::chrono::steady_clock::now();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+            now - phaseStarted).count();
+        phaseStarted = now;
+        return elapsed;
+    };
     const VkApplicationInfo appInfo {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pApplicationName = "Sokoban 3D",
@@ -294,6 +315,7 @@ void VulkanDeviceContext::createInstance()
     }
     std::vector<const char*> extensions(
         sdlExtensions, sdlExtensions + sdlExtensionCount);
+    const auto sdlExtensionsMicroseconds = finishPhase();
 
     std::vector<const char*> layers = validationLayers();
     if (!layers.empty() && !supportsValidationLayer()) {
@@ -312,6 +334,7 @@ void VulkanDeviceContext::createInstance()
     }
     const VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo =
         vulkanDebug::validationMessengerCreateInfo();
+    const auto validationProbesMicroseconds = finishPhase();
 
     const VkInstanceCreateInfo createInfo {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -325,9 +348,17 @@ void VulkanDeviceContext::createInstance()
     vkCheck(
         vkCreateInstance(&createInfo, nullptr, &instance_),
         "vkCreateInstance failed");
+    const auto instanceMicroseconds = finishPhase();
     if (enableDebugUtils) {
         createValidationMessenger();
     }
+    const auto validationMessengerMicroseconds = finishPhase();
+    log::info(log::Category::Rendering)
+        << "Vulkan instance startup phases (us): sdl-extensions="
+        << sdlExtensionsMicroseconds
+        << " validation-probes=" << validationProbesMicroseconds
+        << " vk-create-instance=" << instanceMicroseconds
+        << " validation-messenger=" << validationMessengerMicroseconds;
 }
 
 void VulkanDeviceContext::createSurface()

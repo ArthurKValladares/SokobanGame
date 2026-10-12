@@ -32,13 +32,21 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
-Asset metadata discovery and the configured publication-cap regression pass
-in Debug and optimized builds, alongside ten focused asset/content suites.
-An optimized 1,200-frame capture drains every asset queue with no dropped draws
-or capacity blocks. Three alternating warm launch pairs reduce median model
-resource setup from 96.6 to 23.4 ms; overall first-frame time remains about
-2.3 seconds, with no demonstrated improvement. Evidence is in ignored
-`out/asset-loading-review/`. The broader asset-manifest suite has two stale
+Debug and optimized builds pass eleven focused asset/content, campaign, ImGui
+and Vulkan thumbnail suites. Optimized 1,200-frame overworld and puzzle captures
+and a 480-frame Debug validation capture drain every asset queue with no dropped
+draws or capacity blocks. The Debug capture has no VUID messages; the existing
+missing Epic overlay manifest still produces a loader error.
+
+Three alternating warm launch pairs, using the same complete executable path,
+reduce median title first-frame time from 2.42 to 1.70 seconds and gameplay
+from 2.82 to 1.65 seconds on this machine. Catalog discovery overlaps instance
+creation (about 140 ms hidden), and progressive editor thumbnails reduce initial
+workspace work from about 240 ms to 2 ms. Vulkan instance timings also improve
+in these samples but remain driver-dependent; do not attribute the whole
+end-to-end gain to asset work. Evidence is in ignored `out/startup-critical-path/`.
+The earlier metadata/publication-cap evidence remains in `out/asset-loading-review/`.
+The broader asset-manifest suite has two stale
 Stone material assertions, also reproduced with the unchanged Debug runner:
 the current boulder authors a base-color texture without normal/ORM maps.
 
@@ -1092,6 +1100,29 @@ resource setup, applies the saved window mode before the first swapchain, and
 emits first-frame plus Vulkan/audio subphase timings. The comprehensive
 performance runner records matched cold/warm application launches. Collect a
 fresh baseline when changing those paths.
+
+Runtime texture-catalog discovery also overlaps Vulkan instance and surface
+creation. Join its future before physical-device selection, preserving the
+exact descriptor requirement and stable texture identities. SDL and Vulkan
+initialization still run on the main thread. Window, instance, application
+first-frame and UI subphase logs distinguish driver waits from asset work.
+Compare binaries under the same complete executable path: vendor Vulkan
+layers can behave differently for renamed diagnostic executables.
+
+Do not queue the whole campaign or composed overworld at startup. Each frame
+requests its exact visible assets; puzzles additionally warm action assets.
+After the first draw, speculative work covers only selectable targets on the
+active overworld screen or the immediate next puzzle screen. Refresh after
+screen transitions and profile changes. On the title, a saved puzzle warms
+only its current screen. Source-watcher scanning begins after the first draw.
+Hidden docked editor tabs must not run content callbacks for ImGui's initial
+sizing: they can synchronously load thumbnails and scan source assets. The
+workspace's ImGui regression covers lazy tabs, tab focus and floating windows.
+Visible palette rows request thumbnails without decoding or uploading inline;
+at most one pending thumbnail loads before each later UI frame. Missing files
+remain cached, and invalidation clears both cached and queued work. The
+`thumbnail_loading_budget` Vulkan regression checks the deferred upload budget,
+deduplication, cached misses and progressive reloads.
 
 Asset discovery reads only GLB JSON and KTX2 headers, mip indices and format
 descriptors; actual background loads still read the full payload. Both metadata

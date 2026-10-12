@@ -4,6 +4,7 @@
 #include "TestHarness.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/DebugUi.hpp"
 #include "engine/EditorTilePalette.hpp"
 #include "engine/LevelEditorDebugUi.hpp"
 
@@ -728,6 +729,83 @@ void mossPaletteOffersEveryLayoutAndVariation()
     CHECK(panel.shows("Transform: TileDecorationMossEnd"));
 }
 
+void hiddenDockedTabsDeferTheirCallbacks()
+{
+    TEST("hiddenDockedTabsDeferTheirCallbacks");
+    ImGuiContext* previous = ImGui::GetCurrentContext();
+    ImGuiContext* context = ImGui::CreateContext();
+    struct Cleanup {
+        ImGuiContext* previous;
+        ImGuiContext* context;
+        ~Cleanup()
+        {
+            DebugUi::clearTabs();
+            ImGui::DestroyContext(context);
+            ImGui::SetCurrentContext(previous);
+        }
+    } cleanup { previous, context };
+    auto& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.LogFilename = nullptr;
+    io.DisplaySize = { 1280.0f, 720.0f };
+    io.DeltaTime = 1.0f / 60.0f;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.Fonts->Build();
+    io.Fonts->SetTexID(1);
+    DebugUi::clearTabs();
+    DebugUi::initialize();
+    int summaryCalls = 0;
+    int browserCalls = 0;
+    int hiddenCalls = 0;
+    const auto content = [&](int& calls) {
+        ++calls;
+        const ImGuiWindow* window = ImGui::GetCurrentWindow();
+        if (window->DockIsActive && !window->DockTabIsVisible) {
+            ++hiddenCalls;
+        }
+        ImGui::TextUnformatted("Content is loaded only when this tab is shown.");
+    };
+    DebugUi::addTab("Summary", [&] { content(summaryCalls); });
+    DebugUi::addTab("Asset Browser", [&] { content(browserCalls); });
+    const auto frame = [] {
+        ImGui::NewFrame();
+        (void)DebugUi::draw({});
+        ImGui::Render();
+    };
+
+    // Newly created ImGui windows permit submission for sizing, including
+    // hidden dock tabs. Those tabs must not initiate file or GPU loads.
+    frame();
+    CHECK(hiddenCalls == 0);
+    CHECK(summaryCalls + browserCalls <= 1);
+    frame();
+    frame();
+    CHECK(hiddenCalls == 0);
+    CHECK(summaryCalls + browserCalls > 0);
+
+    // Programmatic focus still selects a previously hidden tab and begins
+    // its lazy content work once it becomes the visible dock tab.
+    const int beforeFocus = browserCalls;
+    DebugUi::requestTabFocus("Asset Browser");
+    frame();
+    frame();
+    frame();
+    CHECK(browserCalls > beforeFocus);
+    CHECK(hiddenCalls == 0);
+
+    // Floating tool windows are independently visible and keep their normal
+    // callback behavior instead of being treated as unselected dock tabs.
+    ImGuiWindow* browser = ImGui::FindWindowByName("Asset Browser");
+    CHECK(browser != nullptr);
+    if (browser) {
+        ImGui::SetWindowDock(browser, 0, ImGuiCond_Always);
+        const int beforeUndock = browserCalls;
+        frame();
+        frame();
+        CHECK(browserCalls > beforeUndock);
+    }
+}
+
 } // namespace
 #endif
 
@@ -745,6 +823,7 @@ int main()
         tileDecorationTabChoosesBrushAndKeepsPlacedListsSeparate();
         decorationListsAndInspectorsRespectLayerLock();
         mossPaletteOffersEveryLayoutAndVariation();
+        hiddenDockedTabsDeferTheirCallbacks();
     } catch (const std::exception& error) {
         std::cerr << "Editor ImGui regression failed: " << error.what() << '\n';
         return 1;

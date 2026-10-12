@@ -7,6 +7,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <unordered_map>
 
@@ -45,10 +46,15 @@ public:
 
     [[nodiscard]] bool valid() const { return device_ != VK_NULL_HANDLE; }
 
-    // Loads the baked thumbnail for `tile` on first use and returns a handle
-    // ImGui can draw, or null when there is no baked file. Callers must treat
-    // null as "draw something else".
+    // Requests the baked thumbnail for `tile` and returns an existing handle.
+    // A first request only queues work; null means pending or no baked file,
+    // so callers must draw a fallback until a later frame has loaded it.
     [[nodiscard]] VkDescriptorSet thumbnailFor(TileType tile);
+
+    // Services at most one request before the UI frame begins. File decoding
+    // and the synchronous GPU upload stay on the main thread, but the first
+    // palette draw cannot trigger a batch of loads and fence waits.
+    void servicePendingThumbnails();
 
     // Drops every loaded thumbnail, so a re-bake can be picked up without
     // restarting.
@@ -60,8 +66,8 @@ private:
         // No sampler: this ImGui version's AddTexture takes only a view and a
         // layout, and uses its own sampler.
         VkDescriptorSet imguiTexture = VK_NULL_HANDLE;
-        // Distinguishes "looked and found nothing" from "not looked at yet",
-        // so a missing file is not retried every frame.
+        // A completed request with no usable file; a queued placeholder keeps
+        // the default value until serviced.
         bool missing = false;
     };
 
@@ -76,6 +82,7 @@ private:
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     std::filesystem::path assetRoot_;
     std::unordered_map<int, Thumbnail> cache_;
+    std::deque<TileType> pending_;
 };
 
 } // namespace sokoban

@@ -36,7 +36,7 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 - Versioned profiles with atomic writes, backups, corrupt-save recovery,
   per-screen checkpoints, exact entity state, and undo-stack persistence.
 - Manifest-driven lazy asset loading with task-system CPU preparation and
-  background prefetching for upcoming levels.
+  background prefetching for nearby selectable puzzles and the next screen.
 - A transactional level editor whose document and filesystem logic do not
   depend on ImGui, SDL, or Vulkan.
 - Per-screen camera tilt and rotation authored in the level editor, with live
@@ -1465,8 +1465,15 @@ re-encoded. Deleting the cache is always safe. The shipping presets turn both
 off and stage from scratch.
 
 The game loads from the staged `assets/` tree. Runtime asset requests are lazy;
-CPU work uses the task system, and requirements for the current and next level
-are prefetched to reduce level-transition stalls. Decoration model references
+CPU decoding uses the task system, while uploads and publication are bounded
+per frame. The renderer requests the assets in the visible frame, including
+only the visible overworld neighborhood. Puzzles also request their action
+assets. Speculative prefetch begins after the first draw: selectable puzzles
+on the active overworld screen, or the immediate next screen of a puzzle.
+The title can warm its saved puzzle screen without loading the whole campaign.
+Editor thumbnails are requested only for visible palette rows and load one
+per later frame, using a swatch while pending. Hidden editor tabs stay lazy.
+Decoration model references
 participate in the same requirement collection, validation, staging, and
 prefetch path as gameplay models.
 

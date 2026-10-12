@@ -5,6 +5,7 @@
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/OverworldMap.hpp"
+#include "engine/TileThumbnailBake.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/VulkanDeviceContext.hpp"
@@ -1187,6 +1188,86 @@ void exerciseRendererAssetPublicationBudget(SDL_Window* window)
     std::cout << "Renderer honored the configured two-asset publication budget\n";
 }
 
+int exerciseThumbnailLoadingBudget(SDL_Window* window)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    using namespace sokoban;
+    const auto require = [](bool condition, const char* message) {
+        if (!condition) throw std::runtime_error(message);
+    };
+    const auto assetRoot = std::filesystem::path(SOKOBAN_VULKAN_TEST_ASSETS);
+    constexpr TileType first = TileType::Ground;
+    constexpr TileType second = TileType::Wall;
+    constexpr TileType missing = TileType::Air;
+    require(std::filesystem::is_regular_file(
+                assetRoot / tileThumbnails::assetPathFor(first)) &&
+            std::filesystem::is_regular_file(
+                assetRoot / tileThumbnails::assetPathFor(second)),
+        "Thumbnail budget fixture needs baked Ground and Wall thumbnails");
+    require(!std::filesystem::exists(
+                assetRoot / tileThumbnails::assetPathFor(missing)),
+        "Thumbnail cached-miss fixture unexpectedly has an Air thumbnail");
+    const auto manifest = AssetManifest::loadFromFile(assetRoot / "manifest.json");
+    auto font = FontAtlas::loadDefault(assetRoot);
+    ScopedTestDirectory temporary("thumbnail-loading-budget");
+    VulkanRenderer renderer(window, assetRoot, temporary.path() / "cache.bin",
+        manifest, font, AntiAliasingMode::None, 100,
+        { .vsync = false }, {}, false, true, true, false);
+    UiDrawData ui;
+    ui.viewportSize = { 32, 32 };
+    const auto draw = [&] {
+        renderer.beginDebugUiFrame();
+        const auto frame = renderer.prepareFrame(RenderFrameData {});
+        renderer.drawFrame(frame, ui);
+        require(!renderer.hasFatalFailure(), "Thumbnail budget frame failed to render");
+    };
+
+    require(renderer.tileThumbnail(first) == VK_NULL_HANDLE &&
+            renderer.tileThumbnail(second) == VK_NULL_HANDLE &&
+            renderer.tileThumbnail(first) == VK_NULL_HANDLE,
+        "Initial thumbnail requests must only queue deduplicated work");
+    draw();
+    const VkDescriptorSet firstHandle = renderer.tileThumbnail(first);
+    require(firstHandle != VK_NULL_HANDLE &&
+            renderer.tileThumbnail(second) == VK_NULL_HANDLE,
+        "The first service frame must load exactly one queued thumbnail");
+    draw();
+    require(renderer.tileThumbnail(first) == firstHandle &&
+            renderer.tileThumbnail(second) != VK_NULL_HANDLE,
+        "Duplicate requests must not delay the second thumbnail or replace a cached handle");
+
+    renderer.invalidateTileThumbnails();
+    require(renderer.tileThumbnail(missing) == VK_NULL_HANDLE &&
+            renderer.tileThumbnail(missing) == VK_NULL_HANDLE,
+        "A missing thumbnail must queue one request and use its fallback");
+    draw();
+    // A cached miss must not consume another service slot before these two
+    // real files. The same requests also prove invalidation dropped both
+    // previously loaded handles and lets them load progressively again.
+    require(renderer.tileThumbnail(missing) == VK_NULL_HANDLE &&
+            renderer.tileThumbnail(first) == VK_NULL_HANDLE &&
+            renderer.tileThumbnail(second) == VK_NULL_HANDLE,
+        "Invalidation must clear loaded handles while caching a serviced miss");
+    draw();
+    require(renderer.tileThumbnail(first) != VK_NULL_HANDLE &&
+            renderer.tileThumbnail(second) == VK_NULL_HANDLE,
+        "A cached missing thumbnail must not delay the first reloaded thumbnail");
+    draw();
+    require(renderer.tileThumbnail(first) != VK_NULL_HANDLE &&
+            renderer.tileThumbnail(second) != VK_NULL_HANDLE &&
+            renderer.tileThumbnail(missing) == VK_NULL_HANDLE,
+        "Invalidated thumbnails must reload one per frame and preserve cached misses");
+    renderer.waitIdle();
+    std::cout << "Thumbnail loading deferred and deduplicated requests, loaded one per frame, "
+                 "and preserved invalidation and cached misses\n";
+    return 0;
+#else
+    (void)window;
+    std::cout << "Thumbnail budget check requires developer tools\n";
+    return 77;
+#endif
+}
+
 void exerciseGroundRimDrawBudgetFallback(SDL_Window* window)
 {
     using namespace sokoban;
@@ -1471,6 +1552,10 @@ int main(int argc, char** argv)
             std::string_view(argv[1]) == "--asset-publication-budget") {
             exerciseRendererAssetPublicationBudget(window.get());
             return 0;
+        }
+        if (argc == 2 &&
+            std::string_view(argv[1]) == "--thumbnail-loading-budget") {
+            return exerciseThumbnailLoadingBudget(window.get());
         }
         if (argc == 2 &&
             std::string_view(argv[1]) == "--benchmark-startup") {

@@ -211,8 +211,7 @@ private:
     // editor's mirrored changes are still reflected.
     void buildLevelCatalog();
     void restoreProfileLocation();
-    [[nodiscard]] RenderAssetRequirements levelAssetRequirements(int levelIndex) const;
-    void preloadUpcomingAssets();
+    void serviceUpcomingAssetPrefetch();
     // Advances to the arena the previous prepared frame does not reference,
     // clears it, and returns it. The only place a render-frame arena is reset.
     [[nodiscard]] FrameArena& beginRenderFrameArena();
@@ -363,6 +362,7 @@ private:
     bool evidenceSceneCaptured_ = false;
     bool screenPreviewActive_ = false;
     bool startupReported_ = false;
+    bool upcomingAssetPrefetchPending_ = true;
     bool running_ = true;
 };
 

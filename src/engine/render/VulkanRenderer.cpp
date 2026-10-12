@@ -302,9 +302,15 @@ VulkanRenderer::VulkanRenderer(
     bool waterCellCacheEnabled)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
-    , runtimeTextureCatalog_(
-          collectTimedRuntimeTextureCatalog(assetRoot_, manifest))
-    , deviceContext_(window, runtimeTextureCatalog_.textures().size())
+    , catalogStartup_(std::async(std::launch::async, [this, &manifest] {
+          return collectTimedRuntimeTextureCatalog(assetRoot_, manifest);
+      }))
+    , deviceContext_(window, [this] {
+          // Instance creation needs no content metadata. Join only when the
+          // exact requirement is needed for descriptor-aware GPU selection.
+          runtimeTextureCatalog_ = catalogStartup_.get();
+          return runtimeTextureCatalog_.textures().size();
+      })
     , reconfigurationQueue_({
           .antiAliasing = antiAliasingMode,
           .renderScalePercent = renderScalePercent,
@@ -1167,6 +1173,9 @@ void VulkanRenderer::handleEvent(const SDL_Event& event)
 void VulkanRenderer::beginDebugUiFrame()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
+    // Palette requests made during the previous UI frame load progressively;
+    // constructing a palette must never upload all of its thumbnails at once.
+    thumbnailPass_.servicePendingThumbnails();
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();

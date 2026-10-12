@@ -6,6 +6,7 @@
 
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AssetManifest.hpp"
+#include "engine/CampaignSession.hpp"
 #include "engine/Level.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/RotatorVisuals.hpp"
@@ -15,6 +16,49 @@
 #include <string_view>
 
 namespace sokoban {
+
+std::vector<LevelLocation> puzzleAssetPrefetchTargets(
+    const CampaignSession& campaign,
+    const PlayerProfile& profile,
+    const OverworldMap* overworldMap)
+{
+    std::vector<LevelLocation> targets;
+    if (!campaign.inOverworld()) {
+        // The current screen is already requested at visible priority. Its
+        // successor becomes selectable when the current puzzle is completed.
+        if (campaign.currentScreen() < campaign.screenCount(
+                campaign.currentLevel()) - 1) {
+            targets.push_back({
+                .level = campaign.currentLevel(),
+                .screen = campaign.currentScreen() + 1,
+            });
+        }
+        return targets;
+    }
+
+    const auto includeSelectable = [&](LevelLocation target) {
+        if (campaign.selectorViewState(profile, target).status !=
+                ScreenSelectorStatus::Unavailable &&
+            std::ranges::find(targets, target) == targets.end()) {
+            targets.push_back(target);
+        }
+    };
+    if (overworldMap) {
+        for (const OverworldSelectorRuntime& selector :
+             overworldMap->selectors()) {
+            if (selector.screen == campaign.activeOverworldScreen() &&
+                selector.target) {
+                includeSelectable(*selector.target);
+            }
+        }
+    } else {
+        for (LevelLocation target : campaign.overworldTargets()) {
+            includeSelectable(target);
+        }
+    }
+    return targets;
+}
+
 namespace {
 
 void require(std::vector<bool>& set, std::size_t index)
@@ -122,23 +166,12 @@ bool RenderAssetRequirements::empty() const
     return modelCount() == 0 && animationCount() == 0 && textureCount() == 0;
 }
 
-RenderAssetRequirements renderAssetRequirementsForLevel(
+RenderAssetRequirements renderActionAssetRequirementsForLevel(
     const Level& level,
     const AssetManifest& manifest,
-    std::optional<LevelLocation> location,
     const AnimationCatalog* animations)
 {
     RenderAssetRequirements requirements;
-
-    // Every authored hero model is resident. Duplicates are harmless here and
-    // collapse in the requirement bitset.
-    for (const Level::PlayerStart& player : level.playerStarts()) {
-        requirements.requireModel(manifest.characterModel(player.character));
-    }
-    for (const Level::Wardrobe& wardrobe : level.wardrobes()) {
-        requirements.requireModel(
-            manifest.characterModel(wardrobe.character));
-    }
     auto requireUse = [&](AnimationUse use, RenderAnimation fallback) {
         requirements.requireAnimation(
             animations != nullptr ? animations->animation(use) : fallback);
@@ -156,9 +189,60 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
         AnimationUse::MirrorPreviewPlayerDeadIdle,
         manifest.playerDeadIdleAnimation());
     if (!level.enemyStarts().empty()) {
-        requirements.requireModel(manifest.enemyModel());
         requireUse(AnimationUse::EnemyIdle, manifest.playerIdleAnimation());
         requireUse(AnimationUse::EnemyAttack, manifest.enemyAttackAnimation());
+    }
+    // A valid level has one metadata record for every gate tile, so these
+    // collections cover brief effects without traversing the terrain grid.
+    if (!level.gates().empty()) {
+        requirements.requireTexture(
+            manifest.textureIdByName(config::gateParticleTextureName));
+    }
+    if (std::ranges::any_of(level.movableTiles(), [](const auto& movable) {
+            return tileTypeIsMirror(movable.type);
+        })) {
+        for (std::string_view textureName : config::mirrorSwapSmokeTextureNames) {
+            requirements.requireTexture(manifest.textureIdByName(textureName));
+        }
+    }
+    if (!level.portals().empty()) {
+        requirements.requireTexture(
+            manifest.findTextureIdByName(config::turretGlowTextureName));
+    }
+    if (std::ranges::any_of(level.movableTiles(), [](const auto& movable) {
+            return tileTypeIsTurret(movable.type);
+        })) {
+        // These bursts can finish before demand-driven streaming completes.
+        requirements.requireTexture(
+            manifest.textureIdByName(config::turretMuzzleTextureName));
+        requirements.requireTexture(
+            manifest.textureIdByName(config::turretGlowTextureName));
+        requirements.requireTexture(
+            manifest.textureIdByName(config::turretLaserTextureName));
+    }
+    return requirements;
+}
+
+RenderAssetRequirements renderAssetRequirementsForLevel(
+    const Level& level,
+    const AssetManifest& manifest,
+    std::optional<LevelLocation> location,
+    const AnimationCatalog* animations)
+{
+    RenderAssetRequirements requirements =
+        renderActionAssetRequirementsForLevel(level, manifest, animations);
+
+    // Every authored hero model is resident. Duplicates are harmless here and
+    // collapse in the requirement bitset.
+    for (const Level::PlayerStart& player : level.playerStarts()) {
+        requirements.requireModel(manifest.characterModel(player.character));
+    }
+    for (const Level::Wardrobe& wardrobe : level.wardrobes()) {
+        requirements.requireModel(
+            manifest.characterModel(wardrobe.character));
+    }
+    if (!level.enemyStarts().empty()) {
+        requirements.requireModel(manifest.enemyModel());
     }
 
     // Ground splatting samples these directly from the descriptor array, so
@@ -185,9 +269,6 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
                     continue;
                 }
                 if (level.tileAt(x, y, z) == TileType::Gate) {
-                    requirements.requireTexture(
-                        manifest.textureIdByName(
-                            config::gateParticleTextureName));
                     continue;
                 }
                 const TileType tile = level.tileAt(x, y, z);
@@ -254,35 +335,8 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
             }
         }
     }
-    const bool containsMirror = std::ranges::any_of(
-        level.movableTiles(), [](const Level::MovableTile& unit) {
-            return tileTypeIsMirror(unit.type);
-        });
-    if (containsMirror) {
-        for (std::string_view textureName :
-             config::mirrorSwapSmokeTextureNames) {
-            requirements.requireTexture(
-                manifest.textureIdByName(textureName));
-        }
-    }
-    if (!level.portals().empty()) {
-        requirements.requireTexture(
-            manifest.findTextureIdByName(config::turretGlowTextureName));
-    }
-    bool containsTurret = false;
     for (const Level::MovableTile& movable : level.movableTiles()) {
         requirements.requireModel(manifest.modelForTile(movable.type));
-        containsTurret |= tileTypeIsTurret(movable.type);
-    }
-    if (containsTurret) {
-        // Shot effects are too brief to wait for demand-driven streaming on
-        // their first frame. Warm all shot textures with the turret model.
-        requirements.requireTexture(
-            manifest.textureIdByName(config::turretMuzzleTextureName));
-        requirements.requireTexture(
-            manifest.textureIdByName(config::turretGlowTextureName));
-        requirements.requireTexture(
-            manifest.textureIdByName(config::turretLaserTextureName));
     }
     for (const Level::Decoration& decoration : level.decorations()) {
         requirements.requireModel(

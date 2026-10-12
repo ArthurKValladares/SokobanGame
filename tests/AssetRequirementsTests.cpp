@@ -2,11 +2,15 @@
 
 #include "TestHarness.hpp"
 
+#include "engine/AnimationCatalog.hpp"
 #include "engine/AssetManifest.hpp"
+#include "engine/CampaignSession.hpp"
 #include "engine/Level.hpp"
+#include "engine/ParticleConfig.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 
 #include <iostream>
+#include <sstream>
 
 namespace {
 
@@ -61,6 +65,7 @@ const AssetManifest& testManifest()
         { "name": "Idle", "path": "a.glb", "role": "player-idle" },
         { "name": "Move", "path": "a.glb", "role": "player-move" },
         { "name": "Push", "path": "a.glb", "role": "player-push" },
+        { "name": "Pull", "path": "a.glb", "role": "player-pull" },
         { "name": "Death", "path": "a.glb", "role": "player-death" },
         { "name": "DeadIdle", "path": "a.glb", "role": "player-dead-idle" },
         { "name": "EnemyAttack", "path": "a.glb", "role": "enemy-attack" }
@@ -151,7 +156,7 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.enemyModel()));
     CHECK(requirements.contains(manifest.enemyAttackAnimation()));
     CHECK(requirements.modelCount() == 8);
-    CHECK(requirements.animationCount() == 6);
+    CHECK(requirements.animationCount() == 7);
     // Three splat textures, side sandstone, muzzle, glow, and the laser beam.
     CHECK(requirements.textureCount() == 7);
 
@@ -199,6 +204,106 @@ void testFrameRequirementsOnlyContainReferencedAssets()
     CHECK(requirements.animationCount() == 2);
     CHECK(requirements.textureCount() == 1);
     CHECK(requirements.contains(manifest.textureIdByName("Smoke03")));
+}
+
+void testActionRequirementsKeepFirstUseAssetsWithoutTerrainOrModels()
+{
+    TEST("actionRequirementsKeepFirstUseAssetsWithoutTerrainOrModels");
+    const AssetManifest& manifest = testManifest();
+    const Level quiet = Level::loadFromLayers(
+        { { "..." }, { "C.." } }, "quiet action requirements");
+    const auto quietRequirements =
+        renderActionAssetRequirementsForLevel(quiet, manifest);
+    CHECK(quietRequirements.modelCount() == 0);
+    CHECK(quietRequirements.textureCount() == 0);
+    CHECK(quietRequirements.animationCount() == 6);
+    CHECK(quietRequirements.contains(manifest.playerIdleAnimation()));
+    CHECK(quietRequirements.contains(manifest.playerMoveAnimation()));
+    CHECK(quietRequirements.contains(manifest.playerPushAnimation()));
+    CHECK(quietRequirements.contains(manifest.playerPullAnimation()));
+    CHECK(quietRequirements.contains(manifest.playerDeathAnimation()));
+    CHECK(quietRequirements.contains(manifest.playerDeadIdleAnimation()));
+    CHECK(!quietRequirements.contains(manifest.enemyAttackAnimation()));
+
+    const Level effects = Level::loadFromDefinition({
+        .layers = { { "......" }, { "C3NGeP" } },
+        .gates = { { .cell = { 3, 0, 1 },
+                     .pressurePlates = { { 5, 0, 1 } } } },
+    }, "brief action effects");
+    const auto effectsRequirements =
+        renderActionAssetRequirementsForLevel(effects, manifest);
+    CHECK(effectsRequirements.modelCount() == 0);
+    CHECK(effectsRequirements.animationCount() == 7);
+    CHECK(effectsRequirements.contains(manifest.enemyAttackAnimation()));
+    for (std::string_view textureName : config::mirrorSwapSmokeTextureNames) {
+        CHECK(effectsRequirements.contains(manifest.textureIdByName(textureName)));
+    }
+    CHECK(effectsRequirements.contains(
+        manifest.textureIdByName(config::gateParticleTextureName)));
+    CHECK(effectsRequirements.contains(
+        manifest.textureIdByName(config::turretMuzzleTextureName)));
+    CHECK(effectsRequirements.contains(
+        manifest.textureIdByName(config::turretLaserTextureName)));
+    CHECK(effectsRequirements.textureCount() == 13);
+    CHECK(!effectsRequirements.contains(manifest.textureIdByName("GroundGrass")));
+    CHECK(!effectsRequirements.contains(manifest.textureIdByName("GroundRock")));
+    CHECK(!effectsRequirements.contains(manifest.textureIdByName("GroundRockSide")));
+    CHECK(!effectsRequirements.contains(manifest.textureIdByName("GroundSplatMap")));
+
+    // Gate and portal glows must also warm when no turret shares that texture.
+    const Level gate = Level::loadFromDefinition({
+        .layers = { { "..." }, { "CGP" } },
+        .gates = { { .cell = { 1, 0, 1 },
+                     .pressurePlates = { { 2, 0, 1 } } } },
+    }, "gate action effect");
+    const auto gateRequirements = renderActionAssetRequirementsForLevel(gate, manifest);
+    CHECK(gateRequirements.textureCount() == 1);
+    CHECK(gateRequirements.contains(manifest.textureIdByName("ParticleGlow")));
+    CHECK(renderAssetRequirementsForLevel(gate, manifest).contains(
+        manifest.textureIdByName("ParticleGlow")));
+
+    const Level portal = Level::loadFromDefinition({
+        .layers = { { "..." }, { "COO" } },
+        .portals = { { .cell = { 1, 0, 1 } }, { .cell = { 2, 0, 1 } } },
+    }, "portal action effect");
+    const auto portalRequirements = renderActionAssetRequirementsForLevel(portal, manifest);
+    CHECK(portalRequirements.modelCount() == 0);
+    CHECK(portalRequirements.textureCount() == 1);
+    CHECK(portalRequirements.contains(manifest.textureIdByName("ParticleGlow")));
+}
+
+void testActionRequirementsHonorCatalogAnimationBindings()
+{
+    TEST("actionRequirementsHonorCatalogAnimationBindings");
+    const AssetManifest& manifest = testManifest();
+    std::ostringstream serialized;
+    serialized << R"({"format":2,"clips":[)";
+    bool first = true;
+    for (const auto& animation : manifest.animations()) {
+        if (!first) serialized << ',';
+        first = false;
+        serialized << R"({"animation":")" << animation.name
+                   << R"(","duration":1})";
+    }
+    serialized << R"(],"uses":[)";
+    first = true;
+    for (const auto& use : animationUseDefinitions()) {
+        if (!first) serialized << ',';
+        first = false;
+        serialized << R"({"id":")" << use.id
+                   << R"(","animation":"EnemyAttack"})";
+    }
+    serialized << "]}";
+    const AnimationCatalog catalog = AnimationCatalog::parse(serialized.str(), manifest);
+    const Level level = Level::loadFromLayers(
+        { { "." }, { "C" } }, "catalog action requirements");
+    const auto requirements =
+        renderActionAssetRequirementsForLevel(level, manifest, &catalog);
+    CHECK(requirements.animationCount() == 1);
+    CHECK(requirements.contains(manifest.enemyAttackAnimation()));
+    CHECK(!requirements.contains(manifest.playerIdleAnimation()));
+    CHECK(requirements.modelCount() == 0);
+    CHECK(requirements.textureCount() == 0);
 }
 
 void testKnightLevelRequiresKnightInsteadOfRogueModel()
@@ -518,11 +623,117 @@ void testPerScreenSplatMapsAreSelectedAndFallBack()
         groundSplatMapTextureNameForScreen({ 12, 3 }));
 }
 
+void testPuzzlePrefetchOnlyPlansImmediateSuccessor()
+{
+    TEST("puzzlePrefetchOnlyPlansImmediateSuccessor");
+    CampaignSession campaign;
+    campaign.setLevelScreenCounts({ 3, 2 });
+    PlayerProfile profile;
+
+    CHECK(campaign.startPuzzle(profile, { 0, 1 }));
+    CHECK(profile.selectorStatus({ 0, 2 }) ==
+        ScreenSelectorStatus::Unavailable);
+    CHECK(puzzleAssetPrefetchTargets(campaign, profile) ==
+        (std::vector<LevelLocation> { { 0, 2 } }));
+
+    // Completing a level returns to the overworld, so its last screen must
+    // not speculate into every other level or even the next numbered level.
+    CHECK(campaign.startPuzzle(profile, { 0, 2 }));
+    CHECK(puzzleAssetPrefetchTargets(campaign, profile).empty());
+    CHECK(campaign.startPuzzle(profile, { 1, 0 }));
+    CHECK(puzzleAssetPrefetchTargets(campaign, profile) ==
+        (std::vector<LevelLocation> { { 1, 1 } }));
+}
+
+void testOverworldPrefetchUsesOnlySelectableActiveScreenTargets()
+{
+    TEST("overworldPrefetchUsesOnlySelectableActiveScreenTargets");
+    const Level::Definition active {
+        .layers = {
+            { "....", "...." },
+            { "    ", "C   " },
+        },
+        .selectors = {
+            { .id = 1, .cell = { 0, 0, 1 }, .target = LevelLocation { 0, 0 } },
+            { .id = 2, .cell = { 1, 0, 1 }, .target = LevelLocation { 0, 0 } },
+            { .id = 3, .cell = { 2, 0, 1 }, .target = LevelLocation { 0, 1 } },
+            { .id = 4, .cell = { 3, 0, 1 } },
+            { .id = 5, .cell = { 1, 1, 1 }, .target = LevelLocation { 99, 0 } },
+        },
+    };
+    const auto otherScreen = [](int targetLevel) {
+        return Level::Definition {
+            .layers = {
+                { "....", "...." },
+                { "    ", "    " },
+            },
+            .selectors = {
+                { .id = 1, .cell = { 0, 0, 1 },
+                  .target = LevelLocation { targetLevel, 0 } },
+            },
+        };
+    };
+    // Full in-memory overrides make this fixture independent of disk and
+    // prove that selecting a preload plan needs no puzzle-file reads.
+    const OverworldMap map = OverworldMap::load({}, OverworldDraftOverride {
+        .layout = OverworldLayout {
+            .format = 3,
+            .screenWidth = 4,
+            .screenHeight = 2,
+            .screens = {
+                { .id = 1, .file = "screen1.scr", .slot = { 0, 0 } },
+                { .id = 2, .file = "screen2.scr", .slot = { 1, 0 } },
+                { .id = 3, .file = "screen3.scr", .slot = { 2, 0 } },
+            },
+        },
+        .definitions = {
+            { .screen = 1, .definition = active },
+            { .screen = 2, .definition = otherScreen(1) },
+            { .screen = 3, .definition = otherScreen(2) },
+        },
+    });
+    CampaignSession campaign;
+    campaign.setLevelScreenCounts({ 2, 1, 1 });
+    campaign.setOverworldTopology(map.fingerprint(), { 1, 2, 3 }, 1);
+    PlayerProfile profile;
+
+    // A duplicate flag, a locked successor, an unassigned flag, a missing
+    // target and both other authored screens must not broaden disk work.
+    CHECK(puzzleAssetPrefetchTargets(campaign, profile, &map) ==
+        (std::vector<LevelLocation> { { 0, 0 } }));
+    profile.recordScreenCompletion({ 0, 0 }, 3, 1.0);
+    CHECK(puzzleAssetPrefetchTargets(campaign, profile, &map) ==
+        (std::vector<LevelLocation> { { 0, 0 }, { 0, 1 } }));
+
+    CHECK(campaign.transitionOverworldScreen(profile, 2));
+    CHECK(puzzleAssetPrefetchTargets(campaign, profile, &map) ==
+        (std::vector<LevelLocation> { { 1, 0 } }));
+    CHECK(campaign.transitionOverworldScreen(profile, 3));
+    CHECK(puzzleAssetPrefetchTargets(campaign, profile, &map) ==
+        (std::vector<LevelLocation> { { 2, 0 } }));
+}
+
+void testLegacyOverworldPrefetchFiltersLockedTargets()
+{
+    TEST("legacyOverworldPrefetchFiltersLockedTargets");
+    CampaignSession campaign;
+    campaign.setLevelScreenCounts({ 2, 1 });
+    campaign.setOverworldTargets({ { 0, 0 }, { 0, 1 }, { 1, 0 } });
+    PlayerProfile profile;
+    CHECK(puzzleAssetPrefetchTargets(campaign, profile) ==
+        (std::vector<LevelLocation> { { 0, 0 }, { 1, 0 } }));
+    profile.recordScreenCompletion({ 0, 0 }, 3, 1.0);
+    CHECK(puzzleAssetPrefetchTargets(campaign, profile) ==
+        (std::vector<LevelLocation> { { 0, 0 }, { 0, 1 }, { 1, 0 } }));
+}
+
 int main()
 {
     testLevelRequirementsIncludeDynamicAndStaticAssets();
     testSelectorRequirementsIncludeEveryFlagState();
     testFrameRequirementsOnlyContainReferencedAssets();
+    testActionRequirementsKeepFirstUseAssetsWithoutTerrainOrModels();
+    testActionRequirementsHonorCatalogAnimationBindings();
     testKnightLevelRequiresKnightInsteadOfRogueModel();
     testMergeDeduplicatesRequirements();
     testCubeAndNoneAreNeverRequirements();
@@ -530,6 +741,9 @@ int main()
     testTerrainPbrCompanionsAreRequired();
     testRimWallTextureFallbacksAndPreviewRequirements();
     testPerScreenSplatMapsAreSelectedAndFallBack();
+    testPuzzlePrefetchOnlyPlansImmediateSuccessor();
+    testOverworldPrefetchUsesOnlySelectableActiveScreenTargets();
+    testLegacyOverworldPrefetchFiltersLockedTargets();
 
     if (failures == 0) {
         std::cout << "AssetRequirementsTests: "

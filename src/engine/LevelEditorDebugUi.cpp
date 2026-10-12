@@ -896,7 +896,10 @@ void LevelEditorDebugUi::drawTilePalette(
             const auto& displayedDefinition = tileTypeDefinitions()[
                 static_cast<std::size_t>(displayedTile)];
             const auto thumbnailFor = [&](TileType tile) {
-                return static_cast<ImTextureID>(callbacks.tileThumbnail
+                // Clipped palette rows need layout, but their pictures can
+                // stay unloaded until the player scrolls them into view.
+                return static_cast<ImTextureID>(callbacks.tileThumbnail &&
+                        ImGui::IsRectVisible(paletteButtonSize)
                     ? callbacks.tileThumbnail(tile) : 0);
             };
             ImGui::PushID(static_cast<int>(definition.type));

@@ -284,8 +284,13 @@ Application::Application(ApplicationOptions options)
 {
     log::info(log::Category::Persistence)
         << saveSlots_.progressStatus();
+    const auto levelCatalogStart = std::chrono::steady_clock::now();
     buildLevelCatalog();
     restoreProfileLocation();
+    log::info(log::Category::Application)
+        << "Asset startup phase (us): level-catalog="
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now() - levelCatalogStart).count();
     SettingsEffects initialSettings = settingsCoordinator_.initialize();
     // The window was configured before renderer construction so Vulkan saw
     // the final startup extent. Reapplying it here would synchronize the OS
@@ -326,18 +331,12 @@ Application::Application(ApplicationOptions options)
     presentationSettings_.normalize();
     presentation_.setAnimationCatalog(&animationCatalog_);
     screenPreviewPresentation_.setAnimationCatalog(&animationCatalog_);
-    // The world stays unloaded until the title's Continue/New Game, but its
-    // assets warm up in the background so that first load doesn't block.
+    // The title needs no world assets. Speculative work starts after the first
+    // draw, using the saved screen or the nearby selectable puzzles only.
     openTitleScreen();
-    RenderAssetRequirements initialRequirements =
-        renderAssetRequirementsForLevel(
-            overworldMap_ ? overworldMap_->level()
-                          : Level::loadFromFile(overworldPath()),
-            assetManifest_);
-    initialRequirements.merge(levelAssetRequirements(campaign_.currentLevel()));
-    renderer_.preloadAssets(initialRequirements);
 
 #if SOKOBAN_ENABLE_DEBUG_UI
+    const auto toolsStartupStart = std::chrono::steady_clock::now();
     DebugUi::initialize();
     tools_->initialize(
         SOKOBAN_SOURCE_LEVEL_DIR,
@@ -347,6 +346,10 @@ Application::Application(ApplicationOptions options)
         campaign_.currentScreen(),
         assetManifest_,
         animationCatalog_);
+    log::info(log::Category::Application)
+        << "Asset startup phase (us): developer-tools="
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now() - toolsStartupStart).count();
 
     DebugUi::addTab("Engine", [this] {
         int completedTargets = 0;
@@ -734,6 +737,7 @@ bool Application::bakeTileThumbnails()
 bool Application::drawUiFrame(
     const InputRouter::Frame& routedInput, [[maybe_unused]] float dt)
 {
+    const auto uiStart = std::chrono::steady_clock::now();
     const Vec2 windowSize = window_.size();
     const Vec2 pixelSize = window_.sizeInPixels();
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -765,7 +769,9 @@ bool Application::drawUiFrame(
         routedInput.pointer.primaryDown,
         routedInput.pointer.primaryPressed);
 
+    const auto debugFrameStart = std::chrono::steady_clock::now();
     renderer_.beginDebugUiFrame();
+    const auto workspaceStart = std::chrono::steady_clock::now();
 #if SOKOBAN_ENABLE_DEBUG_UI
     if (developerWorkspaceVisible) {
         const VkExtent2D gameExtent = renderer_.renderExtent();
@@ -801,6 +807,7 @@ bool Application::drawUiFrame(
         renderer_.setGameViewportDisplay(std::nullopt);
     }
 #endif
+    const auto overlaysStart = std::chrono::steady_clock::now();
     if (const auto cell = gameplaySession_.readingLectern(); cell && !shellMenuOpen()) {
         if (const auto* lectern = level_.lecternAt(*cell)) {
             lecternDialog_.draw(ui_, pixelSize, lectern->text, {
@@ -868,6 +875,18 @@ bool Application::drawUiFrame(
     tools_->animationPreviewDebugUi.update(dt, renderer_);
 #endif
     ui_.endFrame();
+    if (!startupReported_) {
+        const auto elapsedUs = [](auto start, auto end) {
+            return std::chrono::duration_cast<std::chrono::microseconds>(
+                end - start).count();
+        };
+        log::info(log::Category::Application)
+            << "UI first-frame work (us): begin="
+            << elapsedUs(uiStart, debugFrameStart)
+            << " debug-frame=" << elapsedUs(debugFrameStart, workspaceStart)
+            << " workspace=" << elapsedUs(workspaceStart, overlaysStart)
+            << " overlays=" << elapsedUs(overlaysStart, std::chrono::steady_clock::now());
+    }
     return developerWorkspaceVisible;
 }
 
@@ -958,6 +977,7 @@ bool Application::run()
     startupConstructionMicroseconds_ =
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - startupStarted_).count();
+    const auto launchStart = std::chrono::steady_clock::now();
     if (smokeFrames_ > 0) {
         // Nobody is here to press New Game, and the title screen draws no
         // world behind it, so a smoke run that stayed on the title would
@@ -977,6 +997,7 @@ bool Application::run()
     } else if (evidenceOutputDirectory_.empty()) {
         applyLaunchRequest();
     }
+    const auto launchFinished = std::chrono::steady_clock::now();
     std::uint64_t renderedFrames = 0;
     CpuProfiler::instance().setCurrentThreadName("Main");
     auto previousFrameStart = std::chrono::steady_clock::now();
@@ -1004,9 +1025,12 @@ bool Application::run()
             renderer_.invalidateTileThumbnails();
         }
         tools_->serviceShaderHotReload(renderer_);
-        serviceSourceWatcher();
+        if (renderedFrames > 0) {
+            serviceSourceWatcher();
+        }
         tools_->serviceSolutionStore();
 #endif
+        const auto eventsStart = std::chrono::steady_clock::now();
         input_.beginFrame();
 
         {
@@ -1055,6 +1079,7 @@ bool Application::run()
             }
         }
 
+        const auto eventsFinished = std::chrono::steady_clock::now();
         const InputRouter::BackAction backAction = levelTransition_.active()
             ? InputRouter::BackAction::None
             : inputRouter_.backAction(input_, inputRoutingContext());
@@ -1133,6 +1158,7 @@ bool Application::run()
                 std::chrono::duration<double, std::milli>(
                     std::chrono::steady_clock::now() - buildStart).count());
         }
+        const auto renderStart = std::chrono::steady_clock::now();
         {
             SOKOBAN_PROFILE_SCOPE("Application.Render");
             renderer_.drawFrame(
@@ -1157,6 +1183,29 @@ bool Application::run()
                 << std::chrono::duration_cast<std::chrono::microseconds>(
                        std::chrono::steady_clock::now() - startupStarted_)
                        .count();
+            const auto elapsedUs = [](auto start, auto end) {
+                return std::chrono::duration_cast<std::chrono::microseconds>(
+                    end - start).count();
+            };
+            log::info(log::Category::Application)
+                << "Application first-frame work (us): launch="
+                << elapsedUs(launchStart, launchFinished)
+                << " services=" << elapsedUs(applicationFrameStart, eventsStart)
+                << " events=" << elapsedUs(eventsStart, eventsFinished)
+                << " input=" << elapsedUs(eventsFinished, updateStart)
+                << " update=" << elapsedUs(updateStart, uiStart)
+                << " ui=" << elapsedUs(uiStart, buildStart)
+                << " build=" << elapsedUs(buildStart, renderStart)
+                << " render=" << elapsedUs(renderStart, std::chrono::steady_clock::now());
+            const RenderStats stats = renderer_.renderStats();
+            log::info(log::Category::Application)
+                << "Renderer first-frame work (ms): scheduling="
+                << stats.assetSchedulingTiming.latestMilliseconds
+                << " fence=" << stats.frameFenceWaitTiming.latestMilliseconds
+                << " maintenance=" << stats.assetMaintenanceTiming.latestMilliseconds
+                << " acquire=" << stats.imageAcquisitionTiming.latestMilliseconds
+                << " commands=" << stats.commandRecordingTiming.latestMilliseconds
+                << " present=" << stats.submitPresentTiming.latestMilliseconds;
         }
         ++renderedFrames;
         if (renderer_.hasFatalFailure()) {
@@ -1167,6 +1216,7 @@ bool Application::run()
             finishSmokeRunIfDue(renderedFrames);
         }
         if (running_) {
+            serviceUpcomingAssetPrefetch();
             const auto pacingStart = std::chrono::steady_clock::now();
             framePacer_.pace();
             applicationPacingTelemetry_.record(
@@ -1322,17 +1372,19 @@ void Application::update(
                 log::error(log::Category::Gameplay)
                     << "Could not commit overworld screen transition to "
                     << *playerScreen;
-            } else if (firstVisit &&
-                !gameplaySession_.state().players.empty()) {
-                const GridPosition3 entry =
-                    gameplaySession_.state().players.front().cell;
-                overworldFogReveal_ = OverworldFogReveal {
-                    .screen = *playerScreen,
-                    .origin = {
-                        static_cast<float>(entry.x) + 0.5f,
-                        static_cast<float>(entry.y) + 0.5f,
-                    },
-                };
+            } else {
+                upcomingAssetPrefetchPending_ = true;
+                if (firstVisit && !gameplaySession_.state().players.empty()) {
+                    const GridPosition3 entry =
+                        gameplaySession_.state().players.front().cell;
+                    overworldFogReveal_ = OverworldFogReveal {
+                        .screen = *playerScreen,
+                        .origin = {
+                            static_cast<float>(entry.x) + 0.5f,
+                            static_cast<float>(entry.y) + 0.5f,
+                        },
+                    };
+                }
             }
         }
     }
@@ -1491,7 +1543,7 @@ void Application::loadCurrentScreen()
     }
     campaign_.finishWorldLoad(playerProfile_);
     checkpointCurrentScreen(true);
-    preloadUpcomingAssets();
+    upcomingAssetPrefetchPending_ = true;
 #if SOKOBAN_ENABLE_DEBUG_UI
     tools_->levelEditor.setPlayingDraft(false);
     tools_->levelEditor.setEditingDocument(false);
@@ -1513,26 +1565,16 @@ bool Application::applyLevel(
     // Running tasks may finish, but queued disk work is discarded before it
     // competes with the assets the player is about to see.
     renderer_.cancelQueuedAssetPrefetches();
-    // Same location the render frame will use, so the splat map this screen
-    // draws with is the one guaranteed resident here.
-    RenderAssetRequirements requirements = renderAssetRequirementsForLevel(
-        level,
-        assetManifest_,
-        location,
-        &animationCatalog_);
-    if (composedOverworld && overworldMap_) {
-        for (OverworldScreenId screenId : overworldMap_->visibleNeighborhood(
-                 campaign_.activeOverworldScreen())) {
-            const GroundSplatTextures textures =
-                groundSplatTexturesForOverworldScreen(
-                    [this](std::string_view name) {
-                        return assetManifest_.findTextureIdByName(name);
-                    },
-                    screenId);
-            requirements.requireGroundSplat(textures);
-        }
+    // A composed overworld includes distant screens and every terrain variant.
+    // drawFrame requests its exact visible models, splats and dependencies.
+    // Warm action clips and brief effects before first use in both worlds.
+    if (composedOverworld) {
+        renderer_.ensureAssets(renderActionAssetRequirementsForLevel(
+            level, assetManifest_, &animationCatalog_));
+    } else {
+        renderer_.ensureAssets(renderAssetRequirementsForLevel(
+            level, assetManifest_, location, &animationCatalog_));
     }
-    renderer_.ensureAssets(requirements);
     gameplayGroundGeometryStore_.invalidate();
     gameplayGroundGeometrySource_.clear();
     level_ = std::move(level);
@@ -1968,8 +2010,8 @@ bool Application::switchSaveSlot(int slot)
 
     // The new slot's world loads on Continue/New Game, like at boot.
     campaign_.resetForProfile(playerProfile_);
-    renderer_.preloadAssets(
-        levelAssetRequirements(campaign_.currentLevel()));
+    renderer_.cancelQueuedAssetPrefetches();
+    upcomingAssetPrefetchPending_ = true;
     openTitleScreen();
     return true;
 }
@@ -1997,6 +2039,8 @@ void Application::deleteSaveSlot(int slot)
         // The file stays absent until the player starts playing again.
         playerProfile_.resetProgress();
         campaign_.resetForProfile(playerProfile_);
+        renderer_.cancelQueuedAssetPrefetches();
+        upcomingAssetPrefetchPending_ = true;
     }
     titleScreen_.setSaveSlots(saveSlotInfos(), saveSlots_.activeSlot());
     if (deletion.cleanupPending) {
@@ -2257,42 +2301,40 @@ void Application::restoreProfileLocation()
     }
 }
 
-RenderAssetRequirements Application::levelAssetRequirements(int levelIndex) const
+void Application::serviceUpcomingAssetPrefetch()
 {
+    if (!upcomingAssetPrefetchPending_) {
+        return;
+    }
+    upcomingAssetPrefetchPending_ = false;
+    renderer_.cancelQueuedAssetPrefetches();
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (tools_->levelEditor.editingDocument() ||
+        tools_->levelEditor.playingDraft()) {
+        return;
+    }
+#endif
+    std::vector<LevelLocation> targets;
+    if (!campaign_.gameLoaded() && !campaign_.inOverworld()) {
+        targets.push_back({ campaign_.currentLevel(), campaign_.currentScreen() });
+    } else {
+        targets = puzzleAssetPrefetchTargets(
+            campaign_, playerProfile_, overworldMap_ ? &*overworldMap_ : nullptr);
+    }
     RenderAssetRequirements requirements;
-    for (int screenIndex = 0;
-         campaign_.screenExists(levelIndex, screenIndex);
-         ++screenIndex) {
+    for (LevelLocation target : targets) {
         try {
             requirements.merge(renderAssetRequirementsForLevel(
-                Level::loadFromFile(screenPath(levelIndex, screenIndex)),
+                Level::loadFromFile(screenPath(target.level, target.screen)),
                 assetManifest_,
-                LevelLocation { .level = levelIndex, .screen = screenIndex },
+                target,
                 &animationCatalog_));
         } catch (const std::exception& error) {
             log::warning(log::Category::Assets)
                 << "asset preload skipped "
-                << screenPath(levelIndex, screenIndex).string()
+                << screenPath(target.level, target.screen).string()
                 << ": " << error.what();
         }
-    }
-    return requirements;
-}
-
-void Application::preloadUpcomingAssets()
-{
-    renderer_.cancelQueuedAssetPrefetches();
-    RenderAssetRequirements requirements;
-    if (campaign_.inOverworld()) {
-        for (int level = 0; level < campaign_.levelCount(); ++level) {
-            requirements.merge(levelAssetRequirements(level));
-        }
-    } else {
-        requirements = levelAssetRequirements(campaign_.currentLevel());
-        requirements.merge(renderAssetRequirementsForLevel(
-            overworldMap_ ? overworldMap_->level()
-                          : Level::loadFromFile(overworldPath()),
-            assetManifest_));
     }
     renderer_.preloadAssets(requirements);
 }

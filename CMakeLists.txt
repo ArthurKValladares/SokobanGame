@@ -746,9 +746,10 @@ add_library(sokoban_render_vulkan STATIC
 )
 add_library(Sokoban::render_vulkan ALIAS sokoban_render_vulkan)
 if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
-    # The editor adapter is shared with its real ImGui interaction tests.
-    # This library already owns ImGui; player builds omit the adapter.
+    # The editor workspace and adapter share their real ImGui interaction tests.
+    # This library already owns ImGui; player builds omit both.
     target_sources(sokoban_render_vulkan PRIVATE
+        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/DebugUi.cpp>"
         "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/LevelEditorDebugUi.cpp>")
     foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
         target_sources(sokoban_render_vulkan PRIVATE
@@ -812,7 +813,6 @@ if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
         "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/ApplicationTools.cpp>"
         "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/ApplicationDebugUi.cpp>"
         "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/AssetManifestDebugUi.cpp>"
-        "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/DebugUi.cpp>"
         "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/LogDebugUi.cpp>"
         "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/ProfilerDebugUi.cpp>"
         "$<${SOKOBAN_DEVELOPER_TOOLS_ENABLED}:src/engine/TuningDebugUi.cpp>"
@@ -1180,6 +1180,17 @@ if(SOKOBAN_BUILD_TESTS)
             TIMEOUT 60
             SKIP_RETURN_CODE 77
         )
+        if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
+            if(SOKOBAN_TEST_RUNNERS)
+                add_test(NAME thumbnail_loading_budget COMMAND
+                    sokoban_vulkan_tests vulkan_smoke --thumbnail-loading-budget)
+            else()
+                add_test(NAME thumbnail_loading_budget COMMAND
+                    sokoban_vulkan_smoke_tests --thumbnail-loading-budget)
+            endif()
+            set_tests_properties(thumbnail_loading_budget PROPERTIES
+                LABELS "vulkan;editor;assets" TIMEOUT 30 SKIP_RETURN_CODE 77)
+        endif()
         sokoban_add_test(NAME text_rendering
             STANDALONE TARGET sokoban_text_rendering_tests
             LIBS sokoban_render_vulkan sokoban_ui

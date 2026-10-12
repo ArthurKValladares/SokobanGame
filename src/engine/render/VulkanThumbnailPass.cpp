@@ -38,9 +38,7 @@ void VulkanThumbnailPass::create(
 
 void VulkanThumbnailPass::destroy()
 {
-    if (device_) {
-        invalidate();
-    }
+    invalidate();
     device_ = VK_NULL_HANDLE;
     allocator_ = nullptr;
     commandPool_ = VK_NULL_HANDLE;
@@ -67,6 +65,7 @@ void VulkanThumbnailPass::destroyThumbnail(
 
 void VulkanThumbnailPass::invalidate()
 {
+    pending_.clear();
     if (!device_) {
         cache_.clear();
         return;
@@ -107,12 +106,27 @@ VkDescriptorSet VulkanThumbnailPass::thumbnailFor(TileType tile)
     if (!valid()) {
         return VK_NULL_HANDLE;
     }
-    const int key = static_cast<int>(tile);
-    if (const auto found = cache_.find(key); found != cache_.end()) {
-        return found->second.imguiTexture;
+    const auto [entry, inserted] = cache_.try_emplace(static_cast<int>(tile));
+    if (inserted) {
+        // The placeholder also deduplicates requests while this thumbnail is
+        // pending. Drawing a palette performs no file access or GPU work.
+        pending_.push_back(tile);
     }
+    return entry->second.imguiTexture;
+#endif
+}
 
-    Thumbnail thumbnail;
+void VulkanThumbnailPass::servicePendingThumbnails()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (!valid() || pending_.empty()) {
+        return;
+    }
+    const TileType tile = pending_.front();
+    pending_.pop_front();
+    // Retain the placeholder on success or failure, so missing files are not
+    // retried by the palette every frame.
+    Thumbnail& thumbnail = cache_.at(static_cast<int>(tile));
     try {
         if (!loadThumbnail(tile, thumbnail)) {
             thumbnail.missing = true;
@@ -126,11 +140,6 @@ VkDescriptorSet VulkanThumbnailPass::thumbnailFor(TileType tile)
         thumbnail.missing = true;
     }
 
-    // Cached either way, including the miss: a tile with no baked file must
-    // not hit the filesystem again on every frame.
-    const VkDescriptorSet texture = thumbnail.imguiTexture;
-    cache_.emplace(key, thumbnail);
-    return texture;
 #endif
 }
 
@@ -258,8 +267,8 @@ bool VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
             });
         fence = vulkanResources::submitOneShotCommands(
             device_, graphicsQueue_, commandBuffer, "thumbnail");
-        // Loaded once and cached, so this stall costs one upload per tile the
-        // first time the palette is opened.
+        // The deferred main-thread service admits only one thumbnail per
+        // frame, so a palette cannot accumulate a batch of these waits.
         vkCheck(vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX),
             "vkWaitForFences thumbnail failed");
         cleanup();

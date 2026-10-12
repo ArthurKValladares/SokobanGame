@@ -1,7 +1,9 @@
 #include "engine/Window.hpp"
+#include "engine/Log.hpp"
 
 #include <SDL3/SDL.h>
 
+#include <chrono>
 #include <stdexcept>
 
 namespace sokoban {
@@ -19,9 +21,11 @@ void syncWindow(SDL_Window* window, const char* operation)
 
 Window::Window(const std::string& title, int width, int height)
 {
+    const auto started = std::chrono::steady_clock::now();
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
     }
+    const auto initialized = std::chrono::steady_clock::now();
 
     window_ = SDL_CreateWindow(
         title.c_str(),
@@ -33,6 +37,17 @@ Window::Window(const std::string& title, int width, int height)
         SDL_Quit();
         throw std::runtime_error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
     }
+    const auto created = std::chrono::steady_clock::now();
+    log::info(log::Category::Application)
+        << "Window startup phases (us): sdl-init="
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               initialized - started).count()
+        << " create="
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               created - initialized).count()
+        << " total="
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               created - started).count();
 }
 
 Window::~Window()
