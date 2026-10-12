@@ -88,9 +88,9 @@ controllers fall back to the generic glyph set.
 ## Lecterns and Activate
 
 Lecterns are fixed blocks that open a reading box when a hero walks into them.
-Click **Lectern** in the editor's tile palette to open the same direction
-submenu as turrets and portals. Choose North, East, South, or West, then paint
-the stand. Painting another direction over an existing lectern preserves its
+Click **Lectern** in the editor's tile palette, then press `R` or click
+**Rotate** to choose North, East, South, or West before painting
+the stand. Replacing an existing lectern with another direction preserves its
 text and supports undo/redo. The eyedropper and Recent tiles retain the direction.
 Select the stand in the **Lecterns** section to enter its text.
 Text supports line breaks, wraps to the box, and uses pages when needed.
@@ -572,9 +572,16 @@ incoming slide or conveyor momentum. The exit tile must be free.
 Portals can connect different layers and transport pushed units; turret,
 mirror and witch rays follow the same front-edge geometry. Their colors are
 independent of linked-object and pressure-plate groups of the same color.
-Units can be authored on a portal with `@plate` metadata. All four portal
-brushes use the active Link Color and the existing color tools.
+Units can be authored on a portal with `@plate` metadata. The portal brush
+uses the active Link Color and the existing color tools in every orientation.
 A playable example is [portals.scr](docs/examples/portals.scr).
+
+An optional `@tilerotation {"cell":[x,y,z],"quarterTurns":1}` directive
+stores a tile's additional clockwise appearance rotation before `@layer 0`.
+Use 1, 2 or 3 quarter turns; omit zero. Directional devices retain their
+existing grid symbols for gameplay direction. Rotation applies to the
+occupant when a cell also has a covered plate. Connected ground and cliffs
+constrain the visible rotation to orientations that preserve their joins.
 
 A `@linkcolor {"cell":[x,y,z],"color":[r,g,b]}` directive is level-editor
 bookkeeping: the color of a pressure plate, button or lever that drives nothing yet (see Link
@@ -785,7 +792,12 @@ editor commands but does not own document or filesystem policy.
   Wall** groups. **Randomize Ground** and **Randomize Walls** sit directly
   below these groups.
 - **Ground rock versions:** click **Ground** in Terrain to open the
-  same thumbnail submenu used by mirrors and turrets, then choose **Rock 01–10**.
+  thumbnail submenu, then choose **Rock 01–10**. Press `R` or click **Rotate**
+  to rotate any tile brush clockwise in 90-degree steps before placing it.
+  Saved screens, the eyedropper, moving tiles and undo/redo preserve the chosen
+  rotation. Joined terrain keeps its connections when using **Rotate** or
+  **Randomize**: isolated tiles allow four orientations, strips allow two,
+  and asymmetric connection shapes constrain the effective rotation.
   Each version uses an editable Blender rock body with three or four large
   fractured plates per side, gently curved edges, rounded bevels, and warm
   sandstone grain. Each style has six native GLB shapes: standalone, end,
@@ -802,17 +814,21 @@ editor commands but does not own document or filesystem policy.
   Existing `.` tiles use Rock 01; the other nine brushes save as the symbols
   above. Eyedropper, recent brushes, undo/redo, and moving a painted tile retain
   its chosen version and material assignment.
-  **Randomize Ground** assigns a random version to
+  **Randomize Ground** assigns a random version and quarter-turn rotation to
   every ground tile on every layer of the edited screen. The whole action is
   one undo/redo step and keeps each tile's splat assignment.
 - **Cliff walls:** click **Cliff Wall** to choose between two rock styles.
   The body automatically selects and rotates the matching module for all
   sixteen neighboring cliff patterns, including corners and filled interiors.
   Their flat tops use **Ground Paint** for assigned splat maps and blend-mask
-  painting. **Randomize Walls** keeps each tile's stone or cliff family and
-  preserves its paint assignment.
-- Buttons and levers: click their palette family to choose North, East, South
-  or West in the direction submenu. Changing placement preserves link colors
+  painting. **Randomize Walls** chooses a random variation and quarter-turn
+  rotation, keeps each tile's stone or cliff family and preserves its paint
+  assignment.
+- Conveyors, mirrors, turrets, portals, buttons, levers and lecterns have one
+  palette entry per family. Rail Straight, Rail Corner and Rail Stop each
+  have one entry. Select a family and use **Rotate** or `R` to change its
+  direction. Art variations, wardrobe characters and rotator behavior still
+  have their own choices. Changing placement preserves link colors
   and covered occupants; undo/redo, the eyedropper and Recent tiles retain the
   chosen placement. Levers keep their on/off state during play until activated
   again, while buttons supply one-step pulses.
@@ -845,7 +861,10 @@ editor commands but does not own document or filesystem policy.
   colors; links that colors cannot express at all are regrouped and the
   editor says so.
 - Click normally paints above the selected cell.
-- Hold `R` while clicking to replace on the resolved layer.
+- Hold `Q` while clicking to replace on the resolved layer.
+- Press `R` to rotate the active tile brush clockwise by 90 degrees. The
+  shortcut works over the game view immediately after choosing a palette
+  control; active text fields and open menus retain keyboard input.
 - Hold `M` and click a tile object, then its destination, to move it as one
   undoable edit. The move tool is independent of the active palette: ordinary
   tiles, mirrors, pressure plates, ends, and overworld selector flags all use
@@ -854,7 +873,7 @@ editor commands but does not own document or filesystem policy.
   move.
 - Hold `D` while clicking to delete; the target is shown with a dithered
   preview while invisible pick geometry keeps hover selection stable.
-- Hold the button and drag to paint (or, with `D`, delete, or with `R`,
+- Hold the button and drag to paint (or, with `D`, delete, or with `Q`,
   replace) every cell the pointer crosses. Each board column is edited at
   most once per drag, and the whole drag is one undo step. Hold `Shift` to
   keep the drag on its starting row or column. A drag only extends the board
@@ -872,6 +891,7 @@ editor commands but does not own document or filesystem policy.
   | Hold `Alt` + click | Eyedropper: pick up the tile under the pointer, and its link color |
   | Hold `Ctrl` + click or drag | Link-color brush: give each pressure plate, button, lever, device, or movable object touched the Link Color |
   | `1`-`9` | Choose from the recent-tiles strip at the top of the Tiles palette |
+  | `R` | Rotate the active tile or tile-decoration brush clockwise by 90 degrees |
   | `PageUp` / `PageDown` | Change the active layer |
   | `L` | Lock edits to the active layer |
   | `Tab` | Cycle Tiles, Mesh Decorations, Tile Decorations and (overworld) Screen Selectors |

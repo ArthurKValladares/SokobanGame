@@ -111,13 +111,17 @@ enum class BindingDeviceClass : uint8_t {
     InputAction action,
     BindingDeviceClass deviceClass,
     FrameArena& arena);
+// Whether two actions run in overlapping contexts and therefore cannot share
+// an identical binding. Tile and decoration-gizmo rotation are exclusive.
+[[nodiscard]] bool inputActionsConflict(InputAction left, InputAction right);
 // Rebinds `action`: bindings identical to `candidate` are removed from every
 // action active in the same input context, and the action's bindings of the
 // candidate's exact kind (keyboard / pad button / pad axis) are replaced by
 // the candidate. Editor-only modifiers may intentionally reuse gameplay keys;
 // an action that would otherwise become empty receives the target's displaced
 // same-kind binding. Rebinding a d-pad button still keeps an existing stick
-// binding and vice versa.
+// binding and vice versa. Tile rotation and decoration-gizmo rotation may
+// share a binding because their tools run them in mutually exclusive contexts.
 void assignBinding(
     InputBindings& bindings,
     InputAction action,

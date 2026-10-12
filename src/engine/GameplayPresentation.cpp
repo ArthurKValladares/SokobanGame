@@ -1556,8 +1556,8 @@ void GameplayPresentation::syncToGameState(const GameState& state)
         if (existing != oldPlayers.end()) {
             visual = *existing;
         } else {
-            visual.facingQuarterTurns = players_.empty()
-                ? facingQuarterTurns(MoveDirection::Down)
+            visual.facingQuarterTurns = oldPlayers.empty() || players_.empty()
+                ? (facingQuarterTurns(MoveDirection::Down) + player.quarterTurns) % 4
                 : players_.front().facingQuarterTurns;
         }
         visual.motion.target = target;
@@ -1603,6 +1603,9 @@ void GameplayPresentation::syncToGameState(const GameState& state)
         EnemyVisual visual;
         if (existing != oldEnemies.end()) {
             visual = *existing;
+        } else {
+            visual.rotatorYawOffsetRadians = static_cast<float>(enemy.quarterTurns) *
+                1.57079632679489661923f;
         }
         visual.motion.target = target;
         setImmediatePosition(

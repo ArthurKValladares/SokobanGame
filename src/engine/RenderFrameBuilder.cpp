@@ -77,6 +77,7 @@ struct StaticRenderCell {
     std::optional<RenderModel> modelOverride;
     std::optional<Vec4> colorOverride;
     float gateOpenness = 0.0f;
+    uint64_t renderableId = 0;
 };
 
 void appendControlComponents(
@@ -324,7 +325,7 @@ void appendStaticTiles(
                     };
                     appendMinecartGateVisual(frame, position,
                         level.plateAt(position).value_or(TileType::Air),
-                        cell.gateOpenness);
+                        cell.gateOpenness, 1.0f, false, level.tileRotationQuarterTurns(position));
                     continue;
                 }
                 if (cell.tile == TileType::Air ||
@@ -362,6 +363,7 @@ void appendStaticTiles(
                     .affectsCameraFit =
                         tileTypeAffectsCameraFit(cell.tile),
                     .model = model,
+                    .renderableId = cell.renderableId,
                     .modelRotationQuarterTurns = cell.modelRotationQuarterTurns,
                     .modelRotationOffsetRadians =
                         cell.modelRotationOffsetRadians +
@@ -886,6 +888,12 @@ void appendGameplayWorld(
                         .baseElevation =
                             static_cast<float>(std::max(position.z - 1, 0)),
                         .height = 1.0f,
+                        .modelRotationQuarterTurns = rules::turretDirection(*fallenMovable)
+                            ? facingQuarterTurns(*rules::turretDirection(*fallenMovable))
+                            : (mirrorOrientationQuarterTurns(fallenMovable->type).value_or(0) +
+                                  static_cast<uint32_t>(fallenMovable->quarterTurns)) % 4,
+                        .renderableId = resolvedEntityId(EntityKind::Movable, fallenMovable->id,
+                            static_cast<std::size_t>(fallenMovable - state.movables.data())),
                     };
                 }
             }
@@ -1086,6 +1094,7 @@ void appendGameplayWorld(
             input.manifest.modelForTile(TileType::Elevator));
         platform.renderableId =
             resolvedEntityId(EntityKind::Elevator, invalidEntityId, index);
+        applyAuthoredTileRotation(platform, input.level.tileRotationQuarterTurns(elevator.cell));
         // No per-tile scale: scaling the slab would lift its top off the
         // layer surface it has to be flush with.
         frame.tiles.push_back(platform);
@@ -1149,6 +1158,7 @@ void appendGameplayWorld(
         };
         cartTile.renderableId = resolvedEntityId(
             EntityKind::Minecart, invalidEntityId, index);
+        applyAuthoredTileRotation(cartTile, input.level.tileRotationQuarterTurns(minecart.cell));
         frame.tiles.push_back(cartTile);
     }
 
@@ -1784,7 +1794,11 @@ void appendMirrorGhostTile(
             ? (previewPlayer
                     ? previewPlayer->facingQuarterTurns
                     : 0U)
-            : 0U,
+            : entity.enemy ? 0U
+            : rules::turretDirection(state.movables[entity.movableIndex])
+                ? facingQuarterTurns(*rules::turretDirection(state.movables[entity.movableIndex]))
+                : (mirrorOrientationQuarterTurns(state.movables[entity.movableIndex].type).value_or(0) +
+                      static_cast<uint32_t>(state.movables[entity.movableIndex].quarterTurns)) % 4,
         .modelRotationOffsetRadians = previewEnemy
             ? yawRadians(previewEnemy->orientation)
             : 0.0f,
@@ -2041,12 +2055,38 @@ void applyScrollingMaterials(
     }
 }
 
+void applyGameplayAuthoredRotations(RenderFrameData& frame, const Level& level)
+{
+    for (auto& tile : frame.tiles) {
+        // Actors carry their authored orientation in GameState, so it follows
+        // them when they move. Decorations have their own complete transform.
+        if (tile.renderableId != 0 || tile.modelTransform || !level.inBounds(tile.cell)) continue;
+        const uint32_t turns = level.tileRotationQuarterTurns(tile.cell);
+        if (turns == 0) continue;
+        const TileType authored = level.authoredTileAt(
+            static_cast<uint32_t>(tile.cell.x), static_cast<uint32_t>(tile.cell.y),
+            static_cast<uint32_t>(tile.cell.z));
+        // The static grid retains a covered plate where a unit was authored.
+        // A rotation at that cell belongs to the unit, even after it moves.
+        if (tileTypeIsPlate(authored) &&
+            (std::ranges::find(level.movableTiles(), tile.cell, &Level::MovableTile::position) != level.movableTiles().end() ||
+                std::ranges::find(level.playerStarts(), tile.cell, &Level::PlayerStart::position) != level.playerStarts().end() ||
+                std::ranges::find(level.enemyStarts(), tile.cell) != level.enemyStarts().end() ||
+                std::ranges::find(level.minecarts(), tile.cell, &Level::Minecart::cell) != level.minecarts().end())) continue;
+        if (tileTypeIsMovableObject(authored) || tileTypeIsPlayerStart(authored) ||
+            authored == TileType::Enemy || tileTypeIsMinecart(authored) ||
+            authored == TileType::MinecartGate) continue;
+        applyAuthoredTileRotation(tile, turns);
+    }
+}
+
 } // namespace
 
 RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
 {
     RenderFrameData frame = initializeGameplayFrame(input);
     appendGameplayWorld(frame, input);
+    applyGameplayAuthoredRotations(frame, input.level);
     appendGameplayEntities(frame, input);
     input.presentation.appendWaterRippleRenderData(frame);
     appendMirrorPreview(frame, input);
@@ -2075,6 +2115,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(
 {
     RenderFrameData frame = initializeGameplayFrame(input, &arena);
     appendGameplayWorld(frame, input);
+    applyGameplayAuthoredRotations(frame, input.level);
     appendGameplayEntities(frame, input);
     input.presentation.appendWaterRippleRenderData(frame);
     appendMirrorPreview(frame, input, &arena);

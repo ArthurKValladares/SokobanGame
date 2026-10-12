@@ -155,6 +155,99 @@ void testEveryMaskAndStyleUsesAuthoredGeometry()
     }
 }
 
+void testAuthoredQuarterTurnsKeepConnectedBodiesAndCapsAligned()
+{
+    TEST("authoredQuarterTurnsKeepConnectedBodiesAndCapsAligned");
+    const auto manifest = makeManifest();
+    for (uint8_t mask = 0; mask < 16; ++mask) {
+        const auto baseModule = tileModuleForMask(mask);
+        uint8_t seenTurns = 0;
+        for (uint32_t turns = 0; turns < 4; ++turns) {
+            std::vector tiles { ground({ 0, 0, 1 }, manifest, 2) };
+            tiles.front().authoredRotationQuarterTurns = turns;
+            for (std::size_t side = 0; side < 4; ++side) {
+                if ((mask & (1U << side)) == 0) {
+                    tiles.push_back(ground({ neighborhoodOffsets[side].x, neighborhoodOffsets[side].y, 1 }, manifest));
+                }
+            }
+            processGroundTileGeometry(tiles, manifest);
+            const auto& tile = tiles.front();
+            checkSelected(tile, manifest, mask);
+            CHECK(tile.model == manifest.modelIdByName(groundTileModelName(baseModule.shapeIndex, 2)));
+            CHECK(tile.authoredRotationQuarterTurns == turns);
+            CHECK(tile.modelRotationQuarterTurns < 4);
+            seenTurns |= static_cast<uint8_t>(1U << tile.modelRotationQuarterTurns);
+            if (mask == 0 || mask == groundAllSides) CHECK(tile.modelRotationQuarterTurns == turns);
+
+            // Cap concavities stay in world space while their native vertices,
+            // normals and material coverage follow the selected mesh rotation.
+            const auto surface = groundTileTopSurface(tile);
+            const auto& canonical = groundTileCanonicalTopSurface(baseModule.shapeIndex, 2,
+                rotateMask(tile.groundModuleConcaveCorners, 4 - tile.modelRotationQuarterTurns));
+            CHECK(surface.count == canonical.count);
+            CHECK(surface.count == groundTileTopPatchCountFor(tile));
+            for (std::size_t patch = 0; patch < surface.count; ++patch) {
+                for (std::size_t vertex = 0; vertex < 4; ++vertex) {
+                    Vec3 point = canonical.patches[patch].vertices[vertex];
+                    for (uint32_t turn = 0; turn < tile.modelRotationQuarterTurns; ++turn) point = { 1-point.y, point.x, point.z };
+                    point.z += 1;
+                    CHECK(surface.patches[patch].vertices[vertex] == point);
+                }
+                Vec3 normal = canonical.patches[patch].normal;
+                for (uint32_t turn = 0; turn < tile.modelRotationQuarterTurns; ++turn) normal = { -normal.y, normal.x, normal.z };
+                CHECK(surface.patches[patch].normal == normal);
+                CHECK(surface.patches[patch].wallCoverage == canonical.patches[patch].wallCoverage);
+            }
+            const auto once = tiles;
+            processGroundTileGeometry(tiles, manifest);
+            CHECK(tiles == once);
+        }
+        CHECK(std::popcount(seenTurns) == (mask == 0 || mask == 15 ? 4 : mask == 5 || mask == 10 ? 2 : 1));
+    }
+}
+
+void testRotatedIslandsShareRenderShadowAndPaintCaps()
+{
+    TEST("rotatedIslandsShareRenderShadowAndPaintCaps");
+    const auto manifest = makeManifest();
+    constexpr Vec2 extent { 1280, 720 };
+    IsoScenePreparer preparer;
+    PreparedRenderScene scene;
+    for (uint32_t turns = 0; turns < 4; ++turns) {
+        auto tile = ground({ 2, 2, 1 }, manifest, 3);
+        tile.authoredRotationQuarterTurns = turns;
+        processGroundTileGeometry(std::span(&tile, 1), manifest);
+        CHECK(tile.modelRotationQuarterTurns == turns);
+        tile.groundSplat = GroundSplatTextures { .base = RenderTexture { 1 },
+            .detail = RenderTexture { 2 }, .splatMap = RenderTexture { 3 } };
+        RenderFrameData frame;
+        frame.viewMode = RenderViewMode::Isometric3D;
+        frame.levelWidth = frame.levelHeight = 6;
+        frame.levelDepth = 3;
+        frame.cameraExtent = { 0, 0, 0, 6, 6, 3 };
+        frame.tiles.push_back(tile);
+        preparer.prepare(frame, extent, scene);
+        const auto surface = groundTileTopSurface(tile);
+        CHECK(scene.shadowFaces.size() == surface.count);
+        for (const auto& patch : surface.faces()) {
+            CHECK(std::ranges::find(scene.shadowFaces, patch.vertices) != scene.shadowFaces.end());
+            CHECK(std::ranges::any_of(scene.opaqueFaceIndices, [&](std::size_t index) {
+                return scene.isoFaces[index].worldVertices == patch.vertices;
+            }));
+        }
+        const Vec3 clip = IsoScenePreparer::projectIsoPoint(scene.isoLayout, extent, { 2.5f, 2.5f, 2 });
+        const Vec2 pixel { (clip.x+1)*.5f*extent.x, (1-clip.y)*.5f*extent.y };
+        const auto hit = preparer.pickGroundPoint(scene, pixel, extent);
+        CHECK(hit.has_value());
+        if (hit) {
+            checkNear(hit->x, 2.5f, "rotated island paint x", .002f);
+            checkNear(hit->y, 2.5f, "rotated island paint y", .002f);
+            checkNear(hit->z, 2, "rotated island paint height", .002f);
+        }
+        CHECK(preparer.pickGridCell(scene, pixel, extent, 6, 6, 3) == tile.cell);
+    }
+}
+
 void testMissingModulesAndUnsupportedNeighborsFailOpen()
 {
     TEST("missingModulesAndUnsupportedNeighborsFailOpen");
@@ -447,6 +540,38 @@ std::optional<GroundCapSample> sampleCap(const GroundTileCapSurface& surface, Ve
     return std::nullopt;
 }
 
+void testAuthoredQuarterTurnsKeepJoinedCapTraces()
+{
+    TEST("authoredQuarterTurnsKeepJoinedCapTraces");
+    const auto manifest = makeManifest();
+    constexpr std::array<GridPosition, 10> neighbors {{
+        { -1, -1 }, { 0, -1 }, { 1, -1 }, { 2, -1 }, { -1, 0 }, { 2, 0 },
+        { -1, 1 }, { 0, 1 }, { 1, 1 }, { 2, 1 },
+    }};
+    constexpr std::array<float, 13> stations { 0, .03f, .06f, .09f, .12f, .15f, .37f, .70f, .88f, .91f, .94f, .97f, 1 };
+    for (uint32_t pattern = 0; pattern < 1024; ++pattern) {
+        std::vector tiles { ground({ 0, 0, 0 }, manifest, 2), ground({ 1, 0, 0 }, manifest, 7) };
+        tiles[0].authoredRotationQuarterTurns = pattern & 3;
+        tiles[1].authoredRotationQuarterTurns = (pattern >> 2) & 3;
+        for (std::size_t neighbor = 0; neighbor < neighbors.size(); ++neighbor) {
+            if (pattern & (1U << neighbor)) tiles.push_back(ground({ neighbors[neighbor].x, neighbors[neighbor].y, 0 }, manifest));
+        }
+        processGroundTileGeometry(tiles, manifest);
+        const auto first = groundTileTopSurface(tiles[0]);
+        const auto second = groundTileTopSurface(tiles[1]);
+        for (float station : stations) {
+            const auto a = sampleCap(first, { 1, station });
+            const auto b = sampleCap(second, { 1, station });
+            CHECK(a.has_value());
+            CHECK(b.has_value());
+            if (a && b) {
+                checkNear(a->height, b->height, "rotated joined cap height", .00001f);
+                checkNear(a->wallCoverage, b->wallCoverage, "rotated joined cap material coverage", .00001f);
+            }
+        }
+    }
+}
+
 void testHiddenSeamsAndCanonicalRotation()
 {
     TEST("hiddenSeamsAndCanonicalRotation");
@@ -457,6 +582,7 @@ void testHiddenSeamsAndCanonicalRotation()
             for (uint8_t concave = 0; concave < 16; ++concave) {
                 if ((concave & ~allowedConcaveCorners(mask)) != 0) continue;
                 auto tile = ground({ 0, 0, 0 }, manifest, variant);
+                tile.modelRotationQuarterTurns = module.quarterTurns;
                 tile.groundModuleSideMask = mask;
                 tile.groundModuleConcaveCorners = concave;
                 const auto& canonical = groundTileCanonicalTopSurface(module.shapeIndex, variant, rotateMask(concave, 4 - module.quarterTurns));
@@ -1134,6 +1260,9 @@ int main()
 {
     try {
         testEveryMaskAndStyleUsesAuthoredGeometry();
+        testAuthoredQuarterTurnsKeepConnectedBodiesAndCapsAligned();
+        testRotatedIslandsShareRenderShadowAndPaintCaps();
+        testAuthoredQuarterTurnsKeepJoinedCapTraces();
         testMissingModulesAndUnsupportedNeighborsFailOpen();
         testRaisedContactsAndStacksUseSquareCohorts();
         testEverySquareShapeSharesAuthoredRenderShadowAndPaintCaps();

@@ -282,7 +282,8 @@ PaintedCell stackPaint(PaintedCell current, TileType tile)
 // Removes every legacy Player tile (the overworld has exactly one). A Player
 // standing on a plate leaves that plate behind in the grid.
 bool removePlayerTiles(
-    Level::LayerRows& layers, std::vector<Level::Plate>& plates)
+    Level::LayerRows& layers, std::vector<Level::Plate>& plates,
+    std::vector<Level::TileRotation>& tileRotations)
 {
     bool changed = false;
     const char player = tileTypeToChar(TileType::Player);
@@ -298,6 +299,9 @@ bool removePlayerTiles(
                     static_cast<int>(y),
                     static_cast<int>(z),
                 };
+                std::erase_if(tileRotations, [&](const Level::TileRotation& rotation) {
+                    return rotation.cell == cell;
+                });
                 const auto covered =
                     std::ranges::find(plates, cell, &Level::Plate::cell);
                 if (covered != plates.end()) {
@@ -822,9 +826,60 @@ void LevelEditor::toggleLayerLock()
 
 void LevelEditor::setSelectedTile(TileType tile)
 {
+    if (document_.selectedTile != tile) {
+        document_.selectedTileQuarterTurns = 0;
+    }
     document_.selectedTile = tile;
     document_.tool = Tool::Tiles;
     noteRecentTile(tile);
+}
+
+void LevelEditor::rotateSelectedTile(int quarterTurns)
+{
+    const TileType rotated = rotateTileType(document_.selectedTile, quarterTurns);
+    if (rotateTileType(document_.selectedTile, 1) != document_.selectedTile) {
+        document_.selectedTile = rotated;
+        document_.selectedTileQuarterTurns = 0;
+    } else if (document_.selectedTile != TileType::Air) {
+        document_.selectedTileQuarterTurns = static_cast<uint32_t>(
+            (static_cast<int>(document_.selectedTileQuarterTurns) + quarterTurns % 4 + 4) % 4);
+    }
+    document_.status = "Rotated " + std::string(tileTypeName(document_.selectedTile)) + ".";
+}
+
+uint32_t LevelEditor::selectedTileQuarterTurns() const
+{
+    return document_.selectedTileQuarterTurns;
+}
+
+uint32_t LevelEditor::tileRotationQuarterTurns(GridPosition3 cell) const
+{
+    const auto rotation = std::ranges::lower_bound(document_.tileRotations,
+        std::array { cell.z, cell.y, cell.x }, {}, [](const Level::TileRotation& candidate) {
+            return std::array { candidate.cell.z, candidate.cell.y, candidate.cell.x };
+        });
+    return rotation != document_.tileRotations.end() && rotation->cell == cell
+        ? rotation->quarterTurns : 0U;
+}
+
+const std::vector<Level::TileRotation>& LevelEditor::tileRotations() const
+{
+    return document_.tileRotations;
+}
+
+void LevelEditor::setTileRotation(GridPosition3 cell, uint32_t quarterTurns)
+{
+    const auto rotation = std::ranges::lower_bound(document_.tileRotations,
+        std::array { cell.z, cell.y, cell.x }, {}, [](const Level::TileRotation& candidate) {
+            return std::array { candidate.cell.z, candidate.cell.y, candidate.cell.x };
+        });
+    const auto normalized = static_cast<uint8_t>(quarterTurns % 4);
+    if (rotation != document_.tileRotations.end() && rotation->cell == cell) {
+        if (normalized == 0) document_.tileRotations.erase(rotation);
+        else rotation->quarterTurns = normalized;
+    } else if (normalized != 0) {
+        document_.tileRotations.insert(rotation, { .cell = cell, .quarterTurns = normalized });
+    }
 }
 
 void LevelEditor::setTool(Tool tool)
@@ -901,17 +956,20 @@ std::optional<TileType> LevelEditor::pickTile(GridPosition3 pickedCell)
     };
 
     std::optional<TileType> picked;
+    GridPosition3 selectedCell = pickedCell;
     if (document_.layerLocked) {
         const TileType tile =
             tileAt(pickedCell.x, pickedCell.y, document_.activeLayer);
         if (tile != TileType::Air) {
             picked = tile;
+            selectedCell.z = document_.activeLayer;
         }
     } else {
         for (int z = static_cast<int>(documentDepth()) - 1; z >= 0; --z) {
             const TileType tile = tileAt(pickedCell.x, pickedCell.y, z);
             if (tile != TileType::Air) {
                 picked = tile;
+                selectedCell.z = z;
                 break;
             }
         }
@@ -921,6 +979,7 @@ std::optional<TileType> LevelEditor::pickTile(GridPosition3 pickedCell)
         return std::nullopt;
     }
     setSelectedTile(*picked);
+    document_.selectedTileQuarterTurns = tileRotationQuarterTurns(selectedCell);
     document_.status =
         "Picked " + std::string(tileTypeName(*picked)) + ".";
     // Picking a pressure plate, device, or linked movable object also picks
@@ -1210,7 +1269,7 @@ bool LevelEditor::setBrowserRoot(const std::filesystem::path& path)
 
 bool LevelEditor::paintCell(GridPosition3 position)
 {
-    return setCell(position, document_.selectedTile);
+    return setCellWithRotation(position, document_.selectedTile, document_.selectedTileQuarterTurns);
 }
 
 bool LevelEditor::eraseCell(GridPosition3 position)
@@ -1226,11 +1285,15 @@ bool LevelEditor::randomizeRocks(std::optional<uint32_t> seed)
     std::mt19937 random(seed ? *seed : std::random_device {}());
     std::uniform_int_distribution<uint32_t> choose(
         0, static_cast<uint32_t>(groundRockVariantCount - 1));
+    std::uniform_int_distribution<uint32_t> chooseRotation(0, 3);
     std::size_t rocks = 0;
     std::size_t changed = 0;
-    for (auto& layer : document_.layers) {
-        for (auto& row : layer) {
-            for (char& character : row) {
+    for (std::size_t z = 0; z < document_.layers.size(); ++z) {
+        auto& layer = document_.layers[z];
+        for (std::size_t y = 0; y < layer.size(); ++y) {
+            auto& row = layer[y];
+            for (std::size_t x = 0; x < row.size(); ++x) {
+                char& character = row[x];
                 const auto tile = charToTileType(character);
                 if (!tile || !tileTypeIsGround(*tile)) continue;
                 ++rocks;
@@ -1238,8 +1301,11 @@ bool LevelEditor::randomizeRocks(std::optional<uint32_t> seed)
                 const TileType replacement = variant == 0 ? TileType::Ground
                     : static_cast<TileType>(static_cast<uint32_t>(TileType::GroundRock02) + variant - 1);
                 const char replacementCharacter = tileTypeToChar(replacement);
-                changed += character != replacementCharacter;
+                const GridPosition3 cell { static_cast<int>(x), static_cast<int>(y), static_cast<int>(z) };
+                const uint32_t rotation = chooseRotation(random);
+                changed += character != replacementCharacter || tileRotationQuarterTurns(cell) != rotation;
                 character = replacementCharacter;
+                setTileRotation(cell, rotation);
             }
         }
     }
@@ -1265,11 +1331,15 @@ bool LevelEditor::randomizeWalls(std::optional<uint32_t> seed)
         0, static_cast<uint32_t>(wallStoneVariantCount - 1));
     std::uniform_int_distribution<uint32_t> chooseCliff(
         0, static_cast<uint32_t>(cliffWallVariantCount - 1));
+    std::uniform_int_distribution<uint32_t> chooseRotation(0, 3);
     std::size_t walls = 0;
     std::size_t changed = 0;
-    for (auto& layer : document_.layers) {
-        for (auto& row : layer) {
-            for (char& character : row) {
+    for (std::size_t z = 0; z < document_.layers.size(); ++z) {
+        auto& layer = document_.layers[z];
+        for (std::size_t y = 0; y < layer.size(); ++y) {
+            auto& row = layer[y];
+            for (std::size_t x = 0; x < row.size(); ++x) {
+                char& character = row[x];
                 const auto tile = charToTileType(character);
                 if (!tile || !tileTypeIsWall(*tile)) continue;
                 ++walls;
@@ -1280,8 +1350,11 @@ bool LevelEditor::randomizeWalls(std::optional<uint32_t> seed)
                     : variant == 0 ? TileType::Wall
                         : static_cast<TileType>(static_cast<uint32_t>(TileType::WallStone02) + variant - 1);
                 const char replacementCharacter = tileTypeToChar(replacement);
-                changed += character != replacementCharacter;
+                const GridPosition3 cell { static_cast<int>(x), static_cast<int>(y), static_cast<int>(z) };
+                const uint32_t rotation = chooseRotation(random);
+                changed += character != replacementCharacter || tileRotationQuarterTurns(cell) != rotation;
                 character = replacementCharacter;
+                setTileRotation(cell, rotation);
             }
         }
     }
@@ -1487,6 +1560,12 @@ bool LevelEditor::moveObject(GridPosition3 destination)
     restoreRecordAfterMove(
         document_.lecterns, before.lecterns, tileTypeIsLectern(move->tile),
         move->source, destination);
+    const auto rotation = std::ranges::find(before.tileRotations, move->source,
+        &Level::TileRotation::cell);
+    const GridPosition3 rotationDestination {
+        std::max(destination.x, 0), std::max(destination.y, 0), destination.z };
+    setTileRotation(rotationDestination,
+        rotation == before.tileRotations.end() ? 0U : rotation->quarterTurns);
     if (tileTypeHasSplatTop(move->tile)) {
         const auto paint = std::ranges::find(before.groundPaint, move->source, &Level::GroundPaint::cell);
         if (paint != before.groundPaint.end()) {
@@ -1697,11 +1776,27 @@ GridPosition3 LevelEditor::resolveSelectorTarget(
 
 bool LevelEditor::setCell(GridPosition3 position, TileType tile)
 {
+    uint32_t rotation = 0;
+    if (position.x >= 0 && position.y >= 0 && position.z >= 0 &&
+        position.x < static_cast<int>(documentWidth()) &&
+        position.y < static_cast<int>(documentHeight()) &&
+        position.z < static_cast<int>(documentDepth()) &&
+        charToTileType(document_.layers[static_cast<std::size_t>(position.z)]
+            [static_cast<std::size_t>(position.y)][static_cast<std::size_t>(position.x)]) == tile) {
+        rotation = tileRotationQuarterTurns(position);
+    }
+    return setCellWithRotation(position, tile, rotation);
+}
+
+bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uint32_t quarterTurns)
+{
     if (editingOverworld() && tileTypeIsPlayerStart(tile)) {
         tile = TileType::Player;
     } else if (!editingOverworld() && tile == TileType::Player) {
         tile = TileType::Rogue;
     }
+    quarterTurns = tile == TileType::Air || rotateTileType(tile, 1) != tile
+        ? 0U : quarterTurns % 4;
     if (document_.layers.empty() || position.z < 0) {
         return false;
     }
@@ -1811,7 +1906,10 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
     if (!expandsDocument &&
         translatedPosition.z < static_cast<int>(document_.layers.size())) {
         const PaintedCell current = paintedCellAt(translatedPosition);
-        if (stackPaint(current, tile) == current) {
+        const PaintedCell painted = stackPaint(current, tile);
+        const uint32_t rotation = painted.top != tile && painted.top == current.top
+            ? tileRotationQuarterTurns(translatedPosition) : quarterTurns;
+        if (painted == current && rotation == tileRotationQuarterTurns(translatedPosition)) {
             // Painting a pressure plate, device or movable object over itself
             // gives it the active link color. This is how an ordinary object
             // first joins a linked group.
@@ -1868,6 +1966,7 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
             paint.cell.x += prependColumns;
             paint.cell.y += prependRows;
         }
+        translateLinkColors(document_.tileRotations, prependColumns, prependRows);
         translateLinkedRecords(document_.gates, prependColumns, prependRows);
         translateLinkedRecords(
             document_.rotators, prependColumns, prependRows);
@@ -1892,7 +1991,7 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
     }
 
     if (editingOverworld() && tile == TileType::Player) {
-        (void)removePlayerTiles(document_.layers, document_.plates);
+        (void)removePlayerTiles(document_.layers, document_.plates, document_.tileRotations);
     }
 
     const PaintedCell previous = paintedCellAt(translatedPosition);
@@ -2047,6 +2146,9 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
         [static_cast<size_t>(translatedPosition.y)]
         [static_cast<size_t>(translatedPosition.x)] =
         tileTypeToChar(painted.top);
+    if (painted.top == tile || painted.top != previous.top) {
+        setTileRotation(translatedPosition, quarterTurns);
+    }
     document_.activeLayer = translatedPosition.z;
     document_.dirty = true;
     if (expandsDocument) {
@@ -3053,6 +3155,7 @@ Level::Definition LevelEditor::linkedDefinition(
         .character = character,
         .groundSplats = document_.groundSplats,
         .groundPaint = document_.groundPaint,
+        .tileRotations = document_.tileRotations,
     };
     // The color groups become explicit links here, and only here; nothing
     // past this point ever compares colors.
@@ -3245,6 +3348,7 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     document_.lecterns.clear();
     document_.groundSplats.clear();
     document_.groundPaint.clear();
+    document_.tileRotations.clear();
     document_.gates.clear();
     document_.rotators.clear();
     document_.lockPlates.clear();
@@ -3313,6 +3417,9 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
     });
     std::erase_if(document_.groundPaint, [&](const Level::GroundPaint& paint) {
         return paint.cell.x >= width || paint.cell.y >= height;
+    });
+    std::erase_if(document_.tileRotations, [&](const Level::TileRotation& rotation) {
+        return rotation.cell.x >= width || rotation.cell.y >= height;
     });
     cropLinkedRecords(document_.gates, width, height);
     cropLinkedRecords(document_.rotators, width, height);
@@ -3410,6 +3517,9 @@ void LevelEditor::insertLayerAt(int insertionIndex, const char* status)
     for (Level::GroundPaint& paint : document_.groundPaint) {
         if (paint.cell.z >= insertionIndex) ++paint.cell.z;
     }
+    for (Level::TileRotation& rotation : document_.tileRotations) {
+        if (rotation.cell.z >= insertionIndex) ++rotation.cell.z;
+    }
     document_.activeLayer = insertionIndex;
     document_.dirty = true;
     document_.status = status;
@@ -3461,6 +3571,11 @@ void LevelEditor::deleteActiveLayer()
     std::erase_if(document_.groundPaint, [&](Level::GroundPaint& paint) {
         if (paint.cell.z == static_cast<int>(deletedLayer)) return true;
         if (paint.cell.z > static_cast<int>(deletedLayer)) --paint.cell.z;
+        return false;
+    });
+    std::erase_if(document_.tileRotations, [&](Level::TileRotation& rotation) {
+        if (rotation.cell.z == static_cast<int>(deletedLayer)) return true;
+        if (rotation.cell.z > static_cast<int>(deletedLayer)) --rotation.cell.z;
         return false;
     });
     removeLinkedRecordLayer(document_.gates, static_cast<int>(deletedLayer));
@@ -3654,6 +3769,10 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     document_.lecterns = std::move(definition.lecterns);
     document_.groundSplats = std::move(definition.groundSplats);
     document_.groundPaint = std::move(definition.groundPaint);
+    document_.tileRotations = std::move(definition.tileRotations);
+    std::ranges::sort(document_.tileRotations, {}, [](const Level::TileRotation& rotation) {
+        return std::array { rotation.cell.z, rotation.cell.y, rotation.cell.x };
+    });
     groundAssignmentPainting_ = false;
     for (std::size_t z = 0; z < document_.layers.size(); ++z) {
         for (std::size_t y = 0; y < document_.layers[z].size(); ++y) {
@@ -3714,10 +3833,14 @@ bool LevelEditor::reloadFromDisk()
     try {
         Level::Definition onDisk = Level::loadDefinitionFromFile(path);
         (void)padToRectangle(onDisk);
+        std::ranges::sort(onDisk.tileRotations, {}, [](const Level::TileRotation& rotation) {
+            return std::array { rotation.cell.z, rotation.cell.y, rotation.cell.x };
+        });
         // The editor's own saves land here too; they change nothing.
         const Level::Definition current =
             linkedDefinition(document_.character);
         if (onDisk.layers == current.layers &&
+            onDisk.tileRotations == current.tileRotations &&
             onDisk.waterLayer == current.waterLayer &&
             onDisk.cameraAngles == current.cameraAngles &&
             onDisk.character == current.character &&
@@ -3816,7 +3939,7 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
                             Level::Definition definition =
                                 Level::loadDefinitionFromFile(other);
                             const bool changed = removePlayerTiles(
-                                definition.layers, definition.plates);
+                                definition.layers, definition.plates, definition.tileRotations);
                             if (changed) {
                                 writeScreenRows(
                                     other,
@@ -4411,6 +4534,7 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
     }
     const DocumentSnapshot after = captureDocumentSnapshot();
     if (before.layers == after.layers &&
+        before.tileRotations == after.tileRotations &&
         before.waterLayer == after.waterLayer &&
         before.cameraAngles == after.cameraAngles &&
         before.character == after.character &&
@@ -4454,6 +4578,7 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
     document_.lecterns = snapshot.lecterns;
     document_.groundSplats = snapshot.groundSplats;
     document_.groundPaint = snapshot.groundPaint;
+    document_.tileRotations = snapshot.tileRotations;
     document_.gates = snapshot.gates;
     document_.rotators = snapshot.rotators;
     document_.lockPlates = snapshot.lockPlates;
@@ -4624,13 +4749,19 @@ std::optional<Level> LevelEditor::beginDraftPlayback(
             // starts controlling - or use a Rogue when the draft has none.
             char hero = tileTypeToChar(TileType::Rogue);
             bool lifted = false;
-            for (auto& layer : definition.layers) {
-                for (std::string& row : layer) {
-                    for (char& tile : row) {
+            std::optional<GridPosition3> heroCell;
+            for (std::size_t layerIndex = 0; layerIndex < definition.layers.size(); ++layerIndex) {
+                auto& layer = definition.layers[layerIndex];
+                for (std::size_t rowIndex = 0; rowIndex < layer.size(); ++rowIndex) {
+                    auto& row = layer[rowIndex];
+                    for (std::size_t column = 0; column < row.size(); ++column) {
+                        char& tile = row[column];
                         const std::optional<TileType> type =
                             charToTileType(tile);
                         if (!lifted && type && tileTypeIsPlayerStart(*type)) {
                             hero = tile;
+                            heroCell = GridPosition3 { static_cast<int>(column),
+                                static_cast<int>(rowIndex), static_cast<int>(layerIndex) };
                             tile = tileTypeToChar(TileType::Air);
                             lifted = true;
                         }
@@ -4666,6 +4797,13 @@ std::optional<Level> LevelEditor::beginDraftPlayback(
                 return std::nullopt;
             }
             targetTile = hero;
+            if (heroCell) {
+                const auto rotation = std::ranges::find(definition.tileRotations,
+                    *heroCell, &Level::TileRotation::cell);
+                if (rotation != definition.tileRotations.end()) {
+                    rotation->cell = { static_cast<int>(x), static_cast<int>(y), static_cast<int>(z) };
+                }
+            }
             level = Level::loadFromDefinition(
                 definition, "level editor draft (play from cursor)");
             draftOverworldMap_.reset();
@@ -4718,6 +4856,7 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
         .lecterns = document_.lecterns,
         .groundSplats = document_.groundSplats,
         .groundPaint = document_.groundPaint,
+        .tileRotations = document_.tileRotations,
         .gates = document_.gates,
         .rotators = document_.rotators,
         .lockPlates = document_.lockPlates,

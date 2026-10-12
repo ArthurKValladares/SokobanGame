@@ -19,10 +19,19 @@ std::size_t actionIndex(InputAction action)
     return index;
 }
 
-bool actionsShareContext(InputAction left, InputAction right)
+} // namespace
+
+bool inputActionsConflict(InputAction left, InputAction right)
 {
     if (left == right) {
         return true;
+    }
+    // The router uses tile rotation while placing a tile or tile decoration,
+    // and gizmo rotation when editing a placed decoration. Their shared
+    // default key and any shared custom key are intentional.
+    if ((left == InputAction::EditorRotateTile && right == InputAction::EditorGizmoRotate) ||
+        (right == InputAction::EditorRotateTile && left == InputAction::EditorGizmoRotate)) {
+        return false;
     }
     // Editor controls may intentionally reuse gameplay/menu controls because
     // document editing and gameplay are mutually exclusive. Global actions
@@ -33,8 +42,6 @@ bool actionsShareContext(InputAction left, InputAction right)
         rightContext == InputActionContext::Global ||
         leftContext == rightContext;
 }
-
-} // namespace
 
 std::vector<InputBinding>& InputBindings::forAction(InputAction action)
 {
@@ -214,7 +221,7 @@ void assignBinding(
     const std::vector<InputBinding> displaced = bindings.actions[targetIndex];
     for (std::size_t i = 0; i < inputActionCount; ++i) {
         const InputAction existingAction = static_cast<InputAction>(i);
-        if (actionsShareContext(action, existingAction)) {
+        if (inputActionsConflict(action, existingAction)) {
             std::erase(bindings.actions[i], candidate);
             if (i != targetIndex && bindings.actions[i].empty()) {
                 const auto replacement = std::ranges::find_if(

@@ -518,6 +518,11 @@ struct RenderFrameData {
         float groundRimWidth = 0.0f;
         float groundRimDepth = 0.0f;
 
+        // Authored appearance rotation, independent of the neighbor-selected
+        // terrain module's orientation. Geometry selection retains this value
+        // when it resolves a connected body's final instance transform.
+        uint32_t authoredRotationQuarterTurns = 0;
+
         friend constexpr bool operator==(const Tile&, const Tile&) = default;
     };
 

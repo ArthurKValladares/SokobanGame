@@ -2,6 +2,46 @@
 
 namespace sokoban {
 
+TileType rotateTileType(TileType type, int quarterTurns)
+{
+    const int turns = (quarterTurns % 4 + 4) % 4;
+    const auto rotated = [type, turns]<std::size_t Count>(
+                             const std::array<TileType, Count>& variants)
+        -> std::optional<TileType> {
+        for (std::size_t index = 0; index < Count; ++index) {
+            if (variants[index] == type) {
+                return variants[(index + static_cast<std::size_t>(turns)) % Count];
+            }
+        }
+        return std::nullopt;
+    };
+    for (const auto& variants : {
+             std::array { TileType::ConveyorUp, TileType::ConveyorRight,
+                 TileType::ConveyorDown, TileType::ConveyorLeft },
+             std::array { TileType::MirrorNorthWest, TileType::MirrorNorthEast,
+                 TileType::MirrorSouthEast, TileType::MirrorSouthWest },
+             std::array { TileType::TurretNorth, TileType::TurretEast,
+                 TileType::TurretSouth, TileType::TurretWest },
+             std::array { TileType::ButtonNorth, TileType::ButtonEast,
+                 TileType::ButtonSouth, TileType::ButtonWest },
+             std::array { TileType::LeverNorth, TileType::LeverEast,
+                 TileType::LeverSouth, TileType::LeverWest },
+             std::array { TileType::LecternSouth, TileType::LecternWest,
+                 TileType::LecternNorth, TileType::LecternEast },
+             std::array { TileType::PortalNorth, TileType::PortalEast,
+                 TileType::PortalSouth, TileType::PortalWest },
+             std::array { TileType::RailCornerNorthWest, TileType::RailCornerNorthEast,
+                 TileType::RailCornerSouthEast, TileType::RailCornerSouthWest } }) {
+        if (const auto result = rotated(variants)) return *result;
+    }
+    for (const auto& variants : {
+             std::array { TileType::RailStraightNorthSouth, TileType::RailStraightEastWest },
+             std::array { TileType::RailStopNorthSouth, TileType::RailStopEastWest } }) {
+        if (const auto result = rotated(variants)) return *result;
+    }
+    return type;
+}
+
 const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions()
 {
     return tileTypeDefinitionTable;

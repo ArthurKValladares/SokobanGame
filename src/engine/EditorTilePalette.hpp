@@ -14,6 +14,9 @@ struct Group {
     std::string_view name;
     std::array<TileType, groundRockVariantCount> tiles;
     std::size_t count;
+    // Direction variants remain available to saved screens and the eyedropper,
+    // but share one selectable brush in the palette. Rotate changes direction.
+    bool rotationOnly = false;
 
     [[nodiscard]] constexpr std::span<const TileType> variants() const
     {
@@ -43,29 +46,29 @@ inline constexpr std::array<Group, 15> groups {{
                 TileType::WallStone07, TileType::WallStone08 }, wallStoneVariantCount },
     { "Cliff Wall", { TileType::CliffWall, TileType::CliffWall02 }, cliffWallVariantCount },
     { "Conveyor", { TileType::ConveyorUp, TileType::ConveyorRight,
-                    TileType::ConveyorDown, TileType::ConveyorLeft }, 4 },
+                    TileType::ConveyorDown, TileType::ConveyorLeft }, 4, true },
     { "Mirror", { TileType::MirrorNorthWest, TileType::MirrorNorthEast,
-                  TileType::MirrorSouthWest, TileType::MirrorSouthEast }, 4 },
+                  TileType::MirrorSouthWest, TileType::MirrorSouthEast }, 4, true },
     { "Turret", { TileType::TurretNorth, TileType::TurretEast,
-                  TileType::TurretSouth, TileType::TurretWest }, 4 },
+                  TileType::TurretSouth, TileType::TurretWest }, 4, true },
     { "Portal", { TileType::PortalNorth, TileType::PortalEast,
-                  TileType::PortalSouth, TileType::PortalWest }, 4 },
+                  TileType::PortalSouth, TileType::PortalWest }, 4, true },
     { "Button", { TileType::ButtonNorth, TileType::ButtonEast,
-                  TileType::ButtonSouth, TileType::ButtonWest }, 4 },
+                  TileType::ButtonSouth, TileType::ButtonWest }, 4, true },
     { "Lever", { TileType::LeverNorth, TileType::LeverEast,
-                 TileType::LeverSouth, TileType::LeverWest }, 4 },
+                 TileType::LeverSouth, TileType::LeverWest }, 4, true },
     { "Lectern", { TileType::LecternNorth, TileType::LecternEast,
-                   TileType::LecternSouth, TileType::LecternWest }, 4 },
+                   TileType::LecternSouth, TileType::LecternWest }, 4, true },
     { "Rotator", { TileType::RotatorClockwise,
                    TileType::RotatorCounterClockwise }, 2 },
     { "Rail Straight", { TileType::RailStraightNorthSouth,
-                         TileType::RailStraightEastWest }, 2 },
+                         TileType::RailStraightEastWest }, 2, true },
     { "Rail Corner", { TileType::RailCornerNorthEast,
                        TileType::RailCornerSouthEast,
                        TileType::RailCornerSouthWest,
-                       TileType::RailCornerNorthWest }, 4 },
+                       TileType::RailCornerNorthWest }, 4, true },
     { "Rail Stop", { TileType::RailStopNorthSouth,
-                     TileType::RailStopEastWest }, 2 },
+                     TileType::RailStopEastWest }, 2, true },
     { "Wardrobe", { TileType::WardrobeLorekeeper,
                      TileType::WardrobeRogue,
                      TileType::WardrobeKnight,

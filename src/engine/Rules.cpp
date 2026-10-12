@@ -327,6 +327,7 @@ GameState initialState(const Level& level)
             .cell = start.position,
             .character = start.character,
             .controller = id,
+            .quarterTurns = static_cast<uint8_t>(level.tileRotationQuarterTurns(start.position)),
         });
     }
     state.movables.reserve(level.movableTiles().size());
@@ -335,11 +336,13 @@ GameState initialState(const Level& level)
         entry.id = nextId++;
         entry.type = movable.type;
         entry.cell = movable.position;
+        entry.quarterTurns = static_cast<uint8_t>(level.tileRotationQuarterTurns(movable.position));
         state.movables.push_back(entry);
     }
     state.enemies.reserve(level.enemyStarts().size());
     for (GridPosition3 position : level.enemyStarts()) {
-        state.enemies.push_back({ .id = nextId++, .cell = position });
+        state.enemies.push_back({ .id = nextId++, .cell = position,
+            .quarterTurns = static_cast<uint8_t>(level.tileRotationQuarterTurns(position)) });
     }
     state.elevators.reserve(level.elevators().size());
     for (const Level::Elevator& elevator : level.elevators()) {

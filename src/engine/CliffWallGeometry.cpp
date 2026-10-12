@@ -62,7 +62,7 @@ void processCliffWallGeometry(
         const std::size_t variant = tile.cliffWallVariant % 2;
         const uint8_t exposed = compatibleCliff(tile)
             ? tileModuleExposedSides(tile.cell, occupied) : groundAllSides;
-        const auto selected = cliffWallModuleForMask(exposed);
+        const auto selected = cliffWallModuleForMask(exposed, tile.authoredRotationQuarterTurns);
         if (const auto model = models[selected.shapeIndex][variant]) {
             tile.model = *model;
             tile.modelRotationQuarterTurns = selected.quarterTurns;
@@ -71,7 +71,7 @@ void processCliffWallGeometry(
             // A partial/custom manifest still draws a complete isolated body.
             tile.model = models[0][variant].value_or(manifest.modelForTile(
                 variant == 0 ? TileType::CliffWall : TileType::CliffWall02));
-            tile.modelRotationQuarterTurns = 0;
+            tile.modelRotationQuarterTurns = tile.authoredRotationQuarterTurns & 3;
             tile.cliffWallSideMask = groundAllSides;
         }
     }

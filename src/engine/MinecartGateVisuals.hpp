@@ -50,8 +50,11 @@ inline void appendMinecartGateVisual(
     TileType rail,
     float openness = 0.0f,
     float opacity = 1.0f,
-    bool pickable = false)
+    bool pickable = false,
+    uint32_t authoredQuarterTurns = 0)
 {
+    const std::size_t firstTile = frame.tiles.size();
+    const std::size_t firstFace = frame.isoFaces.size();
     const float x = static_cast<float>(cell.x);
     const float y = static_cast<float>(cell.y);
     const float z = static_cast<float>(cell.z);
@@ -144,6 +147,27 @@ inline void appendMinecartGateVisual(
                 .pickOnly = true,
                 .showGrid = false,
             });
+    }
+    // Rotate the entire procedural device about its cell, including the boom
+    // and cube posts. Cube draws use their bounds rather than model transforms.
+    const uint32_t turns = authoredQuarterTurns % 4;
+    for (std::size_t index = firstTile; index < frame.tiles.size(); ++index) {
+        auto& tile = frame.tiles[index];
+        tile.authoredRotationQuarterTurns = turns;
+        for (uint32_t turn = 0; turn < turns; ++turn) {
+            const Vec2 local { tile.position.x - x, tile.position.y - y };
+            tile.position = { x + 1.0f - local.y - tile.size.y, y + local.x };
+            std::swap(tile.size.x, tile.size.y);
+        }
+    }
+    for (std::size_t index = firstFace; index < frame.isoFaces.size(); ++index) {
+        auto& face = frame.isoFaces[index];
+        for (uint32_t turn = 0; turn < turns; ++turn) {
+            for (auto& vertex : face.vertices) {
+                vertex = { x + 1.0f - (vertex.y - y), y + (vertex.x - x), vertex.z };
+            }
+            face.normal = { -face.normal.y, face.normal.x, face.normal.z };
+        }
     }
 }
 

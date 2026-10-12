@@ -253,6 +253,7 @@ void testEditorFrameUsesConfiguredControls()
     input.beginFrame();
     pressKey(router, input, SDL_SCANCODE_Z);
     pressKey(router, input, SDL_SCANCODE_D);
+    pressKey(router, input, SDL_SCANCODE_Q);
     pressKey(router, input, SDL_SCANCODE_R);
     pressKey(router, input, SDL_SCANCODE_M);
     pressKey(router, input, SDL_SCANCODE_T);
@@ -361,7 +362,7 @@ void testTileDecorationRotationRespectsRebindingAndCapture()
     sokoban::InputState input(false);
     sokoban::InputBindings bindings = sokoban::defaultInputBindings();
     sokoban::assignBinding(
-        bindings, sokoban::InputAction::EditorGizmoRotate,
+        bindings, sokoban::InputAction::EditorRotateTile,
         sokoban::KeyboardBinding { "P" });
     input.setBindings(bindings);
     sokoban::InputRouter::RoutingContext placing {
@@ -452,6 +453,66 @@ void testTileDecorationRotationAfterPaletteFocus()
         keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_R), input, {});
     pressKey(router, input, SDL_SCANCODE_R);
     CHECK(router.routeFrame(input, placing).editor.rotateTileDecorationPressed);
+}
+
+void testTileRotationUsesOnePressAndKeepsReplaceIndependent()
+{
+    TEST("tileRotationUsesOnePressAndKeepsReplaceIndependent");
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    sokoban::InputRouter::RoutingContext placing {
+        .editorEditing = true,
+        .tilePlacementReady = true,
+        .keyboardCaptured = true,
+        .editorViewportShortcutsAllowed = true,
+    };
+    input.beginFrame();
+    CHECK(router.routeEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_R), input,
+        { .keyboardCaptured = true, .editorEditing = true }).forwardedToInput);
+    auto frame = router.routeFrame(input, placing);
+    CHECK(frame.editor.rotateTilePressed);
+    CHECK(!frame.editor.rotateTileDecorationPressed);
+    CHECK(!frame.editor.rotateGizmoPressed);
+    CHECK(!frame.editor.replaceLayer);
+    CHECK(!frame.gameplay.restartPressed);
+    pressKey(router, input, SDL_SCANCODE_Q);
+    CHECK(router.routeFrame(input, placing).editor.replaceLayer);
+
+    input.beginFrame();
+    SDL_Event repeat = keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_R);
+    repeat.key.repeat = true;
+    (void)router.routeEvent(repeat, input, { .editorEditing = true });
+    CHECK(!router.routeFrame(input, placing).editor.rotateTilePressed);
+    (void)router.routeEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_R), input, {});
+    pressKey(router, input, SDL_SCANCODE_R);
+    CHECK(router.routeFrame(input, placing).editor.rotateTilePressed);
+
+    placing.editorViewportShortcutsAllowed = false;
+    CHECK(!router.routeFrame(input, placing).editor.rotateTilePressed);
+    placing.editorViewportShortcutsAllowed = true;
+    placing.optionsOpen = true;
+    CHECK(!router.routeFrame(input, placing).editor.rotateTilePressed);
+    placing.optionsOpen = false;
+    placing.titleOpen = true;
+    CHECK(!router.routeFrame(input, placing).editor.rotateTilePressed);
+    placing.titleOpen = false;
+
+    auto bindings = sokoban::defaultInputBindings();
+    sokoban::assignBinding(bindings, sokoban::InputAction::EditorRotateTile,
+        sokoban::KeyboardBinding { "P" });
+    input.setBindings(bindings);
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_R);
+    CHECK(!router.routeFrame(input, placing).editor.rotateTilePressed);
+    CHECK(router.routeEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_P), input,
+        { .keyboardCaptured = true, .editorEditing = true }).forwardedToInput);
+    CHECK(router.routeFrame(input, placing).editor.rotateTilePressed);
+
+    input.beginFrame();
+    (void)router.routeEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_P), input, {});
+    (void)router.routeEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_P), input,
+        { .bindingCapture = true, .editorEditing = true });
+    CHECK(!router.routeFrame(input, placing).editor.rotateTilePressed);
 }
 
 void testEditorPointerExposesPressAndHold()
@@ -728,6 +789,7 @@ int main()
     testTileDecorationRotationUsesOneExclusivePress();
     testTileDecorationRotationRespectsRebindingAndCapture();
     testTileDecorationRotationAfterPaletteFocus();
+    testTileRotationUsesOnePressAndKeepsReplaceIndependent();
     testEditorShortcuts();
     testDraftPlaybackShortcuts();
     testEditorShortcutsFollowRebinding();

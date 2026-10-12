@@ -1481,6 +1481,112 @@ void testGroundSplatMetadata()
     CHECK(Level::parseDefinition({ "C." }, "legacy ground").groundSplats.empty());
 }
 
+void testTileRotationMetadata()
+{
+    TEST("tileRotationMetadataRoundTripsAndValidatesCells");
+    const Level::Definition definition {
+        .layers = { { "#...", "...." }, { " CR ", "    " } },
+        .plates = { { .cell = { 2, 0, 1 }, .tile = TileType::PressurePlate } },
+        .tileRotations = {
+            { .cell = { 0, 0, 0 }, .quarterTurns = 1 },
+            { .cell = { 1, 0, 0 }, .quarterTurns = 2 },
+            { .cell = { 2, 0, 1 }, .quarterTurns = 3 },
+        },
+    };
+    const auto lines = Level::serializeDefinition(definition);
+    CHECK(std::ranges::any_of(lines, [](const std::string& line) {
+        return line.starts_with("@tilerotation ");
+    }));
+    const auto parsed = Level::parseDefinition(lines, "tile rotation round trip");
+    CHECK(parsed == definition);
+    const auto level = Level::loadFromDefinition(parsed, "tile rotation runtime");
+    CHECK(level.tileRotations() == definition.tileRotations);
+    CHECK(level.tileRotationQuarterTurns({ 0, 0, 0 }) == 1);
+    CHECK(level.tileRotationQuarterTurns({ 1, 0, 0 }) == 2);
+    CHECK(level.tileRotationQuarterTurns({ 2, 0, 1 }) == 3);
+    CHECK(level.tileRotationQuarterTurns({ 3, 0, 0 }) == 0);
+    CHECK(level.tileRotationQuarterTurns({ -1, 0, 0 }) == 0);
+    CHECK(level.plateAt({ 2, 0, 1 }) == TileType::PressurePlate);
+    CHECK(Level::loadFromLines(lines, "tile rotation lines").tileRotations() ==
+        definition.tileRotations);
+    auto unsorted = definition;
+    std::ranges::reverse(unsorted.tileRotations);
+    const auto reordered = Level::loadFromDefinition(unsorted, "unsorted authored rotations");
+    CHECK(reordered.tileRotations() == definition.tileRotations);
+    CHECK(reordered.tileRotationQuarterTurns({ 0, 0, 0 }) == 1);
+    CHECK(reordered.tileRotationQuarterTurns({ 1, 0, 0 }) == 2);
+    CHECK(reordered.tileRotationQuarterTurns({ 2, 0, 1 }) == 3);
+    CHECK(reordered.tileRotationQuarterTurns({ 0, 1, 0 }) == 0);
+    CHECK(Level::parseDefinition({
+        "@tilerotation {\"cell\":[2,0,1],\"quarterTurns\":3}",
+        "@tilerotation {\"cell\":[1,0,0],\"quarterTurns\":2}",
+        "@tilerotation {\"cell\":[0,0,0],\"quarterTurns\":1}",
+        "@plate {\"cell\":[2,0,1],\"tile\":\"Pressure\"}",
+        "@layer 0", "#...", "....", "@layer 1", " CR ", "    ",
+    }, "unsorted rotation records").tileRotations == definition.tileRotations);
+
+    // Adding rotation to a one-layer legacy document must retain it on save.
+    auto legacy = Level::parseDefinition({ "C.#" }, "legacy tiles");
+    CHECK(legacy.tileRotations.empty());
+    CHECK(Level::serializeDefinition(legacy) == std::vector<std::string>({ "C.#" }));
+    legacy.tileRotations.push_back({ .cell = { 2, 0, 0 }, .quarterTurns = 1 });
+    CHECK(Level::parseDefinition(Level::serializeDefinition(legacy),
+        "rotated legacy tiles") == legacy);
+
+    auto bad = definition;
+    bad.tileRotations.push_back(bad.tileRotations.front());
+    checkThrowsContaining([&] { (void)Level::serializeDefinition(bad); }, "Duplicate tile rotation");
+    checkThrowsContaining([&] { (void)Level::loadFromDefinition(bad, "duplicate rotation"); }, "Duplicate tile rotation");
+    for (const GridPosition3 cell : { GridPosition3 { -1, 0, 0 },
+             GridPosition3 { 4, 0, 0 }, GridPosition3 { 0, 2, 0 },
+             GridPosition3 { 0, 0, 2 }, GridPosition3 { 0, 0, 1 } }) {
+        bad = definition;
+        bad.tileRotations[0].cell = cell;
+        checkThrowsContaining([&] { (void)Level::serializeDefinition(bad); }, "non-air tile inside");
+        checkThrowsContaining([&] { (void)Level::loadFromDefinition(bad, "invalid rotation cell"); }, "non-air tile inside");
+    }
+    for (const uint8_t turns : { uint8_t { 0 }, uint8_t { 4 }, uint8_t { 255 } }) {
+        bad = definition;
+        bad.tileRotations[0].quarterTurns = turns;
+        checkThrowsContaining([&] { (void)Level::serializeDefinition(bad); }, "quarterTurns");
+        checkThrowsContaining([&] { (void)Level::loadFromDefinition(bad, "invalid rotation"); }, "quarterTurns");
+    }
+    for (const std::string value : { "-1", "0", "4", "256", "4294967296",
+             "18446744073709551615", "1.5", "true", "null", "\"east\"" }) {
+        checkThrowsContaining([&] {
+            (void)Level::parseDefinition({
+                "@tilerotation {\"cell\":[1,0,0],\"quarterTurns\":" + value + "}",
+                "@layer 0", "C#",
+            }, "invalid rotation turns");
+        }, "quarterTurns");
+    }
+    for (const std::string coordinate : { "4294967297", "-4294967296", "-9223372036854775808" }) {
+        checkThrowsContaining([&] {
+            (void)Level::parseDefinition({
+                "@tilerotation {\"cell\":[" + coordinate + ",0,0],\"quarterTurns\":1}",
+                "@layer 0", "C#",
+            }, "overflow rotation cell");
+        }, "out of range");
+    }
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition({
+            "@tilerotation {\"cell\":[1,0,0],\"quarterTurns\":1}",
+            "@tilerotation {\"cell\":[1,0,0],\"quarterTurns\":2}",
+            "@layer 0", "C#",
+        }, "duplicate parsed rotation");
+    }, "Duplicate tile rotation");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition({ "@layer 0", "C#",
+            "@tilerotation {\"cell\":[1,0,0],\"quarterTurns\":1}",
+        }, "late rotation");
+    }, "before '@layer 0'");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition({
+            "@tilerotation {\"cell\":[1,0,0],\"quarterTurns\":1}", "C#",
+        }, "unlayered rotation");
+    }, "explicit '@layer 0'");
+}
+
 void testCliffWallStylesAreSolidAndSaveSplatAssignments()
 {
     TEST("cliffWallStylesAreSolidAndSaveSplatAssignments");
@@ -1587,6 +1693,7 @@ int main()
     testLockPlateMetadata();
     testPortalMetadata();
     testGroundSplatMetadata();
+    testTileRotationMetadata();
     testCliffWallStylesAreSolidAndSaveSplatAssignments();
     testLegacyAndLayeredParsing();
     testButtonPlacementsRoundTripAndKeepPlateSemantics();

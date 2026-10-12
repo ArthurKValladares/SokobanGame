@@ -154,6 +154,42 @@ void testAllMasksAndBothVariants()
     }
 }
 
+void testAuthoredQuarterTurnsKeepNativeJoinsAndTopFootprints()
+{
+    TEST("authoredQuarterTurnsKeepNativeJoinsAndTopFootprints");
+    const auto manifest = makeManifest();
+    for (uint32_t variant = 0; variant < 2; ++variant) {
+        for (uint8_t mask = 0; mask < 16; ++mask) {
+            const auto baseModule = cliffWallModuleForMask(mask);
+            uint8_t seenTurns = 0;
+            for (uint32_t turns = 0; turns < 4; ++turns) {
+                std::vector tiles { cliff({ 2, 3, 1 }, manifest, variant) };
+                tiles.front().authoredRotationQuarterTurns = turns;
+                for (std::size_t side = 0; side < offsets.size(); ++side) {
+                    if ((mask & (1U << side)) == 0) {
+                        tiles.push_back(cliff({ 2+offsets[side].x, 3+offsets[side].y, 1 }, manifest, 1-variant));
+                    }
+                }
+                processCliffWallGeometry(tiles, manifest);
+                const auto& tile = tiles.front();
+                checkMask(tile, manifest, mask);
+                CHECK(tile.model == manifest.modelIdByName(cliffWallModelNames[baseModule.shapeIndex][variant]));
+                CHECK(tile.authoredRotationQuarterTurns == turns);
+                seenTurns |= static_cast<uint8_t>(1U << tile.modelRotationQuarterTurns);
+                if (mask == 0 || mask == groundAllSides) CHECK(tile.modelRotationQuarterTurns == turns);
+                auto unrotated = tile;
+                unrotated.authoredRotationQuarterTurns = 0;
+                unrotated.modelRotationQuarterTurns = baseModule.quarterTurns;
+                CHECK(cliffWallTopPatches(tile) == cliffWallTopPatches(unrotated));
+                const auto once = tiles;
+                processCliffWallGeometry(tiles, manifest);
+                CHECK(tiles == once);
+            }
+            CHECK(std::popcount(seenTurns) == (mask == 0 || mask == 15 ? 4 : mask == 5 || mask == 10 ? 2 : 1));
+        }
+    }
+}
+
 void testFilledGridStripAndCorner()
 {
     TEST("filledGridStripAndCorner");
@@ -436,10 +472,12 @@ void testTaperedCapsShareDrawPaintAndShadowFootprints()
     const IsoScenePreparer preparer;
     for (uint32_t variant = 0; variant < 2; ++variant) {
         for (uint8_t mask = 0; mask < 16; ++mask) {
+            for (uint32_t turns = 0; turns < (mask == 0 || mask == 5 || mask == 10 || mask == 15 ? 4u : 1u); ++turns) {
             auto tile = cliff({ -3, -4, 2 }, manifest, variant);
-            const auto module = cliffWallModuleForMask(mask);
+            const auto module = cliffWallModuleForMask(mask, turns);
             tile.model = manifest.modelIdByName(cliffWallModelNames[module.shapeIndex][variant]);
             tile.modelRotationQuarterTurns = module.quarterTurns;
+            tile.authoredRotationQuarterTurns = turns;
             tile.cliffWallSideMask = mask;
             tile.groundSplat = GroundSplatTextures {
                 .base = RenderTexture { 11 }, .detail = RenderTexture { 12 }, .splatMap = RenderTexture { 13 },
@@ -518,6 +556,7 @@ void testTaperedCapsShareDrawPaintAndShadowFootprints()
                     CHECK(std::ranges::find(patches, scene.isoFaces[index].worldVertices) != patches.end());
                 }
                 CHECK(!preparer.pickGroundPoint(scene, pixelAt(inside), extent));
+            }
             }
         }
     }
@@ -687,6 +726,7 @@ int main()
 {
     try {
         testAllMasksAndBothVariants();
+        testAuthoredQuarterTurnsKeepNativeJoinsAndTopFootprints();
         testFilledGridStripAndCorner();
         testLayersUnsupportedNeighborsAndPreviewContext();
         testMissingModelsFailToCompleteIsland();

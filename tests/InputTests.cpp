@@ -62,7 +62,11 @@ void testDefaultKeyboardBindings()
     CHECK(input.keyBoundToAction(
         SDL_SCANCODE_Q, sokoban::InputAction::CycleHero));
     CHECK(input.keyBoundToAction(
+        SDL_SCANCODE_Q, sokoban::InputAction::EditorReplaceTile));
+    CHECK(!input.keyBoundToAction(
         SDL_SCANCODE_R, sokoban::InputAction::EditorReplaceTile));
+    CHECK(input.keyBoundToAction(
+        SDL_SCANCODE_R, sokoban::InputAction::EditorRotateTile));
     CHECK(input.keyBoundToAction(
         SDL_SCANCODE_D, sokoban::InputAction::EditorDeleteTile));
     CHECK(input.keyBoundToAction(
@@ -198,6 +202,29 @@ void testEditorBindingsMayReuseGameplayKeys()
         bindings, sokoban::InputAction::EditorMoveTile) == "P");
     CHECK(sokoban::actionBindingsDisplay(
         bindings, sokoban::InputAction::EditorReplaceTile) == "M");
+}
+
+void testTileAndGizmoRotationMayShareBindings()
+{
+    TEST("tileAndGizmoRotationMayShareBindings");
+    auto bindings = sokoban::defaultInputBindings();
+    const auto assertSharedRotationKey = [&](std::string_view key) {
+        CHECK(sokoban::actionBindingsDisplay(bindings,
+            sokoban::InputAction::EditorRotateTile) == key);
+        CHECK(sokoban::actionBindingsDisplay(bindings,
+            sokoban::InputAction::EditorGizmoRotate) == key);
+    };
+    sokoban::assignBinding(bindings, sokoban::InputAction::EditorGizmoRotate,
+        sokoban::KeyboardBinding { "R" });
+    assertSharedRotationKey("R");
+    sokoban::assignBinding(bindings, sokoban::InputAction::EditorRotateTile,
+        sokoban::KeyboardBinding { "R" });
+    assertSharedRotationKey("R");
+    sokoban::assignBinding(bindings, sokoban::InputAction::EditorRotateTile,
+        sokoban::KeyboardBinding { "P" });
+    sokoban::assignBinding(bindings, sokoban::InputAction::EditorGizmoRotate,
+        sokoban::KeyboardBinding { "P" });
+    assertSharedRotationKey("P");
 }
 
 void testGamepadButtonsAndRemapping()
@@ -423,6 +450,7 @@ int main()
     testMenuConfirmBindings();
     testKeyboardRemapping();
     testEditorBindingsMayReuseGameplayKeys();
+    testTileAndGizmoRotationMayShareBindings();
     testGamepadButtonsAndRemapping();
     testStickThresholdAndPressEdges();
     testInvalidBindingIsDiagnosed();

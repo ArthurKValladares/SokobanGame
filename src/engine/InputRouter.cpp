@@ -52,6 +52,7 @@ InputRouter::EventResult InputRouter::routeEvent(
             boundTo(InputAction::EditorPickTile) ||
             boundTo(InputAction::EditorPaintLinkColor) ||
             boundTo(InputAction::EditorStraightLine) ||
+            boundTo(InputAction::EditorRotateTile) ||
             boundTo(InputAction::EditorGizmoTranslate) ||
             boundTo(InputAction::EditorGizmoRotate) ||
             boundTo(InputAction::EditorGizmoScale) ||
@@ -205,11 +206,15 @@ InputRouter::Frame InputRouter::routeFrame(
             .moving = input.actionDown(InputAction::EditorMoveTile),
             .translateGizmoPressed =
                 pressed(InputAction::EditorGizmoTranslate),
-            .rotateGizmoPressed = !context.tileDecorationPlacementReady &&
+            .rotateGizmoPressed = !context.tilePlacementReady &&
+                !context.tileDecorationPlacementReady &&
                 pressed(InputAction::EditorGizmoRotate),
+            .rotateTilePressed = context.tilePlacementReady &&
+                context.editorViewportShortcutsAllowed &&
+                input.actionPressed(InputAction::EditorRotateTile),
             .rotateTileDecorationPressed = context.tileDecorationPlacementReady &&
                 context.editorViewportShortcutsAllowed &&
-                input.actionPressed(InputAction::EditorGizmoRotate),
+                input.actionPressed(InputAction::EditorRotateTile),
             .scaleGizmoPressed = pressed(InputAction::EditorGizmoScale),
             .pointerCaptured = context.mouseCaptured,
         };

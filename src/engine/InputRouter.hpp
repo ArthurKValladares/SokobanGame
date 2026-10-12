@@ -43,6 +43,7 @@ public:
         bool optionsOpen = false;
         bool titleOpen = false;
         bool editorEditing = false;
+        bool tilePlacementReady = false;
         bool decorationPlacementReady = false;
         bool tileDecorationPlacementReady = false;
         bool draftPlaying = false;
@@ -95,6 +96,8 @@ public:
         bool moving = false;
         bool translateGizmoPressed = false;
         bool rotateGizmoPressed = false;
+        // Edge: one clockwise quarter turn of the active tile brush.
+        bool rotateTilePressed = false;
         // The configured rotate action turns the tile-decoration brush while
         // placing, leaving the selected decoration's gizmo mode unchanged.
         bool rotateTileDecorationPressed = false;

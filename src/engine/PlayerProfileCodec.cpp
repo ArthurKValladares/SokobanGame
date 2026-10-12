@@ -1169,10 +1169,17 @@ InputBindings inputBindingsFromJson(
             fail(context, "unknown property '" + key + "'");
         }
     }
+    // Rotate tile was added within the current settings format. Older settings
+    // still contain every prior action, so only this new action may be absent.
+    const bool predatesTileRotation =
+        !value.contains(std::string(inputActionName(InputAction::EditorRotateTile)));
     InputBindings result;
     for (std::size_t i = 0; i < inputActionCount; ++i) {
         const InputAction action = static_cast<InputAction>(i);
         const std::string actionName(inputActionName(action));
+        if (action == InputAction::EditorRotateTile && predatesTileRotation) {
+            continue;
+        }
         const Json& bindings = requiredProperty(value, actionName, context);
         if (!bindings.is_array() || bindings.empty()) {
             fail(context, "property '" + actionName + "' must be a non-empty array");
@@ -1186,6 +1193,47 @@ InputBindings inputBindingsFromJson(
                 fail(bindingContext, "duplicate binding");
             }
             parsed.push_back(std::move(binding));
+        }
+    }
+    if (predatesTileRotation) {
+        const auto available = [&](InputAction action, const InputBinding& candidate) {
+            return std::ranges::none_of(inputActionDefinitions, [&](const auto& definition) {
+                return definition.action != action &&
+                    inputActionsConflict(action, definition.action) &&
+                    std::ranges::find(result.forAction(definition.action), candidate) !=
+                        result.forAction(definition.action).end();
+            });
+        };
+        // Move the former default only when Q is free in the editor. Preserve
+        // custom keys, including an existing editor action assigned to Q.
+        auto& replace = result.forAction(InputAction::EditorReplaceTile);
+        const InputBinding newReplace = KeyboardBinding { "Q" };
+        if (replace == std::vector<InputBinding> { KeyboardBinding { "R" } } &&
+            available(InputAction::EditorReplaceTile, newReplace)) {
+            replace = { newReplace };
+        }
+        // Old custom actions can already use R. Add rotation without changing
+        // them; prefer E, then a free function key, then a modified alternative.
+        std::vector<std::string> rotateKeys { "R", "E" };
+        for (int number = 1; number <= 24; ++number) {
+            // F11 is the debug workspace's global full-window shortcut.
+            if (number == 11) continue;
+            rotateKeys.push_back("F" + std::to_string(number));
+        }
+        auto& rotate = result.forAction(InputAction::EditorRotateTile);
+        for (unsigned modifiers = keyModifierNone;
+             modifiers <= keyModifierAll && rotate.empty(); ++modifiers) {
+            for (const auto& key : rotateKeys) {
+                InputBinding candidate = KeyboardBinding {
+                    key, static_cast<std::uint8_t>(modifiers) };
+                if (available(InputAction::EditorRotateTile, candidate)) {
+                    rotate.push_back(std::move(candidate));
+                    break;
+                }
+            }
+        }
+        if (rotate.empty()) {
+            fail(context, "no unused shortcut available for Rotate tile");
         }
     }
     return result;

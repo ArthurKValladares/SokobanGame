@@ -107,18 +107,22 @@ bool drawPaintButton(
                 1.5f);
         }
     }
-    if (group != nullptr) {
+    if (group != nullptr && !group->rotationOnly) {
         drawList->AddText(
             ImVec2(buttonMax.x - 20.0f, buttonMin.y + 2.0f),
             ImGui::GetColorU32(ImGuiCol_Text), "...");
     }
     if (ImGui::IsItemHovered()) {
-        if (group != nullptr) {
+        if (group != nullptr && group->rotationOnly) {
+            ImGui::SetTooltip("%.*s\nUse Rotate to change direction.",
+                static_cast<int>(definition.name.size()), definition.name.data());
+        } else if (group != nullptr) {
             ImGui::SetTooltip("%.*s: choose %s\n%.*s",
                 static_cast<int>(group->name.size()), group->name.data(),
                 tileTypeIsCliffWall(definition.type) ? "cliff style"
                     : tileTypeIsGround(definition.type) ? "rock version"
-                    : tileTypeIsWall(definition.type) ? "stone version" : "direction",
+                    : tileTypeIsWall(definition.type) ? "stone version"
+                    : tileTypeIsWardrobe(definition.type) ? "character" : "behavior",
                 static_cast<int>(definition.name.size()), definition.name.data());
         } else {
             ImGui::SetTooltip("%.*s", static_cast<int>(definition.name.size()), definition.name.data());
@@ -425,6 +429,7 @@ void LevelEditorDebugUi::draw(
             ImGui::BulletText(
                 "%s: %s", actionBindingsDisplay(bindings, action).c_str(), what);
         };
+        shortcut(InputAction::EditorRotateTile, "rotate the active tile brush clockwise by 90 degrees");
         ImGui::BulletText(
             "Drag: paint (or delete) every tile the pointer crosses; "
             "the whole drag is one undo step");
@@ -802,6 +807,15 @@ void LevelEditorDebugUi::drawTilePalette(
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     SOKOBAN_PROFILE_SCOPE("Editor.Draw tile palette");
+    if (ImGui::Button("Rotate")) {
+        editor.rotateSelectedTile();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Turn the brush clockwise by 90 degrees. Joined terrain keeps its connection shape: isolated tiles allow four orientations, strips allow two, and asymmetric connections constrain rotation.");
+    }
+    ImGui::SameLine();
+    ImGui::Text("%s: clockwise 90 degrees",
+        actionBindingsDisplay(bindings, InputAction::EditorRotateTile).c_str());
     if (!editor.recentTiles().empty()) {
         ImGui::Text("Recent");
         const std::vector<TileType>& recent = editor.recentTiles();
@@ -888,13 +902,13 @@ void LevelEditorDebugUi::drawTilePalette(
             ImGui::PushID(static_cast<int>(definition.type));
             if (drawPaintButton(displayedDefinition, editor.selectedTile(),
                     thumbnailFor(displayedTile), group)) {
-                if (group != nullptr) {
+                if (group != nullptr && !group->rotationOnly) {
                     ImGui::OpenPopup("Direction");
                 } else {
-                    editor.setSelectedTile(definition.type);
+                    editor.setSelectedTile(displayedTile);
                 }
             }
-            if (group != nullptr && ImGui::BeginPopup("Direction")) {
+            if (group != nullptr && !group->rotationOnly && ImGui::BeginPopup("Direction")) {
                 ImGui::Text("%.*s %s",
                     static_cast<int>(group->name.size()), group->name.data(),
                     tileTypeIsCliffWall(definition.type)
@@ -905,7 +919,7 @@ void LevelEditorDebugUi::drawTilePalette(
                             ? "stone version"
                         : tileTypeIsWardrobe(definition.type)
                             ? "character"
-                            : "direction");
+                            : "behavior");
                 ImGui::Separator();
                 if (ImGui::BeginTable("Variants", 2,
                         ImGuiTableFlags_SizingFixedFit)) {
@@ -954,14 +968,14 @@ void LevelEditorDebugUi::drawTilePalette(
                 (void)editor.randomizeRocks();
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Choose a random style for every ground tile on all layers of this screen. Undo restores the previous choices.");
+                ImGui::SetTooltip("Choose a random style and quarter-turn rotation for every ground tile on all layers of this screen. Joined terrain uses only rotations that preserve its connections: isolated tiles allow four orientations, strips allow two, and asymmetric connections constrain rotation. Undo restores the previous choices.");
             }
             ImGui::SameLine();
             if (ImGui::Button("Randomize Walls")) {
                 (void)editor.randomizeWalls();
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Choose a random variant for every wall tile on all layers of this screen, preserving its stone or cliff family. Undo restores the previous choices.");
+                ImGui::SetTooltip("Choose a random variant and quarter-turn rotation for every wall tile on all layers of this screen, preserving its stone or cliff family. Joined terrain uses only rotations that preserve its connections: isolated tiles allow four orientations, strips allow two, and asymmetric connections constrain rotation. Undo restores the previous choices.");
             }
         }
         ImGui::Text("Paint");
@@ -974,8 +988,12 @@ void LevelEditorDebugUi::drawTilePalette(
     } else {
         ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
     }
+    const auto* selectedGroup = editorTilePalette::groupFor(editor.selectedTile());
+    if (selectedGroup == nullptr || !selectedGroup->rotationOnly) {
+        ImGui::Text("Rotation: %u degrees", editor.selectedTileQuarterTurns() * 90U);
+    }
     if (tileTypeHasSplatTop(editor.selectedTile())) {
-        ImGui::TextWrapped("Terrain shapes join automatically. Paint their tops with Ground Paint.");
+        ImGui::TextWrapped("Terrain shapes join automatically. Rotate and Randomize preserve those joins: isolated tiles allow four orientations, strips allow two, and asymmetric connections constrain rotation. Paint their tops with Ground Paint.");
     }
     ImGui::TextWrapped(
         "Plates (Pressure, Buttons, Levers, End, Rotators, Lock Plates, Rail Stops) stack with units and mirrors; "
@@ -1625,7 +1643,7 @@ void LevelEditorDebugUi::drawTileDecorationPalette(
         brush = editor.tileDecorationBrush();
     }
     ImGui::TextDisabled("%s: rotate brush while placing",
-        actionBindingsDisplay(bindings, InputAction::EditorGizmoRotate).c_str());
+        actionBindingsDisplay(bindings, InputAction::EditorRotateTile).c_str());
 
     // The diagram follows world north (-Y), independent of camera rotation.
     constexpr std::array<uint8_t, 4> edgeMasks { 1, 3, 5, 11 };

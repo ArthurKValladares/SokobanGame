@@ -3579,6 +3579,9 @@ void testRandomizeRocksPreservesAssignmentsAndGroupsUndo()
     auto editor = makeEditor(project);
     editor.newDocument(20, 10);
     CHECK(editor.setCell({ 1, 1, 0 }, TileType::Wall));
+    editor.setSelectedTile(TileType::Wall);
+    editor.rotateSelectedTile(2);
+    CHECK(editor.paintCell({ 1, 1, 0 }));
     CHECK(editor.setCell({ 4, 3, 1 }, TileType::Rock));
     const auto* group = editorTilePalette::groupFor(TileType::Ground);
     CHECK(group != nullptr);
@@ -3604,10 +3607,12 @@ void testRandomizeRocksPreservesAssignmentsAndGroupsUndo()
     CHECK(randomized.layers[1] != before.layers[1]);
     CHECK(randomized.groundSplats == before.groundSplats);
     CHECK(randomized.groundPaint == before.groundPaint);
+    CHECK(editor.tileRotationQuarterTurns({ 1, 1, 0 }) == 2);
     CHECK(editor.selectedTile() == TileType::Wall);
     CHECK(editor.activeLayer() == 1);
     CHECK(Level::loadDefinitionFromFile(source).layers == before.layers);
     std::array<bool, groundRockVariantCount> seen {};
+    std::array<bool, 4> seenRotations {};
     for (std::size_t z = 0; z < before.layers.size(); ++z) {
         for (std::size_t y = 0; y < before.layers[z].size(); ++y) {
             for (std::size_t column = 0; column < before.layers[z][y].size(); ++column) {
@@ -3615,6 +3620,8 @@ void testRandomizeRocksPreservesAssignmentsAndGroupsUndo()
                 const auto newTile = charToTileType(randomized.layers[z][y][column]);
                 CHECK(oldTile && newTile);
                 if (oldTile && tileTypeIsGround(*oldTile)) {
+                    seenRotations[editor.tileRotationQuarterTurns({ static_cast<int>(column),
+                        static_cast<int>(y), static_cast<int>(z) })] = true;
                     CHECK(newTile && tileTypeIsGround(*newTile));
                     if (newTile && tileTypeIsGround(*newTile)) seen[groundRockVariantFor(*newTile)] = true;
                 } else {
@@ -3624,12 +3631,15 @@ void testRandomizeRocksPreservesAssignmentsAndGroupsUndo()
         }
     }
     CHECK(std::ranges::all_of(seen, [](bool chosen) { return chosen; }));
+    CHECK(std::ranges::all_of(seenRotations, [](bool chosen) { return chosen; }));
     CHECK(editor.tryUndoEdit());
     CHECK(editor.documentLayers() == before.layers);
+    CHECK(editor.tileRotations() == before.tileRotations);
     CHECK(editor.groundPaint() == before.groundPaint);
     CHECK(!editor.dirty());
     CHECK(editor.tryRedoEdit());
     CHECK(editor.documentLayers() == randomized.layers);
+    CHECK(editor.tileRotations() == randomized.tileRotations);
     // The same seeded layout is a no-op, so it cannot add an undo record.
     CHECK(!editor.randomizeRocks(12345U));
     CHECK(editor.tryUndoEdit());
@@ -3645,6 +3655,7 @@ void testRandomizeRocksPreservesAssignmentsAndGroupsUndo()
     CHECK(editor.documentLayers() == rerandomized.layers);
     CHECK(editor.saveDocument(source));
     CHECK(Level::loadDefinitionFromFile(source).layers == rerandomized.layers);
+    CHECK(Level::loadDefinitionFromFile(source).tileRotations == rerandomized.tileRotations);
     CHECK(Level::loadDefinitionFromFile(project.runtime / "level0/screen0.scr").layers == rerandomized.layers);
     CHECK(Level::loadDefinitionFromFile(source).groundPaint == before.groundPaint);
 }
@@ -3697,6 +3708,9 @@ void testRandomizeWallsPreservesDocumentAndGroupsUndo()
         }
     }
     CHECK(authored.setCell({ 0, 4, 1 }, TileType::Rock));
+    authored.setSelectedTile(TileType::Rock);
+    authored.rotateSelectedTile(3);
+    CHECK(authored.paintCell({ 0, 4, 1 }));
     CHECK(authored.setCell({ 1, 4, 1 }, TileType::PressurePlate));
     CHECK(authored.setCell({ 2, 4, 1 }, TileType::Gate));
     // The wall rows replace the default start; keep a valid playable fixture.
@@ -3729,12 +3743,15 @@ void testRandomizeWallsPreservesDocumentAndGroupsUndo()
     CHECK(randomized.layers[1] != before.layers[1]);
     auto expected = before;
     expected.layers = randomized.layers;
+    expected.tileRotations = randomized.tileRotations;
     CHECK(randomized == expected);
+    CHECK(editor.tileRotationQuarterTurns({ 0, 4, 1 }) == 3);
     CHECK(editor.selectedTile() == TileType::GroundRock03);
     CHECK(editor.activeLayer() == 1);
     CHECK(Level::loadDefinitionFromFile(source) == before);
     std::array<bool, wallStoneVariantCount> seen {};
     std::array<bool, cliffWallVariantCount> seenCliffs {};
+    std::array<bool, 4> seenRotations {};
     for (std::size_t z = 0; z < before.layers.size(); ++z) {
         for (std::size_t y = 0; y < before.layers[z].size(); ++y) {
             for (std::size_t x = 0; x < before.layers[z][y].size(); ++x) {
@@ -3742,9 +3759,13 @@ void testRandomizeWallsPreservesDocumentAndGroupsUndo()
                 const auto newTile = charToTileType(randomized.layers[z][y][x]);
                 CHECK(oldTile && newTile);
                 if (oldTile && tileTypeIsCliffWall(*oldTile)) {
+                    seenRotations[editor.tileRotationQuarterTurns({ static_cast<int>(x),
+                        static_cast<int>(y), static_cast<int>(z) })] = true;
                     CHECK(newTile && tileTypeIsCliffWall(*newTile));
                     if (newTile && tileTypeIsCliffWall(*newTile)) seenCliffs[cliffWallVariantFor(*newTile)] = true;
                 } else if (oldTile && tileTypeIsWall(*oldTile)) {
+                    seenRotations[editor.tileRotationQuarterTurns({ static_cast<int>(x),
+                        static_cast<int>(y), static_cast<int>(z) })] = true;
                     CHECK(newTile && tileTypeIsWall(*newTile));
                     CHECK(newTile && !tileTypeIsCliffWall(*newTile));
                     if (newTile && tileTypeIsWall(*newTile)) seen[wallStoneVariantFor(*newTile)] = true;
@@ -3756,6 +3777,7 @@ void testRandomizeWallsPreservesDocumentAndGroupsUndo()
     }
     CHECK(std::ranges::all_of(seen, [](bool chosen) { return chosen; }));
     CHECK(std::ranges::all_of(seenCliffs, [](bool chosen) { return chosen; }));
+    CHECK(std::ranges::all_of(seenRotations, [](bool chosen) { return chosen; }));
     CHECK(editor.tryUndoEdit());
     CHECK(editor.documentDefinition() == before);
     CHECK(!editor.dirty());
@@ -3804,8 +3826,223 @@ void testRandomizeWallsEndsStrokeAndHandlesNoWalls()
     CHECK(!emptyEditor.canUndo());
 }
 
+void testDirectionalBrushesRotateTheirTileTypes()
+{
+    TEST("directionalBrushesRotateTheirTileTypes");
+    constexpr std::array families {
+        std::array { TileType::ConveyorUp, TileType::ConveyorRight,
+            TileType::ConveyorDown, TileType::ConveyorLeft },
+        std::array { TileType::MirrorNorthWest, TileType::MirrorNorthEast,
+            TileType::MirrorSouthEast, TileType::MirrorSouthWest },
+        std::array { TileType::TurretNorth, TileType::TurretEast,
+            TileType::TurretSouth, TileType::TurretWest },
+        std::array { TileType::ButtonNorth, TileType::ButtonEast,
+            TileType::ButtonSouth, TileType::ButtonWest },
+        std::array { TileType::LeverNorth, TileType::LeverEast,
+            TileType::LeverSouth, TileType::LeverWest },
+        std::array { TileType::LecternSouth, TileType::LecternWest,
+            TileType::LecternNorth, TileType::LecternEast },
+        std::array { TileType::PortalNorth, TileType::PortalEast,
+            TileType::PortalSouth, TileType::PortalWest },
+        std::array { TileType::RailCornerNorthWest, TileType::RailCornerNorthEast,
+            TileType::RailCornerSouthEast, TileType::RailCornerSouthWest },
+    };
+    LevelEditor editor;
+    editor.newDocument(4, 2, false);
+    for (const auto& family : families) {
+        editor.setSelectedTile(family.front());
+        for (std::size_t step = 1; step <= 4; ++step) {
+            editor.rotateSelectedTile();
+            CHECK(editor.selectedTile() == family[step % 4]);
+            CHECK(editor.selectedTileQuarterTurns() == 0);
+        }
+        CHECK(rotateTileType(family.front(), -1) == family.back());
+        CHECK(rotateTileType(family.front(), 9) == family[1]);
+        CHECK(editor.paintCell({ 1, 0, 1 }));
+        CHECK(editor.tileRotationQuarterTurns({ 1, 0, 1 }) == 0);
+        CHECK(editor.tileRotations().empty());
+        CHECK(editor.eraseCell({ 1, 0, 1 }));
+    }
+    for (const auto& family : { std::array { TileType::RailStraightNorthSouth,
+                                    TileType::RailStraightEastWest },
+             std::array { TileType::RailStopNorthSouth, TileType::RailStopEastWest } }) {
+        editor.setSelectedTile(family[0]);
+        editor.rotateSelectedTile(-1);
+        CHECK(editor.selectedTile() == family[1]);
+        CHECK(editor.selectedTileQuarterTurns() == 0);
+        editor.rotateSelectedTile();
+        CHECK(editor.selectedTile() == family[0]);
+        CHECK(rotateTileType(family[0], 2) == family[0]);
+    }
+    CHECK(rotateTileType(TileType::WallStone03, 1) == TileType::WallStone03);
+}
+
+void testTileBrushRotationsSurviveEditingAndSaving()
+{
+    TEST("tileBrushRotationsSurviveEditingAndSaving");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(4, 3, false);
+    editor.setSelectedTile(TileType::WallStone02);
+    editor.rotateSelectedTile(5);
+    CHECK(editor.selectedTile() == TileType::WallStone02);
+    CHECK(editor.selectedTileQuarterTurns() == 1);
+    editor.setSelectedTile(TileType::WallStone02);
+    CHECK(editor.selectedTileQuarterTurns() == 1);
+    CHECK(editor.selectRecentTile(0));
+    CHECK(editor.selectedTileQuarterTurns() == 1);
+    CHECK(editor.paintCell({ 1, 0, 1 }));
+    CHECK(editor.tileRotationQuarterTurns({ 1, 0, 1 }) == 1);
+    CHECK(editor.pickTile({ 1, 0, 0 }) == TileType::WallStone02);
+    CHECK(editor.selectedTileQuarterTurns() == 1);
+    CHECK(editor.paintCell({ 2, 0, 1 }));
+    editor.rotateSelectedTile(-2);
+    CHECK(editor.selectedTileQuarterTurns() == 3);
+    CHECK(editor.paintCell({ 2, 0, 1 }));
+    CHECK(editor.tileRotationQuarterTurns({ 2, 0, 1 }) == 3);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.tileRotationQuarterTurns({ 2, 0, 1 }) == 1);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.tileRotationQuarterTurns({ 2, 0, 1 }) == 3);
+    CHECK(!editor.setCell({ 2, 0, 1 }, TileType::WallStone02));
+    CHECK(editor.tileRotationQuarterTurns({ 2, 0, 1 }) == 3);
+    CHECK(editor.beginMove({ 1, 0, 1 }));
+    CHECK(editor.moveObject({ 3, 0, 1 }));
+    CHECK(editor.tileRotationQuarterTurns({ 1, 0, 1 }) == 0);
+    CHECK(editor.tileRotationQuarterTurns({ 3, 0, 1 }) == 1);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.tileRotationQuarterTurns({ 1, 0, 1 }) == 1);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.eraseCell({ 2, 0, 1 }));
+    CHECK(editor.tileRotationQuarterTurns({ 2, 0, 1 }) == 0);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.tileRotationQuarterTurns({ 2, 0, 1 }) == 3);
+    CHECK(editor.setCell({ 2, 0, 1 }, TileType::Rock));
+    CHECK(editor.tileRotationQuarterTurns({ 2, 0, 1 }) == 0);
+    editor.setSelectedTile(TileType::Rock);
+    editor.rotateSelectedTile();
+    CHECK(editor.paintCell({ 2, 0, 1 }));
+    CHECK(editor.setCell({ 2, 0, 1 }, TileType::PressurePlate));
+    CHECK(editor.tileRotationQuarterTurns({ 2, 0, 1 }) == 1);
+    CHECK(editor.eraseCell({ 2, 0, 1 }));
+    CHECK(editor.tileRotationQuarterTurns({ 2, 0, 1 }) == 0);
+
+    editor.setSelectedTile(TileType::GroundRock04);
+    editor.rotateSelectedTile(2);
+    CHECK(editor.paintCell({ 1, 1, 0 }));
+    const auto beforeExpansion = editor.documentDefinition();
+    CHECK(editor.paintCell({ -1, -1, 1 }));
+    CHECK(editor.tileRotationQuarterTurns({ 4, 1, 1 }) == 1);
+    CHECK(editor.tileRotationQuarterTurns({ 2, 2, 0 }) == 2);
+    CHECK(editor.tileRotationQuarterTurns({ 0, 0, 1 }) == 2);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentDefinition() == beforeExpansion);
+    CHECK(editor.tryRedoEdit());
+    editor.setActiveLayer(1);
+    editor.addLayerBelow();
+    CHECK(editor.tileRotationQuarterTurns({ 4, 1, 2 }) == 1);
+    editor.deleteActiveLayer();
+    CHECK(editor.tileRotationQuarterTurns({ 4, 1, 1 }) == 1);
+    const auto beforeResize = editor.documentDefinition();
+    editor.resizeDocument(3, 2);
+    CHECK(editor.tileRotationQuarterTurns({ 4, 1, 1 }) == 0);
+    CHECK(editor.tileRotationQuarterTurns({ 2, 2, 0 }) == 0);
+    CHECK(editor.tileRotationQuarterTurns({ 0, 0, 1 }) == 2);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentDefinition() == beforeResize);
+    const auto source = project.source / "level0/screen0.scr";
+    CHECK(editor.saveDocument(source));
+    const auto expected = editor.documentDefinition();
+    CHECK(Level::loadDefinitionFromFile(source) == expected);
+    CHECK(Level::loadDefinitionFromFile(project.runtime / "level0/screen0.scr") == expected);
+    auto loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(source, false));
+    CHECK(loaded.tileRotations() == expected.tileRotations);
+    CHECK(loaded.documentToLevel().tileRotations() == expected.tileRotations);
+    CHECK(std::ranges::all_of(loaded.tileRotations(), [](const auto& rotation) {
+        return rotation.quarterTurns > 0 && rotation.quarterTurns < 4;
+    }));
+}
+
+void testTileRotationsSurviveDraftSwitchesAndCursorPlayback()
+{
+    TEST("tileRotationsSurviveDraftSwitchesAndCursorPlayback");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(3, 2, false);
+    const auto first = project.source / "level0/screen0.scr";
+    const auto second = project.source / "level0/screen1.scr";
+    CHECK(editor.saveDocument(first));
+    CHECK(editor.saveDocument(second));
+    CHECK(editor.loadDocument(first, false));
+    editor.setSelectedTile(TileType::Rock);
+    editor.rotateSelectedTile(3);
+    CHECK(editor.paintCell({ 1, 0, 1 }));
+    const auto changed = editor.documentDefinition();
+    CHECK(editor.openDocument(second));
+    CHECK(editor.tileRotations().empty());
+    CHECK(editor.openDocument(first));
+    CHECK(editor.documentDefinition() == changed);
+    CHECK(editor.selectedTileQuarterTurns() == 3);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.tileRotations().empty());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.tileRotations() == changed.tileRotations);
+    editor.setSelectedTile(TileType::Rogue);
+    editor.rotateSelectedTile(2);
+    CHECK(editor.paintCell({ 0, 0, 1 }));
+    editor.setLayerLocked(true);
+    editor.setActiveLayer(1);
+    const auto beforePlayback = editor.documentDefinition();
+    const auto playback = editor.beginDraftPlayback(nullptr, GridPosition3 { 2, 1, 1 });
+    CHECK(playback.has_value());
+    if (playback) {
+        CHECK(playback->tileRotationQuarterTurns({ 0, 0, 1 }) == 0);
+        CHECK(playback->tileRotationQuarterTurns({ 2, 1, 1 }) == 2);
+        CHECK(playback->tileRotationQuarterTurns({ 1, 0, 1 }) == 3);
+    }
+    CHECK(editor.documentDefinition() == beforePlayback);
+}
+
+void testUnsortedRotationRecordsSupportBrushUpdates()
+{
+    TEST("unsortedRotationRecordsSupportBrushUpdates");
+    TemporaryProject project;
+    const auto source = project.source / "level0/screen0.scr";
+    std::filesystem::create_directories(source.parent_path());
+    {
+        std::ofstream file(source);
+        file << "@tilerotation {\"cell\":[2,0,1],\"quarterTurns\":3}\n"
+                "@tilerotation {\"cell\":[1,0,1],\"quarterTurns\":1}\n"
+                "@layer 0\n...\n@layer 1\nQ##\n";
+    }
+    auto editor = makeEditor(project);
+    CHECK(editor.tileRotationQuarterTurns({ 1, 0, 1 }) == 1);
+    CHECK(editor.tileRotationQuarterTurns({ 2, 0, 1 }) == 3);
+    CHECK(editor.tileRotations().size() == 2);
+    if (editor.tileRotations().size() != 2) return;
+    CHECK(editor.tileRotations().front().cell == GridPosition3({ 1, 0, 1 }));
+    CHECK(!editor.reloadFromDisk());
+    editor.setSelectedTile(TileType::Wall);
+    editor.rotateSelectedTile(2);
+    CHECK(editor.paintCell({ 2, 0, 1 }));
+    CHECK(editor.tileRotationQuarterTurns({ 1, 0, 1 }) == 1);
+    CHECK(editor.tileRotationQuarterTurns({ 2, 0, 1 }) == 2);
+    CHECK(editor.tileRotations().size() == 2);
+    editor.rotateSelectedTile(-2);
+    CHECK(editor.paintCell({ 1, 0, 1 }));
+    CHECK(editor.tileRotationQuarterTurns({ 1, 0, 1 }) == 0);
+    CHECK(editor.tileRotations().size() == 1);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.tileRotationQuarterTurns({ 1, 0, 1 }) == 1);
+}
+
 int main()
 {
+    testDirectionalBrushesRotateTheirTileTypes();
+    testTileBrushRotationsSurviveEditingAndSaving();
+    testTileRotationsSurviveDraftSwitchesAndCursorPlayback();
+    testUnsortedRotationRecordsSupportBrushUpdates();
     testRandomizeWallsPreservesDocumentAndGroupsUndo();
     testRandomizeWallsEndsStrokeAndHandlesNoWalls();
     testRandomizeRocksPreservesAssignmentsAndGroupsUndo();

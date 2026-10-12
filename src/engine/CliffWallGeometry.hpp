@@ -87,8 +87,15 @@ using CliffWallModule = TileModule;
     return tileModuleForMask(mask);
 }
 
+[[nodiscard]] constexpr CliffWallModule cliffWallModuleForMask(uint8_t mask, uint32_t authoredQuarterTurns)
+{
+    return tileModuleForMask(mask, authoredQuarterTurns);
+}
+
 // Resolve authored and hover-preview cliffs against emitted, same-height
 // cliff cells. Their body stays undeformed and their flat top stays splattable.
+// Authored rotation is retained wherever the connection shape is symmetric;
+// asymmetric modules keep their exposed faces and hidden joins in place.
 void processCliffWallGeometry(
     std::span<RenderFrameData::Tile> tiles, const AssetManifest& manifest);
 

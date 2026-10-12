@@ -1544,6 +1544,94 @@ void testKeyboardChordsAndEditorBindingsRoundTrip()
     }, "an unknown action is rejected");
 }
 
+void testExistingSettingsGainRotateTileAndMoveDefaultReplace()
+{
+    TEST("existingSettingsGainRotateTileAndMoveDefaultReplace");
+    auto legacy = nlohmann::json::parse(sokoban::PlayerProfile {}.serialize());
+    auto& input = legacy["settings"]["input"];
+    input.erase("editorRotateTile");
+    input["editorReplaceTile"][0]["control"] = "R";
+    auto decoded = sokoban::decodePlayerProfile(legacy.dump()).profile;
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorReplaceTile) == "Q");
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorRotateTile) == "R");
+    CHECK(sokoban::decodePlayerProfile(decoded.serialize()).profile == decoded);
+
+    input["editorReplaceTile"][0]["control"] = "P";
+    input["editorGizmoRotate"][0]["control"] = "O";
+    decoded = sokoban::decodePlayerProfile(legacy.dump()).profile;
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorReplaceTile) == "P");
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorGizmoRotate) == "O");
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorRotateTile) == "R");
+
+    // Once Rotate exists, R may be an intentional custom replacement binding.
+    auto current = nlohmann::json::parse(decoded.serialize());
+    current["settings"]["input"]["editorReplaceTile"][0]["control"] = "R";
+    current["settings"]["input"]["editorRotateTile"][0]["control"] = "K";
+    decoded = sokoban::decodePlayerProfile(current.dump()).profile;
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorReplaceTile) == "R");
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorRotateTile) == "K");
+}
+
+void testRotationBindingMigrationPreservesCustomEditorKeys()
+{
+    TEST("rotationBindingMigrationPreservesCustomEditorKeys");
+    const auto legacySettings = [] {
+        auto json = nlohmann::json::parse(sokoban::PlayerProfile {}.serialize());
+        json["settings"]["input"].erase("editorRotateTile");
+        json["settings"]["input"]["editorReplaceTile"][0]["control"] = "R";
+        return json;
+    };
+    auto legacy = legacySettings();
+    legacy["settings"]["input"]["editorMoveTile"][0]["control"] = "Q";
+    auto decoded = sokoban::decodePlayerProfile(legacy.dump()).profile;
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorMoveTile) == "Q");
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorReplaceTile) == "R");
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorRotateTile) == "E");
+    CHECK(sokoban::decodePlayerProfile(decoded.serialize()).profile == decoded);
+
+    legacy = legacySettings();
+    auto& input = legacy["settings"]["input"];
+    input["editorReplaceTile"][0]["control"] = "P";
+    input["editorDeleteTile"][0]["control"] = "R";
+    input["editorMoveTile"][0]["control"] = "E";
+    decoded = sokoban::decodePlayerProfile(legacy.dump()).profile;
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorReplaceTile) == "P");
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorDeleteTile) == "R");
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorMoveTile) == "E");
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorRotateTile) == "F1");
+    CHECK(sokoban::decodePlayerProfile(decoded.serialize()).profile == decoded);
+
+    // If all preferred plain keys are occupied, a chord remains available.
+    auto& occupied = input["editorDeleteTile"];
+    const auto prototype = occupied.front();
+    auto extra = prototype;
+    extra["control"] = "E";
+    occupied.push_back(extra);
+    for (int number = 1; number <= 24; ++number) {
+        extra["control"] = "F" + std::to_string(number);
+        occupied.push_back(extra);
+    }
+    decoded = sokoban::decodePlayerProfile(legacy.dump()).profile;
+    CHECK(sokoban::actionBindingsDisplay(decoded.settings.input,
+        sokoban::InputAction::EditorRotateTile) == "Ctrl+R");
+    CHECK(decoded.settings.input.forAction(sokoban::InputAction::EditorDeleteTile).size() == 26U);
+    CHECK(sokoban::decodePlayerProfile(decoded.serialize()).profile == decoded);
+}
+
 sokoban::PlayerProfile longHistoryProfile()
 {
     constexpr int actionCount = 2048;
@@ -1704,6 +1792,8 @@ int main(int argc, char** argv)
         testNormalizationAndValidation();
         testScreenProgressAndOverworldCheckpoint();
         testKeyboardChordsAndEditorBindingsRoundTrip();
+        testExistingSettingsGainRotateTileAndMoveDefaultReplace();
+        testRotationBindingMigrationPreservesCustomEditorKeys();
         testStoreBackupsAndRecovery();
         testInterruptedWriteRecovery();
         testUsableProfilesSurviveMaintenanceFailures();

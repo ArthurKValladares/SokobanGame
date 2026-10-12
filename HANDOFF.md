@@ -1,6 +1,6 @@
 # Sokoban 3D handoff
 
-Updated 2026-10-11. This file describes current operating guidance, implementation
+Updated 2026-10-12. This file describes current operating guidance, implementation
 contracts and known limitations. [README.md](README.md) covers player controls,
 authoring formats, supported commands and packaging.
 
@@ -31,6 +31,19 @@ remains release-signoff work in
 [packaging/ReleaseValidation.md](packaging/ReleaseValidation.md).
 
 ## Current validation and limitations
+
+The October 12 editor rotation pass moves default Replace to Q and adds
+Rotate on R for tile and tile-decoration placement. Direction-only palette
+families have one entry; style/behavior choices retain their submenus.
+Optional sorted `@tilerotation` records preserve arbitrary tile appearance
+through saves, drafts, moves, undo/redo and overworld composition. Directional
+devices still rotate their existing enums, keeping gameplay semantics and
+older screen symbols compatible. Ground/wall randomization picks both style
+and quarter turns; connected ground and cliffs constrain effective rotations
+to symmetries that preserve their joins. Bodies reuse the same model with a
+transform, and terrain caps use that effective transform too.
+Debug and optimized editor builds pass. The focused editor/UI, input/profile,
+level, rules, presentation, overworld and terrain/geometry suites pass locally.
 
 The October 11 stylized rendering pass uses peach sunlight, periwinkle ambient
 fill, stronger and longer cast shadows, lavender atmosphere/sky, and quieter

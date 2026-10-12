@@ -28,7 +28,7 @@ SOKOBAN_INPUT_ACTION(MenuBack, "menuBack", "Menu back", "Back", Global, Hidden, 
 SOKOBAN_INPUT_ACTION(MenuConfirm, "menuConfirm", "Confirm / Activate", "Confirm|Activate", Gameplay, Controls, 9,
     KeyboardBinding { "Space" }, GamepadButtonBinding { "south" })
 SOKOBAN_INPUT_ACTION(EditorReplaceTile, "editorReplaceTile", "Replace tile (hold)", "", Editor, EditorEditing, 0,
-    KeyboardBinding { "R" })
+    KeyboardBinding { "Q" })
 SOKOBAN_INPUT_ACTION(EditorDeleteTile, "editorDeleteTile", "Delete tile (hold)", "", Editor, EditorEditing, 1,
     KeyboardBinding { "D" })
 SOKOBAN_INPUT_ACTION(EditorMoveTile, "editorMoveTile", "Move tile object (hold)", "", Editor, EditorEditing, 2,
@@ -85,3 +85,6 @@ SOKOBAN_INPUT_ACTION(EditorRecentTile8, "editorRecentTile8", "Recent tile 8", ""
     KeyboardBinding { "8" })
 SOKOBAN_INPUT_ACTION(EditorRecentTile9, "editorRecentTile9", "Recent tile 9", "", Editor, EditorRecentTiles, 8,
     KeyboardBinding { "9" })
+// Append actions so existing indexes, especially recent-tile slots, stay stable.
+SOKOBAN_INPUT_ACTION(EditorRotateTile, "editorRotateTile", "Rotate tile", "Rotate", Editor, EditorEditing, 14,
+    KeyboardBinding { "R" })

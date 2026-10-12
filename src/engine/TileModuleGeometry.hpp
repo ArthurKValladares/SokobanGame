@@ -37,6 +37,17 @@ inline constexpr std::array<uint8_t, 6> tileModuleCanonicalMasks { 15, 11, 5, 3,
     return { 0, 0 };
 }
 
+// Resolve connectivity in the authored tile's local frame, then turn the
+// selected body back into world space. Symmetric bodies retain the authored
+// orientation while asymmetric bodies keep their seam faces at their joins.
+[[nodiscard]] constexpr TileModule tileModuleForMask(uint8_t mask, uint32_t authoredQuarterTurns)
+{
+    const uint32_t authored = authoredQuarterTurns & 3;
+    TileModule selected = tileModuleForMask(rotateTileModuleMask(mask, 4 - authored));
+    selected.quarterTurns = (selected.quarterTurns + authored) & 3;
+    return selected;
+}
+
 [[nodiscard]] inline bool tileModuleCellLess(GridPosition3 left, GridPosition3 right)
 {
     return std::tie(left.z, left.y, left.x) < std::tie(right.z, right.y, right.x);

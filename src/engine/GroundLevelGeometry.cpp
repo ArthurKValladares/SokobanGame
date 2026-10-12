@@ -104,7 +104,8 @@ uint64_t levelGroundGeometryFingerprint(const Level& level, const AssetManifest&
         hash.integer(static_cast<uint32_t>(cell.y));
         hash.integer(static_cast<uint32_t>(cell.z));
         hash.scalar(manifest.tileScale(type));
-        const auto tile = tileVisual(type, cell, manifest, settings);
+        auto tile = tileVisual(type, cell, manifest, settings);
+        tile.modelRotationQuarterTurns = level.tileRotationQuarterTurns(cell);
         fingerprintModel(hash, tile.model, manifest);
         hash.scalar(tile.position.x);
         hash.scalar(tile.position.y);
@@ -141,7 +142,10 @@ ProcessedGroundArtifact compileLevelGroundGeometry(const Level& level,
         if (tiles.size() == RenderFrameData::tileCapacity) {
             throw std::runtime_error("authored ground exceeds the render tile capacity");
         }
-        tiles.push_back(tileVisual(type, cell, manifest, settings));
+        auto tile = tileVisual(type, cell, manifest, settings);
+        tile.authoredRotationQuarterTurns = level.tileRotationQuarterTurns(cell);
+        tile.modelRotationQuarterTurns = tile.authoredRotationQuarterTurns;
+        tiles.push_back(tile);
     });
     processGroundGeometry(tiles, manifest);
     for (auto& tile : tiles) {

@@ -54,6 +54,13 @@ Vec4 shade(Vec4 color, float multiplier);
 
 void applyTileScale(RenderFrameData::Tile& tile, float scale);
 
+inline void applyAuthoredTileRotation(RenderFrameData::Tile& tile, uint32_t quarterTurns)
+{
+    tile.authoredRotationQuarterTurns = quarterTurns % 4;
+    tile.modelRotationQuarterTurns =
+        (tile.modelRotationQuarterTurns + tile.authoredRotationQuarterTurns) % 4;
+}
+
 void appendLinkedObjectAura(
     RenderFrameData& frame,
     const RenderFrameData::Tile& object,

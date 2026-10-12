@@ -692,6 +692,28 @@ void testDraftOverridesMustNameEachScreenOnce()
 
 int main()
 {
+    TEST("tileRotationsTranslateWithOverworldScreens");
+    {
+        TestProject project("tile_rotations");
+        auto west = westDefinition();
+        auto east = eastDefinition();
+        west.tileRotations = { { .cell = { 2, 0, 1 }, .quarterTurns = 1 } };
+        east.tileRotations = { { .cell = { 0, 0, 1 }, .quarterTurns = 3 } };
+        project.writeScreen(1, west);
+        project.writeScreen(2, east);
+        project.writeLayout(eastWestLayout());
+        const auto map = OverworldMap::load(project.root);
+        CHECK(map.level().tileRotationQuarterTurns({ 2, 0, 1 }) == 1);
+        CHECK(map.level().tileRotationQuarterTurns({ 3, 0, 1 }) == 3);
+        CHECK(map.level().tileRotationQuarterTurns({ 0, 0, 1 }) == 0);
+        const auto originalFingerprint = map.fingerprint();
+        east.tileRotations.front().quarterTurns = 2;
+        const auto draft = OverworldMap::load(project.root, OverworldDraftOverride {
+            .definitions = { { .screen = 2, .definition = east } },
+        });
+        CHECK(draft.level().tileRotationQuarterTurns({ 3, 0, 1 }) == 2);
+        CHECK(draft.fingerprint() != originalFingerprint);
+    }
     TEST("lecternTextTranslatesWithOverworldScreens");
     {
         TestProject project("lectern");

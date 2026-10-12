@@ -1696,6 +1696,11 @@ void ApplicationTools::handleEditorShortcuts(
     if (input.toggleLayerLockPressed) {
         levelEditor.toggleLayerLock();
     }
+    if (input.rotateTilePressed &&
+        levelEditor.tool() == LevelEditor::Tool::Tiles) {
+        interruptTileStroke();
+        levelEditor.rotateSelectedTile();
+    }
     if (input.rotateTileDecorationPressed &&
         levelEditor.tool() == LevelEditor::Tool::TileDecorations &&
         levelEditor.placingDecoration()) {

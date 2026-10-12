@@ -248,6 +248,16 @@ public:
         bool operator==(const GroundPaint&) const = default;
     };
 
+    // Additional authored mesh rotation for a tile. Directional tile types
+    // retain their gameplay orientation; this turns a tile's visual variation.
+    // Zero is represented by the absence of a record.
+    struct TileRotation {
+        GridPosition3 cell {};
+        uint8_t quarterTurns = 0;
+
+        bool operator==(const TileRotation&) const = default;
+    };
+
     struct Definition {
         LayerRows layers;
         std::optional<uint32_t> waterLayer;
@@ -271,6 +281,7 @@ public:
 
         std::vector<GroundSplat> groundSplats;
         std::vector<GroundPaint> groundPaint;
+        std::vector<TileRotation> tileRotations;
 
         bool operator==(const Definition&) const = default;
     };
@@ -410,6 +421,8 @@ public:
     [[nodiscard]] const Lectern* lecternAt(GridPosition3 cell) const;
     [[nodiscard]] const std::vector<GroundSplat>& groundSplats() const { return groundSplats_; }
     [[nodiscard]] const std::vector<GroundPaint>& groundPaint() const { return groundPaint_; }
+    [[nodiscard]] const std::vector<TileRotation>& tileRotations() const { return tileRotations_; }
+    [[nodiscard]] uint32_t tileRotationQuarterTurns(GridPosition3 cell) const;
     [[nodiscard]] TileType authoredTileAt(uint32_t x, uint32_t y, uint32_t z = 0) const;
     [[nodiscard]] TileType tileAt(uint32_t x, uint32_t y, uint32_t z = 0) const;
     [[nodiscard]] std::optional<TileType> supportingTileAt(GridPosition3 position) const;
@@ -446,6 +459,7 @@ private:
     std::vector<Lectern> lecterns_;
     std::vector<GroundSplat> groundSplats_;
     std::vector<GroundPaint> groundPaint_;
+    std::vector<TileRotation> tileRotations_;
 };
 
 } // namespace sokoban

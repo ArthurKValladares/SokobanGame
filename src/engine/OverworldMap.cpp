@@ -638,6 +638,12 @@ void OverworldMap::composeScreenGrid(
                     tileTypeToChar(TileType::Wall));
             }
         }
+        for (const Level::TileRotation& authored : screen.definition.tileRotations) {
+            composed.tileRotations.push_back({
+                .cell = translate(screen, authored.cell),
+                .quarterTurns = authored.quarterTurns,
+            });
+        }
         for (const Level::Decoration& authored : screen.definition.decorations) {
             Level::Decoration translated = authored;
             translated.position.x += static_cast<float>(screen.origin.x);

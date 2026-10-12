@@ -988,8 +988,8 @@ void testDebugEditorControlBindings()
     CHECK(state.page == sokoban::OptionsMenuPage::EditorControls);
     const std::vector<sokoban::OptionsMenuRow> editorRows =
         sokoban::optionsMenuRows(state, settings);
-    // Section tabs, the fourteen editing bindings, then Back.
-    CHECK(editorRows.size() == 16);
+    // Section tabs, the fifteen editing bindings, then Back.
+    CHECK(editorRows.size() == 17);
     CHECK(editorRows.front().id ==
         sokoban::OptionsMenuRowId::EditorControlsSection);
     CHECK(editorRows[1].id == sokoban::OptionsMenuRowId::EditorReplaceTile);

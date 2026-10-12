@@ -447,55 +447,60 @@ void terrainPickersKeepEveryStyleAndRecentBrushes()
     }));
 }
 
-void buttonPickerOffersFourPlacementsAndKeepsSelectedBrush()
+void directionalFamiliesUseOneBrushAndRotateWithoutPickers()
 {
-    TEST("buttonPickerOffersFourPlacementsAndKeepsSelectedBrush");
+    TEST("directionalFamiliesUseOneBrushAndRotateWithoutPickers");
     EditorPanel panel(LevelEditor::Tool::Tiles);
-    const auto* group = editorTilePalette::groupFor(TileType::ButtonNorth);
-    CHECK(group != nullptr);
-    if (!group) return;
-    CHECK(group->variants().size() == 4);
-    for (const TileType variant : group->variants()) {
-        const auto selected = panel.editor.selectedTile();
-        panel.clickIcon(group->contains(selected) ? selected : TileType::ButtonNorth);
-        const auto picker = panel.frame();
-        CHECK(picker.text.find("Button direction") != std::string::npos);
-        CHECK(std::ranges::count_if(picker.icons, [](const EditorPanel::Icon& icon) {
-            return iconIsInPopup(icon) && tileTypeIsButton(icon.tile);
-        }) == 4);
-        panel.clickIcon(variant, true);
-        CHECK(panel.editor.selectedTile() == variant);
-        CHECK(std::ranges::find(panel.editor.recentTiles(), variant) != panel.editor.recentTiles().end());
-        CHECK(std::ranges::count_if(panel.frame().icons, [variant](const EditorPanel::Icon& icon) {
-            return !iconIsInPopup(icon) && tileTypeIsButton(icon.tile) && icon.tile == variant;
-        }) == 1);
+    std::size_t families = 0;
+    for (const auto& group : editorTilePalette::groups) {
+        if (!group.rotationOnly) continue;
+        ++families;
+        panel.editor.setSelectedTile(TileType::Ground);
+        panel.clickIcon(group.tiles.front());
+        CHECK(panel.editor.selectedTile() == group.tiles.front());
+        for (int turn = 1; turn <= 4; ++turn) {
+            panel.clickPaletteControl("Rotate");
+            const auto expected = rotateTileType(group.tiles.front(), turn);
+            CHECK(panel.editor.selectedTile() == expected);
+            const auto displayed = panel.frame();
+            CHECK(std::ranges::none_of(displayed.icons, iconIsInPopup));
+            CHECK(std::ranges::count_if(displayed.icons, [&](const EditorPanel::Icon& icon) {
+                return group.contains(icon.tile);
+            }) == 1);
+            CHECK(std::ranges::any_of(displayed.icons, [&](const EditorPanel::Icon& icon) {
+                return icon.tile == expected;
+            }));
+            CHECK(displayed.text.find(tileTypeName(expected)) != std::string::npos);
+            // A rotated brush still selects the same family and opens no menu.
+            panel.clickIcon(expected);
+            CHECK(panel.editor.selectedTile() == expected);
+            CHECK(std::ranges::none_of(panel.frame().icons, iconIsInPopup));
+        }
     }
+    CHECK(families == 10);
+    CHECK(panel.shows("A lever stays on or off until activated again."));
 }
 
-void leverPickerOffersFourPlacementsAndKeepsSelectedBrush()
+void rotateControlKeepsArtAndBehaviorVariants()
 {
-    TEST("leverPickerOffersFourPlacementsAndKeepsSelectedBrush");
+    TEST("rotateControlKeepsArtAndBehaviorVariants");
     EditorPanel panel(LevelEditor::Tool::Tiles);
-    const auto* group = editorTilePalette::groupFor(TileType::LeverNorth);
-    CHECK(group != nullptr);
-    if (!group) return;
-    CHECK(group->variants().size() == 4);
-    for (const TileType variant : group->variants()) {
-        const auto selected = panel.editor.selectedTile();
-        panel.clickIcon(group->contains(selected) ? selected : TileType::LeverNorth);
-        const auto picker = panel.frame();
-        CHECK(picker.text.find("Lever direction") != std::string::npos);
-        CHECK(std::ranges::count_if(picker.icons, [](const EditorPanel::Icon& icon) {
-            return iconIsInPopup(icon) && tileTypeIsLever(icon.tile);
-        }) == 4);
-        panel.clickIcon(variant, true);
-        CHECK(panel.editor.selectedTile() == variant);
-        CHECK(std::ranges::find(panel.editor.recentTiles(), variant) != panel.editor.recentTiles().end());
-        CHECK(std::ranges::count_if(panel.frame().icons, [variant](const EditorPanel::Icon& icon) {
-            return !iconIsInPopup(icon) && tileTypeIsLever(icon.tile) && icon.tile == variant;
-        }) == 1);
+    for (const auto tile : { TileType::GroundRock09, TileType::WallStone03,
+             TileType::CliffWall02, TileType::WardrobeBard,
+             TileType::RotatorCounterClockwise }) {
+        panel.editor.setSelectedTile(tile);
+        for (uint32_t turn = 1; turn <= 4; ++turn) {
+            panel.clickPaletteControl("Rotate");
+            CHECK(panel.editor.selectedTile() == tile);
+            CHECK(panel.editor.selectedTileQuarterTurns() == turn % 4U);
+            CHECK(panel.shows("Rotation: " + std::to_string((turn % 4U) * 90U) + " degrees"));
+        }
+        const auto* group = editorTilePalette::groupFor(tile);
+        CHECK(group && !group->rotationOnly);
+        panel.clickIcon(tile);
+        CHECK(std::ranges::any_of(panel.frame().icons, iconIsInPopup));
+        panel.clickIcon(tile, true);
     }
-    CHECK(panel.shows("A lever stays on or off until activated again."));
 }
 
 void terrainRandomizeButtonsKeepAssignmentsAndUndo()
@@ -734,8 +739,8 @@ int main()
         newMaskActionUsesSelectedSplat();
         terrainSectionCollapsesWithoutHidingQuarryWalls();
         terrainPickersKeepEveryStyleAndRecentBrushes();
-        buttonPickerOffersFourPlacementsAndKeepsSelectedBrush();
-        leverPickerOffersFourPlacementsAndKeepsSelectedBrush();
+        directionalFamiliesUseOneBrushAndRotateWithoutPickers();
+        rotateControlKeepsArtAndBehaviorVariants();
         terrainRandomizeButtonsKeepAssignmentsAndUndo();
         tileDecorationTabChoosesBrushAndKeepsPlacedListsSeparate();
         decorationListsAndInspectorsRespectLayerLock();

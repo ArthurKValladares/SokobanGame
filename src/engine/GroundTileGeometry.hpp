@@ -46,6 +46,9 @@ inline constexpr float groundTileBottomOverhang = 0.04f;
 // Unsupported tiles select native jagged bottom bodies. Builders resolve full
 // authored support even when the supporting layer is hidden; direct callers
 // can set groundModuleSupported, or rely on emitted native ground below.
+// Authored quarter turns choose among orientations with the same connection
+// shape: all four for islands/interiors and half turns for strips. Asymmetric
+// ends, corners and edges keep their seam faces aligned to their neighbors.
 void processGroundTileGeometry(std::span<RenderFrameData::Tile> tiles, const AssetManifest& manifest,
     FrameArena* arena = nullptr);
 

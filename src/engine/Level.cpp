@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -38,6 +39,7 @@ constexpr std::size_t maximumElevatorStops = 64;
 constexpr std::string_view platePrefix = "@plate ";
 constexpr std::string_view groundSplatPrefix = "@groundsplat ";
 constexpr std::string_view groundPaintPrefix = "@groundpaint ";
+constexpr std::string_view tileRotationPrefix = "@tilerotation ";
 
 using Json = nlohmann::json;
 
@@ -477,6 +479,64 @@ GridPosition3 parseLinkedCell(
         }
     }
     return cell;
+}
+
+Level::TileRotation parseTileRotation(
+    std::string_view payload, std::string_view sourceName)
+{
+    try {
+        const Json object = Json::parse(payload);
+        const auto turns = object.find("quarterTurns");
+        if (!object.is_object() || !object.contains("cell") ||
+            turns == object.end() || !turns->is_number_integer() ||
+            *turns < 1 || *turns > 3) {
+            throw std::runtime_error(
+                "Tile rotation requires 'cell' and integer 'quarterTurns' from 1 to 3");
+        }
+        const Json& cell = object.at("cell");
+        if (cell.is_array()) {
+            for (const Json& component : cell) {
+                if (component.is_number_integer() &&
+                    (component < 0 || component > std::numeric_limits<int>::max())) {
+                    throw std::runtime_error("Tile rotation cell coordinates are out of range");
+                }
+            }
+        }
+        return {
+            .cell = parseLinkedCell(cell, "cell", sourceName, "Tile rotation"),
+            .quarterTurns = turns->get<uint8_t>(),
+        };
+    } catch (const std::exception& error) {
+        throw std::runtime_error("Invalid tile rotation in " +
+            std::string(sourceName) + ": " + error.what());
+    }
+}
+
+void validateTileRotations(
+    const Level::Definition& definition, std::string_view sourceName)
+{
+    const auto fail = [&](const char* message) {
+        throw std::runtime_error(std::string(message) + ": " + std::string(sourceName));
+    };
+    for (std::size_t i = 0; i < definition.tileRotations.size(); ++i) {
+        const Level::TileRotation& rotation = definition.tileRotations[i];
+        if (rotation.quarterTurns < 1 || rotation.quarterTurns > 3) {
+            fail("Tile rotation quarterTurns must be from 1 to 3; omit zero rotations");
+        }
+        const GridPosition3 cell = rotation.cell;
+        if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+            static_cast<std::size_t>(cell.z) >= definition.layers.size() ||
+            static_cast<std::size_t>(cell.y) >= definition.layers[static_cast<std::size_t>(cell.z)].size() ||
+            static_cast<std::size_t>(cell.x) >= definition.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)].size() ||
+            charToTileType(definition.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)]).value_or(TileType::Air) == TileType::Air) {
+            fail("Tile rotation must reference a non-air tile inside the screen");
+        }
+        for (std::size_t j = 0; j < i; ++j) {
+            if (definition.tileRotations[j].cell == cell) {
+                fail("Duplicate tile rotation cell");
+            }
+        }
+    }
 }
 
 Level::Lectern parseLectern(std::string_view payload, std::string_view sourceName,
@@ -1194,7 +1254,8 @@ Level::Definition Level::parseDefinition(
                     line.starts_with(linkColorPrefix) ||
                     line.starts_with(platePrefix) ||
                     line.starts_with(groundSplatPrefix) ||
-                    line.starts_with(groundPaintPrefix);
+                    line.starts_with(groundPaintPrefix) ||
+                    line.starts_with(tileRotationPrefix);
             })) {
             throw std::runtime_error(
                 "Level metadata requires explicit '@layer 0' sections: " + source);
@@ -1206,6 +1267,15 @@ Level::Definition Level::parseDefinition(
     std::vector<std::pair<GridPosition3, TileType>> legacyLecternDirections;
     std::optional<uint32_t> currentLayer;
     for (const std::string& line : lines) {
+        if (line.starts_with(tileRotationPrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Tile rotation metadata must appear before '@layer 0': " + source);
+            }
+            definition.tileRotations.push_back(parseTileRotation(
+                std::string_view(line).substr(tileRotationPrefix.size()), sourceName));
+            continue;
+        }
         if (line.starts_with(groundSplatPrefix) || line.starts_with(groundPaintPrefix)) {
             if (currentLayer) {
                 throw std::runtime_error("Ground metadata must appear before '@layer 0': " + source);
@@ -1511,6 +1581,10 @@ Level::Definition Level::parseDefinition(
     canonicalizePlates(definition.plates, sourceName);
     canonicalizeLinkColors(definition.linkColors, sourceName);
     validateGroundSplats(definition, sourceName);
+    validateTileRotations(definition, sourceName);
+    std::ranges::sort(definition.tileRotations, {}, [](const TileRotation& rotation) {
+        return std::array { rotation.cell.z, rotation.cell.y, rotation.cell.x };
+    });
 
     return definition;
 }
@@ -1526,6 +1600,7 @@ std::vector<std::string> Level::serializeDefinition(
     const Definition& definition)
 {
     validateGroundSplats(definition, "serialized level");
+    validateTileRotations(definition, "serialized level");
     if (definition.layers.size() == 1 && !definition.character &&
         !definition.waterLayer && !definition.cameraAngles &&
         definition.decorations.empty() &&
@@ -1535,7 +1610,7 @@ std::vector<std::string> Level::serializeDefinition(
         definition.minecarts.empty() && definition.objectLinks.empty() &&
         definition.portals.empty() && definition.linkColors.empty() &&
         definition.plates.empty() && definition.groundSplats.empty() &&
-        definition.groundPaint.empty()) {
+        definition.groundPaint.empty() && definition.tileRotations.empty()) {
         return definition.layers.front();
     }
 
@@ -1560,6 +1635,17 @@ std::vector<std::string> Level::serializeDefinition(
             { "splat", tile.splat },
         };
         lines.push_back(std::string(groundPaintPrefix) + object.dump());
+    }
+    std::vector<TileRotation> tileRotations = definition.tileRotations;
+    std::ranges::sort(tileRotations, {}, [](const TileRotation& rotation) {
+        return std::array { rotation.cell.z, rotation.cell.y, rotation.cell.x };
+    });
+    for (const TileRotation& rotation : tileRotations) {
+        const Json object {
+            { "cell", { rotation.cell.x, rotation.cell.y, rotation.cell.z } },
+            { "quarterTurns", rotation.quarterTurns },
+        };
+        lines.push_back(std::string(tileRotationPrefix) + object.dump());
     }
     if (definition.cameraAngles) {
         validateCameraAngles(*definition.cameraAngles, "serialized level");
@@ -1672,7 +1758,8 @@ std::vector<std::string> Level::serializeDefinition(
         !definition.elevators.empty() || !definition.minecarts.empty() ||
         !definition.objectLinks.empty() || !definition.portals.empty() ||
         !definition.linkColors.empty() || !definition.plates.empty() ||
-        !definition.groundSplats.empty() || !definition.groundPaint.empty()) {
+        !definition.groundSplats.empty() || !definition.groundPaint.empty() ||
+        !definition.tileRotations.empty()) {
         lines.emplace_back();
     }
     for (size_t layer = 0; layer < definition.layers.size(); ++layer) {
@@ -1723,9 +1810,23 @@ Level Level::loadFromDefinition(
         definition.lecterns);
     level.cameraAngles_ = definition.cameraAngles;
     validateGroundSplats(definition, sourceName);
+    validateTileRotations(definition, sourceName);
     level.groundSplats_ = definition.groundSplats;
     level.groundPaint_ = definition.groundPaint;
+    level.tileRotations_ = definition.tileRotations;
+    std::ranges::sort(level.tileRotations_, {}, [](const TileRotation& rotation) {
+        return std::array { rotation.cell.z, rotation.cell.y, rotation.cell.x };
+    });
     return level;
+}
+
+uint32_t Level::tileRotationQuarterTurns(GridPosition3 cell) const
+{
+    const auto found = std::ranges::lower_bound(tileRotations_,
+        std::array { cell.z, cell.y, cell.x }, {}, [](const TileRotation& rotation) {
+            return std::array { rotation.cell.z, rotation.cell.y, rotation.cell.x };
+        });
+    return found == tileRotations_.end() || found->cell != cell ? 0u : found->quarterTurns;
 }
 
 const Level::GroundSplat* Level::groundSplatAt(

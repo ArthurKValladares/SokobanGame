@@ -2128,6 +2128,8 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
     };
 #if SOKOBAN_ENABLE_DEBUG_UI
     context.editorEditing = tools_->levelEditor.editingDocument();
+    context.tilePlacementReady = context.editorEditing &&
+        tools_->levelEditor.tool() == LevelEditor::Tool::Tiles;
     context.decorationPlacementReady =
         context.editorEditing &&
         tools_->levelEditor.placingDecoration();

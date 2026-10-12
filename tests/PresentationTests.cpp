@@ -3354,7 +3354,7 @@ void testLinkedMovablesRenderScaledColorMatchedAuras()
 void testMirrorActivationBuildsBeamAndDestinationGhost()
 {
     TEST("mirrorActivationBuildsBeamAndDestinationGhost");
-    const Level level = Level::loadFromLayers({
+    Level::Definition definition { .layers = {
         {
             ".....",
             ".....",
@@ -3369,7 +3369,10 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
             "     ",
             "  C  ",
         },
-    }, "mirror visualization");
+    } };
+    definition.layers[1][2][0] = tileTypeToChar(TileType::PressurePlate);
+    definition.tileRotations.push_back({ .cell = { 0, 2, 1 }, .quarterTurns = 1 });
+    const Level level = Level::loadFromDefinition(definition, "mirror visualization");
     const GameState state = rules::initialState(level);
     GameplayPresentation presentation;
     presentation.resetEntities(state);
@@ -3408,6 +3411,9 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
         CHECK(ghost->model == testManifest().playerModel());
         CHECK(ghost->animation == testManifest().playerIdleAnimation());
         CHECK(ghost->animationInstanceId != uint64_t { 0 });
+        // The destination plate's appearance must not turn the reflected hero.
+        CHECK(ghost->modelRotationQuarterTurns == presentation.players().front().facingQuarterTurns);
+        CHECK(ghost->authoredRotationQuarterTurns == 0);
         CHECK(sameColor(ghost->color, config::mirrorGhostColor));
     }
 
@@ -3557,6 +3563,24 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
         [](const RenderFrameData::IsoFace& face) {
             return face.effect == RenderSurfaceEffect::MirrorEnergy;
         }));
+
+    // Movable previews retain the source object's authored appearance too.
+    definition.layers[1][4][2] = tileTypeToChar(TileType::Rock);
+    definition.layers[1][0][4] = tileTypeToChar(TileType::Player);
+    definition.tileRotations.push_back({ .cell = { 2, 4, 1 }, .quarterTurns = 3 });
+    const Level rockLevel = Level::loadFromDefinition(definition, "rotated mirror movable");
+    const GameState rockState = rules::initialState(rockLevel);
+    presentation.resetEntities(rockState);
+    const auto rockFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(), .level = rockLevel, .state = rockState,
+        .projectedState = rockState, .presentation = presentation, .settings = {},
+    });
+    const auto rockGhost = std::ranges::find_if(rockFrame.tiles, [](const auto& tile) {
+        return tile.effect == RenderSurfaceEffect::MirrorEnergy &&
+            tile.model == testManifest().modelForTile(TileType::Rock);
+    });
+    CHECK(rockGhost != rockFrame.tiles.end());
+    if (rockGhost != rockFrame.tiles.end()) CHECK(rockGhost->modelRotationQuarterTurns == 3);
 }
 
 void testGameplayFrameBuildsProceduralWaterSurface()
@@ -5061,6 +5085,158 @@ void testLecternFacingInGameplayEditorAndPreviews()
     }
 }
 
+void testAuthoredTileRotationsMatchEditorPreviewsAndGameplay()
+{
+    TEST("authoredTileRotationsMatchEditorPreviewsAndGameplay");
+    const auto& manifest = testManifest();
+    LevelEditor editor;
+    editor.newDocument(5, 2, false);
+    editor.setSelectedTile(TileType::Player);
+    editor.rotateSelectedTile(2);
+    CHECK(editor.paintCell({ 0, 0, 1 }));
+    editor.setSelectedTile(TileType::Knight);
+    editor.rotateSelectedTile();
+    CHECK(editor.paintCell({ 0, 1, 1 }));
+    editor.setSelectedTile(TileType::Wall);
+    editor.rotateSelectedTile();
+    CHECK(editor.paintCell({ 1, 0, 1 }));
+    editor.setSelectedTile(TileType::Rock);
+    editor.rotateSelectedTile(3);
+    CHECK(editor.setCell({ 2, 0, 1 }, TileType::PressurePlate));
+    CHECK(editor.paintCell({ 2, 0, 1 }));
+    editor.setSelectedTile(TileType::WardrobeKnight);
+    editor.rotateSelectedTile();
+    CHECK(editor.paintCell({ 4, 1, 1 }));
+    editor.setSelectedTile(TileType::Rock);
+    editor.rotateSelectedTile(3);
+
+    const auto checkRotation = [&](const RenderFrameData& frame, GridPosition3 cell,
+                                   RenderModel model, uint32_t turns, bool preview = false) {
+        const auto tile = std::ranges::find_if(frame.tiles, [&](const auto& candidate) {
+            return candidate.cell == cell && candidate.model == model &&
+                candidate.isEditorPreview == preview && !candidate.pickOnly;
+        });
+        CHECK(tile != frame.tiles.end());
+        if (tile != frame.tiles.end()) CHECK(tile->modelRotationQuarterTurns == turns);
+    };
+    const auto wall = manifest.modelForTile(TileType::Wall);
+    const auto rock = manifest.modelForTile(TileType::Rock);
+    const auto wardrobe = manifest.modelForTile(TileType::WardrobeKnight);
+    const auto knight = manifest.characterModel(CharacterType::Knight);
+    const auto editorFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = {}, .hoverCell = { { 3, 0, 1 } },
+    });
+    checkRotation(editorFrame, { 1, 0, 1 }, wall, 1);
+    checkRotation(editorFrame, { 2, 0, 1 }, rock, 3);
+    checkRotation(editorFrame, { 2, 0, 1 }, manifest.modelForTile(TileType::PressurePlate), 0);
+    checkRotation(editorFrame, { 3, 0, 1 }, rock, 3, true);
+    checkRotation(editorFrame, { 4, 1, 1 }, wardrobe, 1);
+    checkRotation(editorFrame, { 4, 1, 1 }, knight, 1);
+
+    const auto definition = editor.documentDefinition();
+    const std::array neighbors { RenderFrameBuilder::EditorInput::OverworldNeighbor {
+        .screen = 7, .origin = { 5, 0 }, .width = 5, .height = 2, .definition = &definition,
+    } };
+    const auto neighborFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = {}, .overworldNeighbors = neighbors,
+    });
+    checkRotation(neighborFrame, { 6, 0, 1 }, wall, 1);
+    checkRotation(neighborFrame, { 7, 0, 1 }, rock, 3);
+    checkRotation(neighborFrame, { 7, 0, 1 }, manifest.modelForTile(TileType::PressurePlate), 0);
+    checkRotation(neighborFrame, { 9, 1, 1 }, wardrobe, 1);
+    checkRotation(neighborFrame, { 9, 1, 1 }, knight, 1);
+
+    CHECK(editor.beginMove({ 1, 0, 1 }));
+    const auto moveFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = {}, .hoverCell = { { 3, 1, 1 } },
+        .editorPreviewTile = TileType::Wall,
+    });
+    checkRotation(moveFrame, { 1, 0, 1 }, wall, 1, true);
+    checkRotation(moveFrame, { 3, 1, 1 }, wall, 1, true);
+    editor.cancelMove();
+    const auto deleteFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = {}, .hoverCell = { { 1, 0, 1 } },
+        .deleting = true,
+    });
+    checkRotation(deleteFrame, { 1, 0, 1 }, wall, 1, true);
+
+    const auto level = editor.documentToLevel();
+    auto state = rules::initialState(level);
+    CHECK(state.players.front().quarterTurns == 2);
+    CHECK(state.players[1].quarterTurns == 1);
+    CHECK(state.movables.front().quarterTurns == 3);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    const auto gameplayFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest, .level = level, .state = state,
+        .projectedState = state, .presentation = presentation, .settings = {},
+    });
+    checkRotation(gameplayFrame, { 1, 0, 1 }, wall, 1);
+    checkRotation(gameplayFrame, { 2, 0, 1 }, rock, 3);
+    checkRotation(gameplayFrame, { 2, 0, 1 }, manifest.modelForTile(TileType::PressurePlate), 0);
+    checkRotation(gameplayFrame, { 4, 1, 1 }, wardrobe, 1);
+    checkRotation(gameplayFrame, { 4, 1, 1 }, knight, 1);
+    CHECK(presentation.players().front().facingQuarterTurns == 2);
+    CHECK(presentation.players()[1].facingQuarterTurns == 1);
+
+    state.movables.front().cell = { 3, 1, 1 };
+    presentation.resetEntities(state);
+    const auto movedFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest, .level = level, .state = state,
+        .projectedState = state, .presentation = presentation, .settings = {},
+    });
+    checkRotation(movedFrame, { 3, 1, 1 }, rock, 3);
+    checkRotation(movedFrame, { 2, 0, 1 }, manifest.modelForTile(TileType::PressurePlate), 0);
+
+    state.movables.front().fallen = true;
+    presentation.resetEntities(state);
+    const auto fallenFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = manifest, .level = level, .state = state,
+        .projectedState = state, .presentation = presentation, .settings = {},
+    });
+    checkRotation(fallenFrame, { 3, 1, 1 }, rock, 3);
+}
+
+void testAuthoredMinecartGateRotationTurnsPostsBoomAndPickBounds()
+{
+    TEST("authoredMinecartGateRotationTurnsPostsBoomAndPickBounds");
+    RenderFrameData original;
+    const GridPosition3 cell { 3, 4, 1 };
+    appendMinecartGateVisual(original, cell, TileType::RailStraightNorthSouth,
+        0.4f, 1.0f, true);
+    for (uint32_t turns = 0; turns < 4; ++turns) {
+        RenderFrameData rotated;
+        appendMinecartGateVisual(rotated, cell, TileType::RailStraightNorthSouth,
+            0.4f, 1.0f, true, turns);
+        CHECK(rotated.tiles.size() == original.tiles.size());
+        CHECK(rotated.isoFaces.size() == original.isoFaces.size());
+        for (std::size_t index = 0; index < original.isoFaces.size(); ++index) {
+            for (std::size_t corner = 0; corner < 4; ++corner) {
+                Vec3 expected = original.isoFaces[index].vertices[corner];
+                for (uint32_t turn = 0; turn < turns; ++turn) {
+                    expected = { 4.0f - (expected.y - 4.0f), 4.0f + (expected.x - 3.0f), expected.z };
+                }
+                CHECK(distance(rotated.isoFaces[index].vertices[corner], expected) < 0.00001f);
+            }
+        }
+        const auto& pick = rotated.tiles.back();
+        CHECK(pick.pickOnly);
+        CHECK(pick.position == Vec2({ 3, 4 }));
+        CHECK(pick.size == Vec2({ 1, 1 }));
+        for (std::size_t index = 0; index + 1 < original.tiles.size(); ++index) {
+            const auto& post = rotated.tiles[index];
+            const auto& source = original.tiles[index];
+            Vec2 center { source.position.x + source.size.x * 0.5f,
+                source.position.y + source.size.y * 0.5f };
+            for (uint32_t turn = 0; turn < turns; ++turn) {
+                center = { 4.0f - (center.y - 4.0f), 4.0f + (center.x - 3.0f) };
+            }
+            CHECK(near(post.position.x + post.size.x * 0.5f, center.x));
+            CHECK(near(post.position.y + post.size.y * 0.5f, center.y));
+        }
+    }
+}
+
 } // namespace
 
 int main()
@@ -5068,6 +5244,8 @@ int main()
     testLecternFacingInGameplayEditorAndPreviews();
     testPortalPresentation();
     try {
+    testAuthoredTileRotationsMatchEditorPreviewsAndGameplay();
+    testAuthoredMinecartGateRotationTurnsPostsBoomAndPickBounds();
     testPresentationTransactionResolvesActorIndependentDependencies();
     testPresentationTransactionRejectsDependencyCycles();
     testControlTracksComposeSeekAndReverse();

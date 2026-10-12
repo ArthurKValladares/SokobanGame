@@ -177,6 +177,7 @@ private:
                     input_.editor.documentPlateAt(cell).value_or(TileType::Air))
                     .value_or(0);
             }
+            if (!plate) applyAuthoredTileRotation(tile, input_.editor.tileRotationQuarterTurns(cell));
             tile.color = { color.x, color.y, color.z, 1.0f };
             tile.pickable = false;
             tile.showGrid = false;
@@ -594,7 +595,8 @@ private:
         const Level::Definition& definition,
         GridPosition origin,
         GridPosition3 localCell,
-        TileType tile) const
+        TileType tile,
+        std::optional<uint32_t> rotationOverride = std::nullopt) const
     {
         if (tile == TileType::Air) {
             return;
@@ -604,6 +606,10 @@ private:
             localCell.y + origin.y,
             localCell.z,
         };
+        const auto authoredRotation = std::ranges::find(definition.tileRotations,
+            localCell, &Level::TileRotation::cell);
+        const uint32_t rotation = rotationOverride.value_or(
+            authoredRotation == definition.tileRotations.end() ? 0U : authoredRotation->quarterTurns);
         const auto neighborTileAt = [&](GridPosition3 globalCell) {
             return definitionTileAt(definition, {
                 globalCell.x - origin.x,
@@ -634,6 +640,7 @@ private:
                  ++index) {
                 frame.tiles[index].pickable = false;
                 frame.tiles[index].affectsCameraFit = false;
+                applyAuthoredTileRotation(frame.tiles[index], rotation);
             }
             return;
         }
@@ -641,7 +648,8 @@ private:
             const auto covered = std::ranges::find(
                 definition.plates, localCell, &Level::Plate::cell);
             appendMinecartGateVisual(frame, cell,
-                covered != definition.plates.end() ? covered->tile : TileType::Air);
+                covered != definition.plates.end() ? covered->tile : TileType::Air,
+                0.0f, 1.0f, false, rotation);
             return;
         }
         if (tile == TileType::Gate) {
@@ -723,6 +731,7 @@ private:
         }
         renderTile.pickable = false;
         renderTile.affectsCameraFit = false;
+        applyAuthoredTileRotation(renderTile, rotation);
         const bool animatedActor =
             tileTypeIsPlayerStart(tile) || tile == TileType::Enemy;
         const AnimationUse editorUse = tile == TileType::Enemy
@@ -774,6 +783,7 @@ private:
                         input_.animations,
                         AnimationUse::EditorPlayerIdle,
                         input_.worldAnimationTimeSeconds));
+                applyAuthoredTileRotation(frame.tiles.back(), rotation);
                 frame.tiles.back().pickable = false;
                 frame.tiles.back().affectsCameraFit = false;
             }
@@ -830,7 +840,8 @@ private:
                                 definition,
                                 neighbor.origin,
                                 localCell,
-                                covered->tile);
+                                covered->tile,
+                                0U);
                         }
                     }
                 }
@@ -874,8 +885,17 @@ private:
         int z,
         TileType tile,
         bool preview,
-        bool pickOnly = false) const
+        bool pickOnly = false,
+        std::optional<uint32_t> rotationOverride = std::nullopt) const
     {
+        const GridPosition3 rotationCell { x, y, z };
+        const uint32_t rotation = rotationOverride.value_or(!preview
+            ? input_.editor.tileRotationQuarterTurns(rotationCell)
+            : pendingTileMoveSource()
+                ? input_.editor.tileRotationQuarterTurns(*pendingTileMoveSource())
+                : input_.deleting
+                    ? input_.editor.tileRotationQuarterTurns(rotationCell)
+                    : input_.editor.selectedTileQuarterTurns());
         if (tile == TileType::Air) {
             return;
         }
@@ -933,12 +953,16 @@ private:
                     }
                     return documentTileAt(position);
                 };
+            const std::size_t firstSegment = frame.tiles.size();
             appendLadderSegmentsForCell(
                 frame,
                 { x, y, z },
                 tileAtForLadder,
                 input_.manifest,
                 preview);
+            for (std::size_t index = firstSegment; index < frame.tiles.size(); ++index) {
+                applyAuthoredTileRotation(frame.tiles[index], rotation);
+            }
             return;
         }
         if (tile == TileType::MinecartGate) {
@@ -949,7 +973,7 @@ private:
                     rail = documentTileAt(cell);
                 }
                 appendMinecartGateVisual(frame, cell, rail, 0.0f,
-                    preview ? 0.68f : 1.0f, true);
+                    preview ? 0.68f : 1.0f, true, rotation);
                 frame.tiles.back().isEditorPreview = preview;
             } else {
                 frame.tiles.push_back({
@@ -1074,6 +1098,7 @@ private:
             renderTile.model = input_.manifest.characterModel(
                 characterForStartTile(tile, input_.editor.character()));
         }
+        applyAuthoredTileRotation(renderTile, rotation);
         renderTile.baseElevation += preview ? 0.02f : 0.0f;
         renderTile.pickOnly = pickOnly;
         renderTile.isEditorPreview = preview;
@@ -1127,6 +1152,7 @@ private:
                             AnimationUse::EditorPlayerIdle,
                             input_.worldAnimationTimeSeconds),
                         preview);
+                    applyAuthoredTileRotation(frame.tiles.back(), rotation);
                 }
             }
         }
@@ -1265,6 +1291,7 @@ private:
             ghost.pickable = false;
             ghost.showGrid = false;
             ghost.affectsCameraFit = false;
+            applyAuthoredTileRotation(ghost, input_.editor.tileRotationQuarterTurns(cell));
             frame.tiles.push_back(ghost);
         }
     }
@@ -1279,7 +1306,7 @@ private:
             return;
         }
         const std::size_t first = frame.tiles.size();
-        appendEditorTile(frame, cell.x, cell.y, cell.z, covered->tile, false);
+        appendEditorTile(frame, cell.x, cell.y, cell.z, covered->tile, false, false, 0U);
         for (std::size_t index = first; index < frame.tiles.size(); ++index) {
             frame.tiles[index].pickable = false;
         }

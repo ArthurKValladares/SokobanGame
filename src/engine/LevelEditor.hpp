@@ -122,6 +122,10 @@ public:
     void toggleLayerLock();
     void setShowOverworldNeighbors(bool show);
     void setSelectedTile(TileType tile);
+    void rotateSelectedTile(int quarterTurns = 1);
+    [[nodiscard]] uint32_t selectedTileQuarterTurns() const;
+    [[nodiscard]] uint32_t tileRotationQuarterTurns(GridPosition3 cell) const;
+    [[nodiscard]] const std::vector<Level::TileRotation>& tileRotations() const;
     void setTool(Tool tool);
     // Tiles -> Decorations -> TileDecorations -> Selectors (overworld only) -> Tiles.
     void cycleTool();
@@ -195,11 +199,11 @@ public:
     bool paintCell(GridPosition3 position);
     bool eraseCell(GridPosition3 position);
     bool setCell(GridPosition3 position, TileType tile);
-    // Randomizes ground rock variants on every document layer as one undo
-    // step, preserving tile assignments. A seed gives repeatable layouts.
+    // Randomizes ground rock variants and quarter turns on every document
+    // layer as one undo step, preserving tile assignments. A seed is repeatable.
     bool randomizeRocks(std::optional<uint32_t> seed = std::nullopt);
-    // Randomizes each wall's stone/cliff style variants on every document
-    // layer as one undo step, preserving its family and splat assignments.
+    // Randomizes each wall's stone/cliff style variants and quarter turns on
+    // every layer as one undo step, preserving its family and splat assignments.
     bool randomizeWalls(std::optional<uint32_t> seed = std::nullopt);
     // A stroke groups every change made until endStroke() into one undo
     // record, so a drag that paints forty cells undoes in one step. Undo,
@@ -419,6 +423,7 @@ private:
         std::vector<Level::Lectern> lecterns;
         std::vector<Level::GroundSplat> groundSplats;
         std::vector<Level::GroundPaint> groundPaint;
+        std::vector<Level::TileRotation> tileRotations;
         std::vector<Level::Gate> gates;
         std::vector<Level::Rotator> rotators;
         std::vector<Level::LockPlate> lockPlates;
@@ -444,6 +449,7 @@ private:
         int requestedHeight = 8;
         int activeLayer = 0;
         TileType selectedTile = TileType::Wall;
+        uint32_t selectedTileQuarterTurns = 0;
         Tool tool = Tool::Tiles;
         std::string selectedDecorationModel;
         TileDecorations::Brush tileDecorationBrush;
@@ -466,6 +472,7 @@ private:
         std::vector<Level::Lectern> lecterns;
         std::vector<Level::GroundSplat> groundSplats;
         std::vector<Level::GroundPaint> groundPaint;
+        std::vector<Level::TileRotation> tileRotations;
         std::vector<Level::Gate> gates;
         std::vector<Level::Rotator> rotators;
         std::vector<Level::LockPlate> lockPlates;
@@ -508,6 +515,8 @@ private:
     using ScreenIdentityRemaps = std::vector<ScreenIdentityRemap>;
 
     void recordDocumentChange(const DocumentSnapshot& before);
+    bool setCellWithRotation(GridPosition3 position, TileType tile, uint32_t quarterTurns);
+    void setTileRotation(GridPosition3 cell, uint32_t quarterTurns);
     // The document as a level definition, with each device's plate list
     // filled in from its color group and the colors of plates that drive
     // nothing kept as editor-only link colors.

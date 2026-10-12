@@ -134,16 +134,17 @@ const GroundTileCapSurface& groundTileCanonicalTopSurface(
 GroundTileCapSurface groundTileTopSurface(const RenderFrameData::Tile& tile) noexcept
 {
     const TileModule module = tileModuleForMask(tile.groundModuleSideMask);
-    const uint8_t canonicalConcave = rotateTileModuleMask(tile.groundModuleConcaveCorners, 4 - module.quarterTurns);
+    const uint32_t quarterTurns = tile.modelRotationQuarterTurns & 3;
+    const uint8_t canonicalConcave = rotateTileModuleMask(tile.groundModuleConcaveCorners, 4 - quarterTurns);
     GroundTileCapSurface surface = groundTileCanonicalTopSurface(module.shapeIndex, tile.groundRockVariant,
         canonicalConcave, tile.groundModuleSquare);
     for (auto& patch : std::span(surface.patches.data(), surface.count)) {
         for (auto& vertex : patch.vertices) {
-            for (uint32_t turn = 0; turn < module.quarterTurns; ++turn) vertex = { 1 - vertex.y, vertex.x, vertex.z };
+            for (uint32_t turn = 0; turn < quarterTurns; ++turn) vertex = { 1 - vertex.y, vertex.x, vertex.z };
             vertex = { tile.position.x + vertex.x * tile.size.x, tile.position.y + vertex.y * tile.size.y,
                 tile.baseElevation + vertex.z * std::max(tile.height, 0.0f) };
         }
-        for (uint32_t turn = 0; turn < module.quarterTurns; ++turn) patch.normal = { -patch.normal.y, patch.normal.x, patch.normal.z };
+        for (uint32_t turn = 0; turn < quarterTurns; ++turn) patch.normal = { -patch.normal.y, patch.normal.x, patch.normal.z };
         if (tile.size != Vec2 { 1, 1 } || tile.height != 1) {
             patch.normal = normalize(cross(patch.vertices[1] - patch.vertices[0], patch.vertices[2] - patch.vertices[0]));
         }
@@ -154,7 +155,8 @@ GroundTileCapSurface groundTileTopSurface(const RenderFrameData::Tile& tile) noe
 std::size_t groundTileTopPatchCountFor(const RenderFrameData::Tile& tile) noexcept
 {
     const TileModule module = tileModuleForMask(tile.groundModuleSideMask);
-    const uint8_t canonicalConcave = rotateTileModuleMask(tile.groundModuleConcaveCorners, 4 - module.quarterTurns);
+    const uint8_t canonicalConcave = rotateTileModuleMask(tile.groundModuleConcaveCorners,
+        4 - (tile.modelRotationQuarterTurns & 3));
     return groundTileCanonicalTopSurface(module.shapeIndex, tile.groundRockVariant,
         canonicalConcave, tile.groundModuleSquare).count;
 }
@@ -250,7 +252,7 @@ void processGroundTileGeometry(std::span<RenderFrameData::Tile> tiles, const Ass
             !(lower && occupiedIndex(*lower, occupied));
         const auto& regularModels = models[square ? 1 : 0];
         const auto& bottomModels = models[(square ? 1 : 0) + 2];
-        const auto selected = tileModuleForMask(exposed);
+        const auto selected = tileModuleForMask(exposed, tile.authoredRotationQuarterTurns);
         const auto regularModel = regularModels[selected.shapeIndex][variant];
         const auto bottomModel = bottom ? bottomModels[selected.shapeIndex][variant] : std::nullopt;
         if (const auto model = bottomModel ? bottomModel : regularModel) {
@@ -264,7 +266,7 @@ void processGroundTileGeometry(std::span<RenderFrameData::Tile> tiles, const Ass
             // A partial manifest fails open to its complete standalone model.
             // If that source is also custom, retain its square legacy cap.
             tile.model = regularModels[0][variant].value_or(models[0][0][variant].value_or(tile.model));
-            tile.modelRotationQuarterTurns = 0;
+            tile.modelRotationQuarterTurns = tile.authoredRotationQuarterTurns & 3;
             tile.groundModuleSideMask = groundAllSides;
             tile.groundModuleConcaveCorners = 0;
             tile.groundModuleSquare = !tile.model.isCube() &&
