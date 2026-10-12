@@ -1445,17 +1445,32 @@ void LevelEditorDebugUi::drawSelectedDecorationInspector(LevelEditor& editor)
                   3600.0f,
                   "%.1f deg") ||
         changed;
-    changed = ImGui::DragFloat3(
-                  "Scale",
-                  &edited.scale.x,
-                  0.02f,
-                  0.001f,
-                  100.0f,
-                  "%.3f") ||
-        changed;
+    const Vec3 previousScale = edited.scale;
+    const bool scaleChanged = ImGui::DragFloat3(
+        "Scale",
+        &edited.scale.x,
+        0.02f,
+        0.001f,
+        100.0f,
+        "%.3f");
+    const bool meshDecoration = !TileDecorations::isTileDecoration(edited.model);
+    if (scaleChanged && meshDecoration && decorationScaleAxesLocked_) {
+        const float scale = edited.scale.x != previousScale.x ? edited.scale.x
+            : edited.scale.y != previousScale.y ? edited.scale.y
+                                               : edited.scale.z;
+        edited.scale = { scale, scale, scale };
+    }
     edited.scale.x = std::max(edited.scale.x, 0.001f);
     edited.scale.y = std::max(edited.scale.y, 0.001f);
     edited.scale.z = std::max(edited.scale.z, 0.001f);
+    if (meshDecoration) {
+        ImGui::Checkbox("Lock axis", &decorationScaleAxesLocked_);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Changing any scale axis sets X, Y and Z to the same value.");
+        }
+    }
+    changed = scaleChanged || changed;
     if (changed) {
         (void)editor.updateSelectedDecoration(edited);
     }

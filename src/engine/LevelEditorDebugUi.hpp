@@ -129,6 +129,7 @@ private:
     int overworldMoveSlot_[2] { 0, 0 };
     int overworldRestoreSlot_[2] { 0, 0 };
     bool showDebugView_ = false;
+    bool decorationScaleAxesLocked_ = false;
     bool elevatorLevelsEditing_ = false;
     bool elevatorLevelsError_ = false;
     bool renamePopupOpen_ = false;
