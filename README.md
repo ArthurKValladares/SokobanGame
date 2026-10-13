@@ -1202,7 +1202,8 @@ The `dev` and `dev-fast` builds add these to the workspace:
   frame time against an adjustable budget; shows a thread-aware CPU flame
   chart and exclusive/inclusive hot-path table; breaks CPU command recording
   and Vulkan timestamp queries down by render phase; and tracks process
-  memory, VMA allocations, peaks, churn, fragmentation, and per-heap budget
+  memory, CPU frame-arena reservations, VMA allocations, peaks, churn,
+  fragmentation, and per-heap budget
   pressure. Its ranked optimization candidates use those same measurements
   to call out CPU/GPU budget overruns, synchronization, dominant passes,
   submission granularity, cache reuse, jitter, and memory pressure. Capture

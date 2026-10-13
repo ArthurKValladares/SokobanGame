@@ -809,7 +809,9 @@ void writeReports(
     const Suite& suite,
     unsigned workers,
     const sokoban::ProcessMemoryStatistics& initialMemory,
-    const sokoban::ProcessMemoryStatistics& finalMemory)
+    const sokoban::ProcessMemoryStatistics& finalMemory,
+    const sokoban::FrameArenaMemoryStats& initialArenas,
+    const sokoban::FrameArenaMemoryStats& finalArenas)
 {
     std::error_code error;
     std::filesystem::create_directories(
@@ -843,6 +845,16 @@ void writeReports(
                  << finalMemory.residentBytes / (1024.0 * 1024.0)
                  << " MiB\n";
     }
+    markdown << "- Initial CPU arena reserved payload: "
+             << initialArenas.reservedBytes / (1024.0 * 1024.0)
+             << " MiB in " << initialArenas.arenaCount << " arenas\n"
+             << "- Final CPU arena reserved payload: "
+             << finalArenas.reservedBytes / (1024.0 * 1024.0)
+             << " MiB in " << finalArenas.arenaCount << " arenas\n"
+             << "- Peak aggregate CPU arena reserved payload (process lifetime): "
+             << finalArenas.peakReservedBytes / (1024.0 * 1024.0)
+             << " MiB\n"
+             << "\nArena reservations exclude heap overhead and are included in process memory.\n";
     markdown << "\nHardware timings are diagnostic baselines, not correctness "
                 "thresholds. Compare runs on the same machine and power state.\n\n"
              << "## Results\n\n"
@@ -876,6 +888,13 @@ void writeReports(
          << (suite.settings().full ? "full" : "quick")
          << "\",\n  \"samples\": " << suite.settings().samples
          << ",\n  \"workerCount\": " << workers
+         << ",\n  \"cpuFrameArenas\": {\n    \"initial\": {\"arenaCount\": "
+         << initialArenas.arenaCount << ", \"reservedBytes\": " << initialArenas.reservedBytes
+         << ", \"peakReservedBytes\": " << initialArenas.peakReservedBytes
+         << "},\n    \"final\": {\"arenaCount\": " << finalArenas.arenaCount
+         << ", \"reservedBytes\": " << finalArenas.reservedBytes
+         << ", \"peakReservedBytes\": " << finalArenas.peakReservedBytes
+         << "},\n    \"excludesHeapOverhead\": true, \"includedInProcessMemory\": true\n  }"
          << ",\n  \"benchmarks\": [\n";
     for (std::size_t index = 0; index < suite.results().size(); ++index) {
         const BenchmarkResult& result = suite.results()[index];
@@ -926,6 +945,8 @@ int main(int argc, char** argv)
         const Settings settings = parseSettings(argc, argv);
         const sokoban::ProcessMemoryStatistics initialMemory =
             sokoban::processMemoryStatistics();
+        const sokoban::FrameArenaMemoryStats initialArenas =
+            sokoban::frameArenaMemoryStats();
         const unsigned hardware = std::max(1U, std::thread::hardware_concurrency());
         const unsigned workerCount = std::min(4U, hardware > 1 ? hardware - 1 : 1U);
         sokoban::TaskSystem tasks(workerCount);
@@ -945,8 +966,11 @@ int main(int argc, char** argv)
         runEffectBenchmarks(suite, tasks);
         const sokoban::ProcessMemoryStatistics finalMemory =
             sokoban::processMemoryStatistics();
+        const sokoban::FrameArenaMemoryStats finalArenas =
+            sokoban::frameArenaMemoryStats();
         writeReports(
-            suite, tasks.workerCount(), initialMemory, finalMemory);
+            suite, tasks.workerCount(), initialMemory, finalMemory,
+            initialArenas, finalArenas);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Performance suite failed: " << error.what() << '\n';

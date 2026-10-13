@@ -13,6 +13,9 @@ artist-authored models and newer mechanics have since expanded the inventory.
 Original vendor meshes, procedural inputs and editable Blender sources remain
 separate from generated PBR outputs.
 
+Keep canonical `.blend` sources tracked. Blender's numbered save backups are
+local recovery files and are ignored; committed revisions remain in Git history.
+
 ## Ownership and current coverage
 
 | Model family | Registered models | Authoring owner |
@@ -94,6 +97,12 @@ with metallic factor 0 and no normal, ORM, occlusion or emissive maps. Its white
 draw tint, preserved aspect ratio and 0.93
 tile scale keep the painted boulder inside one cell. The PBR generator retains
 this asset and its editable Blender source.
+
+Continue boulder art edits from that Blender source. `tools/make_chunky_boulder.py`
+creates the initial reference shape and replaces its source and export when run.
+Run it as a file inside Blender when intentionally recreating the asset; its
+output paths resolve from the script's checkout, independently of the working
+directory.
 
 Cavity AO is deliberately weak and applies only to wood, leather and stone. It
 is derived surface detail, not a geometry AO bake, and affects ambient lighting.

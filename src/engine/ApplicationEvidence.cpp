@@ -457,6 +457,11 @@ void Application::finishEvidenceCapture()
            << " MiB (peak "
            << static_cast<double>(evidenceStats_.processPeakResidentBytes) / (1024.0 * 1024.0)
            << " MiB)\n";
+    report << "- CPU arena reserved payload: "
+           << static_cast<double>(evidenceStats_.frameArenaReservedBytes) / (1024.0 * 1024.0)
+           << " MiB in " << evidenceStats_.frameArenaCount << " arenas; process-lifetime peak aggregate "
+           << static_cast<double>(evidenceStats_.frameArenaPeakReservedBytes) / (1024.0 * 1024.0)
+           << " MiB (excludes heap overhead; included in process memory)\n";
     report << "- GPU allocation memory: "
            << static_cast<double>(evidenceStats_.gpuMemoryAllocationBytes) / (1024.0 * 1024.0)
            << " MiB in " << evidenceStats_.gpuMemoryAllocationCount

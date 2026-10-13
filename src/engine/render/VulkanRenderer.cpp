@@ -1,5 +1,6 @@
 #include "engine/render/VulkanRenderer.hpp"
 
+#include "engine/FrameArena.hpp"
 #include "engine/Log.hpp"
 #include "engine/ProcessMemory.hpp"
 #include "engine/Profiler.hpp"
@@ -1657,6 +1658,10 @@ RenderStats VulkanRenderer::renderStats() const
     stats.processResidentBytes = process.residentBytes;
     stats.processPeakResidentBytes = process.peakResidentBytes;
     stats.processPrivateBytes = process.privateBytes;
+    const FrameArenaMemoryStats arenas = frameArenaMemoryStats();
+    stats.frameArenaCount = static_cast<uint64_t>(arenas.arenaCount);
+    stats.frameArenaReservedBytes = static_cast<uint64_t>(arenas.reservedBytes);
+    stats.frameArenaPeakReservedBytes = static_cast<uint64_t>(arenas.peakReservedBytes);
     sceneRecorder_.populateTimingStats(stats);
     return stats;
 }

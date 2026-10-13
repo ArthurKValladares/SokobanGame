@@ -1,6 +1,7 @@
 """Author the reference-inspired boulder in Blender, with a baked game material.
 
-Run inside Blender's Python context. Only this asset's scene is replaced.
+Run inside Blender's Python context using this file's path. Output paths are
+relative to this checkout. Only this asset's scene is replaced.
 The existing open project is not saved or altered on disk.
 """
 import bpy
@@ -10,7 +11,7 @@ import json
 from pathlib import Path
 from mathutils import Vector
 
-ROOT = Path(r'C:\Users\arthu\Documents\Projects\Sokoban Game')
+ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'assets/custom/source/chunky_boulder.blend'
 OUT = ROOT / 'assets/custom/models/chunky_boulder.glb'
 ART = ROOT / 'assets/custom/source/chunky_boulder'

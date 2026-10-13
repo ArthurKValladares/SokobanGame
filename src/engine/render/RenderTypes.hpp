@@ -931,6 +931,11 @@ struct RenderStats {
     uint64_t processResidentBytes = 0;
     uint64_t processPeakResidentBytes = 0;
     uint64_t processPrivateBytes = 0;
+    // CPU arena payload reservations, included in process memory and excluding
+    // allocator overhead. Peak is peak aggregate capacity, not peak bytes used.
+    uint64_t frameArenaCount = 0;
+    uint64_t frameArenaReservedBytes = 0;
+    uint64_t frameArenaPeakReservedBytes = 0;
     uint32_t gpuMemoryBlockCount = 0;
     uint32_t gpuMemoryAllocationCount = 0;
     uint32_t gpuImageAllocationCount = 0;

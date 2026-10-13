@@ -2,7 +2,33 @@
 
 #include "engine/Log.hpp"
 
+#include <algorithm>
+#include <mutex>
+
 namespace sokoban {
+namespace {
+
+struct FrameArenaMemoryLedger {
+    std::mutex mutex;
+    FrameArenaMemoryStats stats;
+};
+
+FrameArenaMemoryLedger& memoryLedger()
+{
+    // Initialized before the first arena finishes construction, so static
+    // owners such as the CPU profiler destroy their arenas before the ledger.
+    static FrameArenaMemoryLedger ledger;
+    return ledger;
+}
+
+} // namespace
+
+FrameArenaMemoryStats frameArenaMemoryStats() noexcept
+{
+    auto& ledger = memoryLedger();
+    const std::scoped_lock lock(ledger.mutex);
+    return ledger.stats;
+}
 
 FrameArena::FrameArena(const char* name, std::size_t capacityBytes)
     : name_(name)
@@ -11,6 +37,20 @@ FrameArena::FrameArena(const char* name, std::size_t capacityBytes)
     , end_(storage_.get() + capacityBytes)
     , capacityBytes_(capacityBytes)
 {
+    auto& ledger = memoryLedger();
+    const std::scoped_lock lock(ledger.mutex);
+    ++ledger.stats.arenaCount;
+    ledger.stats.reservedBytes += capacityBytes_;
+    ledger.stats.peakReservedBytes = std::max(
+        ledger.stats.peakReservedBytes, ledger.stats.reservedBytes);
+}
+
+FrameArena::~FrameArena()
+{
+    auto& ledger = memoryLedger();
+    const std::scoped_lock lock(ledger.mutex);
+    --ledger.stats.arenaCount;
+    ledger.stats.reservedBytes -= capacityBytes_;
 }
 
 void* FrameArena::allocate(std::size_t bytes, std::size_t alignment) noexcept
@@ -32,7 +72,7 @@ void* FrameArena::allocate(std::size_t bytes, std::size_t alignment) noexcept
             reported_ = true;
             log::warning(log::Category::Rendering)
                 << "Frame arena '" << name_ << "' is out of space: needed "
-                << bytes << " bytes with " << (available - padding)
+                << bytes << " bytes with " << (padding > available ? 0 : available - padding)
                 << " usable of " << capacityBytes_
                 << ". Raise its capacity.";
         }

@@ -7,6 +7,18 @@
 
 namespace sokoban {
 
+struct FrameArenaMemoryStats {
+    std::size_t arenaCount = 0;
+    std::size_t reservedBytes = 0;
+    std::size_t peakReservedBytes = 0;
+};
+
+// Requested CPU arena payload storage, already included in process memory.
+// Excludes allocator overhead. The peak is the largest aggregate reservation
+// held by concurrently live arenas, not a sum of individual usage peaks.
+// Construction/destruction update the ledger; allocation/reset do not.
+[[nodiscard]] FrameArenaMemoryStats frameArenaMemoryStats() noexcept;
+
 // Bytes an arena needs to hold `count` objects of type T, including the worst
 // case padding spent aligning the head in front of them.
 template <class T>
@@ -37,6 +49,7 @@ public:
     // made at startup: a frame-sized arena does not belong on a Windows
     // thread's 1 MB stack, and reset() never allocates.
     FrameArena(const char* name, std::size_t capacityBytes);
+    ~FrameArena();
 
     FrameArena(const FrameArena&) = delete;
     FrameArena& operator=(const FrameArena&) = delete;

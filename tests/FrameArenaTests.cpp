@@ -3,18 +3,159 @@
 #include "engine/ArenaArray.hpp"
 #include "engine/FrameArena.hpp"
 #include "engine/FrameArray.hpp"
+#include "engine/Log.hpp"
 #include "engine/render/RenderTypes.hpp"
 
+#include <algorithm>
+#include <barrier>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
+#include <string>
+#include <thread>
 
 namespace {
 
 [[nodiscard]] bool isAlignedTo(const void* pointer, std::size_t alignment)
 {
     return reinterpret_cast<std::uintptr_t>(pointer) % alignment == 0;
+}
+
+void testArenaMemoryTracksOwnersRatherThanFrameUsage()
+{
+    TEST("arenaMemoryTracksOwnersRatherThanFrameUsage");
+    using namespace sokoban;
+    const auto baseline = frameArenaMemoryStats();
+    std::size_t observedPeak = baseline.peakReservedBytes;
+    FrameArray<int> escaped;
+    {
+        FrameArena first("ledger first", 257);
+        auto stats = frameArenaMemoryStats();
+        CHECK(stats.arenaCount == baseline.arenaCount + 1);
+        CHECK(stats.reservedBytes == baseline.reservedBytes + 257);
+        CHECK(stats.peakReservedBytes == std::max(
+            baseline.peakReservedBytes, baseline.reservedBytes + 257));
+        {
+            FrameArena second("ledger second", 1024);
+            stats = frameArenaMemoryStats();
+            CHECK(stats.arenaCount == baseline.arenaCount + 2);
+            CHECK(stats.reservedBytes == baseline.reservedBytes + 1281);
+            CHECK(stats.peakReservedBytes == std::max(
+                baseline.peakReservedBytes, baseline.reservedBytes + 1281));
+            observedPeak = stats.peakReservedBytes;
+            CHECK(first.allocate(64, 1) != nullptr);
+            FrameArray<int> values(first, 4);
+            CHECK(values.push_back(7));
+            auto movedView = std::move(values);
+            escaped = movedView.clone();
+            CHECK(escaped.front() == 7);
+            first.reset();
+            CHECK(first.bytesUsed() == 0);
+            CHECK(first.highWaterBytes() >= 64 + 4 * sizeof(int));
+            CHECK(second.allocate(2048, 1) == nullptr);
+            CHECK(second.exhausted());
+            CHECK(second.bytesUsed() == 0);
+            second.reset();
+            CHECK(!second.exhausted());
+            stats = frameArenaMemoryStats();
+            CHECK(stats.arenaCount == baseline.arenaCount + 2);
+            CHECK(stats.reservedBytes == baseline.reservedBytes + 1281);
+            CHECK(stats.peakReservedBytes == observedPeak);
+        }
+        stats = frameArenaMemoryStats();
+        CHECK(stats.arenaCount == baseline.arenaCount + 1);
+        CHECK(stats.reservedBytes == baseline.reservedBytes + 257);
+        CHECK(stats.peakReservedBytes == observedPeak);
+    }
+    const auto released = frameArenaMemoryStats();
+    CHECK(released.arenaCount == baseline.arenaCount);
+    CHECK(released.reservedBytes == baseline.reservedBytes);
+    CHECK(released.peakReservedBytes == observedPeak);
+    CHECK(escaped.front() == 7); // The owning clone is not another arena.
+
+    checkThrows([] { FrameArena impossible("failed ledger constructor", SIZE_MAX); },
+        "failed arena construction must not acquire a reservation");
+    const auto failed = frameArenaMemoryStats();
+    CHECK(failed.arenaCount == released.arenaCount);
+    CHECK(failed.reservedBytes == released.reservedBytes);
+    CHECK(failed.peakReservedBytes == released.peakReservedBytes);
+}
+
+void testConcurrentArenaOwnersPublishCoherentMemorySnapshots()
+{
+    TEST("concurrentArenaOwnersPublishCoherentMemorySnapshots");
+    using namespace sokoban;
+    const auto baseline = frameArenaMemoryStats();
+    constexpr std::size_t ownerBytes = 512;
+    constexpr int rounds = 16;
+    std::barrier phases(3);
+    const auto owner = [&] {
+        for (int round = 0; round < rounds; ++round) {
+            phases.arrive_and_wait();
+            {
+                FrameArena arena("concurrent ledger owner", ownerBytes);
+                phases.arrive_and_wait();
+                phases.arrive_and_wait();
+            }
+            phases.arrive_and_wait();
+        }
+    };
+    std::thread first(owner);
+    std::thread second(owner);
+    const auto checkCoherent = [&] {
+        const auto stats = frameArenaMemoryStats();
+        CHECK(stats.arenaCount >= baseline.arenaCount);
+        CHECK(stats.arenaCount <= baseline.arenaCount + 2);
+        CHECK(stats.reservedBytes >= baseline.reservedBytes);
+        CHECK(stats.reservedBytes - baseline.reservedBytes ==
+            (stats.arenaCount - baseline.arenaCount) * ownerBytes);
+        CHECK(stats.peakReservedBytes >= stats.reservedBytes);
+    };
+    for (int round = 0; round < rounds; ++round) {
+        phases.arrive_and_wait();
+        checkCoherent(); // Observe construction without relying on scheduling or delays.
+        phases.arrive_and_wait();
+        const auto overlapping = frameArenaMemoryStats();
+        CHECK(overlapping.arenaCount == baseline.arenaCount + 2);
+        CHECK(overlapping.reservedBytes == baseline.reservedBytes + 2 * ownerBytes);
+        CHECK(overlapping.peakReservedBytes == std::max(
+            baseline.peakReservedBytes, baseline.reservedBytes + 2 * ownerBytes));
+        phases.arrive_and_wait();
+        checkCoherent(); // Destruction can be in progress, but the pair must agree.
+        phases.arrive_and_wait();
+        const auto released = frameArenaMemoryStats();
+        CHECK(released.arenaCount == baseline.arenaCount);
+        CHECK(released.reservedBytes == baseline.reservedBytes);
+    }
+    first.join();
+    second.join();
+}
+
+void testAlignmentExhaustionWarningReportsZeroUsableBytes()
+{
+    TEST("alignmentExhaustionWarningReportsZeroUsableBytes");
+    using namespace sokoban;
+    log::reset();
+    log::configure({ .stderrEnabled = false });
+    log::setHistoryEnabled(true);
+    FrameArena arena("padding warning fixture", 1);
+    CHECK(arena.allocate(1, 1) != nullptr);
+    CHECK(arena.allocate(1, 8) == nullptr);
+    CHECK(arena.bytesUsed() == 1);
+    CHECK(arena.bytesRemaining() == 0);
+    CHECK(arena.exhausted());
+    const auto history = log::historySnapshot();
+    const auto warning = std::ranges::find_if(history.entries, [](const auto& entry) {
+        return entry.message.find("Frame arena 'padding warning fixture'") != std::string::npos;
+    });
+    CHECK(warning != history.entries.end());
+    if (warning != history.entries.end()) {
+        CHECK(warning->level == log::Level::Warning);
+        CHECK(warning->category == log::Category::Rendering);
+        CHECK(warning->message.find("0 usable of 1") != std::string::npos);
+    }
+    log::reset();
 }
 
 void testBumpsAndReports()
@@ -339,6 +480,9 @@ void testRenderFrameTakesAllCollectionStorageInOneArena()
 
 int main()
 {
+    testArenaMemoryTracksOwnersRatherThanFrameUsage();
+    testConcurrentArenaOwnersPublishCoherentMemorySnapshots();
+    testAlignmentExhaustionWarningReportsZeroUsableBytes();
     testBumpsAndReports();
     testAlignmentPadding();
     testResetReturnsTheWholeArena();

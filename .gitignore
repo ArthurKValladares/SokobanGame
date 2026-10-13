@@ -8,6 +8,9 @@ imgui.ini
 __pycache__/
 *.pyc
 
+# Blender's numbered local save backups; keep canonical .blend sources tracked.
+*.blend[0-9]*
+
 # Generated diagnostics and local validation outputs.
 /Testing/
 /test-output/

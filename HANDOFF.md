@@ -907,6 +907,15 @@ and the required real-device checks are recorded.
 
 ## Renderer contracts
 
+- `frameArenaMemoryStats()` reports all live CPU `FrameArena` reservations and
+  their peak combined capacity. Accounting changes only on construction and
+  destruction; bump allocations, reset and borrowed array views do not change
+  reserved bytes. This payload storage is already included in process memory
+  and excludes allocator overhead. Keep it separate from resident memory and
+  from each arena's used-byte high-water mark.
+- Legacy ground glTF/bin sources and PBR GLBs remain inputs to current ground
+  validation, geometry/GPU fixtures and optional PBR authoring. Their absence
+  from the active runtime manifest does not make them deletion candidates.
 - `AnimationController::updateInstances` owns playback per nonzero
   `animationInstanceId` and emits a pose for every valid instance on every
   frame, including paused clips and previews. Frame-indexed GPU palettes need

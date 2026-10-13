@@ -605,6 +605,16 @@ void ProfilerDebugUi::draw(const VulkanRenderer& renderer)
             ImGui::TextDisabled("Process memory counters unavailable.");
         }
         ImGui::Text(
+            "CPU arenas %.1f MiB reserved payload in %llu arenas (peak %.1f MiB)",
+            toMiB(stats.frameArenaReservedBytes),
+            static_cast<unsigned long long>(stats.frameArenaCount),
+            toMiB(stats.frameArenaPeakReservedBytes));
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Requested arena capacity, excluding heap overhead; included in process memory.\n"
+                "Peak is the process-lifetime maximum simultaneous reservation.");
+        }
+        ImGui::Text(
             "GPU allocations %.1f MiB (peak %.1f) in %u allocations / %u blocks",
             toMiB(stats.gpuMemoryAllocationBytes),
             toMiB(stats.gpuMemoryPeakAllocationBytes),
