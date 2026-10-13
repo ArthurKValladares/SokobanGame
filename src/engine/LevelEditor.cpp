@@ -15,6 +15,7 @@
 #include <cmath>
 #include <exception>
 #include <fstream>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <system_error>
@@ -22,6 +23,12 @@
 
 namespace sokoban {
 namespace {
+
+std::size_t addHistoryBytes(std::size_t left, std::size_t right)
+{
+    const auto maximum = std::numeric_limits<std::size_t>::max();
+    return right > maximum - left ? maximum : left + right;
+}
 
 void remapGroundTextures(std::vector<Level::GroundSplat>& splats,
     std::span<const LevelLocationAssociationRemap> remaps)
@@ -634,8 +641,8 @@ void LevelEditor::initialize(
     }
     document_.playingDraft = false;
     document_.editingDocument = false;
-    editHistory_.clear();
-    redoHistory_.clear();
+    clearHistory(editHistory_);
+    clearHistory(redoHistory_);
     strokeBefore_.reset();
     strokeChanges_ = 0;
     drafts_.clear();
@@ -739,13 +746,13 @@ void LevelEditor::setWaterLayer(std::optional<uint32_t> layer)
         return;
     }
 
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     document_.waterLayer = layer;
     document_.dirty = true;
     document_.status = layer
         ? "Water enabled on layer " + std::to_string(*layer + 1) + "."
         : "Water disabled.";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
 }
 
 void LevelEditor::setCameraAngles(std::optional<CameraAngles> angles)
@@ -758,13 +765,13 @@ void LevelEditor::setCameraAngles(std::optional<CameraAngles> angles)
     if (document_.cameraAngles == angles) {
         return;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     document_.cameraAngles = angles;
     document_.dirty = true;
     document_.status = angles
         ? "Screen camera updated."
         : "Screen camera reset to default.";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
 }
 
 void LevelEditor::setCharacter(CharacterType character)
@@ -773,7 +780,7 @@ void LevelEditor::setCharacter(CharacterType character)
         document_.status = "Overworld hero placement is fixed to the Lorekeeper.";
         return;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     const TileType replacementType = character == CharacterType::Knight
         ? TileType::Knight
         : character == CharacterType::Druid
@@ -804,7 +811,7 @@ void LevelEditor::setCharacter(CharacterType character)
     document_.dirty = true;
     document_.status = "All placed heroes changed to " +
         std::string(characterTypeName(character)) + ".";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
 }
 
 void LevelEditor::setLayerLocked(bool locked)
@@ -1122,7 +1129,7 @@ bool LevelEditor::placeSelector(GridPosition3 cell)
     for (const Level::ScreenSelector& selector : document_.selectors) {
         nextId = std::max(nextId, selector.id + 1);
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     document_.selectors.push_back({ .id = nextId, .cell = cell });
     std::ranges::sort(
         document_.selectors, {}, &Level::ScreenSelector::id);
@@ -1134,7 +1141,7 @@ bool LevelEditor::placeSelector(GridPosition3 cell)
     document_.dirty = true;
     document_.status =
         "Placed Selector " + std::to_string(nextId) + ".";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -1181,7 +1188,7 @@ bool LevelEditor::updateSelectedSelectorTarget(
     if (selector.target == target) {
         return true;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     selector.target = target;
     document_.dirty = true;
     document_.status = target
@@ -1189,7 +1196,7 @@ bool LevelEditor::updateSelectedSelectorTarget(
             " to level " + std::to_string(target->level) +
             " screen " + std::to_string(target->screen) + "."
         : "Unassigned Selector " + std::to_string(selector.id) + ".";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -1199,7 +1206,7 @@ bool LevelEditor::deleteSelectedSelector()
         *document_.selectedSelector >= document_.selectors.size()) {
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     const uint32_t id =
         document_.selectors[*document_.selectedSelector].id;
     document_.selectors.erase(
@@ -1214,7 +1221,7 @@ bool LevelEditor::deleteSelectedSelector()
     }
     document_.dirty = true;
     document_.status = "Deleted Selector " + std::to_string(id) + ".";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -1243,13 +1250,12 @@ void LevelEditor::cacheActiveDraft()
         drafts_.erase(key);
         return;
     }
-    drafts_.insert_or_assign(
-        key,
-        DraftState {
-            .document = document_,
-            .editHistory = editHistory_,
-            .redoHistory = redoHistory_,
-        });
+    // Complete the potentially throwing document copy before transferring
+    // its histories. The active screen owns them again if opening fails.
+    DraftState& draft = drafts_.try_emplace(key).first->second;
+    draft.document = document_;
+    draft.editHistory = std::move(editHistory_);
+    draft.redoHistory = std::move(redoHistory_);
 }
 
 bool LevelEditor::setBrowserRoot(const std::filesystem::path& path)
@@ -1281,7 +1287,7 @@ bool LevelEditor::randomizeRocks(std::optional<uint32_t> seed)
 {
     // A toolbar command must not become part of a still-open paint stroke.
     endStroke();
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     std::mt19937 random(seed ? *seed : std::random_device {}());
     std::uniform_int_distribution<uint32_t> choose(
         0, static_cast<uint32_t>(groundRockVariantCount - 1));
@@ -1318,14 +1324,14 @@ bool LevelEditor::randomizeRocks(std::optional<uint32_t> seed)
     document_.dirty = true;
     document_.status = "Randomized " + std::to_string(rocks) +
         " ground rocks (" + std::to_string(changed) + " changed).";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
 bool LevelEditor::randomizeWalls(std::optional<uint32_t> seed)
 {
     endStroke();
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     std::mt19937 random(seed ? *seed : std::random_device {}());
     std::uniform_int_distribution<uint32_t> choose(
         0, static_cast<uint32_t>(wallStoneVariantCount - 1));
@@ -1367,7 +1373,7 @@ bool LevelEditor::randomizeWalls(std::optional<uint32_t> seed)
     document_.dirty = true;
     document_.status = "Randomized " + std::to_string(walls) +
         " walls (" + std::to_string(changed) + " changed).";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -1386,7 +1392,7 @@ bool LevelEditor::endStroke()
     if (!strokeBefore_) {
         return false;
     }
-    const DocumentSnapshot before = std::move(*strokeBefore_);
+    DocumentSnapshot before = std::move(*strokeBefore_);
     strokeBefore_.reset();
     const std::size_t changes = std::exchange(strokeChanges_, 0);
     if (changes == 0) {
@@ -1396,7 +1402,7 @@ bool LevelEditor::endStroke()
         document_.status = "Edited " + std::to_string(changes) +
             " cells in one stroke.";
     }
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -1516,13 +1522,13 @@ bool LevelEditor::moveObject(GridPosition3 destination)
             return false;
         }
 
-        const DocumentSnapshot before = captureDocumentSnapshot();
+        auto before = captureBeforeDocumentChange();
         selector->cell = destination;
         document_.selectedSelector = static_cast<std::size_t>(
             std::distance(document_.selectors.begin(), selector));
         document_.dirty = true;
         document_.status = "Moved object.";
-        recordDocumentChange(before);
+        recordDocumentChange(std::move(before));
         return true;
     }
 
@@ -1542,7 +1548,7 @@ bool LevelEditor::moveObject(GridPosition3 destination)
         return false;
     }
 
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    DocumentSnapshot before = captureDocumentSnapshot();
     // The erase and the placement are one command: record neither
     // separately, and leave the history untouched if the placement fails.
     historySuppressed_ = true;
@@ -1659,7 +1665,7 @@ bool LevelEditor::moveObject(GridPosition3 destination)
     }
 
     document_.status = "Moved object.";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -1934,7 +1940,7 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
         }
     }
 
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     if (expandsDocument) {
         for (size_t layerIndex = 0;
              layerIndex < document_.layers.size();
@@ -2175,7 +2181,7 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
                     : "Painted layer " +
                         std::to_string(translatedPosition.z + 1) + ".");
     }
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -2199,12 +2205,12 @@ bool LevelEditor::placeDecoration(GridPosition3 surfaceCell)
     if (!decoration) {
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     document_.decorations.push_back(*decoration);
     document_.dirty = true;
     document_.status = "Placed decoration " +
         decoration->model + ".";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     if (document_.tool == Tool::TileDecorations &&
         document_.tileDecorationBrush.randomVariation) {
         // Each of the other variants is equally likely. Never immediately
@@ -2276,11 +2282,11 @@ bool LevelEditor::updateSelectedDecoration(
     if (current == decoration) {
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     current = decoration;
     document_.dirty = true;
     document_.status = "Updated decoration transform.";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -2328,14 +2334,14 @@ bool LevelEditor::endSelectedDecorationTransform(bool commit)
     if (!decorationTransformBefore_) {
         return false;
     }
-    const DocumentSnapshot before = *decorationTransformBefore_;
+    DocumentSnapshot before = std::move(*decorationTransformBefore_);
     decorationTransformBefore_.reset();
     if (!commit) {
         applyDocumentSnapshot(before);
         document_.status = "Cancelled decoration transform.";
         return true;
     }
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     document_.status = "Updated decoration transform.";
     return true;
 }
@@ -2388,7 +2394,7 @@ bool LevelEditor::duplicateSelectedDecoration()
         document_.status = "Decoration is outside the locked layer.";
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     Level::Decoration duplicate =
         document_.decorations[*document_.selectedDecoration];
     duplicate.position.x += 0.25f;
@@ -2397,7 +2403,7 @@ bool LevelEditor::duplicateSelectedDecoration()
     document_.selectedDecoration = document_.decorations.size() - 1;
     document_.dirty = true;
     document_.status = "Duplicated decoration.";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -2411,7 +2417,7 @@ bool LevelEditor::deleteSelectedDecoration()
         document_.status = "Decoration is outside the locked layer.";
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     document_.decorations.erase(
         document_.decorations.begin() +
         static_cast<std::ptrdiff_t>(*document_.selectedDecoration));
@@ -2424,7 +2430,7 @@ bool LevelEditor::deleteSelectedDecoration()
     }
     document_.dirty = true;
     document_.status = "Deleted decoration.";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -2436,10 +2442,10 @@ bool LevelEditor::tryUndoEdit()
         return false;
     }
 
-    const EditActionRecord inverse = invertEditActionRecord(editHistory_.back());
-    applyDocumentSnapshot(inverse.after);
+    applyDocumentSnapshot(editHistory_.back().before);
     redoHistory_.push_back(std::move(editHistory_.back()));
     editHistory_.pop_back();
+    if (editHistory_.empty()) clearHistory(editHistory_);
     document_.status = "Undid editor change.";
     return true;
 }
@@ -2455,6 +2461,7 @@ bool LevelEditor::tryRedoEdit()
     applyDocumentSnapshot(redoHistory_.back().after);
     editHistory_.push_back(std::move(redoHistory_.back()));
     redoHistory_.pop_back();
+    if (redoHistory_.empty()) clearHistory(redoHistory_);
     document_.status = "Redid editor change.";
     return true;
 }
@@ -2467,6 +2474,75 @@ bool LevelEditor::canUndo() const
 bool LevelEditor::canRedo() const
 {
     return !redoHistory_.empty() && strokeChanges_ == 0;
+}
+
+void LevelEditor::setHistoryLimits(HistoryLimits limits)
+{
+    historyLimits_ = limits;
+    trimHistory();
+}
+
+LevelEditor::HistoryLimits LevelEditor::historyLimits() const
+{
+    return historyLimits_;
+}
+
+LevelEditor::HistoryStats LevelEditor::historyStats() const
+{
+    HistoryStats stats;
+    const auto add = [&](const EditHistory& undo, const EditHistory& redo) {
+        stats.undoRecords += undo.size();
+        stats.redoRecords += redo.size();
+        for (const auto* history : { &undo, &redo }) {
+            for (const EditActionRecord& record : *history) {
+                stats.retainedBytes = addHistoryBytes(stats.retainedBytes, record.retainedBytes);
+            }
+        }
+    };
+    add(editHistory_, redoHistory_);
+    for (const auto& [key, draft] : drafts_) {
+        add(draft.editHistory, draft.redoHistory);
+    }
+    return stats;
+}
+
+void LevelEditor::clearHistory(EditHistory& history)
+{
+    // Some deque implementations keep all previously allocated blocks after
+    // clear/pop. Empty inactive histories should not retain those buffers.
+    EditHistory empty;
+    history.swap(empty);
+}
+
+void LevelEditor::trimHistory()
+{
+    for (;;) {
+        const HistoryStats stats = historyStats();
+        if (stats.undoRecords + stats.redoRecords <= historyLimits_.maxRecords &&
+            stats.retainedBytes <= historyLimits_.maxBytes) {
+            return;
+        }
+        EditHistory* oldest = nullptr;
+        const auto consider = [&](EditHistory& history) {
+            if (!history.empty() &&
+                (!oldest || history.front().sequence < oldest->front().sequence)) {
+                oldest = &history;
+            }
+        };
+        consider(editHistory_);
+        consider(redoHistory_);
+        for (auto& [key, draft] : drafts_) {
+            consider(draft.editHistory);
+            consider(draft.redoHistory);
+        }
+        if (!oldest) {
+            return;
+        }
+        // Undo's oldest past and redo's farthest future are the boundaries
+        // that can be dropped without skipping an intermediate document.
+        oldest->pop_front();
+        if (oldest->empty()) clearHistory(*oldest);
+    }
 }
 
 uint32_t LevelEditor::documentWidth() const
@@ -2609,11 +2685,11 @@ bool LevelEditor::setLecternText(std::size_t index, std::string text)
     if (index >= document_.lecterns.size() || document_.lecterns[index].text == text) {
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     document_.lecterns[index].text = std::move(text);
     document_.dirty = true;
     document_.status = "Updated lectern text.";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -2905,7 +2981,7 @@ bool LevelEditor::setLinkColor(GridPosition3 cell, Vec3 color)
     if (current && sameColor(*current, color)) {
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     if (unlinkedPortal) {
         document_.portals.push_back({ .cell = cell, .color = color });
         std::ranges::sort(document_.portals, {}, [](const auto& portal) {
@@ -2951,7 +3027,7 @@ bool LevelEditor::setLinkColor(GridPosition3 cell, Vec3 color)
         (linkedPlates == 1 ? "" : "s") + " and " +
         std::to_string(linkedObjects) + " movable object" +
         (linkedObjects == 1 ? "" : "s") + ".";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -3000,7 +3076,7 @@ bool LevelEditor::recolorLinkGroup(Vec3 from, Vec3 to)
     if (sameColor(from, to)) {
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     bool changed = false;
     const auto recolor = [&](auto& records) {
         for (auto& record : records) {
@@ -3031,7 +3107,7 @@ bool LevelEditor::recolorLinkGroup(Vec3 from, Vec3 to)
     document_.status = merges
         ? "Merged two link groups."
         : "Recolored a link group.";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -3071,13 +3147,13 @@ bool LevelEditor::setElevatorLevels(std::size_t index, std::vector<int> levels)
     if (levels == current.levels) {
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     document_.elevators[index].levels = std::move(levels);
     document_.dirty = true;
     document_.status = document_.elevators[index].levels.size() < 2
         ? "Updated elevator; it will not move until it has a second stop."
         : "Updated elevator stops.";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -3087,13 +3163,13 @@ bool LevelEditor::setGateStartOpen(std::size_t index, bool startOpen)
         document_.gates[index].startOpen == startOpen) {
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     document_.gates[index].startOpen = startOpen;
     document_.dirty = true;
     document_.status = startOpen
         ? "Gate now starts open and closes when its plates are pressed."
         : "Gate now starts closed and opens when its plates are pressed.";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -3103,13 +3179,13 @@ bool LevelEditor::setLockPlateStartEnabled(std::size_t index, bool startEnabled)
         document_.lockPlates[index].startEnabled == startEnabled) {
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     document_.lockPlates[index].startEnabled = startEnabled;
     document_.dirty = true;
     document_.status = startEnabled
         ? "Lock Plate starts enabled and releases units when its plates are pressed."
         : "Lock Plate starts disabled and locks units when its plates are pressed.";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -3131,11 +3207,11 @@ bool LevelEditor::setMinecartInitialDirection(
     if (minecart.initialDirection == direction) {
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     minecart.initialDirection = direction;
     document_.dirty = true;
     document_.status = "Updated minecart route direction.";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -3331,7 +3407,7 @@ std::optional<OverworldScreenId> LevelEditor::overworldScreenIdForPath(
 void LevelEditor::newDocument(int width, int height, bool recordHistory)
 {
     setGroundAssignmentPainting(false);
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = recordHistory ? captureBeforeDocumentChange() : std::nullopt;
     pendingMove_.reset();
     width = std::max(width, 1);
     height = std::max(height, 1);
@@ -3376,7 +3452,7 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     document_.editingDocument = true;
     document_.status = "Created new level.";
     if (recordHistory) {
-        recordDocumentChange(before);
+        recordDocumentChange(std::move(before));
     }
 }
 
@@ -3389,7 +3465,7 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
             "Overworld screen dimensions are fixed by layout.json.";
         return;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = recordHistory ? captureBeforeDocumentChange() : std::nullopt;
     width = std::max(width, 1);
     height = std::max(height, 1);
 
@@ -3449,7 +3525,7 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
     document_.dirty = true;
     document_.status = "Resized level.";
     if (recordHistory) {
-        recordDocumentChange(before);
+        recordDocumentChange(std::move(before));
     }
 }
 
@@ -3465,7 +3541,7 @@ void LevelEditor::addLayerBelow()
 
 void LevelEditor::insertLayerAt(int insertionIndex, const char* status)
 {
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     const int width = std::max(document_.requestedWidth, 1);
     const int height = std::max(document_.requestedHeight, 1);
     insertionIndex = std::clamp(
@@ -3528,7 +3604,7 @@ void LevelEditor::insertLayerAt(int insertionIndex, const char* status)
     document_.activeLayer = insertionIndex;
     document_.dirty = true;
     document_.status = status;
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
 }
 
 void LevelEditor::deleteActiveLayer()
@@ -3538,7 +3614,7 @@ void LevelEditor::deleteActiveLayer()
         return;
     }
 
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     const uint32_t deletedLayer =
         static_cast<uint32_t>(document_.activeLayer);
     if (document_.waterLayer == deletedLayer) {
@@ -3633,7 +3709,7 @@ void LevelEditor::deleteActiveLayer()
         static_cast<int>(document_.layers.size()) - 1);
     document_.dirty = true;
     document_.status = "Deleted layer.";
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
 }
 
 LevelEditor::SaveResult LevelEditor::saveLoadedDocument()
@@ -3693,20 +3769,22 @@ bool LevelEditor::openDocument(const std::filesystem::path& path)
 
     if (!loadDocument(path, false)) {
         // The current document is still active after a failed load. It owns
-        // the cached copy again, so avoid reporting the same draft twice.
-        if (!activeKey.empty()) {
-            drafts_.erase(activeKey);
+        // the transferred histories again, so remove its cached draft.
+        if (auto found = drafts_.find(activeKey); found != drafts_.end()) {
+            editHistory_ = std::move(found->second.editHistory);
+            redoHistory_ = std::move(found->second.redoHistory);
+            drafts_.erase(found);
         }
         return false;
     }
-    editHistory_.clear();
-    redoHistory_.clear();
+    clearHistory(editHistory_);
+    clearHistory(redoHistory_);
     return true;
 }
 
 bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHistory)
 {
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = recordHistory ? captureBeforeDocumentChange() : std::nullopt;
     pendingMove_.reset();
     std::ifstream file(path);
     if (!file) {
@@ -3823,7 +3901,7 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     }
     drafts_.erase(draftKey(path));
     if (recordHistory) {
-        recordDocumentChange(before);
+        recordDocumentChange(std::move(before));
     }
     return true;
 }
@@ -3858,8 +3936,8 @@ bool LevelEditor::reloadFromDisk()
         return false;
     }
     // The history described the old contents.
-    editHistory_.clear();
-    redoHistory_.clear();
+    clearHistory(editHistory_);
+    clearHistory(redoHistory_);
     pendingMove_.reset();
     document_.editingDocument = editing;
     document_.playingDraft = playing;
@@ -4517,7 +4595,13 @@ bool LevelEditor::permanentlyDelete(const std::filesystem::path& path)
     return true;
 }
 
-void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
+std::optional<LevelEditor::DocumentSnapshot> LevelEditor::captureBeforeDocumentChange() const
+{
+    return historySuppressed_ || strokeBefore_
+        ? std::nullopt : std::optional<DocumentSnapshot>(captureDocumentSnapshot());
+}
+
+void LevelEditor::recordDocumentChange(std::optional<DocumentSnapshot> before)
 {
     if (historySuppressed_) {
         return;
@@ -4527,38 +4611,110 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
         ++strokeChanges_;
         return;
     }
-    const DocumentSnapshot after = captureDocumentSnapshot();
-    if (before.layers == after.layers &&
-        before.tileRotations == after.tileRotations &&
-        before.waterLayer == after.waterLayer &&
-        before.cameraAngles == after.cameraAngles &&
-        before.character == after.character &&
-        before.decorations == after.decorations &&
-        before.selectors == after.selectors &&
-        before.lecterns == after.lecterns &&
-        before.groundSplats == after.groundSplats &&
-        before.groundPaint == after.groundPaint &&
-        before.gates == after.gates &&
-        before.rotators == after.rotators &&
-        before.lockPlates == after.lockPlates &&
-        before.elevators == after.elevators &&
-        before.minecarts == after.minecarts &&
-        before.objectLinks == after.objectLinks &&
-        before.portals == after.portals && before.plates == after.plates &&
-        before.plateColors == after.plateColors &&
-        before.filePath == after.filePath &&
-        before.requestedWidth == after.requestedWidth &&
-        before.requestedHeight == after.requestedHeight &&
-        before.activeLayer == after.activeLayer &&
-        before.dirty == after.dirty) {
+    if (!before) {
+        return;
+    }
+    if (before->layers == document_.layers &&
+        before->tileRotations == document_.tileRotations &&
+        before->waterLayer == document_.waterLayer &&
+        before->cameraAngles == document_.cameraAngles &&
+        before->character == document_.character &&
+        before->decorations == document_.decorations &&
+        before->selectors == document_.selectors &&
+        before->lecterns == document_.lecterns &&
+        before->groundSplats == document_.groundSplats &&
+        before->groundPaint == document_.groundPaint &&
+        before->gates == document_.gates &&
+        before->rotators == document_.rotators &&
+        before->lockPlates == document_.lockPlates &&
+        before->elevators == document_.elevators &&
+        before->minecarts == document_.minecarts &&
+        before->objectLinks == document_.objectLinks &&
+        before->portals == document_.portals && before->plates == document_.plates &&
+        before->plateColors == document_.plateColors &&
+        before->filePath == document_.filePath &&
+        before->loadedPath == document_.loadedPath &&
+        before->requestedWidth == document_.requestedWidth &&
+        before->requestedHeight == document_.requestedHeight &&
+        before->activeLayer == document_.activeLayer &&
+        before->dirty == document_.dirty) {
         return;
     }
 
-    editHistory_.push_back({
-        .before = before,
-        .after = after,
-    });
-    redoHistory_.clear();
+    EditActionRecord record {
+        .before = std::move(*before),
+        .after = captureDocumentSnapshot(),
+        .sequence = ++historySequence_,
+    };
+    record.retainedBytes = recordStorageBytes(record);
+    if (historyLimits_.maxRecords == 0 || record.retainedBytes > historyLimits_.maxBytes) {
+        // The document changed, but retaining this transaction would exceed
+        // the whole budget. Older edits cannot be undone across that gap.
+        clearHistory(editHistory_);
+        clearHistory(redoHistory_);
+        return;
+    }
+    editHistory_.push_back(std::move(record));
+    if (!redoHistory_.empty()) clearHistory(redoHistory_);
+    trimHistory();
+}
+
+std::size_t LevelEditor::snapshotStorageBytes(const DocumentSnapshot& snapshot)
+{
+    std::size_t bytes = 0;
+    const auto add = [&](std::size_t count, std::size_t elementBytes) {
+        const auto maximum = std::numeric_limits<std::size_t>::max();
+        bytes = count > maximum / elementBytes
+            ? maximum : addHistoryBytes(bytes, count * elementBytes);
+    };
+    const auto vector = [&](const auto& values) { add(values.capacity(), sizeof(values[0])); };
+    const auto string = [&](const auto& value) {
+        add(value.capacity(), sizeof(value[0]));
+        add(1, sizeof(value[0]));
+    };
+    vector(snapshot.layers);
+    for (const auto& layer : snapshot.layers) {
+        vector(layer);
+        for (const auto& row : layer) string(row);
+    }
+    vector(snapshot.decorations);
+    for (const auto& decoration : snapshot.decorations) string(decoration.model);
+    vector(snapshot.selectors);
+    vector(snapshot.lecterns);
+    for (const auto& lectern : snapshot.lecterns) string(lectern.text);
+    vector(snapshot.groundSplats);
+    for (const auto& splat : snapshot.groundSplats) {
+        string(splat.name);
+        string(splat.base);
+        string(splat.detail);
+        string(splat.mask);
+    }
+    vector(snapshot.groundPaint);
+    for (const auto& paint : snapshot.groundPaint) string(paint.splat);
+    vector(snapshot.tileRotations);
+    const auto linked = [&](const auto& records) {
+        vector(records);
+        for (const auto& record : records) vector(record.pressurePlates);
+    };
+    linked(snapshot.gates);
+    linked(snapshot.rotators);
+    linked(snapshot.lockPlates);
+    linked(snapshot.elevators);
+    for (const auto& elevator : snapshot.elevators) vector(elevator.levels);
+    linked(snapshot.minecarts);
+    vector(snapshot.plates);
+    vector(snapshot.objectLinks);
+    vector(snapshot.portals);
+    vector(snapshot.plateColors);
+    string(snapshot.filePath.native());
+    string(snapshot.loadedPath.native());
+    return bytes;
+}
+
+std::size_t LevelEditor::recordStorageBytes(const EditActionRecord& record)
+{
+    return addHistoryBytes(sizeof(EditActionRecord), addHistoryBytes(
+        snapshotStorageBytes(record.before), snapshotStorageBytes(record.after)));
 }
 
 void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
@@ -4643,11 +4799,11 @@ bool LevelEditor::addGroundSplat(Level::GroundSplat splat)
         document_.status = error.what();
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     document_.groundSplats.push_back(std::move(splat));
     selectedGroundSplatName_ = document_.groundSplats.back().name;
     document_.dirty = true;
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -4666,12 +4822,12 @@ bool LevelEditor::updateGroundSplat(std::size_t index, Level::GroundSplat splat)
         document_.status = error.what();
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     document_.groundSplats = std::move(candidate.groundSplats);
     document_.groundPaint = std::move(candidate.groundPaint);
     if (selectedGroundSplatName_ == oldName) selectedGroundSplatName_ = splat.name;
     document_.dirty = true;
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -4684,12 +4840,12 @@ bool LevelEditor::removeGroundSplat(std::size_t index)
         document_.status = "The first splat map is the default for unpainted ground. Edit it instead.";
         return false;
     }
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     const std::string name = document_.groundSplats[index].name;
     std::erase_if(document_.groundPaint, [&](const Level::GroundPaint& paint) { return paint.splat == name; });
     document_.groundSplats.erase(document_.groundSplats.begin() + static_cast<std::ptrdiff_t>(index));
     document_.dirty = true;
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -4704,7 +4860,7 @@ bool LevelEditor::paintGroundSplat(GridPosition3 cell)
     const bool isDefault = splat == &document_.groundSplats.front();
     if ((found == document_.groundPaint.end() && isDefault) ||
         (found != document_.groundPaint.end() && found->splat == splat->name)) return false;
-    const DocumentSnapshot before = captureDocumentSnapshot();
+    auto before = captureBeforeDocumentChange();
     if (isDefault) {
         document_.groundPaint.erase(found);
     } else if (found == document_.groundPaint.end()) {
@@ -4713,7 +4869,7 @@ bool LevelEditor::paintGroundSplat(GridPosition3 cell)
         found->splat = splat->name;
     }
     document_.dirty = true;
-    recordDocumentChange(before);
+    recordDocumentChange(std::move(before));
     return true;
 }
 
@@ -4869,14 +5025,6 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
         .selectedDecoration = document_.selectedDecoration,
         .selectedSelector = document_.selectedSelector,
         .dirty = document_.dirty,
-    };
-}
-
-LevelEditor::EditActionRecord LevelEditor::invertEditActionRecord(const EditActionRecord& record) const
-{
-    return {
-        .before = record.after,
-        .after = record.before,
     };
 }
 
@@ -5173,10 +5321,11 @@ void LevelEditor::applyScreenIdentityRemaps(
         remapPath(snapshot.loadedPath);
         remapSelectors(snapshot.selectors);
     };
-    const auto remapHistory = [&](std::vector<EditActionRecord>& history) {
+    const auto remapHistory = [&](EditHistory& history) {
         for (EditActionRecord& record : history) {
             remapSnapshot(record.before);
             remapSnapshot(record.after);
+            record.retainedBytes = recordStorageBytes(record);
         }
     };
     const auto remapDocument = [&](Document& document) {
@@ -5213,6 +5362,7 @@ void LevelEditor::applyScreenIdentityRemaps(
         }
     }
     drafts_ = std::move(remappedDrafts);
+    trimHistory();
 }
 
 bool LevelEditor::applyProjectMutation(
@@ -5288,9 +5438,9 @@ bool LevelEditor::applyProjectMutation(
     }
     if (!screenIdentityRemaps.empty()) {
         // The source/runtime transaction has committed, so paths now identify
-        // their post-renumber occupants. Preserve the active dirty document
-        // before switching to the newly inserted or adjacent screen.
-        cacheActiveDraft();
+        // their post-renumber occupants. Remap the active document/history
+        // directly; a subsequent switch caches that remapped identity.
+        endStroke();
         applyScreenIdentityRemaps(screenIdentityRemaps);
     }
     return true;

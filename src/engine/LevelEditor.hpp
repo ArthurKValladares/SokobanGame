@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -258,6 +259,28 @@ public:
     [[nodiscard]] bool canUndo() const;
     [[nodiscard]] bool canRedo() const;
 
+    // One budget covers committed undo and redo records in this document and
+    // every inactive screen draft. Eviction removes the oldest undo or the
+    // farthest future redo at a history boundary, preserving contiguous edits.
+    // An edit too large to retain clears that document's undo/redo chain.
+    struct HistoryLimits {
+        std::size_t maxRecords = 128;
+        std::size_t maxBytes = 64 * 1024 * 1024;
+    };
+    struct HistoryStats {
+        std::size_t undoRecords = 0;
+        std::size_t redoRecords = 0;
+        // Conservative snapshot storage: record objects and owned vector,
+        // string and path capacities (including small-string capacity).
+        // Excludes live/draft documents, open stroke/transform rollback
+        // snapshots, and deque/allocator bookkeeping.
+        std::size_t retainedBytes = 0;
+    };
+    // Changes take effect immediately. Zero in either limit disables history.
+    void setHistoryLimits(HistoryLimits limits);
+    [[nodiscard]] HistoryLimits historyLimits() const;
+    [[nodiscard]] HistoryStats historyStats() const;
+
     void addLevelAt(int levelIndex);
     void renameLevel(const LevelDirectory& level, const std::string& name);
     void deleteLevel(const LevelDirectory& level);
@@ -498,12 +521,15 @@ private:
     struct EditActionRecord {
         DocumentSnapshot before;
         DocumentSnapshot after;
+        std::size_t retainedBytes = 0;
+        uint64_t sequence = 0;
     };
+    using EditHistory = std::deque<EditActionRecord>;
 
     struct DraftState {
         Document document;
-        std::vector<EditActionRecord> editHistory;
-        std::vector<EditActionRecord> redoHistory;
+        EditHistory editHistory;
+        EditHistory redoHistory;
     };
 
     struct ScreenIdentityRemap {
@@ -514,7 +540,12 @@ private:
     };
     using ScreenIdentityRemaps = std::vector<ScreenIdentityRemap>;
 
-    void recordDocumentChange(const DocumentSnapshot& before);
+    [[nodiscard]] std::optional<DocumentSnapshot> captureBeforeDocumentChange() const;
+    void recordDocumentChange(std::optional<DocumentSnapshot> before);
+    [[nodiscard]] static std::size_t snapshotStorageBytes(const DocumentSnapshot& snapshot);
+    [[nodiscard]] static std::size_t recordStorageBytes(const EditActionRecord& record);
+    static void clearHistory(EditHistory& history);
+    void trimHistory();
     bool setCellWithRotation(GridPosition3 position, TileType tile, uint32_t quarterTurns);
     void setTileRotation(GridPosition3 cell, uint32_t quarterTurns);
     // The document as a level definition, with each device's plate list
@@ -529,7 +560,6 @@ private:
     void insertLayerAt(int insertionIndex, const char* status);
     void applyDocumentSnapshot(const DocumentSnapshot& snapshot);
     [[nodiscard]] DocumentSnapshot captureDocumentSnapshot() const;
-    [[nodiscard]] EditActionRecord invertEditActionRecord(const EditActionRecord& record) const;
     [[nodiscard]] std::filesystem::path runtimeMirrorPath(const std::filesystem::path& sourcePath) const;
     [[nodiscard]] std::filesystem::path deletedLevelRoot() const;
     [[nodiscard]] bool isActiveLevelDirectory(const LevelDirectory& level) const;
@@ -571,8 +601,10 @@ private:
     void invalidateBrowserSnapshots() const;
     mutable BrowserSnapshot activeBrowserSnapshot_;
     mutable BrowserSnapshot deletedBrowserSnapshot_;
-    std::vector<EditActionRecord> editHistory_;
-    std::vector<EditActionRecord> redoHistory_;
+    EditHistory editHistory_;
+    EditHistory redoHistory_;
+    HistoryLimits historyLimits_;
+    uint64_t historySequence_ = 0;
     // Open stroke: the snapshot from before its first change, plus how many
     // cell edits it has absorbed.
     std::optional<DocumentSnapshot> strokeBefore_;

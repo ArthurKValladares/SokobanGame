@@ -3,7 +3,6 @@
 #include "engine/ActionPlan.hpp"
 #include "engine/GameplayConfig.hpp"
 #include "engine/Rules.hpp"
-#include "engine/solver/DeadPosition.hpp"
 #include "engine/solver/Heuristic.hpp"
 #include "engine/solver/StateKey.hpp"
 
@@ -310,41 +309,6 @@ Result solve(const Level& level, const Options& options)
         result.status = Status::Solved;
         return result;
     }
-    const detail::DeadPositionIndex deadPositions(level);
-    result.statistics.staticDeadPositionAnalysisEnabled =
-        deadPositions.staticAnalysisEnabled();
-    result.statistics.multiRockFreezeAnalysisEnabled =
-        deadPositions.multiRockFreezeAnalysisEnabled();
-    result.statistics.staticDeadCells = deadPositions.deadCellCount();
-    const auto rejectedByDeadPosition = [&](const GameState& state) {
-        if (!deadPositions.applicable()) {
-            return false;
-        }
-        ++result.statistics.deadPositionChecks;
-        const detail::DeadPositionReason reason =
-            deadPositions.rejectionReason(state);
-        if (reason == detail::DeadPositionReason::None) {
-            return false;
-        }
-        ++result.statistics.deadPositionPrunes;
-        switch (reason) {
-        case detail::DeadPositionReason::None: break;
-        case detail::DeadPositionReason::UnitCount:
-            ++result.statistics.deadPositionUnitCountPrunes;
-            break;
-        case detail::DeadPositionReason::StaticMatching:
-            ++result.statistics.deadPositionStaticMatchingPrunes;
-            break;
-        case detail::DeadPositionReason::FrozenCluster:
-            ++result.statistics.deadPositionFrozenClusterPrunes;
-            break;
-        }
-        return true;
-    };
-    if (rejectedByDeadPosition(driver.state())) {
-        result.status = Status::Exhausted;
-        return result;
-    }
     std::optional<detail::RelaxedHeuristic> heuristic;
     if (options.strategy == Strategy::BestFirst) {
         heuristic.emplace(level);
@@ -585,10 +549,6 @@ Result solve(const Level& level, const Options& options)
                     continue;
                 }
                 transition.rawKey = &*keyPosition;
-            }
-            if (!successorSolved &&
-                rejectedByDeadPosition(successorState)) {
-                continue;
             }
             const PackedStateKey& rawKey = *transition.rawKey;
             // Cache members are added only after their canonical position is

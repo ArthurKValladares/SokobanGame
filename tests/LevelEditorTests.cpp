@@ -4410,8 +4410,334 @@ void testUnsortedRotationRecordsSupportBrushUpdates()
     CHECK(editor.tileRotationQuarterTurns({ 1, 0, 1 }) == 1);
 }
 
+LevelEditor::HistoryStats checkHistoryBudget(
+    const LevelEditor& editor, std::size_t undo, std::size_t redo)
+{
+    const auto stats = editor.historyStats();
+    const auto limits = editor.historyLimits();
+    CHECK(stats.undoRecords == undo);
+    CHECK(stats.redoRecords == redo);
+    CHECK(stats.undoRecords + stats.redoRecords <= limits.maxRecords);
+    CHECK(stats.retainedBytes <= limits.maxBytes);
+    CHECK((stats.retainedBytes == 0) == (undo + redo == 0));
+    return stats;
+}
+
+void testHistoryRecordLimitPreservesUndoRedoOrderAndBranches()
+{
+    TEST("historyRecordLimitPreservesUndoRedoOrderAndBranches");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(6, 3, false);
+    editor.setHistoryLimits({ .maxRecords = 3, .maxBytes = SIZE_MAX });
+    const auto wallAt = [&](int x) {
+        return editor.documentLayers()[1][1][static_cast<std::size_t>(x)] == tileTypeToChar(TileType::Wall);
+    };
+    for (int x = 1; x <= 4; ++x) CHECK(editor.setCell({ x, 1, 1 }, TileType::Wall));
+    const auto full = checkHistoryBudget(editor, 3, 0);
+    for (int x = 4; x >= 2; --x) {
+        CHECK(editor.tryUndoEdit());
+        CHECK(!wallAt(x));
+        CHECK(wallAt(x - 1));
+        CHECK(editor.historyStats().retainedBytes == full.retainedBytes);
+    }
+    checkHistoryBudget(editor, 0, 3);
+    CHECK(!editor.tryUndoEdit());
+    CHECK(wallAt(1)); // The evicted edit is the retained document's base.
+    CHECK(editor.tryRedoEdit());
+    CHECK(wallAt(2));
+    CHECK(!wallAt(3));
+    checkHistoryBudget(editor, 1, 2);
+    CHECK(editor.setCell({ 5, 1, 1 }, TileType::Wall));
+    checkHistoryBudget(editor, 2, 0);
+    CHECK(!editor.tryRedoEdit());
+    CHECK(editor.tryUndoEdit());
+    CHECK(!wallAt(5));
+    CHECK(editor.tryUndoEdit());
+    CHECK(!wallAt(2));
+    CHECK(wallAt(1));
+    CHECK(!editor.tryUndoEdit());
+}
+
+void testReducingHistoryLimitRetainsNearestRedoSteps()
+{
+    TEST("reducingHistoryLimitRetainsNearestRedoSteps");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(6, 3, false);
+    editor.setHistoryLimits({ .maxRecords = 4, .maxBytes = SIZE_MAX });
+    for (int x = 1; x <= 4; ++x) CHECK(editor.setCell({ x, 1, 1 }, TileType::Wall));
+    for (int count = 0; count < 3; ++count) CHECK(editor.tryUndoEdit());
+    checkHistoryBudget(editor, 1, 3);
+    editor.setHistoryLimits({ .maxRecords = 2, .maxBytes = SIZE_MAX });
+    checkHistoryBudget(editor, 0, 2);
+    // x4 is the farthest redo; retaining it while dropping x2 would jump over
+    // an intermediate state. Redo must instead visit x2 and then x3 exactly.
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers()[1][1] == " ##   ");
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers()[1][1] == " ###  ");
+    CHECK(!editor.tryRedoEdit());
+    checkHistoryBudget(editor, 2, 0);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[1][1] == " ##   ");
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[1][1] == " #    ");
+    CHECK(!editor.tryUndoEdit());
+}
+
+void testGroupedAndCancelledEditsRespectHistoryBudget()
+{
+    TEST("groupedAndCancelledEditsRespectHistoryBudget");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(5, 3, false);
+    editor.setHistoryLimits({ .maxRecords = 2, .maxBytes = SIZE_MAX });
+    CHECK(editor.beginStroke());
+    for (int x = 1; x <= 3; ++x) CHECK(editor.setCell({ x, 1, 1 }, TileType::Wall));
+    checkHistoryBudget(editor, 0, 0); // Pending rollback snapshots are not committed history.
+    CHECK(editor.endStroke());
+    const auto grouped = checkHistoryBudget(editor, 1, 0);
+    CHECK(editor.tryUndoEdit());
+    checkHistoryBudget(editor, 0, 1);
+    CHECK(editor.beginStroke());
+    CHECK(!editor.endStroke());
+    CHECK(editor.beginStroke());
+    CHECK(editor.setCell({ 2, 1, 1 }, TileType::Wall));
+    CHECK(editor.eraseCell({ 2, 1, 1 }));
+    CHECK(editor.endStroke());
+    CHECK(editor.historyStats().retainedBytes == grouped.retainedBytes);
+    checkHistoryBudget(editor, 0, 1); // A net-zero stroke preserves the redo branch.
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers()[1][1] == " ### ");
+
+    auto decorations = makeEditor(project);
+    decorations.newDocument(3, 2, false);
+    decorations.setHistoryLimits({ .maxRecords = 2, .maxBytes = SIZE_MAX });
+    decorations.setSelectedDecorationModel("Stone");
+    CHECK(decorations.placeDecoration({ 1, 1, 1 }));
+    CHECK(decorations.selectDecoration(0));
+    CHECK(decorations.setCell({ 2, 1, 1 }, TileType::Wall));
+    CHECK(decorations.tryUndoEdit());
+    const auto beforeCancel = checkHistoryBudget(decorations, 1, 1);
+    const auto original = *decorations.selectedDecoration();
+    CHECK(decorations.beginSelectedDecorationTransform());
+    auto moved = original;
+    moved.position.x += 0.5f;
+    CHECK(decorations.previewSelectedDecorationTransform(moved));
+    CHECK(decorations.endSelectedDecorationTransform(false));
+    CHECK(*decorations.selectedDecoration() == original);
+    CHECK(decorations.historyStats().retainedBytes == beforeCancel.retainedBytes);
+    checkHistoryBudget(decorations, 1, 1);
+    CHECK(decorations.beginSelectedDecorationTransform());
+    CHECK(decorations.endSelectedDecorationTransform());
+    checkHistoryBudget(decorations, 1, 1); // A transform with no previews is also a no-op.
+    CHECK(decorations.beginSelectedDecorationTransform());
+    CHECK(decorations.previewSelectedDecorationTransform(moved));
+    moved.position.x += 0.25f;
+    CHECK(decorations.previewSelectedDecorationTransform(moved));
+    CHECK(decorations.endSelectedDecorationTransform());
+    checkHistoryBudget(decorations, 2, 0);
+    CHECK(decorations.tryUndoEdit());
+    CHECK(*decorations.selectedDecoration() == original);
+    CHECK(decorations.tryUndoEdit());
+    CHECK(decorations.decorations().empty());
+    CHECK(!decorations.tryUndoEdit());
+}
+
+void testHistoryBudgetIsGlobalAcrossDraftsAndFailedOpen()
+{
+    TEST("historyBudgetIsGlobalAcrossDraftsAndFailedOpen");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    const std::array paths { project.source / "level0/screen0.scr",
+        project.source / "level0/screen1.scr", project.source / "level0/screen2.scr" };
+    for (const auto& path : paths) {
+        editor.newDocument(4, 3, false);
+        CHECK(editor.saveDocument(path));
+    }
+    editor.setHistoryLimits({ .maxRecords = 4, .maxBytes = SIZE_MAX });
+    for (const auto& path : paths) {
+        CHECK(editor.openDocument(path));
+        CHECK(editor.setCell({ 1, 1, 1 }, TileType::Wall));
+        CHECK(editor.setCell({ 2, 1, 1 }, TileType::Wall));
+    }
+    checkHistoryBudget(editor, 4, 0); // The oldest screen's two records were evicted.
+    CHECK(editor.tryUndoEdit());
+    const auto beforeFailedOpen = checkHistoryBudget(editor, 3, 1);
+    const auto currentDraft = editor.documentDefinition();
+    CHECK(!editor.openDocument(project.source / "level0/missing.scr"));
+    CHECK(editor.loadedDocumentPath() == paths[2]);
+    CHECK(editor.documentDefinition() == currentDraft);
+    CHECK(editor.historyStats().retainedBytes == beforeFailedOpen.retainedBytes);
+    checkHistoryBudget(editor, 3, 1);
+
+    CHECK(editor.openDocument(paths[0]));
+    CHECK(editor.documentLayers()[1][1] == " ## ");
+    CHECK(editor.dirty());
+    CHECK(!editor.canUndo());
+    CHECK(!editor.tryUndoEdit());
+    checkHistoryBudget(editor, 3, 1);
+    CHECK(editor.openDocument(paths[1]));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.setCell({ 3, 1, 1 }, TileType::Wall));
+    CHECK(editor.documentLayers()[1][1] == " # #");
+    CHECK(!editor.canRedo());
+    checkHistoryBudget(editor, 3, 1);
+    CHECK(editor.openDocument(paths[2]));
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers()[1][1] == " ## ");
+    checkHistoryBudget(editor, 4, 0);
+    editor.setHistoryLimits({ .maxRecords = 2, .maxBytes = SIZE_MAX });
+    checkHistoryBudget(editor, 2, 0);
+    CHECK(editor.openDocument(paths[1]));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[1][1] == " #  ");
+    CHECK(!editor.tryUndoEdit());
+    CHECK(editor.openDocument(paths[2]));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[1][1] == " #  ");
+    CHECK(!editor.tryUndoEdit());
+    checkHistoryBudget(editor, 0, 2);
+
+    editor.setHistoryLimits({ .maxRecords = 0, .maxBytes = SIZE_MAX });
+    checkHistoryBudget(editor, 0, 0);
+    CHECK(editor.openDocument(paths[1]));
+    CHECK(!editor.canUndo());
+    CHECK(!editor.canRedo());
+    CHECK(editor.setCell({ 3, 2, 1 }, TileType::Wall));
+    checkHistoryBudget(editor, 0, 0);
+}
+
+void testOversizedEditIsAnUndoBarrierWithoutDiscardingOtherDrafts()
+{
+    TEST("oversizedEditIsAnUndoBarrierWithoutDiscardingOtherDrafts");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    const auto first = project.source / "level0/screen0.scr";
+    const auto second = project.source / "level0/screen1.scr";
+    editor.newDocument(4, 3, false);
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::Lectern));
+    CHECK(editor.saveDocument(first));
+    CHECK(editor.saveDocument(second));
+    editor.setHistoryLimits({ .maxRecords = 0, .maxBytes = SIZE_MAX });
+    editor.setHistoryLimits({ .maxRecords = 8, .maxBytes = SIZE_MAX });
+    CHECK(editor.setCell({ 2, 1, 1 }, TileType::Wall));
+    const auto smallRecordBytes = checkHistoryBudget(editor, 1, 0).retainedBytes;
+    editor.setHistoryLimits({ .maxRecords = 0, .maxBytes = SIZE_MAX });
+    const std::size_t byteLimit = smallRecordBytes * 3;
+    editor.setHistoryLimits({ .maxRecords = 8, .maxBytes = byteLimit });
+    CHECK(editor.openDocument(first));
+    CHECK(editor.setCell({ 2, 1, 1 }, TileType::Wall));
+    CHECK(editor.openDocument(second));
+    CHECK(editor.setCell({ 3, 1, 1 }, TileType::Wall));
+    checkHistoryBudget(editor, 2, 0);
+    const std::string oversizedText(byteLimit + 1, 'x');
+    CHECK(editor.setLecternText(0, oversizedText));
+    CHECK(editor.lecterns().front().text == oversizedText);
+    CHECK(editor.dirty());
+    CHECK(!editor.canUndo());
+    CHECK(!editor.tryUndoEdit());
+    checkHistoryBudget(editor, 1, 0); // The other screen's history survived.
+    CHECK(editor.setLecternText(0, "small")); // The oversized before-state also cannot be retained.
+    CHECK(!editor.canUndo());
+    checkHistoryBudget(editor, 1, 0);
+    const auto afterBarrier = editor.documentDefinition();
+    CHECK(editor.setCell({ 0, 2, 1 }, TileType::Wall));
+    checkHistoryBudget(editor, 2, 0);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentDefinition() == afterBarrier);
+    CHECK(!editor.tryUndoEdit());
+    checkHistoryBudget(editor, 1, 1);
+    CHECK(editor.openDocument(first));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::Air));
+    checkHistoryBudget(editor, 0, 2);
+}
+
+void testHistoryAccountingFollowsScreenRemapsAndReloads()
+{
+    for (const bool tightBytes : { false, true }) {
+        TEST(tightBytes ? "historyByteLimitReappliedAfterScreenRemap"
+                        : "historyAccountingFollowsScreenRemapsAndReloads");
+        TemporaryProject project;
+        // Snapshots copy native path strings. Pick a prefix whose copied
+        // screen9 path exactly fills that implementation's capacity, so the
+        // extra character in screen10 necessarily increases retained storage.
+        // This avoids depending on MSVC's wchar_t allocation bucket size or
+        // the machine-specific temporary directory's length.
+        const auto sourceRoot = project.source;
+        bool capacityBoundaryFound = false;
+        for (std::size_t padding = 1; padding <= 64; ++padding) {
+            const auto candidate = sourceRoot / std::string(padding, 'p');
+            const auto normalized = std::filesystem::absolute(
+                candidate / "level0/screen9.scr").lexically_normal();
+            const std::filesystem::path retainedCopy(normalized);
+            if (retainedCopy.native().size() == retainedCopy.native().capacity()) {
+                project.source = candidate;
+                capacityBoundaryFound = true;
+                break;
+            }
+        }
+        CHECK(capacityBoundaryFound);
+        if (!capacityBoundaryFound) continue;
+        const auto levelRoot = project.source / "level0";
+        std::filesystem::create_directories(levelRoot);
+        for (int screen = 0; screen < 10; ++screen) {
+            std::ofstream(levelRoot / ("screen" + std::to_string(screen) + ".scr"))
+                << "@layer 0\n....\n....\n....\n@layer 1\nC   \n    \n   E\n";
+        }
+        auto editor = makeEditor(project);
+        editor.setHistoryLimits({ .maxRecords = 8, .maxBytes = SIZE_MAX });
+        CHECK(editor.openDocument(levelRoot / "screen9.scr"));
+        CHECK(editor.setCell({ 1, 1, 1 }, TileType::Wall));
+        CHECK(editor.setCell({ 2, 1, 1 }, TileType::Wall));
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.openDocument(levelRoot / "screen0.scr"));
+        const auto beforeRemap = checkHistoryBudget(editor, 1, 1);
+        if (tightBytes) {
+            editor.setHistoryLimits({ .maxRecords = 8, .maxBytes = beforeRemap.retainedBytes });
+        }
+        const auto levels = editor.collectLevelDirectories();
+        CHECK(levels.size() == 1);
+        if (levels.empty()) continue;
+        editor.addScreenAt(levels.front(), 0); // screen9 -> screen10 lengthens every snapshot path.
+        checkHistoryBudget(editor, tightBytes ? 0 : 1, 1);
+        if (!tightBytes) CHECK(editor.historyStats().retainedBytes > beforeRemap.retainedBytes);
+        const auto shifted = levelRoot / "screen10.scr";
+        CHECK(editor.openDocument(shifted));
+        CHECK(editor.loadedDocumentPath() == shifted);
+        CHECK(editor.documentLayers()[1][1] == " #  ");
+        CHECK(editor.tryRedoEdit());
+        CHECK(editor.documentLayers()[1][1] == " ## ");
+        CHECK(editor.loadedDocumentPath() == shifted);
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.documentLayers()[1][1] == " #  ");
+        CHECK(editor.canUndo() == !tightBytes);
+        CHECK(editor.saveLoadedDocument());
+        const auto beforeReload = editor.historyStats();
+        CHECK(!editor.reloadFromDisk());
+        CHECK(editor.historyStats().retainedBytes == beforeReload.retainedBytes);
+        auto outside = editor.documentDefinition();
+        outside.layers[1][1][1] = tileTypeToChar(TileType::Air);
+        {
+            std::ofstream file(shifted, std::ios::trunc);
+            for (const auto& line : Level::serializeDefinition(outside)) file << line << '\n';
+        }
+        CHECK(editor.reloadFromDisk());
+        CHECK(editor.documentDefinition() == outside);
+        checkHistoryBudget(editor, 0, 0);
+    }
+}
+
 int main()
 {
+    testHistoryRecordLimitPreservesUndoRedoOrderAndBranches();
+    testReducingHistoryLimitRetainsNearestRedoSteps();
+    testGroupedAndCancelledEditsRespectHistoryBudget();
+    testHistoryBudgetIsGlobalAcrossDraftsAndFailedOpen();
+    testOversizedEditIsAnUndoBarrierWithoutDiscardingOtherDrafts();
+    testHistoryAccountingFollowsScreenRemapsAndReloads();
     testDirectionalBrushesRotateTheirTileTypes();
     testTileBrushRotationsSurviveEditingAndSaving();
     testTileRotationsSurviveDraftSwitchesAndCursorPlayback();

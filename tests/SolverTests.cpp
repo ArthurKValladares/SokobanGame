@@ -2,11 +2,11 @@
 
 #include "engine/Level.hpp"
 #include "engine/Solution.hpp"
-#include "engine/solver/DeadPosition.hpp"
 #include "engine/solver/Heuristic.hpp"
 #include "engine/solver/Solver.hpp"
 #include "engine/solver/StateKey.hpp"
 
+#include <algorithm>
 #include <exception>
 #include <iostream>
 #include <string>
@@ -93,7 +93,7 @@ void checkNoHeuristicWork(const solver::Statistics& statistics)
     CHECK(statistics.heuristicGraphEdges == 0);
 }
 
-void checkSolutionReplays(
+solution::Recording checkSolutionReplays(
     const Level& level, const Level::Definition& definition, const solver::Result& result)
 {
     CHECK(result.solved());
@@ -103,6 +103,7 @@ void checkSolutionReplays(
         CHECK_MESSAGE(solution::replay(level, recording.solution).passed,
             "recorded search output replays every settled state");
     }
+    return recording;
 }
 
 void testRelaxedHeuristicFallsBackForMovableMirrors()
@@ -235,23 +236,24 @@ void testPortalHeuristicFallbackPreservesSearchAndReplay()
     }
 }
 
-void testDeadPositionAnalysisIsConservativeAndFeatureAware()
+void testHeroCanLeavePressurePlateAndFinishWithoutRocks()
 {
-    TEST("pressurePlateSwitchesDoNotBecomeSolverGoals");
-    const Level level = Level::loadFromLayers({
-        { "....." },
-        { "C P E" },
-    }, "plate switch solver test");
-    const solver::detail::DeadPositionIndex deadPositions(level);
-    CHECK(!deadPositions.applicable());
-    CHECK(!deadPositions.staticAnalysisEnabled());
-    CHECK(!deadPositions.rejects(rules::initialState(level)));
-
-    const solver::Result result = solver::solve(level, {
-        .maxStates = 1'000,
-    });
-    CHECK(result.solved());
-    CHECK(result.statistics.deadPositionChecks == 0);
+    TEST("heroCanLeavePressurePlateAndFinishWithoutRocks");
+    const Level::Definition definition { .layers = { { "....." }, { "C P E" } } };
+    const Level level = Level::loadFromDefinition(definition, "plate switch solver test");
+    CHECK(level.movableTiles().empty());
+    for (const auto strategy : { solver::Strategy::BreadthFirst, solver::Strategy::BestFirst }) {
+        const auto result = solver::solve(level, { .maxStates = 1'000, .strategy = strategy });
+        const auto recording = checkSolutionReplays(level, definition, result);
+        CHECK(std::ranges::any_of(recording.solution.steps, [&](const auto& step) {
+            return rules::isPressurePlateActive(level, step.state, { 2, 0, 1 });
+        }));
+        if (!recording.solution.steps.empty()) {
+            const auto& final = recording.solution.steps.back().state;
+            CHECK(rules::isAtUnlockedEnd(level, final));
+            CHECK(!rules::isPressurePlateActive(level, final, { 2, 0, 1 }));
+        }
+    }
 }
 
 void testPackedStateKeyIncludesEveryDynamicField()
@@ -698,10 +700,10 @@ void testWalkingCacheIsBoundedAndOptional()
     CHECK(disabled.statistics.peakCanonicalizationCachedStates == 0);
 }
 
-void testGateSwitchesRemainSearchable()
+void testSolverMovesRockOntoPlateToCrossGate()
 {
-    TEST("gateSwitchesRemainSearchable");
-    const Level level = Level::loadFromDefinition({
+    TEST("solverMovesRockOntoPlateToCrossGate");
+    const Level::Definition definition {
         .layers = {
             {
                 ".......",
@@ -712,9 +714,9 @@ void testGateSwitchesRemainSearchable()
             },
             {
                 "#######",
-                "#  P  #",
+                "#  P###",
                 "#C RGE#",
-                "#     #",
+                "#    ##",
                 "#######",
             },
         },
@@ -722,15 +724,31 @@ void testGateSwitchesRemainSearchable()
             .cell = { 4, 2, 1 },
             .pressurePlates = { { 3, 1, 1 } },
         } },
-    }, "gate solver test");
-    const solver::Result result = solver::solve(level, {
-        .maxStates = 10'000,
-    });
-
-    CHECK(result.solved());
-    CHECK(!result.statistics.staticDeadPositionAnalysisEnabled);
-    CHECK(result.statistics.deadPositionChecks == 0);
-    CHECK(result.statistics.deadPositionPrunes == 0);
+    };
+    const Level level = Level::loadFromDefinition(definition, "gate solver test");
+    const auto& gate = level.gates().front();
+    CHECK(!rules::isGateOpen(level, rules::initialState(level), gate));
+    // Walls above and below the End make the gate its only approach. The
+    // rock must be pushed up onto the plate before the hero can cross it.
+    for (const auto strategy : { solver::Strategy::BreadthFirst, solver::Strategy::BestFirst }) {
+        const auto result = solver::solve(level, { .maxStates = 10'000, .strategy = strategy });
+        const auto recording = checkSolutionReplays(level, definition, result);
+        CHECK(std::ranges::any_of(recording.solution.steps, [&](const auto& step) {
+            return std::ranges::any_of(step.state.players, [&](const auto& hero) {
+                return !hero.dead && hero.cell == gate.cell;
+            });
+        }));
+        if (!recording.solution.steps.empty()) {
+            const auto& final = recording.solution.steps.back().state;
+            CHECK(std::ranges::any_of(final.movables, [](const auto& movable) {
+                return movable.type == TileType::Rock && !movable.dead && !movable.fallen &&
+                    movable.cell == (GridPosition3 { 3, 1, 1 });
+            }));
+            CHECK(rules::isPressurePlateActive(level, final, { 3, 1, 1 }));
+            CHECK(rules::isGateOpen(level, final, gate));
+            CHECK(rules::isAtUnlockedEnd(level, final));
+        }
+    }
 }
 
 void testProgressCanCancelSearch()
@@ -777,7 +795,7 @@ int main()
         testRelaxedWalkHeuristicBoundsRemainingInputs();
         testSearchStrategiesPreserveForcedPushCostAndReplay();
         testPortalHeuristicFallbackPreservesSearchAndReplay();
-        testDeadPositionAnalysisIsConservativeAndFeatureAware();
+        testHeroCanLeavePressurePlateAndFinishWithoutRocks();
         testPackedStateKeyIncludesEveryDynamicField();
         testSolverRidesElevators();
         testSolverActivatesButtonForAnotherHeroElevator();
@@ -789,7 +807,7 @@ int main()
         testBestFirstReportsHeuristicWork();
         testWalkingVariantsAreCanonicalizedBeforeEnqueue();
         testWalkingCacheIsBoundedAndOptional();
-        testGateSwitchesRemainSearchable();
+        testSolverMovesRockOntoPlateToCrossGate();
         testProgressCanCancelSearch();
         testStatusNamesAreStable();
     } catch (const std::exception& error) {

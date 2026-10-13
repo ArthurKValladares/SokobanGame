@@ -905,6 +905,10 @@ editor commands but does not own document or filesystem policy.
   from its first cell.
 - Press `Z` to undo editor changes and `Y` (or `Ctrl+Shift+Z`) to redo them.
   Like undo history, redo history travels with a document's unsaved draft.
+  All screens share a limit of 128 retained undo/redo steps or 64 MiB of
+  estimated snapshot storage. Older steps expire without discarding draft
+  contents. An edit larger than the budget still applies, but clears that
+  document's history so undo cannot skip over it.
 - More editor shortcuts, active while the game view has keyboard focus
   (click it after using a panel). These are the defaults:
 
@@ -1363,10 +1367,8 @@ breadth-first search leaves heuristic graph and evaluation counters at zero.
 Authored mirrors are movable entities, so the heuristic does not scan for
 static mirror edges. Screens with movable mirrors or portals retain the
 conservative zero-estimate fallback.
-`--progress-interval N` prints the same counters, including dead-position
-checks and prunes broken down by unit count, static matching, and frozen
-clusters, after approximately every N generated positions. Use a Release
-build; the search is slow in Debug.
+`--progress-interval N` prints the same counters after approximately every N
+generated positions. Use a Release build; the search is slow in Debug.
 
 The search itself is the reusable `engine/solver/Solver.hpp` API. It reports
 solved, exhausted, state-limit and cancelled outcomes separately, accepts an

@@ -47,17 +47,6 @@ struct Statistics {
     std::size_t peakCanonicalizationCachedStates = 0;
     std::size_t canonicalizationCacheEvictions = 0;
     std::size_t canonicalizationCacheRotations = 0;
-    // Legacy pressure-plate feasibility counters. Gate-controlled plates are
-    // transient switches rather than completion goals, so this analysis is
-    // currently disabled and these remain zero.
-    bool staticDeadPositionAnalysisEnabled = false;
-    bool multiRockFreezeAnalysisEnabled = false;
-    std::size_t staticDeadCells = 0;
-    std::size_t deadPositionChecks = 0;
-    std::size_t deadPositionPrunes = 0;
-    std::size_t deadPositionUnitCountPrunes = 0;
-    std::size_t deadPositionStaticMatchingPrunes = 0;
-    std::size_t deadPositionFrozenClusterPrunes = 0;
     // Ordinary walking configurations visited while constructing macro moves.
     std::size_t walkStates = 0;
     // State-changing moves discovered during walking-region floods and then
@@ -69,7 +58,7 @@ struct Statistics {
     std::size_t precomputedSuccessorsReused = 0;
     std::size_t drivenSuccessors = 0;
     // Equivalent raw outcomes removed within one expanded position, before
-    // dead-position checks or walking-region canonicalization.
+    // walking-region canonicalization.
     std::size_t localSuccessorDuplicates = 0;
     // Driver applications that could not settle within its safety limit.
     std::size_t settleFailures = 0;

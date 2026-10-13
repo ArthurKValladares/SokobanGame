@@ -582,7 +582,6 @@ add_library(sokoban_core STATIC
     src/engine/Solution.cpp
     src/engine/SolutionCoverage.cpp
     src/engine/SolutionStore.cpp
-    src/engine/solver/DeadPosition.cpp
     src/engine/solver/Heuristic.cpp
     src/engine/solver/Solver.cpp
     src/engine/solver/StateKey.cpp

@@ -655,12 +655,23 @@ and the required real-device checks are recorded.
   save it. It never stores game progress, which stays in the save slot.
 - Level editor edits go through `LevelEditor::recordDocumentChange`. While a
   stroke is open (`beginStroke`/`endStroke`) it folds changes into one record,
-  and `endStroke` writes that record. Any recorded edit clears the redo stack.
+  and `endStroke` writes that record. Capture through
+  `captureBeforeDocumentChange` to avoid per-cell snapshots during strokes or
+  suppressed subcommands; commands that need rollback capture separately.
+  Any recorded edit clears the redo stack; no-op edits preserve it.
   Undo, redo, save shortcuts, draft playback and document switches close an
   open stroke first. Compound commands that make intermediate edits (such as
   `moveObject`) suppress recording and record once themselves; they must not
-  resize the history vectors. Redo is carried everywhere undo is: the draft
-  cache and screen-identity remaps.
+  modify history directly. Redo is carried everywhere undo is: the draft
+  cache and screen-identity remaps. Histories move into and out of cached drafts
+  rather than being duplicated. `HistoryLimits` defaults to 128 records and
+  64 MiB across active and cached undo/redo histories. Eviction removes an
+  undo stack's oldest step or a redo stack's farthest future step, preserving
+  a contiguous replay chain. An oversized edit clears the active document's
+  history and still applies. `historyStats` estimates snapshot storage,
+  including nested allocations; it excludes live draft documents, temporary
+  stroke/transform rollback snapshots and allocator/container overhead.
+  Screen-identity remaps remeasure history and enforce the limits again.
 - Every editor control is an `InputAction`. `inputActionContext` decides
   which actions may share a key; a new action needs a context, a default, a
   name, and (when it is a player-facing control) an Options row. Adding one
@@ -735,17 +746,11 @@ and the required real-device checks are recorded.
   the same input through `solution::Driver` again. Settled mirror previews and
   hero-controller switches are likewise exact successors. Mirror results with
   pending automatic motion must continue through the Driver. Local exact-state
-  deduplication happens before dead-position and canonicalization work, and the
+  deduplication happens before canonicalization work, and the
   solver statistics expose reused, driven, and locally duplicated successors.
-  `engine/solver/DeadPosition.*` always applies the safe
-  movable-unit/plate cardinality proof. Its per-plate reverse-push tables also
-  require a complete rock-to-plate matching, but that stronger proof is
-  deliberately feature-gated: do not enable it for a new mechanic until that
-  mechanic is included in the reachability proof. Rogue-only layouts add a
-  still stricter 2x2 freeze proof: every cell in the square must be either a
-  live rock or static blocker, and frozen rocks only match plates they already
-  occupy. Do not enable this for Knight chain pushes. Dead-position statistics
-  distinguish cardinality, static-matching, and frozen-cluster rejections.
+  The former rock-to-plate dead-position analysis was removed: pressure plates
+  drive devices and can be unoccupied at completion, so cardinality,
+  reverse-push matching and frozen-rock proofs cannot reject a position.
   Every returned solution must
   still pass through `solution::record`/`solution::Driver` before it is stored.
 - The source watcher (`SourceWatcher`, `Application::serviceSourceWatcher`,
@@ -822,8 +827,7 @@ and the required real-device checks are recorded.
   on stays put (the rule that rejects moves into bottomless columns).
   `startOpen` is written to `@gate` only when true, and solution digests hash
   it only for start-open gates, so older digests are unchanged. The solver
-  heuristic treats a gate as floor (optimistic); gates already keep the
-  static dead-position proof off.
+  heuristic treats a gate as floor (optimistic).
 - Live mirrors are movable entities: position and rotation travel in
   `GameState::movables` and `StateDelta::movables`. The cell-keyed
   `turnedMirrors`/`StateDelta::mirrors` path supports static-mirror compatibility.
