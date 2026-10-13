@@ -88,7 +88,10 @@ authored transparency and the engine's special effects intact.
 BricksA omits the vendor color image and keeps a white base factor so its gameplay
 tint remains authoritative. Stone uses the artist-authored
 `custom/models/chunky_boulder.glb`, with packed terracotta-and-slate albedo and a
-matte dielectric material. Its white draw tint, preserved aspect ratio and 0.93
+matte dielectric material. The embedded 1024-square PNG preserves the pixels in
+`custom/source/chunky_boulder/boulder_albedo.png`; roughness is uniformly 0.92,
+with metallic factor 0 and no normal, ORM, occlusion or emissive maps. Its white
+draw tint, preserved aspect ratio and 0.93
 tile scale keep the painted boulder inside one cell. The PBR generator retains
 this asset and its editable Blender source.
 

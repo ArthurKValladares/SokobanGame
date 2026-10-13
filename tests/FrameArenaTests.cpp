@@ -205,6 +205,50 @@ void testArenaBackedFrameArrayKeepsItsFixedCapacity()
     CHECK(values.droppedCount() == 1);
 }
 
+void testEmptyFrameArraysRemainWritableThroughCopiesAndMoves()
+{
+    TEST("emptyFrameArraysRemainWritableThroughCopiesAndMoves");
+    sokoban::FrameArray<int> empty;
+    CHECK(empty.empty());
+    CHECK(empty.capacity() == 0);
+    CHECK(empty.data() == nullptr);
+    CHECK(!empty.arenaBacked());
+    empty.reserve(0);
+    empty.clear();
+    CHECK(empty.erase(empty.begin(), empty.end()) == empty.end());
+
+    auto copied = empty.clone();
+    auto moved = std::move(copied);
+    CHECK(moved.empty());
+    CHECK(!moved.arenaBacked());
+    CHECK(moved.push_back(7));
+    CHECK(moved.front() == 7);
+    CHECK(empty.empty());
+    copied.reserve(2);
+    CHECK(copied.push_back(9));
+    CHECK(copied.back() == 9);
+
+    sokoban::FrameArena arena("empty copy", sokoban::arenaBytesFor<int>(2));
+    sokoban::FrameArray<int> arenaEmpty(arena, 2);
+    auto escaped = arenaEmpty.clone();
+    CHECK(!escaped.arenaBacked());
+    CHECK(escaped.capacity() == 0);
+    arena.reset();
+    CHECK(escaped.push_back(11));
+    CHECK(escaped.front() == 11);
+    moved = empty;
+    CHECK(moved.empty());
+    CHECK(moved.capacity() == 0);
+    CHECK(moved.push_back(13));
+    CHECK(moved.front() == 13);
+
+    auto owningDestination = std::move(moved);
+    CHECK(owningDestination.front() == 13);
+    CHECK(moved.push_back(17));
+    CHECK(moved.back() == 17);
+    CHECK(owningDestination.front() == 13);
+}
+
 struct ThrowingCopy {
     int value = 0;
     inline static bool fail = false;
@@ -218,6 +262,29 @@ struct ThrowingCopy {
     }
     ThrowingCopy& operator=(const ThrowingCopy&) = default;
 };
+
+void testFailedFirstFrameArrayWriteLeavesUsableStorage()
+{
+    TEST("failedFirstFrameArrayWriteLeavesUsableStorage");
+    sokoban::FrameArray<ThrowingCopy> values;
+    const ThrowingCopy value(23);
+    ThrowingCopy::fail = true;
+    checkThrows([&] { values.push_back(value); }, "first element copy throws");
+    ThrowingCopy::fail = false;
+    CHECK(values.empty());
+    CHECK(!values.arenaBacked());
+    values.clear();
+    CHECK(values.push_back(value));
+    CHECK(values.front().value == 23);
+
+    sokoban::FrameArray<int> reserved;
+    checkThrows([&] { reserved.reserve(SIZE_MAX); }, "impossible first reserve throws");
+    CHECK(reserved.empty());
+    CHECK(reserved.capacity() == 0);
+    CHECK(!reserved.arenaBacked());
+    CHECK(reserved.push_back(29));
+    CHECK(reserved.front() == 29);
+}
 
 void testFailedFrameArrayCopyPreservesDestination()
 {
@@ -281,6 +348,8 @@ int main()
     testArenaArrayFromExhaustedArenaIsEmptyNotNull();
     testFrameArrayPreservesOwningCopySemantics();
     testArenaBackedFrameArrayKeepsItsFixedCapacity();
+    testEmptyFrameArraysRemainWritableThroughCopiesAndMoves();
+    testFailedFirstFrameArrayWriteLeavesUsableStorage();
     testFailedFrameArrayCopyPreservesDestination();
     testRenderFrameTakesAllCollectionStorageInOneArena();
 

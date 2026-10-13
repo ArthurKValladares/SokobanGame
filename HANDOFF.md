@@ -222,18 +222,20 @@ Compact metrics, finalized-export proof, previews and native source snapshots
 remain in ignored `out/ground-modules/`. That transition preserved
 1,144 accepted boulders, 190 floating rocks and 191,939 export triangles;
 near-lip coverage is at least 98.50% across all 960 checked slices.
-The broader Debug
-allocation suite still reports 16-byte debug-container allocations across
-unrelated paths; its optimized counterpart passed the earlier runtime baseline.
+The allocation suite now compares exact counts and bytes with independently
+measured standard-library bookkeeping in Debug; optimized baselines remain
+zero. Empty frame collections lazily acquire owning storage, removing unused
+vector proxies from render frames. Payload-allocation positive controls protect
+the regression check. Current evidence is in `out/review/target10/`.
 
 The floating-island sky uses three independently drifting procedural cloud
 layers with world-space parallax. Debug and optimized game builds pass, as do
 the focused sky, water-entry ripple, GPU ABI, shader reload, scene preparation,
 content pipeline and thumbnail suites. A 240-frame Debug capture and optimized
-puzzle/water captures complete with zero dropped draws. The older Vulkan smoke
-and preview suites fail in their processed-ground fixtures because GroundRock01
-now uses a native island module; their variant-triangle counters remain zero.
-The same failures occur with the sky disabled. Their preview-inset checks pass.
+puzzle/water captures complete with zero dropped draws. Vulkan smoke and
+preview regressions use an isolated legacy-ground fixture for processing, rim
+and chunk checks, and the current staged native kit for authored-ground
+rendering checks. Their preview-inset checks remain in the same suites.
 Cloud lattice corners now use integer hashing to remove seams caused by GPU
 floating-point contraction. The 1024-square sky regression samples 1 ms steps
 at 0, 45 and 120 seconds: the original shader jumps by 16 RGB steps, while the
@@ -468,13 +470,15 @@ fixture. A 240-frame Debug `--require-validation` capture with dense ground,
 water and point lights completed without VUID errors. Its missing Epic overlay
 manifest and unused shader-output warnings also occur in the prior baseline.
 
-The full Debug suite was not rebuilt or rerun for this experiment. Its prior
-baseline passed 95 of 96: `scene_preparation_allocations` reports allocations in warmed
-gameplay, editor, menu and profiler paths. Its scene-preparation and parallelFor
-checks remain allocation-free. The Debug failure is an open validation issue;
-the optimized configuration passes that suite. Reproduce it with
-`ctest --preset dev -R '^scene_preparation_allocations$' --output-on-failure`
-before claiming a passing Debug baseline.
+That experiment did not rebuild the full Debug suite; its prior baseline
+passed 95 of 96 because the allocation fixture treated MSVC checked-iterator
+bookkeeping as payload allocation. The October 13 review follow-up removes
+unused frame/scratch vector construction and gives remaining Debug bookkeeping
+exact independent count/byte baselines. All 114 freshly built Debug CTest tests
+now pass, including the corrected native/legacy GPU fixtures and package gate.
+Seven focused optimized suites also pass: allocation, material, frame storage,
+ground geometry/selection and both GPU fixtures. Reports and logs are in
+`out/review/target10/`.
 
 Linux, sanitizer/static-analysis configurations, a fresh headless build, and
 Release/shipping packages were not rebuilt for this experiment. A passing package

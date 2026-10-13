@@ -1246,7 +1246,9 @@ if(SOKOBAN_BUILD_TESTS)
             STANDALONE TARGET sokoban_preview_rendering_tests
             LIBS sokoban_render_vulkan sokoban_ui
             SOURCES tests/PreviewRenderingTests.cpp
-            DEFINITIONS SOKOBAN_PREVIEW_TEST_ASSETS="$<TARGET_FILE_DIR:sokoban>/assets"
+            DEFINITIONS
+                SOKOBAN_PREVIEW_TEST_ASSETS="$<TARGET_FILE_DIR:sokoban>/assets"
+                SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
             DEPENDS sokoban_content
         )
         if(SOKOBAN_DEVELOPER_TOOLS_ENABLED)

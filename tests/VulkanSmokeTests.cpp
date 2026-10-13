@@ -1,14 +1,17 @@
 #include "ScopedTestDirectory.hpp"
+#include "GroundGpuFixture.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/AnimationCatalog.hpp"
 #include "engine/ContentPipeline.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/OverworldMap.hpp"
+#include "engine/RenderFrameBuilder.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/VulkanDeviceContext.hpp"
+#include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/VulkanGroundChunkCache.hpp"
 #include "engine/render/VulkanMemoryAllocator.hpp"
@@ -1411,12 +1414,13 @@ void exerciseGroundRimDrawBudgetFallback(SDL_Window* window)
     const auto assetRoot = std::filesystem::path(SOKOBAN_VULKAN_TEST_ASSETS);
     const auto manifest = AssetManifest::loadFromFile(assetRoot / "manifest.json");
     auto font = FontAtlas::loadDefault(assetRoot);
+    const LegacyGroundGpuFixture fixture(assetRoot, manifest);
     ScopedTestDirectory temporary("ground-rim-budget");
-    VulkanRenderer renderer(window, assetRoot, temporary.path() / "cache.bin",
-        manifest, font, AntiAliasingMode::None, 100,
+    VulkanRenderer renderer(window, fixture.root(), temporary.path() / "cache.bin",
+        fixture.manifest(), font, AntiAliasingMode::None, 100,
         { .vsync = false }, {}, false, true, true, false);
     renderer.setFrustumCullingEnabled(false);
-    const auto ground = manifest.modelIdByName("GroundRock01");
+    const auto ground = fixture.manifest().modelIdByName("GroundRock01");
     RenderAssetRequirements requirements;
     requirements.requireModel(ground);
     renderer.waitForAssets(requirements);
@@ -1491,8 +1495,151 @@ void exerciseGroundRimDrawBudgetFallback(SDL_Window* window)
             "Ground rim budget fallback caps and body differ from an explicitly flat frame");
     }
     renderer.waitIdle();
-    std::cout << "Ground rim budget fallback preserved " << tileCount
+    std::cout << "Legacy ground rim budget fallback preserved " << tileCount
               << " loaded ground bodies and flat caps without dropped draw instances\n";
+}
+
+void exerciseNativeGroundBypassesLegacyProcessing(SDL_Window* window)
+{
+    using namespace sokoban;
+    const auto require = [](bool condition, const char* message) {
+        if (!condition) throw std::runtime_error(message);
+    };
+    const auto assetRoot = std::filesystem::path(SOKOBAN_VULKAN_TEST_ASSETS);
+    const auto manifest = AssetManifest::loadFromFile(assetRoot / "manifest.json");
+    auto font = FontAtlas::loadDefault(assetRoot);
+    ScopedTestDirectory temporary("native-ground-gpu");
+    VulkanRenderer renderer(window, assetRoot, temporary.path() / "cache.bin",
+        manifest, font, AntiAliasingMode::None, 100,
+        { .vsync = false }, {}, false, true, true, false);
+    renderer.setFrustumCullingEnabled(false);
+
+    constexpr Vec3 cameraPosition { 6, 6, 9 };
+    const auto makeFrame = [&](bool legacySettings) {
+        RenderFrameData frame;
+        frame.viewMode = RenderViewMode::Isometric3D;
+        frame.levelWidth = frame.levelHeight = 3;
+        frame.levelDepth = 2;
+        frame.cameraExtent = RenderFrameData::CameraExtent { 0, 0, -1, 3, 3, 3 };
+        frame.cameraOverride = RenderFrameData::CameraOverride {
+            .position = cameraPosition,
+            .forward = Vec3 { 1.5f, 1.5f, 1.0f } - cameraPosition,
+        };
+        frame.lighting.ambient = { .color = { 1, 1, 1 }, .intensity = 1 };
+        frame.lighting.shadows.enabled = false;
+        frame.groundSplat = groundSplatTexturesForScreen(
+            [&](std::string_view name) { return manifest.findTextureIdByName(name); },
+            std::nullopt);
+        require(frame.groundSplat.valid(), "Native ground fixture lacks its painted surface textures");
+        frame.requestedGroundRimWidth = legacySettings ? .12f : 0.0f;
+        frame.requestedGroundRimDepth = legacySettings ? .10f : 0.0f;
+        frame.groundChunksRequested = legacySettings;
+        frame.groundChunkMeshoptimizer = legacySettings;
+        for (int y = 0; y < 3; ++y) {
+            for (int x = 0; x < 3; ++x) {
+                auto tile = tileVisual((x + y) % 2 == 0 ? TileType::Ground : TileType::GroundRock02,
+                    { x, y, 0 }, manifest, {});
+                tile.showGrid = false;
+                frame.tiles.push_back(tile);
+            }
+        }
+        auto raised = tileVisual(TileType::GroundRock03, { 1, 1, 1 }, manifest, {});
+        raised.showGrid = false;
+        frame.tiles.push_back(raised);
+        // Use the gameplay/editor selector: the lower connected cohort uses
+        // square floating-bottom bodies, while the supported raised tile keeps
+        // its regular chamfered body and literal authored cap.
+        processGroundTileGeometry(frame.tiles, manifest);
+        require(std::ranges::all_of(frame.tiles, [&](const auto& tile) {
+            return tile.groundModule && !tile.groundGeometryEligible &&
+                tile.groundRimWidth == 0 && tile.groundRimDepth == 0 &&
+                authoredGroundTileVariant(manifest.model(tile.model)).has_value() &&
+                !isProcessableGroundRockModel(manifest.model(tile.model));
+        }), "Native ground fixture entered the legacy mesh processor");
+        require(std::ranges::count_if(frame.tiles, [](const auto& tile) {
+            return tile.groundModuleSquare && tile.groundModuleBottom;
+        }) == 9 && !frame.tiles.back().groundModuleSquare && !frame.tiles.back().groundModuleBottom,
+            "Native fixture did not select both stacked square bottoms and a supported chamfered top");
+        return frame;
+    };
+    const auto initial = makeFrame(true);
+    const auto requirements = renderAssetRequirementsForFrame(initial);
+    require(requirements.modelCount() == 4,
+        "Mixed native ground fixture did not select its four distinct authored bodies");
+    renderer.waitForAssets(requirements);
+    uint32_t expectedCapPatches = 0;
+    uint32_t expectedVisibleCapPatches = 0;
+    for (const auto& tile : initial.tiles) {
+        const auto surface = groundTileTopSurface(tile);
+        expectedCapPatches += static_cast<uint32_t>(surface.count);
+        for (const auto& patch : surface.faces()) {
+            Vec3 center {};
+            for (const auto vertex : patch.vertices) center += vertex * .25f;
+            if (dot(patch.normal, cameraPosition - center) > 0) ++expectedVisibleCapPatches;
+        }
+    }
+    require(expectedCapPatches > initial.tiles.size() && expectedVisibleCapPatches > initial.tiles.size(),
+        "Native fixture lost the raised tile's authored chamfer facets");
+    // This camera sees the east, south and top logical faces of every tile.
+    // appendIsoFace also culls authored cap patches that face away from it.
+    const auto expectedFaces = initial.tiles.size() * 3 + expectedVisibleCapPatches;
+
+    UiDrawData ui;
+    ui.viewportSize = { 32, 32 };
+    const auto capture = [&](bool legacySettings) {
+        renderer.beginDebugUiFrame();
+        const auto prepared = renderer.prepareFrame(makeFrame(legacySettings));
+        renderer.drawFrame(prepared, ui);
+        require(!renderer.hasFatalFailure(), "Native ground fixture failed to render");
+        const auto stats = renderer.renderStats();
+        if (!(stats.unavailableModels == 0 && stats.preparedModels == initial.tiles.size() &&
+                stats.preparedIsoFaces == expectedFaces &&
+                stats.drawCalls > 0 && stats.triangles > expectedCapPatches)) {
+            throw std::runtime_error("Native ground did not draw its resident authored bodies and cap patches: models=" +
+                std::to_string(stats.preparedModels) + ", faces=" + std::to_string(stats.preparedIsoFaces) +
+                ", expectedFaces=" + std::to_string(expectedFaces) +
+                ", authoredPatches=" + std::to_string(expectedCapPatches) +
+                ", visiblePatches=" + std::to_string(expectedVisibleCapPatches) +
+                ", draws=" + std::to_string(stats.drawCalls) + ", triangles=" + std::to_string(stats.triangles) +
+                ", unavailable=" + std::to_string(stats.unavailableModels));
+        }
+        require(stats.groundTrianglesBeforeProcessing == 0 && stats.groundTrianglesAfterProcessing == 0 &&
+                stats.groundShadowTrianglesRemoved == 0 && stats.resolvedGroundRimTiles == 0 &&
+                !stats.groundRimBudgetFallback && stats.generatedGroundRimSurfaces == 0 &&
+                stats.groundRimSurfaceCacheBytes == 0 && stats.groundRimArtifactImports == 0 &&
+                stats.groundChunkDraws == 0 && stats.groundChunkTiles == 0 &&
+                stats.groundChunkUploads == 0 && stats.groundChunkGeometryBytes == 0 &&
+                stats.groundChunkOriginalBytes == 0 && stats.groundChunkInputVertices == 0 &&
+                stats.groundChunkOutputVertices == 0 &&
+                stats.groundChunkResidentBytes == 0 && stats.groundChunkStagingBytes == 0,
+            "Native ground unexpectedly generated legacy side variants, rims or chunks");
+        // The enabled empty candidate set has one cache bookkeeping generation;
+        // it must never become geometry or a GPU upload, including after disabling.
+        require(stats.groundChunkCacheRebuilds == 1,
+            "Native ground changed the empty legacy chunk cache generation");
+        require(stats.groundChunksRequested == legacySettings && stats.groundChunkMeshoptimizer == legacySettings,
+            "Native ground fixture did not exercise both legacy toggle settings");
+        const auto assets = renderer.assetLoadingStats();
+        require(assets.loadedModels == requirements.modelCount() && assets.failedAssets == 0 &&
+                assets.modelResidencyBytes > 0 && assets.textureResidencyBytes > 0 &&
+                assets.residencyBudgetBlocks == 0 && assets.droppedDrawInstances == 0 &&
+                assets.droppedSkinningInstances == 0,
+            "Native ground rendering lost resident resources or exceeded its draw budget");
+        const auto pixel = renderer.projectToPixels(prepared, { 1.5f, 1.5f, 2.0f });
+        const auto picked = pixel ? renderer.pickIsoGroundPoint(prepared, *pixel) : std::nullopt;
+        require(picked && std::abs(picked->z - 2.0f) < .0001f,
+            "Raised native cap did not retain its authored paintable surface height");
+        return renderer.captureRenderedFrame();
+    };
+    const auto enabled = capture(true);
+    const auto disabled = capture(false);
+    require(enabled.width == disabled.width && enabled.height == disabled.height && enabled.rgba == disabled.rgba,
+        "Legacy rim/chunk settings changed the current native ground image");
+    renderer.waitIdle();
+    require(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a native ground rendering error");
+    std::cout << "Native ground drew four mixed authored bodies and " << expectedCapPatches
+              << " cap patches with identical legacy settings on/off and no processed ground resources\n";
 }
 
 void exerciseAnimatedSkyClouds()
@@ -1780,6 +1927,7 @@ int main(int argc, char** argv)
         submitNoOp(deviceContext);
         exerciseRendererAssetPublicationBudget(window.get());
         exerciseGroundRimDrawBudgetFallback(window.get());
+        exerciseNativeGroundBypassesLegacyProcessing(window.get());
         exerciseAnimatedSkyClouds();
         std::cout << "Vulkan hidden-surface smoke test passed\n";
         return 0;

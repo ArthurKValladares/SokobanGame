@@ -248,15 +248,14 @@ void processGroundGeometry(
     // At frame capacity this is 128 KiB, inside the frame's existing 2 MiB
     // scratch allowance. Insertion and four neighbour lookups are expected O(n).
     const std::size_t capacity = std::bit_ceil(eligibleCount * 2);
-    std::vector<uint32_t> owningTable;
+    std::optional<std::vector<uint32_t>> owningTable;
     uint32_t* table = nullptr;
     if (arena) {
         table = arena->allocateUninitialized<uint32_t>(capacity);
         if (!table) return;
         std::uninitialized_fill_n(table, capacity, uint32_t { 0 });
     } else {
-        owningTable.resize(capacity);
-        table = owningTable.data();
+        table = owningTable.emplace(capacity).data();
     }
     const auto slotFor = [&](GridPosition3 cell) {
         std::size_t slot = cellHash(cell) & (capacity - 1);

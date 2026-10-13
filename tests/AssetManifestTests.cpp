@@ -5,6 +5,7 @@
 #include "engine/GroundTileGeometry.hpp"
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
+#include "engine/render/TextureSourceLoader.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -707,7 +708,7 @@ void testRealManifestFile()
     CHECK_MESSAGE(
         manifest.model(rock).materialMode ==
             sokoban::ModelMaterialMode::Auto,
-        "rock uses PBR maps while its variant preserves the bright engine tint");
+        "painted boulder uses its authored glTF material without a manifest override");
 
     const sokoban::RenderModel turret = manifest.modelIdByName("Turret");
     CHECK_MESSAGE(
@@ -787,19 +788,71 @@ void testRealManifestFile()
     CHECK_MESSAGE(
         runtimeTextures.model(static_cast<uint32_t>(rock.index())).materialMode ==
             sokoban::ModelMaterialMode::PrimitiveMaterials,
-        "rock runtime binding enables authored PBR maps");
-    for (const sokoban::RenderModel tintedModel : { wall, rock }) {
-        const sokoban::RuntimeModelTextures& textures =
-            runtimeTextures.model(static_cast<uint32_t>(tintedModel.index()));
-        CHECK_MESSAGE(!textures.primitiveMaterials.empty(), "tinted model has a PBR binding");
-        if (!textures.primitiveMaterials.empty()) {
-            const auto& binding = textures.primitiveMaterials.front();
-            CHECK_MESSAGE(!binding.bindBaseColorTexture,
-                "tinted model does not restore the dark vendor palette");
-            CHECK_MESSAGE(binding.normalTextureIndex.has_value() &&
-                    binding.metallicRoughnessTextureIndex.has_value(),
-                "tinted model resolves its normal and metallic-roughness maps");
+        "painted boulder runtime binding enables its authored material");
+    const auto& wallTextures = runtimeTextures.model(static_cast<uint32_t>(wall.index()));
+    CHECK_MESSAGE(!wallTextures.primitiveMaterials.empty(), "BricksA has a PBR binding");
+    if (!wallTextures.primitiveMaterials.empty()) {
+        const auto& binding = wallTextures.primitiveMaterials.front();
+        CHECK_MESSAGE(!binding.bindBaseColorTexture,
+            "BricksA does not restore the dark vendor palette");
+        CHECK_MESSAGE(binding.normalTextureIndex.has_value() &&
+                binding.metallicRoughnessTextureIndex.has_value(),
+            "BricksA resolves its normal and metallic-roughness maps");
+    }
+
+    const auto& rockAsset = manifest.model(rock);
+    CHECK_MESSAGE(rockAsset.path == "custom/models/chunky_boulder.glb",
+        "Stone resolves the artist-authored painted boulder");
+    CHECK(rockAsset.geometry == sokoban::ModelGeometry::Static);
+    CHECK(rockAsset.preserveAspectRatio && !rockAsset.preserveSourceScale && !rockAsset.rotateHalfTurn);
+    CHECK(manifest.modelForTile(sokoban::TileType::Rock) == rock);
+    CHECK(std::abs(manifest.tileScale(sokoban::TileType::Rock) - .93f) < .000001f);
+    CHECK(sokoban::tileColor(sokoban::TileType::Rock) == sokoban::Vec4({ 1, 1, 1, 1 }));
+    const auto& rockTextures = runtimeTextures.model(static_cast<uint32_t>(rock.index()));
+    CHECK_MESSAGE(rockTextures.primitiveMaterials.size() == 1 && rockTextures.requiredTextures.size() == 1,
+        "painted boulder has one material and one authored albedo image");
+    if (rockTextures.primitiveMaterials.size() == 1) {
+        const auto& binding = rockTextures.primitiveMaterials.front();
+        CHECK_MESSAGE(binding.bindBaseColorTexture,
+            "painted boulder binds its terracotta-and-slate albedo");
+        CHECK_MESSAGE(!binding.normalTextureIndex && !binding.metallicRoughnessTextureIndex &&
+                !binding.occlusionTextureIndex && !binding.emissiveTextureIndex,
+            "painted boulder retains uniform matte roughness without auxiliary material maps");
+        if (binding.bindBaseColorTexture) {
+            const auto& texture = runtimeTextures.textures().at(binding.textureIndex);
+            const auto* embedded = std::get_if<sokoban::GltfBufferViewTextureSource>(&texture.identity.source);
+            CHECK_MESSAGE(embedded != nullptr && embedded->document == rockAsset.path && embedded->mimeType == "image/png",
+                "painted boulder albedo comes from its embedded PNG");
+            CHECK(texture.identity.interpretation.colorSpace == sokoban::TextureColorSpace::Srgb);
+            CHECK(texture.identity.interpretation.magFilter == sokoban::TextureMagnificationFilter::Linear);
+            CHECK(texture.identity.interpretation.minFilter == sokoban::TextureMinificationFilter::LinearMipmapLinear);
+            const auto albedo = sokoban::loadRgbaTextureSource(*root, texture.identity.source);
+            const auto paintedSource = sokoban::loadRgbaImage(
+                *root / "custom/source/chunky_boulder/boulder_albedo.png");
+            CHECK_MESSAGE(albedo.width == 1024 && albedo.height == 1024 &&
+                    albedo.width == paintedSource.width && albedo.height == paintedSource.height &&
+                    albedo.rgba == paintedSource.rgba,
+                "embedded boulder albedo exactly preserves the current artist-painted source pixels");
         }
+    }
+    const auto rockMesh = sokoban::loadGltfMesh(*root / rockAsset.path, {
+        .preserveAspectRatio = rockAsset.preserveAspectRatio,
+        .preserveSourceScale = rockAsset.preserveSourceScale,
+        .rotateHalfTurn = rockAsset.rotateHalfTurn,
+        .primitiveMaterials = rockTextures.primitiveMaterials,
+    });
+    CHECK(!rockMesh.vertices.empty() && !rockMesh.indices.empty());
+    CHECK(rockMesh.materials.size() == 1);
+    if (rockMesh.materials.size() == 1) {
+        const auto& material = rockMesh.materials.front();
+        CHECK(material.baseColorFactor == sokoban::Vec4({ 1, 1, 1, 1 }));
+        CHECK(material.baseColorTexture != 0 && material.baseColorUvSet == 0);
+        CHECK_MESSAGE(material.metallicFactor == 0 && std::abs(material.roughnessFactor - .92f) < .000001f,
+            "painted boulder remains dielectric with its uniform 0.92 roughness");
+        CHECK(material.normalTexture == 0 && material.metallicRoughnessTexture == 0 &&
+            material.occlusionTexture == 0 && material.emissiveTexture == 0);
+        CHECK(material.emissiveFactor == sokoban::Vec3({ 0, 0, 0 }));
+        CHECK(material.doubleSided && material.alphaMode == sokoban::MaterialAlphaMode::Opaque);
     }
     const sokoban::RuntimeModelTextures& turretTextures =
         runtimeTextures.model(static_cast<uint32_t>(turret.index()));

@@ -1,4 +1,5 @@
 #include "ScopedTestDirectory.hpp"
+#include "GroundGpuFixture.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/render/PngWriter.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
@@ -585,17 +586,21 @@ void verifyRimHeavyGroundChunkPublication(SDL_Window* window,
     const std::filesystem::path& root, FontAtlas& font,
     const AssetManifest& manifest, const std::filesystem::path& cache)
 {
-    VulkanRenderer renderer(window, root, cache, manifest, font,
+    const LegacyGroundGpuFixture fixture(root, manifest);
+    const auto& legacyManifest = fixture.manifest();
+    VulkanRenderer renderer(window, fixture.root(), cache, legacyManifest, font,
         AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
     renderer.setFrustumCullingEnabled(false);
     constexpr uint32_t rowWidth = 30;
     constexpr uint32_t tileCount = rowWidth * rowWidth;
     constexpr uint64_t uploadLimit = 8ULL * 1024 * 1024;
-    const RenderModel ground = manifest.modelIdByName("GroundRock01");
+    const RenderModel ground = legacyManifest.modelIdByName("GroundRock01");
     const auto splat = groundSplatTexturesForScreen(
-        [&](std::string_view name) { return manifest.findTextureIdByName(name); },
+        [&](std::string_view name) { return legacyManifest.findTextureIdByName(name); },
         std::nullopt);
-    verify(splat.valid(), "Ground chunk fixture is missing its splat textures");
+    verify(splat.valid() && !splat.rimWall.isNone() && !splat.rimWallNormal.isNone() &&
+            !splat.rimWallOrm.isNone(),
+        "Ground chunk fixture is missing its splat or rim-wall textures");
 
     const auto makeFrame = [&](bool chunks, bool optimize) {
         RenderFrameData frame;
@@ -712,7 +717,7 @@ void verifyRimHeavyGroundChunkPublication(SDL_Window* window,
     verifyAdopted(draw(true, false), 2, 2, false);
     verify(vulkanDebug::validationErrorCount() == 0,
         "Vulkan validation reported a rim-heavy ground chunk publication error");
-    std::cout << "Rim-heavy ground chunks: " << tileCount
+    std::cout << "Rim-heavy legacy ground chunks: " << tileCount
               << " tiles adopted without publication starvation\n";
 }
 

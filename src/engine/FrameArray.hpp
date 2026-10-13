@@ -11,9 +11,10 @@
 
 namespace sokoban {
 
-// Vector-compatible frame storage. Ordinary frames own a std::vector so tests
-// and offline tools remain freely copyable. Live render frames select the
-// ArenaArray alternative and take their whole capacity in one arena bump.
+// Vector-compatible frame storage. Ordinary frames acquire an owning vector
+// on their first write, so empty optional collections require no heap storage
+// or debug-iterator bookkeeping. Live render frames select the ArenaArray
+// alternative and take their whole capacity in one arena bump.
 template <class T>
 class FrameArray {
 public:
@@ -39,9 +40,11 @@ public:
     // arena; move, or take a reference, when you do not. `clone()` says so at
     // the call site.
     FrameArray(const FrameArray& other)
-        : storage_(std::in_place_type<std::vector<T>>,
-              other.begin(), other.end())
     {
+        if (!other.empty()) {
+            std::vector<T> values(other.begin(), other.end());
+            storage_ = std::move(values);
+        }
     }
 
     // An explicit copy, for the places that want the heap copy on purpose.
@@ -76,26 +79,26 @@ public:
 
     bool push_back(const T& value)
     {
-        if (auto* vector = std::get_if<std::vector<T>>(&storage_)) {
-            vector->push_back(value);
-            return true;
+        if (auto* arena = std::get_if<ArenaArray<T>>(&storage_)) {
+            return arena->push_back(value);
         }
-        return std::get<ArenaArray<T>>(storage_).push_back(value);
+        owningStorage().push_back(value);
+        return true;
     }
 
     bool push_back(T&& value)
     {
-        if (auto* vector = std::get_if<std::vector<T>>(&storage_)) {
-            vector->push_back(std::move(value));
-            return true;
+        if (auto* arena = std::get_if<ArenaArray<T>>(&storage_)) {
+            return arena->push_back(std::move(value));
         }
-        return std::get<ArenaArray<T>>(storage_).push_back(value);
+        owningStorage().push_back(std::move(value));
+        return true;
     }
 
     void reserve(std::size_t capacity)
     {
-        if (auto* vector = std::get_if<std::vector<T>>(&storage_)) {
-            vector->reserve(capacity);
+        if (!arenaBacked() && capacity != 0) {
+            owningStorage().reserve(capacity);
         }
     }
 
@@ -103,13 +106,16 @@ public:
     {
         if (auto* values = std::get_if<std::vector<T>>(&storage_)) {
             values->clear();
-        } else {
-            arenaStorage().clear();
+        } else if (auto* arena = std::get_if<ArenaArray<T>>(&storage_)) {
+            arena->clear();
         }
     }
 
     iterator erase(const_iterator first, const_iterator last)
     {
+        if (first == last) {
+            return const_cast<iterator>(first);
+        }
         if (auto* vector = std::get_if<std::vector<T>>(&storage_)) {
             const auto firstOffset = first - vector->data();
             const auto lastOffset = last - vector->data();
@@ -118,7 +124,7 @@ public:
                 vector->begin() + lastOffset);
             return vector->data() + firstOffset;
         }
-        return std::get<ArenaArray<T>>(storage_).erase(first, last);
+        return arenaStorage().erase(first, last);
     }
 
     iterator erase(const_iterator position)
@@ -128,18 +134,24 @@ public:
 
     [[nodiscard]] std::size_t size() const noexcept
     {
+        if (const auto* arena = std::get_if<ArenaArray<T>>(&storage_)) {
+            return arena->size();
+        }
         if (const auto* values = std::get_if<std::vector<T>>(&storage_)) {
             return values->size();
         }
-        return arenaStorage().size();
+        return 0;
     }
 
     [[nodiscard]] std::size_t capacity() const noexcept
     {
+        if (const auto* arena = std::get_if<ArenaArray<T>>(&storage_)) {
+            return arena->capacity();
+        }
         if (const auto* values = std::get_if<std::vector<T>>(&storage_)) {
             return values->capacity();
         }
-        return arenaStorage().capacity();
+        return 0;
     }
 
     [[nodiscard]] bool empty() const noexcept { return size() == 0; }
@@ -157,22 +169,28 @@ public:
 
     [[nodiscard]] T* data() noexcept
     {
+        if (auto* arena = std::get_if<ArenaArray<T>>(&storage_)) {
+            return arena->data();
+        }
         if (auto* values = std::get_if<std::vector<T>>(&storage_)) {
             return values->data();
         }
-        return arenaStorage().data();
+        return nullptr;
     }
     [[nodiscard]] const T* data() const noexcept
     {
+        if (const auto* arena = std::get_if<ArenaArray<T>>(&storage_)) {
+            return arena->data();
+        }
         if (const auto* values = std::get_if<std::vector<T>>(&storage_)) {
             return values->data();
         }
-        return arenaStorage().data();
+        return nullptr;
     }
     [[nodiscard]] iterator begin() noexcept { return data(); }
-    [[nodiscard]] iterator end() noexcept { return data() + size(); }
+    [[nodiscard]] iterator end() noexcept { return empty() ? data() : data() + size(); }
     [[nodiscard]] const_iterator begin() const noexcept { return data(); }
-    [[nodiscard]] const_iterator end() const noexcept { return data() + size(); }
+    [[nodiscard]] const_iterator end() const noexcept { return empty() ? data() : data() + size(); }
     [[nodiscard]] const_iterator cbegin() const noexcept { return begin(); }
     [[nodiscard]] const_iterator cend() const noexcept { return end(); }
 
@@ -195,6 +213,20 @@ public:
     }
 
 private:
+    [[nodiscard]] std::vector<T>& owningStorage()
+    {
+        if (auto* values = std::get_if<std::vector<T>>(&storage_)) {
+            return *values;
+        }
+        assert(std::holds_alternative<std::monostate>(storage_));
+        // Finish construction before replacing the lazy alternative. Later
+        // reserve/push failures leave an ordinary valid, empty vector, and no
+        // throwing element construction occurs inside variant::emplace.
+        std::vector<T> values;
+        storage_ = std::move(values);
+        return *std::get_if<std::vector<T>>(&storage_);
+    }
+
     // Constructors and moves preserve an active alternative, and copy
     // assignment commits only after its potentially throwing work succeeds.
     // Unlike std::visit/std::get, this access cannot throw bad_variant_access.
@@ -212,7 +244,7 @@ private:
         return *values;
     }
 
-    std::variant<std::vector<T>, ArenaArray<T>> storage_;
+    std::variant<std::monostate, std::vector<T>, ArenaArray<T>> storage_;
 };
 
 } // namespace sokoban

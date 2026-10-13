@@ -98,8 +98,10 @@ Docked viewport resizing still samples that native display image through ImGui.
 
 `ui` tests cover shaping, kerning, script fallback, contextual Arabic forms,
 bidirectional ordering, grapheme wrapping, filtering gutters, cache updates
-and mixed text/icons. `scene_preparation_allocations` checks that warmed menu
-frames continue to allocate no memory.
+and mixed text/icons. `scene_preparation_allocations` checks warmed menu frames
+against exact, independently measured standard-library bookkeeping budgets.
+Optimized builds require zero allocations; MSVC Debug permits the expected
+iterator proxies while detecting additional payload allocations.
 
 With `SOKOBAN_BUILD_VULKAN_SMOKE_TESTS=ON`, `text_rendering` renders small and
 large text, multiple scripts and a generated icon through the real Vulkan

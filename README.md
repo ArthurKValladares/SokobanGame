@@ -465,7 +465,13 @@ actionable synchronization stall. For an isolated comparison, pass
 after warm-up, serial scene preparation, parallel scene preparation, and
 `TaskSystem::parallelFor` coordination must complete 64 representative runs
 with zero C++ general-heap allocations. It also checks warmed gameplay,
-editor, UI, input and profiler paths. The parallel scene path uses
+editor, UI, input and profiler paths. Their exact allocation counts and bytes
+must match independently measured standard-library bookkeeping: MSVC Debug
+can allocate iterator proxies for empty vectors and short strings. These
+baselines are zero in optimized builds, and additional payload allocations
+fail the checks. Empty `FrameArray` collections acquire their owning storage
+on first write, so unused render collections need no heap bookkeeping.
+The parallel scene path uses
 `TaskSystem::scopedTask`, whose callable and completion state stay on the
 waiting stack instead of allocating `packaged_task`/`future` shared state;
 `parallelFor` keeps its join-before-return coordination state there too.

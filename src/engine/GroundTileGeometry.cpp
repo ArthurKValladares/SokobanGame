@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -167,9 +168,11 @@ void processGroundTileGeometry(std::span<RenderFrameData::Tile> tiles, const Ass
     const auto count = static_cast<std::size_t>(std::ranges::count_if(tiles, [](const auto& tile) {
         return compatibleGround(tile) && !tile.isEditorPreview;
     }));
-    std::vector<GridPosition3> owned;
-    std::vector<std::size_t> ownedParents;
-    std::vector<uint8_t> ownedSquare;
+    // The arena path does not need owning containers, including the checked
+    // iterator bookkeeping allocated by empty vectors in MSVC Debug builds.
+    std::optional<std::vector<GridPosition3>> owned;
+    std::optional<std::vector<std::size_t>> ownedParents;
+    std::optional<std::vector<uint8_t>> ownedSquare;
     GridPosition3* storage = nullptr;
     std::size_t* parents = nullptr;
     uint8_t* squareCohorts = nullptr;
@@ -179,9 +182,9 @@ void processGroundTileGeometry(std::span<RenderFrameData::Tile> tiles, const Ass
             parents = arena->allocateUninitialized<std::size_t>(count);
             squareCohorts = arena->allocateUninitialized<uint8_t>(count);
         } else {
-            owned.resize(count); storage = owned.data();
-            ownedParents.resize(count); parents = ownedParents.data();
-            ownedSquare.resize(count); squareCohorts = ownedSquare.data();
+            storage = owned.emplace(count).data();
+            parents = ownedParents.emplace(count).data();
+            squareCohorts = ownedSquare.emplace(count).data();
         }
     }
     std::span<GridPosition3> occupied;

@@ -1,6 +1,7 @@
 #include "TestHarness.hpp"
 
 #include "engine/TaskSystem.hpp"
+#include "engine/FrameArray.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
 #include "engine/render/GroundChunkGeometry.hpp"
 #include "engine/render/ProcessedGroundArtifact.hpp"
@@ -22,13 +23,19 @@
 #include "engine/ui/SelectorPrompt.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <new>
+#include <span>
+#include <string>
+#include <vector>
 
 namespace allocationTracking {
 
@@ -168,20 +175,107 @@ void operator delete[](
 
 namespace {
 
-template <typename Function>
-void checkNoFrameAllocations(const char* name, Function&& function)
+[[nodiscard]] bool sameAllocations(
+    allocationTracking::Sample actual, allocationTracking::Sample expected)
+{
+    return actual.allocations == expected.allocations && actual.bytes == expected.bytes;
+}
+
+struct NoContainerBookkeeping {
+    void operator()() const {}
+};
+
+// MSVC checked iterators allocate bookkeeping even for empty vectors and
+// small strings. Compare against independent, payload-free container
+// operations, rather than excluding allocation sizes or learning a budget
+// from the production operation. On unchecked standard libraries these
+// baselines are zero. Every unlisted path still requires exactly zero.
+template <typename Function, typename Bookkeeping = NoContainerBookkeeping>
+void checkNoFrameAllocations(
+    const char* name, Function&& function, Bookkeeping&& bookkeeping = {})
 {
     for (int index = 0; index < 8; ++index) {
         function();
     }
+    const auto expected = allocationTracking::measure([&] {
+        for (int index = 0; index < 64; ++index) {
+            bookkeeping();
+        }
+    });
     const auto sample = allocationTracking::measure([&] {
         for (int index = 0; index < 64; ++index) {
             function();
         }
     });
     std::cout << name << " count=" << sample.allocations
-              << " bytes=" << sample.bytes << '\n';
-    CHECK_MESSAGE(sample.allocations == 0, name);
+              << " bytes=" << sample.bytes
+              << " bookkeeping_count=" << expected.allocations
+              << " bookkeeping_bytes=" << expected.bytes << '\n';
+    CHECK_MESSAGE(sameAllocations(sample, expected), name);
+}
+
+void testAllocationContractDetectsPayloads()
+{
+    const auto emptyVector = [] { std::vector<int> values; };
+    const auto baseline = allocationTracking::measure(emptyVector);
+    for (const std::size_t bytes : { std::size_t { 16 }, std::size_t { 256 } }) {
+        const auto withPayload = allocationTracking::measure([&] {
+            emptyVector();
+            // Call the replacement directly so allocation elision cannot
+            // remove this control. Sixteen bytes also matches MSVC's usual
+            // proxy size; it must still fail the exact comparison.
+            void* const payload = ::operator new(bytes);
+            ::operator delete(payload);
+        });
+        CHECK(withPayload.allocations == baseline.allocations + 1);
+        CHECK(withPayload.bytes == baseline.bytes + bytes);
+        CHECK(!sameAllocations(withPayload, baseline));
+    }
+
+    const auto vectorPayload = allocationTracking::measure([] {
+        std::vector<int> values;
+        values.reserve(4);
+    });
+    CHECK(vectorPayload.allocations > baseline.allocations);
+    CHECK(vectorPayload.bytes >= baseline.bytes + 4 * sizeof(int));
+    CHECK(!sameAllocations(vectorPayload, baseline));
+}
+
+void testLazyAndArenaFrameArrayAllocations()
+{
+    using namespace sokoban;
+    FrameArena arena("lazy arrays", arenaBytesFor<int>(4));
+    checkNoFrameAllocations("empty_and_arena_frame_arrays", [&] {
+        FrameArray<int> empty;
+        empty.reserve(0);
+        empty.clear();
+        CHECK(empty.erase(empty.begin(), empty.end()) == empty.end());
+        auto copied = empty.clone();
+        auto moved = std::move(copied);
+        empty = moved;
+        CHECK(std::ranges::empty(empty));
+        CHECK(std::ranges::equal(empty, moved));
+
+        arena.reset();
+        FrameArray<int> arenaValues(arena, 4);
+        auto emptyEscape = arenaValues.clone();
+        auto movedArena = std::move(arenaValues);
+        CHECK(movedArena.push_back(1));
+        CHECK(movedArena.push_back(2));
+        CHECK(movedArena.erase(movedArena.begin(), movedArena.begin()) == movedArena.begin());
+        CHECK(emptyEscape.empty());
+        CHECK(!emptyEscape.arenaBacked());
+        CHECK(!arena.exhausted());
+    });
+}
+
+void emptyGameplayResultBookkeeping(int readyPolls)
+{
+    sokoban::GameplayLoop::UpdateResult result;
+    for (int poll = 0; poll < readyPolls; ++poll) {
+        std::vector<sokoban::GameplaySession::TurretShotEvent> shots;
+        std::vector<sokoban::GameplaySound> sounds;
+    }
 }
 
 void testGameplayFrameAllocations()
@@ -224,7 +318,7 @@ void testGameplayFrameAllocations()
     checkNoFrameAllocations("gameplay_render", draw);
     checkNoFrameAllocations("idle_gameplay_update", [&] {
         (void)GameplayLoop::update(level, session, presentation, {}, 0.0001f, false);
-    });
+    }, [] { emptyGameplayResultBookkeeping(1); });
 
     session.queueMove(MoveDirection::Down);
     (void)GameplayLoop::update(level, session, presentation, {}, 0.0001f, false);
@@ -234,13 +328,13 @@ void testGameplayFrameAllocations()
         (void)session.projectedStateView();
         (void)session.activationPreview(level);
         (void)session.activationPreview(level, true);
-    });
+    }, [] { emptyGameplayResultBookkeeping(2); });
     checkNoFrameAllocations("moving_gameplay_render", draw);
     checkNoFrameAllocations("held_move_update", [&] {
         GameplayLoop::InputFrame input;
         input.down.down = true;
         (void)GameplayLoop::update(level, session, presentation, input, 0.0001f, false);
-    });
+    }, [] { emptyGameplayResultBookkeeping(2); });
 
     const auto previewModel = manifest.playerModel();
     checkNoFrameAllocations("animation_preview_scene", [&] {
@@ -346,6 +440,11 @@ void testEditorFrameAllocations()
         }, arena);
         CHECK(frame.tiles.arenaBacked());
         CHECK(!arena.exhausted());
+    }, [] {
+        // One neighbor visual and one local fallback each construct an empty
+        // pressurePlates vector; no device links are copied during rendering.
+        const Level::Gate neighborVisual;
+        const Level::Gate localFallback;
     });
 }
 
@@ -447,6 +546,38 @@ void testInputFrameAllocations()
     }
 }
 
+// Only the owning strings currently used for row IDs and numeric labels.
+// The rows are captured before measurement; this does not build menu rows,
+// layouts, prompts or draw data. Verify every string fits the implementation's
+// initial small-string capacity so the baseline cannot include payload growth.
+void optionsStringBookkeeping(
+    std::span<const sokoban::OptionsMenuRow> rows, std::size_t smallStringCapacity)
+{
+    using namespace sokoban;
+    for (const auto& row : rows) {
+        const std::string controlId = "options.row." + std::to_string(static_cast<int>(row.id));
+        CHECK(controlId.size() <= smallStringCapacity);
+        if (row.kind == OptionsMenuRowKind::Slider) {
+            std::string displayValue;
+            if (row.sliderDisplay == OptionsMenuSliderDisplay::ExposureEv) {
+                const int tenths = static_cast<int>(std::round(row.sliderValue * 10.0f));
+                const int magnitude = std::abs(tenths);
+                displayValue = (tenths > 0 ? "+" : (tenths < 0 ? "-" : "")) +
+                    std::to_string(magnitude / 10) + "." +
+                    std::to_string(magnitude % 10) + " EV";
+            } else {
+                displayValue = std::to_string(static_cast<int>(
+                    std::round(row.sliderValue * 100.0f))) + "%";
+            }
+            CHECK(displayValue.size() <= smallStringCapacity);
+        } else if (row.kind == OptionsMenuRowKind::CustomRenderScale) {
+            const std::string percent = std::to_string(static_cast<int>(
+                std::round(row.sliderValue * 100.0f))) + "%";
+            CHECK(percent.size() <= smallStringCapacity);
+        }
+    }
+}
+
 void testMenuFrameAllocations()
 {
     using namespace sokoban;
@@ -455,16 +586,18 @@ void testMenuFrameAllocations()
     UiContext ui(font);
     OptionsMenuView view;
     UserSettings settings;
+    const std::size_t smallStringCapacity = std::string {}.capacity();
     for (const auto page : { OptionsMenuPage::Main, OptionsMenuPage::Graphics,
             OptionsMenuPage::Audio, OptionsMenuPage::Controls,
             OptionsMenuPage::EditorControls, OptionsMenuPage::QuitConfirmation }) {
         OptionsMenuState state { .open = true, .page = page };
+        const auto rows = optionsMenuRows(state, settings);
         checkNoFrameAllocations("options_menu", [&] {
             ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
             (void)view.draw(ui, { 1280.0f, 720.0f }, state, settings);
             ui.endFrame();
             CHECK(!ui.frameArena().exhausted());
-        });
+        }, [&] { optionsStringBookkeeping(rows, smallStringCapacity); });
     }
     const auto manifest = AssetManifest::loadFromFile(
         std::filesystem::path(SOKOBAN_TEST_ASSET_DIR) / "manifest.json");
@@ -477,20 +610,22 @@ void testMenuFrameAllocations()
         };
         OptionsMenuState state { .open = true, .page = OptionsMenuPage::Controls,
             .controlsBindingDevice = BindingDeviceClass::Gamepad };
+        const auto rows = optionsMenuRows(state, settings);
         checkNoFrameAllocations("controller_binding_menu", [&] {
             ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
             (void)view.draw(ui, { 1280.0f, 720.0f }, state, settings, &prompts, &gamepad);
             ui.endFrame();
             CHECK(!ui.frameArena().exhausted());
-        });
+        }, [&] { optionsStringBookkeeping(rows, smallStringCapacity); });
     }
     OptionsMenuState controls { .open = true, .page = OptionsMenuPage::EditorControls };
+    const auto controlRows = optionsMenuRows(controls, settings);
     checkNoFrameAllocations("keyboard_binding_menu", [&] {
         ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
         (void)view.draw(ui, { 1280.0f, 720.0f }, controls, settings, &prompts);
         ui.endFrame();
         CHECK(!ui.frameArena().exhausted());
-    });
+    }, [&] { optionsStringBookkeeping(controlRows, smallStringCapacity); });
     InputBindings bindings = defaultInputBindings();
     bindings.forAction(InputAction::MenuConfirm) = {
         KeyboardBinding { "Keypad Enter", keyModifierAll },
@@ -522,7 +657,12 @@ void testMenuFrameAllocations()
     drawTitle({ .down = true });
     drawTitle({ .confirm = true });
     CHECK(title.page() == TitleScreen::Page::SaveSlots);
-    checkNoFrameAllocations("save_slots_menu", [&] { drawTitle(); });
+    checkNoFrameAllocations("save_slots_menu", [&] { drawTitle(); }, [&] {
+        for (int slot = 1; slot <= 3; ++slot) {
+            const std::string label = "Slot " + std::to_string(slot);
+            CHECK(label.size() <= smallStringCapacity);
+        }
+    });
     drawTitle({ .right = true });
     drawTitle({ .confirm = true });
     CHECK(title.page() == TitleScreen::Page::SlotDeleteConfirmation);
@@ -551,7 +691,16 @@ void testProfilerFrameAllocations()
     for (std::size_t index = 0; index < CpuProfiler::capturedFrameCapacity * 2; ++index) {
         frame();
     }
-    checkNoFrameAllocations("profiler_capture", frame);
+    // The two retained hot paths already own their name buffers. Sorting
+    // them only moves strings; checked iterators can allocate a replacement
+    // proxy for the moved-from string, without allocating name storage.
+    std::array<CpuHotPath, 2> sortBaseline {{
+        { .name = "Allocation audit outer frame scope", .exclusiveMilliseconds = 2.0 },
+        { .name = "Allocation audit nested scope", .exclusiveMilliseconds = 1.0 },
+    }};
+    checkNoFrameAllocations("profiler_capture", frame, [&] {
+        std::ranges::sort(sortBaseline, std::greater {}, &CpuHotPath::exclusiveMilliseconds);
+    });
     profiler.setEnabled(false);
 }
 
@@ -820,6 +969,8 @@ void testWarmGroundChunkPreparationAllocations()
 int main()
 {
     std::cout << std::unitbuf;
+    testAllocationContractDetectsPayloads();
+    testLazyAndArenaFrameArrayAllocations();
     testWarmPreparationAllocationCounts();
     testWarmGroundRimPreparationAllocations();
     testWarmGroundChunkPreparationAllocations();
