@@ -9,7 +9,9 @@
 
 #include <exception>
 #include <iostream>
+#include <string>
 #include <unordered_set>
+#include <vector>
 
 namespace {
 
@@ -83,9 +85,29 @@ const Level::Definition assignmentHeuristicDefinition {
     },
 };
 
-void testRelaxedHeuristicUsesMirrorTransport()
+void checkNoHeuristicWork(const solver::Statistics& statistics)
 {
-    TEST("relaxedHeuristicUsesMirrorTransport");
+    CHECK(statistics.heuristicEvaluations == 0);
+    CHECK(!statistics.bestHeuristic.has_value());
+    CHECK(statistics.heuristicGraphCells == 0);
+    CHECK(statistics.heuristicGraphEdges == 0);
+}
+
+void checkSolutionReplays(
+    const Level& level, const Level::Definition& definition, const solver::Result& result)
+{
+    CHECK(result.solved());
+    const auto recording = solution::record(level, definition, result.inputs, "solver regression");
+    CHECK_MESSAGE(recording.solved, "search output solves through the production recording driver");
+    if (recording.solved) {
+        CHECK_MESSAGE(solution::replay(level, recording.solution).passed,
+            "recorded search output replays every settled state");
+    }
+}
+
+void testRelaxedHeuristicFallsBackForMovableMirrors()
+{
+    TEST("relaxedHeuristicFallsBackForMovableMirrors");
     const Level level = Level::loadFromDefinition(
         mirrorHeuristicDefinition, "mirror heuristic test");
     const solver::detail::RelaxedHeuristic heuristic(level);
@@ -94,13 +116,123 @@ void testRelaxedHeuristicUsesMirrorTransport()
     CHECK(heuristic.edgeCount() > 0);
     // Movable mirrors can create transport edges anywhere; fixed authored
     // mirror edges cannot give an admissible estimate for these screens.
-    CHECK(heuristic.mirrorEdgeCount() == 0);
     CHECK(heuristic.estimate(rules::initialState(level)) == 0);
+
+    // Authored mirror glyphs are promoted into movable units during loading,
+    // leaving Air in the static grid. The fallback must still apply after a
+    // push changes the mirror's position from its authored location.
+    for (const auto type : { TileType::MirrorNorthWest, TileType::MirrorNorthEast,
+            TileType::MirrorSouthWest, TileType::MirrorSouthEast }) {
+        std::string row = "C  E ";
+        row[1] = tileTypeToChar(type);
+        const Level::Definition definition { .layers = { { "....." }, { row } } };
+        const Level promoted = Level::loadFromDefinition(definition, "promoted mirror");
+        // Both tile accessors expose the static grid after unit promotion;
+        // authoredTileAt only bypasses implicit water-layer substitution.
+        CHECK(promoted.authoredTileAt(1, 0, 1) == TileType::Air);
+        CHECK(promoted.tileAt(1, 0, 1) == TileType::Air);
+        CHECK(promoted.movableTiles().size() == 1);
+        CHECK(promoted.movableTiles().front().type == type);
+        CHECK(promoted.movableTiles().front().position == (GridPosition3 { 1, 0, 1 }));
+        const solver::detail::RelaxedHeuristic dynamic(promoted);
+        solution::Driver driver(promoted);
+        CHECK(dynamic.estimate(driver.state()) == 0);
+        CHECK(driver.apply(solution::Input::Right));
+        CHECK(driver.state().movables.front().cell == (GridPosition3 { 2, 0, 1 }));
+        CHECK(dynamic.estimate(driver.state()) == 0);
+    }
 
     const Level assignmentLevel = Level::loadFromDefinition(
         assignmentHeuristicDefinition, "assignment heuristic test");
     const solver::detail::RelaxedHeuristic assignment(assignmentLevel);
     CHECK(assignment.estimate(rules::initialState(assignmentLevel)) == 5);
+}
+
+void testRelaxedWalkHeuristicBoundsRemainingInputs()
+{
+    TEST("relaxedWalkHeuristicBoundsRemainingInputs");
+    const Level level = Level::loadFromLayers({ { "....." }, { "C   E" } },
+        "walk distance heuristic");
+    const solver::detail::RelaxedHeuristic heuristic(level);
+    solution::Driver driver(level);
+    // This corridor has no shortcut or moving device: the exact remaining
+    // raw-input distance is known independently of the search's macro cost.
+    for (int remaining = 4; remaining >= 0; --remaining) {
+        const int estimate = heuristic.estimate(driver.state());
+        CHECK(estimate >= 0);
+        CHECK(estimate <= remaining);
+        CHECK(estimate == remaining);
+        if (remaining != 0) {
+            CHECK(driver.apply(solution::Input::Right));
+        }
+    }
+    CHECK(driver.solved());
+}
+
+void testSearchStrategiesPreserveForcedPushCostAndReplay()
+{
+    TEST("searchStrategiesPreserveForcedPushCostAndReplay");
+    const Level::Definition definition { .layers = { { "....." }, { "CR E " } } };
+    const Level level = Level::loadFromDefinition(definition, "forced push cost");
+    const solver::detail::RelaxedHeuristic heuristic(level);
+    for (const auto strategy : { solver::Strategy::BreadthFirst, solver::Strategy::BestFirst }) {
+        const auto result = solver::solve(level, { .maxStates = 1'000, .strategy = strategy });
+        checkSolutionReplays(level, definition, result);
+        // In a single-row corridor every advance pushes the rock; reaching
+        // the End at x3 requires exactly three significant moves.
+        CHECK(result.inputs == (std::vector<solution::Input> {
+            solution::Input::Right, solution::Input::Right, solution::Input::Right }));
+        CHECK(result.statistics.solutionSignificantMoves == 3);
+        if (strategy == solver::Strategy::BreadthFirst) {
+            checkNoHeuristicWork(result.statistics);
+        } else {
+            CHECK(result.statistics.heuristicEvaluations > 0);
+            CHECK(result.statistics.bestHeuristic.has_value());
+            CHECK(result.statistics.heuristicGraphCells == heuristic.traversableCellCount());
+            CHECK(result.statistics.heuristicGraphEdges == heuristic.edgeCount());
+            CHECK(result.statistics.heuristicGraphCells > 0);
+            CHECK(result.statistics.heuristicGraphEdges > 0);
+        }
+    }
+}
+
+void testPortalHeuristicFallbackPreservesSearchAndReplay()
+{
+    TEST("portalHeuristicFallbackPreservesSearchAndReplay");
+    std::string row = "C  #  E";
+    row[1] = tileTypeToChar(TileType::PortalEast);
+    row[5] = tileTypeToChar(TileType::PortalWest);
+    const Level::Definition definition {
+        .layers = { { "......." }, { row } },
+        .portals = { { .cell = { 1, 0, 1 }, .color = { 0.2f, 0.4f, 1.0f } },
+                     { .cell = { 5, 0, 1 }, .color = { 0.2f, 0.4f, 1.0f } } },
+    };
+    const Level level = Level::loadFromDefinition(definition, "portal heuristic fallback");
+    const auto crossing = level.portalCrossing({ 1, 0, 1 }, { 1, 0 });
+    CHECK(crossing.has_value());
+    if (crossing) {
+        CHECK(crossing->exit == (GridPosition3 { 5, 0, 1 }));
+    }
+    const solver::detail::RelaxedHeuristic heuristic(level);
+    solution::Driver driver(level);
+    CHECK(heuristic.estimate(driver.state()) == 0);
+    CHECK(driver.apply(solution::Input::Right));
+    CHECK(driver.apply(solution::Input::Right));
+    CHECK(driver.state().players.front().cell == (GridPosition3 { 5, 0, 1 }));
+    CHECK(heuristic.estimate(driver.state()) == 0);
+    CHECK(driver.apply(solution::Input::Right));
+    CHECK(driver.solved());
+
+    for (const auto strategy : { solver::Strategy::BreadthFirst, solver::Strategy::BestFirst }) {
+        const auto result = solver::solve(level, { .maxStates = 1'000, .strategy = strategy });
+        checkSolutionReplays(level, definition, result);
+        if (strategy == solver::Strategy::BreadthFirst) {
+            checkNoHeuristicWork(result.statistics);
+        } else {
+            CHECK(result.statistics.heuristicEvaluations > 0);
+            CHECK(result.statistics.bestHeuristic == 0);
+        }
+    }
 }
 
 void testDeadPositionAnalysisIsConservativeAndFeatureAware()
@@ -326,6 +458,7 @@ void testSearchResultReplays()
     CHECK(result.statistics.solutionSignificantMoves.has_value());
     CHECK(result.statistics.solutionSignificantMoves.value_or(
         result.inputs.size()) < result.inputs.size());
+    checkNoHeuristicWork(result.statistics);
 }
 
 void testSolverRidesElevators()
@@ -434,22 +567,22 @@ void testPrecomputedMirrorSuccessorReplays()
     // Ends, so Interact is required under the current completion rules.
     const Level level = Level::loadFromDefinition(
         mirrorCompletion, "mirror successor test");
-    const solver::Result result = solver::solve(level, {
-        .maxStates = 10'000,
-        .strategy = solver::Strategy::BestFirst,
-    });
-
-    CHECK(result.solved());
-    CHECK(std::ranges::find(result.inputs, solution::Input::Interact) !=
-        result.inputs.end());
-    CHECK(result.statistics.precomputedSuccessorsReused > 0);
-    CHECK_MESSAGE(
-        solution::record(
-            level,
-            mirrorCompletion,
-            result.inputs,
-            "mirror successor test").solved,
-        "a reused mirror preview must match replay-driver semantics");
+    for (const auto strategy : { solver::Strategy::BreadthFirst, solver::Strategy::BestFirst }) {
+        const solver::Result result = solver::solve(level, {
+            .maxStates = 10'000,
+            .strategy = strategy,
+        });
+        checkSolutionReplays(level, mirrorCompletion, result);
+        CHECK(std::ranges::find(result.inputs, solution::Input::Interact) !=
+            result.inputs.end());
+        CHECK(result.statistics.precomputedSuccessorsReused > 0);
+        if (strategy == solver::Strategy::BreadthFirst) {
+            checkNoHeuristicWork(result.statistics);
+        } else {
+            CHECK(result.statistics.heuristicEvaluations > 0);
+            CHECK(result.statistics.bestHeuristic == 0);
+        }
+    }
 }
 
 void testExhaustionIsDistinctFromStateLimit()
@@ -469,6 +602,7 @@ void testExhaustionIsDistinctFromStateLimit()
     CHECK(exhausted.statistics.generatedStates == 1);
     CHECK(exhausted.statistics.expandedPositions == 1);
     CHECK(exhausted.statistics.unchangedInputs > 0);
+    checkNoHeuristicWork(exhausted.statistics);
 
     const Level searchable =
         Level::loadFromDefinition(pushAndPlateDefinition, "limited solver test");
@@ -485,6 +619,7 @@ void testExhaustionIsDistinctFromStateLimit()
     CHECK(limited.statistics.generatedStates == 1);
     CHECK(limited.statistics.frontierPops == 1);
     CHECK(limited.statistics.expandedPositions == 0);
+    checkNoHeuristicWork(limited.statistics);
 
     const solver::Result tightlyLimited = solver::solve(searchable, {
         .maxStates = 2,
@@ -638,7 +773,10 @@ void testStatusNamesAreStable()
 int main()
 {
     try {
-        testRelaxedHeuristicUsesMirrorTransport();
+        testRelaxedHeuristicFallsBackForMovableMirrors();
+        testRelaxedWalkHeuristicBoundsRemainingInputs();
+        testSearchStrategiesPreserveForcedPushCostAndReplay();
+        testPortalHeuristicFallbackPreservesSearchAndReplay();
         testDeadPositionAnalysisIsConservativeAndFeatureAware();
         testPackedStateKeyIncludesEveryDynamicField();
         testSolverRidesElevators();

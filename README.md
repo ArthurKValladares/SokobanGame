@@ -1358,6 +1358,11 @@ floods/walk states, walking-component cache hits/current and peak size,
 evictions, precomputed-versus-driven successors, local successor duplicates,
 and peak frontier size. Solved screens also report their significant
 state-changing move count.
+Only best-first search constructs and evaluates the relaxed travel heuristic;
+breadth-first search leaves heuristic graph and evaluation counters at zero.
+Authored mirrors are movable entities, so the heuristic does not scan for
+static mirror edges. Screens with movable mirrors or portals retain the
+conservative zero-estimate fallback.
 `--progress-interval N` prints the same counters, including dead-position
 checks and prunes broken down by unit count, static matching, and frozen
 clusters, after approximately every N generated positions. Use a Release
@@ -1377,9 +1382,9 @@ no separate unbounded raw-successor table. New components are canonicalized
 before they can consume retained-node or frontier capacity.
 Best-first depth counts significant actions while raw input length only breaks
 ties, preventing a long harmless walk from outweighing a useful push. Its
-precomputed relaxed graph models push geometry, potentially bridged water, and
-mirror reflection, then finds a minimum-cost distinct assignment of live
-movable units to plates. Ordinary settled steps use the production action
+precomputed relaxed graph models walking, potentially bridged water, open
+gates and elevator/minecart transport, then finds a minimum-cost distinct
+assignment of living heroes to Ends. Ordinary settled steps use the production action
 planner directly. State-changing results found during the walking flood are
 reused as successors instead of being simulated a second time, including
 settled mirror previews and hero switches; equivalent raw outcomes from one

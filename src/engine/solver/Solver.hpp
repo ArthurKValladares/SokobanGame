@@ -82,9 +82,10 @@ struct Statistics {
     std::size_t peakCanonicalWalkRegion = 0;
     std::size_t heuristicEvaluations = 0;
     std::optional<int> bestHeuristic;
+    // Relaxed graph construction is used only by BestFirst. BreadthFirst
+    // leaves these counts and heuristicEvaluations at zero.
     std::size_t heuristicGraphCells = 0;
     std::size_t heuristicGraphEdges = 0;
-    std::size_t heuristicMirrorEdges = 0;
     // Significant state-changing actions in the returned solution. Ordinary
     // walking inputs are retained in Result::inputs but do not inflate this
     // cost or best-first search depth.

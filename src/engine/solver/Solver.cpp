@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <queue>
 #include <tuple>
 #include <unordered_set>
@@ -344,11 +345,12 @@ Result solve(const Level& level, const Options& options)
         result.status = Status::Exhausted;
         return result;
     }
-    const detail::RelaxedHeuristic heuristic(level);
-    result.statistics.heuristicGraphCells =
-        heuristic.traversableCellCount();
-    result.statistics.heuristicGraphEdges = heuristic.edgeCount();
-    result.statistics.heuristicMirrorEdges = heuristic.mirrorEdgeCount();
+    std::optional<detail::RelaxedHeuristic> heuristic;
+    if (options.strategy == Strategy::BestFirst) {
+        heuristic.emplace(level);
+        result.statistics.heuristicGraphCells = heuristic->traversableCellCount();
+        result.statistics.heuristicGraphEdges = heuristic->edgeCount();
+    }
 
     std::vector<Node> nodes;
     nodes.push_back({
@@ -363,8 +365,8 @@ Result solve(const Level& level, const Options& options)
     std::priority_queue<Entry, std::vector<Entry>, std::greater<>> frontier;
     const auto priority = [&](std::size_t index) -> Entry {
         std::size_t score = nodes[index].significantDepth;
-        if (options.strategy == Strategy::BestFirst) {
-            const int remaining = heuristic.estimate(nodes[index].state);
+        if (heuristic) {
+            const int remaining = heuristic->estimate(nodes[index].state);
             ++result.statistics.heuristicEvaluations;
             if (!result.statistics.bestHeuristic ||
                 remaining < *result.statistics.bestHeuristic) {

@@ -985,6 +985,18 @@ void LevelEditorDebugUi::drawTilePalette(
         drawPaletteIcons(false);
     }
 
+    // These pictures are screenshots of the real render, so they go stale when
+    // models, materials or lighting change.
+    if (ImGui::Button("Re-bake Tile Pictures") && callbacks.bakeTileThumbnails) {
+        (void)callbacks.bakeTileThumbnails();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Renders every tile through the normal game path and saves the "
+            "results to assets/custom/thumbnails. Takes a moment and the "
+            "window will flicker through each tile.");
+    }
+
     const std::string_view selectedName = tileTypeName(editor.selectedTile());
     if (tileTypeIsGround(editor.selectedTile())) {
         ImGui::Text("Selected: Ground Rock %02u", groundRockVariantFor(editor.selectedTile()) + 1U);
@@ -1344,17 +1356,6 @@ void LevelEditorDebugUi::drawTilePalette(
         }
     }
 
-    // These pictures are screenshots of the real render, so they go stale when
-    // models, materials or lighting change.
-    if (ImGui::Button("Re-bake Tile Pictures") && callbacks.bakeTileThumbnails) {
-        (void)callbacks.bakeTileThumbnails();
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(
-            "Renders every tile through the normal game path and saves the "
-            "results to assets/custom/thumbnails. Takes a moment and the "
-            "window will flicker through each tile.");
-    }
 #else
     (void)editor;
     (void)bindings;

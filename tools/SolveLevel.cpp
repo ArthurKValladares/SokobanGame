@@ -131,8 +131,7 @@ void appendStatistics(
     if (statistics.bestHeuristic) {
         stream << ", best estimate " << *statistics.bestHeuristic;
         stream << " (" << statistics.heuristicGraphCells << " cells/"
-               << statistics.heuristicGraphEdges << " edges/"
-               << statistics.heuristicMirrorEdges << " mirror)";
+               << statistics.heuristicGraphEdges << " edges)";
     }
     if (statistics.solutionSignificantMoves) {
         stream << ", " << *statistics.solutionSignificantMoves

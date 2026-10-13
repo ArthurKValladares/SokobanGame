@@ -4,12 +4,10 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
 #include <cstdlib>
 #include <limits>
 #include <optional>
 #include <queue>
-#include <utility>
 
 namespace sokoban::solver::detail {
 namespace {
@@ -22,164 +20,6 @@ constexpr std::array directions {
     MoveDirection::Left,
     MoveDirection::Right,
 };
-
-struct MirrorRays {
-    GridPosition first {};
-    GridPosition second {};
-};
-
-struct MirrorHit {
-    GridPosition3 cell {};
-    GridPosition output {};
-    int distance = 0;
-};
-
-TileType tileAt(const Level& level, GridPosition3 cell)
-{
-    return level.tileAt(
-        static_cast<std::uint32_t>(cell.x),
-        static_cast<std::uint32_t>(cell.y),
-        static_cast<std::uint32_t>(cell.z));
-}
-
-std::optional<MirrorRays> mirrorRays(TileType tile)
-{
-    switch (tile) {
-    case TileType::MirrorNorthWest:
-        return MirrorRays { { 0, -1 }, { -1, 0 } };
-    case TileType::MirrorNorthEast:
-        return MirrorRays { { 0, -1 }, { 1, 0 } };
-    case TileType::MirrorSouthWest:
-        return MirrorRays { { 0, 1 }, { -1, 0 } };
-    case TileType::MirrorSouthEast:
-        return MirrorRays { { 0, 1 }, { 1, 0 } };
-    default:
-        return std::nullopt;
-    }
-}
-
-GridPosition3 offset(GridPosition3 cell, GridPosition direction, int scale = 1)
-{
-    return {
-        cell.x + direction.x * scale,
-        cell.y + direction.y * scale,
-        cell.z,
-    };
-}
-
-std::optional<int> distanceAlongRay(
-    GridPosition3 origin,
-    GridPosition3 target,
-    GridPosition ray)
-{
-    if (origin.z != target.z) {
-        return std::nullopt;
-    }
-    const int dx = target.x - origin.x;
-    const int dy = target.y - origin.y;
-    if (ray.x != 0 && dy == 0 && dx * ray.x > 0) {
-        return std::abs(dx);
-    }
-    if (ray.y != 0 && dx == 0 && dy * ray.y > 0) {
-        return std::abs(dy);
-    }
-    return std::nullopt;
-}
-
-bool clearStaticRay(
-    const Level& level,
-    GridPosition3 mirror,
-    GridPosition ray,
-    int first,
-    int last)
-{
-    for (int step = first; step <= last; ++step) {
-        if (!rules::staticCellAllowsEntity(
-                level, offset(mirror, ray, step))) {
-            return false;
-        }
-    }
-    return true;
-}
-
-std::vector<MirrorHit> nearestMirrors(
-    const Level& level,
-    GridPosition3 cell,
-    const std::vector<GridPosition3>& used)
-{
-    std::vector<MirrorHit> nearest;
-    int nearestDistance = 0;
-    if (cell.z < 0 || cell.z >= static_cast<int>(level.depth())) {
-        return nearest;
-    }
-    for (int y = 0; y < static_cast<int>(level.height()); ++y) {
-        for (int x = 0; x < static_cast<int>(level.width()); ++x) {
-            const GridPosition3 mirror { x, y, cell.z };
-            if (std::ranges::find(used, mirror) != used.end()) {
-                continue;
-            }
-            const std::optional<MirrorRays> rays =
-                mirrorRays(tileAt(level, mirror));
-            if (!rays) {
-                continue;
-            }
-            const std::array pairs {
-                std::pair { rays->first, rays->second },
-                std::pair { rays->second, rays->first },
-            };
-            for (const auto& [input, output] : pairs) {
-                const std::optional<int> distance =
-                    distanceAlongRay(mirror, cell, input);
-                if (!distance ||
-                    !clearStaticRay(level, mirror, input, 1, *distance - 1)) {
-                    continue;
-                }
-                if (nearest.empty() || *distance < nearestDistance) {
-                    nearest = { { mirror, output, *distance } };
-                    nearestDistance = *distance;
-                } else if (*distance == nearestDistance) {
-                    nearest.push_back({ mirror, output, *distance });
-                }
-            }
-        }
-    }
-    return nearest;
-}
-
-std::optional<GridPosition3> relaxedMirrorDestination(
-    const Level& level,
-    GridPosition3 start,
-    const std::vector<bool>& traversable,
-    const auto& cellIndex)
-{
-    GridPosition3 current = start;
-    std::vector<GridPosition3> used;
-    const std::size_t maximumChain =
-        static_cast<std::size_t>(level.width()) * level.height();
-    while (used.size() < maximumChain) {
-        const std::vector<MirrorHit> hits =
-            nearestMirrors(level, current, used);
-        if (hits.empty()) {
-            if (used.empty() || !traversable[cellIndex(current)]) {
-                return std::nullopt;
-            }
-            return current;
-        }
-        // Movable units do not branch when two mirrors are equally near; the
-        // production activation rejects the whole transaction in that case.
-        if (hits.size() != 1) {
-            return std::nullopt;
-        }
-        const MirrorHit& hit = hits.front();
-        if (!clearStaticRay(
-                level, hit.cell, hit.output, 1, hit.distance)) {
-            return std::nullopt;
-        }
-        used.push_back(hit.cell);
-        current = offset(hit.cell, hit.output, hit.distance);
-    }
-    return std::nullopt;
-}
 
 int minimumAssignment(const std::vector<std::vector<int>>& costs)
 {
@@ -336,7 +176,9 @@ RelaxedHeuristic::RelaxedHeuristic(const Level& level)
                 for (const MoveDirection direction : directions) {
                     const GridPosition delta =
                         rules::directionOffset(direction);
-                    const GridPosition3 destination = offset(source, delta);
+                    const GridPosition3 destination {
+                        source.x + delta.x, source.y + delta.y, source.z,
+                    };
                     if (const auto crossing = level.portalCrossing(source, delta)) {
                         if (inRange(crossing->exit) && traversable_[index(crossing->exit)]) {
                             edges[index(source)].push_back(index(crossing->exit));
@@ -344,17 +186,6 @@ RelaxedHeuristic::RelaxedHeuristic(const Level& level)
                     } else if (inRange(destination) && traversable_[index(destination)]) {
                         edges[index(source)].push_back(index(destination));
                     }
-                }
-                const std::optional<GridPosition3> reflected =
-                    relaxedMirrorDestination(
-                        level,
-                        source,
-                        traversable_,
-                        [&](GridPosition3 cell) { return index(cell); });
-                if (reflected && *reflected != source &&
-                    inRange(*reflected)) {
-                    edges[index(source)].push_back(index(*reflected));
-                    ++mirrorEdgeCount_;
                 }
             }
         }
@@ -454,9 +285,8 @@ int RelaxedHeuristic::estimate(const GameState& state) const
         const int assignment = minimumAssignment(costs);
         cost += assignment == unreachable ? unreachableCost_ : assignment;
     } else {
-        // Mirrors can create the missing heroes. Until then, allow the same
-        // existing hero to stand in for multiple eventual copies so the
-        // estimate remains useful without declaring the position impossible.
+        // When fewer heroes remain than goals, reuse the nearest living hero
+        // for each goal rather than declaring the position impossible.
         for (std::size_t end = 0; end < level_.ends().size(); ++end) {
             int nearest = unreachableCost_;
             for (std::size_t hero = 0; hero < heroes.size(); ++hero) {

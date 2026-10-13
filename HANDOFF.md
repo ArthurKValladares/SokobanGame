@@ -721,11 +721,15 @@ and the required real-device checks are recorded.
   Do not add another unbounded raw-successor set: the retained canonical set is
   the lossless fallback and grows only to `Options::maxStates`. Search depth
   counts significant actions, with raw input length used only as a priority
-  tie-breaker. `engine/solver/Heuristic.*` precomputes an optimistic graph:
-  ordinary empty-board pushes, water treated as potentially bridged, and
-  independent static mirror reflection. It uses a distinct unit-to-plate
-  assignment and affects ordering only, never correctness. Keep new mechanics
-  optimistic unless their exact relaxed transition is modeled.
+  tie-breaker. Only best-first search constructs `engine/solver/Heuristic.*`'s
+  relaxed travel graph: ordinary walking, water treated as potentially bridged,
+  open gates and optimistic elevator/minecart transport. Its assignment maps
+  Ends to distinct living heroes. Authored mirrors are movable entities;
+  the obsolete per-cell static-mirror scan and counter have been removed.
+  Screens with movable mirrors or portals retain a zero estimate. Breadth-first
+  search builds no heuristic graph. Best-first uses a weighted estimate for
+  ordering and does not promise a shortest solution. Keep new mechanics
+  conservative unless their relaxed transition is modeled.
   Significant directional results discovered during a walking flood are
   already settled production-rule transitions; reuse them rather than running
   the same input through `solution::Driver` again. Settled mirror previews and
