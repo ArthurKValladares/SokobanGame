@@ -1477,6 +1477,7 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         ASSETS_ENV
         SOURCES tests/AssetManifestEditorTests.cpp
+        DEFINITIONS SOKOBAN_ENABLE_TEST_HOOKS=1
     )
     sokoban_add_test(NAME presentation
         LIBS sokoban_core

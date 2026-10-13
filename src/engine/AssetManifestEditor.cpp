@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cwctype>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
@@ -22,12 +23,22 @@ bool samePath(
     if (left.empty() || right.empty()) {
         return false;
     }
-    std::error_code error;
-    const bool equivalent = std::filesystem::equivalent(left, right, error);
-    if (!error) {
-        return equivalent;
-    }
-    return left.lexically_normal() == right.lexically_normal();
+    // A replacement breaks hard links, so equivalent inodes at distinct
+    // filenames still need publication. Resolve path aliases instead.
+    const auto leftAbsolute = std::filesystem::absolute(left);
+    const auto rightAbsolute = std::filesystem::absolute(right);
+    auto leftKey = (std::filesystem::weakly_canonical(leftAbsolute.parent_path()) /
+        leftAbsolute.filename()).native();
+    auto rightKey = (std::filesystem::weakly_canonical(rightAbsolute.parent_path()) /
+        rightAbsolute.filename()).native();
+#ifdef _WIN32
+    const auto foldCase = [](wchar_t character) {
+        return static_cast<wchar_t>(std::towlower(character));
+    };
+    std::ranges::transform(leftKey, leftKey.begin(), foldCase);
+    std::ranges::transform(rightKey, rightKey.begin(), foldCase);
+#endif
+    return leftKey == rightKey;
 }
 
 template <typename Item>
@@ -214,26 +225,10 @@ bool AssetManifestEditor::save()
         const std::string contents = serialize();
         (void)AssetManifest::parse(contents);
 
-        atomicFile::write(filePath_, contents);
         if (!runtimePath_.empty() && !samePath(filePath_, runtimePath_)) {
-            // Publish newly selected sounds with the runtime manifest. Draft
-            // paths may still be missing, matching the staging policy.
-            for (const auto& sound : sounds_) {
-                for (const auto& file : sound.files) {
-                    if (!std::filesystem::exists(filePath_.parent_path() / file)) {
-                        continue;
-                    }
-                    const auto source = soundFilePath(file);
-                    const auto destination = runtimePath_.parent_path() / file;
-                    if (!samePath(source, destination)) {
-                        std::filesystem::create_directories(destination.parent_path());
-                        std::filesystem::copy_file(
-                            source, destination, std::filesystem::copy_options::overwrite_existing);
-                    }
-                }
-            }
-            atomicFile::write(runtimePath_, contents);
-            (void)refreshContentPackageIndex(runtimePath_.parent_path());
+            publishAssetManifest(filePath_, runtimePath_, contents);
+        } else {
+            atomicFile::write(filePath_, contents);
         }
         dirty_ = false;
         status_ = "Saved " + filePath_.string();

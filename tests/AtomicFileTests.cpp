@@ -147,6 +147,106 @@ void testInjectedPermissionAndDiskFullFailuresPreserveDestination()
     CHECK(!std::filesystem::exists(destination.string() + ".tmp"));
 }
 
+void testInjectedReplaceFailureBeforeInstallPreservesBothFilesAndIsConsumed()
+{
+    TEST("replaceFailureBeforeInstall");
+    TemporaryDirectory temporary;
+    const auto destination = temporary.root / "settings.json";
+    const auto replacement = temporary.root / "settings.json.tmp";
+    writeRaw(destination, "original");
+    writeRaw(replacement, "first");
+
+    sokoban::atomicFile::failReplaceAfterForTesting(
+        1, std::errc::permission_denied);
+    sokoban::atomicFile::replace(destination, replacement);
+    CHECK(readRaw(destination) == "first");
+    CHECK(!std::filesystem::exists(replacement));
+
+    writeRaw(replacement, "second");
+    bool permissionDenied = false;
+    try {
+        sokoban::atomicFile::replace(destination, replacement);
+    } catch (const std::system_error& error) {
+        permissionDenied = error.code() ==
+            std::make_error_code(std::errc::permission_denied);
+    }
+    CHECK(permissionDenied);
+    CHECK(readRaw(destination) == "first");
+    CHECK(readRaw(replacement) == "second");
+
+    sokoban::atomicFile::replace(destination, replacement);
+    CHECK(readRaw(destination) == "second");
+    CHECK(!std::filesystem::exists(replacement));
+}
+
+void testInjectedReplaceFailureAfterInstallLeavesInstalledFileAndIsConsumed()
+{
+    TEST("replaceFailureAfterInstall");
+    TemporaryDirectory temporary;
+    const auto destination = temporary.root / "settings.json";
+    const auto replacement = temporary.root / "settings.json.tmp";
+    writeRaw(destination, "original");
+    writeRaw(replacement, "installed before failure");
+
+    sokoban::atomicFile::failReplaceAfterForTesting(
+        0, std::errc::io_error, true);
+    bool syncFailure = false;
+    try {
+        sokoban::atomicFile::replace(destination, replacement);
+    } catch (const std::system_error& error) {
+        syncFailure = error.code() == std::make_error_code(std::errc::io_error);
+    }
+    CHECK(syncFailure);
+    CHECK(readRaw(destination) == "installed before failure");
+    CHECK(!std::filesystem::exists(replacement));
+
+    writeRaw(replacement, "retry");
+    sokoban::atomicFile::replace(destination, replacement);
+    CHECK(readRaw(destination) == "retry");
+    CHECK(!std::filesystem::exists(replacement));
+}
+
+void testInjectedWriteAndReplaceFailuresRemainIndependent()
+{
+    TEST("writeAndReplaceFailuresRemainIndependent");
+    TemporaryDirectory temporary;
+    const auto destination = temporary.root / "settings.json";
+    const auto replacement = temporary.root / "settings.json.tmp";
+    writeRaw(destination, "original");
+
+    sokoban::atomicFile::failWriteAfterForTesting(
+        0, std::errc::no_space_on_device);
+    sokoban::atomicFile::failReplaceAfterForTesting(
+        0, std::errc::permission_denied);
+    bool writeFailure = false;
+    try {
+        sokoban::atomicFile::write(destination, "not written");
+    } catch (const std::system_error& error) {
+        writeFailure = error.code() ==
+            std::make_error_code(std::errc::no_space_on_device);
+    }
+    CHECK(writeFailure);
+    CHECK(readRaw(destination) == "original");
+    CHECK(!std::filesystem::exists(replacement));
+
+    writeRaw(replacement, "not installed");
+    bool replaceFailure = false;
+    try {
+        sokoban::atomicFile::replace(destination, replacement);
+    } catch (const std::system_error& error) {
+        replaceFailure = error.code() ==
+            std::make_error_code(std::errc::permission_denied);
+    }
+    CHECK(replaceFailure);
+    CHECK(readRaw(destination) == "original");
+    CHECK(readRaw(replacement) == "not installed");
+
+    sokoban::atomicFile::replace(destination, replacement);
+    sokoban::atomicFile::write(destination, "both failures consumed");
+    CHECK(readRaw(destination) == "both failures consumed");
+    CHECK(!std::filesystem::exists(replacement));
+}
+
 } // namespace
 
 int main()
@@ -156,6 +256,9 @@ int main()
     testFailedInstallRestoresDisplacedDestination();
     testWriteFailureCleansTemporaryFile();
     testInjectedPermissionAndDiskFullFailuresPreserveDestination();
+    testInjectedReplaceFailureBeforeInstallPreservesBothFilesAndIsConsumed();
+    testInjectedReplaceFailureAfterInstallLeavesInstalledFileAndIsConsumed();
+    testInjectedWriteAndReplaceFailuresRemainIndependent();
 
     if (failures != 0) {
         std::cerr << "AtomicFileTests: " << failures << " failure(s) of "

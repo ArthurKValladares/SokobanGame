@@ -1885,4 +1885,417 @@ ContentStageReport stageContent(
     return report;
 }
 
+namespace {
+
+bool samePublicationBytes(
+    const std::filesystem::path& source,
+    const std::filesystem::path& destination)
+{
+    if (!std::filesystem::is_regular_file(destination) ||
+        std::filesystem::file_size(source) != std::filesystem::file_size(destination)) {
+        return false;
+    }
+    std::ifstream left(source, std::ios::binary);
+    std::ifstream right(destination, std::ios::binary);
+    if (!left || !right) {
+        throw std::runtime_error("cannot compare publication asset: " + source.string());
+    }
+    std::array<char, 64 * 1024> leftBytes {};
+    std::array<char, 64 * 1024> rightBytes {};
+    while (left && right) {
+        left.read(leftBytes.data(), static_cast<std::streamsize>(leftBytes.size()));
+        right.read(rightBytes.data(), static_cast<std::streamsize>(rightBytes.size()));
+        if (left.bad() || right.bad()) {
+            throw std::runtime_error("cannot read publication asset: " + source.string());
+        }
+        if (left.gcount() != right.gcount() ||
+            !std::equal(leftBytes.begin(), leftBytes.begin() + left.gcount(), rightBytes.begin())) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Copy explicitly instead of following directory links in a recursive copy.
+// Overlays must never write through a link inherited from the old package.
+void copyPublicationPackage(
+    const std::filesystem::path& source,
+    const std::filesystem::path& destination)
+{
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(source)) {
+        const auto target = destination / entry.path().lexically_relative(source);
+        if (entry.is_symlink()) {
+            throw std::runtime_error(
+                "runtime content package contains a symbolic link: " + entry.path().string());
+        }
+        if (entry.is_directory()) {
+            std::filesystem::create_directories(target);
+        } else if (entry.is_regular_file()) {
+            std::filesystem::copy_file(entry.path(), target);
+        } else {
+            throw std::runtime_error(
+                "runtime content package contains an unsupported artifact: " + entry.path().string());
+        }
+    }
+}
+
+} // namespace
+
+void publishAssetManifest(
+    const std::filesystem::path& sourceManifest,
+    const std::filesystem::path& runtimeManifest,
+    std::string_view contents)
+{
+    const AssetManifest manifest = AssetManifest::parse(contents);
+    const auto sourceRoot = canonicalRoot(
+        std::filesystem::absolute(sourceManifest).parent_path(), "asset source");
+    const auto sourcePath = sourceRoot / sourceManifest.filename();
+    const auto runtimePath = std::filesystem::absolute(runtimeManifest).lexically_normal();
+    const auto runtimeRoot = std::filesystem::weakly_canonical(runtimePath.parent_path());
+    if (!std::filesystem::is_regular_file(sourcePath) ||
+        std::filesystem::is_symlink(sourcePath)) {
+        throw std::runtime_error("source manifest must be a regular file: " + sourcePath.string());
+    }
+    if (runtimeRoot == runtimeRoot.root_path() || runtimePath.filename().empty() ||
+        isWithin(std::filesystem::path(contentPathKey(runtimeRoot)),
+            std::filesystem::path(contentPathKey(sourceRoot)))) {
+        throw std::runtime_error("runtime package must not contain the source assets directory");
+    }
+
+    enum class TextureInvalidation { None, Source, All };
+    struct PublicationFile {
+        std::filesystem::path source;
+        std::filesystem::path relative;
+        TextureInvalidation invalidation;
+    };
+    std::map<std::string, PublicationFile> files;
+    const auto addFile = [&](const std::filesystem::path& path,
+                             std::string_view label,
+                             TextureInvalidation invalidation,
+                             bool optional = false) {
+        const auto relative = normalizedRelativePath(path, label);
+        const auto key = contentPathKey(relative);
+        if (key == contentPathKey(runtimePath.filename()) || key == "content.index" ||
+            contentPathKey(*relative.begin()) == "compiled-textures") {
+            throw std::runtime_error("asset collides with runtime package metadata: " + relative.string());
+        }
+        const auto absolute = sourceFile(sourceRoot, relative, label, optional);
+        if (absolute.empty()) {
+            return;
+        }
+        const auto [it, inserted] = files.emplace(
+            key, PublicationFile { absolute, relative, invalidation });
+        if (!inserted) {
+            if (it->second.source != absolute) {
+                throw std::runtime_error("multiple assets map to " + relative.string());
+            }
+            it->second.invalidation = std::max(it->second.invalidation, invalidation);
+        }
+    };
+    std::set<std::string> documents;
+    const auto addDocument = [&](const std::filesystem::path& path, std::string_view label) {
+        const auto relative = normalizedRelativePath(path, label);
+        addFile(relative, label, TextureInvalidation::All);
+        if (documents.insert(contentPathKey(relative)).second) {
+            const auto dependencies = inspectGltfAssetDependencies(
+                sourceFile(sourceRoot, relative, label));
+            const auto dependencyLabel = "external dependency of " + relative.string();
+            for (const auto& buffer : dependencies.buffers) {
+                if (buffer.sourceKind == GltfBufferSourceKind::ExternalUri) {
+                    addFile(gltfExternalRelativePath(relative, buffer.uri), dependencyLabel,
+                        TextureInvalidation::All);
+                }
+            }
+            for (const auto& image : dependencies.images) {
+                if (image.sourceKind == GltfImageSourceKind::ExternalUri) {
+                    addFile(gltfExternalRelativePath(relative, image.uri), dependencyLabel,
+                        TextureInvalidation::Source);
+                }
+            }
+        }
+    };
+    for (const auto& texture : manifest.textures()) {
+        addFile(texture.path, "texture '" + texture.name + "'", TextureInvalidation::Source);
+    }
+    for (const auto& model : manifest.models()) {
+        addDocument(model.path, "model '" + model.name + "'");
+        for (const auto& attachment : model.attachments) {
+            addDocument(attachment.path, "attachment on model '" + model.name + "'");
+        }
+    }
+    for (const auto& animation : manifest.animations()) {
+        addDocument(animation.path, "animation '" + animation.name + "'");
+    }
+    for (const auto& sound : manifest.soundSets()) {
+        for (const auto& file : sound.files) {
+            addFile(file, "sound set '" + sound.name + "'", TextureInvalidation::None, true);
+        }
+    }
+    for (const auto& track : manifest.musicTracks()) {
+        addFile(track.file, "music", TextureInvalidation::None);
+    }
+    // Imported assets must carry the same adjacent attribution notices as a
+    // normal content stage. Discover first so adding notices cannot recurse.
+    std::set<std::filesystem::path> noticeDirectories;
+    for (const auto& [key, file] : files) {
+        (void)key;
+        auto directory = file.source.parent_path();
+        while (directory != sourceRoot && isWithin(sourceRoot, directory)) {
+            noticeDirectories.insert(directory);
+            directory = directory.parent_path();
+        }
+    }
+    for (const auto& directory : noticeDirectories) {
+        for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+            if (entry.is_regular_file() && isNoticeFile(entry.path())) {
+                addFile(entry.path().lexically_relative(sourceRoot), "asset notice", TextureInvalidation::None);
+            }
+        }
+    }
+
+    const auto stagingRoot = runtimeRoot.parent_path() /
+        (runtimeRoot.filename().string() + ".manifest-stage");
+    const auto backupRoot = runtimeRoot.parent_path() /
+        (runtimeRoot.filename().string() + ".manifest-backup");
+    const auto sourceStage = sourcePath.parent_path() /
+        (sourcePath.filename().string() + ".publish-stage");
+    const auto sourceBackup = sourcePath.parent_path() /
+        (sourcePath.filename().string() + ".publish-backup");
+    const auto sourceStageTemporary = std::filesystem::path(sourceStage.string() + ".tmp");
+    for (const auto& directory : { runtimeRoot, stagingRoot, backupRoot }) {
+        for (const auto& file : { sourcePath, sourceStage, sourceBackup, sourceStageTemporary }) {
+            const auto directoryKey = std::filesystem::path(contentPathKey(directory));
+            const auto fileKey = std::filesystem::path(contentPathKey(file));
+            if (isWithin(directoryKey, fileKey) || isWithin(fileKey, directoryKey)) {
+                throw std::runtime_error("runtime publication directory overlaps source transaction path: " +
+                    directory.string() + " and " + file.string());
+            }
+        }
+    }
+    for (const auto& reserved : { stagingRoot, backupRoot, sourceStage, sourceBackup, sourceStageTemporary }) {
+        if (std::filesystem::symlink_status(reserved).type() != std::filesystem::file_type::not_found) {
+            throw std::runtime_error("publication transaction path already exists: " + reserved.string());
+        }
+    }
+    bool stagingCreated = false;
+    bool backupCreated = false;
+    bool sourceStageAttempted = false;
+    bool sourceBackupAttempted = false;
+    bool sourceInstallAttempted = false;
+    struct PublicationChange {
+        std::filesystem::path relative;
+        bool hadOriginal;
+        bool deletion;
+        bool attempted = false;
+    };
+    std::vector<PublicationChange> changes;
+    std::vector<std::filesystem::path> createdDirectories;
+    try {
+        std::filesystem::create_directories(runtimeRoot.parent_path());
+        stagingCreated = std::filesystem::create_directory(stagingRoot);
+        if (!stagingCreated) {
+            throw std::runtime_error("cannot create publication staging directory: " + stagingRoot.string());
+        }
+        if (std::filesystem::exists(runtimeRoot)) {
+            copyPublicationPackage(runtimeRoot, stagingRoot);
+        }
+        bool invalidateAllTextures = false;
+        std::vector<std::filesystem::path> changedImages;
+        for (const auto& [key, file] : files) {
+            (void)key;
+            const auto destination = stagingRoot / file.relative;
+            if (!samePublicationBytes(file.source, destination)) {
+                invalidateAllTextures |= file.invalidation == TextureInvalidation::All;
+                if (file.invalidation == TextureInvalidation::Source) {
+                    changedImages.push_back(file.relative);
+                }
+                std::filesystem::create_directories(destination.parent_path());
+                std::filesystem::copy_file(file.source, destination,
+                    std::filesystem::copy_options::overwrite_existing);
+            }
+        }
+        if (invalidateAllTextures) {
+            // Prepared texture names encode identity, not source bytes. This
+            // also covers images embedded in changed glTF buffers/documents,
+            // including identities only used by an older manifest.
+            std::filesystem::remove_all(stagingRoot / "compiled-textures");
+        } else {
+            for (const auto& image : changedImages) {
+                invalidateCompressedTextureArtifactsForSource(stagingRoot, image);
+            }
+        }
+        atomicFile::write(stagingRoot / runtimePath.filename(), contents);
+        (void)refreshContentPackageIndex(stagingRoot);
+        sourceStageAttempted = true;
+        atomicFile::write(sourceStage, contents);
+
+        // Music streams keep files open without delete sharing on Windows.
+        // Prepare a per-file journal so identical files and their containing
+        // directories remain in place throughout publication.
+        std::set<std::string> candidatePaths;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(stagingRoot)) {
+            if (!entry.is_regular_file()) {
+                continue;
+            }
+            const auto relative = entry.path().lexically_relative(stagingRoot);
+            candidatePaths.insert(contentPathKey(relative));
+            const auto destination = runtimeRoot / relative;
+            if (!samePublicationBytes(entry.path(), destination)) {
+                changes.push_back({ relative, std::filesystem::exists(destination), false });
+            }
+        }
+        if (std::filesystem::exists(runtimeRoot)) {
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(runtimeRoot)) {
+                const auto relative = entry.path().lexically_relative(runtimeRoot);
+                if (entry.is_regular_file() && !candidatePaths.contains(contentPathKey(relative))) {
+                    changes.push_back({ relative, true, true });
+                }
+            }
+        }
+        const auto changePriority = [&](const PublicationChange& change) {
+            const auto key = contentPathKey(change.relative);
+            return key == "content.index" ? 2 : key == contentPathKey(runtimePath.filename()) ? 1 : 0;
+        };
+        std::ranges::sort(changes, [&](const auto& left, const auto& right) {
+            const int leftPriority = changePriority(left);
+            const int rightPriority = changePriority(right);
+            return leftPriority != rightPriority ? leftPriority < rightPriority :
+                contentPathKey(left.relative) < contentPathKey(right.relative);
+        });
+        backupCreated = std::filesystem::create_directory(backupRoot);
+        if (!backupCreated) {
+            throw std::runtime_error("cannot create publication backup directory: " + backupRoot.string());
+        }
+        for (const auto& change : changes) {
+            if (change.hadOriginal) {
+                const auto backup = backupRoot / change.relative;
+                std::filesystem::create_directories(backup.parent_path());
+                std::filesystem::copy_file(runtimeRoot / change.relative, backup);
+            }
+        }
+        sourceBackupAttempted = true;
+        std::filesystem::copy_file(sourcePath, sourceBackup);
+        for (auto& change : changes) {
+            const auto destination = runtimeRoot / change.relative;
+            if (!change.deletion) {
+                std::vector<std::filesystem::path> missing;
+                auto directory = destination.parent_path();
+                while (directory != runtimeRoot.parent_path() && !std::filesystem::exists(directory)) {
+                    missing.push_back(directory);
+                    directory = directory.parent_path();
+                }
+                for (auto it = missing.rbegin(); it != missing.rend(); ++it) {
+                    if (std::filesystem::create_directory(*it)) {
+                        createdDirectories.push_back(*it);
+                    }
+                }
+            }
+            // replace can throw after installation during synchronization.
+            change.attempted = true;
+            if (change.deletion) {
+                std::filesystem::remove(destination);
+            } else {
+                atomicFile::replace(destination, stagingRoot / change.relative);
+            }
+        }
+        sourceInstallAttempted = true;
+        atomicFile::replace(sourcePath, sourceStage);
+    } catch (const std::exception& failure) {
+        std::string message = failure.what();
+        bool rollbackFailed = false;
+        const auto restoreFile = [&](const std::filesystem::path& destination,
+                                     const std::filesystem::path& backup,
+                                     const std::filesystem::path& temporary) {
+            try {
+                // A failed install may have left the original untouched and
+                // locked by another reader; do not try to replace it again.
+                if (!samePublicationBytes(backup, destination)) {
+                    // Keep the backup even if restoring it fails after the
+                    // replacement is installed but before synchronization.
+                    std::filesystem::create_directories(temporary.parent_path());
+                    std::filesystem::copy_file(backup, temporary,
+                        std::filesystem::copy_options::overwrite_existing);
+                    atomicFile::replace(destination, temporary);
+                }
+            } catch (const std::exception& restoreError) {
+                rollbackFailed = true;
+                message += "; cannot restore " + destination.string() +
+                    "; backup retained at " + backup.string() + ": " + restoreError.what();
+            }
+        };
+        if (sourceInstallAttempted) {
+            restoreFile(sourcePath, sourceBackup, sourceStage);
+        }
+        std::error_code error;
+        for (auto it = changes.rbegin(); it != changes.rend(); ++it) {
+            if (!it->attempted) {
+                continue;
+            }
+            if (it->hadOriginal) {
+                restoreFile(runtimeRoot / it->relative, backupRoot / it->relative,
+                    stagingRoot / it->relative);
+            } else {
+                std::filesystem::remove(runtimeRoot / it->relative, error);
+                if (error) {
+                    rollbackFailed = true;
+                    message += "; cannot remove failed publication file " + it->relative.string() +
+                        ": " + error.message();
+                }
+            }
+        }
+        for (auto it = createdDirectories.rbegin(); it != createdDirectories.rend(); ++it) {
+            std::filesystem::remove(*it, error);
+            if (error) {
+                rollbackFailed = true;
+                message += "; cannot remove new publication directory " + it->string() +
+                    ": " + error.message();
+            }
+        }
+        if (!rollbackFailed) {
+            if (backupCreated) {
+                std::filesystem::remove_all(backupRoot, error);
+                if (error) {
+                    message += "; cannot clean publication backup " + backupRoot.string() +
+                        ": " + error.message();
+                }
+            }
+            if (sourceBackupAttempted) {
+                std::filesystem::remove(sourceBackup, error);
+                if (error) {
+                    message += "; cannot clean source manifest backup " + sourceBackup.string() +
+                        ": " + error.message();
+                }
+            }
+        }
+        if (stagingCreated) {
+            std::filesystem::remove_all(stagingRoot, error);
+            if (error) {
+                message += "; cannot clean publication stage " + stagingRoot.string() +
+                    ": " + error.message();
+            }
+        }
+        if (sourceStageAttempted) {
+            std::filesystem::remove(sourceStage, error);
+            if (error) {
+                message += "; cannot clean source manifest stage " + sourceStage.string() +
+                    ": " + error.message();
+            }
+        }
+        throw std::runtime_error(message);
+    }
+    std::error_code cleanupError;
+    std::filesystem::remove_all(stagingRoot, cleanupError);
+    if (cleanupError) {
+        log::warning(log::Category::Assets) << "Cannot remove publication stage: " << stagingRoot.string();
+    }
+    std::filesystem::remove(sourceBackup, cleanupError);
+    if (cleanupError) {
+        log::warning(log::Category::Assets) << "Cannot remove manifest backup: " << sourceBackup.string();
+    }
+    std::filesystem::remove_all(backupRoot, cleanupError);
+    if (cleanupError) {
+        log::warning(log::Category::Assets) << "Cannot remove runtime backup: " << backupRoot.string();
+    }
+}
+
 } // namespace sokoban

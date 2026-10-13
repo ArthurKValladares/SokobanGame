@@ -10,7 +10,7 @@
 
 namespace sokoban::atomicFile {
 
-// Durably replaces destination with a fully written same-directory temporary
+// Durably replaces destination with a fully written same-filesystem temporary
 // file. The temporary file is synchronized before installation; the installed
 // file and its containing directory are then synchronized as supported by the
 // host platform. Callers must close the temporary file before calling this.
@@ -29,6 +29,14 @@ void write(
 void failWriteAfterForTesting(
     std::uint32_t successfulWritesBeforeFailure,
     std::errc error);
+
+// Causes one later replace invocation to fail before installation, or just
+// after installation to model a final synchronization failure. The counter is
+// independent of the write hook and the failure is consumed on that invocation.
+void failReplaceAfterForTesting(
+    std::uint32_t successfulReplacementsBeforeFailure,
+    std::errc error,
+    bool afterInstall = false);
 #endif
 
 } // namespace sokoban::atomicFile

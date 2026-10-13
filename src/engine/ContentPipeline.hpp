@@ -161,4 +161,14 @@ void validateContentPackage(
 [[nodiscard]] bool refreshContentPackageIndex(
     const std::filesystem::path& root);
 
+// Publishes an edited manifest and its complete asset dependency closure.
+// A sibling copy of the runtime package is prepared and its existing index
+// refreshed before either live destination changes. Ordinary failures restore
+// both destinations; an incomplete rollback retains its backup and reports
+// its location. Source-only saves should use atomicFile::write instead.
+void publishAssetManifest(
+    const std::filesystem::path& sourceManifest,
+    const std::filesystem::path& runtimeManifest,
+    std::string_view contents);
+
 } // namespace sokoban

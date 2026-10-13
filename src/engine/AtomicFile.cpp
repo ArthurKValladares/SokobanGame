@@ -28,6 +28,39 @@ struct WriteFailureForTesting {
 std::mutex writeFailureMutex;
 std::optional<WriteFailureForTesting> writeFailureForTesting;
 
+struct ReplaceFailureForTesting {
+    std::uint32_t successfulReplacementsBeforeFailure = 0;
+    std::errc error {};
+    bool afterInstall = false;
+};
+
+std::mutex replaceFailureMutex;
+std::optional<ReplaceFailureForTesting> replaceFailureForTesting;
+
+std::optional<ReplaceFailureForTesting> takeReplaceFailureForTesting()
+{
+    const std::scoped_lock lock(replaceFailureMutex);
+    if (!replaceFailureForTesting) {
+        return std::nullopt;
+    }
+    if (replaceFailureForTesting->successfulReplacementsBeforeFailure != 0) {
+        --replaceFailureForTesting->successfulReplacementsBeforeFailure;
+        return std::nullopt;
+    }
+    const auto failure = replaceFailureForTesting;
+    replaceFailureForTesting.reset();
+    return failure;
+}
+
+[[noreturn]] void throwReplaceFailureForTesting(
+    const std::filesystem::path& path,
+    std::errc error)
+{
+    throw std::system_error(
+        std::make_error_code(error),
+        "test-injected replace failure " + path.string());
+}
+
 void maybeFailWriteForTesting(const std::filesystem::path& path)
 {
     std::optional<std::errc> failure;
@@ -177,8 +210,21 @@ void replace(
     const std::filesystem::path& destination,
     const std::filesystem::path& temporary)
 {
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    const auto failure = takeReplaceFailureForTesting();
+#endif
     syncFile(temporary);
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    if (failure && !failure->afterInstall) {
+        throwReplaceFailureForTesting(destination, failure->error);
+    }
+#endif
     installReplacement(destination, temporary);
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    if (failure && failure->afterInstall) {
+        throwReplaceFailureForTesting(destination, failure->error);
+    }
+#endif
 #ifdef _WIN32
     // MOVEFILE_WRITE_THROUGH makes the replacement itself synchronous. Flush
     // the newly named file as well so its data and metadata are acknowledged
@@ -233,6 +279,19 @@ void failWriteAfterForTesting(
     writeFailureForTesting = WriteFailureForTesting {
         .successfulWritesBeforeFailure = successfulWritesBeforeFailure,
         .error = error,
+    };
+}
+
+void failReplaceAfterForTesting(
+    std::uint32_t successfulReplacementsBeforeFailure,
+    std::errc error,
+    bool afterInstall)
+{
+    const std::scoped_lock lock(replaceFailureMutex);
+    replaceFailureForTesting = ReplaceFailureForTesting {
+        .successfulReplacementsBeforeFailure = successfulReplacementsBeforeFailure,
+        .error = error,
+        .afterInstall = afterInstall,
     };
 }
 #endif
