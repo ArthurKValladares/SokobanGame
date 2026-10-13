@@ -1128,6 +1128,46 @@ if(SOKOBAN_BUILD_TESTS)
     target_compile_definitions(sokoban_core PRIVATE SOKOBAN_ENABLE_TEST_HOOKS=1)
     enable_testing()
 
+    # Fixture regressions join ordinary CTest runs when the local Python
+    # environment is ready. Required CI installs the dependencies explicitly
+    # and also audits the current assets outside the C++ build matrix.
+    find_package(Python3 3.11 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        execute_process(
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/run_python_tests.py"
+                --check-dependencies
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            RESULT_VARIABLE python_test_dependencies_result
+            OUTPUT_VARIABLE python_test_dependencies_output
+            ERROR_VARIABLE python_test_dependencies_error
+            TIMEOUT 30
+        )
+        if(python_test_dependencies_result EQUAL 0)
+            add_test(NAME python_regressions
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tools/run_python_tests.py")
+            set_tests_properties(python_regressions PROPERTIES
+                LABELS "python;tools;assets"
+                WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1"
+                TIMEOUT 60)
+        else()
+            string(STRIP
+                "${python_test_dependencies_output}\n${python_test_dependencies_error}"
+                python_test_dependencies_message)
+            message(WARNING
+                "Python regression tests are not registered: ${python_test_dependencies_message}\n"
+                "Install with ${Python3_EXECUTABLE} -m pip install -r "
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/requirements-python-tests.txt, then reconfigure.")
+        endif()
+    else()
+        message(WARNING
+            "Python regression tests are not registered: Python 3.11 or newer was not found. "
+            "Install Python and tools/requirements-python-tests.txt, then reconfigure. "
+            "C++ tests remain available.")
+    endif()
+
     # Hardware timings are deliberately not registered with CTest: absolute
     # performance is machine and power-state dependent. The executable emits
     # structured results, a ranked report, and a Chrome/Perfetto CPU trace;

@@ -105,14 +105,17 @@ point-shadow policy; sharing GGX does not change shadow sampling counts.
 
 ## Authoring
 
-Python 3, Pillow and NumPy are required by the PBR tools. Native-family authoring
+Python 3.11 or newer, Pillow and NumPy are required by the Python validation
+workflow. Install its pinned dependencies with
+`python -m pip install -r tools/requirements-python-tests.txt`. Native-family authoring
 also needs the Blender workflows linked above. The game has no new runtime
 dependency. Start with the read-only checks from the repository root:
 
 ```powershell
 python tools/make_pbr_art_pass.py --check-only
 python tools/check_pbr_art_pass.py
-python -m unittest discover -s tests -p test_pbr_art_pass.py
+python tools/run_python_tests.py
+python tools/validate_current_ground.py
 ```
 
 `--check-only` validates complete ownership and the publication plan without
@@ -122,6 +125,11 @@ exact manifest paths and readability of 325 retained models. Retained families
 keep their native layouts; their own validators provide detailed geometry and
 material checks. The regression suite covers ownership conflicts, dry-run safety,
 generated publication and retained-asset preservation in temporary directories.
+The shared runner discovers both `*Tests.py` and `test_*.py` suites, including
+the ground geometry regressions. Required CI runs it and the current asset
+audits on Ubuntu and Windows; `bash tools/check_ci.sh python` runs the same
+Python checks locally. The current ground audit uses tracked evidence and
+does not need Blender or ignored migration snapshots.
 
 When intentionally regenerating the authored PBR outputs:
 

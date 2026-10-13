@@ -158,15 +158,22 @@ only relevant bottom-cell margins, preserving distant overworld framing.
 The GPU material table holds 4096 entries; a catalog-wide regression checks
 the current 1721 slots including fallback and attachments fit.
 
-Use `tools/validate_regular_relief.py` for the current kit. It compares regular
-detail against the accepted shoulder revision, checks the original vertices
-and edges plus bounded inward triangle refinement, and protects all bottom
-exports. It retains cap, seam, stacked-contact, stepped-contact and near-lip
-coverage checks. Current evidence uses
+Use `python tools/validate_current_ground.py` for the current kit. It runs from
+a clean checkout using the tracked source-bound
+`assets/custom/source/ground_modules/current_source_audit.json.gz`, native
+source, exports and cap tables. After native edits and finalized exports,
+refresh that bundle with `tools/snapshot_current_ground.py` in background
+Blender, then rerun the audit. It checks actual source/export corner streams,
+editable roles, bounded relief, bottom geometry, materials, caps and seams.
+No ignored migration history is needed for this check.
+
+`tools/validate_regular_relief.py` keeps the historical retention proof against
+the accepted shoulder revision, including unchanged bottom exports. It needs
+its ignored local snapshots and reports. Historical review evidence uses
 `out/ground-modules/regular-relief-validation.json`,
 `out/ground-modules/regular-relief-native-preview.png` and the
 `out/ground-modules/regular-relief-{gallery,normal}/` capture directories.
-Historical shoulder and regular/bottom validators keep their matching
+The shoulder and regular/bottom validators keep their matching
 baselines and deliberately enforce their earlier exact geometry.
 
 The current relief audit passes all 240 bodies: 564 shallow facets across

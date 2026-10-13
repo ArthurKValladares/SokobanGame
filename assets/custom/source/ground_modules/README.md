@@ -229,13 +229,50 @@ When exporting all 240 bodies, finalize the bottom subset as well.
 Tangents are exported from the native meshes with both UV streams; check
 them in the mesh audit rather than applying a tangent-repair pass.
 
-Run the independent mesh and seam audit from the project root:
+Run the current mesh and seam audit from the project root:
+
+```text
+python tools/validate_current_ground.py
+```
+
+This check uses only tracked assets and tools, so it runs from a clean
+checkout with Python and the dependencies in
+`tools/requirements-python-tests.txt`. Blender is needed only when authoring
+or refreshing source evidence. The tracked `current_source_audit.json.gz`
+contains native body, frozen construction-reference and cap geometry,
+per-corner normals, UVs, face materials and editable roles. SHA-256 bindings
+tie it to the saved `.blend`, all 240 finalized exports and both cap tables.
+The validator compares the actual source/export streams and applies geometry,
+material, relief, bottom, shoulder, cap and seam checks. It does not use the
+ignored `out/ground-modules` migration history.
+Position and UV comparisons use a 0.00002 tolerance; normal comparisons use
+0.0001 to accommodate Blender's saved custom-normal precision. Runtime manifest
+identities, paths, scale, orientation and material settings are also checked.
+
+After saving native edits and finalizing exports, capture fresh evidence:
+
+```text
+blender --background assets/custom/source/ground_modules.blend --python-exit-code 1 --python tools/snapshot_current_ground.py
+python tools/validate_current_ground.py --output out/ground-modules/current-validation.json
+```
+
+The capture requires background Blender and reads the saved native source
+without saving it or exporting art. It rejects dirty source state, unsupported
+object transforms and evaluated mesh changes, and preserves an identical
+existing bundle. Gallery translations are allowed.
+Review the source, export and evidence changes together. For a staged capture,
+pass `-- --output PATH` to Blender and `--source-audit PATH` to the validator
+before publishing it at the tracked location. Required CI runs the current
+audit, PBR audit and every Python regression suite on Ubuntu and Windows.
+`python tools/run_python_tests.py` runs the fixtures directly.
+
+For the historical relief migration retention proof, run:
 
 ```text
 python tools/validate_regular_relief.py
 ```
 
-The default audit reads `out/ground-modules/regular-relief-source-audit.json`
+This historical audit reads `out/ground-modules/regular-relief-source-audit.json`
 and writes `out/ground-modules/regular-relief-validation.json`. Its frozen
 accepted library is `out/ground-modules/pre-regular-relief-20261011/`,
 containing the accepted shoulder source, all 240 exports, role snapshots and
@@ -244,7 +281,7 @@ proofs. Native and in-game review evidence uses
 `out/ground-modules/regular-relief-native-preview.png` and
 `out/ground-modules/regular-relief-{gallery,normal}/`.
 
-The current audit proves that only the recorded regular triangle interiors
+The historical migration audit proves that only the recorded regular triangle interiors
 change. Original vertices and edges, untouched face streams, materials and
 UV interpolation are checked against the accepted shoulder revision. It
 checks bounded inward depth, child-face coverage of each parent triangle,

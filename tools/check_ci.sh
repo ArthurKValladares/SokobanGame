@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Run the Linux CI configurations locally, retaining every compile failure.
+# Run Python asset checks and Linux CI configurations locally.
 set -euo pipefail
 if [ "${1:-}" = --help ]; then
-  echo "Usage: bash tools/check_ci.sh [ci-debug ci-dev-fast ci-release ci-tidy ci-sanitize headless-tests ci-fuzz]"
-  echo "Defaults to all seven configurations; requires Linux, CI dependencies, and the pinned Vulkan SDK."
+  echo "Usage: bash tools/check_ci.sh [python ci-debug ci-dev-fast ci-release ci-tidy ci-sanitize headless-tests ci-fuzz]"
+  echo "Python fixtures and current asset audits run once for every invocation."
+  echo "Use 'python' alone without Linux, C++ tools or Vulkan; PYTHON selects the interpreter (default python3)."
+  echo "Install dependencies with: python3 -m pip install -r tools/requirements-python-tests.txt"
+  echo "Defaults to Python plus all seven Linux configurations; C++ checks require CI dependencies and the pinned Vulkan SDK."
   exit 0
-fi
-if [ "$(uname -s)" != Linux ]; then
-  echo "Linux CI checks require Linux (for example Ubuntu 24.04 in WSL). Windows checks cannot substitute for them." >&2
-  exit 1
 fi
 cd "$(dirname "$0")/.."
 presets=("$@")
@@ -16,13 +15,41 @@ if [ "${#presets[@]}" -eq 0 ]; then
   presets=(ci-debug ci-dev-fast ci-release ci-tidy ci-sanitize headless-tests ci-fuzz)
 fi
 needs_vulkan=false
+needs_cpp=false
 for preset in "${presets[@]}"; do
   case "$preset" in
-    ci-debug|ci-dev-fast|ci-release|ci-tidy|ci-sanitize|ci-fuzz) needs_vulkan=true ;;
-    headless-tests) ;;
+    ci-debug|ci-dev-fast|ci-release|ci-tidy|ci-sanitize|ci-fuzz) needs_vulkan=true; needs_cpp=true ;;
+    headless-tests) needs_cpp=true ;;
+    python) ;;
     *) echo "Unknown CI preset: $preset" >&2; exit 1 ;;
   esac
 done
+python_command="${PYTHON:-python3}"
+failed=()
+if ! command -v "$python_command" >/dev/null; then
+  echo "Missing Python interpreter: $python_command (set PYTHON to choose one)." >&2
+  failed+=(python)
+else
+  for check in tools/run_python_tests.py tools/check_pbr_art_pass.py tools/validate_current_ground.py; do
+    if "$python_command" "$check"; then
+      echo "PASSED $check"
+    else
+      failed+=("$check")
+      echo "FAILED $check" >&2
+    fi
+  done
+fi
+if ! "$needs_cpp"; then
+  if [ "${#failed[@]}" -ne 0 ]; then
+    echo "Failed Python checks: ${failed[*]}" >&2
+    exit 1
+  fi
+  exit 0
+fi
+if [ "$(uname -s)" != Linux ]; then
+  echo "Linux CI checks require Linux (for example Ubuntu 24.04 in WSL). Windows checks cannot substitute for them." >&2
+  exit 1
+fi
 for program in cmake ninja gcc-13 g++-13 clang-18 clang++-18 clang-tidy-18 xvfb-run; do
   command -v "$program" >/dev/null || { echo "Missing CI dependency: $program" >&2; exit 1; }
 done
@@ -65,8 +92,8 @@ run_preset() {
       --smoke-frames 240 --require-validation --save-directory "$scratch/profile" || return
   fi
 }
-failed=()
 for preset in "${presets[@]}"; do
+  if [ "$preset" = python ]; then continue; fi
   if run_preset "$preset"; then
     echo "PASSED $preset"
   else
@@ -75,6 +102,6 @@ for preset in "${presets[@]}"; do
   fi
 done
 if [ "${#failed[@]}" -ne 0 ]; then
-  echo "Failed CI configurations: ${failed[*]}" >&2
+  echo "Failed CI checks: ${failed[*]}" >&2
   exit 1
 fi

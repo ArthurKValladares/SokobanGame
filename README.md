@@ -316,8 +316,10 @@ listed in `.github/workflows/required-tests.yml` and expose its pinned
 Vulkan SDK. Run these from the repository root:
 
 ```sh
-bash tools/check_ci.sh                         # all seven Linux configurations
-bash tools/check_ci.sh ci-release ci-tidy       # selected configurations
+python -m pip install -r tools/requirements-python-tests.txt
+bash tools/check_ci.sh                         # Python checks + seven Linux configurations
+bash tools/check_ci.sh ci-release ci-tidy       # Python checks + selected configurations
+bash tools/check_ci.sh python                  # Python checks only; also works in Git Bash
 ```
 
 This preflight checks the toolchain dependencies and SDK header version,
@@ -325,7 +327,15 @@ selects lavapipe and validation layers using the CI helper, and runs the
 builds, CTest suites, bounded fuzz run, Vulkan-free core check, and Debug
 240-frame validation smoke. Independent configurations continue after a
 failure, and Ninja uses `-k 0` to report all available compile failures.
-It requires a real Linux environment; Git Bash cannot reproduce these gates.
+The C++ configurations require a real Linux environment. The `python` selector
+runs the asset regression fixtures, PBR audit and current ground audit without
+a C++ toolchain, Vulkan SDK or Blender. Set `PYTHON` to select an interpreter.
+Required CI runs those Python checks separately on Ubuntu and Windows with
+Python 3.12 and pinned NumPy/Pillow dependencies. CMake also registers
+`python_regressions` with CTest when Python 3.11 or newer and the dependencies
+are available; otherwise configuration prints installation instructions.
+After installing them, reconfigure to register the test. To run the fixtures
+directly, use `python tools/run_python_tests.py`.
 
 The Windows workflows cover the MSVC build and CTest suites. Linux adds GCC
 and Clang diagnostics, platform-specific type and library behavior,
@@ -1038,8 +1048,12 @@ with `tools/finalize_cliff_gltf.py`. Normal export preserves native edits and
 leaves bottom exports alone. The explicit `-- --remodel-regular-relief`
 option rebuilds the subtle face detail from frozen accepted revision 2
 regular bodies in `GroundRegularReliefConstructionSources`, replacing later
-regular mesh edits. `tools/validate_regular_relief.py` is the current mesh
-and seam audit. `tools/sculpt_ground_shoulders.py` can still export all 240
+regular mesh edits. `tools/validate_current_ground.py` audits the current meshes
+and seams using tracked, source-bound evidence, and runs in a clean checkout.
+After editing the native source, refresh that evidence with
+`tools/snapshot_current_ground.py` in Blender and rerun the current audit.
+`tools/validate_regular_relief.py` retains the historical migration proof
+against its ignored accepted snapshots. `tools/sculpt_ground_shoulders.py` can still export all 240
 native bodies without remodeling. Its explicit shoulder rebuild, earlier
 regular/bottom rebuilds and their validators describe historical revisions.
 See [the ground source contract](assets/custom/source/ground_modules/README.md)
