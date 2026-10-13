@@ -387,23 +387,13 @@ void addSkinnedAttachment(
 [[nodiscard]] std::vector<std::string> listGltfAnimationNames(
     const std::filesystem::path& path);
 
+// CPU reference for geometry, transform and attachment tests. Runtime
+// animation samples the palettes below and skins vertices on the GPU.
 [[nodiscard]] MeshData skinGltfMesh(
     const SkinnedMeshData& mesh,
     const GltfAnimationClip& animation,
     float timeSeconds,
     AnimationPlaybackMode playbackMode = AnimationPlaybackMode::Loop);
-
-// Skins with a pose blended between two clips (0 = from, 1 = to); used for
-// short crossfades when the active animation changes.
-[[nodiscard]] MeshData skinGltfMeshBlended(
-    const SkinnedMeshData& mesh,
-    const GltfAnimationClip& fromAnimation,
-    float fromTimeSeconds,
-    const GltfAnimationClip& toAnimation,
-    float toTimeSeconds,
-    float blend,
-    AnimationPlaybackMode fromPlaybackMode = AnimationPlaybackMode::Loop,
-    AnimationPlaybackMode toPlaybackMode = AnimationPlaybackMode::Loop);
 
 // Samples the skeleton without transforming vertices. GPU skinning uploads
 // these palettes instead of rebuilding every vertex on the CPU.

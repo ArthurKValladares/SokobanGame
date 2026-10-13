@@ -177,6 +177,120 @@ void testLayoutRejectsInvalidGeometryWithoutPacking()
     }, "attachment node outside skeleton range");
 }
 
+SkinnedMeshData makeBlendingRig()
+{
+    SkinnedMeshData mesh;
+    mesh.nodes = { SkeletonNode { .name = "root" },
+        SkeletonNode { .name = "socket", .parent = 0, .translation = { 0, 1, 0 } } };
+    mesh.jointNodeIndices = { 1 };
+    Mat4 inverseBind = mat4Identity;
+    inverseBind.values[13] = -1.0f;
+    mesh.inverseBindMatrices = { inverseBind };
+    mesh.preserveSourceScale = true;
+    mesh.vertices = { SkinnedVertex {
+        .position = { 2, 0, 0 }, .normal = { 0, 1, 0 },
+        .joints = { 0, 0, 0, 0 }, .weights = { 1, 0, 0, 0 },
+    } };
+    mesh.indices = { 0 };
+    mesh.attachments = { SkinnedAttachment {
+        .mesh = MeshData { .vertices = { MeshVertex { .position = { 1, 0, 0 } } }, .indices = { 0 } },
+        .nodeIndex = 1,
+    } };
+    return mesh;
+}
+
+AnimationChannel constantRootChannel(AnimationChannelPath path, Vec4 value)
+{
+    return { .targetNodeName = "root", .path = path,
+        .keyframes = { .times = { 0.0f }, .values = { value } } };
+}
+
+void testBlendedPosePalettesMatchAnalyticTransforms()
+{
+    TEST("blendedPosePalettesMatchAnalyticTransforms");
+    const auto mesh = makeBlendingRig();
+    const auto packed = packGpuSkinnedMesh(mesh);
+    const GltfAnimationClip from { .durationSeconds = 1.0f,
+        .channels = { constantRootChannel(AnimationChannelPath::Translation, { 2, 0, 0, 0 }) } };
+    const GltfAnimationClip to { .durationSeconds = 1.0f,
+        .channels = {
+            constantRootChannel(AnimationChannelPath::Translation, { 6, 0, 0, 0 }),
+            constantRootChannel(AnimationChannelPath::Rotation, { 0, 0, 1, 0 }),
+            constantRootChannel(AnimationChannelPath::Scale, { 3, 3, 3, 0 }),
+        } };
+    struct Case {
+        float blend;
+        Vec3 rootOrigin;
+        Vec3 socketOrigin;
+        Vec3 jointVertex;
+        Vec3 attachmentVertex;
+    };
+    // Midpoint: translation x4, scale2, rotation90 degrees. The child is
+    // translated along local y; inverse bind cancels that offset for joints
+    // but attachments must retain it. Expectations are source coordinates.
+    const Case cases[] {
+        { -1.0f, { 2, 0, 0 }, { 2, 1, 0 }, { 4, 0, 0 }, { 3, 1, 0 } },
+        { 0.0f, { 2, 0, 0 }, { 2, 1, 0 }, { 4, 0, 0 }, { 3, 1, 0 } },
+        { 0.5f, { 4, 0, 0 }, { 2, 0, 0 }, { 4, 4, 0 }, { 2, 2, 0 } },
+        { 1.0f, { 6, 0, 0 }, { 6, -3, 0 }, { 0, 0, 0 }, { 3, -3, 0 } },
+        { 2.0f, { 6, 0, 0 }, { 6, -3, 0 }, { 0, 0, 0 }, { 3, -3, 0 } },
+    };
+    for (const auto& expected : cases) {
+        const auto pose = sampleGltfSkinPoseBlended(mesh, from, 0.25f, to, 0.75f, expected.blend);
+        CHECK(pose.jointMatrices.size() == 1);
+        CHECK(pose.nodeMatrices.size() == 2);
+        CHECK(near(transformPoint(pose.nodeMatrices[0], {}), expected.rootOrigin));
+        CHECK(near(transformPoint(pose.nodeMatrices[1], {}), expected.socketOrigin));
+        CHECK(near(transformPoint(pose.jointMatrices[0], mesh.vertices[0].position), expected.jointVertex));
+        const auto gpu = makeGpuSkinningInstance(mesh, pose);
+        CHECK(near(transformPoint(gpu.palette[0], mesh.vertices[0].position), expected.jointVertex));
+        const auto& attachment = packed.vertices[1];
+        CHECK(attachment.attachmentNodeIndex == 1);
+        CHECK(near(transformPoint(gpu.palette[maxSkinJoints + attachment.attachmentNodeIndex],
+            attachment.position), expected.attachmentVertex));
+        // Source-scale conversion maps (x,y,z) to engine (x,-z,y).
+        CHECK(near(gpuSkinnedPosition(gpu, mesh.vertices[0]),
+            { expected.jointVertex.x, -expected.jointVertex.z, expected.jointVertex.y }));
+        CHECK(near(transformPoint(gpu.modelFromSource,
+            transformPoint(gpu.palette[maxSkinJoints + attachment.attachmentNodeIndex], attachment.position)),
+            { expected.attachmentVertex.x, -expected.attachmentVertex.z, expected.attachmentVertex.y }));
+    }
+}
+
+void testBlendedPoseSamplesEachPlaybackModeIndependently()
+{
+    TEST("blendedPoseSamplesEachPlaybackModeIndependently");
+    const auto mesh = makeBlendingRig();
+    const GltfAnimationClip from { .durationSeconds = 1.0f,
+        .channels = { AnimationChannel { .targetNodeName = "root",
+            .path = AnimationChannelPath::Translation,
+            .keyframes = { .times = { 0, 1 }, .values = { Vec4 {}, Vec4 { 4, 0, 0, 0 } } } } } };
+    const GltfAnimationClip to { .durationSeconds = 2.0f,
+        .channels = { AnimationChannel { .targetNodeName = "root",
+            .path = AnimationChannelPath::Translation,
+            .keyframes = { .times = { 0, 2 }, .values = { Vec4 { 10, 0, 0, 0 }, Vec4 { 18, 0, 0, 0 } } } } } };
+    struct Case {
+        AnimationPlaybackMode fromMode;
+        AnimationPlaybackMode toMode;
+        float rootX;
+    };
+    // At 1.5s the source loops to x2 or clamps to x4. At 2.5s the target
+    // loops to x12 or clamps to x18. Their midpoint must use both policies.
+    const Case cases[] {
+        { AnimationPlaybackMode::Loop, AnimationPlaybackMode::Loop, 7 },
+        { AnimationPlaybackMode::Loop, AnimationPlaybackMode::Clamp, 10 },
+        { AnimationPlaybackMode::Clamp, AnimationPlaybackMode::Loop, 8 },
+        { AnimationPlaybackMode::Clamp, AnimationPlaybackMode::Clamp, 11 },
+    };
+    for (const auto& expected : cases) {
+        const auto pose = sampleGltfSkinPoseBlended(mesh, from, 1.5f, to, 2.5f,
+            0.5f, expected.fromMode, expected.toMode);
+        CHECK(near(transformPoint(pose.nodeMatrices[0], {}), { expected.rootX, 0, 0 }));
+        CHECK(near(transformPoint(pose.nodeMatrices[1], { 1, 0, 0 }), { expected.rootX + 1, 1, 0 }));
+        CHECK(near(transformPoint(pose.jointMatrices[0], { 2, 0, 0 }), { expected.rootX + 2, 0, 0 }));
+    }
+}
+
 void testNonuniformNormalizationPreservesSkinnedBasis()
 {
     TEST("nonuniformNormalizationPreservesSkinnedBasis");
@@ -328,6 +442,8 @@ int main()
     testModelInstanceDrawReadiness();
     testPaletteAndAttachmentEncoding();
     testLayoutRejectsInvalidGeometryWithoutPacking();
+    testBlendedPosePalettesMatchAnalyticTransforms();
+    testBlendedPoseSamplesEachPlaybackModeIndependently();
     testNonuniformNormalizationPreservesSkinnedBasis();
     testRoguePaletteMatchesCpuSkinning();
     testWitchUsesTheSharedCharacterRigAnimations();

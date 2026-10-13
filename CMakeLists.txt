@@ -707,7 +707,6 @@ set(SOKOBAN_VENDOR_IMPLEMENTATION_SOURCES
     src/engine/render/CgltfImplementation.cpp
     src/engine/render/StbImageImplementation.cpp
     src/engine/render/VulkanMemoryAllocatorImplementation.cpp
-    src/engine/ui/StbTruetypeImplementation.cpp
 )
 set_source_files_properties(${SOKOBAN_VENDOR_IMPLEMENTATION_SOURCES}
     ${SOKOBAN_IMGUI_SOURCES}

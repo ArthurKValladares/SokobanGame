@@ -78,7 +78,7 @@ def main():
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     excluded = {"MiniaudioImpl.cpp", "CgltfImplementation.cpp",
-                "StbImageImplementation.cpp", "StbTruetypeImplementation.cpp",
+                "StbImageImplementation.cpp",
                 "VulkanMemoryAllocatorImplementation.cpp"}
     units = []
     for entry in json.loads(args.database.read_text(encoding="utf-8")):

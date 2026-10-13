@@ -36,10 +36,9 @@ public:
 
     explicit AnimationController(float fadeDurationSeconds = config::playerAnimationFadeSeconds);
 
-    // Identifies the model whose tiles drive clip selection and the clip used
-    // when an invalid animation id is dereferenced. Ids come from the asset
-    // manifest at runtime.
-    void configure(RenderModel playerModel, RenderAnimation fallbackClip);
+    // Sets the fallback clip for tiles without an animation and for clip()
+    // lookups whose requested clip is unavailable. Ids come from the manifest.
+    void configure(RenderAnimation fallbackClip);
 
     void clear();
     void setClip(RenderAnimation animation, GltfAnimationClip clip);
@@ -50,7 +49,9 @@ public:
         RenderModel model,
         const GltfAnimationClip* clip,
         float timeSeconds);
-    [[nodiscard]] std::optional<SkinningRequest> update(const RenderFrameData& frameData);
+    // Available instance poses emit on every call, including paused animations
+    // and previews, to populate each frame's separate GPU buffer.
+    // Tiles with animationInstanceId == 0 do not produce requests.
     [[nodiscard]] std::vector<InstanceSkinningRequest> updateInstances(
         const RenderFrameData& frameData);
     [[nodiscard]] FrameArray<InstanceSkinningRequest> updateInstances(
@@ -71,25 +72,19 @@ private:
     [[nodiscard]] std::optional<SkinningRequest> updateTile(
         const RenderFrameData::Tile& tile,
         PlaybackState& playback,
-        float transitionTimeSeconds,
-        bool forceSample = false);
-    void resetPlayback();
+        float transitionTimeSeconds);
     void updateInstancesInto(
         const RenderFrameData& frameData,
         FrameArray<InstanceSkinningRequest>& requests);
 
     // Indexed by RenderAnimation::value - 1; grown on demand.
     std::vector<GltfAnimationClip> clips_;
-    RenderModel playerModel_ {};
     RenderAnimation fallbackClip_ {};
     float fadeDurationSeconds_ = config::playerAnimationFadeSeconds;
-    PlaybackState legacyPlayback_;
     std::unordered_map<uint64_t, PlaybackState> instancePlayback_;
     const GltfAnimationClip* previewClip_ = nullptr;
     RenderModel previewModel_ {};
     float previewTimeSeconds_ = 0.0f;
-    const GltfAnimationClip* activePreviewClip_ = nullptr;
-    float activePreviewTime_ = -1.0f;
 };
 
 } // namespace sokoban

@@ -1923,29 +1923,6 @@ MeshData skinGltfMesh(
         sampleAnimationPoses(mesh, animation, timeSeconds, playbackMode));
 }
 
-MeshData skinGltfMeshBlended(
-    const SkinnedMeshData& mesh,
-    const GltfAnimationClip& fromAnimation,
-    float fromTimeSeconds,
-    const GltfAnimationClip& toAnimation,
-    float toTimeSeconds,
-    float blend,
-    AnimationPlaybackMode fromPlaybackMode,
-    AnimationPlaybackMode toPlaybackMode)
-{
-    blend = std::clamp(blend, 0.0f, 1.0f);
-    std::vector<NodePose> poses = sampleAnimationPoses(
-        mesh, fromAnimation, fromTimeSeconds, fromPlaybackMode);
-    const std::vector<NodePose> target = sampleAnimationPoses(
-        mesh, toAnimation, toTimeSeconds, toPlaybackMode);
-    for (size_t i = 0; i < poses.size() && i < target.size(); ++i) {
-        poses[i].translation = lerpVec3(poses[i].translation, target[i].translation, blend);
-        poses[i].rotation = blendRotation(poses[i].rotation, target[i].rotation, blend);
-        poses[i].scale = lerpVec3(poses[i].scale, target[i].scale, blend);
-    }
-    return skinWithPoses(mesh, poses);
-}
-
 SkinnedPoseMatrices sampleGltfSkinPose(
     const SkinnedMeshData& mesh,
     const GltfAnimationClip& animation,

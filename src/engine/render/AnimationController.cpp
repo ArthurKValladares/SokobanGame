@@ -12,9 +12,8 @@ AnimationController::AnimationController(float fadeDurationSeconds)
 {
 }
 
-void AnimationController::configure(RenderModel playerModel, RenderAnimation fallbackClip)
+void AnimationController::configure(RenderAnimation fallbackClip)
 {
-    playerModel_ = playerModel;
     fallbackClip_ = fallbackClip;
 }
 
@@ -24,7 +23,7 @@ void AnimationController::clear()
     previewClip_ = nullptr;
     previewModel_ = cubeModel;
     previewTimeSeconds_ = 0.0f;
-    resetPlayback();
+    instancePlayback_.clear();
 }
 
 void AnimationController::setClip(RenderAnimation animation, GltfAnimationClip clip)
@@ -66,39 +65,6 @@ void AnimationController::setPreview(
     previewTimeSeconds_ = timeSeconds;
 }
 
-std::optional<AnimationController::SkinningRequest> AnimationController::update(const RenderFrameData& frameData)
-{
-    if (previewClip_ != nullptr &&
-        std::ranges::any_of(frameData.tiles, [&](const RenderFrameData::Tile& tile) {
-            return tile.model == previewModel_;
-        })) {
-        constexpr float timeEpsilon = 0.0001f;
-        if (previewClip_ == activePreviewClip_ &&
-            std::abs(previewTimeSeconds_ - activePreviewTime_) < timeEpsilon) {
-            return std::nullopt;
-        }
-
-        activePreviewClip_ = previewClip_;
-        activePreviewTime_ = previewTimeSeconds_;
-        legacyPlayback_ = {};
-        return SkinningRequest {
-            .toClip = previewClip_,
-            .toTimeSeconds = previewTimeSeconds_,
-        };
-    }
-    activePreviewClip_ = nullptr;
-
-    for (const RenderFrameData::Tile& tile : frameData.tiles) {
-        if (tile.model == playerModel_ && !tile.animation.isNone()) {
-            return updateTile(
-                tile,
-                legacyPlayback_,
-                frameData.animationTransitionTimeSeconds);
-        }
-    }
-    return std::nullopt;
-}
-
 std::vector<AnimationController::InstanceSkinningRequest>
 AnimationController::updateInstances(const RenderFrameData& frameData)
 {
@@ -125,10 +91,6 @@ void AnimationController::updateInstancesInto(
     const RenderFrameData& frameData,
     FrameArray<InstanceSkinningRequest>& requests)
 {
-    activePreviewClip_ = previewClip_;
-    activePreviewTime_ = previewClip_ != nullptr
-        ? previewTimeSeconds_
-        : -1.0f;
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
         if (tile.animationInstanceId == 0) {
             continue;
@@ -149,8 +111,7 @@ void AnimationController::updateInstancesInto(
         if (std::optional<SkinningRequest> request = updateTile(
                 tile,
                 playback,
-                frameData.animationTransitionTimeSeconds,
-                true)) {
+                frameData.animationTransitionTimeSeconds)) {
             requests.push_back({
                 .instanceId = tile.animationInstanceId,
                 .model = tile.model,
@@ -163,10 +124,8 @@ void AnimationController::updateInstancesInto(
 std::optional<AnimationController::SkinningRequest> AnimationController::updateTile(
     const RenderFrameData::Tile& tile,
     PlaybackState& playback,
-    float transitionTimeSeconds,
-    bool forceSample)
+    float transitionTimeSeconds)
 {
-    constexpr float timeEpsilon = 0.0001f;
     RenderAnimation requestedAnimation = tile.animation.isNone()
         ? fallbackClip_
         : tile.animation;
@@ -219,12 +178,6 @@ std::optional<AnimationController::SkinningRequest> AnimationController::updateT
         }
     }
 
-    if (!forceSample && playback.fadeFromAnimation.isNone() &&
-        requestedAnimation == playback.activeAnimation &&
-        std::abs(requestedTime - playback.activeAnimationTime) < timeEpsilon) {
-        return std::nullopt;
-    }
-
     SkinningRequest request {
         .toClip = &clip(requestedAnimation),
         .toTimeSeconds = requestedTime,
@@ -250,14 +203,6 @@ std::optional<AnimationController::SkinningRequest> AnimationController::updateT
     playback.activeAnimationTime = requestedTime;
     playback.activePlaybackMode = requestedPlaybackMode;
     return request;
-}
-
-void AnimationController::resetPlayback()
-{
-    legacyPlayback_ = {};
-    instancePlayback_.clear();
-    activePreviewClip_ = nullptr;
-    activePreviewTime_ = -1.0f;
 }
 
 } // namespace sokoban

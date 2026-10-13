@@ -1,9 +1,10 @@
-// Headless tests for animation selection, preview, deduplication, and fades.
+// Headless tests for per-instance animation selection, preview, and fades.
 
 #include "TestHarness.hpp"
 
 #include "engine/render/AnimationController.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -142,6 +143,7 @@ RenderFrameData frameWithAnimation(RenderAnimation animation, float timeSeconds)
     frame.tiles.push_back({
         .model = heroModel,
         .animation = animation,
+        .animationInstanceId = 17,
         .animationTimeSeconds = timeSeconds,
     });
     return frame;
@@ -150,7 +152,7 @@ RenderFrameData frameWithAnimation(RenderAnimation animation, float timeSeconds)
 AnimationController makeController(float fadeSeconds = 0.1f)
 {
     AnimationController controller(fadeSeconds);
-    controller.configure(heroModel, idleClip);
+    controller.configure(idleClip);
     controller.setClip(idleClip, makeClip("idle"));
     controller.setClip(moveClip, makeClip("movement"));
     controller.setClip(pushClip, makeClip("push"));
@@ -160,11 +162,11 @@ AnimationController makeController(float fadeSeconds = 0.1f)
     return controller;
 }
 
-void testSelectsFirstAnimatedRogueAndDeduplicates()
+void testIdentifiedInstancesEmitEachFrameAcrossModels()
 {
-    TEST("selectsFirstAnimatedRogueAndDeduplicates");
+    TEST("identifiedInstancesEmitEachFrameAcrossModels");
     AnimationController controller = makeController();
-    CHECK(!controller.update({}));
+    CHECK(controller.updateInstances({}).empty());
 
     RenderFrameData frame;
     frame.tiles.push_back({
@@ -175,63 +177,78 @@ void testSelectsFirstAnimatedRogueAndDeduplicates()
     frame.tiles.push_back({
         .model = heroModel,
         .animation = idleClip,
+        .animationInstanceId = 17,
         .animationTimeSeconds = 1.0f,
     });
     frame.tiles.push_back({
-        .model = heroModel,
+        .model = stoneModel,
         .animation = pushClip,
+        .animationInstanceId = 18,
         .animationTimeSeconds = 2.0f,
     });
 
-    const auto request = controller.update(frame);
-    CHECK(request.has_value());
-    CHECK(!request->blended());
-    CHECK(request->toClip->name == "idle");
-    CHECK(near(request->toTimeSeconds, 1.0f));
-    CHECK(!controller.update(frame));
+    const auto request = controller.updateInstances(frame);
+    CHECK(request.size() == 2);
+    CHECK(request[0].instanceId == 17);
+    CHECK(request[0].model == heroModel);
+    CHECK(!request.front().skinning.blended());
+    CHECK(request.front().skinning.toClip->name == "idle");
+    CHECK(near(request.front().skinning.toTimeSeconds, 1.0f));
+    CHECK(request[1].instanceId == 18);
+    CHECK(request[1].model == stoneModel);
+    CHECK(request[1].skinning.toClip->name == "push");
+    CHECK(near(request[1].skinning.toTimeSeconds, 2.0f));
+    // Each frame-in-flight mesh buffer needs its pose, including paused poses.
+    const auto repeated = controller.updateInstances(frame);
+    CHECK(repeated.size() == 2);
+    CHECK(repeated[0].skinning.toClip == request[0].skinning.toClip);
+    CHECK(near(repeated[0].skinning.toTimeSeconds, 1.0f));
+    CHECK(repeated[1].skinning.toClip == request[1].skinning.toClip);
+    CHECK(near(repeated[1].skinning.toTimeSeconds, 2.0f));
 
     frame.tiles[1].animationTimeSeconds = 1.25f;
-    const auto advanced = controller.update(frame);
-    CHECK(advanced.has_value());
-    CHECK(!advanced->blended());
-    CHECK(near(advanced->toTimeSeconds, 1.25f));
+    const auto advanced = controller.updateInstances(frame);
+    CHECK(advanced.size() == 2);
+    CHECK(!advanced.front().skinning.blended());
+    CHECK(near(advanced.front().skinning.toTimeSeconds, 1.25f));
+    CHECK(near(advanced[1].skinning.toTimeSeconds, 2.0f));
 }
 
 void testCrossfadeProgressesAndCompletes()
 {
     TEST("crossfadeProgressesAndCompletes");
     AnimationController controller = makeController(0.1f);
-    CHECK(controller.update(frameWithAnimation(idleClip, 1.0f)).has_value());
+    CHECK(controller.updateInstances(frameWithAnimation(idleClip, 1.0f)).size() == 1);
 
-    const auto halfway = controller.update(frameWithAnimation(moveClip, 1.05f));
-    CHECK(halfway.has_value());
-    CHECK(halfway->blended());
-    CHECK(halfway->fromClip->name == "idle");
-    CHECK(halfway->toClip->name == "movement");
+    const auto halfway = controller.updateInstances(frameWithAnimation(moveClip, 1.05f));
+    CHECK(halfway.size() == 1);
+    CHECK(halfway.front().skinning.blended());
+    CHECK(halfway.front().skinning.fromClip->name == "idle");
+    CHECK(halfway.front().skinning.toClip->name == "movement");
     // A clip switch has no meaningful local-time delta: the source holds its
     // last sampled pose on the transition frame, then advances on later
     // frames once the target clock has an in-domain delta.
-    CHECK(near(halfway->fromTimeSeconds, 1.0f));
-    CHECK(near(halfway->blend, 0.5f));
+    CHECK(near(halfway.front().skinning.fromTimeSeconds, 1.0f));
+    CHECK(near(halfway.front().skinning.blend, 0.5f));
 
-    const auto complete = controller.update(frameWithAnimation(moveClip, 1.1f));
-    CHECK(complete.has_value());
-    CHECK(!complete->blended());
-    CHECK(complete->toClip->name == "movement");
+    const auto complete = controller.updateInstances(frameWithAnimation(moveClip, 1.1f));
+    CHECK(complete.size() == 1);
+    CHECK(!complete.front().skinning.blended());
+    CHECK(complete.front().skinning.toClip->name == "movement");
 }
 
 void testReverseTimeStillAdvancesFade()
 {
     TEST("reverseTimeStillAdvancesFade");
     AnimationController controller = makeController(0.1f);
-    CHECK(controller.update(frameWithAnimation(idleClip, 1.0f)).has_value());
+    CHECK(controller.updateInstances(frameWithAnimation(idleClip, 1.0f)).size() == 1);
 
-    const auto request = controller.update(frameWithAnimation(pushClip, 0.95f));
-    CHECK(request.has_value());
-    CHECK(request->blended());
-    CHECK(request->fromClip->name == "idle");
-    CHECK(near(request->fromTimeSeconds, 1.0f));
-    CHECK(near(request->blend, 0.5f));
+    const auto request = controller.updateInstances(frameWithAnimation(pushClip, 0.95f));
+    CHECK(request.size() == 1);
+    CHECK(request.front().skinning.blended());
+    CHECK(request.front().skinning.fromClip->name == "idle");
+    CHECK(near(request.front().skinning.fromTimeSeconds, 1.0f));
+    CHECK(near(request.front().skinning.blend, 0.5f));
 }
 
 void testCrossfadeClockIsIndependentFromClipLocalTime()
@@ -241,97 +258,95 @@ void testCrossfadeClockIsIndependentFromClipLocalTime()
 
     RenderFrameData idle = frameWithAnimation(idleClip, 5.0f);
     idle.animationTransitionTimeSeconds = 10.0f;
-    CHECK(controller.update(idle).has_value());
+    CHECK(controller.updateInstances(idle).size() == 1);
 
     // A real clip transition commonly resets local time to zero. That jump is
     // not elapsed fade time and must not instantly consume the crossfade.
     RenderFrameData move = frameWithAnimation(moveClip, 0.0f);
     move.animationTransitionTimeSeconds = 10.01f;
-    const auto started = controller.update(move);
-    CHECK(started.has_value());
-    CHECK(started->blended());
-    CHECK(near(started->fromTimeSeconds, 5.0f));
-    CHECK(near(started->toTimeSeconds, 0.0f));
-    CHECK(near(started->blend, 0.028f));
+    const auto started = controller.updateInstances(move);
+    CHECK(started.size() == 1);
+    CHECK(started.front().skinning.blended());
+    CHECK(near(started.front().skinning.fromTimeSeconds, 5.0f));
+    CHECK(near(started.front().skinning.toTimeSeconds, 0.0f));
+    CHECK(near(started.front().skinning.blend, 0.028f));
 
     // Transition time keeps advancing even when a target clip is paused.
     move.animationTransitionTimeSeconds = 10.05f;
-    const auto halfway = controller.update(move);
-    CHECK(halfway.has_value());
-    CHECK(halfway->blended());
-    CHECK(near(halfway->fromTimeSeconds, 5.0f));
-    CHECK(near(halfway->blend, 0.5f));
+    const auto halfway = controller.updateInstances(move);
+    CHECK(halfway.size() == 1);
+    CHECK(halfway.front().skinning.blended());
+    CHECK(near(halfway.front().skinning.fromTimeSeconds, 5.0f));
+    CHECK(near(halfway.front().skinning.blend, 0.5f));
 }
 
 void testHardTransitionDiscardsPreviousPose()
 {
     TEST("hardTransitionDiscardsPreviousPose");
     AnimationController controller = makeController(0.1f);
-    CHECK(controller.update(
-        frameWithAnimation(deathClip, 0.75f)).has_value());
+    CHECK(controller.updateInstances(
+        frameWithAnimation(deathClip, 0.75f)).size() == 1);
 
     RenderFrameData revived = frameWithAnimation(moveClip, 0.99f);
     revived.tiles.front().animationCrossfades = false;
-    const auto request = controller.update(revived);
-    CHECK(request.has_value());
-    CHECK(!request->blended());
-    CHECK(request->toClip->name == "movement");
-    CHECK(near(request->toTimeSeconds, 0.99f));
+    const auto request = controller.updateInstances(revived);
+    CHECK(request.size() == 1);
+    CHECK(!request.front().skinning.blended());
+    CHECK(request.front().skinning.toClip->name == "movement");
+    CHECK(near(request.front().skinning.toTimeSeconds, 0.99f));
 }
 
 void testPreviewOverridesAndThenReleasesGameplay()
 {
     TEST("previewOverridesAndThenReleasesGameplay");
     AnimationController controller = makeController();
-    CHECK(controller.update(frameWithAnimation(idleClip, 0.0f)).has_value());
-
-    GltfAnimationClip preview = makeClip("preview");
-    controller.setPreview(heroModel, &preview, 2.0f);
-    const auto previewRequest = controller.update(frameWithAnimation(pushClip, 4.0f));
-    CHECK(previewRequest.has_value());
-    CHECK(!previewRequest->blended());
-    CHECK(previewRequest->toClip == &preview);
-    CHECK(near(previewRequest->toTimeSeconds, 2.0f));
-    CHECK(!controller.update(frameWithAnimation(pushClip, 4.0f)));
-
-    controller.setPreview(heroModel, &preview, 2.25f);
-    CHECK(controller.update(frameWithAnimation(pushClip, 4.0f)).has_value());
-    controller.setPreview(cubeModel, nullptr, 0.0f);
-    const auto gameplayRequest = controller.update(frameWithAnimation(pushClip, 4.0f));
-    CHECK(gameplayRequest.has_value());
-    CHECK(!gameplayRequest->blended());
-    CHECK(gameplayRequest->toClip->name == "push");
-
-    // Instance poses back separate buffers for each frame in flight, so a
-    // paused preview must still publish its pose whenever that frame recurs.
-    AnimationController instanceController = makeController();
-    RenderFrameData instanceFrame = frameWithAnimation(pushClip, 4.0f);
-    instanceFrame.tiles.front().animationInstanceId = 17;
-    instanceController.setPreview(heroModel, &preview, 2.0f);
-    CHECK(instanceController.updateInstances(instanceFrame).size() == 1);
-    CHECK(instanceController.updateInstances(instanceFrame).size() == 1);
-
-    instanceFrame.tiles.push_back({
+    RenderFrameData frame = frameWithAnimation(pushClip, 4.0f);
+    frame.tiles.push_back({
         .model = RenderModel { 3 },
         .animation = attackClip,
         .animationInstanceId = 18,
         .animationTimeSeconds = 0.5f,
     });
-    const auto mixedPreview = instanceController.updateInstances(instanceFrame);
-    CHECK(mixedPreview.size() == 2);
-    CHECK(mixedPreview[0].skinning.toClip == &preview);
-    CHECK(mixedPreview[1].model == RenderModel { 3 });
-    CHECK(mixedPreview[1].skinning.toClip->name == "attack");
+    CHECK(controller.updateInstances(frame).size() == 2);
+    GltfAnimationClip preview = makeClip("preview");
+    controller.setPreview(heroModel, &preview, 2.0f);
+    for (int repeatedFrame = 0; repeatedFrame < 2; ++repeatedFrame) {
+        // Paused previews publish on every frame for separate mesh buffers.
+        const auto requests = controller.updateInstances(frame);
+        CHECK(requests.size() == 2);
+        CHECK(requests[0].instanceId == 17);
+        CHECK(!requests[0].skinning.blended());
+        CHECK(requests[0].skinning.toClip == &preview);
+        CHECK(near(requests[0].skinning.toTimeSeconds, 2.0f));
+        CHECK(requests[1].instanceId == 18);
+        CHECK(requests[1].skinning.toClip->name == "attack");
+    }
+    controller.setPreview(heroModel, &preview, 2.25f);
+    const auto advanced = controller.updateInstances(frame);
+    CHECK(advanced.size() == 2);
+    CHECK(near(advanced[0].skinning.toTimeSeconds, 2.25f));
+    GltfAnimationClip alternate = makeClip("alternate preview");
+    controller.setPreview(heroModel, &alternate, 2.25f);
+    const auto changed = controller.updateInstances(frame);
+    CHECK(changed.size() == 2);
+    CHECK(changed[0].skinning.toClip == &alternate);
 
-    instanceController.setPreview(RenderModel { 3 }, &preview, 1.5f);
-    const auto selectedModelPreview =
-        instanceController.updateInstances(instanceFrame);
+    controller.setPreview(RenderModel { 3 }, &preview, 1.5f);
+    const auto selectedModelPreview = controller.updateInstances(frame);
     CHECK(selectedModelPreview.size() == 2);
     CHECK(selectedModelPreview[0].model == heroModel);
+    CHECK(!selectedModelPreview[0].skinning.blended());
     CHECK(selectedModelPreview[0].skinning.toClip->name == "push");
     CHECK(selectedModelPreview[1].model == RenderModel { 3 });
     CHECK(selectedModelPreview[1].skinning.toClip == &preview);
     CHECK(near(selectedModelPreview[1].skinning.toTimeSeconds, 1.5f));
+    controller.setPreview(cubeModel, nullptr, 0.0f);
+    const auto gameplay = controller.updateInstances(frame);
+    CHECK(gameplay.size() == 2);
+    CHECK(!gameplay[0].skinning.blended());
+    CHECK(gameplay[0].skinning.toClip->name == "push");
+    CHECK(!gameplay[1].skinning.blended());
+    CHECK(gameplay[1].skinning.toClip->name == "attack");
 }
 
 void testNonLoopingAnimationFallsBackAtClipDuration()
@@ -342,19 +357,19 @@ void testNonLoopingAnimationFallsBackAtClipDuration()
     frame.tiles.front().animationFallback = deadIdleClip;
     frame.tiles.front().animationLoops = false;
 
-    const auto death = controller.update(frame);
-    CHECK(death.has_value());
-    CHECK(death->toClip->name == "death");
-    CHECK(death->toPlaybackMode == AnimationPlaybackMode::Clamp);
+    const auto death = controller.updateInstances(frame);
+    CHECK(death.size() == 1);
+    CHECK(death.front().skinning.toClip->name == "death");
+    CHECK(death.front().skinning.toPlaybackMode == AnimationPlaybackMode::Clamp);
 
     frame.tiles.front().animationTimeSeconds = 1.0f;
     frame.tiles.front().animationFallbackTimeSeconds = 0.25f;
-    const auto deadIdle = controller.update(frame);
-    CHECK(deadIdle.has_value());
-    CHECK(!deadIdle->blended());
-    CHECK(deadIdle->toClip->name == "dead idle");
-    CHECK(near(deadIdle->toTimeSeconds, 0.25f));
-    CHECK(deadIdle->toPlaybackMode == AnimationPlaybackMode::Loop);
+    const auto deadIdle = controller.updateInstances(frame);
+    CHECK(deadIdle.size() == 1);
+    CHECK(!deadIdle.front().skinning.blended());
+    CHECK(deadIdle.front().skinning.toClip->name == "dead idle");
+    CHECK(near(deadIdle.front().skinning.toTimeSeconds, 0.25f));
+    CHECK(deadIdle.front().skinning.toPlaybackMode == AnimationPlaybackMode::Loop);
 }
 
 void testNonLoopingPlaybackModeSurvivesCrossfade()
@@ -364,18 +379,18 @@ void testNonLoopingPlaybackModeSurvivesCrossfade()
 
     RenderFrameData death = frameWithAnimation(deathClip, 0.75f);
     death.tiles.front().animationLoops = false;
-    const auto oneShot = controller.update(death);
-    CHECK(oneShot.has_value());
-    CHECK(oneShot->toPlaybackMode == AnimationPlaybackMode::Clamp);
+    const auto oneShot = controller.updateInstances(death);
+    CHECK(oneShot.size() == 1);
+    CHECK(oneShot.front().skinning.toPlaybackMode == AnimationPlaybackMode::Clamp);
 
     RenderFrameData move = frameWithAnimation(moveClip, 0.0f);
     move.animationTransitionTimeSeconds = 0.80f;
-    const auto transition = controller.update(move);
-    CHECK(transition.has_value());
-    CHECK(transition->blended());
-    CHECK(transition->fromClip->name == "death");
-    CHECK(transition->fromPlaybackMode == AnimationPlaybackMode::Clamp);
-    CHECK(transition->toPlaybackMode == AnimationPlaybackMode::Loop);
+    const auto transition = controller.updateInstances(move);
+    CHECK(transition.size() == 1);
+    CHECK(transition.front().skinning.blended());
+    CHECK(transition.front().skinning.fromClip->name == "death");
+    CHECK(transition.front().skinning.fromPlaybackMode == AnimationPlaybackMode::Clamp);
+    CHECK(transition.front().skinning.toPlaybackMode == AnimationPlaybackMode::Loop);
 }
 
 void testClipValidationAndClear()
@@ -384,6 +399,10 @@ void testClipValidationAndClear()
     AnimationController controller = makeController();
     CHECK(controller.hasClip(idleClip));
     CHECK(!controller.hasClip(noAnimation));
+    CHECK(controller.clip(RenderAnimation { 99 }).name == "idle");
+    CHECK(controller.clip(noAnimation).name == "idle");
+    CHECK(controller.updateInstances(frameWithAnimation(RenderAnimation { 99 }, 0.0f)).empty());
+    CHECK(controller.updateInstances(frameWithAnimation(noAnimation, 0.0f)).size() == 1);
 
     bool threw = false;
     try {
@@ -393,9 +412,21 @@ void testClipValidationAndClear()
     }
     CHECK(threw);
 
+    CHECK(controller.updateInstances(frameWithAnimation(pushClip, 1.0f)).size() == 1);
+    GltfAnimationClip preview = makeClip("preview before clear");
+    controller.setPreview(heroModel, &preview, 2.0f);
+    // Leave the preview pending so the instance still has active push
+    // playback. Clear must discard both, independently.
     controller.clear();
     CHECK(!controller.hasClip(idleClip));
-    CHECK(!controller.update(frameWithAnimation(idleClip, 1.0f)));
+    CHECK(controller.updateInstances(frameWithAnimation(idleClip, 1.0f)).empty());
+    controller.setClip(idleClip, makeClip("reloaded idle"));
+    controller.setClip(pushClip, makeClip("reloaded push"));
+    const auto reloaded = controller.updateInstances(frameWithAnimation(noAnimation, 1.0f));
+    CHECK(reloaded.size() == 1);
+    CHECK(reloaded[0].instanceId == 17);
+    CHECK(!reloaded[0].skinning.blended());
+    CHECK(reloaded[0].skinning.toClip->name == "reloaded idle");
 }
 
 void testAnimatedInstancesKeepIndependentPlayback()
@@ -403,6 +434,7 @@ void testAnimatedInstancesKeepIndependentPlayback()
     TEST("animatedInstancesKeepIndependentPlayback");
     AnimationController controller = makeController(0.1f);
     RenderFrameData frame;
+    frame.animationTransitionTimeSeconds = 1.0f;
     frame.tiles.push_back({
         .model = heroModel,
         .animation = idleClip,
@@ -417,28 +449,116 @@ void testAnimatedInstancesKeepIndependentPlayback()
         .animationLoops = false,
         .animationTimeSeconds = 0.25f,
     });
+    frame.tiles.push_back({
+        .model = heroModel,
+        .animation = idleClip,
+        .animationInstanceId = 3,
+        .animationTimeSeconds = 9.0f,
+    });
     const auto initial = controller.updateInstances(frame);
-    CHECK(initial.size() == 2);
+    CHECK(initial.size() == 3);
     CHECK(initial[0].instanceId == 1);
     CHECK(initial[0].skinning.toClip->name == "idle");
     CHECK(initial[1].instanceId == 2);
     CHECK(initial[1].skinning.toClip->name == "attack");
+    CHECK(initial[2].instanceId == 3);
+    CHECK(near(initial[2].skinning.toTimeSeconds, 9.0f));
 
+    frame.animationTransitionTimeSeconds = 1.05f;
     frame.tiles[0].animation = moveClip;
     frame.tiles[0].animationTimeSeconds = 1.05f;
     frame.tiles[1].animationTimeSeconds = 0.30f;
     const auto advanced = controller.updateInstances(frame);
-    CHECK(advanced.size() == 2);
+    CHECK(advanced.size() == 3);
     CHECK(advanced[0].skinning.blended());
     CHECK(advanced[0].skinning.fromClip->name == "idle");
     CHECK(advanced[0].skinning.toClip->name == "movement");
+    CHECK(near(advanced[0].skinning.blend, 0.5f));
     CHECK(!advanced[1].skinning.blended());
     CHECK(advanced[1].skinning.toClip->name == "attack");
+    CHECK(!advanced[2].skinning.blended());
+    CHECK(advanced[2].skinning.toClip->name == "idle");
+    CHECK(near(advanced[2].skinning.toTimeSeconds, 9.0f));
 
     frame.tiles[1].animation = noAnimation;
     const auto fallback = controller.updateInstances(frame);
-    CHECK(fallback.size() == 2);
+    CHECK(fallback.size() == 3);
     CHECK(fallback[1].skinning.toClip->name == "idle");
+
+    std::reverse(frame.tiles.begin(), frame.tiles.end());
+    const auto reordered = controller.updateInstances(frame);
+    CHECK(reordered.size() == 3);
+    CHECK(reordered[0].instanceId == 3);
+    CHECK(!reordered[0].skinning.blended());
+    CHECK(near(reordered[0].skinning.toTimeSeconds, 9.0f));
+    CHECK(reordered[2].instanceId == 1);
+    CHECK(reordered[2].skinning.fromClip->name == "idle");
+    CHECK(reordered[2].skinning.toClip->name == "movement");
+}
+
+void testArenaAndVectorUpdatesProduceEquivalentInstanceRequests()
+{
+    TEST("arenaAndVectorUpdatesProduceEquivalentInstanceRequests");
+    AnimationController vectorController = makeController();
+    AnimationController arenaController = makeController();
+    FrameArena arena("animation requests", 4096);
+    RenderFrameData frame = frameWithAnimation(idleClip, 1.0f);
+    frame.tiles.push_back({
+        .model = stoneModel, .animation = deathClip,
+        .animationFallback = deadIdleClip, .animationInstanceId = 18,
+        .animationLoops = false, .animationTimeSeconds = 0.75f,
+    });
+    const auto compare = [&] {
+        const auto owned = vectorController.updateInstances(frame);
+        arena.reset();
+        const auto live = arenaController.updateInstances(frame, arena);
+        CHECK(live.arenaBacked());
+        CHECK(live.droppedCount() == 0);
+        CHECK(!arena.exhausted());
+        CHECK(live.size() == owned.size());
+        for (std::size_t index = 0; index < std::min(live.size(), owned.size()); ++index) {
+            CHECK(live[index].instanceId == owned[index].instanceId);
+            CHECK(live[index].model == owned[index].model);
+            const auto& expected = owned[index].skinning;
+            const auto& actual = live[index].skinning;
+            CHECK(actual.blended() == expected.blended());
+            if (actual.fromClip && expected.fromClip) {
+                CHECK(actual.fromClip->name == expected.fromClip->name);
+            }
+            CHECK(actual.toClip->name == expected.toClip->name);
+            CHECK(near(actual.fromTimeSeconds, expected.fromTimeSeconds));
+            CHECK(near(actual.toTimeSeconds, expected.toTimeSeconds));
+            CHECK(near(actual.blend, expected.blend));
+            CHECK(actual.fromPlaybackMode == expected.fromPlaybackMode);
+            CHECK(actual.toPlaybackMode == expected.toPlaybackMode);
+        }
+        return live.size();
+    };
+    CHECK(compare() == 2);
+    frame.tiles[0].animation = moveClip;
+    frame.tiles[0].animationTimeSeconds = 0.05f;
+    frame.animationTransitionTimeSeconds = 1.05f;
+    CHECK(compare() == 2); // Forward fade with a reset local clock.
+    CHECK(compare() == 2); // Identical samples are still published.
+    frame.tiles[0].animationTimeSeconds = 0.025f;
+    frame.animationTransitionTimeSeconds = 1.025f;
+    CHECK(compare() == 2); // Reverse time still advances the fade.
+    frame.animationTransitionTimeSeconds = 1.05f;
+    CHECK(compare() == 2); // Paused clip time, advancing transition clock.
+    frame.tiles[1].animationTimeSeconds = 1.0f;
+    frame.tiles[1].animationFallbackTimeSeconds = 0.25f;
+    CHECK(compare() == 2); // Non-looping terminal fallback changes Clamp to Loop.
+
+    GltfAnimationClip preview = makeClip("parity preview");
+    vectorController.setPreview(heroModel, &preview, 2.0f);
+    arenaController.setPreview(heroModel, &preview, 2.0f);
+    CHECK(compare() == 2);
+    CHECK(compare() == 2);
+    vectorController.setPreview(cubeModel, nullptr, 0.0f);
+    arenaController.setPreview(cubeModel, nullptr, 0.0f);
+    CHECK(compare() == 2); // Exiting preview starts fresh per-instance playback.
+    frame.tiles[1].animationInstanceId = 0;
+    CHECK(compare() == 1); // Both overloads ignore static tiles identically.
 }
 
 void testSkinnedAttachmentsInheritAnimatedNodeTransforms()
@@ -817,7 +937,7 @@ void testLoadsCubicSplineAnimationLayout()
 
 int main()
 {
-    testSelectsFirstAnimatedRogueAndDeduplicates();
+    testIdentifiedInstancesEmitEachFrameAcrossModels();
     testCrossfadeProgressesAndCompletes();
     testReverseTimeStillAdvancesFade();
     testCrossfadeClockIsIndependentFromClipLocalTime();
@@ -827,6 +947,7 @@ int main()
     testNonLoopingPlaybackModeSurvivesCrossfade();
     testClipValidationAndClear();
     testAnimatedInstancesKeepIndependentPlayback();
+    testArenaAndVectorUpdatesProduceEquivalentInstanceRequests();
     testSkinnedAttachmentsInheritAnimatedNodeTransforms();
     testAnimationInterpolationModes();
     testNonLoopingSamplingHoldsTheTerminalPose();

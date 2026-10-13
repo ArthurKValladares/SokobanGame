@@ -477,7 +477,7 @@ void testAnimationRequestAllocations()
 {
     using namespace sokoban;
     AnimationController controller;
-    controller.configure(RenderModel { 1 }, RenderAnimation { 1 });
+    controller.configure(RenderAnimation { 1 });
     GltfAnimationClip clip;
     clip.durationSeconds = 1.0f;
     clip.channels.resize(1);

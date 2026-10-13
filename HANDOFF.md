@@ -900,10 +900,20 @@ and the required real-device checks are recorded.
 - Static loading, CPU skinning, and GPU skinning share the source-to-model
   transform. Positions and tangents use the forward linear transform; normals
   use its inverse transpose. Tangent frames remain normalized, orthogonal, and
-  preserve handedness.
+  preserve handedness. `skinGltfMesh` remains a single-clip CPU reference for
+  geometry and attachment tests. Runtime animation uses `sampleGltfSkinPose`
+  and `sampleGltfSkinPoseBlended` to build GPU palettes; the unused blended
+  CPU vertex-skinning API has been removed.
 
 ## Renderer contracts
 
+- `AnimationController::updateInstances` owns playback per nonzero
+  `animationInstanceId` and emits a pose for every valid instance on every
+  frame, including paused clips and previews. Frame-indexed GPU palettes need
+  that publication even when clip/time are unchanged. Preview overrides only
+  instances of its selected model. Crossfades use the separate frame transition
+  clock, so clip resets, paused clips and reverse playback preserve fade timing.
+  `clear()` resets loaded clips, preview inputs and all instance playback.
 - Ground geometry processing derives exposure from the final emitted tiles on
   the same layer, even when loading baked rim caps.
   Eligible terrain is opaque, fixed, unanimated unit ground at its authored

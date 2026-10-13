@@ -284,8 +284,7 @@ void VulkanModelResources::create(
         animations_[animationIndex].sourceBytes = sourceFileBytes(
             assetRoot_ / manifest.animations()[animationIndex].path);
     }
-    animationController_.configure(
-        manifest.playerModel(), manifest.playerIdleAnimation());
+    animationController_.configure(manifest.playerIdleAnimation());
 
     try {
         // The ring comes first and is shared: the texture uploader stages
