@@ -6,6 +6,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -54,11 +55,17 @@ public:
     // Services at most one request before the UI frame begins. File decoding
     // and the synchronous GPU upload stay on the main thread, but the first
     // palette draw cannot trigger a batch of loads and fence waits.
+    // Transient failures retry after a cooldown without blocking other tiles.
     void servicePendingThumbnails();
 
     // Drops every loaded thumbnail, so a re-bake can be picked up without
     // restarting.
     void invalidate();
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    // Exercises cleanup and retry after an upload has already allocated its image.
+    static void failNextTextureRegistrationForTesting();
+#endif
 
 private:
     struct Thumbnail {
@@ -66,12 +73,11 @@ private:
         // No sampler: this ImGui version's AddTexture takes only a view and a
         // layout, and uses its own sampler.
         VkDescriptorSet imguiTexture = VK_NULL_HANDLE;
-        // A completed request with no usable file; a queued placeholder keeps
-        // the default value until serviced.
-        bool missing = false;
+        std::chrono::steady_clock::time_point retryAfter {};
+        bool failureReported = false;
     };
 
-    [[nodiscard]] bool loadThumbnail(TileType tile, Thumbnail& target);
+    void loadThumbnail(TileType tile, Thumbnail& target);
     void destroyThumbnail(
         Thumbnail& thumbnail,
         bool releaseImGuiDescriptor = true);

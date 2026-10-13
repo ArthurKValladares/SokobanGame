@@ -1665,12 +1665,19 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/SourceWatcherTests.cpp
     )
-    # Replays solutions/*.solution against the current rules and levels.
+    # Requires a passing current recording or an explicit current draft
+    # exception for every puzzle screen, in all test/CI configurations.
     sokoban_add_test(NAME solution_replay
         LIBS sokoban_core
         SOURCES tests/SolutionReplayTests.cpp
         DEFINITIONS SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+        DEPENDS sokoban_solve_level
     )
+    add_test(NAME solution_tool COMMAND "${CMAKE_COMMAND}"
+        "-DSOKOBAN_SOLVE_EXECUTABLE=$<TARGET_FILE:sokoban_solve_level>"
+        "-DSOKOBAN_TEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/test-output/solution-tool/$<CONFIG>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/VerifySolutionTool.cmake")
+    set_tests_properties(solution_tool PROPERTIES LABELS "solver;content" TIMEOUT 30)
     set(SOKOBAN_SHADER_HOT_RELOAD_TEST_DEFINITIONS)
     if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
         # Also exercises the real compiler when the build has one.

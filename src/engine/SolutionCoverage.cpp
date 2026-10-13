@@ -129,9 +129,17 @@ CoverageReport auditCoverage(
                 if (!entry.is_regular_file()) continue;
                 const auto screen =
                     screenIndexFromFilename(entry.path().filename().string());
-                if (screen)
-                    screens.emplace(
+                if (screen) {
+                    const auto [existing, inserted] = screens.emplace(
                         LocationKey { *level, *screen }, entry.path());
+                    if (!inserted) {
+                        report.errors.push_back(
+                            screenName({ *level, *screen }) +
+                            ": duplicate screen location: " +
+                            existing->second.string() + " and " +
+                            entry.path().string());
+                    }
+                }
             }
         }
     }
@@ -158,6 +166,7 @@ CoverageReport auditCoverage(
                 }
             }
             bool matched = false;
+            bool allPassed = true;
             for (const auto& [file, recording] : recordings) {
                 if (recording.levelDigest != digest) continue;
                 matched = true;
@@ -165,13 +174,14 @@ CoverageReport auditCoverage(
                 const auto result = replay(
                     Level::loadFromDefinition(definition, name), recording);
                 if (!result.passed) {
+                    allPassed = false;
                     report.errors.push_back(
                         name + " (" + file.filename().string() +
                         "): " + result.message);
                 }
             }
             if (matched) {
-                ++report.replayed;
+                if (allPassed) ++report.replayed;
             } else if (!isDraft) {
                 report.errors.push_back(
                     name + ": missing current recording (digest " +

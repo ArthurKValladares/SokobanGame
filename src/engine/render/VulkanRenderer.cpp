@@ -30,6 +30,10 @@
 #include <string>
 #include <utility>
 
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+#include <atomic>
+#endif
+
 #ifndef SOKOBAN_ENABLE_DEBUG_UI
 // Deliberately fatal rather than defaulting to 0. This flag decides whether
 // Application and DebugUi declare some of their members, so a translation unit
@@ -41,6 +45,10 @@
 
 namespace sokoban {
 namespace {
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+std::atomic_bool failNextSwapchainAcquisition = false;
+#endif
 
 RuntimeTextureCatalog collectTimedRuntimeTextureCatalog(
     const std::filesystem::path& assetRoot,
@@ -843,8 +851,15 @@ void VulkanRenderer::drawFrame(
     VkResult acquired = VK_SUCCESS;
     {
         SOKOBAN_PROFILE_SCOPE("Renderer.Acquire swapchain image");
-        acquired = activeResources_.swapchain->acquire(
-            frame.imageAvailable, imageIndex);
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+        if (failNextSwapchainAcquisition.exchange(false)) {
+            acquired = VK_ERROR_OUT_OF_DATE_KHR;
+        } else
+#endif
+        {
+            acquired = activeResources_.swapchain->acquire(
+                frame.imageAvailable, imageIndex);
+        }
     }
     imageAcquisitionTimeTelemetry_.record(
         elapsedMilliseconds(imageAcquisitionStart));
@@ -2201,44 +2216,64 @@ void VulkanRenderer::initializeDebugUi()
 #if SOKOBAN_ENABLE_DEBUG_UI
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard |
-        ImGuiConfigFlags_DockingEnable;
-    ImGui::StyleColorsDark();
+    try {
+        ImGuiIO& io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard |
+            ImGuiConfigFlags_DockingEnable;
+        ImGui::StyleColorsDark();
 
-    if (!ImGui_ImplSDL3_InitForVulkan(window_)) {
-        throw std::runtime_error("ImGui_ImplSDL3_InitForVulkan failed");
+        if (!ImGui_ImplSDL3_InitForVulkan(window_)) {
+            throw std::runtime_error("ImGui_ImplSDL3_InitForVulkan failed");
+        }
+
+        const VkFormat colorAttachmentFormat =
+            activeResources_.swapchain->colorFormat();
+        VkPipelineRenderingCreateInfoKHR pipelineRendering {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
+            .colorAttachmentCount = 1,
+            .pColorAttachmentFormats = &colorAttachmentFormat,
+        };
+
+        ImGui_ImplVulkan_InitInfo initInfo {};
+        initInfo.ApiVersion = VK_API_VERSION_1_3;
+        initInfo.Instance = deviceContext_.instance();
+        initInfo.PhysicalDevice = deviceContext_.physicalDevice();
+        initInfo.Device = deviceContext_.device();
+        initInfo.QueueFamily = deviceContext_.queueFamilies().graphics;
+        initInfo.Queue = deviceContext_.graphicsQueue();
+        // Every tile may be resident at once. Atlas textures and overlapping
+        // viewport generations share this pool; samplers have a separate budget.
+        initInfo.DescriptorPoolSize = static_cast<uint32_t>(tileTypeCount) +
+            IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE + viewportTextureCapacity_;
+        initInfo.MinImageCount = 2;
+        initInfo.ImageCount = std::max(
+            2U, activeResources_.swapchain->imageCount());
+        initInfo.PipelineInfoMain.PipelineRenderingCreateInfo = pipelineRendering;
+        initInfo.UseDynamicRendering = true;
+        initInfo.MinAllocationSize = VkDeviceSize { 1024 } * 1024;
+        initInfo.CheckVkResultFn = [](VkResult result) {
+            // In particular, AddTexture must stop before updating a descriptor
+            // when vkAllocateDescriptorSets fails.
+            vkCheck(result, "ImGui Vulkan operation failed");
+        };
+
+        if (!ImGui_ImplVulkan_Init(&initInfo)) {
+            throw std::runtime_error("ImGui_ImplVulkan_Init failed");
+        }
+        registerGameViewportTexture(activeResources_);
+    } catch (...) {
+        shutdownDebugUi();
+        throw;
     }
-
-    const VkFormat colorAttachmentFormat =
-        activeResources_.swapchain->colorFormat();
-    VkPipelineRenderingCreateInfoKHR pipelineRendering {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
-        .colorAttachmentCount = 1,
-        .pColorAttachmentFormats = &colorAttachmentFormat,
-    };
-
-    ImGui_ImplVulkan_InitInfo initInfo {};
-    initInfo.ApiVersion = VK_API_VERSION_1_3;
-    initInfo.Instance = deviceContext_.instance();
-    initInfo.PhysicalDevice = deviceContext_.physicalDevice();
-    initInfo.Device = deviceContext_.device();
-    initInfo.QueueFamily = deviceContext_.queueFamilies().graphics;
-    initInfo.Queue = deviceContext_.graphicsQueue();
-    initInfo.DescriptorPoolSize = 64;
-    initInfo.MinImageCount = 2;
-    initInfo.ImageCount = std::max(
-        2U, activeResources_.swapchain->imageCount());
-    initInfo.PipelineInfoMain.PipelineRenderingCreateInfo = pipelineRendering;
-    initInfo.UseDynamicRendering = true;
-    initInfo.MinAllocationSize = VkDeviceSize { 1024 } * 1024;
-
-    if (!ImGui_ImplVulkan_Init(&initInfo)) {
-        throw std::runtime_error("ImGui_ImplVulkan_Init failed");
-    }
-    registerGameViewportTexture(activeResources_);
 #endif
 }
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+void VulkanRenderer::failNextSwapchainAcquisitionForTesting()
+{
+    failNextSwapchainAcquisition.store(true);
+}
+#endif
 
 void VulkanRenderer::registerGameViewportTexture(
     RenderResourceSet& resources)
@@ -2249,9 +2284,27 @@ void VulkanRenderer::registerGameViewportTexture(
         ImGui::GetIO().BackendRendererUserData == nullptr) {
         return;
     }
+    const auto viewportTextures = static_cast<uint32_t>(std::ranges::count_if(
+        retiredResources_, [](const RetiredRenderResources& retired) {
+            return retired.resources.gameViewportTexture != VK_NULL_HANDLE;
+        })) + (activeResources_.gameViewportTexture ? 1U : 0U);
+    if (viewportTextures >= viewportTextureCapacity_) {
+        // Repeated out-of-date acquisitions can replace resources without
+        // advancing the frame slot. Drain those retired generations before
+        // they consume the viewport reserve indefinitely.
+        vkCheck(vkDeviceWaitIdle(deviceContext_.device()),
+            "vkDeviceWaitIdle failed while reclaiming viewport textures");
+        for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
+            completeFrame(i);
+        }
+        destroyCompletedRetirements();
+    }
     resources.gameViewportTexture = ImGui_ImplVulkan_AddTexture(
         resources.swapchain->displayColorView(),
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (!resources.gameViewportTexture) {
+        throw std::runtime_error("ImGui viewport texture registration failed");
+    }
 #else
     (void)resources;
 #endif
@@ -2281,8 +2334,12 @@ void VulkanRenderer::shutdownDebugUi()
         for (RetiredRenderResources& retired : retiredResources_) {
             releaseGameViewportTexture(retired.resources);
         }
-        ImGui_ImplVulkan_Shutdown();
-        ImGui_ImplSDL3_Shutdown();
+        if (ImGui::GetIO().BackendRendererUserData) {
+            ImGui_ImplVulkan_Shutdown();
+        }
+        if (ImGui::GetIO().BackendPlatformUserData) {
+            ImGui_ImplSDL3_Shutdown();
+        }
         ImGui::DestroyContext();
     }
 #endif

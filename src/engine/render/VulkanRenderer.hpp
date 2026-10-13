@@ -206,6 +206,10 @@ public:
     [[nodiscard]] VkDescriptorSet tileThumbnail(TileType tile);
     // Drops loaded thumbnails so a re-bake is picked up without restarting.
     void invalidateTileThumbnails();
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    // Skips acquisition without signaling a semaphore or acquiring an image.
+    static void failNextSwapchainAcquisitionForTesting();
+#endif
     // World point -> pixel position, using the frame's own camera. Lets the
     // debug UI draw overlays that sit correctly on the 3D board (the brush
     // preview ring) without duplicating the projection.
@@ -387,6 +391,7 @@ private:
     std::vector<RetiredRenderResources> retiredResources_;
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
+    static constexpr uint32_t viewportTextureCapacity_ = maxFramesInFlight_ + 2;
     // The skinning palette and the draw-instance buffer are sized for a fixed
     // number of frame slots and indexed by the frame this renderer is on, so
     // the two counts are one number wearing two names. Raising this alone

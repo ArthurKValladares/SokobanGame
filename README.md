@@ -1252,9 +1252,11 @@ fail the suite; all current screens require coverage by default.
 
 `solutions/coverage.json` may exempt an unfinished screen with its level and
 screen indices, current gameplay digest, and a nonempty reason. A gameplay edit
-or a removed screen invalidates that exception until it is reviewed. The
-minecart demonstration at level 5, screen 2 has no End tile and is the current
-exception. New finished screens must be solved and recorded before merging.
+or a removed screen invalidates that exception until it is reviewed. There are
+currently no exceptions: all 25 campaign screens have passing recordings,
+including the minecart puzzle at level 5, screen 2. New finished screens must
+be solved and recorded before merging. The same strict audit runs through
+CTest in every required CI test configuration and never regenerates files.
 
 A file looks like this:
 
@@ -1309,11 +1311,25 @@ build preset builds it:
 ```
 
 Without `--level` it tries every screen that has no current recording. It
-skips screens whose recording still matches unless given `--overwrite`, and
+skips screens whose recording still matches and replays unless given `--overwrite`, and
 stops a screen after `--max-states` (default 2,000,000) generated positions.
 The exact walking-membership cache is limited by `--max-walking-cache`
 (default 1,000,000 keys); zero disables it, while a larger value trades memory
 for fewer repeated canonicalization floods.
+
+After intentionally changing a screen, `--refresh-existing` first tries the
+inputs from its named recording through the current gameplay driver. A run
+that still solves is re-recorded with complete current expectations and
+verified before the file is atomically replaced. Otherwise the tool reports
+why the old inputs failed and searches with the normal state limit. Review
+the regenerated files and run the strict coverage test before committing:
+
+```powershell
+.\out\release\tools\Release\sokoban_solve_level.exe levels solutions --level 3 --screen 2 --refresh-existing --best-first
+cmake --build --preset dev --target sokoban_tests
+ctest --test-dir out\dev -R '^solution_replay$' --output-on-failure
+```
+
 The default breadth-first search minimizes significant state-changing moves,
 not necessarily recorded inputs; `--best-first` is usually much faster on
 large screens but the result may be longer. Final output distinguishes

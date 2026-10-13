@@ -13,9 +13,23 @@
 
 #include <cstring>
 #include <exception>
+#include <new>
 #include <system_error>
 
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+#include <atomic>
+#endif
+
 namespace sokoban {
+namespace {
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+std::atomic_bool failNextTextureRegistration = false;
+#endif
+#if SOKOBAN_ENABLE_DEBUG_UI
+constexpr auto thumbnailRetryDelay = std::chrono::seconds(1);
+#endif
+} // namespace
+
 VulkanThumbnailPass::~VulkanThumbnailPass()
 {
     destroy();
@@ -103,7 +117,7 @@ VkDescriptorSet VulkanThumbnailPass::thumbnailFor(TileType tile)
     (void)tile;
     return VK_NULL_HANDLE;
 #else
-    if (!valid()) {
+    if (!valid() || static_cast<std::size_t>(tile) >= tileTypeCount) {
         return VK_NULL_HANDLE;
     }
     const auto [entry, inserted] = cache_.try_emplace(static_cast<int>(tile));
@@ -122,39 +136,76 @@ void VulkanThumbnailPass::servicePendingThumbnails()
     if (!valid() || pending_.empty()) {
         return;
     }
-    const TileType tile = pending_.front();
-    pending_.pop_front();
-    // Retain the placeholder on success or failure, so missing files are not
-    // retried by the palette every frame.
-    Thumbnail& thumbnail = cache_.at(static_cast<int>(tile));
-    try {
-        if (!loadThumbnail(tile, thumbnail)) {
-            thumbnail.missing = true;
+    const auto now = std::chrono::steady_clock::now();
+    const auto queuedCount = pending_.size();
+    for (std::size_t i = 0; i < queuedCount; ++i) {
+        const TileType tile = pending_.front();
+        pending_.pop_front();
+        Thumbnail& thumbnail = cache_.at(static_cast<int>(tile));
+        if (now < thumbnail.retryAfter) {
+            pending_.push_back(tile);
+            continue;
         }
-    } catch (const std::exception& error) {
-        log::warning(log::Category::Assets)
-            << "Could not load the baked thumbnail for "
-            << tileTypeName(tile) << ": " << error.what();
-        destroyThumbnail(thumbnail);
-        thumbnail = {};
-        thumbnail.missing = true;
+        const auto retry = [&](const std::exception& error) {
+            destroyThumbnail(thumbnail);
+            if (!thumbnail.failureReported) {
+                log::warning(log::Category::Assets)
+                    << "Could not load the baked thumbnail for "
+                    << tileTypeName(tile) << ": " << error.what()
+                    << "; retrying later";
+                thumbnail.failureReported = true;
+            }
+            thumbnail.retryAfter =
+                std::chrono::steady_clock::now() + thumbnailRetryDelay;
+            pending_.push_back(tile);
+        };
+        try {
+            // Missing or corrupt files retain their placeholder until a bake
+            // invalidates the cache. Only transient failures return to the queue.
+            loadThumbnail(tile, thumbnail);
+            thumbnail.failureReported = false;
+        } catch (const VulkanError& error) {
+            if (error.result() == VK_ERROR_DEVICE_LOST) {
+                destroyThumbnail(thumbnail);
+                throw;
+            }
+            retry(error);
+        } catch (const std::exception& error) {
+            retry(error);
+        }
+        // Rotating delayed retries must not turn into multiple uploads per frame.
+        break;
     }
 
 #endif
 }
 
-bool VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
+void VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
 {
     const std::filesystem::path file =
         assetRoot_ / tileThumbnails::assetPathFor(tile);
     std::error_code error;
-    if (!std::filesystem::exists(file, error)) {
-        return false;
+    const bool exists = std::filesystem::exists(file, error);
+    if (error) {
+        throw std::filesystem::filesystem_error("Inspecting thumbnail", file, error);
+    }
+    if (!exists) {
+        return;
     }
 
-    const ImageData image = loadRgbaImage(file);
+    ImageData image;
+    try {
+        image = loadRgbaImage(file);
+    } catch (const std::bad_alloc&) {
+        throw;
+    } catch (const std::exception& decodeError) {
+        log::warning(log::Category::Assets)
+            << "Ignoring the unreadable baked thumbnail for "
+            << tileTypeName(tile) << ": " << decodeError.what();
+        return;
+    }
     if (image.width == 0 || image.height == 0 || image.rgba.empty()) {
-        return false;
+        return;
     }
 
     // SRGB, not UNORM, and the reasoning here used to be backwards.
@@ -278,12 +329,22 @@ bool VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
     }
 
 #if SOKOBAN_ENABLE_DEBUG_UI
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    if (!failNextTextureRegistration.exchange(false))
+#endif
     target.imguiTexture = ImGui_ImplVulkan_AddTexture(
         target.image.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    return target.imguiTexture != VK_NULL_HANDLE;
-#else
-    return false;
+    if (!target.imguiTexture) {
+        throw std::runtime_error("ImGui thumbnail texture registration failed");
+    }
 #endif
 }
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+void VulkanThumbnailPass::failNextTextureRegistrationForTesting()
+{
+    failNextTextureRegistration.store(true);
+}
+#endif
 
 } // namespace sokoban

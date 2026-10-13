@@ -4,14 +4,17 @@
 //   sokoban_solve_level <levels-root> <solutions-dir> [--level L [--screen S]]
 //                       [--max-states N] [--max-walking-cache N]
 //                       [--best-first]
-//                       [--progress-interval N] [--overwrite]
+//                       [--progress-interval N] [--overwrite] [--refresh-existing]
 //
 // The solver plans ordinary transitions through the production rules and uses
 // solution::Driver for automatic consequences. Every result is still recorded
 // and replayed through Driver before it is written.
-// Screens that already have a solution for their current content are skipped
-// unless --overwrite is given.
+// Screens with a passing solution for their current content are skipped unless
+// --overwrite is given. --refresh-existing first re-records the canonical
+// file's inputs against the current screen, even when its old digest is stale;
+// missing, malformed or unsuccessful recordings fall back to bounded search.
 
+#include "engine/AtomicFile.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/Solution.hpp"
@@ -29,10 +32,26 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace {
 
 using namespace sokoban;
+
+solution::Solution readRecording(const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) {
+        throw std::runtime_error("cannot read " + path.string());
+    }
+    std::stringstream text;
+    text << stream.rdbuf();
+    if (stream.bad()) {
+        throw std::runtime_error("cannot read " + path.string());
+    }
+    return solution::parse(text.str());
+}
 
 std::map<std::uint64_t, std::filesystem::path> existingSolutions(
     const std::filesystem::path& directory)
@@ -45,11 +64,8 @@ std::map<std::uint64_t, std::filesystem::path> existingSolutions(
         if (entry.path().extension() != ".solution") {
             continue;
         }
-        std::ifstream stream(entry.path(), std::ios::binary);
-        std::stringstream text;
-        text << stream.rdbuf();
         try {
-            found.emplace(solution::parse(text.str()).levelDigest, entry.path());
+            found.emplace(readRecording(entry.path()).levelDigest, entry.path());
         } catch (const std::exception&) {
             // A broken file is the replay test's to report.
             continue;
@@ -135,7 +151,7 @@ try
                      "<solutions-dir> [--level L [--screen S]] "
                      "[--max-states N] [--max-walking-cache N] "
                      "[--best-first] "
-                     "[--progress-interval N] [--overwrite]\n";
+                     "[--progress-interval N] [--overwrite] [--refresh-existing]\n";
         return 2;
     }
     const std::filesystem::path levelsRoot = argv[1];
@@ -147,6 +163,7 @@ try
         solver::Options {}.maxCachedWalkingStates;
     std::size_t progressInterval = 0;
     bool overwrite = false;
+    bool refreshExisting = false;
     solver::Strategy strategy = solver::Strategy::BreadthFirst;
     try {
         for (int index = 3; index < argc; ++index) {
@@ -172,6 +189,8 @@ try
                     static_cast<std::size_t>(std::stoull(value()));
             } else if (argument == "--overwrite") {
                 overwrite = true;
+            } else if (argument == "--refresh-existing") {
+                refreshExisting = true;
             } else if (argument == "--best-first") {
                 strategy = solver::Strategy::BestFirst;
             } else {
@@ -185,7 +204,15 @@ try
     }
 
     std::filesystem::create_directories(solutionsDir);
-    const auto existing = existingSolutions(solutionsDir);
+    auto existing = existingSolutions(solutionsDir);
+    const auto publish = [&](const std::filesystem::path& output,
+                             const solution::Solution& recording) {
+        atomicFile::write(output, solution::serialize(recording));
+        std::erase_if(existing, [&](const auto& entry) {
+            return entry.second == output;
+        });
+        existing[recording.levelDigest] = output;
+    };
     int failures = 0;
     for (int levelIndex = 0;; ++levelIndex) {
         const std::filesystem::path levelDirectory =
@@ -210,13 +237,61 @@ try
             const Level::Definition definition =
                 Level::loadDefinitionFromFile(screenPath);
             const std::uint64_t digest = solution::levelDigest(definition);
-            if (!overwrite && existing.contains(digest)) {
-                std::cout << name << ": already solved by "
-                          << existing.at(digest).filename().string() << "\n";
-                continue;
-            }
             const Level level =
                 Level::loadFromDefinition(definition, screenPath.string());
+            const std::filesystem::path output = solutionsDir /
+                solution::fileNameFor({ levelIndex, screenIndex });
+            if (refreshExisting) {
+                std::optional<solution::Solution> refreshed;
+                try {
+                    const auto previous = readRecording(output);
+                    std::vector<solution::Input> inputs;
+                    inputs.reserve(previous.steps.size());
+                    for (const auto& step : previous.steps) inputs.push_back(step.input);
+                    auto recording = solution::record(level, definition, inputs, name);
+                    if (!recording.solved) {
+                        std::cout << name << ": existing inputs cannot be refreshed: "
+                                  << recording.error << "; searching instead\n" << std::flush;
+                    } else {
+                        const auto verified = solution::replay(level, recording.solution);
+                        if (verified.passed) {
+                            refreshed = std::move(recording.solution);
+                        } else {
+                            std::cout << name << ": refreshed recording failed verification: "
+                                      << verified.message << "; searching instead\n" << std::flush;
+                        }
+                    }
+                } catch (const std::exception& error) {
+                    std::cout << name << ": cannot refresh " << output.filename().string()
+                              << ": " << error.what() << "; searching instead\n" << std::flush;
+                }
+                if (refreshed) {
+                    publish(output, *refreshed);
+                    std::cout << name << ": refreshed " << refreshed->steps.size()
+                              << " existing input steps -> " << output.filename().string()
+                              << "\n" << std::flush;
+                    continue;
+                }
+            } else if (!overwrite && existing.contains(digest)) {
+                const auto file = existing.at(digest);
+                try {
+                    const auto recording = readRecording(file);
+                    const auto verified = recording.levelDigest == digest
+                        ? solution::replay(level, recording)
+                        : solution::ReplayReport { .message = "recording digest changed since inventory" };
+                    if (verified.passed) {
+                        std::cout << name << ": already solved by "
+                                  << file.filename().string() << "\n";
+                        continue;
+                    }
+                    std::cout << name << ": current recording " << file.filename().string()
+                              << " failed verification: " << verified.message
+                              << "; searching instead\n" << std::flush;
+                } catch (const std::exception& error) {
+                    std::cout << name << ": cannot replay " << file.filename().string()
+                              << ": " << error.what() << "; searching instead\n" << std::flush;
+                }
+            }
             const auto started = std::chrono::steady_clock::now();
             solver::Options options {
                 .maxStates = maxStates,
@@ -272,10 +347,14 @@ try
                 ++failures;
                 continue;
             }
-            const std::filesystem::path output = solutionsDir /
-                solution::fileNameFor({ levelIndex, screenIndex });
-            std::ofstream(output, std::ios::binary | std::ios::trunc)
-                << solution::serialize(recording.solution);
+            const auto verified = solution::replay(level, recording.solution);
+            if (!verified.passed) {
+                std::cout << name << ": search recording failed verification: "
+                          << verified.message << "\n";
+                ++failures;
+                continue;
+            }
+            publish(output, recording.solution);
             std::cout << name << ": " << found.inputs.size() << " steps (";
             appendStatistics(std::cout, found.statistics, seconds);
             std::cout << ") -> " << output.filename().string() << "\n";

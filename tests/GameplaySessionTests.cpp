@@ -809,6 +809,184 @@ void testInvalidSnapshotIsRejectedWithoutMutation()
     CHECK(target.snapshot() == beforeRestore);
 }
 
+void testCyclicSlideSnapshotRestoresReachableEndpointAndRejectsUnreachableEndpoint()
+{
+    TEST("cyclicSlideSnapshotRestoresReachableEndpointAndRejectsUnreachableEndpoint");
+    Level::Definition definition {
+        .layers = { { ".....", "....." }, { "     ", "     " } },
+        .portals = {
+            { cell(0, 0, 1), { 1, 0, 0 } },
+            { cell(4, 0, 1), { 1, 0, 0 } },
+        },
+    };
+    definition.layers[1][0][0] = tileTypeToChar(TileType::PortalWest);
+    definition.layers[1][0][4] = tileTypeToChar(TileType::PortalEast);
+    definition.layers[1][0][1] = tileTypeToChar(TileType::Ice);
+    definition.layers[1][1][0] = tileTypeToChar(TileType::Bard);
+    const Level level = Level::loadFromDefinition(definition, "cyclic slide checkpoint");
+    const GameState initial = rules::initialState(level);
+    const GameState first = rules::step(level, initial, MoveDirection::Right);
+    const GameState reachable = rules::step(level, first, std::nullopt);
+    CHECK(first != initial);
+    CHECK(reachable != first);
+    CHECK(reachable.movables[0].sliding.has_value());
+    CHECK(!reachable.movables[0].fallen);
+
+    // Establish the fixture's cycle without asking gameplay planning or restore
+    // to settle an endless slide. The endpoint is beyond the input's first step.
+    GameState cycled = reachable;
+    bool repeated = false;
+    for (int step = 0; step < 16; ++step) {
+        cycled = rules::step(level, cycled, std::nullopt);
+        if (cycled == reachable) {
+            repeated = true;
+            break;
+        }
+    }
+    CHECK(repeated);
+
+    GameplaySession::Action action;
+    action.before = initial;
+    action.after = reachable;
+    action.playerMoveCountAfter = 1;
+    GameplaySession::Snapshot saved {
+        .state = reachable,
+        .undoStack = { action },
+        .playerMoveCount = 1,
+        .activeHeroController = rules::playerControllerId(reachable, 0),
+    };
+    GameplaySession target;
+    target.reset(level);
+    CHECK(target.restore(level, saved));
+    CHECK(target.snapshot() == saved);
+    CHECK(!target.moving());
+
+    target.queueUndo();
+    const GameplaySession::Snapshot beforeRestore = target.snapshot();
+    const auto completedBefore = target.completedActionCount();
+    const auto inputLogBefore = target.inputLog();
+    GameplaySession::Snapshot unreachable = saved;
+    // The same chain/count remains structurally valid, but no step of this
+    // supported portal loop can produce a fallen block.
+    unreachable.state.movables[0].fallen = true;
+    unreachable.undoStack[0].after = unreachable.state;
+    CHECK(!target.restore(level, unreachable));
+    CHECK(target.snapshot() == beforeRestore);
+    CHECK(target.completedActionCount() == completedBefore);
+    CHECK(target.inputLog() == inputLogBefore);
+    CHECK(!target.moving());
+
+    // Rejection must also preserve pending commands, which Snapshot omits.
+    CHECK(target.tryStartNextAction(level, {}));
+    CHECK(target.activeAction().reversed);
+    finishAction(target);
+    CHECK(target.state() == initial);
+    CHECK(target.undoCount() == 0);
+    CHECK(target.playerMoveCount() == 0);
+}
+
+void testLongFiniteSlideSnapshotRestoresAcrossPlannerContinuations()
+{
+    TEST("longFiniteSlideSnapshotRestoresAcrossPlannerContinuations");
+    constexpr int width = plans::maxChainedSteps * 2 + 17;
+    std::string objects(width, ' ');
+    objects[0] = tileTypeToChar(TileType::Player);
+    objects[1] = tileTypeToChar(TileType::Ice);
+    objects.back() = tileTypeToChar(TileType::Wall);
+    const Level level = makeLevel({ { std::string(width, '.') }, { objects } });
+    GameplaySession original;
+    original.reset(level);
+    const GameState initial = original.state();
+    original.queueMove(MoveDirection::Right);
+    CHECK(original.tryStartNextAction(level, {}));
+    runUntilIdle(original, level, 16);
+    CHECK(!original.moving());
+    CHECK(!rules::hasPendingMotion(level, original.state()));
+    CHECK(original.state().movables[0].cell == cell(width - 2, 0, 1));
+    CHECK(!original.state().movables[0].fallen);
+    CHECK(!original.state().movables[0].sliding.has_value());
+    CHECK(original.completedActionCount() >= 3);
+    CHECK(original.playerMoveCount() == 1);
+    CHECK(original.undoCount() == 1);
+
+    // The scheduler splits planning at 512 legs, but continuation commits fold
+    // into the original push's single saved undo entry.
+    const GameplaySession::Snapshot saved = original.snapshot();
+    CHECK(saved.undoStack.size() == 1);
+    CHECK(saved.undoStack[0].before == initial);
+    CHECK(saved.undoStack[0].after == saved.state);
+    CHECK(saved.state.movables[0].cell.x - initial.movables[0].cell.x >
+        plans::maxChainedSteps);
+    GameplaySession restored;
+    CHECK(restored.restore(level, saved));
+    CHECK(restored.snapshot() == saved);
+    restored.queueUndo();
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state() == initial);
+    CHECK(restored.playerMoveCount() == 0);
+    CHECK(restored.undoCount() == 0);
+}
+
+void testSnapshotReplayStepBudgetAcceptsExactLimitAndRejectsNextStep()
+{
+    TEST("snapshotReplayStepBudgetAcceptsExactLimitAndRejectsNextStep");
+    constexpr std::size_t limit = GameplaySession::maxCheckpointReplaySteps;
+    constexpr int width = static_cast<int>(limit) + 6;
+    std::string objects(width, ' ');
+    objects[0] = tileTypeToChar(TileType::Player);
+    objects[1] = tileTypeToChar(TileType::Ice);
+    objects.back() = tileTypeToChar(TileType::Wall);
+    const Level level = makeLevel({ { std::string(width, '.') }, { objects } });
+    const GameState initial = rules::initialState(level);
+    // The input-driven first step consumes one unit of the replay budget.
+    GameState atLimit = rules::step(level, initial, MoveDirection::Right);
+    for (std::size_t step = 1; step < limit; ++step) {
+        atLimit = rules::step(level, atLimit, std::nullopt);
+    }
+    CHECK(atLimit.movables[0].cell == cell(static_cast<int>(limit) + 1, 0, 1));
+    CHECK(atLimit.movables[0].sliding.has_value());
+    CHECK(!atLimit.movables[0].fallen);
+
+    GameplaySession::Action action;
+    action.before = initial;
+    action.after = atLimit;
+    action.playerMoveCountAfter = 1;
+    const GameplaySession::Snapshot saved {
+        .state = atLimit,
+        .undoStack = { action },
+        .playerMoveCount = 1,
+        .activeHeroController = rules::playerControllerId(atLimit, 0),
+    };
+    GameplaySession target;
+    target.reset(level);
+    CHECK(target.restore(level, saved));
+    CHECK(target.snapshot() == saved);
+
+    GameplaySession::Snapshot beyondLimit = saved;
+    beyondLimit.state = rules::step(level, atLimit, std::nullopt);
+    beyondLimit.undoStack[0].after = beyondLimit.state;
+    CHECK(beyondLimit.state.movables[0].cell ==
+        cell(static_cast<int>(limit) + 2, 0, 1));
+    CHECK(beyondLimit.state.movables[0].sliding.has_value());
+    CHECK(beyondLimit.state != atLimit);
+    target.queueUndo();
+    const GameplaySession::Snapshot beforeRestore = target.snapshot();
+    const auto completedBefore = target.completedActionCount();
+    const auto inputLogBefore = target.inputLog();
+    CHECK(!target.restore(level, beyondLimit));
+    CHECK(target.snapshot() == beforeRestore);
+    CHECK(target.completedActionCount() == completedBefore);
+    CHECK(target.inputLog() == inputLogBefore);
+    CHECK(!target.moving());
+    CHECK(target.tryStartNextAction(level, {}));
+    CHECK(target.activeAction().reversed);
+    finishAction(target);
+    CHECK(target.state() == initial);
+    CHECK(target.playerMoveCount() == 0);
+    CHECK(target.undoCount() == 0);
+}
+
 void testMirrorActionIsInstantUndoableAndRestorable()
 {
     TEST("mirrorActionIsInstantUndoableAndRestorable");
@@ -1729,6 +1907,9 @@ void testFastPressurePlateCrossingSerializesAndRetriesDistantMovement()
 
 int main()
 {
+    testCyclicSlideSnapshotRestoresReachableEndpointAndRejectsUnreachableEndpoint();
+    testLongFiniteSlideSnapshotRestoresAcrossPlannerContinuations();
+    testSnapshotReplayStepBudgetAcceptsExactLimitAndRejectsNextStep();
     testPressurePlateChangesSerializeDistantGateMoves();
     testFastPressurePlateCrossingSerializesAndRetriesDistantMovement();
     testLeverStateCommitsRestoresUndoesAndRestarts();

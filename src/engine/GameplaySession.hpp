@@ -66,6 +66,12 @@ public:
     void resetToState(
         const GameState& state, EntityId activeHeroController);
     [[nodiscard]] Snapshot snapshot() const;
+    // Validation checks at most this many rule steps per candidate input/scope,
+    // including its first step. This exceeds one planner batch because slide
+    // continuations can fold into a single history entry. Replay stops on a
+    // cycle or at this budget; an endpoint not reached by then is rejected
+    // without changing the session.
+    static constexpr std::size_t maxCheckpointReplaySteps = 10'000;
     [[nodiscard]] bool restore(const Level& level, const Snapshot& snapshot);
 
     void queueMove(MoveDirection direction);

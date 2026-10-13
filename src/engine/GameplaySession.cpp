@@ -88,36 +88,56 @@ bool replayMatches(
         MoveDirection::Right,
     };
     return std::ranges::any_of(inputs, [&](std::optional<MoveDirection> input) {
-        const GameState first =
+        GameState current =
             rules::scopedStep(level, action.before, input, rates, scope);
-        if (first == action.before) {
+        if (current == action.before) {
             return false;
         }
         // A move counts once, judged on the input-driven first step, however
         // many steps the slide it started runs for.
         const int expectedMoveCount = action.playerMoveCountBefore +
-            (input && plans::anyPlayerMoved(action.before, first) ? 1 : 0);
+            (input && plans::anyPlayerMoved(action.before, current) ? 1 : 0);
         if (action.playerMoveCountAfter != expectedMoveCount) {
             return false;
         }
         // Saves written before slides were chained hold one step per action,
         // so a single step still has to be accepted. Newer saves hold the whole
         // chain, which is what replaying the plan produces.
-        if (first == action.after) {
+        if (current == action.after) {
             return true;
         }
+        if (!plans::anySlideMomentum(current)) {
+            return false;
+        }
 
-        GameState current = first;
-        while (plans::anySlideMomentum(current) &&
-            !(current == action.after)) {
+        // With fixed input, scope and rates, repeating the complete mechanical
+        // state proves the endpoint is unreachable. Brent's cycle detector
+        // keeps one checkpoint instead of retaining every replayed state.
+        GameState checkpoint = current;
+        std::size_t power = 1;
+        std::size_t distance = 0;
+        // The input-driven first step already consumed one unit. Bound work
+        // even when a long joint cycle has not repeated within this budget.
+        for (std::size_t steps = 1;
+             steps < GameplaySession::maxCheckpointReplaySteps &&
+                 plans::anySlideMomentum(current);
+             ++steps) {
             GameState next =
                 rules::scopedStep(level, current, std::nullopt, rates, scope);
-            if (next == current) {
-                break;
+            if (next == action.after) {
+                return true;
+            }
+            if (next == current || next == checkpoint) {
+                return false;
             }
             current = std::move(next);
+            if (++distance == power) {
+                checkpoint = current;
+                power *= 2;
+                distance = 0;
+            }
         }
-        return current == action.after;
+        return false;
     });
 }
 

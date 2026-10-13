@@ -7,6 +7,7 @@
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/Solution.hpp"
+#include "engine/SolutionCoverage.hpp"
 #include "engine/SolutionStore.hpp"
 
 #include <algorithm>
@@ -15,9 +16,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <map>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifndef SOKOBAN_TEST_SOURCE_DIR
@@ -34,6 +36,10 @@ const Level::Definition walkAndPushDefinition {
         { "......", "......", "......" },
         { "C    E", "  R   ", "      " },
     },
+};
+
+const Level::Definition coverageWalkDefinition {
+    .layers = { { "..." }, { "C E" } },
 };
 
 void testRecordSerializeParse()
@@ -258,6 +264,46 @@ void writeScreen(
     }
 }
 
+void writeText(const std::filesystem::path& path, std::string_view text)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+    stream << text;
+    if (!stream) throw std::runtime_error("cannot write fixture " + path.string());
+}
+
+solution::Solution coverageWalkSolution()
+{
+    const Level level = Level::loadFromDefinition(coverageWalkDefinition, "coverage walk");
+    const std::vector<Input> inputs { Input::Right, Input::Right };
+    const auto recording =
+        solution::record(level, coverageWalkDefinition, inputs, "coverage walk");
+    CHECK_MESSAGE(recording.solved, recording.error.c_str());
+    return recording.solution;
+}
+
+bool hasDiagnostic(const std::vector<std::string>& messages, std::string_view text)
+{
+    return std::ranges::any_of(messages, [text](const auto& message) {
+        return message.find(text) != std::string::npos;
+    });
+}
+
+void writeDraftCoverage(
+    const std::filesystem::path& solutions,
+    LevelLocation location,
+    const Level::Definition& definition,
+    std::string_view reason)
+{
+    // Fixture reasons below contain no characters requiring JSON escaping.
+    std::ostringstream text;
+    text << "{\"format\":1,\"drafts\":[{\"level\":" << location.level
+         << ",\"screen\":" << location.screen << ",\"level-digest\":\""
+         << solution::digestText(solution::levelDigest(definition))
+         << "\",\"reason\":\"" << reason << "\"}]}";
+    writeText(solutions / "coverage.json", text.str());
+}
+
 std::size_t stepsIn(const std::filesystem::path& path)
 {
     std::ifstream stream(path, std::ios::binary);
@@ -356,88 +402,200 @@ void testStoreKeepsOneShortestRecordingPerScreen()
     CHECK(solution::reconcileStore(levels, solutions).empty());
 }
 
-// Every puzzle screen with a recorded solution must still be solved by it.
-// Screens without one, and solutions whose screen has changed, are listed but
-// do not fail: recording is a deliberate step (see README.md > Solutions).
-void testRecordedSolutionsStillSolveTheirScreens()
+void testCoverageRequiresCurrentPassingRecording()
 {
-    TEST("recordedSolutionsStillSolveTheirScreens");
-    const auto started = std::chrono::steady_clock::now();
-    const std::filesystem::path root = SOKOBAN_TEST_SOURCE_DIR;
-    std::map<std::uint64_t, std::pair<std::filesystem::path, solution::Solution>>
-        solutions;
-    const std::filesystem::path solutionsDir = root / "solutions";
-    if (std::filesystem::is_directory(solutionsDir)) {
-        for (const auto& entry :
-             std::filesystem::directory_iterator(solutionsDir)) {
-            if (entry.path().extension() != ".solution") {
-                continue;
-            }
-            std::ifstream stream(entry.path(), std::ios::binary);
-            std::stringstream text;
-            text << stream.rdbuf();
-            try {
-                solution::Solution parsed = solution::parse(text.str());
-                solutions.emplace(
-                    parsed.levelDigest,
-                    std::pair { entry.path(), std::move(parsed) });
-            } catch (const std::exception& error) {
-                CHECK_MESSAGE(false,
-                    (entry.path().filename().string() + ": " + error.what())
-                        .c_str());
-            }
-        }
+    TEST("coverageRequiresCurrentPassingRecording");
+    ScopedTestDirectory temp("sokoban-solution-coverage-current");
+    const auto levels = temp.path() / "levels";
+    const auto solutions = temp.path() / "solutions";
+    const auto screen = screenFilePath(levelDirectoryPath(levels, 0), 0);
+    const auto recordingFile = solutions / solution::fileNameFor({ 0, 0 });
+    writeScreen(screen, coverageWalkDefinition);
+
+    const auto missing = solution::auditCoverage(levels, solutions);
+    CHECK(!missing.passed());
+    CHECK(missing.screens == 1 && missing.replayed == 0 && missing.drafts == 0);
+    CHECK(missing.errors.size() == 1);
+    CHECK(hasDiagnostic(missing.errors, "level0/screen0: missing current recording"));
+
+    writeText(recordingFile, solution::serialize(coverageWalkSolution()));
+    const auto current = solution::auditCoverage(levels, solutions);
+    CHECK(current.passed());
+    CHECK(current.screens == 1 && current.replayed == 1 && current.drafts == 0);
+    CHECK(current.notes.empty());
+
+    // The old recording still has this screen's filename and valid syntax,
+    // but changing gameplay content must make coverage fail until re-recorded.
+    Level::Definition changed { .layers = { { "...." }, { "C  E" } } };
+    CHECK(solution::levelDigest(changed) != solution::levelDigest(coverageWalkDefinition));
+    writeScreen(screen, changed);
+    const auto stale = solution::auditCoverage(levels, solutions);
+    CHECK(!stale.passed());
+    CHECK(stale.screens == 1 && stale.replayed == 0 && stale.drafts == 0);
+    CHECK(stale.errors.size() == 1);
+    CHECK(hasDiagnostic(stale.errors, "level0/screen0: missing current recording"));
+    CHECK(hasDiagnostic(stale.notes, "level0-screen0.solution: matches no current screen"));
+}
+
+void testCoverageRejectsMatchingDigestWithInvalidReplay()
+{
+    TEST("coverageRejectsMatchingDigestWithInvalidReplay");
+    ScopedTestDirectory temp("sokoban-solution-coverage-replay");
+    const auto levels = temp.path() / "levels";
+    const auto solutions = temp.path() / "solutions";
+    writeScreen(screenFilePath(levelDirectoryPath(levels, 0), 0), coverageWalkDefinition);
+    auto invalid = coverageWalkSolution();
+    CHECK(!invalid.steps.empty());
+    if (invalid.steps.empty()) return;
+    invalid.steps[0].changes.clear();
+    writeText(solutions / solution::fileNameFor({ 0, 0 }), solution::serialize(invalid));
+    writeText(solutions / "zz-passing.solution", solution::serialize(coverageWalkSolution()));
+
+    const auto report = solution::auditCoverage(levels, solutions);
+    CHECK(!report.passed());
+    CHECK(report.screens == 1 && report.replayed == 0 && report.drafts == 0);
+    CHECK(report.errors.size() == 1);
+    CHECK(hasDiagnostic(report.errors, "level0/screen0 (level0-screen0.solution)"));
+    CHECK(hasDiagnostic(report.errors, "step 1 of 2 (right)"));
+    CHECK(hasDiagnostic(report.errors, "unexpectedly changed"));
+
+    // A draft exempts missing coverage, not a matching recording that now
+    // disagrees with the rules.
+    writeDraftCoverage(solutions, { 0, 0 }, coverageWalkDefinition,
+        "Puzzle draft awaiting review.");
+    const auto exempted = solution::auditCoverage(levels, solutions);
+    CHECK(!exempted.passed());
+    CHECK(exempted.screens == 1 && exempted.replayed == 0 && exempted.drafts == 1);
+    CHECK(hasDiagnostic(exempted.errors, "step 1 of 2 (right)"));
+    CHECK(hasDiagnostic(exempted.errors, "unexpectedly changed"));
+}
+
+void testCoverageDraftMustMatchCurrentScreenAndHaveReason()
+{
+    TEST("coverageDraftMustMatchCurrentScreenAndHaveReason");
+    ScopedTestDirectory temp("sokoban-solution-coverage-draft");
+    const auto levels = temp.path() / "levels";
+    const auto solutions = temp.path() / "solutions";
+    const auto screen = screenFilePath(levelDirectoryPath(levels, 0), 0);
+    const Level::Definition draft { .layers = { { "..." }, { "C  " } } };
+    constexpr std::string_view reason = "Mechanics draft has no completion objective.";
+    writeScreen(screen, draft);
+    writeDraftCoverage(solutions, { 0, 0 }, draft, reason);
+
+    const auto current = solution::auditCoverage(levels, solutions);
+    CHECK(current.passed());
+    CHECK(current.screens == 1 && current.replayed == 0 && current.drafts == 1);
+    CHECK(current.notes.size() == 1);
+    CHECK(hasDiagnostic(current.notes, "level0/screen0: draft: Mechanics draft"));
+
+    CHECK(std::filesystem::remove(solutions / "coverage.json"));
+    const auto unlisted = solution::auditCoverage(levels, solutions);
+    CHECK(!unlisted.passed());
+    CHECK(unlisted.screens == 1 && unlisted.drafts == 0);
+    CHECK(hasDiagnostic(unlisted.errors, "level0/screen0: missing current recording"));
+    writeDraftCoverage(solutions, { 0, 0 }, draft, reason);
+
+    Level::Definition changed = draft;
+    changed.layers[1][0] = "CI ";
+    CHECK(solution::levelDigest(changed) != solution::levelDigest(draft));
+    writeScreen(screen, changed);
+    const auto stale = solution::auditCoverage(levels, solutions);
+    CHECK(!stale.passed());
+    CHECK(stale.screens == 1 && stale.replayed == 0 && stale.drafts == 0);
+    CHECK(hasDiagnostic(stale.errors, "level0/screen0: draft changed"));
+    CHECK(hasDiagnostic(stale.errors, "level0/screen0: missing current recording"));
+
+    writeScreen(screen, draft);
+    writeDraftCoverage(solutions, { 0, 0 }, draft, "   ");
+    const auto unexplained = solution::auditCoverage(levels, solutions);
+    CHECK(!unexplained.passed());
+    CHECK(unexplained.drafts == 0);
+    CHECK(hasDiagnostic(unexplained.errors, "coverage.json: draft needs a nonempty reason"));
+    CHECK(hasDiagnostic(unexplained.errors, "level0/screen0: missing current recording"));
+
+    writeDraftCoverage(solutions, { 0, 0 }, draft, reason);
+    CHECK(std::filesystem::remove(screen));
+    const auto missing = solution::auditCoverage(levels, solutions);
+    CHECK(!missing.passed());
+    CHECK(missing.screens == 0 && missing.drafts == 0);
+    CHECK(hasDiagnostic(missing.errors,
+        "level0/screen0: coverage exception names a missing screen"));
+}
+
+void testCoverageEnumeratesBeyondLevelAndScreenGaps()
+{
+    TEST("coverageEnumeratesBeyondLevelAndScreenGaps");
+    ScopedTestDirectory temp("sokoban-solution-coverage-gaps");
+    const auto levels = temp.path() / "levels";
+    const auto solutions = temp.path() / "solutions";
+    const std::vector<LevelLocation> locations { { 0, 0 }, { 0, 2 }, { 2, 0 }, { 4, 3 } };
+    for (const auto location : locations) {
+        writeScreen(screenFilePath(levelDirectoryPath(levels, location.level), location.screen),
+            coverageWalkDefinition);
+    }
+    const auto missing = solution::auditCoverage(levels, solutions);
+    CHECK(!missing.passed());
+    CHECK(missing.screens == locations.size());
+    CHECK(missing.replayed == 0 && missing.drafts == 0);
+    CHECK(missing.errors.size() == locations.size());
+    for (const auto location : locations) {
+        CHECK(hasDiagnostic(missing.errors,
+            "level" + std::to_string(location.level) + "/screen" +
+                std::to_string(location.screen) + ": missing current recording"));
     }
 
-    int replayed = 0;
-    std::vector<std::string> missing;
-    std::map<std::uint64_t, bool> used;
-    for (int levelIndex = 0;; ++levelIndex) {
-        const std::filesystem::path directory =
-            levelDirectoryPath(root / "levels", levelIndex);
-        if (!std::filesystem::is_directory(directory)) {
-            break;
-        }
-        for (int screenIndex = 0;; ++screenIndex) {
-            const std::filesystem::path path =
-                screenFilePath(directory, screenIndex);
-            if (!std::filesystem::is_regular_file(path)) {
-                break;
-            }
-            const std::string name = "level" + std::to_string(levelIndex) +
-                "/screen" + std::to_string(screenIndex);
-            const Level::Definition definition =
-                Level::loadDefinitionFromFile(path);
-            const auto found =
-                solutions.find(solution::levelDigest(definition));
-            if (found == solutions.end()) {
-                missing.push_back(name);
-                continue;
-            }
-            used[found->first] = true;
-            const Level level = Level::loadFromDefinition(definition, name);
-            const solution::ReplayReport report =
-                solution::replay(level, found->second.second);
-            CHECK_MESSAGE(report.passed,
-                (name + " (" + found->second.first.filename().string() +
-                    "): " + report.message).c_str());
-            ++replayed;
-        }
+    // One matching gameplay digest covers each identical screen regardless of
+    // gaps or filenames; every discovered screen must still be replayed.
+    writeText(solutions / solution::fileNameFor({ 0, 0 }),
+        solution::serialize(coverageWalkSolution()));
+    const auto covered = solution::auditCoverage(levels, solutions);
+    CHECK(covered.passed());
+    CHECK(covered.screens == locations.size() && covered.replayed == locations.size());
+    CHECK(covered.drafts == 0);
+}
+
+void testCoverageRejectsDuplicateNumericScreenLocations()
+{
+    TEST("coverageRejectsDuplicateNumericScreenLocations");
+    for (const bool aliasLevel : { false, true }) {
+        ScopedTestDirectory temp("sokoban-solution-coverage-alias");
+        const auto levels = temp.path() / "levels";
+        const auto solutions = temp.path() / "solutions";
+        const auto screen = screenFilePath(levelDirectoryPath(levels, 1), 0);
+        const auto alias = aliasLevel
+            ? levels / "level01" / "screen0.scr"
+            : levels / "level1" / "screen00.scr";
+        writeScreen(screen, coverageWalkDefinition);
+        writeScreen(alias, coverageWalkDefinition);
+        writeText(solutions / solution::fileNameFor({ 1, 0 }),
+            solution::serialize(coverageWalkSolution()));
+
+        const auto report = solution::auditCoverage(levels, solutions);
+        CHECK(!report.passed());
+        CHECK(report.screens == 1 && report.replayed == 1 && report.drafts == 0);
+        CHECK(report.errors.size() == 1);
+        CHECK(hasDiagnostic(report.errors, "level1/screen0: duplicate screen location"));
+        CHECK(hasDiagnostic(report.errors, screen.string()));
+        CHECK(hasDiagnostic(report.errors, alias.string()));
     }
-    for (const auto& [digest, entry] : solutions) {
-        if (!used.contains(digest)) {
-            std::cout << "  note: " << entry.first.filename().string()
-                      << " matches no current screen (the screen changed; "
-                         "re-record it)\n";
-        }
-    }
-    for (const std::string& name : missing) {
-        std::cout << "  note: " << name << " has no recorded solution\n";
-    }
+}
+
+void testCurrentCampaignHasCompletePassingSolutionCoverage()
+{
+    TEST("currentCampaignHasCompletePassingSolutionCoverage");
+    const auto started = std::chrono::steady_clock::now();
+    const std::filesystem::path root = SOKOBAN_TEST_SOURCE_DIR;
+    const auto report = solution::auditCoverage(root / "levels", root / "solutions");
+    std::string diagnostics = "Current campaign solution coverage failed:";
+    for (const auto& error : report.errors) diagnostics += "\n  " + error;
+    CHECK_MESSAGE(report.passed(), diagnostics.c_str());
+    CHECK(report.screens > 0);
+    for (const auto& note : report.notes) std::cout << "  note: " << note << '\n';
     const double seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - started).count();
-    std::cout << "  replayed " << replayed << " recorded solutions in "
-              << seconds << " s\n";
+    std::cout << "  audited " << report.screens << " puzzle screens: "
+              << report.replayed << " current recordings replayed, " << report.drafts
+              << " reviewed drafts in " << seconds << " s\n";
 }
 
 } // namespace
@@ -452,7 +610,12 @@ int main()
         testLegacyCoveredButtonKeepsRecordedSolutionDigest();
         testReplayFailuresNameTheStepAndEntity();
         testStoreKeepsOneShortestRecordingPerScreen();
-        testRecordedSolutionsStillSolveTheirScreens();
+        testCoverageRequiresCurrentPassingRecording();
+        testCoverageRejectsMatchingDigestWithInvalidReplay();
+        testCoverageDraftMustMatchCurrentScreenAndHaveReason();
+        testCoverageEnumeratesBeyondLevelAndScreenGaps();
+        testCoverageRejectsDuplicateNumericScreenLocations();
+        testCurrentCampaignHasCompletePassingSolutionCoverage();
     } catch (const std::exception& error) {
         std::cerr << "SolutionReplayTests: unexpected exception: "
                   << error.what() << "\n";

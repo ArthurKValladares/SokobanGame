@@ -9,6 +9,7 @@ namespace sokoban::solution {
 
 struct CoverageReport {
     std::size_t screens = 0;
+    // Screens whose current matching recordings all replayed successfully.
     std::size_t replayed = 0;
     std::size_t drafts = 0;
     std::vector<std::string> errors;

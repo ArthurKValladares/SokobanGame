@@ -14,6 +14,7 @@
 #include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanRenderer.hpp"
+#include "engine/render/VulkanThumbnailPass.hpp"
 #include "engine/render/VulkanTextureUploader.hpp"
 #include "engine/ui/FontAtlas.hpp"
 
@@ -34,6 +35,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -1222,6 +1224,9 @@ int exerciseThumbnailLoadingBudget(SDL_Window* window)
         require(!renderer.hasFatalFailure(), "Thumbnail budget frame failed to render");
     };
 
+    require(renderer.tileThumbnail(TileType::Count) == VK_NULL_HANDLE &&
+            renderer.tileThumbnail(TileType::Count) == VK_NULL_HANDLE,
+        "An invalid tile type must not acquire a thumbnail or enter the service queue");
     require(renderer.tileThumbnail(first) == VK_NULL_HANDLE &&
             renderer.tileThumbnail(second) == VK_NULL_HANDLE &&
             renderer.tileThumbnail(first) == VK_NULL_HANDLE,
@@ -1257,9 +1262,141 @@ int exerciseThumbnailLoadingBudget(SDL_Window* window)
             renderer.tileThumbnail(second) != VK_NULL_HANDLE &&
             renderer.tileThumbnail(missing) == VK_NULL_HANDLE,
         "Invalidated thumbnails must reload one per frame and preserve cached misses");
+
+    std::vector<TileType> tiles;
+    for (const auto& definition : tileTypeDefinitions()) {
+        if (!tileThumbnails::shouldBake(definition.type)) continue;
+        require(std::filesystem::is_regular_file(
+                assetRoot / tileThumbnails::assetPathFor(definition.type)),
+            "Complete thumbnail fixture is missing a baked tile image");
+        tiles.push_back(definition.type);
+    }
+    require(tiles.size() > 64,
+        "Complete thumbnail fixture must exceed the former 64-image descriptor pool");
+    const auto loadCompleteCatalog = [&] {
+        renderer.invalidateTileThumbnails();
+        std::vector<VkDescriptorSet> handles(tiles.size(), VK_NULL_HANDLE);
+        for (const TileType tile : tiles) {
+            require(renderer.tileThumbnail(tile) == VK_NULL_HANDLE &&
+                    renderer.tileThumbnail(tile) == VK_NULL_HANDLE,
+                "Complete catalog requests must only queue deduplicated work");
+        }
+        for (std::size_t frame = 0; frame < tiles.size(); ++frame) {
+            draw();
+            for (std::size_t index = 0; index < tiles.size(); ++index) {
+                const auto handle = renderer.tileThumbnail(tiles[index]);
+                if (index > frame) {
+                    require(handle == VK_NULL_HANDLE,
+                        "Complete catalog uploaded more than one thumbnail in one frame");
+                } else if (handles[index] != VK_NULL_HANDLE) {
+                    require(handle == handles[index],
+                        "Complete catalog replaced a previously loaded thumbnail handle");
+                } else {
+                    require(index == frame && handle != VK_NULL_HANDLE,
+                        "Complete catalog did not load its next thumbnail in one frame");
+                    require(std::find(handles.begin(), handles.end(), handle) == handles.end(),
+                        "Different tile thumbnails share the same descriptor handle");
+                    handles[index] = handle;
+                }
+            }
+        }
+        return handles;
+    };
+    (void)loadCompleteCatalog();
+    const auto catalogHandles = loadCompleteCatalog();
+
+    // Replacing a viewport briefly needs both its new descriptor and those
+    // retained by in-flight frames, while every palette image remains live.
+    for (const int scale : { 75, 100, 50, 100 }) {
+        const auto before = renderer.renderStats().renderResourceReconfigurations;
+        renderer.setRenderScalePercent(scale);
+        draw();
+        // Reconfiguration occurs after recording, so the next recorded frame
+        // publishes its counter in renderStats().
+        draw();
+        require(renderer.renderStats().renderResourceReconfigurations >= before + 1 &&
+                renderer.gameViewportTexture() != 0,
+            "Resident thumbnails prevented viewport resource reconfiguration");
+        for (std::size_t index = 0; index < tiles.size(); ++index) {
+            require(renderer.tileThumbnail(tiles[index]) == catalogHandles[index],
+                "Viewport resource reconfiguration changed a resident thumbnail handle");
+        }
+    }
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    // Leave both frame slots submitted, then fail acquisition repeatedly
+    // without advancing the current slot. Retired viewport generations must
+    // be reclaimed before they exhaust the reserved ImGui descriptors.
+    for (int frame = 0; frame < 3; ++frame) draw();
+    const auto beforeAcquisitionFailures = renderer.renderStats();
+    auto earlyPeakImages = beforeAcquisitionFailures.gpuImageAllocationCount;
+    auto earlyPeakAllocations = beforeAcquisitionFailures.gpuMemoryAllocationCount;
+    for (int failure = 0; failure < 20; ++failure) {
+        VulkanRenderer::failNextSwapchainAcquisitionForTesting();
+        draw();
+        require(renderer.gameViewportTexture() != 0,
+            "Repeated out-of-date acquisitions lost the viewport descriptor");
+        for (std::size_t index = 0; index < tiles.size(); ++index) {
+            require(renderer.tileThumbnail(tiles[index]) == catalogHandles[index],
+                "Viewport descriptor reserve pressure changed a resident thumbnail handle");
+        }
+        if (failure < 4) {
+            const auto current = renderer.renderStats();
+            earlyPeakImages = std::max(earlyPeakImages, current.gpuImageAllocationCount);
+            earlyPeakAllocations = std::max(earlyPeakAllocations, current.gpuMemoryAllocationCount);
+        }
+    }
+    const auto afterAcquisitionFailures = renderer.renderStats();
+    require(earlyPeakImages > beforeAcquisitionFailures.gpuImageAllocationCount,
+        "Out-of-date acquisition fixture did not retain any viewport generations");
+    require(afterAcquisitionFailures.gpuImageAllocationCount <= earlyPeakImages &&
+            afterAcquisitionFailures.gpuMemoryAllocationCount <= earlyPeakAllocations,
+        "Repeated out-of-date acquisitions accumulated unbounded viewport allocations");
+    for (int frame = 0; frame < 3; ++frame) draw();
+    require(renderer.renderStats().swapchainRecreations >=
+            beforeAcquisitionFailures.swapchainRecreations + 20,
+        "Out-of-date acquisition fixture did not perform all requested viewport replacements");
+
+    renderer.invalidateTileThumbnails();
+    // Settle both frame slots and retired viewport resources before measuring
+    // the temporary image and staging allocation of a failed registration.
+    for (int frame = 0; frame < 3; ++frame) draw();
     renderer.waitIdle();
-    std::cout << "Thumbnail loading deferred and deduplicated requests, loaded one per frame, "
-                 "and preserved invalidation and cached misses\n";
+    const auto beforeFailure = renderer.renderStats();
+    require(renderer.tileThumbnail(first) == VK_NULL_HANDLE &&
+            renderer.tileThumbnail(second) == VK_NULL_HANDLE,
+        "Transient failure fixture must start with two queued thumbnails");
+    VulkanThumbnailPass::failNextTextureRegistrationForTesting();
+    draw();
+    const auto afterFailure = renderer.renderStats();
+    require(renderer.tileThumbnail(first) == VK_NULL_HANDLE &&
+            renderer.tileThumbnail(second) == VK_NULL_HANDLE,
+        "A failed registration must keep its fallback and consume only one service attempt");
+    require(afterFailure.gpuImageAllocationCount == beforeFailure.gpuImageAllocationCount &&
+            afterFailure.gpuMemoryAllocationCount == beforeFailure.gpuMemoryAllocationCount,
+        "A failed thumbnail registration leaked its temporary Vulkan allocations");
+    draw();
+    const auto peerHandle = renderer.tileThumbnail(second);
+    require(peerHandle != VK_NULL_HANDLE && renderer.tileThumbnail(first) == VK_NULL_HANDLE,
+        "A thumbnail waiting to retry must not block a different queued thumbnail");
+
+    VkDescriptorSet retriedHandle = VK_NULL_HANDLE;
+    const auto retryDeadline = Clock::now() + std::chrono::seconds(3);
+    while (retriedHandle == VK_NULL_HANDLE && Clock::now() < retryDeadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        draw();
+        require(renderer.tileThumbnail(second) == peerHandle,
+            "Retrying a failed registration replaced a resident peer thumbnail");
+        retriedHandle = renderer.tileThumbnail(first);
+    }
+    require(retriedHandle != VK_NULL_HANDLE && retriedHandle != peerHandle,
+        "A transient thumbnail registration failure did not recover without invalidation");
+#endif
+    renderer.waitIdle();
+    std::cout << "Thumbnail loading deferred and deduplicated requests, loaded all "
+              << tiles.size() << " baked tiles one per frame twice, preserved handles across "
+                 "viewport reconfiguration and reserve pressure, and retained cached misses "
+                 "and transient retries\n";
     return 0;
 #else
     (void)window;
