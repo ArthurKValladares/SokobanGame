@@ -1555,6 +1555,13 @@ bool LevelEditor::moveObject(GridPosition3 destination)
         return false;
     }
 
+    // Placing beyond the left/top edge prepends columns/rows. All metadata
+    // must use the placed cell in the expanded document; source lookups still
+    // use the original coordinates in the before snapshot.
+    destination = {
+        std::max(destination.x, 0), std::max(destination.y, 0), destination.z,
+    };
+
     // setCell keeps gate metadata valid at every intermediate point. Restore
     // the authored relationships after the two-cell transaction completes.
     restoreRecordAfterMove(
@@ -1562,9 +1569,7 @@ bool LevelEditor::moveObject(GridPosition3 destination)
         move->source, destination);
     const auto rotation = std::ranges::find(before.tileRotations, move->source,
         &Level::TileRotation::cell);
-    const GridPosition3 rotationDestination {
-        std::max(destination.x, 0), std::max(destination.y, 0), destination.z };
-    setTileRotation(rotationDestination,
+    setTileRotation(destination,
         rotation == before.tileRotations.end() ? 0U : rotation->quarterTurns);
     if (tileTypeHasSplatTop(move->tile)) {
         const auto paint = std::ranges::find(before.groundPaint, move->source, &Level::GroundPaint::cell);
@@ -3883,11 +3888,17 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
                         std::string::npos;
                 });
         });
-    const std::vector<std::string> serialized =
-        Level::serializeDefinition(linkedDefinition(
+    std::vector<std::string> serialized;
+    try {
+        serialized = Level::serializeDefinition(linkedDefinition(
             overworldScreenIdForPath(sourcePath)
                 ? document_.character
                 : std::nullopt));
+    } catch (const std::exception& exception) {
+        document_.status = "Failed to save " + sourcePath.string() +
+            ": " + exception.what();
+        return {};
+    }
 
     // A component edit can invalidate the unique Player tile, common
     // dimensions, or water metadata. Route it through the

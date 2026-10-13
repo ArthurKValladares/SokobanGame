@@ -1072,6 +1072,61 @@ void testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness()
     CHECK(!editor.dirty());
 }
 
+void testSerializationFailurePreservesFilesDraftAndHistory()
+{
+    TEST("serializationFailurePreservesFilesDraftAndHistory");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(5, 3, false);
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::LecternEast));
+    CHECK(editor.setLecternText(0, "Committed text"));
+    const auto source = project.source / "level0/screen0.scr";
+    CHECK(editor.saveDocument(source));
+    const auto committed = editor.documentDefinition();
+    const auto sourceBefore = snapshotTree(project.source);
+    const auto runtimeBefore = snapshotTree(project.runtime);
+    const auto documentPathBefore = editor.documentPath();
+    const auto loadedPathBefore = editor.loadedDocumentPath();
+
+    // The text editor accepts bytes that JSON cannot serialize. Saving this
+    // draft must report a regular failure before any files are changed.
+    CHECK(editor.setLecternText(0, std::string(1, static_cast<char>(0xff))));
+    CHECK(editor.setCell({ 3, 1, 1 }, TileType::Wall));
+    CHECK(editor.tryUndoEdit());
+    const auto invalidDraft = editor.documentDefinition();
+    CHECK(editor.dirty());
+    CHECK(editor.canUndo());
+    CHECK(editor.canRedo());
+    const auto result = editor.saveDocument(source);
+    CHECK(result.outcome == LevelEditor::SaveResult::Outcome::Failed);
+    CHECK(!result.sourceSaved());
+    CHECK(!result.mirrorStale());
+    CHECK(editor.status().find("Failed to save") != std::string::npos);
+    CHECK(editor.documentDefinition() == invalidDraft);
+    CHECK(editor.documentPath() == documentPathBefore);
+    CHECK(editor.loadedDocumentPath() == loadedPathBefore);
+    CHECK(editor.dirty());
+    CHECK(editor.canUndo());
+    CHECK(editor.canRedo());
+    CHECK(snapshotTree(project.source) == sourceBefore);
+    CHECK(snapshotTree(project.runtime) == runtimeBefore);
+
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentDefinition() == committed);
+    CHECK(!editor.dirty());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentDefinition() == invalidDraft);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers()[1][1][3] == tileTypeToChar(TileType::Wall));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.setLecternText(0, "Repaired text"));
+    CHECK(editor.saveDocument(source));
+    CHECK(!editor.dirty());
+    CHECK(Level::loadFromFile(source).lecternAt({ 1, 1, 1 })->text ==
+        "Repaired text");
+    CHECK(readFile(source) == readFile(project.runtime / "level0/screen0.scr"));
+}
+
 void testSelectedPathIsSeparateFromTheLoadedDocument()
 {
     TEST("selectedPathIsSeparateFromTheLoadedDocument");
@@ -2670,6 +2725,202 @@ void testMoveTileIsAtomicAndUndoable()
         tileTypeToChar(TileType::Wall));
 }
 
+void testMovingTilesPastOriginPreservesAuthoredMetadata()
+{
+    struct TileCase {
+        const char* name;
+        TileType tile;
+    };
+    const std::array cases {
+        TileCase { "gate", TileType::Gate },
+        TileCase { "lectern", TileType::LecternEast },
+        TileCase { "lockPlate", TileType::LockPlate },
+        TileCase { "rotator", TileType::RotatorCounterClockwise },
+        TileCase { "elevator", TileType::Elevator },
+        TileCase { "pressurePlate", TileType::PressurePlate },
+        TileCase { "button", TileType::ButtonEast },
+        TileCase { "lever", TileType::LeverWest },
+        TileCase { "portal", TileType::PortalNorth },
+        TileCase { "linkedRock", TileType::Rock },
+        TileCase { "rotatedWall", TileType::WallStone02 },
+        TileCase { "paintedCliff", TileType::CliffWall02 },
+        TileCase { "paintedGround", TileType::GroundRock04 },
+    };
+    const std::array destinations {
+        GridPosition { -2, 1 }, GridPosition { 3, -2 }, GridPosition { -2, -1 },
+    };
+    const Vec3 blue { 0.2f, 0.4f, 1.0f };
+    const Vec3 red { 1.0f, 0.2f, 0.3f };
+
+    for (const auto& tileCase : cases) {
+        for (const auto requested : destinations) {
+            const std::string testName = std::string("movingTilesPastOrigin/") +
+                tileCase.name + "/" + std::to_string(requested.x) + "," +
+                std::to_string(requested.y);
+            TEST(testName.c_str());
+            TemporaryProject project;
+            auto editor = makeEditor(project);
+            editor.newDocument(7, 4, false);
+            editor.setActiveLinkColor(blue);
+            const GridPosition3 source { 3, 1,
+                tileTypeIsGround(tileCase.tile) ? 0 : 1 };
+            const GridPosition3 plate { 1, 2, 1 };
+            const GridPosition3 cart { 5, 2, 1 };
+            const GridPosition3 paintedGround { 2, 2, 0 };
+            const GridPosition3 rotatedWall { 4, 3, 1 };
+            CHECK(editor.setCell(plate, TileType::PressurePlate));
+            CHECK(editor.setCell(cart, TileType::RailStopEastWest));
+            CHECK(editor.setCell(cart, TileType::Minecart));
+            CHECK(editor.setMinecartInitialDirection(0, 3));
+            editor.setSelectedTile(TileType::WallStone02);
+            editor.rotateSelectedTile();
+            CHECK(editor.paintCell(rotatedWall));
+            CHECK(editor.addGroundSplat(
+                { "Default", "Grass", "Stone", "DefaultMask", { 0, 0, 1 } }));
+            CHECK(editor.addGroundSplat(
+                { "Meadow", "Grass", "Stone", "Mask", { 0, 1, 0 } }));
+            CHECK(editor.addGroundSplat(
+                { "Sand", "Sand", "Stone", "SandMask", { 1, 0, 0 } }));
+            editor.selectGroundSplat(1);
+            CHECK(editor.paintGroundSplat(paintedGround));
+            CHECK(editor.setCell(source, tileCase.tile));
+            if (tileCase.tile == TileType::Gate) {
+                CHECK(editor.setGateStartOpen(0, true));
+            } else if (tileTypeIsLectern(tileCase.tile)) {
+                CHECK(editor.setLecternText(0, "Keep this text.\nAnd this line."));
+            } else if (tileTypeIsLockPlate(tileCase.tile)) {
+                CHECK(editor.setLockPlateStartEnabled(0, true));
+            } else if (tileTypeIsElevator(tileCase.tile)) {
+                CHECK(editor.setElevatorLevels(0, { 1, 0 }));
+            } else if (tileTypeIsMovableObject(tileCase.tile)) {
+                CHECK(editor.setLinkColor(source, blue));
+            } else if (tileTypeIsPortal(tileCase.tile)) {
+                CHECK(editor.setCell({ 6, 3, 1 }, TileType::PortalSouth));
+            }
+            if (tileTypeHasSplatTop(tileCase.tile)) {
+                editor.selectGroundSplat(2);
+                CHECK(editor.paintGroundSplat(source));
+            }
+            const bool rotated = tileCase.tile == TileType::WallStone02 ||
+                tileTypeHasSplatTop(tileCase.tile);
+            if (rotated) {
+                editor.setSelectedTile(tileCase.tile);
+                editor.rotateSelectedTile(
+                    3 - static_cast<int>(editor.selectedTileQuarterTurns()));
+                CHECK(editor.paintCell(source));
+            }
+            editor.setSelectedDecorationModel("Stone");
+            CHECK(editor.placeDecoration({ 6, 0, 1 }));
+            editor.cancelDecorationPlacement();
+            editor.setTool(LevelEditor::Tool::Tiles);
+            const auto before = editor.documentDefinition();
+            const auto oldRotation = editor.tileRotationQuarterTurns(source);
+            editor.setActiveLinkColor(red);
+
+            const GridPosition3 destination {
+                std::max(requested.x, 0), std::max(requested.y, 0), source.z,
+            };
+            const int dx = std::max(-requested.x, 0);
+            const int dy = std::max(-requested.y, 0);
+            const auto translated = [=](GridPosition3 cell) {
+                return GridPosition3 { cell.x + dx, cell.y + dy, cell.z };
+            };
+            CHECK(editor.beginMove(source));
+            CHECK(editor.moveObject({ requested.x, requested.y, source.z }));
+            CHECK(!editor.pendingMove());
+            CHECK(editor.documentWidth() == 7U + dx);
+            CHECK(editor.documentHeight() == 4U + dy);
+            CHECK(editor.documentLayers()[source.z][destination.y][destination.x] ==
+                tileTypeToChar(tileCase.tile));
+            const auto oldCell = translated(source);
+            CHECK(editor.documentLayers()[oldCell.z][oldCell.y][oldCell.x] ==
+                tileTypeToChar(TileType::Air));
+            CHECK(editor.tileRotationQuarterTurns(destination) == oldRotation);
+            CHECK(editor.tileRotationQuarterTurns(translated(rotatedWall)) == 1);
+            CHECK(editor.linkColorAt(translated(plate)) == std::optional<Vec3>(blue));
+            CHECK(editor.groundSplats() == before.groundSplats);
+            const auto groundPaint = std::ranges::find(editor.groundPaint(),
+                translated(paintedGround), &Level::GroundPaint::cell);
+            CHECK(groundPaint != editor.groundPaint().end());
+            if (groundPaint != editor.groundPaint().end()) {
+                CHECK(groundPaint->splat == "Meadow");
+            }
+            if (tileTypeHasSplatTop(tileCase.tile)) {
+                const auto movedPaint = std::ranges::find(editor.groundPaint(),
+                    destination, &Level::GroundPaint::cell);
+                CHECK(movedPaint != editor.groundPaint().end());
+                if (movedPaint != editor.groundPaint().end()) {
+                    CHECK(movedPaint->splat == "Sand");
+                }
+                CHECK(editor.groundPaint().size() == 2);
+            }
+            const auto after = editor.documentDefinition();
+            const auto checkRecord = [&](const auto& previous, const auto& current,
+                                         GridPosition3 oldPosition,
+                                         GridPosition3 newPosition) {
+                const auto old = std::ranges::find_if(previous,
+                    [&](const auto& record) { return record.cell == oldPosition; });
+                CHECK(old != previous.end());
+                if (old == previous.end()) return;
+                auto expected = *old;
+                expected.cell = newPosition;
+                if constexpr (requires { expected.pressurePlates; }) {
+                    for (auto& input : expected.pressurePlates) {
+                        input = input == source ? destination : translated(input);
+                    }
+                }
+                CHECK(std::ranges::find(current, expected) != current.end());
+            };
+            if (tileCase.tile == TileType::Gate) {
+                checkRecord(before.gates, after.gates, source, destination);
+            } else if (tileTypeIsLectern(tileCase.tile)) {
+                checkRecord(before.lecterns, after.lecterns, source, destination);
+            } else if (tileTypeIsLockPlate(tileCase.tile)) {
+                checkRecord(before.lockPlates, after.lockPlates, source, destination);
+            } else if (tileTypeIsRotator(tileCase.tile)) {
+                checkRecord(before.rotators, after.rotators, source, destination);
+            } else if (tileTypeIsElevator(tileCase.tile)) {
+                checkRecord(before.elevators, after.elevators, source, destination);
+            } else if (tileTypeIsSignalSource(tileCase.tile)) {
+                CHECK(editor.linkColorAt(destination) == std::optional<Vec3>(blue));
+            } else if (tileTypeIsPortal(tileCase.tile)) {
+                checkRecord(before.portals, after.portals, source, destination);
+                CHECK(editor.documentToLevel().portalExit(destination) ==
+                    translated({ 6, 3, 1 }));
+            } else if (tileTypeIsMovableObject(tileCase.tile)) {
+                checkRecord(before.objectLinks, after.objectLinks, source, destination);
+            }
+            checkRecord(before.minecarts, after.minecarts, cart, translated(cart));
+            CHECK(editor.documentPlateAt(translated(cart)) == TileType::RailStopEastWest);
+            auto decoration = before.decorations[0];
+            decoration.position.x += static_cast<float>(dx);
+            decoration.position.y += static_cast<float>(dy);
+            CHECK(editor.decorations() == std::vector<Level::Decoration> { decoration });
+            CHECK(editor.documentToLevel().width() == editor.documentWidth());
+            CHECK(editor.documentToLevel().height() == editor.documentHeight());
+            CHECK(std::ranges::all_of(editor.groundPaint(), [](const auto& paint) {
+                return paint.cell.x >= 0 && paint.cell.y >= 0;
+            }));
+            CHECK(editor.tryUndoEdit());
+            CHECK(editor.documentDefinition() == before);
+            CHECK(editor.tryRedoEdit());
+            CHECK(editor.documentDefinition() == after);
+
+            const auto serialized = Level::serializeDefinition(after);
+            const auto path = project.source / "level0/screen0.scr";
+            CHECK(editor.saveDocument(path));
+            CHECK(!editor.dirty());
+            CHECK(Level::serializeDefinition(Level::loadDefinitionFromFile(path)) == serialized);
+            CHECK(Level::serializeDefinition(Level::loadDefinitionFromFile(
+                project.runtime / "level0/screen0.scr")) == serialized);
+            auto loaded = makeEditor(project);
+            CHECK(loaded.loadDocument(path, false));
+            CHECK(Level::serializeDefinition(loaded.documentDefinition()) == serialized);
+            CHECK(loaded.documentToLevel().width() == editor.documentWidth());
+        }
+    }
+}
+
 void testComposedOverworldDocumentsArePathAwareAndTransactional()
 {
     TEST("composedOverworldDocumentsArePathAwareAndTransactional");
@@ -4259,6 +4510,7 @@ int main()
     testSaveLoadAndRuntimeMirror();
     testCharacterSelectionPersistsAndIsUndoable();
     testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness();
+    testSerializationFailurePreservesFilesDraftAndHistory();
     testSelectedPathIsSeparateFromTheLoadedDocument();
     testOpeningScreensPreservesIndependentDraftsAndUndoHistory();
     testScreenRenumberingPreservesDraftIdentity();
@@ -4290,6 +4542,7 @@ int main()
     testDecorationLayerContextChangesCommitActiveTransform();
     testSelectorEditingPersistenceUndoAndProjectRemapping();
     testMoveTileIsAtomicAndUndoable();
+    testMovingTilesPastOriginPreservesAuthoredMetadata();
     testComposedOverworldDocumentsArePathAwareAndTransactional();
     testComposedSelectorOwnershipIsEnforcedBeforeSave();
     testOverworldPlayerTileMovesAcrossComponents();
