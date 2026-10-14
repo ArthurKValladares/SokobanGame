@@ -352,9 +352,6 @@ void setMirrorQuarterTurns(
     const Level& level,
     const GameState& state,
     const Level::Minecart& minecart);
-// Kept as a compatibility query for debug/presentation callers. End tiles no
-// longer have a locked state, so this always returns true.
-[[nodiscard]] bool isEndUnlocked(const Level& level, const GameState& state);
 // A screen is solved when every living hero stands on an End and every End
 // holds a hero. A level with more Ends than heroes needs hero copies (mirrors)
 // to be solved. Pressure plates now control Gates rather than completion.

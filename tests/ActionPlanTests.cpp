@@ -46,13 +46,13 @@ using namespace sokoban;
     });
 }
 
-void testWorldStepPlansAPush()
+void testPlayerStepPlansAPush()
 {
-    TEST("worldStepPlansAPush");
+    TEST("playerStepPlansAPush");
     const Level level = roomWithRock();
     const GameState state = rules::initialState(level);
 
-    const std::optional<plans::PlannedAction> planned = plans::worldStep(
+    const std::optional<plans::PlannedAction> planned = plans::planPlayerStep(
         level, state, MoveDirection::Right, {}, 0.25f);
     CHECK(planned.has_value());
     if (!planned) {
@@ -70,15 +70,13 @@ void testWorldStepPlansAPush()
     CHECK(planned->action.playerMoveCountAfter == 0);
 }
 
-void testWorldStepWithoutMovementHasNoPlan()
+void testPlayerStepWithoutMovementHasNoPlan()
 {
-    TEST("worldStepWithoutMovementHasNoPlan");
+    TEST("playerStepWithoutMovementHasNoPlan");
     const Level level = roomWithRock();
     const GameState state = rules::initialState(level);
     // Into the wall above.
-    CHECK(!plans::worldStep(level, state, MoveDirection::Up, {}, 0.25f));
-    // Nothing is sliding or riding a belt, so an automatic step does nothing.
-    CHECK(!plans::worldStep(level, state, std::nullopt, {}, 0.25f));
+    CHECK(!plans::planPlayerStep(level, state, MoveDirection::Up, {}, 0.25f));
 }
 
 void testPlanningIsPureAndRepeatable()
@@ -90,9 +88,9 @@ void testPlanningIsPureAndRepeatable()
     const GameState state = rules::initialState(level);
 
     const std::optional<plans::PlannedAction> first =
-        plans::worldStep(level, state, MoveDirection::Right, {}, 0.25f);
+        plans::planPlayerStep(level, state, MoveDirection::Right, {}, 0.25f);
     const std::optional<plans::PlannedAction> second =
-        plans::worldStep(level, state, MoveDirection::Right, {}, 0.25f);
+        plans::planPlayerStep(level, state, MoveDirection::Right, {}, 0.25f);
     CHECK(first == second);
 
     // Planning must not have touched the state it was given.
@@ -104,7 +102,7 @@ void testWalkingWithoutPushing()
     TEST("walkingWithoutPushing");
     const Level level = roomWithRock();
     const GameState state = rules::initialState(level);
-    const std::optional<plans::PlannedAction> planned = plans::worldStep(
+    const std::optional<plans::PlannedAction> planned = plans::planPlayerStep(
         level, state, MoveDirection::Left, {}, 0.25f);
     CHECK(planned.has_value());
     if (planned) {
@@ -122,7 +120,7 @@ void testKnightEnemyPushUsesThePushPresentation()
         { "..." },
         { "CN " },
     }, CharacterType::Knight);
-    const std::optional<plans::PlannedAction> planned = plans::worldStep(
+    const std::optional<plans::PlannedAction> planned = plans::planPlayerStep(
         level,
         rules::initialState(level),
         MoveDirection::Right,
@@ -225,7 +223,7 @@ void testRestartPlan()
     CHECK(!plans::restart(level, initial, 0.25f));
 
     const std::optional<plans::PlannedAction> moved =
-        plans::worldStep(level, initial, MoveDirection::Right, {}, 0.25f);
+        plans::planPlayerStep(level, initial, MoveDirection::Right, {}, 0.25f);
     CHECK(moved.has_value());
     if (!moved) {
         return;
@@ -250,7 +248,7 @@ void testInvertedSwapsEndpointsAndCounts()
     const Level level = roomWithRock();
     const GameState state = rules::initialState(level);
     std::optional<plans::PlannedAction> forward =
-        plans::worldStep(level, state, MoveDirection::Right, {}, 0.25f);
+        plans::planPlayerStep(level, state, MoveDirection::Right, {}, 0.25f);
     CHECK(forward.has_value());
     if (!forward) {
         return;
@@ -281,7 +279,7 @@ void testPlayerMovementHelpers()
     TEST("playerMovementHelpers");
     const Level level = roomWithRock();
     const GameState state = rules::initialState(level);
-    const std::optional<plans::PlannedAction> planned = plans::worldStep(
+    const std::optional<plans::PlannedAction> planned = plans::planPlayerStep(
         level, state, MoveDirection::Right, {}, 0.25f);
     CHECK(planned.has_value());
     if (!planned) {
@@ -357,9 +355,18 @@ void testSlideResolvesAsOneAction()
     TEST("slideResolvesAsOneAction");
     const Level level = iceRink();
     const GameState state = rules::initialState(level);
-
-    const std::optional<plans::PlannedAction> planned = plans::worldStep(
+    const std::optional<plans::PlannedAction> pushed = plans::planPlayerStep(
         level, state, MoveDirection::Right, {}, 0.2f);
+    CHECK(pushed.has_value());
+    if (!pushed) {
+        return;
+    }
+    const std::optional<plans::PlannedAction> planned = plans::planSlides(
+        level,
+        pushed->action.after,
+        plans::slidingEntities(pushed->action.after),
+        {},
+        0.2f);
     CHECK(planned.has_value());
     if (!planned) {
         return;
@@ -375,8 +382,18 @@ void testSlideResolvesAsOneAction()
     const float expected =
         0.2f * static_cast<float>(planned->legs.size());
     CHECK(std::abs(planned->action.durationSeconds - expected) < 0.0001f);
-    // Still one player move, however far the rock travelled.
-    CHECK(planned->action.playerPushing);
+    // The separate slide does not take another player step or effort.
+    CHECK(planned->action.after.players == pushed->action.after.players);
+    CHECK(!planned->action.playerPushing);
+    CHECK(!planned->action.playerPulling);
+    CHECK(planned->action.playerMoveCountBefore == 0);
+    CHECK(planned->action.playerMoveCountAfter == 0);
+    CHECK(planned == plans::planSlides(
+        level,
+        pushed->action.after,
+        plans::slidingEntities(pushed->action.after),
+        {},
+        0.2f));
 
     // Every leg differs from the one before it: no wasted frames.
     for (std::size_t i = 1; i < planned->legs.size(); ++i) {
@@ -387,15 +404,21 @@ void testSlideResolvesAsOneAction()
 void testSlideOutcomeIgnoresLaterInterference()
 {
     TEST("slideOutcomeIgnoresLaterInterference");
-    // The guarantee, stated as a test. Planning the same push against the same
-    // world always gives the same destination, and that destination is fixed
-    // before the first tile of travel - so nothing that happens during the
-    // slide can be consulted, because the answer already exists.
+    // The slide's destination is fixed before its first tile of travel, so
+    // nothing that happens during the slide can be consulted afterwards.
     const Level level = iceRink();
-    const GameState state = rules::initialState(level);
-
-    const std::optional<plans::PlannedAction> planned =
-        plans::worldStep(level, state, MoveDirection::Right, {}, 0.2f);
+    const std::optional<plans::PlannedAction> pushed = plans::planPlayerStep(
+        level, rules::initialState(level), MoveDirection::Right, {}, 0.2f);
+    CHECK(pushed.has_value());
+    if (!pushed) {
+        return;
+    }
+    const std::optional<plans::PlannedAction> planned = plans::planSlides(
+        level,
+        pushed->action.after,
+        plans::slidingEntities(pushed->action.after),
+        {},
+        0.2f);
     CHECK(planned.has_value());
     if (!planned) {
         return;
@@ -404,8 +427,12 @@ void testSlideOutcomeIgnoresLaterInterference()
 
     // Re-plan from a mid-slide leg with the world otherwise untouched: the rock
     // still ends up in the same place, which is what "already decided" means.
-    const std::optional<plans::PlannedAction> resumed = plans::worldStep(
-        level, planned->legs.front(), std::nullopt, {}, 0.2f);
+    const std::optional<plans::PlannedAction> resumed = plans::planSlides(
+        level,
+        planned->legs.front(),
+        plans::slidingEntities(planned->legs.front()),
+        {},
+        0.2f);
     CHECK(resumed.has_value());
     if (resumed) {
         CHECK(resumed->action.after.movables[0].cell == destination);
@@ -423,8 +450,8 @@ void testChainStopsAtConveyors()
     });
     GameState state = rules::initialState(level);
     state.players[0].cell = cell(0, 0, 1);  // step onto the belt
-    const std::optional<plans::PlannedAction> planned =
-        plans::worldStep(level, state, std::nullopt, {}, 0.2f);
+    const std::optional<plans::PlannedAction> planned = plans::planConveyorRides(
+        level, state, plans::conveyorRiders(level, state), {}, 0.2f);
     CHECK(planned.has_value());
     if (planned) {
         CHECK(planned->legs.size() == 1);
@@ -455,10 +482,7 @@ void testSlideMomentumDetection()
     CHECK(plans::anySlideMomentum(state));
 }
 
-// The scoped planners. `worldStep` plans every entity, so a plan made while a
-// slide was in flight re-planned that slide and collided with the copy already
-// running - nothing could ever be admitted alongside anything else. These pin
-// the per-entity planners that replace it.
+// Plans leave unrelated motion alone so actions can run concurrently.
 
 void testPlayerStepIsOneStepAndLeavesTheSlideBehind()
 {
@@ -498,7 +522,7 @@ void testSlidePlanSettlesTheDestination()
     }
 
     const std::optional<plans::PlannedAction> slide =
-        plans::planSlide(level, pushed, sliding.front(), {}, 0.2f);
+        plans::planSlides(level, pushed, sliding, {}, 0.2f);
     CHECK(slide.has_value());
     if (!slide) {
         return;
@@ -513,33 +537,34 @@ void testSlidePlanSettlesTheDestination()
     CHECK(slide->action.after.players[0] == pushed.players[0]);
 }
 
-void testPlayerStepAndSlideComposeToTheWholeWorldStep()
+void testSlidePlanLeavesUnrelatedMomentumAlone()
 {
-    TEST("playerStepAndSlideComposeToTheWholeWorldStep");
-    const Level level = iceRink();
-    const GameState state = rules::initialState(level);
+    TEST("slidePlanLeavesUnrelatedMomentumAlone");
+    const Level level = makeLevel({
+        { "........", "........" },
+        { "CI  #   ", " I     #" },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[0].sliding = MoveDirection::Right;
+    state.movables[1].sliding = MoveDirection::Right;
 
-    const std::optional<plans::PlannedAction> whole =
-        plans::worldStep(level, state, MoveDirection::Right, {}, 0.2f);
-    const std::optional<plans::PlannedAction> step =
-        plans::planPlayerStep(level, state, MoveDirection::Right, {}, 0.2f);
-    CHECK(whole.has_value());
-    CHECK(step.has_value());
-    if (!whole || !step) {
-        return;
-    }
-
-    GameState composed = step->action.after;
-    for (const EntityId slider : plans::slidingEntities(composed)) {
-        if (const std::optional<plans::PlannedAction> slide =
-                plans::planSlide(level, composed, slider, {}, 0.2f)) {
-            composed = slide->action.after;
+    const std::optional<plans::PlannedAction> slide = plans::planSlides(
+        level, state, { state.movables[0].id }, {}, 0.2f);
+    CHECK(slide.has_value());
+    if (slide) {
+        CHECK(slide->action.after.movables[0].cell == cell(3, 0, 1));
+        CHECK(!slide->action.after.movables[0].sliding);
+        CHECK(slide->action.after.movables[1] == state.movables[1]);
+        CHECK(slide->action.after.players == state.players);
+        CHECK(plans::anySlideMomentum(slide->action.after));
+        // The unrelated slider cannot keep this action looping after its own
+        // rock has stopped. Every recorded leg belongs to the selected rock.
+        CHECK(slide->legs.size() <
+            static_cast<std::size_t>(plans::maxChainedSteps));
+        for (const GameState& leg : slide->legs) {
+            CHECK(leg.movables[1] == state.movables[1]);
         }
     }
-
-    // Splitting the planner must not change where anything ends up. This is the
-    // property that lets the two coexist while the split is wired through.
-    CHECK(composed == whole->action.after);
 }
 
 void testPlayerStepLeavesAmbientRidersAlone()
@@ -578,7 +603,7 @@ void testConveyorRideIsOneStepPerAction()
     }
 
     const std::optional<plans::PlannedAction> ride =
-        plans::planConveyorRide(level, state, riders.front(), {}, 0.2f);
+        plans::planConveyorRides(level, state, riders, {}, 0.2f);
     CHECK(ride.has_value());
     if (ride) {
         // The belt has more to give, but this action is over: ambient motion
@@ -600,8 +625,8 @@ void testConveyorRideIsOneStepPerAction()
     const std::optional<plans::PlannedAction> enemyRide =
         enemyRiders.empty()
         ? std::nullopt
-        : plans::planConveyorRide(
-              level, enemyState, enemyRiders.front(), {}, 0.2f);
+        : plans::planConveyorRides(
+              level, enemyState, enemyRiders, {}, 0.2f);
     CHECK(enemyRide.has_value());
     if (enemyRide) {
         CHECK(enemyRide->action.after.enemies[0].cell == cell(2, 1, 1));
@@ -618,9 +643,27 @@ void testScopedPlannersRefuseEntitiesWithNothingToDo()
     // session's admit loop terminates.
     CHECK(plans::slidingEntities(state).empty());
     CHECK(plans::conveyorRiders(level, state).empty());
-    CHECK(!plans::planSlide(level, state, state.movables[0].id, {}, 0.2f));
-    CHECK(!plans::planConveyorRide(level, state, state.movables[0].id, {}, 0.2f));
-    CHECK(!plans::planSlide(level, state, invalidEntityId, {}, 0.2f));
+    CHECK(!plans::planSlides(level, state, { state.movables[0].id }, {}, 0.2f));
+    CHECK(!plans::planConveyorRides(
+        level, state, { state.movables[0].id }, {}, 0.2f));
+    // Empty and invalid-only batches must never select the whole world.
+    GameState moving = state;
+    moving.movables[0].sliding = MoveDirection::Right;
+    CHECK(plans::planSlides(
+        level, moving, plans::slidingEntities(moving), {}, 0.2f).has_value());
+    CHECK(!plans::planSlides(level, moving, {}, {}, 0.2f));
+    CHECK(!plans::planSlides(level, moving, { invalidEntityId }, {}, 0.2f));
+
+    const Fixture belt = beltWithTwoRiders();
+    CHECK(plans::planConveyorRides(
+        belt.level,
+        belt.state,
+        plans::conveyorRiders(belt.level, belt.state),
+        {},
+        0.2f).has_value());
+    CHECK(!plans::planConveyorRides(belt.level, belt.state, {}, {}, 0.2f));
+    CHECK(!plans::planConveyorRides(
+        belt.level, belt.state, { invalidEntityId }, {}, 0.2f));
 }
 
 } // namespace
@@ -739,11 +782,11 @@ void testBeltRidersFollowEachOtherDownOneBelt()
     // standing in the cell it is about to leave, and refuses to move. A queue
     // on a belt would never advance.
     const std::optional<plans::PlannedAction> followerAlone =
-        plans::planConveyorRide(belt.level, belt.state, riders[0], {}, 0.2f);
+        plans::planConveyorRides(belt.level, belt.state, { riders[0] }, {}, 0.2f);
     CHECK(!followerAlone.has_value());
     // The leader alone is fine - nothing is in front of it.
     const std::optional<plans::PlannedAction> leaderAlone =
-        plans::planConveyorRide(belt.level, belt.state, riders[1], {}, 0.2f);
+        plans::planConveyorRides(belt.level, belt.state, { riders[1] }, {}, 0.2f);
     CHECK(leaderAlone.has_value());
 }
 
@@ -766,8 +809,18 @@ void testChainPlanningStopsAtTheCap()
         "CI" + std::string(static_cast<std::size_t>(width - 3), ' ') + "#";
     const Level level = makeLevel({ { floor }, { row } });
 
-    const std::optional<plans::PlannedAction> planned = plans::worldStep(
+    const std::optional<plans::PlannedAction> pushed = plans::planPlayerStep(
         level, rules::initialState(level), MoveDirection::Right, {}, 0.2f);
+    CHECK(pushed.has_value());
+    if (!pushed) {
+        return;
+    }
+    const std::optional<plans::PlannedAction> planned = plans::planSlides(
+        level,
+        pushed->action.after,
+        plans::slidingEntities(pushed->action.after),
+        {},
+        0.2f);
     CHECK(planned.has_value());
     if (!planned) {
         return;
@@ -800,8 +853,8 @@ int main()
     testChainPlanningStopsAtTheCap();
     testBeltRidersFollowEachOtherDownOneBelt();
     testOutcomeSurvivesAnyChangeOutsideItsClaims();
-    testWorldStepPlansAPush();
-    testWorldStepWithoutMovementHasNoPlan();
+    testPlayerStepPlansAPush();
+    testPlayerStepWithoutMovementHasNoPlan();
     testPlanningIsPureAndRepeatable();
     testWalkingWithoutPushing();
     testKnightEnemyPushUsesThePushPresentation();
@@ -816,7 +869,7 @@ int main()
     testSlideMomentumDetection();
     testPlayerStepIsOneStepAndLeavesTheSlideBehind();
     testSlidePlanSettlesTheDestination();
-    testPlayerStepAndSlideComposeToTheWholeWorldStep();
+    testSlidePlanLeavesUnrelatedMomentumAlone();
     testPlayerStepLeavesAmbientRidersAlone();
     testConveyorRideIsOneStepPerAction();
     testScopedPlannersRefuseEntitiesWithNothingToDo();

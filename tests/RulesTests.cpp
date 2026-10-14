@@ -1164,8 +1164,12 @@ void testPressurePlatesDoNotLockEnd()
         { "CPE" },
     });
     GameState state = rules::initialState(level);
-    state.players[0].cell = cell(2, 0, 1);
-    CHECK(rules::isEndUnlocked(level, state));
+    CHECK(!rules::isAtUnlockedEnd(level, state));
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(rules::isPressurePlateActive(level, state, cell(1, 0, 1)));
+    CHECK(!rules::isAtUnlockedEnd(level, state));
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(!rules::isPressurePlateActive(level, state, cell(1, 0, 1)));
     CHECK(rules::isAtUnlockedEnd(level, state));
 }
 

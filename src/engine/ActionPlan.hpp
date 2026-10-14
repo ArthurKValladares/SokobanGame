@@ -15,8 +15,8 @@ namespace sokoban {
 // Deciding and executing are separate on purpose. A plan is produced by a pure
 // function of the world at the instant the action begins, so its outcome cannot
 // drift afterwards; `GameplaySession` owns timing, history and bookkeeping, and
-// does not decide outcomes. That split is what the concurrent scheduler will be
-// built on - it needs to ask "what would this do?" without doing it.
+// does not decide outcomes. That split lets the concurrent scheduler ask
+// "what would this do?" without doing it.
 //
 // `before` and `after` are whole states because `GameplayPresentation` animates
 // by pairing entities between them. What completion actually commits is the
@@ -90,27 +90,6 @@ struct PlannedAction {
 // a guard against an unforeseen cycle rather than an expected limit.
 inline constexpr int maxChainedSteps = 512;
 
-// A world step and everything that inevitably follows from it.
-//
-// The first step applies `playerInput`; after that the world keeps stepping for
-// as long as anything still carries slide momentum, and the whole run becomes
-// one action. That is what makes a slide's destination final the moment it is
-// pushed: the outcome is computed here, in full, and nothing that happens later
-// can change it.
-//
-// Conveyor riders are deliberately left out. Belt motion is ambient and never
-// terminates, so chaining it would produce an action that never ends; a rider
-// gets one step per action instead, and hands back over to the caller.
-//
-// `durationSeconds` is per world step, so the action's total duration is that
-// times the number of legs. No plan when nothing would move.
-[[nodiscard]] std::optional<PlannedAction> worldStep(
-    const Level& level,
-    const GameState& state,
-    std::optional<MoveDirection> playerInput,
-    const rules::StepRates& rates,
-    float stepDurationSeconds);
-
 // Every living player controlled by `controller` takes one input-driven step,
 // together with everything that step drags in: a block they push, an enemy
 // that block shoves, or a player the enemy kills. Authored heroes have distinct
@@ -131,17 +110,10 @@ inline constexpr int maxChainedSteps = 512;
     float stepDurationSeconds,
     EntityId controller = invalidEntityId);
 
-// One entity's slide, resolved to its end as a single committed chain, plus
-// whatever it runs into on the way. Nothing that happens while it travels can
-// change where it stops.
-[[nodiscard]] std::optional<PlannedAction> planSlide(
-    const Level& level,
-    const GameState& state,
-    EntityId slider,
-    const rules::StepRates& rates,
-    float stepDurationSeconds);
-
-// Several entities sliding at once, as one action.
+// The selected entities' slides, resolved to their ends as one action, plus
+// whatever they run into on the way. Nothing that happens while they travel can
+// change where they stop. `stepDurationSeconds` is per world step, so the total
+// duration is that times the number of legs. No plan when nothing would change.
 //
 // They must be planned together rather than one plan each. Two entities sliding
 // from the same instant are outside each other's scope, so each treats the
@@ -157,21 +129,13 @@ inline constexpr int maxChainedSteps = 512;
     const rules::StepRates& rates,
     float stepDurationSeconds);
 
-// One belt rider, one step.
+// The selected belt riders, one step, as one action.
 //
 // Never chained: belt motion is ambient and does not terminate, so a chained
 // ride would be an action that never ends. Re-planning each step also keeps a
 // rider's claims one cell and one interval long, without which the area around
 // any belt would be permanently unusable and two riders could not follow each
 // other down the same belt.
-[[nodiscard]] std::optional<PlannedAction> planConveyorRide(
-    const Level& level,
-    const GameState& state,
-    EntityId rider,
-    const rules::StepRates& rates,
-    float stepDurationSeconds);
-
-// Every belt rider, one step, as one action.
 //
 // Together for the same reason slides are, and for one more: riders following
 // each other down the same belt only work if they move in one scope. Planned

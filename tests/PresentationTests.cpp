@@ -2363,6 +2363,49 @@ void testMirrorOnPlatesDrawsPlateAndTurns()
             *mirrorOrientationQuarterTurns(TileType::MirrorNorthEast));
 }
 
+void testGameplayEndsStayActiveAcrossPressurePlateChanges()
+{
+    TEST("gameplayEndsStayActiveAcrossPressurePlateChanges");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "......" }, { "CPE R " } },
+        .plates = { { .cell = { 4, 0, 1 }, .tile = TileType::End } },
+    }, "active end presentation");
+    const AssetManifest& manifest = testManifest();
+    for (const bool plateOccupied : { false, true }) {
+        GameState state = rules::initialState(level);
+        if (plateOccupied) {
+            state.players[0].cell = { 1, 0, 1 };
+        }
+        CHECK(rules::isPressurePlateActive(level, state, { 1, 0, 1 }) ==
+            plateOccupied);
+        GameplayPresentation presentation;
+        presentation.resetEntities(state);
+        const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+            .manifest = manifest,
+            .level = level,
+            .state = state,
+            .moving = false,
+            .projectedState = state,
+            .presentation = presentation,
+            .settings = {},
+        });
+        // Both the uncovered End and the one beneath the rock keep their
+        // normal color and energy effect, regardless of plate occupancy.
+        for (const GridPosition3 cell :
+             { GridPosition3 { 2, 0, 1 }, GridPosition3 { 4, 0, 1 } }) {
+            const auto end = std::ranges::find_if(frame.tiles, [&](const auto& tile) {
+                return tile.cell == cell && !tile.pickOnly &&
+                    near(tile.height, config::surfaceEntityHeight);
+            });
+            CHECK(end != frame.tiles.end());
+            if (end != frame.tiles.end()) {
+                CHECK(end->color == tileColor(TileType::End));
+                CHECK(end->effect == RenderSurfaceEffect::PlateEnergy);
+            }
+        }
+    }
+}
+
 void testEditorDrawsPlatesBeneathTheirOccupants()
 {
     TEST("editorDrawsPlatesBeneathTheirOccupants");
@@ -5449,6 +5492,7 @@ int main()
     testMinecartGateOpensForPassageAndClosesAfterUndo();
     testTurnedHeroFacesItsNewDirectionSmoothly();
     testMirrorOnPlatesDrawsPlateAndTurns();
+    testGameplayEndsStayActiveAcrossPressurePlateChanges();
     testEditorDrawsPlatesBeneathTheirOccupants();
 #if SOKOBAN_ENABLE_DEBUG_UI
     testEditorLinkedItemVisualization();

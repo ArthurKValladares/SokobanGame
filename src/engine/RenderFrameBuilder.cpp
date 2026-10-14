@@ -64,7 +64,6 @@ RenderAnimation manifestAnimationForUse(
 
 struct StaticRenderCell {
     TileType tile = TileType::Ground;
-    bool active = true;
     bool showGrid = true;
     Vec2 size { 1.0f, 1.0f };
     Vec2 positionOffset {};
@@ -156,7 +155,6 @@ StaticRenderCell staticRenderCellFor(
     uint32_t x,
     uint32_t y,
     uint32_t z,
-    bool endUnlocked,
     std::optional<TileType> fallenTile,
     float surfaceEntityHeight,
     float surfaceEntitySize,
@@ -174,7 +172,6 @@ StaticRenderCell staticRenderCellFor(
     const float centeredOffset = (1.0f - surfaceEntitySize) * 0.5f;
     return {
         .tile = tile,
-        .active = tile != TileType::End || endUnlocked,
         .showGrid = !tileTypeIsPlayerStart(tile),
         // Edge controls and their pedestals are authored in
         // tile coordinates; a unit transform retains that offset and shape.
@@ -356,7 +353,7 @@ void appendStaticTiles(
                     .color = cell.colorOverride.value_or(
                         tileTypeIsPlayerStart(cell.tile)
                             ? Vec4 { 1.0f, 1.0f, 1.0f, 1.0f }
-                            : tileColor(cell.tile, cell.active)),
+                            : tileColor(cell.tile)),
                     .baseElevation = cell.baseElevation,
                     .height = cell.height,
                     .showGrid = cell.showGrid,
@@ -758,8 +755,7 @@ void appendGameplayWaterAndShorelines(
 // so it is drawn here. Rotators draw from their records.
 void appendCoveredStaticSurfaces(
     RenderFrameData& frame,
-    const RenderFrameBuilder::GameplayInput& input,
-    bool endUnlocked)
+    const RenderFrameBuilder::GameplayInput& input)
 {
     for (const Level::Plate& plate : input.level.coveredPlates()) {
         const GridPosition3 cell = plate.cell;
@@ -780,8 +776,7 @@ void appendCoveredStaticSurfaces(
             (!tileTypeIsMinecart(occupant) && occupant != TileType::MinecartGate)) {
             continue;
         }
-        Vec4 color = tileColor(
-            plate.tile, plate.tile != TileType::End || endUnlocked);
+        Vec4 color = tileColor(plate.tile);
         if (tileTypeIsSignalSource(plate.tile)) {
             if (const std::optional<Vec3> linkColor =
                     input.level.pressurePlateLinkColor(cell)) {
@@ -845,7 +840,6 @@ void appendGameplayWorld(
     const auto& primaryPlayerVisual =
         input.presentation.players().at(primaryPlayerIndex(input));
     const auto& movableVisuals = input.presentation.movables();
-    const bool endUnlocked = rules::isEndUnlocked(input.level, state);
 
     frame.tiles.reserve(
         static_cast<std::size_t>(input.level.width()) *
@@ -905,7 +899,6 @@ void appendGameplayWorld(
                 x,
                 y,
                 z,
-                endUnlocked,
                 std::nullopt,
                 input.settings.geometry.surfaceEntityHeight,
                 input.settings.geometry.surfaceEntityWidthDepth,
@@ -982,7 +975,7 @@ void appendGameplayWorld(
                 AnimationUse::PlayerIdle,
                 input.presentation.worldAnimationTimeSeconds()));
     }
-    appendCoveredStaticSurfaces(frame, input, endUnlocked);
+    appendCoveredStaticSurfaces(frame, input);
     appendDecorations(
         frame,
         input.level.decorations(),

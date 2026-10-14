@@ -86,15 +86,17 @@ void testOverlapRules()
     CHECK(!before.overlaps(resting));
 }
 
-// A pushed ice block that travels several tiles before a wall stops it.
+// An ice block's committed slide after a push, stopped by a wall.
 [[nodiscard]] plans::PlannedAction slidePlan()
 {
     const Level level = makeLevel({
         { "........" },
         { "CI     #" },
     });
-    const GameState state = rules::initialState(level);
-    return *plans::worldStep(level, state, MoveDirection::Right, {}, 0.1f);
+    GameState state = rules::initialState(level);
+    state.movables[0].sliding = MoveDirection::Right;
+    return *plans::planSlides(
+        level, state, plans::slidingEntities(state), {}, 0.1f);
 }
 
 void testSlideClaimsItsWholePath()
@@ -131,8 +133,12 @@ void testSlideClaimsItsWholePath()
     CHECK(!holds(claims.cells, cell(7, 0), 0));
     CHECK(!holds(claims.cells, cell(7, 0), 999));
 
-    // The player claims the cell it stepped into, open-ended.
-    CHECK(holds(claims.cells, cell(1, 0), 999));
+    // The slide releases its starting cell and leaves the stationary player
+    // out of its claims. The player's push is a separate action.
+    CHECK(!holds(claims.cells, cell(1, 0), 999));
+    CHECK(!holds(claims.cells, cell(0, 0), 0));
+    CHECK(!holds(claims.cells, cell(0, 0), 999));
+    CHECK(planned.action.before.players == planned.action.after.players);
 }
 
 void testUninvolvedEntitiesAreNotClaimed()
@@ -466,7 +472,7 @@ void testPortalReservations()
                          { .cell = { 3, 1, 1 }, .color = { 1, 0, 0 } } },
         },
         "portal reservations");
-    const auto plan = plans::worldStep(
+    const auto plan = plans::planPlayerStep(
         level,
         [&] {
             auto state = rules::initialState(level);

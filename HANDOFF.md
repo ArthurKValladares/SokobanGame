@@ -773,6 +773,13 @@ and the required real-device checks are recorded.
 
 ## Gameplay and input contracts
 
+- Action planning uses `planPlayerStep`, `planSlides` and `planConveyorRides`.
+  Slide and conveyor batches arbitrate simultaneous motion in one scope;
+  their tests must exercise these runtime entry points. Checkpoint validation
+  replays scoped rules independently of the planner's transient legs.
+- Ends always render active. Pressure plates control linked devices, while
+  completion requires every hero on an End and every End occupied by a hero;
+  there is no separate end-unlock query or state.
 - `StateDelta` owns canonical player, movable, and enemy entity order, append,
   and overlap interpretation. Scheduling and gameplay validation must use it
   instead of rebuilding changed-ID lists.

@@ -225,9 +225,7 @@ void addChanged(
 }
 
 // The one planning core. Every planner is this with a different scope and a
-// different answer to whether it chains, which is what keeps them from drifting
-// apart - and what lets `worldStep` remain exactly what it always was, since
-// every save on disk is validated by replaying it.
+// different answer to whether it chains, which keeps them from drifting apart.
 [[nodiscard]] std::optional<plans::PlannedAction> planScoped(
     const Level& level,
     const GameState& state,
@@ -263,15 +261,11 @@ void addChanged(
         // was not named when the action began.
         rules::StepScope chainScope = scope;
         std::vector<EntityId> closure = scope.actors;
-        const bool wholeWorld = scope.wholeWorld();
-        if (!wholeWorld) {
-            addChanged(state, current, closure);
-            chainScope.actors = closure;
-        }
+        addChanged(state, current, closure);
+        chainScope.actors = closure;
 
         while (static_cast<int>(planned.legs.size()) < plans::maxChainedSteps &&
-            (wholeWorld ? plans::anySlideMomentum(current)
-                        : anySlideMomentumWithin(current, closure))) {
+            anySlideMomentumWithin(current, closure)) {
             rules::StepResult step = rules::scopedStepWithEvents(
                 level, current, std::nullopt, rates, chainScope);
             planned.pressurePlateActivityChanged =
@@ -283,10 +277,8 @@ void addChanged(
                 // asking again, so stop rather than spin.
                 break;
             }
-            if (!wholeWorld) {
-                addChanged(current, next, closure);
-                chainScope.actors = closure;
-            }
+            addChanged(current, next, closure);
+            chainScope.actors = closure;
             current = std::move(next);
             planned.legs.push_back(current);
             const std::size_t legIndex = planned.legs.size() - 1;
@@ -411,30 +403,6 @@ bool anySlideMomentum(const GameState& state)
     return false;
 }
 
-std::optional<PlannedAction> worldStep(
-    const Level& level,
-    const GameState& state,
-    std::optional<MoveDirection> playerInput,
-    const rules::StepRates& rates,
-    float stepDurationSeconds)
-{
-    // The whole-world composition: everything acts, and momentum is resolved
-    // here rather than one step at a time so that a slide's destination is
-    // settled before the block has moved a single tile.
-    //
-    // This cannot become one of the scoped planners, however tempting. Every
-    // save is validated by replaying its history through this exact function,
-    // so its behaviour is part of the save format.
-    return planScoped(
-        level,
-        state,
-        playerInput,
-        rates,
-        stepDurationSeconds,
-        rules::StepScope {},
-        true);
-}
-
 std::optional<PlannedAction> planPlayerStep(
     const Level& level,
     const GameState& state,
@@ -455,19 +423,6 @@ std::optional<PlannedAction> planPlayerStep(
         stepDurationSeconds,
         rules::StepScope { .actors = std::move(players) },
         false);
-}
-
-std::optional<PlannedAction> planSlide(
-    const Level& level,
-    const GameState& state,
-    EntityId slider,
-    const rules::StepRates& rates,
-    float stepDurationSeconds)
-{
-    if (slider == invalidEntityId) {
-        return std::nullopt;
-    }
-    return planSlides(level, state, { slider }, rates, stepDurationSeconds);
 }
 
 std::optional<PlannedAction> planSlides(
@@ -491,20 +446,6 @@ std::optional<PlannedAction> planSlides(
         stepDurationSeconds,
         rules::StepScope { .actors = std::move(sliders) },
         true);
-}
-
-std::optional<PlannedAction> planConveyorRide(
-    const Level& level,
-    const GameState& state,
-    EntityId rider,
-    const rules::StepRates& rates,
-    float stepDurationSeconds)
-{
-    if (rider == invalidEntityId) {
-        return std::nullopt;
-    }
-    return planConveyorRides(
-        level, state, { rider }, rates, stepDurationSeconds);
 }
 
 std::optional<PlannedAction> planConveyorRides(

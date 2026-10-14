@@ -440,10 +440,9 @@ private:
     //
     // One entry per *player* action, not per scheduled action. A push and the
     // slide it sets off are two actions to the scheduler and one entry here:
-    // the consequence folds into the entry its cause created, so the folded
-    // entry is exactly the whole-world transition `worldStep` would have
-    // produced. That is what keeps the save format and `matchesForwardTransition`
-    // untouched by the planner split.
+    // the consequence folds into the entry its cause created. Checkpoint
+    // validation replays that combined transition through the scoped rules;
+    // the planner's transient legs do not enter the save format.
     std::vector<Action> undoHistory_;
     // Which causal group each undo entry belongs to, so a consequence folds
     // into its own cause rather than into whatever committed most recently -

@@ -1519,13 +1519,6 @@ MinecartRiders applyMinecartActivations(
 
 } // namespace
 
-bool isEndUnlocked(const Level& level, const GameState& state)
-{
-    (void)level;
-    (void)state;
-    return true;
-}
-
 bool isAtUnlockedEnd(const Level& level, const GameState& state)
 {
     if (level.ends().empty() || anyPlayerDead(state)) {
