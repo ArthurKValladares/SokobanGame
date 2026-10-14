@@ -47,6 +47,15 @@ retain a new default. Water is tuned independently in
 [`WaterConfig.hpp`](../src/engine/render/WaterConfig.hpp); the procedural sky
 palette lives in [`sky_clouds.frag.glsl`](../shaders/sky_clouds.frag.glsl).
 
+The sky uses three broken cloud banks above a smooth layer of deep air. The
+distant bank is muted lavender, the middle bank is darker blue-violet, and the
+near wisps catch peach sunlight. Reduced coverage and opacity leave openings
+onto the lower atmosphere, which blends cool blue-violet with sun-facing peach.
+Clouds and the atmosphere's broad color variation are anchored at fixed world
+heights, preserving depth during camera movement; each cloud bank drifts
+independently. Coverage, opacity, haze and both shading colors are set per layer
+in the sky shader and can be adjusted with shader hot reload.
+
 ## Shader behavior and neutral settings
 
 Set **Diffuse Softness = 0**, **Normal Detail = 1**, and **Roughness Floor = 0**

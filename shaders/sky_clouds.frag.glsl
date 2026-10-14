@@ -67,7 +67,7 @@ vec3 cloudField(vec2 p, float time)
 
 vec3 compositeCloudLayer(vec3 below, vec3 camera, vec3 ray,
     float height, float scale, vec2 wind, vec2 seed,
-    float coverage, float opacity, float haze)
+    float coverage, float opacity, float haze, vec3 shade, vec3 lit)
 {
     // Horizon/upward rays see the gradient sky. Fade out before an almost
     // horizontal intersection can magnify the noise into subpixel flicker.
@@ -89,12 +89,31 @@ vec3 compositeCloudLayer(vec3 below, vec3 camera, vec3 ray,
     vec3 normal = normalize(vec3(-field.yz * 1.35, 1.0));
     vec3 sun = normalize(vec3(-0.55, -0.45, 0.70));
     float light = clamp(dot(normal, sun), 0.0, 1.0);
-    vec3 shade = vec3(0.32, 0.32, 0.57);
-    vec3 lit = vec3(0.92, 0.76, 0.67);
-    vec3 color = mix(shade, lit, 0.32 + light * 0.68);
+    vec3 color = mix(shade, lit, 0.24 + light * 0.76);
     // Thin wisps blend into lavender air; the distant sea loses contrast.
     color = mix(color, vec3(0.52, 0.48, 0.68), haze);
     return mix(below, color, alpha);
+}
+
+vec3 lowerAtmosphere(vec3 sky, vec3 camera, vec3 ray)
+{
+    // A smooth bed of air below the lowest clouds shows through their gaps.
+    // Anchor its broad color variation in the world, like the cloud planes,
+    // so orbiting and zooming reveal depth instead of a screen-space wash.
+    const float height = -145.0;
+    float visibility = smoothstep(0.015, 0.16, -ray.z);
+    if (visibility <= 0.0 || camera.z <= height) {
+        return sky;
+    }
+    float distanceToAir = (height - camera.z) / min(ray.z, -0.001);
+    vec2 world = camera.xy + ray.xy * distanceToAir;
+    vec2 sunDirection = normalize(vec2(-0.55, -0.45));
+    float broadHaze = cloudNoise(world * 0.003 + vec2(12.8, -6.3)).x;
+    // Bounded sun-facing warmth keeps both hues present even on distant maps.
+    float warmth = smoothstep(-1.2, 1.2,
+        dot(ray.xy, sunDirection) * 0.65 + (broadHaze - 0.5) * 1.1);
+    vec3 air = mix(vec3(0.22, 0.26, 0.48), vec3(0.70, 0.45, 0.40), warmth);
+    return mix(sky, air, visibility * 0.90);
 }
 
 void main()
@@ -106,15 +125,20 @@ void main()
     vec3 ray = normalize(farPoint.xyz / farPoint.w - camera);
     float horizon = pow(1.0 - abs(ray.z), 3.0);
     vec3 sky = mix(vec3(0.25, 0.29, 0.53), vec3(0.68, 0.52, 0.61), horizon);
-    // A hazy, almost continuous distant sea, a broken middle bank, and sparse
-    // nearer wisps. Fixed world heights give genuine parallax during orbit,
+    sky = lowerAtmosphere(sky, camera, ray);
+    // A muted distant bank, darker blue-violet middle clouds, and peach-lit
+    // nearer wisps. Broken coverage leaves the deep atmosphere visible.
+    // Fixed world heights give genuine parallax during orbit,
     // top-down view and overworld zoom, without attaching clouds to the camera.
     sky = compositeCloudLayer(sky, camera, ray, -90.0, 0.040,
-        vec2(0.004, -0.002), vec2(38.1, 7.4), 0.20, 3.8, 0.68);
+        vec2(0.004, -0.002), vec2(38.1, 7.4), 0.35, 1.8, 0.55,
+        vec3(0.27, 0.28, 0.49), vec3(0.66, 0.56, 0.61));
     sky = compositeCloudLayer(sky, camera, ray, -52.0, 0.065,
-        vec2(0.007, 0.003), vec2(-19.3, 31.8), 0.36, 3.0, 0.30);
+        vec2(0.007, 0.003), vec2(-19.3, 31.8), 0.42, 2.2, 0.18,
+        vec3(0.18, 0.20, 0.42), vec3(0.54, 0.44, 0.53));
     sky = compositeCloudLayer(sky, camera, ray, -26.0, 0.090,
-        vec2(0.011, -0.004), vec2(4.7, -23.6), 0.46, 2.6, 0.08);
+        vec2(0.011, -0.004), vec2(4.7, -23.6), 0.50, 2.0, 0.05,
+        vec3(0.34, 0.32, 0.55), vec3(0.95, 0.71, 0.58));
     // Scene alpha is the ambient-occlusion mask, never background opacity.
     outColor = vec4(sky, 0.0);
 }
