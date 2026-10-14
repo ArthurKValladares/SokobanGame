@@ -305,6 +305,7 @@ public:
     [[nodiscard]] bool textureReady(RenderTexture texture) const noexcept;
     [[nodiscard]] std::vector<TextureView> textures() const;
     [[nodiscard]] uint32_t textureCount() const;
+    [[nodiscard]] VulkanGeometryArena::Statistics geometryStatistics() const noexcept;
     [[nodiscard]] LoadingStats loadingStats() const;
     [[nodiscard]] SkinningBufferView skinningBuffer() const;
     [[nodiscard]] DrawInstanceBufferView drawInstanceBuffer() const;

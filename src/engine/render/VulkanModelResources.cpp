@@ -1677,6 +1677,11 @@ VulkanModelResources::materialBuffer() const
         static_cast<VkDeviceSize>(maxModelMaterials) * sizeof(GpuMaterial));
 }
 
+VulkanGeometryArena::Statistics VulkanModelResources::geometryStatistics() const noexcept
+{
+    return geometryArena_.statistics();
+}
+
 VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
 {
     LoadingStats result {

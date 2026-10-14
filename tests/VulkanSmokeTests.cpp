@@ -9,10 +9,12 @@
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
+#include "engine/render/FrameRetirementQueue.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/VulkanDeviceContext.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanGpuProfiler.hpp"
+#include "engine/render/VulkanGeometryArena.hpp"
 #include "engine/render/VulkanGroundChunkCache.hpp"
 #include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanModelResources.hpp"
@@ -440,6 +442,235 @@ void exerciseMemoryAllocator(sokoban::VulkanDeviceContext& deviceContext)
         throw std::runtime_error(
             "VMA smoke allocations were not fully released");
     }
+}
+
+void exerciseGeometryArena(sokoban::VulkanDeviceContext& deviceContext)
+{
+    using namespace sokoban;
+    const auto require = [](bool condition, const char* message) {
+        if (!condition) throw std::runtime_error(message);
+    };
+    constexpr VkDeviceSize mebibyte = 1024ULL * 1024ULL;
+    VulkanMemoryAllocator& allocator = deviceContext.memoryAllocator();
+    const VulkanMemoryStatistics before = allocator.statistics();
+    const uint64_t validationErrors = vulkanDebug::validationErrorCount();
+    {
+        VulkanUploadRing ring;
+        ring.create(allocator, deviceContext.device(), 512);
+        const VulkanMemoryStatistics ringOnly = allocator.statistics();
+        VulkanGeometryArena arena;
+        arena.create(allocator, deviceContext.device(), deviceContext.commandPool(),
+            deviceContext.graphicsQueue(), ring);
+        const auto requireEmpty = [&] {
+            const auto geometry = arena.statistics();
+            const auto memory = allocator.statistics();
+            require(geometry.usedBytes() == 0 && geometry.reservedBytes() == 0 &&
+                    geometry.blockCount() == 0 &&
+                    memory.bufferBytes == ringOnly.bufferBytes &&
+                    memory.bufferCount == ringOnly.bufferCount,
+                "Empty geometry arena retained backing Vulkan allocations");
+        };
+        requireEmpty();
+
+        // Each request exceeds every previously released vertex block. Keeping
+        // empty blocks used to retain 154 MiB after this sequence, with no
+        // live slices left. Check the actual VMA buffer allocations as well as
+        // the arena's own counters, so hiding an empty block cannot pass.
+        for (VkDeviceSize vertexMebibytes : { 33ULL, 34ULL, 35ULL, 36ULL }) {
+            auto allocation = arena.allocate(vertexMebibytes * mebibyte, 4);
+            const auto active = arena.statistics();
+            require(active.vertex.usedBytes == vertexMebibytes * mebibyte &&
+                    active.vertex.reservedBytes == vertexMebibytes * mebibyte &&
+                    active.vertex.blockCount == 1 && active.index.usedBytes == 4 &&
+                    active.index.reservedBytes == 16 * mebibyte &&
+                    active.index.blockCount == 1 && active.blockCount() == 2,
+                "Geometry statistics did not distinguish live payload and backing capacity");
+            const auto backing = allocator.statistics();
+            require(backing.bufferBytes - ringOnly.bufferBytes >= active.reservedBytes() &&
+                    backing.bufferCount - ringOnly.bufferCount == active.blockCount(),
+                "Geometry reservation statistics disagreed with live Vulkan buffers");
+            arena.release(allocation);
+            require(!allocation.valid(), "Released geometry allocation remained valid");
+            requireEmpty();
+            std::cout << "geometry_reclamation vertex_request_mib="
+                      << vertexMebibytes << " live_slice_bytes=0 retained_buffer_bytes="
+                      << allocator.statistics().bufferBytes - ringOnly.bufferBytes << '\n';
+        }
+
+        // Index slices have alignment gaps; live bytes count requested data,
+        // rather than interpreting either padding or capacity as resident data.
+        auto first = arena.allocate(64, 12);
+        auto peer = arena.allocate(80, 20);
+        const VkBuffer peerVertex = arena.vertexBuffer(peer);
+        const VkBuffer peerIndex = arena.indexBuffer(peer);
+        require(first.vertexBlock == peer.vertexBlock && first.indexBlock == peer.indexBlock &&
+                arena.statistics().vertex.usedBytes == 144 &&
+                arena.statistics().index.usedBytes == 32 &&
+                arena.statistics().reservedBytes() == 48 * mebibyte,
+            "Shared geometry blocks or exact live-payload accounting changed");
+        arena.release(first);
+        require(arena.statistics().usedBytes() == 100 &&
+                arena.statistics().reservedBytes() == 48 * mebibyte &&
+                arena.vertexBuffer(peer) == peerVertex && arena.indexBuffer(peer) == peerIndex,
+            "Releasing one slice destroyed a block still used by its live peer");
+        arena.release(peer);
+        requireEmpty();
+
+        // Occupy two complete block pairs, then free the first pair. Later
+        // allocations must reuse its vacant slots without renumbering the
+        // second pair, whose handles may already be recorded in commands.
+        first = arena.allocate(32 * mebibyte, 16 * mebibyte);
+        peer = arena.allocate(32 * mebibyte, 16 * mebibyte);
+        const uint32_t vacantVertex = first.vertexBlock;
+        const uint32_t vacantIndex = first.indexBlock;
+        const uint32_t stableVertex = peer.vertexBlock;
+        const uint32_t stableIndex = peer.indexBlock;
+        const VkBuffer stableVertexBuffer = arena.vertexBuffer(peer);
+        const VkBuffer stableIndexBuffer = arena.indexBuffer(peer);
+        arena.release(first);
+        require(arena.statistics().reservedBytes() == 48 * mebibyte &&
+                peer.vertexBlock == stableVertex && peer.indexBlock == stableIndex &&
+                arena.vertexBuffer(peer) == stableVertexBuffer &&
+                arena.indexBuffer(peer) == stableIndexBuffer,
+            "Freeing a lower geometry block invalidated a surviving allocation");
+        auto replacement = arena.allocate(64, 16);
+        require(replacement.vertexBlock == vacantVertex && replacement.indexBlock == vacantIndex &&
+                arena.vertexBuffer(peer) == stableVertexBuffer &&
+                arena.indexBuffer(peer) == stableIndexBuffer &&
+                arena.statistics().blockCount() == 4,
+            "New geometry blocks did not reuse vacant slots safely");
+        arena.release(replacement);
+        arena.release(peer);
+        requireEmpty();
+
+        // Geometry release follows the renderer's retirement decision. A
+        // completed unrelated frame, or only one relevant frame, cannot free
+        // the backing buffers while another recorded frame still uses them.
+        FrameRetirementQueue<VulkanGeometryArena::Allocation> retired;
+        auto pending = arena.allocate(64, 16);
+        retired.retire(pending, 0b101);
+        pending = {};
+        const auto drain = [&] {
+            retired.drainCompleted([&](auto& allocation) { arena.release(allocation); });
+        };
+        drain();
+        retired.completeFrame(1);
+        drain();
+        require(retired.size() == 1 && arena.statistics().usedBytes() == 80 &&
+                arena.statistics().reservedBytes() == 48 * mebibyte,
+            "An unrelated frame completion reclaimed pending geometry");
+        retired.completeFrame(0);
+        drain();
+        require(retired.size() == 1 && arena.statistics().blockCount() == 2,
+            "Geometry backing buffers were released before every pending frame completed");
+        retired.completeFrame(2);
+        drain();
+        require(retired.empty(), "Completed geometry retirement remained queued");
+        requireEmpty();
+
+        // Exercise the real transfer submission and wait for its fence before
+        // releasing either staging storage or the geometry destination.
+        const std::array<uint32_t, 16> vertices {};
+        const std::array<uint32_t, 4> indices {};
+        auto uploaded = arena.allocate(sizeof(vertices), sizeof(indices));
+        auto upload = arena.beginUpload(uploaded, vertices.data(), sizeof(vertices),
+            indices.data(), sizeof(indices));
+        try {
+            require(upload.submitted && upload.fence && ring.usedBytes() == 80,
+                "Geometry upload did not retain its staging reservation");
+            require(vkWaitForFences(deviceContext.device(), 1, &upload.fence, VK_TRUE,
+                    5'000'000'000ULL) == VK_SUCCESS && arena.uploadComplete(upload),
+                "Geometry transfer did not complete before reclamation");
+            require(arena.statistics().usedBytes() == 80 &&
+                    arena.statistics().blockCount() == 2,
+                "Completing an upload released geometry still owned by its caller");
+        } catch (...) {
+            deviceContext.waitIdle();
+            arena.destroyUpload(upload);
+            throw;
+        }
+        arena.destroyUpload(upload);
+        require(!upload.submitted && !upload.staging.valid() && ring.usedBytes() == 0,
+            "Completed geometry upload did not release its staging storage");
+        arena.release(uploaded);
+        requireEmpty();
+
+        // A full upload ring fails before submission. The caller rolls back
+        // its geometry allocation while preserving the unrelated reservation.
+        const auto heldStaging = ring.reserve(ring.capacity(), 16);
+        require(heldStaging.has_value(), "Could not fill geometry test upload ring");
+        auto failedUpload = arena.allocate(sizeof(vertices), sizeof(indices));
+        bool uploadRejected = false;
+        try {
+            const auto unexpected = arena.beginUpload(failedUpload, vertices.data(),
+                sizeof(vertices), indices.data(), sizeof(indices));
+            deviceContext.waitIdle();
+            auto cleanup = unexpected;
+            arena.destroyUpload(cleanup);
+        } catch (const std::runtime_error&) {
+            uploadRejected = true;
+        }
+        require(uploadRejected && ring.usedBytes() == ring.capacity(),
+            "Failed geometry upload consumed or released unrelated staging storage");
+        arena.release(failedUpload);
+        requireEmpty();
+        ring.abandon(*heldStaging);
+        require(ring.usedBytes() == 0, "Abandoned test reservation remained in upload ring");
+
+        // Inject the second-half failure at the arena seam, never by requesting
+        // unsafe GPU sizes or relying on device-specific out-of-memory behavior.
+        arena.failNextIndexBlockCreationForTesting();
+        bool indexRejected = false;
+        try {
+            auto unexpected = arena.allocate(64, 16);
+            arena.release(unexpected);
+        } catch (const std::runtime_error&) {
+            indexRejected = true;
+        }
+        require(indexRejected, "Geometry index failure injection did not run");
+        requireEmpty();
+
+        peer = arena.allocate(64, 16 * mebibyte);
+        const VkBuffer rollbackPeerVertex = arena.vertexBuffer(peer);
+        const VkBuffer rollbackPeerIndex = arena.indexBuffer(peer);
+        arena.failNextIndexBlockCreationForTesting();
+        indexRejected = false;
+        try {
+            auto unexpected = arena.allocate(32, 16);
+            arena.release(unexpected);
+        } catch (const std::runtime_error&) {
+            indexRejected = true;
+        }
+        require(indexRejected && arena.statistics().vertex.usedBytes == 64 &&
+                arena.statistics().index.usedBytes == 16 * mebibyte &&
+                arena.statistics().reservedBytes() == 48 * mebibyte &&
+                arena.vertexBuffer(peer) == rollbackPeerVertex &&
+                arena.indexBuffer(peer) == rollbackPeerIndex,
+            "Failed index allocation damaged a shared live vertex block");
+        arena.release(peer);
+        requireEmpty();
+
+        first = arena.allocate(32 * mebibyte, 16 * mebibyte);
+        peer = arena.allocate(64, 16);
+        arena.destroy();
+        requireEmpty();
+        arena.destroy();
+        requireEmpty();
+        arena.create(allocator, deviceContext.device(), deviceContext.commandPool(),
+            deviceContext.graphicsQueue(), ring);
+        auto recreated = arena.allocate(16, 4);
+        arena.release(recreated);
+        arena.release(recreated);
+        requireEmpty();
+    }
+    require(allocator.statistics().bufferBytes == before.bufferBytes &&
+            allocator.statistics().bufferCount == before.bufferCount,
+        "Geometry arena fixture leaked Vulkan buffers");
+    require(vulkanDebug::validationErrorCount() == validationErrors,
+        "Vulkan validation reported a geometry arena lifecycle error");
+    std::cout << "Geometry arena reclamation, shared owners, stable slots, frame retirement, "
+                 "transfer completion, rollback and teardown passed; validation_active="
+              << vulkanDebug::validationActive() << '\n';
 }
 
 void exerciseGroundChunkCacheLifecycle(sokoban::VulkanDeviceContext& deviceContext)
@@ -1865,6 +2096,11 @@ int main(int argc, char** argv)
             return 0;
         }
         sokoban::VulkanDeviceContext deviceContext(window.get());
+        if (argc == 2 &&
+            std::string_view(argv[1]) == "--geometry-arena") {
+            exerciseGeometryArena(deviceContext);
+            return 0;
+        }
         // Cover the live device-query policy as well as the pure selector:
         // a sampled D32 attachment must not be downgraded to D16, whose
         // precision loses floor markers with the detached camera.

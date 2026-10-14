@@ -914,6 +914,18 @@ and the required real-device checks are recorded.
 
 ## Renderer contracts
 
+- Model geometry arena buffers are reclaimed when their last slice is released.
+  Runtime eviction releases slices only after every referencing frame fence
+  clears the retirement mask; uploads must also complete before release.
+  Empty slots are reused without renumbering live allocations, and allocation
+  rollback reclaims newly empty buffers while preserving shared live owners.
+- Geometry statistics separate requested slice payload from reserved VkBuffer
+  capacity (free space and alignment gaps included). Both uploading and retiring
+  slices count until release. Capacity is included in VMA allocation totals;
+  VMA allocation padding and heap blocks are separate. The model residency
+  budget still limits payload, not a strict cap on geometry capacity: partly
+  occupied blocks and the preferred 32 MiB vertex / 16 MiB index sizes retain
+  slack. Do not interpret geometry reclamation as a strict physical-memory cap.
 - `frameArenaMemoryStats()` reports all live CPU `FrameArena` reservations and
   their peak combined capacity. Accounting changes only on construction and
   destruction; bump allocations, reset and borrowed array views do not change

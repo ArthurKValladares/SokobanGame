@@ -1638,6 +1638,11 @@ RenderStats VulkanRenderer::renderStats() const
     stats.gpuMemoryTotalFreedBytes = memory.totalFreedBytes;
     stats.gpuImageBytes = memory.imageBytes;
     stats.gpuBufferBytes = memory.bufferBytes;
+    const VulkanGeometryArena::Statistics geometry =
+        modelResources_.geometryStatistics();
+    stats.geometryArenaUsedBytes = geometry.usedBytes();
+    stats.geometryArenaReservedBytes = geometry.reservedBytes();
+    stats.geometryArenaBlockCount = geometry.blockCount();
     stats.gpuDeviceLocalBytes = memory.deviceLocalBytes;
     stats.gpuHostVisibleBytes = memory.hostVisibleBytes;
     stats.gpuLifetimeAllocations = memory.lifetimeAllocations;

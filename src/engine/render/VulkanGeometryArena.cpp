@@ -5,6 +5,9 @@
 #include "engine/render/VulkanResourceUtils.hpp"
 
 #include <algorithm>
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+#include <atomic>
+#endif
 #include <iterator>
 #include <stdexcept>
 
@@ -14,6 +17,10 @@ namespace {
 constexpr VkDeviceSize vertexBlockBytes = 32ULL * 1024ULL * 1024ULL;
 constexpr VkDeviceSize indexBlockBytes = 16ULL * 1024ULL * 1024ULL;
 constexpr uint64_t geometryAlignment = 16;
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+std::atomic<bool> failNextIndexBlockCreation { false };
+#endif
 
 } // namespace
 
@@ -81,7 +88,11 @@ VulkanGeometryArena::Allocation VulkanGeometryArena::allocate(
             indexBlockBytes,
             "Static geometry index block");
     } catch (...) {
-        vertexBlocks_[result.vertexBlock].allocator.release(result.vertex);
+        Block& vertexBlock = vertexBlocks_[result.vertexBlock];
+        vertexBlock.allocator.release(result.vertex);
+        if (vertexBlock.allocator.usedBytes() == 0) {
+            destroyBlock(vertexBlock);
+        }
         throw;
     }
     return result;
@@ -94,11 +105,21 @@ void VulkanGeometryArena::release(Allocation& allocation)
         return;
     }
     if (allocation.vertexBlock >= vertexBlocks_.size() ||
-        allocation.indexBlock >= indexBlocks_.size()) {
+        allocation.indexBlock >= indexBlocks_.size() ||
+        !vertexBlocks_[allocation.vertexBlock].buffer ||
+        !indexBlocks_[allocation.indexBlock].buffer) {
         throw std::invalid_argument("Geometry allocation points outside the arena");
     }
-    vertexBlocks_[allocation.vertexBlock].allocator.release(allocation.vertex);
-    indexBlocks_[allocation.indexBlock].allocator.release(allocation.index);
+    Block& vertexBlock = vertexBlocks_[allocation.vertexBlock];
+    Block& indexBlock = indexBlocks_[allocation.indexBlock];
+    vertexBlock.allocator.release(allocation.vertex);
+    indexBlock.allocator.release(allocation.index);
+    if (vertexBlock.allocator.usedBytes() == 0) {
+        destroyBlock(vertexBlock);
+    }
+    if (indexBlock.allocator.usedBytes() == 0) {
+        destroyBlock(indexBlock);
+    }
     allocation = {};
 }
 
@@ -122,7 +143,9 @@ VulkanGeometryArena::Upload VulkanGeometryArena::beginUpload(
     VkDeviceSize indexBytes) const
 {
     if (!allocation.valid() || allocation.vertexBlock >= vertexBlocks_.size() ||
-        allocation.indexBlock >= indexBlocks_.size()) {
+        allocation.indexBlock >= indexBlocks_.size() ||
+        !vertexBlocks_[allocation.vertexBlock].buffer ||
+        !indexBlocks_[allocation.indexBlock].buffer) {
         throw std::invalid_argument("Invalid geometry allocation upload");
     }
     if (!vertexData || !indexData || vertexBytes != allocation.vertex.size ||
@@ -273,27 +296,58 @@ VkDeviceSize VulkanGeometryArena::indexOffset(const Allocation& allocation) cons
     return allocation.index.offset;
 }
 
+VulkanGeometryArena::Statistics VulkanGeometryArena::statistics() const noexcept
+{
+    const auto summarize = [](const std::vector<Block>& blocks) {
+        BufferStatistics result;
+        for (const Block& block : blocks) {
+            if (block.buffer) {
+                result.usedBytes += block.allocator.usedBytes();
+                result.reservedBytes += block.allocator.capacity();
+                ++result.blockCount;
+            }
+        }
+        return result;
+    };
+    return { .vertex = summarize(vertexBlocks_), .index = summarize(indexBlocks_) };
+}
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+void VulkanGeometryArena::failNextIndexBlockCreationForTesting()
+{
+    failNextIndexBlockCreation.store(true, std::memory_order_relaxed);
+}
+#endif
+
 VulkanGeometryArena::Block VulkanGeometryArena::createBlock(
     VkDeviceSize capacity,
     VkBufferUsageFlags usage,
     const char* name) const
 {
     Block result;
+    // Reserve the host free-list entry before creating the GPU resource.
+    result.allocator = GeometrySuballocator(capacity);
     VkBufferCreateInfo bufferInfo {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = capacity,
         .usage = usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
-    memoryAllocator_->createBuffer(
-        bufferInfo,
-        VulkanMemoryUsage::DeviceLocal,
-        result.buffer,
-        result.allocation,
-        nullptr,
-        name);
-    vulkanDebug::setObjectName(device_, VK_OBJECT_TYPE_BUFFER, result.buffer, name);
-    result.allocator = GeometrySuballocator(capacity);
+    try {
+        memoryAllocator_->createBuffer(
+            bufferInfo,
+            VulkanMemoryUsage::DeviceLocal,
+            result.buffer,
+            result.allocation,
+            nullptr,
+            name);
+        vulkanDebug::setObjectName(device_, VK_OBJECT_TYPE_BUFFER, result.buffer, name);
+    } catch (...) {
+        // createBuffer can fail after assigning the handles, for example while
+        // allocating its debug name. Clean up that partially created resource.
+        destroyBlock(result);
+        throw;
+    }
     return result;
 }
 
@@ -305,26 +359,56 @@ GeometrySuballocator::Allocation VulkanGeometryArena::allocateSlice(
     VkDeviceSize preferredBlockBytes,
     const char* name)
 {
+    uint32_t vacantIndex = UINT32_MAX;
     for (uint32_t index = 0; index < blocks.size(); ++index) {
+        if (!blocks[index].buffer) {
+            if (vacantIndex == UINT32_MAX) {
+                vacantIndex = index;
+            }
+            continue;
+        }
         if (const auto allocation = blocks[index].allocator.allocate(
                 bytes, geometryAlignment)) {
             blockIndex = index;
             return *allocation;
         }
     }
-    const VkDeviceSize capacity = std::max(preferredBlockBytes, bytes);
-    blocks.push_back(createBlock(capacity, usage, name));
-    blockIndex = static_cast<uint32_t>(blocks.size() - 1);
-    const auto allocation = blocks.back().allocator.allocate(bytes, geometryAlignment);
-    if (!allocation) {
-        throw std::runtime_error("New geometry arena block could not satisfy allocation");
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    if ((usage & VK_BUFFER_USAGE_INDEX_BUFFER_BIT) != 0 &&
+        failNextIndexBlockCreation.exchange(false, std::memory_order_relaxed)) {
+        throw std::runtime_error("Injected geometry index block creation failure");
     }
-    return *allocation;
+#endif
+    if (vacantIndex == UINT32_MAX) {
+        if (blocks.size() >= UINT32_MAX) {
+            throw std::length_error("Geometry arena has exhausted block indices");
+        }
+        vacantIndex = static_cast<uint32_t>(blocks.size());
+        // Grow the host vector before owning a new VkBuffer, so insertion
+        // failure cannot leak GPU storage. Empty slots preserve live indices.
+        blocks.emplace_back();
+    }
+    const VkDeviceSize capacity = std::max(preferredBlockBytes, bytes);
+    Block& block = blocks[vacantIndex];
+    block = createBlock(capacity, usage, name);
+    try {
+        const auto allocation = block.allocator.allocate(bytes, geometryAlignment);
+        if (!allocation) {
+            throw std::runtime_error("New geometry arena block could not satisfy allocation");
+        }
+        blockIndex = vacantIndex;
+        return *allocation;
+    } catch (...) {
+        destroyBlock(block);
+        throw;
+    }
 }
 
-void VulkanGeometryArena::destroyBlock(Block& block) const
+void VulkanGeometryArena::destroyBlock(Block& block) const noexcept
 {
-    memoryAllocator_->destroyBuffer(block.buffer, block.allocation);
+    if (block.buffer || block.allocation) {
+        memoryAllocator_->destroyBuffer(block.buffer, block.allocation);
+    }
     block.buffer = VK_NULL_HANDLE;
     block.allocation = nullptr;
     block.allocator = GeometrySuballocator(0);

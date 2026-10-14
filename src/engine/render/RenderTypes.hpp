@@ -947,6 +947,12 @@ struct RenderStats {
     uint64_t gpuMemoryTotalFreedBytes = 0;
     uint64_t gpuImageBytes = 0;
     uint64_t gpuBufferBytes = 0;
+    // Model vertex/index payload includes uploads and deferred retirements
+    // until their fence-safe release. Reserved capacity is requested VkBuffer
+    // size, included in GPU allocations and excluding VMA heap overhead.
+    uint64_t geometryArenaUsedBytes = 0;
+    uint64_t geometryArenaReservedBytes = 0;
+    uint32_t geometryArenaBlockCount = 0;
     uint64_t gpuDeviceLocalBytes = 0;
     uint64_t gpuHostVisibleBytes = 0;
     uint64_t gpuLifetimeAllocations = 0;

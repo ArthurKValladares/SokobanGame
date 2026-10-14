@@ -468,6 +468,13 @@ void Application::finishEvidenceCapture()
            << " allocations; "
            << static_cast<double>(evidenceStats_.gpuMemoryBlockBytes) / (1024.0 * 1024.0)
            << " MiB reserved in blocks\n";
+    report << "- Model geometry arena: "
+           << static_cast<double>(evidenceStats_.geometryArenaUsedBytes) / (1024.0 * 1024.0)
+           << " MiB slice payload / "
+           << static_cast<double>(evidenceStats_.geometryArenaReservedBytes) / (1024.0 * 1024.0)
+           << " MiB VkBuffer capacity in " << evidenceStats_.geometryArenaBlockCount
+           << " buffers (payload excludes alignment gaps; includes uploading and retiring slices; "
+              "capacity is included in GPU allocations and excludes VMA heap overhead)\n";
     report << "- Scene image: `" << sceneName << "`\n";
     if (evidenceAmbientOcclusionEnabled_) {
         report << "- Filtered SSAO image: `" << occlusionName << "`\n";

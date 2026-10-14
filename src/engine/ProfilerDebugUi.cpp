@@ -635,6 +635,17 @@ void ProfilerDebugUi::draw(const VulkanRenderer& renderer)
             toMiB(stats.gpuBufferBytes),
             stats.gpuBufferAllocationCount);
         ImGui::Text(
+            "Model geometry %.2f MiB payload / %.2f MiB buffer capacity in %u buffers",
+            toMiB(stats.geometryArenaUsedBytes),
+            toMiB(stats.geometryArenaReservedBytes),
+            stats.geometryArenaBlockCount);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Model vertex/index slices, including uploads and deferred retirements until safe release.\n"
+                "Payload excludes slice alignment gaps. Capacity is requested VkBuffer size,\n"
+                "included in GPU buffers above and excluding VMA heap overhead.");
+        }
+        ImGui::Text(
             "Device-local %.1f MiB, host-visible %.1f MiB",
             toMiB(stats.gpuDeviceLocalBytes),
             toMiB(stats.gpuHostVisibleBytes));
