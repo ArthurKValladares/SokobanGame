@@ -8,8 +8,10 @@
 #include "engine/EditorCursorArt.hpp"
 #include "engine/EditorInteraction.hpp"
 #include "engine/Log.hpp"
+#include "engine/OverworldSplatTiling.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/TileTypes.hpp"
+#include "engine/render/CompressedTextureArtifact.hpp"
 #include "engine/render/PngWriter.hpp"
 #include "engine/render/ShaderCatalog.hpp"
 
@@ -26,6 +28,7 @@
 #include <sstream>
 #include <fstream>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -43,6 +46,27 @@ bool selectedDecorationMatchesTool(const LevelEditor& editor)
         editor.decorationEditable(*selected) &&
         TileDecorations::isTileDecoration(selected->model) ==
             (editor.tool() == LevelEditor::Tool::TileDecorations);
+}
+
+bool remapSplatMask(
+    Level::Definition& definition,
+    const OverworldSplatTilingPlan::MaskChange& change)
+{
+    if (!change.before) {
+        if (!definition.groundSplats.empty()) return false;
+        definition.groundSplats.push_back(change.after);
+        return true;
+    }
+    for (Level::GroundSplat& splat : definition.groundSplats) {
+        if (splat.name == change.before->name &&
+            splat.base == change.before->base &&
+            splat.detail == change.before->detail &&
+            splat.mask == change.before->mask) {
+            splat.mask = change.after.mask;
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -564,11 +588,13 @@ bool ApplicationTools::openGroundPainting(
     levelEditor.setEditingDocument(true);
 
     if (splatPainter.dirty() && !splatPainter.save()) return false;
+    splatPainter.close();
     levelEditor.setGroundAssignmentPainting(false);
     levelEditor.showGroundAssignmentColors() = false;
-    const Level::GroundSplat* selectedSplat = levelEditor.selectedGroundSplat();
-    const bool opened = splatPainter.open(
-        {
+    const Level::GroundSplat* selected = levelEditor.selectedGroundSplat();
+    const std::optional<Level::GroundSplat> selectedSplat = selected
+        ? std::optional<Level::GroundSplat> { *selected } : std::nullopt;
+    SplatPainter::OpenRequest request {
             .documentPath = levelEditor.loadedDocumentPath(),
             .boardTilesWide = levelEditor.documentWidth(),
             .boardTilesHigh = levelEditor.documentHeight(),
@@ -580,15 +606,196 @@ bool ApplicationTools::openGroundPainting(
                       groundSplatMapTextureNameForOverworldScreen(
                           *levelEditor.overworldScreenId()) }
                 : std::nullopt,
-        },
-        manifest);
+        };
+    groundPaintingDefinitions_.clear();
+    groundPaintingLayout_.reset();
+    if (levelEditor.overworldScreenId() &&
+        !prepareOverworldGroundPainting(request, selectedSplat, manifest, renderer)) {
+        return false;
+    }
+    const bool opened = splatPainter.open(request, manifest);
     if (opened) {
         RenderAssetRequirements requirements;
-        requirements.requireTexture(splatPainter.texture());
+        for (std::size_t index = 0; index < splatPainter.mapCount(); ++index) {
+            requirements.requireTexture(splatPainter.mapTexture(index));
+        }
         renderer.waitForAssets(requirements);
-        uploadedSplatRevision = splatPainter.revision();
+        // Opening may resize a mask or start one that is not on disk yet.
+        uploadedSplatRevision = 0;
+        pushPaintedSplatMap(renderer);
     }
     return opened;
+}
+
+const Level::Definition* ApplicationTools::groundPaintingNeighborDefinition(
+    OverworldScreenId screen) const
+{
+    if (splatPainter.active() && splatPainter.documentPath().lexically_normal() ==
+            levelEditor.loadedDocumentPath().lexically_normal()) {
+        const auto found = std::ranges::find(
+            groundPaintingDefinitions_, screen, &OverworldDefinitionOverride::screen);
+        if (found != groundPaintingDefinitions_.end()) return &found->definition;
+    }
+    return overworldMapEditor.definition(screen);
+}
+
+bool ApplicationTools::prepareOverworldGroundPainting(
+    SplatPainter::OpenRequest& request,
+    std::optional<Level::GroundSplat> selectedSplat,
+    AssetManifest& manifest,
+    VulkanRenderer& renderer)
+{
+    try {
+        const OverworldScreenId active = *levelEditor.overworldScreenId();
+        const bool useTopology = overworldMapEditor.loaded() && matchingOverworldEditorRoot();
+        const OverworldLayout layout = useTopology
+            ? overworldMapEditor.layout()
+            : loadOverworldLayout(levelEditor.browserRoot() / "overworld/layout.json");
+        std::vector<OverworldSplatScreen> screens;
+        for (const OverworldScreenSpec& spec : layout.screens) {
+            const auto path = levelEditor.browserRoot() / "overworld" / spec.file;
+            std::optional<Level::Definition> definition = levelEditor.definitionForDocument(path);
+            if (!definition && useTopology) {
+                if (const auto* draft = overworldMapEditor.definition(spec.id)) definition = *draft;
+            }
+            if (!definition) throw std::runtime_error("Could not read overworld screen " + std::to_string(spec.id));
+            screens.push_back({ spec.id, spec.slot, std::move(*definition) });
+        }
+        std::vector<std::string> externalMasks;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(levelEditor.browserRoot())) {
+            if (!entry.is_regular_file() || entry.path().extension() != ".scr") continue;
+            const auto relative = entry.path().lexically_relative(levelEditor.browserRoot());
+            if (*relative.begin() == "overworld") continue;
+            if (const auto definition = levelEditor.definitionForDocument(entry.path())) {
+                for (const auto& splat : definition->groundSplats) externalMasks.push_back(splat.mask);
+            }
+        }
+        const OverworldSplatTilingPlan plan = planOverworldSplatTiling({
+            .screens = screens,
+            .activeScreen = active,
+            .selectedSplat = std::move(selectedSplat),
+            .screenWidth = layout.screenWidth,
+            .screenHeight = layout.screenHeight,
+            .manifest = manifest,
+            .sourceAssetRoot = request.sourceAssetRoot,
+            .runtimeAssetRoot = request.runtimeAssetRoot,
+            .externalMaskNames = externalMasks,
+        });
+        if (!plan.valid) throw std::runtime_error(plan.status);
+        if (manifest.textures().size() + plan.copies.size() > renderer.textureDescriptorCapacity()) {
+            throw std::runtime_error("The runtime texture descriptor heap is full.");
+        }
+
+        // Shared masks can also be used by puzzle screens. Copy their paint
+        // before assigning screen-owned identities; never overwrite the original.
+        AssetManifestEditor preparedManifest = assetManifestEditor;
+        for (const auto& copy : plan.copies) {
+            SplatCanvas canvas = SplatCanvas::createForBoard(layout.screenWidth, layout.screenHeight);
+            if (!copy.sourceTextureName.empty()) {
+                const RenderTexture source = manifest.findTextureIdByName(copy.sourceTextureName);
+                const auto relative = manifest.textures().at(source.index()).path;
+                std::filesystem::path path = request.sourceAssetRoot / relative;
+                if (!std::filesystem::exists(path) && !request.runtimeAssetRoot.empty()) {
+                    path = request.runtimeAssetRoot / relative;
+                }
+                if (std::filesystem::exists(path)) {
+                    const auto loaded = SplatCanvas::fromImage(loadRgbaImage(path));
+                    if (!loaded) throw std::runtime_error("Could not decode " + path.string());
+                    canvas = *loaded;
+                    (void)canvas.resizeToBoard(layout.screenWidth, layout.screenHeight);
+                }
+            }
+            std::vector<std::filesystem::path> roots { request.sourceAssetRoot };
+            if (!request.runtimeAssetRoot.empty() &&
+                std::filesystem::absolute(request.runtimeAssetRoot).lexically_normal() !=
+                    std::filesystem::absolute(request.sourceAssetRoot).lexically_normal()) {
+                roots.push_back(request.runtimeAssetRoot);
+            }
+            for (const auto& root : roots) {
+                if (root.empty()) continue;
+                const auto path = root / copy.relativePath;
+                if (std::filesystem::exists(path)) {
+                    throw std::runtime_error("The new blend mask already exists: " + path.string());
+                }
+                std::filesystem::create_directories(path.parent_path());
+                writeGrayscalePng(path, canvas.width(), canvas.height(), canvas.weights());
+            }
+            preparedManifest.addTexture();
+            preparedManifest.updateTexture(preparedManifest.textures().size() - 1, {
+                .name = copy.newTextureName,
+                .path = copy.relativePath,
+                .tiling = false,
+                .filter = TextureFilter::Linear,
+                .colorSpace = TextureColorSpace::Linear,
+            });
+        }
+        if (!plan.copies.empty()) {
+            if (!preparedManifest.save()) throw std::runtime_error(preparedManifest.status());
+            assetManifestEditor = std::move(preparedManifest);
+            for (const auto& copy : plan.copies) {
+                (void)manifest.addTexture({
+                    .name = copy.newTextureName,
+                    .path = copy.relativePath,
+                    .tiling = false,
+                    .filter = TextureFilter::Linear,
+                    .colorSpace = TextureColorSpace::Linear,
+                });
+                if (!request.runtimeAssetRoot.empty()) {
+                    invalidateCompressedTextureArtifactsForSource(request.runtimeAssetRoot, copy.relativePath);
+                }
+            }
+            if (!request.runtimeAssetRoot.empty()) (void)refreshContentPackageIndex(request.runtimeAssetRoot);
+            renderer.syncManifestTextures();
+        }
+
+        if (!plan.maskChanges.empty()) {
+            // Persist only mask ownership metadata from the latest files.
+            // Parked and active tile drafts remain in memory, with their edits.
+            std::optional<std::filesystem::path> runtimeLevels;
+            if (!levelEditor.runtimeLevelRoot().empty() &&
+                std::filesystem::absolute(levelEditor.browserRoot()).lexically_normal() ==
+                    std::filesystem::absolute(levelEditor.sourceLevelRoot()).lexically_normal()) {
+                runtimeLevels = levelEditor.runtimeLevelRoot();
+            }
+            const auto result = LevelProjectStore::transact(
+                levelEditor.browserRoot(), runtimeLevels,
+                [&](const std::filesystem::path& root) {
+                    for (const auto& change : plan.maskChanges) {
+                        const auto spec = std::ranges::find(layout.screens, change.screen, &OverworldScreenSpec::id);
+                        const auto path = root / "overworld" / spec->file;
+                        if (!std::filesystem::is_regular_file(path)) continue;
+                        auto definition = Level::loadDefinitionFromFile(path);
+                        if (!remapSplatMask(definition, change)) continue;
+                        std::string contents;
+                        for (const auto& line : Level::serializeDefinition(definition)) contents += line + '\n';
+                        atomicFile::write(path, contents);
+                    }
+                });
+            if (!result.succeeded) throw std::runtime_error(result.message);
+            for (const auto& change : plan.maskChanges) {
+                (void)levelEditor.remapGroundSplatMask(
+                    levelEditor.browserRoot() / "overworld" /
+                        std::ranges::find(layout.screens, change.screen, &OverworldScreenSpec::id)->file,
+                    change.before, change.after);
+                if (useTopology) (void)overworldMapEditor.remapGroundSplatMask(change.screen, change.before, change.after);
+                const auto screen = std::ranges::find(screens, change.screen, &OverworldSplatScreen::id);
+                (void)remapSplatMask(screen->definition, change);
+            }
+        }
+        request.textureName = plan.maps.front().textureName;
+        for (std::size_t index = 1; index < plan.maps.size(); ++index) {
+            request.tiledMaps.push_back({ plan.maps[index].textureName, plan.maps[index].originTiles });
+        }
+        for (auto& screen : screens) {
+            groundPaintingDefinitions_.push_back({ screen.id, std::move(screen.definition) });
+        }
+        if (useTopology) groundPaintingLayout_ = layout;
+        log::info(log::Category::Assets) << plan.status;
+        return true;
+    } catch (const std::exception& error) {
+        log::error(log::Category::Assets) << "Could not connect overworld blend masks: " << error.what();
+        return false;
+    }
 }
 
 bool ApplicationTools::createGroundSplatMap(
@@ -793,8 +1000,13 @@ void ApplicationTools::pushPaintedSplatMap(VulkanRenderer& renderer)
         return;
     }
     try {
-        if (renderer.updateTexture(
-                splatPainter.texture(), splatPainter.canvas().toImage())) {
+        bool uploaded = true;
+        for (std::size_t index = 0; index < splatPainter.mapCount(); ++index) {
+            uploaded &= renderer.updateTexture(
+                splatPainter.mapTexture(index),
+                splatPainter.mapCanvas(index).toImage());
+        }
+        if (uploaded) {
             uploadedSplatRevision = splatPainter.revision();
         }
     } catch (const std::exception& error) {
@@ -1425,6 +1637,25 @@ void ApplicationTools::updateEditorInteraction(
     pickedCell.reset();
     hoverDecoration.reset();
     brushPoint.reset();
+    if (splatPainter.active()) {
+        const bool documentChanged = splatPainter.documentPath().lexically_normal() !=
+            levelEditor.loadedDocumentPath().lexically_normal();
+        const bool layoutChanged = groundPaintingLayout_ &&
+            (!overworldMapEditor.loaded() || !matchingOverworldEditorRoot() ||
+                *groundPaintingLayout_ != overworldMapEditor.layout());
+        if (documentChanged || layoutChanged) {
+            splatPainter.endStroke();
+            pushPaintedSplatMap(renderer);
+            if (splatPainter.dirty() && !splatPainter.save()) return;
+            splatPainter.close();
+            groundPaintingDefinitions_.clear();
+            groundPaintingLayout_.reset();
+            if (layoutChanged) {
+                log::info(log::Category::Assets)
+                    << "Overworld layout changed; saved the blend masks and stopped painting. Open Paint Blend Mask to use the new layout.";
+            }
+        }
+    }
     if (tileStroke_ && !input.primaryDown) {
         (void)levelEditor.endStroke();
         tileStroke_.reset();

@@ -954,6 +954,14 @@ editor commands but does not own document or filesystem policy.
   Mask** creates and registers a fresh blank PNG for the selected map and opens
   it for painting, keeping the previous mask file. Masks cover a screen once at 32
   texels per tile and should use linear color space with clamped sampling.
+  Composed-overworld blend painting follows the layout grid: a brush crossing
+  an edge or corner spills into neighboring screens, including during a drag.
+  Maps connect when their base and detail textures match; the same map name is
+  preferred, otherwise the material pair must identify a single map. Shared
+  fallback masks are copied into independent screen masks, preserving existing
+  paint. One undo restores the whole stroke across all touched screens, and
+  **Save Map** saves every changed mask. Enable **Show Neighboring Screens** to
+  see spillover while painting.
   Save the document to keep map definitions and tile assignments; **Save Map**
   saves the blend-mask image. `Ctrl+S` saves both. Existing screens retain their
   original grass/rock blend masks. Legacy documents without definitions keep

@@ -172,6 +172,16 @@ public:
     // never-saved document has no such file and needs an explicit path.
     [[nodiscard]] SaveResult saveLoadedDocument();
     [[nodiscard]] Level::Definition documentDefinition() const;
+    // Active and parked drafts take precedence over their saved component.
+    [[nodiscard]] std::optional<Level::Definition> definitionForDocument(
+        const std::filesystem::path& path) const;
+    // Rebase a persisted mask migration through drafts and their histories
+    // without saving unrelated work or adding an editor undo step. No before
+    // splat means the document used the implicit legacy ground splat.
+    bool remapGroundSplatMask(
+        const std::filesystem::path& path,
+        const std::optional<Level::GroundSplat>& before,
+        const Level::GroundSplat& after);
     [[nodiscard]] const std::vector<Level::GroundSplat>& groundSplats() const { return document_.groundSplats; }
     [[nodiscard]] const std::vector<Level::GroundPaint>& groundPaint() const { return document_.groundPaint; }
     bool addGroundSplat(Level::GroundSplat splat);
@@ -553,6 +563,8 @@ private:
     // nothing kept as editor-only link colors.
     [[nodiscard]] Level::Definition linkedDefinition(
         std::optional<CharacterType> character) const;
+    [[nodiscard]] static Level::Definition linkedDefinition(
+        const Document& document, std::optional<CharacterType> character);
     void cacheActiveDraft();
     void noteRecentTile(TileType tile);
     [[nodiscard]] static std::filesystem::path draftKey(

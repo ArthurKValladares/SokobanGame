@@ -9,6 +9,7 @@
 #include "engine/render/PngWriter.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 #include <filesystem>
 #include <limits>
@@ -219,72 +220,123 @@ bool SplatPainter::open(
     const std::string textureName = request.textureName
         ? *request.textureName
         : groundSplatMapTextureNameForScreen(*location);
-    const RenderTexture texture = manifest.findTextureIdByName(textureName);
-    if (texture.isNone()) {
-        status_ = "No '" + textureName +
-            "' texture in the manifest, so this screen shares the fallback "
-            "map and has nowhere of its own to paint. Add the entry and "
-            "re-run tools/make_ground_textures.py.";
-        return false;
+    std::vector<OpenRequest::TiledMap> targets {
+        { .textureName = textureName, .originTiles = {} },
+    };
+    targets.insert(targets.end(), request.tiledMaps.begin(), request.tiledMaps.end());
+    std::vector<Map> maps;
+    maps.reserve(targets.size());
+
+    // Resolve every target before publishing a session. Two names can refer
+    // to one image, which would otherwise make saving silently lose paint.
+    for (const OpenRequest::TiledMap& target : targets) {
+        if (!std::isfinite(target.originTiles.x) ||
+            !std::isfinite(target.originTiles.y)) {
+            status_ = "Invalid tiled origin for '" + target.textureName + "'.";
+            return false;
+        }
+        const RenderTexture texture =
+            manifest.findTextureIdByName(target.textureName);
+        if (texture.isNone()) {
+            status_ = "No '" + target.textureName +
+                "' texture in the manifest, so this map has nowhere of its "
+                "own to paint. Add the entry and re-run "
+                "tools/make_ground_textures.py.";
+            return false;
+        }
+        std::string relativeString = manifest.textures()[texture.index()].path;
+        std::replace(relativeString.begin(), relativeString.end(), '\\', '/');
+        const std::filesystem::path relative =
+            std::filesystem::path(relativeString).lexically_normal();
+        if (relative.empty() || relative.is_absolute() ||
+            *relative.begin() == "..") {
+            status_ = "Invalid splat map asset path for '" +
+                target.textureName + "'.";
+            return false;
+        }
+        Map map {
+            .texture = texture,
+            .originTiles = target.originTiles,
+            .canvas = {},
+            .sourcePath = (request.sourceAssetRoot / relative).lexically_normal(),
+            .runtimePath = request.runtimeAssetRoot.empty()
+                ? std::filesystem::path {}
+                : (request.runtimeAssetRoot / relative).lexically_normal(),
+        };
+        for (const Map& existing : maps) {
+            if (existing.texture == map.texture ||
+                existing.sourcePath == map.sourcePath) {
+                status_ = "Duplicate tiled splat map '" + target.textureName + "'.";
+                return false;
+            }
+            const Vec2 delta = map.originTiles - existing.originTiles;
+            if (std::abs(delta.x) < static_cast<float>(request.boardTilesWide) &&
+                std::abs(delta.y) < static_cast<float>(request.boardTilesHigh)) {
+                status_ = "Tiled splat map '" + target.textureName +
+                    "' overlaps another map's board.";
+                return false;
+            }
+        }
+        maps.push_back(std::move(map));
     }
 
-    const std::filesystem::path relative =
-        manifest.textures()[texture.index()].path;
-    sourcePath_ = request.sourceAssetRoot / relative;
-    runtimePath_ = request.runtimeAssetRoot.empty()
-        ? std::filesystem::path {}
-        : request.runtimeAssetRoot / relative;
+    bool anyResized = false;
+    for (std::size_t index = 0; index < maps.size(); ++index) {
+        Map& map = maps[index];
+        std::optional<SplatCanvas> loaded;
+        std::error_code error;
+        if (std::filesystem::exists(map.sourcePath, error)) {
+            try {
+                loaded = SplatCanvas::fromImage(loadRgbaImage(map.sourcePath));
+            } catch (const std::exception& failure) {
+                log::warning(log::Category::Assets)
+                    << "Could not read splat map " << map.sourcePath.string()
+                    << ": " << failure.what();
+            }
+        }
+        if (error) {
+            status_ = "Could not inspect splat map '" +
+                targets[index].textureName + "': " + error.message();
+            return false;
+        }
+
+        if (loaded) {
+            map.canvas = std::move(*loaded);
+            const Vec2 tiles = map.canvas.boardTiles();
+            map.dirty = map.canvas.resizeToBoard(
+                request.boardTilesWide, request.boardTilesHigh);
+            anyResized |= map.dirty;
+            if (index == 0) {
+                status_ = map.dirty
+                    ? "Resized splat map from " +
+                        std::to_string(static_cast<uint32_t>(tiles.x)) + "x" +
+                        std::to_string(static_cast<uint32_t>(tiles.y)) + " to " +
+                        std::to_string(request.boardTilesWide) + "x" +
+                        std::to_string(request.boardTilesHigh) +
+                        " tiles to match the board; save to keep it."
+                    : "Painting " + textureName + ".";
+            }
+        } else {
+            map.canvas = SplatCanvas::createForBoard(
+                request.boardTilesWide, request.boardTilesHigh);
+            if (index == 0) {
+                status_ = "Started a blank " + textureName + ".";
+            }
+        }
+    }
+    if (maps.size() > 1) {
+        status_ += " Brush spillover reaches " + std::to_string(maps.size()) +
+            " tiled maps.";
+        if (anyResized) {
+            status_ += " Resized maps need saving.";
+        }
+    }
+
+    maps_ = std::move(maps);
     runtimeAssetRoot_ = request.runtimeAssetRoot;
     documentPath_ = request.documentPath;
-
-    std::optional<SplatCanvas> loaded;
-    std::error_code error;
-    if (std::filesystem::exists(sourcePath_, error)) {
-        try {
-            loaded = SplatCanvas::fromImage(loadRgbaImage(sourcePath_));
-        } catch (const std::exception& failure) {
-            log::warning(log::Category::Assets)
-                << "Could not read splat map " << sourcePath_.string()
-                << ": " << failure.what();
-        }
-    }
-
-    // Set when the in-memory map no longer matches what is on disk, so the
-    // session starts dirty and a save is needed to keep the change.
-    bool resized = false;
-    if (loaded) {
-        canvas_ = *loaded;
-        // A map whose size disagrees with the board covers the wrong extent,
-        // because the shader derives coverage from the texture's own
-        // dimensions - the board's extra tiles would just repeat the clamped
-        // edge. Resizing the board in the editor is the usual cause, so grow
-        // or crop to match and keep what was already painted.
-        const Vec2 tiles = canvas_.boardTiles();
-        const auto coveredWide = static_cast<uint32_t>(tiles.x);
-        const auto coveredHigh = static_cast<uint32_t>(tiles.y);
-        if (canvas_.resizeToBoard(
-                request.boardTilesWide, request.boardTilesHigh)) {
-            resized = true;
-            status_ = "Resized splat map from " + std::to_string(coveredWide) +
-                "x" + std::to_string(coveredHigh) + " to " +
-                std::to_string(request.boardTilesWide) + "x" +
-                std::to_string(request.boardTilesHigh) +
-                " tiles to match the board; save to keep it.";
-        } else {
-            status_ = "Painting " + textureName + ".";
-        }
-    } else {
-        canvas_ = SplatCanvas::createForBoard(
-            request.boardTilesWide, request.boardTilesHigh);
-        status_ = "Started a blank " + textureName + ".";
-    }
-
-    active_ = true;
-    // A resize already diverged from the file on disk, so the session opens
-    // dirty rather than pretending it is saved.
-    dirty_ = resized;
     location_ = location;
-    texture_ = texture;
+    active_ = true;
     ++revision_;
     return true;
 }
@@ -292,16 +344,12 @@ bool SplatPainter::open(
 void SplatPainter::close()
 {
     active_ = false;
-    dirty_ = false;
     strokeActive_ = false;
     strokeChanged_ = false;
     location_.reset();
-    texture_ = noTexture;
-    canvas_ = SplatCanvas {};
+    maps_.clear();
     undoHistory_.clear();
     strokeSnapshot_.clear();
-    sourcePath_.clear();
-    runtimePath_.clear();
     runtimeAssetRoot_.clear();
     documentPath_.clear();
     ++revision_;
@@ -310,6 +358,12 @@ void SplatPainter::close()
 std::optional<LevelLocation> SplatPainter::location() const
 {
     return location_;
+}
+
+bool SplatPainter::dirty() const
+{
+    return std::any_of(maps_.begin(), maps_.end(),
+        [](const Map& map) { return map.dirty; });
 }
 
 bool SplatPainter::beginStroke(Vec2 worldTile)
@@ -325,18 +379,25 @@ bool SplatPainter::beginStroke(Vec2 worldTile)
 
     // Captured before the first stamp, so undo restores the state the stroke
     // started from however many samples the drag produces.
-    strokeSnapshot_ = canvas_.snapshot();
     // The canvas needs to know too: it composites the whole stroke against
     // this state rather than against its own output, which is what keeps
     // hardness and opacity from creeping while the button is held.
-    canvas_.beginStroke();
+    strokeSnapshot_.clear();
+    strokeSnapshot_.reserve(maps_.size());
+    for (Map& map : maps_) {
+        strokeSnapshot_.push_back(map.canvas.snapshot());
+        map.canvas.beginStroke();
+    }
     strokeActive_ = true;
     strokeChanged_ = false;
     lastPosition_ = worldTile;
 
-    strokeChanged_ = canvas_.stamp(worldTile, brush_);
+    for (Map& map : maps_) {
+        const bool changed = map.canvas.stamp(worldTile - map.originTiles, brush_);
+        map.dirty |= changed;
+        strokeChanged_ |= changed;
+    }
     if (strokeChanged_) {
-        dirty_ = true;
         ++revision_;
     }
     return strokeChanged_;
@@ -347,11 +408,16 @@ bool SplatPainter::paintTo(Vec2 worldTile)
     if (!active_ || !strokeActive_) {
         return false;
     }
-    const bool changed = canvas_.stampLine(lastPosition_, worldTile, brush_);
+    bool changed = false;
+    for (Map& map : maps_) {
+        const bool mapChanged = map.canvas.stampLine(
+            lastPosition_ - map.originTiles, worldTile - map.originTiles, brush_);
+        map.dirty |= mapChanged;
+        changed |= mapChanged;
+    }
     lastPosition_ = worldTile;
     if (changed) {
         strokeChanged_ = true;
-        dirty_ = true;
         ++revision_;
     }
     return changed;
@@ -363,7 +429,9 @@ void SplatPainter::endStroke()
         return;
     }
     strokeActive_ = false;
-    canvas_.endStroke();
+    for (Map& map : maps_) {
+        map.canvas.endStroke();
+    }
     // A stroke that changed nothing (painting white on white, or a click off
     // the board) leaves no undo step; otherwise Ctrl+Z would appear to do
     // nothing while silently consuming history.
@@ -388,7 +456,13 @@ bool SplatPainter::followBoardResize(
     if (!active_ || boardTilesWide == 0 || boardTilesHigh == 0) {
         return false;
     }
-    if (!canvas_.resizeToBoard(boardTilesWide, boardTilesHigh)) {
+    bool changed = false;
+    for (Map& map : maps_) {
+        const bool resized = map.canvas.resizeToBoard(boardTilesWide, boardTilesHigh);
+        map.dirty |= resized;
+        changed |= resized;
+    }
+    if (!changed) {
         return false;
     }
 
@@ -400,7 +474,6 @@ bool SplatPainter::followBoardResize(
     strokeSnapshot_.clear();
     strokeActive_ = false;
     strokeChanged_ = false;
-    dirty_ = true;
     ++revision_;
     status_ = "Board resized to " + std::to_string(boardTilesWide) + "x" +
         std::to_string(boardTilesHigh) +
@@ -410,19 +483,25 @@ bool SplatPainter::followBoardResize(
 
 bool SplatPainter::undo()
 {
-    if (!active_ || undoHistory_.empty()) {
+    if (!active_) {
         return false;
     }
     // Undoing mid-stroke would restore under the brush; finish first.
     if (strokeActive_) {
         endStroke();
     }
-    const bool restored = canvas_.restore(undoHistory_.back());
-    undoHistory_.pop_back();
-    if (!restored) {
+    if (undoHistory_.empty()) {
         return false;
     }
-    dirty_ = true;
+    const Snapshot& snapshot = undoHistory_.back();
+    for (std::size_t index = 0; index < maps_.size(); ++index) {
+        Map& map = maps_[index];
+        if (map.canvas.weights() != snapshot[index]) {
+            (void)map.canvas.restore(snapshot[index]);
+            map.dirty = true;
+        }
+    }
+    undoHistory_.pop_back();
     ++revision_;
     status_ = "Undid a paint stroke.";
     return true;
@@ -433,50 +512,65 @@ bool SplatPainter::save()
     if (!active_) {
         return false;
     }
-    if (canvas_.empty()) {
+    if (canvas().empty()) {
         status_ = "Nothing to save.";
         return false;
     }
 
-    try {
-        std::error_code error;
-        std::filesystem::create_directories(sourcePath_.parent_path(), error);
-        writeGrayscalePng(
-            sourcePath_, canvas_.width(), canvas_.height(), canvas_.weights());
-    } catch (const std::exception& failure) {
-        status_ = "Could not save splat map: " + std::string(failure.what());
-        log::error(log::Category::Assets)
-            << "Splat map save failed for " << sourcePath_.string()
-            << ": " << failure.what();
-        return false;
+    // Keep the active-map save behavior even for a clean/new canvas. Neighbour
+    // files are written only when this session actually changed them.
+    std::vector<Map*> targets { &maps_.front() };
+    for (std::size_t index = 1; index < maps_.size(); ++index) {
+        if (maps_[index].dirty) {
+            targets.push_back(&maps_[index]);
+        }
     }
-
-    if (!runtimePath_.empty()) {
+    for (Map* map : targets) {
         try {
-            std::error_code error;
-            std::filesystem::create_directories(
-                runtimePath_.parent_path(), error);
-            writeGrayscalePng(
-                runtimePath_,
-                canvas_.width(),
-                canvas_.height(),
-                canvas_.weights());
-            invalidateCompressedTextureArtifactsForSource(
-                runtimeAssetRoot_,
-                runtimePath_.lexically_relative(runtimeAssetRoot_));
-            (void)refreshContentPackageIndex(runtimeAssetRoot_);
+            std::filesystem::create_directories(map->sourcePath.parent_path());
+            writeGrayscalePng(map->sourcePath, map->canvas.width(),
+                map->canvas.height(), map->canvas.weights());
         } catch (const std::exception& failure) {
-            dirty_ = true;
-            status_ =
-                "Saved the source splat map, but runtime publication failed: " +
-                std::string(failure.what());
+            map->dirty = true;
+            status_ = "Could not save splat map '" +
+                map->sourcePath.filename().string() + "': " + failure.what();
             log::error(log::Category::Assets) << status_;
             return false;
         }
     }
 
-    dirty_ = false;
-    status_ = "Saved " + sourcePath_.filename().string() + ".";
+    try {
+        for (Map* map : targets) {
+            if (map->runtimePath.empty()) {
+                continue;
+            }
+            std::filesystem::create_directories(map->runtimePath.parent_path());
+            writeGrayscalePng(map->runtimePath, map->canvas.width(),
+                map->canvas.height(), map->canvas.weights());
+            invalidateCompressedTextureArtifactsForSource(runtimeAssetRoot_,
+                map->runtimePath.lexically_relative(runtimeAssetRoot_));
+        }
+        if (!runtimeAssetRoot_.empty()) {
+            (void)refreshContentPackageIndex(runtimeAssetRoot_);
+        }
+    } catch (const std::exception& failure) {
+        // Publication can fail after some maps were written. Retain every
+        // target for a full retry, including neighbour-only paint.
+        for (Map* map : targets) {
+            map->dirty = true;
+        }
+        status_ = "Saved the source splat maps, but runtime publication failed: " +
+            std::string(failure.what());
+        log::error(log::Category::Assets) << status_;
+        return false;
+    }
+
+    for (Map* map : targets) {
+        map->dirty = false;
+    }
+    status_ = targets.size() == 1
+        ? "Saved " + maps_.front().sourcePath.filename().string() + "."
+        : "Saved " + std::to_string(targets.size()) + " tiled splat maps.";
     return true;
 }
 

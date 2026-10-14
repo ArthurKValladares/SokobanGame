@@ -596,9 +596,13 @@ void LevelEditorDebugUi::drawGroundPaintTab(
         const bool maskChanged = textureChoice("Blend Mask", edited.mask);
         changed |= maskChanged;
         if (changed) {
-            if (!maskChanged || !painter.dirty() || painter.save()) {
-                if (maskChanged) painter.close();
+            const bool paintTargetChanged = edited.name != selected->name ||
+                edited.base != selected->base || edited.detail != selected->detail || maskChanged;
+            if (!paintTargetChanged || !painter.dirty() || painter.save()) {
+                const bool paintingMask = painter.active();
+                if (paintTargetChanged) painter.close();
                 (void)editor.updateGroundSplat(selectedIndex, std::move(edited));
+                if (paintingMask && paintTargetChanged && callbacks.openGroundPainting) (void)callbacks.openGroundPainting();
             }
         }
         if (ImGui::Button("New Blend Mask") && callbacks.createGroundBlendMask) {

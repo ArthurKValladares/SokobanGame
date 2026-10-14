@@ -43,6 +43,8 @@ namespace sokoban {
 class ApplicationTools {
 public:
     [[nodiscard]] bool matchingOverworldEditorRoot();
+    [[nodiscard]] const Level::Definition* groundPaintingNeighborDefinition(
+        OverworldScreenId screen) const;
     void initialize(
         const std::filesystem::path& sourceLevelRoot,
         const std::filesystem::path& sourceAssetRoot,
@@ -187,6 +189,14 @@ public:
     std::uint64_t uploadedSplatRevision = 0;
 
 private:
+    bool prepareOverworldGroundPainting(
+        SplatPainter::OpenRequest& request,
+        std::optional<Level::GroundSplat> selectedSplat,
+        AssetManifest& manifest,
+        VulkanRenderer& renderer);
+    std::vector<OverworldDefinitionOverride> groundPaintingDefinitions_;
+    std::optional<OverworldLayout> groundPaintingLayout_;
+
     struct DetachedCameraState {
         Vec3 position {};
         Vec3 homePosition {};

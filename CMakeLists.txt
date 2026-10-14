@@ -548,6 +548,7 @@ add_library(sokoban_core STATIC
     src/engine/LevelCatalog.cpp
     src/engine/OverworldMap.cpp
     src/engine/OverworldMapEditor.cpp
+    src/engine/OverworldSplatTiling.cpp
     src/engine/OverworldView.cpp
     src/engine/LevelEditor.cpp
     src/engine/LevelProjectStore.cpp
@@ -1746,6 +1747,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME splat_painter
         LIBS sokoban_core
         SOURCES tests/SplatPainterTests.cpp
+    )
+    sokoban_add_test(NAME overworld_splat_tiling
+        LIBS sokoban_core
+        SOURCES tests/OverworldSplatTilingTests.cpp
     )
     sokoban_add_test(NAME png_writer
         LIBS sokoban_core

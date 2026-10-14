@@ -3218,31 +3218,42 @@ bool LevelEditor::setMinecartInitialDirection(
 Level::Definition LevelEditor::linkedDefinition(
     std::optional<CharacterType> character) const
 {
+    return linkedDefinition(document_, character);
+}
+
+Level::Definition LevelEditor::linkedDefinition(
+    const Document& document, std::optional<CharacterType> character)
+{
     Level::Definition definition {
-        .layers = document_.layers,
-        .waterLayer = document_.waterLayer,
-        .cameraAngles = document_.cameraAngles,
-        .decorations = document_.decorations,
-        .selectors = document_.selectors,
-        .lecterns = document_.lecterns,
-        .gates = document_.gates,
-        .rotators = document_.rotators,
-        .lockPlates = document_.lockPlates,
-        .plates = document_.plates,
-        .elevators = document_.elevators,
-        .minecarts = document_.minecarts,
-        .objectLinks = document_.objectLinks,
-        .portals = document_.portals,
+        .layers = document.layers,
+        .waterLayer = document.waterLayer,
+        .cameraAngles = document.cameraAngles,
+        .decorations = document.decorations,
+        .selectors = document.selectors,
+        .lecterns = document.lecterns,
+        .gates = document.gates,
+        .rotators = document.rotators,
+        .lockPlates = document.lockPlates,
+        .plates = document.plates,
+        .elevators = document.elevators,
+        .minecarts = document.minecarts,
+        .objectLinks = document.objectLinks,
+        .portals = document.portals,
         .character = character,
-        .groundSplats = document_.groundSplats,
-        .groundPaint = document_.groundPaint,
-        .tileRotations = document_.tileRotations,
+        .groundSplats = document.groundSplats,
+        .groundPaint = document.groundPaint,
+        .tileRotations = document.tileRotations,
     };
     // The color groups become explicit links here, and only here; nothing
     // past this point ever compares colors.
     const auto link = [&](auto& records) {
         for (auto& record : records) {
-            record.pressurePlates = linkedPressurePlates(record.color);
+            record.pressurePlates.clear();
+            for (const Level::LinkColor& plate : document.plateColors) {
+                if (sameColor(plate.color, record.color)) {
+                    record.pressurePlates.push_back(plate.cell);
+                }
+            }
         }
     };
     link(definition.gates);
@@ -3250,15 +3261,15 @@ Level::Definition LevelEditor::linkedDefinition(
     link(definition.lockPlates);
     link(definition.elevators);
     link(definition.minecarts);
-    for (const Level::LinkColor& plate : document_.plateColors) {
+    for (const Level::LinkColor& plate : document.plateColors) {
         const auto drives = [&](const auto& records) {
             return std::ranges::any_of(records, [&](const auto& record) {
                 return sameColor(record.color, plate.color);
             });
         };
-        if (!drives(document_.gates) && !drives(document_.rotators) &&
-            !drives(document_.lockPlates) &&
-            !drives(document_.elevators) && !drives(document_.minecarts)) {
+        if (!drives(document.gates) && !drives(document.rotators) &&
+            !drives(document.lockPlates) &&
+            !drives(document.elevators) && !drives(document.minecarts)) {
             definition.linkColors.push_back(plate);
         }
     }
@@ -4761,6 +4772,78 @@ Level::Definition LevelEditor::documentDefinition() const
 {
     return linkedDefinition(
         editingOverworld() ? document_.character : std::nullopt);
+}
+
+std::optional<Level::Definition> LevelEditor::definitionForDocument(
+    const std::filesystem::path& path) const
+{
+    const std::filesystem::path key = draftKey(path);
+    if (key.empty()) return std::nullopt;
+    if (draftKey(document_.loadedPath) == key) return documentDefinition();
+    if (const auto draft = drafts_.find(key); draft != drafts_.end()) {
+        const Document& document = draft->second.document;
+        const bool overworld = document.loadedPath.filename() == "overworld.scr" ||
+            overworldScreenIdForPath(document.loadedPath).has_value();
+        return linkedDefinition(document,
+            overworld ? document.character : std::nullopt);
+    }
+    try {
+        if (std::filesystem::is_regular_file(path)) {
+            return Level::loadDefinitionFromFile(path);
+        }
+    } catch (const std::exception&) {
+        // A missing or partially written component is not a usable fallback.
+    }
+    return std::nullopt;
+}
+
+bool LevelEditor::remapGroundSplatMask(
+    const std::filesystem::path& path,
+    const std::optional<Level::GroundSplat>& before,
+    const Level::GroundSplat& after)
+{
+    const std::filesystem::path key = draftKey(path);
+    if (key.empty()) return false;
+    bool changed = false;
+    const auto remap = [&](auto& document) {
+        if (draftKey(document.loadedPath) != key) return;
+        auto& splats = document.groundSplats;
+        if (!before) {
+            if (splats.empty()) {
+                splats.push_back(after);
+                changed = true;
+            }
+            return;
+        }
+        for (Level::GroundSplat& splat : splats) {
+            if (splat.name == before->name && splat.base == before->base &&
+                splat.detail == before->detail && splat.mask == before->mask &&
+                splat.mask != after.mask) {
+                splat.mask = after.mask;
+                changed = true;
+            }
+        }
+    };
+    const auto remapHistory = [&](EditHistory& history) {
+        for (EditActionRecord& record : history) {
+            remap(record.before);
+            remap(record.after);
+            record.retainedBytes = recordStorageBytes(record);
+        }
+    };
+    remap(document_);
+    remapHistory(editHistory_);
+    remapHistory(redoHistory_);
+    if (strokeBefore_) remap(*strokeBefore_);
+    if (decorationTransformBefore_) remap(*decorationTransformBefore_);
+    for (auto& [draftPath, draft] : drafts_) {
+        (void)draftPath;
+        remap(draft.document);
+        remapHistory(draft.editHistory);
+        remapHistory(draft.redoHistory);
+    }
+    if (changed) trimHistory();
+    return changed;
 }
 
 void LevelEditor::selectGroundSplat(std::size_t index)

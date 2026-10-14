@@ -19,6 +19,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <string>
 
 namespace {
@@ -114,6 +115,272 @@ std::vector<char> readBytes(const std::filesystem::path& path)
     std::ifstream stream(path, std::ios::binary);
     return { std::istreambuf_iterator<char>(stream),
         std::istreambuf_iterator<char>() };
+}
+
+AssetManifest tiledManifest()
+{
+    AssetManifest manifest = testManifest();
+    for (int index = 0; index < 8; ++index) {
+        (void)manifest.addTexture({
+            .name = "TiledMap" + std::to_string(index),
+            .path = "custom/textures/tiled_" + std::to_string(index) + ".png",
+        });
+    }
+    return manifest;
+}
+
+SplatPainter::OpenRequest tiledRequest(const TemporaryDirectory& directory)
+{
+    SplatPainter::OpenRequest request =
+        requestFor(directory, "level2/screen1.scr", 4, 3);
+    // Right, down, lower-right, left, up, upper-left, upper-right, lower-left.
+    const Vec2 origins[] {
+        { 4, 0 }, { 0, 3 }, { 4, 3 }, { -4, 0 },
+        { 0, -3 }, { -4, -3 }, { 4, -3 }, { -4, 3 },
+    };
+    for (std::size_t index = 0; index < std::size(origins); ++index) {
+        request.tiledMaps.push_back({
+            .textureName = "TiledMap" + std::to_string(index),
+            .originTiles = origins[index],
+        });
+    }
+    return request;
+}
+
+bool matchesContinuousCanvas(const SplatPainter& painter,
+    const SplatPainter::OpenRequest& request, const SplatCanvas& reference)
+{
+    for (std::size_t index = 0; index < painter.mapCount(); ++index) {
+        const Vec2 origin = index == 0 ? Vec2 {} :
+            request.tiledMaps[index - 1].originTiles;
+        const auto startX = static_cast<uint32_t>(
+            (origin.x + 4) * SplatCanvas::texelsPerTile);
+        const auto startY = static_cast<uint32_t>(
+            (origin.y + 3) * SplatCanvas::texelsPerTile);
+        const SplatCanvas& map = painter.mapCanvas(index);
+        for (uint32_t y = 0; y < map.height(); ++y) {
+            for (uint32_t x = 0; x < map.width(); ++x) {
+                if (map.weightAt(x, y) != reference.weightAt(startX + x, startY + y)) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+void testTiledSpilloverMatchesAContinuousCanvas()
+{
+    TEST("tiledSpilloverMatchesAContinuousCanvas");
+    const TemporaryDirectory directory;
+    const AssetManifest manifest = tiledManifest();
+    const SplatPainter::OpenRequest request = tiledRequest(directory);
+    const Vec2 positions[] {
+        { 4, 1.5f }, { 2, 3 }, { 4, 3 }, { 0, 0 }, { -0.5f, 1.5f }, { 2, 1.5f },
+    };
+    for (std::size_t scenario = 0; scenario < std::size(positions); ++scenario) {
+        SplatPainter painter;
+        CHECK(painter.open(request, manifest));
+        CHECK(painter.mapCount() == 9);
+        CHECK(painter.mapTexture(0) == painter.texture());
+        CHECK(&painter.mapCanvas(0) == &painter.canvas());
+        CHECK(painter.mapTexture(1) == manifest.findTextureIdByName("TiledMap0"));
+        painter.brush() = solidWhite;
+        painter.brush().radiusTiles = scenario == 5 ? 6.0f : 0.75f;
+        painter.brush().hardness = 0.4f;
+        SplatCanvas reference = SplatCanvas::createForBoard(12, 9);
+        CHECK(reference.stamp(positions[scenario] + Vec2 { 4, 3 }, painter.brush()));
+        const uint64_t revision = painter.revision();
+        CHECK(painter.beginStroke(positions[scenario]));
+        painter.endStroke();
+        // One event bumps the revision once even when it changes nine maps.
+        CHECK(painter.revision() == revision + 1);
+        CHECK(matchesContinuousCanvas(painter, request, reference));
+        CHECK(painter.undoDepth() == 1);
+        if (scenario == 0) {
+            const uint32_t y = 3 * SplatCanvas::texelsPerTile / 2;
+            CHECK(painter.canvas().weightAt(painter.canvas().width() - 1, y) > 0);
+            CHECK(painter.mapCanvas(1).weightAt(0, y) > 0);
+            // Spillover reaches the distinct right-hand image; it never wraps
+            // around onto the active map's far edge.
+            CHECK(painter.canvas().weightAt(0, y) == 0);
+        }
+    }
+}
+
+void testTiledStrokesKeepOpacityAndUndoTogether()
+{
+    TEST("tiledStrokesKeepOpacityAndUndoTogether");
+    const TemporaryDirectory directory;
+    const SplatPainter::OpenRequest request = tiledRequest(directory);
+    SplatPainter painter;
+    CHECK(painter.open(request, tiledManifest()));
+    painter.brush() = solidWhite;
+    painter.brush().radiusTiles = 1.3f;
+    painter.brush().hardness = 0.35f;
+    painter.brush().opacity = 0.4f;
+    const Vec2 samples[] { { -2, 1.5f }, { 2, 1.5f }, { 6, 1.5f }, { 4, 3.5f } };
+    SplatCanvas reference = SplatCanvas::createForBoard(12, 9);
+    reference.beginStroke();
+    CHECK(reference.stamp(samples[0] + Vec2 { 4, 3 }, painter.brush()));
+    CHECK(painter.beginStroke(samples[0]));
+    for (std::size_t index = 1; index < std::size(samples); ++index) {
+        CHECK(painter.paintTo(samples[index]));
+        CHECK(reference.stampLine(samples[index - 1] + Vec2 { 4, 3 },
+            samples[index] + Vec2 { 4, 3 }, painter.brush()));
+    }
+    const uint64_t revision = painter.revision();
+    for (int repeat = 0; repeat < 30; ++repeat) {
+        CHECK(!painter.paintTo(samples[3]));
+    }
+    CHECK(painter.revision() == revision);
+    painter.endStroke();
+    reference.endStroke();
+    CHECK(matchesContinuousCanvas(painter, request, reference));
+    for (std::size_t index = 0; index < painter.mapCount(); ++index) {
+        const auto& weights = painter.mapCanvas(index).weights();
+        CHECK(*std::max_element(weights.begin(), weights.end()) <= 102);
+    }
+    CHECK(painter.undoDepth() == 1);
+    CHECK(painter.save());
+    CHECK(!painter.dirty());
+    CHECK(painter.undo());
+    CHECK(painter.dirty());
+    CHECK(painter.undoDepth() == 0);
+    CHECK(matchesContinuousCanvas(painter, request, SplatCanvas::createForBoard(12, 9)));
+    CHECK(painter.save());
+    // Every affected neighbour is saved again after undo, not only the main map.
+    const auto restored = SplatCanvas::fromImage(loadRgbaImage(
+        request.sourceAssetRoot / "custom/textures/tiled_0.png"));
+    CHECK(restored.has_value());
+    CHECK(restored && std::all_of(restored->weights().begin(),
+        restored->weights().end(), [](uint8_t weight) { return weight == 0; }));
+}
+
+void testTiledSaveWritesChangedMapsAndRetriesPublication()
+{
+    TEST("tiledSaveWritesChangedMapsAndRetriesPublication");
+    // Failure in either tree can happen after earlier maps were written. All
+    // changed canvases must remain available for a retry and for undo.
+    for (bool failRuntime : { false, true }) {
+        const TemporaryDirectory directory;
+        const SplatPainter::OpenRequest request = tiledRequest(directory);
+        const std::filesystem::path untouched = request.sourceAssetRoot /
+            "custom/textures/tiled_1.png";
+        std::filesystem::create_directories(untouched.parent_path());
+        writeGrayscalePng(untouched, 4 * SplatCanvas::texelsPerTile,
+            3 * SplatCanvas::texelsPerTile,
+            std::vector<uint8_t>(12 * SplatCanvas::texelsPerTile *
+                SplatCanvas::texelsPerTile, 77));
+        const std::vector<char> untouchedBytes = readBytes(untouched);
+        SplatPainter painter;
+        CHECK(painter.open(request, tiledManifest()));
+        CHECK(painter.mapCanvas(2).weightAt(0, 0) == 77);
+        painter.brush() = solidWhite;
+        // Begin outside the active map; only the neighbour receives paint.
+        CHECK(painter.beginStroke({ 6, 1.5f }));
+        const std::filesystem::path obstruction =
+            (failRuntime ? request.runtimeAssetRoot : request.sourceAssetRoot) /
+            "custom/textures/tiled_0.png";
+        std::filesystem::create_directories(obstruction);
+        std::ofstream(obstruction / "obstruction") << "x";
+        CHECK(!painter.save());
+        CHECK(painter.dirty());
+        CHECK(painter.strokeInProgress());
+        CHECK(painter.mapCanvas(1).weightAt(
+            2 * SplatCanvas::texelsPerTile, 3 * SplatCanvas::texelsPerTile / 2) == 255);
+        std::filesystem::remove_all(obstruction);
+        CHECK(painter.save());
+        CHECK(!painter.dirty());
+        for (const std::string& relative : {
+                 std::string("custom/textures/ground_splat_level2_screen1.png"),
+                 std::string("custom/textures/tiled_0.png") }) {
+            CHECK(!readBytes(request.sourceAssetRoot / relative).empty());
+            CHECK(readBytes(request.sourceAssetRoot / relative) ==
+                readBytes(request.runtimeAssetRoot / relative));
+        }
+        CHECK(readBytes(untouched) == untouchedBytes);
+        CHECK(!std::filesystem::exists(request.runtimeAssetRoot /
+            "custom/textures/tiled_1.png"));
+        CHECK(!std::filesystem::exists(request.sourceAssetRoot /
+            "custom/textures/tiled_2.png"));
+        painter.endStroke();
+        CHECK(painter.undoDepth() == 1);
+        CHECK(painter.undo());
+        CHECK(painter.dirty());
+        CHECK(painter.mapCanvas(1).weightAt(
+            2 * SplatCanvas::texelsPerTile, 3 * SplatCanvas::texelsPerTile / 2) == 0);
+        CHECK(painter.save());
+    }
+}
+
+void testTiledOpenRejectsAmbiguousTargets()
+{
+    TEST("tiledOpenRejectsAmbiguousTargets");
+    const TemporaryDirectory directory;
+    AssetManifest manifest = tiledManifest();
+    (void)manifest.addTexture({
+        .name = "AliasForMain",
+        .path = "custom/textures/nested/../ground_splat_level2_screen1.png",
+    });
+    const SplatPainter::OpenRequest::TiledMap invalid[] {
+        { "GroundSplatMap2_1", { 4, 0 } },
+        { "AliasForMain", { 4, 0 } },
+        { "MissingMap", { 4, 0 } },
+        { "TiledMap0", { 0, 0 } },
+        { "TiledMap0", { 3, 0 } },
+        { "TiledMap0", { std::numeric_limits<float>::quiet_NaN(), 0 } },
+    };
+    SplatPainter painter;
+    for (const auto& target : invalid) {
+        SplatPainter::OpenRequest request =
+            requestFor(directory, "level2/screen1.scr", 4, 3);
+        request.tiledMaps.push_back(target);
+        CHECK(!painter.open(request, manifest));
+        CHECK(!painter.active());
+        CHECK(painter.mapCount() == 0);
+        CHECK(!painter.status().empty());
+    }
+    CHECK(!std::filesystem::exists(directory.path() / "assets"));
+}
+
+void testTiledNoOpsAndResizeClearAllHistory()
+{
+    TEST("tiledNoOpsAndResizeClearAllHistory");
+    const TemporaryDirectory directory;
+    SplatPainter painter;
+    CHECK(painter.open(tiledRequest(directory), tiledManifest()));
+    painter.brush() = solidWhite;
+    const uint64_t revision = painter.revision();
+    CHECK(!painter.beginStroke({ 30, 30 }));
+    painter.endStroke();
+    CHECK(painter.undoDepth() == 0);
+    CHECK(!painter.dirty());
+    CHECK(painter.revision() == revision);
+    CHECK(painter.beginStroke({ 4, 3 }));
+    painter.endStroke();
+    CHECK(painter.undoDepth() == 1);
+    CHECK(painter.beginStroke({ 0, 0 }));
+    CHECK(painter.followBoardResize(5, 4));
+    CHECK(!painter.strokeInProgress());
+    CHECK(painter.undoDepth() == 0);
+    CHECK(!painter.undo());
+    for (std::size_t index = 0; index < painter.mapCount(); ++index) {
+        CHECK(painter.mapCanvas(index).width() == 5 * SplatCanvas::texelsPerTile);
+        CHECK(painter.mapCanvas(index).height() == 4 * SplatCanvas::texelsPerTile);
+        CHECK(!painter.mapCanvas(index).strokeActive());
+    }
+    CHECK(!painter.followBoardResize(5, 4));
+    painter.close();
+    CHECK(painter.mapCount() == 0);
+    CHECK(painter.canvas().empty());
+    CHECK(!painter.dirty());
+    CHECK(painter.open(requestFor(directory, "level2/screen1.scr", 4, 3), testManifest()));
+    CHECK(painter.mapCount() == 1);
+    CHECK(!painter.dirty());
+    CHECK(painter.beginStroke({ 4, 1.5f }));
+    painter.endStroke();
+    CHECK(painter.canvas().weightAt(0, 3 * SplatCanvas::texelsPerTile / 2) == 0);
 }
 
 void testScreenPathParsing()
@@ -874,6 +1141,11 @@ void testCloseResetsEverything()
 
 int main()
 {
+    testTiledSpilloverMatchesAContinuousCanvas();
+    testTiledStrokesKeepOpacityAndUndoTogether();
+    testTiledSaveWritesChangedMapsAndRetriesPublication();
+    testTiledOpenRejectsAmbiguousTargets();
+    testTiledNoOpsAndResizeClearAllHistory();
     testScreenPathParsing();
     testOpenRejectsDocumentsThatAreNotScreens();
     testOpenReportsAMissingManifestEntry();

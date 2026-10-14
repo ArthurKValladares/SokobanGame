@@ -217,6 +217,44 @@ void testTopologyDraftPreservesNewerComponentSaves()
     CHECK(mirrored.layers[1][2][2] == '#');
 }
 
+void testGroundMaskMigrationSurvivesTopologyHistory()
+{
+    TemporaryProject project;
+    sokoban::OverworldMapEditor editor;
+    editor.initialize(project.source, project.runtime);
+    const sokoban::Level::GroundSplat migrated { "Ground", "Grass", "Stone", "OwnedMask" };
+    CHECK(editor.remapGroundSplatMask(1, std::nullopt, migrated));
+    CHECK(!editor.dirty());
+    CHECK(editor.definition(1)->groundSplats[0].mask == migrated.mask);
+    CHECK(editor.moveScreen(1, { 1, 0 }));
+    CHECK(editor.dirty());
+    auto latest = migrated;
+    latest.mask = "LatestMask";
+    CHECK(editor.remapGroundSplatMask(1, migrated, latest));
+    CHECK(editor.undo());
+    CHECK(!editor.dirty());
+    CHECK(editor.definition(1)->groundSplats[0].mask == latest.mask);
+    auto newest = latest;
+    newest.mask = "NewestMask";
+    CHECK(editor.remapGroundSplatMask(1, latest, newest));
+    CHECK(editor.redo());
+    CHECK(editor.dirty());
+    CHECK(editor.definition(1)->groundSplats[0].mask == newest.mask);
+    CHECK(editor.undo());
+
+    // A screen without a file remains a normal unsaved topology component.
+    CHECK(editor.addScreen({ 1, 0 }));
+    CHECK(editor.remapGroundSplatMask(2, std::nullopt, migrated));
+    CHECK(editor.dirty());
+    CHECK(editor.undo());
+    CHECK(editor.screen(2) == nullptr);
+    CHECK(editor.redo());
+    CHECK(editor.definition(2)->groundSplats[0].mask == migrated.mask);
+    CHECK(editor.save());
+    CHECK(sokoban::Level::loadDefinitionFromFile(
+        project.source / "overworld/screen2.scr").groundSplats[0].mask == migrated.mask);
+}
+
 } // namespace
 
 int main()
@@ -227,6 +265,7 @@ int main()
     testPlayerTileValidation();
     testUnsavedComposition();
     testTopologyDraftPreservesNewerComponentSaves();
+    testGroundMaskMigrationSurvivesTopologyHistory();
 
     if (failures != 0) {
         std::cerr << "OverworldMapEditorTests: " << failures

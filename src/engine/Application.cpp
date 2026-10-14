@@ -2669,7 +2669,7 @@ RenderFrameData Application::buildEditorRenderFrame(
                     continue;
                 }
                 if (const Level::Definition* definition =
-                        topology.definition(candidate.id)) {
+                        tools_->groundPaintingNeighborDefinition(candidate.id)) {
                     overworldNeighbors.push_back({
                         .screen = candidate.id,
                         .origin = {

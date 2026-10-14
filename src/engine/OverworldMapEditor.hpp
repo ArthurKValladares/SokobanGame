@@ -49,6 +49,12 @@ public:
         OverworldScreenId id) const;
     [[nodiscard]] const Level::Definition* definition(
         OverworldScreenId id) const;
+    // Keep externally persisted component mask migrations across topology
+    // undo/redo. A missing before splat represents the implicit legacy splat.
+    bool remapGroundSplatMask(
+        OverworldScreenId id,
+        const std::optional<Level::GroundSplat>& before,
+        const Level::GroundSplat& after);
     [[nodiscard]] std::filesystem::path screenPath(
         OverworldScreenId id) const;
     [[nodiscard]] OverworldDraftOverride draftOverride(

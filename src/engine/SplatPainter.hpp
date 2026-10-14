@@ -15,7 +15,7 @@ namespace sokoban {
 
 class AssetManifest;
 
-// Paint session for one screen's ground splat map.
+// Paint session for one screen's ground splat map and its tiled neighbours.
 //
 // Owns the editable canvas, the brush, stroke-level undo, and saving. Headless
 // and renderer-free: it takes world-tile positions and hands back a canvas, so
@@ -26,12 +26,18 @@ class AssetManifest;
 // linked only by the document path, which names the screen.
 class SplatPainter {
 public:
-    // Maximum number of strokes that can be undone. Each entry is a full
-    // canvas copy - about 340KB for the largest current board - so this is
-    // capped rather than unbounded.
+    // Maximum number of strokes that can be undone. Each entry copies all
+    // participating canvases, so the history is capped rather than unbounded.
     static constexpr std::size_t maxUndoSteps = 32;
 
     struct OpenRequest {
+        struct TiledMap {
+            std::string textureName;
+            // Position of this map's upper-left corner relative to the
+            // active map. All maps use the board dimensions below.
+            Vec2 originTiles {};
+        };
+
         // The .scr being edited; its name determines which screen's map to
         // open. A document outside the levels tree is not a screen and cannot
         // be painted.
@@ -47,6 +53,9 @@ public:
         // The selected splat definition supplies its manifest mask name.
         // Also supports stable-ID overworld maps and legacy screen conventions.
         std::optional<std::string> textureName;
+        // Distinct adjacent maps receive brush spillover in their own local
+        // coordinates. The active map is always at (0,0).
+        std::vector<TiledMap> tiledMaps;
     };
 
     // Opens the map for `request`'s screen, creating a blank one if the file
@@ -63,10 +72,23 @@ public:
     {
         return documentPath_;
     }
-    [[nodiscard]] RenderTexture texture() const { return texture_; }
-    [[nodiscard]] const SplatCanvas& canvas() const { return canvas_; }
+    [[nodiscard]] RenderTexture texture() const { return mapTexture(0); }
+    [[nodiscard]] const SplatCanvas& canvas() const
+    {
+        return maps_.empty() ? emptyCanvas_ : maps_.front().canvas;
+    }
+    // Index 0 is the active map, followed by OpenRequest::tiledMaps order.
+    [[nodiscard]] std::size_t mapCount() const { return maps_.size(); }
+    [[nodiscard]] RenderTexture mapTexture(std::size_t index) const
+    {
+        return index < maps_.size() ? maps_[index].texture : noTexture;
+    }
+    [[nodiscard]] const SplatCanvas& mapCanvas(std::size_t index) const
+    {
+        return maps_.at(index).canvas;
+    }
     [[nodiscard]] const std::string& status() const { return status_; }
-    [[nodiscard]] bool dirty() const { return dirty_; }
+    [[nodiscard]] bool dirty() const;
 
     [[nodiscard]] SplatCanvas::Brush& brush() { return brush_; }
     [[nodiscard]] const SplatCanvas::Brush& brush() const { return brush_; }
@@ -83,9 +105,9 @@ public:
     void endStroke();
     [[nodiscard]] bool strokeInProgress() const { return strokeActive_; }
 
-    // Grows or crops the canvas to a board that changed size underneath the
-    // session, keeping existing paint anchored at the origin. Returns true
-    // when it actually changed, which also marks the map dirty.
+    // Grows or crops every canvas to a board that changed size underneath the
+    // session, keeping existing paint anchored at each local origin. Explicit
+    // tile origins are preserved; reopen if the layout also changed.
     bool followBoardResize(uint32_t boardTilesWide, uint32_t boardTilesHigh);
 
     // Reverts the most recent completed stroke. Returns false when there is
@@ -93,27 +115,34 @@ public:
     bool undo();
     [[nodiscard]] std::size_t undoDepth() const { return undoHistory_.size(); }
 
-    // Writes the map back to the source assets tree, and mirrors it into the
-    // staged tree when one was given. Returns false and sets `status()` on
-    // failure, leaving the canvas untouched so the work is not lost.
+    // Writes the active map and changed tiled neighbours to the source assets
+    // tree, and mirrors them into the staged tree when one was given. Returns
+    // false and sets `status()` on failure, keeping all paint for a retry.
     bool save();
 
 private:
+    struct Map {
+        RenderTexture texture = noTexture;
+        Vec2 originTiles {};
+        SplatCanvas canvas;
+        std::filesystem::path sourcePath;
+        std::filesystem::path runtimePath;
+        bool dirty = false;
+    };
+    using Snapshot = std::vector<std::vector<uint8_t>>;
+
     void recordUndoSnapshot();
 
     bool active_ = false;
-    bool dirty_ = false;
     bool strokeActive_ = false;
     bool strokeChanged_ = false;
     Vec2 lastPosition_ {};
     std::optional<LevelLocation> location_;
-    RenderTexture texture_ = noTexture;
-    SplatCanvas canvas_;
+    std::vector<Map> maps_;
+    SplatCanvas emptyCanvas_;
     SplatCanvas::Brush brush_;
-    std::vector<std::vector<uint8_t>> undoHistory_;
-    std::vector<uint8_t> strokeSnapshot_;
-    std::filesystem::path sourcePath_;
-    std::filesystem::path runtimePath_;
+    std::vector<Snapshot> undoHistory_;
+    Snapshot strokeSnapshot_;
     std::filesystem::path runtimeAssetRoot_;
     std::filesystem::path documentPath_;
     std::string status_;

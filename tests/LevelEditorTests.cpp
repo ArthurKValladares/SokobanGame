@@ -3208,6 +3208,99 @@ void testLockPlateEditor()
     CHECK(editor.lockPlates()[0].startEnabled);
 }
 
+void testGroundMaskMigrationPreservesActiveAndParkedDrafts()
+{
+    TEST("groundMaskMigrationPreservesActiveAndParkedDrafts");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    const auto first = project.source / "level0/screen0.scr";
+    const auto second = project.source / "level0/screen1.scr";
+    const Level::GroundSplat original { "Meadow", "Grass", "Stone", "SharedMask" };
+    auto migrated = original;
+    migrated.mask = "OwnedMask";
+    editor.newDocument(4, 3, false);
+    CHECK(editor.addGroundSplat(original));
+    CHECK(editor.saveDocument(first));
+    CHECK(editor.saveDocument(second));
+    CHECK(editor.openDocument(first));
+    CHECK(!editor.dirty());
+    CHECK(editor.remapGroundSplatMask(first, original, migrated));
+    CHECK(!editor.dirty());
+    CHECK(editor.groundSplats()[0].mask == migrated.mask);
+    CHECK(editor.definitionForDocument(first)->groundSplats[0].mask == migrated.mask);
+    CHECK(!editor.definitionForDocument({}));
+    CHECK(!editor.definitionForDocument(project.source / "missing.scr"));
+    CHECK(editor.definitionForDocument(second)->groundSplats[0].mask == original.mask);
+
+    CHECK(editor.beginStroke());
+    CHECK(editor.setCell({ 2, 1, 1 }, TileType::Wall));
+    auto latest = migrated;
+    latest.mask = "LatestMask";
+    CHECK(editor.remapGroundSplatMask(first, migrated, latest));
+    CHECK(editor.dirty());
+    CHECK(editor.endStroke());
+    CHECK(editor.tryUndoEdit());
+    CHECK(!editor.dirty());
+    CHECK(editor.groundSplats()[0].mask == latest.mask);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::Wall));
+    CHECK(editor.openDocument(second));
+    CHECK(editor.hasInProgressDraft(first));
+    CHECK(!editor.dirty());
+
+    auto parked = latest;
+    parked.mask = "ParkedMask";
+    CHECK(editor.remapGroundSplatMask(first, latest, parked));
+    CHECK(!editor.dirty());
+    const auto parkedDefinition = editor.definitionForDocument(first);
+    CHECK(parkedDefinition.has_value());
+    CHECK(parkedDefinition->layers[1][1][2] == tileTypeToChar(TileType::Wall));
+    CHECK(parkedDefinition->groundSplats[0].mask == parked.mask);
+    CHECK(Level::loadDefinitionFromFile(first).groundSplats[0].mask == original.mask);
+    CHECK(editor.openDocument(first));
+    CHECK(editor.dirty());
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.groundSplats()[0].mask == parked.mask);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.groundSplats()[0].mask == parked.mask);
+    CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::Wall));
+
+    // Matching the old identity must not overwrite an independently chosen mask.
+    auto independent = parked;
+    independent.mask = "AuthorMask";
+    CHECK(editor.updateGroundSplat(0, independent));
+    auto next = parked;
+    next.mask = "NextMask";
+    CHECK(editor.remapGroundSplatMask(first, parked, next));
+    CHECK(editor.groundSplats()[0].mask == independent.mask);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.groundSplats()[0].mask == next.mask);
+}
+
+void testLegacyGroundMaskMigrationPreservesDraftHistory()
+{
+    TEST("legacyGroundMaskMigrationPreservesDraftHistory");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    const auto path = project.source / "level0/screen0.scr";
+    editor.newDocument(4, 3, false);
+    CHECK(editor.saveDocument(path));
+    CHECK(editor.setCell({ 2, 1, 1 }, TileType::Wall));
+    const Level::GroundSplat migrated { "Ground", "Grass", "Stone", "OwnedMask" };
+    CHECK(editor.remapGroundSplatMask(path, std::nullopt, migrated));
+    CHECK(editor.dirty());
+    CHECK(editor.groundSplats() == std::vector<Level::GroundSplat> { migrated });
+    CHECK(editor.tryUndoEdit());
+    CHECK(!editor.dirty());
+    CHECK(editor.groundSplats() == std::vector<Level::GroundSplat> { migrated });
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::Wall));
+    auto ignored = migrated;
+    ignored.mask = "AnotherMask";
+    CHECK(!editor.remapGroundSplatMask(path, std::nullopt, ignored));
+    CHECK(editor.groundSplats()[0].mask == migrated.mask);
+}
+
 void testGroundSplatEditing()
 {
     TEST("groundSplatEditing");
@@ -4821,6 +4914,8 @@ int main()
     testLockPlateEditor();
     testPortalColorGroups();
     testGroundSplatEditing();
+    testGroundMaskMigrationPreservesActiveAndParkedDrafts();
+    testLegacyGroundMaskMigrationPreservesDraftHistory();
     testCliffWallSplatAssignmentsSurviveEditingAndMove();
     testDocumentCommandsAndUndo();
     testColorGroupsBecomeExplicitLinks();

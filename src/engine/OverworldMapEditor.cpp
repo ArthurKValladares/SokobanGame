@@ -195,6 +195,40 @@ const Level::Definition* OverworldMapEditor::definition(
     return found ? &found->definition : nullptr;
 }
 
+bool OverworldMapEditor::remapGroundSplatMask(
+    OverworldScreenId id,
+    const std::optional<Level::GroundSplat>& before,
+    const Level::GroundSplat& after)
+{
+    bool changed = false;
+    const auto remapState = [&](State& state) {
+        const auto screen = std::ranges::find(state.screens, id,
+            [](const DraftScreen& value) { return value.spec.id; });
+        if (screen == state.screens.end()) return;
+        auto& splats = screen->definition.groundSplats;
+        if (!before) {
+            if (splats.empty()) {
+                splats.push_back(after);
+                changed = true;
+            }
+            return;
+        }
+        for (Level::GroundSplat& splat : splats) {
+            if (splat.name == before->name && splat.base == before->base &&
+                splat.detail == before->detail && splat.mask == before->mask &&
+                splat.mask != after.mask) {
+                splat.mask = after.mask;
+                changed = true;
+            }
+        }
+    };
+    remapState(state_);
+    remapState(savedState_);
+    for (State& state : undo_) remapState(state);
+    for (State& state : redo_) remapState(state);
+    return changed;
+}
+
 std::filesystem::path OverworldMapEditor::screenPath(
     OverworldScreenId id) const
 {
