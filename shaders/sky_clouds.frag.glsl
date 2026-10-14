@@ -30,21 +30,53 @@ float hashCloud(ivec2 cell)
     return float(h >> 8) * (1.0 / 16777216.0);
 }
 
-// Value and analytic XY gradient. Lighting uses the slope of the billows,
-// avoiding extra noise evaluations or screen derivatives at cloud edges.
-vec3 cloudNoise(vec2 p)
+// Very broad value noise for the smooth atmosphere below the cloud banks.
+float atmosphereNoise(vec2 p)
 {
     ivec2 cell = ivec2(floor(p));
     vec2 f = fract(p);
     vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-    vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
     float a = hashCloud(cell);
     float b = hashCloud(cell + ivec2(1, 0));
     float c = hashCloud(cell + ivec2(0, 1));
     float d = hashCloud(cell + ivec2(1));
     float k = a - b - c + d;
-    return vec3(a + (b - a) * u.x + (c - a) * u.y + k * u.x * u.y,
-        du * (vec2(b - a, c - a) + k * u.yx));
+    return a + (b - a) * u.x + (c - a) * u.y + k * u.x * u.y;
+}
+
+vec3 cloudSimplexCorner(ivec2 cell, vec2 offset)
+{
+    const float diagonal = 0.7071067812;
+    const vec2 gradients[8] = vec2[](
+        vec2(1.0, 0.0), vec2(-1.0, 0.0),
+        vec2(0.0, 1.0), vec2(0.0, -1.0),
+        vec2(diagonal, diagonal), vec2(-diagonal, diagonal),
+        vec2(diagonal, -diagonal), vec2(-diagonal, -diagonal));
+    vec2 gradient = gradients[int(hashCloud(cell) * 8.0)];
+    float radius = max(0.5 - dot(offset, offset), 0.0);
+    float radius2 = radius * radius;
+    float radius3 = radius2 * radius;
+    float radius4 = radius2 * radius2;
+    float projection = dot(gradient, offset);
+    return vec3(radius4 * projection,
+        radius4 * gradient - 8.0 * radius3 * projection * offset);
+}
+
+vec3 cloudBillowNoise(vec2 p)
+{
+    // Radial contributions on a triangular lattice avoid the square plateaus
+    // of interpolated value noise. Shared integer corner hashes and analytic
+    // gradients keep the contours and their lighting continuous while drifting.
+    const float skew = 0.3660254038;
+    const float unskew = 0.2113248654;
+    ivec2 cell = ivec2(floor(p + (p.x + p.y) * skew));
+    vec2 offset = p - (vec2(cell) - float(cell.x + cell.y) * unskew);
+    ivec2 step = offset.x > offset.y ? ivec2(1, 0) : ivec2(0, 1);
+    vec3 field = cloudSimplexCorner(cell, offset)
+        + cloudSimplexCorner(cell + step, offset - vec2(step) + unskew)
+        + cloudSimplexCorner(cell + ivec2(1), offset - 1.0 + 2.0 * unskew);
+    // Match the former value-noise contrast so coverage remains equally open.
+    return vec3(0.5, 0.0, 0.0) + field * 41.664;
 }
 
 vec3 cloudField(vec2 p, float time)
@@ -52,15 +84,18 @@ vec3 cloudField(vec2 p, float time)
     // Independent octave motion gently changes the contours as wind advects
     // the entire bank. The broad octave dominates for soft, readable masses.
     vec3 field = vec3(0.0);
-    float frequency = 1.0;
+    float frequency = 0.42;
     float amplitude = 0.57;
+    const mat2 octaveRotation = mat2(0.8, 0.6, -0.6, 0.8);
+    mat2 basis = octaveRotation;
     for (int octave = 0; octave < 4; ++octave) {
-        vec3 n = cloudNoise(p * frequency +
+        vec3 n = cloudBillowNoise((basis * p) * frequency +
             vec2(13.7, 9.2) * float(octave) +
             time * vec2(0.008, -0.005) * float(octave));
-        field += vec3(n.x, n.yz * frequency) * amplitude;
+        field += vec3(n.x, transpose(basis) * n.yz * frequency) * amplitude;
         frequency *= 2.03;
         amplitude *= 0.48;
+        basis *= octaveRotation;
     }
     return field / 1.039;
 }
@@ -79,10 +114,17 @@ vec3 compositeCloudLayer(vec3 below, vec3 camera, vec3 ray,
     vec2 world = camera.xy + ray.xy * distanceToLayer;
     float time = pc.animation.x;
     vec2 p = world * scale + wind * time + seed;
-    // Low-frequency warping breaks up the square value-noise lattice.
-    vec2 warp = vec2(cloudNoise(p * 0.43 + 17.2).x,
-        cloudNoise(p * 0.43 - 8.4).x) - 0.5;
-    vec3 field = cloudField(p + warp * 0.65, time);
+    // Broad, smooth warping keeps the billows irregular across all octaves.
+    const float warpFrequency = 0.18;
+    const float warpStrength = 1.2;
+    vec3 warpX = cloudBillowNoise(p * warpFrequency + 17.2);
+    vec3 warpY = cloudBillowNoise(p * warpFrequency - 8.4);
+    vec2 warp = vec2(warpX.x, warpY.x) - 0.5;
+    vec3 field = cloudField(p + warp * warpStrength, time);
+    // Apply the warp's Jacobian so shading follows the curved contours.
+    vec2 slope = field.yz;
+    field.yz += warpStrength * warpFrequency *
+        (slope.x * warpX.yz + slope.y * warpY.yz);
     float body = smoothstep(coverage, coverage + 0.25, field.x);
     float alpha = (1.0 - exp(-body * opacity)) * visibility;
 
@@ -92,28 +134,46 @@ vec3 compositeCloudLayer(vec3 below, vec3 camera, vec3 ray,
     vec3 color = mix(shade, lit, 0.24 + light * 0.76);
     // Thin wisps blend into lavender air; the distant sea loses contrast.
     color = mix(color, vec3(0.52, 0.48, 0.68), haze);
+    // Slightly weathered gray separates clouds from the richer island colors
+    // while preserving a trace of peach light and blue-violet shadow.
+    float gray = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    color = mix(color, vec3(gray), 0.22);
     return mix(below, color, alpha);
 }
 
 vec3 lowerAtmosphere(vec3 sky, vec3 camera, vec3 ray)
 {
-    // A smooth bed of air below the lowest clouds shows through their gaps.
-    // Anchor its broad color variation in the world, like the cloud planes,
-    // so orbiting and zooming reveal depth instead of a screen-space wash.
-    const float height = -145.0;
+    // Broad strata below the clouds give the air its own world-space parallax.
+    // Shallow views catch the upper peach haze; looking farther down reveals
+    // deeper, darker blue-violet air. Depth follows world down, not screen Y.
+    const float heights[3] = float[](-115.0, -190.0, -300.0);
     float visibility = smoothstep(0.015, 0.16, -ray.z);
-    if (visibility <= 0.0 || camera.z <= height) {
+    if (visibility <= 0.0 || camera.z <= heights[0]) {
         return sky;
     }
-    float distanceToAir = (height - camera.z) / min(ray.z, -0.001);
-    vec2 world = camera.xy + ray.xy * distanceToAir;
+    float depth = smoothstep(0.10, 0.95, -ray.z);
+    // Overlapping weights avoid visible bands between the atmosphere strata.
+    vec3 weights = vec3((1.0 - depth) * (1.0 - depth),
+        2.0 * depth * (1.0 - depth), depth * depth);
     vec2 sunDirection = normalize(vec2(-0.55, -0.45));
-    float broadHaze = cloudNoise(world * 0.003 + vec2(12.8, -6.3)).x;
-    // Bounded sun-facing warmth keeps both hues present even on distant maps.
-    float warmth = smoothstep(-1.2, 1.2,
-        dot(ray.xy, sunDirection) * 0.65 + (broadHaze - 0.5) * 1.1);
-    vec3 air = mix(vec3(0.22, 0.26, 0.48), vec3(0.70, 0.45, 0.40), warmth);
-    return mix(sky, air, visibility * 0.90);
+    vec3 air = vec3(0.0);
+    for (int layer = 0; layer < 3; ++layer) {
+        float layerDepth = float(layer) * 0.5;
+        float distanceToAir = (heights[layer] - camera.z) / min(ray.z, -0.001);
+        vec2 world = camera.xy + ray.xy * distanceToAir;
+        float broadHaze = atmosphereNoise(world * 0.003
+            + vec2(12.8, -6.3) + vec2(7.1, 13.4) * layerDepth);
+        float warmth = smoothstep(-1.2, 1.2,
+            dot(ray.xy, sunDirection) * 0.65 + (broadHaze - 0.5) * 1.1);
+        vec3 shadow = mix(vec3(0.18, 0.22, 0.40),
+            vec3(0.09, 0.13, 0.28), layerDepth);
+        vec3 sunlit = mix(vec3(0.55, 0.36, 0.34),
+            vec3(0.30, 0.22, 0.27), layerDepth);
+        // Peach light falls away with depth, leaving the cool palette below.
+        air += mix(shadow, sunlit, warmth * (1.0 - layerDepth * 0.25))
+            * weights[layer];
+    }
+    return mix(sky, air, visibility * 0.94);
 }
 
 void main()

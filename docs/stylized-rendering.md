@@ -50,7 +50,13 @@ palette lives in [`sky_clouds.frag.glsl`](../shaders/sky_clouds.frag.glsl).
 The sky uses three broken cloud banks above a smooth layer of deep air. The
 distant bank is muted lavender, the middle bank is darker blue-violet, and the
 near wisps catch peach sunlight. Reduced coverage and opacity leave openings
-onto the lower atmosphere, which blends cool blue-violet with sun-facing peach.
+onto a darker lower atmosphere. Three broad haze strata below the clouds blend
+subdued peach light near the top into deeper blue-violet tones farther down.
+Downward views reveal more of the dark air, with smooth transitions between
+depths and independent world-space parallax in the broad color variation.
+Cloud colors are mildly desaturated to stand apart from the islands. Rounded
+simplex billows, rotated detail octaves and broad domain warping prevent square
+formations; analytic gradients keep their lighting smooth during motion.
 Clouds and the atmosphere's broad color variation are anchored at fixed world
 heights, preserving depth during camera movement; each cloud bank drifts
 independently. Coverage, opacity, haze and both shading colors are set per layer
