@@ -450,6 +450,48 @@
       "path": "custom/textures/GroundSplatMapOverworld4_1.png",
       "filter": "linear",
       "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMapOverworld2",
+      "path": "custom/textures/ground_splat_overworld_2.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMapOverworld3",
+      "path": "custom/textures/ground_splat_overworld_3.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMapOverworld4",
+      "path": "custom/textures/ground_splat_overworld_4.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMapOverworld5",
+      "path": "custom/textures/ground_splat_overworld_5.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMapOverworld6",
+      "path": "custom/textures/ground_splat_overworld_6.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMapOverworld8",
+      "path": "custom/textures/ground_splat_overworld_8.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMapOverworld9",
+      "path": "custom/textures/ground_splat_overworld_9.png",
+      "filter": "linear",
+      "colorSpace": "linear"
     }
   ],
   "models": [
@@ -2557,7 +2599,7 @@
     {
       "tile": "Rock",
       "model": "Stone",
-      "scale": 0.93
+      "scale": 0.9300000071525574
     },
     {
       "tile": "Ice",
