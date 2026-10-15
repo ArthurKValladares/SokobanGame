@@ -281,6 +281,7 @@ struct RenderFrameData {
     static constexpr std::size_t groundSplatRegionCapacity = 18;
     static constexpr std::size_t pointLightCapacity = 8;
     static constexpr std::size_t waterRippleCapacity = 16;
+    static constexpr std::size_t rockScratchCapacity = 64;
     enum class EditorDecorationHighlight : uint8_t {
         None,
         Hovered,
@@ -567,6 +568,15 @@ struct RenderFrameData {
         float ageSeconds = 0.0f;
     };
 
+    // A rock's ground contact path. Age is measured from the first contact;
+    // duration lets the material fade each point in the order it was scraped.
+    struct RockScratch {
+        Vec3 start {};
+        Vec3 end {};
+        float ageSeconds = 0.0f;
+        float durationSeconds = 0.0f;
+    };
+
     struct Particle {
         Vec3 position {};
         Vec2 size { 1.0f, 1.0f };
@@ -682,6 +692,8 @@ struct RenderFrameData {
     WaterRendering waterRendering = defaultWaterRendering();
     std::array<WaterRipple, waterRippleCapacity> waterRipples {};
     uint32_t waterRippleCount = 0;
+    std::array<RockScratch, rockScratchCapacity> rockScratches {};
+    std::size_t rockScratchCount = 0;
     uint32_t levelWidth = 0;
     uint32_t levelHeight = 0;
     uint32_t levelDepth = 1;

@@ -2,13 +2,70 @@
 
 #include "engine/AssetManifest.hpp"
 #include "engine/GateEffect.hpp"
+#include "engine/GameplayLoop.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/RenderFrameParts.hpp"
+#include "engine/RenderFrameBuilder.hpp"
 
 #include <algorithm>
 #include <stdexcept>
 
 namespace sokoban {
+
+RockScratchEvidenceFixture::RockScratchEvidenceFixture(const AnimationCatalog* animations)
+    : level_(Level::loadFromDefinition({
+          .layers = {
+              { "         ", " ....... ", " ....... ", " ....... ",
+                  " ....... ", " ....... ", "         " },
+              { "         ", "         ", "         ", "         ",
+                  " KR      ", "         ", "         " },
+          },
+          .waterLayer = 0,
+      }, "rock scratch evidence"))
+    , animations_(animations)
+{
+    session_.reset(level_);
+    session_.setStepDurationSeconds(0.2f);
+    presentation_.setAnimationCatalog(animations_);
+    presentation_.resetEntities(session_.state());
+
+    const auto advance = [&](float seconds, const GameplayLoop::InputFrame& input = {}) {
+        (void)GameplayLoop::update(level_, session_, presentation_, input, 0.0f, false);
+        // Exercise ordinary presentation sampling during movement, rather than
+        // jumping over the contacts that lay the scratches down.
+        for (; seconds > 0.0001f; seconds -= 1.0f / 60.0f) {
+            (void)GameplayLoop::update(level_, session_, presentation_, {},
+                std::min(seconds, 1.0f / 60.0f), false);
+        }
+    };
+    advance(0.3f, { .right = { .pressed = true } });
+    advance(0.3f, { .right = { .pressed = true } });
+    advance(1.2f);
+    advance(0.3f, { .down = { .pressed = true } });
+    advance(0.3f, { .right = { .pressed = true } });
+    advance(0.3f, { .up = { .pressed = true } });
+    advance(0.3f, { .up = { .pressed = true } });
+    // Step aside to leave the new end of the trail visible beside the rock.
+    advance(0.3f, { .left = { .pressed = true } });
+}
+
+RenderFrameData RockScratchEvidenceFixture::build(const AssetManifest& manifest,
+    const PresentationSettings& settings, GroundGeometryCache& groundCache,
+    FrameArena& arena) const
+{
+    return RenderFrameBuilder::buildGameplay({
+        .manifest = manifest,
+        .level = level_,
+        .state = session_.state(),
+        .activeHeroController = session_.activeHeroController(),
+        .moving = session_.moving(),
+        .projectedState = session_.projectedStateView(),
+        .presentation = presentation_,
+        .settings = settings,
+        .animations = animations_,
+        .groundGeometryCache = &groundCache,
+    }, arena);
+}
 
 PerformanceEffectFixture::PerformanceEffectFixture(const AssetManifest& manifest)
     : mirror_(makeMirrorSwapParticleEffect(manifest))

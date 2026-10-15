@@ -347,7 +347,7 @@ void testPerformanceScenarios()
     CHECK(parse({ "--smoke-frames", "420", "--evidence-output", "x",
         "--evidence-water", "--evidence-disable-water" }).malformed);
     for (const auto scenario : { "mirror-swap", "witch-swap", "turret-volley",
-             "portals", "special-blocks", "mixed-stress" }) {
+             "portals", "special-blocks", "mixed-stress", "rock-scratches" }) {
         CHECK(!parse({ "--smoke-frames", "420", "--evidence-output", "x",
             "--evidence-effects", scenario }).malformed);
         CHECK(parse({ "--evidence-effects", scenario }).malformed);

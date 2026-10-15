@@ -32,6 +32,8 @@ layout(location = 0) out vec4 outColor;
 
 #include "SceneFrame.glsl"
 
+#include "RockScratches.glsl"
+
 // The splat region's world origin is carried in draw.passData[1].yz. Using
 // world positions keeps both paint and tiled materials continuous across rim
 // subpatches.
@@ -137,6 +139,10 @@ void main()
 {
     applyEditorPreviewDither();
 
+    // Derivatives must be evaluated before per-stroke bounds/reveal branches.
+    vec2 scratchWorldDx = dFdx(inWorldPosition.xy);
+    vec2 scratchWorldDy = dFdy(inWorldPosition.xy);
+
     // Paint lookup is region-local; material layers use the global grid.
     vec2 splatLocalTile = inWorldPosition.xy - draw.passData[1].yz;
     vec2 worldTile = inWorldPosition.xy;
@@ -232,6 +238,14 @@ void main()
         // to the ground material and fades out toward the exposed border.
         materialColor.rgb = mix(materialColor.rgb, wallAlbedo, wallCoverage);
         orm = mix(orm, wallOrm, wallCoverage);
+    }
+    if (draw.passData[1].w > 0.5) {
+        vec2 scratches = rockScratchCoverage(inWorldPosition,
+            scratchWorldDx, scratchWorldDy) * (1.0 - wallCoverage);
+        vec3 scuffedAlbedo = min(materialColor.rgb * 1.60 +
+            vec3(0.10, 0.085, 0.06), vec3(1.0));
+        materialColor.rgb *= 1.0 - scratches.y * 0.65;
+        materialColor.rgb = mix(materialColor.rgb, scuffedAlbedo, scratches.x);
     }
     vec3 color = mix(materialColor.rgb, draw.gridColor.rgb, gridMask());
     float ambientMask = 0.0;

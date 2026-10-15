@@ -244,8 +244,8 @@ struct CommandLineOptions {
             options.evidenceAnimate = true;
         } else if (argument == "--evidence-effects") {
             if (index + 1 >= arguments.size() ||
-                !isPerformanceEffectScenario(arguments[index + 1])) {
-                return reject("--evidence-effects needs mirror-swap, witch-swap, turret-volley, portals, special-blocks, or mixed-stress");
+                !isEvidenceEffectScenario(arguments[index + 1])) {
+                return reject("--evidence-effects needs mirror-swap, witch-swap, turret-volley, portals, special-blocks, mixed-stress, or rock-scratches");
             }
             options.evidenceEffects = arguments[++index];
         } else if (argument == "--evidence-disable-water") {

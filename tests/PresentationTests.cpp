@@ -10,6 +10,7 @@
 #include "engine/MinecartGateVisuals.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/ParticleConfig.hpp"
+#include "engine/RockScratchConfig.hpp"
 #include "engine/PresentationTransactionBuilder.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/render/LightingConfig.hpp"
@@ -4222,6 +4223,160 @@ void testWaterRippleScheduleHasAFixedBudget()
         static_cast<float>(count) - 0.5f));
 }
 
+void testRockScratchesClipPhysicalTracksToGround()
+{
+    TEST("rockScratchesClipPhysicalTracksToGround");
+    const Level level = Level::loadFromLayers({ { ".W.#.." }, { "C     " } },
+        "ground scratch clipping");
+    GameState before = stateWithPlayer({ 0, 0, 1 });
+    before.movables.push_back({ .id = 7, .type = TileType::Rock,
+        .cell = { 0, 0, 1 } });
+    GameplaySession::Action action { .before = before, .after = before,
+        .durationSeconds = 5.0f, .playerPushing = true };
+    action.presentation.motions.push_back({
+        .target = { EntityKind::Movable, 7 },
+        .from = { 0, 0, 1 }, .to = { 5, 0, 1 }, .durationSeconds = 5.0f,
+    });
+    GameplayPresentation presentation;
+    presentation.resetEntities(before);
+    presentation.scheduleRockScratches(level, action, 5.0f);
+    const auto frameAt = [&] {
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(), .level = level, .state = before,
+            .moving = true, .projectedState = before,
+            .presentation = presentation, .settings = {},
+        });
+    };
+    auto frame = frameAt();
+    CHECK(frame.rockScratchCount == 4);
+    if (frame.rockScratchCount == 4) {
+        constexpr std::array starts { 0.5f, 2.0f, 4.0f, 5.0f };
+        constexpr std::array ends { 1.0f, 3.0f, 5.0f, 5.5f };
+        for (std::size_t index = 0; index < starts.size(); ++index) {
+            CHECK(near(frame.rockScratches[index].start.x, starts[index]));
+            CHECK(near(frame.rockScratches[index].end.x, ends[index]));
+            CHECK(near(frame.rockScratches[index].start.z, 1.0f));
+            CHECK(near(frame.rockScratches[index].end.z, 1.0f));
+        }
+    }
+    presentation.clearRockScratches();
+    // Physical tracks on each side of a portal leave a gap between them.
+    action.presentation.motions = {
+        { .target = { EntityKind::Movable, 7 }, .from = { 0, 0, 1 },
+          .to = { 0.4f, 0, 1 }, .durationSeconds = 0.5f },
+        { .target = { EntityKind::Movable, 7 }, .from = { 4.6f, 0, 1 },
+          .to = { 5, 0, 1 }, .startSeconds = 0.5f, .durationSeconds = 0.5f },
+    };
+    presentation.scheduleRockScratches(level, action, 1.0f);
+    frame = frameAt();
+    CHECK(frame.rockScratchCount == 2);
+    if (frame.rockScratchCount == 2) {
+        CHECK(near(frame.rockScratches[0].end.x, 0.9f));
+        CHECK(near(frame.rockScratches[1].start.x, 5.1f));
+    }
+    presentation.clearRockScratches();
+    action.before.movables[0].type = TileType::Ice;
+    presentation.scheduleRockScratches(level, action, 1.0f);
+    CHECK(frameAt().rockScratchCount == 0);
+    action.before.movables[0].type = TileType::Rock;
+    action.playerPushing = false;
+    action.playerPulling = true;
+    presentation.scheduleRockScratches(level, action, 1.0f);
+    CHECK(frameAt().rockScratchCount == 2);
+    presentation.clearRockScratches();
+    action.playerPulling = false;
+    presentation.scheduleRockScratches(level, action, 1.0f);
+    CHECK(frameAt().rockScratchCount == 0);
+    action.playerPushing = true;
+    action.presentation.motions = {
+        { .target = { EntityKind::Movable, 7 }, .from = { 0, 0, 2 },
+          .to = { 0, 0, 1 }, .durationSeconds = 0.5f },
+        { .target = { EntityKind::Movable, 7 }, .from = { 0, 0, 1 },
+          .to = { 1, 0, 2 }, .durationSeconds = 0.5f },
+    };
+    presentation.scheduleRockScratches(level, action, 1.0f);
+    CHECK(frameAt().rockScratchCount == 0);
+}
+
+void testFallingRockScratchesStopAtDepartureGroundEdge()
+{
+    TEST("fallingRockScratchesStopAtDepartureGroundEdge");
+    const Level level = Level::loadFromLayers({ { ".W ." }, { "C   " } },
+        "falling rock scratches");
+    GameState before = stateWithPlayer({ 0, 0, 1 });
+    before.movables.push_back({ .id = 7, .type = TileType::Rock,
+        .cell = { 0, 0, 1 } });
+    GameplaySession::Action action { .before = before, .after = before,
+        .durationSeconds = 2.0f, .playerPushing = true };
+    action.presentation.motions = {
+        { .target = { EntityKind::Movable, 7 }, .from = { 0, 0, 1 },
+          .to = { 1, 0, 0.82f }, .durationSeconds = 1.18f },
+        { .target = { EntityKind::Movable, 7 }, .from = { 3, 0, 1 },
+          .to = { 2, 0, 0 }, .durationSeconds = 2.0f },
+    };
+    GameplayPresentation presentation;
+    presentation.resetEntities(before);
+    presentation.scheduleRockScratches(level, action, 2.0f);
+    RenderFrameData frame;
+    presentation.appendRockScratchRenderData(frame);
+    CHECK(frame.rockScratchCount == 2);
+    if (frame.rockScratchCount == 2) {
+        CHECK(near(frame.rockScratches[0].start.x, 0.5f));
+        CHECK(near(frame.rockScratches[0].end.x, 1.0f));
+        CHECK(near(frame.rockScratches[0].durationSeconds, 0.5f));
+        CHECK(near(frame.rockScratches[1].start.x, 3.5f));
+        CHECK(near(frame.rockScratches[1].end.x, 3.0f));
+        CHECK(near(frame.rockScratches[1].durationSeconds, 0.5f));
+        CHECK(near(frame.rockScratches[0].end.z, 1.0f));
+        CHECK(near(frame.rockScratches[1].end.z, 1.0f));
+    }
+}
+
+void testRockScratchBudgetUsesDepositionOrder()
+{
+    TEST("rockScratchBudgetUsesDepositionOrder");
+    const Level level = Level::loadFromLayers({ { "..." }, { "C  " } },
+        "bounded ground scratches");
+    GameState before = stateWithPlayer({ 0, 0, 1 });
+    before.movables.push_back({ .id = 7, .type = TileType::Rock,
+        .cell = { 0, 0, 1 } });
+    GameplaySession::Action action { .before = before, .after = before,
+        .durationSeconds = 0.1f, .playerPushing = true };
+    action.presentation.motions.push_back({
+        .target = { EntityKind::Movable, 7 }, .from = { 0, 0, 1 },
+        .to = { 0.1f, 0, 1 }, .durationSeconds = 0.1f,
+    });
+    GameplayPresentation presentation;
+    presentation.resetEntities(before);
+    // This action is admitted first but deposits last. A full queue must not
+    // discard it merely because it was admitted before the immediate pushes.
+    presentation.scheduleRockScratches(level, action, -10.0f);
+    for (std::size_t index = 0; index < RenderFrameData::rockScratchCapacity; ++index) {
+        const float offset = 0.005f * static_cast<float>(index);
+        action.presentation.motions[0].from.x = offset;
+        action.presentation.motions[0].to.x = offset + 0.1f;
+        presentation.scheduleRockScratches(level, action, 0.0f);
+    }
+    RenderFrameData frame;
+    presentation.appendRockScratchRenderData(frame);
+    CHECK(frame.rockScratchCount == RenderFrameData::rockScratchCapacity - 1);
+    if (frame.rockScratchCount > 0) {
+        CHECK(near(frame.rockScratches[0].start.x, 0.505f));
+    }
+    presentation.advanceRockScratches(10.0f);
+    frame = {};
+    presentation.appendRockScratchRenderData(frame);
+    CHECK(frame.rockScratchCount == 1);
+    if (frame.rockScratchCount == 1) {
+        CHECK(near(frame.rockScratches[0].start.x, 0.5f));
+        CHECK(near(frame.rockScratches[0].ageSeconds, 0.0f));
+    }
+    presentation.advanceRockScratches(config::rockScratchLifetimeSeconds + 0.1f);
+    frame = {};
+    presentation.appendRockScratchRenderData(frame);
+    CHECK(frame.rockScratchCount == 0);
+}
+
 void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
 {
     TEST("drownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition");
@@ -5518,6 +5673,9 @@ int main()
     testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition();
     testWaterRipplesFollowPlayerAndEnemySurfaceContact();
     testWaterRippleScheduleHasAFixedBudget();
+    testRockScratchesClipPhysicalTracksToGround();
+    testFallingRockScratchesStopAtDepartureGroundEdge();
+    testRockScratchBudgetUsesDepositionOrder();
     testTileDecorationHoverPreviewMatchesRaisedSurfacePlacement();
     testEditorLayerLockFiltersDecorationsAndTheirLights();
     testGameplayFrameBuildsManifestDecorationInstances();

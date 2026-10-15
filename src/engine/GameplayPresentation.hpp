@@ -108,6 +108,16 @@ public:
     void advanceWaterRipples(float dt);
     void clearWaterRipples();
     void appendWaterRippleRenderData(RenderFrameData& frame) const;
+    // Physical horizontal tracks are clipped to supporting ground cells. Each
+    // segment retains its deposition duration so reveal and fading follow the
+    // rock's movement, including pending action starts.
+    void scheduleRockScratches(
+        const Level& level,
+        const GameplaySession::Action& action,
+        float elapsedSeconds = 0.0f);
+    void advanceRockScratches(float dt);
+    void clearRockScratches();
+    void appendRockScratchRenderData(RenderFrameData& frame) const;
     [[nodiscard]] Vec2 turretRecoilOffset(EntityId turretId) const;
     // Zero-time activations still move platforms at the current world-step
     // speed. Use activationStepSeconds for their travel without delaying
@@ -200,6 +210,9 @@ private:
     std::array<RenderFrameData::WaterRipple,
         RenderFrameData::waterRippleCapacity> waterRipples_ {};
     std::size_t waterRippleCount_ = 0;
+    std::array<RenderFrameData::RockScratch,
+        RenderFrameData::rockScratchCapacity> rockScratches_ {};
+    std::size_t rockScratchCount_ = 0;
     const AnimationCatalog* animationCatalog_ = nullptr;
     // Where a reversed action's timeline is sampled from. The only piece of
     // per-action state the presentation keeps; three sibling members were

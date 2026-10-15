@@ -191,6 +191,10 @@ void Application::finishEvidenceCapture()
     report << "- Effect fixture: " << (evidenceEffects_.empty() ? "none" : evidenceEffects_)
            << "; " << (evidenceEffectSnapshot_ ? evidenceEffectSnapshot_->particles.size() : 0)
            << " retained particles\n";
+    if (evidenceEffects_ == "rock-scratches") {
+        report << "- Scratch fixture: four real pushes around a corner; oldest contact "
+                  "3.3 s ago, newest contact 0.4 s ago; water surrounds the ground\n";
+    }
     report << "- Authored water: " << (evidenceWaterDisabled_ ? "disabled" : "enabled")
            << "\n- Water reflections: "
            << (evidenceWaterReflectionsDisabled_ ? "disabled" : "enabled") << "\n";

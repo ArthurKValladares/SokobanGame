@@ -1,6 +1,7 @@
 #include "TestHarness.hpp"
 
 #include "engine/GameplayLoop.hpp"
+#include "engine/RockScratchConfig.hpp"
 #include "engine/Time.hpp"
 
 #include <algorithm>
@@ -1439,6 +1440,148 @@ void testDeferredWaterEntryMatchesLongFrameCatchUp()
         catchUp.waterRipples[0].ageSeconds) < 0.0001f);
 }
 
+void testRockScratchesGrowFadeAndClearWithGameplay()
+{
+    TEST("rockScratchesGrowFadeAndClearWithGameplay");
+    const Level level = makeLevel({ { "......" }, { "CR    " } });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.25f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto update = [&](GameplayLoop::InputFrame input, float dt) {
+        (void)GameplayLoop::update(level, session, presentation, input, dt, false);
+    };
+    const auto scratches = [&] {
+        RenderFrameData frame;
+        presentation.appendRockScratchRenderData(frame);
+        return frame;
+    };
+    update({ .right = { .pressed = true } }, 0.05f);
+    auto frame = scratches();
+    CHECK(frame.rockScratchCount == 1);
+    if (frame.rockScratchCount == 1) {
+        CHECK(std::abs(frame.rockScratches[0].start.x - 1.5f) < 0.0001f);
+        CHECK(std::abs(frame.rockScratches[0].end.x - 2.0f) < 0.0001f);
+        CHECK(std::abs(frame.rockScratches[0].ageSeconds - 0.05f) < 0.0001f);
+        CHECK(std::abs(frame.rockScratches[0].durationSeconds - 0.125f) < 0.0001f);
+    }
+    update({}, 0.25f);
+    CHECK(!session.moving());
+    CHECK(scratches().rockScratchCount == 2);
+    update({ .right = { .pressed = true } }, 0.3f);
+    frame = scratches();
+    CHECK(frame.rockScratchCount == 4);
+    if (frame.rockScratchCount == 4) {
+        CHECK(frame.rockScratches[0].ageSeconds > frame.rockScratches[1].ageSeconds);
+        CHECK(frame.rockScratches[1].ageSeconds > frame.rockScratches[2].ageSeconds);
+        CHECK(frame.rockScratches[2].ageSeconds > frame.rockScratches[3].ageSeconds);
+    }
+    update({}, config::rockScratchLifetimeSeconds - 0.4f);
+    frame = scratches();
+    CHECK(frame.rockScratchCount == 3);
+    if (frame.rockScratchCount == 3) {
+        CHECK(std::abs(frame.rockScratches[0].start.x - 2.0f) < 0.0001f);
+    }
+    update({ .undoPressed = true }, 0.01f);
+    CHECK(scratches().rockScratchCount == 0);
+    update({}, 0.3f);
+    CHECK(scratches().rockScratchCount == 0);
+    update({ .right = { .pressed = true } }, 0.3f);
+    CHECK(scratches().rockScratchCount == 2);
+    update({ .restartPressed = true }, 0.01f);
+    CHECK(scratches().rockScratchCount == 0);
+    update({}, 0.3f);
+    update({ .right = { .pressed = true } }, 0.3f);
+    CHECK(scratches().rockScratchCount == 2);
+    presentation.resetEntities(session.state());
+    CHECK(scratches().rockScratchCount == 0);
+}
+
+void testRockScratchTimingMatchesLongFrameCatchUp()
+{
+    TEST("rockScratchTimingMatchesLongFrameCatchUp");
+    const Level level = makeLevel({ { "....." }, { "CR   " } });
+    const auto run = [&](bool split) {
+        GameplaySession session;
+        session.reset(level);
+        session.setStepDurationSeconds(0.25f);
+        GameplayPresentation presentation;
+        presentation.resetEntities(session.state());
+        (void)GameplayLoop::update(level, session, presentation,
+            { .right = { .pressed = true } }, split ? 0.1f : 0.4f, false);
+        if (split) {
+            (void)GameplayLoop::update(level, session, presentation, {}, 0.3f, false);
+        }
+        RenderFrameData frame;
+        presentation.appendRockScratchRenderData(frame);
+        return frame;
+    };
+    const auto split = run(true);
+    const auto catchUp = run(false);
+    CHECK(split.rockScratchCount == 2);
+    CHECK(catchUp.rockScratchCount == split.rockScratchCount);
+    for (std::size_t index = 0;
+         index < std::min(split.rockScratchCount, catchUp.rockScratchCount); ++index) {
+        CHECK(std::abs(split.rockScratches[index].ageSeconds -
+            catchUp.rockScratches[index].ageSeconds) < 0.0001f);
+    }
+}
+
+void testPulledRockLeavesScratchesInMovementOrder()
+{
+    TEST("pulledRockLeavesScratchesInMovementOrder");
+    // Druid is the hero with the existing compulsory trailing-unit pull.
+    const Level level = makeLevel({ { "....." }, { "RU   " } });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.25f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const auto update = [&](GameplayLoop::InputFrame input, float dt) {
+        (void)GameplayLoop::update(level, session, presentation, input, dt, false);
+    };
+    const auto scratches = [&] {
+        RenderFrameData frame;
+        presentation.appendRockScratchRenderData(frame);
+        return frame;
+    };
+    CHECK(session.state().players[0].character == CharacterType::Druid);
+    update({ .right = { .pressed = true } }, 0.05f);
+    CHECK(session.activeAction().playerPulling);
+    CHECK(!session.activeAction().playerPushing);
+    auto frame = scratches();
+    CHECK(frame.rockScratchCount == 1);
+    if (frame.rockScratchCount == 1) {
+        CHECK(std::abs(frame.rockScratches[0].start.x - 0.5f) < 0.0001f);
+        CHECK(std::abs(frame.rockScratches[0].end.x - 1.0f) < 0.0001f);
+        CHECK(std::abs(frame.rockScratches[0].ageSeconds - 0.05f) < 0.0001f);
+    }
+    update({}, 0.25f);
+    CHECK(session.state().movables[0].cell == GridPosition3({ 1, 0, 1 }));
+    CHECK(scratches().rockScratchCount == 2);
+    update({ .right = { .pressed = true } }, 0.3f);
+    frame = scratches();
+    CHECK(session.state().movables[0].cell == GridPosition3({ 2, 0, 1 }));
+    CHECK(frame.rockScratchCount == 4);
+    if (frame.rockScratchCount == 4) {
+        CHECK(frame.rockScratches[0].ageSeconds > frame.rockScratches[1].ageSeconds);
+        CHECK(frame.rockScratches[1].ageSeconds > frame.rockScratches[2].ageSeconds);
+        CHECK(frame.rockScratches[2].ageSeconds > frame.rockScratches[3].ageSeconds);
+    }
+    update({}, config::rockScratchLifetimeSeconds - 0.4f);
+    frame = scratches();
+    CHECK(frame.rockScratchCount == 3);
+    if (frame.rockScratchCount == 3) {
+        CHECK(std::abs(frame.rockScratches[0].start.x - 1.0f) < 0.0001f);
+    }
+    update({ .undoPressed = true }, 0.01f);
+    CHECK(scratches().rockScratchCount == 0);
+    update({}, 0.3f);
+    CHECK(session.state().movables[0].cell == GridPosition3({ 1, 0, 1 }));
+    CHECK(scratches().rockScratchCount == 0);
+}
+
 int main()
 {
     TEST("lecternReadingPausesWithoutSpendingAMove");
@@ -1529,6 +1672,9 @@ int main()
     testFacingTurretsStartAnAmbientMutualVolley();
     testWaterRippleStartsAtContactAndPersistsAfterCommit();
     testDeferredWaterEntryMatchesLongFrameCatchUp();
+    testRockScratchesGrowFadeAndClearWithGameplay();
+    testRockScratchTimingMatchesLongFrameCatchUp();
+    testPulledRockLeavesScratchesInMovementOrder();
 
     if (failures == 0) {
         std::cout << "GameplayLoopTests: " << checks << " checks passed\n";

@@ -173,6 +173,8 @@ void checkPreparationOutputsMatch(
         CHECK(expected.isoFaces[index].depth == actual.isoFaces[index].depth);
         CHECK(expected.isoFaces[index].groundRimSurface ==
               actual.isoFaces[index].groundRimSurface);
+        CHECK(expected.isoFaces[index].rockScratchGround ==
+              actual.isoFaces[index].rockScratchGround);
         CHECK(expected.isoFaces[index].groundRimWallCoverage ==
               actual.isoFaces[index].groundRimWallCoverage);
         CHECK(expected.isoFaces[index].material == actual.isoFaces[index].material);
@@ -3110,8 +3112,58 @@ void testGroundChunkPickingRetainsOwnedFramesAndPickFlags()
 
 } // namespace
 
+void testRockScratchesOnlyUseActualGroundCaps()
+{
+    TEST("rockScratchesOnlyUseActualGroundCaps");
+    using namespace sokoban;
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 5;
+    frame.levelHeight = 1;
+    frame.levelDepth = 2;
+    for (int x = 0; x < 5; ++x) {
+        auto tile = cube(x, 0);
+        tile.groundTop = x != 3;
+        tile.effect = x == 3 ? RenderSurfaceEffect::Standard : RenderSurfaceEffect::GroundSplat;
+        if (x == 1) {
+            tile.model = { 1 };
+            tile.groundModule = true;
+        } else if (x == 2) {
+            tile.model = { 2 };
+            tile.cliffWall = true;
+        } else if (x == 4) {
+            tile.model = { 3 };
+            tile.groundRimWidth = 0.12f;
+            tile.groundRimDepth = 0.10f;
+        }
+        frame.tiles.push_back(tile);
+    }
+    frame.waterSurfaces.push_back({ .cell = { 0, 1, 0 }, .position = { 0, 1 },
+        .color = { 0.1f, 0.2f, 0.3f, 1.0f } });
+    const auto scene = prepareScene(frame, { 1280, 720 });
+    std::array<std::size_t, 5> drawnCaps {};
+    for (const auto index : scene.opaqueFaceIndices) {
+        const auto& face = scene.isoFaces[index];
+        if (face.material != PreparedSurfaceMaterial::GroundSplat) {
+            CHECK(!face.rockScratchGround);
+            continue;
+        }
+        ++drawnCaps[static_cast<std::size_t>(face.cell.x)];
+        CHECK(face.rockScratchGround == (face.cell.x != 2));
+    }
+    CHECK(drawnCaps[0] > 0);
+    CHECK(drawnCaps[1] > 0);
+    CHECK(drawnCaps[2] > 0);
+    CHECK(drawnCaps[3] == 0);
+    CHECK(drawnCaps[4] > 0);
+    for (const auto index : scene.translucentFaceIndices) {
+        CHECK(!scene.isoFaces[index].rockScratchGround);
+    }
+}
+
 int main()
 {
+    testRockScratchesOnlyUseActualGroundCaps();
     testReadyGroundChunksPreserveGeometryAndPicking();
     testGroundChunkPreparationFallsBackWholeChunks();
     testGroundChunkFrustumCullingKeepsSunCastersAndPicking();

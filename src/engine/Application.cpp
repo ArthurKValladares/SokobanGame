@@ -11,6 +11,7 @@
 #endif
 
 #include "engine/ParticleConfig.hpp"
+#include "engine/PerformanceFixtures.hpp"
 #include "engine/GroundTileGeometry.hpp"
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/CompressedTextureArtifact.hpp"
@@ -2899,6 +2900,14 @@ RenderFrameData Application::buildRenderFrame(
 {
     (void)editorInput;
     FrameArena& arena = beginRenderFrameArena();
+    if (evidenceEffects_ == "rock-scratches") {
+        if (!evidenceRockScratchFixture_) {
+            evidenceRockScratchFixture_ =
+                std::make_unique<RockScratchEvidenceFixture>(&animationCatalog_);
+        }
+        return evidenceRockScratchFixture_->build(assetManifest_, presentationSettings_,
+            gameplayGroundGeometryCache_, arena);
+    }
     if (evidenceGroundRimFixture_) {
         return buildGroundRimEvidenceFrame(arena);
     }

@@ -1471,6 +1471,7 @@ struct IsoFaceRequest {
     bool editorPreview = false;
     bool pickable = false;
     bool groundRimSurface = false;
+    bool rockScratchGround = false;
     std::array<float, 4> groundRimWallCoverage {};
     bool drawable = false;
     Vec2 gridSize {};
@@ -1495,6 +1496,7 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
         .isEditorPreview = request.editorPreview,
         .pickable = request.pickable,
         .groundRimSurface = request.groundRimSurface,
+        .rockScratchGround = request.rockScratchGround,
         .groundRimWallCoverage = request.groundRimWallCoverage,
         .gridSize = request.gridSize,
         .worldOrigin = {
@@ -1597,6 +1599,7 @@ void appendTileFaces(
             tile.effect == RenderSurfaceEffect::GroundSplat && !tile.pickOnly
             ? PreparedSurfaceMaterial::GroundSplat
             : tileMaterial;
+        const bool rockScratchGround = tile.groundTop && !tile.cliffWall;
         const auto* cachedRim = groundRimSurfaces.surfaceForTileIndex(tileIndex);
         const GroundRimSurface& rim = cachedRim ? *cachedRim : emptyRim;
         // Visual scaling can move an edge tile's origin into the neighboring
@@ -1617,6 +1620,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .rockScratchGround = rockScratchGround,
                 .drawable = drawTop && mainSceneVisible && !moduleTop,
                 .gridSize = { width, depth },
                 .material = moduleTop ? PreparedSurfaceMaterial::Standard : topMaterial,
@@ -1705,6 +1709,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .rockScratchGround = rockScratchGround,
                 .drawable = drawTop && mainSceneVisible && rim.count == 0 && !moduleTop,
                 .gridSize = { width, depth },
                 // Keep the logical box for tile selection, but paint picking
@@ -1728,6 +1733,7 @@ void appendTileFaces(
                     .editorPreview = tile.isEditorPreview,
                     .pickable = pickable,
                     .groundRimSurface = true,
+                    .rockScratchGround = rockScratchGround,
                     .groundRimWallCoverage = patch.wallCoverage,
                     .drawable = drawTop && mainSceneVisible,
                     .gridSize = { width, depth },
@@ -1753,6 +1759,7 @@ void appendTileFaces(
                     .editorPreview = tile.isEditorPreview,
                     .pickable = pickable,
                     .groundRimSurface = true,
+                    .rockScratchGround = rockScratchGround,
                     .groundRimWallCoverage = wallCoverage,
                     .drawable = drawTop && mainSceneVisible,
                     .gridSize = { width, depth },

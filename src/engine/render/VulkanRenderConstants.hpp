@@ -26,6 +26,11 @@ struct PointLightUniform {
     Vec4 shadowOptions {};
 };
 
+struct RockScratchUniform {
+    Vec4 startAndAge {};
+    Vec4 endAndDuration {};
+};
+
 // Everything the GPU needs to know about the frame that is not per draw: the
 // camera it renders through, the sun's shadow transform, and the point lights.
 // One uniform buffer, written once per frame per descriptor set.
@@ -56,10 +61,17 @@ struct SceneFrameUniform {
     Vec4 waterRippleMeta {};
     // x is diffuse softness; y is normal detail; z is the roughness floor.
     Vec4 stylizedSurface {};
+    std::array<RockScratchUniform, RenderFrameData::rockScratchCapacity>
+        rockScratches {};
+    // x=count, y=lifetime, z=hold before fading, w=maximum material opacity.
+    Vec4 rockScratchMeta {};
 };
 
 static_assert(sizeof(PointLightUniform) == 48);
-static_assert(sizeof(SceneFrameUniform) == 832);
+static_assert(sizeof(RockScratchUniform) == 32);
+static_assert(offsetof(RockScratchUniform, startAndAge) == 0);
+static_assert(offsetof(RockScratchUniform, endAndDuration) == 16);
+static_assert(sizeof(SceneFrameUniform) == 2896);
 
 // The camera and sun transforms a frame renders through, in the form the
 // uniform buffer wants them. Built by the recorder from the prepared scene's

@@ -559,18 +559,25 @@ public:
                 std::min<std::size_t>(source.waterRippleCount,
                     source.waterRipples.size()));
         };
+        const auto scratchesFor = [](const RenderFrameData& source) {
+            return std::span<const RenderFrameData::RockScratch>(
+                source.rockScratches.data(),
+                std::min(source.rockScratchCount, source.rockScratches.size()));
+        };
         descriptors_.updateFrame(
             configuration_.descriptorFrameIndex,
             frameData.lighting,
             cameraFor(scene),
             false,
-            ripplesFor(frameData));
+            ripplesFor(frameData),
+            scratchesFor(frameData));
         descriptors_.updateFrame(
             configuration_.descriptorFrameIndex,
             previewFrameData ? previewFrameData->lighting : frameData.lighting,
             cameraFor(previewScene ? *previewScene : scene),
             true,
-            ripplesFor(previewFrameData ? *previewFrameData : frameData));
+            ripplesFor(previewFrameData ? *previewFrameData : frameData),
+            scratchesFor(previewFrameData ? *previewFrameData : frameData));
 
         const VkCommandBufferBeginInfo beginInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -2722,7 +2729,8 @@ private:
                     face.isEditorPreview,
                     splatTextures,
                     Vec2 { static_cast<float>(face.cell.x), static_cast<float>(face.cell.y) },
-                    face.groundRimWallCoverage);
+                    face.groundRimWallCoverage,
+                    face.rockScratchGround);
             } else {
                 faceInstance = drawFace(
                     commandBuffer,
@@ -3472,7 +3480,8 @@ private:
                 const uint32_t instance = drawGroundSplatFace(commandBuffer, corners, tile.color,
                     {0,0,1}, frameData.lighting, tile.position - paintOrigin, {1,1},
                     tile.showGrid ? frameData.gridOverlay.color : Vec4 {}, frameData.gridOverlay.width,
-                    false, textures, {static_cast<float>(tile.cell.x), static_cast<float>(tile.cell.y)}, wallWeights, false);
+                    false, textures, {static_cast<float>(tile.cell.x), static_cast<float>(tile.cell.y)},
+                    wallWeights, tile.groundTop && !tile.cliffWall, false);
                 if (slot == 0) firstInstance = instance;
                 else if (instance != firstInstance + slot) throw std::logic_error("Ground chunk instances must be contiguous");
             }
@@ -3490,8 +3499,9 @@ private:
     // Ground tops blended from two textures via a splat map. Lighting,
     // shadowing, grid, and dithering come from the same helpers drawFace uses,
     // so they agree by construction. passData carries the optional layer data
-    // maps, specular strength, the splat region's world origin, and rim wall
-    // coverage. Unpublished wall maps retain the ordinary painted material.
+    // maps, specular strength, the splat region's world origin, scratch
+    // eligibility, and rim wall coverage. Unpublished wall maps retain the
+    // ordinary painted material.
     [[nodiscard]] uint32_t drawGroundSplatFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
@@ -3506,6 +3516,7 @@ private:
         const GroundSplatTextures& textures,
         Vec2 rimTileOrigin,
         const std::array<float, 4>& rimWallCoverage,
+        bool rockScratchGround,
         bool countGeometry = true)
     {
         if (countGeometry) beginQuadDraw(commandBuffer);
@@ -3531,7 +3542,7 @@ private:
                     std::max(lighting.specularStrength, 0.0f),
                     vertices[0].x - worldOrigin.x,
                     vertices[0].y - worldOrigin.y,
-                    0.0f,
+                    rockScratchGround ? 1.0f : 0.0f,
                 },
                 Vec4 { wallHandle(textures.rimWall), wallHandle(textures.rimWallNormal),
                     wallHandle(textures.rimWallOrm), 0.0f },

@@ -55,6 +55,8 @@
 
 namespace sokoban {
 
+class RockScratchEvidenceFixture;
+
 // Non-default process configuration for automated smoke/evidence runs and
 // deterministic renderer validation. Ordinary play uses the defaults.
 struct ApplicationOptions {
@@ -332,6 +334,7 @@ private:
     int evidenceScreen_ = 0;
     std::string evidenceEffects_;
     std::optional<RenderFrameData> evidenceEffectSnapshot_;
+    std::unique_ptr<RockScratchEvidenceFixture> evidenceRockScratchFixture_;
     FrameTimeTelemetry applicationFrameTelemetry_;
     FrameTimeTelemetry applicationIntervalTelemetry_;
     FrameTimeTelemetry applicationPacingTelemetry_;

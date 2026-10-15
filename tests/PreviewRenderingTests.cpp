@@ -1,6 +1,11 @@
 #include "ScopedTestDirectory.hpp"
 #include "GroundGpuFixture.hpp"
 #include "engine/AssetManifest.hpp"
+#include "engine/FrameArena.hpp"
+#include "engine/GroundGeometry.hpp"
+#include "engine/PerformanceFixtures.hpp"
+#include "engine/PresentationSettings.hpp"
+#include "engine/RockScratchConfig.hpp"
 #include "engine/render/PngWriter.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
@@ -582,6 +587,177 @@ void verifyWaterEntryRipples(SDL_Window* window, const std::filesystem::path& ro
         "Vulkan validation reported a water-entry ripple rendering error");
 }
 
+void verifyRockScratches(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    UiContext ui(font);
+    const auto splat = groundSplatTexturesForScreen(
+        [&](std::string_view name) { return manifest.findTextureIdByName(name); }, std::nullopt);
+    verify(splat.valid(), "Rock scratch fixture is missing its ground textures");
+    constexpr float pushDuration = 0.6f;
+    const auto makeFrame = [&](std::optional<float> age, float duration = 0.6f) {
+        RenderFrameData frame;
+        frame.viewMode = RenderViewMode::Isometric3D;
+        frame.levelWidth = 8;
+        frame.levelHeight = 8;
+        frame.levelDepth = 2;
+        frame.skyCloudsEnabled = false;
+        frame.lighting.sun.intensity = 0.0f;
+        frame.lighting.ambient = { .color = { 1, 1, 1 }, .intensity = 1 };
+        // Crop slightly inside the floor: the scratch reaches the uncovered
+        // main-view perimeter as well as the preview's opaque center.
+        frame.cameraOverride = RenderFrameData::CameraOverride {
+            .position = { 4.0f, 4.0f, 4.0f }, .forward = { 0.0f, 0.0f, -1.0f },
+        };
+        frame.groundSplat = splat;
+        for (int y = 0; y < 8; ++y) {
+            for (int x = 0; x < 8; ++x) {
+                frame.tiles.push_back({
+                    .cell = { x, y, 0 },
+                    .position = { static_cast<float>(x), static_cast<float>(y) },
+                    .color = { 1, 1, 1, 1 }, .height = 1.0f, .showGrid = false,
+                    .effect = RenderSurfaceEffect::GroundSplat, .groundTop = true,
+                });
+            }
+        }
+        if (age) {
+            frame.rockScratches[0] = {
+                .start = { 1.0f, 4.0f, 1.0f }, .end = { 7.0f, 4.0f, 1.0f },
+                .ageSeconds = *age, .durationSeconds = duration,
+            };
+            frame.rockScratchCount = 1;
+        }
+        return frame;
+    };
+    const RenderFrameData quiet = makeFrame(std::nullopt);
+    renderer.waitForAssets(renderAssetRequirementsForFrame(quiet));
+    const auto capture = [&](const RenderFrameData& main,
+                             const std::optional<RenderFrameData>& preview = std::nullopt) {
+        for (int frame = 0; frame < 3; ++frame) {
+            ui.beginFrame({ 640, 360 }, {}, false, false);
+            if (preview) ScreenPreviewOverlay::draw(ui, { 640, 360 });
+            ui.endFrame();
+            renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            ImGui::Render();
+#endif
+            renderer.drawFrame(renderer.prepareFrame(main, preview), ui.drawData(), bool(preview));
+            verify(!renderer.hasFatalFailure(), "Rock scratch fixture failed to render");
+        }
+        return renderer.captureRenderedFrame();
+    };
+    const RenderFrameData active = makeFrame(pushDuration + 0.1f);
+    const ImageData baseline = capture(quiet);
+    const ImageData full = capture(active);
+    const ImageData partial = capture(makeFrame(pushDuration * 0.5f));
+    const ImageData fading = capture(makeFrame(config::rockScratchLifetimeSeconds - 1.0f));
+    const ImageData expired = capture(makeFrame(config::rockScratchLifetimeSeconds + pushDuration + 0.1f));
+    const auto fullChange = rippleImageDifference(baseline, full);
+    const auto partialChange = rippleImageDifference(baseline, partial);
+    const auto fadingChange = rippleImageDifference(baseline, fading);
+    const std::filesystem::path evidence = std::filesystem::current_path() /
+        "out" / "rock-scratch-evidence";
+    std::filesystem::create_directories(evidence);
+    saveRippleEvidence(evidence / "baseline.png", baseline);
+    saveRippleEvidence(evidence / "full.png", full);
+    saveRippleEvidence(evidence / "partial.png", partial);
+    saveRippleEvidence(evidence / "fading.png", fading);
+    std::cout << "Rock scratch: full weight=" << fullChange.weight << ", peak=" << fullChange.peak
+              << ", partial weight=" << partialChange.weight << ", fading weight=" << fadingChange.weight << '\n';
+    verify(fullChange.weight > 200.0 && fullChange.peak > 3.0,
+        "Rock scratch did not visibly alter the ground material");
+    verify(partialChange.weight > fullChange.weight * 0.2 &&
+            partialChange.weight < fullChange.weight * 0.8,
+        "Rock scratch was not progressively revealed along the push");
+    verify(fadingChange.weight > 0.0 && fadingChange.weight < fullChange.weight * 0.5,
+        "Rock scratch did not gradually fade before expiring");
+    verify(rippleImageDifference(baseline, expired).weight == 0.0,
+        "Expired rock scratch still changed the ground");
+
+    // Stretch deposition time so the oldest end is gone while the newest
+    // end remains visible. In this vertical camera, +world-X points left.
+    const ImageData orderedFade = capture(makeFrame(config::rockScratchLifetimeSeconds + 0.5f, 4.0f));
+    verify(difference(baseline, orderedFade, baseline.width * 9 / 10, baseline.height * 2 / 5,
+            baseline.width, baseline.height * 3 / 5) == 0.0,
+        "Rock scratch's oldest end outlived its deposited lifetime");
+    verify(difference(baseline, orderedFade, baseline.width / 10, baseline.height * 2 / 5,
+            baseline.width / 5, baseline.height * 3 / 5) > 0.05,
+        "Rock scratch's newer end disappeared with its older end");
+
+    RenderFrameData wrongHeight = active;
+    wrongHeight.rockScratches[0].start.z += 1.0f;
+    wrongHeight.rockScratches[0].end.z += 1.0f;
+    verify(rippleImageDifference(baseline, capture(wrongHeight)).weight == 0.0,
+        "Rock scratch leaked onto a ground layer at another elevation");
+    for (const bool cliff : { false, true }) {
+        RenderFrameData excluded = quiet;
+        for (auto& tile : excluded.tiles) {
+            tile.groundTop = cliff;
+            tile.cliffWall = cliff;
+        }
+        const ImageData excludedBaseline = capture(excluded);
+        excluded.rockScratches = active.rockScratches;
+        excluded.rockScratchCount = active.rockScratchCount;
+        verify(rippleImageDifference(excludedBaseline, capture(excluded)).weight == 0.0,
+            cliff ? "Rock scratch changed a cliff top" : "Rock scratch changed a non-ground surface");
+    }
+    RenderFrameData water = quiet;
+    water.tiles.clear();
+    water.waterSurfaces.push_back({ .size = { 8, 8 }, .color = { .1f, .4f, .6f, .5f }, .elevation = 1 });
+    water.waterGridBounds = { .width = 8, .height = 8 };
+    water.waterAnimationTimeSeconds = 0.7f;
+    const ImageData waterBaseline = capture(water);
+    water.rockScratches = active.rockScratches;
+    water.rockScratchCount = active.rockScratchCount;
+    verify(rippleImageDifference(waterBaseline, capture(water)).weight == 0.0,
+        "Rock scratch changed a water-only frame");
+
+    const ImageData previewBaseline = capture(quiet, quiet);
+    const ImageData mainScratch = capture(active, quiet);
+    const ImageData previewScratch = capture(quiet, active);
+    const uint32_t xBegin = baseline.width * 2 / 5;
+    const uint32_t xEnd = baseline.width * 3 / 5;
+    const uint32_t yBegin = baseline.height * 2 / 5;
+    const uint32_t yEnd = baseline.height * 3 / 5;
+    verify(difference(previewBaseline, mainScratch, xBegin, yBegin, xEnd, yEnd) == 0.0,
+        "Main-view rock scratch leaked into a quiet preview");
+    verify(difference(previewBaseline, previewScratch, xBegin, yBegin, xEnd, yEnd) > 0.05,
+        "Preview ground did not render its own rock scratch");
+    verify(difference(previewBaseline, mainScratch, 0, yBegin, baseline.width / 16, yEnd) > 0.05,
+        "Rock scratch fixture did not cover the visible main-view perimeter");
+    verify(difference(previewBaseline, previewScratch, 0, yBegin, baseline.width / 16, yEnd) == 0.0,
+        "Preview rock scratch leaked into the quiet main view");
+    saveRippleEvidence(evidence / "preview.png", previewScratch);
+
+    // Exercise real push contacts through the gameplay frame builder and the
+    // shipped native cap meshes, retaining the rock, water, and scene lighting.
+    RockScratchEvidenceFixture gameplayFixture;
+    PresentationSettings settings;
+    settings.applyTileScales(manifest);
+    GroundGeometryCache groundCache;
+    FrameArena arena("rock scratch gameplay regression", renderFrameArenaBytes());
+    const RenderFrameData gameplay = gameplayFixture.build(manifest, settings, groundCache, arena);
+    verify(gameplay.rockScratchCount > 0 && !gameplay.waterSurfaces.empty() &&
+            std::ranges::any_of(gameplay.tiles, [](const auto& tile) { return tile.groundModule; }),
+        "Rock scratch gameplay fixture did not emit its native ground, water, and push contacts");
+    renderer.waitForAssets(renderAssetRequirementsForFrame(gameplay));
+    RenderFrameData gameplayQuiet = gameplay;
+    gameplayQuiet.rockScratchCount = 0;
+    const ImageData gameplayBaseline = capture(gameplayQuiet);
+    const ImageData gameplayImage = capture(gameplay);
+    saveRippleEvidence(evidence / "gameplay-baseline.png", gameplayBaseline);
+    saveRippleEvidence(evidence / "gameplay.png", gameplayImage);
+    const auto gameplayChange = rippleImageDifference(gameplayBaseline, gameplayImage);
+    std::cout << "Gameplay rock scratch: weight=" << gameplayChange.weight
+              << ", peak=" << gameplayChange.peak << '\n';
+    verify(gameplayChange.weight > 100.0 && gameplayChange.peak > 2.0,
+        "Real gameplay pushes did not visibly scratch the shipped native ground caps");
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a rock scratch rendering error");
+}
+
 void verifyRimHeavyGroundChunkPublication(SDL_Window* window,
     const std::filesystem::path& root, FontAtlas& font,
     const AssetManifest& manifest, const std::filesystem::path& cache)
@@ -748,6 +924,11 @@ int main(int argc, char** argv)
             verify(vulkanDebug::validationErrorCount() == 0,
                 "Vulkan validation reported a water-entry ripple rendering error");
             std::cout << "Water-entry ripple GPU regression passed\n";
+            return 0;
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--rock-scratches") {
+            verifyRockScratches(window.get(), root, font, manifest, temp.path() / "cache.bin");
+            std::cout << "Rock scratch GPU regression passed\n";
             return 0;
         }
         const auto image = verifyPreview(window.get(), root, font, manifest,

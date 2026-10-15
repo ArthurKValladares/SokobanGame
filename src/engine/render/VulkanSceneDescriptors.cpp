@@ -6,9 +6,11 @@
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 #include "engine/render/WaterConfig.hpp"
+#include "engine/RockScratchConfig.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <stdexcept>
@@ -627,7 +629,8 @@ void VulkanSceneDescriptors::updateFrame(
     const RenderFrameData::Lighting& lighting,
     const SceneCamera& camera,
     bool preview,
-    std::span<const RenderFrameData::WaterRipple> waterRipples) const
+    std::span<const RenderFrameData::WaterRipple> waterRipples,
+    std::span<const RenderFrameData::RockScratch> rockScratches) const
 {
     const uint32_t internalSetIndex = setIndex * 2 + (preview ? 1U : 0U);
     if (internalSetIndex >= frameBuffers_.size() ||
@@ -698,6 +701,28 @@ void VulkanSceneDescriptors::updateFrame(
         lighting.stylization.normalDetail,
         lighting.stylization.roughnessFloor,
         0.0f,
+    };
+    std::size_t scratchCount = 0;
+    const auto finite = [](Vec3 point) {
+        return std::isfinite(point.x) && std::isfinite(point.y) &&
+            std::isfinite(point.z);
+    };
+    for (const RenderFrameData::RockScratch& scratch : rockScratches) {
+        if (!finite(scratch.start) || !finite(scratch.end) ||
+            !std::isfinite(scratch.ageSeconds) || !std::isfinite(scratch.durationSeconds) ||
+            scratch.ageSeconds < 0.0f || scratch.durationSeconds < 0.0f ||
+            scratch.ageSeconds >= config::rockScratchLifetimeSeconds + scratch.durationSeconds) {
+            continue;
+        }
+        if (scratchCount == uniform.rockScratches.size()) break;
+        uniform.rockScratches[scratchCount++] = {
+            .startAndAge = { scratch.start.x, scratch.start.y, scratch.start.z, scratch.ageSeconds },
+            .endAndDuration = { scratch.end.x, scratch.end.y, scratch.end.z, scratch.durationSeconds },
+        };
+    }
+    uniform.rockScratchMeta = {
+        static_cast<float>(scratchCount), config::rockScratchLifetimeSeconds,
+        config::rockScratchHoldSeconds, config::rockScratchOpacity,
     };
     std::memcpy(
         frameBuffers_[internalSetIndex].mapped(),

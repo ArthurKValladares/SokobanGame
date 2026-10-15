@@ -64,13 +64,14 @@ public:
     void update(const Resources& resources) const;
     void update(uint32_t setIndex, const Resources& resources) const;
     void destroy();
-    // Writes the whole per-frame uniform: camera, sun transform, lights.
+    // Writes per-view camera, lighting, water ripples, and ground scratches.
     void updateFrame(
         uint32_t setIndex,
         const RenderFrameData::Lighting& lighting,
         const SceneCamera& camera,
         bool preview = false,
-        std::span<const RenderFrameData::WaterRipple> waterRipples = {}) const;
+        std::span<const RenderFrameData::WaterRipple> waterRipples = {},
+        std::span<const RenderFrameData::RockScratch> rockScratches = {}) const;
 
     [[nodiscard]] VkDescriptorSetLayout layout() const { return layout_; }
     [[nodiscard]] VkDescriptorSetLayout textureLayout() const

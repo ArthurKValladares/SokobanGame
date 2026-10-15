@@ -3,6 +3,7 @@
 #include "engine/ElevatorVisuals.hpp"
 #include "engine/PresentationTransactionBuilder.hpp"
 #include "engine/ParticleConfig.hpp"
+#include "engine/RockScratchConfig.hpp"
 #include "engine/render/AnimationConfig.hpp"
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/WaterGeometry.hpp"
@@ -499,6 +500,7 @@ void GameplayPresentation::resetEntities(const GameState& state)
     controls_.clear();
     turretRecoils_.clear();
     clearWaterRipples();
+    clearRockScratches();
     syncToGameState(state);
 }
 
@@ -677,6 +679,144 @@ void GameplayPresentation::appendWaterRippleRenderData(RenderFrameData& frame) c
             ripple.ageSeconds < config::waterImpactRippleLifetimeSeconds &&
             frame.waterRippleCount < frame.waterRipples.size()) {
             frame.waterRipples[frame.waterRippleCount++] = ripple;
+        }
+    }
+}
+
+void GameplayPresentation::scheduleRockScratches(
+    const Level& level,
+    const GameplaySession::Action& action,
+    float elapsedSeconds)
+{
+    if (action.reversed) {
+        clearRockScratches();
+        return;
+    }
+    if (!action.playerPushing && !action.playerPulling) {
+        return;
+    }
+    constexpr float epsilon = 0.0001f;
+    const auto retain = [&](RenderFrameData::RockScratch scratch) {
+        if (scratch.ageSeconds >=
+            config::rockScratchLifetimeSeconds + scratch.durationSeconds) {
+            return;
+        }
+        // Ages share the current presentation time. Sort by actual deposition
+        // start rather than admission order: a deferred action may have been
+        // admitted before a push that is already running.
+        if (rockScratchCount_ == rockScratches_.size()) {
+            if (scratch.ageSeconds > rockScratches_[0].ageSeconds) {
+                return;
+            }
+            std::move(rockScratches_.begin() + 1, rockScratches_.end(),
+                rockScratches_.begin());
+            --rockScratchCount_;
+        }
+        std::size_t position = rockScratchCount_;
+        while (position > 0 &&
+            rockScratches_[position - 1].ageSeconds < scratch.ageSeconds) {
+            rockScratches_[position] = rockScratches_[position - 1];
+            --position;
+        }
+        rockScratches_[position] = scratch;
+        ++rockScratchCount_;
+    };
+    for (const ActionMotionTrack& track : action.presentation.motions) {
+        if (track.target.kind != EntityKind::Movable ||
+            track.durationSeconds <= epsilon) {
+            continue;
+        }
+        const GameState::Movable* rock = nullptr;
+        for (std::size_t index = 0; index < action.before.movables.size(); ++index) {
+            if (movableTarget(action.before.movables[index], index) == track.target) {
+                rock = &action.before.movables[index];
+                break;
+            }
+        }
+        if (rock == nullptr ||
+            rock->type != TileType::Rock || rock->fallen || rock->dead) {
+            continue;
+        }
+        const Vec3 motionDelta = track.to - track.from;
+        const bool alongX = std::abs(motionDelta.x) > epsilon;
+        const bool alongY = std::abs(motionDelta.y) > epsilon;
+        if (alongX == alongY || motionDelta.z > epsilon ||
+            std::abs(track.from.z - std::round(track.from.z)) > epsilon) {
+            continue;
+        }
+        // Grid motion travels horizontally before dropping. Preserve only the
+        // ground contact portion when a rock is dragged off a ledge or into
+        // water; it stops depositing when it leaves supporting ground.
+        const Vec3 delta { motionDelta.x, motionDelta.y, 0.0f };
+        const float horizontalDistance = std::abs(delta.x) + std::abs(delta.y);
+        const float duration = track.durationSeconds * horizontalDistance /
+            (horizontalDistance + std::abs(motionDelta.z));
+        // Motion tracks already split at portals, so no segment is ever drawn
+        // between the entrance and exit. World coordinates use tile centres.
+        const Vec3 start = track.from + Vec3 { 0.5f, 0.5f, 0.0f };
+        const Vec3 end = start + delta;
+        const float fromAxis = alongX ? start.x : start.y;
+        const float toAxis = alongX ? end.x : end.y;
+        std::vector<float> boundaries { 0.0f, 1.0f };
+        const float minimum = std::min(fromAxis, toAxis);
+        const float maximum = std::max(fromAxis, toAxis);
+        for (float boundary = std::floor(minimum) + 1.0f;
+             boundary < maximum - epsilon; boundary += 1.0f) {
+            boundaries.push_back((boundary - fromAxis) / (toAxis - fromAxis));
+        }
+        std::ranges::sort(boundaries);
+        for (std::size_t index = 1; index < boundaries.size(); ++index) {
+            const float from = boundaries[index - 1];
+            const float to = boundaries[index];
+            const Vec3 middle = start + delta * ((from + to) * 0.5f);
+            const GridPosition3 cell {
+                static_cast<int>(std::floor(middle.x)),
+                static_cast<int>(std::floor(middle.y)),
+                static_cast<int>(std::lround(middle.z)),
+            };
+            const auto support = level.supportingTileAt(cell);
+            if (!support || !tileTypeIsGround(*support)) {
+                continue;
+            }
+            retain({
+                .start = start + delta * from,
+                .end = start + delta * to,
+                .ageSeconds = elapsedSeconds - track.startSeconds -
+                    duration * from,
+                .durationSeconds = duration * (to - from),
+            });
+        }
+    }
+}
+
+void GameplayPresentation::advanceRockScratches(float dt)
+{
+    std::size_t retained = 0;
+    for (std::size_t index = 0; index < rockScratchCount_; ++index) {
+        auto scratch = rockScratches_[index];
+        scratch.ageSeconds += std::max(dt, 0.0f);
+        if (scratch.ageSeconds <
+            config::rockScratchLifetimeSeconds + scratch.durationSeconds) {
+            rockScratches_[retained++] = scratch;
+        }
+    }
+    rockScratchCount_ = retained;
+}
+
+void GameplayPresentation::clearRockScratches()
+{
+    rockScratchCount_ = 0;
+}
+
+void GameplayPresentation::appendRockScratchRenderData(RenderFrameData& frame) const
+{
+    for (std::size_t index = 0; index < rockScratchCount_; ++index) {
+        const auto& scratch = rockScratches_[index];
+        if (scratch.ageSeconds >= 0.0f &&
+            scratch.ageSeconds <
+                config::rockScratchLifetimeSeconds + scratch.durationSeconds &&
+            frame.rockScratchCount < frame.rockScratches.size()) {
+            frame.rockScratches[frame.rockScratchCount++] = scratch;
         }
     }
 }

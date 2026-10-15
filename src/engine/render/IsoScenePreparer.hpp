@@ -118,6 +118,9 @@ struct PreparedIsoFace {
     bool pickable = false;
     // Cap subpatches keep world-grid coordinates even in assignment-color mode.
     bool groundRimSurface = false;
+    // Only actual ground caps receive rock scratches; cliff tops share the
+    // same material shader but retain their own eligibility.
+    bool rockScratchGround = false;
     std::array<float, 4> groundRimWallCoverage {};
     Vec2 gridSize {};
     Vec2 worldOrigin {};

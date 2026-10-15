@@ -20,6 +20,9 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 - Animated enemies that track and attack adjacent players, participate in
   physical movement rules, and support skeleton-driven held-item attachments.
 - Animated mirror beams, destination ghosts, sound, and particle effects.
+- Pushed and pulled rocks leave uneven ground scratches that appear along their
+  travel and fade from oldest to newest over six seconds. Undo, restart, and
+  screen changes clear the trails.
 - Pixel-blur world transitions when entering a puzzle from the overworld and
   returning after completion.
 - Stylized procedural water with cellular ripples, two-tone shading,

@@ -2089,6 +2089,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     applyGameplayAuthoredRotations(frame, input.level);
     appendGameplayEntities(frame, input);
     input.presentation.appendWaterRippleRenderData(frame);
+    input.presentation.appendRockScratchRenderData(frame);
     appendMirrorPreview(frame, input);
     appendControlComponents(frame, input);
     applyScrollingMaterials(frame, input);
@@ -2118,6 +2119,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(
     applyGameplayAuthoredRotations(frame, input.level);
     appendGameplayEntities(frame, input);
     input.presentation.appendWaterRippleRenderData(frame);
+    input.presentation.appendRockScratchRenderData(frame);
     appendMirrorPreview(frame, input, &arena);
     appendControlComponents(frame, input);
     applyScrollingMaterials(frame, input);
