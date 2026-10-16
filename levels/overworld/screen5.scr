@@ -19,6 +19,47 @@
 @lectern {"cell":[0,5,1],"text":"Move with <!Move Up!>, <!Move Left!>, <!Move Down!>, <!Move Right!>"}
 @lectern {"cell":[2,5,1],"text":"You can move into a rock to push them."}
 @lectern {"cell":[7,6,1],"text":"Press 'Space' to activate the mirror."}
+@decoration {"model":"TileDecorationGrassCorner01","position":[7.5,3.5,1.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationGrassCorner01","position":[1.5,4.5,1.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationGrassEnd01","position":[8.5,4.5,1.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationGrassEnd01","position":[5.5,6.5,1.0],"rotation":[0.0,0.0,90.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationGrassEdge01","position":[1.5,6.5,1.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationGrassEdge01","position":[6.5,4.5,1.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationGrassEdge01","position":[4.5,0.5,1.0],"rotation":[0.0,0.0,90.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationPebblesCorner01","position":[7.5,1.5,1.0],"rotation":[0.0,0.0,90.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationPebblesCorner01","position":[1.5,1.5,1.0],"rotation":[0.0,0.0,270.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationPebblesEdge01","position":[0.5,0.5,1.0],"rotation":[0.0,0.0,90.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationPebblesEnd01","position":[8.5,5.5,2.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationPebblesEnd01","position":[1.5,3.5,2.0],"rotation":[0.0,0.0,270.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationPebblesEdge01","position":[8.5,2.5,2.0],"rotation":[0.0,0.0,90.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationPebblesEdge01","position":[8.5,3.5,2.0],"rotation":[0.0,0.0,90.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationMossStrip01","position":[4.5,5.5,1.0],"rotation":[0.0,0.0,90.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationMossEnd01","position":[6.5,3.5,2.0],"rotation":[0.0,0.0,90.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationMossEnd01","position":[8.5,1.5,2.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationMossEnd01","position":[5.5,1.5,1.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationMossEdge01","position":[5.5,0.5,1.0],"rotation":[0.0,0.0,270.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationPebblesEdge01","position":[3.5,5.5,2.0],"rotation":[0.0,0.0,180.0],"scale":[1.0,1.0,1.0]}
+@decoration {"model":"TileDecorationFenceSlats01","position":[7.940000057220459,2.5,1.0],"rotation":[-1.8900748491287231,0.0,-90.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFencePost01","position":[7.940000057220459,3.0,1.0],"rotation":[-1.8900748491287231,0.0,-90.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFencePost01","position":[7.940000057220459,2.0,1.0],"rotation":[-1.8900748491287231,0.0,-90.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFenceSlats04","position":[7.940000057220459,3.4791665077209473,1.0],"rotation":[-1.8900748491287231,0.0,-90.0],"scale":[0.9583332538604736,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFencePost04","position":[7.940000057220459,3.9583332538604736,1.0],"rotation":[-1.8900748491287231,0.0,-90.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFenceSlats03","position":[5.5208330154418945,6.059999942779541,1.0],"rotation":[-1.8900748491287231,0.0,180.0],"scale":[0.9583334922790527,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFencePost03","position":[6.0,6.059999942779541,1.0],"rotation":[-1.8900748491287231,0.0,180.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFencePost03","position":[5.041666507720947,6.059999942779541,1.0],"rotation":[-1.8900748491287231,0.0,180.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFenceSlats01","position":[3.4791665077209473,4.059999942779541,1.0],"rotation":[-1.8900748491287231,0.0,180.0],"scale":[0.9583332538604736,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFencePost01","position":[3.9583332538604736,4.059999942779541,1.0],"rotation":[-1.8900748491287231,0.0,180.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFencePost01","position":[3.0,4.059999942779541,1.0],"rotation":[-1.8900748491287231,0.0,180.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFenceSlats03","position":[2.5,4.059999942779541,1.0],"rotation":[-1.8900748491287231,0.0,180.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFencePost03","position":[2.0,4.059999942779541,1.0],"rotation":[-1.8900748491287231,0.0,180.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFenceSlats01","position":[1.5208333730697632,4.059999942779541,1.0],"rotation":[-1.8900748491287231,0.0,180.0],"scale":[0.9583332538604736,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFencePost01","position":[1.0416667461395264,4.059999942779541,1.0],"rotation":[-1.8900748491287231,0.0,180.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFenceSlats04","position":[7.940000057220459,5.5208330154418945,1.0],"rotation":[-1.8900748491287231,0.0,-90.0],"scale":[0.9583334922790527,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFencePost04","position":[7.940000057220459,6.0,1.0],"rotation":[-1.8900748491287231,0.0,-90.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFencePost04","position":[7.940000057220459,5.041666507720947,1.0],"rotation":[-1.8900748491287231,0.0,-90.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFenceSlats01","position":[6.4791669845581055,4.059999942779541,1.0],"rotation":[-1.8900748491287231,0.0,180.0],"scale":[0.9583334922790527,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFencePost01","position":[6.958333492279053,4.059999942779541,1.0],"rotation":[-1.8900748491287231,0.0,180.0],"scale":[1.0,1.0,1.0005443096160889]}
+@decoration {"model":"TileDecorationFencePost01","position":[6.0,4.059999942779541,1.0],"rotation":[-1.8900748491287231,0.0,180.0],"scale":[1.0,1.0,1.0005443096160889]}
 
 @layer 0
 XSSXAaXAX
