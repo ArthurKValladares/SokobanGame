@@ -863,7 +863,7 @@ bool Driver::settled() const
     return !session_.moving() &&
         (rules::anyPlayerDead(session_.state()) ||
          session_.automaticMotionPaused() ||
-         !rules::hasPendingMotion(level_, session_.state()));
+         !rules::hasPendingMotion(level_, session_.state(), false));
 }
 
 bool Driver::runUntilSettled()
@@ -871,6 +871,13 @@ bool Driver::runUntilSettled()
     float elapsedSeconds = 0.0f;
     for (int transition = 0; transition < maximumSettleTransitions;
          ++transition) {
+        // Patrol motors repeat indefinitely. At a completion boundary, leave
+        // their next beat for the next recorded input, while still settling
+        // finite consequences such as slides. Admission below runs once even
+        // for a blocked input, so waiting against a wall advances the patrol.
+        if (transition > 0 && settled()) {
+            return true;
+        }
         // This is GameplayLoop's mechanical core without presentation work:
         // admit everything that can run concurrently, advance exactly to the
         // next completion, commit it, and repeat from the new world state.

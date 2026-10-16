@@ -14,6 +14,7 @@
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/RenderFrameParts.hpp"
 #include "engine/Rules.hpp"
+#include "engine/RobotVisuals.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
@@ -54,6 +55,7 @@ const AssetManifest& testManifest(bool components = false)
         { "name": "Witch", "path": "w.glb", "geometry": "skinned" },
         { "name": "Bard", "path": "b.glb", "geometry": "skinned" },
         { "name": "Wardrobe", "path": "wardrobe.glb", "preserveSourceScale": true },
+        { "name": "Robot", "path": "robot.glb", "geometry": "skinned", "preserveSourceScale": true },
         { "name": "CliffWallIslandA", "path": "cliff_a.glb", "preserveSourceScale": true },
         { "name": "CliffWallIslandB", "path": "cliff_b.glb", "preserveSourceScale": true }
       ],
@@ -62,10 +64,15 @@ const AssetManifest& testManifest(bool components = false)
         { "name": "Move", "path": "a.glb", "role": "player-move" },
         { "name": "Push", "path": "a.glb", "role": "player-push" },
         { "name": "Death", "path": "a.glb", "role": "player-death" },
-        { "name": "DeadIdle", "path": "a.glb", "role": "player-dead-idle" }
+        { "name": "DeadIdle", "path": "a.glb", "role": "player-dead-idle" },
+        { "name": "RobotDrive", "path": "robot.glb", "clip": 0 }
       ],
       "tiles": [
         { "tile": "Wall", "model": "Bricks" },
+        { "tile": "Robot North", "model": "Robot" },
+        { "tile": "Robot East", "model": "Robot" },
+        { "tile": "Robot South", "model": "Robot" },
+        { "tile": "Robot West", "model": "Robot" },
         { "tile": "Cliff Wall", "model": "CliffWallIslandA" },
         { "tile": "Cliff Wall 02", "model": "CliffWallIslandB" },
         { "tile": "Ladder", "model": "Ladder" },
@@ -1176,10 +1183,60 @@ void testCropFramesTheSubjectCell()
     CHECK(tiny.y == 0);
 }
 
+void testRobotEditorAndThumbnailUseFrozenDrivePose()
+{
+    TEST("robot editor and thumbnail use frozen drive pose");
+    const auto& manifest = testManifest();
+    const auto drive = manifest.animationIdByName("RobotDrive");
+    const auto model = manifest.modelIdByName("Robot");
+    std::set<uint64_t> instances;
+    for (const auto tile : { TileType::RobotNorth, TileType::RobotEast,
+             TileType::RobotSouth, TileType::RobotWest }) {
+        const auto frame = tileThumbnails::buildBakeFrame(tile, manifest, {});
+        const auto found = std::ranges::find(frame.tiles, model, &RenderFrameData::Tile::model);
+        CHECK(found != frame.tiles.end());
+        if (found == frame.tiles.end()) continue;
+        CHECK(found->animation == drive);
+        CHECK(found->animationInstanceId != 0);
+        CHECK(found->animationTimeSeconds == 0.0f);
+        CHECK(!found->animationCrossfades);
+        CHECK(instances.insert(found->animationInstanceId).second);
+        CHECK(renderAssetRequirementsForFrame(frame).contains(drive));
+    }
+    LevelEditor editor;
+    editor.newDocument(5, 1, false);
+    CHECK(editor.setCell({ 1, 0, 1 }, TileType::RobotEast));
+    CHECK(editor.setCell({ 3, 0, 1 }, TileType::RobotWest));
+    const auto frame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = {},
+        .worldAnimationTimeSeconds = 17.5f,
+    });
+    instances.clear();
+    std::size_t robots = 0;
+    for (const auto& tile : frame.tiles) {
+        if (tile.model != model || tile.pickOnly) continue;
+        ++robots;
+        CHECK(tile.animation == drive);
+        CHECK(tile.animationTimeSeconds == 0.0f);
+        CHECK(tile.animationInstanceId != 0);
+        CHECK(instances.insert(tile.animationInstanceId).second);
+    }
+    CHECK(robots == 2);
+    CHECK(renderAssetRequirementsForLevel(editor.documentToLevel(), manifest).contains(drive));
+    const Level::Decoration decoration {
+        .model = "Robot", .position = { 2.5f, 0.5f, 1.0f },
+    };
+    const auto decor = renderFrameParts::decorationVisual(decoration, manifest, false);
+    CHECK(decor.animation == drive);
+    CHECK(decor.animationInstanceId != 0);
+    CHECK(decor.animationTimeSeconds == 0.0f);
+}
+
 } // namespace
 
 int main()
 {
+    testRobotEditorAndThumbnailUseFrozenDrivePose();
     testAssetPathsAreUniqueAndTidy();
     testAirAndWaterAreNotBaked();
     testEdgeControlsRetainAuthoredPlacementAndEnergyMaterials();

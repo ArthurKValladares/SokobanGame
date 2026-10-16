@@ -1,0 +1,30 @@
+@lectern {"cell":[1,1,2],"text":"Robot workshop\n\nThe robot below you moves along the axis shown by its top arrows. Its end lights show its current heading. When its path is blocked, it turns back.\n\nStep onto the raised ledge to leave your ride. Heroes can push robots to reposition them and stand on top to travel with them.\n\nThe second robot pushes one rock toward the water. It will stop and reverse before driving itself off the floor. Two units in a row block its push.\n\nUse <!Undo!> or restart to try again."}
+@layer 0
+............
+............
+............
+............
+............
+.........WW.
+............
+............
+
+@layer 1
+############
+#....      #
+#.}      # #
+#.         #
+#          #
+#   } R    #
+#          #
+############
+
+@layer 2
+            
+ t  E       
+  Q         
+            
+            
+            
+            
+            

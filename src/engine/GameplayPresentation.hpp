@@ -19,6 +19,13 @@ public:
     GameplayPresentation();
 
     struct EntityVisual {
+        struct RobotDriveSample {
+            // Motion vector storage survives scheduler action moves. This is
+            // an identity only; completed actions' pointers are never read.
+            const ActionMotionTrack* timeline = nullptr;
+            float signedTravel = 0.0f;
+            bool complete = false;
+        };
         EntityTarget target;
         Vec3 renderPosition {};
         Vec3 animationStart {};
@@ -27,6 +34,11 @@ public:
         float animationDuration = 0.0f;
         float animationSecondsPerTile = 0.0f;
         bool moving = false;
+        // Signed physical tread travel, independent of idle/world clocks.
+        // Per-action deltas make seeks idempotent and let deferred slide
+        // continuations inherit the phase reached by their cause.
+        float robotDriveTimeSeconds = 0.0f;
+        std::vector<RobotDriveSample> robotDriveSamples;
     };
 
     struct AnimatedActorVisual {

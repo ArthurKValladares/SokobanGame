@@ -1905,8 +1905,67 @@ void testFastPressurePlateCrossingSerializesAndRetriesDistantMovement()
     CHECK(restored.state() == initial);
 }
 
+void testRobotPatrolRepeatsWithoutInputAndRestoresAndUndoes()
+{
+    TEST("robotPatrolRepeatsWithoutInputAndRestoresAndUndoes");
+    const Level level = makeLevel({ { ".....", "....." }, { " } # ", " C   " } });
+    GameplaySession session;
+    session.reset(level);
+    const GameState initial = session.state();
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(!session.tryStartNextAction(level, {}));
+    CHECK(session.activeAction().after.movables[0].cell == cell(2, 0, 1));
+    finishAction(session);
+    const GameState beforeReversal = session.state();
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeAction().after.movables[0].cell == cell(2, 0, 1));
+    CHECK(rules::robotDirection(session.activeAction().after.movables[0]) == MoveDirection::Left);
+    finishAction(session);
+    CHECK(session.playerMoveCount() == 0);
+    CHECK(session.undoCount() == 2);
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == session.state());
+    restored.queueUndo();
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state() == beforeReversal);
+    CHECK(!restored.tryStartNextAction(level, {}));
+    CHECK(restored.automaticMotionPaused());
+    restored.queueUndo();
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state() == initial);
+    restored.queueRestart();
+    // Restarting an unchanged opening state is harmless and leaves no action.
+    CHECK(!restored.tryStartNextAction(level, {}));
+}
+
+void testRobotPatrolAndUnrelatedPlayerMoveRunConcurrently()
+{
+    TEST("robotPatrolAndUnrelatedPlayerMoveRunConcurrently");
+    const Level level = makeLevel({ { ".......", ".......", "......." },
+        { " }     ", "       ", " C     " } });
+    GameplaySession session;
+    session.reset(level);
+    CHECK(session.tryStartNextAction(level, {}));
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 2);
+    session.advanceActiveAction(session.stepDurationSeconds());
+    session.completeActiveAction();
+    CHECK(session.state().movables[0].cell == cell(2, 0, 1));
+    CHECK(session.state().players[0].cell == cell(2, 2, 1));
+    CHECK(session.playerMoveCount() == 1);
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == session.state());
+}
+
 int main()
 {
+    testRobotPatrolRepeatsWithoutInputAndRestoresAndUndoes();
+    testRobotPatrolAndUnrelatedPlayerMoveRunConcurrently();
     testCyclicSlideSnapshotRestoresReachableEndpointAndRejectsUnreachableEndpoint();
     testLongFiniteSlideSnapshotRestoresAcrossPlannerContinuations();
     testSnapshotReplayStepBudgetAcceptsExactLimitAndRejectsNextStep();

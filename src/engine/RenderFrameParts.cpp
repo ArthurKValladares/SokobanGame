@@ -1,6 +1,7 @@
 #include "engine/RenderFrameParts.hpp"
 
 #include "engine/Rules.hpp"
+#include "engine/RobotVisuals.hpp"
 #include "engine/render/MirrorConfig.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/SceneConfig.hpp"
@@ -439,15 +440,17 @@ RenderFrameData::Tile decorationVisual(
     constexpr float radiansPerDegree =
         3.14159265358979323846f / 180.0f;
     const RenderModel model = manifest.modelIdByName(decoration.model);
+    const bool robot = manifest.model(model).name == "Robot";
+    const GridPosition3 cell {
+        static_cast<int>(std::floor(decoration.position.x)),
+        static_cast<int>(std::floor(decoration.position.y)),
+        static_cast<int>(std::floor(decoration.position.z)),
+    };
     const Vec3 pivot = manifest.model(model).preserveSourceScale
         ? Vec3 { 0.0f, 0.0f, 0.0f }
         : Vec3 { 0.5f, 0.5f, 0.0f };
     return {
-        .cell = {
-            static_cast<int>(std::floor(decoration.position.x)),
-            static_cast<int>(std::floor(decoration.position.y)),
-            static_cast<int>(std::floor(decoration.position.z)),
-        },
+        .cell = cell,
         .position = {
             decoration.position.x - decoration.scale.x * 0.5f,
             decoration.position.y - decoration.scale.y * 0.5f,
@@ -461,6 +464,11 @@ RenderFrameData::Tile decorationVisual(
         .isEditorPreview = preview,
         .affectsCameraFit = false,
         .model = model,
+        .animation = robot ? robotDriveAnimation(manifest) : noAnimation,
+        .animationInstanceId = robot
+            ? authoredAnimationInstance(TileType::RobotNorth, cell) ^ (uint64_t { 1 } << 61)
+            : uint64_t { 0 },
+        .animationCrossfades = !robot,
         .modelTransform = RenderFrameData::ModelTransform {
             .translation = decoration.position,
             .rotationRadians = {

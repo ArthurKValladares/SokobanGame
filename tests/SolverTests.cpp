@@ -776,6 +776,24 @@ void testProgressCanCancelSearch()
     CHECK(result.statistics == observed.statistics);
 }
 
+void testRobotPatrolAndHeroSwitchSolutionsReplay()
+{
+    TEST("robotPatrolAndHeroSwitchSolutionsReplay");
+    const Level::Definition definition {
+        .layers = { { ".....", ".....", ".....", ".....", "....." },
+            { "QE   ", "     ", "}  # ", "     ", "KE   " } },
+    };
+    const Level level = Level::loadFromDefinition(definition, "robot hero switch solver");
+    CHECK(solver::detail::RelaxedHeuristic(level).estimate(rules::initialState(level)) == 0);
+    const auto result = solver::solve(level, { .maxStates = 2'000 });
+    CHECK(result.status == solver::Status::Solved);
+    if (result.status != solver::Status::Solved) return;
+    CHECK(std::ranges::find(result.inputs, solution::Input::CycleHero) != result.inputs.end());
+    const auto recording = solution::record(level, definition, result.inputs, "robot hero switch solver");
+    CHECK_MESSAGE(recording.solved, recording.error.c_str());
+    if (recording.solved) CHECK(solution::replay(level, recording.solution).passed);
+}
+
 void testStatusNamesAreStable()
 {
     TEST("statusNamesAreStable");
@@ -791,6 +809,7 @@ void testStatusNamesAreStable()
 int main()
 {
     try {
+        testRobotPatrolAndHeroSwitchSolutionsReplay();
         testRelaxedHeuristicFallsBackForMovableMirrors();
         testRelaxedWalkHeuristicBoundsRemainingInputs();
         testSearchStrategiesPreserveForcedPushCostAndReplay();

@@ -11,6 +11,7 @@
 #include "engine/GameplayPresentation.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/RockScratchConfig.hpp"
+#include "engine/RobotVisuals.hpp"
 #include "engine/PresentationTransactionBuilder.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/render/LightingConfig.hpp"
@@ -91,6 +92,7 @@ const AssetManifest& testManifest()
         },
         { "name": "Mirror", "path": "mirror.gltf" },
         { "name": "Turret", "path": "turret.gltf" },
+        { "name": "Robot", "path": "robot.glb", "preserveSourceScale": true },
         { "name": "Lectern", "path": "lectern.glb" },
         {
           "name": "Decoration",
@@ -171,7 +173,8 @@ const AssetManifest& testManifest()
         { "name": "Push", "path": "a.glb", "role": "player-push" },
         { "name": "Death", "path": "a.glb", "role": "player-death" },
         { "name": "DeadIdle", "path": "a.glb", "role": "player-dead-idle" },
-        { "name": "EnemyAttack", "path": "a.glb", "role": "enemy-attack" }
+        { "name": "EnemyAttack", "path": "a.glb", "role": "enemy-attack" },
+        { "name": "RobotDrive", "path": "robot.glb", "clip": 0 }
       ],
       "tiles": [
         { "tile": "Wall", "model": "Bricks" },
@@ -190,6 +193,10 @@ const AssetManifest& testManifest()
         { "tile": "Turret East", "model": "Turret" },
         { "tile": "Turret South", "model": "Turret" },
         { "tile": "Turret West", "model": "Turret" },
+        { "tile": "Robot North", "model": "Robot" },
+        { "tile": "Robot East", "model": "Robot" },
+        { "tile": "Robot South", "model": "Robot" },
+        { "tile": "Robot West", "model": "Robot" },
         { "tile": "Player", "model": "Hero" },
         { "tile": "Enemy", "model": "Enemy" },
         { "tile": "Rotator Clockwise", "model": "RotatorClockwise" },
@@ -224,7 +231,8 @@ AnimationCatalog testAnimationCatalog()
         { "animation": "Push", "speed": 1.0, "duration": 1.0 },
         { "animation": "Death", "speed": 1.0, "duration": 1.0 },
         { "animation": "DeadIdle", "speed": 1.0, "duration": 0.0 },
-        { "animation": "EnemyAttack", "speed": 1.0, "duration": 1.0 }
+        { "animation": "EnemyAttack", "speed": 1.0, "duration": 1.0 },
+        { "animation": "RobotDrive", "speed": 1.0, "duration": 2.0 }
       ],
       "uses": [
         { "id": "player.idle", "animation": "Idle", "speed": 1.0 },
@@ -3327,6 +3335,205 @@ void testTurretMovablesUseTheirModelAndOrientation()
         }));
 }
 
+void testRobotModelsFollowRuntimeHeadingAndEditorOrientation()
+{
+    TEST("robot models follow runtime heading and editor orientation");
+    const Level level = Level::loadFromLayers({
+        { "....." },
+        { "C{}:;" },
+    }, "robot presentation frame");
+    GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    const auto build = [&](bool moving, const GameState& projected) {
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(),
+            .level = level,
+            .state = state,
+            .moving = moving,
+            .projectedState = projected,
+            .presentation = presentation,
+            .settings = {},
+        });
+    };
+    const auto checkRobots = [&](const RenderFrameData& frame,
+                                 std::array<uint32_t, 4> expected) {
+        uint64_t previousInstance = 0;
+        for (std::size_t index = 0; index < expected.size(); ++index) {
+            const auto found = std::ranges::find_if(frame.tiles, [&](const auto& tile) {
+                return tile.cell == GridPosition3 { static_cast<int>(index) + 1, 0, 1 } &&
+                    tile.model == testManifest().modelIdByName("Robot") &&
+                    !tile.pickOnly;
+            });
+            CHECK(found != frame.tiles.end());
+            if (found != frame.tiles.end()) {
+                CHECK(found->modelRotationQuarterTurns == expected[index]);
+                CHECK(found->color == Vec4(1.0f, 1.0f, 1.0f, 1.0f));
+                CHECK(near(found->height, 1.0f));
+                CHECK(found->animation == robotDriveAnimation(testManifest()));
+                CHECK(found->animationInstanceId != 0);
+                CHECK(found->animationInstanceId != previousInstance);
+                previousInstance = found->animationInstanceId;
+                CHECK(found->animationLoops);
+                CHECK(!found->animationCrossfades);
+                CHECK(near(found->animationTimeSeconds, 0.0f));
+            }
+        }
+    };
+    checkRobots(build(false, {}), { 2, 3, 0, 1 });
+    GameState reversed = state;
+    reversed.movables[0].quarterTurns = 2;
+    // Leading lamps update during the reversal beat, before translation.
+    checkRobots(build(true, reversed), { 0, 3, 0, 1 });
+    state = reversed;
+    presentation.resetEntities(state);
+    checkRobots(build(false, {}), { 0, 3, 0, 1 });
+
+    LevelEditor editor;
+    editor.newDocument(5, 1, false);
+    constexpr std::array<TileType, 4> variants {
+        TileType::RobotNorth, TileType::RobotEast,
+        TileType::RobotSouth, TileType::RobotWest,
+    };
+    for (std::size_t i = 0; i < variants.size(); ++i) {
+        CHECK(editor.setCell({ static_cast<int>(i) + 1, 0, 1 }, variants[i]));
+    }
+    checkRobots(RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(), .editor = editor, .settings = {},
+    }), { 2, 3, 0, 1 });
+}
+
+void testRobotDrivePhaseTracksDistanceAcrossSeeksCommitsAndUndo()
+{
+    TEST("robot drive phase tracks distance across seeks commits and undo");
+    const Level level = Level::loadFromLayers({ { "........" }, { "C}    } " } }, "robot drive phase");
+    GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    const auto motion = [&](const GameState& before, std::size_t index, Vec3 from, Vec3 to) {
+        GameplaySession::Action action { .before = before, .after = before, .durationSeconds = 1.0f };
+        action.after.movables[index].cell = { static_cast<int>(to.x), static_cast<int>(to.y), static_cast<int>(to.z) };
+        action.presentation = { .durationSeconds = 1.0f,
+            .motions = { { .target = { EntityKind::Movable, before.movables[index].id },
+                .from = from, .to = to, .durationSeconds = 1.0f } } };
+        return action;
+    };
+    const auto forward = motion(state, 0, { 1, 0, 1 }, { 2, 0, 1 });
+    presentation.beginAction(forward, state);
+    presentation.seekAction(forward, 0.25f);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 0.25f));
+    presentation.seekAction(forward, 0.25f);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 0.25f));
+    presentation.seekAction(forward, 0.75f);
+    presentation.seekAction(forward, 0.5f);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 0.5f));
+    presentation.syncToGameState(state);
+    presentation.seekAction(forward, 0.75f);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 0.75f));
+    const auto frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(), .level = level, .state = state, .moving = true,
+        .projectedState = forward.after, .presentation = presentation, .settings = {},
+    });
+    const auto robotTile = std::ranges::find(frame.tiles, state.movables[0].id,
+        &RenderFrameData::Tile::renderableId);
+    CHECK(robotTile != frame.tiles.end());
+    if (robotTile != frame.tiles.end()) {
+        CHECK(robotTile->animation == robotDriveAnimation(testManifest()));
+        CHECK(near(robotTile->animationTimeSeconds, 0.75f));
+        CHECK(robotTile->animationInstanceId == state.movables[0].id);
+    }
+    presentation.advanceClocks(100.0f, false);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 0.75f));
+    presentation.seekAction(forward, 1.0f);
+    state = forward.after;
+    presentation.finishAction(state);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 1.0f));
+    CHECK(presentation.movables()[0].robotDriveSamples.empty());
+    GameplaySession::Action turn { .before = state, .after = state, .durationSeconds = 1.0f };
+    turn.after.movables[0].quarterTurns = 2;
+    turn.presentation.durationSeconds = 1.0f;
+    presentation.beginAction(turn, state);
+    presentation.seekAction(turn, 1.0f);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 1.0f));
+
+    const auto backward = motion(state, 0, { 2, 0, 1 }, { 1, 0, 1 });
+    presentation.beginAction(backward, state);
+    presentation.seekAction(backward, 0.5f);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 0.5f));
+    presentation.seekAction(backward, 1.0f);
+    state = backward.after;
+    presentation.finishAction(state);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 0.0f));
+    auto undo = plans::inverted(backward);
+    undo.durationSeconds = 1.0f;
+    presentation.beginAction(undo, state);
+    presentation.seekAction(undo, 0.5f);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 0.5f));
+    presentation.seekAction(undo, 1.0f);
+    state = undo.after;
+    presentation.finishAction(state);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 1.0f));
+
+    const auto cause = motion(state, 0, { 2, 0, 1 }, { 3, 0, 1 });
+    const auto deferred = motion(cause.after, 0, { 3, 0, 1 }, { 4, 0, 1 });
+    presentation.beginAction(cause, state);
+    presentation.beginAction(deferred, state);
+    CHECK(presentation.movables()[0].robotDriveSamples.size() == 2);
+    presentation.seekAction(cause, 1.0f);
+    state = cause.after;
+    presentation.finishAction(state);
+    CHECK(presentation.movables()[0].robotDriveSamples.size() == 1);
+    presentation.seekAction(deferred, 0.0f);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 2.0f));
+    presentation.seekAction(deferred, 0.5f);
+    const auto unrelated = motion(state, 1, { 6, 0, 1 }, { 7, 0, 1 });
+    presentation.beginAction(unrelated, state);
+    presentation.seekAction(unrelated, 1.0f);
+    state.movables[1] = unrelated.after.movables[1];
+    presentation.finishAction(state);
+    presentation.seekAction(deferred, 0.75f);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 2.75f));
+    CHECK(near(presentation.movables()[1].robotDriveTimeSeconds, 1.0f));
+    presentation.seekAction(deferred, 1.0f);
+    state.movables[0] = deferred.after.movables[0];
+    presentation.finishAction(state);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 3.0f));
+    CHECK(presentation.movables()[0].robotDriveSamples.empty());
+    presentation.resetEntities(state);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 0.0f));
+}
+
+void testRobotDriveIgnoresElevatorsAndPortalJumps()
+{
+    TEST("robot drive ignores elevators and portal jumps");
+    const Level level = Level::loadFromLayers({ { "........" }, { "C}      " } }, "robot drive portal");
+    const GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    const EntityTarget target { EntityKind::Movable, state.movables[0].id };
+    GameplaySession::Action action { .before = state, .after = state, .durationSeconds = 2.0f };
+    action.presentation = { .durationSeconds = 2.0f,
+        .motions = { { .target = target, .from = { 1, 0, 1 }, .to = { 1.5f, 0, 1 }, .durationSeconds = 0.5f },
+            { .target = target, .from = { 7, 4, 1 }, .to = { 7, 3.5f, 1 }, .startSeconds = 0.5f, .durationSeconds = 0.5f },
+            { .target = target, .from = { 7, 3.5f, 1 }, .to = { 7, 3.5f, 4 }, .startSeconds = 1.0f, .durationSeconds = 1.0f } } };
+    presentation.beginAction(action, state);
+    presentation.seekAction(action, 0.75f);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 0.75f));
+    presentation.seekAction(action, 1.5f);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 1.0f));
+    presentation.seekAction(action, 2.0f);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 1.0f));
+    presentation.finishAction(state);
+    action.presentation.motions[0].from = { 1, 0, 1 };
+    action.presentation.motions[0].to = { 0.5f, 0, 1 };
+    action.presentation.motions[1].to = { 7, 4.5f, 1 };
+    action.presentation.motions.resize(2);
+    action.presentation.durationSeconds = 1.0f;
+    presentation.beginAction(action, state);
+    presentation.seekAction(action, 0.75f);
+    CHECK(near(presentation.movables()[0].robotDriveTimeSeconds, 0.25f));
+}
+
 void testLinkedMovablesRenderScaledColorMatchedAuras()
 {
     TEST("linkedMovablesRenderScaledColorMatchedAuras");
@@ -5767,6 +5974,9 @@ int main()
     testEditorSelectorMoveUsesFlagPreviews();
     testMirrorTilesUseTheirModelAndOrientation();
     testTurretMovablesUseTheirModelAndOrientation();
+    testRobotModelsFollowRuntimeHeadingAndEditorOrientation();
+    testRobotDrivePhaseTracksDistanceAcrossSeeksCommitsAndUndo();
+    testRobotDriveIgnoresElevatorsAndPortalJumps();
     testLinkedMovablesRenderScaledColorMatchedAuras();
     testMirrorActivationBuildsBeamAndDestinationGhost();
     testPlayerCopiesRenderAndInterpolateTogether();

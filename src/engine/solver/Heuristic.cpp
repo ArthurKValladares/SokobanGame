@@ -258,9 +258,9 @@ int RelaxedHeuristic::estimate(const GameState& state) const
 {
     if (!level_.portals().empty() || std::ranges::any_of(
             level_.movableTiles(), [](const Level::MovableTile& unit) {
-                return tileTypeIsMirror(unit.type);
+                return tileTypeIsMirror(unit.type) || tileTypeIsRobot(unit.type);
             })) {
-        // Portals and movable mirrors can bypass the precomputed walk edges.
+        // Portals, mirrors, and robot rides can bypass the static walk edges.
         return 0;
     }
     std::vector<GridPosition3> heroes;

@@ -26,6 +26,30 @@ Level makeLevel(const std::vector<std::vector<std::string>>& layers)
     return Level::loadFromLines(lines, "gameplay loop test");
 }
 
+void testRobotCarriesHeroWithSmoothMotionAndFrameCatchUp()
+{
+    TEST("robotCarriesHeroWithSmoothMotionAndFrameCatchUp");
+    const Level level = makeLevel({ { "......" }, { " }    " }, { " C    " } });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.2f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.1f, true);
+    CHECK(session.state().movables[0].cell == GridPosition3({ 1, 0, 1 }));
+    CHECK(presentation.movables()[0].renderPosition.x > 1.0f);
+    CHECK(presentation.movables()[0].renderPosition.x < 2.0f);
+    CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 0.5f) < 0.0001f);
+    CHECK(std::abs(presentation.players()[0].motion.renderPosition.x -
+        presentation.movables()[0].renderPosition.x) < 0.0001f);
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.3f, true);
+    CHECK(session.state().movables[0].cell == GridPosition3({ 3, 0, 1 }));
+    CHECK(session.state().players[0].cell == GridPosition3({ 3, 0, 2 }));
+    CHECK(session.playerMoveCount() == 0);
+    CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 2.0f) < 0.0001f);
+    CHECK(presentation.movables()[0].robotDriveSamples.size() <= 1);
+}
+
 void testOpposingDirectionsAreNeutral()
 {
     TEST("opposingDirectionsAreNeutral");
@@ -1649,6 +1673,7 @@ int main()
     testElevatorLoopUsesPlatformMotionOnly();
     testPortalIceFallFiresAtStationaryHeroAndUndoesTogether();
     testPortalCrossingsReachTheLivePresentation();
+    testRobotCarriesHeroWithSmoothMotionAndFrameCatchUp();
     testOpposingDirectionsAreNeutral();
     testSimulationTimingClampsLongFrames();
     testSimulationTimingScalesOneSharedDelta();

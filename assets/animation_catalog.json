@@ -2,6 +2,11 @@
   "format": 2,
   "clips": [
     {
+      "animation": "RobotDrive",
+      "speed": 1.0,
+      "duration": 2.0
+    },
+    {
       "animation": "RogueIdle",
       "speed": 1.0,
       "duration": 2.133333444595337

@@ -617,6 +617,12 @@
       "rotateHalfTurn": true
     },
     {
+      "name": "Robot",
+      "path": "custom/models/robot.glb",
+      "geometry": "skinned",
+      "preserveSourceScale": true
+    },
+    {
       "name": "Lorekeeper",
       "path": "KayKit Lorekeeper/characters/Lorekeeper.glb",
       "geometry": "skinned",
@@ -2561,6 +2567,11 @@
   ],
   "animations": [
     {
+      "name": "RobotDrive",
+      "path": "custom/models/robot.glb",
+      "clip": 0
+    },
+    {
       "name": "RogueIdle",
       "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
       "clip": 8,
@@ -2704,6 +2715,22 @@
       "tile": "Turret West",
       "model": "Turret",
       "scale": 0.8999999761581421
+    },
+    {
+      "tile": "Robot North",
+      "model": "Robot"
+    },
+    {
+      "tile": "Robot East",
+      "model": "Robot"
+    },
+    {
+      "tile": "Robot South",
+      "model": "Robot"
+    },
+    {
+      "tile": "Robot West",
+      "model": "Robot"
     },
     {
       "tile": "Player",

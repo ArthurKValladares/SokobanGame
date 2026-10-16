@@ -61,9 +61,9 @@ struct GameState {
         bool dead = false;
         std::optional<MoveDirection> sliding;
         // Clockwise quarter turns (0-3) rotator plates have applied since the
-        // unit was authored. A turret fires along its authored direction
-        // turned by this amount (see rules::turretDirection); other movables
-        // only change how they are drawn.
+        // unit was authored. Turrets fire and robots patrol along their
+        // authored direction turned by this amount. Robots also add two
+        // quarter turns when a blocked patrol reverses direction.
         uint8_t quarterTurns = 0;
 
         bool operator==(const Movable&) const = default;
@@ -163,6 +163,7 @@ struct StepRates {
     int playerMove = 1; // input-driven walking and pushing
     int slide = 1;      // ice-slide momentum (all movable units)
     int conveyor = 1;   // belt riders
+    int robot = 1;      // autonomous robot patrol
 
     bool operator==(const StepRates&) const = default;
 };
@@ -223,6 +224,10 @@ struct StepResult {
 [[nodiscard]] std::optional<MoveDirection> conveyorDirectionForTile(TileType tile);
 [[nodiscard]] std::optional<MoveDirection> conveyorDirectionAt(const Level& level, GridPosition3 position);
 [[nodiscard]] std::optional<MoveDirection> turretDirectionForTile(TileType tile);
+[[nodiscard]] std::optional<MoveDirection> robotDirectionForTile(TileType tile);
+// Live patrol direction, including reversals and turns from rotators/portals.
+[[nodiscard]] std::optional<MoveDirection> robotDirection(
+    const GameState::Movable& movable);
 // `direction` turned by `quarterTurns` clockwise quarter turns (negative
 // values turn counter-clockwise).
 [[nodiscard]] MoveDirection rotateDirection(
@@ -358,8 +363,11 @@ void setMirrorQuarterTurns(
 [[nodiscard]] bool isAtUnlockedEnd(const Level& level, const GameState& state);
 
 // True when the world has an automatic action to resolve: a mutual turret
-// volley, slide momentum, or a surviving entity standing on a conveyor.
-[[nodiscard]] bool hasPendingMotion(const Level& level, const GameState& state);
+// volley, slide momentum, a surviving entity standing on a conveyor, or an
+// unlocked robot patrol. Excluding robots lets replay stop at a finite action
+// boundary even though a patrol continues indefinitely.
+[[nodiscard]] bool hasPendingMotion(
+    const Level& level, const GameState& state, bool includeRobots = true);
 
 struct MirrorBeamSegment {
     GridPosition3 from {};
@@ -444,6 +452,7 @@ struct StepScope {
 //   - slide momentum first (it overrides player input),
 //   - then player input (which may push a movable; only direct input pushes),
 //   - then conveyors for entities standing on them.
+//   - then autonomous robot patrols, which may shove one unit or reverse.
 // Each entity moves at most its rate in tiles per step (intents and rates are
 // re-derived between micro-steps, so e.g. an entity carried off a belt stops
 // even with budget left). Falls resolve within the step and cancel momentum.

@@ -92,7 +92,8 @@ struct Solution {
 // scheduler used by GameplayLoop, one input at a time. It advances directly
 // between mechanical completion boundaries because tools have no animation to
 // render. Waiting until idle is what makes a recording replayable: a player
-// pressing keys mid-slide depends on timing, a replay must not.
+// pressing keys mid-slide depends on timing, a replay must not. Repeating
+// robot motors advance to the next completion boundary for each input.
 class Driver {
 public:
     explicit Driver(const Level& level);

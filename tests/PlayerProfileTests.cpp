@@ -1777,6 +1777,33 @@ void benchmarkProfileSnapshots()
         << " immediate_peak_bytes=" << immediate.peakAdditionalBytes << '\n';
 }
 
+void testRobotCheckpointPersistsHeadingAndUndoHistory()
+{
+    TEST("robotCheckpointPersistsHeadingAndUndoHistory");
+    const auto level = sokoban::Level::loadFromLayers(
+        { { ".....", "....." }, { " }#  ", " C   " } }, "robot checkpoint");
+    sokoban::GameplaySession session;
+    session.reset(level);
+    CHECK(session.tryStartNextAction(level, {}));
+    session.advanceActiveAction(session.activeActionDuration());
+    session.completeActiveAction();
+    CHECK(session.state().movables[0].quarterTurns == 2);
+    sokoban::PlayerProfile profile;
+    profile.worldContext = sokoban::PlayerProfile::WorldContext::Puzzle;
+    profile.activeScreen = sokoban::PlayerProfile::ActiveScreen {
+        .level = 0, .screen = 0, .session = session.snapshot(),
+    };
+    const auto decoded = sokoban::decodePlayerProfile(profile.serialize());
+    CHECK(decoded.profile.activeScreen.has_value());
+    if (!decoded.profile.activeScreen) return;
+    const auto& checkpoint = decoded.profile.activeScreen->session;
+    CHECK(checkpoint.state == session.state());
+    CHECK(checkpoint.undoStack == session.snapshot().undoStack);
+    sokoban::GameplaySession restored;
+    CHECK(restored.restore(level, checkpoint));
+    CHECK(restored.state() == session.state());
+}
+
 int main(int argc, char** argv)
 {
     try {
@@ -1785,6 +1812,7 @@ int main(int argc, char** argv)
             benchmarkProfileSnapshots();
             return 0;
         }
+        testRobotCheckpointPersistsHeadingAndUndoHistory();
         testRoundTripAndBests();
         testReachedScreensAndProgressReset();
         testSectionedSerialization();

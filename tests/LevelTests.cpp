@@ -172,6 +172,47 @@ void testSerializationRoundTrip()
     CHECK(Level::parseLayerRows(serialized, "round trip") == layered);
 }
 
+void testRobotHeadingsRoundTripAsMovableUnits()
+{
+    TEST("robotHeadingsRoundTripAsMovableUnits");
+    constexpr std::array robots { TileType::RobotNorth, TileType::RobotEast,
+        TileType::RobotSouth, TileType::RobotWest };
+    const Level::Definition definition {
+        .layers = { { "......" }, { "Q{}:; " } },
+        .plates = { { { 2, 0, 1 }, TileType::PressurePlate } },
+        .objectLinks = { { .cell = { 3, 0, 1 }, .color = { 0.2f, 0.4f, 0.8f } } },
+    };
+    const auto lines = Level::serializeDefinition(definition);
+    CHECK(Level::parseDefinition(lines, "robot headings") == definition);
+    const Level level = Level::loadFromLines(lines, "robot headings");
+    CHECK(level.movableTiles().size() == robots.size());
+    for (std::size_t index = 0; index < robots.size(); ++index) {
+        const TileType tile = robots[index];
+        const GridPosition3 cell { static_cast<int>(index + 1), 0, 1 };
+        CHECK(level.movableTiles()[index].type == tile);
+        CHECK(level.movableTiles()[index].position == cell);
+        CHECK(tileTypeIsRobot(tile));
+        CHECK(tileTypeIsMovableObject(tile));
+        CHECK(tileTypeOccupiesLevelCell(tile));
+        CHECK(tileTypeCanStandOnPlate(tile));
+        CHECK(tileTypeCanCoverSurface(tile, TileType::PressurePlate));
+        CHECK(!tileTypeCanCoverSurface(tile, TileType::RailStraightEastWest));
+        CHECK(!tileTypeAllowsEntity(tile));
+        CHECK(robotOrientationQuarterTurns(tile) == index);
+        CHECK(charToTileType(tileTypeToChar(tile)) == tile);
+        CHECK(tileTypeFromName(tileTypeName(tile)) == tile);
+        CHECK(rotateTileType(tile, 1) == robots[(index + 1) % robots.size()]);
+        CHECK(rotateTileType(tile, -1) == robots[(index + 3) % robots.size()]);
+        CHECK(level.tileAt(cell.x, cell.y, cell.z) ==
+            (index == 1 ? TileType::PressurePlate : TileType::Air));
+    }
+    CHECK(level.plateAt({ 2, 0, 1 }) == TileType::PressurePlate);
+    CHECK(level.movableLinkColor(2) == std::optional<Vec3>(Vec3 { 0.2f, 0.4f, 0.8f }));
+    CHECK(tileTypeFromName("Robot") == TileType::RobotNorth);
+    CHECK(!tileTypeIsRobot(TileType::Rock));
+    CHECK(!robotOrientationQuarterTurns(TileType::Rock));
+}
+
 void testCameraMetadataRoundTripAndValidation()
 {
     TEST("cameraMetadataRoundTripAndValidation");
@@ -1699,6 +1740,7 @@ int main()
     testButtonPlacementsRoundTripAndKeepPlateSemantics();
     testLeverPlacementsRoundTripAndKeepPlateSemantics();
     testSerializationRoundTrip();
+    testRobotHeadingsRoundTripAsMovableUnits();
     testCameraMetadataRoundTripAndValidation();
     testCharacterMetadataRoundTripAndLegacyDefault();
     testWardrobeVariantsRoundTripAndRemainTraversable();

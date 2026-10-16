@@ -463,6 +463,24 @@ std::optional<MoveDirection> turretDirectionForTile(TileType tile)
     }
 }
 
+std::optional<MoveDirection> robotDirectionForTile(TileType tile)
+{
+    switch (tile) {
+    case TileType::RobotNorth: return MoveDirection::Up;
+    case TileType::RobotEast: return MoveDirection::Right;
+    case TileType::RobotSouth: return MoveDirection::Down;
+    case TileType::RobotWest: return MoveDirection::Left;
+    default: return std::nullopt;
+    }
+}
+
+std::optional<MoveDirection> robotDirection(const GameState::Movable& movable)
+{
+    const auto authored = robotDirectionForTile(movable.type);
+    return authored ? std::optional(rotateDirection(*authored, movable.quarterTurns))
+                    : std::nullopt;
+}
+
 MoveDirection rotateDirection(MoveDirection direction, int quarterTurns)
 {
     // Clockwise order seen from above: north, east, south, west.
@@ -1075,6 +1093,70 @@ bool anyUnitIn(const GameState& state, GridPosition3 cell)
         fallenEnemyAt(state, cell) != nullptr;
 }
 
+// A robot is a full-height support. Every consecutive live unit above it
+// rides along, including stacks of blocks with a hero on top.
+std::vector<LiveUnitAt> robotRiders(const GameState& state, std::size_t index)
+{
+    std::vector<LiveUnitAt> riders;
+    if (!tileTypeIsRobot(state.movables[index].type)) {
+        return riders;
+    }
+    GridPosition3 cell = state.movables[index].cell;
+    for (++cell.z; ; ++cell.z) {
+        const auto rider = liveUnitAt(state, cell);
+        if (!rider) {
+            return riders;
+        }
+        riders.push_back(*rider);
+    }
+}
+
+void setUnitCell(GameState& state, LiveUnitAt unit, GridPosition3 cell)
+{
+    switch (unit.kind) {
+    case EntityKind::Player: state.players[unit.index].cell = cell; break;
+    case EntityKind::Movable: state.movables[unit.index].cell = cell; break;
+    case EntityKind::Enemy: state.enemies[unit.index].cell = cell; break;
+    default: break;
+    }
+}
+
+bool robotRidersCanMove(
+    const Level& level, const GameState& state, std::size_t index,
+    GridPosition3 landing, int entryZ = -1)
+{
+    const auto riders = robotRiders(state, index);
+    const GridPosition3 from = state.movables[index].cell;
+    for (const LiveUnitAt rider : riders) {
+        const GridPosition3 cell = unitCell(state, rider);
+        if (isUnitLocked(level, state, cell)) {
+            return false;
+        }
+        // A forced shove can drop the robot after entering the next column.
+        // Check the rider's entry height and the entire fall, so an overhang
+        // cannot be crossed merely because the final landing has headroom.
+        for (int z = std::max(landing.z, entryZ); z >= landing.z; --z) {
+            const GridPosition3 target { landing.x, landing.y, z + cell.z - from.z };
+            if (!cellAllowsEntity(level, state, target)) {
+                return false;
+            }
+            if (const auto occupant = liveUnitAt(state, target)) {
+                const bool inStack = std::ranges::any_of(riders, [&](LiveUnitAt other) {
+                    return occupant->kind == other.kind && occupant->index == other.index;
+                });
+                if (!inStack && !(occupant->kind == EntityKind::Movable &&
+                        occupant->index == index)) {
+                    return false;
+                }
+            }
+            if (fallenMovableAt(state, target) || fallenEnemyAt(state, target)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 // Per-gate open state, in Level::gates() order.
 std::vector<char> gateOpenness(const Level& level, const GameState& state)
 {
@@ -1628,7 +1710,7 @@ std::vector<EntityId> mutuallyFacingTurrets(const Level& level, const GameState&
     return participants;
 }
 
-bool hasPendingMotion(const Level& level, const GameState& state)
+bool hasPendingMotion(const Level& level, const GameState& state, bool includeRobots)
 {
     if (visitMutuallyFacingTurrets(level, state,
             [](std::size_t, std::size_t) { return true; })) {
@@ -1646,7 +1728,8 @@ bool hasPendingMotion(const Level& level, const GameState& state)
     return std::ranges::any_of(state.movables, [&](const GameState::Movable& movable) {
         return !movable.fallen && !movable.dead &&
             !isUnitLocked(level, state, movable.cell) &&
-            (movable.sliding || conveyorDirectionAt(level, movable.cell).has_value());
+            (movable.sliding || conveyorDirectionAt(level, movable.cell).has_value() ||
+                (includeRobots && tileTypeIsRobot(movable.type)));
     }) || std::ranges::any_of(
         state.enemies,
         [&](const GameState::Enemy& enemy) {
@@ -2505,6 +2588,7 @@ private:
         int bardMoveBudget = 0;
         bool bardDirectionContested = false;
         bool bardDriven = false;
+        bool robotDriven = false;
         // A witch replaces an input-driven walk with one teleport to the
         // nearest visible movable unit on that ray.
         std::optional<ChainEntity> witchSwapTarget;
@@ -2879,6 +2963,7 @@ private:
             status.bardMoveBudget = 0;
             status.bardDirectionContested = false;
             status.bardDriven = false;
+            status.robotDriven = false;
             status.witchSwapTarget.reset();
         }
         std::fill(
@@ -2947,6 +3032,10 @@ private:
                     if (status.consumed < rates_.conveyor) {
                         status.intent = belt;
                     }
+                } else if (const auto patrol = robotDirection(after_.movables[i]);
+                           patrol && status.consumed < rates_.robot) {
+                    status.intent = patrol;
+                    status.robotDriven = true;
                 }
             }
 
@@ -3036,6 +3125,7 @@ private:
             movableBlocksAt(after_, destination, blockerIndex) ||
             playerBlocksAt(after_, destination) ||
             enemyBlocksAt(after_, destination) ||
+            !canCarryRobotRiders(blockerIndex, destination, blockerStatus.bardDriven) ||
             (!blockerStatus.bardDriven &&
                 !movableFallTarget(
                     level_, after_, blockerIndex, destination)
@@ -3131,6 +3221,7 @@ private:
                     movableBlocksAt(after_, destination, index) ||
                     playerBlocksAt(after_, destination) ||
                     enemyBlocksAt(after_, destination) ||
+                    !canCarryRobotRiders(index, destination) ||
                     !movableFallTarget(level_, after_, index, destination)
                          .supported) {
                     continue;
@@ -3169,9 +3260,13 @@ private:
             status.resolved = true;
             return true;
         }
+        if (status.robotDriven) {
+            return resolveRobot(index, anyMovement);
+        }
         if (!cellAllowsEntity(level_, after_, target) ||
             (!status.bardDriven &&
-                !movableFallTarget(level_, after_, index, target).supported)) {
+                !movableFallTarget(level_, after_, index, target).supported) ||
+            !canCarryRobotRiders(index, target, status.bardDriven)) {
             slidingOf(index) = std::nullopt;
             status.done = true;
             status.resolved = true;
@@ -3207,6 +3302,133 @@ private:
             }
         }
         applyMovableMove(index, direction, target, status.bardDriven);
+        status.resolved = true;
+        status.movedThisMicro = true;
+        anyMovement = true;
+        return true;
+    }
+
+    [[nodiscard]] std::size_t entityIndexForUnit(LiveUnitAt unit) const
+    {
+        return unit.kind == EntityKind::Player ? entityIndexForPlayer(unit.index)
+            : unit.kind == EntityKind::Enemy ? entityIndexForEnemy(unit.index)
+                                             : unit.index;
+    }
+
+    [[nodiscard]] bool canCarryRobotRiders(
+        std::size_t index, GridPosition3 target, bool preserveElevation = false) const
+    {
+        if (!tileTypeIsRobot(after_.movables[index].type)) {
+            return true;
+        }
+        for (const LiveUnitAt rider : robotRiders(after_, index)) {
+            if (status_[entityIndexForUnit(rider)].movedThisMicro) {
+                return false;
+            }
+        }
+        const auto landing = preserveElevation ? target
+            : movableFallTarget(level_, after_, index, target).cell;
+        return robotRidersCanMove(level_, after_, index, landing, target.z);
+    }
+
+    // Validate a robot's one-unit shove on a scratch board. This deliberately
+    // never recurses: a second unit in front of the victim blocks the motor.
+    [[nodiscard]] bool previewRobotPush(
+        GameState& trial, LiveUnitAt unit, MoveDirection direction) const
+    {
+        const GridPosition3 from = unitCell(trial, unit);
+        const GridPosition3 target = movementDestination(from, direction);
+        if (isUnitLocked(level_, trial, from) ||
+            !portalEntryClear(from, direction, trial) ||
+            !cellAllowsEntity(level_, trial, target) || liveUnitAt(trial, target)) {
+            return false;
+        }
+        FallResult fall;
+        if (unit.kind == EntityKind::Player) {
+            fall = playerFallTarget(level_, trial, unit.index, target);
+        } else if (unit.kind == EntityKind::Enemy) {
+            fall = enemyFallTarget(level_, trial, unit.index, target);
+        } else {
+            fall = movableFallTarget(level_, trial, unit.index, target);
+        }
+        if (!fall.supported) {
+            return false;
+        }
+        if (unit.kind == EntityKind::Movable &&
+            tileTypeIsRobot(trial.movables[unit.index].type)) {
+            if (!robotRidersCanMove(level_, trial, unit.index, fall.cell, target.z)) {
+                return false;
+            }
+            for (const auto rider : robotRiders(trial, unit.index)) {
+                if (status_[entityIndexForUnit(rider)].movedThisMicro) {
+                    return false;
+                }
+                const auto cell = unitCell(trial, rider);
+                setUnitCell(trial, rider,
+                    { fall.cell.x, fall.cell.y, fall.cell.z + cell.z - from.z });
+            }
+        }
+        setUnitCell(trial, unit, fall.cell);
+        return true;
+    }
+
+    [[nodiscard]] bool resolveRobot(std::size_t index, bool& anyMovement)
+    {
+        Status& status = status_[index];
+        const MoveDirection direction = *status.intent;
+        const GridPosition3 target = *status.target;
+        if (!cellAllowsEntity(level_, after_, target)) {
+            status.resolved = true;
+            return true;
+        }
+        const auto blocker = liveUnitAt(after_, target);
+        if (blocker && !status_[entityIndexForUnit(*blocker)].resolved) {
+            return false;
+        }
+        // Portals require an empty exit, just as they do for hero pushes.
+        if (blocker && level_.portalCrossing(
+                cellOf(index), directionOffset(direction))) {
+            status.resolved = true;
+            return true;
+        }
+        GameState trial = after_;
+        if (blocker &&
+            (status_[entityIndexForUnit(*blocker)].movedThisMicro ||
+                !previewRobotPush(trial, *blocker, direction))) {
+            status.resolved = true;
+            return true;
+        }
+        const FallResult fall = movableFallTarget(level_, trial, index, target);
+        // A patrol never deliberately changes elevation or enters water.
+        // Being pushed retains the ordinary movable fall rules.
+        if (!fall.supported || fall.fallen || fall.cell != target ||
+            !robotRidersCanMove(level_, trial, index, target)) {
+            status.resolved = true;
+            return true;
+        }
+        for (const auto rider : robotRiders(after_, index)) {
+            if (status_[entityIndexForUnit(rider)].movedThisMicro) {
+                status.resolved = true;
+                return true;
+            }
+        }
+        if (blocker) {
+            if (blocker->kind == EntityKind::Movable) {
+                applyMovableMove(blocker->index, direction,
+                    movementDestination(unitCell(after_, *blocker), direction));
+            } else if (blocker->kind == EntityKind::Enemy) {
+                applyEnemyMove(blocker->index, direction);
+            } else {
+                applyPlayerMove(entityIndexForPlayer(blocker->index), direction,
+                    movementDestination(unitCell(after_, *blocker), direction));
+            }
+            Status& pushed = status_[entityIndexForUnit(*blocker)];
+            pushed.active = true;
+            pushed.resolved = true;
+            pushed.movedThisMicro = true;
+            pushed.done = false;
+        }
+        applyMovableMove(index, direction, target);
         status.resolved = true;
         status.movedThisMicro = true;
         anyMovement = true;
@@ -3498,6 +3720,7 @@ private:
                 !movableBlocksAt(after_, pushTarget, blockerIndex) &&
                 !playerBlocksAt(after_, pushTarget, playerIndex) &&
                 enemyCanMove &&
+                canCarryRobotRiders(blockerIndex, pushTarget) &&
                 movableFallTarget(level_, after_, blockerIndex, pushTarget)
                     .supported) {
                 if (pushedEnemy != nullptr) {
@@ -3606,8 +3829,18 @@ private:
                 }
                 const FallResult fall = movableFallTarget(
                     level_, trial, entity.index, destination);
-                if (!fall.supported) {
+                if (!fall.supported ||
+                    !robotRidersCanMove(level_, trial, entity.index, fall.cell,
+                        destination.z)) {
                     return false;
+                }
+                for (const auto rider : robotRiders(trial, entity.index)) {
+                    if (status_[entityIndexForUnit(rider)].movedThisMicro) {
+                        return false;
+                    }
+                    const GridPosition3 cell = unitCell(trial, rider);
+                    setUnitCell(trial, rider, { fall.cell.x, fall.cell.y,
+                        fall.cell.z + cell.z - origin.z });
                 }
                 trial.movables[entity.index].cell = fall.cell;
                 trial.movables[entity.index].fallen = fall.fallen;
@@ -4196,6 +4429,8 @@ private:
         GridPosition3 target,
         bool preserveElevation = false)
     {
+        const GridPosition3 robotFrom = after_.movables[index].cell;
+        const auto riders = robotRiders(after_, index);
         target =
             transportedLanding(after_.movables[index].cell, direction, target);
         const bool portalMomentum = portalCarriesMomentum(
@@ -4235,6 +4470,26 @@ private:
             ? std::optional<MoveDirection>(direction)
             : std::nullopt;
         ++status_[index].consumed;
+        for (const LiveUnitAt rider : riders) {
+            const GridPosition3 from = unitCell(after_, rider);
+            const GridPosition3 to { fall.cell.x, fall.cell.y,
+                fall.cell.z + from.z - robotFrom.z };
+            setUnitCell(after_, rider, to);
+            const std::size_t riderIndex = entityIndexForUnit(rider);
+            slidingOf(riderIndex).reset();
+            Status& riderStatus = status_[riderIndex];
+            ++riderStatus.consumed;
+            riderStatus.active = true;
+            riderStatus.resolved = true;
+            riderStatus.movedThisMicro = true;
+            riderStatus.done = true;
+            if (rider.kind == EntityKind::Enemy) {
+                enemyMoved_[rider.index] = true;
+                enemyMovedThisMicro_[rider.index] = true;
+            } else if (rider.kind == EntityKind::Player) {
+                applyWardrobeSwap(rider.index);
+            }
+        }
     }
 
     void applyPlayerMove(
@@ -4336,6 +4591,7 @@ private:
         const GridPosition3 landing =
             movementDestination(pulledFrom, direction);
         if (!cellAllowsEntity(level_, after_, landing) || occupied(landing) ||
+            (pulled->movable && !canCarryRobotRiders(pulled->index, landing)) ||
             (pulled->movable
                  ? !movableFallTarget(level_, after_, pulled->index, landing)
                         .supported
@@ -4359,6 +4615,11 @@ private:
         for (std::size_t i = 0; i < status_.size(); ++i) {
             if (status_[i].intent && !status_[i].movedThisMicro) {
                 cancelAndFinish(i, true);
+                if (status_[i].robotDriven) {
+                    after_.movables[i].quarterTurns = addQuarterTurns(
+                        after_.movables[i].quarterTurns, 2);
+                    status_[i].done = true;
+                }
             }
         }
     }

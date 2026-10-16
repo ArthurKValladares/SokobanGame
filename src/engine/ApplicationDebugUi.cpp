@@ -173,6 +173,7 @@ if (ImGui::CollapsingHeader("Tile Geometry")) {
         ImGui::SliderInt("Player", &stepRates.playerMove, 0, 5);
         ImGui::SliderInt("Slide", &stepRates.slide, 0, 5);
         ImGui::SliderInt("Conveyor", &stepRates.conveyor, 0, 5);
+        ImGui::SliderInt("Robot", &stepRates.robot, 0, 5);
         context.gameplaySession.setStepRates(stepRates);
         ImGui::TextDisabled("Movement rates by source; default 1.");
         ImGui::TreePop();

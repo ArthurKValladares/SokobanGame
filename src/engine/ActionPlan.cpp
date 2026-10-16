@@ -490,6 +490,35 @@ std::optional<PlannedAction> planTurretVolley(
         false);
 }
 
+std::optional<PlannedAction> planRobotPatrols(
+    const Level& level,
+    const GameState& state,
+    std::vector<EntityId> robots,
+    const rules::StepRates& rates,
+    float stepDurationSeconds)
+{
+    std::erase(robots, invalidEntityId);
+    if (robots.empty() || rates.robot <= 0) {
+        return std::nullopt;
+    }
+    return planScoped(
+        level, state, std::nullopt, rates, stepDurationSeconds,
+        rules::StepScope { .actors = std::move(robots) }, false);
+}
+
+std::vector<EntityId> patrollingRobots(const GameState& state)
+{
+    std::vector<EntityId> ids;
+    for (std::size_t i = 0; i < state.movables.size(); ++i) {
+        const auto& movable = state.movables[i];
+        if (tileTypeIsRobot(movable.type) && !movable.fallen &&
+            !movable.dead && !movable.sliding) {
+            ids.push_back(resolvedEntityId(EntityKind::Movable, movable.id, i));
+        }
+    }
+    return ids;
+}
+
 std::vector<EntityId> slidingEntities(const GameState& state)
 {
     std::vector<EntityId> ids;

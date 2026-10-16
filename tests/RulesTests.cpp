@@ -3963,10 +3963,179 @@ void testLockPlatesHoldAndReleaseUnits()
     }
 }
 
+void testRobotPatrolAndReversal()
+{
+    TEST("robotPatrolAndReversal");
+    const Level level = makeLevel({ { ".....", ".....", "....." },
+        { "C    ", "     ", "     " } });
+    for (const auto type : { TileType::RobotNorth, TileType::RobotEast,
+            TileType::RobotSouth, TileType::RobotWest }) {
+        auto state = rules::initialState(level);
+        state.movables.push_back({ .id = 20, .type = type, .cell = cell(2, 1, 1) });
+        const auto direction = *rules::robotDirection(state.movables[0]);
+        const auto after = rules::step(level, state);
+        CHECK(after.movables[0].cell == rules::movementTarget(cell(2, 1, 1), direction));
+        CHECK(rules::robotDirection(after.movables[0]) == direction);
+        CHECK(rules::hasPendingMotion(level, state));
+        CHECK(!rules::hasPendingMotion(level, state, false));
+        CHECK(rules::step(level, state, std::nullopt, { .robot = 0 }) == state);
+    }
+    const Level corridor = makeLevel({ { "....." }, { "C } #" } });
+    auto state = rules::initialState(corridor);
+    state = rules::step(corridor, state);
+    CHECK(state.movables[0].cell == cell(3, 0, 1));
+    const auto reversed = rules::step(corridor, state);
+    CHECK(reversed.movables[0].cell == state.movables[0].cell);
+    CHECK(rules::robotDirection(reversed.movables[0]) == MoveDirection::Left);
+    CHECK(rules::step(corridor, reversed).movables[0].cell == cell(2, 0, 1));
+}
+
+void testRobotAvoidsWaterAndDrops()
+{
+    TEST("robotAvoidsWaterAndDrops");
+    for (const char hazard : std::string("W ")) {
+        std::string floor = ".....";
+        floor[3] = hazard;
+        const Level level = makeLevel({ { floor }, { "C }  " } });
+        const auto before = rules::initialState(level);
+        const auto after = rules::step(level, before);
+        CHECK(after.movables[0].cell == cell(2, 0, 1));
+        CHECK(!after.movables[0].fallen);
+        CHECK(rules::robotDirection(after.movables[0]) == MoveDirection::Left);
+    }
+    const Level drop = makeLevel({ { "....." }, { "...  " }, { "C }  " } });
+    const auto after = rules::step(drop, rules::initialState(drop));
+    CHECK(after.movables[0].cell == cell(2, 0, 2));
+    CHECK(rules::robotDirection(after.movables[0]) == MoveDirection::Left);
+    for (const TileType filler : { TileType::Rock, TileType::Ice }) {
+        const Level bridge = makeLevel({ { "...W." }, { "C }  " } });
+        auto filled = rules::initialState(bridge);
+        filled.movables.push_back({ .id = 90, .type = filler,
+            .cell = cell(3, 0, 1), .fallen = true });
+        const auto bridged = rules::step(bridge, filled);
+        CHECK(bridged.movables[0].cell == cell(3, 0, 1));
+        CHECK(!bridged.movables[0].fallen);
+    }
+}
+
+void testRobotPushesOneUnitIncludingHero()
+{
+    TEST("robotPushesOneUnitIncludingHero");
+    for (const char victim : std::string("RCN")) {
+        std::string row = "C }   ";
+        row[3] = victim;
+        if (victim == 'C') { row[0] = ' '; }
+        const Level level = makeLevel({ { "......" }, { row } });
+        const auto after = rules::step(level, rules::initialState(level));
+        CHECK(after.movables[0].cell == cell(3, 0, 1));
+        if (victim == 'C') { CHECK(after.players[0].cell == cell(4, 0, 1)); }
+        if (victim == 'R') { CHECK(after.movables[1].cell == cell(4, 0, 1)); }
+        if (victim == 'N') { CHECK(after.enemies[0].cell == cell(4, 0, 1)); }
+    }
+    for (const std::string row : { "C }RR ", "C }RC ", "C }RN " }) {
+        const Level level = makeLevel({ { "......" }, { row } });
+        const auto before = rules::initialState(level);
+        const auto after = rules::step(level, before);
+        CHECK(after.movables[0].cell == cell(2, 0, 1));
+        CHECK(after.movables[1].cell == before.movables[1].cell);
+        CHECK(after.players == before.players);
+        CHECK(after.enemies == before.enemies);
+        CHECK(rules::robotDirection(after.movables[0]) == MoveDirection::Left);
+    }
+    const Level water = makeLevel({ { "....W." }, { "C }R  " } });
+    const auto after = rules::step(water, rules::initialState(water));
+    CHECK(after.movables[0].cell == cell(3, 0, 1));
+    CHECK(after.movables[1].cell == cell(4, 0, 1));
+    CHECK(after.movables[1].fallen);
+    auto bridged = rules::initialState(water);
+    bridged.movables.push_back({ .id = 90, .type = TileType::Rock,
+        .cell = cell(4, 0, 1), .fallen = true });
+    const auto bridgePush = rules::step(water, bridged);
+    CHECK(bridgePush.movables[0].cell == cell(3, 0, 1));
+    CHECK(bridgePush.movables[1].cell == cell(4, 0, 1));
+    CHECK(!bridgePush.movables[1].fallen);
+}
+
+void testRobotCarriesStackAndHeroAndCanBePushed()
+{
+    TEST("robotCarriesStackAndHeroAndCanBePushed");
+    const Level level = makeLevel({ { "......" }, { "  }   " },
+        { "  R   " }, { "  C   " } });
+    auto state = rules::initialState(level);
+    auto after = rules::scopedStep(level, state, std::nullopt, {},
+        { .actors = { state.movables[0].id } });
+    CHECK(after.movables[0].cell == cell(3, 0, 1));
+    CHECK(after.movables[1].cell == cell(3, 0, 2));
+    CHECK(after.players[0].cell == cell(3, 0, 3));
+    CHECK(!after.players[0].dead);
+
+    // Player input may move a robot perpendicular to its patrol axis; that
+    // external shove carries riders and does not change the patrol heading.
+    const Level pushed = makeLevel({ { "....", "....", "...." },
+        { " C  ", " }  ", "    " }, { "    ", " C  ", "    " } });
+    const auto beforePush = rules::initialState(pushed);
+    after = rules::scopedStep(pushed, beforePush, MoveDirection::Down, {},
+        { .actors = { beforePush.players[0].id } });
+    CHECK(after.players[0].cell == cell(1, 1, 1));
+    CHECK(after.movables[0].cell == cell(1, 2, 1));
+    CHECK(after.players[1].cell == cell(1, 2, 2));
+    CHECK(rules::robotDirection(after.movables[0]) == MoveDirection::Right);
+}
+
+void testRobotRiderHeadroomIsAtomic()
+{
+    TEST("robotRiderHeadroomIsAtomic");
+    const Level level = makeLevel({ { "....." }, { "C }R " }, { "  C# " } });
+    const auto before = rules::initialState(level);
+    const auto after = rules::step(level, before);
+    CHECK(after.movables[0].cell == before.movables[0].cell);
+    CHECK(after.movables[1] == before.movables[1]);
+    CHECK(after.players == before.players);
+    CHECK(rules::robotDirection(after.movables[0]) == MoveDirection::Left);
+    const Level pushed = makeLevel({ { "....." }, { "C}   " }, { " C#  " } });
+    const auto pushBefore = rules::initialState(pushed);
+    CHECK(rules::scopedStep(pushed, pushBefore, MoveDirection::Right, {},
+        { .actors = { pushBefore.players[0].id } }) == pushBefore);
+    const Level overhang = makeLevel({ { "..." }, { ".. " },
+        { "C} " }, { " C#" } });
+    const auto beneath = rules::initialState(overhang);
+    CHECK(rules::scopedStep(overhang, beneath, MoveDirection::Right, {},
+        { .actors = { beneath.players[0].id } }) == beneath);
+}
+
+void testRobotScopeLocksAndTurnPersistence()
+{
+    TEST("robotScopeLocksAndTurnPersistence");
+    const Level level = makeLevel({ { "....." }, { "C }  " } });
+    const auto state = rules::initialState(level);
+    const auto heroOnly = rules::scopedStep(level, state, MoveDirection::Right, {},
+        { .actors = { state.players[0].id } });
+    CHECK(heroOnly.movables == state.movables);
+    CHECK(heroOnly.players[0].cell == cell(1, 0, 1));
+    auto turned = state;
+    turned.movables[0].quarterTurns = 2;
+    CHECK(rules::robotDirection(turned.movables[0]) == MoveDirection::Left);
+    CHECK(rules::step(level, turned).movables[0].cell == cell(1, 0, 1));
+    const Level locked = Level::loadFromDefinition({
+        .layers = { { "....." }, { "C }  " } },
+        .lockPlates = { { .cell = cell(2, 0, 1), .startEnabled = true } },
+        .plates = { { .cell = cell(2, 0, 1), .tile = TileType::LockPlate } },
+    }, "locked robot");
+    const auto lockBefore = rules::initialState(locked);
+    CHECK(!rules::hasPendingMotion(locked, lockBefore));
+    CHECK(rules::step(locked, lockBefore) == lockBefore);
+}
+
 } // namespace
 
 int main()
 {
+    testRobotPatrolAndReversal();
+    testRobotAvoidsWaterAndDrops();
+    testRobotPushesOneUnitIncludingHero();
+    testRobotCarriesStackAndHeroAndCanBePushed();
+    testRobotRiderHeadroomIsAtomic();
+    testRobotScopeLocksAndTurnPersistence();
     testPressurePlateActivityTracksIntermediateFastSteps();
     testLeverActivationUsesStartingBoardAndCanonicalOrder();
     testInvalidReflectionPreservesIndependentLeverAndButtonActivation();

@@ -4402,7 +4402,7 @@ void testGroupedPalettePreservesDirectionalBrushes()
             tileTypeIsPortal(definition.type) || tileTypeIsRail(definition.type) ||
             tileTypeIsRotator(definition.type) || tileTypeIsLectern(definition.type) ||
             tileTypeIsWardrobe(definition.type) || tileTypeIsButton(definition.type) ||
-            tileTypeIsLever(definition.type);
+            tileTypeIsLever(definition.type) || tileTypeIsRobot(definition.type);
         CHECK(membership[static_cast<std::size_t>(definition.type)] ==
             (directional ? 1 : 0));
     }
@@ -4813,6 +4813,8 @@ void testDirectionalBrushesRotateTheirTileTypes()
             TileType::MirrorSouthEast, TileType::MirrorSouthWest },
         std::array { TileType::TurretNorth, TileType::TurretEast,
             TileType::TurretSouth, TileType::TurretWest },
+        std::array { TileType::RobotNorth, TileType::RobotEast,
+            TileType::RobotSouth, TileType::RobotWest },
         std::array { TileType::ButtonNorth, TileType::ButtonEast,
             TileType::ButtonSouth, TileType::ButtonWest },
         std::array { TileType::LeverNorth, TileType::LeverEast,
@@ -4852,6 +4854,41 @@ void testDirectionalBrushesRotateTheirTileTypes()
         CHECK(rotateTileType(family[0], 2) == family[0]);
     }
     CHECK(rotateTileType(TileType::WallStone03, 1) == TileType::WallStone03);
+}
+
+void testRobotBrushPreservesHeadingPlatesAndUndoThroughSave()
+{
+    TEST("robotBrushPreservesHeadingPlatesAndUndoThroughSave");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(5, 3, false);
+    const GridPosition3 cell { 2, 1, 1 };
+    const auto* group = editorTilePalette::groupFor(TileType::RobotNorth);
+    CHECK(group != nullptr && group->name == "Robot" && group->rotationOnly);
+    CHECK(editor.setCell(cell, TileType::PressurePlate));
+    editor.setSelectedTile(TileType::RobotNorth);
+    editor.rotateSelectedTile();
+    CHECK(editor.selectedTile() == TileType::RobotEast);
+    CHECK(editor.paintCell(cell));
+    CHECK(editor.documentPlateAt(cell) == TileType::PressurePlate);
+    CHECK(editor.documentToLevel().movableTiles().back().type == TileType::RobotEast);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[1][1][2] == 'P');
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.pickTile(cell) == TileType::RobotEast);
+    CHECK(editor.selectedTile() == TileType::RobotEast);
+    CHECK(editor.selectedTileQuarterTurns() == 0);
+    const auto path = project.source / "robot.scr";
+    CHECK(editor.saveDocument(path).sourceSaved());
+    auto loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(path, false));
+    CHECK(loaded.documentLayers()[1][1][2] == '}');
+    CHECK(loaded.documentPlateAt(cell) == TileType::PressurePlate);
+    CHECK(loaded.documentToLevel().movableTiles().back().type == TileType::RobotEast);
+    CHECK(loaded.eraseCell(cell));
+    CHECK(loaded.documentLayers()[1][1][2] == 'P');
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.documentLayers()[1][1][2] == '}');
 }
 
 void testTileBrushRotationsSurviveEditingAndSaving()
@@ -5343,6 +5380,7 @@ int main()
     testOversizedEditIsAnUndoBarrierWithoutDiscardingOtherDrafts();
     testHistoryAccountingFollowsScreenRemapsAndReloads();
     testDirectionalBrushesRotateTheirTileTypes();
+    testRobotBrushPreservesHeadingPlatesAndUndoThroughSave();
     testTileBrushRotationsSurviveEditingAndSaving();
     testTileRotationsSurviveDraftSwitchesAndCursorPlayback();
     testUnsortedRotationRecordsSupportBrushUpdates();

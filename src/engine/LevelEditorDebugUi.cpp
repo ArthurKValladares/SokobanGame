@@ -1014,6 +1014,9 @@ void LevelEditorDebugUi::drawTilePalette(
     if (tileTypeHasSplatTop(editor.selectedTile())) {
         ImGui::TextWrapped("Terrain shapes join automatically. Rotate and Randomize preserve those joins: isolated tiles allow four orientations, strips allow two, and asymmetric connections constrain rotation. Paint their tops with Ground Paint.");
     }
+    if (tileTypeIsRobot(editor.selectedTile())) {
+        ImGui::TextWrapped("Robots patrol along their arrow axis and reverse when blocked or facing an unsafe drop. Rotate chooses their initial heading and axis. They push one unit, including a hero. Push a robot to reposition it, or stand on top to ride along.");
+    }
     ImGui::TextWrapped(
         "Plates (Pressure, Buttons, Levers, End, Rotators, Lock Plates, Rail Stops) stack with units and mirrors; "
         "a Minecart can only stack on a Rail Stop. A Minecart Gate stacks on "

@@ -19,6 +19,8 @@
 #include "engine/render/SelectorRenderConfig.hpp"
 #include "engine/render/WaterGeometry.hpp"
 
+#include "engine/RobotVisuals.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -742,7 +744,7 @@ private:
                   input_.animations,
                   editorUse,
                   input_.manifest.playerIdleAnimation())
-            : noAnimation;
+            : tileTypeIsRobot(tile) ? robotDriveAnimation(input_.manifest) : noAnimation;
         renderTile.animationTimeSeconds = animatedActor
             ? animationTimeFor(
                   input_.animations,
@@ -1112,7 +1114,7 @@ private:
                   input_.animations,
                   editorUse,
                   input_.manifest.playerIdleAnimation())
-            : noAnimation;
+            : tileTypeIsRobot(tile) ? robotDriveAnimation(input_.manifest) : noAnimation;
         renderTile.animationTimeSeconds = animatedActor
             ? animationTimeFor(
                   input_.animations,
@@ -1535,7 +1537,7 @@ RenderFrameData::Tile tileVisual(
 
     Vec4 color = tileColor(tile);
     if (tileTypeIsPlayerStart(tile) || tile == TileType::Enemy ||
-        tileTypeIsTurret(tile) || tile == TileType::Ladder) {
+        tileTypeIsTurret(tile) || tileTypeIsRobot(tile) || tile == TileType::Ladder) {
         color = { 1.0f, 1.0f, 1.0f, 1.0f };
     }
     if (tile == TileType::Ice) {
@@ -1588,17 +1590,20 @@ RenderFrameData::Tile tileVisual(
         .model = model,
         .animation = tileTypeIsPlayerStart(tile) || tile == TileType::Enemy
             ? manifest.playerIdleAnimation()
-            : noAnimation,
-        .animationInstanceId = tileTypeIsPlayerStart(tile) || tile == TileType::Enemy
+            : tileTypeIsRobot(tile) ? robotDriveAnimation(manifest) : noAnimation,
+        .animationInstanceId = tileTypeIsPlayerStart(tile) || tile == TileType::Enemy || tileTypeIsRobot(tile)
             ? authoredAnimationInstance(tile, cell)
             : uint64_t { 0 },
-        // Conveyors, turrets, mirrors, rails, lecterns and edge controls carry an
+        .animationCrossfades = !tileTypeIsRobot(tile),
+        // Conveyors, robots, turrets, mirrors, rails and edge controls carry an
         // orientation in their tile type. Each family rotates one shared model.
         .modelRotationQuarterTurns =
             edgeControl
             ? edgeControlQuarterTurns
             : rules::conveyorDirectionForTile(tile)
             ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
+            : rules::robotDirectionForTile(tile)
+            ? facingQuarterTurns(*rules::robotDirectionForTile(tile))
             : (rules::turretDirectionForTile(tile)
                     ? facingQuarterTurns(*rules::turretDirectionForTile(tile))
                     : railOrientationQuarterTurns(tile).value_or(

@@ -158,6 +158,17 @@ inline constexpr int maxChainedSteps = 512;
     const rules::StepRates& rates,
     float stepDurationSeconds);
 
+// One motor step for the selected robots, including pushed units and riders.
+// A patrol never settles, so release its claims after every tile or reversal.
+[[nodiscard]] std::optional<PlannedAction> planRobotPatrols(
+    const Level& level,
+    const GameState& state,
+    std::vector<EntityId> robots,
+    const rules::StepRates& rates,
+    float stepDurationSeconds);
+
+[[nodiscard]] std::vector<EntityId> patrollingRobots(const GameState& state);
+
 // Entities carrying slide momentum, and entities standing on a belt. What the
 // session needs in order to know which motion actions to plan; the split
 // between them matters because only the first may be chained.

@@ -42,6 +42,30 @@ const Level::Definition coverageWalkDefinition {
     .layers = { { "..." }, { "C E" } },
 };
 
+void testRobotPatrolRecordsFiniteBeatsAndReplaysReversals()
+{
+    TEST("robotPatrolRecordsFiniteBeatsAndReplaysReversals");
+    const Level::Definition definition {
+        .layers = { { "......", "......", "......" },
+            { "C E   ", "      ", " } #  " } },
+    };
+    const Level level = Level::loadFromDefinition(definition, "robot solution");
+    const std::vector<Input> inputs { Input::Right, Input::Right };
+    const auto recording = solution::record(level, definition, inputs, "robot solution");
+    CHECK_MESSAGE(recording.solved, recording.error.c_str());
+    if (recording.solution.steps.size() != 2) return;
+    CHECK(recording.solution.steps[0].state.movables[0].cell == GridPosition3({ 2, 2, 1 }));
+    CHECK(recording.solution.steps[1].state.movables[0].quarterTurns == 2);
+    const auto parsed = solution::parse(solution::serialize(recording.solution));
+    CHECK(parsed == recording.solution);
+    CHECK(solution::replay(level, parsed).passed);
+
+    solution::Driver waiting(level);
+    CHECK(waiting.apply(Input::Up));
+    CHECK(waiting.state().players[0].cell == GridPosition3({ 0, 0, 1 }));
+    CHECK(waiting.state().movables[0].cell == GridPosition3({ 2, 2, 1 }));
+}
+
 void testRecordSerializeParse()
 {
     TEST("recordSerializeParse");
@@ -603,6 +627,7 @@ void testCurrentCampaignHasCompletePassingSolutionCoverage()
 int main()
 {
     try {
+        testRobotPatrolRecordsFiniteBeatsAndReplaysReversals();
         testRecordSerializeParse();
         testWardrobeStateSurvivesSolutionRoundTrip();
         testLeverStateSurvivesSolutionRoundTrip();

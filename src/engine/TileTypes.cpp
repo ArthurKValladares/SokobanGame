@@ -22,6 +22,8 @@ TileType rotateTileType(TileType type, int quarterTurns)
                  TileType::MirrorSouthEast, TileType::MirrorSouthWest },
              std::array { TileType::TurretNorth, TileType::TurretEast,
                  TileType::TurretSouth, TileType::TurretWest },
+             std::array { TileType::RobotNorth, TileType::RobotEast,
+                 TileType::RobotSouth, TileType::RobotWest },
              std::array { TileType::ButtonNorth, TileType::ButtonEast,
                  TileType::ButtonSouth, TileType::ButtonWest },
              std::array { TileType::LeverNorth, TileType::LeverEast,
@@ -93,6 +95,9 @@ std::optional<TileType> tileTypeFromName(std::string_view name)
     }
     if (name == "Lever") {
         return TileType::LeverNorth;
+    }
+    if (name == "Robot") {
+        return TileType::RobotNorth;
     }
     for (const TileTypeDefinition& definition : tileTypeDefinitionTable) {
         if (definition.name == name) {
@@ -166,7 +171,7 @@ bool tileTypeOccupiesLevelCell(TileType type)
 {
     return tileTypeIsPlayerStart(type) || type == TileType::Rock ||
         type == TileType::Ice || type == TileType::Enemy ||
-        tileTypeIsTurret(type) || tileTypeIsMirror(type);
+        tileTypeIsTurret(type) || tileTypeIsMirror(type) || tileTypeIsRobot(type);
 }
 
 bool tileTypeIsSolidBlock(TileType type)
@@ -231,6 +236,14 @@ bool tileTypeIsTurret(TileType type)
         type == TileType::TurretWest;
 }
 
+std::optional<uint32_t> robotOrientationQuarterTurns(TileType type)
+{
+    return tileTypeIsRobot(type)
+        ? std::optional<uint32_t>(static_cast<uint32_t>(type) -
+              static_cast<uint32_t>(TileType::RobotNorth))
+        : std::nullopt;
+}
+
 std::optional<uint32_t> lecternOrientationQuarterTurns(TileType type)
 {
     switch (type) {
@@ -245,7 +258,7 @@ std::optional<uint32_t> lecternOrientationQuarterTurns(TileType type)
 bool tileTypeIsMovableObject(TileType type)
 {
     return type == TileType::Rock || type == TileType::Ice ||
-        tileTypeIsTurret(type) || tileTypeIsMirror(type);
+        tileTypeIsTurret(type) || tileTypeIsMirror(type) || tileTypeIsRobot(type);
 }
 
 bool tileTypeIsDecorative(TileType type)

@@ -485,7 +485,7 @@ void directionalFamiliesUseOneBrushAndRotateWithoutPickers()
             CHECK(std::ranges::none_of(panel.frame().icons, iconIsInPopup));
         }
     }
-    CHECK(families == 10);
+    CHECK(families == 11);
     CHECK(panel.shows("A lever stays on or off until activated again."));
 }
 

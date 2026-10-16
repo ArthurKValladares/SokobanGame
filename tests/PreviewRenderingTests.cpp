@@ -210,6 +210,158 @@ void saveRippleEvidence(const std::filesystem::path& path, const ImageData& imag
     writeRgbaPng(path, image.width, image.height, pixels);
 }
 
+void verifyRobotAnimation(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache,
+    const std::optional<std::filesystem::path>& evidence)
+{
+    const auto robot = manifest.findModelIdByName("Robot");
+    verify(robot.has_value(), "Robot animation fixture is missing its production model");
+    verify(manifest.model(*robot).geometry == ModelGeometry::Skinned,
+        "Robot animation fixture requires the production skinned model");
+    const auto drive = manifest.animationIdByName("RobotDrive");
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    UiDrawData ui;
+    ui.viewportSize = { 640, 360 };
+    const auto makeFrame = [&](float firstPhase, float secondPhase, unsigned mask = 3) {
+        RenderFrameData frame;
+        frame.viewMode = RenderViewMode::Isometric3D;
+        frame.skyCloudsEnabled = false;
+        frame.levelWidth = 6;
+        frame.levelHeight = 4;
+        frame.levelDepth = 2;
+        frame.cameraOverride = RenderFrameData::CameraOverride {
+            .position = { 5.7f, 8.4f, 4.4f },
+            .forward = { -3.0f, -6.5f, -4.0f },
+            .verticalFovDegrees = 29.0f,
+        };
+        frame.lighting.ambient = { .color = { 1, 1, 1 }, .intensity = 0.65f };
+        frame.lighting.sun = { .direction = { -0.35f, -0.45f, 0.82f },
+            .color = { 1, 1, 1 }, .intensity = 0.9f };
+        frame.tiles.push_back({
+            .position = { -2, -2 }, .size = { 10, 8 },
+            .color = { 0.55f, 0.56f, 0.58f, 1 },
+            .height = 0.0f, .showGrid = false,
+        });
+        for (unsigned index = 0; index < 2; ++index) {
+            if (!(mask & (1U << index))) {
+                continue;
+            }
+            frame.tiles.push_back({
+                .position = { 1.0f + static_cast<float>(index) * 2.4f, 1.4f },
+                .size = { 1, 1 }, .color = { 1, 1, 1, 1 },
+                .baseElevation = 0.0f, .height = 1.0f,
+                .showGrid = false, .model = *robot, .animation = drive,
+                .animationInstanceId = 0x524F424F54000001ULL + index,
+                .animationLoops = true, .animationCrossfades = false,
+                .animationTimeSeconds = index == 0 ? firstPhase : secondPhase,
+            });
+        }
+        return frame;
+    };
+    renderer.waitForAssets(renderAssetRequirementsForFrame(makeFrame(0, 0)));
+    const auto capture = [&](float firstPhase, float secondPhase, unsigned mask = 3) {
+        // Exercise both in-flight palette slots, including repeated poses.
+        for (unsigned repeat = 0; repeat < 3; ++repeat) {
+            renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            ImGui::Render();
+#endif
+            renderer.drawFrame(renderer.prepareFrame(
+                makeFrame(firstPhase, secondPhase, mask)), ui);
+            verify(!renderer.hasFatalFailure(), "Robot animation frame failed to render");
+            const auto loading = renderer.assetLoadingStats();
+            verify(renderer.renderStats().unavailableModels == 0,
+                "Robot animation dropped a resident model or its requested pose");
+            verify(loading.droppedSkinningInstances == 0 && loading.droppedDrawInstances == 0,
+                "Robot animation exceeded its pose or draw capacity");
+            verify(loading.failedAssets == 0 && loading.pendingModels == 0 &&
+                    loading.pendingAnimations == 0,
+                "Robot animation assets were not completely drained before capture");
+        }
+        return renderer.captureRenderedFrame();
+    };
+    const ImageData empty = capture(0, 0, 0);
+    struct PixelBounds { uint32_t left, top, right, bottom; };
+    const auto footprint = [&](const ImageData& image) {
+        PixelBounds bounds { image.width, image.height, 0, 0 };
+        uint32_t occupied = 0;
+        for (uint32_t y = 0; y < image.height; ++y) {
+            for (uint32_t x = 0; x < image.width; ++x) {
+                const std::size_t pixel = (std::size_t(y) * image.width + x) * 4;
+                int peak = 0;
+                for (unsigned channel = 0; channel < 3; ++channel) {
+                    peak = std::max(peak, std::abs(
+                        std::to_integer<int>(image.rgba[pixel + channel]) -
+                        std::to_integer<int>(empty.rgba[pixel + channel])));
+                }
+                if (peak > 6) {
+                    bounds.left = std::min(bounds.left, x);
+                    bounds.right = std::max(bounds.right, x + 1);
+                    bounds.top = std::min(bounds.top, y);
+                    bounds.bottom = std::max(bounds.bottom, y + 1);
+                    ++occupied;
+                }
+            }
+        }
+        verify(occupied > 400 && bounds.right > bounds.left + 20 &&
+                bounds.bottom > bounds.top + 20,
+            "Robot animation fixture did not draw a recognizable robot");
+        return bounds;
+    };
+    const PixelBounds first = footprint(capture(0, 0, 1));
+    const PixelBounds second = footprint(capture(0, 0, 2));
+    verify(first.right < second.left || second.right < first.left,
+        "Robot animation fixture overlapped its independently posed robots");
+    const auto regionDifference = [](const ImageData& before, const ImageData& after,
+                                     PixelBounds bounds, bool roof) {
+        const uint32_t height = bounds.bottom - bounds.top;
+        return difference(before, after, bounds.left,
+            roof ? bounds.top : bounds.top + height / 2,
+            bounds.right, roof ? bounds.top + height / 4 : bounds.bottom);
+    };
+    const ImageData phaseZero = capture(0, 0);
+    const ImageData firstMoving = capture(0.19f, 0);
+    const ImageData bothMoving = capture(0.19f, 0.41f);
+    const double firstMotion = regionDifference(phaseZero, firstMoving, first, false);
+    const double secondMotion = regionDifference(firstMoving, bothMoving, second, false);
+    std::cout << "RobotDrive rendered track/cog differences: first=" << firstMotion
+              << ", second=" << secondMotion << '\n';
+    verify(firstMotion > 0.05 && secondMotion > 0.05,
+        "RobotDrive changed no visible track/cog pixels at distinct phases");
+    verify(regionDifference(phaseZero, firstMoving, first, true) == 0.0 &&
+            regionDifference(firstMoving, bothMoving, second, true) == 0.0,
+        "RobotDrive moved the rigid roof while animating its drive mechanism");
+    verify(difference(phaseZero, firstMoving, second.left, second.top,
+                second.right, second.bottom) == 0.0 &&
+            difference(firstMoving, bothMoving, first.left, first.top,
+                first.right, first.bottom) == 0.0,
+        "RobotDrive reused one instance's pose for another robot");
+    const ImageData frozen = capture(0.19f, 0.41f);
+    verify(difference(bothMoving, frozen, 0, 0, frozen.width, frozen.height) == 0.0,
+        "RobotDrive advanced while the signed travel phase was frozen");
+    const ImageData looped = capture(2.0f, 2.0f);
+    verify(difference(phaseZero, looped, 0, 0, looped.width, looped.height) == 0.0,
+        "RobotDrive did not loop exactly at its two-second boundary");
+    if (evidence) {
+        std::filesystem::create_directories(*evidence);
+        saveRippleEvidence(*evidence / "phase-000.png", phaseZero);
+        saveRippleEvidence(*evidence / "phase-019.png", firstMoving);
+        saveRippleEvidence(*evidence / "phase-041.png", bothMoving);
+        saveRippleEvidence(*evidence / "frozen.png", frozen);
+        saveRippleEvidence(*evidence / "looped.png", looped);
+        for (unsigned index = 0; index < 32; ++index) {
+            const float phase = float(index) * 2.0f / 32.0f;
+            saveRippleEvidence(*evidence /
+                ("drive-" + std::to_string(1000 + index).substr(1) + ".png"),
+                capture(phase, -phase));
+        }
+        std::cout << "Robot animation evidence: " << evidence->string() << '\n';
+    }
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a robot animation error");
+}
+
 double verifyInteractionOutlineImage(const ImageData& baseline,
     const ImageData& outlined, bool requireBlueSilhouette = true)
 {
@@ -912,6 +1064,13 @@ int main(int argc, char** argv)
         auto font = FontAtlas::loadDefault(root);
         const auto manifest = AssetManifest::loadFromFile(root / "manifest.json");
         ScopedTestDirectory temp("preview-rendering");
+        if (argc > 1 && std::string_view(argv[1]) == "--robot-animation") {
+            verifyRobotAnimation(window.get(), root, font, manifest,
+                temp.path() / "cache.bin", argc > 2
+                    ? std::optional<std::filesystem::path>(argv[2]) : std::nullopt);
+            std::cout << "Robot animation GPU regression passed\n";
+            return 0;
+        }
         if (argc > 1 && std::string_view(argv[1]) == "--interaction-outlines") {
             verifyInteractionOutlines(window.get(), root, font, manifest,
                 temp.path() / "cache.bin");

@@ -848,8 +848,31 @@ void testChainPlanningStopsAtTheCap()
     }
 }
 
+void testRobotPatrolPlansOneBeatAndLeavesUnrelatedActorsAlone()
+{
+    TEST("robotPatrolPlansOneBeatAndLeavesUnrelatedActorsAlone");
+    const Level level = makeLevel({ { ".......", "......." }, { " }   } ", " C     " } });
+    const GameState initial = rules::initialState(level);
+    const auto robots = plans::patrollingRobots(initial);
+    CHECK(robots.size() == 2);
+    CHECK(!plans::planRobotPatrols(level, initial, {}, {}, 0.2f));
+    CHECK(!plans::planRobotPatrols(level, initial, robots, { .robot = 0 }, 0.2f));
+    const auto patrol = plans::planRobotPatrols(level, initial, { robots[0] }, {}, 0.2f);
+    CHECK(patrol.has_value());
+    if (!patrol) return;
+    CHECK(patrol->legs.size() == 1);
+    CHECK(patrol->action.durationSeconds == 0.2f);
+    CHECK(patrol->action.after.movables[0].cell == cell(2, 0, 1));
+    CHECK(patrol->action.after.movables[1] == initial.movables[1]);
+    CHECK(patrol->action.after.players == initial.players);
+    CHECK(!patrol->action.playerPushing);
+    CHECK(!patrol->action.facingDirection);
+    CHECK(plans::planRobotPatrols(level, initial, { robots[0] }, {}, 0.2f) == patrol);
+}
+
 int main()
 {
+    testRobotPatrolPlansOneBeatAndLeavesUnrelatedActorsAlone();
     testChainPlanningStopsAtTheCap();
     testBeltRidersFollowEachOtherDownOneBelt();
     testOutcomeSurvivesAnyChangeOutsideItsClaims();

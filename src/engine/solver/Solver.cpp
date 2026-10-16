@@ -122,13 +122,13 @@ std::optional<DirectionTransition> applyDirection(
             {},
             config::stepDurationSeconds,
             controller);
-    if (!planned) {
+    if (!planned && plans::patrollingRobots(before).empty()) {
         return DirectionTransition {
             .state = before,
             .solved = rules::isAtUnlockedEnd(level, before),
         };
     }
-    if (!rules::hasPendingMotion(level, planned->action.after)) {
+    if (planned && !rules::hasPendingMotion(level, planned->action.after)) {
         return DirectionTransition {
             .state = planned->action.after,
             .solved = rules::isAtUnlockedEnd(level, planned->action.after),
@@ -483,12 +483,16 @@ Result solve(const Level& level, const Options& options)
             const std::vector<EntityId> controllers =
                 livingControllerIds(walks[walk].state);
             if (controllers.size() > 1) {
-                addPrecomputedSuccessor(
-                    walk,
-                    Input::CycleHero,
-                    walks[walk].state,
-                    nextLivingController(controllers, controller),
-                    false);
+                if (!plans::patrollingRobots(walks[walk].state).empty()) {
+                    addDrivenSuccessor(walk, Input::CycleHero);
+                } else {
+                    addPrecomputedSuccessor(
+                        walk,
+                        Input::CycleHero,
+                        walks[walk].state,
+                        nextLivingController(controllers, controller),
+                        false);
+                }
             }
             std::optional<rules::MirrorActivationPreview> mirror =
                 rules::previewActivation(level, walks[walk].state);

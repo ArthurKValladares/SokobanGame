@@ -11,6 +11,7 @@
 #include "engine/ParticleConfig.hpp"
 #include "engine/RenderFrameParts.hpp"
 #include "engine/RotatorVisuals.hpp"
+#include "engine/RobotVisuals.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/MirrorConfig.hpp"
@@ -36,6 +37,18 @@ namespace sokoban {
 using namespace renderFrameParts;
 
 namespace {
+
+uint32_t movableModelQuarterTurns(const GameState::Movable& movable)
+{
+    if (const auto direction = rules::robotDirection(movable)) {
+        return facingQuarterTurns(*direction);
+    }
+    if (const auto direction = rules::turretDirection(movable)) {
+        return facingQuarterTurns(*direction);
+    }
+    return (mirrorOrientationQuarterTurns(movable.type).value_or(0) +
+        static_cast<uint32_t>(movable.quarterTurns)) % 4;
+}
 
 RenderAnimation manifestAnimationForUse(
     const AssetManifest& manifest,
@@ -77,6 +90,7 @@ struct StaticRenderCell {
     std::optional<Vec4> colorOverride;
     float gateOpenness = 0.0f;
     uint64_t renderableId = 0;
+    float robotDriveTimeSeconds = 0.0f;
 };
 
 void appendControlComponents(
@@ -204,6 +218,8 @@ StaticRenderCell staticRenderCellFor(
             ? playerFacingQuarterTurns
             : (rules::conveyorDirectionForTile(tile)
                     ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
+                    : rules::robotDirectionForTile(tile)
+                    ? facingQuarterTurns(*rules::robotDirectionForTile(tile))
                     : (rules::turretDirectionForTile(tile)
                             ? facingQuarterTurns(
                                   *rules::turretDirectionForTile(tile))
@@ -384,6 +400,13 @@ void appendStaticTiles(
                     .cliffWallVariant = cliffWallVariantFor(cell.tile),
                     .groundTop = tileTypeHasSplatTop(cell.tile),
                 };
+                if (tileTypeIsRobot(cell.tile)) {
+                    renderTile.animation = robotDriveAnimation(manifest);
+                    renderTile.animationInstanceId = cell.renderableId != 0
+                        ? cell.renderableId : authoredAnimationInstance(cell.tile, renderTile.cell);
+                    renderTile.animationCrossfades = false;
+                    renderTile.animationTimeSeconds = cell.robotDriveTimeSeconds;
+                }
                 applyTileScale(renderTile, scaleForTile(cell.tile));
                 if (tileTypeIsPortal(cell.tile)) {
                     appendPortalVisual(
@@ -884,12 +907,11 @@ void appendGameplayWorld(
                         .baseElevation =
                             static_cast<float>(std::max(position.z - 1, 0)),
                         .height = 1.0f,
-                        .modelRotationQuarterTurns = rules::turretDirection(*fallenMovable)
-                            ? facingQuarterTurns(*rules::turretDirection(*fallenMovable))
-                            : (mirrorOrientationQuarterTurns(fallenMovable->type).value_or(0) +
-                                  static_cast<uint32_t>(fallenMovable->quarterTurns)) % 4,
+                        .modelRotationQuarterTurns = movableModelQuarterTurns(*fallenMovable),
                         .renderableId = resolvedEntityId(EntityKind::Movable, fallenMovable->id,
                             static_cast<std::size_t>(fallenMovable - state.movables.data())),
+                        .robotDriveTimeSeconds = static_cast<std::size_t>(fallenMovable - state.movables.data()) < movableVisuals.size()
+                            ? movableVisuals[static_cast<std::size_t>(fallenMovable - state.movables.data())].robotDriveTimeSeconds : 0.0f,
                     };
                 }
             }
@@ -1554,7 +1576,7 @@ void appendGameplayEntities(
             continue;
         }
 
-        Vec4 color = tileTypeIsTurret(movable.type)
+        Vec4 color = tileTypeIsTurret(movable.type) || tileTypeIsRobot(movable.type)
             ? Vec4 { 1.0f, 1.0f, 1.0f, 1.0f }
             : tileColor(movable.type);
         if (movable.type == TileType::Ice) {
@@ -1577,6 +1599,11 @@ void appendGameplayEntities(
             ? quarterTurnDeltaAt(
                   state.movables, input.projectedState.movables, movableIndex)
             : 0;
+        const GameState::Movable& headingMovable =
+            tileTypeIsRobot(movable.type) && input.moving && !turnedByRotator &&
+                    movableIndex < input.projectedState.movables.size()
+                ? input.projectedState.movables[movableIndex]
+                : movable;
         RenderFrameData::Tile movableTile {
             .cell = movable.cell,
             .position = {
@@ -1590,13 +1617,17 @@ void appendGameplayEntities(
             .affectsCameraFit = false,
             .interactionOutline = tileTypeHasInteractionOutline(movable.type),
             .model = input.manifest.modelForTile(movable.type),
+            .animation = tileTypeIsRobot(movable.type)
+                ? robotDriveAnimation(input.manifest) : noAnimation,
+            .animationInstanceId = tileTypeIsRobot(movable.type)
+                ? actorAnimationInstance(visual.target) : uint64_t { 0 },
             .renderableId = visual.target.id,
-            // Turrets face their (possibly rotated) firing direction; other
-            // movables show the quarter turns rotators have applied.
-            .modelRotationQuarterTurns = rules::turretDirection(movable)
-                ? facingQuarterTurns(*rules::turretDirection(movable))
-                : (mirrorOrientationQuarterTurns(movable.type).value_or(0) +
-                      static_cast<uint32_t>(movable.quarterTurns)) % 4,
+            .animationCrossfades = !tileTypeIsRobot(movable.type),
+            .animationTimeSeconds = tileTypeIsRobot(movable.type)
+                ? visual.robotDriveTimeSeconds : 0.0f,
+            // Robots' leading lamps follow their current patrol direction.
+            // Turrets likewise face their live firing direction.
+            .modelRotationQuarterTurns = movableModelQuarterTurns(headingMovable),
             .modelRotationOffsetRadians =
                 (tileTypeIsMirror(movable.type)
                         ? config::mirrorModelRotationOffsetRadians : 0.0f) +
@@ -1795,15 +1826,20 @@ void appendMirrorGhostTile(
                     ? previewPlayer->facingQuarterTurns
                     : 0U)
             : entity.enemy ? 0U
-            : rules::turretDirection(state.movables[entity.movableIndex])
-                ? facingQuarterTurns(*rules::turretDirection(state.movables[entity.movableIndex]))
-                : (mirrorOrientationQuarterTurns(state.movables[entity.movableIndex].type).value_or(0) +
-                      static_cast<uint32_t>(state.movables[entity.movableIndex].quarterTurns)) % 4,
+            : movableModelQuarterTurns(state.movables[entity.movableIndex]),
         .modelRotationOffsetRadians = previewEnemy
             ? yawRadians(previewEnemy->orientation)
             : 0.0f,
         .effect = RenderSurfaceEffect::MirrorEnergy,
     };
+    if (!entity.player && !entity.enemy &&
+        tileTypeIsRobot(state.movables[entity.movableIndex].type)) {
+        ghost.animation = robotDriveAnimation(input.manifest);
+        ghost.animationInstanceId = mirrorGhostAnimationInstance(
+            state.players.size() + state.enemies.size() + entity.movableIndex);
+        ghost.animationCrossfades = false;
+        ghost.animationTimeSeconds = preview.visual ? preview.visual->robotDriveTimeSeconds : 0.0f;
+    }
     applyTileScale(
         ghost,
         input.settings.tileScale(

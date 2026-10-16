@@ -10,6 +10,7 @@
 #include "engine/Level.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/RotatorVisuals.hpp"
+#include "engine/RobotVisuals.hpp"
 #include "engine/TileTypes.hpp"
 
 #include <algorithm>
@@ -191,6 +192,13 @@ RenderAssetRequirements renderActionAssetRequirementsForLevel(
     if (!level.enemyStarts().empty()) {
         requireUse(AnimationUse::EnemyIdle, manifest.playerIdleAnimation());
         requireUse(AnimationUse::EnemyAttack, manifest.enemyAttackAnimation());
+    }
+    if (std::ranges::any_of(level.movableTiles(), [](const auto& movable) {
+            return tileTypeIsRobot(movable.type);
+        }) || std::ranges::any_of(level.decorations(), [](const auto& decoration) {
+            return decoration.model == "Robot";
+        })) {
+        requirements.requireAnimation(robotDriveAnimation(manifest));
     }
     // A valid level has one metadata record for every gate tile, so these
     // collections cover brief effects without traversing the terrain grid.

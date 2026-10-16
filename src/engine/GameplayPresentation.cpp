@@ -4,6 +4,7 @@
 #include "engine/PresentationTransactionBuilder.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/RockScratchConfig.hpp"
+#include "engine/RobotVisuals.hpp"
 #include "engine/render/AnimationConfig.hpp"
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/WaterGeometry.hpp"
@@ -435,6 +436,54 @@ Vec3 interpolateGridMotion(
         travelAxis(to.z, result.z);
     }
     return result;
+}
+
+float robotSignedTravel(
+    const GameplaySession::Action& action, EntityTarget target, float sourceTime)
+{
+    // Undo retains the original forward timeline but swaps the state endpoints.
+    const GameState& source = action.reversed ? action.after : action.before;
+    const auto movable = std::ranges::find_if(source.movables,
+        [&](const auto& unit) {
+            return movableTarget(unit, static_cast<std::size_t>(&unit - source.movables.data())) == target;
+        });
+    if (movable == source.movables.end()) return 0.0f;
+    const auto direction = rules::robotDirection(*movable);
+    if (!direction) return 0.0f;
+    const auto axis = rules::directionOffset(*direction);
+    Vec2 heading { static_cast<float>(axis.x), static_cast<float>(axis.y) };
+    std::vector<const ActionMotionTrack*> tracks;
+    for (const auto& track : action.presentation.motions) {
+        if (track.target == target) tracks.push_back(&track);
+    }
+    std::ranges::stable_sort(tracks, {}, [](const auto* track) { return track->startSeconds; });
+    std::optional<Vec3> previousEnd;
+    float previousSign = 1.0f;
+    float travel = 0.0f;
+    for (const auto* track : tracks) {
+        const Vec3 delta = track->to - track->from;
+        const float horizontal = std::abs(delta.x) + std::abs(delta.y);
+        if (horizontal > 0.0001f && track->durationSeconds > 0.0f) {
+            // Portal segments omit the jump between their mouths. Rotate the
+            // local drive axis with the outgoing segment, retaining whether
+            // the robot entered forwards or was shoved backwards.
+            if (previousEnd && length(track->from - *previousEnd) > 0.001f) {
+                heading = { delta.x / horizontal * previousSign,
+                    delta.y / horizontal * previousSign };
+            }
+            const float alignment = delta.x * heading.x + delta.y * heading.y;
+            const float sign = alignment < -0.0001f ? -1.0f : 1.0f;
+            const float distance = gridDistance(track->from, track->to);
+            const Vec3 sample = interpolateGridMotion(track->from, track->to,
+                std::clamp(sourceTime - track->startSeconds, 0.0f, track->durationSeconds),
+                track->durationSeconds / distance);
+            travel += sign * (std::abs(sample.x - track->from.x) +
+                std::abs(sample.y - track->from.y));
+            previousSign = sign;
+        }
+        previousEnd = track->to;
+    }
+    return travel * config::robotDriveClipSecondsPerTile;
 }
 
 uint32_t facingQuarterTurns(MoveDirection direction)
@@ -1351,6 +1400,18 @@ void GameplayPresentation::beginAction(
     reverseSourceStartSeconds_ = action.reversed
         ? action.presentation.durationSeconds
         : 0.0f;
+    for (std::size_t index = 0; index < movables_.size(); ++index) {
+        if (!tileTypeIsRobot(worldState.movables[index].type)) continue;
+        EntityVisual& visual = movables_[index];
+        if (std::ranges::none_of(action.presentation.motions,
+                [&](const auto& track) { return track.target == visual.target; })) continue;
+        const auto* key = action.presentation.motions.data();
+        // An allocator may reuse storage from an already completed action.
+        std::erase_if(visual.robotDriveSamples,
+            [&](const auto& sample) { return sample.timeline == key; });
+        visual.robotDriveSamples.push_back({ key,
+            robotSignedTravel(action, visual.target, reverseSourceStartSeconds_), false });
+    }
     // Face only the control groups participating in this action. Authored
     // heroes have distinct controller ids, while mirror copies inherit their
     // source's id. That keeps a blocked mirror copy visually tied to the copy
@@ -1479,6 +1540,15 @@ void GameplayPresentation::seekAction(
             : elapsed,
         0.0f,
         timeline.durationSeconds);
+    for (EntityVisual& visual : movables_) {
+        const auto sample = std::ranges::find(visual.robotDriveSamples,
+            timeline.motions.data(), &EntityVisual::RobotDriveSample::timeline);
+        if (sample == visual.robotDriveSamples.end()) continue;
+        const float travel = robotSignedTravel(action, visual.target, sourceTime);
+        visual.robotDriveTimeSeconds += travel - sample->signedTravel;
+        sample->signedTravel = travel;
+        sample->complete = elapsed >= timeline.durationSeconds;
+    }
     for (std::size_t index = 0; index < timeline.controls.size(); ++index) {
         const ActionControlTrack& track = timeline.controls[index];
         std::size_t chosen = index;
@@ -1667,6 +1737,10 @@ void GameplayPresentation::seekAction(
 
 void GameplayPresentation::finishAction(const GameState& state)
 {
+    for (auto& visual : movables_) {
+        std::erase_if(visual.robotDriveSamples,
+            [](const auto& sample) { return sample.complete; });
+    }
     syncToGameState(state);
     controls_.clear();
     reverseSourceStartSeconds_ = 0.0f;

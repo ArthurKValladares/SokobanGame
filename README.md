@@ -661,6 +661,7 @@ Common tile symbols:
 | `g` | Minecart gate | `! _` | Rail stops (north/south, east/west) |
 | `O o p q` | Portals (north, east, south, west) | | |
 | `n e s w` | Turrets facing north/east/south/west | | |
+| `{ } : ;` | Robots initially moving north/east/south/west | | |
 
 Decorative blocks render but have no gameplay, support, occupancy, camera-fit,
 or water-grid-bound semantics. New water layouts should use `@water N`; `W`
@@ -852,7 +853,7 @@ editor commands but does not own document or filesystem policy.
   painting. **Randomize Walls** chooses a random variation and quarter-turn
   rotation, keeps each tile's stone or cliff family and preserves its paint
   assignment.
-- Conveyors, mirrors, turrets, portals, buttons, levers and lecterns have one
+- Conveyors, mirrors, turrets, robots, portals, buttons, levers and lecterns have one
   palette entry per family. Rail Straight, Rail Corner and Rail Stop each
   have one entry. Select a family and use **Rotate** or `R` to change its
   direction. Art variations, wardrobe characters and rotator behavior still
@@ -863,6 +864,21 @@ editor commands but does not own document or filesystem policy.
   During play, lever handles swing between positions and button caps press
   down and spring back. Pressure plates lower under an occupying unit and
   remain pressed until it leaves. These motions also follow undo and restart.
+- **Robots:** choose **Robot**, then use **Rotate** or `R` to select the patrol
+  axis and initial heading. Each motor beat advances one tile. A blocked robot
+  reverses in place and tries the other direction on its next beat. Its motor
+  avoids water and drops, and can push one unit, including a hero; two units
+  in a row stop it. Heroes can push robots like other blocks and stand on top
+  to ride them. Riders and supported stacks travel together, with overhead
+  obstructions stopping the move. The flat top's arrows show the patrol axis;
+  warm gold and dim ember lanterns distinguish its current front and back.
+  Riveted bronze, copper pipes, iron tracks and a weathered wooden deck give
+  the robot a rustic mechanical appearance. Track links circulate and gears
+  turn with distance travelled, stopping when the robot stops and running
+  backward during backward pushes and undo. Pushing a robot
+  can move it off a ledge like an ordinary block. See
+  [the robot example](docs/examples/robot.scr), which starts a hero riding one
+  robot and places another behind a rock near water.
 - Link Colors: in the editor, every pressure plate, button, lever and device has a link
   color, and a device is driven by exactly the sources of its color.
   Rocks, ice blocks, and turrets can also be painted into a color group; they

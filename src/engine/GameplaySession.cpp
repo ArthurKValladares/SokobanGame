@@ -1312,6 +1312,29 @@ GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& le
             : StartOutcome::Refused;
     }
 
+    if (std::optional<plans::PlannedAction> patrol = plans::planRobotPatrols(
+            level,
+            current,
+            withoutEntitiesInFlight(plans::patrollingRobots(current)),
+            stepRates_,
+            stepDurationSeconds_)) {
+        patrol->action.playerMoveCountBefore = playerMoveCount_;
+        patrol->action.playerMoveCountAfter = playerMoveCount_;
+        if (!actionAdmissionAllows(patrol->action)) {
+            return StartOutcome::Impossible;
+        }
+        return beginAction(
+                   patrol->action,
+                   patrol->pressurePlateActivityChanged,
+                   std::move(patrol->legs),
+                   std::move(patrol->turretShots),
+                   0,
+                   {},
+                   std::move(patrol->portalTransits))
+            ? StartOutcome::Started
+            : StartOutcome::Refused;
+    }
+
     return StartOutcome::Impossible;
 }
 

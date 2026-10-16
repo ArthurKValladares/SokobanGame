@@ -122,6 +122,12 @@ enum class TileType : uint8_t {
     LeverEast,
     LeverSouth,
     LeverWest,
+    // Autonomous pushable platforms. Orientation is both the patrol axis and
+    // the initial heading; blocked robots reverse along that same axis.
+    RobotNorth,
+    RobotEast,
+    RobotSouth,
+    RobotWest,
     Count,
 };
 
@@ -292,6 +298,10 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::LeverEast, '&', "Lever East", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::LeverSouth, '[', "Lever South", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::LeverWest, ']', "Lever West", { 0.95f, 0.55f, 0.16f, 1.0f }, {}, TileProperty::Plate },
+    TileTypeDefinition { TileType::RobotNorth, '{', "Robot North", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::RobotEast, '}', "Robot East", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::RobotSouth, ':', "Robot South", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::RobotWest, ';', "Robot West", { 1.0f, 1.0f, 1.0f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -342,6 +352,12 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeIsConveyor(TileType type);
 [[nodiscard]] bool tileTypeIsMirror(TileType type);
 [[nodiscard]] bool tileTypeIsTurret(TileType type);
+[[nodiscard]] constexpr bool tileTypeIsRobot(TileType type)
+{
+    return type >= TileType::RobotNorth && type <= TileType::RobotWest;
+}
+// Clockwise turns from north, matching the robot's initial travel heading.
+[[nodiscard]] std::optional<uint32_t> robotOrientationQuarterTurns(TileType type);
 [[nodiscard]] constexpr bool tileTypeIsWardrobe(TileType type)
 {
     return type >= TileType::WardrobeLorekeeper &&
