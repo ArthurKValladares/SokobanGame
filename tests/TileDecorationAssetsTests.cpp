@@ -94,8 +94,8 @@ void checkDecorationMesh(const MeshData& mesh, std::string_view style, std::stri
     CHECK(bounds.minimum.z >= -0.0151f);
     CHECK(bounds.minimum.z < 0.0f);
     CHECK(bounds.maximum.z > 0.01f);
-    const float maximumHeight = style == "Grass" ? 0.1701f :
-        style == "Moss" ? 0.1301f : 0.0601f;
+    const float maximumHeight = style == "Grass" ? 0.1901f :
+        style == "Moss" ? 0.0641f : 0.0621f;
     CHECK(bounds.maximum.z <= maximumHeight);
     // Every authored layout includes north. Additional edges must meet the
     // same tile boundary rather than leaving an inset band of bare ground.

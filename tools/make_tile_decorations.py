@@ -49,17 +49,16 @@ def solid_material(name, color, roughness=.88):
 
 
 PALETTES = {
-    'pebbles': [(0.59,.60,.46), (.67,.67,.52), (.74,.73,.58), (.79,.77,.62),
-                (.65,.64,.51), (.72,.70,.55), (.83,.80,.66), (.60,.63,.52)],
+    'pebbles': [(.24,.27,.23), (.38,.40,.30), (.46,.50,.47), (.56,.53,.42),
+                (.65,.57,.40), (.68,.71,.63), (.80,.75,.59), (.88,.86,.74)],
     'grass': [(.31,.46,.075), (.42,.58,.10), (.53,.65,.15), (.65,.73,.24),
               (.24,.43,.065), (.37,.55,.08), (.59,.69,.20), (.73,.78,.31)],
     'moss': [(.25,.40,.055), (.34,.48,.075), (.43,.56,.105), (.50,.61,.14),
              (.38,.52,.08), (.57,.66,.18), (.85,.82,.36), (.96,.91,.54)]}
 
 
-def palette_material(style):
+def paint_palette(image, style):
     colors = PALETTES[style]
-    image = bpy.data.images.new('TileDetails_' + style + '_palette', width=128, height=16, alpha=False)
     pixels = []
     for y in range(16):
         for x in range(128):
@@ -68,10 +67,15 @@ def palette_material(style):
             shade = .97 + .035 * y / 15 + .008 * math.sin(x * .8 + y)
             pixels.extend([min(1, c * shade) for c in color] + [1])
     image.pixels.foreach_set(pixels)
+    image.update()
     image.filepath_raw = str(KIT / (style + '_palette.png'))
-    image.file_format = 'PNG'
     image.save()
     image.pack()
+
+
+def palette_material(style):
+    image = bpy.data.images.new('TileDetails_' + style + '_palette', width=128, height=16, alpha=False)
+    paint_palette(image,style)
     mat = solid_material('TileDetails_' + style, (.6,.6,.6),
                          {'pebbles':.91,'grass':.85,'moss':.94}[style])
     tex = mat.node_tree.nodes.new('ShaderNodeTexImage')
@@ -129,43 +133,55 @@ def edge_point(edge, t, inset):
 
 
 def pebble(builder, x, y, radius, height, rng, swatch):
-    n = rng.choice([7, 8, 9])
-    elongation = rng.uniform(.73, 1.14)
+    shape=rng.choice(('rounded','slab','wedge','angular','river'))
+    n = rng.choice([6,7,8,9]) if shape in ('rounded','river') else rng.choice([5,6,7])
+    elongation = rng.uniform(.48,.74) if shape=='river' else rng.uniform(.70,1.23)
     rotation = rng.uniform(0, math.tau)
-    radial = [rng.uniform(.90, 1.10) for _ in range(n)]
+    radial = [rng.uniform(.76,1.20) for _ in range(n)]
+    if shape=='angular':
+        radial[rng.randrange(n)]*=.65
+    shoulder={'rounded':(.92,.58),'slab':(.97,.81),'wedge':(.83,.47),
+              'angular':(.90,.67),'river':(.95,.63)}[shape]
+    top_offset=(rng.uniform(-.28,.28)*radius,rng.uniform(-.24,.24)*radius)
+    slope=rng.uniform(-.20,.20) if shape=='wedge' else rng.uniform(-.07,.07)
     verts = []
-    for ring, (scale, z) in enumerate(((.63, -.008), (1, .20 * height),
-                                      (.91, .66 * height), (.53, .94 * height))):
+    for ring, (scale, z) in enumerate(((.64,-.008),(1,.22*height),
+                                      (shoulder[0],.68*height),(shoulder[1],.93*height))):
         for j in range(n):
             angle = j * math.tau / n + rotation + .035 * ring
-            z_jitter = rng.uniform(-.035, .035) * height if ring else 0
-            verts.append((x + math.cos(angle) * radius * radial[j] * scale,
-                          y + math.sin(angle) * radius * elongation * radial[j] * scale,
+            z_jitter = (rng.uniform(-.045,.045)+slope*math.cos(angle))*height if ring else 0
+            drift=(0,.18,.58,.82)[ring]
+            verts.append((x+math.cos(angle)*radius*radial[j]*scale+top_offset[0]*drift,
+                          y+math.sin(angle)*radius*elongation*radial[j]*scale+top_offset[1]*drift,
                           z + z_jitter))
-    verts.append((x + .08 * radius, y - .07 * radius, height))
+    verts.append((x+top_offset[0],y+top_offset[1],height))
     faces, swatches = [tuple(reversed(range(n)))], [max(0, swatch - 1)]
     for ring in range(3):
         for j in range(n):
             faces.append((ring*n+j, ring*n+(j+1)%n, (ring+1)*n+(j+1)%n, (ring+1)*n+j))
-            swatches.append(swatch if ring < 2 else min(7, swatch+1))
+            swatches.append(min(7,swatch+1) if ring==2 and rng.random()<.18 else swatch)
     for j in range(n):
         faces.append((3*n+j, 3*n+(j+1)%n, 4*n))
-        swatches.append(min(7, swatch + (j%3 == 0)))
+        swatches.append(min(7,swatch+1) if rng.random()<.20 else swatch)
     builder.island(verts, faces, swatches)
 
 
-def blade(builder, x, y, height, width, angle, lean, swatch):
-    """Closed, curved, folded blade; real volume rather than alpha cards."""
+def blade(builder, x, y, height, width, angle, lean, swatch,
+          *, bend=2.0, twist=0.0, taper=.58, base=.30):
+    """A solid folded blade with independently shaped bend and taper."""
     forward = Vector((math.cos(angle), math.sin(angle), 0))
-    side = Vector((-math.sin(angle), math.cos(angle), 0))
     verts = []
-    # Three diamond sections, then a tip. Broadest near the lower middle.
-    for t, profile in ((0, .30), (.38, 1), (.74, .58)):
-        center = Vector((x,y,-.006 + height*t)) + forward*(lean*t*t)
+    # Closed diamond sections preserve thickness even on the narrow reeds.
+    # Rotating each section gently changes the folded silhouette as it rises.
+    for t, profile in ((0, base), (.38, 1), (.74, taper)):
+        direction=angle+twist*t
+        section_forward=Vector((math.cos(direction),math.sin(direction),0))
+        side=Vector((-math.sin(direction),math.cos(direction),0))
+        center = Vector((x,y,-.006+(height+.006)*t)) + forward*(lean*t**bend)
         halfwidth = width*profile*.5
         ridge = max(.0012, width*.11)*profile
-        verts.extend([tuple(center-side*halfwidth), tuple(center+forward*ridge),
-                      tuple(center+side*halfwidth), tuple(center-forward*ridge)])
+        verts.extend([tuple(center-side*halfwidth), tuple(center+section_forward*ridge),
+                      tuple(center+side*halfwidth), tuple(center-section_forward*ridge)])
     verts.append((x+forward.x*lean, y+forward.y*lean, height))
     faces, swatches = [(3,2,1,0)], [0]
     for ring in range(2):
@@ -178,265 +194,280 @@ def blade(builder, x, y, height, width, angle, lean, swatch):
     builder.island(verts, faces, swatches)
 
 
-def leaf(builder, x, y, length, width, angle, swatch):
-    # Small oval ground leaves echo the broad leaves in the supplied reference.
-    local = [(0,0,.003), (.22*length,-.44*width,.014),
-             (.60*length,-.5*width,.023), (length,0,.035),
-             (.60*length,.5*width,.023), (.22*length,.44*width,.014),
-             (.53*length,0,.032), (.48*length,0,.005)]
+def leaf(builder, x, y, length, width, angle, swatch,
+         *, lift=.035, fullness=.60, cup=.15):
+    """Closed oval-to-lance leaf with a raised fold and a solid underside."""
+    local = [(0,0,.003), (.22*length,-.44*width,.003+.31*lift),
+             (fullness*length,-.5*width,.003+.57*lift), (length,0,.003+.90*lift),
+             (fullness*length,.5*width,.003+.57*lift), (.22*length,.44*width,.003+.31*lift),
+             (.50*length,0,.003+(.82+cup)*lift), (.48*length,0,.0045)]
     verts = [(x+u*math.cos(angle)-v*math.sin(angle),
               y+u*math.sin(angle)+v*math.cos(angle),z) for u,v,z in local]
     faces = [(j,(j+1)%6,6) for j in range(6)] + [((j+1)%6,j,7) for j in range(6)]
-    builder.island(verts,faces,[swatch+(j%3==0) for j in range(6)]+[swatch]*6)
+    builder.island(verts,faces,[min(7,swatch+(j%3==0)) for j in range(6)]+[min(7,swatch)]*6)
 
 
-def decoration_focus(config, variation):
-    shift=(-.018,.018,-.009,.009)[variation]
-    if config=='corner':
-        return (.337+shift*.45,-.337+shift*.25)
-    return (shift,-.34+(-.006,.008,.004,-.003)[variation])
+def make_pebbles(builder, rng):
+    """One stone per site; variation changes the stone, never the density."""
+    radius=rng.uniform(.023,.039)
+    height=rng.uniform(.013,.027) if rng.random()<.40 else rng.uniform(.028,.052)
+    pebble(builder,0,0,radius,height,rng,rng.randrange(8))
 
 
-def trail_lengths(config, focus):
-    x,y=focus
-    if config in ('edge','strip'):
-        return (x+.415,.415-x)
-    if config=='corner':
-        return (x+.415,.415-y)
-    return (x+.34+.415-y,.34-x+.415-y)
+def make_grass(builder, rng):
+    """Mix upright, spreading, reed, windswept, and broad-leaf silhouettes."""
+    # Blade/leaf counts, tallest height, width, lean, fan, bend, root spread.
+    # Heights remain independent of the later horizontal footprint fitting.
+    profiles=(
+        ((2,4),(0,1),(.082,.138),(.013,.024),(.012,.036),.90,(1.8,2.8),.007),
+        ((4,7),(0,2),(.044,.088),(.017,.029),(.042,.080),2.60,(1.15,1.8),.015),
+        ((3,6),(0,1),(.150,.190),(.0105,.016),(.008,.027),.66,(2.0,3.1),.006),
+        ((3,6),(0,2),(.096,.165),(.014,.025),(.055,.100),.64,(1.25,2.2),.011),
+        ((2,4),(2,4),(.060,.106),(.021,.034),(.030,.062),2.10,(1.4,2.4),.018),
+    )
+    kind=rng.randrange(len(profiles))
+    counts,leaf_counts,heights,widths,leans,fan,bends,root_spread=profiles[kind]
+    count=rng.randint(*counts)
+    leaf_count=rng.randint(*leaf_counts)
+    tallest=rng.uniform(*heights)
+    leader=rng.randrange(count)
+    heading=math.pi/2+rng.uniform(-.42,.42)
+    if kind==3:
+        heading+=rng.uniform(-.45,.45)
+    for j in range(count):
+        root_angle=rng.uniform(0,math.tau)
+        root_radius=root_spread*math.sqrt(rng.random())
+        x=math.cos(root_angle)*root_radius
+        y=math.sin(root_angle)*root_radius*.48
+        height=tallest if j==leader else max(.040,tallest*rng.uniform(.55,.92))
+        angle=heading+(j/(count-1)-.5)*fan+rng.uniform(-.16,.16)
+        taper=rng.uniform(.31,.49) if kind==2 else rng.uniform(.43,.73)
+        blade(builder,x,y,height,rng.uniform(*widths),angle,rng.uniform(*leans),
+              rng.choice([0,1,2,4]),bend=rng.uniform(*bends),
+              twist=rng.uniform(-.27,.27),taper=taper,base=rng.uniform(.24,.43))
+    for j in range(leaf_count):
+        if kind==4:
+            length,width=rng.uniform(.055,.100),rng.uniform(.033,.064)
+            lift=rng.uniform(.020,.050)
+            angle=heading+(j/max(1,leaf_count-1)-.5)*3.8+rng.uniform(-.24,.24)
+        elif kind==2:
+            length,width=rng.uniform(.035,.055),rng.uniform(.015,.025)
+            lift=rng.uniform(.015,.030)
+            angle=heading+rng.uniform(-1.0,1.0)
+        else:
+            length,width=rng.uniform(.040,.075),rng.uniform(.020,.040)
+            lift=rng.uniform(.012,.030)
+            angle=heading+rng.uniform(-.60,.60) if kind==3 else heading+rng.uniform(-1.5,1.5)
+        leaf(builder,rng.uniform(-root_spread,root_spread),rng.uniform(-.006,.006),
+             length,width,angle,rng.choice([0,1,4,5]),lift=lift,
+             fullness=rng.uniform(.42,.70),cup=rng.uniform(.05,.27))
 
 
-def trail_point(config, focus, branch, distance):
-    x,y=focus
-    if config in ('edge','strip'):
-        return (x+branch*distance,y,branch,0)
-    if config=='corner':
-        return (x-distance,y,-1,0) if branch<0 else (x,y+distance,0,1)
-    turn=x+.34 if branch<0 else .34-x
-    if distance<=turn:
-        return (x+branch*distance,y,branch,0)
-    return (branch*.34,y+distance-turn,0,1)
+def decoration_distribution(style):
+    """Fixed scatter bands with smaller, independently sized pieces inside."""
+    return {
+        'pebbles':(.110,(.025,.065),(.024,.064)),
+        'grass':(.145,(.033,.071),(.038,.086)),
+        'moss':(.125,(.036,.079),(.036,.084)),
+    }[style]
 
 
-def density_weight(config, variation, distance):
-    width={'edge':.234,'corner':.306,'strip':.234,'end':.510}[config]
-    width*=(1.0,1.08,.94,1.035)[variation]
-    return math.exp(-((distance/width)**1.30))
+def scatter_edge_sites(edge, indices, band, widths, depths, rng):
+    """Jitter length strata and shuffle depth strata instead of making rows."""
+    count=len(indices)
+    near=depths[1]/2+.002
+    far=band-near
+    for attempt in range(500):
+        insets=[near+(rank+rng.uniform(.12,.88))*(far-near)/count
+                for rank in range(count)]
+        rng.shuffle(insets)
+        sites=[]
+        for index,inset in zip(indices,insets):
+            width=rng.uniform(*widths)
+            jitter=.008 if index in (0,11) else .020
+            if index in (0,11):
+                jitter=min(jitter,1/24-width/2-.001)
+            sites.append({'edge':edge,'corner':False,
+                          't':(index+.5)/12-.5+rng.uniform(-jitter,jitter),
+                          'inset':inset,'width':width,
+                          'depth':rng.uniform(*depths)})
+        # One randomly positioned outer sample reaches the border. The other
+        # pieces are free to occupy the full band rather than hugging a line.
+        outer=min(sites,key=lambda site:site['inset'])
+        outer['inset']=outer['depth']/2
+        gaps=[b['t']-a['t'] for a,b in zip(sites,sites[1:])]
+        if any(not .052<=gap<=.116 for gap in gaps):
+            continue
+        if any(math.hypot(a['t']-b['t'],a['inset']-b['inset'])<.055
+               for i,a in enumerate(sites) for b in sites[i+1:]):
+            continue
+        # Avoid accidental local rows or long diagonal progressions.
+        if any(max(s['inset'] for s in sites[i:i+4])-
+               min(s['inset'] for s in sites[i:i+4])<.38*(far-near)
+               for i in range(count-3)):
+            continue
+        mean_t=sum(s['t'] for s in sites)/count
+        mean_d=sum(s['inset'] for s in sites)/count
+        covariance=sum((s['t']-mean_t)*(s['inset']-mean_d) for s in sites)
+        variance_t=sum((s['t']-mean_t)**2 for s in sites)
+        variance_d=sum((s['inset']-mean_d)**2 for s in sites)
+        if abs(covariance)/math.sqrt(variance_t*variance_d)>.55:
+            continue
+        return sites
+    raise RuntimeError('Could not distribute edge sites evenly')
 
 
-def trail_samples(config, variation, rng):
-    # One global peak. Spacing increases continuously along both tails,
-    # including across corners; turning onto another edge never restarts it.
-    focus=decoration_focus(config,variation)
-    for branch,length in zip((-1,1),trail_lengths(config,focus)):
-        distance=.023
-        while distance<length:
-            weight=density_weight(config,variation,distance)
-            x,y,tx,ty=trail_point(config,focus,branch,distance)
-            yield (x,y,tx,ty,weight,distance)
-            distance+=(.030+.060*(1-weight))*rng.uniform(.92,1.08)
+def perimeter_sites(style, config, rng):
+    """Balanced 2D scatter, with one owner for each shared corner."""
+    edges={'edge':(0,),'corner':(0,1),'strip':(0,2),'end':(0,1,3)}[config]
+    band,widths,depths=decoration_distribution(style)
+    for attempt in range(500):
+        sites=[]
+        for edge in edges:
+            indices=[i for i in range(12)
+                     if not (i==0 and (edge-1)%4 in edges)
+                     and not (i==11 and (edge+1)%4 in edges)]
+            sites.extend(scatter_edge_sites(edge,indices,band,widths,depths,rng))
+            if (edge+1)%4 in edges:
+                width,depth=rng.uniform(*widths),rng.uniform(*depths)
+                sites.append({'edge':edge,'corner':True,'width':width,'depth':depth,
+                              'center':(.5-rng.uniform(width/2+.003,.052),
+                                        -.5+rng.uniform(depth/2+.003,.052))})
+        centers=[]
+        for site in sites:
+            if site['corner']:
+                x,y=site['center']
+                centers.append(((x,y),(-y,x),(-x,-y),(y,-x))[site['edge']])
+            else:
+                centers.append(edge_point(site['edge'],site['t'],site['inset']))
+        if all(math.dist(a,b)>=.052 for i,a in enumerate(centers) for b in centers[i+1:]):
+            return sites
+    raise RuntimeError('Could not keep the shared corners evenly spaced')
 
 
-def inward_angle(x,y):
-    return math.atan2(-y,-x) if abs(x)+abs(y)>.07 else math.pi/2
-
-
-def make_pebbles(builder, config, variation, rng):
-    focus=decoration_focus(config,variation)
+def place_perimeter_patch(builder, patch, site):
+    """Place a whole patch inside its sampled footprint without clipping."""
+    edge,corner=site['edge'],site['corner']
+    width,depth=site['width'],site['depth']
+    points=patch.vertices
+    if corner:
+        # North/east corner: point the plant inward along the diagonal.
+        points=[((x-y)/math.sqrt(2),(x+y)/math.sqrt(2),z) for x,y,z in points]
+    low=[min(p[i] for p in points) for i in (0,1)]
+    high=[max(p[i] for p in points) for i in (0,1)]
     placed=[]
-
-    def stone(x,y,radius,shade=None):
-        if any(math.hypot(x-a,y-b)<.79*(radius+r) for a,b,r in placed):
-            return False
-        placed.append((x,y,radius))
-        pebble(builder,x,y,radius,radius*rng.uniform(.80,1.10),rng,
-               rng.choice([1,2,3,4,5]) if shade is None else shade)
-        return True
-
-    stone(*focus,.049,3)
-    # A loose nucleus feeds into the same gradually thinning trail.
-    for attempt in range(110):
-        angle=rng.uniform(0,math.tau)
-        radius=.116*math.sqrt(rng.random())
-        x=focus[0]+math.cos(angle)*radius
-        y=focus[1]+math.sin(angle)*radius*.80
-        stone(x,y,rng.uniform(.018,.037)*(1-.25*radius/.116))
-        if len(placed)>=14:
-            break
-    for x,y,tx,ty,weight,distance in trail_samples(config,variation,rng):
-        width=.009+.038*weight
-        # Blend one- and two-stone widths continuously instead of a row cutoff.
-        for side in ((-1,1) if rng.random()<weight else (0,)):
-            offset=side*width+rng.uniform(-.010,.010)
-            size=(.009+.030*weight)*rng.uniform(.84,1.12)
-            stone(x-ty*offset,y+tx*offset,size)
+    for x,y,z in points:
+        u=(x-low[0])/(high[0]-low[0])
+        v=(y-low[1])/(high[1]-low[1])
+        if corner:
+            px=site['center'][0]+(u-.5)*width
+            py=site['center'][1]+(v-.5)*depth
+            # Rotate the shared NE site to the other three corners.
+            px,py=((px,py),(-py,px),(-px,-py),(py,-px))[edge]
+        else:
+            px,py=edge_point(edge,site['t']+(u-.5)*width,
+                            site['inset']+(v-.5)*depth)
+        placed.append((px,py,z))
+    builder.island(placed,patch.faces,patch.swatches)
 
 
-def make_grass(builder, config, variation, rng):
-    focus=decoration_focus(config,variation)
-    # Fewer, more spread-out core leaves leave breathing room at the focus.
-    for j in range(15):
-        angle=j*2.39996+rng.uniform(-.20,.20)
-        radius=.080*math.sqrt((j+.5)/15)
-        x=focus[0]+math.cos(angle)*radius
-        y=focus[1]+math.sin(angle)*radius*.84
-        leaf(builder,x,y,rng.uniform(.078,.113),rng.uniform(.052,.078),
-             inward_angle(x,y)+rng.uniform(-1.05,1.05),rng.choice([0,1,4,5]))
-    # Taller blades emerge through the same core, not from separate clumps.
-    for j in range(13):
-        x=focus[0]+rng.uniform(-.070,.070)
-        y=focus[1]+rng.uniform(-.050,.050)
-        blade(builder,x,y,rng.uniform(.096,.161),rng.uniform(.024,.036),
-              inward_angle(x,y)+rng.uniform(-1.7,1.7),rng.uniform(.035,.064),rng.choice([0,1,2,4]))
-    for x,y,tx,ty,weight,distance in trail_samples(config,variation,rng):
-        width=.005+.040*weight
-        rows=[0]
-        for side in (-1,1):
-            if rng.random()<.84*weight:
-                rows.append(side)
-        for side in rows:
-            offset=side*width+rng.uniform(-.009,.009)
-            px,py=x-ty*offset,y+tx*offset
-            leaf(builder,px,py,(.023+.069*weight)*rng.uniform(.88,1.10),
-                 (.014+.043*weight)*rng.uniform(.88,1.10),
-                 inward_angle(px,py)+rng.uniform(-1.12,1.12),rng.choice([0,1,4,5]))
-        if rng.random()<.28+.64*weight:
-            # Blade count, height, width and lean all fade with the same field.
-            expected=1+1.7*weight
-            count=int(expected)+int(rng.random()<expected-int(expected))
-            fan=inward_angle(x,y)+rng.uniform(-1.05,1.05)
-            for j in range(count):
-                blade(builder,x+rng.uniform(-.011,.011),y+rng.uniform(-.011,.011),
-                      (.035+.112*weight)*rng.uniform(.75,1.09),
-                      (.009+.020*weight)*rng.uniform(.85,1.10),
-                      fan+(j-(count-1)/2)*.53,
-                      (.014+.041*weight)*rng.uniform(.85,1.10),rng.choice([0,1,2,4]))
+def make_uniform_decoration(builder, style, config, variation, rng):
+    band,_,_=decoration_distribution(style)
+    maker={'pebbles':make_pebbles,'grass':make_grass,'moss':make_moss}[style]
+    for site in perimeter_sites(style,config,rng):
+        patch=MeshBuilder()
+        maker(patch,rng)
+        if style=='moss':
+            # A small cluster should keep soft bulb proportions when fitted
+            # to its footprint, rather than becoming a row of tall spikes.
+            height=max(p[2] for p in patch.vertices)
+            scale=min(1,.80*min(site['width'],site['depth'])/height)
+            patch.vertices=[(x,y,z*scale if z>0 else z) for x,y,z in patch.vertices]
+        place_perimeter_patch(builder,patch,site)
+    # Retain compatible representative points for existing catalog readers.
+    focus=[0,-.5+band/2,0]
+    if config=='corner':
+        focus=[.5-band/2,-.5+band/2,0]
+    builder.focal_points=[focus]
+    if config=='strip':
+        builder.focal_points.append([0,.5-band/2,0])
+    return focus
 
 
-def moss_clump(builder, x, y, radius, height, rng, swatch):
-    """A closed, soft cushion with a gently irregular scalloped silhouette."""
-    n=8
+def moss_clump(builder, x, y, radius, height, rng, swatch, *, fleck=False, detail=True):
+    """A closed rounded lobe, with fewer sections for small satellites."""
+    n=7 if detail else 5
     rotation=rng.uniform(0,math.tau)
-    elongation=rng.uniform(.79,1.08)
-    radial=[rng.uniform(.88,1.10) for _ in range(n)]
+    elongation=rng.uniform(.75,1.18)
+    radial=[rng.uniform(.91,1.09) for _ in range(n)]
     verts=[]
-    for ring,(scale,z) in enumerate(((.69,-.006),(1,.24*height),
-                                    (.91,.65*height),(.55,.93*height))):
+    rings=(((.63,-.006),(1,.27*height),(.94,.60*height),(.60,.88*height))
+           if n==7 else ((.63,-.006),(1,.29*height),(.68,.82*height)))
+    for ring,(scale,z) in enumerate(rings):
         for j in range(n):
             angle=j*math.tau/n+rotation
-            jitter=rng.uniform(-.025,.025)*height if ring else 0
+            jitter=rng.uniform(-.018,.018)*height if ring else 0
             verts.append((x+math.cos(angle)*radius*radial[j]*scale,
                           y+math.sin(angle)*radius*elongation*radial[j]*scale,z+jitter))
-    verts.append((x+.05*radius,y-.04*radius,height))
+    verts.append((x+.04*radius,y-.03*radius,height))
     faces=[tuple(reversed(range(n)))]
     swatches=[max(0,swatch-1)]
-    for ring in range(3):
+    for ring in range(len(rings)-1):
         for j in range(n):
             faces.append((ring*n+j,ring*n+(j+1)%n,(ring+1)*n+(j+1)%n,(ring+1)*n+j))
-            swatches.append(swatch if ring<2 else min(5,swatch+1))
+            swatches.append(swatch if ring<len(rings)-2 else min(5,swatch+1))
+    shoulder=(len(rings)-1)*n
+    tip_index=len(rings)*n
     for j in range(n):
-        faces.append((3*n+j,3*n+(j+1)%n,4*n))
+        faces.append((shoulder+j,shoulder+(j+1)%n,tip_index))
         swatches.append(min(5,swatch+1))
     builder.island(verts,faces,swatches)
-    # Pale seed-like flecks nest into the cushion instead of floating above it.
-    # Closed little tetrahedra keep the asset opaque and manifold.
-    for _ in range(rng.choices((0,1,2,3),weights=(3,4,2,1))[0]):
-        angle=rng.uniform(0,math.tau)
-        distance=radius*rng.uniform(.10,.50)
-        px=x+math.cos(angle)*distance
-        py=y+math.sin(angle)*distance*elongation
-        pz=height*(.975-.13*distance/radius)
-        size=radius*rng.uniform(.040,.068)
-        fleck=[(px-size,py-size*.65,pz),(px+size,py-size*.65,pz),
-               (px,py+size,pz),(px,py,pz+size*1.3)]
+    # Sample an actual top triangle, then inset a small solid fleck into it.
+    # The caller permits at most two flecks across the whole patch.
+    if fleck:
+        j=rng.randrange(n)
+        tip=verts[tip_index]
+        left,right=verts[shoulder+j],verts[shoulder+(j+1)%n]
+        tip_weight=rng.uniform(.52,.84)
+        split=rng.random()
+        left_weight=(1-tip_weight)*split
+        right_weight=(1-tip_weight)*(1-split)
+        px,py,pz=(tip_weight*tip[i]+left_weight*left[i]+right_weight*right[i]
+                  for i in range(3))
+        size=radius*rng.uniform(.045,.070)
+        base=pz-.65*size
+        fleck=[(px-size,py-size*.65,base),(px+size,py-size*.65,base),
+               (px,py+size,base),(px,py,pz+.60*size)]
         builder.island(fleck,[(0,2,1),(0,1,3),(1,2,3),(2,0,3)],
                        [6,7,7,6])
 
 
-def make_moss(builder, config, variation, rng):
-    focus=decoration_focus(config,variation)
-    placed=[]
-
-    def cushion(x,y,radius,shade=None):
-        if any(math.hypot(x-a,y-b)<.74*(radius+r) for a,b,r in placed):
-            return False
-        placed.append((x,y,radius))
-        moss_clump(builder,x,y,radius,radius*rng.uniform(.88,1.22),rng,
-                   rng.choice([1,2,3,4]) if shade is None else shade)
-        return True
-
-    cushion(*focus,.069,3)
-    # Touching cushions share one broad focus, then taper into smaller lobes.
-    for attempt in range(100):
-        angle=rng.uniform(0,math.tau)
-        radius=.112*math.sqrt(rng.random())
-        x=focus[0]+math.cos(angle)*radius
-        y=focus[1]+math.sin(angle)*radius*.76
-        cushion(x,y,rng.uniform(.026,.046)*(1-.18*radius/.112))
-        if len(placed)>=10:
-            break
-    for x,y,tx,ty,weight,distance in trail_samples(config,variation,rng):
-        width=.006+.032*weight
-        rows=(-1,1) if rng.random()<.65*weight else (0,)
-        for side in rows:
-            offset=side*width+rng.uniform(-.008,.008)
-            size=(.010+.035*weight)*rng.uniform(.87,1.10)
-            cushion(x-ty*offset,y+tx*offset,size)
-
-
-def align_decoration_edges(builder, config, focus):
-    """Meet the requested tile borders without clipping individual pieces.
-
-    Translate one-edge/corner clusters as a whole. Three-edge clusters need a
-    positive X stretch to reach both side borders. Z, topology and palette
-    assignments stay unchanged; MeshBuilder.object recalculates normals after
-    this transform. Opposite-edge layouts are assembled from two edge bands.
-    """
-    if not builder.vertices or config not in ('edge','corner','end'):
-        raise ValueError('Cannot align an empty or unknown decoration layout')
-    minimum_x=min(point[0] for point in builder.vertices)
-    maximum_x=max(point[0] for point in builder.vertices)
-    minimum_y=min(point[1] for point in builder.vertices)
-    scale_x=scale_y=1.0
-    offset_x=offset_y=0.0
-    offset_y=-.5-minimum_y
-    if config=='corner':
-        offset_x=.5-maximum_x
-    elif config=='end':
-        if maximum_x<=minimum_x:
-            raise ValueError('Three-edge decoration needs a positive X span')
-        scale_x=1.0/(maximum_x-minimum_x)
-        offset_x=-.5-minimum_x*scale_x
-    builder.vertices=[(x*scale_x+offset_x,y*scale_y+offset_y,z)
-                      for x,y,z in builder.vertices]
-    return [focus[0]*scale_x+offset_x,focus[1]*scale_y+offset_y,0]
-
-
-def make_opposite_edge_decoration(builder, style, variation, rng):
-    """Two independent perimeter clusters with an open middle of the tile."""
-    maker={'pebbles':make_pebbles,'grass':make_grass,'moss':make_moss}[style]
-    for south in (False,True):
-        edge=MeshBuilder()
-        edge_rng=random.Random(rng.getrandbits(64))
-        maker(edge,'edge',variation,edge_rng)
-        focus=align_decoration_edges(edge,'edge',decoration_focus('edge',variation))
-        if south:
-            # A rigid half turn preserves the individual stones/leaves and
-            # their soft taper, while moving north-border contact to south.
-            edge.vertices=[(-x,-y,z) for x,y,z in edge.vertices]
-            focus=[-focus[0],-focus[1],focus[2]]
-        builder.island(edge.vertices,edge.faces,edge.swatches)
-        builder.focal_points.append(focus)
-    return builder.focal_points[0]
+def make_moss(builder, rng):
+    """Mix compact bulb triads with cushions bearing lopsided satellites."""
+    radius=rng.uniform(.027,.038)
+    compact=rng.random()<.50
+    height=radius*rng.uniform(*((1.15,1.45) if compact else (1.25,1.65)))
+    swatch=rng.choice([1,2,3,4])
+    satellites=2 if compact else rng.choice((2,3))
+    direction=rng.uniform(0,math.tau)
+    spread=rng.uniform(*((1.65,2.35) if compact else (2.4,4.7)))
+    fleck_count=rng.choices((0,1,2),weights=(2,5,3))[0]
+    fleck_lobes=set(rng.sample(range(satellites+1),fleck_count))
+    moss_clump(builder,0,0,radius,height,rng,swatch,fleck=0 in fleck_lobes)
+    for i in range(satellites):
+        angle=direction+(i/(satellites-1)-.5)*spread+rng.uniform(-.18,.18)
+        distance=radius*rng.uniform(*((.90,1.18) if compact else (.68,.98)))
+        satellite_radius=radius*rng.uniform(*((.72,.85) if compact else (.50,.76)))
+        satellite_height=satellite_radius*rng.uniform(*((1.25,1.50) if compact else (1.10,1.40)))
+        moss_clump(builder,math.cos(angle)*distance,
+                   math.sin(angle)*distance*rng.uniform(.76,1.04),
+                   satellite_radius,satellite_height,rng,
+                   max(0,min(5,swatch+rng.choice((-1,0,0,1)))),
+                   fleck=i+1 in fleck_lobes,detail=False)
 
 
 def make_decoration(builder, style, config, variation, rng):
-    if config=='strip':
-        return make_opposite_edge_decoration(builder,style,variation,rng)
-    {'pebbles':make_pebbles,'grass':make_grass,'moss':make_moss}[style](builder,config,variation,rng)
-    focus=align_decoration_edges(builder,config,decoration_focus(config,variation))
-    builder.focal_points=[focus]
-    return focus
+    return make_uniform_decoration(builder,style,config,variation,rng)
 
 
 def link_display(obj):
@@ -592,7 +623,7 @@ for obj in objects:
     record['vertex_count']=sum(exported['accessors'][p['attributes']['POSITION']]['count']
                                for m in exported['meshes'] for p in m['primitives'])
 
-manifest={'version':1,'revision':'Pebbles, grass and moss perimeter clusters with an open opposite-edge center',
+manifest={'version':1,'revision':'Varied pebbles and grass tufts with multi-lobe moss in balanced edge scatter',
           'tile_size':1,'coordinates':'Blender X/Y horizontal, Z up; origin at tile center and surface',
           'north':'-Y','placement_z':0,'preserveSourceScale':True,
           'configurations':{name:{'edge_mask':mask,'edges':[('N','E','S','W')[i] for i in edges]}

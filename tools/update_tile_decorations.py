@@ -2,6 +2,7 @@
 
 Run in the open tile_decorations.blend. Keeps object names, asset metadata,
 presentation, transforms and shared close-up meshes; updates geometry/exports.
+Set UPDATE_STYLES in the execution globals to refresh only selected styles.
 """
 import ast
 import contextlib
@@ -30,10 +31,10 @@ assets_collection.name='Decoration assets | 48 meshes'
 # Reuse the actual authoring definitions without running the new-scene setup.
 source_path=ROOT/'tools/make_tile_decorations.py'
 source=ast.parse(source_path.read_text(encoding='utf-8'))
-definition_names={'solid_material','palette_material','MeshBuilder','edge_point','pebble','blade','leaf',
-                  'decoration_focus','trail_lengths','trail_point','density_weight',
-                  'trail_samples','inward_angle','make_pebbles','make_grass','moss_clump','make_moss',
-                  'align_decoration_edges','make_opposite_edge_decoration','make_decoration'}
+definition_names={'solid_material','paint_palette','palette_material','MeshBuilder','edge_point','pebble','blade','leaf',
+                  'make_pebbles','make_grass','moss_clump','make_moss',
+                  'decoration_distribution','scatter_edge_sites','perimeter_sites',
+                  'place_perimeter_patch','make_uniform_decoration','make_decoration'}
 module=ast.Module(body=[node for node in source.body
                        if ((isinstance(node,(ast.ClassDef,ast.FunctionDef))
                             and node.name in definition_names)
@@ -59,11 +60,16 @@ for style in styles:
                                           'model':f'assets/custom/models/tile_decorations/{name}.glb'})
                 new_ids.append(name)
 materials={style:bpy.data.materials.get('TileDetails_'+style) for style in styles}
+updated_entries=[entry for entry in catalog['assets']
+                 if entry['style'] in globals().get('UPDATE_STYLES',styles)]
 for style,material in tuple(materials.items()):
     if material is None:
         materials[style]=palette_material(style)
+    elif style in globals().get('UPDATE_STYLES',styles):
+        texture=next(n for n in material.node_tree.nodes if n.type=='TEX_IMAGE' and n.image)
+        paint_palette(texture.image,style)
 
-for entry in catalog['assets']:
+for entry in updated_entries:
     obj=bpy.data.objects.get(entry['id'])
     style_index=styles.index(entry['style'])
     row=configurations.index(entry['configuration'])
@@ -113,7 +119,7 @@ for entry in catalog['assets']:
     bm.free()
 
 with contextlib.redirect_stdout(io.StringIO()):
-    for entry in catalog['assets']:
+    for entry in updated_entries:
         obj=bpy.data.objects[entry['id']]
         bpy.ops.object.select_all(action='DESELECT')
         obj.select_set(True)
@@ -136,11 +142,11 @@ with contextlib.redirect_stdout(io.StringIO()):
         entry['vertex_count']=sum(exported['accessors'][p['attributes']['POSITION']]['count']
                                   for m in exported['meshes'] for p in m['primitives'])
 
-catalog['revision']='Pebbles, grass and moss perimeter clusters with an open opposite-edge center'
+catalog['revision']='Varied pebbles and grass tufts with multi-lobe moss in balanced edge scatter'
 catalog_path.write_text(json.dumps(catalog,indent=2)+'\n',encoding='utf-8')
 bpy.ops.object.select_all(action='DESELECT')
 bpy.context.view_layer.objects.active=bpy.data.objects[catalog['assets'][0]['id']]
 bpy.ops.wm.save_as_mainfile(filepath=str(ROOT/'assets/custom/source/tile_decorations.blend'))
-print(json.dumps({'updated_assets':len(catalog['assets']),'new_assets':new_ids,
+print(json.dumps({'updated_assets':len(updated_entries),'new_assets':new_ids,
                   'min_triangles':min(a['triangles'] for a in catalog['assets']),
                   'max_triangles':max(a['triangles'] for a in catalog['assets'])}))
