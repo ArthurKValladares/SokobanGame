@@ -1,0 +1,155 @@
+{
+  "format": 1,
+  "variants": [
+    "01 | intact four rails",
+    "02 | crooked and sagging",
+    "03 | missing inner rail",
+    "04 | splintered broken rails"
+  ],
+  "models": [
+    {
+      "name": "TileDecorationFenceSlats01",
+      "path": "assets/custom/models/fences/fence_slats_01.glb",
+      "engine_bounds": {
+        "min": [
+          -0.5,
+          -0.026698369532823563,
+          0.11999999731779099
+        ],
+        "max": [
+          0.5,
+          0.026698369532823563,
+          0.8199999928474426
+        ]
+      },
+      "vertices": 584,
+      "faces": 640
+    },
+    {
+      "name": "TileDecorationFencePost01",
+      "path": "assets/custom/models/fences/fence_post_01.glb",
+      "engine_bounds": {
+        "min": [
+          -0.04185882583260536,
+          -0.05184300243854523,
+          0.0
+        ],
+        "max": [
+          0.04448853060603142,
+          0.05086706578731537,
+          0.949999988079071
+        ]
+      },
+      "vertices": 232,
+      "faces": 182
+    },
+    {
+      "name": "TileDecorationFenceSlats02",
+      "path": "assets/custom/models/fences/fence_slats_02.glb",
+      "engine_bounds": {
+        "min": [
+          -0.5,
+          -0.026694120839238167,
+          0.11999999731779099
+        ],
+        "max": [
+          0.5,
+          0.026694120839238167,
+          0.8199999928474426
+        ]
+      },
+      "vertices": 584,
+      "faces": 640
+    },
+    {
+      "name": "TileDecorationFencePost02",
+      "path": "assets/custom/models/fences/fence_post_02.glb",
+      "engine_bounds": {
+        "min": [
+          -0.0454808846116066,
+          -0.05187583342194557,
+          0.0
+        ],
+        "max": [
+          0.04109804704785347,
+          0.05101056396961212,
+          0.949999988079071
+        ]
+      },
+      "vertices": 232,
+      "faces": 182
+    },
+    {
+      "name": "TileDecorationFenceSlats03",
+      "path": "assets/custom/models/fences/fence_slats_03.glb",
+      "engine_bounds": {
+        "min": [
+          -0.5,
+          -0.02668534219264984,
+          0.11999999731779099
+        ],
+        "max": [
+          0.5,
+          0.02668534219264984,
+          0.8199999928474426
+        ]
+      },
+      "vertices": 438,
+      "faces": 480
+    },
+    {
+      "name": "TileDecorationFencePost03",
+      "path": "assets/custom/models/fences/fence_post_03.glb",
+      "engine_bounds": {
+        "min": [
+          -0.04033726453781128,
+          -0.05117969214916229,
+          0.0
+        ],
+        "max": [
+          0.04647323489189148,
+          0.05121297016739845,
+          0.949999988079071
+        ]
+      },
+      "vertices": 232,
+      "faces": 182
+    },
+    {
+      "name": "TileDecorationFenceSlats04",
+      "path": "assets/custom/models/fences/fence_slats_04.glb",
+      "engine_bounds": {
+        "min": [
+          -0.5,
+          -0.02669547125697136,
+          0.11999999731779099
+        ],
+        "max": [
+          0.5,
+          0.026699990034103394,
+          0.8199999928474426
+        ]
+      },
+      "vertices": 876,
+      "faces": 960
+    },
+    {
+      "name": "TileDecorationFencePost04",
+      "path": "assets/custom/models/fences/fence_post_04.glb",
+      "engine_bounds": {
+        "min": [
+          -0.041478436440229416,
+          -0.050955671817064285,
+          0.0
+        ],
+        "max": [
+          0.04498470574617386,
+          0.05189377814531326,
+          0.949999988079071
+        ]
+      },
+      "vertices": 232,
+      "faces": 182
+    }
+  ]
+}

@@ -1603,6 +1603,13 @@ void LevelEditorDebugUi::drawTileDecorationPalette(
 #if SOKOBAN_ENABLE_DEBUG_UI
     auto brush = editor.tileDecorationBrush();
     bool changed = false;
+    const bool fenceKitAvailable = callbacks.assetManifest &&
+        std::ranges::all_of(TileDecorations::catalog, [&](const auto& entry) {
+            return entry.style != TileDecorations::Style::Fence ||
+                callbacks.assetManifest().findModelIdByName(entry.model).has_value();
+        }) && std::ranges::all_of(TileDecorations::fencePostModels, [&](auto model) {
+            return callbacks.assetManifest().findModelIdByName(model).has_value();
+        });
     ImGui::TextUnformatted("Style");
     for (const auto style : TileDecorations::styles) {
         if (style != TileDecorations::styles.front()) ImGui::SameLine();
@@ -1636,6 +1643,12 @@ void LevelEditorDebugUi::drawTileDecorationPalette(
         ImGui::SameLine();
         ImGui::TextDisabled("New variation after each placement");
     }
+    if (brush.style == TileDecorations::Style::Fence) {
+        ImGui::TextDisabled("Intact / crooked / missing slats / broken boards");
+        ImGui::BeginDisabled(!fenceKitAvailable);
+        if (ImGui::Button("Randomize Fences")) (void)editor.randomizeFences();
+        ImGui::EndDisabled();
+    }
 
     if (ImGui::Button("Rotate Left")) {
         brush.quarterTurns = (brush.quarterTurns + 3) % 4;
@@ -1654,10 +1667,8 @@ void LevelEditorDebugUi::drawTileDecorationPalette(
         actionBindingsDisplay(bindings, InputAction::EditorRotateTile).c_str());
 
     // The diagram follows world north (-Y), independent of camera rotation.
-    constexpr std::array<uint8_t, 4> edgeMasks { 1, 3, 5, 11 };
-    const uint8_t mask = edgeMasks[static_cast<std::size_t>(brush.layout)];
     const unsigned turns = brush.quarterTurns;
-    const unsigned rotatedMask = ((mask << turns) | (mask >> (4 - turns))) & 15;
+    const unsigned rotatedMask = TileDecorations::edgeMask(brush);
     constexpr std::array<const char*, 4> edgeNames { "North", "East", "South", "West" };
     std::string edges;
     for (std::size_t edge = 0; edge < edgeNames.size(); ++edge) {
@@ -1686,7 +1697,11 @@ void LevelEditorDebugUi::drawTileDecorationPalette(
 
     const auto model = editor.selectedTileDecorationModel();
     const bool available = callbacks.assetManifest &&
-        callbacks.assetManifest().findModelIdByName(model).has_value();
+        callbacks.assetManifest().findModelIdByName(model).has_value() &&
+        (brush.style != TileDecorations::Style::Fence || fenceKitAvailable);
+    if (!available && brush.style == TileDecorations::Style::Fence && editor.placingDecoration()) {
+        editor.cancelDecorationPlacement();
+    }
     ImGui::BeginDisabled(!available);
     if (ImGui::Button("Place Selected")) editor.setTileDecorationBrush(brush);
     ImGui::EndDisabled();
@@ -1696,6 +1711,10 @@ void LevelEditorDebugUi::drawTileDecorationPalette(
     ImGui::EndDisabled();
     if (!available) {
         ImGui::TextWrapped("This decoration is missing from the asset manifest.");
+    } else if (brush.style == TileDecorations::Style::Fence) {
+        ImGui::TextWrapped("Click a stone or cliff wall. Exposed edges follow its bevels. "
+            "Adjacent sections share posts; each slat section always has two posts. "
+            "Rotate to choose the sides. With the layer locked, choose the wall's base layer.");
     } else {
         ImGui::TextWrapped("Click a tile to place. Click a placed decoration to select it. "
                            "Right-click deselects it. Place Selected resumes placement after canceling.");

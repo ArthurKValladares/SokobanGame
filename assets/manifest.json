@@ -2517,6 +2517,46 @@
       "name": "TileDecorationMossEnd04",
       "path": "custom/models/tile_decorations/tile_moss_end_04.glb",
       "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationFenceSlats01",
+      "path": "custom/models/fences/fence_slats_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationFenceSlats02",
+      "path": "custom/models/fences/fence_slats_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationFenceSlats03",
+      "path": "custom/models/fences/fence_slats_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationFenceSlats04",
+      "path": "custom/models/fences/fence_slats_04.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationFencePost01",
+      "path": "custom/models/fences/fence_post_01.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationFencePost02",
+      "path": "custom/models/fences/fence_post_02.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationFencePost03",
+      "path": "custom/models/fences/fence_post_03.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "TileDecorationFencePost04",
+      "path": "custom/models/fences/fence_post_04.glb",
+      "preserveSourceScale": true
     }
   ],
   "animations": [

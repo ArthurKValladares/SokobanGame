@@ -1,6 +1,6 @@
 # Sokoban 3D handoff
 
-Updated 2026-10-12. This file describes current operating guidance, implementation
+Updated 2026-10-15. This file describes current operating guidance, implementation
 contracts and known limitations. [README.md](README.md) covers player controls,
 authoring formats, supported commands and packaging.
 
@@ -31,6 +31,26 @@ remains release-signoff work in
 [packaging/ReleaseValidation.md](packaging/ReleaseValidation.md).
 
 ## Current validation and limitations
+
+The October 15 fence kit adds four separate post meshes and four horizontal
+slat meshes (intact, crooked, missing and broken) under Tile Decorations.
+Standard sections use four .115-high rails with .08 gaps; damaged variants
+retain that layout, and post nails follow the four rail centers.
+Placement follows exposed stone/cliff faces with a fixed native-cliff lean,
+shared seam posts, and angled convex/concave connectors. Extending an already
+fenced wall retains its authored endpoints and connects new sections to them.
+Complete hover assemblies and placement share the same ordinary decoration
+records; a click is one undoable edit. Random placement advances only after
+success, and Randomize Fences changes existing variants without moving joins.
+Fence pivots belong to the supporting wall's base layer. An incomplete fence
+manifest disables the brush and suppresses its ghost. Editable source is in
+`assets/custom/source/fences/modular_fence_kit.blend`, with the reproducible
+`tools/make_fence_models.py` generator and `docs/examples/fences.scr` gallery.
+Debug and optimized editor builds pass with warnings-as-errors; eleven focused
+optimized suites and the four corresponding Debug editor/asset/presentation
+suites pass. A 600-frame Vulkan gallery capture drains all asset queues with
+zero dropped draws or capacity blocks. Evidence is in ignored
+`out/fence-review/`.
 
 Debug and optimized builds pass eleven focused asset/content, campaign, ImGui
 and Vulkan thumbnail suites. Optimized 1,200-frame overworld and puzzle captures

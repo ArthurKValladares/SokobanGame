@@ -3,6 +3,7 @@
 
 #include "engine/AtomicFile.hpp"
 #include "engine/ContentPipeline.hpp"
+#include "engine/CliffWallGeometry.hpp"
 #include "engine/OverworldMapEditor.hpp"
 
 #include "engine/LevelCatalog.hpp"
@@ -1073,6 +1074,13 @@ bool LevelEditor::placingDecoration() const
 std::optional<Level::Decoration> LevelEditor::decorationPlacementPreview(
     GridPosition3 surfaceCell) const
 {
+    const auto previews = decorationPlacementPreviews(surfaceCell);
+    return previews.empty() ? std::nullopt : std::optional(previews.front());
+}
+
+std::vector<Level::Decoration> LevelEditor::decorationPlacementPreviews(
+    GridPosition3 surfaceCell) const
+{
     if (document_.layerLocked) {
         surfaceCell.z = document_.activeLayer;
     }
@@ -1080,10 +1088,222 @@ std::optional<Level::Decoration> LevelEditor::decorationPlacementPreview(
         surfaceCell.x < 0 || surfaceCell.y < 0 || surfaceCell.z < 0 ||
         surfaceCell.x >= static_cast<int>(documentWidth()) ||
         surfaceCell.y >= static_cast<int>(documentHeight())) {
-        return std::nullopt;
+        return {};
     }
     const bool tileDecoration = document_.tool == Tool::TileDecorations;
-    return Level::Decoration {
+    if (tileDecoration && document_.tileDecorationBrush.style == TileDecorations::Style::Fence) {
+        const GridPosition3 wallCell { surfaceCell.x, surfaceCell.y,
+            document_.layerLocked ? surfaceCell.z : surfaceCell.z - 1 };
+        const auto tileAt = [&](GridPosition3 cell) {
+            if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+                cell.x >= static_cast<int>(documentWidth()) ||
+                cell.y >= static_cast<int>(documentHeight()) ||
+                cell.z >= static_cast<int>(documentDepth())) return TileType::Air;
+            return charToTileType(document_.layers[static_cast<std::size_t>(cell.z)]
+                [static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)])
+                .value_or(TileType::Air);
+        };
+        const TileType wall = tileAt(wallCell);
+        if (!tileTypeIsWall(wall)) return {};
+
+        constexpr std::array<GridPosition, 4> neighbors {{
+            { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 },
+        }};
+        uint8_t exposed = 15;
+        for (std::size_t side = 0; side < neighbors.size(); ++side) {
+            if (tileTypeIsWall(tileAt({ wallCell.x + neighbors[side].x,
+                    wallCell.y + neighbors[side].y, wallCell.z }))) {
+                exposed &= static_cast<uint8_t>(~(1U << side));
+            }
+        }
+        const uint8_t selected = TileDecorations::edgeMask(document_.tileDecorationBrush) & exposed;
+        if (selected == 0) return {};
+
+        // Fence timbers are rigid meshes. Follow the broad rock face with a
+        // small inward lean, keeping the thin slats outside its seam collars.
+        // A constant lean across both native variants preserves full-height
+        // post joins when neighboring tiles have different randomized rocks.
+        const bool cliff = tileTypeIsCliffWall(wall);
+        // Shared clearance lets stone and cliff sections meet at one post.
+        constexpr float clearance = .06f;
+        const float chamfer = cliff ? cliffWallCornerTaperRadius * .25f : .018f;
+        const float lean = cliff ? cliffWallCornerTaperAmounts[1] * .5f : 0.0f;
+        const float tilt = -radiansToDegrees(std::atan(lean));
+        const float verticalScale = std::sqrt(1.0f + lean * lean);
+        const float elevation = static_cast<float>(wallCell.z);
+        const Vec2 origin { static_cast<float>(wallCell.x), static_cast<float>(wallCell.y) };
+        const auto edgePoint = [](std::size_t side, float u) -> Vec2 {
+            if (side == 0) return { u, 0 };
+            if (side == 1) return { 1, u };
+            if (side == 2) return { 1 - u, 1 };
+            return { 0, 1 - u };
+        };
+        const auto samePosition = [](Vec3 a, Vec3 b) {
+            return approximately(a.x, b.x, .0002f) &&
+                approximately(a.y, b.y, .0002f) && approximately(a.z, b.z, .0002f);
+        };
+        const auto sameSlats = [&](const Level::Decoration& a, const Level::Decoration& b) {
+            return TileDecorations::isFenceSlats(a.model) && samePosition(a.position, b.position) &&
+                approximately(a.scale.x, b.scale.x, .0002f) &&
+                // Reversing a section's local X direction or wrapping its yaw
+                // does not create another span between the same two posts.
+                approximately(std::remainder(a.rotationDegrees.z - b.rotationDegrees.z,
+                    180.0f), 0.0f, .0002f);
+        };
+        std::vector<Level::Decoration> result;
+        std::array<Level::Decoration, 4> sides;
+        std::array<std::array<Vec2, 2>, 4> endpoints;
+        std::array<bool, 4> sidePresent {};
+        const auto slatsBetween = [&](Vec2 first, Vec2 second) {
+            const Vec2 span = second - first;
+            return Level::Decoration {
+                .model = std::string(selectedTileDecorationModel()),
+                .position = { (first.x + second.x) * .5f,
+                    (first.y + second.y) * .5f, elevation },
+                .rotationDegrees = { tilt, 0, radiansToDegrees(std::atan2(span.y, span.x)) },
+                .scale = { std::sqrt(dot(span, span)), 1, verticalScale },
+            };
+        };
+        const auto faceSection = [&](GridPosition3 owner, std::size_t side)
+            -> const Level::Decoration* {
+            const Vec2 center = Vec2 { static_cast<float>(owner.x), static_cast<float>(owner.y) } +
+                edgePoint(side, .5f) + Vec2 { static_cast<float>(neighbors[side].x),
+                    static_cast<float>(neighbors[side].y) } * clearance;
+            const auto found = std::ranges::find_if(document_.decorations, [&](const auto& existing) {
+                if (!TileDecorations::isFenceSlats(existing.model) ||
+                    !approximately(existing.position.z, static_cast<float>(owner.z), .0002f) ||
+                    !approximately(existing.rotationDegrees.y, 0.0f, .0002f) ||
+                    !approximately(std::remainder(existing.rotationDegrees.z -
+                        static_cast<float>(side) * 90.0f, 180.0f), 0.0f, .0002f) ||
+                    existing.scale.x < .88f || existing.scale.x > 1.1f) return false;
+                // Recognize a face previously shortened at a convex corner,
+                // or extended to an older neighbor's endpoint. Leave freely
+                // moved/scaled decorations outside this narrow authored band.
+                return side % 2 == 0
+                    ? approximately(existing.position.y, center.y, .0002f) &&
+                        approximately(existing.position.x, center.x, .06f)
+                    : approximately(existing.position.x, center.x, .0002f) &&
+                        approximately(existing.position.y, center.y, .06f);
+            });
+            return found == document_.decorations.end() ? nullptr : &*found;
+        };
+        const auto sectionEndpoints = [&](const Level::Decoration& section, std::size_t side) {
+            const float yaw = degreesToRadians(section.rotationDegrees.z);
+            Vec2 halfSpan { std::cos(yaw) * section.scale.x * .5f,
+                std::sin(yaw) * section.scale.x * .5f };
+            const Vec2 direction = edgePoint(side, 1) - edgePoint(side, 0);
+            if (dot(halfSpan, direction) < 0) halfSpan = -halfSpan;
+            const Vec2 center { section.position.x, section.position.y };
+            return std::array<Vec2, 2> { center - halfSpan, center + halfSpan };
+        };
+        for (std::size_t side = 0; side < sides.size(); ++side) {
+            if (const auto* existing = faceSection(wallCell, side)) {
+                // Wall edits can change the expected chamfer. Existing fence
+                // timbers keep their authored transforms and terminal posts.
+                sides[side] = *existing;
+                endpoints[side] = sectionEndpoints(*existing, side);
+                sidePresent[side] = true;
+                continue;
+            }
+            const std::size_t previous = (side + 3) % 4;
+            const std::size_t next = (side + 1) % 4;
+            const Vec2 outward { static_cast<float>(neighbors[side].x),
+                static_cast<float>(neighbors[side].y) };
+            // Only exposed convex corners are chamfered. Hidden neighbor joins
+            // end exactly at the cell seam, so an arbitrarily long run shares
+            // one post there rather than leaving gaps or double posts.
+            const float start = (exposed & (1U << previous)) != 0 ? chamfer : 0.0f;
+            const float end = (exposed & (1U << next)) != 0 ? 1.0f - chamfer : 1.0f;
+            endpoints[side] = { origin + edgePoint(side, start) + outward * clearance,
+                origin + edgePoint(side, end) + outward * clearance };
+            for (std::size_t endpoint = 0; endpoint < 2; ++endpoint) {
+                const std::size_t adjacent = endpoint == 0 ? previous : next;
+                if ((exposed & (1U << adjacent)) != 0) continue;
+                const GridPosition3 neighbor { wallCell.x + neighbors[adjacent].x,
+                    wallCell.y + neighbors[adjacent].y, wallCell.z };
+                if (const auto* existing = faceSection(neighbor, side)) {
+                    const Vec2 join = sectionEndpoints(*existing, side)[1 - endpoint];
+                    const Vec2 gap = join - endpoints[side][endpoint];
+                    if (dot(gap, gap) <= .09f * .09f) endpoints[side][endpoint] = join;
+                }
+            }
+            sides[side] = slatsBetween(endpoints[side][0], endpoints[side][1]);
+            sidePresent[side] = (selected & (1U << side)) != 0 ||
+                std::ranges::any_of(document_.decorations, [&](const auto& existing) {
+                    return sameSlats(existing, sides[side]);
+                });
+        }
+        const auto addSection = [&](const Level::Decoration& section,
+                                    const std::array<Vec2, 2>& points) {
+            if (!std::ranges::any_of(document_.decorations, [&](const auto& existing) {
+                    return sameSlats(existing, section);
+                }) && !std::ranges::any_of(result, [&](const auto& existing) {
+                    return sameSlats(existing, section);
+                })) result.push_back(section);
+            for (const Vec2 point : points) {
+                const Vec3 position { point.x, point.y, elevation };
+                const auto hasPost = [&](const auto& existing) {
+                    return TileDecorations::isFencePost(existing.model) &&
+                        samePosition(existing.position, position);
+                };
+                if (std::ranges::any_of(document_.decorations, hasPost) ||
+                    std::ranges::any_of(result, hasPost)) continue;
+                result.push_back(Level::Decoration {
+                    .model = std::string(TileDecorations::fencePostModels[
+                        document_.tileDecorationBrush.variant]),
+                    .position = position,
+                    .rotationDegrees = section.rotationDegrees,
+                    .scale = { 1, 1, verticalScale },
+                });
+            }
+        };
+        for (std::size_t side = 0; side < sides.size(); ++side) {
+            if ((selected & (1U << side)) != 0) addSection(sides[side], endpoints[side]);
+        }
+        for (std::size_t side = 0; side < sides.size(); ++side) {
+            const std::size_t next = (side + 1) % 4;
+            const uint8_t cornerMask = static_cast<uint8_t>((1U << side) | (1U << next));
+            if ((exposed & cornerMask) != cornerMask || (selected & cornerMask) == 0 ||
+                !sidePresent[side] || !sidePresent[next]) continue;
+            const std::array<Vec2, 2> points { endpoints[side][1], endpoints[next][0] };
+            addSection(slatsBetween(points[0], points[1]), points);
+        }
+        // At an inward bend, the incident faces belong to two different wall
+        // cells. Bridge their terminal posts across the small empty notch.
+        for (std::size_t side = 0; side < sides.size(); ++side) {
+            if ((selected & (1U << side)) == 0) continue;
+            for (std::size_t endpoint = 0; endpoint < 2; ++endpoint) {
+                const std::size_t adjacent = (side + (endpoint == 0 ? 3 : 1)) % 4;
+                if ((exposed & (1U << adjacent)) != 0) continue;
+                const GridPosition3 otherWall {
+                    wallCell.x + neighbors[side].x + neighbors[adjacent].x,
+                    wallCell.y + neighbors[side].y + neighbors[adjacent].y, wallCell.z };
+                if (!tileTypeIsWall(tileAt(otherWall))) continue;
+                const std::size_t otherSide = (adjacent + 2) % 4;
+                const auto* otherSection = faceSection(otherWall, otherSide);
+                if (!otherSection) continue;
+                const Vec2 corner = origin + edgePoint(side, static_cast<float>(endpoint));
+                const Vec2 target = corner + Vec2 { static_cast<float>(neighbors[otherSide].x),
+                    static_cast<float>(neighbors[otherSide].y) } * clearance;
+                const auto otherEndpoints = sectionEndpoints(*otherSection, otherSide);
+                const Vec2 firstGap = otherEndpoints[0] - target;
+                const Vec2 secondGap = otherEndpoints[1] - target;
+                const Vec2 otherPoint = dot(firstGap, firstGap) < dot(secondGap, secondGap)
+                    ? otherEndpoints[0] : otherEndpoints[1];
+                std::array<Vec2, 2> points { endpoints[side][endpoint], otherPoint };
+                const Vec2 gap = points[1] - points[0];
+                if (dot(gap, gap) > .15f * .15f || dot(gap, gap) < .0002f * .0002f) continue;
+                // Keep the panel's lean toward the supporting walls for
+                // either painting order around this concave corner.
+                const Vec2 inward { static_cast<float>(neighbors[adjacent].x - neighbors[side].x),
+                    static_cast<float>(neighbors[adjacent].y - neighbors[side].y) };
+                if (dot(Vec2 { -gap.y, gap.x }, inward) < 0) std::swap(points[0], points[1]);
+                addSection(slatsBetween(points[0], points[1]), points);
+            }
+        }
+        return result;
+    }
+    return { Level::Decoration {
         .model = tileDecoration
             ? std::string(selectedTileDecorationModel())
             : document_.selectedDecorationModel,
@@ -1097,7 +1317,7 @@ std::optional<Level::Decoration> LevelEditor::decorationPlacementPreview(
                 ? static_cast<float>(document_.tileDecorationBrush.quarterTurns) * 90.0f
                 : 0.0f,
         },
-    };
+    } };
 }
 
 bool LevelEditor::placeSelector(GridPosition3 cell)
@@ -1373,6 +1593,36 @@ bool LevelEditor::randomizeWalls(std::optional<uint32_t> seed)
     document_.dirty = true;
     document_.status = "Randomized " + std::to_string(walls) +
         " walls (" + std::to_string(changed) + " changed).";
+    recordDocumentChange(std::move(before));
+    return true;
+}
+
+bool LevelEditor::randomizeFences(std::optional<uint32_t> seed)
+{
+    endStroke();
+    auto before = captureBeforeDocumentChange();
+    std::mt19937 random(seed ? *seed : std::random_device {}());
+    std::uniform_int_distribution<uint32_t> choose(0, TileDecorations::variantCount - 1);
+    std::size_t fences = 0;
+    std::size_t changed = 0;
+    for (auto& decoration : document_.decorations) {
+        const bool post = TileDecorations::isFencePost(decoration.model);
+        if (!post && !TileDecorations::isFenceSlats(decoration.model)) continue;
+        ++fences;
+        const auto variant = static_cast<uint8_t>(choose(random));
+        const std::string replacement(post ? TileDecorations::fencePostModels[variant]
+            : TileDecorations::modelName({ .style = TileDecorations::Style::Fence,
+                                          .variant = variant }));
+        changed += decoration.model != replacement;
+        decoration.model = replacement;
+    }
+    if (changed == 0) {
+        document_.status = fences == 0 ? "No fences to randomize." : "Fence choices are unchanged.";
+        return false;
+    }
+    document_.dirty = true;
+    document_.status = "Randomized " + std::to_string(fences) + " fence meshes (" +
+        std::to_string(changed) + " changed).";
     recordDocumentChange(std::move(before));
     return true;
 }
@@ -2201,15 +2451,20 @@ bool LevelEditor::placeDecoration(GridPosition3 surfaceCell)
         return false;
     }
 
-    const auto decoration = decorationPlacementPreview(surfaceCell);
-    if (!decoration) {
+    const auto additions = decorationPlacementPreviews(surfaceCell);
+    if (additions.empty()) {
+        if (document_.tool == Tool::TileDecorations &&
+            document_.tileDecorationBrush.style == TileDecorations::Style::Fence) {
+            document_.status = "Fence needs an exposed stone or cliff wall edge; "
+                "existing sections are already filled.";
+        }
         return false;
     }
     auto before = captureBeforeDocumentChange();
-    document_.decorations.push_back(*decoration);
+    document_.decorations.insert(document_.decorations.end(), additions.begin(), additions.end());
     document_.dirty = true;
     document_.status = "Placed decoration " +
-        decoration->model + ".";
+        additions.front().model + ".";
     recordDocumentChange(std::move(before));
     if (document_.tool == Tool::TileDecorations &&
         document_.tileDecorationBrush.randomVariation) {

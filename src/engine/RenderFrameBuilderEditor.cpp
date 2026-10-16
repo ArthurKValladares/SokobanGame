@@ -1465,8 +1465,13 @@ private:
         }
 
         if (!input_.hoverDecoration && input_.hoverCell) {
-            if (const auto preview = input_.editor.decorationPlacementPreview(*input_.hoverCell)) {
-                frame.tiles.push_back(decorationVisual(*preview, input_.manifest, true));
+            const auto previews = input_.editor.decorationPlacementPreviews(*input_.hoverCell);
+            if (std::ranges::all_of(previews, [this](const auto& preview) {
+                    return input_.manifest.findModelIdByName(preview.model).has_value();
+                })) {
+                for (const auto& preview : previews) {
+                    frame.tiles.push_back(decorationVisual(preview, input_.manifest, true));
+                }
             }
         }
     }

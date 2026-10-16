@@ -4555,6 +4555,112 @@ void testTileDecorationHoverPreviewMatchesRaisedSurfacePlacement()
     }
 }
 
+void testCompleteFenceHoverPreviewMatchesPlacedPartsOnWallLayer()
+{
+    TEST("completeFenceHoverPreviewMatchesPlacedPartsOnWallLayer");
+    AssetManifest manifest = testManifest();
+    LevelEditor incompleteKitEditor;
+    incompleteKitEditor.newDocument(4, 4, false);
+    incompleteKitEditor.setLayerLocked(false);
+    CHECK(incompleteKitEditor.setCell({ 1, 1, 1 }, TileType::Wall));
+    incompleteKitEditor.setTileDecorationBrush({ .style = TileDecorations::Style::Fence });
+    CHECK(!incompleteKitEditor.decorationPlacementPreviews({ 1, 1, 2 }).empty());
+    // An editor can briefly see a partial manifest while content is reloaded.
+    // Missing any assembly component must hide the whole ghost without a throw.
+    const auto incompleteFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest,
+        .editor = incompleteKitEditor,
+        .settings = {},
+        .hoverCell = GridPosition3 { 1, 1, 2 },
+    });
+    CHECK(std::ranges::none_of(incompleteFrame.tiles, [](const auto& tile) {
+        return tile.isEditorPreview && tile.modelTransform.has_value();
+    }));
+    for (const std::string part : { "Slats", "Post" }) {
+        for (int variant = 1; variant <= 4; ++variant) {
+            const auto model = manifest.addModel({
+                .name = "TileDecorationFence" + part + "0" + std::to_string(variant),
+                .path = "fence_" + part + "_0" + std::to_string(variant) + ".glb",
+                .preserveSourceScale = true,
+            });
+            CHECK(!model.isCube());
+        }
+    }
+    const auto isFence = [&](const RenderFrameData::Tile& tile) {
+        return !tile.model.isCube() &&
+            manifest.model(tile.model).name.starts_with("TileDecorationFence");
+    };
+    LevelEditor editor;
+    editor.newDocument(4, 4, false);
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::Wall));
+    editor.setLayerLocked(true);
+    editor.setActiveLayer(1);
+    editor.setTileDecorationBrush({
+        TileDecorations::Style::Fence, TileDecorations::Layout::Corner, 0, 0,
+    });
+    const GridPosition3 hover { 1, 1, 2 };
+    const auto placements = editor.decorationPlacementPreviews(hover);
+    CHECK(placements.size() >= 5);
+    if (placements.empty()) return;
+    const RenderFrameData hoverFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest,
+        .editor = editor,
+        .settings = {},
+        .hoverCell = hover,
+    });
+    CHECK(static_cast<std::size_t>(std::ranges::count_if(hoverFrame.tiles, isFence)) == placements.size());
+    std::vector<RenderFrameData::ModelTransform> ghostTransforms;
+    for (const auto& placement : placements) {
+        const auto ghost = std::ranges::find_if(hoverFrame.tiles, [&](const auto& tile) {
+            return tile.model == manifest.modelIdByName(placement.model) &&
+                tile.isEditorPreview && tile.modelTransform &&
+                tile.modelTransform->translation == placement.position;
+        });
+        CHECK(ghost != hoverFrame.tiles.end());
+        if (ghost == hoverFrame.tiles.end()) return;
+        CHECK(!ghost->pickable && !ghost->affectsCameraFit && !ghost->showGrid);
+        CHECK(!ghost->editorDecorationIndex);
+        CHECK(ghost->cell.z == 1);
+        CHECK(near(ghost->baseElevation, 1.0f));
+        CHECK(ghost->modelTransform->scale == placement.scale);
+        CHECK((ghost->modelTransform->pivot == Vec3 { 0, 0, 0 }));
+        constexpr float radiansPerDegree = 0.017453292519943295f;
+        CHECK(near(ghost->modelTransform->rotationRadians.x,
+            placement.rotationDegrees.x * radiansPerDegree));
+        CHECK(near(ghost->modelTransform->rotationRadians.y,
+            placement.rotationDegrees.y * radiansPerDegree));
+        CHECK(near(ghost->modelTransform->rotationRadians.z,
+            placement.rotationDegrees.z * radiansPerDegree));
+        ghostTransforms.push_back(*ghost->modelTransform);
+    }
+    CHECK(editor.decorations().empty());
+    CHECK(editor.placeDecoration(hover));
+    CHECK(editor.decorations() == placements);
+    const RenderFrameData placedFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest,
+        .editor = editor,
+        .settings = {},
+    });
+    CHECK(static_cast<std::size_t>(std::ranges::count_if(placedFrame.tiles, isFence)) == placements.size());
+    for (std::size_t index = 0; index < placements.size(); ++index) {
+        const auto placed = std::ranges::find_if(placedFrame.tiles, [&](const auto& tile) {
+            return isFence(tile) && tile.editorDecorationIndex == index;
+        });
+        CHECK(placed != placedFrame.tiles.end());
+        if (placed == placedFrame.tiles.end()) return;
+        CHECK(!placed->isEditorPreview);
+        CHECK(placed->cell.z == 1);
+        CHECK(placed->modelTransform == ghostTransforms[index]);
+    }
+    editor.setActiveLayer(0);
+    const RenderFrameData lowerFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest,
+        .editor = editor,
+        .settings = {},
+    });
+    CHECK(std::ranges::none_of(lowerFrame.tiles, isFence));
+}
+
 void testEditorLayerLockFiltersDecorationsAndTheirLights()
 {
     TEST("editorLayerLockFiltersDecorationsAndTheirLights");
@@ -5677,6 +5783,7 @@ int main()
     testFallingRockScratchesStopAtDepartureGroundEdge();
     testRockScratchBudgetUsesDepositionOrder();
     testTileDecorationHoverPreviewMatchesRaisedSurfacePlacement();
+    testCompleteFenceHoverPreviewMatchesPlacedPartsOnWallLayer();
     testEditorLayerLockFiltersDecorationsAndTheirLights();
     testGameplayFrameBuildsManifestDecorationInstances();
     testEnemyFacingAttackAndAnimationInstances();

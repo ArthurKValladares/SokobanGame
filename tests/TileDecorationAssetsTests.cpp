@@ -196,10 +196,132 @@ void testGameReadyTileDecorations()
     TEST("tile decoration level requirements");
     CHECK(decorations.size() == 48);
     CHECK(std::ranges::count_if(manifest.models(), [](const auto& model) {
-        return model.name.starts_with("TileDecoration");
+        return model.name.starts_with("TileDecoration") &&
+            !model.name.starts_with("TileDecorationFence");
     }) == 48);
     const Level level = Level::loadFromLayers({ { "." }, { "C" } },
         "tile decorations", std::nullopt, decorations);
+    const RenderAssetRequirements requirements = renderAssetRequirementsForLevel(level, manifest);
+    for (const Level::Decoration& decoration : decorations) {
+        CHECK(requirements.contains(manifest.modelIdByName(decoration.model)));
+    }
+}
+
+void testGameReadyModularFenceDecorations()
+{
+    TEST("game ready modular fence decorations");
+    const std::filesystem::path assets = testAssetRoot();
+    const AssetManifest manifest = AssetManifest::loadFromFile(assets / "manifest.json");
+    const RuntimeTextureCatalog textures = collectRuntimeTextureCatalog(assets, manifest);
+    std::vector<Level::Decoration> decorations;
+    for (const std::string_view part : { "Slats", "Post" }) {
+        std::array<std::vector<std::array<float, 3>>, 4> variantPositions;
+        std::array<std::size_t, 4> variantIndexCounts {};
+        for (int variant = 1; variant <= 4; ++variant) {
+            const std::string name = "TileDecorationFence" + std::string(part) +
+                "0" + std::to_string(variant);
+            TEST(name.c_str());
+            const RenderModel id = manifest.modelIdByName(name);
+            CHECK(!id.isCube());
+            const AssetManifest::Model& definition = manifest.model(id);
+            CHECK(definition.geometry == ModelGeometry::Static);
+            CHECK(definition.preserveSourceScale);
+            CHECK(!definition.rotateHalfTurn);
+            CHECK(definition.materialMode == ModelMaterialMode::Auto);
+            CHECK(std::filesystem::is_regular_file(assets / definition.path));
+            CHECK(resolveGltfExternalFiles(assets, definition.path, name).empty());
+            const RuntimeModelTextures& runtime = textures.model(
+                static_cast<uint32_t>(id.index()));
+            CHECK(runtime.preparedBytes > 0);
+            CHECK(runtime.materialMode == ModelMaterialMode::PrimitiveMaterials);
+            CHECK(!runtime.primitiveMaterials.empty());
+            CHECK(!runtime.requiredTextures.empty());
+            for (uint32_t texture : runtime.requiredTextures) {
+                const RuntimeTextureDefinition& palette = textures.textures()[texture];
+                CHECK(!palette.manifestOwned);
+                CHECK(palette.identity.interpretation.colorSpace == TextureColorSpace::Srgb);
+                CHECK(std::holds_alternative<GltfBufferViewTextureSource>(palette.identity.source));
+                const ImageData image = loadRgbaTextureSource(assets, palette.identity.source);
+                CHECK(image.width > 0 && image.height > 0);
+                CHECK(image.rgba.size() == static_cast<std::size_t>(image.width) * image.height * 4);
+                bool opaque = true;
+                for (std::size_t alpha = 3; alpha < image.rgba.size(); alpha += 4) {
+                    opaque &= image.rgba[alpha] == std::byte { 255 };
+                }
+                CHECK(opaque);
+            }
+            const MeshData mesh = loadGltfMesh(assets / definition.path, {
+                .preserveSourceScale = definition.preserveSourceScale,
+                .primitiveMaterials = runtime.primitiveMaterials,
+            });
+            CHECK(!mesh.vertices.empty());
+            CHECK(!mesh.indices.empty());
+            CHECK(mesh.indices.size() % 3 == 0);
+            CHECK(std::ranges::all_of(mesh.indices, [&](uint32_t index) {
+                return index < mesh.vertices.size();
+            }));
+            Bounds bounds;
+            bool validVertices = true;
+            auto& positions = variantPositions[variant - 1];
+            for (const MeshVertex& vertex : mesh.vertices) {
+                const float normalLengthSquared = vertex.normal.x * vertex.normal.x +
+                    vertex.normal.y * vertex.normal.y + vertex.normal.z * vertex.normal.z;
+                validVertices &= std::isfinite(vertex.position.x) &&
+                    std::isfinite(vertex.position.y) && std::isfinite(vertex.position.z) &&
+                    std::isfinite(normalLengthSquared) &&
+                    std::abs(normalLengthSquared - 1.0f) < 0.001f &&
+                    std::isfinite(vertex.uv.x) && std::isfinite(vertex.uv.y) &&
+                    vertex.uv.x >= 0.0f && vertex.uv.x <= 1.0f &&
+                    vertex.uv.y >= 0.0f && vertex.uv.y <= 1.0f &&
+                    vertex.materialIndex < mesh.materials.size();
+                bounds.minimum.x = std::min(bounds.minimum.x, vertex.position.x);
+                bounds.minimum.y = std::min(bounds.minimum.y, vertex.position.y);
+                bounds.minimum.z = std::min(bounds.minimum.z, vertex.position.z);
+                bounds.maximum.x = std::max(bounds.maximum.x, vertex.position.x);
+                bounds.maximum.y = std::max(bounds.maximum.y, vertex.position.y);
+                bounds.maximum.z = std::max(bounds.maximum.z, vertex.position.z);
+                positions.push_back({ vertex.position.x, vertex.position.y, vertex.position.z });
+            }
+            CHECK(validVertices);
+            for (const MeshMaterial& material : mesh.materials) {
+                CHECK(material.alphaMode == MaterialAlphaMode::Opaque);
+            }
+            // Placement stretches only the canonical X span. The imported
+            // pivot and Z dimensions must survive GLB axis conversion intact.
+            if (part == "Slats") {
+                checkNear(bounds.minimum.x, -0.5f, "slats left connection");
+                checkNear(bounds.maximum.x, 0.5f, "slats right connection");
+                CHECK(bounds.minimum.y >= -0.04f && bounds.maximum.y <= 0.04f);
+                checkNear(bounds.minimum.z, 0.12f, "slats bottom");
+                checkNear(bounds.maximum.z, 0.82f, "slats top");
+            } else {
+                CHECK(bounds.minimum.x >= -0.06f && bounds.maximum.x <= 0.06f);
+                CHECK(bounds.minimum.y >= -0.06f && bounds.maximum.y <= 0.06f);
+                checkNear(bounds.minimum.z, 0.0f, "post base pivot");
+                checkNear(bounds.maximum.z, 0.95f, "post height");
+            }
+            variantIndexCounts[variant - 1] = mesh.indices.size();
+            decorations.push_back({ .model = name, .position = { 0.5f, 0.5f, 1.0f } });
+        }
+        TEST("fence variants have distinct authored geometry");
+        for (std::size_t first = 0; first < variantPositions.size(); ++first) {
+            for (std::size_t second = first + 1; second < variantPositions.size(); ++second) {
+                CHECK(variantPositions[first] != variantPositions[second]);
+            }
+        }
+        if (part == "Slats") {
+            // The missing-slat variant is real geometry, not a material or
+            // name-only variant of the intact span.
+            CHECK(variantIndexCounts[2] < variantIndexCounts[0]);
+        }
+    }
+    TEST("modular fence level requirements");
+    CHECK(decorations.size() == 8);
+    CHECK(std::ranges::count_if(manifest.models(), [](const auto& model) {
+        return model.name.starts_with("TileDecorationFence");
+    }) == 8);
+    const Level level = Level::loadFromLayers({ { "." }, { "C" } },
+        "modular fence decorations", std::nullopt, decorations);
     const RenderAssetRequirements requirements = renderAssetRequirementsForLevel(level, manifest);
     for (const Level::Decoration& decoration : decorations) {
         CHECK(requirements.contains(manifest.modelIdByName(decoration.model)));
@@ -212,6 +334,7 @@ int main()
 {
     try {
         testGameReadyTileDecorations();
+        testGameReadyModularFenceDecorations();
     } catch (const std::exception& error) {
         std::cerr << "TileDecorationAssetsTests: " << error.what() << '\n';
         return 1;

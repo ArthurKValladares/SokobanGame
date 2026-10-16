@@ -1,0 +1,51 @@
+@camera {"pitch":55,"yaw":-8}
+@decoration {"model":"TileDecorationFenceSlats01","position":[1.5,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats02","position":[2.5,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats03","position":[3.5,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats04","position":[4.5,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats01","position":[5.5,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats02","position":[6.5,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats03","position":[7.5,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats04","position":[8.5,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost01","position":[1,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost02","position":[2,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost03","position":[3,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost04","position":[4,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost01","position":[5,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost02","position":[6,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost03","position":[7,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost04","position":[8,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost01","position":[9,2.06,1],"rotation":[-1.8900748258989577,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats01","position":[1.5,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats02","position":[2.5,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats03","position":[3.5,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats04","position":[4.5,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats01","position":[5.5,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats02","position":[6.5,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats03","position":[7.5,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFenceSlats04","position":[8.5,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost01","position":[1,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost02","position":[2,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost03","position":[3,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost04","position":[4,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost01","position":[5,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost02","position":[6,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost03","position":[7,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost04","position":[8,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+@decoration {"model":"TileDecorationFencePost01","position":[9,4.06,1],"rotation":[0,0,180],"scale":[1,1,1]}
+
+@layer 0
+..........
+..........
+..........
+..........
+..........
+..........
+
+@layer 1
+          
+ uxuxuxux 
+          
+ ######## 
+          
+    QE    

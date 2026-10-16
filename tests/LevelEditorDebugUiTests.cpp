@@ -37,7 +37,8 @@ public:
         Widget widget;
     };
 
-    explicit EditorPanel(LevelEditor::Tool tool = LevelEditor::Tool::Selectors)
+    explicit EditorPanel(LevelEditor::Tool tool = LevelEditor::Tool::Selectors,
+        bool includeFencePosts = true)
         : previousContext_(ImGui::GetCurrentContext()),
           context_(ImGui::CreateContext()),
           manifest_(AssetManifest::parse(R"json({
@@ -64,6 +65,12 @@ public:
         for (const auto& entry : TileDecorations::catalog) {
             if (manifest_.addModel({ .name = std::string(entry.model), .path = "decoration.glb" }).isCube()) {
                 throw std::runtime_error("Could not initialize tile decoration UI fixture");
+            }
+        }
+        for (const auto model : TileDecorations::fencePostModels) {
+            if (!includeFencePosts) continue;
+            if (manifest_.addModel({ .name = std::string(model), .path = "fence-post.glb" }).isCube()) {
+                throw std::runtime_error("Could not initialize fence post UI fixture");
             }
         }
         auto& io = ImGui::GetIO();
@@ -729,6 +736,68 @@ void mossPaletteOffersEveryLayoutAndVariation()
     CHECK(panel.shows("Transform: TileDecorationMossEnd"));
 }
 
+void fencePaletteBuildsSeparatePartsAndKeepsRandomPreviewStable()
+{
+    TEST("fencePaletteBuildsSeparatePartsAndKeepsRandomPreviewStable");
+    EditorPanel panel(LevelEditor::Tool::Tiles);
+    panel.editor.setLayerLocked(false);
+    panel.editor.setSelectedTile(TileType::CliffWall);
+    CHECK(panel.editor.paintCell({ 1, 1, 0 }));
+    panel.clickToolTab("Tile Decorations");
+    panel.clickToolControl("Fence");
+    panel.clickToolControl("One edge");
+    panel.clickToolControl("Variation 3");
+    CHECK(panel.editor.selectedTileDecorationModel() == "TileDecorationFenceSlats03");
+    panel.clickToolControl("Random");
+    const auto preview = panel.editor.decorationPlacementPreviews({ 1, 1, 1 });
+    CHECK(preview.size() >= 3);
+    CHECK(panel.editor.decorationPlacementPreviews({ 1, 1, 1 }) == preview);
+    CHECK(panel.editor.placeDecoration({ 1, 1, 1 }));
+    CHECK(panel.editor.decorations() == preview);
+    CHECK(panel.editor.tileDecorationBrush().randomVariation);
+    CHECK(!panel.editor.selectedDecorationIndex());
+    const auto nextVariant = panel.editor.tileDecorationBrush().variant;
+    panel.clickToolControl("Rotate Right");
+    CHECK(panel.editor.tileDecorationBrush().variant == nextVariant);
+    CHECK(panel.editor.tileDecorationBrush().quarterTurns == 1);
+    CHECK(panel.shows("Edges: East"));
+    panel.clickToolControl("Cancel Placement");
+    CHECK(!panel.editor.placingDecoration());
+    panel.clickToolControl("Place Selected");
+    CHECK(panel.editor.placingDecoration());
+    CHECK(panel.editor.tileDecorationBrush().variant == nextVariant);
+    panel.clickToolTab("Mesh Decorations");
+    CHECK(panel.shows("Placed Meshes (0)"));
+    panel.clickToolTab("Tile Decorations");
+    panel.clickToolControl("Variation 1");
+    CHECK(!panel.editor.tileDecorationBrush().randomVariation);
+    CHECK(panel.editor.selectedTileDecorationModel() == "TileDecorationFenceSlats01");
+    const auto beforeRandomize = panel.editor.documentDefinition();
+    panel.clickToolControl("Randomize Fences");
+    const auto randomized = panel.editor.documentDefinition();
+    CHECK(randomized.decorations != beforeRandomize.decorations);
+    CHECK(panel.editor.tryUndoEdit());
+    CHECK(panel.editor.documentDefinition() == beforeRandomize);
+    CHECK(panel.editor.tryRedoEdit());
+    CHECK(panel.editor.documentDefinition() == randomized);
+}
+
+void incompleteFenceKitDoesNotEnablePlacement()
+{
+    TEST("incompleteFenceKitDoesNotEnablePlacement");
+    EditorPanel panel(LevelEditor::Tool::Tiles, false);
+    panel.editor.setLayerLocked(false);
+    CHECK(panel.editor.setCell({ 1, 1, 0 }, TileType::Wall));
+    panel.clickToolTab("Tile Decorations");
+    panel.clickToolControl("Fence");
+    CHECK(panel.shows("This decoration is missing from the asset manifest."));
+    CHECK(!panel.editor.placingDecoration());
+    CHECK(!panel.editor.placeDecoration({ 1, 1, 1 }));
+    CHECK(panel.editor.decorations().empty());
+    panel.clickToolControl("Grass");
+    CHECK(panel.editor.placingDecoration());
+}
+
 void hiddenDockedTabsDeferTheirCallbacks()
 {
     TEST("hiddenDockedTabsDeferTheirCallbacks");
@@ -823,6 +892,8 @@ int main()
         tileDecorationTabChoosesBrushAndKeepsPlacedListsSeparate();
         decorationListsAndInspectorsRespectLayerLock();
         mossPaletteOffersEveryLayoutAndVariation();
+        fencePaletteBuildsSeparatePartsAndKeepsRandomPreviewStable();
+        incompleteFenceKitDoesNotEnablePlacement();
         hiddenDockedTabsDeferTheirCallbacks();
     } catch (const std::exception& error) {
         std::cerr << "Editor ImGui regression failed: " << error.what() << '\n';

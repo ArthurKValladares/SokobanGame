@@ -149,6 +149,11 @@ public:
     // Both the rendered ghost and the placement command use this transform.
     [[nodiscard]] std::optional<Level::Decoration> decorationPlacementPreview(
         GridPosition3 surfaceCell) const;
+    // All new meshes in the placement, including a fence's section endpoints.
+    // Fence pivots belong to the supporting wall's base layer. Unlocked picks
+    // name its top surface; a locked pick names the active wall layer itself.
+    [[nodiscard]] std::vector<Level::Decoration> decorationPlacementPreviews(
+        GridPosition3 surfaceCell) const;
     void selectDocument(const std::filesystem::path& path);
     [[nodiscard]] bool setBrowserRoot(const std::filesystem::path& path);
 
@@ -216,6 +221,9 @@ public:
     // Randomizes each wall's stone/cliff style variants and quarter turns on
     // every layer as one undo step, preserving its family and splat assignments.
     bool randomizeWalls(std::optional<uint32_t> seed = std::nullopt);
+    // Re-roll placed fence slats and posts without changing their joins or
+    // orientation. All variants are changed together as one undo step.
+    bool randomizeFences(std::optional<uint32_t> seed = std::nullopt);
     // A stroke groups every change made until endStroke() into one undo
     // record, so a drag that paints forty cells undoes in one step. Undo,
     // redo and document switches end an open stroke first.

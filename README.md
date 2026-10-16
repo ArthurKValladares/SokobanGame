@@ -984,7 +984,7 @@ editor commands but does not own document or filesystem policy.
   deleted, and undone. A selected decoration can attach or detach a point
   light and edit all of its lighting and shadow settings in place.
 - **Tile Decorations**, next to Mesh Decorations, offers the Blender-authored
-  **Pebbles**, **Grass** and **Moss** sets. Moss forms low, rounded green clumps
+  **Pebbles**, **Grass**, **Moss** and **Fence** sets. Moss forms low, rounded green clumps
   with small yellow flecks. Choose one edge, two adjacent edges, two
   opposite edges, or three edges, then one of four variations or **Random**.
   Random places the variation shown in the hover preview, then chooses a
@@ -999,11 +999,26 @@ editor commands but does not own document or filesystem policy.
   **Cancel Placement** (or Back, `Escape` by default) stops
   the brush; **Place Selected** resumes it. Right-click deselects a placed item.
   Placed tile decorations have their own list and share the mesh transform
-  gizmos, duplicate/delete, undo/redo, and document saving. The 48 models retain
+  gizmos, duplicate/delete, undo/redo, and document saving. The ground decoration models retain
   their authored tile dimensions and embedded palettes, with each layout
   touching its decorated tile edges. The opposite-edge layout has separate
   bands on both borders and leaves the tile center clear. A complete gallery is
   available in `docs/examples/tile-decorations.scr`.
+  **Fence** places sections of four weathered wooden slats against exposed stone or
+  cliff wall faces. Its four variations are intact, crooked, missing slats,
+  and broken; **Random** advances to a different variation after each successful
+  placement. **Randomize Fences** changes the variations of existing fence parts
+  across the document in one undoable edit, preserving their positions and joins.
+  Choose the edges and rotate the brush as above, then click a wall.
+  Sections follow the wall's slope and corner bevels. Posts and slats are separate
+  meshes, with a post at each section end; neighboring sections share posts, so
+  any run keeps the pattern **Post - Slats - Post - Slats - Post**. A single click
+  adds all needed parts as one undoable edit. With the layer locked, fences belong
+  to the supporting wall's layer. Saved fences retain their chosen variations.
+  `docs/examples/fences.scr` shows all four variations in continuous runs on
+  stone and cliff walls. Editable source is in
+  `assets/custom/source/fences/modular_fence_kit.blend`; regenerate the kit with
+  `blender --background --python tools/make_fence_models.py`.
 - Source saves, runtime mirroring, screen/level insertion and renumbering,
   soft deletion, restore, and guarded permanent deletion are handled by the
   tested editor/project APIs.

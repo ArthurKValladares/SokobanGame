@@ -1990,7 +1990,7 @@ void testDecorationTransformSessionCoalescesUndoAndCanCancel()
 void testTileDecorationCatalogAndSurfacePlacement()
 {
     TEST("tileDecorationCatalogAndSurfacePlacement");
-    CHECK(TileDecorations::catalog.size() == 48);
+    CHECK(TileDecorations::catalog.size() == 52);
     for (std::size_t index = 0; index < TileDecorations::catalog.size(); ++index) {
         const auto& entry = TileDecorations::catalog[index];
         const TileDecorations::Brush brush {
@@ -2119,6 +2119,517 @@ void testTileAndMeshDecorationBrushesStayIndependent()
     editor.setTool(LevelEditor::Tool::Tiles);
     CHECK(!editor.decorationToolActive());
     CHECK(!editor.placingDecoration());
+}
+
+bool fencePointNear(Vec3 left, Vec3 right)
+{
+    return std::abs(left.x - right.x) < 0.0002f &&
+        std::abs(left.y - right.y) < 0.0002f &&
+        std::abs(left.z - right.z) < 0.0002f;
+}
+
+std::array<Vec3, 2> fenceSlatEndpoints(const Level::Decoration& slats)
+{
+    constexpr float radiansPerDegree = 0.017453292519943295f;
+    const float angle = slats.rotationDegrees.z * radiansPerDegree;
+    const Vec3 halfSpan {
+        std::cos(angle) * slats.scale.x * 0.5f,
+        std::sin(angle) * slats.scale.x * 0.5f,
+        0.0f,
+    };
+    return {{
+        { slats.position.x - halfSpan.x, slats.position.y - halfSpan.y, slats.position.z },
+        { slats.position.x + halfSpan.x, slats.position.y + halfSpan.y, slats.position.z },
+    }};
+}
+
+void checkFenceAssembly(const std::vector<Level::Decoration>& decorations, float baseHeight)
+{
+    std::vector<Vec3> posts;
+    std::vector<std::array<Vec3, 2>> spans;
+    for (const Level::Decoration& decoration : decorations) {
+        CHECK(decoration.model.starts_with("TileDecorationFence"));
+        CHECK(std::isfinite(decoration.rotationDegrees.x));
+        CHECK(std::isfinite(decoration.rotationDegrees.y));
+        checkNear(decoration.position.z, baseHeight, "fence follows supporting wall base");
+        CHECK(decoration.scale.y == 1.0f);
+        CHECK(decoration.scale.z >= 1.0f && decoration.scale.z <= 1.001f);
+        if (decoration.model.starts_with("TileDecorationFencePost")) {
+            CHECK(decoration.scale.x == 1.0f);
+            posts.push_back(decoration.position);
+        } else {
+            CHECK(decoration.model.starts_with("TileDecorationFenceSlats"));
+            CHECK(std::isfinite(decoration.scale.x) && decoration.scale.x > 0.0f);
+            // A new span can reach back to a preserved corner post when the
+            // wall is extended after that post was placed.
+            CHECK(decoration.scale.x <= 1.10f);
+            spans.push_back(fenceSlatEndpoints(decoration));
+        }
+    }
+    CHECK(!spans.empty());
+    CHECK(posts.size() >= 2);
+    for (const auto& span : spans) {
+        for (Vec3 endpoint : span) {
+            CHECK_MESSAGE(std::ranges::count_if(posts, [&](Vec3 post) {
+                return fencePointNear(post, endpoint);
+            }) == 1, "each slat endpoint has exactly one supporting post");
+        }
+    }
+    for (std::size_t first = 0; first < posts.size(); ++first) {
+        for (std::size_t second = first + 1; second < posts.size(); ++second) {
+            CHECK_MESSAGE(!fencePointNear(posts[first], posts[second]),
+                "neighboring spans share one post instead of overlapping posts");
+        }
+    }
+    for (std::size_t first = 0; first < spans.size(); ++first) {
+        for (std::size_t second = first + 1; second < spans.size(); ++second) {
+            const bool sameDirection = fencePointNear(spans[first][0], spans[second][0]) &&
+                fencePointNear(spans[first][1], spans[second][1]);
+            const bool reverseDirection = fencePointNear(spans[first][0], spans[second][1]) &&
+                fencePointNear(spans[first][1], spans[second][0]);
+            CHECK_MESSAGE(!sameDirection && !reverseDirection,
+                "painting adjacent cells does not duplicate a slat span");
+        }
+    }
+}
+
+void checkFenceIsOneConnectedChain(const std::vector<Level::Decoration>& decorations)
+{
+    std::vector<Vec3> posts;
+    std::vector<std::array<Vec3, 2>> spans;
+    for (const auto& decoration : decorations) {
+        if (decoration.model.starts_with("TileDecorationFencePost")) posts.push_back(decoration.position);
+        if (decoration.model.starts_with("TileDecorationFenceSlats")) spans.push_back(fenceSlatEndpoints(decoration));
+    }
+    CHECK(!posts.empty());
+    if (posts.empty()) return;
+    std::vector<bool> reached(posts.size(), false);
+    std::vector<std::size_t> degree(posts.size(), 0);
+    reached[0] = true;
+    std::vector<std::array<std::size_t, 2>> edges;
+    for (const auto& span : spans) {
+        const auto first = std::ranges::find_if(posts, [&](Vec3 post) { return fencePointNear(post, span[0]); });
+        const auto second = std::ranges::find_if(posts, [&](Vec3 post) { return fencePointNear(post, span[1]); });
+        CHECK(first != posts.end() && second != posts.end());
+        if (first == posts.end() || second == posts.end()) return;
+        const std::size_t a = static_cast<std::size_t>(first - posts.begin());
+        const std::size_t b = static_cast<std::size_t>(second - posts.begin());
+        ++degree[a];
+        ++degree[b];
+        edges.push_back({ a, b });
+    }
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (const auto& edge : edges) {
+            if (reached[edge[0]] == reached[edge[1]]) continue;
+            reached[edge[0]] = reached[edge[1]] = true;
+            changed = true;
+        }
+    }
+    CHECK_MESSAGE(std::ranges::all_of(reached, [](bool value) { return value; }),
+        "adjoining painted wall sides form one continuous fence chain");
+    CHECK(std::ranges::count(degree, std::size_t { 1 }) == 2);
+    CHECK(std::ranges::all_of(degree, [](std::size_t value) { return value == 1 || value == 2; }));
+
+    // Exact duplicate checks alone miss a newly lengthened section painted
+    // over an old section after the wall's neighboring cells change.
+    for (std::size_t first = 0; first < spans.size(); ++first) {
+        const float dx = spans[first][1].x - spans[first][0].x;
+        const float dy = spans[first][1].y - spans[first][0].y;
+        const float length = std::sqrt(dx * dx + dy * dy);
+        if (length <= 0.0002f) continue;
+        for (std::size_t second = first + 1; second < spans.size(); ++second) {
+            const auto perpendicularDistance = [&](Vec3 point) {
+                return std::abs(dx * (point.y - spans[first][0].y) -
+                    dy * (point.x - spans[first][0].x)) / length;
+            };
+            if (perpendicularDistance(spans[second][0]) >= 0.0002f ||
+                perpendicularDistance(spans[second][1]) >= 0.0002f) continue;
+            const auto projection = [&](Vec3 point) {
+                return (dx * (point.x - spans[first][0].x) +
+                    dy * (point.y - spans[first][0].y)) / length;
+            };
+            const float a = projection(spans[second][0]);
+            const float b = projection(spans[second][1]);
+            const float overlap = std::min(length, std::max(a, b)) -
+                std::max(0.0f, std::min(a, b));
+            CHECK_MESSAGE(overlap <= 0.0002f,
+                "neighbor changes never produce overlapping fence sections");
+        }
+    }
+}
+
+void testFenceIsModularAcrossArbitraryWallLengths()
+{
+    TEST("fenceIsModularAcrossArbitraryWallLengths");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(7, 3, false);
+    for (int x = 1; x <= 5; ++x) {
+        CHECK(editor.setCell({ x, 1, 1 }, TileType::Wall));
+    }
+    editor.setTileDecorationBrush({
+        TileDecorations::Style::Fence, TileDecorations::Layout::Edge, 2, 0,
+    });
+    CHECK(editor.selectedTileDecorationModel() == "TileDecorationFenceSlats03");
+    const auto firstPreview = editor.decorationPlacementPreviews({ 1, 1, 2 });
+    CHECK(!firstPreview.empty());
+    if (firstPreview.empty()) return;
+    CHECK(editor.decorationPlacementPreviews({ 1, 1, 2 }) == firstPreview);
+    CHECK(editor.decorationPlacementPreview({ 1, 1, 2 }) == firstPreview.front());
+    checkFenceAssembly(firstPreview, 1.0f);
+
+    const auto beforeStroke = editor.historyStats();
+    (void)editor.beginStroke();
+    for (int x = 1; x <= 5; ++x) {
+        const auto preview = editor.decorationPlacementPreviews({ x, 1, 2 });
+        CHECK(!preview.empty());
+        CHECK(editor.placeDecoration({ x, 1, 2 }));
+        checkFenceAssembly(editor.decorations(), 1.0f);
+    }
+    editor.endStroke();
+    CHECK(editor.historyStats().undoRecords == beforeStroke.undoRecords + 1);
+    const auto placed = editor.decorations();
+    CHECK(std::ranges::all_of(placed, [](const auto& decoration) {
+        return !decoration.model.starts_with("TileDecorationFenceSlats") ||
+            decoration.model == "TileDecorationFenceSlats03";
+    }));
+    CHECK(!editor.placeDecoration({ 3, 1, 2 }));
+    CHECK(editor.decorations() == placed);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.decorations().empty());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.decorations() == placed);
+    CHECK(!editor.selectedDecorationIndex());
+
+    const auto path = project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(path));
+    CHECK(Level::loadFromFile(path).decorations() == placed);
+    CHECK(Level::loadFromFile(project.runtime / "level0" / "screen0.scr").decorations() == placed);
+    auto loaded = makeEditor(project);
+    CHECK(loaded.decorations() == placed);
+    CHECK(loaded.selectDecoration(0));
+    CHECK(loaded.tool() == LevelEditor::Tool::TileDecorations);
+}
+
+void testFenceRotationCornersAndOppositeEdgesFollowWallBevels()
+{
+    TEST("fenceRotationCornersAndOppositeEdgesFollowWallBevels");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(5, 5, false);
+    CHECK(editor.setCell({ 2, 2, 1 }, TileType::Wall));
+    for (uint8_t quarterTurns = 0; quarterTurns < 4; ++quarterTurns) {
+        editor.setTileDecorationBrush({
+            TileDecorations::Style::Fence, TileDecorations::Layout::Edge, 0, quarterTurns,
+        });
+        const auto preview = editor.decorationPlacementPreviews({ 2, 2, 2 });
+        CHECK(!preview.empty());
+        if (preview.empty()) return;
+        checkFenceAssembly(preview, 1.0f);
+        for (const Level::Decoration& decoration : preview) {
+            if (!decoration.model.starts_with("TileDecorationFenceSlats")) continue;
+            for (Vec3 endpoint : fenceSlatEndpoints(decoration)) {
+                CHECK(quarterTurns != 0 || endpoint.y < 2.5f);
+                CHECK(quarterTurns != 1 || endpoint.x > 2.5f);
+                CHECK(quarterTurns != 2 || endpoint.y > 2.5f);
+                CHECK(quarterTurns != 3 || endpoint.x < 2.5f);
+            }
+        }
+    }
+    for (TileDecorations::Layout layout : {
+        TileDecorations::Layout::Corner, TileDecorations::Layout::Strip,
+        TileDecorations::Layout::End,
+    }) {
+        editor.setTileDecorationBrush({ TileDecorations::Style::Fence, layout, 1, 0 });
+        const auto preview = editor.decorationPlacementPreviews({ 2, 2, 2 });
+        CHECK(!preview.empty());
+        if (preview.empty()) return;
+        checkFenceAssembly(preview, 1.0f);
+        if (layout == TileDecorations::Layout::Corner) {
+            CHECK_MESSAGE(std::ranges::any_of(preview, [](const auto& decoration) {
+                if (!decoration.model.starts_with("TileDecorationFenceSlats")) return false;
+                const float angle = decoration.rotationDegrees.z * 0.017453292519943295f;
+                return std::abs(std::sin(angle)) > 0.01f && std::abs(std::cos(angle)) > 0.01f;
+            }), "adjacent wall edges connect through an angled bevel span");
+        }
+        if (layout == TileDecorations::Layout::Strip) {
+            bool north = false;
+            bool south = false;
+            for (const Level::Decoration& decoration : preview) {
+                if (!decoration.model.starts_with("TileDecorationFenceSlats")) continue;
+                CHECK(decoration.position.y < 2.5f || decoration.position.y > 2.5f);
+                north |= decoration.position.y < 2.5f;
+                south |= decoration.position.y > 2.5f;
+            }
+            CHECK(north && south);
+        }
+    }
+}
+
+void testFenceRejectsMissingOrHiddenWallSupportWithoutRerolling()
+{
+    TEST("fenceRejectsMissingOrHiddenWallSupportWithoutRerolling");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(5, 5, false);
+    editor.setTileDecorationBrush({
+        TileDecorations::Style::Fence, TileDecorations::Layout::Edge, 0, 0, true,
+    });
+    const auto pendingVariant = editor.tileDecorationBrush().variant;
+    CHECK(editor.decorationPlacementPreviews({ 2, 2, 1 }).empty());
+    CHECK(editor.decorationPlacementPreviews({ 2, 2, 2 }).empty());
+    CHECK(!editor.placeDecoration({ 2, 2, 2 }));
+    CHECK(editor.tileDecorationBrush().variant == pendingVariant);
+    CHECK(editor.decorations().empty());
+    CHECK(editor.setCell({ 2, 2, 1 }, TileType::CliffWall02));
+    CHECK(editor.setCell({ 2, 1, 1 }, TileType::CliffWall));
+    CHECK(editor.decorationPlacementPreviews({ 2, 2, 2 }).empty());
+    CHECK(!editor.placeDecoration({ 2, 2, 2 }));
+    CHECK(editor.tileDecorationBrush().variant == pendingVariant);
+    CHECK(editor.setCell({ 2, 1, 1 }, TileType::Air));
+    const auto preview = editor.decorationPlacementPreviews({ 2, 2, 2 });
+    CHECK(!preview.empty());
+    if (preview.empty()) return;
+    CHECK(editor.decorationPlacementPreviews({ 2, 2, 2 }) == preview);
+    checkFenceAssembly(preview, 1.0f);
+    CHECK(!editor.placeDecoration({ -1, 2, 2 }));
+    CHECK(editor.decorationPlacementPreviews({ 2, 2, 2 }) == preview);
+    CHECK(editor.placeDecoration({ 2, 2, 2 }));
+    CHECK(editor.decorations() == preview);
+    CHECK(editor.tileDecorationBrush().variant != pendingVariant);
+    const auto nextVariant = editor.tileDecorationBrush().variant;
+    CHECK(!editor.placeDecoration({ 2, 2, 2 }));
+    CHECK(editor.tileDecorationBrush().variant == nextVariant);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.decorations().empty());
+    CHECK(editor.tileDecorationBrush().variant == nextVariant);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.decorations() == preview);
+
+    // The locked layer denotes the wall itself, including when the picked
+    // surface belongs to a different visible layer.
+    editor.setLayerLocked(true);
+    editor.setActiveLayer(1);
+    CHECK(editor.decorationPlacementPreviews({ 1, 2, 0 }).empty());
+    CHECK(editor.setCell({ 1, 2, 1 }, TileType::WallStone02));
+    const auto locked = editor.decorationPlacementPreviews({ 1, 2, 0 });
+    CHECK(!locked.empty());
+    if (!locked.empty()) {
+        auto combined = editor.decorations();
+        combined.insert(combined.end(), locked.begin(), locked.end());
+        checkFenceAssembly(combined, 1.0f);
+    }
+    editor.setActiveLayer(0);
+    CHECK(editor.decorationPlacementPreviews({ 1, 2, 2 }).empty());
+}
+
+void testFenceJoinsSeparatelyPaintedEdgesAndRepairsMissingPosts()
+{
+    TEST("fenceJoinsSeparatelyPaintedEdgesAndRepairsMissingPosts");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(4, 4, false);
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::CliffWall));
+    editor.setTileDecorationBrush({
+        TileDecorations::Style::Fence, TileDecorations::Layout::Edge, 3, 0,
+    });
+    CHECK(editor.placeDecoration({ 1, 1, 2 }));
+    const auto firstEdge = editor.decorations();
+    checkFenceAssembly(firstEdge, 1.0f);
+    editor.rotateTileDecorationBrush();
+    const auto secondEdge = editor.decorationPlacementPreviews({ 1, 1, 2 });
+    CHECK(!secondEdge.empty());
+    CHECK(editor.placeDecoration({ 1, 1, 2 }));
+    CHECK(editor.decorations().size() == firstEdge.size() + secondEdge.size());
+    checkFenceAssembly(editor.decorations(), 1.0f);
+    CHECK_MESSAGE(std::ranges::any_of(editor.decorations(), [](const auto& decoration) {
+        if (!decoration.model.starts_with("TileDecorationFenceSlats")) return false;
+        const float angle = decoration.rotationDegrees.z * 0.017453292519943295f;
+        return std::abs(std::sin(angle)) > 0.01f && std::abs(std::cos(angle)) > 0.01f;
+    }), "painting a second adjoining edge fills its beveled corner join");
+    const auto postToRemove = std::ranges::find_if(secondEdge, [](const auto& decoration) {
+        return decoration.model.starts_with("TileDecorationFencePost");
+    });
+    CHECK(postToRemove != secondEdge.end());
+    if (postToRemove == secondEdge.end()) return;
+    const auto postIndex = std::ranges::find(editor.decorations(), *postToRemove);
+    CHECK(postIndex != editor.decorations().end());
+    if (postIndex == editor.decorations().end()) return;
+    const std::size_t index = static_cast<std::size_t>(postIndex - editor.decorations().begin());
+    CHECK(editor.selectDecoration(index));
+    CHECK(editor.deleteSelectedDecoration());
+    // Selection identifies a fence part without discarding the pending edge
+    // orientation. Painting repairs support without adding duplicate slats.
+    const auto repair = editor.decorationPlacementPreviews({ 1, 1, 2 });
+    CHECK(repair.size() == 1);
+    if (repair.size() != 1) return;
+    CHECK(repair.front().model.starts_with("TileDecorationFencePost"));
+    CHECK(editor.placeDecoration({ 1, 1, 2 }));
+    checkFenceAssembly(editor.decorations(), 1.0f);
+}
+
+void testFenceWallExtensionPreservesTheOriginalSpanAndSharesItsPost()
+{
+    TEST("fenceWallExtensionPreservesTheOriginalSpanAndSharesItsPost");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    for (TileType wall : { TileType::Wall, TileType::CliffWall }) {
+        editor.newDocument(5, 4, false);
+        CHECK(editor.setCell({ 1, 1, 1 }, wall));
+        editor.setTileDecorationBrush({
+            TileDecorations::Style::Fence, TileDecorations::Layout::Edge, 1, 0,
+        });
+        CHECK(editor.placeDecoration({ 1, 1, 2 }));
+        const auto original = editor.decorations();
+        checkFenceAssembly(original, 1.0f);
+        CHECK(editor.setCell({ 2, 1, 1 }, wall));
+        CHECK(editor.decorationPlacementPreviews({ 1, 1, 2 }).empty());
+        CHECK(!editor.placeDecoration({ 1, 1, 2 }));
+        CHECK(editor.decorations() == original);
+
+        const auto extension = editor.decorationPlacementPreviews({ 2, 1, 2 });
+        CHECK(!extension.empty());
+        CHECK(editor.placeDecoration({ 2, 1, 2 }));
+        const auto extended = editor.decorations();
+        CHECK(extended.size() == original.size() + extension.size());
+        CHECK(extended.size() >= original.size());
+        if (extended.size() < original.size()) return;
+        CHECK(std::equal(original.begin(), original.end(), extended.begin()));
+        checkFenceAssembly(extended, 1.0f);
+        checkFenceIsOneConnectedChain(extended);
+        CHECK(editor.decorationPlacementPreviews({ 1, 1, 2 }).empty());
+        CHECK(editor.decorationPlacementPreviews({ 2, 1, 2 }).empty());
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.decorations() == original);
+        CHECK(editor.tryRedoEdit());
+        CHECK(editor.decorations() == extended);
+    }
+}
+
+void testFenceConcaveWallSidesJoinThroughTheirExistingPosts()
+{
+    TEST("fenceConcaveWallSidesJoinThroughTheirExistingPosts");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    for (TileType wall : { TileType::Wall, TileType::CliffWall }) {
+        editor.newDocument(5, 5, false);
+        CHECK(editor.setCell({ 1, 1, 1 }, wall));
+        CHECK(editor.setCell({ 2, 1, 1 }, wall));
+        CHECK(editor.setCell({ 1, 2, 1 }, wall));
+        editor.setTileDecorationBrush({
+            TileDecorations::Style::Fence, TileDecorations::Layout::Edge, 2, 2,
+        });
+        CHECK(editor.placeDecoration({ 2, 1, 2 }));
+        const auto south = editor.decorations();
+        checkFenceAssembly(south, 1.0f);
+        editor.rotateTileDecorationBrush(-1);
+        const auto east = editor.decorationPlacementPreviews({ 1, 2, 2 });
+        CHECK(!east.empty());
+        CHECK_MESSAGE(std::ranges::any_of(east, [](const auto& decoration) {
+            if (!decoration.model.starts_with("TileDecorationFenceSlats")) return false;
+            const float angle = decoration.rotationDegrees.z * 0.017453292519943295f;
+            return std::abs(std::sin(angle)) > 0.01f && std::abs(std::cos(angle)) > 0.01f;
+        }), "perpendicular wall sides receive a connector across the concave notch");
+        CHECK(editor.placeDecoration({ 1, 2, 2 }));
+        const auto joined = editor.decorations();
+        CHECK(joined.size() == south.size() + east.size());
+        checkFenceAssembly(joined, 1.0f);
+        checkFenceIsOneConnectedChain(joined);
+        CHECK(editor.decorationPlacementPreviews({ 1, 2, 2 }).empty());
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.decorations() == south);
+        CHECK(editor.tryRedoEdit());
+        CHECK(editor.decorations() == joined);
+    }
+}
+
+void testRandomizeFencesChangesOnlyVariantsAsOneUndoStep()
+{
+    TEST("randomizeFencesChangesOnlyVariantsAsOneUndoStep");
+    TemporaryProject project;
+    auto authored = makeEditor(project);
+    authored.newDocument(20, 3, false);
+    for (int x = 1; x <= 18; ++x) {
+        CHECK(authored.setCell({ x, 1, 1 }, TileType::Wall));
+    }
+    authored.setTileDecorationBrush({
+        TileDecorations::Style::Fence, TileDecorations::Layout::Edge, 0, 0,
+    });
+    for (int x = 1; x <= 18; ++x) {
+        CHECK(authored.placeDecoration({ x, 1, 2 }));
+    }
+    authored.setTileDecorationBrush({
+        TileDecorations::Style::Grass, TileDecorations::Layout::Corner, 2, 3,
+    });
+    CHECK(authored.placeDecoration({ 1, 2, 1 }));
+    authored.setSelectedDecorationModel("Stone");
+    CHECK(authored.placeDecoration({ 2, 2, 1 }));
+    CHECK(authored.selectDecoration(0));
+    auto transformed = *authored.selectedDecoration();
+    transformed.rotationDegrees = { 11.0f, -7.0f, 32.0f };
+    transformed.scale = { 0.7f, 1.2f, 0.9f };
+    transformed.pointLight = Level::Decoration::PointLight {};
+    CHECK(authored.updateSelectedDecoration(transformed));
+    const auto source = project.source / "level0" / "screen0.scr";
+    CHECK(authored.saveDocument(source));
+
+    auto editor = makeEditor(project);
+    CHECK(editor.loadDocument(source, false));
+    CHECK(editor.selectDecoration(0));
+    const auto before = editor.documentDefinition();
+    const auto pendingBrush = editor.tileDecorationBrush();
+    CHECK(!editor.canUndo());
+    CHECK(editor.randomizeFences(12345U));
+    const auto randomized = editor.documentDefinition();
+    CHECK(editor.historyStats().undoRecords == 1);
+    CHECK(editor.selectedDecorationIndex() == 0U);
+    CHECK(editor.tileDecorationBrush() == pendingBrush);
+    auto expected = before;
+    std::array<bool, 4> seenSlats {};
+    std::array<bool, 4> seenPosts {};
+    std::size_t changed = 0;
+    for (std::size_t index = 0; index < before.decorations.size(); ++index) {
+        const auto& original = before.decorations[index];
+        const auto& replacement = randomized.decorations[index];
+        if (!original.model.starts_with("TileDecorationFence")) {
+            CHECK(replacement == original);
+            continue;
+        }
+        const bool post = original.model.starts_with("TileDecorationFencePost");
+        CHECK(replacement.model.starts_with(post
+            ? "TileDecorationFencePost" : "TileDecorationFenceSlats"));
+        const auto brush = TileDecorations::brushForModel(replacement.model);
+        CHECK(brush && brush->style == TileDecorations::Style::Fence);
+        if (brush) (post ? seenPosts : seenSlats)[brush->variant] = true;
+        changed += replacement.model != original.model;
+        expected.decorations[index].model = replacement.model;
+    }
+    CHECK(changed > 0);
+    CHECK(std::ranges::all_of(seenSlats, [](bool seen) { return seen; }));
+    CHECK(std::ranges::all_of(seenPosts, [](bool seen) { return seen; }));
+    CHECK(randomized == expected);
+    CHECK(Level::loadDefinitionFromFile(source) == before);
+    CHECK(!editor.randomizeFences(12345U));
+    CHECK(editor.historyStats().undoRecords == 1);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentDefinition() == before);
+    CHECK(!editor.canUndo());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentDefinition() == randomized);
+    CHECK(editor.saveDocument(source));
+    CHECK(Level::loadDefinitionFromFile(source) == randomized);
+    CHECK(Level::loadDefinitionFromFile(project.runtime / "level0" / "screen0.scr") == randomized);
+
+    editor.newDocument(2, 2, false);
+    editor.setSelectedDecorationModel("Stone");
+    CHECK(editor.placeDecoration({ 1, 1, 1 }));
+    const auto withoutFences = editor.documentDefinition();
+    const auto history = editor.historyStats().undoRecords;
+    CHECK(!editor.randomizeFences(12345U));
+    CHECK(editor.documentDefinition() == withoutFences);
+    CHECK(editor.historyStats().undoRecords == history);
 }
 
 void testRandomTileDecorationPreviewMatchesEachPlacement()
@@ -4954,6 +5465,13 @@ int main()
     testDecorationTransformSessionCoalescesUndoAndCanCancel();
     testTileDecorationCatalogAndSurfacePlacement();
     testTileAndMeshDecorationBrushesStayIndependent();
+    testFenceIsModularAcrossArbitraryWallLengths();
+    testFenceRotationCornersAndOppositeEdgesFollowWallBevels();
+    testFenceRejectsMissingOrHiddenWallSupportWithoutRerolling();
+    testFenceJoinsSeparatelyPaintedEdgesAndRepairsMissingPosts();
+    testFenceWallExtensionPreservesTheOriginalSpanAndSharesItsPost();
+    testFenceConcaveWallSidesJoinThroughTheirExistingPosts();
+    testRandomizeFencesChangesOnlyVariantsAsOneUndoStep();
     testRandomTileDecorationPreviewMatchesEachPlacement();
     testRandomTileDecorationBrushChangesKeepPendingVariant();
     testMossBrushPlacementAndRoundTrip();
