@@ -66,6 +66,49 @@ void testRobotPatrolRecordsFiniteBeatsAndReplaysReversals()
     CHECK(waiting.state().movables[0].cell == GridPosition3({ 2, 2, 1 }));
 }
 
+void testStaggeredRobotPatrolsSettleAndResumeOnEachInput()
+{
+    TEST("staggeredRobotPatrolsSettleAndResumeOnEachInput");
+    const Level::Definition definition {
+        .layers = {
+            { "........", "........", "........" },
+            { "       E", " }    # ", " }    # " },
+            { "        ", "        ", " C      " },
+        },
+    };
+    const Level level = Level::loadFromDefinition(definition, "staggered robots");
+    solution::Driver driver(level);
+
+    // Stepping off the second robot delays its motor admission. If motors
+    // keep restarting during settling, their staggered moves and short pauses
+    // overlap forever and this input never reaches an idle boundary.
+    CHECK(driver.apply(Input::Right));
+    CHECK(driver.state().players[0].cell == GridPosition3({ 2, 2, 1 }));
+    CHECK(driver.state().movables[0].cell == GridPosition3({ 2, 1, 1 }));
+    CHECK(driver.state().movables[1].cell == GridPosition3({ 1, 2, 1 }));
+    const GameState boundary = driver.state();
+    const EntityId controller = driver.activeHeroController();
+
+    // A blocked input still advances one patrol beat, including a one-unit
+    // shove of the hero. The previous tile's pause must neither skip a beat
+    // nor leave robot rates disabled after the preceding input settles.
+    for (int beat = 1; beat <= 3; ++beat) {
+        CHECK(driver.apply(Input::Down));
+        CHECK(driver.state().movables[0].cell == GridPosition3({ 2 + beat, 1, 1 }));
+        CHECK(driver.state().movables[1].cell == GridPosition3({ 1 + beat, 2, 1 }));
+        CHECK(driver.state().players[0].cell == GridPosition3({ 2 + beat, 2, 1 }));
+    }
+
+    // Solution search restores only the idle state, so a transient dwell may
+    // not change the next recorded beat relative to uninterrupted replay.
+    solution::Driver restored(level);
+    restored.resetTo(boundary, controller);
+    CHECK(restored.apply(Input::Down));
+    CHECK(restored.state().movables[0].cell == GridPosition3({ 3, 1, 1 }));
+    CHECK(restored.state().movables[1].cell == GridPosition3({ 2, 2, 1 }));
+    CHECK(restored.state().players[0].cell == GridPosition3({ 3, 2, 1 }));
+}
+
 void testRecordSerializeParse()
 {
     TEST("recordSerializeParse");
@@ -628,6 +671,7 @@ int main()
 {
     try {
         testRobotPatrolRecordsFiniteBeatsAndReplaysReversals();
+        testStaggeredRobotPatrolsSettleAndResumeOnEachInput();
         testRecordSerializeParse();
         testWardrobeStateSurvivesSolutionRoundTrip();
         testLeverStateSurvivesSolutionRoundTrip();

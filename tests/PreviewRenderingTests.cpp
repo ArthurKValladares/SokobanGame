@@ -581,6 +581,85 @@ void verifyInteractionOutlines(SDL_Window* window, const std::filesystem::path& 
         "Vulkan validation reported an interaction outline rendering error");
 }
 
+void verifyWaterStreams(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    UiContext ui(font);
+    const auto capture = [&](uint32_t flow, float time) {
+        auto frame = scene({ 0.16f, 0.18f, 0.22f, 1.0f }, false);
+        frame.levelWidth = 1;
+        frame.levelHeight = 1;
+        frame.cameraExtent = { 0, 0, 0, 1, 1, 2 };
+        frame.cameraPitchDegrees = 0.0f;
+        frame.skyCloudsEnabled = false;
+        frame.tiles.front().size = { 1.0f, 1.0f };
+        frame.waterGridBounds = { .width = 1, .height = 1 };
+        frame.waterAnimationTimeSeconds = time;
+        frame.waterRendering.rippleSpeed = 1.0f;
+        frame.waterRendering.primaryRippleOpacity = 0.0f;
+        frame.waterRendering.secondaryRippleOpacity = 0.0f;
+        frame.waterRendering.reflectionStrength = 0.0f;
+        frame.waterRendering.refractionStrength = 0.0f;
+        frame.waterRendering.underwaterCausticStrength = 0.0f;
+        frame.waterSurfaces.push_back({
+            .color = frame.waterRendering.surfaceColor,
+            .elevation = 1.02f,
+            .streamDirection = flow,
+            .streamBoundaryMask = 15,
+        });
+        for (int slot = 0; slot < 3; ++slot) {
+            ui.beginFrame({ 640, 360 }, {}, false, false);
+            ui.endFrame();
+            renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            ImGui::Render();
+#endif
+            renderer.drawFrame(renderer.prepareFrame(frame), ui.drawData(), false);
+            verify(!renderer.hasFatalFailure(), "Water stream fixture failed to render");
+        }
+        return renderer.captureRenderedFrame();
+    };
+    const auto quietEarly = capture(0, 0.17f);
+    const auto quietLate = capture(0, 0.40f);
+    std::array<ImageData, 4> straights;
+    const auto evidence = std::filesystem::current_path() / "out" / "water-stream-evidence";
+    std::filesystem::create_directories(evidence);
+    for (uint32_t flow = 1; flow <= 12; ++flow) {
+        const auto early = capture(flow, 0.17f);
+        const auto late = capture(flow, 0.40f);
+        const double visible = difference(quietEarly, early, 0, 0, early.width, early.height);
+        double animation = 0.0;
+        for (std::size_t pixel = 0; pixel < early.rgba.size(); pixel += 4) {
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                const auto sample = pixel + channel;
+                const int first = std::to_integer<int>(early.rgba[sample]) -
+                    std::to_integer<int>(quietEarly.rgba[sample]);
+                const int second = std::to_integer<int>(late.rgba[sample]) -
+                    std::to_integer<int>(quietLate.rgba[sample]);
+                animation += std::abs(second - first);
+            }
+        }
+        animation /= static_cast<double>(early.width) * early.height * 3.0;
+        std::cout << "Water stream " << flow << ": contrast=" << visible
+                  << ", animation=" << animation << '\n';
+        verify(visible > 0.5, "Water stream foam was not clearly visible");
+        verify(animation > 0.5, "Water stream foam did not visibly advance");
+        if (flow <= 4) {
+            straights[flow - 1] = early;
+        } else {
+            const uint32_t incoming = (flow - 5) % 4;
+            const uint32_t exit = (incoming + (flow <= 8 ? 1U : 3U)) % 4;
+            verify(difference(straights[exit], early, 0, 0, early.width, early.height) > 0.5,
+                "Curved water stream rendered as a straight stream");
+        }
+        saveRippleEvidence(evidence / ("flow-" + std::to_string(flow) + ".png"), early);
+    }
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a water stream rendering error");
+}
+
 void verifyWaterEntryRipples(SDL_Window* window, const std::filesystem::path& root,
     FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
 {
@@ -1083,6 +1162,11 @@ int main(int argc, char** argv)
             verify(vulkanDebug::validationErrorCount() == 0,
                 "Vulkan validation reported a water-entry ripple rendering error");
             std::cout << "Water-entry ripple GPU regression passed\n";
+            return 0;
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--water-streams") {
+            verifyWaterStreams(window.get(), root, font, manifest, temp.path() / "cache.bin");
+            std::cout << "Water stream GPU regression passed\n";
             return 0;
         }
         if (argc > 1 && std::string_view(argv[1]) == "--rock-scratches") {

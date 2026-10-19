@@ -122,7 +122,7 @@ std::optional<DirectionTransition> applyDirection(
             {},
             config::stepDurationSeconds,
             controller);
-    if (!planned && plans::patrollingRobots(before).empty()) {
+    if (!planned && !rules::hasPendingMotion(level, before)) {
         return DirectionTransition {
             .state = before,
             .solved = rules::isAtUnlockedEnd(level, before),
@@ -483,7 +483,7 @@ Result solve(const Level& level, const Options& options)
             const std::vector<EntityId> controllers =
                 livingControllerIds(walks[walk].state);
             if (controllers.size() > 1) {
-                if (!plans::patrollingRobots(walks[walk].state).empty()) {
+                if (rules::hasPendingMotion(level, walks[walk].state)) {
                     addDrivenSuccessor(walk, Input::CycleHero);
                 } else {
                     addPrecomputedSuccessor(

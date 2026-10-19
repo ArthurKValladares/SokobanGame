@@ -166,7 +166,8 @@ FallResult fallTarget(
     const Level& level,
     const GameState& state,
     GridPosition3 position,
-    OccupiedBelow occupiedBelow)
+    OccupiedBelow occupiedBelow,
+    bool floats = false)
 {
     GridPosition3 current = position;
     // A minecart is a low platform inside its rail cell, so a unit occupying
@@ -181,10 +182,10 @@ FallResult fallTarget(
         if (tileTypeIsSolidBlock(support) || occupiedBelow(below)) {
             return { .cell = current, .fallen = false };
         }
-        if (support == TileType::Water) {
+        if (tileTypeIsWater(support)) {
             return {
                 .cell = current,
-                .fallen = isUnfilledWater(level, state, current),
+                .fallen = !floats && isUnfilledWater(level, state, current),
             };
         }
         if (!cellAllowsEntity(level, state, below)) {
@@ -222,7 +223,7 @@ FallResult movableFallTarget(const Level& level, const GameState& state, size_t 
             }
         }
         return playerBlocksAt(state, below) || enemyBlocksAt(state, below);
-    });
+    }, state.movables[movableIndex].type == TileType::LilyPad);
 }
 
 FallResult enemyFallTarget(
@@ -444,7 +445,43 @@ std::optional<MoveDirection> conveyorDirectionAt(const Level& level, GridPositio
         return std::nullopt;
     }
 
-    return conveyorDirectionForTile(tileAt(level, position));
+    if (const auto belt = conveyorDirectionForTile(tileAt(level, position))) {
+        return belt;
+    }
+    return waterStreamDirectionAt(level, position);
+}
+
+std::optional<MoveDirection> waterStreamDirectionForTile(TileType tile)
+{
+    switch (tile) {
+    case TileType::StreamUp: return MoveDirection::Up;
+    case TileType::StreamRight: return MoveDirection::Right;
+    case TileType::StreamDown: return MoveDirection::Down;
+    case TileType::StreamLeft: return MoveDirection::Left;
+    default: return std::nullopt;
+    }
+}
+
+std::optional<MoveDirection> conveyorDirectionAt(
+    const Level& level, const GameState& state, GridPosition3 position)
+{
+    if (!level.inBounds(position)) {
+        return std::nullopt;
+    }
+    if (const auto belt = conveyorDirectionForTile(tileAt(level, position))) {
+        return belt;
+    }
+    return fallenMovableAt(state, position) == nullptr
+        ? waterStreamDirectionAt(level, position) : std::nullopt;
+}
+
+std::optional<MoveDirection> waterStreamDirectionAt(const Level& level, GridPosition3 position)
+{
+    if (!level.inBounds(position)) {
+        return std::nullopt;
+    }
+    const auto support = level.supportingTileAt(position);
+    return support ? waterStreamDirectionForTile(*support) : std::nullopt;
 }
 
 std::optional<MoveDirection> turretDirectionForTile(TileType tile)
@@ -799,7 +836,8 @@ bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 p
         return false;
     }
 
-    return level.supportingTileAt(position) == TileType::Water &&
+    const auto support = level.supportingTileAt(position);
+    return support && tileTypeIsWater(*support) &&
         fallenMovableAt(state, position) == nullptr;
 }
 
@@ -1093,12 +1131,12 @@ bool anyUnitIn(const GameState& state, GridPosition3 cell)
         fallenEnemyAt(state, cell) != nullptr;
 }
 
-// A robot is a full-height support. Every consecutive live unit above it
+// A movable platform supports every consecutive live unit above it. Each unit
 // rides along, including stacks of blocks with a hero on top.
-std::vector<LiveUnitAt> robotRiders(const GameState& state, std::size_t index)
+std::vector<LiveUnitAt> platformRiders(const GameState& state, std::size_t index)
 {
     std::vector<LiveUnitAt> riders;
-    if (!tileTypeIsRobot(state.movables[index].type)) {
+    if (!tileTypeIsMovablePlatform(state.movables[index].type)) {
         return riders;
     }
     GridPosition3 cell = state.movables[index].cell;
@@ -1121,11 +1159,11 @@ void setUnitCell(GameState& state, LiveUnitAt unit, GridPosition3 cell)
     }
 }
 
-bool robotRidersCanMove(
+bool platformRidersCanMove(
     const Level& level, const GameState& state, std::size_t index,
     GridPosition3 landing, int entryZ = -1)
 {
-    const auto riders = robotRiders(state, index);
+    const auto riders = platformRiders(state, index);
     const GridPosition3 from = state.movables[index].cell;
     for (const LiveUnitAt rider : riders) {
         const GridPosition3 cell = unitCell(state, rider);
@@ -1720,7 +1758,7 @@ bool hasPendingMotion(const Level& level, const GameState& state, bool includeRo
         if (!playerDead(state, i) &&
             !isUnitLocked(level, state, playerCell(state, i)) &&
             (playerSliding(state, i) ||
-                conveyorDirectionAt(level, playerCell(state, i)))) {
+                conveyorDirectionAt(level, state, playerCell(state, i)))) {
             return true;
         }
     }
@@ -1728,7 +1766,7 @@ bool hasPendingMotion(const Level& level, const GameState& state, bool includeRo
     return std::ranges::any_of(state.movables, [&](const GameState::Movable& movable) {
         return !movable.fallen && !movable.dead &&
             !isUnitLocked(level, state, movable.cell) &&
-            (movable.sliding || conveyorDirectionAt(level, movable.cell).has_value() ||
+            (movable.sliding || conveyorDirectionAt(level, state, movable.cell).has_value() ||
                 (includeRobots && tileTypeIsRobot(movable.type)));
     }) || std::ranges::any_of(
         state.enemies,
@@ -1736,7 +1774,7 @@ bool hasPendingMotion(const Level& level, const GameState& state, bool includeRo
             return !enemy.fallen && !enemy.dead &&
                 !isUnitLocked(level, state, enemy.cell) &&
                 (enemy.sliding ||
-                    conveyorDirectionAt(level, enemy.cell).has_value());
+                    conveyorDirectionAt(level, state, enemy.cell).has_value());
         });
 }
 
@@ -2737,7 +2775,7 @@ private:
                     movementTarget(origin, direction),
                     directionOffset(direction))) &&
             (sliding.has_value() ||
-             conveyorDirectionAt(level_, origin).has_value());
+             conveyorDirectionAt(level_, after_, origin).has_value());
     }
 
     [[nodiscard]] std::optional<MoveDirection>& slidingOf(std::size_t index)
@@ -2807,6 +2845,32 @@ private:
         }
     }
 
+    [[nodiscard]] std::optional<GridPosition3> lilyPadBoardTarget(
+        std::size_t playerIndex, MoveDirection direction) const
+    {
+        const GridPosition3 from = playerCell(after_, playerIndex);
+        // Boarding is a local shore step. An occupied portal exit retains
+        // the ordinary portal collision rules.
+        if (level_.portalCrossing(from, directionOffset(direction))) {
+            return std::nullopt;
+        }
+        const GridPosition3 adjacent = movementTarget(from, direction);
+        const auto* pad = movableAt(after_, adjacent);
+        const auto support = level_.supportingTileAt(adjacent);
+        if (pad == nullptr || pad->type != TileType::LilyPad ||
+            !support || !tileTypeIsWater(*support)) {
+            return std::nullopt;
+        }
+        const GridPosition3 top { adjacent.x, adjacent.y, adjacent.z + 1 };
+        if (!cellAllowsEntity(level_, after_, top) ||
+            movableAt(after_, top) || fallenMovableAt(after_, top) ||
+            enemyAt(after_, top) || fallenEnemyAt(after_, top) ||
+            playerBlocksAt(after_, top)) {
+            return std::nullopt;
+        }
+        return top;
+    }
+
     struct PlayerMovementIntent {
         MoveDirection direction = MoveDirection::Up;
         int budget = 0;
@@ -2841,7 +2905,7 @@ private:
             return std::nullopt;
         }
         if (const std::optional<MoveDirection> belt =
-                conveyorDirectionAt(level_, playerCell(after_, playerIndex))) {
+                conveyorDirectionAt(level_, after_, playerCell(after_, playerIndex))) {
             if (status.consumed < rates_.conveyor) {
                 return PlayerMovementIntent {
                     .direction = *belt,
@@ -3009,7 +3073,7 @@ private:
                     }
                 } else if (const std::optional<MoveDirection> belt =
                                conveyorDirectionAt(
-                                   level_, after_.enemies[enemyIndex].cell)) {
+                                   level_, after_, after_.enemies[enemyIndex].cell)) {
                     if (status.consumed < rates_.conveyor) {
                         status.intent = belt;
                     }
@@ -3028,7 +3092,7 @@ private:
                         status.intent = after_.movables[i].sliding;
                     }
                 } else if (const std::optional<MoveDirection> belt =
-                               conveyorDirectionAt(level_, after_.movables[i].cell)) {
+                               conveyorDirectionAt(level_, after_, after_.movables[i].cell)) {
                     if (status.consumed < rates_.conveyor) {
                         status.intent = belt;
                     }
@@ -3044,7 +3108,10 @@ private:
                 if (isPlayer(i) && status.inputDriven) {
                     const std::size_t playerIndex =
                         playerIndexForEntity(i);
-                    if (characterBehavior(
+                    const auto boarding = lilyPadBoardTarget(playerIndex, *status.intent);
+                    if (boarding) {
+                        status.target = boarding;
+                    } else if (characterBehavior(
                             after_.players[playerIndex].character.value_or(
                                 level_.character())) == CharacterType::Witch) {
                         status.witchSwapTarget = visibleMovableForWitch(
@@ -3055,7 +3122,7 @@ private:
                         status.target = swap.movable
                             ? after_.movables[swap.index].cell
                             : after_.enemies[swap.index].cell;
-                    } else {
+                    } else if (!boarding) {
                         status.target =
                             playerLadderClimbTarget(
                                 level_,
@@ -3125,7 +3192,7 @@ private:
             movableBlocksAt(after_, destination, blockerIndex) ||
             playerBlocksAt(after_, destination) ||
             enemyBlocksAt(after_, destination) ||
-            !canCarryRobotRiders(blockerIndex, destination, blockerStatus.bardDriven) ||
+            !canCarryPlatformRiders(blockerIndex, destination, blockerStatus.bardDriven) ||
             (!blockerStatus.bardDriven &&
                 !movableFallTarget(
                     level_, after_, blockerIndex, destination)
@@ -3221,7 +3288,7 @@ private:
                     movableBlocksAt(after_, destination, index) ||
                     playerBlocksAt(after_, destination) ||
                     enemyBlocksAt(after_, destination) ||
-                    !canCarryRobotRiders(index, destination) ||
+                    !canCarryPlatformRiders(index, destination) ||
                     !movableFallTarget(level_, after_, index, destination)
                          .supported) {
                     continue;
@@ -3265,12 +3332,28 @@ private:
         }
         if (!cellAllowsEntity(level_, after_, target) ||
             (!status.bardDriven &&
-                !movableFallTarget(level_, after_, index, target).supported) ||
-            !canCarryRobotRiders(index, target, status.bardDriven)) {
+                !movableFallTarget(level_, after_, index, target).supported)) {
             slidingOf(index) = std::nullopt;
             status.done = true;
             status.resolved = true;
             return true;
+        }
+        // A current keeps a floating leaf in water. External shoves, slide
+        // momentum, and Bard movement may still carry it onto the bank.
+        const bool padCurrent = after_.movables[index].type == TileType::LilyPad &&
+            !status.bardDriven && !after_.movables[index].sliding &&
+            !conveyorDirectionForTile(tileAt(level_, cellOf(index))) &&
+            waterStreamDirectionAt(level_, cellOf(index)).has_value();
+        if (padCurrent && !isUnfilledWater(level_, after_,
+                movableFallTarget(level_, after_, index, target).cell)) {
+            status.done = true;
+            status.resolved = true;
+            return true;
+        }
+        // A rider in the destination column may still leave with another
+        // platform this micro-step. Retry after that platform has resolved.
+        if (!canCarryPlatformRiders(index, target, status.bardDriven)) {
+            return false;
         }
         if (const GameState::Movable* blocker = movableAt(after_, target)) {
             const std::size_t blockerIndex = static_cast<std::size_t>(
@@ -3315,20 +3398,20 @@ private:
                                              : unit.index;
     }
 
-    [[nodiscard]] bool canCarryRobotRiders(
+    [[nodiscard]] bool canCarryPlatformRiders(
         std::size_t index, GridPosition3 target, bool preserveElevation = false) const
     {
-        if (!tileTypeIsRobot(after_.movables[index].type)) {
+        if (!tileTypeIsMovablePlatform(after_.movables[index].type)) {
             return true;
         }
-        for (const LiveUnitAt rider : robotRiders(after_, index)) {
+        for (const LiveUnitAt rider : platformRiders(after_, index)) {
             if (status_[entityIndexForUnit(rider)].movedThisMicro) {
                 return false;
             }
         }
         const auto landing = preserveElevation ? target
             : movableFallTarget(level_, after_, index, target).cell;
-        return robotRidersCanMove(level_, after_, index, landing, target.z);
+        return platformRidersCanMove(level_, after_, index, landing, target.z);
     }
 
     // Validate a robot's one-unit shove on a scratch board. This deliberately
@@ -3355,11 +3438,11 @@ private:
             return false;
         }
         if (unit.kind == EntityKind::Movable &&
-            tileTypeIsRobot(trial.movables[unit.index].type)) {
-            if (!robotRidersCanMove(level_, trial, unit.index, fall.cell, target.z)) {
+            tileTypeIsMovablePlatform(trial.movables[unit.index].type)) {
+            if (!platformRidersCanMove(level_, trial, unit.index, fall.cell, target.z)) {
                 return false;
             }
-            for (const auto rider : robotRiders(trial, unit.index)) {
+            for (const auto rider : platformRiders(trial, unit.index)) {
                 if (status_[entityIndexForUnit(rider)].movedThisMicro) {
                     return false;
                 }
@@ -3402,11 +3485,11 @@ private:
         // A patrol never deliberately changes elevation or enters water.
         // Being pushed retains the ordinary movable fall rules.
         if (!fall.supported || fall.fallen || fall.cell != target ||
-            !robotRidersCanMove(level_, trial, index, target)) {
+            !platformRidersCanMove(level_, trial, index, target)) {
             status.resolved = true;
             return true;
         }
-        for (const auto rider : robotRiders(after_, index)) {
+        for (const auto rider : platformRiders(after_, index)) {
             if (status_[entityIndexForUnit(rider)].movedThisMicro) {
                 status.resolved = true;
                 return true;
@@ -3720,7 +3803,7 @@ private:
                 !movableBlocksAt(after_, pushTarget, blockerIndex) &&
                 !playerBlocksAt(after_, pushTarget, playerIndex) &&
                 enemyCanMove &&
-                canCarryRobotRiders(blockerIndex, pushTarget) &&
+                canCarryPlatformRiders(blockerIndex, pushTarget) &&
                 movableFallTarget(level_, after_, blockerIndex, pushTarget)
                     .supported) {
                 if (pushedEnemy != nullptr) {
@@ -3830,11 +3913,11 @@ private:
                 const FallResult fall = movableFallTarget(
                     level_, trial, entity.index, destination);
                 if (!fall.supported ||
-                    !robotRidersCanMove(level_, trial, entity.index, fall.cell,
+                    !platformRidersCanMove(level_, trial, entity.index, fall.cell,
                         destination.z)) {
                     return false;
                 }
-                for (const auto rider : robotRiders(trial, entity.index)) {
+                for (const auto rider : platformRiders(trial, entity.index)) {
                     if (status_[entityIndexForUnit(rider)].movedThisMicro) {
                         return false;
                     }
@@ -4430,7 +4513,7 @@ private:
         bool preserveElevation = false)
     {
         const GridPosition3 robotFrom = after_.movables[index].cell;
-        const auto riders = robotRiders(after_, index);
+        const auto riders = platformRiders(after_, index);
         target =
             transportedLanding(after_.movables[index].cell, direction, target);
         const bool portalMomentum = portalCarriesMomentum(
@@ -4591,7 +4674,7 @@ private:
         const GridPosition3 landing =
             movementDestination(pulledFrom, direction);
         if (!cellAllowsEntity(level_, after_, landing) || occupied(landing) ||
-            (pulled->movable && !canCarryRobotRiders(pulled->index, landing)) ||
+            (pulled->movable && !canCarryPlatformRiders(pulled->index, landing)) ||
             (pulled->movable
                  ? !movableFallTarget(level_, after_, pulled->index, landing)
                         .supported

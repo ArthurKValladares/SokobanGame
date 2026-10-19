@@ -129,7 +129,7 @@ inline constexpr int maxChainedSteps = 512;
     const rules::StepRates& rates,
     float stepDurationSeconds);
 
-// The selected belt riders, one step, as one action.
+// The selected belt riders and floating stream platforms, one step, as one action.
 //
 // Never chained: belt motion is ambient and does not terminate, so a chained
 // ride would be an action that never ends. Re-planning each step also keeps a

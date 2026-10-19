@@ -1196,7 +1196,7 @@ void testLevelValidationErrors()
     CHECK(multipleHeroes.playerStarts()[3].character == CharacterType::Witch);
     CHECK(multipleHeroes.playerStarts()[4].character == CharacterType::Bard);
     checkThrowsContaining([] {
-        (void)Level::loadFromLayers({ { "C$" } }, "unknown tile");
+        (void)Level::loadFromLayers({ { "C\x01" } }, "unknown tile");
     }, "Unknown level tile");
     checkThrowsContaining([] {
         (void)Level::loadFromLayers({ { "..." }, { "LC " } }, "unsupported ladder");

@@ -128,12 +128,38 @@ enum class TileType : uint8_t {
     RobotEast,
     RobotSouth,
     RobotWest,
+    // Pushable floating support; units ride on the layer above the leaf.
+    LilyPad,
+    // Directional water volumes, on the same layer as ordinary Water.
+    StreamUp,
+    StreamRight,
+    StreamDown,
+    StreamLeft,
     Count,
 };
 
 inline constexpr std::size_t groundRockVariantCount = 10;
 inline constexpr std::size_t wallStoneVariantCount = 8;
 inline constexpr std::size_t cliffWallVariantCount = 2;
+
+[[nodiscard]] constexpr bool tileTypeIsWaterStream(TileType tile)
+{
+    return tile >= TileType::StreamUp && tile <= TileType::StreamLeft;
+}
+
+[[nodiscard]] constexpr bool tileTypeIsWater(TileType tile)
+{
+    return tile == TileType::Water || tileTypeIsWaterStream(tile);
+}
+
+// Clockwise turns from a northward-flowing stream.
+[[nodiscard]] constexpr std::optional<uint32_t> waterStreamOrientationQuarterTurns(TileType tile)
+{
+    return tileTypeIsWaterStream(tile)
+        ? std::optional<uint32_t>(static_cast<uint32_t>(tile) -
+              static_cast<uint32_t>(TileType::StreamUp))
+        : std::nullopt;
+}
 
 [[nodiscard]] constexpr bool tileTypeIsCliffWall(TileType tile)
 {
@@ -302,6 +328,11 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::RobotEast, '}', "Robot East", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::RobotSouth, ':', "Robot South", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::RobotWest, ';', "Robot West", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::LilyPad, '$', "Lily Pad", { 0.30f, 0.64f, 0.18f, 1.0f } },
+    TileTypeDefinition { TileType::StreamUp, '\'', "Water Stream Up", { 0.08f, 0.34f, 0.78f, 1.0f } },
+    TileTypeDefinition { TileType::StreamRight, '"', "Water Stream Right", { 0.08f, 0.34f, 0.78f, 1.0f } },
+    TileTypeDefinition { TileType::StreamDown, ',', "Water Stream Down", { 0.08f, 0.34f, 0.78f, 1.0f } },
+    TileTypeDefinition { TileType::StreamLeft, '`', "Water Stream Left", { 0.08f, 0.34f, 0.78f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -355,6 +386,10 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] constexpr bool tileTypeIsRobot(TileType type)
 {
     return type >= TileType::RobotNorth && type <= TileType::RobotWest;
+}
+[[nodiscard]] constexpr bool tileTypeIsMovablePlatform(TileType type)
+{
+    return tileTypeIsRobot(type) || type == TileType::LilyPad;
 }
 // Clockwise turns from north, matching the robot's initial travel heading.
 [[nodiscard]] std::optional<uint32_t> robotOrientationQuarterTurns(TileType type);

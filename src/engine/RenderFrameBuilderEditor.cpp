@@ -619,7 +619,7 @@ private:
                 globalCell.z,
             });
         };
-        if (tile == TileType::Water) {
+        if (tileTypeIsWater(tile)) {
             appendWaterCellSurface(
                 frame,
                 cell,
@@ -630,7 +630,9 @@ private:
                         return tileTypeIsSolidBlock(
                             neighborTileAt(adjacent));
                     }),
-                false);
+                false,
+                waterStreamFlowForCell(cell, neighborTileAt),
+                streamBoundaryMaskForWaterCell(cell, tile, neighborTileAt));
             return;
         }
         if (tile == TileType::Ladder) {
@@ -734,6 +736,8 @@ private:
         renderTile.pickable = false;
         renderTile.affectsCameraFit = false;
         applyAuthoredTileRotation(renderTile, rotation);
+        applyEditorLilyPadSupport(renderTile, tile, neighborTileAt,
+            input_.worldAnimationTimeSeconds);
         const bool animatedActor =
             tileTypeIsPlayerStart(tile) || tile == TileType::Enemy;
         const AnimationUse editorUse = tile == TileType::Enemy
@@ -901,7 +905,7 @@ private:
         if (tile == TileType::Air) {
             return;
         }
-        if (tile == TileType::Water) {
+        if (tileTypeIsWater(tile)) {
             if (pickOnly) {
                 frame.tiles.push_back({
                     .cell = { x, y, z },
@@ -918,6 +922,9 @@ private:
                 return;
             }
             const GridPosition3 waterCell { x, y, z };
+            const auto renderedWaterTileAt = [&](GridPosition3 position) {
+                return position == waterCell ? tile : documentTileAt(position);
+            };
             appendWaterCellSurface(
                 frame,
                 waterCell,
@@ -927,7 +934,10 @@ private:
                     [this](GridPosition3 position) {
                         return tileTypeIsSolidBlock(
                             documentTileAt(position));
-                    }));
+                    }),
+                true,
+                waterStreamFlowForCell(waterCell, renderedWaterTileAt),
+                streamBoundaryMaskForWaterCell(waterCell, tile, renderedWaterTileAt));
             return;
         }
         if (tile == TileType::Ladder) {
@@ -1101,6 +1111,9 @@ private:
                 characterForStartTile(tile, input_.editor.character()));
         }
         applyAuthoredTileRotation(renderTile, rotation);
+        applyEditorLilyPadSupport(renderTile, tile,
+            [this](GridPosition3 position) { return documentTileAt(position); },
+            input_.worldAnimationTimeSeconds);
         renderTile.baseElevation += preview ? 0.02f : 0.0f;
         renderTile.pickOnly = pickOnly;
         renderTile.isEditorPreview = preview;
@@ -1358,10 +1371,10 @@ private:
                             static_cast<int>(frame.levelHeight)) {
                         return waterLayer_ == z;
                     }
-                    return documentTileAt(
+                    return tileTypeIsWater(documentTileAt(
                                static_cast<uint32_t>(position.x),
                                static_cast<uint32_t>(position.y),
-                               z) == TileType::Water;
+                               z));
                 },
                 [](GridPosition) { return true; });
         }
@@ -1537,7 +1550,8 @@ RenderFrameData::Tile tileVisual(
 
     Vec4 color = tileColor(tile);
     if (tileTypeIsPlayerStart(tile) || tile == TileType::Enemy ||
-        tileTypeIsTurret(tile) || tileTypeIsRobot(tile) || tile == TileType::Ladder) {
+        tileTypeIsTurret(tile) || tileTypeIsRobot(tile) || tile == TileType::Ladder ||
+        tile == TileType::LilyPad) {
         color = { 1.0f, 1.0f, 1.0f, 1.0f };
     }
     if (tile == TileType::Ice) {
@@ -1584,7 +1598,7 @@ RenderFrameData::Tile tileVisual(
                             ? 1.0f
                             : 0.0f)),
         .blurBehind = tile == TileType::Ice,
-        .showGrid = !tileTypeIsPlayerStart(tile),
+        .showGrid = !tileTypeIsPlayerStart(tile) && tile != TileType::LilyPad,
         .affectsCameraFit = tileTypeAffectsCameraFit(tile),
         .interactionOutline = tileTypeHasInteractionOutline(tile),
         .model = model,
@@ -1630,6 +1644,9 @@ RenderFrameData::Tile tileVisual(
             visual,
             settings.tileScale(
                 tileTypeIsPlayerStart(tile) ? TileType::Player : tile));
+    }
+    if (tile == TileType::LilyPad) {
+        visual.pickHeight = config::lilyPadPickHeight * visual.height;
     }
     return visual;
 }

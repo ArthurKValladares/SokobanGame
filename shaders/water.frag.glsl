@@ -129,6 +129,80 @@ float smoothValueNoise(vec2 position)
         blend.y);
 }
 
+// Wrap only the travel axis so drifting foam keeps its shape as it crosses
+// a tile edge, including either end of a curved stream.
+float waterStreamNoise(vec2 position, float period)
+{
+    vec2 cell = floor(position);
+    vec2 local = fract(position);
+    vec2 blend = local * local * local *
+        (local * (local * 6.0 - 15.0) + 10.0);
+    float row = mod(cell.y, period);
+    float nextRow = mod(cell.y + 1.0, period);
+    return mix(
+        mix(hash22(vec2(cell.x, row)).x,
+            hash22(vec2(cell.x + 1.0, row)).x, blend.x),
+        mix(hash22(vec2(cell.x, nextRow)).x,
+            hash22(vec2(cell.x + 1.0, nextRow)).x, blend.x),
+        blend.y);
+}
+
+// Irregular foam threads stretch and drift with the current, sharing the
+// pool's ripple colors, refraction, reflections and shoreline foam.
+vec2 waterStreamWavelets(vec2 localPosition,
+    vec2 size, uint direction, uint boundaryMask, float time)
+{
+    if (direction == 0u) return vec2(0.0);
+    uint incoming = direction <= 4u ? direction
+        : direction <= 8u ? direction - 4u : direction - 8u;
+    vec2 flow = incoming == 1u ? vec2(0.0, -1.0)
+        : incoming == 2u ? vec2(1.0, 0.0)
+        : incoming == 3u ? vec2(0.0, 1.0) : vec2(-1.0, 0.0);
+    vec2 acrossFlow = vec2(-flow.y, flow.x);
+    vec2 centered = localPosition / max(size, vec2(0.001)) - vec2(0.5);
+    float along = dot(centered, flow) + 0.5;
+    float across = dot(centered, acrossFlow);
+    if (direction > 4u) {
+        // Rotate every incoming direction to north, then bend around the
+        // lower right/left corner. The circular coordinate's tangent joins
+        // both straight neighbors, including the flecks beside the center.
+        vec2 canonical = vec2(across, -dot(centered, flow)) + vec2(0.5);
+        bool clockwise = direction <= 8u;
+        vec2 corner = vec2(clockwise ? 1.0 : 0.0, 1.0);
+        vec2 fromCorner = canonical - corner;
+        float radius = length(fromCorner);
+        float angle = atan(max(1.0 - canonical.y, 0.00001),
+            max(clockwise ? 1.0 - canonical.x : canonical.x, 0.00001));
+        along = angle * 0.6366197724;
+        across = (0.5 - radius) * (clockwise ? 1.0 : -1.0);
+    }
+    float fade = 1.0;
+    if ((boundaryMask & 1u) != 0u) fade *= smoothstep(0.0, 0.15, localPosition.y);
+    if ((boundaryMask & 2u) != 0u) fade *= smoothstep(0.0, 0.15, size.x - localPosition.x);
+    if ((boundaryMask & 4u) != 0u) fade *= smoothstep(0.0, 0.15, size.y - localPosition.y);
+    if ((boundaryMask & 8u) != 0u) fade *= smoothstep(0.0, 0.15, localPosition.x);
+    // Soft ribbon edges follow the bend rather than revealing the tile quad.
+    fade *= 1.0 - smoothstep(0.27, 0.43, abs(across));
+
+    // Higher cross-flow frequency stretches noise into flowing filaments.
+    // Every layer advects together; slow meanders and patchy foam provide
+    // direction through motion without repeated crests or fixed lanes.
+    float advected = along - time * 0.95;
+    float meander = waterStreamNoise(
+        vec2(across * 4.5 + 17.3, advected * 3.0), 3.0) - 0.5;
+    float foamField = waterStreamNoise(
+        vec2(across * 17.0 + meander * 0.85 + 31.7,
+            advected * 3.0 + 8.2), 3.0);
+    float patches = waterStreamNoise(
+        vec2(across * 5.0 + 59.1, advected * 5.0 + 12.6), 5.0);
+    float distanceToThread = abs(foamField - (0.53 + meander * 0.10));
+    float aa = max(fwidth(foamField) * 0.75, 0.003);
+    float thread = 1.0 - smoothstep(0.018, 0.085 + aa, distanceToThread);
+    float halo = 1.0 - smoothstep(0.085, 0.20 + aa, distanceToThread);
+    float breakup = 0.35 + 0.65 * smoothstep(0.25, 0.70, patches);
+    return vec2(halo * breakup, thread * breakup) * fade;
+}
+
 float broadWaterTone(
     vec2 worldPosition,
     float animationTime,
@@ -1025,6 +1099,10 @@ void main()
     vec2 worldPosition = draw.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
     float frequency = max(draw.textureOptions.x, 0.01);
     float time = draw.gridColor.z * draw.textureOptions.y;
+    uint waterFlags = uint(max(draw.textureOptions.w, 0.0) + 0.5);
+    vec2 streamWavelets = waterStreamWavelets(
+        vec2(inFaceCoordU, inFaceCoordV), draw.materialOptions.yz,
+        (waterFlags >> 8u) & 15u, (waterFlags >> 12u) & 15u, time);
     float rippleCrestHalfWidth =
         max(draw.normalAndAmbientRed.z, 0.001);
     float rippleHaloWidth =
@@ -1054,7 +1132,8 @@ void main()
         caustics.x * 0.70 + caustics.y * 0.30 +
         secondaryCaustics.x * 0.20 +
         secondaryCaustics.y * 0.10 +
-        impactRipples.x * 0.25 + impactRipples.y * 0.55;
+        impactRipples.x * 0.25 + impactRipples.y * 0.55 +
+        streamWavelets.x * 0.12 + streamWavelets.y * 0.32;
     vec2 diffractionGradient = vec2(
         dFdx(diffractionField),
         dFdy(diffractionField));
@@ -1241,8 +1320,10 @@ void main()
         finalWaterColor,
         draw.passData[0].rgb,
         tileBorder * clamp(draw.passData[0].a, 0.0, 1.0));
-    uint shorelineMask =
-        uint(max(draw.textureOptions.w, 0.0) + 0.5);
+    vec3 streamFoamColor = mix(rippleColor, vec3(0.94, 0.98, 1.00), 0.55);
+    finalWaterColor = mix(finalWaterColor, streamFoamColor,
+        clamp(streamWavelets.x * 0.12 + streamWavelets.y * 0.70, 0.0, 0.80));
+    uint shorelineMask = waterFlags & 255u;
     vec2 foamLayers = shorelineFoam(
         shorelineMask,
         vec2(inFaceCoordU, inFaceCoordV),

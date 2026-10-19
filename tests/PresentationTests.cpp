@@ -19,6 +19,7 @@
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 #include "engine/RenderFrameBuilder.hpp"
+#include "engine/RenderFrameParts.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/RotatorVisuals.hpp"
 #include "engine/render/CameraConfig.hpp"
@@ -3922,6 +3923,292 @@ void testGameplayFrameBuildsProceduralWaterSurface()
     CHECK(filledFrame.waterSurfaces.empty());
 }
 
+void testWaterStreamCornersAndConnectedBoundaries()
+{
+    TEST("waterStreamCornersAndConnectedBoundaries");
+    using renderFrameParts::streamBoundaryMaskForWaterCell;
+    using renderFrameParts::waterStreamFlowForCell;
+    constexpr std::array<TileType, 4> streams {
+        TileType::StreamUp, TileType::StreamRight,
+        TileType::StreamDown, TileType::StreamLeft,
+    };
+    constexpr std::array<GridPosition, 4> offsets {
+        GridPosition { 0, -1 }, GridPosition { 1, 0 },
+        GridPosition { 0, 1 }, GridPosition { -1, 0 },
+    };
+    constexpr GridPosition3 center { 1, 1, 0 };
+    std::array<TileType, 9> cells;
+    const auto tileAt = [&](GridPosition3 cell) {
+        return cell.z == 0 && cell.x >= 0 && cell.x < 3 && cell.y >= 0 && cell.y < 3
+            ? cells[static_cast<std::size_t>(cell.y * 3 + cell.x)] : TileType::Air;
+    };
+    const auto put = [&](GridPosition3 cell, TileType tile) {
+        cells[static_cast<std::size_t>(cell.y * 3 + cell.x)] = tile;
+    };
+    const auto adjacent = [&](uint32_t edge) {
+        return GridPosition3 { center.x + offsets[edge].x,
+            center.y + offsets[edge].y, center.z };
+    };
+    struct Corner { uint32_t incoming; uint32_t outgoing; uint32_t flow; };
+    constexpr std::array corners {
+        Corner { 0, 1, 5 }, Corner { 1, 2, 6 },
+        Corner { 2, 3, 7 }, Corner { 3, 0, 8 },
+        Corner { 0, 3, 9 }, Corner { 1, 0, 10 },
+        Corner { 2, 1, 11 }, Corner { 3, 2, 12 },
+    };
+    for (const Corner corner : corners) {
+        cells.fill(TileType::Water);
+        const uint32_t entrance = (corner.incoming + 2) % 4;
+        const GridPosition3 feeder = adjacent(entrance);
+        const GridPosition3 receiver = adjacent(corner.outgoing);
+        put(feeder, streams[corner.incoming]);
+        put(center, streams[corner.outgoing]);
+        put(receiver, streams[corner.outgoing]);
+        const uint32_t expectedMask = 15U ^ (1U << entrance) ^ (1U << corner.outgoing);
+        CHECK(waterStreamFlowForCell(center, tileAt) == corner.flow);
+        CHECK(streamBoundaryMaskForWaterCell(center, tileAt(center), tileAt) == expectedMask);
+        CHECK((streamBoundaryMaskForWaterCell(feeder, tileAt(feeder), tileAt) &
+            (1U << corner.incoming)) == 0);
+        CHECK((streamBoundaryMaskForWaterCell(receiver, tileAt(receiver), tileAt) &
+            (1U << ((corner.outgoing + 2) % 4))) == 0);
+
+        std::vector<std::string> rows(3, std::string(3, 'W'));
+        LevelEditor editor;
+        editor.newDocument(3, 3, false);
+        for (int y = 0; y < 3; ++y) {
+            for (int x = 0; x < 3; ++x) {
+                const TileType tile = tileAt({ x, y, 0 });
+                rows[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] = tileTypeToChar(tile);
+                CHECK(editor.setCell({ x, y, 0 }, tile));
+            }
+        }
+        const Level level = Level::loadFromLayers({ rows, { "C  ", "   ", "   " } },
+            "all water stream corners");
+        const GameState state = rules::initialState(level);
+        GameplayPresentation presentation;
+        presentation.resetEntities(state);
+        const auto checkFrame = [&](const RenderFrameData& frame, bool preview = false) {
+            const auto water = std::ranges::find_if(frame.waterSurfaces, [&](const auto& surface) {
+                return surface.cell == center && surface.isEditorPreview == preview;
+            });
+            CHECK(water != frame.waterSurfaces.end());
+            if (water != frame.waterSurfaces.end()) {
+                CHECK(water->streamDirection == corner.flow);
+                CHECK(water->streamBoundaryMask == expectedMask);
+            }
+        };
+        checkFrame(RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(), .level = level, .state = state,
+            .projectedState = state, .presentation = presentation, .settings = {},
+        }));
+        checkFrame(RenderFrameBuilder::buildEditor({
+            .manifest = testManifest(), .editor = editor, .settings = {},
+        }));
+        CHECK(editor.setCell(center, TileType::Water));
+        checkFrame(RenderFrameBuilder::buildEditor({
+            .manifest = testManifest(), .editor = editor, .settings = {},
+            .hoverCell = center, .editorPreviewTile = streams[corner.outgoing],
+        }), true);
+    }
+
+    for (uint32_t outgoing = 0; outgoing < streams.size(); ++outgoing) {
+        cells.fill(TileType::Water);
+        put(center, streams[outgoing]);
+        // Two side feeders are ambiguous, so neither receives a curved join.
+        for (const uint32_t incoming : { (outgoing + 1) % 4, (outgoing + 3) % 4 }) {
+            put(adjacent((incoming + 2) % 4), streams[incoming]);
+        }
+        CHECK(waterStreamFlowForCell(center, tileAt) == outgoing + 1);
+        CHECK(streamBoundaryMaskForWaterCell(center, tileAt(center), tileAt) == 15U);
+        // A straight feeder takes precedence over both side feeders.
+        put(adjacent((outgoing + 2) % 4), streams[outgoing]);
+        put(adjacent(outgoing), streams[outgoing]);
+        CHECK(waterStreamFlowForCell(center, tileAt) == outgoing + 1);
+        CHECK(streamBoundaryMaskForWaterCell(center, tileAt(center), tileAt) ==
+            (15U ^ (1U << outgoing) ^ (1U << ((outgoing + 2) % 4))));
+    }
+    cells.fill(TileType::Water);
+    CHECK(waterStreamFlowForCell(center, tileAt) == 0);
+    CHECK(streamBoundaryMaskForWaterCell(center, TileType::Water, tileAt) == 0);
+    put(center, TileType::StreamRight);
+    put(adjacent(0), TileType::StreamRight);
+    CHECK(streamBoundaryMaskForWaterCell(center, tileAt(center), tileAt) == 15U);
+}
+
+void testWaterStreamsAndFloatingLilyPadPresentation()
+{
+    TEST("waterStreamsAndFloatingLilyPadPresentation");
+    const Level level = Level::loadFromLayers({
+        { "\"\"'W" }, { "$   " }, { "C   " },
+    }, "floating lily pad presentation");
+    const GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    const auto build = [&](const GameState& projected = GameState {}) {
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(), .level = level, .state = state,
+            .moving = true, .projectedState = projected,
+            .presentation = presentation, .settings = {},
+        });
+    };
+    const auto frame = build();
+    CHECK(frame.waterSurfaces.size() == 4);
+    if (frame.waterSurfaces.size() != 4) return;
+    CHECK(frame.waterSurfaces[0].streamDirection == 2);
+    CHECK(frame.waterSurfaces[1].streamDirection == 2);
+    CHECK(frame.waterSurfaces[2].streamDirection == 10);
+    CHECK(frame.waterSurfaces[3].streamDirection == 0);
+    CHECK((frame.waterSurfaces[0].streamBoundaryMask &
+        waterShorelineBit(WaterShorelineEdge::PositiveX)) == 0);
+    CHECK((frame.waterSurfaces[1].streamBoundaryMask &
+        waterShorelineBit(WaterShorelineEdge::NegativeX)) == 0);
+    CHECK((frame.waterSurfaces[1].streamBoundaryMask &
+        waterShorelineBit(WaterShorelineEdge::PositiveX)) == 0);
+    CHECK((frame.waterSurfaces[2].streamBoundaryMask &
+        waterShorelineBit(WaterShorelineEdge::NegativeX)) == 0);
+    CHECK(std::ranges::all_of(frame.waterSurfaces, [&](const auto& water) {
+        return near(water.elevation, 1.0f - config::waterDepthBelowGround);
+    }));
+
+    const auto padTile = [](const RenderFrameData& rendered) {
+        return std::ranges::find_if(rendered.tiles, [](const auto& tile) {
+            return tile.cell.z == 1 && tile.cell.x == 0 && !tile.pickOnly;
+        });
+    };
+    const auto heroTile = [](const RenderFrameData& rendered) {
+        return std::ranges::find_if(rendered.tiles, [](const auto& tile) {
+            return tile.isPrimaryPlayer;
+        });
+    };
+    const auto pad = padTile(frame);
+    const auto hero = heroTile(frame);
+    CHECK(pad != frame.tiles.end());
+    CHECK(hero != frame.tiles.end());
+    if (pad == frame.tiles.end() || hero == frame.tiles.end()) return;
+    CHECK(near(pad->baseElevation, frame.waterSurfaces[0].elevation));
+    CHECK(near(hero->baseElevation - pad->baseElevation, config::lilyPadRideHeight));
+    CHECK(!pad->showGrid);
+
+    presentation.advanceClocks(0.6f, false);
+    const auto bobbed = build();
+    const auto bobbedPad = padTile(bobbed);
+    const auto bobbedHero = heroTile(bobbed);
+    CHECK(bobbedPad != bobbed.tiles.end() && bobbedHero != bobbed.tiles.end());
+    if (bobbedPad != bobbed.tiles.end() && bobbedHero != bobbed.tiles.end()) {
+        CHECK(!near(bobbedPad->baseElevation, pad->baseElevation));
+        CHECK(near(bobbedHero->baseElevation - bobbedPad->baseElevation,
+            config::lilyPadRideHeight));
+        CHECK(std::abs(bobbedPad->baseElevation - frame.waterSurfaces[0].elevation) < 0.015f);
+    }
+
+    GameState arrived = state;
+    arrived.movables[0].cell.x = 1;
+    arrived.players[0].cell.x = 1;
+    GameplaySession::Action action { .before = state, .after = arrived, .durationSeconds = 1.0f };
+    action.presentation = presentation.buildActionPresentation(action, &level);
+    presentation.beginAction(action, state);
+    presentation.seekAction(action, 0.5f);
+    const auto carried = build(arrived);
+    const auto carriedPad = padTile(carried);
+    const auto carriedHero = heroTile(carried);
+    CHECK(carriedPad != carried.tiles.end() && carriedHero != carried.tiles.end());
+    if (carriedPad != carried.tiles.end() && carriedHero != carried.tiles.end()) {
+        CHECK(near(carriedHero->position.x, carriedPad->position.x));
+        CHECK(near(carriedHero->baseElevation - carriedPad->baseElevation,
+            config::lilyPadRideHeight));
+    }
+
+    IsoScenePreparer preparer;
+    PreparedRenderScene scene;
+    preparer.prepare(frame, { 1280.0f, 720.0f }, scene);
+    bool foundLeafPickFace = false;
+    for (const auto faceIndex : scene.pickFaceIndices) {
+        const auto& face = scene.isoFaces[faceIndex];
+        if (face.cell != GridPosition3 { 0, 0, 1 }) continue;
+        foundLeafPickFace = true;
+        for (const auto point : face.worldVertices) {
+            CHECK(point.z <= pad->baseElevation + config::lilyPadPickHeight + 0.0001f);
+        }
+    }
+    CHECK(foundLeafPickFace);
+    const auto padTransform = IsoScenePreparer::modelTransformPoints(*pad);
+    CHECK(near(padTransform.zPoint.z - padTransform.origin.z, 1.0f));
+    CHECK(std::ranges::any_of(scene.isoFaces, [](const auto& face) {
+        return face.material == PreparedSurfaceMaterial::Water &&
+            face.streamDirection == 2;
+    }));
+
+    // Every thin pad in a support chain collapses its own logical height.
+    // Both leaves and the hero must retain contact while the bottom leaf bobs.
+    const Level stackedLevel = Level::loadFromLayers({
+        { "WW" }, { "$ " }, { "$ " }, { "C " },
+    }, "stacked floating lily pads");
+    const GameState stacked = rules::initialState(stackedLevel);
+    GameplayPresentation stackedPresentation;
+    stackedPresentation.resetEntities(stacked);
+    stackedPresentation.advanceClocks(0.6f, false);
+    const auto checkStackContact = [](const RenderFrameData& rendered) {
+        const auto atLayer = [&](int z) {
+            return std::ranges::find_if(rendered.tiles, [&](const auto& tile) {
+                return tile.cell.x == 0 && tile.cell.z == z && !tile.pickOnly &&
+                    !tile.isEditorPreview;
+            });
+        };
+        const auto lower = atLayer(1);
+        const auto upper = atLayer(2);
+        const auto rider = atLayer(3);
+        CHECK(lower != rendered.tiles.end() && upper != rendered.tiles.end() &&
+            rider != rendered.tiles.end());
+        if (lower != rendered.tiles.end() && upper != rendered.tiles.end() &&
+            rider != rendered.tiles.end()) {
+            CHECK(near(upper->baseElevation - lower->baseElevation, config::lilyPadRideHeight));
+            CHECK(near(rider->baseElevation - upper->baseElevation, config::lilyPadRideHeight));
+        }
+    };
+    checkStackContact(RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(), .level = stackedLevel, .state = stacked,
+        .projectedState = stacked, .presentation = stackedPresentation, .settings = {},
+    }));
+    LevelEditor stackedEditor;
+    stackedEditor.newDocument(2, 1, false);
+    while (stackedEditor.documentLayers().size() < 4) {
+        stackedEditor.setActiveLayer(static_cast<int>(stackedEditor.documentLayers().size()) - 1);
+        stackedEditor.addLayerAbove();
+    }
+    CHECK(stackedEditor.setCell({ 0, 0, 0 }, TileType::Water));
+    CHECK(stackedEditor.setCell({ 0, 0, 1 }, TileType::LilyPad));
+    CHECK(stackedEditor.setCell({ 0, 0, 2 }, TileType::LilyPad));
+    CHECK(stackedEditor.setCell({ 0, 0, 3 }, TileType::Player));
+    checkStackContact(RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(), .editor = stackedEditor, .settings = {},
+        .worldAnimationTimeSeconds = 0.6f,
+    }));
+
+    const Level bankLevel = Level::loadFromLayers({
+        { ".W" }, { "C$" }, { "  " },
+    }, "lily pad boarding height");
+    const GameState bank = rules::initialState(bankLevel);
+    GameState boarded = bank;
+    boarded.players[0].cell = { 1, 0, 2 };
+    GameplayPresentation bankPresentation;
+    bankPresentation.resetEntities(bank);
+    GameplaySession::Action boarding { .before = bank, .after = boarded, .durationSeconds = 1.0f };
+    boarding.presentation = bankPresentation.buildActionPresentation(boarding, &bankLevel);
+    bankPresentation.beginAction(boarding, bank);
+    bankPresentation.seekAction(boarding, 0.5f);
+    const auto boardingFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(), .level = bankLevel, .state = bank, .moving = true,
+        .projectedState = boarded, .presentation = bankPresentation, .settings = {},
+    });
+    const auto boardingHero = heroTile(boardingFrame);
+    CHECK(boardingHero != boardingFrame.tiles.end());
+    if (boardingHero != boardingFrame.tiles.end()) {
+        CHECK(boardingHero->baseElevation >= 1.0f - config::waterDepthBelowGround +
+            config::lilyPadRideHeight - 0.015f);
+        CHECK(boardingHero->baseElevation <= 1.0f);
+    }
+}
+
 void testPlayerCopiesRenderAndInterpolateTogether()
 {
     TEST("playerCopiesRenderAndInterpolateTogether");
@@ -5984,6 +6271,8 @@ int main()
     testInactiveHeroesKeepTheirFacing();
     testMirrorDuplicationPreviewsEveryDestination();
     testGameplayFrameBuildsProceduralWaterSurface();
+    testWaterStreamCornersAndConnectedBoundaries();
+    testWaterStreamsAndFloatingLilyPadPresentation();
     testWaterLayerBuildsUnboundedNonPickableExterior();
     testFilledWaterUpdatesEdgesAndRoundedCornerCaps();
     testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition();

@@ -160,14 +160,125 @@ void appendWaterSurface(
     Vec2 size,
     bool editorPreview = false,
     uint32_t shorelineMask = 0,
-    bool pickable = true);
+    bool pickable = true,
+    uint32_t streamDirection = 0,
+    uint32_t streamBoundaryMask = 0);
 
 void appendWaterCellSurface(
     RenderFrameData& frame,
     GridPosition3 cell,
     bool editorPreview = false,
     uint32_t shorelineMask = 0,
-    bool pickable = true);
+    bool pickable = true,
+    uint32_t streamDirection = 0,
+    uint32_t streamBoundaryMask = 0);
+
+[[nodiscard]] uint32_t waterStreamDirectionForTile(TileType tile);
+
+// Tiles author the exit direction. A sole perpendicular feeder rounds the
+// visual path into that exit; straight feeders and ambiguous junctions keep
+// the authored straight flow. Codes 1..4 are N/E/S/W, 5..8 are clockwise
+// N->E/E->S/S->W/W->N, and 9..12 are counterclockwise N->W/E->N/S->E/W->S.
+template <typename TileAt>
+uint32_t waterStreamFlowForCell(GridPosition3 cell, TileAt tileAt)
+{
+    const uint32_t outgoing = waterStreamDirectionForTile(tileAt(cell));
+    if (outgoing == 0) return 0;
+    constexpr std::array<GridPosition, 4> offsets {
+        GridPosition { 0, -1 }, GridPosition { 1, 0 },
+        GridPosition { 0, 1 }, GridPosition { -1, 0 },
+    };
+    uint32_t incoming = 0;
+    uint32_t sideFeeders = 0;
+    for (uint32_t direction = 1; direction <= offsets.size(); ++direction) {
+        const GridPosition offset = offsets[direction - 1];
+        if (waterStreamDirectionForTile(tileAt({ cell.x - offset.x,
+                cell.y - offset.y, cell.z })) != direction) {
+            continue;
+        }
+        if (direction == outgoing) return outgoing;
+        if ((direction - 1) % 2 != (outgoing - 1) % 2) {
+            incoming = direction;
+            ++sideFeeders;
+        }
+    }
+    if (sideFeeders != 1) return outgoing;
+    return (outgoing == incoming % 4 + 1 ? 5U : 9U) + incoming - 1;
+}
+
+// A shared world-space phase lets the leaf and every rider bob together.
+[[nodiscard]] float lilyPadBob(Vec2 position, float timeSeconds);
+void applyLilyPadVisual(RenderFrameData::Tile& tile, float timeSeconds,
+    float floatingAmount = 1.0f);
+
+template <typename TileAt>
+std::optional<GridPosition3> lilyPadSupportCellFor(GridPosition3 cell, TileAt tileAt)
+{
+    for (--cell.z; cell.z >= 0; --cell.z) {
+        const TileType below = tileAt(cell);
+        if (below == TileType::LilyPad) return cell;
+        if (!tileTypeIsMovableObject(below) && !tileTypeIsPlayerStart(below) &&
+            below != TileType::Enemy) break;
+    }
+    return std::nullopt;
+}
+
+template <typename TileAt>
+void applyEditorLilyPadSupport(RenderFrameData::Tile& tile, TileType type,
+    TileAt tileAt, float timeSeconds)
+{
+    if (type == TileType::LilyPad) {
+        applyLilyPadVisual(tile, timeSeconds,
+            tileTypeIsWater(tileAt({ tile.cell.x, tile.cell.y, tile.cell.z - 1 }))
+                ? 1.0f : 0.0f);
+    }
+    if (tileTypeIsMovableObject(type) || tileTypeIsPlayerStart(type) ||
+        type == TileType::Enemy) {
+        GridPosition3 supportCell = tile.cell;
+        while (const auto pad = lilyPadSupportCellFor(supportCell, tileAt)) {
+            const bool floating = tileTypeIsWater(tileAt({ pad->x, pad->y, pad->z - 1 }));
+            tile.baseElevation += -1.0f + config::lilyPadRideHeight +
+                (floating ? -config::waterDepthBelowGround +
+                    lilyPadBob({ static_cast<float>(pad->x), static_cast<float>(pad->y) }, timeSeconds)
+                    : 0.0f);
+            supportCell = *pad;
+        }
+    }
+}
+
+template <typename TileAt>
+uint32_t streamBoundaryMaskForWaterCell(
+    GridPosition3 cell, TileType tile, TileAt tileAt)
+{
+    if (!tileTypeIsWaterStream(tile)) return 0;
+    // A placement preview can override the document's current tile. Use the
+    // rendered tile for both its flow and its neighbors' inferred entrances.
+    const auto renderedTileAt = [&](GridPosition3 position) {
+        return position == cell ? tile : tileAt(position);
+    };
+    constexpr std::array<GridPosition, 4> offsets {
+        GridPosition { 0, -1 }, GridPosition { 1, 0 },
+        GridPosition { 0, 1 }, GridPosition { -1, 0 },
+    };
+    const uint32_t flow = waterStreamFlowForCell(cell, renderedTileAt);
+    const uint32_t entrance = ((flow - 1) % 4 + 2) % 4;
+    const uint32_t exit = waterStreamDirectionForTile(tile) - 1;
+    uint32_t mask = 0;
+    for (std::size_t edge = 0; edge < offsets.size(); ++edge) {
+        const GridPosition3 neighbor { cell.x + offsets[edge].x,
+            cell.y + offsets[edge].y, cell.z };
+        const uint32_t neighborFlow = waterStreamFlowForCell(neighbor, renderedTileAt);
+        const uint32_t neighborExit = waterStreamDirectionForTile(renderedTileAt(neighbor));
+        const uint32_t oppositeEdge = (static_cast<uint32_t>(edge) + 2) % 4;
+        const bool connected = neighborFlow != 0 &&
+            ((edge == exit && oppositeEdge == ((neighborFlow - 1) % 4 + 2) % 4) ||
+                (edge == entrance && oppositeEdge == neighborExit - 1));
+        if (!connected) {
+            mask |= 1U << edge;
+        }
+    }
+    return mask;
+}
 
 RenderFrameData::WaterGridBounds waterGridBoundsFor(
     const std::optional<RenderFrameData::CameraExtent>& gameplayExtent);

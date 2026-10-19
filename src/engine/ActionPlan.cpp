@@ -502,7 +502,8 @@ std::optional<PlannedAction> planRobotPatrols(
         return std::nullopt;
     }
     return planScoped(
-        level, state, std::nullopt, rates, stepDurationSeconds,
+        level, state, std::nullopt, rates,
+        stepDurationSeconds * config::robotPatrolMovementDurationMultiplier,
         rules::StepScope { .actors = std::move(robots) }, false);
 }
 
@@ -553,7 +554,7 @@ std::vector<EntityId> conveyorRiders(
         const GameState::Player& player = state.players[i];
         // Momentum overrides the belt, so a sliding rider is not a rider yet.
         if (!player.dead && !player.sliding &&
-            rules::conveyorDirectionAt(level, player.cell)) {
+            rules::conveyorDirectionAt(level, state, player.cell)) {
             ids.push_back(
                 resolvedEntityId(EntityKind::Player, player.id, i));
         }
@@ -561,7 +562,7 @@ std::vector<EntityId> conveyorRiders(
     for (std::size_t i = 0; i < state.movables.size(); ++i) {
         const GameState::Movable& movable = state.movables[i];
         if (!movable.fallen && !movable.dead && !movable.sliding &&
-            rules::conveyorDirectionAt(level, movable.cell)) {
+            rules::conveyorDirectionAt(level, state, movable.cell)) {
             ids.push_back(
                 resolvedEntityId(EntityKind::Movable, movable.id, i));
         }
@@ -569,7 +570,7 @@ std::vector<EntityId> conveyorRiders(
     for (std::size_t i = 0; i < state.enemies.size(); ++i) {
         const GameState::Enemy& enemy = state.enemies[i];
         if (!enemy.fallen && !enemy.dead && !enemy.sliding &&
-            rules::conveyorDirectionAt(level, enemy.cell)) {
+            rules::conveyorDirectionAt(level, state, enemy.cell)) {
             ids.push_back(
                 resolvedEntityId(EntityKind::Enemy, enemy.id, i));
         }

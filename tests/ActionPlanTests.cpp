@@ -848,6 +848,76 @@ void testChainPlanningStopsAtTheCap()
     }
 }
 
+void testWaterStreamPlansCarryPlatformsAndReserveTheirRiders()
+{
+    TEST("waterStreamPlansCarryPlatformsAndReserveTheirRiders");
+    const Level level = makeLevel({ { ".\"\"WW" }, { " $   " },
+        { " R   " }, { " C   " } });
+    const auto before = rules::initialState(level);
+    const auto riders = plans::conveyorRiders(level, before);
+    CHECK(riders == std::vector<EntityId> { before.movables[0].id });
+    const auto ride = plans::planConveyorRides(level, before, riders, {}, 0.2f);
+    CHECK(ride.has_value());
+    if (!ride) return;
+    CHECK(ride->legs.size() == 1);
+    CHECK(ride->action.after.movables[0].cell == cell(2, 0, 1));
+    CHECK(ride->action.after.movables[1].cell == cell(2, 0, 2));
+    CHECK(ride->action.after.players[0].cell == cell(2, 0, 3));
+    CHECK(!ride->action.after.movables[0].fallen);
+    CHECK(!ride->action.after.players[0].dead);
+    CHECK(plans::planConveyorRides(level, before, riders, {}, 0.2f) == ride);
+    CHECK(!plans::planConveyorRides(level, before, riders, { .conveyor = 0 }, 0.2f));
+    const auto reverse = plans::inverted(ride->action);
+    CHECK(reverse.before == ride->action.after);
+    CHECK(reverse.after == before);
+    const auto claims = plans::reservationsFor(*ride);
+    for (int z = 1; z <= 3; ++z) {
+        for (int x = 1; x <= 2; ++x) {
+            CHECK(std::ranges::any_of(claims.cells, [&](const Reservation& claim) {
+                return claim.cell == cell(x, 0, z);
+            }));
+        }
+    }
+    CHECK(plans::conveyorRiders(level, ride->action.after) == riders);
+
+    const Level blocked = makeLevel({ { "W\"WWW" }, { " $   " }, { " C#  " } });
+    const auto blockedState = rules::initialState(blocked);
+    CHECK(!plans::planConveyorRides(blocked, blockedState,
+        plans::conveyorRiders(blocked, blockedState), {}, 0.2f));
+}
+
+void testWaterStreamPlansReevaluateCornersAndReserveTheirStack()
+{
+    TEST("waterStreamPlansReevaluateCornersAndReserveTheirStack");
+    const Level level = makeLevel({ { "WWWW", "W\",W", "W'`W", "WWWW" },
+        { "    ", " $  ", "    ", "    " },
+        { "    ", " R  ", "    ", "    " },
+        { "    ", " C  ", "    ", "    " } });
+    auto state = rules::initialState(level);
+    const auto riders = plans::conveyorRiders(level, state);
+    for (const auto target : { cell(2, 1, 1), cell(2, 2, 1), cell(1, 2, 1), cell(1, 1, 1) }) {
+        const auto ride = plans::planConveyorRides(level, state, riders, {}, 0.2f);
+        CHECK(ride.has_value());
+        if (!ride) return;
+        CHECK(ride->legs.size() == 1);
+        CHECK(ride->action.before == state);
+        CHECK(ride->action.after.movables[0].cell == target);
+        CHECK(ride->action.after.movables[1].cell == cell(target.x, target.y, 2));
+        CHECK(ride->action.after.players[0].cell == cell(target.x, target.y, 3));
+        const auto claims = plans::reservationsFor(*ride);
+        ReservationTable reservations;
+        reservations.admit(1, claims, 0);
+        for (int z = 1; z <= 3; ++z) {
+            const ActionReservations incoming { .cells = {
+                Reservation { .cell = cell(target.x, target.y, z) } } };
+            CHECK(reservations.conflict(incoming, 0).has_value());
+        }
+        CHECK(!reservations.conflict({ .cells = { Reservation { .cell = cell(0, 0, 1) } } }, 0));
+        CHECK(plans::conveyorRiders(level, ride->action.after) == riders);
+        state = ride->action.after;
+    }
+}
+
 void testRobotPatrolPlansOneBeatAndLeavesUnrelatedActorsAlone()
 {
     TEST("robotPatrolPlansOneBeatAndLeavesUnrelatedActorsAlone");
@@ -861,7 +931,7 @@ void testRobotPatrolPlansOneBeatAndLeavesUnrelatedActorsAlone()
     CHECK(patrol.has_value());
     if (!patrol) return;
     CHECK(patrol->legs.size() == 1);
-    CHECK(patrol->action.durationSeconds == 0.2f);
+    CHECK(patrol->action.durationSeconds == 0.4f);
     CHECK(patrol->action.after.movables[0].cell == cell(2, 0, 1));
     CHECK(patrol->action.after.movables[1] == initial.movables[1]);
     CHECK(patrol->action.after.players == initial.players);
@@ -872,6 +942,8 @@ void testRobotPatrolPlansOneBeatAndLeavesUnrelatedActorsAlone()
 
 int main()
 {
+    testWaterStreamPlansCarryPlatformsAndReserveTheirRiders();
+    testWaterStreamPlansReevaluateCornersAndReserveTheirStack();
     testRobotPatrolPlansOneBeatAndLeavesUnrelatedActorsAlone();
     testChainPlanningStopsAtTheCap();
     testBeltRidersFollowEachOtherDownOneBelt();

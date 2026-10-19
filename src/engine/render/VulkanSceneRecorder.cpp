@@ -2677,6 +2677,8 @@ private:
                     },
                     frameData.waterAnimationTimeSeconds,
                     face.shorelineMask,
+                    face.streamDirection,
+                    face.streamBoundaryMask,
                     frameData.waterRendering,
                     scene.isoLayout,
                     face.isEditorPreview);
@@ -3589,6 +3591,8 @@ private:
         Vec2 boardSize,
         float animationTimeSeconds,
         uint32_t shorelineMask,
+        uint32_t streamDirection,
+        uint32_t streamBoundaryMask,
         const RenderFrameData::WaterRendering& rendering,
         const IsoRenderLayout& layout,
         bool isEditorPreview)
@@ -3671,7 +3675,11 @@ private:
                 rendering.rippleSpatialFrequency,
                 rendering.rippleSpeed,
                 rendering.refractionStrength,
-                static_cast<float>(shorelineMask),
+                // All flags remain exact in FP32 and retain the existing GPU
+                // instance ABI. The cached cellular water field is unchanged.
+                static_cast<float>((shorelineMask & 255U) |
+                    ((streamDirection & 15U) << 8U) |
+                    ((streamBoundaryMask & 15U) << 12U)),
             },
         };
         return writeDrawInstance(constants);

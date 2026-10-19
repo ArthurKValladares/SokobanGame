@@ -611,7 +611,7 @@ void GameplayPresentation::scheduleWaterEntries(
         const float legEnd = legStart + stepSeconds + platformExtraSeconds(
             platformMoves(before, after, stepSeconds, &level, activationStepSeconds));
         const auto schedule = [&](EntityTarget target, GridPosition3 cell) {
-            if (level.supportingTileAt(cell) != TileType::Water) {
+            if (!tileTypeIsWater(level.supportingTileAt(cell).value_or(TileType::Air))) {
                 return;
             }
             const float elevation = static_cast<float>(cell.z) -

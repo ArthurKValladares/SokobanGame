@@ -6,6 +6,9 @@
 namespace sokoban::config {
 
 inline constexpr float waterDepthBelowGround = 0.18f;
+// The authored leaf is source scale, with a thin, walkable upper surface.
+inline constexpr float lilyPadRideHeight = 0.070f;
+inline constexpr float lilyPadPickHeight = 0.090f;
 inline constexpr float waterExteriorMarginScale = 2.0f;
 inline constexpr float waterExteriorMinimumMarginTiles = 4.0f;
 inline constexpr float drownedPlayerDepthBelowGround = 1.0f;

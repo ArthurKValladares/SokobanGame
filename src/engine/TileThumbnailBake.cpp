@@ -152,7 +152,22 @@ RenderFrameData buildBakeFrame(
         subject.animation = animations->animation(use);
         subject.animationTimeSeconds = 0.0f;
     }
-    if (tile == TileType::Gate) {
+    if (tileTypeIsWaterStream(tile) || tile == TileType::LilyPad) {
+        // Show water mechanics on the same surface used in the game. A
+        // current has no solid block/model of its own.
+        frame.waterGridBounds = { 0, 0, bedSize, bedSize };
+        frame.waterSurfaces.push_back({
+            .cell = subject.cell,
+            .position = subject.position,
+            .color = frame.waterRendering.surfaceColor,
+            .elevation = 0.025f,
+            .streamDirection = renderFrameParts::waterStreamDirectionForTile(tile),
+        });
+        if (tile == TileType::LilyPad) {
+            subject.baseElevation = 0.025f;
+            frame.tiles.push_back(subject);
+        }
+    } else if (tile == TileType::Gate) {
         // Gates have no model: their closed silhouette is the energy volume
         // and its corner particles. Put that volume directly on the bed.
         const std::size_t firstPart = frame.tiles.size();

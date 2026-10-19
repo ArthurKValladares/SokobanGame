@@ -42,6 +42,42 @@ bool anyEntityChangedCell(const GameState& before, const GameState& after)
     return false;
 }
 
+std::vector<EntityId> platformRidersForScheduling(const GameState& source, EntityId robot)
+{
+    const auto platform = std::ranges::find_if(source.movables, [&](const auto& movable) {
+        const auto index = static_cast<std::size_t>(&movable - source.movables.data());
+        return resolvedEntityId(EntityKind::Movable, movable.id, index) == robot;
+    });
+    if (platform == source.movables.end()) return {};
+    std::vector<EntityId> riders;
+    GridPosition3 cell = platform->cell;
+    for (++cell.z; ; ++cell.z) {
+        const auto player = std::ranges::find_if(source.players, [&](const auto& unit) {
+            return !unit.dead && unit.cell == cell;
+        });
+        if (player != source.players.end()) {
+            riders.push_back(resolvedEntityId(EntityKind::Player, player->id,
+                static_cast<std::size_t>(player - source.players.begin())));
+        } else if (const auto* movable = rules::movableAt(source, cell)) {
+            riders.push_back(resolvedEntityId(EntityKind::Movable, movable->id,
+                static_cast<std::size_t>(movable - source.movables.data())));
+        } else if (const auto* enemy = rules::enemyAt(source, cell)) {
+            riders.push_back(resolvedEntityId(EntityKind::Enemy, enemy->id,
+                static_cast<std::size_t>(enemy - source.enemies.data())));
+        } else {
+            break;
+        }
+    }
+    return riders;
+}
+
+bool actionMovesPlatformRider(const GameplaySession::Action& action, EntityId robot)
+{
+    const auto changed = StateDelta::between(action.before, action.after);
+    return changed.changesAny(platformRidersForScheduling(action.before, robot)) ||
+        changed.changesAny(platformRidersForScheduling(action.after, robot));
+}
+
 float turretShotTriggerSeconds(
     const ActionScheduler::InFlight& action,
     const plans::TurretShotCue& cue)
@@ -377,6 +413,9 @@ std::vector<GridPosition3> witchSwapDestinations(const ActionPlan& action)
 
 void GameplaySession::reset(const Level& level)
 {
+    robotPatrolPauses_.clear();
+    robotPatrolActions_.clear();
+    failedAmbientAttempt_.valid = false;
     undoBaseState_ = rules::initialState(level);
     scheduler_.reset(undoBaseState_, stepDurationSeconds_);
     pendingCommands_.clear();
@@ -402,6 +441,9 @@ void GameplaySession::reset(const Level& level)
 void GameplaySession::resetToState(
     const GameState& state, EntityId activeHeroController)
 {
+    robotPatrolPauses_.clear();
+    robotPatrolActions_.clear();
+    failedAmbientAttempt_.valid = false;
     undoBaseState_ = state;
     scheduler_.reset(undoBaseState_, stepDurationSeconds_);
     pendingCommands_.clear();
@@ -529,6 +571,23 @@ float GameplaySession::timeToNextCompletion() const
     return soonest;
 }
 
+std::optional<float> GameplaySession::timeToNextRobotPatrol() const
+{
+    if (autoMotionPaused_ || readingLectern_ || stepRates_.robot <= 0 ||
+        rules::anyPlayerDead(state())) return std::nullopt;
+    std::optional<float> soonest;
+    for (const auto& pause : robotPatrolPauses_) {
+        const auto robot = std::ranges::find_if(state().movables, [&](const auto& movable) {
+            const auto index = static_cast<std::size_t>(&movable - state().movables.data());
+            return resolvedEntityId(EntityKind::Movable, movable.id, index) == pause.robot &&
+                !movable.dead && !movable.fallen;
+        });
+        if (robot == state().movables.end() || pause.remainingSeconds <= 0.0f) continue;
+        soonest = soonest ? std::min(*soonest, pause.remainingSeconds) : pause.remainingSeconds;
+    }
+    return soonest;
+}
+
 bool GameplaySession::anyActionComplete() const
 {
     return std::ranges::any_of(
@@ -643,6 +702,9 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
     }
 
     scheduler_.reset(normalized.state, stepDurationSeconds_);
+    robotPatrolPauses_.clear();
+    robotPatrolActions_.clear();
+    failedAmbientAttempt_.valid = false;
     pendingCommands_.clear();
     readingLectern_.reset();
     readingHero_ = invalidEntityId;
@@ -843,6 +905,16 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
 void GameplaySession::advanceActiveAction(float dt)
 {
     scheduler_.advanceClock(dt);
+    for (auto& pause : robotPatrolPauses_) {
+        pause.remainingSeconds = std::max(0.0f, pause.remainingSeconds - std::max(dt, 0.0f));
+    }
+    if (std::erase_if(robotPatrolPauses_, [](const auto& pause) {
+            return pause.remainingSeconds <= 0.0f;
+        }) != 0) {
+        // The board may be unchanged throughout a dwell, but its motor can
+        // now act again; do not reuse the cached failed ambient admission.
+        failedAmbientAttempt_.valid = false;
+    }
 }
 
 void GameplaySession::completeActiveAction()
@@ -858,6 +930,23 @@ void GameplaySession::completeActiveAction()
     // What stays here is the bookkeeping only the session knows about.
     for (const ActionScheduler::InFlight& finished : scheduler_.commitFinished()) {
         recordCompletion(finished.plan, finished.causalGroup);
+        const auto patrol = std::ranges::find(robotPatrolActions_, finished.id,
+            &RobotPatrolAction::actionId);
+        if (patrol != robotPatrolActions_.end()) {
+            for (const EntityId id : patrol->robots) {
+                const auto robot = std::ranges::find_if(state().movables, [&](const auto& movable) {
+                    const auto index = static_cast<std::size_t>(&movable - state().movables.data());
+                    return resolvedEntityId(EntityKind::Movable, movable.id, index) == id &&
+                        !movable.dead && !movable.fallen;
+                });
+                if (robot != state().movables.end()) {
+                    std::erase_if(robotPatrolPauses_, [id](const auto& pause) { return pause.robot == id; });
+                    robotPatrolPauses_.push_back({ id, config::robotPatrolPauseSeconds });
+                }
+            }
+            robotPatrolActions_.erase(patrol);
+            failedAmbientAttempt_.valid = false;
+        }
     }
 }
 
@@ -1123,6 +1212,9 @@ GameplaySession::StartOutcome GameplaySession::planPlayerStep(
     if (!step) {
         return StartOutcome::Impossible;
     }
+    if (actionUsesMovingPlatformSupport(step->action)) {
+        return StartOutcome::Refused;
+    }
 
     // The plan settles the outcome; the session only knows the running move
     // total, so it fills that in. One step, so one move - the slide it starts
@@ -1172,6 +1264,11 @@ GameplaySession::StartOutcome GameplaySession::planPlayerStep(
 
     if (!actionAdmissionAllows(batch)) {
         return StartOutcome::Impossible;
+    }
+    if (std::ranges::any_of(batch, [this](const auto& pending) {
+            return actionUsesMovingPlatformSupport(pending.plan);
+        })) {
+        return StartOutcome::Refused;
     }
 
     // Allocated up front so the consequence carries the same group as its
@@ -1235,6 +1332,36 @@ GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
     return outcome;
 }
 
+bool GameplaySession::robotHasRiderInFlight(EntityId robot) const
+{
+    for (const auto& action : scheduler_.inFlight()) {
+        // Include the destination stack: a boarding hero still travels
+        // from the ledge when the dwell expires and must retain support.
+        if (actionMovesPlatformRider(action.plan, robot)) return true;
+    }
+    return false;
+}
+
+bool GameplaySession::actionUsesMovingPlatformSupport(const Action& action) const
+{
+    for (const auto& moving : scheduler_.inFlight()) {
+        const auto count = std::min(moving.plan.before.movables.size(),
+            moving.plan.after.movables.size());
+        for (std::size_t index = 0; index < count; ++index) {
+            const auto& before = moving.plan.before.movables[index];
+            const auto& after = moving.plan.after.movables[index];
+            if (!tileTypeIsMovablePlatform(before.type) ||
+                (before.cell.x == after.cell.x && before.cell.y == after.cell.y)) continue;
+            const EntityId robot = resolvedEntityId(EntityKind::Movable, before.id, index);
+            // A new plan must not board the old top of a platform already on
+            // its way elsewhere. Its base and the hero's top-level path use
+            // different cells, so ordinary path reservations cannot catch it.
+            if (actionMovesPlatformRider(action, robot)) return true;
+        }
+    }
+    return false;
+}
+
 GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& level)
 {
     const GameState& current = planningState();
@@ -1289,10 +1416,16 @@ GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& le
             : StartOutcome::Refused;
     }
 
+    auto conveyorActors = withoutEntitiesInFlight(plans::conveyorRiders(level, current));
+    std::erase_if(conveyorActors, [&](EntityId id) {
+        return std::ranges::any_of(scheduler_.inFlight(), [&](const auto& action) {
+            return actionMovesPlatformRider(action.plan, id);
+        });
+    });
     if (std::optional<plans::PlannedAction> ride = plans::planConveyorRides(
             level,
             current,
-            withoutEntitiesInFlight(plans::conveyorRiders(level, current)),
+            conveyorActors,
             stepRates_,
             stepDurationSeconds_)) {
         ride->action.playerMoveCountBefore = playerMoveCount_;
@@ -1312,10 +1445,16 @@ GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& le
             : StartOutcome::Refused;
     }
 
+    auto robotActors = withoutEntitiesInFlight(plans::patrollingRobots(current));
+    std::erase_if(robotActors, [&](EntityId id) {
+        return robotHasRiderInFlight(id) || std::ranges::any_of(robotPatrolPauses_, [id](const auto& pause) {
+            return pause.robot == id && pause.remainingSeconds > 0.0f;
+        });
+    });
     if (std::optional<plans::PlannedAction> patrol = plans::planRobotPatrols(
             level,
             current,
-            withoutEntitiesInFlight(plans::patrollingRobots(current)),
+            robotActors,
             stepRates_,
             stepDurationSeconds_)) {
         patrol->action.playerMoveCountBefore = playerMoveCount_;
@@ -1330,7 +1469,8 @@ GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& le
                    std::move(patrol->turretShots),
                    0,
                    {},
-                   std::move(patrol->portalTransits))
+                   std::move(patrol->portalTransits),
+                   std::move(robotActors))
             ? StartOutcome::Started
             : StartOutcome::Refused;
     }
@@ -1414,6 +1554,8 @@ GameplaySession::StartOutcome GameplaySession::tryStartUndoMove(const Level& lev
         return StartOutcome::Refused;
     }
     autoMotionPaused_ = true;
+    robotPatrolPauses_.clear();
+    robotPatrolActions_.clear();
     inputLog_.push_back(PlayerInput::Undo);
     return StartOutcome::Started;
 }
@@ -1444,6 +1586,8 @@ GameplaySession::StartOutcome GameplaySession::tryStartRestart(
     }
     autoMotionPaused_ = false;
     // A restart begins a fresh attempt; the log describes that attempt only.
+    robotPatrolPauses_.clear();
+    robotPatrolActions_.clear();
     inputLog_.clear();
     return StartOutcome::Started;
 }
@@ -1542,20 +1686,32 @@ bool GameplaySession::beginAction(
     std::vector<plans::TurretShotCue> turretShots,
     std::size_t causalGroup,
     ActionDeferral deferral,
-    std::vector<plans::PlannedAction::PortalCue> portalTransits)
+    std::vector<plans::PlannedAction::PortalCue> portalTransits,
+    std::vector<EntityId> robotPatrolActors)
 {
+    if (actionUsesMovingPlatformSupport(action)) return false;
     const ActionReservations claims =
         makePending(action, pressurePlateActivityChanged,
             legs, turretShots, deferral, portalTransits)
             .reservations;
-    return std::holds_alternative<ActionScheduler::Started>(scheduler_.tryStart(
+    const auto admission = scheduler_.tryStart(
         action,
         claims,
         std::move(legs),
         causalGroup,
         deferral,
         std::move(turretShots),
-        std::move(portalTransits)));
+        std::move(portalTransits));
+    const auto* started = std::get_if<ActionScheduler::Started>(&admission);
+    if (!started) return false;
+    if (!robotPatrolActors.empty()) {
+        const auto changed = StateDelta::between(action.before, action.after).changedEntityIds();
+        std::erase_if(robotPatrolActors, [&](EntityId id) {
+            return std::ranges::find(changed, id) == changed.end();
+        });
+        robotPatrolActions_.push_back({ started->id, std::move(robotPatrolActors) });
+    }
+    return true;
 }
 
 bool GameplaySession::actionAdmissionAllows(const Action& action) const

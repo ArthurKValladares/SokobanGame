@@ -951,6 +951,11 @@
       "preserveSourceScale": true
     },
     {
+      "name": "LilyPad",
+      "path": "custom/models/lily_pad.glb",
+      "preserveSourceScale": true
+    },
+    {
       "name": "Wardrobe",
       "path": "custom/models/wardrobe.glb",
       "preserveSourceScale": true
@@ -2800,6 +2805,10 @@
     {
       "tile": "Ladder",
       "model": "Ladder"
+    },
+    {
+      "tile": "Lily Pad",
+      "model": "LilyPad"
     },
     {
       "tile": "Wardrobe Lorekeeper",

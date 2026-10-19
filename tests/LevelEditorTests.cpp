@@ -1777,7 +1777,7 @@ void testInvalidLoadLeavesDocumentUntouched()
     const std::filesystem::path invalidPath = project.root / "invalid.scr";
     {
         std::ofstream file(invalidPath);
-        file << "@layer 0\n....\n\n@layer 1\n$$$$\n";
+        file << "@layer 0\n....\n\n@layer 1\n" << std::string(4, '\x01') << '\n';
     }
 
     CHECK(!editor.loadDocument(invalidPath));
@@ -4398,6 +4398,7 @@ void testGroupedPalettePreservesDirectionalBrushes()
         const bool directional = tileTypeIsGround(definition.type) ||
             tileTypeIsWall(definition.type) ||
             tileTypeIsConveyor(definition.type) ||
+            tileTypeIsWaterStream(definition.type) ||
             tileTypeIsMirror(definition.type) || tileTypeIsTurret(definition.type) ||
             tileTypeIsPortal(definition.type) || tileTypeIsRail(definition.type) ||
             tileTypeIsRotator(definition.type) || tileTypeIsLectern(definition.type) ||
@@ -4809,6 +4810,8 @@ void testDirectionalBrushesRotateTheirTileTypes()
     constexpr std::array families {
         std::array { TileType::ConveyorUp, TileType::ConveyorRight,
             TileType::ConveyorDown, TileType::ConveyorLeft },
+        std::array { TileType::StreamUp, TileType::StreamRight,
+            TileType::StreamDown, TileType::StreamLeft },
         std::array { TileType::MirrorNorthWest, TileType::MirrorNorthEast,
             TileType::MirrorSouthEast, TileType::MirrorSouthWest },
         std::array { TileType::TurretNorth, TileType::TurretEast,
@@ -4854,6 +4857,37 @@ void testDirectionalBrushesRotateTheirTileTypes()
         CHECK(rotateTileType(family[0], 2) == family[0]);
     }
     CHECK(rotateTileType(TileType::WallStone03, 1) == TileType::WallStone03);
+}
+
+void testWaterStreamsAndLilyPadsSurviveEditingAndSaving()
+{
+    TEST("waterStreamsAndLilyPadsSurviveEditingAndSaving");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    editor.newDocument(5, 3, false);
+    editor.setWaterLayer(0);
+    editor.setSelectedTile(TileType::StreamUp);
+    editor.rotateSelectedTile();
+    CHECK(editor.selectedTile() == TileType::StreamRight);
+    CHECK(editor.paintCell({ 2, 1, 0 }));
+    CHECK(editor.setCell({ 2, 1, 1 }, TileType::LilyPad));
+    editor.setLayerLocked(true);
+    editor.setActiveLayer(0);
+    CHECK(editor.pickTile({ 2, 1, 0 }) == TileType::StreamRight);
+    CHECK(editor.selectedTile() == TileType::StreamRight);
+    const auto before = editor.documentDefinition();
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentDefinition() == before);
+    const auto path = project.source / "water-streams.scr";
+    CHECK(editor.saveDocument(path).sourceSaved());
+    auto loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(path, false));
+    CHECK(loaded.documentDefinition() == before);
+    const auto level = loaded.documentToLevel();
+    CHECK(level.tileAt(2, 1, 0) == TileType::StreamRight);
+    CHECK(level.movableTiles().size() == 1);
+    CHECK(level.movableTiles().front().type == TileType::LilyPad);
 }
 
 void testRobotBrushPreservesHeadingPlatesAndUndoThroughSave()
@@ -5381,6 +5415,7 @@ int main()
     testHistoryAccountingFollowsScreenRemapsAndReloads();
     testDirectionalBrushesRotateTheirTileTypes();
     testRobotBrushPreservesHeadingPlatesAndUndoThroughSave();
+    testWaterStreamsAndLilyPadsSurviveEditingAndSaving();
     testTileBrushRotationsSurviveEditingAndSaving();
     testTileRotationsSurviveDraftSwitchesAndCursorPlayback();
     testUnsortedRotationRecordsSupportBrushUpdates();

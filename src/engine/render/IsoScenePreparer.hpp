@@ -129,6 +129,8 @@ struct PreparedIsoFace {
     float worldHeight = 0.0f;
     PreparedSurfaceMaterial material = PreparedSurfaceMaterial::Standard;
     uint32_t shorelineMask = 0;
+    uint32_t streamDirection = 0;
+    uint32_t streamBoundaryMask = 0;
     float depth = 0.0f;
     std::optional<GroundSplatTextures> groundSplat;
     GridPosition groundSplatOrigin {};

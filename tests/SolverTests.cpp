@@ -794,6 +794,22 @@ void testRobotPatrolAndHeroSwitchSolutionsReplay()
     if (recording.solved) CHECK(solution::replay(level, recording.solution).passed);
 }
 
+void testSolverWaitsForAStreamAndReplaysTheCrossing()
+{
+    TEST("solverWaitsForAStreamAndReplaysTheCrossing");
+    const Level::Definition definition {
+        .layers = { { "W\"\"\"." }, { " $  E" }, { " C   " } },
+    };
+    const auto level = Level::loadFromDefinition(definition, "stream crossing solver");
+    CHECK(solver::detail::RelaxedHeuristic(level).estimate(rules::initialState(level)) == 0);
+    const auto result = solver::solve(level, { .maxStates = 2'000 });
+    CHECK(result.status == solver::Status::Solved);
+    if (result.status != solver::Status::Solved) return;
+    const auto recording = solution::record(level, definition, result.inputs, "stream crossing solver");
+    CHECK_MESSAGE(recording.solved, recording.error.c_str());
+    if (recording.solved) CHECK(solution::replay(level, recording.solution).passed);
+}
+
 void testStatusNamesAreStable()
 {
     TEST("statusNamesAreStable");
@@ -810,6 +826,7 @@ int main()
 {
     try {
         testRobotPatrolAndHeroSwitchSolutionsReplay();
+        testSolverWaitsForAStreamAndReplaysTheCrossing();
         testRelaxedHeuristicFallsBackForMovableMirrors();
         testRelaxedWalkHeuristicBoundsRemainingInputs();
         testSearchStrategiesPreserveForcedPushCostAndReplay();

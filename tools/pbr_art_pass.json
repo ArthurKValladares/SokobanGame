@@ -405,6 +405,12 @@
       "surface_rule": "named-materials"
     },
     {
+      "name": "LilyPad",
+      "ownership": "retained",
+      "source": "custom/models/lily_pad.glb",
+      "skip": "Native faceted leaf, raised veins and authored green palette; regenerate with make_lily_pad_model.py."
+    },
+    {
       "name": "Wardrobe",
       "ownership": "retained",
       "source": "custom/models/wardrobe.glb",

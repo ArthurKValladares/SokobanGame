@@ -449,6 +449,9 @@ struct RenderFrameData {
         Vec4 color {};
         float baseElevation = 0.0f;
         float height = 0.0f;
+        // A source-scale model can use a thin editor hit volume without
+        // compressing its authored geometry through the model transform.
+        std::optional<float> pickHeight;
         bool blurBehind = false;
         bool pickOnly = false;
         bool pickable = true;
@@ -557,6 +560,11 @@ struct RenderFrameData {
         Vec4 color {};
         float elevation = 0.0f;
         uint32_t shorelineMask = 0;
+        // 0 is still water; 1..4 flow north, east, south and west.
+        uint32_t streamDirection = 0;
+        // Fade the current where it meets a different flow or still water.
+        // Uses WaterShorelineEdge bits, independent of shoreline foam.
+        uint32_t streamBoundaryMask = 0;
         bool isEditorPreview = false;
         bool pickable = true;
     };

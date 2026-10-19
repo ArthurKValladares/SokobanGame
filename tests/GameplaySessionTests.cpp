@@ -1915,8 +1915,16 @@ void testRobotPatrolRepeatsWithoutInputAndRestoresAndUndoes()
     CHECK(session.tryStartNextAction(level, {}));
     CHECK(!session.tryStartNextAction(level, {}));
     CHECK(session.activeAction().after.movables[0].cell == cell(2, 0, 1));
+    CHECK(session.activeActionDuration() == 2.0f * session.stepDurationSeconds());
     finishAction(session);
     const GameState beforeReversal = session.state();
+    CHECK(!session.moving());
+    CHECK(session.timeToNextRobotPatrol() == config::robotPatrolPauseSeconds);
+    CHECK(!session.tryStartNextAction(level, {}));
+    session.advanceActiveAction(config::robotPatrolPauseSeconds * 0.5f);
+    CHECK(!session.tryStartNextAction(level, {}));
+    session.advanceActiveAction(*session.timeToNextRobotPatrol());
+    CHECK(!session.timeToNextRobotPatrol());
     CHECK(session.tryStartNextAction(level, {}));
     CHECK(session.activeAction().after.movables[0].cell == cell(2, 0, 1));
     CHECK(rules::robotDirection(session.activeAction().after.movables[0]) == MoveDirection::Left);
@@ -1926,6 +1934,7 @@ void testRobotPatrolRepeatsWithoutInputAndRestoresAndUndoes()
     GameplaySession restored;
     CHECK(restored.restore(level, session.snapshot()));
     CHECK(restored.state() == session.state());
+    CHECK(!restored.timeToNextRobotPatrol());
     restored.queueUndo();
     CHECK(restored.tryStartNextAction(level, {}));
     finishAction(restored);
@@ -1954,6 +1963,10 @@ void testRobotPatrolAndUnrelatedPlayerMoveRunConcurrently()
     CHECK(session.inFlight().size() == 2);
     session.advanceActiveAction(session.stepDurationSeconds());
     session.completeActiveAction();
+    CHECK(session.state().movables[0].cell == cell(1, 0, 1));
+    CHECK(session.moving());
+    session.advanceActiveAction(session.activeActionRemainingSeconds());
+    session.completeActiveAction();
     CHECK(session.state().movables[0].cell == cell(2, 0, 1));
     CHECK(session.state().players[0].cell == cell(2, 2, 1));
     CHECK(session.playerMoveCount() == 1);
@@ -1962,10 +1975,172 @@ void testRobotPatrolAndUnrelatedPlayerMoveRunConcurrently()
     CHECK(restored.state() == session.state());
 }
 
+void testRobotDwellReleasesRiderAndWaitsForBoardingAndUnboarding()
+{
+    TEST("robotDwellReleasesRiderAndWaitsForBoardingAndUnboarding");
+    const Level level = makeLevel({ { "......", "......" },
+        { " }    ", "......" }, { "      ", "  C   " } });
+    GameplaySession session;
+    session.reset(level);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().movables[0].cell == cell(2, 0, 1));
+    CHECK(session.timeToNextRobotPatrol().has_value());
+    session.queueMove(MoveDirection::Up);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeActionDuration() == session.stepDurationSeconds());
+    session.advanceActiveAction(config::robotPatrolPauseSeconds);
+    CHECK(!session.timeToNextRobotPatrol());
+    // The motor cannot abandon a hero who is still arriving from the ledge.
+    CHECK(!session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 1);
+    session.advanceActiveAction(session.activeActionRemainingSeconds());
+    session.completeActiveAction();
+    CHECK(session.state().players[0].cell == cell(2, 0, 2));
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeAction().after.players[0].cell == cell(3, 0, 2));
+    finishAction(session);
+    CHECK(session.state().movables[0].cell == cell(3, 0, 1));
+    session.queueMove(MoveDirection::Down);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeAction().after.players[0].cell == cell(3, 1, 2));
+    session.advanceActiveAction(config::robotPatrolPauseSeconds);
+    CHECK(!session.tryStartNextAction(level, {}));
+    session.advanceActiveAction(session.activeActionRemainingSeconds());
+    session.completeActiveAction();
+    CHECK(session.state().players[0].cell == cell(3, 1, 2));
+    CHECK(session.state().movables[0].cell == cell(3, 0, 1));
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeAction().after.players[0].cell == cell(3, 1, 2));
+    session.reset(level);
+    CHECK(!session.timeToNextRobotPatrol());
+}
+
+void testRobotDwellsAreIndependentAndForcedPushKeepsNormalTiming()
+{
+    TEST("robotDwellsAreIndependentAndForcedPushKeepsNormalTiming");
+    const Level level = makeLevel({ { ".......", ".......", "......." },
+        { " }     ", "       ", " C}    " } });
+    GameplaySession session;
+    session.reset(level);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeActionDuration() == session.stepDurationSeconds());
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 2);
+    session.advanceActiveAction(session.stepDurationSeconds());
+    session.completeActiveAction();
+    CHECK(!session.timeToNextRobotPatrol());
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 2);
+    session.advanceActiveAction(session.stepDurationSeconds());
+    session.completeActiveAction();
+    CHECK(session.timeToNextRobotPatrol() == config::robotPatrolPauseSeconds);
+    session.advanceActiveAction(*session.timeToNextRobotPatrol());
+    CHECK(!session.timeToNextRobotPatrol());
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 2);
+}
+
+void testBoardingCannotUseTheOldTopOfAnAlreadyMovingRobot()
+{
+    TEST("boardingCannotUseTheOldTopOfAnAlreadyMovingRobot");
+    const Level level = makeLevel({ { "......", "......" },
+        { " }    ", "......" }, { "      ", " C    " } });
+    GameplaySession session;
+    session.reset(level);
+    CHECK(session.tryStartNextAction(level, {}));
+    session.advanceActiveAction(session.stepDurationSeconds());
+    session.queueMove(MoveDirection::Up);
+    CHECK(!session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 1);
+    CHECK(session.state().players[0].cell == cell(1, 1, 2));
+    session.advanceActiveAction(session.activeActionRemainingSeconds());
+    session.completeActiveAction();
+    CHECK(session.state().movables[0].cell == cell(2, 0, 1));
+    // The queued step is re-planned after the robot settles. Its old column
+    // now leads down to the floor, rather than leaving the hero suspended.
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeAction().after.players[0].cell == cell(1, 0, 1));
+}
+
+void testStreamCarriesPadAndRiderThroughRestoreAndUndo()
+{
+    TEST("streamCarriesPadAndRiderThroughRestoreAndUndo");
+    const Level level = makeLevel({ { "W\"\"WW" }, { " $   " }, { " C   " } });
+    GameplaySession session;
+    session.reset(level);
+    const auto initial = session.state();
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeAction().after.movables[0].cell == cell(2, 0, 1));
+    CHECK(session.activeAction().after.players[0].cell == cell(2, 0, 2));
+    CHECK(session.state() == initial);
+    finishAction(session);
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == session.state());
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state().movables[0].cell == cell(3, 0, 1));
+    CHECK(restored.state().players[0].cell == cell(3, 0, 2));
+    CHECK(!restored.state().movables[0].fallen);
+    CHECK(!restored.state().players[0].dead);
+    CHECK(!restored.tryStartNextAction(level, {}));
+    restored.queueUndo();
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state().movables[0].cell == cell(2, 0, 1));
+    CHECK(restored.state().players[0].cell == cell(2, 0, 2));
+    CHECK(!restored.tryStartNextAction(level, {}));
+}
+
+void testBoardingCannotUseTheOldTopOfAMovingLilyPad()
+{
+    TEST("boardingCannotUseTheOldTopOfAMovingLilyPad");
+    const Level level = makeLevel({ { "W\"WWWW", "......" },
+        { " $    ", "......" }, { "      ", " C    " } });
+    GameplaySession session;
+    session.reset(level);
+    CHECK(session.tryStartNextAction(level, {}));
+    session.advanceActiveAction(session.stepDurationSeconds() * 0.25f);
+    session.queueMove(MoveDirection::Up);
+    CHECK(!session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 1);
+    finishAction(session);
+    CHECK(session.state().movables[0].cell == cell(2, 0, 1));
+    CHECK(session.state().players[0].cell == cell(1, 1, 2));
+}
+
+void testChainedSlideCannotLandOnAMovingPadsOldTop()
+{
+    TEST("chainedSlideCannotLandOnAMovingPadsOldTop");
+    const Level level = makeLevel({ { "...\"WW" }, { ".WW$  " }, { "CII   " } });
+    GameplaySession session;
+    auto initial = rules::initialState(level);
+    for (auto& movable : initial.movables) {
+        if (movable.type == TileType::Ice) movable.fallen = true;
+    }
+    session.resetToState(initial, initial.players[0].controller);
+    CHECK(session.tryStartNextAction(level, {}));
+    session.advanceActiveAction(session.stepDurationSeconds() * 0.25f);
+    session.queueMove(MoveDirection::Right);
+    CHECK(!session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 1);
+    CHECK(session.state().players[0].cell == cell(0, 0, 2));
+    finishAction(session);
+    CHECK(session.state().movables[0].cell == cell(4, 0, 1));
+}
+
 int main()
 {
+    testChainedSlideCannotLandOnAMovingPadsOldTop();
+    testStreamCarriesPadAndRiderThroughRestoreAndUndo();
+    testBoardingCannotUseTheOldTopOfAMovingLilyPad();
     testRobotPatrolRepeatsWithoutInputAndRestoresAndUndoes();
     testRobotPatrolAndUnrelatedPlayerMoveRunConcurrently();
+    testRobotDwellReleasesRiderAndWaitsForBoardingAndUnboarding();
+    testRobotDwellsAreIndependentAndForcedPushKeepsNormalTiming();
+    testBoardingCannotUseTheOldTopOfAnAlreadyMovingRobot();
     testCyclicSlideSnapshotRestoresReachableEndpointAndRejectsUnreachableEndpoint();
     testLongFiniteSlideSnapshotRestoresAcrossPlannerContinuations();
     testSnapshotReplayStepBudgetAcceptsExactLimitAndRejectsNextStep();

@@ -604,7 +604,8 @@ void testBakeFrameStandsTheTileOnAGroundBed()
         // cell rather than stacking on it, so it is one fewer.
         const std::size_t bedCells =
             tileThumbnails::bedSize * tileThumbnails::bedSize;
-        const std::size_t expected = tileTypeIsGround(definition.type)
+        const std::size_t expected = tileTypeIsGround(definition.type) ||
+                tileTypeIsWaterStream(definition.type)
             ? bedCells
             : bedCells + (definition.type == TileType::Gate
                           ? config::gateEnergyTileCount
@@ -660,6 +661,13 @@ void testBakeFrameStandsTheTileOnAGroundBed()
             }
             continue;
         }
+        if (tileTypeIsWaterStream(definition.type)) {
+            CHECK(frame.waterSurfaces.size() == 1);
+            CHECK(frame.waterSurfaces.front().position ==
+                Vec2({ static_cast<float>(tileThumbnails::bedCentre),
+                    static_cast<float>(tileThumbnails::bedCentre) }));
+            continue;
+        }
         // The subject is the last tile and is centred on the centre cell. Its
         // footprint is checked by its midpoint rather than its corner because
         // a manifest tile scale above 1 legitimately overhangs the cell.
@@ -672,7 +680,8 @@ void testBakeFrameStandsTheTileOnAGroundBed()
         const float ladderOffset = definition.type == TileType::Ladder ? 0.38f : 0.0f;
         CHECK(std::abs(midY - (centre + 0.5f + edge.y * 0.5f + ladderOffset)) < 0.001f);
         // Standing on the bed's surface, not sunk into or floating above it.
-        CHECK(std::abs(subject.baseElevation) < 0.001f);
+        CHECK(std::abs(subject.baseElevation -
+            (definition.type == TileType::LilyPad ? 0.025f : 0.0f)) < 0.001f);
     }
 }
 
@@ -829,6 +838,12 @@ void testSubjectMatchesTheTileTheEditorDraws()
         }
         const RenderFrameData frame = tileThumbnails::buildBakeFrame(
             definition.type, testManifest(), testSettings());
+        if (tileTypeIsWaterStream(definition.type)) {
+            CHECK(frame.waterSurfaces.size() == 1);
+            CHECK(frame.waterSurfaces.front().streamDirection ==
+                renderFrameParts::waterStreamDirectionForTile(definition.type));
+            continue;
+        }
         const RenderFrameData::Tile& subject = frame.tiles.back();
         const RenderFrameData::Tile expected = tileVisual(
             definition.type,

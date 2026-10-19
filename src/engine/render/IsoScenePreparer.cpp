@@ -131,14 +131,15 @@ Mat4 shadowClipFromWorld(const ShadowRenderLayout& layout)
 
 namespace {
 
-std::array<Vec3, 8> logicalTileCorners(const RenderFrameData::Tile& tile)
+std::array<Vec3, 8> logicalTileCorners(const RenderFrameData::Tile& tile,
+    std::optional<float> heightOverride = std::nullopt)
 {
     const float x = tile.position.x;
     const float y = tile.position.y;
     const float width = tile.size.x;
     const float depth = tile.size.y;
     const float base = tile.baseElevation;
-    const float top = base + std::max(tile.height, 0.0f);
+    const float top = base + std::max(heightOverride.value_or(tile.height), 0.0f);
     return {
         Vec3 { x, y, base },
         Vec3 { x + width, y, base },
@@ -1477,6 +1478,8 @@ struct IsoFaceRequest {
     Vec2 gridSize {};
     PreparedSurfaceMaterial material {};
     uint32_t shorelineMask = 0;
+    uint32_t streamDirection = 0;
+    uint32_t streamBoundaryMask = 0;
     std::optional<GroundSplatTextures> groundSplat;
     GridPosition groundSplatOrigin {};
 };
@@ -1506,6 +1509,8 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
         .worldHeight = request.vertices[0].z,
         .material = request.material,
         .shorelineMask = request.shorelineMask,
+        .streamDirection = request.streamDirection,
+        .streamBoundaryMask = request.streamBoundaryMask,
         .depth = faceDepth(scene.isoLayout, request.vertices),
         .groundSplat = request.groundSplat,
         .groundSplatOrigin = request.groundSplatOrigin,
@@ -1559,7 +1564,7 @@ void appendTileFaces(
         const bool chunked = scene.groundChunkTileMask[tileIndex] != 0;
         const float width = tile.size.x;
         const float depth = tile.size.y;
-        const float height = std::max(tile.height, 0.0f);
+        const float height = std::max(tile.pickHeight.value_or(tile.height), 0.0f);
         const bool drawCube = tile.model.isCube() && !tile.pickOnly;
         const bool moduleTop = (tile.cliffWall || tile.groundModule) && !tile.model.isCube();
         const bool drawTop = !chunked && !tile.pickOnly &&
@@ -1570,9 +1575,9 @@ void appendTileFaces(
         // as selector flags carry an explicit centered position/size/
         // height for picking, so use that volume for their invisible
         // faces while leaving their visual transform untouched.
-        const std::array<Vec3, 8> corners = drawCube
-            ? tileCorners(tile)
-            : logicalTileCorners(tile);
+        const std::array<Vec3, 8> corners = tile.pickHeight
+            ? logicalTileCorners(tile, tile.pickHeight)
+            : drawCube ? tileCorners(tile) : logicalTileCorners(tile);
         const bool pickable =
             tile.pickable &&
             !tile.isEditorPreview &&
@@ -2007,6 +2012,8 @@ void IsoScenePreparer::appendWaterFaces(
             .gridSize = { right - left, bottom - top },
             .material = PreparedSurfaceMaterial::Water,
             .shorelineMask = water.shorelineMask,
+            .streamDirection = water.streamDirection,
+            .streamBoundaryMask = water.streamBoundaryMask,
         });
     }
 }

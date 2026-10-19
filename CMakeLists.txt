@@ -1271,6 +1271,10 @@ if(SOKOBAN_BUILD_TESTS)
             COMMAND sokoban_preview_rendering_tests --water-entry-ripples
         )
         set_tests_properties(water_entry_ripples PROPERTIES LABELS "vulkan;render;water" TIMEOUT 60)
+        add_test(NAME water_streams
+            COMMAND sokoban_preview_rendering_tests --water-streams
+        )
+        set_tests_properties(water_streams PROPERTIES LABELS "vulkan;render;water" TIMEOUT 60)
         add_test(NAME rock_scratches
             COMMAND sokoban_preview_rendering_tests --rock-scratches
         )

@@ -258,14 +258,16 @@ GameplayLoop::UpdateResult GameplayLoop::update(
         }
         appendReadyTurretShots(session, result.turretShots);
         appendReadySounds(session, result);
-        if (!session.moving()) {
+        const auto robotWake = session.timeToNextRobotPatrol();
+        if (!session.moving() && !robotWake) {
             presentation.advanceWaterRipples(remainingTime);
             presentation.advanceRockScratches(remainingTime);
             return result;
         }
 
-        const float step = std::min(
-            remainingTime, session.timeToNextCompletion());
+        float step = remainingTime;
+        if (session.moving()) step = std::min(step, session.timeToNextCompletion());
+        if (robotWake) step = std::min(step, *robotWake);
         remainingTime -= step;
         presentation.advanceWaterRipples(step);
         presentation.advanceRockScratches(step);

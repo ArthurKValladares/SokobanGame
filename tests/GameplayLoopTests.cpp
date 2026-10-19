@@ -39,14 +39,44 @@ void testRobotCarriesHeroWithSmoothMotionAndFrameCatchUp()
     CHECK(session.state().movables[0].cell == GridPosition3({ 1, 0, 1 }));
     CHECK(presentation.movables()[0].renderPosition.x > 1.0f);
     CHECK(presentation.movables()[0].renderPosition.x < 2.0f);
-    CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 0.5f) < 0.0001f);
+    CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 0.25f) < 0.0001f);
     CHECK(std::abs(presentation.players()[0].motion.renderPosition.x -
         presentation.movables()[0].renderPosition.x) < 0.0001f);
-    (void)GameplayLoop::update(level, session, presentation, {}, 0.3f, true);
+    (void)GameplayLoop::update(level, session, presentation, {}, 1.0f, true);
     CHECK(session.state().movables[0].cell == GridPosition3({ 3, 0, 1 }));
     CHECK(session.state().players[0].cell == GridPosition3({ 3, 0, 2 }));
     CHECK(session.playerMoveCount() == 0);
     CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 2.0f) < 0.0001f);
+    CHECK(presentation.movables()[0].robotDriveSamples.size() <= 1);
+}
+
+void testRobotHalfSpeedAndFreeDwellFollowSimulationTime()
+{
+    TEST("robotHalfSpeedAndFreeDwellFollowSimulationTime");
+    const Level level = makeLevel({ { "........" }, { "C}      " } });
+    GameplaySession session;
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.25f, true);
+    CHECK(std::abs(presentation.movables()[0].renderPosition.x - 1.5f) < 0.0001f);
+    CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 0.5f) < 0.0001f);
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.25f, true);
+    CHECK(session.state().movables[0].cell == GridPosition3({ 2, 0, 1 }));
+    CHECK(!session.moving());
+    CHECK(session.timeToNextRobotPatrol() == config::robotPatrolPauseSeconds);
+    CHECK(presentation.movables()[0].robotDriveSamples.empty());
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.1f, true);
+    CHECK(!session.moving());
+    CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 1.0f) < 0.0001f);
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.1f, true);
+    CHECK(!session.timeToNextRobotPatrol());
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.25f, true);
+    CHECK(std::abs(presentation.movables()[0].renderPosition.x - 2.5f) < 0.0001f);
+    CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 1.5f) < 0.0001f);
+    (void)GameplayLoop::update(level, session, presentation, {}, 1.15f, true);
+    CHECK(session.state().movables[0].cell == GridPosition3({ 4, 0, 1 }));
+    CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 3.0f) < 0.0001f);
     CHECK(presentation.movables()[0].robotDriveSamples.size() <= 1);
 }
 
@@ -1674,6 +1704,7 @@ int main()
     testPortalIceFallFiresAtStationaryHeroAndUndoesTogether();
     testPortalCrossingsReachTheLivePresentation();
     testRobotCarriesHeroWithSmoothMotionAndFrameCatchUp();
+    testRobotHalfSpeedAndFreeDwellFollowSimulationTime();
     testOpposingDirectionsAreNeutral();
     testSimulationTimingClampsLongFrames();
     testSimulationTimingScalesOneSharedDelta();

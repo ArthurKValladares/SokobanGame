@@ -50,6 +50,77 @@ uint32_t movableModelQuarterTurns(const GameState::Movable& movable)
         static_cast<uint32_t>(movable.quarterTurns)) % 4;
 }
 
+float motionProgress(const GameplayPresentation::EntityVisual& motion)
+{
+    const Vec3 travel = subtract(motion.animationEnd, motion.animationStart);
+    const float lengthSquared = dot(travel, travel);
+    return motion.moving && lengthSquared > 0.0001f
+        ? std::clamp(dot(subtract(motion.renderPosition, motion.animationStart), travel) /
+              lengthSquared, 0.0f, 1.0f)
+        : 0.0f;
+}
+
+float lilyPadFloatingAmount(const RenderFrameBuilder::GameplayInput& input,
+    std::size_t index)
+{
+    const auto& pad = input.state.movables[index];
+    const float before = rules::isUnfilledWater(input.level, input.state, pad.cell) ? 1.0f : 0.0f;
+    const auto& visuals = input.presentation.movables();
+    if (index >= input.projectedState.movables.size() || index >= visuals.size() ||
+        !visuals[index].moving) return before;
+    const float after = rules::isUnfilledWater(input.level, input.projectedState,
+        input.projectedState.movables[index].cell) ? 1.0f : 0.0f;
+    return before + (after - before) * motionProgress(visuals[index]);
+}
+
+std::optional<std::size_t> supportingLilyPad(
+    const GameState& state, GridPosition3 cell)
+{
+    const auto support = lilyPadSupportCellFor(cell, [&](GridPosition3 below) {
+        if (const auto* movable = rules::movableAt(state, below)) return movable->type;
+        if (rules::enemyAt(state, below)) return TileType::Enemy;
+        if (std::ranges::any_of(state.players, [&](const auto& player) {
+                return !player.dead && !player.drowned && player.cell == below;
+            })) return TileType::Player;
+        return TileType::Air;
+    });
+    if (!support) return std::nullopt;
+    const auto* pad = rules::movableAt(state, *support);
+    return static_cast<std::size_t>(pad - state.movables.data());
+}
+
+float lilyPadRiderElevationOffset(const RenderFrameBuilder::GameplayInput& input,
+    const GameplayPresentation::EntityVisual& motion, GridPosition3 cell,
+    std::optional<GridPosition3> projectedCell)
+{
+    const auto offsetFor = [&](const GameState& state, GridPosition3 supportCell) {
+        float offset = 0.0f;
+        while (const auto index = supportingLilyPad(state, supportCell)) {
+            if (*index >= input.state.movables.size() ||
+                *index >= input.presentation.movables().size()) break;
+            const Vec3 padPosition = input.presentation.movables()[*index].renderPosition;
+            const float floating = lilyPadFloatingAmount(input, *index);
+            offset += -1.0f + config::lilyPadRideHeight + floating *
+                (-config::waterDepthBelowGround + lilyPadBob({ padPosition.x, padPosition.y },
+                    input.presentation.worldAnimationTimeSeconds()));
+            supportCell = state.movables[*index].cell;
+        }
+        return offset;
+    };
+    const float start = offsetFor(input.state, cell);
+    const float end = projectedCell ? offsetFor(input.projectedState, *projectedCell) : start;
+    const float progress = motionProgress(motion);
+    if (motion.moving && std::abs(end - start) > 0.0001f) {
+        // Boarding may step up one logical cell even though the thin leaf is
+        // just below the bank. Blend the actual support heights so the grid's
+        // horizontal-then-vertical track cannot dip the rider under water.
+        const float heightFrom = motion.animationStart.z + start;
+        const float heightTo = motion.animationEnd.z + end;
+        return heightFrom + (heightTo - heightFrom) * progress - motion.renderPosition.z;
+    }
+    return start + (end - start) * progress;
+}
+
 RenderAnimation manifestAnimationForUse(
     const AssetManifest& manifest,
     AnimationUse use)
@@ -343,7 +414,7 @@ void appendStaticTiles(
                 }
                 if (cell.tile == TileType::Air ||
                     cell.tile == TileType::Ladder ||
-                    cell.tile == TileType::Water ||
+                    tileTypeIsWater(cell.tile) ||
                     cell.tile == TileType::Gate ||
                     tileTypeIsRotator(cell.tile) ||
                     tileTypeIsLockPlate(cell.tile) ||
@@ -680,7 +751,7 @@ void appendGameplayWaterAndShorelines(
         if (tileTypeIsSolidBlock(tile)) {
             return true;
         }
-        if (tile != TileType::Water) {
+        if (!tileTypeIsWater(tile)) {
             return false;
         }
         return !rules::isUnfilledWater(input.level, state, {
@@ -709,7 +780,11 @@ void appendGameplayWaterAndShorelines(
                         false,
                         shorelineMaskForWaterCell(
                             waterCell,
-                            gameplayShorelineAt));
+                            gameplayShorelineAt),
+                        true,
+                        waterStreamFlowForCell(waterCell, levelTileAt),
+                        streamBoundaryMaskForWaterCell(waterCell,
+                            levelTileAt(waterCell), levelTileAt));
                 }
             }
         }
@@ -884,7 +959,7 @@ void appendGameplayWorld(
             if (input.visibleCell && !input.visibleCell(position)) {
                 return StaticRenderCell { .tile = TileType::Air };
             }
-            if (input.level.tileAt(x, y, z) == TileType::Water) {
+            if (tileTypeIsWater(input.level.tileAt(x, y, z))) {
                 const GridPosition3 entityPosition {
                     position.x,
                     position.y,
@@ -1487,6 +1562,10 @@ void appendGameplayEntities(
         applyTileScale(
             playerTile,
             input.settings.tileScale(TileType::Player));
+        playerTile.baseElevation += lilyPadRiderElevationOffset(input,
+            visual.motion, state.players[playerIndex].cell,
+            playerIndex < input.projectedState.players.size()
+                ? std::optional(input.projectedState.players[playerIndex].cell) : std::nullopt);
         frame.tiles.push_back(playerTile);
     }
 
@@ -1542,6 +1621,9 @@ void appendGameplayEntities(
             .modelRotationOffsetRadians = yawRadians(visual.orientation),
         };
         applyTileScale(enemyTile, input.settings.tileScale(TileType::Enemy));
+        enemyTile.baseElevation += lilyPadRiderElevationOffset(input,
+            visual.motion, enemy.cell, enemyIndex < input.projectedState.enemies.size()
+                ? std::optional(input.projectedState.enemies[enemyIndex].cell) : std::nullopt);
         frame.tiles.push_back(enemyTile);
     }
 
@@ -1637,6 +1719,13 @@ void appendGameplayEntities(
         applyTileScale(
             movableTile,
             input.settings.tileScale(movable.type));
+        if (movable.type == TileType::LilyPad) {
+            applyLilyPadVisual(movableTile, input.presentation.worldAnimationTimeSeconds(),
+                lilyPadFloatingAmount(input, movableIndex));
+        }
+        movableTile.baseElevation += lilyPadRiderElevationOffset(input,
+            visual, movable.cell, movableIndex < input.projectedState.movables.size()
+                ? std::optional(input.projectedState.movables[movableIndex].cell) : std::nullopt);
         if (const std::optional<Vec3> linkColor =
                 input.level.movableLinkColor(movableIndex)) {
             appendLinkedObjectAura(frame, movableTile, *linkColor);
@@ -1724,6 +1813,8 @@ void appendMirrorGhostTile(
     RenderFrameData& frame,
     const RenderFrameBuilder::GameplayInput& input,
     const GameState& state,
+    const GameState& resultState,
+    const GameState* endResultState,
     const MirrorEntityPreviewContext& preview)
 {
     const rules::MirrorEntityPreview& entity = preview.entity;
@@ -1848,6 +1939,38 @@ void appendMirrorGhostTile(
                 : (entity.enemy
                         ? TileType::Enemy
                         : state.movables[entity.movableIndex].type)));
+    const TileType ghostType = entity.player ? TileType::Player : entity.enemy
+        ? TileType::Enemy : state.movables[entity.movableIndex].type;
+    const auto supportPose = [&](const GameState& result, GridPosition3 destination) {
+        auto pose = ghost;
+        pose.cell = destination;
+        pose.position = { static_cast<float>(destination.x), static_cast<float>(destination.y) };
+        pose.baseElevation = 0.0f;
+        const auto tileAt = [&](GridPosition3 cell) {
+            if (const auto* movable = rules::movableAt(result, cell)) return movable->type;
+            if (rules::enemyAt(result, cell)) return TileType::Enemy;
+            if (std::ranges::any_of(result.players, [&](const auto& player) {
+                    return !player.dead && !player.drowned && player.cell == cell;
+                })) return TileType::Player;
+            if (!input.level.inBounds(cell)) return TileType::Air;
+            const TileType tile = input.level.tileAt(static_cast<uint32_t>(cell.x),
+                static_cast<uint32_t>(cell.y), static_cast<uint32_t>(cell.z));
+            // A filled water cell presents a dry support surface.
+            return tileTypeIsWater(tile) && !rules::isUnfilledWater(input.level, result,
+                { cell.x, cell.y, cell.z + 1 }) ? TileType::Ground : tile;
+        };
+        applyEditorLilyPadSupport(pose, ghostType, tileAt,
+            input.presentation.worldAnimationTimeSeconds());
+        return pose;
+    };
+    const auto fromPose = supportPose(resultState, entity.destination);
+    const auto toPose = animatePreview && endResultState
+        ? supportPose(*endResultState, matchingEndEntity->destination) : fromPose;
+    ghost.baseElevation += fromPose.baseElevation +
+        (toPose.baseElevation - fromPose.baseElevation) * progress;
+    ghost.modelRotationOffsetRadians = fromPose.modelRotationOffsetRadians +
+        (toPose.modelRotationOffsetRadians - fromPose.modelRotationOffsetRadians) * progress;
+    ghost.pickHeight = fromPose.pickHeight;
     frame.tiles.push_back(ghost);
 }
 
@@ -2024,7 +2147,8 @@ void appendMirrorPreview(
                 };
                 appendMirrorEntitySegments(
                     preview, entitySegments, beamSegments);
-                appendMirrorGhostTile(frame, input, state, preview);
+                appendMirrorGhostTile(frame, input, state, mirrorPreview->after,
+                    actionEndPreview ? &actionEndPreview->after : nullptr, preview);
             }
 
             for (const MirrorRenderSegment& segment : beamSegments) {

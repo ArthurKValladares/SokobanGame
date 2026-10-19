@@ -8,6 +8,7 @@
 #include "engine/StateDelta.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
@@ -3963,6 +3964,290 @@ void testLockPlatesHoldAndReleaseUnits()
     }
 }
 
+void testWaterStreamTileDefinitions()
+{
+    TEST("waterStreamTileDefinitions");
+    CHECK(tileTypeIsMovableObject(TileType::LilyPad));
+    CHECK(tileTypeOccupiesLevelCell(TileType::LilyPad));
+    CHECK(tileTypeCanStandOnPlate(TileType::LilyPad));
+    CHECK(tileTypeFromName("LilyPad") == TileType::LilyPad);
+    CHECK(tileTypeIsWater(TileType::Water));
+    CHECK(!tileTypeIsWaterStream(TileType::Water));
+    const std::array streams { TileType::StreamUp, TileType::StreamRight,
+        TileType::StreamDown, TileType::StreamLeft };
+    const std::array directions { MoveDirection::Up, MoveDirection::Right,
+        MoveDirection::Down, MoveDirection::Left };
+    for (std::size_t i = 0; i < streams.size(); ++i) {
+        const TileType stream = streams[i];
+        CHECK(charToTileType(tileTypeToChar(stream)) == stream);
+        CHECK(tileTypeFromName(tileTypeName(stream)) == stream);
+        CHECK(tileTypeIsWater(stream));
+        CHECK(tileTypeIsWaterStream(stream));
+        CHECK(tileTypeSupportsEntity(stream));
+        CHECK(!tileTypeAllowsEntity(stream));
+        CHECK(!tileTypeAffectsCameraFit(stream));
+        CHECK(waterStreamOrientationQuarterTurns(stream) == i);
+        CHECK(rules::waterStreamDirectionForTile(stream) == directions[i]);
+        CHECK(rotateTileType(stream, 1) == streams[(i + 1) % streams.size()]);
+        CHECK(rotateTileType(stream, -1) == streams[(i + 3) % streams.size()]);
+    }
+    CHECK(!rules::waterStreamDirectionForTile(TileType::Water));
+}
+
+void testLilyPadFloatsAndCarriesStackOnStreams()
+{
+    TEST("lilyPadFloatsAndCarriesStackOnStreams");
+    const Level level = makeLevel({ { ".\"\"WW." }, { " $    " },
+        { " R    " }, { " C    " } });
+    const auto initial = rules::initialState(level);
+    CHECK(initial.movables[0].type == TileType::LilyPad);
+    CHECK(level.tileAt(1, 0, 1) == TileType::Air);
+    CHECK(rules::conveyorDirectionAt(level, cell(1, 0, 1)) == MoveDirection::Right);
+    CHECK(!rules::conveyorDirectionAt(level, cell(1, 0, 2)));
+    CHECK(rules::hasPendingMotion(level, initial));
+    auto after = rules::scopedStep(level, initial, std::nullopt, {},
+        { .actors = { initial.movables[0].id } });
+    CHECK(after.movables[0].cell == cell(2, 0, 1));
+    CHECK(!after.movables[0].fallen);
+    CHECK(after.movables[1].cell == cell(2, 0, 2));
+    CHECK(after.players[0].cell == cell(2, 0, 3));
+    CHECK(!after.players[0].dead);
+    auto restored = after;
+    StateDelta::between(initial, after).inverted().applyTo(restored);
+    CHECK(restored == initial);
+    after = rules::step(level, after);
+    CHECK(after.movables[0].cell == cell(3, 0, 1));
+    CHECK(!after.movables[0].fallen);
+    CHECK(after.players[0].cell == cell(3, 0, 3));
+    CHECK(!rules::hasPendingMotion(level, after));
+    CHECK(rules::step(level, after) == after);
+}
+
+void testWaterStreamsCarryInAllDirectionsAndRespectRate()
+{
+    TEST("waterStreamsCarryInAllDirectionsAndRespectRate");
+    for (const TileType stream : { TileType::StreamUp, TileType::StreamRight,
+            TileType::StreamDown, TileType::StreamLeft }) {
+        std::vector<std::string> water(5, std::string(5, tileTypeToChar(stream)));
+        water[0][0] = '.';
+        const Level level = makeLevel({ water,
+            { "C    ", "     ", "  $  ", "     ", "     " },
+            { "     ", "     ", "  C  ", "     ", "     " } });
+        const auto before = rules::initialState(level);
+        const auto direction = *rules::waterStreamDirectionForTile(stream);
+        const auto after = rules::scopedStep(level, before, std::nullopt, {},
+            { .actors = { before.movables[0].id } });
+        const auto target = rules::movementTarget(cell(2, 2, 1), direction);
+        CHECK(after.movables[0].cell == target);
+        CHECK(!after.movables[0].fallen);
+        CHECK(after.players[1].cell == cell(target.x, target.y, 2));
+        CHECK(!after.players[1].dead);
+        CHECK(rules::scopedStep(level, before, std::nullopt, { .conveyor = 0 },
+            { .actors = { before.movables[0].id } }) == before);
+        const auto fast = rules::scopedStep(level, before, std::nullopt, { .conveyor = 2 },
+            { .actors = { before.movables[0].id } });
+        CHECK(fast.movables[0].cell == rules::movementTarget(target, direction));
+    }
+}
+
+void testWaterStreamsCarryStackAroundEveryCorner()
+{
+    TEST("waterStreamsCarryStackAroundEveryCorner");
+    // Both loop directions cover every directed 90-degree turn. The current
+    // must be sampled again after each step, including within a fast beat.
+    for (const bool clockwise : { true, false }) {
+        const std::vector<std::string> water = clockwise
+            ? std::vector<std::string> { "WWWWW", "W\"\",W", "W'W,W", "W'``W", "WWWWW" }
+            : std::vector<std::string> { "WWWWW", "W,``W", "W,W'W", "W\"\"'W", "WWWWW" };
+        const Level level = makeLevel({ water,
+            { "     ", " $   ", "     ", "     ", "     " },
+            { "     ", " R   ", "     ", "     ", "     " },
+            { "     ", " C   ", "     ", "     ", "     " } });
+        std::array route { cell(1, 1, 1), cell(2, 1, 1), cell(3, 1, 1), cell(3, 2, 1),
+            cell(3, 3, 1), cell(2, 3, 1), cell(1, 3, 1), cell(1, 2, 1) };
+        if (!clockwise) std::reverse(route.begin() + 1, route.end());
+        const auto initial = rules::initialState(level);
+        auto state = initial;
+        for (std::size_t step = 1; step <= route.size(); ++step) {
+            const auto after = rules::step(level, state);
+            const auto target = route[step % route.size()];
+            CHECK(after.movables[0].cell == target);
+            CHECK(after.movables[1].cell == cell(target.x, target.y, 2));
+            CHECK(after.players[0].cell == cell(target.x, target.y, 3));
+            CHECK(!after.movables[0].fallen);
+            CHECK(!after.movables[1].fallen);
+            CHECK(!after.players[0].dead);
+            auto restored = after;
+            StateDelta::between(state, after).inverted().applyTo(restored);
+            CHECK(restored == state);
+            state = after;
+        }
+        CHECK(state == initial);
+        CHECK(rules::step(level, initial, std::nullopt, { .conveyor = 3 }).movables[0].cell ==
+            route[3]);
+    }
+}
+
+void testLilyPadCanBePushedOntoWaterWithRiders()
+{
+    TEST("lilyPadCanBePushedOntoWaterWithRiders");
+    const Level level = makeLevel({ { "..WWW" }, { "C$   " }, { " C   " } });
+    const auto before = rules::initialState(level);
+    const auto after = rules::scopedStep(level, before, MoveDirection::Right, {},
+        { .actors = { before.players[0].id } });
+    CHECK(after.players[0].cell == cell(1, 0, 1));
+    CHECK(after.movables[0].cell == cell(2, 0, 1));
+    CHECK(!after.movables[0].fallen);
+    CHECK(after.players[1].cell == cell(2, 0, 2));
+    CHECK(!after.players[1].dead);
+
+    // A hero can step down onto a floating pad and remains above its support.
+    const Level board = makeLevel({ { "WWWW" }, { ".$  " }, { "C   " } });
+    const auto boarded = rules::step(board, rules::initialState(board), MoveDirection::Right);
+    CHECK(boarded.players[0].cell == cell(1, 0, 2));
+    CHECK(!boarded.players[0].dead);
+}
+
+void testWaterStreamPlatformCollisionsStayAtomic()
+{
+    TEST("waterStreamPlatformCollisionsStayAtomic");
+    const Level overhang = makeLevel({ { "W\"WWW" }, { " $   " }, { " C#  " } });
+    const auto blocked = rules::initialState(overhang);
+    CHECK(rules::step(overhang, blocked) == blocked);
+    const Level occupied = makeLevel({ { "W\"WWW" }, { " $   " }, { " CC  " } });
+    const auto occupiedBefore = rules::initialState(occupied);
+    CHECK(rules::step(occupied, occupiedBefore) == occupiedBefore);
+    const Level follow = makeLevel({ { "W\"\"WW" }, { " $$  " }, { " CC  " } });
+    const auto before = rules::initialState(follow);
+    const auto after = rules::step(follow, before);
+    CHECK(after.movables[0].cell == cell(2, 0, 1));
+    CHECK(after.movables[1].cell == cell(3, 0, 1));
+    CHECK(after.players[0].cell == cell(2, 0, 2));
+    CHECK(after.players[1].cell == cell(3, 0, 2));
+    const Level opposing = makeLevel({ { "W\"W`W" }, { " $ $ " }, { " C C " } });
+    const auto opposingBefore = rules::initialState(opposing);
+    CHECK(rules::step(opposing, opposingBefore) == opposingBefore);
+}
+
+void testEveryHeroBoardsFloatingPadsFromShoreAndDismounts()
+{
+    TEST("everyHeroBoardsFloatingPadsFromShoreAndDismounts");
+    for (const auto hero : { CharacterType::Rogue, CharacterType::Knight,
+            CharacterType::Druid, CharacterType::Witch, CharacterType::Bard }) {
+        Level::Definition definition {
+            .layers = { { ".WW." }, { "C$$ " }, { "    " } }, .character = hero };
+        if (hero == CharacterType::Bard) {
+            // Isolate walking from the Bard's separate ability to move all
+            // nearby loose blocks, including the pad supporting them.
+            for (int x : { 1, 2 }) {
+                definition.lockPlates.push_back({ .cell = cell(x, 0, 1), .startEnabled = true });
+                definition.plates.push_back({ .cell = cell(x, 0, 1), .tile = TileType::LockPlate });
+            }
+        }
+        const Level level = Level::loadFromDefinition(definition, "shore boarding");
+        const auto initial = rules::initialState(level);
+        const auto boarded = rules::scopedStep(level, initial, MoveDirection::Right, {},
+            { .actors = { initial.players[0].id } });
+        CHECK(boarded.players[0].cell == cell(1, 0, 2));
+        CHECK(!boarded.players[0].dead);
+        CHECK(boarded.movables == initial.movables);
+        const auto crossed = rules::scopedStep(level, boarded, MoveDirection::Right, {},
+            { .actors = { initial.players[0].id } });
+        CHECK(crossed.players[0].cell == cell(2, 0, 2));
+        CHECK(!crossed.players[0].dead);
+        CHECK(crossed.movables == initial.movables);
+        const auto dismounted = rules::scopedStep(level, crossed, MoveDirection::Right, {},
+            { .actors = { initial.players[0].id } });
+        CHECK(dismounted.players[0].cell == cell(3, 0, 1));
+        CHECK(!dismounted.players[0].dead);
+        CHECK(dismounted.movables == initial.movables);
+    }
+    // A blocked boarding top falls back to ordinary collision and push
+    // rules, which reject a shove that would leave the walking hero in water.
+    const Level occupied = makeLevel({ { ".WW." }, { "C$  " }, { " C  " } });
+    const auto occupiedBefore = rules::initialState(occupied);
+    const auto pushed = rules::scopedStep(occupied, occupiedBefore, MoveDirection::Right, {},
+        { .actors = { occupiedBefore.players[0].id } });
+    CHECK(pushed == occupiedBefore);
+    const Level ceiling = makeLevel({ { ".WW." }, { "C$  " }, { " #  " } });
+    const auto ceilingBefore = rules::initialState(ceiling);
+    const auto under = rules::scopedStep(ceiling, ceilingBefore, MoveDirection::Right, {},
+        { .actors = { ceilingBefore.players[0].id } });
+    CHECK(under == ceilingBefore);
+}
+
+void testWaterStreamsStopPadsAtBanksButExternalMovementCanBeachThem()
+{
+    TEST("waterStreamsStopPadsAtBanksButExternalMovementCanBeachThem");
+    const Level bank = makeLevel({ { "W\".." }, { " $  " }, { " C  " } });
+    const auto initial = rules::initialState(bank);
+    CHECK(rules::step(bank, initial) == initial);
+    const auto dismounted = rules::scopedStep(bank, initial, MoveDirection::Right, {},
+        { .actors = { initial.players[0].id } });
+    CHECK(dismounted.movables == initial.movables);
+    CHECK(dismounted.players[0].cell == cell(2, 0, 1));
+    CHECK(!dismounted.players[0].dead);
+
+    const Level filled = makeLevel({ { "W\"WW" }, { " $  " }, { " C  " } });
+    auto filledState = rules::initialState(filled);
+    filledState.movables.push_back({ .id = 90, .type = TileType::Rock,
+        .cell = cell(2, 0, 1), .fallen = true });
+    CHECK(rules::step(filled, filledState) == filledState);
+
+    // A direct push over a filled water cell can beach a pad and its rider.
+    const Level pushed = makeLevel({ { ".W.." }, { "C$  " }, { " C  " } });
+    auto pushState = rules::initialState(pushed);
+    pushState.movables.push_back({ .id = 90, .type = TileType::Rock,
+        .cell = cell(1, 0, 1), .fallen = true });
+    const auto beached = rules::scopedStep(pushed, pushState, MoveDirection::Right, {},
+        { .actors = { pushState.players[0].id } });
+    CHECK(beached.movables[0].cell == cell(2, 0, 1));
+    CHECK(!beached.movables[0].fallen);
+    CHECK(beached.players[1].cell == cell(2, 0, 2));
+
+    auto sliding = initial;
+    sliding.movables[0].sliding = MoveDirection::Right;
+    const auto slid = rules::scopedStep(bank, sliding, std::nullopt, {},
+        { .actors = { sliding.movables[0].id } });
+    CHECK(slid.movables[0].cell == cell(2, 0, 1));
+    CHECK(slid.players[0].cell == cell(2, 0, 2));
+}
+
+void testWaterStreamsKeepDrowningAndFilledWaterBehavior()
+{
+    TEST("waterStreamsKeepDrowningAndFilledWaterBehavior");
+    for (const char stream : std::string("'\",`")) {
+        std::string floor = "..W.";
+        floor[2] = stream;
+        for (const char block : std::string("RI")) {
+            const Level level = makeLevel({ { floor }, { std::string("C") + block + "  " } });
+            const auto after = rules::step(level, rules::initialState(level), MoveDirection::Right);
+            CHECK(after.movables[0].cell == cell(2, 0, 1));
+            CHECK(after.movables[0].fallen);
+            CHECK(!after.players[0].dead);
+            CHECK(!rules::isUnfilledWater(level, after, cell(2, 0, 1)));
+        }
+        const Level bare = makeLevel({ { floor }, { " C  " } });
+        const auto initial = rules::initialState(bare);
+        CHECK(rules::isUnfilledWater(bare, initial, cell(2, 0, 1)));
+        CHECK(rules::step(bare, initial, MoveDirection::Right) == initial);
+        auto sliding = initial;
+        sliding.players[0].sliding = MoveDirection::Right;
+        const auto drowned = rules::step(bare, sliding);
+        CHECK(drowned.players[0].dead);
+        CHECK(drowned.players[0].drowned);
+        auto filled = initial;
+        filled.movables.push_back({ .id = 90, .type = TileType::Rock,
+            .cell = cell(2, 0, 1), .fallen = true });
+        const auto bridged = rules::step(bare, filled, MoveDirection::Right);
+        CHECK(bridged.players[0].cell == cell(2, 0, 1));
+        CHECK(!bridged.players[0].dead);
+        CHECK(!rules::conveyorDirectionAt(bare, bridged, cell(2, 0, 1)));
+        CHECK(!rules::hasPendingMotion(bare, bridged));
+        CHECK(rules::step(bare, bridged) == bridged);
+    }
+}
+
 void testRobotPatrolAndReversal()
 {
     TEST("robotPatrolAndReversal");
@@ -4130,6 +4415,15 @@ void testRobotScopeLocksAndTurnPersistence()
 
 int main()
 {
+    testWaterStreamTileDefinitions();
+    testLilyPadFloatsAndCarriesStackOnStreams();
+    testWaterStreamsCarryInAllDirectionsAndRespectRate();
+    testWaterStreamsCarryStackAroundEveryCorner();
+    testLilyPadCanBePushedOntoWaterWithRiders();
+    testWaterStreamPlatformCollisionsStayAtomic();
+    testEveryHeroBoardsFloatingPadsFromShoreAndDismounts();
+    testWaterStreamsStopPadsAtBanksButExternalMovementCanBeachThem();
+    testWaterStreamsKeepDrowningAndFilledWaterBehavior();
     testRobotPatrolAndReversal();
     testRobotAvoidsWaterAndDrops();
     testRobotPushesOneUnitIncludingHero();

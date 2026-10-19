@@ -273,7 +273,7 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     for (uint32_t z = 0; z < level.depth(); ++z) {
         for (uint32_t y = 0; y < level.height(); ++y) {
             for (uint32_t x = 0; x < level.width(); ++x) {
-                if (level.tileAt(x, y, z) == TileType::Water) {
+                if (tileTypeIsWater(level.tileAt(x, y, z))) {
                     continue;
                 }
                 if (level.tileAt(x, y, z) == TileType::Gate) {

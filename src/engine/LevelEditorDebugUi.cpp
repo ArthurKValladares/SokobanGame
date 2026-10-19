@@ -1017,6 +1017,12 @@ void LevelEditorDebugUi::drawTilePalette(
     if (tileTypeIsRobot(editor.selectedTile())) {
         ImGui::TextWrapped("Robots patrol along their arrow axis and reverse when blocked or facing an unsafe drop. Rotate chooses their initial heading and axis. They push one unit, including a hero. Push a robot to reposition it, or stand on top to ride along.");
     }
+    if (editor.selectedTile() == TileType::LilyPad) {
+        ImGui::TextWrapped("Lily pads are pushable floating blocks. Place a pad one layer above water, then place riders on the layer above the pad. Heroes can also step onto a floating pad from shore. Water streams carry the pad and its riders together when their path is clear.");
+    }
+    if (tileTypeIsWaterStream(editor.selectedTile())) {
+        ImGui::TextWrapped("Water streams replace water cells on the water layer. Rotate chooses the exit direction. Feed a stream from either side to make a smooth corner automatically. They carry floating lily pads like conveyors; unprotected units still sink in water.");
+    }
     ImGui::TextWrapped(
         "Plates (Pressure, Buttons, Levers, End, Rotators, Lock Plates, Rail Stops) stack with units and mirrors; "
         "a Minecart can only stack on a Rail Stop. A Minecart Gate stacks on "

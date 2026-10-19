@@ -327,7 +327,9 @@ void appendWaterSurface(
     Vec2 size,
     bool editorPreview,
     uint32_t shorelineMask,
-    bool pickable)
+    bool pickable,
+    uint32_t streamDirection,
+    uint32_t streamBoundaryMask)
 {
     frame.waterSurfaces.push_back({
         .cell = cell,
@@ -338,6 +340,8 @@ void appendWaterSurface(
             config::waterDepthBelowGround +
             (editorPreview ? 0.02f : 0.0f),
         .shorelineMask = shorelineMask,
+        .streamDirection = streamDirection,
+        .streamBoundaryMask = streamBoundaryMask,
         .isEditorPreview = editorPreview,
         .pickable = pickable,
     });
@@ -348,7 +352,9 @@ void appendWaterCellSurface(
     GridPosition3 cell,
     bool editorPreview,
     uint32_t shorelineMask,
-    bool pickable)
+    bool pickable,
+    uint32_t streamDirection,
+    uint32_t streamBoundaryMask)
 {
     appendWaterSurface(
         frame,
@@ -360,7 +366,43 @@ void appendWaterCellSurface(
         { 1.0f, 1.0f },
         editorPreview,
         shorelineMask,
-        pickable);
+        pickable,
+        streamDirection,
+        streamBoundaryMask);
+}
+
+uint32_t waterStreamDirectionForTile(TileType tile)
+{
+    switch (tile) {
+    case TileType::StreamUp: return 1;
+    case TileType::StreamRight: return 2;
+    case TileType::StreamDown: return 3;
+    case TileType::StreamLeft: return 4;
+    default: return 0;
+    }
+}
+
+float lilyPadBob(Vec2 position, float timeSeconds)
+{
+    return std::sin(timeSeconds * 1.65f + position.x * 0.73f +
+        position.y * 0.51f) * 0.012f;
+}
+
+void applyLilyPadVisual(RenderFrameData::Tile& tile, float timeSeconds,
+    float floatingAmount)
+{
+    const Vec2 anchor { tile.position.x + (tile.size.x - 1.0f) * 0.5f,
+        tile.position.y + (tile.size.y - 1.0f) * 0.5f };
+    const float phase = timeSeconds * 1.12f + anchor.x * 0.73f +
+        anchor.y * 0.51f;
+    tile.baseElevation += floatingAmount *
+        (-config::waterDepthBelowGround + lilyPadBob(anchor, timeSeconds));
+    tile.modelRotationOffsetRadians +=
+        std::sin(phase) * 0.025f * floatingAmount;
+    tile.showGrid = false;
+    tile.pickHeight = config::lilyPadPickHeight * tile.height;
+    // Authored leaf colors carry the ribs and contrasting cut edge.
+    tile.color = { 1.0f, 1.0f, 1.0f, tile.color.w };
 }
 
 RenderFrameData::WaterGridBounds waterGridBoundsFor(

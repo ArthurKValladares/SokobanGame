@@ -869,12 +869,27 @@ bool Driver::settled() const
 bool Driver::runUntilSettled()
 {
     float elapsedSeconds = 0.0f;
+    // Recorded inputs advance discrete beats. Finish the previous tile's
+    // pause before admitting the next beat, even when the input is blocked.
+    while (!session_.moving()) {
+        const auto robotWake = session_.timeToNextRobotPatrol();
+        if (!robotWake) break;
+        elapsedSeconds += *robotWake;
+        if (elapsedSeconds > maximumSettleSeconds) return false;
+        session_.advanceActiveAction(*robotWake);
+    }
+    const auto originalRates = session_.stepRates();
+    struct RestoreRates {
+        GameplaySession& session;
+        rules::StepRates rates;
+        ~RestoreRates() { session.setStepRates(rates); }
+    } restoreRates { session_, originalRates };
     for (int transition = 0; transition < maximumSettleTransitions;
          ++transition) {
-        // Patrol motors repeat indefinitely. At a completion boundary, leave
-        // their next beat for the next recorded input, while still settling
-        // finite consequences such as slides. Admission below runs once even
-        // for a blocked input, so waiting against a wall advances the patrol.
+        // Patrol motors repeat indefinitely. Only the initial admission batch
+        // may start them; otherwise staggered tile pauses can keep one motor
+        // running forever while another waits. Finite slides and belts still
+        // settle completely before the next recorded input.
         if (transition > 0 && settled()) {
             return true;
         }
@@ -882,11 +897,19 @@ bool Driver::runUntilSettled()
         // admit everything that can run concurrently, advance exactly to the
         // next completion, commit it, and repeat from the new world state.
         while (session_.tryStartNextAction(level_, { })) { }
+        if (transition == 0) {
+            auto settlingRates = originalRates;
+            settlingRates.robot = 0;
+            session_.setStepRates(settlingRates);
+        }
         if (settled()) {
             return true;
         }
         if (!session_.moving()) {
-            return false;
+            // A blocked belt or a current at a bank retains its direction,
+            // but has no action to run. The admission pass has already tried
+            // every source, so this idle state is a settled endpoint.
+            return true;
         }
         const float step = session_.timeToNextCompletion();
         elapsedSeconds += step;

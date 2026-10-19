@@ -145,6 +145,9 @@ public:
     // planning whatever follows it from a state that never existed. Zero when
     // idle, or when something is already due.
     [[nodiscard]] float timeToNextCompletion() const;
+    // A stopped robot releases its cells and riders between patrol tiles.
+    // This simulation-time deadline also wakes an otherwise idle world.
+    [[nodiscard]] std::optional<float> timeToNextRobotPatrol() const;
     // Whether any action has run its full duration. `activeActionComplete`
     // asks the same of the oldest one only.
     [[nodiscard]] bool anyActionComplete() const;
@@ -372,7 +375,8 @@ private:
         std::vector<plans::TurretShotCue> turretShots = {},
         std::size_t causalGroup = 0,
         ActionDeferral deferral = {},
-        std::vector<plans::PlannedAction::PortalCue> portalTransits = {});
+        std::vector<plans::PlannedAction::PortalCue> portalTransits = {},
+        std::vector<EntityId> robotPatrolActors = {});
     [[nodiscard]] bool actionAdmissionAllows(const Action& action) const;
     [[nodiscard]] bool actionAdmissionAllows(
         const std::vector<ActionScheduler::Pending>& actions) const;
@@ -396,6 +400,8 @@ private:
     // and would otherwise be handed a second slide.
     [[nodiscard]] std::vector<EntityId> withoutEntitiesInFlight(
         std::vector<EntityId> candidates) const;
+    [[nodiscard]] bool robotHasRiderInFlight(EntityId robot) const;
+    [[nodiscard]] bool actionUsesMovingPlatformSupport(const Action& action) const;
     // Bookkeeping for one action that has just committed: history, the undo
     // stack, and the running move total.
     void recordCompletion(const Action& action, std::size_t causalGroup);
@@ -434,6 +440,17 @@ private:
     // new action may join them. The session decides *what* to plan and in what
     // order; the scheduler only executes.
     ActionScheduler scheduler_;
+    struct RobotPatrolPause {
+        EntityId robot = invalidEntityId;
+        float remainingSeconds = 0.0f;
+    };
+    struct RobotPatrolAction {
+        std::size_t actionId = 0;
+        std::vector<EntityId> robots;
+    };
+    // Transient scheduling state; checkpoints resume from a free tile boundary.
+    std::vector<RobotPatrolPause> robotPatrolPauses_;
+    std::vector<RobotPatrolAction> robotPatrolActions_;
     std::deque<Command> pendingCommands_;
     // Completed forward actions that can still be undone. Reversed actions
     // remove entries from this stack and never become undoable again.

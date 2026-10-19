@@ -222,7 +222,13 @@ struct StepResult {
 [[nodiscard]] GridPosition directionOffset(MoveDirection direction);
 [[nodiscard]] GridPosition3 movementTarget(GridPosition3 origin, MoveDirection direction);
 [[nodiscard]] std::optional<MoveDirection> conveyorDirectionForTile(TileType tile);
+[[nodiscard]] std::optional<MoveDirection> waterStreamDirectionForTile(TileType tile);
+// A stream occupies the water volume immediately below a floating unit.
+[[nodiscard]] std::optional<MoveDirection> waterStreamDirectionAt(const Level& level, GridPosition3 position);
+// Includes water currents below the cell as well as belts in the cell.
 [[nodiscard]] std::optional<MoveDirection> conveyorDirectionAt(const Level& level, GridPosition3 position);
+// Filled water blocks its current; an ordinary belt remains active.
+[[nodiscard]] std::optional<MoveDirection> conveyorDirectionAt(const Level& level, const GameState& state, GridPosition3 position);
 [[nodiscard]] std::optional<MoveDirection> turretDirectionForTile(TileType tile);
 [[nodiscard]] std::optional<MoveDirection> robotDirectionForTile(TileType tile);
 // Live patrol direction, including reversals and turns from rotators/portals.

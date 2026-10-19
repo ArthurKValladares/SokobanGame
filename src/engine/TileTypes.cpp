@@ -18,6 +18,8 @@ TileType rotateTileType(TileType type, int quarterTurns)
     for (const auto& variants : {
              std::array { TileType::ConveyorUp, TileType::ConveyorRight,
                  TileType::ConveyorDown, TileType::ConveyorLeft },
+             std::array { TileType::StreamUp, TileType::StreamRight,
+                 TileType::StreamDown, TileType::StreamLeft },
              std::array { TileType::MirrorNorthWest, TileType::MirrorNorthEast,
                  TileType::MirrorSouthEast, TileType::MirrorSouthWest },
              std::array { TileType::TurretNorth, TileType::TurretEast,
@@ -99,6 +101,9 @@ std::optional<TileType> tileTypeFromName(std::string_view name)
     if (name == "Robot") {
         return TileType::RobotNorth;
     }
+    if (name == "LilyPad" || name == "Lilypad") {
+        return TileType::LilyPad;
+    }
     for (const TileTypeDefinition& definition : tileTypeDefinitionTable) {
         if (definition.name == name) {
             return definition.type;
@@ -169,7 +174,7 @@ bool tileTypeCanCoverSurface(TileType occupant, TileType surface)
 
 bool tileTypeOccupiesLevelCell(TileType type)
 {
-    return tileTypeIsPlayerStart(type) || type == TileType::Rock ||
+    return tileTypeIsPlayerStart(type) || type == TileType::Rock || type == TileType::LilyPad ||
         type == TileType::Ice || type == TileType::Enemy ||
         tileTypeIsTurret(type) || tileTypeIsMirror(type) || tileTypeIsRobot(type);
 }
@@ -186,7 +191,7 @@ bool tileTypeIsSolidBlock(TileType type)
 
 bool tileTypeSupportsEntity(TileType type)
 {
-    return tileTypeIsSolidBlock(type) || type == TileType::Water;
+    return tileTypeIsSolidBlock(type) || tileTypeIsWater(type);
 }
 
 bool tileTypeAllowsEntity(TileType type)
@@ -257,7 +262,7 @@ std::optional<uint32_t> lecternOrientationQuarterTurns(TileType type)
 
 bool tileTypeIsMovableObject(TileType type)
 {
-    return type == TileType::Rock || type == TileType::Ice ||
+    return type == TileType::Rock || type == TileType::Ice || type == TileType::LilyPad ||
         tileTypeIsTurret(type) || tileTypeIsMirror(type) || tileTypeIsRobot(type);
 }
 
@@ -346,7 +351,7 @@ std::optional<int> rotatorQuarterTurns(TileType type)
 bool tileTypeAffectsCameraFit(TileType type)
 {
     return type != TileType::Air &&
-        type != TileType::Water &&
+        !tileTypeIsWater(type) &&
         !tileTypeIsDecorative(type);
 }
 

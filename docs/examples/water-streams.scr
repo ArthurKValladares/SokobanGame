@@ -1,0 +1,31 @@
+@water 0
+@lectern {"cell":[1,2,1],"text":"River crossing\n\nYou start on a floating lily pad. The water stream carries the pad and its riders toward the far dock. Step right onto the dock when you arrive.\n\nHeroes can board a floating pad from shore. Other units can stand on pads, and a blocked rider stops the whole platform.\n\nUse <!Undo!> to rewind a ride, or restart to float across again."}
+@layer 0
+............
+...      ...
+...      ...
+.."""""""...
+...      ...
+.  '''',,  .
+.  ``````  .
+............
+
+@layer 1
+############
+#          #
+#t         #
+# $      E #
+#          #
+#  $   $   #
+#          #
+############
+
+@layer 2
+            
+            
+            
+  Q         
+            
+            
+            
+            
