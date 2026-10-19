@@ -478,6 +478,54 @@ private:
             : std::nullopt;
     }
 
+    [[nodiscard]] TileType selectedPreviewTile() const
+    {
+        if (input_.deleting) return TileType::Air;
+        if (input_.editorPreviewTile) return *input_.editorPreviewTile;
+        const auto& move = input_.editor.pendingMove();
+        return move && move->kind == LevelEditor::MoveObject::Kind::Tile
+            ? move->tile : input_.editor.selectedTile();
+    }
+
+    [[nodiscard]] bool tilePreviewActive() const
+    {
+        return !pendingSelectorMoveId() &&
+            (input_.editor.tool() == LevelEditor::Tool::Tiles ||
+                input_.deleting || input_.editorPreviewTile || pendingTileMoveSource());
+    }
+
+    [[nodiscard]] bool hoverAllowsTilePreview(TileType tile) const
+    {
+        if (!tilePreviewActive() || !input_.hoverCell) return false;
+        const GridPosition3 cell = *input_.hoverCell;
+        return cell.z >= 0 && cell.x >= -1 && cell.y >= -1 &&
+            cell.x <= static_cast<int>(input_.editor.documentWidth()) &&
+            cell.y <= static_cast<int>(input_.editor.documentHeight()) &&
+            (!layerLocked_ || cell.z == static_cast<int>(activeLayer_)) &&
+            (input_.deleting || tile == TileType::Air ||
+                input_.editor.canPlaceWaterTile(cell, tile));
+    }
+
+    [[nodiscard]] std::optional<TileType> hoverStreamPreview() const
+    {
+        const TileType tile = selectedPreviewTile();
+        return tileTypeIsWaterStream(tile) && hoverAllowsTilePreview(tile) &&
+                input_.hoverCell != pendingTileMoveSource()
+            ? std::optional<TileType> { tile } : std::nullopt;
+    }
+
+    [[nodiscard]] TileType previewWaterTileAt(GridPosition3 cell) const
+    {
+        if (const auto stream = hoverStreamPreview();
+            stream && input_.hoverCell == cell) {
+            return *stream;
+        }
+        const TileType tile = documentTileAt(cell);
+        // Moving a stream removes its current, while retaining the water.
+        return pendingTileMoveSource() == cell && tileTypeIsWaterStream(tile)
+            ? TileType::Water : tile;
+    }
+
     [[nodiscard]] RenderFrameData initializeEditorFrame() const
     {
         RenderFrameData frame = arena_ != nullptr
@@ -923,7 +971,7 @@ private:
             }
             const GridPosition3 waterCell { x, y, z };
             const auto renderedWaterTileAt = [&](GridPosition3 position) {
-                return position == waterCell ? tile : documentTileAt(position);
+                return position == waterCell ? tile : previewWaterTileAt(position);
             };
             appendWaterCellSurface(
                 frame,
@@ -938,6 +986,11 @@ private:
                 true,
                 waterStreamFlowForCell(waterCell, renderedWaterTileAt),
                 streamBoundaryMaskForWaterCell(waterCell, tile, renderedWaterTileAt));
+            if (preview && tileTypeIsWaterStream(tile)) {
+                // The preview replaces the water surface, so it can remain
+                // flush with the surrounding shader instead of floating above it.
+                frame.waterSurfaces.back().elevation -= 0.02f;
+            }
             return;
         }
         if (tile == TileType::Ladder) {
@@ -1114,7 +1167,7 @@ private:
         applyEditorLilyPadSupport(renderTile, tile,
             [this](GridPosition3 position) { return documentTileAt(position); },
             input_.worldAnimationTimeSeconds);
-        renderTile.baseElevation += preview ? 0.02f : 0.0f;
+        renderTile.baseElevation += preview && tile != TileType::LilyPad ? 0.02f : 0.0f;
         renderTile.pickOnly = pickOnly;
         renderTile.isEditorPreview = preview;
         const bool animatedActor =
@@ -1258,6 +1311,10 @@ private:
                             static_cast<int>(y),
                             static_cast<int>(z),
                         });
+                    const bool streamPreviewTarget = tileTypeIsWater(tile) &&
+                        hoverStreamPreview() && input_.hoverCell == GridPosition3 {
+                            static_cast<int>(x), static_cast<int>(y), static_cast<int>(z),
+                        };
                     appendEditorTile(
                         frame,
                         static_cast<int>(x),
@@ -1265,7 +1322,7 @@ private:
                         static_cast<int>(z),
                         tile,
                         false,
-                        deletePreviewTarget || movePreviewSource);
+                        deletePreviewTarget || movePreviewSource || streamPreviewTarget);
                     appendCoveredPlate(frame, {
                         static_cast<int>(x),
                         static_cast<int>(y),
@@ -1423,28 +1480,17 @@ private:
             pendingSelectorMoveId();
         if (const std::optional<GridPosition3> source =
                 pendingTileMoveSource();
-            source && input_.editorPreviewTile) {
+            source && (!layerLocked_ || source->z == static_cast<int>(activeLayer_))) {
             appendEditorTile(
                 frame,
                 source->x,
                 source->y,
                 source->z,
-                *input_.editorPreviewTile,
+                selectedPreviewTile(),
                 true);
         }
-        if (!movingSelector &&
-            (input_.editor.tool() == LevelEditor::Tool::Tiles ||
-                input_.deleting || input_.editorPreviewTile) &&
-            input_.hoverCell &&
-            input_.hoverCell->z >= 0 &&
-            input_.hoverCell->x >= -1 &&
-            input_.hoverCell->y >= -1 &&
-            input_.hoverCell->x <= static_cast<int>(frame.levelWidth) &&
-            input_.hoverCell->y <= static_cast<int>(frame.levelHeight)) {
-            const TileType selectedTile = input_.deleting
-                ? TileType::Air
-                : input_.editorPreviewTile.value_or(
-                    input_.editor.selectedTile());
+        const TileType selectedTile = selectedPreviewTile();
+        if (hoverAllowsTilePreview(selectedTile)) {
             const TileType hoveredTile =
                 documentTileAt(*input_.hoverCell);
             const TileType previewTile = selectedTile == TileType::Air

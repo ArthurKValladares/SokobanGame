@@ -1500,6 +1500,18 @@ bool LevelEditor::paintCell(GridPosition3 position)
 
 bool LevelEditor::eraseCell(GridPosition3 position)
 {
+    if (position.x >= 0 && position.y >= 0 && position.z >= 0 &&
+        position.x < static_cast<int>(documentWidth()) &&
+        position.y < static_cast<int>(documentHeight()) &&
+        position.z < static_cast<int>(documentDepth()) &&
+        tileTypeIsWaterStream(charToTileType(
+            document_.layers[static_cast<std::size_t>(position.z)]
+                [static_cast<std::size_t>(position.y)][static_cast<std::size_t>(position.x)])
+                .value_or(TileType::Air))) {
+        const bool implicitWater = document_.waterLayer &&
+            static_cast<uint32_t>(position.z) == *document_.waterLayer;
+        return setCell(position, implicitWater ? TileType::Air : TileType::Water);
+    }
     return setCell(position, TileType::Air);
 }
 
@@ -1786,9 +1798,17 @@ bool LevelEditor::moveObject(GridPosition3 destination)
         document_.status = "The selected object no longer exists.";
         return false;
     }
+    if (!canPlaceWaterTile(destination, move->tile)) {
+        document_.status = move->tile == TileType::LilyPad
+            ? "Lily pads must be placed in an empty cell directly above water."
+            : "Water streams must be placed on existing water.";
+        return false;
+    }
     // Units and mirrors may move onto plates; minecart gates onto rails.
     const bool ontoPlate = tileTypeCanCoverSurface(move->tile, tileAt(destination));
-    if ((tileAt(destination) != TileType::Air && !ontoPlate) ||
+    const bool ontoWater = tileTypeIsWaterStream(move->tile) &&
+        tileTypeIsWater(tileAt(destination));
+    if ((tileAt(destination) != TileType::Air && !ontoPlate && !ontoWater) ||
         selectorAt(destination) != document_.selectors.end()) {
         document_.status = move->tile == TileType::MinecartGate
             ? "Move destination must be empty or an unoccupied rail."
@@ -1802,8 +1822,10 @@ bool LevelEditor::moveObject(GridPosition3 destination)
     // The erase and the placement are one command: record neither
     // separately, and leave the history untouched if the placement fails.
     historySuppressed_ = true;
-    (void)setCell(move->source, TileType::Air);
-    const bool placed = setCell(destination, move->tile);
+    (void)setCell(move->source,
+        tileTypeIsWaterStream(move->tile) ? TileType::Water : TileType::Air);
+    const bool placed = setCell(destination, move->tile) ||
+        (tileTypeIsWaterStream(move->tile) && tileAt(destination) == move->tile);
     historySuppressed_ = false;
     if (!placed) {
         applyDocumentSnapshot(before);
@@ -1974,6 +1996,46 @@ GridPosition3 LevelEditor::resolveEditTarget(
         pickedCell.z = topmostOccupiedLayer().value_or(pickedCell.z);
         return pickedCell;
     }
+    const TileType placementTile = pendingMove_
+        ? pendingMove_->kind == MoveObject::Kind::Tile ? pendingMove_->tile : TileType::Air
+        : document_.tool == Tool::Tiles ? document_.selectedTile : TileType::Air;
+    if (placementTile == TileType::LilyPad || tileTypeIsWaterStream(placementTile)) {
+        // A water brush follows the surface that was actually picked, never
+        // the normal "add another block" height. A pad is the only occupied
+        // pick through which the water directly below remains editable.
+        const auto authoredTileAt = [&](GridPosition3 cell) {
+            if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+                cell.x >= static_cast<int>(documentWidth()) ||
+                cell.y >= static_cast<int>(documentHeight()) ||
+                cell.z >= static_cast<int>(documentDepth())) {
+                return TileType::Air;
+            }
+            return charToTileType(document_.layers[static_cast<std::size_t>(cell.z)]
+                [static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)])
+                .value_or(TileType::Air);
+        };
+        std::optional<int> surface;
+        if (documentHasWater(pickedCell)) {
+            surface = pickedCell.z;
+        } else if ((authoredTileAt(pickedCell) == TileType::Air ||
+                       authoredTileAt(pickedCell) == TileType::LilyPad) &&
+            documentHasWater({ pickedCell.x, pickedCell.y, pickedCell.z - 1 })) {
+            surface = pickedCell.z - 1;
+        } else if (authoredTileAt(pickedCell) == TileType::Air && document_.waterLayer) {
+            const int water = static_cast<int>(*document_.waterLayer);
+            const auto occupied = topmostOccupiedLayer();
+            // Empty implicit-water columns sometimes arrive as a plane pick.
+            // Do not project the brush through a wall or another unit.
+            if ((!occupied || *occupied <= water) &&
+                documentHasWater({ pickedCell.x, pickedCell.y, water })) {
+                surface = water;
+            }
+        }
+        if (surface) {
+            pickedCell.z = *surface + (placementTile == TileType::LilyPad ? 1 : 0);
+        }
+        return pickedCell;
+    }
     if (replaceLayer) {
         return pickedCell;
     }
@@ -2049,6 +2111,46 @@ bool LevelEditor::setCell(GridPosition3 position, TileType tile)
     return setCellWithRotation(position, tile, rotation);
 }
 
+bool LevelEditor::documentHasWater(GridPosition3 position) const
+{
+    if (position.x < 0 || position.y < 0 || position.z < 0 ||
+        position.x >= static_cast<int>(documentWidth()) ||
+        position.y >= static_cast<int>(documentHeight()) ||
+        position.z >= static_cast<int>(documentDepth())) {
+        return false;
+    }
+    const TileType authored = charToTileType(
+        document_.layers[static_cast<std::size_t>(position.z)]
+            [static_cast<std::size_t>(position.y)][static_cast<std::size_t>(position.x)])
+        .value_or(TileType::Air);
+    return tileTypeIsWater(authored) ||
+        (authored == TileType::Air && document_.waterLayer &&
+            static_cast<uint32_t>(position.z) == *document_.waterLayer);
+}
+
+bool LevelEditor::canPlaceWaterTile(GridPosition3 position, TileType tile) const
+{
+    if (tileTypeIsWaterStream(tile)) {
+        return documentHasWater(position);
+    }
+    if (tile != TileType::LilyPad) {
+        return true;
+    }
+    if (position.z <= 0 || documentHasWater(position) ||
+        !documentHasWater({ position.x, position.y, position.z - 1 })) {
+        return false;
+    }
+    // A pad can create the layer immediately above the document's water.
+    if (position.z >= static_cast<int>(documentDepth())) {
+        return true;
+    }
+    const TileType current = charToTileType(
+        document_.layers[static_cast<std::size_t>(position.z)]
+            [static_cast<std::size_t>(position.y)][static_cast<std::size_t>(position.x)])
+        .value_or(TileType::Air);
+    return current == TileType::Air || current == TileType::LilyPad;
+}
+
 bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uint32_t quarterTurns)
 {
     if (editingOverworld() && tileTypeIsPlayerStart(tile)) {
@@ -2059,6 +2161,12 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
     quarterTurns = tile == TileType::Air || rotateTileType(tile, 1) != tile
         ? 0U : quarterTurns % 4;
     if (document_.layers.empty() || position.z < 0) {
+        return false;
+    }
+    if (!canPlaceWaterTile(position, tile)) {
+        document_.status = tile == TileType::LilyPad
+            ? "Lily pads must be placed in an empty cell directly above water."
+            : "Water streams must be placed on existing water.";
         return false;
     }
     if (editingOverworld() && tile == TileType::End) {

@@ -495,7 +495,7 @@ std::optional<PlannedAction> planRobotPatrols(
     const GameState& state,
     std::vector<EntityId> robots,
     const rules::StepRates& rates,
-    float stepDurationSeconds)
+    float secondsPerTile)
 {
     std::erase(robots, invalidEntityId);
     if (robots.empty() || rates.robot <= 0) {
@@ -503,7 +503,7 @@ std::optional<PlannedAction> planRobotPatrols(
     }
     return planScoped(
         level, state, std::nullopt, rates,
-        stepDurationSeconds * config::robotPatrolMovementDurationMultiplier,
+        secondsPerTile,
         rules::StepScope { .actors = std::move(robots) }, false);
 }
 
@@ -546,15 +546,26 @@ std::vector<EntityId> slidingEntities(const GameState& state)
     return ids;
 }
 
-std::vector<EntityId> conveyorRiders(
-    const Level& level, const GameState& state)
+namespace {
+
+std::vector<EntityId> surfaceRiders(
+    const Level& level, const GameState& state, bool streamsOnly)
 {
     std::vector<EntityId> ids;
+    const auto driven = [&](GridPosition3 cell) {
+        if (streamsOnly && (!rules::waterStreamDirectionAt(level, cell) ||
+                rules::conveyorDirectionForTile(level.tileAt(
+                    static_cast<uint32_t>(cell.x), static_cast<uint32_t>(cell.y),
+                    static_cast<uint32_t>(cell.z))))) {
+            return false;
+        }
+        return rules::conveyorDirectionAt(level, state, cell).has_value();
+    };
     for (std::size_t i = 0; i < state.players.size(); ++i) {
         const GameState::Player& player = state.players[i];
         // Momentum overrides the belt, so a sliding rider is not a rider yet.
         if (!player.dead && !player.sliding &&
-            rules::conveyorDirectionAt(level, state, player.cell)) {
+            driven(player.cell)) {
             ids.push_back(
                 resolvedEntityId(EntityKind::Player, player.id, i));
         }
@@ -562,7 +573,7 @@ std::vector<EntityId> conveyorRiders(
     for (std::size_t i = 0; i < state.movables.size(); ++i) {
         const GameState::Movable& movable = state.movables[i];
         if (!movable.fallen && !movable.dead && !movable.sliding &&
-            rules::conveyorDirectionAt(level, state, movable.cell)) {
+            driven(movable.cell)) {
             ids.push_back(
                 resolvedEntityId(EntityKind::Movable, movable.id, i));
         }
@@ -570,12 +581,24 @@ std::vector<EntityId> conveyorRiders(
     for (std::size_t i = 0; i < state.enemies.size(); ++i) {
         const GameState::Enemy& enemy = state.enemies[i];
         if (!enemy.fallen && !enemy.dead && !enemy.sliding &&
-            rules::conveyorDirectionAt(level, state, enemy.cell)) {
+            driven(enemy.cell)) {
             ids.push_back(
                 resolvedEntityId(EntityKind::Enemy, enemy.id, i));
         }
     }
     return ids;
+}
+
+} // namespace
+
+std::vector<EntityId> conveyorRiders(const Level& level, const GameState& state)
+{
+    return surfaceRiders(level, state, false);
+}
+
+std::vector<EntityId> waterStreamRiders(const Level& level, const GameState& state)
+{
+    return surfaceRiders(level, state, true);
 }
 
 ActionPlan fromMirrorPreview(

@@ -2,6 +2,7 @@
 #include "TestHarness.hpp"
 
 #include "engine/Tuning.hpp"
+#include "engine/GameplayConfig.hpp"
 #include "engine/render/FogOfWarConfig.hpp"
 #include "engine/ui/LecternConfig.hpp"
 

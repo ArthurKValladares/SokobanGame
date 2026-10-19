@@ -856,6 +856,7 @@ void testWaterStreamPlansCarryPlatformsAndReserveTheirRiders()
     const auto before = rules::initialState(level);
     const auto riders = plans::conveyorRiders(level, before);
     CHECK(riders == std::vector<EntityId> { before.movables[0].id });
+    CHECK(plans::waterStreamRiders(level, before) == riders);
     const auto ride = plans::planConveyorRides(level, before, riders, {}, 0.2f);
     CHECK(ride.has_value());
     if (!ride) return;
@@ -884,6 +885,18 @@ void testWaterStreamPlansCarryPlatformsAndReserveTheirRiders()
     const auto blockedState = rules::initialState(blocked);
     CHECK(!plans::planConveyorRides(blocked, blockedState,
         plans::conveyorRiders(blocked, blockedState), {}, 0.2f));
+}
+
+void testWaterStreamRidersExcludeBeltsAboveStreams()
+{
+    TEST("waterStreamRidersExcludeBeltsAboveStreams");
+    const Level level = makeLevel({ { "W\"WWW", "W\"WWW" },
+        { " $   ", "C>   " } });
+    auto state = rules::initialState(level);
+    state.players[0].cell = cell(1, 1, 1);
+    CHECK(plans::conveyorRiders(level, state).size() == 2);
+    CHECK(plans::waterStreamRiders(level, state) ==
+        std::vector<EntityId> { state.movables[0].id });
 }
 
 void testWaterStreamPlansReevaluateCornersAndReserveTheirStack()
@@ -931,7 +944,7 @@ void testRobotPatrolPlansOneBeatAndLeavesUnrelatedActorsAlone()
     CHECK(patrol.has_value());
     if (!patrol) return;
     CHECK(patrol->legs.size() == 1);
-    CHECK(patrol->action.durationSeconds == 0.4f);
+    CHECK(patrol->action.durationSeconds == 0.2f);
     CHECK(patrol->action.after.movables[0].cell == cell(2, 0, 1));
     CHECK(patrol->action.after.movables[1] == initial.movables[1]);
     CHECK(patrol->action.after.players == initial.players);
@@ -943,6 +956,7 @@ void testRobotPatrolPlansOneBeatAndLeavesUnrelatedActorsAlone()
 int main()
 {
     testWaterStreamPlansCarryPlatformsAndReserveTheirRiders();
+    testWaterStreamRidersExcludeBeltsAboveStreams();
     testWaterStreamPlansReevaluateCornersAndReserveTheirStack();
     testRobotPatrolPlansOneBeatAndLeavesUnrelatedActorsAlone();
     testChainPlanningStopsAtTheCap();

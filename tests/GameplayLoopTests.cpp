@@ -39,10 +39,10 @@ void testRobotCarriesHeroWithSmoothMotionAndFrameCatchUp()
     CHECK(session.state().movables[0].cell == GridPosition3({ 1, 0, 1 }));
     CHECK(presentation.movables()[0].renderPosition.x > 1.0f);
     CHECK(presentation.movables()[0].renderPosition.x < 2.0f);
-    CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 0.25f) < 0.0001f);
+    CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 0.20f) < 0.0001f);
     CHECK(std::abs(presentation.players()[0].motion.renderPosition.x -
         presentation.movables()[0].renderPosition.x) < 0.0001f);
-    (void)GameplayLoop::update(level, session, presentation, {}, 1.0f, true);
+    (void)GameplayLoop::update(level, session, presentation, {}, 1.5f, true);
     CHECK(session.state().movables[0].cell == GridPosition3({ 3, 0, 1 }));
     CHECK(session.state().players[0].cell == GridPosition3({ 3, 0, 2 }));
     CHECK(session.playerMoveCount() == 0);
@@ -66,18 +66,123 @@ void testRobotHalfSpeedAndFreeDwellFollowSimulationTime()
     CHECK(!session.moving());
     CHECK(session.timeToNextRobotPatrol() == config::robotPatrolPauseSeconds);
     CHECK(presentation.movables()[0].robotDriveSamples.empty());
-    (void)GameplayLoop::update(level, session, presentation, {}, 0.1f, true);
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.25f, true);
     CHECK(!session.moving());
     CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 1.0f) < 0.0001f);
-    (void)GameplayLoop::update(level, session, presentation, {}, 0.1f, true);
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.25f, true);
     CHECK(!session.timeToNextRobotPatrol());
     (void)GameplayLoop::update(level, session, presentation, {}, 0.25f, true);
     CHECK(std::abs(presentation.movables()[0].renderPosition.x - 2.5f) < 0.0001f);
     CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 1.5f) < 0.0001f);
-    (void)GameplayLoop::update(level, session, presentation, {}, 1.15f, true);
+    (void)GameplayLoop::update(level, session, presentation, {}, 1.5f, true);
     CHECK(session.state().movables[0].cell == GridPosition3({ 4, 0, 1 }));
     CHECK(std::abs(presentation.movables()[0].robotDriveTimeSeconds - 3.0f) < 0.0001f);
     CHECK(presentation.movables()[0].robotDriveSamples.size() <= 1);
+}
+
+void testWaterStreamCarriesPadAndRiderAtHalfSpeedWhileBeltsKeepTheirSpeed()
+{
+    TEST("waterStreamCarriesPadAndRiderAtHalfSpeedWhileBeltsKeepTheirSpeed");
+    const Level level = makeLevel({
+        { "W\"WWW", "....." },
+        { " $   ", "R>   " },
+        { " C   ", "     " },
+    });
+    auto initial = rules::initialState(level);
+    // A rock cannot be authored in the belt's own cell. Start it there as
+    // though an earlier player push had just finished.
+    initial.movables[1].cell = { 1, 1, 1 };
+    GameplaySession session;
+    session.resetToState(initial, initial.players[0].controller);
+    session.setStepDurationSeconds(0.125f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.125f, true);
+    CHECK(session.state().movables[0].cell == GridPosition3({ 1, 0, 1 }));
+    CHECK(session.state().players[0].cell == GridPosition3({ 1, 0, 2 }));
+    CHECK(std::abs(presentation.movables()[0].renderPosition.x - 1.5f) < 0.0001f);
+    CHECK(std::abs(presentation.players()[0].motion.renderPosition.x - 1.5f) < 0.0001f);
+    CHECK(session.state().movables[1].cell == GridPosition3({ 2, 1, 1 }));
+    CHECK(std::abs(presentation.movables()[1].renderPosition.x - 2.0f) < 0.0001f);
+    CHECK(session.inFlight().size() == 1);
+
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.125f, true);
+    CHECK(session.state().movables[0].cell == GridPosition3({ 2, 0, 1 }));
+    CHECK(session.state().players[0].cell == GridPosition3({ 2, 0, 2 }));
+    CHECK(std::abs(presentation.movables()[0].renderPosition.x - 2.0f) < 0.0001f);
+    CHECK(std::abs(presentation.players()[0].motion.renderPosition.x - 2.0f) < 0.0001f);
+    CHECK(!session.moving());
+    CHECK(session.playerMoveCount() == 0);
+}
+
+void testWaterStreamCornersKeepHalfSpeedThroughLongFrameCatchUp()
+{
+    TEST("waterStreamCornersKeepHalfSpeedThroughLongFrameCatchUp");
+    const Level level = makeLevel({
+        { "W\",WW", "WW,WW", "WWWWW" },
+        { " $   ", "     ", "     " },
+        { " C   ", "     ", "     " },
+    });
+    GameplaySession split;
+    split.reset(level);
+    split.setStepDurationSeconds(0.125f);
+    GameplayPresentation splitPresentation;
+    splitPresentation.resetEntities(split.state());
+    GameplaySession catchUp;
+    catchUp.reset(level);
+    catchUp.setStepDurationSeconds(0.125f);
+    GameplayPresentation catchUpPresentation;
+    catchUpPresentation.resetEntities(catchUp.state());
+
+    for (int frame = 0; frame < 5; ++frame) {
+        (void)GameplayLoop::update(level, split, splitPresentation, {}, 0.125f, true);
+    }
+    (void)GameplayLoop::update(level, catchUp, catchUpPresentation, {}, 0.625f, true);
+    // Two stream tiles have committed, and the third is halfway through.
+    // A current changes direction on the corner without adding a pause.
+    CHECK(split.state().movables[0].cell == GridPosition3({ 2, 1, 1 }));
+    CHECK(split.state().players[0].cell == GridPosition3({ 2, 1, 2 }));
+    CHECK(std::abs(splitPresentation.movables()[0].renderPosition.x - 2.0f) < 0.0001f);
+    CHECK(std::abs(splitPresentation.movables()[0].renderPosition.y - 1.5f) < 0.0001f);
+    CHECK(std::abs(splitPresentation.players()[0].motion.renderPosition.y - 1.5f) < 0.0001f);
+    CHECK(catchUp.state() == split.state());
+    CHECK(std::abs(catchUpPresentation.movables()[0].renderPosition.x -
+        splitPresentation.movables()[0].renderPosition.x) < 0.0001f);
+    CHECK(std::abs(catchUpPresentation.movables()[0].renderPosition.y -
+        splitPresentation.movables()[0].renderPosition.y) < 0.0001f);
+    CHECK(std::abs(catchUpPresentation.players()[0].motion.renderPosition.y -
+        splitPresentation.players()[0].motion.renderPosition.y) < 0.0001f);
+
+    (void)GameplayLoop::update(level, split, splitPresentation, {}, 0.125f, true);
+    (void)GameplayLoop::update(level, catchUp, catchUpPresentation, {}, 0.125f, true);
+    CHECK(split.state().movables[0].cell == GridPosition3({ 2, 2, 1 }));
+    CHECK(split.state().players[0].cell == GridPosition3({ 2, 2, 2 }));
+    CHECK(catchUp.state() == split.state());
+    CHECK(!split.moving());
+    CHECK(!catchUp.moving());
+}
+
+void testPushingALilyPadAndRiderKeepsTheOrdinaryStepSpeed()
+{
+    TEST("pushingALilyPadAndRiderKeepsTheOrdinaryStepSpeed");
+    const Level level = makeLevel({ { "..WWW" }, { "C$   " }, { " C   " } });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.125f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+
+    (void)GameplayLoop::update(level, session, presentation,
+        { .right = { .pressed = true } }, 0.0625f, true);
+    CHECK(std::abs(presentation.movables()[0].renderPosition.x - 1.5f) < 0.0001f);
+    CHECK(std::abs(presentation.players()[1].motion.renderPosition.x - 1.5f) < 0.0001f);
+    (void)GameplayLoop::update(level, session, presentation, {}, 0.0625f, true);
+    CHECK(session.state().movables[0].cell == GridPosition3({ 2, 0, 1 }));
+    CHECK(session.state().players[0].cell == GridPosition3({ 1, 0, 1 }));
+    CHECK(session.state().players[1].cell == GridPosition3({ 2, 0, 2 }));
+    CHECK(!session.moving());
+    CHECK(session.playerMoveCount() == 1);
 }
 
 void testOpposingDirectionsAreNeutral()
@@ -1705,6 +1810,9 @@ int main()
     testPortalCrossingsReachTheLivePresentation();
     testRobotCarriesHeroWithSmoothMotionAndFrameCatchUp();
     testRobotHalfSpeedAndFreeDwellFollowSimulationTime();
+    testWaterStreamCarriesPadAndRiderAtHalfSpeedWhileBeltsKeepTheirSpeed();
+    testWaterStreamCornersKeepHalfSpeedThroughLongFrameCatchUp();
+    testPushingALilyPadAndRiderKeepsTheOrdinaryStepSpeed();
     testOpposingDirectionsAreNeutral();
     testSimulationTimingClampsLongFrames();
     testSimulationTimingScalesOneSharedDelta();

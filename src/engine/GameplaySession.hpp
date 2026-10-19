@@ -335,6 +335,7 @@ private:
         uint64_t progress = 0;
         uint64_t policy = 0;
         int reservationStep = 0;
+        float robotSecondsPerTile = 0.0f;
         bool operator==(const PlanningStamp&) const = default;
     };
     struct FailedPlanningAttempt {

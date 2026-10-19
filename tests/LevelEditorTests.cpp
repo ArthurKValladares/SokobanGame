@@ -4375,6 +4375,7 @@ void testGroupedPalettePreservesDirectionalBrushes()
     std::array<int, tileTypeCount> membership {};
     LevelEditor editor;
     editor.newDocument(5, 3, false);
+    editor.setWaterLayer(1);
     for (const auto& group : editorTilePalette::groups) {
         CHECK(group.count >= 2 && group.count <= group.tiles.size());
         for (TileType variant : group.variants()) {
@@ -4831,6 +4832,7 @@ void testDirectionalBrushesRotateTheirTileTypes()
     };
     LevelEditor editor;
     editor.newDocument(4, 2, false);
+    editor.setWaterLayer(1);
     for (const auto& family : families) {
         editor.setSelectedTile(family.front());
         for (std::size_t step = 1; step <= 4; ++step) {
@@ -4866,6 +4868,7 @@ void testWaterStreamsAndLilyPadsSurviveEditingAndSaving()
     auto editor = makeEditor(project);
     editor.newDocument(5, 3, false);
     editor.setWaterLayer(0);
+    CHECK(editor.eraseCell({ 2, 1, 0 }));
     editor.setSelectedTile(TileType::StreamUp);
     editor.rotateSelectedTile();
     CHECK(editor.selectedTile() == TileType::StreamRight);
@@ -4888,6 +4891,190 @@ void testWaterStreamsAndLilyPadsSurviveEditingAndSaving()
     CHECK(level.tileAt(2, 1, 0) == TileType::StreamRight);
     CHECK(level.movableTiles().size() == 1);
     CHECK(level.movableTiles().front().type == TileType::LilyPad);
+}
+
+void testWaterTilePlacementRequiresExistingWaterAndPreservesRejectedEdits()
+{
+    TEST("waterTilePlacementRequiresExistingWaterAndPreservesRejectedEdits");
+    LevelEditor editor;
+    editor.newDocument(5, 3, false);
+    editor.setWaterLayer(0);
+    const auto before = editor.documentDefinition();
+    const auto history = editor.historyStats();
+    // Configuring a water layer does not turn its authored ground into water.
+    for (const GridPosition3 cell : { GridPosition3 { 2, 1, 0 },
+             { 2, 1, 1 }, { -1, 1, 0 }, { 5, 1, 0 }, { 2, -1, 0 },
+             { 2, 3, 0 }, { 2, 1, -1 }, { 2, 1, 6 } }) {
+        CHECK(!editor.canPlaceWaterTile(cell, TileType::StreamUp));
+        CHECK(!editor.setCell(cell, TileType::StreamUp));
+        CHECK(editor.status().find("existing water") != std::string::npos);
+    }
+    for (const GridPosition3 cell : { GridPosition3 { 2, 1, 0 },
+             { 2, 1, 1 }, { -1, 1, 1 }, { 5, 1, 1 }, { 2, -1, 1 },
+             { 2, 3, 1 }, { 2, 1, -1 }, { 2, 1, 6 } }) {
+        CHECK(!editor.canPlaceWaterTile(cell, TileType::LilyPad));
+        CHECK(!editor.setCell(cell, TileType::LilyPad));
+        CHECK(editor.status().find("directly above water") != std::string::npos);
+    }
+    CHECK(editor.documentDefinition() == before);
+    CHECK(editor.historyStats().undoRecords == history.undoRecords);
+    CHECK(editor.historyStats().redoRecords == history.redoRecords);
+    CHECK(editor.historyStats().retainedBytes == history.retainedBytes);
+    CHECK(editor.documentWidth() == 5 && editor.documentHeight() == 3);
+    CHECK(editor.documentDepth() == 2);
+
+    CHECK(editor.eraseCell({ 2, 1, 0 })); // Implicit water.
+    CHECK(editor.setCell({ 3, 1, 0 }, TileType::Water)); // Explicit water.
+    for (const int x : { 2, 3 }) {
+        CHECK(editor.canPlaceWaterTile({ x, 1, 0 }, TileType::StreamLeft));
+        CHECK(editor.canPlaceWaterTile({ x, 1, 1 }, TileType::LilyPad));
+        CHECK(!editor.canPlaceWaterTile({ x, 1, 2 }, TileType::LilyPad));
+        CHECK(editor.setCell({ x, 1, 0 }, TileType::StreamLeft));
+        CHECK(editor.setCell({ x, 1, 1 }, TileType::Rock));
+        CHECK(!editor.canPlaceWaterTile({ x, 1, 1 }, TileType::LilyPad));
+        const auto occupied = editor.documentDefinition();
+        CHECK(!editor.setCell({ x, 1, 1 }, TileType::LilyPad));
+        CHECK(editor.documentDefinition() == occupied);
+        CHECK(editor.eraseCell({ x, 1, 1 }));
+        CHECK(editor.setCell({ x, 1, 1 }, TileType::LilyPad));
+    }
+    CHECK(editor.canPlaceWaterTile({ -1, -1, -1 }, TileType::Rock));
+
+    // A pad must sit above the surface rather than inside another water volume.
+    LevelEditor stackedWater;
+    stackedWater.newDocument(2, 2, false);
+    CHECK(stackedWater.setCell({ 1, 1, 0 }, TileType::Water));
+    stackedWater.setWaterLayer(1);
+    CHECK(!stackedWater.canPlaceWaterTile({ 1, 1, 1 }, TileType::LilyPad));
+    CHECK(!stackedWater.setCell({ 1, 1, 1 }, TileType::LilyPad));
+    CHECK(stackedWater.canPlaceWaterTile({ 1, 1, 2 }, TileType::LilyPad));
+}
+
+void testWaterBrushTargetsTheWaterSurfaceAndHonorsLayerLock()
+{
+    TEST("waterBrushTargetsTheWaterSurfaceAndHonorsLayerLock");
+    LevelEditor editor;
+    editor.newDocument(5, 3, false);
+    editor.setWaterLayer(0);
+    CHECK(editor.eraseCell({ 2, 1, 0 }));
+    editor.setSelectedTile(TileType::StreamUp);
+    CHECK((editor.resolveEditTarget({ 2, 1, 0 }, false, false) == GridPosition3 { 2, 1, 0 }));
+    CHECK((editor.resolveEditTarget({ 2, 1, 1 }, false, true) == GridPosition3 { 2, 1, 0 }));
+    for (const TileType direction : { TileType::StreamUp, TileType::StreamRight,
+             TileType::StreamDown, TileType::StreamLeft }) {
+        editor.setSelectedTile(direction);
+        const auto target = editor.resolveEditTarget({ 2, 1, 0 }, false, false);
+        CHECK(target.z == 0);
+        CHECK(editor.paintCell(target));
+        CHECK(editor.documentLayers()[0][1][2] == tileTypeToChar(direction));
+        CHECK(editor.documentDepth() == 2);
+    }
+    editor.setSelectedTile(TileType::LilyPad);
+    const auto pad = editor.resolveEditTarget({ 2, 1, 0 }, false, false);
+    CHECK((pad == GridPosition3 { 2, 1, 1 }));
+    CHECK(editor.paintCell(pad));
+    CHECK(editor.resolveEditTarget(pad, false, false) == pad);
+    CHECK(editor.resolveEditTarget(pad, true, false) == pad);
+    editor.setSelectedTile(TileType::StreamUp);
+    CHECK((editor.resolveEditTarget(pad, false, false) == GridPosition3 { 2, 1, 0 }));
+    CHECK(editor.paintCell(editor.resolveEditTarget(pad, false, false)));
+    CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::LilyPad));
+
+    editor.setLayerLocked(true);
+    editor.setActiveLayer(1);
+    const auto lockedStream = editor.resolveEditTarget({ 2, 1, 0 }, false, false);
+    CHECK(lockedStream == pad);
+    CHECK(!editor.paintCell(lockedStream));
+    editor.setSelectedTile(TileType::LilyPad);
+    editor.setActiveLayer(0);
+    CHECK((editor.resolveEditTarget(pad, false, false) == GridPosition3 { 2, 1, 0 }));
+    CHECK(!editor.paintCell(editor.resolveEditTarget(pad, false, false)));
+    editor.setLayerLocked(false);
+
+    // A picked rock/ground never projects the brush through to water behind it.
+    CHECK(editor.setCell({ 3, 1, 0 }, TileType::Water));
+    CHECK(editor.setCell({ 3, 1, 1 }, TileType::Rock));
+    editor.setSelectedTile(TileType::StreamRight);
+    CHECK((editor.resolveEditTarget({ 3, 1, 1 }, false, false) == GridPosition3 { 3, 1, 1 }));
+    CHECK(!editor.paintCell(editor.resolveEditTarget({ 3, 1, 1 }, false, false)));
+    CHECK(!editor.paintCell(editor.resolveEditTarget({ 4, 1, 0 }, false, false)));
+
+    // Explicit water can exist on another layer, including the current top.
+    CHECK(editor.setCell({ 4, 1, 2 }, TileType::Water));
+    editor.setSelectedTile(TileType::LilyPad);
+    const auto highPad = editor.resolveEditTarget({ 4, 1, 2 }, false, true);
+    CHECK((highPad == GridPosition3 { 4, 1, 3 }));
+    CHECK(editor.canPlaceWaterTile(highPad, TileType::LilyPad));
+    CHECK(editor.paintCell(highPad));
+    CHECK(editor.documentDepth() == 4);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentDepth() == 3);
+
+    // Selecting another tool retains its usual surface-placement behavior.
+    editor.setTool(LevelEditor::Tool::Decorations);
+    CHECK((editor.resolveEditTarget({ 4, 1, 2 }, false, false) == GridPosition3 { 4, 1, 3 }));
+}
+
+void testWaterTilesMoveAndEraseWithoutDrainingTheWater()
+{
+    TEST("waterTilesMoveAndEraseWithoutDrainingTheWater");
+    LevelEditor editor;
+    editor.newDocument(6, 3, false);
+    for (const int x : { 1, 2, 4 }) CHECK(editor.setCell({ x, 1, 0 }, TileType::Water));
+    CHECK(editor.setCell({ 1, 1, 0 }, TileType::StreamRight));
+    const auto beforeMove = editor.documentDefinition();
+    editor.setSelectedTile(TileType::Rock);
+    CHECK(editor.beginMove({ 1, 1, 0 }));
+    CHECK((editor.resolveMoveTarget({ 2, 1, 0 }) == GridPosition3 { 2, 1, 0 }));
+    CHECK(editor.moveObject(editor.resolveMoveTarget({ 2, 1, 0 })));
+    CHECK(editor.documentLayers()[0][1][1] == tileTypeToChar(TileType::Water));
+    CHECK(editor.documentLayers()[0][1][2] == tileTypeToChar(TileType::StreamRight));
+    const auto afterMove = editor.documentDefinition();
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentDefinition() == beforeMove);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentDefinition() == afterMove);
+
+    CHECK(editor.beginMove({ 2, 1, 0 }));
+    const auto beforeFailure = editor.documentDefinition();
+    const auto history = editor.historyStats();
+    CHECK(!editor.moveObject({ 3, 1, 0 }));
+    CHECK(editor.documentDefinition() == beforeFailure);
+    CHECK(editor.historyStats().undoRecords == history.undoRecords);
+    CHECK(editor.historyStats().redoRecords == history.redoRecords);
+    CHECK(editor.beginMove({ 2, 1, 0 }));
+    CHECK(!editor.moveObject({ -1, 1, 0 }));
+    CHECK(editor.documentDefinition() == beforeFailure);
+
+    CHECK(editor.setCell({ 2, 1, 1 }, TileType::LilyPad));
+    const auto beforePadMove = editor.documentDefinition();
+    CHECK(editor.beginMove({ 2, 1, 1 }));
+    CHECK((editor.resolveMoveTarget({ 4, 1, 0 }) == GridPosition3 { 4, 1, 1 }));
+    CHECK(editor.moveObject(editor.resolveMoveTarget({ 4, 1, 0 })));
+    CHECK(editor.documentLayers()[0][1][2] == tileTypeToChar(TileType::StreamRight));
+    CHECK(editor.documentLayers()[1][1][4] == tileTypeToChar(TileType::LilyPad));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentDefinition() == beforePadMove);
+    CHECK(editor.beginMove({ 2, 1, 1 }));
+    CHECK(!editor.moveObject({ 3, 1, 1 }));
+    CHECK(editor.documentDefinition() == beforePadMove);
+    CHECK(editor.beginMove({ 2, 1, 1 }));
+    CHECK(!editor.moveObject({ 4, 1, 2 }));
+    CHECK(editor.documentDefinition() == beforePadMove);
+
+    // Merging two currents of the same direction still removes the source's flow.
+    CHECK(editor.setCell({ 4, 1, 0 }, TileType::StreamRight));
+    CHECK(editor.beginMove({ 2, 1, 0 }));
+    CHECK(editor.moveObject({ 4, 1, 0 }));
+    CHECK(editor.documentLayers()[0][1][2] == tileTypeToChar(TileType::Water));
+    CHECK(editor.eraseCell({ 4, 1, 0 }));
+    CHECK(editor.documentLayers()[0][1][4] == tileTypeToChar(TileType::Water));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[0][1][4] == tileTypeToChar(TileType::StreamRight));
+    editor.setWaterLayer(0);
+    CHECK(editor.eraseCell({ 4, 1, 0 }));
+    CHECK(editor.documentLayers()[0][1][4] == tileTypeToChar(TileType::Air));
+    CHECK(editor.documentToLevel().tileAt(4, 1, 0) == TileType::Water);
 }
 
 void testRobotBrushPreservesHeadingPlatesAndUndoThroughSave()
@@ -5416,6 +5603,9 @@ int main()
     testDirectionalBrushesRotateTheirTileTypes();
     testRobotBrushPreservesHeadingPlatesAndUndoThroughSave();
     testWaterStreamsAndLilyPadsSurviveEditingAndSaving();
+    testWaterTilePlacementRequiresExistingWaterAndPreservesRejectedEdits();
+    testWaterBrushTargetsTheWaterSurfaceAndHonorsLayerLock();
+    testWaterTilesMoveAndEraseWithoutDrainingTheWater();
     testTileBrushRotationsSurviveEditingAndSaving();
     testTileRotationsSurviveDraftSwitchesAndCursorPlayback();
     testUnsortedRotationRecordsSupportBrushUpdates();

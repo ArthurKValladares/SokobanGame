@@ -408,6 +408,61 @@ void terrainSectionCollapsesWithoutHidingQuarryWalls()
     CHECK(terrainIconCount(panel.frame()) == 2);
 }
 
+void waterTilesSectionOffersLilyPadsAndDirectionalStreams()
+{
+    TEST("waterTilesSectionOffersLilyPadsAndDirectionalStreams");
+    EditorPanel panel(LevelEditor::Tool::Tiles);
+    const auto waterIconCount = [](const EditorPanel::Frame& frame) {
+        return std::ranges::count_if(frame.icons, [](const EditorPanel::Icon& icon) {
+            return !iconIsInPopup(icon) &&
+                (icon.tile == TileType::LilyPad || tileTypeIsWaterStream(icon.tile));
+        });
+    };
+    const auto expanded = panel.frame();
+    CHECK(expanded.text.find("Water Tiles") != std::string::npos);
+    CHECK(expanded.text.find("Place only on water.") != std::string::npos);
+    CHECK(waterIconCount(expanded) == 2);
+
+    panel.clickIcon(TileType::LilyPad);
+    CHECK(panel.editor.selectedTile() == TileType::LilyPad);
+    CHECK(panel.editor.tool() == LevelEditor::Tool::Tiles);
+    CHECK(panel.shows("Lily pads can be placed only on water."));
+    CHECK(std::ranges::none_of(panel.frame().icons, iconIsInPopup));
+
+    panel.clickIcon(TileType::StreamUp);
+    CHECK(panel.editor.selectedTile() == TileType::StreamUp);
+    CHECK(panel.editor.tool() == LevelEditor::Tool::Tiles);
+    CHECK(panel.shows("Water streams can be placed only on water."));
+    for (int turn = 1; turn <= 4; ++turn) {
+        panel.clickPaletteControl("Rotate");
+        const auto expected = rotateTileType(TileType::StreamUp, turn);
+        CHECK(panel.editor.selectedTile() == expected);
+        const auto rotated = panel.frame();
+        CHECK(waterIconCount(rotated) == 2);
+        CHECK(std::ranges::none_of(rotated.icons, iconIsInPopup));
+        CHECK(std::ranges::count_if(rotated.icons, [](const EditorPanel::Icon& icon) {
+            return tileTypeIsWaterStream(icon.tile);
+        }) == 1);
+        panel.clickIcon(expected);
+        CHECK(panel.editor.selectedTile() == expected);
+    }
+
+    // Collapsing this section hides both water brushes without affecting the
+    // terrain or ordinary Paint palette, and catches duplicate Paint entries.
+    panel.clickPaletteControl("Water Tiles");
+    const auto collapsed = panel.frame();
+    CHECK(waterIconCount(collapsed) == 0);
+    CHECK(std::ranges::any_of(collapsed.icons, [](const EditorPanel::Icon& icon) {
+        return !iconIsInPopup(icon) && icon.tile == TileType::Ground;
+    }));
+    CHECK(std::ranges::any_of(collapsed.icons, [](const EditorPanel::Icon& icon) {
+        return !iconIsInPopup(icon) && icon.tile == TileType::Wall;
+    }));
+    panel.clickPaletteControl("Water Tiles");
+    CHECK(waterIconCount(panel.frame()) == 2);
+    CHECK(panel.editor.selectedTile() == TileType::StreamUp);
+}
+
 void terrainPickersKeepEveryStyleAndRecentBrushes()
 {
     TEST("terrainPickersKeepEveryStyleAndRecentBrushes");
@@ -885,6 +940,7 @@ int main()
         addSplatKeepsMaskPaintingAvailable();
         newMaskActionUsesSelectedSplat();
         terrainSectionCollapsesWithoutHidingQuarryWalls();
+        waterTilesSectionOffersLilyPadsAndDirectionalStreams();
         terrainPickersKeepEveryStyleAndRecentBrushes();
         directionalFamiliesUseOneBrushAndRotateWithoutPickers();
         rotateControlKeepsArtAndBehaviorVariants();

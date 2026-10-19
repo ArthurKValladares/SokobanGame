@@ -160,12 +160,13 @@ inline constexpr int maxChainedSteps = 512;
 
 // One motor step for the selected robots, including pushed units and riders.
 // A patrol never settles, so release its claims after every tile or reversal.
+// Its travel duration is independent of the hero's world-step duration.
 [[nodiscard]] std::optional<PlannedAction> planRobotPatrols(
     const Level& level,
     const GameState& state,
     std::vector<EntityId> robots,
     const rules::StepRates& rates,
-    float stepDurationSeconds);
+    float secondsPerTile);
 
 [[nodiscard]] std::vector<EntityId> patrollingRobots(const GameState& state);
 
@@ -174,6 +175,9 @@ inline constexpr int maxChainedSteps = 512;
 // between them matters because only the first may be chained.
 [[nodiscard]] std::vector<EntityId> slidingEntities(const GameState& state);
 [[nodiscard]] std::vector<EntityId> conveyorRiders(
+    const Level& level, const GameState& state);
+// The stream-driven subset, excluding entities driven by a belt at their cell.
+[[nodiscard]] std::vector<EntityId> waterStreamRiders(
     const Level& level, const GameState& state);
 
 // Whether any entity is still carrying slide momentum, which is what decides

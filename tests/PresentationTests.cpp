@@ -31,6 +31,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <ranges>
@@ -3979,6 +3980,9 @@ void testWaterStreamCornersAndConnectedBoundaries()
             for (int x = 0; x < 3; ++x) {
                 const TileType tile = tileAt({ x, y, 0 });
                 rows[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] = tileTypeToChar(tile);
+                if (tileTypeIsWaterStream(tile)) {
+                    CHECK(editor.setCell({ x, y, 0 }, TileType::Water));
+                }
                 CHECK(editor.setCell({ x, y, 0 }, tile));
             }
         }
@@ -4033,6 +4037,143 @@ void testWaterStreamCornersAndConnectedBoundaries()
     put(center, TileType::StreamRight);
     put(adjacent(0), TileType::StreamRight);
     CHECK(streamBoundaryMaskForWaterCell(center, tileAt(center), tileAt) == 15U);
+}
+
+void testEditorWaterMechanicPreviewsRequireWater()
+{
+    TEST("editorWaterMechanicPreviewsRequireWater");
+    LevelEditor editor;
+    editor.newDocument(3, 3, false);
+    for (int y = 0; y < 3; ++y) {
+        for (int x = 0; x < 3; ++x) {
+            CHECK(editor.setCell({ x, y, 0 }, TileType::Water));
+        }
+    }
+    CHECK(editor.setCell({ 0, 0, 0 }, TileType::Ground));
+    CHECK(editor.setCell({ 2, 0, 1 }, TileType::Rock));
+    CHECK(editor.setCell({ 1, 2, 0 }, TileType::StreamUp));
+    CHECK(editor.setCell({ 2, 1, 0 }, TileType::StreamRight));
+    CHECK(editor.setCell({ 0, 1, 0 }, TileType::StreamLeft));
+    constexpr GridPosition3 center { 1, 1, 0 };
+    const auto build = [&](GridPosition3 hover, bool deleting = false) {
+        return RenderFrameBuilder::buildEditor({
+            .manifest = testManifest(), .editor = editor, .settings = {},
+            .hoverCell = hover, .deleting = deleting,
+        });
+    };
+    const auto surfaceAt = [](const RenderFrameData& frame, GridPosition3 cell) {
+        return std::ranges::find(frame.waterSurfaces, cell,
+            &RenderFrameData::WaterSurface::cell);
+    };
+    const auto hasTilePreview = [](const RenderFrameData& frame, GridPosition3 cell) {
+        return std::ranges::any_of(frame.tiles, [&](const auto& tile) {
+            return tile.cell == cell && tile.isEditorPreview && !tile.pickOnly;
+        });
+    };
+
+    editor.setSelectedTile(TileType::StreamRight);
+    const auto right = build(center);
+    CHECK(std::ranges::count(right.waterSurfaces, center,
+        &RenderFrameData::WaterSurface::cell) == 1);
+    const auto rightCenter = surfaceAt(right, center);
+    CHECK(rightCenter != right.waterSurfaces.end());
+    if (rightCenter != right.waterSurfaces.end()) {
+        CHECK(rightCenter->isEditorPreview);
+        CHECK(rightCenter->streamDirection == 5);
+        CHECK(near(rightCenter->elevation, 1.0f - config::waterDepthBelowGround));
+    }
+    const auto rightReceiver = surfaceAt(right, { 2, 1, 0 });
+    CHECK(rightReceiver != right.waterSurfaces.end());
+    if (rightReceiver != right.waterSurfaces.end()) {
+        CHECK((rightReceiver->streamBoundaryMask &
+            waterShorelineBit(WaterShorelineEdge::NegativeX)) == 0);
+    }
+
+    editor.rotateSelectedTile(2);
+    const auto left = build(center);
+    const auto leftCenter = surfaceAt(left, center);
+    CHECK(leftCenter != left.waterSurfaces.end());
+    if (leftCenter != left.waterSurfaces.end()) CHECK(leftCenter->streamDirection == 9);
+    const auto leftReceiver = surfaceAt(left, { 0, 1, 0 });
+    CHECK(leftReceiver != left.waterSurfaces.end());
+    if (leftReceiver != left.waterSurfaces.end()) {
+        CHECK((leftReceiver->streamBoundaryMask &
+            waterShorelineBit(WaterShorelineEdge::PositiveX)) == 0);
+    }
+    const auto disconnectedRight = surfaceAt(left, { 2, 1, 0 });
+    CHECK(disconnectedRight != left.waterSurfaces.end());
+    if (disconnectedRight != left.waterSurfaces.end()) {
+        CHECK((disconnectedRight->streamBoundaryMask &
+            waterShorelineBit(WaterShorelineEdge::NegativeX)) != 0);
+    }
+
+    const auto dryStream = build({ 0, 0, 0 });
+    CHECK(std::ranges::none_of(dryStream.waterSurfaces, [](const auto& water) {
+        return water.isEditorPreview;
+    }));
+    CHECK(std::ranges::any_of(dryStream.tiles, [](const auto& tile) {
+        return tile.cell == GridPosition3 { 0, 0, 0 } &&
+            !tile.isEditorPreview && !tile.pickOnly;
+    }));
+    const auto untouchedCenter = surfaceAt(dryStream, center);
+    CHECK(untouchedCenter != dryStream.waterSurfaces.end());
+    if (untouchedCenter != dryStream.waterSurfaces.end()) {
+        CHECK(!untouchedCenter->isEditorPreview && untouchedCenter->streamDirection == 0);
+    }
+
+    editor.setActiveLayer(1);
+    editor.setLayerLocked(true);
+    CHECK(std::ranges::none_of(build(center).waterSurfaces, [](const auto& water) {
+        return water.isEditorPreview;
+    }));
+    editor.setActiveLayer(0);
+    const auto lockedWater = build(center);
+    const auto lockedSurface = surfaceAt(lockedWater, center);
+    CHECK(lockedSurface != lockedWater.waterSurfaces.end());
+    if (lockedSurface != lockedWater.waterSurfaces.end()) {
+        CHECK(lockedSurface->isEditorPreview);
+    }
+    editor.setLayerLocked(false);
+
+    // Configured water layers count as water even without an authored W.
+    editor.setWaterLayer(0);
+    CHECK(editor.setCell({ 2, 2, 0 }, TileType::Air));
+    const auto implicitWaterStream = build({ 2, 2, 0 });
+    const auto implicitSurface = surfaceAt(implicitWaterStream, { 2, 2, 0 });
+    CHECK(implicitSurface != implicitWaterStream.waterSurfaces.end());
+    if (implicitSurface != implicitWaterStream.waterSurfaces.end()) {
+        CHECK(implicitSurface->isEditorPreview);
+    }
+
+    editor.setSelectedTile(TileType::LilyPad);
+    const auto lilyPreview = build({ 2, 2, 1 });
+    CHECK(hasTilePreview(lilyPreview, { 2, 2, 1 }));
+    const auto pad = std::ranges::find_if(lilyPreview.tiles, [](const auto& tile) {
+        return tile.cell == GridPosition3 { 2, 2, 1 } && tile.isEditorPreview;
+    });
+    if (pad != lilyPreview.tiles.end()) {
+        CHECK(near(pad->baseElevation, 1.0f - config::waterDepthBelowGround +
+            renderFrameParts::lilyPadBob({ 2.0f, 2.0f }, 0.0f)));
+    }
+    CHECK(!hasTilePreview(build({ 0, 0, 1 }), { 0, 0, 1 }));
+    CHECK(!hasTilePreview(build({ 2, 0, 1 }), { 2, 0, 1 }));
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::LilyPad));
+    CHECK(editor.beginMove({ 1, 1, 1 }));
+    editor.setSelectedTile(TileType::StreamRight);
+    CHECK(hasTilePreview(build({ 2, 2, 1 }), { 2, 2, 1 }));
+    CHECK(!hasTilePreview(build({ 0, 0, 1 }), { 0, 0, 1 }));
+    editor.cancelMove();
+
+    // A later support edit must not hide an existing leaf or prevent deleting it.
+    CHECK(editor.setCell(center, TileType::Ground));
+    editor.setSelectedTile(TileType::LilyPad);
+    const auto unsupported = build({ 1, 1, 1 });
+    CHECK(!hasTilePreview(unsupported, { 1, 1, 1 }));
+    CHECK(std::ranges::any_of(unsupported.tiles, [](const auto& tile) {
+        return tile.cell == GridPosition3 { 1, 1, 1 } &&
+            !tile.isEditorPreview && !tile.pickOnly;
+    }));
+    CHECK(hasTilePreview(build({ 1, 1, 1 }, true), { 1, 1, 1 }));
 }
 
 void testWaterStreamsAndFloatingLilyPadPresentation()
@@ -4170,15 +4311,19 @@ void testWaterStreamsAndFloatingLilyPadPresentation()
         .projectedState = stacked, .presentation = stackedPresentation, .settings = {},
     }));
     LevelEditor stackedEditor;
-    stackedEditor.newDocument(2, 1, false);
-    while (stackedEditor.documentLayers().size() < 4) {
-        stackedEditor.setActiveLayer(static_cast<int>(stackedEditor.documentLayers().size()) - 1);
-        stackedEditor.addLayerAbove();
+    TemporaryEditorProject stackedProject;
+    const auto stackedPath = stackedProject.source / "stacked.scr";
+    {
+        // Existing levels and gameplay can contain stacked leaves even
+        // though new editor placements require direct water support.
+        std::ofstream output(stackedPath);
+        for (const auto& line : Level::serializeLayerRows({
+                { "WW" }, { "$ " }, { "$ " }, { "C " },
+            })) {
+            output << line << '\n';
+        }
     }
-    CHECK(stackedEditor.setCell({ 0, 0, 0 }, TileType::Water));
-    CHECK(stackedEditor.setCell({ 0, 0, 1 }, TileType::LilyPad));
-    CHECK(stackedEditor.setCell({ 0, 0, 2 }, TileType::LilyPad));
-    CHECK(stackedEditor.setCell({ 0, 0, 3 }, TileType::Player));
+    CHECK(stackedEditor.loadDocument(stackedPath, false));
     checkStackContact(RenderFrameBuilder::buildEditor({
         .manifest = testManifest(), .editor = stackedEditor, .settings = {},
         .worldAnimationTimeSeconds = 0.6f,
@@ -6272,6 +6417,7 @@ int main()
     testMirrorDuplicationPreviewsEveryDestination();
     testGameplayFrameBuildsProceduralWaterSurface();
     testWaterStreamCornersAndConnectedBoundaries();
+    testEditorWaterMechanicPreviewsRequireWater();
     testWaterStreamsAndFloatingLilyPadPresentation();
     testWaterLayerBuildsUnboundedNonPickableExterior();
     testFilledWaterUpdatesEdgesAndRoundedCornerCaps();

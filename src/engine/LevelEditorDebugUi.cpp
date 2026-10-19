@@ -866,10 +866,15 @@ void LevelEditorDebugUi::drawTilePalette(
         static_cast<int>(
             (available + spacing) / (paletteButtonSize.x + spacing)));
     const bool editingOverworld = editor.editingOverworld();
-    const auto drawPaletteIcons = [&](bool terrain) {
+    const auto drawPaletteIcons = [&](bool terrain, bool water = false) {
         int column = 0;
         for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
             if (editorTilePalette::isTerrain(definition.type) != terrain) {
+                continue;
+            }
+            const bool waterTile = definition.type == TileType::LilyPad ||
+                tileTypeIsWaterStream(definition.type);
+            if (waterTile != water) {
                 continue;
             }
             const auto* group = editorTilePalette::groupFor(definition.type);
@@ -960,8 +965,11 @@ void LevelEditorDebugUi::drawTilePalette(
                 ImGui::EndPopup();
             }
             ImGui::PopID();
-            if (terrain && group != nullptr) {
+            if ((terrain || water) && group != nullptr) {
                 ImGui::TextUnformatted(group->name.data(), group->name.data() + group->name.size());
+            } else if (water) {
+                ImGui::TextUnformatted(displayedDefinition.name.data(),
+                    displayedDefinition.name.data() + displayedDefinition.name.size());
             }
             ImGui::EndGroup();
             ++column;
@@ -969,6 +977,10 @@ void LevelEditorDebugUi::drawTilePalette(
     };
     {
         SOKOBAN_PROFILE_SCOPE("Editor.Draw palette icons");
+        if (ImGui::CollapsingHeader("Water Tiles", ImGuiTreeNodeFlags_DefaultOpen)) {
+            drawPaletteIcons(false, true);
+            ImGui::TextWrapped("Place only on water. Streams follow the water surface; lily pads float above it. Rotate changes the stream direction.");
+        }
         if (ImGui::CollapsingHeader("Terrain", ImGuiTreeNodeFlags_DefaultOpen)) {
             drawPaletteIcons(true);
             if (ImGui::Button("Randomize Ground")) {
@@ -1018,10 +1030,10 @@ void LevelEditorDebugUi::drawTilePalette(
         ImGui::TextWrapped("Robots patrol along their arrow axis and reverse when blocked or facing an unsafe drop. Rotate chooses their initial heading and axis. They push one unit, including a hero. Push a robot to reposition it, or stand on top to ride along.");
     }
     if (editor.selectedTile() == TileType::LilyPad) {
-        ImGui::TextWrapped("Lily pads are pushable floating blocks. Place a pad one layer above water, then place riders on the layer above the pad. Heroes can also step onto a floating pad from shore. Water streams carry the pad and its riders together when their path is clear.");
+        ImGui::TextWrapped("Lily pads can be placed only on water. Click a water surface to float a pad above it. Place riders on the layer above the pad, or board from shore. Water streams carry the pad and its riders together when their path is clear.");
     }
     if (tileTypeIsWaterStream(editor.selectedTile())) {
-        ImGui::TextWrapped("Water streams replace water cells on the water layer. Rotate chooses the exit direction. Feed a stream from either side to make a smooth corner automatically. They carry floating lily pads like conveyors; unprotected units still sink in water.");
+        ImGui::TextWrapped("Water streams can be placed only on water. Click an existing water surface to paint a current; Rotate chooses its exit direction. Feed a stream from either side to make a smooth corner automatically. Streams carry floating lily pads like conveyors; unprotected units still sink in water.");
     }
     ImGui::TextWrapped(
         "Plates (Pressure, Buttons, Levers, End, Rotators, Lock Plates, Rail Stops) stack with units and mirrors; "

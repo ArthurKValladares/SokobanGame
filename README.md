@@ -669,15 +669,22 @@ Decorative blocks render but have no gameplay, support, occupancy, camera-fit,
 or water-grid-bound semantics. New water layouts should use `@water N`; `W`
 remains supported for older screens.
 
-Lily pads are pushable floating blocks. Paint **Lily Pad** one layer above
-water and place heroes or other units on the layer above the pad. Heroes can
+The ImGui level editor's **Water Tiles** palette contains **Lily Pad** and
+**Water Stream** brushes. Click existing water to place either: streams paint
+the water cell and lily pads float directly above it. Placement previews and
+clicks reject land, dry air, and obstructed pad positions. Drag to paint a
+stream, and press `R` to rotate its exit direction. With a locked layer,
+streams require the water layer and pads require the layer immediately above.
+
+Lily pads are pushable floating blocks. Place heroes or other units on the
+layer above the pad. Heroes can
 also step onto floating pads from an ordinary shore and step off onto land.
 Pads float without filling the water, and carry their stacked riders when moved. Paint
 **Water Stream** on the water layer and press `R` to rotate its exit direction.
 Streams automatically curve when a neighboring stream feeds in from either
 side, supporting all four corners in both directions. At junctions with
 multiple incoming directions the stream keeps its authored straight exit.
-Streams carry floating pads at the conveyor movement rate, stop when the pad
+Streams carry floating pads at half the conveyor movement speed, stop when the pad
 or a rider is blocked, and leave ordinary water's sinking rules intact.
 The current's moving foam strokes and wavelets blend into the surrounding water shader;
 pad leaves and their riders gently bob together. Undo and checkpoints retain
@@ -886,9 +893,11 @@ editor commands but does not own document or filesystem policy.
   down and spring back. Pressure plates lower under an occupying unit and
   remain pressed until it leaves. These motions also follow undo and restart.
 - **Robots:** choose **Robot**, then use **Rotate** or `R` to select the patrol
-  axis and initial heading. Each motor beat advances one tile at half the
-  hero's walking speed, then pauses for 0.2 seconds so heroes can step on or
-  off. A blocked robot
+  axis and initial heading. By default, each motor beat takes 0.5 seconds per
+  tile, then pauses for 0.5 seconds so heroes can step on or off. Adjust
+  **Seconds Per Tile** and **Pause Seconds** under **Tuning > Robots**;
+  **Save to header** makes the edited values the defaults of the next build.
+  A blocked robot
   reverses in place and tries the other direction on its next beat. Its motor
   avoids water and drops, and can push one unit, including a hero; two units
   in a row stop it. Heroes can push robots like other blocks and stand on top

@@ -1915,7 +1915,7 @@ void testRobotPatrolRepeatsWithoutInputAndRestoresAndUndoes()
     CHECK(session.tryStartNextAction(level, {}));
     CHECK(!session.tryStartNextAction(level, {}));
     CHECK(session.activeAction().after.movables[0].cell == cell(2, 0, 1));
-    CHECK(session.activeActionDuration() == 2.0f * session.stepDurationSeconds());
+    CHECK(session.activeActionDuration() == config::robotPatrolSecondsPerTile);
     finishAction(session);
     const GameState beforeReversal = session.state();
     CHECK(!session.moving());
@@ -1986,10 +1986,14 @@ void testRobotDwellReleasesRiderAndWaitsForBoardingAndUnboarding()
     finishAction(session);
     CHECK(session.state().movables[0].cell == cell(2, 0, 1));
     CHECK(session.timeToNextRobotPatrol().has_value());
+    // Start boarding near the end of the stop, so its final 0.20 seconds
+    // expire before the ordinary 0.25-second hero step finishes.
+    session.advanceActiveAction(config::robotPatrolPauseSeconds - 0.20f);
+    const float boardingPause = *session.timeToNextRobotPatrol();
     session.queueMove(MoveDirection::Up);
     CHECK(session.tryStartNextAction(level, {}));
     CHECK(session.activeActionDuration() == session.stepDurationSeconds());
-    session.advanceActiveAction(config::robotPatrolPauseSeconds);
+    session.advanceActiveAction(boardingPause);
     CHECK(!session.timeToNextRobotPatrol());
     // The motor cannot abandon a hero who is still arriving from the ledge.
     CHECK(!session.tryStartNextAction(level, {}));
@@ -2001,10 +2005,12 @@ void testRobotDwellReleasesRiderAndWaitsForBoardingAndUnboarding()
     CHECK(session.activeAction().after.players[0].cell == cell(3, 0, 2));
     finishAction(session);
     CHECK(session.state().movables[0].cell == cell(3, 0, 1));
+    session.advanceActiveAction(config::robotPatrolPauseSeconds - 0.20f);
+    const float unboardingPause = *session.timeToNextRobotPatrol();
     session.queueMove(MoveDirection::Down);
     CHECK(session.tryStartNextAction(level, {}));
     CHECK(session.activeAction().after.players[0].cell == cell(3, 1, 2));
-    session.advanceActiveAction(config::robotPatrolPauseSeconds);
+    session.advanceActiveAction(unboardingPause);
     CHECK(!session.tryStartNextAction(level, {}));
     session.advanceActiveAction(session.activeActionRemainingSeconds());
     session.completeActiveAction();
@@ -2036,10 +2042,57 @@ void testRobotDwellsAreIndependentAndForcedPushKeepsNormalTiming()
     session.advanceActiveAction(session.stepDurationSeconds());
     session.completeActiveAction();
     CHECK(session.timeToNextRobotPatrol() == config::robotPatrolPauseSeconds);
+    // The second robot finishes later and gets its own complete stop.
+    session.advanceActiveAction(session.activeActionRemainingSeconds());
+    session.completeActiveAction();
+    CHECK(session.timeToNextRobotPatrol().has_value());
+    CHECK(*session.timeToNextRobotPatrol() < config::robotPatrolPauseSeconds);
     session.advanceActiveAction(*session.timeToNextRobotPatrol());
+    CHECK(session.timeToNextRobotPatrol().has_value());
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 1);
+    CHECK(session.activeAction().after.movables[0].cell == cell(3, 0, 1));
+    CHECK(session.activeAction().after.movables[1].cell == session.state().movables[1].cell);
+}
+
+void testRobotTimingUsesLiveTuningWithoutRetimingAnAdmittedMove()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    TEST("robotTimingUsesLiveTuningWithoutRetimingAnAdmittedMove");
+    struct RestoreRobotTiming {
+        float travel = config::robotPatrolSecondsPerTile;
+        float pause = config::robotPatrolPauseSeconds;
+        ~RestoreRobotTiming()
+        {
+            config::robotPatrolSecondsPerTile = travel;
+            config::robotPatrolPauseSeconds = pause;
+        }
+    } restore;
+    const Level level = makeLevel({ { "........" }, { "C}      " } });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.10f);
+    config::robotPatrolSecondsPerTile = 0.80f;
+    config::robotPatrolPauseSeconds = 0.35f;
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeActionDuration() == 0.80f);
+    // Values edited in Tuning apply to this already-created session. The
+    // admitted tile retains its duration; the next tile uses the new value.
+    config::robotPatrolSecondsPerTile = 0.30f;
+    config::robotPatrolPauseSeconds = 0.60f;
+    CHECK(session.activeActionDuration() == 0.80f);
+    finishAction(session);
+    CHECK(session.timeToNextRobotPatrol() == 0.60f);
+    session.advanceActiveAction(*session.timeToNextRobotPatrol());
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeActionDuration() == 0.30f);
+    CHECK(session.stepDurationSeconds() == 0.10f);
+    config::robotPatrolPauseSeconds = 0.0f;
+    finishAction(session);
     CHECK(!session.timeToNextRobotPatrol());
     CHECK(session.tryStartNextAction(level, {}));
-    CHECK(session.inFlight().size() == 2);
+    CHECK(session.activeActionDuration() == 0.30f);
+#endif
 }
 
 void testBoardingCannotUseTheOldTopOfAnAlreadyMovingRobot()
@@ -2072,14 +2125,19 @@ void testStreamCarriesPadAndRiderThroughRestoreAndUndo()
     session.reset(level);
     const auto initial = session.state();
     CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeActionDuration() == session.stepDurationSeconds() * 2.0f);
     CHECK(session.activeAction().after.movables[0].cell == cell(2, 0, 1));
     CHECK(session.activeAction().after.players[0].cell == cell(2, 0, 2));
+    CHECK(session.state() == initial);
+    session.advanceActiveAction(session.stepDurationSeconds());
+    CHECK(!session.activeActionComplete());
     CHECK(session.state() == initial);
     finishAction(session);
     GameplaySession restored;
     CHECK(restored.restore(level, session.snapshot()));
     CHECK(restored.state() == session.state());
     CHECK(restored.tryStartNextAction(level, {}));
+    CHECK(restored.activeActionDuration() == restored.stepDurationSeconds() * 2.0f);
     finishAction(restored);
     CHECK(restored.state().movables[0].cell == cell(3, 0, 1));
     CHECK(restored.state().players[0].cell == cell(3, 0, 2));
@@ -2092,6 +2150,25 @@ void testStreamCarriesPadAndRiderThroughRestoreAndUndo()
     CHECK(restored.state().movables[0].cell == cell(2, 0, 1));
     CHECK(restored.state().players[0].cell == cell(2, 0, 2));
     CHECK(!restored.tryStartNextAction(level, {}));
+}
+
+void testFollowingStreamPadsShareTheSlowerMovementClock()
+{
+    TEST("followingStreamPadsShareTheSlowerMovementClock");
+    const Level level = makeLevel({ { "W\"\"\"WW" }, { " $$   " }, { " C    " } });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.10f);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeActionDuration() == 0.20f);
+    CHECK(session.activeAction().after.movables[0].cell == cell(2, 0, 1));
+    CHECK(session.activeAction().after.movables[1].cell == cell(3, 0, 1));
+    CHECK(session.activeAction().after.players[0].cell == cell(2, 0, 2));
+    CHECK(session.inFlight().size() == 1);
+    CHECK(!session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().movables[0].cell == cell(2, 0, 1));
+    CHECK(session.state().movables[1].cell == cell(3, 0, 1));
 }
 
 void testBoardingCannotUseTheOldTopOfAMovingLilyPad()
@@ -2135,11 +2212,13 @@ int main()
 {
     testChainedSlideCannotLandOnAMovingPadsOldTop();
     testStreamCarriesPadAndRiderThroughRestoreAndUndo();
+    testFollowingStreamPadsShareTheSlowerMovementClock();
     testBoardingCannotUseTheOldTopOfAMovingLilyPad();
     testRobotPatrolRepeatsWithoutInputAndRestoresAndUndoes();
     testRobotPatrolAndUnrelatedPlayerMoveRunConcurrently();
     testRobotDwellReleasesRiderAndWaitsForBoardingAndUnboarding();
     testRobotDwellsAreIndependentAndForcedPushKeepsNormalTiming();
+    testRobotTimingUsesLiveTuningWithoutRetimingAnAdmittedMove();
     testBoardingCannotUseTheOldTopOfAnAlreadyMovingRobot();
     testCyclicSlideSnapshotRestoresReachableEndpointAndRejectsUnreachableEndpoint();
     testLongFiniteSlideSnapshotRestoresAcrossPlannerContinuations();

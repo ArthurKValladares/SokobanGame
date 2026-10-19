@@ -1195,7 +1195,7 @@ GameplaySession::PlanningStamp GameplaySession::planningStamp(const Level& level
     // Refresh progress at mechanical leg boundaries before reading its generation.
     (void)planningState();
     return { &level, scheduler_.stateRevision(), scheduler_.progressGeneration(),
-        planningPolicyRevision_, scheduler_.currentStep() };
+        planningPolicyRevision_, scheduler_.currentStep(), config::robotPatrolSecondsPerTile };
 }
 
 GameplaySession::StartOutcome GameplaySession::planPlayerStep(
@@ -1422,27 +1422,37 @@ GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& le
             return actionMovesPlatformRider(action.plan, id);
         });
     });
-    if (std::optional<plans::PlannedAction> ride = plans::planConveyorRides(
-            level,
-            current,
-            conveyorActors,
-            stepRates_,
-            stepDurationSeconds_)) {
-        ride->action.playerMoveCountBefore = playerMoveCount_;
-        ride->action.playerMoveCountAfter = playerMoveCount_;
-        if (!actionAdmissionAllows(ride->action)) {
-            return StartOutcome::Impossible;
+    const auto streamActors = plans::waterStreamRiders(level, current);
+    // Belts and currents run on separate clocks. Keep each surface's riders
+    // together so a following platform can enter the cell its leader vacates.
+    for (const bool stream : { false, true }) {
+        auto actors = conveyorActors;
+        std::erase_if(actors, [&](EntityId id) {
+            return (std::ranges::find(streamActors, id) != streamActors.end()) != stream;
+        });
+        if (std::optional<plans::PlannedAction> ride = plans::planConveyorRides(
+                level,
+                current,
+                std::move(actors),
+                stepRates_,
+                stepDurationSeconds_ *
+                    (stream ? config::waterStreamMovementDurationMultiplier : 1.0f))) {
+            ride->action.playerMoveCountBefore = playerMoveCount_;
+            ride->action.playerMoveCountAfter = playerMoveCount_;
+            if (!actionAdmissionAllows(ride->action)) {
+                return StartOutcome::Impossible;
+            }
+            return beginAction(
+                       ride->action,
+                       ride->pressurePlateActivityChanged,
+                       std::move(ride->legs),
+                       std::move(ride->turretShots),
+                       0,
+                       {},
+                       std::move(ride->portalTransits))
+                ? StartOutcome::Started
+                : StartOutcome::Refused;
         }
-        return beginAction(
-                   ride->action,
-                   ride->pressurePlateActivityChanged,
-                   std::move(ride->legs),
-                   std::move(ride->turretShots),
-                   0,
-                   {},
-                   std::move(ride->portalTransits))
-            ? StartOutcome::Started
-            : StartOutcome::Refused;
     }
 
     auto robotActors = withoutEntitiesInFlight(plans::patrollingRobots(current));
@@ -1456,7 +1466,7 @@ GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& le
             current,
             robotActors,
             stepRates_,
-            stepDurationSeconds_)) {
+            config::robotPatrolSecondsPerTile)) {
         patrol->action.playerMoveCountBefore = playerMoveCount_;
         patrol->action.playerMoveCountAfter = playerMoveCount_;
         if (!actionAdmissionAllows(patrol->action)) {

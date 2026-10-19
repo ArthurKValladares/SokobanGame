@@ -215,6 +215,10 @@ public:
     bool paintCell(GridPosition3 position);
     bool eraseCell(GridPosition3 position);
     bool setCell(GridPosition3 position, TileType tile);
+    // Streams replace an existing water surface; lily pads occupy the empty
+    // cell immediately above one. Includes implicit water-layer cells and
+    // rejects horizontal expansion. Other tiles have no water placement restriction.
+    [[nodiscard]] bool canPlaceWaterTile(GridPosition3 position, TileType tile) const;
     // Randomizes ground rock variants and quarter turns on every document
     // layer as one undo step, preserving tile assignments. A seed is repeatable.
     bool randomizeRocks(std::optional<uint32_t> seed = std::nullopt);
@@ -565,6 +569,7 @@ private:
     static void clearHistory(EditHistory& history);
     void trimHistory();
     bool setCellWithRotation(GridPosition3 position, TileType tile, uint32_t quarterTurns);
+    [[nodiscard]] bool documentHasWater(GridPosition3 position) const;
     void setTileRotation(GridPosition3 cell, uint32_t quarterTurns);
     // The document as a level definition, with each device's plate list
     // filled in from its color group and the colors of plates that drive
