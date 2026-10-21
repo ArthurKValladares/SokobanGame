@@ -3,6 +3,7 @@
 #include "engine/GameplayLoop.hpp"
 #include "engine/RockScratchConfig.hpp"
 #include "engine/Time.hpp"
+#include "engine/render/WaterGeometry.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1530,10 +1531,11 @@ void testWaterRippleStartsAtContactAndPersistsAfterCommit()
         presentation.appendWaterRippleRenderData(frame);
         return frame;
     };
-    const float entrySeconds = 0.25f * 0.5f / 1.18f;
-    update({ .right = { .pressed = true } }, 0.1f);
+    const float entrySeconds = 0.25f * 0.5f /
+        (1.0f + config::sunkenMovableDepthBelowGround);
+    update({ .right = { .pressed = true } }, 0.05f);
     CHECK(ripples().waterRippleCount == 0);
-    update({}, 0.05f);
+    update({}, 0.1f);
     CHECK(ripples().waterRippleCount == 1);
     CHECK(!session.state().movables[0].fallen);
     CHECK(rules::isUnfilledWater(level, session.state(), { 2, 0, 1 }));
@@ -1576,12 +1578,12 @@ void testDeferredWaterEntryMatchesLongFrameCatchUp()
         GameplayPresentation presentation;
         presentation.resetEntities(session.state());
         (void)GameplayLoop::update(level, session, presentation,
-            { .right = { .pressed = true } }, split ? 0.6f : 0.9f, false);
+            { .right = { .pressed = true } }, split ? 0.55f : 0.9f, false);
         if (split) {
             RenderFrameData pending;
             presentation.appendWaterRippleRenderData(pending);
             CHECK(pending.waterRippleCount == 0);
-            (void)GameplayLoop::update(level, session, presentation, {}, 0.3f, false);
+            (void)GameplayLoop::update(level, session, presentation, {}, 0.35f, false);
         }
         CHECK(session.state().movables[0].fallen);
         RenderFrameData frame;
@@ -1592,11 +1594,146 @@ void testDeferredWaterEntryMatchesLongFrameCatchUp()
     const auto catchUp = run(false);
     CHECK(split.waterRippleCount == 1);
     CHECK(catchUp.waterRippleCount == 1);
-    const float entrySeconds = 0.5f + 0.25f * 0.5f / 1.18f;
+    const float entrySeconds = 0.5f + 0.25f * 0.5f /
+        (1.0f + config::sunkenMovableDepthBelowGround);
     CHECK(std::abs(split.waterRipples[0].ageSeconds -
         (0.9f - entrySeconds)) < 0.0001f);
     CHECK(std::abs(split.waterRipples[0].ageSeconds -
         catchUp.waterRipples[0].ageSeconds) < 0.0001f);
+}
+
+void testSunkenRockPoseStaysLowWhileHeroesWalkOverIt()
+{
+    TEST("sunkenRockPoseStaysLowWhileHeroesWalkOverIt");
+    for (const char rock : { 'R', '\\' }) {
+        const Level level = makeLevel({ { "..W." },
+            { std::string("C") + rock + " #" } });
+        GameplaySession session;
+        session.reset(level);
+        session.setStepDurationSeconds(0.25f);
+        GameplayPresentation presentation;
+        presentation.resetEntities(session.state());
+        (void)GameplayLoop::update(level, session, presentation,
+            { .right = { .pressed = true } }, 1.0f, true);
+        CHECK(!session.moving());
+        CHECK(session.state().movables[0].fallen);
+        CHECK(session.state().movables[0].cell == GridPosition3({ 2, 0, 1 }));
+        CHECK(std::abs(presentation.movables()[0].renderPosition.z) < 0.0001f);
+        (void)GameplayLoop::update(level, session, presentation,
+            { .right = { .pressed = true } }, 0.3f, true);
+        CHECK(session.state().players[0].cell == GridPosition3({ 2, 0, 1 }));
+        CHECK(!session.state().players[0].dead && !session.state().players[0].drowned);
+        CHECK(std::abs(presentation.players()[0].motion.renderPosition.z - 1.0f) < 0.0001f);
+        CHECK(std::abs(presentation.movables()[0].renderPosition.z) < 0.0001f);
+    }
+}
+
+void testRoundRockDrivenPadsCoastSlowlyAndStayBeforeShore()
+{
+    TEST("roundRockDrivenPadsCoastSlowlyAndStayBeforeShore");
+    // No rider, a mounted round rock, and a hero riding a wake-driven pad.
+    for (const int rider : { 0, 1, 2 }) {
+        auto layers = std::vector<std::vector<std::string>> {
+            { ".WWWW." }, { "Q$    " },
+        };
+        if (rider == 1) layers.push_back({ " \\    " });
+        if (rider == 2) layers.push_back({ " Q    " });
+        const Level level = makeLevel(layers);
+        auto initial = rules::initialState(level);
+        // Rock pickup and a passing rock's wake both leave this same saved
+        // momentum on the pad. Exercise it with and without a rock rider.
+        initial.movables[0].sliding = MoveDirection::Right;
+        GameplaySession session;
+        session.resetToState(initial, initial.players[0].controller);
+        session.setStepDurationSeconds(0.25f);
+        GameplayPresentation presentation;
+        presentation.resetEntities(session.state());
+        (void)GameplayLoop::update(level, session, presentation, {}, 0.25f, true);
+        CHECK(std::abs(presentation.movables()[0].renderPosition.x - 1.5f) < 0.0001f);
+        if (rider == 1) {
+            CHECK(std::abs(presentation.movables()[1].renderPosition.x - 1.5f) < 0.0001f);
+        }
+        if (rider == 2) {
+            CHECK(std::abs(presentation.players()[1].motion.renderPosition.x - 1.5f) < 0.0001f);
+        }
+        (void)GameplayLoop::update(level, session, presentation, {}, 0.25f, true);
+        CHECK(std::abs(presentation.movables()[0].renderPosition.x - 2.0f) < 0.0001f);
+        (void)GameplayLoop::update(level, session, presentation, {}, 3.0f, true);
+        CHECK(!session.moving());
+        CHECK(session.state().movables[0].cell == GridPosition3({ 4, 0, 1 }));
+        CHECK(!session.state().movables[0].sliding);
+        CHECK(!session.state().movables[0].fallen);
+        if (rider == 1) {
+            CHECK(session.state().movables[1].cell == GridPosition3({ 4, 0, 2 }));
+            CHECK(!session.state().movables[1].fallen);
+        }
+        if (rider == 2) {
+            CHECK(session.state().players[1].cell == GridPosition3({ 4, 0, 2 }));
+            CHECK(!session.state().players[1].dead);
+        }
+    }
+}
+
+void testRoundRockSkipRingsMatchCatchUpAndClearOnUndoRestart()
+{
+    TEST("roundRockSkipRingsMatchCatchUpAndClearOnUndoRestart");
+    const Level level = makeLevel({ { "..WWWW.." }, { "C\\      " } });
+    GameplaySession split;
+    GameplaySession catchUp;
+    split.reset(level);
+    catchUp.reset(level);
+    split.setStepDurationSeconds(0.25f);
+    catchUp.setStepDurationSeconds(0.25f);
+    GameplayPresentation splitPresentation;
+    GameplayPresentation catchUpPresentation;
+    splitPresentation.resetEntities(split.state());
+    catchUpPresentation.resetEntities(catchUp.state());
+    const auto ripples = [](const GameplayPresentation& presentation) {
+        RenderFrameData frame;
+        presentation.appendWaterRippleRenderData(frame);
+        return frame;
+    };
+    (void)GameplayLoop::update(level, split, splitPresentation,
+        { .right = { .pressed = true } }, 0.15f, false);
+    CHECK(ripples(splitPresentation).waterRippleCount == 0);
+    (void)GameplayLoop::update(level, split, splitPresentation, {}, 0.25f, false);
+    (void)GameplayLoop::update(level, catchUp, catchUpPresentation,
+        { .right = { .pressed = true } }, 0.4f, false);
+    const auto splitRings = ripples(splitPresentation);
+    const auto catchUpRings = ripples(catchUpPresentation);
+    CHECK(splitRings.waterRippleCount > 0);
+    CHECK(splitRings.waterRippleCount == catchUpRings.waterRippleCount);
+    for (std::size_t index = 0;
+         index < std::min(splitRings.waterRippleCount, catchUpRings.waterRippleCount);
+         ++index) {
+        CHECK(std::abs(splitRings.waterRipples[index].position.x -
+            catchUpRings.waterRipples[index].position.x) < 0.0001f);
+        CHECK(std::abs(splitRings.waterRipples[index].ageSeconds -
+            catchUpRings.waterRipples[index].ageSeconds) < 0.0001f);
+    }
+    CHECK(std::abs(splitPresentation.movables()[0].renderPosition.x -
+        catchUpPresentation.movables()[0].renderPosition.x) < 0.0001f);
+    CHECK(std::abs(splitPresentation.movables()[0].renderPosition.z -
+        catchUpPresentation.movables()[0].renderPosition.z) < 0.0001f);
+
+    (void)GameplayLoop::update(level, split, splitPresentation, {}, 0.6f, false);
+    CHECK(!split.moving());
+    CHECK(split.state().movables[0].cell == GridPosition3({ 6, 0, 1 }));
+    CHECK(!split.state().movables[0].fallen);
+    CHECK(split.playerMoveCount() == 1);
+    CHECK(ripples(splitPresentation).waterRippleCount > 0);
+    (void)GameplayLoop::update(level, split, splitPresentation,
+        { .undoPressed = true }, 0.01f, false);
+    CHECK(ripples(splitPresentation).waterRippleCount == 0);
+    (void)GameplayLoop::update(level, split, splitPresentation, {}, 1.0f, false);
+    CHECK(split.state().movables[0].cell == GridPosition3({ 1, 0, 1 }));
+    CHECK(ripples(splitPresentation).waterRippleCount == 0);
+    (void)GameplayLoop::update(level, split, splitPresentation,
+        { .right = { .pressed = true } }, 1.0f, false);
+    CHECK(ripples(splitPresentation).waterRippleCount > 0);
+    (void)GameplayLoop::update(level, split, splitPresentation,
+        { .restartPressed = true }, 0.01f, false);
+    CHECK(ripples(splitPresentation).waterRippleCount == 0);
 }
 
 void testRockScratchesGrowFadeAndClearWithGameplay()
@@ -1836,6 +1973,9 @@ int main()
     testFacingTurretsStartAnAmbientMutualVolley();
     testWaterRippleStartsAtContactAndPersistsAfterCommit();
     testDeferredWaterEntryMatchesLongFrameCatchUp();
+    testRoundRockSkipRingsMatchCatchUpAndClearOnUndoRestart();
+    testRoundRockDrivenPadsCoastSlowlyAndStayBeforeShore();
+    testSunkenRockPoseStaysLowWhileHeroesWalkOverIt();
     testRockScratchesGrowFadeAndClearWithGameplay();
     testRockScratchTimingMatchesLongFrameCatchUp();
     testPulledRockLeavesScratchesInMovementOrder();

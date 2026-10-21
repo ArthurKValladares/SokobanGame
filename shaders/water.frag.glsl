@@ -42,6 +42,8 @@ vec2 waterImpactRipples(vec2 worldPosition, float elevation)
     float lifetime = max(frame.waterRippleMeta.y, 0.001);
     for (int impact = 0; impact < count; ++impact) {
         vec4 ripple = frame.waterRipples[impact];
+        vec2 style = frame.waterRippleStyles[impact].xy;
+        float radiusScale = max(style.x, 0.01);
         if (abs(elevation - ripple.z) > 0.015 ||
             ripple.w < 0.0 || ripple.w >= lifetime) {
             continue;
@@ -61,16 +63,17 @@ vec2 waterImpactRipples(vec2 worldPosition, float elevation)
         float distanceFootprint = fwidth(distanceFromImpact);
         float shapeFootprint = fwidth(shape);
         float remaining = 1.0 - ripple.w / lifetime;
-        float fade = remaining * remaining;
-        for (int pulse = 0; pulse < 3; ++pulse) {
+        float fade = remaining * remaining * style.y;
+        int pulseCount = radiusScale < 0.99 ? 1 : 3;
+        for (int pulse = 0; pulse < pulseCount; ++pulse) {
             float waveAge = ripple.w - float(pulse) * 0.16;
             if (waveAge < 0.0) {
                 continue;
             }
-            float radius = 0.25 + waveAge * 1.65;
-            float warpAmplitude = min(radius * 0.22, 0.24);
+            float radius = (0.25 + waveAge * 1.65) * radiusScale;
+            float warpAmplitude = min(radius * 0.22, 0.24 * radiusScale);
             float warpedRadius = radius + shape * warpAmplitude;
-            float halfWidth = (0.028 + waveAge * 0.018) *
+            float halfWidth = (0.028 + waveAge * 0.018) * sqrt(radiusScale) *
                 mix(0.75, 1.45, fineShape);
             float ringPixelWidth = max(pixelWidth,
                 (distanceFootprint + shapeFootprint * warpAmplitude) * 0.65);
@@ -717,6 +720,57 @@ float cameraDepthFromDeviceDepth(
         max(farDepth - deviceDepth * depthRange, 0.0001);
 }
 
+// Intersect the opaque surface's local tangent plane with the water plane.
+// Its horizontal distance gives shoreline waves the mesh's actual contour,
+// including sloping and faceted rocks, rather than the occupied tile's square.
+// Derivatives must run before any depth-dependent branch.
+vec2 opaqueWaterContact(vec3 waterPosition, float waterCameraDepth,
+    float opaqueCameraDepth, float geometryPresent, float nearDepth, float farDepth)
+{
+    vec3 cameraPosition = frame.cameraPositionAndNearPlane.xyz;
+    vec3 opaquePosition = cameraPosition + (waterPosition - cameraPosition) *
+        (opaqueCameraDepth / max(waterCameraDepth, 0.001));
+    vec3 opaqueDx = dFdx(opaquePosition);
+    vec3 opaqueDy = dFdy(opaquePosition);
+    vec3 surfaceNormal = cross(opaqueDx, opaqueDy);
+    surfaceNormal /= max(length(surfaceNormal), 1e-12);
+    if (dot(surfaceNormal, cameraPosition - opaquePosition) < 0.0) {
+        surfaceNormal = -surfaceNormal;
+    }
+    float horizontalNormal = length(surfaceNormal.xy);
+    float signedDistanceToContact = dot(surfaceNormal, waterPosition - opaquePosition) /
+        max(horizontalNormal, 0.0001);
+    float distanceToContact = abs(signedDistanceToContact);
+    float heightBelowWater = waterPosition.z - opaquePosition.z;
+    // Flat pool floors have no waterline. Reject distant depth silhouettes too:
+    // a quad spanning an object and the background is not a local surface plane.
+    float depthContinuity = 1.0 - smoothstep(0.10, 0.25,
+        max(length(opaqueDx), length(opaqueDy)));
+    float coverage = geometryPresent * depthContinuity *
+        smoothstep(0.02, 0.10, horizontalNormal) *
+        step(-0.002, heightBelowWater) *
+        (1.0 - smoothstep(0.18, 0.28, heightBelowWater)) *
+        (1.0 - smoothstep(0.13, 0.16, distanceToContact));
+    // A tangent plane can extend above a wholly submerged mesh. Confirm that
+    // the predicted waterline really has a dry side before creating foam.
+    if (coverage > 0.0 && distanceToContact < 0.16) {
+        vec2 outward = surfaceNormal.xy / max(horizontalNormal, 0.0001);
+        vec3 insideContact = waterPosition -
+            vec3(outward * (signedDistanceToContact + 0.025), 0.0);
+        vec4 clip = frame.clipFromWorld * vec4(insideContact, 1.0);
+        vec3 ndc = clip.xyz / max(clip.w, 0.0001);
+        vec2 uv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+        float contactDepth = textureLod(sceneDepth,
+            clamp(uv, vec2(0.001), vec2(0.999)), 0.0).r;
+        float depthSeparation = cameraDepthFromDeviceDepth(contactDepth, nearDepth, farDepth) -
+            cameraDepthFromDeviceDepth(ndc.z, nearDepth, farDepth);
+        coverage *= 1.0 - smoothstep(-0.001, 0.004, depthSeparation);
+        coverage *= float(clip.w > 0.0 && all(greaterThan(uv, vec2(0.0))) &&
+            all(lessThan(uv, vec2(1.0))));
+    }
+    return vec2(distanceToContact, coverage);
+}
+
 vec3 waterReflectionNormal(vec2 worldPosition, float rippleField)
 {
     // Recover the ripple field's world-X/Y gradient from its screen-space
@@ -1085,6 +1139,33 @@ vec2 shorelineFoam(
     return foam;
 }
 
+// Refracting ice is absent from the opaque depth buffer. Its rounded-box
+// section is supplied at the water plane, using the rendered size and pose.
+vec2 translucentObjectShorelines(vec2 worldPosition, float elevation, float time)
+{
+    vec2 foam = vec2(0.0);
+    int count = clamp(int(frame.waterContactMeta.x + 0.5), 0, 32);
+    for (int contact = 0; contact < count; ++contact) {
+        vec4 center = frame.waterContacts[contact].centerAndElevation;
+        vec4 section = frame.waterContacts[contact].halfExtentAndRadius;
+        vec2 offset = worldPosition - center.xy;
+        float sine = sin(section.w);
+        float cosine = cos(section.w);
+        vec2 local = vec2(cosine * offset.x + sine * offset.y,
+            -sine * offset.x + cosine * offset.y);
+        float radius = section.z;
+        vec2 corner = abs(local) - max(section.xy - vec2(radius), vec2(0.0));
+        float distanceToContact = length(max(corner, vec2(0.0))) +
+            min(max(corner.x, corner.y), 0.0) - radius;
+        float coverage = step(0.0, distanceToContact) *
+            (1.0 - step(0.015, abs(elevation - center.z)));
+        foam = max(foam, shorelineWave(
+            distanceToContact, dot(local, vec2(0.8, 0.6)), time, 0.0,
+            shorelineNearDistance, shorelineFarDistance, shorelineFarThickness) * coverage);
+    }
+    return foam;
+}
+
 void main()
 {
     bool visualizeCausticsOnly =
@@ -1169,6 +1250,8 @@ void main()
         opaqueCameraDepth - waterCameraDepth,
         0.0);
     float geometryPresent = 1.0 - step(0.9999, opaqueDeviceDepth);
+    vec2 objectContact = opaqueWaterContact(inWorldPosition, waterCameraDepth,
+        opaqueCameraDepth, geometryPresent, nearDepth, farDepth);
     vec2 cameraPosition = frame.cameraPositionAndNearPlane.xy;
     vec2 causticProjectionOffset =
         (worldPosition - cameraPosition) *
@@ -1333,6 +1416,16 @@ void main()
         shorelineNearDistance,
         shorelineFarDistance,
         shorelineFarThickness);
+    foamLayers = max(foamLayers, shorelineWave(
+        objectContact.x,
+        dot(worldPosition, vec2(0.8, 0.6)),
+        time,
+        0.0,
+        shorelineNearDistance,
+        shorelineFarDistance,
+        shorelineFarThickness) * objectContact.y);
+    foamLayers = max(foamLayers,
+        translucentObjectShorelines(worldPosition, inWorldPosition.z, time));
     float nearFoamOpacity =
         clamp(draw.passData[3].y, 0.0, 1.0);
     float farFoamOpacity =

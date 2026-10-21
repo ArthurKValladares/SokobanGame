@@ -45,6 +45,16 @@ struct ActionPlan {
 // fills those in. Everything else about the action is settled here.
 namespace plans {
 
+// Relative time for one resolved leg. Rock-driven lily pads take twice the
+// normal tile time; free water skips take half. Ordinary pushes keep their pace.
+[[nodiscard]] float stepDurationWeight(
+    const Level* level, const GameState& before, const GameState& after);
+
+// Recover variable leg times from the plan's authoritative mechanical total.
+[[nodiscard]] std::vector<float> legDurations(
+    const Level* level, const GameState& before,
+    const std::vector<GameState>& legs, float totalSeconds);
+
 // A plan together with the intermediate states it passes through.
 //
 // The legs exist so the presentation can animate a chain tile by tile instead

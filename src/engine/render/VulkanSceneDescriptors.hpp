@@ -71,7 +71,9 @@ public:
         const SceneCamera& camera,
         bool preview = false,
         std::span<const RenderFrameData::WaterRipple> waterRipples = {},
-        std::span<const RenderFrameData::RockScratch> rockScratches = {}) const;
+        std::span<const RenderFrameData::RockScratch> rockScratches = {},
+        std::span<const RenderFrameData::Tile> waterContactTiles = {},
+        std::span<const RenderFrameData::WaterSurface> waterContactSurfaces = {}) const;
 
     [[nodiscard]] VkDescriptorSetLayout layout() const { return layout_; }
     [[nodiscard]] VkDescriptorSetLayout textureLayout() const

@@ -33,6 +33,7 @@ public:
         float animationElapsed = 0.0f;
         float animationDuration = 0.0f;
         float animationSecondsPerTile = 0.0f;
+        float arcHeight = 0.0f;
         bool moving = false;
         // Signed physical tread travel, independent of idle/world clocks.
         // Per-action deltas make seeks idempotent and let deferred slide
@@ -118,6 +119,11 @@ public:
         float elapsedSeconds = 0.0f,
         float activationStepSeconds = config::stepDurationSeconds);
     void advanceWaterRipples(float dt);
+    // Pending contacts follow the recorded hops, so long routes retain their
+    // first impacts even when later contacts exceed the GPU's live budget.
+    void scheduleRoundRockSkips(
+        const Level& level, const GameplaySession::Action& action,
+        float elapsedSeconds = 0.0f);
     void clearWaterRipples();
     void appendWaterRippleRenderData(RenderFrameData& frame) const;
     // Physical horizontal tracks are clipped to supporting ground cells. Each
@@ -222,6 +228,7 @@ private:
     std::array<RenderFrameData::WaterRipple,
         RenderFrameData::waterRippleCapacity> waterRipples_ {};
     std::size_t waterRippleCount_ = 0;
+    std::vector<RenderFrameData::WaterRipple> roundRockRipples_;
     std::array<RenderFrameData::RockScratch,
         RenderFrameData::rockScratchCapacity> rockScratches_ {};
     std::size_t rockScratchCount_ = 0;

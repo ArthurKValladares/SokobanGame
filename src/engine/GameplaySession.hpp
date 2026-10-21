@@ -370,6 +370,7 @@ private:
     // held from this moment and nothing can invalidate the outcome already
     // promised for it.
     [[nodiscard]] bool beginAction(
+        const Level& level,
         const Action& action,
         bool pressurePlateActivityChanged,
         std::vector<GameState> legs = {},
@@ -384,6 +385,7 @@ private:
     // Everything the scheduler needs to admit one plan, including the claims
     // derived from the cells its entities pass through.
     [[nodiscard]] ActionScheduler::Pending makePending(
+        const Level& level,
         const Action& action,
         bool pressurePlateActivityChanged,
         const std::vector<GameState>& legs,

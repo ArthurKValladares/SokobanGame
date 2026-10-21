@@ -537,6 +537,11 @@
       "preserveAspectRatio": true
     },
     {
+      "name": "RoundRock",
+      "path": "custom/models/round_rock.glb",
+      "preserveAspectRatio": true
+    },
+    {
       "name": "Glass",
       "path": "custom/pbr/models/Glass.glb"
     },
@@ -2655,6 +2660,11 @@
     {
       "tile": "Rock",
       "model": "Stone",
+      "scale": 0.9300000071525574
+    },
+    {
+      "tile": "Round Rock",
+      "model": "RoundRock",
       "scale": 0.9300000071525574
     },
     {

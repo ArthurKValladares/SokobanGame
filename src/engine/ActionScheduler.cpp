@@ -74,6 +74,13 @@ const GameState& ActionScheduler::InFlight::stateAtCurrentProgress() const
     if (mechanicalDurationSeconds <= 0.0f ||
         elapsedSeconds >= mechanicalDurationSeconds) {
         completedLegs = legs.size();
+    } else if (legDurationsSeconds.size() == legs.size()) {
+        float boundary = 0.0f;
+        for (float duration : legDurationsSeconds) {
+            boundary += duration;
+            if (elapsedSeconds < boundary) break;
+            ++completedLegs;
+        }
     } else {
         const float legDuration = mechanicalDurationSeconds /
             static_cast<float>(legs.size());
@@ -83,6 +90,23 @@ const GameState& ActionScheduler::InFlight::stateAtCurrentProgress() const
             legs.size());
     }
     return completedLegs == 0 ? plan.before : legs[completedLegs - 1];
+}
+
+float ActionScheduler::InFlight::legBoundarySeconds(std::size_t completedLegs) const
+{
+    if (completedLegs == 0) return 0.0f;
+    if (legs.empty() || completedLegs >= legs.size()) {
+        return mechanicalDurationSeconds;
+    }
+    if (legDurationsSeconds.size() == legs.size()) {
+        float boundary = 0.0f;
+        for (std::size_t index = 0; index < completedLegs; ++index) {
+            boundary += legDurationsSeconds[index];
+        }
+        return boundary;
+    }
+    return mechanicalDurationSeconds * static_cast<float>(completedLegs) /
+        static_cast<float>(legs.size());
 }
 
 GameState ActionScheduler::stateAtCurrentProgress() const
@@ -150,7 +174,8 @@ ActionScheduler::tryStart(
     std::size_t causalGroup,
     ActionDeferral deferral,
     std::vector<plans::TurretShotCue> turretShots,
-    std::vector<plans::PlannedAction::PortalCue> portalTransits)
+    std::vector<plans::PlannedAction::PortalCue> portalTransits,
+    std::vector<float> legDurationsSeconds)
 {
     // Rounded down deliberately. An action starting part-way through a step
     // gets claims that begin fractionally early, which can only make the check
@@ -182,6 +207,7 @@ ActionScheduler::tryStart(
         .id = id,
         .plan = plan,
         .legs = std::move(legs),
+        .legDurationsSeconds = std::move(legDurationsSeconds),
         .turretShots = std::move(turretShots),
         .portalTransits = std::move(portalTransits),
         .mechanicalDurationSeconds = plan.durationSeconds,
@@ -228,7 +254,8 @@ std::optional<ActionScheduler::Rejection> ActionScheduler::tryStartAll(
             causalGroup,
             pending.deferral,
             std::move(pending.turretShots),
-            std::move(pending.portalTransits));
+            std::move(pending.portalTransits),
+            std::move(pending.legDurationsSeconds));
         // Unreachable: every member was just checked against the same table,
         // and admitting a member of this group cannot refuse a later one - the
         // group is exempt from itself.

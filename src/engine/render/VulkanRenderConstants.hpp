@@ -31,6 +31,14 @@ struct RockScratchUniform {
     Vec4 endAndDuration {};
 };
 
+inline constexpr std::size_t waterContactCapacity = 32;
+
+struct WaterContactUniform {
+    Vec4 centerAndElevation {};
+    // xy=waterline half extents, z=corner radius, w=rotation in radians.
+    Vec4 halfExtentAndRadius {};
+};
+
 // Everything the GPU needs to know about the frame that is not per draw: the
 // camera it renders through, the sun's shadow transform, and the point lights.
 // One uniform buffer, written once per frame per descriptor set.
@@ -65,13 +73,23 @@ struct SceneFrameUniform {
         rockScratches {};
     // x=count, y=lifetime, z=hold before fading, w=maximum material opacity.
     Vec4 rockScratchMeta {};
+    // x=radius scale, y=intensity. Small skips use one delicate ring.
+    std::array<Vec4, RenderFrameData::waterRippleCapacity> waterRippleStyles {};
+    // Transparent Ice does not write the opaque depth sampled by water.
+    std::array<WaterContactUniform, waterContactCapacity> waterContacts {};
+    Vec4 waterContactMeta {}; // x=active contact count
 };
 
 static_assert(sizeof(PointLightUniform) == 48);
 static_assert(sizeof(RockScratchUniform) == 32);
 static_assert(offsetof(RockScratchUniform, startAndAge) == 0);
 static_assert(offsetof(RockScratchUniform, endAndDuration) == 16);
-static_assert(sizeof(SceneFrameUniform) == 2896);
+static_assert(sizeof(WaterContactUniform) == 32);
+static_assert(offsetof(WaterContactUniform, centerAndElevation) == 0);
+static_assert(offsetof(WaterContactUniform, halfExtentAndRadius) == 16);
+static_assert(offsetof(SceneFrameUniform, waterContacts) == 3152);
+static_assert(offsetof(SceneFrameUniform, waterContactMeta) == 4176);
+static_assert(sizeof(SceneFrameUniform) == 4192);
 
 // The camera and sun transforms a frame renders through, in the form the
 // uniform buffer wants them. Built by the recorder from the prepared scene's

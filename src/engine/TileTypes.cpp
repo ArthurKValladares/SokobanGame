@@ -174,7 +174,7 @@ bool tileTypeCanCoverSurface(TileType occupant, TileType surface)
 
 bool tileTypeOccupiesLevelCell(TileType type)
 {
-    return tileTypeIsPlayerStart(type) || type == TileType::Rock || type == TileType::LilyPad ||
+    return tileTypeIsPlayerStart(type) || type == TileType::Rock || type == TileType::RoundRock || type == TileType::LilyPad ||
         type == TileType::Ice || type == TileType::Enemy ||
         tileTypeIsTurret(type) || tileTypeIsMirror(type) || tileTypeIsRobot(type);
 }
@@ -262,7 +262,7 @@ std::optional<uint32_t> lecternOrientationQuarterTurns(TileType type)
 
 bool tileTypeIsMovableObject(TileType type)
 {
-    return type == TileType::Rock || type == TileType::Ice || type == TileType::LilyPad ||
+    return type == TileType::Rock || type == TileType::RoundRock || type == TileType::Ice || type == TileType::LilyPad ||
         tileTypeIsTurret(type) || tileTypeIsMirror(type) || tileTypeIsRobot(type);
 }
 

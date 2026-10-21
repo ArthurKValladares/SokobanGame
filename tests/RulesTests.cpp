@@ -4209,8 +4209,9 @@ void testWaterStreamsStopPadsAtBanksButExternalMovementCanBeachThem()
     sliding.movables[0].sliding = MoveDirection::Right;
     const auto slid = rules::scopedStep(bank, sliding, std::nullopt, {},
         { .actors = { sliding.movables[0].id } });
-    CHECK(slid.movables[0].cell == cell(2, 0, 1));
-    CHECK(slid.players[0].cell == cell(2, 0, 2));
+    CHECK(slid.movables[0].cell == cell(1, 0, 1));
+    CHECK(!slid.movables[0].sliding);
+    CHECK(slid.players[0].cell == cell(1, 0, 2));
 }
 
 void testWaterStreamsKeepDrowningAndFilledWaterBehavior()
@@ -4411,10 +4412,318 @@ void testRobotScopeLocksAndTurnPersistence()
     CHECK(rules::step(locked, lockBefore) == lockBefore);
 }
 
+void testRoundRockDefinitionsAndGroundBehavior()
+{
+    TEST("roundRockDefinitionsAndGroundBehavior");
+    CHECK(charToTileType('\\') == TileType::RoundRock);
+    CHECK(tileTypeToChar(TileType::RoundRock) == '\\');
+    CHECK(tileTypeFromName("Round Rock") == TileType::RoundRock);
+    CHECK(tileTypeIsMovableObject(TileType::RoundRock));
+    CHECK(tileTypeOccupiesLevelCell(TileType::RoundRock));
+    const Level level = makeLevel({ { "......" }, { "C\\    " } });
+    const auto before = rules::initialState(level);
+    CHECK(before.movables[0].type == TileType::RoundRock);
+    auto ordinary = before;
+    ordinary.movables[0].type = TileType::Rock;
+    for (const auto direction : { MoveDirection::Right, MoveDirection::Left }) {
+        auto roundAfter = rules::step(level, before, direction);
+        const auto regularAfter = rules::step(level, ordinary, direction);
+        roundAfter.movables[0].type = TileType::Rock;
+        CHECK(roundAfter == regularAfter);
+    }
+    // A grounded leaf is an ordinary blocking object, not a water pickup.
+    for (const auto hero : { CharacterType::Rogue, CharacterType::Knight }) {
+        const Level pads = makeLevel({ { "......" }, { "C\\$   " }, { "      " } }, hero);
+        const auto roundBefore = rules::initialState(pads);
+        auto regularBefore = roundBefore;
+        regularBefore.movables[0].type = TileType::Rock;
+        auto roundAfter = rules::step(pads, roundBefore, MoveDirection::Right);
+        const auto regularAfter = rules::step(pads, regularBefore, MoveDirection::Right);
+        roundAfter.movables[0].type = TileType::Rock;
+        CHECK(roundAfter == regularAfter);
+    }
+}
+
+void testRoundRockSkipsToShoreAndSinksAtBlockers()
+{
+    TEST("roundRockSkipsToShoreAndSinksAtBlockers");
+    const Level level = makeLevel({ { "..WWW.." }, { "C\\     " } });
+    const auto initial = rules::initialState(level);
+    auto state = rules::scopedStep(level, initial, MoveDirection::Right, {},
+        { .actors = { initial.players[0].id } });
+    CHECK(state.players[0].cell == cell(1, 0, 1));
+    CHECK(state.movables[0].cell == cell(2, 0, 1));
+    CHECK(state.movables[0].sliding == MoveDirection::Right);
+    CHECK(!state.movables[0].fallen);
+    for (int x : { 3, 4, 5 }) {
+        const auto before = state;
+        state = rules::step(level, state);
+        CHECK(state.movables[0].cell == cell(x, 0, 1));
+        CHECK(!state.movables[0].fallen);
+        auto restored = state;
+        StateDelta::between(before, state).inverted().applyTo(restored);
+        CHECK(restored == before);
+    }
+    CHECK(!state.movables[0].sliding);
+    CHECK(rules::step(level, state) == state);
+
+    const Level blocked = makeLevel({ { "..WWWWW", "......." },
+        { "C\\   # ", "       " } });
+    state = rules::step(blocked, rules::initialState(blocked), MoveDirection::Right);
+    for (int i = 0; i < 3; ++i) state = rules::step(blocked, state);
+    CHECK(state.movables[0].cell == cell(4, 0, 1));
+    CHECK(state.movables[0].fallen);
+    CHECK(!state.movables[0].sliding);
+    CHECK(!rules::isUnfilledWater(blocked, state, cell(4, 0, 1)));
+    state.players[0].cell = cell(4, 1, 1);
+    state = rules::step(blocked, state, MoveDirection::Up);
+    CHECK(state.players[0].cell == cell(4, 0, 1));
+    CHECK(!state.players[0].dead);
+
+    for (const char blocker : { 'R', 'N', 'C' }) {
+        const Level occupied = makeLevel({ { "..WWWW" },
+            { std::string("C\\  ") + blocker + " " } });
+        auto hit = rules::step(occupied, rules::initialState(occupied), MoveDirection::Right);
+        hit = rules::step(occupied, hit);
+        hit = rules::step(occupied, hit);
+        CHECK(hit.movables[0].cell == cell(3, 0, 1));
+        CHECK(hit.movables[0].fallen);
+        CHECK(!hit.movables[0].sliding);
+        if (blocker == 'R') CHECK(hit.movables[1].cell == cell(4, 0, 1));
+        if (blocker == 'N') CHECK(hit.enemies[0].cell == cell(4, 0, 1));
+        if (blocker == 'C') CHECK(hit.players[1].cell == cell(4, 0, 1));
+    }
+    const Level edge = makeLevel({ { "..WW" }, { "C\\  " } });
+    auto edgeState = rules::step(edge, rules::initialState(edge), MoveDirection::Right);
+    edgeState = rules::step(edge, edgeState);
+    edgeState = rules::step(edge, edgeState);
+    CHECK(edgeState.movables[0].cell == cell(3, 0, 1));
+    CHECK(edgeState.movables[0].fallen);
+}
+
+void testRoundRockRidesLilyPadToShoreOrObstacle()
+{
+    TEST("roundRockRidesLilyPadToShoreOrObstacle");
+    const Level level = makeLevel({ { "..WWW.." }, { "C\\ $   " }, { "       " } });
+    auto state = rules::step(level, rules::initialState(level), MoveDirection::Right);
+    state = rules::step(level, state);
+    CHECK(state.movables[0].cell == cell(3, 0, 2));
+    CHECK(state.movables[1].cell == cell(3, 0, 1));
+    CHECK(!state.movables[0].sliding);
+    CHECK(state.movables[1].sliding == MoveDirection::Right);
+    CHECK(!state.movables[0].fallen);
+    for (int x : { 4, 4 }) {
+        state = rules::step(level, state);
+        CHECK(state.movables[0].cell == cell(x, 0, 2));
+        CHECK(state.movables[1].cell == cell(x, 0, 1));
+        CHECK(!state.movables[0].fallen);
+    }
+    CHECK(!state.movables[1].sliding);
+    CHECK(rules::step(level, state) == state);
+
+    const Level enemy = makeLevel({ { "..WWWWW" }, { "C\\ $N  " }, { "       " } });
+    state = rules::step(enemy, rules::initialState(enemy), MoveDirection::Right);
+    state = rules::step(enemy, state);
+    state = rules::step(enemy, state);
+    CHECK(state.movables[0].cell == cell(3, 0, 2));
+    CHECK(state.movables[1].cell == cell(3, 0, 1));
+    CHECK(state.enemies[0].cell == cell(4, 0, 1));
+    CHECK(!state.movables[1].sliding);
+    CHECK(rules::step(enemy, state) == state);
+
+    // Rider headroom blocks the whole assembly; the stone remains on the leaf.
+    const Level ceiling = makeLevel({ { "..WWWWW" }, { "C\\ $   " }, { "    #  " } });
+    state = rules::step(ceiling, rules::initialState(ceiling), MoveDirection::Right);
+    state = rules::step(ceiling, state);
+    state = rules::step(ceiling, state);
+    CHECK(state.movables[0].cell == cell(3, 0, 2));
+    CHECK(state.movables[1].cell == cell(3, 0, 1));
+    CHECK(!state.movables[0].fallen);
+    CHECK(!state.movables[1].sliding);
+
+    // Occupied leaves cannot accept another stone, so the skip ends in water.
+    const Level occupied = makeLevel({ { "..WWWWW" }, { "C\\ $   " }, { "   R   " } });
+    state = rules::step(occupied, rules::initialState(occupied), MoveDirection::Right);
+    state = rules::step(occupied, state);
+    CHECK(state.movables[0].cell == cell(2, 0, 1));
+    CHECK(state.movables[0].fallen);
+
+    // Boarding also works when the first water tile already contains the pad.
+    for (const auto hero : { CharacterType::Rogue, CharacterType::Knight }) {
+        const Level adjacent = makeLevel({ { "..WWW" }, { "C\\$  " }, { "     " } }, hero);
+        state = rules::step(adjacent, rules::initialState(adjacent), MoveDirection::Right);
+        CHECK(state.movables[0].cell == cell(2, 0, 2));
+        CHECK(state.movables[1].sliding == MoveDirection::Right);
+    }
+}
+
+void testRoundRockWakeMovesSidePadsPerpendicularInEveryDirection()
+{
+    TEST("roundRockWakeMovesSidePadsPerpendicularInEveryDirection");
+    for (const auto direction : { MoveDirection::Up, MoveDirection::Down,
+            MoveDirection::Left, MoveDirection::Right }) {
+        std::vector<std::string> water(7, "WWWWWWW");
+        water[0] = ".......";
+        water[6] = ".......";
+        for (auto& row : water) { row.front() = '.'; row.back() = '.'; }
+        const Level level = makeLevel({ water,
+            { "C      ", "       ", "       ", "       ",
+                "       ", "       ", "       " } });
+        auto state = rules::initialState(level);
+        const auto start = rules::movementTarget(cell(3, 3, 1),
+            rules::rotateDirection(direction, 2));
+        const auto firstSide = rules::rotateDirection(direction, 1);
+        const auto secondSide = rules::rotateDirection(direction, -1);
+        const auto padA = rules::movementTarget(cell(3, 3, 1), firstSide);
+        const auto padB = rules::movementTarget(cell(3, 3, 1), secondSide);
+        state.movables = {
+            { .id = 40, .type = TileType::RoundRock, .cell = start, .sliding = direction },
+            { .id = 41, .type = TileType::LilyPad, .cell = padA },
+            { .id = 42, .type = TileType::LilyPad, .cell = padB },
+        };
+        const auto initial = state;
+        state = rules::scopedStep(level, state, std::nullopt, {}, { .actors = { 40 } });
+        CHECK(state.movables[0].cell == cell(3, 3, 1));
+        CHECK(state.movables[1].cell == rules::movementTarget(padA, firstSide));
+        CHECK(state.movables[2].cell == rules::movementTarget(padB, secondSide));
+        CHECK(state.movables[1].sliding == firstSide);
+        CHECK(state.movables[2].sliding == secondSide);
+        state = rules::step(level, state);
+        CHECK(!state.movables[1].sliding);
+        CHECK(!state.movables[2].sliding);
+        CHECK(state.movables[1].cell == rules::movementTarget(padA, firstSide));
+        CHECK(state.movables[2].cell == rules::movementTarget(padB, secondSide));
+        CHECK(!state.movables[1].fallen);
+        CHECK(!state.movables[2].fallen);
+        auto restored = state;
+        StateDelta::between(initial, state).inverted().applyTo(restored);
+        CHECK(restored == initial);
+    }
+}
+
+void testRockDrivenPadStopsBeforeBanksAndFilledWaterInEveryDirection()
+{
+    TEST("rockDrivenPadStopsBeforeBanksAndFilledWaterInEveryDirection");
+    for (const auto direction : { MoveDirection::Up, MoveDirection::Down,
+            MoveDirection::Left, MoveDirection::Right }) {
+        const auto target = rules::movementTarget(cell(2, 2, 1), direction);
+        for (const bool filled : { false, true }) {
+            std::vector<std::string> floor(5, "WWWWW");
+            floor[0][0] = '.';
+            if (!filled) floor[static_cast<std::size_t>(target.y)][static_cast<std::size_t>(target.x)] = '.';
+            const Level level = makeLevel({ floor,
+                { "C    ", "     ", "  $  ", "     ", "     " },
+                { "     ", "     ", "  \\  ", "     ", "     " },
+            });
+            auto before = rules::initialState(level);
+            before.movables[0].sliding = direction;
+            if (filled) before.movables.push_back({ .id = 70, .type = TileType::Rock,
+                .cell = target, .fallen = true });
+            const auto after = rules::scopedStep(level, before, std::nullopt, {},
+                { .actors = { before.movables[0].id } });
+            CHECK(after.movables[0].cell == cell(2, 2, 1));
+            CHECK(after.movables[1].cell == cell(2, 2, 2));
+            CHECK(!after.movables[0].sliding);
+            CHECK(!after.movables[0].fallen);
+            CHECK(!after.movables[1].fallen);
+            CHECK(rules::lilyPadDrivenByRock(level, before, after, 0));
+            auto restored = after;
+            StateDelta::between(before, after).inverted().applyTo(restored);
+            CHECK(restored == before);
+        }
+    }
+}
+
+void testKnightRockShovesKeepPadsInWaterAndRemainAtomic()
+{
+    TEST("knightRockShovesKeepPadsInWaterAndRemainAtomic");
+    for (const char rock : { 'R', '\\' }) {
+        // An intervening ice block still transmits the rock's shove to the pad.
+        const Level blocked = makeLevel({ { "...W.." },
+            { std::string("K") + rock + "I$  " } });
+        const auto before = rules::initialState(blocked);
+        CHECK(rules::step(blocked, before, MoveDirection::Right) == before);
+    }
+    const Level water = makeLevel({ { "..WW.." }, { "KR$   " } });
+    const auto before = rules::initialState(water);
+    const auto moved = rules::step(water, before, MoveDirection::Right);
+    CHECK(moved.players[0].cell == cell(1, 0, 1));
+    CHECK(moved.movables[1].cell == cell(3, 0, 1));
+    CHECK(!moved.movables[1].fallen);
+    CHECK(rules::lilyPadDrivenByRock(water, before, moved, 1));
+
+    // Without a rock in the chain, ordinary hero pushing can still beach pads.
+    const Level normal = makeLevel({ { "..W." }, { "KI$ " } });
+    const auto normalBefore = rules::initialState(normal);
+    const auto normalAfter = rules::step(normal, normalBefore, MoveDirection::Right);
+    CHECK(normalAfter.movables[1].cell == cell(3, 0, 1));
+    CHECK(!rules::lilyPadDrivenByRock(normal, normalBefore, normalAfter, 1));
+    auto impulse = before;
+    impulse.movables[1].sliding = MoveDirection::Right;
+    CHECK(!rules::lilyPadDrivenByRock(water, before, impulse, 1));
+    CHECK(!rules::lilyPadDrivenByRock(water, before, moved, 20));
+}
+
+void testLinkedAndBardRockShovesKeepPadsInWater()
+{
+    TEST("linkedAndBardRockShovesKeepPadsInWater");
+    for (const bool bank : { false, true }) {
+        const Level linked = Level::loadFromDefinition({
+            .layers = { { ".....", bank ? "WWWW." : "WWWWW" },
+                { "CR   ", "   $ " } },
+            .objectLinks = {
+                { .cell = cell(1, 0, 1), .color = { 0.2f, 0.4f, 1.0f } },
+                { .cell = cell(3, 1, 1), .color = { 0.2f, 0.4f, 1.0f } },
+            },
+        }, "linked rock and leaf");
+        const auto before = rules::initialState(linked);
+        const auto after = rules::step(linked, before, MoveDirection::Right);
+        CHECK(after.movables[0].cell == cell(2, 0, 1));
+        CHECK(after.movables[1].cell == cell(bank ? 3 : 4, 1, 1));
+        CHECK(rules::lilyPadDrivenByRock(linked, before, after, 1) == !bank);
+
+        // The pad is beyond the Bard's aura; the rock physically shoves it.
+        const Level bard = makeLevel({ { bank ? "..WW." : "..WWW", "....." },
+            { "  R$ ", "B    " } });
+        const auto bardBefore = rules::initialState(bard);
+        const auto bardAfter = rules::step(bard, bardBefore, MoveDirection::Right);
+        CHECK(bardAfter.movables[1].cell == cell(bank ? 3 : 4, 0, 1));
+        CHECK(rules::lilyPadDrivenByRock(bard, bardBefore, bardAfter, 1) == !bank);
+    }
+}
+
+void testRockDrivenPadTimingRecognizesTurningPortalShove()
+{
+    TEST("rockDrivenPadTimingRecognizesTurningPortalShove");
+    auto definition = edgePortalDefinition(TileType::PortalEast, TileType::PortalSouth);
+    definition.layers[1][0][0] = ' ';
+    definition.layers[1][2][0] = 'K';
+    definition.layers[1][2][1] = 'R';
+    definition.layers[0][2][2] = 'W';
+    definition.layers[3][5][5] = 'W';
+    const Level level = Level::loadFromDefinition(definition, "rock shoves pad through turn");
+    auto before = rules::initialState(level);
+    const std::size_t padIndex = before.movables.size();
+    before.movables.push_back({ .id = 90, .type = TileType::LilyPad,
+        .cell = cell(2, 2, 1) });
+    const auto after = rules::step(level, before, MoveDirection::Right);
+    CHECK(after.movables[padIndex].cell == cell(5, 5, 4));
+    CHECK(rules::isUnfilledWater(level, after, after.movables[padIndex].cell));
+    CHECK(rules::lilyPadDrivenByRock(level, before, after, padIndex));
+}
+
 } // namespace
 
 int main()
 {
+    testRoundRockDefinitionsAndGroundBehavior();
+    testRoundRockSkipsToShoreAndSinksAtBlockers();
+    testRoundRockRidesLilyPadToShoreOrObstacle();
+    testRoundRockWakeMovesSidePadsPerpendicularInEveryDirection();
+    testRockDrivenPadStopsBeforeBanksAndFilledWaterInEveryDirection();
+    testKnightRockShovesKeepPadsInWaterAndRemainAtomic();
+    testLinkedAndBardRockShovesKeepPadsInWater();
+    testRockDrivenPadTimingRecognizesTurningPortalShove();
     testWaterStreamTileDefinitions();
     testLilyPadFloatsAndCarriesStackOnStreams();
     testWaterStreamsCarryInAllDirectionsAndRespectRate();

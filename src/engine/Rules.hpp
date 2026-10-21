@@ -23,9 +23,10 @@ enum class MoveDirection : uint8_t {
 // the static Level. Values of this type are cheap to copy and compare, which
 // is what step application, undo history, and tests are built on.
 //
-// `sliding` fields are ice-slide momentum: an entity with momentum moves one
-// tile in that direction every world step until it is blocked, falls, or
-// leaves slippery ground.
+// `sliding` fields retain movement momentum: ice slides, round rocks skipping
+// over water, and lily pads coasting from a stone or its wake. Momentum moves
+// one tile in its direction every world step until blocked or reaching shore.
+// A coasting lily pad stops in the final water cell and keeps its riders.
 struct GameState {
     struct Player {
         EntityId id = invalidEntityId;
@@ -319,6 +320,11 @@ void setMirrorQuarterTurns(
 // Water that has not been filled by a fallen movable. A drowned player remains
 // below the water surface and does not displace it.
 [[nodiscard]] bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 position);
+// Whether this transition spends a stone impulse on a lily pad, including a
+// coasting stop and one-tile physical or linked rock shoves. Merely assigning
+// momentum to a stationary pad (pickup or a blocked wake) is not movement.
+[[nodiscard]] bool lilyPadDrivenByRock(const Level& level,
+    const GameState& before, const GameState& after, std::size_t padIndex);
 
 // A pressure plate is pressed by a live hero, movable or enemy, or a mirror
 // standing on it. Buttons pulse; levers supply input while latched on.

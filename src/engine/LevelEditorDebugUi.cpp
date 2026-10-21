@@ -866,9 +866,17 @@ void LevelEditorDebugUi::drawTilePalette(
         static_cast<int>(
             (available + spacing) / (paletteButtonSize.x + spacing)));
     const bool editingOverworld = editor.editingOverworld();
+    // Keep the two rock brushes together without changing persistent tile IDs.
+    static constexpr auto paletteDefinitions = [] {
+        auto definitions = tileTypeDefinitionTable;
+        std::rotate(definitions.begin() + static_cast<std::size_t>(TileType::Rock) + 1,
+            definitions.begin() + static_cast<std::size_t>(TileType::RoundRock),
+            definitions.begin() + static_cast<std::size_t>(TileType::RoundRock) + 1);
+        return definitions;
+    }();
     const auto drawPaletteIcons = [&](bool terrain, bool water = false) {
         int column = 0;
-        for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
+        for (const TileTypeDefinition& definition : paletteDefinitions) {
             if (editorTilePalette::isTerrain(definition.type) != terrain) {
                 continue;
             }
@@ -967,7 +975,8 @@ void LevelEditorDebugUi::drawTilePalette(
             ImGui::PopID();
             if ((terrain || water) && group != nullptr) {
                 ImGui::TextUnformatted(group->name.data(), group->name.data() + group->name.size());
-            } else if (water) {
+            } else if (water || definition.type == TileType::Rock ||
+                definition.type == TileType::RoundRock) {
                 ImGui::TextUnformatted(displayedDefinition.name.data(),
                     displayedDefinition.name.data() + displayedDefinition.name.size());
             }
@@ -1028,6 +1037,9 @@ void LevelEditorDebugUi::drawTilePalette(
     }
     if (tileTypeIsRobot(editor.selectedTile())) {
         ImGui::TextWrapped("Robots patrol along their arrow axis and reverse when blocked or facing an unsafe drop. Rotate chooses their initial heading and axis. They push one unit, including a hero. Push a robot to reposition it, or stand on top to ride along.");
+    }
+    if (editor.selectedTile() == TileType::RoundRock) {
+        ImGui::TextWrapped("Round rocks push like ordinary rocks on land. Over water they skip to shore or sink when blocked, becoming stepping stones. They ride lily pads at a quarter of skipping speed. Passing beside a pad sends it away perpendicular to the rock's travel. Driven pads stop before shore or an obstacle, with riders staying aboard.");
     }
     if (editor.selectedTile() == TileType::LilyPad) {
         ImGui::TextWrapped("Lily pads can be placed only on water. Click a water surface to float a pad above it. Place riders on the layer above the pad, or board from shore. Water streams carry the pad and its riders together when their path is clear.");

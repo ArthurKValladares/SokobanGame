@@ -6,6 +6,9 @@
 namespace sokoban::config {
 
 inline constexpr float waterDepthBelowGround = 0.18f;
+// Sunken supports sit in the water volume, leaving only their upper cap above
+// the surface. Keep motion, settled geometry and mirror previews aligned.
+inline constexpr float sunkenMovableDepthBelowGround = 1.0f;
 // The authored leaf is source scale, with a thin, walkable upper surface.
 inline constexpr float lilyPadRideHeight = 0.070f;
 inline constexpr float lilyPadPickHeight = 0.090f;

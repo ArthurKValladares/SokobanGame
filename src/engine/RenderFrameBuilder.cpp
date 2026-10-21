@@ -52,50 +52,82 @@ uint32_t movableModelQuarterTurns(const GameState::Movable& movable)
 
 float motionProgress(const GameplayPresentation::EntityVisual& motion)
 {
-    const Vec3 travel = subtract(motion.animationEnd, motion.animationStart);
-    const float lengthSquared = dot(travel, travel);
-    return motion.moving && lengthSquared > 0.0001f
-        ? std::clamp(dot(subtract(motion.renderPosition, motion.animationStart), travel) /
-              lengthSquared, 0.0f, 1.0f)
+    return motion.moving && motion.animationDuration > 0.0f
+        ? std::clamp(motion.animationElapsed / motion.animationDuration, 0.0f, 1.0f)
         : 0.0f;
+}
+
+GridPosition3 motionEndpointCell(const GameplayPresentation::EntityVisual& motion,
+    bool end)
+{
+    const Vec3 position = motion.moving
+        ? (end ? motion.animationEnd : motion.animationStart) : motion.renderPosition;
+    return { static_cast<int>(std::lround(position.x)),
+        static_cast<int>(std::lround(position.y)),
+        static_cast<int>(std::lround(position.z)) };
 }
 
 float lilyPadFloatingAmount(const RenderFrameBuilder::GameplayInput& input,
     std::size_t index)
 {
     const auto& pad = input.state.movables[index];
-    const float before = rules::isUnfilledWater(input.level, input.state, pad.cell) ? 1.0f : 0.0f;
     const auto& visuals = input.presentation.movables();
-    if (index >= input.projectedState.movables.size() || index >= visuals.size() ||
-        !visuals[index].moving) return before;
+    const auto fromCell = index < visuals.size()
+        ? motionEndpointCell(visuals[index], false) : pad.cell;
+    const float before = rules::isUnfilledWater(input.level, input.state, fromCell) ? 1.0f : 0.0f;
+    if (index >= visuals.size() || !visuals[index].moving) return before;
     const float after = rules::isUnfilledWater(input.level, input.projectedState,
-        input.projectedState.movables[index].cell) ? 1.0f : 0.0f;
+        motionEndpointCell(visuals[index], true)) ? 1.0f : 0.0f;
     return before + (after - before) * motionProgress(visuals[index]);
 }
 
 std::optional<std::size_t> supportingLilyPad(
-    const GameState& state, GridPosition3 cell)
+    const RenderFrameBuilder::GameplayInput& input, GridPosition3 cell, bool end)
 {
+    const auto& state = input.state;
+    const auto& movableVisuals = input.presentation.movables();
+    const auto& enemyVisuals = input.presentation.enemies();
+    const auto& playerVisuals = input.presentation.players();
+    const auto movableCell = [&](std::size_t index) {
+        return index < movableVisuals.size()
+            ? motionEndpointCell(movableVisuals[index], end) : state.movables[index].cell;
+    };
+    // A chained action's committed and projected cells can be many hops away
+    // from the current motion. Find support at this track's endpoints instead.
     const auto support = lilyPadSupportCellFor(cell, [&](GridPosition3 below) {
-        if (const auto* movable = rules::movableAt(state, below)) return movable->type;
-        if (rules::enemyAt(state, below)) return TileType::Enemy;
-        if (std::ranges::any_of(state.players, [&](const auto& player) {
-                return !player.dead && !player.drowned && player.cell == below;
-            })) return TileType::Player;
+        for (std::size_t index = 0; index < state.movables.size(); ++index) {
+            const auto& movable = state.movables[index];
+            if (!movable.dead && !movable.fallen && movableCell(index) == below)
+                return movable.type;
+        }
+        for (std::size_t index = 0; index < state.enemies.size(); ++index) {
+            const auto& enemy = state.enemies[index];
+            const auto enemyCell = index < enemyVisuals.size()
+                ? motionEndpointCell(enemyVisuals[index].motion, end) : enemy.cell;
+            if (!enemy.dead && !enemy.fallen && enemyCell == below) return TileType::Enemy;
+        }
+        for (std::size_t index = 0; index < state.players.size(); ++index) {
+            const auto& player = state.players[index];
+            const auto playerCell = index < playerVisuals.size()
+                ? motionEndpointCell(playerVisuals[index].motion, end) : player.cell;
+            if (!player.dead && !player.drowned && playerCell == below) return TileType::Player;
+        }
         return TileType::Air;
     });
     if (!support) return std::nullopt;
-    const auto* pad = rules::movableAt(state, *support);
-    return static_cast<std::size_t>(pad - state.movables.data());
+    for (std::size_t index = 0; index < state.movables.size(); ++index) {
+        if (state.movables[index].type == TileType::LilyPad && movableCell(index) == *support)
+            return index;
+    }
+    return std::nullopt;
 }
 
 float lilyPadRiderElevationOffset(const RenderFrameBuilder::GameplayInput& input,
-    const GameplayPresentation::EntityVisual& motion, GridPosition3 cell,
-    std::optional<GridPosition3> projectedCell)
+    const GameplayPresentation::EntityVisual& motion)
 {
-    const auto offsetFor = [&](const GameState& state, GridPosition3 supportCell) {
+    const auto offsetFor = [&](GridPosition3 supportCell, bool end) {
         float offset = 0.0f;
-        while (const auto index = supportingLilyPad(state, supportCell)) {
+        while (const auto index = supportingLilyPad(input, supportCell, end)) {
             if (*index >= input.state.movables.size() ||
                 *index >= input.presentation.movables().size()) break;
             const Vec3 padPosition = input.presentation.movables()[*index].renderPosition;
@@ -103,12 +135,13 @@ float lilyPadRiderElevationOffset(const RenderFrameBuilder::GameplayInput& input
             offset += -1.0f + config::lilyPadRideHeight + floating *
                 (-config::waterDepthBelowGround + lilyPadBob({ padPosition.x, padPosition.y },
                     input.presentation.worldAnimationTimeSeconds()));
-            supportCell = state.movables[*index].cell;
+            supportCell = motionEndpointCell(input.presentation.movables()[*index], end);
         }
         return offset;
     };
-    const float start = offsetFor(input.state, cell);
-    const float end = projectedCell ? offsetFor(input.projectedState, *projectedCell) : start;
+    const auto startCell = motionEndpointCell(motion, false);
+    const float start = offsetFor(startCell, false);
+    const float end = offsetFor(motionEndpointCell(motion, true), true);
     const float progress = motionProgress(motion);
     if (motion.moving && std::abs(end - start) > 0.0001f) {
         // Boarding may step up one logical cell even though the thin leaf is
@@ -116,7 +149,11 @@ float lilyPadRiderElevationOffset(const RenderFrameBuilder::GameplayInput& input
         // horizontal-then-vertical track cannot dip the rider under water.
         const float heightFrom = motion.animationStart.z + start;
         const float heightTo = motion.animationEnd.z + end;
-        return heightFrom + (heightTo - heightFrom) * progress - motion.renderPosition.z;
+        // Boarding can also be a stone's arced hop. Keep only its authored
+        // lift while collapsing the leaf's extra logical layer to its surface.
+        const float arcLift = 4.0f * motion.arcHeight * progress * (1.0f - progress);
+        return heightFrom + (heightTo - heightFrom) * progress -
+            motion.renderPosition.z + arcLift;
     }
     return start + (end - start) * progress;
 }
@@ -269,7 +306,7 @@ StaticRenderCell staticRenderCellFor(
             ? Vec2 { centeredOffset, centeredOffset }
             : Vec2 {},
         .baseElevation = static_cast<float>(z) -
-            (submergedEntity ? config::waterDepthBelowGround : 0.0f),
+            (submergedEntity ? config::sunkenMovableDepthBelowGround : 0.0f),
         .height = edgeControl
             ? 1.0f
             : surfaceEntity
@@ -748,17 +785,18 @@ void appendGameplayWaterAndShorelines(
             return false;
         }
         const TileType tile = levelTileAt(position);
-        if (tileTypeIsSolidBlock(tile)) {
-            return true;
+        return tileTypeIsSolidBlock(tile);
+    };
+    // Filled water still surrounds the sunken object. It blocks gameplay
+    // currents, so use still water when resolving visible stream connections.
+    auto surfaceTileAt = [&](GridPosition3 position) {
+        const TileType tile = levelTileAt(position);
+        if (tileTypeIsWaterStream(tile) &&
+            !rules::isUnfilledWater(input.level, state,
+                { position.x, position.y, position.z + 1 })) {
+            return TileType::Water;
         }
-        if (!tileTypeIsWater(tile)) {
-            return false;
-        }
-        return !rules::isUnfilledWater(input.level, state, {
-            position.x,
-            position.y,
-            position.z + 1,
-        });
+        return tile;
     };
     for (uint32_t z = 0; z < input.level.depth(); ++z) {
         for (uint32_t y = 0; y < input.level.height(); ++y) {
@@ -769,11 +807,7 @@ void appendGameplayWaterAndShorelines(
                     static_cast<int>(z),
                 };
                 if ((!input.visibleCell || input.visibleCell(waterCell)) &&
-                    rules::isUnfilledWater(input.level, state, {
-                        waterCell.x,
-                        waterCell.y,
-                        waterCell.z + 1,
-                    })) {
+                    tileTypeIsWater(levelTileAt(waterCell))) {
                     appendWaterCellSurface(
                         frame,
                         waterCell,
@@ -782,9 +816,9 @@ void appendGameplayWaterAndShorelines(
                             waterCell,
                             gameplayShorelineAt),
                         true,
-                        waterStreamFlowForCell(waterCell, levelTileAt),
+                        waterStreamFlowForCell(waterCell, surfaceTileAt),
                         streamBoundaryMaskForWaterCell(waterCell,
-                            levelTileAt(waterCell), levelTileAt));
+                            surfaceTileAt(waterCell), surfaceTileAt));
                 }
             }
         }
@@ -832,11 +866,11 @@ void appendGameplayWaterAndShorelines(
                      position.y >= static_cast<int>(input.level.height()))) {
                     return true;
                 }
-                return rules::isUnfilledWater(input.level, state, {
+                return tileTypeIsWater(levelTileAt({
                     position.x,
                     position.y,
-                    static_cast<int>(z) + 1,
-                });
+                    static_cast<int>(z),
+                }));
             },
             [&, z](GridPosition position) {
                 return !input.visibleCell || input.visibleCell({
@@ -959,28 +993,14 @@ void appendGameplayWorld(
             if (input.visibleCell && !input.visibleCell(position)) {
                 return StaticRenderCell { .tile = TileType::Air };
             }
-            if (tileTypeIsWater(input.level.tileAt(x, y, z))) {
-                const GridPosition3 entityPosition {
-                    position.x,
-                    position.y,
-                    position.z + 1,
-                };
-                if (const GameState::Movable* fallenMovable =
-                        rules::fallenMovableAt(state, entityPosition)) {
-                    if (!fallenMovableIsMoving(fallenMovable)) {
-                        return StaticRenderCell { .tile = TileType::Air };
-                    }
-                }
-            }
-
             if (const GameState::Movable* fallenMovable =
                     rules::fallenMovableAt(state, position)) {
                 if (!fallenMovableIsMoving(fallenMovable)) {
                     return StaticRenderCell {
                         .tile = fallenMovable->type,
                         .showGrid = true,
-                        .baseElevation =
-                            static_cast<float>(std::max(position.z - 1, 0)),
+                        .baseElevation = static_cast<float>(position.z) -
+                            config::sunkenMovableDepthBelowGround,
                         .height = 1.0f,
                         .modelRotationQuarterTurns = movableModelQuarterTurns(*fallenMovable),
                         .renderableId = resolvedEntityId(EntityKind::Movable, fallenMovable->id,
@@ -1562,10 +1582,7 @@ void appendGameplayEntities(
         applyTileScale(
             playerTile,
             input.settings.tileScale(TileType::Player));
-        playerTile.baseElevation += lilyPadRiderElevationOffset(input,
-            visual.motion, state.players[playerIndex].cell,
-            playerIndex < input.projectedState.players.size()
-                ? std::optional(input.projectedState.players[playerIndex].cell) : std::nullopt);
+        playerTile.baseElevation += lilyPadRiderElevationOffset(input, visual.motion);
         frame.tiles.push_back(playerTile);
     }
 
@@ -1621,9 +1638,7 @@ void appendGameplayEntities(
             .modelRotationOffsetRadians = yawRadians(visual.orientation),
         };
         applyTileScale(enemyTile, input.settings.tileScale(TileType::Enemy));
-        enemyTile.baseElevation += lilyPadRiderElevationOffset(input,
-            visual.motion, enemy.cell, enemyIndex < input.projectedState.enemies.size()
-                ? std::optional(input.projectedState.enemies[enemyIndex].cell) : std::nullopt);
+        enemyTile.baseElevation += lilyPadRiderElevationOffset(input, visual.motion);
         frame.tiles.push_back(enemyTile);
     }
 
@@ -1723,9 +1738,7 @@ void appendGameplayEntities(
             applyLilyPadVisual(movableTile, input.presentation.worldAnimationTimeSeconds(),
                 lilyPadFloatingAmount(input, movableIndex));
         }
-        movableTile.baseElevation += lilyPadRiderElevationOffset(input,
-            visual, movable.cell, movableIndex < input.projectedState.movables.size()
-                ? std::optional(input.projectedState.movables[movableIndex].cell) : std::nullopt);
+        movableTile.baseElevation += lilyPadRiderElevationOffset(input, visual);
         if (const std::optional<Vec3> linkColor =
                 input.level.movableLinkColor(movableIndex)) {
             appendLinkedObjectAura(frame, movableTile, *linkColor);
@@ -1833,7 +1846,7 @@ void appendMirrorGhostTile(
             if (preview.fallen) {
                 result.z -= preview.player
                     ? config::drownedPlayerDepthBelowGround
-                    : config::waterDepthBelowGround;
+                    : config::sunkenMovableDepthBelowGround;
             }
             return result;
         };

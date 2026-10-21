@@ -774,7 +774,7 @@ GameplaySession::Action undoActionFromJson(
         const std::string motionContext = presentationContext +
             ".motions[" + std::to_string(i) + "]";
         rejectUnknownProperties(encoded, {
-            "target", "from", "to", "startSeconds", "durationSeconds",
+            "target", "from", "to", "startSeconds", "durationSeconds", "arcHeight",
         }, motionContext);
         ActionMotionTrack motion {
             .target = entityTargetFromJson(
@@ -791,6 +791,12 @@ GameplaySession::Action undoActionFromJson(
             .durationSeconds = floatProperty(
                 encoded, "durationSeconds", motionContext),
         };
+        if (encoded.contains("arcHeight")) {
+            motion.arcHeight = floatProperty(encoded, "arcHeight", motionContext);
+            if (motion.arcHeight < 0.0f) {
+                fail(motionContext, "motion arc height must be non-negative");
+            }
+        }
         if (motion.startSeconds < 0.0f || motion.durationSeconds < 0.0f ||
             motion.startSeconds + motion.durationSeconds >
                 action.presentation.durationSeconds + 0.0001f) {
@@ -915,6 +921,9 @@ OrderedJson undoActionToJson(const GameplaySession::Action& action)
             { "startSeconds", motion.startSeconds },
             { "durationSeconds", motion.durationSeconds },
         });
+        if (motion.arcHeight != 0.0f) {
+            motions.back()["arcHeight"] = motion.arcHeight;
+        }
     }
     OrderedJson animations = OrderedJson::array();
     for (const ActionAnimationTrack& track : action.presentation.animations) {

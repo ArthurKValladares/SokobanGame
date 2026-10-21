@@ -446,6 +446,7 @@ void testActiveScreenCheckpointRoundTrip()
                     .from = { 1.0f, 0.0f, 1.0f },
                     .to = { 2.0f, 0.0f, 1.0f },
                     .durationSeconds = 0.15f,
+                    .arcHeight = 0.18f,
                 },
                 {
                     .target = {
@@ -552,6 +553,29 @@ void testActiveScreenCheckpointRoundTrip()
     CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["undoStack"][0]
             ["presentation"]["controls"].size() == 3,
         "undo persists exact per-cell control motion, including both pulse segments");
+    CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["undoStack"][0]
+            ["presentation"]["motions"][0]["arcHeight"].get<float>() == 0.18f,
+        "undo persists curved motion height exactly");
+    CHECK_MESSAGE(!current["progress"]["activeScreen"]["session"]["undoStack"][0]
+            ["presentation"]["motions"][1].contains("arcHeight"),
+        "straight motion omits the optional arc height");
+    nlohmann::json oldArcs = current;
+    oldArcs["progress"]["activeScreen"]["session"]["undoStack"][0]
+        ["presentation"]["motions"][0].erase("arcHeight");
+    auto expectedOldArcs = profile;
+    expectedOldArcs.activeScreen->session.undoStack[0].presentation.motions[0].arcHeight = 0.0f;
+    CHECK_MESSAGE(sokoban::decodePlayerProfile(oldArcs.dump()).profile == expectedOldArcs,
+        "existing checkpoints without arc heights retain straight motion");
+    for (const nlohmann::json& invalidHeight : {
+             nlohmann::json(-0.1), nlohmann::json(1e100),
+             nlohmann::json("high"), nlohmann::json(nullptr) }) {
+        nlohmann::json invalid = current;
+        invalid["progress"]["activeScreen"]["session"]["undoStack"][0]
+            ["presentation"]["motions"][0]["arcHeight"] = invalidHeight;
+        checkThrows([&] {
+            (void)sokoban::decodePlayerProfile(invalid.dump());
+        }, "checkpoint rejects invalid curved motion height");
+    }
     nlohmann::json oldControls = current;
     oldControls["progress"]["activeScreen"]["session"]["undoStack"][0]
         ["presentation"].erase("controls");

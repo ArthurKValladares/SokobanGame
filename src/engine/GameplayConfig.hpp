@@ -8,6 +8,7 @@ inline constexpr float stepDurationSeconds = 0.25f;
 inline constexpr float minimumStepDurationSeconds = 0.05f;
 inline constexpr float maximumStepDurationSeconds = 1.0f;
 inline constexpr float waterStreamMovementDurationMultiplier = 2.0f;
+inline constexpr float rockDrivenLilyPadMovementDurationMultiplier = 2.0f;
 
 SOKOBAN_TUNING_SECTION(robotPatrolTuning,
     "Robots", "src/engine/GameplayConfig.hpp", "robotPatrol");

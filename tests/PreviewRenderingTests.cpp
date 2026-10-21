@@ -5,11 +5,14 @@
 #include "engine/GroundGeometry.hpp"
 #include "engine/PerformanceFixtures.hpp"
 #include "engine/PresentationSettings.hpp"
+#include "engine/RenderFrameBuilder.hpp"
 #include "engine/RockScratchConfig.hpp"
+#include "engine/TileThumbnailBake.hpp"
 #include "engine/render/PngWriter.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanRenderer.hpp"
+#include "engine/render/WaterGeometry.hpp"
 #include "engine/ui/FontAtlas.hpp"
 #include "engine/ui/SelectorPrompt.hpp"
 #include "engine/ui/Ui.hpp"
@@ -660,6 +663,300 @@ void verifyWaterStreams(SDL_Window* window, const std::filesystem::path& root,
         "Vulkan validation reported a water stream rendering error");
 }
 
+void verifySunkenRocks(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache,
+    bool shorelines = false)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    UiContext ui(font);
+    PresentationSettings settings;
+    settings.applyTileScales(manifest);
+    constexpr Vec4 blueWater { .025f, .30f, .75f, .72f };
+    constexpr Vec4 redWater { .70f, .025f, .12f, .72f };
+    const auto makeFrame = [&](TileType type, bool rock, bool water, Vec4 waterColor) {
+        RenderFrameData frame;
+        frame.viewMode = RenderViewMode::Isometric3D;
+        frame.levelWidth = 3;
+        frame.levelHeight = 3;
+        frame.levelDepth = 2;
+        frame.skyCloudsEnabled = false;
+        frame.cameraOverride = RenderFrameData::CameraOverride {
+            .position = { 4.0f, 6.0f, 4.5f },
+            .forward = { -2.5f, -4.5f, -4.05f },
+            .verticalFovDegrees = 30.0f,
+        };
+        frame.lighting.ambient = { .color = { 1, 1, 1 }, .intensity = 1.0f };
+        frame.lighting.sun.intensity = 0.0f;
+        frame.tiles.push_back({
+            .position = { 0, 0 }, .size = { 3, 3 },
+            .color = { .50f, .52f, .54f, 1 },
+            .baseElevation = -.35f, .height = 0.0f, .showGrid = false,
+        });
+        if (rock) {
+            // Use the production model, aspect-preserving normalization and
+            // manifest scale. A settled water filler keeps its base one layer
+            // below its logical cell; its small crown rises above the water.
+            auto visual = tileVisual(type, { 1, 1, 0 }, manifest, settings);
+            visual.showGrid = false;
+            visual.interactionOutline = false;
+            frame.tiles.push_back(visual);
+        }
+        if (water) {
+            frame.waterSurfaces.push_back({
+                .position = { 0, 0 }, .size = { 3, 3 }, .color = waterColor,
+                .elevation = 1.0f - config::waterDepthBelowGround,
+            });
+            frame.waterGridBounds = { .width = 3, .height = 3 };
+            // Fixed tint and opaque depth isolate submerged-body composition
+            // from moving ripples, reflection, refraction and caustics.
+            frame.waterRendering.reflectionStrength = 0.0f;
+            frame.waterRendering.refractionStrength = 0.0f;
+            frame.waterRendering.underwaterCausticStrength = 0.0f;
+            frame.waterRendering.primaryRippleOpacity = 0.0f;
+            frame.waterRendering.secondaryRippleOpacity = 0.0f;
+            frame.waterRendering.primaryShorelineOpacity = 0.0f;
+            frame.waterRendering.secondaryShorelineOpacity = 0.0f;
+        }
+        return frame;
+    };
+    const auto capture = [&](const RenderFrameData& frame) {
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            ui.beginFrame({ 640, 360 }, {}, false, false);
+            ui.endFrame();
+            renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            ImGui::Render();
+#endif
+            renderer.drawFrame(renderer.prepareFrame(frame), ui.drawData());
+            verify(!renderer.hasFatalFailure(), "Sunken rock fixture failed to render");
+            verify(renderer.renderStats().unavailableModels == 0,
+                "Sunken rock fixture dropped a production rock model");
+        }
+        return renderer.captureRenderedFrame();
+    };
+    const auto evidence = std::filesystem::current_path() / "out" /
+        (shorelines ? "sunken-object-shoreline-evidence" : "sunken-rock-evidence");
+    std::filesystem::create_directories(evidence);
+    std::vector<TileType> objectTypes { TileType::Rock, TileType::RoundRock };
+    if (shorelines) objectTypes.push_back(TileType::Ice);
+    for (TileType type : objectTypes) {
+        const auto production = makeFrame(type, true, true, blueWater);
+        verify(!manifest.modelForTile(type).isCube(),
+            "Sunken rock fixture requires the production authored rock model");
+        renderer.waitForAssets(renderAssetRequirementsForFrame(production));
+        const auto empty = capture(makeFrame(type, false, false, blueWater));
+        const auto dry = capture(makeFrame(type, true, false, blueWater));
+        const auto submerged = capture(production);
+        const auto alternateWater = capture(makeFrame(type, true, true, redWater));
+        const std::string label = type == TileType::Rock ? "rock"
+            : type == TileType::RoundRock ? "round-rock" : "ice";
+        saveRippleEvidence(evidence / (label + "-dry.png"), dry);
+        saveRippleEvidence(evidence / (label + "-in-water.png"), submerged);
+        saveRippleEvidence(evidence / (label + "-alternate-water.png"), alternateWater);
+        const auto channel = [](const ImageData& image, std::size_t pixel, std::size_t component) {
+            return std::to_integer<int>(image.rgba[pixel * 4 + component]);
+        };
+        const auto pixelDifference = [&](const ImageData& left, const ImageData& right,
+                                         std::size_t pixel) {
+            double sum = 0.0;
+            for (std::size_t component = 0; component < 3; ++component) {
+                sum += std::abs(channel(left, pixel, component) -
+                    channel(right, pixel, component));
+            }
+            return sum / 3.0;
+        };
+        const auto rockPixel = [&](std::size_t pixel) {
+            return pixelDifference(empty, dry, pixel) > 12.0;
+        };
+        uint64_t capPixels = 0;
+        uint64_t underwaterPixels = 0;
+        uint64_t surroundingWaterPixels = 0;
+        double underwaterTint = 0.0;
+        for (uint32_t y = 1; y + 1 < dry.height; ++y) {
+            for (uint32_t x = 1; x + 1 < dry.width; ++x) {
+                const std::size_t pixel = static_cast<std::size_t>(y) * dry.width + x;
+                const double waterChange = pixelDifference(submerged, alternateWater, pixel);
+                if (!rockPixel(pixel)) {
+                    if (waterChange > 12.0) ++surroundingWaterPixels;
+                    continue;
+                }
+                // Exclude silhouette coverage and its one-pixel antialiasing
+                // seam, so a cap assertion tests opaque rock interiors.
+                if (!rockPixel(pixel - 1) || !rockPixel(pixel + 1) ||
+                    !rockPixel(pixel - dry.width) || !rockPixel(pixel + dry.width)) continue;
+                if (waterChange < 1.0 && pixelDifference(dry, submerged, pixel) < 1.0) {
+                    ++capPixels;
+                } else if (waterChange > 12.0 && pixelDifference(dry, submerged, pixel) > 6.0) {
+                    ++underwaterPixels;
+                    underwaterTint += (channel(submerged, pixel, 2) - channel(submerged, pixel, 0)) -
+                        (channel(dry, pixel, 2) - channel(dry, pixel, 0));
+                }
+            }
+        }
+        const double meanTint = underwaterTint / static_cast<double>(std::max<uint64_t>(underwaterPixels, 1));
+        std::cout << "Sunken " << label << ": opaque cap=" << capPixels
+                  << ", submerged body=" << underwaterPixels << ", body blue tint=" << meanTint
+                  << ", surrounding water=" << surroundingWaterPixels << '\n';
+        if (type != TileType::Ice) {
+            verify(capPixels > 20, "Sunken rock lost its opaque walkable crown above the water");
+            verify(underwaterPixels > 100 && meanTint > 10.0,
+                "Water did not visibly tint the submerged body of the production rock");
+            verify(capPixels < (capPixels + underwaterPixels) * .75,
+                "Sunken rock showed a mostly dry body instead of a small exposed crown");
+        }
+        verify(surroundingWaterPixels > 1000,
+            "The production rock was not surrounded by visible water");
+        verify(renderer.assetLoadingStats().failedAssets == 0,
+            "Sunken rock fixture had an asset upload failure");
+        if (!shorelines) continue;
+
+        const auto foamFrame = [&](bool enabled, float time, bool object = true) {
+            auto frame = makeFrame(type, object, true, blueWater);
+            frame.waterAnimationTimeSeconds = time;
+            const auto defaults = RenderFrameData::defaultWaterRendering();
+            frame.waterRendering.primaryShorelineOpacity = enabled
+                ? defaults.primaryShorelineOpacity : 0.0f;
+            frame.waterRendering.secondaryShorelineOpacity = enabled
+                ? defaults.secondaryShorelineOpacity : 0.0f;
+            // No terrain-bank masks: only the real object's depth contour can
+            // generate shoreline foam in this pool.
+            verify(frame.waterSurfaces.front().shorelineMask == 0,
+                "Sunken object foam fixture accidentally enabled a terrain bank");
+            return frame;
+        };
+        constexpr float earlyTime = .23f;
+        constexpr float lateTime = .91f;
+        const auto earlyOff = capture(foamFrame(false, earlyTime));
+        const auto earlyOn = capture(foamFrame(true, earlyTime));
+        const auto lateOff = capture(foamFrame(false, lateTime));
+        const auto lateOn = capture(foamFrame(true, lateTime));
+        saveRippleEvidence(evidence / (label + "-foam-off.png"), earlyOff);
+        saveRippleEvidence(evidence / (label + "-foam-early.png"), earlyOn);
+        saveRippleEvidence(evidence / (label + "-foam-late.png"), lateOn);
+        const auto earlyFoam = rippleImageDifference(earlyOff, earlyOn);
+        const auto lateFoam = rippleImageDifference(lateOff, lateOn);
+
+        // Dilate the authored model's silhouette by a small world-scale band
+        // (about .1 tile at this camera), retaining its actual rounded contour.
+        std::vector<uint8_t> nearObject(static_cast<std::size_t>(dry.width) * dry.height, 0);
+        constexpr int contourPixels = 12;
+        for (int y = 0; y < static_cast<int>(dry.height); ++y) {
+            for (int x = 0; x < static_cast<int>(dry.width); ++x) {
+                const std::size_t pixel = static_cast<std::size_t>(y) * dry.width + x;
+                if (!rockPixel(pixel)) continue;
+                for (int dy = -contourPixels; dy <= contourPixels; ++dy) {
+                    const int targetY = y + dy;
+                    if (targetY < 0 || targetY >= static_cast<int>(dry.height)) continue;
+                    for (int dx = -contourPixels; dx <= contourPixels; ++dx) {
+                        const int targetX = x + dx;
+                        if (targetX < 0 || targetX >= static_cast<int>(dry.width) ||
+                            dx * dx + dy * dy > contourPixels * contourPixels) continue;
+                        nearObject[static_cast<std::size_t>(targetY) * dry.width + targetX] = 1;
+                    }
+                }
+            }
+        }
+        double nearContourWeight = 0.0;
+        double animationWeight = 0.0;
+        double positiveFoam = 0.0;
+        double capChange = 0.0;
+        uint64_t capInteriorPixels = 0;
+        std::vector<uint8_t> dryCap(nearObject.size(), 0);
+        if (type != TileType::Ice) {
+            for (std::size_t pixel = 0; pixel < dryCap.size(); ++pixel) {
+                // Exact baseline agreement rejects water-covered seam pixels
+                // whose small coverage happened to differ by less than 1 RGB.
+                dryCap[pixel] = rockPixel(pixel) &&
+                    pixelDifference(dry, submerged, pixel) == 0.0 &&
+                    pixelDifference(submerged, alternateWater, pixel) == 0.0;
+            }
+        }
+        for (std::size_t pixel = 0; pixel < nearObject.size(); ++pixel) {
+            const double earlyChange = pixelDifference(earlyOff, earlyOn, pixel);
+            if (nearObject[pixel]) nearContourWeight += earlyChange;
+            double signedEarlyChange = 0.0;
+            for (std::size_t component = 0; component < 3; ++component) {
+                const int earlyDelta = channel(earlyOn, pixel, component) -
+                    channel(earlyOff, pixel, component);
+                const int lateDelta = channel(lateOn, pixel, component) -
+                    channel(lateOff, pixel, component);
+                animationWeight += std::abs(earlyDelta - lateDelta) / 3.0;
+                signedEarlyChange += earlyDelta / 3.0;
+            }
+            positiveFoam += std::max(signedEarlyChange, 0.0);
+            // Erode two pixels in every direction, including the diagonals,
+            // so the assertion measures opaque crown interiors, not the
+            // silhouette/waterline seam or its filtered neighboring samples.
+            const int x = static_cast<int>(pixel % dry.width);
+            const int y = static_cast<int>(pixel / dry.width);
+            bool capInterior = dryCap[pixel] && x >= 2 && y >= 2 &&
+                x + 2 < static_cast<int>(dry.width) && y + 2 < static_cast<int>(dry.height);
+            for (int dy = -2; capInterior && dy <= 2; ++dy) {
+                for (int dx = -2; capInterior && dx <= 2; ++dx) {
+                    const auto neighbor = static_cast<std::size_t>(y + dy) * dry.width + (x + dx);
+                    capInterior = dryCap[neighbor] != 0;
+                }
+            }
+            if (capInterior) {
+                ++capInteriorPixels;
+                capChange = std::max(capChange, std::max(earlyChange,
+                    pixelDifference(lateOff, lateOn, pixel)));
+            }
+        }
+        const double contourShare = nearContourWeight / std::max(earlyFoam.weight, 1.0);
+        std::cout << "Sunken " << label << " shoreline: early=" << earlyFoam.weight
+                  << ", late=" << lateFoam.weight << ", peak=" << earlyFoam.peak
+                  << ", contour share=" << contourShare << ", animation=" << animationWeight
+                  << ", exposed cap interior=" << capInteriorPixels
+                  << ", exposed cap change=" << capChange << '\n';
+        verify(earlyFoam.weight > 150.0 && earlyFoam.peak > 5.0 && positiveFoam > 100.0,
+            "Shoreline foam was not visibly crashing around the sunken object's waterline");
+        verify(contourShare > .90,
+            "Sunken object shoreline foam spread beyond the object's actual contour");
+        verify(animationWeight > 50.0 && animationWeight > earlyFoam.weight * .02,
+            "Sunken object shoreline foam did not visibly animate");
+        if (type != TileType::Ice) {
+            verify(capInteriorPixels > 20,
+                "Sunken object shoreline fixture did not retain a measurable opaque crown interior");
+            verify(capChange < 1.0,
+                "Sunken object shoreline foam repainted the opaque crown above the water");
+            auto belowSurfaceOff = foamFrame(false, earlyTime);
+            auto belowSurfaceOn = foamFrame(true, earlyTime);
+            belowSurfaceOff.tiles.back().baseElevation -= .30f;
+            belowSurfaceOn.tiles.back().baseElevation -= .30f;
+            const auto fullySubmergedOff = capture(belowSurfaceOff);
+            const auto fullySubmergedOn = capture(belowSurfaceOn);
+            saveRippleEvidence(evidence / (label + "-fully-submerged-foam-off.png"), fullySubmergedOff);
+            saveRippleEvidence(evidence / (label + "-fully-submerged-foam-enabled.png"), fullySubmergedOn);
+            const auto falseContact = rippleImageDifference(fullySubmergedOff, fullySubmergedOn);
+            std::cout << "Fully submerged " << label << ": false shoreline=" << falseContact.weight << '\n';
+            verify(falseContact.weight == 0.0,
+                "A wholly submerged rock incorrectly generated shoreline contact foam");
+        }
+
+        if (type == TileType::Rock) {
+            const auto deepOff = capture(foamFrame(false, earlyTime, false));
+            const auto deepOn = capture(foamFrame(true, earlyTime, false));
+            saveRippleEvidence(evidence / "deep-flat-pool-foam-off.png", deepOff);
+            saveRippleEvidence(evidence / "deep-flat-pool-foam-enabled.png", deepOn);
+            verify(rippleImageDifference(deepOff, deepOn).weight == 0.0,
+                "A deep flat pool floor incorrectly generated object shoreline foam");
+            auto emptyOffFrame = foamFrame(false, earlyTime, false);
+            auto emptyOnFrame = foamFrame(true, earlyTime, false);
+            emptyOffFrame.tiles.clear();
+            emptyOnFrame.tiles.clear();
+            const auto emptyOff = capture(emptyOffFrame);
+            const auto emptyOn = capture(emptyOnFrame);
+            saveRippleEvidence(evidence / "empty-water-foam-enabled.png", emptyOn);
+            verify(rippleImageDifference(emptyOff, emptyOn).weight == 0.0,
+                "Empty water incorrectly generated object shoreline foam");
+        }
+    }
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a sunken rock rendering error");
+}
+
 void verifyWaterEntryRipples(SDL_Window* window, const std::filesystem::path& root,
     FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
 {
@@ -745,6 +1042,47 @@ void verifyWaterEntryRipples(SDL_Window* window, const std::filesystem::path& ro
         "Water-entry ripple did not fade before its lifetime ended");
     verify(rippleImageDifference(baseline, expired).weight == 0.0,
         "Expired water-entry ripple still changed the water image");
+    const auto skipFrame = [&](float age) {
+        auto frame = makeFrame(age);
+        frame.waterRipples[0].radiusScale = 0.35f;
+        frame.waterRipples[0].intensity = 0.75f;
+        return frame;
+    };
+    const auto skipEarly = capture(skipFrame(0.16f));
+    const auto skipExpanded = capture(skipFrame(0.55f));
+    const auto skipFading = capture(skipFrame(1.35f));
+    const auto skipEarlyDifference = rippleImageDifference(baseline, skipEarly);
+    const auto skipExpandedDifference = rippleImageDifference(baseline, skipExpanded);
+    const auto skipFadingDifference = rippleImageDifference(baseline, skipFading);
+    saveRippleEvidence(evidence / "skip-early.png", skipEarly);
+    saveRippleEvidence(evidence / "skip-expanded.png", skipExpanded);
+    saveRippleEvidence(evidence / "skip-fading.png", skipFading);
+    verify(skipEarlyDifference.weight > 20.0 && skipEarlyDifference.peak > 3.0,
+        "Round rock skip ring was not visible on the water");
+    verify(skipExpandedDifference.radiusPixels > skipEarlyDifference.radiusPixels * 1.4 &&
+        skipExpandedDifference.radiusPixels < expandedDifference.radiusPixels * 0.65,
+        "Round rock skip ring did not stay small while expanding");
+    verify(skipFadingDifference.peak < skipExpandedDifference.peak * 0.6,
+        "Round rock skip ring did not lose intensity with age");
+    // Capture the new asset through the same lighting and crop as the editor
+    // palette. This also exercises its real GPU mesh/material upload.
+    const auto rockFrame = tileThumbnails::buildBakeFrame(
+        TileType::RoundRock, manifest, PresentationSettings {});
+    renderer.waitForAssets(renderAssetRequirementsForFrame(rockFrame));
+    const auto rockImage = capture(rockFrame);
+    const auto crop = tileThumbnails::cropFor(rockFrame, rockImage.width, rockImage.height);
+    std::vector<uint8_t> cropped(static_cast<std::size_t>(crop.width) * crop.height * 4);
+    for (uint32_t y = 0; y < crop.height; ++y) {
+        for (uint32_t x = 0; x < crop.width; ++x) {
+            for (std::size_t channel = 0; channel < 4; ++channel) {
+                const std::size_t source = ((static_cast<std::size_t>(crop.y) + y) *
+                    rockImage.width + static_cast<std::size_t>(crop.x) + x) * 4 + channel;
+                cropped[(static_cast<std::size_t>(y) * crop.width + x) * 4 + channel] =
+                    std::to_integer<uint8_t>(rockImage.rgba[source]);
+            }
+        }
+    }
+    writeRgbaPng(evidence / "tile_round_rock.png", crop.width, crop.height, cropped);
     verify(rippleImageDifference(baseline,
             capture(makeFrame(0.55f, true, 2.82f))).weight == 0.0,
         "Water-entry ripple leaked onto water at another elevation");
@@ -767,10 +1105,9 @@ void verifyWaterEntryRipples(SDL_Window* window, const std::filesystem::path& ro
         "Preview water did not render its own water-entry ripple");
     saveRippleEvidence(evidence / "preview.png", previewRipple);
 
-    // Match a .15 s sample of the default .25 s move: one horizontal unit,
-    // then a .18 unit sink. The block has moved .708 units and the effect is
-    // .044 s old after its leading edge first touched water. A completed-step
-    // trigger would hide the entire effect in this common one-tile pool case.
+    // Use a partially entering block so its leading-edge ripple remains visible
+    // in a one-tile pool. The fixture samples .044 s after first water contact;
+    // waiting for the completed step would hide the effect beneath the block.
     constexpr float moveDurationSeconds = 0.25f;
     constexpr float pathDistance = 1.18f;
     constexpr float sampleTimeSeconds = 0.15f;
@@ -1162,6 +1499,16 @@ int main(int argc, char** argv)
             verify(vulkanDebug::validationErrorCount() == 0,
                 "Vulkan validation reported a water-entry ripple rendering error");
             std::cout << "Water-entry ripple GPU regression passed\n";
+            return 0;
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--sunken-rocks") {
+            verifySunkenRocks(window.get(), root, font, manifest, temp.path() / "cache.bin");
+            std::cout << "Sunken rock GPU regression passed\n";
+            return 0;
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--sunken-object-shorelines") {
+            verifySunkenRocks(window.get(), root, font, manifest, temp.path() / "cache.bin", true);
+            std::cout << "Sunken object shoreline GPU regression passed\n";
             return 0;
         }
         if (argc > 1 && std::string_view(argv[1]) == "--water-streams") {

@@ -570,14 +570,18 @@ public:
             cameraFor(scene),
             false,
             ripplesFor(frameData),
-            scratchesFor(frameData));
+            scratchesFor(frameData),
+            frameData.tiles,
+            frameData.waterSurfaces);
         descriptors_.updateFrame(
             configuration_.descriptorFrameIndex,
             previewFrameData ? previewFrameData->lighting : frameData.lighting,
             cameraFor(previewScene ? *previewScene : scene),
             true,
             ripplesFor(previewFrameData ? *previewFrameData : frameData),
-            scratchesFor(previewFrameData ? *previewFrameData : frameData));
+            scratchesFor(previewFrameData ? *previewFrameData : frameData),
+            (previewFrameData ? *previewFrameData : frameData).tiles,
+            (previewFrameData ? *previewFrameData : frameData).waterSurfaces);
 
         const VkCommandBufferBeginInfo beginInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,

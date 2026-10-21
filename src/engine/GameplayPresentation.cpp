@@ -31,7 +31,7 @@ Vec3 movableRenderTarget(GridPosition3 position, bool fallen)
 {
     Vec3 target = toVec3(position);
     if (fallen) {
-        target.z -= config::waterDepthBelowGround;
+        target.z -= config::sunkenMovableDepthBelowGround;
     }
     return target;
 }
@@ -602,12 +602,13 @@ void GameplayPresentation::scheduleWaterEntries(
         return;
     }
     const std::size_t legCount = std::max<std::size_t>(legs.size(), 1);
-    const float stepSeconds = std::max(mechanicalDurationSeconds, 0.0f) /
-        static_cast<float>(legCount);
+    const auto durations = plans::legDurations(
+        &level, action.before, legs, mechanicalDurationSeconds);
     float legStart = 0.0f;
     for (std::size_t leg = 0; leg < legCount; ++leg) {
         const GameState& before = leg == 0 ? action.before : legs[leg - 1];
         const GameState& after = legs.empty() ? action.after : legs[leg];
+        const float stepSeconds = durations[leg];
         const float legEnd = legStart + stepSeconds + platformExtraSeconds(
             platformMoves(before, after, stepSeconds, &level, activationStepSeconds));
         const auto schedule = [&](EntityTarget target, GridPosition3 cell) {
@@ -702,6 +703,46 @@ void GameplayPresentation::scheduleWaterEntries(
     }
 }
 
+void GameplayPresentation::scheduleRoundRockSkips(
+    const Level& level, const GameplaySession::Action& action,
+    float elapsedSeconds)
+{
+    if (action.reversed) {
+        clearWaterRipples();
+        return;
+    }
+    for (const auto& track : action.presentation.motions) {
+        if (track.arcHeight <= 0.0f || track.target.kind != EntityKind::Movable ||
+            track.durationSeconds <= 0.0f) continue;
+        const auto rock = std::ranges::find_if(action.before.movables,
+            [&](const auto& movable) {
+                const auto index = static_cast<std::size_t>(&movable - action.before.movables.data());
+                return movableTarget(movable, index) == track.target;
+            });
+        if (rock == action.before.movables.end() || rock->type != TileType::RoundRock) continue;
+        const GridPosition3 cell {
+            static_cast<int>(std::lround(track.to.x)),
+            static_cast<int>(std::lround(track.to.y)),
+            static_cast<int>(std::lround(track.to.z)),
+        };
+        // Portal mouths and mounted landings do not strike exposed water.
+        if (std::abs(track.to.x - static_cast<float>(cell.x)) > 0.001f ||
+            std::abs(track.to.y - static_cast<float>(cell.y)) > 0.001f ||
+            !tileTypeIsWater(level.supportingTileAt(cell).value_or(TileType::Air))) continue;
+        const float age = elapsedSeconds - track.startSeconds - track.durationSeconds;
+        if (age >= config::waterImpactRippleLifetimeSeconds) continue;
+        constexpr std::size_t pendingCapacity = 4096;
+        if (roundRockRipples_.size() == pendingCapacity) roundRockRipples_.erase(roundRockRipples_.begin());
+        roundRockRipples_.push_back({
+            .position = { track.to.x + 0.5f, track.to.y + 0.5f,
+                static_cast<float>(cell.z) - config::waterDepthBelowGround },
+            .ageSeconds = age,
+            .radiusScale = 0.35f,
+            .intensity = 0.75f,
+        });
+    }
+}
+
 void GameplayPresentation::advanceWaterRipples(float dt)
 {
     std::size_t retained = 0;
@@ -713,11 +754,16 @@ void GameplayPresentation::advanceWaterRipples(float dt)
         }
     }
     waterRippleCount_ = retained;
+    for (auto& ripple : roundRockRipples_) ripple.ageSeconds += std::max(dt, 0.0f);
+    std::erase_if(roundRockRipples_, [](const auto& ripple) {
+        return ripple.ageSeconds >= config::waterImpactRippleLifetimeSeconds;
+    });
 }
 
 void GameplayPresentation::clearWaterRipples()
 {
     waterRippleCount_ = 0;
+    roundRockRipples_.clear();
 }
 
 void GameplayPresentation::appendWaterRippleRenderData(RenderFrameData& frame) const
@@ -729,6 +775,17 @@ void GameplayPresentation::appendWaterRippleRenderData(RenderFrameData& frame) c
             frame.waterRippleCount < frame.waterRipples.size()) {
             frame.waterRipples[frame.waterRippleCount++] = ripple;
         }
+    }
+    // Prefer recent visible contacts if a crowded surface fills the live
+    // budget; pending contacts consume no shader slots.
+    for (const auto& ripple : roundRockRipples_) {
+        if (ripple.ageSeconds < 0.0f ||
+            ripple.ageSeconds >= config::waterImpactRippleLifetimeSeconds) continue;
+        if (frame.waterRippleCount == frame.waterRipples.size()) {
+            std::move(frame.waterRipples.begin() + 1, frame.waterRipples.end(), frame.waterRipples.begin());
+            --frame.waterRippleCount;
+        }
+        frame.waterRipples[frame.waterRippleCount++] = ripple;
     }
 }
 
@@ -783,7 +840,8 @@ void GameplayPresentation::scheduleRockScratches(
             }
         }
         if (rock == nullptr ||
-            rock->type != TileType::Rock || rock->fallen || rock->dead) {
+            (rock->type != TileType::Rock && rock->type != TileType::RoundRock) ||
+            rock->fallen || rock->dead) {
             continue;
         }
         const Vec3 motionDelta = track.to - track.from;
@@ -1041,8 +1099,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     // once from start to finish would be right for a single block travelling in
     // a straight line, but wrong the moment a chain is involved: a block that
     // only starts moving on the fourth step would set off immediately.
-    const float stepDuration =
-        action.durationSeconds / static_cast<float>(legs.size());
+    const auto durations = plans::legDurations(
+        level, action.before, legs, action.durationSeconds);
 
     // Each leg is resolved as its own transaction and the results are laid end
     // to end. Motion alone used to be enough here, on the reasoning that only
@@ -1060,19 +1118,54 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     ActionPresentationTimeline timeline;
     float legStart = 0.0f;
     float platformSeconds = 0.0f;
+    struct PreviousHop {
+        EntityTarget target;
+        Vec3 end;
+        float mechanicalEnd = 0.0f;
+        float visibleEnd = 0.0f;
+    };
+    std::vector<PreviousHop> previousHops;
     for (std::size_t leg = 0; leg < legs.size(); ++leg) {
         GameplaySession::Action legAction = action;
         legAction.before = leg == 0 ? action.before : legs[leg - 1];
         legAction.after = legs[leg];
+        const float stepDuration = durations[leg];
         legAction.durationSeconds = stepDuration;
         legAction.playerPushing = leg == 0 && action.playerPushing;
         legAction.playerPulling = leg == 0 && action.playerPulling;
 
         const auto events = legTransits(leg);
+        auto legTimeline = buildActionPresentationLeg(
+            legAction, level, cues ? &events : nullptr, false, activationStepSeconds);
+        // A shared leg can carry a slow leaf and an independent skipping
+        // stone. Keep their visible clocks independent while the immutable
+        // rule plan and its conservative path claims retain the shared step.
+        const float skipScale = 0.5f / plans::stepDurationWeight(
+            level, legAction.before, legAction.after);
+        for (auto& motion : legTimeline.motions) {
+            const auto previous = std::ranges::find(previousHops, motion.target, &PreviousHop::target);
+            if (motion.arcHeight <= 0.0f || legAction.playerPushing || legAction.playerPulling) {
+                if (previous != previousHops.end()) previousHops.erase(previous);
+                continue;
+            }
+            const float mechanicalStart = legStart + motion.startSeconds;
+            const float mechanicalEnd = mechanicalStart + motion.durationSeconds;
+            float visibleStart = mechanicalStart;
+            if (previous != previousHops.end() &&
+                std::abs(previous->mechanicalEnd - mechanicalStart) < 0.0001f &&
+                length(previous->end - motion.from) < 0.0001f) {
+                visibleStart = previous->visibleEnd;
+            }
+            motion.startSeconds = visibleStart - legStart;
+            motion.durationSeconds *= skipScale;
+            const PreviousHop hop { motion.target, motion.to, mechanicalEnd,
+                visibleStart + motion.durationSeconds };
+            if (previous == previousHops.end()) previousHops.push_back(hop);
+            else *previous = hop;
+        }
         timeline = concatenateTimelines(
             std::move(timeline),
-            buildActionPresentationLeg(
-                legAction, level, cues ? &events : nullptr, false, activationStepSeconds),
+            legTimeline,
             legStart);
         const float extra = platformExtraSeconds(
             platformMoves(
@@ -1130,7 +1223,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
                                    GridPosition3 before,
                                    GridPosition3 after,
                                    Vec3 from,
-                                   Vec3 to) {
+                                   Vec3 to,
+                                   float arcHeight = 0.0f) {
         if (level && transits) {
             std::vector<std::pair<Vec3, Vec3>> physicalLegs;
             Vec3 current = from;
@@ -1160,7 +1254,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
                                         .from = start,
                                         .to = end,
                                         .startSeconds = startSeconds,
-                                        .durationSeconds = duration });
+                                        .durationSeconds = duration,
+                                        .arcHeight = arcHeight });
                     startSeconds += duration;
                 }
                 return;
@@ -1181,19 +1276,22 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
                 builder.addMotion({ .target = target,
                                     .from = from,
                                     .to = mouth,
-                                    .durationSeconds = motionDuration * 0.5f });
+                                    .durationSeconds = motionDuration * 0.5f,
+                                    .arcHeight = arcHeight });
                 builder.addMotion({ .target = target,
                                     .from = emerged,
                                     .to = to,
                                     .startSeconds = motionDuration * 0.5f,
-                                    .durationSeconds = motionDuration * 0.5f });
+                                    .durationSeconds = motionDuration * 0.5f,
+                                    .arcHeight = arcHeight });
                 return;
             }
         }
         builder.addMotion({ .target = target,
                             .from = from,
                             .to = to,
-                            .durationSeconds = motionDuration });
+                            .durationSeconds = motionDuration,
+                            .arcHeight = arcHeight });
     };
 
     const std::size_t playerCount = std::min(
@@ -1265,8 +1363,20 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
         const Vec3 from = movableRenderTarget(before.cell, before.fallen);
         const Vec3 to = movableRenderTarget(walkedTo, after.fallen);
         if (gridDistance(from, to) > 0.0001f) {
+            const bool onPad = std::ranges::any_of(action.before.movables,
+                [&](const auto& pad) {
+                    return pad.type == TileType::LilyPad && !pad.dead && !pad.fallen &&
+                        pad.cell.x == before.cell.x && pad.cell.y == before.cell.y &&
+                        pad.cell.z + 1 == before.cell.z;
+                });
+            const bool skips = level && before.type == TileType::RoundRock &&
+                !before.fallen && !after.fallen && !onPad &&
+                (before.cell.x != walkedTo.x || before.cell.y != walkedTo.y) &&
+                (tileTypeIsWater(level->supportingTileAt(before.cell).value_or(TileType::Air)) ||
+                 tileTypeIsWater(level->supportingTileAt(walkedTo).value_or(TileType::Air)));
             addUnitMotion(
-                movableTarget(before, index), before.cell, walkedTo, from, to);
+                movableTarget(before, index), before.cell, walkedTo, from, to,
+                skips ? 0.16f : 0.0f);
         }
     }
 
@@ -1679,6 +1789,7 @@ void GameplayPresentation::seekAction(
         visual->animationEnd = track.to;
         visual->animationElapsed = motionElapsed;
         visual->animationDuration = track.durationSeconds;
+        visual->arcHeight = track.arcHeight;
         visual->animationSecondsPerTile = distance > 0.0001f
             ? track.durationSeconds / distance
             : 0.0f;
@@ -1687,6 +1798,11 @@ void GameplayPresentation::seekAction(
             track.to,
             motionElapsed,
             visual->animationSecondsPerTile);
+        if (track.arcHeight > 0.0f && track.durationSeconds > 0.0f) {
+            const float progress = std::clamp(motionElapsed / track.durationSeconds, 0.0f, 1.0f);
+            visual->renderPosition = track.from + (track.to - track.from) * progress;
+            visual->renderPosition.z += 4.0f * track.arcHeight * progress * (1.0f - progress);
+        }
         visual->moving = distance > 0.0001f;
     }
 
@@ -1856,11 +1972,13 @@ std::vector<GameplaySoundCue> GameplayPresentation::buildActionSoundCues(
         return cues;
     }
     const std::size_t legCount = std::max<std::size_t>(legs.size(), 1);
-    const float stepSeconds = mechanicalDurationSeconds / static_cast<float>(legCount);
+    const auto durations = plans::legDurations(
+        &level, action.before, legs, mechanicalDurationSeconds);
     float legStart = 0.0f;
     for (std::size_t leg = 0; leg < legCount; ++leg) {
         const GameState& before = leg == 0 ? action.before : legs[leg - 1];
         const GameState& after = legs.empty() ? action.after : legs[leg];
+        const float stepSeconds = durations[leg];
         const auto moves = platformMoves(before, after, stepSeconds, &level, activationStepSeconds);
         const float legEnd = legStart + stepSeconds + platformExtraSeconds(moves);
         // Gates fade toward the projected state while the leg moves. Start
@@ -1996,6 +2114,7 @@ void GameplayPresentation::setImmediatePosition(
     visual.animationElapsed = 0.0f;
     visual.animationDuration = 0.0f;
     visual.animationSecondsPerTile = 0.0f;
+    visual.arcHeight = 0.0f;
     visual.moving = false;
 }
 

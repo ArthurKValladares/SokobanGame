@@ -213,6 +213,34 @@ void testRobotHeadingsRoundTripAsMovableUnits()
     CHECK(!robotOrientationQuarterTurns(TileType::Rock));
 }
 
+void testRoundRocksRoundTripAsLinkedMovableUnits()
+{
+    TEST("roundRocksRoundTripAsLinkedMovableUnits");
+    const Level::Definition definition {
+        .layers = { { "...." }, { "Q\\R " } },
+        .plates = { { { 1, 0, 1 }, TileType::PressurePlate } },
+        .objectLinks = {
+            { .cell = { 1, 0, 1 }, .color = { 0.2f, 0.4f, 0.8f } },
+            { .cell = { 2, 0, 1 }, .color = { 0.2f, 0.4f, 0.8f } },
+        },
+    };
+    const auto lines = Level::serializeDefinition(definition);
+    CHECK(Level::parseDefinition(lines, "round rock authoring") == definition);
+    const Level level = Level::loadFromLines(lines, "round rock authoring");
+    CHECK(level.movableTiles().size() == 2);
+    CHECK(level.movableTiles()[0].type == TileType::RoundRock);
+    CHECK(level.movableTiles()[0].position == GridPosition3({ 1, 0, 1 }));
+    CHECK(level.movableTiles()[1].type == TileType::Rock);
+    CHECK(level.movablesAreLinked(0, 1));
+    CHECK(level.tileAt(1, 0, 1) == TileType::PressurePlate);
+    CHECK(tileTypeIsMovableObject(TileType::RoundRock));
+    CHECK(tileTypeCanStandOnPlate(TileType::RoundRock));
+    CHECK(tileTypeToChar(TileType::RoundRock) == '\\');
+    CHECK(charToTileType('\\') == TileType::RoundRock);
+    CHECK(tileTypeFromName("Round Rock") == TileType::RoundRock);
+    CHECK(tileTypeFromName(tileTypeName(TileType::RoundRock)) == TileType::RoundRock);
+}
+
 void testCameraMetadataRoundTripAndValidation()
 {
     TEST("cameraMetadataRoundTripAndValidation");
@@ -1741,6 +1769,7 @@ int main()
     testLeverPlacementsRoundTripAndKeepPlateSemantics();
     testSerializationRoundTrip();
     testRobotHeadingsRoundTripAsMovableUnits();
+    testRoundRocksRoundTripAsLinkedMovableUnits();
     testCameraMetadataRoundTripAndValidation();
     testCharacterMetadataRoundTripAndLegacyDefault();
     testWardrobeVariantsRoundTripAndRemainTraversable();

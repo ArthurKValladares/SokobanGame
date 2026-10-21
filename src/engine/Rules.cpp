@@ -841,6 +841,87 @@ bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 p
         fallenMovableAt(state, position) == nullptr;
 }
 
+bool lilyPadDrivenByRock(const Level& level,
+    const GameState& before, const GameState& after, std::size_t padIndex)
+{
+    if (padIndex >= before.movables.size() || padIndex >= after.movables.size()) {
+        return false;
+    }
+    const auto& fromPad = before.movables[padIndex];
+    const auto& toPad = after.movables[padIndex];
+    if (fromPad.type != TileType::LilyPad || toPad.type != TileType::LilyPad ||
+        fromPad.dead || fromPad.fallen || toPad.dead || toPad.fallen) {
+        return false;
+    }
+    const bool moved = fromPad.cell != toPad.cell;
+    const bool stopped = fromPad.sliding && !toPad.sliding;
+    if (isUnfilledWater(level, before, fromPad.cell) &&
+        ((moved && (fromPad.sliding || toPad.sliding)) || (!moved && stopped))) {
+        return true;
+    }
+    if (!moved) return false;
+
+    // Keep entry and exit directions distinct for a shove crossing a portal.
+    const auto directions = [&](GridPosition3 from, GridPosition3 to)
+        -> std::optional<std::pair<MoveDirection, MoveDirection>> {
+        if (from.x == to.x && from.y == to.y) return std::nullopt;
+        for (const auto direction : { MoveDirection::Up, MoveDirection::Down,
+                 MoveDirection::Left, MoveDirection::Right }) {
+            if (const auto portal = level.portalCrossing(from, directionOffset(direction));
+                portal && portal->exit.x == to.x && portal->exit.y == to.y) {
+                return std::pair { direction, rotateDirection(direction, portal->quarterTurns) };
+            }
+        }
+        if (from.x == to.x) {
+            const auto direction = to.y < from.y ? MoveDirection::Up : MoveDirection::Down;
+            return std::pair { direction, direction };
+        }
+        if (from.y == to.y) {
+            const auto direction = to.x < from.x ? MoveDirection::Left : MoveDirection::Right;
+            return std::pair { direction, direction };
+        }
+        return std::nullopt;
+    };
+    const auto padDirections = directions(fromPad.cell, toPad.cell);
+    if (!padDirections) return false;
+    const auto movedRock = [&](std::size_t index, MoveDirection expectedDirection) {
+        if (index >= after.movables.size()) return false;
+        const auto& rock = before.movables[index];
+        if (rock.dead || rock.fallen || after.movables[index].dead ||
+            (rock.type != TileType::Rock && rock.type != TileType::RoundRock)) {
+            return false;
+        }
+        const auto movement = directions(rock.cell, after.movables[index].cell);
+        return movement && movement->second == expectedDirection;
+    };
+    for (std::size_t index = 0; index < before.movables.size(); ++index) {
+        if (movedRock(index, padDirections->second) &&
+            level.movablesAreLinked(index, padIndex)) return true;
+    }
+
+    // A Knight chain or a Bard shove can transmit a rock's force through
+    // intervening blocks and enemies. Require every intervening unit to move.
+    auto cell = movementTarget(fromPad.cell, oppositeDirection(padDirections->first));
+    while (level.inBounds(cell)) {
+        if (const auto* movable = movableAt(before, cell)) {
+            const auto index = static_cast<std::size_t>(movable - before.movables.data());
+            if (movedRock(index, padDirections->first)) return true;
+            if (index >= after.movables.size()) return false;
+            const auto movement = directions(movable->cell, after.movables[index].cell);
+            if (!movement || movement->second != padDirections->first) return false;
+        } else if (const auto* enemy = enemyAt(before, cell)) {
+            const auto index = static_cast<std::size_t>(enemy - before.enemies.data());
+            if (index >= after.enemies.size()) return false;
+            const auto movement = directions(enemy->cell, after.enemies[index].cell);
+            if (!movement || movement->second != padDirections->first) return false;
+        } else {
+            return false;
+        }
+        cell = movementTarget(cell, oppositeDirection(padDirections->first));
+    }
+    return false;
+}
+
 bool isPressurePlateActive(
     const Level& level,
     const GameState& state,
@@ -3164,10 +3245,63 @@ private:
     void cancelAndFinish(std::size_t index, bool onlyWhenSliding)
     {
         if (slidingOf(index)) {
+            // A skipping stone loses its support when its forward travel is
+            // stopped. Fallen stones fill water exactly like ordinary rocks.
+            if (index < movableCount_ &&
+                after_.movables[index].type == TileType::RoundRock &&
+                isUnfilledWater(level_, after_, cellOf(index))) {
+                after_.movables[index].fallen = true;
+            }
             slidingOf(index) = std::nullopt;
             status_[index].done = true;
         } else if (!onlyWhenSliding) {
             status_[index].done = true;
+        }
+    }
+
+    [[nodiscard]] std::optional<std::size_t> roundRockPadAt(
+        std::size_t index, GridPosition3 target) const
+    {
+        if (after_.movables[index].type != TileType::RoundRock) {
+            return std::nullopt;
+        }
+        const auto* pad = movableAt(after_, target);
+        if (pad == nullptr || pad->type != TileType::LilyPad ||
+            !isUnfilledWater(level_, after_, target) ||
+            isUnitLocked(level_, after_, target)) {
+            return std::nullopt;
+        }
+        ++target.z;
+        if (!cellAllowsEntity(level_, after_, target) ||
+            anyUnitIn(after_, target)) {
+            return std::nullopt;
+        }
+        return static_cast<std::size_t>(pad - after_.movables.data());
+    }
+
+    // The wake travels sideways away from the stone on either side of its
+    // path. Momentum is ordinary saved state, so these pads join the same
+    // causal closure and remain deterministic through undo and replay.
+    void pushRoundRockWake(std::size_t index, MoveDirection direction)
+    {
+        const auto cell = after_.movables[index].cell;
+        const bool horizontal = direction == MoveDirection::Left ||
+            direction == MoveDirection::Right;
+        for (const auto side : horizontal
+                 ? std::array { MoveDirection::Up, MoveDirection::Down }
+                 : std::array { MoveDirection::Left, MoveDirection::Right }) {
+            const auto neighbor = movementTarget(cell, side);
+            const auto* pad = movableAt(after_, neighbor);
+            if (pad == nullptr || pad->type != TileType::LilyPad ||
+                !isUnfilledWater(level_, after_, neighbor) ||
+                isUnitLocked(level_, after_, neighbor)) {
+                continue;
+            }
+            const auto padIndex = static_cast<std::size_t>(
+                pad - after_.movables.data());
+            after_.movables[padIndex].sliding = side;
+            status_[padIndex].active = true;
+            status_[padIndex].done = false;
         }
     }
 
@@ -3177,7 +3311,8 @@ private:
     // through a single loose rock, ice block, or turret when space permits.
     [[nodiscard]] bool pushOneMovableForBard(
         std::size_t blockerIndex,
-        MoveDirection direction)
+        MoveDirection direction,
+        bool pushedByRock = false)
     {
         Status& blockerStatus = status_[blockerIndex];
         if (blockerStatus.movedThisMicro ||
@@ -3186,10 +3321,16 @@ private:
         }
         const GridPosition3 destination =
             movementDestination(after_.movables[blockerIndex].cell, direction);
+        if (pushedByRock && after_.movables[blockerIndex].type == TileType::LilyPad &&
+            !isUnfilledWater(level_, after_,
+                movableFallTarget(level_, after_, blockerIndex, destination).cell)) {
+            return false;
+        }
         if (!portalEntryClear(
                 after_.movables[blockerIndex].cell, direction, after_) ||
             !cellAllowsEntity(level_, after_, destination) ||
-            movableBlocksAt(after_, destination, blockerIndex) ||
+            (movableBlocksAt(after_, destination, blockerIndex) &&
+                !roundRockPadAt(blockerIndex, destination)) ||
             playerBlocksAt(after_, destination) ||
             enemyBlocksAt(after_, destination) ||
             !canCarryPlatformRiders(blockerIndex, destination, blockerStatus.bardDriven) ||
@@ -3268,6 +3409,11 @@ private:
             if (conflictingDirections) {
                 continue;
             }
+            const bool rockDriven = std::ranges::any_of(members, [&](std::size_t index) {
+                const auto type = after_.movables[index].type;
+                return movableMovedDirections_[index] &&
+                    (type == TileType::Rock || type == TileType::RoundRock);
+            });
 
             const GridPosition offset = directionOffset(direction);
             std::ranges::sort(members, {}, [&](std::size_t index) {
@@ -3283,6 +3429,11 @@ private:
                 }
                 const GridPosition3 destination =
                     movementDestination(movable.cell, direction);
+                if (rockDriven && movable.type == TileType::LilyPad &&
+                    !isUnfilledWater(level_, after_,
+                        movableFallTarget(level_, after_, index, destination).cell)) {
+                    continue;
+                }
                 if (!portalEntryClear(movable.cell, direction, after_) ||
                     !cellAllowsEntity(level_, after_, destination) ||
                     movableBlocksAt(after_, destination, index) ||
@@ -3333,20 +3484,36 @@ private:
         if (!cellAllowsEntity(level_, after_, target) ||
             (!status.bardDriven &&
                 !movableFallTarget(level_, after_, index, target).supported)) {
-            slidingOf(index) = std::nullopt;
-            status.done = true;
+            cancelAndFinish(index, false);
             status.resolved = true;
             return true;
         }
-        // A current keeps a floating leaf in water. External shoves, slide
-        // momentum, and Bard movement may still carry it onto the bank.
+        const auto boardingPad = roundRockPadAt(index, target);
+        const bool skipping = after_.movables[index].type == TileType::RoundRock &&
+            after_.movables[index].sliding &&
+            isUnfilledWater(level_, after_, cellOf(index));
+        const bool coasting = after_.movables[index].type == TileType::LilyPad &&
+            after_.movables[index].sliding &&
+            isUnfilledWater(level_, after_, cellOf(index));
+        if ((skipping || coasting) && !boardingPad) {
+            if (const auto blocker = liveUnitAt(after_, target)) {
+                if (!status_[entityIndexForUnit(*blocker)].resolved) {
+                    return false;
+                }
+                cancelAndFinish(index, false);
+                status.resolved = true;
+                return true;
+            }
+        }
+        // Water currents and stone impulses stop on the water side of the
+        // bank. A hero's ordinary shove can still beach an idle leaf.
         const bool padCurrent = after_.movables[index].type == TileType::LilyPad &&
             !status.bardDriven && !after_.movables[index].sliding &&
             !conveyorDirectionForTile(tileAt(level_, cellOf(index))) &&
             waterStreamDirectionAt(level_, cellOf(index)).has_value();
-        if (padCurrent && !isUnfilledWater(level_, after_,
+        if ((padCurrent || coasting) && !isUnfilledWater(level_, after_,
                 movableFallTarget(level_, after_, index, target).cell)) {
-            status.done = true;
+            cancelAndFinish(index, false);
             status.resolved = true;
             return true;
         }
@@ -3355,14 +3522,17 @@ private:
         if (!canCarryPlatformRiders(index, target, status.bardDriven)) {
             return false;
         }
-        if (const GameState::Movable* blocker = movableAt(after_, target)) {
+        if (const GameState::Movable* blocker = movableAt(after_, target);
+            blocker != nullptr && !boardingPad) {
             const std::size_t blockerIndex = static_cast<std::size_t>(
                 blocker - after_.movables.data());
             if (blockerIndex != index && !status_[blockerIndex].resolved) {
                 return false;
             }
             if (!status.bardDriven || blockerIndex == index ||
-                !pushOneMovableForBard(blockerIndex, direction)) {
+                !pushOneMovableForBard(blockerIndex, direction,
+                    after_.movables[index].type == TileType::Rock ||
+                        after_.movables[index].type == TileType::RoundRock)) {
                 cancelAndFinish(index, true);
                 status.resolved = true;
                 return true;
@@ -3420,12 +3590,16 @@ private:
         GameState& trial, LiveUnitAt unit, MoveDirection direction) const
     {
         const GridPosition3 from = unitCell(trial, unit);
-        const GridPosition3 target = movementDestination(from, direction);
+        GridPosition3 target = movementDestination(from, direction);
+        const bool boardingPad = unit.kind == EntityKind::Movable &&
+            roundRockPadAt(unit.index, target).has_value();
         if (isUnitLocked(level_, trial, from) ||
             !portalEntryClear(from, direction, trial) ||
-            !cellAllowsEntity(level_, trial, target) || liveUnitAt(trial, target)) {
+            !cellAllowsEntity(level_, trial, target) ||
+            (liveUnitAt(trial, target) && !boardingPad)) {
             return false;
         }
+        if (boardingPad) ++target.z;
         FallResult fall;
         if (unit.kind == EntityKind::Player) {
             fall = playerFallTarget(level_, trial, unit.index, target);
@@ -3800,7 +3974,8 @@ private:
                 !occupiedPortalExit &&
                 portalEntryClear(target, direction, after_) &&
                 cellAllowsEntity(level_, after_, pushTarget) &&
-                !movableBlocksAt(after_, pushTarget, blockerIndex) &&
+                (!movableBlocksAt(after_, pushTarget, blockerIndex) ||
+                    roundRockPadAt(blockerIndex, pushTarget)) &&
                 !playerBlocksAt(after_, pushTarget, playerIndex) &&
                 enemyCanMove &&
                 canCarryPlatformRiders(blockerIndex, pushTarget) &&
@@ -3872,6 +4047,12 @@ private:
                 return {};
             }
             chain.push_back(*entity);
+            // A floating leaf is the round stone's landing support. It does
+            // not become another block in the Knight's shove chain.
+            if (entity->movable && roundRockPadAt(entity->index,
+                    movementTarget(cell, direction))) {
+                break;
+            }
             if (level_.portalCrossing(cell, directionOffset(direction))) {
                 break;
             }
@@ -3900,18 +4081,31 @@ private:
                 if (status_[entity.index].movedThisMicro) {
                     return false;
                 }
-                const GridPosition3 destination = movementDestination(
+                GridPosition3 destination = movementDestination(
                     trial.movables[entity.index].cell, direction);
+                const bool boardingPad =
+                    roundRockPadAt(entity.index, destination).has_value();
                 if (!portalEntryClear(
                         trial.movables[entity.index].cell, direction, trial) ||
                     !cellAllowsEntity(level_, trial, destination) ||
-                    movableBlocksAt(trial, destination, entity.index) ||
+                    (movableBlocksAt(trial, destination, entity.index) && !boardingPad) ||
                     enemyBlocksAt(trial, destination) ||
                     playerBlocksAt(trial, destination)) {
                     return false;
                 }
+                if (boardingPad) ++destination.z;
                 const FallResult fall = movableFallTarget(
                     level_, trial, entity.index, destination);
+                const bool rockDrivenPad = trial.movables[entity.index].type == TileType::LilyPad &&
+                    std::ranges::any_of(chain.begin(), it.base() - 1,
+                        [&](const ChainEntity& pusher) {
+                            if (!pusher.movable) return false;
+                            const auto type = trial.movables[pusher.index].type;
+                            return type == TileType::Rock || type == TileType::RoundRock;
+                        });
+                if (rockDrivenPad && !isUnfilledWater(level_, trial, fall.cell)) {
+                    return false;
+                }
                 if (!fall.supported ||
                     !platformRidersCanMove(level_, trial, entity.index, fall.cell,
                         destination.z)) {
@@ -4503,9 +4697,9 @@ private:
     }
 
     // Moves one tile, resolves the fall, and updates slide momentum.
-    // Momentum continues while the entity is icy (an ice block, or anything
-    // standing on an ice floor), did not fall, and the next cell is not
-    // statically blocked.
+    // Water momentum uses the same state and action legs as ice slides.
+    // A leaf only coasts after an impulse and remains in water; an ordinary
+    // hero shove keeps its existing one-tile behavior and may beach the leaf.
     void applyMovableMove(
         std::size_t index,
         MoveDirection direction,
@@ -4513,9 +4707,15 @@ private:
         bool preserveElevation = false)
     {
         const GridPosition3 robotFrom = after_.movables[index].cell;
+        const bool padCoasting = after_.movables[index].type == TileType::LilyPad &&
+            after_.movables[index].sliding.has_value();
         const auto riders = platformRiders(after_, index);
         target =
             transportedLanding(after_.movables[index].cell, direction, target);
+        const auto boardingPad = roundRockPadAt(index, target);
+        if (boardingPad) {
+            ++target.z;
+        }
         const bool portalMomentum = portalCarriesMomentum(
             after_.movables[index].cell,
             direction,
@@ -4540,18 +4740,38 @@ private:
         const FallResult fall = preserveElevation
             ? FallResult { .cell = target, .supported = true }
             : movableFallTarget(level_, after_, index, target);
-        const bool fell = fall.cell.z != target.z || fall.fallen;
+        const bool skipping = after_.movables[index].type == TileType::RoundRock &&
+            !boardingPad && isUnfilledWater(level_, after_, fall.cell);
+        const bool fell = fall.cell.z != target.z || (fall.fallen && !skipping);
         after_.movables[index].cell = fall.cell;
-        after_.movables[index].fallen = fall.fallen;
+        after_.movables[index].fallen = fall.fallen && !skipping;
+        const bool coasting = padCoasting &&
+            isUnfilledWater(level_, after_, fall.cell);
         const bool slippery = portalMomentum ||
             after_.movables[index].type == TileType::Ice ||
             isIceFloor(level_, after_, fall.cell);
         after_.movables[index].sliding =
-            (!fell && slippery &&
+            (skipping || coasting || (!fell && slippery &&
              cellAllowsEntity(
-                 level_, after_, movementDestination(fall.cell, direction)))
+                 level_, after_, movementDestination(fall.cell, direction))))
             ? std::optional<MoveDirection>(direction)
             : std::nullopt;
+        if (boardingPad) {
+            auto& pad = after_.movables[*boardingPad];
+            after_.movables[index].sliding.reset();
+            if (isUnfilledWater(level_, after_, pad.cell)) {
+                pad.sliding = direction;
+                auto& padStatus = status_[*boardingPad];
+                padStatus.active = true;
+                padStatus.done = false;
+                padStatus.resolved = true;
+                padStatus.movedThisMicro = true;
+                ++padStatus.consumed;
+            }
+        }
+        if (skipping) {
+            pushRoundRockWake(index, direction);
+        }
         ++status_[index].consumed;
         for (const LiveUnitAt rider : riders) {
             const GridPosition3 from = unitCell(after_, rider);

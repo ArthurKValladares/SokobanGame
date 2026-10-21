@@ -298,8 +298,13 @@ void addChanged(
     ActionPlan& plan = planned.action;
     plan.before = state;
     plan.after = current;
-    plan.durationSeconds =
-        stepDurationSeconds * static_cast<float>(planned.legs.size());
+    float durationWeight = 0.0f;
+    const GameState* previous = &state;
+    for (const auto& leg : planned.legs) {
+        durationWeight += plans::stepDurationWeight(&level, *previous, leg);
+        previous = &leg;
+    }
+    plan.durationSeconds = stepDurationSeconds * durationWeight;
     plan.facingDirection = playerInput;
 
     if (playerInput && plans::anyPlayerMoved(plan.before, planned.legs.front())) {
@@ -353,6 +358,57 @@ void addChanged(
 }
 
 } // namespace
+
+float stepDurationWeight(
+    const Level* level, const GameState& before, const GameState& after)
+{
+    if (level == nullptr) return 1.0f;
+    for (std::size_t index = 0; index < before.movables.size(); ++index) {
+        if (rules::lilyPadDrivenByRock(*level, before, after, index)) {
+            return config::rockDrivenLilyPadMovementDurationMultiplier;
+        }
+    }
+    if (anyPlayerMoved(before, after)) return 1.0f;
+    bool skipping = false;
+    const std::size_t count = std::min(before.movables.size(), after.movables.size());
+    for (std::size_t index = 0; index < count; ++index) {
+        const auto& from = before.movables[index];
+        const auto& to = after.movables[index];
+        if (from.type != TileType::RoundRock || from.fallen || from.dead ||
+            from == to) continue;
+        // A mounted rock occupies the cell above the moving leaf. The pickup
+        // leg itself remains a skip; the following legs travel with the leaf.
+        const bool riding = std::ranges::any_of(before.movables, [&](const auto& pad) {
+            return pad.type == TileType::LilyPad && !pad.fallen && !pad.dead &&
+                pad.cell.x == from.cell.x && pad.cell.y == from.cell.y &&
+                pad.cell.z + 1 == from.cell.z;
+        });
+        if (riding) return 1.0f;
+        const bool water = tileTypeIsWater(
+            level->supportingTileAt(from.cell).value_or(TileType::Air)) ||
+            tileTypeIsWater(level->supportingTileAt(to.cell).value_or(TileType::Air));
+        skipping = skipping || (water && (from.sliding || to.sliding));
+    }
+    return skipping ? 0.5f : 1.0f;
+}
+
+std::vector<float> legDurations(
+    const Level* level, const GameState& before,
+    const std::vector<GameState>& legs, float totalSeconds)
+{
+    if (legs.empty()) return { std::max(totalSeconds, 0.0f) };
+    std::vector<float> durations;
+    float weight = 0.0f;
+    const GameState* previous = &before;
+    for (const auto& leg : legs) {
+        const float next = stepDurationWeight(level, *previous, leg);
+        durations.push_back(next);
+        weight += next;
+        previous = &leg;
+    }
+    for (auto& duration : durations) duration *= std::max(totalSeconds, 0.0f) / weight;
+    return durations;
+}
 
 bool anyPlayerMoved(const GameState& before, const GameState& after)
 {

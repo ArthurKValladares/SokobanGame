@@ -62,6 +62,9 @@ public:
         // Transient by design: a restored action already carries its built
         // timeline, so legs are never persisted.
         std::vector<GameState> legs;
+        // Per-leg mechanical times, including faster water skips. Transient
+        // like legs; an empty list retains the uniform-step timing contract.
+        std::vector<float> legDurationsSeconds;
         // One-shot presentation events captured while the transient legs were
         // planned. They are consumed only by the live action admission path.
         std::vector<plans::TurretShotCue> turretShots;
@@ -94,6 +97,8 @@ public:
         // State after the last mechanical leg boundary this action crossed.
         // Deferred and not-yet-one-leg actions still report `plan.before`.
         [[nodiscard]] const GameState& stateAtCurrentProgress() const;
+        // Mechanical time after this many legs (0 is the action's start).
+        [[nodiscard]] float legBoundarySeconds(std::size_t completedLegs) const;
 
         bool operator==(const InFlight&) const = default;
     };
@@ -118,6 +123,7 @@ public:
         ActionPlan plan;
         ActionReservations reservations;
         std::vector<GameState> legs;
+        std::vector<float> legDurationsSeconds;
         std::vector<plans::TurretShotCue> turretShots;
         std::vector<plans::PlannedAction::PortalCue> portalTransits;
         ActionDeferral deferral;
@@ -150,7 +156,8 @@ public:
         std::size_t causalGroup = 0,
         ActionDeferral deferral = {},
         std::vector<plans::TurretShotCue> turretShots = {},
-        std::vector<plans::PlannedAction::PortalCue> portalTransits = {});
+        std::vector<plans::PlannedAction::PortalCue> portalTransits = {},
+        std::vector<float> legDurationsSeconds = {});
 
     // Admits a whole causal group, or none of it.
     //

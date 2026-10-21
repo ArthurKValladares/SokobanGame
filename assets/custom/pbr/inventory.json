@@ -18,6 +18,11 @@
       "retained": "artist-authored painted boulder"
     },
     {
+      "name": "RoundRock",
+      "source": "custom/models/round_rock.glb",
+      "retained": "artist-authored painted round rock"
+    },
+    {
       "name": "Glass",
       "source": "KayKit Block Bits 1.0/Assets/gltf/glass.gltf",
       "output": "custom/pbr/models/Glass.glb",

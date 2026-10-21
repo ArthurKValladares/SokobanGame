@@ -408,6 +408,32 @@ void terrainSectionCollapsesWithoutHidingQuarryWalls()
     CHECK(terrainIconCount(panel.frame()) == 2);
 }
 
+void roundRockBrushAppearsInPaintAndExplainsWaterBehavior()
+{
+    TEST("roundRockBrushAppearsInPaintAndExplainsWaterBehavior");
+    EditorPanel panel(LevelEditor::Tool::Tiles);
+    const auto frame = panel.frame();
+    CHECK(std::ranges::count_if(frame.icons, [](const EditorPanel::Icon& icon) {
+        return !iconIsInPopup(icon) && icon.tile == TileType::RoundRock;
+    }) == 1);
+    const auto rock = std::ranges::find_if(frame.icons, [](const auto& icon) {
+        return !iconIsInPopup(icon) && icon.tile == TileType::Rock;
+    });
+    const auto roundRock = std::ranges::find_if(frame.icons, [](const auto& icon) {
+        return !iconIsInPopup(icon) && icon.tile == TileType::RoundRock;
+    });
+    CHECK(rock != frame.icons.end() && roundRock != frame.icons.end());
+    if (rock != frame.icons.end() && roundRock != frame.icons.end()) {
+        CHECK(roundRock - rock == 1);
+    }
+    CHECK(frame.text.find("Round Rock") != std::string::npos);
+    panel.clickIcon(TileType::RoundRock);
+    CHECK(panel.editor.selectedTile() == TileType::RoundRock);
+    CHECK(panel.editor.tool() == LevelEditor::Tool::Tiles);
+    CHECK(panel.shows("Round rocks push like ordinary rocks on land."));
+    CHECK(std::ranges::none_of(panel.frame().icons, iconIsInPopup));
+}
+
 void waterTilesSectionOffersLilyPadsAndDirectionalStreams()
 {
     TEST("waterTilesSectionOffersLilyPadsAndDirectionalStreams");
@@ -941,6 +967,7 @@ int main()
         newMaskActionUsesSelectedSplat();
         terrainSectionCollapsesWithoutHidingQuarryWalls();
         waterTilesSectionOffersLilyPadsAndDirectionalStreams();
+        roundRockBrushAppearsInPaintAndExplainsWaterBehavior();
         terrainPickersKeepEveryStyleAndRecentBrushes();
         directionalFamiliesUseOneBrushAndRotateWithoutPickers();
         rotateControlKeepsArtAndBehaviorVariants();

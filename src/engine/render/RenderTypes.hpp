@@ -574,6 +574,8 @@ struct RenderFrameData {
     struct WaterRipple {
         Vec3 position {};
         float ageSeconds = 0.0f;
+        float radiusScale = 1.0f;
+        float intensity = 1.0f;
     };
 
     // A rock's ground contact path. Age is measured from the first contact;

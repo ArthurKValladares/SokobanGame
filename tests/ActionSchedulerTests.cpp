@@ -448,6 +448,47 @@ void testResetClearsEverything()
     CHECK(started(scheduler.tryStart(plan, claims)));
 }
 
+void testVariableLegDurationsDriveProgressAndCues()
+{
+    TEST("variableLegDurationsDriveProgressAndCues");
+    const GameState initial = twoRocks();
+    ActionPlan slide { .before = initial, .after = initial,
+        .durationSeconds = .625f };
+    std::vector<GameState> legs;
+    for (int x = 6; x <= 8; ++x) {
+        GameState leg = legs.empty() ? initial : legs.back();
+        leg.movables[0].cell = cell(x, 0);
+        legs.push_back(leg);
+    }
+    slide.after = legs.back();
+    ActionScheduler scheduler;
+    scheduler.reset(initial, .25f);
+    CHECK(!scheduler.tryStartAll({ {
+        .plan = slide,
+        .legs = legs,
+        .legDurationsSeconds = { .125f, .25f, .25f },
+        .deferral = { .steps = 1, .seconds = .25f },
+    } }, 17));
+    const auto& action = scheduler.inFlight().front();
+    CHECK(action.legBoundarySeconds(0) == 0.0f);
+    CHECK(action.legBoundarySeconds(1) == .125f);
+    CHECK(action.legBoundarySeconds(2) == .375f);
+    CHECK(action.legBoundarySeconds(3) == .625f);
+    scheduler.advanceClock(.25f);
+    CHECK(action.stateAtCurrentProgress() == initial);
+    scheduler.advanceClock(.125f);
+    CHECK(action.stateAtCurrentProgress() == legs[0]);
+    scheduler.advanceClock(.125f);
+    CHECK(action.stateAtCurrentProgress() == legs[0]);
+    scheduler.advanceClock(.125f);
+    CHECK(action.stateAtCurrentProgress() == legs[1]);
+    // A longer reaction animation does not stretch mechanical boundaries.
+    scheduler.find(action.id)->plan.durationSeconds = 1.0f;
+    scheduler.advanceClock(.25f);
+    CHECK(action.stateAtCurrentProgress() == legs[2]);
+    CHECK(!scheduler.idle());
+}
+
 void testZeroDurationActionCompletesImmediately()
 {
     TEST("zeroDurationActionCompletesImmediately");
@@ -479,6 +520,7 @@ int main()
     testCompletionOrderIsDeterministic();
     testSharedClockPlacesClaims();
     testProgressStateAdvancesAtLegBoundaries();
+    testVariableLegDurationsDriveProgressAndCues();
     testResetClearsEverything();
     testZeroDurationActionCompletesImmediately();
 

@@ -2208,8 +2208,146 @@ void testChainedSlideCannotLandOnAMovingPadsOldTop()
     CHECK(session.state().movables[0].cell == cell(4, 0, 1));
 }
 
+void testRoundRockMixedSkipAndPadRideUseActualLegTimes()
+{
+    TEST("roundRockMixedSkipAndPadRideUseActualLegTimes");
+    const Level level = makeLevel({ { "..WWW.." }, { "C\\ $   " }, { "       " } });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(.25f);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 2);
+    session.advanceActiveAction(.25f);
+    session.completeActiveAction();
+    CHECK(session.inFlight().size() == 1);
+    const auto& travel = session.inFlight().front();
+    CHECK(travel.legs.size() == 3);
+    CHECK(travel.legDurationsSeconds == std::vector<float>({ .125f, .5f, .5f }));
+    CHECK(travel.mechanicalDurationSeconds == 1.125f);
+    CHECK(travel.stateAtCurrentProgress().movables[0].cell == cell(2, 0, 1));
+    session.advanceActiveAction(.125f);
+    CHECK(travel.stateAtCurrentProgress().movables[0].cell == cell(3, 0, 2));
+    CHECK(travel.stateAtCurrentProgress().movables[1].cell == cell(3, 0, 1));
+    session.advanceActiveAction(.25f);
+    CHECK(travel.stateAtCurrentProgress().movables[0].cell == cell(3, 0, 2));
+    session.advanceActiveAction(.25f);
+    CHECK(travel.stateAtCurrentProgress().movables[0].cell == cell(4, 0, 2));
+    CHECK(travel.stateAtCurrentProgress().movables[1].sliding.has_value());
+    session.advanceActiveAction(.5f);
+    session.completeActiveAction();
+    CHECK(session.state().movables[0].cell == cell(4, 0, 2));
+    CHECK(session.state().movables[1].cell == cell(4, 0, 1));
+    CHECK(!session.state().movables[1].sliding);
+    CHECK(session.undoCount() == 1);
+}
+
+void testRoundRockTurretReactionFiresAtFastLegBoundary()
+{
+    TEST("roundRockTurretReactionFiresAtFastLegBoundary");
+    const Level level = makeLevel({
+        { ".......", "WWWWW..", "......." },
+        { "  s    ", "  \\ $  ", "  C    " },
+        { "       ", "       ", "       " },
+    });
+    GameState initial = rules::initialState(level);
+    const auto rock = std::ranges::find(initial.movables, TileType::RoundRock,
+        &GameState::Movable::type);
+    CHECK(rock != initial.movables.end());
+    rock->sliding = MoveDirection::Right;
+    GameplaySession session;
+    session.resetToState(initial, initial.players[0].controller);
+    session.setStepDurationSeconds(.25f);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 1);
+    const auto& travel = session.inFlight().front();
+    CHECK(travel.legs.size() == 3);
+    CHECK(travel.turretShots.size() == 1);
+    CHECK(session.takeReadyTurretShots().empty());
+    session.advanceActiveAction(.124f);
+    CHECK(session.takeReadyTurretShots().empty());
+    session.advanceActiveAction(.001f);
+    const auto fired = session.takeReadyTurretShots();
+    CHECK(fired.size() == 1);
+    if (!fired.empty()) {
+        CHECK(fired.front().shot.target.kind == EntityKind::Player);
+        CHECK(fired.front().impactDelaySeconds == 0.0f);
+    }
+    CHECK(session.takeReadyTurretShots().empty());
+}
+
+void testFreeRoundRockReservesPathAlongsideSlowerPadRider()
+{
+    TEST("freeRoundRockReservesPathAlongsideSlowerPadRider");
+    const Level level = makeLevel({
+        { "WWWWWWWWWW..", "............", "............", "WWWWWWWWWW.." },
+        { " \\          ", " R          ", " C          ", " $          " },
+        { "            ", "            ", "            ", " \\          " },
+    });
+    auto initial = rules::initialState(level);
+    for (auto& movable : initial.movables) {
+        if ((movable.type == TileType::RoundRock && movable.cell.z == 1) ||
+            movable.type == TileType::LilyPad) {
+            movable.sliding = MoveDirection::Right;
+        }
+    }
+    GameplaySession session;
+    session.resetToState(initial, initial.players[0].controller);
+    session.setStepDurationSeconds(.25f);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 1);
+    const auto& travel = session.inFlight().front();
+    CHECK(travel.legs.size() > 3);
+    CHECK(plans::stepDurationWeight(&level, travel.plan.before, travel.legs.front()) == 2.0f);
+    CHECK(travel.legDurationsSeconds.size() == travel.legs.size());
+    session.advanceActiveAction(.75f);
+    // The source cell's normal step claim would have expired by now. The
+    // skipping route stays reserved while the slower rider is still moving.
+    const auto refusals = session.admissionStats().refusedByReservation;
+    session.queueMove(MoveDirection::Up);
+    CHECK(!session.tryStartNextAction(level, {}));
+    CHECK(session.admissionStats().refusedByReservation > refusals);
+    CHECK(session.inFlight().size() == 1);
+    CHECK(session.state().players[0].cell == cell(1, 2, 1));
+}
+
+void testPadCoastAndOrdinarySlideKeepTheirLegClocksWithoutRoundRock()
+{
+    TEST("padCoastAndOrdinarySlideKeepTheirLegClocksWithoutRoundRock");
+    const Level level = makeLevel({
+        { "WWW.....", "........", "........" },
+        { " $      ", " I     #", "C       " },
+    });
+    auto initial = rules::initialState(level);
+    for (auto& movable : initial.movables) movable.sliding = MoveDirection::Right;
+    GameplaySession session;
+    session.resetToState(initial, initial.players[0].controller);
+    session.setStepDurationSeconds(.25f);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 1);
+    const auto& travel = session.inFlight().front();
+    CHECK(travel.legs.size() == 5);
+    CHECK(travel.legDurationsSeconds ==
+        std::vector<float>({ .5f, .5f, .25f, .25f, .25f }));
+    CHECK(travel.mechanicalDurationSeconds == 1.75f);
+    session.advanceActiveAction(.25f);
+    CHECK(travel.stateAtCurrentProgress().movables[0].cell == cell(1, 0, 1));
+    session.advanceActiveAction(.25f);
+    CHECK(travel.stateAtCurrentProgress().movables[0].cell == cell(2, 0, 1));
+    CHECK(travel.stateAtCurrentProgress().movables[0].sliding.has_value());
+    session.advanceActiveAction(.5f);
+    CHECK(!travel.stateAtCurrentProgress().movables[0].sliding);
+    CHECK(travel.stateAtCurrentProgress().movables[1].cell == cell(3, 1, 1));
+    session.advanceActiveAction(.25f);
+    CHECK(travel.stateAtCurrentProgress().movables[1].cell == cell(4, 1, 1));
+}
+
 int main()
 {
+    testPadCoastAndOrdinarySlideKeepTheirLegClocksWithoutRoundRock();
+    testFreeRoundRockReservesPathAlongsideSlowerPadRider();
+    testRoundRockMixedSkipAndPadRideUseActualLegTimes();
+    testRoundRockTurretReactionFiresAtFastLegBoundary();
     testChainedSlideCannotLandOnAMovingPadsOldTop();
     testStreamCarriesPadAndRiderThroughRestoreAndUndo();
     testFollowingStreamPadsShareTheSlowerMovementClock();

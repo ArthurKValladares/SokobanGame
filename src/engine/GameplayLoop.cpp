@@ -88,6 +88,8 @@ void startPresentation(
         session.stepDurationSeconds());
     presentation.scheduleRockScratches(
         level, started->plan, started->elapsedSeconds);
+    presentation.scheduleRoundRockSkips(
+        level, started->plan, started->elapsedSeconds);
     // A deferred action holds its claims but has not begun, and its entities
     // are still being driven by the action that caused it. Seeking it to zero
     // would snap them to where that action is going to leave them, cutting its

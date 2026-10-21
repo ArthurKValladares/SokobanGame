@@ -18,6 +18,7 @@
 #include "engine/Rules.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
+#include "engine/render/WaterContactGeometry.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/RenderFrameParts.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
@@ -35,6 +36,7 @@
 #include <iostream>
 #include <limits>
 #include <ranges>
+#include <span>
 
 namespace {
 
@@ -79,6 +81,7 @@ const AssetManifest& testManifest()
       ],
       "models": [
         { "name": "Stone", "path": "stone.gltf" },
+        { "name": "RoundRock", "path": "round-rock.glb" },
         { "name": "Ladder", "path": "ladder.glb", "preserveSourceScale": true },
         { "name": "Glass", "path": "glass.gltf" },
         { "name": "Bricks", "path": "bricks.gltf" },
@@ -182,6 +185,7 @@ const AssetManifest& testManifest()
         { "tile": "Wall", "model": "Bricks" },
         { "tile": "Ladder", "model": "Ladder" },
         { "tile": "Rock", "model": "Stone" },
+        { "tile": "Round Rock", "model": "RoundRock" },
         { "tile": "Ice", "model": "Glass" },
         { "tile": "Conveyor Up", "model": "Conveyor" },
         { "tile": "Conveyor Down", "model": "Conveyor" },
@@ -845,7 +849,7 @@ void testPresentationResetClocksAndFallenTargets()
     CHECK(presentation.movables().size() == 1);
     CHECK(near(
         presentation.movables()[0].renderPosition.z,
-        2.0f - config::waterDepthBelowGround));
+        2.0f - config::sunkenMovableDepthBelowGround));
 
     presentation.advanceClocks(0.5f, false);
     CHECK(near(presentation.worldAnimationTimeSeconds(), 0.5f));
@@ -3921,7 +3925,8 @@ void testGameplayFrameBuildsProceduralWaterSurface()
         .presentation = presentation,
         .settings = settings,
     });
-    CHECK(filledFrame.waterSurfaces.empty());
+    CHECK(filledFrame.waterSurfaces.size() == frame.waterSurfaces.size());
+    CHECK(filledFrame.waterSurfaces[0].shorelineMask == frame.waterSurfaces[0].shorelineMask);
 }
 
 void testWaterStreamCornersAndConnectedBoundaries()
@@ -4614,161 +4619,180 @@ void testWaterLayerBuildsUnboundedNonPickableExterior()
     CHECK(allWaterFrame.isoFaces.empty());
 }
 
-void testFilledWaterUpdatesEdgesAndRoundedCornerCaps()
+void testTransparentIceContactsFollowTheirRenderedWaterline()
 {
-    TEST("filledWaterUpdatesEdgesAndRoundedCornerCaps");
-    const Level level = Level::loadFromLayers({
-        {
-            "WWWW..",
-            "WWWW..",
-            "WWWW..",
-        },
-        {
-            "     C",
-            "      ",
-            "      ",
-        },
-    }, "dynamic water shoreline");
-    GameState state = stateWithPlayer(level.playerStart());
+    TEST("transparentIceContactsFollowTheirRenderedWaterline");
+    RenderFrameData::Tile ice {
+        .position = { 2, 3 }, .size = { 1, 1 }, .baseElevation = 0.0f,
+        .height = 1.0f, .blurBehind = true,
+    };
+    RenderFrameData::WaterSurface water {
+        .position = { 2, 3 }, .elevation = 0.82f,
+    };
+    const auto encode = [&](const RenderFrameData::Tile& tile,
+                            const RenderFrameData::WaterSurface& surface) {
+        SceneFrameUniform uniform;
+        writeWaterContacts(uniform, std::span(&tile, 1), std::span(&surface, 1));
+        return uniform;
+    };
+    const auto contact = encode(ice, water);
+    CHECK(near(contact.waterContactMeta.x, 1.0f));
+    CHECK(near(contact.waterContacts[0].centerAndElevation.x, 2.5f));
+    CHECK(near(contact.waterContacts[0].centerAndElevation.y, 3.5f));
+    CHECK(near(contact.waterContacts[0].centerAndElevation.z, 0.82f));
+    CHECK(near(contact.waterContacts[0].halfExtentAndRadius.x, 0.5f));
+    CHECK(near(contact.waterContacts[0].halfExtentAndRadius.z, 0.05f));
+    for (const int rejected : { 0, 1, 2, 3, 4, 5 }) {
+        auto tile = ice;
+        if (rejected == 0) tile.blurBehind = false;
+        if (rejected == 1) tile.pickOnly = true;
+        if (rejected == 2) tile.isEditorPreview = true;
+        if (rejected == 3) tile.baseElevation = -2.0f;
+        if (rejected == 4) tile.baseElevation = 1.0f;
+        if (rejected == 5) tile.position.x = 10.0f;
+        CHECK(near(encode(tile, water).waterContactMeta.x, 0.0f));
+    }
+    auto bevelWater = water;
+    bevelWater.elevation = 0.99f;
+    const auto bevel = encode(ice, bevelWater);
+    CHECK(near(bevel.waterContactMeta.x, 1.0f));
+    CHECK(near(bevel.waterContacts[0].halfExtentAndRadius.x, 0.48f));
+    CHECK(near(bevel.waterContacts[0].halfExtentAndRadius.z, 0.03f));
+    auto scaled = ice;
+    scaled.size = { 0.5f, 0.75f };
+    scaled.modelRotationOffsetRadians = 0.4f;
+    const auto rotated = encode(scaled, water);
+    CHECK(near(rotated.waterContacts[0].centerAndElevation.x, 2.25f));
+    CHECK(near(rotated.waterContacts[0].centerAndElevation.y, 3.375f));
+    CHECK(near(rotated.waterContacts[0].halfExtentAndRadius.x, 0.25f));
+    CHECK(near(rotated.waterContacts[0].halfExtentAndRadius.y, 0.375f));
+    CHECK(near(rotated.waterContacts[0].halfExtentAndRadius.z, 0.025f));
+    CHECK(near(rotated.waterContacts[0].halfExtentAndRadius.w, 0.4f));
+    std::array waters { water, water };
+    SceneFrameUniform separateView;
+    writeWaterContacts(separateView, std::span(&scaled, 1), waters);
+    CHECK(near(separateView.waterContactMeta.x, 1.0f));
+    CHECK(near(contact.waterContacts[0].centerAndElevation.x, 2.5f));
+    writeWaterContacts(separateView, {}, waters);
+    CHECK(near(separateView.waterContactMeta.x, 0.0f));
+    CHECK(near(separateView.waterContacts[0].centerAndElevation.x, 0.0f));
+    std::vector<RenderFrameData::Tile> crowded(waterContactCapacity + 3, ice);
+    for (std::size_t index = 0; index < crowded.size(); ++index)
+        crowded[index].position.x += static_cast<float>(index);
+    auto wideWater = water;
+    wideWater.size.x = static_cast<float>(crowded.size());
+    SceneFrameUniform bounded;
+    writeWaterContacts(bounded, crowded, std::span(&wideWater, 1));
+    CHECK(near(bounded.waterContactMeta.x, static_cast<float>(waterContactCapacity)));
+}
 
+void testFilledWaterRetainsContinuousSurfaceAndShorelines()
+{
+    TEST("filledWaterRetainsContinuousSurfaceAndShorelines");
+    const Level level = Level::loadFromLayers({
+        { "WWWW..", "WWWW..", "WWWW.." },
+        { "     C", "      ", "      " },
+    }, "submerged rocks retain water");
+    GameState state = stateWithPlayer(level.playerStart());
     GameplayPresentation presentation;
     presentation.resetEntities(state);
-    const PresentationSettings settings;
-
-    auto buildFrame = [&] {
+    const auto buildFrame = [&] {
         return RenderFrameBuilder::buildGameplay({
-            .manifest = testManifest(),
-            .level = level,
-            .state = state,
-            .moving = false,
-            .projectedState = {},
-            .presentation = presentation,
-            .settings = settings,
+            .manifest = testManifest(), .level = level, .state = state,
+            .projectedState = state, .presentation = presentation, .settings = {},
         });
     };
-    const RenderFrameData openFrame = buildFrame();
+    const auto openFrame = buildFrame();
     CHECK(openFrame.waterSurfaces.size() == 12);
-
-    state.movables.push_back({
-        .type = TileType::Rock,
-        .cell = { 1, 1, 1 },
-        .fallen = true,
-    });
+    const auto checkContinuous = [&](const RenderFrameData& filled) {
+        CHECK(filled.waterSurfaces.size() == openFrame.waterSurfaces.size());
+        for (const auto& expected : openFrame.waterSurfaces) {
+            const auto water = std::ranges::find(filled.waterSurfaces,
+                expected.cell, &RenderFrameData::WaterSurface::cell);
+            CHECK(water != filled.waterSurfaces.end());
+            if (water == filled.waterSurfaces.end()) continue;
+            CHECK(water->position == expected.position);
+            CHECK(water->size == expected.size);
+            CHECK(near(water->elevation, expected.elevation));
+            CHECK(water->shorelineMask == expected.shorelineMask);
+        }
+    };
+    state.movables.push_back({ .type = TileType::Rock,
+        .cell = { 1, 1, 1 }, .fallen = true });
     presentation.resetEntities(state);
-    const RenderFrameData filledFrame = buildFrame();
-    CHECK(filledFrame.waterSurfaces.size() == 11);
-
-    auto waterAt = [&](int x, int y) {
-        return std::ranges::find_if(
-            filledFrame.waterSurfaces,
-            [&](const RenderFrameData::WaterSurface& water) {
-                return water.cell == GridPosition3 { x, y, 0 };
-            });
-    };
-    auto hasEdge = [](const RenderFrameData::WaterSurface& water,
-                       WaterShorelineEdge edge) {
-        return (water.shorelineMask & waterShorelineBit(edge)) != 0;
-    };
-    auto hasCorner = [](const RenderFrameData::WaterSurface& water,
-                         WaterShorelineCorner corner) {
-        return (water.shorelineMask & waterShorelineBit(corner)) != 0;
-    };
-
-    const auto north = waterAt(1, 0);
-    const auto east = waterAt(2, 1);
-    const auto south = waterAt(1, 2);
-    const auto west = waterAt(0, 1);
-    CHECK(north != filledFrame.waterSurfaces.end());
-    CHECK(east != filledFrame.waterSurfaces.end());
-    CHECK(south != filledFrame.waterSurfaces.end());
-    CHECK(west != filledFrame.waterSurfaces.end());
-    if (north != filledFrame.waterSurfaces.end()) {
-        CHECK(hasEdge(*north, WaterShorelineEdge::PositiveY));
-    }
-    if (east != filledFrame.waterSurfaces.end()) {
-        CHECK(hasEdge(*east, WaterShorelineEdge::NegativeX));
-    }
-    if (south != filledFrame.waterSurfaces.end()) {
-        CHECK(hasEdge(*south, WaterShorelineEdge::NegativeY));
-    }
-    if (west != filledFrame.waterSurfaces.end()) {
-        CHECK(hasEdge(*west, WaterShorelineEdge::PositiveX));
-    }
-
-    const auto northWest = waterAt(0, 0);
-    const auto northEast = waterAt(2, 0);
-    const auto southEast = waterAt(2, 2);
-    const auto southWest = waterAt(0, 2);
-    CHECK(northWest != filledFrame.waterSurfaces.end());
-    CHECK(northEast != filledFrame.waterSurfaces.end());
-    CHECK(southEast != filledFrame.waterSurfaces.end());
-    CHECK(southWest != filledFrame.waterSurfaces.end());
-    if (northWest != filledFrame.waterSurfaces.end()) {
-        CHECK(hasCorner(
-            *northWest,
-            WaterShorelineCorner::PositiveXPositiveY));
-    }
-    if (northEast != filledFrame.waterSurfaces.end()) {
-        CHECK(hasCorner(
-            *northEast,
-            WaterShorelineCorner::NegativeXPositiveY));
-    }
-    if (southEast != filledFrame.waterSurfaces.end()) {
-        CHECK(hasCorner(
-            *southEast,
-            WaterShorelineCorner::NegativeXNegativeY));
-    }
-    if (southWest != filledFrame.waterSurfaces.end()) {
-        CHECK(hasCorner(
-            *southWest,
-            WaterShorelineCorner::PositiveXNegativeY));
-    }
-
-    state.movables.push_back({
-        .type = TileType::Ice,
-        .cell = { 2, 1, 1 },
-        .fallen = true,
-    });
+    checkContinuous(buildFrame());
+    state.movables.push_back({ .type = TileType::Ice,
+        .cell = { 2, 1, 1 }, .fallen = true });
     presentation.resetEntities(state);
-    const RenderFrameData joinedFrame = buildFrame();
-    CHECK(joinedFrame.waterSurfaces.size() == 10);
+    checkContinuous(buildFrame());
+}
 
-    auto joinedWaterAt = [&](int x, int y) {
-        return std::ranges::find_if(
-            joinedFrame.waterSurfaces,
-            [&](const RenderFrameData::WaterSurface& water) {
-                return water.cell == GridPosition3 { x, y, 0 };
+void testSunkenRocksKeepASmallCapAndTheirSinkPoseAfterCommit()
+{
+    TEST("sunkenRocksKeepASmallCapAndTheirSinkPoseAfterCommit");
+    const Level level = Level::loadFromLayers({ { ".W." }, { "Q  " } },
+        "sunken rock cap and walking surface");
+    for (const TileType type : { TileType::Rock, TileType::RoundRock }) {
+        GameState before = rules::initialState(level);
+        before.movables.push_back({ .id = 7, .type = type, .cell = { 1, 0, 1 } });
+        GameState after = before;
+        after.movables[0].fallen = true;
+        GameplayPresentation presentation;
+        presentation.resetEntities(before);
+        GameplaySession::Action sink { .before = before, .after = after,
+            .durationSeconds = 1.0f };
+        sink.presentation = presentation.buildActionPresentation(sink, &level);
+        presentation.beginAction(sink, before);
+        PresentationSettings settings;
+        settings.setTileScale(type, 0.93f);
+        const auto frameFor = [&](const GameState& state, bool moving) {
+            return RenderFrameBuilder::buildGameplay({
+                .manifest = testManifest(), .level = level, .state = state,
+                .moving = moving, .projectedState = after,
+                .presentation = presentation, .settings = settings,
             });
-    };
-    const auto aboveFirst = joinedWaterAt(1, 0);
-    const auto aboveSecond = joinedWaterAt(2, 0);
-    const auto outerNorthWest = joinedWaterAt(0, 0);
-    const auto outerNorthEast = joinedWaterAt(3, 0);
-    CHECK(aboveFirst != joinedFrame.waterSurfaces.end());
-    CHECK(aboveSecond != joinedFrame.waterSurfaces.end());
-    CHECK(outerNorthWest != joinedFrame.waterSurfaces.end());
-    CHECK(outerNorthEast != joinedFrame.waterSurfaces.end());
-    if (aboveFirst != joinedFrame.waterSurfaces.end()) {
-        CHECK(hasEdge(*aboveFirst, WaterShorelineEdge::PositiveY));
-        CHECK(!hasCorner(
-            *aboveFirst,
-            WaterShorelineCorner::PositiveXPositiveY));
-    }
-    if (aboveSecond != joinedFrame.waterSurfaces.end()) {
-        CHECK(hasEdge(*aboveSecond, WaterShorelineEdge::PositiveY));
-        CHECK(!hasCorner(
-            *aboveSecond,
-            WaterShorelineCorner::NegativeXPositiveY));
-    }
-    if (outerNorthWest != joinedFrame.waterSurfaces.end()) {
-        CHECK(hasCorner(
-            *outerNorthWest,
-            WaterShorelineCorner::PositiveXPositiveY));
-    }
-    if (outerNorthEast != joinedFrame.waterSurfaces.end()) {
-        CHECK(hasCorner(
-            *outerNorthEast,
-            WaterShorelineCorner::NegativeXPositiveY));
+        };
+        const auto rockTile = [](const RenderFrameData& frame) {
+            return std::ranges::find_if(frame.tiles, [](const auto& tile) {
+                return tile.renderableId == 7 && !tile.pickOnly && !tile.isEditorPreview;
+            });
+        };
+        presentation.seekAction(sink, 0.5f);
+        CHECK(frameFor(before, true).waterSurfaces.size() == 1);
+        presentation.seekAction(sink, 1.0f);
+        const auto landedFrame = frameFor(before, true);
+        const auto landed = rockTile(landedFrame);
+        CHECK(landed != landedFrame.tiles.end());
+        CHECK(near(presentation.movables()[0].renderPosition.z,
+            1.0f - config::sunkenMovableDepthBelowGround));
+        presentation.finishAction(after);
+        const auto settledFrame = frameFor(after, false);
+        const auto settled = rockTile(settledFrame);
+        CHECK(settled != settledFrame.tiles.end());
+        CHECK(settledFrame.waterSurfaces.size() == 1);
+        if (landed != landedFrame.tiles.end() && settled != settledFrame.tiles.end() &&
+            !settledFrame.waterSurfaces.empty()) {
+            const auto& water = settledFrame.waterSurfaces[0];
+            CHECK(near(landed->baseElevation, settled->baseElevation));
+            CHECK(landed->position == settled->position);
+            CHECK(near(settled->baseElevation, 0.0f));
+            CHECK(settled->baseElevation < water.elevation);
+            // Both authored rocks use a .93-high normalized model envelope.
+            const float capEnvelope = settled->baseElevation + settled->height - water.elevation;
+            CHECK(near(capEnvelope, 0.11f));
+            CHECK(capEnvelope > 0.0f && capEnvelope <= 0.12f);
+        }
+        const auto walked = rules::step(level, after, MoveDirection::Right);
+        CHECK(walked.players[0].cell == GridPosition3({ 1, 0, 1 }));
+        CHECK(!walked.players[0].dead && !walked.players[0].drowned);
+        presentation.resetEntities(walked);
+        const auto walkedFrame = frameFor(walked, false);
+        CHECK(walkedFrame.waterSurfaces.size() == 1);
+        const auto hero = std::ranges::find_if(walkedFrame.tiles, [](const auto& tile) {
+            return tile.model == testManifest().playerModel() && !tile.pickOnly;
+        });
+        CHECK(hero != walkedFrame.tiles.end());
+        if (hero != walkedFrame.tiles.end()) CHECK(near(hero->baseElevation, 1.0f));
     }
 }
 
@@ -4801,19 +4825,21 @@ void testWaterRipplesFollowPlayerAndEnemySurfaceContact()
         });
     };
     CHECK(frameAt().waterRippleCount == 0);
-    // The hero continues below the water after touching it, so its impact is
-    // earlier than the enemy whose motion ends exactly at the water surface.
+    // Both actors travel below the surface; their rings start at the actual
+    // crossing rather than waiting for the submerged endpoint.
     presentation.advanceWaterRipples(0.6f);
     const auto playerContact = frameAt();
-    CHECK(playerContact.waterRippleCount == 1);
+    CHECK(playerContact.waterRippleCount == 2);
     CHECK(near(playerContact.waterRipples[0].position.x, 1.5f));
     CHECK(near(playerContact.waterRipples[0].position.z, 0.82f));
     CHECK(near(playerContact.waterRipples[0].ageSeconds, 0.01f));
+    CHECK(near(playerContact.waterRipples[1].position.x, 2.5f));
+    CHECK(near(playerContact.waterRipples[1].ageSeconds, 0.01f));
     presentation.advanceWaterRipples(0.5f);
     const auto both = frameAt();
     CHECK(both.waterRippleCount == 2);
     CHECK(near(both.waterRipples[1].position.x, 2.5f));
-    CHECK(near(both.waterRipples[1].ageSeconds, 0.1f));
+    CHECK(near(both.waterRipples[1].ageSeconds, 0.51f));
     // Render sampling is side-effect free; repeated seeks cannot duplicate an
     // emission, and finishing the action leaves its rings running.
     presentation.beginAction(action, before);
@@ -4860,6 +4886,298 @@ void testWaterRippleScheduleHasAFixedBudget()
     CHECK(near(frame.waterRipples[0].position.x, 5.5f));
     CHECK(near(frame.waterRipples[frame.waterRippleCount - 1].position.x,
         static_cast<float>(count) - 0.5f));
+}
+
+GameplaySession::Action roundRockSkipTimeline(std::size_t hops, float hopSeconds)
+{
+    GameState before = stateWithPlayer({ 0, 0, 1 });
+    before.movables.push_back({ .id = 7, .type = TileType::RoundRock,
+        .cell = { 1, 0, 1 }, .sliding = MoveDirection::Right });
+    GameplaySession::Action action { .before = before, .after = before,
+        .durationSeconds = static_cast<float>(hops) * hopSeconds };
+    action.after.movables[0].cell.x += static_cast<int>(hops);
+    action.presentation.durationSeconds = action.durationSeconds;
+    for (std::size_t hop = 0; hop < hops; ++hop) {
+        const float from = static_cast<float>(hop + 1);
+        action.presentation.motions.push_back({
+            .target = { EntityKind::Movable, 7 }, .from = { from, 0, 1 },
+            .to = { from + 1, 0, 1 },
+            .startSeconds = static_cast<float>(hop) * hopSeconds,
+            .durationSeconds = hopSeconds, .arcHeight = 0.16f,
+        });
+    }
+    return action;
+}
+
+void testRoundRockSkipsArcAndLilyPadRidesTakeFourTimesAsLong()
+{
+    TEST("roundRockSkipsArcAndLilyPadRidesTakeFourTimesAsLong");
+    const Level level = Level::loadFromLayers({ { ".WWWWW." }, { "C      " } },
+        "round rock hop and ride timing");
+    auto action = roundRockSkipTimeline(1, 0.25f);
+    action.before.movables.push_back({ .id = 8, .type = TileType::LilyPad,
+        .cell = { 3, 0, 1 } });
+    action.after.movables.push_back(action.before.movables.back());
+    GameState mounted = action.after;
+    mounted.movables[0].cell = { 3, 0, 2 };
+    mounted.movables[0].sliding.reset();
+    mounted.movables[1].sliding = MoveDirection::Right;
+    GameState ridden = mounted;
+    ridden.movables[0].cell.x = 4;
+    ridden.movables[1].cell.x = 4;
+    const auto durations = plans::legDurations(&level, action.before,
+        { action.after, mounted, ridden }, 1.5f);
+    CHECK(durations.size() == 3);
+    CHECK(near(durations[0], 0.25f));
+    CHECK(near(durations[1], 0.25f));
+    CHECK(near(durations[2], 1.0f));
+
+    GameplayPresentation presentation;
+    presentation.resetEntities(action.before);
+    action.presentation = presentation.buildActionPresentation(action, &level);
+    CHECK(action.presentation.motions.size() == 1);
+    CHECK(action.presentation.motions[0].arcHeight > 0.0f);
+    presentation.beginAction(action, action.before);
+    presentation.seekAction(action, 0.125f);
+    CHECK(near(presentation.movables()[0].renderPosition.x, 1.5f));
+    CHECK(presentation.movables()[0].renderPosition.z > 1.1f);
+    presentation.seekAction(action, 0.25f);
+    CHECK(near(presentation.movables()[0].renderPosition.z, 1.0f));
+
+    GameplaySession::Action ride { .before = mounted, .after = ridden,
+        .durationSeconds = durations[2] };
+    presentation.resetEntities(mounted);
+    ride.presentation = presentation.buildActionPresentation(ride, &level);
+    CHECK(std::ranges::all_of(ride.presentation.motions, [](const auto& motion) {
+        return motion.arcHeight == 0.0f;
+    }));
+    presentation.beginAction(ride, mounted);
+    presentation.seekAction(ride, 0.5f);
+    CHECK(near(presentation.movables()[0].renderPosition.x, 3.5f));
+    CHECK(near(presentation.movables()[1].renderPosition.x, 3.5f));
+    CHECK(near(presentation.movables()[0].renderPosition.z, 2.0f));
+    presentation.scheduleRoundRockSkips(level, ride, 1.0f);
+    RenderFrameData frame;
+    presentation.appendWaterRippleRenderData(frame);
+    CHECK(frame.waterRippleCount == 0);
+}
+
+void testRoundRockRenderedChainUsesEachHopsLilyPadSupport()
+{
+    TEST("roundRockRenderedChainUsesEachHopsLilyPadSupport");
+    const Level level = Level::loadFromLayers({ { ".WWWW." }, { "C     " } },
+        "round rock rendered pickup chain");
+    auto action = roundRockSkipTimeline(1, 1.5f);
+    action.before.movables.push_back({ .id = 8, .type = TileType::LilyPad,
+        .cell = { 3, 0, 1 } });
+    GameState skipped = action.before;
+    skipped.movables[0].cell.x = 2;
+    GameState mounted = skipped;
+    mounted.movables[0].cell = { 3, 0, 2 };
+    mounted.movables[0].sliding.reset();
+    mounted.movables[1].sliding = MoveDirection::Right;
+    GameState ridden = mounted;
+    ridden.movables[0].cell.x = 4;
+    ridden.movables[1].cell.x = 4;
+    action.after = ridden;
+    action.after.movables[1].sliding.reset();
+    GameplayPresentation presentation;
+    presentation.resetEntities(action.before);
+    action.presentation = presentation.buildActionPresentation(action,
+        std::vector<GameState> { skipped, mounted, action.after }, &level);
+    presentation.beginAction(action, action.before);
+    const auto frameAt = [&](float seconds) {
+        presentation.seekAction(action, seconds);
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(), .level = level, .state = action.before,
+            .moving = true, .projectedState = action.after,
+            .presentation = presentation, .settings = {},
+        });
+    };
+    const auto tileFor = [](const RenderFrameData& frame, EntityId id) {
+        return std::ranges::find_if(frame.tiles, [&](const auto& tile) {
+            return tile.renderableId == id && !tile.pickOnly && !tile.isEditorPreview;
+        });
+    };
+    const auto freeHop = frameAt(0.125f);
+    const auto freeRock = tileFor(freeHop, 7);
+    const auto waitingPad = tileFor(freeHop, 8);
+    CHECK(freeRock != freeHop.tiles.end() && waitingPad != freeHop.tiles.end());
+    if (freeRock != freeHop.tiles.end() && waitingPad != freeHop.tiles.end()) {
+        CHECK(near(freeRock->baseElevation, 1.16f));
+        CHECK(std::abs(waitingPad->baseElevation - 0.82f) < 0.015f);
+    }
+    const auto pickup = frameAt(0.375f);
+    const auto pickupRock = tileFor(pickup, 7);
+    const auto pickupPad = tileFor(pickup, 8);
+    CHECK(pickupRock != pickup.tiles.end() && pickupPad != pickup.tiles.end());
+    if (pickupRock != pickup.tiles.end() && pickupPad != pickup.tiles.end()) {
+        const float linearBoardingHeight = std::lerp(1.0f,
+            pickupPad->baseElevation + config::lilyPadRideHeight, 0.5f);
+        CHECK(near(pickupRock->baseElevation, linearBoardingHeight + 0.16f));
+    }
+    for (float seconds : { 0.75f, 1.0f, 1.5f }) {
+        const auto frame = frameAt(seconds);
+        const auto rock = tileFor(frame, 7);
+        const auto pad = tileFor(frame, 8);
+        CHECK(rock != frame.tiles.end() && pad != frame.tiles.end());
+        if (rock != frame.tiles.end() && pad != frame.tiles.end()) {
+            CHECK(near(rock->baseElevation - pad->baseElevation,
+                config::lilyPadRideHeight));
+            CHECK(std::abs(pad->baseElevation - 0.82f) < 0.015f);
+            CHECK(pad->position.x <= 4.0f);
+        }
+    }
+}
+
+void testConcurrentRoundRockSkipKeepsFourTimesThePadRideSpeed()
+{
+    TEST("concurrentRoundRockSkipKeepsFourTimesThePadRideSpeed");
+    const Level level = Level::loadFromLayers({ { ".WWW.", ".WWW." },
+        { "C    ", "     " } }, "parallel round rock skip and ride");
+    GameState before = stateWithPlayer({ 0, 0, 1 });
+    before.movables = {
+        { .id = 7, .type = TileType::RoundRock, .cell = { 1, 0, 1 },
+          .sliding = MoveDirection::Right },
+        { .id = 8, .type = TileType::LilyPad, .cell = { 1, 1, 1 },
+          .sliding = MoveDirection::Right },
+        { .id = 9, .type = TileType::RoundRock, .cell = { 1, 1, 2 } },
+    };
+    GameState first = before;
+    for (auto& movable : first.movables) ++movable.cell.x;
+    GameState after = first;
+    for (auto& movable : after.movables) ++movable.cell.x;
+    GameplaySession::Action action { .before = before, .after = after,
+        .durationSeconds = 2.0f };
+    GameplayPresentation presentation;
+    presentation.resetEntities(before);
+    action.presentation = presentation.buildActionPresentation(action,
+        std::vector<GameState> { first, after }, &level);
+    std::size_t freeTracks = 0;
+    for (const auto& motion : action.presentation.motions) {
+        if (motion.target != EntityTarget { EntityKind::Movable, 7 }) continue;
+        CHECK(near(motion.startSeconds, 0.25f * static_cast<float>(freeTracks)));
+        CHECK(near(motion.durationSeconds, 0.25f));
+        CHECK(motion.arcHeight > 0.0f);
+        ++freeTracks;
+    }
+    CHECK(freeTracks == 2);
+    presentation.beginAction(action, before);
+    const auto frameAt = [&](float seconds) {
+        presentation.seekAction(action, seconds);
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(), .level = level, .state = before,
+            .moving = true, .projectedState = after,
+            .presentation = presentation, .settings = {},
+        });
+    };
+    const auto tileFor = [](const RenderFrameData& frame, EntityId id) {
+        return std::ranges::find_if(frame.tiles, [&](const auto& tile) {
+            return tile.renderableId == id && !tile.pickOnly && !tile.isEditorPreview;
+        });
+    };
+    for (const float seconds : { 0.125f, 0.25f, 0.5f, 0.75f, 1.5f }) {
+        const auto frame = frameAt(seconds);
+        const auto free = tileFor(frame, 7);
+        const auto pad = tileFor(frame, 8);
+        const auto rider = tileFor(frame, 9);
+        CHECK(free != frame.tiles.end() && pad != frame.tiles.end() && rider != frame.tiles.end());
+        if (free == frame.tiles.end() || pad == frame.tiles.end() || rider == frame.tiles.end()) continue;
+        CHECK(near(free->position.x, 1.0f + std::min(seconds * 4.0f, 2.0f)));
+        CHECK(near(pad->position.x, 1.0f + seconds));
+        CHECK(near(rider->position.x, pad->position.x));
+        CHECK(near(rider->baseElevation - pad->baseElevation, config::lilyPadRideHeight));
+        CHECK(std::abs(pad->baseElevation - 0.82f) < 0.015f);
+        CHECK(free->baseElevation >= 1.0f);
+        if (seconds == 0.125f) CHECK(near(free->baseElevation, 1.16f));
+    }
+}
+
+void testRoundRockImpactRingsFollowContactsAndClearWithReset()
+{
+    TEST("roundRockImpactRingsFollowContactsAndClearWithReset");
+    const Level level = Level::loadFromLayers({ { ".WWWWW." }, { "C      " } },
+        "round rock timed impact rings");
+    const auto action = roundRockSkipTimeline(3, 0.2f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(action.before);
+    const auto ripples = [&] {
+        RenderFrameData frame;
+        presentation.appendWaterRippleRenderData(frame);
+        return frame;
+    };
+    // A deferred action must retain its first contact without showing any of
+    // the later contacts before the stone reaches them.
+    presentation.scheduleRoundRockSkips(level, action, -0.3f);
+    CHECK(ripples().waterRippleCount == 0);
+    presentation.advanceWaterRipples(0.49f);
+    CHECK(ripples().waterRippleCount == 0);
+    presentation.advanceWaterRipples(0.02f);
+    auto frame = ripples();
+    CHECK(frame.waterRippleCount == 1);
+    if (frame.waterRippleCount == 1) {
+        CHECK(near(frame.waterRipples[0].position.x, 2.5f));
+        CHECK(near(frame.waterRipples[0].ageSeconds, 0.01f));
+        CHECK(frame.waterRipples[0].radiusScale < 1.0f);
+        CHECK(frame.waterRipples[0].intensity < 1.0f);
+    }
+    presentation.advanceWaterRipples(0.2f);
+    frame = ripples();
+    CHECK(frame.waterRippleCount == 2);
+    if (frame.waterRippleCount == 2) {
+        CHECK(near(frame.waterRipples[0].position.x, 2.5f));
+        CHECK(near(frame.waterRipples[1].position.x, 3.5f));
+        CHECK(near(frame.waterRipples[0].ageSeconds, 0.21f));
+        CHECK(near(frame.waterRipples[1].ageSeconds, 0.01f));
+    }
+    presentation.advanceWaterRipples(config::waterImpactRippleLifetimeSeconds + 0.2f);
+    CHECK(ripples().waterRippleCount == 0);
+    presentation.scheduleRoundRockSkips(level, action, 0.61f);
+    CHECK(ripples().waterRippleCount == 3);
+    presentation.resetEntities(action.after);
+    CHECK(ripples().waterRippleCount == 0);
+    presentation.scheduleRoundRockSkips(level, action);
+    presentation.clearWaterRipples();
+    presentation.advanceWaterRipples(0.7f);
+    CHECK(ripples().waterRippleCount == 0);
+    auto reversed = action;
+    reversed.reversed = true;
+    presentation.scheduleRoundRockSkips(level, reversed, 0.61f);
+    CHECK(ripples().waterRippleCount == 0);
+}
+
+void testLongRoundRockSkipRetainsItsEarliestPendingContacts()
+{
+    TEST("longRoundRockSkipRetainsItsEarliestPendingContacts");
+    const std::size_t hops = RenderFrameData::waterRippleCapacity + 8;
+    const std::string water = "." + std::string(hops + 3, 'W');
+    const Level level = Level::loadFromLayers({ { water },
+        { "C" + std::string(hops + 3, ' ') } }, "long round rock skip");
+    const auto action = roundRockSkipTimeline(hops, 0.2f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(action.before);
+    presentation.scheduleRoundRockSkips(level, action);
+    presentation.advanceWaterRipples(0.21f);
+    RenderFrameData first;
+    presentation.appendWaterRippleRenderData(first);
+    CHECK(first.waterRippleCount == 1);
+    if (first.waterRippleCount == 1) {
+        CHECK(near(first.waterRipples[0].position.x, 2.5f));
+        CHECK(near(first.waterRipples[0].ageSeconds, 0.01f));
+    }
+    presentation.advanceWaterRipples(action.durationSeconds);
+    RenderFrameData last;
+    presentation.appendWaterRippleRenderData(last);
+    CHECK(last.waterRippleCount > 0);
+    CHECK(last.waterRippleCount <= RenderFrameData::waterRippleCapacity);
+    CHECK(std::ranges::any_of(std::span(last.waterRipples.data(), last.waterRippleCount),
+        [&](const auto& ripple) {
+            return near(ripple.position.x, static_cast<float>(hops) + 1.5f);
+        }));
+    presentation.advanceWaterRipples(config::waterImpactRippleLifetimeSeconds);
+    RenderFrameData expired;
+    presentation.appendWaterRippleRenderData(expired);
+    CHECK(expired.waterRippleCount == 0);
 }
 
 void testRockScratchesClipPhysicalTracksToGround()
@@ -4949,7 +5267,7 @@ void testFallingRockScratchesStopAtDepartureGroundEdge()
         .durationSeconds = 2.0f, .playerPushing = true };
     action.presentation.motions = {
         { .target = { EntityKind::Movable, 7 }, .from = { 0, 0, 1 },
-          .to = { 1, 0, 0.82f }, .durationSeconds = 1.18f },
+          .to = { 1, 0, 0 }, .durationSeconds = 2.0f },
         { .target = { EntityKind::Movable, 7 }, .from = { 3, 0, 1 },
           .to = { 2, 0, 0 }, .durationSeconds = 2.0f },
     };
@@ -6420,10 +6738,17 @@ int main()
     testEditorWaterMechanicPreviewsRequireWater();
     testWaterStreamsAndFloatingLilyPadPresentation();
     testWaterLayerBuildsUnboundedNonPickableExterior();
-    testFilledWaterUpdatesEdgesAndRoundedCornerCaps();
+    testFilledWaterRetainsContinuousSurfaceAndShorelines();
+    testTransparentIceContactsFollowTheirRenderedWaterline();
+    testSunkenRocksKeepASmallCapAndTheirSinkPoseAfterCommit();
     testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition();
     testWaterRipplesFollowPlayerAndEnemySurfaceContact();
     testWaterRippleScheduleHasAFixedBudget();
+    testRoundRockSkipsArcAndLilyPadRidesTakeFourTimesAsLong();
+    testRoundRockRenderedChainUsesEachHopsLilyPadSupport();
+    testConcurrentRoundRockSkipKeepsFourTimesThePadRideSpeed();
+    testRoundRockImpactRingsFollowContactsAndClearWithReset();
+    testLongRoundRockSkipRetainsItsEarliestPendingContacts();
     testRockScratchesClipPhysicalTracksToGround();
     testFallingRockScratchesStopAtDepartureGroundEdge();
     testRockScratchBudgetUsesDepositionOrder();

@@ -15,6 +15,8 @@ struct ActionMotionTrack {
     Vec3 to {};
     float startSeconds = 0.0f;
     float durationSeconds = 0.0f;
+    // Vertical parabola above the straight path, sampled identically by undo.
+    float arcHeight = 0.0f;
 
     bool operator==(const ActionMotionTrack& other) const
     {
@@ -22,7 +24,7 @@ struct ActionMotionTrack {
             from.x == other.from.x && from.y == other.from.y && from.z == other.from.z &&
             to.x == other.to.x && to.y == other.to.y && to.z == other.to.z &&
             startSeconds == other.startSeconds &&
-            durationSeconds == other.durationSeconds;
+            durationSeconds == other.durationSeconds && arcHeight == other.arcHeight;
     }
 };
 

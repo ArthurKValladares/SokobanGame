@@ -93,16 +93,12 @@ float turretShotTriggerSeconds(
     if (!anyEntityChangedCell(beforeLeg, afterLeg)) {
         // A stationary mutual volley is the action, rather than a reaction to
         // its movement, so it begins at the start of this leg.
-        return action.mechanicalDurationSeconds *
-            static_cast<float>(cue.legIndex) /
-            static_cast<float>(action.legs.size());
+        return action.legBoundarySeconds(cue.legIndex);
     }
 
     // Rule resolution observes the destination state, but presentation must
     // not reveal that reaction while the entity is still travelling there.
-    return action.mechanicalDurationSeconds *
-        static_cast<float>(cue.legIndex + 1) /
-        static_cast<float>(action.legs.size());
+    return action.legBoundarySeconds(cue.legIndex + 1);
 }
 
 // movementDirection, anyPlayerMoved and firstPlayerMovementDirection now live
@@ -971,9 +967,7 @@ GameplaySession::takeReadyTurretShots()
             cue.emitted = true;
             // Stationary volleys retain the old wind-up to the end of their
             // leg. A reaction released at a movement boundary begins now.
-            const float legEndSeconds = action->mechanicalDurationSeconds *
-                static_cast<float>(cue.legIndex + 1) /
-                static_cast<float>(std::max<std::size_t>(action->legs.size(), 1));
+            const float legEndSeconds = action->legBoundarySeconds(cue.legIndex + 1);
             ready.push_back({
                 .shot = cue.shot,
                 .impactDelaySeconds = std::max(
@@ -1233,6 +1227,7 @@ GameplaySession::StartOutcome GameplaySession::planPlayerStep(
 
     std::vector<ActionScheduler::Pending> batch;
     batch.push_back(makePending(
+        level,
         step->action,
         step->pressurePlateActivityChanged,
         step->legs,
@@ -1254,6 +1249,7 @@ GameplaySession::StartOutcome GameplaySession::planPlayerStep(
         slide->action.playerMoveCountBefore = step->action.playerMoveCountAfter;
         slide->action.playerMoveCountAfter = step->action.playerMoveCountAfter;
         batch.push_back(makePending(
+            level,
             slide->action,
             slide->pressurePlateActivityChanged,
             slide->legs,
@@ -1378,6 +1374,7 @@ GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& le
             return StartOutcome::Impossible;
         }
         return beginAction(
+                   level,
                    volley->action,
                    volley->pressurePlateActivityChanged,
                    std::move(volley->legs),
@@ -1405,6 +1402,7 @@ GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& le
         }
         const std::size_t group = continuationCausalGroup(slide->action);
         return beginAction(
+                   level,
                    slide->action,
                    slide->pressurePlateActivityChanged,
                    std::move(slide->legs),
@@ -1443,6 +1441,7 @@ GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& le
                 return StartOutcome::Impossible;
             }
             return beginAction(
+                       level,
                        ride->action,
                        ride->pressurePlateActivityChanged,
                        std::move(ride->legs),
@@ -1473,6 +1472,7 @@ GameplaySession::StartOutcome GameplaySession::planAmbientMotion(const Level& le
             return StartOutcome::Impossible;
         }
         return beginAction(
+                   level,
                    patrol->action,
                    patrol->pressurePlateActivityChanged,
                    std::move(patrol->legs),
@@ -1522,7 +1522,7 @@ GameplaySession::StartOutcome GameplaySession::planActivationAction(const Level&
         lastMirrorSwapDestinations_.clear();
         return StartOutcome::Impossible;
     }
-    if (!beginAction(action, activation->pressurePlateActivityChanged)) {
+    if (!beginAction(level, action, activation->pressurePlateActivityChanged)) {
         lastMirrorSwapDestinations_.clear();
         return StartOutcome::Refused;
     }
@@ -1559,7 +1559,7 @@ GameplaySession::StartOutcome GameplaySession::tryStartUndoMove(const Level& lev
     if (!actionAdmissionAllows(action)) {
         return StartOutcome::Impossible;
     }
-    if (!beginAction(action, rules::pressurePlateActivityChanged(
+    if (!beginAction(level, action, rules::pressurePlateActivityChanged(
             level, action.before, action.after))) {
         return StartOutcome::Refused;
     }
@@ -1590,7 +1590,7 @@ GameplaySession::StartOutcome GameplaySession::tryStartRestart(
     if (!actionAdmissionAllows(*action)) {
         return StartOutcome::Impossible;
     }
-    if (!beginAction(*action, rules::pressurePlateActivityChanged(
+    if (!beginAction(level, *action, rules::pressurePlateActivityChanged(
             level, action->before, action->after))) {
         return StartOutcome::Refused;
     }
@@ -1690,6 +1690,7 @@ void GameplaySession::setActionDuration(
 }
 
 bool GameplaySession::beginAction(
+    const Level& level,
     const Action& action,
     bool pressurePlateActivityChanged,
     std::vector<GameState> legs,
@@ -1700,18 +1701,17 @@ bool GameplaySession::beginAction(
     std::vector<EntityId> robotPatrolActors)
 {
     if (actionUsesMovingPlatformSupport(action)) return false;
-    const ActionReservations claims =
-        makePending(action, pressurePlateActivityChanged,
-            legs, turretShots, deferral, portalTransits)
-            .reservations;
+    ActionScheduler::Pending pending = makePending(level, action,
+        pressurePlateActivityChanged, legs, turretShots, deferral, portalTransits);
     const auto admission = scheduler_.tryStart(
         action,
-        claims,
+        pending.reservations,
         std::move(legs),
         causalGroup,
         deferral,
         std::move(turretShots),
-        std::move(portalTransits));
+        std::move(portalTransits),
+        std::move(pending.legDurationsSeconds));
     const auto* started = std::get_if<ActionScheduler::Started>(&admission);
     if (!started) return false;
     if (!robotPatrolActors.empty()) {
@@ -1751,6 +1751,7 @@ bool GameplaySession::actionAdmissionAllows(
 }
 
 ActionScheduler::Pending GameplaySession::makePending(
+    const Level& level,
     const Action& action,
     bool pressurePlateActivityChanged,
     const std::vector<GameState>& legs,
@@ -1777,10 +1778,44 @@ ActionScheduler::Pending GameplaySession::makePending(
         .portalTransits = portalTransits,
         .pressurePlateActivityChanged = pressurePlateActivityChanged,
     };
+    ActionReservations reservations = plans::reservationsFor(claimed);
+    const GameState* previous = &action.before;
+    bool waterMomentum = false;
+    for (const GameState& leg : claimed.legs) {
+        // A slower companion may determine this leg's shared clock while a
+        // free stone still animates ahead at skipping speed. Inspect stones
+        // directly rather than relying on the shared duration weight.
+        const std::size_t count = std::min(previous->movables.size(), leg.movables.size());
+        for (std::size_t index = 0; index < count; ++index) {
+            const auto& from = previous->movables[index];
+            const auto& to = leg.movables[index];
+            if (rules::lilyPadDrivenByRock(level, *previous, leg, index)) {
+                waterMomentum = true;
+            }
+            if (from.type != TileType::RoundRock || from.fallen || from.dead ||
+                (!from.sliding && !to.sliding)) continue;
+            waterMomentum = waterMomentum ||
+                tileTypeIsWater(level.supportingTileAt(from.cell).value_or(TileType::Air)) ||
+                tileTypeIsWater(level.supportingTileAt(to.cell).value_or(TileType::Air));
+        }
+        previous = &leg;
+    }
+    if (waterMomentum) {
+        // Reservation steps use the normal world clock. Skipping stones can
+        // arrive before a claim begins; coasting leaves can leave after it
+        // expires. Keep their paths reserved until the whole action commits.
+        for (Reservation& reservation : reservations.cells) {
+            reservation.firstStep = 0;
+            reservation.lastStep.reset();
+        }
+    }
     return ActionScheduler::Pending {
         .plan = action,
-        .reservations = plans::reservationsFor(claimed),
+        .reservations = std::move(reservations),
         .legs = legs,
+        .legDurationsSeconds = waterMomentum
+            ? plans::legDurations(&level, action.before, legs, action.durationSeconds)
+            : std::vector<float> {},
         .turretShots = turretShots,
         .portalTransits = portalTransits,
         .deferral = deferral,

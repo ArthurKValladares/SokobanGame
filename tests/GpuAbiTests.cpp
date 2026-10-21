@@ -66,6 +66,7 @@ using namespace sokoban;
 // rather than producing an unspecified offset.
 static_assert(std::is_standard_layout_v<PointLightUniform>);
 static_assert(std::is_standard_layout_v<RockScratchUniform>);
+static_assert(std::is_standard_layout_v<WaterContactUniform>);
 static_assert(std::is_standard_layout_v<SceneFrameUniform>);
 static_assert(std::is_standard_layout_v<GpuDrawInstance>);
 static_assert(std::is_standard_layout_v<GpuMaterial>);
@@ -128,6 +129,12 @@ constexpr ScalarKind scalarKindOf<PointLightUniform>()
 }
 template <>
 constexpr ScalarKind scalarKindOf<RockScratchUniform>()
+{
+    return ScalarKind::Aggregate;
+}
+
+template <>
+constexpr ScalarKind scalarKindOf<WaterContactUniform>()
 {
     return ScalarKind::Aggregate;
 }
@@ -431,6 +438,9 @@ std::vector<ExpectedBlock> expectedBlocks()
                 offsetof(SceneFrameUniform, stylizedSurface),
                 offsetof(SceneFrameUniform, rockScratches),
                 offsetof(SceneFrameUniform, rockScratchMeta),
+                offsetof(SceneFrameUniform, waterRippleStyles),
+                offsetof(SceneFrameUniform, waterContacts),
+                offsetof(SceneFrameUniform, waterContactMeta),
             },
             // A uniform block: its members sit directly in the block.
             .elementStride = std::nullopt,
@@ -438,7 +448,8 @@ std::vector<ExpectedBlock> expectedBlocks()
             // stride only because 48 is already a multiple of 16; a member
             // that broke that would silently move every light after the first.
             .memberArrayStrides = { { 3u, byteSize<PointLightUniform>() },
-                { 5u, byteSize<Vec4>() }, { 8u, byteSize<RockScratchUniform>() } },
+                { 5u, byteSize<Vec4>() }, { 8u, byteSize<RockScratchUniform>() },
+                { 10u, byteSize<Vec4>() }, { 11u, byteSize<WaterContactUniform>() } },
             .memberKinds = {
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, clipFromWorld),
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, shadowFromWorld),
@@ -450,6 +461,9 @@ std::vector<ExpectedBlock> expectedBlocks()
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, stylizedSurface),
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, rockScratches),
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, rockScratchMeta),
+                SOKOBAN_MEMBER_KIND(SceneFrameUniform, waterRippleStyles),
+                SOKOBAN_MEMBER_KIND(SceneFrameUniform, waterContacts),
+                SOKOBAN_MEMBER_KIND(SceneFrameUniform, waterContactMeta),
             },
         },
         ExpectedBlock {

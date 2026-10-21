@@ -953,8 +953,154 @@ void testRobotPatrolPlansOneBeatAndLeavesUnrelatedActorsAlone()
     CHECK(plans::planRobotPatrols(level, initial, { robots[0] }, {}, 0.2f) == patrol);
 }
 
+void testRoundRockPlansSkipThenRideAtQuarterSkippingSpeed()
+{
+    TEST("roundRockPlansSkipThenRideAtQuarterSkippingSpeed");
+    const Level level = makeLevel({ { "..WWWW.." }, { "C\\  $   " }, { "        " } });
+    const auto initial = rules::initialState(level);
+    const auto push = plans::planPlayerStep(level, initial, MoveDirection::Right, {}, 0.2f);
+    CHECK(push.has_value());
+    if (!push) return;
+    CHECK(push->legs.size() == 1);
+    CHECK(push->action.durationSeconds == 0.2f);
+    CHECK(push->action.playerPushing);
+    const auto moving = plans::slidingEntities(push->action.after);
+    const auto skip = plans::planSlides(level, push->action.after, moving, {}, 0.2f);
+    CHECK(skip.has_value());
+    if (!skip) return;
+    CHECK(skip->legs.size() == 4);
+    CHECK(skip->legs[0].movables[0].cell == cell(3, 0, 1));
+    CHECK(skip->legs[1].movables[0].cell == cell(4, 0, 2));
+    CHECK(skip->action.after.movables[0].cell == cell(5, 0, 2));
+    CHECK(skip->action.after.movables[1].cell == cell(5, 0, 1));
+    CHECK(!plans::anySlideMomentum(skip->action.after));
+    CHECK(skip->action.after.players == push->action.after.players);
+    CHECK(std::abs(skip->action.durationSeconds - 1.0f) < 0.0001f);
+    const auto durations = plans::legDurations(&level, skip->action.before,
+        skip->legs, skip->action.durationSeconds);
+    CHECK(durations.size() == 4);
+    CHECK(std::abs(durations[0] - 0.1f) < 0.0001f);
+    CHECK(std::abs(durations[1] - 0.1f) < 0.0001f);
+    CHECK(std::abs(durations[2] - 0.4f) < 0.0001f);
+    CHECK(std::abs(durations[3] - 0.4f) < 0.0001f);
+    CHECK(skip->legs[2].movables[1].cell == skip->legs[3].movables[1].cell);
+    CHECK(skip->legs[2].movables[1].sliding.has_value());
+    CHECK(!skip->legs[3].movables[1].sliding);
+    CHECK(skip == plans::planSlides(level, push->action.after, moving, {}, 0.2f));
+    const auto claims = plans::reservationsFor(*skip);
+    for (int x : { 4, 5 }) {
+        for (int z : { 1, 2 }) {
+            CHECK(std::ranges::any_of(claims.cells, [&](const Reservation& claim) {
+                return claim.cell == cell(x, 0, z);
+            }));
+        }
+    }
+}
+
+void testRoundRockWakeJoinsPlanClosureAndReservations()
+{
+    TEST("roundRockWakeJoinsPlanClosureAndReservations");
+    const Level level = makeLevel({
+        { ".......", "WWWWWWW", "WWWWWWW", "..WWWW.", "WWWWWWW", "WWWWWWW", "......." },
+        { "       ", "       ", "   $   ", "C\\     ", "   $   ", "       ", "       " },
+    });
+    const auto initial = rules::initialState(level);
+    const auto push = plans::planPlayerStep(level, initial, MoveDirection::Right, {}, 0.2f);
+    CHECK(push.has_value());
+    if (!push) return;
+    const auto skip = plans::planSlides(level, push->action.after,
+        plans::slidingEntities(push->action.after), {}, 0.2f);
+    CHECK(skip.has_value());
+    if (!skip) return;
+    CHECK(!plans::anySlideMomentum(skip->action.after));
+    const auto& state = skip->action.after;
+    CHECK(state.movables[0].cell == cell(3, 1, 1));
+    CHECK(state.movables[2].cell == cell(3, 5, 1));
+    CHECK(state.movables[1].cell == cell(6, 3, 1));
+    const auto durations = plans::legDurations(&level, skip->action.before,
+        skip->legs, skip->action.durationSeconds);
+    const GameState* previous = &skip->action.before;
+    bool sawPadMovement = false;
+    for (std::size_t leg = 0; leg < skip->legs.size(); ++leg) {
+        for (std::size_t index : { std::size_t(0), std::size_t(2) }) {
+            if (rules::lilyPadDrivenByRock(level, *previous, skip->legs[leg], index)) {
+                CHECK(std::abs(durations[leg] - .4f) < .0001f);
+                sawPadMovement = sawPadMovement ||
+                    previous->movables[index].cell != skip->legs[leg].movables[index].cell;
+            }
+        }
+        previous = &skip->legs[leg];
+    }
+    CHECK(sawPadMovement);
+    const auto claims = plans::reservationsFor(*skip);
+    for (const auto endpoint : { cell(3, 1, 1), cell(3, 5, 1), cell(6, 3, 1) }) {
+        CHECK(std::ranges::any_of(claims.cells, [&](const Reservation& claim) {
+            return claim.cell == endpoint && !claim.lastStep;
+        }));
+    }
+}
+
+void testCoastingPadWithoutRockUsesSlowerClockAndStopsInWater()
+{
+    TEST("coastingPadWithoutRockUsesSlowerClockAndStopsInWater");
+    for (bool withHeroRider : { false, true }) {
+        const Level level = makeLevel({
+            { "WWWWW..", "......." }, { " $     ", "C      " },
+            { withHeroRider ? " C     " : "       ", "       " },
+        });
+        auto state = rules::initialState(level);
+        state.movables[0].sliding = MoveDirection::Right;
+        const auto coast = plans::planSlides(level, state,
+            plans::slidingEntities(state), {}, .2f);
+        CHECK(coast.has_value());
+        if (!coast) continue;
+        CHECK(coast->legs.size() == 4);
+        CHECK(coast->action.after.movables[0].cell == cell(4, 0, 1));
+        CHECK(!coast->action.after.movables[0].sliding);
+        CHECK(std::abs(coast->action.durationSeconds - 1.6f) < .0001f);
+        const auto durations = plans::legDurations(&level, state,
+            coast->legs, coast->action.durationSeconds);
+        for (float duration : durations) CHECK(std::abs(duration - .4f) < .0001f);
+        CHECK(coast->legs[2].movables[0].cell == coast->legs[3].movables[0].cell);
+        CHECK(coast->legs[2].movables[0].sliding.has_value());
+        if (withHeroRider) {
+            CHECK(std::ranges::any_of(coast->action.after.players, [](const auto& player) {
+                return player.cell == cell(4, 0, 2) && !player.dead;
+            }));
+        }
+    }
+    // Direct hero pushes retain the ordinary one-step clock.
+    const Level pushLevel = makeLevel({ { "..WWW" }, { "C$   " }, { " C   " } });
+    const auto initial = rules::initialState(pushLevel);
+    const auto push = plans::planPlayerStep(pushLevel, initial,
+        MoveDirection::Right, {}, .2f, initial.players[0].controller);
+    CHECK(push.has_value());
+    if (push) {
+        CHECK(push->action.durationSeconds == .2f);
+        CHECK(push->action.after.movables[0].cell == cell(2, 0, 1));
+        CHECK(!push->action.after.movables[0].sliding);
+    }
+    // A Knight's regular-rock chain shove also uses the slower pad clock,
+    // including when the pad travels just one cell without coasting momentum.
+    const Level chainLevel = makeLevel({ { "..WW.." }, { "KR$   " } });
+    const auto chainInitial = rules::initialState(chainLevel);
+    const auto chainPush = plans::planPlayerStep(chainLevel, chainInitial,
+        MoveDirection::Right, {}, .2f, chainInitial.players[0].controller);
+    CHECK(chainPush.has_value());
+    if (chainPush) {
+        CHECK(std::abs(chainPush->action.durationSeconds - .4f) < .0001f);
+        CHECK(chainPush->action.after.movables[1].cell == cell(3, 0, 1));
+        CHECK(!chainPush->action.after.movables[1].sliding);
+        CHECK(rules::lilyPadDrivenByRock(chainLevel, chainInitial,
+            chainPush->action.after, 1));
+    }
+}
+
 int main()
 {
+    testRoundRockPlansSkipThenRideAtQuarterSkippingSpeed();
+    testCoastingPadWithoutRockUsesSlowerClockAndStopsInWater();
+    testRoundRockWakeJoinsPlanClosureAndReservations();
     testWaterStreamPlansCarryPlatformsAndReserveTheirRiders();
     testWaterStreamRidersExcludeBeltsAboveStreams();
     testWaterStreamPlansReevaluateCornersAndReserveTheirStack();

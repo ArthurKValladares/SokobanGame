@@ -6,6 +6,7 @@
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 #include "engine/render/WaterConfig.hpp"
+#include "engine/render/WaterContactGeometry.hpp"
 #include "engine/RockScratchConfig.hpp"
 
 #include <algorithm>
@@ -630,7 +631,9 @@ void VulkanSceneDescriptors::updateFrame(
     const SceneCamera& camera,
     bool preview,
     std::span<const RenderFrameData::WaterRipple> waterRipples,
-    std::span<const RenderFrameData::RockScratch> rockScratches) const
+    std::span<const RenderFrameData::RockScratch> rockScratches,
+    std::span<const RenderFrameData::Tile> waterContactTiles,
+    std::span<const RenderFrameData::WaterSurface> waterContactSurfaces) const
 {
     const uint32_t internalSetIndex = setIndex * 2 + (preview ? 1U : 0U);
     if (internalSetIndex >= frameBuffers_.size() ||
@@ -686,6 +689,9 @@ void VulkanSceneDescriptors::updateFrame(
         if (rippleCount == uniform.waterRipples.size()) {
             break;
         }
+        uniform.waterRippleStyles[rippleCount] = {
+            ripple.radiusScale, ripple.intensity, 0.0f, 0.0f,
+        };
         uniform.waterRipples[rippleCount++] = {
             ripple.position.x, ripple.position.y, ripple.position.z,
             ripple.ageSeconds,
@@ -724,6 +730,7 @@ void VulkanSceneDescriptors::updateFrame(
         static_cast<float>(scratchCount), config::rockScratchLifetimeSeconds,
         config::rockScratchHoldSeconds, config::rockScratchOpacity,
     };
+    writeWaterContacts(uniform, waterContactTiles, waterContactSurfaces);
     std::memcpy(
         frameBuffers_[internalSetIndex].mapped(),
         &uniform,

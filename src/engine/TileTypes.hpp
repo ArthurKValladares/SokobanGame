@@ -135,6 +135,8 @@ enum class TileType : uint8_t {
     StreamRight,
     StreamDown,
     StreamLeft,
+    // A rounded stone skips across water and can ride a floating lily pad.
+    RoundRock,
     Count,
 };
 
@@ -333,6 +335,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::StreamRight, '"', "Water Stream Right", { 0.08f, 0.34f, 0.78f, 1.0f } },
     TileTypeDefinition { TileType::StreamDown, ',', "Water Stream Down", { 0.08f, 0.34f, 0.78f, 1.0f } },
     TileTypeDefinition { TileType::StreamLeft, '`', "Water Stream Left", { 0.08f, 0.34f, 0.78f, 1.0f } },
+    TileTypeDefinition { TileType::RoundRock, '\\', "Round Rock", { 1.0f, 1.0f, 1.0f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
