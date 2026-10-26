@@ -1831,7 +1831,8 @@ void appendMirrorGhostTile(
     const GameState& state,
     const GameState& resultState,
     const GameState* endResultState,
-    const MirrorEntityPreviewContext& preview)
+    const MirrorEntityPreviewContext& preview,
+    Vec4 ghostColor = config::mirrorGhostColor)
 {
     const rules::MirrorEntityPreview& entity = preview.entity;
     const rules::MirrorEntityPreview* matchingEndEntity =
@@ -1873,10 +1874,10 @@ void appendMirrorGhostTile(
             ghostPosition.y,
         },
         .color = {
-            config::mirrorGhostColor.x,
-            config::mirrorGhostColor.y,
-            config::mirrorGhostColor.z,
-            config::mirrorGhostColor.w * previewOpacity,
+            ghostColor.x,
+            ghostColor.y,
+            ghostColor.z,
+            ghostColor.w * previewOpacity,
         },
         .baseElevation = ghostPosition.z,
         .height = 1.0f,
@@ -1988,6 +1989,139 @@ void appendMirrorGhostTile(
         (toPose.modelRotationOffsetRadians - fromPose.modelRotationOffsetRadians) * progress;
     ghost.pickHeight = fromPose.pickHeight;
     frame.tiles.push_back(ghost);
+}
+
+void appendInvalidMirrorPreview(
+    RenderFrameData& frame,
+    const RenderFrameBuilder::GameplayInput& input,
+    const rules::MirrorActivationPreview* validPreview,
+    FrameArena* arena)
+{
+    rules::InvalidMirrorPreview owned;
+    rules::InvalidMirrorPreview ownedEnd;
+    if (!input.cachedActivationPreviews) {
+        owned = rules::previewInvalidMirrors(input.level, input.state);
+    }
+    const std::span<const rules::MirrorBeamSegment> beams =
+        input.cachedActivationPreviews ? input.invalidMirrorBeams : owned.beamSegments;
+    const std::span<const rules::MirrorEntityPreview> entities =
+        input.cachedActivationPreviews ? input.invalidMirrorEntities : owned.entities;
+    if (beams.empty() && entities.empty()) {
+        return;
+    }
+    if (input.moving && !input.cachedActivationPreviews &&
+        !rules::anyPlayerDead(input.projectedState)) {
+        ownedEnd = rules::previewInvalidMirrors(input.level, input.projectedState);
+    }
+    const std::span<const rules::MirrorBeamSegment> endBeams =
+        input.cachedActivationPreviews ? input.projectedInvalidMirrorBeams : ownedEnd.beamSegments;
+    const std::span<const rules::MirrorEntityPreview> endEntities =
+        input.cachedActivationPreviews ? input.projectedInvalidMirrorEntities : ownedEnd.entities;
+    float progress = 0.0f;
+    if (input.moving) {
+        for (const auto& player : input.presentation.players()) {
+            progress = std::max(progress, motionProgress(player.motion));
+        }
+        for (const auto& movable : input.presentation.movables()) {
+            progress = std::max(progress, motionProgress(movable));
+        }
+        for (const auto& enemy : input.presentation.enemies()) {
+            progress = std::max(progress, motionProgress(enemy.motion));
+        }
+    }
+    const float fadeProgress = std::clamp(progress /
+        std::max(config::mirrorPreviewExitFadeProgress, 0.0001f), 0.0f, 1.0f);
+    const float exitOpacity = 1.0f - fadeProgress * fadeProgress * (3.0f - 2.0f * fadeProgress);
+    FrameArray<MirrorRenderSegment> segments = arena
+        ? FrameArray<MirrorRenderSegment>(*arena, beams.size())
+        : FrameArray<MirrorRenderSegment>();
+    for (const auto& beam : beams) {
+        MirrorRenderSegment segment {
+            .from = toRenderPoint(beam.from, beam.fromEdge),
+            .to = toRenderPoint(beam.to, beam.toEdge),
+        };
+        // A blocked alternative can share the beginning of an executable
+        // chain. Preserve blue on that shared, valid portion of the path.
+        if (validPreview && std::ranges::any_of(validPreview->entities, [&](const auto& entity) {
+                return std::ranges::any_of(entity.beamSegments, [&](const auto& valid) {
+                    return sameUndirectedSegment(segment, {
+                        .from = toRenderPoint(valid.from, valid.fromEdge),
+                        .to = toRenderPoint(valid.to, valid.toEdge),
+                    });
+                });
+            })) {
+            continue;
+        }
+        if (input.moving && std::ranges::none_of(endBeams, [&](const auto& end) {
+                return sameUndirectedSegment(segment, {
+                    .from = toRenderPoint(end.from, end.fromEdge),
+                    .to = toRenderPoint(end.to, end.toEdge),
+                });
+            })) {
+            segment.opacity = exitOpacity;
+        }
+        if (segment.opacity <= 0.001f ||
+            std::ranges::any_of(segments, [&](const auto& existing) {
+                return sameUndirectedSegment(existing, segment);
+            })) {
+            continue;
+        }
+        segments.push_back(segment);
+    }
+    for (const auto& segment : segments) {
+        Vec4 halo = config::mirrorInvalidBeamHaloColor;
+        Vec4 core = config::mirrorInvalidBeamCoreColor;
+        halo.w *= segment.opacity;
+        core.w *= segment.opacity;
+        appendMirrorBeamRibbons(frame, segment, config::mirrorBeamHaloWidth, halo);
+        appendMirrorBeamRibbons(frame, segment, config::mirrorBeamCoreWidth, core);
+    }
+    for (const auto& entity : entities) {
+        const auto match = std::ranges::find_if(endEntities, [&](const auto& candidate) {
+            return candidate.player == entity.player && candidate.enemy == entity.enemy &&
+                candidate.reflectionIndex == entity.reflectionIndex &&
+                (entity.player ? candidate.playerIndex == entity.playerIndex
+                    : entity.enemy ? candidate.enemyIndex == entity.enemyIndex
+                                   : candidate.movableIndex == entity.movableIndex);
+        });
+        const auto* endEntity = match != endEntities.end() ? &*match : nullptr;
+        const bool samePath = endEntity &&
+            endEntity->beamSegments.size() == entity.beamSegments.size() &&
+            !entity.beamSegments.empty() &&
+            [&] {
+                for (std::size_t i = 0; i < entity.beamSegments.size(); ++i) {
+                    const auto& from = entity.beamSegments[i];
+                    const auto& to = endEntity->beamSegments[i];
+                    if ((i > 0 && from.from != to.from) ||
+                        (i + 1 < entity.beamSegments.size() && from.to != to.to) ||
+                        from.fromEdge != to.fromEdge || from.toEdge != to.toEdge) {
+                        return false;
+                    }
+                }
+                return true;
+            }();
+        const auto* player = entity.player &&
+                entity.playerIndex < input.presentation.players().size()
+            ? &input.presentation.players()[entity.playerIndex] : nullptr;
+        const auto* enemy = entity.enemy &&
+                entity.enemyIndex < input.presentation.enemies().size()
+            ? &input.presentation.enemies()[entity.enemyIndex] : nullptr;
+        const auto* visual = entity.player ? (player ? &player->motion : nullptr)
+            : entity.enemy ? (enemy ? &enemy->motion : nullptr)
+            : entity.movableIndex < input.presentation.movables().size()
+                ? &input.presentation.movables()[entity.movableIndex] : nullptr;
+        const float opacity = input.moving && !samePath ? exitOpacity : 1.0f;
+        if (opacity <= 0.001f) {
+            continue;
+        }
+        const MirrorEntityPreviewContext preview {
+            entity, endEntity, player, enemy, visual,
+            visual ? motionProgress(*visual) : progress,
+            samePath, opacity,
+        };
+        appendMirrorGhostTile(frame, input, input.state, input.state, nullptr,
+            preview, config::mirrorInvalidGhostColor);
+    }
 }
 
 void appendMirrorPreview(
@@ -2184,6 +2318,7 @@ void appendMirrorPreview(
                     coreColor);
             }
         }
+        appendInvalidMirrorPreview(frame, input, mirrorPreview, arena);
     }
 }
 

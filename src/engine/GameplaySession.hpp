@@ -115,6 +115,10 @@ public:
     // These owning previews survive frames; refresh at discrete world changes.
     [[nodiscard]] const std::optional<rules::MirrorActivationPreview>&
     activationPreview(const Level& level, bool projected = false) const;
+    [[nodiscard]] const std::vector<rules::MirrorBeamSegment>&
+    invalidMirrorBeams(const Level& level, bool projected = false) const;
+    [[nodiscard]] const rules::InvalidMirrorPreview&
+    invalidMirrorPreview(const Level& level, bool projected = false) const;
 
     // Several actions can be in flight at once. The accessors below still speak
     // in terms of a single "active" action, resolving to the one that has been
@@ -353,6 +357,7 @@ private:
     mutable std::array<uint64_t, 2> previewRevisions_ {};
     mutable std::array<std::optional<rules::MirrorActivationPreview>, 2>
         activationPreviews_;
+    mutable std::array<rules::InvalidMirrorPreview, 2> invalidMirrorPreviews_;
     // Finds the completed action whose momentum an automatic continuation is
     // spending. A slide resumed after a checkpoint must still fold into that
     // cause so later player steps remain ordered behind it in history.

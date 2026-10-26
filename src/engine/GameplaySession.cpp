@@ -525,9 +525,25 @@ GameplaySession::activationPreview(const Level& level, bool projected) const
         const GameState& source = projected ? projectedStateView() : state();
         activationPreviews_[index] = rules::anyPlayerDead(source)
             ? std::nullopt : rules::previewActivation(level, source);
+        invalidMirrorPreviews_[index] = rules::anyPlayerDead(source)
+            ? rules::InvalidMirrorPreview {}
+            : rules::previewInvalidMirrors(level, source);
         previewRevisions_[index] = scheduler_.stateRevision();
     }
     return activationPreviews_[index];
+}
+
+const std::vector<rules::MirrorBeamSegment>&
+GameplaySession::invalidMirrorBeams(const Level& level, bool projected) const
+{
+    return invalidMirrorPreview(level, projected).beamSegments;
+}
+
+const rules::InvalidMirrorPreview&
+GameplaySession::invalidMirrorPreview(const Level& level, bool projected) const
+{
+    (void)activationPreview(level, projected);
+    return invalidMirrorPreviews_[projected ? 1 : 0];
 }
 
 std::size_t GameplaySession::continuationCausalGroup(

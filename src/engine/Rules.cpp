@@ -1871,6 +1871,8 @@ struct MirrorHit {
     GridPosition output {};
     GridPosition input {};
     int distance = 0;
+    bool inputBlocked = false;
+    bool conflict = false;
 };
 
 std::optional<MirrorRays> mirrorRays(TileType tile)
@@ -1997,7 +1999,9 @@ bool entityBlocksSight(
     return false;
 }
 
-bool inputRayIsClear(
+enum class MirrorInputSight { Clear, GeometryBlocked, UnitBlocked };
+
+MirrorInputSight inputRaySight(
     const Level& level,
     const GameState& state,
     GridPosition3 mirror,
@@ -2006,11 +2010,13 @@ bool inputRayIsClear(
     std::size_t entityIndex)
 {
     const PortalRayPath path = portalRayPath(level, mirror, ray, distance);
+    bool geometryBlocked = false;
     for (const auto cell : path.cells) {
-        if (!cellAllowsEntity(level, state, cell) ||
-            entityBlocksSight(state, cell, entityIndex)) {
-            return false;
+        if (entityBlocksSight(state, cell, entityIndex)) {
+            return MirrorInputSight::UnitBlocked;
         }
+        geometryBlocked = geometryBlocked ||
+            !cellAllowsEntity(level, state, cell);
         // The ignored source may occupy an entrance before it teleports.
         const auto matchesSource = [&](const auto& units, std::size_t offset) {
             return entityIndex >= offset &&
@@ -2024,7 +2030,8 @@ bool inputRayIsClear(
             break;
         }
     }
-    return true;
+    return geometryBlocked ? MirrorInputSight::GeometryBlocked
+                           : MirrorInputSight::Clear;
 }
 
 bool outputRayIsClear(
@@ -2043,12 +2050,36 @@ bool outputRayIsClear(
     return true;
 }
 
+std::optional<int> firstUnitOnRay(
+    const Level& level,
+    const GameState& state,
+    GridPosition3 mirror,
+    GridPosition ray,
+    int distance,
+    std::size_t entityIndex)
+{
+    int step = 0;
+    for (const auto cell : portalRayPath(level, mirror, ray, distance).cells) {
+        ++step;
+        if (!cellAllowsEntity(level, state, cell) ||
+            mirrorTileAt(level, state, cell)) {
+            break;
+        }
+        // Ignore the source's original cell during chained reflections.
+        if (entityBlocksSight(state, cell, entityIndex)) {
+            return step;
+        }
+    }
+    return std::nullopt;
+}
+
 std::vector<MirrorHit> nearestMirrors(
     const Level& level,
     const GameState& state,
     GridPosition3 entityCell,
     std::size_t entityIndex,
-    const std::vector<GridPosition3>& usedMirrors)
+    const std::vector<GridPosition3>& usedMirrors,
+    bool includeBlockedInputs = false)
 {
     std::vector<MirrorHit> nearest;
     int nearestDistance = 0;
@@ -2087,19 +2118,27 @@ std::vector<MirrorHit> nearestMirrors(
                 for (const auto& [input, output] : pairs) {
                     const std::optional<int> distance =
                         distanceAlongRay(level, mirror, entityCell, input);
-                    if (!distance ||
-                        !inputRayIsClear(
-                            level,
-                            state,
-                            mirror,
-                            input,
-                            *distance,
-                            entityIndex)) {
+                    if (!distance) {
                         continue;
                     }
+                    const MirrorInputSight sight = inputRaySight(
+                        level, state, mirror, input, *distance, entityIndex);
+                    if (sight == MirrorInputSight::UnitBlocked ||
+                        (sight == MirrorInputSight::GeometryBlocked &&
+                            !includeBlockedInputs)) {
+                        continue;
+                    }
+                    const auto opposite = firstUnitOnRay(
+                        level, state, mirror, output, *distance, entityIndex);
+                    if (opposite && *opposite < *distance) {
+                        continue;
+                    }
+                    const MirrorHit hit { mirror, output, input, *distance,
+                        sight == MirrorInputSight::GeometryBlocked,
+                        opposite && *opposite == *distance };
                     if (nearest.empty() || *distance < nearestDistance) {
                         nearest.clear();
-                        nearest.push_back({ mirror, output, input, *distance });
+                        nearest.push_back(hit);
                         nearestDistance = *distance;
                     } else if (
                         *distance == nearestDistance &&
@@ -2107,7 +2146,7 @@ std::vector<MirrorHit> nearestMirrors(
                             nearest, [&](const MirrorHit& existing) {
                                 return existing.cell == mirror;
                             })) {
-                        nearest.push_back({ mirror, output, input, *distance });
+                        nearest.push_back(hit);
                     }
                 }
             }
@@ -2133,7 +2172,10 @@ std::optional<std::vector<ReflectedPath>> reflectedPathsForEntity(
     const GameState& state,
     GridPosition3 start,
     std::size_t entityIndex,
-    bool allowBranches)
+    bool allowBranches,
+    bool includeBlockedInputs = false,
+    std::vector<ReflectedPath>* attemptedPaths = nullptr,
+    std::vector<ReflectedPath>* invalidPaths = nullptr)
 {
     const std::size_t maximumChain =
         static_cast<std::size_t>(level.width()) * level.height();
@@ -2142,17 +2184,37 @@ std::optional<std::vector<ReflectedPath>> reflectedPathsForEntity(
         { .cell = start },
     };
     std::vector<ReflectedPath> results;
+    bool invalid = false;
+    const bool collecting = attemptedPaths || invalidPaths;
+    const auto appendPath = [](std::vector<ReflectedPath>* destination,
+                              const PendingReflectionPath& source) {
+        if (destination) {
+            destination->push_back({
+                .cell = source.cell,
+                .reflected = !source.usedMirrors.empty(),
+                .beamSegments = source.beamSegments,
+            });
+        }
+    };
 
     while (!pending.empty()) {
         PendingReflectionPath path = std::move(pending.back());
         pending.pop_back();
         if (path.usedMirrors.size() >= maximumChain) {
-            return std::nullopt;
+            if (!collecting) {
+                return std::nullopt;
+            }
+            appendPath(attemptedPaths, path);
+            appendPath(invalidPaths, path);
+            invalid = true;
+            continue;
         }
 
         const std::vector<MirrorHit> hits = nearestMirrors(
-            level, state, path.cell, entityIndex, path.usedMirrors);
+            level, state, path.cell, entityIndex, path.usedMirrors,
+            includeBlockedInputs);
         if (hits.empty()) {
+            appendPath(attemptedPaths, path);
             results.push_back({
                 .cell = path.cell,
                 .reflected = !path.usedMirrors.empty(),
@@ -2160,18 +2222,19 @@ std::optional<std::vector<ReflectedPath>> reflectedPathsForEntity(
             });
             continue;
         }
-        if (!allowBranches && hits.size() > 1) {
-            return std::nullopt;
-        }
-        if (pending.size() + results.size() + hits.size() > maximumBranches) {
+        const bool invalidBranches = (!allowBranches && hits.size() > 1) ||
+            pending.size() + results.size() + hits.size() > maximumBranches;
+        if (invalidBranches && !collecting) {
             return std::nullopt;
         }
 
         // Reverse insertion keeps the level scan order stable when paths are
         // later popped from this depth-first stack.
         for (auto hit = hits.rbegin(); hit != hits.rend(); ++hit) {
-            if (!outputRayIsClear(
-                    level, state, hit->cell, hit->output, hit->distance)) {
+            const bool blocked = hit->inputBlocked || hit->conflict ||
+                invalidBranches || !outputRayIsClear(
+                    level, state, hit->cell, hit->output, hit->distance);
+            if (blocked && !collecting) {
                 return std::nullopt;
             }
             PendingReflectionPath branch = path;
@@ -2194,10 +2257,19 @@ std::optional<std::vector<ReflectedPath>> reflectedPathsForEntity(
                 output.segments.begin(),
                 output.segments.end());
             branch.cell = destination;
+            if (blocked) {
+                appendPath(attemptedPaths, branch);
+                appendPath(invalidPaths, branch);
+                invalid = true;
+                continue;
+            }
             pending.push_back(std::move(branch));
         }
     }
 
+    if (invalid) {
+        return std::nullopt;
+    }
     return results;
 }
 
@@ -2237,6 +2309,37 @@ bool liveCellsAreUnique(const GameState& state)
 } // namespace
 
 namespace {
+
+struct ActivationSignals {
+    GameState state;
+    bool pulse = false;
+    bool toggled = false;
+};
+
+ActivationSignals activationSignals(const Level& level, const GameState& state)
+{
+    ActivationSignals result { .state = state };
+    result.state.activeButtons = activatableButtons(level, state);
+    result.pulse = !result.state.activeButtons.empty();
+    const auto levers = activatableLevers(level, state);
+    result.toggled = !levers.empty();
+    if (result.toggled) {
+        result.state.activeLevers.clear();
+        // Sample switches from the starting board, before any reflections.
+        for (const GridPosition3 cell : level.pressurePlates()) {
+            if (!tileTypeIsLever(level.plateAt(cell).value_or(TileType::Air))) {
+                continue;
+            }
+            const bool wasOn = std::ranges::find(state.activeLevers, cell) !=
+                state.activeLevers.end();
+            const bool flip = std::ranges::find(levers, cell) != levers.end();
+            if (wasOn != flip) {
+                result.state.activeLevers.push_back(cell);
+            }
+        }
+    }
+    return result;
+}
 
 std::optional<MirrorActivationPreview> previewActivationImpl(
     const Level& level,
@@ -2475,34 +2578,101 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
 std::optional<MirrorActivationPreview> previewActivation(
     const Level& level, const GameState& state)
 {
-    GameState signals = state;
-    signals.activeButtons = activatableButtons(level, state);
-    const bool pulse = !signals.activeButtons.empty();
-    const auto levers = activatableLevers(level, state);
-    const bool toggled = !levers.empty();
-    if (toggled) {
-        signals.activeLevers.clear();
-        // Sample every switch from the starting board, then store the result
-        // in level order. Reflection copies cannot toggle new destinations.
-        for (const GridPosition3 cell : level.pressurePlates()) {
-            if (!tileTypeIsLever(level.plateAt(cell).value_or(TileType::Air))) {
+    const ActivationSignals signals = activationSignals(level, state);
+    auto preview = previewActivationImpl(
+        level, state, signals.state, true, signals.pulse, signals.toggled);
+    // An invalid reflection has no eligible mirror transaction, but must not
+    // discard independent switches occupied by other heroes.
+    if (!preview && (signals.pulse || signals.toggled)) {
+        preview = previewActivationImpl(
+            level, state, signals.state, false, signals.pulse, signals.toggled);
+    }
+    return preview;
+}
+
+InvalidMirrorPreview previewInvalidMirrors(
+    const Level& level, const GameState& state)
+{
+    if (anyPlayerDead(state)) {
+        return {};
+    }
+    const ActivationSignals signals = activationSignals(level, state);
+    // Validate the full reflection transaction, before the independent switch
+    // fallback. This also detects unsupported landings and destination clashes.
+    const auto valid = previewActivationImpl(
+        level, state, signals.state, true, signals.pulse, signals.toggled);
+    InvalidMirrorPreview result;
+    std::size_t nextGhostPlayerIndex = valid
+        ? valid->after.players.size() : state.players.size();
+    const auto inspect = [&](const MirrorEntityPreview& source, std::size_t entityIndex,
+                             bool allowBranches) {
+        std::vector<ReflectedPath> attempted;
+        std::vector<ReflectedPath> invalid;
+        (void)reflectedPathsForEntity(level, signals.state, source.start, entityIndex,
+            allowBranches, true, &attempted, &invalid);
+        const bool allInvalid = !valid || isUnitLocked(level, state, source.start);
+        for (std::size_t index = 0; index < attempted.size(); ++index) {
+            const ReflectedPath& path = attempted[index];
+            if (!path.reflected || (!allInvalid &&
+                std::ranges::none_of(invalid, [&](const ReflectedPath& rejected) {
+                    return path.cell == rejected.cell &&
+                        path.beamSegments == rejected.beamSegments;
+                }))) {
                 continue;
             }
-            const bool wasOn = std::ranges::find(state.activeLevers, cell) !=
-                state.activeLevers.end();
-            const bool flip = std::ranges::find(levers, cell) != levers.end();
-            if (wasOn != flip) {
-                signals.activeLevers.push_back(cell);
+            MirrorEntityPreview entity = source;
+            entity.reflectionIndex = index;
+            entity.resultPlayerIndex = source.player ? nextGhostPlayerIndex++ : 0;
+            // Keep the geometric target even when it has no support or is
+            // occupied. Warning ghosts describe the attempt, never a state
+            // that activation is allowed to commit.
+            entity.destination = path.cell;
+            entity.beamSegments = path.beamSegments;
+            result.entities.push_back(std::move(entity));
+        }
+    };
+    for (std::size_t i = 0; i < state.players.size(); ++i) {
+        if (!playerDead(state, i)) {
+            inspect({ .player = true, .playerIndex = i,
+                .start = playerCell(state, i) }, state.movables.size() + i, true);
+        }
+    }
+    for (std::size_t i = 0; i < state.movables.size(); ++i) {
+        const auto& movable = state.movables[i];
+        if (!movable.fallen && !movable.dead &&
+            !tileTypeIsMirror(movable.type)) {
+            inspect({ .movableIndex = i, .start = movable.cell }, i, false);
+        }
+    }
+    for (std::size_t i = 0; i < state.enemies.size(); ++i) {
+        const auto& enemy = state.enemies[i];
+        if (!enemy.fallen && !enemy.dead) {
+            inspect({ .enemy = true, .enemyIndex = i, .start = enemy.cell },
+                state.movables.size() + state.players.size() + i, false);
+        }
+    }
+    for (const auto& entity : result.entities) {
+        for (const auto& segment : entity.beamSegments) {
+            if (segment.from == segment.to && segment.fromEdge == segment.toEdge) {
+                continue;
+            }
+            if (std::ranges::none_of(result.beamSegments, [&](const auto& existing) {
+                    return existing == segment ||
+                        (existing.from == segment.to && existing.to == segment.from &&
+                            existing.fromEdge == segment.toEdge &&
+                            existing.toEdge == segment.fromEdge);
+                })) {
+                result.beamSegments.push_back(segment);
             }
         }
     }
-    auto preview = previewActivationImpl(level, state, signals, true, pulse, toggled);
-    // An invalid reflection has no eligible mirror transaction, but must not
-    // discard independent switches occupied by other heroes.
-    if (!preview && (pulse || toggled)) {
-        preview = previewActivationImpl(level, state, signals, false, pulse, toggled);
-    }
-    return preview;
+    return result;
+}
+
+std::vector<MirrorBeamSegment> invalidMirrorBeamSegments(
+    const Level& level, const GameState& state)
+{
+    return previewInvalidMirrors(level, state).beamSegments;
 }
 
 std::optional<GameState> activate(const Level& level, const GameState& state)

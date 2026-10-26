@@ -86,6 +86,10 @@ public:
         bool cachedActivationPreviews = false;
         const rules::MirrorActivationPreview* activationPreview = nullptr;
         const rules::MirrorActivationPreview* projectedActivationPreview = nullptr;
+        std::span<const rules::MirrorBeamSegment> invalidMirrorBeams;
+        std::span<const rules::MirrorBeamSegment> projectedInvalidMirrorBeams;
+        std::span<const rules::MirrorEntityPreview> invalidMirrorEntities;
+        std::span<const rules::MirrorEntityPreview> projectedInvalidMirrorEntities;
         GroundGeometryCache* groundGeometryCache = nullptr;
     };
 

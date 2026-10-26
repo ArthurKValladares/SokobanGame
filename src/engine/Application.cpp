@@ -1789,6 +1789,8 @@ Application::buildScreenPreviewRenderFrame(FrameArena& arena) const
         },
         .cachedActivationPreviews = true,
         .activationPreview = activationPreview ? &*activationPreview : nullptr,
+        .invalidMirrorBeams = screenPreviewSession_.invalidMirrorBeams(*screenPreviewLevel_),
+        .invalidMirrorEntities = screenPreviewSession_.invalidMirrorPreview(*screenPreviewLevel_).entities,
         .groundGeometryCache = &previewGroundGeometryCache_,
     }, arena);
     if (presentationSettings_.geometry.smoothGroundRim &&
@@ -3057,6 +3059,10 @@ RenderFrameData Application::buildRenderFrame(
         .activationPreview = activationPreview ? &*activationPreview : nullptr,
         .projectedActivationPreview = gameplaySession_.moving() && projectedActivationPreview
             ? &*projectedActivationPreview : nullptr,
+        .invalidMirrorBeams = gameplaySession_.invalidMirrorBeams(level_),
+        .projectedInvalidMirrorBeams = gameplaySession_.invalidMirrorBeams(level_, true),
+        .invalidMirrorEntities = gameplaySession_.invalidMirrorPreview(level_).entities,
+        .projectedInvalidMirrorEntities = gameplaySession_.invalidMirrorPreview(level_, true).entities,
         .groundGeometryCache = &gameplayGroundGeometryCache_,
     }, arena);
     frame.groundChunksRequested = !editorDraftPlaying && presentationSettings_.geometry.groundChunks &&

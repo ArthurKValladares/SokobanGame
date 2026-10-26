@@ -137,10 +137,9 @@ vec4 mirrorBeam()
     float alpha = draw.color.a * endFade * edge *
         (haze * mix(0.20, 0.16, halo) +
             wisp * cloud * 0.65 + energy * 0.92);
-    vec3 tint = mix(draw.color.rgb, vec3(0.78, 0.72, 1.0),
-        halo * (1.0 - cloud) * 0.24);
+    vec3 tint = draw.color.rgb;
     vec3 color = tint * (1.25 + flow * 0.45) +
-        vec3(0.72, 0.9, 1.0) * energy * 0.65;
+        mix(tint, vec3(1.0), 0.18) * energy * 0.65;
     return vec4(color, clamp(alpha, 0.0, 1.0));
 }
 
@@ -249,10 +248,10 @@ void main()
         1.0 + draw.gridColor.w, pulse);
     float flowStrength = clamp(draw.shadowOptions.z, 0.0, 1.0);
     float body = mix(0.82, 0.48 + wisps * 0.72, flowStrength);
-    vec3 flowingTint = mix(draw.color.rgb, vec3(0.86, 0.76, 1.0),
-        wisps * 0.26);
+    // Keep the supplied hue on both blue valid and red invalid ghosts.
+    vec3 flowingTint = mix(draw.color.rgb, vec3(1.0), wisps * 0.05);
     vec3 energyColor = flowingTint * textureTint * detail * body * pulseScale +
-        mix(flowingTint, vec3(0.88, 0.97, 1.0), 0.65) *
+        mix(flowingTint, vec3(1.0), 0.18) *
             (veins * flowStrength * 0.72 + rim * 0.95);
     float alpha = draw.color.a * clamp(
         0.48 + wisps * 0.34 + veins * flowStrength * 0.32 + rim * 0.24,

@@ -821,9 +821,12 @@ and loose blocks cannot. A block loaded onto a cart also stops it at the gate.
 A cart parked inside a gate holds it open until it departs. Gates need no
 pressure links, and removing one leaves its rail in place.
 
-Mirrors are pushable units and reflect from their current position. A mirror
-on a Rotator is turned by it, changing the corners it reflects between. A
-mirror presses a pressure plate while standing on it. Pushing a mirror off an
+Mirrors are pushable units and reflect from their current position. Each mirror
+reflects only the closest visible unit across its two rays. Equally close units
+conflict and cannot swap. Red rays mark conflicts and other invalid reflections,
+including blocked sightlines and destinations. A mirror on a Rotator is turned
+by it, changing the corners it reflects between. A mirror presses a pressure
+plate while standing on it. Pushing a mirror off an
 End exposes it for a hero, and that End counts towards completion.
 
 A screen is complete when every living hero stands on an End and every End

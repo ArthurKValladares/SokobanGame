@@ -414,6 +414,13 @@ struct MirrorActivationPreview {
     bool operator==(const MirrorActivationPreview&) const = default;
 };
 
+struct InvalidMirrorPreview {
+    std::vector<MirrorBeamSegment> beamSegments;
+    std::vector<MirrorEntityPreview> entities;
+
+    bool operator==(const InvalidMirrorPreview&) const = default;
+};
+
 // Describes the exact valid transaction activation would commit, including
 // every input/output leg used to visualize chained reflections.
 [[nodiscard]] std::optional<MirrorActivationPreview> previewMirrorActivation(
@@ -424,11 +431,20 @@ struct MirrorActivationPreview {
 // and reflect eligible units, using the same starting board for eligibility.
 [[nodiscard]] std::optional<MirrorActivationPreview> previewActivation(
     const Level& level, const GameState& state);
+// Attempted reflection paths that cannot execute, including blocked incoming
+// sightlines. Uses Activate's switch state and the same portal/chain tracing.
+// Returned geometry is for warning previews only; it never grants activation.
+// Entities retain their source identity and intended destination for red ghosts.
+[[nodiscard]] InvalidMirrorPreview previewInvalidMirrors(
+    const Level& level, const GameState& state);
+[[nodiscard]] std::vector<MirrorBeamSegment> invalidMirrorBeamSegments(
+    const Level& level, const GameState& state);
 [[nodiscard]] std::optional<GameState> activate(
     const Level& level, const GameState& state);
 
-// Reflects every visible, non-fallen movable unit through mirrors as one
-// atomic transaction. Returns no state when nothing is reflected or any
+// Each mirror reflects the closest visible live unit across its two rays;
+// equally close units conflict. All reflections form one atomic transaction.
+// Returns no state when nothing is reflected or any
 // reflected destination/chain is invalid.
 [[nodiscard]] std::optional<GameState> activateMirrors(
     const Level& level,

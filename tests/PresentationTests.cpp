@@ -3872,6 +3872,192 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
     if (rockGhost != rockFrame.tiles.end()) CHECK(rockGhost->modelRotationQuarterTurns == 3);
 }
 
+void testMirrorPreviewOnlyShowsClosestUnitAcrossBothRays()
+{
+    TEST("mirrorPreviewOnlyShowsClosestUnitAcrossBothRays");
+    const Level level = Level::loadFromLayers({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "     ", "     ", " RR 3", "    C", "     " },
+    }, "closest mirror preview");
+    GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    const auto buildFrame = [&] {
+        presentation.resetEntities(state);
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(), .level = level, .state = state,
+            .projectedState = state, .presentation = presentation, .settings = {},
+        });
+    };
+    const RenderFrameData frame = buildFrame();
+    CHECK(std::ranges::count_if(frame.tiles, [](const auto& tile) {
+        return tile.effect == RenderSurfaceEffect::MirrorEnergy;
+    }) == 1);
+    const auto ghost = std::ranges::find_if(frame.tiles, [](const auto& tile) {
+        return tile.effect == RenderSurfaceEffect::MirrorEnergy;
+    });
+    CHECK(ghost != frame.tiles.end());
+    if (ghost != frame.tiles.end()) {
+        CHECK(ghost->model == testManifest().playerModel());
+        CHECK(ghost->cell == (GridPosition3 { 3, 2, 1 }));
+    }
+    CHECK(std::ranges::count_if(frame.isoFaces, [](const auto& face) {
+        return face.effect == RenderSurfaceEffect::MirrorEnergy;
+    }) == 8);
+    for (const auto& face : frame.isoFaces) {
+        if (face.effect != RenderSurfaceEffect::MirrorEnergy) {
+            continue;
+        }
+        // Ribbon centers must end at the hero, mirror or hero destination;
+        // the more distant rocks must not extend either light-path leg.
+        const Vec2 from {
+            (face.vertices[0].x + face.vertices[3].x) * 0.5f,
+            (face.vertices[0].y + face.vertices[3].y) * 0.5f,
+        };
+        const Vec2 to {
+            (face.vertices[1].x + face.vertices[2].x) * 0.5f,
+            (face.vertices[1].y + face.vertices[2].y) * 0.5f,
+        };
+        CHECK((near(from.x, 4.5f) && near(from.y, 3.5f) &&
+                  near(to.x, 4.5f) && near(to.y, 2.5f)) ||
+            (near(from.x, 4.5f) && near(from.y, 2.5f) &&
+                near(to.x, 3.5f) && near(to.y, 2.5f)));
+    }
+
+    // Moving a rock closer and the hero farther reverses the selected model.
+    for (auto& movable : state.movables) {
+        if (movable.cell == (GridPosition3 { 2, 2, 1 })) {
+            movable.cell = { 3, 2, 1 };
+        }
+    }
+    state.players[0].cell = { 4, 4, 1 };
+    const RenderFrameData rockFrame = buildFrame();
+    CHECK(std::ranges::count_if(rockFrame.tiles, [](const auto& tile) {
+        return tile.effect == RenderSurfaceEffect::MirrorEnergy;
+    }) == 1);
+    CHECK(std::ranges::any_of(rockFrame.tiles, [](const auto& tile) {
+        return tile.effect == RenderSurfaceEffect::MirrorEnergy &&
+            tile.model == testManifest().modelForTile(TileType::Rock) &&
+            tile.cell == (GridPosition3 { 4, 3, 1 });
+    }));
+}
+
+void testInvalidMirrorPreviewsUseRedRaysAndGhosts()
+{
+    TEST("invalidMirrorPreviewsUseRedRaysAndGhosts");
+    const std::vector<std::vector<std::string>> unitLayers {
+        { "     ", "     ", "R 3  ", "     ", "  C  " },
+        { "     ", "     ", "  3  ", "  #  ", "  C  " },
+        { "     ", "     ", " #3  ", "     ", "  C  " },
+        { "     ", "     ", "  3  ", "     ", "  C  " },
+    };
+    const auto sameColor = [](Vec4 left, Vec4 right) {
+        return near(left.x, right.x) && near(left.y, right.y) &&
+            near(left.z, right.z) && near(left.w, right.w);
+    };
+    for (std::size_t index = 0; index < unitLayers.size(); ++index) {
+        std::vector<std::string> ground(5, ".....");
+        if (index == 3) {
+            ground[2][0] = ' ';
+        }
+        const Level level = Level::loadFromLayers({
+            ground, unitLayers[index],
+        }, "invalid mirror ray preview");
+        const GameState state = rules::initialState(level);
+        GameplayPresentation presentation;
+        presentation.resetEntities(state);
+        const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(), .level = level, .state = state,
+            .projectedState = state, .presentation = presentation, .settings = {},
+        });
+        const int expectedGhosts = index == 0 ? 2 : 1;
+        CHECK(std::ranges::count_if(frame.tiles, [](const auto& tile) {
+            return tile.effect == RenderSurfaceEffect::MirrorEnergy;
+        }) == expectedGhosts);
+        CHECK(std::ranges::any_of(frame.tiles, [&](const auto& tile) {
+            return tile.effect == RenderSurfaceEffect::MirrorEnergy &&
+                tile.model == testManifest().playerModel() &&
+                tile.cell == (GridPosition3 { 0, 2, 1 }) &&
+                sameColor(tile.color, config::mirrorInvalidGhostColor) &&
+                near(tile.baseElevation, 1.0f) &&
+                tile.modelRotationQuarterTurns == presentation.players()[0].facingQuarterTurns;
+        }));
+        if (index == 0) {
+            CHECK(std::ranges::any_of(frame.tiles, [&](const auto& tile) {
+                return tile.effect == RenderSurfaceEffect::MirrorEnergy &&
+                    tile.model == testManifest().modelForTile(TileType::Rock) &&
+                    tile.cell == (GridPosition3 { 2, 4, 1 }) &&
+                    sameColor(tile.color, config::mirrorInvalidGhostColor);
+            }));
+        }
+        for (const auto& tile : frame.tiles) {
+            if (tile.effect != RenderSurfaceEffect::MirrorEnergy) {
+                continue;
+            }
+            CHECK(sameColor(tile.color, config::mirrorInvalidGhostColor));
+            CHECK(tile.color.w > 0.0f && tile.color.w < 1.0f);
+            CHECK(!tile.showGrid);
+            CHECK(!tile.affectsCameraFit);
+            CHECK(!tile.interactionOutline);
+        }
+        CHECK(std::ranges::any_of(frame.isoFaces, [&](const auto& face) {
+            return face.effect == RenderSurfaceEffect::MirrorEnergy &&
+                sameColor(face.color, config::mirrorInvalidBeamCoreColor);
+        }));
+        CHECK(std::ranges::any_of(frame.isoFaces, [&](const auto& face) {
+            return face.effect == RenderSurfaceEffect::MirrorEnergy &&
+                sameColor(face.color, config::mirrorInvalidBeamHaloColor);
+        }));
+        for (const auto& face : frame.isoFaces) {
+            if (face.effect != RenderSurfaceEffect::MirrorEnergy) {
+                continue;
+            }
+            CHECK(face.translucent);
+            CHECK(!face.castsShadows);
+            CHECK(sameColor(face.color, config::mirrorInvalidBeamCoreColor) ||
+                sameColor(face.color, config::mirrorInvalidBeamHaloColor));
+        }
+
+        // Live gameplay supplies owning previews cached by the session.
+        // It must show the same invalid paths as the uncached builder.
+        GameplaySession session;
+        session.reset(level);
+        const auto& cachedActivation = session.activationPreview(level);
+        const auto& cachedInvalidBeams = session.invalidMirrorBeams(level);
+        const auto& cachedInvalid = session.invalidMirrorPreview(level);
+        const RenderFrameData cachedFrame = RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(), .level = level, .state = session.state(),
+            .projectedState = session.state(), .presentation = presentation, .settings = {},
+            .cachedActivationPreviews = true,
+            .activationPreview = cachedActivation ? &*cachedActivation : nullptr,
+            .invalidMirrorBeams = cachedInvalidBeams,
+            .invalidMirrorEntities = cachedInvalid.entities,
+        });
+        CHECK(std::ranges::count_if(cachedFrame.tiles, [](const auto& tile) {
+            return tile.effect == RenderSurfaceEffect::MirrorEnergy;
+        }) == expectedGhosts);
+        CHECK(std::ranges::any_of(cachedFrame.tiles, [&](const auto& tile) {
+            return tile.effect == RenderSurfaceEffect::MirrorEnergy &&
+                tile.model == testManifest().playerModel() &&
+                tile.cell == (GridPosition3 { 0, 2, 1 }) &&
+                sameColor(tile.color, config::mirrorInvalidGhostColor);
+        }));
+        for (const auto& tile : cachedFrame.tiles) {
+            if (tile.effect == RenderSurfaceEffect::MirrorEnergy) {
+                CHECK(sameColor(tile.color, config::mirrorInvalidGhostColor));
+            }
+        }
+        CHECK(std::ranges::any_of(cachedFrame.isoFaces, [&](const auto& face) {
+            return face.effect == RenderSurfaceEffect::MirrorEnergy &&
+                sameColor(face.color, config::mirrorInvalidBeamCoreColor);
+        }));
+        CHECK(std::ranges::count_if(cachedFrame.isoFaces, [](const auto& face) {
+            return face.effect == RenderSurfaceEffect::MirrorEnergy;
+        }) == std::ranges::count_if(frame.isoFaces, [](const auto& face) {
+            return face.effect == RenderSurfaceEffect::MirrorEnergy;
+        }));
+    }
+}
+
 void testGameplayFrameBuildsProceduralWaterSurface()
 {
     TEST("gameplayFrameBuildsProceduralWaterSurface");
@@ -6758,6 +6944,8 @@ int main()
     testRobotDriveIgnoresElevatorsAndPortalJumps();
     testLinkedMovablesRenderScaledColorMatchedAuras();
     testMirrorActivationBuildsBeamAndDestinationGhost();
+    testMirrorPreviewOnlyShowsClosestUnitAcrossBothRays();
+    testInvalidMirrorPreviewsUseRedRaysAndGhosts();
     testPlayerCopiesRenderAndInterpolateTogether();
     testPlayerCopiesShareTheInputFacing();
     testInactiveHeroesKeepTheirFacing();

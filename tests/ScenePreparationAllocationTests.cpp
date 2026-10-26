@@ -311,6 +311,10 @@ void testGameplayFrameAllocations()
             .cachedActivationPreviews = true,
             .activationPreview = preview ? &*preview : nullptr,
             .projectedActivationPreview = endPreview ? &*endPreview : nullptr,
+            .invalidMirrorBeams = session.invalidMirrorBeams(level),
+            .projectedInvalidMirrorBeams = session.invalidMirrorBeams(level, true),
+            .invalidMirrorEntities = session.invalidMirrorPreview(level).entities,
+            .projectedInvalidMirrorEntities = session.invalidMirrorPreview(level, true).entities,
         }, arena);
         CHECK(frame.tiles.arenaBacked());
         CHECK(!arena.exhausted());
@@ -342,6 +346,29 @@ void testGameplayFrameAllocations()
         const auto frame = animationPreviewScene::build(previewModel, manifest, settings, &arena);
         CHECK(frame.tiles.arenaBacked());
     });
+
+    const Level conflict = Level::loadFromLayers({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "     ", "     ", "R 3  ", "     ", "  C  " },
+    }, "invalid mirror allocation fixture");
+    GameplaySession conflictSession;
+    conflictSession.reset(conflict);
+    GameplayPresentation conflictPresentation;
+    conflictPresentation.resetEntities(conflictSession.state());
+    CHECK(!conflictSession.invalidMirrorBeams(conflict).empty());
+    checkNoFrameAllocations("invalid_mirror_render", [&] {
+        arena.reset();
+        const auto frame = RenderFrameBuilder::buildGameplay({
+            .manifest = manifest, .level = conflict, .state = conflictSession.state(),
+            .projectedState = conflictSession.projectedStateView(),
+            .presentation = conflictPresentation, .settings = settings,
+            .cachedActivationPreviews = true,
+            .invalidMirrorBeams = conflictSession.invalidMirrorBeams(conflict),
+            .invalidMirrorEntities = conflictSession.invalidMirrorPreview(conflict).entities,
+        }, arena);
+        CHECK(!frame.isoFaces.empty());
+        CHECK(!arena.exhausted());
+    });
 }
 
 void testDualSceneFrameAllocations()
@@ -371,6 +398,8 @@ void testDualSceneFrameAllocations()
                 .projectedState = session.projectedStateView(), .presentation = presentation,
                 .settings = {}, .cachedActivationPreviews = true,
                 .activationPreview = activation ? &*activation : nullptr,
+                .invalidMirrorBeams = session.invalidMirrorBeams(level),
+                .invalidMirrorEntities = session.invalidMirrorPreview(level).entities,
             }, arena);
         };
         const auto main = build();
