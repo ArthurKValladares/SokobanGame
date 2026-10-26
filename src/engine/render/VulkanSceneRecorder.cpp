@@ -2706,7 +2706,8 @@ private:
                     face.normal,
                     frameData.effectAnimationTimeSeconds,
                     face.material ==
-                        PreparedSurfaceMaterial::LinkedObjectAura);
+                        PreparedSurfaceMaterial::LinkedObjectAura,
+                    face.material == PreparedSurfaceMaterial::MirrorEnergy);
             } else if (
                 face.material == PreparedSurfaceMaterial::GroundSplat &&
                 splatTextures.valid()) {
@@ -3308,37 +3309,39 @@ private:
         Vec4 color,
         Vec3 normal,
         float animationTimeSeconds,
-        bool linkedAura = false)
+        bool linkedAura,
+        bool mirrorBeam)
     {
         beginQuadDraw(commandBuffer);
 
         const GpuDrawInstance constants {
             .vertices = quadVertices(vertices, worldSpaceQuad),
             .passData = {
-                Vec4 { 0.0f, 0.0f, linkedAura ? 1.0f : 0.0f, 0.0f },
-                Vec4 {}, Vec4 {}, Vec4 {},
+                Vec4 { 0.0f, 0.0f, linkedAura ? 1.0f : 0.0f,
+                    mirrorBeam ? 1.0f : (linkedAura ? 0.0f : -1.0f) },
+                Vec4 { length(vertices[1] - vertices[0]),
+                    length(vertices[3] - vertices[0]) /
+                        config::mirrorBeamHaloWidth,
+                    config::mirrorBeamFlowSpeed, 0.0f },
+                Vec4 {}, Vec4 {},
             },
             .color = color,
             .normalAndAmbientRed = {
                 normal.x, normal.y, normal.z, 0.0f },
-            .shadowOptions = {
-                linkedAura ? 0.0f : config::mirrorEnergyScanlineFrequency,
-                linkedAura ? 0.0f : config::mirrorEnergyScanlineSpeed,
-                linkedAura ? 0.0f : config::mirrorEnergyScanlineStrength,
-                linkedAura ? 0.12f : config::mirrorGhostTextureInfluence,
-            },
+            // Gate shutters share this pipeline. Keep their established
+            // scanline/texture and rim/pulse settings independent of mirrors.
+            // Beam ribbons use passData[1] instead of these legacy lanes.
+            .shadowOptions = linkedAura
+                ? Vec4 { 0.0f, 0.0f, 0.0f, 0.12f }
+                : Vec4 { 0.12f, 5.0f, 0.10f, 0.38f },
             .materialOptions = {
                 0.0f, 1.0f, 1.0f, animationTimeSeconds },
-            .gridColor = {
-                linkedAura ? config::linkedObjectAuraRimPower
-                           : config::mirrorGhostRimPower,
-                linkedAura ? config::linkedObjectAuraRimStrength
-                           : config::mirrorGhostRimStrength,
-                linkedAura ? config::linkedObjectAuraWispSpeed
-                           : config::mirrorEnergyPulseSpeed,
-                linkedAura ? config::linkedObjectAuraWispStrength
-                           : config::mirrorEnergyPulseStrength,
-            },
+            .gridColor = linkedAura
+                ? Vec4 { config::linkedObjectAuraRimPower,
+                    config::linkedObjectAuraRimStrength,
+                    config::linkedObjectAuraWispSpeed,
+                    config::linkedObjectAuraWispStrength }
+                : Vec4 { 2.2f, 1.45f, 3.4f, 0.16f },
         };
         return writeDrawInstance(constants);
     }
@@ -3895,10 +3898,10 @@ private:
             .sunRadianceAndAmbientBlue = lanes.sunRadianceAndAmbientBlue,
             .shadowOptions = {
                 specialEnergy
-                    ? config::mirrorEnergyScanlineFrequency
+                    ? config::mirrorEnergyFlowFrequency
                     : (lighting.shadows.enabled ? 1.0f : 0.0f),
                 specialEnergy
-                    ? config::mirrorEnergyScanlineSpeed
+                    ? config::mirrorEnergyFlowSpeed
                     : std::clamp(
                           lighting.shadows.opacity *
                               std::clamp(
@@ -3908,7 +3911,7 @@ private:
                           0.0f,
                           1.0f),
                 specialEnergy
-                    ? config::mirrorEnergyScanlineStrength
+                    ? config::mirrorEnergyFlowStrength
                     : std::max(lighting.shadows.bias, 0.0f),
                 specialEnergy
                     ? (linkedAura ? 0.12f : config::mirrorGhostTextureInfluence)

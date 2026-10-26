@@ -361,7 +361,7 @@ Vec3 interpolate(Vec3 from, Vec3 to, float amount)
     };
 }
 
-void appendMirrorBeamPrism(
+void appendMirrorBeamRibbons(
     RenderFrameData& frame,
     const MirrorRenderSegment& segment,
     float width,
@@ -385,31 +385,34 @@ void appendMirrorBeamPrism(
         -delta.y / length * width * 0.5f,
         delta.x / length * width * 0.5f,
     };
-    const float bottom = segment.from.z +
-        config::mirrorBeamElevation - config::mirrorBeamThickness * 0.5f;
-    const float top = bottom + config::mirrorBeamThickness;
-    const std::array<Vec3, 8> corners {
-        Vec3 { from.x - perpendicular.x, from.y - perpendicular.y, bottom },
-        Vec3 { from.x + perpendicular.x, from.y + perpendicular.y, bottom },
-        Vec3 { to.x + perpendicular.x, to.y + perpendicular.y, bottom },
-        Vec3 { to.x - perpendicular.x, to.y - perpendicular.y, bottom },
-        Vec3 { from.x - perpendicular.x, from.y - perpendicular.y, top },
-        Vec3 { from.x + perpendicular.x, from.y + perpendicular.y, top },
-        Vec3 { to.x + perpendicular.x, to.y + perpendicular.y, top },
-        Vec3 { to.x - perpendicular.x, to.y - perpendicular.y, top },
-    };
+    const float fromHeight = segment.from.z + config::mirrorBeamElevation;
+    const float toHeight = segment.to.z + config::mirrorBeamElevation;
     auto appendFace = [&](std::array<Vec3, 4> vertices) {
         frame.isoFaces.push_back({
             .vertices = vertices,
             .color = color,
             .effect = RenderSurfaceEffect::MirrorEnergy,
+            .translucent = true,
+            .castsShadows = false,
         });
     };
-    appendFace({ corners[4], corners[7], corners[6], corners[5] });
-    appendFace({ corners[0], corners[4], corners[5], corners[1] });
-    appendFace({ corners[3], corners[2], corners[6], corners[7] });
-    appendFace({ corners[0], corners[3], corners[7], corners[4] });
-    appendFace({ corners[1], corners[5], corners[6], corners[2] });
+    // Crossed, uncapped ribbons leave room for the shader's feathered wisps
+    // without the bright end walls of a translucent box. Every ribbon's U
+    // axis runs from source to destination and V runs across its full width.
+    // Keep each leg as one quad so the flowing pattern has no internal seams.
+    appendFace({
+        Vec3 { from.x - perpendicular.x, from.y - perpendicular.y, fromHeight },
+        Vec3 { to.x - perpendicular.x, to.y - perpendicular.y, toHeight },
+        Vec3 { to.x + perpendicular.x, to.y + perpendicular.y, toHeight },
+        Vec3 { from.x + perpendicular.x, from.y + perpendicular.y, fromHeight },
+    });
+    const float halfHeight = width * 0.5f;
+    appendFace({
+        Vec3 { from.x, from.y, fromHeight - halfHeight },
+        Vec3 { to.x, to.y, toHeight - halfHeight },
+        Vec3 { to.x, to.y, toHeight + halfHeight },
+        Vec3 { from.x, from.y, fromHeight + halfHeight },
+    });
 }
 
 bool sameUndirectedSegment(
@@ -2167,14 +2170,14 @@ void appendMirrorPreview(
             for (const MirrorRenderSegment& segment : beamSegments) {
                 Vec4 haloColor = config::mirrorBeamHaloColor;
                 haloColor.w *= segment.opacity;
-                appendMirrorBeamPrism(
+                appendMirrorBeamRibbons(
                     frame,
                     segment,
                     config::mirrorBeamHaloWidth,
                     haloColor);
                 Vec4 coreColor = config::mirrorBeamCoreColor;
                 coreColor.w *= segment.opacity;
-                appendMirrorBeamPrism(
+                appendMirrorBeamRibbons(
                     frame,
                     segment,
                     config::mirrorBeamCoreWidth,

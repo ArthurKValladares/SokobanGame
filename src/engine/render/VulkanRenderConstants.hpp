@@ -220,6 +220,9 @@ struct GpuDrawInstance {
     // mixed-material back-face rejection. z selects a linked-object aura,
     // w selects authored plate energy, and passData[1].x carries the plate's
     // animation clock independently of the editor-preview dither marker.
+    // Energy quads instead use w = +1 for mirror ribbons or -1 for gates, with
+    // passData[1].xyz carrying beam length, width relative to the halo, and
+    // flow speed. Mirror ghost models keep w zero.
     // Nine-sliced textured quads use the
     // two-lane contract in NineSlice.hpp: source borders in passData[0] and
     // target extent/scale in passData[1]. Ground splats carry base/detail

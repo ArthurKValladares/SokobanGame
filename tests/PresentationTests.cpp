@@ -3682,8 +3682,37 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
         [&](const RenderFrameData::IsoFace& face) {
             return face.effect == RenderSurfaceEffect::MirrorEnergy;
         });
-    // Two reflection legs, each represented by a halo and core five-face prism.
-    CHECK(energyFaceCount == 20);
+    // Two reflection legs, each with crossed halo and core ribbons.
+    CHECK(energyFaceCount == 8);
+    for (const RenderFrameData::IsoFace& face : frame.isoFaces) {
+        if (face.effect != RenderSurfaceEffect::MirrorEnergy) {
+            continue;
+        }
+        CHECK(face.translucent);
+        CHECK(!face.castsShadows);
+        // The beam shader relies on U following the entire reflection leg,
+        // with matching endpoints on both sides and V across its width.
+        const Vec3 along {
+            face.vertices[1].x - face.vertices[0].x,
+            face.vertices[1].y - face.vertices[0].y,
+            face.vertices[1].z - face.vertices[0].z,
+        };
+        const Vec3 across {
+            face.vertices[3].x - face.vertices[0].x,
+            face.vertices[3].y - face.vertices[0].y,
+            face.vertices[3].z - face.vertices[0].z,
+        };
+        CHECK(near(along.x, face.vertices[2].x - face.vertices[3].x));
+        CHECK(near(along.y, face.vertices[2].y - face.vertices[3].y));
+        CHECK(near(along.z, face.vertices[2].z - face.vertices[3].z));
+        CHECK(along.x * along.x + along.y * along.y > 1.0f);
+        CHECK(across.x * across.x + across.y * across.y +
+            across.z * across.z > 0.0f);
+        CHECK(near(along.x * across.x + along.y * across.y +
+            along.z * across.z, 0.0f));
+        CHECK(near((face.vertices[0].z + face.vertices[3].z) * 0.5f,
+            1.0f + config::mirrorBeamElevation));
+    }
     CHECK(std::ranges::any_of(
         frame.isoFaces,
         [&](const RenderFrameData::IsoFace& face) {
@@ -4539,7 +4568,7 @@ void testMirrorDuplicationPreviewsEveryDestination()
         frame.isoFaces,
         [](const RenderFrameData::IsoFace& face) {
             return face.effect == RenderSurfaceEffect::MirrorEnergy;
-        }) == 40);
+        }) == 16);
 }
 
 void testWaterLayerBuildsUnboundedNonPickableExterior()
