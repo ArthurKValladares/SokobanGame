@@ -146,6 +146,18 @@
       "filter": "linear"
     },
     {
+      "name": "GroundAutumnGrass",
+      "path": "custom/textures/ground_autumn_grass.png",
+      "tiling": true,
+      "filter": "linear"
+    },
+    {
+      "name": "GroundAutumnRock",
+      "path": "custom/textures/ground_autumn_rock.png",
+      "tiling": true,
+      "filter": "linear"
+    },
+    {
       "name": "GroundSplatMap",
       "path": "custom/textures/ground_splat.png",
       "filter": "linear",

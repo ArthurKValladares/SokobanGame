@@ -33,6 +33,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -70,6 +71,12 @@ public:
         AssetManifest& manifest,
         VulkanRenderer& renderer);
     [[nodiscard]] bool createGroundBlendMask(
+        const std::filesystem::path& sourceAssetRoot,
+        const std::filesystem::path& runtimeAssetRoot,
+        AssetManifest& manifest,
+        VulkanRenderer& renderer);
+    [[nodiscard]] std::optional<std::string> prepareGroundBlendMask(
+        std::string_view textureName,
         const std::filesystem::path& sourceAssetRoot,
         const std::filesystem::path& runtimeAssetRoot,
         AssetManifest& manifest,

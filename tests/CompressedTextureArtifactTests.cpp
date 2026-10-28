@@ -116,6 +116,47 @@ void testLinearNonMipmappedArtifactAndStableIdentityPath()
         sokoban::compressedTextureArtifactPath(linearIdentity) !=
             sokoban::compressedTextureArtifactPath(srgbIdentity),
         "colour interpretation participates in artifact identity");
+    sokoban::TextureSourceIdentity splatIdentity = linearIdentity;
+    splatIdentity.interpretation.splatWeights = true;
+    CHECK_MESSAGE(
+        sokoban::compressedTextureArtifactPath(linearIdentity) !=
+            sokoban::compressedTextureArtifactPath(splatIdentity),
+        "legacy splat conversion invalidates older compressed artifacts");
+}
+
+void testLegacySplatIsConvertedBeforeCompression()
+{
+    sokoban::ImageData grayscale {
+        .width = 2, .height = 1,
+        .rgba = { std::byte { 0 }, std::byte { 0 }, std::byte { 0 }, std::byte { 255 },
+            std::byte { 128 }, std::byte { 128 }, std::byte { 128 }, std::byte { 255 } },
+        .sourceChannels = 1,
+    };
+    sokoban::ImageData converted = grayscale;
+    sokoban::convertLegacySplatWeights(converted);
+    sokoban::TextureInterpretation linear { .colorSpace = sokoban::TextureColorSpace::Linear };
+    sokoban::TextureInterpretation splat = linear;
+    splat.splatWeights = true;
+    CHECK_MESSAGE(sokoban::buildBc7Ktx2(grayscale, splat) ==
+            sokoban::buildBc7Ktx2(converted, linear),
+        "prepared grayscale splat mips encode the same RGBA weights as runtime conversion");
+    converted.rgba = { std::byte { 0 }, std::byte { 0 }, std::byte { 0 }, std::byte { 255 },
+        std::byte { 0 }, std::byte { 0 }, std::byte { 255 }, std::byte { 0 } };
+    CHECK_MESSAGE(sokoban::buildBc7Ktx2(converted, splat) ==
+            sokoban::buildBc7Ktx2(converted, linear),
+        "native blue and alpha weights survive prepared texture encoding");
+
+    sokoban::ImageData rgb {
+        .width = 1, .height = 1,
+        .rgba = { std::byte { 100 }, std::byte { 60 }, std::byte { 20 }, std::byte { 255 } },
+        .sourceChannels = 3,
+    };
+    sokoban::ImageData expected = rgb;
+    expected.rgba[3] = std::byte { 0 };
+    expected.sourceChannels = 4;
+    CHECK_MESSAGE(sokoban::buildBc7Ktx2(rgb, splat) ==
+            sokoban::buildBc7Ktx2(expected, linear),
+        "prepared RGB masks do not introduce an unpainted alpha material");
 }
 
 void testMalformedArtifactsAreRejected()
@@ -274,6 +315,8 @@ void testInvalidationCoversEveryInterpretationOfOneSource()
     };
     const std::filesystem::path firstPath = createArtifact(first);
     const std::filesystem::path secondPath = createArtifact(second);
+    second.interpretation.splatWeights = true;
+    const std::filesystem::path splatPath = createArtifact(second);
     const std::filesystem::path unrelatedPath = createArtifact(unrelated);
 
     sokoban::invalidateCompressedTextureArtifactsForSource(root, source);
@@ -281,6 +324,8 @@ void testInvalidationCoversEveryInterpretationOfOneSource()
         "default interpretation is invalidated");
     CHECK_MESSAGE(!std::filesystem::exists(secondPath),
         "alternate interpretation is invalidated");
+    CHECK_MESSAGE(!std::filesystem::exists(splatPath),
+        "converted splat interpretation is invalidated after painting");
     CHECK_MESSAGE(std::filesystem::exists(unrelatedPath),
         "an unrelated authored texture keeps its prepared artifact");
     checkThrows([&] {
@@ -298,6 +343,7 @@ int main()
 {
     testRoundTripPreservesFormatDimensionsAndMipBytes();
     testLinearNonMipmappedArtifactAndStableIdentityPath();
+    testLegacySplatIsConvertedBeforeCompression();
     testMalformedArtifactsAreRejected();
     testMetadataInspectionMatchesLoadedPayload();
     testMipResidencyChoosesTheFinestCompleteTailThatFits();

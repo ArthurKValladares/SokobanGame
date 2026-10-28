@@ -216,6 +216,7 @@ bool OverworldMapEditor::remapGroundSplatMask(
         for (Level::GroundSplat& splat : splats) {
             if (splat.name == before->name && splat.base == before->base &&
                 splat.detail == before->detail && splat.mask == before->mask &&
+                splat.texture2 == before->texture2 && splat.texture3 == before->texture3 &&
                 splat.mask != after.mask) {
                 splat.mask = after.mask;
                 changed = true;

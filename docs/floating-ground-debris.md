@@ -20,7 +20,7 @@ including freeze at zero. Model rendering, sun shadows, point shadows and
 outlines share the deformation. The mesh still renders in one draw per tile;
 there are no per-frame mesh uploads or individual rock objects at runtime.
 
-Full excursions are at most 0.008 tile in X/Y and 0.020 in Z. Authoring reserves
+Maximum offsets from rest are 0.020 tile in X/Y and 0.060 in Z. Authoring reserves
 that envelope within the existing side/depth bounds and retains at least 0.04
 tile of visible surface clearance throughout motion. Conservative swept bounds
 protect visibility and shadow culling. Point shadows refresh when the animation
@@ -31,7 +31,10 @@ Run `tools/vary_floating_ground_debris.py` in Blender to refresh markers, save
 the source and export the 100 current exposed bodies. Normal exports preserve
 their edited geometry. `-- --vary-debris` performs the initial deterministic
 layout pass only on bodies that do not yet have `FloatingDebrisRevision=1`;
-it does not repeatedly resize an already revised body. Existing bottom/shoulder
+it does not repeatedly resize an already revised body. `-- --refit-motion`
+translates the existing fragments to reserve the configured motion envelope,
+preserving their sizes, orientations, normals and UVs. Add `--plan-only` to
+check those placements without saving or exporting. Existing bottom/shoulder
 export tools also retain the custom attribute.
 
 After exporting, normalize Blender image references and recapture source
@@ -47,3 +50,8 @@ python tools/validate_current_ground.py --output out/floating-debris/current-gro
 The current audit independently checks native/export marker ownership, rigid
 seeds, source/export corners, fixed terrain, actual surface gaps and the full
 motion envelope. Historical migration validators describe their frozen revisions.
+
+The `ground_debris` GPU regression renders the actual island at different
+simulation times, checks visible pixel movement, and verifies frozen frames
+and fixed terrain stay identical. Run it with
+`ctest --preset dev-fast -R '^ground_debris$'` after building the Vulkan tests.

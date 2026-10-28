@@ -296,6 +296,26 @@ void testPointShadowBatchCapacityKeepsTheOrdinaryDrawReserve()
         std::numeric_limits<uint64_t>::max(), 65'535, 1));
 }
 
+void testFourLayerTextureHandlesRemainExact()
+{
+    TEST("fourLayerTextureHandlesRemainExact");
+    for (const uint32_t low : { 0U, 1U, 1024U, groundTextureHandleMask }) {
+        for (const uint32_t high : { 0U, 1U, 1024U, groundTextureHandleMask }) {
+            const float packed = packGroundTextureHandles(RenderTexture { low }, RenderTexture { high });
+            const uint32_t restored = static_cast<uint32_t>(packed);
+            CHECK((restored & groundTextureHandleMask) == low);
+            CHECK((restored >> groundTextureHandleBits) == high);
+        }
+    }
+    bool rejected = false;
+    try {
+        (void)packGroundTextureHandles(RenderTexture { groundTextureHandleMask + 1 }, noTexture);
+    } catch (const std::out_of_range&) {
+        rejected = true;
+    }
+    CHECK(rejected);
+}
+
 } // namespace
 
 int main()
@@ -317,6 +337,7 @@ int main()
     testQuadVerticesCarryTheSpaceFlag();
     testDegenerateValuesArePassedThroughUntouched();
     testPointShadowBatchCapacityKeepsTheOrdinaryDrawReserve();
+    testFourLayerTextureHandlesRemainExact();
 
     if (failures != 0) {
         std::cerr << failures << " of " << checks << " checks failed\n";

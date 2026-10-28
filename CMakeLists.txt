@@ -1211,10 +1211,12 @@ if(SOKOBAN_BUILD_TESTS)
         )
         if(SOKOBAN_TEST_RUNNERS)
             add_test(NAME sky_clouds COMMAND sokoban_vulkan_tests vulkan_smoke --sky-clouds)
+            add_test(NAME ground_debris COMMAND sokoban_vulkan_tests vulkan_smoke --ground-debris)
             add_test(NAME vulkan_geometry_arena COMMAND
                 sokoban_vulkan_tests vulkan_smoke --geometry-arena)
         else()
             add_test(NAME sky_clouds COMMAND sokoban_vulkan_smoke_tests --sky-clouds)
+            add_test(NAME ground_debris COMMAND sokoban_vulkan_smoke_tests --ground-debris)
             add_test(NAME vulkan_geometry_arena COMMAND
                 sokoban_vulkan_smoke_tests --geometry-arena)
         endif()
@@ -1225,6 +1227,11 @@ if(SOKOBAN_BUILD_TESTS)
         )
         set_tests_properties(sky_clouds PROPERTIES
             LABELS "vulkan;render;sky"
+            TIMEOUT 60
+            SKIP_RETURN_CODE 77
+        )
+        set_tests_properties(ground_debris PROPERTIES
+            LABELS "vulkan;render;ground"
             TIMEOUT 60
             SKIP_RETURN_CODE 77
         )
@@ -1287,6 +1294,10 @@ if(SOKOBAN_BUILD_TESTS)
             COMMAND sokoban_preview_rendering_tests --rock-scratches
         )
         set_tests_properties(rock_scratches PROPERTIES LABELS "vulkan;render;ground" TIMEOUT 60)
+        add_test(NAME four_layer_splat
+            COMMAND sokoban_preview_rendering_tests --four-layer-splat
+        )
+        set_tests_properties(four_layer_splat PROPERTIES LABELS "vulkan;render;ground" TIMEOUT 60)
         add_test(NAME robot_animation
             COMMAND sokoban_preview_rendering_tests --robot-animation
         )
@@ -1304,7 +1315,7 @@ if(SOKOBAN_BUILD_TESTS)
         if(SOKOBAN_ENABLE_SANITIZERS)
             # These tests initialize SDL/X11 and Vulkan. The application child
             # inherits this environment from the CMake teardown verifier.
-            set_property(TEST vulkan_smoke vulkan_geometry_arena sky_clouds application_validation_teardown preview_rendering interaction_outlines water_entry_ripples rock_scratches robot_animation
+            set_property(TEST vulkan_smoke vulkan_geometry_arena sky_clouds ground_debris application_validation_teardown preview_rendering interaction_outlines water_entry_ripples rock_scratches four_layer_splat robot_animation
                 APPEND PROPERTY ENVIRONMENT
                 "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
         endif()

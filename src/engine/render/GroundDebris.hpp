@@ -11,8 +11,8 @@ namespace sokoban {
 
 // Must match GroundDebris.glsl. These are full excursion limits, including
 // both sine components, used for conservative visibility and shadow bounds.
-inline constexpr float groundDebrisHorizontalAmplitude = 0.008f;
-inline constexpr float groundDebrisVerticalAmplitude = 0.020f;
+inline constexpr float groundDebrisHorizontalAmplitude = 0.020f;
+inline constexpr float groundDebrisVerticalAmplitude = 0.060f;
 
 [[nodiscard]] inline bool hasAnimatedGroundDebris(const RenderFrameData::Tile& tile) noexcept
 {

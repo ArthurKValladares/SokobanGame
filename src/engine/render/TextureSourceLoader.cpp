@@ -193,7 +193,9 @@ PreparedTextureSource loadPreparedTextureSource(
         validateArtifactColorSpace(artifact.format, identity, *path);
         return artifact;
     }
-    return loadRgbaTextureSource(assetRoot, identity.source);
+    ImageData image = loadRgbaTextureSource(assetRoot, identity.source);
+    if (identity.interpretation.splatWeights) convertLegacySplatWeights(image);
+    return image;
 }
 
 uint64_t preparedTexturePayloadBytes(const PreparedTextureSource& texture)

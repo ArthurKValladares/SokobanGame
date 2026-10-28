@@ -567,6 +567,25 @@ void testRgbaImportNormalizesAndDistinguishesAlphaFromLegacyGray()
     CHECK(loaded->weightAt(2, 0, 3) == 0);
 }
 
+void testRgbImportIgnoresSynthesizedOpaqueAlpha()
+{
+    TEST("rgbImportIgnoresSynthesizedOpaqueAlpha");
+    ImageData image;
+    image.width = 2;
+    image.height = 1;
+    image.sourceChannels = 3;
+    image.rgba = { std::byte { 100 }, std::byte { 100 }, std::byte { 100 }, std::byte { 255 },
+        std::byte { 0 }, std::byte { 0 }, std::byte { 255 }, std::byte { 255 } };
+    const auto loaded = SplatCanvas::fromImage(image);
+    CHECK(loaded.has_value());
+    CHECK(loaded->weightAt(0, 0, 0) == 85);
+    CHECK(loaded->weightAt(0, 0, 1) == 85);
+    CHECK(loaded->weightAt(0, 0, 2) == 85);
+    CHECK(loaded->weightAt(0, 0, 3) == 0);
+    CHECK(loaded->weightAt(1, 0, 2) == 255);
+    CHECK(loaded->weightAt(1, 0, 3) == 0);
+}
+
 } // namespace
 
 int main()
@@ -589,6 +608,7 @@ int main()
     testFromImageRejectsUnusableInput();
     testFourLayerPaintingPreservesNormalizedWeightsAndUndo();
     testRgbaImportNormalizesAndDistinguishesAlphaFromLegacyGray();
+    testRgbImportIgnoresSynthesizedOpaqueAlpha();
 
     if (failures == 0) {
         std::cout << "SplatCanvasTests: " << checks << " checks passed\n";

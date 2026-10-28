@@ -2,6 +2,8 @@
 
 Run in ground_modules.blend with -- --vary-debris for the one-time layout pass.
 The default exports the current artist-edited bodies without changing geometry.
+-- --refit-motion translates current fragments to reserve the larger motion
+envelope; add --plan-only to check those placements without writing files.
 Every FloatingRockNN keeps its faces, UVs and material; all other vertices stay
 fixed. A POINT/FLOAT _GROUND_DEBRIS attribute gives the renderer one seed per
 rigid fragment, with zero on the terrain. Bobbing itself runs in the renderer.
@@ -29,7 +31,7 @@ from update_ground_recess_material import native_color, update_glb
 SOURCE = ROOT / "assets/custom/source/ground_modules.blend"
 MODELS = ROOT / "assets/custom/models/ground_modules"
 ATTRIBUTE = "_GROUND_DEBRIS"
-OFFSET = Vector((.008, .008, .020))
+OFFSET = Vector((.020, .020, .060))
 MOTION_RADIUS = OFFSET.length
 GAP = .04
 
@@ -60,8 +62,8 @@ def mark_fragments(body):
     body["FloatingDebrisRevision"] = 1
 
 
-def vary_body(body):
-    if body.get("FloatingDebrisRevision") == 1:
+def vary_body(body, *, refit_motion=False):
+    if body.get("FloatingDebrisRevision") == 1 and not refit_motion:
         return False
     mesh = body.data
     groups = fragments(body)
@@ -99,10 +101,13 @@ def vary_body(body):
             # Broad vs narrow chips vary in three dimensions, including thickness.
             # Reselect size periodically when the available space is tight.
             if attempt % 40 == 0:
-                size = Vector((rng.uniform(.052, .125), rng.uniform(.052, .125), rng.uniform(.060, .170)))
-                size[widest] = rng.uniform(.145, .265) if index == 0 else rng.uniform(.070, .160)
-                rotation = Euler((rng.uniform(-.36, .36), rng.uniform(-.36, .36), rng.uniform(-1.2, 1.2))).to_matrix()
-                offsets = [rotation @ Vector([(original[i][a]-pivot[a])*size[a]/extent[a] for a in range(3)]) for i in indices]
+                if refit_motion:
+                    offsets = [original[i]-pivot for i in indices]
+                else:
+                    size = Vector((rng.uniform(.052, .125), rng.uniform(.052, .125), rng.uniform(.060, .170)))
+                    size[widest] = rng.uniform(.145, .265) if index == 0 else rng.uniform(.070, .160)
+                    rotation = Euler((rng.uniform(-.36, .36), rng.uniform(-.36, .36), rng.uniform(-1.2, 1.2))).to_matrix()
+                    offsets = [rotation @ Vector([(original[i][a]-pivot[a])*size[a]/extent[a] for a in range(3)]) for i in indices]
                 local_lo = Vector([min(p[a] for p in offsets) for a in range(3)])
                 local_hi = Vector([max(p[a] for p in offsets) for a in range(3)])
                 radius = max(p.length for p in offsets)
@@ -110,7 +115,9 @@ def vary_body(body):
                 continue
             if any(lower[a]-local_lo[a] > upper[a]-local_hi[a] for a in range(3)):
                 continue
-            center = Vector([rng.uniform(lower[a]-local_lo[a], upper[a]-local_hi[a]) for a in range(3)])
+            center = (Vector([max(lower[a]-local_lo[a], min(upper[a]-local_hi[a], pivot[a])) for a in range(3)])
+                      if refit_motion and attempt == 0 else
+                      Vector([rng.uniform(lower[a]-local_lo[a], upper[a]-local_hi[a]) for a in range(3)]))
             nearest = fixed.find_nearest(center)
             if nearest[0] is None or nearest[3] < radius + GAP + MOTION_RADIUS:
                 continue
@@ -124,19 +131,21 @@ def vary_body(body):
             for vertex, offset in zip(indices, offsets):
                 mesh.vertices[vertex].co = center+offset
             members = set(indices)
-            for loop in mesh.loops:
-                if loop.vertex_index in members:
-                    normals[loop.index] = (rotation @ Vector([normals[loop.index][a]*extent[a]/size[a] for a in range(3)])).normalized()
+            if not refit_motion:
+                for loop in mesh.loops:
+                    if loop.vertex_index in members:
+                        normals[loop.index] = (rotation @ Vector([normals[loop.index][a]*extent[a]/size[a] for a in range(3)])).normalized()
             placed.append((center, radius, actual_size))
             break
         else:
             raise AssertionError((body.name, name, "No debris position with safe bobbing clearance"))
     assert all(mesh.vertices[i].co == original[i] for i in range(len(original)) if i not in floating)
     mesh.update()
-    mesh.normals_split_custom_set(normals)
+    if not refit_motion:
+        mesh.normals_split_custom_set(normals)
     # Preserve unchanged packed normals exactly; passing decoded vectors back
     # through Blender's encoder can subtly alter otherwise untouched corners.
-    if encoded is not None:
+    if encoded is not None and not refit_motion:
         for loop in mesh.loops:
             if loop.vertex_index not in floating:
                 mesh.attributes['custom_normal'].data[loop.index].value = encoded[loop.index]
@@ -148,6 +157,9 @@ def vary_body(body):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vary-debris", action="store_true")
+    parser.add_argument("--refit-motion", action="store_true",
+                        help="Translate current fragments to reserve the current motion envelope; preserve shape and normals")
+    parser.add_argument("--plan-only", action="store_true", help="Check placements in memory without saving or exporting")
     args = parser.parse_args(sys.argv[sys.argv.index("--")+1:] if "--" in sys.argv else [])
     assert Path(bpy.data.filepath).resolve() == SOURCE.resolve(), "Open ground_modules.blend first"
     bpy.context.window.scene = bpy.data.scenes["GroundModules"]
@@ -156,15 +168,19 @@ def main():
     tempfile.tempdir = str(temporary)
     contract = json.loads((SOURCE.parent / 'ground_modules/contract.json').read_text(encoding='utf-8'))
     recess_color = contract['recessMaterialBaseColorFactor']
-    native_color(bpy, recess_color, True)
+    if not args.plan_only:
+        native_color(bpy, recess_color, True)
     changed = exported = 0
     bodies = [o for o in bpy.data.collections["GroundBottomModules"].objects
               if o.name.endswith("_Body") and fragments(o)]
     for body in bodies:
-        if args.vary_debris:
-            changed += vary_body(body)
+        if args.vary_debris or args.refit_motion:
+            changed += vary_body(body, refit_motion=args.refit_motion)
         else:
             mark_fragments(body)
+    if args.plan_only:
+        print(json.dumps({"planned_layouts": changed, "exported_bodies": 0, "motion_offset": list(OFFSET)}))
+        return
     # Direct bpy data writes do not consistently set is_dirty. The marker and
     # revision are part of the saved source even on a normal artist export.
     bpy.ops.wm.save_as_mainfile(filepath=str(SOURCE))

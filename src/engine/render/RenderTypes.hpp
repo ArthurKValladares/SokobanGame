@@ -35,7 +35,7 @@ enum class RenderSurfaceEffect : uint8_t {
     // A slightly enlarged copy of a linked object's own model, shaded as a
     // translucent animated wisp in that link group's color.
     LinkedObjectAura,
-    // Ground tops blend two ground textures through a splat map; see
+    // Ground tops blend four ground textures through an RGBA splat map; see
     // shaders/ground_splat.frag.glsl.
     GroundSplat,
     // Authored plates keep their neutral housing while linked-color emissive
@@ -127,6 +127,8 @@ inline constexpr RenderTexture noTexture {};
 // that is resolved but never required would silently sample the fallback.
 inline constexpr std::string_view groundSplatBaseTextureName = "GroundGrass";
 inline constexpr std::string_view groundSplatDetailTextureName = "GroundRock";
+inline constexpr std::string_view groundSplatTexture2Name = "GroundAutumnGrass";
+inline constexpr std::string_view groundSplatTexture3Name = "GroundAutumnRock";
 inline constexpr std::string_view groundRockSideTextureName = "GroundRockSide";
 inline constexpr std::string_view groundSplatMapTextureName = "GroundSplatMap";
 
@@ -182,12 +184,19 @@ struct GroundSplatTextures {
     RenderTexture rimWall = noTexture;
     RenderTexture rimWallNormal = noTexture;
     RenderTexture rimWallOrm = noTexture;
+    RenderTexture texture2 = noTexture;
+    RenderTexture texture3 = noTexture;
+    RenderTexture texture2Normal = noTexture;
+    RenderTexture texture3Normal = noTexture;
+    RenderTexture texture2Orm = noTexture;
+    RenderTexture texture3Orm = noTexture;
     friend constexpr bool operator==(GroundSplatTextures, GroundSplatTextures) = default;
 
-    [[nodiscard]] constexpr std::array<RenderTexture, 10> sampledTextures() const
+    [[nodiscard]] constexpr std::array<RenderTexture, 16> sampledTextures() const
     {
         return { base, detail, splatMap, baseNormal, detailNormal, baseOrm, detailOrm,
-            rimWall, rimWallNormal, rimWallOrm };
+            rimWall, rimWallNormal, rimWallOrm, texture2, texture3,
+            texture2Normal, texture3Normal, texture2Orm, texture3Orm };
     }
 
     [[nodiscard]] constexpr bool valid() const
@@ -204,9 +213,14 @@ template <typename FindTextureByName>
     FindTextureByName findTextureByName,
     std::string_view baseName,
     std::string_view detailName,
-    RenderTexture splatMap)
+    RenderTexture splatMap,
+    std::string_view texture2Name = {},
+    std::string_view texture3Name = {})
 {
+    if (texture2Name.empty()) texture2Name = groundSplatTexture2Name;
+    if (texture3Name.empty()) texture3Name = groundSplatTexture3Name;
     const auto dataMap = [&](std::string_view name, const char* suffix) {
+        if (name.empty()) return noTexture;
         char mapName[256] {};
         if (name.size() > sizeof(mapName) - 8) return noTexture;
         const int length = std::snprintf(mapName, sizeof(mapName), "%.*s%s",
@@ -226,6 +240,12 @@ template <typename FindTextureByName>
         .rimWall = findTextureByName(groundRockSideTextureName),
         .rimWallNormal = dataMap(groundRockSideTextureName, "Normal"),
         .rimWallOrm = dataMap(groundRockSideTextureName, "Orm"),
+        .texture2 = findTextureByName(texture2Name),
+        .texture3 = findTextureByName(texture3Name),
+        .texture2Normal = dataMap(texture2Name, "Normal"),
+        .texture3Normal = dataMap(texture3Name, "Normal"),
+        .texture2Orm = dataMap(texture2Name, "Orm"),
+        .texture3Orm = dataMap(texture3Name, "Orm"),
     };
 }
 
@@ -251,7 +271,7 @@ template <typename FindTextureByName>
         groundSplatBaseTextureName, groundSplatDetailTextureName,
         screenMap.isNone()
             ? findTextureByName(groundSplatMapTextureName)
-            : screenMap);
+            : screenMap, groundSplatTexture2Name, groundSplatTexture3Name);
 }
 
 template <typename FindTextureByName>
@@ -266,7 +286,7 @@ template <typename FindTextureByName>
         groundSplatBaseTextureName, groundSplatDetailTextureName,
         screenMap.isNone()
             ? findTextureByName(groundSplatMapTextureName)
-            : screenMap);
+            : screenMap, groundSplatTexture2Name, groundSplatTexture3Name);
 }
 
 struct RenderFrameData {

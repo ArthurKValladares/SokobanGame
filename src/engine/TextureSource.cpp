@@ -59,6 +59,7 @@ std::string textureSourceIdentityKey(const TextureSourceIdentity& identity)
         static_cast<uint32_t>(identity.interpretation.magFilter));
     key += "|" + std::to_string(
         static_cast<uint32_t>(identity.interpretation.minFilter));
+    if (identity.interpretation.splatWeights) key += "|rgba-splat-weights-1";
     return key;
 }
 

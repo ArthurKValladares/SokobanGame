@@ -1519,7 +1519,7 @@ void testGroundSplatMetadata()
     Level::Definition definition {
         .layers = { { "..." }, { "C  " } },
         .groundSplats = {
-            { "Meadow", "Grass", "Stone", "MeadowMask", { 0, 1, 0 } },
+            { "Meadow", "Grass", "Stone", "MeadowMask", { 0, 1, 0 }, "AutumnGrass", "AutumnRock" },
             { "Sand", "Sand", "Mud", "SandMask", { 1, 0, 0 } },
         },
         .groundPaint = { { { 2, 0, 0 }, "Sand" } },
@@ -1527,6 +1527,10 @@ void testGroundSplatMetadata()
     const auto lines = Level::serializeDefinition(definition);
     const auto parsed = Level::parseDefinition(lines, "ground round trip");
     CHECK(parsed.groundSplats == definition.groundSplats);
+    CHECK(parsed.groundSplats[0].texture2 == "AutumnGrass");
+    CHECK(parsed.groundSplats[0].texture3 == "AutumnRock");
+    CHECK(parsed.groundSplats[1].texture2.empty());
+    CHECK(parsed.groundSplats[1].texture3.empty());
     CHECK(parsed.groundPaint == definition.groundPaint);
     const auto level = Level::loadFromDefinition(parsed, "ground runtime");
     CHECK(level.groundSplats() == definition.groundSplats);

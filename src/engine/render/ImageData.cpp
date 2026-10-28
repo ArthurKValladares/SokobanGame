@@ -98,9 +98,27 @@ ImageData loadRgbaImage(
     ImageData image;
     image.width = static_cast<uint32_t>(width);
     image.height = static_cast<uint32_t>(height);
+    image.sourceChannels = static_cast<uint8_t>(sourceChannels);
     image.rgba.resize(imageWidth * imageHeight * rgbaChannels);
     std::memcpy(image.rgba.data(), pixels.get(), image.rgba.size());
     return image;
+}
+
+void convertLegacySplatWeights(ImageData& image)
+{
+    if (image.sourceChannels >= 4) return;
+    for (size_t offset = 0; offset + 3 < image.rgba.size(); offset += 4) {
+        if (image.sourceChannels <= 2) {
+            const auto detail = std::to_integer<uint8_t>(image.rgba[offset]);
+            image.rgba[offset] = static_cast<std::byte>(255 - detail);
+            image.rgba[offset + 1] = static_cast<std::byte>(detail);
+            image.rgba[offset + 2] = std::byte { 0 };
+        }
+        // STBI supplies opaque alpha for RGB sources. That synthesized value
+        // is not an authored fourth material weight.
+        image.rgba[offset + 3] = std::byte { 0 };
+    }
+    image.sourceChannels = 4;
 }
 
 uint64_t inspectRgbaImagePayloadBytes(const std::filesystem::path& path)

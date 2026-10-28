@@ -5,8 +5,23 @@
 
 #include <algorithm>
 #include <array>
+#include <stdexcept>
 
 namespace sokoban {
+
+// Two one-based texture handles fit exactly in a float's 24-bit integer
+// precision. Ground splats use these pairs to keep the shared 256-byte draw
+// ABI while carrying four albedo, normal and ORM layers. Mirrors GLSL's
+// unpackGroundTextureHandles; zero still means an absent companion map.
+inline constexpr uint32_t groundTextureHandleBits = 12;
+inline constexpr uint32_t groundTextureHandleMask = (1U << groundTextureHandleBits) - 1;
+[[nodiscard]] constexpr float packGroundTextureHandles(RenderTexture low, RenderTexture high)
+{
+    if (low.value > groundTextureHandleMask || high.value > groundTextureHandleMask) {
+        throw std::out_of_range("Ground texture handle exceeds terrain packing capacity");
+    }
+    return static_cast<float>(low.value | (high.value << groundTextureHandleBits));
+}
 
 // The arithmetic that several scene draws were each writing out for
 // themselves, in one place and reachable from a test.

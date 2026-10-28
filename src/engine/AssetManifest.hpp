@@ -75,6 +75,9 @@ public:
         // textures (the ground splat weight map) must not be: a painted 50%
         // grey has to arrive at the shader as a 0.5 blend weight, not 0.21.
         TextureColorSpace colorSpace = TextureColorSpace::Srgb;
+        // Treat grayscale sources as legacy two-layer splat masks and keep
+        // RGBA channels as four material weights, including alpha.
+        bool splatWeights = false;
 
         bool operator==(const Texture&) const = default;
     };

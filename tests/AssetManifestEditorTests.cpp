@@ -328,7 +328,9 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
                 model.attachments[0].node == "handslot.r" &&
                 model.attachments[0].rotateHalfTurn;
         }), "skinned attachment loaded");
-    CHECK_MESSAGE(editor.animations().size() == 7, "animations loaded");
+    CHECK_MESSAGE(editor.animations().size() ==
+        sokoban::AssetManifest::loadFromFile(sourceManifest).animations().size(),
+        "all authored animations loaded");
     CHECK_MESSAGE(editor.tileEntries().size() ==
         sokoban::AssetManifest::loadFromFile(sourceManifest).tileEntries().size(),
         "all authored tile entries loaded");
@@ -342,6 +344,7 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
 
     auto texture = editor.textures()[0];
     texture.path = "textures/edited.png";
+    texture.splatWeights = true;
     editor.updateTexture(0, texture);
 
     const auto conveyorIt = std::ranges::find_if(
@@ -385,6 +388,7 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
     const sokoban::AssetManifest saved =
         sokoban::AssetManifest::loadFromFile(temporary.file());
     CHECK_MESSAGE(saved.textures()[0].path == "textures/edited.png", "texture edit persisted");
+    CHECK_MESSAGE(saved.textures()[0].splatWeights, "custom mask interpretation persisted");
     const sokoban::RenderModel conveyor = saved.modelIdByName("Conveyor");
     CHECK_MESSAGE(saved.model(conveyor).primitiveMaterials[0].scrollV,
         "per-material behavior edit persisted");
@@ -948,7 +952,7 @@ void testLevelAssociationsFollowInsertDeleteAndRestore()
     std::ofstream(manifestPath, std::ios::binary) << R"json({
       "format": 1,
       "textures": [
-        { "name": "GroundSplatMap0_0", "path": "maps/first.png", "colorSpace": "linear" },
+        { "name": "GroundSplatMap0_0", "path": "maps/first.png", "colorSpace": "linear", "splatWeights": true },
         { "name": "GroundSplatMap0_1", "path": "maps/second.png", "colorSpace": "linear" },
         { "name": "GroundSplatMap1_0", "path": "maps/third.png", "colorSpace": "linear" }
       ],
@@ -1044,6 +1048,8 @@ void testLevelAssociationsFollowInsertDeleteAndRestore()
     CHECK_MESSAGE(
         restored.textures()[restoredFirst.index()].path == "maps/first.png",
         "restored level recovers its original map path");
+    CHECK_MESSAGE(restored.textures()[restoredFirst.index()].splatWeights,
+        "restored level recovers its mask interpretation");
     CHECK_MESSAGE(restored.musicForLevel(2) &&
             *restored.musicForLevel(2) == "music/first.ogg",
         "restored level recovers its original music");

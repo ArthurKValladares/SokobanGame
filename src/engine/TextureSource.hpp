@@ -83,6 +83,9 @@ struct TextureInterpretation {
         TextureMagnificationFilter::Linear;
     TextureMinificationFilter minFilter =
         TextureMinificationFilter::LinearMipmapLinear;
+    // Splat-map sources preserve old grayscale masks as two explicit RG
+    // weights before upload or compression. Other grayscale data is untouched.
+    bool splatWeights = false;
 
     bool operator==(const TextureInterpretation&) const = default;
 };

@@ -267,7 +267,8 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     for (const Level::GroundSplat& authored : level.groundSplats()) {
         requirements.requireGroundSplat(groundSplatTexturesForMaterials(
             [&manifest](std::string_view name) { return manifest.findTextureIdByName(name); },
-            authored.base, authored.detail, manifest.findTextureIdByName(authored.mask)));
+            authored.base, authored.detail, manifest.findTextureIdByName(authored.mask),
+            authored.texture2, authored.texture3));
     }
 
     for (uint32_t z = 0; z < level.depth(); ++z) {

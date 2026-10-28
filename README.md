@@ -1021,7 +1021,7 @@ editor commands but does not own document or filesystem policy.
 - Painting one cell beyond an edge expands every layer transactionally.
 - **Ground Paint** supports any number of screen-local splat maps. **Add Splat
   Map** creates a board-sized blend mask and registers it in the asset manifest.
-  Choose each map's name, **Base Texture**, **Detail Texture**, **Blend Mask**,
+  Choose each map's name, **Texture 0 (R)** through **Texture 3 (A)**, **Blend Mask**,
   and unique **Assignment Color** from the panel. Texture selectors use the
   manifest's registered textures; add other textures through the Asset Manifest
   editor. The first map is the default for unassigned ground and cliff tops.
@@ -1029,26 +1029,32 @@ editor commands but does not own document or filesystem policy.
   across ground or cliff tops. Each drag is one document undo step; assignments remain
   independent on different layers. **Show Assignment Colors** displays the
   assignment palette; turn it off to see the textured result.
-  **Paint Blend Mask** edits the selected map's blend: white adds its detail
-  texture, black returns to its base texture. It remains available while painting
+  **Paint Blend Mask** edits four material weights stored in the mask's red,
+  green, blue, and alpha channels. Choose a texture layer to paint; its weight
+  increases while the other weights decrease proportionally. Alpha controls
+  texture 3 rather than transparency. It remains available while painting
   tile assignments; clicking it switches to blend-mask painting. **New Blend
   Mask** creates and registers a fresh blank PNG for the selected map and opens
   it for painting, keeping the previous mask file. Masks cover a screen once at 32
   texels per tile and should use linear color space with clamped sampling.
   Composed-overworld blend painting follows the layout grid: a brush crossing
   an edge or corner spills into neighboring screens, including during a drag.
-  Maps connect when their base and detail textures match; the same map name is
-  preferred, otherwise the material pair must identify a single map. Shared
+  Maps connect when all four textures match; the same map name is
+  preferred, otherwise the material set must identify a single map. Shared
   fallback masks are copied into independent screen masks, preserving existing
   paint. One undo restores the whole stroke across all touched screens, and
   **Save Map** saves every changed mask. Enable **Show Neighboring Screens** to
   see spillover while painting.
   Save the document to keep map definitions and tile assignments; **Save Map**
   saves the blend-mask image. `Ctrl+S` saves both. Existing screens retain their
-  original grass/rock blend masks. Legacy documents without definitions keep
-  the previous screen-map/fallback behavior.
+  original grass/rock blend masks: grayscale maps load as red = 1 - gray,
+  green = gray, blue = alpha = 0, and save as RGBA after painting.
+  New maps offer `GroundGrass`, `GroundRock`, `GroundAutumnGrass`, and
+  `GroundAutumnRock`; the autumn set adds golden-orange turf and pale warm
+  limestone. Legacy documents without definitions keep the screen-map fallback.
   Screen files store definitions as `@groundsplat` JSON records with `name`,
-  `base`, `detail`, `mask`, and RGB `color`, and assignments as `@groundpaint`
+  `base` (texture 0), `detail` (texture 1), optional `texture2` and `texture3`,
+  `mask`, and RGB `color`, and assignments as `@groundpaint`
   records with `cell: [x,y,z]` and `splat` (the map name), before `@layer 0`.
 - The Mesh Decorations tool scans source `assets/` for `.gltf` and `.glb`
   files in developer builds. Any discovered mesh can be selected: an unregistered

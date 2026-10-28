@@ -340,8 +340,8 @@ class CurrentGroundDebrisTests(unittest.TestCase):
 
     def test_motion_envelope_preserves_real_clearance_and_hidden_planes(self):
         roles = {"IslandCore": box_faces([0, 0, -.34], [1, 1, .77]),
-                 "FloatingRock01": box_faces([.1, .1, -.95], [.24, .24, -.8]),
-                 "FloatingRock02": box_faces([.4, .1, -.94], [.5, .2, -.82])}
+                 "FloatingRock01": box_faces([.1, .1, -.93], [.24, .24, -.78]),
+                 "FloatingRock02": box_faces([.45, .1, -.92], [.55, .2, -.80])}
 
         def check(values, exposed=15):
             floating = {name: audit.rock.convex_rock(faces, name)
@@ -354,9 +354,9 @@ class CurrentGroundDebrisTests(unittest.TestCase):
                               ("shoulder", "fixed geometry")):
             changed = deepcopy(roles)
             exposed = 15
-            if kind == "core": changed["FloatingRock01"] += [0, 0, .42]
-            if kind == "pair": changed["FloatingRock02"] -= [.11, 0, 0]
-            if kind == "floor": changed["FloatingRock01"] -= [0, 0, .04]
+            if kind == "core": changed["FloatingRock01"] += [0, 0, .35]
+            if kind == "pair": changed["FloatingRock02"] -= [.08, 0, 0]
+            if kind == "floor": changed["FloatingRock01"] -= [0, 0, .03]
             if kind == "hidden":
                 changed["FloatingRock01"] -= [.095, 0, 0]
                 exposed = 7

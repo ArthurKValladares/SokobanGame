@@ -70,7 +70,7 @@
   "bottomDesignRevision": 5,
   "floatingDebrisRevision": 1,
   "floatingDebrisAttribute": "_GROUND_DEBRIS",
-  "floatingDebrisMaximumOffset": [0.008, 0.008, 0.020],
+  "floatingDebrisMaximumOffset": [0.020, 0.020, 0.060],
   "bottomRemodelHeight": 0.78,
   "bottomLegacyCollarMinimumZ": 0.78,
   "bottomMaximumDepth": 1,

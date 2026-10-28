@@ -18,6 +18,7 @@
 #include "engine/render/GroundDebris.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/SceneDrawLanes.hpp"
+#include "engine/render/RendererConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanGroundChunkCache.hpp"
@@ -56,6 +57,8 @@
 
 namespace sokoban {
 namespace {
+
+static_assert(config::textureDescriptorCapacityCeiling <= groundTextureHandleMask);
 
 // A model draw passes its authored material mode straight through, so the
 // first three DrawMaterialMode values have to keep agreeing with the manifest
@@ -3517,7 +3520,7 @@ private:
         vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
     }
 
-    // Ground tops blended from two textures via a splat map. Lighting,
+    // Ground tops blended from four textures via an RGBA splat map. Lighting,
     // shadowing, grid, and dithering come from the same helpers drawFace uses,
     // so they agree by construction. passData carries the optional layer data
     // maps, specular strength, the splat region's world origin, scratch
@@ -3554,10 +3557,10 @@ private:
             .vertices = quadVertices(vertices, worldSpaceQuad),
             .passData = {
                 Vec4 {
-                    static_cast<float>(textures.baseNormal.value),
-                    static_cast<float>(textures.detailNormal.value),
-                    static_cast<float>(textures.baseOrm.value),
-                    static_cast<float>(textures.detailOrm.value),
+                    packGroundTextureHandles(textures.baseNormal, textures.texture2Normal),
+                    packGroundTextureHandles(textures.detailNormal, textures.texture3Normal),
+                    packGroundTextureHandles(textures.baseOrm, textures.texture2Orm),
+                    packGroundTextureHandles(textures.detailOrm, textures.texture3Orm),
                 },
                 Vec4 {
                     std::max(lighting.specularStrength, 0.0f),
@@ -3566,7 +3569,8 @@ private:
                     rockScratchGround ? 1.0f : 0.0f,
                 },
                 Vec4 { wallHandle(textures.rimWall), wallHandle(textures.rimWallNormal),
-                    wallHandle(textures.rimWallOrm), 0.0f },
+                    wallHandle(textures.rimWallOrm),
+                    packGroundTextureHandles(textures.texture2, textures.texture3) },
                 Vec4 { rimWallCoverage[0], rimWallCoverage[1],
                     rimWallCoverage[2], rimWallCoverage[3] },
             },

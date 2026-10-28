@@ -28,7 +28,8 @@ void applyGroundSplat(
     if (!splat) return;
     tile.groundSplat = groundSplatTexturesForMaterials(
         [&manifest](std::string_view name) { return manifest.findTextureIdByName(name); },
-        splat->base, splat->detail, manifest.findTextureIdByName(splat->mask));
+        splat->base, splat->detail, manifest.findTextureIdByName(splat->mask),
+        splat->texture2, splat->texture3);
     tile.groundSplatOrigin = origin;
     if (showColors) {
         tile.color = { splat->color.x, splat->color.y, splat->color.z, tile.color.w };

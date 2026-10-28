@@ -117,7 +117,8 @@ void testValidManifest()
   "format": 1,
   "textures": [
     { "name": "Tex", "path": "t.png", "tiling": true, "filter": "linear" },
-    { "name": "Data", "path": "d.png", "filter": "linear", "colorSpace": "linear" }
+    { "name": "Data", "path": "d.png", "filter": "linear", "colorSpace": "linear" },
+    { "name": "CustomMask", "path": "mask.png", "tiling": true, "splatWeights": true }
   ],
   "models": [ { "name": "Hero", "path": "h.glb", "geometry": "skinned", "role": "player" } ],
   "animations": [
@@ -139,6 +140,13 @@ void testValidManifest()
         "linear filter parsed on data texture");
     CHECK_MESSAGE(sampled.textures()[1].colorSpace == sokoban::TextureColorSpace::Linear,
         "linear colour space parsed");
+    CHECK(sampled.textures()[2].splatWeights);
+    const auto customMask = sokoban::manifestTextureSourceIdentity(sampled.textures()[2], "mask.png");
+    CHECK(customMask.interpretation.splatWeights);
+    CHECK(customMask.interpretation.colorSpace == sokoban::TextureColorSpace::Linear);
+    CHECK(customMask.interpretation.wrapU == sokoban::TextureAddressMode::ClampToEdge);
+    CHECK(customMask.interpretation.wrapV == sokoban::TextureAddressMode::ClampToEdge);
+    CHECK(customMask.interpretation.magFilter == sokoban::TextureMagnificationFilter::Linear);
     CHECK_MESSAGE(manifest.models().size() == 3, "three models");
     CHECK_MESSAGE(manifest.animations().size() == 5, "five animations");
 

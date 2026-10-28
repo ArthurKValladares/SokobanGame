@@ -21,6 +21,8 @@
 #include "engine/render/VulkanRenderer.hpp"
 #include "engine/render/VulkanThumbnailPass.hpp"
 #include "engine/render/VulkanTextureUploader.hpp"
+#include "engine/render/PngWriter.hpp"
+#include "engine/render/GroundDebris.hpp"
 #include "engine/ui/FontAtlas.hpp"
 
 #include <SDL3/SDL.h>
@@ -1873,6 +1875,215 @@ void exerciseNativeGroundBypassesLegacyProcessing(SDL_Window* window)
               << " cap patches with identical legacy settings on/off and no processed ground resources\n";
 }
 
+void exerciseAnimatedGroundDebris(const std::optional<std::filesystem::path>& outputDirectory)
+{
+    using namespace sokoban;
+    const auto require = [](bool condition, const char* message) {
+        if (!condition) throw std::runtime_error(message);
+    };
+    const auto assetRoot = std::filesystem::path(SOKOBAN_VULKAN_TEST_ASSETS);
+    const auto manifest = AssetManifest::loadFromFile(assetRoot / "manifest.json");
+    auto font = FontAtlas::loadDefault(assetRoot);
+    ScopedTestDirectory temporary("animated-ground-debris");
+    const SdlWindow window(1024, 1024);
+    VulkanRenderer renderer(window.get(), assetRoot, temporary.path() / "cache.bin",
+        manifest, font, AntiAliasingMode::None, 100,
+        { .vsync = false }, {}, false, true, true, false);
+    UiDrawData ui;
+    ui.viewportSize = { 1024, 1024 };
+
+    const auto makeFrame = [&](bool animate, float seconds) {
+        RenderFrameData frame;
+        frame.viewMode = RenderViewMode::Isometric3D;
+        frame.levelWidth = frame.levelHeight = frame.levelDepth = 1;
+        frame.cameraExtent = RenderFrameData::CameraExtent { 0, 0, -1, 1, 1, 3 };
+        constexpr Vec3 cameraPosition { 2.5f, 3.0f, 1.8f };
+        frame.cameraOverride = RenderFrameData::CameraOverride {
+            .position = cameraPosition,
+            .forward = Vec3 { .5f, .5f, -.05f } - cameraPosition,
+            .verticalFovDegrees = 36.0f,
+        };
+        frame.skyCloudsEnabled = false;
+        frame.effectAnimationTimeSeconds = seconds;
+        frame.lighting.ambient = { .color = { 1, 1, 1 }, .intensity = 1 };
+        frame.lighting.sun.intensity = 0;
+        frame.lighting.shadows.enabled = false;
+        frame.lighting.ambientOcclusion.enabled = false;
+        frame.groundSplat = groundSplatTexturesForScreen(
+            [&](std::string_view name) { return manifest.findTextureIdByName(name); },
+            std::nullopt);
+        auto tile = tileVisual(TileType::Ground, { 0, 0, 0 }, manifest, {});
+        tile.showGrid = false;
+        frame.tiles.push_back(tile);
+        processGroundTileGeometry(frame.tiles, manifest);
+        require(frame.tiles[0].groundModule && frame.tiles[0].groundModuleBottom &&
+                frame.tiles[0].model == manifest.modelIdByName("GroundRockBottom01"),
+            "Ground debris fixture did not select its actual native floating island");
+        // Keep the exact authored body in the control. Removing native-module
+        // eligibility disables the GPU motion without changing its mesh data.
+        if (!animate) frame.tiles[0].groundModule = false;
+        return frame;
+    };
+    const auto initialFrame = makeFrame(true, 0.0f);
+    const auto requirements = renderAssetRequirementsForFrame(initialFrame);
+    require(requirements.modelCount() == 1,
+        "Ground debris fixture must draw one authored island body");
+    renderer.waitForAssets(requirements);
+    const auto mesh = loadGltfMesh(assetRoot / manifest.model(initialFrame.tiles[0].model).path,
+        { .preserveSourceScale = true });
+    std::vector<float> fragmentSeeds;
+    std::vector<Aabb> fragmentBounds;
+    for (const auto& vertex : mesh.vertices) {
+        if (vertex.groundDebris <= 0) continue;
+        auto found = std::ranges::find(fragmentSeeds, vertex.groundDebris);
+        if (found == fragmentSeeds.end()) {
+            fragmentSeeds.push_back(vertex.groundDebris);
+            fragmentBounds.push_back({});
+            found = fragmentSeeds.end() - 1;
+        }
+        const auto index = static_cast<std::size_t>(found - fragmentSeeds.begin());
+        fragmentBounds[index] = expand(fragmentBounds[index], vertex.position);
+    }
+    require(!fragmentBounds.empty(),
+        "Ground debris fixture lacks marked detached rocks");
+    struct PixelBounds { float left, top, right, bottom; };
+    std::vector<PixelBounds> debrisPixelBounds;
+    std::optional<Vec2> capPixel;
+    const auto capture = [&](bool animate, float seconds) {
+        renderer.beginDebugUiFrame();
+        const auto prepared = renderer.prepareFrame(makeFrame(animate, seconds));
+        if (animate && !capPixel) {
+            capPixel = renderer.projectToPixels(prepared, { .5f, .5f, 1 });
+            const Vec3 motionMargin { groundDebrisHorizontalAmplitude,
+                groundDebrisHorizontalAmplitude, groundDebrisVerticalAmplitude };
+            for (const auto& bounds : fragmentBounds) {
+                PixelBounds pixels { std::numeric_limits<float>::max(),
+                    std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest(),
+                    std::numeric_limits<float>::lowest() };
+                for (const auto point : corners(aabbFromMinMax(
+                         bounds.minimum - motionMargin, bounds.maximum + motionMargin))) {
+                    const auto pixel = renderer.projectToPixels(prepared, point);
+                    require(pixel.has_value(), "Ground debris swept bound could not be projected");
+                    pixels.left = std::min(pixels.left, pixel->x);
+                    pixels.top = std::min(pixels.top, pixel->y);
+                    pixels.right = std::max(pixels.right, pixel->x);
+                    pixels.bottom = std::max(pixels.bottom, pixel->y);
+                }
+                // The final image includes the bloom filter and bilinear
+                // reconstruction around the actual moving silhouette.
+                pixels.left -= 16; pixels.top -= 16;
+                pixels.right += 16; pixels.bottom += 16;
+                debrisPixelBounds.push_back(pixels);
+            }
+        }
+        renderer.drawFrame(prepared, ui);
+        require(!renderer.hasFatalFailure(), "Ground debris frame failed to render");
+        const auto stats = renderer.renderStats();
+        const auto assets = renderer.assetLoadingStats();
+        require(stats.preparedModels == 1 && stats.unavailableModels == 0 &&
+                stats.drawCalls > 0 && assets.failedAssets == 0 &&
+                assets.droppedDrawInstances == 0 && assets.droppedSkinningInstances == 0,
+            "Ground debris fixture did not draw its resident island body");
+        auto image = renderer.captureRenderedFrame();
+        require(image.width >= 1024 && image.height >= 1024 &&
+                image.rgba.size() == std::size_t(image.width) * image.height * 4,
+            "Ground debris capture was empty or smaller than the requested resolution");
+        return image;
+    };
+    const auto initial = capture(true, 0.0f);
+    const auto repeated = capture(true, 0.0f);
+    const auto afterTwoSeconds = capture(true, 2.0f);
+    const auto afterFourSeconds = capture(true, 4.0f);
+    require(initial.width == repeated.width && initial.height == repeated.height &&
+            initial.rgba == repeated.rgba,
+        "Ground debris changed while its simulation clock was frozen");
+    const auto changedPixels = [&](const ImageData& image) {
+        require(initial.width == image.width && initial.height == image.height,
+            "Ground debris capture dimensions changed between identical views");
+        std::size_t changed = 0;
+        for (std::size_t pixel = 0; pixel < initial.rgba.size(); pixel += 4) {
+            int maximumChange = 0;
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                maximumChange = std::max(maximumChange, std::abs(
+                    std::to_integer<int>(initial.rgba[pixel + channel]) -
+                    std::to_integer<int>(image.rgba[pixel + channel])));
+            }
+            if (maximumChange >= 8) {
+                const float x = static_cast<float>((pixel / 4) % initial.width);
+                const float y = static_cast<float>((pixel / 4) / initial.width);
+                require(std::ranges::any_of(debrisPixelBounds, [&](const auto& bounds) {
+                    return x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom;
+                }), "Ground debris animation changed pixels outside the authored fragments' swept bounds");
+                ++changed;
+            }
+        }
+        return changed;
+    };
+    const auto changedAtTwoSeconds = changedPixels(afterTwoSeconds);
+    const auto changedAtFourSeconds = changedPixels(afterFourSeconds);
+    // The fixed close-up must expose a clear moving silhouette, not merely a
+    // handful of subpixel lighting changes. This guards its visible magnitude
+    // as well as transport of the animation clock and vertex marker.
+    if (changedAtTwoSeconds < 1024 || changedAtFourSeconds < 1024) {
+        throw std::runtime_error("Ground debris did not visibly move on the GPU: changed pixels at 2s=" +
+            std::to_string(changedAtTwoSeconds) + ", at 4s=" + std::to_string(changedAtFourSeconds));
+    }
+    require(capPixel && capPixel->x >= 1 && capPixel->y >= 1 &&
+            capPixel->x + 1 < static_cast<float>(initial.width) &&
+            capPixel->y + 1 < static_cast<float>(initial.height),
+        "Ground debris fixture could not project its fixed island cap");
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            const auto pixel = (std::size_t(static_cast<int>(capPixel->y) + y) * initial.width +
+                std::size_t(static_cast<int>(capPixel->x) + x)) * 4;
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                require(initial.rgba[pixel + channel] == afterTwoSeconds.rgba[pixel + channel] &&
+                        initial.rgba[pixel + channel] == afterFourSeconds.rgba[pixel + channel],
+                    "Ground debris animation moved or changed the fixed island cap");
+            }
+        }
+    }
+    // The fixed camera keeps the cap and upper body in this band, safely
+    // above every detached fragment. Temporal changes must stay below it.
+    const auto upperBandBytes = std::size_t(initial.width) * (initial.height / 3) * 4;
+    for (std::size_t pixel = 0; pixel < upperBandBytes; pixel += 4) {
+        for (std::size_t channel = 0; channel < 3; ++channel) {
+            require(initial.rgba[pixel + channel] == afterTwoSeconds.rgba[pixel + channel] &&
+                    initial.rgba[pixel + channel] == afterFourSeconds.rgba[pixel + channel],
+                "Ground debris animation changed the fixed upper island or background");
+        }
+    }
+    const auto staticInitial = capture(false, 0.0f);
+    const auto staticLater = capture(false, 2.0f);
+    require(staticInitial.width == staticLater.width && staticInitial.height == staticLater.height &&
+            staticInitial.rgba == staticLater.rgba,
+        "The effect clock changed a ground body with debris animation disabled");
+    if (outputDirectory) {
+        std::filesystem::create_directories(*outputDirectory);
+        const auto save = [&](std::string_view name, const ImageData& image) {
+            std::vector<uint8_t> pixels(image.rgba.size());
+            for (std::size_t index = 0; index < pixels.size(); ++index) {
+                pixels[index] = static_cast<uint8_t>(image.rgba[index]);
+            }
+            writeRgbaPng(*outputDirectory / name, image.width, image.height, pixels);
+        };
+        save("t0.png", initial);
+        save("t2.png", afterTwoSeconds);
+        save("t4.png", afterFourSeconds);
+        for (int frame = 0; frame < 12; ++frame) {
+            const auto name = std::string("frame-") + (frame < 10 ? "0" : "") +
+                std::to_string(frame) + ".png";
+            save(name, capture(true, static_cast<float>(frame) * (6.0f / 11.0f)));
+        }
+    }
+    renderer.waitIdle();
+    require(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a ground debris rendering error");
+    std::cout << "Ground debris moves deterministically while its cap stays fixed: changed RGB pixels at 2s="
+              << changedAtTwoSeconds << ", at 4s=" << changedAtFourSeconds
+              << "; frozen and disabled controls are identical\n";
+}
+
 void exerciseAnimatedSkyClouds()
 {
     using namespace sokoban;
@@ -2059,6 +2270,11 @@ int main(int argc, char** argv)
     try {
         const SdlVideo video;
         const SdlWindow window;
+        if ((argc == 2 || argc == 3) && std::string_view(argv[1]) == "--ground-debris") {
+            exerciseAnimatedGroundDebris(argc == 3
+                ? std::optional<std::filesystem::path>(argv[2]) : std::nullopt);
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--sky-clouds") {
             exerciseAnimatedSkyClouds();
             return 0;

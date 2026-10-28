@@ -12,6 +12,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -33,6 +34,9 @@ public:
         std::function<bool()> createGroundSplatMap;
         // Gives the selected map a fresh blank mask and starts mask painting.
         std::function<bool()> createGroundBlendMask;
+        // Imports an existing color texture as an independent editable mask.
+        // Already registered mask textures retain their existing identity.
+        std::function<std::optional<std::string>(std::string_view)> prepareGroundBlendMask;
         std::function<const AssetManifest&()> assetManifest;
         // Rendered preview of a tile type for the palette, or 0 when there is
         // none to show (still loading, no model, or thumbnails unavailable).

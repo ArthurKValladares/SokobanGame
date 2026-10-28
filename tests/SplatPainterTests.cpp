@@ -160,8 +160,11 @@ bool matchesContinuousCanvas(const SplatPainter& painter,
         const SplatCanvas& map = painter.mapCanvas(index);
         for (uint32_t y = 0; y < map.height(); ++y) {
             for (uint32_t x = 0; x < map.width(); ++x) {
-                if (map.weightAt(x, y) != reference.weightAt(startX + x, startY + y)) {
-                    return false;
+                for (uint32_t layer = 0; layer < SplatCanvas::layerCount; ++layer) {
+                    if (map.weightAt(x, y, layer) !=
+                        reference.weightAt(startX + x, startY + y, layer)) {
+                        return false;
+                    }
                 }
             }
         }
@@ -1141,6 +1144,44 @@ void testCloseResetsEverything()
         6 * SplatCanvas::texelsPerTile, 3 * SplatCanvas::texelsPerTile) == 0);
 }
 
+void testBlueAndAlphaWeightsSurviveTiledSaveReopenAndUndo()
+{
+    TEST("blueAndAlphaWeightsSurviveTiledSaveReopenAndUndo");
+    const TemporaryDirectory directory;
+    const AssetManifest manifest = tiledManifest();
+    const auto request = tiledRequest(directory);
+    SplatPainter painter;
+    CHECK(painter.open(request, manifest));
+    const auto blank = painter.canvas().snapshot();
+    painter.brush() = solidWhite;
+    painter.brush().color = SplatCanvas::BrushColor::Layer2;
+    CHECK(painter.beginStroke({ 4, 1.5f }));
+    painter.endStroke();
+    const uint32_t y = 3 * SplatCanvas::texelsPerTile / 2;
+    CHECK(painter.canvas().weightAt(painter.canvas().width() - 1, y, 2) == 255);
+    CHECK(painter.mapCanvas(1).weightAt(0, y, 2) == 255);
+    const auto blue = painter.canvas().snapshot();
+    painter.brush().color = SplatCanvas::BrushColor::Layer3;
+    painter.brush().opacity = 0.5f;
+    CHECK(painter.beginStroke({ 4, 1.5f }));
+    painter.endStroke();
+    CHECK(painter.canvas().weightAt(painter.canvas().width() - 1, y, 3) == 128);
+    CHECK(painter.mapCanvas(1).weightAt(0, y, 3) == 128);
+    CHECK(painter.save());
+
+    SplatPainter reopened;
+    CHECK(reopened.open(request, manifest));
+    for (std::size_t index = 0; index < painter.mapCount(); ++index) {
+        CHECK(reopened.mapCanvas(index).snapshot() == painter.mapCanvas(index).snapshot());
+    }
+    CHECK(painter.undo());
+    CHECK(painter.canvas().snapshot() == blue);
+    CHECK(painter.mapCanvas(1).weightAt(0, y, 3) == 0);
+    CHECK(painter.undo());
+    CHECK(painter.canvas().snapshot() == blank);
+    CHECK(painter.mapCanvas(1).weightAt(0, y, 0) == 255);
+}
+
 } // namespace
 
 int main()
@@ -1175,6 +1216,7 @@ int main()
     testUniqueBlankMapKeepsUnrestrictedNamesInsideTextures();
     testUniqueBlankMapRejectsInvalidRequestsBeforeWriting();
     testCloseResetsEverything();
+    testBlueAndAlphaWeightsSurviveTiledSaveReopenAndUndo();
 
     if (failures == 0) {
         std::cout << "SplatPainterTests: " << checks << " checks passed\n";

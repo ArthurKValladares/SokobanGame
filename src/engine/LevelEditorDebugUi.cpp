@@ -604,8 +604,17 @@ void LevelEditorDebugUi::drawGroundPaintTab(
             if (!paintTargetChanged || !painter.dirty() || painter.save()) {
                 const bool paintingMask = painter.active();
                 if (paintTargetChanged) painter.close();
-                (void)editor.updateGroundSplat(selectedIndex, std::move(edited));
-                if (paintingMask && paintTargetChanged && callbacks.openGroundPainting) (void)callbacks.openGroundPainting();
+                bool maskReady = true;
+                if (maskChanged && callbacks.prepareGroundBlendMask) {
+                    const auto prepared = callbacks.prepareGroundBlendMask(edited.mask);
+                    maskReady = prepared.has_value();
+                    if (prepared) edited.mask = *prepared;
+                    else groundPaintActionStatus_ = "Could not prepare the blend mask. Check Logs for details.";
+                }
+                if (maskReady) {
+                    (void)editor.updateGroundSplat(selectedIndex, std::move(edited));
+                    if (paintingMask && paintTargetChanged && callbacks.openGroundPainting) (void)callbacks.openGroundPainting();
+                }
             }
         }
         if (ImGui::Button("New Blend Mask") && callbacks.createGroundBlendMask) {
@@ -671,7 +680,8 @@ void LevelEditorDebugUi::drawGroundPaintTab(
     int layer = static_cast<int>(brush.color);
     ImGui::TextUnformatted("Paint Texture");
     constexpr std::array<const char*, 4> layerLabels {
-        "Texture 0 (R)", "Texture 1 (G)", "Texture 2 (B)", "Texture 3 (A)",
+        "Texture 0 (R)##brush", "Texture 1 (G)##brush",
+        "Texture 2 (B)##brush", "Texture 3 (A)##brush",
     };
     const auto* paintSplat = editor.selectedGroundSplat();
     const std::array<std::string_view, 4> layerNames {

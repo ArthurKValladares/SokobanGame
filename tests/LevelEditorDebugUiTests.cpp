@@ -105,6 +105,11 @@ public:
             return 0;
         };
         callbacks_.assetManifest = [this]() -> const AssetManifest& { return manifest_; };
+        callbacks_.prepareGroundBlendMask = [this](std::string_view name) -> std::optional<std::string> {
+            ++prepareMaskCalls;
+            preparedMask = name;
+            return "NewMask";
+        };
         callbacks_.createGroundSplatMap = [this] {
             ++addCalls;
             if (!editor.addGroundSplat({
@@ -186,7 +191,9 @@ public:
     void click(const char* label)
     {
         const auto located = frame(label);
-        if (!located.buttonCenter || located.text.find(label) == std::string::npos) {
+        const std::string_view text(label);
+        const auto visibleLabel = text.substr(0, text.find("##"));
+        if (!located.buttonCenter || located.text.find(visibleLabel) == std::string::npos) {
             throw std::runtime_error(std::string("Missing editor button: ") + label);
         }
         clickAt(*located.buttonCenter);
@@ -202,6 +209,17 @@ public:
         if (!located.buttonCenter || located.text.find(visibleLabel) == std::string::npos) {
             throw std::runtime_error(std::string("Missing palette control: ") + label);
         }
+        clickAt(*located.buttonCenter);
+    }
+
+    void chooseComboItem(const char* combo, const char* item)
+    {
+        click(combo);
+        (void)frame();
+        ImGuiWindow* popup = ImGui::FindWindowByName("##Combo_00");
+        if (!popup || !popup->Active) throw std::runtime_error("Missing texture combo popup");
+        const auto located = frame(nullptr, Widget { popup->GetID(item), popup });
+        if (!located.buttonCenter) throw std::runtime_error("Missing texture combo choice");
         clickAt(*located.buttonCenter);
     }
 
@@ -291,6 +309,8 @@ public:
     int addCalls = 0;
     int paintCalls = 0;
     int newMaskCalls = 0;
+    int prepareMaskCalls = 0;
+    std::string preparedMask;
 
 private:
     bool openSelectedMask()
@@ -348,6 +368,37 @@ void addSplatKeepsMaskPaintingAvailable()
     CHECK(panel.paintCalls == 2);
     CHECK(!panel.editor.groundAssignmentPainting());
     CHECK(panel.painter.active());
+}
+
+void brushSelectsEveryRgbaTextureLayer()
+{
+    TEST("brushSelectsEveryRgbaTextureLayer");
+    EditorPanel panel;
+    CHECK(panel.shows("Texture 0 (R)"));
+    CHECK(panel.shows("Texture 1 (G)"));
+    CHECK(panel.shows("Texture 2 (B)"));
+    CHECK(panel.shows("Texture 3 (A)"));
+    panel.click("Paint Blend Mask");
+    panel.click("Texture 0 (R)##brush");
+    CHECK(panel.painter.brush().color == SplatCanvas::BrushColor::Layer0);
+    panel.click("Texture 1 (G)##brush");
+    CHECK(panel.painter.brush().color == SplatCanvas::BrushColor::Layer1);
+    panel.click("Texture 2 (B)##brush");
+    CHECK(panel.painter.brush().color == SplatCanvas::BrushColor::Layer2);
+    panel.click("Texture 3 (A)##brush");
+    CHECK(panel.painter.brush().color == SplatCanvas::BrushColor::Layer3);
+    CHECK(panel.painter.active());
+}
+
+void selectingCustomMaskUsesPreparedCopy()
+{
+    TEST("selectingCustomMaskUsesPreparedCopy");
+    EditorPanel panel;
+    panel.chooseComboItem("Blend Mask", "AddedMask");
+    CHECK(panel.prepareMaskCalls == 1);
+    CHECK(panel.preparedMask == "AddedMask");
+    CHECK(panel.editor.selectedGroundSplat()->mask == "NewMask");
+    CHECK(!panel.painter.active());
 }
 
 void newMaskActionUsesSelectedSplat()
@@ -964,6 +1015,8 @@ int main()
 #if SOKOBAN_ENABLE_DEBUG_UI
     try {
         addSplatKeepsMaskPaintingAvailable();
+        brushSelectsEveryRgbaTextureLayer();
+        selectingCustomMaskUsesPreparedCopy();
         newMaskActionUsesSelectedSplat();
         terrainSectionCollapsesWithoutHidingQuarryWalls();
         waterTilesSectionOffersLilyPadsAndDirectionalStreams();

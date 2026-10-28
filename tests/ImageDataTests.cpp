@@ -85,6 +85,50 @@ void testNonImageInspectionDiagnostic()
     }
 }
 
+void testLegacySplatConversionPreservesRgbaWeights()
+{
+    sokoban::ImageData grayscale {
+        .width = 3, .height = 1,
+        .rgba = { std::byte { 0 }, std::byte { 0 }, std::byte { 0 }, std::byte { 255 },
+            std::byte { 128 }, std::byte { 128 }, std::byte { 128 }, std::byte { 255 },
+            std::byte { 255 }, std::byte { 255 }, std::byte { 255 }, std::byte { 255 } },
+        .sourceChannels = 1,
+    };
+    sokoban::convertLegacySplatWeights(grayscale);
+    CHECK(grayscale.sourceChannels == 4);
+    CHECK(grayscale.rgba[0] == std::byte { 255 });
+    CHECK(grayscale.rgba[1] == std::byte { 0 });
+    CHECK(grayscale.rgba[4] == std::byte { 127 });
+    CHECK(grayscale.rgba[5] == std::byte { 128 });
+    CHECK(grayscale.rgba[6] == std::byte { 0 });
+    CHECK(grayscale.rgba[7] == std::byte { 0 });
+    CHECK(grayscale.rgba[8] == std::byte { 0 });
+    CHECK(grayscale.rgba[9] == std::byte { 255 });
+    const auto converted = grayscale.rgba;
+    sokoban::convertLegacySplatWeights(grayscale);
+    CHECK(grayscale.rgba == converted);
+
+    sokoban::ImageData rgb {
+        .width = 1, .height = 1,
+        .rgba = { std::byte { 100 }, std::byte { 60 }, std::byte { 20 }, std::byte { 255 } },
+        .sourceChannels = 3,
+    };
+    sokoban::convertLegacySplatWeights(rgb);
+    CHECK(rgb.sourceChannels == 4);
+    CHECK(rgb.rgba[0] == std::byte { 100 });
+    CHECK(rgb.rgba[1] == std::byte { 60 });
+    CHECK(rgb.rgba[2] == std::byte { 20 });
+    CHECK(rgb.rgba[3] == std::byte { 0 });
+
+    sokoban::ImageData rgba {
+        .width = 1, .height = 1,
+        .rgba = { std::byte { 0 }, std::byte { 0 }, std::byte { 0 }, std::byte { 255 } },
+    };
+    sokoban::convertLegacySplatWeights(rgba);
+    CHECK(rgba.rgba[0] == std::byte { 0 });
+    CHECK(rgba.rgba[3] == std::byte { 255 });
+}
+
 } // namespace
 
 int main()
@@ -94,6 +138,7 @@ int main()
     testMissingFileDiagnostic();
     testNonImageDiagnostic();
     testNonImageInspectionDiagnostic();
+    testLegacySplatConversionPreservesRgbaWeights();
 
     if (failures == 0) {
         std::cout << "ImageDataTests: " << checks << " checks passed\n";

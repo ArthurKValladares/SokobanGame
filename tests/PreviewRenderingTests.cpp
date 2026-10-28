@@ -1465,6 +1465,160 @@ void verifyRimHeavyGroundChunkPublication(SDL_Window* window,
               << " tiles adopted without publication starvation\n";
 }
 
+void verifyFourLayerSplat(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    GroundSplatTextures textures {
+        .base = manifest.textureIdByName("GroundGrass"),
+        .detail = manifest.textureIdByName("GroundRock"),
+        .splatMap = manifest.textureIdByName(groundSplatMapTextureName),
+        .texture2 = manifest.textureIdByName("GroundAutumnGrass"),
+        .texture3 = manifest.textureIdByName("GroundAutumnRock"),
+    };
+    const std::array<RenderTexture, 4> albedos {
+        textures.base, textures.detail, textures.texture2, textures.texture3,
+    };
+    RenderFrameData floor;
+    floor.viewMode = RenderViewMode::Isometric3D;
+    floor.levelWidth = 8;
+    floor.levelHeight = 8;
+    floor.levelDepth = 2;
+    floor.skyCloudsEnabled = false;
+    floor.lighting.sun.intensity = 0;
+    floor.lighting.ambient = { .color = { 1, 1, 1 }, .intensity = 1 };
+    floor.cameraOverride = RenderFrameData::CameraOverride {
+        .position = { 4, 4, 4 }, .forward = { 0, 0, -1 },
+    };
+    floor.groundSplat = textures;
+    for (int y = 0; y < 8; ++y) {
+        for (int x = 0; x < 8; ++x) {
+            floor.tiles.push_back({
+                .cell = { x, y, 0 },
+                .position = { static_cast<float>(x), static_cast<float>(y) },
+                .color = { 1, 1, 1, 1 }, .height = 1, .showGrid = false,
+                .effect = RenderSurfaceEffect::GroundSplat, .groundTop = true,
+            });
+        }
+    }
+    renderer.waitForAssets(renderAssetRequirementsForFrame(floor));
+    // waitForAssets permits submitted texture uploads. Repainting requires
+    // published Ready slots, so complete uploads and let subsequent frames
+    // retire their fences before replacing the fixture's texture images.
+    UiDrawData ui;
+    ui.viewportSize = { 640, 360 };
+    for (int frame = 0; frame < 3; ++frame) {
+        renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+        ImGui::Render();
+#endif
+        renderer.drawFrame(renderer.prepareFrame(floor), ui);
+        renderer.waitIdle();
+    }
+    const auto solidImage = [](uint32_t size, std::array<uint8_t, 4> value) {
+        ImageData image;
+        image.width = image.height = size;
+        image.rgba.resize(static_cast<std::size_t>(size) * size * 4);
+        for (std::size_t pixel = 0; pixel < image.rgba.size(); pixel += 4) {
+            for (std::size_t channel = 0; channel < 4; ++channel) {
+                image.rgba[pixel + channel] = static_cast<std::byte>(value[channel]);
+            }
+        }
+        return image;
+    };
+    // These updates affect only this fixture's GPU resources. Distinct solid
+    // colors make the channel mapping independent of shipped artwork changes.
+    constexpr std::array<std::array<uint8_t, 4>, 4> colors {{
+        { 230, 20, 20, 255 }, { 20, 230, 20, 255 },
+        { 20, 20, 230, 255 }, { 230, 230, 20, 255 },
+    }};
+    for (std::size_t layer = 0; layer < albedos.size(); ++layer) {
+        if (!renderer.updateTexture(albedos[layer], solidImage(4, colors[layer]))) {
+            throw std::runtime_error("Four-layer fixture could not upload material " +
+                std::to_string(layer));
+        }
+    }
+    const auto updateMask = [&](std::array<uint8_t, 4> weights) {
+        verify(renderer.updateTexture(textures.splatMap, solidImage(8 * 32, weights)),
+            "Four-layer fixture could not upload RGBA weights");
+    };
+    const auto capture = [&](const GroundSplatTextures& assignment) {
+        for (int frame = 0; frame < 3; ++frame) {
+            floor.groundSplat = assignment;
+            renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            ImGui::Render();
+#endif
+            renderer.drawFrame(renderer.prepareFrame(floor), ui);
+            verify(!renderer.hasFatalFailure(), "Four-layer fixture failed to render");
+        }
+        return renderer.captureRenderedFrame();
+    };
+    const auto centerDifference = [&](const ImageData& left, const ImageData& right) {
+        return difference(left, right, left.width * 2 / 5, left.height * 2 / 5,
+            left.width * 3 / 5, left.height * 3 / 5);
+    };
+    const std::filesystem::path evidence = std::filesystem::path(SOKOBAN_TEST_SOURCE_DIR) /
+        "out" / "four-layer-splat";
+    std::filesystem::create_directories(evidence);
+    std::array<ImageData, 4> pure;
+    constexpr std::array<const char*, 4> layerNames { "red", "green", "blue", "alpha" };
+    for (std::size_t layer = 0; layer < albedos.size(); ++layer) {
+        std::array<uint8_t, 4> weights {};
+        weights[layer] = 255;
+        updateMask(weights);
+        pure[layer] = capture(textures);
+        saveRippleEvidence(evidence / (std::string(layerNames[layer]) + ".png"), pure[layer]);
+        // A pure layer must match opaque material 0 using that same albedo.
+        // The alpha case fails if mask alpha controls surface transparency.
+        GroundSplatTextures reference = textures;
+        reference.base = albedos[layer];
+        updateMask({ 255, 0, 0, 0 });
+        const double error = centerDifference(pure[layer], capture(reference));
+        std::cout << "Splat " << layerNames[layer] << " reference error=" << error << '\n';
+        verify(error < 0.1, "Pure RGBA channel did not select its assigned opaque material");
+    }
+    for (std::size_t layer = 1; layer < pure.size(); ++layer) {
+        verify(centerDifference(pure[0], pure[layer]) > 20,
+            "RGBA layer selection did not visibly change the material");
+    }
+
+    constexpr std::array<uint8_t, 4> mixture { 51, 51, 51, 102 };
+    updateMask(mixture);
+    const ImageData mixed = capture(textures);
+    saveRippleEvidence(evidence / "mixed.png", mixed);
+    updateMask({ 102, 102, 102, 204 });
+    verify(centerDifference(mixed, capture(textures)) < 0.1,
+        "RGBA splat weights were not normalized before blending");
+    updateMask({ 0, 0, 0, 0 });
+    verify(centerDifference(pure[0], capture(textures)) < 0.1,
+        "An empty RGBA weight texel did not fall back to material 0");
+    std::array<uint8_t, 4> expected { 0, 0, 0, 255 };
+    for (std::size_t channel = 0; channel < 3; ++channel) {
+        double linear = 0;
+        for (std::size_t layer = 0; layer < colors.size(); ++layer) {
+            const double srgb = colors[layer][channel] / 255.0;
+            const double decoded = srgb <= 0.04045 ? srgb / 12.92 :
+                std::pow((srgb + 0.055) / 1.055, 2.4);
+            linear += decoded * mixture[layer] / 255.0;
+        }
+        const double encoded = linear <= 0.0031308 ? linear * 12.92 :
+            1.055 * std::pow(linear, 1.0 / 2.4) - 0.055;
+        expected[channel] = static_cast<uint8_t>(std::lround(encoded * 255));
+    }
+    verify(renderer.updateTexture(textures.base, solidImage(4, expected)),
+        "Four-layer fixture could not upload its expected blend");
+    updateMask({ 255, 0, 0, 0 });
+    const ImageData expectedBlend = capture(textures);
+    saveRippleEvidence(evidence / "mixed-reference.png", expectedBlend);
+    const double mixedError = centerDifference(mixed, expectedBlend);
+    std::cout << "Splat mixed reference error=" << mixedError << '\n';
+    verify(mixedError < 1.0, "RGBA material mixture disagreed with its linear-color blend");
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a four-layer splat rendering error");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -1519,6 +1673,11 @@ int main(int argc, char** argv)
         if (argc > 1 && std::string_view(argv[1]) == "--rock-scratches") {
             verifyRockScratches(window.get(), root, font, manifest, temp.path() / "cache.bin");
             std::cout << "Rock scratch GPU regression passed\n";
+            return 0;
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--four-layer-splat") {
+            verifyFourLayerSplat(window.get(), root, font, manifest, temp.path() / "cache.bin");
+            std::cout << "Four-layer splat GPU regression passed\n";
             return 0;
         }
         const auto image = verifyPreview(window.get(), root, font, manifest,

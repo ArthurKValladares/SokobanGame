@@ -158,6 +158,46 @@ void testNameThenUniqueMaterialMatchingSkipsAmbiguityAndReversedLayers()
     CHECK(result.maps[2].textureName == "GroundSplatMapOverworld9_1");
 }
 
+void testAllFourMaterialsMustMatchForBrushSpillover()
+{
+    TEST("allFourMaterialsMustMatchForBrushSpillover");
+    AssetManifest manifest = manifestWithFallback();
+    for (int id = 7; id <= 10; ++id) {
+        addMask(manifest, "GroundSplatMapOverworld" + std::to_string(id));
+    }
+    auto explicitDefaults = ground("GroundSplatMapOverworld8");
+    explicitDefaults.texture2 = "GroundAutumnGrass";
+    explicitDefaults.texture3 = "GroundAutumnRock";
+    auto otherBlue = ground("GroundSplatMapOverworld9");
+    otherBlue.texture2 = "Sand";
+    auto otherAlpha = ground("GroundSplatMapOverworld10");
+    otherAlpha.texture3 = "Mud";
+    const std::vector screens {
+        screen(7, { 0, 0 }, { ground("GroundSplatMapOverworld7") }),
+        screen(8, { 1, 0 }, { explicitDefaults }),
+        screen(9, { 2, 0 }, { otherBlue }),
+        screen(10, { 3, 0 }, { otherAlpha }),
+    };
+    const auto result = plan(screens, manifest);
+    CHECK(result.valid);
+    CHECK(result.maps.size() == 2);
+    CHECK(result.status.find("Skipped 2") != std::string::npos);
+    CHECK(result.copies.empty());
+    if (result.maps.size() == 2) {
+        CHECK(result.maps[1].screen == 8);
+    }
+
+    // A screen with implicit defaults must not adopt a custom third layer.
+    auto custom = screens.front().definition.groundSplats.front();
+    custom.texture2 = "Sand";
+    const std::vector legacyNeighbour {
+        screen(7, { 0, 0 }, { custom }), screen(8, { 1, 0 }),
+    };
+    const auto customResult = plan(legacyNeighbour, manifest);
+    CHECK(customResult.valid);
+    CHECK(customResult.maps.size() == 1);
+}
+
 void testPathAliasesAndOtherMaterialUsersCannotShareEditableCanvas()
 {
     TEST("pathAliasesAndOtherMaterialUsersCannotShareEditableCanvas");
@@ -317,6 +357,7 @@ int main()
     testDedicatedMasksUseScreenLayoutWithoutCopies();
     testLegacyFallbackIsCopiedIndependentlyAndInputsStayIntact();
     testNameThenUniqueMaterialMatchingSkipsAmbiguityAndReversedLayers();
+    testAllFourMaterialsMustMatchForBrushSpillover();
     testPathAliasesAndOtherMaterialUsersCannotShareEditableCanvas();
     testCustomAndSimilarScreenPrefixesAreDetached();
     testExternalDocumentsProtectOwnedNamesAndPathAliases();

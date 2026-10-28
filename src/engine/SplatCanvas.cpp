@@ -18,7 +18,7 @@ constexpr float strokeSpacingFraction = 0.25f;
 constexpr int maxStampsPerSegment = 512;
 
 // Proportional integer allocation with largest remainders keeps every texel
-// exactly normalized without gradually favouring the lower-numbered layers.
+// exactly normalized while preserving the other layers to one byte of error.
 void distributeWeights(const std::array<uint32_t, 4>& source,
     uint32_t total, uint32_t budget, uint8_t* destination)
 {
@@ -109,7 +109,10 @@ std::optional<SplatCanvas> SplatCanvas::fromImage(const ImageData& image)
             std::array<uint32_t, 4> source {};
             uint32_t total = 0;
             for (std::size_t layer = 0; layer < channels; ++layer) {
-                source[layer] = static_cast<uint8_t>(image.rgba[i * channels + layer]);
+                // RGB files have no authored layer-3 weight. stb_image's
+                // synthesized opaque alpha is not part of the paint mask.
+                source[layer] = image.sourceChannels == 3 && layer == 3 ? 0 :
+                    static_cast<uint8_t>(image.rgba[i * channels + layer]);
                 total += source[layer];
             }
             if (total == 0) {

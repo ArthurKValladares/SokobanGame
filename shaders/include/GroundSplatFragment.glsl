@@ -2,8 +2,8 @@
 #define GROUND_RIM_WALL_WEIGHTS draw.passData[3]
 #endif
 
-// Ground splatting: blends two ground textures (a base and a detail layer)
-// using the red channel of a splat map, then applies the same lighting,
+// Ground splatting: RGBA channels weight texture0 through texture3,
+// normalized before blending, then applies the same lighting,
 // shadowing, grid overlay, and editor-preview dithering as the standard tile
 // shader so splatted ground sits seamlessly beside every other surface.
 //
@@ -119,6 +119,22 @@ vec3 sampleGroundData(float handle, vec2 uv, vec3 fallback)
         : fallback;
 }
 
+// Mirrors packGroundTextureHandles in SceneDrawLanes.hpp. Two 12-bit handles
+// are carried as an exact 24-bit integer so the shared draw ABI stays fixed.
+vec2 unpackGroundTextureHandles(float packed)
+{
+    uint handles = uint(packed);
+    return vec2(float(handles & 4095u), float(handles >> 12u));
+}
+
+vec3 sampleGroundLayer(float handle, vec2 uv, vec2 uvDx, vec2 uvDy, vec3 fallback)
+{
+    int index = 0;
+    return resolveTexture(handle, index)
+        ? textureGrad(modelTextures[nonuniformEXT(index)], uv, uvDx, uvDy).rgb
+        : fallback;
+}
+
 float rimWallCoverage()
 {
     // The quad's UV coordinates identify its two standard triangles even on
@@ -147,51 +163,50 @@ void main()
     vec2 splatLocalTile = inWorldPosition.xy - draw.passData[1].yz;
     vec2 worldTile = inWorldPosition.xy;
     vec2 uv = worldTile / GROUND_UV_TILES;
+    vec2 uvDx = dFdx(uv);
+    vec2 uvDy = dFdy(uv);
 
     vec4 materialColor = draw.color;
-    float weight = 0.0;
-    int baseIndex = 0;
-    int detailIndex = 0;
+    vec4 weights = vec4(1.0, 0.0, 0.0, 0.0);
     int splatIndex = 0;
-    if (resolveTexture(draw.textureOptions.x, baseIndex)) {
-        vec3 baseColor = texture(
-            modelTextures[nonuniformEXT(baseIndex)], uv).rgb;
-        vec3 blended = baseColor;
-        if (resolveTexture(draw.textureOptions.y, detailIndex)) {
-            vec3 detailColor = texture(
-                modelTextures[nonuniformEXT(detailIndex)], uv).rgb;
-            // The splat map spans the board once. Its size tells us how many
-            // tiles that is, so world tile -> 0..1 needs nothing pushed.
-            if (resolveTexture(draw.textureOptions.z, splatIndex)) {
-                vec2 splatBoardTiles = max(
-                    vec2(textureSize(
-                        modelTextures[nonuniformEXT(splatIndex)], 0)) /
-                        GROUND_SPLAT_TEXELS_PER_TILE,
-                    vec2(1.0));
-                // Clamped, not wrapped: ground outside the board (the
-                // continuation skirt) holds the edge weight instead of
-                // repeating the board's pattern back over itself.
-                vec2 splatUv = clamp(
-                    splatLocalTile / splatBoardTiles, 0.0, 1.0);
-                weight = texture(
-                    modelTextures[nonuniformEXT(splatIndex)], splatUv).r;
-            }
-            blended = mix(baseColor, detailColor, clamp(weight, 0.0, 1.0));
-        }
-        // Modulate by the tile color so gameplay tinting (active plates,
-        // editor highlights) still reads through the texture.
-        materialColor.rgb *= blended;
+    if (resolveTexture(draw.textureOptions.z, splatIndex)) {
+        vec2 splatBoardTiles = max(
+            vec2(textureSize(modelTextures[nonuniformEXT(splatIndex)], 0)) /
+                GROUND_SPLAT_TEXELS_PER_TILE, vec2(1.0));
+        vec2 splatUv = clamp(splatLocalTile / splatBoardTiles, 0.0, 1.0);
+        // Alpha is material-3 coverage, not the ground's opacity. Legacy
+        // grayscale maps are converted to (1-R,R,0,0) before upload/BC7.
+        vec4 mask = max(texture(modelTextures[nonuniformEXT(splatIndex)], splatUv), vec4(0.0));
+        float total = dot(mask, vec4(1.0));
+        if (total > 0.00001) weights = mask / total;
     }
 
-    // Data maps use the exact same world UVs and splat weights as albedo.
-    // Unregistered companion maps retain a neutral normal and matte response.
-    vec3 baseNormal = sampleGroundData(draw.passData[0].x, uv, vec3(.5, .5, 1.0)) * 2.0 - 1.0;
-    vec3 detailNormal = sampleGroundData(draw.passData[0].y, uv, vec3(.5, .5, 1.0)) * 2.0 - 1.0;
-    vec3 tangentNormal = normalize(mix(baseNormal, detailNormal, clamp(weight, 0.0, 1.0)));
-    vec3 orm = mix(
-        sampleGroundData(draw.passData[0].z, uv, vec3(1.0, 1.0, 0.0)),
-        sampleGroundData(draw.passData[0].w, uv, vec3(1.0, 1.0, 0.0)),
-        clamp(weight, 0.0, 1.0));
+    vec2 extraAlbedo = unpackGroundTextureHandles(draw.passData[2].w);
+    vec2 normals02 = unpackGroundTextureHandles(draw.passData[0].x);
+    vec2 normals13 = unpackGroundTextureHandles(draw.passData[0].y);
+    vec2 orm02 = unpackGroundTextureHandles(draw.passData[0].z);
+    vec2 orm13 = unpackGroundTextureHandles(draw.passData[0].w);
+    float albedoHandles[4] = float[4](draw.textureOptions.x, draw.textureOptions.y,
+        extraAlbedo.x, extraAlbedo.y);
+    float normalHandles[4] = float[4](normals02.x, normals13.x, normals02.y, normals13.y);
+    float ormHandles[4] = float[4](orm02.x, orm13.x, orm02.y, orm13.y);
+    vec3 blendedAlbedo = vec3(0.0);
+    vec3 blendedNormal = vec3(0.0);
+    vec3 orm = vec3(0.0);
+    for (int layer = 0; layer < 4; ++layer) {
+        if (weights[layer] <= 0.0) continue;
+        // Missing optional layers fall back to texture0 and its companions.
+        int source = albedoHandles[layer] >= 0.5 ? layer : 0;
+        blendedAlbedo += weights[layer] * sampleGroundLayer(
+            albedoHandles[source], uv, uvDx, uvDy, vec3(1.0));
+        blendedNormal += weights[layer] * (sampleGroundLayer(
+            normalHandles[source], uv, uvDx, uvDy, vec3(.5, .5, 1.0)) * 2.0 - 1.0);
+        orm += weights[layer] * sampleGroundLayer(
+            ormHandles[source], uv, uvDx, uvDy, vec3(1.0, 1.0, 0.0));
+    }
+    materialColor.rgb *= blendedAlbedo;
+    vec3 tangentNormal = length(blendedNormal) > 0.00001
+        ? normalize(blendedNormal) : vec3(0.0, 0.0, 1.0);
 
     float wallCoverage = 0.0;
     float wallNsWeight = 0.5;

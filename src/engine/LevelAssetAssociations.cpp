@@ -68,6 +68,7 @@ Json textureJson(const AssetManifest::Texture& texture)
             ? "linear" : "nearest" },
         { "colorSpace", texture.colorSpace == TextureColorSpace::Linear
             ? "linear" : "srgb" },
+        { "splatWeights", texture.splatWeights },
     };
 }
 
@@ -82,6 +83,7 @@ AssetManifest::Texture textureFromJson(const Json& value)
         .colorSpace = value.value("colorSpace", std::string("srgb")) ==
                 "linear"
             ? TextureColorSpace::Linear : TextureColorSpace::Srgb,
+        .splatWeights = value.value("splatWeights", false),
     };
 }
 

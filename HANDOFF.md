@@ -38,17 +38,20 @@ materials and topology. Native POINT/FLOAT `_GROUND_DEBRIS` marks each rigid
 fragment with a positive seed; fixed vertices use zero. The static GLTF loader
 retains this scalar in `MeshVertex`, and shared model/shadow/outline vertex
 deformation uses the simulation clock plus stable tile and fragment seeds.
-Maximum motion is 0.008 tile in X/Y and 0.020 in Z. Source placement reserves
+Maximum motion is 0.020 tile in X/Y and 0.060 in Z. Source placement reserves
 the full motion envelope and a 0.04 surface gap. Swept bounds protect culling
 and camera fit; advancing debris invalidates affected point-shadow caches.
 See [floating debris](docs/floating-ground-debris.md) for authoring and checks.
-Debug and optimized game/test builds and ten focused renderer suites pass;
+Debug and optimized game/test builds and focused renderer suites pass;
 23 focused Python regressions and the complete current ground audit pass.
 The audit covers all 240 bodies, 310 caps and 190 marked fragments, with fixed
 source positions/normals, topology, UVs and cap tables preserved exactly.
-A 480-frame Debug validation capture has no VUIDs or shader-input warnings;
-a 900-frame optimized point-light capture refreshes all six shadow faces.
-Both drain asset queues with no dropped draws or capacity blocks. Existing
+The registered `ground_debris` GPU regression checks perceptible movement,
+identical frozen/disabled frames and fixed terrain in both builds, with no
+Vulkan validation errors. Motion rates are 1.3 times the initial revision;
+the vertical offset is three times its original maximum. A 600-frame optimized
+point-light capture refreshes all six shadow faces and drains asset queues
+with no dropped draws or capacity blocks. Existing
 location-10 output warnings and the Epic overlay loader message remain in Debug.
 Evidence is in ignored `out/floating-debris/`.
 
@@ -1130,8 +1133,12 @@ and the required real-device checks are recorded.
   Player-facing UI is composed after tonemapping.
 - Terrain companion textures use `<albedo manifest name>Normal` and `...Orm`.
   GroundSplatTextures resolves them for default, overworld and editor-assigned
-  layers; sampledTextures is the residency list. Ground passData[0] carries
-  base/detail normal handles in xy and base/detail ORM handles in zw;
+  layers; sampledTextures is the residency list. Ground masks store four
+  normalized material weights in RGBA, with alpha used as texture 3 coverage.
+  Legacy grayscale masks convert to (1-gray,gray,0,0) before upload/BC7 and
+  painting; RGBA saves preserve every layer. Ground passData[0] packs normal
+  handles (0,2)/(1,3) in xy and ORM handles (0,2)/(1,3) in zw as exact 24-bit
+  integers (two 12-bit handles). passData[2].w packs albedo handles 2/3;
   passData[1].x carries specular strength. The splat and model shaders share
   PbrLighting.glsl, retaining their distinct point-shadow tap counts. Terrain
   maps are linear repeat data and use the color layers' world UVs and weights.

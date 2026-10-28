@@ -594,6 +594,18 @@ bool ApplicationTools::openGroundPainting(
     levelEditor.setGroundAssignmentPainting(false);
     levelEditor.showGroundAssignmentColors() = false;
     const Level::GroundSplat* selected = levelEditor.selectedGroundSplat();
+    if (selected) {
+        const auto maskName = prepareGroundBlendMask(selected->mask,
+            sourceAssetRoot, runtimeAssetRoot, manifest, renderer);
+        if (!maskName) return false;
+        if (*maskName != selected->mask) {
+            const auto index = static_cast<std::size_t>(selected - levelEditor.groundSplats().data());
+            Level::GroundSplat edited = *selected;
+            edited.mask = *maskName;
+            if (!levelEditor.updateGroundSplat(index, std::move(edited))) return false;
+            selected = levelEditor.selectedGroundSplat();
+        }
+    }
     const std::optional<Level::GroundSplat> selectedSplat = selected
         ? std::optional<Level::GroundSplat> { *selected } : std::nullopt;
     SplatPainter::OpenRequest request {
@@ -729,6 +741,7 @@ bool ApplicationTools::prepareOverworldGroundPainting(
                 .tiling = false,
                 .filter = TextureFilter::Linear,
                 .colorSpace = TextureColorSpace::Linear,
+                .splatWeights = true,
             });
         }
         if (!plan.copies.empty()) {
@@ -741,6 +754,7 @@ bool ApplicationTools::prepareOverworldGroundPainting(
                     .tiling = false,
                     .filter = TextureFilter::Linear,
                     .colorSpace = TextureColorSpace::Linear,
+                    .splatWeights = true,
                 });
                 if (!request.runtimeAssetRoot.empty()) {
                     invalidateCompressedTextureArtifactsForSource(request.runtimeAssetRoot, copy.relativePath);
@@ -857,6 +871,7 @@ bool ApplicationTools::createGroundSplatMap(
             .tiling = false,
             .filter = TextureFilter::Linear,
             .colorSpace = TextureColorSpace::Linear,
+            .splatWeights = true,
         });
         if (added.isNone()) {
             log::error(log::Category::Assets)
@@ -934,6 +949,7 @@ bool ApplicationTools::createGroundBlendMask(
         .tiling = false,
         .filter = TextureFilter::Linear,
         .colorSpace = TextureColorSpace::Linear,
+        .splatWeights = true,
     });
     if (added.isNone()) {
         log::error(log::Category::Assets)
@@ -946,6 +962,59 @@ bool ApplicationTools::createGroundBlendMask(
     return openGroundPainting(sourceAssetRoot, runtimeAssetRoot, manifest, renderer);
 }
 
+std::optional<std::string> ApplicationTools::prepareGroundBlendMask(
+    std::string_view textureName,
+    const std::filesystem::path& sourceAssetRoot,
+    const std::filesystem::path& runtimeAssetRoot,
+    AssetManifest& manifest,
+    VulkanRenderer& renderer)
+{
+    try {
+        const RenderTexture texture = manifest.findTextureIdByName(textureName);
+        if (texture.isNone()) throw std::runtime_error("The selected blend mask is not registered.");
+        const auto& entry = manifest.textures().at(texture.index());
+        if (entry.splatWeights || entry.name.starts_with(groundSplatMapTextureName)) return entry.name;
+        if (manifest.textures().size() >= renderer.textureDescriptorCapacity()) {
+            throw std::runtime_error("The runtime texture descriptor heap is full.");
+        }
+        std::string portablePath = entry.path;
+        std::replace(portablePath.begin(), portablePath.end(), '\\', '/');
+        const auto relative = std::filesystem::path(portablePath).lexically_normal();
+        if (relative.empty() || relative.has_root_path() || *relative.begin() == "..") {
+            throw std::runtime_error("The selected blend mask has an invalid asset path.");
+        }
+        std::filesystem::path source = sourceAssetRoot / relative;
+        if (!std::filesystem::exists(source) && !runtimeAssetRoot.empty()) source = runtimeAssetRoot / relative;
+        const auto imported = SplatCanvas::fromImage(loadRgbaImage(source));
+        if (!imported) throw std::runtime_error("Could not decode the selected blend mask.");
+        const auto created = createUniqueBlankSplatMap("GroundSplatMapImported",
+            levelEditor.documentWidth(), levelEditor.documentHeight(),
+            sourceAssetRoot, runtimeAssetRoot, manifest);
+        if (!created.created) throw std::runtime_error(created.message);
+        writeRgbaPng(sourceAssetRoot / created.relativePath,
+            imported->width(), imported->height(), imported->weights());
+        if (!runtimeAssetRoot.empty()) {
+            writeRgbaPng(runtimeAssetRoot / created.relativePath,
+                imported->width(), imported->height(), imported->weights());
+            (void)refreshContentPackageIndex(runtimeAssetRoot);
+        }
+        if (!persistManifestTexture(created.textureName, created.relativePath)) return std::nullopt;
+        const RenderTexture added = manifest.addTexture({
+            .name = created.textureName,
+            .path = created.relativePath,
+            .filter = TextureFilter::Linear,
+            .colorSpace = TextureColorSpace::Linear,
+            .splatWeights = true,
+        });
+        if (added.isNone()) throw std::runtime_error("Could not register the imported blend mask.");
+        renderer.syncManifestTextures();
+        return created.textureName;
+    } catch (const std::exception& error) {
+        log::error(log::Category::Assets) << "Could not prepare blend mask: " << error.what();
+        return std::nullopt;
+    }
+}
+
 bool ApplicationTools::persistManifestTexture(
     const std::string& name,
     const std::string& relativePath)
@@ -956,6 +1025,7 @@ bool ApplicationTools::persistManifestTexture(
         .tiling = false,
         .filter = TextureFilter::Linear,
         .colorSpace = TextureColorSpace::Linear,
+        .splatWeights = true,
     };
 
     assetManifestEditor.addTexture();
@@ -1080,7 +1150,7 @@ void ApplicationTools::drawBrushPreview(
     drawList->AddPolyline(
         rim.data(),
         static_cast<int>(rim.size()),
-        white ? IM_COL32(255, 255, 255, 130) : IM_COL32(0, 0, 0, 150),
+        (tint & ~IM_COL32_A_MASK) | (static_cast<ImU32>(150) << IM_COL32_A_SHIFT),
         ImDrawFlags_Closed,
         1.5f);
 #else

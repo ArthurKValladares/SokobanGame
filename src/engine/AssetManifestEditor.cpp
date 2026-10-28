@@ -265,6 +265,7 @@ std::string AssetManifestEditor::serialize() const
         if (texture.colorSpace == TextureColorSpace::Linear) {
             entry["colorSpace"] = "linear";
         }
+        if (texture.splatWeights) entry["splatWeights"] = true;
         root["textures"].push_back(std::move(entry));
     }
 

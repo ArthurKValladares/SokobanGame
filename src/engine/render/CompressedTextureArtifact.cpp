@@ -414,7 +414,7 @@ void invalidateCompressedTextureArtifactsForSource(
                      magnificationFilters) {
                     for (const TextureMinificationFilter minFilter :
                          minificationFilters) {
-                        const TextureSourceIdentity identity {
+                        TextureSourceIdentity identity {
                             .source = ExternalTextureSource {
                                 .path = relativeSourcePath,
                             },
@@ -426,6 +426,10 @@ void invalidateCompressedTextureArtifactsForSource(
                                 .minFilter = minFilter,
                             },
                         };
+                        artifactNames.insert(
+                            compressedTextureArtifactPath(identity)
+                                .filename().string());
+                        identity.interpretation.splatWeights = true;
                         artifactNames.insert(
                             compressedTextureArtifactPath(identity)
                                 .filename().string());
@@ -466,6 +470,7 @@ std::vector<std::byte> buildBc7Ktx2(
     std::vector<CompressedTextureMip> mips;
     mips.reserve(levels);
     ImageData image = source;
+    if (interpretation.splatWeights) convertLegacySplatWeights(image);
     for (uint32_t level = 0; level < levels; ++level) {
         mips.push_back({
             .width = image.width,

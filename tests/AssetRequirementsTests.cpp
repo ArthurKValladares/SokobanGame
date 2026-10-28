@@ -443,7 +443,8 @@ void testTerrainPbrCompanionsAreRequired()
     TEST("terrainPbrCompanionsAreRequired");
     AssetManifest manifest = testManifest();
     for (const char* name : { "GroundGrassNormal", "GroundGrassOrm", "GroundRockNormal", "GroundRockOrm",
-             "GroundRockSideNormal", "GroundRockSideOrm" }) {
+             "GroundRockSideNormal", "GroundRockSideOrm", "GroundAutumnGrass", "GroundAutumnRock",
+             "GroundAutumnGrassNormal", "GroundAutumnGrassOrm", "GroundAutumnRockNormal", "GroundAutumnRockOrm" }) {
         CHECK(!manifest.addTexture({ .name = name, .path = std::string(name) + ".png",
             .tiling = true, .filter = TextureFilter::Linear,
             .colorSpace = TextureColorSpace::Linear }).isNone());
@@ -454,13 +455,19 @@ void testTerrainPbrCompanionsAreRequired()
     CHECK(defaults.detailNormal == manifest.textureIdByName("GroundRockNormal"));
     CHECK(defaults.baseOrm == manifest.textureIdByName("GroundGrassOrm"));
     CHECK(defaults.detailOrm == manifest.textureIdByName("GroundRockOrm"));
+    CHECK(defaults.texture2 == manifest.textureIdByName("GroundAutumnGrass"));
+    CHECK(defaults.texture3 == manifest.textureIdByName("GroundAutumnRock"));
+    CHECK(defaults.texture2Normal == manifest.textureIdByName("GroundAutumnGrassNormal"));
+    CHECK(defaults.texture3Orm == manifest.textureIdByName("GroundAutumnRockOrm"));
     CHECK(defaults.rimWall == manifest.textureIdByName("GroundRockSide"));
     CHECK(defaults.rimWallNormal == manifest.textureIdByName("GroundRockSideNormal"));
     CHECK(defaults.rimWallOrm == manifest.textureIdByName("GroundRockSideOrm"));
-    CHECK(defaults.sampledTextures().size() == 10);
+    CHECK(defaults.sampledTextures().size() == 16);
     const Level level = Level::loadFromLayers({ { "..." }, { "C.." } }, "terrain PBR residency");
     const auto levelRequirements = renderAssetRequirementsForLevel(level, manifest);
-    for (RenderTexture texture : defaults.sampledTextures()) CHECK(levelRequirements.contains(texture));
+    for (RenderTexture texture : defaults.sampledTextures()) {
+        if (!texture.isNone()) CHECK(levelRequirements.contains(texture));
+    }
 
     // Editor-assigned layers may reverse base and detail. Resolve maps by the
     // selected albedo, rather than reusing the default grass/rock ordering.
@@ -474,13 +481,15 @@ void testTerrainPbrCompanionsAreRequired()
     RenderFrameData frame;
     frame.tiles.push_back({ .groundSplat = reversed });
     const auto tileRequirements = renderAssetRequirementsForFrame(frame);
-    for (RenderTexture texture : reversed.sampledTextures()) CHECK(tileRequirements.contains(texture));
+    for (RenderTexture texture : reversed.sampledTextures()) {
+        if (!texture.isNone()) CHECK(tileRequirements.contains(texture));
+    }
     frame.tiles.clear();
     frame.groundSplatRegionCount = 1;
     frame.groundSplatRegions[0].textures = groundSplatTexturesForOverworldScreen(find, 1);
     const auto regionRequirements = renderAssetRequirementsForFrame(frame);
     for (RenderTexture texture : frame.groundSplatRegions[0].textures.sampledTextures()) {
-        CHECK(regionRequirements.contains(texture));
+        if (!texture.isNone()) CHECK(regionRequirements.contains(texture));
     }
 
     const GroundSplatTextures legacy = groundSplatTexturesForMaterials(find,
@@ -488,6 +497,12 @@ void testTerrainPbrCompanionsAreRequired()
     CHECK(legacy.valid());
     CHECK(legacy.detailNormal.isNone());
     CHECK(legacy.detailOrm.isNone());
+
+    const GroundSplatTextures swappedExtras = groundSplatTexturesForMaterials(find,
+        "GroundGrass", "GroundRock", defaults.splatMap, "GroundAutumnRock", "GroundAutumnGrass");
+    CHECK(swappedExtras.texture2 == defaults.texture3);
+    CHECK(swappedExtras.texture3Normal == defaults.texture2Normal);
+    CHECK(swappedExtras.texture2Orm == defaults.texture3Orm);
 }
 
 void testRimWallTextureFallbacksAndPreviewRequirements()

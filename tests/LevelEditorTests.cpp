@@ -3832,6 +3832,8 @@ void testGroundSplatEditing()
     CHECK(editor.groundPaint().size() == 2);
     auto sand = editor.groundSplats()[1];
     sand.name = "Desert"; sand.color = { 1, 1, 0 }; sand.base = "Beach";
+    sand.texture2 = "AutumnGrass";
+    sand.texture3 = "AutumnRock";
     CHECK(editor.updateGroundSplat(1, sand));
     CHECK(editor.groundPaint()[0].splat == "Desert");
     CHECK(editor.selectedGroundSplat()->name == "Desert");

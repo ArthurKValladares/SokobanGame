@@ -226,7 +226,7 @@ static void parseTextures(const Json& root, AssetManifest& manifest)
         const Json& texture = textures[i];
         rejectUnknownProperties(
             texture,
-            { "name", "path", "tiling", "filter", "colorSpace" },
+            { "name", "path", "tiling", "filter", "colorSpace", "splatWeights" },
             context);
 
         const std::string filter =
@@ -247,6 +247,7 @@ static void parseTextures(const Json& root, AssetManifest& manifest)
             filter == "linear" ? TextureFilter::Linear : TextureFilter::Nearest,
             colorSpace == "linear" ? TextureColorSpace::Linear
                                    : TextureColorSpace::Srgb,
+            optionalBool(texture, "splatWeights", false, context),
         });
     }
 }
@@ -908,22 +909,24 @@ TextureSourceIdentity manifestTextureSourceIdentity(
     const AssetManifest::Texture& texture,
     const std::filesystem::path& sourcePath)
 {
+    const bool splatWeights = texture.splatWeights || texture.name.starts_with("GroundSplatMap");
     return {
         .source = ExternalTextureSource { sourcePath.lexically_normal() },
         .interpretation = {
-            .colorSpace = texture.colorSpace,
-            .wrapU = texture.tiling
+            .colorSpace = splatWeights ? TextureColorSpace::Linear : texture.colorSpace,
+            .wrapU = texture.tiling && !splatWeights
                 ? TextureAddressMode::Repeat
                 : TextureAddressMode::ClampToEdge,
-            .wrapV = texture.tiling
+            .wrapV = texture.tiling && !splatWeights
                 ? TextureAddressMode::Repeat
                 : TextureAddressMode::ClampToEdge,
-            .magFilter = texture.filter == TextureFilter::Linear
+            .magFilter = splatWeights || texture.filter == TextureFilter::Linear
                 ? TextureMagnificationFilter::Linear
                 : TextureMagnificationFilter::Nearest,
-            .minFilter = texture.filter == TextureFilter::Linear
+            .minFilter = splatWeights || texture.filter == TextureFilter::Linear
                 ? TextureMinificationFilter::LinearMipmapLinear
                 : TextureMinificationFilter::Nearest,
+            .splatWeights = splatWeights,
         },
     };
 }

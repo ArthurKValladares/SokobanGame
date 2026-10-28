@@ -703,6 +703,39 @@ void testManifestTextureIdentityIsShared()
         TextureMagnificationFilter::Linear);
     CHECK(identity.interpretation.minFilter ==
         TextureMinificationFilter::LinearMipmapLinear);
+
+    AssetManifest::Texture mask = texture;
+    mask.name = "GroundSplatMapCustom";
+    CHECK(manifestTextureSourceIdentity(mask, mask.path).interpretation.splatWeights);
+    mask.name = "ImportedMask";
+    mask.splatWeights = true;
+    CHECK(manifestTextureSourceIdentity(mask, mask.path).interpretation.splatWeights);
+}
+
+void testGrayscaleSplatSourceAndArtifactUseTheSameRgbaWeights()
+{
+    TEST("grayscaleSplatSourceAndArtifactUseTheSameRgbaWeights");
+    ScopedTestDirectory temp("sokoban-splat-texture-source");
+    const std::filesystem::path relative = "textures/custom-mask.png";
+    writeBytes(temp.path() / relative, encodeGrayscalePng(3, 1, { 0, 128, 255 }));
+    TextureSourceIdentity source = identity(relative.generic_string());
+    const ImageData grayscale = loadRgbaTextureSource(temp.path(), source.source);
+    CHECK(grayscale.sourceChannels == 1);
+    const auto ordinary = loadPreparedTextureSource(temp.path(), source, false);
+    CHECK(std::get<ImageData>(ordinary).rgba == grayscale.rgba);
+
+    source.interpretation.splatWeights = true;
+    const auto weights = loadPreparedTextureSource(temp.path(), source, false);
+    ImageData expected = grayscale;
+    convertLegacySplatWeights(expected);
+    CHECK(std::get<ImageData>(weights).rgba == expected.rgba);
+    CHECK(std::get<ImageData>(weights).sourceChannels == 4);
+    const auto encoded = buildBc7Ktx2(grayscale, source.interpretation);
+    writeBytes(temp.path() / compressedTextureArtifactPath(source), encoded);
+    const auto compressed = loadPreparedTextureSource(temp.path(), source, true);
+    CHECK(std::holds_alternative<CompressedTextureArtifact>(compressed));
+    CHECK(std::get<CompressedTextureArtifact>(compressed).mips[0].bytes ==
+        parseBc7Ktx2(buildBc7Ktx2(expected, source.interpretation)).mips[0].bytes);
 }
 
 void testCollectsProductionCatalog()
@@ -745,6 +778,7 @@ int main()
     testLoadsEverySupportedSourceForm();
     testPreparedTextureSelectsArtifactOrSourceFallback();
     testManifestTextureIdentityIsShared();
+    testGrayscaleSplatSourceAndArtifactUseTheSameRgbaWeights();
     testCollectsProductionCatalog();
 
     if (failures == 0) {
