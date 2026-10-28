@@ -17,7 +17,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/"tools"))
 import validate_current_ground as audit
-from ValidateGroundBottomsTests import boulder_fixture
+from ValidateGroundBottomsTests import boulder_fixture, box_faces
 from ValidateRegularReliefTests import export_fixture
 
 
@@ -263,6 +263,106 @@ class CurrentGroundCornerTests(unittest.TestCase):
         masses["BoulderMass01"] = audit.rock.convex_rock(roles["BoulderMass01"]+np.asarray([5, 0, 0]), "detached")
         with self.assertRaisesRegex(AssertionError, "not rooted"):
             audit.rooted_masses(masses, roles["IslandCore"], "fixture")
+
+
+class CurrentGroundDebrisTests(unittest.TestCase):
+    def fixture(self):
+        body, primitives, streams = corner_fixture()
+        body["vertexGroups"] = {"FloatingRock01": [1, 2], "FloatingRock02": [3]}
+        body["properties"] = {"FloatingDebrisRevision": 1}
+        body["pointAttributes"] = {audit.DEBRIS_ATTRIBUTE: {
+            "domain": "POINT", "dataType": "FLOAT", "values": [0, .25, .25, .75]}}
+        return body, primitives, streams
+
+    def test_marker_owns_only_floating_groups_and_rigid_constant_seeds(self):
+        body, _, _ = self.fixture()
+        report = audit.audit_debris_groups(body, True, 15, "fixture")
+        self.assertEqual(report["animated_floating_rocks"], 2)
+        for values, message in (([.5, .25, .25, .75], "fixed geometry"),
+                                ([0, .25, .3, .75], "constant and positive"),
+                                ([0, .25, .25, 0], "constant and positive"),
+                                ([0, .25, .25, .25], "share a debris seed")):
+            changed = deepcopy(body)
+            changed["pointAttributes"][audit.DEBRIS_ATTRIBUTE]["values"] = values
+            with self.subTest(values=values), self.assertRaisesRegex(AssertionError, message):
+                audit.audit_debris_groups(changed, True, 15, "fixture")
+
+    def test_missing_wrong_domain_nonfinite_or_out_of_range_markers_fail(self):
+        for kind in ("missing", "domain", "type", "short", "nan", "negative", "too_large", "revision"):
+            body, _, _ = self.fixture()
+            attribute = body["pointAttributes"][audit.DEBRIS_ATTRIBUTE]
+            if kind == "missing": body["pointAttributes"].clear()
+            if kind == "domain": attribute["domain"] = "CORNER"
+            if kind == "type": attribute["dataType"] = "INT"
+            if kind == "short": attribute["values"].pop()
+            if kind == "nan": attribute["values"][1] = float("nan")
+            if kind == "negative": attribute["values"][1] = -.25
+            if kind == "too_large": attribute["values"][1] = 1.25
+            if kind == "revision": body["properties"].clear()
+            with self.subTest(kind=kind), self.assertRaises(AssertionError):
+                audit.audit_debris_groups(body, True, 15, "fixture")
+
+    def test_fixed_regular_and_interior_meshes_cannot_receive_debris(self):
+        body, _, _ = corner_fixture()
+        self.assertEqual(audit.audit_debris_groups(body, False, 15, "fixture")["animated_floating_rocks"], 0)
+        self.assertEqual(audit.audit_debris_groups(body, True, 0, "fixture")["animated_floating_rocks"], 0)
+        changed, _, _ = self.fixture()
+        for bottom, exposed in ((False, 15), (True, 0)):
+            with self.subTest(bottom=bottom, exposed=exposed), self.assertRaisesRegex(AssertionError, "revision/ownership"):
+                audit.audit_debris_groups(changed, bottom, exposed, "fixture")
+
+    def test_export_marker_is_compared_by_oriented_source_corner(self):
+        body, primitives, streams = self.fixture()
+        values = audit.source_debris_values(body, "fixture")
+        # The export fixture expands every source corner into its own vertex.
+        expanded = values[np.asarray(body["polygons"]).reshape(-1)]
+        actual = audit.export_corner_records(primitives, streams, [expanded])
+        expected = audit.source_corner_records(body, "fixture")
+        audit.match_corner_records(actual, expected, "fixture")
+        expanded[0] = .125
+        with self.assertRaisesRegex(AssertionError, "debris marker differs"):
+            audit.match_corner_records(audit.export_corner_records(primitives, streams, [expanded]), expected, "fixture")
+        with self.assertRaisesRegex(AssertionError, "debris marker differs"):
+            audit.match_corner_records(audit.export_corner_records(primitives, streams), expected, "fixture")
+
+    def test_export_marker_requires_exact_float_scalar_layout(self):
+        _, primitives, _ = corner_fixture()
+        document = SimpleNamespace(data={"nodes": [{"mesh": 0}], "meshes": [{"primitives": [
+            {"attributes": {audit.DEBRIS_ATTRIBUTE: 0}}]}],
+            "accessors": [{"componentType": 5126, "type": "SCALAR"}]},
+            accessor=lambda index: np.asarray([[0], [.25], [.25], [0], [.25], [.75]]))
+        self.assertEqual(len(audit.export_debris_values(document, primitives, "fixture")[0]), 6)
+        for patch in ({"componentType": 5123}, {"type": "VEC2"}, {"normalized": True}):
+            changed = deepcopy(document)
+            changed.data["accessors"][0].update(patch)
+            with self.subTest(patch=patch), self.assertRaisesRegex(AssertionError, "FLOAT SCALAR"):
+                audit.export_debris_values(changed, primitives, "fixture")
+
+    def test_motion_envelope_preserves_real_clearance_and_hidden_planes(self):
+        roles = {"IslandCore": box_faces([0, 0, -.34], [1, 1, .77]),
+                 "FloatingRock01": box_faces([.1, .1, -.95], [.24, .24, -.8]),
+                 "FloatingRock02": box_faces([.4, .1, -.94], [.5, .2, -.82])}
+
+        def check(values, exposed=15):
+            floating = {name: audit.rock.convex_rock(faces, name)
+                        for name, faces in values.items() if name.startswith("FloatingRock")}
+            audit.audit_debris_motion_envelope(floating, {}, values, exposed, "fixture")
+
+        check(roles)
+        for kind, message in (("core", "fixed geometry"), ("pair", "floating rocks lose"),
+                              ("floor", "body envelope"), ("hidden", "body envelope"),
+                              ("shoulder", "fixed geometry")):
+            changed = deepcopy(roles)
+            exposed = 15
+            if kind == "core": changed["FloatingRock01"] += [0, 0, .42]
+            if kind == "pair": changed["FloatingRock02"] -= [.11, 0, 0]
+            if kind == "floor": changed["FloatingRock01"] -= [0, 0, .04]
+            if kind == "hidden":
+                changed["FloatingRock01"] -= [.095, 0, 0]
+                exposed = 7
+            if kind == "shoulder": changed["ShoulderRock01"] = box_faces([.27, .1, -.94], [.32, .24, -.8])
+            with self.subTest(kind=kind), self.assertRaisesRegex(AssertionError, message):
+                check(changed, exposed)
 
 
 class CurrentGroundMaterialTests(unittest.TestCase):

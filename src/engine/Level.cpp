@@ -1291,6 +1291,8 @@ Level::Definition Level::parseDefinition(
                         .detail = object.at("detail").get<std::string>(),
                         .mask = object.at("mask").get<std::string>(),
                         .color = parseDecorationVec3(object, "color", sourceName),
+                        .texture2 = object.value("texture2", std::string {}),
+                        .texture3 = object.value("texture3", std::string {}),
                     });
                 } else {
                     definition.groundPaint.push_back({
@@ -1616,11 +1618,13 @@ std::vector<std::string> Level::serializeDefinition(
 
     std::vector<std::string> lines;
     for (const GroundSplat& splat : definition.groundSplats) {
-        const Json object {
+        Json object {
             { "name", splat.name }, { "base", splat.base },
             { "detail", splat.detail }, { "mask", splat.mask },
             { "color", { splat.color.x, splat.color.y, splat.color.z } },
         };
+        if (!splat.texture2.empty()) object["texture2"] = splat.texture2;
+        if (!splat.texture3.empty()) object["texture3"] = splat.texture3;
         lines.push_back(std::string(groundSplatPrefix) + object.dump());
     }
     std::vector<GroundPaint> paint = definition.groundPaint;

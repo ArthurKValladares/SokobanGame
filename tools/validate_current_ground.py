@@ -36,6 +36,9 @@ TOLERANCE = 2e-5
 # comparisons remain tighter; this is below the historical 2e-4 normal bound.
 NORMAL_TOLERANCE = 1e-4
 SHA256 = re.compile(r"[0-9a-f]{64}")
+DEBRIS_ATTRIBUTE = "_GROUND_DEBRIS"
+DEBRIS_MAXIMUM_OFFSET = np.asarray([.008, .008, .020])
+DEBRIS_MOTION_RADIUS = float(np.linalg.norm(DEBRIS_MAXIMUM_OFFSET))
 
 
 def require(condition, message):
@@ -87,6 +90,9 @@ def audit_contract(contract):
             and contract.get("regularDesignRevision") == 3 and contract.get("regularReliefRevision") == 1
             and contract.get("bottomDesignRevision") == 5 and contract.get("shoulderTransitionRevision") == 1
             and contract.get("recessMaterialRevision") == 1
+            and contract.get("floatingDebrisRevision") == 1
+            and contract.get("floatingDebrisAttribute") == DEBRIS_ATTRIBUTE
+            and contract.get("floatingDebrisMaximumOffset") == DEBRIS_MAXIMUM_OFFSET.tolist()
             and contract.get("recessMaterialBaseColorFactor") == relief.RECESS_BASE_COLOR,
             "Unexpected current native-ground identity/revision/material contract")
     for key, expected in (("regularReliefMaximumDepth", .0072), ("outerLipHeight", .91),
@@ -100,6 +106,66 @@ def audit_contract(contract):
                 f"Unexpected current ground contract value: {key}")
     require(contract.get("shoulderRoofClearance") == "0.001 + 0.0006 * zero-based shoulder index",
             "Unexpected shoulder roof-clearance contract")
+
+
+def source_debris_values(body, label):
+    count = len(body["points"])
+    attribute = body.get("pointAttributes", {}).get(DEBRIS_ATTRIBUTE)
+    if attribute is None:
+        return np.zeros(count)
+    require(isinstance(attribute, dict) and attribute.get("domain") == "POINT"
+            and attribute.get("dataType") == "FLOAT",
+            f"{label}: native debris marker must be POINT FLOAT")
+    values = np.asarray(attribute.get("values"), dtype=float)
+    require(values.shape == (count,) and np.isfinite(values).all()
+            and np.all((values >= 0) & (values <= 1)),
+            f"{label}: invalid native debris marker values")
+    return values
+
+
+def audit_debris_groups(body, bottom, exposed, label):
+    values = source_debris_values(body, label)
+    groups = {name: np.asarray(indices, dtype=int) for name, indices in body.get("vertexGroups", {}).items()
+              if re.fullmatch(r"FloatingRock\d+", name)}
+    expected = np.zeros(len(values), dtype=bool)
+    seeds = []
+    for name, indices in groups.items():
+        require(len(indices) > 0 and np.all((indices >= 0) & (indices < len(values))),
+                f"{label}: invalid debris group vertices {name}")
+        require(not expected[indices].any(), f"{label}: floating rocks share vertices")
+        expected[indices] = True
+        seed = values[indices[0]]
+        require(seed > 0 and np.all(values[indices] == seed),
+                f"{label}: debris marker must be constant and positive within {name}")
+        seeds.append(seed)
+    require(np.array_equal(values > 0, expected),
+            f"{label}: debris marker affects fixed geometry or misses floating vertices")
+    require(len(set(seeds)) == len(seeds), f"{label}: floating rocks share a debris seed")
+    active = bottom and exposed != 0
+    require(bool(groups) == active and body.get("properties", {}).get("FloatingDebrisRevision") == (1 if active else None),
+            f"{label}: invalid floating debris revision/ownership")
+    return {"animated_floating_rocks": len(groups), "debris_marker_matches_native_groups": True}
+
+
+def export_debris_values(document, primitives, label):
+    node = document.data["nodes"][0]
+    rows = document.data["meshes"][node["mesh"]]["primitives"]
+    require(len(rows) == len(primitives), f"{label}: ambiguous debris primitive order")
+    output = []
+    for row, primitive in zip(rows, primitives):
+        index = row["attributes"].get(DEBRIS_ATTRIBUTE)
+        if index is None:
+            output.append(np.zeros(len(primitive.points)))
+            continue
+        accessor = document.data["accessors"][index]
+        require(accessor.get("componentType") == 5126 and accessor.get("type") == "SCALAR"
+                and accessor.get("normalized", False) is False,
+                f"{label}: exported debris marker must be unnormalized FLOAT SCALAR")
+        values = document.accessor(index)
+        require(values.shape == (len(primitive.points), 1) and np.isfinite(values).all()
+                and np.all((values >= 0) & (values <= 1)), f"{label}: invalid exported debris marker values")
+        output.append(values[:, 0])
+    return output
 
 
 def model_name(identity):
@@ -200,16 +266,20 @@ def source_corner_records(body, label):
         streams[f"TEXCOORD_{index}"] = values.reshape(-1, 3, 2)
     require(isinstance(materials, list) and len(materials) == len(polygons)
             and all(isinstance(name, str) and name for name in materials), f"{label}: invalid source face materials")
+    debris = source_debris_values(body, label)
     return [{"points": points[face], "normals": normals.reshape(-1, 3, 3)[index],
-             "uv": {name: values[index] for name, values in streams.items()}, "material": materials[index]}
+             "uv": {name: values[index] for name, values in streams.items()}, "material": materials[index],
+             "debris": debris[face]}
             for index, face in enumerate(polygons)]
 
 
-def export_corner_records(primitives, streams):
+def export_corner_records(primitives, streams, debris=None):
+    if debris is None:
+        debris = [np.zeros(len(primitive.points)) for primitive in primitives]
     return [{"points": primitive.points[indices], "normals": primitive.normals[indices],
              "uv": {name: values[indices] for name, values in coordinates.items()},
-             "material": primitive.material.get("name", "")}
-            for primitive, coordinates in zip(primitives, streams) for indices in primitive.triangles]
+             "material": primitive.material.get("name", ""), "debris": seeds[indices]}
+            for primitive, coordinates, seeds in zip(primitives, streams, debris) for indices in primitive.triangles]
 
 
 def match_corner_records(actual, expected, label):
@@ -233,13 +303,14 @@ def match_corner_records(actual, expected, label):
             for rotation in range(3):
                 if (np.max(np.abs(record["points"]-np.roll(other["points"], rotation, axis=0))) <= TOLERANCE
                         and np.max(np.abs(record["normals"]-np.roll(other["normals"], rotation, axis=0))) <= NORMAL_TOLERANCE
+                        and np.max(np.abs(record["debris"]-np.roll(other["debris"], rotation, axis=0))) <= 1e-7
                         and all(np.max(np.abs(values-np.roll(other["uv"][name], rotation, axis=0))) <= TOLERANCE
                                 for name, values in record["uv"].items())):
                     found = index
                     break
             if found is not None:
                 break
-        require(found is not None, f"{label}: source/export triangle position, winding, normal, UV or material differs")
+        require(found is not None, f"{label}: source/export triangle position, winding, normal, UV, material or debris marker differs")
         remaining.remove(found)
     require(not remaining, f"{label}: source triangles were not all exported")
 
@@ -393,6 +464,36 @@ def rooted_masses(masses, core, label):
     require(reached == set(masses), f"{label}: boulder mass is not rooted in its native core")
 
 
+def audit_debris_motion_envelope(floating, masses, roles, exposed, label):
+    for name, value in floating.items():
+        require(not rock.core_intersection(value, roles["IslandCore"])
+                and not rock.point_inside_core(value["points"].mean(0), roles["IslandCore"]),
+                f"{label}: floating rock intersects its core")
+        fixed_distance = rock.mesh_surface_distance(value["faces"], roles["IslandCore"])
+        for other_name, other in {**masses, **floating}.items():
+            if other_name != name:
+                require(rock.convex_gap(value, other) > 0, f"{label}: floating rocks intersect another mass")
+                distance = rock.mesh_surface_distance(value["faces"], other["faces"])
+                if other_name in floating:
+                    require(distance >= .04 + 2*DEBRIS_MOTION_RADIUS-TOLERANCE,
+                            f"{label}: animated floating rocks lose their visible surface gap")
+                else:
+                    fixed_distance = min(fixed_distance, distance)
+        # Shoulders are fixed too. A translation by a vector inside the stated
+        # envelope can reduce surface distance by at most its Euclidean norm.
+        for other_name, faces in roles.items():
+            if re.fullmatch(r"ShoulderRock\d+", other_name):
+                fixed_distance = min(fixed_distance, rock.mesh_surface_distance(value["faces"], faces))
+        require(fixed_distance >= .04 + DEBRIS_MOTION_RADIUS-TOLERANCE,
+                f"{label}: animated floating rock loses its visible surface gap from fixed geometry")
+        low, high = np.asarray(value["minimum"]), np.asarray(value["maximum"])
+        minimum = np.asarray([-.04 if exposed & 8 else 0, -.04 if exposed & 1 else 0, -1])
+        maximum = np.asarray([1.04 if exposed & 2 else 1, 1.04 if exposed & 4 else 1, .777])
+        require(np.all(low-DEBRIS_MAXIMUM_OFFSET >= minimum-TOLERANCE)
+                and np.all(high+DEBRIS_MAXIMUM_OFFSET <= maximum+TOLERANCE),
+                f"{label}: animated floating rock escapes its body envelope")
+
+
 def audit_bottom_geometry(body, roles, exposed, lip, label):
     points = np.asarray(body["points"])
     require(points[:, 2].min() < -.4, f"{label}: floating bottom has no broad rock depth")
@@ -419,16 +520,7 @@ def audit_bottom_geometry(body, roles, exposed, lip, label):
     sizes = [float((value["maximum"]-value["minimum"])[:2].max()) for value in floating.values()]
     require(not sizes or max(sizes) >= .12, f"{label}: floating rocks are too small")
     require(len(sizes) < 2 or max(sizes)/min(sizes) >= 1.15, f"{label}: floating rocks lack size variation")
-    for name, value in floating.items():
-        require(not rock.core_intersection(value, roles["IslandCore"])
-                and not rock.point_inside_core(value["points"].mean(0), roles["IslandCore"]),
-                f"{label}: floating rock intersects its core")
-        distance = rock.mesh_surface_distance(value["faces"], roles["IslandCore"])
-        for other_name, other in {**masses, **floating}.items():
-            if other_name != name:
-                require(rock.convex_gap(value, other) > 0, f"{label}: floating rocks intersect another mass")
-                distance = min(distance, rock.mesh_surface_distance(value["faces"], other["faces"]))
-        require(distance >= rock.ROCK_GAP, f"{label}: floating rock loses its visible surface gap")
+    audit_debris_motion_envelope(floating, masses, roles, exposed, label)
     shoulders = shoulder.audit_shoulder_geometry(roles, True, exposed, lip, label)
     return boundary, {"floor_projected_area": area, "boulder_masses": len(masses),
                       "floating_rocks": len(floating), **shoulders}
@@ -441,7 +533,9 @@ def audit_body(path, row, contract, original, assets, verified_images):
     primitives, streams = native.read_primitives(document), rock.texture_coordinates(document)
     body, bottom, square = row["body"], row["bottom"], row["squareTop"]
     exposed, lip = row["exposedSideMask"], 1 if square else .91
-    match_corner_records(export_corner_records(primitives, streams), source_corner_records(body, label), label)
+    debris = export_debris_values(document, primitives, label)
+    match_corner_records(export_corner_records(primitives, streams, debris), source_corner_records(body, label), label)
+    debris_report = audit_debris_groups(body, bottom, exposed, label)
     properties = body["properties"]
     require(document.data["nodes"][0].get("extras", {}) == properties,
             f"{label}: exported properties differ from the editable source")
@@ -496,7 +590,7 @@ def audit_body(path, row, contract, original, assets, verified_images):
             f"{label}: incorrect shoulder count metadata")
     materials = audit_materials(document, original, contract, assets, verified_images)
     return primitives, boundary, {"file": label, "bottom": bottom, "square_top": square,
-                                   "source_corner_streams_match": True, **materials, **geometry}
+                                   "source_corner_streams_match": True, **materials, **geometry, **debris_report}
 
 
 def audit_caps_source(bundle_caps, chamfered, square, label="Current caps"):

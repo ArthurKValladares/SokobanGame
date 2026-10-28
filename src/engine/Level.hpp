@@ -237,6 +237,10 @@ public:
         std::string detail;
         std::string mask;
         Vec3 color { 0.25f, 0.75f, 0.35f };
+        // Optional blue/alpha layers. Empty legacy entries use the default
+        // autumn materials; base/detail remain the red/green layers.
+        std::string texture2;
+        std::string texture3;
 
         bool operator==(const GroundSplat&) const = default;
     };

@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -668,6 +669,101 @@ void testPreservesAuthoredTangentFrameForNormalMapping()
     validateFrame(loadGltfMesh(model, options));
 }
 
+void testLoadsGroundDebrisSeedsWithoutChangingSurfaceData()
+{
+    TEST("loadsGroundDebrisSeedsWithoutChangingSurfaceData");
+    TempDirectory temp;
+    const std::filesystem::path model = temp.path() / "ground-debris.glb";
+    const auto writeFixture = [&](std::string_view attribute,
+                                  std::string_view accessor,
+                                  float seed) {
+        std::vector<uint8_t> binary;
+        for (float value : {
+                 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f,
+                 0.0f, -0.70710677f, 0.70710677f,
+                 0.0f, -0.70710677f, 0.70710677f,
+                 0.0f, -0.70710677f, 0.70710677f,
+                 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f,
+                 0.25f, 0.25f, 0.75f, 0.25f, 0.25f, 0.75f,
+                 seed, seed, seed, 0.0f, 0.0f, 0.0f,
+             }) {
+            appendFloat(binary, value);
+        }
+        appendUint16(binary, 0);
+        appendUint16(binary, 1);
+        appendUint16(binary, 2);
+        std::string json = R"json({
+  "asset":{"version":"2.0"},
+  "buffers":[{"byteLength":150}],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":36},
+    {"buffer":0,"byteOffset":36,"byteLength":36},
+    {"buffer":0,"byteOffset":72,"byteLength":24},
+    {"buffer":0,"byteOffset":96,"byteLength":24},
+    {"buffer":0,"byteOffset":120,"byteLength":24},
+    {"buffer":0,"byteOffset":144,"byteLength":6}
+  ],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,1]},
+    {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
+    {"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},
+    {"bufferView":3,"componentType":5126,"count":3,"type":"VEC2"},
+    @ACCESSOR@,
+    {"bufferView":5,"componentType":5123,"count":3,"type":"SCALAR"}
+  ],
+  "meshes":[{"primitives":[
+    {"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2,"TEXCOORD_1":3},"indices":5},
+    {"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2,"TEXCOORD_1":3,@ATTRIBUTE@:4},"indices":5}
+  ]}]
+})json";
+        json.replace(json.find("@ACCESSOR@"), 10, accessor);
+        json.replace(json.find("@ATTRIBUTE@"), 11, attribute);
+        writeGlb(model, json, binary);
+    };
+    constexpr std::string_view scalar =
+        R"({"bufferView":4,"componentType":5126,"count":3,"type":"SCALAR"})";
+    writeFixture(R"("_GROUND_DEBRIS")", scalar, 0.625f);
+    const MeshData mesh = loadGltfMesh(model, { .preserveSourceScale = true });
+    CHECK(mesh.vertices.size() == 6);
+    if (mesh.vertices.size() != 6) return;
+    for (std::size_t index = 0; index < 3; ++index) {
+        const MeshVertex& fixed = mesh.vertices[index];
+        const MeshVertex& debris = mesh.vertices[index + 3];
+        CHECK(fixed.groundDebris == 0.0f);
+        CHECK(debris.groundDebris == 0.625f);
+        CHECK(debris.position == fixed.position);
+        CHECK(debris.normal == fixed.normal);
+        CHECK(debris.tangent == fixed.tangent);
+        CHECK(debris.uv == fixed.uv);
+        CHECK(debris.uv1 == fixed.uv1);
+    }
+    CHECK(mesh.vertices[3].uv != mesh.vertices[3].uv1);
+    CHECK(mesh.indices == std::vector<uint32_t>({ 0, 1, 2, 3, 4, 5 }));
+
+    writeFixture(R"("_OTHER_ATTRIBUTE")", scalar, 0.625f);
+    const MeshData other = loadGltfMesh(model);
+    for (const MeshVertex& vertex : other.vertices) CHECK(vertex.groundDebris == 0.0f);
+
+    for (std::string_view malformed : {
+             R"({"bufferView":4,"componentType":5126,"count":2,"type":"SCALAR"})",
+             R"({"bufferView":4,"componentType":5126,"count":3,"type":"VEC2"})",
+             R"({"bufferView":4,"componentType":5123,"count":3,"type":"SCALAR"})",
+             R"({"bufferView":4,"componentType":5126,"count":3,"type":"SCALAR","normalized":true})",
+         }) {
+        writeFixture(R"("_GROUND_DEBRIS")", malformed, 0.625f);
+        checkThrows([&] { (void)loadGltfMesh(model); },
+            "malformed ground debris accessor is rejected");
+    }
+    for (float invalidSeed : {
+             -0.25f, 1.25f, std::numeric_limits<float>::infinity(),
+             std::numeric_limits<float>::quiet_NaN(),
+         }) {
+        writeFixture(R"("_GROUND_DEBRIS")", scalar, invalidSeed);
+        checkThrows([&] { (void)loadGltfMesh(model); },
+            "out-of-range or nonfinite ground debris seed is rejected");
+    }
+}
+
 void testPreservesHdrEmissiveStrengthAndStandardEmission()
 {
     TEST("preservesHdrEmissiveStrengthAndStandardEmission");
@@ -755,6 +851,7 @@ int main()
     testMetadataInspectionPreservesGlbContainerValidation();
     testLoadsMaterialMapBindingsAndAuthoredParameters();
     testPreservesAuthoredTangentFrameForNormalMapping();
+    testLoadsGroundDebrisSeedsWithoutChangingSurfaceData();
     testPreservesHdrEmissiveStrengthAndStandardEmission();
 
     if (failures == 0) {

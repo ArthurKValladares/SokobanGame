@@ -1,6 +1,7 @@
 #include "engine/SplatCanvas.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace sokoban {
@@ -15,6 +16,28 @@ constexpr float strokeSpacingFraction = 0.25f;
 // A drag across a large board could otherwise request an unbounded number of
 // stamps in one frame (for example if the pointer jumps after an alt-tab).
 constexpr int maxStampsPerSegment = 512;
+
+// Proportional integer allocation with largest remainders keeps every texel
+// exactly normalized without gradually favouring the lower-numbered layers.
+void distributeWeights(const std::array<uint32_t, 4>& source,
+    uint32_t total, uint32_t budget, uint8_t* destination)
+{
+    std::array<uint32_t, 4> remainders {};
+    uint32_t used = 0;
+    for (std::size_t layer = 0; layer < source.size(); ++layer) {
+        destination[layer] = total == 0 ? 0 :
+            static_cast<uint8_t>(source[layer] * budget / total);
+        remainders[layer] = total == 0 ? 0 : source[layer] * budget % total;
+        used += destination[layer];
+    }
+    while (used < budget) {
+        const auto largest = std::max_element(remainders.begin(), remainders.end());
+        const auto layer = static_cast<std::size_t>(largest - remainders.begin());
+        ++destination[layer];
+        *largest = 0;
+        ++used;
+    }
+}
 
 // Brush profile at `distance` texels from the centre, in 0..1.
 //
@@ -53,8 +76,11 @@ SplatCanvas SplatCanvas::createForBoard(
     canvas.width_ = boardTilesWide * texelsPerTile;
     canvas.height_ = boardTilesHigh * texelsPerTile;
     canvas.weights_.assign(
-        static_cast<std::size_t>(canvas.width_) * canvas.height_,
-        initialWeight);
+        static_cast<std::size_t>(canvas.width_) * canvas.height_ * layerCount, 0);
+    for (std::size_t i = 0; i < canvas.weights_.size(); i += layerCount) {
+        canvas.weights_[i] = static_cast<uint8_t>(255 - initialWeight);
+        canvas.weights_[i + 1] = initialWeight;
+    }
     return canvas;
 }
 
@@ -71,10 +97,28 @@ std::optional<SplatCanvas> SplatCanvas::fromImage(const ImageData& image)
     SplatCanvas canvas;
     canvas.width_ = image.width;
     canvas.height_ = image.height;
-    canvas.weights_.resize(texels);
+    canvas.weights_.resize(texels * channels);
     for (std::size_t i = 0; i < texels; ++i) {
-        canvas.weights_[i] =
-            static_cast<uint8_t>(image.rgba[i * channels]);
+        uint8_t* destination = canvas.weights_.data() + i * channels;
+        if (image.sourceChannels <= 2) {
+            const auto gray = static_cast<uint8_t>(image.rgba[i * channels]);
+            destination[0] = static_cast<uint8_t>(255 - gray);
+            destination[1] = gray;
+            destination[2] = destination[3] = 0;
+        } else {
+            std::array<uint32_t, 4> source {};
+            uint32_t total = 0;
+            for (std::size_t layer = 0; layer < channels; ++layer) {
+                source[layer] = static_cast<uint8_t>(image.rgba[i * channels + layer]);
+                total += source[layer];
+            }
+            if (total == 0) {
+                destination[0] = 255;
+                destination[1] = destination[2] = destination[3] = 0;
+            } else {
+                distributeWeights(source, total, 255, destination);
+            }
+        }
     }
     return canvas;
 }
@@ -89,10 +133,15 @@ Vec2 SplatCanvas::boardTiles() const
 
 uint8_t SplatCanvas::weightAt(uint32_t x, uint32_t y) const
 {
-    if (x >= width_ || y >= height_) {
+    return weightAt(x, y, 1);
+}
+
+uint8_t SplatCanvas::weightAt(uint32_t x, uint32_t y, uint32_t layer) const
+{
+    if (x >= width_ || y >= height_ || layer >= layerCount) {
         return 0;
     }
-    return weights_[static_cast<std::size_t>(y) * width_ + x];
+    return weights_[(static_cast<std::size_t>(y) * width_ + x) * layerCount + layer];
 }
 
 ImageData SplatCanvas::toImage() const
@@ -100,13 +149,9 @@ ImageData SplatCanvas::toImage() const
     ImageData image;
     image.width = width_;
     image.height = height_;
-    image.rgba.resize(weights_.size() * 4);
+    image.rgba.resize(weights_.size());
     for (std::size_t i = 0; i < weights_.size(); ++i) {
-        const std::byte value = static_cast<std::byte>(weights_[i]);
-        image.rgba[i * 4 + 0] = value;
-        image.rgba[i * 4 + 1] = value;
-        image.rgba[i * 4 + 2] = value;
-        image.rgba[i * 4 + 3] = static_cast<std::byte>(255);
+        image.rgba[i] = static_cast<std::byte>(weights_[i]);
     }
     return image;
 }
@@ -130,7 +175,7 @@ void SplatCanvas::beginStroke()
         return;
     }
     strokeBase_ = weights_;
-    strokeCoverage_.assign(weights_.size(), 0);
+    strokeCoverage_.assign(weights_.size() / layerCount, 0);
     strokeActive_ = true;
 }
 
@@ -145,7 +190,9 @@ void SplatCanvas::endStroke()
 
 bool SplatCanvas::stamp(Vec2 centerTiles, const Brush& brush)
 {
-    if (empty() || brush.radiusTiles <= 0.0f || brush.opacity <= 0.0f) {
+    const auto selectedLayer = static_cast<uint32_t>(brush.color);
+    if (empty() || brush.radiusTiles <= 0.0f || brush.opacity <= 0.0f ||
+        selectedLayer >= layerCount) {
         return false;
     }
 
@@ -180,8 +227,6 @@ bool SplatCanvas::stamp(Vec2 centerTiles, const Brush& brush)
         return false;
     }
 
-    const float target =
-        brush.color == BrushColor::White ? 255.0f : 0.0f;
     const float opacity = std::clamp(brush.opacity, 0.0f, 1.0f);
     bool changed = false;
 
@@ -213,14 +258,23 @@ bool SplatCanvas::stamp(Vec2 centerTiles, const Brush& brush)
 
             // Composited against where the stroke started, never against its
             // own output.
-            const float base = static_cast<float>(strokeBase_[index]);
-            const float blended = base +
-                (target - base) * (static_cast<float>(coverage) / 255.0f);
-            const auto updated = static_cast<uint8_t>(
-                std::clamp(std::lround(blended), 0L, 255L));
-            if (updated != weights_[index]) {
-                weights_[index] = updated;
-                changed = true;
+            const std::size_t offset = index * layerCount;
+            const uint32_t selectedBase = strokeBase_[offset + selectedLayer];
+            const auto selectedWeight = static_cast<uint8_t>(selectedBase +
+                ((255 - selectedBase) * coverage + 127) / 255);
+            std::array<uint32_t, 4> others {};
+            for (uint32_t layer = 0; layer < layerCount; ++layer) {
+                if (layer != selectedLayer) others[layer] = strokeBase_[offset + layer];
+            }
+            std::array<uint8_t, 4> updated {};
+            distributeWeights(others, 255 - selectedBase,
+                255 - selectedWeight, updated.data());
+            updated[selectedLayer] = selectedWeight;
+            for (uint32_t layer = 0; layer < layerCount; ++layer) {
+                if (updated[layer] != weights_[offset + layer]) {
+                    weights_[offset + layer] = updated[layer];
+                    changed = true;
+                }
             }
         }
     }
@@ -280,20 +334,24 @@ bool SplatCanvas::resizeToBoard(
     }
 
     std::vector<uint8_t> resized(
-        static_cast<std::size_t>(width) * height, fill);
+        static_cast<std::size_t>(width) * height * layerCount, 0);
+    for (std::size_t i = 0; i < resized.size(); i += layerCount) {
+        resized[i] = static_cast<uint8_t>(255 - fill);
+        resized[i + 1] = fill;
+    }
     // Anchored at the origin, which is where the board's origin is: tile
     // (0,0) keeps its paint whichever way the board grew or shrank.
     const uint32_t copyWidth = std::min(width, width_);
     const uint32_t copyHeight = std::min(height, height_);
     for (uint32_t y = 0; y < copyHeight; ++y) {
         const auto source = weights_.begin() +
-            static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y) * width_);
+            static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y) * width_ * layerCount);
         std::copy(
             source,
-            source + static_cast<std::ptrdiff_t>(copyWidth),
+            source + static_cast<std::ptrdiff_t>(copyWidth * layerCount),
             resized.begin() +
                 static_cast<std::ptrdiff_t>(
-                    static_cast<std::size_t>(y) * width));
+                    static_cast<std::size_t>(y) * width * layerCount));
     }
 
     width_ = width;

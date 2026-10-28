@@ -7,6 +7,7 @@ layout(location = 2) in vec2 inUv;
 layout(location = 8) in vec4 inTangent;
 layout(location = 9) in vec2 inUv1;
 layout(location = 10) in uint inMaterialIndex;
+layout(location = 11) in float inGroundDebris;
 
 layout(location = 0) out vec4 outShadowPosition;
 layout(location = 1) out float outFaceCoordU;
@@ -33,6 +34,7 @@ layout(location = 10) flat out uint outMaterialIndex;
 
 #include "DrawInstance.glsl"
 #include "GroundRim.glsl"
+#include "GroundDebris.glsl"
 
 #define draw drawInstances.instances[gl_InstanceIndex]
 
@@ -58,7 +60,8 @@ void main()
 
     GroundRimDeformation rim = groundRimDeformation(
         inPosition, draw.passData[2], uint(draw.passData[3].x + 0.5), draw.passData[3].yz);
-    vec3 worldPosition = (worldTransform * vec4(rim.position, 1.0)).xyz;
+    vec3 modelPosition = rim.position + groundDebrisOffset(inGroundDebris, draw.passData[1]);
+    vec3 worldPosition = (worldTransform * vec4(modelPosition, 1.0)).xyz;
     gl_Position = frame.clipFromWorld * vec4(worldPosition, 1.0);
     outWorldPosition = worldPosition;
     outShadowPosition = sunShadowFromWorld(worldPosition);

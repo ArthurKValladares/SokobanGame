@@ -15,6 +15,7 @@
 #include "engine/render/OpaqueDrawSorter.hpp"
 #include "engine/render/OutlineConfig.hpp"
 #include "engine/render/GroundRimGeometry.hpp"
+#include "engine/render/GroundDebris.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/SceneDrawLanes.hpp"
 #include "engine/render/WaterConfig.hpp"
@@ -271,7 +272,14 @@ Aabb modelWorldBounds(const RenderFrameData::Tile& tile, const Aabb& bounds)
     const ModelTransformPoints transform =
         IsoScenePreparer::modelTransformPoints(tile);
     Aabb result;
-    for (Vec3 corner : corners(bounds)) {
+    Aabb visualBounds = bounds;
+    if (hasAnimatedGroundDebris(tile)) {
+        const Vec3 margin { groundDebrisHorizontalAmplitude,
+            groundDebrisHorizontalAmplitude, groundDebrisVerticalAmplitude };
+        visualBounds.minimum = visualBounds.minimum - margin;
+        visualBounds.maximum = visualBounds.maximum + margin;
+    }
+    for (Vec3 corner : corners(visualBounds)) {
         result = expand(result, transformModelPoint(transform, corner));
     }
     return result;
@@ -940,7 +948,8 @@ private:
             drawModelShadow(
                 commandBuffer,
                 scene.shadowLayout,
-                tile);
+                tile,
+                frameData.effectAnimationTimeSeconds);
         }
         shadowPass_.end(commandBuffer, stats_);
 
@@ -995,6 +1004,8 @@ private:
                     .tileIndex = tileIndex,
                     .tile = tile,
                     .ready = ready,
+                    .groundDebrisAnimation = groundDebrisAnimationData(
+                        tile, frameData.effectAnimationTimeSeconds),
                 });
                 if (ready && !skinned) {
                     // Neighbour residency/validation can change the selected
@@ -1061,7 +1072,8 @@ private:
                         commandBuffer,
                         light,
                         cubeFace,
-                        tile);
+                        tile,
+                        frameData.effectAnimationTimeSeconds);
                 }
                 shadowPass_.endPointFace(commandBuffer);
             }
@@ -2153,7 +2165,7 @@ private:
                     viewportExtent.x, viewportExtent.y,
                     config::interactionOutlineWidthPixels * renderScale,
                     transparent ? (box ? 1.0f : 2.0f) : 0.0f,
-                }, Vec4 {}, Vec4 {}, Vec4 {} },
+                }, groundDebrisAnimationData(tile, frameData.effectAnimationTimeSeconds), Vec4 {}, Vec4 {} },
                 .color = color,
             });
             if (box) {
@@ -2203,7 +2215,7 @@ private:
                 .vertices = IsoScenePreparer::modelWorldTransform(tile),
                 .passData = { Vec4 {
                     scene.renderExtent.x, scene.renderExtent.y, 2.0f, box ? 1.0f : 0.0f,
-                }, Vec4 {}, Vec4 {}, Vec4 {} },
+                }, groundDebrisAnimationData(tile, frameData.effectAnimationTimeSeconds), Vec4 {}, Vec4 {} },
                 .color = tile.color,
             });
             if (box) {
@@ -3880,8 +3892,10 @@ private:
                     linkedAura ? 1.0f : 0.0f,
                     tile.effect == RenderSurfaceEffect::PlateEnergy ? 1.0f : 0.0f,
                 },
-                Vec4 { tile.effect == RenderSurfaceEffect::PlateEnergy
-                    ? effectAnimationTimeSeconds : 0.0f, 0.0f, 0.0f, 0.0f },
+                hasAnimatedGroundDebris(tile)
+                    ? groundDebrisAnimationData(tile, effectAnimationTimeSeconds)
+                    : Vec4 { tile.effect == RenderSurfaceEffect::PlateEnergy
+                        ? effectAnimationTimeSeconds : 0.0f, 0.0f, 0.0f, 0.0f },
                 Vec4 { tile.groundRimWidth, tile.groundRimDepth,
                     GroundRimProfile {}.bodyBand, static_cast<float>(tile.groundRimSides) },
                 Vec4 { static_cast<float>(tile.groundRimConcaveCorners),
@@ -3999,7 +4013,8 @@ private:
     void drawModelShadow(
         VkCommandBuffer commandBuffer,
         const ShadowRenderLayout& layout,
-        const RenderFrameData::Tile& tile)
+        const RenderFrameData::Tile& tile,
+        float effectAnimationTimeSeconds)
     {
         const VulkanModelResources::MeshView mesh =
             models_.meshForTile(tile, configuration_.descriptorFrameIndex);
@@ -4015,7 +4030,7 @@ private:
                     layout, transform.yPoint),
                 IsoScenePreparer::projectShadowPoint(
                     layout, transform.zPoint)),
-            .passData = { Vec4 {}, Vec4 {},
+            .passData = { Vec4 {}, groundDebrisAnimationData(tile, effectAnimationTimeSeconds),
                 Vec4 { tile.groundRimWidth, tile.groundRimDepth,
                     GroundRimProfile {}.bodyBand, static_cast<float>(tile.groundRimSides) },
                 Vec4 { static_cast<float>(tile.groundRimConcaveCorners),
@@ -4050,7 +4065,8 @@ private:
         VkCommandBuffer commandBuffer,
         const RenderFrameData::PointLight& light,
         uint32_t cubeFace,
-        const RenderFrameData::Tile& tile)
+        const RenderFrameData::Tile& tile,
+        float effectAnimationTimeSeconds)
     {
         const VulkanModelResources::MeshView mesh =
             models_.meshForTile(tile, configuration_.descriptorFrameIndex);
@@ -4062,7 +4078,7 @@ private:
                 projectPointShadow(light, cubeFace, transform.xPoint),
                 projectPointShadow(light, cubeFace, transform.yPoint),
                 projectPointShadow(light, cubeFace, transform.zPoint)),
-            .passData = { Vec4 {}, Vec4 {},
+            .passData = { Vec4 {}, groundDebrisAnimationData(tile, effectAnimationTimeSeconds),
                 Vec4 { tile.groundRimWidth, tile.groundRimDepth,
                     GroundRimProfile {}.bodyBand, static_cast<float>(tile.groundRimSides) },
                 Vec4 { static_cast<float>(tile.groundRimConcaveCorners),

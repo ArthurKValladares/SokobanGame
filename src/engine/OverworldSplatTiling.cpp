@@ -47,7 +47,12 @@ std::string legacyMaskName(
 bool sameMaterials(
     const Level::GroundSplat& left, const Level::GroundSplat& right)
 {
-    return left.base == right.base && left.detail == right.detail;
+    const auto effective = [](const std::string& name, const char* fallback) -> std::string_view {
+        return name.empty() ? std::string_view(fallback) : std::string_view(name);
+    };
+    return left.base == right.base && left.detail == right.detail &&
+        effective(left.texture2, "GroundAutumnGrass") == effective(right.texture2, "GroundAutumnGrass") &&
+        effective(left.texture3, "GroundAutumnRock") == effective(right.texture3, "GroundAutumnRock");
 }
 
 bool sameSelection(
@@ -184,7 +189,9 @@ OverworldSplatTilingPlan planOverworldSplatTiling(
         Level::GroundSplat after;
         if (screen.definition.groundSplats.empty()) {
             if (selected.base != groundSplatBaseTextureName ||
-                selected.detail != groundSplatDetailTextureName) {
+                selected.detail != groundSplatDetailTextureName ||
+                (!selected.texture2.empty() && selected.texture2 != "GroundAutumnGrass") ||
+                (!selected.texture3.empty() && selected.texture3 != "GroundAutumnRock")) {
                 ++skipped;
                 return;
             }

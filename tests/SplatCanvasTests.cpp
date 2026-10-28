@@ -170,15 +170,15 @@ void testHardnessSurvivesAHeldClick()
         const std::vector<uint8_t> weights = profileAfter(8, hardness);
         const uint32_t x = static_cast<uint32_t>(5.0f * texelsPerTile);
         const uint32_t y = 4 * texelsPerTile;
-        return weights[static_cast<std::size_t>(y) * 8 * texelsPerTile + x];
+        return weights[(static_cast<std::size_t>(y) * 8 * texelsPerTile + x) * 4 + 1];
     };
     CHECK(midRadius(1.0f) == 255);
     CHECK(midRadius(0.25f) < 220);
     CHECK(midRadius(0.05f) < midRadius(0.25f));
     // A soft brush is still solid dead centre.
     const std::vector<uint8_t> soft = profileAfter(8, 0.05f);
-    CHECK(soft[static_cast<std::size_t>(4 * texelsPerTile) * 8 * texelsPerTile +
-              4 * texelsPerTile] == 255);
+    CHECK(soft[(static_cast<std::size_t>(4 * texelsPerTile) * 8 * texelsPerTile +
+              4 * texelsPerTile) * 4 + 1] == 255);
 }
 
 void testCoverageAtMatchesWhatStampingWrites()
@@ -433,7 +433,7 @@ void testResizeToBoardKeepsPaintAnchoredAtTheOrigin()
         static_cast<uint32_t>(0.5f * texelsPerTile),
         static_cast<uint32_t>(0.5f * texelsPerTile)) == 255);
     CHECK(canvas.weights().size() ==
-        static_cast<std::size_t>(canvas.width()) * canvas.height());
+        static_cast<std::size_t>(canvas.width()) * canvas.height() * 4);
 
     // Same size is not a change, and a degenerate board is refused.
     CHECK(!canvas.resizeToBoard(2, 2));
@@ -465,13 +465,14 @@ void testImageRoundTrip()
     CHECK(image.rgba.size() ==
         static_cast<std::size_t>(image.width) * image.height * 4);
 
-    // Grey, so the map reads correctly in an image viewer, and opaque.
+    // RGBA are independent weights; alpha is zero while only layers 0/1 exist.
     const std::size_t sample =
         (static_cast<std::size_t>(1 * texelsPerTile) * image.width +
             static_cast<std::size_t>(1.5f * texelsPerTile)) * 4;
-    CHECK(image.rgba[sample + 0] == image.rgba[sample + 1]);
-    CHECK(image.rgba[sample + 1] == image.rgba[sample + 2]);
-    CHECK(image.rgba[sample + 3] == static_cast<std::byte>(255));
+    CHECK(static_cast<uint8_t>(image.rgba[sample]) +
+        static_cast<uint8_t>(image.rgba[sample + 1]) == 255);
+    CHECK(image.rgba[sample + 2] == std::byte { 0 });
+    CHECK(image.rgba[sample + 3] == std::byte { 0 });
 
     const std::optional<SplatCanvas> reloaded = SplatCanvas::fromImage(image);
     CHECK(reloaded.has_value());
@@ -499,10 +500,71 @@ void testFromImageRejectsUnusableInput()
     ImageData odd;
     odd.width = 3;
     odd.height = 5;
+    odd.sourceChannels = 1;
     odd.rgba.assign(3 * 5 * 4, static_cast<std::byte>(200));
     const std::optional<SplatCanvas> loaded = SplatCanvas::fromImage(odd);
     CHECK(loaded.has_value());
     CHECK(loaded->weightAt(0, 0) == 200);
+    CHECK(loaded->weightAt(0, 0, 0) == 55);
+    CHECK(loaded->weightAt(0, 0, 2) == 0);
+    CHECK(loaded->weightAt(0, 0, 3) == 0);
+}
+
+void testFourLayerPaintingPreservesNormalizedWeightsAndUndo()
+{
+    TEST("fourLayerPaintingPreservesNormalizedWeightsAndUndo");
+    SplatCanvas canvas = SplatCanvas::createForBoard(4, 4);
+    const uint32_t sample = 2 * texelsPerTile;
+    const auto original = canvas.snapshot();
+    for (const auto layer : { SplatCanvas::BrushColor::Layer1,
+             SplatCanvas::BrushColor::Layer2, SplatCanvas::BrushColor::Layer3 }) {
+        SplatCanvas::Brush brush {
+            .radiusTiles = 1.0f, .hardness = 1.0f, .opacity = 0.5f, .color = layer,
+        };
+        canvas.beginStroke();
+        CHECK(canvas.stamp({ 2.0f, 2.0f }, brush));
+        const auto painted = canvas.snapshot();
+        CHECK(!canvas.stamp({ 2.0f, 2.0f }, brush));
+        CHECK(canvas.snapshot() == painted);
+        canvas.endStroke();
+        CHECK(canvas.weightAt(sample, sample, static_cast<uint32_t>(layer)) == 128);
+        uint32_t sum = 0;
+        for (uint32_t channel = 0; channel < 4; ++channel) {
+            sum += canvas.weightAt(sample, sample, channel);
+        }
+        CHECK(sum == 255);
+    }
+    // Painting alpha must keep all four weights, including mixed blue/green,
+    // across upload/import and snapshot/restore.
+    const auto reloaded = SplatCanvas::fromImage(canvas.toImage());
+    CHECK(reloaded && reloaded->weights() == canvas.weights());
+    CHECK(canvas.weightAt(sample, sample, 1) > 0);
+    CHECK(canvas.weightAt(sample, sample, 2) > 0);
+    CHECK(canvas.weightAt(sample, sample, 3) == 128);
+    CHECK(canvas.restore(original));
+    CHECK(canvas.weightAt(sample, sample, 0) == 255);
+    CHECK(canvas.weightAt(sample, sample, 3) == 0);
+}
+
+void testRgbaImportNormalizesAndDistinguishesAlphaFromLegacyGray()
+{
+    TEST("rgbaImportNormalizesAndDistinguishesAlphaFromLegacyGray");
+    ImageData image;
+    image.width = 3;
+    image.height = 1;
+    image.rgba = { std::byte { 100 }, std::byte { 100 }, std::byte { 100 }, std::byte { 100 },
+        std::byte { 0 }, std::byte { 0 }, std::byte { 0 }, std::byte { 255 },
+        std::byte { 0 }, std::byte { 0 }, std::byte { 0 }, std::byte { 0 } };
+    const auto loaded = SplatCanvas::fromImage(image);
+    CHECK(loaded.has_value());
+    CHECK(loaded->weightAt(0, 0, 0) == 64);
+    CHECK(loaded->weightAt(0, 0, 1) == 64);
+    CHECK(loaded->weightAt(0, 0, 2) == 64);
+    CHECK(loaded->weightAt(0, 0, 3) == 63);
+    CHECK(loaded->weightAt(1, 0, 3) == 255);
+    CHECK(loaded->weightAt(1, 0, 0) == 0);
+    CHECK(loaded->weightAt(2, 0, 0) == 255);
+    CHECK(loaded->weightAt(2, 0, 3) == 0);
 }
 
 } // namespace
@@ -525,6 +587,8 @@ int main()
     testResizeToBoardKeepsPaintAnchoredAtTheOrigin();
     testImageRoundTrip();
     testFromImageRejectsUnusableInput();
+    testFourLayerPaintingPreservesNormalizedWeightsAndUndo();
+    testRgbaImportNormalizesAndDistinguishesAlphaFromLegacyGray();
 
     if (failures == 0) {
         std::cout << "SplatCanvasTests: " << checks << " checks passed\n";

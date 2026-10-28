@@ -9,9 +9,8 @@
 
 namespace sokoban {
 
-// Editable ground splat weight map: one 8-bit weight per texel, covering one
-// screen's board exactly. 0 is pure base material (grass), 255 is pure detail
-// (rock); the shader reads this as the blend factor.
+// Editable ground splat map: four 8-bit material weights per texel, mapped to
+// RGBA. Weights sum to 255; alpha is a material weight, not transparency.
 //
 // Deliberately headless and renderer-free. All the brush maths lives here so
 // it can be unit-tested without a device, a window, or a running editor - the
@@ -24,12 +23,16 @@ public:
     // dividing the map's dimensions by this, so a mismatch silently offsets
     // and rescales every painted stroke.
     static constexpr uint32_t texelsPerTile = 32;
+    static constexpr uint32_t layerCount = 4;
 
     enum class BrushColor : uint8_t {
-        // Paints toward the detail layer (rock).
-        White,
-        // Paints toward the base layer (grass).
-        Black,
+        Layer0 = 0,
+        Layer1 = 1,
+        Layer2 = 2,
+        Layer3 = 3,
+        // Legacy names retained for callers painting the original two layers.
+        Black = Layer0,
+        White = Layer1,
     };
 
     struct Brush {
@@ -43,13 +46,16 @@ public:
         BrushColor color = BrushColor::White;
     };
 
-    // A board-sized canvas filled with `initialWeight` everywhere.
+    // A board-sized canvas with the legacy layer-1 `initialWeight`; the rest
+    // starts in layer 0. New blank canvases are therefore solid red.
     [[nodiscard]] static SplatCanvas createForBoard(
         uint32_t boardTilesWide,
         uint32_t boardTilesHigh,
         uint8_t initialWeight = 0);
 
-    // Reads the red channel of an already-decoded map. Fails (returns empty)
+    // Imports RGBA weights, normalizing each texel. Legacy grayscale sources
+    // become (255-gray, gray, 0, 0), preserving their original two-layer blend.
+    // Fails (returns empty)
     // on a zero-sized image; any other size is accepted, since a map authored
     // at a different density is still paintable - it just covers a different
     // number of tiles.
@@ -64,11 +70,11 @@ public:
     [[nodiscard]] Vec2 boardTiles() const;
 
     [[nodiscard]] uint8_t weightAt(uint32_t x, uint32_t y) const;
+    [[nodiscard]] uint8_t weightAt(uint32_t x, uint32_t y, uint32_t layer) const;
+    // Interleaved RGBA bytes, also used for undo and lossless PNG persistence.
     [[nodiscard]] const std::vector<uint8_t>& weights() const { return weights_; }
 
-    // Expands the single weight channel into the RGBA the uploader and PNG
-    // writer both expect. Weight rides in red; green and blue mirror it so the
-    // map stays readable as greyscale in any image viewer.
+    // Returns RGBA weights unchanged for the uploader and PNG writer.
     [[nodiscard]] ImageData toImage() const;
 
     // A stroke is one press-drag-release. Within it, each texel accumulates

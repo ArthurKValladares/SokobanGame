@@ -416,7 +416,8 @@ def export_body(body, path):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             result = bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB", use_selection=True,
                 use_active_scene=True, export_normals=True, export_tangents=True, export_texcoords=True,
-                export_animations=False, export_yup=True, export_keep_originals=True, export_extras=True)
+                export_animations=False, export_yup=True, export_keep_originals=True, export_extras=True,
+                export_attributes=True)
         assert "FINISHED" in result
     finally:
         body.location = location

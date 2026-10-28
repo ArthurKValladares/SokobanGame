@@ -10,6 +10,7 @@
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/GroundRimSurface.hpp"
 #include "engine/render/GroundChunkGeometry.hpp"
+#include "engine/render/GroundDebris.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -177,13 +178,17 @@ std::array<Vec3, 8> tileCorners(const RenderFrameData::Tile& tile)
     if (tile.groundModule && tile.groundModuleBottom) {
         const uint8_t sides = tile.groundModuleSideMask;
         const float left = tile.position.x -
-            ((sides & groundWestSide) ? groundTileBottomOverhang * tile.size.x : 0.0f);
+            (((sides & groundWestSide) ? groundTileBottomOverhang : 0.0f) +
+                groundDebrisHorizontalAmplitude) * tile.size.x;
         const float right = tile.position.x + tile.size.x +
-            ((sides & groundEastSide) ? groundTileBottomOverhang * tile.size.x : 0.0f);
+            (((sides & groundEastSide) ? groundTileBottomOverhang : 0.0f) +
+                groundDebrisHorizontalAmplitude) * tile.size.x;
         const float nearY = tile.position.y -
-            ((sides & groundNorthSide) ? groundTileBottomOverhang * tile.size.y : 0.0f);
+            (((sides & groundNorthSide) ? groundTileBottomOverhang : 0.0f) +
+                groundDebrisHorizontalAmplitude) * tile.size.y;
         const float farY = tile.position.y + tile.size.y +
-            ((sides & groundSouthSide) ? groundTileBottomOverhang * tile.size.y : 0.0f);
+            (((sides & groundSouthSide) ? groundTileBottomOverhang : 0.0f) +
+                groundDebrisHorizontalAmplitude) * tile.size.y;
         // The mask is already in world-cell orientation. The enclosing box
         // covers the lower rocks without changing the model transform or
         // the logical faces used for picking.
@@ -192,7 +197,8 @@ std::array<Vec3, 8> tileCorners(const RenderFrameData::Tile& tile)
             result[corner].y = corner % 4 < 2 ? nearY : farY;
         }
         for (std::size_t corner = 0; corner < 4; ++corner) {
-            result[corner].z -= groundTileBottomDepth * std::max(tile.height, 0.0f);
+            result[corner].z -= (groundTileBottomDepth + groundDebrisVerticalAmplitude) *
+                std::max(tile.height, 0.0f);
         }
     }
     return result;
@@ -402,11 +408,12 @@ IsoRenderLayout calculateIsoLayout(
                 tile.position.x + tile.size.x <= left || tile.position.x >= right ||
                 tile.position.y + tile.size.y <= nearY || tile.position.y >= farY ||
                 tile.baseElevation < cameraExtent.originZ || tile.baseElevation >= top) continue;
-            bottom = std::min(bottom, tile.baseElevation - groundTileBottomDepth * std::max(tile.height, 0.0f));
+            bottom = std::min(bottom, tile.baseElevation -
+                (groundTileBottomDepth + groundDebrisVerticalAmplitude) * std::max(tile.height, 0.0f));
             const auto visual = tileCorners(tile);
             const uint8_t sides = tile.groundModuleSideMask;
-            const float xMargin = groundTileBottomOverhang * tile.size.x;
-            const float yMargin = groundTileBottomOverhang * tile.size.y;
+            const float xMargin = (groundTileBottomOverhang + groundDebrisHorizontalAmplitude) * tile.size.x;
+            const float yMargin = (groundTileBottomOverhang + groundDebrisHorizontalAmplitude) * tile.size.y;
             // A partially intersecting cell during a pan cannot pull the fit
             // past this small margin beyond the authored/interpolated extent.
             if (sides & groundWestSide) fitLeft = std::min(fitLeft, std::max(visual[0].x, left - xMargin));

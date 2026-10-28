@@ -32,6 +32,8 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
   shorelines, tile borders, and submerged-entity rendering.
 - Floating-island sky with three procedural cloud layers, independent gentle
   drift and world-space camera parallax beneath puzzle and overworld screens.
+- Unequal floating-island debris rocks with varied three-dimensional placement
+  and subtle independent bobbing, including matching animated shadows.
 - Vulkan shadows, SSAO, MSAA, internal render scaling, deferred renderer
   reconfiguration, FIFO-by-default VSync, optional tearing/frame caps,
   GLTF models, skeletal animation, and real-font UI.

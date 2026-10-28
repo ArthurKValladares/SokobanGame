@@ -61,7 +61,7 @@ CreatedSplatMap createBlankSplatMapAt(
             SplatCanvas::createForBoard(boardTilesWide, boardTilesHigh);
         try {
             std::filesystem::create_directories(sourcePath.parent_path(), error);
-            writeGrayscalePng(
+            writeRgbaPng(
                 sourcePath, blank.width(), blank.height(), blank.weights());
         } catch (const std::exception& failure) {
             result.message =
@@ -528,7 +528,7 @@ bool SplatPainter::save()
     for (Map* map : targets) {
         try {
             std::filesystem::create_directories(map->sourcePath.parent_path());
-            writeGrayscalePng(map->sourcePath, map->canvas.width(),
+            writeRgbaPng(map->sourcePath, map->canvas.width(),
                 map->canvas.height(), map->canvas.weights());
         } catch (const std::exception& failure) {
             map->dirty = true;
@@ -545,7 +545,7 @@ bool SplatPainter::save()
                 continue;
             }
             std::filesystem::create_directories(map->runtimePath.parent_path());
-            writeGrayscalePng(map->runtimePath, map->canvas.width(),
+            writeRgbaPng(map->runtimePath, map->canvas.width(),
                 map->canvas.height(), map->canvas.weights());
             invalidateCompressedTextureArtifactsForSource(runtimeAssetRoot_,
                 map->runtimePath.lexically_relative(runtimeAssetRoot_));

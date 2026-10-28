@@ -61,6 +61,8 @@ bool remapSplatMask(
         if (splat.name == change.before->name &&
             splat.base == change.before->base &&
             splat.detail == change.before->detail &&
+            splat.texture2 == change.before->texture2 &&
+            splat.texture3 == change.before->texture3 &&
             splat.mask == change.before->mask) {
             splat.mask = change.after.mask;
             return true;
@@ -718,7 +720,7 @@ bool ApplicationTools::prepareOverworldGroundPainting(
                     throw std::runtime_error("The new blend mask already exists: " + path.string());
                 }
                 std::filesystem::create_directories(path.parent_path());
-                writeGrayscalePng(path, canvas.width(), canvas.height(), canvas.weights());
+                writeRgbaPng(path, canvas.width(), canvas.height(), canvas.weights());
             }
             preparedManifest.addTexture();
             preparedManifest.updateTexture(preparedManifest.textures().size() - 1, {
@@ -871,6 +873,8 @@ bool ApplicationTools::createGroundSplatMap(
         .base = selected ? selected->base : std::string(groundSplatBaseTextureName),
         .detail = selected ? selected->detail : std::string(groundSplatDetailTextureName),
         .mask = textureName,
+        .texture2 = selected ? selected->texture2 : "GroundAutumnGrass",
+        .texture3 = selected ? selected->texture3 : "GroundAutumnRock",
     };
     // Generate a distinct 8-bit assignment color; authors can change it later.
     for (uint32_t key = 0x40bf59; ; key = (key + 0x9e3779) & 0xffffff) {
@@ -1035,10 +1039,12 @@ void ApplicationTools::drawBrushPreview(
         return;
     }
 
-    const bool white = brush.color == SplatCanvas::BrushColor::White;
-    const ImU32 tint = white
-        ? IM_COL32(255, 255, 255, 0)
-        : IM_COL32(15, 15, 15, 0);
+    constexpr std::array<ImU32, 4> layerTints {
+        IM_COL32(240, 100, 100, 0), IM_COL32(110, 225, 120, 0),
+        IM_COL32(115, 155, 255, 0), IM_COL32(235, 190, 245, 0),
+    };
+    const ImU32 tint = layerTints[std::min(
+        static_cast<std::size_t>(brush.color), layerTints.size() - 1)];
     ImDrawList* drawList = renderer.hasGameViewportDisplay()
         ? ImGui::GetForegroundDrawList()
         : ImGui::GetBackgroundDrawList();

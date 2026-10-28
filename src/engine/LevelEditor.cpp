@@ -35,7 +35,8 @@ void remapGroundTextures(std::vector<Level::GroundSplat>& splats,
     std::span<const LevelLocationAssociationRemap> remaps)
 {
     for (Level::GroundSplat& splat : splats) {
-        for (std::string* name : { &splat.base, &splat.detail, &splat.mask }) {
+        for (std::string* name : { &splat.base, &splat.detail, &splat.mask,
+                 &splat.texture2, &splat.texture3 }) {
             const auto found = std::ranges::find_if(remaps, [&](const auto& remap) {
                 return remap.destination && *name == groundSplatMapTextureNameForScreen(remap.source);
             });
@@ -5062,6 +5063,8 @@ std::size_t LevelEditor::snapshotStorageBytes(const DocumentSnapshot& snapshot)
         string(splat.base);
         string(splat.detail);
         string(splat.mask);
+        string(splat.texture2);
+        string(splat.texture3);
     }
     vector(snapshot.groundPaint);
     for (const auto& paint : snapshot.groundPaint) string(paint.splat);
@@ -5181,6 +5184,7 @@ bool LevelEditor::remapGroundSplatMask(
         for (Level::GroundSplat& splat : splats) {
             if (splat.name == before->name && splat.base == before->base &&
                 splat.detail == before->detail && splat.mask == before->mask &&
+                splat.texture2 == before->texture2 && splat.texture3 == before->texture3 &&
                 splat.mask != after.mask) {
                 splat.mask = after.mask;
                 changed = true;

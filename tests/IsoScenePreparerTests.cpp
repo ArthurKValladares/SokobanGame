@@ -5,6 +5,7 @@
 #include "engine/render/PointShadowFaceCache.hpp"
 #include "engine/render/GroundRimSurface.hpp"
 #include "engine/render/GroundChunkGeometry.hpp"
+#include "engine/render/GroundDebris.hpp"
 #include "engine/render/ProcessedGroundArtifact.hpp"
 #include "engine/TaskSystem.hpp"
 
@@ -457,9 +458,85 @@ void testPointShadowFaceCacheRequiresExactStableGeometry()
     models[0].ready = true;
     CHECK(cache.reusable(0, light, faces, indices, models));
 
+    models[0].tile.groundModule = true;
+    models[0].tile.groundModuleBottom = true;
+    models[0].groundDebrisAnimation = groundDebrisAnimationData(models[0].tile, 3.0f);
+    cache.markRendered(0, light, faces, indices, models);
+    CHECK_MESSAGE(cache.reusable(0, light, faces, indices, models),
+        "frozen GPU debris can reuse its point-shadow depth");
+    models[0].groundDebrisAnimation = groundDebrisAnimationData(models[0].tile, 3.1f);
+    CHECK_MESSAGE(!cache.reusable(0, light, faces, indices, models),
+        "advancing GPU debris invalidates cached point-shadow depth");
+    models[0].groundDebrisAnimation = groundDebrisAnimationData(models[0].tile, 3.0f);
+    CHECK(cache.reusable(0, light, faces, indices, models));
+    models[0].tile.groundModuleBottom = false;
+    models[0].groundDebrisAnimation = groundDebrisAnimationData(models[0].tile, 3.0f);
+    cache.markRendered(0, light, faces, indices, models);
+    models[0].groundDebrisAnimation = groundDebrisAnimationData(models[0].tile, 30.0f);
+    CHECK_MESSAGE(cache.reusable(0, light, faces, indices, models),
+        "ordinary static meshes keep reusing shadows as the effect clock advances");
+    models[0].tile.groundModuleBottom = true;
+    models[0].tile.groundModuleSideMask = 0;
+    models[0].groundDebrisAnimation = groundDebrisAnimationData(models[0].tile, 3.0f);
+    cache.markRendered(0, light, faces, indices, models);
+    models[0].groundDebrisAnimation = groundDebrisAnimationData(models[0].tile, 30.0f);
+    CHECK_MESSAGE(cache.reusable(0, light, faces, indices, models),
+        "interior undersides without debris keep reusing point shadows");
+
     cache.markRendered(0, light, faces, indices, noModels);
     cache.invalidate(0);
     CHECK(!cache.reusable(0, light, faces, indices, noModels));
+}
+
+void testGroundDebrisUsesStableIndependentInstanceClocks()
+{
+    TEST("groundDebrisUsesStableIndependentInstanceClocks");
+    using namespace sokoban;
+
+    RenderFrameData::Tile tile = cube(2, 3);
+    tile.model = { 7 };
+    tile.groundModule = true;
+    CHECK(!hasAnimatedGroundDebris(tile));
+    const Vec4 supported = groundDebrisAnimationData(tile, 7.5f);
+    CHECK(supported.x == 0.0f);
+    CHECK(supported.z == 0.0f);
+
+    tile.groundModuleBottom = true;
+    CHECK(hasAnimatedGroundDebris(tile));
+    const Vec4 original = groundDebrisAnimationData(tile, 7.5f);
+    CHECK(original.x == 7.5f);
+    CHECK(original.y >= 0.0f && original.y <= 1.0f);
+    CHECK(original.z == 1.0f);
+    CHECK(groundDebrisAnimationData(tile, 7.5f) == original);
+    const Vec4 later = groundDebrisAnimationData(tile, 8.0f);
+    CHECK(later.x == 8.0f);
+    CHECK(later.y == original.y);
+
+    // Reusing a model in adjacent cells, or on another layer, must not
+    // synchronize its fragments with the first instance.
+    auto adjacent = tile;
+    ++adjacent.cell.x;
+    adjacent.position.x += 1.0f;
+    CHECK(groundDebrisAnimationData(adjacent, 7.5f).y != original.y);
+    adjacent = tile;
+    ++adjacent.cell.y;
+    adjacent.position.y += 1.0f;
+    CHECK(groundDebrisAnimationData(adjacent, 7.5f).y != original.y);
+    adjacent = tile;
+    ++adjacent.cell.z;
+    adjacent.baseElevation += 1.0f;
+    CHECK(groundDebrisAnimationData(adjacent, 7.5f).y != original.y);
+
+    CHECK(groundDebrisAnimationData(tile, -1.0f).x == 0.0f);
+    CHECK(groundDebrisAnimationData(tile, std::numeric_limits<float>::infinity()).x == 0.0f);
+    CHECK(groundDebrisAnimationData(tile, std::numeric_limits<float>::quiet_NaN()).x == 0.0f);
+    tile.groundModuleSideMask = 0;
+    CHECK(!hasAnimatedGroundDebris(tile));
+    CHECK(groundDebrisAnimationData(tile, 7.5f) == Vec4 {});
+    tile.groundModuleSideMask = groundAllSides;
+    tile.groundModule = false;
+    CHECK(!hasAnimatedGroundDebris(tile));
+    CHECK(groundDebrisAnimationData(tile, 7.5f).z == 0.0f);
 }
 
 void testCameraLayoutUsesConfiguredAngles()
@@ -3178,6 +3255,7 @@ int main()
     testParallelAuxiliaryPreparationMatchesSerialOutput();
     testPointShadowCastersAreRangeCulledConservatively();
     testPointShadowFaceCacheRequiresExactStableGeometry();
+    testGroundDebrisUsesStableIndependentInstanceClocks();
     testCameraLayoutUsesConfiguredAngles();
     testExplicitCameraPoseBypassesBoardFit();
     testDetachedCameraRetainsFloorMarkerDepthSeparation();

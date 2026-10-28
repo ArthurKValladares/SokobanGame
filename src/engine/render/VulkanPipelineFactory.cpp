@@ -73,7 +73,7 @@ constexpr std::array<VkVertexInputAttributeDescription, 5> groundChunkAttributes
 // skinned one name the same thing the same way: 5 to 7 are the skinning
 // attributes, and a tangent that moved depending on the pipeline would be
 // a trap in two vertex shaders instead of a number in one table.
-constexpr std::array<VkVertexInputAttributeDescription, 6> meshAttributes {
+constexpr std::array<VkVertexInputAttributeDescription, 7> meshAttributes {
     VkVertexInputAttributeDescription {
         .location = 0,
         .binding = 0,
@@ -114,6 +114,12 @@ constexpr std::array<VkVertexInputAttributeDescription, 6> meshAttributes {
         .format = VK_FORMAT_R32_UINT,
         .offset = offsetof(MeshVertex, materialIndex),
     },
+    VkVertexInputAttributeDescription {
+        .location = 11,
+        .binding = 0,
+        .format = VK_FORMAT_R32_SFLOAT,
+        .offset = offsetof(MeshVertex, groundDebris),
+    },
 };
 
 constexpr std::array<VkVertexInputAttributeDescription, 9> skinnedAttributes {
@@ -128,14 +134,9 @@ constexpr std::array<VkVertexInputAttributeDescription, 9> skinnedAttributes {
     VkVertexInputAttributeDescription { 10, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, materialIndex) },
 };
 
-// The shadow pipelines bind position only - and, for a skinned mesh, the three
-// attributes the skinning needs to compute it.
-constexpr VkVertexInputAttributeDescription meshPositionAttribute {
-    .location = 0,
-    .binding = 0,
-    .format = VK_FORMAT_R32G32B32_SFLOAT,
-    .offset = offsetof(MeshVertex, position),
-};
+// Static shadows need position and the optional debris seed. Skinned shadows
+// bind position and the three attributes the skinning needs to compute it.
+constexpr std::array meshPositionAttributes { meshAttributes[0], meshAttributes[6] };
 
 constexpr std::array<VkVertexInputAttributeDescription, 4> skinnedPositionAttributes {
     VkVertexInputAttributeDescription { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, position) },
@@ -144,7 +145,7 @@ constexpr std::array<VkVertexInputAttributeDescription, 4> skinnedPositionAttrib
     VkVertexInputAttributeDescription { 7, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, attachmentNodeIndex) },
 };
 
-constexpr std::array meshOutlineAttributes { meshAttributes[0], meshAttributes[1] };
+constexpr std::array meshOutlineAttributes { meshAttributes[0], meshAttributes[1], meshAttributes[6] };
 constexpr std::array skinnedOutlineAttributes {
     skinnedAttributes[0], skinnedAttributes[1], skinnedAttributes[3],
     skinnedAttributes[4], skinnedAttributes[5],
@@ -564,8 +565,8 @@ VkPipelineVertexInputStateCreateInfo VulkanPipelineFactory::vertexInputFor(
         break;
     case VertexLayout::MeshPosition:
         info.pVertexBindingDescriptions = &meshBinding;
-        info.pVertexAttributeDescriptions = &meshPositionAttribute;
-        info.vertexAttributeDescriptionCount = 1;
+        info.pVertexAttributeDescriptions = meshPositionAttributes.data();
+        info.vertexAttributeDescriptionCount = static_cast<uint32_t>(meshPositionAttributes.size());
         break;
     case VertexLayout::GroundChunk:
         info.pVertexBindingDescriptions = &groundChunkBinding;

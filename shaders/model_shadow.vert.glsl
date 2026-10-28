@@ -2,8 +2,10 @@
 #extension GL_GOOGLE_include_directive : require
 
 #include "GroundRim.glsl"
+#include "GroundDebris.glsl"
 
 layout(location = 0) in vec3 inPosition;
+layout(location = 11) in float inGroundDebris;
 
 layout(push_constant) uniform PushConstants
 {
@@ -28,5 +30,6 @@ void main()
         pc.shadowFromModel[3]);
     GroundRimDeformation rim = groundRimDeformation(
         inPosition, pc.passData[2], uint(pc.passData[3].x + 0.5), pc.passData[3].yz);
-    gl_Position = shadowTransform * vec4(rim.position, 1.0);
+    gl_Position = shadowTransform * vec4(
+        rim.position + groundDebrisOffset(inGroundDebris, pc.passData[1]), 1.0);
 }

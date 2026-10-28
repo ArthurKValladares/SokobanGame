@@ -551,7 +551,7 @@ void LevelEditorDebugUi::drawGroundPaintTab(
             ? std::string {}
             : "Could not add the splat map. Check Logs for details.";
     }
-    ImGui::TextWrapped("Each map blends its base and detail textures. Choose its color, then paint ground or cliff tops to assign them. The first map is the default.");
+    ImGui::TextWrapped("Each map blends four textures using its red, green, blue, and alpha weights. Choose its assignment color, then paint ground or cliff tops to assign it. The first map is the default.");
     const Level::GroundSplat* selected = editor.selectedGroundSplat();
     if (selected) {
         std::size_t selectedIndex = static_cast<std::size_t>(selected - editor.groundSplats().data());
@@ -576,9 +576,9 @@ void LevelEditorDebugUi::drawGroundPaintTab(
         Level::GroundSplat edited = *selected;
         bool changed = ImGui::InputText("Map Name", &edited.name);
         changed |= ImGui::ColorEdit3("Assignment Color", &edited.color.x, ImGuiColorEditFlags_NoAlpha);
-        const auto textureChoice = [&](const char* label, std::string& name) {
+        const auto textureChoice = [&](const char* label, std::string& name, const char* fallback = "") {
             bool picked = false;
-            if (ImGui::BeginCombo(label, name.c_str())) {
+            if (ImGui::BeginCombo(label, name.empty() ? fallback : name.c_str())) {
                 if (callbacks.assetManifest) {
                     for (const auto& texture : callbacks.assetManifest().textures()) {
                         if (ImGui::Selectable(texture.name.c_str(), texture.name == name)) {
@@ -591,13 +591,16 @@ void LevelEditorDebugUi::drawGroundPaintTab(
             }
             return picked;
         };
-        changed |= textureChoice("Base Texture", edited.base);
-        changed |= textureChoice("Detail Texture", edited.detail);
+        changed |= textureChoice("Texture 0 (R)", edited.base);
+        changed |= textureChoice("Texture 1 (G)", edited.detail);
+        changed |= textureChoice("Texture 2 (B)", edited.texture2, "GroundAutumnGrass");
+        changed |= textureChoice("Texture 3 (A)", edited.texture3, "GroundAutumnRock");
         const bool maskChanged = textureChoice("Blend Mask", edited.mask);
         changed |= maskChanged;
         if (changed) {
             const bool paintTargetChanged = edited.name != selected->name ||
-                edited.base != selected->base || edited.detail != selected->detail || maskChanged;
+                edited.base != selected->base || edited.detail != selected->detail ||
+                edited.texture2 != selected->texture2 || edited.texture3 != selected->texture3 || maskChanged;
             if (!paintTargetChanged || !painter.dirty() || painter.save()) {
                 const bool paintingMask = painter.active();
                 if (paintTargetChanged) painter.close();
@@ -665,16 +668,26 @@ void LevelEditorDebugUi::drawGroundPaintTab(
     drawBrushValue("Hardness", brush.hardness, 0.0f, 1.0f, 1.0f);
     drawBrushValue("Opacity", brush.opacity, 0.01f, 1.0f, 1.0f);
 
-    int color = brush.color == SplatCanvas::BrushColor::White ? 0 : 1;
-    ImGui::TextUnformatted("Color");
-    ImGui::SameLine();
-    // White adds the detail layer (rock), black returns to the base (grass).
-    ImGui::RadioButton("White (detail)", &color, 0);
-    ImGui::SameLine();
-    ImGui::RadioButton("Black (base)", &color, 1);
-    brush.color = color == 0
-        ? SplatCanvas::BrushColor::White
-        : SplatCanvas::BrushColor::Black;
+    int layer = static_cast<int>(brush.color);
+    ImGui::TextUnformatted("Paint Texture");
+    constexpr std::array<const char*, 4> layerLabels {
+        "Texture 0 (R)", "Texture 1 (G)", "Texture 2 (B)", "Texture 3 (A)",
+    };
+    const auto* paintSplat = editor.selectedGroundSplat();
+    const std::array<std::string_view, 4> layerNames {
+        paintSplat ? std::string_view(paintSplat->base) : groundSplatBaseTextureName,
+        paintSplat ? std::string_view(paintSplat->detail) : groundSplatDetailTextureName,
+        paintSplat && !paintSplat->texture2.empty() ? std::string_view(paintSplat->texture2) : "GroundAutumnGrass",
+        paintSplat && !paintSplat->texture3.empty() ? std::string_view(paintSplat->texture3) : "GroundAutumnRock",
+    };
+    for (int index = 0; index < 4; ++index) {
+        ImGui::RadioButton(layerLabels[static_cast<std::size_t>(index)], &layer, index);
+        ImGui::SameLine();
+        const auto name = layerNames[static_cast<std::size_t>(index)];
+        ImGui::TextDisabled("%.*s", static_cast<int>(name.size()), name.data());
+    }
+    brush.color = static_cast<SplatCanvas::BrushColor>(layer);
+    ImGui::TextDisabled("Painting adds the selected texture and reduces the other weights.");
 
     if (ImGui::Button("Undo Stroke")) {
         (void)painter.undo();

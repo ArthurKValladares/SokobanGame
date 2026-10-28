@@ -71,6 +71,16 @@ def snapshot(obj, triangulated=True):
             raise ValueError(f"{obj.name}: unassigned native face material")
         materials.append(material.name)
     properties = {name: plain(value) for name, value in obj.items()}
+    # This marker is deliberately separate from both authored UV charts. Its
+    # value identifies a whole rigid fragment for shared runtime deformation.
+    debris = mesh.attributes.get("_GROUND_DEBRIS")
+    point_attributes = {}
+    if debris is not None:
+        if debris.domain != "POINT" or debris.data_type != "FLOAT":
+            raise ValueError(f"{obj.name}: _GROUND_DEBRIS must be a POINT FLOAT attribute")
+        point_attributes["_GROUND_DEBRIS"] = {
+            "domain": debris.domain, "dataType": debris.data_type,
+            "values": [item.value for item in debris.data]}
     return {
         "object": obj.name, "vertices": len(points), "faces": len(faces), "points": points,
         "bounds": {"min": [min(point[i] for point in points) for i in range(3)],
@@ -86,6 +96,7 @@ def snapshot(obj, triangulated=True):
         "uvLayers": {layer.name: [list(layer.data[index].uv) for index in loops]
                      for layer in mesh.uv_layers},
         "faceMaterials": materials,
+        "pointAttributes": point_attributes,
     }
 
 

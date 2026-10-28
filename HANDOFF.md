@@ -32,6 +32,26 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
+Floating ground debris revision 1 varies only the existing `FloatingRockNN`
+vertices in the 100 exposed bottom bodies, retaining the fixed terrain, UVs,
+materials and topology. Native POINT/FLOAT `_GROUND_DEBRIS` marks each rigid
+fragment with a positive seed; fixed vertices use zero. The static GLTF loader
+retains this scalar in `MeshVertex`, and shared model/shadow/outline vertex
+deformation uses the simulation clock plus stable tile and fragment seeds.
+Maximum motion is 0.008 tile in X/Y and 0.020 in Z. Source placement reserves
+the full motion envelope and a 0.04 surface gap. Swept bounds protect culling
+and camera fit; advancing debris invalidates affected point-shadow caches.
+See [floating debris](docs/floating-ground-debris.md) for authoring and checks.
+Debug and optimized game/test builds and ten focused renderer suites pass;
+23 focused Python regressions and the complete current ground audit pass.
+The audit covers all 240 bodies, 310 caps and 190 marked fragments, with fixed
+source positions/normals, topology, UVs and cap tables preserved exactly.
+A 480-frame Debug validation capture has no VUIDs or shader-input warnings;
+a 900-frame optimized point-light capture refreshes all six shadow faces.
+Both drain asset queues with no dropped draws or capacity blocks. Existing
+location-10 output warnings and the Epic overlay loader message remain in Debug.
+Evidence is in ignored `out/floating-debris/`.
+
 The October 15 fence kit adds four separate post meshes and four horizontal
 slat meshes (intact, crooked, missing and broken) under Tile Decorations.
 Standard sections use four .115-high rails with .08 gaps; damaged variants

@@ -12,7 +12,7 @@ Produces PNGs in `assets/custom/textures/`:
 - `ground_splat_overworld_<ID>.png` — one blend map per stable overworld screen
   ID declared by `levels/overworld/layout.json`.
 
-The two material layers tile; the splat maps deliberately do not. Each splat
+The material layers tile; the splat maps deliberately do not. Each splat
 map covers exactly one screen's board at SPLAT_TEXELS_PER_TILE texels per tile,
 which is what makes it paintable in the level editor: a repeating map would
 echo every brush stroke across the board.
@@ -192,12 +192,12 @@ def write_png(
     width: int,
     height: int,
     grayscale: bool = False,
+    rgba: bool = False,
 ) -> None:
     """Writes an 8-bit PNG. `rows` holds `height` rows of `channels*width` bytes.
 
-    Splat maps are written greyscale so they match what the in-game painter
-    saves (`src/engine/render/PngWriter.cpp`); a map that has been painted and
-    one that has only been generated should not differ in format.
+    Splat maps use RGBA weights (texture0..3), matching the in-game painter.
+    Existing grayscale maps remain readable as a legacy grass/rock blend.
     """
     raw = bytearray()
     for row in rows:
@@ -212,9 +212,9 @@ def write_png(
             + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
         )
 
-    # Colour type 0 = greyscale, 2 = RGB.
+    # Colour type 0 = greyscale, 2 = RGB, 6 = RGBA.
     header = struct.pack(
-        ">IIBBBBB", width, height, 8, 0 if grayscale else 2, 0, 0, 0)
+        ">IIBBBBB", width, height, 8, 6 if rgba else 0 if grayscale else 2, 0, 0, 0)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(
         b"\x89PNG\r\n\x1a\n"
@@ -268,9 +268,10 @@ def generate_splat(width: int, height: int, seed: int) -> list[bytes]:
             centered = (
                 field[source_y][source_x] + SPLAT_BIAS - 0.5
             ) * SPLAT_CONTRAST + 0.5
-            # One channel: a weight map has nothing to say in green and blue,
-            # and the shader only reads red (greyscale decodes to r=g=b).
-            row.append(int(round(min(max(centered, 0.0), 1.0) * 255)))
+            # Keep the original grass/rock layout, reserving blue and alpha
+            # for additional painted materials. Alpha is a weight, not opacity.
+            rock = int(round(min(max(centered, 0.0), 1.0) * 255))
+            row.extend((255 - rock, rock, 0, 0))
         rows.append(bytes(row))
     return rows
 
@@ -408,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
     shared = OUTPUT_DIRECTORY / "ground_splat.png"
     if arguments.force or not shared.is_file():
         splat = generate_splat(SPLAT_SIZE, SPLAT_SIZE, SPLAT_SEED)
-        write_png(shared, splat, SPLAT_SIZE, SPLAT_SIZE, grayscale=True)
+        write_png(shared, splat, SPLAT_SIZE, SPLAT_SIZE, rgba=True)
     else:
         kept += 1
     written.append("ground_splat.png")
@@ -444,7 +445,7 @@ def main(argv: list[str] | None = None) -> int:
             height,
             SPLAT_SEED + LEVEL_SEED_STRIDE * (level + 1) + screen + 1,
         )
-        write_png(destination, screen_splat, width, height, grayscale=True)
+        write_png(destination, screen_splat, width, height, rgba=True)
         print(f"  wrote {name}: {tiles_wide}x{tiles_high} tiles -> {width}x{height}px")
 
     overworld_screens = discover_overworld_screens(LEVEL_DIRECTORY)
@@ -463,7 +464,7 @@ def main(argv: list[str] | None = None) -> int:
             height,
             SPLAT_SEED + OVERWORLD_SEED_OFFSET + screen_id,
         )
-        write_png(destination, screen_splat, width, height, grayscale=True)
+        write_png(destination, screen_splat, width, height, rgba=True)
         print(f"  wrote {name}: {tiles_wide}x{tiles_high} tiles -> {width}x{height}px")
 
     if kept:

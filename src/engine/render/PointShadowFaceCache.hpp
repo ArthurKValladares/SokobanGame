@@ -13,6 +13,9 @@ struct PointShadowModelState {
     std::size_t tileIndex = 0;
     RenderFrameData::Tile tile;
     bool ready = false;
+    // A frozen simulation can reuse its depth. Advancing GPU-only debris
+    // must invalidate that same static-mesh cache just like a moved tile.
+    Vec4 groundDebrisAnimation {};
 
     friend constexpr bool operator==(
         const PointShadowModelState&,

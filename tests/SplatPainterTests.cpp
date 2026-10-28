@@ -238,8 +238,10 @@ void testTiledStrokesKeepOpacityAndUndoTogether()
     reference.endStroke();
     CHECK(matchesContinuousCanvas(painter, request, reference));
     for (std::size_t index = 0; index < painter.mapCount(); ++index) {
-        const auto& weights = painter.mapCanvas(index).weights();
-        CHECK(*std::max_element(weights.begin(), weights.end()) <= 102);
+        const auto& map = painter.mapCanvas(index);
+        for (uint32_t y = 0; y < map.height(); ++y) {
+            for (uint32_t x = 0; x < map.width(); ++x) CHECK(map.weightAt(x, y) <= 102);
+        }
     }
     CHECK(painter.undoDepth() == 1);
     CHECK(painter.save());
@@ -253,8 +255,8 @@ void testTiledStrokesKeepOpacityAndUndoTogether()
     const auto restored = SplatCanvas::fromImage(loadRgbaImage(
         request.sourceAssetRoot / "custom/textures/tiled_0.png"));
     CHECK(restored.has_value());
-    CHECK(restored && std::all_of(restored->weights().begin(),
-        restored->weights().end(), [](uint8_t weight) { return weight == 0; }));
+    CHECK(restored && restored->weights() ==
+        SplatCanvas::createForBoard(4, 3).weights());
 }
 
 void testTiledSaveWritesChangedMapsAndRetriesPublication()
@@ -764,7 +766,7 @@ void testSaveInvalidatesPreparedPixelsAndRemainsRetryable()
     const std::size_t centre =
         (static_cast<std::size_t>(3 * SplatCanvas::texelsPerTile) * width +
             6 * SplatCanvas::texelsPerTile) * 4U;
-    CHECK(published.rgba.at(centre) == static_cast<std::byte>(255));
+    CHECK(published.rgba.at(centre + 1) == static_cast<std::byte>(255));
 
     painter.beginStroke({ 3.0f, 3.0f });
     painter.endStroke();
@@ -884,7 +886,10 @@ void testCreateBlankSplatMapWritesBothTrees()
     const ImageData image = loadRgbaImage(source / created.relativePath);
     CHECK(image.width == 10 * SplatCanvas::texelsPerTile);
     CHECK(image.height == 6 * SplatCanvas::texelsPerTile);
-    CHECK(image.rgba[0] == static_cast<std::byte>(0));
+    CHECK(image.rgba[0] == static_cast<std::byte>(255));
+    CHECK(image.rgba[1] == static_cast<std::byte>(0));
+    CHECK(image.rgba[2] == static_cast<std::byte>(0));
+    CHECK(image.rgba[3] == static_cast<std::byte>(0));
 }
 
 void testCreateBlankSplatMapNeverOverwrites()
@@ -996,8 +1001,7 @@ void testUniqueBlankMapSkipsRegisteredAndUnregisteredMasks()
     CHECK(canvas.has_value());
     CHECK(canvas && canvas->width() == 10 * SplatCanvas::texelsPerTile);
     CHECK(canvas && canvas->height() == 6 * SplatCanvas::texelsPerTile);
-    CHECK(canvas && std::all_of(canvas->weights().begin(),
-        canvas->weights().end(), [](uint8_t weight) { return weight == 0; }));
+    CHECK(canvas && canvas->weights() == SplatCanvas::createForBoard(10, 6).weights());
     const std::vector<char> firstBytes = readBytes(source / first.relativePath);
     CHECK(!firstBytes.empty());
     CHECK(readBytes(staged / first.relativePath) == firstBytes);

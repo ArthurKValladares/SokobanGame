@@ -36,6 +36,9 @@ struct MeshVertex {
     // value for every vertex of a primitive, and the material entry they were
     // copied from now travels to the shader instead.
     uint32_t materialIndex = 0;
+    // Optional _GROUND_DEBRIS scalar: zero for the fixed island, otherwise
+    // one constant normalized seed across every vertex of a detached rock.
+    float groundDebris = 0.0f;
 };
 
 enum PrimitiveMaterialFlag : uint8_t {

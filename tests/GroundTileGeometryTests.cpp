@@ -8,6 +8,7 @@
 #include "engine/Rules.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/GroundChunkGeometry.hpp"
+#include "engine/render/GroundDebris.hpp"
 #include "engine/render/GroundMeshGeometry.hpp"
 #include "engine/render/GroundRimSurface.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
@@ -687,13 +688,13 @@ void testFloatingBottomTopologyCapsBoundsAndShadows()
                 CHECK(scene.opaqueModelIndices.size() == 1);
                 CHECK(scene.shadowModelIndices.size() == 1); // interior undersides remain visible
                 const Vec3 minimum {
-                    2 - ((mask & groundWestSide) ? groundTileBottomOverhang : 0.0f),
-                    2 - ((mask & groundNorthSide) ? groundTileBottomOverhang : 0.0f),
-                    -groundTileBottomDepth,
+                    2 - (((mask & groundWestSide) ? groundTileBottomOverhang : 0.0f) + groundDebrisHorizontalAmplitude),
+                    2 - (((mask & groundNorthSide) ? groundTileBottomOverhang : 0.0f) + groundDebrisHorizontalAmplitude),
+                    -(groundTileBottomDepth + groundDebrisVerticalAmplitude),
                 };
                 const Vec3 maximum {
-                    3 + ((mask & groundEastSide) ? groundTileBottomOverhang : 0.0f),
-                    3 + ((mask & groundSouthSide) ? groundTileBottomOverhang : 0.0f),
+                    3 + (((mask & groundEastSide) ? groundTileBottomOverhang : 0.0f) + groundDebrisHorizontalAmplitude),
+                    3 + (((mask & groundSouthSide) ? groundTileBottomOverhang : 0.0f) + groundDebrisHorizontalAmplitude),
                     1,
                 };
                 CHECK(scene.renderables[0].worldBounds.minimum == minimum);
@@ -837,6 +838,19 @@ void testFloatingBottomOverhangCullingAndScaledBounds()
     CHECK(scene.renderables[0].worldBounds.minimum == Vec3({ 2, 2, 0 }));
     CHECK(scene.renderables[0].worldBounds.maximum == Vec3({ 3, 3, 1 }));
 
+    // At the extreme of a bob, a fragment can enter a narrow camera frustum
+    // while the full authored static underside remains outside it.
+    frame.tiles[0].groundModuleBottom = true;
+    frame.cameraOverride->position.x =
+        3 + groundTileBottomOverhang + groundDebrisHorizontalAmplitude * .5f;
+    frame.cameraOverride->position.z = -.94f;
+    preparer.prepare(frame, extent, scene);
+    const auto motionFrustum = frustumFromViewProjection(isoClipFromWorld(scene.isoLayout, extent));
+    CHECK(intersects(motionFrustum, scene.renderables[0].worldBounds));
+    CHECK(!intersects(motionFrustum, aabbFromMinMax(
+        Vec3 { 2, 2, -groundTileBottomDepth },
+        Vec3 { 3 + groundTileBottomOverhang, 3, 1 })));
+
     // Side masks are in world orientation, independent of canonical rotation.
     frame.cameraOverride.reset();
     frame.tiles[0].groundModuleBottom = true;
@@ -845,8 +859,13 @@ void testFloatingBottomOverhangCullingAndScaledBounds()
     frame.tiles[0].size = { 2, 3 };
     frame.tiles[0].height = .5f;
     preparer.prepare(frame, extent, scene);
-    CHECK(scene.renderables[0].worldBounds.minimum == Vec3({ 2, 2 - 3 * groundTileBottomOverhang, -.5f }));
-    CHECK(scene.renderables[0].worldBounds.maximum == Vec3({ 4 + 2 * groundTileBottomOverhang, 5, .5f }));
+    CHECK(scene.renderables[0].worldBounds.minimum == Vec3({
+        2 - 2 * groundDebrisHorizontalAmplitude,
+        2 - 3 * (groundTileBottomOverhang + groundDebrisHorizontalAmplitude),
+        -.5f * (groundTileBottomDepth + groundDebrisVerticalAmplitude) }));
+    CHECK(scene.renderables[0].worldBounds.maximum == Vec3({
+        4 + 2 * (groundTileBottomOverhang + groundDebrisHorizontalAmplitude),
+        5 + 3 * groundDebrisHorizontalAmplitude, .5f }));
     const auto transform = IsoScenePreparer::modelTransformPoints(frame.tiles[0]);
     CHECK(std::abs(transform.xPoint.x - transform.origin.x) <= 2);
     CHECK(std::abs(transform.xPoint.y - transform.origin.y) <= 3);

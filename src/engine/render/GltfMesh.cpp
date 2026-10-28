@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
@@ -414,6 +415,33 @@ const cgltf_accessor* findAttribute(
         }
     }
     return nullptr;
+}
+
+const cgltf_accessor* groundDebrisAttribute(
+    const cgltf_primitive& primitive, cgltf_size vertexCount)
+{
+    for (cgltf_size index = 0; index < primitive.attributes_count; ++index) {
+        const cgltf_attribute& attribute = primitive.attributes[index];
+        if (!attribute.name || std::string_view(attribute.name) != "_GROUND_DEBRIS") continue;
+        const cgltf_accessor* accessor = attribute.data;
+        if (!accessor || accessor->type != cgltf_type_scalar ||
+            accessor->component_type != cgltf_component_type_r_32f ||
+            accessor->normalized || accessor->count != vertexCount) {
+            throw std::runtime_error("_GROUND_DEBRIS requires one unnormalized FLOAT scalar per vertex");
+        }
+        return accessor;
+    }
+    return nullptr;
+}
+
+float groundDebrisSeed(const cgltf_accessor* accessor, size_t index)
+{
+    if (!accessor) return 0.0f;
+    const float seed = readScalarFloat(*accessor, index);
+    if (!std::isfinite(seed) || seed < 0.0f || seed > 1.0f) {
+        throw std::runtime_error("_GROUND_DEBRIS seed must be finite and in [0, 1]");
+    }
+    return seed;
 }
 
 // TANGENT and TEXCOORD_1 are both optional, and both have a defined answer
@@ -1283,6 +1311,7 @@ MeshData loadGltfMesh(
                 findAttribute(primitive, cgltf_attribute_type_tangent);
             const cgltf_accessor* secondUvs =
                 findAttribute(primitive, cgltf_attribute_type_texcoord, 1);
+            const cgltf_accessor* debris = groundDebrisAttribute(primitive, positions.count);
             const cgltf_accessor& indices = *primitive.indices;
 
             const uint32_t materialIndex = materialSlotIndex(data, primitive);
@@ -1318,6 +1347,7 @@ MeshData loadGltfMesh(
                     .uv = uv,
                     .uv1 = optionalUv(secondUvs, index, uv),
                     .materialIndex = materialIndex,
+                    .groundDebris = groundDebrisSeed(debris, index),
                 });
                 bounds = expand(bounds, position);
             }
