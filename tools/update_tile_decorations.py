@@ -31,8 +31,8 @@ assets_collection.name='Decoration assets | 48 meshes'
 # Reuse the actual authoring definitions without running the new-scene setup.
 source_path=ROOT/'tools/make_tile_decorations.py'
 source=ast.parse(source_path.read_text(encoding='utf-8'))
-definition_names={'solid_material','paint_palette','palette_material','MeshBuilder','edge_point','pebble','blade','leaf',
-                  'make_pebbles','make_grass','moss_clump','make_moss',
+definition_names={'solid_material','paint_palette','palette_material','MeshBuilder','edge_point','pebble','blade',
+                  'make_pebbles','ground_cover','make_grass','make_moss',
                   'decoration_distribution','scatter_edge_sites','perimeter_sites',
                   'place_perimeter_patch','make_uniform_decoration','make_decoration'}
 module=ast.Module(body=[node for node in source.body
@@ -142,7 +142,7 @@ with contextlib.redirect_stdout(io.StringIO()):
         entry['vertex_count']=sum(exported['accessors'][p['attributes']['POSITION']]['count']
                                   for m in exported['meshes'] for p in m['primitives'])
 
-catalog['revision']='Varied pebbles and grass tufts with multi-lobe moss in balanced edge scatter'
+catalog['revision']='Varied simple stones and moss mats with separate single grass blades'
 catalog_path.write_text(json.dumps(catalog,indent=2)+'\n',encoding='utf-8')
 bpy.ops.object.select_all(action='DESELECT')
 bpy.context.view_layer.objects.active=bpy.data.objects[catalog['assets'][0]['id']]

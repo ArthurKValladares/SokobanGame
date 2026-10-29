@@ -43,30 +43,30 @@
       "variant": 1,
       "edge_mask": 1,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_edge_01.glb",
-      "triangles": 632,
-      "vertex_count": 1312,
+      "triangles": 206,
+      "vertex_count": 432,
       "bounds": {
         "min": [
-          -0.4718526601791382,
+          -0.4669558107852936,
           -0.5,
           -0.00800000037997961
         ],
         "max": [
-          0.47957897186279297,
-          -0.40302005410194397,
-          0.05168909206986427
+          0.4578261971473694,
+          -0.3368297219276428,
+          0.04265443608164787
         ]
       },
-      "source_vertex_count": 340,
+      "source_vertex_count": 113,
       "focal_point": [
         0,
-        -0.445,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.445,
+          -0.4075,
           0
         ]
       ]
@@ -78,30 +78,30 @@
       "variant": 2,
       "edge_mask": 1,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_edge_02.glb",
-      "triangles": 624,
-      "vertex_count": 1296,
+      "triangles": 206,
+      "vertex_count": 432,
       "bounds": {
         "min": [
-          -0.4708573520183563,
+          -0.44658562541007996,
           -0.5,
           -0.00800000037997961
         ],
         "max": [
-          0.47331753373146057,
-          -0.39899832010269165,
-          0.04980144649744034
+          0.4790194630622864,
+          -0.32115796208381653,
+          0.05544839799404144
         ]
       },
-      "source_vertex_count": 336,
+      "source_vertex_count": 113,
       "focal_point": [
         0,
-        -0.445,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.445,
+          -0.4075,
           0
         ]
       ]
@@ -113,30 +113,30 @@
       "variant": 3,
       "edge_mask": 1,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_edge_03.glb",
-      "triangles": 624,
-      "vertex_count": 1296,
+      "triangles": 198,
+      "vertex_count": 416,
       "bounds": {
         "min": [
-          -0.48753541707992554,
+          -0.4209708869457245,
           -0.5,
           -0.00800000037997961
         ],
         "max": [
-          0.4914533495903015,
-          -0.40166911482810974,
-          0.04992653429508209
+          0.449721097946167,
+          -0.3558824956417084,
+          0.0519198514521122
         ]
       },
-      "source_vertex_count": 336,
+      "source_vertex_count": 109,
       "focal_point": [
         0,
-        -0.445,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.445,
+          -0.4075,
           0
         ]
       ]
@@ -148,30 +148,30 @@
       "variant": 4,
       "edge_mask": 1,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_edge_04.glb",
-      "triangles": 576,
-      "vertex_count": 1200,
+      "triangles": 214,
+      "vertex_count": 448,
       "bounds": {
         "min": [
-          -0.4791978597640991,
+          -0.44101980328559875,
           -0.5,
           -0.00800000037997961
         ],
         "max": [
-          0.4689829349517822,
-          -0.40211936831474304,
-          0.051799118518829346
+          0.43179601430892944,
+          -0.32746681571006775,
+          0.05121500790119171
         ]
       },
-      "source_vertex_count": 312,
+      "source_vertex_count": 117,
       "focal_point": [
         0,
-        -0.445,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.445,
+          -0.4075,
           0
         ]
       ]
@@ -183,30 +183,30 @@
       "variant": 1,
       "edge_mask": 3,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_corner_01.glb",
-      "triangles": 1154,
-      "vertex_count": 2400,
+      "triangles": 358,
+      "vertex_count": 752,
       "bounds": {
         "min": [
-          -0.48898646235466003,
+          -0.44024115800857544,
           -0.5,
           -0.00800000037997961
         ],
         "max": [
           0.5,
-          0.47696471214294434,
-          0.050795309245586395
+          0.47047048807144165,
+          0.056615352630615234
         ]
       },
-      "source_vertex_count": 623,
+      "source_vertex_count": 197,
       "focal_point": [
-        0.445,
-        -0.445,
+        0.4075,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
-          0.445,
-          -0.445,
+          0.4075,
+          -0.4075,
           0
         ]
       ]
@@ -218,30 +218,30 @@
       "variant": 2,
       "edge_mask": 3,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_corner_02.glb",
-      "triangles": 1194,
-      "vertex_count": 2480,
+      "triangles": 374,
+      "vertex_count": 784,
       "bounds": {
         "min": [
-          -0.4760425388813019,
+          -0.46233928203582764,
           -0.5,
           -0.00800000037997961
         ],
         "max": [
           0.5,
-          0.4788797199726105,
-          0.05429334193468094
+          0.49799999594688416,
+          0.05227236449718475
         ]
       },
-      "source_vertex_count": 643,
+      "source_vertex_count": 205,
       "focal_point": [
-        0.445,
-        -0.445,
+        0.4075,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
-          0.445,
-          -0.445,
+          0.4075,
+          -0.4075,
           0
         ]
       ]
@@ -253,30 +253,30 @@
       "variant": 3,
       "edge_mask": 3,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_corner_03.glb",
-      "triangles": 1218,
-      "vertex_count": 2528,
+      "triangles": 374,
+      "vertex_count": 784,
       "bounds": {
         "min": [
-          -0.4820147156715393,
+          -0.4541388154029846,
           -0.5,
           -0.00800000037997961
         ],
         "max": [
           0.5,
-          0.47669172286987305,
-          0.050331298261880875
+          0.45259889960289,
+          0.04878068342804909
         ]
       },
-      "source_vertex_count": 655,
+      "source_vertex_count": 205,
       "focal_point": [
-        0.445,
-        -0.445,
+        0.4075,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
-          0.445,
-          -0.445,
+          0.4075,
+          -0.4075,
           0
         ]
       ]
@@ -288,30 +288,30 @@
       "variant": 4,
       "edge_mask": 3,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_corner_04.glb",
-      "triangles": 1210,
-      "vertex_count": 2512,
+      "triangles": 406,
+      "vertex_count": 848,
       "bounds": {
         "min": [
-          -0.4741177558898926,
+          -0.44471463561058044,
           -0.5,
           -0.00800000037997961
         ],
         "max": [
           0.5,
-          0.480745404958725,
-          0.05127335712313652
+          0.46540606021881104,
+          0.053788766264915466
         ]
       },
-      "source_vertex_count": 651,
+      "source_vertex_count": 221,
       "focal_point": [
-        0.445,
-        -0.445,
+        0.4075,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
-          0.445,
-          -0.445,
+          0.4075,
+          -0.4075,
           0
         ]
       ]
@@ -323,35 +323,35 @@
       "variant": 1,
       "edge_mask": 5,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_strip_01.glb",
-      "triangles": 1176,
-      "vertex_count": 2448,
+      "triangles": 380,
+      "vertex_count": 800,
       "bounds": {
         "min": [
-          -0.48439738154411316,
+          -0.4469454884529114,
           -0.5,
           -0.00800000037997961
         ],
         "max": [
-          0.4777548909187317,
+          0.46556222438812256,
           0.5,
-          0.05312473699450493
+          0.0516512431204319
         ]
       },
-      "source_vertex_count": 636,
+      "source_vertex_count": 210,
       "focal_point": [
         0,
-        -0.445,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.445,
+          -0.4075,
           0
         ],
         [
           0,
-          0.445,
+          0.4075,
           0
         ]
       ]
@@ -363,35 +363,35 @@
       "variant": 2,
       "edge_mask": 5,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_strip_02.glb",
-      "triangles": 1272,
-      "vertex_count": 2640,
+      "triangles": 436,
+      "vertex_count": 912,
       "bounds": {
         "min": [
-          -0.48181071877479553,
+          -0.49423909187316895,
           -0.5,
           -0.00800000037997961
         ],
         "max": [
-          0.4951483905315399,
+          0.46732792258262634,
           0.5,
-          0.05186038464307785
+          0.052837394177913666
         ]
       },
-      "source_vertex_count": 684,
+      "source_vertex_count": 238,
       "focal_point": [
         0,
-        -0.445,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.445,
+          -0.4075,
           0
         ],
         [
           0,
-          0.445,
+          0.4075,
           0
         ]
       ]
@@ -403,35 +403,35 @@
       "variant": 3,
       "edge_mask": 5,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_strip_03.glb",
-      "triangles": 1136,
-      "vertex_count": 2368,
+      "triangles": 372,
+      "vertex_count": 784,
       "bounds": {
         "min": [
-          -0.4910516142845154,
+          -0.47264334559440613,
           -0.5,
           -0.00800000037997961
         ],
         "max": [
-          0.48658299446105957,
+          0.49124348163604736,
           0.5,
-          0.0511540025472641
+          0.05204160138964653
         ]
       },
-      "source_vertex_count": 616,
+      "source_vertex_count": 206,
       "focal_point": [
         0,
-        -0.445,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.445,
+          -0.4075,
           0
         ],
         [
           0,
-          0.445,
+          0.4075,
           0
         ]
       ]
@@ -443,35 +443,35 @@
       "variant": 4,
       "edge_mask": 5,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_strip_04.glb",
-      "triangles": 1176,
-      "vertex_count": 2448,
+      "triangles": 468,
+      "vertex_count": 976,
       "bounds": {
         "min": [
-          -0.48472797870635986,
+          -0.45130133628845215,
           -0.5,
           -0.00800000037997961
         ],
         "max": [
-          0.48553797602653503,
+          0.45184823870658875,
           0.5,
-          0.05247443914413452
+          0.0525808185338974
         ]
       },
-      "source_vertex_count": 636,
+      "source_vertex_count": 254,
       "focal_point": [
         0,
-        -0.445,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.445,
+          -0.4075,
           0
         ],
         [
           0,
-          0.445,
+          0.4075,
           0
         ]
       ]
@@ -483,8 +483,8 @@
       "variant": 1,
       "edge_mask": 11,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_end_01.glb",
-      "triangles": 1652,
-      "vertex_count": 3440,
+      "triangles": 518,
+      "vertex_count": 1088,
       "bounds": {
         "min": [
           -0.5,
@@ -493,20 +493,20 @@
         ],
         "max": [
           0.5,
-          0.4854971170425415,
-          0.0534285232424736
+          0.4605709910392761,
+          0.053626835346221924
         ]
       },
-      "source_vertex_count": 894,
+      "source_vertex_count": 285,
       "focal_point": [
         0,
-        -0.445,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.445,
+          -0.4075,
           0
         ]
       ]
@@ -518,8 +518,8 @@
       "variant": 2,
       "edge_mask": 11,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_end_02.glb",
-      "triangles": 1708,
-      "vertex_count": 3552,
+      "triangles": 550,
+      "vertex_count": 1152,
       "bounds": {
         "min": [
           -0.5,
@@ -528,20 +528,20 @@
         ],
         "max": [
           0.5,
-          0.48104533553123474,
-          0.05168299004435539
+          0.4808112680912018,
+          0.051418423652648926
         ]
       },
-      "source_vertex_count": 922,
+      "source_vertex_count": 301,
       "focal_point": [
         0,
-        -0.445,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.445,
+          -0.4075,
           0
         ]
       ]
@@ -553,8 +553,8 @@
       "variant": 3,
       "edge_mask": 11,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_end_03.glb",
-      "triangles": 1748,
-      "vertex_count": 3632,
+      "triangles": 550,
+      "vertex_count": 1152,
       "bounds": {
         "min": [
           -0.5,
@@ -563,20 +563,20 @@
         ],
         "max": [
           0.5,
-          0.47719329595565796,
-          0.050752826035022736
+          0.4458046853542328,
+          0.05302134156227112
         ]
       },
-      "source_vertex_count": 942,
+      "source_vertex_count": 301,
       "focal_point": [
         0,
-        -0.445,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.445,
+          -0.4075,
           0
         ]
       ]
@@ -588,8 +588,8 @@
       "variant": 4,
       "edge_mask": 11,
       "model": "assets/custom/models/tile_decorations/tile_pebbles_end_04.glb",
-      "triangles": 1700,
-      "vertex_count": 3536,
+      "triangles": 550,
+      "vertex_count": 1152,
       "bounds": {
         "min": [
           -0.5,
@@ -598,20 +598,20 @@
         ],
         "max": [
           0.5,
-          0.4873195290565491,
-          0.05168771371245384
+          0.44522717595100403,
+          0.05395589396357536
         ]
       },
-      "source_vertex_count": 918,
+      "source_vertex_count": 301,
       "focal_point": [
         0,
-        -0.445,
+        -0.4075,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.445,
+          -0.4075,
           0
         ]
       ]
@@ -623,30 +623,30 @@
       "variant": 1,
       "edge_mask": 1,
       "model": "assets/custom/models/tile_decorations/tile_grass_edge_01.glb",
-      "triangles": 1400,
-      "vertex_count": 3300,
+      "triangles": 70,
+      "vertex_count": 160,
       "bounds": {
         "min": [
-          -0.49601516127586365,
+          -0.4470842182636261,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.4835125803947449,
-          -0.3685219883918762,
-          0.18173646926879883
+          0.3946076035499573,
+          -0.35631516575813293,
+          0.1563851684331894
         ]
       },
-      "source_vertex_count": 850,
+      "source_vertex_count": 45,
       "focal_point": [
         0,
-        -0.4275,
+        -0.42,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4275,
+          -0.42,
           0
         ]
       ]
@@ -658,30 +658,30 @@
       "variant": 2,
       "edge_mask": 1,
       "model": "assets/custom/models/tile_decorations/tile_grass_edge_02.glb",
-      "triangles": 1138,
-      "vertex_count": 2640,
+      "triangles": 70,
+      "vertex_count": 160,
       "bounds": {
         "min": [
-          -0.4834544360637665,
+          -0.39722585678100586,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.4766671061515808,
-          -0.3704475164413452,
-          0.1796727329492569
+          0.39381447434425354,
+          -0.3504810929298401,
+          0.1692112684249878
         ]
       },
-      "source_vertex_count": 687,
+      "source_vertex_count": 45,
       "focal_point": [
         0,
-        -0.4275,
+        -0.42,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4275,
+          -0.42,
           0
         ]
       ]
@@ -693,30 +693,30 @@
       "variant": 3,
       "edge_mask": 1,
       "model": "assets/custom/models/tile_decorations/tile_grass_edge_03.glb",
-      "triangles": 1178,
-      "vertex_count": 2796,
+      "triangles": 70,
+      "vertex_count": 160,
       "bounds": {
         "min": [
-          -0.4843728542327881,
+          -0.4144957363605499,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.48224398493766785,
-          -0.36557137966156006,
-          0.1555432677268982
+          0.4049261212348938,
+          -0.37425097823143005,
+          0.17335215210914612
         ]
       },
-      "source_vertex_count": 717,
+      "source_vertex_count": 45,
       "focal_point": [
         0,
-        -0.4275,
+        -0.42,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4275,
+          -0.42,
           0
         ]
       ]
@@ -728,30 +728,30 @@
       "variant": 4,
       "edge_mask": 1,
       "model": "assets/custom/models/tile_decorations/tile_grass_edge_04.glb",
-      "triangles": 1272,
-      "vertex_count": 2952,
+      "triangles": 70,
+      "vertex_count": 160,
       "bounds": {
         "min": [
-          -0.47923293709754944,
+          -0.40052077174186707,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.4834342896938324,
-          -0.36949682235717773,
-          0.1716323345899582
+          0.3968901038169861,
+          -0.3699330687522888,
+          0.11757254600524902
         ]
       },
-      "source_vertex_count": 768,
+      "source_vertex_count": 45,
       "focal_point": [
         0,
-        -0.4275,
+        -0.42,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4275,
+          -0.42,
           0
         ]
       ]
@@ -763,30 +763,30 @@
       "variant": 1,
       "edge_mask": 3,
       "model": "assets/custom/models/tile_decorations/tile_grass_corner_01.glb",
-      "triangles": 2416,
-      "vertex_count": 5556,
+      "triangles": 126,
+      "vertex_count": 288,
       "bounds": {
         "min": [
-          -0.4823199510574341,
+          -0.41458243131637573,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
           0.5,
-          0.48517197370529175,
-          0.17366592586040497
+          0.416637659072876,
+          0.15495194494724274
         ]
       },
-      "source_vertex_count": 1454,
+      "source_vertex_count": 81,
       "focal_point": [
-        0.4275,
-        -0.4275,
+        0.42,
+        -0.42,
         0
       ],
       "focal_points": [
         [
-          0.4275,
-          -0.4275,
+          0.42,
+          -0.42,
           0
         ]
       ]
@@ -798,30 +798,30 @@
       "variant": 2,
       "edge_mask": 3,
       "model": "assets/custom/models/tile_decorations/tile_grass_corner_02.glb",
-      "triangles": 2482,
-      "vertex_count": 5700,
+      "triangles": 126,
+      "vertex_count": 288,
       "bounds": {
         "min": [
-          -0.48480671644210815,
+          -0.40114590525627136,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
           0.5,
-          0.4851418435573578,
-          0.1790657788515091
+          0.4161771237850189,
+          0.17381539940834045
         ]
       },
-      "source_vertex_count": 1493,
+      "source_vertex_count": 81,
       "focal_point": [
-        0.4275,
-        -0.4275,
+        0.42,
+        -0.42,
         0
       ],
       "focal_points": [
         [
-          0.4275,
-          -0.4275,
+          0.42,
+          -0.42,
           0
         ]
       ]
@@ -833,30 +833,30 @@
       "variant": 3,
       "edge_mask": 3,
       "model": "assets/custom/models/tile_decorations/tile_grass_corner_03.glb",
-      "triangles": 2394,
-      "vertex_count": 5400,
+      "triangles": 126,
+      "vertex_count": 288,
       "bounds": {
         "min": [
-          -0.48768290877342224,
+          -0.43108347058296204,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
           0.5,
-          0.49394023418426514,
-          0.1821644902229309
+          0.40026164054870605,
+          0.16939105093479156
         ]
       },
-      "source_vertex_count": 1431,
+      "source_vertex_count": 81,
       "focal_point": [
-        0.4275,
-        -0.4275,
+        0.42,
+        -0.42,
         0
       ],
       "focal_points": [
         [
-          0.4275,
-          -0.4275,
+          0.42,
+          -0.42,
           0
         ]
       ]
@@ -868,30 +868,30 @@
       "variant": 4,
       "edge_mask": 3,
       "model": "assets/custom/models/tile_decorations/tile_grass_corner_04.glb",
-      "triangles": 2508,
-      "vertex_count": 5688,
+      "triangles": 126,
+      "vertex_count": 288,
       "bounds": {
         "min": [
-          -0.4830441474914551,
+          -0.4055485129356384,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
           0.5,
-          0.4792744815349579,
-          0.18620087206363678
+          0.42721983790397644,
+          0.15821623802185059
         ]
       },
-      "source_vertex_count": 1502,
+      "source_vertex_count": 81,
       "focal_point": [
-        0.4275,
-        -0.4275,
+        0.42,
+        -0.42,
         0
       ],
       "focal_points": [
         [
-          0.4275,
-          -0.4275,
+          0.42,
+          -0.42,
           0
         ]
       ]
@@ -903,35 +903,35 @@
       "variant": 1,
       "edge_mask": 5,
       "model": "assets/custom/models/tile_decorations/tile_grass_strip_01.glb",
-      "triangles": 2380,
-      "vertex_count": 5448,
+      "triangles": 140,
+      "vertex_count": 320,
       "bounds": {
         "min": [
-          -0.4799014627933502,
+          -0.43377187848091125,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.49529778957366943,
+          0.43986085057258606,
           0.5,
-          0.18909496068954468
+          0.15391620993614197
         ]
       },
-      "source_vertex_count": 1430,
+      "source_vertex_count": 90,
       "focal_point": [
         0,
-        -0.4275,
+        -0.42,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4275,
+          -0.42,
           0
         ],
         [
           0,
-          0.4275,
+          0.42,
           0
         ]
       ]
@@ -943,35 +943,35 @@
       "variant": 2,
       "edge_mask": 5,
       "model": "assets/custom/models/tile_decorations/tile_grass_strip_02.glb",
-      "triangles": 2464,
-      "vertex_count": 5700,
+      "triangles": 140,
+      "vertex_count": 320,
       "bounds": {
         "min": [
-          -0.4916402995586395,
+          -0.4344165027141571,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.488584965467453,
+          0.42029812932014465,
           0.5,
-          0.18732987344264984
+          0.14851979911327362
         ]
       },
-      "source_vertex_count": 1486,
+      "source_vertex_count": 90,
       "focal_point": [
         0,
-        -0.4275,
+        -0.42,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4275,
+          -0.42,
           0
         ],
         [
           0,
-          0.4275,
+          0.42,
           0
         ]
       ]
@@ -983,35 +983,35 @@
       "variant": 3,
       "edge_mask": 5,
       "model": "assets/custom/models/tile_decorations/tile_grass_strip_03.glb",
-      "triangles": 2344,
-      "vertex_count": 5340,
+      "triangles": 140,
+      "vertex_count": 320,
       "bounds": {
         "min": [
-          -0.49785783886909485,
+          -0.43636128306388855,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.490250825881958,
+          0.4236183762550354,
           0.5,
-          0.18850743770599365
+          0.16716964542865753
         ]
       },
-      "source_vertex_count": 1406,
+      "source_vertex_count": 90,
       "focal_point": [
         0,
-        -0.4275,
+        -0.42,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4275,
+          -0.42,
           0
         ],
         [
           0,
-          0.4275,
+          0.42,
           0
         ]
       ]
@@ -1023,35 +1023,35 @@
       "variant": 4,
       "edge_mask": 5,
       "model": "assets/custom/models/tile_decorations/tile_grass_strip_04.glb",
-      "triangles": 2554,
-      "vertex_count": 5916,
+      "triangles": 140,
+      "vertex_count": 320,
       "bounds": {
         "min": [
-          -0.493820458650589,
+          -0.40362173318862915,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.48619210720062256,
+          0.4268636703491211,
           0.5,
-          0.18459144234657288
+          0.1694273203611374
         ]
       },
-      "source_vertex_count": 1541,
+      "source_vertex_count": 90,
       "focal_point": [
         0,
-        -0.4275,
+        -0.42,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4275,
+          -0.42,
           0
         ],
         [
           0,
-          0.4275,
+          0.42,
           0
         ]
       ]
@@ -1063,8 +1063,8 @@
       "variant": 1,
       "edge_mask": 11,
       "model": "assets/custom/models/tile_decorations/tile_grass_end_01.glb",
-      "triangles": 3360,
-      "vertex_count": 7596,
+      "triangles": 182,
+      "vertex_count": 416,
       "bounds": {
         "min": [
           -0.5,
@@ -1073,20 +1073,20 @@
         ],
         "max": [
           0.5,
-          0.477631151676178,
-          0.18748275935649872
+          0.443228155374527,
+          0.17457668483257294
         ]
       },
-      "source_vertex_count": 2010,
+      "source_vertex_count": 117,
       "focal_point": [
         0,
-        -0.4275,
+        -0.42,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4275,
+          -0.42,
           0
         ]
       ]
@@ -1098,8 +1098,8 @@
       "variant": 2,
       "edge_mask": 11,
       "model": "assets/custom/models/tile_decorations/tile_grass_end_02.glb",
-      "triangles": 3652,
-      "vertex_count": 8400,
+      "triangles": 182,
+      "vertex_count": 416,
       "bounds": {
         "min": [
           -0.5,
@@ -1108,20 +1108,20 @@
         ],
         "max": [
           0.5,
-          0.49778565764427185,
-          0.17681948840618134
+          0.417063444852829,
+          0.17233869433403015
         ]
       },
-      "source_vertex_count": 2198,
+      "source_vertex_count": 117,
       "focal_point": [
         0,
-        -0.4275,
+        -0.42,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4275,
+          -0.42,
           0
         ]
       ]
@@ -1133,8 +1133,8 @@
       "variant": 3,
       "edge_mask": 11,
       "model": "assets/custom/models/tile_decorations/tile_grass_end_03.glb",
-      "triangles": 3628,
-      "vertex_count": 8328,
+      "triangles": 182,
+      "vertex_count": 416,
       "bounds": {
         "min": [
           -0.5,
@@ -1143,20 +1143,20 @@
         ],
         "max": [
           0.5,
-          0.492836058139801,
-          0.18877577781677246
+          0.4310736656188965,
+          0.1723652184009552
         ]
       },
-      "source_vertex_count": 2182,
+      "source_vertex_count": 117,
       "focal_point": [
         0,
-        -0.4275,
+        -0.42,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4275,
+          -0.42,
           0
         ]
       ]
@@ -1168,8 +1168,8 @@
       "variant": 4,
       "edge_mask": 11,
       "model": "assets/custom/models/tile_decorations/tile_grass_end_04.glb",
-      "triangles": 3500,
-      "vertex_count": 8088,
+      "triangles": 182,
+      "vertex_count": 416,
       "bounds": {
         "min": [
           -0.5,
@@ -1178,20 +1178,20 @@
         ],
         "max": [
           0.5,
-          0.4763927757740021,
-          0.18842960894107819
+          0.4176110029220581,
+          0.16663597524166107
         ]
       },
-      "source_vertex_count": 2110,
+      "source_vertex_count": 117,
       "focal_point": [
         0,
-        -0.4275,
+        -0.42,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4275,
+          -0.42,
           0
         ]
       ]
@@ -1205,31 +1205,31 @@
       "model": "assets/custom/models/tile_decorations/tile_moss_edge_01.glb",
       "focal_point": [
         0,
-        -0.4375,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4375,
+          -0.3825,
           0
         ]
       ],
-      "triangles": 1444,
-      "source_vertex_count": 820,
+      "triangles": 470,
+      "source_vertex_count": 245,
       "bounds": {
         "min": [
-          -0.4945806562900543,
+          -0.49799999594688416,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.4901491701602936,
-          -0.3799332082271576,
-          0.05081428587436676
+          0.4259115159511566,
+          -0.3112051784992218,
+          0.03292740136384964
         ]
       },
-      "vertex_count": 2893
+      "vertex_count": 890
     },
     {
       "id": "tile_moss_edge_02",
@@ -1240,31 +1240,31 @@
       "model": "assets/custom/models/tile_decorations/tile_moss_edge_02.glb",
       "focal_point": [
         0,
-        -0.4375,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4375,
+          -0.3825,
           0
         ]
       ],
-      "triangles": 1476,
-      "source_vertex_count": 840,
+      "triangles": 470,
+      "source_vertex_count": 245,
       "bounds": {
         "min": [
-          -0.4901348352432251,
+          -0.42774805426597595,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.4874917268753052,
-          -0.3827401399612427,
-          0.043656397610902786
+          0.49799999594688416,
+          -0.28496697545051575,
+          0.02820083498954773
         ]
       },
-      "vertex_count": 2960
+      "vertex_count": 890
     },
     {
       "id": "tile_moss_edge_03",
@@ -1275,31 +1275,31 @@
       "model": "assets/custom/models/tile_decorations/tile_moss_edge_03.glb",
       "focal_point": [
         0,
-        -0.4375,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4375,
+          -0.3825,
           0
         ]
       ],
-      "triangles": 1520,
-      "source_vertex_count": 872,
+      "triangles": 470,
+      "source_vertex_count": 245,
       "bounds": {
         "min": [
-          -0.4929613471031189,
+          -0.4464046061038971,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.4952077865600586,
-          -0.3813862204551697,
-          0.04244767501950264
+          0.45538580417633057,
+          -0.27215734124183655,
+          0.022813795134425163
         ]
       },
-      "vertex_count": 3058
+      "vertex_count": 884
     },
     {
       "id": "tile_moss_edge_04",
@@ -1310,31 +1310,31 @@
       "model": "assets/custom/models/tile_decorations/tile_moss_edge_04.glb",
       "focal_point": [
         0,
-        -0.4375,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4375,
+          -0.3825,
           0
         ]
       ],
-      "triangles": 1484,
-      "source_vertex_count": 848,
+      "triangles": 470,
+      "source_vertex_count": 245,
       "bounds": {
         "min": [
-          -0.48219406604766846,
+          -0.49799999594688416,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.47800782322883606,
-          -0.3835158944129944,
-          0.051800962537527084
+          0.44167521595954895,
+          -0.30425742268562317,
+          0.02679763361811638
         ]
       },
-      "vertex_count": 2977
+      "vertex_count": 886
     },
     {
       "id": "tile_moss_corner_01",
@@ -1344,32 +1344,32 @@
       "edge_mask": 3,
       "model": "assets/custom/models/tile_decorations/tile_moss_corner_01.glb",
       "focal_point": [
-        0.4375,
-        -0.4375,
+        0.3825,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
-          0.4375,
-          -0.4375,
+          0.3825,
+          -0.3825,
           0
         ]
       ],
-      "triangles": 2842,
-      "source_vertex_count": 1631,
+      "triangles": 846,
+      "source_vertex_count": 441,
       "bounds": {
         "min": [
-          -0.49620532989501953,
+          -0.44760191440582275,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
           0.5,
-          0.49187445640563965,
-          0.050109751522541046
+          0.4794502556324005,
+          0.02898496203124523
         ]
       },
-      "vertex_count": 5722
+      "vertex_count": 1598
     },
     {
       "id": "tile_moss_corner_02",
@@ -1379,32 +1379,32 @@
       "edge_mask": 3,
       "model": "assets/custom/models/tile_decorations/tile_moss_corner_02.glb",
       "focal_point": [
-        0.4375,
-        -0.4375,
+        0.3825,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
-          0.4375,
-          -0.4375,
+          0.3825,
+          -0.3825,
           0
         ]
       ],
-      "triangles": 2738,
-      "source_vertex_count": 1563,
+      "triangles": 846,
+      "source_vertex_count": 441,
       "bounds": {
         "min": [
-          -0.48887360095977783,
+          -0.46671199798583984,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
           0.5,
-          0.47115060687065125,
-          0.047906793653964996
+          0.47818315029144287,
+          0.031130021438002586
         ]
       },
-      "vertex_count": 5498
+      "vertex_count": 1598
     },
     {
       "id": "tile_moss_corner_03",
@@ -1414,32 +1414,32 @@
       "edge_mask": 3,
       "model": "assets/custom/models/tile_decorations/tile_moss_corner_03.glb",
       "focal_point": [
-        0.4375,
-        -0.4375,
+        0.3825,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
-          0.4375,
-          -0.4375,
+          0.3825,
+          -0.3825,
           0
         ]
       ],
-      "triangles": 2830,
-      "source_vertex_count": 1619,
+      "triangles": 846,
+      "source_vertex_count": 441,
       "bounds": {
         "min": [
-          -0.4915127456188202,
+          -0.4705980122089386,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
           0.5,
-          0.49628859758377075,
-          0.046487290412187576
+          0.49799999594688416,
+          0.031892355531454086
         ]
       },
-      "vertex_count": 5689
+      "vertex_count": 1602
     },
     {
       "id": "tile_moss_corner_04",
@@ -1449,32 +1449,32 @@
       "edge_mask": 3,
       "model": "assets/custom/models/tile_decorations/tile_moss_corner_04.glb",
       "focal_point": [
-        0.4375,
-        -0.4375,
+        0.3825,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
-          0.4375,
-          -0.4375,
+          0.3825,
+          -0.3825,
           0
         ]
       ],
-      "triangles": 2722,
-      "source_vertex_count": 1559,
+      "triangles": 846,
+      "source_vertex_count": 441,
       "bounds": {
         "min": [
-          -0.4950452744960785,
+          -0.4635012745857239,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
           0.5,
-          0.49855318665504456,
-          0.049087151885032654
+          0.49267202615737915,
+          0.03285810351371765
         ]
       },
-      "vertex_count": 5477
+      "vertex_count": 1596
     },
     {
       "id": "tile_moss_strip_01",
@@ -1485,36 +1485,36 @@
       "model": "assets/custom/models/tile_decorations/tile_moss_strip_01.glb",
       "focal_point": [
         0,
-        -0.4375,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4375,
+          -0.3825,
           0
         ],
         [
           0,
-          0.4375,
+          0.3825,
           0
         ]
       ],
-      "triangles": 2920,
-      "source_vertex_count": 1672,
+      "triangles": 940,
+      "source_vertex_count": 490,
       "bounds": {
         "min": [
-          -0.490943044424057,
+          -0.49799999594688416,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.4968212842941284,
+          0.46580252051353455,
           0.5,
-          0.04431241750717163
+          0.03252071142196655
         ]
       },
-      "vertex_count": 5872
+      "vertex_count": 1774
     },
     {
       "id": "tile_moss_strip_02",
@@ -1525,36 +1525,36 @@
       "model": "assets/custom/models/tile_decorations/tile_moss_strip_02.glb",
       "focal_point": [
         0,
-        -0.4375,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4375,
+          -0.3825,
           0
         ],
         [
           0,
-          0.4375,
+          0.3825,
           0
         ]
       ],
-      "triangles": 2860,
-      "source_vertex_count": 1636,
+      "triangles": 940,
+      "source_vertex_count": 490,
       "bounds": {
         "min": [
-          -0.49836692214012146,
+          -0.47908642888069153,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.4923942983150482,
+          0.48621317744255066,
           0.5,
-          0.05072189122438431
+          0.029147932305932045
         ]
       },
-      "vertex_count": 5751
+      "vertex_count": 1776
     },
     {
       "id": "tile_moss_strip_03",
@@ -1565,36 +1565,36 @@
       "model": "assets/custom/models/tile_decorations/tile_moss_strip_03.glb",
       "focal_point": [
         0,
-        -0.4375,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4375,
+          -0.3825,
           0
         ],
         [
           0,
-          0.4375,
+          0.3825,
           0
         ]
       ],
-      "triangles": 2928,
-      "source_vertex_count": 1668,
+      "triangles": 940,
+      "source_vertex_count": 490,
       "bounds": {
         "min": [
-          -0.4915570318698883,
+          -0.4381336271762848,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.4937256872653961,
+          0.43756332993507385,
           0.5,
-          0.05050823837518692
+          0.03001497872173786
         ]
       },
-      "vertex_count": 5877
+      "vertex_count": 1774
     },
     {
       "id": "tile_moss_strip_04",
@@ -1605,36 +1605,36 @@
       "model": "assets/custom/models/tile_decorations/tile_moss_strip_04.glb",
       "focal_point": [
         0,
-        -0.4375,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4375,
+          -0.3825,
           0
         ],
         [
           0,
-          0.4375,
+          0.3825,
           0
         ]
       ],
-      "triangles": 2940,
-      "source_vertex_count": 1668,
+      "triangles": 940,
+      "source_vertex_count": 490,
       "bounds": {
         "min": [
-          -0.4935336410999298,
+          -0.47989317774772644,
           -0.5,
           -0.006000000052154064
         ],
         "max": [
-          0.48046788573265076,
+          0.45153316855430603,
           0.5,
-          0.05219932273030281
+          0.03175456449389458
         ]
       },
-      "vertex_count": 5885
+      "vertex_count": 1776
     },
     {
       "id": "tile_moss_end_01",
@@ -1645,18 +1645,18 @@
       "model": "assets/custom/models/tile_decorations/tile_moss_end_01.glb",
       "focal_point": [
         0,
-        -0.4375,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4375,
+          -0.3825,
           0
         ]
       ],
-      "triangles": 4100,
-      "source_vertex_count": 2326,
+      "triangles": 1222,
+      "source_vertex_count": 637,
       "bounds": {
         "min": [
           -0.5,
@@ -1665,11 +1665,11 @@
         ],
         "max": [
           0.5,
-          0.49715203046798706,
-          0.057405903935432434
+          0.44890928268432617,
+          0.031517144292593
         ]
       },
-      "vertex_count": 8211
+      "vertex_count": 2310
     },
     {
       "id": "tile_moss_end_02",
@@ -1680,18 +1680,18 @@
       "model": "assets/custom/models/tile_decorations/tile_moss_end_02.glb",
       "focal_point": [
         0,
-        -0.4375,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4375,
+          -0.3825,
           0
         ]
       ],
-      "triangles": 4160,
-      "source_vertex_count": 2386,
+      "triangles": 1222,
+      "source_vertex_count": 637,
       "bounds": {
         "min": [
           -0.5,
@@ -1700,11 +1700,11 @@
         ],
         "max": [
           0.5,
-          0.48889291286468506,
-          0.04868136718869209
+          0.48962295055389404,
+          0.03142992779612541
         ]
       },
-      "vertex_count": 8374
+      "vertex_count": 2308
     },
     {
       "id": "tile_moss_end_03",
@@ -1715,18 +1715,18 @@
       "model": "assets/custom/models/tile_decorations/tile_moss_end_03.glb",
       "focal_point": [
         0,
-        -0.4375,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4375,
+          -0.3825,
           0
         ]
       ],
-      "triangles": 4000,
-      "source_vertex_count": 2286,
+      "triangles": 1222,
+      "source_vertex_count": 637,
       "bounds": {
         "min": [
           -0.5,
@@ -1735,11 +1735,11 @@
         ],
         "max": [
           0.5,
-          0.48673850297927856,
-          0.057676784694194794
+          0.48005715012550354,
+          0.03149568662047386
         ]
       },
-      "vertex_count": 8038
+      "vertex_count": 2308
     },
     {
       "id": "tile_moss_end_04",
@@ -1750,18 +1750,18 @@
       "model": "assets/custom/models/tile_decorations/tile_moss_end_04.glb",
       "focal_point": [
         0,
-        -0.4375,
+        -0.3825,
         0
       ],
       "focal_points": [
         [
           0,
-          -0.4375,
+          -0.3825,
           0
         ]
       ],
-      "triangles": 4184,
-      "source_vertex_count": 2386,
+      "triangles": 1222,
+      "source_vertex_count": 637,
       "bounds": {
         "min": [
           -0.5,
@@ -1770,12 +1770,12 @@
         ],
         "max": [
           0.5,
-          0.4948013126850128,
-          0.05572202429175377
+          0.49427831172943115,
+          0.032994288951158524
         ]
       },
-      "vertex_count": 8397
+      "vertex_count": 2310
     }
   ],
-  "revision": "Varied pebbles and grass tufts with multi-lobe moss in balanced edge scatter"
+  "revision": "Varied simple stones and moss mats with separate single grass blades"
 }
