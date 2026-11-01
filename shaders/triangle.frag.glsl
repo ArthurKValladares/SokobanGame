@@ -38,6 +38,7 @@ layout(location = 0) out vec4 outColor;
 #include "Material.glsl"
 #include "SceneFrame.glsl"
 #include "PbrLighting.glsl"
+#include "FlameStream.glsl"
 
 // Entry zero is reserved as the published-nothing fallback: an untextured
 // white surface. A base of zero means the model has not published, and its
@@ -204,6 +205,13 @@ float plateEnergyPattern(vec2 uv, float time)
 
 void main()
 {
+    // Procedural fire owns its parameter lanes; handle it before modelMaterial
+    // interprets passData[0].x as a material-buffer index.
+    if (int(draw.textureOptions.x + 0.5) == DRAW_MODE_FLAME_STREAM) {
+        outColor = flameStreamColor(vec2(inFaceCoordU, inFaceCoordV),
+            draw.passData[0], draw.color);
+        return;
+    }
     applyEditorPreviewDither();
 
     // Read for every draw, not just the primitive-materials one. A draw with

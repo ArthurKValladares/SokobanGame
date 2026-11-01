@@ -1420,18 +1420,17 @@ void Application::update(
                 witchSwapParticleEffect_);
         }
     }
+    if (input.gameplay.undoPressed || input.gameplay.undoDown || input.gameplay.restartPressed) {
+        turretFlames_.reset();
+    }
+    turretFlames_.update(level_, gameplaySession_.state(),
+        gameplaySession_.readingLectern() ? 0.0f : dt, &presentation_);
     for (const GameplayLoop::UpdateResult::TurretShotPresentation& shot :
          gameplayResult.turretShots) {
-        const float recoilDelay = emitTurretShotParticles(
-            particleSystem_,
-            turretParticleEffects_,
-            shot.shot,
-            shot.impactDelaySeconds);
+        turretFlames_.triggerShot(shot.shot, shot.impactDelaySeconds);
         presentation_.triggerTurretShot(
             shot.shot.turret.id,
-            shot.shot.direction,
-            recoilDelay);
-        audioSystem_->playOneShot("laser", recoilDelay);
+            shot.shot.direction);
     }
     for (const auto sound : gameplayResult.sounds) {
         audioSystem_->playOneShot(soundSetName(sound));
@@ -1605,6 +1604,7 @@ bool Application::applyLevel(
         campaign_.inOverworld() ? 0 : campaign_.currentLevel(),
         gameplaySession_.activeHeroCharacter());
     particleSystem_.reset();
+    turretFlames_.reset();
     campaign_.markWorldLoaded();
     return restored;
 }
@@ -3088,6 +3088,7 @@ RenderFrameData Application::buildRenderFrame(
             overworldFogReveal_);
     }
     particleSystem_.appendRenderData(frame);
+    turretFlames_.appendRenderData(frame, turretParticleEffects_);
     frame.levelTransitionAmount = levelTransition_.amount();
     if (evidenceWaterEnabled_) {
         appendEvidenceWaterFixture(frame);

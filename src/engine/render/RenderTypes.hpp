@@ -607,6 +607,17 @@ struct RenderFrameData {
         float durationSeconds = 0.0f;
     };
 
+    // A connected fire surface with turbulence advected in path space. The
+    // offset keeps its flow continuous across portal segments.
+    struct FlameStream {
+        float timeSeconds = 0.0f;
+        float pathOffset = 0.0f;
+        float pathLength = 1.0f;
+        float seed = 0.0f;
+
+        bool operator==(const FlameStream&) const = default;
+    };
+
     struct Particle {
         Vec3 position {};
         Vec2 size { 1.0f, 1.0f };
@@ -624,6 +635,7 @@ struct RenderFrameData {
         RenderTexture texture = noTexture;
         bool drawOnTop = false;
         int32_t drawOrder = 0;
+        std::optional<FlameStream> flameStream;
     };
 
     struct GridOverlay {

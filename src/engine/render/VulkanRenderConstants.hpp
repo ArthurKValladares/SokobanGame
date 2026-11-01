@@ -144,6 +144,7 @@ enum class DrawMaterialMode : uint8_t {
     ProceduralTexture = 5,
     SceneImage = 6,
     TextureImage = 7,
+    FlameStream = 8,
 };
 
 // The lane is a float because every other lane of that vec4 is one; the shader
@@ -225,6 +226,8 @@ struct GpuDrawInstance {
     // Energy quads instead use w = +1 for mirror ribbons or -1 for gates, with
     // passData[1].xyz carrying beam length, width relative to the halo, and
     // flow speed. Mirror ghost models keep w zero.
+    // Flame-stream quads use passData[0] for time, cumulative path offset,
+    // segment length and stable turbulence seed; they sample no texture.
     // Nine-sliced textured quads use the
     // two-lane contract in NineSlice.hpp: source borders in passData[0] and
     // target extent/scale in passData[1]. Ground splats carry

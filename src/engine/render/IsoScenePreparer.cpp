@@ -1199,7 +1199,7 @@ static void prepareAuxiliaryGeometry(
     if (frameData.viewMode == RenderViewMode::Isometric3D) {
         SOKOBAN_PROFILE_SCOPE("Renderer.Prepare particles");
         for (const RenderFrameData::Particle& source : frameData.particles) {
-            if (source.texture.isNone() || source.color.w <= 0.0f ||
+            if ((source.texture.isNone() && !source.flameStream) || source.color.w <= 0.0f ||
                 source.size.x <= 0.0f || source.size.y <= 0.0f) {
                 continue;
             }
@@ -1252,11 +1252,17 @@ static void prepareAuxiliaryGeometry(
                 cameraRight.y * rightCosine + cameraUp.y * rightSine,
                 cameraRight.z * rightCosine + cameraUp.z * rightSine,
             };
-            const Vec3 up {
+            const Vec3 billboardUp {
                 cameraUp.x * upCosine + cameraRight.x * upSine,
                 cameraUp.y * upCosine + cameraRight.y * upSine,
                 cameraUp.z * upCosine + cameraRight.z * upSine,
             };
+            // A long fire ribbon must meet its real world-space endpoints.
+            // Flattening its length into the camera plane moves the nozzle
+            // and target after perspective projection, even at the right center.
+            const Vec3 up = source.flameStream && source.billboardAlignmentUsesY
+                ? normalize(source.billboardAlignment) * (source.size.y * 0.5f)
+                : billboardUp;
             const Vec3 diagonal = add(right, up);
             PreparedParticle particle {
                 .vertices = {
@@ -1275,6 +1281,7 @@ static void prepareAuxiliaryGeometry(
                 .flipTextureV = source.flipTextureV,
                 .drawOnTop = source.drawOnTop,
                 .drawOrder = source.drawOrder,
+                .flameStream = source.flameStream,
             };
             particles.push_back(particle);
         }

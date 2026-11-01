@@ -141,150 +141,172 @@ void testTrailSamplesAppearAlongTheLineAtProjectileSpeed()
     CHECK(frame.particles.front().color.w < frame.particles.back().color.w);
 }
 
-void testTurretShotLayersTheMuzzleAndFullPathLaser()
+TurretParticleEffects flameEffects()
 {
-    TEST("turretShotLayersTheMuzzleAndFullPathLaser");
-    TurretParticleEffects effects;
-    effects.muzzleGlow = fixedEffect();
-    effects.muzzleGlow.textures = { RenderTexture { 10 } };
-    effects.muzzleGlow.particleCount = 1;
-    effects.muzzleFlash = fixedEffect();
-    effects.muzzleFlash.textures = { RenderTexture { 11 } };
-    effects.muzzleFlash.particleCount = 1;
+    return { .glowTexture = RenderTexture { 14 } };
+}
 
-    effects.laserBeam = {
-        .texture = RenderTexture { 12 },
-        .color = { 1.0f, 0.6f, 0.1f, 0.8f },
-        .emissiveStrength = 2.25f,
-        .textureNineSlice =
-            NineSlice::symmetricFitTargetWidth({ 0.2f, 0.2f }),
-        .width = 0.40f,
-        .lifetimeSeconds = 0.20f,
-        .revealSeconds = 0.06f,
-        .fullLength = true,
-        .drawOnTop = true,
-    };
-    effects.laserBeamCore = effects.laserBeam;
-    effects.laserBeamCore.texture = RenderTexture { 13 };
-    effects.laserBeamCore.width = 0.12f;
-    effects.impactGlow = fixedEffect();
-    effects.impactGlow.textures = { RenderTexture { 14 } };
-    effects.impactGlow.color = effects.laserBeam.color;
-    effects.impactGlow.color.w = 1.0f;
-    effects.impactGlow.emissiveStrength = 2.6f;
-    effects.impactGlow.particleCount = 1;
-    effects.impactGlow.drawOrder = 2;
-    effects.impactGlow.initialSize = { 0.4f, 0.4f };
-    effects.impactGlow.finalSize = { 1.6f, 1.6f };
-    effects.impactGlow.minimumVelocity = {};
-    effects.impactGlow.maximumVelocity = {};
-    effects.impactCore = fixedEffect();
-    effects.impactCore.textures = { RenderTexture { 15 } };
-    effects.impactCore.color = { 1.0f, 0.96f, 0.7f, 0.96f };
-    effects.impactCore.color.w = 1.0f;
-    effects.impactCore.emissiveStrength = 4.2f;
-    effects.impactCore.particleCount = 1;
-    effects.impactCore.drawOrder = 3;
-    effects.impactCore.minimumVelocity = {};
-    effects.impactCore.maximumVelocity = {};
-
-    ParticleSystem particles(17);
-    const float muzzleDelay = emitTurretShotParticles(
-        particles,
-        effects,
-        rules::TurretShot {
-            .turretCell = { 0, 0, 1 },
-            .targetCell = { 2, 0, 1 },
-            .direction = MoveDirection::Right,
-        },
-        0.25f);
-
-    particles.update(muzzleDelay + 0.001f);
+void testFlameGrowsThenStaysActiveAndFlickersUntilSightlineClears()
+{
+    TEST("flame grows in the existing laser time and burns while a target remains");
+    const Level level = Level::loadFromLayers({ { ".......", "......." },
+        { "e    R ", " C     " } }, "flamethrower");
+    auto state = rules::initialState(level);
+    TurretFlameSystem flames;
     RenderFrameData frame;
-    particles.appendRenderData(frame);
-    CHECK(frame.particles.size() == 2);
-    CHECK(std::ranges::any_of(frame.particles, [](const auto& particle) {
-        return particle.texture == RenderTexture { 10 };
+    const auto render = [&] {
+        frame.particles.clear();
+        flames.appendRenderData(frame, flameEffects());
+    };
+    flames.update(level, state, 0.0f);
+    render();
+    CHECK(frame.particles.empty());
+    flames.update(level, state, 0.04f);
+    render();
+    CHECK(!frame.particles.empty());
+    CHECK(std::ranges::all_of(frame.particles, [](const auto& particle) {
+        return particle.position.x < 3.4f;
     }));
+    CHECK(std::ranges::count_if(frame.particles, [](const auto& particle) {
+        return particle.texture == RenderTexture { 14 };
+    }) == 1); // No impact bloom before arrival.
+    flames.update(level, state, 0.04f);
+    render();
     CHECK(std::ranges::any_of(frame.particles, [](const auto& particle) {
-        return particle.texture == RenderTexture { 11 };
+        return particle.texture == RenderTexture { 14 } && near(particle.position.x, 5.5f);
     }));
+    const auto particleCount = frame.particles.size();
+    CHECK(frame.particles.front().flameStream.has_value());
+    const auto firstFlow = frame.particles.front().flameStream;
+    flames.update(level, state, 10.0f);
+    render();
+    CHECK(frame.particles.size() == particleCount);
+    CHECK(frame.particles.front().flameStream != firstFlow);
+    CHECK(frame.particles.front().flameStream->timeSeconds > 10.0f);
+    // Clear the rock without moving the turret. Empty space is not a target.
+    state.movables[1].cell = { 5, 1, 1 };
+    flames.update(level, state, 0.01f);
+    render();
+    CHECK(frame.particles.empty());
+    // Reacquiring the rock starts at the nozzle again.
+    state.movables[1].cell = { 2, 0, 1 };
+    flames.update(level, state, 0.0f);
+    render();
+    CHECK(frame.particles.empty());
+    flames.update(level, state, 0.08f);
+    render();
+    CHECK(!frame.particles.empty());
+    CHECK(std::ranges::all_of(frame.particles, [](const auto& particle) {
+        return particle.position.x <= 2.5f;
+    }));
+    state.movables[0].dead = true;
+    flames.update(level, state, 0.0f);
+    render();
+    CHECK(frame.particles.empty());
+}
 
-    // One millisecond before the beam reaches full length, neither hit layer
-    // is visible yet.
-    particles.update(0.066f);
+void testFlameStopsAtWallAndRestartsAfterRotation()
+{
+    TEST("flame stops at the first wall and follows turret orientation");
+    const Level level = Level::loadFromLayers({ { ".......", ".......", "......." },
+        { "e .  R ", " C     ", "       " } }, "flame wall");
+    auto state = rules::initialState(level);
+    TurretFlameSystem flames;
+    flames.update(level, state, 0.0f);
+    flames.update(level, state, 0.08f);
+    RenderFrameData frame;
+    flames.appendRenderData(frame, flameEffects());
+    CHECK(!frame.particles.empty());
+    CHECK(std::ranges::all_of(frame.particles, [](const auto& particle) {
+        return particle.position.x <= 2.0f;
+    }));
+    state.movables[0].quarterTurns = 1; // Turns away from the wall.
+    flames.update(level, state, 0.1f);
     frame.particles.clear();
-    particles.appendRenderData(frame);
-    const auto laserParticle = std::ranges::find_if(
-        frame.particles,
-        [](const auto& particle) {
-            return particle.texture == RenderTexture { 12 };
-        });
-    CHECK(laserParticle != frame.particles.end());
-    if (laserParticle != frame.particles.end()) {
-        CHECK(near(laserParticle->size.x, 0.40f));
-        CHECK(laserParticle->size.y > 1.4f);
-        CHECK(laserParticle->billboardAlignment.x > 0.99f);
-        CHECK(laserParticle->billboardAlignmentUsesY);
-        CHECK(!laserParticle->flipTextureV);
-        CHECK(near(laserParticle->emissiveStrength, 2.25f));
-        CHECK(near(laserParticle->textureNineSlice.sourceBorders.x, 0.2f));
-        CHECK(near(laserParticle->textureNineSlice.sourceBorders.y, 0.2f));
-        CHECK(laserParticle->size.y < 1.48f);
-    }
-    CHECK(std::ranges::any_of(frame.particles, [](const auto& particle) {
-        return particle.texture == RenderTexture { 13 };
-    }));
-    CHECK(std::ranges::none_of(frame.particles, [](const auto& particle) {
-        return particle.texture == RenderTexture { 14 } ||
-            particle.texture == RenderTexture { 15 };
-    }));
+    flames.appendRenderData(frame, flameEffects());
+    CHECK(frame.particles.empty());
+    flames.reset();
+    flames.appendRenderData(frame, flameEffects());
+    CHECK(frame.particles.empty());
+}
 
-    // Crossing the remaining millisecond completes the ribbon and begins
-    // both centered energy-sphere layers in the same simulation update.
-    particles.update(0.002f);
+void testFlameStartsBetweenTheRenderedBarrelsInEveryDirection()
+{
+    TEST("flame follows the barrel midpoint through rendered scale, rotation and recoil");
+    const MoveDirection directions[] { MoveDirection::Down, MoveDirection::Left,
+        MoveDirection::Up, MoveDirection::Right };
+    for (uint32_t turn = 0; turn < 4; ++turn) {
+        for (const float scale : { 0.6f, 0.9f, 1.3f }) {
+            const auto offset = rules::directionOffset(directions[turn]);
+            TurretFlameSystem flames;
+            flames.triggerShot({ .turret = { .kind = EntityKind::Movable, .id = 42 },
+                .turretCell = { 2, 3, 1 },
+                .targetCell = { 2 + offset.x * 4, 3 + offset.y * 4, 1 },
+                .direction = directions[turn] }, 0.0f);
+            flames.update(Level {}, {}, 0.08f);
+            RenderFrameData frame;
+            // The rendered center includes a recoil offset and a raised base.
+            frame.tiles.push_back({ .position = { 2.62f - scale * 0.5f, 3.48f - scale * 0.5f },
+                .size = { scale, scale }, .baseElevation = 1.2f, .height = scale,
+                .renderableId = 42, .modelRotationQuarterTurns = turn });
+            flames.appendRenderData(frame, flameEffects());
+            const auto jet = std::ranges::find_if(frame.particles, [](const auto& particle) {
+                return particle.flameStream.has_value();
+            });
+            CHECK(jet != frame.particles.end());
+            if (jet == frame.particles.end()) {
+                continue;
+            }
+            const Vec3 start = jet->position - jet->billboardAlignment * (jet->size.y * 0.5f);
+            // Measured from the front rims of the two authored barrels.
+            const float forward = 0.4979431f * scale;
+            const float lateral = 0.0001996f * scale;
+            const Vec3 expected {
+                2.62f + static_cast<float>(offset.x) * forward + static_cast<float>(offset.y) * lateral,
+                3.48f + static_cast<float>(offset.y) * forward - static_cast<float>(offset.x) * lateral,
+                1.2f + 0.8496013f * scale,
+            };
+            CHECK(length(start - expected) < 0.0001f);
+            CHECK(std::ranges::any_of(frame.particles, [&](const auto& particle) {
+                return particle.texture == RenderTexture { 14 } &&
+                    length(particle.position - expected) < 0.0001f;
+            }));
+        }
+    }
+}
+
+void testFlameFrontTraversesPortalSegmentsInOrderAndLethalShotsExpire()
+{
+    TEST("flame reaches successive portal segments before a lethal volley expires");
+    TurretFlameSystem flames;
+    flames.triggerShot({ .turret = { .kind = EntityKind::Movable, .id = 42 },
+        .turretCell = { 0, 0, 1 }, .targetCell = { 8, 3, 1 },
+        .direction = MoveDirection::Right,
+        .beamSegments = {
+            { .from = { 0, 0, 1 }, .to = { 3, 0, 1 }, .toEdge = { 1, 0 } },
+            { .from = { 6, 3, 1 }, .to = { 8, 3, 1 }, .fromEdge = { -1, 0 } },
+        } }, 0.0f);
+    const Level empty;
+    flames.update(empty, {}, 0.02f);
+    RenderFrameData frame;
+    flames.appendRenderData(frame, flameEffects());
+    CHECK(!frame.particles.empty());
+    CHECK(std::ranges::all_of(frame.particles, [](const auto& particle) {
+        return particle.position.y < 1.0f;
+    }));
+    flames.update(empty, {}, 0.06f);
     frame.particles.clear();
-    particles.appendRenderData(frame);
-    const auto arrivedLaser = std::ranges::find_if(
-        frame.particles,
-        [](const auto& particle) {
-            return particle.texture == RenderTexture { 12 };
-        });
-    const auto impactGlow = std::ranges::find_if(
-        frame.particles,
-        [](const auto& particle) {
-            return particle.texture == RenderTexture { 14 };
-        });
-    const auto impactCore = std::ranges::find_if(
-        frame.particles,
-        [](const auto& particle) {
-            return particle.texture == RenderTexture { 15 };
-        });
-    CHECK(arrivedLaser != frame.particles.end());
-    if (arrivedLaser != frame.particles.end()) {
-        CHECK(near(
-            arrivedLaser->size.y,
-            std::sqrt(1.48f * 1.48f + 0.06f * 0.06f)));
-    }
-    CHECK(impactGlow != frame.particles.end());
-    CHECK(impactCore != frame.particles.end());
-    if (impactGlow != frame.particles.end()) {
-        CHECK(near(impactGlow->position.x, 2.5f));
-        CHECK(near(impactGlow->position.y, 0.5f));
-        CHECK(near(impactGlow->position.z, 1.58f));
-        CHECK(near(impactGlow->emissiveStrength, 2.6f));
-        CHECK(impactGlow->color.w > 0.999f);
-        CHECK(impactGlow->size.x > 0.4f);
-        CHECK(impactGlow->drawOrder == 2);
-    }
-    if (impactCore != frame.particles.end()) {
-        CHECK(near(impactCore->position.x, 2.5f));
-        CHECK(near(impactCore->position.y, 0.5f));
-        CHECK(near(impactCore->position.z, 1.58f));
-        CHECK(near(impactCore->emissiveStrength, 4.2f));
-        CHECK(impactCore->color.w > 0.999f);
-        CHECK(impactCore->drawOrder == 3);
-    }
+    flames.appendRenderData(frame, flameEffects());
+    CHECK(std::ranges::any_of(frame.particles, [](const auto& particle) {
+        return particle.position.y > 3.0f;
+    }));
+    CHECK(std::ranges::any_of(frame.particles, [](const auto& particle) {
+        return particle.texture == RenderTexture { 14 } && near(particle.position.x, 8.5f);
+    }));
+    flames.update(empty, {}, 0.1f);
+    frame.particles.clear();
+    flames.appendRenderData(frame, flameEffects());
+    CHECK(frame.particles.empty());
 }
 
 void testFullLengthRibbonStaysVisibleUntilItsLifetimeEnds()
@@ -423,7 +445,10 @@ int main()
     testEmptyEffectsAndReset();
     testDelayedParticlesDoNotAgeOrMoveBeforeTheyAppear();
     testTrailSamplesAppearAlongTheLineAtProjectileSpeed();
-    testTurretShotLayersTheMuzzleAndFullPathLaser();
+    testFlameGrowsThenStaysActiveAndFlickersUntilSightlineClears();
+    testFlameStopsAtWallAndRestartsAfterRotation();
+    testFlameStartsBetweenTheRenderedBarrelsInEveryDirection();
+    testFlameFrontTraversesPortalSegmentsInOrderAndLethalShotsExpire();
     testRibbonRemainsOneConnectedMovingTracer();
     testFullLengthRibbonStaysVisibleUntilItsLifetimeEnds();
     testFullLengthRibbonGrowsFromItsOriginThenHolds();

@@ -144,9 +144,7 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.modelIdByName("Stone")));
     CHECK(requirements.contains(manifest.modelIdByName("Glass")));
     CHECK(requirements.contains(manifest.modelIdByName("Turret")));
-    CHECK(requirements.contains(manifest.textureIdByName("Muzzle01")));
     CHECK(requirements.contains(manifest.textureIdByName("ParticleGlow")));
-    CHECK(requirements.contains(manifest.textureIdByName("LaserBeam")));
     CHECK(!requirements.contains(cubeModel));
     CHECK(requirements.contains(manifest.playerIdleAnimation()));
     CHECK(requirements.contains(manifest.playerMoveAnimation()));
@@ -157,8 +155,8 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.enemyAttackAnimation()));
     CHECK(requirements.modelCount() == 8);
     CHECK(requirements.animationCount() == 7);
-    // Three splat textures, side sandstone, muzzle, glow, and the laser beam.
-    CHECK(requirements.textureCount() == 7);
+    // Three splat textures, side sandstone and the flame endpoint glow.
+    CHECK(requirements.textureCount() == 5);
 
     const Level mirrorLevel = Level::loadFromLayers({
         { ".....", ".....", ".....", ".....", "....." },
@@ -240,11 +238,7 @@ void testActionRequirementsKeepFirstUseAssetsWithoutTerrainOrModels()
     }
     CHECK(effectsRequirements.contains(
         manifest.textureIdByName(config::gateParticleTextureName)));
-    CHECK(effectsRequirements.contains(
-        manifest.textureIdByName(config::turretMuzzleTextureName)));
-    CHECK(effectsRequirements.contains(
-        manifest.textureIdByName(config::turretLaserTextureName)));
-    CHECK(effectsRequirements.textureCount() == 13);
+    CHECK(effectsRequirements.textureCount() == 11);
     CHECK(!effectsRequirements.contains(manifest.textureIdByName("GroundGrass")));
     CHECK(!effectsRequirements.contains(manifest.textureIdByName("GroundRock")));
     CHECK(!effectsRequirements.contains(manifest.textureIdByName("GroundRockSide")));

@@ -220,13 +220,9 @@ RenderAssetRequirements renderActionAssetRequirementsForLevel(
     if (std::ranges::any_of(level.movableTiles(), [](const auto& movable) {
             return tileTypeIsTurret(movable.type);
         })) {
-        // These bursts can finish before demand-driven streaming completes.
-        requirements.requireTexture(
-            manifest.textureIdByName(config::turretMuzzleTextureName));
+        // The flame's first front can arrive before demand-driven streaming.
         requirements.requireTexture(
             manifest.textureIdByName(config::turretGlowTextureName));
-        requirements.requireTexture(
-            manifest.textureIdByName(config::turretLaserTextureName));
     }
     return requirements;
 }

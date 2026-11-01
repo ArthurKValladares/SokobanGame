@@ -272,6 +272,7 @@ private:
     ParticleEffectDefinition mirrorSwapParticleEffect_;
     ParticleEffectDefinition witchSwapParticleEffect_;
     TurretParticleEffects turretParticleEffects_;
+    TurretFlameSystem turretFlames_;
     Level level_;
     std::optional<OverworldMap> overworldMap_;
     GameplaySession gameplaySession_;

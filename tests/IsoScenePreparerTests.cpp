@@ -210,6 +210,7 @@ void checkPreparationOutputsMatch(
               actual.particles[index].drawOnTop);
         CHECK(expected.particles[index].drawOrder ==
               actual.particles[index].drawOrder);
+        CHECK(expected.particles[index].flameStream == actual.particles[index].flameStream);
     }
 }
 
@@ -2177,6 +2178,36 @@ void testParticlesBecomeSortedTranslucentBillboardsOnly()
     CHECK(scene.shadowModelIndices.empty());
 }
 
+void testProceduralFlameRetainsItsFlowWithoutATexture()
+{
+    using namespace sokoban;
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = frame.levelHeight = 4;
+    const RenderFrameData::FlameStream flow {
+        .timeSeconds = 2.5f, .pathOffset = 3.0f, .pathLength = 2.0f, .seed = 17.0f,
+    };
+    frame.particles.push_back({
+        .position = { 1.5f, 1.5f, 1.0f },
+        .size = { 0.72f, 2.0f },
+        .billboardAlignment = { 0.0f, 1.0f, 0.0f },
+        .billboardAlignmentUsesY = true,
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .emissiveStrength = 3.2f,
+        .flameStream = flow,
+    });
+    const PreparedRenderScene scene = prepareScene(frame, { 1280.0f, 720.0f });
+    CHECK(scene.particles.size() == 1);
+    if (!scene.particles.empty()) {
+        CHECK(scene.particles.front().texture.isNone());
+        CHECK(scene.particles.front().flameStream == flow);
+        CHECK(near(scene.particles.front().emissiveStrength, 3.2f));
+        const auto& corners = scene.particles.front().vertices;
+        CHECK(length((corners[0] + corners[1]) * 0.5f - Vec3 { 1.5f, 0.5f, 1.0f }) < 0.0001f);
+        CHECK(length((corners[2] + corners[3]) * 0.5f - Vec3 { 1.5f, 2.5f, 1.0f }) < 0.0001f);
+    }
+}
+
 void testParticleRibbonFollowsTheProjectedWorldPath()
 {
     using namespace sokoban;
@@ -3289,6 +3320,7 @@ int main()
     testAlphaTintedModelUsesTheTranslucentPass();
     testParticlesBecomeSortedTranslucentBillboardsOnly();
     testParticleRibbonFollowsTheProjectedWorldPath();
+    testProceduralFlameRetainsItsFlowWithoutATexture();
     testAuthoredModelTransformSupportsPivotRotationAndNonUniformScale();
 
     if (failures == 0) {

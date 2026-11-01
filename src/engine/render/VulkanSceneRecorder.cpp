@@ -3373,10 +3373,15 @@ private:
             nineSlice = nineSliceDrawData(
                 particle.textureNineSlice, { quadWidth, quadHeight });
         }
+        const Vec4 surfaceData = particle.flameStream
+            ? Vec4 { particle.flameStream->timeSeconds,
+                  particle.flameStream->pathOffset, particle.flameStream->pathLength,
+                  particle.flameStream->seed }
+            : nineSlice.sourceBorders;
         const GpuDrawInstance constants {
             .vertices = quadVertices(particle.vertices, worldSpaceQuad),
             .passData = {
-                nineSlice.sourceBorders,
+                surfaceData,
                 nineSlice.targetExtentAndSourcePixelScale,
             },
             .color = {
@@ -3387,7 +3392,8 @@ private:
             },
             .materialOptions = { 0.0f, 1.0f, 1.0f, 0.0f },
             .textureOptions = {
-                shaderValue(DrawMaterialMode::ProceduralTexture),
+                shaderValue(particle.flameStream ? DrawMaterialMode::FlameStream
+                                                : DrawMaterialMode::ProceduralTexture),
                 static_cast<float>(particle.texture.value),
                 0.0f,
                 particle.flipTextureV ? -1.0f : 1.0f,

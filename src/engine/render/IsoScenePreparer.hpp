@@ -149,6 +149,7 @@ struct PreparedParticle {
     bool flipTextureV = false;
     bool drawOnTop = false;
     int32_t drawOrder = 0;
+    std::optional<RenderFrameData::FlameStream> flameStream;
 };
 
 // Persistent, Vulkan-free identity and world bounds for one source

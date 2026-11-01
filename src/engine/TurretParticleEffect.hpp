@@ -1,32 +1,47 @@
 #pragma once
 
-#include "engine/ParticleSystem.hpp"
 #include "engine/Rules.hpp"
+#include "engine/render/RenderTypes.hpp"
+
+#include <vector>
 
 namespace sokoban {
 
 class AssetManifest;
+class GameplayPresentation;
 
 struct TurretParticleEffects {
-    ParticleEffectDefinition muzzleGlow;
-    ParticleEffectDefinition muzzleFlash;
-    ParticleRibbonDefinition laserBeam;
-    ParticleRibbonDefinition laserBeamCore;
-    ParticleEffectDefinition impactGlow;
-    ParticleEffectDefinition impactCore;
+    RenderTexture glowTexture = noTexture;
 };
 
 [[nodiscard]] TurretParticleEffects makeTurretParticleEffects(
     const AssetManifest& manifest);
 
-// Schedules a layered muzzle burst, a full-path laser, and an energy-sphere
-// hit at the instant the growing ribbon reaches its destination. The beam
-// remains visible across the gameplay impact. Returns the muzzle/recoil start
-// delay.
-[[nodiscard]] float emitTurretShotParticles(
-    ParticleSystem& particles,
-    const TurretParticleEffects& effects,
-    const rules::TurretShot& shot,
-    float impactDelaySeconds);
+// Continuous streams use gameplay collision and portal traversal. Animation
+// is sampled without accumulating particles, keeping idle flames bounded.
+class TurretFlameSystem {
+public:
+    void update(const Level& level, const GameState& state, float dt,
+        const GameplayPresentation* presentation = nullptr);
+    // A lethal volley must remain visible long enough for the flame to arrive
+    // even when gameplay has already removed its target or both turrets.
+    void triggerShot(const rules::TurretShot& shot, float impactDelaySeconds);
+    void appendRenderData(RenderFrameData& frame,
+        const TurretParticleEffects& effects) const;
+    void reset();
+
+private:
+    struct Stream {
+        EntityId turret = invalidEntityId;
+        GridPosition3 origin {};
+        MoveDirection direction = MoveDirection::Up;
+        std::vector<rules::TurretRaySegment> segments;
+        float ageSeconds = 0.0f;
+        float shotHoldSeconds = 0.0f;
+        bool visible = false;
+    };
+
+    std::vector<Stream> streams_;
+};
 
 } // namespace sokoban

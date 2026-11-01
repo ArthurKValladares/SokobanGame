@@ -21,7 +21,7 @@ int main()
         fixture.append(frame, manifest, scenario, 8);
         CHECK(!frame.particles.empty());
         CHECK(std::ranges::all_of(frame.particles, [](const auto& particle) {
-            return !particle.texture.isNone() && particle.size.x > 0.0f &&
+            return (!particle.texture.isNone() || particle.flameStream) && particle.size.x > 0.0f &&
                 particle.size.y > 0.0f && particle.color.w > 0.0f;
         }));
         if (std::string_view(scenario) == "turret-volley") {

@@ -81,6 +81,7 @@ void PerformanceEffectFixture::append(RenderFrameData& frame,
         throw std::invalid_argument("Unknown performance effect scenario");
     }
     particles_.reset();
+    TurretFlameSystem flames;
     const bool mixed = scenario == "mixed-stress";
     const int width = static_cast<int>(std::max(frame.levelWidth, 4U));
     const int height = static_cast<int>(std::max(frame.levelHeight, 4U));
@@ -99,11 +100,12 @@ void PerformanceEffectFixture::append(RenderFrameData& frame,
         }
         if (mixed || scenario == "turret-volley") {
             const rules::TurretShot shot {
+                .turret = { .kind = EntityKind::Movable, .id = index + 1ULL },
                 .turretCell = cell,
                 .targetCell = { width - 2, cell.y, 1 },
                 .direction = MoveDirection::Right,
             };
-            (void)emitTurretShotParticles(particles_, turret_, shot, 0.04f);
+            flames.triggerShot(shot, 0.04f);
         }
         if (mixed || scenario == "portals") {
             auto portal = tileVisual(TileType::PortalNorth, cell, manifest, settings);
@@ -132,6 +134,8 @@ void PerformanceEffectFixture::append(RenderFrameData& frame,
     }
     particles_.update(0.08f);
     particles_.appendRenderData(frame);
+    flames.update(Level {}, GameState {}, 0.08f);
+    flames.appendRenderData(frame, turret_);
 }
 
 } // namespace sokoban
