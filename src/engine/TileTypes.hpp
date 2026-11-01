@@ -346,8 +346,8 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::StreamDown, ',', "Water Stream Down", { 0.08f, 0.34f, 0.78f, 1.0f } },
     TileTypeDefinition { TileType::StreamLeft, '`', "Water Stream Left", { 0.08f, 0.34f, 0.78f, 1.0f } },
     TileTypeDefinition { TileType::RoundRock, '\\', "Round Rock", { 1.0f, 1.0f, 1.0f, 1.0f } },
-    TileTypeDefinition { TileType::Crystal, '\x01', "Crystal", { 1.0f, 0.57f, 0.30f, 0.72f } },
-    TileTypeDefinition { TileType::SkippingCrystal, '\x02', "Skipping Crystal", { 1.0f, 0.28f, 0.64f, 0.72f } },
+    TileTypeDefinition { TileType::Crystal, '\x01', "Crystal", { 1.0f, 1.0f, 1.0f, 0.84f } },
+    TileTypeDefinition { TileType::SkippingCrystal, '\x02', "Skipping Crystal", { 1.0f, 1.0f, 1.0f, 0.84f } },
     TileTypeDefinition { TileType::Cleric, '\x03', "Cleric", { 1.0f, 0.82f, 0.24f, 1.0f } },
     TileTypeDefinition { TileType::WardrobeCleric, '\x04', "Wardrobe Cleric", { 1.0f, 1.0f, 1.0f, 1.0f } },
 };
