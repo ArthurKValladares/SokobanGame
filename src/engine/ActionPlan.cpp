@@ -374,7 +374,7 @@ float stepDurationWeight(
     for (std::size_t index = 0; index < count; ++index) {
         const auto& from = before.movables[index];
         const auto& to = after.movables[index];
-        if (from.type != TileType::RoundRock || from.fallen || from.dead ||
+        if (!tileTypeIsSkippingStone(from.type) || from.fallen || from.dead ||
             from == to) continue;
         // A mounted rock occupies the cell above the moving leaf. The pickup
         // leg itself remains a skip; the following legs travel with the leaf.

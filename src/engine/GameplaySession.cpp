@@ -1808,7 +1808,7 @@ ActionScheduler::Pending GameplaySession::makePending(
             if (rules::lilyPadDrivenByRock(level, *previous, leg, index)) {
                 waterMomentum = true;
             }
-            if (from.type != TileType::RoundRock || from.fallen || from.dead ||
+            if (!tileTypeIsSkippingStone(from.type) || from.fallen || from.dead ||
                 (!from.sliding && !to.sliding)) continue;
             waterMomentum = waterMomentum ||
                 tileTypeIsWater(level.supportingTileAt(from.cell).value_or(TileType::Air)) ||

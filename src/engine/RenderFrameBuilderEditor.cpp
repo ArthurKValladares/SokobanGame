@@ -1643,7 +1643,7 @@ RenderFrameData::Tile tileVisual(
                               tileTypeIsWardrobe(tile)
                             ? 1.0f
                             : 0.0f)),
-        .blurBehind = tile == TileType::Ice,
+        .blurBehind = tile == TileType::Ice || tileTypeIsCrystal(tile),
         .showGrid = !tileTypeIsPlayerStart(tile) && tile != TileType::LilyPad,
         .affectsCameraFit = tileTypeAffectsCameraFit(tile),
         .interactionOutline = tileTypeHasInteractionOutline(tile),

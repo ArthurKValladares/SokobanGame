@@ -137,8 +137,15 @@ enum class TileType : uint8_t {
     StreamLeft,
     // A rounded stone skips across water and can ride a floating lily pad.
     RoundRock,
+    // Internal row tokens; screen files encode these through @crystal records.
+    Crystal,
+    SkippingCrystal,
     Count,
 };
+
+[[nodiscard]] constexpr bool tileTypeIsCrystal(TileType t) { return t == TileType::Crystal || t == TileType::SkippingCrystal; }
+[[nodiscard]] constexpr bool tileTypeIsSkippingStone(TileType t) { return t == TileType::RoundRock || t == TileType::SkippingCrystal; }
+[[nodiscard]] constexpr bool tileTypeIsStone(TileType t) { return t == TileType::Rock || tileTypeIsSkippingStone(t) || t == TileType::Crystal; }
 
 inline constexpr std::size_t groundRockVariantCount = 10;
 inline constexpr std::size_t wallStoneVariantCount = 8;
@@ -336,6 +343,8 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::StreamDown, ',', "Water Stream Down", { 0.08f, 0.34f, 0.78f, 1.0f } },
     TileTypeDefinition { TileType::StreamLeft, '`', "Water Stream Left", { 0.08f, 0.34f, 0.78f, 1.0f } },
     TileTypeDefinition { TileType::RoundRock, '\\', "Round Rock", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::Crystal, '\x01', "Crystal", { 1.0f, 0.57f, 0.30f, 0.72f } },
+    TileTypeDefinition { TileType::SkippingCrystal, '\x02', "Skipping Crystal", { 1.0f, 0.28f, 0.64f, 0.72f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();

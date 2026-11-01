@@ -248,20 +248,21 @@ def decoration_distribution(style):
     """Broad footprints, with enough clear tile between larger silhouettes."""
     return {
         'pebbles':(.185,(.075,.205),(.055,.165)),
-        'grass':(.160,(.032,.065),(.035,.090)),
+        'grass':(.260,(.032,.065),(.035,.090)),
         'moss':(.235,(.115,.285),(.075,.220)),
     }[style]
 
 
-def scatter_edge_sites(edge, indices, band, widths, depths, rng):
-    """Five loose strata replace the previous twelve miniature clusters."""
+def scatter_edge_sites(edge, indices, band, widths, depths, rng, *, strata=5):
+    """Jitter length strata and shuffle depths across the full border band."""
     ranks=list(range(len(indices)))
     rng.shuffle(ranks)
     sites=[]
     for index,rank in zip(indices,ranks):
         width,depth=rng.uniform(*widths),rng.uniform(*depths)
         margin=width/2+.002
-        t=max(-.5+margin,min(.5-margin,(index+.5)/5-.5+rng.uniform(-.023,.023)))
+        jitter=.115/strata
+        t=max(-.5+margin,min(.5-margin,(index+.5)/strata-.5+rng.uniform(-jitter,jitter)))
         fraction=(rank+rng.uniform(.12,.88))/len(indices)
         inset=depth/2+.003+fraction*(band-depth-.006)
         sites.append({'edge':edge,'corner':False,'t':t,'inset':inset,
@@ -271,16 +272,61 @@ def scatter_edge_sites(edge, indices, band, widths, depths, rng):
     return sites
 
 
+def grass_perimeter_sites(edges, band, widths, depths, rng):
+    """Scatter single blades through uneven bands with shared corner spacing."""
+    sites,occupied=[],[]
+    # Reserve the shared corners before filling either neighboring band.
+    for edge in edges:
+        if (edge+1)%4 in edges:
+            width,depth=rng.uniform(*widths),rng.uniform(*depths)
+            center=(.5-width/2,-.5+depth/2)
+            sites.append({'edge':edge,'corner':True,'width':width,'depth':depth,
+                          'center':center})
+            x,y=center
+            occupied.append(((x,y),(-y,x),(-x,-y),(y,-x))[edge])
+    for edge in edges:
+        count=36-((edge-1)%4 in edges)-((edge+1)%4 in edges)
+        phase=rng.uniform(0,math.tau)
+        for number in range(count):
+            for attempt in range(4000):
+                width,depth=rng.uniform(*widths),rng.uniform(*depths)
+                t=rng.uniform(-.5+width/2+.003,.5-width/2-.003)
+                # A changing inward extent breaks the straight inner outline.
+                reach=band*(.66+.34*(.5+.5*math.sin(t*math.tau*1.35+phase)))
+                inset=(depth/2 if number==0 else
+                       rng.uniform(depth/2+.003,band-depth/2-.003))
+                if inset+depth/2>reach:
+                    continue
+                center=edge_point(edge,t,inset)
+                x,y=center
+                distances=(y+.5,.5-x,.5-y,x+.5)
+                # Each adjacent edge owns its nearer half of the corner.
+                if any(distances[other]<inset for other in edges if other!=edge):
+                    continue
+                if any(math.dist(center,point)<.027 for point in occupied):
+                    continue
+                sites.append({'edge':edge,'corner':False,'t':t,'inset':inset,
+                              'width':width,'depth':depth})
+                occupied.append(center)
+                break
+            else:
+                raise RuntimeError('Could not scatter independent grass blades')
+    return sites
+
+
 def perimeter_sites(style, config, rng):
-    """Five broad patches per edge, sharing a single patch at each corner."""
+    """Dense individual grass blades; five broad stones or moss mats per edge."""
     edges={'edge':(0,),'corner':(0,1),'strip':(0,2),'end':(0,1,3)}[config]
     band,widths,depths=decoration_distribution(style)
+    if style=='grass':
+        return grass_perimeter_sites(edges,band,widths,depths,rng)
+    strata=5
     sites=[]
     for edge in edges:
-        indices=[i for i in range(5)
+        indices=[i for i in range(strata)
                  if not (i==0 and (edge-1)%4 in edges)
-                 and not (i==4 and (edge+1)%4 in edges)]
-        sites.extend(scatter_edge_sites(edge,indices,band,widths,depths,rng))
+                 and not (i==strata-1 and (edge+1)%4 in edges)]
+        sites.extend(scatter_edge_sites(edge,indices,band,widths,depths,rng,strata=strata))
         if (edge+1)%4 in edges:
             width,depth=rng.uniform(*widths),rng.uniform(*depths)
             sites.append({'edge':edge,'corner':True,'width':width,'depth':depth,
@@ -505,7 +551,7 @@ for obj in objects:
     record['vertex_count']=sum(exported['accessors'][p['attributes']['POSITION']]['count']
                                for m in exported['meshes'] for p in m['primitives'])
 
-manifest={'version':1,'revision':'Varied simple stones and moss mats with separate single grass blades',
+manifest={'version':1,'revision':'Varied simple stones and moss mats with dense irregular grass scatter',
           'tile_size':1,'coordinates':'Blender X/Y horizontal, Z up; origin at tile center and surface',
           'north':'-Y','placement_z':0,'preserveSourceScale':True,
           'configurations':{name:{'edge_mask':mask,'edges':[('N','E','S','W')[i] for i in edges]}

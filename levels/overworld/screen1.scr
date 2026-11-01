@@ -1,3 +1,4 @@
+@crystal {"cell":[4,1,2],"skipping":false}
 @groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMapOverworld1","name":"Ground"}
 @character lorekeeper
 @selector {"cell":[2,3,2],"id":1,"target":{"level":2,"screen":0}}

@@ -719,7 +719,7 @@ void GameplayPresentation::scheduleRoundRockSkips(
                 const auto index = static_cast<std::size_t>(&movable - action.before.movables.data());
                 return movableTarget(movable, index) == track.target;
             });
-        if (rock == action.before.movables.end() || rock->type != TileType::RoundRock) continue;
+        if (rock == action.before.movables.end() || !tileTypeIsSkippingStone(rock->type)) continue;
         const GridPosition3 cell {
             static_cast<int>(std::lround(track.to.x)),
             static_cast<int>(std::lround(track.to.y)),
@@ -840,7 +840,7 @@ void GameplayPresentation::scheduleRockScratches(
             }
         }
         if (rock == nullptr ||
-            (rock->type != TileType::Rock && rock->type != TileType::RoundRock) ||
+            (rock->type != TileType::Rock && !tileTypeIsSkippingStone(rock->type)) ||
             rock->fallen || rock->dead) {
             continue;
         }
@@ -1369,7 +1369,7 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
                         pad.cell.x == before.cell.x && pad.cell.y == before.cell.y &&
                         pad.cell.z + 1 == before.cell.z;
                 });
-            const bool skips = level && before.type == TileType::RoundRock &&
+            const bool skips = level && tileTypeIsSkippingStone(before.type) &&
                 !before.fallen && !after.fallen && !onPad &&
                 (before.cell.x != walkedTo.x || before.cell.y != walkedTo.y) &&
                 (tileTypeIsWater(level->supportingTileAt(before.cell).value_or(TileType::Air)) ||

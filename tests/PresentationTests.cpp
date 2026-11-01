@@ -3854,7 +3854,7 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
         }));
 
     // Movable previews retain the source object's authored appearance too.
-    definition.layers[1][4][2] = tileTypeToChar(TileType::Rock);
+    definition.layers[1][4][2] = tileTypeToChar(TileType::Crystal);
     definition.layers[1][0][4] = tileTypeToChar(TileType::Player);
     definition.tileRotations.push_back({ .cell = { 2, 4, 1 }, .quarterTurns = 3 });
     const Level rockLevel = Level::loadFromDefinition(definition, "rotated mirror movable");
@@ -3866,7 +3866,7 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
     });
     const auto rockGhost = std::ranges::find_if(rockFrame.tiles, [](const auto& tile) {
         return tile.effect == RenderSurfaceEffect::MirrorEnergy &&
-            tile.model == testManifest().modelForTile(TileType::Rock);
+            tile.model == testManifest().modelForTile(TileType::Crystal);
     });
     CHECK(rockGhost != rockFrame.tiles.end());
     if (rockGhost != rockFrame.tiles.end()) CHECK(rockGhost->modelRotationQuarterTurns == 3);
@@ -3877,7 +3877,7 @@ void testMirrorPreviewOnlyShowsClosestUnitAcrossBothRays()
     TEST("mirrorPreviewOnlyShowsClosestUnitAcrossBothRays");
     const Level level = Level::loadFromLayers({
         { ".....", ".....", ".....", ".....", "....." },
-        { "     ", "     ", " RR 3", "    C", "     " },
+        { "     ", "     ", " \x01\x01 3", "    C", "     " },
     }, "closest mirror preview");
     GameState state = rules::initialState(level);
     GameplayPresentation presentation;
@@ -3936,7 +3936,7 @@ void testMirrorPreviewOnlyShowsClosestUnitAcrossBothRays()
     }) == 1);
     CHECK(std::ranges::any_of(rockFrame.tiles, [](const auto& tile) {
         return tile.effect == RenderSurfaceEffect::MirrorEnergy &&
-            tile.model == testManifest().modelForTile(TileType::Rock) &&
+            tile.model == testManifest().modelForTile(TileType::Crystal) &&
             tile.cell == (GridPosition3 { 4, 3, 1 });
     }));
 }
@@ -3945,7 +3945,7 @@ void testInvalidMirrorPreviewsUseRedRaysAndGhosts()
 {
     TEST("invalidMirrorPreviewsUseRedRaysAndGhosts");
     const std::vector<std::vector<std::string>> unitLayers {
-        { "     ", "     ", "R 3  ", "     ", "  C  " },
+        { "     ", "     ", "\x01 3  ", "     ", "  C  " },
         { "     ", "     ", "  3  ", "  #  ", "  C  " },
         { "     ", "     ", " #3  ", "     ", "  C  " },
         { "     ", "     ", "  3  ", "     ", "  C  " },
@@ -3969,6 +3969,21 @@ void testInvalidMirrorPreviewsUseRedRaysAndGhosts()
             .manifest = testManifest(), .level = level, .state = state,
             .projectedState = state, .presentation = presentation, .settings = {},
         });
+        if (index == 1) {
+            // The wall hides the source entirely; neither live nor cached
+            // previews may show a ghost or beam through it.
+            CHECK(std::ranges::none_of(frame.tiles, [](const auto& tile) {
+                return tile.effect == RenderSurfaceEffect::MirrorEnergy;
+            }));
+            CHECK(std::ranges::none_of(frame.isoFaces, [](const auto& face) {
+                return face.effect == RenderSurfaceEffect::MirrorEnergy;
+            }));
+            GameplaySession session;
+            session.reset(level);
+            CHECK(session.invalidMirrorPreview(level).entities.empty());
+            CHECK(session.invalidMirrorBeams(level).empty());
+            continue;
+        }
         const int expectedGhosts = index == 0 ? 2 : 1;
         CHECK(std::ranges::count_if(frame.tiles, [](const auto& tile) {
             return tile.effect == RenderSurfaceEffect::MirrorEnergy;
@@ -3984,7 +3999,7 @@ void testInvalidMirrorPreviewsUseRedRaysAndGhosts()
         if (index == 0) {
             CHECK(std::ranges::any_of(frame.tiles, [&](const auto& tile) {
                 return tile.effect == RenderSurfaceEffect::MirrorEnergy &&
-                    tile.model == testManifest().modelForTile(TileType::Rock) &&
+                    tile.model == testManifest().modelForTile(TileType::Crystal) &&
                     tile.cell == (GridPosition3 { 2, 4, 1 }) &&
                     sameColor(tile.color, config::mirrorInvalidGhostColor);
             }));
@@ -4755,6 +4770,42 @@ void testMirrorDuplicationPreviewsEveryDestination()
         [](const RenderFrameData::IsoFace& face) {
             return face.effect == RenderSurfaceEffect::MirrorEnergy;
         }) == 16);
+}
+
+void testMirrorCloneMergeShowsOneGhostAndSyncsSurvivor()
+{
+    TEST("mirrorCloneMergeShowsOneGhostAndSyncsSurvivor");
+    const Level level = Level::loadFromLayers({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "  3  ", "     ", "  C  ", "     ", "  2  " },
+    }, "clone merge presentation");
+    const auto split = rules::activateMirrors(level, rules::initialState(level));
+    CHECK(split && split->players.size() == 2);
+    if (!split) return;
+    GameplayPresentation presentation;
+    presentation.resetEntities(*split);
+    const auto frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(), .level = level, .state = *split,
+        .projectedState = *split, .presentation = presentation, .settings = {},
+    });
+    CHECK(std::ranges::count_if(frame.tiles, [](const auto& tile) {
+        return tile.effect == RenderSurfaceEffect::MirrorEnergy;
+    }) == 1);
+    CHECK(std::ranges::any_of(frame.tiles, [](const auto& tile) {
+        return tile.effect == RenderSurfaceEffect::MirrorEnergy &&
+            tile.cell == (GridPosition3 { 2, 2, 1 });
+    }));
+    CHECK(std::ranges::count_if(frame.isoFaces, [](const auto& face) {
+        return face.effect == RenderSurfaceEffect::MirrorEnergy;
+    }) == 16);
+    const auto merged = rules::activateMirrors(level, *split);
+    CHECK(merged && merged->players.size() == 1);
+    if (merged) {
+        presentation.syncToGameState(*merged);
+        CHECK(presentation.players().size() == 1);
+        presentation.syncToGameState(*split);
+        CHECK(presentation.players().size() == 2);
+    }
 }
 
 void testWaterLayerBuildsUnboundedNonPickableExterior()
@@ -6950,6 +7001,7 @@ int main()
     testPlayerCopiesShareTheInputFacing();
     testInactiveHeroesKeepTheirFacing();
     testMirrorDuplicationPreviewsEveryDestination();
+    testMirrorCloneMergeShowsOneGhostAndSyncsSurvivor();
     testGameplayFrameBuildsProceduralWaterSurface();
     testWaterStreamCornersAndConnectedBoundaries();
     testEditorWaterMechanicPreviewsRequireWater();

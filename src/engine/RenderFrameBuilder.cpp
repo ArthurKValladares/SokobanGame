@@ -1713,7 +1713,7 @@ void appendGameplayEntities(
             .color = color,
             .baseElevation = visual.renderPosition.z,
             .height = 1.0f,
-            .blurBehind = movable.type == TileType::Ice,
+            .blurBehind = movable.type == TileType::Ice || tileTypeIsCrystal(movable.type),
             .affectsCameraFit = false,
             .interactionOutline = tileTypeHasInteractionOutline(movable.type),
             .model = input.manifest.modelForTile(movable.type),
@@ -2297,8 +2297,18 @@ void appendMirrorPreview(
                 };
                 appendMirrorEntitySegments(
                     preview, entitySegments, beamSegments);
-                appendMirrorGhostTile(frame, input, state, mirrorPreview->after,
-                    actionEndPreview ? &actionEndPreview->after : nullptr, preview);
+                // Several incoming beams may reunite at one surviving clone.
+                // Draw its ghost once while retaining every reflection beam.
+                const bool ghostAlreadyDrawn = entity.player &&
+                    std::ranges::any_of(frame.tiles, [&](const auto& tile) {
+                        return tile.effect == RenderSurfaceEffect::MirrorEnergy &&
+                            tile.animationInstanceId ==
+                                mirrorGhostAnimationInstance(entity.resultPlayerIndex);
+                    });
+                if (!ghostAlreadyDrawn) {
+                    appendMirrorGhostTile(frame, input, state, mirrorPreview->after,
+                        actionEndPreview ? &actionEndPreview->after : nullptr, preview);
+                }
             }
 
             for (const MirrorRenderSegment& segment : beamSegments) {

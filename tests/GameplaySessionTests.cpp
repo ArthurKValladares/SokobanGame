@@ -1042,6 +1042,50 @@ void testMirrorDuplicationIsInstantUndoableAndRestorable()
     CHECK(restored.state() == initial);
 }
 
+void testMirrorCloneMovementAndMergeRestoreUndo()
+{
+    TEST("mirrorCloneMovementAndMergeRestoreUndo");
+    const Level level = makeLevel({
+        { ".......", ".......", ".......", ".......", "......." },
+        { "  3    ", "       ", "  C    ", "       ", "  2  # " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    const auto initial = session.state();
+    session.queueMirror();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().players.size() == 2);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
+    CHECK(session.state().players[1].cell == cell(4, 4, 1));
+    CHECK(session.playerMoveCount() == 1);
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    const auto split = session.state();
+    session.queueMirror();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().players.size() == 1);
+    CHECK(session.state().players[0] == initial.players[0]);
+    CHECK(session.playerMoveCount() == 0);
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == session.state());
+    restored.queueUndo();
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state() == split);
+    restored.queueMove(MoveDirection::Right);
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state().players[0].cell == cell(1, 0, 1));
+    CHECK(restored.state().players[1].cell == cell(4, 4, 1));
+}
+
 } // namespace
 
 void testBeltCarriesARiderOneActionPerStep()
@@ -2402,6 +2446,7 @@ int main()
     testInvalidSnapshotIsRejectedWithoutMutation();
     testMirrorActionIsInstantUndoableAndRestorable();
     testMirrorDuplicationIsInstantUndoableAndRestorable();
+    testMirrorCloneMovementAndMergeRestoreUndo();
     testMirrorPushCommitsRestoresAndUndoes();
     testLegacyStaticMirrorsUpgradeOnRestore();
 

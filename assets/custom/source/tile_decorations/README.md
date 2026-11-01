@@ -6,13 +6,16 @@ and shallow moss cushions. Simple geometry and broad color regions keep the
 decorations readable at the game's camera distance.
 
 All three styles use natural random scatter with even coverage along each
-decorated edge. Five nominal placement sites per edge vary in both position
-along the border and distance inward. Adjacent decorated edges share one corner
-site. Each edge has a randomly chosen patch touching its border, while shared
+decorated edge. Pebbles and moss use five nominal placement sites per edge;
+grass uses 36 independent blades scattered in two dimensions across a wider
+band with a gently varying inward extent. Grass spacing is checked across all
+decorated edges; adjacent edges divide their overlapping corner area diagonally.
+Pebble and moss sites vary along the border and in distance inward. Adjacent
+decorated edges share one corner site. Each edge has a randomly chosen patch touching its border, while shared
 corner patches reach both borders. The remaining patches sit farther inward,
 giving the border a naturally broken outline with clear tile between shapes.
 
-The scatter bands extend 0.185 units inward for pebbles, 0.160 for grass and
+The scatter bands extend up to 0.185 units inward for pebbles, 0.260 for grass and
 0.235 for moss. Placement fit boxes vary independently in width and depth:
 pebbles use 0.075–0.205 by 0.055–0.165 units, grass 0.032–0.065 by
 0.035–0.090, and moss 0.115–0.285 by 0.075–0.220. These are maximum fit
@@ -35,12 +38,12 @@ height is limited by its horizontal footprint.
 
 Each style has four variations for each layout:
 
-| Filename configuration | Decorated edges | Mask | Sites per asset | Variations per style |
-| --- | --- | --- | --- | --- |
-| `edge` | North | 1 | 5 | 4 |
-| `corner` | North, East | 3 | 9 | 4 |
-| `strip` | North, South | 5 | 10 | 4 |
-| `end` | North, East, West | 11 | 13 | 4 |
+| Filename configuration | Decorated edges | Mask | Pebbles / moss pieces | Grass blades | Variations per style |
+| --- | --- | --- | --- | --- | --- |
+| `edge` | North | 1 | 5 | 36 | 4 |
+| `corner` | North, East | 3 | 9 | 71 | 4 |
+| `strip` | North, South | 5 | 10 | 72 | 4 |
+| `end` | North, East, West | 11 | 13 | 106 | 4 |
 
 Every layout follows the perimeter. The opposite-edge pair has no geometry
 through the tile center. `catalog.json` records `focal_points` in Blender

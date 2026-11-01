@@ -889,12 +889,12 @@ void LevelEditorDebugUi::drawTilePalette(
         static_cast<int>(
             (available + spacing) / (paletteButtonSize.x + spacing)));
     const bool editingOverworld = editor.editingOverworld();
-    // Keep the two rock brushes together without changing persistent tile IDs.
+    // Keep rocks and crystals together without changing persistent tile IDs.
     static constexpr auto paletteDefinitions = [] {
         auto definitions = tileTypeDefinitionTable;
         std::rotate(definitions.begin() + static_cast<std::size_t>(TileType::Rock) + 1,
             definitions.begin() + static_cast<std::size_t>(TileType::RoundRock),
-            definitions.begin() + static_cast<std::size_t>(TileType::RoundRock) + 1);
+            definitions.end());
         return definitions;
     }();
     const auto drawPaletteIcons = [&](bool terrain, bool water = false) {
@@ -998,8 +998,7 @@ void LevelEditorDebugUi::drawTilePalette(
             ImGui::PopID();
             if ((terrain || water) && group != nullptr) {
                 ImGui::TextUnformatted(group->name.data(), group->name.data() + group->name.size());
-            } else if (water || definition.type == TileType::Rock ||
-                definition.type == TileType::RoundRock) {
+            } else if (water || tileTypeIsStone(definition.type)) {
                 ImGui::TextUnformatted(displayedDefinition.name.data(),
                     displayedDefinition.name.data() + displayedDefinition.name.size());
             }

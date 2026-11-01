@@ -241,6 +241,41 @@ void testRoundRocksRoundTripAsLinkedMovableUnits()
     CHECK(tileTypeFromName(tileTypeName(TileType::RoundRock)) == TileType::RoundRock);
 }
 
+void testCrystalAuthoringPreservesLegacySymbols()
+{
+    TEST("crystalAuthoringPreservesLegacySymbols");
+    CHECK(charToTileType('b') == TileType::ButtonNorth);
+    CHECK(charToTileType('g') == TileType::MinecartGate);
+    for (const auto& definition : tileTypeDefinitions()) {
+        CHECK(charToTileType(tileTypeToChar(definition.type)) == definition.type);
+    }
+    Level::Definition definition { .layers = { { "....." }, { "QR\\b " } } };
+    definition.layers[1][0][1] = tileTypeToChar(TileType::Crystal);
+    definition.layers[1][0][2] = tileTypeToChar(TileType::SkippingCrystal);
+    const auto lines = Level::serializeDefinition(definition);
+    CHECK(Level::parseDefinition(lines, "crystals") == definition);
+    for (const auto& line : lines) {
+        CHECK(line.find('\x01') == std::string::npos);
+        CHECK(line.find('\x02') == std::string::npos);
+    }
+    const auto level = Level::loadFromLines(lines, "crystals");
+    CHECK(level.movableTiles().size() == 2);
+    CHECK(level.movableTiles()[0].type == TileType::Crystal);
+    CHECK(level.movableTiles()[1].type == TileType::SkippingCrystal);
+    CHECK(level.pressurePlates().size() == 1);
+    CHECK(tileTypeIsMovableObject(TileType::Crystal));
+    CHECK(tileTypeIsSkippingStone(TileType::SkippingCrystal));
+    CHECK(!tileTypeIsSkippingStone(TileType::Crystal));
+    // Single-layer saves must still include a layer header before metadata.
+    definition.layers = { { "Q " } };
+    definition.layers[0][0][1] = tileTypeToChar(TileType::Crystal);
+    CHECK(Level::parseDefinition(Level::serializeDefinition(definition), "single crystal") == definition);
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition({ "@crystal {\"cell\":[1,0,1]}",
+            "@layer 0", "..", "@layer 1", "Qb" }, "bad crystal");
+    }, "matching rock tile");
+}
+
 void testCameraMetadataRoundTripAndValidation()
 {
     TEST("cameraMetadataRoundTripAndValidation");
@@ -1224,7 +1259,7 @@ void testLevelValidationErrors()
     CHECK(multipleHeroes.playerStarts()[3].character == CharacterType::Witch);
     CHECK(multipleHeroes.playerStarts()[4].character == CharacterType::Bard);
     checkThrowsContaining([] {
-        (void)Level::loadFromLayers({ { "C\x01" } }, "unknown tile");
+        (void)Level::loadFromLayers({ { "C\x03" } }, "unknown tile");
     }, "Unknown level tile");
     checkThrowsContaining([] {
         (void)Level::loadFromLayers({ { "..." }, { "LC " } }, "unsupported ladder");
@@ -1774,6 +1809,7 @@ int main()
     testSerializationRoundTrip();
     testRobotHeadingsRoundTripAsMovableUnits();
     testRoundRocksRoundTripAsLinkedMovableUnits();
+    testCrystalAuthoringPreservesLegacySymbols();
     testCameraMetadataRoundTripAndValidation();
     testCharacterMetadataRoundTripAndLegacyDefault();
     testWardrobeVariantsRoundTripAndRemainTraversable();

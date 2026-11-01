@@ -1680,3 +1680,11 @@ implementation history remain available through Git history.
 
 See [HANDOFF.md](HANDOFF.md) for implementation invariants, current limitations
 and guidance for continuing development.
+
+Crystal authoring: Crystal and Skipping Crystal appear beside the rock brushes
+in the level editor. They share Rock and Round Rock movement respectively;
+only the crystal variants can be reflected by mirrors. Since printable grid
+symbols are exhausted, screen files keep `R` or `\` in the grid and add an
+`@crystal {"cell":[x,y,z],"skipping":false}` record before the layers
+(`true` for Skipping Crystal). Existing `b` buttons and `g` minecart gates
+retain their meanings. The editor writes these records automatically.

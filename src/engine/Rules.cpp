@@ -888,7 +888,7 @@ bool lilyPadDrivenByRock(const Level& level,
         if (index >= after.movables.size()) return false;
         const auto& rock = before.movables[index];
         if (rock.dead || rock.fallen || after.movables[index].dead ||
-            (rock.type != TileType::Rock && rock.type != TileType::RoundRock)) {
+            (!tileTypeIsStone(rock.type))) {
             return false;
         }
         const auto movement = directions(rock.cell, after.movables[index].cell);
@@ -2034,20 +2034,49 @@ MirrorInputSight inputRaySight(
                            : MirrorInputSight::Clear;
 }
 
-bool outputRayIsClear(
-    const Level& level,
-    const GameState& state,
-    GridPosition3 mirror,
-    GridPosition ray,
-    int distance)
+struct MirrorOutputPath {
+    PortalRayPath path;
+    bool blocked = false;
+};
+
+MirrorOutputPath mirrorOutputPath(
+    const Level& level, const GameState& state, GridPosition3 origin,
+    GridPosition ray, int distance, std::size_t entityIndex)
 {
-    for (const auto cell : portalRayPath(level, mirror, ray, distance).cells) {
-        if (!cellAllowsEntity(level, state, cell) ||
-            mirrorTileAt(level, state, cell)) {
-            return false;
+    MirrorOutputPath result { .path = { .destination = origin } };
+    GridPosition3 segmentStart = origin;
+    GridPosition startEdge {};
+    for (int step = 0; step < distance; ++step) {
+        auto& cell = result.path.destination;
+        if (const auto crossing = level.portalCrossing(cell, ray)) {
+            result.path.segments.push_back({ segmentStart, cell, startEdge, ray });
+            cell = crossing->exit;
+            ray = crossing->direction;
+            segmentStart = cell;
+            startEdge = portalEdgeOffset(*level.plateAt(cell));
+        } else {
+            cell = { cell.x + ray.x, cell.y + ray.y, cell.z };
         }
+        result.path.cells.push_back(cell);
+        if (const auto tile = mirrorTileAt(level, state, cell)) {
+            const auto rays = mirrorRays(*tile);
+            const GridPosition incoming { -ray.x, -ray.y };
+            if (incoming == rays->first || incoming == rays->second) {
+                result.path.segments.push_back({ segmentStart, cell, startEdge, {} });
+                ray = incoming == rays->first ? rays->second : rays->first;
+                segmentStart = cell;
+                startEdge = {};
+                // Entering a reflector consumes a step, including the last one.
+                result.blocked = result.blocked || step + 1 == distance;
+                continue;
+            }
+            result.blocked = true;
+        }
+        result.blocked = result.blocked || !cellAllowsEntity(level, state, cell) ||
+            entityBlocksSight(state, cell, entityIndex);
     }
-    return true;
+    result.path.segments.push_back({ segmentStart, result.path.destination, startEdge, {} });
+    return result;
 }
 
 std::optional<int> firstUnitOnRay(
@@ -2079,7 +2108,7 @@ std::vector<MirrorHit> nearestMirrors(
     GridPosition3 entityCell,
     std::size_t entityIndex,
     const std::vector<GridPosition3>& usedMirrors,
-    bool includeBlockedInputs = false)
+    bool /*includeBlockedInputs*/ = false)
 {
     std::vector<MirrorHit> nearest;
     int nearestDistance = 0;
@@ -2123,9 +2152,7 @@ std::vector<MirrorHit> nearestMirrors(
                     }
                     const MirrorInputSight sight = inputRaySight(
                         level, state, mirror, input, *distance, entityIndex);
-                    if (sight == MirrorInputSight::UnitBlocked ||
-                        (sight == MirrorInputSight::GeometryBlocked &&
-                            !includeBlockedInputs)) {
+                    if (sight != MirrorInputSight::Clear) {
                         continue;
                     }
                     const auto opposite = firstUnitOnRay(
@@ -2228,18 +2255,17 @@ std::optional<std::vector<ReflectedPath>> reflectedPathsForEntity(
             return std::nullopt;
         }
 
-        // Reverse insertion keeps the level scan order stable when paths are
-        // later popped from this depth-first stack.
-        for (auto hit = hits.rbegin(); hit != hits.rend(); ++hit) {
+        // Preserve the level scan order for duplicated player previews.
+        for (auto hit = hits.begin(); hit != hits.end(); ++hit) {
+            const MirrorOutputPath traced = mirrorOutputPath(
+                level, state, hit->cell, hit->output, hit->distance, entityIndex);
             const bool blocked = hit->inputBlocked || hit->conflict ||
-                invalidBranches || !outputRayIsClear(
-                    level, state, hit->cell, hit->output, hit->distance);
+                invalidBranches || traced.blocked;
             if (blocked && !collecting) {
                 return std::nullopt;
             }
             PendingReflectionPath branch = path;
-            const PortalRayPath output =
-                portalRayPath(level, hit->cell, hit->output, hit->distance);
+            const PortalRayPath& output = traced.path;
             const GridPosition3 destination = output.destination;
             const PortalRayPath input = portalRayPath(
                 level, hit->cell, hit->input, hit->distance, path.cell);
@@ -2263,7 +2289,9 @@ std::optional<std::vector<ReflectedPath>> reflectedPathsForEntity(
                 invalid = true;
                 continue;
             }
-            pending.push_back(std::move(branch));
+            appendPath(attemptedPaths, branch);
+            results.push_back({ .cell = branch.cell, .reflected = true,
+                .beamSegments = std::move(branch.beamSegments) });
         }
     }
 
@@ -2429,6 +2457,8 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
         // Mirrors are reflectors, even though they now move as units.
         if (state.movables[i].fallen || state.movables[i].dead ||
             tileTypeIsMirror(state.movables[i].type) ||
+            state.movables[i].type == TileType::Rock ||
+            state.movables[i].type == TileType::RoundRock ||
             isUnitLocked(level, state, state.movables[i].cell)) {
             continue;
         }
@@ -2481,6 +2511,42 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
                 .beamSegments = reflected.beamSegments,
             });
             anyReflected = true;
+        }
+    }
+
+    // Reflections can reunite copies of one hero. Keep the first identity
+    // and remap every preview before removing the redundant player records.
+    // Different controller groups still collide and invalidate the swap.
+    if (anyReflected) {
+        std::vector<std::size_t> remapped(after.players.size());
+        std::vector<GameState::Player> merged;
+        for (std::size_t i = 0; i < after.players.size(); ++i) {
+            const auto& player = after.players[i];
+            const auto existing = std::ranges::find_if(merged, [&](const auto& candidate) {
+                return !player.dead && !candidate.dead &&
+                    player.cell == candidate.cell &&
+                    player.character == candidate.character &&
+                    player.controller != invalidEntityId &&
+                    player.controller == candidate.controller;
+            });
+            if (existing == merged.end()) {
+                remapped[i] = merged.size();
+                merged.push_back(player);
+            } else {
+                remapped[i] = static_cast<std::size_t>(existing - merged.begin());
+            }
+        }
+        after.players = std::move(merged);
+        for (auto& index : reflectedPlayerIndices) {
+            index = remapped[index];
+        }
+        std::ranges::sort(reflectedPlayerIndices);
+        const auto duplicates = std::ranges::unique(reflectedPlayerIndices);
+        reflectedPlayerIndices.erase(duplicates.begin(), duplicates.end());
+        for (auto& entity : entities) {
+            if (entity.player) {
+                entity.resultPlayerIndex = remapped[entity.resultPlayerIndex];
+            }
         }
     }
 
@@ -2640,7 +2706,8 @@ InvalidMirrorPreview previewInvalidMirrors(
     for (std::size_t i = 0; i < state.movables.size(); ++i) {
         const auto& movable = state.movables[i];
         if (!movable.fallen && !movable.dead &&
-            !tileTypeIsMirror(movable.type)) {
+            !tileTypeIsMirror(movable.type) &&
+            movable.type != TileType::Rock && movable.type != TileType::RoundRock) {
             inspect({ .movableIndex = i, .start = movable.cell }, i, false);
         }
     }
@@ -3418,7 +3485,7 @@ private:
             // A skipping stone loses its support when its forward travel is
             // stopped. Fallen stones fill water exactly like ordinary rocks.
             if (index < movableCount_ &&
-                after_.movables[index].type == TileType::RoundRock &&
+                tileTypeIsSkippingStone(after_.movables[index].type) &&
                 isUnfilledWater(level_, after_, cellOf(index))) {
                 after_.movables[index].fallen = true;
             }
@@ -3432,7 +3499,7 @@ private:
     [[nodiscard]] std::optional<std::size_t> roundRockPadAt(
         std::size_t index, GridPosition3 target) const
     {
-        if (after_.movables[index].type != TileType::RoundRock) {
+        if (!tileTypeIsSkippingStone(after_.movables[index].type)) {
             return std::nullopt;
         }
         const auto* pad = movableAt(after_, target);
@@ -3582,7 +3649,7 @@ private:
             const bool rockDriven = std::ranges::any_of(members, [&](std::size_t index) {
                 const auto type = after_.movables[index].type;
                 return movableMovedDirections_[index] &&
-                    (type == TileType::Rock || type == TileType::RoundRock);
+                    (tileTypeIsStone(type));
             });
 
             const GridPosition offset = directionOffset(direction);
@@ -3659,7 +3726,7 @@ private:
             return true;
         }
         const auto boardingPad = roundRockPadAt(index, target);
-        const bool skipping = after_.movables[index].type == TileType::RoundRock &&
+        const bool skipping = tileTypeIsSkippingStone(after_.movables[index].type) &&
             after_.movables[index].sliding &&
             isUnfilledWater(level_, after_, cellOf(index));
         const bool coasting = after_.movables[index].type == TileType::LilyPad &&
@@ -3701,8 +3768,7 @@ private:
             }
             if (!status.bardDriven || blockerIndex == index ||
                 !pushOneMovableForBard(blockerIndex, direction,
-                    after_.movables[index].type == TileType::Rock ||
-                        after_.movables[index].type == TileType::RoundRock)) {
+                    tileTypeIsStone(after_.movables[index].type))) {
                 cancelAndFinish(index, true);
                 status.resolved = true;
                 return true;
@@ -4271,7 +4337,7 @@ private:
                         [&](const ChainEntity& pusher) {
                             if (!pusher.movable) return false;
                             const auto type = trial.movables[pusher.index].type;
-                            return type == TileType::Rock || type == TileType::RoundRock;
+                            return tileTypeIsStone(type);
                         });
                 if (rockDrivenPad && !isUnfilledWater(level_, trial, fall.cell)) {
                     return false;
@@ -4910,7 +4976,7 @@ private:
         const FallResult fall = preserveElevation
             ? FallResult { .cell = target, .supported = true }
             : movableFallTarget(level_, after_, index, target);
-        const bool skipping = after_.movables[index].type == TileType::RoundRock &&
+        const bool skipping = tileTypeIsSkippingStone(after_.movables[index].type) &&
             !boardingPad && isUnfilledWater(level_, after_, fall.cell);
         const bool fell = fall.cell.z != target.z || (fall.fallen && !skipping);
         after_.movables[index].cell = fall.cell;

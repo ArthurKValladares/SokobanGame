@@ -1,3 +1,7 @@
+@crystal {"cell":[2,4,1],"skipping":false}
+@crystal {"cell":[3,4,1],"skipping":false}
+@crystal {"cell":[5,4,1],"skipping":false}
+@crystal {"cell":[3,6,1],"skipping":false}
 @groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMapOverworld5","name":"Ground"}
 @groundsplat {"base":"WallMoss","color":[0.8705882430076599,0.9647058844566345,0.8235294222831726],"detail":"WallSlateRock","mask":"GroundSplatMapOverworld5_1","name":"Ground 2"}
 @groundpaint {"cell":[8,1,1],"splat":"Ground 2"}

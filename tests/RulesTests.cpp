@@ -2843,10 +2843,41 @@ void testEveryMirrorOrientationReflectsBothWays()
     }
 }
 
+Level makeCrystalMirrorLevel(std::vector<std::vector<std::string>> layers)
+{
+    for (auto& layer : layers)
+        for (auto& row : layer)
+            for (char& token : row)
+                if (token == 'R') token = tileTypeToChar(TileType::Crystal);
+    return makeLevel(layers);
+}
+
+void testOnlyCrystalsReflectThroughMirrors()
+{
+    TEST("onlyCrystalsReflectThroughMirrors");
+    for (const auto type : { TileType::Rock, TileType::RoundRock,
+             TileType::Crystal, TileType::SkippingCrystal }) {
+        std::vector<std::vector<std::string>> layers {
+            { ".....", ".....", ".....", ".....", "....." },
+            { "C    ", "     ", "  3  ", "  R  ", "     " },
+        };
+        layers[1][3][2] = tileTypeToChar(type);
+        const auto level = makeLevel(layers);
+        const auto before = rules::initialState(level);
+        const auto after = rules::activateMirrors(level, before);
+        if (tileTypeIsCrystal(type)) {
+            CHECK(after.has_value());
+            CHECK(after && after->movables[1].cell == cell(1, 2, 1));
+        } else {
+            CHECK(!after || after->movables[1].cell == before.movables[1].cell);
+        }
+    }
+}
+
 void testMirrorReflectsMovablesAndStopsAtNearestEntity()
 {
     TEST("mirrorReflectsMovablesAndStopsAtNearestEntity");
-    const Level level = makeLevel({
+    const Level level = makeCrystalMirrorLevel({
         { ".....", ".....", ".....", ".....", "....." },
         { "C    ", "     ", "  3  ", "  R  ", "  I  " },
     });
@@ -2855,7 +2886,7 @@ void testMirrorReflectsMovablesAndStopsAtNearestEntity()
 
     CHECK(after.has_value());
     CHECK(after && after->players[0].cell == state.players[0].cell);
-    CHECK(after && after->movables[1].type == TileType::Rock);
+    CHECK(after && after->movables[1].type == TileType::Crystal);
     CHECK(after && after->movables[1].cell == cell(1, 2, 1));
     // The nearer rock occludes the ice on the same input ray.
     CHECK(after && after->movables[2].cell == cell(2, 4, 1));
@@ -2888,12 +2919,12 @@ void testMirrorOnlyReflectsClosestUnitAcrossBothRays()
                 [static_cast<std::size_t>(near.x)] = 'C';
             units[static_cast<std::size_t>(far.y)]
                 [static_cast<std::size_t>(far.x)] = 'R';
-            const Level level = makeLevel({
+            const Level level = makeCrystalMirrorLevel({
                 { ".....", ".....", ".....", ".....", "....." }, units,
             });
             GameState state = rules::initialState(level);
             const auto rock = std::find_if(state.movables.begin(), state.movables.end(),
-                [](const auto& movable) { return movable.type == TileType::Rock; });
+                [](const auto& movable) { return movable.type == TileType::Crystal; });
             CHECK(rock != state.movables.end());
             if (rock == state.movables.end()) {
                 continue;
@@ -2924,7 +2955,7 @@ void testMirrorOnlyReflectsClosestUnitAcrossBothRays()
 void testMirrorEquallyCloseUnitsConflict()
 {
     TEST("mirrorEquallyCloseUnitsConflict");
-    const Level level = makeLevel({
+    const Level level = makeCrystalMirrorLevel({
         { ".....", ".....", ".....", ".....", "....." },
         { "     ", "     ", "R 3  ", "     ", "  C  " },
     });
@@ -2967,8 +2998,13 @@ void testInvalidMirrorBeamPreviewsCoverSightlinesAndDestinations()
         const GameState state = rules::initialState(level);
         CHECK(!rules::previewMirrorActivation(level, state));
         CHECK(!rules::activateMirrors(level, state));
-        CHECK(!rules::invalidMirrorBeamSegments(level, state).empty());
         const auto invalid = rules::previewInvalidMirrors(level, state);
+        if (&layers == &cases.front()) {
+            CHECK(invalid.entities.empty());
+            CHECK(invalid.beamSegments.empty());
+            continue;
+        }
+        CHECK(!rules::invalidMirrorBeamSegments(level, state).empty());
         CHECK(invalid.entities.size() == 1);
         CHECK(!invalid.beamSegments.empty());
         if (invalid.entities.size() == 1) {
@@ -2982,7 +3018,7 @@ void testInvalidMirrorBeamPreviewsCoverSightlinesAndDestinations()
         CHECK(state.players[0].cell == cell(2, 4, 1));
     }
 
-    const Level clear = makeLevel({
+    const Level clear = makeCrystalMirrorLevel({
         { ".....", ".....", ".....", ".....", "....." },
         { "     ", "     ", "  3  ", "     ", "  C  " },
     });
@@ -2997,7 +3033,7 @@ void testInvalidMirrorBeamPreviewsCoverSightlinesAndDestinations()
 void testMirrorClosestEnemyAndInactiveUnits()
 {
     TEST("mirrorClosestEnemyAndInactiveUnits");
-    const Level level = makeLevel({
+    const Level level = makeCrystalMirrorLevel({
         { ".....", ".....", ".....", ".....", "....." },
         { "     ", "     ", " N3  ", "     ", "  C  " },
     });
@@ -3033,7 +3069,7 @@ void testMirrorClosestUnitUsesPortalRayDistance()
     }, "closest mirror unit through portal");
     GameState state = rules::initialState(level);
     state.movables.push_back({
-        .id = 99, .type = TileType::Rock, .cell = cell(7, 4, 1),
+        .id = 99, .type = TileType::Crystal, .cell = cell(7, 4, 1),
     });
     const auto preview = rules::previewMirrorActivation(level, state);
     // The distant portal exit is two ray steps away; the hero is three.
@@ -3064,34 +3100,52 @@ void testMirrorReflectsEnemiesAsMovableEntities()
 
 void testMirrorChainsWithoutReusingAMirror()
 {
-    TEST("mirrorChainsWithoutReusingAMirror");
+    TEST("mirrorChainsConsumeDistanceAtEachReflector");
     const Level level = makeLevel({
+        { "................", "................", "................", "................" },
+        { "                ", "C       3       ", "        2       ", "                " },
+    });
+    const GameState state = rules::initialState(level);
+    const auto preview = rules::previewMirrorActivation(level, state);
+    CHECK(preview && preview->entities.size() == 1);
+    CHECK(preview && preview->entities[0].destination == cell(15, 2, 1));
+    CHECK(preview && preview->entities[0].beamSegments.size() == 3);
+    if (preview && preview->entities[0].beamSegments.size() == 3) {
+        CHECK(preview->entities[0].beamSegments[0] ==
+            (rules::MirrorBeamSegment { cell(0, 1, 1), cell(8, 1, 1) }));
+        CHECK(preview->entities[0].beamSegments[1] ==
+            (rules::MirrorBeamSegment { cell(8, 1, 1), cell(8, 2, 1) }));
+        CHECK(preview->entities[0].beamSegments[2] ==
+            (rules::MirrorBeamSegment { cell(8, 2, 1), cell(15, 2, 1) }));
+    }
+    const auto after = rules::activateMirrors(level, state);
+    CHECK(after && after->players[0].cell == cell(15, 2, 1));
+    CHECK(preview && after && preview->after == *after);
+    if (after) {
+        const auto second = rules::previewMirrorActivation(level, *after);
+        CHECK(second && second->entities[0].destination == cell(2, 1, 1));
+        const auto swapped = rules::activateMirrors(level, *after);
+        CHECK(swapped && swapped->players[0].cell == cell(2, 1, 1));
+    }
+
+    // A mirror visible from the endpoint, outside the travel path, cannot
+    // start a new reflection with a fresh distance budget.
+    const Level outsidePath = makeLevel({
         { ".....", ".....", ".....", ".....", "....." },
         { "  3  ", "     ", "    3", "     ", "    C" },
     });
-    const GameState state = rules::initialState(level);
-    const std::optional<rules::MirrorActivationPreview> preview =
-        rules::previewMirrorActivation(level, state);
-    CHECK(preview.has_value());
-    CHECK(preview && preview->entities.size() == 1);
-    CHECK(preview && preview->entities[0].player);
-    CHECK(preview && preview->entities[0].start == cell(4, 4, 1));
-    CHECK(preview && preview->entities[0].destination == cell(0, 0, 1));
-    CHECK(preview && preview->entities[0].beamSegments.size() == 4);
-    if (preview && preview->entities[0].beamSegments.size() == 4) {
-        CHECK(preview->entities[0].beamSegments[0] ==
-            (rules::MirrorBeamSegment { cell(4, 4, 1), cell(4, 2, 1) }));
-        CHECK(preview->entities[0].beamSegments[1] ==
-            (rules::MirrorBeamSegment { cell(4, 2, 1), cell(2, 2, 1) }));
-        CHECK(preview->entities[0].beamSegments[2] ==
-            (rules::MirrorBeamSegment { cell(2, 2, 1), cell(2, 0, 1) }));
-        CHECK(preview->entities[0].beamSegments[3] ==
-            (rules::MirrorBeamSegment { cell(2, 0, 1), cell(0, 0, 1) }));
-    }
-    const std::optional<GameState> after = rules::activateMirrors(level, state);
-    CHECK(after.has_value());
-    CHECK(after && after->players[0].cell == cell(0, 0, 1));
-    CHECK(preview && after && preview->after == *after);
+    const auto endpoint = rules::previewMirrorActivation(
+        outsidePath, rules::initialState(outsidePath));
+    CHECK(endpoint && endpoint->entities[0].destination == cell(2, 2, 1));
+
+    // An obstacle on a later leg keeps the geometric ghost and rejects execution.
+    GameState blocked = state;
+    blocked.movables.push_back({ .id = 99, .type = TileType::Rock,
+        .cell = cell(12, 2, 1) });
+    CHECK(!rules::activateMirrors(level, blocked));
+    const auto invalid = rules::previewInvalidMirrors(level, blocked);
+    CHECK(invalid.entities.size() == 1);
+    CHECK(!invalid.entities.empty() && invalid.entities[0].destination == cell(15, 2, 1));
 }
 
 void testInvalidMirrorOutputRejectsWholeActivation()
@@ -3186,6 +3240,53 @@ void testPlayerCopiesShareMovementAndCanDuplicateAgain()
         rules::activateMirrors(mirrorLevel, duplicated);
     CHECK(duplicatedAgain.has_value());
     CHECK(duplicatedAgain && duplicatedAgain->players.size() == 3);
+}
+
+void testMirrorClonesMoveIndependentlyAndMerge()
+{
+    TEST("mirrorClonesMoveIndependentlyAndMerge");
+    const Level level = makeLevel({
+        { ".......", ".......", ".......", ".......", "......." },
+        { "  3    ", "       ", "  C    ", "       ", "  2  # " },
+    });
+    const auto initial = rules::initialState(level);
+    const auto split = rules::activateMirrors(level, initial);
+    CHECK(split && split->players.size() == 2);
+    if (!split || split->players.size() != 2) return;
+    CHECK(split->players[0].id != split->players[1].id);
+    CHECK(split->players[0].controller == split->players[1].controller);
+    const auto right = rules::step(level, *split, MoveDirection::Right);
+    CHECK(right.players[0].cell == cell(1, 0, 1));
+    CHECK(right.players[1].cell == cell(4, 4, 1));
+    const auto left = rules::step(level, *split, MoveDirection::Left);
+    CHECK(left.players[0].cell == cell(0, 0, 1));
+    CHECK(left.players[1].cell == cell(3, 4, 1));
+    const auto merged = rules::previewMirrorActivation(level, *split);
+    CHECK(merged && merged->after.players.size() == 1);
+    CHECK(merged && merged->after.players[0].cell == cell(2, 2, 1));
+    CHECK(merged && merged->after.players[0].id == initial.players[0].id);
+    CHECK(merged && merged->after.players[0].controller == initial.players[0].controller);
+    CHECK(merged && merged->entities.size() == 2);
+    if (merged && merged->entities.size() == 2) {
+        CHECK(merged->entities[0].resultPlayerIndex == 0);
+        CHECK(merged->entities[1].resultPlayerIndex == 0);
+    }
+    CHECK(rules::previewInvalidMirrors(level, *split).entities.empty());
+    if (merged) {
+        const auto splitAgain = rules::activateMirrors(level, merged->after);
+        CHECK(splitAgain && splitAgain->players.size() == 2);
+    }
+    auto unrelated = *split;
+    unrelated.players[1].controller = 999;
+    CHECK(!rules::activateMirrors(level, unrelated));
+
+    // Compacting the clone vector must retain an unrelated hero's identity.
+    auto withBystander = *split;
+    withBystander.players.push_back({ .id = 1000, .cell = cell(6, 2, 1),
+        .controller = 1000 });
+    const auto compacted = rules::previewMirrorActivation(level, withBystander);
+    CHECK(compacted && compacted->after.players.size() == 2);
+    CHECK(compacted && compacted->after.players[1] == withBystander.players[2]);
 }
 
 void testEveryPlayerMustReachAnActiveEnd()
@@ -5018,6 +5119,7 @@ int main()
     testHeadOnSlidesStopWithoutOverlap();
     testEveryLinkedPressurePlateMustHaveLiveOccupant();
     testEveryMirrorOrientationReflectsBothWays();
+    testOnlyCrystalsReflectThroughMirrors();
     testMirrorReflectsMovablesAndStopsAtNearestEntity();
     testMirrorOnlyReflectsClosestUnitAcrossBothRays();
     testMirrorEquallyCloseUnitsConflict();
@@ -5031,6 +5133,7 @@ int main()
     testMirrorNoVisibilityIsNoOp();
     testEquidistantMirrorsDuplicatePlayers();
     testPlayerCopiesShareMovementAndCanDuplicateAgain();
+    testMirrorClonesMoveIndependentlyAndMerge();
     testEveryPlayerMustReachAnActiveEnd();
     testEveryEndMustHoldAHero();
     testEnemySpawnsOutsideStaticGridAndKillsAdjacentPlayer();
