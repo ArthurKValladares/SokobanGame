@@ -214,7 +214,7 @@ bool tileTypeIsPlayerStart(TileType type)
 {
     return type == TileType::Player || type == TileType::Rogue ||
         type == TileType::Knight || type == TileType::Druid ||
-        type == TileType::Witch || type == TileType::Bard;
+        type == TileType::Witch || type == TileType::Bard || type == TileType::Cleric;
 }
 
 bool tileTypeIsConveyor(TileType type)

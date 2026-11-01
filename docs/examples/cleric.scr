@@ -1,0 +1,16 @@
+@cleric {"cell":[2,2,1],"wardrobe":false}
+@cleric {"cell":[5,3,1],"wardrobe":true}
+
+@layer 0
+.......
+.......
+.WWWWW.
+.......
+.......
+
+@layer 1
+       
+  N    
+e CQ   
+     0 
+  E E  

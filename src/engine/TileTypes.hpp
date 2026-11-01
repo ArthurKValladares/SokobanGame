@@ -23,7 +23,7 @@ enum class TileType : uint8_t {
     RotatorClockwise,
     RotatorCounterClockwise,
     // Legacy generic player start. New puzzle documents author a concrete
-    // Rogue, Knight, Druid, Witch, or Bard tile; overworld documents retain
+    // Rogue, Knight, Druid, Witch, Bard, or Cleric tile; overworld documents retain
     // this tile for backwards compatibility with their single Lorekeeper.
     Player,
     Rogue,
@@ -140,6 +140,9 @@ enum class TileType : uint8_t {
     // Internal row tokens; screen files encode these through @crystal records.
     Crystal,
     SkippingCrystal,
+    // Encoded as named @cleric metadata on disk; printable symbols are full.
+    Cleric,
+    WardrobeCleric,
     Count,
 };
 
@@ -345,6 +348,8 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::RoundRock, '\\', "Round Rock", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::Crystal, '\x01', "Crystal", { 1.0f, 0.57f, 0.30f, 0.72f } },
     TileTypeDefinition { TileType::SkippingCrystal, '\x02', "Skipping Crystal", { 1.0f, 0.28f, 0.64f, 0.72f } },
+    TileTypeDefinition { TileType::Cleric, '\x03', "Cleric", { 1.0f, 0.82f, 0.24f, 1.0f } },
+    TileTypeDefinition { TileType::WardrobeCleric, '\x04', "Wardrobe Cleric", { 1.0f, 1.0f, 1.0f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -407,8 +412,8 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] std::optional<uint32_t> robotOrientationQuarterTurns(TileType type);
 [[nodiscard]] constexpr bool tileTypeIsWardrobe(TileType type)
 {
-    return type >= TileType::WardrobeLorekeeper &&
-        type <= TileType::WardrobeBard;
+    return (type >= TileType::WardrobeLorekeeper &&
+        type <= TileType::WardrobeBard) || type == TileType::WardrobeCleric;
 }
 [[nodiscard]] constexpr std::optional<CharacterType> wardrobeCharacterForTile(
     TileType type)
@@ -420,6 +425,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     case TileType::WardrobeDruid: return CharacterType::Druid;
     case TileType::WardrobeWitch: return CharacterType::Witch;
     case TileType::WardrobeBard: return CharacterType::Bard;
+    case TileType::WardrobeCleric: return CharacterType::Cleric;
     default: return std::nullopt;
     }
 }
@@ -433,6 +439,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     case CharacterType::Druid: return TileType::WardrobeDruid;
     case CharacterType::Witch: return TileType::WardrobeWitch;
     case CharacterType::Bard: return TileType::WardrobeBard;
+    case CharacterType::Cleric: return TileType::WardrobeCleric;
     }
     return TileType::WardrobeLorekeeper;
 }

@@ -62,6 +62,9 @@ CharacterType characterForStartTile(
     if (tile == TileType::Bard) {
         return CharacterType::Bard;
     }
+    if (tile == TileType::Cleric) {
+        return CharacterType::Cleric;
+    }
     return legacyCharacter;
 }
 

@@ -525,6 +525,13 @@ void testRealManifestFile()
         "real manifest resolves the bard character model");
     const AssetManifest::Model& bardModel = manifest.model(
         manifest.characterModel(sokoban::CharacterType::Bard));
+    CHECK(manifest.characterModel(sokoban::CharacterType::Cleric) == manifest.modelIdByName("Cleric"));
+    const auto& clericModel = manifest.model(manifest.characterModel(sokoban::CharacterType::Cleric));
+    CHECK(clericModel.path == "KeyKit Cleric/characters/Cleric.glb");
+    const auto clericMesh = sokoban::loadGltfSkinnedMesh(*root / clericModel.path,
+        { .preserveAspectRatio = true, .rotateHalfTurn = true });
+    CHECK(!clericMesh.vertices.empty());
+    CHECK(!clericMesh.jointNodeIndices.empty());
     const sokoban::SkinnedMeshData bardMesh = sokoban::loadGltfSkinnedMesh(
         *root / bardModel.path,
         {

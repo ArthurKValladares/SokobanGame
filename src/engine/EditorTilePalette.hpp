@@ -78,7 +78,8 @@ inline constexpr std::array<Group, 17> groups {{
                      TileType::WardrobeKnight,
                      TileType::WardrobeDruid,
                      TileType::WardrobeWitch,
-                     TileType::WardrobeBard }, 6 },
+                     TileType::WardrobeBard,
+                     TileType::WardrobeCleric }, 7 },
 }};
 
 // These families use neighboring tiles to choose their visible terrain faces.

@@ -701,6 +701,13 @@
       "rotateHalfTurn": true
     },
     {
+      "name": "Cleric",
+      "path": "KeyKit Cleric/characters/Cleric.glb",
+      "geometry": "skinned",
+      "preserveAspectRatio": true,
+      "rotateHalfTurn": true
+    },
+    {
       "name": "Barbarian",
       "path": "custom/pbr/models/Barbarian.glb",
       "geometry": "skinned",
@@ -2866,6 +2873,10 @@
     },
     {
       "tile": "Wardrobe Bard",
+      "model": "Wardrobe"
+    },
+    {
+      "tile": "Wardrobe Cleric",
       "model": "Wardrobe"
     },
     {

@@ -153,6 +153,7 @@ const AssetManifest& testManifest()
           "geometry": "skinned",
           "material": { "mode": "texture", "texture": "Tex" }
         },
+        { "name": "Cleric", "path": "cleric.glb", "geometry": "skinned" },
         {
           "name": "Enemy",
           "path": "enemy.glb",
@@ -1187,6 +1188,57 @@ void testGameplayFrameUsesTheLevelsCharacterModel()
         CHECK(player->model == testManifest().modelIdByName("Knight"));
         CHECK(player->animation == testManifest().playerIdleAnimation());
     }
+}
+
+void testClericFrameShowsActiveImmunityOnClericAndAllies()
+{
+    TEST("Cleric frame shows animated gold immunity on cardinal allies only");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { ".....", ".....", "....." },
+            { "  N  ", " QC  ", "   Q " } },
+        .character = CharacterType::Cleric,
+    }, "Cleric presentation");
+    auto state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    const auto build = [&] {
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(), .level = level, .state = state,
+            .projectedState = state, .presentation = presentation, .settings = {},
+        });
+    };
+    const auto frame = build();
+    CHECK(frame.particles.size() == 196);
+    const auto cleric = std::ranges::find_if(frame.tiles, [&](const auto& tile) {
+        return tile.model == testManifest().modelIdByName("Cleric");
+    });
+    CHECK(cleric != frame.tiles.end());
+    CHECK(std::ranges::all_of(frame.particles, [](const auto& particle) {
+        return particle.color.x == 1.0f && particle.color.y > particle.color.z &&
+            particle.emissiveStrength > 1.0f && !particle.drawOnTop;
+    }));
+    presentation.advanceClocks(0.4f, false);
+    const auto animated = build();
+    CHECK(animated.particles.size() == frame.particles.size());
+    CHECK(animated.particles[80].position != frame.particles[80].position);
+    state.enemies[0].dead = true;
+    presentation.resetEntities(state);
+    CHECK(build().particles.empty());
+
+    const Level combat = Level::loadFromDefinition({
+        .layers = { { "...." }, { "C N " } }, .character = CharacterType::Cleric,
+    }, "protected attack animation");
+    const auto before = rules::initialState(combat);
+    const auto after = rules::step(combat, before, MoveDirection::Right);
+    const auto animations = testAnimationCatalog();
+    presentation.setAnimationCatalog(&animations);
+    presentation.resetEntities(before);
+    GameplaySession::Action action { .before = before, .after = after, .durationSeconds = 0.25f };
+    action.presentation = presentation.buildActionPresentation(action, &combat);
+    presentation.beginAction(action, before);
+    presentation.seekAction(action, 0.1f);
+    CHECK(presentation.enemies()[0].animationUse == AnimationUse::EnemyAttack);
+    CHECK(!after.players[0].dead);
 }
 
 void testBardFrameBuildsAnimatedMusicalAura()
@@ -6962,6 +7014,7 @@ int main()
     testGameplayFrameUsesSettingsAndPresentation();
     testGameplayFrameUsesTheLevelsCharacterModel();
     testBardFrameBuildsAnimatedMusicalAura();
+    testClericFrameShowsActiveImmunityOnClericAndAllies();
     testSelectorFlagReflectsTargetCompletion();
     testDecorativeTileRendersWithoutChangingCameraExtent();
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();

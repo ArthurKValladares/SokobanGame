@@ -12,6 +12,11 @@
 namespace sokoban::rules {
 namespace {
 
+bool isCleric(const Level& level, const GameState::Player& player)
+{
+    return player.character.value_or(level.character()) == CharacterType::Cleric;
+}
+
 // Compare against the immutable input rather than copying every intermediate
 // board. Once a physical plate differs, later reactions cannot undo the fact
 // that this action changed a signal along the way.
@@ -204,6 +209,23 @@ FallResult playerFallTarget(
     std::size_t playerIndex,
     GridPosition3 position)
 {
+    if (std::ranges::any_of(state.players, [&](const auto& player) {
+            return !player.dead && isCleric(level, player);
+        })) {
+        // Query the landing board: entering an attack activates protection,
+        // while leaving its range cannot carry protection into an empty gap.
+        if (state.players[playerIndex].cell == position) {
+            if (clericGravityProtection(level, state)[playerIndex]) {
+                return { .cell = position };
+            }
+        } else {
+            GameState landing = state;
+            landing.players[playerIndex].cell = position;
+            if (clericGravityProtection(level, landing)[playerIndex]) {
+                return { .cell = position };
+            }
+        }
+    }
     return fallTarget(level, state, position, [&](GridPosition3 below) {
         return movableAt(state, below) != nullptr ||
             fallenMovableAt(state, below) != nullptr ||
@@ -226,6 +248,35 @@ FallResult movableFallTarget(const Level& level, const GameState& state, size_t 
     }, state.movables[movableIndex].type == TileType::LilyPad);
 }
 
+std::vector<std::size_t> dropLostClericProtection(
+    const Level& level, GameState& state, std::vector<char>& previouslyProtected)
+{
+    std::vector<std::size_t> dropped;
+    bool changed;
+    do {
+        changed = false;
+        const auto protectedNow = clericGravityProtection(level, state);
+        for (std::size_t i = 0; i < previouslyProtected.size() && i < state.players.size(); ++i) {
+            auto& player = state.players[i];
+            if (player.dead || !previouslyProtected[i] || protectedNow[i]) {
+                continue;
+            }
+            const auto fall = playerFallTarget(level, state, i, player.cell);
+            if (fall.cell == player.cell && !fall.fallen && fall.supported) {
+                continue;
+            }
+            player.cell = fall.cell;
+            player.dead = fall.fallen || !fall.supported;
+            player.drowned = fall.fallen;
+            player.sliding.reset();
+            dropped.push_back(i);
+            changed = true;
+        }
+        previouslyProtected = protectedNow;
+    } while (changed);
+    return dropped;
+}
+
 FallResult enemyFallTarget(
     const Level& level,
     const GameState& state,
@@ -245,13 +296,14 @@ FallResult enemyFallTarget(
     });
 }
 
-void resolveEnemyAttacks(GameState& state)
+void resolveEnemyAttacks(const Level& level, GameState& state)
 {
+    const auto protectedPlayers = clericGravityProtection(level, state);
     for (std::size_t playerIndex = 0;
          playerIndex < state.players.size();
          ++playerIndex) {
         GameState::Player& player = state.players[playerIndex];
-        if (player.dead) {
+        if (player.dead || isCleric(level, player) || protectedPlayers[playerIndex]) {
             continue;
         }
         const bool threatened = std::ranges::any_of(
@@ -1777,6 +1829,40 @@ std::vector<TurretRaySegment> turretBeamSegments(
 
 } // namespace
 
+std::vector<char> clericGravityProtection(const Level& level, const GameState& state)
+{
+    std::vector<char> protectedPlayers(state.players.size(), 0);
+    for (const auto& cleric : state.players) {
+        if (cleric.dead || !isCleric(level, cleric)) {
+            continue;
+        }
+        bool attacked = std::ranges::any_of(state.enemies, [&](const auto& enemy) {
+            return !enemy.dead && !enemy.fallen && enemy.cell.z == cleric.cell.z &&
+                std::abs(enemy.cell.x - cleric.cell.x) +
+                    std::abs(enemy.cell.y - cleric.cell.y) == 1;
+        });
+        if (!attacked) {
+            attacked = std::ranges::any_of(state.movables, [&](const auto& turret) {
+                const auto direction = turretDirection(turret);
+                return !turret.dead && !turret.fallen && direction &&
+                    turretHasLineOfSight(level, state, turret.cell, *direction, cleric.cell);
+            });
+        }
+        if (!attacked) {
+            continue;
+        }
+        for (std::size_t i = 0; i < state.players.size(); ++i) {
+            const auto& ally = state.players[i];
+            if (!ally.dead && ally.cell.z == cleric.cell.z &&
+                std::abs(ally.cell.x - cleric.cell.x) +
+                    std::abs(ally.cell.y - cleric.cell.y) <= 1) {
+                protectedPlayers[i] = true;
+            }
+        }
+    }
+    return protectedPlayers;
+}
+
 namespace {
 
 template <typename Visitor>
@@ -2378,6 +2464,7 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
     bool toggled = false)
 {
     GameState after = signals;
+    auto clericProtection = clericGravityProtection(level, state);
     bool pressurePlateActivityChanged = false;
     const PressurePlateActivityTracker plateActivity {
         level, state, &pressurePlateActivityChanged,
@@ -2611,9 +2698,11 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
     (void)applyMinecartActivations(
         level, after, minecartEngagement(level, engagementBefore), plateActivity);
     (void)applyGateChanges(level, after, gatesOpen, plateActivity);
-    resolveEnemyAttacks(after);
+    (void)dropLostClericProtection(level, after, clericProtection);
+    resolveEnemyAttacks(level, after);
     // An attack can empty a plate, opening or closing its gates.
     (void)applyGateChanges(level, after, gatesOpen, plateActivity);
+    (void)dropLostClericProtection(level, after, clericProtection);
     for (MirrorEntityPreview& entity : entities) {
         if (entity.player) {
             entity.destination = playerCell(after, entity.resultPlayerIndex);
@@ -2841,6 +2930,7 @@ public:
             status_[entityIndexForEnemy(i)].done = after_.enemies[i].fallen ||
                 after_.enemies[i].dead;
         }
+        clericProtection_ = clericGravityProtection(level_, after_);
     }
 
     void run()
@@ -2905,6 +2995,9 @@ public:
         // through its gates. Expiration uses normal gate crush/fall reactions.
         after_.activeButtons.clear();
         while (resolveGateChanges()) {
+            resolveReactions();
+        }
+        if (resolveLostClericProtection()) {
             resolveReactions();
         }
     }
@@ -4204,7 +4297,7 @@ private:
                 level_.portalCrossing(target, directionOffset(direction))
                     .has_value() &&
                 occupied(pushTarget);
-            if (status.inputDriven && !druid &&
+            if (status.inputDriven && !druid && !isCleric(level_, after_.players[playerIndex]) &&
                 !isUnitLocked(level_, after_, target) &&
                 !status_[blockerIndex].movedThisMicro &&
                 !occupiedPortalExit &&
@@ -4662,7 +4755,8 @@ private:
     {
         bool changed;
         do {
-            changed = resolveTurretShots(sweepingTurrets);
+            changed = resolveLostClericProtection();
+            changed = resolveTurretShots(sweepingTurrets) || changed;
             changed = resolveAttacks() || changed;
             sweepingTurrets = nullptr;
         } while (changed);
@@ -4676,6 +4770,7 @@ private:
         const std::vector<char>* sweepingTurrets = nullptr)
     {
         TurretSightlines visible = captureTurretSightlines();
+        const auto protectedPlayers = clericGravityProtection(level_, after_);
         bool anyKilled = false;
         std::vector<char> killedPlayers(playerCount_, 0);
         std::vector<char> killedMovables(movableCount_, 0);
@@ -4759,8 +4854,10 @@ private:
                     (sweeping || status_[entityIndex].movedThisMicro ||
                         newlyVisible(entityIndex)) &&
                     visible[turretIndex][entityIndex]) {
-                    killedPlayers[playerIndex] = true;
-                    anyKilled = true;
+                    if (!isCleric(level_, player) && !protectedPlayers[playerIndex]) {
+                        killedPlayers[playerIndex] = true;
+                        anyKilled = true;
+                    }
                     if (turretShots_ != nullptr) {
                         turretShots_->push_back({
                             .turret = {
@@ -4891,11 +4988,12 @@ private:
     [[nodiscard]] bool resolveAttacks()
     {
         bool anyKilled = false;
+        const auto protectedPlayers = clericGravityProtection(level_, after_);
         for (std::size_t playerIndex = 0;
              playerIndex < playerCount_;
              ++playerIndex) {
             GameState::Player& player = after_.players[playerIndex];
-            if (player.dead) {
+            if (player.dead || isCleric(level_, player) || protectedPlayers[playerIndex]) {
                 continue;
             }
 
@@ -4930,6 +5028,21 @@ private:
         }
         plateActivity_.observe(after_);
         return anyKilled;
+    }
+
+    // Losing an aura can drop a bystander outside the moving action's scope.
+    // Join it to the closure so saves, animation and undo own that consequence.
+    [[nodiscard]] bool resolveLostClericProtection()
+    {
+        const auto dropped = dropLostClericProtection(level_, after_, clericProtection_);
+        for (const std::size_t i : dropped) {
+            auto& status = status_[entityIndexForPlayer(i)];
+            status.active = true;
+            status.movedThisMicro = true;
+            status.done = true;
+        }
+        plateActivity_.observe(after_);
+        return !dropped.empty();
     }
 
     // Moves one tile, resolves the fall, and updates slide momentum.
@@ -5179,6 +5292,7 @@ private:
     std::vector<char> enemyMovedThisMicro_;
     // Last volley's visibility, sampled before its kills are applied.
     TurretSightlines turretSightlines_;
+    std::vector<char> clericProtection_;
     // Direction of each successful movable displacement in the current
     // micro-step. Linked groups react after ordinary resolution completes.
     std::vector<std::optional<MoveDirection>> movableMovedDirections_;

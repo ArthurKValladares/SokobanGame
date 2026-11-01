@@ -6,7 +6,7 @@
 namespace sokoban::solver::detail {
 namespace {
 
-static_assert(static_cast<std::uint32_t>(CharacterType::Bard) < 0xffU);
+static_assert(static_cast<std::uint32_t>(CharacterType::Cleric) < 0xffU);
 static_assert(static_cast<std::uint32_t>(MoveDirection::Right) < 0xffU);
 static_assert(static_cast<std::uint32_t>(TileType::Count) <= 0x100U);
 

@@ -1234,6 +1234,46 @@ Level::Definition Level::parseDefinition(
         throw std::runtime_error("Level is empty: " + source);
     }
 
+    // Named records retain printable, backwards-compatible grids while the
+    // editor uses distinct tokens for the new character and its wardrobe.
+    if (std::ranges::any_of(lines, [](const std::string& line) {
+            return line.starts_with("@cleric ");
+        })) {
+        std::vector<std::string> gridLines;
+        std::vector<std::pair<GridPosition3, bool>> clerics;
+        for (const auto& line : lines) {
+            if (!line.starts_with("@cleric ")) {
+                gridLines.push_back(line);
+                continue;
+            }
+            try {
+                const Json object = Json::parse(line.substr(8));
+                const auto cell = parseLinkedCell(object.at("cell"), "cell", sourceName, "Cleric");
+                if (std::ranges::any_of(clerics, [&](const auto& entry) { return entry.first == cell; })) {
+                    throw std::runtime_error("Duplicate cleric cell: " + source);
+                }
+                clerics.emplace_back(cell, object.value("wardrobe", false));
+            } catch (const Json::exception& error) {
+                throw std::runtime_error("Invalid cleric metadata: " + std::string(error.what()));
+            }
+        }
+        Definition result = parseDefinition(gridLines, sourceName);
+        for (const auto& [cell, wardrobe] : clerics) {
+            if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+                static_cast<std::size_t>(cell.z) >= result.layers.size() ||
+                static_cast<std::size_t>(cell.y) >= result.layers[cell.z].size() ||
+                static_cast<std::size_t>(cell.x) >= result.layers[cell.z][cell.y].size()) {
+                throw std::runtime_error("Cleric cell outside screen: " + source);
+            }
+            char& token = result.layers[cell.z][cell.y][cell.x];
+            if (token != tileTypeToChar(wardrobe ? TileType::WardrobeLorekeeper : TileType::Player)) {
+                throw std::runtime_error("Cleric metadata requires matching player or wardrobe tile: " + source);
+            }
+            token = tileTypeToChar(wardrobe ? TileType::WardrobeCleric : TileType::Cleric);
+        }
+        return result;
+    }
+
     // Printable grid symbols are exhausted. Crystals use named metadata on disk
     // and unique byte tokens in editor rows, preserving every legacy symbol.
     if (std::ranges::any_of(lines, [](const std::string& line) {
@@ -1375,7 +1415,7 @@ Level::Definition Level::parseDefinition(
                 throw std::runtime_error(
                     "Invalid character metadata; expected '@character lorekeeper', "
                     "'@character rogue', '@character knight', '@character druid', "
-                    "'@character witch', or '@character bard': " + source);
+                    "'@character witch', '@character bard', or '@character cleric': " + source);
             }
             continue;
         }
@@ -1642,12 +1682,20 @@ std::vector<std::string> Level::serializeDefinition(
     const Definition& definition)
 {
     Definition disk = definition;
+    std::vector<std::string> clerics;
     std::vector<std::string> crystals;
     for (std::size_t z = 0; z < disk.layers.size(); ++z) {
         for (std::size_t y = 0; y < disk.layers[z].size(); ++y) {
             for (std::size_t x = 0; x < disk.layers[z][y].size(); ++x) {
                 char& token = disk.layers[z][y][x];
                 const auto type = charToTileType(token).value_or(TileType::Air);
+                if (type == TileType::Cleric || type == TileType::WardrobeCleric) {
+                    const bool wardrobe = type == TileType::WardrobeCleric;
+                    Json object { { "cell", { x, y, z } }, { "wardrobe", wardrobe } };
+                    clerics.push_back("@cleric " + object.dump());
+                    token = tileTypeToChar(wardrobe ? TileType::WardrobeLorekeeper : TileType::Player);
+                    continue;
+                }
                 if (!tileTypeIsCrystal(type)) continue;
                 const bool skipping = type == TileType::SkippingCrystal;
                 Json object { { "cell", { x, y, z } }, { "skipping", skipping } };
@@ -1656,12 +1704,13 @@ std::vector<std::string> Level::serializeDefinition(
             }
         }
     }
-    if (!crystals.empty()) {
+    if (!crystals.empty() || !clerics.empty()) {
         auto lines = serializeDefinition(disk);
         if (disk.layers.size() == 1 && std::ranges::none_of(lines,
                 [](const std::string& line) { return line.starts_with(layerPrefix); }))
             lines.insert(lines.begin(), "@layer 0");
         lines.insert(lines.begin(), crystals.begin(), crystals.end());
+        lines.insert(lines.begin(), clerics.begin(), clerics.end());
         return lines;
     }
     validateGroundSplats(definition, "serialized level");
@@ -2058,6 +2107,8 @@ Level Level::loadFromLayers(
                                 ? CharacterType::Witch
                                 : *tile == TileType::Bard
                                     ? CharacterType::Bard
+                                    : *tile == TileType::Cleric
+                                        ? CharacterType::Cleric
                                     : *tile == TileType::Rogue
                                         ? CharacterType::Rogue
                                         : selectedCharacter;

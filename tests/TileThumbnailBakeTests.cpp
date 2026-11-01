@@ -54,6 +54,7 @@ const AssetManifest& testManifest(bool components = false)
         { "name": "Druid", "path": "d.glb", "geometry": "skinned" },
         { "name": "Witch", "path": "w.glb", "geometry": "skinned" },
         { "name": "Bard", "path": "b.glb", "geometry": "skinned" },
+        { "name": "Cleric", "path": "cleric.glb", "geometry": "skinned" },
         { "name": "Wardrobe", "path": "wardrobe.glb", "preserveSourceScale": true },
         { "name": "Robot", "path": "robot.glb", "geometry": "skinned", "preserveSourceScale": true },
         { "name": "CliffWallIslandA", "path": "cliff_a.glb", "preserveSourceScale": true },
@@ -90,7 +91,8 @@ const AssetManifest& testManifest(bool components = false)
         { "tile": "Wardrobe Knight", "model": "Wardrobe" },
         { "tile": "Wardrobe Druid", "model": "Wardrobe" },
         { "tile": "Wardrobe Witch", "model": "Wardrobe" },
-        { "tile": "Wardrobe Bard", "model": "Wardrobe" }
+        { "tile": "Wardrobe Bard", "model": "Wardrobe" },
+        { "tile": "Wardrobe Cleric", "model": "Wardrobe" }
       ]
     })json";
     static const AssetManifest manifest = AssetManifest::parse(definition);
@@ -161,6 +163,7 @@ void testAirAndWaterAreNotBaked()
     CHECK(tileThumbnails::shouldBake(TileType::Druid));
     CHECK(tileThumbnails::shouldBake(TileType::Witch));
     CHECK(tileThumbnails::shouldBake(TileType::Bard));
+    CHECK(tileThumbnails::shouldBake(TileType::Cleric));
 }
 
 // The bake takes the game's live settings. Shadows and ambient occlusion are

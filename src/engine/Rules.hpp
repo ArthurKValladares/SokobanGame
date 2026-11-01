@@ -217,6 +217,12 @@ struct StepResult {
 
 [[nodiscard]] bool anyPlayerDead(const GameState& state);
 
+// Live, same-layer protection: an attacked Cleric and its four adjacent
+// allies ignore gravity. Attack immunity also applies to idle Clerics.
+// Derived from board geometry so undo, copies and saves need no stale timer.
+[[nodiscard]] std::vector<char> clericGravityProtection(
+    const Level& level, const GameState& state);
+
 [[nodiscard]] EntityId playerControllerId(
     const GameState& state, std::size_t playerIndex);
 

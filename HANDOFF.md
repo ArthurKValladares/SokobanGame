@@ -10,7 +10,7 @@ Sokoban 3D is a C++20, SDL3, Vulkan 1.3 project. Runtime content is declared by
 `assets/manifest.json`, staged by `sokoban_content`, and validated against
 `content.index` at startup.
 
-Gameplay includes five hero types, pushable mirrors and copies, linked movable
+Gameplay includes six puzzle hero types, pushable mirrors and copies, linked movable
 objects, portals, buttons, persistent levers, rotators, lock plates, elevators, minecarts, and
 lecterns. Rules, replay and solver search share the production action planner.
 Developer builds expose transactional level/asset/animation editors, live tuning,

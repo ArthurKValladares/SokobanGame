@@ -791,6 +791,8 @@ void LevelEditor::setCharacter(CharacterType character)
                 ? TileType::Witch
                 : character == CharacterType::Bard
                     ? TileType::Bard
+                    : character == CharacterType::Cleric
+                        ? TileType::Cleric
                     : TileType::Rogue;
     const char replacement = tileTypeToChar(replacementType);
     bool changed = document_.character.has_value();
@@ -2965,6 +2967,9 @@ CharacterType LevelEditor::character() const
                 if (tile == TileType::Bard) {
                     return CharacterType::Bard;
                 }
+                if (tile == TileType::Cleric) {
+                    return CharacterType::Cleric;
+                }
             }
         }
     }
@@ -4191,6 +4196,8 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
                         ? TileType::Witch
                         : character == CharacterType::Bard
                             ? TileType::Bard
+                            : character == CharacterType::Cleric
+                                ? TileType::Cleric
                             : TileType::Rogue;
             for (std::vector<std::string>& layer : definition.layers) {
                 for (std::string& row : layer) {

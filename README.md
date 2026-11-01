@@ -10,7 +10,7 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 - Layered Sokoban movement with rocks, pressure-plate gates, pulse buttons, persistent levers, rotator
   plates, lock plates, elevators, minecarts and rail gates, goals, undo, restart,
   multi-screen levels, and completion tracking.
-- Rogue, knight, druid, witch and bard heroes with distinct movement abilities,
+- Rogue, knight, druid, witch, bard and cleric heroes with distinct movement abilities,
   switchable hero control, and pushable mirrors that create hero copies.
 - Ice, ladders, conveyors, floating lily pads, directional water streams,
   falling, configurable water layers, and four
@@ -56,6 +56,22 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
   variations per layout, and quarter-turn rotation for tile-sized placement.
 - Colored point lights attachable to mesh decorations, with per-light local
   offset, intensity, range, and omnidirectional shadows that add to the sun.
+
+## Cleric
+
+The Cleric cannot push blocks or enemies and is immune to enemy and turret
+attacks. While an enemy is adjacent or a turret has a clear shot at it, the
+Cleric also ignores gravity and can cross water or air. During that attack,
+allies in the four immediately adjacent cells on the same layer share both
+protections. The effect does not extend diagonally or relay through allies.
+Protection ends immediately when the attack or adjacency ends; unsupported
+heroes then fall normally. A golden ring and rising sparks mark protected
+heroes. Choose **Cleric** or **Wardrobe > Cleric** in the editor.
+
+Cleric tiles are saved as `@cleric {"cell":[x,y,z],"wardrobe":false}`
+metadata over a `C` grid cell (`true` over a `0` cell for a wardrobe), keeping
+existing screen symbols intact. `@character cleric` also works for legacy
+generic player starts. See `docs/examples/cleric.scr` for a small test scene.
 
 ## Default Controls
 

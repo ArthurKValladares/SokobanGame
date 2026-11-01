@@ -379,6 +379,38 @@ void testCharacterMetadataRoundTripAndLegacyDefault()
     CHECK(legacy.character() == CharacterType::Rogue);
 }
 
+void testClericStartsAndWardrobesRoundTrip()
+{
+    TEST("cleric starts and wardrobes round trip without control bytes on disk");
+    Level::Definition definition { .layers = { { "....." }, { "CQ R0" } } };
+    definition.layers[1][0][0] = tileTypeToChar(TileType::Cleric);
+    definition.layers[1][0][4] = tileTypeToChar(TileType::WardrobeCleric);
+    definition.layers[1][0][3] = tileTypeToChar(TileType::Crystal);
+    const auto serialized = Level::serializeDefinition(definition);
+    CHECK(std::ranges::any_of(serialized, [](const auto& line) { return line.starts_with("@cleric "); }));
+    CHECK(std::ranges::none_of(serialized, [](const auto& line) {
+        return line.find('\x03') != std::string::npos || line.find('\x04') != std::string::npos;
+    }));
+    const auto parsed = Level::parseDefinition(serialized, "Cleric round trip");
+    CHECK(parsed == definition);
+    const auto level = Level::loadFromDefinition(parsed, "Cleric round trip");
+    CHECK(level.playerStarts().size() == 2);
+    CHECK(level.playerStarts()[0].character == CharacterType::Cleric);
+    CHECK(level.playerStarts()[1].character == CharacterType::Rogue);
+    CHECK(level.wardrobes()[0].character == CharacterType::Cleric);
+    CHECK(level.isWalkable({ 4, 0, 1 }));
+    definition.character = CharacterType::Cleric;
+    CHECK(Level::parseDefinition(Level::serializeDefinition(definition), "Cleric character") == definition);
+    CHECK(characterTypeFromName("cleric") == CharacterType::Cleric);
+
+    checkThrowsContaining([] { (void)Level::parseDefinition({ "@cleric {\"cell\":[8,0,1]}",
+        "@layer 0", "...", "@layer 1", "C  " }, "bad Cleric cell"); }, "outside screen");
+    checkThrowsContaining([] { (void)Level::parseDefinition({ "@cleric {\"cell\":[0,0,1]}",
+        "@cleric {\"cell\":[0,0,1]}", "@layer 0", "...", "@layer 1", "C  " }, "duplicate Cleric"); }, "Duplicate cleric");
+    checkThrowsContaining([] { (void)Level::parseDefinition({ "@cleric {\"cell\":[1,0,1]}",
+        "@layer 0", "...", "@layer 1", "CR " }, "Cleric on rock"); }, "matching player");
+}
+
 void testWardrobeVariantsRoundTripAndRemainTraversable()
 {
     TEST("wardrobeVariantsRoundTripAndRemainTraversable");
@@ -1259,7 +1291,7 @@ void testLevelValidationErrors()
     CHECK(multipleHeroes.playerStarts()[3].character == CharacterType::Witch);
     CHECK(multipleHeroes.playerStarts()[4].character == CharacterType::Bard);
     checkThrowsContaining([] {
-        (void)Level::loadFromLayers({ { "C\x03" } }, "unknown tile");
+        (void)Level::loadFromLayers({ { "C\x05" } }, "unknown tile");
     }, "Unknown level tile");
     checkThrowsContaining([] {
         (void)Level::loadFromLayers({ { "..." }, { "LC " } }, "unsupported ladder");
@@ -1741,6 +1773,7 @@ void testCliffWallStylesAreSolidAndSaveSplatAssignments()
 
 int main()
 {
+    testClericStartsAndWardrobesRoundTrip();
     TEST("lecternMetadata");
     const Level::Definition lecternDefinition {
         .layers = { { "..." }, { "CT " } },

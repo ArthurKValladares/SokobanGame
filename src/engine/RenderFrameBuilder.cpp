@@ -1498,6 +1498,48 @@ void appendBardAura(
     }
 }
 
+// Rebuilt from the live protection mask each frame: the aureole and rising
+// embers follow interpolation and disappear immediately when protection ends.
+void appendClericImmunity(
+    RenderFrameData& frame, Vec3 position, RenderTexture glow,
+    float time, std::size_t playerIndex)
+{
+    if (glow.isNone()) {
+        return;
+    }
+    const Vec3 center { position.x + 0.5f, position.y + 0.5f, position.z + 0.06f };
+    const float phase = time * 2.1f + static_cast<float>(playerIndex) * 1.7f;
+    for (int i = 0; i < 80; ++i) {
+        const float angle = static_cast<float>(i) * (2.0f * pi / 80.0f);
+        const float radius = 0.43f + 0.018f * std::sin(phase + angle * 5.0f);
+        frame.particles.push_back({
+            .position = { center.x + std::cos(angle) * radius,
+                          center.y + std::sin(angle) * radius, center.z },
+            .size = { 0.24f, 0.24f },
+            .color = { 1.0f, 0.68f, 0.06f, 0.45f },
+            .emissiveStrength = 2.4f,
+            .texture = glow,
+        });
+    }
+    for (int i = 0; i < 18; ++i) {
+        const float seed = static_cast<float>(i);
+        const float age = std::fmod(time * (0.72f + seed * 0.013f) + seed * 0.618034f, 1.0f);
+        const float angle = seed * 2.399963f + phase * 0.35f;
+        const float radius = 0.30f + 0.16f * std::sin(seed * 1.73f);
+        const float opacity = std::sin(age * pi);
+        frame.particles.push_back({
+            .position = { center.x + std::cos(angle) * radius,
+                          center.y + std::sin(angle) * radius,
+                          center.z + age * 0.65f },
+            .size = { 0.055f, 0.12f },
+            .billboardAlignment = { 0.0f, 0.0f, 1.0f },
+            .color = { 1.0f, 0.88f, 0.22f, opacity * 0.85f },
+            .emissiveStrength = 3.0f,
+            .texture = glow,
+        });
+    }
+}
+
 void appendGameplayEntities(
     RenderFrameData& frame,
     const RenderFrameBuilder::GameplayInput& input)
@@ -1511,6 +1553,7 @@ void appendGameplayEntities(
     // Rotator turns interpolate between the committed and projected states.
     const float turnProgress = inFlightActionProgress(input);
     const float quarterTurnRadians = pi * 0.5f;
+    const auto clericProtection = rules::clericGravityProtection(input.level, state);
 
     for (std::size_t playerIndex = 0;
          playerIndex < state.players.size() &&
@@ -1538,6 +1581,11 @@ void appendGameplayEntities(
         const bool primary = playerIndex == primaryIndex;
         const bool controlled = rules::playerControllerId(state, playerIndex) ==
             activeController;
+        if (clericProtection[playerIndex]) {
+            appendClericImmunity(frame, visual.motion.renderPosition,
+                input.manifest.findTextureIdByName("ParticleGlow"),
+                input.presentation.worldAnimationTimeSeconds(), playerIndex);
+        }
         if (!state.players[playerIndex].dead &&
             state.players[playerIndex].character.value_or(
                 input.level.character()) == CharacterType::Bard) {

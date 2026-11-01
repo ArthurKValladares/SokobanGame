@@ -1397,6 +1397,9 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
         action.after.enemies.size());
     std::vector<std::vector<std::size_t>> attackedPlayers(enemyCount);
     std::vector<std::optional<IntentId>> attackIntents(enemyCount);
+    const auto clericProtection = level
+        ? rules::clericGravityProtection(*level, action.after)
+        : std::vector<char>(action.after.players.size(), 0);
     for (std::size_t enemyIndex = 0; enemyIndex < enemyCount; ++enemyIndex) {
         const GameState::Enemy& before = action.before.enemies[enemyIndex];
         const GameState::Enemy& after = action.after.enemies[enemyIndex];
@@ -1427,7 +1430,11 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
              ++playerIndex) {
             const GameState::Player& playerBefore = action.before.players[playerIndex];
             const GameState::Player& playerAfter = action.after.players[playerIndex];
-            if (playerBefore.dead || !playerAfter.dead || playerAfter.drowned ||
+            const bool protectedSurvivor = !playerAfter.dead &&
+                (clericProtection[playerIndex] ||
+                    playerAfter.character.value_or(level ? level->character() : CharacterType::Rogue) == CharacterType::Cleric) &&
+                (playerBefore.cell != playerAfter.cell || before.cell != after.cell);
+            if (playerBefore.dead || (!playerAfter.dead && !protectedSurvivor) || playerAfter.drowned ||
                 after.fallen || after.dead ||
                 playerAfter.cell.z != after.cell.z) {
                 continue;

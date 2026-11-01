@@ -34,6 +34,137 @@ GridPosition3 cell(int x, int y, int z)
     return { x, y, z };
 }
 
+void testClericCannotPushAndResistsAttacks()
+{
+    TEST("cleric cannot push blocks or enemies and resists attacks");
+    for (const char blocker : std::string("RI1eN")) {
+        const Level level = makeLevel({ { "...." },
+            { std::string("C") + blocker + "  " } }, CharacterType::Cleric);
+        const auto before = rules::initialState(level);
+        const auto after = rules::step(level, before, MoveDirection::Right);
+        CHECK(after.players[0].cell == before.players[0].cell);
+        CHECK(after.movables == before.movables);
+        CHECK(after.enemies == before.enemies);
+        CHECK(!after.players[0].dead);
+    }
+    const Level enemy = makeLevel({ { "....", "...." },
+        { "C   ", " N  " } }, CharacterType::Cleric);
+    const auto attacked = rules::step(enemy, rules::initialState(enemy), MoveDirection::Right);
+    CHECK(attacked.players[0].cell == cell(1, 0, 1));
+    CHECK(!attacked.players[0].dead);
+    CHECK(rules::clericGravityProtection(enemy, attacked)[0]);
+}
+
+void testClericWalksOverWaterAndAirOnlyWhileAttacked()
+{
+    TEST("cleric walks over water and air only while attacked");
+    for (const std::string floor : { ".WWWW.", ".    ." }) {
+        const Level level = makeLevel({ { "......", floor },
+            { " C    ", "e     " } }, CharacterType::Cleric);
+        const auto before = rules::initialState(level);
+        CHECK(!rules::clericGravityProtection(level, before)[0]);
+        const auto entered = rules::stepWithEvents(level, before, MoveDirection::Down);
+        CHECK(entered.state.players[0].cell == cell(1, 1, 1));
+        CHECK(!entered.state.players[0].dead);
+        CHECK(!entered.state.players[0].drowned);
+        CHECK(entered.turretShots.size() == 1);
+        CHECK(rules::clericGravityProtection(level, entered.state)[0]);
+        const auto walking = rules::step(level, entered.state, MoveDirection::Right);
+        CHECK(walking.players[0].cell == cell(2, 1, 1));
+        CHECK(!walking.players[0].dead);
+        const auto exited = rules::step(level, walking, MoveDirection::Up);
+        CHECK(exited.players[0].cell == cell(2, 0, 1));
+        CHECK(!rules::clericGravityProtection(level, exited)[0]);
+
+        auto noAttack = before;
+        noAttack.movables[0].dead = true;
+        const auto blocked = rules::step(level, noAttack, MoveDirection::Down);
+        CHECK(blocked.players[0].cell == before.players[0].cell);
+        CHECK(!rules::clericGravityProtection(level, blocked)[0]);
+    }
+}
+
+void testClericProtectsOnlyCardinalAlliesAndDoesNotRelay()
+{
+    TEST("cleric protects cardinal allies against enemies and turrets without relaying");
+    const Level level = makeLevel({ { ".....", ".....", ".....", "....." },
+        { " NN  ", "eQC K", "  UQ ", "     " } }, CharacterType::Cleric);
+    auto before = rules::initialState(level);
+    // Concrete hero tiles override the legacy Cleric start.
+    CHECK(before.players[1].character == CharacterType::Cleric);
+    auto protection = rules::clericGravityProtection(level, before);
+    CHECK(protection[0]); // west ally
+    CHECK(protection[1]); // attacked Cleric
+    CHECK(!protection[2]); // two cells east, no relay
+    CHECK(protection[3]); // south ally
+    CHECK(!protection[4]); // diagonal ally
+    auto entering = before;
+    entering.players[0].cell = cell(1, 2, 1);
+    const auto after = rules::scopedStepWithEvents(level, entering, MoveDirection::Up,
+        {}, { .actors = { entering.players[0].id } });
+    CHECK(!after.state.players[0].dead); // survives adjacency and a clear shot
+    CHECK(!after.state.players[1].dead);
+
+    before.players[0].cell = cell(2, 1, 2);
+    CHECK(!rules::clericGravityProtection(level, before)[0]);
+    before.enemies[0].dead = true;
+    before.enemies[1].dead = true;
+    // The west hero no longer occludes the turret; Cleric remains targeted.
+    CHECK(rules::clericGravityProtection(level, before)[1]);
+    before.movables[0].dead = true;
+    CHECK(std::ranges::none_of(rules::clericGravityProtection(level, before),
+        [](char value) { return value != 0; }));
+}
+
+void testClericLosesGravityImmediatelyWhenSightlineCloses()
+{
+    TEST("cleric and adjacent ally fall when an out-of-scope attack is blocked");
+    for (const bool water : { false, true }) {
+        const Level level = makeLevel({
+            { "....", water ? "..WW" : "..  ", "...." },
+            { " v  ", "e C ", "    " } }, CharacterType::Cleric);
+        auto before = rules::initialState(level);
+        before.movables.push_back({ .id = 1234, .type = TileType::Rock, .cell = cell(1, 0, 1) });
+        before.players.push_back({ .id = 1235, .cell = cell(3, 1, 1),
+            .character = CharacterType::Rogue, .controller = 1235 });
+        CHECK(rules::clericGravityProtection(level, before)[0]);
+        CHECK(rules::clericGravityProtection(level, before)[1]);
+        const auto result = rules::scopedStepWithEvents(level, before, std::nullopt,
+            rules::StepRates {}, rules::StepScope { .actors = { 1234 } });
+        CHECK(result.state.movables.back().cell == cell(1, 1, 1));
+        CHECK(result.state.players[0].dead);
+        CHECK(result.state.players[1].dead);
+        CHECK(result.state.players[0].drowned == water);
+        CHECK(result.state.players[1].drowned == water);
+        const auto delta = StateDelta::between(before, result.state);
+        auto restored = result.state;
+        delta.inverted().applyTo(restored);
+        CHECK(restored == before);
+    }
+}
+
+void testClericAlliesCrossWaterAndLoseProtectionWhenLeaving()
+{
+    TEST("adjacent allies walk on water and lose protection when leaving");
+    const Level level = makeLevel({ { ".....", ".WWW.", "....." },
+        { "  N  ", "  C  ", " Q   " } }, CharacterType::Cleric);
+    const auto before = rules::initialState(level);
+    const auto allyId = before.players[1].id;
+    const auto after = rules::scopedStep(level, before, MoveDirection::Up,
+        {}, { .actors = { allyId } });
+    CHECK(after.players[1].cell == cell(1, 1, 1));
+    CHECK(!after.players[1].dead);
+    CHECK(rules::clericGravityProtection(level, after)[1]);
+    const auto leaving = rules::scopedStep(level, after, MoveDirection::Down,
+        {}, { .actors = { allyId } });
+    CHECK(leaving.players[1].cell == cell(1, 2, 1));
+    CHECK(!rules::clericGravityProtection(level, leaving)[1]);
+    auto noAttack = before;
+    noAttack.enemies[0].dead = true;
+    CHECK(rules::scopedStep(level, noAttack, MoveDirection::Up,
+        {}, { .actors = { allyId } }).players[1].cell == cell(1, 2, 1));
+}
+
 void testInitialState()
 {
     TEST("initialState");
@@ -5000,6 +5131,11 @@ void testRockDrivenPadTimingRecognizesTurningPortalShove()
 
 int main()
 {
+    testClericCannotPushAndResistsAttacks();
+    testClericWalksOverWaterAndAirOnlyWhileAttacked();
+    testClericProtectsOnlyCardinalAlliesAndDoesNotRelay();
+    testClericLosesGravityImmediatelyWhenSightlineCloses();
+    testClericAlliesCrossWaterAndLoseProtectionWhenLeaving();
     testRoundRockDefinitionsAndGroundBehavior();
     testRoundRockSkipsToShoreAndSinksAtBlockers();
     testRoundRockRidesLilyPadToShoreOrObstacle();

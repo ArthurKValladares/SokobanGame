@@ -15,6 +15,7 @@ enum class CharacterType : uint8_t {
     Druid,
     Witch,
     Bard,
+    Cleric,
 };
 
 [[nodiscard]] constexpr std::string_view characterTypeName(
@@ -33,6 +34,8 @@ enum class CharacterType : uint8_t {
         return "witch";
     case CharacterType::Bard:
         return "bard";
+    case CharacterType::Cleric:
+        return "cleric";
     }
     return "rogue";
 }
@@ -57,6 +60,9 @@ enum class CharacterType : uint8_t {
     }
     if (name == "bard") {
         return CharacterType::Bard;
+    }
+    if (name == "cleric") {
+        return CharacterType::Cleric;
     }
     return std::nullopt;
 }

@@ -997,6 +997,17 @@ void testCharacterSelectionPersistsAndIsUndoable()
     CHECK(witch.loadDocument(sourcePath));
     CHECK(witch.character() == CharacterType::Witch);
     CHECK(witch.documentToLevel().character() == CharacterType::Witch);
+
+    witch.setCharacter(CharacterType::Cleric);
+    CHECK(witch.character() == CharacterType::Cleric);
+    CHECK(witch.saveDocument(sourcePath));
+    CHECK(readFile(sourcePath).find("@cleric ") != std::string::npos);
+    LevelEditor cleric = makeEditor(project);
+    CHECK(cleric.loadDocument(sourcePath));
+    CHECK(cleric.documentToLevel().character() == CharacterType::Cleric);
+    cleric.setCharacter(CharacterType::Rogue);
+    CHECK(cleric.tryUndoEdit());
+    CHECK(cleric.character() == CharacterType::Cleric);
 }
 
 void testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness()
@@ -1777,7 +1788,7 @@ void testInvalidLoadLeavesDocumentUntouched()
     const std::filesystem::path invalidPath = project.root / "invalid.scr";
     {
         std::ofstream file(invalidPath);
-        file << "@layer 0\n....\n\n@layer 1\n" << std::string(4, '\x01') << '\n';
+        file << "@layer 0\n....\n\n@layer 1\n" << std::string(4, '\x05') << '\n';
     }
 
     CHECK(!editor.loadDocument(invalidPath));
