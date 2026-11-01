@@ -61,12 +61,16 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 
 The Cleric cannot push blocks or enemies and is immune to enemy and turret
 attacks. While an enemy is adjacent or a turret has a clear shot at it, the
-Cleric also ignores gravity and can cross water or air. During that attack,
-allies in the four immediately adjacent cells on the same layer share both
-protections. The effect does not extend diagonally or relay through allies.
-Protection ends immediately when the attack or adjacency ends; unsupported
-heroes then fall normally. A golden ring and rising sparks mark protected
-heroes. Choose **Cleric** or **Wardrobe > Cleric** in the editor.
+Cleric also ignores gravity and can cross water or air. Allies in the four
+immediately adjacent cells on the same layer always share its attack immunity.
+An attack on any of them activates gravity immunity for the Cleric and its
+adjacent allies together, with golden rings and sparks on each protected hero.
+The Knight can push the Cleric, including over water or air while this shared
+protection is active.
+The effect does not extend diagonally or relay through allies.
+Gravity immunity ends immediately when its attack or adjacency ends; unsupported
+heroes then fall normally. A golden ring and rising sparks mark actively
+protected heroes. Choose **Cleric** or **Wardrobe > Cleric** in the editor.
 
 Cleric tiles are saved as `@cleric {"cell":[x,y,z],"wardrobe":false}`
 metadata over a `C` grid cell (`true` over a `0` cell for a wardrobe), keeping

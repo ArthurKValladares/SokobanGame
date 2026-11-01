@@ -1241,6 +1241,55 @@ void testClericFrameShowsActiveImmunityOnClericAndAllies()
     CHECK(!after.players[0].dead);
 }
 
+void testAttackedAllyActivatesClericAura()
+{
+    TEST("an attacked ally activates the immunity effect on its Cleric too");
+    const auto level = Level::loadFromDefinition({
+        .layers = { { ".....", ".....", ".....", ".....", "....." },
+            { "     ", "  C  ", "e    ", "  K  ", "     " } },
+        .character = CharacterType::Cleric,
+    }, "Knight protected by idle Cleric");
+    const auto before = rules::initialState(level);
+    const auto after = rules::scopedStep(level, before, MoveDirection::Up,
+        {}, { .actors = { before.players[1].id } });
+    CHECK(!after.players[1].dead);
+    GameplayPresentation presentation;
+    presentation.resetEntities(after);
+    const auto frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(), .level = level, .state = after,
+        .projectedState = after, .presentation = presentation, .settings = {},
+    });
+    CHECK(frame.particles.size() == 196);
+    CHECK(rules::clericGravityProtection(level, after)[0]);
+    CHECK(rules::clericGravityProtection(level, after)[1]);
+    CHECK(std::ranges::any_of(frame.particles, [](const auto& particle) {
+        return particle.position.y > 1.0f && particle.position.y < 2.0f;
+    }));
+    CHECK(std::ranges::any_of(frame.particles, [](const auto& particle) {
+        return particle.position.y > 2.0f && particle.position.y < 3.0f;
+    }));
+
+    const auto gap = Level::loadFromDefinition({
+        .layers = { { "....   ..." }, { "e KC      " } },
+        .character = CharacterType::Cleric,
+    }, "shared Cleric push presentation");
+    GameplaySession session;
+    session.reset(gap);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(gap, {}));
+    auto action = session.activeAction();
+    CHECK(action.playerPushing);
+    const auto animations = testAnimationCatalog();
+    presentation.setAnimationCatalog(&animations);
+    presentation.resetEntities(action.before);
+    action.presentation = presentation.buildActionPresentation(action, &gap);
+    presentation.beginAction(action, action.before);
+    presentation.seekAction(action, 0.05f);
+    CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerPush);
+    CHECK(presentation.players()[1].animationUse == AnimationUse::PlayerMove);
+    CHECK(near(presentation.players()[1].motion.renderPosition.z, 1.0f));
+}
+
 void testBardFrameBuildsAnimatedMusicalAura()
 {
     TEST("bardFrameBuildsAnimatedMusicalAura");
@@ -7015,6 +7064,7 @@ int main()
     testGameplayFrameUsesTheLevelsCharacterModel();
     testBardFrameBuildsAnimatedMusicalAura();
     testClericFrameShowsActiveImmunityOnClericAndAllies();
+    testAttackedAllyActivatesClericAura();
     testSelectorFlagReflectsTargetCompletion();
     testDecorativeTileRendersWithoutChangingCameraExtent();
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();

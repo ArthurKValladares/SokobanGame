@@ -209,6 +209,35 @@ function Add-RadialBox($Model, [int]$Material, [double]$Radius,
     Add-BoxBasis $Model $Material $center $radial $vertical $tangent
 }
 
+function Add-TaperedRadialBox($Model, [int]$Material, [double]$Radius,
+                              [double]$Theta, [double]$CenterY,
+                              [double]$RadialSize, [double]$Height,
+                              [double]$InnerWidth, [double]$OuterWidth) {
+    $cosine = [Math]::Cos($Theta)
+    $sine = [Math]::Sin($Theta)
+    $innerRadius = $Radius - $RadialSize * 0.5
+    $outerRadius = $Radius + $RadialSize * 0.5
+    $minimumY = $CenterY - $Height * 0.5
+    $maximumY = $CenterY + $Height * 0.5
+    [Vector3[]]$bottom = @()
+    foreach ($corner in @(@($innerRadius, (-$InnerWidth * 0.5)),
+                           @($outerRadius, (-$OuterWidth * 0.5)),
+                           @($outerRadius, ($OuterWidth * 0.5)),
+                           @($innerRadius, ($InnerWidth * 0.5)))) {
+        $bottom += New-Vec ($corner[0] * $cosine + $corner[1] * $sine) $minimumY (-$corner[0] * $sine + $corner[1] * $cosine)
+    }
+    [Vector3[]]$top = @()
+    foreach ($point in $bottom) {
+        $top += New-Vec $point.X $maximumY $point.Z
+    }
+    Add-Quad $Model $Material $bottom[0] $bottom[1] $bottom[2] $bottom[3]
+    Add-Quad $Model $Material $top[3] $top[2] $top[1] $top[0]
+    for ($i = 0; $i -lt 4; ++$i) {
+        $next = ($i + 1) % 4
+        Add-Quad $Model $Material $bottom[$i] $top[$i] $top[$next] $bottom[$next]
+    }
+}
+
 function Add-CylinderX($Model, [int]$Material, [double]$CenterX,
                        [double]$CenterY, [double]$CenterZ,
                        [double]$Length, [double]$Radius, [int]$Sides) {
@@ -259,11 +288,16 @@ function New-StopRailModel {
 
 function New-CornerRailModel {
     $model = New-Model 'MinecartRailCorner'
-    foreach ($degrees in @(20.0, 32.5, 45.0, 57.5, 70.0)) {
+    # Equal angular cells cover the full bend. Narrow inner ends keep the
+    # sleepers separate where the curve converges (radius 0.18).
+    for ($i = 0; $i -lt 5; ++$i) {
+        $degrees = ($i + 0.5) * 90.0 / 5
         $theta = $degrees * [Math]::PI / 180.0
-        Add-RadialBox $model 0 0.50 $theta 0.0375 0.64 0.075 0.13
+        Add-TaperedRadialBox $model 0 0.50 $theta 0.0375 0.64 0.075 0.04 0.13
         foreach ($radius in @(0.32, 0.68)) {
-            Add-RadialBox $model 2 $radius $theta 0.0975 0.115 0.045 0.105
+            # The inner fasteners must also fit the narrower sleepers.
+            $fastenerWidth = if ($radius -lt 0.5) { 0.05 } else { 0.105 }
+            Add-RadialBox $model 2 $radius $theta 0.0975 0.115 0.045 $fastenerWidth
         }
     }
     Add-CurvedRail $model 1 0.32 0.085 0.075 0.165 16

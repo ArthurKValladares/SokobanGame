@@ -1334,7 +1334,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
         if (gridDistance(from, to) > 0.0001f) {
             const AnimationUse movementUse = action.playerPulling
                 ? AnimationUse::PlayerPull
-                : action.playerPushing
+                : (action.playerPushing &&
+                      before.character.value_or(level ? level->character() : CharacterType::Rogue) != CharacterType::Cleric)
                     ? AnimationUse::PlayerPush
                     : AnimationUse::PlayerMove;
             if (visual != players_.end()) {
@@ -1398,7 +1399,7 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
     std::vector<std::vector<std::size_t>> attackedPlayers(enemyCount);
     std::vector<std::optional<IntentId>> attackIntents(enemyCount);
     const auto clericProtection = level
-        ? rules::clericGravityProtection(*level, action.after)
+        ? rules::clericAttackProtection(*level, action.after)
         : std::vector<char>(action.after.players.size(), 0);
     for (std::size_t enemyIndex = 0; enemyIndex < enemyCount; ++enemyIndex) {
         const GameState::Enemy& before = action.before.enemies[enemyIndex];

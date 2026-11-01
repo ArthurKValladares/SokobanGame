@@ -165,6 +165,216 @@ void testClericAlliesCrossWaterAndLoseProtectionWhenLeaving()
         {}, { .actors = { allyId } }).players[1].cell == cell(1, 2, 1));
 }
 
+void testIdleClericProtectsKnightWhoEntersTurretFire()
+{
+    TEST("idle Cleric protects adjacent Knight when only the Knight is targeted");
+    for (const char support : std::string(".W ")) {
+        std::vector<std::vector<std::string>> layers {
+            { ".....", ".....", ".....", ".....", ".....", "....." },
+            { "     ", "     ", "  C  ", "e    ", "  K  ", "     " },
+        };
+        layers[0][3][2] = support;
+        const auto level = makeLevel(layers, CharacterType::Cleric);
+        const auto before = rules::initialState(level);
+        const auto knightId = before.players[1].id;
+        const rules::StepScope knight { .actors = { knightId } };
+        CHECK(!rules::clericAttackProtection(level, before)[1]);
+        CHECK(!rules::clericGravityProtection(level, before)[0]);
+        CHECK(!rules::clericGravityProtection(level, before)[1]);
+
+        const auto entered = rules::scopedStepWithEvents(level, before,
+            MoveDirection::Up, {}, knight);
+        CHECK(entered.state.players[1].cell == cell(2, 3, 1));
+        CHECK(!entered.state.players[1].dead);
+        CHECK(!entered.state.players[1].drowned);
+        CHECK(!entered.state.players[0].dead);
+        CHECK(entered.turretShots.size() == 1);
+        if (!entered.turretShots.empty()) {
+            CHECK(entered.turretShots[0].target.id == knightId);
+        }
+        const auto attacks = rules::clericAttackProtection(level, entered.state);
+        const auto gravity = rules::clericGravityProtection(level, entered.state);
+        CHECK(attacks[0]);
+        CHECK(attacks[1]);
+        CHECK(gravity[0]); // Sharing active protection also protects the Cleric.
+        CHECK(gravity[1]);
+
+        if (support == '.') {
+            const auto outside = rules::scopedStep(level, entered.state,
+                MoveDirection::Right, {}, knight);
+            CHECK(outside.players[1].cell == cell(3, 3, 1));
+            CHECK(outside.players[1].dead);
+            CHECK(!outside.players[0].dead);
+            auto noCleric = before;
+            noCleric.players[0].dead = true;
+            CHECK(rules::scopedStep(level, noCleric,
+                MoveDirection::Up, {}, knight).players[1].dead);
+        } else {
+            auto noAttack = before;
+            noAttack.movables[0].dead = true;
+            const auto blocked = rules::scopedStep(level, noAttack,
+                MoveDirection::Up, {}, knight);
+            CHECK(blocked.players[1].cell == before.players[1].cell);
+        }
+        auto restored = entered.state;
+        StateDelta::between(before, entered.state).inverted().applyTo(restored);
+        CHECK(restored == before);
+    }
+}
+
+void testKnightInterceptsTurretShotBesideCleric()
+{
+    TEST("Knight intercepts a turret shot without losing the Cleric's shared immunity");
+    const auto level = makeLevel({ { ".....", "....." },
+        { "e  C ", "  K  " } }, CharacterType::Cleric);
+    const auto before = rules::initialState(level);
+    CHECK(rules::clericGravityProtection(level, before)[0]);
+    const auto after = rules::scopedStepWithEvents(level, before, MoveDirection::Up,
+        {}, { .actors = { before.players[1].id } });
+    CHECK(after.state.players[1].cell == cell(2, 0, 1));
+    CHECK(!after.state.players[0].dead);
+    CHECK(!after.state.players[1].dead);
+    CHECK(after.turretShots.size() == 1);
+    if (!after.turretShots.empty()) {
+        CHECK(after.turretShots[0].target.id == before.players[1].id);
+    }
+    CHECK(rules::clericAttackProtection(level, after.state)[1]);
+    CHECK(rules::clericGravityProtection(level, after.state)[0]);
+    CHECK(rules::clericGravityProtection(level, after.state)[1]);
+}
+
+void testIdleClericSharesAttackImmunityWithAllFourNeighbours()
+{
+    TEST("idle Cleric protects cardinal neighbours without extending or relaying the aura");
+    const auto level = makeLevel({ { ".....", ".....", ".....", ".....", "....." },
+        { "     ", "     ", "  C  ", "     ", "     " } }, CharacterType::Cleric);
+    auto state = rules::initialState(level);
+    for (const auto direction : { MoveDirection::Up, MoveDirection::Down,
+            MoveDirection::Left, MoveDirection::Right }) {
+        state.players.push_back({ .cell = rules::movementTarget(cell(2, 2, 1), direction),
+            .character = CharacterType::Knight });
+    }
+    state.players.push_back({ .cell = cell(3, 3, 1), .character = CharacterType::Knight });
+    state.players.push_back({ .cell = cell(2, 0, 1), .character = CharacterType::Knight });
+    state.players.push_back({ .cell = cell(2, 2, 2), .character = CharacterType::Knight });
+    const auto attacks = rules::clericAttackProtection(level, state);
+    for (std::size_t i = 0; i < 5; ++i) CHECK(attacks[i]);
+    for (std::size_t i = 5; i < attacks.size(); ++i) CHECK(!attacks[i]);
+    CHECK(std::ranges::none_of(rules::clericGravityProtection(level, state),
+        [](char value) { return value != 0; }));
+
+    const auto combat = makeLevel({ { ".....", ".....", ".....", "....." },
+        { "     ", " C   ", "  N  ", " K   " } }, CharacterType::Cleric);
+    const auto before = rules::initialState(combat);
+    const auto after = rules::scopedStep(combat, before, MoveDirection::Up,
+        {}, { .actors = { before.players[1].id } });
+    CHECK(after.players[1].cell == cell(1, 2, 1));
+    CHECK(!after.players[1].dead);
+    CHECK(rules::clericGravityProtection(combat, after)[0]);
+    CHECK(rules::clericGravityProtection(combat, after)[1]);
+}
+
+void testMovingClericExposesStationaryAllyToAttacks()
+{
+    TEST("moving Cleric exposes a stationary ally to turret and enemy attacks");
+    const auto turret = makeLevel({ { ".....", ".....", ".....", ".....", "....." },
+        { "     ", "     ", "  C  ", "e K  ", "     " } }, CharacterType::Cleric);
+    const auto before = rules::initialState(turret);
+    const auto after = rules::scopedStepWithEvents(turret, before, MoveDirection::Up,
+        {}, { .actors = { before.players[0].id } });
+    CHECK(after.state.players[0].cell == cell(2, 1, 1));
+    CHECK(after.state.players[1].cell == before.players[1].cell);
+    CHECK(after.state.players[1].dead);
+    CHECK(after.turretShots.size() == 1);
+
+    const auto enemy = makeLevel({ { "....", "....", "....", "...." },
+        { "    ", " C  ", " KN ", "    " } }, CharacterType::Cleric);
+    const auto enemyBefore = rules::initialState(enemy);
+    const auto exposed = rules::scopedStep(enemy, enemyBefore, MoveDirection::Up,
+        {}, { .actors = { enemyBefore.players[0].id } });
+    CHECK(exposed.players[1].cell == enemyBefore.players[1].cell);
+    CHECK(exposed.players[1].dead);
+}
+
+void testKnightPushesSharingClericAcrossAirAndWater()
+{
+    TEST("Knight pushes a sharing Cleric across air and water while both stay protected");
+    for (const auto gap : { std::string("   "), std::string("WWW") }) {
+        const auto level = makeLevel({ { "...." + gap + "..." },
+            { "e KC      " } }, CharacterType::Cleric);
+        auto state = rules::initialState(level);
+        const rules::StepScope knight { .actors = { state.players[0].id } };
+        CHECK(state.players[0].character == CharacterType::Knight);
+        CHECK(state.players[1].character == CharacterType::Cleric);
+        CHECK(rules::clericGravityProtection(level, state)[0]);
+        CHECK(rules::clericGravityProtection(level, state)[1]);
+        const auto initial = state;
+        for (int step = 1; step <= 5; ++step) {
+            const auto after = rules::scopedStepWithEvents(level, state,
+                MoveDirection::Right, {}, knight);
+            CHECK(after.state.players[0].cell == cell(2 + step, 0, 1));
+            CHECK(after.state.players[1].cell == cell(3 + step, 0, 1));
+            CHECK(!after.state.players[0].dead);
+            CHECK(!after.state.players[1].dead);
+            CHECK(!after.state.players[1].drowned);
+            CHECK(after.turretShots.size() == 1);
+            CHECK(rules::clericGravityProtection(level, after.state)[1]);
+            state = after.state;
+        }
+        auto noAttack = initial;
+        noAttack.movables[0].dead = true;
+        const auto unprotected = rules::scopedStep(level, noAttack, MoveDirection::Right, {}, knight);
+        if (gap == "   ") {
+            CHECK(unprotected == noAttack);
+        } else {
+            CHECK(unprotected.players[1].cell == cell(4, 0, 1));
+            CHECK(unprotected.players[1].drowned);
+            CHECK(unprotected.players[1].dead);
+        }
+        rules::StepRates fast;
+        fast.playerMove = 2;
+        const auto twice = rules::scopedStep(level, initial, MoveDirection::Right, fast, knight);
+        CHECK(twice.players[0].cell == cell(4, 0, 1));
+        CHECK(twice.players[1].cell == cell(5, 0, 1));
+        CHECK(!twice.players[1].dead);
+        auto restored = twice;
+        StateDelta::between(initial, twice).inverted().applyTo(restored);
+        CHECK(restored == initial);
+    }
+}
+
+void testClericShoveStaysAtomicAndSharingRequiresAnAttack()
+{
+    TEST("Cleric shoves stay atomic and an idle group cannot float");
+    const auto blocked = makeLevel({ { "....." }, { "e KC#" } }, CharacterType::Cleric);
+    const auto initial = rules::initialState(blocked);
+    CHECK(rules::scopedStep(blocked, initial, MoveDirection::Right,
+        {}, { .actors = { initial.players[0].id } }) == initial);
+    const auto rogue = makeLevel({ { "....." }, { "e QC " } }, CharacterType::Cleric);
+    const auto rogueBefore = rules::initialState(rogue);
+    CHECK(rules::scopedStep(rogue, rogueBefore, MoveDirection::Right,
+        {}, { .actors = { rogueBefore.players[0].id } }) == rogueBefore);
+
+    const auto level = makeLevel({ { "....    ", "........" },
+        { "e KC    ", " ^      " } }, CharacterType::Cleric);
+    auto state = rules::initialState(level);
+    state.movables.push_back({ .id = 1234, .type = TileType::Rock, .cell = cell(1, 1, 1) });
+    for (int step = 0; step < 2; ++step) {
+        state = rules::scopedStep(level, state, MoveDirection::Right,
+            {}, { .actors = { state.players[0].id } });
+    }
+    CHECK(state.players[0].cell == cell(4, 0, 1));
+    CHECK(state.players[1].cell == cell(5, 0, 1));
+    const auto shielded = state;
+    state = rules::scopedStep(level, state, std::nullopt, {}, { .actors = { 1234 } });
+    CHECK(state.movables.back().cell == cell(1, 0, 1));
+    CHECK(state.players[0].dead);
+    CHECK(state.players[1].dead);
+    auto restored = state;
+    StateDelta::between(shielded, state).inverted().applyTo(restored);
+    CHECK(restored == shielded);
+}
+
 void testInitialState()
 {
     TEST("initialState");
@@ -5136,6 +5346,12 @@ int main()
     testClericProtectsOnlyCardinalAlliesAndDoesNotRelay();
     testClericLosesGravityImmediatelyWhenSightlineCloses();
     testClericAlliesCrossWaterAndLoseProtectionWhenLeaving();
+    testIdleClericProtectsKnightWhoEntersTurretFire();
+    testKnightInterceptsTurretShotBesideCleric();
+    testIdleClericSharesAttackImmunityWithAllFourNeighbours();
+    testMovingClericExposesStationaryAllyToAttacks();
+    testKnightPushesSharingClericAcrossAirAndWater();
+    testClericShoveStaysAtomicAndSharingRequiresAnAttack();
     testRoundRockDefinitionsAndGroundBehavior();
     testRoundRockSkipsToShoreAndSinksAtBlockers();
     testRoundRockRidesLilyPadToShoreOrObstacle();

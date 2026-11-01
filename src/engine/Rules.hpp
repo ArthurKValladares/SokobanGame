@@ -217,9 +217,12 @@ struct StepResult {
 
 [[nodiscard]] bool anyPlayerDead(const GameState& state);
 
-// Live, same-layer protection: an attacked Cleric and its four adjacent
-// allies ignore gravity. Attack immunity also applies to idle Clerics.
-// Derived from board geometry so undo, copies and saves need no stale timer.
+// A living Cleric always shares attack immunity with its four same-layer
+// neighbours. An attack on the Cleric or a protected neighbour activates
+// gravity immunity for that entire aura, including the Cleric itself.
+// Both masks derive from direct attacks on the live board, without relaying.
+[[nodiscard]] std::vector<char> clericAttackProtection(
+    const Level& level, const GameState& state);
 [[nodiscard]] std::vector<char> clericGravityProtection(
     const Level& level, const GameState& state);
 

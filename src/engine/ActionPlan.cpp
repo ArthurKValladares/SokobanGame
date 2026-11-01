@@ -89,6 +89,20 @@ std::optional<MoveDirection> movementDirection(
                 return true;
             }
         }
+        const std::size_t playerIndex = static_cast<std::size_t>(
+            &player - before.players.data());
+        if (characterBehavior(player.character.value_or(level.character())) ==
+                CharacterType::Knight && playerIndex < after.players.size() &&
+            after.players[playerIndex].cell == pushCell) {
+            const auto playerCount = std::min(before.players.size(), after.players.size());
+            for (std::size_t i = 0; i < playerCount; ++i) {
+                if (i != playerIndex && !before.players[i].dead &&
+                    before.players[i].character.value_or(level.character()) == CharacterType::Cleric &&
+                    before.players[i].cell == pushCell && after.players[i].cell != pushCell) {
+                    return true;
+                }
+            }
+        }
     }
     return false;
 }

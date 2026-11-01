@@ -283,6 +283,69 @@ void testActiveHeroCharacterFollowsSelectionAndCopies()
     CHECK(!session.activeHeroCharacter());
 }
 
+void testKnightInterceptsTurretWithClericProtectionThroughUndoAndRestore()
+{
+    TEST("Knight intercepts a turret beside Cleric through planning, undo and checkpoint restore");
+    const auto level = Level::loadFromDefinition({
+        .layers = { { ".....", "....." }, { "e  C ", "  K  " } },
+        .character = CharacterType::Cleric,
+    }, "Cleric intercept session");
+    GameplaySession session;
+    session.reset(level);
+    session.cycleActiveHero();
+    CHECK(session.activeHeroCharacter() == CharacterType::Knight);
+    const auto before = session.state();
+    session.queueMove(MoveDirection::Up);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(!session.projectedState().players[1].dead);
+    session.advanceActiveAction(session.activeActionDuration());
+    const auto shots = session.takeReadyTurretShots();
+    CHECK(shots.size() == 1);
+    if (!shots.empty()) CHECK(shots[0].shot.target.id == before.players[1].id);
+    session.completeActiveAction();
+    CHECK(session.state().players[1].cell == cell(2, 0, 1));
+    CHECK(!session.state().players[1].dead);
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == session.state());
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state() == before);
+}
+
+void testKnightPushesProtectedClericOverGapWithUndoAndRestore()
+{
+    TEST("Knight pushes a protected Cleric over a gap with correct history and checkpoint restore");
+    const auto level = Level::loadFromDefinition({
+        .layers = { { "....   ..." }, { "e KC      " } },
+        .character = CharacterType::Cleric,
+    }, "Cleric shared gravity shove");
+    GameplaySession session;
+    session.reset(level);
+    const auto before = session.state();
+    CHECK(session.activeHeroCharacter() == CharacterType::Knight);
+    for (int step = 1; step <= 2; ++step) {
+        session.queueMove(MoveDirection::Right);
+        CHECK(session.tryStartNextAction(level, {}));
+        CHECK(session.activeAction().playerPushing);
+        CHECK(session.projectedState().players[1].cell == cell(3 + step, 0, 1));
+        CHECK(!session.projectedState().players[1].dead);
+        finishAction(session);
+    }
+    CHECK(session.state().players[0].cell == cell(4, 0, 1));
+    CHECK(session.state().players[1].cell == cell(5, 0, 1));
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == session.state());
+    for (int step = 0; step < 2; ++step) {
+        session.queueUndo();
+        CHECK(session.tryStartNextAction(level, {}));
+        finishAction(session);
+    }
+    CHECK(session.state() == before);
+}
+
 void testPushMetadata()
 {
     TEST("pushMetadata");
@@ -2388,6 +2451,8 @@ void testPadCoastAndOrdinarySlideKeepTheirLegClocksWithoutRoundRock()
 
 int main()
 {
+    testKnightInterceptsTurretWithClericProtectionThroughUndoAndRestore();
+    testKnightPushesProtectedClericOverGapWithUndoAndRestore();
     testPadCoastAndOrdinarySlideKeepTheirLegClocksWithoutRoundRock();
     testFreeRoundRockReservesPathAlongsideSlowerPadRider();
     testRoundRockMixedSkipAndPadRideUseActualLegTimes();
