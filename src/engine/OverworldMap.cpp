@@ -237,7 +237,7 @@ void validateComponentDefinition(
         authoredCharacter != CharacterType::Rogue) {
         throw std::runtime_error(
             "overworld screen " + name +
-            " must use character lorekeeper (legacy rogue is also accepted)");
+            " must use character lorekeeper (paladin or legacy rogue is also accepted)");
     }
     for (std::size_t z = 0; z < definition.layers.size(); ++z) {
         const auto& layer = definition.layers[z];

@@ -775,7 +775,7 @@ RenderModel AssetManifest::characterModel(CharacterType character) const
     case CharacterType::Knight:
         return modelIdByName("Knight");
     case CharacterType::Druid:
-        return modelIdByName("Druid");
+        return modelIdByName("Thief");
     case CharacterType::Witch:
         return modelIdByName("Witch");
     case CharacterType::Bard:

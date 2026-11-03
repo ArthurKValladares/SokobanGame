@@ -109,6 +109,19 @@ uint8_t parseTurns(const Json& value)
     return turns;
 }
 
+// Version 1 recordings use these identifiers in saved states and digests.
+std::string_view solutionCharacterName(CharacterType character)
+{
+    switch (character) {
+    case CharacterType::Rogue:
+        return "rogue";
+    case CharacterType::Druid:
+        return "druid";
+    default:
+        return characterTypeName(character);
+    }
+}
+
 Json stateJson(
     const GameState& state,
     EntityId activeController,
@@ -133,7 +146,7 @@ Json stateJson(
                 { "id", player.id },
                 { "cell", cellJson(player.cell) },
                 { "character",
-                  player.character ? Json(characterTypeName(*player.character))
+                  player.character ? Json(solutionCharacterName(*player.character))
                                    : Json(nullptr) },
                 { "controller", player.controller },
                 { "dead", player.dead },
@@ -190,7 +203,7 @@ Json stateJson(
         result["wardrobes"].push_back(
             {
                 { "cell", cellJson(wardrobe.cell) },
-                { "character", characterTypeName(wardrobe.character) },
+                { "character", solutionCharacterName(wardrobe.character) },
             });
     }
     for (const auto button : state.activeButtons) {
@@ -560,7 +573,7 @@ std::uint64_t levelDigest(const Level::Definition& definition)
     hashBytes(
         hash,
         definition.character
-            ? std::string(characterTypeName(*definition.character))
+            ? std::string(solutionCharacterName(*definition.character))
             : std::string("default"));
     // Rotator links decide which plates turn which units. Hashed only when
     // present so digests of screens without rotators stay unchanged.

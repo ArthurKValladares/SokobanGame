@@ -2,16 +2,8 @@
   "format": 1,
   "textures": [
     {
-      "name": "Rogue",
-      "path": "KayKit Adventurers 2.0/Characters/gltf/rogue_texture.png"
-    },
-    {
       "name": "Knight",
       "path": "KayKit Adventurers 2.0/Characters/gltf/knight_texture.png"
-    },
-    {
-      "name": "Druid",
-      "path": "KayKit Adventurers 2.0/Characters/gltf/druid_texture.png"
     },
     {
       "name": "Barbarian",
@@ -653,13 +645,9 @@
       "rotateHalfTurn": true
     },
     {
-      "name": "Rogue",
-      "path": "custom/pbr/models/Rogue.glb",
+      "name": "Paladin",
+      "path": "KayKit Paladin/characters/gltf/Paladin.glb",
       "geometry": "skinned",
-      "material": {
-        "mode": "texture",
-        "texture": "Rogue"
-      },
       "preserveAspectRatio": true,
       "rotateHalfTurn": true,
       "role": "player"
@@ -676,13 +664,9 @@
       "rotateHalfTurn": true
     },
     {
-      "name": "Druid",
-      "path": "custom/pbr/models/Druid.glb",
+      "name": "Thief",
+      "path": "KayKit Adventurers 2.0/Characters/gltf/Rogue_Hooded.glb",
       "geometry": "skinned",
-      "material": {
-        "mode": "texture",
-        "texture": "Druid"
-      },
       "preserveAspectRatio": true,
       "rotateHalfTurn": true
     },
@@ -2780,7 +2764,7 @@
     },
     {
       "tile": "Player",
-      "model": "Rogue",
+      "model": "Paladin",
       "scale": 1.100000023841858
     },
     {
@@ -2856,7 +2840,7 @@
       "model": "Wardrobe"
     },
     {
-      "tile": "Wardrobe Rogue",
+      "tile": "Wardrobe Paladin",
       "model": "Wardrobe"
     },
     {
@@ -2864,7 +2848,7 @@
       "model": "Wardrobe"
     },
     {
-      "tile": "Wardrobe Druid",
+      "tile": "Wardrobe Thief",
       "model": "Wardrobe"
     },
     {

@@ -1414,7 +1414,7 @@ Level::Definition Level::parseDefinition(
             if (!definition.character) {
                 throw std::runtime_error(
                     "Invalid character metadata; expected '@character lorekeeper', "
-                    "'@character rogue', '@character knight', '@character druid', "
+                    "'@character paladin', '@character knight', '@character thief', "
                     "'@character witch', '@character bard', or '@character cleric': " + source);
             }
             continue;

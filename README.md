@@ -10,7 +10,7 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 - Layered Sokoban movement with rocks, pressure-plate gates, pulse buttons, persistent levers, rotator
   plates, lock plates, elevators, minecarts and rail gates, goals, undo, restart,
   multi-screen levels, and completion tracking.
-- Rogue, knight, druid, witch, bard and cleric heroes with distinct movement abilities,
+- Paladin, knight, thief, witch, bard and cleric heroes with distinct movement abilities,
   switchable hero control, and pushable mirrors that create hero copies.
 - Ice, ladders, conveyors, floating lily pads, directional water streams,
   falling, configurable water layers, and four
@@ -587,9 +587,10 @@ PDB belongs in the separately retained Symbols ZIP.
 ## Level Format
 
 Screens are text `.scr` files containing sequential `@layer N` sections. Each
-authored screen declares `@character rogue`, `@character knight`,
-`@character druid`, `@character witch`, or `@character bard`; screens without the
-directive default to the rogue.
+authored screen can declare `@character paladin`, `@character knight`,
+`@character thief`, `@character witch`, `@character bard`, or `@character cleric`.
+The default is Paladin. Existing files can use `rogue` for Paladin and
+`druid` for Thief.
 An optional `@water N` directive makes Air on that layer resolve to Water and
 extends the water beyond the authored board without expanding camera bounds.
 An optional `@camera {"pitch":45,"yaw":90}` directive sets that screen's camera
@@ -642,7 +643,7 @@ Colors under Level Editor). Gameplay ignores it and reads links only from the
 explicit `plates` arrays. Metadata must appear before `@layer 0`.
 
 ```text
-@character rogue
+@character paladin
 @water 0
 @gate {"cell":[4,1,1],"plates":[[1,1,1],[2,1,1]],"color":[1.0,0.72,0.12]}
 @rotator {"cell":[3,1,1],"plates":[[2,1,1]],"color":[0.24,0.62,0.92]}
@@ -671,7 +672,7 @@ Common tile symbols:
 | `A F S V X Y Z a c` | Ground rock versions 02–10 | | |
 | `u` | Cliff Wall (style 01) | `x` | Cliff Wall (style 02) |
 | `#` | Wall | `C` | Player |
-| `Q K U H B` | Rogue / Knight / Druid / Witch / Bard starts | | |
+| `Q K U H B` | Paladin / Knight / Thief / Witch / Bard starts | | |
 | `R` | Rock | `P` | Pressure plate |
 | `\` | Round rock | | |
 | `b y z ~` | Pulse buttons at north/east/south/west edges | `J` | Lock plate |
@@ -860,10 +861,10 @@ Turrets are pushable movables. A turret shoots a player or enemy whenever that
 unit moves into its cardinal line of sight; walls, rocks, and other live units
 block the shot.
 
-The rogue uses the original one-object push rules and is always used in the
-overworld. The knight can push any-length contiguous chains containing rocks,
+Paladin uses the original one-object push rules, which Lorekeeper also uses
+in the overworld. The knight can push any-length contiguous chains containing rocks,
 ice blocks, turrets, and enemies, provided the entire chain has a valid place
-to move. Instead of pushing, the druid compulsively pulls a movable unit
+to move. Thief compulsively pulls a movable unit
 directly behind it into every cell it vacates. When the witch moves toward the
 nearest visible movable unit in a cardinal line, it swaps positions with that
 unit instead; other heroes and walls block the spell's line of sight. Rocks,
@@ -1528,7 +1529,7 @@ Pressure-plate feasibility rejects states with too few
 surviving movable units on every level. Classic flat push-only screens also
 precompute reverse-push reachability for each plate, rejecting both rocks on
 cells that cannot reach any plate and sets of rocks that cannot be assigned to
-distinct plates. Rogue-only screens additionally reject permanently sealed 2x2
+distinct plates. Paladin-only screens additionally reject permanently sealed 2x2
 groups of rocks and static blockers, while preserving groups whose frozen rocks
 already cover the required plates. Knights are excluded because chain pushes
 can break that pattern. Mechanics that can invalidate either proof disable its

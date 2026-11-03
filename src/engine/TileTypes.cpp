@@ -86,6 +86,18 @@ std::string_view tileTypeName(TileType type)
 
 std::optional<TileType> tileTypeFromName(std::string_view name)
 {
+    if (name == "Rogue") {
+        return TileType::Rogue;
+    }
+    if (name == "Druid") {
+        return TileType::Druid;
+    }
+    if (name == "Wardrobe Rogue") {
+        return TileType::WardrobeRogue;
+    }
+    if (name == "Wardrobe Druid") {
+        return TileType::WardrobeDruid;
+    }
     if (name == "Portal") {
         return TileType::PortalNorth;
     }

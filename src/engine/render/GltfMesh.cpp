@@ -26,6 +26,8 @@
 #include <cstdlib>
 #include <fstream>
 #include <limits>
+#include <optional>
+#include <span>
 #include <memory>
 #include <ranges>
 #include <stdexcept>
@@ -1432,6 +1434,8 @@ SkinnedMeshData loadGltfSkinnedMesh(
     Aabb bounds;
     for (cgltf_size meshIndex = 0; meshIndex < data.meshes_count; ++meshIndex) {
         const cgltf_mesh& sourceMesh = data.meshes[meshIndex];
+        std::optional<uint16_t> rigidJoint;
+        Mat4 rigidBindTransform = mat4Identity;
         for (cgltf_size primitiveIndex = 0;
              primitiveIndex < sourceMesh.primitives_count;
              ++primitiveIndex) {
@@ -1449,10 +1453,10 @@ SkinnedMeshData loadGltfSkinnedMesh(
                 primitive, cgltf_attribute_type_normal, "NORMAL");
             const cgltf_accessor& uvs = requiredAttribute(
                 primitive, cgltf_attribute_type_texcoord, "TEXCOORD_0");
-            const cgltf_accessor& joints = requiredAttribute(
-                primitive, cgltf_attribute_type_joints, "JOINTS_0");
-            const cgltf_accessor& weights = requiredAttribute(
-                primitive, cgltf_attribute_type_weights, "WEIGHTS_0");
+            const cgltf_accessor* joints =
+                findAttribute(primitive, cgltf_attribute_type_joints);
+            const cgltf_accessor* weights =
+                findAttribute(primitive, cgltf_attribute_type_weights);
             const cgltf_accessor* tangents =
                 findAttribute(primitive, cgltf_attribute_type_tangent);
             const cgltf_accessor* secondUvs =
@@ -1462,10 +1466,38 @@ SkinnedMeshData loadGltfSkinnedMesh(
 
             if (positions.count != normals.count ||
                 positions.count != uvs.count ||
-                positions.count != joints.count ||
-                positions.count != weights.count) {
+                (joints == nullptr) != (weights == nullptr) ||
+                (joints && (positions.count != joints->count ||
+                            positions.count != weights->count))) {
                 throw std::runtime_error(
                     "Incompatible skinned glTF primitive accessors");
+            }
+            if (!joints && !rigidJoint) {
+                const cgltf_node* rigidNode = nullptr;
+                for (const cgltf_node& node :
+                     std::span(data.nodes, data.nodes_count)) {
+                    if (node.mesh != &sourceMesh) {
+                        continue;
+                    }
+                    if (node.skin || rigidNode) {
+                        throw std::runtime_error(
+                            "Rigid glTF mesh must have exactly one unskinned node");
+                    }
+                    rigidNode = &node;
+                }
+                if (!rigidNode || mesh.jointNodeIndices.size() >
+                        std::numeric_limits<uint16_t>::max()) {
+                    throw std::runtime_error(
+                        "Cannot bind rigid glTF mesh to its node");
+                }
+                // Weight rigid parts to their own node so they inherit its
+                // animated parent transform. Their vertices are node-local.
+                rigidJoint = static_cast<uint16_t>(mesh.jointNodeIndices.size());
+                mesh.jointNodeIndices.push_back(
+                    static_cast<uint32_t>(cgltf_node_index(&data, rigidNode)));
+                mesh.inverseBindMatrices.push_back(mat4Identity);
+                cgltf_node_transform_world(
+                    rigidNode, rigidBindTransform.values.data());
             }
 
             const uint32_t baseVertex =
@@ -1473,8 +1505,10 @@ SkinnedMeshData loadGltfSkinnedMesh(
             mesh.vertices.reserve(mesh.vertices.size() + positions.count);
             for (size_t index = 0; index < positions.count; ++index) {
                 const Vec3 position = readVec3(positions, index);
-                auto jointValues = readJoints(joints, index);
-                auto weightValues = readWeights(weights, index);
+                auto jointValues = joints ? readJoints(*joints, index)
+                    : std::array<uint16_t, 4> { *rigidJoint, 0, 0, 0 };
+                auto weightValues = weights ? readWeights(*weights, index)
+                    : std::array { 1.0f, 0.0f, 0.0f, 0.0f };
                 const float totalWeight = weightValues[0] + weightValues[1] +
                     weightValues[2] + weightValues[3];
                 if (totalWeight > 0.000001f) {
@@ -1496,7 +1530,8 @@ SkinnedMeshData loadGltfSkinnedMesh(
                     .joints = jointValues,
                     .weights = weightValues,
                 });
-                bounds = expand(bounds, position);
+                bounds = expand(bounds, joints
+                    ? position : transformPoint(rigidBindTransform, position));
             }
 
             mesh.indices.reserve(mesh.indices.size() + indices.count);

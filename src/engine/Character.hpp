@@ -8,6 +8,7 @@ namespace sokoban {
 
 // The character selected by a level. Gameplay abilities and the rendered
 // model both key off this value, while animations remain shared for now.
+// Rogue and Druid are the internal identities for Paladin and Thief.
 enum class CharacterType : uint8_t {
     Lorekeeper,
     Rogue,
@@ -25,11 +26,11 @@ enum class CharacterType : uint8_t {
     case CharacterType::Lorekeeper:
         return "lorekeeper";
     case CharacterType::Rogue:
-        return "rogue";
+        return "paladin";
     case CharacterType::Knight:
         return "knight";
     case CharacterType::Druid:
-        return "druid";
+        return "thief";
     case CharacterType::Witch:
         return "witch";
     case CharacterType::Bard:
@@ -37,7 +38,7 @@ enum class CharacterType : uint8_t {
     case CharacterType::Cleric:
         return "cleric";
     }
-    return "rogue";
+    return "paladin";
 }
 
 [[nodiscard]] constexpr std::optional<CharacterType> characterTypeFromName(
@@ -46,13 +47,13 @@ enum class CharacterType : uint8_t {
     if (name == "lorekeeper") {
         return CharacterType::Lorekeeper;
     }
-    if (name == "rogue") {
+    if (name == "paladin" || name == "rogue") {
         return CharacterType::Rogue;
     }
     if (name == "knight") {
         return CharacterType::Knight;
     }
-    if (name == "druid") {
+    if (name == "thief" || name == "druid") {
         return CharacterType::Druid;
     }
     if (name == "witch") {
@@ -67,7 +68,7 @@ enum class CharacterType : uint8_t {
     return std::nullopt;
 }
 
-// Lorekeeper is the overworld avatar. It intentionally inherits the Rogue's
+// Lorekeeper is the overworld avatar. It intentionally inherits the Paladin's
 // established rule set; the distinct value exists so rendering, saves and
 // wardrobes can retain the selected appearance without inventing a new
 // gameplay ability.

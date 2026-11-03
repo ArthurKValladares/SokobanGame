@@ -139,11 +139,10 @@
       "skip": "Vendor-authored skinned character with embedded materials."
     },
     {
-      "name": "Rogue",
-      "ownership": "generated",
-      "source": "KayKit Adventurers 2.0/Characters/gltf/Rogue.glb",
-      "skip": null,
-      "surface_rule": "hero"
+      "name": "Paladin",
+      "ownership": "retained",
+      "source": "KayKit Paladin/characters/gltf/Paladin.glb",
+      "skip": "Vendor-authored skinned character with embedded materials."
     },
     {
       "name": "Knight",
@@ -153,11 +152,10 @@
       "surface_rule": "hero"
     },
     {
-      "name": "Druid",
-      "ownership": "generated",
-      "source": "KayKit Adventurers 2.0/Characters/gltf/Druid.glb",
-      "skip": null,
-      "surface_rule": "hero"
+      "name": "Thief",
+      "ownership": "retained",
+      "source": "KayKit Adventurers 2.0/Characters/gltf/Rogue_Hooded.glb",
+      "skip": "Vendor-authored skinned character with embedded materials."
     },
     {
       "name": "Witch",

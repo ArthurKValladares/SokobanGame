@@ -1,4 +1,6 @@
 @cleric {"cell":[2,1,1],"wardrobe":false}
+@tilerotation {"cell":[2,5,1],"quarterTurns":1}
+
 @layer 0
 ....         
 ....         
@@ -14,5 +16,14 @@
           E  
 e            
           E  
-  K          
+  Q          
+             
+
+@layer 2
+             
+             
+             
+             
+             
+             
              

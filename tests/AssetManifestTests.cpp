@@ -513,8 +513,20 @@ void testRealManifestFile()
         "real manifest resolves the knight character model");
     CHECK_MESSAGE(
         manifest.characterModel(sokoban::CharacterType::Druid) ==
-            manifest.modelIdByName("Druid"),
-        "real manifest resolves the druid character model");
+            manifest.modelIdByName("Thief"),
+        "real manifest resolves the thief character model");
+    CHECK_MESSAGE(
+        manifest.characterModel(sokoban::CharacterType::Rogue) ==
+            manifest.modelIdByName("Paladin"),
+        "real manifest resolves the paladin character model");
+    CHECK(manifest.model(manifest.modelIdByName("Thief")).path ==
+        "KayKit Adventurers 2.0/Characters/gltf/Rogue_Hooded.glb");
+    const auto& paladinModel = manifest.model(manifest.playerModel());
+    CHECK(paladinModel.path == "KayKit Paladin/characters/gltf/Paladin.glb");
+    const auto paladinMesh = sokoban::loadGltfSkinnedMesh(*root / paladinModel.path);
+    CHECK(!paladinMesh.jointNodeIndices.empty());
+    CHECK(paladinMesh.nodes.at(paladinMesh.jointNodeIndices.back()).name ==
+        "Paladin_Cape");
     CHECK_MESSAGE(
         manifest.characterModel(sokoban::CharacterType::Witch) ==
             manifest.modelIdByName("Witch"),

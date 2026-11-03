@@ -23,7 +23,7 @@ enum class TileType : uint8_t {
     RotatorClockwise,
     RotatorCounterClockwise,
     // Legacy generic player start. New puzzle documents author a concrete
-    // Rogue, Knight, Druid, Witch, Bard, or Cleric tile; overworld documents retain
+    // Paladin, Knight, Thief, Witch, Bard, or Cleric tile; overworld documents retain
     // this tile for backwards compatibility with their single Lorekeeper.
     Player,
     Rogue,
@@ -261,9 +261,9 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::RotatorClockwise, ')', "Rotator Clockwise", { 0.24f, 0.62f, 0.92f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::RotatorCounterClockwise, '(', "Rotator Counter-Clockwise", { 0.24f, 0.62f, 0.92f, 1.0f }, {}, TileProperty::Plate },
     TileTypeDefinition { TileType::Player, 'C', "Player", { 0.0f, 1.0f, 0.15f, 1.0f } },
-    TileTypeDefinition { TileType::Rogue, 'Q', "Rogue", { 0.0f, 1.0f, 0.15f, 1.0f } },
+    TileTypeDefinition { TileType::Rogue, 'Q', "Paladin", { 0.0f, 1.0f, 0.15f, 1.0f } },
     TileTypeDefinition { TileType::Knight, 'K', "Knight", { 0.25f, 0.55f, 1.0f, 1.0f } },
-    TileTypeDefinition { TileType::Druid, 'U', "Druid", { 0.35f, 0.72f, 0.28f, 1.0f } },
+    TileTypeDefinition { TileType::Druid, 'U', "Thief", { 0.35f, 0.72f, 0.28f, 1.0f } },
     TileTypeDefinition { TileType::Witch, 'H', "Witch", { 0.62f, 0.25f, 0.82f, 1.0f } },
     TileTypeDefinition { TileType::Bard, 'B', "Bard", { 0.94f, 0.44f, 0.82f, 1.0f } },
     TileTypeDefinition { TileType::Rock, 'R', "Rock", { 1.0f, 1.0f, 1.0f, 1.0f } },
@@ -315,9 +315,9 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::LecternEast, 'j', "Lectern East", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::LecternWest, 'l', "Lectern West", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::WardrobeLorekeeper, '0', "Wardrobe Lorekeeper", { 1.0f, 1.0f, 1.0f, 1.0f } },
-    TileTypeDefinition { TileType::WardrobeRogue, '9', "Wardrobe Rogue", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WardrobeRogue, '9', "Wardrobe Paladin", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::WardrobeKnight, '+', "Wardrobe Knight", { 1.0f, 1.0f, 1.0f, 1.0f } },
-    TileTypeDefinition { TileType::WardrobeDruid, '*', "Wardrobe Druid", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::WardrobeDruid, '*', "Wardrobe Thief", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::WardrobeWitch, '/', "Wardrobe Witch", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::WardrobeBard, '?', "Wardrobe Bard", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::WallStone02, 'd', "Wall Stone 02", { 1.0f, 1.0f, 1.0f, 1.0f } },

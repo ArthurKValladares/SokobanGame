@@ -347,7 +347,20 @@ void testCharacterMetadataRoundTripAndLegacyDefault()
     druidDefinition.character = CharacterType::Druid;
     const std::vector<std::string> druidSerialized =
         Level::serializeDefinition(druidDefinition);
-    CHECK(druidSerialized[0] == "@character druid");
+    CHECK(druidSerialized[0] == "@character thief");
+    auto legacyDruid = druidSerialized;
+    legacyDruid[0] = "@character druid";
+    CHECK(Level::parseDefinition(legacyDruid, "legacy druid") == druidDefinition);
+
+    auto paladinDefinition = definition;
+    paladinDefinition.character = CharacterType::Rogue;
+    auto paladinSerialized = Level::serializeDefinition(paladinDefinition);
+    CHECK(paladinSerialized[0] == "@character paladin");
+    CHECK(Level::parseDefinition(paladinSerialized, "paladin round trip") ==
+        paladinDefinition);
+    paladinSerialized[0] = "@character rogue";
+    CHECK(Level::parseDefinition(paladinSerialized, "legacy rogue") ==
+        paladinDefinition);
     CHECK(Level::parseDefinition(druidSerialized, "druid round trip") ==
         druidDefinition);
 
