@@ -594,6 +594,66 @@ void VulkanSwapchainResources::prepareSceneDepthAttachment(
     ++stats.imageBarriers;
 }
 
+VkImageView VulkanSwapchainResources::copyDepthForOutline(
+    VkCommandBuffer commandBuffer, VkRect2D area, RenderStats& stats)
+{
+    if (!outlineDepthImage_.image) {
+        const VkImageCreateInfo imageInfo {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .imageType = VK_IMAGE_TYPE_2D,
+            .format = depthFormat_,
+            .extent = { renderExtent_.width, renderExtent_.height, 1 },
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = sampleCount_,
+            .tiling = VK_IMAGE_TILING_OPTIMAL,
+            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        };
+        outlineDepthImage_ = vulkanResources::createImage(
+            *allocator_, device_, imageInfo, VK_IMAGE_ASPECT_DEPTH_BIT, "Outline depth");
+    }
+
+    // Keep the crystal masks out of the scene depth sampled by later effects.
+    constexpr auto depthStages = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+        VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    constexpr auto depthAccess = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    const vulkanResources::ImageState sceneDepth = msaaEnabled()
+        ? vulkanResources::ImageState { depthStages, depthAccess, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL }
+        : vulkanResources::ImageState { depthStages | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+              depthAccess | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL };
+    const vulkanResources::ImageState copySource { VK_PIPELINE_STAGE_2_COPY_BIT,
+        VK_ACCESS_2_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL };
+    const vulkanResources::ImageState copyDestination { VK_PIPELINE_STAGE_2_COPY_BIT,
+        VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL };
+    const auto range = vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT);
+    const std::array beforeCopy {
+        vulkanResources::imageBarrier(depthImage_.image, range, sceneDepth, copySource),
+        vulkanResources::imageBarrier(outlineDepthImage_.image, range,
+            { depthStages, depthAccess, VK_IMAGE_LAYOUT_UNDEFINED }, copyDestination),
+    };
+    vulkanResources::transitionImages(commandBuffer, beforeCopy);
+    const VkImageCopy region {
+        .srcSubresource = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1 },
+        .srcOffset = { area.offset.x, area.offset.y, 0 },
+        .dstSubresource = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1 },
+        .dstOffset = { area.offset.x, area.offset.y, 0 },
+        .extent = { area.extent.width, area.extent.height, 1 },
+    };
+    vkCmdCopyImage(commandBuffer, depthImage_.image, copySource.layout,
+        outlineDepthImage_.image, copyDestination.layout, 1, &region);
+    const std::array afterCopy {
+        vulkanResources::imageBarrier(depthImage_.image, range, copySource, sceneDepth),
+        vulkanResources::imageBarrier(outlineDepthImage_.image, range, copyDestination,
+            { depthStages, depthAccess, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL }),
+    };
+    vulkanResources::transitionImages(commandBuffer, afterCopy);
+    stats.imageBarriers += static_cast<uint32_t>(beforeCopy.size() + afterCopy.size());
+    return outlineDepthImage_.view;
+}
+
 // Scales the tonemapped display image onto the swapchain. The source is the
 // display image rather than the scene target: the scene target may hold
 // values and a format the surface cannot present, and a blit would have no
@@ -943,7 +1003,7 @@ void VulkanSwapchainResources::createDepth()
         .samples = sampleCount_,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-            VK_IMAGE_USAGE_SAMPLED_BIT,
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
@@ -955,6 +1015,7 @@ void VulkanSwapchainResources::createDepth()
         "Scene depth");
     if (msaaEnabled()) {
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.usage &= ~VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         resolveDepthImage_ = vulkanResources::createImage(
             *allocator_,
             device_,
@@ -1069,6 +1130,7 @@ void VulkanSwapchainResources::destroyAttachments()
     vulkanResources::destroyImage(*allocator_, device_, sceneColorImage_);
     vulkanResources::destroyImage(*allocator_, device_, previewSceneColorImage_);
     vulkanResources::destroyImage(*allocator_, device_, resolveDepthImage_);
+    vulkanResources::destroyImage(*allocator_, device_, outlineDepthImage_);
     vulkanResources::destroyImage(*allocator_, device_, depthImage_);
     vulkanResources::destroyImage(*allocator_, device_, msaaColorImage_);
     vulkanResources::destroyImage(*allocator_, device_, resolvedColorImage_);

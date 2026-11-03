@@ -121,6 +121,8 @@ public:
     [[nodiscard]] VkImageView previewSceneColorView() const { return previewSceneColorImage_.view; }
     [[nodiscard]] VkSampler sceneColorSampler() const { return sceneColorSampler_; }
     [[nodiscard]] VkImageView depthView() const { return depthImage_.view; }
+    [[nodiscard]] VkImageView copyDepthForOutline(
+        VkCommandBuffer commandBuffer, VkRect2D area, RenderStats& stats);
     [[nodiscard]] VkImageView sampledDepthView() const;
     [[nodiscard]] VkImage depthSourceImage() const;
     [[nodiscard]] VkImageView resolveDepthView() const { return resolveDepthImage_.view; }
@@ -175,6 +177,7 @@ private:
     vulkanResources::OwnedImage resolvedColorImage_ {};
     vulkanResources::OwnedImage msaaColorImage_ {};
     vulkanResources::OwnedImage depthImage_ {};
+    vulkanResources::OwnedImage outlineDepthImage_ {};
     vulkanResources::OwnedImage resolveDepthImage_ {};
     vulkanResources::OwnedImage sceneColorImage_ {};
     // Preview refraction needs its own opaque scene, while sceneColorImage_

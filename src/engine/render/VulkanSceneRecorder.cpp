@@ -1208,6 +1208,8 @@ private:
         }
         swapchain_.copyResolvedSceneColor(
             commandBuffer, stats_);
+        const bool crystalOutlines = hasFacetedInteractionOutlines(frameData);
+        const VkRect2D renderArea { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() };
         recordScenePass(
             commandBuffer,
             colorView,
@@ -1217,7 +1219,7 @@ private:
             ScenePassOptions {
                 .translucent = true,
                 .loadColor = true,
-                .storeColor = !resolveView,
+                .storeColor = crystalOutlines || !resolveView,
                 .loadDepth = true,
                 .writeDepth = false,
                 .content = mirrorPreviewOverFog
@@ -1225,7 +1227,11 @@ private:
                     : SceneContent::Full,
                 .profileParticles = true,
             },
-            { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
+            renderArea);
+        if (crystalOutlines) {
+            recordFacetedInteractionOutlines(commandBuffer, colorView, resolveView,
+                frameData, scene, renderArea);
+        }
         gpuProfiler_.endPhase(
             commandBuffer,
             configuration_.descriptorFrameIndex,
@@ -1289,6 +1295,7 @@ private:
         // geometry. The main descriptor still holds the untouched world for
         // ScreenPreviewOverlay, so this copy cannot erase its edge feather.
         swapchain_.copyResolvedSceneColor(commandBuffer, stats_, std::nullopt, true);
+        const bool crystalOutlines = hasFacetedInteractionOutlines(frameData);
         recordScenePass(
             commandBuffer,
             colorView,
@@ -1298,11 +1305,15 @@ private:
             ScenePassOptions {
                 .translucent = true,
                 .loadColor = true,
-                .storeColor = !resolveView,
+                .storeColor = crystalOutlines || !resolveView,
                 .loadDepth = true,
                 .writeDepth = false,
             },
             inset);
+        if (crystalOutlines) {
+            recordFacetedInteractionOutlines(commandBuffer, colorView, resolveView,
+                frameData, scene, inset);
+        }
         swapchain_.prepareSceneDepthAttachment(commandBuffer, stats_);
     }
 
@@ -1894,7 +1905,47 @@ private:
         // overwrite the main-scene face/model queries later in the frame.
         bool profileOpaqueGeometry = false;
         bool profileParticles = false;
+        VkImageView outlineDepth = VK_NULL_HANDLE;
     };
+
+    enum class FacetedOutlinePass { None, DepthMask, Contour };
+
+    bool hasFacetedInteractionOutlines(const RenderFrameData& frameData) const
+    {
+        return frameData.viewMode == RenderViewMode::Isometric3D &&
+            swapchain_.depthView() && !configuration_.wireframeEnabled &&
+            std::ranges::any_of(frameData.tiles, [](const auto& tile) {
+                return tile.interactionOutline && tile.facetedInteractionOutline;
+            });
+    }
+
+    void recordFacetedInteractionOutlines(VkCommandBuffer commandBuffer,
+        VkImageView colorView, VkImageView resolveView, const RenderFrameData& frameData,
+        const PreparedRenderScene& scene, VkRect2D renderArea)
+    {
+        const VkImageView outlineDepth = swapchain_.copyDepthForOutline(commandBuffer, renderArea, stats_);
+        const VkMemoryBarrier2 attachments {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        };
+        const VkDependencyInfo dependency {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .memoryBarrierCount = 1,
+            .pMemoryBarriers = &attachments,
+        };
+        vkCmdPipelineBarrier2(commandBuffer, &dependency);
+        recordScenePass(commandBuffer, colorView, resolveView, frameData, scene,
+            ScenePassOptions {
+                .translucent = true,
+                .loadColor = true,
+                .storeColor = !resolveView,
+                .loadDepth = true,
+                .outlineDepth = outlineDepth,
+            }, renderArea);
+    }
 
     void recordScenePass(
         VkCommandBuffer commandBuffer,
@@ -1945,13 +1996,13 @@ private:
             .depthStencil = { .depth = 1.0f, .stencil = 0 },
         };
         const bool samplesDepthAttachment =
-            !writeDepth && !swapchain_.resolveDepthView();
+            !writeDepth && !options.outlineDepth && !swapchain_.resolveDepthView();
         const bool resolvesDepth =
             writeDepth && swapchain_.resolveDepthView();
         const VkRenderingAttachmentInfo depthAttachment {
             .sType =
                 VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = swapchain_.depthView(),
+            .imageView = options.outlineDepth ? options.outlineDepth : swapchain_.depthView(),
             .imageLayout = samplesDepthAttachment
                 ? VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL
                 : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
@@ -1967,7 +2018,7 @@ private:
             .loadOp = loadDepth
                 ? VK_ATTACHMENT_LOAD_OP_LOAD
                 : VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .storeOp = options.outlineDepth ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE,
             .clearValue = depthClear,
         };
         const VkRenderingInfo renderingInfo {
@@ -2068,7 +2119,13 @@ private:
                 swapchain_.depthView() && writeDepth ? VK_TRUE : VK_FALSE);
         }
 
-        if (frameData.viewMode == RenderViewMode::Isometric3D) {
+        if (options.outlineDepth) {
+            const Vec2 viewportExtent { viewport.width, -viewport.height };
+            drawInteractionOutlines(commandBuffer, scene, frameData, true,
+                viewportExtent, FacetedOutlinePass::DepthMask);
+            drawInteractionOutlines(commandBuffer, scene, frameData, true,
+                viewportExtent, FacetedOutlinePass::Contour);
+        } else if (frameData.viewMode == RenderViewMode::Isometric3D) {
             drawIsoFrame(
                 commandBuffer,
                 scene,
@@ -2119,13 +2176,15 @@ private:
         const PreparedRenderScene& scene,
         const RenderFrameData& frameData,
         bool translucentPass,
-        Vec2 viewportExtent)
+        Vec2 viewportExtent,
+        FacetedOutlinePass facetedPass = FacetedOutlinePass::None)
     {
         if (configuration_.wireframeEnabled || !swapchain_.depthView()) {
             return;
         }
         const float renderScale = static_cast<float>(swapchain_.renderExtent().width) /
             static_cast<float>(std::max(1U, swapchain_.displayExtent().width));
+        const bool depthMask = facetedPass == FacetedOutlinePass::DepthMask;
         VkPipeline boundPipeline = VK_NULL_HANDLE;
         for (std::size_t tileIndex = 0; tileIndex < frameData.tiles.size(); ++tileIndex) {
             const auto& tile = frameData.tiles[tileIndex];
@@ -2143,7 +2202,8 @@ private:
             }
             const bool transparent = tile.blurBehind || (!box &&
                 !models_.materialForModel(tile.model).policy.hasOpaqueOrMask);
-            if (transparent != translucentPass) {
+            const bool facetedHull = transparent && !box && tile.facetedInteractionOutline;
+            if (transparent != translucentPass || facetedHull != (facetedPass != FacetedOutlinePass::None)) {
                 continue;
             }
             const bool skinned = !box && models_.modelUsesGpuSkinning(tile.model);
@@ -2154,23 +2214,24 @@ private:
                 ++stats_.pipelineBinds;
                 boundPipeline = pipeline;
             }
-            // Opaque hull interiors are masked by scene depth. Glass instead
-            // uses a contour on its visible surface to preserve transparency.
-            vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
-            vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_CLOCKWISE);
-            vkCmdSetCullMode(commandBuffer,
-                transparent ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_FRONT_BIT);
+            const bool surfaceContour = transparent && !facetedHull;
             Vec4 color = config::interactionOutlineColor;
             color.w *= std::clamp(tile.color.w, 0.0f, 1.0f);
+            // The crystal already blended over the scene. Its front depth
+            // masks the expanded backfaces without painting over the glass.
             const uint32_t instance = writeDrawInstance(GpuDrawInstance {
                 .vertices = IsoScenePreparer::modelWorldTransform(tile),
                 .passData = { Vec4 {
                     viewportExtent.x, viewportExtent.y,
-                    config::interactionOutlineWidthPixels * renderScale,
-                    transparent ? (box ? 1.0f : 2.0f) : 0.0f,
+                    depthMask ? 0.0f : config::interactionOutlineWidthPixels * renderScale,
+                    facetedHull ? 3.0f : surfaceContour ? (box ? 1.0f : 2.0f) : 0.0f,
                 }, groundDebrisAnimationData(tile, frameData.effectAnimationTimeSeconds), Vec4 {}, Vec4 {} },
-                .color = color,
+                .color = depthMask ? Vec4 {} : color,
             });
+            vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_CLOCKWISE);
+            vkCmdSetDepthWriteEnable(commandBuffer, depthMask ? VK_TRUE : VK_FALSE);
+            vkCmdSetCullMode(commandBuffer,
+                depthMask || surfaceContour ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_FRONT_BIT);
             if (box) {
                 vkCmdDraw(commandBuffer, 36, 1, 0, instance);
                 ++stats_.drawCalls;
@@ -2183,6 +2244,9 @@ private:
             }
         }
         if (boundPipeline != VK_NULL_HANDLE) {
+            if (depthMask) {
+                vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+            }
             vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
             vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
         }

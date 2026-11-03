@@ -9,11 +9,12 @@ layout(location = 0) out vec4 outColor;
 void main()
 {
     float coverage = 1.0;
-    if (draw.passData[0].w > 1.5) {
+    float mode = draw.passData[0].w;
+    if (mode > 1.5 && mode < 2.5) {
         float width = max(fwidth(inFaceCoordU) * draw.passData[0].z, 0.00001);
         coverage = 1.0 - smoothstep(0.0, width, abs(inFaceCoordU));
         if (coverage <= 0.0) { discard; }
-    } else if (draw.passData[0].w > 0.5) {
+    } else if (mode > 0.5 && mode < 1.5) {
         vec2 uv = vec2(inFaceCoordU, inFaceCoordV);
         vec2 pixelsFromEdge = min(uv, 1.0 - uv) / max(fwidth(uv), vec2(0.00001));
         coverage = 1.0 - smoothstep(draw.passData[0].z - 0.5,

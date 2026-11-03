@@ -5,9 +5,13 @@ void outlinePosition(vec3 position, vec3 normal)
     mat4 world = mat4(draw.vertices[0], draw.vertices[1],
                       draw.vertices[2], draw.vertices[3]);
     vec3 worldPosition = (world * vec4(position, 1.0)).xyz;
-    vec3 worldNormal = normalize(transpose(inverse(mat3(world))) * normal);
     vec4 clip = frame.clipFromWorld * vec4(worldPosition, 1.0);
-    if (draw.passData[0].w > 1.5) {
+    bool faceted = draw.passData[0].w > 2.5;
+    // A radial direction keeps coincident vertices together at hard edges.
+    vec3 worldNormal = faceted
+        ? worldPosition - (world * vec4(0.5, 0.5, 0.5, 1.0)).xyz
+        : normalize(transpose(inverse(mat3(world))) * normal);
+    if (!faceted && draw.passData[0].w > 1.5) {
         // Transparent surfaces have no self-depth to mask an expanded hull.
         // Keep their contour on the visible surface at grazing view angles.
         gl_Position = clip;

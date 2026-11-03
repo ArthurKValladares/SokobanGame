@@ -1764,6 +1764,7 @@ void appendGameplayEntities(
             .blurBehind = movable.type == TileType::Ice || tileTypeIsCrystal(movable.type),
             .affectsCameraFit = false,
             .interactionOutline = tileTypeHasInteractionOutline(movable.type),
+            .facetedInteractionOutline = tileTypeIsCrystal(movable.type),
             .model = input.manifest.modelForTile(movable.type),
             .animation = tileTypeIsRobot(movable.type)
                 ? robotDriveAnimation(input.manifest) : noAnimation,

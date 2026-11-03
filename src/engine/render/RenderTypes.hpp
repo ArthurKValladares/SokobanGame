@@ -481,6 +481,8 @@ struct RenderFrameData {
         // A thin silhouette identifies functional gameplay pieces. Authored
         // decorations keep this false even when they reuse a gameplay model.
         bool interactionOutline = false;
+        // Faceted translucent meshes need a depth mask and a continuous hull.
+        bool facetedInteractionOutline = false;
         // A pick-only volume may supply the silhouette of procedural faces
         // without adding color geometry, picking, shadows or camera bounds.
         bool interactionOutlineOnly = false;

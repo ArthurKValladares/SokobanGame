@@ -580,6 +580,30 @@ void verifyInteractionOutlines(SDL_Window* window, const std::filesystem::path& 
     std::cout << "Transparent Glass: interior change=" << glassInteriorChange << '\n';
     verify(glassInteriorChange < 0.1,
         "Interaction outline filled the transparent Glass model's interior");
+
+    for (const auto type : { TileType::Crystal, TileType::SkippingCrystal }) {
+        RenderFrameData crystalFrame = makeFrame(false);
+        auto& crystal = crystalFrame.tiles.back();
+        crystal.model = manifest.modelForTile(type);
+        verify(!crystal.model.isCube(), "Interaction outline fixture is missing a crystal model");
+        crystal.color = tileColor(type);
+        crystal.blurBehind = true;
+        crystal.facetedInteractionOutline = true;
+        renderer.waitForAssets(renderAssetRequirementsForFrame(crystalFrame));
+        for (const auto samples : { AntiAliasingMode::None, AntiAliasingMode::Msaa4x }) {
+            renderer.setAntiAliasingMode(samples);
+            crystal.interactionOutline = false;
+            const ImageData baseline = captureFrame(crystalFrame);
+            crystal.interactionOutline = tileTypeHasInteractionOutline(type);
+            const ImageData outlined = captureFrame(crystalFrame);
+            verify(difference(baseline, outlined, 0, 0, baseline.width, baseline.height) > 0.0,
+                "Interaction outline did not visibly contour a crystal model");
+            verify(difference(baseline, outlined,
+                    baseline.width * 48 / 100, baseline.height * 46 / 100,
+                    baseline.width * 52 / 100, baseline.height * 54 / 100) < 0.1,
+                "Interaction outline filled a crystal model's interior");
+        }
+    }
     verify(vulkanDebug::validationErrorCount() == 0,
         "Vulkan validation reported an interaction outline rendering error");
 }

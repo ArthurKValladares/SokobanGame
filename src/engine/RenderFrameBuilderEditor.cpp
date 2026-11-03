@@ -1625,6 +1625,7 @@ RenderFrameData::Tile tileVisual(
         .showGrid = !tileTypeIsPlayerStart(tile) && tile != TileType::LilyPad,
         .affectsCameraFit = tileTypeAffectsCameraFit(tile),
         .interactionOutline = tileTypeHasInteractionOutline(tile),
+        .facetedInteractionOutline = tileTypeIsCrystal(tile),
         .model = model,
         .animation = tileTypeIsPlayerStart(tile) || tile == TileType::Enemy
             ? manifest.playerIdleAnimation()

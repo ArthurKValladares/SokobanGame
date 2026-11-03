@@ -14,11 +14,12 @@ Energy volumes, auras and destination ghosts retain their own effects.
 
 Outline color and width are in
 [`OutlineConfig.hpp`](../src/engine/render/OutlineConfig.hpp). The default width
-is 1.5 display pixels, independent of model size, camera distance and internal
+is 3.375 display pixels, independent of model size, camera distance and internal
 render scale. Static and animated opaque models use depth-tested expanded
-backfaces; transparent ice uses a contour on the visible surface so its interior
-stays transparent. Contours draw within the existing scene passes, before
-particles and output processing, and do not cast shadows or affect picking.
+backfaces. Transparent ice uses a contour on the visible surface so its interior
+stays transparent. Faceted crystals use a depth mask to keep their contours
+around the silhouette. Contours draw before output processing and do not cast
+shadows or affect picking.
 
 ## Live tuning
 
