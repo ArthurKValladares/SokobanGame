@@ -87,9 +87,9 @@ static_assert(offsetof(RockScratchUniform, endAndDuration) == 16);
 static_assert(sizeof(WaterContactUniform) == 32);
 static_assert(offsetof(WaterContactUniform, centerAndElevation) == 0);
 static_assert(offsetof(WaterContactUniform, halfExtentAndRadius) == 16);
-static_assert(offsetof(SceneFrameUniform, waterContacts) == 3152);
-static_assert(offsetof(SceneFrameUniform, waterContactMeta) == 4176);
-static_assert(sizeof(SceneFrameUniform) == 4192);
+static_assert(offsetof(SceneFrameUniform, waterContacts) == 9296);
+static_assert(offsetof(SceneFrameUniform, waterContactMeta) == 10320);
+static_assert(sizeof(SceneFrameUniform) == 10336);
 
 // The camera and sun transforms a frame renders through, in the form the
 // uniform buffer wants them. Built by the recorder from the prepared scene's

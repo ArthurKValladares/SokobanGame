@@ -301,7 +301,7 @@ struct RenderFrameData {
     static constexpr std::size_t groundSplatRegionCapacity = 18;
     static constexpr std::size_t pointLightCapacity = 8;
     static constexpr std::size_t waterRippleCapacity = 16;
-    static constexpr std::size_t rockScratchCapacity = 64;
+    static constexpr std::size_t rockScratchCapacity = 256;
     enum class EditorDecorationHighlight : uint8_t {
         None,
         Hovered,

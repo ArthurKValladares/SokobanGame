@@ -1217,10 +1217,15 @@ void verifyRockScratches(SDL_Window* window, const std::filesystem::path& root,
         return renderer.captureRenderedFrame();
     };
     const RenderFrameData active = makeFrame(pushDuration + 0.1f);
+    RenderFrameData retraced = active;
+    retraced.rockScratches[1] = active.rockScratches[0];
+    std::swap(retraced.rockScratches[1].start, retraced.rockScratches[1].end);
+    retraced.rockScratchCount = 2;
     const ImageData baseline = capture(quiet);
     const ImageData full = capture(active);
+    const ImageData stacked = capture(retraced);
     const ImageData partial = capture(makeFrame(pushDuration * 0.5f));
-    const ImageData fading = capture(makeFrame(config::rockScratchLifetimeSeconds - 1.0f));
+    const ImageData fading = capture(makeFrame(config::rockScratchLifetimeSeconds * 0.75f));
     const ImageData expired = capture(makeFrame(config::rockScratchLifetimeSeconds + pushDuration + 0.1f));
     const auto fullChange = rippleImageDifference(baseline, full);
     const auto partialChange = rippleImageDifference(baseline, partial);
@@ -1230,12 +1235,17 @@ void verifyRockScratches(SDL_Window* window, const std::filesystem::path& root,
     std::filesystem::create_directories(evidence);
     saveRippleEvidence(evidence / "baseline.png", baseline);
     saveRippleEvidence(evidence / "full.png", full);
+    saveRippleEvidence(evidence / "stacked.png", stacked);
     saveRippleEvidence(evidence / "partial.png", partial);
     saveRippleEvidence(evidence / "fading.png", fading);
     std::cout << "Rock scratch: full weight=" << fullChange.weight << ", peak=" << fullChange.peak
               << ", partial weight=" << partialChange.weight << ", fading weight=" << fadingChange.weight << '\n';
     verify(fullChange.weight > 200.0 && fullChange.peak > 3.0,
         "Rock scratch did not visibly alter the ground material");
+    const auto stackedChange = rippleImageDifference(baseline, stacked);
+    verify(stackedChange.weight > fullChange.weight * 1.25 &&
+            stackedChange.peak > fullChange.peak * 1.15,
+        "Retracing a rock scratch did not deepen the existing groove");
     verify(partialChange.weight > fullChange.weight * 0.2 &&
             partialChange.weight < fullChange.weight * 0.8,
         "Rock scratch was not progressively revealed along the push");
@@ -1246,7 +1256,9 @@ void verifyRockScratches(SDL_Window* window, const std::filesystem::path& root,
 
     // Stretch deposition time so the oldest end is gone while the newest
     // end remains visible. In this vertical camera, +world-X points left.
-    const ImageData orderedFade = capture(makeFrame(config::rockScratchLifetimeSeconds + 0.5f, 4.0f));
+    const ImageData orderedFade = capture(makeFrame(
+        config::rockScratchLifetimeSeconds * 1.08f,
+        config::rockScratchLifetimeSeconds * 0.65f));
     verify(difference(baseline, orderedFade, baseline.width * 9 / 10, baseline.height * 2 / 5,
             baseline.width, baseline.height * 3 / 5) == 0.0,
         "Rock scratch's oldest end outlived its deposited lifetime");

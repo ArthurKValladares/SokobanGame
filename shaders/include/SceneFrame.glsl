@@ -3,7 +3,7 @@
 
 // Camera and lighting for the whole frame. Mirrors SceneFrameUniform and
 // PointLightUniform in VulkanRenderConstants.hpp, whose static_asserts pin the
-// 4192-byte, 48-byte, and 32-byte sizes.
+// 10336-byte, 48-byte, and 32-byte sizes.
 struct PointLightData
 {
     vec4 positionAndRange;
@@ -34,8 +34,8 @@ layout(std140, set = 0, binding = 7) uniform SceneFrame
     // x = diffuse softness, y = normal detail, z = roughness floor.
     // (0, 1, 0) preserves the authored PBR response for studio frames.
     vec4 stylizedSurface;
-    RockScratchData rockScratches[64];
-    // x=count, y=lifetime, z=hold before fading, w=maximum material opacity.
+    RockScratchData rockScratches[256];
+    // x=count, y=lifetime, z=hold before fading, w=material opacity per pass.
     vec4 rockScratchMeta;
     vec4 waterRippleStyles[16];
     WaterContactData waterContacts[32];

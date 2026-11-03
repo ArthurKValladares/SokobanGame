@@ -21,9 +21,9 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 - Animated enemies that track and attack adjacent players, participate in
   physical movement rules, and support skeleton-driven held-item attachments.
 - Animated mirror beams, destination ghosts, sound, and particle effects.
-- Pushed and pulled rocks leave uneven ground scratches that appear along their
-  travel and fade from oldest to newest over six seconds. Undo, restart, and
-  screen changes clear the trails.
+- Pushed and pulled rocks leave uneven ground scratches that deepen with
+  repeated passes and fade over five minutes. Undo, restart, and screen
+  changes clear the trails.
 - Round rocks skip across water with expanding impact rings, collect lily pads
   as slower rides, and send nearby pads drifting away with their wake.
 - Pixel-blur world transitions when entering a puzzle from the overworld and

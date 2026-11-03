@@ -36,17 +36,23 @@ vec2 rockScratchCoverage(vec3 position, vec2 worldDx, vec2 worldDy)
         0, frame.rockScratches.length());
     for (int index = 0; index < count; ++index) {
         RockScratchData scratch = frame.rockScratches[index];
-        vec2 path = scratch.endAndDuration.xy - scratch.startAndAge.xy;
+        vec2 start = scratch.startAndAge.xy;
+        vec2 end = scratch.endAndDuration.xy;
+        if (abs(position.z - scratch.startAndAge.z) > 0.40 ||
+            any(lessThan(position.xy, min(start, end) - 0.36)) ||
+            any(greaterThan(position.xy, max(start, end) + 0.36))) continue;
+
+        vec2 path = end - start;
         float pathLength = length(path);
-        if (pathLength < 0.0001 ||
-            abs(position.z - scratch.startAndAge.z) > 0.40) continue;
+        if (pathLength < 0.0001) continue;
 
         vec2 direction = path / pathLength;
-        vec2 across = vec2(-direction.y, direction.x);
-        vec2 offset = position.xy - scratch.startAndAge.xy;
+        vec2 offset = position.xy - start;
         float along = dot(offset, direction);
-        float lateral = dot(offset, across);
-        if (along < 0.0 || along > pathLength || abs(lateral) > 0.36) continue;
+        bool reverse = direction.x < 0.0 || (direction.x == 0.0 && direction.y < 0.0);
+        // Give shared endpoints to just one segment of a continuous track.
+        float alongCanonical = reverse ? pathLength - along : along;
+        if (alongCanonical < 0.0 || alongCanonical >= pathLength) continue;
 
         // A drag deposits its beginning first. Interpolating birth time along
         // every segment also makes the tail disappear before the newer head.
@@ -55,6 +61,15 @@ vec2 rockScratchCoverage(vec3 position, vec2 worldDx, vec2 worldDy)
         if (age < 0.0 || age >= frame.rockScratchMeta.y) continue;
         float fade = 1.0 - smoothstep(
             frame.rockScratchMeta.z, frame.rockScratchMeta.y, age);
+
+        // Opposite drags follow the same grooves. The travel direction above
+        // still controls when each point on the path is scratched.
+        if (reverse) {
+            direction = -direction;
+        }
+        vec2 across = vec2(-direction.y, direction.x);
+        float lateral = dot(offset, across);
+        if (abs(lateral) > 0.36) continue;
 
         // World coordinates keep every variation continuous across split cell
         // segments. Ground patches change contact independently of each ridge
@@ -88,10 +103,11 @@ vec2 rockScratchCoverage(vec3 position, vec2 worldDx, vec2 worldDy)
             strokes = max(strokes, vec2(scuff * scratched,
                 furrow * scratched * pressure));
         }
-        // Repeated passes retrace the latest mark without accumulating opacity.
-        coverage = max(coverage, strokes * fade);
+        // Each pass adds contrast to the existing groove, with diminishing
+        // returns so heavily used tracks stay within the material's range.
+        coverage += (1.0 - coverage) * strokes * (fade * frame.rockScratchMeta.w);
     }
-    return coverage * frame.rockScratchMeta.w;
+    return coverage;
 }
 
 #endif
