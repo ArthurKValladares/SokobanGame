@@ -697,7 +697,67 @@ GameplaySession::Snapshot GameplaySession::snapshot() const
     return result;
 }
 
-bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
+namespace {
+
+bool moveBetweenOverworldSelectors(
+    GameState& state, const Level::ScreenSelector& from,
+    const Level::ScreenSelector& to)
+{
+    if (!from.target || !to.target || from.target->level != to.target->level ||
+        to.target->screen - from.target->screen != 1 ||
+        from.cell.z != to.cell.z ||
+        std::abs(from.cell.x - to.cell.x) +
+            std::abs(from.cell.y - to.cell.y) != 1 ||
+        state.players.empty() ||
+        std::ranges::any_of(state.players, [&](const GameState::Player& player) {
+            return player.dead || player.cell != from.cell;
+        })) {
+        return false;
+    }
+    for (GameState::Player& player : state.players) {
+        player.cell = to.cell;
+    }
+    return true;
+}
+
+bool matchesOverworldReturn(const Level& level, const ActionPlan& action)
+{
+    if (action.playerMoveCountBefore != action.playerMoveCountAfter ||
+        action.before.players.empty() || action.after.players.empty()) {
+        return false;
+    }
+    const auto* from = level.selectorAt(action.before.players.front().cell);
+    const auto* to = level.selectorAt(action.after.players.front().cell);
+    if (!from || !to) {
+        return false;
+    }
+    GameState expected = action.before;
+    return moveBetweenOverworldSelectors(expected, *from, *to) &&
+        expected == action.after;
+}
+
+} // namespace
+
+bool GameplaySession::appendOverworldReturnStep(
+    Snapshot& snapshot, const Level::ScreenSelector& from,
+    const Level::ScreenSelector& to)
+{
+    GameState next = snapshot.state;
+    if (!moveBetweenOverworldSelectors(next, from, to)) {
+        return false;
+    }
+    snapshot.undoStack.push_back({
+        .before = std::move(snapshot.state),
+        .after = next,
+        .playerMoveCountBefore = snapshot.playerMoveCount,
+        .playerMoveCountAfter = snapshot.playerMoveCount,
+    });
+    snapshot.state = std::move(next);
+    return true;
+}
+
+bool GameplaySession::restore(
+    const Level& level, const Snapshot& snapshot, bool allowOverworldReturns)
 {
     if (snapshot.playerMoveCount < 0) {
         return false;
@@ -714,7 +774,8 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
             action.playerMoveCountAfter < 0 ||
             !(action.before == expectedState) ||
             action.playerMoveCountBefore != expectedMoveCount ||
-            !matchesForwardTransition(level, action, stepRates_)) {
+            (!(allowOverworldReturns && matchesOverworldReturn(level, action)) &&
+             !matchesForwardTransition(level, action, stepRates_))) {
             return false;
         }
         expectedState = action.after;

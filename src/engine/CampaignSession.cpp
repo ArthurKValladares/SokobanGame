@@ -2,6 +2,7 @@
 #include "engine/LevelCatalog.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <stdexcept>
 #include <utility>
 
@@ -21,6 +22,20 @@ void CampaignSession::setOverworldTargets(std::vector<LevelLocation> targets)
     targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
     validateOverworldTargets(targets);
     overworldTargets_ = std::move(targets);
+    overworldSelectors_.clear();
+}
+
+void CampaignSession::setOverworldSelectors(
+    std::vector<Level::ScreenSelector> selectors)
+{
+    std::vector<LevelLocation> targets;
+    for (const Level::ScreenSelector& selector : selectors) {
+        if (selector.target) {
+            targets.push_back(*selector.target);
+        }
+    }
+    setOverworldTargets(std::move(targets));
+    overworldSelectors_ = std::move(selectors);
 }
 
 void CampaignSession::setOverworldTopology(
@@ -243,6 +258,66 @@ void CampaignSession::finishWorldLoad(PlayerProfile& profile)
     gameLoaded_ = true;
 }
 
+std::optional<LevelLocation> CampaignSession::resolvePuzzleExit(
+    PlayerProfile& profile) const
+{
+    auto& checkpoint = profile.overworldCheckpoint;
+    if (!checkpoint || checkpoint->topologyFingerprint != overworldFingerprint_) {
+        return std::nullopt;
+    }
+    const auto& players = checkpoint->session.state.players;
+    if (players.empty()) {
+        return std::nullopt;
+    }
+    const GridPosition3 entryCell = players.front().cell;
+    if (std::ranges::any_of(players, [entryCell](const auto& player) {
+            return player.dead || player.cell != entryCell;
+        })) {
+        return std::nullopt;
+    }
+    auto selector = std::ranges::find(
+        overworldSelectors_, entryCell, &Level::ScreenSelector::cell);
+    if (selector == overworldSelectors_.end() || !selector->target ||
+        selector->target->level != current_.level ||
+        selector->target->screen > current_.screen) {
+        return std::nullopt;
+    }
+
+    const auto findNext = [this](const Level::ScreenSelector& flag) {
+        const GridPosition3 cell = flag.cell;
+        const LevelLocation next { current_.level, flag.target->screen + 1 };
+        return std::ranges::find_if(overworldSelectors_,
+            [cell, next](const Level::ScreenSelector& candidate) {
+                return candidate.target == next && candidate.cell.z == cell.z &&
+                    std::abs(candidate.cell.x - cell.x) +
+                        std::abs(candidate.cell.y - cell.y) == 1;
+            });
+    };
+
+    // Reconstruct the route from the original checkpoint after a reload.
+    std::vector<const Level::ScreenSelector*> route { &*selector };
+    while (selector->target->screen < current_.screen) {
+        selector = findNext(*selector);
+        if (selector == overworldSelectors_.end()) {
+            return std::nullopt;
+        }
+        route.push_back(&*selector);
+    }
+    if (const auto next = findNext(*selector);
+        next != overworldSelectors_.end() &&
+        screenExists(next->target->level, next->target->screen)) {
+        return next->target;
+    }
+
+    for (std::size_t i = 1; i < route.size(); ++i) {
+        if (!GameplaySession::appendOverworldReturnStep(
+                checkpoint->session, *route[i - 1], *route[i])) {
+            break;
+        }
+    }
+    return std::nullopt;
+}
+
 CampaignSession::PuzzleCompleted CampaignSession::completePuzzle(
     PlayerProfile& profile,
     int moveCount,
@@ -274,6 +349,7 @@ CampaignSession::PuzzleCompleted CampaignSession::completePuzzle(
         .newBestTime = recordBests &&
             (!previousBestTime || puzzleElapsedSeconds_ < *previousBestTime),
         .gameCompleted = allTargetsCompleted(profile),
+        .nextPuzzle = resolvePuzzleExit(profile),
     };
     puzzleElapsedSeconds_ = 0.0;
     return completed;

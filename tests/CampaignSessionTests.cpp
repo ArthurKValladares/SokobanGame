@@ -261,6 +261,56 @@ void testIndependentCompletionAndAllTargets()
     CHECK(profile.screenCompleted({ 0, 1 }));
 }
 
+void testAdjacentPuzzlesChainFromSavedSelector()
+{
+    TEST("adjacentPuzzlesChainFromSavedSelector");
+    CampaignSession campaign;
+    campaign.setLevelScreenCounts({ 5, 1 });
+    const Level map = Level::loadFromLayers(
+        { { ".....", ".....", "....." }, { "C    ", "     ", "     " } },
+        "adjacent selectors", std::nullopt, {},
+        {
+            { 1, { 0, 0, 1 }, LevelLocation { 0, 0 } },
+            { 2, { 1, 0, 1 }, LevelLocation { 0, 1 } },
+            { 3, { 2, 0, 1 }, LevelLocation { 0, 2 } },
+            { 4, { 2, 1, 1 }, LevelLocation { 0, 3 } },
+            { 5, { 3, 2, 1 }, LevelLocation { 0, 4 } },
+            { 6, { 3, 1, 1 }, LevelLocation { 1, 0 } },
+            { 7, { 4, 2, 1 }, LevelLocation { 0, 3 } },
+        });
+    campaign.setOverworldSelectors(map.selectors());
+    PlayerProfile profile;
+    GameplaySession session;
+    session.reset(map);
+    const GameplaySession::Snapshot overworld = session.snapshot();
+    CHECK(campaign.enterSelector(profile, { 0, 0 }, overworld));
+
+    for (int screen = 0; screen < 4; ++screen) {
+        CHECK(campaign.location() == (LevelLocation { 0, screen }));
+        const auto completed = campaign.completePuzzle(profile, 2);
+        CHECK(profile.screenCompleted({ 0, screen }));
+        if (screen < 3) {
+            const LevelLocation next { 0, screen + 1 };
+            CHECK(completed.nextPuzzle == next);
+            CHECK(campaign.prepareWorldLoad(profile).snapshot == overworld);
+            CHECK(campaign.startPuzzle(profile, next));
+            campaign.writeCheckpoint(profile, {});
+            CHECK(campaign.restoreProfileLocation(profile));
+        } else {
+            CHECK(!completed.nextPuzzle);
+        }
+    }
+    CHECK(campaign.inOverworld());
+    const auto saved = decodePlayerProfile(profile.serialize()).profile;
+    const auto returned = campaign.prepareWorldLoad(saved).snapshot;
+    CHECK(returned.has_value());
+    CHECK(!session.restore(map, *returned));
+    CHECK(session.restore(map, *returned, true));
+    CHECK(session.state().players.front().cell == (GridPosition3 { 2, 1, 1 }));
+    CHECK(session.playerMoveCount() == overworld.playerMoveCount);
+    CHECK(session.undoCount() == 3);
+}
+
 void testDebugCompletionDoesNotRecordBests()
 {
     TEST("debugCompletionDoesNotRecordBests");
@@ -310,6 +360,7 @@ int main()
     testSelectorEntryAndBothCheckpointKinds();
     testOverworldTopologyCheckpointValidation();
     testIndependentCompletionAndAllTargets();
+    testAdjacentPuzzlesChainFromSavedSelector();
     testDebugCompletionDoesNotRecordBests();
     testPuzzleOnlyTimingAndDeferredCheckpoint();
     } catch (const std::exception& error) {

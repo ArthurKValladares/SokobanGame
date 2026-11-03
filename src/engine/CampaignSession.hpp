@@ -29,10 +29,12 @@ public:
         bool newBestMoves = false;
         bool newBestTime = false;
         bool gameCompleted = false;
+        std::optional<LevelLocation> nextPuzzle;
     };
 
     void setLevelScreenCounts(std::vector<int> screenCounts);
     void setOverworldTargets(std::vector<LevelLocation> targets);
+    void setOverworldSelectors(std::vector<Level::ScreenSelector> selectors);
     void setOverworldTopology(
         uint64_t fingerprint,
         std::vector<OverworldScreenId> screens,
@@ -126,6 +128,8 @@ private:
     static constexpr double autosaveIntervalSeconds_ = 2.0;
 
     void clearRunState();
+    [[nodiscard]] std::optional<LevelLocation> resolvePuzzleExit(
+        PlayerProfile& profile) const;
     void validateOverworldTargets(
         const std::vector<LevelLocation>& targets) const;
     [[nodiscard]] bool overworldScreenExists(
@@ -139,6 +143,7 @@ private:
 
     std::vector<int> levelScreenCounts_;
     std::vector<LevelLocation> overworldTargets_;
+    std::vector<Level::ScreenSelector> overworldSelectors_;
     // Screen 1/fingerprint 0 is the temporary identity of the legacy
     // levels/overworld.scr path. Application replaces this with map metadata
     // when runtime integration switches to OverworldMap.

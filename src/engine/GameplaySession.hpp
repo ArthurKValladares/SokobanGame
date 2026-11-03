@@ -72,7 +72,12 @@ public:
     // cycle or at this budget; an endpoint not reached by then is rejected
     // without changing the session.
     static constexpr std::size_t maxCheckpointReplaySteps = 10'000;
-    [[nodiscard]] bool restore(const Level& level, const Snapshot& snapshot);
+    [[nodiscard]] bool restore(
+        const Level& level, const Snapshot& snapshot,
+        bool allowOverworldReturns = false);
+    [[nodiscard]] static bool appendOverworldReturnStep(
+        Snapshot& snapshot, const Level::ScreenSelector& from,
+        const Level::ScreenSelector& to);
 
     void queueMove(MoveDirection direction);
     void queueActivate();
