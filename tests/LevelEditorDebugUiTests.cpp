@@ -424,9 +424,9 @@ bool iconIsInPopup(const EditorPanel::Icon& icon)
     return (icon.widget.window->Flags & ImGuiWindowFlags_Popup) != 0;
 }
 
-void terrainSectionCollapsesWithoutHidingQuarryWalls()
+void terrainSectionCollapsesWithWallsAndDecorativeBlocks()
 {
-    TEST("terrainSectionCollapsesWithoutHidingQuarryWalls");
+    TEST("terrainSectionCollapsesWithWallsAndDecorativeBlocks");
     EditorPanel panel(LevelEditor::Tool::Tiles);
     const auto expanded = panel.frame();
     const auto terrainIconCount = [](const EditorPanel::Frame& frame) {
@@ -434,19 +434,18 @@ void terrainSectionCollapsesWithoutHidingQuarryWalls()
             return !iconIsInPopup(icon) && editorTilePalette::isTerrain(icon.tile);
         });
     };
-    CHECK(terrainIconCount(expanded) == 2);
+    CHECK(terrainIconCount(expanded) == 4);
     CHECK(expanded.text.find("Terrain") < expanded.text.find("Randomize Ground"));
     CHECK(expanded.text.find("Randomize Ground") < expanded.text.find("Randomize Walls"));
-    CHECK(expanded.text.find("Randomize Walls") < expanded.text.find("\nPaint"));
+    CHECK(expanded.text.find("Miscelaneous") != std::string::npos);
+    CHECK(expanded.text.find("Randomize Walls") < expanded.text.find("Miscelaneous"));
     panel.clickPaletteControl("Terrain");
     const auto collapsed = panel.frame();
     CHECK(terrainIconCount(collapsed) == 0);
     CHECK(collapsed.text.find("Randomize Ground") == std::string::npos);
     CHECK(collapsed.text.find("Randomize Walls") == std::string::npos);
-    CHECK(std::ranges::any_of(collapsed.icons, [](const EditorPanel::Icon& icon) {
-        return !iconIsInPopup(icon) && icon.tile == TileType::Wall;
-    }));
     CHECK(panel.shows("Paint Blend Mask"));
+    panel.clickPaletteControl("Terrain");
     panel.clickIcon(TileType::Wall);
     const auto quarryPicker = panel.frame();
     CHECK(static_cast<std::size_t>(std::ranges::count_if(quarryPicker.icons, [](const EditorPanel::Icon& icon) {
@@ -454,14 +453,12 @@ void terrainSectionCollapsesWithoutHidingQuarryWalls()
     })) == wallStoneVariantCount);
     panel.clickIcon(TileType::WallStone08, true);
     CHECK(panel.editor.selectedTile() == TileType::WallStone08);
-    CHECK(terrainIconCount(panel.frame()) == 0);
-    panel.clickPaletteControl("Terrain");
-    CHECK(terrainIconCount(panel.frame()) == 2);
+    CHECK(terrainIconCount(panel.frame()) == 4);
 }
 
-void roundRockBrushAppearsInPaintAndExplainsWaterBehavior()
+void roundRockBrushAppearsInRocksAndExplainsWaterBehavior()
 {
-    TEST("roundRockBrushAppearsInPaintAndExplainsWaterBehavior");
+    TEST("roundRockBrushAppearsInRocksAndExplainsWaterBehavior");
     EditorPanel panel(LevelEditor::Tool::Tiles);
     const auto frame = panel.frame();
     CHECK(std::ranges::count_if(frame.icons, [](const EditorPanel::Icon& icon) {
@@ -477,7 +474,7 @@ void roundRockBrushAppearsInPaintAndExplainsWaterBehavior()
     if (rock != frame.icons.end() && roundRock != frame.icons.end()) {
         CHECK(roundRock - rock == 1);
     }
-    CHECK(frame.text.find("Round Rock") != std::string::npos);
+    CHECK(frame.text.find("Round Rock") == std::string::npos);
     panel.clickIcon(TileType::RoundRock);
     CHECK(panel.editor.selectedTile() == TileType::RoundRock);
     CHECK(panel.editor.tool() == LevelEditor::Tool::Tiles);
@@ -525,7 +522,7 @@ void waterTilesSectionOffersLilyPadsAndDirectionalStreams()
     }
 
     // Collapsing this section hides both water brushes without affecting the
-    // terrain or ordinary Paint palette, and catches duplicate Paint entries.
+    // terrain or Miscelaneous section, and catches duplicate brush entries.
     panel.clickPaletteControl("Water Tiles");
     const auto collapsed = panel.frame();
     CHECK(waterIconCount(collapsed) == 0);
@@ -1018,9 +1015,9 @@ int main()
         brushSelectsEveryRgbaTextureLayer();
         selectingCustomMaskUsesPreparedCopy();
         newMaskActionUsesSelectedSplat();
-        terrainSectionCollapsesWithoutHidingQuarryWalls();
+        terrainSectionCollapsesWithWallsAndDecorativeBlocks();
         waterTilesSectionOffersLilyPadsAndDirectionalStreams();
-        roundRockBrushAppearsInPaintAndExplainsWaterBehavior();
+        roundRockBrushAppearsInRocksAndExplainsWaterBehavior();
         terrainPickersKeepEveryStyleAndRecentBrushes();
         directionalFamiliesUseOneBrushAndRotateWithoutPickers();
         rotateControlKeepsArtAndBehaviorVariants();

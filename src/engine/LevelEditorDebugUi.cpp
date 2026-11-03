@@ -897,15 +897,37 @@ void LevelEditorDebugUi::drawTilePalette(
             definitions.end());
         return definitions;
     }();
-    const auto drawPaletteIcons = [&](bool terrain, bool water = false) {
+    enum class PaletteSection {
+        Water, Terrain, Characters, Minecart, Hazards, Activators, Rocks, Miscellaneous
+    };
+    const auto sectionFor = [](TileType tile) {
+        if (tile == TileType::LilyPad || tileTypeIsWaterStream(tile)) {
+            return PaletteSection::Water;
+        }
+        if (editorTilePalette::isTerrain(tile)) {
+            return PaletteSection::Terrain;
+        }
+        if (tileTypeIsPlayerStart(tile)) {
+            return PaletteSection::Characters;
+        }
+        if (tileTypeIsRail(tile) || tileTypeIsMinecart(tile) || tile == TileType::MinecartGate) {
+            return PaletteSection::Minecart;
+        }
+        if (tileTypeIsTurret(tile) || tile == TileType::Enemy) {
+            return PaletteSection::Hazards;
+        }
+        if (tileTypeIsSignalSource(tile)) {
+            return PaletteSection::Activators;
+        }
+        if (tileTypeIsStone(tile) || tile == TileType::Ice) {
+            return PaletteSection::Rocks;
+        }
+        return PaletteSection::Miscellaneous;
+    };
+    const auto drawPaletteIcons = [&](PaletteSection section) {
         int column = 0;
         for (const TileTypeDefinition& definition : paletteDefinitions) {
-            if (editorTilePalette::isTerrain(definition.type) != terrain) {
-                continue;
-            }
-            const bool waterTile = definition.type == TileType::LilyPad ||
-                tileTypeIsWaterStream(definition.type);
-            if (waterTile != water) {
+            if (sectionFor(definition.type) != section) {
                 continue;
             }
             const auto* group = editorTilePalette::groupFor(definition.type);
@@ -929,7 +951,6 @@ void LevelEditorDebugUi::drawTilePalette(
             if (column % perRow != 0) {
                 ImGui::SameLine();
             }
-            ImGui::BeginGroup();
             // Keep the selected direction visible on its single family button.
             const TileType displayedTile = group != nullptr &&
                     group->contains(editor.selectedTile())
@@ -976,18 +997,6 @@ void LevelEditorDebugUi::drawTilePalette(
                             editor.setSelectedTile(variant);
                             ImGui::CloseCurrentPopup();
                         }
-                        if (tileTypeIsCliffWall(variant)) {
-                            ImGui::Text("Style %02u", cliffWallVariantFor(variant) + 1U);
-                        } else if (tileTypeIsGround(variant)) {
-                            ImGui::Text("Rock %02u", groundRockVariantFor(variant) + 1U);
-                        } else if (tileTypeIsWall(variant)) {
-                            ImGui::Text("Stone %02u", wallStoneVariantFor(variant) + 1U);
-                        } else {
-                            const auto direction = variantDefinition.name.substr(
-                                group->name.size() + 1);
-                            ImGui::TextUnformatted(direction.data(),
-                                direction.data() + direction.size());
-                        }
                     }
                     ImGui::EndTable();
                 }
@@ -997,24 +1006,17 @@ void LevelEditorDebugUi::drawTilePalette(
                 ImGui::EndPopup();
             }
             ImGui::PopID();
-            if ((terrain || water) && group != nullptr) {
-                ImGui::TextUnformatted(group->name.data(), group->name.data() + group->name.size());
-            } else if (water || tileTypeIsStone(definition.type)) {
-                ImGui::TextUnformatted(displayedDefinition.name.data(),
-                    displayedDefinition.name.data() + displayedDefinition.name.size());
-            }
-            ImGui::EndGroup();
             ++column;
         }
     };
     {
         SOKOBAN_PROFILE_SCOPE("Editor.Draw palette icons");
         if (ImGui::CollapsingHeader("Water Tiles", ImGuiTreeNodeFlags_DefaultOpen)) {
-            drawPaletteIcons(false, true);
+            drawPaletteIcons(PaletteSection::Water);
             ImGui::TextWrapped("Place only on water. Streams follow the water surface; lily pads float above it. Rotate changes the stream direction.");
         }
         if (ImGui::CollapsingHeader("Terrain", ImGuiTreeNodeFlags_DefaultOpen)) {
-            drawPaletteIcons(true);
+            drawPaletteIcons(PaletteSection::Terrain);
             if (ImGui::Button("Randomize Ground")) {
                 (void)editor.randomizeRocks();
             }
@@ -1029,8 +1031,18 @@ void LevelEditorDebugUi::drawTilePalette(
                 ImGui::SetTooltip("Choose a random variant and quarter-turn rotation for every wall tile on all layers of this screen, preserving its stone or cliff family. Joined terrain uses only rotations that preserve its connections: isolated tiles allow four orientations, strips allow two, and asymmetric connections constrain rotation. Undo restores the previous choices.");
             }
         }
-        ImGui::Text("Paint");
-        drawPaletteIcons(false);
+        for (const auto& [label, section] : std::array {
+                 std::pair { "Characters", PaletteSection::Characters },
+                 std::pair { "Minecart", PaletteSection::Minecart },
+                 std::pair { "Hazards", PaletteSection::Hazards },
+                 std::pair { "Activators", PaletteSection::Activators },
+                 std::pair { "Rocks", PaletteSection::Rocks },
+                 std::pair { "Miscelaneous", PaletteSection::Miscellaneous },
+             }) {
+            if (ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen)) {
+                drawPaletteIcons(section);
+            }
+        }
     }
 
     // These pictures are screenshots of the real render, so they go stale when
