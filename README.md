@@ -10,7 +10,7 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 - Layered Sokoban movement with rocks, pressure-plate gates, pulse buttons, persistent levers, rotator
   plates, lock plates, elevators, minecarts and rail gates, goals, undo, restart,
   multi-screen levels, and completion tracking.
-- Paladin, knight, thief, witch, bard and cleric heroes with distinct movement abilities,
+- Paladin, Ranger, Knight, Thief, Witch, Bard and Cleric heroes with distinct movement abilities,
   switchable hero control, and pushable mirrors that create hero copies.
 - Ice, ladders, conveyors, floating lily pads, directional water streams,
   falling, configurable water layers, and four
@@ -586,11 +586,14 @@ PDB belongs in the separately retained Symbols ZIP.
 
 ## Level Format
 
-Screens are text `.scr` files containing sequential `@layer N` sections. Each
+Screens are text `.scr` files containing sequential `@layer N` sections. An
 authored screen can declare `@character paladin`, `@character knight`,
-`@character thief`, `@character witch`, `@character bard`, or `@character cleric`.
+`@character thief`, `@character witch`, `@character bard`, `@character cleric`,
+or `@character ranger`.
 The default is Paladin. Existing files can use `rogue` for Paladin and
-`druid` for Thief.
+`druid` for Thief. An `@ranger {"cell":[x,y,z]}` record turns a `C` tile
+into an explicit Ranger start. Add `"wardrobe":true` to target a wardrobe
+placeholder (`0`) at that cell.
 An optional `@water N` directive makes Air on that layer resolve to Water and
 extends the water beyond the authored board without expanding camera bounds.
 An optional `@camera {"pitch":45,"yaw":90}` directive sets that screen's camera
@@ -861,8 +864,8 @@ Turrets are pushable movables. A turret shoots a player or enemy whenever that
 unit moves into its cardinal line of sight; walls, rocks, and other live units
 block the shot.
 
-Paladin uses the original one-object push rules, which Lorekeeper also uses
-in the overworld. The knight can push any-length contiguous chains containing rocks,
+Paladin and Ranger have one point of push power. Lorekeeper uses the same
+push rules in the overworld. The knight can push any-length contiguous chains containing rocks,
 ice blocks, turrets, and enemies, provided the entire chain has a valid place
 to move. Thief compulsively pulls a movable unit
 directly behind it into every cell it vacates. When the witch moves toward the
@@ -871,6 +874,12 @@ unit instead; other heroes and walls block the spell's line of sight. Rocks,
 ice blocks, turrets, and enemies are all movable units for these abilities,
 mirrors, pressure plates, conveyors, and ice momentum. Hazards and enemy
 attacks still resolve normally after forced movement.
+
+Each player combines their character's base abilities with grants in
+`GameState::Player::abilityGrants`. A mechanic can increase push power or
+grant abilities such as Thief's pull, personal attack immunity, or Cleric's
+protection aura. Grants follow the player through wardrobe changes and are
+tracked in undo, checkpoints, and solution replay.
 
 The bard surrounds itself with a 5x5 musical aura that also reaches one layer
 above and below. Whenever the bard moves, each live movable unit in that area

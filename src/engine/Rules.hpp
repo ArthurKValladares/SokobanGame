@@ -49,6 +49,24 @@ struct GameState {
         // saves and concurrent actions agree on it.
         uint8_t quarterTurns = 0;
 
+        // Additive powers that travel with this player through wardrobe changes.
+        CharacterAbilities abilityGrants {};
+
+        [[nodiscard]] constexpr CharacterAbilities abilities(
+            CharacterType fallback) const
+        {
+            auto result = baseCharacterAbilities(character.value_or(fallback));
+            const int power = result.pushPower + abilityGrants.pushPower;
+            result.pushPower = static_cast<uint8_t>(
+                power < CharacterAbilities::unlimitedPush
+                    ? power : CharacterAbilities::unlimitedPush);
+            result.flags |= abilityGrants.flags;
+            if (abilityGrants.pushPower != 0) {
+                result.grant(CharacterAbility::PushEnemy);
+            }
+            return result;
+        }
+
         bool operator==(const Player&) const = default;
     };
 

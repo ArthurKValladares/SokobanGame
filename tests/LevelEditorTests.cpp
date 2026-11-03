@@ -1788,7 +1788,7 @@ void testInvalidLoadLeavesDocumentUntouched()
     const std::filesystem::path invalidPath = project.root / "invalid.scr";
     {
         std::ofstream file(invalidPath);
-        file << "@layer 0\n....\n\n@layer 1\n" << std::string(4, '\x05') << '\n';
+        file << "@layer 0\n....\n\n@layer 1\n" << std::string(4, '\x7f') << '\n';
     }
 
     CHECK(!editor.loadDocument(invalidPath));

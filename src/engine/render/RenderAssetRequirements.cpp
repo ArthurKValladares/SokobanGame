@@ -240,14 +240,14 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     // collapse in the requirement bitset.
     for (const Level::PlayerStart& player : level.playerStarts()) {
         requirements.requireModel(manifest.characterModel(player.character));
-        if (player.character == CharacterType::Cleric) {
+        if (baseCharacterAbilities(player.character).has(CharacterAbility::ProtectionAura)) {
             requirements.requireTexture(manifest.findTextureIdByName("ParticleGlow"));
         }
     }
     for (const Level::Wardrobe& wardrobe : level.wardrobes()) {
         requirements.requireModel(
             manifest.characterModel(wardrobe.character));
-        if (wardrobe.character == CharacterType::Cleric) {
+        if (baseCharacterAbilities(wardrobe.character).has(CharacterAbility::ProtectionAura)) {
             requirements.requireTexture(manifest.findTextureIdByName("ParticleGlow"));
         }
     }

@@ -783,17 +783,7 @@ void LevelEditor::setCharacter(CharacterType character)
         return;
     }
     auto before = captureBeforeDocumentChange();
-    const TileType replacementType = character == CharacterType::Knight
-        ? TileType::Knight
-        : character == CharacterType::Druid
-            ? TileType::Druid
-            : character == CharacterType::Witch
-                ? TileType::Witch
-                : character == CharacterType::Bard
-                    ? TileType::Bard
-                    : character == CharacterType::Cleric
-                        ? TileType::Cleric
-                    : TileType::Rogue;
+    const TileType replacementType = startTileForCharacter(character);
     const char replacement = tileTypeToChar(replacementType);
     bool changed = document_.character.has_value();
     for (std::vector<std::string>& layer : document_.layers) {
@@ -2952,23 +2942,8 @@ CharacterType LevelEditor::character() const
         for (const std::string& row : layer) {
             for (char encoded : row) {
                 const std::optional<TileType> tile = charToTileType(encoded);
-                if (tile == TileType::Knight) {
-                    return CharacterType::Knight;
-                }
-                if (tile == TileType::Rogue) {
-                    return CharacterType::Rogue;
-                }
-                if (tile == TileType::Druid) {
-                    return CharacterType::Druid;
-                }
-                if (tile == TileType::Witch) {
-                    return CharacterType::Witch;
-                }
-                if (tile == TileType::Bard) {
-                    return CharacterType::Bard;
-                }
-                if (tile == TileType::Cleric) {
-                    return CharacterType::Cleric;
+                if (tile && *tile != TileType::Player && tileTypeIsPlayerStart(*tile)) {
+                    return characterForStartTile(*tile);
                 }
             }
         }
@@ -4188,17 +4163,7 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
         if (!overworld) {
             const CharacterType character =
                 definition.character.value_or(CharacterType::Rogue);
-            const TileType concrete = character == CharacterType::Knight
-                ? TileType::Knight
-                : character == CharacterType::Druid
-                    ? TileType::Druid
-                    : character == CharacterType::Witch
-                        ? TileType::Witch
-                        : character == CharacterType::Bard
-                            ? TileType::Bard
-                            : character == CharacterType::Cleric
-                                ? TileType::Cleric
-                            : TileType::Rogue;
+            const TileType concrete = startTileForCharacter(character);
             for (std::vector<std::string>& layer : definition.layers) {
                 for (std::string& row : layer) {
                     std::ranges::replace(

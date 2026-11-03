@@ -527,6 +527,11 @@ void testRealManifestFile()
     CHECK(!paladinMesh.jointNodeIndices.empty());
     CHECK(paladinMesh.nodes.at(paladinMesh.jointNodeIndices.back()).name ==
         "Paladin_Cape");
+    const auto ranger = manifest.characterModel(sokoban::CharacterType::Ranger);
+    CHECK(!ranger.isCube());
+    CHECK(manifest.model(ranger).path ==
+        "KayKit Adventurers 2.0/Characters/gltf/Ranger.glb");
+    CHECK(!sokoban::loadGltfSkinnedMesh(*root / manifest.model(ranger).path).vertices.empty());
     CHECK_MESSAGE(
         manifest.characterModel(sokoban::CharacterType::Witch) ==
             manifest.modelIdByName("Witch"),

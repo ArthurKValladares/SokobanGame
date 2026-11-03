@@ -12,11 +12,6 @@
 namespace sokoban::rules {
 namespace {
 
-bool isCleric(const Level& level, const GameState::Player& player)
-{
-    return player.character.value_or(level.character()) == CharacterType::Cleric;
-}
-
 // Compare against the immutable input rather than copying every intermediate
 // board. Once a physical plate differs, later reactions cannot undo the fact
 // that this action changed a signal along the way.
@@ -210,7 +205,7 @@ FallResult playerFallTarget(
     GridPosition3 position)
 {
     if (std::ranges::any_of(state.players, [&](const auto& player) {
-            return !player.dead && isCleric(level, player);
+            return !player.dead && player.abilities(level.character()).has(CharacterAbility::ProtectionAura);
         })) {
         // Query the landing board: entering an attack activates protection,
         // while leaving its range cannot carry protection into an empty gap.
@@ -303,7 +298,7 @@ void resolveEnemyAttacks(const Level& level, GameState& state)
          playerIndex < state.players.size();
          ++playerIndex) {
         GameState::Player& player = state.players[playerIndex];
-        if (player.dead || isCleric(level, player) || protectedPlayers[playerIndex]) {
+        if (player.dead || player.abilities(level.character()).has(CharacterAbility::AttackImmunity) || protectedPlayers[playerIndex]) {
             continue;
         }
         const bool threatened = std::ranges::any_of(
@@ -1857,7 +1852,7 @@ std::vector<char> clericGravityProtection(const Level& level, const GameState& s
     }
     std::vector<char> protectedPlayers(state.players.size(), 0);
     for (const auto& cleric : state.players) {
-        if (cleric.dead || !isCleric(level, cleric)) {
+        if (cleric.dead || !cleric.abilities(level.character()).has(CharacterAbility::ProtectionAura)) {
             continue;
         }
         const auto inAura = [&](const auto& ally) {
@@ -1885,7 +1880,7 @@ std::vector<char> clericAttackProtection(const Level& level, const GameState& st
 {
     std::vector<char> protectedPlayers(state.players.size(), 0);
     for (const auto& cleric : state.players) {
-        if (cleric.dead || !isCleric(level, cleric)) {
+        if (cleric.dead || !cleric.abilities(level.character()).has(CharacterAbility::ProtectionAura)) {
             continue;
         }
         for (std::size_t i = 0; i < state.players.size(); ++i) {
@@ -2559,6 +2554,7 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
                     .dead = source.dead,
                     .drowned = source.drowned,
                     .sliding = std::nullopt,
+                    .abilityGrants = source.abilityGrants,
                 });
                 resultPlayer = after.players.size() - 1;
             }
@@ -2650,6 +2646,7 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
                 return !player.dead && !candidate.dead &&
                     player.cell == candidate.cell &&
                     player.character == candidate.character &&
+                    player.abilityGrants == candidate.abilityGrants &&
                     player.controller != invalidEntityId &&
                     player.controller == candidate.controller;
             });
@@ -3391,9 +3388,7 @@ private:
         for (std::size_t playerIndex = 0;
              playerIndex < playerCount_;
              ++playerIndex) {
-            if (characterBehavior(
-                    after_.players[playerIndex].character.value_or(
-                        level_.character())) != CharacterType::Bard) {
+            if (!after_.players[playerIndex].abilities(level_.character()).has(CharacterAbility::MovementAura)) {
                 continue;
             }
             const std::optional<PlayerMovementIntent> bardIntent =
@@ -3433,9 +3428,7 @@ private:
         for (std::size_t playerIndex = 0;
              playerIndex < playerCount_;
              ++playerIndex) {
-            if (characterBehavior(
-                    after_.players[playerIndex].character.value_or(
-                        level_.character())) == CharacterType::Bard &&
+            if (after_.players[playerIndex].abilities(level_.character()).has(CharacterAbility::MovementAura) &&
                 status_[entityIndexForPlayer(playerIndex)].movedThisMicro) {
                 return true;
             }
@@ -3448,9 +3441,7 @@ private:
         for (std::size_t playerIndex = 0;
              playerIndex < playerCount_;
              ++playerIndex) {
-            if (characterBehavior(
-                    after_.players[playerIndex].character.value_or(
-                        level_.character())) == CharacterType::Bard &&
+            if (after_.players[playerIndex].abilities(level_.character()).has(CharacterAbility::MovementAura) &&
                 movementIntentForPlayer(playerIndex)) {
                 return true;
             }
@@ -3560,9 +3551,7 @@ private:
                     const auto boarding = lilyPadBoardTarget(playerIndex, *status.intent);
                     if (boarding) {
                         status.target = boarding;
-                    } else if (characterBehavior(
-                            after_.players[playerIndex].character.value_or(
-                                level_.character())) == CharacterType::Witch) {
+                    } else if (after_.players[playerIndex].abilities(level_.character()).has(CharacterAbility::Swap)) {
                         status.witchSwapTarget = visibleMovableForWitch(
                             playerIndex, *status.intent);
                     }
@@ -4233,11 +4222,12 @@ private:
             status.resolved = true;
             return true;
         }
+        const auto abilities = after_.players[playerIndex].abilities(level_.character());
         if (status.inputDriven &&
-            characterBehavior(after_.players[playerIndex].character.value_or(
-                level_.character())) == CharacterType::Knight &&
+            abilities.pushPower != 0 &&
+            abilities.has(CharacterAbility::PushAlly) &&
             playerBlocksAt(after_, target, playerIndex)) {
-            return resolveKnightClericPush(entityIndex, direction, target, anyMovement);
+            return resolveAllyPush(entityIndex, direction, target, anyMovement);
         }
         const FallResult fall =
             playerFallTarget(level_, after_, playerIndex, target);
@@ -4252,9 +4242,7 @@ private:
         if (playerBlocksAt(after_, target, playerIndex)) {
             return false;
         }
-        if (characterBehavior(
-                after_.players[playerIndex].character.value_or(
-                    level_.character())) == CharacterType::Druid) {
+        if (abilities.has(CharacterAbility::Pull)) {
             const GridPosition3 pullSource = movementDestination(
                 playerCell(after_, playerIndex), oppositeDirection(direction));
             if (const GameState::Enemy* enemy = enemyAt(after_, pullSource)) {
@@ -4266,9 +4254,7 @@ private:
             }
         }
         if (status.inputDriven &&
-            characterBehavior(
-                after_.players[playerIndex].character.value_or(
-                    level_.character())) == CharacterType::Knight) {
+            abilities.pushPower > 1) {
             const std::vector<ChainEntity> chain = pushChainAt(target, direction);
             if (!chain.empty()) {
                 // A movable with its own unresolved intent gets the same chance
@@ -4281,7 +4267,9 @@ private:
                         return false;
                     }
                 }
-                if (pushKnightChain(chain, direction)) {
+                if ((abilities.pushPower == CharacterAbilities::unlimitedPush ||
+                     chain.size() <= abilities.pushPower) &&
+                    pushChain(chain, direction)) {
                     applyPlayerMoveAndPull(entityIndex, direction, target);
                     status.movedThisMicro = true;
                     anyMovement = true;
@@ -4296,10 +4284,8 @@ private:
             if (!status_[entityIndexForEnemy(enemyIndex)].resolved) {
                 return false;
             }
-            const bool rogue = characterBehavior(
-                after_.players[playerIndex].character.value_or(
-                    level_.character())) == CharacterType::Rogue;
-            if (status.inputDriven && rogue &&
+            if (status.inputDriven && abilities.pushPower != 0 &&
+                abilities.has(CharacterAbility::PushEnemy) &&
                 !enemyMovedThisMicro_[enemyIndex] &&
                 pushEnemy(enemyIndex, direction)) {
                 applyPlayerMoveAndPull(entityIndex, direction, target);
@@ -4318,8 +4304,8 @@ private:
             if (!status_[blockerIndex].resolved) {
                 return false; // wait for the blocker to resolve first
             }
-            // The blocker has finished its own movement for this micro-step.
-            // Direct input may push it.
+            // Direct input pushes one movable. Its existing collision rules
+            // can then carry riders or displace an enemy in its path.
             const GridPosition3 pushTarget =
                 movementDestination(target, direction);
             const GameState::Enemy* pushedEnemy = enemyAt(after_, pushTarget);
@@ -4334,14 +4320,11 @@ private:
                 canPushEnemy(
                     static_cast<std::size_t>(pushedEnemy - after_.enemies.data()),
                     direction);
-            const bool druid = characterBehavior(
-                after_.players[playerIndex].character.value_or(
-                    level_.character())) == CharacterType::Druid;
             const bool occupiedPortalExit =
                 level_.portalCrossing(target, directionOffset(direction))
                     .has_value() &&
                 occupied(pushTarget);
-            if (status.inputDriven && !druid && !isCleric(level_, after_.players[playerIndex]) &&
+            if (status.inputDriven && abilities.pushPower != 0 &&
                 !isUnitLocked(level_, after_, target) &&
                 !status_[blockerIndex].movedThisMicro &&
                 !occupiedPortalExit &&
@@ -4387,13 +4370,13 @@ private:
     // Evaluate the complete shove before either hero falls. The attacked
     // Knight and its Cleric must remain adjacent on the landing board, even
     // though moving the Cleric first would briefly separate them by two cells.
-    [[nodiscard]] bool resolveKnightClericPush(
+    [[nodiscard]] bool resolveAllyPush(
         std::size_t knightEntity, MoveDirection direction,
         GridPosition3 target, bool& anyMovement)
     {
         const auto blocker = liveUnitAt(after_, target);
         if (!blocker || blocker->kind != EntityKind::Player ||
-            !isCleric(level_, after_.players[blocker->index])) {
+            !after_.players[blocker->index].abilities(level_.character()).has(CharacterAbility::PushableAlly)) {
             return false;
         }
         const std::size_t clericIndex = blocker->index;
@@ -4439,7 +4422,7 @@ private:
         clericStatus.resolved = true;
         clericStatus.movedThisMicro = true;
         clericStatus.done = true; // A passive shove cannot pick up the Knight's input.
-        applyPlayerMove(knightEntity, direction, target, &knightFall);
+        applyPlayerMoveAndPull(knightEntity, direction, target, &knightFall);
         knightStatus.movedThisMicro = true;
         anyMovement = true;
         return true;
@@ -4498,7 +4481,7 @@ private:
     // Validates the complete mixed chain against a copy before committing any
     // entity. Farthest-first movement then gives every block, turret, or enemy
     // exactly one newly vacated destination and keeps a failed push atomic.
-    [[nodiscard]] bool pushKnightChain(
+    [[nodiscard]] bool pushChain(
         const std::vector<ChainEntity>& chain,
         MoveDirection direction)
     {
@@ -4960,7 +4943,7 @@ private:
                         newlyVisible(entityIndex) ||
                         (clericAttackProtection_[playerIndex] && !protectedPlayers[playerIndex])) &&
                     visible[turretIndex][entityIndex]) {
-                    if (!isCleric(level_, player) && !protectedPlayers[playerIndex]) {
+                    if (!player.abilities(level_.character()).has(CharacterAbility::AttackImmunity) && !protectedPlayers[playerIndex]) {
                         killedPlayers[playerIndex] = true;
                         anyKilled = true;
                     }
@@ -5100,7 +5083,7 @@ private:
              playerIndex < playerCount_;
              ++playerIndex) {
             GameState::Player& player = after_.players[playerIndex];
-            if (player.dead || isCleric(level_, player) || protectedPlayers[playerIndex]) {
+            if (player.dead || player.abilities(level_.character()).has(CharacterAbility::AttackImmunity) || protectedPlayers[playerIndex]) {
                 continue;
             }
 
@@ -5328,14 +5311,13 @@ private:
     void applyPlayerMoveAndPull(
         std::size_t entityIndex,
         MoveDirection direction,
-        GridPosition3 target)
+        GridPosition3 target,
+        const FallResult* resolvedFall = nullptr)
     {
         const std::size_t playerIndex = playerIndexForEntity(entityIndex);
         const GridPosition3 vacated = playerCell(after_, playerIndex);
         std::optional<ChainEntity> pulled;
-        if (characterBehavior(
-                after_.players[playerIndex].character.value_or(
-                    level_.character())) == CharacterType::Druid) {
+        if (after_.players[playerIndex].abilities(level_.character()).has(CharacterAbility::Pull)) {
             const GridPosition3 pullSource =
                 movementTarget(vacated, oppositeDirection(direction));
             if (const std::optional<ChainEntity> entity =
@@ -5349,7 +5331,7 @@ private:
             }
         }
 
-        applyPlayerMove(entityIndex, direction, target);
+        applyPlayerMove(entityIndex, direction, target, resolvedFall);
         if (!pulled) {
             return;
         }

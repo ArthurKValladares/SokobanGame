@@ -1234,42 +1234,52 @@ Level::Definition Level::parseDefinition(
         throw std::runtime_error("Level is empty: " + source);
     }
 
-    // Named records retain printable, backwards-compatible grids while the
-    // editor uses distinct tokens for the new character and its wardrobe.
+    // Named hero records keep the grid printable. The editor uses distinct
+    // internal tokens so heroes and wardrobes can be painted independently.
     if (std::ranges::any_of(lines, [](const std::string& line) {
-            return line.starts_with("@cleric ");
+            return line.starts_with("@ranger ") || line.starts_with("@cleric ");
         })) {
-        std::vector<std::string> gridLines;
-        std::vector<std::pair<GridPosition3, bool>> clerics;
+        std::vector<std::pair<GridPosition3, TileType>> namedHeroes;
+        std::vector<std::string> heroGridLines;
         for (const auto& line : lines) {
-            if (!line.starts_with("@cleric ")) {
-                gridLines.push_back(line);
+            const bool ranger = line.starts_with("@ranger ");
+            if (!ranger && !line.starts_with("@cleric ")) {
+                heroGridLines.push_back(line);
                 continue;
             }
+            const auto hero = ranger ? CharacterType::Ranger : CharacterType::Cleric;
+            const auto name = characterTypeName(hero);
             try {
-                const Json object = Json::parse(line.substr(8));
-                const auto cell = parseLinkedCell(object.at("cell"), "cell", sourceName, "Cleric");
-                if (std::ranges::any_of(clerics, [&](const auto& entry) { return entry.first == cell; })) {
-                    throw std::runtime_error("Duplicate cleric cell: " + source);
+                const Json object = Json::parse(line.substr(name.size() + 2));
+                const auto cell = parseLinkedCell(object.at("cell"), "cell", sourceName, name);
+                if (std::ranges::any_of(namedHeroes,
+                        [&](const auto& entry) { return entry.first == cell; })) {
+                    throw std::runtime_error("Duplicate " + std::string(name) + " cell: " + source);
                 }
-                clerics.emplace_back(cell, object.value("wardrobe", false));
+                const auto tile = object.value("wardrobe", false)
+                    ? wardrobeTileForCharacter(hero) : startTileForCharacter(hero);
+                namedHeroes.emplace_back(cell, tile);
             } catch (const Json::exception& error) {
-                throw std::runtime_error("Invalid cleric metadata: " + std::string(error.what()));
+                throw std::runtime_error("Invalid " + std::string(name) +
+                    " metadata: " + error.what());
             }
         }
-        Definition result = parseDefinition(gridLines, sourceName);
-        for (const auto& [cell, wardrobe] : clerics) {
+        Definition result = parseDefinition(heroGridLines, sourceName);
+        for (const auto& [cell, tile] : namedHeroes) {
             if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
                 static_cast<std::size_t>(cell.z) >= result.layers.size() ||
                 static_cast<std::size_t>(cell.y) >= result.layers[cell.z].size() ||
                 static_cast<std::size_t>(cell.x) >= result.layers[cell.z][cell.y].size()) {
-                throw std::runtime_error("Cleric cell outside screen: " + source);
+                throw std::runtime_error("Named hero cell outside screen: " + source);
             }
             char& token = result.layers[cell.z][cell.y][cell.x];
-            if (token != tileTypeToChar(wardrobe ? TileType::WardrobeLorekeeper : TileType::Player)) {
-                throw std::runtime_error("Cleric metadata requires matching player or wardrobe tile: " + source);
+            const auto placeholder = tileTypeIsWardrobe(tile)
+                ? TileType::WardrobeLorekeeper : TileType::Player;
+            if (token != tileTypeToChar(placeholder)) {
+                throw std::runtime_error(
+                    "Named hero metadata requires matching player or wardrobe tile: " + source);
             }
-            token = tileTypeToChar(wardrobe ? TileType::WardrobeCleric : TileType::Cleric);
+            token = tileTypeToChar(tile);
         }
         return result;
     }
@@ -1415,7 +1425,7 @@ Level::Definition Level::parseDefinition(
                 throw std::runtime_error(
                     "Invalid character metadata; expected '@character lorekeeper', "
                     "'@character paladin', '@character knight', '@character thief', "
-                    "'@character witch', '@character bard', or '@character cleric': " + source);
+                    "'@character witch', '@character bard', '@character cleric', or '@character ranger': " + source);
             }
             continue;
         }
@@ -1682,17 +1692,20 @@ std::vector<std::string> Level::serializeDefinition(
     const Definition& definition)
 {
     Definition disk = definition;
-    std::vector<std::string> clerics;
+    std::vector<std::string> namedHeroes;
     std::vector<std::string> crystals;
     for (std::size_t z = 0; z < disk.layers.size(); ++z) {
         for (std::size_t y = 0; y < disk.layers[z].size(); ++y) {
             for (std::size_t x = 0; x < disk.layers[z][y].size(); ++x) {
                 char& token = disk.layers[z][y][x];
                 const auto type = charToTileType(token).value_or(TileType::Air);
-                if (type == TileType::Cleric || type == TileType::WardrobeCleric) {
-                    const bool wardrobe = type == TileType::WardrobeCleric;
+                if (type == TileType::Cleric || type == TileType::WardrobeCleric ||
+                    type == TileType::Ranger || type == TileType::WardrobeRanger) {
+                    const bool wardrobe = tileTypeIsWardrobe(type);
+                    const auto hero = wardrobeCharacterForTile(type)
+                        .value_or(characterForStartTile(type));
                     Json object { { "cell", { x, y, z } }, { "wardrobe", wardrobe } };
-                    clerics.push_back("@cleric " + object.dump());
+                    namedHeroes.push_back("@" + std::string(characterTypeName(hero)) + " " + object.dump());
                     token = tileTypeToChar(wardrobe ? TileType::WardrobeLorekeeper : TileType::Player);
                     continue;
                 }
@@ -1704,13 +1717,13 @@ std::vector<std::string> Level::serializeDefinition(
             }
         }
     }
-    if (!crystals.empty() || !clerics.empty()) {
+    if (!crystals.empty() || !namedHeroes.empty()) {
         auto lines = serializeDefinition(disk);
         if (disk.layers.size() == 1 && std::ranges::none_of(lines,
                 [](const std::string& line) { return line.starts_with(layerPrefix); }))
             lines.insert(lines.begin(), "@layer 0");
         lines.insert(lines.begin(), crystals.begin(), crystals.end());
-        lines.insert(lines.begin(), clerics.begin(), clerics.end());
+        lines.insert(lines.begin(), namedHeroes.begin(), namedHeroes.end());
         return lines;
     }
     validateGroundSplats(definition, "serialized level");
@@ -2099,19 +2112,8 @@ Level Level::loadFromLayers(
                 }
 
                 if (tileTypeIsPlayerStart(*tile)) {
-                    const CharacterType heroCharacter = *tile == TileType::Knight
-                        ? CharacterType::Knight
-                        : *tile == TileType::Druid
-                            ? CharacterType::Druid
-                            : *tile == TileType::Witch
-                                ? CharacterType::Witch
-                                : *tile == TileType::Bard
-                                    ? CharacterType::Bard
-                                    : *tile == TileType::Cleric
-                                        ? CharacterType::Cleric
-                                    : *tile == TileType::Rogue
-                                        ? CharacterType::Rogue
-                                        : selectedCharacter;
+                    const CharacterType heroCharacter =
+                        characterForStartTile(*tile, selectedCharacter);
                     level.playerStarts_.push_back({ position, heroCharacter });
                     if (level.playerStarts_.size() == 1) {
                         level.playerStart_ = position;

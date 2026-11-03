@@ -143,6 +143,8 @@ enum class TileType : uint8_t {
     // Encoded as named @cleric metadata on disk; printable symbols are full.
     Cleric,
     WardrobeCleric,
+    Ranger,
+    WardrobeRanger,
     Count,
 };
 
@@ -350,6 +352,8 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::SkippingCrystal, '\x02', "Skipping Crystal", { 1.0f, 1.0f, 1.0f, 0.84f } },
     TileTypeDefinition { TileType::Cleric, '\x03', "Cleric", { 1.0f, 0.82f, 0.24f, 1.0f } },
     TileTypeDefinition { TileType::WardrobeCleric, '\x04', "Wardrobe Cleric", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::Ranger, '\x05', "Ranger", { 0.32f, 0.60f, 0.28f, 1.0f } },
+    TileTypeDefinition { TileType::WardrobeRanger, '\x06', "Wardrobe Ranger", { 1.0f, 1.0f, 1.0f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -410,10 +414,37 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 }
 // Clockwise turns from north, matching the robot's initial travel heading.
 [[nodiscard]] std::optional<uint32_t> robotOrientationQuarterTurns(TileType type);
+[[nodiscard]] constexpr CharacterType characterForStartTile(
+    TileType tile, CharacterType legacyCharacter = CharacterType::Rogue)
+{
+    switch (tile) {
+    case TileType::Rogue: return CharacterType::Rogue;
+    case TileType::Knight: return CharacterType::Knight;
+    case TileType::Druid: return CharacterType::Druid;
+    case TileType::Witch: return CharacterType::Witch;
+    case TileType::Bard: return CharacterType::Bard;
+    case TileType::Cleric: return CharacterType::Cleric;
+    case TileType::Ranger: return CharacterType::Ranger;
+    default: return legacyCharacter;
+    }
+}
+[[nodiscard]] constexpr TileType startTileForCharacter(CharacterType character)
+{
+    switch (character) {
+    case CharacterType::Knight: return TileType::Knight;
+    case CharacterType::Druid: return TileType::Druid;
+    case CharacterType::Witch: return TileType::Witch;
+    case CharacterType::Bard: return TileType::Bard;
+    case CharacterType::Cleric: return TileType::Cleric;
+    case CharacterType::Ranger: return TileType::Ranger;
+    default: return TileType::Rogue;
+    }
+}
 [[nodiscard]] constexpr bool tileTypeIsWardrobe(TileType type)
 {
     return (type >= TileType::WardrobeLorekeeper &&
-        type <= TileType::WardrobeBard) || type == TileType::WardrobeCleric;
+        type <= TileType::WardrobeBard) || type == TileType::WardrobeCleric ||
+        type == TileType::WardrobeRanger;
 }
 [[nodiscard]] constexpr std::optional<CharacterType> wardrobeCharacterForTile(
     TileType type)
@@ -426,6 +457,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     case TileType::WardrobeWitch: return CharacterType::Witch;
     case TileType::WardrobeBard: return CharacterType::Bard;
     case TileType::WardrobeCleric: return CharacterType::Cleric;
+    case TileType::WardrobeRanger: return CharacterType::Ranger;
     default: return std::nullopt;
     }
 }
@@ -440,6 +472,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     case CharacterType::Witch: return TileType::WardrobeWitch;
     case CharacterType::Bard: return TileType::WardrobeBard;
     case CharacterType::Cleric: return TileType::WardrobeCleric;
+    case CharacterType::Ranger: return TileType::WardrobeRanger;
     }
     return TileType::WardrobeLorekeeper;
 }

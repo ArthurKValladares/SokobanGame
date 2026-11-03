@@ -67,8 +67,8 @@ std::optional<MoveDirection> movementDirection(
     MoveDirection playerInput)
 {
     for (const GameState::Player& player : before.players) {
-        if (characterBehavior(player.character.value_or(level.character())) ==
-            CharacterType::Witch) {
+        const auto abilities = player.abilities(level.character());
+        if (abilities.pushPower == 0) {
             continue;
         }
         const GridPosition3 pushCell =
@@ -77,6 +77,8 @@ std::optional<MoveDirection> movementDirection(
             std::min(before.movables.size(), after.movables.size());
         for (std::size_t i = 0; i < count; ++i) {
             if (before.movables[i].cell == pushCell &&
+                !(abilities.has(CharacterAbility::Swap) &&
+                    after.movables[i].cell == player.cell) &&
                 !(after.movables[i].cell == pushCell)) {
                 return true;
             }
@@ -85,19 +87,21 @@ std::optional<MoveDirection> movementDirection(
             std::min(before.enemies.size(), after.enemies.size());
         for (std::size_t i = 0; i < enemyCount; ++i) {
             if (before.enemies[i].cell == pushCell &&
+                !(abilities.has(CharacterAbility::Swap) &&
+                    after.enemies[i].cell == player.cell) &&
                 !(after.enemies[i].cell == pushCell)) {
                 return true;
             }
         }
         const std::size_t playerIndex = static_cast<std::size_t>(
             &player - before.players.data());
-        if (characterBehavior(player.character.value_or(level.character())) ==
-                CharacterType::Knight && playerIndex < after.players.size() &&
+        if (abilities.has(CharacterAbility::PushAlly) &&
+            playerIndex < after.players.size() &&
             after.players[playerIndex].cell == pushCell) {
             const auto playerCount = std::min(before.players.size(), after.players.size());
             for (std::size_t i = 0; i < playerCount; ++i) {
                 if (i != playerIndex && !before.players[i].dead &&
-                    before.players[i].character.value_or(level.character()) == CharacterType::Cleric &&
+                    before.players[i].abilities(level.character()).has(CharacterAbility::PushableAlly) &&
                     before.players[i].cell == pushCell && after.players[i].cell != pushCell) {
                     return true;
                 }
@@ -124,9 +128,8 @@ std::optional<MoveDirection> movementDirection(
     for (std::size_t playerIndex = 0;
          playerIndex < playerCount;
          ++playerIndex) {
-        if (characterBehavior(
-                before.players[playerIndex].character.value_or(
-                    level.character())) != CharacterType::Druid) {
+        if (!before.players[playerIndex].abilities(level.character())
+                 .has(CharacterAbility::Pull)) {
             continue;
         }
         const std::optional<MoveDirection> direction = movementDirection(

@@ -685,6 +685,13 @@
       "rotateHalfTurn": true
     },
     {
+      "name": "Ranger",
+      "path": "KayKit Adventurers 2.0/Characters/gltf/Ranger.glb",
+      "geometry": "skinned",
+      "preserveAspectRatio": true,
+      "rotateHalfTurn": true
+    },
+    {
       "name": "Cleric",
       "path": "KeyKit Cleric/characters/Cleric.glb",
       "geometry": "skinned",
@@ -2857,6 +2864,10 @@
     },
     {
       "tile": "Wardrobe Bard",
+      "model": "Wardrobe"
+    },
+    {
+      "tile": "Wardrobe Ranger",
       "model": "Wardrobe"
     },
     {

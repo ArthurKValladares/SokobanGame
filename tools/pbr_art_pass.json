@@ -152,6 +152,12 @@
       "surface_rule": "hero"
     },
     {
+      "name": "Ranger",
+      "ownership": "retained",
+      "source": "KayKit Adventurers 2.0/Characters/gltf/Ranger.glb",
+      "skip": "Vendor-authored skinned character with embedded materials."
+    },
+    {
       "name": "Thief",
       "ownership": "retained",
       "source": "KayKit Adventurers 2.0/Characters/gltf/Rogue_Hooded.glb",

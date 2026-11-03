@@ -424,6 +424,27 @@ void testClericStartsAndWardrobesRoundTrip()
         "@layer 0", "...", "@layer 1", "CR " }, "Cleric on rock"); }, "matching player");
 }
 
+void testRangerStartsAndWardrobesRoundTrip()
+{
+    TEST("rangerStartsAndWardrobesRoundTrip");
+    Level::Definition definition { .layers = { { "...." }, { "CC00" } } };
+    definition.layers[1][0][0] = tileTypeToChar(TileType::Ranger);
+    definition.layers[1][0][1] = tileTypeToChar(TileType::Cleric);
+    definition.layers[1][0][2] = tileTypeToChar(TileType::WardrobeRanger);
+    const auto serialized = Level::serializeDefinition(definition);
+    CHECK(std::ranges::count_if(serialized, [](const auto& line) {
+        return line.starts_with("@ranger ");
+    }) == 2);
+    CHECK(Level::parseDefinition(serialized, "ranger round trip") == definition);
+    const auto level = Level::loadFromDefinition(definition, "ranger tiles");
+    CHECK(level.playerStarts()[0].character == CharacterType::Ranger);
+    CHECK(level.playerStarts()[1].character == CharacterType::Cleric);
+    CHECK(level.wardrobes()[0].character == CharacterType::Ranger);
+    const auto legacyStart = Level::parseDefinition(
+        { "@character ranger", "@layer 0", "C." }, "ranger directive");
+    CHECK(legacyStart.character == CharacterType::Ranger);
+}
+
 void testWardrobeVariantsRoundTripAndRemainTraversable()
 {
     TEST("wardrobeVariantsRoundTripAndRemainTraversable");
@@ -1304,7 +1325,7 @@ void testLevelValidationErrors()
     CHECK(multipleHeroes.playerStarts()[3].character == CharacterType::Witch);
     CHECK(multipleHeroes.playerStarts()[4].character == CharacterType::Bard);
     checkThrowsContaining([] {
-        (void)Level::loadFromLayers({ { "C\x05" } }, "unknown tile");
+        (void)Level::loadFromLayers({ { "C\x7f" } }, "unknown tile");
     }, "Unknown level tile");
     checkThrowsContaining([] {
         (void)Level::loadFromLayers({ { "..." }, { "LC " } }, "unsupported ladder");
@@ -1787,6 +1808,7 @@ void testCliffWallStylesAreSolidAndSaveSplatAssignments()
 int main()
 {
     testClericStartsAndWardrobesRoundTrip();
+    testRangerStartsAndWardrobesRoundTrip();
     TEST("lecternMetadata");
     const Level::Definition lecternDefinition {
         .layers = { { "..." }, { "CT " } },

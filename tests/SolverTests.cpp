@@ -301,6 +301,9 @@ void testPackedStateKeyIncludesEveryDynamicField()
         state, activeController + 1));
 
     GameState changed = state;
+    changed.players[0].abilityGrants.grant(CharacterAbility::Pull);
+    checkChanged(changed);
+    changed = state;
     changed.activeButtons = { { 1, 2, 3 } };
     checkChanged(changed);
     changed = state;

@@ -154,6 +154,9 @@ Json stateJson(
                 { "sliding", directionJson(player.sliding) },
                 { "quarterTurns", player.quarterTurns },
             });
+        if (const auto grants = player.abilityGrants.packed(); grants != 0) {
+            result["players"].back()["abilityGrants"] = grants;
+        }
     }
     for (const auto& movable : state.movables) {
         result["movables"].push_back(
@@ -247,6 +250,9 @@ void parseState(const Json& value, Step& step)
                 .drowned = item.at("drowned").get<bool>(),
                 .sliding = parseDirection(item.at("sliding")),
                 .quarterTurns = parseTurns(item.at("quarterTurns")),
+                .abilityGrants = item.contains("abilityGrants")
+                    ? CharacterAbilities::unpack(exactInteger<uint16_t>(item.at("abilityGrants")))
+                    : CharacterAbilities {},
             });
     }
     for (const auto& item : array("movables")) {

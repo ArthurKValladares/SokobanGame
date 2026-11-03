@@ -55,6 +55,7 @@ const AssetManifest& testManifest(bool components = false)
         { "name": "Witch", "path": "w.glb", "geometry": "skinned" },
         { "name": "Bard", "path": "b.glb", "geometry": "skinned" },
         { "name": "Cleric", "path": "cleric.glb", "geometry": "skinned" },
+        { "name": "Ranger", "path": "ranger.glb", "geometry": "skinned" },
         { "name": "Wardrobe", "path": "wardrobe.glb", "preserveSourceScale": true },
         { "name": "Robot", "path": "robot.glb", "geometry": "skinned", "preserveSourceScale": true },
         { "name": "CliffWallIslandA", "path": "cliff_a.glb", "preserveSourceScale": true },
@@ -92,7 +93,8 @@ const AssetManifest& testManifest(bool components = false)
         { "tile": "Wardrobe Thief", "model": "Wardrobe" },
         { "tile": "Wardrobe Witch", "model": "Wardrobe" },
         { "tile": "Wardrobe Bard", "model": "Wardrobe" },
-        { "tile": "Wardrobe Cleric", "model": "Wardrobe" }
+        { "tile": "Wardrobe Cleric", "model": "Wardrobe" },
+        { "tile": "Wardrobe Ranger", "model": "Wardrobe" }
       ]
     })json";
     static const AssetManifest manifest = AssetManifest::parse(definition);

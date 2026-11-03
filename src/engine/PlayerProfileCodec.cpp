@@ -300,7 +300,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         const Json& item = players[i];
         rejectUnknownProperties(
             item,
-            { "id", "cell", "character", "controller", "dead", "drowned", "sliding", "quarterTurns" },
+            { "id", "cell", "character", "controller", "dead", "drowned", "sliding", "quarterTurns", "abilityGrants" },
             playerContext);
         std::optional<CharacterType> character;
         const Json& encodedCharacter =
@@ -316,6 +316,11 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
                 fail(playerContext, "unknown hero character");
             }
         }
+        const uint64_t abilityGrants = item.contains("abilityGrants")
+            ? unsignedIntegerProperty(item, "abilityGrants", playerContext) : 0;
+        if (abilityGrants > UINT16_MAX) {
+            fail(playerContext, "property 'abilityGrants' must fit in 16 bits");
+        }
         state.players.push_back({
             .id = unsignedIntegerProperty(item, "id", playerContext),
             .cell = positionFromJson(
@@ -330,6 +335,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
                 requiredProperty(item, "sliding", playerContext),
                 playerContext + ".sliding"),
             .quarterTurns = quarterTurnsProperty(item, playerContext),
+            .abilityGrants = CharacterAbilities::unpack(static_cast<uint16_t>(abilityGrants)),
         });
     }
 
@@ -540,6 +546,9 @@ OrderedJson gameStateToJson(const GameState& state)
         });
         if (player.quarterTurns != 0) {
             players.back()["quarterTurns"] = player.quarterTurns;
+        }
+        if (const auto grants = player.abilityGrants.packed(); grants != 0) {
+            players.back()["abilityGrants"] = grants;
         }
     }
     OrderedJson movables = OrderedJson::array();

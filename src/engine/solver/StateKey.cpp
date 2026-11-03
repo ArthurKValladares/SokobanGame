@@ -6,7 +6,7 @@
 namespace sokoban::solver::detail {
 namespace {
 
-static_assert(static_cast<std::uint32_t>(CharacterType::Cleric) < 0xffU);
+static_assert(static_cast<std::uint32_t>(CharacterType::Ranger) < 0xffU);
 static_assert(static_cast<std::uint32_t>(MoveDirection::Right) < 0xffU);
 static_assert(static_cast<std::uint32_t>(TileType::Count) <= 0x100U);
 
@@ -55,10 +55,15 @@ PackedStateKey makePackedStateKey(
         flags |= static_cast<std::uint32_t>(player.dead) << 16;
         flags |= static_cast<std::uint32_t>(player.drowned) << 17;
         flags |= static_cast<std::uint32_t>(player.quarterTurns) << 18;
+        const auto abilityGrants = player.abilityGrants.packed();
+        flags |= static_cast<std::uint32_t>(abilityGrants != 0) << 26;
         words.push_back(player.id);
         words.push_back(player.controller);
         words.push_back(packPair(player.cell.x, player.cell.y));
         words.push_back(packZAndFlags(player.cell.z, flags));
+        if (abilityGrants != 0) {
+            words.push_back(abilityGrants);
+        }
     }
 
     words.push_back(state.movables.size());

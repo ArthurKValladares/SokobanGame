@@ -76,6 +76,11 @@ bool onlyPlayersMoved(const GameState& before, const GameState& after)
         before.players.size() != after.players.size()) {
         return false;
     }
+    for (std::size_t i = 0; i < before.players.size(); ++i) {
+        if (before.players[i].abilityGrants != after.players[i].abilityGrants) {
+            return false;
+        }
+    }
     return before.movables == after.movables &&
         before.enemies == after.enemies &&
         before.turnedMirrors == after.turnedMirrors &&

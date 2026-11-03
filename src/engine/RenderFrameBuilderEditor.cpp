@@ -43,31 +43,6 @@ using namespace renderFrameParts;
 
 namespace {
 
-CharacterType characterForStartTile(
-    TileType tile,
-    CharacterType legacyCharacter = CharacterType::Rogue)
-{
-    if (tile == TileType::Knight) {
-        return CharacterType::Knight;
-    }
-    if (tile == TileType::Rogue) {
-        return CharacterType::Rogue;
-    }
-    if (tile == TileType::Druid) {
-        return CharacterType::Druid;
-    }
-    if (tile == TileType::Witch) {
-        return CharacterType::Witch;
-    }
-    if (tile == TileType::Bard) {
-        return CharacterType::Bard;
-    }
-    if (tile == TileType::Cleric) {
-        return CharacterType::Cleric;
-    }
-    return legacyCharacter;
-}
-
 class EditorFrameBuild {
 public:
     explicit EditorFrameBuild(

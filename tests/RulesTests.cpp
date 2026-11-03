@@ -1007,6 +1007,47 @@ void testBlockedAndDifferentlyColoredLinkedObjectsStayPut()
     CHECK(moved.movables[2].cell == cell(5, 0, 1));
 }
 
+void testRangerUsesSinglePushAndCanGainAbilities()
+{
+    TEST("rangerUsesSinglePushAndCanGainAbilities");
+    const Level level = makeLevel({
+        { "......." },
+        { "RCR R  " },
+    }, CharacterType::Ranger);
+    const GameState initial = rules::initialState(level);
+    CHECK(initial.players[0].character == CharacterType::Ranger);
+    CHECK(initial.players[0].abilities(level.character()) ==
+        baseCharacterAbilities(CharacterType::Rogue));
+
+    const GameState pushed = rules::step(level, initial, MoveDirection::Right);
+    CHECK(pushed.players[0].cell == cell(2, 0, 1));
+    CHECK(pushed.movables[1].cell == cell(3, 0, 1));
+    CHECK(rules::step(level, pushed, MoveDirection::Right) == pushed);
+
+    GameState boosted = pushed;
+    boosted.players[0].abilityGrants.pushPower = 1;
+    const GameState chain = rules::step(level, boosted, MoveDirection::Right);
+    CHECK(chain.players[0].cell == cell(3, 0, 1));
+    CHECK(chain.movables[1].cell == cell(4, 0, 1));
+    CHECK(chain.movables[2].cell == cell(5, 0, 1));
+
+    GameState pulling = initial;
+    pulling.players[0].abilityGrants.grant(CharacterAbility::Pull);
+    const GameState pulled = rules::step(level, pulling, MoveDirection::Right);
+    CHECK(pulled.movables[0].cell == cell(1, 0, 1));
+    CHECK(pulled.movables[1].cell == cell(3, 0, 1));
+
+    const Level fight = makeLevel({ { "..." }, { "CN " } }, CharacterType::Ranger);
+    GameState fighter = rules::initialState(fight);
+    const auto attacked = rules::step(fight, fighter, MoveDirection::Right);
+    CHECK(attacked.enemies[0].cell == cell(2, 0, 1));
+    CHECK(attacked.players[0].dead);
+    fighter.players[0].abilityGrants.grant(CharacterAbility::AttackImmunity);
+    const auto immune = rules::step(fight, fighter, MoveDirection::Right);
+    CHECK(immune.enemies[0].cell == cell(2, 0, 1));
+    CHECK(!immune.players[0].dead);
+}
+
 void testKnightPushesAnUnlimitedMixedChain()
 {
     TEST("knightPushesAnUnlimitedMixedChain");
@@ -5401,6 +5442,7 @@ int main()
     testPushBlocked();
     testLinkedObjectsRepeatSuccessfulMovesWhenAble();
     testBlockedAndDifferentlyColoredLinkedObjectsStayPut();
+    testRangerUsesSinglePushAndCanGainAbilities();
     testKnightPushesAnUnlimitedMixedChain();
     testKnightChainPushIsAtomicWhenItsTailIsBlocked();
     testKnightCanPushAnEnemyButStillSuffersItsAttack();

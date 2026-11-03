@@ -79,7 +79,8 @@ inline constexpr std::array<Group, 17> groups {{
                      TileType::WardrobeDruid,
                      TileType::WardrobeWitch,
                      TileType::WardrobeBard,
-                     TileType::WardrobeCleric }, 7 },
+                     TileType::WardrobeCleric,
+                     TileType::WardrobeRanger }, 8 },
 }};
 
 [[nodiscard]] constexpr bool isTerrain(TileType tile)

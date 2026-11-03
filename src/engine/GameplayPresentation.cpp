@@ -1332,10 +1332,11 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
                 playerRenderTarget(after.cell, after.drowned));
         }
         if (gridDistance(from, to) > 0.0001f) {
+            const auto abilities = before.abilities(
+                level ? level->character() : CharacterType::Rogue);
             const AnimationUse movementUse = action.playerPulling
                 ? AnimationUse::PlayerPull
-                : (action.playerPushing &&
-                      before.character.value_or(level ? level->character() : CharacterType::Rogue) != CharacterType::Cleric)
+                : action.playerPushing && abilities.pushPower != 0
                     ? AnimationUse::PlayerPush
                     : AnimationUse::PlayerMove;
             if (visual != players_.end()) {
@@ -1433,7 +1434,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
             const GameState::Player& playerAfter = action.after.players[playerIndex];
             const bool protectedSurvivor = !playerAfter.dead &&
                 (clericProtection[playerIndex] ||
-                    playerAfter.character.value_or(level ? level->character() : CharacterType::Rogue) == CharacterType::Cleric) &&
+                    playerAfter.abilities(level ? level->character() : CharacterType::Rogue)
+                        .has(CharacterAbility::AttackImmunity)) &&
                 (playerBefore.cell != playerAfter.cell || before.cell != after.cell);
             if (playerBefore.dead || (!playerAfter.dead && !protectedSurvivor) || playerAfter.drowned ||
                 after.fallen || after.dead ||

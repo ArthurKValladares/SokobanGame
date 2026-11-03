@@ -1587,8 +1587,8 @@ void appendGameplayEntities(
                 input.presentation.worldAnimationTimeSeconds(), playerIndex);
         }
         if (!state.players[playerIndex].dead &&
-            state.players[playerIndex].character.value_or(
-                input.level.character()) == CharacterType::Bard) {
+            state.players[playerIndex].abilities(input.level.character())
+                .has(CharacterAbility::MovementAura)) {
             appendBardAura(
                 frame,
                 visual.motion.renderPosition,

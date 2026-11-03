@@ -352,7 +352,8 @@ void normalizeLegacySnapshot(
     }
 }
 
-std::vector<GridPosition3> witchSwapDestinations(const ActionPlan& action)
+std::vector<GridPosition3> witchSwapDestinations(
+    const Level& level, const ActionPlan& action)
 {
     std::vector<GridPosition3> destinations;
     const std::size_t playerCount = std::min(
@@ -368,7 +369,7 @@ std::vector<GridPosition3> witchSwapDestinations(const ActionPlan& action)
             action.before.players[playerIndex];
         const GameState::Player& afterPlayer =
             action.after.players[playerIndex];
-        if (beforePlayer.character != CharacterType::Witch ||
+        if (!beforePlayer.abilities(level.character()).has(CharacterAbility::Swap) ||
             beforePlayer.cell == afterPlayer.cell) {
             continue;
         }
@@ -1239,7 +1240,7 @@ GameplaySession::StartOutcome GameplaySession::planPlayerStep(
     const int stepLegs = static_cast<int>(step->legs.size());
     const GameState afterStep = step->action.after;
     const std::vector<GridPosition3> witchSwapEndpoints =
-        witchSwapDestinations(step->action);
+        witchSwapDestinations(level, step->action);
 
     std::vector<ActionScheduler::Pending> batch;
     batch.push_back(makePending(
