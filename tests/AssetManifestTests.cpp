@@ -532,6 +532,10 @@ void testRealManifestFile()
     CHECK(manifest.model(ranger).path ==
         "KayKit Adventurers 2.0/Characters/gltf/Ranger.glb");
     CHECK(!sokoban::loadGltfSkinnedMesh(*root / manifest.model(ranger).path).vertices.empty());
+    const auto druid = manifest.characterModel(sokoban::CharacterType::CrystalDruid);
+    CHECK(manifest.model(druid).path ==
+        "KayKit Adventurers 2.0/Characters/gltf/Druid.glb");
+    CHECK(!sokoban::loadGltfSkinnedMesh(*root / manifest.model(druid).path).vertices.empty());
     CHECK_MESSAGE(
         manifest.characterModel(sokoban::CharacterType::Witch) ==
             manifest.modelIdByName("Witch"),

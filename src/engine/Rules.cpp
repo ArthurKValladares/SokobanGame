@@ -2916,6 +2916,28 @@ namespace {
 // intent. An action can still pull a bystander into its closure by exposing it
 // to a turret or enemy. An empty scope means everything acts, which is the
 // behaviour every existing save was written against.
+// Keep resolver indices stable while a living unit changes entity kind.
+// Temporary slots are dead until used and are removed before publishing state.
+std::size_t allocateCrystalSlots(
+    GameState& state, const Level& level,
+    std::optional<MoveDirection> input, const StepScope& scope)
+{
+    if (input && (std::ranges::any_of(state.players, [&](const auto& player) {
+            const auto index = static_cast<std::size_t>(&player - state.players.data());
+            return !player.dead &&
+                player.abilities(level.character()).has(CharacterAbility::Crystallize) &&
+                (scope.wholeWorld() || std::ranges::find(scope.actors,
+                    resolvedEntityId(EntityKind::Player, player.id, index)) != scope.actors.end());
+        }) || std::ranges::any_of(state.wardrobes, [](const auto& wardrobe) {
+            return baseCharacterAbilities(wardrobe.character).has(CharacterAbility::Crystallize);
+        }))) {
+        state.movables.resize(
+            state.movables.size() + state.players.size() + state.enemies.size(),
+            GameState::Movable { .dead = true });
+    }
+    return state.movables.size();
+}
+
 class MicroStepResolver {
 public:
     MicroStepResolver(
@@ -2927,13 +2949,15 @@ public:
         const StepScope& scope,
         std::vector<TurretShot>* turretShots = nullptr,
         std::vector<PortalTransit>* portalTransits = nullptr,
-        bool* pressurePlateActivityChanged = nullptr)
+        bool* pressurePlateActivityChanged = nullptr,
+        std::vector<CrystalChange>* crystalChanges = nullptr)
         : level_(level)
         , after_(after)
         , plateActivity_ { level, before, pressurePlateActivityChanged }
         , playerInput_(playerInput)
         , rates_(rates)
-        , movableCount_(after.movables.size())
+        , originalMovableCount_(after.movables.size())
+        , movableCount_(allocateCrystalSlots(after, level, playerInput, scope))
         , playerCount_(after.players.size())
         , enemyCount_(after.enemies.size())
         , status_(movableCount_ + playerCount_ + enemyCount_)
@@ -2942,6 +2966,7 @@ public:
         , movableMovedDirections_(movableCount_)
         , turretShots_(turretShots)
         , portalTransits_(portalTransits)
+        , crystalChanges_(crystalChanges)
         , rotatorsEngagedAtStart_(rotatorEngagement(level, after))
         , elevatorsEngagedAtStart_(elevatorEngagement(level, after))
         , minecartsEngagedAtStart_(minecartEngagement(level, after))
@@ -2989,6 +3014,8 @@ public:
             }
             const std::size_t transitCount =
                 portalTransits_ ? portalTransits_->size() : 0;
+            const std::size_t crystalCount =
+                crystalChanges_ ? crystalChanges_->size() : 0;
             deriveIntents();
             const bool hasBardPulse = std::ranges::any_of(
                 status_,
@@ -3000,6 +3027,9 @@ public:
             if (mayPulse && hasBardPulse && !anyBardMovedThisMicro()) {
                 if (portalTransits_) {
                     portalTransits_->resize(transitCount);
+                }
+                if (crystalChanges_) {
+                    crystalChanges_->resize(crystalCount);
                 }
                 after_ = beforeBardPulse;
                 status_ = statusesBeforeBardPulse;
@@ -3035,6 +3065,7 @@ public:
         if (resolveLostClericProtection()) {
             resolveReactions();
         }
+        finishCrystalChanges();
     }
 
 private:
@@ -3064,6 +3095,8 @@ private:
         bool resolved = false;
         bool movedThisMicro = false;
         bool inputDriven = false; // player only
+        bool crystallized = false;
+        EntityId crystalRestorer = invalidEntityId;
         // A live bard moving within range overrides this movable unit's
         // ordinary slide or conveyor intent for the current micro-step.
         // The budget mirrors the bard's movement source so faster configured
@@ -3077,6 +3110,122 @@ private:
         // nearest visible movable unit on that ray.
         std::optional<ChainEntity> witchSwapTarget;
     };
+
+    void finishCrystalChanges()
+    {
+        if (originalMovableCount_ == movableCount_) {
+            return;
+        }
+        std::size_t index = 0;
+        std::erase_if(after_.players, [&](const auto&) {
+            return status_[entityIndexForPlayer(index++)].crystallized;
+        });
+        index = 0;
+        std::erase_if(after_.enemies, [&](const auto&) {
+            return status_[entityIndexForEnemy(index++)].crystallized;
+        });
+        const auto slots = after_.movables.begin() +
+            static_cast<std::ptrdiff_t>(originalMovableCount_);
+        after_.movables.erase(
+            std::remove_if(slots, after_.movables.end(), [](const auto& rock) {
+                return rock.id == invalidEntityId;
+            }),
+            after_.movables.end());
+
+        // Keep the crystal as a blocker until this action settles. The
+        // restored actor enters the board at commit, with fresh momentum.
+        for (std::size_t i = originalMovableCount_; i-- > 0;) {
+            if (status_[i].crystalRestorer == invalidEntityId || after_.movables[i].dead) {
+                continue;
+            }
+            const auto crystal = after_.movables[i];
+            const auto& origin = *crystal.crystalOrigin;
+            after_.movables.erase(after_.movables.begin() + static_cast<std::ptrdiff_t>(i));
+            if (origin.character) {
+                auto& player = after_.players.emplace_back(GameState::Player {
+                    .id = crystal.id,
+                    .cell = crystal.cell,
+                    .character = origin.character,
+                    .controller = origin.controller,
+                    .quarterTurns = origin.quarterTurns,
+                    .abilityGrants = origin.abilityGrants,
+                });
+                const auto fall = playerFallTarget(
+                    level_, after_, after_.players.size() - 1, crystal.cell);
+                player.cell = fall.cell;
+                player.dead = fall.fallen || !fall.supported;
+                player.drowned = fall.fallen;
+            } else {
+                auto& enemy = after_.enemies.emplace_back(GameState::Enemy {
+                    .id = crystal.id,
+                    .cell = crystal.cell,
+                    .quarterTurns = origin.quarterTurns,
+                });
+                const auto fall = enemyFallTarget(
+                    level_, after_, after_.enemies.size() - 1, crystal.cell);
+                enemy.cell = fall.cell;
+                enemy.fallen = fall.fallen;
+                enemy.dead = !fall.supported;
+            }
+            if (crystalChanges_) {
+                crystalChanges_->push_back({ status_[i].crystalRestorer, crystal.cell });
+            }
+            plateActivity_.observe(after_);
+        }
+    }
+
+    bool crystallize(std::size_t actor, LiveUnitAt victim, GridPosition3 cell)
+    {
+        auto& victimStatus = status_[entityIndexForUnit(victim)];
+        if (!victimStatus.resolved) {
+            return false;
+        }
+        const bool hero = victim.kind == EntityKind::Player;
+        const std::size_t rockIndex = originalMovableCount_ + victim.index +
+            (hero ? 0 : playerCount_);
+        auto& rock = after_.movables[rockIndex];
+        rock = { .type = TileType::Crystal, .cell = cell };
+        if (hero) {
+            auto& player = after_.players[victim.index];
+            rock.id = resolvedEntityId(victim.kind, player.id, victim.index);
+            rock.crystalOrigin = GameState::CrystalOrigin {
+                .character = player.character.value_or(level_.character()),
+                .controller = player.controller,
+                .abilityGrants = player.abilityGrants,
+                .quarterTurns = player.quarterTurns,
+            };
+            if (player.character.value_or(level_.character()) == CharacterType::Ranger) {
+                rock.type = TileType::SkippingCrystal;
+            }
+            player.dead = true;
+            player.sliding.reset();
+        } else {
+            auto& enemy = after_.enemies[victim.index];
+            rock.id = resolvedEntityId(victim.kind, enemy.id, victim.index);
+            rock.crystalOrigin = GameState::CrystalOrigin { .quarterTurns = enemy.quarterTurns };
+            enemy.dead = true;
+            enemy.sliding.reset();
+        }
+        victimStatus.crystallized = true;
+        victimStatus.done = true;
+        const auto fall = movableFallTarget(level_, after_, rockIndex, cell);
+        rock.cell = fall.cell;
+        rock.fallen = fall.fallen;
+        rock.dead = !fall.supported;
+        status_[rockIndex].active = true;
+        status_[rockIndex].done = rock.dead || rock.fallen;
+        status_[rockIndex].resolved = true;
+        status_[actor].done = true;
+        status_[actor].resolved = true;
+        if (crystalChanges_) {
+            const auto index = playerIndexForEntity(actor);
+            crystalChanges_->push_back({
+                resolvedEntityId(EntityKind::Player, after_.players[index].id, index), cell,
+            });
+        }
+        plateActivity_.observe(after_);
+        return true;
+    }
 
     // Brings one entity into the causal closure, by the id the rest of the
     // engine knows it by. Unmatched ids are ignored rather than rejected: a
@@ -4223,6 +4372,34 @@ private:
             return true;
         }
         const auto abilities = after_.players[playerIndex].abilities(level_.character());
+        if (status.inputDriven && originalMovableCount_ != movableCount_ &&
+            abilities.has(CharacterAbility::Crystallize)) {
+            const auto victim = liveUnitAt(after_, target);
+            if (victim && victim->kind == EntityKind::Movable &&
+                victim->index < originalMovableCount_ &&
+                after_.movables[victim->index].crystalOrigin) {
+                auto& crystalStatus = status_[victim->index];
+                if (!crystalStatus.resolved) return false;
+                if (crystalStatus.crystalRestorer == invalidEntityId) {
+                    crystalStatus.crystalRestorer = resolvedEntityId(
+                        EntityKind::Player, after_.players[playerIndex].id, playerIndex);
+                }
+                crystalStatus.done = true;
+                after_.movables[victim->index].sliding.reset();
+                status.done = true;
+                status.resolved = true;
+                anyMovement = true;
+                return true;
+            }
+            if (victim && victim->kind != EntityKind::Movable &&
+                entityIndexForUnit(*victim) != entityIndex) {
+                if (!crystallize(entityIndex, *victim, target)) {
+                    return false;
+                }
+                anyMovement = true;
+                return true;
+            }
+        }
         if (status.inputDriven &&
             abilities.pushPower != 0 &&
             abilities.has(CharacterAbility::PushAlly) &&
@@ -5382,6 +5559,7 @@ private:
     const PressurePlateActivityTracker plateActivity_;
     const std::optional<MoveDirection> playerInput_;
     const StepRates& rates_;
+    const std::size_t originalMovableCount_;
     const std::size_t movableCount_;
     const std::size_t playerCount_;
     const std::size_t enemyCount_;
@@ -5402,6 +5580,7 @@ private:
     std::vector<std::optional<MoveDirection>> movableMovedDirections_;
     std::vector<TurretShot>* turretShots_ = nullptr;
     std::vector<PortalTransit>* portalTransits_ = nullptr;
+    std::vector<CrystalChange>* crystalChanges_ = nullptr;
     bool suppressBardInfluences_ = false;
     // Which rotators had every linked plate pressed when the step began. A
     // rotator activates on the step that presses its last plate, never on a
@@ -5469,7 +5648,8 @@ StepResult scopedStepWithEvents(
         scope,
         &result.turretShots,
         &result.portalTransits,
-        &result.pressurePlateActivityChanged);
+        &result.pressurePlateActivityChanged,
+        &result.crystalChanges);
     resolver.run();
     return result;
 }

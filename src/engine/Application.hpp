@@ -271,6 +271,7 @@ private:
     ParticleSystem particleSystem_;
     ParticleEffectDefinition mirrorSwapParticleEffect_;
     ParticleEffectDefinition witchSwapParticleEffect_;
+    ParticleEffectDefinition crystalChangeParticleEffect_;
     TurretParticleEffects turretParticleEffects_;
     TurretFlameSystem turretFlames_;
     Level level_;

@@ -1,6 +1,7 @@
 #include "engine/Solution.hpp"
 
 #include "engine/Character.hpp"
+#include "engine/CrystalOriginJson.hpp"
 #include "engine/Rules.hpp"
 
 #include <nlohmann/json.hpp>
@@ -169,6 +170,9 @@ Json stateJson(
                 { "sliding", directionJson(movable.sliding) },
                 { "quarterTurns", movable.quarterTurns },
             });
+        if (movable.crystalOrigin) {
+            result["movables"].back()["crystalOrigin"] = crystalOriginToJson<Json>(*movable.crystalOrigin);
+        }
     }
     for (const auto& enemy : state.enemies) {
         result["enemies"].push_back(
@@ -240,6 +244,11 @@ void parseState(const Json& value, Step& step)
             if (!character)
                 throw std::runtime_error("state has an unknown character");
         }
+        const auto grants = item.contains("abilityGrants")
+            ? exactInteger<uint32_t>(item.at("abilityGrants")) : 0;
+        if (grants > CharacterAbilities::maxPacked) {
+            throw std::runtime_error("state has unknown ability grant bits");
+        }
         state.players.push_back(
             {
                 .id = exactInteger<EntityId>(item.at("id")),
@@ -250,9 +259,7 @@ void parseState(const Json& value, Step& step)
                 .drowned = item.at("drowned").get<bool>(),
                 .sliding = parseDirection(item.at("sliding")),
                 .quarterTurns = parseTurns(item.at("quarterTurns")),
-                .abilityGrants = item.contains("abilityGrants")
-                    ? CharacterAbilities::unpack(exactInteger<uint16_t>(item.at("abilityGrants")))
-                    : CharacterAbilities {},
+                .abilityGrants = CharacterAbilities::unpack(grants),
             });
     }
     for (const auto& item : array("movables")) {
@@ -268,6 +275,9 @@ void parseState(const Json& value, Step& step)
                 .dead = item.at("dead").get<bool>(),
                 .sliding = parseDirection(item.at("sliding")),
                 .quarterTurns = parseTurns(item.at("quarterTurns")),
+                .crystalOrigin = item.contains("crystalOrigin")
+                    ? std::optional(crystalOriginFromJson(item.at("crystalOrigin"), *type))
+                    : std::nullopt,
             });
     }
     for (const auto& item : array("enemies")) {

@@ -33,6 +33,9 @@ struct StateDelta {
         // players, and undoing it has to take them back out again.
         std::optional<Entity> before;
         std::optional<Entity> after;
+        // Restore the entity ahead of the next surviving neighbour on undo.
+        EntityId beforeNext = invalidEntityId;
+        EntityId afterNext = invalidEntityId;
 
         bool operator==(const Change&) const = default;
     };
@@ -48,9 +51,7 @@ struct StateDelta {
     // as it is.
     //
     // Applying to the same `before` it was computed from reproduces `after`
-    // exactly, including vector order, as long as entities were only appended
-    // rather than inserted mid-vector. The rules only ever push_back, so that
-    // holds; `StateDeltaTests` pins it for the paths the game actually takes.
+    // exactly, including the order of restored entities.
     void applyTo(GameState& state) const;
 
     // Swaps each change's endpoints, so undo is the same machinery run

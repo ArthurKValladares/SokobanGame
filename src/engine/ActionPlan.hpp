@@ -88,6 +88,7 @@ struct PlannedAction {
         bool operator==(const PortalCue&) const = default;
     };
     std::vector<PortalCue> portalTransits;
+    std::vector<rules::CrystalChange> crystalChanges;
     // Latched across all rule steps, including intermediate press/release
     // activity that is absent from the action's endpoints.
     bool pressurePlateActivityChanged = false;

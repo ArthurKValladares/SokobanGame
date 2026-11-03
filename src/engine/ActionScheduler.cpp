@@ -175,7 +175,8 @@ ActionScheduler::tryStart(
     ActionDeferral deferral,
     std::vector<plans::TurretShotCue> turretShots,
     std::vector<plans::PlannedAction::PortalCue> portalTransits,
-    std::vector<float> legDurationsSeconds)
+    std::vector<float> legDurationsSeconds,
+    std::vector<rules::CrystalChange> crystalChanges)
 {
     // Rounded down deliberately. An action starting part-way through a step
     // gets claims that begin fractionally early, which can only make the check
@@ -210,6 +211,7 @@ ActionScheduler::tryStart(
         .legDurationsSeconds = std::move(legDurationsSeconds),
         .turretShots = std::move(turretShots),
         .portalTransits = std::move(portalTransits),
+        .crystalChanges = std::move(crystalChanges),
         .mechanicalDurationSeconds = plan.durationSeconds,
         // Counts up to zero first. The action is admitted and holds its claims
         // from now, so nothing can take the cells out from under it, but it
@@ -255,7 +257,8 @@ std::optional<ActionScheduler::Rejection> ActionScheduler::tryStartAll(
             pending.deferral,
             std::move(pending.turretShots),
             std::move(pending.portalTransits),
-            std::move(pending.legDurationsSeconds));
+            std::move(pending.legDurationsSeconds),
+            std::move(pending.crystalChanges));
         // Unreachable: every member was just checked against the same table,
         // and admitting a member of this group cannot refuse a later one - the
         // group is exempt from itself.

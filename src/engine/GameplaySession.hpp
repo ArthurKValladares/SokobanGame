@@ -85,7 +85,7 @@ public:
 
     [[nodiscard]] bool tryStartNextAction(const Level& level, const Controls& controls);
     void advanceActiveAction(float dt);
-    void completeActiveAction();
+    void completeActiveAction(std::vector<GridPosition3>* crystalPuffs = nullptr);
 
     struct TurretShotEvent {
         rules::TurretShot shot;

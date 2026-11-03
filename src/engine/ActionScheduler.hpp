@@ -69,6 +69,7 @@ public:
         // planned. They are consumed only by the live action admission path.
         std::vector<plans::TurretShotCue> turretShots;
         std::vector<plans::PlannedAction::PortalCue> portalTransits;
+        std::vector<rules::CrystalChange> crystalChanges;
         std::vector<GameplaySoundCue> soundCues;
         // Duration assigned by rules before presentation clips are installed.
         // Reaction cues use this clock so a long death animation cannot move
@@ -126,6 +127,7 @@ public:
         std::vector<float> legDurationsSeconds;
         std::vector<plans::TurretShotCue> turretShots;
         std::vector<plans::PlannedAction::PortalCue> portalTransits;
+        std::vector<rules::CrystalChange> crystalChanges;
         ActionDeferral deferral;
     };
 
@@ -157,7 +159,8 @@ public:
         ActionDeferral deferral = {},
         std::vector<plans::TurretShotCue> turretShots = {},
         std::vector<plans::PlannedAction::PortalCue> portalTransits = {},
-        std::vector<float> legDurationsSeconds = {});
+        std::vector<float> legDurationsSeconds = {},
+        std::vector<rules::CrystalChange> crystalChanges = {});
 
     // Admits a whole causal group, or none of it.
     //

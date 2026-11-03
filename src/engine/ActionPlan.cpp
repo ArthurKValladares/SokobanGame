@@ -260,6 +260,7 @@ void addChanged(
     }
 
     plans::PlannedAction planned;
+    planned.crystalChanges = std::move(firstStep.crystalChanges);
     planned.pressurePlateActivityChanged = firstStep.pressurePlateActivityChanged;
     for (const auto& transit : firstStep.portalTransits) {
         planned.portalTransits.push_back({ .transit = transit, .legIndex = 0 });

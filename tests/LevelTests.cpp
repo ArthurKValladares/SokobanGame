@@ -443,6 +443,14 @@ void testRangerStartsAndWardrobesRoundTrip()
     const auto legacyStart = Level::parseDefinition(
         { "@character ranger", "@layer 0", "C." }, "ranger directive");
     CHECK(legacyStart.character == CharacterType::Ranger);
+
+    definition.layers[1][0][1] = tileTypeToChar(TileType::CrystalDruid);
+    definition.layers[1][0][3] = tileTypeToChar(TileType::WardrobeCrystalDruid);
+    const auto druidSerialized = Level::serializeDefinition(definition);
+    CHECK(std::ranges::count_if(druidSerialized, [](const auto& line) {
+        return line.starts_with("@druid ");
+    }) == 2);
+    CHECK(Level::parseDefinition(druidSerialized, "druid round trip") == definition);
 }
 
 void testWardrobeVariantsRoundTripAndRemainTraversable()

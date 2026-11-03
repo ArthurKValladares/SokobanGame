@@ -70,6 +70,16 @@ struct GameState {
         bool operator==(const Player&) const = default;
     };
 
+    struct CrystalOrigin {
+        // An enemy has no character. Heroes retain their controller and grants.
+        std::optional<CharacterType> character;
+        EntityId controller = invalidEntityId;
+        CharacterAbilities abilityGrants {};
+        uint8_t quarterTurns = 0;
+
+        bool operator==(const CrystalOrigin&) const = default;
+    };
+
     struct Movable {
         EntityId id = invalidEntityId;
         TileType type = TileType::Rock;
@@ -84,6 +94,7 @@ struct GameState {
         // authored direction turned by this amount. Robots also add two
         // quarter turns when a blocked patrol reverses direction.
         uint8_t quarterTurns = 0;
+        std::optional<CrystalOrigin> crystalOrigin {};
 
         bool operator==(const Movable&) const = default;
     };
@@ -220,10 +231,18 @@ struct PortalTransit {
     bool operator==(const PortalTransit&) const = default;
 };
 
+struct CrystalChange {
+    EntityId actor = invalidEntityId;
+    GridPosition3 cell {};
+
+    bool operator==(const CrystalChange&) const = default;
+};
+
 struct StepResult {
     GameState state;
     std::vector<TurretShot> turretShots;
     std::vector<PortalTransit> portalTransits;
+    std::vector<CrystalChange> crystalChanges;
     // Includes activity that changes and returns to its starting value within
     // one world step. Transient planning metadata, never part of GameState.
     bool pressurePlateActivityChanged = false;

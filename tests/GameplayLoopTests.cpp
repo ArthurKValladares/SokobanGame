@@ -700,6 +700,33 @@ void testRejectedMirrorInputDoesNotEmitActivation()
     CHECK(session.undoCount() == 0);
 }
 
+void testDruidPushAnimationAndSmokeOnCrystalChanges()
+{
+    TEST("druidPushAnimationAndSmokeOnCrystalChanges");
+    const auto definition = Level::parseDefinition({
+        "@druid {\"cell\":[0,0,1]}", "@layer 0", "...", "@layer 1", "CN ",
+    }, "druid effects");
+    const auto level = Level::loadFromDefinition(definition, "druid effects");
+    GameplaySession session;
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    const std::vector<GridPosition3> expected { { 1, 0, 1 } };
+    for (int i = 0; i < 2; ++i) {
+        const auto started = GameplayLoop::update(level, session, presentation,
+            { .right = { .pressed = true, .down = true } }, 0.01f, false);
+        CHECK(started.crystalPuffs.empty());
+        CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerPush);
+        const auto committed = GameplayLoop::update(
+            level, session, presentation, {}, 1.0f, false);
+        CHECK(committed.crystalPuffs == expected);
+        CHECK(session.state().players[0].cell == (GridPosition3 { 0, 0, 1 }));
+        CHECK(GameplayLoop::update(level, session, presentation, {}, 0.01f, false)
+            .crystalPuffs.empty());
+    }
+    CHECK(session.state().enemies.size() == 1);
+}
+
 void testWitchSwapEmitsBothParticleEndpointsOnce()
 {
     TEST("witchSwapEmitsBothParticleEndpointsOnce");
@@ -1965,6 +1992,7 @@ int main()
     testMirrorInputCommitsAnInstantAction();
     testInstantMirrorActivationAnimatesPressureEdges();
     testRejectedMirrorInputDoesNotEmitActivation();
+    testDruidPushAnimationAndSmokeOnCrystalChanges();
     testWitchSwapEmitsBothParticleEndpointsOnce();
     testSolvedScreenAndDraftOutcomesDiffer();
     testMirrorDuplicationRequiresEveryPlayerOnAnEnd();

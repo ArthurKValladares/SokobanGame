@@ -6,7 +6,7 @@
 namespace sokoban::solver::detail {
 namespace {
 
-static_assert(static_cast<std::uint32_t>(CharacterType::Ranger) < 0xffU);
+static_assert(static_cast<std::uint32_t>(CharacterType::CrystalDruid) < 0xffU);
 static_assert(static_cast<std::uint32_t>(MoveDirection::Right) < 0xffU);
 static_assert(static_cast<std::uint32_t>(TileType::Count) <= 0x100U);
 
@@ -73,9 +73,16 @@ PackedStateKey makePackedStateKey(
         flags |= static_cast<std::uint32_t>(movable.fallen) << 16;
         flags |= static_cast<std::uint32_t>(movable.dead) << 17;
         flags |= static_cast<std::uint32_t>(movable.quarterTurns) << 18;
+        flags |= static_cast<std::uint32_t>(movable.crystalOrigin.has_value()) << 26;
         words.push_back(movable.id);
         words.push_back(packPair(movable.cell.x, movable.cell.y));
         words.push_back(packZAndFlags(movable.cell.z, flags));
+        if (const auto& origin = movable.crystalOrigin) {
+            words.push_back(origin->controller);
+            words.push_back(optionalEnumCode(origin->character) |
+                (static_cast<std::uint64_t>(origin->abilityGrants.packed()) << 8) |
+                (static_cast<std::uint64_t>(origin->quarterTurns) << 32));
+        }
     }
 
     words.push_back(state.enemies.size());

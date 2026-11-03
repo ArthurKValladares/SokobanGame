@@ -1007,6 +1007,81 @@ void testBlockedAndDifferentlyColoredLinkedObjectsStayPut()
     CHECK(moved.movables[2].cell == cell(5, 0, 1));
 }
 
+void testDruidCrystallizesLivingUnitsWithoutPushing()
+{
+    TEST("druidCrystallizesLivingUnitsWithoutPushing");
+    const Level enemies = makeLevel({
+        { "....." },
+        { "RCNN " },
+    }, CharacterType::CrystalDruid);
+    const auto initial = rules::initialState(enemies);
+    CHECK(initial.players[0].abilities(enemies.character()).pushPower == 0);
+    CHECK(rules::step(enemies, initial, MoveDirection::Left) == initial);
+    const auto transformed = rules::step(enemies, initial, MoveDirection::Right);
+    CHECK(transformed.players == initial.players);
+    CHECK(transformed.enemies.size() == 1);
+    CHECK(transformed.enemies[0].id == initial.enemies[1].id);
+    CHECK(transformed.movables.size() == 2);
+    CHECK(transformed.movables[1].id == initial.enemies[0].id);
+    CHECK(transformed.movables[1].type == TileType::Crystal);
+    CHECK(transformed.movables[1].cell == cell(2, 0, 1));
+    const auto revivedEnemy = rules::step(enemies, transformed, MoveDirection::Right);
+    CHECK(revivedEnemy.players == initial.players);
+    CHECK(revivedEnemy.movables == initial.movables);
+    CHECK(revivedEnemy.enemies.size() == 2);
+    CHECK(revivedEnemy.enemies.back() == initial.enemies[0]);
+
+    const Level heroes = makeLevel({
+        { "....." },
+        { "QC Q " },
+    }, CharacterType::CrystalDruid);
+    auto heroesBefore = rules::initialState(heroes);
+    const rules::StepScope scope { .actors = { heroesBefore.players[1].id } };
+    const auto ordinary = rules::scopedStep(heroes, heroesBefore, MoveDirection::Left, {}, scope);
+    CHECK(ordinary.players.size() == 2);
+    CHECK(ordinary.movables[0].type == TileType::Crystal);
+    heroesBefore.players[0].character = CharacterType::Ranger;
+    const auto ranger = rules::scopedStep(heroes, heroesBefore, MoveDirection::Left, {}, scope);
+    CHECK(ranger.players.size() == 2);
+    CHECK(ranger.players[0] == heroesBefore.players[1]);
+    CHECK(ranger.movables[0].type == TileType::SkippingCrystal);
+    CHECK(ranger.movables[0].cell == cell(0, 0, 1));
+    const auto revivedRanger = rules::scopedStep(heroes, ranger, MoveDirection::Left, {}, scope);
+    CHECK(revivedRanger.movables.empty());
+    CHECK(revivedRanger.players.back() == heroesBefore.players[0]);
+
+    const Level transported = makeLevel({
+        { ".....", "....." },
+        { " C QQ", "     " },
+    }, CharacterType::CrystalDruid);
+    auto transportState = rules::initialState(transported);
+    transportState.players[1].character = CharacterType::Ranger;
+    transportState.players[1].quarterTurns = 3;
+    transportState.players[1].abilityGrants.grant(CharacterAbility::Pull);
+    const auto original = transportState.players[1];
+    const rules::StepScope druid { .actors = { transportState.players[0].id } };
+    const rules::StepScope paladin { .actors = { transportState.players[2].id } };
+    transportState = rules::scopedStep(transported, transportState, MoveDirection::Right, {}, druid);
+    auto round = rules::scopedStep(transported, transportState, MoveDirection::Right, {}, druid);
+    CHECK(round.movables.size() == 1);
+    round = rules::scopedStep(transported, round, MoveDirection::Down, {}, druid);
+    round = rules::scopedStep(transported, round, MoveDirection::Left, {}, paladin);
+    CHECK(round.movables[0].cell == cell(2, 0, 1));
+    const auto movedRanger = rules::scopedStep(transported, round, MoveDirection::Up, {}, druid);
+    auto expected = original;
+    expected.cell = cell(2, 0, 1);
+    CHECK(movedRanger.movables.empty());
+    CHECK(movedRanger.players.back() == expected);
+
+    const Level natural = makeLevel({
+        { "..." },
+        { "CR " },
+    }, CharacterType::CrystalDruid);
+    auto naturalCrystal = rules::initialState(natural);
+    naturalCrystal.movables[0].type = TileType::Crystal;
+    CHECK(rules::step(natural, naturalCrystal, MoveDirection::Right) == naturalCrystal);
+}
+
 void testRangerUsesSinglePushAndCanGainAbilities()
 {
     TEST("rangerUsesSinglePushAndCanGainAbilities");
@@ -5442,6 +5517,7 @@ int main()
     testPushBlocked();
     testLinkedObjectsRepeatSuccessfulMovesWhenAble();
     testBlockedAndDifferentlyColoredLinkedObjectsStayPut();
+    testDruidCrystallizesLivingUnitsWithoutPushing();
     testRangerUsesSinglePushAndCanGainAbilities();
     testKnightPushesAnUnlimitedMixedChain();
     testKnightChainPushIsAtomicWhenItsTailIsBlocked();

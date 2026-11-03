@@ -42,6 +42,48 @@ const Level::Definition coverageWalkDefinition {
     .layers = { { "..." }, { "C E" } },
 };
 
+void testDruidTransformationAndUndoPreserveHeroOrder()
+{
+    TEST("druidTransformationAndUndoPreserveHeroOrder");
+    const auto definition = Level::parseDefinition({
+        "@ranger {\"cell\":[0,0,1]}",
+        "@druid {\"cell\":[1,0,1]}",
+        "@layer 0", ".....",
+        "@layer 1", "CC  Q",
+    }, "druid undo");
+    const auto level = Level::loadFromDefinition(definition, "druid undo");
+    solution::Driver driver(level);
+    const auto before = driver.state();
+    CHECK(driver.apply(Input::CycleHero));
+    CHECK(driver.apply(Input::Left));
+    CHECK(driver.state().players.size() == 2);
+    CHECK(driver.state().movables.size() == 1);
+    CHECK(driver.state().movables[0].type == TileType::SkippingCrystal);
+    const auto petrified = driver.state();
+    CHECK(driver.apply(Input::Left));
+    CHECK(driver.state().movables.empty());
+    CHECK(driver.state().players.back() == before.players[0]);
+    CHECK(driver.apply(Input::Undo));
+    CHECK(driver.state() == petrified);
+    CHECK(driver.apply(Input::Undo));
+    CHECK(driver.state() == before);
+
+    auto puzzle = definition;
+    puzzle.layers[1][0] = "CC E ";
+    puzzle.layers[1][0][0] = tileTypeToChar(TileType::Ranger);
+    puzzle.layers[1][0][1] = tileTypeToChar(TileType::CrystalDruid);
+    const auto puzzleLevel = Level::loadFromDefinition(puzzle, "druid solution");
+    const std::vector<Input> inputs {
+        Input::CycleHero, Input::Left, Input::Right, Input::Right,
+    };
+    const auto recording = solution::record(puzzleLevel, puzzle, inputs, "druid solution");
+    CHECK_MESSAGE(recording.solved, recording.error.c_str());
+    if (recording.solved) {
+        const auto parsed = solution::parse(solution::serialize(recording.solution));
+        CHECK(solution::replay(puzzleLevel, parsed).passed);
+    }
+}
+
 void testRobotPatrolRecordsFiniteBeatsAndReplaysReversals()
 {
     TEST("robotPatrolRecordsFiniteBeatsAndReplaysReversals");
@@ -670,6 +712,7 @@ void testCurrentCampaignHasCompletePassingSolutionCoverage()
 int main()
 {
     try {
+        testDruidTransformationAndUndoPreserveHeroOrder();
         testRobotPatrolRecordsFiniteBeatsAndReplaysReversals();
         testStaggeredRobotPatrolsSettleAndResumeOnEachInput();
         testRecordSerializeParse();

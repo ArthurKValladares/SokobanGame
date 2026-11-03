@@ -1,5 +1,7 @@
 #pragma once
 
+#include <span>
+
 #include "engine/GameplaySession.hpp"
 #include "engine/Math.hpp"
 #include "engine/render/RenderTypes.hpp"
@@ -154,7 +156,8 @@ public:
         const Level* level = nullptr,
         const std::vector<plans::PlannedAction::PortalCue>* cues =
             nullptr,
-        float activationStepSeconds = config::stepDurationSeconds) const;
+        float activationStepSeconds = config::stepDurationSeconds,
+        std::span<const rules::CrystalChange> crystalChanges = {}) const;
     [[nodiscard]] float reverseDuration(
         const GameplaySession::Action& action) const;
     [[nodiscard]] std::vector<GameplaySoundCue> buildActionSoundCues(
@@ -216,7 +219,8 @@ private:
         const Level* level,
         const std::vector<rules::PortalTransit>* transits,
         bool buttonPulse,
-        float activationStepSeconds) const;
+        float activationStepSeconds,
+        std::span<const rules::CrystalChange> crystalChanges = {}) const;
 
     std::vector<PlayerVisual> players_;
     std::vector<EntityVisual> movables_;

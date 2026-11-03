@@ -26,6 +26,20 @@ template <EntityKind kind, typename Entity>
 }
 
 template <EntityKind kind, typename Entity>
+[[nodiscard]] EntityId nextSurvivor(
+    const std::vector<Entity>& source, std::size_t index,
+    const std::vector<Entity>& other)
+{
+    for (++index; index < source.size(); ++index) {
+        const auto id = resolvedEntityId(kind, source[index].id, index);
+        if (indexOf<kind>(other, id) != notFound) {
+            return id;
+        }
+    }
+    return invalidEntityId;
+}
+
+template <EntityKind kind, typename Entity>
 void collect(
     const std::vector<Entity>& before,
     const std::vector<Entity>& after,
@@ -44,6 +58,7 @@ void collect(
                 .id = id,
                 .before = std::nullopt,
                 .after = after[index],
+                .afterNext = nextSurvivor<kind>(after, index, before),
             });
         } else if (!(before[previous] == after[index])) {
             changes.push_back({
@@ -62,6 +77,7 @@ void collect(
                 .id = id,
                 .before = before[index],
                 .after = std::nullopt,
+                .beforeNext = nextSurvivor<kind>(before, index, after),
             });
         }
     }
@@ -76,7 +92,10 @@ void apply(
         const std::size_t found = indexOf<kind>(entities, change.id);
         if (change.after.has_value()) {
             if (found == notFound) {
-                entities.push_back(*change.after);
+                const auto next = indexOf<kind>(entities, change.afterNext);
+                entities.insert(next == notFound ? entities.end()
+                    : entities.begin() + static_cast<std::ptrdiff_t>(next),
+                    *change.after);
             } else {
                 entities[found] = *change.after;
             }
@@ -98,6 +117,8 @@ template <typename Entity>
             .id = change.id,
             .before = change.after,
             .after = change.before,
+            .beforeNext = change.afterNext,
+            .afterNext = change.beforeNext,
         });
     }
     return result;

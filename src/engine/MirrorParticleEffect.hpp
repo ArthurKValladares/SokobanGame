@@ -10,5 +10,7 @@ class AssetManifest;
     const AssetManifest& manifest);
 [[nodiscard]] ParticleEffectDefinition makeWitchSwapParticleEffect(
     const AssetManifest& manifest);
+[[nodiscard]] ParticleEffectDefinition makeCrystalChangeParticleEffect(
+    const AssetManifest& manifest);
 
 } // namespace sokoban

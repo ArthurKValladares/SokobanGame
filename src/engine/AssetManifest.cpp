@@ -784,6 +784,8 @@ RenderModel AssetManifest::characterModel(CharacterType character) const
         return modelIdByName("Cleric");
     case CharacterType::Ranger:
         return modelIdByName("Ranger");
+    case CharacterType::CrystalDruid:
+        return modelIdByName("Druid");
     }
     return playerModel_;
 }

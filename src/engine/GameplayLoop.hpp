@@ -51,6 +51,7 @@ public:
         bool activeHeroChanged = false;
         std::vector<GridPosition3> mirrorSwapDestinations;
         std::vector<GridPosition3> witchSwapDestinations;
+        std::vector<GridPosition3> crystalPuffs;
         std::vector<TurretShotPresentation> turretShots;
         std::vector<GameplaySound> sounds;
     };

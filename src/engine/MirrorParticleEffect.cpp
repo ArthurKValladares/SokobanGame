@@ -63,4 +63,16 @@ ParticleEffectDefinition makeWitchSwapParticleEffect(
     return makeSwapParticleEffect(manifest, config::witchSwapSmokeColor);
 }
 
+ParticleEffectDefinition makeCrystalChangeParticleEffect(
+    const AssetManifest& manifest)
+{
+    auto effect = makeSwapParticleEffect(manifest, { 0.80f, 0.86f, 0.82f, 0.62f });
+    effect.particleCount = 4;
+    effect.lifetimeSeconds = { 0.25f, 0.45f };
+    effect.initialSize = { 0.20f, 0.32f };
+    effect.finalSize = { 0.42f, 0.62f };
+    effect.spawnRadius = 0.12f;
+    return effect;
+}
+
 } // namespace sokoban

@@ -685,6 +685,13 @@
       "rotateHalfTurn": true
     },
     {
+      "name": "Druid",
+      "path": "KayKit Adventurers 2.0/Characters/gltf/Druid.glb",
+      "geometry": "skinned",
+      "preserveAspectRatio": true,
+      "rotateHalfTurn": true
+    },
+    {
       "name": "Ranger",
       "path": "KayKit Adventurers 2.0/Characters/gltf/Ranger.glb",
       "geometry": "skinned",
@@ -2864,6 +2871,10 @@
     },
     {
       "tile": "Wardrobe Bard",
+      "model": "Wardrobe"
+    },
+    {
+      "tile": "Wardrobe Druid",
       "model": "Wardrobe"
     },
     {

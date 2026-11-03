@@ -18,6 +18,21 @@
 namespace sokoban {
 namespace {
 
+template <EntityKind kind, typename Entity>
+std::optional<std::size_t> matchingIndex(
+    const std::vector<Entity>& before, std::size_t index,
+    const std::vector<Entity>& after)
+{
+    const EntityId id = resolvedEntityId(kind, before[index].id, index);
+    if (index < after.size() && resolvedEntityId(kind, after[index].id, index) == id) {
+        return index;
+    }
+    for (std::size_t i = 0; i < after.size(); ++i) {
+        if (resolvedEntityId(kind, after[i].id, i) == id) return i;
+    }
+    return std::nullopt;
+}
+
 Vec3 toVec3(GridPosition3 position)
 {
     return {
@@ -1078,7 +1093,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     const std::vector<GameState>& legs,
     const Level* level,
     const std::vector<plans::PlannedAction::PortalCue>* cues,
-    float activationStepSeconds) const
+    float activationStepSeconds,
+    std::span<const rules::CrystalChange> crystalChanges) const
 {
     const auto legTransits = [&](std::size_t leg) {
         std::vector<rules::PortalTransit> events;
@@ -1092,7 +1108,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     if (legs.size() <= 1) {
         const auto events = legTransits(0);
         return buildActionPresentationLeg(
-            action, level, cues ? &events : nullptr, legs.empty(), activationStepSeconds);
+            action, level, cues ? &events : nullptr, legs.empty(), activationStepSeconds,
+            crystalChanges);
     }
 
     // A chained slide is one action spanning several world steps. Interpolating
@@ -1136,7 +1153,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
 
         const auto events = legTransits(leg);
         auto legTimeline = buildActionPresentationLeg(
-            legAction, level, cues ? &events : nullptr, false, activationStepSeconds);
+            legAction, level, cues ? &events : nullptr, false, activationStepSeconds,
+            leg == 0 ? crystalChanges : std::span<const rules::CrystalChange> {});
         // A shared leg can carry a slow leaf and an independent skipping
         // stone. Keep their visible clocks independent while the immutable
         // rule plan and its conservative path claims retain the shared step.
@@ -1193,7 +1211,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
     const Level* level,
     const std::vector<rules::PortalTransit>* transits,
     bool buttonPulse,
-    float activationStepSeconds) const
+    float activationStepSeconds,
+    std::span<const rules::CrystalChange> crystalChanges) const
 {
     PresentationTransactionBuilder builder(animationCatalog_);
     const float motionDuration = std::max(action.durationSeconds, 0.0f);
@@ -1294,12 +1313,13 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
                             .arcHeight = arcHeight });
     };
 
-    const std::size_t playerCount = std::min(
-        action.before.players.size(),
-        action.after.players.size());
+    const std::size_t playerCount = action.before.players.size();
     for (std::size_t index = 0; index < playerCount; ++index) {
         const GameState::Player& before = action.before.players[index];
-        const GameState::Player& after = action.after.players[index];
+        const auto afterIndex = matchingIndex<EntityKind::Player>(
+            action.before.players, index, action.after.players);
+        if (!afterIndex) continue;
+        const GameState::Player& after = action.after.players[*afterIndex];
         const EntityTarget target = playerTarget(before, index);
         float initialClipTime = 0.0f;
         float movementClipTime = 0.0f;
@@ -1331,10 +1351,14 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
                 to,
                 playerRenderTarget(after.cell, after.drowned));
         }
-        if (gridDistance(from, to) > 0.0001f) {
+        const bool moved = gridDistance(from, to) > 0.0001f;
+        const bool transformed = std::ranges::find(
+            crystalChanges, target.id, &rules::CrystalChange::actor) != crystalChanges.end();
+        if (moved || transformed) {
             const auto abilities = before.abilities(
                 level ? level->character() : CharacterType::Rogue);
-            const AnimationUse movementUse = action.playerPulling
+            const AnimationUse movementUse = transformed ? AnimationUse::PlayerPush
+                : action.playerPulling
                 ? AnimationUse::PlayerPull
                 : action.playerPushing && abilities.pushPower != 0
                     ? AnimationUse::PlayerPush
@@ -1342,7 +1366,9 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
             if (visual != players_.end()) {
                 movementClipTime = visual->clipTimeFor(movementUse);
             }
-            addUnitMotion(target, before.cell, walkedTo, from, to);
+            if (moved) {
+                addUnitMotion(target, before.cell, walkedTo, from, to);
+            }
             static_cast<void>(builder.addAnimation({
                 .target = target,
                 .use = movementUse,
@@ -1354,12 +1380,13 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
         }
     }
 
-    const std::size_t movableCount = std::min(
-        action.before.movables.size(),
-        action.after.movables.size());
+    const std::size_t movableCount = action.before.movables.size();
     for (std::size_t index = 0; index < movableCount; ++index) {
         const GameState::Movable& before = action.before.movables[index];
-        const GameState::Movable& after = action.after.movables[index];
+        const auto afterIndex = matchingIndex<EntityKind::Movable>(
+            action.before.movables, index, action.after.movables);
+        if (!afterIndex) continue;
+        const GameState::Movable& after = action.after.movables[*afterIndex];
         const GridPosition3 walkedTo = addRide(
             movableTarget(before, index), before.cell, after.cell, after.fallen);
         const Vec3 from = movableRenderTarget(before.cell, before.fallen);
@@ -1394,9 +1421,7 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
     }
 
     using IntentId = PresentationTransactionBuilder::AnimationIntentId;
-    const std::size_t enemyCount = std::min(
-        action.before.enemies.size(),
-        action.after.enemies.size());
+    const std::size_t enemyCount = action.before.enemies.size();
     std::vector<std::vector<std::size_t>> attackedPlayers(enemyCount);
     std::vector<std::optional<IntentId>> attackIntents(enemyCount);
     const auto clericProtection = level
@@ -1404,7 +1429,10 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
         : std::vector<char>(action.after.players.size(), 0);
     for (std::size_t enemyIndex = 0; enemyIndex < enemyCount; ++enemyIndex) {
         const GameState::Enemy& before = action.before.enemies[enemyIndex];
-        const GameState::Enemy& after = action.after.enemies[enemyIndex];
+        const auto afterIndex = matchingIndex<EntityKind::Enemy>(
+            action.before.enemies, enemyIndex, action.after.enemies);
+        if (!afterIndex) continue;
+        const GameState::Enemy& after = action.after.enemies[*afterIndex];
         const EntityTarget target = enemyTarget(before, enemyIndex);
         float initialClipTime = 0.0f;
         const auto visual = std::ranges::find_if(
@@ -1431,9 +1459,12 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
              playerIndex < playerCount;
              ++playerIndex) {
             const GameState::Player& playerBefore = action.before.players[playerIndex];
-            const GameState::Player& playerAfter = action.after.players[playerIndex];
+            const auto afterPlayerIndex = matchingIndex<EntityKind::Player>(
+                action.before.players, playerIndex, action.after.players);
+            if (!afterPlayerIndex) continue;
+            const GameState::Player& playerAfter = action.after.players[*afterPlayerIndex];
             const bool protectedSurvivor = !playerAfter.dead &&
-                (clericProtection[playerIndex] ||
+                (clericProtection[*afterPlayerIndex] ||
                     playerAfter.abilities(level ? level->character() : CharacterType::Rogue)
                         .has(CharacterAbility::AttackImmunity)) &&
                 (playerBefore.cell != playerAfter.cell || before.cell != after.cell);
@@ -1463,7 +1494,10 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
          playerIndex < playerCount;
          ++playerIndex) {
         const GameState::Player& before = action.before.players[playerIndex];
-        const GameState::Player& after = action.after.players[playerIndex];
+        const auto afterIndex = matchingIndex<EntityKind::Player>(
+            action.before.players, playerIndex, action.after.players);
+        if (!afterIndex) continue;
+        const GameState::Player& after = action.after.players[*afterIndex];
         if (before.dead || !after.dead) {
             continue;
         }
@@ -1538,17 +1572,27 @@ void GameplayPresentation::beginAction(
     // that moved without rotating unrelated, inactive heroes.
     if (action.facingDirection) {
         std::vector<EntityId> movingControllers;
-        const std::size_t playerCount = std::min(
-            action.before.players.size(), action.after.players.size());
+        const std::size_t playerCount = action.before.players.size();
         for (std::size_t index = 0; index < playerCount; ++index) {
             // A hero only carried by a platform did not walk anywhere.
             const GridPosition3 before = action.before.players[index].cell;
-            const GridPosition3 after = action.after.players[index].cell;
-            if (before == after ||
+            const auto afterIndex = matchingIndex<EntityKind::Player>(
+                action.before.players, index, action.after.players);
+            if (!afterIndex) continue;
+            const GridPosition3 after = action.after.players[*afterIndex].cell;
+            const auto target = playerTarget(action.before.players[index], index);
+            const auto track = std::ranges::find(
+                action.presentation.animations, target, &ActionAnimationTrack::target);
+            const bool stationaryPush = before == after &&
+                track != action.presentation.animations.end() &&
+                std::ranges::any_of(track->segments, [](const auto& segment) {
+                    return segment.use == AnimationUse::PlayerPush;
+                });
+            if (!stationaryPush && (before == after ||
                 rideOf(
                     platformMoves(action.before, action.after, 0.0f, nullptr),
                     before,
-                    after) != nullptr) {
+                    after) != nullptr)) {
                 continue;
             }
             const EntityId controller =
@@ -1590,11 +1634,13 @@ void GameplayPresentation::beginAction(
         enemy.rotatorYawOffsetRadians = 0.0f;
     }
     if (!action.reversed) {
-        const std::size_t turnedEnemyCount = std::min(
-            action.before.enemies.size(), action.after.enemies.size());
+        const std::size_t turnedEnemyCount = action.before.enemies.size();
         for (std::size_t index = 0; index < turnedEnemyCount; ++index) {
+            const auto afterIndex = matchingIndex<EntityKind::Enemy>(
+                action.before.enemies, index, action.after.enemies);
+            if (!afterIndex) continue;
             const int turns =
-                ((static_cast<int>(action.after.enemies[index].quarterTurns) -
+                ((static_cast<int>(action.after.enemies[*afterIndex].quarterTurns) -
                      static_cast<int>(
                          action.before.enemies[index].quarterTurns)) %
                         4 +
@@ -1621,11 +1667,13 @@ void GameplayPresentation::beginAction(
     // Heroes a rotator turns face their new direction from the start of the
     // action; the frame builder unwinds the turn until the action completes,
     // so the hero is seen turning rather than snapping.
-    const std::size_t turnedPlayerCount = std::min(
-        action.before.players.size(), action.after.players.size());
+    const std::size_t turnedPlayerCount = action.before.players.size();
     for (std::size_t index = 0; index < turnedPlayerCount; ++index) {
+        const auto afterIndex = matchingIndex<EntityKind::Player>(
+            action.before.players, index, action.after.players);
+        if (!afterIndex) continue;
         const int delta =
-            static_cast<int>(action.after.players[index].quarterTurns) -
+            static_cast<int>(action.after.players[*afterIndex].quarterTurns) -
             static_cast<int>(action.before.players[index].quarterTurns);
         if (delta == 0) {
             continue;

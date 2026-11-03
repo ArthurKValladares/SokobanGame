@@ -14,8 +14,19 @@
 namespace sokoban {
 namespace {
 
+bool countsAsPlayerMove(const GameState& before, const GameState& after)
+{
+    return plans::anyPlayerMoved(before, after) ||
+        before.enemies.size() != after.enemies.size();
+}
+
 bool anyEntityChangedCell(const GameState& before, const GameState& after)
 {
+    if (before.players.size() != after.players.size() ||
+        before.movables.size() != after.movables.size() ||
+        before.enemies.size() != after.enemies.size()) {
+        return true;
+    }
     const std::size_t playerCount = std::min(
         before.players.size(), after.players.size());
     for (std::size_t i = 0; i < playerCount; ++i) {
@@ -128,7 +139,7 @@ bool replayMatches(
         // A move counts once, judged on the input-driven first step, however
         // many steps the slide it started runs for.
         const int expectedMoveCount = action.playerMoveCountBefore +
-            (input && plans::anyPlayerMoved(action.before, current) ? 1 : 0);
+            (input && countsAsPlayerMove(action.before, current) ? 1 : 0);
         if (action.playerMoveCountAfter != expectedMoveCount) {
             return false;
         }
@@ -815,7 +826,7 @@ void GameplaySession::cycleActiveHero()
             controllers.push_back(controller);
         }
     }
-    if (controllers.size() < 2) {
+    if (controllers.empty()) {
         return;
     }
     const auto current = std::ranges::find(
@@ -930,7 +941,7 @@ void GameplaySession::advanceActiveAction(float dt)
     }
 }
 
-void GameplaySession::completeActiveAction()
+void GameplaySession::completeActiveAction(std::vector<GridPosition3>* crystalPuffs)
 {
     // The scheduler applies each finished action's delta - only what that
     // action changed, rather than its `after` wholesale. With one action in
@@ -942,6 +953,11 @@ void GameplaySession::completeActiveAction()
     //
     // What stays here is the bookkeeping only the session knows about.
     for (const ActionScheduler::InFlight& finished : scheduler_.commitFinished()) {
+        if (crystalPuffs) {
+            for (const auto& change : finished.crystalChanges) {
+                crystalPuffs->push_back(change.cell);
+            }
+        }
         recordCompletion(finished.plan, finished.causalGroup);
         const auto patrol = std::ranges::find(robotPatrolActions_, finished.id,
             &RobotPatrolAction::actionId);
@@ -959,6 +975,10 @@ void GameplaySession::completeActiveAction()
             }
             robotPatrolActions_.erase(patrol);
             failedAmbientAttempt_.valid = false;
+        }
+        if (finished.plan.before.players.size() > finished.plan.after.players.size() &&
+            !activeHeroCharacter()) {
+            cycleActiveHero();
         }
     }
 }
@@ -1230,11 +1250,11 @@ GameplaySession::StartOutcome GameplaySession::planPlayerStep(
     // The plan settles the outcome; the session only knows the running move
     // total, so it fills that in. One step, so one move - the slide it starts
     // is a separate action and adds nothing to the count.
-    const bool countsAsPlayerMove =
-        plans::anyPlayerMoved(step->action.before, step->action.after);
+    const bool countsAsMove =
+        countsAsPlayerMove(step->action.before, step->action.after);
     step->action.playerMoveCountBefore = playerMoveCount_;
     step->action.playerMoveCountAfter =
-        playerMoveCount_ + (countsAsPlayerMove ? 1 : 0);
+        playerMoveCount_ + (countsAsMove ? 1 : 0);
 
     const float stepDuration = step->action.durationSeconds;
     const int stepLegs = static_cast<int>(step->legs.size());
@@ -1251,6 +1271,16 @@ GameplaySession::StartOutcome GameplaySession::planPlayerStep(
         step->turretShots,
         ActionDeferral {},
         step->portalTransits));
+    batch.back().crystalChanges = std::move(step->crystalChanges);
+    for (const auto& change : batch.back().crystalChanges) {
+        const auto& players = step->action.before.players;
+        for (std::size_t i = 0; i < players.size(); ++i) {
+            if (resolvedEntityId(EntityKind::Player, players[i].id, i) == change.actor) {
+                batch.back().reservations.cells.push_back({ players[i].cell, 0, 1 });
+                break;
+            }
+        }
+    }
 
     // Whatever the step leaves travelling, planned from the state the step
     // produces and starting one step behind it. Every slider goes into one

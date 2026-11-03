@@ -10,7 +10,7 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 - Layered Sokoban movement with rocks, pressure-plate gates, pulse buttons, persistent levers, rotator
   plates, lock plates, elevators, minecarts and rail gates, goals, undo, restart,
   multi-screen levels, and completion tracking.
-- Paladin, Ranger, Knight, Thief, Witch, Bard and Cleric heroes with distinct movement abilities,
+- Paladin, Ranger, Knight, Thief, Druid, Witch, Bard and Cleric heroes with distinct movement abilities,
   switchable hero control, and pushable mirrors that create hero copies.
 - Ice, ladders, conveyors, floating lily pads, directional water streams,
   falling, configurable water layers, and four
@@ -589,11 +589,11 @@ PDB belongs in the separately retained Symbols ZIP.
 Screens are text `.scr` files containing sequential `@layer N` sections. An
 authored screen can declare `@character paladin`, `@character knight`,
 `@character thief`, `@character witch`, `@character bard`, `@character cleric`,
-or `@character ranger`.
+`@character ranger`, or `@character crystal-druid`.
 The default is Paladin. Existing files can use `rogue` for Paladin and
 `druid` for Thief. An `@ranger {"cell":[x,y,z]}` record turns a `C` tile
 into an explicit Ranger start. Add `"wardrobe":true` to target a wardrobe
-placeholder (`0`) at that cell.
+placeholder (`0`) at that cell. Use `@druid` with the same fields for Druid.
 An optional `@water N` directive makes Air on that layer resolve to Water and
 extends the water beyond the authored board without expanding camera bounds.
 An optional `@camera {"pitch":45,"yaw":90}` directive sets that screen's camera
@@ -874,6 +874,11 @@ unit instead; other heroes and walls block the spell's line of sight. Rocks,
 ice blocks, turrets, and enemies are all movable units for these abilities,
 mirrors, pressure plates, conveyors, and ice momentum. Hazards and enemy
 attacks still resolve normally after forced movement.
+
+Druid has zero push power. Bumping a living hero or enemy transforms it in
+place into a crystal rock. A Ranger becomes a round crystal rock that skips
+across water when pushed. Bumping that crystal again restores the original
+unit where the crystal is now. Druid stays on the original tile.
 
 Each player combines their character's base abilities with grants in
 `GameState::Player::abilityGrants`. A mechanic can increase push power or

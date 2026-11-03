@@ -248,6 +248,8 @@ Application::Application(ApplicationOptions options)
           makeMirrorSwapParticleEffect(assetManifest_))
     , witchSwapParticleEffect_(
           makeWitchSwapParticleEffect(assetManifest_))
+    , crystalChangeParticleEffect_(
+          makeCrystalChangeParticleEffect(assetManifest_))
     , turretParticleEffects_(
           makeTurretParticleEffects(assetManifest_))
     , settingsCoordinator_(playerProfile_, presentationSettings_)
@@ -1419,6 +1421,13 @@ void Application::update(
                 },
                 witchSwapParticleEffect_);
         }
+    }
+    for (GridPosition3 cell : gameplayResult.crystalPuffs) {
+        particleSystem_.emit(
+            { static_cast<float>(cell.x) + 0.5f,
+              static_cast<float>(cell.y) + 0.5f,
+              static_cast<float>(cell.z) + 0.4f },
+            crystalChangeParticleEffect_);
     }
     if (input.gameplay.undoPressed || input.gameplay.undoDown || input.gameplay.restartPressed) {
         turretFlames_.reset();

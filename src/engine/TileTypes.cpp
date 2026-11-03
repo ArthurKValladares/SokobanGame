@@ -89,14 +89,8 @@ std::optional<TileType> tileTypeFromName(std::string_view name)
     if (name == "Rogue") {
         return TileType::Rogue;
     }
-    if (name == "Druid") {
-        return TileType::Druid;
-    }
     if (name == "Wardrobe Rogue") {
         return TileType::WardrobeRogue;
-    }
-    if (name == "Wardrobe Druid") {
-        return TileType::WardrobeDruid;
     }
     if (name == "Portal") {
         return TileType::PortalNorth;
@@ -227,7 +221,7 @@ bool tileTypeIsPlayerStart(TileType type)
     return type == TileType::Player || type == TileType::Rogue ||
         type == TileType::Knight || type == TileType::Druid ||
         type == TileType::Witch || type == TileType::Bard || type == TileType::Cleric ||
-        type == TileType::Ranger;
+        type == TileType::Ranger || type == TileType::CrystalDruid;
 }
 
 bool tileTypeIsConveyor(TileType type)

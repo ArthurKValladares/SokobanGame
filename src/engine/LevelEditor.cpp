@@ -804,7 +804,8 @@ void LevelEditor::setCharacter(CharacterType character)
     }
     document_.dirty = true;
     document_.status = "All placed heroes changed to " +
-        std::string(characterTypeName(character)) + ".";
+        std::string(character == CharacterType::CrystalDruid
+            ? std::string_view("druid") : characterTypeName(character)) + ".";
     recordDocumentChange(std::move(before));
 }
 

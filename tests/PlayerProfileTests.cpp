@@ -421,7 +421,14 @@ void testActiveScreenCheckpointRoundTrip()
     after.players[0].quarterTurns = 3;
     after.players[0].abilityGrants.pushPower = 2;
     after.players[0].abilityGrants.grant(sokoban::CharacterAbility::Pull);
+    after.players[0].abilityGrants.grant(sokoban::CharacterAbility::Crystallize);
     after.movables.front().quarterTurns = 1;
+    after.movables.front().type = sokoban::TileType::Crystal;
+    after.movables.front().crystalOrigin = sokoban::GameState::CrystalOrigin {
+        .character = sokoban::CharacterType::Rogue,
+        .controller = 42,
+        .quarterTurns = 2,
+    };
     after.enemies.front().quarterTurns = 2;
     after.turnedMirrors.push_back({ .cell = { 2, 2, 1 }, .quarterTurns = 3 });
     // Elevator platforms persist their cell and cycle phase.

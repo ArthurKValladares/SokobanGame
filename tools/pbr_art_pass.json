@@ -152,6 +152,12 @@
       "surface_rule": "hero"
     },
     {
+      "name": "Druid",
+      "ownership": "retained",
+      "source": "KayKit Adventurers 2.0/Characters/gltf/Druid.glb",
+      "skip": "Vendor-authored skinned character with embedded materials."
+    },
+    {
       "name": "Ranger",
       "ownership": "retained",
       "source": "KayKit Adventurers 2.0/Characters/gltf/Ranger.glb",

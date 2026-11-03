@@ -65,7 +65,7 @@ void startPresentation(
             actionId,
             presentation.buildActionPresentation(
                 source, started->legs, &level, &started->portalTransits,
-                session.stepDurationSeconds()));
+                session.stepDurationSeconds(), started->crystalChanges));
         // Re-fetched after every mutation: the setters write through the
         // scheduler, and holding a pointer across them invites a stale read.
         started = session.findInFlight(actionId);
@@ -286,7 +286,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
             continue;
         }
 
-        session.completeActiveAction();
+        session.completeActiveAction(&result.crystalPuffs);
         presentation.finishAction(session.state());
         // finishAction synchronizes structural changes and committed positions.
         // The committed state deliberately excludes actions that are still in

@@ -145,6 +145,8 @@ enum class TileType : uint8_t {
     WardrobeCleric,
     Ranger,
     WardrobeRanger,
+    CrystalDruid,
+    WardrobeCrystalDruid,
     Count,
 };
 
@@ -353,6 +355,8 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::Cleric, '\x03', "Cleric", { 1.0f, 0.82f, 0.24f, 1.0f } },
     TileTypeDefinition { TileType::WardrobeCleric, '\x04', "Wardrobe Cleric", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::Ranger, '\x05', "Ranger", { 0.32f, 0.60f, 0.28f, 1.0f } },
+    TileTypeDefinition { TileType::CrystalDruid, '\x07', "Druid", { 0.35f, 0.72f, 0.28f, 1.0f } },
+    TileTypeDefinition { TileType::WardrobeCrystalDruid, '\x08', "Wardrobe Druid", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::WardrobeRanger, '\x06', "Wardrobe Ranger", { 1.0f, 1.0f, 1.0f, 1.0f } },
 };
 
@@ -425,6 +429,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     case TileType::Bard: return CharacterType::Bard;
     case TileType::Cleric: return CharacterType::Cleric;
     case TileType::Ranger: return CharacterType::Ranger;
+    case TileType::CrystalDruid: return CharacterType::CrystalDruid;
     default: return legacyCharacter;
     }
 }
@@ -437,6 +442,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     case CharacterType::Bard: return TileType::Bard;
     case CharacterType::Cleric: return TileType::Cleric;
     case CharacterType::Ranger: return TileType::Ranger;
+    case CharacterType::CrystalDruid: return TileType::CrystalDruid;
     default: return TileType::Rogue;
     }
 }
@@ -444,7 +450,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 {
     return (type >= TileType::WardrobeLorekeeper &&
         type <= TileType::WardrobeBard) || type == TileType::WardrobeCleric ||
-        type == TileType::WardrobeRanger;
+        type == TileType::WardrobeRanger || type == TileType::WardrobeCrystalDruid;
 }
 [[nodiscard]] constexpr std::optional<CharacterType> wardrobeCharacterForTile(
     TileType type)
@@ -458,6 +464,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     case TileType::WardrobeBard: return CharacterType::Bard;
     case TileType::WardrobeCleric: return CharacterType::Cleric;
     case TileType::WardrobeRanger: return CharacterType::Ranger;
+    case TileType::WardrobeCrystalDruid: return CharacterType::CrystalDruid;
     default: return std::nullopt;
     }
 }
@@ -473,6 +480,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     case CharacterType::Bard: return TileType::WardrobeBard;
     case CharacterType::Cleric: return TileType::WardrobeCleric;
     case CharacterType::Ranger: return TileType::WardrobeRanger;
+    case CharacterType::CrystalDruid: return TileType::WardrobeCrystalDruid;
     }
     return TileType::WardrobeLorekeeper;
 }

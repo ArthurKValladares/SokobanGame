@@ -17,6 +17,7 @@ enum class CharacterType : uint8_t {
     Bard,
     Cleric,
     Ranger,
+    CrystalDruid,
 };
 
 [[nodiscard]] constexpr std::string_view characterTypeName(
@@ -39,6 +40,8 @@ enum class CharacterType : uint8_t {
         return "cleric";
     case CharacterType::Ranger:
         return "ranger";
+    case CharacterType::CrystalDruid:
+        return "crystal-druid";
     }
     return "paladin";
 }
@@ -70,10 +73,13 @@ enum class CharacterType : uint8_t {
     if (name == "ranger") {
         return CharacterType::Ranger;
     }
+    if (name == "crystal-druid") {
+        return CharacterType::CrystalDruid;
+    }
     return std::nullopt;
 }
 
-enum class CharacterAbility : uint8_t {
+enum class CharacterAbility : uint16_t {
     Pull = 1 << 0,
     Swap = 1 << 1,
     MovementAura = 1 << 2,
@@ -82,32 +88,34 @@ enum class CharacterAbility : uint8_t {
     PushAlly = 1 << 5,
     PushableAlly = 1 << 6,
     PushEnemy = 1 << 7,
+    Crystallize = 1 << 8,
 };
 
 struct CharacterAbilities {
     static constexpr uint8_t unlimitedPush = 255;
 
     uint8_t pushPower = 0;
-    uint8_t flags = 0;
+    uint16_t flags = 0;
+    static constexpr uint32_t maxPacked = (1U << 17) - 1;
 
     [[nodiscard]] constexpr bool has(CharacterAbility ability) const
     {
-        return (flags & static_cast<uint8_t>(ability)) != 0;
+        return (flags & static_cast<uint16_t>(ability)) != 0;
     }
 
     constexpr void grant(CharacterAbility ability)
     {
-        flags |= static_cast<uint8_t>(ability);
+        flags |= static_cast<uint16_t>(ability);
     }
 
-    [[nodiscard]] constexpr uint16_t packed() const
+    [[nodiscard]] constexpr uint32_t packed() const
     {
-        return static_cast<uint16_t>(pushPower | (flags << 8));
+        return pushPower | (static_cast<uint32_t>(flags) << 8);
     }
 
-    [[nodiscard]] static constexpr CharacterAbilities unpack(uint16_t value)
+    [[nodiscard]] static constexpr CharacterAbilities unpack(uint32_t value)
     {
-        return { static_cast<uint8_t>(value), static_cast<uint8_t>(value >> 8) };
+        return { static_cast<uint8_t>(value), static_cast<uint16_t>(value >> 8) };
     }
 
     bool operator==(const CharacterAbilities&) const = default;
@@ -131,6 +139,9 @@ struct CharacterAbilities {
         break;
     case CharacterType::Druid:
         abilities.grant(CharacterAbility::Pull);
+        break;
+    case CharacterType::CrystalDruid:
+        abilities.grant(CharacterAbility::Crystallize);
         break;
     case CharacterType::Witch:
         abilities.pushPower = 1;

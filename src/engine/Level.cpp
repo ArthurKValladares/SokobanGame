@@ -1237,18 +1237,21 @@ Level::Definition Level::parseDefinition(
     // Named hero records keep the grid printable. The editor uses distinct
     // internal tokens so heroes and wardrobes can be painted independently.
     if (std::ranges::any_of(lines, [](const std::string& line) {
-            return line.starts_with("@ranger ") || line.starts_with("@cleric ");
+            return line.starts_with("@ranger ") || line.starts_with("@cleric ") ||
+                line.starts_with("@druid ");
         })) {
         std::vector<std::pair<GridPosition3, TileType>> namedHeroes;
         std::vector<std::string> heroGridLines;
         for (const auto& line : lines) {
             const bool ranger = line.starts_with("@ranger ");
-            if (!ranger && !line.starts_with("@cleric ")) {
+            const bool druid = line.starts_with("@druid ");
+            if (!ranger && !druid && !line.starts_with("@cleric ")) {
                 heroGridLines.push_back(line);
                 continue;
             }
-            const auto hero = ranger ? CharacterType::Ranger : CharacterType::Cleric;
-            const auto name = characterTypeName(hero);
+            const auto hero = ranger ? CharacterType::Ranger
+                : druid ? CharacterType::CrystalDruid : CharacterType::Cleric;
+            const auto name = druid ? std::string_view("druid") : characterTypeName(hero);
             try {
                 const Json object = Json::parse(line.substr(name.size() + 2));
                 const auto cell = parseLinkedCell(object.at("cell"), "cell", sourceName, name);
@@ -1425,7 +1428,7 @@ Level::Definition Level::parseDefinition(
                 throw std::runtime_error(
                     "Invalid character metadata; expected '@character lorekeeper', "
                     "'@character paladin', '@character knight', '@character thief', "
-                    "'@character witch', '@character bard', '@character cleric', or '@character ranger': " + source);
+                    "'@character witch', '@character bard', '@character cleric', '@character ranger', or '@character crystal-druid': " + source);
             }
             continue;
         }
@@ -1700,12 +1703,15 @@ std::vector<std::string> Level::serializeDefinition(
                 char& token = disk.layers[z][y][x];
                 const auto type = charToTileType(token).value_or(TileType::Air);
                 if (type == TileType::Cleric || type == TileType::WardrobeCleric ||
-                    type == TileType::Ranger || type == TileType::WardrobeRanger) {
+                    type == TileType::Ranger || type == TileType::WardrobeRanger ||
+                    type == TileType::CrystalDruid || type == TileType::WardrobeCrystalDruid) {
                     const bool wardrobe = tileTypeIsWardrobe(type);
                     const auto hero = wardrobeCharacterForTile(type)
                         .value_or(characterForStartTile(type));
                     Json object { { "cell", { x, y, z } }, { "wardrobe", wardrobe } };
-                    namedHeroes.push_back("@" + std::string(characterTypeName(hero)) + " " + object.dump());
+                    const auto name = hero == CharacterType::CrystalDruid
+                        ? std::string_view("druid") : characterTypeName(hero);
+                    namedHeroes.push_back("@" + std::string(name) + " " + object.dump());
                     token = tileTypeToChar(wardrobe ? TileType::WardrobeLorekeeper : TileType::Player);
                     continue;
                 }

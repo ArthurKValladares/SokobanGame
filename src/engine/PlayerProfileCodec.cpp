@@ -1,5 +1,6 @@
 #include "engine/PlayerProfile.hpp"
 
+#include "engine/CrystalOriginJson.hpp"
 #include "engine/Rules.hpp"
 #include "engine/render/RenderResolution.hpp"
 
@@ -318,8 +319,8 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         }
         const uint64_t abilityGrants = item.contains("abilityGrants")
             ? unsignedIntegerProperty(item, "abilityGrants", playerContext) : 0;
-        if (abilityGrants > UINT16_MAX) {
-            fail(playerContext, "property 'abilityGrants' must fit in 16 bits");
+        if (abilityGrants > CharacterAbilities::maxPacked) {
+            fail(playerContext, "property 'abilityGrants' has unknown ability bits");
         }
         state.players.push_back({
             .id = unsignedIntegerProperty(item, "id", playerContext),
@@ -335,7 +336,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
                 requiredProperty(item, "sliding", playerContext),
                 playerContext + ".sliding"),
             .quarterTurns = quarterTurnsProperty(item, playerContext),
-            .abilityGrants = CharacterAbilities::unpack(static_cast<uint16_t>(abilityGrants)),
+            .abilityGrants = CharacterAbilities::unpack(static_cast<uint32_t>(abilityGrants)),
         });
     }
 
@@ -349,7 +350,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         const Json& item = movables[i];
         rejectUnknownProperties(
             item,
-            { "id", "type", "cell", "fallen", "dead", "sliding", "quarterTurns" },
+            { "id", "type", "cell", "fallen", "dead", "sliding", "quarterTurns", "crystalOrigin" },
             movableContext);
         GameState::Movable movable;
         movable.id = unsignedIntegerProperty(item, "id", movableContext);
@@ -369,6 +370,9 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
             requiredProperty(item, "sliding", movableContext),
             movableContext + ".sliding");
         movable.quarterTurns = quarterTurnsProperty(item, movableContext);
+        if (item.contains("crystalOrigin")) {
+            movable.crystalOrigin = crystalOriginFromJson(item.at("crystalOrigin"), movable.type);
+        }
         state.movables.push_back(movable);
     }
     const Json& enemies = requiredProperty(value, "enemies", context);
@@ -565,6 +569,9 @@ OrderedJson gameStateToJson(const GameState& state)
         });
         if (movable.quarterTurns != 0) {
             movables.back()["quarterTurns"] = movable.quarterTurns;
+        }
+        if (movable.crystalOrigin) {
+            movables.back()["crystalOrigin"] = crystalOriginToJson<OrderedJson>(*movable.crystalOrigin);
         }
     }
     OrderedJson enemies = OrderedJson::array();

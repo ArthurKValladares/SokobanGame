@@ -236,20 +236,25 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     RenderAssetRequirements requirements =
         renderActionAssetRequirementsForLevel(level, manifest, animations);
 
-    // Every authored hero model is resident. Duplicates are harmless here and
-    // collapse in the requirement bitset.
-    for (const Level::PlayerStart& player : level.playerStarts()) {
-        requirements.requireModel(manifest.characterModel(player.character));
-        if (baseCharacterAbilities(player.character).has(CharacterAbility::ProtectionAura)) {
+    const auto requireCharacter = [&](CharacterType character) {
+        requirements.requireModel(manifest.characterModel(character));
+        const auto abilities = baseCharacterAbilities(character);
+        if (abilities.has(CharacterAbility::ProtectionAura)) {
             requirements.requireTexture(manifest.findTextureIdByName("ParticleGlow"));
         }
+        if (abilities.has(CharacterAbility::Crystallize)) {
+            requirements.requireModel(manifest.modelForTile(TileType::Crystal));
+            requirements.requireModel(manifest.modelForTile(TileType::SkippingCrystal));
+            for (std::string_view name : config::mirrorSwapSmokeTextureNames) {
+                requirements.requireTexture(manifest.textureIdByName(name));
+            }
+        }
+    };
+    for (const Level::PlayerStart& player : level.playerStarts()) {
+        requireCharacter(player.character);
     }
     for (const Level::Wardrobe& wardrobe : level.wardrobes()) {
-        requirements.requireModel(
-            manifest.characterModel(wardrobe.character));
-        if (baseCharacterAbilities(wardrobe.character).has(CharacterAbility::ProtectionAura)) {
-            requirements.requireTexture(manifest.findTextureIdByName("ParticleGlow"));
-        }
+        requireCharacter(wardrobe.character);
     }
     if (!level.enemyStarts().empty()) {
         requirements.requireModel(manifest.enemyModel());
