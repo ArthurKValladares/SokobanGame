@@ -1244,10 +1244,24 @@ void verifyRockScratches(SDL_Window* window, const std::filesystem::path& root,
     RenderFrameData retraced = active;
     retraced.rockScratches[1] = active.rockScratches[0];
     std::swap(retraced.rockScratches[1].start, retraced.rockScratches[1].end);
+    retraced.rockScratches[1].pattern = 1;
     retraced.rockScratchCount = 2;
     const ImageData baseline = capture(quiet);
     const ImageData full = capture(active);
     const ImageData stacked = capture(retraced);
+    // Identical patterns isolate the extra wear from repeated contact.
+    RenderFrameData heavyWear = active;
+    std::fill_n(heavyWear.rockScratches.begin(), 4, active.rockScratches[0]);
+    heavyWear.rockScratchCount = 2;
+    const ImageData twoPasses = capture(heavyWear);
+    heavyWear.rockScratchCount = 3;
+    const ImageData threePasses = capture(heavyWear);
+    heavyWear.rockScratchCount = 4;
+    const ImageData fourPasses = capture(heavyWear);
+    for (std::size_t index = 0; index < heavyWear.rockScratchCount; ++index) {
+        heavyWear.rockScratches[index].end.x = 4.0f;
+    }
+    const ImageData featheredEnd = capture(heavyWear);
     const ImageData partial = capture(makeFrame(pushDuration * 0.5f));
     const ImageData fading = capture(makeFrame(config::rockScratchLifetimeSeconds * 0.75f));
     const ImageData expired = capture(makeFrame(config::rockScratchLifetimeSeconds + pushDuration + 0.1f));
@@ -1260,6 +1274,9 @@ void verifyRockScratches(SDL_Window* window, const std::filesystem::path& root,
     saveRippleEvidence(evidence / "baseline.png", baseline);
     saveRippleEvidence(evidence / "full.png", full);
     saveRippleEvidence(evidence / "stacked.png", stacked);
+    saveRippleEvidence(evidence / "three-passes.png", threePasses);
+    saveRippleEvidence(evidence / "four-passes.png", fourPasses);
+    saveRippleEvidence(evidence / "feathered-end.png", featheredEnd);
     saveRippleEvidence(evidence / "partial.png", partial);
     saveRippleEvidence(evidence / "fading.png", fading);
     std::cout << "Rock scratch: full weight=" << fullChange.weight << ", peak=" << fullChange.peak
@@ -1270,6 +1287,43 @@ void verifyRockScratches(SDL_Window* window, const std::filesystem::path& root,
     verify(stackedChange.weight > fullChange.weight * 1.25 &&
             stackedChange.peak > fullChange.peak * 1.15,
         "Retracing a rock scratch did not deepen the existing groove");
+    const auto newScratchPixels = [&](const ImageData& before, const ImageData& after,
+                                     int maxBeforeChange) {
+        std::size_t count = 0;
+        for (std::size_t pixel = 0; pixel < baseline.rgba.size(); pixel += 4) {
+            int beforeChange = 0;
+            int afterChange = 0;
+            for (std::size_t channel = pixel; channel < pixel + 3; ++channel) {
+                const int ground = std::to_integer<int>(baseline.rgba[channel]);
+                beforeChange += std::abs(ground - std::to_integer<int>(before.rgba[channel]));
+                afterChange += std::abs(ground - std::to_integer<int>(after.rgba[channel]));
+            }
+            if (beforeChange <= maxBeforeChange && afterChange >= beforeChange + 9) ++count;
+        }
+        return count;
+    };
+    verify(newScratchPixels(full, stacked, 0) > 100,
+        "Retracing a rock scratch did not mark enough previously clear ground");
+    const auto heavyWearPixels = newScratchPixels(full, fourPasses, 9);
+    std::cout << "Heavy rock wear: " << heavyWearPixels << " newly visible pixels\n";
+    verify(heavyWearPixels > 100,
+        "Repeated passes did not fill enough ground between the original grooves");
+    const double thirdPassChange = rippleImageDifference(twoPasses, threePasses).weight;
+    const double fourthPassChange = rippleImageDifference(threePasses, fourPasses).weight;
+    verify(fourthPassChange > thirdPassChange * 0.5 &&
+            fourthPassChange < thirdPassChange * 1.25,
+        "Scratch buildup changed too abruptly between the third and fourth passes");
+    // World X increases leftward, so the feather reaches just left of center.
+    const uint32_t center = baseline.width / 2;
+    const auto endContrast = [&](uint32_t xBegin, uint32_t xEnd) {
+        return difference(baseline, featheredEnd, xBegin, baseline.height * 9 / 20,
+            xEnd, baseline.height * 11 / 20);
+    };
+    const double nearEnd = endContrast(center - 8, center - 2);
+    const double inside = endContrast(center + 40, center + 46);
+    verify(nearEnd > 0.15 && nearEnd < inside * 0.5 &&
+            endContrast(center - 55, center - 49) == 0.0,
+        "Heavy scratch wear did not taper from the track into clear ground");
     verify(partialChange.weight > fullChange.weight * 0.2 &&
             partialChange.weight < fullChange.weight * 0.8,
         "Rock scratch was not progressively revealed along the push");

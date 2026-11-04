@@ -887,6 +887,8 @@ void GameplayPresentation::scheduleRockScratches(
             boundaries.push_back((boundary - fromAxis) / (toAxis - fromAxis));
         }
         std::ranges::sort(boundaries);
+        // Keep the same pattern across all ground segments of this drag.
+        const auto pattern = nextRockScratchPattern_++;
         for (std::size_t index = 1; index < boundaries.size(); ++index) {
             const float from = boundaries[index - 1];
             const float to = boundaries[index];
@@ -906,6 +908,7 @@ void GameplayPresentation::scheduleRockScratches(
                 .ageSeconds = elapsedSeconds - track.startSeconds -
                     duration * from,
                 .durationSeconds = duration * (to - from),
+                .pattern = pattern,
             });
         }
     }
@@ -928,6 +931,7 @@ void GameplayPresentation::advanceRockScratches(float dt)
 void GameplayPresentation::clearRockScratches()
 {
     rockScratchCount_ = 0;
+    nextRockScratchPattern_ = 0;
 }
 
 void GameplayPresentation::appendRockScratchRenderData(RenderFrameData& frame) const

@@ -28,7 +28,7 @@ struct PointLightUniform {
 
 struct RockScratchUniform {
     Vec4 startAndAge {};
-    Vec4 endAndDuration {};
+    Vec4 endPatternAndDuration {};
 };
 
 inline constexpr std::size_t waterContactCapacity = 32;
@@ -83,7 +83,7 @@ struct SceneFrameUniform {
 static_assert(sizeof(PointLightUniform) == 48);
 static_assert(sizeof(RockScratchUniform) == 32);
 static_assert(offsetof(RockScratchUniform, startAndAge) == 0);
-static_assert(offsetof(RockScratchUniform, endAndDuration) == 16);
+static_assert(offsetof(RockScratchUniform, endPatternAndDuration) == 16);
 static_assert(sizeof(WaterContactUniform) == 32);
 static_assert(offsetof(WaterContactUniform, centerAndElevation) == 0);
 static_assert(offsetof(WaterContactUniform, halfExtentAndRadius) == 16);

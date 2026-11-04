@@ -607,6 +607,7 @@ struct RenderFrameData {
         Vec3 end {};
         float ageSeconds = 0.0f;
         float durationSeconds = 0.0f;
+        std::uint8_t pattern = 0;
     };
 
     // A connected fire surface with turbulence advected in path space. The

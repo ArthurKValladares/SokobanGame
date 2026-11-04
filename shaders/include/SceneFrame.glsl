@@ -15,7 +15,7 @@ struct PointLightData
 struct RockScratchData
 {
     vec4 startAndAge;
-    vec4 endAndDuration;
+    vec4 endPatternAndDuration;
 };
 struct WaterContactData
 {

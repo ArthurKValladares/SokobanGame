@@ -236,6 +236,7 @@ private:
     std::array<RenderFrameData::RockScratch,
         RenderFrameData::rockScratchCapacity> rockScratches_ {};
     std::size_t rockScratchCount_ = 0;
+    std::uint8_t nextRockScratchPattern_ = 0;
     const AnimationCatalog* animationCatalog_ = nullptr;
     // Where a reversed action's timeline is sampled from. The only piece of
     // per-action state the presentation keeps; three sibling members were

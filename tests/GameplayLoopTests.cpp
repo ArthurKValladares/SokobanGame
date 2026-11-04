@@ -1799,6 +1799,9 @@ void testRockScratchesGrowFadeAndClearWithGameplay()
         CHECK(frame.rockScratches[0].ageSeconds > frame.rockScratches[1].ageSeconds);
         CHECK(frame.rockScratches[1].ageSeconds > frame.rockScratches[2].ageSeconds);
         CHECK(frame.rockScratches[2].ageSeconds > frame.rockScratches[3].ageSeconds);
+        CHECK(frame.rockScratches[0].pattern == frame.rockScratches[1].pattern);
+        CHECK(frame.rockScratches[2].pattern == frame.rockScratches[3].pattern);
+        CHECK(frame.rockScratches[0].pattern != frame.rockScratches[2].pattern);
     }
     update({}, config::rockScratchLifetimeSeconds - 0.4f);
     frame = scratches();

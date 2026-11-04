@@ -723,7 +723,8 @@ void VulkanSceneDescriptors::updateFrame(
         if (scratchCount == uniform.rockScratches.size()) break;
         uniform.rockScratches[scratchCount++] = {
             .startAndAge = { scratch.start.x, scratch.start.y, scratch.start.z, scratch.ageSeconds },
-            .endAndDuration = { scratch.end.x, scratch.end.y, scratch.end.z, scratch.durationSeconds },
+            .endPatternAndDuration = { scratch.end.x, scratch.end.y,
+                static_cast<float>(scratch.pattern), scratch.durationSeconds },
         };
     }
     uniform.rockScratchMeta = {
