@@ -638,7 +638,6 @@ void appendSelector(
     bool preview,
     bool pickable)
 {
-    constexpr float flagScale = 0.65f;
     ScreenSelectorViewState state;
     if (selector.target) {
         state = stateFor
@@ -649,21 +648,22 @@ void appendSelector(
     }
     const RenderModel model = manifest.modelIdByName(
         selectorRender::modelName(state));
+    const float diameter = state.lastScreenInLevel ? 0.94f : 0.70f;
+    const float height = state.lastScreenInLevel ? 0.105f : 0.079f;
     const Vec3 translation {
-        static_cast<float>(selector.cell.x) + 0.5f,
-        static_cast<float>(selector.cell.y) + 0.5f,
+        static_cast<float>(selector.cell.x),
+        static_cast<float>(selector.cell.y),
         static_cast<float>(selector.cell.z),
     };
+    const float inset = (1.0f - diameter) * 0.5f;
+    const Vec2 position { translation.x + inset, translation.y + inset };
     if (preview && pickable) {
         frame.tiles.push_back({
             .cell = selector.cell,
-            .position = {
-                translation.x - flagScale * 0.5f,
-                translation.y - flagScale * 0.5f,
-            },
-            .size = { flagScale, flagScale },
+            .position = position,
+            .size = { diameter, diameter },
             .baseElevation = translation.z,
-            .height = flagScale * 1.5f,
+            .height = height,
             .pickOnly = true,
             .showGrid = false,
             .affectsCameraFit = false,
@@ -671,14 +671,11 @@ void appendSelector(
     }
     frame.tiles.push_back({
         .cell = selector.cell,
-        .position = {
-            translation.x - flagScale * 0.5f,
-            translation.y - flagScale * 0.5f,
-        },
-        .size = { flagScale, flagScale },
+        .position = position,
+        .size = { diameter, diameter },
         .color = { 1.0f, 1.0f, 1.0f, 1.0f },
         .baseElevation = translation.z,
-        .height = flagScale * 1.5f,
+        .height = height,
         .pickable = pickable,
         .showGrid = false,
         .isEditorPreview = preview,
@@ -687,7 +684,7 @@ void appendSelector(
         .model = model,
         .modelTransform = RenderFrameData::ModelTransform {
             .translation = translation,
-            .scale = { flagScale, flagScale, flagScale },
+            .scale = { 1.0f, 1.0f, 1.0f },
             .pivot = { 0.0f, 0.0f, 0.0f },
         },
     });

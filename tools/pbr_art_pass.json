@@ -85,45 +85,39 @@
     },
     {
       "name": "ScreenSelectorAPlayable",
-      "ownership": "generated",
-      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_blue.gltf",
-      "skip": null,
-      "surface_rule": "flag"
+      "ownership": "retained",
+      "source": "custom/pbr/models/ScreenSelectorAPlayable.glb",
+      "skip": "Authored by tools/make_screen_selector_models.py"
     },
     {
       "name": "ScreenSelectorASolved",
-      "ownership": "generated",
-      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_green.gltf",
-      "skip": null,
-      "surface_rule": "flag"
+      "ownership": "retained",
+      "source": "custom/pbr/models/ScreenSelectorASolved.glb",
+      "skip": "Authored by tools/make_screen_selector_models.py"
     },
     {
       "name": "ScreenSelectorAUnavailable",
-      "ownership": "generated",
-      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_red.gltf",
-      "skip": null,
-      "surface_rule": "flag"
+      "ownership": "retained",
+      "source": "custom/pbr/models/ScreenSelectorAUnavailable.glb",
+      "skip": "Authored by tools/make_screen_selector_models.py"
     },
     {
       "name": "ScreenSelectorBPlayable",
-      "ownership": "generated",
-      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_blue.gltf",
-      "skip": null,
-      "surface_rule": "flag"
+      "ownership": "retained",
+      "source": "custom/pbr/models/ScreenSelectorBPlayable.glb",
+      "skip": "Authored by tools/make_screen_selector_models.py"
     },
     {
       "name": "ScreenSelectorBSolved",
-      "ownership": "generated",
-      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_green.gltf",
-      "skip": null,
-      "surface_rule": "flag"
+      "ownership": "retained",
+      "source": "custom/pbr/models/ScreenSelectorBSolved.glb",
+      "skip": "Authored by tools/make_screen_selector_models.py"
     },
     {
       "name": "ScreenSelectorBUnavailable",
-      "ownership": "generated",
-      "source": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_red.gltf",
-      "skip": null,
-      "surface_rule": "flag"
+      "ownership": "retained",
+      "source": "custom/pbr/models/ScreenSelectorBUnavailable.glb",
+      "skip": "Authored by tools/make_screen_selector_models.py"
     },
     {
       "name": "Turret",

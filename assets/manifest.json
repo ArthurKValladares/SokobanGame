@@ -574,55 +574,31 @@
     {
       "name": "ScreenSelectorAPlayable",
       "path": "custom/pbr/models/ScreenSelectorAPlayable.glb",
-      "material": {
-        "mode": "texture",
-        "texture": "BoardGameBits"
-      },
       "preserveSourceScale": true
     },
     {
       "name": "ScreenSelectorASolved",
       "path": "custom/pbr/models/ScreenSelectorASolved.glb",
-      "material": {
-        "mode": "texture",
-        "texture": "BoardGameBits"
-      },
       "preserveSourceScale": true
     },
     {
       "name": "ScreenSelectorAUnavailable",
       "path": "custom/pbr/models/ScreenSelectorAUnavailable.glb",
-      "material": {
-        "mode": "texture",
-        "texture": "BoardGameBits"
-      },
       "preserveSourceScale": true
     },
     {
       "name": "ScreenSelectorBPlayable",
       "path": "custom/pbr/models/ScreenSelectorBPlayable.glb",
-      "material": {
-        "mode": "texture",
-        "texture": "BoardGameBits"
-      },
       "preserveSourceScale": true
     },
     {
       "name": "ScreenSelectorBSolved",
       "path": "custom/pbr/models/ScreenSelectorBSolved.glb",
-      "material": {
-        "mode": "texture",
-        "texture": "BoardGameBits"
-      },
       "preserveSourceScale": true
     },
     {
       "name": "ScreenSelectorBUnavailable",
       "path": "custom/pbr/models/ScreenSelectorBUnavailable.glb",
-      "material": {
-        "mode": "texture",
-        "texture": "BoardGameBits"
-      },
       "preserveSourceScale": true
     },
     {

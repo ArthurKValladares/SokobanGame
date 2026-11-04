@@ -572,7 +572,7 @@ def validate_geometry(meshes):
             assert _dot(face, tuple(sum(n[j] for n in normals) for j in range(3))) > 0, (name, i)
 
 
-def write_glb(path, meshes):
+def write_glb(path, meshes, materials=MATERIALS, generator="tools/make_energy_plate_models.py"):
     validate_geometry(meshes)
     binary = bytearray()
     views, accessors, primitives = [], [], []
@@ -601,11 +601,11 @@ def write_glb(path, meshes):
         primitives.append({"attributes": {"POSITION": position, "NORMAL": normal, "TEXCOORD_0": uv},
                            "indices": indices, "material": material_index, "mode": 4})
     document = {
-        "asset": {"version": "2.0", "generator": "tools/make_energy_plate_models.py"},
+        "asset": {"version": "2.0", "generator": generator},
         "extensionsUsed": ["KHR_materials_emissive_strength"],
         "scene": 0, "scenes": [{"nodes": [0]}], "nodes": [{"mesh": 0, "name": path.stem}],
         "meshes": [{"name": path.stem, "primitives": primitives}],
-        "materials": [MATERIALS[name] for name in meshes],
+        "materials": [materials[name] for name in meshes],
         "buffers": [{"byteLength": len(binary)}], "bufferViews": views, "accessors": accessors,
     }
     payload = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
