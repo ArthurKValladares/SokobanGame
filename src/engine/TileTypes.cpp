@@ -84,6 +84,11 @@ std::string_view tileTypeName(TileType type)
     return "Unknown";
 }
 
+std::string_view tileTypeDisplayName(TileType type)
+{
+    return type == TileType::WardrobeCrystalDruid ? "Druid" : tileTypeName(type);
+}
+
 std::optional<TileType> tileTypeFromName(std::string_view name)
 {
     if (name == "Rogue") {

@@ -846,7 +846,7 @@ void LevelEditor::rotateSelectedTile(int quarterTurns)
         document_.selectedTileQuarterTurns = static_cast<uint32_t>(
             (static_cast<int>(document_.selectedTileQuarterTurns) + quarterTurns % 4 + 4) % 4);
     }
-    document_.status = "Rotated " + std::string(tileTypeName(document_.selectedTile)) + ".";
+    document_.status = "Rotated " + std::string(tileTypeDisplayName(document_.selectedTile)) + ".";
 }
 
 uint32_t LevelEditor::selectedTileQuarterTurns() const
@@ -938,7 +938,7 @@ bool LevelEditor::selectRecentTile(std::size_t slot)
     }
     setSelectedTile(recentTiles_[slot]);
     document_.status = "Selected " +
-        std::string(tileTypeName(document_.selectedTile)) + ".";
+        std::string(tileTypeDisplayName(document_.selectedTile)) + ".";
     return true;
 }
 
@@ -983,7 +983,7 @@ std::optional<TileType> LevelEditor::pickTile(GridPosition3 pickedCell)
     setSelectedTile(*picked);
     document_.selectedTileQuarterTurns = tileRotationQuarterTurns(selectedCell);
     document_.status =
-        "Picked " + std::string(tileTypeName(*picked)) + ".";
+        "Picked " + std::string(tileTypeDisplayName(*picked)) + ".";
     // Picking a pressure plate, device, or linked movable object also picks
     // up its link color.
     for (int z = static_cast<int>(documentDepth()) - 1; z >= 0; --z) {
@@ -1000,7 +1000,7 @@ std::optional<TileType> LevelEditor::pickTile(GridPosition3 pickedCell)
         if (color) {
             activeLinkColor_ = *color;
             document_.status = "Picked " +
-                std::string(tileTypeName(*picked)) +
+                std::string(tileTypeDisplayName(*picked)) +
                 " and its link color.";
         }
         break;

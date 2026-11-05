@@ -115,18 +115,20 @@ bool drawAnimationRole(std::string& role)
 
 bool drawTileType(TileType& tile)
 {
-    const std::string preview(tileTypeName(tile));
+    const std::string preview(tileTypeDisplayName(tile));
     bool changed = false;
     if (ImGui::BeginCombo("Tile", preview.c_str())) {
         for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
             const bool selected = tile == definition.type;
-            if (ImGui::Selectable(definition.name.data(), selected)) {
+            ImGui::PushID(static_cast<int>(definition.type));
+            if (ImGui::Selectable(tileTypeDisplayName(definition.type).data(), selected)) {
                 tile = definition.type;
                 changed = true;
             }
             if (selected) {
                 ImGui::SetItemDefaultFocus();
             }
+            ImGui::PopID();
         }
         ImGui::EndCombo();
     }
@@ -608,7 +610,7 @@ void AssetManifestDebugUi::drawTiles(AssetManifestEditor& editor)
     }
     for (std::size_t i = 0; i < editor.tileEntries().size(); ++i) {
         AssetManifest::TileEntry tile = editor.tileEntries()[i];
-        const std::string label(tileTypeName(tile.tile));
+        const std::string label(tileTypeDisplayName(tile.tile));
         ImGui::PushID(static_cast<int>(i));
         const bool open = ImGui::TreeNode("Tile", "%s", label.c_str());
         const ItemAction action = drawItemActions(i, editor.tileEntries().size());

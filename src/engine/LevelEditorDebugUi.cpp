@@ -50,6 +50,7 @@ bool drawPaintButton(
     ImTextureID thumbnail,
     const editorTilePalette::Group* group = nullptr)
 {
+    const std::string_view displayName = tileTypeDisplayName(definition.type);
     const bool selected = group != nullptr
         ? group->contains(selectedTile)
         : selectedTile == definition.type;
@@ -115,7 +116,7 @@ bool drawPaintButton(
     if (ImGui::IsItemHovered()) {
         if (group != nullptr && group->rotationOnly) {
             ImGui::SetTooltip("%.*s\nUse Rotate to change direction.",
-                static_cast<int>(definition.name.size()), definition.name.data());
+                static_cast<int>(displayName.size()), displayName.data());
         } else if (group != nullptr) {
             ImGui::SetTooltip("%.*s: choose %s\n%.*s",
                 static_cast<int>(group->name.size()), group->name.data(),
@@ -123,9 +124,9 @@ bool drawPaintButton(
                     : tileTypeIsGround(definition.type) ? "rock version"
                     : tileTypeIsWall(definition.type) ? "stone version"
                     : tileTypeIsWardrobe(definition.type) ? "character" : "behavior",
-                static_cast<int>(definition.name.size()), definition.name.data());
+                static_cast<int>(displayName.size()), displayName.data());
         } else {
-            ImGui::SetTooltip("%.*s", static_cast<int>(definition.name.size()), definition.name.data());
+            ImGui::SetTooltip("%.*s", static_cast<int>(displayName.size()), displayName.data());
         }
     }
     ImGui::PopID();
@@ -851,7 +852,7 @@ void LevelEditorDebugUi::drawTilePalette(
             ImGui::GetContentRegionAvail().x;
         const auto labelFor = [&](std::size_t slot) {
             return std::to_string(slot + 1) + " " +
-                std::string(tileTypeName(recent[slot]));
+                std::string(tileTypeDisplayName(recent[slot]));
         };
         for (std::size_t slot = 0; slot < recent.size(); ++slot) {
             const std::string text = labelFor(slot);
@@ -1053,7 +1054,7 @@ void LevelEditorDebugUi::drawTilePalette(
             "window will flicker through each tile.");
     }
 
-    const std::string_view selectedName = tileTypeName(editor.selectedTile());
+    const std::string_view selectedName = tileTypeDisplayName(editor.selectedTile());
     if (tileTypeIsGround(editor.selectedTile())) {
         ImGui::Text("Selected: Ground Rock %02u", groundRockVariantFor(editor.selectedTile()) + 1U);
     } else {

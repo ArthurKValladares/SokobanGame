@@ -364,6 +364,8 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] char tileTypeToChar(TileType type);
 [[nodiscard]] std::optional<TileType> charToTileType(char character);
 [[nodiscard]] std::string_view tileTypeName(TileType type);
+// UI labels may differ from the unique names used by assets and saved data.
+[[nodiscard]] std::string_view tileTypeDisplayName(TileType type);
 // Clockwise visual turns. Directional tiles encode their orientation in the
 // tile type; other tiles retain their type and can use authored rotation data.
 [[nodiscard]] TileType rotateTileType(TileType type, int quarterTurns);
