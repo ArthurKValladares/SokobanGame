@@ -319,7 +319,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         }
         const uint64_t abilityGrants = item.contains("abilityGrants")
             ? unsignedIntegerProperty(item, "abilityGrants", playerContext) : 0;
-        if (abilityGrants > CharacterAbilities::maxPacked) {
+        if (abilityGrants > CharacterAbilityGrants::maxPacked) {
             fail(playerContext, "property 'abilityGrants' has unknown ability bits");
         }
         state.players.push_back({
@@ -336,7 +336,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
                 requiredProperty(item, "sliding", playerContext),
                 playerContext + ".sliding"),
             .quarterTurns = quarterTurnsProperty(item, playerContext),
-            .abilityGrants = CharacterAbilities::unpack(static_cast<uint32_t>(abilityGrants)),
+            .abilityGrants = CharacterAbilityGrants::unpack(static_cast<uint32_t>(abilityGrants)),
         });
     }
 

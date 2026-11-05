@@ -50,16 +50,17 @@ struct GameState {
         uint8_t quarterTurns = 0;
 
         // Additive powers that travel with this player through wardrobe changes.
-        CharacterAbilities abilityGrants {};
+        CharacterAbilityGrants abilityGrants {};
 
         [[nodiscard]] constexpr CharacterAbilities abilities(
             CharacterType fallback) const
         {
             auto result = baseCharacterAbilities(character.value_or(fallback));
-            const int power = result.pushPower + abilityGrants.pushPower;
-            result.pushPower = static_cast<uint8_t>(
-                power < CharacterAbilities::unlimitedPush
-                    ? power : CharacterAbilities::unlimitedPush);
+            if (result.pushPower != CharacterAbilities::unlimitedPush) {
+                const int power = result.pushPower + abilityGrants.pushPower;
+                result.pushPower = power < CharacterAbilityGrants::unlimitedPush
+                    ? power : CharacterAbilities::unlimitedPush;
+            }
             result.flags |= abilityGrants.flags;
             if (abilityGrants.pushPower != 0) {
                 result.grant(CharacterAbility::PushEnemy);
@@ -74,7 +75,7 @@ struct GameState {
         // An enemy has no character. Heroes retain their controller and grants.
         std::optional<CharacterType> character;
         EntityId controller = invalidEntityId;
-        CharacterAbilities abilityGrants {};
+        CharacterAbilityGrants abilityGrants {};
         uint8_t quarterTurns = 0;
 
         bool operator==(const CrystalOrigin&) const = default;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string_view>
 
@@ -92,11 +93,10 @@ enum class CharacterAbility : uint16_t {
 };
 
 struct CharacterAbilities {
-    static constexpr uint8_t unlimitedPush = 255;
+    static constexpr int unlimitedPush = std::numeric_limits<int>::max();
 
-    uint8_t pushPower = 0;
+    int pushPower = 0;
     uint16_t flags = 0;
-    static constexpr uint32_t maxPacked = (1U << 17) - 1;
 
     [[nodiscard]] constexpr bool has(CharacterAbility ability) const
     {
@@ -108,17 +108,33 @@ struct CharacterAbilities {
         flags |= static_cast<uint16_t>(ability);
     }
 
+    bool operator==(const CharacterAbilities&) const = default;
+};
+
+// Saved additive grants use one byte for push power and nine bits for flags.
+struct CharacterAbilityGrants {
+    static constexpr uint8_t unlimitedPush = 255;
+    static constexpr uint32_t maxPacked = (1U << 17) - 1;
+
+    uint8_t pushPower = 0;
+    uint16_t flags = 0;
+
+    constexpr void grant(CharacterAbility ability)
+    {
+        flags |= static_cast<uint16_t>(ability);
+    }
+
     [[nodiscard]] constexpr uint32_t packed() const
     {
         return pushPower | (static_cast<uint32_t>(flags) << 8);
     }
 
-    [[nodiscard]] static constexpr CharacterAbilities unpack(uint32_t value)
+    [[nodiscard]] static constexpr CharacterAbilityGrants unpack(uint32_t value)
     {
         return { static_cast<uint8_t>(value), static_cast<uint16_t>(value >> 8) };
     }
 
-    bool operator==(const CharacterAbilities&) const = default;
+    bool operator==(const CharacterAbilityGrants&) const = default;
 };
 
 [[nodiscard]] constexpr CharacterAbilities baseCharacterAbilities(

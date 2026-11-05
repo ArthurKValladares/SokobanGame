@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -1131,6 +1132,8 @@ void testKnightPushesAnUnlimitedMixedChain()
         { "CRRnN " },
     }, CharacterType::Knight);
     const GameState initial = rules::initialState(level);
+    CHECK(initial.players[0].abilities(level.character()).pushPower ==
+        std::numeric_limits<int>::max());
 
     const GameState pushed = rules::step(
         level, initial, MoveDirection::Right);
@@ -1141,6 +1144,112 @@ void testKnightPushesAnUnlimitedMixedChain()
     CHECK(pushed.movables[2].cell == cell(4, 0, 1));
     CHECK(pushed.enemies[0].cell == cell(5, 0, 1));
     CHECK(!pushed.players[0].dead);
+}
+
+void testHeroCarryCapacityAndCrushing()
+{
+    TEST("heroCarryCapacityAndCrushing");
+    const Level level = makeLevel({
+        { ".....", ".....", "....." },
+        { "##C  ", "     ", "     " },
+        { "CR  #", "  #  ", "  #  " },
+        { "     ", "  R  ", "  C  " },
+    }, CharacterType::Knight);
+    const GameState initial = rules::initialState(level);
+    const rules::StepScope carrier { .actors = { initial.players[0].id } };
+    const rules::StepScope lowerPusher { .actors = { initial.players[1].id } };
+    const rules::StepScope upperPusher { .actors = { initial.players[2].id } };
+
+    for (const CharacterType character : { CharacterType::Druid, CharacterType::CrystalDruid }) {
+        GameState weak = initial;
+        weak.players[0].character = character;
+        const auto crushed = rules::scopedStep(level, weak, MoveDirection::Right, {}, lowerPusher);
+        CHECK(crushed.players[0].dead);
+        CHECK(!crushed.players[0].drowned);
+        CHECK(crushed.movables[0].cell == cell(2, 0, 1));
+    }
+
+    GameState ranger = initial;
+    ranger.players[0].character = CharacterType::Ranger;
+    const auto oneRock = rules::scopedStep(level, ranger, MoveDirection::Right, {}, lowerPusher);
+    CHECK(!oneRock.players[0].dead);
+    CHECK(oneRock.movables[0].cell == cell(2, 0, 2));
+    const auto carried = rules::scopedStep(level, oneRock, MoveDirection::Right, {}, carrier);
+    CHECK(carried.players[0].cell == cell(3, 0, 1));
+    CHECK(carried.movables[0].cell == cell(3, 0, 2));
+    CHECK(rules::scopedStep(level, carried, MoveDirection::Right, {}, carrier) == carried);
+
+    const auto overloaded = rules::scopedStep(level, oneRock, MoveDirection::Up, {}, upperPusher);
+    CHECK(overloaded.players[0].dead);
+    CHECK(overloaded.movables[0].cell == cell(2, 0, 1));
+    CHECK(overloaded.movables[1].cell == cell(2, 0, 2));
+
+    GameState boosted = oneRock;
+    boosted.players[0].abilityGrants.pushPower = 1;
+    boosted = rules::scopedStep(level, boosted, MoveDirection::Up, {}, upperPusher);
+    CHECK(!boosted.players[0].dead);
+    CHECK(boosted.movables[1].cell == cell(2, 0, 3));
+
+    auto knight = rules::scopedStep(level, initial, MoveDirection::Right, {}, lowerPusher);
+    knight = rules::scopedStep(level, knight, MoveDirection::Up, {}, upperPusher);
+    knight.enemies.push_back({ .cell = cell(2, 0, 4) });
+    knight = rules::scopedStep(level, knight, MoveDirection::Right, {}, carrier);
+    CHECK(!knight.players[0].dead);
+    CHECK(knight.players[0].cell == cell(3, 0, 1));
+    CHECK(knight.movables[0].cell == cell(3, 0, 2));
+    CHECK(knight.movables[1].cell == cell(3, 0, 3));
+    CHECK(knight.enemies[0].cell == cell(3, 0, 4));
+}
+
+void testFallingUnitsCrushHeroesThroughTheirLoad()
+{
+    TEST("fallingUnitsCrushHeroesThroughTheirLoad");
+    for (const char falling : std::string("RNC")) {
+        const std::string ledge = falling == 'C' ? "  C  " : std::string(" C") + falling + "  ";
+        const Level level = makeLevel({
+            { "....." }, { "   C " }, { "     " }, { " ##  " }, { ledge },
+        }, CharacterType::Knight);
+
+        for (const bool stacked : { false, true }) {
+            GameState before = rules::initialState(level);
+            if (stacked) {
+                before.movables.push_back({ .id = 99, .cell = cell(3, 0, 2) });
+            } else {
+                before.players[0].character = CharacterType::Ranger;
+            }
+            const rules::StepScope ledgeHero { .actors = { before.players[1].id } };
+            const auto after = rules::scopedStep(level, before, MoveDirection::Right, {}, ledgeHero);
+            CHECK(after.players[0].dead);
+            CHECK(!after.players[0].drowned);
+            CHECK(!after.players[1].dead);
+            const auto landed = cell(3, 0, stacked ? 2 : 1);
+            if (falling == 'R') {
+                CHECK(after.movables[0].cell == landed);
+            } else if (falling == 'N') {
+                CHECK(after.enemies[0].cell == landed);
+            } else {
+                CHECK(after.players[1].cell == landed);
+            }
+            if (stacked) {
+                CHECK(after.movables.back().cell == cell(3, 0, 1));
+            }
+        }
+    }
+}
+
+void testOpeningGateDropsRockOntoKnight()
+{
+    TEST("openingGateDropsRockOntoKnight");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "....." }, { "PC C " }, { "     " }, { "   G " }, { "   R " } },
+        .gates = { { .cell = cell(3, 0, 3), .pressurePlates = { cell(0, 0, 1) } } },
+        .character = CharacterType::Knight,
+    }, "gate above knight");
+    const auto before = rules::initialState(level);
+    const rules::StepScope opener { .actors = { before.players[0].id } };
+    const auto after = rules::scopedStep(level, before, MoveDirection::Left, {}, opener);
+    CHECK(after.players[1].dead);
+    CHECK(after.movables[0].cell == cell(3, 0, 1));
 }
 
 void testKnightChainPushIsAtomicWhenItsTailIsBlocked()
@@ -1213,6 +1322,7 @@ void testDruidCompulsivelyPullsTrailingMovables()
         { "UR " },
     });
     const GameState cannotPushInitial = rules::initialState(cannotPush);
+    CHECK(cannotPushInitial.players[0].abilities(cannotPush.character()).pushPower == 0);
     CHECK(rules::step(
         cannotPush,
         cannotPushInitial,
@@ -5520,6 +5630,9 @@ int main()
     testDruidCrystallizesLivingUnitsWithoutPushing();
     testRangerUsesSinglePushAndCanGainAbilities();
     testKnightPushesAnUnlimitedMixedChain();
+    testHeroCarryCapacityAndCrushing();
+    testFallingUnitsCrushHeroesThroughTheirLoad();
+    testOpeningGateDropsRockOntoKnight();
     testKnightChainPushIsAtomicWhenItsTailIsBlocked();
     testKnightCanPushAnEnemyButStillSuffersItsAttack();
     testDruidCompulsivelyPullsTrailingMovables();

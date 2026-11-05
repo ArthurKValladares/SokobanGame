@@ -44,8 +44,8 @@ template <typename Json>
         if (!origin.character) throw std::runtime_error("Invalid crystal origin character");
     }
     origin.controller = number("controller", std::numeric_limits<EntityId>::max());
-    origin.abilityGrants = CharacterAbilities::unpack(
-        static_cast<uint32_t>(number("abilityGrants", CharacterAbilities::maxPacked)));
+    origin.abilityGrants = CharacterAbilityGrants::unpack(
+        static_cast<uint32_t>(number("abilityGrants", CharacterAbilityGrants::maxPacked)));
     origin.quarterTurns = static_cast<uint8_t>(number("quarterTurns", 3));
     if ((!origin.character && (origin.controller != invalidEntityId ||
              origin.abilityGrants.packed() != 0)) ||

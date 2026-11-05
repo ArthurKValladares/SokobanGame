@@ -50,7 +50,23 @@ struct FallResult {
     // hold an entity (an all-air column). Moves that would land unsupported
     // are rejected instead of leaving the entity standing on nothing.
     bool supported = true;
+    std::optional<std::size_t> impactVictim = std::nullopt;
 };
+
+// Fall queries also run on preview boards. Only committed falls queue impacts.
+struct FallImpacts {
+    std::vector<std::size_t> victims;
+
+    void record(const FallResult& fall)
+    {
+        if (fall.impactVictim) {
+            victims.push_back(*fall.impactVictim);
+        }
+    }
+};
+
+std::optional<std::size_t> supportingHero(
+    const Level& level, const GameState& state, GridPosition3 cell);
 
 TileType tileAt(const Level& level, GridPosition3 position)
 {
@@ -179,8 +195,12 @@ FallResult fallTarget(
         const GridPosition3 below { current.x, current.y, current.z - 1 };
         const TileType support = liveTileAt(level, state, below);
 
-        if (tileTypeIsSolidBlock(support) || occupiedBelow(below)) {
+        if (tileTypeIsSolidBlock(support)) {
             return { .cell = current, .fallen = false };
+        }
+        if (occupiedBelow(below)) {
+            return { .cell = current, .impactVictim = current.z < position.z
+                    ? supportingHero(level, state, below) : std::nullopt };
         }
         if (tileTypeIsWater(support)) {
             return {
@@ -244,7 +264,8 @@ FallResult movableFallTarget(const Level& level, const GameState& state, size_t 
 }
 
 std::vector<std::size_t> dropLostClericProtection(
-    const Level& level, GameState& state, std::vector<char>& previouslyProtected)
+    const Level& level, GameState& state, std::vector<char>& previouslyProtected,
+    FallImpacts& impacts)
 {
     std::vector<std::size_t> dropped;
     bool changed;
@@ -260,6 +281,7 @@ std::vector<std::size_t> dropLostClericProtection(
             if (fall.cell == player.cell && !fall.fallen && fall.supported) {
                 continue;
             }
+            impacts.record(fall);
             player.cell = fall.cell;
             player.dead = fall.fallen || !fall.supported;
             player.drowned = fall.fallen;
@@ -1038,7 +1060,7 @@ bool isGateOpen(
     // A closed gate is a solid block. Rocks and ice blocks cannot be
     // destroyed, so one standing in the cell holds the gate open until it
     // leaves. Heroes, enemies and turrets can die: the gate closes on them
-    // and kills them (see applyGateChanges).
+    // and kills them (see applySupportChanges).
     if (const GameState::Movable* movable = movableAt(state, gate.cell);
         movable != nullptr && !tileTypeIsTurret(movable->type)) {
         return true;
@@ -1250,6 +1272,24 @@ std::optional<LiveUnitAt> liveUnitAt(const GameState& state, GridPosition3 cell)
     return std::nullopt;
 }
 
+std::optional<std::size_t> supportingHero(
+    const Level& level, const GameState& state, GridPosition3 cell)
+{
+    for (auto unit = liveUnitAt(state, cell); unit; unit = liveUnitAt(state, cell)) {
+        if (unit->kind == EntityKind::Player) {
+            return unit->index;
+        }
+        if (minecartPlatformAt(level, state, cell)) {
+            break;
+        }
+        --cell.z;
+        if (tileTypeIsSolidBlock(liveTileAt(level, state, cell))) {
+            break;
+        }
+    }
+    return std::nullopt;
+}
+
 // Anything at all in `cell`, including fallen units filling water. A cell an
 // elevator moves through must hold none of it.
 bool anyUnitIn(const GameState& state, GridPosition3 cell)
@@ -1259,15 +1299,9 @@ bool anyUnitIn(const GameState& state, GridPosition3 cell)
         fallenEnemyAt(state, cell) != nullptr;
 }
 
-// A movable platform supports every consecutive live unit above it. Each unit
-// rides along, including stacks of blocks with a hero on top.
-std::vector<LiveUnitAt> platformRiders(const GameState& state, std::size_t index)
+std::vector<LiveUnitAt> stackAbove(const GameState& state, GridPosition3 cell)
 {
     std::vector<LiveUnitAt> riders;
-    if (!tileTypeIsMovablePlatform(state.movables[index].type)) {
-        return riders;
-    }
-    GridPosition3 cell = state.movables[index].cell;
     for (++cell.z; ; ++cell.z) {
         const auto rider = liveUnitAt(state, cell);
         if (!rider) {
@@ -1275,6 +1309,13 @@ std::vector<LiveUnitAt> platformRiders(const GameState& state, std::size_t index
         }
         riders.push_back(*rider);
     }
+}
+
+std::vector<LiveUnitAt> platformRiders(const GameState& state, std::size_t index)
+{
+    const auto& movable = state.movables[index];
+    return tileTypeIsMovablePlatform(movable.type)
+        ? stackAbove(state, movable.cell) : std::vector<LiveUnitAt> {};
 }
 
 void setUnitCell(GameState& state, LiveUnitAt unit, GridPosition3 cell)
@@ -1287,20 +1328,21 @@ void setUnitCell(GameState& state, LiveUnitAt unit, GridPosition3 cell)
     }
 }
 
-bool platformRidersCanMove(
-    const Level& level, const GameState& state, std::size_t index,
-    GridPosition3 landing, int entryZ = -1)
+GridPosition3 riderLanding(GridPosition3 from, GridPosition3 to, GridPosition3 rider)
 {
-    const auto riders = platformRiders(state, index);
-    const GridPosition3 from = state.movables[index].cell;
+    return { to.x, to.y, to.z + rider.z - from.z };
+}
+
+bool ridersCanMove(
+    const Level& level, const GameState& state, const std::vector<LiveUnitAt>& riders,
+    GridPosition3 from, GridPosition3 landing, int entryZ)
+{
     for (const LiveUnitAt rider : riders) {
         const GridPosition3 cell = unitCell(state, rider);
         if (isUnitLocked(level, state, cell)) {
             return false;
         }
-        // A forced shove can drop the robot after entering the next column.
-        // Check the rider's entry height and the entire fall, so an overhang
-        // cannot be crossed merely because the final landing has headroom.
+        // Check the entry height and the entire fall for overhangs.
         for (int z = std::max(landing.z, entryZ); z >= landing.z; --z) {
             const GridPosition3 target { landing.x, landing.y, z + cell.z - from.z };
             if (!cellAllowsEntity(level, state, target)) {
@@ -1310,8 +1352,7 @@ bool platformRidersCanMove(
                 const bool inStack = std::ranges::any_of(riders, [&](LiveUnitAt other) {
                     return occupant->kind == other.kind && occupant->index == other.index;
                 });
-                if (!inStack && !(occupant->kind == EntityKind::Movable &&
-                        occupant->index == index)) {
+                if (!inStack && target != from) {
                     return false;
                 }
             }
@@ -1321,6 +1362,14 @@ bool platformRidersCanMove(
         }
     }
     return true;
+}
+
+bool platformRidersCanMove(
+    const Level& level, const GameState& state, std::size_t index,
+    GridPosition3 landing, int entryZ = -1)
+{
+    return ridersCanMove(level, state, platformRiders(state, index),
+        state.movables[index].cell, landing, entryZ);
 }
 
 // Per-gate open state, in Level::gates() order.
@@ -1356,11 +1405,10 @@ struct UnitIndices {
     }
 };
 
-// What gates opening and closing did to the units around them.
-struct GateChanges {
-    // Fell through a gate that opened beneath them.
+struct SupportChanges {
+    // Fell after a gate opened or a supporting hero was crushed.
     UnitIndices dropped;
-    // Killed by a gate that closed on them.
+    // Killed by a closing gate, an excessive load, or a falling unit.
     UnitIndices crushed;
 
     [[nodiscard]] bool empty() const
@@ -1373,7 +1421,7 @@ struct GateChanges {
 // stepped there. Returns false when it stays put: something still holds it,
 // or nothing below can (an all-air column), the same case in which a move is
 // rejected rather than leaving a unit standing on nothing.
-bool dropUnit(const Level& level, GameState& state, LiveUnitAt unit)
+bool dropUnit(const Level& level, GameState& state, LiveUnitAt unit, FallImpacts& impacts)
 {
     if (isUnitLocked(level, state, unitCell(state, unit))) {
         return false;
@@ -1386,6 +1434,7 @@ bool dropUnit(const Level& level, GameState& state, LiveUnitAt unit)
         if (!fall.supported || (fall.cell == player.cell && !fall.fallen)) {
             return false;
         }
+        impacts.record(fall);
         player.cell = fall.cell;
         player.dead = fall.fallen;
         player.drowned = fall.fallen;
@@ -1399,6 +1448,7 @@ bool dropUnit(const Level& level, GameState& state, LiveUnitAt unit)
         if (!fall.supported || (fall.cell == movable.cell && !fall.fallen)) {
             return false;
         }
+        impacts.record(fall);
         movable.cell = fall.cell;
         movable.fallen = fall.fallen;
         movable.sliding.reset();
@@ -1411,6 +1461,7 @@ bool dropUnit(const Level& level, GameState& state, LiveUnitAt unit)
         if (!fall.supported || (fall.cell == enemy.cell && !fall.fallen)) {
             return false;
         }
+        impacts.record(fall);
         enemy.cell = fall.cell;
         enemy.fallen = fall.fallen;
         enemy.sliding.reset();
@@ -1421,7 +1472,7 @@ bool dropUnit(const Level& level, GameState& state, LiveUnitAt unit)
     }
 }
 
-// Kills a hero, enemy or turret a gate has closed on. The body stays where
+// Kills a hero, enemy or turret. The body stays where
 // it is: a dead hero is left on the board like one an enemy struck, and dead
 // enemies and turrets stop blocking and rendering.
 void crushUnit(GameState& state, LiveUnitAt unit)
@@ -1444,6 +1495,53 @@ void crushUnit(GameState& state, LiveUnitAt unit)
     }
 }
 
+void crushHeroAndDropStack(
+    const Level& level, GameState& state, std::size_t index,
+    SupportChanges& changes, FallImpacts& impacts)
+{
+    const LiveUnitAt hero { EntityKind::Player, index };
+    const auto riders = stackAbove(state, unitCell(state, hero));
+    crushUnit(state, hero);
+    changes.crushed.add(hero);
+    for (const LiveUnitAt rider : riders) {
+        if (dropUnit(level, state, rider, impacts)) {
+            changes.dropped.add(rider);
+        }
+    }
+}
+
+// Resolve an overloaded hero from the top down so the falling stack can
+// settle on the next support before checking the load on heroes below it.
+bool crushOverloadedHero(
+    const Level& level, GameState& state, SupportChanges& changes, FallImpacts& impacts)
+{
+    std::optional<std::size_t> overloaded;
+    for (std::size_t i = 0; i < state.players.size(); ++i) {
+        const auto& hero = state.players[i];
+        if (hero.dead ||
+            (overloaded && state.players[*overloaded].cell.z >= hero.cell.z)) {
+            continue;
+        }
+        const int capacity = hero.abilities(level.character()).pushPower;
+        if (capacity == CharacterAbilities::unlimitedPush) {
+            continue;
+        }
+        GridPosition3 cell = hero.cell;
+        int load = 0;
+        for (++cell.z; liveUnitAt(state, cell); ++cell.z) {
+            if (++load > capacity) {
+                overloaded = i;
+                break;
+            }
+        }
+    }
+    if (!overloaded) {
+        return false;
+    }
+    crushHeroAndDropStack(level, state, *overloaded, changes, impacts);
+    return true;
+}
+
 // A closed gate is a solid block and an open gate is empty space.
 //
 // A gate that opens drops the column of live units resting on top of it,
@@ -1459,17 +1557,18 @@ void crushUnit(GameState& state, LiveUnitAt unit)
 //
 // Landings and deaths can press or release further plates, so this repeats
 // until nothing changes.
-GateChanges applyGateChanges(
+SupportChanges applySupportChanges(
     const Level& level,
     GameState& state,
     std::vector<char>& openBefore,
-    const PressurePlateActivityTracker& plateActivity)
+    const PressurePlateActivityTracker& plateActivity,
+    FallImpacts& impacts)
 {
     plateActivity.observe(state);
-    GateChanges changes;
+    SupportChanges changes;
     const std::vector<Level::Gate>& gates = level.gates();
     openBefore.resize(gates.size(), 0);
-    bool changed = !gates.empty();
+    bool changed = true;
     while (changed) {
         changed = false;
         std::vector<char> openNow = gateOpenness(level, state);
@@ -1492,7 +1591,7 @@ GateChanges applyGateChanges(
             for (std::optional<LiveUnitAt> unit = liveUnitAt(state, cell);
                  unit;
                  ++cell.z, unit = liveUnitAt(state, cell)) {
-                if (dropUnit(level, state, *unit)) {
+                if (dropUnit(level, state, *unit, impacts)) {
                     plateActivity.observe(state);
                     changes.dropped.add(*unit);
                     changed = true;
@@ -1500,6 +1599,19 @@ GateChanges applyGateChanges(
             }
         }
         openBefore = std::move(openNow);
+        while (!impacts.victims.empty()) {
+            const std::size_t victim = impacts.victims.back();
+            impacts.victims.pop_back();
+            if (!playerDead(state, victim)) {
+                crushHeroAndDropStack(level, state, victim, changes, impacts);
+                plateActivity.observe(state);
+                changed = true;
+            }
+        }
+        if (crushOverloadedHero(level, state, changes, impacts)) {
+            plateActivity.observe(state);
+            changed = true;
+        }
     }
     return changes;
 }
@@ -2675,12 +2787,14 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
         return std::nullopt;
     }
 
+    FallImpacts impacts;
     for (std::size_t playerIndex : reflectedPlayerIndices) {
         const FallResult fall = playerFallTarget(
             level, after, playerIndex, playerCell(after, playerIndex));
         if (!fall.supported) {
             return std::nullopt;
         }
+        impacts.record(fall);
         playerCell(after, playerIndex) = fall.cell;
         playerDead(after, playerIndex) = fall.fallen;
         after.players[playerIndex].drowned = fall.fallen;
@@ -2694,6 +2808,7 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
         if (!fall.supported) {
             return std::nullopt;
         }
+        impacts.record(fall);
         after.movables[i].cell = fall.cell;
         after.movables[i].fallen = fall.fallen;
     }
@@ -2706,6 +2821,7 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
         if (!fall.supported) {
             return std::nullopt;
         }
+        impacts.record(fall);
         after.enemies[i].cell = fall.cell;
         after.enemies[i].fallen = fall.fallen;
     }
@@ -2716,7 +2832,7 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
     // Reflected units can open or close gates, dropping whatever rests on
     // them or crushing whatever stands in them.
     std::vector<char> gatesOpen = gateOpenness(level, state);
-    (void)applyGateChanges(level, after, gatesOpen, plateActivity);
+    (void)applySupportChanges(level, after, gatesOpen, plateActivity, impacts);
     GameState engagementBefore = state;
     if (pulse) {
         // Each key press is a new edge, including consecutive presses while
@@ -2731,12 +2847,16 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
         level, after, elevatorEngagement(level, engagementBefore), plateActivity);
     (void)applyMinecartActivations(
         level, after, minecartEngagement(level, engagementBefore), plateActivity);
-    (void)applyGateChanges(level, after, gatesOpen, plateActivity);
-    (void)dropLostClericProtection(level, after, clericProtection);
+    (void)applySupportChanges(level, after, gatesOpen, plateActivity, impacts);
+    if (!dropLostClericProtection(level, after, clericProtection, impacts).empty()) {
+        (void)applySupportChanges(level, after, gatesOpen, plateActivity, impacts);
+    }
     resolveEnemyAttacks(level, after);
     // An attack can empty a plate, opening or closing its gates.
-    (void)applyGateChanges(level, after, gatesOpen, plateActivity);
-    (void)dropLostClericProtection(level, after, clericProtection);
+    (void)applySupportChanges(level, after, gatesOpen, plateActivity, impacts);
+    if (!dropLostClericProtection(level, after, clericProtection, impacts).empty()) {
+        (void)applySupportChanges(level, after, gatesOpen, plateActivity, impacts);
+    }
     for (MirrorEntityPreview& entity : entities) {
         if (entity.player) {
             entity.destination = playerCell(after, entity.resultPlayerIndex);
@@ -3016,6 +3136,7 @@ public:
                 portalTransits_ ? portalTransits_->size() : 0;
             const std::size_t crystalCount =
                 crystalChanges_ ? crystalChanges_->size() : 0;
+            const std::size_t impactCount = fallImpacts_.victims.size();
             deriveIntents();
             const bool hasBardPulse = std::ranges::any_of(
                 status_,
@@ -3031,6 +3152,7 @@ public:
                 if (crystalChanges_) {
                     crystalChanges_->resize(crystalCount);
                 }
+                fallImpacts_.victims.resize(impactCount);
                 after_ = beforeBardPulse;
                 status_ = statusesBeforeBardPulse;
                 enemyMoved_ = enemiesBeforeBardPulse;
@@ -3042,27 +3164,28 @@ public:
                 settleBlocked();
                 suppressBardInfluences_ = false;
             }
-            anyMovement = resolveGateChanges() || anyMovement;
+            anyMovement = resolveSupportChanges() || anyMovement;
             if (anyMovement) {
                 resolveReactions();
             }
         }
         resolveRotators();
         resolveElevators();
-        while (resolveGateChanges()) {
+        while (resolveSupportChanges()) {
             resolveReactions();
         }
         resolveMinecarts();
-        while (resolveGateChanges()) {
+        while (resolveSupportChanges()) {
             resolveReactions();
         }
         // A pulse supplies input for one complete step, including movement
         // through its gates. Expiration uses normal gate crush/fall reactions.
         after_.activeButtons.clear();
-        while (resolveGateChanges()) {
+        while (resolveSupportChanges()) {
             resolveReactions();
         }
         if (resolveLostClericProtection()) {
+            (void)resolveSupportChanges();
             resolveReactions();
         }
         finishCrystalChanges();
@@ -3134,6 +3257,7 @@ private:
 
         // Keep the crystal as a blocker until this action settles. The
         // restored actor enters the board at commit, with fresh momentum.
+        bool restored = false;
         for (std::size_t i = originalMovableCount_; i-- > 0;) {
             if (status_[i].crystalRestorer == invalidEntityId || after_.movables[i].dead) {
                 continue;
@@ -3152,6 +3276,7 @@ private:
                 });
                 const auto fall = playerFallTarget(
                     level_, after_, after_.players.size() - 1, crystal.cell);
+                fallImpacts_.record(fall);
                 player.cell = fall.cell;
                 player.dead = fall.fallen || !fall.supported;
                 player.drowned = fall.fallen;
@@ -3163,6 +3288,7 @@ private:
                 });
                 const auto fall = enemyFallTarget(
                     level_, after_, after_.enemies.size() - 1, crystal.cell);
+                fallImpacts_.record(fall);
                 enemy.cell = fall.cell;
                 enemy.fallen = fall.fallen;
                 enemy.dead = !fall.supported;
@@ -3171,6 +3297,10 @@ private:
                 crystalChanges_->push_back({ status_[i].crystalRestorer, crystal.cell });
             }
             plateActivity_.observe(after_);
+            restored = true;
+        }
+        if (restored) {
+            (void)applySupportChanges(level_, after_, gatesOpen_, plateActivity_, fallImpacts_);
         }
     }
 
@@ -3209,6 +3339,7 @@ private:
         victimStatus.crystallized = true;
         victimStatus.done = true;
         const auto fall = movableFallTarget(level_, after_, rockIndex, cell);
+        fallImpacts_.record(fall);
         rock.cell = fall.cell;
         rock.fallen = fall.fallen;
         rock.dead = !fall.supported;
@@ -4089,6 +4220,19 @@ private:
         return platformRidersCanMove(level_, after_, index, landing, target.z);
     }
 
+    [[nodiscard]] bool canCarryPlayerRiders(
+        const GameState& board, std::size_t playerIndex, GridPosition3 landing, int entryZ) const
+    {
+        const auto& player = after_.players[playerIndex];
+        const auto riders = stackAbove(after_, player.cell);
+        const int capacity = player.abilities(level_.character()).pushPower;
+        return riders.size() <= static_cast<std::size_t>(capacity) &&
+            std::ranges::none_of(riders, [&](LiveUnitAt rider) {
+                return status_[entityIndexForUnit(rider)].movedThisMicro;
+            }) &&
+            ridersCanMove(level_, board, riders, player.cell, landing, entryZ);
+    }
+
     // Validate a robot's one-unit shove on a scratch board. This deliberately
     // never recurses: a second unit in front of the victim blocks the motor.
     [[nodiscard]] bool previewRobotPush(
@@ -4116,7 +4260,14 @@ private:
         if (!fall.supported) {
             return false;
         }
-        if (unit.kind == EntityKind::Movable &&
+        if (unit.kind == EntityKind::Player) {
+            if (!canCarryPlayerRiders(trial, unit.index, fall.cell, target.z)) {
+                return false;
+            }
+            for (const auto rider : stackAbove(trial, from)) {
+                setUnitCell(trial, rider, riderLanding(from, fall.cell, unitCell(trial, rider)));
+            }
+        } else if (unit.kind == EntityKind::Movable &&
             tileTypeIsMovablePlatform(trial.movables[unit.index].type)) {
             if (!platformRidersCanMove(level_, trial, unit.index, fall.cell, target.z)) {
                 return false;
@@ -4334,6 +4485,10 @@ private:
             }
 
             const GridPosition3 origin = playerCell(after_, playerIndex);
+            if (!canCarryPlayerRiders(after_, playerIndex, target, target.z)) {
+                return false;
+            }
+            const auto riders = stackAbove(after_, origin);
             playerCell(after_, playerIndex) = target;
             playerSliding(after_, playerIndex).reset();
             if (swap.movable) {
@@ -4362,6 +4517,7 @@ private:
                 status_[swap.index].movedThisMicro = true;
                 status_[swap.index].done = true;
             }
+            applyRiderMoves(riders, origin, target);
             anyMovement = true;
             return true;
         }
@@ -4419,6 +4575,9 @@ private:
         if (playerBlocksAt(after_, target, playerIndex)) {
             return false;
         }
+        if (!canCarryPlayerRiders(after_, playerIndex, fall.cell, target.z)) {
+            return false;
+        }
         if (abilities.has(CharacterAbility::Pull)) {
             const GridPosition3 pullSource = movementDestination(
                 playerCell(after_, playerIndex), oppositeDirection(direction));
@@ -4444,8 +4603,7 @@ private:
                         return false;
                     }
                 }
-                if ((abilities.pushPower == CharacterAbilities::unlimitedPush ||
-                     chain.size() <= abilities.pushPower) &&
+                if (chain.size() <= static_cast<std::size_t>(abilities.pushPower) &&
                     pushChain(chain, direction)) {
                     applyPlayerMoveAndPull(entityIndex, direction, target);
                     status.movedThisMicro = true;
@@ -4580,13 +4738,18 @@ private:
             return true;
         }
         const auto clericFall = playerFallTarget(level_, trial, clericIndex, destination);
-        if (!clericFall.supported) {
+        if (!clericFall.supported ||
+            !canCarryPlayerRiders(trial, clericIndex, clericFall.cell, destination.z)) {
             return true;
         }
         trial.players[clericIndex].cell = clericFall.cell;
         trial.players[clericIndex].dead = clericFall.fallen;
+        for (const auto rider : stackAbove(after_, target)) {
+            setUnitCell(trial, rider, riderLanding(target, clericFall.cell, unitCell(trial, rider)));
+        }
         const auto knightFall = playerFallTarget(level_, trial, knightIndex, target);
-        if (!knightFall.supported || knightFall.fallen) {
+        if (!knightFall.supported || knightFall.fallen ||
+            !canCarryPlayerRiders(trial, knightIndex, knightFall.cell, target.z)) {
             return true;
         }
         trial.players[knightIndex].cell = knightFall.cell;
@@ -4805,6 +4968,7 @@ private:
         const FallResult fall = preserveElevation
             ? FallResult { .cell = destination, .supported = true }
             : enemyFallTarget(level_, after_, enemyIndex, destination);
+        fallImpacts_.record(fall);
         after_.enemies[enemyIndex].cell = fall.cell;
         after_.enemies[enemyIndex].fallen = fall.fallen;
         const bool fell = fall.cell != destination || fall.fallen;
@@ -4827,24 +4991,17 @@ private:
         enemyMovedThisMicro_[enemyIndex] = true;
     }
 
-    // Gates act as soon as each micro-step's movement settles, so a unit
-    // sliding over a gate that opens falls through it there, and a hero in a
-    // gate that closes dies there. Dropped units join the closure because
+    // Gates, overloads, and impacts react as soon as each micro-step settles.
+    // Dropped units join the closure because
     // they are written, and count as having just moved for turrets and
     // attacks. One that was not acting (scenery to this step) only falls: it
     // must not pick up this step's input, and a belt it lands on moves it as
     // pending motion on the next step. Crushed units are written too, and
     // are finished.
-    [[nodiscard]] bool resolveGateChanges()
+    [[nodiscard]] bool resolveSupportChanges()
     {
-        if (gatesOpen_.empty()) {
-            // Locks and moving platforms also read physical plate activity,
-            // as can a later action on a board without gates.
-            plateActivity_.observe(after_);
-            return false;
-        }
-        const GateChanges changes =
-            applyGateChanges(level_, after_, gatesOpen_, plateActivity_);
+        const SupportChanges changes =
+            applySupportChanges(level_, after_, gatesOpen_, plateActivity_, fallImpacts_);
         const auto joinClosure = [this](std::size_t entity, bool finished) {
             Status& status = status_[entity];
             if (!status.active || finished) {
@@ -5021,6 +5178,9 @@ private:
         bool changed;
         do {
             changed = resolveLostClericProtection();
+            if (changed) {
+                (void)resolveSupportChanges();
+            }
             changed = resolveTurretShots(sweepingTurrets) || changed;
             changed = resolveAttacks() || changed;
             sweepingTurrets = nullptr;
@@ -5311,7 +5471,7 @@ private:
                 attackProtectionLost = true;
             }
         }
-        const auto dropped = dropLostClericProtection(level_, after_, clericProtection_);
+        const auto dropped = dropLostClericProtection(level_, after_, clericProtection_, fallImpacts_);
         for (const std::size_t i : dropped) {
             auto& status = status_[entityIndexForPlayer(i)];
             status.active = true;
@@ -5332,7 +5492,7 @@ private:
         GridPosition3 target,
         bool preserveElevation = false)
     {
-        const GridPosition3 robotFrom = after_.movables[index].cell;
+        const GridPosition3 from = after_.movables[index].cell;
         const bool padCoasting = after_.movables[index].type == TileType::LilyPad &&
             after_.movables[index].sliding.has_value();
         const auto riders = platformRiders(after_, index);
@@ -5366,6 +5526,7 @@ private:
         const FallResult fall = preserveElevation
             ? FallResult { .cell = target, .supported = true }
             : movableFallTarget(level_, after_, index, target);
+        fallImpacts_.record(fall);
         const bool skipping = tileTypeIsSkippingStone(after_.movables[index].type) &&
             !boardingPad && isUnfilledWater(level_, after_, fall.cell);
         const bool fell = fall.cell.z != target.z || (fall.fallen && !skipping);
@@ -5399,11 +5560,14 @@ private:
             pushRoundRockWake(index, direction);
         }
         ++status_[index].consumed;
+        applyRiderMoves(riders, from, fall.cell);
+    }
+
+    void applyRiderMoves(
+        const std::vector<LiveUnitAt>& riders, GridPosition3 from, GridPosition3 to)
+    {
         for (const LiveUnitAt rider : riders) {
-            const GridPosition3 from = unitCell(after_, rider);
-            const GridPosition3 to { fall.cell.x, fall.cell.y,
-                fall.cell.z + from.z - robotFrom.z };
-            setUnitCell(after_, rider, to);
+            setUnitCell(after_, rider, riderLanding(from, to, unitCell(after_, rider)));
             const std::size_t riderIndex = entityIndexForUnit(rider);
             slidingOf(riderIndex).reset();
             Status& riderStatus = status_[riderIndex];
@@ -5428,6 +5592,8 @@ private:
         const FallResult* simultaneousLanding = nullptr)
     {
         const std::size_t playerIndex = playerIndexForEntity(entityIndex);
+        const GridPosition3 from = playerCell(after_, playerIndex);
+        const auto riders = stackAbove(after_, from);
         target = transportedLanding(
             playerCell(after_, playerIndex), direction, target);
         const bool portalMomentum = portalCarriesMomentum(
@@ -5449,6 +5615,7 @@ private:
         const FallResult fall = simultaneousLanding
             ? *simultaneousLanding
             : playerFallTarget(level_, after_, playerIndex, target);
+        fallImpacts_.record(fall);
         const bool fell = fall.cell.z != target.z || fall.fallen;
         playerCell(after_, playerIndex) = fall.cell;
         playerDead(after_, playerIndex) = fall.fallen;
@@ -5464,6 +5631,7 @@ private:
             applyWardrobeSwap(playerIndex);
         }
         ++status_[entityIndex].consumed;
+        applyRiderMoves(riders, from, fall.cell);
     }
 
     void applyWardrobeSwap(std::size_t playerIndex)
@@ -5581,6 +5749,7 @@ private:
     std::vector<TurretShot>* turretShots_ = nullptr;
     std::vector<PortalTransit>* portalTransits_ = nullptr;
     std::vector<CrystalChange>* crystalChanges_ = nullptr;
+    FallImpacts fallImpacts_;
     bool suppressBardInfluences_ = false;
     // Which rotators had every linked plate pressed when the step began. A
     // rotator activates on the step that presses its last plate, never on a
@@ -5591,7 +5760,7 @@ private:
     std::vector<char> elevatorsEngagedAtStart_;
     // Which minecarts had every linked plate pressed when the step began.
     std::vector<char> minecartsEngagedAtStart_;
-    // Which gates were open when last looked at (see applyGateChanges). Unlike
+    // Which gates were open when last looked at (see applySupportChanges). Unlike
     // the engagement samples above this is kept current through the step,
     // so a gate that closes and opens again drops what has since stepped on.
     std::vector<char> gatesOpen_;

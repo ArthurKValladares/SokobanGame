@@ -109,6 +109,24 @@ void addReservation(
     }
 }
 
+// An arriving or departing rider depends on the heroes supporting its stack.
+// Their own paths are at a different height, so reserve those cells until the
+// rider's move settles even when the heroes stand still.
+void addHeroSupportReservations(
+    const GameState& state, GridPosition3 cell, std::optional<int> lastStep,
+    std::vector<Reservation>& into)
+{
+    for (--cell.z; cell.z >= 0; --cell.z) {
+        if (std::ranges::any_of(state.players, [&](const auto& hero) {
+                return !hero.dead && hero.cell == cell;
+            })) {
+            addReservation(into, { .cell = cell, .firstStep = 0, .lastStep = lastStep });
+        } else if (!rules::movableAt(state, cell) && !rules::enemyAt(state, cell)) {
+            break;
+        }
+    }
+}
+
 // Live units stacked directly on a platform resting in `platform`.
 int ridersAbove(const GameState& state, GridPosition3 platform)
 {
@@ -297,7 +315,13 @@ ActionReservations reservationsFor(const PlannedAction& planned)
         };
 
         for (std::size_t i = 0; i < track.cells.size(); ++i) {
-            claim(track.cells[i], track.firstInstant + static_cast<int>(i));
+            const int instant = track.firstInstant + static_cast<int>(i);
+            claim(track.cells[i], instant);
+            const auto& state = instant == 0
+                ? planned.action.before : planned.legs[static_cast<std::size_t>(instant - 1)];
+            addHeroSupportReservations(state, track.cells[i],
+                i + 1 == track.cells.size() ? std::nullopt : std::optional<int>(instant + 1),
+                result.cells);
         }
 
         // Every cell on the path is held from the action's own start, not from

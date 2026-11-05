@@ -246,7 +246,7 @@ void parseState(const Json& value, Step& step)
         }
         const auto grants = item.contains("abilityGrants")
             ? exactInteger<uint32_t>(item.at("abilityGrants")) : 0;
-        if (grants > CharacterAbilities::maxPacked) {
+        if (grants > CharacterAbilityGrants::maxPacked) {
             throw std::runtime_error("state has unknown ability grant bits");
         }
         state.players.push_back(
@@ -259,7 +259,7 @@ void parseState(const Json& value, Step& step)
                 .drowned = item.at("drowned").get<bool>(),
                 .sliding = parseDirection(item.at("sliding")),
                 .quarterTurns = parseTurns(item.at("quarterTurns")),
-                .abilityGrants = CharacterAbilities::unpack(grants),
+                .abilityGrants = CharacterAbilityGrants::unpack(grants),
             });
     }
     for (const auto& item : array("movables")) {

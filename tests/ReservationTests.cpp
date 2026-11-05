@@ -329,6 +329,31 @@ void testDisjointActionsDoNotConflict()
     CHECK(table.empty());
 }
 
+void testLandingOnHeroReservesTheirSupport()
+{
+    TEST("landingOnHeroReservesTheirSupport");
+    const Level level = makeLevel({ { "...." }, { "##C " }, { "CR  " } });
+    const GameState state = rules::initialState(level);
+    const auto landing = plans::planPlayerStep(
+        level, state, MoveDirection::Right, {}, 0.1f, state.players[1].controller);
+    const auto departing = plans::planPlayerStep(
+        level, state, MoveDirection::Right, {}, 0.1f, state.players[0].controller);
+    CHECK(landing.has_value());
+    CHECK(departing.has_value());
+    if (!landing || !departing) return;
+    CHECK(landing->action.after.movables[0].cell == cell(2, 0, 2));
+    CHECK(landing->action.after.players[0] == state.players[0]);
+
+    const auto landingClaims = plans::reservationsFor(*landing);
+    const auto departingClaims = plans::reservationsFor(*departing);
+    ReservationTable table;
+    table.admit(1, landingClaims, 0);
+    CHECK(table.conflict(departingClaims, 0).has_value());
+    table.clear();
+    table.admit(2, departingClaims, 0);
+    CHECK(table.conflict(landingClaims, 0).has_value());
+}
+
 void testCrossingBehindTheBlockIsAllowed()
 {
     TEST("crossingBehindTheBlockIsAllowed");
@@ -562,6 +587,7 @@ int main()
     testUninvolvedEntitiesAreNotClaimed();
     testEntitiesCannotSwapThroughEachOther();
     testDisjointActionsDoNotConflict();
+    testLandingOnHeroReservesTheirSupport();
     testCrossingBehindTheBlockIsAllowed();
     testStandingInThePathConflicts();
     testConflictIsSymmetric();
