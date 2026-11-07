@@ -1540,6 +1540,48 @@ void appendClericImmunity(
     }
 }
 
+// A payload keeps its height relative to the same hero throughout a carry.
+// Walk down through carried heroes to find the root that determines the turn.
+std::optional<std::size_t> movingCarrier(
+    const RenderFrameBuilder::GameplayInput& input, GridPosition3 from, GridPosition3 to)
+{
+    auto before = rules::carryingPlayer(input.level, input.state, from);
+    auto after = rules::carryingPlayer(input.level, input.projectedState, to);
+    if (!before || !after ||
+        resolvedEntityId(EntityKind::Player, input.state.players[*before].id, *before) !=
+            resolvedEntityId(EntityKind::Player, input.projectedState.players[*after].id, *after) ||
+        from.z - input.state.players[*before].cell.z !=
+            to.z - input.projectedState.players[*after].cell.z) {
+        return std::nullopt;
+    }
+    while (const auto lower = rules::carryingPlayer(
+               input.level, input.projectedState, input.projectedState.players[*after].cell)) {
+        after = lower;
+    }
+    return after;
+}
+
+float carrierFacingOffset(
+    const RenderFrameBuilder::GameplayInput& input, std::size_t carrier, float turnProgress)
+{
+    const auto& after = input.projectedState.players[carrier];
+    const auto id = resolvedEntityId(EntityKind::Player, after.id, carrier);
+    const auto& visuals = input.presentation.players();
+    const auto visual = std::ranges::find_if(visuals, [&](const auto& candidate) {
+        return candidate.motion.target.id == id;
+    });
+    if (visual == visuals.end()) return 0.0f;
+    const auto before = std::ranges::find_if(input.state.players, [&](const auto& hero) {
+        const auto index = static_cast<std::size_t>(&hero - input.state.players.data());
+        return resolvedEntityId(EntityKind::Player, hero.id, index) == id;
+    });
+    const float turn = before == input.state.players.end() ? 0.0f
+        : static_cast<float>(quarterTurnDelta(before->quarterTurns, after.quarterTurns));
+    const float visibleFacing = static_cast<float>(visual->facingQuarterTurns) - turn * (1.0f - turnProgress);
+    const float settledFacing = static_cast<float>(facingQuarterTurns(rules::playerFacing(after)));
+    return std::remainder(visibleFacing - settledFacing, 4.0f) * (pi * 0.5f);
+}
+
 void appendGameplayEntities(
     RenderFrameData& frame,
     const RenderFrameBuilder::GameplayInput& input)
@@ -1564,6 +1606,9 @@ void appendGameplayEntities(
             continue;
         }
         const GameplayPresentation::PlayerVisual& visual = playerVisuals[playerIndex];
+        const auto carrier = playerIndex < input.projectedState.players.size()
+            ? movingCarrier(input, state.players[playerIndex].cell,
+                input.projectedState.players[playerIndex].cell) : std::nullopt;
         const AnimationUse animationUse = visual.animationUse;
         RenderAnimation animation = animationFor(
             input.animations,
@@ -1626,9 +1671,10 @@ void appendGameplayEntities(
             // turning it; unwind that until the action has played out.
             .modelRotationQuarterTurns = visual.facingQuarterTurns,
             .modelRotationOffsetRadians =
-                -static_cast<float>(quarterTurnDeltaAt(
-                    state.players, input.projectedState.players, playerIndex)) *
-                quarterTurnRadians * (1.0f - turnProgress),
+                carrier ? carrierFacingOffset(input, *carrier, turnProgress)
+                    : -static_cast<float>(quarterTurnDeltaAt(
+                          state.players, input.projectedState.players, playerIndex)) *
+                          quarterTurnRadians * (1.0f - turnProgress),
         };
         applyTileScale(
             playerTile,
@@ -1643,6 +1689,14 @@ void appendGameplayEntities(
          ++enemyIndex) {
         const GameState::Enemy& enemy = state.enemies[enemyIndex];
         const GameplayPresentation::EnemyVisual& visual = enemyVisuals[enemyIndex];
+        const auto carrier = enemyIndex < input.projectedState.enemies.size()
+            ? movingCarrier(input, enemy.cell, input.projectedState.enemies[enemyIndex].cell)
+            : std::nullopt;
+        float carriedYaw = yawRadians(visual.orientation);
+        if (carrier) {
+            carriedYaw = static_cast<float>(input.projectedState.enemies[enemyIndex].quarterTurns) *
+                quarterTurnRadians + carrierFacingOffset(input, *carrier, turnProgress);
+        }
         if (enemy.dead || (enemy.fallen && !visual.motion.moving)) {
             continue;
         }
@@ -1686,7 +1740,7 @@ void appendGameplayEntities(
                 input.animations,
                 visual.animationFallbackUse.value_or(visual.animationUse),
                 visual.clipTimeSeconds),
-            .modelRotationOffsetRadians = yawRadians(visual.orientation),
+            .modelRotationOffsetRadians = carriedYaw,
         };
         applyTileScale(enemyTile, input.settings.tileScale(TileType::Enemy));
         enemyTile.baseElevation += lilyPadRiderElevationOffset(input, visual.motion);
@@ -1698,6 +1752,9 @@ void appendGameplayEntities(
          movableIndex < movableVisuals.size();
          ++movableIndex) {
         const GameState::Movable& movable = state.movables[movableIndex];
+        const auto carrier = movableIndex < input.projectedState.movables.size()
+            ? movingCarrier(input, movable.cell, input.projectedState.movables[movableIndex].cell)
+            : std::nullopt;
         const GameplayPresentation::EntityVisual& visual =
             movableVisuals[movableIndex];
         const bool movingOutOfWater =
@@ -1737,7 +1794,7 @@ void appendGameplayEntities(
         // changes quarterTurns, but that turn belongs to the moment the
         // object passes through; animating it against turnProgress (which
         // restarts every leg of a slide) spun the object the whole way.
-        const bool turnedByRotator =
+        const bool turnedByRotator = !carrier &&
             movableIndex < input.projectedState.movables.size() &&
             tileTypeIsRotator(
                 input.level
@@ -1748,7 +1805,7 @@ void appendGameplayEntities(
                   state.movables, input.projectedState.movables, movableIndex)
             : 0;
         const GameState::Movable& headingMovable =
-            tileTypeIsRobot(movable.type) && input.moving && !turnedByRotator &&
+            (tileTypeIsRobot(movable.type) || carrier) && input.moving && !turnedByRotator &&
                     movableIndex < input.projectedState.movables.size()
                 ? input.projectedState.movables[movableIndex]
                 : movable;
@@ -1780,6 +1837,7 @@ void appendGameplayEntities(
             .modelRotationOffsetRadians =
                 (tileTypeIsMirror(movable.type)
                         ? config::mirrorModelRotationOffsetRadians : 0.0f) +
+                (carrier ? carrierFacingOffset(input, *carrier, turnProgress) : 0.0f) +
                 static_cast<float>(animatedQuarterTurns) *
                 quarterTurnRadians * turnProgress,
         };

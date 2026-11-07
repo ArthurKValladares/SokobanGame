@@ -301,7 +301,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         const Json& item = players[i];
         rejectUnknownProperties(
             item,
-            { "id", "cell", "character", "controller", "dead", "drowned", "sliding", "quarterTurns", "abilityGrants" },
+            { "id", "cell", "character", "controller", "dead", "drowned", "sliding", "quarterTurns", "abilityGrants", "facing" },
             playerContext);
         std::optional<CharacterType> character;
         const Json& encodedCharacter =
@@ -337,6 +337,8 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
                 playerContext + ".sliding"),
             .quarterTurns = quarterTurnsProperty(item, playerContext),
             .abilityGrants = CharacterAbilityGrants::unpack(static_cast<uint32_t>(abilityGrants)),
+            .facing = item.contains("facing")
+                ? directionFromJson(item.at("facing"), playerContext + ".facing") : std::nullopt,
         });
     }
 
@@ -553,6 +555,9 @@ OrderedJson gameStateToJson(const GameState& state)
         }
         if (const auto grants = player.abilityGrants.packed(); grants != 0) {
             players.back()["abilityGrants"] = grants;
+        }
+        if (player.facing) {
+            players.back()["facing"] = directionName(*player.facing);
         }
     }
     OrderedJson movables = OrderedJson::array();

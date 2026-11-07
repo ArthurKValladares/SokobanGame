@@ -55,6 +55,7 @@ PackedStateKey makePackedStateKey(
         flags |= static_cast<std::uint32_t>(player.dead) << 16;
         flags |= static_cast<std::uint32_t>(player.drowned) << 17;
         flags |= static_cast<std::uint32_t>(player.quarterTurns) << 18;
+        flags |= optionalEnumCode(player.facing) << 20;
         const auto abilityGrants = player.abilityGrants.packed();
         flags |= static_cast<std::uint32_t>(abilityGrants != 0) << 26;
         words.push_back(player.id);
@@ -81,7 +82,8 @@ PackedStateKey makePackedStateKey(
             words.push_back(origin->controller);
             words.push_back(optionalEnumCode(origin->character) |
                 (static_cast<std::uint64_t>(origin->abilityGrants.packed()) << 8) |
-                (static_cast<std::uint64_t>(origin->quarterTurns) << 32));
+                (static_cast<std::uint64_t>(origin->quarterTurns) << 32) |
+                (static_cast<std::uint64_t>(optionalEnumCode(origin->facing)) << 40));
         }
     }
 

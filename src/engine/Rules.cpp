@@ -65,6 +65,15 @@ struct FallImpacts {
     }
 };
 
+struct LiveUnitAt {
+    EntityKind kind = EntityKind::Player;
+    std::size_t index = 0;
+};
+
+std::optional<LiveUnitAt> liveUnitAt(const GameState& state, GridPosition3 cell);
+std::vector<LiveUnitAt> stackAbove(const GameState& state, GridPosition3 cell);
+void rotateUnit(GameState& state, LiveUnitAt unit, int turns);
+
 std::optional<std::size_t> supportingHero(
     const Level& level, const GameState& state, GridPosition3 cell);
 
@@ -480,6 +489,21 @@ GridPosition directionOffset(MoveDirection direction)
         return { 1, 0 };
     }
     return {};
+}
+
+MoveDirection playerFacing(const GameState::Player& player)
+{
+    return player.facing.value_or(rotateDirection(MoveDirection::Down, player.quarterTurns));
+}
+
+std::optional<std::size_t> carryingPlayer(
+    const Level& level, const GameState& state, GridPosition3 cell)
+{
+    --cell.z;
+    if (tileTypeIsSolidBlock(liveTileAt(level, state, cell))) {
+        return std::nullopt;
+    }
+    return supportingHero(level, state, cell);
 }
 
 GridPosition3 movementTarget(GridPosition3 origin, MoveDirection direction)
@@ -1176,27 +1200,20 @@ RotatedOccupants applyRotatorActivations(
         if (!turns) {
             continue;
         }
-        for (std::size_t i = 0; i < state.players.size(); ++i) {
-            GameState::Player& player = state.players[i];
-            if (!player.dead && player.cell == rotator.cell) {
-                player.quarterTurns = addQuarterTurns(player.quarterTurns, *turns);
-                rotated.players.push_back(i);
+        const auto occupant = liveUnitAt(state, rotator.cell);
+        if (!occupant) continue;
+        const auto rotate = [&](LiveUnitAt unit) {
+            rotateUnit(state, unit, *turns);
+            switch (unit.kind) {
+            case EntityKind::Player: rotated.players.push_back(unit.index); break;
+            case EntityKind::Movable: rotated.movables.push_back(unit.index); break;
+            case EntityKind::Enemy: rotated.enemies.push_back(unit.index); break;
+            default: break;
             }
-        }
-        for (std::size_t i = 0; i < state.movables.size(); ++i) {
-            GameState::Movable& movable = state.movables[i];
-            if (!movable.fallen && !movable.dead &&
-                movable.cell == rotator.cell) {
-                movable.quarterTurns = addQuarterTurns(movable.quarterTurns, *turns);
-                rotated.movables.push_back(i);
-            }
-        }
-        for (std::size_t i = 0; i < state.enemies.size(); ++i) {
-            GameState::Enemy& enemy = state.enemies[i];
-            if (!enemy.fallen && !enemy.dead && enemy.cell == rotator.cell) {
-                enemy.quarterTurns = addQuarterTurns(enemy.quarterTurns, *turns);
-                rotated.enemies.push_back(i);
-            }
+        };
+        rotate(*occupant);
+        if (occupant->kind == EntityKind::Player) {
+            for (const auto rider : stackAbove(state, rotator.cell)) rotate(rider);
         }
     }
     return rotated;
@@ -1235,11 +1252,6 @@ struct ElevatorRiders {
 
 // One live unit standing in `cell`, as a state index. Units never share a
 // cell, so the first match is the only one.
-struct LiveUnitAt {
-    EntityKind kind = EntityKind::Player;
-    std::size_t index = 0;
-};
-
 GridPosition3 unitCell(const GameState& state, LiveUnitAt unit)
 {
     switch (unit.kind) {
@@ -1324,6 +1336,27 @@ void setUnitCell(GameState& state, LiveUnitAt unit, GridPosition3 cell)
     case EntityKind::Player: state.players[unit.index].cell = cell; break;
     case EntityKind::Movable: state.movables[unit.index].cell = cell; break;
     case EntityKind::Enemy: state.enemies[unit.index].cell = cell; break;
+    default: break;
+    }
+}
+
+void rotateUnit(GameState& state, LiveUnitAt unit, int turns)
+{
+    switch (unit.kind) {
+    case EntityKind::Player: {
+        auto& player = state.players[unit.index];
+        player.quarterTurns = addQuarterTurns(player.quarterTurns, turns);
+        if (player.facing) player.facing = rotateDirection(*player.facing, turns);
+        break;
+    }
+    case EntityKind::Movable:
+        state.movables[unit.index].quarterTurns = addQuarterTurns(
+            state.movables[unit.index].quarterTurns, turns);
+        break;
+    case EntityKind::Enemy:
+        state.enemies[unit.index].quarterTurns = addQuarterTurns(
+            state.enemies[unit.index].quarterTurns, turns);
+        break;
     default: break;
     }
 }
@@ -2666,7 +2699,9 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
                     .dead = source.dead,
                     .drowned = source.drowned,
                     .sliding = std::nullopt,
+                    .quarterTurns = source.quarterTurns,
                     .abilityGrants = source.abilityGrants,
+                    .facing = source.facing,
                 });
                 resultPlayer = after.players.size() - 1;
             }
@@ -3169,6 +3204,9 @@ public:
                 resolveReactions();
             }
         }
+        if (faceBlockedCopies()) {
+            resolveReactions();
+        }
         resolveRotators();
         resolveElevators();
         while (resolveSupportChanges()) {
@@ -3273,6 +3311,7 @@ private:
                     .controller = origin.controller,
                     .quarterTurns = origin.quarterTurns,
                     .abilityGrants = origin.abilityGrants,
+                    .facing = origin.facing,
                 });
                 const auto fall = playerFallTarget(
                     level_, after_, after_.players.size() - 1, crystal.cell);
@@ -3323,6 +3362,7 @@ private:
                 .controller = player.controller,
                 .abilityGrants = player.abilityGrants,
                 .quarterTurns = player.quarterTurns,
+                .facing = player.facing,
             };
             if (player.character.value_or(level_.character()) == CharacterType::Ranger) {
                 rock.type = TileType::SkippingCrystal;
@@ -3348,6 +3388,7 @@ private:
         status_[rockIndex].resolved = true;
         status_[actor].done = true;
         status_[actor].resolved = true;
+        turnPlayerInPlace(playerIndexForEntity(actor), *status_[actor].intent);
         if (crystalChanges_) {
             const auto index = playerIndexForEntity(actor);
             crystalChanges_->push_back({
@@ -4517,7 +4558,8 @@ private:
                 status_[swap.index].movedThisMicro = true;
                 status_[swap.index].done = true;
             }
-            applyRiderMoves(riders, origin, target);
+            status.inputDirection = direction;
+            applyRiderMoves(riders, origin, target, facePlayer(playerIndex, direction));
             anyMovement = true;
             return true;
         }
@@ -4544,6 +4586,7 @@ private:
                 after_.movables[victim->index].sliding.reset();
                 status.done = true;
                 status.resolved = true;
+                turnPlayerInPlace(playerIndex, direction);
                 anyMovement = true;
                 return true;
             }
@@ -5516,8 +5559,10 @@ private:
             direction,
             target);
         movableMovedDirections_[index] = direction;
+        int riderTurns = 0;
         if (const auto crossing = level_.portalCrossing(
                 after_.movables[index].cell, directionOffset(direction))) {
+            riderTurns = crossing->quarterTurns;
             after_.movables[index].quarterTurns = addQuarterTurns(
                 after_.movables[index].quarterTurns, crossing->quarterTurns);
         }
@@ -5560,13 +5605,53 @@ private:
             pushRoundRockWake(index, direction);
         }
         ++status_[index].consumed;
-        applyRiderMoves(riders, from, fall.cell);
+        applyRiderMoves(riders, from, fall.cell, riderTurns);
+    }
+
+    int facePlayer(std::size_t index, MoveDirection direction)
+    {
+        auto& player = after_.players[index];
+        const auto previous = playerFacing(player);
+        int turns = 0;
+        while (rotateDirection(previous, turns) != direction) ++turns;
+        player.facing = direction;
+        return turns;
+    }
+
+    void turnPlayerInPlace(std::size_t index, MoveDirection direction)
+    {
+        const auto cell = after_.players[index].cell;
+        const auto riders = stackAbove(after_, cell);
+        applyRiderMoves(riders, cell, cell, facePlayer(index, direction));
+        status_[entityIndexForPlayer(index)].inputDirection = direction;
+        status_[entityIndexForPlayer(index)].active = true;
+    }
+
+    bool faceBlockedCopies()
+    {
+        if (!playerInput_) return false;
+        bool changed = false;
+        for (std::size_t index = 0; index < playerCount_; ++index) {
+            if (playerDead(after_, index) || status_[entityIndexForPlayer(index)].inputDirection) continue;
+            const auto controller = playerControllerId(after_, index);
+            const bool groupActed = std::ranges::any_of(after_.players, [&](const auto& hero) {
+                const auto other = static_cast<std::size_t>(&hero - after_.players.data());
+                return !hero.dead && playerControllerId(after_, other) == controller &&
+                    status_[entityIndexForPlayer(other)].inputDirection.has_value();
+            });
+            if (!groupActed) continue;
+            turnPlayerInPlace(index, *playerInput_);
+            changed = true;
+        }
+        return changed;
     }
 
     void applyRiderMoves(
-        const std::vector<LiveUnitAt>& riders, GridPosition3 from, GridPosition3 to)
+        const std::vector<LiveUnitAt>& riders, GridPosition3 from, GridPosition3 to,
+        int turns = 0)
     {
         for (const LiveUnitAt rider : riders) {
+            rotateUnit(after_, rider, turns);
             setUnitCell(after_, rider, riderLanding(from, to, unitCell(after_, rider)));
             const std::size_t riderIndex = entityIndexForUnit(rider);
             slidingOf(riderIndex).reset();
@@ -5631,7 +5716,7 @@ private:
             applyWardrobeSwap(playerIndex);
         }
         ++status_[entityIndex].consumed;
-        applyRiderMoves(riders, from, fall.cell);
+        applyRiderMoves(riders, from, fall.cell, facePlayer(playerIndex, direction));
     }
 
     void applyWardrobeSwap(std::size_t playerIndex)

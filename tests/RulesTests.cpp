@@ -1019,7 +1019,9 @@ void testDruidCrystallizesLivingUnitsWithoutPushing()
     CHECK(initial.players[0].abilities(enemies.character()).pushPower == 0);
     CHECK(rules::step(enemies, initial, MoveDirection::Left) == initial);
     const auto transformed = rules::step(enemies, initial, MoveDirection::Right);
-    CHECK(transformed.players == initial.players);
+    auto facingRight = initial.players;
+    facingRight[0].facing = MoveDirection::Right;
+    CHECK(transformed.players == facingRight);
     CHECK(transformed.enemies.size() == 1);
     CHECK(transformed.enemies[0].id == initial.enemies[1].id);
     CHECK(transformed.movables.size() == 2);
@@ -1027,7 +1029,7 @@ void testDruidCrystallizesLivingUnitsWithoutPushing()
     CHECK(transformed.movables[1].type == TileType::Crystal);
     CHECK(transformed.movables[1].cell == cell(2, 0, 1));
     const auto revivedEnemy = rules::step(enemies, transformed, MoveDirection::Right);
-    CHECK(revivedEnemy.players == initial.players);
+    CHECK(revivedEnemy.players == facingRight);
     CHECK(revivedEnemy.movables == initial.movables);
     CHECK(revivedEnemy.enemies.size() == 2);
     CHECK(revivedEnemy.enemies.back() == initial.enemies[0]);
@@ -1044,7 +1046,9 @@ void testDruidCrystallizesLivingUnitsWithoutPushing()
     heroesBefore.players[0].character = CharacterType::Ranger;
     const auto ranger = rules::scopedStep(heroes, heroesBefore, MoveDirection::Left, {}, scope);
     CHECK(ranger.players.size() == 2);
-    CHECK(ranger.players[0] == heroesBefore.players[1]);
+    auto facingLeft = heroesBefore.players[1];
+    facingLeft.facing = MoveDirection::Left;
+    CHECK(ranger.players[0] == facingLeft);
     CHECK(ranger.movables[0].type == TileType::SkippingCrystal);
     CHECK(ranger.movables[0].cell == cell(0, 0, 1));
     const auto revivedRanger = rules::scopedStep(heroes, ranger, MoveDirection::Left, {}, scope);
@@ -1235,6 +1239,59 @@ void testFallingUnitsCrushHeroesThroughTheirLoad()
             }
         }
     }
+}
+
+void testCarriedStackTurnsWithHero()
+{
+    TEST("carriedStackTurnsWithHero");
+    std::vector<std::vector<std::string>> layers(7, std::vector<std::string>(5, "     "));
+    layers[0] = std::vector<std::string>(5, ".....");
+    layers[1][2] = "  C  ";
+    layers[2][2] = "  R  ";
+    layers[3][2] = "  1  ";
+    layers[4][2] = "  n  ";
+    layers[5][2] = "  N  ";
+    layers[6][2] = "  C  ";
+    const Level level = makeLevel(layers, CharacterType::Knight);
+    auto state = rules::initialState(level);
+    const rules::StepScope carrier { .actors = { state.players[0].id } };
+    int turns = 3;
+    for (const auto direction : { MoveDirection::Right, MoveDirection::Up,
+             MoveDirection::Left, MoveDirection::Down }) {
+        state = rules::scopedStep(level, state, direction, {}, carrier);
+        CHECK(rules::playerFacing(state.players[0]) == direction);
+        CHECK(rules::playerFacing(state.players[1]) == direction);
+        for (const auto& movable : state.movables) CHECK(movable.quarterTurns == turns);
+        CHECK(state.enemies[0].quarterTurns == turns);
+        CHECK(rules::turretDirection(state.movables[2]) == rules::rotateDirection(MoveDirection::Up, turns));
+        turns = (turns + 3) % 4;
+    }
+
+    const Level copies = makeLevel({ { "....", "...." },
+        { "C   ", "C#  " }, { "    ", "R   " } }, CharacterType::Knight);
+    auto mirrored = rules::initialState(copies);
+    mirrored.players[1].controller = mirrored.players[0].controller;
+    const auto turned = rules::step(copies, mirrored, MoveDirection::Right);
+    CHECK(turned.players[1].cell == mirrored.players[1].cell);
+    CHECK(rules::playerFacing(turned.players[1]) == MoveDirection::Right);
+    CHECK(turned.movables[0].quarterTurns == 3);
+}
+
+void testRotatorTurnsCarriedStack()
+{
+    TEST("rotatorTurnsCarriedStack");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "....." }, { "PC C " }, { "   R " }, { "   n " } },
+        .rotators = { { .cell = cell(3, 0, 1), .pressurePlates = { cell(0, 0, 1) } } },
+        .plates = { { .cell = cell(3, 0, 1), .tile = TileType::RotatorClockwise } },
+        .character = CharacterType::Knight,
+    }, "carried rotator");
+    const auto before = rules::initialState(level);
+    const rules::StepScope opener { .actors = { before.players[0].id } };
+    const auto after = rules::scopedStep(level, before, MoveDirection::Left, {}, opener);
+    CHECK(after.players[1].quarterTurns == 1);
+    CHECK(after.movables[0].quarterTurns == 1);
+    CHECK(rules::turretDirection(after.movables[1]) == MoveDirection::Right);
 }
 
 void testOpeningGateDropsRockOntoKnight()
@@ -5632,6 +5689,8 @@ int main()
     testKnightPushesAnUnlimitedMixedChain();
     testHeroCarryCapacityAndCrushing();
     testFallingUnitsCrushHeroesThroughTheirLoad();
+    testCarriedStackTurnsWithHero();
+    testRotatorTurnsCarriedStack();
     testOpeningGateDropsRockOntoKnight();
     testKnightChainPushIsAtomicWhenItsTailIsBlocked();
     testKnightCanPushAnEnemyButStillSuffersItsAttack();

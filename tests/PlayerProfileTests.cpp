@@ -419,6 +419,7 @@ void testActiveScreenCheckpointRoundTrip()
     after.wardrobes[0].character = sokoban::CharacterType::Lorekeeper;
     // Rotator plates leave quarter turns on any unit.
     after.players[0].quarterTurns = 3;
+    after.players[0].facing = sokoban::MoveDirection::Up;
     after.players[0].abilityGrants.pushPower = 2;
     after.players[0].abilityGrants.grant(sokoban::CharacterAbility::Pull);
     after.players[0].abilityGrants.grant(sokoban::CharacterAbility::Crystallize);
@@ -428,6 +429,7 @@ void testActiveScreenCheckpointRoundTrip()
         .character = sokoban::CharacterType::Rogue,
         .controller = 42,
         .quarterTurns = 2,
+        .facing = sokoban::MoveDirection::Right,
     };
     after.enemies.front().quarterTurns = 2;
     after.turnedMirrors.push_back({ .cell = { 2, 2, 1 }, .quarterTurns = 3 });

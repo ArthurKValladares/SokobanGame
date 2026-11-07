@@ -4690,6 +4690,70 @@ void testWaterStreamsAndFloatingLilyPadPresentation()
     }
 }
 
+void testCarriedObjectsRenderWithTheirHeroTurn()
+{
+    TEST("carriedObjectsRenderWithTheirHeroTurn");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { ".....", ".....", "....." },
+            { "  )  ", "  C  ", "     " },
+            { "  P  ", "  R  ", "     " },
+            { "     ", "  n  ", "     " } },
+        .rotators = { { .cell = { 2, 0, 1 }, .pressurePlates = { { 2, 0, 2 } } } },
+        .character = CharacterType::Knight,
+    }, "carried turn presentation");
+    auto before = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(before);
+    for (const auto direction : { MoveDirection::Right, MoveDirection::Up, MoveDirection::Left }) {
+        const auto after = rules::scopedStep(level, before, direction, {},
+            { .actors = { before.players[0].id } });
+        GameplaySession::Action action { .before = before, .after = after,
+            .durationSeconds = 0.2f, .facingDirection = direction };
+        action.presentation = presentation.buildActionPresentation(action, &level);
+        presentation.beginAction(action, before);
+        presentation.seekAction(action, 0.1f);
+        const auto frame = RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(), .level = level, .state = before, .moving = true,
+            .projectedState = after, .presentation = presentation, .settings = {},
+        });
+        for (std::size_t i = 0; i < before.movables.size(); ++i) {
+            const auto tile = std::ranges::find(frame.tiles, before.movables[i].id,
+                &RenderFrameData::Tile::renderableId);
+            CHECK(tile != frame.tiles.end());
+            if (tile == frame.tiles.end()) continue;
+            const auto expected = i == 0 ? after.movables[i].quarterTurns
+                : renderFrameParts::facingQuarterTurns(*rules::turretDirection(after.movables[i]));
+            CHECK(tile->modelRotationQuarterTurns == expected);
+            const auto hero = std::ranges::find(frame.tiles, before.players[0].id,
+                &RenderFrameData::Tile::renderableId);
+            CHECK(hero != frame.tiles.end());
+            if (hero != frame.tiles.end()) {
+                CHECK(near(tile->modelRotationOffsetRadians, hero->modelRotationOffsetRadians));
+            }
+        }
+        auto undo = plans::inverted(action);
+        GameplayPresentation reverse;
+        reverse.resetEntities(after);
+        reverse.beginAction(undo, after);
+        reverse.seekAction(undo, 0.1f);
+        CHECK(reverse.players()[0].facingQuarterTurns ==
+            renderFrameParts::facingQuarterTurns(rules::playerFacing(before.players[0])));
+        const auto undoFrame = RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(), .level = level, .state = after, .moving = true,
+            .projectedState = before, .presentation = reverse, .settings = {},
+        });
+        const auto rock = std::ranges::find(undoFrame.tiles, before.movables[0].id,
+            &RenderFrameData::Tile::renderableId);
+        CHECK(rock != undoFrame.tiles.end());
+        if (rock != undoFrame.tiles.end()) CHECK(rock->modelRotationQuarterTurns == before.movables[0].quarterTurns);
+        presentation.finishAction(after);
+        before = after;
+    }
+    GameplayPresentation restored;
+    restored.resetEntities(before);
+    CHECK(restored.players()[0].facingQuarterTurns == renderFrameParts::facingQuarterTurns(MoveDirection::Up));
+}
+
 void testPlayerCopiesRenderAndInterpolateTogether()
 {
     TEST("playerCopiesRenderAndInterpolateTogether");
@@ -7101,6 +7165,7 @@ int main()
     testMirrorPreviewOnlyShowsClosestUnitAcrossBothRays();
     testInvalidMirrorPreviewsUseRedRaysAndGhosts();
     testPlayerCopiesRenderAndInterpolateTogether();
+    testCarriedObjectsRenderWithTheirHeroTurn();
     testPlayerCopiesShareTheInputFacing();
     testInactiveHeroesKeepTheirFacing();
     testMirrorDuplicationPreviewsEveryDestination();

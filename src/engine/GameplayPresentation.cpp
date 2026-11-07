@@ -1695,6 +1695,21 @@ void GameplayPresentation::beginAction(
                     4) % 4);
         }
     }
+    for (std::size_t index = 0; index < action.before.players.size(); ++index) {
+        const auto afterIndex = matchingIndex<EntityKind::Player>(
+            action.before.players, index, action.after.players);
+        if (!afterIndex) continue;
+        const auto& after = action.after.players[*afterIndex];
+        const auto& before = action.before.players[index];
+        if ((!after.facing && !before.facing) || after == before) continue;
+        const auto target = playerTarget(action.before.players[index], index);
+        const auto visual = std::ranges::find_if(players_, [&](const auto& candidate) {
+            return candidate.motion.target == target;
+        });
+        if (visual != players_.end()) {
+            visual->facingQuarterTurns = facingQuarterTurns(rules::playerFacing(after));
+        }
+    }
 }
 
 void GameplayPresentation::seekAction(
@@ -1948,7 +1963,8 @@ void GameplayPresentation::syncToGameState(const GameState& state)
         if (existing != oldPlayers.end()) {
             visual = *existing;
         } else {
-            visual.facingQuarterTurns = oldPlayers.empty() || players_.empty()
+            visual.facingQuarterTurns = player.facing ? facingQuarterTurns(*player.facing)
+                : oldPlayers.empty() || players_.empty()
                 ? (facingQuarterTurns(MoveDirection::Down) + player.quarterTurns) % 4
                 : players_.front().facingQuarterTurns;
         }

@@ -44,13 +44,14 @@ struct GameState {
         // actor on the board, while water deaths render below the surface.
         bool drowned = false;
         std::optional<MoveDirection> sliding;
-        // Clockwise quarter turns (0-3) rotator plates have applied to this
-        // hero. Presentation-only for heroes, but kept in the state so undo,
-        // saves and concurrent actions agree on it.
+        // Clockwise quarter turns (0-3) applied by rotators or a carrier.
         uint8_t quarterTurns = 0;
 
         // Additive powers that travel with this player through wardrobe changes.
         CharacterAbilityGrants abilityGrants {};
+        // Last movement heading. Legacy states start facing down, with their
+        // authored turns applied. Carried units turn by changes in this heading.
+        std::optional<MoveDirection> facing;
 
         [[nodiscard]] constexpr CharacterAbilities abilities(
             CharacterType fallback) const
@@ -77,6 +78,7 @@ struct GameState {
         EntityId controller = invalidEntityId;
         CharacterAbilityGrants abilityGrants {};
         uint8_t quarterTurns = 0;
+        std::optional<MoveDirection> facing;
 
         bool operator==(const CrystalOrigin&) const = default;
     };
@@ -90,8 +92,8 @@ struct GameState {
         // undo/save deltas, but no longer block, move, fire, or render.
         bool dead = false;
         std::optional<MoveDirection> sliding;
-        // Clockwise quarter turns (0-3) rotator plates have applied since the
-        // unit was authored. Turrets fire and robots patrol along their
+        // Clockwise quarter turns (0-3) applied since the unit was authored.
+        // Carriers and portals turn payloads too. Turrets fire and robots patrol along their
         // authored direction turned by this amount. Robots also add two
         // quarter turns when a blocked patrol reverses direction.
         uint8_t quarterTurns = 0;
@@ -185,6 +187,11 @@ struct GameState {
 // one), and all entities move simultaneously: an entity blocked only by
 // another entity that vacates its cell this step still advances.
 namespace rules {
+
+[[nodiscard]] MoveDirection playerFacing(const GameState::Player& player);
+// The nearest hero supporting a unit at this cell through a contiguous stack.
+[[nodiscard]] std::optional<std::size_t> carryingPlayer(
+    const Level& level, const GameState& state, GridPosition3 cell);
 
 // Movement rates in tiles per world step, by movement source. The step
 // algorithm supports any non-negative rate: multi-tile movement resolves as

@@ -158,6 +158,7 @@ Json stateJson(
         if (const auto grants = player.abilityGrants.packed(); grants != 0) {
             result["players"].back()["abilityGrants"] = grants;
         }
+        if (player.facing) result["players"].back()["facing"] = directionJson(player.facing);
     }
     for (const auto& movable : state.movables) {
         result["movables"].push_back(
@@ -260,6 +261,7 @@ void parseState(const Json& value, Step& step)
                 .sliding = parseDirection(item.at("sliding")),
                 .quarterTurns = parseTurns(item.at("quarterTurns")),
                 .abilityGrants = CharacterAbilityGrants::unpack(grants),
+                .facing = item.contains("facing") ? parseDirection(item.at("facing")) : std::nullopt,
             });
     }
     for (const auto& item : array("movables")) {
@@ -1100,11 +1102,22 @@ ReplayReport replay(const Level& level, const Solution& solution)
                 };
             }
         }
-        if (step.state != driver.state() ||
+        // Older recordings leave movement facing unspecified. Their replay
+        // supplies it, while explicit headings in current recordings must match.
+        GameState expected = step.state;
+        for (std::size_t i = 0; i < expected.players.size() && i < driver.state().players.size(); ++i) {
+            if (!expected.players[i].facing) expected.players[i].facing = driver.state().players[i].facing;
+        }
+        for (std::size_t i = 0; i < expected.movables.size() && i < driver.state().movables.size(); ++i) {
+            auto& origin = expected.movables[i].crystalOrigin;
+            const auto& actualOrigin = driver.state().movables[i].crystalOrigin;
+            if (origin && actualOrigin && !origin->facing) origin->facing = actualOrigin->facing;
+        }
+        if (expected != driver.state() ||
             step.activeHeroController != driver.activeHeroController() ||
             step.automaticMotionPaused != driver.automaticMotionPaused()) {
             const Json expectedState = stateJson(
-                step.state,
+                expected,
                 step.activeHeroController,
                 step.automaticMotionPaused);
             const Json currentState = stateJson(

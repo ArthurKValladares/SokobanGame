@@ -339,6 +339,9 @@ void testPackedStateKeyIncludesEveryDynamicField()
     changed = state;
     changed.players[0].quarterTurns = 1;
     checkChanged(changed);
+    changed = state;
+    changed.players[0].facing = MoveDirection::Right;
+    checkChanged(changed);
 
     changed = state;
     ++changed.movables[0].id;
