@@ -26,6 +26,8 @@ inline void appendGateEffect(
     const float x = static_cast<float>(gate.cell.x);
     const float y = static_cast<float>(gate.cell.y);
     const float z = static_cast<float>(gate.cell.z);
+    const Vec3 tint = gate.enemyGate ? enemyGateColor : gate.color;
+    bool drawingFrame = false;
     const auto appendEnergyBox = [&](
                                      Vec2 position,
                                      Vec2 size,
@@ -37,17 +39,19 @@ inline void appendGateEffect(
             .position = position,
             .size = size,
             .color = {
-                gate.color.x,
-                gate.color.y,
-                gate.color.z,
-                alpha * opacity,
+                gate.enemyGate && drawingFrame ? 0.055f : tint.x,
+                gate.enemyGate && drawingFrame ? 0.012f : tint.y,
+                gate.enemyGate && drawingFrame ? 0.075f : tint.z,
+                (gate.enemyGate && drawingFrame ? 1.0f : alpha) * opacity,
             },
             .baseElevation = baseElevation,
             .height = height,
             .pickable = false,
             .showGrid = false,
             .affectsCameraFit = false,
-            .effect = RenderSurfaceEffect::GateEnergy,
+            .effect = gate.enemyGate
+                ? (drawingFrame ? RenderSurfaceEffect::Standard : RenderSurfaceEffect::EnemyGateEnergy)
+                : RenderSurfaceEffect::GateEnergy,
         });
     };
 
@@ -61,7 +65,7 @@ inline void appendGateEffect(
         { 1.0f - shellInset * 2.0f, 1.0f - shellInset * 2.0f },
         z + shellInset,
         1.0f - shellInset * 2.0f,
-        config::gateEnergyShellAlpha);
+        gate.enemyGate ? 0.86f : config::gateEnergyShellAlpha);
     appendEnergyBox(
         { x + 0.12f, y + 0.12f },
         { 0.76f, 0.76f },
@@ -77,6 +81,7 @@ inline void appendGateEffect(
     const float length = one - inset * 2.0f;
     const float farEdge = one - inset - thickness;
     const float upperEdge = z + one - inset - thickness;
+    drawingFrame = gate.enemyGate;
     for (float edgeY : std::array { y + inset, y + farEdge }) {
         appendEnergyBox(
             { x + inset, edgeY },
@@ -132,9 +137,9 @@ inline void appendGateEffect(
                         config::gateCornerParticleSize * pulse,
                     },
                     .color = {
-                        gate.color.x,
-                        gate.color.y,
-                        gate.color.z,
+                        tint.x,
+                        tint.y,
+                        tint.z,
                         config::gateCornerParticleOpacity * opacity * pulse,
                     },
                     .emissiveStrength =

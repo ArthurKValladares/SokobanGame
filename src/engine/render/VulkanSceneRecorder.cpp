@@ -527,7 +527,7 @@ public:
             }));
         stats_.preparedEnergyFaces = static_cast<uint32_t>(std::ranges::count_if(
             scene.isoFaces, [](const auto& face) {
-                return face.material == PreparedSurfaceMaterial::GateEnergy ||
+                return (face.material == PreparedSurfaceMaterial::GateEnergy || face.material == PreparedSurfaceMaterial::EnemyGateEnergy) ||
                     face.material == PreparedSurfaceMaterial::PortalEnergy ||
                     face.material == PreparedSurfaceMaterial::PortalBeam ||
                     face.material == PreparedSurfaceMaterial::MirrorEnergy ||
@@ -2707,6 +2707,7 @@ private:
                     return pipelines_.water();
                 case PreparedSurfaceMaterial::MirrorEnergy:
                 case PreparedSurfaceMaterial::GateEnergy:
+                case PreparedSurfaceMaterial::EnemyGateEnergy:
                 case PreparedSurfaceMaterial::LinkedObjectAura:
                     return pipelines_.mirrorEnergy();
                 case PreparedSurfaceMaterial::PortalEnergy:
@@ -2776,7 +2777,7 @@ private:
                     face.material == PreparedSurfaceMaterial::PortalBeam);
             } else if (
                 face.material == PreparedSurfaceMaterial::MirrorEnergy ||
-                face.material == PreparedSurfaceMaterial::GateEnergy ||
+                (face.material == PreparedSurfaceMaterial::GateEnergy || face.material == PreparedSurfaceMaterial::EnemyGateEnergy) ||
                 face.material == PreparedSurfaceMaterial::LinkedObjectAura) {
                 faceInstance = drawMirrorEnergyFace(
                     commandBuffer,
@@ -2786,7 +2787,8 @@ private:
                     frameData.effectAnimationTimeSeconds,
                     face.material ==
                         PreparedSurfaceMaterial::LinkedObjectAura,
-                    face.material == PreparedSurfaceMaterial::MirrorEnergy);
+                    face.material == PreparedSurfaceMaterial::MirrorEnergy,
+                    face.material == PreparedSurfaceMaterial::EnemyGateEnergy);
             } else if (
                 face.material == PreparedSurfaceMaterial::GroundSplat &&
                 splatTextures.valid()) {
@@ -3389,7 +3391,8 @@ private:
         Vec3 normal,
         float animationTimeSeconds,
         bool linkedAura,
-        bool mirrorBeam)
+        bool mirrorBeam,
+        bool enemyGate)
     {
         beginQuadDraw(commandBuffer);
 
@@ -3397,7 +3400,7 @@ private:
             .vertices = quadVertices(vertices, worldSpaceQuad),
             .passData = {
                 Vec4 { 0.0f, 0.0f, linkedAura ? 1.0f : 0.0f,
-                    mirrorBeam ? 1.0f : (linkedAura ? 0.0f : -1.0f) },
+                    enemyGate ? -2.0f : (mirrorBeam ? 1.0f : (linkedAura ? 0.0f : -1.0f)) },
                 Vec4 { length(vertices[1] - vertices[0]),
                     length(vertices[3] - vertices[0]) /
                         config::mirrorBeamHaloWidth,

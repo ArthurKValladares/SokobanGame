@@ -284,7 +284,7 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
                 if (tileTypeIsWater(level.tileAt(x, y, z))) {
                     continue;
                 }
-                if (level.tileAt(x, y, z) == TileType::Gate) {
+                if (tileTypeIsGate(level.tileAt(x, y, z))) {
                     continue;
                 }
                 const TileType tile = level.tileAt(x, y, z);

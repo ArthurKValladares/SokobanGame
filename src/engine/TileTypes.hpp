@@ -147,8 +147,17 @@ enum class TileType : uint8_t {
     WardrobeRanger,
     CrystalDruid,
     WardrobeCrystalDruid,
+    // Named @gate metadata keeps the on-disk grid printable.
+    EnemyGate,
     Count,
 };
+
+[[nodiscard]] constexpr bool tileTypeIsGate(TileType tile)
+{
+    return tile == TileType::Gate || tile == TileType::EnemyGate;
+}
+
+inline constexpr Vec3 enemyGateColor { 1.0f, 0.025f, 0.68f };
 
 [[nodiscard]] constexpr bool tileTypeIsCrystal(TileType t) { return t == TileType::Crystal || t == TileType::SkippingCrystal; }
 [[nodiscard]] constexpr bool tileTypeIsSkippingStone(TileType t) { return t == TileType::RoundRock || t == TileType::SkippingCrystal; }
@@ -358,6 +367,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::CrystalDruid, '\x07', "Druid", { 0.35f, 0.72f, 0.28f, 1.0f } },
     TileTypeDefinition { TileType::WardrobeCrystalDruid, '\x08', "Wardrobe Druid", { 1.0f, 1.0f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::WardrobeRanger, '\x06', "Wardrobe Ranger", { 1.0f, 1.0f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::EnemyGate, '\x0e', "Enemy Gate", { 1.0f, 0.025f, 0.68f, 0.92f }, { 1.0f, 0.025f, 0.68f, 0.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -514,7 +524,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     }
     return tileTypeIsPlayerStart(type) || type == TileType::Enemy ||
         tileTypeIsMovableObject(type) || tileTypeIsPlate(type) ||
-        type == TileType::Gate || type == TileType::MinecartGate ||
+        tileTypeIsGate(type) || type == TileType::MinecartGate ||
         tileTypeIsElevator(type) || tileTypeIsMinecart(type) ||
         tileTypeIsLectern(type) || tileTypeIsWardrobe(type) ||
         type == TileType::Ladder || tileTypeIsConveyor(type);

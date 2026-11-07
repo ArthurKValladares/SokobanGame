@@ -455,7 +455,7 @@ void appendStaticTiles(
                 if (cell.tile == TileType::Air ||
                     cell.tile == TileType::Ladder ||
                     tileTypeIsWater(cell.tile) ||
-                    cell.tile == TileType::Gate ||
+                    tileTypeIsGate(cell.tile) ||
                     tileTypeIsRotator(cell.tile) ||
                     tileTypeIsLockPlate(cell.tile) ||
                     tileTypeIsElevator(cell.tile) ||

@@ -2,6 +2,7 @@
 #include "GroundGpuFixture.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/FrameArena.hpp"
+#include "engine/GateEffect.hpp"
 #include "engine/GroundGeometry.hpp"
 #include "engine/PerformanceFixtures.hpp"
 #include "engine/PresentationSettings.hpp"
@@ -1709,6 +1710,67 @@ void verifyFourLayerSplat(SDL_Window* window, const std::filesystem::path& root,
         "Vulkan validation reported a four-layer splat rendering error");
 }
 
+void verifyEnemyGates(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::Msaa4x, 100, { .vsync = false }, {}, false, true, true, false);
+    UiContext ui(font);
+    const auto capture = [&](bool enemyGate, float time, float opacity) {
+        auto frame = scene({ 0.48f, 0.44f, 0.38f, 1.0f }, false);
+        frame.effectAnimationTimeSeconds = time;
+        appendGateEffect(frame, Level::Gate { .cell = { 1, 1, 1 },
+            .color = enemyGateColor, .enemyGate = enemyGate }, manifest, opacity, time);
+        renderer.waitForAssets(renderAssetRequirementsForFrame(frame));
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            ui.beginFrame({ 640, 360 }, {}, false, false);
+            ui.endFrame();
+            renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            ImGui::Render();
+#endif
+            renderer.drawFrame(renderer.prepareFrame(frame), ui.drawData());
+            verify(!renderer.hasFatalFailure(), "Enemy gate fixture failed to render");
+        }
+        return renderer.captureRenderedFrame();
+    };
+    const auto closed = capture(true, 0.0f, 1.0f);
+    const auto animated = capture(true, 2.0f, 1.0f);
+    const auto regular = capture(false, 0.0f, 1.0f);
+    const auto open = capture(true, 0.0f, 0.0f);
+    const auto evidence = std::filesystem::current_path() / "out" / "enemy-gate-review";
+    std::filesystem::create_directories(evidence);
+    saveRippleEvidence(evidence / "closed.png", closed);
+    saveRippleEvidence(evidence / "animated.png", animated);
+    saveRippleEvidence(evidence / "regular-same-color.png", regular);
+    saveRippleEvidence(evidence / "open.png", open);
+    // Bake the palette picture through the production thumbnail camera too.
+    const auto thumbnail = tileThumbnails::buildBakeFrame(
+        TileType::EnemyGate, manifest, PresentationSettings {});
+    renderer.waitForAssets(renderAssetRequirementsForFrame(thumbnail));
+    for (int repeat = 0; repeat < 3; ++repeat) {
+        ui.beginFrame({ 640, 360 }, {}, false, false);
+        ui.endFrame();
+        renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+        ImGui::Render();
+#endif
+        renderer.drawFrame(renderer.prepareFrame(thumbnail), ui.drawData());
+    }
+    const auto crop = tileThumbnails::cropFor(thumbnail, closed.width, closed.height);
+    saveRippleEvidence(evidence / "tile_enemy_gate.png", renderer.captureRenderedFrame(VkRect2D {
+        .offset = { crop.x, crop.y }, .extent = { crop.width, crop.height },
+    }));
+    verify(difference(closed, regular, 0, 0, closed.width, closed.height) > 0.5,
+        "Enemy gate did not differ visually from a regular gate of the same color");
+    verify(difference(closed, animated, 0, 0, closed.width, closed.height) > 0.05,
+        "Enemy gate energy did not animate");
+    verify(difference(closed, open, 0, 0, closed.width, closed.height) > 0.5,
+        "Open enemy gate retained its visible barrier");
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported an enemy gate rendering error");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -1724,6 +1786,11 @@ int main(int argc, char** argv)
         auto font = FontAtlas::loadDefault(root);
         const auto manifest = AssetManifest::loadFromFile(root / "manifest.json");
         ScopedTestDirectory temp("preview-rendering");
+        if (argc > 1 && std::string_view(argv[1]) == "--enemy-gates") {
+            verifyEnemyGates(window.get(), root, font, manifest, temp.path() / "cache.bin");
+            std::cout << "Enemy gate GPU regression passed\n";
+            return 0;
+        }
         if (argc > 1 && std::string_view(argv[1]) == "--robot-animation") {
             verifyRobotAnimation(window.get(), root, font, manifest,
                 temp.path() / "cache.bin", argc > 2

@@ -1,0 +1,16 @@
+@character crystal-druid
+@gate {"cell":[3,1,1],"plates":[],"color":[1,0.025,0.68],"enemyGate":true}
+@gate {"cell":[5,1,1],"plates":[],"color":[1,0.025,0.68],"enemyGate":true,"startOpen":true}
+@gate {"cell":[7,1,1],"plates":[[7,3,1]],"color":[0.24,0.62,0.92]}
+@layer 0
+.........
+.........
+.........
+.........
+.........
+@layer 1
+         
+   G G G 
+ CN      
+       P 
+         

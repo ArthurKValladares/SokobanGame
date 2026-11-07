@@ -614,7 +614,7 @@ void testBakeFrameStandsTheTileOnAGroundBed()
         const std::size_t expected = tileTypeIsGround(definition.type) ||
                 tileTypeIsWaterStream(definition.type)
             ? bedCells
-            : bedCells + (definition.type == TileType::Gate
+            : bedCells + (tileTypeIsGate(definition.type)
                           ? config::gateEnergyTileCount
                           : definition.type == TileType::MinecartGate ? 5
                           : tileTypeIsWardrobe(definition.type) ? 2 : 1);
@@ -638,7 +638,7 @@ void testBakeFrameStandsTheTileOnAGroundBed()
         CHECK(frame.lighting.shadows.enabled);
         CHECK(frame.lighting.ambientOcclusion.enabled);
 
-        if (definition.type == TileType::Gate) {
+        if (tileTypeIsGate(definition.type)) {
             // A gate is a composite effect, not one model at the cell centre.
             continue;
         }
@@ -745,6 +745,53 @@ void testGateBakesTheClosedEnergyEffect()
     CHECK(!scene.particles.empty());
     CHECK(std::ranges::any_of(scene.isoFaces, [](const auto& face) {
         return face.material == PreparedSurfaceMaterial::GateEnergy;
+    }));
+}
+
+void testEnemyGateBakesDistinctFramedEnergyAndFadesInGameplay()
+{
+    TEST("enemy gate bakes distinct framed energy and fades in gameplay");
+    const auto frame = tileThumbnails::buildBakeFrame(
+        TileType::EnemyGate, testManifest(), testSettings());
+    CHECK(std::ranges::count_if(frame.tiles, [](const auto& tile) {
+        return tile.effect == RenderSurfaceEffect::EnemyGateEnergy;
+    }) == 2);
+    const auto energy = std::ranges::find_if(frame.tiles, [](const auto& tile) {
+        return tile.effect == RenderSurfaceEffect::EnemyGateEnergy;
+    });
+    CHECK(energy != frame.tiles.end());
+    CHECK(energy->color.x == enemyGateColor.x && energy->color.z == enemyGateColor.z);
+    CHECK(frame.tiles.back().effect == RenderSurfaceEffect::Standard);
+    CHECK(frame.tiles.back().color.x < 0.1f); // dark cage, rather than colored rails
+    PreparedRenderScene scene;
+    IsoScenePreparer {}.prepare(frame, { 800, 600 }, scene);
+    CHECK(std::ranges::any_of(scene.isoFaces, [](const auto& face) {
+        return face.material == PreparedSurfaceMaterial::EnemyGateEnergy;
+    }));
+    CHECK(!scene.translucentFaceIndices.empty());
+
+    const auto definition = Level::parseDefinition({
+        "@gate {\"cell\":[2,0,1],\"plates\":[],\"color\":[1,0.025,0.68],\"enemyGate\":true}",
+        "@layer 0", "....", "@layer 1", "CNG ",
+    }, "enemy gate presentation");
+    const auto level = Level::loadFromDefinition(definition, "enemy gate presentation");
+    auto state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    auto gameplay = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(), .level = level, .state = state,
+        .moving = false, .projectedState = state, .presentation = presentation, .settings = {},
+    });
+    CHECK(std::ranges::any_of(gameplay.tiles, [](const auto& tile) {
+        return tile.effect == RenderSurfaceEffect::EnemyGateEnergy;
+    }));
+    state.enemies[0].dead = true;
+    gameplay = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(), .level = level, .state = state,
+        .moving = false, .projectedState = state, .presentation = presentation, .settings = {},
+    });
+    CHECK(std::ranges::none_of(gameplay.tiles, [](const auto& tile) {
+        return tile.effect == RenderSurfaceEffect::EnemyGateEnergy;
     }));
 }
 
@@ -878,8 +925,9 @@ void testSubjectMatchesTheTileTheEditorDraws()
             }
             continue;
         }
-        if (definition.type == TileType::Gate) {
-            CHECK(subject.effect == RenderSurfaceEffect::GateEnergy);
+        if (tileTypeIsGate(definition.type)) {
+            CHECK(subject.effect == (definition.type == TileType::EnemyGate
+                ? RenderSurfaceEffect::Standard : RenderSurfaceEffect::GateEnergy));
             continue;
         }
         if (definition.type == TileType::MinecartGate) {
@@ -1268,6 +1316,7 @@ int main()
     testBakeFrameStandsTheTileOnAGroundBed();
     testBedIsNeutralAndFlat();
     testGateBakesTheClosedEnergyEffect();
+    testEnemyGateBakesDistinctFramedEnergyAndFadesInGameplay();
     testGroundIsBakedThroughTheSplatPath();
     testMirrorsBakeAtTheirOwnOrientation();
     testLecternsBakeAllCardinalDirections();

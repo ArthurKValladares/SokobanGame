@@ -36,9 +36,13 @@ public:
         std::vector<GridPosition3> pressurePlates;
         Vec3 color { 1.0f, 0.72f, 0.12f };
         // Inverts the gate: open (empty) while its plates are not all
-        // pressed and closed (solid) once they are. Written as `startOpen`
+        // pressed and closed (solid) once they are. Enemy gates instead
+        // invert the all-enemies-defeated condition. Written as `startOpen`
         // in the `@gate` record only when set.
         bool startOpen = false;
+        // Reacts to no living enemies/turrets instead of linked plates.
+        // Crystallized enemies are absent from the live enemy population.
+        bool enemyGate = false;
 
         bool operator==(const Gate&) const = default;
     };

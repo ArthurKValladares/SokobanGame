@@ -1315,7 +1315,7 @@ static void prepareAuxiliaryGeometry(
             tile.effect == RenderSurfaceEffect::MirrorEnergy ||
             tile.effect == RenderSurfaceEffect::PortalEnergy ||
             tile.effect == RenderSurfaceEffect::PortalBeam ||
-            tile.effect == RenderSurfaceEffect::GateEnergy ||
+            (tile.effect == RenderSurfaceEffect::GateEnergy || tile.effect == RenderSurfaceEffect::EnemyGateEnergy) ||
             tile.effect == RenderSurfaceEffect::LinkedObjectAura) {
             continue;
         }
@@ -1365,7 +1365,7 @@ static void prepareAuxiliaryGeometry(
             face.effect != RenderSurfaceEffect::MirrorEnergy &&
             face.effect != RenderSurfaceEffect::PortalEnergy &&
             face.effect != RenderSurfaceEffect::PortalBeam &&
-            face.effect != RenderSurfaceEffect::GateEnergy &&
+            face.effect != RenderSurfaceEffect::GateEnergy && face.effect != RenderSurfaceEffect::EnemyGateEnergy &&
             face.effect != RenderSurfaceEffect::LinkedObjectAura) {
             appendShadowFace(face.vertices);
         }
@@ -1547,7 +1547,7 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
                 request.material == PreparedSurfaceMaterial::MirrorEnergy ||
                 request.material == PreparedSurfaceMaterial::PortalEnergy ||
                 request.material == PreparedSurfaceMaterial::PortalBeam ||
-                request.material == PreparedSurfaceMaterial::GateEnergy ||
+                (request.material == PreparedSurfaceMaterial::GateEnergy || request.material == PreparedSurfaceMaterial::EnemyGateEnergy) ||
                 request.material == PreparedSurfaceMaterial::LinkedObjectAura
                 ? scene.translucentFaceIndices
                 : scene.opaqueFaceIndices)
@@ -1598,7 +1598,7 @@ void appendTileFaces(
             tile.effect != RenderSurfaceEffect::MirrorEnergy &&
             tile.effect != RenderSurfaceEffect::PortalEnergy &&
             tile.effect != RenderSurfaceEffect::PortalBeam &&
-            tile.effect != RenderSurfaceEffect::GateEnergy &&
+            tile.effect != RenderSurfaceEffect::GateEnergy && tile.effect != RenderSurfaceEffect::EnemyGateEnergy &&
             tile.effect != RenderSurfaceEffect::LinkedObjectAura;
         const PreparedSurfaceMaterial tileMaterial =
             tile.effect == RenderSurfaceEffect::MirrorEnergy
@@ -1607,6 +1607,8 @@ void appendTileFaces(
             ? PreparedSurfaceMaterial::PortalEnergy
             : tile.effect == RenderSurfaceEffect::PortalBeam
             ? PreparedSurfaceMaterial::PortalBeam
+            : tile.effect == RenderSurfaceEffect::EnemyGateEnergy
+            ? PreparedSurfaceMaterial::EnemyGateEnergy
             : tile.effect == RenderSurfaceEffect::GateEnergy
             ? PreparedSurfaceMaterial::GateEnergy
             : tile.effect == RenderSurfaceEffect::LinkedObjectAura
@@ -1801,7 +1803,7 @@ void appendTileFaces(
                     tile.effect == RenderSurfaceEffect::MirrorEnergy ||
                     tile.effect == RenderSurfaceEffect::PortalEnergy ||
                     tile.effect == RenderSurfaceEffect::PortalBeam ||
-                    tile.effect == RenderSurfaceEffect::GateEnergy ||
+                    (tile.effect == RenderSurfaceEffect::GateEnergy || tile.effect == RenderSurfaceEffect::EnemyGateEnergy) ||
                     tile.effect == RenderSurfaceEffect::LinkedObjectAura
                     ? scene.translucentModelIndices
                     : scene.opaqueModelIndices)
@@ -1833,6 +1835,8 @@ void appendSourceIsoFaces(
                 ? PreparedSurfaceMaterial::PortalEnergy
                 : source.effect == RenderSurfaceEffect::PortalBeam
                 ? PreparedSurfaceMaterial::PortalBeam
+                : source.effect == RenderSurfaceEffect::EnemyGateEnergy
+                ? PreparedSurfaceMaterial::EnemyGateEnergy
                 : source.effect == RenderSurfaceEffect::GateEnergy
                 ? PreparedSurfaceMaterial::GateEnergy
                 : source.effect == RenderSurfaceEffect::LinkedObjectAura
@@ -1852,7 +1856,7 @@ void appendSourceIsoFaces(
                     face.material == PreparedSurfaceMaterial::MirrorEnergy ||
                     face.material == PreparedSurfaceMaterial::PortalEnergy ||
                     face.material == PreparedSurfaceMaterial::PortalBeam ||
-                    face.material == PreparedSurfaceMaterial::GateEnergy ||
+                    (face.material == PreparedSurfaceMaterial::GateEnergy || face.material == PreparedSurfaceMaterial::EnemyGateEnergy) ||
                     face.material == PreparedSurfaceMaterial::LinkedObjectAura
                     ? scene.translucentFaceIndices
                     : scene.opaqueFaceIndices)

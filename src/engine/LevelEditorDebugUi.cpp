@@ -896,6 +896,9 @@ void LevelEditorDebugUi::drawTilePalette(
         std::rotate(definitions.begin() + static_cast<std::size_t>(TileType::Rock) + 1,
             definitions.begin() + static_cast<std::size_t>(TileType::RoundRock),
             definitions.end());
+        const auto gate = std::ranges::find(definitions, TileType::Gate, &TileTypeDefinition::type);
+        const auto enemyGate = std::ranges::find(definitions, TileType::EnemyGate, &TileTypeDefinition::type);
+        std::rotate(gate + 1, enemyGate, enemyGate + 1);
         return definitions;
     }();
     enum class PaletteSection {
@@ -1200,6 +1203,10 @@ void LevelEditorDebugUi::drawTilePalette(
         "is empty space. A gate opens while all its linked sources are active, "
         "or, when it starts open, closes while they are. Closing on a hero, "
         "enemy or turret kills it; a rock or ice block holds it open.");
+    ImGui::TextWrapped(
+        "Enemy Gates react to every enemy and turret in the screen. They open "
+        "when all are defeated, including by water or crystallization. Start Open "
+        "reverses this. Restoring a crystallized enemy restores its signal too.");
     const std::vector<Level::Gate>& gates = editor.gates();
     if (selectedGateIndex_ && *selectedGateIndex_ >= gates.size()) {
         selectedGateIndex_.reset();
@@ -1211,10 +1218,10 @@ void LevelEditorDebugUi::drawTilePalette(
         ImGui::TextDisabled("Paint a Gate tile to configure it here.");
     } else {
         const std::size_t index = *selectedGateIndex_;
-        const std::string preview = "Gate " + cellText(gates[index].cell);
+        const std::string preview = std::string(gates[index].enemyGate ? "Enemy Gate " : "Gate ") + cellText(gates[index].cell);
         if (ImGui::BeginCombo("Gate", preview.c_str())) {
             for (std::size_t candidate = 0; candidate < gates.size(); ++candidate) {
-                const std::string label = "Gate " +
+                const std::string label = std::string(gates[candidate].enemyGate ? "Enemy Gate " : "Gate ") +
                     cellText(gates[candidate].cell) + "##gate" +
                     std::to_string(candidate);
                 if (ImGui::Selectable(label.c_str(), candidate == index)) {
@@ -1229,8 +1236,9 @@ void LevelEditorDebugUi::drawTilePalette(
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
-                "Inverts the gate: open while its plates are released, closed "
-                "while they are all pressed. Drawn faded in the editor.");
+                "%s", gates[*selectedGateIndex_].enemyGate
+                    ? "Open while any enemies or turrets remain; closed when all are defeated. Drawn faded in the editor."
+                    : "Inverts the gate: open while its plates are released, closed while they are all pressed. Drawn faded in the editor.");
         }
     }
 

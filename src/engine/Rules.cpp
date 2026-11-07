@@ -839,7 +839,7 @@ bool staticCellAllowsEntity(const Level& level, GridPosition3 position)
     }
 
     const TileType tile = tileAt(level, position);
-    return tileTypeAllowsEntity(tile) || tile == TileType::Gate ||
+    return tileTypeAllowsEntity(tile) || tileTypeIsGate(tile) ||
         tile == TileType::Elevator || tile == TileType::Minecart;
 }
 
@@ -874,7 +874,7 @@ bool cellAllowsEntity(
         }
     }
     if (!level.inBounds(position) ||
-        tileAt(level, position) != TileType::Gate) {
+        !tileTypeIsGate(tileAt(level, position))) {
         return staticCellAllowsEntity(level, position);
     }
     const Level::Gate* gate = level.gateAt(position);
@@ -1089,7 +1089,13 @@ bool isGateOpen(
         movable != nullptr && !tileTypeIsTurret(movable->type)) {
         return true;
     }
-    const bool activated = !gate.pressurePlates.empty() &&
+    const bool activated = gate.enemyGate
+        ? std::ranges::none_of(state.enemies, [](const auto& enemy) {
+              return !enemy.dead && !enemy.fallen;
+          }) && std::ranges::none_of(state.movables, [](const auto& movable) {
+              return tileTypeIsTurret(movable.type) && !movable.dead && !movable.fallen;
+          })
+        : !gate.pressurePlates.empty() &&
         std::ranges::all_of(
             gate.pressurePlates,
             [&](GridPosition3 plate) {

@@ -582,6 +582,11 @@ void validateLinkedRecord(
         return std::isfinite(component) && component >= 0.0f &&
             component <= 1.0f;
     };
+    if constexpr (requires { record.enemyGate; }) {
+        if (record.enemyGate && !record.pressurePlates.empty()) {
+            throw std::runtime_error("Enemy gates cannot link to pressure plates: " + std::string(sourceName));
+        }
+    }
     if (!validColor(record.color.x) || !validColor(record.color.y) ||
         !validColor(record.color.z)) {
         throw std::runtime_error(
@@ -685,6 +690,18 @@ Record parseLinkedRecord(
         Record record {
             .cell = parseLinkedCell(*cell, "cell", sourceName, kind),
         };
+        if constexpr (requires { record.enemyGate; }) {
+            const auto enemyGate = object.find("enemyGate");
+            if (enemyGate != object.end()) {
+                if (!enemyGate->is_boolean()) {
+                    throw std::runtime_error("gate 'enemyGate' must be true or false");
+                }
+                record.enemyGate = enemyGate->get<bool>();
+            }
+            if (record.enemyGate && !plates->empty()) {
+                throw std::runtime_error("enemy gates cannot link to pressure plates");
+            }
+        }
         record.pressurePlates.reserve(plates->size());
         for (const Json& plate : *plates) {
             record.pressurePlates.push_back(
@@ -776,6 +793,9 @@ std::string serializeLinkedRecord(
         { "plates", std::move(plates) },
         { "color", { record.color.x, record.color.y, record.color.z } },
     };
+    if constexpr (requires { record.enemyGate; }) {
+        if (record.enemyGate) object["enemyGate"] = true;
+    }
     if constexpr (requires { record.levels; }) {
         object["levels"] = record.levels;
     }
@@ -1667,6 +1687,17 @@ Level::Definition Level::parseDefinition(
     }
 
     canonicalizeLinkedRecords(definition.gates, sourceName, "Gate");
+    for (const Gate& gate : definition.gates) {
+        if (!gate.enemyGate) continue;
+        const auto cell = gate.cell;
+        if (static_cast<std::size_t>(cell.z) >= definition.layers.size() ||
+            static_cast<std::size_t>(cell.y) >= definition.layers[cell.z].size() ||
+            static_cast<std::size_t>(cell.x) >= definition.layers[cell.z][cell.y].size() ||
+            !tileTypeIsGate(charToTileType(definition.layers[cell.z][cell.y][cell.x]).value_or(TileType::Air))) {
+            throw std::runtime_error("Enemy gate metadata requires a Gate tile inside the screen: " + source);
+        }
+        definition.layers[cell.z][cell.y][cell.x] = tileTypeToChar(TileType::EnemyGate);
+    }
     canonicalizeLinkedRecords(definition.rotators, sourceName, "Rotator");
     canonicalizeLinkedRecords(definition.lockPlates, sourceName, "LockPlate");
     canonicalizeLinkedRecords(definition.elevators, sourceName, "Elevator");
@@ -1697,11 +1728,17 @@ std::vector<std::string> Level::serializeDefinition(
     Definition disk = definition;
     std::vector<std::string> namedHeroes;
     std::vector<std::string> crystals;
+    bool convertedEnemyGates = false;
     for (std::size_t z = 0; z < disk.layers.size(); ++z) {
         for (std::size_t y = 0; y < disk.layers[z].size(); ++y) {
             for (std::size_t x = 0; x < disk.layers[z][y].size(); ++x) {
                 char& token = disk.layers[z][y][x];
                 const auto type = charToTileType(token).value_or(TileType::Air);
+                if (type == TileType::EnemyGate) {
+                    token = tileTypeToChar(TileType::Gate);
+                    convertedEnemyGates = true;
+                    continue;
+                }
                 if (type == TileType::Cleric || type == TileType::WardrobeCleric ||
                     type == TileType::Ranger || type == TileType::WardrobeRanger ||
                     type == TileType::CrystalDruid || type == TileType::WardrobeCrystalDruid) {
@@ -1723,7 +1760,7 @@ std::vector<std::string> Level::serializeDefinition(
             }
         }
     }
-    if (!crystals.empty() || !namedHeroes.empty()) {
+    if (convertedEnemyGates || !crystals.empty() || !namedHeroes.empty()) {
         auto lines = serializeDefinition(disk);
         if (disk.layers.size() == 1 && std::ranges::none_of(lines,
                 [](const std::string& line) { return line.starts_with(layerPrefix); }))
@@ -2215,7 +2252,8 @@ Level Level::loadFromLayers(
             level.authoredTileAt(
                 static_cast<uint32_t>(gate.cell.x),
                 static_cast<uint32_t>(gate.cell.y),
-                static_cast<uint32_t>(gate.cell.z)) != TileType::Gate) {
+                static_cast<uint32_t>(gate.cell.z)) !=
+                    (gate.enemyGate ? TileType::EnemyGate : TileType::Gate)) {
             throw std::runtime_error(
                 "Gate metadata cell must contain a Gate tile: " + source);
         }
@@ -2327,7 +2365,7 @@ Level Level::loadFromLayers(
                         "Every Minecart tile requires an '@minecart' metadata record: " +
                         source);
                 }
-                if (authored == TileType::Gate &&
+                if (tileTypeIsGate(authored) &&
                     level.gateAt(cell) == nullptr) {
                     throw std::runtime_error(
                         "Every Gate tile requires an '@gate' metadata record: " +

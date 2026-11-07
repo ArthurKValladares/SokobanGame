@@ -1270,6 +1270,10 @@ if(SOKOBAN_BUILD_TESTS)
             target_include_directories(sokoban_preview_rendering_tests SYSTEM PRIVATE third_party/imgui)
         endif()
         set_tests_properties(preview_rendering PROPERTIES LABELS "vulkan;render" TIMEOUT 60)
+        add_test(NAME enemy_gates_gpu
+            COMMAND sokoban_preview_rendering_tests --enemy-gates
+        )
+        set_tests_properties(enemy_gates_gpu PROPERTIES LABELS "vulkan;render;gameplay" TIMEOUT 60)
         add_test(NAME interaction_outlines
             COMMAND sokoban_preview_rendering_tests --interaction-outlines
         )

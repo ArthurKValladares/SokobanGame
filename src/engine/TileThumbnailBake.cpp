@@ -167,13 +167,14 @@ RenderFrameData buildBakeFrame(
             subject.baseElevation = 0.025f;
             frame.tiles.push_back(subject);
         }
-    } else if (tile == TileType::Gate) {
+    } else if (tileTypeIsGate(tile)) {
         // Gates have no model: their closed silhouette is the energy volume
         // and its corner particles. Put that volume directly on the bed.
         const std::size_t firstPart = frame.tiles.size();
         appendGateEffect(frame,
             Level::Gate { .cell = {
-                static_cast<int>(bedCentre), static_cast<int>(bedCentre), 0 } },
+                static_cast<int>(bedCentre), static_cast<int>(bedCentre), 0 },
+                .enemyGate = tile == TileType::EnemyGate },
             manifest, 1.0f, 0.0f);
         for (std::size_t index = firstPart; index < frame.tiles.size(); ++index) {
             frame.tiles[index].affectsCameraFit = true;

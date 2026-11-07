@@ -144,7 +144,7 @@ private:
             auto tile = tileVisual(type, cell, input_.manifest, input_.settings);
             // Procedural gates need a unit-height debug proxy instead of
             // tileVisual's flat fallback.
-            if (type == TileType::Gate || type == TileType::MinecartGate) {
+            if (tileTypeIsGate(type) || type == TileType::MinecartGate) {
                 tile.position = { static_cast<float>(cell.x), static_cast<float>(cell.y) };
                 tile.size = { 1.0f, 1.0f };
                 tile.baseElevation = static_cast<float>(cell.z);
@@ -172,7 +172,7 @@ private:
             };
         };
         const auto configurable = [](TileType type) {
-            return tileTypeIsSignalSource(type) || type == TileType::Gate ||
+            return tileTypeIsSignalSource(type) || tileTypeIsGate(type) ||
                 tileTypeIsRotator(type) || type == TileType::LockPlate ||
                 type == TileType::Elevator || type == TileType::Minecart ||
                 tileTypeIsPortal(type) || tileTypeIsLectern(type) ||
@@ -329,7 +329,7 @@ private:
             if (occupied(cell)) {
                 return rules::TurretRayCell::Occupied;
             }
-            if (type == TileType::Gate) {
+            if (tileTypeIsGate(type)) {
                 const auto gate = std::ranges::find(input_.editor.gates(), cell, &Level::Gate::cell);
                 if (gate != input_.editor.gates().end()) {
                     bool hasPlate = false;
@@ -341,6 +341,17 @@ private:
                         }
                     }
                     pressed &= hasPlate;
+                    if (gate->enemyGate) {
+                        pressed = true;
+                        for (const auto& layer : input_.editor.documentLayers()) {
+                            for (const auto& row : layer) {
+                                for (char token : row) {
+                                    const auto tile = charToTileType(token).value_or(TileType::Air);
+                                    if (tile == TileType::Enemy || tileTypeIsTurret(tile)) pressed = false;
+                                }
+                            }
+                        }
+                    }
                     if (pressed != gate->startOpen) {
                         return rules::TurretRayCell::Open;
                     }
@@ -682,10 +693,10 @@ private:
                 0.0f, 1.0f, false, rotation);
             return;
         }
-        if (tile == TileType::Gate) {
+        if (tileTypeIsGate(tile)) {
             const auto found = std::ranges::find(
                 definition.gates, localCell, &Level::Gate::cell);
-            Level::Gate gate { .cell = cell };
+            Level::Gate gate { .cell = cell, .enemyGate = tile == TileType::EnemyGate };
             if (found != definition.gates.end()) {
                 gate.color = found->color;
                 gate.startOpen = found->startOpen;
@@ -1030,11 +1041,11 @@ private:
             }
             return;
         }
-        if (tile == TileType::Gate) {
+        if (tileTypeIsGate(tile)) {
             const GridPosition3 cell { x, y, z };
             const auto found = std::ranges::find(
                 input_.editor.gates(), cell, &Level::Gate::cell);
-            const Level::Gate fallback { .cell = cell };
+            const Level::Gate fallback { .cell = cell, .enemyGate = tile == TileType::EnemyGate };
             const Level::Gate& gate = found != input_.editor.gates().end()
                 ? *found : fallback;
             if (!pickOnly) {

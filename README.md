@@ -77,6 +77,21 @@ metadata over a `C` grid cell (`true` over a `0` cell for a wardrobe), keeping
 existing screen symbols intact. `@character cleric` also works for legacy
 generic player starts. See `docs/examples/cleric.scr` for a small test scene.
 
+## Enemy Gates
+
+Enemy Gates are magenta energy cubes with dark frames and skull seals. Paint
+**Enemy Gate** in the editor, then select it under **Gates** to change **Start Open**.
+A default enemy gate stays closed while any enemy or turret in the screen is alive
+and opens when all are defeated. Start Open reverses this behavior. Water deaths,
+enemy attacks, and crystallization count as defeat; restoring an enemy from a
+crystal makes it count as alive again. A screen with no enemies is already cleared.
+Enemy gates use the regular gates' support, obstruction and crushing rules and
+do not use pressure-plate links. Undo and restart restore their state automatically.
+
+Screen files use a `G` grid cell and an `@gate` record with `"enemyGate":true`,
+`"plates":[]`, the gate's `"cell"` and `"color"`, and optional `"startOpen":true`.
+See `docs/examples/enemy-gates.scr` for both starting states beside a regular gate.
+
 ## Default Controls
 
 | Action | Keyboard | Gamepad |

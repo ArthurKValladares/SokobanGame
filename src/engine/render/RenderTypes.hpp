@@ -32,6 +32,7 @@ enum class RenderSurfaceEffect : uint8_t {
     // Persistent energy barriers share the animated emissive shader with
     // mirror projections, but remain part of the normal world pass.
     GateEnergy,
+    EnemyGateEnergy,
     // A slightly enlarged copy of a linked object's own model, shaded as a
     // translucent animated wisp in that link group's color.
     LinkedObjectAura,

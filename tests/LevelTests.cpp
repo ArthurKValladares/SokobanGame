@@ -649,6 +649,43 @@ void testSelectorMetadataRoundTripAndLookup()
     CHECK(level.isWalkable({ 1, 0, 1 }));
 }
 
+void testEnemyGateMetadataRoundTripAndValidation()
+{
+    TEST("enemy gate metadata round trip and validation");
+    const auto definition = Level::parseDefinition({
+        "@gate {\"cell\":[2,0,1],\"plates\":[],\"color\":[1,0.025,0.68],\"enemyGate\":true,\"startOpen\":true}",
+        "@layer 0", "...", "@layer 1", "C G",
+    }, "enemy gate");
+    CHECK(charToTileType(definition.layers[1][0][2]) == TileType::EnemyGate);
+    CHECK(definition.gates[0].enemyGate);
+    CHECK(definition.gates[0].startOpen);
+    const auto serialized = Level::serializeDefinition(definition);
+    CHECK(serialized.back() == "C G");
+    CHECK(Level::parseDefinition(serialized, "enemy gate round trip") == definition);
+    const auto level = Level::loadFromDefinition(definition, "enemy gate runtime");
+    CHECK(level.tileAt(2, 0, 1) == TileType::EnemyGate);
+    CHECK(!level.isWalkable({ 2, 0, 1 }));
+    CHECK(tileTypeFromName("Enemy Gate") == TileType::EnemyGate);
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition({
+            "@gate {\"cell\":[2,0,1],\"plates\":[[1,0,1]],\"color\":[1,0,1],\"enemyGate\":true}",
+            "@layer 0", "...", "@layer 1", "CPG",
+        }, "invalid enemy gate links");
+    }, "cannot link");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition({
+            "@gate {\"cell\":[2,0,1],\"plates\":[],\"color\":[1,0,1],\"enemyGate\":\"yes\"}",
+            "@layer 0", "...", "@layer 1", "C G",
+        }, "invalid enemy gate mode");
+    }, "must be true or false");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition({
+            "@gate {\"cell\":[9,0,1],\"plates\":[],\"color\":[1,0,1],\"enemyGate\":true}",
+            "@layer 0", "...", "@layer 1", "C G",
+        }, "invalid enemy gate cell");
+    }, "inside the screen");
+}
+
 void testGateMetadataRoundTripAndValidation()
 {
     TEST("gateMetadataRoundTripAndValidation");
@@ -1815,6 +1852,7 @@ void testCliffWallStylesAreSolidAndSaveSplatAssignments()
 
 int main()
 {
+    testEnemyGateMetadataRoundTripAndValidation();
     testClericStartsAndWardrobesRoundTrip();
     testRangerStartsAndWardrobesRoundTrip();
     TEST("lecternMetadata");

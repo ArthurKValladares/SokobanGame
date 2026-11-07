@@ -466,6 +466,9 @@ std::vector<LinkedDevice> linkedDevices(Level::Definition& definition)
     std::vector<LinkedDevice> devices;
     const auto add = [&](auto& records) {
         for (auto& record : records) {
+            if constexpr (requires { record.enemyGate; }) {
+                if (record.enemyGate) continue;
+            }
             std::vector<GridPosition3> plates = record.pressurePlates;
             std::ranges::sort(plates, {}, cellOrder);
             devices.push_back({ .color = &record.color, .plates = std::move(plates) });
@@ -1852,7 +1855,7 @@ bool LevelEditor::moveObject(GridPosition3 destination)
     restoreRecordAfterMove(
         document_.gates,
         before.gates,
-        move->tile == TileType::Gate,
+        tileTypeIsGate(move->tile),
         move->source,
         destination);
     restoreRecordAfterMove(
@@ -2378,7 +2381,7 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
     if (tileTypeIsLectern(painted.top) && !tileTypeIsLectern(previous.top)) {
         document_.lecterns.push_back({ .cell = translatedPosition, .text = {} });
     }
-    if (previous.top == TileType::Gate && painted.top != TileType::Gate) {
+    if (tileTypeIsGate(previous.top) && previous.top != painted.top) {
         std::erase_if(document_.gates, [&](const Level::Gate& gate) {
             return gate.cell == translatedPosition;
         });
@@ -2422,10 +2425,11 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
         });
         sortLinkColors(document_.plateColors);
     }
-    if (painted.top == TileType::Gate && previous.top != TileType::Gate) {
+    if (tileTypeIsGate(painted.top) && previous.top != painted.top) {
         document_.gates.push_back({
             .cell = translatedPosition,
-            .color = activeLinkColor_,
+            .color = painted.top == TileType::EnemyGate ? enemyGateColor : activeLinkColor_,
+            .enemyGate = painted.top == TileType::EnemyGate,
         });
     }
     if (tileTypeIsRotator(paintedPlate) && !tileTypeIsRotator(previousPlate)) {
@@ -3143,6 +3147,9 @@ std::optional<Vec3> LevelEditor::linkColorAt(GridPosition3 cell) const
     }
     const auto colorOf = [&](const auto& records) -> std::optional<Vec3> {
         const auto found = std::ranges::find_if(records, [&](const auto& record) {
+            if constexpr (requires { record.enemyGate; }) {
+                if (record.enemyGate) return false;
+            }
             return record.cell == cell;
         });
         return found == records.end()
@@ -3187,7 +3194,12 @@ const std::vector<LevelEditor::LinkGroup>& LevelEditor::linkGroupsView() const
 {
     const auto visitInputs = [&](auto visit) {
         const auto records = [&](const auto& values, uint8_t kind) {
-            for (const auto& value : values) visit(LinkInput { value.cell, value.color, kind });
+            for (const auto& value : values) {
+                if constexpr (requires { value.enemyGate; }) {
+                    if (value.enemyGate) continue;
+                }
+                visit(LinkInput { value.cell, value.color, kind });
+            }
         };
         records(document_.plateColors, 0);
         records(document_.gates, 1);
@@ -3222,6 +3234,7 @@ const std::vector<LevelEditor::LinkGroup>& LevelEditor::linkGroupsView() const
         groupFor(plate.color).pressurePlates.push_back(plate.cell);
     }
     for (const Level::Gate& gate : document_.gates) {
+        if (gate.enemyGate) continue;
         groupFor(gate.color).gates.push_back(gate.cell);
     }
     for (const Level::Rotator& rotator : document_.rotators) {
@@ -3426,6 +3439,9 @@ bool LevelEditor::recolorLinkGroup(Vec3 from, Vec3 to)
     const auto recolor = [&](auto& records) {
         for (auto& record : records) {
             if (sameColor(record.color, from)) {
+                if constexpr (requires { record.enemyGate; }) {
+                    if (record.enemyGate) continue;
+                }
                 record.color = to;
                 changed = true;
             }
@@ -3514,6 +3530,11 @@ bool LevelEditor::setGateStartOpen(std::size_t index, bool startOpen)
     document_.status = startOpen
         ? "Gate now starts open and closes when its plates are pressed."
         : "Gate now starts closed and opens when its plates are pressed.";
+    if (document_.gates[index].enemyGate) {
+        document_.status = startOpen
+            ? "Enemy gate opens while enemies remain and closes when all are defeated."
+            : "Enemy gate closes while enemies remain and opens when all are defeated.";
+    }
     recordDocumentChange(std::move(before));
     return true;
 }
@@ -3594,6 +3615,9 @@ Level::Definition LevelEditor::linkedDefinition(
     const auto link = [&](auto& records) {
         for (auto& record : records) {
             record.pressurePlates.clear();
+            if constexpr (requires { record.enemyGate; }) {
+                if (record.enemyGate) continue;
+            }
             for (const Level::LinkColor& plate : document.plateColors) {
                 if (sameColor(plate.color, record.color)) {
                     record.pressurePlates.push_back(plate.cell);
@@ -3609,6 +3633,9 @@ Level::Definition LevelEditor::linkedDefinition(
     for (const Level::LinkColor& plate : document.plateColors) {
         const auto drives = [&](const auto& records) {
             return std::ranges::any_of(records, [&](const auto& record) {
+                if constexpr (requires { record.enemyGate; }) {
+                    if (record.enemyGate) return false;
+                }
                 return sameColor(record.color, plate.color);
             });
         };

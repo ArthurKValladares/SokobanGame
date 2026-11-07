@@ -107,7 +107,7 @@ RelaxedHeuristic::RelaxedHeuristic(const Level& level)
                     rules::staticCellAllowsEntity(level, cell) && support &&
                     (tileTypeSupportsEntity(*support) ||
                         tileTypeIsWater(*support) ||
-                        *support == TileType::Gate);
+                        tileTypeIsGate(*support));
                 traversableCellCount_ += traversable_[index(cell)] ? 1 : 0;
             }
         }

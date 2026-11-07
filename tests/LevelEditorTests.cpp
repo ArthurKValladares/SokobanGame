@@ -724,6 +724,41 @@ void testGateStartOpenIsAnUndoableGateSetting()
     CHECK(editor.gates()[0].startOpen);
 }
 
+void testEnemyGateEditingPersistsAndIgnoresPlateColors()
+{
+    TEST("enemy gate editing persists and ignores plate colors");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(6, 3, false);
+    const GridPosition3 gate { 3, 1, 1 };
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::PressurePlate));
+    CHECK(editor.setCell(gate, TileType::EnemyGate));
+    CHECK(editor.gates().size() == 1);
+    CHECK(editor.gates()[0].enemyGate);
+    CHECK(!editor.linkColorAt(gate));
+    CHECK(!editor.setLinkColor(gate, { 0.2f, 0.3f, 0.4f }));
+    CHECK(editor.linkGroups()[0].gates.empty());
+    CHECK(editor.documentToLevel().gates()[0].pressurePlates.empty());
+    CHECK(editor.setGateStartOpen(0, true));
+    CHECK(editor.tryUndoEdit());
+    CHECK(!editor.gates()[0].startOpen);
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.gates()[0].startOpen);
+    const GridPosition3 moved { 4, 1, 1 };
+    CHECK(editor.beginMove(gate));
+    CHECK(editor.moveObject(moved));
+    CHECK(editor.gates()[0].cell == moved);
+    CHECK(editor.gates()[0].enemyGate && editor.gates()[0].startOpen);
+    const auto parsed = Level::parseDefinition(Level::serializeDefinition(editor.documentDefinition()), "enemy gate editor round trip");
+    CHECK(parsed.gates == editor.gates());
+    CHECK(editor.setCell(moved, TileType::Gate));
+    CHECK(editor.gates().size() == 1 && !editor.gates()[0].enemyGate);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.gates()[0].enemyGate);
+    CHECK(editor.setCell(moved, TileType::Air));
+    CHECK(editor.gates().empty());
+}
+
 void testElevatorStopsPersistAndFollowEditorCommands()
 {
     TEST("elevatorStopsPersistAndFollowEditorCommands");
@@ -5607,6 +5642,7 @@ void testHistoryAccountingFollowsScreenRemapsAndReloads()
 
 int main()
 {
+    testEnemyGateEditingPersistsAndIgnoresPlateColors();
     testHistoryRecordLimitPreservesUndoRedoOrderAndBranches();
     testReducingHistoryLimitRetainsNearestRedoSteps();
     testGroupedAndCancelledEditsRespectHistoryBudget();

@@ -145,6 +145,44 @@ vec4 mirrorBeam()
 
 void main()
 {
+    // Enemy gates share the energy pass, with a separate material selector.
+    // World-cell coordinates keep every vertical emblem upright, regardless
+    // of the cube face's winding or which side the camera sees.
+    if (draw.passData[0].w < -1.5) {
+        vec2 facePosition = abs(inNormal.z) > 0.5
+            ? vec2(inWorldPosition.x, -inWorldPosition.y)
+            : vec2(abs(inNormal.x) > 0.5 ? inWorldPosition.y : inWorldPosition.x,
+                inWorldPosition.z);
+        vec2 p = fract(facePosition) - 0.5;
+        float time = draw.materialOptions.w;
+        float aa = max(fwidth(p.x), fwidth(p.y)) * 1.4;
+        float dome = length((p - vec2(0.0, 0.055)) / vec2(0.25, 0.265)) - 1.0;
+        float jaw = max(abs(p.x) - 0.17, abs(p.y + 0.16) - 0.13);
+        float skull = max(1.0 - smoothstep(-aa * 4.0, aa * 4.0, dome),
+            1.0 - smoothstep(-aa, aa, jaw));
+        float eye = min(length((p - vec2(-0.105, 0.06)) / vec2(0.066, 0.075)),
+            length((p - vec2(0.105, 0.06)) / vec2(0.066, 0.075)));
+        float holes = 1.0 - smoothstep(0.88, 1.08, eye);
+        float nose = 1.0 - smoothstep(0.0, aa,
+            max(abs(p.x) + (p.y + 0.08) * 0.45 - 0.032, abs(p.y + 0.08) - 0.04));
+        float teeth = (1.0 - smoothstep(0.0, aa, abs(p.y + 0.24) - 0.045)) *
+            (1.0 - smoothstep(0.013, 0.023, abs(mod(p.x + 0.03, 0.06) - 0.03)));
+        skull *= 1.0 - max(max(holes, nose), teeth);
+        float radius = length(p);
+        float angle = atan(p.y, p.x);
+        float cloud = energyCloud(vec3(p * 5.5, time * 0.25));
+        float swirl = 0.5 + 0.5 * sin(radius * 36.0 - time * 2.0 + angle * 3.0 + cloud * 3.0);
+        float seal = exp(-pow((radius - 0.36) / 0.018, 2.0));
+        vec2 corner = abs(p);
+        float thorns = smoothstep(0.35, 0.39, corner.x + corner.y * 0.22) *
+            smoothstep(0.19, 0.32, corner.y);
+        float body = 0.62 + cloud * 0.32 + swirl * 0.10;
+        vec3 color = draw.color.rgb * (body + seal * 0.35);
+        color = mix(color, vec3(1.55, 0.20, 1.0), skull * 0.85);
+        color = mix(color, vec3(0.045, 0.008, 0.055), thorns * 0.95);
+        outColor = vec4(color, draw.color.a * (0.86 + cloud * 0.14));
+        return;
+    }
     // Positive selects beam ribbons, negative preserves gate shutters, and
     // ghost models keep zero. Linked auras have their separate selector.
     if (draw.passData[0].w > 0.5) {

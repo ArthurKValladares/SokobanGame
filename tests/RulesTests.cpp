@@ -35,6 +35,103 @@ GridPosition3 cell(int x, int y, int z)
     return { x, y, z };
 }
 
+Level enemyGateLevel(Level::LayerRows layers, GridPosition3 gate,
+    bool startOpen = false, CharacterType character = CharacterType::Rogue)
+{
+    layers[gate.z][gate.y][gate.x] = tileTypeToChar(TileType::EnemyGate);
+    return Level::loadFromDefinition({
+        .layers = std::move(layers),
+        .gates = { Level::Gate { .cell = gate, .color = enemyGateColor,
+            .startOpen = startOpen, .enemyGate = true } },
+        .character = character,
+    }, "enemy gate test");
+}
+
+void testEnemyGatesCountLivingEnemiesAndTurrets()
+{
+    TEST("enemy gates count living enemies and turrets, including zero enemies");
+    for (const bool startOpen : { false, true }) {
+        const auto level = enemyGateLevel({ { "......" }, { "C Nn G" } }, cell(5, 0, 1), startOpen);
+        auto state = rules::initialState(level);
+        const auto open = [&] { return rules::isGateOpen(level, state, level.gates()[0]); };
+        CHECK(open() == startOpen);
+        state.enemies[0].dead = true;
+        CHECK(open() == startOpen); // the turret is still alive
+        state.movables[0].fallen = true;
+        CHECK(open() != startOpen);
+        state.enemies[0].dead = false;
+        state.enemies[0].fallen = true;
+        CHECK(open() != startOpen); // water deaths count too
+        state.movables[0].fallen = false;
+        state.movables[0].dead = true;
+        CHECK(open() != startOpen);
+        state.enemies[0].fallen = false;
+        CHECK(open() == startOpen); // a restored enemy reactivates the gate
+        state.enemies.clear();
+        state.movables.clear();
+        CHECK(open() != startOpen);
+        state.movables.push_back({ .type = TileType::Rock, .cell = level.gates()[0].cell });
+        CHECK(open()); // indestructible blockers still hold gates open
+    }
+}
+
+void testEnemyGatesReactToDeathsAndCrystallizationInTheSameStep()
+{
+    TEST("enemy gates react to mutual turret kills and preserve undo deltas");
+    const auto turrets = enemyGateLevel({ { ".....", "....." },
+        { "e   w", "C G  " } }, cell(2, 1, 1));
+    const auto before = rules::initialState(turrets);
+    const auto after = rules::step(turrets, before);
+    CHECK(after.movables[0].dead && after.movables[1].dead);
+    CHECK(rules::isGateOpen(turrets, after, turrets.gates()[0]));
+    CHECK(!rules::isGateOpen(turrets, before, turrets.gates()[0]));
+    const auto delta = StateDelta::between(before, after);
+    auto restored = after;
+    delta.inverted().applyTo(restored);
+    CHECK(restored == before);
+
+    TEST("enemy gate opening drops its riders in the same step");
+    const auto support = enemyGateLevel({ { ".....", "....." },
+        { "e   w", "  G  " }, { "     ", "  C  " } }, cell(2, 1, 1));
+    const auto dropped = rules::step(support, rules::initialState(support));
+    CHECK(dropped.players[0].cell == cell(2, 1, 1));
+    CHECK(!dropped.players[0].dead);
+
+    TEST("inverted enemy gate closing crushes its occupant in the same step");
+    const auto inverted = enemyGateLevel({ { ".....", "....." },
+        { "e   w", "C G  " } }, cell(2, 1, 1), true);
+    auto occupied = rules::initialState(inverted);
+    occupied.players[0].cell = cell(2, 1, 1);
+    const auto crushed = rules::step(inverted, occupied);
+    CHECK(crushed.players[0].dead);
+
+    TEST("enemy gates react to crystallization and restoration");
+    for (const bool startOpen : { false, true }) {
+        const auto level = enemyGateLevel({ { "....." }, { "CNG  " } },
+            cell(2, 0, 1), startOpen, CharacterType::CrystalDruid);
+        const auto initial = rules::initialState(level);
+        const auto crystal = rules::step(level, initial, MoveDirection::Right);
+        CHECK(crystal.enemies.empty());
+        CHECK(crystal.movables.size() == 1);
+        CHECK(crystal.movables[0].type == TileType::Crystal);
+        CHECK(rules::isGateOpen(level, crystal, level.gates()[0]) != startOpen);
+        const auto revived = rules::step(level, crystal, MoveDirection::Right);
+        CHECK(revived.enemies.size() == 1);
+        CHECK(revived.movables.empty());
+        CHECK(rules::isGateOpen(level, revived, level.gates()[0]) == startOpen);
+    }
+
+    TEST("enemy gates react when the last enemy is pushed into water");
+    const auto water = enemyGateLevel({ { "..W.." }, { "CNG  " } }, cell(2, 0, 1), true);
+    // Put the water beside the enemy; the inverted gate occupies another cell.
+    auto state = rules::initialState(water);
+    state.enemies[0].cell = cell(1, 0, 1);
+    // The open gate lets the enemy fall into the water beneath it.
+    state = rules::step(water, state, MoveDirection::Right);
+    CHECK(state.enemies[0].fallen || state.enemies[0].dead);
+    CHECK(!rules::isGateOpen(water, state, water.gates()[0]));
+}
+
 void testClericCannotPushAndResistsAttacks()
 {
     TEST("cleric cannot push blocks or enemies and resists attacks");
@@ -5624,6 +5721,8 @@ void testRockDrivenPadTimingRecognizesTurningPortalShove()
 
 int main()
 {
+    testEnemyGatesCountLivingEnemiesAndTurrets();
+    testEnemyGatesReactToDeathsAndCrystallizationInTheSameStep();
     testClericCannotPushAndResistsAttacks();
     testClericWalksOverWaterAndAirOnlyWhileAttacked();
     testClericProtectsOnlyCardinalAlliesAndDoesNotRelay();
