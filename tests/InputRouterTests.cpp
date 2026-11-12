@@ -978,10 +978,92 @@ void testMakerRoutesNavigationWithoutCampaignActions()
     CHECK(!frame.title.confirm);
     CHECK(!frame.gameplay.right.down && !frame.toggleDraftPlaybackPressed);
     CHECK(router.backAction(input, context) == InputRouter::BackAction::ShellBack);
+    const auto search = router.routeFrame(input, {
+        .titleOpen = true, .makerOpen = true, .nativeTextEditing = true,
+    });
+    CHECK(!search.maker.next && !search.maker.activate);
     const auto modal = router.routeFrame(input, {
         .optionsOpen = true, .titleOpen = true, .makerOpen = true,
     });
     CHECK(modal.options.confirm && !modal.maker.activate);
+}
+
+void testMakerPlaytestRoutesIsolatedGameplay()
+{
+    TEST("makerPlaytestRoutesIsolatedGameplay");
+    using namespace sokoban;
+    InputState input(false);
+    InputRouter router;
+    input.beginFrame();
+    for (const SDL_Scancode key : { SDL_SCANCODE_W, SDL_SCANCODE_D,
+             SDL_SCANCODE_Z, SDL_SCANCODE_R, SDL_SCANCODE_Q, SDL_SCANCODE_SPACE,
+             SDL_SCANCODE_T, SDL_SCANCODE_TAB, SDL_SCANCODE_V, SDL_SCANCODE_F5,
+             SDL_SCANCODE_ESCAPE }) {
+        pressKey(router, input, key);
+    }
+    SDL_Event press {};
+    press.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    press.button.button = SDL_BUTTON_LEFT;
+    press.button.x = 20.0f;
+    press.button.y = 40.0f;
+    (void)router.routeEvent(press, input, {});
+
+    const auto campaign = router.routeFrame(input, {});
+    CHECK(campaign.showOverworldMap && campaign.previewScreen);
+
+    InputRouter::RoutingContext context {
+        .titleOpen = true,
+        .makerOpen = true,
+        .makerPlaying = true,
+        .editorEditing = true,
+        .draftPlaying = true,
+    };
+    const auto playtest = router.routeFrame(input, context);
+    CHECK(playtest.gameplay.up.pressed && playtest.gameplay.right.down);
+    CHECK(playtest.gameplay.undoPressed && playtest.gameplay.restartPressed);
+    CHECK(playtest.gameplay.cycleHeroPressed && playtest.gameplay.interactPressed);
+    CHECK(playtest.showTopDownView);
+    CHECK(!playtest.showOverworldMap && !playtest.previewScreen);
+    CHECK(!playtest.title.confirm && !playtest.maker.activate);
+    CHECK(!playtest.editor.primaryPressed && !playtest.editor.undoPressed);
+    CHECK(!playtest.toggleDraftPlaybackPressed && !playtest.playDraftFromCursorPressed);
+    CHECK(playtest.pointer.primaryPressedAt == (Vec2 { 20.0f, 40.0f }));
+    CHECK(router.backAction(input, context) == InputRouter::BackAction::ShellBack);
+
+    context.lecternOpen = true;
+    CHECK(router.backAction(input, context) == InputRouter::BackAction::None);
+    CHECK(router.routeFrame(input, context).gameplay.dismissPressed);
+
+    context.optionsOpen = true;
+    const auto modal = router.routeFrame(input, context);
+    CHECK(modal.options.confirm);
+    CHECK(modal.gameplay == GameplayLoop::InputFrame {});
+    CHECK(router.backAction(input, context) == InputRouter::BackAction::ShellBack);
+}
+
+void testMakerDraftDialogAcceptsGamepadWithNameFocused()
+{
+    TEST("makerDraftDialogAcceptsGamepadWithNameFocused");
+    using namespace sokoban;
+    InputState input(false);
+    InputRouter router;
+    const InputRouter::RoutingContext dialog {
+        .titleOpen = true, .makerOpen = true, .nativeTextEditing = true, .makerDialogOpen = true,
+    };
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_SPACE);
+    CHECK(!router.routeFrame(input, dialog).maker.activate);
+
+    input.beginFrame();
+    (void)router.routeEvent(gamepadButtonEvent(SDL_EVENT_GAMEPAD_BUTTON_DOWN,
+        SDL_GAMEPAD_BUTTON_SOUTH), input, {});
+    const auto frame = router.routeFrame(input, dialog);
+    CHECK(frame.maker.activate);
+    CHECK(!frame.title.confirm);
+    CHECK(!frame.gameplay.interactPressed);
+    CHECK(!router.routeFrame(input, {
+        .titleOpen = true, .makerOpen = true, .nativeTextEditing = true,
+    }).maker.activate);
 }
 
 void testEditorModifiersPassUiKeyboardCapture()
@@ -1018,6 +1100,8 @@ int main()
     testPrimaryPointerEdgesKeepEventPositions();
     testNativeTextFocusSuppressesActions();
     testMakerRoutesNavigationWithoutCampaignActions();
+    testMakerPlaytestRoutesIsolatedGameplay();
+    testMakerDraftDialogAcceptsGamepadWithNameFocused();
     testBindingCaptureSynchronizesGamepadButtonStateWithoutAnEdge();
     testBindingCaptureSynchronizesAxisStateWithoutAnEdge();
     testModalFrameRouting();

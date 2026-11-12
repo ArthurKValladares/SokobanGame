@@ -771,15 +771,37 @@ bool Application::bakeTileThumbnails()
 }
 #endif
 
+bool Application::nativeTextFocused() const
+{
+    if (makerOpen_ && !makerPlaytest_ && !optionsMenu_.isOpen()) {
+        return makerDraftDialog_ ? makerView_.draftNameFocused() : makerView_.tileSearchFocused();
+    }
+    return optionsMenuView_.controlsSearchFocused(optionsMenu_.state());
+}
+
+void Application::blurNativeTextInput()
+{
+    makerView_.blurTileSearch();
+    makerView_.blurDraftName();
+    optionsMenuView_.blurControlsSearch();
+    nativeTextInput_.setTarget(nullptr, nullptr);
+}
+
 void Application::updateNativeTextInput()
 {
-    auto* target = optionsMenuView_.activeTextEdit(optionsMenu_.state());
+    const bool makerInteractive = makerOpen_ && !makerPlaytest_ && !optionsMenu_.isOpen();
+    const bool draftNameInteractive = makerInteractive && makerDraftDialog_.has_value();
+    auto* target = makerInteractive
+        ? (draftNameInteractive ? makerView_.activeDraftNameEdit() : makerView_.activeTextEdit())
+        : optionsMenuView_.activeTextEdit(optionsMenu_.state());
     SDL_Rect area {};
     if (target) {
         const Vec2 size = window_.size();
         const Vec2 pixels = window_.sizeInPixels();
         if (pixels.x > 0.0f && pixels.y > 0.0f) {
-            const UiRect caret = optionsMenuView_.textCaret();
+            const UiRect caret = makerInteractive
+                ? (draftNameInteractive ? makerView_.draftNameCaret() : makerView_.textCaret())
+                : optionsMenuView_.textCaret();
             const Vec2 position = scaleUiPosition(caret.position, pixels, size);
             const Vec2 extent = scaleUiPosition(caret.size, pixels, size);
             area = {
@@ -796,33 +818,210 @@ void Application::updateNativeTextInput()
 bool Application::handleNativeTextInputEvent(const SDL_Event& event)
 {
     const auto& options = optionsMenu_.state();
-    if (options.open && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+    const bool makerInteractive = makerOpen_ && !makerPlaytest_ && !options.open;
+    const bool makerDialogInteractive = makerInteractive && makerDraftDialog_.has_value();
+    if ((options.open || makerInteractive) && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
         event.button.button == SDL_BUTTON_LEFT &&
         event.button.windowID == SDL_GetWindowID(window_.nativeHandle())) {
         const Vec2 position = scaleUiPosition({ event.button.x, event.button.y },
             window_.size(), window_.sizeInPixels());
-        if (optionsMenuView_.handleControlsSearchPress(ui_, options, position,
-                (SDL_GetModState() & SDL_KMOD_SHIFT) != 0)) {
+        const bool extend = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
+        const bool focusChanged = makerInteractive
+            ? (makerDialogInteractive ? makerView_.handleDraftNamePress(ui_, position, extend)
+                                      : makerView_.handleTileSearchPress(ui_, position, extend))
+            : optionsMenuView_.handleControlsSearchPress(ui_, options, position, extend);
+        if (focusChanged) {
             updateNativeTextInput();
         }
     }
-    if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+    if (!makerDialogInteractive && event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
         event.key.scancode == SDL_SCANCODE_F &&
         (event.key.mod & SDL_KMOD_CTRL) != 0 &&
         (event.key.mod & (SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0) {
-        const auto* target = optionsMenuView_.activeTextEdit(options);
-        if ((!target || target->composition().text.empty()) &&
-            optionsMenuView_.focusControlsSearch(options)) {
-            updateNativeTextInput();
-            return true;
+        const auto* target = makerInteractive
+            ? makerView_.activeTextEdit() : optionsMenuView_.activeTextEdit(options);
+        if (!target || target->composition().text.empty()) {
+            const bool focused = makerInteractive
+                ? makerView_.focusTileSearch() : optionsMenuView_.focusControlsSearch(options);
+            if (focused) {
+                updateNativeTextInput();
+                return true;
+            }
         }
     }
     const auto result = nativeTextInput_.handleEvent(event);
-    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST ||
+    if (makerDialogInteractive && result == SdlTextInputResult::Submit) {
+        makerDraftDialog_->inputAction = makerView_.submitDraftName();
+    } else if (makerDialogInteractive && result == SdlTextInputResult::Blur &&
+        event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) {
+        makerDraftDialog_->inputAction = { .command = MakerDraftDialogAction::Command::Cancel };
+    } else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST ||
         result == SdlTextInputResult::Submit || result == SdlTextInputResult::Blur) {
-        optionsMenuView_.blurControlsSearch();
+        blurNativeTextInput();
     }
     return result != SdlTextInputResult::Ignored;
+}
+
+void Application::openMakerDraftDialog(MakerDraftDialogMode mode, std::string_view name)
+{
+    MakerDraftDialog dialog { .mode = mode, .pendingName = std::string(name) };
+    if (mode == MakerDraftDialogMode::Load) {
+        try {
+            dialog.names = makerDraftStore_.list();
+        } catch (const std::exception& error) {
+            dialog.error = error.what();
+        }
+    }
+    makerSession_->endStroke();
+    blurNativeTextInput();
+    if (mode == MakerDraftDialogMode::ResizeBoard) {
+        const auto& editor = makerSession_->editor();
+        makerView_.beginResizeBoardDialog(editor.documentWidth(), editor.documentHeight());
+    } else {
+        makerView_.beginDraftDialog(mode, dialog.pendingName);
+    }
+    ui_.cancelPointerInteraction();
+    makerHover_.reset();
+    makerDraftDialog_ = std::move(dialog);
+}
+
+void Application::closeMakerDraftDialog()
+{
+    blurNativeTextInput();
+    ui_.cancelPointerInteraction();
+    makerDraftDialog_.reset();
+}
+
+void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& action)
+{
+    using Command = MakerDraftDialogAction::Command;
+    if (action.command == Command::None) return;
+
+    auto& dialog = *makerDraftDialog_;
+    auto& maker = *makerSession_;
+    if (action.command == Command::Cancel) {
+        if (dialog.mode == MakerDraftDialogMode::Overwrite) {
+            openMakerDraftDialog(MakerDraftDialogMode::Save, dialog.pendingName);
+        } else if (dialog.mode == MakerDraftDialogMode::Discard) {
+            openMakerDraftDialog(MakerDraftDialogMode::Load);
+        } else if (dialog.mode == MakerDraftDialogMode::DiscardNew ||
+                   dialog.mode == MakerDraftDialogMode::ConfirmCrop) {
+            dialog.mode = dialog.mode == MakerDraftDialogMode::DiscardNew
+                ? MakerDraftDialogMode::NewDraft : MakerDraftDialogMode::ResizeBoard;
+            dialog.error.clear();
+            makerView_.resumeBoardSizeDialog();
+            ui_.cancelPointerInteraction();
+        } else {
+            closeMakerDraftDialog();
+        }
+        return;
+    }
+
+    if (dialog.mode == MakerDraftDialogMode::ResizeBoard ||
+        dialog.mode == MakerDraftDialogMode::ConfirmCrop) {
+        const bool cropConfirmed = dialog.mode == MakerDraftDialogMode::ConfirmCrop;
+        const std::size_t removedTiles = cropConfirmed
+            ? 0 : maker.resizeTileLossCount(action.width, action.height);
+        if (removedTiles != 0) {
+            openMakerDraftDialog(MakerDraftDialogMode::ConfirmCrop);
+            makerDraftDialog_->removedTileCount = removedTiles;
+        } else if (maker.resizeDraft(action.width, action.height, cropConfirmed)) {
+            makerViewport_.reset();
+            makerHover_.reset();
+            closeMakerDraftDialog();
+        } else {
+            dialog.error = maker.status();
+        }
+        return;
+    }
+
+    if (dialog.mode == MakerDraftDialogMode::NewDraft ||
+        dialog.mode == MakerDraftDialogMode::DiscardNew) {
+        if (dialog.mode == MakerDraftDialogMode::NewDraft && maker.hasUnsavedChanges()) {
+            openMakerDraftDialog(MakerDraftDialogMode::DiscardNew);
+        } else if (maker.newDraft(action.width, action.height)) {
+            makerViewport_.reset();
+            makerHover_.reset();
+            closeMakerDraftDialog();
+        } else {
+            dialog.error = maker.status();
+        }
+        return;
+    }
+
+    const std::string_view name = dialog.mode == MakerDraftDialogMode::Overwrite ||
+        dialog.mode == MakerDraftDialogMode::Discard ? dialog.pendingName : action.name;
+    if (dialog.mode == MakerDraftDialogMode::Save || dialog.mode == MakerDraftDialogMode::Overwrite) {
+        const bool overwrite = dialog.mode == MakerDraftDialogMode::Overwrite ||
+            name == maker.draftName();
+        switch (maker.saveDraft(makerDraftStore_, name, overwrite)) {
+        case MakerSession::SaveDraftResult::Saved:
+            closeMakerDraftDialog();
+            return;
+        case MakerSession::SaveDraftResult::NameExists:
+            openMakerDraftDialog(MakerDraftDialogMode::Overwrite, name);
+            return;
+        case MakerSession::SaveDraftResult::Failed:
+            break;
+        }
+    } else if (dialog.mode == MakerDraftDialogMode::Load && maker.hasUnsavedChanges()) {
+        openMakerDraftDialog(MakerDraftDialogMode::Discard, name);
+        return;
+    } else if (maker.loadDraft(makerDraftStore_, name)) {
+        makerViewport_.reset();
+        makerHover_.reset();
+        closeMakerDraftDialog();
+        return;
+    }
+    dialog.error = maker.status();
+}
+
+void Application::startMakerPlaytest()
+{
+    auto level = makerSession_->buildPlaytestLevel();
+    if (!level) return;
+
+    auto& playtest = makerPlaytest_.emplace();
+    playtest.level = std::move(*level);
+    playtest.session.setStepDurationSeconds(gameplaySession_.stepDurationSeconds());
+    playtest.session.setStepRates(gameplaySession_.stepRates());
+    playtest.session.reset(playtest.level);
+    playtest.presentation.setAnimationCatalog(&animationCatalog_);
+    playtest.presentation.resetEntities(playtest.session.state());
+    const CameraAngles angles = playtest.level.cameraAngles().value_or(CameraAngles {});
+    playtest.presentation.updateCameraPitch(angles.pitchDegrees, 0.0f, 0.0f);
+    playtest.presentation.updateCameraYaw(angles.yawDegrees, 0.0f, 0.0f);
+    playtest.solved = rules::isAtUnlockedEnd(playtest.level, playtest.session.state());
+    renderer_.ensureAssets(renderAssetRequirementsForLevel(
+        playtest.level, assetManifest_, std::nullopt, &animationCatalog_));
+    audioSystem_->setAtmosphericLevel(playtest.level);
+    blurNativeTextInput();
+    ui_.cancelPointerInteraction();
+    makerViewport_.reset();
+    makerHover_.reset();
+}
+
+void Application::returnToMaker()
+{
+    makerPlaytest_.reset();
+    audioSystem_->setAtmosphericLevel(level_);
+    ui_.cancelPointerInteraction();
+    makerViewport_.reset();
+    makerHover_.reset();
+}
+
+void Application::drawLecternDialog(
+    LecternDialog& dialog, const Level& level, GridPosition3 cell, Vec2 viewport)
+{
+    if (const auto* lectern = level.lecternAt(cell)) {
+        dialog.draw(ui_, viewport, lectern->text, {
+            .bindings = &input_.bindings(),
+            .prompts = &inputPrompts_,
+            .deviceClass = input_.activeDevice() == ActiveInputDevice::Gamepad
+                ? BindingDeviceClass::Gamepad : BindingDeviceClass::Keyboard,
+            .gamepad = input_.activeGamepadPresentation(),
+        });
+    }
 }
 
 void Application::drawMakerWorkspace(
@@ -833,11 +1032,23 @@ void Application::drawMakerWorkspace(
         1.0f, 3.0f);
     const MakerLayout layout = MakerView::layout(viewport, scale);
     const UiRect scene = fitSceneViewport(layout.board, viewport);
+    ui_.setSceneViewport(scene);
+    if (makerPlaytest_) {
+        if (!optionsMenu_.isOpen()) {
+            if (makerView_.drawPlaytest(ui_, layout, makerPlaytest_->solved) ==
+                MakerCommand::ReturnToMaker) {
+                returnToMaker();
+            } else if (const auto cell = makerPlaytest_->session.readingLectern()) {
+                drawLecternDialog(makerPlaytest_->lecternDialog, makerPlaytest_->level,
+                    *cell, viewport);
+            }
+        }
+        return;
+    }
     // The previous prepared frame has the projection used by the scene the
     // pointer actually sees. After a resize, wait for the new layout to draw.
     const bool canPick = makerViewport_ == scene && preparedRenderFrame_.has_value();
     makerViewport_ = scene;
-    ui_.setSceneViewport(scene);
 
     MakerSession& maker = *makerSession_;
     if (optionsMenu_.isOpen()) {
@@ -854,10 +1065,17 @@ void Application::drawMakerWorkspace(
         }
         return std::nullopt;
     };
-    const auto hovered = pick(ui_.mousePosition());
+    const auto hovered = makerDraftDialog_ ? std::nullopt : pick(ui_.mousePosition());
     const LevelEditor& editor = maker.editor();
     makerHover_ = hovered ? maker.previewCell(*hovered) : std::nullopt;
     const auto assets = renderer_.assetLoadingStats();
+    const MakerViewInput viewInput {
+        .wheelY = input.pointer.wheel.y,
+        .wheelPosition = wheelPosition,
+        .navigation = input.maker,
+        .extendTextSelection = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0,
+        .interactive = !makerDraftDialog_,
+    };
     const MakerViewAction action = makerView_.draw(ui_, layout, {
         .brush = editor.selectedTile(),
         .quarterTurns = editor.selectedTileQuarterTurns(),
@@ -869,11 +1087,31 @@ void Application::drawMakerWorkspace(
         .hovered = makerHover_,
         .status = maker.status().empty() && (assets.pendingModels || assets.pendingTextures)
             ? "Loading board assets" : maker.status(),
-    }, {
-        .wheelY = input.pointer.wheel.y,
-        .wheelPosition = wheelPosition,
-        .navigation = input.maker,
-    });
+        .draftName = maker.draftName(),
+        .unsavedChanges = maker.hasUnsavedChanges(),
+    }, viewInput);
+    if (auto& dialog = makerDraftDialog_) {
+        MakerViewInput dialogInput = viewInput;
+        if (dialog->mode == MakerDraftDialogMode::NewDraft ||
+            dialog->mode == MakerDraftDialogMode::DiscardNew ||
+            dialog->mode == MakerDraftDialogMode::ResizeBoard ||
+            dialog->mode == MakerDraftDialogMode::ConfirmCrop) {
+            dialogInput.navigation.activate |= input_.keyPressed(SDL_SCANCODE_RETURN) ||
+                input_.keyPressed(SDL_SCANCODE_KP_ENTER);
+        }
+        const auto pointerAction = makerView_.drawDraftDialog(ui_, viewport, scale, {
+            .mode = dialog->mode,
+            .names = dialog->names,
+            .error = dialog->error,
+            .pendingName = dialog->pendingName,
+            .removedTileCount = dialog->removedTileCount,
+        }, dialogInput);
+        // Dismiss after drawing the modal so the frame's pointer edges never reach the board.
+        const auto inputAction = std::exchange(dialog->inputAction, {});
+        handleMakerDraftDialogAction(inputAction.command != MakerDraftDialogAction::Command::None
+            ? inputAction : pointerAction);
+        return;
+    }
 
     switch (action.command) {
     case MakerCommand::None: break;
@@ -885,14 +1123,42 @@ void Application::drawMakerWorkspace(
     case MakerCommand::Rotate: maker.rotateTile(); break;
     case MakerCommand::LayerDown: maker.stepLayer(-1); break;
     case MakerCommand::LayerUp: maker.stepLayer(1); break;
-    case MakerCommand::Undo: maker.undo(); break;
-    case MakerCommand::Redo: maker.redo(); break;
+    case MakerCommand::Undo:
+    case MakerCommand::Redo: {
+        const auto width = editor.documentWidth();
+        const auto height = editor.documentHeight();
+        if (action.command == MakerCommand::Undo) maker.undo();
+        else maker.redo();
+        if (editor.documentWidth() != width || editor.documentHeight() != height) {
+            makerViewport_.reset();
+            makerHover_.reset();
+            return;
+        }
+        break;
+    }
+    case MakerCommand::NewDraft:
+        openMakerDraftDialog(MakerDraftDialogMode::NewDraft);
+        return;
+    case MakerCommand::ResizeBoard:
+        openMakerDraftDialog(MakerDraftDialogMode::ResizeBoard);
+        return;
+    case MakerCommand::Save:
+        openMakerDraftDialog(MakerDraftDialogMode::Save, maker.draftName());
+        return;
+    case MakerCommand::Load:
+        openMakerDraftDialog(MakerDraftDialogMode::Load);
+        return;
+    case MakerCommand::TestPlay:
+        startMakerPlaytest();
+        return;
+    case MakerCommand::ReturnToMaker: break;
     }
     if (action.tile) {
         maker.selectTile(*action.tile);
     }
 
-    const auto drag = ui_.dragPosition("maker.board", scene);
+    const auto drag = makerView_.tileSearchFocused()
+        ? std::nullopt : ui_.dragPosition("maker.board", scene);
     if (drag) {
         if (const auto press = ui_.mousePressPosition()) {
             maker.endStroke();
@@ -986,15 +1252,7 @@ bool Application::drawUiFrame(
     const auto overlaysStart = std::chrono::steady_clock::now();
     if (!makerOpen_) {
         if (const auto cell = gameplaySession_.readingLectern(); cell && !shellMenuOpen()) {
-            if (const auto* lectern = level_.lecternAt(*cell)) {
-                lecternDialog_.draw(ui_, pixelSize, lectern->text, {
-                    .bindings = &input_.bindings(),
-                    .prompts = &inputPrompts_,
-                    .deviceClass = input_.activeDevice() == ActiveInputDevice::Gamepad
-                        ? BindingDeviceClass::Gamepad : BindingDeviceClass::Keyboard,
-                    .gamepad = input_.activeGamepadPresentation(),
-                });
-            }
+            drawLecternDialog(lecternDialog_, level_, *cell, pixelSize);
         } else if (screenPreviewActive_) {
             drawScreenPreviewOverlay(pixelSize);
         } else {
@@ -1306,9 +1564,12 @@ bool Application::run()
 #endif
             break;
         case InputRouter::BackAction::ShellBack:
-            if (optionsMenuView_.controlsSearchFocused(optionsMenu_.state())) {
-                optionsMenuView_.blurControlsSearch();
-                updateNativeTextInput();
+            if (makerDraftDialog_ && !optionsMenu_.isOpen()) {
+                makerDraftDialog_->inputAction = { .command = MakerDraftDialogAction::Command::Cancel };
+            } else if (nativeTextFocused()) {
+                blurNativeTextInput();
+            } else if (makerPlaytest_ && !optionsMenu_.isOpen()) {
+                returnToMaker();
             } else {
                 handleShellEvent(ShellBackPressed {});
             }
@@ -1441,12 +1702,53 @@ bool Application::run()
     return !renderer_.hasFatalFailure();
 }
 
+void Application::updateMakerPlaytest(float dt, const InputRouter::Frame& input)
+{
+    if (optionsMenu_.isOpen()) {
+        audioSystem_->update(dt, false, false);
+        return;
+    }
+
+    auto& playtest = *makerPlaytest_;
+    auto& session = playtest.session;
+    auto& presentation = playtest.presentation;
+    const CameraAngles angles = playtest.level.cameraAngles().value_or(CameraAngles {});
+    presentation.advanceClocks(dt, session.moving() && session.activeAction().reversed);
+    presentation.updateCameraPitch(input.showTopDownView ? 0.0f : angles.pitchDegrees,
+        dt, config::cameraPitchTransitionSeconds);
+
+    const auto reading = session.readingLectern();
+    const auto result = GameplayLoop::update(
+        playtest.level, session, presentation, input.gameplay, dt, true);
+    if (reading && (input.gameplay.interactPressed || input.gameplay.dismissPressed)) {
+        audioSystem_->update(dt, false, false);
+        return;
+    }
+    if (session.readingLectern() && session.readingLectern() != reading) {
+        playtest.lecternDialog.reset();
+    }
+    if (!reading || !session.readingLectern() || session.moving() || result.stateCommitted) {
+        playtest.particles.update(dt);
+    }
+    if (input.gameplay.restartPressed && !reading) {
+        playtest.solved = false;
+    }
+    playtest.solved |= result.draftSolved;
+    presentGameplayEffects(playtest.level, session, presentation, playtest.particles,
+        playtest.turretFlames, result, input.gameplay, dt);
+    updateGameplayAudio(dt, session, presentation);
+}
+
 void Application::update(
     float dt,
     const InputRouter::Frame& input,
     const VulkanRenderer::PreparedFrame* previousRenderFrame)
 {
     screenPreviewActive_ = false;
+    if (makerPlaytest_) {
+        updateMakerPlaytest(dt, input);
+        return;
+    }
 #if !SOKOBAN_ENABLE_DEBUG_UI
     (void)previousRenderFrame;
 #endif
@@ -1619,55 +1921,8 @@ void Application::update(
             }
         }
     }
-    if (gameplayResult.mirrorActivated) {
-        audioSystem_->playOneShot("mirror-swap");
-        for (GridPosition3 destination :
-             gameplayResult.mirrorSwapDestinations) {
-            particleSystem_.emit(
-                {
-                    static_cast<float>(destination.x) + 0.5f,
-                    static_cast<float>(destination.y) + 0.5f,
-                    static_cast<float>(destination.z) +
-                        config::mirrorSwapSmokeElevation,
-                },
-                mirrorSwapParticleEffect_);
-        }
-    }
-    if (gameplayResult.witchSwapped) {
-        for (GridPosition3 destination :
-             gameplayResult.witchSwapDestinations) {
-            particleSystem_.emit(
-                {
-                    static_cast<float>(destination.x) + 0.5f,
-                    static_cast<float>(destination.y) + 0.5f,
-                    static_cast<float>(destination.z) +
-                        config::mirrorSwapSmokeElevation,
-                },
-                witchSwapParticleEffect_);
-        }
-    }
-    for (GridPosition3 cell : gameplayResult.crystalPuffs) {
-        particleSystem_.emit(
-            { static_cast<float>(cell.x) + 0.5f,
-              static_cast<float>(cell.y) + 0.5f,
-              static_cast<float>(cell.z) + 0.4f },
-            crystalChangeParticleEffect_);
-    }
-    if (input.gameplay.undoPressed || input.gameplay.undoDown || input.gameplay.restartPressed) {
-        turretFlames_.reset();
-    }
-    turretFlames_.update(level_, gameplaySession_.state(),
-        gameplaySession_.readingLectern() ? 0.0f : dt, &presentation_);
-    for (const GameplayLoop::UpdateResult::TurretShotPresentation& shot :
-         gameplayResult.turretShots) {
-        turretFlames_.triggerShot(shot.shot, shot.impactDelaySeconds);
-        presentation_.triggerTurretShot(
-            shot.shot.turret.id,
-            shot.shot.direction);
-    }
-    for (const auto sound : gameplayResult.sounds) {
-        audioSystem_->playOneShot(soundSetName(sound));
-    }
+    presentGameplayEffects(level_, gameplaySession_, presentation_, particleSystem_,
+        turretFlames_, gameplayResult, input.gameplay, dt);
 #if SOKOBAN_ENABLE_DEBUG_UI
     if (gameplayResult.draftSolved) {
         tools_->levelEditor.markDraftSolved();
@@ -1696,25 +1951,87 @@ void Application::update(
         checkpointCurrentScreen(true);
     }
 
+    updateGameplayAudio(dt, gameplaySession_, presentation_);
+    audioSystem_->playMusicForLevel(
+        campaign_.inOverworld() ? 0 : campaign_.currentLevel(),
+        gameplaySession_.activeHeroCharacter());
+}
+
+void Application::presentGameplayEffects(const Level& level, const GameplaySession& session,
+    GameplayPresentation& presentation, ParticleSystem& particles,
+    TurretFlameSystem& turretFlames, const GameplayLoop::UpdateResult& result,
+    const GameplayLoop::InputFrame& input, float dt)
+{
+    if (result.mirrorActivated) {
+        audioSystem_->playOneShot("mirror-swap");
+        for (GridPosition3 destination :
+             result.mirrorSwapDestinations) {
+            particles.emit(
+                {
+                    static_cast<float>(destination.x) + 0.5f,
+                    static_cast<float>(destination.y) + 0.5f,
+                    static_cast<float>(destination.z) +
+                        config::mirrorSwapSmokeElevation,
+                },
+                mirrorSwapParticleEffect_);
+        }
+    }
+    if (result.witchSwapped) {
+        for (GridPosition3 destination :
+             result.witchSwapDestinations) {
+            particles.emit(
+                {
+                    static_cast<float>(destination.x) + 0.5f,
+                    static_cast<float>(destination.y) + 0.5f,
+                    static_cast<float>(destination.z) +
+                        config::mirrorSwapSmokeElevation,
+                },
+                witchSwapParticleEffect_);
+        }
+    }
+    for (GridPosition3 cell : result.crystalPuffs) {
+        particles.emit(
+            { static_cast<float>(cell.x) + 0.5f,
+              static_cast<float>(cell.y) + 0.5f,
+              static_cast<float>(cell.z) + 0.4f },
+            crystalChangeParticleEffect_);
+    }
+    if (input.undoPressed || input.undoDown || input.restartPressed) {
+        turretFlames.reset();
+    }
+    turretFlames.update(level, session.state(), session.readingLectern() ? 0.0f : dt,
+        &presentation);
+    for (const GameplayLoop::UpdateResult::TurretShotPresentation& shot :
+         result.turretShots) {
+        turretFlames.triggerShot(shot.shot, shot.impactDelaySeconds);
+        presentation.triggerTurretShot(
+            shot.shot.turret.id,
+            shot.shot.direction);
+    }
+    for (const auto sound : result.sounds) {
+        audioSystem_->playOneShot(soundSetName(sound));
+    }
+}
+
+void Application::updateGameplayAudio(float dt, const GameplaySession& session,
+    const GameplayPresentation& presentation)
+{
     bool playerMoving = false;
     bool pushing = false;
     for (const GameplayPresentation::PlayerVisual& player :
-         presentation_.players()) {
+         presentation.players()) {
         playerMoving |= player.motion.moving;
         pushing |= player.motion.moving &&
             (player.animationUse == AnimationUse::PlayerPush ||
                 player.animationUse == AnimationUse::PlayerPull);
     }
     const bool minecartMoving = std::ranges::any_of(
-        presentation_.minecarts(), [](const auto& cart) { return cart.moving; });
+        presentation.minecarts(), [](const auto& cart) { return cart.moving; });
     const bool elevatorMoving = std::ranges::any_of(
-        presentation_.elevators(), [](const auto& elevator) { return elevator.moving; });
+        presentation.elevators(), [](const auto& elevator) { return elevator.moving; });
     audioSystem_->update(dt, playerMoving, pushing, minecartMoving, elevatorMoving,
-        AtmosphericAudio::listenerPosition(gameplaySession_.state(), presentation_,
-            gameplaySession_.activeHeroController()));
-    audioSystem_->playMusicForLevel(
-        campaign_.inOverworld() ? 0 : campaign_.currentLevel(),
-        gameplaySession_.activeHeroCharacter());
+        AtmosphericAudio::listenerPosition(session.state(), presentation,
+            session.activeHeroController()));
 }
 
 void Application::loadCurrentScreen()
@@ -2338,6 +2655,9 @@ void Application::executeShellCommand(const ShellCommand& command)
             makerOpen_ = true;
         },
         [&](const shell::CloseMaker&) {
+            if (makerPlaytest_) returnToMaker();
+            if (makerDraftDialog_) closeMakerDraftDialog();
+            blurNativeTextInput();
             makerSession_->endStroke();
             makerOpen_ = false;
             makerViewport_.reset();
@@ -2367,6 +2687,8 @@ void Application::executeShellCommand(const ShellCommand& command)
                     apply.settings));
         },
         [&](const shell::RequestQuitConfirmation&) {
+            if (makerDraftDialog_) makerDraftDialog_->inputAction = {};
+            blurNativeTextInput();
             optionsMenu_.requestQuitConfirmation();
         },
         [&](const shell::Quit&) { running_ = false; },
@@ -2456,10 +2778,14 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
         .optionsOpen = optionsMenu_.isOpen(),
         .titleOpen = titleScreen_.isOpen(),
         .makerOpen = makerOpen_,
-        .lecternOpen = gameplaySession_.readingLectern().has_value() && !shellMenuOpen(),
+        .makerPlaying = makerPlaytest_.has_value(),
+        .lecternOpen = makerPlaytest_
+            ? makerPlaytest_->session.readingLectern().has_value()
+            : gameplaySession_.readingLectern().has_value() && !shellMenuOpen(),
         .keyboardCaptured = renderer_.wantsKeyboardCapture(),
         .mouseCaptured = renderer_.wantsMouseCapture(),
-        .nativeTextEditing = optionsMenuView_.controlsSearchFocused(optionsMenu_.state()),
+        .nativeTextEditing = nativeTextFocused(),
+        .makerDialogOpen = makerDraftDialog_.has_value(),
     };
 #if SOKOBAN_ENABLE_DEBUG_UI
     context.editorEditing = tools_->levelEditor.editingDocument();
@@ -3253,11 +3579,52 @@ RenderFrameData Application::buildGroundRimEvidenceFrame(FrameArena& arena) cons
     return frame;
 }
 
+RenderFrameData Application::buildMakerPlaytestFrame(FrameArena& arena)
+{
+    auto& playtest = *makerPlaytest_;
+    const auto& level = playtest.level;
+    const auto& session = playtest.session;
+    const auto& presentation = playtest.presentation;
+    const GameState projectedState = session.projectedState();
+    const auto& activation = session.activationPreview(level);
+    const auto& projectedActivation = session.activationPreview(level, true);
+    RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = assetManifest_,
+        .level = level,
+        .state = session.state(),
+        .activeHeroController = session.activeHeroController(),
+        .moving = session.moving(),
+        .projectedState = projectedState,
+        .presentation = presentation,
+        .settings = presentationSettings_,
+        .animations = &animationCatalog_,
+        .conveyorBeltScrollOffset = presentation.conveyorBeltScrollOffset(
+            session.stepDurationSeconds()),
+        .cameraPitchDegrees = presentation.cameraPitchDegrees(),
+        .cameraYawDegrees = presentation.cameraYawDegrees(),
+        .cachedActivationPreviews = true,
+        .activationPreview = activation ? &*activation : nullptr,
+        .projectedActivationPreview = session.moving() && projectedActivation
+            ? &*projectedActivation : nullptr,
+        .invalidMirrorBeams = session.invalidMirrorBeams(level),
+        .projectedInvalidMirrorBeams = session.invalidMirrorBeams(level, true),
+        .invalidMirrorEntities = session.invalidMirrorPreview(level).entities,
+        .projectedInvalidMirrorEntities = session.invalidMirrorPreview(level, true).entities,
+        .groundGeometryCache = &playtest.groundGeometry,
+    }, arena);
+    playtest.particles.appendRenderData(frame);
+    playtest.turretFlames.appendRenderData(frame, turretParticleEffects_);
+    return frame;
+}
+
 RenderFrameData Application::buildRenderFrame(
     const InputRouter::EditorInput& editorInput)
 {
     (void)editorInput;
     FrameArena& arena = beginRenderFrameArena();
+    if (makerPlaytest_) {
+        return buildMakerPlaytestFrame(arena);
+    }
     if (ui_.drawData().sceneViewport && makerSession_) {
         RenderFrameData frame = RenderFrameBuilder::buildEditor({
             .manifest = assetManifest_,

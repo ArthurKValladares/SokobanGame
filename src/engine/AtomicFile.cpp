@@ -1,5 +1,7 @@
 #include "engine/AtomicFile.hpp"
 
+#include "engine/PathText.hpp"
+
 #include <cerrno>
 #include <fstream>
 #include <mutex>
@@ -58,7 +60,7 @@ std::optional<ReplaceFailureForTesting> takeReplaceFailureForTesting()
 {
     throw std::system_error(
         std::make_error_code(error),
-        "test-injected replace failure " + path.string());
+        "test-injected replace failure " + pathText(path));
 }
 
 void maybeFailWriteForTesting(const std::filesystem::path& path)
@@ -78,7 +80,7 @@ void maybeFailWriteForTesting(const std::filesystem::path& path)
     }
     throw std::system_error(
         std::make_error_code(*failure),
-        "test-injected write failure " + path.string());
+        "test-injected write failure " + pathText(path));
 }
 #else
 void maybeFailWriteForTesting(const std::filesystem::path&)
@@ -95,7 +97,7 @@ void maybeFailWriteForTesting(const std::filesystem::path&)
     throw std::system_error(
         static_cast<int>(GetLastError()),
         std::system_category(),
-        std::string(operation) + " " + path.string());
+        std::string(operation) + " " + pathText(path));
 }
 
 void syncFile(const std::filesystem::path& path)
@@ -118,7 +120,7 @@ void syncFile(const std::filesystem::path& path)
         throw std::system_error(
             static_cast<int>(error),
             std::system_category(),
-            "cannot synchronize " + path.string());
+            "cannot synchronize " + pathText(path));
     }
     if (!CloseHandle(handle)) {
         throwWindowsError("cannot close synchronized file", path);
@@ -147,7 +149,7 @@ void installReplacement(
     throw std::system_error(
         error,
         std::generic_category(),
-        std::string(operation) + " " + path.string());
+        std::string(operation) + " " + pathText(path));
 }
 
 void syncDescriptor(
@@ -192,7 +194,7 @@ void installReplacement(
     if (error) {
         throw std::system_error(
             error,
-            "cannot replace " + destination.string());
+            "cannot replace " + pathText(destination));
     }
 }
 
@@ -239,29 +241,30 @@ void write(
     const std::filesystem::path& destination,
     std::string_view contents)
 {
-    const std::filesystem::path temporary = destination.string() + ".tmp";
+    std::filesystem::path temporary = destination;
+    temporary += ".tmp";
     std::error_code cleanupError;
     std::filesystem::remove(temporary, cleanupError);
     if (cleanupError) {
         throw std::system_error(
             cleanupError,
-            "cannot remove stale temporary file " + temporary.string());
+            "cannot remove stale temporary file " + pathText(temporary));
     }
 
     try {
         std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
         if (!stream) {
-            throw std::runtime_error("cannot open " + temporary.string());
+            throw std::runtime_error("cannot open " + pathText(temporary));
         }
         maybeFailWriteForTesting(temporary);
         stream.write(contents.data(), static_cast<std::streamsize>(contents.size()));
         stream.flush();
         if (!stream) {
-            throw std::runtime_error("cannot flush " + temporary.string());
+            throw std::runtime_error("cannot flush " + pathText(temporary));
         }
         stream.close();
         if (!stream) {
-            throw std::runtime_error("cannot close " + temporary.string());
+            throw std::runtime_error("cannot close " + pathText(temporary));
         }
         replace(destination, temporary);
     } catch (...) {

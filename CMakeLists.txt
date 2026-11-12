@@ -537,6 +537,7 @@ add_library(sokoban_core STATIC
     src/engine/DecorationGizmo.cpp
     src/engine/DecorationMeshCatalog.cpp
     src/engine/EditorInteraction.cpp
+    src/engine/FileLock.cpp
     src/engine/FrameArena.cpp
     src/engine/GameplayPresentation.cpp
     src/engine/GameplayLoop.cpp
@@ -551,6 +552,7 @@ add_library(sokoban_core STATIC
     src/engine/OverworldSplatTiling.cpp
     src/engine/OverworldView.cpp
     src/engine/LevelEditor.cpp
+    src/engine/MakerDraftStore.cpp
     src/engine/MakerSession.cpp
     src/engine/LevelProjectStore.cpp
     src/engine/LevelAssetAssociations.cpp
@@ -1500,6 +1502,11 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME maker_session
         LIBS sokoban_core
         SOURCES tests/MakerSessionTests.cpp
+    )
+    sokoban_add_test(NAME maker_draft_store
+        LIBS sokoban_core
+        SOURCES tests/MakerDraftStoreTests.cpp
+        DEFINITIONS SOKOBAN_ENABLE_TEST_HOOKS=1
     )
     if(SOKOBAN_ENABLE_DEVELOPER_TOOLS AND NOT SOKOBAN_HEADLESS_TESTS_ONLY)
         sokoban_add_test(NAME level_editor_debug_ui

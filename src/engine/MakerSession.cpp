@@ -1,14 +1,18 @@
 #include "engine/MakerSession.hpp"
 
 #include "engine/EditorInteraction.hpp"
+#include "engine/MakerDraftStore.hpp"
 
+#include <algorithm>
 #include <cstddef>
+#include <stdexcept>
+#include <utility>
 
 namespace sokoban {
 
 MakerSession::MakerSession()
 {
-    editor_.newDocument(10, 8, false);
+    editor_.newDocument(defaultDraftWidth, defaultDraftHeight, false);
     const auto historyLimits = editor_.historyLimits();
     editor_.setHistoryLimits({ .maxRecords = 0 });
     (void)editor_.beginStroke();
@@ -23,6 +27,7 @@ MakerSession::MakerSession()
     editor_.endStroke();
     editor_.setHistoryLimits(historyLimits);
     editor_.setSelectedTile(TileType::Wall);
+    editor_.markDraftSaved();
 }
 
 void MakerSession::setTool(Tool tool)
@@ -60,14 +65,143 @@ bool MakerSession::undo()
 {
     endStroke();
     status_.clear();
-    return editor_.tryUndoEdit();
+    if (!editor_.tryUndoEdit()) return false;
+    updateUnsavedChanges();
+    return true;
 }
 
 bool MakerSession::redo()
 {
     endStroke();
     status_.clear();
-    return editor_.tryRedoEdit();
+    if (!editor_.tryRedoEdit()) return false;
+    updateUnsavedChanges();
+    return true;
+}
+
+bool MakerSession::newDraft(uint32_t width, uint32_t height)
+{
+    if (width < minDraftDimension || width > maxDraftDimension ||
+        height < minDraftDimension || height > maxDraftDimension) {
+        status_ = "Board width and height must be between " +
+            std::to_string(minDraftDimension) + " and " + std::to_string(maxDraftDimension) + ".";
+        return false;
+    }
+
+    replaceDraft({ .layers = {
+        std::vector<std::string>(height, std::string(width, tileTypeToChar(TileType::Ground))),
+        std::vector<std::string>(height, std::string(width, tileTypeToChar(TileType::Air))),
+    } }, {});
+    editor_.setActiveLayer(1);
+    status_ = "Created new draft";
+    return true;
+}
+
+std::size_t MakerSession::resizeTileLossCount(uint32_t width, uint32_t height) const
+{
+    if (width >= editor_.documentWidth() && height >= editor_.documentHeight()) {
+        return 0;
+    }
+
+    const char air = tileTypeToChar(TileType::Air);
+    std::size_t count = 0;
+    for (const auto& layer : editor_.documentLayers()) {
+        for (std::size_t y = 0; y < layer.size(); ++y) {
+            const std::string_view row = layer[y];
+            const auto kept = y < height ? std::min<std::size_t>(width, row.size()) : 0;
+            count += static_cast<std::size_t>(std::ranges::count_if(row.substr(kept),
+                [air](char tile) { return tile != air; }));
+        }
+    }
+    count += static_cast<std::size_t>(std::ranges::count_if(editor_.coveredPlates(),
+        [width, height](const Level::Plate& plate) {
+            return std::cmp_greater_equal(plate.cell.x, width) ||
+                std::cmp_greater_equal(plate.cell.y, height);
+        }));
+    return count;
+}
+
+bool MakerSession::resizeDraft(uint32_t width, uint32_t height, bool allowCrop)
+{
+    const auto currentWidth = editor_.documentWidth();
+    const auto currentHeight = editor_.documentHeight();
+    const auto maxWidth = std::max(maxDraftDimension, currentWidth);
+    const auto maxHeight = std::max(maxDraftDimension, currentHeight);
+    if (width < minDraftDimension || width > maxWidth ||
+        height < minDraftDimension || height > maxHeight) {
+        status_ = "Board width must be between " + std::to_string(minDraftDimension) +
+            " and " + std::to_string(maxWidth) + ", and height between " +
+            std::to_string(minDraftDimension) + " and " + std::to_string(maxHeight) + " tiles.";
+        return false;
+    }
+    if (width == currentWidth && height == currentHeight) {
+        return true;
+    }
+    if (!allowCrop && resizeTileLossCount(width, height) != 0) {
+        status_ = "Shrinking to this size would remove tiles.";
+        return false;
+    }
+
+    endStroke();
+    editor_.resizeDocument(static_cast<int>(width), static_cast<int>(height));
+    updateUnsavedChanges();
+    status_ = "Resized board";
+    return true;
+}
+
+MakerSession::SaveDraftResult MakerSession::saveDraft(
+    const MakerDraftStore& store, std::string_view name, bool overwrite)
+{
+    endStroke();
+    try {
+        std::string savedName(name);
+        store.save(savedName, editor_.documentDefinition(), overwrite);
+        editor_.markDraftSaved();
+        draftName_ = std::move(savedName);
+        unsavedChanges_ = false;
+        status_ = "Saved draft";
+        return SaveDraftResult::Saved;
+    } catch (const MakerDraftStore::NameExists& error) {
+        status_ = error.what();
+        return SaveDraftResult::NameExists;
+    } catch (const std::exception& error) {
+        status_ = error.what();
+        return SaveDraftResult::Failed;
+    }
+}
+
+bool MakerSession::loadDraft(const MakerDraftStore& store, std::string_view name)
+{
+    try {
+        replaceDraft(store.load(name), std::string(name));
+        status_ = "Loaded draft";
+        return true;
+    } catch (const std::exception& error) {
+        status_ = error.what();
+        return false;
+    }
+}
+
+void MakerSession::replaceDraft(Level::Definition definition, std::string name)
+{
+    editor_.loadDraft(std::move(definition));
+    draftName_ = std::move(name);
+    unsavedChanges_ = false;
+    strokeChanged_ = false;
+    lastCell_.reset();
+    visited_.clear();
+}
+
+std::optional<Level> MakerSession::buildPlaytestLevel()
+{
+    endStroke();
+    status_.clear();
+    try {
+        return editor_.documentToLevel();
+    } catch (const std::runtime_error& error) {
+        status_ = error.what();
+        return std::nullopt;
+    }
 }
 
 std::optional<GridPosition3> MakerSession::previewCell(GridPosition cell) const
@@ -113,13 +247,22 @@ bool MakerSession::continueStroke(std::optional<GridPosition> cell)
         changed = visitCell(*cell);
     }
     lastCell_ = cell;
+    strokeChanged_ |= changed;
     return changed;
 }
 
 bool MakerSession::endStroke()
 {
     lastCell_.reset();
-    return editor_.endStroke();
+    strokeChanged_ = false;
+    const bool changed = editor_.endStroke();
+    if (changed) updateUnsavedChanges();
+    return changed;
+}
+
+void MakerSession::updateUnsavedChanges()
+{
+    unsavedChanges_ = editor_.dirty();
 }
 
 bool MakerSession::visitCell(GridPosition cell)

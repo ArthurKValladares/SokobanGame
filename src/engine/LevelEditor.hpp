@@ -167,6 +167,10 @@ public:
     // and its document-local undo history.
     [[nodiscard]] bool openDocument(const std::filesystem::path& path);
     [[nodiscard]] bool loadDocument(const std::filesystem::path& path, bool recordHistory = true);
+    // Adopt a parsed, standalone draft even when it is still unplayable.
+    void loadDraft(Level::Definition definition);
+    // Track the saved contents of a standalone draft without binding a path.
+    void markDraftSaved();
     [[nodiscard]] SaveResult saveDocument(const std::filesystem::path& path);
     // The loaded file changed outside the editor (a text editor, a merge).
     // Reloads it when there are no unsaved edits, and clears the history,
@@ -533,6 +537,7 @@ private:
     void recordDocumentChange(std::optional<DocumentVersion> before);
     [[nodiscard]] static std::size_t snapshotStorageBytes(const DocumentVersion& snapshot);
     [[nodiscard]] static std::size_t recordStorageBytes(const EditActionRecord& record);
+    void installDocument(Level::Definition definition, const std::filesystem::path& path);
     static void clearHistory(EditHistory& history);
     void trimHistory();
     bool setCellWithRotation(GridPosition3 position, TileType tile, uint32_t quarterTurns);

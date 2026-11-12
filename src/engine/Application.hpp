@@ -18,6 +18,7 @@
 #include "engine/Input.hpp"
 #include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
+#include "engine/MakerDraftStore.hpp"
 #include "engine/MakerSession.hpp"
 #include "engine/LevelTransition.hpp"
 #include "engine/LevelCatalog.hpp"
@@ -39,12 +40,15 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <future>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #ifndef SOKOBAN_ENABLE_DEBUG_UI
@@ -233,7 +237,24 @@ private:
         const InputRouter::Frame& routedInput, [[maybe_unused]] float dt);
     void drawMakerWorkspace(Vec2 viewport, const InputRouter::Frame& input,
         std::optional<Vec2> wheelPosition);
+    void openMakerDraftDialog(MakerDraftDialogMode mode, std::string_view name = {});
+    void closeMakerDraftDialog();
+    void handleMakerDraftDialogAction(const MakerDraftDialogAction& action);
+    void startMakerPlaytest();
+    void returnToMaker();
+    void updateMakerPlaytest(float dt, const InputRouter::Frame& input);
+    [[nodiscard]] RenderFrameData buildMakerPlaytestFrame(FrameArena& arena);
+    void drawLecternDialog(LecternDialog& dialog, const Level& level,
+        GridPosition3 cell, Vec2 viewport);
+    void presentGameplayEffects(const Level& level, const GameplaySession& session,
+        GameplayPresentation& presentation, ParticleSystem& particles,
+        TurretFlameSystem& turretFlames, const GameplayLoop::UpdateResult& result,
+        const GameplayLoop::InputFrame& input, float dt);
+    void updateGameplayAudio(float dt, const GameplaySession& session,
+        const GameplayPresentation& presentation);
     [[nodiscard]] bool handleNativeTextInputEvent(const SDL_Event& event);
+    [[nodiscard]] bool nativeTextFocused() const;
+    void blurNativeTextInput();
     void updateNativeTextInput();
     // The end of a smoke run, if this frame is the one that ends it.
     void finishSmokeRunIfDue(std::uint64_t renderedFrames);
@@ -374,7 +395,28 @@ private:
     // stays before renderer_ so its first surface sees the configured window.
     OptionsMenuView optionsMenuView_;
     MakerView makerView_;
+    MakerDraftStore makerDraftStore_ { saveSlots_.directory() / "maker-drafts" };
     std::optional<MakerSession> makerSession_;
+    struct MakerDraftDialog {
+        MakerDraftDialogMode mode;
+        std::vector<std::string> names;
+        std::string pendingName;
+        std::string error;
+        MakerDraftDialogAction inputAction;
+        std::size_t removedTileCount = 0;
+    };
+    std::optional<MakerDraftDialog> makerDraftDialog_;
+    struct MakerPlaytest {
+        Level level;
+        GameplaySession session;
+        GameplayPresentation presentation;
+        GroundGeometryCache groundGeometry;
+        ParticleSystem particles;
+        TurretFlameSystem turretFlames;
+        LecternDialog lecternDialog;
+        bool solved = false;
+    };
+    std::optional<MakerPlaytest> makerPlaytest_;
     std::optional<UiRect> makerViewport_;
     std::optional<GridPosition3> makerHover_;
     bool makerOpen_ = false;

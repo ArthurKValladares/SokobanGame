@@ -1,6 +1,7 @@
 #include "engine/ui/UiTextEdit.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <iterator>
 #include <utility>
 
@@ -106,6 +107,26 @@ std::size_t byteOffset(
 }
 
 } // namespace
+
+bool matchesSearchTerms(std::string_view label, std::string_view query)
+{
+    const auto caseInsensitive = [](unsigned char left, unsigned char right) {
+        return std::tolower(left) == std::tolower(right);
+    };
+    while (!query.empty()) {
+        const auto first = query.find_first_not_of(" \t");
+        if (first == std::string_view::npos) {
+            break;
+        }
+        query.remove_prefix(first);
+        const std::string_view term = query.substr(0, query.find_first_of(" \t"));
+        if (std::ranges::search(label, term, caseInsensitive).empty()) {
+            return false;
+        }
+        query.remove_prefix(term.size());
+    }
+    return true;
+}
 
 UiTextEdit::UiTextEdit(std::size_t maxBytes)
     : maxBytes_(maxBytes)

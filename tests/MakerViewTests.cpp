@@ -1,12 +1,15 @@
 #include "TestHarness.hpp"
 
+#include "engine/MakerSession.hpp"
 #include "engine/ui/FontAtlas.hpp"
 #include "engine/ui/MakerView.hpp"
+#include "engine/ui/UiTextEdit.hpp"
 
 #include <algorithm>
 #include <array>
 #include <filesystem>
 #include <iostream>
+#include <vector>
 
 namespace {
 
@@ -35,6 +38,13 @@ void testBoardStaysOpen(const FontAtlas& font)
         CHECK(!intersects(layout.board, layout.footer));
         ui.beginFrame(viewport, UiPointerInput {});
         (void)view.draw(ui, layout, {});
+        ui.endFrame();
+        CHECK(std::ranges::none_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
+            return intersects(command.rect, layout.board) &&
+                (!command.clip || intersects(*command.clip, layout.board));
+        }));
+        ui.beginFrame(viewport, UiPointerInput {});
+        CHECK(view.drawPlaytest(ui, layout, false) == MakerCommand::None);
         ui.endFrame();
         CHECK(std::ranges::none_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
             return intersects(command.rect, layout.board) &&
@@ -132,6 +142,424 @@ void testDisplayScale(const FontAtlas& font)
     if (shiftedGoal) CHECK(firstGoal->position.y - shiftedGoal->position.y == 52.0f * scale);
 }
 
+std::vector<Vec2> visibleTileSwatches(const UiContext& ui, const MakerLayout& layout)
+{
+    std::vector<Vec2> result;
+    for (const auto& command : ui.drawData().commands) {
+        if (command.kind != UiDrawKind::Solid ||
+            command.rect.size != Vec2 { 16.0f, 16.0f } * layout.scale) {
+            continue;
+        }
+        const Vec2 center = command.rect.position + command.rect.size * 0.5f;
+        if (ui.contains(layout.palette, center) && command.clip && ui.contains(*command.clip, center)) {
+            result.push_back(center);
+        }
+    }
+    return result;
+}
+
+void testPlaytestControls(const FontAtlas& font)
+{
+    TEST("makerTestPlayAndReturnPreservePaletteSearch");
+    constexpr Vec2 viewport { 1280.0f, 960.0f };
+    constexpr float scale = 2.0f;
+    const MakerLayout layout = MakerView::layout(viewport, scale);
+    UiContext ui(font);
+    MakerView view;
+    const auto drawEditor = [&](UiPointerInput pointer = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto action = view.draw(ui, layout, {});
+        ui.endFrame();
+        return action.command;
+    };
+    const auto drawTest = [&](UiPointerInput pointer = {}, bool solved = false) {
+        ui.beginFrame(viewport, pointer);
+        const auto action = view.drawPlaytest(ui, layout, solved);
+        ui.endFrame();
+        return action;
+    };
+    const Vec2 testPlay { viewport.x - 166.0f * scale, 31.0f * scale };
+    const Vec2 returnToMaker { viewport.x - 100.0f * scale, 31.0f * scale };
+    const Vec2 board = layout.board.position + layout.board.size * 0.5f;
+
+    CHECK(drawEditor() == MakerCommand::None);
+    CHECK(view.focusTileSearch());
+    auto* edit = view.activeTextEdit();
+    CHECK(edit != nullptr);
+    if (!edit) return;
+    CHECK(edit->insert("wall"));
+    CHECK(drawEditor({ .position = testPlay, .down = true, .pressedAt = testPlay }) == MakerCommand::None);
+    CHECK(drawEditor({ .position = board, .releasedAt = board }) == MakerCommand::None);
+    CHECK(drawEditor({ .position = testPlay, .pressedAt = testPlay, .releasedAt = testPlay }) ==
+        MakerCommand::TestPlay);
+
+    CHECK(drawTest() == MakerCommand::None);
+    CHECK(!view.tileSearchFocused() && !view.focusTileSearch());
+    CHECK(visibleTileSwatches(ui, layout).empty());
+    CHECK(drawTest({ .position = board, .down = true, .pressedAt = board }) == MakerCommand::None);
+    CHECK(drawTest({ .position = returnToMaker, .releasedAt = returnToMaker }) == MakerCommand::None);
+    CHECK(drawTest({ .position = returnToMaker, .pressedAt = returnToMaker, .releasedAt = returnToMaker }, true) ==
+        MakerCommand::ReturnToMaker);
+
+    CHECK(drawEditor() == MakerCommand::None);
+    CHECK(view.focusTileSearch());
+    CHECK(edit->text() == "wall");
+    CHECK(visibleTileSwatches(ui, layout).size() == 2);
+}
+
+void testPaletteSearchFiltersWithinGroups(const FontAtlas& font)
+{
+    TEST("makerPaletteSearchFiltersWithinGroups");
+    constexpr Vec2 viewport { 1280.0f, 900.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    const auto draw = [&](UiPointerInput pointer = {}, MakerViewInput input = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto action = view.draw(ui, layout, {}, input);
+        ui.endFrame();
+        return action;
+    };
+
+    (void)draw();
+    const auto unfiltered = visibleTileSwatches(ui, layout);
+    CHECK(view.focusTileSearch());
+    auto* edit = view.activeTextEdit();
+    CHECK(edit != nullptr);
+    if (!edit) return;
+    CHECK(edit->insert("Wa"));
+    (void)draw();
+    const auto prefix = visibleTileSwatches(ui, layout);
+    CHECK(prefix.size() > 2 && prefix.size() < unfiltered.size());
+
+    edit->setComposition("Ll", 2, 0);
+    (void)draw();
+    CHECK(visibleTileSwatches(ui, layout) == prefix);
+    CHECK(edit->insert("Ll"));
+    (void)draw();
+    const auto walls = visibleTileSwatches(ui, layout);
+    CHECK(walls.size() == 2);
+    if (walls.size() != 2) return;
+
+    const auto headingGlyph = [&](const UiDrawCommand& command) {
+        return command.kind == UiDrawKind::FontGlyph && command.fontSize == 15.0f * layout.scale &&
+            command.clip && intersects(*command.clip, layout.palette);
+    };
+    // The first match still belongs to Basics, the second to Terrain. No
+    // heading is emitted for groups without a matching tile.
+    CHECK(std::ranges::count_if(ui.drawData().commands, [&](const auto& command) {
+        return headingGlyph(command) && command.rect.position.y < walls[0].y;
+    }) == 6);
+    CHECK(std::ranges::count_if(ui.drawData().commands, [&](const auto& command) {
+        return headingGlyph(command) && command.rect.position.y >= walls[0].y &&
+            command.rect.position.y < walls[1].y;
+    }) == 7);
+    CHECK(std::ranges::count_if(ui.drawData().commands, headingGlyph) == 13);
+
+    const auto activatedWhileEditing = draw({}, { .navigation = { .activate = true } });
+    CHECK(!activatedWhileEditing.tile && activatedWhileEditing.command == MakerCommand::None);
+    view.blurTileSearch();
+    CHECK(draw({ .position = walls[0], .pressedAt = walls[0], .releasedAt = walls[0] }).tile ==
+        TileType::Wall);
+    CHECK(draw({ .position = walls[1], .pressedAt = walls[1], .releasedAt = walls[1] }).tile ==
+        TileType::CliffWall);
+
+    CHECK(view.focusTileSearch());
+    edit->setText("sTrEaM waTER");
+    (void)draw();
+    const auto stream = visibleTileSwatches(ui, layout);
+    CHECK(stream.size() == 1);
+    if (stream.size() == 1) {
+        view.blurTileSearch();
+        CHECK(draw({ .position = stream[0], .pressedAt = stream[0], .releasedAt = stream[0] }).tile ==
+            TileType::StreamUp);
+    }
+
+    CHECK(view.focusTileSearch());
+    edit->setText("zzzz");
+    (void)draw();
+    CHECK(visibleTileSwatches(ui, layout).empty());
+    const auto caret = view.textCaret();
+    CHECK(std::ranges::any_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
+        return command.kind == UiDrawKind::FontGlyph && command.rect.position.y > caret.position.y + caret.size.y &&
+            command.clip && intersects(*command.clip, layout.palette);
+    }));
+    edit->setText("");
+    (void)draw();
+    CHECK(visibleTileSwatches(ui, layout) == unfiltered);
+}
+
+void testPaletteSearchPressOwnsGesture(const FontAtlas& font)
+{
+    TEST("makerPaletteSearchPressOwnsGesture");
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    const auto draw = [&](UiPointerInput pointer = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto action = view.draw(ui, layout, {});
+        CHECK(!action.tile && action.command == MakerCommand::None);
+        CHECK(!ui.dragPosition("maker.board", layout.board));
+        ui.endFrame();
+    };
+
+    (void)draw();
+    CHECK(view.focusTileSearch());
+    (void)draw();
+    const auto caret = view.textCaret();
+    CHECK(caret.size.y > 0.0f);
+    const Vec2 press = caret.position + Vec2 { 3.0f, 3.0f };
+    view.blurTileSearch();
+    CHECK(!view.tileSearchFocused() && !view.activeTextEdit());
+    CHECK(view.handleTileSearchPress(ui, press, false));
+    auto* edit = view.activeTextEdit();
+    CHECK(edit != nullptr);
+    if (!edit) return;
+
+    CHECK(edit->insert("Pa"));
+    const auto typedCaret = edit->caret();
+    draw({ .position = press, .down = true, .pressedAt = press });
+    CHECK(edit->caret() == typedCaret);
+    const Vec2 board = layout.board.position + layout.board.size * 0.5f;
+    draw({ .position = board, .releasedAt = board });
+    CHECK(view.tileSearchFocused());
+    CHECK(view.handleTileSearchPress(ui, board, false));
+    CHECK(!view.tileSearchFocused() && !view.activeTextEdit());
+    CHECK(edit->text() == "Pa");
+}
+
+void testDraftSaveDialog(const FontAtlas& font)
+{
+    TEST("makerSaveDialogUsesNativeTextAndOwnsInput");
+    using Command = MakerDraftDialogAction::Command;
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    constexpr Vec2 toolbarSave { 300.0f, 31.0f };
+    constexpr Vec2 toolbarLoad { 374.0f, 31.0f };
+    constexpr Vec2 dialogSave { 500.0f, 318.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    const auto click = [](Vec2 at) {
+        return UiPointerInput { .position = at, .pressedAt = at, .releasedAt = at };
+    };
+    const auto editor = [&](Vec2 at) {
+        ui.beginFrame(viewport, click(at));
+        const auto action = view.draw(ui, layout, {});
+        ui.endFrame();
+        return action.command;
+    };
+    const auto dialog = [&](UiPointerInput pointer = {}, MakerViewInput input = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto editorAction = view.draw(ui, layout, {}, { .interactive = false });
+        CHECK(editorAction.command == MakerCommand::None && !editorAction.tile);
+        const auto action = view.drawDraftDialog(ui, viewport, layout.scale, {}, input);
+        ui.endFrame();
+        return action;
+    };
+    CHECK(editor(toolbarSave) == MakerCommand::Save);
+    CHECK(editor(toolbarLoad) == MakerCommand::Load);
+
+    view.beginDraftDialog(MakerDraftDialogMode::Save);
+    auto* edit = view.activeDraftNameEdit();
+    CHECK(view.draftNameFocused() && edit);
+    if (!edit) return;
+    CHECK(dialog({}, { .navigation = { .activate = true } }).command == Command::None);
+    CHECK(edit->insert("Oak"));
+    const auto activated = dialog({}, { .navigation = { .activate = true } });
+    CHECK(activated.command == Command::Submit && activated.name == "Oak");
+    CHECK(dialog(click(toolbarLoad)).command == Command::None);
+    CHECK(!view.draftNameFocused());
+
+    view.beginDraftDialog(MakerDraftDialogMode::Save, "Oak");
+    CHECK(edit->selectedText() == "Oak");
+    CHECK(edit->insert("Oak and Ivy"));
+    edit->setComposition("!", 1, 0);
+    CHECK(view.submitDraftName().command == Command::None);
+    edit->clearComposition();
+    CHECK(view.submitDraftName().name == "Oak and Ivy");
+    CHECK(dialog().command == Command::None);
+    const auto caret = view.draftNameCaret();
+    CHECK(caret.size.y > 0.0f);
+    view.blurDraftName();
+    CHECK(view.handleDraftNamePress(ui, caret.position + Vec2 { 0.0f, 1.0f }, false));
+    CHECK(view.activeDraftNameEdit() == edit);
+    const auto clicked = dialog(click(dialogSave));
+    CHECK(clicked.command == Command::Submit && clicked.name == "Oak and Ivy");
+}
+
+void testDraftLoadDialog(const FontAtlas& font)
+{
+    TEST("makerLoadDialogScrollsAndConfirmsByName");
+    using Command = MakerDraftDialogAction::Command;
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    std::vector<std::string> drafts;
+    for (int i = 0; i < 18; ++i) drafts.push_back("Draft " + std::to_string(i + 1));
+    UiContext ui(font);
+    MakerView view;
+    const auto draw = [&](const MakerDraftDialogState& state, UiPointerInput pointer = {},
+                          MakerViewInput input = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto action = view.drawDraftDialog(ui, viewport, 1.0f, state, input);
+        ui.endFrame();
+        return action;
+    };
+    view.beginDraftDialog(MakerDraftDialogMode::Load);
+    CHECK(!view.draftNameFocused());
+    const MakerDraftDialogState list { .mode = MakerDraftDialogMode::Load, .names = drafts };
+    CHECK(draw(list).command == Command::None);
+    constexpr Vec2 secondRow { 110.0f, 148.0f };
+    constexpr Vec2 loadButton { 500.0f, 419.0f };
+    CHECK(draw(list, { .position = secondRow, .pressedAt = secondRow, .releasedAt = secondRow }).command ==
+        Command::None);
+    const auto load = draw(list, { .position = loadButton, .pressedAt = loadButton, .releasedAt = loadButton });
+    CHECK(load.command == Command::Submit && load.name == drafts[1]);
+
+    view.beginDraftDialog(MakerDraftDialogMode::Load);
+    for (int i = 0; i < 13; ++i) {
+        CHECK(draw(list, {}, { .navigation = { .next = true } }).command == Command::None);
+    }
+    const auto fromScroll = draw(list, {}, { .navigation = { .activate = true } });
+    CHECK(fromScroll.command == Command::Submit && fromScroll.name == drafts[13]);
+
+    for (const auto mode : { MakerDraftDialogMode::Overwrite, MakerDraftDialogMode::Discard }) {
+        view.beginDraftDialog(mode);
+        const MakerDraftDialogState confirmation { .mode = mode, .pendingName = drafts[13] };
+        CHECK(draw(confirmation, {}, { .navigation = { .activate = true } }).command == Command::Cancel);
+        CHECK(draw(confirmation, {}, { .navigation = { .next = true } }).command == Command::None);
+        const auto confirm = draw(confirmation, {}, { .navigation = { .activate = true } });
+        CHECK(confirm.command == Command::Submit && confirm.name == drafts[13]);
+    }
+}
+
+void testNewDraftDialog(const FontAtlas& font)
+{
+    TEST("makerNewDraftSelectsBoardSizeAndSafelyConfirms");
+    using Command = MakerDraftDialogAction::Command;
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    const auto click = [](Vec2 position) {
+        return UiPointerInput { .position = position, .pressedAt = position, .releasedAt = position };
+    };
+    constexpr Vec2 toolbarNewDraft { 214.0f, 31.0f };
+    ui.beginFrame(viewport, click(toolbarNewDraft));
+    CHECK(view.draw(ui, layout, {}).command == MakerCommand::NewDraft);
+    ui.endFrame();
+
+    const auto draw = [&](MakerDraftDialogMode mode, UiPointerInput pointer = {}, UiNavigation navigation = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto editor = view.draw(ui, layout, {}, { .interactive = false });
+        CHECK(editor.command == MakerCommand::None && !editor.tile);
+        const auto action = view.drawDraftDialog(ui, viewport, layout.scale, { .mode = mode }, { .navigation = navigation });
+        ui.endFrame();
+        return action;
+    };
+    constexpr auto picker = MakerDraftDialogMode::NewDraft;
+    constexpr auto discard = MakerDraftDialogMode::DiscardNew;
+    constexpr Vec2 widthUp { 537.0f, 182.0f };
+    constexpr Vec2 heightDown { 453.0f, 229.0f };
+    constexpr Vec2 create { 500.0f, 341.0f };
+    view.beginDraftDialog(picker);
+    CHECK(!view.draftNameFocused());
+    CHECK(draw(picker, click(toolbarNewDraft)).command == Command::None);
+    CHECK(draw(picker, click(widthUp)).command == Command::None);
+    CHECK(draw(picker, click(heightDown)).command == Command::None);
+    const auto requested = draw(picker, click(create));
+    CHECK(requested.command == Command::Submit);
+    CHECK(requested.width == MakerSession::defaultDraftWidth + 1);
+    CHECK(requested.height == MakerSession::defaultDraftHeight - 1);
+
+    view.beginDraftDialog(discard);
+    CHECK(draw(discard, {}, { .activate = true }).command == Command::Cancel);
+    view.resumeBoardSizeDialog();
+    const auto resumed = draw(picker, {}, { .activate = true });
+    CHECK(resumed.command == Command::Submit);
+    CHECK(resumed.width == requested.width && resumed.height == requested.height);
+
+    view.beginDraftDialog(discard);
+    CHECK(draw(discard, {}, { .next = true }).command == Command::None);
+    const auto confirmed = draw(discard, {}, { .activate = true });
+    CHECK(confirmed.command == Command::Submit);
+    CHECK(confirmed.width == requested.width && confirmed.height == requested.height);
+
+    view.beginDraftDialog(picker);
+    CHECK(draw(picker, {}, { .next = true, .activate = true }).command == Command::None);
+    CHECK(draw(picker, {}, { .next = true }).command == Command::None);
+    CHECK(draw(picker, {}, { .next = true }).command == Command::None);
+    CHECK(draw(picker, {}, { .next = true, .activate = true }).command == Command::None);
+    const auto keyboard = draw(picker, click(create));
+    CHECK(keyboard.command == Command::Submit);
+    CHECK(keyboard.width == MakerSession::defaultDraftWidth - 1);
+    CHECK(keyboard.height == MakerSession::defaultDraftHeight + 1);
+
+    constexpr Vec2 widthSliderEnd { 414.0f, 181.0f };
+    CHECK(draw(picker, click(widthSliderEnd)).command == Command::None);
+    CHECK(draw(picker, click(widthUp)).command == Command::None);
+    const auto maximum = draw(picker, click(create));
+    CHECK(maximum.command == Command::Submit);
+    CHECK(maximum.width == MakerSession::maxDraftDimension);
+}
+
+void testResizeBoardDialog(const FontAtlas& font)
+{
+    TEST("makerResizeBoardKeepsSizeThroughCropConfirmation");
+    using Command = MakerDraftDialogAction::Command;
+    constexpr auto resize = MakerDraftDialogMode::ResizeBoard;
+    constexpr auto crop = MakerDraftDialogMode::ConfirmCrop;
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    const auto click = [](Vec2 position) {
+        return UiPointerInput { .position = position, .pressedAt = position, .releasedAt = position };
+    };
+    constexpr Vec2 compactResize { 568.0f, 69.0f };
+    ui.beginFrame(viewport, click(compactResize));
+    CHECK(view.draw(ui, layout, {}).command == MakerCommand::ResizeBoard);
+    ui.endFrame();
+
+    constexpr Vec2 wideViewport { 1440.0f, 900.0f };
+    ui.beginFrame(wideViewport, click({ 881.0f, 31.0f }));
+    CHECK(view.draw(ui, MakerView::layout(wideViewport), {}).command == MakerCommand::ResizeBoard);
+    ui.endFrame();
+
+    const auto draw = [&](MakerDraftDialogMode mode, UiPointerInput pointer = {}, UiNavigation navigation = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto editor = view.draw(ui, layout, {}, { .interactive = false });
+        CHECK(editor.command == MakerCommand::None && !editor.tile);
+        const auto action = view.drawDraftDialog(ui, viewport, layout.scale,
+            { .mode = mode, .removedTileCount = 9 }, { .navigation = navigation });
+        ui.endFrame();
+        return action;
+    };
+    view.beginResizeBoardDialog(70, 12);
+    CHECK(!view.draftNameFocused());
+    const auto initial = draw(resize, {}, { .activate = true });
+    CHECK(initial.command == Command::Submit);
+    CHECK(initial.width == 70 && initial.height == 12);
+    CHECK(draw(resize, click({ 537.0f, 167.0f })).command == Command::None);
+    CHECK(draw(resize, click({ 453.0f, 167.0f })).command == Command::None);
+    CHECK(draw(resize, click({ 537.0f, 213.0f })).command == Command::None);
+    const auto requested = draw(resize, click({ 500.0f, 354.0f }));
+    CHECK(requested.command == Command::Submit);
+    CHECK(requested.width == 69 && requested.height == 13);
+
+    view.beginDraftDialog(crop);
+    CHECK(draw(crop, {}, { .activate = true }).command == Command::Cancel);
+    view.resumeBoardSizeDialog();
+    const auto resumed = draw(resize, {}, { .activate = true });
+    CHECK(resumed.command == Command::Submit);
+    CHECK(resumed.width == requested.width && resumed.height == requested.height);
+
+    view.beginDraftDialog(crop);
+    CHECK(draw(crop, {}, { .next = true }).command == Command::None);
+    const auto confirmed = draw(crop, {}, { .activate = true });
+    CHECK(confirmed.command == Command::Submit);
+    CHECK(confirmed.width == requested.width && confirmed.height == requested.height);
+}
+
 } // namespace
 
 int main()
@@ -141,6 +569,13 @@ int main()
     testBoardStaysOpen(font);
     testPalettePointerOwnership(font);
     testDisplayScale(font);
+    testPlaytestControls(font);
+    testPaletteSearchFiltersWithinGroups(font);
+    testPaletteSearchPressOwnsGesture(font);
+    testDraftSaveDialog(font);
+    testDraftLoadDialog(font);
+    testNewDraftDialog(font);
+    testResizeBoardDialog(font);
     std::cout << "MakerViewTests: " << checks - failures << " of " << checks
               << " checks passed\n";
     return failures != 0 ? 1 : 0;

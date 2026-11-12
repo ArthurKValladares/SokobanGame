@@ -11,7 +11,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -714,26 +713,6 @@ void appendAudioRows(
     };
 }
 
-bool matchesControlsFilter(std::string_view label, std::string_view query)
-{
-    const auto caseInsensitive = [](unsigned char left, unsigned char right) {
-        return std::tolower(left) == std::tolower(right);
-    };
-    while (!query.empty()) {
-        const auto first = query.find_first_not_of(" \t");
-        if (first == std::string_view::npos) {
-            break;
-        }
-        query.remove_prefix(first);
-        const std::string_view term = query.substr(0, query.find_first_of(" \t"));
-        if (std::ranges::search(label, term, caseInsensitive).empty()) {
-            return false;
-        }
-        query.remove_prefix(term.size());
-    }
-    return true;
-}
-
 // The gameplay bindings page.
 void appendControlsRows(
     FrameArray<OptionsMenuRow>& rows, const OptionsMenuState& state)
@@ -747,7 +726,7 @@ void appendControlsRows(
     });
     for (const auto& binding : orderedActionDefinitions) {
         if (binding.group != InputActionGroup::Controls ||
-            !matchesControlsFilter(binding.label, state.controlsFilter)) continue;
+            !matchesSearchTerms(binding.label, state.controlsFilter)) continue;
         rows.push_back({
             .id = rowForAction(binding.action),
             .kind = OptionsMenuRowKind::Binding,
@@ -793,7 +772,7 @@ void appendEditorControlsRows(
     });
     for (const auto& binding : orderedActionDefinitions) {
         if (binding.group != editorActionGroup(state.editorControlsSection) ||
-            !matchesControlsFilter(binding.label, state.controlsFilter)) {
+            !matchesSearchTerms(binding.label, state.controlsFilter)) {
             continue;
         }
         rows.push_back({

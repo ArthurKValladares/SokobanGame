@@ -97,7 +97,12 @@ InputRouter::BackAction InputRouter::backAction(
     if (!input.actionPressed(InputAction::MenuBack)) {
         return BackAction::None;
     }
-    if (context.nativeTextEditing || context.makerOpen) return BackAction::ShellBack;
+    if (context.nativeTextEditing) return BackAction::ShellBack;
+    if (context.makerPlaying) {
+        return context.lecternOpen && !context.optionsOpen
+            ? BackAction::None : BackAction::ShellBack;
+    }
+    if (context.makerOpen) return BackAction::ShellBack;
     if (context.lecternOpen) return BackAction::None;
     if (context.draftExitConfirmationOpen) {
         return BackAction::CloseDraftConfirmation;
@@ -120,20 +125,23 @@ InputRouter::Frame InputRouter::routeFrame(
     const bool left = input.actionPressed(InputAction::MoveLeft);
     const bool right = input.actionPressed(InputAction::MoveRight);
     const bool confirm = input.actionPressed(InputAction::MenuConfirm);
-    const bool shellOpen = context.optionsOpen || context.titleOpen || context.makerOpen;
-    const bool gameplayActive = !shellOpen &&
-        !context.editorEditing &&
-        !context.draftExitConfirmationOpen &&
-        !context.nativeTextEditing;
+    const bool makerActive = context.makerOpen || context.makerPlaying;
+    const bool shellOpen = context.optionsOpen || context.titleOpen || makerActive;
+    const bool gameplayActive = !context.nativeTextEditing &&
+        (context.makerPlaying
+            ? !context.optionsOpen
+            : !shellOpen && !context.editorEditing && !context.draftExitConfirmationOpen);
 
     Frame frame;
     if (gameplayActive) {
         frame.showTopDownView =
             input.actionDown(InputAction::ShowTopDownView);
-        frame.showOverworldMap =
-            input.actionDown(InputAction::ShowOverworldMap);
-        frame.previewScreen =
-            input.actionDown(InputAction::PreviewScreen);
+        if (!context.makerPlaying) {
+            frame.showOverworldMap =
+                input.actionDown(InputAction::ShowOverworldMap);
+            frame.previewScreen =
+                input.actionDown(InputAction::PreviewScreen);
+        }
         frame.gameplay = {
             .up = buttonState(input, InputAction::MoveUp),
             .down = buttonState(input, InputAction::MoveDown),
@@ -147,14 +155,17 @@ InputRouter::Frame InputRouter::routeFrame(
             .dismissPressed = input.actionPressed(InputAction::MenuBack),
         };
     }
-    if (context.titleOpen && !context.optionsOpen && !context.makerOpen &&
+    if (context.titleOpen && !context.optionsOpen && !makerActive &&
         !context.nativeTextEditing) {
         frame.title = { up, down, left, right, confirm };
     }
     if (context.optionsOpen && !context.nativeTextEditing) {
         frame.options = { up, down, left, right, confirm };
     }
-    if (context.makerOpen && !context.optionsOpen && !context.nativeTextEditing) {
+    const bool makerDialogGamepad = context.makerDialogOpen &&
+        input.activeDevice() == ActiveInputDevice::Gamepad;
+    if (context.makerOpen && !context.makerPlaying && !context.optionsOpen &&
+        (!context.nativeTextEditing || makerDialogGamepad)) {
         frame.maker = {
             .previous = up || left,
             .next = down || right,

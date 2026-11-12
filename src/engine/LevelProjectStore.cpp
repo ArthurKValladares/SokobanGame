@@ -3,6 +3,7 @@
 #include "engine/ContentPipeline.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/AtomicFile.hpp"
+#include "engine/FileLock.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/OverworldMap.hpp"
@@ -11,7 +12,6 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <cerrno>
 #include <fstream>
 #include <stdexcept>
 #include <string_view>
@@ -21,10 +21,6 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#else
-#include <fcntl.h>
-#include <sys/file.h>
-#include <unistd.h>
 #endif
 
 namespace sokoban {
@@ -280,70 +276,10 @@ struct Publication {
     bool hadOriginal = false;
 };
 
-// An OS lock is released if an editor or build process terminates. Keep the
-// lock file in place so concurrent openers always synchronize on the same file.
-class PublicationLock {
-public:
-    explicit PublicationLock(const fs::path& projectRoot)
-    {
-        const fs::path path = workingPath(projectRoot, ".editor-transaction.lock");
-        if (fs::is_symlink(path)) {
-            throw std::runtime_error("invalid editor publication lock: " + path.string());
-        }
-        fs::create_directories(path.parent_path());
-#ifdef _WIN32
-        handle_ = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (handle_ == INVALID_HANDLE_VALUE) {
-            throw std::system_error(static_cast<int>(GetLastError()),
-                std::system_category(), "cannot open editor publication lock");
-        }
-        OVERLAPPED offset {};
-        if (!LockFileEx(handle_, LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &offset)) {
-            const auto error = GetLastError();
-            CloseHandle(handle_);
-            throw std::system_error(static_cast<int>(error),
-                std::system_category(), "cannot lock editor publication");
-        }
-#else
-        handle_ = open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
-        if (handle_ == -1) {
-            throw std::system_error(errno, std::generic_category(),
-                "cannot open editor publication lock");
-        }
-        int result;
-        do {
-            result = flock(handle_, LOCK_EX);
-        } while (result == -1 && errno == EINTR);
-        if (result == -1) {
-            const int error = errno;
-            close(handle_);
-            throw std::system_error(error, std::generic_category(),
-                "cannot lock editor publication");
-        }
-#endif
-    }
-
-    ~PublicationLock()
-    {
-#ifdef _WIN32
-        CloseHandle(handle_);
-#else
-        close(handle_);
-#endif
-    }
-
-    PublicationLock(const PublicationLock&) = delete;
-    PublicationLock& operator=(const PublicationLock&) = delete;
-
-private:
-#ifdef _WIN32
-    HANDLE handle_ = INVALID_HANDLE_VALUE;
-#else
-    int handle_ = -1;
-#endif
-};
+fs::path publicationLockPath(const fs::path& projectRoot)
+{
+    return workingPath(projectRoot, ".editor-transaction.lock");
+}
 
 fs::path normalizedDestination(const fs::path& path)
 {
@@ -501,14 +437,14 @@ LevelProjectStore::Result publishProject(
     const std::optional<LevelProjectStore::ManifestTransaction>& manifest)
 {
     fs::path projectRoot;
-    std::optional<PublicationLock> lock;
+    std::optional<FileLock> lock;
     std::vector<Publication> files;
     bool originalsKnown = false;
     bool stagesOwned = false;
     bool committed = false;
     try {
         projectRoot = normalizedDestination(requestedProject);
-        lock.emplace(projectRoot);
+        lock.emplace(publicationLockPath(projectRoot), "editor publication");
         (void)recoverJournal(projectRoot);
         originalsKnown = true;
         if (manifest && manifest->runtimePath && !runtimeRoot) {
@@ -653,7 +589,7 @@ void LevelProjectStore::recover(const std::filesystem::path& projectRoot)
 {
     const fs::path project = normalizedDestination(projectRoot);
     if (fs::exists(journalPath(project))) {
-        const PublicationLock lock(project);
+        const FileLock lock(publicationLockPath(project), "editor publication");
         (void)recoverJournal(project);
     }
 }

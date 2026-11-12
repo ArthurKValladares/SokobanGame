@@ -161,6 +161,18 @@ std::pair<uint32_t, uint32_t> padToRectangle(Level::Definition& definition)
     return { width, height };
 }
 
+void expandLegacyPlayerStarts(Level::Definition& definition)
+{
+    const CharacterType character = definition.character.value_or(CharacterType::Rogue);
+    const TileType concrete = startTileForCharacter(character);
+    for (auto& layer : definition.layers) {
+        for (auto& row : layer) {
+            std::ranges::replace(row, tileTypeToChar(TileType::Player), tileTypeToChar(concrete));
+        }
+    }
+    definition.character.reset();
+}
+
 // Gates, rotators, elevators and minecarts share one record shape: the device's cell,
 // the pressure plates that drive it and its color. In the editor the plate
 // lists stay empty (links come from colors, see linkedDefinition); these
@@ -4145,18 +4157,7 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
         definition = Level::parseDefinition(rows, path.string());
         const bool overworld = overworldScreenIdForPath(path).has_value();
         if (!overworld) {
-            const CharacterType character =
-                definition.character.value_or(CharacterType::Rogue);
-            const TileType concrete = startTileForCharacter(character);
-            for (std::vector<std::string>& layer : definition.layers) {
-                for (std::string& row : layer) {
-                    std::ranges::replace(
-                        row,
-                        tileTypeToChar(TileType::Player),
-                        tileTypeToChar(concrete));
-                }
-            }
-            definition.character.reset();
+            expandLegacyPlayerStarts(definition);
         }
         if (overworld) {
             // The complete composed map validates the single Player tile
@@ -4171,6 +4172,38 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
         return false;
     }
 
+    installDocument(std::move(definition), path);
+    if (recordHistory) {
+        recordDocumentChange(std::move(before));
+    }
+    return true;
+}
+
+void LevelEditor::loadDraft(Level::Definition definition)
+{
+    expandLegacyPlayerStarts(definition);
+    const int layer = document_.activeLayer;
+    installDocument(std::move(definition), {});
+    pendingMove_.reset();
+    strokeBefore_.reset();
+    strokeChanges_ = 0;
+    decorationTransformBefore_.reset();
+    draftOverworldMap_.reset();
+    setActiveLayer(layer);
+    clearHistory(editHistory_);
+    clearHistory(redoHistory_);
+    markDraftSaved();
+}
+
+void LevelEditor::markDraftSaved()
+{
+    if (document_.loadedPath.empty()) {
+        noteSavedDocument({});
+    }
+}
+
+void LevelEditor::installDocument(Level::Definition definition, const std::filesystem::path& path)
+{
     const auto [width, height] = padToRectangle(definition);
     const LinkColoring coloring = colorLinks(definition);
 
@@ -4200,10 +4233,12 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     document_.requestedHeight = static_cast<int>(height);
     document_.requestedWidth = static_cast<int>(width);
     document_.activeLayer = 0;
-    noteSavedDocument(path);
+    if (!path.empty()) {
+        noteSavedDocument(path);
+    }
     document_.playingDraft = false;
     document_.editingDocument = true;
-    document_.status = "Loaded " + path.string();
+    document_.status = path.empty() ? "Loaded draft" : "Loaded " + path.string();
     if (coloring.regrouped) {
         document_.status +=
             ". Some pressure plates drove devices with different plate "
@@ -4213,10 +4248,6 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
         document_.status +=
             ". Gave its link groups distinct colors; the links are unchanged.";
     }
-    if (recordHistory) {
-        recordDocumentChange(std::move(before));
-    }
-    return true;
 }
 
 bool LevelEditor::reloadFromDisk()

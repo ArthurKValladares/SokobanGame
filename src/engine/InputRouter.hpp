@@ -43,6 +43,7 @@ public:
         bool optionsOpen = false;
         bool titleOpen = false;
         bool makerOpen = false;
+        bool makerPlaying = false;
         bool editorEditing = false;
         bool tilePlacementReady = false;
         bool decorationPlacementReady = false;
@@ -53,6 +54,7 @@ public:
         bool keyboardCaptured = false;
         bool mouseCaptured = false;
         bool nativeTextEditing = false;
+        bool makerDialogOpen = false;
         // The pointer is over the game viewport with no active widget,
         // text input, popup or modal. Passive palette focus may still set
         // keyboardCaptured until the next viewport click.
