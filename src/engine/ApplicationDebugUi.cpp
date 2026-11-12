@@ -1082,10 +1082,8 @@ if (ImGui::CollapsingHeader("Rendering Stats")) {
 
 } // namespace
 
-ApplicationDebugUi::Result ApplicationDebugUi::draw(
-    const Context& context) const
+void ApplicationDebugUi::draw(const Context& context) const
 {
-    Result result;
 #if SOKOBAN_ENABLE_DEBUG_UI
     const GameState& state = context.gameplaySession.state();
     const GameState::Player& primaryPlayer = state.players.front();
@@ -1187,9 +1185,6 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
                 ? ", engaged"
                 : "");
     }
-    ImGui::BeginDisabled(context.inOverworld);
-    result.solveCurrentScreen = ImGui::Button("Solve Current Screen");
-    ImGui::EndDisabled();
     ImGui::Text(
         "Task workers %u, tasks run %llu",
         taskSystem().workerCount(),
@@ -1309,7 +1304,6 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
 #else
     (void)context;
 #endif
-    return result;
 }
 
 } // namespace sokoban

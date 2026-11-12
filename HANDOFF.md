@@ -12,7 +12,7 @@ Sokoban 3D is a C++20, SDL3, Vulkan 1.3 project. Runtime content is declared by
 
 Gameplay includes six puzzle hero types, pushable mirrors and copies, linked movable
 objects, portals, buttons, persistent levers, rotators, lock plates, elevators, minecarts, and
-lecterns. Rules, replay and solver search share the production action planner.
+lecterns. Gameplay and solution replay share the production action planner.
 Developer builds expose transactional level/asset/animation editors, live tuning,
 shader reload, profiling and source watching.
 
@@ -374,14 +374,14 @@ and an animated preview are in ignored `out/control-animation/`.
 The October 9 lever addition uses four cardinal edge placements in the
 existing palette submenu. Activate toggles each lever occupied by a living
 hero; its on signal persists across movement and later steps. Lever state is
-included in deltas, checkpoints, profiles, solver identity and solution replay.
+included in deltas, checkpoints, profiles and solution replay.
 Existing profile states and format-2 recordings without `activeLevers` read as
 all levers off. The optimized `dev-fast-all` and Debug game builds pass with
 warnings-as-errors. Across the full optimized run and the corrected reflection
 fixture rerun, 106 of 108 suites pass; the two existing ground-rendering failures
 described below remain. The lever regressions cover persistent signals, mixed
 linked devices, reflection eligibility, concurrency, undo/restart, profile
-round trips, recorded solutions, solver search, render model selection,
+round trips, recorded solutions, render model selection,
 preloading and all four editor placements. Both 900-frame geometry showcases
 complete without dropped draws or queued assets. Four thumbnails and both
 deterministically generated lever models are staged in both game builds.
@@ -745,11 +745,11 @@ and the required real-device checks are recorded.
   it and every slide, conveyor and enemy reaction to settle before the next
   one, so recordings do not depend on frame timing. The driver uses the same
   `GameplaySession` planner/scheduler as the game but advances directly between
-  mechanical completion boundaries; never reintroduce presentation-frame work
-  into this headless path. The recorder, the
-  automatic in-game saving and `sokoban_solve_level` all go through the
-  same driver. Changing the text format means bumping `format` and
-  re-recording, not migrating.
+  mechanical completion boundaries. Keep this headless path free of
+  presentation-frame work. Developer builds record a player's campaign or
+  draft clear through the same driver. `solution::auditCoverage` replays those
+  files in `solution_replay` without writing to the store. Bump `format` and
+  record fresh playthroughs when the text format changes.
 - `solution::reconcileStore` (`engine/SolutionStore.hpp`) is the only code
   that decides where a recording lives: one `level<L>-screen<S>.solution`
   per current screen holding the shortest run (ties keep the file in
@@ -759,43 +759,9 @@ and the required real-device checks are recorded.
   source level change; jobs run one at a time. It must stay free of game,
   UI and GPU state.
 - `GameplaySession::inputLog()` lists the inputs that started actions since
-  the last restart or restore, for solution recording. `resetToState` exists for
-  the solver and the replay driver only; gameplay code restores snapshots.
-- Reusable solution search lives in `engine/solver/Solver.hpp`; the
-  `sokoban_solve_level` executable owns only level/solution file orchestration.
-  Solver limits use generated states, while its statistics distinguish
-  generated nodes, uniquely expanded canonical positions, duplicate rejection,
-  walking-region work, early-canonicalization work and frontier peaks. State
-  identity is the packed, lossless key in `engine/solver/StateKey.*`; when a
-  `GameState` field is added, update its key and the field-by-field solver test.
-  Walking members of every retained canonical position enter the bounded exact
-  membership cache, allowing later equivalent successors to skip their
-  canonicalization flood; only members reachable from a retained position may
-  enter it. Cache eviction may add work but must never reject a new position.
-  Do not add another unbounded raw-successor set: the retained canonical set is
-  the lossless fallback and grows only to `Options::maxStates`. Search depth
-  counts significant actions, with raw input length used only as a priority
-  tie-breaker. Only best-first search constructs `engine/solver/Heuristic.*`'s
-  relaxed travel graph: ordinary walking, water treated as potentially bridged,
-  open gates and optimistic elevator/minecart transport. Its assignment maps
-  Ends to distinct living heroes. Authored mirrors are movable entities;
-  the obsolete per-cell static-mirror scan and counter have been removed.
-  Screens with movable mirrors or portals retain a zero estimate. Breadth-first
-  search builds no heuristic graph. Best-first uses a weighted estimate for
-  ordering and does not promise a shortest solution. Keep new mechanics
-  conservative unless their relaxed transition is modeled.
-  Significant directional results discovered during a walking flood are
-  already settled production-rule transitions; reuse them rather than running
-  the same input through `solution::Driver` again. Settled mirror previews and
-  hero-controller switches are likewise exact successors. Mirror results with
-  pending automatic motion must continue through the Driver. Local exact-state
-  deduplication happens before canonicalization work, and the
-  solver statistics expose reused, driven, and locally duplicated successors.
-  The former rock-to-plate dead-position analysis was removed: pressure plates
-  drive devices and can be unoccupied at completion, so cardinality,
-  reverse-push matching and frozen-rock proofs cannot reject a position.
-  Every returned solution must
-  still pass through `solution::record`/`solution::Driver` before it is stored.
+  the last restart or restore. Record from the authored start so the input
+  sequence replays against the screen's initial state. Replay fixtures and
+  tests use `resetToState`. Live gameplay restores snapshots.
 - The source watcher (`SourceWatcher`, `Application::serviceSourceWatcher`,
   developer builds) polls stamps every 500 ms and never runs in smoke
   or evidence runs. It writes only into the staged tree and content index,
@@ -848,10 +814,10 @@ and the required real-device checks are recorded.
 - Every unit carries `quarterTurns` (0-3, clockwise). Turret firing direction
   is `rules::turretDirection` (authored tile turned by `quarterTurns`); do not
   read turret direction from the tile type alone. Profiles write the field only
-  when non-zero and read it as optional. The
-  solver key includes it. Solution digests hash rotator links only for screens
-  that have rotators. Gate links and start-open state are also hashed; changing
-  either requires a fresh recording.
+  when non-zero and read it as optional. Replay expectations include it.
+  Solution digests hash rotator links on screens that have rotators. The
+  digest also includes gate links and start-open state. Changing either
+  requires a fresh recording.
 - Plates are the tiles with `TileProperty::Plate`, including pressure plates,
   buttons, levers, rotators, lock plates, portals, rail stops and Ends. New plate kinds get
   the property in the tile table; code asks
@@ -876,20 +842,18 @@ and the required real-device checks are recorded.
   input. Crushed units join the closure finished. A unit with nothing to land
   on stays put (the rule that rejects moves into bottomless columns).
   `startOpen` is written to `@gate` only when true, and solution digests hash
-  it only for start-open gates, so older digests are unchanged. The solver
-  heuristic treats a gate as floor (optimistic).
+  it only for start-open gates, so older digests are unchanged.
 - Live mirrors are movable entities: position and rotation travel in
   `GameState::movables` and `StateDelta::movables`. The cell-keyed
   `turnedMirrors`/`StateDelta::mirrors` path supports static-mirror compatibility.
   Rules resolve orientation through `rules::mirrorTileAt`; callers must use
-  live state for moved mirrors. Heuristics remain optimistic and affect search
-  ordering rather than acceptance.
+  live state for moved mirrors.
 - Completion requires every living hero on an End and every End occupied by a
   hero. Pressure plates drive devices; a rock or mirror on an End cannot satisfy
   completion. Space/Activate pulses all buttons and toggles all levers occupied
   by living heroes, and activates eligible mirrors together. Button pulses
   expire after the next step; lever signals persist until toggled again.
-  Both states belong in deltas, solver identity and replay expectations.
+  Both states belong in deltas and replay expectations.
 - Buttons and levers use N/E/S/W edge placements facing the owning cell's
   center. Button characters are `b`, `y`, `z`, `~`; lever characters are `%`,
   `&`, `[`, `]`. The original Button value, `b`, legacy `Button` plate spelling
@@ -905,9 +869,8 @@ and the required real-device checks are recorded.
   `documentToLevel`. Loading derives colors from the explicit lists
   (`colorLinks`), recoloring legacy groups so links survive a save.
   `Level::LinkColor` (`@linkcolor`) stores only the colors of plates that
-  drive nothing and is never read by gameplay, the solver or solution
-  digests. Gameplay, rules and rendering must keep using the explicit
-  `pressurePlates` lists, never color comparisons.
+  drive nothing. Rules, rendering and solution digests use the explicit
+  `pressurePlates` lists.
 - The level editor's tool cursors (eyedropper while Pick Tile is held, a
   brush tinted with the active link color while Paint Link Color is held)
   are drawn in code (`EditorCursorArt.hpp`) and owned by `ApplicationTools`.
@@ -927,11 +890,10 @@ and the required real-device checks are recorded.
   `Level::tileAt`, because the authored cell is open shaft once the platform
   leaves. A move is all or nothing; a blocked shaft drops the press. Carried
   units join the closure and count as moved for turrets and attacks.
-  `StateDelta::elevators` carries platform changes by index, the solver key
-  appends them only when present, the profile writes `elevators` only when
-  non-empty, and solution digests hash elevator records only
-  for screens that have them. Reservations claim a moving platform's whole
-  shaft (`addElevatorReservations`). Presentation animates platforms as
+  `StateDelta::elevators` carries platform changes by index. The profile
+  writes `elevators` only when non-empty. Solution digests hash elevator
+  records for screens that have them. Reservations claim the full shaft of a
+  moving platform (`addElevatorReservations`). Presentation animates platforms as
   `EntityKind::Elevator` motion tracks; a leg in which a platform moves runs
   longer by its travel time (`config::elevatorSecondsPerLayerPerStep`), riders
   walk first and then ride, and `GameplaySession` takes the longer timeline as

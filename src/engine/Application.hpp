@@ -163,7 +163,6 @@ private:
         bool composedOverworld = false);
     void advanceScreen();
 #if SOKOBAN_ENABLE_DEBUG_UI
-    void solveCurrentScreenForDebug();
     // Level editor draft playback: the Play Draft button, F5 and Shift+F5.
     void startEditorDraft(Level level);
     void playEditorDraft(std::optional<GridPosition3> heroStart);

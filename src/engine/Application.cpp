@@ -359,7 +359,7 @@ Application::Application(ApplicationOptions options)
         for (LevelLocation target : campaign_.overworldTargets()) {
             completedTargets += playerProfile_.screenCompleted(target) ? 1 : 0;
         }
-        const ApplicationDebugUi::Result result = tools_->applicationDebugUi.draw({
+        tools_->applicationDebugUi.draw({
             .currentLevel = campaign_.currentLevel(),
             .currentScreen = campaign_.currentScreen(),
             .inOverworld = campaign_.inOverworld(),
@@ -381,9 +381,6 @@ Application::Application(ApplicationOptions options)
                     settingsCoordinator_.applyAudioSettings(settings, persist));
             },
         });
-        if (result.solveCurrentScreen) {
-            solveCurrentScreenForDebug();
-        }
     });
     DebugUi::addTab("Profiler", [this] {
         tools_->profilerDebugUi.draw(renderer_);
@@ -1633,23 +1630,6 @@ void Application::advanceScreen()
             playerProfile_, moveCount));
     });
 }
-
-#if SOKOBAN_ENABLE_DEBUG_UI
-void Application::solveCurrentScreenForDebug()
-{
-    if (!campaign_.gameLoaded() || tools_->levelEditor.playingDraft()) {
-        return;
-    }
-    if (campaign_.inOverworld()) {
-        return;
-    }
-    const int moveCount = gameplaySession_.playerMoveCount();
-    beginLevelTransition([this, moveCount] {
-        handlePuzzleCompleted(campaign_.completePuzzle(
-            playerProfile_, moveCount, false));
-    });
-}
-#endif
 
 void Application::handlePuzzleCompleted(
     const CampaignSession::PuzzleCompleted& completed)

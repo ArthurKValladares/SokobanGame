@@ -98,9 +98,6 @@ class Driver {
 public:
     explicit Driver(const Level& level);
 
-    // Tools only: continue from an arbitrary idle state (solution search).
-    void resetTo(const GameState& state, EntityId activeHeroController);
-
     // Returns false when the world did not come to rest within the time
     // limit (an endless belt loop, say).
     [[nodiscard]] bool apply(Input input);

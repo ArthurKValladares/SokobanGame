@@ -60,9 +60,8 @@ public:
     };
 
     void reset(const Level& level);
-    // Tools only (solution search): starts from `state` with an empty history,
-    // as though it were the level's opening state. Gameplay never calls this;
-    // checkpoints go through restore(), which validates their history.
+    // Starts a test session from a supplied state with an empty undo history.
+    // Saved checkpoints go through restore(), which validates their history.
     void resetToState(
         const GameState& state, EntityId activeHeroController);
     [[nodiscard]] Snapshot snapshot() const;

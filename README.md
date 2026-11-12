@@ -225,7 +225,7 @@ cmake --build --preset dev        # the game and its content only
 `cmake --build --preset dev-all` also builds the tests, and
 `ctest --preset dev` runs them.
 
-For faster level authoring and in-editor solver work, use `dev-fast`. It builds
+For faster level authoring and playtesting, use `dev-fast`. It builds
 RelWithDebInfo with optimization and debugger symbols, retaining the full editor,
 profiler, live tuning, source-content discovery, and automatic solution recording.
 Vulkan validation is off, and optimized debugging may skip or reorder source
@@ -1427,24 +1427,51 @@ In Visual Studio's Open Folder mode, add arguments with the startup item's
 
 ## Solutions
 
-`solutions/` holds one recorded solution per finished puzzle screen. The
-`solution_replay` test replays each one against the screen whose content
-matches it and fails, naming the step and the first hero, block or enemy
-that went somewhere else, when a rule change breaks a recording. It also
-compares the complete settled gameplay state after every input, naming the
-first differing field, and fails if a recording solves its screen early.
-Missing, stale, malformed, or failing recordings for current finished screens
-fail the suite; all current screens require coverage by default.
+Play each finished campaign screen or editor draft from its authored start.
+Developer builds record the inputs from a successful playthrough automatically.
 
-`solutions/coverage.json` may exempt an unfinished screen with its level and
-screen indices, current gameplay digest, and a nonempty reason. A gameplay edit
-or a removed screen invalidates that exception until it is reviewed. There are
-currently no exceptions: all 25 campaign screens have passing recordings,
-including the minecart puzzle at level 5, screen 2. New finished screens must
-be solved and recorded before merging. The same strict audit runs through
-CTest in every required CI test configuration and never regenerates files.
+1. For a campaign screen, open it through the campaign or launch a developer
+   build with `--level` and `--screen`. Use **Restart** if you resumed from a
+   checkpoint. For a draft, use **Play Draft** or `F5` to start at the authored
+   hero positions.
 
-A file looks like this:
+   ```powershell
+   .\out\dev\Debug\sokoban.exe --level 3 --screen 2
+   ```
+
+2. Beat the screen, allowing slides, conveyors and enemy reactions to settle
+   between inputs. A worker replays your inputs one at a time and saves the run
+   if it verifies and is the first or shorter than the stored run for that
+   content. Check the Log or **Level Editor > Solutions** for the result. Wait
+   for **Saving...** to clear before closing the game.
+3. Review the recorded file in `solutions/` and run the coverage audit before
+   merging.
+
+   ```powershell
+   cmake --build --preset dev --target sokoban_tests
+   ctest --preset dev -R '^solution_replay$' --output-on-failure
+   ```
+
+Finished screens use `solutions/level<L>-screen<S>.solution`. A solved draft
+that has yet to be saved goes to `solutions/drafts/<digest>.solution`, which Git
+ignores. Saving a screen with that content promotes the draft recording.
+The store matches by gameplay digest, so it can move recordings when screens
+are renumbered. When a new recording takes the filename of an older layout,
+the older recording moves to `drafts/` and can return if the layout is
+restored. Smoke and evidence runs leave the store untouched.
+
+The `solution_replay` audit is read-only and runs in the required CI test
+configurations. It fails for missing, stale, malformed, or failing recordings.
+Each replay compares the changes and complete settled state after every input
+and checks that the recording ends at the first solve. A replay mismatch
+identifies the screen, input step, and first differing entity or state field.
+
+For an unfinished screen, `solutions/coverage.json` can exempt missing
+coverage. Each exception names the level and screen, the current gameplay
+digest, and a nonempty reason. A gameplay edit or removal of the screen
+invalidates the exception. A failing replay still fails the audit.
+
+A format-2 recording has this shape.
 
 ```text
 format 2
@@ -1468,101 +1495,8 @@ position, death flags, slide momentum and rotation, mirror turns,
 elevator/minecart positions and phases, button pulses, persistent on-lever
 cells in `activeLevers`, the active hero, and automatic-motion pause state.
 Existing format-2 recordings without `activeLevers` load with every lever off.
-Format 1 is rejected; re-record its inputs
-through the current Driver rather than migrating its old expectations.
-Solutions live outside `levels/` because the content pipeline rejects
-unexpected files there, and they are matched by digest, so renumbering
-screens does not break them. After changing a screen's layout, record it
-again.
-
-Developer builds record every solve automatically. When you solve a campaign
-screen or an editor draft, a worker thread replays your inputs one at a time,
-waiting for each to finish, and stores the run as
-`level<L>-screen<S>.solution` if it is the first recording of that content
-or shorter than the stored one. The Log and **Level Editor > Solutions**
-say what happened. A run that only worked because of real-time timing
-(moving during a slide) does not replay and is not stored.
-
-A solved draft that has not been saved yet is kept in
-`solutions/drafts/<digest>.solution` (ignored by git) and moves into place
-when a screen with that content is saved. When a screen is edited, its old
-recording is parked in `drafts/` once the new layout has a recording, and
-comes back if the edit is undone. Smoke and evidence runs never write here.
-
-`sokoban_solve_level` searches for solutions instead. The `release-all`
-build preset builds it:
-
-```powershell
-.\out\release\tools\Release\sokoban_solve_level.exe levels solutions --level 3 --screen 2 --best-first --max-walking-cache 1000000 --progress-interval 100000
-```
-
-Without `--level` it tries every screen that has no current recording. It
-skips screens whose recording still matches and replays unless given `--overwrite`, and
-stops a screen after `--max-states` (default 2,000,000) generated positions.
-The exact walking-membership cache is limited by `--max-walking-cache`
-(default 1,000,000 keys); zero disables it, while a larger value trades memory
-for fewer repeated canonicalization floods.
-
-After intentionally changing a screen, `--refresh-existing` first tries the
-inputs from its named recording through the current gameplay driver. A run
-that still solves is re-recorded with complete current expectations and
-verified before the file is atomically replaced. Otherwise the tool reports
-why the old inputs failed and searches with the normal state limit. Review
-the regenerated files and run the strict coverage test before committing:
-
-```powershell
-.\out\release\tools\Release\sokoban_solve_level.exe levels solutions --level 3 --screen 2 --refresh-existing --best-first
-cmake --build --preset dev --target sokoban_tests
-ctest --test-dir out\dev -R '^solution_replay$' --output-on-failure
-```
-
-The default breadth-first search minimizes significant state-changing moves,
-not necessarily recorded inputs; `--best-first` is usually much faster on
-large screens but the result may be longer. Final output distinguishes
-generated and expanded positions, duplicate states, early-canonicalization
-floods/walk states, walking-component cache hits/current and peak size,
-evictions, precomputed-versus-driven successors, local successor duplicates,
-and peak frontier size. Solved screens also report their significant
-state-changing move count.
-Only best-first search constructs and evaluates the relaxed travel heuristic;
-breadth-first search leaves heuristic graph and evaluation counters at zero.
-Authored mirrors are movable entities, so the heuristic does not scan for
-static mirror edges. Screens with movable mirrors or portals retain the
-conservative zero-estimate fallback.
-`--progress-interval N` prints the same counters after approximately every N
-generated positions. Use a Release build; the search is slow in Debug.
-
-The search itself is the reusable `engine/solver/Solver.hpp` API. It reports
-solved, exhausted, state-limit and cancelled outcomes separately, accepts an
-optional progress/cancellation callback, and exposes deterministic work
-counters suitable for regression benchmarks and future difficulty grading.
-Search identity is a packed, lossless key over every dynamic gameplay field.
-Every walking state discovered while canonicalizing a retained position enters
-a bounded exact-membership cache, so later walking-equivalent successors can be
-rejected without repeating the flood. When full, the cache discards half its
-entries; a miss can only cause extra work because the retained-position
-canonical set remains lossless and is itself bounded by `maxStates`. There is
-no separate unbounded raw-successor table. New components are canonicalized
-before they can consume retained-node or frontier capacity.
-Best-first depth counts significant actions while raw input length only breaks
-ties, preventing a long harmless walk from outweighing a useful push. Its
-precomputed relaxed graph models walking, potentially bridged water, open
-gates and elevator/minecart transport, then finds a minimum-cost distinct
-assignment of living heroes to Ends. Ordinary settled steps use the production action
-planner directly. State-changing results found during the walking flood are
-reused as successors instead of being simulated a second time, including
-settled mirror previews and hero switches; equivalent raw outcomes from one
-expansion are discarded locally. Automatic ice, conveyor and turret
-consequences still fall back to the full replay driver.
-Pressure-plate feasibility rejects states with too few
-surviving movable units on every level. Classic flat push-only screens also
-precompute reverse-push reachability for each plate, rejecting both rocks on
-cells that cannot reach any plate and sets of rocks that cannot be assigned to
-distinct plates. Paladin-only screens additionally reject permanently sealed 2x2
-groups of rocks and static blockers, while preserving groups whose frozen rocks
-already cover the required plates. Knights are excluded because chain pushes
-can break that pattern. Mechanics that can invalidate either proof disable its
-static portion automatically.
+Format 2 is required. Play through the screen again to replace a legacy
+recording or one invalidated by a gameplay change.
 
 ## Content Pipeline
 
@@ -1688,8 +1622,9 @@ prefetch path as gameplay models.
 ## Architecture
 
 - `src/engine/Rules.*`: pure gameplay rules over `Level` and `GameState`.
-- `src/engine/solver/`: reusable solution search, limits, cancellation, and
-  deterministic search-work statistics; the CLI is only file orchestration.
+- `src/engine/Solution.*`, `SolutionStore.*`, and `SolutionCoverage.*`:
+  deterministic playback and capture, recording placement by gameplay
+  digest, and the campaign coverage audit.
 - `src/engine/GameplaySession.*`: commands, timing, state, and undo history;
   committed actions retain a semantic presentation timeline so undo can replay
   movement and actor animations in their exact reverse order.

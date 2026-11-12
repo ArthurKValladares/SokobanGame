@@ -128,8 +128,7 @@ struct PlayerProfile {
     void recordScreenCompletion(
         LevelLocation location,
         int moves,
-        std::optional<double> completionTimeSeconds,
-        bool recordBests = true);
+        std::optional<double> completionTimeSeconds);
 
     [[nodiscard]] const LevelProgress* progressForLevel(int level) const;
     [[nodiscard]] const ScreenProgress* progressForScreen(

@@ -320,8 +320,7 @@ std::optional<LevelLocation> CampaignSession::resolvePuzzleExit(
 
 CampaignSession::PuzzleCompleted CampaignSession::completePuzzle(
     PlayerProfile& profile,
-    int moveCount,
-    bool recordBests)
+    int moveCount)
 {
     const PlayerProfile::ScreenProgress* progress =
         profile.progressForScreen(current_);
@@ -331,7 +330,7 @@ CampaignSession::PuzzleCompleted CampaignSession::completePuzzle(
         progress ? progress->bestTimeSeconds : std::nullopt;
     const int moves = std::max(moveCount, 0);
     profile.recordScreenCompletion(
-        current_, moves, puzzleElapsedSeconds_, recordBests);
+        current_, moves, puzzleElapsedSeconds_);
     const LevelLocation completedLocation = current_;
     profile.activeScreen.reset();
     profile.worldContext = PlayerProfile::WorldContext::Overworld;
@@ -344,10 +343,9 @@ CampaignSession::PuzzleCompleted CampaignSession::completePuzzle(
         .timeSeconds = puzzleElapsedSeconds_,
         .previousBestMoves = previousBestMoves,
         .previousBestTimeSeconds = previousBestTime,
-        .newBestMoves = recordBests &&
-            (!previousBestMoves || moves < *previousBestMoves),
-        .newBestTime = recordBests &&
-            (!previousBestTime || puzzleElapsedSeconds_ < *previousBestTime),
+        .newBestMoves = !previousBestMoves || moves < *previousBestMoves,
+        .newBestTime = !previousBestTime ||
+            puzzleElapsedSeconds_ < *previousBestTime,
         .gameCompleted = allTargetsCompleted(profile),
         .nextPuzzle = resolvePuzzleExit(profile),
     };

@@ -76,8 +76,7 @@ public:
 
     [[nodiscard]] PuzzleCompleted completePuzzle(
         PlayerProfile& profile,
-        int moveCount,
-        bool recordBests = true);
+        int moveCount);
 
     void addElapsedTime(float dt);
     void writeCheckpoint(

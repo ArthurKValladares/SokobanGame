@@ -16,10 +16,6 @@ class AudioSystem;
 
 class ApplicationDebugUi {
 public:
-    struct Result {
-        bool solveCurrentScreen = false;
-    };
-
     struct Context {
         int currentLevel = 0;
         int currentScreen = 0;
@@ -37,7 +33,7 @@ public:
         std::function<void(PlayerProfile::AudioSettings, bool)> updateAudioSettings;
     };
 
-    [[nodiscard]] Result draw(const Context& context) const;
+    void draw(const Context& context) const;
 };
 
 } // namespace sokoban

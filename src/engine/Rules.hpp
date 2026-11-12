@@ -354,8 +354,7 @@ void setMirrorQuarterTurns(
 // A cell entities may occupy, ignoring movables. The plane directly above the
 // top layer (z == depth) is intentionally allowed so entities can stand on
 // top-layer blocks. Gates and moving-platform cells are treated as potentially
-// passable so static solver estimates remain admissible; gameplay movement uses
-// cellAllowsEntity.
+// passable here. Use cellAllowsEntity for state-aware collision.
 [[nodiscard]] bool staticCellAllowsEntity(const Level& level, GridPosition3 position);
 // State-aware static collision. A Gate cell allows entry only while every
 // pressure plate linked by its authored gate record has a live occupant. An

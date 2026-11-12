@@ -882,11 +882,6 @@ Driver::Driver(const Level& level)
     session_.reset(level_);
 }
 
-void Driver::resetTo(const GameState& state, EntityId activeHeroController)
-{
-    session_.resetToState(state, activeHeroController);
-}
-
 bool Driver::settled() const
 {
     // Pending motion counts only when it can run: after an undo, slides and

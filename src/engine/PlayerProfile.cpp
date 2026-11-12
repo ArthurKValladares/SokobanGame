@@ -153,8 +153,7 @@ const PlayerProfile::LevelProgress* PlayerProfile::progressForLevel(int level) c
 void PlayerProfile::recordScreenCompletion(
     LevelLocation location,
     int moves,
-    std::optional<double> completionTimeSeconds,
-    bool recordBests)
+    std::optional<double> completionTimeSeconds)
 {
     if (location.level < 0 || location.screen < 0 || moves < 0 ||
         (completionTimeSeconds &&
@@ -176,10 +175,10 @@ void PlayerProfile::recordScreenCompletion(
         found = std::prev(screens.end());
     }
     found->completed = true;
-    if (recordBests && (!found->bestMoves || moves < *found->bestMoves)) {
+    if (!found->bestMoves || moves < *found->bestMoves) {
         found->bestMoves = moves;
     }
-    if (recordBests && completionTimeSeconds &&
+    if (completionTimeSeconds &&
         (!found->bestTimeSeconds ||
             *completionTimeSeconds < *found->bestTimeSeconds)) {
         found->bestTimeSeconds = completionTimeSeconds;

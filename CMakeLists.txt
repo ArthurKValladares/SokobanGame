@@ -583,9 +583,6 @@ add_library(sokoban_core STATIC
     src/engine/Solution.cpp
     src/engine/SolutionCoverage.cpp
     src/engine/SolutionStore.cpp
-    src/engine/solver/Heuristic.cpp
-    src/engine/solver/Solver.cpp
-    src/engine/solver/StateKey.cpp
     src/engine/SourceWatcher.cpp
     src/engine/SettingsCoordinator.cpp
     src/engine/SettingsTypes.cpp
@@ -789,16 +786,6 @@ else()
 endif()
 
 target_link_libraries(sokoban_content_tool PRIVATE sokoban_core)
-
-# Searches for puzzle solutions and records them for the solution_replay test.
-# A developer tool: nothing in the build runs it. See README.md > Solutions.
-add_executable(sokoban_solve_level tools/SolveLevel.cpp)
-target_include_directories(sokoban_solve_level PRIVATE src)
-target_link_libraries(sokoban_solve_level PRIVATE sokoban_core)
-set_target_properties(sokoban_solve_level PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tools/$<CONFIG>"
-)
-sokoban_enable_warnings(sokoban_solve_level)
 
 set(SOKOBAN_APPLICATION_SOURCES
     src/main.cpp
@@ -1344,10 +1331,6 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/RulesTests.cpp
     )
-    sokoban_add_test(NAME solver
-        LIBS sokoban_core
-        SOURCES tests/SolverTests.cpp
-    )
     sokoban_add_test(NAME level
         LIBS sokoban_core
         SOURCES tests/LevelTests.cpp
@@ -1761,13 +1744,7 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/SolutionReplayTests.cpp
         DEFINITIONS SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-        DEPENDS sokoban_solve_level
     )
-    add_test(NAME solution_tool COMMAND "${CMAKE_COMMAND}"
-        "-DSOKOBAN_SOLVE_EXECUTABLE=$<TARGET_FILE:sokoban_solve_level>"
-        "-DSOKOBAN_TEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/test-output/solution-tool/$<CONFIG>"
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/VerifySolutionTool.cmake")
-    set_tests_properties(solution_tool PROPERTIES LABELS "solver;content" TIMEOUT 30)
     set(SOKOBAN_SHADER_HOT_RELOAD_TEST_DEFINITIONS)
     if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
         # Also exercises the real compiler when the build has one.

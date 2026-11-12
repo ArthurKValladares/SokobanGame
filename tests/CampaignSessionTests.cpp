@@ -311,26 +311,6 @@ void testAdjacentPuzzlesChainFromSavedSelector()
     CHECK(session.undoCount() == 3);
 }
 
-void testDebugCompletionDoesNotRecordBests()
-{
-    TEST("debugCompletionDoesNotRecordBests");
-    CampaignSession campaign = configuredCampaign();
-    PlayerProfile profile;
-    CHECK(campaign.startPuzzle(profile, { 0, 1 }));
-    campaign.addElapsedTime(4.0f);
-
-    const CampaignSession::PuzzleCompleted completed =
-        campaign.completePuzzle(profile, 5, false);
-    CHECK(!completed.newBestMoves);
-    CHECK(!completed.newBestTime);
-    const PlayerProfile::ScreenProgress* progress =
-        profile.progressForScreen({ 0, 1 });
-    CHECK(progress != nullptr);
-    CHECK(progress->completed);
-    CHECK(!progress->bestMoves.has_value());
-    CHECK(!progress->bestTimeSeconds.has_value());
-}
-
 void testPuzzleOnlyTimingAndDeferredCheckpoint()
 {
     TEST("puzzleOnlyTimingAndDeferredCheckpoint");
@@ -361,7 +341,6 @@ int main()
     testOverworldTopologyCheckpointValidation();
     testIndependentCompletionAndAllTargets();
     testAdjacentPuzzlesChainFromSavedSelector();
-    testDebugCompletionDoesNotRecordBests();
     testPuzzleOnlyTimingAndDeferredCheckpoint();
     } catch (const std::exception& error) {
         std::cerr << "UNCAUGHT: " << error.what() << '\n';
