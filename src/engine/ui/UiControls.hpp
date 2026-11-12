@@ -41,6 +41,13 @@ struct SegmentedControlOptions {
     UiRect rect,
     std::string_view label,
     ButtonOptions options = {});
+[[nodiscard]] bool button(
+    UiContext& ui,
+    const UiInteraction& interaction,
+    UiControlId id,
+    UiRect rect,
+    std::string_view label,
+    ButtonTone tone = ButtonTone::Normal);
 [[nodiscard]] bool slider(
     UiContext& ui,
     std::string_view id,

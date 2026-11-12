@@ -2,9 +2,13 @@
 
 #include "engine/Math.hpp"
 #include "engine/SettingsTypes.hpp"
+#include "engine/ui/UiScroll.hpp"
+#include "engine/ui/UiTextEdit.hpp"
+#include "engine/ui/UiTextField.hpp"
 
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
@@ -121,6 +125,7 @@ struct OptionsMenuState {
         EditorControlsSection::Editing;
     std::optional<InputAction> capturingAction;
     std::optional<int> customRenderScalePreview;
+    std::string controlsFilter;
 
     bool operator==(const OptionsMenuState&) const = default;
 };
@@ -175,6 +180,9 @@ struct SetSlider {
 struct ProvideBinding {
     InputBinding binding;
 };
+struct SetControlsFilter {
+    std::string query;
+};
 
 } // namespace intent
 } // namespace options
@@ -196,7 +204,8 @@ using OptionsMenuIntent = std::variant<
     options::intent::SelectChoice,
     options::intent::SetToggle,
     options::intent::SetSlider,
-    options::intent::ProvideBinding>;
+    options::intent::ProvideBinding,
+    options::intent::SetControlsFilter>;
 
 struct OptionsMenuReduction {
     OptionsMenuState state;
@@ -250,17 +259,52 @@ private:
     OptionsMenuState state_;
 };
 
-// Stateless renderer-facing adapter. It consumes declarative rows and emits
-// semantic intents; it never owns or mutates settings policy.
+struct OptionsMenuViewInput {
+    float wheelY = 0.0f;
+    std::optional<Vec2> wheelPosition;
+    bool revealSelection = false;
+    bool extendTextSelection = false;
+};
+
+// Renderer-facing adapter. Scroll position is presentation state; the
+// authoritative menu and settings still change through semantic intents.
 class OptionsMenuView {
 public:
+    [[nodiscard]] bool focusControlsSearch(const OptionsMenuState& state);
+    [[nodiscard]] bool handleControlsSearchPress(UiContext& ui,
+        const OptionsMenuState& state, Vec2 position, bool extendSelection);
+    void blurControlsSearch();
+    [[nodiscard]] bool controlsSearchFocused(const OptionsMenuState& state) const;
+    [[nodiscard]] UiTextEdit* activeTextEdit(const OptionsMenuState& state);
+    [[nodiscard]] std::optional<std::string_view> controlsSearchQuery(
+        const OptionsMenuState& state) const;
+    [[nodiscard]] UiRect textCaret() const { return textCaret_; }
+
     [[nodiscard]] std::optional<OptionsMenuIntent> draw(
         UiContext& ui,
         Vec2 viewport,
         const OptionsMenuState& state,
         const UserSettings& settings,
         const InputPromptCatalog* inputPrompts = nullptr,
-        const GamepadPresentation* gamepad = nullptr) const;
+        const GamepadPresentation* gamepad = nullptr,
+        OptionsMenuViewInput input = {});
+
+private:
+    void prepareControlsSearch(const OptionsMenuState& state);
+
+    UiTextEdit controlsSearch_ { 128 };
+    UiTextField controlsSearchField_;
+    std::optional<OptionsMenuPage> searchPage_;
+    UiRect searchBounds_;
+    UiRect textCaret_;
+    float searchTextSize_ = 0.0f;
+    bool searchFocused_ = false;
+    bool searchPressHandled_ = false;
+    UiScroll scroll_;
+    std::optional<OptionsMenuPage> scrollPage_;
+    std::string lastControlsFilter_;
+    std::optional<OptionsMenuRowId> lastSelectedRow_;
+    Vec2 lastScrollViewport_ {};
 };
 
 } // namespace sokoban

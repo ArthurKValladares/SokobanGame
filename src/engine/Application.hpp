@@ -31,6 +31,7 @@
 #include "engine/ui/FontAtlas.hpp"
 #include "engine/ui/InputPrompts.hpp"
 #include "engine/ui/OptionsMenu.hpp"
+#include "engine/ui/SdlTextInput.hpp"
 #include "engine/ui/TitleScreen.hpp"
 #include "engine/ui/LecternDialog.hpp"
 
@@ -228,6 +229,8 @@ private:
     // UI is compiled out.
     [[nodiscard]] bool drawUiFrame(
         const InputRouter::Frame& routedInput, [[maybe_unused]] float dt);
+    [[nodiscard]] bool handleNativeTextInputEvent(const SDL_Event& event);
+    void updateNativeTextInput();
     // The end of a smoke run, if this frame is the one that ends it.
     void finishSmokeRunIfDue(std::uint64_t renderedFrames);
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -366,6 +369,7 @@ private:
     // Group small routing states and flags; the initialization barrier above
     // stays before renderer_ so its first surface sees the configured window.
     OptionsMenuView optionsMenuView_;
+    SdlTextInput nativeTextInput_;
     // Pure shell routing; Application executes the commands it emits.
     ShellFlow shellFlow_;
     InputRouter inputRouter_;

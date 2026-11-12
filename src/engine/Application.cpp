@@ -33,6 +33,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 #include <fstream>
 #include <functional>
@@ -46,6 +47,14 @@
 
 namespace sokoban {
 namespace {
+
+Vec2 scaleUiPosition(Vec2 position, Vec2 from, Vec2 to)
+{
+    return {
+        from.x > 0.0f ? position.x * to.x / from.x : position.x,
+        from.y > 0.0f ? position.y * to.y / from.y : position.y,
+    };
+}
 
 template<class Load>
 auto timedAssetStartup(std::string_view phase, Load&& load)
@@ -741,6 +750,60 @@ bool Application::bakeTileThumbnails()
 }
 #endif
 
+void Application::updateNativeTextInput()
+{
+    auto* target = optionsMenuView_.activeTextEdit(optionsMenu_.state());
+    SDL_Rect area {};
+    if (target) {
+        const Vec2 size = window_.size();
+        const Vec2 pixels = window_.sizeInPixels();
+        if (pixels.x > 0.0f && pixels.y > 0.0f) {
+            const UiRect caret = optionsMenuView_.textCaret();
+            const Vec2 position = scaleUiPosition(caret.position, pixels, size);
+            const Vec2 extent = scaleUiPosition(caret.size, pixels, size);
+            area = {
+                static_cast<int>(std::floor(position.x)),
+                static_cast<int>(std::floor(position.y)),
+                std::max(1, static_cast<int>(std::ceil(extent.x))),
+                std::max(1, static_cast<int>(std::ceil(extent.y))),
+            };
+        }
+    }
+    nativeTextInput_.setTarget(window_.nativeHandle(), target, area);
+}
+
+bool Application::handleNativeTextInputEvent(const SDL_Event& event)
+{
+    const auto& options = optionsMenu_.state();
+    if (options.open && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+        event.button.button == SDL_BUTTON_LEFT &&
+        event.button.windowID == SDL_GetWindowID(window_.nativeHandle())) {
+        const Vec2 position = scaleUiPosition({ event.button.x, event.button.y },
+            window_.size(), window_.sizeInPixels());
+        if (optionsMenuView_.handleControlsSearchPress(ui_, options, position,
+                (SDL_GetModState() & SDL_KMOD_SHIFT) != 0)) {
+            updateNativeTextInput();
+        }
+    }
+    if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+        event.key.scancode == SDL_SCANCODE_F &&
+        (event.key.mod & SDL_KMOD_CTRL) != 0 &&
+        (event.key.mod & (SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0) {
+        const auto* target = optionsMenuView_.activeTextEdit(options);
+        if ((!target || target->composition().text.empty()) &&
+            optionsMenuView_.focusControlsSearch(options)) {
+            updateNativeTextInput();
+            return true;
+        }
+    }
+    const auto result = nativeTextInput_.handleEvent(event);
+    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST ||
+        result == SdlTextInputResult::Submit || result == SdlTextInputResult::Blur) {
+        optionsMenuView_.blurControlsSearch();
+    }
+    return result != SdlTextInputResult::Ignored;
+}
+
 // One UI frame: sizes, the pointer mapping, every panel and overlay that can
 // draw, and the ImGui/UI frame that brackets them.
 //
@@ -765,23 +828,20 @@ bool Application::drawUiFrame(
 #else
     constexpr bool developerWorkspaceVisible = false;
 #endif
-    const Vec2 mouse = routedInput.pointer.position;
-    const Vec2 mousePixels {
-        windowSize.x > 0.0f
-            ? mouse.x * pixelSize.x / windowSize.x
-            : mouse.x,
-        windowSize.y > 0.0f
-            ? mouse.y * pixelSize.y / windowSize.y
-            : mouse.y,
+    const auto mapPointer = [&](Vec2 position) {
+        return renderer_.mapPointerToGameViewport(
+            scaleUiPosition(position, windowSize, pixelSize), pixelSize);
     };
-    const Vec2 gameMousePixels = renderer_.mapPointerToGameViewport(
-        mousePixels, pixelSize);
+    const auto mapPointerEdge = [&](std::optional<Vec2> position) -> std::optional<Vec2> {
+        return position ? std::optional { mapPointer(*position) } : std::nullopt;
+    };
 
-    ui_.beginFrame(
-        pixelSize,
-        gameMousePixels,
-        routedInput.pointer.primaryDown,
-        routedInput.pointer.primaryPressed);
+    ui_.beginFrame(pixelSize, {
+        .position = mapPointer(routedInput.pointer.position),
+        .down = routedInput.pointer.primaryDown,
+        .pressedAt = mapPointerEdge(routedInput.pointer.primaryPressedAt),
+        .releasedAt = mapPointerEdge(routedInput.pointer.primaryReleasedAt),
+    });
 
     const auto debugFrameStart = std::chrono::steady_clock::now();
     renderer_.beginDebugUiFrame();
@@ -856,11 +916,18 @@ bool Application::drawUiFrame(
         preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
 #endif
 
-    if (const std::optional<TitleAction> titleAction = titleScreen_.draw(
-            ui_, pixelSize, routedInput.title)) {
+    if (titleScreen_.isOpen() && optionsMenu_.isOpen()) {
+        TitleScreen::drawBackground(ui_, pixelSize);
+    } else if (const std::optional<TitleAction> titleAction = titleScreen_.draw(
+                   ui_, pixelSize, routedInput.title)) {
         handleShellEvent(ShellTitleAction { *titleAction });
     }
 
+    if (const auto query = optionsMenuView_.controlsSearchQuery(optionsMenu_.state());
+        query && *query != optionsMenu_.state().controlsFilter) {
+        (void)optionsMenu_.dispatch(settingsCoordinator_.userSettings(),
+            options::intent::SetControlsFilter { std::string(*query) });
+    }
     if (const std::optional<OptionsAction> optionsAction =
             optionsMenu_.handleInput(
                 settingsCoordinator_.userSettings(),
@@ -876,7 +943,15 @@ bool Application::drawUiFrame(
                 optionsMenu_.state(),
                 settingsCoordinator_.userSettings(),
                 &inputPrompts_,
-                &gamepadPresentation)) {
+                &gamepadPresentation,
+                {
+                    .wheelY = routedInput.pointer.wheel.y,
+                    .wheelPosition = mapPointerEdge(routedInput.pointer.wheelPosition),
+                    .revealSelection = routedInput.options.up ||
+                        routedInput.options.down || routedInput.options.left ||
+                        routedInput.options.right || routedInput.options.confirm,
+                    .extendTextSelection = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0,
+                })) {
         if (const std::optional<OptionsAction> optionsAction =
                 optionsMenu_.dispatch(
                     settingsCoordinator_.userSettings(),
@@ -884,6 +959,7 @@ bool Application::drawUiFrame(
             handleShellEvent(ShellOptionsAction { *optionsAction });
         }
     }
+    updateNativeTextInput();
     drawAssetLoadingOverlay(pixelSize);
 #if SOKOBAN_ENABLE_DEBUG_UI
     tools_->animationPreviewDebugUi.update(dt, renderer_);
@@ -1052,6 +1128,12 @@ bool Application::run()
             SOKOBAN_PROFILE_SCOPE("Application.Events");
             SDL_Event event {};
             while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+                    ui_.cancelPointerInteraction();
+                }
+                if (handleNativeTextInputEvent(event)) {
+                    continue;
+                }
                 renderer_.handleEvent(event);
 #if SOKOBAN_ENABLE_DEBUG_UI
                 const bool detachedCameraConsumed =
@@ -1115,7 +1197,12 @@ bool Application::run()
 #endif
             break;
         case InputRouter::BackAction::ShellBack:
-            handleShellEvent(ShellBackPressed {});
+            if (optionsMenuView_.controlsSearchFocused(optionsMenu_.state())) {
+                optionsMenuView_.blurControlsSearch();
+                updateNativeTextInput();
+            } else {
+                handleShellEvent(ShellBackPressed {});
+            }
             break;
         case InputRouter::BackAction::None:
             break;
@@ -2251,6 +2338,7 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
         .lecternOpen = gameplaySession_.readingLectern().has_value() && !shellMenuOpen(),
         .keyboardCaptured = renderer_.wantsKeyboardCapture(),
         .mouseCaptured = renderer_.wantsMouseCapture(),
+        .nativeTextEditing = optionsMenuView_.controlsSearchFocused(optionsMenu_.state()),
     };
 #if SOKOBAN_ENABLE_DEBUG_UI
     context.editorEditing = tools_->levelEditor.editingDocument();

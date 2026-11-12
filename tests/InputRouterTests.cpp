@@ -109,6 +109,44 @@ void testBindingCaptureSynchronizesKeyboardRelease()
     CHECK(!router.routeFrame(input, { .optionsOpen = true }).options.up);
 }
 
+void testPointerWheelRouting()
+{
+    TEST("pointerWheelRouting");
+    using namespace sokoban;
+    InputRouter router;
+    InputState input(false);
+    input.beginFrame();
+    SDL_Event wheel {};
+    wheel.type = SDL_EVENT_MOUSE_WHEEL;
+    wheel.wheel.x = 0.5f;
+    wheel.wheel.y = 1.25f;
+    wheel.wheel.mouse_x = 32.0f;
+    wheel.wheel.mouse_y = 45.0f;
+
+    CHECK(!router.routeEvent(wheel, input, { .mouseCaptured = true })
+        .forwardedToInput);
+    CHECK(router.routeFrame(input, {}).pointer.wheel == Vec2 {});
+    CHECK(router.routeEvent(wheel, input,
+        { .shellMenuOpen = true, .mouseCaptured = true }).forwardedToInput);
+    wheel.wheel.x = 0.25f;
+    wheel.wheel.y = 0.75f;
+    wheel.wheel.direction = SDL_MOUSEWHEEL_FLIPPED;
+    CHECK(router.routeEvent(wheel, input, {}).forwardedToInput);
+    SDL_Event motion {};
+    motion.type = SDL_EVENT_MOUSE_MOTION;
+    motion.motion.x = 200.0f;
+    motion.motion.y = 140.0f;
+    CHECK(router.routeEvent(motion, input, {}).forwardedToInput);
+    const InputRouter::PointerInput pointer =
+        router.routeFrame(input, { .optionsOpen = true }).pointer;
+    CHECK(pointer.position == (Vec2 { 200.0f, 140.0f }));
+    CHECK(pointer.wheelPosition == (Vec2 { 32.0f, 45.0f }));
+    CHECK(pointer.wheel == (Vec2 { 0.25f, 0.5f }));
+    input.beginFrame();
+    CHECK(router.routeFrame(input, {}).pointer.wheel == Vec2 {});
+    CHECK(!router.routeFrame(input, {}).pointer.wheelPosition);
+}
+
 void testBindingCaptureSynchronizesGamepadButtonStateWithoutAnEdge()
 {
     sokoban::InputRouter router;
@@ -854,6 +892,73 @@ void testDraftPlaybackShortcuts()
     CHECK(!frame.toggleDraftPlaybackPressed);
 }
 
+void testPrimaryPointerEdgesKeepEventPositions()
+{
+    TEST("primaryPointerEdgesKeepEventPositions");
+    using namespace sokoban;
+    InputState input(false);
+    const InputRouter router;
+    input.beginFrame();
+    SDL_Event press {};
+    press.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    press.button.button = SDL_BUTTON_LEFT;
+    press.button.x = 12.0f;
+    press.button.y = 23.0f;
+    (void)router.routeEvent(press, input, {});
+    SDL_Event release = press;
+    release.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    release.button.x = 35.0f;
+    release.button.y = 42.0f;
+    (void)router.routeEvent(release, input, { .mouseCaptured = true });
+    SDL_Event move {};
+    move.type = SDL_EVENT_MOUSE_MOTION;
+    move.motion.x = 73.0f;
+    move.motion.y = 84.0f;
+    (void)router.routeEvent(move, input, {});
+
+    const auto pointer = router.routeFrame(input, {}).pointer;
+    CHECK(!pointer.primaryDown);
+    CHECK(pointer.primaryPressedAt == (Vec2 { 12.0f, 23.0f }));
+    CHECK(pointer.primaryReleasedAt == (Vec2 { 35.0f, 42.0f }));
+    CHECK(pointer.position == (Vec2 { 73.0f, 84.0f }));
+
+    input.beginFrame();
+    (void)router.routeEvent(press, input, {});
+    SDL_Event focusLost {};
+    focusLost.type = SDL_EVENT_WINDOW_FOCUS_LOST;
+    (void)router.routeEvent(focusLost, input, {});
+    const auto canceled = router.routeFrame(input, {}).pointer;
+    CHECK(!canceled.primaryDown);
+    CHECK(!canceled.primaryPressedAt);
+    CHECK(!canceled.primaryReleasedAt);
+}
+
+void testNativeTextFocusSuppressesActions()
+{
+    TEST("nativeTextFocusSuppressesActions");
+    using namespace sokoban;
+    InputState input(false);
+    InputRouter router;
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_D);
+    pressKey(router, input, SDL_SCANCODE_SPACE);
+    pressKey(router, input, SDL_SCANCODE_F5);
+
+    const auto optionsWithoutFocus = router.routeFrame(input, { .optionsOpen = true }).options;
+    CHECK(optionsWithoutFocus.right && optionsWithoutFocus.confirm);
+    const auto options = router.routeFrame(input, {
+        .optionsOpen = true, .nativeTextEditing = true,
+    });
+    CHECK(!options.options.right && !options.options.confirm);
+
+    CHECK(router.routeFrame(input, {}).gameplay.right.pressed);
+    CHECK(!router.routeFrame(input, { .nativeTextEditing = true }).gameplay.right.down);
+    CHECK(router.routeFrame(input, { .editorEditing = true }).toggleDraftPlaybackPressed);
+    CHECK(!router.routeFrame(input, {
+        .editorEditing = true, .nativeTextEditing = true,
+    }).toggleDraftPlaybackPressed);
+}
+
 void testEditorModifiersPassUiKeyboardCapture()
 {
     TEST("editorModifiersPassUiKeyboardCapture");
@@ -884,6 +989,9 @@ int main()
 {
     testBindingCaptureAndUiCaptureAdmission();
     testBindingCaptureSynchronizesKeyboardRelease();
+    testPointerWheelRouting();
+    testPrimaryPointerEdgesKeepEventPositions();
+    testNativeTextFocusSuppressesActions();
     testBindingCaptureSynchronizesGamepadButtonStateWithoutAnEdge();
     testBindingCaptureSynchronizesAxisStateWithoutAnEdge();
     testModalFrameRouting();

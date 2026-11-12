@@ -1495,7 +1495,9 @@ void exerciseRendererFrameOwnership(SDL_Window* window)
         require(vulkanDebug::validationErrorCount() == validationErrors,
             "Live blocking load retired a texture still referenced by a submitted frame");
 
-        constexpr bool workspace = SOKOBAN_ENABLE_DEBUG_UI != 0;
+        // Readback samples the display image, so compose native UI there
+        // in both Debug and Release.
+        constexpr bool workspace = true;
         draw(second, workspace);
         const auto original = renderer.captureRenderedFrame();
         require(original.width == full.width && original.height == full.height &&

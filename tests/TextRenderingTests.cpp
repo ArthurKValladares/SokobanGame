@@ -47,6 +47,15 @@ ImageData render(SDL_Window* window, const std::filesystem::path& root, FontAtla
             "\xd9\x85\xd8\xb1\xd8\xad\xd8\xa8\xd8\xa7  "
             "\xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d  "
             "\xe0\xa4\xa8\xe0\xa4\xae\xe0\xa4\xb8\xe0\xa5\x8d\xe0\xa4\xa4\xe0\xa5\x87", { 1, 1, 1, 1 }, 48);
+        const UiRect swatch { { 1200, 20 }, { 360, 200 } };
+        ui.rect(swatch, { 1, 0, 0, 1 });
+        ui.pushClip({ { 1240, 40 }, { 280, 160 } });
+        ui.rect(swatch, { 0, 1, 0, 1 });
+        ui.pushClip({ { 1360, 100 }, { 210, 110 } });
+        ui.rect(swatch, { 0, 0, 1, 1 });
+        ui.popClip();
+        ui.popClip();
+        ui.rect({ { 1530, 24 }, { 30, 25 } }, { 1, 1, 1, 1 });
         ui.endFrame();
         renderer.beginDebugUiFrame();
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -63,6 +72,23 @@ ImageData render(SDL_Window* window, const std::filesystem::path& root, FontAtla
     ImageData image = renderer.captureRenderedFrame();
     verify(image.width == uint32_t(1600 * scale / 100) && image.height == uint32_t(900 * scale / 100),
         "Capture dimensions changed with native UI composition");
+    verify(image.rgba.size() == std::size_t(image.width) * image.height * 4,
+        "Capture size changed with native UI composition");
+    const auto hasColor = [&](uint32_t x, uint32_t y, std::array<bool, 3> rgb) {
+        const std::size_t pixel = std::size_t(y * image.height / 900) * image.width +
+            x * image.width / 1600;
+        for (std::size_t channel = 0; channel < rgb.size(); ++channel) {
+            const auto value = std::to_integer<uint8_t>(image.rgba[pixel * 4 + channel]);
+            if (rgb[channel] ? value < 240 : value > 15) return false;
+        }
+        return true;
+    };
+    verify(hasColor(1238, 120, { true, false, false }) &&
+            hasColor(1240, 120, { false, true, false }) &&
+            hasColor(1400, 120, { false, false, true }) &&
+            hasColor(1540, 140, { true, false, false }) &&
+            hasColor(1540, 34, { true, true, true }),
+        "Native UI did not intersect nested scissors and restore the full viewport");
     if (scale == 100) {
         uint64_t difference = 0, ink = 0;
         for (uint32_t y = 0; y < 140; ++y) {

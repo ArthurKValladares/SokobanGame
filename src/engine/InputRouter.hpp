@@ -51,6 +51,7 @@ public:
         bool draftExitConfirmationOpen = false;
         bool keyboardCaptured = false;
         bool mouseCaptured = false;
+        bool nativeTextEditing = false;
         // The pointer is over the game viewport with no active widget,
         // text input, popup or modal. Passive palette focus may still set
         // keyboardCaptured until the next viewport click.
@@ -60,7 +61,10 @@ public:
     struct PointerInput {
         Vec2 position;
         bool primaryDown = false;
-        bool primaryPressed = false;
+        std::optional<Vec2> primaryPressedAt;
+        std::optional<Vec2> primaryReleasedAt;
+        Vec2 wheel;
+        std::optional<Vec2> wheelPosition;
     };
 
     struct EditorInput {

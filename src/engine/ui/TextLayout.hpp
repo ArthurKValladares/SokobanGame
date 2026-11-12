@@ -11,6 +11,7 @@
 namespace sokoban {
 
 enum class GlyphRendering : uint8_t { Automatic, Coverage, Outline };
+enum class TextLayoutPurpose : uint8_t { Display, Editing };
 
 // Layout contains glyph identities and positions, never atlas addresses. A
 // raster cache can be retired without invalidating a cached paragraph.
@@ -22,8 +23,18 @@ struct PositionedGlyph {
     float advance = 0.0f;
 };
 
+// The visual advance of one grapheme in an editable layout. A right-to-left
+// grapheme has startX > endX. Spans are stored in visual order within a line.
+struct TextCaretSpan {
+    std::size_t start = 0;
+    std::size_t end = 0;
+    float startX = 0.0f;
+    float endX = 0.0f;
+};
+
 struct TextLayout {
     std::vector<PositionedGlyph> glyphs;
+    std::vector<TextCaretSpan> caretSpans;
     Vec2 extent {};
     float ascent = 0.0f;
     float lineHeight = 0.0f;

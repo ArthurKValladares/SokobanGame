@@ -78,6 +78,10 @@ public:
     [[nodiscard]] bool mouseButtonDown(Uint8 button) const;
     [[nodiscard]] bool mouseButtonPressed(Uint8 button) const;
     [[nodiscard]] Vec2 mousePosition() const { return mousePosition_; }
+    [[nodiscard]] std::optional<Vec2> primaryPressPosition() const { return primaryPressPosition_; }
+    [[nodiscard]] std::optional<Vec2> primaryReleasePosition() const { return primaryReleasePosition_; }
+    [[nodiscard]] Vec2 mouseWheel() const { return mouseWheel_; }
+    [[nodiscard]] std::optional<Vec2> mouseWheelPosition() const { return mouseWheelPosition_; }
     [[nodiscard]] const InputBindings& bindings() const { return bindings_; }
     [[nodiscard]] ActiveInputDevice activeDevice() const { return activeDevice_; }
     [[nodiscard]] std::size_t connectedGamepadCount() const { return gamepads_.size(); }
@@ -135,6 +139,10 @@ private:
     std::vector<OpenGamepad> gamepads_;
     SDL_JoystickID activeGamepadId_ = 0;
     Vec2 mousePosition_ {};
+    std::optional<Vec2> primaryPressPosition_;
+    std::optional<Vec2> primaryReleasePosition_;
+    Vec2 mouseWheel_ {};
+    std::optional<Vec2> mouseWheelPosition_;
     std::string activeGamepadName_;
     ActiveInputDevice activeDevice_ = ActiveInputDevice::KeyboardMouse;
     std::size_t invalidBindingCount_ = 0;

@@ -255,6 +255,32 @@ void testDamagedSaveSlotBehavior()
     CHECK(switchSlot != nullptr && switchSlot->slot == 2);
 }
 
+void testMainTitlePointerActivation()
+{
+    TEST("mainTitlePointerActivation");
+    using namespace sokoban;
+    const auto font = FontAtlas::load(fontPath);
+    UiContext ui(font);
+    TitleScreen title;
+    title.open();
+    constexpr Vec2 viewport { 1280.0f, 720.0f };
+    constexpr Vec2 optionsButton { 250.0f, 282.0f };
+    constexpr Vec2 outside { 900.0f, 300.0f };
+    const auto frame = [&](UiPointerInput pointer, TitleScreenInput input = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto result = title.draw(ui, viewport, input);
+        ui.endFrame();
+        return result;
+    };
+    CHECK(!frame({ .position = optionsButton, .down = true, .pressedAt = optionsButton }));
+    CHECK(title.selectedRow() == 1);
+    CHECK(!frame({ .position = outside, .releasedAt = outside }));
+    CHECK(isAction<title::OpenOptions>(frame({}, { .confirm = true })));
+    CHECK(isAction<title::OpenOptions>(frame({
+        .position = outside, .pressedAt = optionsButton, .releasedAt = optionsButton,
+    })));
+}
+
 void testOptionsTitleExitRow()
 {
     const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
@@ -299,6 +325,7 @@ void testOptionsTitleExitRow()
 int main()
 {
     testTitleNavigationAndResults();
+    testMainTitlePointerActivation();
     testSaveSlotsPage();
     testDamagedSaveSlotBehavior();
     testOptionsTitleExitRow();

@@ -94,6 +94,7 @@ public:
     [[nodiscard]] Page page() const { return page_; }
     [[nodiscard]] int selectedRow() const { return selectedRow_; }
 
+    static void drawBackground(UiContext& ui, Vec2 viewport);
     [[nodiscard]] std::optional<TitleAction> draw(
         UiContext& ui,
         Vec2 viewport,
@@ -127,6 +128,7 @@ private:
     int pendingDeleteSlot_ = -1;
     Page page_ = Page::Main;
     int selectedRow_ = 0;
+    UiControlId mainFocus_ = 0;
     std::vector<SaveSlotInfo> saveSlots_;
     int activeSlot_ = 0;
     std::string saveSlotError_;

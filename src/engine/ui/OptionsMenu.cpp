@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -158,6 +159,7 @@ void setPage(OptionsMenuState& state, OptionsMenuPage page)
     state.selectedRow = 0;
     state.capturingAction.reset();
     state.customRenderScalePreview.reset();
+    state.controlsFilter.clear();
 }
 
 void normalizeSelection(OptionsMenuState& state, const UserSettings& settings)
@@ -712,6 +714,26 @@ void appendAudioRows(
     };
 }
 
+bool matchesControlsFilter(std::string_view label, std::string_view query)
+{
+    const auto caseInsensitive = [](unsigned char left, unsigned char right) {
+        return std::tolower(left) == std::tolower(right);
+    };
+    while (!query.empty()) {
+        const auto first = query.find_first_not_of(" \t");
+        if (first == std::string_view::npos) {
+            break;
+        }
+        query.remove_prefix(first);
+        const std::string_view term = query.substr(0, query.find_first_of(" \t"));
+        if (std::ranges::search(label, term, caseInsensitive).empty()) {
+            return false;
+        }
+        query.remove_prefix(term.size());
+    }
+    return true;
+}
+
 // The gameplay bindings page.
 void appendControlsRows(
     FrameArray<OptionsMenuRow>& rows, const OptionsMenuState& state)
@@ -724,7 +746,8 @@ void appendControlsRows(
             state.controlsBindingDevice),
     });
     for (const auto& binding : orderedActionDefinitions) {
-        if (binding.group != InputActionGroup::Controls) continue;
+        if (binding.group != InputActionGroup::Controls ||
+            !matchesControlsFilter(binding.label, state.controlsFilter)) continue;
         rows.push_back({
             .id = rowForAction(binding.action),
             .kind = OptionsMenuRowKind::Binding,
@@ -769,7 +792,8 @@ void appendEditorControlsRows(
             editorControlsSectionChoice(state.editorControlsSection),
     });
     for (const auto& binding : orderedActionDefinitions) {
-        if (binding.group != editorActionGroup(state.editorControlsSection)) {
+        if (binding.group != editorActionGroup(state.editorControlsSection) ||
+            !matchesControlsFilter(binding.label, state.controlsFilter)) {
             continue;
         }
         rows.push_back({
@@ -1041,6 +1065,27 @@ OptionsMenuReduction reduceOptionsMenu(
             result.state.capturingAction.reset();
             result.action = changedSettings(
                 std::move(settings), currentSettings);
+        },
+        [&](const options::intent::SetControlsFilter& filter) {
+            if (!result.state.open || !bindingPage(result.state.page) ||
+                result.state.capturingAction ||
+                result.state.controlsFilter == filter.query) {
+                return;
+            }
+            const auto selection = selectedRowId(result.state, currentSettings);
+            result.state.controlsFilter = filter.query;
+            const auto rows = optionsMenuRows(result.state, currentSettings);
+            const auto isBinding = [](const OptionsMenuRow& row) {
+                return row.kind == OptionsMenuRowKind::Binding;
+            };
+            auto selected = std::ranges::find_if(rows, [&](const OptionsMenuRow& row) {
+                return isBinding(row) && row.id == selection;
+            });
+            if (selected == rows.end()) {
+                selected = std::ranges::find_if(rows, isBinding);
+            }
+            result.state.selectedRow = selected == rows.end()
+                ? 0 : static_cast<int>(selected - rows.begin());
         },
     }, intent);
     normalizeSelection(result.state, currentSettings);
@@ -1585,15 +1630,103 @@ void drawBindingRow(const OptionsRowDraw& d)
     }
 }
 
+static float optionsRowBottom(
+    const UiLayoutTree& tree, const RowLayout& row)
+{
+    const UiLayoutNode last = hasNode(row.detail) ? row.detail
+        : (hasNode(row.control) ? row.control : row.primary);
+    const UiRect rect = tree.rect(last);
+    return rect.position.y + rect.size.y;
+}
+
+void OptionsMenuView::prepareControlsSearch(const OptionsMenuState& state)
+{
+    const auto page = state.open && bindingPage(state.page)
+        ? std::optional { state.page } : std::nullopt;
+    if (searchPage_ != page) {
+        searchPage_ = page;
+        blurControlsSearch();
+        controlsSearch_.setText(page ? std::string_view(state.controlsFilter) : std::string_view {});
+        searchBounds_ = {};
+        textCaret_ = {};
+        searchPressHandled_ = false;
+    }
+    if (state.capturingAction) {
+        blurControlsSearch();
+    }
+}
+
+bool OptionsMenuView::focusControlsSearch(const OptionsMenuState& state)
+{
+    prepareControlsSearch(state);
+    if (!searchPage_ || state.capturingAction) {
+        return false;
+    }
+    searchFocused_ = true;
+    controlsSearch_.selectAll();
+    return true;
+}
+
+bool OptionsMenuView::handleControlsSearchPress(
+    UiContext& ui, const OptionsMenuState& state, Vec2 position, bool extendSelection)
+{
+    prepareControlsSearch(state);
+    if (!searchPage_ || state.capturingAction || searchBounds_.size.x <= 0.0f) {
+        return false;
+    }
+
+    // Use the last drawn field so a press takes effect before any later
+    // keyboard or text event in the same SDL poll.
+    searchPressHandled_ = true;
+    if (ui.contains(ui.visibleRect(searchBounds_), position)) {
+        searchFocused_ = true;
+        controlsSearchField_.placeCaret(ui, searchBounds_, controlsSearch_,
+            searchTextSize_, position, extendSelection);
+        return true;
+    }
+    const bool wasFocused = searchFocused_;
+    blurControlsSearch();
+    return wasFocused;
+}
+
+void OptionsMenuView::blurControlsSearch()
+{
+    searchFocused_ = false;
+    controlsSearch_.clearComposition();
+}
+
+bool OptionsMenuView::controlsSearchFocused(const OptionsMenuState& state) const
+{
+    return searchFocused_ && state.open && searchPage_ == state.page &&
+        !state.capturingAction;
+}
+
+UiTextEdit* OptionsMenuView::activeTextEdit(const OptionsMenuState& state)
+{
+    return controlsSearchFocused(state) ? &controlsSearch_ : nullptr;
+}
+
+std::optional<std::string_view> OptionsMenuView::controlsSearchQuery(
+    const OptionsMenuState& state) const
+{
+    if (state.open && searchPage_ == state.page) {
+        return controlsSearch_.text();
+    }
+    return std::nullopt;
+}
+
 std::optional<OptionsMenuIntent> OptionsMenuView::draw(
     UiContext& ui,
     Vec2 viewport,
     const OptionsMenuState& state,
     const UserSettings& settings,
     const InputPromptCatalog* inputPrompts,
-    const GamepadPresentation* gamepad) const
+    const GamepadPresentation* gamepad,
+    OptionsMenuViewInput input)
 {
+    prepareControlsSearch(state);
     if (!state.open) {
+        scrollPage_.reset();
         return std::nullopt;
     }
 
@@ -1603,20 +1736,35 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
     const auto rows = optionsMenuFrameRows(state, settings, &ui.frameArena());
     const bool compactGraphics =
         state.page == OptionsMenuPage::Graphics;
-    const float afterHeader = bindingPage(state.page)
+    const bool showSearch = bindingPage(state.page);
+    const float afterHeader = showSearch
         ? 16.0f
         : (compactGraphics ? 16.0f : 28.0f);
+    constexpr float searchHeight = 38.0f;
+    constexpr float searchGap = 10.0f;
 
-    // Measure the rows themselves before choosing the panel height. When the
-    // viewport is shorter than that content, all vertical metrics and control
-    // typography use one common scale, keeping every row and Back action in
-    // bounds without maintaining a second set of per-page height estimates.
+    // Search should never move the field while someone is typing. Size the
+    // panel against the unfiltered page and arrange only the matching rows.
+    std::optional<FrameArray<OptionsMenuRow>> unfilteredRows;
+    if (showSearch && !state.controlsFilter.empty()) {
+        auto unfiltered = state;
+        unfiltered.controlsFilter.clear();
+        unfilteredRows = optionsMenuFrameRows(unfiltered, settings, &ui.frameArena());
+    }
+    const auto& measurementRows = unfilteredRows ? *unfilteredRows : rows;
+
+    // Measure first so short pages still fit in one panel. Long pages scroll
+    // below the title once further scaling would make controls hard to read.
     menuKit::MenuPage measurement(afterHeader, false, 1.0f, &ui.frameArena());
-    FrameArray<RowLayout> measuredRows(ui.frameArena(), rows.size());
-    for (std::size_t index = 0; index < rows.size(); ++index) {
+    FrameArray<RowLayout> measuredRows(ui.frameArena(), measurementRows.size());
+    for (std::size_t index = 0; index < measurementRows.size(); ++index) {
         measuredRows.push_back({});
     }
     UiLayoutNode measuredControlsPrompt {};
+    if (showSearch) {
+        (void)measurement.tree.item(measurement.tree.root(), searchHeight);
+        measurement.tree.spacer(measurement.tree.root(), searchGap);
+    }
     if (state.page == OptionsMenuPage::QuitConfirmation) {
         measurement.tree.spacer(measurement.tree.root(), 20.0f);
         (void)measurement.tree.item(measurement.tree.root(), 44.0f);
@@ -1624,7 +1772,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
     }
     layoutOptionsRows(
         measurement,
-        rows,
+        measurementRows,
         measuredRows,
         state,
         compactGraphics,
@@ -1632,9 +1780,11 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
         1.0f);
     const float requiredHeight = measurement.tree.minimumSize().y;
     const float maximumPanelHeight = std::max(viewport.y - 32.0f, 1.0f);
-    const float verticalScale = std::min(
-        1.0f,
-        maximumPanelHeight / std::max(requiredHeight, 1.0f));
+    constexpr float minimumReadableScale = 0.85f;
+    const float verticalScale = std::clamp(
+        maximumPanelHeight / std::max(requiredHeight, 1.0f),
+        minimumReadableScale,
+        1.0f);
     constexpr float comfortablePanelHeight = 540.0f;
     const float desiredPanelHeight = std::max(
         requiredHeight * verticalScale,
@@ -1655,6 +1805,11 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
     for (std::size_t index = 0; index < rows.size(); ++index) {
         rowLayouts.push_back({});
     }
+    UiLayoutNode search {};
+    if (showSearch) {
+        search = layout.tree.item(layout.tree.root(), searchHeight * verticalScale);
+        layout.tree.spacer(layout.tree.root(), searchGap * verticalScale);
+    }
     UiLayoutNode message {};
     UiLayoutNode controlsPrompt {};
     if (state.page == OptionsMenuPage::QuitConfirmation) {
@@ -1673,11 +1828,90 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
         compactGraphics,
         controlsPrompt,
         verticalScale);
-    layout.tree.arrange(panel);
+    UiRect contentPanel = panel;
+    contentPanel.size.y = std::max(
+        panel.size.y, layout.tree.minimumSize().y);
+    layout.tree.arrange(contentPanel);
     layout.drawHeader(
         ui,
         pageTitle(state.page),
         36.0f * verticalScale);
+
+    const UiRect divider = layout.tree.rect(layout.divider);
+    float bodyTop = divider.position.y + divider.size.y;
+    if (showSearch) {
+        const UiRect bounds = layout.tree.rect(search);
+        const bool pressHandled = std::exchange(searchPressHandled_, false);
+        if (const auto press = ui.mousePressPosition();
+            press && !pressHandled && !state.capturingAction) {
+            if (ui.contains(ui.visibleRect(bounds), *press)) {
+                searchFocused_ = true;
+            } else {
+                blurControlsSearch();
+            }
+        }
+        searchBounds_ = bounds;
+        searchTextSize_ = 18.0f * verticalScale;
+        const auto field = controlsSearchField_.draw(ui, "options.controls.search",
+            bounds, controlsSearch_, {
+                .focused = controlsSearchFocused(state),
+                .enabled = !state.capturingAction,
+                .extendSelection = input.extendTextSelection,
+                .pressAlreadyHandled = pressHandled,
+                .placeholder = "Search actions (Ctrl+F)",
+                .textSize = searchTextSize_,
+            });
+        textCaret_ = field.caret;
+        bodyTop = bounds.position.y + bounds.size.y + searchGap * verticalScale;
+    }
+
+    const bool pageChanged = scrollPage_ != state.page;
+    const bool filterChanged = lastControlsFilter_ != state.controlsFilter;
+    if (pageChanged || filterChanged) {
+        scroll_ = {};
+        scrollPage_ = state.page;
+        lastControlsFilter_ = state.controlsFilter;
+    }
+    const std::size_t selected = static_cast<std::size_t>(state.selectedRow);
+    const std::optional<OptionsMenuRowId> selectedId = selected < rows.size()
+        ? std::optional { rows[selected].id } : std::nullopt;
+    const bool revealSelection = input.revealSelection || pageChanged || filterChanged ||
+        lastSelectedRow_ != selectedId || lastScrollViewport_ != viewport;
+    lastSelectedRow_ = selectedId;
+    lastScrollViewport_ = viewport;
+    const bool scrollable = contentPanel.size.y > panel.size.y + 0.01f;
+    if (scrollable) {
+        constexpr float edgeInset = 8.0f;
+        const float top = bodyTop;
+        const UiRect body {
+            { panel.position.x + 1.0f, top },
+            { panel.size.x - 2.0f,
+                std::max(panel.position.y + panel.size.y - edgeInset - top, 0.0f) },
+        };
+        const float contentHeight = body.size.y +
+            contentPanel.size.y - panel.size.y;
+        scroll_.setExtents(body.size.y, contentHeight);
+        if (revealSelection && selectedId) {
+            const RowLayout& row = rowLayouts[selected];
+            scroll_.reveal(
+                layout.tree.rect(row.primary).position.y - top,
+                optionsRowBottom(layout.tree, row) - top);
+        }
+        scroll_.scrollWheel(ui, body, input.wheelY, input.wheelPosition);
+
+        const UiRect track {
+            { panel.position.x + panel.size.x - 2.0f * edgeInset, top },
+            { edgeInset, body.size.y },
+        };
+        scroll_.drawScrollbar(ui, "options.scroll", track);
+        if (scroll_.offset() > 0.0f) {
+            contentPanel.position.y -= scroll_.offset();
+            layout.tree.arrange(contentPanel);
+        }
+        ui.pushClip(body);
+    } else {
+        scroll_.setExtents(0.0f, 0.0f);
+    }
 
     if (state.page == OptionsMenuPage::QuitConfirmation) {
         ui.centeredText(
@@ -1686,15 +1920,20 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             { 0.83f, 0.86f, 0.83f, 1.0f },
             22.0f * verticalScale);
     }
-    if (bindingPage(state.page)) {
+    if (showSearch) {
         const bool editorPage = state.page == OptionsMenuPage::EditorControls;
+        const bool empty = !state.controlsFilter.empty() &&
+            std::ranges::none_of(rows, [](const OptionsMenuRow& row) {
+                return row.kind == OptionsMenuRowKind::Binding;
+            });
         ui.centeredText(
             layout.tree.rect(controlsPrompt),
             state.capturingAction
                 ? (editorPage
                         ? "Hold Ctrl, Shift or Alt for a chord. Esc cancels."
                         : "Esc or Start cancels. Menu controls stay assigned.")
-                : "Choose a tab, then confirm a row to remap it.",
+                : (empty ? "No matching actions."
+                         : "Choose a tab, then confirm a row to remap it."),
             { 0.58f, 0.63f, 0.62f, 1.0f },
             17.0f * verticalScale);
     }
@@ -1703,7 +1942,8 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
     for (std::size_t index = 0; index < rows.size(); ++index) {
         const OptionsMenuRow& row = rows[index];
         const RowLayout& rowLayout = rowLayouts[index];
-        const bool focused = state.selectedRow == static_cast<int>(index);
+        const bool focused = !controlsSearchFocused(state) &&
+            state.selectedRow == static_cast<int>(index);
         const std::string controlId = rowControlId(row.id);
         if (hasNode(rowLayout.divider)) {
             ui.divider(layout.tree.rect(rowLayout.divider));
@@ -1756,6 +1996,9 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             break;
         }
         }
+    }
+    if (scrollable) {
+        ui.popClip();
     }
     return intent;
 }

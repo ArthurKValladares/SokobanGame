@@ -4,9 +4,26 @@
 #include "engine/ui/FontAtlas.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 
 namespace sokoban {
+namespace {
+
+UiRect intersect(UiRect first, UiRect second)
+{
+    const Vec2 start {
+        std::max(first.position.x, second.position.x),
+        std::max(first.position.y, second.position.y),
+    };
+    const Vec2 end {
+        std::min(first.position.x + first.size.x, second.position.x + second.size.x),
+        std::min(first.position.y + first.size.y, second.position.y + second.size.y),
+    };
+    return { start, { std::max(0.0f, end.x - start.x), std::max(0.0f, end.y - start.y) } };
+}
+
+} // namespace
 
 UiContext::UiContext(const FontAtlas& font)
     : font_(&font)
@@ -24,6 +41,17 @@ void UiContext::beginFrame(
     bool mouseDown,
     bool mousePressed)
 {
+    const bool released = !mouseDown && (pointer_.down || mousePressed);
+    beginFrame(viewportSize, {
+        .position = mousePosition,
+        .down = mouseDown,
+        .pressedAt = mousePressed ? std::optional { mousePosition } : std::nullopt,
+        .releasedAt = released ? std::optional { mousePosition } : std::nullopt,
+    });
+}
+
+void UiContext::beginFrame(Vec2 viewportSize, UiPointerInput pointer)
+{
     font_->beginFrame();
     // The head goes back to the start and last frame's commands cease to
     // exist. Nothing needs destroying first: the arena holds trivially
@@ -31,16 +59,23 @@ void UiContext::beginFrame(
     frameArena_.reset();
     drawData_ = UiDrawData(frameArena_);
     drawData_.viewportSize = viewportSize;
-    mousePosition_ = mousePosition;
-    mouseDown_ = mouseDown;
-    mousePressed_ = mousePressed;
-    if (!mouseDown_) {
+    clips_.clear();
+    pointer_ = pointer;
+    resolvedControls_ = false;
+    pointerPressOwnedByControls_ = false;
+    if (pointer_.pressedAt || (!pointer_.down && !pointer_.releasedAt)) {
         activeControl_.clear();
     }
 }
 
 void UiContext::endFrame()
 {
+    if (!pointer_.down) {
+        activeControl_.clear();
+    }
+    if (!resolvedControls_) {
+        capturedControl_ = 0;
+    }
     // Reported here rather than at the drop, so one warning covers the frame
     // instead of one per command past the budget.
     if (drawData_.commands.droppedCount() > 0 && !reportedDroppedCommands_) {
@@ -63,20 +98,159 @@ bool UiContext::contains(UiRect rectValue, Vec2 point) const
 
 bool UiContext::hovered(UiRect rectValue) const
 {
-    return contains(rectValue, mousePosition_);
+    return contains(visibleRect(rectValue), pointer_.position);
 }
 
 bool UiContext::clicked(UiRect rectValue) const
 {
-    return hovered(rectValue) && mousePressed_;
+    return !pointerPressOwnedByControls_ && activeControl_.empty() &&
+        pointer_.pressedAt && contains(visibleRect(rectValue), *pointer_.pressedAt);
 }
 
-bool UiContext::drag(std::string_view id, UiRect rectValue)
+std::optional<Vec2> UiContext::dragPosition(std::string_view id, UiRect rectValue)
 {
+    if (id.empty()) {
+        return std::nullopt;
+    }
     if (clicked(rectValue)) {
         activeControl_ = id;
     }
-    return mouseDown_ && activeControl_ == id;
+    if (activeControl_ != id) {
+        return std::nullopt;
+    }
+    return pointer_.down ? std::optional { pointer_.position } : pointer_.releasedAt;
+}
+
+UiInteraction UiContext::resolveControls(
+    std::string_view scope,
+    std::span<const UiControlRegion> regions,
+    UiControlId focus,
+    UiNavigation navigation)
+{
+    assert(!resolvedControls_);
+    resolvedControls_ = true;
+    const bool previouslyCaptured = capturedControl_ != 0;
+    if (controlScope_ != scope) {
+        controlScope_ = scope;
+        capturedControl_ = 0;
+    }
+
+    const auto hit = [&](Vec2 position) -> const UiControlRegion* {
+        for (auto region = regions.rbegin(); region != regions.rend(); ++region) {
+            if (region->id != 0 && contains(visibleRect(region->bounds), position)) {
+                return &*region;
+            }
+        }
+        return nullptr;
+    };
+    const auto eligibleForFocus = [&](const UiControlRegion& region) {
+        const UiRect visible = visibleRect(region.bounds);
+        return region.id != 0 && region.enabled && region.focusable &&
+            visible.size.x > 0.0f && visible.size.y > 0.0f;
+    };
+
+    UiInteraction result;
+    const UiControlRegion* underPointer = hit(pointer_.position);
+    if (underPointer && underPointer->enabled) {
+        result.hovered = underPointer->id;
+    }
+
+    if (capturedControl_ != 0 &&
+        std::ranges::none_of(regions, [&](const UiControlRegion& region) {
+            return region.id == capturedControl_ && region.enabled;
+        })) {
+        capturedControl_ = 0;
+    }
+    const UiControlRegion* press = nullptr;
+    if (pointer_.pressedAt) {
+        press = hit(*pointer_.pressedAt);
+        capturedControl_ = press && press->enabled ? press->id : 0;
+        result.pressed = capturedControl_;
+        if (press && eligibleForFocus(*press)) {
+            focus = press->id;
+        }
+    }
+
+    if (!pointer_.down && capturedControl_ != 0) {
+        if (pointer_.releasedAt) {
+            result.released = capturedControl_;
+            const UiControlRegion* release = hit(*pointer_.releasedAt);
+            if (release && release->id == capturedControl_) {
+                result.activated = capturedControl_;
+            }
+        }
+        capturedControl_ = 0;
+    }
+    result.held = capturedControl_;
+    result.ownsPointer = underPointer || press || previouslyCaptured || result.held != 0;
+    pointerPressOwnedByControls_ = press != nullptr;
+
+    auto current = std::ranges::find_if(regions, [&](const UiControlRegion& region) {
+        return region.id == focus && eligibleForFocus(region);
+    });
+    if (current == regions.end()) {
+        current = std::ranges::find_if(regions, eligibleForFocus);
+    }
+    const bool keyboardNavigation = !pointer_.pressedAt && !previouslyCaptured;
+    if (current != regions.end()) {
+        result.focused = current->id;
+        if (keyboardNavigation && navigation.previous != navigation.next) {
+            const auto count = static_cast<std::ptrdiff_t>(regions.size());
+            auto index = current - regions.begin();
+            const int direction = navigation.next ? 1 : -1;
+            do {
+                index = (index + count + direction) % count;
+            } while (!eligibleForFocus(regions[static_cast<std::size_t>(index)]));
+            result.focused = regions[static_cast<std::size_t>(index)].id;
+        }
+    }
+    if (keyboardNavigation && navigation.activate) {
+        result.activated = result.focused;
+    }
+    return result;
+}
+
+void UiContext::cancelPointerInteraction()
+{
+    capturedControl_ = 0;
+    activeControl_.clear();
+}
+
+void UiContext::pushClip(UiRect rectValue)
+{
+    clips_.push_back(visibleRect(rectValue));
+}
+
+void UiContext::popClip()
+{
+    assert(!clips_.empty());
+    if (!clips_.empty()) {
+        clips_.pop_back();
+    }
+}
+
+UiRect UiContext::currentClip() const
+{
+    return clips_.empty() ? UiRect { {}, drawData_.viewportSize } : clips_.back();
+}
+
+UiRect UiContext::visibleRect(UiRect rectValue) const
+{
+    return intersect(currentClip(), rectValue);
+}
+
+void UiContext::pushCommand(UiDrawCommand command)
+{
+    if (!clips_.empty()) {
+        const Vec2 visible = visibleRect(command.rect).size;
+        if (visible.x <= 0.0f || visible.y <= 0.0f) {
+            return;
+        }
+        // Preserve the quad and its UVs for partial intersections. The
+        // scissor clips the result, including text and nine-slice borders.
+        command.clip = currentClip();
+    }
+    drawData_.commands.push_back(command);
 }
 
 void UiContext::rect(UiRect rectValue, Vec4 color)
@@ -84,7 +258,7 @@ void UiContext::rect(UiRect rectValue, Vec4 color)
     if (rectValue.size.x <= 0.0f || rectValue.size.y <= 0.0f || color.w <= 0.0f) {
         return;
     }
-    drawData_.commands.push_back({
+    pushCommand({
         .kind = UiDrawKind::Solid,
         .rect = rectValue,
         .color = color,
@@ -96,7 +270,7 @@ void UiContext::image(UiRect rectValue, UiRect uvRectValue, Vec4 color)
     if (rectValue.size.x <= 0.0f || rectValue.size.y <= 0.0f || color.w <= 0.0f) {
         return;
     }
-    drawData_.commands.push_back({
+    pushCommand({
         .kind = UiDrawKind::Image,
         .rect = rectValue,
         .uvRect = uvRectValue,
@@ -115,7 +289,7 @@ void UiContext::textureImage(
         rectValue.size.y <= 0.0f || color.w <= 0.0f) {
         return;
     }
-    drawData_.commands.push_back({
+    pushCommand({
         .kind = UiDrawKind::TextureImage,
         .rect = rectValue,
         .uvRect = uvRectValue,
@@ -135,7 +309,7 @@ void UiContext::sceneImage(
         color.w <= 0.0f) {
         return;
     }
-    drawData_.commands.push_back({
+    pushCommand({
         .kind = UiDrawKind::SceneImage,
         .rect = rectValue,
         .uvRect = uvRectValue,
@@ -161,7 +335,17 @@ void UiContext::divider(UiRect rectValue)
 void UiContext::text(Vec2 position, std::string_view value, Vec4 color, float size, GlyphRendering rendering)
 {
     if (value.empty() || size <= 0.0f || color.w <= 0.0f) return;
-    const TextLayout& layout = font_->layoutText(value, size);
+    drawTextLayout(position, layoutText(value, size), color, size, rendering);
+}
+
+const TextLayout& UiContext::layoutText(std::string_view value, float size, TextLayoutPurpose purpose) const
+{
+    return font_->layoutText(value, size, purpose);
+}
+
+void UiContext::drawTextLayout(Vec2 position, const TextLayout& layout, Vec4 color, float size, GlyphRendering rendering)
+{
+    if (size <= 0.0f || color.w <= 0.0f) return;
     for (const PositionedGlyph& placed : layout.glyphs) {
         Vec2 baseline { position.x + placed.position.x, position.y + layout.ascent + placed.position.y };
         const FontGlyph glyph = font_->glyph(placed, size, rendering, baseline.x);
@@ -176,7 +360,7 @@ void UiContext::text(Vec2 position, std::string_view value, Vec4 color, float si
 void UiContext::drawGlyph(Vec2 baseline, const FontGlyph& glyph, Vec4 color, float size)
 {
     if (glyph.size.x <= 0.0f || glyph.size.y <= 0.0f) return;
-    drawData_.commands.push_back({ .kind = UiDrawKind::FontGlyph,
+    pushCommand({ .kind = UiDrawKind::FontGlyph,
         .rect = { baseline + glyph.offset, glyph.size }, .uvRect = glyph.uv, .color = color,
         .glyphCurveOffset = glyph.curveOffset, .outlineGlyph = glyph.outline, .fontSize = size });
 }

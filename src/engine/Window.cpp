@@ -22,6 +22,12 @@ void syncWindow(SDL_Window* window, const char* operation)
 Window::Window(const std::string& title, int width, int height)
 {
     const auto started = std::chrono::steady_clock::now();
+#if !SOKOBAN_ENABLE_DEBUG_UI
+    // The native field draws preedit while SDL and the OS keep ownership of
+    // candidate selection. Developer builds also host ImGui text fields and
+    // use the OS composition display.
+    SDL_SetHint(SDL_HINT_IME_IMPLEMENTED_UI, "composition");
+#endif
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
     }

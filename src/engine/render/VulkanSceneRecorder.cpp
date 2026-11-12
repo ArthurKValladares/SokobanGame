@@ -93,6 +93,28 @@ static_assert(static_cast<uint32_t>(DrawMaterialMode::GltfMaterial)
     return DrawMaterialMode::Untextured;
 }
 
+[[nodiscard]] VkRect2D uiScissor(UiRect clip, Vec2 viewport, VkExtent2D target)
+{
+    // The UI pipeline is single sampled. Keep pixels whose centers fall
+    // inside the logical, half-open clip, even when the target is scaled.
+    const auto pixelEdge = [](float edge, float logicalExtent, uint32_t targetExtent) {
+        const double extent = static_cast<double>(targetExtent);
+        const double scaled = static_cast<double>(edge) / logicalExtent * extent;
+        return static_cast<int32_t>(std::ceil(std::clamp(scaled, 0.0, extent) - 0.5));
+    };
+    const int32_t left = pixelEdge(clip.position.x, viewport.x, target.width);
+    const int32_t top = pixelEdge(clip.position.y, viewport.y, target.height);
+    const int32_t right = pixelEdge(clip.position.x + clip.size.x, viewport.x, target.width);
+    const int32_t bottom = pixelEdge(clip.position.y + clip.size.y, viewport.y, target.height);
+    return {
+        .offset = { left, top },
+        .extent = {
+            static_cast<uint32_t>(std::max(0, right - left)),
+            static_cast<uint32_t>(std::max(0, bottom - top)),
+        },
+    };
+}
+
 double elapsedMilliseconds(std::chrono::steady_clock::time_point start)
 {
     return std::chrono::duration<double, std::milli>(
@@ -2653,16 +2675,36 @@ private:
 #endif
             if (hasGameUi) {
                 uint32_t first = 0, count = 0;
-                for (const UiDrawCommand& command : uiDrawData.commands) {
-                    const uint32_t instance = drawUiRect(commandBuffer, command, uiDrawData.viewportSize, unlit);
-                    if (count && instance != first + count) {
+                std::optional<UiRect> activeClip;
+                bool clipVisible = true;
+                const auto flush = [&] {
+                    if (count) {
                         drawQuadRun(commandBuffer, first, count);
                         count = 0;
+                    }
+                };
+                for (const UiDrawCommand& command : uiDrawData.commands) {
+                    if (command.clip != activeClip) {
+                        flush();
+                        activeClip = command.clip;
+                        const VkRect2D commandScissor = activeClip
+                            ? uiScissor(*activeClip, uiDrawData.viewportSize, targetExtent)
+                            : scissor;
+                        clipVisible = commandScissor.extent.width > 0 &&
+                            commandScissor.extent.height > 0;
+                        if (clipVisible) {
+                            vkCmdSetScissor(commandBuffer, 0, 1, &commandScissor);
+                        }
+                    }
+                    if (!clipVisible) continue;
+                    const uint32_t instance = drawUiRect(commandBuffer, command, uiDrawData.viewportSize, unlit);
+                    if (count && instance != first + count) {
+                        flush();
                     }
                     if (!count) first = instance;
                     ++count;
                 }
-                if (count) drawQuadRun(commandBuffer, first, count);
+                flush();
             }
         }
         if (renderImGui) {

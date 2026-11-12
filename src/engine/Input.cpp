@@ -78,6 +78,10 @@ void InputState::beginFrame()
     keysPressed_.fill(false);
     keyboardChordsPressed_.fill(0);
     mouseButtonsPressed_.fill(false);
+    primaryPressPosition_.reset();
+    primaryReleasePosition_.reset();
+    mouseWheel_ = {};
+    mouseWheelPosition_.reset();
     gamepadButtonsPressed_.fill(false);
     previousGamepadAxes_ = gamepadAxes_;
 }
@@ -117,6 +121,9 @@ void InputState::handleEvent(
             mouseButtonsDown_[event.button.button] = true;
             if (recordPress) {
                 mouseButtonsPressed_[event.button.button] = true;
+                if (event.button.button == SDL_BUTTON_LEFT) {
+                    primaryPressPosition_ = mousePosition_;
+                }
             }
         }
         activeDevice_ = ActiveInputDevice::KeyboardMouse;
@@ -124,9 +131,21 @@ void InputState::handleEvent(
 
     if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
         mousePosition_ = { event.button.x, event.button.y };
+        if (event.button.button == SDL_BUTTON_LEFT) {
+            primaryReleasePosition_ = mousePosition_;
+        }
         if (event.button.button < mouseButtonsDown_.size()) {
             mouseButtonsDown_[event.button.button] = false;
         }
+    }
+
+    if (event.type == SDL_EVENT_MOUSE_WHEEL && recordPress) {
+        const float direction =
+            event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1.0f : 1.0f;
+        mouseWheel_ += Vec2 { event.wheel.x, event.wheel.y } * direction;
+        mousePosition_ = { event.wheel.mouse_x, event.wheel.mouse_y };
+        mouseWheelPosition_ = mousePosition_;
+        activeDevice_ = ActiveInputDevice::KeyboardMouse;
     }
 
     if (event.type == SDL_EVENT_GAMEPAD_ADDED) {
@@ -147,6 +166,10 @@ void InputState::handleEvent(
         keyboardChordsPressed_.fill(0);
         mouseButtonsDown_.fill(false);
         mouseButtonsPressed_.fill(false);
+        primaryPressPosition_.reset();
+        primaryReleasePosition_.reset();
+        mouseWheel_ = {};
+        mouseWheelPosition_.reset();
         clearGamepadState();
     }
     if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED && activeGamepadId_ != 0) {

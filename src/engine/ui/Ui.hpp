@@ -8,9 +8,11 @@
 #include "engine/ui/TextLayout.hpp"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <span>
+#include <vector>
 #include <cstdint>
 
 namespace sokoban {
@@ -20,6 +22,40 @@ class FontAtlas;
 struct UiRect {
     Vec2 position {};
     Vec2 size {};
+
+    friend constexpr bool operator==(UiRect, UiRect) = default;
+};
+
+struct UiPointerInput {
+    Vec2 position {};
+    bool down = false;
+    std::optional<Vec2> pressedAt;
+    std::optional<Vec2> releasedAt;
+};
+
+using UiControlId = uint64_t;
+
+struct UiControlRegion {
+    UiControlId id = 0; // Zero means no control.
+    UiRect bounds {};
+    bool enabled = true;
+    bool focusable = true;
+};
+
+struct UiNavigation {
+    bool previous = false;
+    bool next = false;
+    bool activate = false;
+};
+
+struct UiInteraction {
+    UiControlId hovered = 0;
+    UiControlId focused = 0;
+    UiControlId pressed = 0;
+    UiControlId held = 0;
+    UiControlId released = 0;
+    UiControlId activated = 0;
+    bool ownsPointer = false;
 };
 
 enum class UiDrawKind : uint8_t {
@@ -41,6 +77,7 @@ struct UiDrawCommand {
     uint32_t glyphCurveOffset = 0;
     bool outlineGlyph = false;
     float fontSize = 0.0f; // Requested display size, for UI diagnostics.
+    std::optional<UiRect> clip {}; // In UI viewport coordinates.
 };
 
 // A mixed line uses the same advance, baseline and draw order for text and
@@ -72,6 +109,7 @@ public:
     explicit UiContext(const FontAtlas& font);
 
     void beginFrame(Vec2 viewportSize, Vec2 mousePosition, bool mouseDown, bool mousePressed);
+    void beginFrame(Vec2 viewportSize, UiPointerInput pointer);
     void endFrame();
 
     [[nodiscard]] const UiDrawData& drawData() const { return drawData_; }
@@ -92,13 +130,37 @@ public:
     {
         return drawData_.commands.droppedCount();
     }
-    [[nodiscard]] Vec2 mousePosition() const { return mousePosition_; }
-    [[nodiscard]] bool mouseDown() const { return mouseDown_; }
-    [[nodiscard]] bool mousePressed() const { return mousePressed_; }
+    [[nodiscard]] Vec2 mousePosition() const { return pointer_.position; }
+    [[nodiscard]] bool mouseDown() const { return pointer_.down; }
+    [[nodiscard]] std::optional<Vec2> mousePressPosition() const
+    {
+        return pointer_.pressedAt;
+    }
     [[nodiscard]] bool contains(UiRect rect, Vec2 point) const;
     [[nodiscard]] bool hovered(UiRect rect) const;
     [[nodiscard]] bool clicked(UiRect rect) const;
-    [[nodiscard]] bool drag(std::string_view id, UiRect rect);
+    // The captured drag keeps its owner outside the hit region and returns
+    // the actual release position on the final frame.
+    [[nodiscard]] std::optional<Vec2> dragPosition(std::string_view id, UiRect rect);
+
+    // Resolve the active view once, after layout and before drawing controls.
+    // Supply unique, stable IDs in paint order and use visibleRect() when
+    // collecting regions under different clips. Only the frontmost region
+    // under the press can own the gesture. A modal can supply its own scope
+    // and regions instead of those underneath it.
+    [[nodiscard]] UiInteraction resolveControls(
+        std::string_view scope,
+        std::span<const UiControlRegion> regions,
+        UiControlId focus,
+        UiNavigation navigation = {});
+    void cancelPointerInteraction();
+
+    // A scope clips drawing and hit testing to its intersection with the
+    // current clip. Scopes start at the viewport on every frame.
+    void pushClip(UiRect rect);
+    void popClip();
+    [[nodiscard]] UiRect currentClip() const;
+    [[nodiscard]] UiRect visibleRect(UiRect rect) const;
 
     void rect(UiRect rect, Vec4 color);
     void image(
@@ -124,12 +186,17 @@ public:
     void divider(UiRect rect);
     void text(Vec2 position, std::string_view text, Vec4 color, float size = 24.0f,
         GlyphRendering rendering = GlyphRendering::Automatic);
+    [[nodiscard]] const TextLayout& layoutText(std::string_view text, float size,
+        TextLayoutPurpose purpose = TextLayoutPurpose::Display) const;
+    void drawTextLayout(Vec2 position, const TextLayout& layout, Vec4 color, float size,
+        GlyphRendering rendering = GlyphRendering::Automatic);
     void inlineText(Vec2 position, std::span<const UiInlineRun> runs, Vec4 color, float size = 24.0f);
     [[nodiscard]] Vec2 measureInlineText(std::span<const UiInlineRun> runs, float size = 24.0f) const;
     [[nodiscard]] Vec2 measureText(std::string_view text, float size = 24.0f) const;
     void centeredText(UiRect rect, std::string_view text, Vec4 color, float size = 24.0f);
 
 private:
+    void pushCommand(UiDrawCommand command);
     void drawGlyph(Vec2 baseline, const struct FontGlyph& glyph, Vec4 color, float size);
     const FontAtlas* font_ = nullptr;
     // UI commands are consumed synchronously by drawFrame(), so none may
@@ -139,9 +206,12 @@ private:
     // Holds no storage of its own, so beginFrame() overwrites it rather than
     // having to destroy it before the arena underneath can be reset.
     UiDrawData drawData_;
-    Vec2 mousePosition_ {};
-    bool mouseDown_ = false;
-    bool mousePressed_ = false;
+    std::vector<UiRect> clips_;
+    UiPointerInput pointer_;
+    std::string controlScope_;
+    UiControlId capturedControl_ = 0;
+    bool resolvedControls_ = false;
+    bool pointerPressOwnedByControls_ = false;
     // One warning per context, like the arena's own.
     bool reportedDroppedCommands_ = false;
     std::string activeControl_;

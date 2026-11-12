@@ -25,17 +25,15 @@ Vec4 buttonColor(ButtonTone tone, bool hovered, bool pressed)
     return base;
 }
 
-} // namespace
-
-bool button(
+void drawButton(
     UiContext& ui,
     UiRect rect,
     std::string_view label,
-    ButtonOptions options)
+    ButtonOptions options,
+    bool hovered,
+    bool pressed)
 {
     const float scale = std::clamp(options.contentScale, 0.5f, 1.0f);
-    const bool hovered = options.enabled && ui.hovered(rect);
-    const bool pressed = hovered && ui.mouseDown();
     const Vec4 border = !options.enabled
         ? Vec4 { 0.24f, 0.26f, 0.26f, 0.65f }
         : (options.focused
@@ -51,7 +49,35 @@ bool button(
     ui.centeredText(rect, label,
         options.enabled ? textColor : Vec4 { 0.50f, 0.52f, 0.51f, 0.72f },
         24.0f * scale);
+}
+
+} // namespace
+
+bool button(
+    UiContext& ui,
+    UiRect rect,
+    std::string_view label,
+    ButtonOptions options)
+{
+    const bool hovered = options.enabled && ui.hovered(rect);
+    drawButton(ui, rect, label, options, hovered, hovered && ui.mouseDown());
     return options.enabled && (ui.clicked(rect) || options.activate);
+}
+
+bool button(
+    UiContext& ui,
+    const UiInteraction& interaction,
+    UiControlId id,
+    UiRect rect,
+    std::string_view label,
+    ButtonTone tone)
+{
+    const bool hovered = id != 0 && interaction.hovered == id;
+    drawButton(ui, rect, label, {
+        .tone = tone,
+        .focused = id != 0 && interaction.focused == id,
+    }, hovered, hovered && interaction.held == id);
+    return id != 0 && interaction.activated == id;
 }
 
 bool slider(
@@ -69,12 +95,12 @@ bool slider(
         return false;
     }
     const float oldValue = value;
-    if (enabled && ui.drag(id, rect)) {
-        const float fraction = std::clamp(
-            (ui.mousePosition().x - rect.position.x) / rect.size.x,
-            0.0f,
-            1.0f);
-        value = minimum + fraction * (maximum - minimum);
+    if (enabled && rect.size.x > 0.0f) {
+        if (const auto pointer = ui.dragPosition(id, rect)) {
+            const float fraction = std::clamp(
+                (pointer->x - rect.position.x) / rect.size.x, 0.0f, 1.0f);
+            value = minimum + fraction * (maximum - minimum);
+        }
     }
     value = std::clamp(value, minimum, maximum);
     const float fraction = (value - minimum) / (maximum - minimum);

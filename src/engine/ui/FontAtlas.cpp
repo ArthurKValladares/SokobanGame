@@ -27,20 +27,21 @@ using Buffer = Owner<hb_buffer_t, hb_buffer_destroy>;
 using Blob = Owner<hb_blob_t, hb_blob_destroy>;
 using Encoder = Owner<hb_gpu_draw_t, hb_gpu_draw_destroy>;
 
-struct LayoutQuery { std::string_view text; float size; };
-struct LayoutKey { std::string text; float size; };
+struct LayoutQuery { std::string_view text; float size; TextLayoutPurpose purpose; };
+struct LayoutKey { std::string text; float size; TextLayoutPurpose purpose; };
 struct LayoutHash {
     using is_transparent = void;
     std::size_t operator()(LayoutQuery key) const
     {
-        return std::hash<std::string_view>()(key.text) ^ (std::hash<float>()(key.size) << 1);
+        return std::hash<std::string_view>()(key.text) ^ (std::hash<float>()(key.size) << 1) ^
+            static_cast<std::size_t>(key.purpose);
     }
-    std::size_t operator()(const LayoutKey& key) const { return (*this)(LayoutQuery { key.text, key.size }); }
+    std::size_t operator()(const LayoutKey& key) const { return (*this)(LayoutQuery { key.text, key.size, key.purpose }); }
 };
 struct LayoutEqual {
     using is_transparent = void;
-    bool operator()(const LayoutKey& a, const LayoutKey& b) const { return a.size == b.size && a.text == b.text; }
-    bool operator()(LayoutQuery a, const LayoutKey& b) const { return a.size == b.size && a.text == b.text; }
+    bool operator()(const LayoutKey& a, const LayoutKey& b) const { return (*this)(LayoutQuery { a.text, a.size, a.purpose }, b); }
+    bool operator()(LayoutQuery a, const LayoutKey& b) const { return a.size == b.size && a.purpose == b.purpose && a.text == b.text; }
     bool operator()(const LayoutKey& a, LayoutQuery b) const { return (*this)(b, a); }
 };
 
@@ -77,6 +78,28 @@ FontGlyph curveGlyph(const Curve& curve, float size)
     return { .uv = { { x, y }, { w, -h } }, .offset = { x * scale, -y * scale },
         .size = { w * scale, h * scale }, .advance = curve.advance * scale,
         .curveOffset = curve.offset, .outline = true };
+}
+
+void appendCaretSpans(std::vector<TextCaretSpan>& spans, std::span<const TextBoundary> boundaries,
+    std::size_t base, std::size_t start, std::size_t end, float left, float right, bool rtl)
+{
+    const auto first = std::ranges::upper_bound(boundaries, start, {}, &TextBoundary::end);
+    const auto last = std::ranges::upper_bound(boundaries, end, {}, &TextBoundary::end);
+    if (first == last) return;
+
+    // A ligature may cover several graphemes. Keep each editable, using
+    // evenly spaced stops within the shaped cluster's advance.
+    const auto firstSpan = static_cast<std::ptrdiff_t>(spans.size());
+    const float finish = rtl ? left : right;
+    float x = rtl ? right : left;
+    const float step = (finish - x) / static_cast<float>(last - first);
+    for (auto current = first; current != last; ++current) {
+        const auto logicalStart = current == boundaries.begin() ? 0 : (current - 1)->end;
+        const float next = current + 1 == last ? finish : x + step;
+        spans.push_back({ base + logicalStart, base + current->end, x, next });
+        x = next;
+    }
+    if (rtl) std::reverse(spans.begin() + firstSpan, spans.end());
 }
 
 } // namespace
@@ -238,7 +261,7 @@ struct FontAtlas::Impl {
             float(hb_font_get_glyph_h_advance(face.hb, id)))).first->second;
     }
 
-    TextLayout shape(std::string_view text, float size)
+    TextLayout shape(std::string_view text, float size, TextLayoutPurpose purpose)
     {
         TextLayout result;
         result.ascent = baseAscent * size / baseSize;
@@ -249,7 +272,7 @@ struct FontAtlas::Impl {
             const auto separator = findTextLineBreak(text.substr(start));
             const auto part = text.substr(start, separator ? separator->offset : std::string_view::npos);
             float pen = 0.0f;
-            if (!part.empty()) shapeLine(result, part, size, start, baseline, pen);
+            if (!part.empty()) shapeLine(result, part, size, start, baseline, pen, purpose);
             result.extent.x = std::max(result.extent.x, pen);
             result.extent.y = baseline + result.lineHeight;
             if (!separator) break;
@@ -260,7 +283,7 @@ struct FontAtlas::Impl {
     }
 
     void shapeLine(TextLayout& result, std::string_view text, float size,
-        std::size_t baseCluster, float baseline, float& pen)
+        std::size_t baseCluster, float baseline, float& pen, TextLayoutPurpose purpose)
     {
         const SBCodepointSequence sequence { SBStringEncodingUTF8, text.data(), text.size() };
         Owner<const _SBAlgorithm, SBAlgorithmRelease> algorithm(SBAlgorithmCreate(&sequence), SBAlgorithmRelease);
@@ -327,13 +350,25 @@ struct FontAtlas::Impl {
                 const auto* info = hb_buffer_get_glyph_infos(buffer.get(), &count);
                 const auto* positions = hb_buffer_get_glyph_positions(buffer.get(), nullptr);
                 const float scale = size / metricHeight(face.ft);
+                float clusterX = pen;
+                std::size_t rtlClusterEnd = last;
                 for (unsigned index = 0; index < count; ++index) {
                     const auto p = positions[index];
+                    const float advance = float(p.x_advance) * scale;
                     result.glyphs.push_back({ .id = info[index].codepoint,
                         .cluster = static_cast<uint32_t>(baseCluster + info[index].cluster), .face = item.face,
                         .position = { pen + float(p.x_offset) * scale, baseline - float(p.y_offset) * scale },
-                        .advance = float(p.x_advance) * scale });
-                    pen += float(p.x_advance) * scale;
+                        .advance = advance });
+                    pen += advance;
+                    if (purpose == TextLayoutPurpose::Editing &&
+                        (index + 1 == count || info[index].cluster != info[index + 1].cluster)) {
+                        const std::size_t cluster = info[index].cluster;
+                        const std::size_t end = rtl ? rtlClusterEnd
+                            : (index + 1 == count ? last : info[index + 1].cluster);
+                        appendCaretSpans(result.caretSpans, boundaries, baseCluster, cluster, end, clusterX, pen, rtl);
+                        clusterX = pen;
+                        rtlClusterEnd = cluster;
+                    }
                 }
             };
             if (rtl) for (auto it = items.rbegin(); it != items.rend(); ++it) shapeItem(*it);
@@ -424,14 +459,14 @@ FontGlyph FontAtlas::glyph(const PositionedGlyph& glyph, float size, GlyphRender
     return bitmap;
 }
 
-const TextLayout& FontAtlas::layoutText(std::string_view text, float size) const
+const TextLayout& FontAtlas::layoutText(std::string_view text, float size, TextLayoutPurpose purpose) const
 {
     if (!std::isfinite(size) || size <= 0.0f || text.size() > std::size_t(std::numeric_limits<int>::max())) {
         throw std::invalid_argument("Invalid text layout size");
     }
-    const LayoutQuery query { text, size };
+    const LayoutQuery query { text, size, purpose };
     if (const auto it = impl_->layouts.find(query); it != impl_->layouts.end()) return it->second;
-    return impl_->layouts.emplace(LayoutKey { std::string(text), size }, impl_->shape(text, size)).first->second;
+    return impl_->layouts.emplace(LayoutKey { std::string(text), size, purpose }, impl_->shape(text, size, purpose)).first->second;
 }
 Vec2 FontAtlas::measureText(std::string_view text, float size) const { return layoutText(text, size).extent; }
 

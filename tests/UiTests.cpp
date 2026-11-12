@@ -189,6 +189,16 @@ void testReusableControls()
         ui, "slider", { { 10.0f, 70.0f }, { 200.0f, 30.0f } },
         value, 0.0f, 1.0f));
     CHECK(value > 0.45f && value < 0.55f);
+    ui.endFrame();
+    ui.beginFrame({ 400.0f, 200.0f }, {
+        .position = { 110.0f, 85.0f },
+        .releasedAt = sokoban::Vec2 { 260.0f, 120.0f },
+    });
+    CHECK(sokoban::uiControls::slider(
+        ui, "slider", { { 10.0f, 70.0f }, { 200.0f, 30.0f } },
+        value, 0.0f, 1.0f));
+    CHECK(value == 1.0f);
+    ui.endFrame();
 
     value = 0.25f;
     ui.beginFrame({ 400.0f, 200.0f }, { 110.0f, 85.0f }, true, true);
@@ -330,7 +340,7 @@ void testOptionsRemainReachableAtSupportedWindowSizes()
     TEST("optionsRemainReachableAtSupportedWindowSizes");
     const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
     sokoban::UiContext ui(font);
-    const sokoban::OptionsMenuView view;
+    sokoban::OptionsMenuView view;
     sokoban::UserSettings settings;
     settings.video.vsync = false;
     settings.video.customRenderScale = true;
@@ -403,7 +413,8 @@ void testOptionsRemainReachableAtSupportedWindowSizes()
                 CHECK(std::ranges::all_of(
                     ui.drawData().commands,
                     [&](const sokoban::UiDrawCommand& command) {
-                        return rectInsideViewport(command.rect, viewport);
+                        return rectInsideViewport(
+                            command.clip.value_or(command.rect), viewport);
                     }));
                 CHECK(std::ranges::any_of(
                     ui.drawData().commands,
@@ -453,6 +464,171 @@ void testOptionsRemainReachableAtSupportedWindowSizes()
                 activate->row == sokoban::OptionsMenuRowId::Back);
         }
     }
+}
+
+void testOptionsOverflowScrolling()
+{
+    TEST("optionsOverflowScrolling");
+    using namespace sokoban;
+    const FontAtlas font = FontAtlas::load(fontPath);
+    UiContext ui(font);
+    OptionsMenuView view;
+    UserSettings settings;
+    settings.video.vsync = false;
+    settings.video.customRenderScale = true;
+    settings.video.ambientOcclusion = true;
+    OptionsMenuState state {
+        .open = true,
+        .page = OptionsMenuPage::Graphics,
+    };
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const auto draw = [&](Vec2 pointer, OptionsMenuViewInput input = {}) {
+        ui.beginFrame(viewport, pointer, false, false);
+        CHECK(!view.draw(ui, viewport, state, settings, nullptr, nullptr, input));
+        ui.endFrame();
+    };
+    const auto thumb = [&] {
+        const auto it = std::ranges::find_if(ui.drawData().commands,
+            [](const UiDrawCommand& command) {
+                return command.kind == UiDrawKind::Solid &&
+                    command.color == Vec4 { 0.40f, 0.56f, 0.53f, 1.0f };
+            });
+        CHECK(it != ui.drawData().commands.end());
+        return it == ui.drawData().commands.end() ? UiRect {} : it->rect;
+    };
+
+    draw({});
+    const UiRect initialThumb = thumb();
+    const auto clippedCommand = std::ranges::find_if(ui.drawData().commands,
+        [](const UiDrawCommand& command) { return command.clip.has_value(); });
+    CHECK(clippedCommand != ui.drawData().commands.end());
+    if (clippedCommand == ui.drawData().commands.end()) {
+        return;
+    }
+    const UiRect clip = *clippedCommand->clip;
+    const Vec2 inside = clip.position + clip.size * 0.5f;
+    draw({}, { .wheelY = -100.0f });
+    CHECK(thumb().position == initialThumb.position);
+    draw(inside, { .wheelY = -100.0f, .wheelPosition = Vec2 {} });
+    CHECK(thumb().position == initialThumb.position);
+    draw({}, { .wheelY = -0.5f, .wheelPosition = inside });
+    const float fractionalPosition = thumb().position.y;
+    CHECK(fractionalPosition > initialThumb.position.y);
+    draw(inside);
+    CHECK(thumb().position.y == fractionalPosition);
+    draw(inside, { .wheelY = -100.0f });
+    CHECK(thumb().position.y > fractionalPosition);
+    draw(inside, { .revealSelection = true });
+    CHECK(thumb().position.y < fractionalPosition);
+    CHECK(std::ranges::any_of(ui.drawData().commands, isFocusedOptionsCommand));
+
+    const UiRect beforeDrag = thumb();
+    const Vec2 press = beforeDrag.position + beforeDrag.size * 0.25f;
+    ui.beginFrame(viewport, {
+        .position = press + Vec2 { 0.0f, 12.0f },
+        .down = true,
+        .pressedAt = press,
+    });
+    CHECK(!view.draw(ui, viewport, state, settings));
+    ui.endFrame();
+    checkNear(thumb().position.y, beforeDrag.position.y + 12.0f,
+        "scrollbar keeps the original grab point");
+
+    // A render-scale preview still commits on release after its row scrolls
+    // outside the body. Drawing is clipped without skipping the control.
+    state.customRenderScalePreview = 42;
+    constexpr Vec2 shortViewport { 640.0f, 260.0f };
+    ui.beginFrame(shortViewport, { 320.0f, 180.0f }, false, false);
+    const auto released = view.draw(ui, shortViewport, state, settings,
+        nullptr, nullptr, { .wheelY = -100.0f });
+    ui.endFrame();
+    const auto* commit = released
+        ? std::get_if<options::intent::SetSlider>(&*released) : nullptr;
+    CHECK(commit && commit->row == OptionsMenuRowId::CustomRenderScale &&
+        commit->commit);
+    state.customRenderScalePreview.reset();
+
+    constexpr Vec2 largeViewport { 1280.0f, 900.0f };
+    ui.beginFrame(largeViewport, {}, false, false);
+    CHECK(!view.draw(ui, largeViewport, state, settings));
+    ui.endFrame();
+    CHECK(std::ranges::none_of(ui.drawData().commands,
+        [](const UiDrawCommand& command) { return command.clip.has_value(); }));
+    draw({});
+    CHECK(thumb().position == initialThumb.position);
+}
+
+void testControlsSearchFiltersRemappableActions()
+{
+    TEST("controlsSearchFiltersRemappableActions");
+    using namespace sokoban;
+    const auto font = FontAtlas::load(fontPath);
+    UiContext ui(font);
+    OptionsMenuView view;
+    const UserSettings settings;
+    OptionsMenuState state { .open = true, .page = OptionsMenuPage::Controls };
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const auto draw = [&](UiPointerInput pointer = {}) {
+        ui.beginFrame(viewport, pointer);
+        CHECK(!view.draw(ui, viewport, state, settings));
+        ui.endFrame();
+    };
+
+    CHECK(view.focusControlsSearch(state));
+    draw();
+    auto* target = view.activeTextEdit(state);
+    CHECK(target != nullptr);
+    if (!target) return;
+    const UiRect originalCaret = view.textCaret();
+    CHECK(originalCaret.size.y > 0.0f);
+
+    target->setComposition("move", 4, 0);
+    CHECK(view.controlsSearchQuery(state) == std::string_view {});
+    CHECK(target->insert("doWN  move"));
+    const auto query = view.controlsSearchQuery(state);
+    CHECK(query == std::string_view("doWN  move"));
+    if (!query) return;
+    state = reduceOptionsMenu(state, settings,
+        options::intent::SetControlsFilter { std::string(*query) }).state;
+    draw();
+    CHECK(view.textCaret().position.y == originalCaret.position.y);
+
+    const auto rows = optionsMenuRows(state, settings);
+    CHECK(std::ranges::count_if(rows, [](const OptionsMenuRow& row) {
+        return row.kind == OptionsMenuRowKind::Binding;
+    }) == 1);
+    CHECK(rows.at(static_cast<std::size_t>(state.selectedRow)).id ==
+        OptionsMenuRowId::MoveDown);
+    CHECK(rows.back().id == OptionsMenuRowId::Back);
+
+    view.blurControlsSearch();
+    CHECK(view.activeTextEdit(state) == nullptr);
+    CHECK(view.controlsSearchQuery(state) == query);
+    const Vec2 click = originalCaret.position + Vec2 { 2.0f, 2.0f };
+    CHECK(view.handleControlsSearchPress(ui, state, click, false));
+    CHECK(view.activeTextEdit(state) == target);
+    CHECK(target->insert("x"));
+    const std::size_t caretAfterTyping = target->caret();
+    draw({ .position = click, .down = true, .pressedAt = click });
+    CHECK(view.activeTextEdit(state) == target);
+    CHECK(target->caret() == caretAfterTyping);
+    CHECK(view.handleControlsSearchPress(ui, state, { 0.0f, 0.0f }, false));
+    CHECK(view.activeTextEdit(state) == nullptr);
+
+    const auto capture = reduceOptionsMenu(state, settings,
+        options::intent::ActivateSelected {}).state;
+    CHECK(capture.capturingAction == InputAction::MoveDown);
+    CHECK(!view.focusControlsSearch(capture));
+    CHECK(view.activeTextEdit(capture) == nullptr);
+    state = reduceOptionsMenu(state, settings,
+        options::intent::SetControlsFilter { "no such action" }).state;
+    CHECK(std::ranges::none_of(optionsMenuRows(state, settings), [](const OptionsMenuRow& row) {
+        return row.kind == OptionsMenuRowKind::Binding;
+    }));
+    state = reduceOptionsMenu(state, settings, options::intent::Back {}).state;
+    CHECK(state.controlsFilter.empty());
+    draw();
+    CHECK(!view.controlsSearchQuery(state));
 }
 
 void testOptionsNavigationAndSettings()
@@ -558,7 +734,7 @@ void testFrameRateStepperPreservesSemanticValues()
     TEST("frameRateStepperPreservesSemanticValues");
     const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
     sokoban::UiContext ui(font);
-    const sokoban::OptionsMenuView view;
+    sokoban::OptionsMenuView view;
     sokoban::OptionsMenuState state {
         .open = true,
         .page = sokoban::OptionsMenuPage::Graphics,
@@ -1055,6 +1231,77 @@ void testDebugEditorControlBindings()
     CHECK(editorBindingRows == editorActions + 1);
 }
 #endif
+
+void testNestedClips()
+{
+    TEST("nestedClipsConstrainDrawingAndHitTesting");
+    using namespace sokoban;
+    const FontAtlas font = FontAtlas::load(fontPath);
+    UiContext ui(font);
+    const UiRect viewport { {}, { 200, 120 } };
+    const UiRect outer { { 20, 20 }, { 150, 80 } };
+    const UiRect inner { { 40, 30 }, { 160, 55 } };
+    const UiRect overlap { { 40, 30 }, { 130, 55 } };
+    constexpr Vec4 white { 1, 1, 1, 1 };
+
+    ui.beginFrame(viewport.size, { 25, 25 }, true, true);
+    CHECK(ui.currentClip() == viewport);
+    ui.rect(viewport, white);
+    ui.pushClip(outer);
+    CHECK(ui.clicked(viewport));
+    ui.rect(viewport, white);
+    ui.pushClip(inner);
+    CHECK(ui.currentClip() == overlap);
+    CHECK(ui.visibleRect(viewport) == overlap);
+    CHECK(!ui.hovered(viewport));
+    CHECK(!ui.clicked(viewport));
+
+    const UiRect imageRect { { 30, 25 }, { 90, 60 } };
+    const UiRect uv { { 0.2f, 0.1f }, { 0.6f, 0.8f } };
+    ui.image(imageRect, uv);
+    ui.textureImage(imageRect, RenderTexture { 7 }, uv, white,
+        NineSlice::preserveSourcePixels({ 0.1f, 0.1f, 0.1f, 0.1f }));
+    ui.sceneImage(imageRect, uv);
+    ui.text({ 50, 35 }, "X", white);
+    const std::size_t drawn = ui.drawData().commands.size();
+    CHECK(drawn == 6);
+
+    ui.rect({ { 170, 50 }, { 10, 10 } }, white);
+    ui.pushClip({ { 175, 30 }, { 25, 10 } });
+    CHECK(ui.currentClip().size.x == 0);
+    ui.rect(viewport, white);
+    CHECK(ui.drawData().commands.size() == drawn);
+    ui.popClip();
+    ui.popClip();
+    ui.rect(viewport, white);
+    ui.popClip();
+    ui.rect(viewport, white);
+    ui.endFrame();
+
+    const auto& commands = ui.drawData().commands;
+    if (commands.size() == 8) {
+        CHECK(!commands[0].clip);
+        CHECK(commands[1].clip == outer);
+        for (std::size_t i = 2; i < 6; ++i) {
+            CHECK(commands[i].clip == overlap);
+        }
+        for (std::size_t i = 2; i < 5; ++i) {
+            CHECK(commands[i].rect == imageRect);
+            CHECK(commands[i].uvRect == uv);
+        }
+        CHECK(commands[6].clip == outer);
+        CHECK(!commands[7].clip);
+    } else {
+        CHECK(commands.size() == 8);
+    }
+
+    ui.beginFrame(viewport.size, { 170, 50 }, true, true);
+    ui.pushClip(outer);
+    CHECK(!ui.hovered(viewport)); // Right edge is excluded.
+    ui.popClip();
+    CHECK(ui.hovered(viewport));
+    ui.endFrame();
+}
 
 void testUiFrameArenaCommandBudget()
 {
@@ -1655,6 +1902,69 @@ void testActionRegistryConsumers()
     }
 }
 
+void testControlFocusAndPointerCapture()
+{
+    TEST("controlFocusAndPointerCapture");
+    using namespace sokoban;
+    const auto font = FontAtlas::load(fontPath);
+    UiContext ui(font);
+    constexpr Vec2 viewport { 200.0f, 120.0f };
+    constexpr Vec2 overlap { 45.0f, 25.0f };
+    constexpr Vec2 outside { 180.0f, 110.0f };
+    constexpr std::array regions {
+        UiControlRegion { 1, { { 10.0f, 10.0f }, { 60.0f, 40.0f } } },
+        UiControlRegion { 2, { { 30.0f, 15.0f }, { 60.0f, 40.0f } } },
+        UiControlRegion { 3, { { 100.0f, 15.0f }, { 60.0f, 40.0f } }, false },
+    };
+    UiControlId focus = 0;
+    const auto frame = [&](UiPointerInput pointer, UiNavigation navigation = {},
+                           std::string_view scope = "editor",
+                           std::optional<UiRect> clip = {}) {
+        ui.beginFrame(viewport, pointer);
+        if (clip) ui.pushClip(*clip);
+        const auto result = ui.resolveControls(scope, regions, focus, navigation);
+        CHECK(!ui.clicked(regions[0].bounds));
+        if (clip) ui.popClip();
+        focus = result.focused;
+        ui.endFrame();
+        return result;
+    };
+
+    CHECK(frame({}, { .next = true }).focused == 2);
+    const auto wrapped = frame({}, { .next = true, .activate = true });
+    CHECK(wrapped.focused == 1);
+    CHECK(wrapped.activated == 1);
+
+    const auto press = frame({ .position = overlap, .down = true, .pressedAt = overlap });
+    CHECK(press.pressed == 2);
+    CHECK(press.focused == 2);
+    CHECK(press.held == 2);
+    CHECK(press.activated == 0);
+    const auto drag = frame({ .position = outside, .down = true });
+    CHECK(drag.held == 2);
+    CHECK(drag.ownsPointer);
+    const auto release = frame({ .position = overlap, .releasedAt = outside });
+    CHECK(release.released == 2);
+    CHECK(release.activated == 0);
+
+    const auto tap = frame({
+        .position = outside, .pressedAt = overlap, .releasedAt = overlap,
+    });
+    CHECK(tap.pressed == 2);
+    CHECK(tap.activated == 2);
+    CHECK(tap.held == 0);
+
+    (void)frame({ .position = overlap, .down = true, .pressedAt = overlap });
+    ui.cancelPointerInteraction();
+    CHECK(frame({ .position = overlap, .releasedAt = overlap }).activated == 0);
+    (void)frame({ .position = overlap, .down = true, .pressedAt = overlap });
+    CHECK(frame({ .position = overlap, .releasedAt = overlap }, {}, "modal").activated == 0);
+
+    constexpr UiRect clip { {}, { 25.0f, 60.0f } };
+    CHECK(frame({ .position = overlap, .pressedAt = overlap }, {}, "editor", clip).pressed == 0);
+    CHECK(focus == 1);
+}
+
 } // namespace
 
 int main()
@@ -1737,6 +2047,8 @@ int main()
     }
     testFontAtlasAndText();
     testShapedTextAndScalableIcons();
+    testNestedClips();
+    testControlFocusAndPointerCapture();
     testUiFrameArenaCommandBudget();
     testReusableControls();
     testSelectorPromptShowsInteractAndPreviewBindings();
@@ -1747,6 +2059,8 @@ int main()
     testScreenPreviewOverlayUsesCenteredSeventyFivePercentInset();
     testLayoutTree();
     testOptionsRemainReachableAtSupportedWindowSizes();
+    testOptionsOverflowScrolling();
+    testControlsSearchFiltersRemappableActions();
     testOptionsNavigationAndSettings();
     testFrameRateStepperPreservesSemanticValues();
     testControlsRemapping();

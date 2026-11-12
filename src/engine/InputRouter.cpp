@@ -37,7 +37,8 @@ InputRouter::EventResult InputRouter::routeEvent(
     const bool mouseEvent =
         event.type == SDL_EVENT_MOUSE_MOTION ||
         event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
-        event.type == SDL_EVENT_MOUSE_BUTTON_UP;
+        event.type == SDL_EVENT_MOUSE_BUTTON_UP ||
+        event.type == SDL_EVENT_MOUSE_WHEEL;
     // Held editor modifiers, the modifier keys chords need, and the gizmo
     // keys keep their physical state accurate while a panel has keyboard
     // focus; they only change what the next viewport click does.
@@ -96,6 +97,7 @@ InputRouter::BackAction InputRouter::backAction(
     if (!input.actionPressed(InputAction::MenuBack)) {
         return BackAction::None;
     }
+    if (context.nativeTextEditing) return BackAction::ShellBack;
     if (context.lecternOpen) return BackAction::None;
     if (context.draftExitConfirmationOpen) {
         return BackAction::CloseDraftConfirmation;
@@ -121,7 +123,8 @@ InputRouter::Frame InputRouter::routeFrame(
     const bool shellOpen = context.optionsOpen || context.titleOpen;
     const bool gameplayActive = !shellOpen &&
         !context.editorEditing &&
-        !context.draftExitConfirmationOpen;
+        !context.draftExitConfirmationOpen &&
+        !context.nativeTextEditing;
 
     Frame frame;
     if (gameplayActive) {
@@ -144,15 +147,15 @@ InputRouter::Frame InputRouter::routeFrame(
             .dismissPressed = input.actionPressed(InputAction::MenuBack),
         };
     }
-    if (context.titleOpen && !context.optionsOpen) {
+    if (context.titleOpen && !context.optionsOpen && !context.nativeTextEditing) {
         frame.title = { up, down, left, right, confirm };
     }
-    if (context.optionsOpen) {
+    if (context.optionsOpen && !context.nativeTextEditing) {
         frame.options = { up, down, left, right, confirm };
     }
 
     if ((context.editorEditing || context.draftPlaying) && !shellOpen &&
-        !context.keyboardCaptured) {
+        !context.keyboardCaptured && !context.nativeTextEditing) {
         const bool fromCursor =
             input.actionPressed(InputAction::EditorPlayFromCursor);
         frame.toggleDraftPlaybackPressed =
@@ -166,9 +169,12 @@ InputRouter::Frame InputRouter::routeFrame(
     frame.pointer = {
         .position = input.mousePosition(),
         .primaryDown = input.mouseButtonDown(SDL_BUTTON_LEFT),
-        .primaryPressed = input.mouseButtonPressed(SDL_BUTTON_LEFT),
+        .primaryPressedAt = input.primaryPressPosition(),
+        .primaryReleasedAt = input.primaryReleasePosition(),
+        .wheel = input.mouseWheel(),
+        .wheelPosition = input.mouseWheelPosition(),
     };
-    if (context.editorEditing && !shellOpen) {
+    if (context.editorEditing && !shellOpen && !context.nativeTextEditing) {
         // A focused text field or panel owns the keyboard. Held modifiers
         // still apply so a panel click does not strand them.
         const bool shortcuts = !context.keyboardCaptured;

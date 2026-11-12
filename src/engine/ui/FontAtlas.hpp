@@ -60,7 +60,8 @@ public:
     [[nodiscard]] FontGlyph glyph(const PositionedGlyph& glyph, float size,
         GlyphRendering rendering = GlyphRendering::Automatic, float subpixelX = 0.0f) const;
     // References remain valid until beginFrame() or a fallback font change.
-    [[nodiscard]] const TextLayout& layoutText(std::string_view text, float size) const;
+    [[nodiscard]] const TextLayout& layoutText(std::string_view text, float size,
+        TextLayoutPurpose purpose = TextLayoutPurpose::Display) const;
     [[nodiscard]] Vec2 measureText(std::string_view text, float size) const;
     [[nodiscard]] uint32_t registerIcon(std::string_view name, const VectorIcon& icon);
     [[nodiscard]] uint32_t findIcon(std::string_view name) const;

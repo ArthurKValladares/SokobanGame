@@ -675,12 +675,16 @@ add_library(sokoban_ui STATIC
     src/engine/ui/InputPrompts.cpp
     src/engine/ui/MenuKit.cpp
     src/engine/ui/OptionsMenu.cpp
+    src/engine/ui/SdlTextInput.cpp
     src/engine/ui/SelectorPrompt.cpp
     src/engine/ui/LecternDialog.cpp
     src/engine/ui/TitleScreen.cpp
     src/engine/ui/Ui.cpp
     src/engine/ui/UiControls.cpp
     src/engine/ui/UiLayout.cpp
+    src/engine/ui/UiScroll.cpp
+    src/engine/ui/UiTextEdit.cpp
+    src/engine/ui/UiTextField.cpp
 )
 add_library(Sokoban::ui ALIAS sokoban_ui)
 target_include_directories(sokoban_ui PUBLIC src)
@@ -1387,6 +1391,19 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_ui
         ASSET_DIR
         SOURCES tests/UiTests.cpp
+    )
+    sokoban_add_test(NAME ui_text_edit
+        LIBS sokoban_ui
+        SOURCES tests/UiTextEditTests.cpp
+    )
+    sokoban_add_test(NAME ui_text_field
+        LIBS sokoban_ui
+        ASSET_DIR
+        SOURCES tests/UiTextFieldTests.cpp
+    )
+    sokoban_add_test(NAME sdl_text_input
+        LIBS sokoban_ui
+        SOURCES tests/SdlTextInputTests.cpp
     )
     sokoban_add_test(NAME title
         LIBS sokoban_ui
