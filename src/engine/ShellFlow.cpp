@@ -9,6 +9,10 @@ void reduceBack(const ShellFacts& facts, std::vector<ShellCommand>& commands)
         commands.push_back(shell::OptionsBack {});
         return;
     }
+    if (facts.makerOpen) {
+        commands.push_back(shell::CloseMaker {});
+        return;
+    }
     if (facts.titleOpen) {
         if (facts.titleAtMainPage) {
             commands.push_back(shell::OpenOptions { .pauseContext = false });
@@ -45,6 +49,9 @@ void reduceTitle(
         },
         [&](const title::DeleteSlot& deleteSlot) {
             commands.push_back(shell::DeleteSlot { deleteSlot.slot });
+        },
+        [&](const title::OpenMaker&) {
+            commands.push_back(shell::OpenMaker {});
         },
         [&](const title::OpenOptions&) {
             commands.push_back(shell::OpenOptions { .pauseContext = false });

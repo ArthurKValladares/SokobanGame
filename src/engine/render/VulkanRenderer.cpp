@@ -1325,25 +1325,40 @@ std::optional<GridPosition3> VulkanRenderer::pickIsoGridCell(
     Vec2 pixelPosition) const
 {
     const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
-    const RenderFrameData& frameData = prepared.frameData;
-    // The one guard that is not shared: a grid cell needs a board to be on.
-    if (frameData.levelWidth == 0 || frameData.levelHeight == 0) {
-        return std::nullopt;
-    }
     const std::optional<PickTarget> target =
         pickTargetFor(prepared, pixelPosition);
     if (!target) {
         return std::nullopt;
     }
-    const VkExtent2D outputExtent = target->extent;
-    const Vec2 mappedPosition = target->position;
-    return scenePreparer_.pickGridCell(
-        prepared.scene,
-        mappedPosition,
-        {
-            static_cast<float>(outputExtent.width),
-            static_cast<float>(outputExtent.height),
-        },
+    return pickGridCell(prepared, target->position, {
+        static_cast<float>(target->extent.width),
+        static_cast<float>(target->extent.height),
+    });
+}
+
+std::optional<GridPosition3> VulkanRenderer::pickIsoGridCell(
+    const PreparedFrame& frame,
+    Vec2 pixelPosition,
+    UiRect nativeViewport) const
+{
+    const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
+    const Vec2 local = pixelPosition - nativeViewport.position;
+    if (prepared.frameData.viewMode != RenderViewMode::Isometric3D ||
+        !(local.x >= 0.0f && local.y >= 0.0f &&
+            local.x < nativeViewport.size.x && local.y < nativeViewport.size.y)) {
+        return std::nullopt;
+    }
+    return pickGridCell(prepared, local, nativeViewport.size);
+}
+
+std::optional<GridPosition3> VulkanRenderer::pickGridCell(
+    const PreparedFrameScratch& prepared, Vec2 pixelPosition, Vec2 extent) const
+{
+    const RenderFrameData& frameData = prepared.frameData;
+    if (frameData.levelWidth == 0 || frameData.levelHeight == 0) {
+        return std::nullopt;
+    }
+    return scenePreparer_.pickGridCell(prepared.scene, pixelPosition, extent,
         frameData.levelWidth,
         frameData.levelHeight,
         frameData.gridPickBorder);

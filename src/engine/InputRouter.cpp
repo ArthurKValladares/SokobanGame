@@ -97,7 +97,7 @@ InputRouter::BackAction InputRouter::backAction(
     if (!input.actionPressed(InputAction::MenuBack)) {
         return BackAction::None;
     }
-    if (context.nativeTextEditing) return BackAction::ShellBack;
+    if (context.nativeTextEditing || context.makerOpen) return BackAction::ShellBack;
     if (context.lecternOpen) return BackAction::None;
     if (context.draftExitConfirmationOpen) {
         return BackAction::CloseDraftConfirmation;
@@ -120,7 +120,7 @@ InputRouter::Frame InputRouter::routeFrame(
     const bool left = input.actionPressed(InputAction::MoveLeft);
     const bool right = input.actionPressed(InputAction::MoveRight);
     const bool confirm = input.actionPressed(InputAction::MenuConfirm);
-    const bool shellOpen = context.optionsOpen || context.titleOpen;
+    const bool shellOpen = context.optionsOpen || context.titleOpen || context.makerOpen;
     const bool gameplayActive = !shellOpen &&
         !context.editorEditing &&
         !context.draftExitConfirmationOpen &&
@@ -147,11 +147,19 @@ InputRouter::Frame InputRouter::routeFrame(
             .dismissPressed = input.actionPressed(InputAction::MenuBack),
         };
     }
-    if (context.titleOpen && !context.optionsOpen && !context.nativeTextEditing) {
+    if (context.titleOpen && !context.optionsOpen && !context.makerOpen &&
+        !context.nativeTextEditing) {
         frame.title = { up, down, left, right, confirm };
     }
     if (context.optionsOpen && !context.nativeTextEditing) {
         frame.options = { up, down, left, right, confirm };
+    }
+    if (context.makerOpen && !context.optionsOpen && !context.nativeTextEditing) {
+        frame.maker = {
+            .previous = up || left,
+            .next = down || right,
+            .activate = confirm,
+        };
     }
 
     if ((context.editorEditing || context.draftPlaying) && !shellOpen &&

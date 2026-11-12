@@ -46,6 +46,10 @@ void testBackRouting()
     CHECK(only<sokoban::shell::OptionsBack>(flow.handle(
         sokoban::ShellBackPressed {},
         { .optionsOpen = true, .titleOpen = true })));
+    CHECK(only<sokoban::shell::OptionsBack>(flow.handle(
+        sokoban::ShellBackPressed {}, { .optionsOpen = true, .makerOpen = true })));
+    CHECK(only<sokoban::shell::CloseMaker>(flow.handle(
+        sokoban::ShellBackPressed {}, { .titleOpen = true, .makerOpen = true })));
 
     // Title sub-pages step back; the main page opens title-context Options.
     CHECK(only<sokoban::shell::TitleBack>(flow.handle(
@@ -71,6 +75,8 @@ void testBackRouting()
     // The window's close button always goes through the confirmation.
     CHECK(only<sokoban::shell::RequestQuitConfirmation>(flow.handle(
         sokoban::ShellCloseRequested {}, {})));
+    CHECK(only<sokoban::shell::RequestQuitConfirmation>(flow.handle(
+        sokoban::ShellCloseRequested {}, { .makerOpen = true })));
 }
 
 void testTitleResults()
@@ -123,6 +129,10 @@ void testTitleResults()
         const auto* deleteSlot = commandAt<sokoban::shell::DeleteSlot>(commands, 0);
         CHECK(commands.size() == 1 && deleteSlot != nullptr && deleteSlot->slot == 0);
     }
+
+    CHECK(only<sokoban::shell::OpenMaker>(flow.handle(
+        sokoban::ShellTitleAction { sokoban::title::OpenMaker {} },
+        { .gameLoaded = true, .titleOpen = true })));
 
     // Options from the title does not carry pause context.
     {

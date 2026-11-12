@@ -535,7 +535,8 @@ private:
         // Ordinary levels can be expanded by painting the one-cell border.
         // Overworld component dimensions are fixed by layout.json, and a
         // border would make a displayed neighbor look editable.
-        frame.gridPickBorder = input_.editor.editingOverworld() ? 0U : 1U;
+        frame.gridPickBorder =
+            input_.allowBoardExpansion && !input_.editor.editingOverworld() ? 1U : 0U;
         frame.groundRockSideTexture = input_.manifest.findTextureIdByName(groundRockSideTextureName);
         // Previews the edited screen's own map, so what the brush paints is
         // what is on screen. A scratch document belongs to no screen and falls
@@ -1238,7 +1239,7 @@ private:
 
     void appendExpansionPickCells(RenderFrameData& frame) const
     {
-        if (input_.editor.editingOverworld()) {
+        if (frame.gridPickBorder == 0) {
             return;
         }
         const int expansionPickLayer = layerLocked_

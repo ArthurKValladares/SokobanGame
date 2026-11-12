@@ -44,10 +44,11 @@ void testTitleNavigationAndResults()
     CHECK(title.isOpen());
     CHECK(title.page() == sokoban::TitleScreen::Page::Main);
 
+    sokoban::Vec2 viewport { 1280.0f, 720.0f };
     auto draw = [&](sokoban::TitleScreenInput input = {}) {
-        ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+        ui.beginFrame(viewport, {}, false, false);
         const std::optional<sokoban::TitleAction> result =
-            title.draw(ui, { 1280.0f, 720.0f }, input);
+            title.draw(ui, viewport, input);
         ui.endFrame();
         return result;
     };
@@ -73,9 +74,11 @@ void testTitleNavigationAndResults()
     CHECK(rightmostGlyph > 0.0f);
     CHECK(rightmostGlyph < 640.0f);
 
-    // Active slot has a save: rows are Continue, Save Slot, Options, Quit.
+    // Active slot has a save: Continue, Save Slot, Make, Options, Quit.
     CHECK(isAction<sokoban::title::Continue>(draw({ .confirm = true })));
     draw({ .down = true });
+    draw({ .down = true });
+    CHECK(isAction<sokoban::title::OpenMaker>(draw({ .confirm = true })));
     draw({ .down = true });
     CHECK(isAction<sokoban::title::OpenOptions>(draw({ .confirm = true })));
     draw({ .down = true });
@@ -85,6 +88,13 @@ void testTitleNavigationAndResults()
     title.open();
     draw({ .up = true });
     CHECK(isAction<sokoban::title::Quit>(draw({ .confirm = true })));
+
+    viewport = { 640.0f, 360.0f };
+    title.open();
+    CHECK(isAction<sokoban::title::Quit>(draw({ .up = true, .confirm = true })));
+    CHECK(isAction<sokoban::title::OpenOptions>(draw({ .up = true, .confirm = true })));
+    CHECK(isAction<sokoban::title::OpenMaker>(draw({ .up = true, .confirm = true })));
+    viewport = { 1280.0f, 720.0f };
 
     // Active slot empty but another save exists: New Game starts here.
     title.setSaveSlots({
@@ -106,8 +116,10 @@ void testTitleNavigationAndResults()
     const auto* pickSlot = actionAs<sokoban::title::NewGameOnSlot>(pick);
     CHECK(pickSlot != nullptr && pickSlot->slot == 1);
 
-    // With no saves, the Save Slot row is hidden: New Game, Options, Quit.
+    // With no saves, the rows are New Game, Make, Options, Quit.
     title.open();
+    draw({ .down = true });
+    CHECK(isAction<sokoban::title::OpenMaker>(draw({ .confirm = true })));
     draw({ .down = true });
     CHECK(isAction<sokoban::title::OpenOptions>(draw({ .confirm = true })));
     draw({ .down = true });
@@ -264,7 +276,8 @@ void testMainTitlePointerActivation()
     TitleScreen title;
     title.open();
     constexpr Vec2 viewport { 1280.0f, 720.0f };
-    constexpr Vec2 optionsButton { 250.0f, 282.0f };
+    constexpr Vec2 makeButton { 250.0f, 282.0f };
+    constexpr Vec2 optionsButton { 250.0f, 354.0f };
     constexpr Vec2 outside { 900.0f, 300.0f };
     const auto frame = [&](UiPointerInput pointer, TitleScreenInput input = {}) {
         ui.beginFrame(viewport, pointer);
@@ -272,10 +285,13 @@ void testMainTitlePointerActivation()
         ui.endFrame();
         return result;
     };
-    CHECK(!frame({ .position = optionsButton, .down = true, .pressedAt = optionsButton }));
+    CHECK(!frame({ .position = makeButton, .down = true, .pressedAt = makeButton }));
     CHECK(title.selectedRow() == 1);
     CHECK(!frame({ .position = outside, .releasedAt = outside }));
-    CHECK(isAction<title::OpenOptions>(frame({}, { .confirm = true })));
+    CHECK(isAction<title::OpenMaker>(frame({}, { .confirm = true })));
+    CHECK(isAction<title::OpenMaker>(frame({
+        .position = makeButton, .pressedAt = makeButton, .releasedAt = makeButton,
+    })));
     CHECK(isAction<title::OpenOptions>(frame({
         .position = outside, .pressedAt = optionsButton, .releasedAt = optionsButton,
     })));

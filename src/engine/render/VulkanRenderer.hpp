@@ -170,6 +170,10 @@ public:
     [[nodiscard]] std::optional<GridPosition3> pickIsoGridCell(
         const PreparedFrame& frame,
         Vec2 pixelPosition) const;
+    [[nodiscard]] std::optional<GridPosition3> pickIsoGridCell(
+        const PreparedFrame& frame,
+        Vec2 pixelPosition,
+        UiRect nativeViewport) const;
     // Continuous world-tile position on splattable ground, for brush painting.
     // Z is the surface's world height, so overlays can sit on it.
     [[nodiscard]] std::optional<Vec3> pickIsoGroundPoint(
@@ -362,6 +366,10 @@ private:
     [[nodiscard]] std::optional<PickTarget> pickTargetFor(
         const PreparedFrameScratch& prepared,
         Vec2 pixelPosition) const;
+    [[nodiscard]] std::optional<GridPosition3> pickGridCell(
+        const PreparedFrameScratch& prepared,
+        Vec2 pixelPosition,
+        Vec2 extent) const;
 
     [[nodiscard]] const PreparedFrameScratch& resolvePreparedFrame(
         const PreparedFrame& frame) const;

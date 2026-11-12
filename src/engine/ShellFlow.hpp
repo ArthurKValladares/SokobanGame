@@ -35,6 +35,7 @@ struct ShellFacts {
     bool titleOpen = false;
     bool titleAtMainPage = false;
     bool editorActive = false;
+    bool makerOpen = false;
 };
 
 // ---- Commands: effects for the caller to execute, in order. ----------------
@@ -46,6 +47,8 @@ struct ResumeCampaign {};
 struct CloseTitle {};
 struct OpenTitle {};
 struct TitleBack {};
+struct OpenMaker {};
+struct CloseMaker {};
 struct StartNewGame {};
 struct StartNewGameOnSlot {
     int slot = 0;
@@ -74,6 +77,8 @@ using ShellCommand = std::variant<
     shell::CloseTitle,
     shell::OpenTitle,
     shell::TitleBack,
+    shell::OpenMaker,
+    shell::CloseMaker,
     shell::StartNewGame,
     shell::StartNewGameOnSlot,
     shell::SwitchSlot,

@@ -833,8 +833,15 @@ public:
                 true,
                 true);
         } else {
+            std::optional<VkRect2D> sceneDestination;
+            if (uiDrawData.sceneViewport) {
+                sceneDestination = uiDrawData.viewportSize.x > 0.0f &&
+                    uiDrawData.viewportSize.y > 0.0f
+                    ? uiScissor(*uiDrawData.sceneViewport, uiDrawData.viewportSize, extent)
+                    : VkRect2D {};
+            }
             swapchain_.upscaleSceneToSwapchain(
-                commandBuffer, imageIndex, stats_);
+                commandBuffer, imageIndex, stats_, sceneDestination);
             recordOverlayRendering(
                 commandBuffer,
                 swapchain_.image(imageIndex),

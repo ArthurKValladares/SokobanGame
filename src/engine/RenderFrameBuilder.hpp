@@ -113,6 +113,7 @@ public:
         std::optional<std::size_t> hoverDecoration;
         bool deleting = false;
         bool selectingMoveSource = false;
+        bool allowBoardExpansion = true;
         std::optional<TileType> editorPreviewTile;
         float worldAnimationTimeSeconds = 0.0f;
         float animationTransitionTimeSeconds = 0.0f;

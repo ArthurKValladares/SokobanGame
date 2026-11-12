@@ -18,6 +18,7 @@
 #include "engine/Input.hpp"
 #include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
+#include "engine/MakerSession.hpp"
 #include "engine/LevelTransition.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/Math.hpp"
@@ -30,6 +31,7 @@
 #include "engine/render/VulkanRenderer.hpp"
 #include "engine/ui/FontAtlas.hpp"
 #include "engine/ui/InputPrompts.hpp"
+#include "engine/ui/MakerView.hpp"
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/SdlTextInput.hpp"
 #include "engine/ui/TitleScreen.hpp"
@@ -229,6 +231,8 @@ private:
     // UI is compiled out.
     [[nodiscard]] bool drawUiFrame(
         const InputRouter::Frame& routedInput, [[maybe_unused]] float dt);
+    void drawMakerWorkspace(Vec2 viewport, const InputRouter::Frame& input,
+        std::optional<Vec2> wheelPosition);
     [[nodiscard]] bool handleNativeTextInputEvent(const SDL_Event& event);
     void updateNativeTextInput();
     // The end of a smoke run, if this frame is the one that ends it.
@@ -369,6 +373,11 @@ private:
     // Group small routing states and flags; the initialization barrier above
     // stays before renderer_ so its first surface sees the configured window.
     OptionsMenuView optionsMenuView_;
+    MakerView makerView_;
+    std::optional<MakerSession> makerSession_;
+    std::optional<UiRect> makerViewport_;
+    std::optional<GridPosition3> makerHover_;
+    bool makerOpen_ = false;
     SdlTextInput nativeTextInput_;
     // Pure shell routing; Application executes the commands it emits.
     ShellFlow shellFlow_;

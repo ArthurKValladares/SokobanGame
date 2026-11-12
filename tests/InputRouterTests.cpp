@@ -959,6 +959,31 @@ void testNativeTextFocusSuppressesActions()
     }).toggleDraftPlaybackPressed);
 }
 
+void testMakerRoutesNavigationWithoutCampaignActions()
+{
+    TEST("makerRoutesNavigationWithoutCampaignActions");
+    using namespace sokoban;
+    InputState input(false);
+    InputRouter router;
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_D);
+    pressKey(router, input, SDL_SCANCODE_SPACE);
+    pressKey(router, input, SDL_SCANCODE_ESCAPE);
+    pressKey(router, input, SDL_SCANCODE_F5);
+    const InputRouter::RoutingContext context {
+        .titleOpen = true, .makerOpen = true, .editorEditing = true,
+    };
+    const auto frame = router.routeFrame(input, context);
+    CHECK(frame.maker.next && frame.maker.activate);
+    CHECK(!frame.title.confirm);
+    CHECK(!frame.gameplay.right.down && !frame.toggleDraftPlaybackPressed);
+    CHECK(router.backAction(input, context) == InputRouter::BackAction::ShellBack);
+    const auto modal = router.routeFrame(input, {
+        .optionsOpen = true, .titleOpen = true, .makerOpen = true,
+    });
+    CHECK(modal.options.confirm && !modal.maker.activate);
+}
+
 void testEditorModifiersPassUiKeyboardCapture()
 {
     TEST("editorModifiersPassUiKeyboardCapture");
@@ -992,6 +1017,7 @@ int main()
     testPointerWheelRouting();
     testPrimaryPointerEdgesKeepEventPositions();
     testNativeTextFocusSuppressesActions();
+    testMakerRoutesNavigationWithoutCampaignActions();
     testBindingCaptureSynchronizesGamepadButtonStateWithoutAnEdge();
     testBindingCaptureSynchronizesAxisStateWithoutAnEdge();
     testModalFrameRouting();

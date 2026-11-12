@@ -56,6 +56,27 @@ Vec2 scaleUiPosition(Vec2 position, Vec2 from, Vec2 to)
     };
 }
 
+UiRect fitSceneViewport(UiRect bounds, Vec2 source)
+{
+    const Vec2 start { std::ceil(bounds.position.x), std::ceil(bounds.position.y) };
+    const Vec2 end {
+        std::floor(bounds.position.x + bounds.size.x),
+        std::floor(bounds.position.y + bounds.size.y),
+    };
+    const Vec2 available = end - start;
+    if (source.x <= 0.0f || source.y <= 0.0f ||
+        available.x <= 0.0f || available.y <= 0.0f) {
+        return { start, {} };
+    }
+    const float scale = std::min(available.x / source.x, available.y / source.y);
+    const Vec2 size { std::floor(source.x * scale), std::floor(source.y * scale) };
+    const Vec2 spare = available - size;
+    return {
+        start + Vec2 { std::floor(spare.x * 0.5f), std::floor(spare.y * 0.5f) },
+        size,
+    };
+}
+
 template<class Load>
 auto timedAssetStartup(std::string_view phase, Load&& load)
 {
@@ -804,6 +825,87 @@ bool Application::handleNativeTextInputEvent(const SDL_Event& event)
     return result != SdlTextInputResult::Ignored;
 }
 
+void Application::drawMakerWorkspace(
+    Vec2 viewport, const InputRouter::Frame& input, std::optional<Vec2> wheelPosition)
+{
+    const float scale = std::clamp(
+        std::max(SDL_GetWindowDisplayScale(window_.nativeHandle()), viewport.y / 1080.0f),
+        1.0f, 3.0f);
+    const MakerLayout layout = MakerView::layout(viewport, scale);
+    const UiRect scene = fitSceneViewport(layout.board, viewport);
+    // The previous prepared frame has the projection used by the scene the
+    // pointer actually sees. After a resize, wait for the new layout to draw.
+    const bool canPick = makerViewport_ == scene && preparedRenderFrame_.has_value();
+    makerViewport_ = scene;
+    ui_.setSceneViewport(scene);
+
+    MakerSession& maker = *makerSession_;
+    if (optionsMenu_.isOpen()) {
+        maker.endStroke();
+        makerHover_.reset();
+        return;
+    }
+    const auto pick = [&](Vec2 position) -> std::optional<GridPosition> {
+        if (canPick) {
+            if (const auto cell = renderer_.pickIsoGridCell(
+                    *preparedRenderFrame_, position, scene)) {
+                return GridPosition { cell->x, cell->y };
+            }
+        }
+        return std::nullopt;
+    };
+    const auto hovered = pick(ui_.mousePosition());
+    const LevelEditor& editor = maker.editor();
+    makerHover_ = hovered ? maker.previewCell(*hovered) : std::nullopt;
+    const auto assets = renderer_.assetLoadingStats();
+    const MakerViewAction action = makerView_.draw(ui_, layout, {
+        .brush = editor.selectedTile(),
+        .quarterTurns = editor.selectedTileQuarterTurns(),
+        .layer = editor.activeLayer(),
+        .layerCount = editor.documentDepth(),
+        .erasing = maker.tool() == MakerSession::Tool::Erase,
+        .canUndo = editor.canUndo(),
+        .canRedo = editor.canRedo(),
+        .hovered = makerHover_,
+        .status = maker.status().empty() && (assets.pendingModels || assets.pendingTextures)
+            ? "Loading board assets" : maker.status(),
+    }, {
+        .wheelY = input.pointer.wheel.y,
+        .wheelPosition = wheelPosition,
+        .navigation = input.maker,
+    });
+
+    switch (action.command) {
+    case MakerCommand::None: break;
+    case MakerCommand::Back:
+        handleShellEvent(ShellBackPressed {});
+        return;
+    case MakerCommand::Paint: maker.setTool(MakerSession::Tool::Paint); break;
+    case MakerCommand::Erase: maker.setTool(MakerSession::Tool::Erase); break;
+    case MakerCommand::Rotate: maker.rotateTile(); break;
+    case MakerCommand::LayerDown: maker.stepLayer(-1); break;
+    case MakerCommand::LayerUp: maker.stepLayer(1); break;
+    case MakerCommand::Undo: maker.undo(); break;
+    case MakerCommand::Redo: maker.redo(); break;
+    }
+    if (action.tile) {
+        maker.selectTile(*action.tile);
+    }
+
+    const auto drag = ui_.dragPosition("maker.board", scene);
+    if (drag) {
+        if (const auto press = ui_.mousePressPosition()) {
+            maker.endStroke();
+            if (const auto cell = pick(*press)) maker.beginStroke(*cell);
+        }
+        maker.continueStroke(pick(*drag));
+    }
+    if (maker.strokeActive() && (!drag || !ui_.mouseDown())) {
+        maker.endStroke();
+    }
+    makerHover_ = hovered ? maker.previewCell(*hovered) : std::nullopt;
+}
+
 // One UI frame: sizes, the pointer mapping, every panel and overlay that can
 // draw, and the ImGui/UI frame that brackets them.
 //
@@ -820,7 +922,7 @@ bool Application::drawUiFrame(
 #if SOKOBAN_ENABLE_DEBUG_UI
     bool developerWorkspaceVisible =
         (evidenceOutputDirectory_.empty() || evidenceDebugUi_) &&
-        !optionsMenu_.isOpen() && !titleScreen_.isOpen();
+        !shellMenuOpen();
     if (!developerWorkspaceVisible) {
         tools_->releaseDetachedCameraMouse(window_.nativeHandle());
         renderer_.setGameViewportDisplay(std::nullopt);
@@ -882,41 +984,45 @@ bool Application::drawUiFrame(
     }
 #endif
     const auto overlaysStart = std::chrono::steady_clock::now();
-    if (const auto cell = gameplaySession_.readingLectern(); cell && !shellMenuOpen()) {
-        if (const auto* lectern = level_.lecternAt(*cell)) {
-            lecternDialog_.draw(ui_, pixelSize, lectern->text, {
-                .bindings = &input_.bindings(),
-                .prompts = &inputPrompts_,
-                .deviceClass = input_.activeDevice() == ActiveInputDevice::Gamepad
-                    ? BindingDeviceClass::Gamepad : BindingDeviceClass::Keyboard,
-                .gamepad = input_.activeGamepadPresentation(),
-            });
+    if (!makerOpen_) {
+        if (const auto cell = gameplaySession_.readingLectern(); cell && !shellMenuOpen()) {
+            if (const auto* lectern = level_.lecternAt(*cell)) {
+                lecternDialog_.draw(ui_, pixelSize, lectern->text, {
+                    .bindings = &input_.bindings(),
+                    .prompts = &inputPrompts_,
+                    .deviceClass = input_.activeDevice() == ActiveInputDevice::Gamepad
+                        ? BindingDeviceClass::Gamepad : BindingDeviceClass::Keyboard,
+                    .gamepad = input_.activeGamepadPresentation(),
+                });
+            }
+        } else if (screenPreviewActive_) {
+            drawScreenPreviewOverlay(pixelSize);
+        } else {
+            drawSelectorPrompt(
+                preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
         }
-    } else if (screenPreviewActive_) {
-        drawScreenPreviewOverlay(pixelSize);
-    } else {
-        drawSelectorPrompt(
-            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
-    }
 #if SOKOBAN_ENABLE_DEBUG_UI
-    tools_->drawShaderHotReloadOverlay(renderer_);
-    tools_->drawDraftExitConfirmation();
-    tools_->drawBrushPreview(
-        renderer_,
-        preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
-    tools_->drawDecorationGizmo(
-        renderer_,
-        preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr,
-        input_.mousePosition(),
-        window_.size(),
-        window_.sizeInPixels(),
-        renderer_.wantsMouseCapture());
-    tools_->drawSelectorLabels(
-        renderer_,
-        preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
+        tools_->drawShaderHotReloadOverlay(renderer_);
+        tools_->drawDraftExitConfirmation();
+        tools_->drawBrushPreview(
+            renderer_,
+            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
+        tools_->drawDecorationGizmo(
+            renderer_,
+            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr,
+            input_.mousePosition(),
+            window_.size(),
+            window_.sizeInPixels(),
+            renderer_.wantsMouseCapture());
+        tools_->drawSelectorLabels(
+            renderer_,
+            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
 #endif
+    }
 
-    if (titleScreen_.isOpen() && optionsMenu_.isOpen()) {
+    if (makerOpen_) {
+        drawMakerWorkspace(pixelSize, routedInput, mapPointerEdge(routedInput.pointer.wheelPosition));
+    } else if (titleScreen_.isOpen() && optionsMenu_.isOpen()) {
         TitleScreen::drawBackground(ui_, pixelSize);
     } else if (const std::optional<TitleAction> titleAction = titleScreen_.draw(
                    ui_, pixelSize, routedInput.title)) {
@@ -960,7 +1066,9 @@ bool Application::drawUiFrame(
         }
     }
     updateNativeTextInput();
-    drawAssetLoadingOverlay(pixelSize);
+    if (!ui_.drawData().sceneViewport) {
+        drawAssetLoadingOverlay(pixelSize);
+    }
 #if SOKOBAN_ENABLE_DEBUG_UI
     tools_->animationPreviewDebugUi.update(dt, renderer_);
 #endif
@@ -1130,6 +1238,7 @@ bool Application::run()
             while (SDL_PollEvent(&event)) {
                 if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
                     ui_.cancelPointerInteraction();
+                    if (makerOpen_) makerSession_->endStroke();
                 }
                 if (handleNativeTextInputEvent(event)) {
                     continue;
@@ -1177,7 +1286,7 @@ bool Application::run()
         }
 
         const auto eventsFinished = std::chrono::steady_clock::now();
-        const InputRouter::BackAction backAction = levelTransition_.active()
+        const InputRouter::BackAction backAction = !makerOpen_ && levelTransition_.active()
             ? InputRouter::BackAction::None
             : inputRouter_.backAction(input_, inputRoutingContext());
         switch (backAction) {
@@ -2198,6 +2307,7 @@ ShellFacts Application::shellFacts() const
 #if SOKOBAN_ENABLE_DEBUG_UI
         .editorActive = tools_->levelEditor.editingDocument() || draftWorldLoaded_,
 #endif
+        .makerOpen = makerOpen_,
     };
 }
 
@@ -2223,6 +2333,16 @@ void Application::executeShellCommand(const ShellCommand& command)
         [&](const shell::CloseTitle&) { titleScreen_.close(); },
         [&](const shell::OpenTitle&) { openTitleScreen(); },
         [&](const shell::TitleBack&) { titleScreen_.back(); },
+        [&](const shell::OpenMaker&) {
+            if (!makerSession_) makerSession_.emplace();
+            makerOpen_ = true;
+        },
+        [&](const shell::CloseMaker&) {
+            makerSession_->endStroke();
+            makerOpen_ = false;
+            makerViewport_.reset();
+            makerHover_.reset();
+        },
         [&](const shell::StartNewGame&) { startNewGame(); },
         [&](const shell::StartNewGameOnSlot& start) {
             (void)executeNewGameOnSlot(
@@ -2255,7 +2375,7 @@ void Application::executeShellCommand(const ShellCommand& command)
 
 bool Application::shellMenuOpen() const
 {
-    return optionsMenu_.isOpen() || titleScreen_.isOpen();
+    return optionsMenu_.isOpen() || titleScreen_.isOpen() || makerOpen_;
 }
 
 void Application::startNewGame()
@@ -2335,6 +2455,7 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
     InputRouter::RoutingContext context {
         .optionsOpen = optionsMenu_.isOpen(),
         .titleOpen = titleScreen_.isOpen(),
+        .makerOpen = makerOpen_,
         .lecternOpen = gameplaySession_.readingLectern().has_value() && !shellMenuOpen(),
         .keyboardCaptured = renderer_.wantsKeyboardCapture(),
         .mouseCaptured = renderer_.wantsMouseCapture(),
@@ -3137,6 +3258,32 @@ RenderFrameData Application::buildRenderFrame(
 {
     (void)editorInput;
     FrameArena& arena = beginRenderFrameArena();
+    if (ui_.drawData().sceneViewport && makerSession_) {
+        RenderFrameData frame = RenderFrameBuilder::buildEditor({
+            .manifest = assetManifest_,
+            .editor = makerSession_->editor(),
+            .settings = presentationSettings_,
+            .animations = &animationCatalog_,
+            .hoverCell = makerHover_,
+            .deleting = makerSession_->tool() == MakerSession::Tool::Erase,
+            .allowBoardExpansion = false,
+            .worldAnimationTimeSeconds = presentation_.worldAnimationTimeSeconds(),
+            .animationTransitionTimeSeconds = presentation_.animationTransitionTimeSeconds(),
+            .groundGeometryCache = &editorGroundGeometryCache_,
+        }, arena);
+        frame.cameraPitchDegrees = 55.0f;
+        frame.cameraYawDegrees = 24.0f;
+        frame.gridOverlay = { { 0.10f, 0.12f, 0.14f, 0.78f }, 2.0f };
+        frame.cameraExtent = RenderFrameData::CameraExtent {
+            .originX = -1,
+            .originY = -1,
+            .originZ = -1,
+            .width = frame.levelWidth + 2,
+            .height = frame.levelHeight + 2,
+            .depth = frame.levelDepth + 1,
+        };
+        return frame;
+    }
     if (evidenceEffects_ == "rock-scratches") {
         if (!evidenceRockScratchFixture_) {
             evidenceRockScratchFixture_ =

@@ -551,6 +551,7 @@ add_library(sokoban_core STATIC
     src/engine/OverworldSplatTiling.cpp
     src/engine/OverworldView.cpp
     src/engine/LevelEditor.cpp
+    src/engine/MakerSession.cpp
     src/engine/LevelProjectStore.cpp
     src/engine/LevelAssetAssociations.cpp
     src/engine/Log.cpp
@@ -674,6 +675,7 @@ add_library(sokoban_ui STATIC
     src/engine/ui/TextLayout.cpp
     src/engine/ui/InputPrompts.cpp
     src/engine/ui/MenuKit.cpp
+    src/engine/ui/MakerView.cpp
     src/engine/ui/OptionsMenu.cpp
     src/engine/ui/SdlTextInput.cpp
     src/engine/ui/SelectorPrompt.cpp
@@ -1392,6 +1394,11 @@ if(SOKOBAN_BUILD_TESTS)
         ASSET_DIR
         SOURCES tests/UiTests.cpp
     )
+    sokoban_add_test(NAME maker_view
+        LIBS sokoban_ui
+        ASSET_DIR
+        SOURCES tests/MakerViewTests.cpp
+    )
     sokoban_add_test(NAME ui_text_edit
         LIBS sokoban_ui
         SOURCES tests/UiTextEditTests.cpp
@@ -1489,6 +1496,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME level_editor
         LIBS sokoban_core
         SOURCES tests/LevelEditorTests.cpp
+    )
+    sokoban_add_test(NAME maker_session
+        LIBS sokoban_core
+        SOURCES tests/MakerSessionTests.cpp
     )
     if(SOKOBAN_ENABLE_DEVELOPER_TOOLS AND NOT SOKOBAN_HEADLESS_TESTS_ONLY)
         sokoban_add_test(NAME level_editor_debug_ui

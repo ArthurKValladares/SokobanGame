@@ -20,6 +20,7 @@ using uiControls::ButtonTone;
 enum MainControl : UiControlId {
     Play = 1,
     SaveSlots,
+    Make,
     Options,
     Quit,
 };
@@ -163,6 +164,9 @@ std::optional<TitleAction> TitleScreen::drawMain(
     UiRect panel,
     const TitleScreenInput& input)
 {
+    if (panel.size.y <= 0.0f) {
+        return std::nullopt;
+    }
     const bool showSaveSlots = anySaveExists();
     menuKit::MenuPage page(26.0f, true, 1.0f, &ui.frameArena());
     UiLayoutTree& tree = page.tree;
@@ -174,21 +178,33 @@ std::optional<TitleAction> TitleScreen::drawMain(
         saveSlotsRow = tree.item(tree.root(), 58.0f);
         tree.spacer(tree.root(), 14.0f);
     }
+    const UiLayoutNode makeRow = tree.item(tree.root(), 58.0f);
+    tree.spacer(tree.root(), 14.0f);
     const UiLayoutNode optionsRow = tree.item(tree.root(), 58.0f);
     tree.flexibleSpacer(tree.root());
     const UiLayoutNode quitDivider = tree.item(tree.root(), 1.0f);
     tree.spacer(tree.root(), 20.0f);
     const UiLayoutNode quitRow = tree.item(tree.root(), 58.0f);
-    tree.arrange(panel);
+    // Fit the complete menu in short windows, including the optional save slot.
+    const float layoutHeight = std::max(panel.size.y, tree.minimumSize().y);
+    const float verticalScale = panel.size.y / layoutHeight;
+    tree.arrange({ panel.position, { panel.size.x, layoutHeight } });
+    const auto rowRect = [&](UiLayoutNode node) {
+        UiRect rect = tree.rect(node);
+        rect.position.y = panel.position.y + (rect.position.y - panel.position.y) * verticalScale;
+        rect.size.y *= verticalScale;
+        return rect;
+    };
 
-    std::array<UiControlRegion, 4> controls;
+    std::array<UiControlRegion, 5> controls;
     std::size_t controlCount = 0;
-    controls[controlCount++] = { MainControl::Play, tree.rect(primaryRow) };
+    controls[controlCount++] = { MainControl::Play, rowRect(primaryRow) };
     if (showSaveSlots) {
-        controls[controlCount++] = { MainControl::SaveSlots, tree.rect(saveSlotsRow) };
+        controls[controlCount++] = { MainControl::SaveSlots, rowRect(saveSlotsRow) };
     }
-    controls[controlCount++] = { MainControl::Options, tree.rect(optionsRow) };
-    controls[controlCount++] = { MainControl::Quit, tree.rect(quitRow) };
+    controls[controlCount++] = { MainControl::Make, rowRect(makeRow) };
+    controls[controlCount++] = { MainControl::Options, rowRect(optionsRow) };
+    controls[controlCount++] = { MainControl::Quit, rowRect(quitRow) };
     const auto regions = std::span(controls).first(controlCount);
     const UiInteraction interaction = ui.resolveControls("TitleMain", regions, mainFocus_, {
         .previous = input.up,
@@ -200,16 +216,16 @@ std::optional<TitleAction> TitleScreen::drawMain(
     selectedRow_ = focus == regions.end() ? 0 : static_cast<int>(focus - regions.begin());
 
     // The brand block keeps its custom subtitle size.
-    ui.centeredText(tree.rect(page.title), "SOKOBAN 3D",
-        { 0.94f, 0.96f, 0.93f, 1.0f }, 44.0f);
-    ui.centeredText(tree.rect(page.subtitle), "a tile-pushing puzzle",
-        { 0.62f, 0.67f, 0.65f, 1.0f }, 18.0f);
-    ui.divider(tree.rect(page.divider));
+    ui.centeredText(rowRect(page.title), "SOKOBAN 3D",
+        { 0.94f, 0.96f, 0.93f, 1.0f }, 44.0f * verticalScale);
+    ui.centeredText(rowRect(page.subtitle), "a tile-pushing puzzle",
+        { 0.62f, 0.67f, 0.65f, 1.0f }, 18.0f * verticalScale);
+    ui.divider(rowRect(page.divider));
 
     std::optional<TitleAction> action;
     const bool hasSave = activeSlotHasSave();
     if (uiControls::button(
-            ui, interaction, MainControl::Play, tree.rect(primaryRow),
+            ui, interaction, MainControl::Play, rowRect(primaryRow),
             hasSave ? "Continue" : "New Game", ButtonTone::Accent)) {
         if (hasSave) {
             action = title::Continue {};
@@ -226,17 +242,21 @@ std::optional<TitleAction> TitleScreen::drawMain(
     std::snprintf(saveSlotLabel, sizeof(saveSlotLabel), "Save Slot %d", activeSlot_ + 1);
     if (showSaveSlots &&
         uiControls::button(
-            ui, interaction, MainControl::SaveSlots, tree.rect(saveSlotsRow),
+            ui, interaction, MainControl::SaveSlots, rowRect(saveSlotsRow),
             saveSlotLabel)) {
         setPage(Page::SaveSlots);
     }
     if (uiControls::button(
-            ui, interaction, MainControl::Options, tree.rect(optionsRow), "Options")) {
+            ui, interaction, MainControl::Make, rowRect(makeRow), "Make")) {
+        action = title::OpenMaker {};
+    }
+    if (uiControls::button(
+            ui, interaction, MainControl::Options, rowRect(optionsRow), "Options")) {
         action = title::OpenOptions {};
     }
-    ui.divider(tree.rect(quitDivider));
+    ui.divider(rowRect(quitDivider));
     if (uiControls::button(
-            ui, interaction, MainControl::Quit, tree.rect(quitRow), "Quit", ButtonTone::Danger)) {
+            ui, interaction, MainControl::Quit, rowRect(quitRow), "Quit", ButtonTone::Danger)) {
         action = title::Quit {};
     }
     return action;

@@ -42,6 +42,7 @@ public:
     struct RoutingContext {
         bool optionsOpen = false;
         bool titleOpen = false;
+        bool makerOpen = false;
         bool editorEditing = false;
         bool tilePlacementReady = false;
         bool decorationPlacementReady = false;
@@ -116,6 +117,7 @@ public:
         bool previewScreen = false;
         TitleScreenInput title;
         OptionsMenuInput options;
+        UiNavigation maker;
         // Play/Stop Draft plays the draft from the editor and returns to the
         // editor while it plays. Play From Cursor plays with the hero moved
         // to the cursor (and also stops a playing draft).

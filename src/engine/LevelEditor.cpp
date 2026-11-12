@@ -3713,6 +3713,11 @@ const std::filesystem::path& LevelEditor::runtimeLevelRoot() const
     return document_.runtimeLevelRoot;
 }
 
+void LevelEditor::clearStatus()
+{
+    document_.status.clear();
+}
+
 const std::string& LevelEditor::status() const
 {
     return document_.status;

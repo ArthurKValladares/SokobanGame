@@ -49,6 +49,7 @@ struct SwitchSlot {
 struct DeleteSlot {
     int slot = 0;
 };
+struct OpenMaker {};
 struct OpenOptions {};
 struct Quit {};
 
@@ -60,6 +61,7 @@ using TitleAction = std::variant<
     title::NewGameOnSlot,
     title::SwitchSlot,
     title::DeleteSlot,
+    title::OpenMaker,
     title::OpenOptions,
     title::Quit>;
 

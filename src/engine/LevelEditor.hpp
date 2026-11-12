@@ -465,6 +465,8 @@ public:
     [[nodiscard]] std::optional<OverworldScreenId> overworldScreenId() const;
     [[nodiscard]] std::optional<OverworldScreenId> selectorLevelOwner(
         int puzzleLevel) const;
+    // Clear a prior message before a command that may be a silent no-op.
+    void clearStatus();
     [[nodiscard]] const std::string& status() const;
 
 private:

@@ -239,6 +239,11 @@ UiRect UiContext::visibleRect(UiRect rectValue) const
     return intersect(currentClip(), rectValue);
 }
 
+void UiContext::setSceneViewport(UiRect rectValue)
+{
+    drawData_.sceneViewport = visibleRect(rectValue);
+}
+
 void UiContext::pushCommand(UiDrawCommand command)
 {
     if (!clips_.empty()) {

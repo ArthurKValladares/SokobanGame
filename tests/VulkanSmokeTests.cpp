@@ -1532,6 +1532,39 @@ void exerciseRendererFrameOwnership(SDL_Window* window)
                 next.rgba.size() == std::size_t(scaled.width) * scaled.height * 4 &&
                 std::to_integer<uint8_t>(next.rgba[2]) > 240,
             "Capture did not switch to the newly submitted generation");
+
+        const UiRect inset { viewport * 0.2f, viewport * 0.5f };
+        const auto drawViewport = [&](UiRect destination, bool testPicking) {
+            RenderFrameData board;
+            board.viewMode = RenderViewMode::Isometric3D;
+            board.levelWidth = 1;
+            board.levelHeight = 1;
+            board.tiles.push_back({
+                .cell = { 0, 0, 0 },
+                .color = { 0.5f, 0.5f, 0.5f, 1.0f },
+                .height = 1.0f,
+            });
+            const auto prepared = renderer.prepareFrame(std::move(board));
+            if (testPicking) {
+                const auto projected = renderer.projectToPixels(prepared, { 0.5f, 0.5f, 1.0f });
+                require(projected.has_value(), "Could not project the viewport fixture tile");
+                const Vec2 position = inset.position + *projected * 0.5f;
+                require(renderer.pickIsoGridCell(prepared, position, inset) == GridPosition3 { 0, 0, 0 },
+                    "A tile could not be picked at its inset position");
+                const Vec2 rightEdge { inset.position.x + inset.size.x, position.y };
+                require(!renderer.pickIsoGridCell(prepared, rightEdge, inset),
+                    "Picking accepted the exclusive edge of the scene viewport");
+            }
+            ui.beginFrame(viewport, {}, false, false);
+            ui.setSceneViewport(destination);
+            ui.rect({ {}, { viewport.x * 0.15f, viewport.y } }, { 0.08f, 0.1f, 0.12f, 1.0f });
+            ui.endFrame();
+            renderer.beginDebugUiFrame();
+            renderer.drawFrame(prepared, ui.drawData());
+            require(!renderer.hasFatalFailure(), "The native viewport frame failed to draw");
+        };
+        drawViewport(inset, true);
+        drawViewport({ viewport, { 1.0f, 1.0f } }, false);
     }
     require(vulkanDebug::validationErrorCount() == validationErrors,
         "Vulkan validation reported a frame ownership error");

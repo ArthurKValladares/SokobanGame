@@ -661,12 +661,21 @@ VkImageView VulkanSwapchainResources::copyDepthForOutline(
 void VulkanSwapchainResources::upscaleSceneToSwapchain(
     VkCommandBuffer commandBuffer,
     uint32_t imageIndex,
-    RenderStats& stats)
+    RenderStats& stats,
+    std::optional<VkRect2D> destination)
 {
+    const VkImage output = image(imageIndex);
+    constexpr auto colorRange =
+        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+    constexpr vulkanResources::ImageState transferWrite {
+        VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    };
     const std::array<VkImageMemoryBarrier2, 2> toTransfer {
         vulkanResources::imageBarrier(
             displayColorImage_.image,
-            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            colorRange,
             {
                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
@@ -677,15 +686,7 @@ void VulkanSwapchainResources::upscaleSceneToSwapchain(
                 VK_ACCESS_2_TRANSFER_READ_BIT,
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             }),
-        vulkanResources::imageBarrier(
-            image(imageIndex),
-            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
-            {},
-            {
-                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            }),
+        vulkanResources::imageBarrier(output, colorRange, {}, transferWrite),
     };
     vulkanResources::transitionImages(commandBuffer, toTransfer);
     // Left here deliberately: captureRenderedFrame reads the display image in
@@ -693,58 +694,59 @@ void VulkanSwapchainResources::upscaleSceneToSwapchain(
     displayColorLayout_ = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     stats.imageBarriers += static_cast<uint32_t>(toTransfer.size());
 
-    VkImageBlit2 region {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2,
-        .srcSubresource = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .mipLevel = 0,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-        .srcOffsets = {
-            VkOffset3D { 0, 0, 0 },
-            VkOffset3D {
-                static_cast<int32_t>(displayExtent().width),
-                static_cast<int32_t>(displayExtent().height),
-                1,
+    const VkRect2D area = destination.value_or(VkRect2D { {}, extent_ });
+    const bool drawScene = area.extent.width > 0 && area.extent.height > 0;
+    if (destination) {
+        constexpr VkClearColorValue backdrop { .float32 = { 0.012f, 0.015f, 0.019f, 1.0f } };
+        vkCmdClearColorImage(commandBuffer, output, transferWrite.layout,
+            &backdrop, 1, &colorRange);
+        if (drawScene) {
+            // The blit overwrites part of the clear in the same image layout.
+            vulkanResources::transitionImage(
+                commandBuffer, output, colorRange, transferWrite, transferWrite);
+            ++stats.imageBarriers;
+        }
+    }
+    if (drawScene) {
+        const VkImageBlit2 region {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2,
+            .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+            .srcOffsets = {
+                VkOffset3D { 0, 0, 0 },
+                VkOffset3D {
+                    static_cast<int32_t>(displayExtent().width),
+                    static_cast<int32_t>(displayExtent().height),
+                    1,
+                },
             },
-        },
-        .dstSubresource = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .mipLevel = 0,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-        .dstOffsets = {
-            VkOffset3D { 0, 0, 0 },
-            VkOffset3D {
-                static_cast<int32_t>(extent_.width),
-                static_cast<int32_t>(extent_.height),
-                1,
+            .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+            .dstOffsets = {
+                VkOffset3D { area.offset.x, area.offset.y, 0 },
+                VkOffset3D {
+                    area.offset.x + static_cast<int32_t>(area.extent.width),
+                    area.offset.y + static_cast<int32_t>(area.extent.height),
+                    1,
+                },
             },
-        },
-    };
-    VkBlitImageInfo2 blitInfo {
-        .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
-        .srcImage = displayColorImage_.image,
-        .srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        .dstImage = image(imageIndex),
-        .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .regionCount = 1,
-        .pRegions = &region,
-        .filter = VK_FILTER_LINEAR,
-    };
-    vkCmdBlitImage2(commandBuffer, &blitInfo);
+        };
+        const VkBlitImageInfo2 blitInfo {
+            .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
+            .srcImage = displayColorImage_.image,
+            .srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            .dstImage = output,
+            .dstImageLayout = transferWrite.layout,
+            .regionCount = 1,
+            .pRegions = &region,
+            .filter = VK_FILTER_LINEAR,
+        };
+        vkCmdBlitImage2(commandBuffer, &blitInfo);
+    }
 
     vulkanResources::transitionImage(
         commandBuffer,
-        image(imageIndex),
-        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
-        {
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        },
+        output,
+        colorRange,
+        transferWrite,
         {
             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |

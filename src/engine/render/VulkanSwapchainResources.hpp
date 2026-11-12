@@ -94,7 +94,8 @@ public:
     void upscaleSceneToSwapchain(
         VkCommandBuffer commandBuffer,
         uint32_t imageIndex,
-        RenderStats& stats);
+        RenderStats& stats,
+        std::optional<VkRect2D> destination = std::nullopt);
 
     [[nodiscard]] VkSwapchainKHR handle() const { return swapchain_; }
     // The swapchain's own format, and the format of the display image the

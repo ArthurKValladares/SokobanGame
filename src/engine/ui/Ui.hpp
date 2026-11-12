@@ -101,6 +101,9 @@ struct UiDrawData {
     }
 
     Vec2 viewportSize {};
+    // A present rectangle confines the live scene to this part of the UI.
+    // The rest of the surface is cleared before the UI draws over it.
+    std::optional<UiRect> sceneViewport;
     ArenaArray<UiDrawCommand> commands;
 };
 
@@ -161,6 +164,7 @@ public:
     void popClip();
     [[nodiscard]] UiRect currentClip() const;
     [[nodiscard]] UiRect visibleRect(UiRect rect) const;
+    void setSceneViewport(UiRect rect);
 
     void rect(UiRect rect, Vec4 color);
     void image(
