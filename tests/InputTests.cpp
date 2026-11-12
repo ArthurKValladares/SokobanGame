@@ -382,6 +382,46 @@ void testKeyboardChordsPreferTheMostSpecificBinding()
         "Y / Ctrl+Shift+Z");
 }
 
+void testKeyboardChordStaysSelectedUntilTheKeyIsReleased()
+{
+    TEST("keyboardChordStaysSelectedUntilTheKeyIsReleased");
+    using sokoban::InputAction;
+    sokoban::InputState input(false);
+    input.beginFrame();
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_LCTRL));
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_S));
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_LCTRL));
+    CHECK(input.actionPressed(InputAction::EditorSave));
+    CHECK(input.actionDown(InputAction::EditorSave));
+    CHECK(!input.actionPressed(InputAction::MoveDown));
+    CHECK(!input.actionDown(InputAction::MoveDown));
+
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_S));
+    CHECK(input.actionPressed(InputAction::EditorSave));
+    CHECK(!input.actionDown(InputAction::EditorSave));
+    CHECK(!input.actionPressed(InputAction::MoveDown));
+
+    input.beginFrame();
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_S));
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_LCTRL));
+    CHECK(input.actionPressed(InputAction::MoveDown));
+    CHECK(input.actionDown(InputAction::MoveDown));
+    CHECK(!input.actionPressed(InputAction::EditorSave));
+    CHECK(!input.actionDown(InputAction::EditorSave));
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_S));
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_LCTRL));
+
+    // SDL supplies the modifiers at the time of a press, even if the
+    // application did not receive a modifier key-down while it had focus.
+    SDL_Event chord = keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_S);
+    chord.key.mod = SDL_KMOD_LCTRL;
+    input.handleEvent(chord);
+    CHECK(input.actionPressed(InputAction::EditorSave));
+    CHECK(input.actionPressed(InputAction::MoveDown));
+    CHECK(input.actionDown(InputAction::EditorSave));
+    CHECK(!input.actionDown(InputAction::MoveDown));
+}
+
 void testChordCaptureAndContexts()
 {
     TEST("chordCaptureAndContexts");
@@ -457,6 +497,7 @@ int main()
     testBindingCaptureCandidates();
     testFocusLossClearsHeldActions();
     testKeyboardChordsPreferTheMostSpecificBinding();
+    testKeyboardChordStaysSelectedUntilTheKeyIsReleased();
     testChordCaptureAndContexts();
 
     if (failures == 0) {

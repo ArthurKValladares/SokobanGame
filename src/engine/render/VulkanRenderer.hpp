@@ -154,7 +154,8 @@ public:
     // already-running preparation are preserved.
     void cancelQueuedAssetPrefetches();
     void ensureAssets(const RenderAssetRequirements& requirements);
-    // Deliberately blocking path for offline tools; never use for gameplay.
+    // Blocking tool path. Completes submitted rendering before residency can
+    // evict assets referenced by an earlier frame.
     void waitForAssets(const RenderAssetRequirements& requirements);
     void handleEvent(const SDL_Event& event);
     void beginDebugUiFrame();
@@ -184,12 +185,13 @@ public:
     [[nodiscard]] uint32_t textureDescriptorCapacity() const;
     // Picks up static models appended by Debug decoration authoring.
     void syncManifestModels();
-    // Reads the last drawn frame back as RGBA. The whole render extent when
-    // `region` is empty, otherwise that rectangle of it. Blocking; used by the
-    // offline thumbnail bake, which needs the real render rather than a
-    // re-creation of it.
+    // Reads the last submitted frame as RGBA. A region uses that frame's
+    // render coordinates, including after the active swapchain changes.
+    // Blocks until the readback is complete.
     [[nodiscard]] ImageData captureRenderedFrame(
         std::optional<VkRect2D> region = std::nullopt);
+    // Zero until a render has been submitted.
+    [[nodiscard]] VkExtent2D renderedFrameExtent() const;
     [[nodiscard]] VkExtent2D renderExtent() const;
     // ImGui descriptor for the latest completed game render. Zero in builds
     // without the developer workspace.
@@ -308,8 +310,8 @@ private:
     bool resolveGroundChunks(RenderFrameData& frame, bool publish = false);
 
     struct RenderResourceSet {
-        std::unique_ptr<VulkanSwapchainResources> swapchain;
-        // Sized by, and retired with, `swapchain`.
+        std::shared_ptr<VulkanSwapchainResources> swapchain;
+        // Sized by the swapchain's images. Retired after their presents finish.
         SwapchainPresentSemaphores presentSemaphores;
         std::unique_ptr<VulkanSsaoPass> ssaoPass;
         std::unique_ptr<VulkanAtmospherePass> atmospherePass;
@@ -323,6 +325,12 @@ private:
     struct RetiredRenderResources {
         RenderResourceSet resources;
         uint32_t pendingFrameMask = 0;
+    };
+
+    struct SubmittedFrame {
+        // Capture may outlive this generation's pipeline and descriptors.
+        std::shared_ptr<const VulkanSwapchainResources> swapchain;
+        VkImageLayout displayLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     };
 
     // The preamble every pick shares: an isometric frame, a non-zero output
@@ -389,6 +397,7 @@ private:
     RendererReconfigurationQueue reconfigurationQueue_;
     RenderResourceSet activeResources_;
     std::vector<RetiredRenderResources> retiredResources_;
+    SubmittedFrame lastSubmittedFrame_;
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
     static constexpr uint32_t viewportTextureCapacity_ = maxFramesInFlight_ + 2;

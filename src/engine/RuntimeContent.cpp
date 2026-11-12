@@ -6,6 +6,8 @@
 #include <SDL3/SDL_filesystem.h>
 
 #include <stdexcept>
+#include <string>
+#include <string_view>
 
 namespace sokoban {
 
@@ -17,7 +19,9 @@ std::filesystem::path runtimeContentRoot(
         throw std::runtime_error("SDL_GetBasePath failed: executable directory is unavailable");
     }
 
-    const std::filesystem::path root = std::filesystem::path(basePath) / "assets";
+    const std::string_view utf8(basePath);
+    const std::filesystem::path root =
+        std::filesystem::path(std::u8string(utf8.begin(), utf8.end())) / "assets";
     if (!sourceLevelRoot.empty()) {
         LevelProjectStore::recover(sourceLevelRoot);
     }

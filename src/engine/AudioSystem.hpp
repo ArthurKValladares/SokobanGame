@@ -5,12 +5,14 @@
 #include "engine/AtmosphericAudio.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <optional>
 #include <random>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace sokoban {
 
@@ -152,5 +154,16 @@ private:
     int lastDragIndex_ = -1;
     bool pushing_ = false;
 };
+
+#if SOKOBAN_ENABLE_TEST_HOOKS
+namespace audioTest {
+
+// Runs the startup sound-set loader with no hardware output device.
+[[nodiscard]] std::size_t loadStartupSounds(
+    const std::filesystem::path& audioRoot,
+    const std::vector<std::string>& fileNames, bool streamed);
+
+} // namespace audioTest
+#endif
 
 } // namespace sokoban

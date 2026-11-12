@@ -1,11 +1,15 @@
 #include "engine/InputBindings.hpp"
 #include "engine/FrameArena.hpp"
-#include <cstring>
+
+#include <SDL3/SDL_keyboard.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstring>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace sokoban {
 namespace {
@@ -17,6 +21,134 @@ std::size_t actionIndex(InputAction action)
         throw std::out_of_range("invalid input action");
     }
     return index;
+}
+
+constexpr std::array menuRecoveryKeys {
+    std::pair { InputAction::MoveUp, std::string_view("Up") },
+    std::pair { InputAction::MoveDown, std::string_view("Down") },
+    std::pair { InputAction::MoveLeft, std::string_view("Left") },
+    std::pair { InputAction::MoveRight, std::string_view("Right") },
+    std::pair { InputAction::MenuConfirm, std::string_view("Return") },
+};
+
+bool needsMenuBinding(InputAction action)
+{
+    return std::ranges::any_of(menuRecoveryKeys, [action](const auto& entry) {
+        return entry.first == action;
+    });
+}
+
+bool usableBinding(const InputBinding& binding)
+{
+    if (const auto* key = std::get_if<KeyboardBinding>(&binding)) {
+        return (key->modifiers & ~keyModifierAll) == 0U &&
+            key->scancode.find('\0') == std::string::npos &&
+            SDL_GetScancodeFromName(key->scancode.c_str()) != SDL_SCANCODE_UNKNOWN;
+    }
+    if (const auto* button = std::get_if<GamepadButtonBinding>(&binding)) {
+        return isKnownGamepadButtonName(button->button);
+    }
+    const auto& axis = std::get<GamepadAxisBinding>(binding);
+    return isKnownGamepadAxisName(axis.axis) && std::isfinite(axis.threshold) &&
+        axis.threshold >= 0.1f && axis.threshold <= 1.0f &&
+        (axis.direction == AxisDirection::Positive ||
+            (axis.direction == AxisDirection::Negative &&
+                axis.axis != "lefttrigger" && axis.axis != "righttrigger"));
+}
+
+bool hasBindingForDevice(const std::vector<InputBinding>& bindings, BindingDeviceClass device)
+{
+    return std::ranges::any_of(bindings, [device](const InputBinding& binding) {
+        return bindingDeviceClass(binding) == device && usableBinding(binding);
+    });
+}
+
+std::string_view faceButtonName(std::string_view button)
+{
+    if (button == "a") return "south";
+    if (button == "b") return "east";
+    if (button == "x") return "west";
+    if (button == "y") return "north";
+    return button;
+}
+
+bool sameControl(const InputBinding& left, const InputBinding& right)
+{
+    if (left.index() != right.index()) return false;
+    if (const auto* key = std::get_if<KeyboardBinding>(&left)) {
+        const auto& other = std::get<KeyboardBinding>(right);
+        if (key->modifiers != other.modifiers) return false;
+        const auto scancode = SDL_GetScancodeFromName(key->scancode.c_str());
+        return scancode != SDL_SCANCODE_UNKNOWN &&
+            scancode == SDL_GetScancodeFromName(other.scancode.c_str());
+    }
+    if (const auto* button = std::get_if<GamepadButtonBinding>(&left)) {
+        return faceButtonName(button->button) ==
+            faceButtonName(std::get<GamepadButtonBinding>(right).button);
+    }
+    const auto& axis = std::get<GamepadAxisBinding>(left);
+    const auto& other = std::get<GamepadAxisBinding>(right);
+    return axis.axis == other.axis && axis.direction == other.direction;
+}
+
+bool controlAvailable(const InputBindings& bindings, InputAction action, const InputBinding& candidate)
+{
+    return std::ranges::none_of(inputActionDefinitions, [&](const auto& definition) {
+        return definition.action != action && inputActionsConflict(action, definition.action) &&
+            std::ranges::any_of(bindings.forAction(definition.action), [&](const InputBinding& binding) {
+                return sameControl(binding, candidate);
+            });
+    });
+}
+
+bool hasMenuBinding(const InputBindings& bindings, InputAction action, BindingDeviceClass device)
+{
+    return std::ranges::any_of(bindings.forAction(action), [&](const InputBinding& candidate) {
+        if (bindingDeviceClass(candidate) != device || !usableBinding(candidate)) return false;
+        return std::ranges::none_of(inputActionDefinitions, [&](const auto& definition) {
+            const InputAction other = definition.action;
+            return other != action && (needsMenuBinding(other) || other == InputAction::MenuBack) &&
+                std::ranges::any_of(bindings.forAction(other), [&](const InputBinding& binding) {
+                    return sameControl(candidate, binding);
+                });
+        });
+    });
+}
+
+bool addMenuFallback(InputBindings& bindings, InputAction action,
+    BindingDeviceClass device, std::string_view recoveryKey)
+{
+    const auto addIfAvailable = [&](InputBinding candidate) {
+        if (!usableBinding(candidate) || !controlAvailable(bindings, action, candidate)) return false;
+        auto& actionBindings = bindings.forAction(action);
+        const auto firstOnDevice = std::ranges::find_if(actionBindings, [device](const InputBinding& binding) {
+            return bindingDeviceClass(binding) == device;
+        });
+        actionBindings.insert(firstOnDevice, std::move(candidate));
+        return true;
+    };
+    static const InputBindings defaults = defaultInputBindings();
+    for (const auto& binding : defaults.forAction(action)) {
+        if (bindingDeviceClass(binding) == device && addIfAvailable(binding)) return true;
+    }
+    if (device == BindingDeviceClass::Keyboard) {
+        if (addIfAvailable(KeyboardBinding { std::string(recoveryKey) })) return true;
+        for (const char key : std::string_view("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")) {
+            if (addIfAvailable(KeyboardBinding { std::string(1, key) })) return true;
+        }
+        return false;
+    }
+    for (const char* button : { "east", "south", "west", "north", "dpup", "dpdown", "dpleft",
+             "dpright", "leftshoulder", "rightshoulder", "leftstick", "rightstick" }) {
+        if (addIfAvailable(GamepadButtonBinding { button })) return true;
+    }
+    for (const char* axis : { "leftx", "lefty", "rightx", "righty" }) {
+        for (const AxisDirection direction : { AxisDirection::Negative, AxisDirection::Positive }) {
+            if (addIfAvailable(GamepadAxisBinding { axis, direction })) return true;
+        }
+    }
+    return addIfAvailable(GamepadAxisBinding { "lefttrigger" }) ||
+        addIfAvailable(GamepadAxisBinding { "righttrigger" });
 }
 
 } // namespace
@@ -217,30 +349,54 @@ void assignBinding(
     InputAction action,
     const InputBinding& candidate)
 {
-    const std::size_t targetIndex = actionIndex(action);
-    const std::vector<InputBinding> displaced = bindings.actions[targetIndex];
-    for (std::size_t i = 0; i < inputActionCount; ++i) {
-        const InputAction existingAction = static_cast<InputAction>(i);
-        if (inputActionsConflict(action, existingAction)) {
-            std::erase(bindings.actions[i], candidate);
-            if (i != targetIndex && bindings.actions[i].empty()) {
-                const auto replacement = std::ranges::find_if(
-                    displaced,
-                    [&](const InputBinding& binding) {
-                        return binding.index() == candidate.index() &&
-                            binding != candidate;
-                    });
-                if (replacement != displaced.end()) {
-                    bindings.actions[i].push_back(*replacement);
-                }
-            }
-        }
-    }
-    std::vector<InputBinding>& target = bindings.forAction(action);
+    InputBindings updated = bindings;
+    std::vector<InputBinding>& target = updated.forAction(action);
+    const std::vector<InputBinding> displaced = target;
     std::erase_if(target, [&](const InputBinding& existing) {
         return existing.index() == candidate.index();
     });
     target.push_back(candidate);
+
+    const BindingDeviceClass device = bindingDeviceClass(candidate);
+    for (std::size_t i = 0; i < inputActionCount; ++i) {
+        const InputAction existingAction = static_cast<InputAction>(i);
+        if (existingAction == action || !inputActionsConflict(action, existingAction)) continue;
+
+        auto& existing = updated.actions[i];
+        const bool menuAction = needsMenuBinding(existingAction);
+        const auto removed = std::erase_if(existing, [&](const InputBinding& binding) {
+            return menuAction ? sameControl(binding, candidate) : binding == candidate;
+        });
+        if (removed == 0 || (!existing.empty() &&
+                (!menuAction || hasBindingForDevice(existing, device)))) {
+            continue;
+        }
+        const auto replacement = std::ranges::find_if(displaced, [&](const InputBinding& binding) {
+            return binding.index() == candidate.index() &&
+                (menuAction ? !sameControl(binding, candidate) &&
+                                  controlAvailable(updated, existingAction, binding)
+                            : binding != candidate);
+        });
+        if (replacement != displaced.end()) {
+            existing.push_back(*replacement);
+        }
+    }
+    if (restoreMenuBindings(updated)) {
+        bindings = std::move(updated);
+    }
+}
+
+bool restoreMenuBindings(InputBindings& bindings)
+{
+    for (const auto& [action, recoveryKey] : menuRecoveryKeys) {
+        for (const auto device : { BindingDeviceClass::Keyboard, BindingDeviceClass::Gamepad }) {
+            if (!hasMenuBinding(bindings, action, device) &&
+                !addMenuFallback(bindings, action, device, recoveryKey)) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 InputBindings defaultInputBindings()

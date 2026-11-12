@@ -17,6 +17,20 @@ float normalizedAxis(Sint16 value)
         : static_cast<float>(value) / 32767.0f;
 }
 
+std::uint8_t keyModifiers(SDL_Keymod modifiers)
+{
+    std::uint8_t result = keyModifierNone;
+    if ((modifiers & SDL_KMOD_CTRL) != 0) result |= keyModifierCtrl;
+    if ((modifiers & SDL_KMOD_SHIFT) != 0) result |= keyModifierShift;
+    if ((modifiers & SDL_KMOD_ALT) != 0) result |= keyModifierAlt;
+    return result;
+}
+
+std::uint8_t chordBit(std::uint8_t modifiers)
+{
+    return static_cast<std::uint8_t>(1U << modifiers);
+}
+
 SDL_GamepadButton gamepadButtonFromBindingName(std::string_view name)
 {
     if (name == "south") return SDL_GAMEPAD_BUTTON_SOUTH;
@@ -62,6 +76,7 @@ InputState::~InputState()
 void InputState::beginFrame()
 {
     keysPressed_.fill(false);
+    keyboardChordsPressed_.fill(0);
     mouseButtonsPressed_.fill(false);
     gamepadButtonsPressed_.fill(false);
     previousGamepadAxes_ = gamepadAxes_;
@@ -73,16 +88,22 @@ void InputState::handleEvent(
 {
     const bool recordPress = pressPolicy == PressPolicy::Record;
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
-        event.key.scancode < SDL_SCANCODE_COUNT) {
-        keysDown_[event.key.scancode] = true;
+        event.key.scancode >= 0 && event.key.scancode < SDL_SCANCODE_COUNT) {
+        const auto key = event.key.scancode;
+        keysDown_[key] = true;
+        keyboardChordsDown_[key] = selectKeyboardChords(
+            key, heldModifiers() | keyModifiers(event.key.mod));
         if (recordPress) {
-            keysPressed_[event.key.scancode] = true;
+            keysPressed_[key] = true;
+            keyboardChordsPressed_[key] |= keyboardChordsDown_[key];
         }
         activeDevice_ = ActiveInputDevice::KeyboardMouse;
     }
 
-    if (event.type == SDL_EVENT_KEY_UP && event.key.scancode < SDL_SCANCODE_COUNT) {
+    if (event.type == SDL_EVENT_KEY_UP && event.key.scancode >= 0 &&
+        event.key.scancode < SDL_SCANCODE_COUNT) {
         keysDown_[event.key.scancode] = false;
+        keyboardChordsDown_[event.key.scancode] = 0;
     }
 
     if (event.type == SDL_EVENT_MOUSE_MOTION) {
@@ -122,6 +143,8 @@ void InputState::handleEvent(
     if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
         keysDown_.fill(false);
         keysPressed_.fill(false);
+        keyboardChordsDown_.fill(0);
+        keyboardChordsPressed_.fill(0);
         mouseButtonsDown_.fill(false);
         mouseButtonsPressed_.fill(false);
         clearGamepadState();
@@ -175,7 +198,9 @@ void InputState::setBindings(InputBindings bindings)
     for (auto& compiled : compiledBindings_) {
         compiled.clear();
     }
-    keyboardChords_.clear();
+    keyboardChords_.fill(0);
+    keyboardChordsDown_.fill(0);
+    keyboardChordsPressed_.fill(0);
     invalidBindingCount_ = 0;
 
     for (std::size_t actionIndex = 0; actionIndex < inputActionCount; ++actionIndex) {
@@ -191,8 +216,7 @@ void InputState::setBindings(InputBindings bindings)
                         value.modifiers & keyModifierAll);
                     valid = compiled.control != SDL_SCANCODE_UNKNOWN;
                     if (valid) {
-                        keyboardChords_.emplace_back(
-                            compiled.control, compiled.modifiers);
+                        keyboardChords_[compiled.control] |= chordBit(compiled.modifiers);
                     }
                 } else if constexpr (std::is_same_v<Binding, GamepadButtonBinding>) {
                     compiled.kind = CompiledBindingKind::GamepadButton;
@@ -225,19 +249,8 @@ std::optional<InputBinding> InputState::bindingCandidate(
         (keyUp && isModifierKey(event.key.scancode))) {
         if (const char* name = SDL_GetScancodeName(event.key.scancode);
             name && *name != '\0') {
-            std::uint8_t modifiers = keyModifierNone;
-            if (keyDown) {
-                if ((event.key.mod & SDL_KMOD_CTRL) != 0) {
-                    modifiers |= keyModifierCtrl;
-                }
-                if ((event.key.mod & SDL_KMOD_SHIFT) != 0) {
-                    modifiers |= keyModifierShift;
-                }
-                if ((event.key.mod & SDL_KMOD_ALT) != 0) {
-                    modifiers |= keyModifierAlt;
-                }
-            }
-            return KeyboardBinding { name, modifiers };
+            return KeyboardBinding { name, keyDown ? keyModifiers(event.key.mod)
+                                                   : std::uint8_t { keyModifierNone } };
         }
     }
     if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
@@ -328,22 +341,26 @@ std::uint8_t InputState::heldModifiers() const
     return held;
 }
 
-bool InputState::keyboardChordSelected(const CompiledBinding& binding) const
+std::uint8_t InputState::selectKeyboardChords(SDL_Scancode key, std::uint8_t held) const
 {
-    const std::uint8_t held = heldModifiers();
-    if ((binding.modifiers & ~held) != 0U) {
-        return false;
-    }
     // A satisfied chord on the same key that needs strictly more modifiers
     // wins: Ctrl+Shift+Z hides Z, and Shift+F5 hides F5.
-    return std::ranges::none_of(
-        keyboardChords_,
-        [&](const std::pair<int, std::uint8_t>& chord) {
-            return chord.first == binding.control &&
-                (chord.second & ~held) == 0U &&
-                chord.second != binding.modifiers &&
-                (chord.second & binding.modifiers) == binding.modifiers;
-        });
+    const auto satisfied = [bound = keyboardChords_[key], held](std::uint8_t modifiers) {
+        return (modifiers & held) == modifiers && (bound & chordBit(modifiers)) != 0U;
+    };
+    std::uint8_t selected = 0;
+    for (std::uint8_t chord = keyModifierNone; chord <= keyModifierAll; ++chord) {
+        if (!satisfied(chord)) continue;
+        bool shadowed = false;
+        for (std::uint8_t other = chord + 1; other <= keyModifierAll; ++other) {
+            if ((other & chord) == chord && satisfied(other)) {
+                shadowed = true;
+                break;
+            }
+        }
+        if (!shadowed) selected |= chordBit(chord);
+    }
+    return selected;
 }
 
 bool InputState::mouseButtonDown(Uint8 button) const
@@ -474,8 +491,7 @@ bool InputState::bindingDown(const CompiledBinding& binding, bool previousAxis) 
 {
     switch (binding.kind) {
     case CompiledBindingKind::Keyboard:
-        return keyDown(static_cast<SDL_Scancode>(binding.control)) &&
-            keyboardChordSelected(binding);
+        return (keyboardChordsDown_[binding.control] & chordBit(binding.modifiers)) != 0U;
     case CompiledBindingKind::GamepadButton:
         return binding.control >= 0 && binding.control < SDL_GAMEPAD_BUTTON_COUNT &&
             gamepadButtonsDown_[binding.control];
@@ -498,8 +514,7 @@ bool InputState::bindingPressed(const CompiledBinding& binding) const
 {
     switch (binding.kind) {
     case CompiledBindingKind::Keyboard:
-        return keyPressed(static_cast<SDL_Scancode>(binding.control)) &&
-            keyboardChordSelected(binding);
+        return (keyboardChordsPressed_[binding.control] & chordBit(binding.modifiers)) != 0U;
     case CompiledBindingKind::GamepadButton:
         return binding.control >= 0 && binding.control < SDL_GAMEPAD_BUTTON_COUNT &&
             gamepadButtonsPressed_[binding.control];

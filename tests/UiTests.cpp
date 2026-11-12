@@ -709,7 +709,7 @@ void testControlsRemapping()
     CHECK(std::ranges::count(moveUp, sokoban::InputBinding {
         sokoban::GamepadButtonBinding { "dpup" } }) == 1);
 
-    // Binding P to Move down steals it from Move up.
+    // Binding P to Move down gives Move up the displaced keyboard key.
     draw({ .down = true });
     draw({ .confirm = true });
     const auto rebound = menu.provideBindingCandidate(
@@ -723,7 +723,11 @@ void testControlsRemapping()
         settings.input.forAction(sokoban::InputAction::MoveUp),
         sokoban::InputBinding { sokoban::KeyboardBinding { "P" } }) == 0);
     CHECK(sokoban::actionBindingsDisplay(
-        settings.input, sokoban::InputAction::MoveUp) ==
+        settings.input, sokoban::InputAction::MoveUp,
+        sokoban::BindingDeviceClass::Keyboard) == "S");
+    CHECK(sokoban::actionBindingsDisplay(
+        settings.input, sokoban::InputAction::MoveUp,
+        sokoban::BindingDeviceClass::Gamepad) ==
         "Pad dpup / Pad lefty-");
 
     // Escape is never bound; back() cancels the capture but stays on the page.
@@ -1383,6 +1387,55 @@ void testOptionsReducerDraftAndBindingSemantics()
         sokoban::BindingDeviceClass::Keyboard) == "W");
 }
 
+void testUnicodeMandatoryLines()
+{
+    TEST("unicodeMandatoryLines");
+    const auto font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+    sokoban::LecternDialog dialog;
+    const auto glyphPositions = [&](std::string_view text) {
+        constexpr sokoban::Vec2 viewport { 1280, 720 };
+        ui.beginFrame(viewport, {}, false, false);
+        dialog.draw(ui, viewport, text);
+        ui.endFrame();
+        std::vector<sokoban::Vec2> positions;
+        for (const auto& command : ui.drawData().commands) {
+            if (command.kind == sokoban::UiDrawKind::FontGlyph) {
+                positions.push_back(command.rect.position);
+            }
+        }
+        return positions;
+    };
+    const auto twoLines = glyphPositions("A\nB");
+    const auto invalidBinding = glyphPositions("<!Move\nUp!>");
+    const auto measure = [](std::string_view text) { return static_cast<float>(text.size()); };
+    for (const std::string_view separator : {
+             "\n", "\r", "\r\n", "\v", "\f", "\x1c", "\x1d", "\x1e",
+             "\xc2\x85", "\xe2\x80\xa8", "\xe2\x80\xa9",
+         }) {
+        std::string text = "A";
+        text += separator;
+        text += 'B';
+        const auto& layout = font.layoutText(text, 32);
+        CHECK(layout.glyphs.size() == 2);
+        if (layout.glyphs.size() == 2) {
+            CHECK(layout.glyphs[0].cluster == 0);
+            CHECK(layout.glyphs[1].cluster == 1 + separator.size());
+            CHECK(sokoban::approximately(layout.glyphs[1].position.y, layout.lineHeight));
+        }
+        CHECK(glyphPositions(text) == twoLines);
+
+        text += separator;
+        CHECK(sokoban::LecternDialog::wrapText(text, 40.0f, measure) ==
+            std::vector<std::string>({ "A", "B", "" }));
+
+        std::string tag = "<!Move";
+        tag += separator;
+        tag += "Up!>";
+        CHECK(glyphPositions(tag) == invalidBinding);
+    }
+}
+
 void testLecternBindingPlaceholders()
 {
     TEST("lecternBindingPlaceholdersTrackRebindingAndActiveDevice");
@@ -1688,6 +1741,7 @@ int main()
     testReusableControls();
     testSelectorPromptShowsInteractAndPreviewBindings();
     testInputPromptCatalogUsesKeyboardAndControllerSpecificGlyphs();
+    testUnicodeMandatoryLines();
     testLecternBindingPlaceholders();
     testActionRegistryConsumers();
     testScreenPreviewOverlayUsesCenteredSeventyFivePercentInset();

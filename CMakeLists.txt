@@ -1201,15 +1201,24 @@ if(SOKOBAN_BUILD_TESTS)
             add_test(NAME ground_debris COMMAND sokoban_vulkan_tests vulkan_smoke --ground-debris)
             add_test(NAME vulkan_geometry_arena COMMAND
                 sokoban_vulkan_tests vulkan_smoke --geometry-arena)
+            add_test(NAME renderer_frame_ownership COMMAND
+                sokoban_vulkan_tests vulkan_smoke --renderer-frame-ownership)
         else()
             add_test(NAME sky_clouds COMMAND sokoban_vulkan_smoke_tests --sky-clouds)
             add_test(NAME ground_debris COMMAND sokoban_vulkan_smoke_tests --ground-debris)
             add_test(NAME vulkan_geometry_arena COMMAND
                 sokoban_vulkan_smoke_tests --geometry-arena)
+            add_test(NAME renderer_frame_ownership COMMAND
+                sokoban_vulkan_smoke_tests --renderer-frame-ownership)
         endif()
         set_tests_properties(vulkan_geometry_arena PROPERTIES
             LABELS "vulkan;memory"
             TIMEOUT 30
+            SKIP_RETURN_CODE 77
+        )
+        set_tests_properties(renderer_frame_ownership PROPERTIES
+            LABELS "vulkan;render"
+            TIMEOUT 60
             SKIP_RETURN_CODE 77
         )
         set_tests_properties(sky_clouds PROPERTIES
@@ -1306,7 +1315,7 @@ if(SOKOBAN_BUILD_TESTS)
         if(SOKOBAN_ENABLE_SANITIZERS)
             # These tests initialize SDL/X11 and Vulkan. The application child
             # inherits this environment from the CMake teardown verifier.
-            set_property(TEST vulkan_smoke vulkan_geometry_arena sky_clouds ground_debris application_validation_teardown preview_rendering interaction_outlines water_entry_ripples rock_scratches four_layer_splat robot_animation
+            set_property(TEST vulkan_smoke vulkan_geometry_arena renderer_frame_ownership sky_clouds ground_debris application_validation_teardown preview_rendering interaction_outlines water_entry_ripples rock_scratches four_layer_splat robot_animation
                 APPEND PROPERTY ENVIRONMENT
                 "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
         endif()
@@ -1415,6 +1424,7 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME atmospheric_audio
         LIBS sokoban_core
         SOURCES tests/AtmosphericAudioTests.cpp
+        DEFINITIONS SOKOBAN_ENABLE_TEST_HOOKS=1
     )
     sokoban_add_test(NAME frame_pacing
         LIBS sokoban_core

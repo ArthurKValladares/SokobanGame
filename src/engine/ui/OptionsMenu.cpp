@@ -1693,7 +1693,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             state.capturingAction
                 ? (editorPage
                         ? "Hold Ctrl, Shift or Alt for a chord. Esc cancels."
-                        : "Esc or Start cancels. Rebinding steals duplicates.")
+                        : "Esc or Start cancels. Menu controls stay assigned.")
                 : "Choose a tab, then confirm a row to remap it.",
             { 0.58f, 0.63f, 0.62f, 1.0f },
             17.0f * verticalScale);

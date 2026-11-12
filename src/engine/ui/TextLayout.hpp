@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -36,5 +37,14 @@ struct TextBoundary {
 // UAX #29 graphemes and UAX #14 break opportunities. Used by every wrapping
 // caller, including the lectern's text interspersed with atomic input prompts.
 [[nodiscard]] std::vector<TextBoundary> textBoundaries(std::string_view text);
+
+struct TextLineBreak {
+    std::size_t offset = 0;
+    std::size_t length = 0;
+};
+
+// First mandatory line break or bidi paragraph separator in a UTF-8 string.
+// CRLF is one break. Offsets and lengths are in bytes.
+[[nodiscard]] std::optional<TextLineBreak> findTextLineBreak(std::string_view text);
 
 } // namespace sokoban

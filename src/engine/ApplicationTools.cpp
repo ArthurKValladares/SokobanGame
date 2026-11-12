@@ -1550,7 +1550,7 @@ bool ApplicationTools::bakeTileThumbnails(
                     ui.drawData());
             }
 
-            const VkExtent2D extent = renderer.renderExtent();
+            const VkExtent2D extent = renderer.renderedFrameExtent();
             const bake::CropRect crop = bake::cropFor(
                 bakeFrame,
                 extent.width,

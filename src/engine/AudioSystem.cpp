@@ -1,6 +1,7 @@
 #include "engine/AudioSystem.hpp"
 
 #include "engine/Log.hpp"
+#include "engine/PathText.hpp"
 
 #include "miniaudio.h"
 
@@ -58,6 +59,19 @@ struct AudioSystem::EngineHandle {
 
 namespace {
 
+ma_result initSoundFromPath(
+    ma_engine& engine, const std::filesystem::path& path,
+    ma_uint32 flags, ma_sound& sound)
+{
+#ifdef _WIN32
+    return ma_sound_init_from_file_w(
+        &engine, path.c_str(), flags, nullptr, nullptr, &sound);
+#else
+    return ma_sound_init_from_file(
+        &engine, path.c_str(), flags, nullptr, nullptr, &sound);
+#endif
+}
+
 void loadSoundSet(
     ma_engine& engine,
     const std::filesystem::path& audioRoot,
@@ -71,24 +85,45 @@ void loadSoundSet(
     const size_t count = fileNames.size();
     sounds.resize(count);
     for (size_t i = 0; i < count; ++i) {
-        const std::filesystem::path path = audioRoot / fileNames[i];
-        const ma_result result = ma_sound_init_from_file(
-            &engine,
-            path.string().c_str(),
-            flags,
-            nullptr,
-            nullptr,
-            &sounds[i]);
+        const std::string& file = fileNames[i];
+        const std::filesystem::path path =
+            audioRoot / std::u8string(file.begin(), file.end());
+        const ma_result result = initSoundFromPath(engine, path, flags, sounds[i]);
         if (result == MA_SUCCESS) {
             loaded.push_back(static_cast<int>(i));
         } else {
             log::warning(log::Category::Audio)
-                << "Audio: failed to load " << path.string();
+                << "Audio: failed to load " << pathText(path)
+                << " (" << ma_result_description(result) << ')';
         }
     }
 }
 
 } // namespace
+
+#if SOKOBAN_ENABLE_TEST_HOOKS
+std::size_t audioTest::loadStartupSounds(
+    const std::filesystem::path& audioRoot,
+    const std::vector<std::string>& fileNames, bool streamed)
+{
+    ma_engine engine {};
+    ma_engine_config config = ma_engine_config_init();
+    config.noDevice = MA_TRUE;
+    config.channels = 2;
+    config.sampleRate = 48000;
+    if (ma_engine_init(&config, &engine) != MA_SUCCESS) return 0;
+
+    std::vector<ma_sound> sounds;
+    std::vector<int> loaded;
+    loadSoundSet(engine, audioRoot, fileNames, sounds, loaded,
+        streamed ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE);
+    for (const int index : loaded) {
+        ma_sound_uninit(&sounds[static_cast<std::size_t>(index)]);
+    }
+    ma_engine_uninit(&engine);
+    return loaded.size();
+}
+#endif
 
 AudioSystem::AudioSystem(std::filesystem::path audioRoot, const AssetManifest& manifest)
     : engine_(std::make_unique<EngineHandle>())
@@ -187,15 +222,8 @@ bool AudioSystem::previewSoundFile(
         error = "Audio engine is unavailable.";
         return false;
     }
-#ifdef _WIN32
-    const ma_result result = ma_sound_init_from_file_w(
-        &engine_->engine, file.c_str(), MA_SOUND_FLAG_STREAM,
-        nullptr, nullptr, &engine_->previewSound);
-#else
-    const ma_result result = ma_sound_init_from_file(
-        &engine_->engine, file.c_str(), MA_SOUND_FLAG_STREAM,
-        nullptr, nullptr, &engine_->previewSound);
-#endif
+    const ma_result result = initSoundFromPath(
+        engine_->engine, file, MA_SOUND_FLAG_STREAM, engine_->previewSound);
     if (result != MA_SUCCESS) {
         error = "Cannot preview sound: " + std::string(ma_result_description(result));
         return false;

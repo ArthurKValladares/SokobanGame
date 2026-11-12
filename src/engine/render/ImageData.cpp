@@ -1,5 +1,7 @@
 #include "engine/render/ImageData.hpp"
 
+#include "engine/PathText.hpp"
+
 #define STBI_FAILURE_USERMSG
 #define STBI_NO_STDIO
 #include <stb_image.h>
@@ -19,15 +21,15 @@ std::vector<stbi_uc> readImageFile(const std::filesystem::path& path)
 {
     std::ifstream stream(path, std::ios::binary | std::ios::ate);
     if (!stream) {
-        throw std::runtime_error("Failed to open image: " + path.string());
+        throw std::runtime_error("Failed to open image: " + pathText(path));
     }
 
     const std::streamoff fileSize = stream.tellg();
     if (fileSize <= 0) {
-        throw std::runtime_error("Image file is empty: " + path.string());
+        throw std::runtime_error("Image file is empty: " + pathText(path));
     }
     if (fileSize > std::numeric_limits<int>::max()) {
-        throw std::runtime_error("Image file is too large to decode: " + path.string());
+        throw std::runtime_error("Image file is too large to decode: " + pathText(path));
     }
 
     std::vector<stbi_uc> encoded(static_cast<size_t>(fileSize));
@@ -36,7 +38,7 @@ std::vector<stbi_uc> readImageFile(const std::filesystem::path& path)
         reinterpret_cast<char*>(encoded.data()),
         static_cast<std::streamsize>(encoded.size()));
     if (!stream) {
-        throw std::runtime_error("Failed to read image: " + path.string());
+        throw std::runtime_error("Failed to read image: " + pathText(path));
     }
     return encoded;
 }
@@ -47,7 +49,7 @@ ImageData loadRgbaImage(const std::filesystem::path& path)
 {
     const std::vector<stbi_uc> encoded = readImageFile(path);
     return loadRgbaImage(
-        std::as_bytes(std::span(encoded)), path.string());
+        std::as_bytes(std::span(encoded)), pathText(path));
 }
 
 ImageData loadRgbaImage(
@@ -125,7 +127,7 @@ uint64_t inspectRgbaImagePayloadBytes(const std::filesystem::path& path)
 {
     const std::vector<stbi_uc> encoded = readImageFile(path);
     return inspectRgbaImagePayloadBytes(
-        std::as_bytes(std::span(encoded)), path.string());
+        std::as_bytes(std::span(encoded)), pathText(path));
 }
 
 uint64_t inspectRgbaImagePayloadBytes(

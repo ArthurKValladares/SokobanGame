@@ -25,10 +25,9 @@ std::vector<std::string> LecternDialog::wrapText(
     std::vector<std::string> lines;
     std::size_t paragraph = 0;
     do {
-        const std::size_t end = text.find('\n', paragraph);
+        const auto separator = findTextLineBreak(text.substr(paragraph));
         std::string_view remaining = text.substr(paragraph,
-            end == std::string_view::npos ? end : end - paragraph);
-        if (!remaining.empty() && remaining.back() == '\r') remaining.remove_suffix(1);
+            separator ? separator->offset : std::string_view::npos);
         if (remaining.empty()) lines.emplace_back();
         while (!remaining.empty()) {
             const auto boundaries = textBoundaries(remaining);
@@ -51,8 +50,8 @@ std::vector<std::string> LecternDialog::wrapText(
                 remaining.remove_prefix(1);
             }
         }
-        if (end == std::string_view::npos) break;
-        paragraph = end + 1;
+        if (!separator) break;
+        paragraph += separator->offset + separator->length;
     } while (paragraph <= text.size());
     return lines;
 }
@@ -128,15 +127,10 @@ void LecternDialog::rebuildLines(UiContext& ui, std::string_view text,
     const auto appendText = [&](std::string_view value, bool error) {
         std::size_t position = 0;
         while (position < value.size()) {
-            if (value[position] == '\n') {
-                finishLine();
-                ++position;
-            } else if (value[position] == '\r') {
-                ++position;
-            } else if (value[position] == ' ' || value[position] == '\t') {
+            if (value[position] == ' ' || value[position] == '\t') {
                 whitespace += value[position++];
             } else {
-                const std::size_t end = value.find_first_of(" \t\r\n", position);
+                const std::size_t end = value.find_first_of(" \t", position);
                 const std::size_t count = end == std::string_view::npos ? value.size() - position : end - position;
                 appendWord(value.substr(position, count), error);
                 position += count;
@@ -183,31 +177,37 @@ void LecternDialog::rebuildLines(UiContext& ui, std::string_view text,
         for (Run& part : parts) appendRun(std::move(part));
     };
 
-    std::size_t position = 0;
-    while (position < text.size()) {
-        const std::size_t begin = text.find("<!", position);
-        if (begin == std::string_view::npos) {
-            appendText(text.substr(position), false);
-            break;
+    std::size_t paragraph = 0;
+    do {
+        const auto separator = findTextLineBreak(text.substr(paragraph));
+        const auto part = text.substr(paragraph,
+            separator ? separator->offset : std::string_view::npos);
+        std::size_t position = 0;
+        while (position < part.size()) {
+            const std::size_t begin = part.find("<!", position);
+            if (begin == std::string_view::npos) {
+                appendText(part.substr(position), false);
+                break;
+            }
+            appendText(part.substr(position, begin - position), false);
+            const std::size_t end = part.find("!>", begin + 2);
+            if (end == std::string_view::npos) {
+                appendText("[Invalid keybind tag]", true);
+                break;
+            }
+            const std::string_view name = part.substr(begin + 2, end - begin - 2);
+            const auto action = findInputAction(name);
+            const InputBinding* binding = action && context.bindings
+                ? SelectorPrompt::bindingView(*context.bindings, *action, context.deviceClass) : nullptr;
+            if (!action) appendText("[Unknown action: " + std::string(name) + "]", true);
+            else if (!binding) appendText("[Unbound action: " + std::string(name) + "]", true);
+            else appendBinding(*binding);
+            position = end + 2;
         }
-        appendText(text.substr(position, begin - position), false);
-        const std::size_t end = text.find("!>", begin + 2);
-        const std::size_t newline = text.find('\n', begin + 2);
-        if (end == std::string_view::npos || (newline != std::string_view::npos && newline < end)) {
-            appendText("[Invalid keybind tag]", true);
-            position = newline == std::string_view::npos ? text.size() : newline;
-            continue;
-        }
-        const std::string_view name = text.substr(begin + 2, end - begin - 2);
-        const auto action = findInputAction(name);
-        const InputBinding* binding = action && context.bindings
-            ? SelectorPrompt::bindingView(*context.bindings, *action, context.deviceClass) : nullptr;
-        if (!action) appendText("[Unknown action: " + std::string(name) + "]", true);
-        else if (!binding) appendText("[Unbound action: " + std::string(name) + "]", true);
-        else appendBinding(*binding);
-        position = end + 2;
-    }
-    finishLine();
+        finishLine();
+        if (!separator) break;
+        paragraph += separator->offset + separator->length;
+    } while (paragraph <= text.size());
 }
 
 void LecternDialog::draw(UiContext& ui, Vec2 viewport, std::string_view text)

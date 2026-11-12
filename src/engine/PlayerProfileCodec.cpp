@@ -1266,6 +1266,9 @@ InputBindings inputBindingsFromJson(
             fail(context, "no unused shortcut available for Rotate tile");
         }
     }
+    if (!restoreMenuBindings(result)) {
+        fail(context, "no unused control available for menu navigation");
+    }
     return result;
 }
 

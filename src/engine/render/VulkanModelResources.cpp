@@ -471,16 +471,15 @@ void VulkanModelResources::cancelQueuedPrefetches()
 
 bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirements)
 {
-    // Offline callers have no submitted render frames referencing residency
-    // resources, so evictions from this blocking path can retire immediately.
+    // The renderer completes submitted frames before entering this blocking
+    // path, so evictions can retire immediately.
     retirementFrameMask_ = 0;
     requestAssets(requirements);
     // The final readiness pass cannot see bindings published while draining
     // CPU jobs: those textures are already resident by the time it runs.
     bool descriptorsChanged = false;
 
-    // This is an offline-only path. Let the normal bounded scheduler drain as
-    // each completed job is published; gameplay never waits here.
+    // Let the normal bounded scheduler drain as each completed job is published.
     while (scheduler_.queuedCount() != 0 || scheduler_.activeCount() != 0) {
         startQueuedAssets();
         bool published = false;

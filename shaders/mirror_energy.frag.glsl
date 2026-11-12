@@ -172,7 +172,8 @@ void main()
         float angle = atan(p.y, p.x);
         float cloud = energyCloud(vec3(p * 5.5, time * 0.25));
         float swirl = 0.5 + 0.5 * sin(radius * 36.0 - time * 2.0 + angle * 3.0 + cloud * 3.0);
-        float seal = exp(-pow((radius - 0.36) / 0.018, 2.0));
+        float sealDistance = (radius - 0.36) / 0.018;
+        float seal = exp(-(sealDistance * sealDistance));
         vec2 corner = abs(p);
         float thorns = smoothstep(0.35, 0.39, corner.x + corner.y * 0.22) *
             smoothstep(0.19, 0.32, corner.y);

@@ -1,6 +1,7 @@
 #include "engine/OverworldMap.hpp"
 
 #include "engine/LevelCatalog.hpp"
+#include "engine/PathText.hpp"
 #include "engine/TileTypes.hpp"
 
 #include <nlohmann/json.hpp>
@@ -354,38 +355,38 @@ void validateDraftOverrides(
 
 OverworldLayout loadOverworldLayout(const std::filesystem::path& path)
 {
+    const std::string source = pathText(path);
     try {
         std::ifstream file(path);
         if (!file) {
             throw std::runtime_error(
-                "cannot read overworld layout " + path.string());
+                "cannot read overworld layout " + source);
         }
         const Json root = Json::parse(file);
         rejectUnknownProperties(
             root,
             { "format", "screenSize", "screens" },
-            path.string());
+            source);
 
         OverworldLayout layout;
         layout.format = integer(
-            required(root, "format", path.string()),
-            path.string() + ".format");
-        const Json& screenSize = required(root, "screenSize", path.string());
+            required(root, "format", source), source + ".format");
+        const Json& screenSize = required(root, "screenSize", source);
         if (!screenSize.is_array() || screenSize.size() != 2) {
-            fail(path.string() + ".screenSize", "must be an array of two integers");
+            fail(source + ".screenSize", "must be an array of two integers");
         }
         layout.screenWidth = positiveUint32(
-            screenSize[0], path.string() + ".screenSize[0]");
+            screenSize[0], source + ".screenSize[0]");
         layout.screenHeight = positiveUint32(
-            screenSize[1], path.string() + ".screenSize[1]");
-        const Json& screens = required(root, "screens", path.string());
+            screenSize[1], source + ".screenSize[1]");
+        const Json& screens = required(root, "screens", source);
         if (!screens.is_array()) {
-            fail(path.string() + ".screens", "must be an array");
+            fail(source + ".screens", "must be an array");
         }
         for (std::size_t index = 0; index < screens.size(); ++index) {
             const Json& encoded = screens[index];
             const std::string context =
-                path.string() + ".screens[" + std::to_string(index) + "]";
+                source + ".screens[" + std::to_string(index) + "]";
             rejectUnknownProperties(encoded, { "id", "file", "slot" }, context);
             layout.screens.push_back({
                 .id = positiveUint32(
@@ -402,8 +403,7 @@ OverworldLayout loadOverworldLayout(const std::filesystem::path& path)
         return layout;
     } catch (const Json::exception& error) {
         throw std::runtime_error(
-            "invalid overworld layout " + path.string() + ": " +
-            error.what());
+            "invalid overworld layout " + source + ": " + error.what());
     }
 }
 
@@ -417,12 +417,12 @@ void writeOverworldLayout(
     std::filesystem::create_directories(path.parent_path());
     std::ofstream file(path, std::ios::trunc);
     if (!file) {
-        throw std::runtime_error("cannot write overworld layout " + path.string());
+        throw std::runtime_error("cannot write overworld layout " + pathText(path));
     }
     file << layoutToJson(normalized).dump(2) << '\n';
     file.close();
     if (!file) {
-        throw std::runtime_error("cannot write overworld layout " + path.string());
+        throw std::runtime_error("cannot write overworld layout " + pathText(path));
     }
 }
 

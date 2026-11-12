@@ -1426,6 +1426,116 @@ void exerciseRendererAssetPublicationBudget(SDL_Window* window)
     std::cout << "Renderer honored the configured two-asset publication budget\n";
 }
 
+void exerciseRendererFrameOwnership(SDL_Window* window)
+{
+    using namespace sokoban;
+    const auto require = [](bool condition, const char* message) {
+        if (!condition) throw std::runtime_error(message);
+    };
+    const auto runtimeAssets = std::filesystem::path(SOKOBAN_VULKAN_TEST_ASSETS);
+    ScopedTestDirectory temporary("renderer-frame-ownership");
+    const auto assetRoot = temporary.path() / "assets";
+    const auto title = std::filesystem::path(config::titleBackgroundPath);
+    std::filesystem::create_directories((assetRoot / title).parent_path());
+    std::filesystem::copy_file(runtimeAssets / title, assetRoot / title);
+    std::filesystem::copy(runtimeAssets / "shaders", assetRoot / "shaders",
+        std::filesystem::copy_options::recursive);
+
+    constexpr uint32_t textureSize = 16;
+    constexpr std::size_t textureBytes = textureSize * textureSize * 4;
+    AssetManifest manifest;
+    const auto makeTexture = [&](const char* name, const char* filename, std::size_t channel) {
+        std::vector<uint8_t> pixels(textureBytes, 0);
+        for (std::size_t index = 0; index < pixels.size(); index += 4) {
+            pixels[index + channel] = 255;
+            pixels[index + 3] = 255;
+        }
+        writeRgbaPng(assetRoot / filename, textureSize, textureSize, pixels);
+        return manifest.addTexture({ .name = name, .path = filename });
+    };
+    const RenderTexture first = makeTexture("First", "first.png", 0);
+    const RenderTexture second = makeTexture("Second", "second.png", 2);
+    require(!first.isNone() && !second.isNone(), "Could not register frame ownership fixture textures");
+    auto font = FontAtlas::loadDefault(runtimeAssets);
+    const auto validationErrors = vulkanDebug::validationErrorCount();
+    {
+        VulkanRenderer renderer(window, assetRoot, temporary.path() / "cache.bin",
+            manifest, font, AntiAliasingMode::None, 100, { .vsync = false },
+            { .textureResidencyBytes = textureBytes }, false, true, true, false);
+        bool noFrame = false;
+        try {
+            (void)renderer.captureRenderedFrame();
+        } catch (const std::runtime_error& error) {
+            noFrame = std::string_view(error.what()).find("submitted") != std::string_view::npos;
+        }
+        require(noFrame, "Capture before the first submission did not report that no frame exists");
+
+        const VkExtent2D full = renderer.renderExtent();
+        const Vec2 viewport { static_cast<float>(full.width), static_cast<float>(full.height) };
+        UiContext ui(font);
+        const auto draw = [&](RenderTexture texture, bool workspace = false) {
+            ui.beginFrame(viewport, {}, false, false);
+            ui.textureImage({ {}, viewport }, texture);
+            ui.endFrame();
+            renderer.beginDebugUiFrame();
+            renderer.drawFrame(renderer.prepareFrame(RenderFrameData {}), ui.drawData(), workspace);
+            require(!renderer.hasFatalFailure(), "Frame ownership fixture failed to draw");
+        };
+        RenderAssetRequirements firstRequired, secondRequired;
+        firstRequired.requireTexture(first);
+        secondRequired.requireTexture(second);
+        renderer.waitForAssets(firstRequired);
+        draw(first);
+        const auto before = renderer.assetLoadingStats();
+        renderer.waitForAssets(secondRequired);
+        const auto after = renderer.assetLoadingStats();
+        require(after.residencyEvictions == before.residencyEvictions + 1 &&
+                after.textureResidencyBytes == textureBytes,
+            "Live blocking load did not force the sampled texture to be evicted");
+        require(vulkanDebug::validationErrorCount() == validationErrors,
+            "Live blocking load retired a texture still referenced by a submitted frame");
+
+        constexpr bool workspace = SOKOBAN_ENABLE_DEBUG_UI != 0;
+        draw(second, workspace);
+        const auto original = renderer.captureRenderedFrame();
+        require(original.width == full.width && original.height == full.height &&
+                original.rgba.size() == std::size_t(full.width) * full.height * 4 &&
+                std::to_integer<uint8_t>(original.rgba[2]) > 240,
+            "Frame capture did not contain the newly resident blue texture");
+
+        renderer.setRenderScalePercent(50);
+        draw(second, workspace);
+        const VkExtent2D scaled = renderer.renderExtent();
+        require(scaled.width < full.width && scaled.height < full.height,
+            "Frame ownership fixture did not recreate the render resources at 50% scale");
+        // Release the completed render generation before reading its image.
+        renderer.waitForAssets(secondRequired);
+        VulkanRenderer::failNextSwapchainAcquisitionForTesting();
+        draw(second, workspace);
+        const auto retained = renderer.captureRenderedFrame();
+        require(retained.width == original.width && retained.height == original.height &&
+                retained.rgba == original.rgba && renderer.renderedFrameExtent().width == full.width,
+            "Reconfiguration or failed acquisition lost the last submitted frame");
+        const auto edge = renderer.captureRenderedFrame(VkRect2D {
+            .offset = { static_cast<int32_t>(full.width - 1), static_cast<int32_t>(full.height - 1) },
+            .extent = { 1, 1 },
+        });
+        require(edge.width == 1 && edge.height == 1 && edge.rgba.size() == 4 &&
+                std::to_integer<uint8_t>(edge.rgba[2]) > 240,
+            "Capture region did not use the last submitted frame's coordinates");
+
+        draw(second, workspace);
+        const auto next = renderer.captureRenderedFrame();
+        require(next.width == scaled.width && next.height == scaled.height &&
+                next.rgba.size() == std::size_t(scaled.width) * scaled.height * 4 &&
+                std::to_integer<uint8_t>(next.rgba[2]) > 240,
+            "Capture did not switch to the newly submitted generation");
+    }
+    require(vulkanDebug::validationErrorCount() == validationErrors,
+        "Vulkan validation reported a frame ownership error");
+    std::cout << "Live texture eviction and capture across swapchain replacement passed\n";
+}
+
 int exerciseThumbnailLoadingBudget(SDL_Window* window)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -2282,6 +2392,10 @@ int main(int argc, char** argv)
         if (argc == 2 &&
             std::string_view(argv[1]) == "--asset-publication-budget") {
             exerciseRendererAssetPublicationBudget(window.get());
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--renderer-frame-ownership") {
+            exerciseRendererFrameOwnership(window.get());
             return 0;
         }
         if (argc == 2 &&

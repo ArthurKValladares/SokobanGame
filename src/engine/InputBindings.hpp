@@ -44,9 +44,8 @@ enum KeyModifier : std::uint8_t {
 struct KeyboardBinding {
     // SDL scancode name, such as "S" or "Left Alt".
     std::string scancode;
-    // KeyModifier bits that must be held. When several bindings on the same
-    // key are satisfied, only the one requiring the most modifiers fires, so
-    // Ctrl+S does not also press S and Shift+F5 does not also press F5.
+    // KeyModifier bits that must be held at key-down. A satisfied chord
+    // requiring a superset of modifiers takes precedence over this binding.
     std::uint8_t modifiers = keyModifierNone;
 
     bool operator==(const KeyboardBinding&) const = default;
@@ -119,13 +118,18 @@ enum class BindingDeviceClass : uint8_t {
 // candidate's exact kind (keyboard / pad button / pad axis) are replaced by
 // the candidate. Editor-only modifiers may intentionally reuse gameplay keys;
 // an action that would otherwise become empty receives the target's displaced
-// same-kind binding. Rebinding a d-pad button still keeps an existing stick
+// same-kind binding. Menu directions and confirm retain a binding on each
+// device, using a displaced control or a free fallback. Rebinding a d-pad
+// button still keeps an existing stick
 // binding and vice versa. Tile rotation and decoration-gizmo rotation may
 // share a binding because their tools run them in mutually exclusive contexts.
 void assignBinding(
     InputBindings& bindings,
     InputAction action,
     const InputBinding& candidate);
+// Repairs settings saved before menu actions were required on both devices.
+// Existing assignments are kept. Returns false if no free control is left.
+[[nodiscard]] bool restoreMenuBindings(InputBindings& bindings);
 // Which actions may share a binding: gameplay and menu actions never run
 // while a document is being edited, and editor actions only run then. Undo,
 // Back, and Play/Stop Draft are live in both.

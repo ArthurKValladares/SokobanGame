@@ -1,9 +1,15 @@
+#include "ScopedTestDirectory.hpp"
 #include "TestHarness.hpp"
 
 #include "engine/AtmosphericAudio.hpp"
+#include "engine/AudioSystem.hpp"
 #include "engine/GameplayLoop.hpp"
+#include "engine/Log.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <limits>
 
@@ -117,6 +123,46 @@ void testListenerUsesAnimatedControlledHero()
     CHECK(!AtmosphericAudio::listenerPosition({}, presentation, invalidEntityId));
 }
 
+void testStartupAudioUsesUnicodePaths()
+{
+    TEST("startupAudioUsesUnicodePaths");
+    const ScopedTestDirectory temp("sokoban-startup-audio");
+    const auto root = temp.path() / u8"audio-\U0001f50a";
+    constexpr std::u8string_view present = u8"note-\u97f3.wav";
+    constexpr std::u8string_view missing = u8"missing-\u97f3.wav";
+    std::filesystem::create_directory(root);
+    // Two silent frames of mono 16-bit PCM at 8 kHz.
+    constexpr std::array<unsigned char, 48> wave {
+        'R', 'I', 'F', 'F', 40, 0, 0, 0, 'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ', 16, 0, 0, 0, 1, 0, 1, 0,
+        0x40, 0x1f, 0, 0, 0x80, 0x3e, 0, 0, 2, 0, 16, 0,
+        'd', 'a', 't', 'a', 4, 0, 0, 0, 0, 0, 0, 0,
+    };
+    {
+        std::ofstream file(root / present, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(wave.data()),
+            static_cast<std::streamsize>(wave.size()));
+        CHECK(file.good());
+    }
+
+    const std::vector<std::string> files {
+        { present.begin(), present.end() }, { missing.begin(), missing.end() },
+    };
+    log::configure({ .stderrEnabled = false });
+    log::setHistoryEnabled(true);
+    CHECK(audioTest::loadStartupSounds(root, files, false) == 1);
+    CHECK(audioTest::loadStartupSounds(root, files, true) == 1);
+    const std::u8string path = (root / missing).u8string();
+    const std::string expected(path.begin(), path.end());
+    const auto history = log::historySnapshot();
+    CHECK(std::ranges::count_if(history.entries, [&](const log::Entry& entry) {
+        return entry.category == log::Category::Audio &&
+            entry.level == log::Level::Warning &&
+            entry.message.find(expected) != std::string::npos;
+    }) == 2);
+    log::reset();
+}
+
 } // namespace
 
 int main()
@@ -125,6 +171,7 @@ int main()
     testNearestTileMixingAndReset();
     testCoveredSourcesAndPortals();
     testListenerUsesAnimatedControlledHero();
+    testStartupAudioUsesUnicodePaths();
     if (failures != 0) {
         return 1;
     }

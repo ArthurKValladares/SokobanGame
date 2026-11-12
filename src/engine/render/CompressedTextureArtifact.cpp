@@ -1,5 +1,6 @@
 #include "engine/render/CompressedTextureArtifact.hpp"
 
+#include "engine/PathText.hpp"
 #include "engine/render/TextureMipChain.hpp"
 
 #include <bc7enc16.h>
@@ -219,7 +220,7 @@ uint64_t alignUp(uint64_t value, uint64_t alignment)
 
 std::string diagnosticLabel(const std::filesystem::path& path)
 {
-    return path.empty() ? "KTX2 texture" : path.string();
+    return path.empty() ? "KTX2 texture" : pathText(path);
 }
 
 [[noreturn]] void invalidKtx(
@@ -577,19 +578,19 @@ CompressedTextureArtifact loadBc7Ktx2(const std::filesystem::path& path)
 {
     std::ifstream stream(path, std::ios::binary | std::ios::ate);
     if (!stream) {
-        throw std::runtime_error("Cannot open BC7 KTX2 artifact: " + path.string());
+        throw std::runtime_error("Cannot open BC7 KTX2 artifact: " + pathText(path));
     }
     const std::streampos end = stream.tellg();
     if (end < 0 || static_cast<uint64_t>(end) >
         std::numeric_limits<std::size_t>::max()) {
-        throw std::runtime_error("BC7 KTX2 artifact is too large: " + path.string());
+        throw std::runtime_error("BC7 KTX2 artifact is too large: " + pathText(path));
     }
     std::vector<std::byte> bytes(static_cast<std::size_t>(end));
     stream.seekg(0);
     stream.read(reinterpret_cast<char*>(bytes.data()),
         static_cast<std::streamsize>(bytes.size()));
     if (!stream) {
-        throw std::runtime_error("Cannot read BC7 KTX2 artifact: " + path.string());
+        throw std::runtime_error("Cannot read BC7 KTX2 artifact: " + pathText(path));
     }
     return parseBc7Ktx2(bytes, path);
 }
@@ -598,11 +599,11 @@ CompressedTextureArtifactMetadata inspectBc7Ktx2(const std::filesystem::path& pa
 {
     std::ifstream stream(path, std::ios::binary | std::ios::ate);
     if (!stream) {
-        throw std::runtime_error("Cannot open BC7 KTX2 artifact: " + path.string());
+        throw std::runtime_error("Cannot open BC7 KTX2 artifact: " + pathText(path));
     }
     const std::streampos end = stream.tellg();
     if (end < 0) {
-        throw std::runtime_error("Cannot size BC7 KTX2 artifact: " + path.string());
+        throw std::runtime_error("Cannot size BC7 KTX2 artifact: " + pathText(path));
     }
     const uint64_t fileBytes = static_cast<uint64_t>(end);
     if (fileBytes < ktx2HeaderBytes) {
@@ -613,7 +614,7 @@ CompressedTextureArtifactMetadata inspectBc7Ktx2(const std::filesystem::path& pa
     stream.seekg(0);
     stream.read(reinterpret_cast<char*>(bytes.data()), ktx2HeaderBytes);
     if (!stream) {
-        throw std::runtime_error("Cannot read BC7 KTX2 artifact: " + path.string());
+        throw std::runtime_error("Cannot read BC7 KTX2 artifact: " + pathText(path));
     }
     const CompressedTextureArtifactMetadata header =
         validateKtx2Header(std::span(bytes).first(ktx2HeaderBytes), path);
@@ -625,7 +626,7 @@ CompressedTextureArtifactMetadata inspectBc7Ktx2(const std::filesystem::path& pa
     stream.read(reinterpret_cast<char*>(bytes.data() + ktx2HeaderBytes),
         static_cast<std::streamsize>(metadataBytes - ktx2HeaderBytes));
     if (!stream) {
-        throw std::runtime_error("Cannot read BC7 KTX2 artifact: " + path.string());
+        throw std::runtime_error("Cannot read BC7 KTX2 artifact: " + pathText(path));
     }
     return validateKtx2Layout(std::span(bytes).first(metadataBytes), fileBytes, path)
         .metadata;

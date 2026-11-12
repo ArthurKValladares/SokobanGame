@@ -481,6 +481,7 @@ VulkanRenderer::~VulkanRenderer()
         }
     }
 
+    lastSubmittedFrame_ = {};
     retiredResources_.clear();
     activeResources_ = {};
     groundChunkGpuCache_.destroy();
@@ -757,6 +758,10 @@ void VulkanRenderer::submitAndPresent(
     frameResourceTracker_.markSubmitted(
         currentFrame_, activeResourceGeneration_);
     gpuProfiler_.markSubmitted(currentFrame_);
+    if (lastSubmittedFrame_.swapchain != activeResources_.swapchain) {
+        lastSubmittedFrame_.swapchain = activeResources_.swapchain;
+    }
+    lastSubmittedFrame_.displayLayout = activeResources_.swapchain->displayColorLayout();
 
     const VkResult presented = activeResources_.swapchain->present(
         deviceContext_.presentQueue(),
@@ -1063,8 +1068,27 @@ void VulkanRenderer::ensureAssets(const RenderAssetRequirements& requirements)
 
 void VulkanRenderer::waitForAssets(const RenderAssetRequirements& requirements)
 {
-    if (modelResources_.waitForAssets(requirements)) {
+    // The blocking loader can free a residency victim immediately. Retire
+    // every submitted frame first so the live painter can safely use it.
+    for (uint32_t index = 0; index < maxFramesInFlight_; ++index) {
+        if (!frameResourceTracker_.pending(index)) {
+            continue;
+        }
+        vkCheck(vkWaitForFences(deviceContext_.device(), 1,
+                    &frames_[index].inFlight, VK_TRUE, UINT64_MAX),
+            "vkWaitForFences", "blocking asset load");
+        completeFrame(index);
+    }
+    modelResources_.retireCompletedUploads();
+    try {
+        if (modelResources_.waitForAssets(requirements)) {
+            descriptorSync_.resourcesChanged();
+        }
+    } catch (...) {
+        // Earlier publications or evictions can succeed before a later
+        // required asset fails.
         descriptorSync_.resourcesChanged();
+        throw;
     }
 }
 
@@ -1092,6 +1116,12 @@ VkExtent2D VulkanRenderer::renderExtent() const
         : VkExtent2D { 0, 0 };
 }
 
+VkExtent2D VulkanRenderer::renderedFrameExtent() const
+{
+    return lastSubmittedFrame_.swapchain
+        ? lastSubmittedFrame_.swapchain->renderExtent() : VkExtent2D {};
+}
+
 uint64_t VulkanRenderer::gameViewportTexture() const
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -1104,10 +1134,11 @@ uint64_t VulkanRenderer::gameViewportTexture() const
 
 ImageData VulkanRenderer::captureRenderedFrame(std::optional<VkRect2D> region)
 {
-    if (!activeResources_.swapchain) {
-        throw std::runtime_error("No swapchain to capture from");
+    const auto& swapchain = lastSubmittedFrame_.swapchain;
+    if (!swapchain) {
+        throw std::runtime_error("No rendered frame has been submitted for capture");
     }
-    const VkExtent2D full = activeResources_.swapchain->renderExtent();
+    const VkExtent2D full = swapchain->renderExtent();
     const VkRect2D rect =
         region.value_or(VkRect2D { .offset = { 0, 0 }, .extent = full });
     if (rect.offset.x < 0 || rect.offset.y < 0 || !rect.extent.width || !rect.extent.height ||
@@ -1115,7 +1146,7 @@ ImageData VulkanRenderer::captureRenderedFrame(std::optional<VkRect2D> region)
         uint64_t(rect.offset.y) + rect.extent.height > full.height) {
         throw std::invalid_argument("Frame capture region lies outside the scene");
     }
-    const VkExtent2D display = activeResources_.swapchain->displayExtent();
+    const VkExtent2D display = swapchain->displayExtent();
     const auto mapX = [&](uint32_t x) { return uint32_t(uint64_t(x) * display.width / full.width); };
     const auto mapY = [&](uint32_t y) { return uint32_t(uint64_t(y) * display.height / full.height); };
     const VkOffset2D offset { static_cast<int32_t>(mapX(static_cast<uint32_t>(rect.offset.x))),
@@ -1125,7 +1156,7 @@ ImageData VulkanRenderer::captureRenderedFrame(std::optional<VkRect2D> region)
         mapY(static_cast<uint32_t>(rect.offset.y) + rect.extent.height) - static_cast<uint32_t>(offset.y) };
 
     // Everything submitted must have landed before the copy reads the image.
-    deviceContext_.waitIdle();
+    vkCheck(vkDeviceWaitIdle(deviceContext_.device()), "vkDeviceWaitIdle", "frame capture");
     return captureImageRegion(
         deviceContext_.memoryAllocator(),
         deviceContext_.device(),
@@ -1133,11 +1164,11 @@ ImageData VulkanRenderer::captureRenderedFrame(std::optional<VkRect2D> region)
         deviceContext_.graphicsQueue(),
         // The display image, not the scene target: it is tonemapped and in a
         // format PngWriter understands.
-        activeResources_.swapchain->displayColorImage(),
-        activeResources_.swapchain->colorFormat(),
+        swapchain->displayColorImage(),
+        swapchain->colorFormat(),
         // The workspace samples this image; the full-window path blits it.
         // Capture restores whichever layout the last frame actually left.
-        activeResources_.swapchain->displayColorLayout(),
+        lastSubmittedFrame_.displayLayout,
         offset,
         captureExtent,
         rect.extent);
@@ -1905,7 +1936,7 @@ VulkanRenderer::createRenderResources(
     const VkSampleCountFlagBits sampleCount =
         sampleCountForMode(settings.antiAliasing);
     resources.swapchain =
-        std::make_unique<VulkanSwapchainResources>();
+        std::make_shared<VulkanSwapchainResources>();
     resources.swapchain->create(
         deviceContext_.physicalDevice(),
         deviceContext_.memoryAllocator(),

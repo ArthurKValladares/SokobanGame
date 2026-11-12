@@ -1,5 +1,7 @@
 #include "engine/Level.hpp"
 
+#include "engine/PathText.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -1222,7 +1224,7 @@ Level::MinecartRoute Level::buildMinecartRoute(
 
 Level Level::loadFromFile(const std::filesystem::path& path)
 {
-    return loadFromDefinition(loadDefinitionFromFile(path), path.string());
+    return loadFromDefinition(loadDefinitionFromFile(path), pathText(path));
 }
 
 Level::Definition Level::loadDefinitionFromFile(
@@ -1230,7 +1232,7 @@ Level::Definition Level::loadDefinitionFromFile(
 {
     std::ifstream file(path);
     if (!file) {
-        throw std::runtime_error("Failed to open level file: " + path.string());
+        throw std::runtime_error("Failed to open level file: " + pathText(path));
     }
 
     std::vector<std::string> lines;
@@ -1242,7 +1244,7 @@ Level::Definition Level::loadDefinitionFromFile(
         lines.push_back(line);
     }
 
-    return parseDefinition(lines, path.string());
+    return parseDefinition(lines, pathText(path));
 }
 
 Level::Definition Level::parseDefinition(

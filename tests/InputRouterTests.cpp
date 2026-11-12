@@ -1,6 +1,8 @@
 #include "TestHarness.hpp"
 
 #include "engine/InputRouter.hpp"
+#include "engine/PlayerProfile.hpp"
+#include "engine/ui/SelectorPrompt.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -216,6 +218,111 @@ void testModalFrameRouting()
     CHECK(frame.showTopDownView);
     CHECK(frame.showOverworldMap);
     CHECK(frame.previewScreen);
+}
+
+void testMenuControlsRemainReachableAfterRebinding()
+{
+    TEST("menuControlsRemainReachableAfterRebinding");
+    using namespace sokoban;
+    InputRouter router;
+    InputState input(false);
+    auto bindings = defaultInputBindings();
+    assignBinding(bindings, InputAction::MoveUp, KeyboardBinding { "Space" });
+    assignBinding(bindings, InputAction::MoveUp, GamepadButtonBinding { "south" });
+    input.setBindings(bindings);
+
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_SPACE);
+    auto frame = router.routeFrame(input, { .titleOpen = true });
+    CHECK(frame.title.up);
+    CHECK(!frame.title.confirm);
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_W);
+    frame = router.routeFrame(input, { .titleOpen = true });
+    CHECK(frame.title.confirm);
+    CHECK(!frame.title.up);
+
+    input.beginFrame();
+    (void)router.routeEvent(gamepadButtonEvent(SDL_EVENT_GAMEPAD_BUTTON_DOWN,
+        SDL_GAMEPAD_BUTTON_SOUTH), input, {});
+    frame = router.routeFrame(input, { .optionsOpen = true });
+    CHECK(frame.options.up);
+    CHECK(!frame.options.confirm);
+    input.beginFrame();
+    (void)router.routeEvent(gamepadButtonEvent(SDL_EVENT_GAMEPAD_BUTTON_DOWN,
+        SDL_GAMEPAD_BUTTON_DPAD_UP), input, {});
+    frame = router.routeFrame(input, { .optionsOpen = true });
+    CHECK(frame.options.confirm);
+    CHECK(!frame.options.up);
+
+    // A previously keyboard-only action has no gamepad control to trade.
+    bindings = defaultInputBindings();
+    assignBinding(bindings, InputAction::ShowTopDownView, GamepadButtonBinding { "south" });
+    input.setBindings(bindings);
+    input.beginFrame();
+    (void)router.routeEvent(gamepadButtonEvent(SDL_EVENT_GAMEPAD_BUTTON_DOWN,
+        SDL_GAMEPAD_BUTTON_EAST), input, {});
+    CHECK(router.routeFrame(input, { .optionsOpen = true }).options.confirm);
+}
+
+void testLegacyBindingsRecoverKeyboardConfirmWithoutMovingNavigation()
+{
+    TEST("legacyBindingsRecoverKeyboardConfirmWithoutMovingNavigation");
+    using namespace sokoban;
+    PlayerProfile profile;
+    auto& oldBindings = profile.settings.input;
+    oldBindings.forAction(InputAction::MoveUp).front() = KeyboardBinding { "Space" };
+    oldBindings.forAction(InputAction::MenuConfirm) = { GamepadButtonBinding { "south" } };
+    const auto decoded = decodePlayerProfile(profile.serialize(ProfileSections::SettingsOnly));
+    const auto& bindings = decoded.profile.settings.input;
+    CHECK(bindings.forAction(InputAction::MoveUp) == oldBindings.forAction(InputAction::MoveUp));
+    CHECK(actionBindingsDisplay(bindings, InputAction::MenuConfirm, BindingDeviceClass::Keyboard) == "Return");
+    CHECK(actionBindingsDisplay(bindings, InputAction::MenuConfirm, BindingDeviceClass::Gamepad) == "Pad south");
+
+    InputRouter router;
+    InputState input(false);
+    input.setBindings(bindings);
+    CHECK(input.invalidBindingCount() == 0);
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_SPACE);
+    auto frame = router.routeFrame(input, { .titleOpen = true });
+    CHECK(frame.title.up);
+    CHECK(!frame.title.confirm);
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_RETURN);
+    frame = router.routeFrame(input, { .titleOpen = true });
+    CHECK(frame.title.confirm);
+    CHECK(!frame.title.up);
+}
+
+void testLegacyMenuBindingsRecoverFromUnknownKeysAndSharedAliases()
+{
+    TEST("legacyMenuBindingsRecoverFromUnknownKeysAndSharedAliases");
+    using namespace sokoban;
+    PlayerProfile profile;
+    auto& oldBindings = profile.settings.input;
+    oldBindings.forAction(InputAction::MoveLeft).front() = KeyboardBinding { "No such key" };
+    oldBindings.forAction(InputAction::MoveUp).push_back(GamepadButtonBinding { "south" });
+    oldBindings.forAction(InputAction::MenuConfirm).back() = GamepadButtonBinding { "a" };
+    const auto decoded = decodePlayerProfile(profile.serialize(ProfileSections::SettingsOnly));
+    const auto& bindings = decoded.profile.settings.input;
+    CHECK(SelectorPrompt::bindingLabel(bindings, InputAction::MoveLeft,
+        BindingDeviceClass::Keyboard) == "A");
+    CHECK(SelectorPrompt::bindingLabel(bindings, InputAction::MenuConfirm,
+        BindingDeviceClass::Gamepad) == "B");
+
+    InputRouter router;
+    InputState input(false);
+    input.setBindings(bindings);
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_A);
+    CHECK(router.routeFrame(input, { .titleOpen = true }).title.left);
+    input.beginFrame();
+    (void)router.routeEvent(gamepadButtonEvent(SDL_EVENT_GAMEPAD_BUTTON_DOWN,
+        SDL_GAMEPAD_BUTTON_EAST), input, {});
+    const auto frame = router.routeFrame(input, { .optionsOpen = true });
+    CHECK(frame.options.confirm);
+    CHECK(!frame.options.up);
 }
 
 void testBackPriority()
@@ -780,6 +887,9 @@ int main()
     testBindingCaptureSynchronizesGamepadButtonStateWithoutAnEdge();
     testBindingCaptureSynchronizesAxisStateWithoutAnEdge();
     testModalFrameRouting();
+    testMenuControlsRemainReachableAfterRebinding();
+    testLegacyBindingsRecoverKeyboardConfirmWithoutMovingNavigation();
+    testLegacyMenuBindingsRecoverFromUnknownKeysAndSharedAliases();
     testBackPriority();
     testEditorFrameUsesConfiguredControls();
     testEditorFrameRespectsRemappedTileControls();

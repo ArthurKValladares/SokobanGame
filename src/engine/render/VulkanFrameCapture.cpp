@@ -77,9 +77,7 @@ ImageData captureImageRegion(
         commandBuffer = vulkanResources::beginOneShotCommands(
             device, commandPool, "capture");
 
-        // The caller has already finished rendering into this image, so the
-        // only synchronisation needed is the layout move to transfer-source
-        // and back.
+        // Make the rendered pixels available to the transfer.
         vulkanResources::transitionImage(
             commandBuffer,
             sourceImage,
@@ -140,6 +138,27 @@ ImageData captureImageRegion(
             staging,
             1,
             &region);
+
+        // The fence orders CPU access after completion. This dependency makes
+        // the transfer's writes available to the host memory domain.
+        const VkBufferMemoryBarrier2 hostRead {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+            .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+            .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = staging,
+            .offset = 0,
+            .size = byteCount,
+        };
+        const VkDependencyInfo hostDependency {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .bufferMemoryBarrierCount = 1,
+            .pBufferMemoryBarriers = &hostRead,
+        };
+        vkCmdPipelineBarrier2(commandBuffer, &hostDependency);
 
         // Restore the layout the caller left it in, so the next frame's
         // rendering is unaffected by having captured.

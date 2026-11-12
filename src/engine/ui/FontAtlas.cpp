@@ -246,25 +246,15 @@ struct FontAtlas::Impl {
         float baseline = 0.0f;
         std::size_t start = 0;
         do {
-            std::size_t newline = text.find_first_of("\n\r", start);
-            std::size_t separator = 1;
-            for (const std::string_view unicodeSeparator : { "\xe2\x80\xa8", "\xe2\x80\xa9" }) {
-                const auto at = text.find(unicodeSeparator, start);
-                if (at != std::string_view::npos && (newline == std::string_view::npos || at < newline)) {
-                    newline = at;
-                    separator = unicodeSeparator.size();
-                }
-            }
-            if (newline != std::string_view::npos && text[newline] == '\r' && newline + 1 < text.size() && text[newline + 1] == '\n') separator = 2;
-            const std::size_t end = newline == std::string_view::npos ? text.size() : newline;
-            const std::string_view part = text.substr(start, end - start);
+            const auto separator = findTextLineBreak(text.substr(start));
+            const auto part = text.substr(start, separator ? separator->offset : std::string_view::npos);
             float pen = 0.0f;
             if (!part.empty()) shapeLine(result, part, size, start, baseline, pen);
             result.extent.x = std::max(result.extent.x, pen);
             result.extent.y = baseline + result.lineHeight;
-            if (newline == std::string_view::npos) break;
+            if (!separator) break;
             baseline += result.lineHeight;
-            start = newline + separator;
+            start += separator->offset + separator->length;
         } while (start <= text.size());
         return result;
     }

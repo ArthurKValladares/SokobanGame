@@ -114,17 +114,16 @@ private:
     [[nodiscard]] SDL_Gamepad* gamepadHandle(SDL_JoystickID id) const;
     [[nodiscard]] bool bindingDown(const CompiledBinding& binding, bool previousAxis) const;
     [[nodiscard]] bool bindingPressed(const CompiledBinding& binding) const;
-    // Whether a keyboard binding's chord is the one the held modifiers
-    // select for its key: all of its modifiers are held, and no binding on
-    // the same key with more of the held modifiers exists.
-    [[nodiscard]] bool keyboardChordSelected(
-        const CompiledBinding& binding) const;
+    [[nodiscard]] std::uint8_t selectKeyboardChords(
+        SDL_Scancode key, std::uint8_t held) const;
 
     InputBindings bindings_ = defaultInputBindings();
     std::array<std::vector<CompiledBinding>, inputActionCount> compiledBindings_;
-    // Every keyboard (scancode, modifiers) pair bound to any action, for
-    // choosing the most specific chord.
-    std::vector<std::pair<int, std::uint8_t>> keyboardChords_;
+    // Each bit represents one combination of Ctrl, Shift and Alt. Resolve at
+    // key-down and retain the chosen chords separately from raw key state.
+    std::array<std::uint8_t, SDL_SCANCODE_COUNT> keyboardChords_ {};
+    std::array<std::uint8_t, SDL_SCANCODE_COUNT> keyboardChordsDown_ {};
+    std::array<std::uint8_t, SDL_SCANCODE_COUNT> keyboardChordsPressed_ {};
     std::array<bool, SDL_SCANCODE_COUNT> keysDown_ {};
     std::array<bool, SDL_SCANCODE_COUNT> keysPressed_ {};
     std::array<bool, 8> mouseButtonsDown_ {};
