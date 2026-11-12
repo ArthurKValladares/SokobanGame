@@ -12,6 +12,7 @@
 #include "engine/GroundLevelGeometry.hpp"
 #include "engine/Log.hpp"
 #include "engine/OverworldMap.hpp"
+#include "engine/PathText.hpp"
 #include "engine/render/ShaderCatalog.hpp"
 #include "engine/render/ProcessedGroundArtifact.hpp"
 #include "engine/TileThumbnailBake.hpp"
@@ -733,8 +734,6 @@ private:
 
     void addLevels()
     {
-        std::map<int, std::set<int>> screens;
-
         if (!manifest_) {
             throw std::logic_error(
                 "content manifest was not loaded before levels");
@@ -835,65 +834,28 @@ private:
                 "overworld selectors require all flag A/B playable, solved, "
                 "and unavailable manifest models");
         }
-        for (const auto& levelDirectory : std::filesystem::directory_iterator(roots_.levels)) {
-            if (!levelDirectory.is_directory() ||
-                levelDirectory.path().filename() == "Deleted" ||
-                (composedOverworld &&
-                    levelDirectory.path().filename() == "overworld")) {
-                continue;
-            }
-            const std::string levelName = levelDirectory.path().filename().string();
-            const std::optional<int> levelIndex =
-                levelIndexFromDirectoryName(levelName);
-            if (!levelIndex) {
-                throw std::runtime_error("unexpected level directory: " + levelDirectory.path().string());
-            }
-            const std::string canonicalLevelName = levelDirectoryName(*levelIndex);
-            if (levelName != canonicalLevelName) {
-                throw std::runtime_error(
-                    "puzzle level directory must be named '" + canonicalLevelName +
-                    "': " + levelDirectory.path().string());
-            }
-            auto& levelScreens = screens[*levelIndex];
-            for (const auto& screenFile : std::filesystem::directory_iterator(levelDirectory.path())) {
-                if (!screenFile.is_regular_file()) {
-                    throw std::runtime_error("unexpected entry in level directory: " + screenFile.path().string());
-                }
-                const std::string screenName = screenFile.path().filename().string();
-                if (screenName == levelMetadataFilename) {
-                    continue;
-                }
-                const std::optional<int> screenIndex =
-                    screenIndexFromFilename(screenName);
-                if (!screenIndex) {
-                    throw std::runtime_error("unexpected level file: " + screenFile.path().string());
-                }
-                const std::string canonicalScreenName = screenFilename(*screenIndex);
-                if (screenName != canonicalScreenName) {
-                    throw std::runtime_error(
-                        "puzzle screen file must be named '" + canonicalScreenName +
-                        "': " + screenFile.path().string());
-                }
-                levelScreens.insert(*screenIndex);
-                const Level level = Level::loadFromFile(screenFile.path());
+        const PuzzleCatalog catalog = loadPuzzleCatalog(
+            roots_.levels, PuzzleCatalogEntries::RejectUnrelated);
+        if (catalog.levels.empty()) {
+            throw std::runtime_error("no playable levels were found in " + pathText(roots_.levels));
+        }
+        for (const auto& entry : catalog.levels) {
+            for (const auto& screenPath : entry.screens) {
+                const Level level = Level::loadFromFile(screenPath);
                 if (!level.selectors().empty()) {
                     throw std::runtime_error(
                         "screen selectors are only allowed in overworld.scr: " +
-                        screenFile.path().string());
+                        pathText(screenPath));
                 }
-                validateDecorations(level, screenFile.path());
-                const std::filesystem::path relative = screenFile.path().lexically_relative(roots_.levels);
+                validateDecorations(level, screenPath);
+                const std::filesystem::path relative = screenPath.lexically_relative(roots_.levels);
                 addFile(roots_.levels, relative, std::filesystem::path("levels") / relative, "level screen");
                 if (levelHasLegacyGroundGeometry(level, *manifest_)) {
                     groundGeometrySources_.push_back({ relative, false });
                 }
             }
 
-            const std::filesystem::path metadataPath =
-                levelDirectory.path() / levelMetadataFilename;
-            (void)loadLevelMetadata(
-                levelDirectory.path(),
-                levelScreens.size());
+            const std::filesystem::path metadataPath = entry.directory / levelMetadataFilename;
             if (std::filesystem::exists(metadataPath)) {
                 const std::filesystem::path relative =
                     metadataPath.lexically_relative(roots_.levels);
@@ -905,38 +867,9 @@ private:
             }
         }
 
-        if (screens.empty()) {
-            throw std::runtime_error("no playable levels were found in " + roots_.levels.string());
-        }
-        int expectedLevel = 0;
-        for (const auto& [level, levelScreens] : screens) {
-            if (level != expectedLevel++) {
-                throw std::runtime_error("level indices must be contiguous starting at level0");
-            }
-            if (levelScreens.empty()) {
-                throw std::runtime_error(
-                    "level" + std::to_string(level) + " contains no playable screens");
-            }
-            int expectedScreen = 0;
-            for (const int screen : levelScreens) {
-                if (screen != expectedScreen++) {
-                    throw std::runtime_error(
-                        "screen indices in level" + std::to_string(level) +
-                        " must be contiguous starting at screen0");
-                }
-            }
-        }
-
         if (overworldMap) {
-            std::vector<int> screenCounts;
-            screenCounts.reserve(screens.size());
-            for (const auto& [level, levelScreens] : screens) {
-                (void)level;
-                screenCounts.push_back(
-                    static_cast<int>(levelScreens.size()));
-            }
             overworldMap->validatePuzzleSelectors(
-                screenCounts, OverworldValidationMode::Structural);
+                catalog.screenCounts(), OverworldValidationMode::Structural);
             return;
         }
 
@@ -947,15 +880,13 @@ private:
                 // They do not count toward playable-screen coverage.
                 continue;
             }
-            const auto level = screens.find(selector.target->level);
-            if (level == screens.end() ||
-                !level->second.contains(selector.target->screen)) {
+            if (!catalog.findScreen(*selector.target)) {
                 throw std::runtime_error(
                     "overworld selector " + std::to_string(selector.id) +
                     " targets missing level " +
                     std::to_string(selector.target->level) + " screen " +
                     std::to_string(selector.target->screen) + ": " +
-                    legacyOverworldPath.string());
+                    pathText(legacyOverworldPath));
             }
         }
     }

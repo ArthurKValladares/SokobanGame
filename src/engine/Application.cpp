@@ -1038,6 +1038,7 @@ bool Application::run()
             renderer_.invalidateTileThumbnails();
         }
         tools_->serviceShaderHotReload(renderer_);
+        observeEditorLevelPublications();
         if (renderedFrames > 0) {
             serviceSourceWatcher();
         }
@@ -1527,8 +1528,11 @@ void Application::update(
 void Application::loadCurrentScreen()
 {
     overworldFogReveal_.reset();
-    // Editor draft play or a New Game may have changed the level set.
-    buildLevelCatalog();
+    refreshLevelCatalogIfNeeded();
+    if (!campaign_.inOverworld() && !campaign_.screenExists(
+            campaign_.currentLevel(), campaign_.currentScreen())) {
+        restoreProfileLocation();
+    }
     const CampaignSession::WorldRestore restore =
         campaign_.prepareWorldLoad(playerProfile_);
 
@@ -1539,8 +1543,8 @@ void Application::loadCurrentScreen()
         ? (overworldMap_ ? overworldRoot() : overworldPath())
         : screenPath(campaign_.currentLevel(), campaign_.currentScreen());
 
-    Level loadedLevel = campaign_.inOverworld() && overworldMap_
-        ? overworldMap_->level()
+    Level loadedLevel = campaign_.inOverworld()
+        ? catalogOverworldLevel()
         : Level::loadFromFile(path);
 
     const bool restored = applyLevel(
@@ -1635,14 +1639,13 @@ void Application::advanceScreen()
     }
     const int moveCount = gameplaySession_.playerMoveCount();
     beginLevelTransition([this, moveCount] {
-        std::optional<Level> legacyOverworld;
-        const Level* overworld = overworldMap_ ? &overworldMap_->level() : nullptr;
-        if (!overworld && playerProfile_.overworldCheckpoint) {
-            legacyOverworld.emplace(Level::loadFromFile(overworldPath()));
-            overworld = &*legacyOverworld;
+        refreshLevelCatalogIfNeeded();
+        if (!campaign_.screenExists(campaign_.currentLevel(), campaign_.currentScreen())) {
+            loadCurrentScreen();
+            return;
         }
         handlePuzzleCompleted(campaign_.completePuzzle(
-            playerProfile_, moveCount, overworld));
+            playerProfile_, moveCount, &catalogOverworldLevel()));
     });
 }
 
@@ -1724,9 +1727,9 @@ void Application::tryEnterSelector()
     checkpointCurrentScreen(true);
     const LevelLocation target = *sharedSelector->target;
     beginLevelTransition([this, target] {
-        if (campaign_.startPuzzle(playerProfile_, target)) {
-            loadCurrentScreen();
-        }
+        refreshLevelCatalogIfNeeded();
+        (void)campaign_.startPuzzle(playerProfile_, target);
+        loadCurrentScreen();
     });
 }
 
@@ -2146,6 +2149,7 @@ bool Application::shellMenuOpen() const
 void Application::startNewGame()
 {
     titleScreen_.close();
+    refreshLevelCatalogIfNeeded();
     campaign_.startNewGame(playerProfile_);
     loadCurrentScreen();
     persistProfile(true);
@@ -2238,9 +2242,11 @@ std::filesystem::path Application::screenPath(
     int levelIndex,
     int screenIndex) const
 {
-    return screenFilePath(
-        levelDirectoryPath(assetRoot_ / "levels", levelIndex),
-        screenIndex);
+    if (const auto* path = puzzleCatalog_.findScreen({ levelIndex, screenIndex })) {
+        return *path;
+    }
+    throw std::out_of_range("puzzle screen " + std::to_string(levelIndex) + ':' +
+        std::to_string(screenIndex) + " is not in the staged catalog");
 }
 
 std::filesystem::path Application::overworldPath() const
@@ -2253,50 +2259,68 @@ std::filesystem::path Application::overworldRoot() const
     return assetRoot_ / "levels" / "overworld";
 }
 
+const Level& Application::catalogOverworldLevel() const
+{
+    return overworldMap_ ? overworldMap_->level() : *legacyOverworld_;
+}
+
+void Application::refreshLevelCatalogIfNeeded()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    observeEditorLevelPublications();
+#endif
+    if (levelCatalogStale_) {
+        try {
+            buildLevelCatalog();
+        } catch (const std::exception& error) {
+            levelCatalogStale_ = false;
+            log::error(log::Category::Gameplay)
+                << "Could not refresh staged campaign catalog: " << error.what();
+        }
+    }
+}
+
 void Application::buildLevelCatalog()
 {
-    std::vector<int> screenCounts;
-    levelMetadata_.clear();
-    for (int level = 0;; ++level) {
-        int screens = 0;
-        while (std::filesystem::exists(screenPath(level, screens))) {
-            ++screens;
-        }
-        if (screens == 0) {
-            break;
-        }
-        screenCounts.push_back(screens);
-        levelMetadata_.push_back(loadLevelMetadata(
-            levelDirectoryPath(assetRoot_ / "levels", level),
-            static_cast<std::size_t>(screens)));
-    }
-    std::vector<Level::ScreenSelector> selectors;
+    PuzzleCatalog puzzleCatalog = loadPuzzleCatalog(assetRoot_ / "levels");
+    std::vector<int> screenCounts = puzzleCatalog.screenCounts();
+    std::optional<OverworldMap> overworld;
+    std::optional<Level> legacyOverworld;
+    std::vector<OverworldScreenId> screenIds;
     const std::filesystem::path layoutPath = overworldRoot() / "layout.json";
-    if (std::filesystem::exists(layoutPath)) {
-        overworldMap_ = OverworldMap::load(overworldRoot());
-        overworldMap_->validatePuzzleSelectors(
+    if (std::filesystem::is_regular_file(layoutPath)) {
+        overworld.emplace(OverworldMap::load(overworldRoot()));
+        overworld->validatePuzzleSelectors(
             screenCounts, OverworldValidationMode::Structural);
-        std::vector<OverworldScreenId> screenIds;
-        screenIds.reserve(overworldMap_->screens().size());
-        for (const OverworldScreenRuntime& screen : overworldMap_->screens()) {
+        screenIds.reserve(overworld->screens().size());
+        for (const OverworldScreenRuntime& screen : overworld->screens()) {
             screenIds.push_back(screen.id);
         }
-        campaign_.setOverworldTopology(
-            overworldMap_->fingerprint(),
-            std::move(screenIds),
-            overworldMap_->startScreen());
-        selectors = overworldMap_->level().selectors();
     } else {
-        overworldMap_.reset();
-        campaign_.setOverworldTopology(0, { 1 }, 1);
-        selectors = Level::loadFromFile(overworldPath()).selectors();
+        legacyOverworld.emplace(Level::loadFromFile(overworldPath()));
+        screenIds.push_back(1);
+        for (const auto& selector : legacyOverworld->selectors()) {
+            if (selector.target && !puzzleCatalog.findScreen(*selector.target)) {
+                throw std::runtime_error("overworld selector " + std::to_string(selector.id) +
+                    " targets a puzzle outside the staged catalog");
+            }
+        }
     }
+
     campaign_.setLevelScreenCounts(std::move(screenCounts));
-    campaign_.setOverworldSelectors(selectors);
+    campaign_.setOverworldSelectors(
+        (overworld ? overworld->level() : *legacyOverworld).selectors());
+    campaign_.setOverworldTopology(overworld ? overworld->fingerprint() : 0,
+        std::move(screenIds), overworld ? overworld->startScreen() : 1);
+    puzzleCatalog_ = std::move(puzzleCatalog);
+    overworldMap_ = std::move(overworld);
+    legacyOverworld_ = std::move(legacyOverworld);
+    levelCatalogStale_ = false;
 }
 
 void Application::restoreProfileLocation()
 {
+    refreshLevelCatalogIfNeeded();
     const bool restoringOverworld =
         playerProfile_.worldContext == PlayerProfile::WorldContext::Overworld;
     const LevelLocation saved {
@@ -2318,7 +2342,7 @@ void Application::restoreProfileLocation()
 
 void Application::serviceUpcomingAssetPrefetch()
 {
-    if (!upcomingAssetPrefetchPending_) {
+    if (!upcomingAssetPrefetchPending_ || levelCatalogStale_) {
         return;
     }
     upcomingAssetPrefetchPending_ = false;
@@ -2347,7 +2371,7 @@ void Application::serviceUpcomingAssetPrefetch()
         } catch (const std::exception& error) {
             log::warning(log::Category::Assets)
                 << "asset preload skipped "
-                << screenPath(target.level, target.screen).string()
+                << target.level << ':' << target.screen
                 << ": " << error.what();
         }
     }
@@ -2441,6 +2465,31 @@ void Application::configureSourceWatcher()
         << " source files for edits made outside the game.";
 }
 
+void Application::observeEditorLevelPublications()
+{
+    const auto levelRevision = tools_->levelEditor.runtimePublicationRevision();
+    const auto overworldRevision = tools_->overworldMapEditor.runtimePublicationRevision();
+    if (levelRevision == editorLevelPublicationRevision_ &&
+        overworldRevision == editorOverworldPublicationRevision_) {
+        return;
+    }
+    editorLevelPublicationRevision_ = levelRevision;
+    editorOverworldPublicationRevision_ = overworldRevision;
+    invalidateLevelCatalog();
+}
+
+void Application::invalidateLevelCatalog()
+{
+    // The active world still uses the old topology until a world load.
+    levelCatalogStale_ = true;
+    screenPreviewActive_ = false;
+    screenPreviewLevel_.reset();
+    screenPreviewTarget_.reset();
+    gameplayGroundGeometryStore_.invalidate();
+    previewGroundGeometryStore_.invalidate();
+    renderer_.cancelQueuedAssetPrefetches();
+}
+
 void Application::serviceSourceWatcher()
 {
     // Smoke and evidence runs must see exactly the staged content.
@@ -2515,8 +2564,7 @@ void Application::reloadSourceLevels(
     if (!result.succeeded) {
         throw std::runtime_error(result.message);
     }
-    gameplayGroundGeometryStore_.invalidate();
-    previewGroundGeometryStore_.invalidate();
+    invalidateLevelCatalog();
     // A saved draft may now match a recording waiting in solutions/drafts/.
     tools_->requestSolutionReconcile();
 
@@ -2538,23 +2586,19 @@ void Application::reloadSourceLevels(
         }
     }
 
+    if (!campaign_.gameLoaded() || campaign_.inOverworld() ||
+        editor.editingDocument() || editor.playingDraft() || levelTransition_.active()) {
+        return;
+    }
     const auto currentScreen = screenPath(campaign_.currentLevel(), campaign_.currentScreen());
     const auto currentSource = sourceLevels / currentScreen.lexically_relative(runtimeLevels);
-    if (campaign_.gameLoaded() && !campaign_.inOverworld() &&
-        std::ranges::find(sources, currentSource.lexically_normal()) != sources.end() &&
-        !editor.editingDocument() &&
-        !editor.playingDraft() && !levelTransition_.active()) {
-        if (std::filesystem::is_regular_file(currentScreen)) {
-            campaign_.writeCheckpoint(playerProfile_, gameplaySession_.snapshot());
-        } else {
-            playerProfile_.worldContext = PlayerProfile::WorldContext::Overworld;
-            playerProfile_.activeScreen.reset();
-            campaign_.resetForProfile(playerProfile_);
-        }
-        loadCurrentScreen();
-        log::info(log::Category::Gameplay)
-            << "Reloaded gameplay after its source levels changed.";
+    if (std::ranges::find(sources, currentSource.lexically_normal()) == sources.end()) {
+        return;
     }
+    campaign_.writeCheckpoint(playerProfile_, gameplaySession_.snapshot());
+    loadCurrentScreen();
+    log::info(log::Category::Gameplay)
+        << "Reloaded gameplay after its source levels changed.";
 }
 
 void Application::reloadSourceTexture(

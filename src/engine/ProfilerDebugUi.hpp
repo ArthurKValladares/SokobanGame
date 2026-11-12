@@ -7,23 +7,18 @@
 namespace sokoban {
 
 class VulkanRenderer;
+struct CpuProfileFrame;
+struct RenderStats;
 
 class ProfilerDebugUi {
 public:
     void draw(const VulkanRenderer& renderer);
 
 private:
-    void appendHistory(
-        uint64_t frameIndex,
-        float totalCpu,
-        float rendererCpu,
-        float gpu,
-        float processResidentMiB,
-        float gpuAllocatedMiB,
-        uint64_t totalAllocatedBytes,
-        uint64_t totalFreedBytes);
+    void appendHistory(const CpuProfileFrame& cpu, const RenderStats& stats);
 
     uint64_t lastHistoryFrame_ = 0;
+    uint64_t lastMemorySample_ = 0;
     std::vector<float> totalCpuHistory_;
     std::vector<float> rendererCpuHistory_;
     std::vector<float> gpuHistory_;

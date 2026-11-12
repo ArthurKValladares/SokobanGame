@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdlib>
 #include <ranges>
@@ -2010,14 +2011,38 @@ std::vector<TurretRaySegment> turretBeamSegments(
     return segments;
 }
 
+bool inClericAura(const GameState::Player& cleric, const GameState::Player& ally)
+{
+    return !ally.dead && ally.cell.z == cleric.cell.z &&
+        std::abs(ally.cell.x - cleric.cell.x) + std::abs(ally.cell.y - cleric.cell.y) <= 1;
+}
+
+void writeClericAttackProtection(const Level& level, const GameState& state,
+    std::span<char> protectedPlayers)
+{
+    std::ranges::fill(protectedPlayers, 0);
+    for (const auto& cleric : state.players) {
+        if (cleric.dead || !cleric.abilities(level.character()).has(CharacterAbility::ProtectionAura)) {
+            continue;
+        }
+        for (std::size_t i = 0; i < state.players.size(); ++i) {
+            if (inClericAura(cleric, state.players[i])) {
+                protectedPlayers[i] = true;
+            }
+        }
+    }
+}
+
 } // namespace
 
-std::vector<char> clericGravityProtection(const Level& level, const GameState& state)
+void clericGravityProtection(const Level& level, const GameState& state,
+    std::span<char> protectedPlayers, std::span<char> attackedPlayers)
 {
-    const auto attackProtection = clericAttackProtection(level, state);
-    std::vector<char> attackedPlayers(state.players.size(), 0);
+    assert(protectedPlayers.size() == state.players.size());
+    assert(attackedPlayers.size() == state.players.size());
+    writeClericAttackProtection(level, state, attackedPlayers);
     for (std::size_t playerIndex = 0; playerIndex < state.players.size(); ++playerIndex) {
-        if (!attackProtection[playerIndex]) {
+        if (!attackedPlayers[playerIndex]) {
             continue;
         }
         const auto& player = state.players[playerIndex];
@@ -2033,53 +2058,43 @@ std::vector<char> clericGravityProtection(const Level& level, const GameState& s
                     turretHasLineOfSight(level, state, turret.cell, *direction, player.cell);
             });
         }
-        if (!attacked) {
-            continue;
-        }
-        attackedPlayers[playerIndex] = true;
+        attackedPlayers[playerIndex] = attacked;
     }
-    std::vector<char> protectedPlayers(state.players.size(), 0);
+    std::ranges::fill(protectedPlayers, 0);
     for (const auto& cleric : state.players) {
         if (cleric.dead || !cleric.abilities(level.character()).has(CharacterAbility::ProtectionAura)) {
             continue;
         }
-        const auto inAura = [&](const auto& ally) {
-            return !ally.dead && ally.cell.z == cleric.cell.z &&
-                std::abs(ally.cell.x - cleric.cell.x) +
-                    std::abs(ally.cell.y - cleric.cell.y) <= 1;
-        };
         bool active = false;
         for (std::size_t i = 0; i < state.players.size(); ++i) {
-            active = active || (attackedPlayers[i] && inAura(state.players[i]));
+            if (attackedPlayers[i] && inClericAura(cleric, state.players[i])) {
+                active = true;
+                break;
+            }
         }
         if (!active) {
             continue;
         }
         for (std::size_t i = 0; i < state.players.size(); ++i) {
-            if (inAura(state.players[i])) {
+            if (inClericAura(cleric, state.players[i])) {
                 protectedPlayers[i] = true;
             }
         }
     }
+}
+
+std::vector<char> clericGravityProtection(const Level& level, const GameState& state)
+{
+    std::vector<char> protectedPlayers(state.players.size());
+    std::vector<char> attackedPlayers(state.players.size());
+    clericGravityProtection(level, state, protectedPlayers, attackedPlayers);
     return protectedPlayers;
 }
 
 std::vector<char> clericAttackProtection(const Level& level, const GameState& state)
 {
-    std::vector<char> protectedPlayers(state.players.size(), 0);
-    for (const auto& cleric : state.players) {
-        if (cleric.dead || !cleric.abilities(level.character()).has(CharacterAbility::ProtectionAura)) {
-            continue;
-        }
-        for (std::size_t i = 0; i < state.players.size(); ++i) {
-            const auto& ally = state.players[i];
-            if (!ally.dead && ally.cell.z == cleric.cell.z &&
-                std::abs(ally.cell.x - cleric.cell.x) +
-                    std::abs(ally.cell.y - cleric.cell.y) <= 1) {
-                protectedPlayers[i] = true;
-            }
-        }
-    }
+    std::vector<char> protectedPlayers(state.players.size());
+    writeClericAttackProtection(level, state, protectedPlayers);
     return protectedPlayers;
 }
 

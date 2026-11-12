@@ -889,7 +889,7 @@ void drawAssetResidencyStats(
 void drawRenderingStatsSection(const ApplicationDebugUi::Context& context)
 {
 if (ImGui::CollapsingHeader("Rendering Stats")) {
-    const RenderStats renderStats = context.renderer.renderStats();
+    const RenderStats& renderStats = context.renderer.debugRenderStats();
     const VulkanModelResources::LoadingStats assetStats =
         context.renderer.assetLoadingStats();
     const ImGuiIO& io = ImGui::GetIO();

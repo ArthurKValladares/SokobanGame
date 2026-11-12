@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace sokoban {
@@ -270,6 +271,9 @@ struct StepResult {
     const Level& level, const GameState& state);
 [[nodiscard]] std::vector<char> clericGravityProtection(
     const Level& level, const GameState& state);
+// The output and scratch each have one entry per player and do not overlap.
+void clericGravityProtection(const Level& level, const GameState& state,
+    std::span<char> protectedPlayers, std::span<char> attackedPlayers);
 
 [[nodiscard]] EntityId playerControllerId(
     const GameState& state, std::size_t playerIndex);

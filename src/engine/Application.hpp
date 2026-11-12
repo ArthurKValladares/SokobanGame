@@ -170,6 +170,8 @@ private:
     // Reloads source levels, textures, the manifest and the animation
     // catalog edited outside the game (DI-10). Called between frames.
     void serviceSourceWatcher();
+    void observeEditorLevelPublications();
+    void invalidateLevelCatalog();
     // False for smoke and evidence runs, which must not write into the
     // source tree (source reloads, recorded solutions).
     [[nodiscard]] bool developerFilesWritable() const
@@ -206,10 +208,10 @@ private:
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
     [[nodiscard]] std::filesystem::path overworldPath() const;
     [[nodiscard]] std::filesystem::path overworldRoot() const;
-    // Scans levels/ once into CampaignSession; the level set is fixed
-    // staged content, so title/progress queries read the cache instead of
-    // hitting the filesystem per open. Rebuilt on screen loads so the debug
-    // editor's mirrored changes are still reflected.
+    [[nodiscard]] const Level& catalogOverworldLevel() const;
+    // A staged catalog is reused across transitions. Developer publications
+    // invalidate it, and the next world load adopts it at a safe boundary.
+    void refreshLevelCatalogIfNeeded();
     void buildLevelCatalog();
     void restoreProfileLocation();
     void serviceUpcomingAssetPrefetch();
@@ -274,14 +276,20 @@ private:
     TurretParticleEffects turretParticleEffects_;
     TurretFlameSystem turretFlames_;
     Level level_;
+    PuzzleCatalog puzzleCatalog_;
     std::optional<OverworldMap> overworldMap_;
+    std::optional<Level> legacyOverworld_;
+    bool levelCatalogStale_ = true;
+#if SOKOBAN_ENABLE_DEBUG_UI
+    uint64_t editorLevelPublicationRevision_ = 0;
+    uint64_t editorOverworldPublicationRevision_ = 0;
+#endif
     GameplaySession gameplaySession_;
     std::optional<LevelLocation> screenPreviewTarget_;
     std::optional<Level> screenPreviewLevel_;
     GameplaySession screenPreviewSession_;
     GameplayPresentation screenPreviewPresentation_;
     CampaignSession campaign_;
-    std::vector<LevelMetadata> levelMetadata_;
     InputState input_;
     SimulationTiming simulationTiming_;
     FrameTimer frameTimer_;

@@ -1058,6 +1058,8 @@ void testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness()
     const std::filesystem::path runtimePath =
         project.runtime / "level0" / "screen0.scr";
     CHECK(editor.saveDocument(sourcePath));
+    const auto initialRevision = editor.runtimePublicationRevision();
+    CHECK(initialRevision > 0);
     const std::string originalSource = readFile(sourcePath);
     const std::string originalMirror = readFile(runtimePath);
 
@@ -1074,11 +1076,14 @@ void testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness()
     CHECK(!sourceFailure.mirrorStale());
     CHECK(readFile(sourcePath) == originalSource);
     CHECK(readFile(runtimePath) == originalMirror);
+    CHECK(editor.runtimePublicationRevision() == initialRevision);
     CHECK(editor.dirty());
     CHECK(editor.status().find("Failed to save") != std::string::npos);
 
     std::filesystem::remove_all(sourceTemporary);
     CHECK(editor.saveDocument(sourcePath));
+    const auto revisionBeforeMirrorFailure = editor.runtimePublicationRevision();
+    CHECK(revisionBeforeMirrorFailure == initialRevision + 1);
     const std::string sourceBeforeMirrorFailure = readFile(sourcePath);
     const std::string mirrorBeforeMirrorFailure = readFile(runtimePath);
 
@@ -1097,6 +1102,7 @@ void testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness()
     CHECK(mirrorFailure.mirrorStale());
     CHECK(readFile(sourcePath) != sourceBeforeMirrorFailure);
     CHECK(readFile(runtimePath) == mirrorBeforeMirrorFailure);
+    CHECK(editor.runtimePublicationRevision() == revisionBeforeMirrorFailure);
     CHECK(editor.loadedDocumentPath() == sourcePath);
     CHECK(editor.dirty());
     CHECK(editor.status().find("Saved source") != std::string::npos);
@@ -1117,6 +1123,17 @@ void testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness()
     std::filesystem::remove_all(mirrorTemporary);
     CHECK(editor.saveDocument(sourcePath));
     CHECK(!editor.dirty());
+
+    CHECK(editor.setCell({ 4, 2, 1 }, TileType::Wall));
+    const auto index = project.runtime.parent_path() / "content.index";
+    std::filesystem::create_directory(index);
+    const auto revisionBeforeIndexFailure = editor.runtimePublicationRevision();
+    const auto indexFailure = editor.saveDocument(sourcePath);
+    CHECK(indexFailure.outcome ==
+        LevelEditor::SaveResult::Outcome::SourceAndMirrorSavedIndexStale);
+    CHECK(editor.runtimePublicationRevision() == revisionBeforeIndexFailure + 1);
+    CHECK(readFile(runtimePath) == readFile(sourcePath));
+    CHECK(editor.dirty());
 }
 
 void testSerializationFailurePreservesFilesDraftAndHistory()

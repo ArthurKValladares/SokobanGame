@@ -509,6 +509,9 @@ bool OverworldMapEditor::save()
         return false;
     }
 
+    if (runtimeLevelRoot_) {
+        ++runtimePublicationRevision_;
+    }
     const std::optional<OverworldScreenId> selected = state_.selected;
     if (!reload()) {
         return false;

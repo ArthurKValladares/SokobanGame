@@ -371,6 +371,46 @@ void testGameplayFrameAllocations()
     });
 }
 
+void testClericGameplayFrameAllocations()
+{
+    using namespace sokoban;
+    const auto manifest = AssetManifest::loadFromFile(
+        std::filesystem::path(SOKOBAN_TEST_ASSET_DIR) / "manifest.json");
+    const auto level = Level::loadFromDefinition({
+        .layers = { { "...." }, { "e KC" } },
+        .character = CharacterType::Cleric,
+    }, "cleric allocation fixture");
+    const auto state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    const PresentationSettings settings;
+    const RenderFrameBuilder::GameplayInput input {
+        .manifest = manifest,
+        .level = level,
+        .state = state,
+        .projectedState = state,
+        .presentation = presentation,
+        .settings = settings,
+        .cachedActivationPreviews = true,
+    };
+    const auto heap = RenderFrameBuilder::buildGameplay(input);
+    CHECK(!heap.tiles.arenaBacked());
+    CHECK(!heap.particles.empty());
+
+    FrameArena arena("cleric gameplay", renderFrameArenaBytes());
+    checkNoFrameAllocations("cleric_gameplay_render", [&] {
+        arena.reset();
+        const auto frame = RenderFrameBuilder::buildGameplay(input, arena);
+        CHECK(frame.tiles.arenaBacked());
+        CHECK(!arena.exhausted());
+        CHECK(std::ranges::equal(frame.tiles, heap.tiles));
+        CHECK(std::ranges::equal(frame.particles, heap.particles, [](const auto& a, const auto& b) {
+            return a.position == b.position && a.size == b.size && a.color == b.color &&
+                a.texture == b.texture && a.emissiveStrength == b.emissiveStrength;
+        }));
+    });
+}
+
 void testDualSceneFrameAllocations()
 {
     using namespace sokoban;
@@ -1005,6 +1045,7 @@ int main()
     testWarmGroundChunkPreparationAllocations();
     testWarmParallelForAllocationCounts();
     testGameplayFrameAllocations();
+    testClericGameplayFrameAllocations();
     testTurretQueryAllocations();
     testEditorFrameAllocations();
     testDualSceneFrameAllocations();

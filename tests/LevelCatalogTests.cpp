@@ -4,6 +4,7 @@
 #include "engine/LevelCatalog.hpp"
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <vector>
 
@@ -112,6 +113,55 @@ void testOptionalLevelMetadataRoundTrips()
         "authored level and screen names round trip");
 }
 
+void testPuzzleCatalogKeepsTheDiscoveredPathsAndMetadata()
+{
+    TEST("puzzleCatalogKeepsTheDiscoveredPathsAndMetadata");
+    using namespace sokoban;
+    namespace fs = std::filesystem;
+    const ScopedTestDirectory temporary("sokoban-puzzle-catalog-tests");
+    const auto root = temporary.path() / fs::path(u8"\u6f22-levels");
+    const auto first = root / "level0";
+    const auto second = root / "level1";
+    fs::create_directories(first);
+    fs::create_directories(second);
+    std::ofstream(first / "screen1.scr") << "...\n C \n";
+    std::ofstream(first / "screen0.scr") << "...\n C \n";
+    std::ofstream(second / "screen0.scr") << "...\n C \n";
+    const LevelMetadata metadata { .name = "First", .screenNames = { "One", "Two" } };
+    writeLevelMetadata(first, metadata);
+
+    const auto staged = loadPuzzleCatalog(root, PuzzleCatalogEntries::RejectUnrelated);
+    CHECK(staged.screenCounts() == (std::vector<int> { 2, 1 }));
+    CHECK(staged.levels.front().metadata == metadata);
+    const auto* found = staged.findScreen({ 0, 1 });
+    CHECK(found && *found == first / "screen1.scr");
+    CHECK(staged.findScreen({ -1, 0 }) == nullptr);
+    CHECK(staged.findScreen({ 1, 1 }) == nullptr);
+
+    // Lookups read the staged snapshot. A publication is adopted by loading a
+    // replacement catalog, which discovers new screens and names together.
+    std::ofstream(first / "screen2.scr") << "...\n C \n";
+    writeLevelMetadata(first, { .name = "First updated", .screenNames = { "One", "Two", "Three" } });
+    CHECK(staged.findScreen({ 0, 2 }) == nullptr);
+    CHECK(staged.levels.front().metadata == metadata);
+    const auto refreshed = loadPuzzleCatalog(root);
+    CHECK(refreshed.screenCounts() == (std::vector<int> { 3, 1 }));
+    CHECK(refreshed.levels.front().metadata.screenNames.back() == "Three");
+
+    const auto unrelated = root / fs::path(u8"\u6587-drafts");
+    fs::create_directories(unrelated);
+    CHECK(loadPuzzleCatalog(root).screenCounts() == refreshed.screenCounts());
+    checkThrows([&] { (void)loadPuzzleCatalog(root, PuzzleCatalogEntries::RejectUnrelated); },
+        "strict staging rejects unrelated level directories");
+
+    fs::rename(first / "screen2.scr", first / "screen02.scr");
+    checkThrows([&] { (void)loadPuzzleCatalog(root); }, "a padded screen is rejected");
+    fs::rename(first / "screen02.scr", first / "screen3.scr");
+    checkThrows([&] { (void)loadPuzzleCatalog(root); }, "a missing screen index is rejected");
+    fs::rename(second, root / "level01");
+    checkThrows([&] { (void)loadPuzzleCatalog(root); }, "a padded level is rejected");
+}
+
 } // namespace
 
 int main()
@@ -121,6 +171,7 @@ int main()
     testInvalidSavedLocationFallsBackToStart();
     testPuzzlePathConvention();
     testOptionalLevelMetadataRoundTrips();
+    testPuzzleCatalogKeepsTheDiscoveredPathsAndMetadata();
 
     if (failures != 0) {
         std::cerr << failures << " of " << checks << " checks failed\n";

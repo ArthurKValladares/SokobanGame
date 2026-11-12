@@ -6,6 +6,7 @@
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/OverworldMap.hpp"
+#include "engine/PathText.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -28,11 +29,6 @@
 
 namespace sokoban {
 namespace {
-
-struct IndexedPath {
-    int index = 0;
-    std::filesystem::path path;
-};
 
 std::filesystem::path workingPath(
     const std::filesystem::path& root,
@@ -138,112 +134,31 @@ void copyFile(
     }
 }
 
-std::vector<IndexedPath> indexedLevelDirectories(
-    const std::filesystem::path& root)
+PuzzleCatalog validateProject(const std::filesystem::path& root)
 {
-    std::vector<IndexedPath> entries;
-    for (const std::filesystem::directory_entry& entry :
-         std::filesystem::directory_iterator(root)) {
-        if (!entry.is_directory()) {
-            continue;
-        }
-        const std::string name = entry.path().filename().string();
-        const std::optional<int> index =
-            levelIndexFromDirectoryName(name);
-        if (index) {
-            const std::string canonicalName = levelDirectoryName(*index);
-            if (name != canonicalName) {
-                throw std::runtime_error(
-                    "puzzle level directory must be named '" + canonicalName +
-                    "': " + entry.path().string());
-            }
-            entries.push_back({ *index, entry.path() });
-        }
-    }
-    std::ranges::sort(entries, {}, &IndexedPath::index);
-    return entries;
-}
-
-std::vector<IndexedPath> indexedScreens(const std::filesystem::path& levelRoot)
-{
-    std::vector<IndexedPath> screens;
-    for (const std::filesystem::directory_entry& entry :
-         std::filesystem::directory_iterator(levelRoot)) {
-        if (!entry.is_regular_file()) {
-            continue;
-        }
-        const std::string name = entry.path().filename().string();
-        const std::optional<int> index =
-            screenIndexFromFilename(name);
-        if (index) {
-            const std::string canonicalName = screenFilename(*index);
-            if (name != canonicalName) {
-                throw std::runtime_error(
-                    "puzzle screen file must be named '" + canonicalName +
-                    "': " + entry.path().string());
-            }
-            screens.push_back({ *index, entry.path() });
-        }
-    }
-    std::ranges::sort(screens, {}, &IndexedPath::index);
-    return screens;
-}
-
-std::vector<IndexedPath> validateProject(const std::filesystem::path& root)
-{
-    const std::vector<IndexedPath> levels = indexedLevelDirectories(root);
-    std::vector<std::vector<IndexedPath>> screensByLevel;
-    screensByLevel.reserve(levels.size());
-    for (std::size_t levelIndex = 0; levelIndex < levels.size(); ++levelIndex) {
-        if (levels[levelIndex].index != static_cast<int>(levelIndex)) {
-            throw std::runtime_error(
-                "level directories must be contiguous from level0");
-        }
-
-        const std::vector<IndexedPath> screens =
-            indexedScreens(levels[levelIndex].path);
-        if (screens.empty()) {
-            throw std::runtime_error(
-                levels[levelIndex].path.string() + " contains no screens");
-        }
-        for (std::size_t screenIndex = 0;
-             screenIndex < screens.size();
-             ++screenIndex) {
-            if (screens[screenIndex].index != static_cast<int>(screenIndex)) {
-                throw std::runtime_error(
-                    "screen files must be contiguous from screen0 in " +
-                    levels[levelIndex].path.string());
-            }
-            const Level screen =
-                Level::loadFromFile(screens[screenIndex].path);
+    PuzzleCatalog catalog = loadPuzzleCatalog(root);
+    for (const auto& level : catalog.levels) {
+        for (const auto& path : level.screens) {
+            const Level screen = Level::loadFromFile(path);
             if (!screen.selectors().empty()) {
                 throw std::runtime_error(
                     "screen selectors are only allowed in overworld content: " +
-                    screens[screenIndex].path.string());
+                    pathText(path));
             }
         }
-        (void)loadLevelMetadata(
-            levels[levelIndex].path,
-            screens.size());
-        screensByLevel.push_back(screens);
     }
 
     const std::filesystem::path overworldRoot = root / "overworld";
     const std::filesystem::path layoutPath = overworldRoot / "layout.json";
     if (std::filesystem::is_regular_file(layoutPath)) {
         const OverworldMap overworld = OverworldMap::load(overworldRoot);
-        std::vector<int> puzzleScreenCounts;
-        puzzleScreenCounts.reserve(screensByLevel.size());
-        for (const std::vector<IndexedPath>& screens : screensByLevel) {
-            puzzleScreenCounts.push_back(static_cast<int>(screens.size()));
-        }
         overworld.validatePuzzleSelectors(
-            puzzleScreenCounts,
+            catalog.screenCounts(),
             OverworldValidationMode::Structural);
     } else {
         const std::filesystem::path overworldPath = root / "overworld.scr";
         if (!std::filesystem::is_regular_file(overworldPath)) {
-            return levels;
+            return catalog;
         }
         const Level overworld = Level::loadFromFile(overworldPath);
         for (uint32_t z = 0; z < overworld.depth(); ++z) {
@@ -260,34 +175,28 @@ std::vector<IndexedPath> validateProject(const std::filesystem::path& root)
             if (!selector.target) {
                 continue;
             }
-            if (selector.target->level < 0 ||
-                selector.target->level >=
-                    static_cast<int>(screensByLevel.size()) ||
-                selector.target->screen < 0 ||
-                selector.target->screen >= static_cast<int>(
-                    screensByLevel[static_cast<std::size_t>(
-                        selector.target->level)].size())) {
+            if (!catalog.findScreen(*selector.target)) {
                 throw std::runtime_error(
                     "selector " + std::to_string(selector.id) +
                     " targets a missing screen in " +
-                    overworldPath.string());
+                    pathText(overworldPath));
             }
         }
     }
-    return levels;
+    return catalog;
 }
 
 void prepareRuntimeMirror(
-    const std::vector<IndexedPath>& levels,
+    const PuzzleCatalog& catalog,
     const std::filesystem::path& projectStage,
     const std::filesystem::path& runtimeStage)
 {
     std::filesystem::create_directories(runtimeStage);
-    for (const IndexedPath& level : levels) {
+    for (const auto& level : catalog.levels) {
         std::error_code error;
         std::filesystem::copy(
-            level.path,
-            runtimeStage / level.path.filename(),
+            level.directory,
+            runtimeStage / level.directory.filename(),
             std::filesystem::copy_options::recursive |
                 std::filesystem::copy_options::copy_symlinks |
                 std::filesystem::copy_options::overwrite_existing,
@@ -628,7 +537,7 @@ LevelProjectStore::Result publishProject(
                 const auto mirrored = validateProject(runtimeStage);
                 const bool indexed = fs::is_regular_file(
                     runtimeRoot->parent_path() / "content.index");
-                if (indexed && (mirrored.empty() ||
+                if (indexed && (mirrored.levels.empty() ||
                     (!fs::is_regular_file(runtimeStage / "overworld/layout.json") &&
                      !fs::is_regular_file(runtimeStage / "overworld.scr")))) {
                     throw std::runtime_error(

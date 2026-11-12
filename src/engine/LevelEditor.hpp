@@ -452,87 +452,56 @@ public:
     [[nodiscard]] const std::filesystem::path& browserRoot() const;
     [[nodiscard]] const std::filesystem::path& sourceLevelRoot() const;
     [[nodiscard]] const std::filesystem::path& runtimeLevelRoot() const;
+    [[nodiscard]] uint64_t runtimePublicationRevision() const
+    {
+        return runtimePublicationRevision_;
+    }
     [[nodiscard]] std::optional<OverworldScreenId> overworldScreenId() const;
     [[nodiscard]] std::optional<OverworldScreenId> selectorLevelOwner(
         int puzzleLevel) const;
     [[nodiscard]] const std::string& status() const;
 
 private:
-    struct DocumentContent {
-        Level::LayerRows layers;
-        std::optional<uint32_t> waterLayer;
-        std::optional<CameraAngles> cameraAngles;
-        std::optional<CharacterType> character;
-        std::vector<Level::Decoration> decorations;
-        std::vector<Level::ScreenSelector> selectors;
-        std::vector<Level::Lectern> lecterns;
-        std::vector<Level::GroundSplat> groundSplats;
-        std::vector<Level::GroundPaint> groundPaint;
-        std::vector<Level::TileRotation> tileRotations;
-        std::vector<Level::Gate> gates;
-        std::vector<Level::Rotator> rotators;
-        std::vector<Level::LockPlate> lockPlates;
-        std::vector<Level::Plate> plates;
-        std::vector<Level::Elevator> elevators;
-        std::vector<Level::Minecart> minecarts;
-        // Only movable objects explicitly painted with the link brush appear
-        // here; ordinary objects remain independent.
-        std::vector<Level::ObjectLink> objectLinks;
-        std::vector<Level::Portal> portals;
-        // One per pressure plate, sorted by cell (see linkGroups).
-        std::vector<Level::LinkColor> plateColors;
-
-        bool operator==(const DocumentContent&) const = default;
-    };
-
-    struct Document : DocumentContent {
+    // During editing, linkColors covers every signal source and device
+    // pressurePlates lists are derived on export by linkedDefinition().
+    struct DocumentVersion : Level::Definition {
         // Selected path (browser clicks move this).
         std::filesystem::path filePath;
         // Where `layers` was actually read from or written to. Empty for an
         // unsaved new document.
         std::filesystem::path loadedPath;
+        int requestedWidth = 12;
+        int requestedHeight = 8;
+        int activeLayer = 0;
+        std::optional<std::size_t> selectedDecoration;
+        std::optional<std::size_t> selectedSelector;
+        uint64_t identity = 0;
+    };
+
+    struct Document : DocumentVersion {
         std::filesystem::path browserRoot;
         std::filesystem::path sourceLevelRoot;
         std::filesystem::path runtimeLevelRoot;
         std::string status;
-        int requestedWidth = 12;
-        int requestedHeight = 8;
-        int activeLayer = 0;
         TileType selectedTile = TileType::Wall;
         uint32_t selectedTileQuarterTurns = 0;
         Tool tool = Tool::Tiles;
         std::string selectedDecorationModel;
         TileDecorations::Brush tileDecorationBrush;
         bool tileDecorationPlacementEnabled = true;
-        std::optional<std::size_t> selectedDecoration;
-        std::optional<std::size_t> selectedSelector;
-        uint64_t identity = 0;
         bool layerLocked = false;
         bool playingDraft = false;
         bool editingDocument = false;
     };
 
-    struct DocumentSnapshot : DocumentContent {
-        std::filesystem::path filePath;
-        // Undoing a load has to restore where the document came from too, or
-        // the restored contents would be attributed to the wrong screen.
-        std::filesystem::path loadedPath;
-        int requestedWidth = 12;
-        int requestedHeight = 8;
-        int activeLayer = 0;
-        std::optional<std::size_t> selectedDecoration;
-        std::optional<std::size_t> selectedSelector;
-        uint64_t identity = 0;
-    };
-
     struct SavedDocument {
-        DocumentContent content;
+        Level::Definition content;
         bool publicationPending = false;
     };
 
     struct EditActionRecord {
-        DocumentSnapshot before;
-        DocumentSnapshot after;
+        DocumentVersion before;
+        DocumentVersion after;
         std::size_t retainedBytes = 0;
         uint64_t sequence = 0;
     };
@@ -552,9 +521,9 @@ private:
     };
     using ScreenIdentityRemaps = std::vector<ScreenIdentityRemap>;
 
-    [[nodiscard]] std::optional<DocumentSnapshot> captureBeforeDocumentChange() const;
-    void recordDocumentChange(std::optional<DocumentSnapshot> before);
-    [[nodiscard]] static std::size_t snapshotStorageBytes(const DocumentSnapshot& snapshot);
+    [[nodiscard]] std::optional<DocumentVersion> captureBeforeDocumentChange() const;
+    void recordDocumentChange(std::optional<DocumentVersion> before);
+    [[nodiscard]] static std::size_t snapshotStorageBytes(const DocumentVersion& snapshot);
     [[nodiscard]] static std::size_t recordStorageBytes(const EditActionRecord& record);
     static void clearHistory(EditHistory& history);
     void trimHistory();
@@ -567,7 +536,7 @@ private:
     [[nodiscard]] Level::Definition linkedDefinition(
         std::optional<CharacterType> character) const;
     [[nodiscard]] static Level::Definition linkedDefinition(
-        const Document& document, std::optional<CharacterType> character);
+        const Level::Definition& authored, std::optional<CharacterType> character);
     [[nodiscard]] bool documentDirty(const Document& document) const;
     SavedDocument& noteSavedDocument(const std::filesystem::path& path);
     void cacheActiveDraft();
@@ -575,8 +544,8 @@ private:
     [[nodiscard]] static std::filesystem::path draftKey(
         const std::filesystem::path& path);
     void insertLayerAt(int insertionIndex, const char* status);
-    void applyDocumentSnapshot(const DocumentSnapshot& snapshot);
-    [[nodiscard]] DocumentSnapshot captureDocumentSnapshot() const;
+    void applyDocumentSnapshot(const DocumentVersion& snapshot);
+    [[nodiscard]] DocumentVersion captureDocumentSnapshot() const;
     [[nodiscard]] std::filesystem::path runtimeMirrorPath(const std::filesystem::path& sourcePath) const;
     [[nodiscard]] std::filesystem::path deletedLevelRoot() const;
     [[nodiscard]] bool isActiveLevelDirectory(const LevelDirectory& level) const;
@@ -623,10 +592,11 @@ private:
     HistoryLimits historyLimits_;
     uint64_t historySequence_ = 0;
     uint64_t documentSequence_ = 0;
+    uint64_t runtimePublicationRevision_ = 0;
     std::map<std::filesystem::path, SavedDocument> savedDocuments_;
     // Open stroke: the snapshot from before its first change, plus how many
     // cell edits it has absorbed.
-    std::optional<DocumentSnapshot> strokeBefore_;
+    std::optional<DocumentVersion> strokeBefore_;
     std::string selectedGroundSplatName_;
     bool groundAssignmentPainting_ = false;
     bool showGroundAssignmentColors_ = false;
@@ -638,7 +608,7 @@ private:
     std::vector<TileType> recentTiles_;
     std::mt19937 tileDecorationRandom_ { std::random_device {}() };
     std::map<std::filesystem::path, DraftState> drafts_;
-    std::optional<DocumentSnapshot> decorationTransformBefore_;
+    std::optional<DocumentVersion> decorationTransformBefore_;
     std::optional<MoveObject> pendingMove_;
     std::optional<OverworldMap> draftOverworldMap_;
     bool showOverworldNeighbors_ = false;

@@ -1,7 +1,9 @@
 #pragma once
 
+#include "engine/FrameArena.hpp"
 #include "engine/Math.hpp"
 #include "engine/PresentationPolicy.hpp"
+#include "engine/ProcessMemory.hpp"
 #include "engine/TaskSystem.hpp"
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/FrameDescriptorSync.hpp"
@@ -36,6 +38,7 @@
 #include <vulkan/vulkan.h>
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <future>
@@ -230,6 +233,10 @@ public:
     [[nodiscard]] AntiAliasingMode antiAliasingMode() const;
     [[nodiscard]] VkSampleCountFlagBits activeSampleCount() const;
     [[nodiscard]] RenderStats renderStats() const;
+#if SOKOBAN_ENABLE_DEBUG_UI
+    // Shared by diagnostics panels until the next beginDebugUiFrame().
+    [[nodiscard]] const RenderStats& debugRenderStats() const;
+#endif
     [[nodiscard]] VulkanModelResources::LoadingStats assetLoadingStats() const;
     [[nodiscard]] std::string_view physicalDeviceName() const;
     [[nodiscard]] const char* physicalDeviceTypeName() const;
@@ -278,6 +285,17 @@ public:
         float timeSeconds);
 
 private:
+    struct MemoryStatsSample {
+        VulkanMemoryStatistics gpu;
+        VulkanGeometryArena::Statistics geometry;
+        ProcessMemoryStatistics process;
+        FrameArenaMemoryStats arenas;
+    };
+
+    [[nodiscard]] MemoryStatsSample sampleMemoryStats() const;
+    [[nodiscard]] RenderStats collectFrameStats() const;
+    static void populateMemoryStats(RenderStats& stats, const MemoryStatsSample& sample);
+
     struct FrameResources {
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         VkSemaphore imageAvailable = VK_NULL_HANDLE;
@@ -433,6 +451,12 @@ private:
     std::optional<VulkanFailure> fatalFailure_;
     PresentationPolicy presentationPolicy_ {};
     RenderStats lastStats_ {};
+#if SOKOBAN_ENABLE_DEBUG_UI
+    mutable std::optional<RenderStats> debugStats_;
+    mutable MemoryStatsSample debugMemoryStats_ {};
+    mutable std::chrono::steady_clock::time_point debugMemorySampleDue_ {};
+    mutable uint64_t debugMemorySampleIndex_ = 0;
+#endif
     FrameTimeTelemetry scenePreparationTimeTelemetry_ {};
     FrameTimeTelemetry cpuFrameTimeTelemetry_ {};
     FrameTimeTelemetry assetSchedulingTimeTelemetry_ {};

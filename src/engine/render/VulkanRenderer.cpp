@@ -1013,22 +1013,10 @@ void VulkanRenderer::drawFrame(
     lastStats_.waterCellCacheEnabled = activeResources_.waterCellCache->enabled();
     lastStats_.waterCellCacheRebuilds = activeResources_.waterCellCache->rebuilds();
     lastStats_.waterCellCacheBytes = activeResources_.waterCellCache->bytes();
-    lastStats_.scenePreparationTiming =
-        renderPhaseTiming(scenePreparationTimeTelemetry_.summary());
-    const FrameTimeSummary gpuTiming = gpuProfiler_.frameTimeSummary();
-    // Guarded, unlike the other two: on a device without timestamp support
-    // this must keep whatever it last held rather than being overwritten with
-    // an unavailable summary every frame.
-    if (gpuTiming.available()) {
-        lastStats_.gpuFrameTiming = renderPhaseTiming(gpuTiming);
-    }
-
     submitAndPresent(frame, imageIndex);
 
     cpuFrameTimeTelemetry_.record(std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - cpuFrameStart).count());
-    lastStats_.cpuFrameTiming =
-        renderPhaseTiming(cpuFrameTimeTelemetry_.summary());
     lastStats_.assetPublications = assetPublications_;
     lastStats_.assetPublicationFrames = assetPublicationFrames_;
     const VulkanModelResources::LoadingStats loadingStats =
@@ -1220,6 +1208,7 @@ void VulkanRenderer::handleEvent(const SDL_Event& event)
 void VulkanRenderer::beginDebugUiFrame()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
+    debugStats_.reset();
     // Palette requests made during the previous UI frame load progressively;
     // constructing a palette must never upload all of its thumbnails at once.
     thumbnailPass_.servicePendingThumbnails();
@@ -1594,6 +1583,33 @@ VkSampleCountFlagBits VulkanRenderer::activeSampleCount() const
 
 RenderStats VulkanRenderer::renderStats() const
 {
+    RenderStats stats = collectFrameStats();
+    populateMemoryStats(stats, sampleMemoryStats());
+    return stats;
+}
+
+#if SOKOBAN_ENABLE_DEBUG_UI
+const RenderStats& VulkanRenderer::debugRenderStats() const
+{
+    if (!debugStats_) {
+        RenderStats stats = collectFrameStats();
+        const auto now = std::chrono::steady_clock::now();
+        if (debugMemorySampleIndex_ == 0 || now >= debugMemorySampleDue_) {
+            debugMemoryStats_ = sampleMemoryStats();
+            debugMemorySampleDue_ = now + std::chrono::milliseconds { 250 };
+            ++debugMemorySampleIndex_;
+        }
+        populateMemoryStats(stats, debugMemoryStats_);
+        stats.memorySampleIndex = debugMemorySampleIndex_;
+        debugStats_ = stats;
+    }
+    return *debugStats_;
+}
+#endif
+
+RenderStats VulkanRenderer::collectFrameStats() const
+{
+    SOKOBAN_PROFILE_SCOPE("Renderer.Collect frame statistics");
     RenderStats stats = lastStats_;
     const VkPresentModeKHR presentMode =
         activeResources_.swapchain->presentMode();
@@ -1601,6 +1617,10 @@ RenderStats VulkanRenderer::renderStats() const
         presentMode == VK_PRESENT_MODE_FIFO_KHR ||
         presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR;
     stats.sceneDepthBits = vulkanDepthFormatBits(depthFormat_);
+    stats.scenePreparationTiming =
+        renderPhaseTiming(scenePreparationTimeTelemetry_.summary());
+    stats.cpuFrameTiming = renderPhaseTiming(cpuFrameTimeTelemetry_.summary());
+    stats.gpuFrameTiming = renderPhaseTiming(gpuProfiler_.frameTimeSummary());
     stats.assetSchedulingTiming = renderPhaseTiming(
         assetSchedulingTimeTelemetry_.summary());
     stats.frameFenceWaitTiming = renderPhaseTiming(
@@ -1656,8 +1676,24 @@ RenderStats VulkanRenderer::renderStats() const
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::AtmosphereVolumes));
     stats.gpuOutputTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Output));
-    const VulkanMemoryStatistics memory =
-        deviceContext_.memoryAllocator().statistics();
+    sceneRecorder_.populateTimingStats(stats);
+    return stats;
+}
+
+VulkanRenderer::MemoryStatsSample VulkanRenderer::sampleMemoryStats() const
+{
+    SOKOBAN_PROFILE_SCOPE("Renderer.Sample memory statistics");
+    return {
+        .gpu = deviceContext_.memoryAllocator().statistics(),
+        .geometry = modelResources_.geometryStatistics(),
+        .process = processMemoryStatistics(),
+        .arenas = frameArenaMemoryStats(),
+    };
+}
+
+void VulkanRenderer::populateMemoryStats(RenderStats& stats, const MemoryStatsSample& sample)
+{
+    const VulkanMemoryStatistics& memory = sample.gpu;
     stats.gpuMemoryBlockCount = memory.blockCount;
     stats.gpuMemoryAllocationCount = memory.allocationCount;
     stats.gpuImageAllocationCount = memory.imageCount;
@@ -1669,8 +1705,7 @@ RenderStats VulkanRenderer::renderStats() const
     stats.gpuMemoryTotalFreedBytes = memory.totalFreedBytes;
     stats.gpuImageBytes = memory.imageBytes;
     stats.gpuBufferBytes = memory.bufferBytes;
-    const VulkanGeometryArena::Statistics geometry =
-        modelResources_.geometryStatistics();
+    const VulkanGeometryArena::Statistics& geometry = sample.geometry;
     stats.geometryArenaUsedBytes = geometry.usedBytes();
     stats.geometryArenaReservedBytes = geometry.reservedBytes();
     stats.geometryArenaBlockCount = geometry.blockCount();
@@ -1689,17 +1724,15 @@ RenderStats VulkanRenderer::renderStats() const
             .budgetBytes = heap.budgetBytes,
         };
     }
-    const ProcessMemoryStatistics process = processMemoryStatistics();
+    const ProcessMemoryStatistics& process = sample.process;
     stats.processMemoryAvailable = process.available;
     stats.processResidentBytes = process.residentBytes;
     stats.processPeakResidentBytes = process.peakResidentBytes;
     stats.processPrivateBytes = process.privateBytes;
-    const FrameArenaMemoryStats arenas = frameArenaMemoryStats();
+    const FrameArenaMemoryStats& arenas = sample.arenas;
     stats.frameArenaCount = static_cast<uint64_t>(arenas.arenaCount);
     stats.frameArenaReservedBytes = static_cast<uint64_t>(arenas.reservedBytes);
     stats.frameArenaPeakReservedBytes = static_cast<uint64_t>(arenas.peakReservedBytes);
-    sceneRecorder_.populateTimingStats(stats);
-    return stats;
 }
 
 VulkanModelResources::LoadingStats VulkanRenderer::assetLoadingStats() const

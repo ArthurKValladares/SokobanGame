@@ -57,6 +57,27 @@ void writeLevelMetadata(
     const std::filesystem::path& levelDirectory,
     const LevelMetadata& metadata);
 
+struct PuzzleCatalog {
+    struct LevelEntry {
+        std::filesystem::path directory;
+        std::vector<std::filesystem::path> screens;
+        LevelMetadata metadata;
+    };
+
+    std::vector<LevelEntry> levels;
+
+    [[nodiscard]] std::vector<int> screenCounts() const;
+    [[nodiscard]] const std::filesystem::path* findScreen(LevelLocation location) const noexcept;
+};
+
+enum class PuzzleCatalogEntries { IgnoreUnrelated, RejectUnrelated };
+
+// Discovers consecutive, canonically named puzzle directories and screens,
+// and reads their metadata. Overworld and deleted screens are separate.
+[[nodiscard]] PuzzleCatalog loadPuzzleCatalog(
+    const std::filesystem::path& root,
+    PuzzleCatalogEntries entries = PuzzleCatalogEntries::IgnoreUnrelated);
+
 [[nodiscard]] bool levelLocationExists(
     std::span<const int> screenCounts,
     LevelLocation location) noexcept;

@@ -366,55 +366,40 @@ void drawOptimizationCandidates(const PerformanceAnalysis& analysis)
 } // namespace
 
 void ProfilerDebugUi::appendHistory(
-    uint64_t frameIndex,
-    float totalCpu,
-    float rendererCpu,
-    float gpu,
-    float processResidentMiB,
-    float gpuAllocatedMiB,
-    uint64_t totalAllocatedBytes,
-    uint64_t totalFreedBytes)
+    const CpuProfileFrame& cpu, const RenderStats& stats)
 {
-    if (frameIndex == 0 || frameIndex == lastHistoryFrame_) {
+    if (stats.memorySampleIndex != lastMemorySample_) {
+        recentAllocatedBytes_ = lastMemorySample_ == 0 ? 0
+            : stats.gpuMemoryTotalAllocatedBytes - previousTotalAllocatedBytes_;
+        recentFreedBytes_ = lastMemorySample_ == 0 ? 0
+            : stats.gpuMemoryTotalFreedBytes - previousTotalFreedBytes_;
+        previousTotalAllocatedBytes_ = stats.gpuMemoryTotalAllocatedBytes;
+        previousTotalFreedBytes_ = stats.gpuMemoryTotalFreedBytes;
+        lastMemorySample_ = stats.memorySampleIndex;
+    }
+    if (stats.frameIndex == 0 || stats.frameIndex == lastHistoryFrame_) {
         return;
     }
-    lastHistoryFrame_ = frameIndex;
-    recentAllocatedBytes_ = previousTotalAllocatedBytes_ == 0
-        ? 0
-        : totalAllocatedBytes - previousTotalAllocatedBytes_;
-    recentFreedBytes_ = previousTotalFreedBytes_ == 0
-        ? 0
-        : totalFreedBytes - previousTotalFreedBytes_;
-    previousTotalAllocatedBytes_ = totalAllocatedBytes;
-    previousTotalFreedBytes_ = totalFreedBytes;
-    appendBounded(totalCpuHistory_, totalCpu);
-    appendBounded(rendererCpuHistory_, rendererCpu);
-    appendBounded(gpuHistory_, gpu);
-    appendBounded(processMemoryHistory_, processResidentMiB);
-    appendBounded(gpuMemoryHistory_, gpuAllocatedMiB);
+    lastHistoryFrame_ = stats.frameIndex;
+    constexpr float unavailable = std::numeric_limits<float>::quiet_NaN();
+    const auto latest = [](const RenderPhaseTiming& timing) {
+        return timing.available ? static_cast<float>(timing.latestMilliseconds) : unavailable;
+    };
+    appendBounded(totalCpuHistory_, cpu.frameIndex == stats.frameIndex
+        ? static_cast<float>(cpu.durationMilliseconds) : unavailable);
+    appendBounded(rendererCpuHistory_, latest(stats.cpuFrameTiming));
+    appendBounded(gpuHistory_, latest(stats.gpuFrameTiming));
+    appendBounded(processMemoryHistory_, toMiB(stats.processResidentBytes));
+    appendBounded(gpuMemoryHistory_, toMiB(stats.gpuMemoryAllocationBytes));
 }
 
 void ProfilerDebugUi::draw(const VulkanRenderer& renderer)
 {
     CpuProfiler& profiler = CpuProfiler::instance();
     const CpuProfileFrame frame = profiler.latestFrame();
-    const RenderStats stats = renderer.renderStats();
+    const RenderStats& stats = renderer.debugRenderStats();
     if (!profiler.paused()) {
-        appendHistory(
-            stats.frameIndex,
-            static_cast<float>(frame.frameIndex == stats.frameIndex
-                ? frame.durationMilliseconds
-                : std::numeric_limits<float>::quiet_NaN()),
-            static_cast<float>(stats.cpuFrameTiming.available
-                ? stats.cpuFrameTiming.latestMilliseconds
-                : std::numeric_limits<float>::quiet_NaN()),
-            static_cast<float>(stats.gpuFrameTiming.available
-                ? stats.gpuFrameTiming.latestMilliseconds
-                : std::numeric_limits<float>::quiet_NaN()),
-            toMiB(stats.processResidentBytes),
-            toMiB(stats.gpuMemoryAllocationBytes),
-            stats.gpuMemoryTotalAllocatedBytes,
-            stats.gpuMemoryTotalFreedBytes);
+        appendHistory(frame, stats);
     }
 
     bool enabled = profiler.enabled();
@@ -435,6 +420,7 @@ void ProfilerDebugUi::draw(const VulkanRenderer& renderer)
         processMemoryHistory_.clear();
         gpuMemoryHistory_.clear();
         lastHistoryFrame_ = 0;
+        lastMemorySample_ = 0;
         previousTotalAllocatedBytes_ = 0;
         previousTotalFreedBytes_ = 0;
         recentAllocatedBytes_ = 0;

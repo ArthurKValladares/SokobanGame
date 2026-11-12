@@ -1,10 +1,12 @@
 #include "engine/LevelCatalog.hpp"
+#include "engine/PathText.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <charconv>
 #include <cstddef>
 #include <fstream>
+#include <map>
 #include <stdexcept>
 #include <system_error>
 
@@ -74,9 +76,9 @@ std::optional<LevelLocation> levelLocationFromScreenPath(
         return std::nullopt;
     }
     const std::optional<int> screen =
-        screenIndexFromFilename(screenPath.filename().string());
+        screenIndexFromFilename(pathText(screenPath.filename()));
     const std::optional<int> level = levelIndexFromDirectoryName(
-        screenPath.parent_path().filename().string());
+        pathText(screenPath.parent_path().filename()));
     if (!screen || !level) {
         return std::nullopt;
     }
@@ -99,7 +101,7 @@ LevelMetadata loadLevelMetadata(
     try {
         std::ifstream file(path);
         if (!file) {
-            throw std::runtime_error("cannot read " + path.string());
+            throw std::runtime_error("cannot read " + pathText(path));
         }
         const nlohmann::json root = nlohmann::json::parse(file);
         if (!root.is_object()) {
@@ -135,11 +137,11 @@ LevelMetadata loadLevelMetadata(
         return metadata;
     } catch (const nlohmann::json::exception& error) {
         throw std::runtime_error(
-            "invalid level metadata " + path.string() + ": " +
+            "invalid level metadata " + pathText(path) + ": " +
             error.what());
     } catch (const std::runtime_error& error) {
         throw std::runtime_error(
-            "invalid level metadata " + path.string() + ": " +
+            "invalid level metadata " + pathText(path) + ": " +
             error.what());
     }
 }
@@ -158,13 +160,106 @@ void writeLevelMetadata(
     };
     std::ofstream file(path, std::ios::trunc);
     if (!file) {
-        throw std::runtime_error("cannot write " + path.string());
+        throw std::runtime_error("cannot write " + pathText(path));
     }
     file << root.dump(2) << '\n';
     file.close();
     if (!file) {
-        throw std::runtime_error("cannot write " + path.string());
+        throw std::runtime_error("cannot write " + pathText(path));
     }
+}
+
+std::vector<int> PuzzleCatalog::screenCounts() const
+{
+    std::vector<int> counts;
+    counts.reserve(levels.size());
+    for (const auto& level : levels) {
+        counts.push_back(static_cast<int>(level.screens.size()));
+    }
+    return counts;
+}
+
+const std::filesystem::path* PuzzleCatalog::findScreen(LevelLocation location) const noexcept
+{
+    if (location.level < 0 || static_cast<std::size_t>(location.level) >= levels.size()) {
+        return nullptr;
+    }
+    const auto& screens = levels[static_cast<std::size_t>(location.level)].screens;
+    if (location.screen < 0 || static_cast<std::size_t>(location.screen) >= screens.size()) {
+        return nullptr;
+    }
+    return &screens[static_cast<std::size_t>(location.screen)];
+}
+
+PuzzleCatalog loadPuzzleCatalog(
+    const std::filesystem::path& root, PuzzleCatalogEntries entries)
+{
+    const bool strict = entries == PuzzleCatalogEntries::RejectUnrelated;
+    std::map<int, std::filesystem::path> directories;
+    for (const auto& entry : std::filesystem::directory_iterator(root)) {
+        if (!entry.is_directory()) continue;
+        const auto& path = entry.path();
+        const std::string name = pathText(path.filename());
+        if (name == "Deleted" || (name == "overworld" &&
+                std::filesystem::is_regular_file(path / "layout.json"))) {
+            continue;
+        }
+        const auto index = levelIndexFromDirectoryName(name);
+        if (!index) {
+            if (strict) throw std::runtime_error("unexpected level directory: " + pathText(path));
+            continue;
+        }
+        const auto canonical = levelDirectoryName(*index);
+        if (name != canonical) {
+            throw std::runtime_error("puzzle level directory must be named '" + canonical +
+                "': " + pathText(path));
+        }
+        directories.emplace(*index, path);
+    }
+
+    PuzzleCatalog catalog;
+    catalog.levels.reserve(directories.size());
+    for (const auto& [index, directory] : directories) {
+        if (static_cast<std::size_t>(index) != catalog.levels.size()) {
+            throw std::runtime_error("level indices must be contiguous starting at level0: " +
+                pathText(directory));
+        }
+        std::map<int, std::filesystem::path> paths;
+        for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+            const auto& path = entry.path();
+            if (!entry.is_regular_file()) {
+                if (strict) throw std::runtime_error("unexpected entry in level directory: " + pathText(path));
+                continue;
+            }
+            const std::string name = pathText(path.filename());
+            if (name == levelMetadataFilename) continue;
+            const auto screen = screenIndexFromFilename(name);
+            if (!screen) {
+                if (strict) throw std::runtime_error("unexpected level file: " + pathText(path));
+                continue;
+            }
+            const auto canonical = screenFilename(*screen);
+            if (name != canonical) {
+                throw std::runtime_error("puzzle screen file must be named '" + canonical +
+                    "': " + pathText(path));
+            }
+            paths.emplace(*screen, path);
+        }
+        if (paths.empty()) {
+            throw std::runtime_error(pathText(directory) + " contains no playable screens");
+        }
+        auto& level = catalog.levels.emplace_back(PuzzleCatalog::LevelEntry { .directory = directory });
+        level.screens.reserve(paths.size());
+        for (const auto& [screen, path] : paths) {
+            if (static_cast<std::size_t>(screen) != level.screens.size()) {
+                throw std::runtime_error("screen indices must be contiguous starting at screen0: " +
+                    pathText(path));
+            }
+            level.screens.push_back(path);
+        }
+        level.metadata = loadLevelMetadata(directory, level.screens.size());
+    }
+    return catalog;
 }
 
 bool levelLocationExists(

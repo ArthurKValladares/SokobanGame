@@ -3,6 +3,7 @@
 #include "engine/LevelProjectStore.hpp"
 #include "engine/OverworldMap.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -75,6 +76,7 @@ public:
     [[nodiscard]] bool undo();
     [[nodiscard]] bool redo();
     [[nodiscard]] bool save();
+    [[nodiscard]] uint64_t runtimePublicationRevision() const { return runtimePublicationRevision_; }
 
 private:
     struct DraftScreen {
@@ -111,6 +113,7 @@ private:
     std::vector<State> redo_;
     std::string status_;
     bool loaded_ = false;
+    uint64_t runtimePublicationRevision_ = 0;
 };
 
 } // namespace sokoban

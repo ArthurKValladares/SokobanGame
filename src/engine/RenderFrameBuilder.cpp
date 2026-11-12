@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <memory>
 
 // The gameplay frame.
 //
@@ -1584,7 +1585,8 @@ float carrierFacingOffset(
 
 void appendGameplayEntities(
     RenderFrameData& frame,
-    const RenderFrameBuilder::GameplayInput& input)
+    const RenderFrameBuilder::GameplayInput& input,
+    FrameArena* arena)
 {
     const GameState& state = input.state;
     const auto& playerVisuals = input.presentation.players();
@@ -1595,7 +1597,25 @@ void appendGameplayEntities(
     // Rotator turns interpolate between the committed and projected states.
     const float turnProgress = inFlightActionProgress(input);
     const float quarterTurnRadians = pi * 0.5f;
-    const auto clericProtection = rules::clericGravityProtection(input.level, state);
+    std::unique_ptr<char[]> ownedProtection;
+    std::span<char> clericProtection;
+    if (std::ranges::any_of(state.players, [&](const auto& player) {
+            return !player.dead && player.abilities(input.level.character())
+                .has(CharacterAbility::ProtectionAura);
+        })) {
+        const std::size_t count = state.players.size();
+        if (arena == nullptr) {
+            ownedProtection = std::make_unique_for_overwrite<char[]>(2 * count);
+        }
+        char* const storage = arena != nullptr
+            ? arena->allocateUninitialized<char>(2 * count) : ownedProtection.get();
+        if (storage != nullptr) {
+            const std::span buffer(storage, 2 * count);
+            clericProtection = buffer.first(count);
+            rules::clericGravityProtection(input.level, state,
+                clericProtection, buffer.last(count));
+        }
+    }
 
     for (std::size_t playerIndex = 0;
          playerIndex < state.players.size() &&
@@ -1626,7 +1646,7 @@ void appendGameplayEntities(
         const bool primary = playerIndex == primaryIndex;
         const bool controlled = rules::playerControllerId(state, playerIndex) ==
             activeController;
-        if (clericProtection[playerIndex]) {
+        if (!clericProtection.empty() && clericProtection[playerIndex]) {
             appendClericImmunity(frame, visual.motion.renderPosition,
                 input.manifest.findTextureIdByName("ParticleGlow"),
                 input.presentation.worldAnimationTimeSeconds(), playerIndex);
@@ -2104,26 +2124,28 @@ void appendInvalidMirrorPreview(
     const rules::MirrorActivationPreview* validPreview,
     FrameArena* arena)
 {
-    rules::InvalidMirrorPreview owned;
-    rules::InvalidMirrorPreview ownedEnd;
+    std::optional<rules::InvalidMirrorPreview> owned;
+    std::span<const rules::MirrorBeamSegment> beams = input.invalidMirrorBeams;
+    std::span<const rules::MirrorEntityPreview> entities = input.invalidMirrorEntities;
     if (!input.cachedActivationPreviews) {
-        owned = rules::previewInvalidMirrors(input.level, input.state);
+        owned.emplace(rules::previewInvalidMirrors(input.level, input.state));
+        beams = owned->beamSegments;
+        entities = owned->entities;
     }
-    const std::span<const rules::MirrorBeamSegment> beams =
-        input.cachedActivationPreviews ? input.invalidMirrorBeams : owned.beamSegments;
-    const std::span<const rules::MirrorEntityPreview> entities =
-        input.cachedActivationPreviews ? input.invalidMirrorEntities : owned.entities;
     if (beams.empty() && entities.empty()) {
         return;
     }
-    if (input.moving && !input.cachedActivationPreviews &&
-        !rules::anyPlayerDead(input.projectedState)) {
-        ownedEnd = rules::previewInvalidMirrors(input.level, input.projectedState);
+    std::optional<rules::InvalidMirrorPreview> ownedEnd;
+    std::span<const rules::MirrorBeamSegment> endBeams;
+    std::span<const rules::MirrorEntityPreview> endEntities;
+    if (input.cachedActivationPreviews) {
+        endBeams = input.projectedInvalidMirrorBeams;
+        endEntities = input.projectedInvalidMirrorEntities;
+    } else if (input.moving && !rules::anyPlayerDead(input.projectedState)) {
+        ownedEnd.emplace(rules::previewInvalidMirrors(input.level, input.projectedState));
+        endBeams = ownedEnd->beamSegments;
+        endEntities = ownedEnd->entities;
     }
-    const std::span<const rules::MirrorBeamSegment> endBeams =
-        input.cachedActivationPreviews ? input.projectedInvalidMirrorBeams : ownedEnd.beamSegments;
-    const std::span<const rules::MirrorEntityPreview> endEntities =
-        input.cachedActivationPreviews ? input.projectedInvalidMirrorEntities : ownedEnd.entities;
     float progress = 0.0f;
     if (input.moving) {
         for (const auto& player : input.presentation.players()) {
@@ -2508,24 +2530,22 @@ void applyGameplayAuthoredRotations(RenderFrameData& frame, const Level& level)
     }
 }
 
-} // namespace
-
-RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
+RenderFrameData buildGameplayFrame(const RenderFrameBuilder::GameplayInput& input, FrameArena* arena)
 {
-    RenderFrameData frame = initializeGameplayFrame(input);
+    RenderFrameData frame = initializeGameplayFrame(input, arena);
     appendGameplayWorld(frame, input);
     applyGameplayAuthoredRotations(frame, input.level);
-    appendGameplayEntities(frame, input);
+    appendGameplayEntities(frame, input, arena);
     input.presentation.appendWaterRippleRenderData(frame);
     input.presentation.appendRockScratchRenderData(frame);
-    appendMirrorPreview(frame, input);
+    appendMirrorPreview(frame, input, arena);
     appendControlComponents(frame, input);
     applyScrollingMaterials(frame, input);
-    processCliffWallGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
-    processGroundTileGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
+    const std::span tiles(frame.tiles.data(), frame.tiles.size());
+    processCliffWallGeometry(tiles, input.manifest);
+    processGroundTileGeometry(tiles, input.manifest, arena);
     if (input.settings.geometry.processGroundGeometry) {
-        processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest,
-            nullptr, input.groundGeometryCache);
+        processGroundGeometry(tiles, input.manifest, arena, input.groundGeometryCache);
         if (input.settings.geometry.smoothGroundRim) {
             frame.requestedGroundRimWidth = input.settings.geometry.groundRimWidth;
             frame.requestedGroundRimDepth = input.settings.geometry.groundRimDepth;
@@ -2538,34 +2558,18 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     return frame;
 }
 
+} // namespace
+
+RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
+{
+    return buildGameplayFrame(input, nullptr);
+}
+
 RenderFrameData RenderFrameBuilder::buildGameplay(
     const GameplayInput& input,
     FrameArena& arena)
 {
-    RenderFrameData frame = initializeGameplayFrame(input, &arena);
-    appendGameplayWorld(frame, input);
-    applyGameplayAuthoredRotations(frame, input.level);
-    appendGameplayEntities(frame, input);
-    input.presentation.appendWaterRippleRenderData(frame);
-    input.presentation.appendRockScratchRenderData(frame);
-    appendMirrorPreview(frame, input, &arena);
-    appendControlComponents(frame, input);
-    applyScrollingMaterials(frame, input);
-    processCliffWallGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest);
-    processGroundTileGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest, &arena);
-    if (input.settings.geometry.processGroundGeometry) {
-        processGroundGeometry({ frame.tiles.data(), frame.tiles.size() }, input.manifest,
-            &arena, input.groundGeometryCache);
-        if (input.settings.geometry.smoothGroundRim) {
-            frame.requestedGroundRimWidth = input.settings.geometry.groundRimWidth;
-            frame.requestedGroundRimDepth = input.settings.geometry.groundRimDepth;
-            for (auto& tile : frame.tiles) if (tile.groundGeometryEligible) {
-                tile.groundRimWidth = frame.requestedGroundRimWidth;
-                tile.groundRimDepth = frame.requestedGroundRimDepth;
-            }
-        }
-    }
-    return frame;
+    return buildGameplayFrame(input, &arena);
 }
 
 } // namespace sokoban
