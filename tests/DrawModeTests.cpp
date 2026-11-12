@@ -79,6 +79,7 @@ const std::vector<Expected>& expectedModes()
         { "DRAW_MODE_SCENE_IMAGE", DrawMaterialMode::SceneImage },
         { "DRAW_MODE_TEXTURE_IMAGE", DrawMaterialMode::TextureImage },
         { "DRAW_MODE_FLAME_STREAM", DrawMaterialMode::FlameStream },
+        { "DRAW_MODE_RESIZE_PREVIEW", DrawMaterialMode::ResizePreview },
     };
     return modes;
 }

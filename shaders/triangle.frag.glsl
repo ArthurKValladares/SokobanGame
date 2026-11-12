@@ -205,11 +205,39 @@ float plateEnergyPattern(vec2 uv, float time)
 
 void main()
 {
+    int materialMode = int(draw.textureOptions.x + 0.5);
     // Procedural fire owns its parameter lanes; handle it before modelMaterial
     // interprets passData[0].x as a material-buffer index.
-    if (int(draw.textureOptions.x + 0.5) == DRAW_MODE_FLAME_STREAM) {
+    if (materialMode == DRAW_MODE_FLAME_STREAM) {
         outColor = flameStreamColor(vec2(inFaceCoordU, inFaceCoordV),
             draw.passData[0], draw.color);
+        return;
+    }
+    if (materialMode == DRAW_MODE_RESIZE_PREVIEW) {
+        if (isModelDraw(draw.gridColor)) {
+            Material material = modelMaterial();
+            if (draw.passData[0].y > 0.5 && !gl_FrontFacing &&
+                material.materialState.w == 0u) {
+                discard;
+            }
+            if (material.materialState.y == 1u) {
+                float coverage = material.baseColorFactor.a;
+                int textureHandle = int(material.primaryTextureHandles.x);
+                if (textureHandle != 0) {
+                    vec2 uv = materialTextureUv(material.textureUvSets.x, material.materialState.z);
+                    coverage *= texture(modelTextures[nonuniformEXT(textureHandle - 1)], uv).a;
+                }
+                if (coverage < material.materialScalars.w) {
+                    discard;
+                }
+            }
+        }
+        // Use a neutral directional light so the selected tint reads the
+        // same across different authored materials and lighting settings.
+        vec3 lightDirection = normalize(vec3(-0.5, -0.6, 1.0));
+        float shade = 0.58 + 0.42 * max(dot(normalize(inNormal), lightDirection), 0.0);
+        vec3 color = mix(draw.color.rgb, draw.gridColor.rgb, gridMask()) * shade;
+        outColor = vec4(color, draw.color.a);
         return;
     }
     applyEditorPreviewDither();
@@ -221,7 +249,6 @@ void main()
     // find a metallic and a roughness for them.
     Material material = modelMaterial();
     vec4 materialColor = draw.color;
-    int materialMode = int(draw.textureOptions.x + 0.5);
     bool modelDraw = isModelDraw(draw.gridColor);
     bool plateEnergy = modelDraw && draw.passData[0].w > 0.5;
     bool plateEmissive = plateEnergy &&

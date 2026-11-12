@@ -77,6 +77,11 @@ UiRect fitSceneViewport(UiRect bounds, Vec2 source)
     };
 }
 
+bool showsMakerResizePreview(MakerDraftDialogMode mode)
+{
+    return mode == MakerDraftDialogMode::ResizeBoard || mode == MakerDraftDialogMode::ConfirmCrop;
+}
+
 template<class Load>
 auto timedAssetStartup(std::string_view phase, Load&& load)
 {
@@ -887,6 +892,7 @@ void Application::openMakerDraftDialog(MakerDraftDialogMode mode, std::string_vi
 
 void Application::closeMakerDraftDialog()
 {
+    if (showsMakerResizePreview(makerDraftDialog_->mode)) makerViewport_.reset();
     blurNativeTextInput();
     ui_.cancelPointerInteraction();
     makerDraftDialog_.reset();
@@ -1092,10 +1098,9 @@ void Application::drawMakerWorkspace(
     }, viewInput);
     if (auto& dialog = makerDraftDialog_) {
         MakerViewInput dialogInput = viewInput;
+        const bool resizePreview = showsMakerResizePreview(dialog->mode);
         if (dialog->mode == MakerDraftDialogMode::NewDraft ||
-            dialog->mode == MakerDraftDialogMode::DiscardNew ||
-            dialog->mode == MakerDraftDialogMode::ResizeBoard ||
-            dialog->mode == MakerDraftDialogMode::ConfirmCrop) {
+            dialog->mode == MakerDraftDialogMode::DiscardNew || resizePreview) {
             dialogInput.navigation.activate |= input_.keyPressed(SDL_SCANCODE_RETURN) ||
                 input_.keyPressed(SDL_SCANCODE_KP_ENTER);
         }
@@ -1105,6 +1110,7 @@ void Application::drawMakerWorkspace(
             .error = dialog->error,
             .pendingName = dialog->pendingName,
             .removedTileCount = dialog->removedTileCount,
+            .resizePreviewPanel = resizePreview ? std::optional { layout.palette } : std::nullopt,
         }, dialogInput);
         // Dismiss after drawing the modal so the frame's pointer edges never reach the board.
         const auto inputAction = std::exchange(dialog->inputAction, {});
@@ -3626,6 +3632,8 @@ RenderFrameData Application::buildRenderFrame(
         return buildMakerPlaytestFrame(arena);
     }
     if (ui_.drawData().sceneViewport && makerSession_) {
+        const auto resizePreviewSize = makerDraftDialog_ && showsMakerResizePreview(makerDraftDialog_->mode)
+            ? std::optional { makerView_.resizePreviewSize() } : std::nullopt;
         RenderFrameData frame = RenderFrameBuilder::buildEditor({
             .manifest = assetManifest_,
             .editor = makerSession_->editor(),
@@ -3637,18 +3645,21 @@ RenderFrameData Application::buildRenderFrame(
             .worldAnimationTimeSeconds = presentation_.worldAnimationTimeSeconds(),
             .animationTransitionTimeSeconds = presentation_.animationTransitionTimeSeconds(),
             .groundGeometryCache = &editorGroundGeometryCache_,
+            .resizePreviewSize = resizePreviewSize,
         }, arena);
         frame.cameraPitchDegrees = 55.0f;
         frame.cameraYawDegrees = 24.0f;
         frame.gridOverlay = { { 0.10f, 0.12f, 0.14f, 0.78f }, 2.0f };
-        frame.cameraExtent = RenderFrameData::CameraExtent {
-            .originX = -1,
-            .originY = -1,
-            .originZ = -1,
-            .width = frame.levelWidth + 2,
-            .height = frame.levelHeight + 2,
-            .depth = frame.levelDepth + 1,
-        };
+        if (!resizePreviewSize) {
+            frame.cameraExtent = RenderFrameData::CameraExtent {
+                .originX = -1,
+                .originY = -1,
+                .originZ = -1,
+                .width = frame.levelWidth + 2,
+                .height = frame.levelHeight + 2,
+                .depth = frame.levelDepth + 1,
+            };
+        }
         return frame;
     }
     if (evidenceEffects_ == "rock-scratches") {

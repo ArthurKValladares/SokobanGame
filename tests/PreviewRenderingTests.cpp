@@ -166,6 +166,78 @@ ImageData verifyPreview(SDL_Window* window, const std::filesystem::path& root,
     return capture(red, blue, true, false);
 }
 
+ImageData verifyResizePreview(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    auto frame = scene({ 0.24f, 0.24f, 0.24f, 1.0f }, false);
+    frame.skyCloudsEnabled = false;
+    frame.cameraOverride = RenderFrameData::CameraOverride {
+        .position = { 2.0f, 2.0f, 8.0f }, .forward = { 0.0f, 0.0f, -1.0f },
+        .verticalFovDegrees = 25.0f,
+    };
+    const auto hero = manifest.findModelIdByName("Knight");
+    verify(hero.has_value(), "Resize preview fixture is missing the Knight model");
+    frame.tiles.push_back({
+        .cell = { 0, 1, 1 }, .position = { 0.75f, 1.5f },
+        .color = { 0.94f, 0.07f, 0.09f, 0.56f }, .baseElevation = 1.0f, .height = 1.0f,
+        .showGrid = false, .isResizePreview = true, .model = *hero,
+        .animation = manifest.animationIdByName("RogueIdle"), .animationInstanceId = 1,
+    });
+    frame.tiles.push_back({
+        .cell = { 2, 1, 1 }, .position = { 2.4f, 1.5f },
+        .color = { 0.05f, 0.33f, 0.98f, 0.56f }, .baseElevation = 1.0f, .height = 0.5f,
+        .showGrid = false, .isResizePreview = true, .effect = RenderSurfaceEffect::GroundSplat,
+    });
+    renderer.waitForAssets(renderAssetRequirementsForFrame(frame));
+    UiDrawData ui;
+    ui.viewportSize = { 640.0f, 360.0f };
+    const auto capture = [&](float alpha) {
+        frame.tiles[1].color.w = alpha;
+        frame.tiles[2].color.w = alpha;
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            ImGui::Render();
+#endif
+            renderer.drawFrame(renderer.prepareFrame(frame), ui);
+        }
+        verify(!renderer.hasFatalFailure(), "Resize preview fixture failed to render");
+        return renderer.captureRenderedFrame();
+    };
+    const ImageData clear = capture(0.0f);
+    ImageData blended = capture(0.56f);
+    const ImageData solid = capture(1.0f);
+    verify(renderer.renderStats().unavailableModels == 0,
+        "Resize preview fixture did not finish loading the Knight model");
+
+    // Ignore edge pixels and require both tints to blend with the scene
+    // beneath, even for the model's otherwise opaque authored materials.
+    const auto channel = [](const ImageData& image, std::size_t pixel, std::size_t component) {
+        return std::to_integer<int>(image.rgba[pixel * 4 + component]);
+    };
+    const auto blendedTintPixels = [&](std::size_t tintChannel) {
+        const auto other = 2 - tintChannel;
+        std::size_t count = 0;
+        for (std::size_t pixel = 0; pixel < std::size_t(blended.width) * blended.height; ++pixel) {
+            const int background = channel(clear, pixel, tintChannel);
+            const int ghost = channel(blended, pixel, tintChannel);
+            const int opaque = channel(solid, pixel, tintChannel);
+            if (ghost > background + 8 && ghost < opaque - 8 &&
+                ghost > channel(blended, pixel, other) + 28) {
+                ++count;
+            }
+        }
+        return count;
+    };
+    verify(blendedTintPixels(0) > 100, "Resize preview model was not blended red");
+    verify(blendedTintPixels(2) > 100, "Resize preview terrain was not blended blue");
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a resize preview rendering error");
+    return blended;
+}
+
 struct RippleImageDifference {
     double weight = 0.0;
     double radiusPixels = 0.0;
@@ -1958,6 +2030,12 @@ int main(int argc, char** argv)
         auto font = FontAtlas::loadDefault(root);
         const auto manifest = AssetManifest::loadFromFile(root / "manifest.json");
         ScopedTestDirectory temp("preview-rendering");
+        if (argc > 1 && std::string_view(argv[1]) == "--resize-preview") {
+            const auto image = verifyResizePreview(window.get(), root, font, manifest, temp.path() / "cache.bin");
+            if (argc > 2) saveRippleEvidence(argv[2], image);
+            std::cout << "Resize preview GPU regression passed\n";
+            return 0;
+        }
         if (argc > 1 && std::string_view(argv[1]) == "--enemy-gates") {
             verifyEnemyGates(window.get(), root, font, manifest, temp.path() / "cache.bin");
             std::cout << "Enemy gate GPU regression passed\n";

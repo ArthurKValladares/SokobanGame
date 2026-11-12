@@ -1277,6 +1277,10 @@ if(SOKOBAN_BUILD_TESTS)
             target_include_directories(sokoban_preview_rendering_tests SYSTEM PRIVATE third_party/imgui)
         endif()
         set_tests_properties(preview_rendering PROPERTIES LABELS "vulkan;render" TIMEOUT 60)
+        add_test(NAME resize_preview_gpu
+            COMMAND sokoban_preview_rendering_tests --resize-preview
+        )
+        set_tests_properties(resize_preview_gpu PROPERTIES LABELS "vulkan;render" TIMEOUT 60)
         add_test(NAME enemy_gates_gpu
             COMMAND sokoban_preview_rendering_tests --enemy-gates
         )
@@ -1326,7 +1330,7 @@ if(SOKOBAN_BUILD_TESTS)
         if(SOKOBAN_ENABLE_SANITIZERS)
             # These tests initialize SDL/X11 and Vulkan. The application child
             # inherits this environment from the CMake teardown verifier.
-            set_property(TEST vulkan_smoke vulkan_geometry_arena renderer_frame_ownership sky_clouds ground_debris application_validation_teardown preview_rendering interaction_outlines water_entry_ripples rock_scratches four_layer_splat robot_animation
+            set_property(TEST vulkan_smoke vulkan_geometry_arena renderer_frame_ownership sky_clouds ground_debris application_validation_teardown preview_rendering resize_preview_gpu interaction_outlines water_entry_ripples rock_scratches four_layer_splat robot_animation
                 APPEND PROPERTY ENVIRONMENT
                 "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
         endif()

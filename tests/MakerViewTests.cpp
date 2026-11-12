@@ -530,23 +530,33 @@ void testResizeBoardDialog(const FontAtlas& font)
         const auto editor = view.draw(ui, layout, {}, { .interactive = false });
         CHECK(editor.command == MakerCommand::None && !editor.tile);
         const auto action = view.drawDraftDialog(ui, viewport, layout.scale,
-            { .mode = mode, .removedTileCount = 9 }, { .navigation = navigation });
+            { .mode = mode, .removedTileCount = 9, .resizePreviewPanel = layout.palette },
+            { .navigation = navigation });
         ui.endFrame();
+        CHECK(std::ranges::none_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
+            return intersects(command.rect, layout.board) &&
+                (!command.clip || intersects(*command.clip, layout.board));
+        }));
         return action;
     };
     view.beginResizeBoardDialog(70, 12);
     CHECK(!view.draftNameFocused());
+    CHECK(view.resizePreviewSize() == (GridPosition { 70, 12 }));
     const auto initial = draw(resize, {}, { .activate = true });
     CHECK(initial.command == Command::Submit);
     CHECK(initial.width == 70 && initial.height == 12);
-    CHECK(draw(resize, click({ 537.0f, 167.0f })).command == Command::None);
-    CHECK(draw(resize, click({ 453.0f, 167.0f })).command == Command::None);
-    CHECK(draw(resize, click({ 537.0f, 213.0f })).command == Command::None);
-    const auto requested = draw(resize, click({ 500.0f, 354.0f }));
+    CHECK(draw(resize, click({ 186.0f, 186.0f })).command == Command::None);
+    CHECK(view.resizePreviewSize() == (GridPosition { 70, 12 }));
+    CHECK(draw(resize, click({ 110.0f, 186.0f })).command == Command::None);
+    CHECK(view.resizePreviewSize() == (GridPosition { 69, 12 }));
+    CHECK(draw(resize, click({ 186.0f, 248.0f })).command == Command::None);
+    CHECK(view.resizePreviewSize() == (GridPosition { 69, 13 }));
+    const auto requested = draw(resize, click({ 154.0f, 393.0f }));
     CHECK(requested.command == Command::Submit);
     CHECK(requested.width == 69 && requested.height == 13);
 
     view.beginDraftDialog(crop);
+    CHECK(view.resizePreviewSize() == (GridPosition { 69, 13 }));
     CHECK(draw(crop, {}, { .activate = true }).command == Command::Cancel);
     view.resumeBoardSizeDialog();
     const auto resumed = draw(resize, {}, { .activate = true });
@@ -558,6 +568,14 @@ void testResizeBoardDialog(const FontAtlas& font)
     const auto confirmed = draw(crop, {}, { .activate = true });
     CHECK(confirmed.command == Command::Submit);
     CHECK(confirmed.width == requested.width && confirmed.height == requested.height);
+
+    view.beginResizeBoardDialog(10, 8);
+    const Vec2 widthSlider { 113.0f, 215.0f };
+    CHECK(draw(resize, { .position = widthSlider, .down = true, .pressedAt = widthSlider }).command == Command::None);
+    CHECK(view.resizePreviewSize().x > 10);
+    const Vec2 sliderEnd { 250.0f, 215.0f };
+    CHECK(draw(resize, { .position = sliderEnd, .releasedAt = sliderEnd }).command == Command::None);
+    CHECK(view.resizePreviewSize() == (GridPosition { static_cast<int>(MakerSession::maxDraftDimension), 8 }));
 }
 
 } // namespace

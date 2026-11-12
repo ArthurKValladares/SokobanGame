@@ -149,6 +149,7 @@ bool isGroundChunkTileEligible(const RenderFrameData::Tile& tile) noexcept
 {
     if (!tile.groundGeometryEligible || tile.groundModule || tile.cliffWall || !tile.groundTop || tile.model.isCube() ||
         tile.effect != RenderSurfaceEffect::GroundSplat || tile.pickOnly || tile.isEditorPreview ||
+        tile.isResizePreview ||
         tile.blurBehind || tile.color.w != 1.0f || tile.size != Vec2 { 1, 1 } || tile.height != 1.0f ||
         tile.modelTransform || tile.modelRotationQuarterTurns != 0 || tile.modelRotationOffsetRadians != 0 ||
         !tile.animation.isNone() || !tile.animationFallback.isNone() || tile.animationInstanceId != 0 ||

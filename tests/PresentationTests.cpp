@@ -6975,6 +6975,103 @@ void testLecternFacingInGameplayEditorAndPreviews()
     }
 }
 
+void testResizePreviewShowsOnlyTheCellsChangedByResize()
+{
+    TEST("resizePreviewShowsOnlyTheCellsChangedByResize");
+    const auto& manifest = testManifest();
+    LevelEditor editor;
+    editor.newDocument(5, 3, false);
+    editor.setCameraAngles(CameraAngles { 55.0f, 24.0f });
+    editor.setSelectedTile(TileType::Rock);
+    editor.rotateSelectedTile(3);
+    const GridPosition3 rockCell { 4, 1, 1 };
+    CHECK(editor.setCell(rockCell, TileType::PressurePlate));
+    CHECK(editor.paintCell(rockCell));
+    CHECK(editor.setCell({ 4, 2, 0 }, TileType::Water));
+    CHECK(editor.setCell({ 3, 2, 1 }, TileType::Gate));
+    CHECK(editor.setCell({ 3, 0, 1 }, TileType::PortalEast));
+    const auto original = editor.documentDefinition();
+    const auto ordinary = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = {},
+    });
+    const auto frame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = {},
+        .hoverCell = rockCell, .deleting = true,
+        .resizePreviewSize = GridPosition { 3, 7 },
+    });
+    CHECK(editor.documentDefinition() == original);
+    CHECK(frame.levelWidth == 5 && frame.levelHeight == 3);
+    CHECK(frame.cameraExtent.has_value());
+    if (frame.cameraExtent) {
+        CHECK(frame.cameraExtent->originX == -1 && frame.cameraExtent->originY == -1);
+        CHECK(frame.cameraExtent->width == 7 && frame.cameraExtent->height == 9);
+        CHECK(frame.cameraExtent->originZ == -1 && frame.cameraExtent->depth == 4);
+    }
+    CHECK(frame.gridPickBorder == 0);
+
+    const auto ghostAt = [&](GridPosition3 cell, RenderModel model) {
+        return std::ranges::find_if(frame.tiles, [&](const auto& tile) {
+            return tile.cell == cell && tile.model == model && tile.isResizePreview;
+        });
+    };
+    const auto rock = ghostAt(rockCell, manifest.modelForTile(TileType::Rock));
+    CHECK(rock != frame.tiles.end());
+    if (rock != frame.tiles.end()) {
+        CHECK(rock->modelRotationQuarterTurns == 3);
+        CHECK(!rock->pickable && !rock->interactionOutline);
+    }
+    CHECK(ghostAt(rockCell, manifest.modelForTile(TileType::PressurePlate)) != frame.tiles.end());
+    const auto gate = std::ranges::find_if(frame.tiles, [](const auto& tile) {
+        return tile.cell == GridPosition3 { 3, 2, 1 } && tile.isResizePreview &&
+            tile.effect == RenderSurfaceEffect::GateEnergy;
+    });
+    CHECK(gate != frame.tiles.end());
+    CHECK(frame.particles.empty());
+
+    std::size_t addedGround = 0;
+    for (const auto& tile : frame.tiles) {
+        CHECK(!tile.isEditorPreview);
+        if (!tile.isResizePreview) continue;
+        CHECK(tile.color.w > 0.0f && tile.color.w < 1.0f);
+        if (tile.color.z > tile.color.x) {
+            CHECK(tile.cell.x >= 0 && tile.cell.x < 3);
+            CHECK(tile.cell.y >= 3 && tile.cell.y < 7);
+            CHECK(tile.cell.z == 0 && tile.groundTop && tile.showGrid);
+            ++addedGround;
+        } else {
+            CHECK(tile.cell.x >= 3 && tile.cell.x < 5);
+            CHECK(tile.cell.y >= 0 && tile.cell.y < 3);
+        }
+    }
+    CHECK(addedGround == 12);
+    CHECK(std::ranges::any_of(frame.waterSurfaces, [](const auto& surface) {
+        return surface.cell == GridPosition3 { 4, 2, 0 } && surface.isResizePreview &&
+            surface.color.x > surface.color.z && !surface.pickable;
+    }));
+    CHECK(std::ranges::any_of(frame.isoFaces, [](const auto& face) {
+        return face.isResizePreview && !face.castsShadows;
+    }));
+    CHECK(std::ranges::none_of(ordinary.tiles, &RenderFrameData::Tile::isResizePreview));
+
+    constexpr Vec2 viewport { 1280.0f, 720.0f };
+    PreparedRenderScene scene;
+    IsoScenePreparer().prepare(frame, viewport, scene);
+    for (const auto point : { Vec3 { 4.5f, 1.5f, 2.6f }, Vec3 { 2.5f, 6.5f, 0.0f } }) {
+        const Vec3 clip = IsoScenePreparer::projectIsoPoint(scene.isoLayout, viewport, point);
+        CHECK(std::abs(clip.x) < 1.0f && std::abs(clip.y) < 1.0f);
+    }
+
+    editor.setWaterLayer(1);
+    const auto flooded = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = {},
+        .resizePreviewSize = GridPosition { 3, 7 },
+    });
+    CHECK(std::ranges::count_if(flooded.waterSurfaces, [](const auto& surface) {
+        return surface.isResizePreview && surface.cell.y >= 3 && surface.cell.y < 7 &&
+            surface.color.z > surface.color.x;
+    }) == 12);
+}
+
 void testAuthoredTileRotationsMatchEditorPreviewsAndGameplay()
 {
     TEST("authoredTileRotationsMatchEditorPreviewsAndGameplay");
@@ -7273,6 +7370,7 @@ int main()
     testLecternFacingInGameplayEditorAndPreviews();
     testPortalPresentation();
     try {
+    testResizePreviewShowsOnlyTheCellsChangedByResize();
     testAuthoredTileRotationsMatchEditorPreviewsAndGameplay();
     testAuthoredMinecartGateRotationTurnsPostsBoomAndPickBounds();
     testInteractionOutlinesFollowGameplayRoles();

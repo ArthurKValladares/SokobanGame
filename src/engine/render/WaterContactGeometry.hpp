@@ -18,7 +18,7 @@ inline void writeWaterContacts(SceneFrameUniform& uniform,
     uniform.waterContactMeta = {};
     std::size_t count = 0;
     for (const auto& tile : tiles) {
-        if (!tile.blurBehind || tile.pickOnly || tile.isEditorPreview || tile.modelTransform ||
+        if (!tile.blurBehind || tile.pickOnly || tile.isEditorPreview || tile.isResizePreview || tile.modelTransform ||
             !std::isfinite(tile.position.x) || !std::isfinite(tile.position.y) ||
             !std::isfinite(tile.baseElevation) || !std::isfinite(tile.height) ||
             !std::isfinite(tile.size.x) || !std::isfinite(tile.size.y) ||
@@ -34,7 +34,7 @@ inline void writeWaterContacts(SceneFrameUniform& uniform,
         const float cosine = std::abs(std::cos(angle));
         const float sine = std::abs(std::sin(angle));
         for (const auto& water : surfaces) {
-            if (water.isEditorPreview || !std::isfinite(water.elevation) ||
+            if (water.isEditorPreview || water.isResizePreview || !std::isfinite(water.elevation) ||
                 !std::isfinite(water.position.x) || !std::isfinite(water.position.y) ||
                 !std::isfinite(water.size.x) || !std::isfinite(water.size.y) ||
                 water.size.x <= 0.0f || water.size.y <= 0.0f ||

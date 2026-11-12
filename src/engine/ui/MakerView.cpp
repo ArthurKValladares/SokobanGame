@@ -37,6 +37,8 @@ constexpr Vec4 accentInk { 0.54f, 0.86f, 0.77f, 1.0f };
 constexpr Vec4 buttonInk { 0.92f, 0.94f, 0.92f, 1.0f };
 constexpr Vec4 disabledButtonInk { 0.50f, 0.52f, 0.51f, 0.72f };
 constexpr Vec4 errorInk { 1.0f, 0.66f, 0.57f, 1.0f };
+constexpr Vec4 removedTileInk { 0.94f, 0.07f, 0.09f, 1.0f };
+constexpr Vec4 addedTileInk { 0.05f, 0.33f, 0.98f, 1.0f };
 
 constexpr UiControlId draftCancelId = 1;
 constexpr UiControlId draftSubmitId = 2;
@@ -628,29 +630,45 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     const bool chooseDimensions = resize || state.mode == MakerDraftDialogMode::NewDraft;
     const bool discardForNew = state.mode == MakerDraftDialogMode::DiscardNew;
     const bool crop = state.mode == MakerDraftDialogMode::ConfirmCrop;
+    const bool previewingResize = resize || crop;
     const bool confirmation = !save && !load && !chooseDimensions;
     const DraftDialogCopy copy = draftDialogCopy(state.mode);
-    const float preferredHeight = load ? 432.0f : resize ? 304.0f : chooseDimensions ? 278.0f : 230.0f;
-    scale = std::min({ scale, viewport.x / 360.0f, viewport.y / (chooseDimensions ? preferredHeight + 30.0f : 260.0f) });
+    const float preferredHeight = load ? 432.0f : chooseDimensions ? 278.0f : 230.0f;
+    const UiRect previewPanel = previewingResize
+        ? state.resizePreviewPanel.value_or(layout(viewport, scale).palette) : UiRect {};
+    const float previewPanelHeight = crop ? 300.0f : 324.0f;
+    scale = previewingResize
+        ? std::min({ scale, previewPanel.size.x / 190.0f, previewPanel.size.y / previewPanelHeight })
+        : std::min({ scale, viewport.x / 360.0f, viewport.y / (chooseDimensions ? preferredHeight + 30.0f : 260.0f) });
     if (scale <= 0.0f) return {};
 
-    const float inset = 20.0f * scale;
+    const float inset = (previewingResize ? 14.0f : 20.0f) * scale;
     const Vec2 panelSize {
         std::min(510.0f * scale, viewport.x - 24.0f * scale),
         std::min(preferredHeight * scale, viewport.y - 24.0f * scale),
     };
-    const UiRect panel { (viewport - panelSize) * 0.5f, panelSize };
+    const UiRect panel = previewingResize
+        ? UiRect { previewPanel.position, { previewPanel.size.x, previewPanelHeight * scale } }
+        : UiRect { (viewport - panelSize) * 0.5f, panelSize };
     const float contentX = panel.position.x + inset;
     const float contentWidth = panel.size.x - inset * 2.0f;
     const float buttonY = panel.position.y + panel.size.y - 54.0f * scale;
-    const float submitWidth = (confirmation ? 166.0f : 110.0f) * scale;
+    const float submitWidth = crop ? contentWidth : resize ? contentWidth * 0.53f
+        : (confirmation ? 166.0f : 110.0f) * scale;
     const UiRect submitButton {
         { contentX + contentWidth - submitWidth, buttonY }, { submitWidth, 34.0f * scale },
     };
-    const UiRect cancelButton {
-        { submitButton.position.x - 106.0f * scale, buttonY }, { 96.0f * scale, 34.0f * scale },
-    };
-    ui.rect({ {}, viewport }, { 0.012f, 0.016f, 0.017f, 0.65f });
+    const UiRect cancelButton = crop
+        ? UiRect { { contentX, buttonY - 42.0f * scale }, { contentWidth, 34.0f * scale } }
+        : resize
+            ? UiRect { { contentX, buttonY }, { contentWidth - submitWidth - 8.0f * scale, 34.0f * scale } }
+            : UiRect { { submitButton.position.x - 106.0f * scale, buttonY }, { 96.0f * scale, 34.0f * scale } };
+    if (previewingResize) {
+        ui.pushClip(previewPanel);
+        ui.rect(previewPanel, chrome);
+    } else {
+        ui.rect({ {}, viewport }, { 0.012f, 0.016f, 0.017f, 0.65f });
+    }
     ui.panel(panel);
     ui.text({ contentX, panel.position.y + 15.0f * scale }, copy.title, ink, 25.0f * scale);
     ui.divider({ { contentX, panel.position.y + 51.0f * scale }, { contentWidth, scale } });
@@ -692,7 +710,7 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
             message = "Load \xe2\x80\x9c" + std::string(state.pendingName) + "\xe2\x80\x9d and discard your unsaved changes?";
         }
         drawDialogText(ui, { { contentX, panel.position.y + 65.0f * scale },
-            { contentWidth, 58.0f * scale } }, message, mutedInk, 17.0f * scale);
+            { contentWidth, (crop ? 67.0f : 58.0f) * scale } }, message, mutedInk, 17.0f * scale);
     }
 
     const bool hasDrafts = load && !state.names.empty();
@@ -706,15 +724,22 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     constexpr float rowPitch = 41.0f;
     FrameArray<UiControlRegion> regions(ui.frameArena(), static_cast<std::size_t>(432.0f / rowPitch) + 4);
     const auto dimensionButton = [&](float y, bool increase) -> UiRect {
+        if (resize) {
+            return { { contentX + contentWidth - (increase ? 28.0f : 104.0f) * scale,
+                         panel.position.y + y * scale },
+                { 28.0f * scale, 30.0f * scale } };
+        }
         const float offset = increase ? 36.0f : 120.0f;
         return { { contentX + contentWidth - offset * scale, panel.position.y + y * scale },
             { 36.0f * scale, 34.0f * scale } };
     };
+    const float widthRow = resize ? 63.0f : 65.0f;
+    const float heightRow = resize ? 125.0f : 111.0f;
     const std::array dimensionButtons {
-        UiControlRegion { widthDecreaseId, dimensionButton(65.0f, false) },
-        UiControlRegion { widthIncreaseId, dimensionButton(65.0f, true) },
-        UiControlRegion { heightDecreaseId, dimensionButton(111.0f, false) },
-        UiControlRegion { heightIncreaseId, dimensionButton(111.0f, true) },
+        UiControlRegion { widthDecreaseId, dimensionButton(widthRow, false) },
+        UiControlRegion { widthIncreaseId, dimensionButton(widthRow, true) },
+        UiControlRegion { heightDecreaseId, dimensionButton(heightRow, false) },
+        UiControlRegion { heightIncreaseId, dimensionButton(heightRow, true) },
     };
     constexpr auto minimumDimension = MakerSession::minDraftDimension;
     constexpr auto maximumDimension = MakerSession::maxDraftDimension;
@@ -722,16 +747,19 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     const uint32_t maxHeight = resize ? std::max(maximumDimension, resizeOriginalHeight_) : maximumDimension;
     if (chooseDimensions) {
         const auto slider = [&](std::string_view id, float y, uint32_t& dimension, uint32_t maximum) {
-            const UiRect bounds { { contentX + 78.0f * scale, panel.position.y + y * scale },
-                { contentWidth - 218.0f * scale, 32.0f * scale } };
+            const UiRect bounds = resize
+                ? UiRect { { contentX + 7.0f * scale, panel.position.y + (y + 33.0f) * scale },
+                      { contentWidth - 14.0f * scale, 22.0f * scale } }
+                : UiRect { { contentX + 78.0f * scale, panel.position.y + (y + 1.0f) * scale },
+                      { contentWidth - 218.0f * scale, 32.0f * scale } };
             float value = static_cast<float>(dimension);
             if (uiControls::slider(ui, id, bounds, value, static_cast<float>(minimumDimension),
                     static_cast<float>(maximum), false, true, scale)) {
                 dimension = static_cast<uint32_t>(std::lround(value));
             }
         };
-        slider("maker.draft.width", 66.0f, draftWidth_, maxWidth);
-        slider("maker.draft.height", 112.0f, draftHeight_, maxHeight);
+        slider("maker.draft.width", widthRow, draftWidth_, maxWidth);
+        slider("maker.draft.height", heightRow, draftHeight_, maxHeight);
         const std::array dimensionEnabled { draftWidth_ > minimumDimension, draftWidth_ < maxWidth,
             draftHeight_ > minimumDimension, draftHeight_ < maxHeight };
         for (std::size_t index = 0; index < dimensionButtons.size(); ++index) {
@@ -809,13 +837,19 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     }
     ui.popClip();
 
-    if (resize) {
-        drawDialogText(ui, { { contentX, panel.position.y + 155.0f * scale }, { contentWidth, 52.0f * scale } },
-            "Tiles keep their coordinates. Shrinking trims the right and bottom edges.", mutedInk, 16.0f * scale);
+    if (previewingResize) {
+        const auto drawSwatch = [&](float y, Vec4 color, std::string_view label) {
+            const Vec2 position { contentX, panel.position.y + y * scale };
+            ui.rect({ position + Vec2 { 0.0f, 3.0f } * scale, Vec2 { 11.0f, 11.0f } * scale }, color);
+            ui.text(position + Vec2 { 18.0f, 0.0f } * scale, label, ink, 15.0f * scale);
+        };
+        drawSwatch(crop ? 136.0f : 197.0f, removedTileInk, "Removed tiles");
+        drawSwatch(crop ? 157.0f : 218.0f, addedTileInk, "Added ground");
     }
-    const float errorY = load ? buttonY - 43.0f * scale :
-        panel.position.y + (resize ? 205.0f : chooseDimensions ? 155.0f : 130.0f) * scale;
-    drawDialogText(ui, { { contentX, errorY }, { contentWidth, buttonY - errorY - 5.0f * scale } },
+    const float errorY = load ? buttonY - 43.0f * scale : panel.position.y +
+        (resize ? 241.0f : crop ? 178.0f : chooseDimensions ? 155.0f : 130.0f) * scale;
+    const float errorBottom = crop ? cancelButton.position.y : buttonY;
+    drawDialogText(ui, { { contentX, errorY }, { contentWidth, errorBottom - errorY - 5.0f * scale } },
         state.error, errorInk, 15.0f * scale);
     const auto drawButton = [&](UiControlId id, UiRect bounds, std::string_view label,
         uiControls::ButtonTone tone, bool enabled) {
@@ -846,6 +880,7 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     const bool cancel = drawButton(draftCancelId, cancelButton, "Cancel", uiControls::ButtonTone::Normal, true);
     const bool submit = drawButton(draftSubmitId, submitButton, copy.submitLabel,
         confirmation ? uiControls::ButtonTone::Danger : uiControls::ButtonTone::Accent, submitEnabled);
+    if (previewingResize) ui.popClip();
     if (cancel) return { Command::Cancel, {} };
     const bool activateRow = hasDrafts && interaction.activated >= firstDraftRowId && interaction.released == 0;
     if (!submit && !activateRow) return {};

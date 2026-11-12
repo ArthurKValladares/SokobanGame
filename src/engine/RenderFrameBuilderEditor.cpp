@@ -43,6 +43,9 @@ using namespace renderFrameParts;
 
 namespace {
 
+constexpr Vec4 resizeRemovedColor { 0.94f, 0.07f, 0.09f, 0.56f };
+constexpr Vec4 resizeAddedColor { 0.05f, 0.33f, 0.98f, 0.56f };
+
 class EditorFrameBuild {
 public:
     explicit EditorFrameBuild(
@@ -54,7 +57,7 @@ public:
         , activeLayer_(input.editor.activeLayer())
         , layerCount_(static_cast<uint32_t>(layers_.size()))
         , waterLayer_(input.editor.waterLayer())
-        , layerLocked_(input.editor.layerLocked())
+        , layerLocked_(input.editor.layerLocked() && !input.resizePreviewSize)
     {
     }
 
@@ -66,7 +69,11 @@ public:
 #if SOKOBAN_ENABLE_DEBUG_UI
         appendDebugView(frame);
 #endif
-        appendEditorPreviews(frame);
+        if (input_.resizePreviewSize) {
+            appendResizeFill(frame);
+        } else {
+            appendEditorPreviews(frame);
+        }
         appendEditorCamera(frame);
         applyEditorScrollingMaterials(frame);
         for (RenderFrameData::Tile& tile : frame.tiles) {
@@ -114,10 +121,81 @@ public:
                 }
             }
         }
+        if (input_.resizePreviewSize) {
+            tintResizeTiles(frame);
+        }
         return frame;
     }
 
 private:
+    [[nodiscard]] bool removedByResize(GridPosition3 cell) const
+    {
+        return input_.resizePreviewSize &&
+            (cell.x >= input_.resizePreviewSize->x || cell.y >= input_.resizePreviewSize->y);
+    }
+
+    void appendResizeFill(RenderFrameData& frame) const
+    {
+        const GridPosition size = *input_.resizePreviewSize;
+        const int width = static_cast<int>(frame.levelWidth);
+        const int height = static_cast<int>(frame.levelHeight);
+        for (int y = 0; y < size.y; ++y) {
+            for (int x = y < height ? width : 0; x < size.x; ++x) {
+                frame.tiles.push_back(tileVisual(TileType::Ground, { x, y, 0 },
+                    input_.manifest, input_.settings));
+                // Resize fills upper layers with air, which an authored
+                // water layer treats as water in both editor and gameplay.
+                if (waterLayer_ && *waterLayer_ > 0 && *waterLayer_ < layerCount_) {
+                    const std::size_t first = frame.waterSurfaces.size();
+                    appendWaterCellSurface(frame, { x, y, static_cast<int>(*waterLayer_) },
+                        false, 0, false);
+                    if (frame.waterSurfaces.size() > first) {
+                        auto& surface = frame.waterSurfaces[first];
+                        surface.isResizePreview = true;
+                        surface.color = resizeAddedColor;
+                    }
+                }
+            }
+        }
+    }
+
+    void tintResizeTiles(RenderFrameData& frame) const
+    {
+        const int width = static_cast<int>(frame.levelWidth);
+        const int height = static_cast<int>(frame.levelHeight);
+        for (auto& tile : frame.tiles) {
+            if (tile.pickOnly || tile.editorDecorationIndex) continue;
+            const bool removed = removedByResize(tile.cell);
+            const bool added = !removed && (tile.cell.x >= width || tile.cell.y >= height);
+            if (!removed && !added) continue;
+            tile.isResizePreview = true;
+            if (tile.effect == RenderSurfaceEffect::GateEnergy ||
+                tile.effect == RenderSurfaceEffect::EnemyGateEnergy) {
+                tile.color = { resizeRemovedColor.x, resizeRemovedColor.y, resizeRemovedColor.z,
+                    resizeRemovedColor.w * tile.color.w };
+            } else {
+                tile.color = removed ? resizeRemovedColor : resizeAddedColor;
+            }
+            tile.pickable = false;
+            tile.showGrid = tile.showGrid && tile.groundTop;
+            tile.affectsCameraFit = false;
+            tile.interactionOutline = false;
+            tile.facetedInteractionOutline = false;
+            tile.blurBehind = false;
+        }
+    }
+
+    static void tintRemovedWaterFaces(RenderFrameData& frame, std::size_t first)
+    {
+        for (std::size_t i = first; i < frame.isoFaces.size(); ++i) {
+            auto& face = frame.isoFaces[i];
+            face.isResizePreview = true;
+            face.color = resizeRemovedColor;
+            face.translucent = true;
+            face.castsShadows = false;
+        }
+    }
+
 #if SOKOBAN_ENABLE_DEBUG_UI
     void appendDebugView(RenderFrameData& frame) const
     {
@@ -536,7 +614,8 @@ private:
         // Overworld component dimensions are fixed by layout.json, and a
         // border would make a displayed neighbor look editable.
         frame.gridPickBorder =
-            input_.allowBoardExpansion && !input_.editor.editingOverworld() ? 1U : 0U;
+            input_.allowBoardExpansion && !input_.editor.editingOverworld() &&
+                !input_.resizePreviewSize ? 1U : 0U;
         frame.groundRockSideTexture = input_.manifest.findTextureIdByName(groundRockSideTextureName);
         // Previews the edited screen's own map, so what the brush paints is
         // what is on screen. A scratch document belongs to no screen and falls
@@ -574,6 +653,16 @@ private:
         frame.cameraExtent =
             gameplayExtent.value_or(RenderFrameData::CameraExtent {});
         frame.waterGridBounds = waterGridBoundsFor(gameplayExtent);
+        if (const auto size = input_.resizePreviewSize) {
+            frame.cameraExtent = RenderFrameData::CameraExtent {
+                .originX = -1,
+                .originY = -1,
+                .originZ = -1,
+                .width = std::max(frame.levelWidth, static_cast<uint32_t>(size->x)) + 2,
+                .height = std::max(frame.levelHeight, static_cast<uint32_t>(size->y)) + 2,
+                .depth = frame.levelDepth + 2,
+            };
+        }
     }
 
     [[nodiscard]] TileType documentTileAt(
@@ -964,6 +1053,7 @@ private:
             const auto renderedWaterTileAt = [&](GridPosition3 position) {
                 return position == waterCell ? tile : previewWaterTileAt(position);
             };
+            const std::size_t firstSurface = frame.waterSurfaces.size();
             appendWaterCellSurface(
                 frame,
                 waterCell,
@@ -977,6 +1067,12 @@ private:
                 true,
                 waterStreamFlowForCell(waterCell, renderedWaterTileAt),
                 streamBoundaryMaskForWaterCell(waterCell, tile, renderedWaterTileAt));
+            if (removedByResize(waterCell) && frame.waterSurfaces.size() > firstSurface) {
+                auto& surface = frame.waterSurfaces.back();
+                surface.isResizePreview = true;
+                surface.color = resizeRemovedColor;
+                surface.pickable = false;
+            }
             if (preview && tileTypeIsWaterStream(tile)) {
                 // The preview replaces the water surface, so it can remain
                 // flush with the surrounding shader instead of floating above it.
@@ -1053,6 +1149,7 @@ private:
             if (!pickOnly) {
                 // A start-open gate is drawn faded: it is empty space
                 // until its plates are pressed.
+                const std::size_t firstParticle = frame.particles.size();
                 appendGateEffect(
                     frame,
                     gate,
@@ -1062,6 +1159,9 @@ private:
                                 ? config::gateStartOpenEditorOpacity
                                 : 1.0f),
                     input_.worldAnimationTimeSeconds);
+                if (removedByResize(cell) && frame.particles.size() > firstParticle) {
+                    frame.particles.erase(frame.particles.begin() + firstParticle, frame.particles.end());
+                }
             }
             frame.tiles.push_back({
                 .cell = cell,
@@ -1178,13 +1278,20 @@ private:
                   editorUse,
                   input_.worldAnimationTimeSeconds)
             : 0.0f;
-        if (!preview && !pickOnly && tileTypeIsMovableObject(tile)) {
+        if (!preview && !pickOnly && !removedByResize(renderTile.cell) && tileTypeIsMovableObject(tile)) {
             if (const std::optional<Vec3> linkColor =
                     input_.editor.objectLinkColorAt({ x, y, z })) {
                 appendLinkedObjectAura(frame, renderTile, *linkColor);
             }
         }
         if (tileTypeIsPortal(tile)) {
+            const bool removed = !pickOnly && removedByResize(renderTile.cell);
+            if (removed) {
+                // Reuse the aperture volume as the doorway's silhouette and
+                // omit the energy beams and particles that extend past it.
+                renderTile.pickOnly = true;
+            }
+            const std::size_t first = frame.tiles.size();
             appendPortalVisual(
                 frame,
                 renderTile,
@@ -1192,6 +1299,9 @@ private:
                 input_.worldAnimationTimeSeconds,
                 input_.manifest.findTextureIdByName(
                     config::turretGlowTextureName));
+            if (removed && frame.tiles.size() > first) {
+                frame.tiles[first].pickOnly = false;
+            }
         } else {
             frame.tiles.push_back(renderTile);
             if (!pickOnly) {
@@ -1288,7 +1398,7 @@ private:
                         });
                         continue;
                     }
-                    const bool deletePreviewTarget =
+                    const bool deletePreviewTarget = !input_.resizePreviewSize &&
                         input_.deleting && input_.hoverCell &&
                         *input_.hoverCell == GridPosition3 {
                             static_cast<int>(x),
@@ -1388,12 +1498,19 @@ private:
 
     void appendEditorWater(RenderFrameData& frame) const
     {
+        const auto size = input_.resizePreviewSize;
         if (waterLayer_ &&
             (!layerLocked_ || *waterLayer_ == activeLayer_)) {
+            // Leave both board footprints available to the preview. An
+            // exterior strip drawn across new ground can obscure the tint.
+            const uint32_t exteriorWidth = size
+                ? std::max(frame.levelWidth, static_cast<uint32_t>(size->x)) : frame.levelWidth;
+            const uint32_t exteriorHeight = size
+                ? std::max(frame.levelHeight, static_cast<uint32_t>(size->y)) : frame.levelHeight;
             appendUnboundedWaterExterior(
                 frame,
-                frame.levelWidth,
-                frame.levelHeight,
+                exteriorWidth,
+                exteriorHeight,
                 *waterLayer_,
                 false,
                 [this](GridPosition3 position) {
@@ -1405,26 +1522,28 @@ private:
             if (layerLocked_ && z != activeLayer_) {
                 continue;
             }
-            appendWaterEdgeFaces(
-                frame,
-                frame.levelWidth,
-                frame.levelHeight,
-                static_cast<float>(z) + 1.0f,
-                [this, &frame, z](GridPosition position) {
-                    if (position.x < 0 ||
-                        position.y < 0 ||
-                        position.x >=
-                            static_cast<int>(frame.levelWidth) ||
-                        position.y >=
-                            static_cast<int>(frame.levelHeight)) {
-                        return waterLayer_ == z;
-                    }
-                    return tileTypeIsWater(documentTileAt(
-                               static_cast<uint32_t>(position.x),
-                               static_cast<uint32_t>(position.y),
-                               z));
-                },
-                [](GridPosition) { return true; });
+            const auto waterAt = [this, &frame, z](GridPosition position) {
+                if (position.x < 0 || position.y < 0 ||
+                    position.x >= static_cast<int>(frame.levelWidth) ||
+                    position.y >= static_cast<int>(frame.levelHeight)) {
+                    return waterLayer_ == z;
+                }
+                return tileTypeIsWater(documentTileAt(
+                    static_cast<uint32_t>(position.x), static_cast<uint32_t>(position.y), z));
+            };
+            const auto appendEdges = [&](bool removed) {
+                appendWaterEdgeFaces(frame, frame.levelWidth, frame.levelHeight,
+                    static_cast<float>(z) + 1.0f, waterAt, [&, this](GridPosition position) {
+                        return removedByResize({ position.x, position.y, static_cast<int>(z) }) == removed;
+                    });
+            };
+            appendEdges(false);
+            if (size && (size->x < static_cast<int>(frame.levelWidth) ||
+                         size->y < static_cast<int>(frame.levelHeight))) {
+                const std::size_t firstRemovedFace = frame.isoFaces.size();
+                appendEdges(true);
+                tintRemovedWaterFaces(frame, firstRemovedFace);
+            }
         }
     }
 

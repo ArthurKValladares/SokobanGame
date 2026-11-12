@@ -478,6 +478,8 @@ struct RenderFrameData {
         bool pickable = true;
         bool showGrid = true;
         bool isEditorPreview = false;
+        // Draws this piece with the resize tint in color, using its alpha for blending.
+        bool isResizePreview = false;
         bool affectsCameraFit = true;
         // A thin silhouette identifies functional gameplay pieces. Authored
         // decorations keep this false even when they reuse a gameplay model.
@@ -574,6 +576,7 @@ struct RenderFrameData {
         // through water, tiles, and models behind them.
         bool translucent = false;
         bool castsShadows = true;
+        bool isResizePreview = false;
     };
 
     struct WaterSurface {
@@ -590,6 +593,7 @@ struct RenderFrameData {
         uint32_t streamBoundaryMask = 0;
         bool isEditorPreview = false;
         bool pickable = true;
+        bool isResizePreview = false;
     };
 
     // A transient disturbance evaluated on water surfaces at this elevation.

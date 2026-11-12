@@ -97,6 +97,7 @@ enum class PreparedSurfaceMaterial : uint8_t {
     GroundSplat,
     PortalEnergy,
     PortalBeam,
+    ResizePreview,
 };
 
 struct PreparedIsoFace {

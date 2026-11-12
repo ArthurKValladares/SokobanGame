@@ -24,6 +24,7 @@ const int DRAW_MODE_PROCEDURAL_TEXTURE = 5;
 const int DRAW_MODE_SCENE_IMAGE = 6;
 const int DRAW_MODE_TEXTURE_IMAGE = 7;
 const int DRAW_MODE_FLAME_STREAM = 8;
+const int DRAW_MODE_RESIZE_PREVIEW = 9;
 
 // Only the pipelines that branch on a mode read textureOptions.x this way.
 // ground_splat reads it as a base texture handle and water reads it as a ripple

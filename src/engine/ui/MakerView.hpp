@@ -78,6 +78,7 @@ struct MakerDraftDialogState {
     std::string_view error;
     std::string_view pendingName;
     std::size_t removedTileCount = 0;
+    std::optional<UiRect> resizePreviewPanel;
 };
 
 struct MakerDraftDialogAction {
@@ -107,6 +108,10 @@ public:
 
     void beginDraftDialog(MakerDraftDialogMode mode, std::string_view initialName = {});
     void beginResizeBoardDialog(uint32_t width, uint32_t height);
+    [[nodiscard]] GridPosition resizePreviewSize() const
+    {
+        return { static_cast<int>(draftWidth_), static_cast<int>(draftHeight_) };
+    }
     void resumeBoardSizeDialog();
     [[nodiscard]] MakerDraftDialogAction drawDraftDialog(UiContext& ui, Vec2 viewport, float scale,
         const MakerDraftDialogState& state, const MakerViewInput& input = {});

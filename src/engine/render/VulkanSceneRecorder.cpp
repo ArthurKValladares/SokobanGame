@@ -212,9 +212,9 @@ VkRect2D atmosphereIntegrationRect(
 bool hasMirrorPreview(const RenderFrameData& frameData)
 {
     return std::ranges::any_of(frameData.tiles, [](const auto& tile) {
-        return tile.effect == RenderSurfaceEffect::MirrorEnergy;
+        return !tile.isResizePreview && tile.effect == RenderSurfaceEffect::MirrorEnergy;
     }) || std::ranges::any_of(frameData.isoFaces, [](const auto& face) {
-        return face.effect == RenderSurfaceEffect::MirrorEnergy;
+        return !face.isResizePreview && face.effect == RenderSurfaceEffect::MirrorEnergy;
     });
 }
 
@@ -2206,7 +2206,7 @@ private:
     static bool hasInteractionOutline(const RenderFrameData::Tile& tile)
     {
         return tile.interactionOutline && (!tile.pickOnly || tile.interactionOutlineOnly) &&
-            !tile.isEditorPreview && tile.color.w > 0.0f && tile.height > 0.0f &&
+            !tile.isEditorPreview && !tile.isResizePreview && tile.color.w > 0.0f && tile.height > 0.0f &&
             (tile.effect == RenderSurfaceEffect::Standard ||
                 tile.effect == RenderSurfaceEffect::PlateEnergy);
     }
@@ -2858,6 +2858,7 @@ private:
                     return opaqueSurface
                         ? pipelines_.groundSplatOpaque()
                         : pipelines_.groundSplat();
+                case PreparedSurfaceMaterial::ResizePreview:
                 case PreparedSurfaceMaterial::Standard:
                     return flatScenePipeline(opaqueSurface);
                 }
@@ -2970,7 +2971,9 @@ private:
                     frameData.gridOverlay.width,
                     face.isEditorPreview,
                     false,
-                    face.groundRimSurface);
+                    face.groundRimSurface,
+                    face.material == PreparedSurfaceMaterial::ResizePreview
+                        ? DrawMaterialMode::ResizePreview : DrawMaterialMode::Untextured);
             }
             // Entries are handed out in order, so a run is simply a
             // contiguous span of them. The guard is defensive: if anything
@@ -3058,8 +3061,9 @@ private:
         std::size_t sourceOrder = 0;
         if (translucentPass) {
             for (std::size_t tileIndex : scene.translucentModelIndices) {
-                const bool mirrorPreview = frameData.tiles[tileIndex].effect ==
-                    RenderSurfaceEffect::MirrorEnergy;
+                const auto& tile = frameData.tiles[tileIndex];
+                const bool mirrorPreview = !tile.isResizePreview &&
+                    tile.effect == RenderSurfaceEffect::MirrorEnergy;
                 if ((content == SceneContent::MirrorPreviewOnly &&
                         !mirrorPreview) ||
                     (content == SceneContent::WithoutMirrorPreview &&
@@ -3068,7 +3072,7 @@ private:
                 }
                 candidates.push_back({
                     .tileIndex = tileIndex,
-                    .depth = modelDepth(frameData.tiles[tileIndex]),
+                    .depth = modelDepth(tile),
                     .sourceOrder = sourceOrder++,
                 });
             }
@@ -3130,10 +3134,10 @@ private:
                     tile, configuration_.descriptorFrameIndex)) {
                 continue;
             }
-            const bool mirrorGhost =
+            const bool mirrorGhost = !tile.isResizePreview &&
                 tile.effect == RenderSurfaceEffect::MirrorEnergy;
-            const bool energyEffect = mirrorGhost ||
-                tile.effect == RenderSurfaceEffect::LinkedObjectAura;
+            const bool energyEffect = mirrorGhost || (!tile.isResizePreview &&
+                tile.effect == RenderSurfaceEffect::LinkedObjectAura);
             const bool skinned = models_.modelUsesGpuSkinning(tile.model);
             const VulkanModelResources::MaterialBinding material =
                 models_.materialForModel(tile.model);
@@ -3640,7 +3644,8 @@ private:
         float gridLineWidth = 0.0f,
         bool isEditorPreview = false,
         bool clipSpace = false,
-        bool groundRimSurface = false)
+        bool groundRimSurface = false,
+        DrawMaterialMode mode = DrawMaterialMode::Untextured)
     {
         beginQuadDraw(commandBuffer);
 
@@ -3671,7 +3676,7 @@ private:
             },
             .gridColor = gridColor,
             .textureOptions = {
-                0.0f,
+                shaderValue(mode),
                 0.0f,
                 std::max(lighting.specularStrength, 0.0f),
                 0.0f,
@@ -4086,9 +4091,9 @@ private:
         const VulkanModelResources::MaterialBinding material =
             models_.materialForModel(tile.model);
         const SunAmbientLanes lanes = sunAmbientLanes(lighting);
-        const bool mirrorEnergy =
+        const bool mirrorEnergy = !tile.isResizePreview &&
             tile.effect == RenderSurfaceEffect::MirrorEnergy;
-        const bool linkedAura =
+        const bool linkedAura = !tile.isResizePreview &&
             tile.effect == RenderSurfaceEffect::LinkedObjectAura;
         const bool specialEnergy = mirrorEnergy || linkedAura;
         const float editorHighlightState =
@@ -4136,8 +4141,8 @@ private:
             },
             // Ground's top tint stays on its splat face. The rock body uses
             // its authored sandstone factors rather than the green top tint.
-            .color = tile.effect == RenderSurfaceEffect::GroundSplat ||
-                    (tile.groundTop && tile.effect == RenderSurfaceEffect::Standard)
+            .color = !tile.isResizePreview && (tile.effect == RenderSurfaceEffect::GroundSplat ||
+                    (tile.groundTop && tile.effect == RenderSurfaceEffect::Standard))
                 ? Vec4 { 1.0f, 1.0f, 1.0f, tile.color.w } : tile.color,
             // xyz free; see above. w is the ambient term's red channel.
             .normalAndAmbientRed = { 0.0f, 0.0f, 0.0f, lanes.ambientRed },
@@ -4196,7 +4201,8 @@ private:
                 // different fragment shader, not because anything here checks.
                 : Vec4 { 0.0f, 0.0f, 0.0f, modelDrawMarkerAlpha },
             .textureOptions = {
-                shaderValue(material.mode),
+                tile.isResizePreview ? shaderValue(DrawMaterialMode::ResizePreview)
+                                     : shaderValue(material.mode),
                 editorHighlightState,
                 std::max(lighting.specularStrength, 0.0f),
                 // Mixed meshes can share the existing opaque and blended

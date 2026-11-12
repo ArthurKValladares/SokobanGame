@@ -145,6 +145,7 @@ enum class DrawMaterialMode : uint8_t {
     SceneImage = 6,
     TextureImage = 7,
     FlameStream = 8,
+    ResizePreview = 9,
 };
 
 // The lane is a float because every other lane of that vec4 is one; the shader

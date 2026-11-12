@@ -128,6 +128,9 @@ public:
         std::span<const OverworldNeighbor> overworldNeighbors;
         std::function<ScreenSelectorViewState(LevelLocation)> selectorState;
         GroundGeometryCache* groundGeometryCache = nullptr;
+        // Drafts resize from the origin. Preview both footprints while the
+        // current editor document remains available for undo and cancellation.
+        std::optional<GridPosition> resizePreviewSize;
     };
 
     [[nodiscard]] static RenderFrameData buildGameplay(const GameplayInput& input);

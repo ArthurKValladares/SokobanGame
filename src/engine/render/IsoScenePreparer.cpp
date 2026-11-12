@@ -404,7 +404,8 @@ IsoRenderLayout calculateIsoLayout(
     // and depth; surrounding screens still contribute depth alone.
     if (frameData.cameraExtent) {
         for (const auto& tile : frameData.tiles) {
-            if (!tile.groundModule || !tile.groundModuleBottom || tile.isEditorPreview || !tile.affectsCameraFit ||
+            if (!tile.groundModule || !tile.groundModuleBottom || tile.isEditorPreview ||
+                tile.isResizePreview || !tile.affectsCameraFit ||
                 tile.position.x + tile.size.x <= left || tile.position.x >= right ||
                 tile.position.y + tile.size.y <= nearY || tile.position.y >= farY ||
                 tile.baseElevation < cameraExtent.originZ || tile.baseElevation >= top) continue;
@@ -438,7 +439,7 @@ IsoRenderLayout calculateIsoLayout(
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
         const bool framesTheCamera = !frameData.cameraOverride &&
             fitToContent &&
-            !tile.isEditorPreview && tile.affectsCameraFit;
+            !tile.isEditorPreview && !tile.isResizePreview && tile.affectsCameraFit;
         for (Vec3 point : tileCorners(tile)) {
             if (framesTheCamera) {
                 includePoint(point);
@@ -449,7 +450,7 @@ IsoRenderLayout calculateIsoLayout(
     }
     for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
         for (Vec3 point : face.vertices) {
-            if (!frameData.cameraOverride && fitToContent) {
+            if (!frameData.cameraOverride && fitToContent && !face.isResizePreview) {
                 includePoint(point);
             } else {
                 includeDepth(point);
@@ -598,7 +599,7 @@ ShadowRenderLayout calculateShadowLayout(const RenderFrameData& frameData)
 
     bool hasBounds = false;
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
-        if (!tile.isEditorPreview) {
+        if (!tile.isEditorPreview && !tile.isResizePreview) {
             for (Vec3 point : tileCorners(tile)) {
                 includePoint(point);
             }
@@ -606,6 +607,7 @@ ShadowRenderLayout calculateShadowLayout(const RenderFrameData& frameData)
         }
     }
     for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
+        if (face.isResizePreview) continue;
         for (Vec3 point : face.vertices) {
             includePoint(point);
         }
@@ -1311,7 +1313,7 @@ static void prepareAuxiliaryGeometry(
          tileIndex < frameData.tiles.size();
          ++tileIndex) {
         const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
-        if (tile.isEditorPreview || tile.pickOnly ||
+        if (tile.isEditorPreview || tile.isResizePreview || tile.pickOnly ||
             tile.effect == RenderSurfaceEffect::MirrorEnergy ||
             tile.effect == RenderSurfaceEffect::PortalEnergy ||
             tile.effect == RenderSurfaceEffect::PortalBeam ||
@@ -1361,7 +1363,7 @@ static void prepareAuxiliaryGeometry(
             { corners[4], corners[5], corners[6], corners[7] });
     }
     for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
-        if (face.castsShadows &&
+        if (face.castsShadows && !face.isResizePreview &&
             face.effect != RenderSurfaceEffect::MirrorEnergy &&
             face.effect != RenderSurfaceEffect::PortalEnergy &&
             face.effect != RenderSurfaceEffect::PortalBeam &&
@@ -1542,7 +1544,7 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
     const std::size_t index = scene.isoFaces.size();
     scene.isoFaces.push_back(face);
     if (request.drawable) {
-        (request.blurBehind ||
+        (request.blurBehind || request.material == PreparedSurfaceMaterial::ResizePreview ||
                 request.material == PreparedSurfaceMaterial::Water ||
                 request.material == PreparedSurfaceMaterial::MirrorEnergy ||
                 request.material == PreparedSurfaceMaterial::PortalEnergy ||
@@ -1594,14 +1596,15 @@ void appendTileFaces(
             : drawCube ? tileCorners(tile) : logicalTileCorners(tile);
         const bool pickable =
             tile.pickable &&
-            !tile.isEditorPreview &&
+            !tile.isEditorPreview && !tile.isResizePreview &&
             tile.effect != RenderSurfaceEffect::MirrorEnergy &&
             tile.effect != RenderSurfaceEffect::PortalEnergy &&
             tile.effect != RenderSurfaceEffect::PortalBeam &&
             tile.effect != RenderSurfaceEffect::GateEnergy && tile.effect != RenderSurfaceEffect::EnemyGateEnergy &&
             tile.effect != RenderSurfaceEffect::LinkedObjectAura;
         const PreparedSurfaceMaterial tileMaterial =
-            tile.effect == RenderSurfaceEffect::MirrorEnergy
+            tile.isResizePreview ? PreparedSurfaceMaterial::ResizePreview
+            : tile.effect == RenderSurfaceEffect::MirrorEnergy
             ? PreparedSurfaceMaterial::MirrorEnergy
             : tile.effect == RenderSurfaceEffect::PortalEnergy
             ? PreparedSurfaceMaterial::PortalEnergy
@@ -1617,7 +1620,7 @@ void appendTileFaces(
         // Splatting is a top-surface treatment; rocky sides use their own
         // glTF geometry and materials without affecting the painted surface.
         const PreparedSurfaceMaterial topMaterial =
-            tile.effect == RenderSurfaceEffect::GroundSplat && !tile.pickOnly
+            !tile.isResizePreview && tile.effect == RenderSurfaceEffect::GroundSplat && !tile.pickOnly
             ? PreparedSurfaceMaterial::GroundSplat
             : tileMaterial;
         const bool rockScratchGround = tile.groundTop && !tile.cliffWall;
@@ -1644,7 +1647,7 @@ void appendTileFaces(
                 .rockScratchGround = rockScratchGround,
                 .drawable = drawTop && mainSceneVisible && !moduleTop,
                 .gridSize = { width, depth },
-                .material = moduleTop ? PreparedSurfaceMaterial::Standard : topMaterial,
+                .material = topMaterial,
                 .shorelineMask = 0,
                 .groundSplat = tile.groundSplat,
                 .groundSplatOrigin = tile.groundSplatOrigin,
@@ -1799,7 +1802,7 @@ void appendTileFaces(
 
         if (!tile.model.isCube() && !tile.pickOnly && mainSceneVisible &&
             (!tile.groundModule || tile.groundModuleSideMask != 0 || tile.groundModuleBottom)) {
-            (tile.blurBehind || tile.color.w < 1.0f ||
+            (tile.isResizePreview || tile.blurBehind || tile.color.w < 1.0f ||
                     tile.effect == RenderSurfaceEffect::MirrorEnergy ||
                     tile.effect == RenderSurfaceEffect::PortalEnergy ||
                     tile.effect == RenderSurfaceEffect::PortalBeam ||
@@ -1829,7 +1832,8 @@ void appendSourceIsoFaces(
             .normal = normal,
             .color = source.color,
             .material =
-                source.effect == RenderSurfaceEffect::MirrorEnergy
+                source.isResizePreview ? PreparedSurfaceMaterial::ResizePreview
+                : source.effect == RenderSurfaceEffect::MirrorEnergy
                 ? PreparedSurfaceMaterial::MirrorEnergy
                 : source.effect == RenderSurfaceEffect::PortalEnergy
                 ? PreparedSurfaceMaterial::PortalEnergy
@@ -1852,7 +1856,7 @@ void appendSourceIsoFaces(
         const std::size_t renderableIndex =
             frameData.tiles.size() + sourceIndex;
         if (scene.renderables[renderableIndex].mainSceneVisible) {
-            (source.translucent ||
+            (source.translucent || source.isResizePreview ||
                     face.material == PreparedSurfaceMaterial::MirrorEnergy ||
                     face.material == PreparedSurfaceMaterial::PortalEnergy ||
                     face.material == PreparedSurfaceMaterial::PortalBeam ||
@@ -1968,7 +1972,7 @@ void IsoScenePreparer::appendWaterFaces(
         // Extending only these large, non-pickable strips preserves the
         // authored shoreline cells while avoiding a far-edge seam at
         // wide aspect ratios or low camera pitches.
-        if (!water.pickable &&
+        if (!water.pickable && !water.isResizePreview &&
             (water.size.x > 1.0f || water.size.y > 1.0f)) {
             const PlaneFootprint footprint = visiblePlaneFootprint(
                 scene.isoLayout,
@@ -2025,10 +2029,11 @@ void IsoScenePreparer::appendWaterFaces(
             .blurBehind = false,
             .showGrid = false,
             .editorPreview = water.isEditorPreview,
-            .pickable = water.pickable && !water.isEditorPreview,
+            .pickable = water.pickable && !water.isEditorPreview && !water.isResizePreview,
             .drawable = mainSceneVisible,
             .gridSize = { right - left, bottom - top },
-            .material = PreparedSurfaceMaterial::Water,
+            .material = water.isResizePreview ? PreparedSurfaceMaterial::ResizePreview
+                                             : PreparedSurfaceMaterial::Water,
             .shorelineMask = water.shorelineMask,
             .streamDirection = water.streamDirection,
             .streamBoundaryMask = water.streamBoundaryMask,
