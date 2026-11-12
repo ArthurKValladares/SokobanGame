@@ -2,16 +2,29 @@
 
 #include "engine/ContentPipeline.hpp"
 #include "engine/AssetManifest.hpp"
+#include "engine/AtomicFile.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/OverworldMap.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
+#include <cerrno>
+#include <fstream>
 #include <stdexcept>
 #include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+#endif
 
 namespace sokoban {
 namespace {
@@ -27,21 +40,6 @@ std::filesystem::path workingPath(
 {
     return root.parent_path() /
         (root.filename().string() + std::string(suffix));
-}
-
-std::filesystem::path runtimeWorkingPath(
-    const std::filesystem::path& root,
-    std::string_view suffix)
-{
-    const std::filesystem::path packageRoot = root.parent_path();
-    std::error_code error;
-    if (!std::filesystem::is_regular_file(
-            packageRoot / "content.index", error) || error) {
-        return workingPath(root, suffix);
-    }
-    return packageRoot.parent_path() /
-        (packageRoot.filename().string() + "." + root.filename().string() +
-         std::string(suffix));
 }
 
 std::filesystem::path runtimeFileWorkingPath(
@@ -87,7 +85,8 @@ void recoverWorkingTree(
     if (!rootExists && backupExists) {
         renamePath(backup, root);
     } else if (rootExists && backupExists) {
-        removeTree(backup);
+        throw std::runtime_error(
+            "ambiguous editor backup from an older version: " + backup.string());
     }
     removeTree(stage);
 }
@@ -148,9 +147,16 @@ std::vector<IndexedPath> indexedLevelDirectories(
         if (!entry.is_directory()) {
             continue;
         }
+        const std::string name = entry.path().filename().string();
         const std::optional<int> index =
-            levelIndexFromDirectoryName(entry.path().filename().string());
+            levelIndexFromDirectoryName(name);
         if (index) {
+            const std::string canonicalName = levelDirectoryName(*index);
+            if (name != canonicalName) {
+                throw std::runtime_error(
+                    "puzzle level directory must be named '" + canonicalName +
+                    "': " + entry.path().string());
+            }
             entries.push_back({ *index, entry.path() });
         }
     }
@@ -166,9 +172,16 @@ std::vector<IndexedPath> indexedScreens(const std::filesystem::path& levelRoot)
         if (!entry.is_regular_file()) {
             continue;
         }
+        const std::string name = entry.path().filename().string();
         const std::optional<int> index =
-            screenIndexFromFilename(entry.path().filename().string());
+            screenIndexFromFilename(name);
         if (index) {
+            const std::string canonicalName = screenFilename(*index);
+            if (name != canonicalName) {
+                throw std::runtime_error(
+                    "puzzle screen file must be named '" + canonicalName +
+                    "': " + entry.path().string());
+            }
             screens.push_back({ *index, entry.path() });
         }
     }
@@ -328,30 +341,366 @@ void prepareRuntimeMirror(
     }
 }
 
-std::string restoreBackup(
-    const std::filesystem::path& root,
-    const std::filesystem::path& backup,
-    bool hadOriginal) noexcept
-{
-    std::error_code error;
-    std::filesystem::remove_all(root, error);
-    if (error) {
-        return "cannot remove incomplete tree " + root.string() +
-            ": " + error.message();
-    }
-    if (!hadOriginal) {
-        return {};
+using Json = nlohmann::json;
+namespace fs = std::filesystem;
+
+struct Publication {
+    fs::path destination;
+    fs::path stage;
+    fs::path backup;
+    bool outsidePackage = false;
+    bool hadOriginal = false;
+};
+
+// An OS lock is released if an editor or build process terminates. Keep the
+// lock file in place so concurrent openers always synchronize on the same file.
+class PublicationLock {
+public:
+    explicit PublicationLock(const fs::path& projectRoot)
+    {
+        const fs::path path = workingPath(projectRoot, ".editor-transaction.lock");
+        if (fs::is_symlink(path)) {
+            throw std::runtime_error("invalid editor publication lock: " + path.string());
+        }
+        fs::create_directories(path.parent_path());
+#ifdef _WIN32
+        handle_ = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle_ == INVALID_HANDLE_VALUE) {
+            throw std::system_error(static_cast<int>(GetLastError()),
+                std::system_category(), "cannot open editor publication lock");
+        }
+        OVERLAPPED offset {};
+        if (!LockFileEx(handle_, LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &offset)) {
+            const auto error = GetLastError();
+            CloseHandle(handle_);
+            throw std::system_error(static_cast<int>(error),
+                std::system_category(), "cannot lock editor publication");
+        }
+#else
+        handle_ = open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+        if (handle_ == -1) {
+            throw std::system_error(errno, std::generic_category(),
+                "cannot open editor publication lock");
+        }
+        int result;
+        do {
+            result = flock(handle_, LOCK_EX);
+        } while (result == -1 && errno == EINTR);
+        if (result == -1) {
+            const int error = errno;
+            close(handle_);
+            throw std::system_error(error, std::generic_category(),
+                "cannot lock editor publication");
+        }
+#endif
     }
 
-    if (!std::filesystem::exists(backup, error) || error) {
-        return "original backup is unavailable at " + backup.string();
+    ~PublicationLock()
+    {
+#ifdef _WIN32
+        CloseHandle(handle_);
+#else
+        close(handle_);
+#endif
     }
-    std::filesystem::rename(backup, root, error);
-    if (error) {
-        return "cannot restore " + backup.string() + " to " +
-            root.string() + ": " + error.message();
+
+    PublicationLock(const PublicationLock&) = delete;
+    PublicationLock& operator=(const PublicationLock&) = delete;
+
+private:
+#ifdef _WIN32
+    HANDLE handle_ = INVALID_HANDLE_VALUE;
+#else
+    int handle_ = -1;
+#endif
+};
+
+fs::path normalizedDestination(const fs::path& path)
+{
+    if (path.empty()) {
+        throw std::runtime_error("invalid level publication destination");
     }
-    return {};
+    fs::path normalized = fs::absolute(path).lexically_normal();
+    if (normalized.filename().empty()) {
+        normalized = normalized.parent_path();
+    }
+    if (normalized.empty() || !normalized.has_filename() ||
+        normalized.filename() == "." || normalized.filename() == "..") {
+        throw std::runtime_error("invalid level publication destination");
+    }
+    return fs::weakly_canonical(normalized.parent_path()) / normalized.filename();
+}
+
+Publication publicationFor(const fs::path& path, bool outsidePackage = false)
+{
+    const fs::path destination = normalizedDestination(path);
+    const auto working = outsidePackage ? runtimeFileWorkingPath : workingPath;
+    return { destination, working(destination, ".editor-stage"),
+        working(destination, ".editor-backup"), outsidePackage };
+}
+
+fs::path journalPath(const fs::path& projectRoot)
+{
+    return workingPath(projectRoot, ".editor-transaction.json");
+}
+
+bool within(const fs::path& parent, const fs::path& path)
+{
+    const fs::path relative = path.lexically_relative(parent);
+    return !relative.empty() && *relative.begin() != "..";
+}
+
+void validatePublicationPaths(
+    const fs::path& journal, const std::vector<Publication>& files)
+{
+    std::vector<fs::path> paths { journal };
+    for (const Publication& file : files) {
+        for (const fs::path* path : { &file.destination, &file.stage, &file.backup }) {
+            if (fs::is_symlink(*path) ||
+                std::ranges::any_of(paths, [&](const fs::path& existing) {
+                    return within(existing, *path) || within(*path, existing);
+                })) {
+                throw std::runtime_error("unsafe level publication path: " + path->string());
+            }
+            paths.push_back(*path);
+        }
+    }
+}
+
+std::string pathText(const fs::path& path)
+{
+    const auto utf8 = path.generic_u8string();
+    return { utf8.begin(), utf8.end() };
+}
+
+Json publicationJournal(
+    const fs::path& projectRoot, const std::vector<Publication>& files)
+{
+    Json entries = Json::array();
+    for (const Publication& file : files) {
+        entries.push_back({
+            { "destination", pathText(file.destination) },
+            { "outsidePackage", file.outsidePackage },
+            { "hadOriginal", file.hadOriginal },
+        });
+    }
+    return { { "version", 1 }, { "project", pathText(projectRoot) },
+        { "committed", false }, { "entries", std::move(entries) } };
+}
+
+// Every original is either still in place or in its backup. Moving an installed
+// replacement back into staging before restoring its backup makes rollback
+// repeatable if the editor stops while recovering.
+void rollBack(const Publication& file)
+{
+    if (fs::exists(file.backup)) {
+        if (!file.hadOriginal &&
+            (!fs::is_directory(file.backup) || !fs::is_empty(file.backup))) {
+            throw std::runtime_error("invalid editor backup marker: " + file.backup.string());
+        }
+        if (fs::exists(file.destination)) {
+            renamePath(file.destination, file.stage);
+        }
+        if (file.hadOriginal) {
+            renamePath(file.backup, file.destination);
+        }
+    } else if (file.hadOriginal && !fs::exists(file.destination)) {
+        throw std::runtime_error("original unavailable: " + file.destination.string());
+    }
+}
+
+enum class Recovery { None, RolledBack, Committed };
+
+Recovery recoverJournal(const fs::path& projectRoot)
+{
+    const fs::path path = journalPath(projectRoot);
+    if (!fs::exists(path)) {
+        return Recovery::None;
+    }
+    if (fs::is_symlink(path) || !fs::is_regular_file(path)) {
+        throw std::runtime_error("invalid editor publication journal: " + path.string());
+    }
+    std::ifstream stream(path, std::ios::binary);
+    const Json journal = Json::parse(stream);
+    stream.close();
+    const Json& entries = journal.at("entries");
+    if (journal.at("version") != 1 || journal.at("project") != pathText(projectRoot) ||
+        !entries.is_array() || entries.empty() || entries.size() > 5) {
+        throw std::runtime_error("invalid editor publication journal: " + path.string());
+    }
+    const bool committed = journal.at("committed").get<bool>();
+    std::vector<Publication> files;
+    for (const Json& entry : entries) {
+        const auto text = entry.at("destination").get<std::string>();
+        const fs::path destination(std::u8string(text.begin(), text.end()));
+        if (!destination.is_absolute()) {
+            throw std::runtime_error("editor publication journal contains a relative path");
+        }
+        Publication file = publicationFor(
+            destination, entry.at("outsidePackage").get<bool>());
+        if (file.destination != destination) {
+            throw std::runtime_error("editor publication destination changed: " + text);
+        }
+        file.hadOriginal = entry.at("hadOriginal").get<bool>();
+        files.push_back(std::move(file));
+    }
+    validatePublicationPaths(path, files);
+    if (!committed) {
+        for (auto file = files.rbegin(); file != files.rend(); ++file) {
+            rollBack(*file);
+        }
+    }
+    for (const Publication& file : files) {
+        removeTree(file.stage);
+        removeTree(file.backup);
+        if (file.outsidePackage && file.destination.filename() == "content.index") {
+            const fs::path temporary = file.destination.parent_path() / "content.index.tmp";
+            if (fs::is_regular_file(temporary)) {
+                fs::remove(temporary);
+            }
+        }
+    }
+    fs::remove(path);
+    return committed ? Recovery::Committed : Recovery::RolledBack;
+}
+
+LevelProjectStore::Result publishProject(
+    const fs::path& requestedProject,
+    const std::optional<fs::path>& runtimeRoot,
+    const LevelProjectStore::Mutation* mutation,
+    const std::optional<LevelProjectStore::ManifestTransaction>& manifest)
+{
+    fs::path projectRoot;
+    std::optional<PublicationLock> lock;
+    std::vector<Publication> files;
+    bool originalsKnown = false;
+    bool stagesOwned = false;
+    bool committed = false;
+    try {
+        projectRoot = normalizedDestination(requestedProject);
+        lock.emplace(projectRoot);
+        (void)recoverJournal(projectRoot);
+        originalsKnown = true;
+        if (manifest && manifest->runtimePath && !runtimeRoot) {
+            throw std::runtime_error("runtime manifest requires a runtime level mirror");
+        }
+        if (runtimeRoot) {
+            const fs::path runtime = normalizedDestination(*runtimeRoot);
+            if (within(projectRoot, runtime) || within(runtime, projectRoot)) {
+                throw std::runtime_error("runtime mirror overlaps the source level tree");
+            }
+        }
+
+        const auto add = [&](const fs::path& path, bool outsidePackage = false) {
+            files.push_back(publicationFor(path, outsidePackage));
+            return files.back().stage;
+        };
+        const fs::path projectStage = mutation ? add(projectRoot) : projectRoot;
+        const fs::path sourceManifestStage = manifest ? add(manifest->sourcePath) : fs::path {};
+        const fs::path runtimeStage = runtimeRoot
+            ? add(*runtimeRoot, fs::is_regular_file(
+                  runtimeRoot->parent_path() / "content.index")) : fs::path {};
+        const fs::path runtimeManifestStage = manifest && manifest->runtimePath
+            ? add(*manifest->runtimePath, true) : fs::path {};
+        const fs::path indexPath = runtimeRoot
+            ? runtimeRoot->parent_path() / "content.index" : fs::path {};
+        const fs::path indexStage = runtimeRoot && fs::exists(indexPath)
+            ? add(indexPath, true) : fs::path {};
+
+        validatePublicationPaths(journalPath(projectRoot), files);
+        originalsKnown = false;
+        for (const Publication& file : files) {
+            recoverWorkingTree(file.destination, file.stage, file.backup);
+        }
+        originalsKnown = true;
+        stagesOwned = true;
+        if (mutation) {
+            copyDirectoryContents(projectRoot, projectStage);
+            (*mutation)(projectStage);
+        }
+        const auto levels = validateProject(projectStage);
+        if (runtimeRoot) {
+            prepareRuntimeMirror(levels, projectStage, runtimeStage);
+            if (!mutation) {
+                // Validate the actual copy, including multi-file overworld edits.
+                const auto mirrored = validateProject(runtimeStage);
+                const bool indexed = fs::is_regular_file(
+                    runtimeRoot->parent_path() / "content.index");
+                if (indexed && (mirrored.empty() ||
+                    (!fs::is_regular_file(runtimeStage / "overworld/layout.json") &&
+                     !fs::is_regular_file(runtimeStage / "overworld.scr")))) {
+                    throw std::runtime_error(
+                        "runtime level mirror requires a playable level and an overworld");
+                }
+            }
+        }
+        if (manifest) {
+            copyFile(manifest->sourcePath, sourceManifestStage);
+            manifest->mutation(sourceManifestStage);
+            (void)AssetManifest::loadFromFile(sourceManifestStage);
+            if (manifest->runtimePath) {
+                copyFile(sourceManifestStage, runtimeManifestStage);
+            }
+        }
+        if (!indexStage.empty()) {
+            copyFile(indexPath, indexStage);
+        } else if (runtimeRoot && fs::exists(indexPath)) {
+            throw std::runtime_error("runtime content index appeared while staging");
+        }
+        for (Publication& file : files) {
+            file.hadOriginal = fs::exists(file.destination);
+        }
+
+        Json journal = publicationJournal(projectRoot, files);
+        const fs::path journalFile = journalPath(projectRoot);
+        atomicFile::write(journalFile, journal.dump());
+        for (const Publication& file : files) {
+            if (file.hadOriginal) {
+                renamePath(file.destination, file.backup);
+            } else {
+                // Record ownership before installing a previously absent path.
+                if (!fs::create_directory(file.backup)) {
+                    throw std::runtime_error("editor backup already exists: " + file.backup.string());
+                }
+            }
+            renamePath(file.stage, file.destination);
+        }
+        if (runtimeRoot) {
+            (void)refreshContentPackageIndex(runtimeRoot->parent_path());
+        }
+        journal["committed"] = true;
+        atomicFile::write(journalFile, journal.dump());
+        committed = true;
+        (void)recoverJournal(projectRoot);
+        return { .succeeded = true };
+    } catch (const std::exception& error) {
+        std::string message = error.what();
+        if (committed) {
+            return { .succeeded = true, .message = std::move(message) };
+        }
+        if (!stagesOwned) {
+            return { .originalsPreserved = originalsKnown,
+                .message = std::move(message) };
+        }
+        try {
+            const Recovery recovery = recoverJournal(projectRoot);
+            if (recovery == Recovery::Committed) {
+                return { .succeeded = true, .message = std::move(message) };
+            }
+            if (recovery == Recovery::None) {
+                for (const Publication& file : files) {
+                    removeTree(file.stage);
+                }
+            }
+        } catch (const std::exception& recoveryError) {
+            message += "; recovery incomplete: ";
+            message += recoveryError.what();
+            return { .originalsPreserved = false, .message = std::move(message) };
+        }
+        return { .message = std::move(message) };
+    }
 }
 
 } // namespace
@@ -362,199 +711,22 @@ LevelProjectStore::Result LevelProjectStore::transact(
     const Mutation& mutation,
     const std::optional<ManifestTransaction>& manifest)
 {
-    const std::filesystem::path projectStage =
-        workingPath(projectRoot, ".editor-stage");
-    const std::filesystem::path projectBackup =
-        workingPath(projectRoot, ".editor-backup");
-    const std::filesystem::path runtimeStage = runtimeRoot
-        ? runtimeWorkingPath(*runtimeRoot, ".editor-stage")
-        : std::filesystem::path {};
-    const std::filesystem::path runtimeBackup = runtimeRoot
-        ? runtimeWorkingPath(*runtimeRoot, ".editor-backup")
-        : std::filesystem::path {};
-    const std::filesystem::path companionStage = manifest
-        ? workingPath(manifest->sourcePath, ".editor-stage")
-        : std::filesystem::path {};
-    const std::filesystem::path companionBackup = manifest
-        ? workingPath(manifest->sourcePath, ".editor-backup")
-        : std::filesystem::path {};
-    const std::filesystem::path runtimeCompanionStage =
-        manifest && manifest->runtimePath
-        ? runtimeFileWorkingPath(
-            *manifest->runtimePath, ".editor-stage")
-        : std::filesystem::path {};
-    const std::filesystem::path runtimeCompanionBackup =
-        manifest && manifest->runtimePath
-        ? runtimeFileWorkingPath(
-            *manifest->runtimePath, ".editor-backup")
-        : std::filesystem::path {};
-    bool projectInstalled = false;
-    bool projectBackedUp = false;
-    bool runtimeInstalled = false;
-    bool runtimeBackedUp = false;
-    bool projectHadOriginal = false;
-    bool runtimeHadOriginal = false;
-    bool companionInstalled = false;
-    bool companionBackedUp = false;
-    bool runtimeCompanionInstalled = false;
-    bool runtimeCompanionBackedUp = false;
-    bool companionHadOriginal = false;
-    bool runtimeCompanionHadOriginal = false;
+    return publishProject(projectRoot, runtimeRoot, &mutation, manifest);
+}
 
-    try {
-        recoverWorkingTree(projectRoot, projectStage, projectBackup);
-        if (runtimeRoot) {
-            recoverWorkingTree(*runtimeRoot, runtimeStage, runtimeBackup);
-        }
-        if (manifest) {
-            recoverWorkingTree(
-                manifest->sourcePath, companionStage, companionBackup);
-            if (manifest->runtimePath) {
-                recoverWorkingTree(
-                    *manifest->runtimePath,
-                    runtimeCompanionStage,
-                    runtimeCompanionBackup);
-            }
-        }
+LevelProjectStore::Result LevelProjectStore::publishRuntime(
+    const std::filesystem::path& projectRoot,
+    const std::filesystem::path& runtimeRoot)
+{
+    return publishProject(projectRoot, runtimeRoot, nullptr, std::nullopt);
+}
 
-        copyDirectoryContents(projectRoot, projectStage);
-        mutation(projectStage);
-        const std::vector<IndexedPath> levels = validateProject(projectStage);
-        if (runtimeRoot) {
-            prepareRuntimeMirror(levels, projectStage, runtimeStage);
-        }
-        if (manifest) {
-            copyFile(manifest->sourcePath, companionStage);
-            manifest->mutation(companionStage);
-            (void)AssetManifest::loadFromFile(companionStage);
-            if (manifest->runtimePath) {
-                copyFile(companionStage, runtimeCompanionStage);
-                (void)AssetManifest::loadFromFile(runtimeCompanionStage);
-            }
-        }
-
-        projectHadOriginal = std::filesystem::exists(projectRoot);
-        if (projectHadOriginal) {
-            renamePath(projectRoot, projectBackup);
-            projectBackedUp = true;
-        }
-        renamePath(projectStage, projectRoot);
-        projectInstalled = true;
-
-        if (manifest) {
-            companionHadOriginal =
-                std::filesystem::exists(manifest->sourcePath);
-            if (companionHadOriginal) {
-                renamePath(manifest->sourcePath, companionBackup);
-                companionBackedUp = true;
-            }
-            renamePath(companionStage, manifest->sourcePath);
-            companionInstalled = true;
-        }
-
-        if (runtimeRoot) {
-            runtimeHadOriginal = std::filesystem::exists(*runtimeRoot);
-            if (runtimeHadOriginal) {
-                renamePath(*runtimeRoot, runtimeBackup);
-                runtimeBackedUp = true;
-            }
-            renamePath(runtimeStage, *runtimeRoot);
-            runtimeInstalled = true;
-            if (manifest && manifest->runtimePath) {
-                runtimeCompanionHadOriginal =
-                    std::filesystem::exists(*manifest->runtimePath);
-                if (runtimeCompanionHadOriginal) {
-                    renamePath(
-                        *manifest->runtimePath,
-                        runtimeCompanionBackup);
-                    runtimeCompanionBackedUp = true;
-                }
-                renamePath(
-                    runtimeCompanionStage, *manifest->runtimePath);
-                runtimeCompanionInstalled = true;
-            }
-            (void)refreshContentPackageIndex(runtimeRoot->parent_path());
-        }
-
-        std::error_code ignored;
-        std::filesystem::remove_all(projectBackup, ignored);
-        if (runtimeRoot) {
-            ignored.clear();
-            std::filesystem::remove_all(runtimeBackup, ignored);
-        }
-        if (manifest) {
-            ignored.clear();
-            std::filesystem::remove_all(companionBackup, ignored);
-            if (manifest->runtimePath) {
-                ignored.clear();
-                std::filesystem::remove_all(
-                    runtimeCompanionBackup, ignored);
-            }
-        }
-        return {
-            .succeeded = true,
-            .originalsPreserved = true,
-        };
-    } catch (const std::exception& error) {
-        std::vector<std::string> rollbackFailures;
-        if (manifest && manifest->runtimePath &&
-            (runtimeCompanionInstalled || runtimeCompanionBackedUp)) {
-            std::string failure = restoreBackup(
-                *manifest->runtimePath,
-                runtimeCompanionBackup,
-                runtimeCompanionHadOriginal);
-            if (!failure.empty()) {
-                rollbackFailures.push_back(std::move(failure));
-            }
-        }
-        if (runtimeRoot && (runtimeInstalled || runtimeBackedUp)) {
-            std::string failure =
-                restoreBackup(*runtimeRoot, runtimeBackup, runtimeHadOriginal);
-            if (!failure.empty()) {
-                rollbackFailures.push_back(std::move(failure));
-            }
-        }
-        if (manifest &&
-            (companionInstalled || companionBackedUp)) {
-            std::string failure = restoreBackup(
-                manifest->sourcePath,
-                companionBackup,
-                companionHadOriginal);
-            if (!failure.empty()) {
-                rollbackFailures.push_back(std::move(failure));
-            }
-        }
-        if (projectInstalled || projectBackedUp) {
-            std::string failure =
-                restoreBackup(projectRoot, projectBackup, projectHadOriginal);
-            if (!failure.empty()) {
-                rollbackFailures.push_back(std::move(failure));
-            }
-        }
-        std::error_code ignored;
-        std::filesystem::remove_all(projectStage, ignored);
-        if (runtimeRoot) {
-            ignored.clear();
-            std::filesystem::remove_all(runtimeStage, ignored);
-        }
-        if (manifest) {
-            ignored.clear();
-            std::filesystem::remove_all(companionStage, ignored);
-            if (manifest->runtimePath) {
-                ignored.clear();
-                std::filesystem::remove_all(
-                    runtimeCompanionStage, ignored);
-            }
-        }
-        std::string message = error.what();
-        for (const std::string& rollbackFailure : rollbackFailures) {
-            message += "; rollback incomplete: " + rollbackFailure;
-        }
-        return {
-            .succeeded = false,
-            .originalsPreserved = rollbackFailures.empty(),
-            .message = std::move(message),
-        };
+void LevelProjectStore::recover(const std::filesystem::path& projectRoot)
+{
+    const fs::path project = normalizedDestination(projectRoot);
+    if (fs::exists(journalPath(project))) {
+        const PublicationLock lock(project);
+        (void)recoverJournal(project);
     }
 }
 

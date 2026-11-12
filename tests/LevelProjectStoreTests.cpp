@@ -1,13 +1,18 @@
 #include "TestHarness.hpp"
 
+#include "engine/AtomicFile.hpp"
+#include "engine/ContentPipeline.hpp"
 #include "engine/LevelProjectStore.hpp"
 
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -105,6 +110,32 @@ void testRejectedMutationPreservesBothOriginalTrees()
     checkNoWorkingTrees(project);
 }
 
+void testPaddedPuzzlePathsCannotBePublished()
+{
+    TEST("paddedPuzzlePathsCannotBePublished");
+    TemporaryProject project;
+    for (const auto& [canonical, padded] : std::array {
+             std::pair { "level0", "level00" },
+             std::pair { "level0/screen0.scr", "level0/screen00.scr" },
+         }) {
+        const auto result = sokoban::LevelProjectStore::transact(
+            project.project,
+            project.runtime,
+            [&](const std::filesystem::path& stage) {
+                std::filesystem::rename(stage / canonical, stage / padded);
+            });
+
+        CHECK(!result.succeeded);
+        CHECK(result.originalsPreserved);
+        const auto filename = std::filesystem::path(canonical).filename();
+        CHECK(result.message.find("must be named '" + filename.string() + "'") !=
+            std::string::npos);
+        CHECK(std::filesystem::exists(project.project / "level0/screen0.scr"));
+        CHECK(std::filesystem::exists(project.runtime / "old-runtime.txt"));
+        checkNoWorkingTrees(project);
+    }
+}
+
 void testThrowingMutationIsContainedAndCleanedUp()
 {
     TemporaryProject project;
@@ -145,6 +176,120 @@ void testInterruptedBackupIsRecoveredBeforeNextTransaction()
     CHECK(!std::filesystem::exists(backup));
     CHECK(!std::filesystem::exists(
         project.project.string() + ".editor-stage"));
+}
+
+void testJournalRecoversWholePublication()
+{
+    namespace fs = std::filesystem;
+    for (const bool committed : { false, true }) {
+        TemporaryProject project;
+        const fs::path sourceManifest = project.root / "manifest.json";
+        const fs::path assets = project.root / "assets";
+        const fs::path runtime = assets / "levels";
+        const fs::path index = assets / "content.index";
+        fs::create_directories(runtime);
+        const auto sourceBackup = project.root / "project.editor-backup";
+        fs::rename(project.project, sourceBackup);
+        fs::create_directory(project.project);
+        TemporaryProject::write(project.project / "notes.txt", "new-source");
+        TemporaryProject::write(sourceManifest, committed ? "new-manifest" : "old-manifest");
+        TemporaryProject::write(index, committed ? "new-index" : "old-index");
+        TemporaryProject::write(runtime / "level.txt", "new-runtime");
+        fs::create_directory(project.root / "assets.levels.editor-backup");
+        TemporaryProject::write(project.root / "assets.levels.editor-backup/level.txt", "old-runtime");
+
+        // In the pending case the manifest was only staged, while the source
+        // and runtime had already been installed. A committed journal has
+        // completed all the installations and only needs cleanup.
+        TemporaryProject::write(project.root /
+            (committed ? "manifest.json.editor-backup" : "manifest.json.editor-stage"),
+            committed ? "old-manifest" : "new-manifest");
+        if (committed) {
+            TemporaryProject::write(project.root / "assets.content.index.editor-backup", "old-index");
+        } else {
+            TemporaryProject::write(assets / "content.index.tmp", "interrupted-index");
+        }
+        const fs::path journal = project.root / "project.editor-transaction.json";
+        {
+            std::ofstream stream(journal, std::ios::binary);
+            stream << R"({"version":1,"project":)"
+                   << std::quoted(fs::weakly_canonical(project.project).generic_string())
+                   << R"(,"committed":)" << std::boolalpha << committed
+                   << R"(,"entries":[)";
+            const auto entry = [&](const fs::path& destination, bool outsidePackage) {
+                stream << R"({"destination":)"
+                       << std::quoted(fs::weakly_canonical(destination).generic_string())
+                       << R"(,"outsidePackage":)" << outsidePackage
+                       << R"(,"hadOriginal":true})";
+            };
+            entry(project.project, false);
+            stream << ',';
+            entry(sourceManifest, false);
+            stream << ',';
+            entry(runtime, true);
+            stream << ',';
+            entry(index, true);
+            stream << "]}";
+        }
+
+        sokoban::LevelProjectStore::recover(project.project);
+        sokoban::LevelProjectStore::recover(project.project);
+        CHECK(TemporaryProject::read(project.project / "notes.txt") ==
+            (committed ? "new-source" : "original-note"));
+        CHECK(TemporaryProject::read(sourceManifest) ==
+            (committed ? "new-manifest" : "old-manifest"));
+        CHECK(TemporaryProject::read(runtime / "level.txt") ==
+            (committed ? "new-runtime" : "old-runtime"));
+        CHECK(TemporaryProject::read(index) == (committed ? "new-index" : "old-index"));
+        CHECK(!fs::exists(sourceBackup));
+        CHECK(!fs::exists(project.root / "assets.levels.editor-backup"));
+        CHECK(!fs::exists(assets / "content.index.tmp"));
+        CHECK(!fs::exists(journal));
+    }
+}
+
+void testRuntimePublicationValidatesBeforeReplacingAndRestoresIndex()
+{
+    namespace fs = std::filesystem;
+    TemporaryProject project;
+    const fs::path assets = project.root / "assets";
+    const fs::path runtime = assets / "levels";
+    const fs::path index = assets / "content.index";
+    const fs::path screen = "level0/screen0.scr";
+    const std::string original = "@layer 0\n....\n@layer 1\nC  E\n";
+    const std::string edited = "@layer 0\n.....\n@layer 1\nC   E\n";
+    const std::string overworld = "@layer 0\n....\n@layer 1\nC   \n";
+    fs::create_directories(runtime / "level0");
+    TemporaryProject::write(project.project / "overworld.scr", overworld);
+    TemporaryProject::write(runtime / "overworld.scr", overworld);
+    TemporaryProject::write(runtime / screen, original);
+    TemporaryProject::write(runtime / "level0/screen1.scr", original);
+    TemporaryProject::write(assets / "manifest.json", "{}");
+    TemporaryProject::write(index, "format 1\ngame-version test\n");
+    CHECK(sokoban::refreshContentPackageIndex(assets));
+    const std::string oldIndex = TemporaryProject::read(index);
+
+    TemporaryProject::write(project.project / screen, "@layer 0\n????\n");
+    auto result = sokoban::LevelProjectStore::publishRuntime(project.project, runtime);
+    CHECK(!result.succeeded && result.originalsPreserved);
+    CHECK(TemporaryProject::read(runtime / screen) == original);
+    CHECK(TemporaryProject::read(index) == oldIndex);
+
+    TemporaryProject::write(project.project / screen, edited);
+    // The journal is written first. Fail after replacing the live index.
+    sokoban::atomicFile::failReplaceAfterForTesting(1, std::errc::io_error, true);
+    result = sokoban::LevelProjectStore::publishRuntime(project.project, runtime);
+    CHECK(!result.succeeded && result.originalsPreserved);
+    CHECK(TemporaryProject::read(runtime / screen) == original);
+    CHECK(TemporaryProject::read(index) == oldIndex);
+    CHECK(fs::exists(runtime / "level0/screen1.scr"));
+    sokoban::validateContentPackage(assets, "test");
+
+    result = sokoban::LevelProjectStore::publishRuntime(project.project, runtime);
+    CHECK_MESSAGE(result.succeeded, result.message.c_str());
+    CHECK(TemporaryProject::read(runtime / screen) == edited);
+    CHECK(!fs::exists(runtime / "level0/screen1.scr"));
+    sokoban::validateContentPackage(assets, "test");
 }
 
 void testRuntimeIndexFailureRollsBackCompanionManifests()
@@ -218,8 +363,11 @@ int main()
 {
     testSuccessfulTransactionCommitsProjectAndRuntimeMirror();
     testRejectedMutationPreservesBothOriginalTrees();
+    testPaddedPuzzlePathsCannotBePublished();
     testThrowingMutationIsContainedAndCleanedUp();
     testInterruptedBackupIsRecoveredBeforeNextTransaction();
+    testJournalRecoversWholePublication();
+    testRuntimePublicationValidatesBeforeReplacingAndRestoresIndex();
     testRuntimeIndexFailureRollsBackCompanionManifests();
 
     if (failures != 0) {

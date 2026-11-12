@@ -633,6 +633,7 @@ void LevelEditor::initialize(
     document_.runtimeLevelRoot = runtimeLevelRoot;
     document_.browserRoot = sourceLevelRoot;
     invalidateBrowserSnapshots();
+    savedDocuments_.clear();
     sourceManifestPath_ = sourceManifestPath;
     runtimeManifestPath_ = runtimeManifestPath;
 
@@ -753,7 +754,6 @@ void LevelEditor::setWaterLayer(std::optional<uint32_t> layer)
 
     auto before = captureBeforeDocumentChange();
     document_.waterLayer = layer;
-    document_.dirty = true;
     document_.status = layer
         ? "Water enabled on layer " + std::to_string(*layer + 1) + "."
         : "Water disabled.";
@@ -772,7 +772,6 @@ void LevelEditor::setCameraAngles(std::optional<CameraAngles> angles)
     }
     auto before = captureBeforeDocumentChange();
     document_.cameraAngles = angles;
-    document_.dirty = true;
     document_.status = angles
         ? "Screen camera updated."
         : "Screen camera reset to default.";
@@ -805,7 +804,6 @@ void LevelEditor::setCharacter(CharacterType character)
     if (!changed) {
         return;
     }
-    document_.dirty = true;
     document_.status = "All placed heroes changed to " +
         std::string(character == CharacterType::CrystalDruid
             ? std::string_view("druid") : characterTypeName(character)) + ".";
@@ -1355,7 +1353,6 @@ bool LevelEditor::placeSelector(GridPosition3 cell)
     document_.selectedSelector = static_cast<std::size_t>(
         std::distance(document_.selectors.begin(), added));
     document_.tool = Tool::Selectors;
-    document_.dirty = true;
     document_.status =
         "Placed Selector " + std::to_string(nextId) + ".";
     recordDocumentChange(std::move(before));
@@ -1407,7 +1404,6 @@ bool LevelEditor::updateSelectedSelectorTarget(
     }
     auto before = captureBeforeDocumentChange();
     selector.target = target;
-    document_.dirty = true;
     document_.status = target
         ? "Assigned Selector " + std::to_string(selector.id) +
             " to level " + std::to_string(target->level) +
@@ -1436,7 +1432,6 @@ bool LevelEditor::deleteSelectedSelector()
             *document_.selectedSelector,
             document_.selectors.size() - 1);
     }
-    document_.dirty = true;
     document_.status = "Deleted Selector " + std::to_string(id) + ".";
     recordDocumentChange(std::move(before));
     return true;
@@ -1456,6 +1451,45 @@ std::filesystem::path LevelEditor::draftKey(
         : normalizedAbsolutePath(path);
 }
 
+bool LevelEditor::documentDirty(const Document& document) const
+{
+    const auto saved = savedDocuments_.find(draftKey(document.loadedPath));
+    return saved == savedDocuments_.end()
+        ? !document.layers.empty()
+        : saved->second.publicationPending || saved->second.content != document;
+}
+
+LevelEditor::SavedDocument& LevelEditor::noteSavedDocument(
+    const std::filesystem::path& path)
+{
+    const auto key = draftKey(path);
+    if (draftKey(document_.loadedPath) != key) {
+        // Saving to a new path moves every version of the active document.
+        // Undoing its creation or load still restores the previous document.
+        const auto bindPath = [&](DocumentSnapshot& snapshot) {
+            if (snapshot.identity == document_.identity) {
+                snapshot.loadedPath = path;
+                snapshot.filePath = path;
+            }
+        };
+        for (EditHistory* history : { &editHistory_, &redoHistory_ }) {
+            for (EditActionRecord& record : *history) {
+                bindPath(record.before);
+                bindPath(record.after);
+                record.retainedBytes = recordStorageBytes(record);
+            }
+        }
+        if (strokeBefore_) bindPath(*strokeBefore_);
+        if (decorationTransformBefore_) bindPath(*decorationTransformBefore_);
+        trimHistory();
+    }
+    document_.loadedPath = path;
+    document_.filePath = path;
+    drafts_.erase(key);
+    return savedDocuments_.insert_or_assign(
+        key, SavedDocument { .content = document_ }).first->second;
+}
+
 void LevelEditor::cacheActiveDraft()
 {
     endStroke();
@@ -1463,7 +1497,7 @@ void LevelEditor::cacheActiveDraft()
     if (key.empty()) {
         return;
     }
-    if (!document_.dirty) {
+    if (!dirty()) {
         drafts_.erase(key);
         return;
     }
@@ -1550,7 +1584,6 @@ bool LevelEditor::randomizeRocks(std::optional<uint32_t> seed)
         return false;
     }
     pendingMove_.reset();
-    document_.dirty = true;
     document_.status = "Randomized " + std::to_string(rocks) +
         " ground rocks (" + std::to_string(changed) + " changed).";
     recordDocumentChange(std::move(before));
@@ -1599,7 +1632,6 @@ bool LevelEditor::randomizeWalls(std::optional<uint32_t> seed)
         return false;
     }
     pendingMove_.reset();
-    document_.dirty = true;
     document_.status = "Randomized " + std::to_string(walls) +
         " walls (" + std::to_string(changed) + " changed).";
     recordDocumentChange(std::move(before));
@@ -1629,7 +1661,6 @@ bool LevelEditor::randomizeFences(std::optional<uint32_t> seed)
         document_.status = fences == 0 ? "No fences to randomize." : "Fence choices are unchanged.";
         return false;
     }
-    document_.dirty = true;
     document_.status = "Randomized " + std::to_string(fences) + " fence meshes (" +
         std::to_string(changed) + " changed).";
     recordDocumentChange(std::move(before));
@@ -1785,7 +1816,6 @@ bool LevelEditor::moveObject(GridPosition3 destination)
         selector->cell = destination;
         document_.selectedSelector = static_cast<std::size_t>(
             std::distance(document_.selectors.begin(), selector));
-        document_.dirty = true;
         document_.status = "Moved object.";
         recordDocumentChange(std::move(before));
         return true;
@@ -2517,7 +2547,6 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
         setTileRotation(translatedPosition, quarterTurns);
     }
     document_.activeLayer = translatedPosition.z;
-    document_.dirty = true;
     if (expandsDocument) {
         document_.status =
             "Expanded level to " + std::to_string(width) + " x " +
@@ -2568,7 +2597,6 @@ bool LevelEditor::placeDecoration(GridPosition3 surfaceCell)
     }
     auto before = captureBeforeDocumentChange();
     document_.decorations.insert(document_.decorations.end(), additions.begin(), additions.end());
-    document_.dirty = true;
     document_.status = "Placed decoration " +
         additions.front().model + ".";
     recordDocumentChange(std::move(before));
@@ -2645,7 +2673,6 @@ bool LevelEditor::updateSelectedDecoration(
     }
     auto before = captureBeforeDocumentChange();
     current = decoration;
-    document_.dirty = true;
     document_.status = "Updated decoration transform.";
     recordDocumentChange(std::move(before));
     return true;
@@ -2685,7 +2712,6 @@ bool LevelEditor::previewSelectedDecorationTransform(
         return false;
     }
     current = decoration;
-    document_.dirty = true;
     document_.status = "Transforming decoration.";
     return true;
 }
@@ -2762,7 +2788,6 @@ bool LevelEditor::duplicateSelectedDecoration()
     duplicate.position.y += 0.25f;
     document_.decorations.push_back(std::move(duplicate));
     document_.selectedDecoration = document_.decorations.size() - 1;
-    document_.dirty = true;
     document_.status = "Duplicated decoration.";
     recordDocumentChange(std::move(before));
     return true;
@@ -2789,7 +2814,6 @@ bool LevelEditor::deleteSelectedDecoration()
             *document_.selectedDecoration,
             document_.decorations.size() - 1);
     }
-    document_.dirty = true;
     document_.status = "Deleted decoration.";
     recordDocumentChange(std::move(before));
     return true;
@@ -3036,7 +3060,6 @@ bool LevelEditor::setLecternText(std::size_t index, std::string text)
     }
     auto before = captureBeforeDocumentChange();
     document_.lecterns[index].text = std::move(text);
-    document_.dirty = true;
     document_.status = "Updated lectern text.";
     recordDocumentChange(std::move(before));
     return true;
@@ -3373,7 +3396,6 @@ bool LevelEditor::setLinkColor(GridPosition3 cell, Vec3 color)
         recolor(document_.minecarts);
         recolor(document_.portals);
     }
-    document_.dirty = true;
     const std::size_t linkedPlates = linkedPressurePlates(color).size();
     const std::size_t linkedObjects = std::ranges::count_if(
         document_.objectLinks,
@@ -3464,7 +3486,6 @@ bool LevelEditor::recolorLinkGroup(Vec3 from, Vec3 to)
     if (sameColor(activeLinkColor_, from)) {
         activeLinkColor_ = to;
     }
-    document_.dirty = true;
     document_.status = merges
         ? "Merged two link groups."
         : "Recolored a link group.";
@@ -3510,7 +3531,6 @@ bool LevelEditor::setElevatorLevels(std::size_t index, std::vector<int> levels)
     }
     auto before = captureBeforeDocumentChange();
     document_.elevators[index].levels = std::move(levels);
-    document_.dirty = true;
     document_.status = document_.elevators[index].levels.size() < 2
         ? "Updated elevator; it will not move until it has a second stop."
         : "Updated elevator stops.";
@@ -3526,7 +3546,6 @@ bool LevelEditor::setGateStartOpen(std::size_t index, bool startOpen)
     }
     auto before = captureBeforeDocumentChange();
     document_.gates[index].startOpen = startOpen;
-    document_.dirty = true;
     document_.status = startOpen
         ? "Gate now starts open and closes when its plates are pressed."
         : "Gate now starts closed and opens when its plates are pressed.";
@@ -3547,7 +3566,6 @@ bool LevelEditor::setLockPlateStartEnabled(std::size_t index, bool startEnabled)
     }
     auto before = captureBeforeDocumentChange();
     document_.lockPlates[index].startEnabled = startEnabled;
-    document_.dirty = true;
     document_.status = startEnabled
         ? "Lock Plate starts enabled and releases units when its plates are pressed."
         : "Lock Plate starts disabled and locks units when its plates are pressed.";
@@ -3575,7 +3593,6 @@ bool LevelEditor::setMinecartInitialDirection(
     }
     auto before = captureBeforeDocumentChange();
     minecart.initialDirection = direction;
-    document_.dirty = true;
     document_.status = "Updated minecart route direction.";
     recordDocumentChange(std::move(before));
     return true;
@@ -3705,7 +3722,7 @@ std::optional<OverworldScreenId> LevelEditor::selectorLevelOwner(
 
 bool LevelEditor::dirty() const
 {
-    return document_.dirty;
+    return documentDirty(document_);
 }
 
 bool LevelEditor::hasInProgressDraft(
@@ -3715,8 +3732,11 @@ bool LevelEditor::hasInProgressDraft(
     if (key.empty()) {
         return false;
     }
-    return (document_.dirty && draftKey(document_.loadedPath) == key) ||
-        drafts_.contains(key);
+    if (draftKey(document_.loadedPath) == key) {
+        return dirty();
+    }
+    const auto draft = drafts_.find(key);
+    return draft != drafts_.end() && documentDirty(draft->second.document);
 }
 
 const std::filesystem::path& LevelEditor::documentPath() const
@@ -3827,10 +3847,10 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     // A new document belongs to no screen until it is saved as one, so it has
     // no splat map of its own and previews the shared fallback.
     document_.loadedPath.clear();
+    document_.identity = ++documentSequence_;
     document_.requestedWidth = width;
     document_.requestedHeight = height;
     document_.activeLayer = 1;
-    document_.dirty = true;
     document_.playingDraft = false;
     document_.editingDocument = true;
     document_.status = "Created new level.";
@@ -3905,7 +3925,6 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
 
     document_.requestedWidth = width;
     document_.requestedHeight = height;
-    document_.dirty = true;
     document_.status = "Resized level.";
     if (recordHistory) {
         recordDocumentChange(std::move(before));
@@ -3985,7 +4004,6 @@ void LevelEditor::insertLayerAt(int insertionIndex, const char* status)
         if (rotation.cell.z >= insertionIndex) ++rotation.cell.z;
     }
     document_.activeLayer = insertionIndex;
-    document_.dirty = true;
     document_.status = status;
     recordDocumentChange(std::move(before));
 }
@@ -4090,7 +4108,6 @@ void LevelEditor::deleteActiveLayer()
     document_.activeLayer = std::min(
         document_.activeLayer,
         static_cast<int>(document_.layers.size()) - 1);
-    document_.dirty = true;
     document_.status = "Deleted layer.";
     recordDocumentChange(std::move(before));
 }
@@ -4258,10 +4275,11 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     // This is the one place the in-memory document takes on a new origin by
     // reading; a browser selection deliberately does not.
     document_.loadedPath = path;
+    document_.identity = ++documentSequence_;
     document_.requestedHeight = static_cast<int>(height);
     document_.requestedWidth = static_cast<int>(width);
     document_.activeLayer = 0;
-    document_.dirty = false;
+    noteSavedDocument(path);
     document_.playingDraft = false;
     document_.editingDocument = true;
     document_.status = "Loaded " + path.string();
@@ -4274,7 +4292,6 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
         document_.status +=
             ". Gave its link groups distinct colors; the links are unchanged.";
     }
-    drafts_.erase(draftKey(path));
     if (recordHistory) {
         recordDocumentChange(std::move(before));
     }
@@ -4283,7 +4300,7 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
 
 bool LevelEditor::reloadFromDisk()
 {
-    if (document_.loadedPath.empty() || document_.dirty || strokeBefore_ ||
+    if (document_.loadedPath.empty() || dirty() || strokeBefore_ ||
         decorationTransformBefore_) {
         return false;
     }
@@ -4331,7 +4348,8 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
     }
 
     const std::filesystem::path sourcePath = normalizedAbsolutePath(path);
-    const bool documentContainsPlayer = std::ranges::any_of(
+    const bool overworld = overworldScreenIdForPath(sourcePath).has_value();
+    const bool documentContainsPlayer = overworld && std::ranges::any_of(
         document_.layers,
         [](const std::vector<std::string>& layer) {
             return std::ranges::any_of(
@@ -4343,10 +4361,22 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
         });
     std::vector<std::string> serialized;
     try {
+        const auto puzzle = levelLocationFromScreenPath(sourcePath);
+        if (puzzle && !runtimeMirrorPath(sourcePath).empty() &&
+            (sourcePath.parent_path().filename() != levelDirectoryName(puzzle->level) ||
+             sourcePath.filename() != screenFilename(puzzle->screen))) {
+            throw std::runtime_error("use the canonical puzzle path " +
+                (std::filesystem::path(levelDirectoryName(puzzle->level)) /
+                    screenFilename(puzzle->screen)).generic_string());
+        }
         serialized = Level::serializeDefinition(linkedDefinition(
-            overworldScreenIdForPath(sourcePath)
-                ? document_.character
-                : std::nullopt));
+            overworld ? document_.character : std::nullopt));
+        if (!overworld) {
+            const Level playable = Level::loadFromLines(serialized, sourcePath.string());
+            if (puzzle && !playable.selectors().empty()) {
+                throw std::runtime_error("screen selectors are only allowed in overworld content");
+            }
+        }
     } catch (const std::exception& exception) {
         document_.status = "Failed to save " + sourcePath.string() +
             ": " + exception.what();
@@ -4357,7 +4387,7 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
     // dimensions, or water metadata. Route it through the
     // same whole-project validator as topology edits so source and runtime can
     // never disagree or expose a half-valid map.
-    if (overworldScreenIdForPath(sourcePath)) {
+    if (overworld) {
         const std::filesystem::path projectRoot =
             normalizedAbsolutePath(document_.browserRoot);
         const std::filesystem::path relative =
@@ -4399,10 +4429,7 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
                 })) {
             return {};
         }
-        document_.filePath = sourcePath;
-        document_.loadedPath = sourcePath;
-        document_.dirty = false;
-        drafts_.erase(draftKey(sourcePath));
+        noteSavedDocument(sourcePath);
         document_.status =
             "Saved overworld screen and validated the complete map.";
         return { .outcome = SaveResult::Outcome::Saved };
@@ -4430,15 +4457,14 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
     // mirror fails. Keep the document dirty in that case so Save retries the
     // mirror, but accurately record where this in-memory document was saved.
     invalidateBrowserSnapshots();
-    document_.filePath = sourcePath;
-    document_.loadedPath = sourcePath;
+    SavedDocument& saved = noteSavedDocument(sourcePath);
 
     const std::filesystem::path mirrorPath = runtimeMirrorPath(sourcePath);
     if (!mirrorPath.empty()) {
+        saved.publicationPending = true;
         if (mirrorPath.has_parent_path()) {
             std::filesystem::create_directories(mirrorPath.parent_path(), error);
             if (error) {
-                document_.dirty = true;
                 document_.status = "Saved source, but failed to create runtime mirror directories: " + error.message();
                 return {
                     .outcome = SaveResult::Outcome::SourceSavedMirrorStale,
@@ -4449,7 +4475,6 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
         try {
             atomicFile::write(mirrorPath, contents);
         } catch (const std::exception& exception) {
-            document_.dirty = true;
             document_.status =
                 "Saved source, but failed to update runtime mirror " +
                 mirrorPath.string() + ": " + exception.what();
@@ -4462,7 +4487,6 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
             (void)refreshContentPackageIndex(
                 document_.runtimeLevelRoot.parent_path());
         } catch (const std::exception& exception) {
-            document_.dirty = true;
             document_.status =
                 "Saved source and runtime mirror, but failed to refresh the "
                 "runtime content index: " + std::string(exception.what());
@@ -4473,10 +4497,7 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
         }
     }
 
-    // Saving a scratch document into levels/level<N>/screen<M>.scr makes it
-    // that screen, so it gains that screen's splat map from here on.
-    document_.dirty = false;
-    drafts_.erase(draftKey(sourcePath));
+    saved.publicationPending = false;
     document_.status = mirrorPath.empty()
         ? "Saved " + sourcePath.string()
         : "Saved " + sourcePath.string() + " and updated runtime mirror.";
@@ -4989,30 +5010,12 @@ void LevelEditor::recordDocumentChange(std::optional<DocumentSnapshot> before)
     if (!before) {
         return;
     }
-    if (before->layers == document_.layers &&
-        before->tileRotations == document_.tileRotations &&
-        before->waterLayer == document_.waterLayer &&
-        before->cameraAngles == document_.cameraAngles &&
-        before->character == document_.character &&
-        before->decorations == document_.decorations &&
-        before->selectors == document_.selectors &&
-        before->lecterns == document_.lecterns &&
-        before->groundSplats == document_.groundSplats &&
-        before->groundPaint == document_.groundPaint &&
-        before->gates == document_.gates &&
-        before->rotators == document_.rotators &&
-        before->lockPlates == document_.lockPlates &&
-        before->elevators == document_.elevators &&
-        before->minecarts == document_.minecarts &&
-        before->objectLinks == document_.objectLinks &&
-        before->portals == document_.portals && before->plates == document_.plates &&
-        before->plateColors == document_.plateColors &&
+    if (static_cast<const DocumentContent&>(*before) == document_ &&
         before->filePath == document_.filePath &&
         before->loadedPath == document_.loadedPath &&
         before->requestedWidth == document_.requestedWidth &&
         before->requestedHeight == document_.requestedHeight &&
-        before->activeLayer == document_.activeLayer &&
-        before->dirty == document_.dirty) {
+        before->activeLayer == document_.activeLayer) {
         return;
     }
 
@@ -5097,25 +5100,7 @@ std::size_t LevelEditor::recordStorageBytes(const EditActionRecord& record)
 void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
 {
     pendingMove_.reset();
-    document_.layers = snapshot.layers;
-    document_.waterLayer = snapshot.waterLayer;
-    document_.cameraAngles = snapshot.cameraAngles;
-    document_.character = snapshot.character;
-    document_.decorations = snapshot.decorations;
-    document_.selectors = snapshot.selectors;
-    document_.lecterns = snapshot.lecterns;
-    document_.groundSplats = snapshot.groundSplats;
-    document_.groundPaint = snapshot.groundPaint;
-    document_.tileRotations = snapshot.tileRotations;
-    document_.gates = snapshot.gates;
-    document_.rotators = snapshot.rotators;
-    document_.lockPlates = snapshot.lockPlates;
-    document_.elevators = snapshot.elevators;
-    document_.minecarts = snapshot.minecarts;
-    document_.objectLinks = snapshot.objectLinks;
-    document_.portals = snapshot.portals;
-    document_.plateColors = snapshot.plateColors;
-    document_.plates = snapshot.plates;
+    static_cast<DocumentContent&>(document_) = snapshot;
     document_.filePath = snapshot.filePath;
     document_.loadedPath = snapshot.loadedPath;
     document_.requestedWidth = snapshot.requestedWidth;
@@ -5123,7 +5108,7 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
     document_.activeLayer = snapshot.activeLayer;
     document_.selectedDecoration = snapshot.selectedDecoration;
     document_.selectedSelector = snapshot.selectedSelector;
-    document_.dirty = snapshot.dirty;
+    document_.identity = snapshot.identity;
     document_.playingDraft = false;
     document_.editingDocument = true;
 }
@@ -5171,9 +5156,8 @@ bool LevelEditor::remapGroundSplatMask(
     const std::filesystem::path key = draftKey(path);
     if (key.empty()) return false;
     bool changed = false;
-    const auto remap = [&](auto& document) {
-        if (draftKey(document.loadedPath) != key) return;
-        auto& splats = document.groundSplats;
+    const auto remapSplats = [&](DocumentContent& content) {
+        auto& splats = content.groundSplats;
         if (!before) {
             if (splats.empty()) {
                 splats.push_back(after);
@@ -5191,6 +5175,11 @@ bool LevelEditor::remapGroundSplatMask(
             }
         }
     };
+    const auto remap = [&](auto& document) {
+        if (draftKey(document.loadedPath) == key) {
+            remapSplats(document);
+        }
+    };
     const auto remapHistory = [&](EditHistory& history) {
         for (EditActionRecord& record : history) {
             remap(record.before);
@@ -5198,6 +5187,9 @@ bool LevelEditor::remapGroundSplatMask(
             record.retainedBytes = recordStorageBytes(record);
         }
     };
+    if (auto saved = savedDocuments_.find(key); saved != savedDocuments_.end()) {
+        remapSplats(saved->second.content);
+    }
     remap(document_);
     remapHistory(editHistory_);
     remapHistory(redoHistory_);
@@ -5252,7 +5244,6 @@ bool LevelEditor::addGroundSplat(Level::GroundSplat splat)
     auto before = captureBeforeDocumentChange();
     document_.groundSplats.push_back(std::move(splat));
     selectedGroundSplatName_ = document_.groundSplats.back().name;
-    document_.dirty = true;
     recordDocumentChange(std::move(before));
     return true;
 }
@@ -5276,7 +5267,6 @@ bool LevelEditor::updateGroundSplat(std::size_t index, Level::GroundSplat splat)
     document_.groundSplats = std::move(candidate.groundSplats);
     document_.groundPaint = std::move(candidate.groundPaint);
     if (selectedGroundSplatName_ == oldName) selectedGroundSplatName_ = splat.name;
-    document_.dirty = true;
     recordDocumentChange(std::move(before));
     return true;
 }
@@ -5294,7 +5284,6 @@ bool LevelEditor::removeGroundSplat(std::size_t index)
     const std::string name = document_.groundSplats[index].name;
     std::erase_if(document_.groundPaint, [&](const Level::GroundPaint& paint) { return paint.splat == name; });
     document_.groundSplats.erase(document_.groundSplats.begin() + static_cast<std::ptrdiff_t>(index));
-    document_.dirty = true;
     recordDocumentChange(std::move(before));
     return true;
 }
@@ -5318,7 +5307,6 @@ bool LevelEditor::paintGroundSplat(GridPosition3 cell)
     } else {
         found->splat = splat->name;
     }
-    document_.dirty = true;
     recordDocumentChange(std::move(before));
     return true;
 }
@@ -5447,35 +5435,17 @@ std::optional<Level> LevelEditor::beginDraftPlayback(
 
 LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
 {
-    return {
-        .layers = document_.layers,
-        .waterLayer = document_.waterLayer,
-        .cameraAngles = document_.cameraAngles,
-        .character = document_.character,
-        .decorations = document_.decorations,
-        .selectors = document_.selectors,
-        .lecterns = document_.lecterns,
-        .groundSplats = document_.groundSplats,
-        .groundPaint = document_.groundPaint,
-        .tileRotations = document_.tileRotations,
-        .gates = document_.gates,
-        .rotators = document_.rotators,
-        .lockPlates = document_.lockPlates,
-        .plates = document_.plates,
-        .elevators = document_.elevators,
-        .minecarts = document_.minecarts,
-        .objectLinks = document_.objectLinks,
-        .portals = document_.portals,
-        .plateColors = document_.plateColors,
-        .filePath = document_.filePath,
-        .loadedPath = document_.loadedPath,
-        .requestedWidth = document_.requestedWidth,
-        .requestedHeight = document_.requestedHeight,
-        .activeLayer = document_.activeLayer,
-        .selectedDecoration = document_.selectedDecoration,
-        .selectedSelector = document_.selectedSelector,
-        .dirty = document_.dirty,
-    };
+    DocumentSnapshot snapshot;
+    static_cast<DocumentContent&>(snapshot) = document_;
+    snapshot.filePath = document_.filePath;
+    snapshot.loadedPath = document_.loadedPath;
+    snapshot.requestedWidth = document_.requestedWidth;
+    snapshot.requestedHeight = document_.requestedHeight;
+    snapshot.activeLayer = document_.activeLayer;
+    snapshot.selectedDecoration = document_.selectedDecoration;
+    snapshot.selectedSelector = document_.selectedSelector;
+    snapshot.identity = document_.identity;
+    return snapshot;
 }
 
 std::filesystem::path LevelEditor::runtimeMirrorPath(const std::filesystem::path& sourcePath) const
@@ -5761,43 +5731,49 @@ void LevelEditor::applyScreenIdentityRemaps(
             }
         }
     };
-    const auto remapSnapshot = [&](DocumentSnapshot& snapshot) {
-        std::vector<LevelLocationAssociationRemap> locations;
-        for (const auto& remap : remaps) {
-            if (remap.sourceLocation) locations.push_back({ *remap.sourceLocation, remap.destinationLocation });
+    std::vector<LevelLocationAssociationRemap> locations;
+    for (const auto& remap : remaps) {
+        if (remap.sourceLocation) {
+            locations.push_back({ *remap.sourceLocation, remap.destinationLocation });
         }
-        remapGroundTextures(snapshot.groundSplats, locations);
-        remapPath(snapshot.filePath);
-        remapPath(snapshot.loadedPath);
-        remapSelectors(snapshot.selectors);
+    }
+    const auto remapContent = [&](DocumentContent& content) {
+        remapGroundTextures(content.groundSplats, locations);
+        remapSelectors(content.selectors);
+    };
+    const auto remapDocument = [&](auto& document) {
+        remapContent(document);
+        remapPath(document.filePath);
+        remapPath(document.loadedPath);
     };
     const auto remapHistory = [&](EditHistory& history) {
         for (EditActionRecord& record : history) {
-            remapSnapshot(record.before);
-            remapSnapshot(record.after);
+            remapDocument(record.before);
+            remapDocument(record.after);
             record.retainedBytes = recordStorageBytes(record);
         }
-    };
-    const auto remapDocument = [&](Document& document) {
-        std::vector<LevelLocationAssociationRemap> locations;
-        for (const auto& remap : remaps) {
-            if (remap.sourceLocation) locations.push_back({ *remap.sourceLocation, remap.destinationLocation });
-        }
-        remapGroundTextures(document.groundSplats, locations);
-        remapPath(document.filePath);
-        remapPath(document.loadedPath);
-        remapSelectors(document.selectors);
     };
 
     remapDocument(document_);
     remapHistory(editHistory_);
     remapHistory(redoHistory_);
     if (decorationTransformBefore_) {
-        remapSnapshot(*decorationTransformBefore_);
+        remapDocument(*decorationTransformBefore_);
     }
     if (strokeBefore_) {
-        remapSnapshot(*strokeBefore_);
+        remapDocument(*strokeBefore_);
     }
+
+    std::map<std::filesystem::path, SavedDocument> remappedSavedDocuments;
+    for (auto& [path, saved] : savedDocuments_) {
+        auto remappedPath = path;
+        remapPath(remappedPath);
+        if (!remappedPath.empty()) {
+            remapContent(saved.content);
+            remappedSavedDocuments.insert_or_assign(std::move(remappedPath), std::move(saved));
+        }
+    }
+    savedDocuments_ = std::move(remappedSavedDocuments);
 
     std::map<std::filesystem::path, DraftState> remappedDrafts;
     for (auto& entry : drafts_) {

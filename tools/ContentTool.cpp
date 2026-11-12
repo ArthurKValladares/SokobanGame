@@ -1,4 +1,5 @@
 #include "engine/ContentPipeline.hpp"
+#include "engine/LevelProjectStore.hpp"
 
 #include <exception>
 #include <filesystem>
@@ -91,6 +92,7 @@ int main(int argc, char** argv)
             return 0;
         }
 
+        sokoban::LevelProjectStore::recover(roots.levels);
         const sokoban::ContentStageReport report =
             sokoban::stageContent(roots, output, version, options);
         if (report.upToDate) {

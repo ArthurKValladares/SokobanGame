@@ -1716,6 +1716,7 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/LevelProjectStoreTests.cpp
         DEFINITIONS SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+                    SOKOBAN_ENABLE_TEST_HOOKS=1
     )
     sokoban_add_test(NAME overworld_map_editor
         LIBS sokoban_core sokoban_json
@@ -1744,6 +1745,7 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/SolutionReplayTests.cpp
         DEFINITIONS SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+                    SOKOBAN_ENABLE_TEST_HOOKS=1
     )
     set(SOKOBAN_SHADER_HOT_RELOAD_TEST_DEFINITIONS)
     if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)

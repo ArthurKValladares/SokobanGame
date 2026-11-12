@@ -81,11 +81,30 @@ void testWatchedFilesAndTrees()
     CHECK(watcher.poll().empty());
 }
 
+void testLevelTreeReportsRenamesAndRemovals()
+{
+    TEST("levelTreeReportsRenamesAndRemovals");
+    ScopedTestDirectory directory;
+    const auto original = directory.path() / "screen0.scr";
+    const auto renamed = directory.path() / "screen1.scr";
+    write(original, "screen");
+    sokoban::SourceWatcher watcher;
+    watcher.watchTree(directory.path(), { ".scr" }, true);
+    CHECK(watcher.poll().empty());
+    std::filesystem::rename(original, renamed);
+    const auto changes = watcher.poll();
+    CHECK(changes.size() == 2);
+    CHECK(contains(changes, original));
+    CHECK(contains(changes, renamed));
+    CHECK(watcher.poll().empty());
+}
+
 } // namespace
 
 int main()
 {
     testWatchedFilesAndTrees();
+    testLevelTreeReportsRenamesAndRemovals();
     if (failures == 0) {
         std::cout << "SourceWatcherTests: " << checks << " checks passed\n";
         return 0;

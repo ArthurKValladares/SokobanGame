@@ -4,6 +4,7 @@
 #include "ScopedTestDirectory.hpp"
 #include "TestHarness.hpp"
 
+#include "engine/AtomicFile.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/Solution.hpp"
@@ -20,6 +21,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #ifndef SOKOBAN_TEST_SOURCE_DIR
@@ -402,12 +404,17 @@ void writeDraftCoverage(
     writeText(solutions / "coverage.json", text.str());
 }
 
-std::size_t stepsIn(const std::filesystem::path& path)
+std::string readText(const std::filesystem::path& path)
 {
     std::ifstream stream(path, std::ios::binary);
     std::stringstream text;
     text << stream.rdbuf();
-    return solution::parse(text.str()).steps.size();
+    return text.str();
+}
+
+std::size_t stepsIn(const std::filesystem::path& path)
+{
+    return solution::parse(readText(path)).steps.size();
 }
 
 bool hasKind(
@@ -498,6 +505,102 @@ void testStoreKeepsOneShortestRecordingPerScreen()
 
     // Nothing to do leaves everything alone.
     CHECK(solution::reconcileStore(levels, solutions).empty());
+}
+
+void testStorePrefersPassingRecordingsOverShorterInvalidOnes()
+{
+    TEST("storePrefersPassingRecordingsOverShorterInvalidOnes");
+    using Kind = solution::StoreChange::Kind;
+    const auto level = Level::loadFromDefinition(coverageWalkDefinition, "coverage walk");
+    auto invalid = coverageWalkSolution();
+    invalid.steps.front().changes.clear();
+    CHECK(!solution::replay(level, invalid).passed);
+    const auto invalidText = solution::serialize(invalid);
+    const std::vector<Input> longer { Input::Left, Input::Right, Input::Right };
+
+    for (const bool savedScreen : { false, true }) {
+        ScopedTestDirectory temp("sokoban-solution-store-verify");
+        const auto levels = temp.path() / "levels";
+        const auto solutions = temp.path() / "solutions";
+        const auto draft = solutions / "drafts" /
+            (solution::digestText(invalid.levelDigest) + ".solution");
+        const auto canonical = solutions / solution::fileNameFor({ 0, 0 });
+        const auto& path = savedScreen ? canonical : draft;
+        if (savedScreen) {
+            writeScreen(screenFilePath(levelDirectoryPath(levels, 0), 0), coverageWalkDefinition);
+        }
+        writeText(path, invalidText);
+
+        CHECK(solution::reconcileStore(levels, solutions).empty());
+        CHECK(readText(path) == invalidText);
+
+        const auto changes = solution::reconcileStore(levels, solutions,
+            solution::SolveToStore { "coverage walk", coverageWalkDefinition, longer });
+        CHECK(hasKind(changes, Kind::Saved));
+        CHECK(!hasKind(changes, Kind::KeptExisting));
+        const auto passing = readText(path);
+        CHECK(solution::replay(level, solution::parse(passing)).passed);
+        CHECK(stepsIn(path) == longer.size());
+
+        if (savedScreen) {
+            // Reconcile-only must promote a passing draft even when the
+            // current screen already has a shorter, broken recording.
+            writeText(draft, passing);
+            writeText(canonical, invalidText);
+            CHECK(hasKind(solution::reconcileStore(levels, solutions), Kind::Moved));
+            CHECK(solution::replay(level, solution::parse(readText(canonical))).passed);
+            CHECK(!std::filesystem::exists(draft));
+        }
+    }
+}
+
+void testStoreRestoresOriginalsWhenPublicationFails()
+{
+    TEST("storeRestoresOriginalsWhenPublicationFails");
+    const Level::Definition revised { .layers = { { "...." }, { "C  E" } } };
+    const auto level = Level::loadFromDefinition(revised, "revised coverage walk");
+    const std::vector<Input> inputs { Input::Right, Input::Right, Input::Right };
+    const auto recording = solution::record(level, revised, inputs, "draft");
+    CHECK_MESSAGE(recording.solved, recording.error.c_str());
+    const auto original = coverageWalkSolution();
+    const auto originalText = solution::serialize(original);
+    const auto draftText = solution::serialize(recording.solution);
+
+    for (const bool afterInstall : { false, true }) {
+        ScopedTestDirectory temp("sokoban-solution-store-rollback");
+        const auto levels = temp.path() / "levels";
+        const auto solutions = temp.path() / "solutions";
+        const auto canonical = solutions / solution::fileNameFor({ 0, 0 });
+        const auto draft = solutions / "drafts" /
+            (solution::digestText(recording.solution.levelDigest) + ".solution");
+        const auto parked = solutions / "drafts" /
+            (solution::digestText(original.levelDigest) + ".solution");
+        const auto coverage = solutions / "coverage.json";
+        writeScreen(screenFilePath(levelDirectoryPath(levels, 0), 0), revised);
+        writeText(canonical, originalText);
+        writeText(draft, draftText);
+        writeText(coverage, "{\"format\":1,\"drafts\":[]}\n");
+
+        // Two replacements and two backups are staged first. One live file
+        // is then installed before the second publication reports failure.
+        atomicFile::failReplaceAfterForTesting(5, std::errc::permission_denied, afterInstall);
+        bool failed = false;
+        try {
+            (void)solution::reconcileStore(levels, solutions);
+        } catch (const std::system_error& error) {
+            failed = error.code() == std::make_error_code(std::errc::permission_denied);
+        }
+        CHECK(failed);
+        CHECK(readText(canonical) == originalText);
+        CHECK(readText(draft) == draftText);
+        CHECK(!std::filesystem::exists(parked));
+        CHECK(readText(coverage) == "{\"format\":1,\"drafts\":[]}\n");
+
+        CHECK(hasKind(solution::reconcileStore(levels, solutions), solution::StoreChange::Kind::Moved));
+        CHECK(solution::replay(level, solution::parse(readText(canonical))).passed);
+        CHECK(readText(parked) == originalText);
+        CHECK(!std::filesystem::exists(draft));
+    }
 }
 
 void testCoverageRequiresCurrentPassingRecording()
@@ -711,6 +814,8 @@ int main()
         testLegacyCoveredButtonKeepsRecordedSolutionDigest();
         testReplayFailuresNameTheStepAndEntity();
         testStoreKeepsOneShortestRecordingPerScreen();
+        testStorePrefersPassingRecordingsOverShorterInvalidOnes();
+        testStoreRestoresOriginalsWhenPublicationFails();
         testCoverageRequiresCurrentPassingRecording();
         testCoverageRejectsMatchingDigestWithInvalidReplay();
         testCoverageDraftMustMatchCurrentScreenAndHaveReason();

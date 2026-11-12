@@ -7,6 +7,7 @@
 #include "engine/ContentPipeline.hpp"
 #include "engine/DebugUi.hpp"
 #include "engine/DevSession.hpp"
+#include "engine/LevelProjectStore.hpp"
 #include <imgui.h>
 #endif
 
@@ -196,9 +197,17 @@ Application::Application(ApplicationOptions options)
     , playerProfile_(saveSlots_.loadActiveProfile())
     , startupWindowConfigured_(
           configureStartupWindow(window_, playerProfile_, options.smokeFrames != 0))
-    , assetRoot_(timedAssetStartup("content-validation", [] {
-          return runtimeContentRoot();
-      }))
+    , assetRoot_(timedAssetStartup("content-validation",
+#if SOKOBAN_ENABLE_DEBUG_UI
+          [&options] {
+              if (options.smokeFrames == 0 && options.evidenceOutputDirectory.empty()) {
+                  return runtimeContentRoot(SOKOBAN_SOURCE_LEVEL_DIR);
+              }
+              return runtimeContentRoot();
+          }))
+#else
+          [] { return runtimeContentRoot(); }))
+#endif
     , assetManifest_(timedAssetStartup("manifest", [this] {
           return AssetManifest::loadFromFile(assetRoot_ / "manifest.json");
       }))
@@ -2415,10 +2424,9 @@ void mirrorIntoRuntime(
 
 void Application::configureSourceWatcher()
 {
-    const std::filesystem::path sourceRoot = SOKOBAN_SOURCE_ROOT_DIR;
     const std::filesystem::path sourceAssets = SOKOBAN_SOURCE_ASSET_DIR;
     SourceWatcher& watcher = tools_->sourceWatcher;
-    watcher.watchTree(sourceRoot / "levels", { ".scr", ".json" });
+    watcher.watchTree(SOKOBAN_SOURCE_LEVEL_DIR, { ".scr", ".json" }, true);
     std::vector<std::filesystem::path> files {
         sourceAssets / "manifest.json",
         sourceAssets / "animation_catalog.json",
@@ -2451,15 +2459,18 @@ void Application::serviceSourceWatcher()
         tools_->requestSolutionReconcile();
         return;
     }
-    const std::filesystem::path sourceRoot = SOKOBAN_SOURCE_ROOT_DIR;
+    const std::filesystem::path sourceLevels = SOKOBAN_SOURCE_LEVEL_DIR;
     const std::filesystem::path sourceAssets = SOKOBAN_SOURCE_ASSET_DIR;
+    std::vector<std::filesystem::path> changedLevels;
     for (const std::filesystem::path& changed : tools_->sourceWatcher.poll()) {
         try {
             const std::filesystem::path relativeToLevels =
-                changed.lexically_relative(sourceRoot / "levels");
+                changed.lexically_relative(sourceLevels);
             if (!relativeToLevels.empty() &&
                 *relativeToLevels.begin() != "..") {
-                reloadSourceLevel(changed);
+                if (*relativeToLevels.begin() != "Deleted") {
+                    changedLevels.push_back(changed);
+                }
                 continue;
             }
             if (changed == (sourceAssets / "manifest.json").lexically_normal()) {
@@ -2485,59 +2496,64 @@ void Application::serviceSourceWatcher()
                 << error.what();
         }
     }
+    if (!changedLevels.empty()) {
+        try {
+            reloadSourceLevels(changedLevels);
+        } catch (const std::exception& error) {
+            log::error(log::Category::Assets)
+                << "Could not reload source levels: " << error.what();
+        }
+    }
 }
 
-void Application::reloadSourceLevel(const std::filesystem::path& source)
+void Application::reloadSourceLevels(
+    const std::vector<std::filesystem::path>& sources)
 {
-    const std::filesystem::path sourceLevels =
-        std::filesystem::path(SOKOBAN_SOURCE_ROOT_DIR) / "levels";
-    const std::filesystem::path relative =
-        source.lexically_relative(sourceLevels);
-    // Deleted (soft-deleted) levels are not part of the package.
-    if (*relative.begin() == "Deleted") {
-        return;
+    const std::filesystem::path sourceLevels = SOKOBAN_SOURCE_LEVEL_DIR;
+    const std::filesystem::path runtimeLevels = assetRoot_ / "levels";
+    const auto result = LevelProjectStore::publishRuntime(sourceLevels, runtimeLevels);
+    if (!result.succeeded) {
+        throw std::runtime_error(result.message);
     }
-    mirrorIntoRuntime(source, assetRoot_ / "levels" / relative);
     gameplayGroundGeometryStore_.invalidate();
     previewGroundGeometryStore_.invalidate();
-    (void)refreshContentPackageIndex(assetRoot_);
     // A saved draft may now match a recording waiting in solutions/drafts/.
     tools_->requestSolutionReconcile();
 
     LevelEditor& editor = tools_->levelEditor;
-    if (!editor.loadedDocumentPath().empty() &&
-        std::filesystem::absolute(editor.loadedDocumentPath())
-                .lexically_normal() ==
-            std::filesystem::absolute(source).lexically_normal()) {
+    const std::filesystem::path openDocument = editor.loadedDocumentPath().empty()
+        ? std::filesystem::path {}
+        : std::filesystem::absolute(editor.loadedDocumentPath()).lexically_normal();
+    const auto changedDocument = std::ranges::find(sources, openDocument);
+    if (changedDocument != sources.end()) {
         if (editor.dirty()) {
             log::warning(log::Category::Editor)
-                << source.filename().string()
+                << changedDocument->filename().string()
                 << " changed on disk; the editor keeps your unsaved draft.";
-        } else if (editor.reloadFromDisk()) {
+        } else if (std::filesystem::is_regular_file(*changedDocument) &&
+            editor.reloadFromDisk()) {
             log::info(log::Category::Editor)
-                << "Reloaded " << source.filename().string()
+                << "Reloaded " << changedDocument->filename().string()
                 << " in the editor after it changed on disk.";
         }
     }
 
-    const std::optional<LevelLocation> location =
-        levelLocationFromScreenPath(relative);
-    const bool currentScreen = location && !campaign_.inOverworld() &&
-        location->level == campaign_.currentLevel() &&
-        location->screen == campaign_.currentScreen();
-    if (currentScreen && !editor.editingDocument() &&
+    const auto currentScreen = screenPath(campaign_.currentLevel(), campaign_.currentScreen());
+    const auto currentSource = sourceLevels / currentScreen.lexically_relative(runtimeLevels);
+    if (campaign_.gameLoaded() && !campaign_.inOverworld() &&
+        std::ranges::find(sources, currentSource.lexically_normal()) != sources.end() &&
+        !editor.editingDocument() &&
         !editor.playingDraft() && !levelTransition_.active()) {
-        // The checkpoint describes the old layout; start the new one fresh
-        // rather than failing to restore it.
-        playerProfile_.activeScreen.reset();
+        if (std::filesystem::is_regular_file(currentScreen)) {
+            campaign_.writeCheckpoint(playerProfile_, gameplaySession_.snapshot());
+        } else {
+            playerProfile_.worldContext = PlayerProfile::WorldContext::Overworld;
+            playerProfile_.activeScreen.reset();
+            campaign_.resetForProfile(playerProfile_);
+        }
         loadCurrentScreen();
         log::info(log::Category::Gameplay)
-            << "Reloaded level " << location->level << " screen "
-            << location->screen << " after its source changed.";
-    } else if (!location) {
-        log::info(log::Category::Assets)
-            << "Mirrored " << relative.generic_string()
-            << "; it applies the next time it is loaded.";
+            << "Reloaded gameplay after its source levels changed.";
     }
 }
 

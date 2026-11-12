@@ -20,6 +20,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -1173,6 +1174,45 @@ void testSerializationFailurePreservesFilesDraftAndHistory()
     CHECK(readFile(source) == readFile(project.runtime / "level0/screen0.scr"));
 }
 
+void testUnplayablePuzzleSavePreservesFilesAndDraft()
+{
+    TEST("unplayablePuzzleSavePreservesFilesAndDraft");
+    TemporaryProject project;
+    auto editor = makeEditor(project);
+    const auto source = project.source / "level0/screen0.scr";
+    const auto newTarget = project.source / "level1/screen0.scr";
+    CHECK(editor.saveDocument(source));
+    const auto committed = editor.documentDefinition();
+    const auto sourceBefore = snapshotTree(project.source);
+    const auto runtimeBefore = snapshotTree(project.runtime);
+
+    CHECK(editor.setCell({ 0, 0, 1 }, TileType::Air));
+    CHECK(editor.setCell({ 1, 1, 1 }, TileType::Wall));
+    CHECK(editor.tryUndoEdit());
+    const auto draft = editor.documentDefinition();
+    CHECK(editor.saveLoadedDocument().outcome == LevelEditor::SaveResult::Outcome::Failed);
+    CHECK(editor.status().find("missing a hero start") != std::string::npos);
+    CHECK(!editor.saveDocument(newTarget));
+    CHECK(editor.loadedDocumentPath() == source);
+    CHECK(editor.documentDefinition() == draft);
+    CHECK(editor.dirty());
+    CHECK(editor.canUndo());
+    CHECK(editor.canRedo());
+    CHECK(snapshotTree(project.source) == sourceBefore);
+    CHECK(snapshotTree(project.runtime) == runtimeBefore);
+
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentDefinition() == committed);
+    CHECK(!editor.dirty());
+    CHECK(editor.tryRedoEdit());
+    CHECK(editor.documentDefinition() == draft);
+    CHECK(editor.setCell({ 2, 1, 1 }, TileType::Rogue));
+    CHECK(editor.saveLoadedDocument());
+    CHECK(Level::loadFromFile(source).playerStarts().front().position ==
+        (GridPosition3 { 2, 1, 1 }));
+    CHECK(readFile(source) == readFile(project.runtime / "level0/screen0.scr"));
+}
+
 void testSelectedPathIsSeparateFromTheLoadedDocument()
 {
     TEST("selectedPathIsSeparateFromTheLoadedDocument");
@@ -1261,6 +1301,48 @@ void testOpeningScreensPreservesIndependentDraftsAndUndoHistory()
         tileTypeToChar(TileType::Decorative));
     CHECK(editor.saveDocument(second));
     CHECK(!editor.hasInProgressDraft(second));
+}
+
+void testUndoAfterSaveKeepsTheRevertedBoardAsADraft()
+{
+    TEST("undoAfterSaveKeepsTheRevertedBoardAsADraft");
+    const std::array<std::string_view, 3> startingFiles {
+        "", "screen0.scr", "screen2.scr",
+    };
+    for (const auto startingFile : startingFiles) {
+        TemporaryProject project;
+        auto editor = makeEditor(project);
+        const auto edited = project.source / "level0/screen0.scr";
+        const auto other = project.source / "level0/screen1.scr";
+        const GridPosition3 cell { 1, 1, 1 };
+        CHECK(editor.saveDocument(other));
+        editor.newDocument(5, 4, false);
+        if (!startingFile.empty()) {
+            CHECK(editor.saveDocument(project.source / "level0" / startingFile));
+        }
+        CHECK(editor.setCell(cell, TileType::Wall));
+        CHECK(editor.saveDocument(edited));
+        CHECK(!editor.dirty());
+
+        CHECK(editor.tryUndoEdit());
+        CHECK(editor.loadedDocumentPath() == edited);
+        CHECK(editor.dirty());
+        CHECK(editor.hasInProgressDraft(edited));
+        CHECK(!editor.reloadFromDisk());
+        CHECK(editor.openDocument(other));
+        CHECK(editor.hasInProgressDraft(edited));
+        CHECK(editor.openDocument(edited));
+        CHECK(editor.documentToLevel().tileAt(1, 1, 1) == TileType::Air);
+        CHECK(editor.tryRedoEdit());
+        CHECK(editor.documentToLevel().tileAt(1, 1, 1) == TileType::Wall);
+        CHECK(!editor.dirty());
+        CHECK(!editor.hasInProgressDraft(edited));
+
+        CHECK(editor.setCell(cell, TileType::Air));
+        CHECK(editor.dirty());
+        CHECK(editor.setCell(cell, TileType::Wall));
+        CHECK(!editor.dirty());
+    }
 }
 
 void testScreenRenumberingPreservesDraftIdentity()
@@ -5755,8 +5837,10 @@ int main()
     testCharacterSelectionPersistsAndIsUndoable();
     testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness();
     testSerializationFailurePreservesFilesDraftAndHistory();
+    testUnplayablePuzzleSavePreservesFilesAndDraft();
     testSelectedPathIsSeparateFromTheLoadedDocument();
     testOpeningScreensPreservesIndependentDraftsAndUndoHistory();
+    testUndoAfterSaveKeepsTheRevertedBoardAsADraft();
     testScreenRenumberingPreservesDraftIdentity();
     testActiveDraftFollowsLevelRenumbering();
     testDeleteScreenRestoresShiftedDraft();

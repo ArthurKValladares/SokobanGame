@@ -1383,6 +1383,34 @@ void testDraftSoundSets()
         "missing sound paths still cannot escape assets");
 }
 
+void testPuzzleCatalogRejectsPaddedNamesAndAliases()
+{
+    TEST("puzzleCatalogRejectsPaddedNamesAndAliases");
+    const ScopedTestDirectory temp("sokoban-puzzle-catalog-names");
+    const auto roots = createValidContent(temp.path());
+    const auto level = roots.levels / "level0";
+    const auto paddedLevel = roots.levels / "level00";
+    const auto screen = level / "screen0.scr";
+    const auto paddedScreen = level / "screen00.scr";
+    const std::string contents = readFile(screen);
+    const auto validate = [&] { (void)sokoban::collectContentInventory(roots); };
+
+    std::filesystem::rename(level, paddedLevel);
+    checkThrowsContaining(validate, { "must be named 'level0'", "level00" },
+        "a padded level directory is invisible to the runtime");
+    writeFile(screen, contents);
+    checkThrowsContaining(validate, { "must be named 'level0'", "level00" },
+        "padded and canonical directories cannot share a level index");
+    std::filesystem::rename(paddedLevel, temp.path() / "discarded-level00");
+
+    std::filesystem::rename(screen, paddedScreen);
+    checkThrowsContaining(validate, { "must be named 'screen0.scr'", "screen00.scr" },
+        "a padded screen file is invisible to the runtime");
+    writeFile(screen, contents);
+    checkThrowsContaining(validate, { "must be named 'screen0.scr'", "screen00.scr" },
+        "padded and canonical files cannot share a screen index");
+}
+
 void testValidationFailures()
 {
     ScopedTestDirectory temp("sokoban-content-pipeline");
@@ -1493,6 +1521,7 @@ int main()
         testGltfTextureTraversalIsRejected();
         testUnsupportedGltfTextureSemanticsHaveContext();
         testDraftSoundSets();
+        testPuzzleCatalogRejectsPaddedNamesAndAliases();
         testValidationFailures();
     } catch (const std::exception& error) {
         std::cerr << "UNEXPECTED EXCEPTION: " << error.what() << '\n';

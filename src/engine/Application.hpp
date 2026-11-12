@@ -177,7 +177,7 @@ private:
         return smokeFrames_ == 0 && evidenceOutputDirectory_.empty();
     }
     void configureSourceWatcher();
-    void reloadSourceLevel(const std::filesystem::path& source);
+    void reloadSourceLevels(const std::vector<std::filesystem::path>& sources);
     void reloadSourceTexture(
         const std::filesystem::path& source,
         const std::string& textureName,

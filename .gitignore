@@ -21,3 +21,10 @@ __pycache__/
 
 # Recordings of unsaved editor drafts (see README.md > Solutions).
 solutions/drafts/
+
+# Local recovery state for level and runtime mirror publication.
+*.editor-transaction.json
+*.editor-transaction.json.tmp
+*.editor-transaction.lock
+*.editor-stage
+*.editor-backup

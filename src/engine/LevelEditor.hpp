@@ -458,7 +458,7 @@ public:
     [[nodiscard]] const std::string& status() const;
 
 private:
-    struct Document {
+    struct DocumentContent {
         Level::LayerRows layers;
         std::optional<uint32_t> waterLayer;
         std::optional<CameraAngles> cameraAngles;
@@ -481,6 +481,11 @@ private:
         std::vector<Level::Portal> portals;
         // One per pressure plate, sorted by cell (see linkGroups).
         std::vector<Level::LinkColor> plateColors;
+
+        bool operator==(const DocumentContent&) const = default;
+    };
+
+    struct Document : DocumentContent {
         // Selected path (browser clicks move this).
         std::filesystem::path filePath;
         // Where `layers` was actually read from or written to. Empty for an
@@ -501,33 +506,13 @@ private:
         bool tileDecorationPlacementEnabled = true;
         std::optional<std::size_t> selectedDecoration;
         std::optional<std::size_t> selectedSelector;
+        uint64_t identity = 0;
         bool layerLocked = false;
-        bool dirty = false;
         bool playingDraft = false;
         bool editingDocument = false;
     };
 
-    struct DocumentSnapshot {
-        Level::LayerRows layers;
-        std::optional<uint32_t> waterLayer;
-        std::optional<CameraAngles> cameraAngles;
-        std::optional<CharacterType> character;
-        std::vector<Level::Decoration> decorations;
-        std::vector<Level::ScreenSelector> selectors;
-        std::vector<Level::Lectern> lecterns;
-        std::vector<Level::GroundSplat> groundSplats;
-        std::vector<Level::GroundPaint> groundPaint;
-        std::vector<Level::TileRotation> tileRotations;
-        std::vector<Level::Gate> gates;
-        std::vector<Level::Rotator> rotators;
-        std::vector<Level::LockPlate> lockPlates;
-        std::vector<Level::Plate> plates;
-        std::vector<Level::Elevator> elevators;
-        std::vector<Level::Minecart> minecarts;
-        std::vector<Level::ObjectLink> objectLinks;
-        std::vector<Level::Portal> portals;
-        // One per pressure plate, sorted by cell (see linkGroups).
-        std::vector<Level::LinkColor> plateColors;
+    struct DocumentSnapshot : DocumentContent {
         std::filesystem::path filePath;
         // Undoing a load has to restore where the document came from too, or
         // the restored contents would be attributed to the wrong screen.
@@ -537,7 +522,12 @@ private:
         int activeLayer = 0;
         std::optional<std::size_t> selectedDecoration;
         std::optional<std::size_t> selectedSelector;
-        bool dirty = false;
+        uint64_t identity = 0;
+    };
+
+    struct SavedDocument {
+        DocumentContent content;
+        bool publicationPending = false;
     };
 
     struct EditActionRecord {
@@ -578,6 +568,8 @@ private:
         std::optional<CharacterType> character) const;
     [[nodiscard]] static Level::Definition linkedDefinition(
         const Document& document, std::optional<CharacterType> character);
+    [[nodiscard]] bool documentDirty(const Document& document) const;
+    SavedDocument& noteSavedDocument(const std::filesystem::path& path);
     void cacheActiveDraft();
     void noteRecentTile(TileType tile);
     [[nodiscard]] static std::filesystem::path draftKey(
@@ -630,6 +622,8 @@ private:
     EditHistory redoHistory_;
     HistoryLimits historyLimits_;
     uint64_t historySequence_ = 0;
+    uint64_t documentSequence_ = 0;
+    std::map<std::filesystem::path, SavedDocument> savedDocuments_;
     // Open stroke: the snapshot from before its first change, plus how many
     // cell edits it has absorbed.
     std::optional<DocumentSnapshot> strokeBefore_;

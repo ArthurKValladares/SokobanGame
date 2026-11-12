@@ -848,6 +848,12 @@ private:
             if (!levelIndex) {
                 throw std::runtime_error("unexpected level directory: " + levelDirectory.path().string());
             }
+            const std::string canonicalLevelName = levelDirectoryName(*levelIndex);
+            if (levelName != canonicalLevelName) {
+                throw std::runtime_error(
+                    "puzzle level directory must be named '" + canonicalLevelName +
+                    "': " + levelDirectory.path().string());
+            }
             auto& levelScreens = screens[*levelIndex];
             for (const auto& screenFile : std::filesystem::directory_iterator(levelDirectory.path())) {
                 if (!screenFile.is_regular_file()) {
@@ -861,6 +867,12 @@ private:
                     screenIndexFromFilename(screenName);
                 if (!screenIndex) {
                     throw std::runtime_error("unexpected level file: " + screenFile.path().string());
+                }
+                const std::string canonicalScreenName = screenFilename(*screenIndex);
+                if (screenName != canonicalScreenName) {
+                    throw std::runtime_error(
+                        "puzzle screen file must be named '" + canonicalScreenName +
+                        "': " + screenFile.path().string());
                 }
                 levelScreens.insert(*screenIndex);
                 const Level level = Level::loadFromFile(screenFile.path());

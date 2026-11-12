@@ -19,9 +19,10 @@ void SourceWatcher::watchFile(const std::filesystem::path& path)
 
 void SourceWatcher::watchTree(
     const std::filesystem::path& root,
-    std::vector<std::string> extensions)
+    std::vector<std::string> extensions,
+    bool reportRemovals)
 {
-    trees_.push_back({ root.lexically_normal(), std::move(extensions) });
+    trees_.push_back({ root.lexically_normal(), std::move(extensions), reportRemovals });
     if (primed_) {
         for (const std::filesystem::path& path : currentPaths()) {
             if (!stamps_.contains(path)) {
@@ -97,7 +98,8 @@ std::vector<std::filesystem::path> SourceWatcher::currentPaths() const
 std::vector<std::filesystem::path> SourceWatcher::poll()
 {
     std::vector<std::filesystem::path> changed;
-    for (const std::filesystem::path& path : currentPaths()) {
+    const auto paths = currentPaths();
+    for (const std::filesystem::path& path : paths) {
         const Stamp stamp = stampOf(path);
         const auto found = stamps_.find(path);
         const bool differs = found == stamps_.end()
@@ -108,6 +110,26 @@ std::vector<std::filesystem::path> SourceWatcher::poll()
             changed.push_back(path);
         }
     }
+    std::erase_if(stamps_, [&](const auto& entry) {
+        if (std::ranges::binary_search(paths, entry.first)) {
+            return false;
+        }
+        std::error_code error;
+        if (std::filesystem::exists(entry.first, error) || error) {
+            return false;
+        }
+        const bool report = std::ranges::any_of(trees_, [&](const Tree& tree) {
+            const auto relative = entry.first.lexically_relative(tree.root);
+            return tree.reportRemovals && !relative.empty() &&
+                *relative.begin() != ".." &&
+                std::ranges::find(tree.extensions, entry.first.extension().string()) !=
+                    tree.extensions.end();
+        });
+        if (primed_ && report && entry.second.exists) {
+            changed.push_back(entry.first);
+        }
+        return true;
+    });
     primed_ = true;
     return changed;
 }

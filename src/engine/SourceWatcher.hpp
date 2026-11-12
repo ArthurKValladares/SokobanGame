@@ -24,13 +24,14 @@ public:
     // (".scr", ".json"), including files created later.
     void watchTree(
         const std::filesystem::path& root,
-        std::vector<std::string> extensions);
+        std::vector<std::string> extensions,
+        bool reportRemovals = false);
     // Replaces the set of individually watched files, keeping the stamps of
     // files that stay watched.
     void setWatchedFiles(const std::vector<std::filesystem::path>& paths);
 
     // Files created or modified since the previous poll. The first poll only
-    // records stamps. Deleted files are not reported.
+    // records stamps. Removals are reported for trees that opt in.
     [[nodiscard]] std::vector<std::filesystem::path> poll();
 
     [[nodiscard]] std::size_t watchedCount() const { return stamps_.size(); }
@@ -46,6 +47,7 @@ private:
     struct Tree {
         std::filesystem::path root;
         std::vector<std::string> extensions;
+        bool reportRemovals = false;
     };
 
     [[nodiscard]] static Stamp stampOf(const std::filesystem::path& path);

@@ -11,9 +11,9 @@
 
 // Keeps `solutions/` in step with the screens under `levels/`.
 //
-// Each screen whose content has a recording gets exactly one file,
-// `level<L>-screen<S>.solution`, holding the shortest recording known for that
-// content. Recordings of content that is not on disk (an editor draft that
+// Each screen with a passing recording gets one file,
+// `level<L>-screen<S>.solution`, holding the shortest verified recording for
+// that content. Recordings of content that is not on disk (an editor draft that
 // has not been saved yet) wait in `solutions/drafts/<digest>.solution` and
 // move into place once a screen with that content appears. Recordings whose
 // screen changed stay where they are, so the replay test can point them out,
@@ -44,7 +44,9 @@ struct SolveToStore {
 };
 
 // Brings the directory in line with the rules above. With a solve, records
-// it first and offers it as a candidate. Throws on I/O errors.
+// it first and offers it as a candidate. Stages replacements and originals
+// before publishing. Throws on I/O errors and retains backup files under
+// drafts/ if any live file cannot be restored.
 [[nodiscard]] std::vector<StoreChange> reconcileStore(
     const std::filesystem::path& levelsRoot,
     const std::filesystem::path& solutionsDir,

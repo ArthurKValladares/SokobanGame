@@ -1,6 +1,7 @@
 #include "engine/RuntimeContent.hpp"
 
 #include "engine/ContentPipeline.hpp"
+#include "engine/LevelProjectStore.hpp"
 
 #include <SDL3/SDL_filesystem.h>
 
@@ -8,7 +9,8 @@
 
 namespace sokoban {
 
-std::filesystem::path runtimeContentRoot()
+std::filesystem::path runtimeContentRoot(
+    const std::filesystem::path& sourceLevelRoot)
 {
     const char* basePath = SDL_GetBasePath();
     if (basePath == nullptr || *basePath == '\0') {
@@ -16,6 +18,9 @@ std::filesystem::path runtimeContentRoot()
     }
 
     const std::filesystem::path root = std::filesystem::path(basePath) / "assets";
+    if (!sourceLevelRoot.empty()) {
+        LevelProjectStore::recover(sourceLevelRoot);
+    }
     validateContentPackage(root, SOKOBAN_GAME_VERSION);
     return root;
 }
