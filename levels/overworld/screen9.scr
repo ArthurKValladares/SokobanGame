@@ -37,6 +37,11 @@
 @tilerotation {"cell":[4,6,1],"quarterTurns":2}
 @tilerotation {"cell":[7,6,1],"quarterTurns":1}
 @tilerotation {"cell":[8,6,1],"quarterTurns":3}
+@selector {"cell":[3,2,2],"id":1,"target":{"level":6,"screen":0}}
+@selector {"cell":[4,2,2],"id":2,"target":{"level":6,"screen":1}}
+@selector {"cell":[5,2,2],"id":3,"target":{"level":6,"screen":2}}
+@selector {"cell":[3,4,2],"id":4,"target":{"level":7,"screen":0}}
+@selector {"cell":[4,4,2],"id":5,"target":{"level":7,"screen":1}}
 
 @layer 0
 .        
