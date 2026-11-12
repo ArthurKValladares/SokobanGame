@@ -3,7 +3,9 @@
 @crystal {"cell":[14,11,2],"skipping":false}
 @groundsplat {"base":"GroundGrass","color":[0.25,0.75,0.3499999940395355],"detail":"GroundRock","mask":"GroundSplatMap3_2","name":"Ground"}
 @water 1
-@gate {"cell":[15,7,2],"color":[1.0,0.7200000286102295,0.11999999731779099],"plates":[[6,7,2],[6,8,2],[15,8,2]]}
+@linkcolor {"cell":[6,7,2],"color":[1.0,0.7200000286102295,0.11999999731779099]}
+@linkcolor {"cell":[6,8,2],"color":[1.0,0.7200000286102295,0.11999999731779099]}
+@linkcolor {"cell":[15,8,2],"color":[1.0,0.7200000286102295,0.11999999731779099]}
 
 @layer 0
 DDDDDDDDDDDDDDDDDDDDDD
@@ -12,7 +14,7 @@ DDDDDDDDDDDDDDDDDDDDDD
  DDDDD          DDDDD 
  DDDDD          DDDDD 
  DDDDD          DDDDD 
- DDDDDDD      DDDDDDD 
+ DDDDDDD      D DDDDD 
  DDDDDDD      DDDDDDD 
   DDDDDD      DDDDDD  
   DDDDDD      DDDDDD  
@@ -29,7 +31,7 @@ DDDDDDDDDDDDDDDDDDDDDD
       FXcc.ASScF      
       .FYcA.YVaa      
         FFFX.A        
-      c .VYZFa cF     
+      c .VYZFa c      
       F YcaVFY A      
         YYZZAa        
       VFYX.ZZVaZ      
@@ -45,7 +47,7 @@ DDDDDDDDDDDDDDDDDDDDDD
        R      R       
                       
                       
-      P   12   GE     
+      P   12   E      
       P   34   P      
                       
                       

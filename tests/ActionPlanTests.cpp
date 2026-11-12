@@ -899,6 +899,93 @@ void testWaterStreamRidersExcludeBeltsAboveStreams()
         std::vector<EntityId> { state.movables[0].id });
 }
 
+void testPushedPadStopsAtStreamBeforeCurrentRide()
+{
+    TEST("pushedPadStopsAtStreamBeforeCurrentRide");
+    const Level level = makeLevel({ { "...,WW", "WWW,WW", "WWWWWW" },
+        { " C$   ", "      ", "      " },
+        { "  R   ", "      ", "      " } });
+    const auto initial = rules::initialState(level);
+    const auto shove = plans::planPlayerStep(level, initial,
+        MoveDirection::Right, { .playerMove = 3, .conveyor = 3 }, .2f);
+    CHECK(shove.has_value());
+    if (!shove) return;
+    const auto& atStream = shove->action.after;
+    CHECK(shove->action.durationSeconds == .2f);
+    CHECK(atStream.players[0].cell == cell(2, 0, 1));
+    CHECK(atStream.movables[0].cell == cell(3, 0, 1));
+    CHECK(atStream.movables[1].cell == cell(3, 0, 2));
+    CHECK(plans::slidingEntities(atStream).empty());
+
+    const auto riders = plans::waterStreamRiders(level, atStream);
+    CHECK(riders == std::vector<EntityId> { atStream.movables[0].id });
+    const auto ride = plans::planConveyorRides(level, atStream, riders,
+        { .conveyor = 3 }, .4f);
+    CHECK(ride.has_value());
+    if (!ride) return;
+    CHECK(ride->action.after.movables[0].cell == cell(3, 2, 1));
+    CHECK(ride->action.after.movables[1].cell == cell(3, 2, 2));
+}
+
+void testRoundRockBoardsPadWithoutOverridingItsCurrent()
+{
+    TEST("roundRockBoardsPadWithoutOverridingItsCurrent");
+    const Level level = makeLevel({ { "..WW,WW.", "WWWWWWWW" },
+        { "C\\  $   ", "        " } });
+    const auto initial = rules::initialState(level);
+    const auto shove = plans::planPlayerStep(level, initial,
+        MoveDirection::Right, {}, .2f);
+    CHECK(shove.has_value());
+    if (!shove) return;
+    const auto& pushed = shove->action.after;
+    const auto skip = plans::planSlides(level, pushed,
+        plans::slidingEntities(pushed), { .slide = 3, .conveyor = 3 }, .2f);
+    CHECK(skip.has_value());
+    if (!skip) return;
+    const auto& boarded = skip->action.after;
+    CHECK(boarded.movables[0].cell == cell(4, 0, 2));
+    CHECK(boarded.movables[1].cell == cell(4, 0, 1));
+    CHECK(plans::slidingEntities(boarded).empty());
+
+    auto legacy = boarded;
+    legacy.movables[1].sliding = MoveDirection::Right;
+    const auto brake = plans::planSlides(level, legacy,
+        plans::slidingEntities(legacy), {}, .2f);
+    CHECK(brake.has_value());
+    if (brake) CHECK(brake->action.after == boarded);
+
+    const auto ride = plans::planConveyorRides(level, boarded,
+        plans::waterStreamRiders(level, boarded), {}, .4f);
+    CHECK(ride.has_value());
+    if (!ride) return;
+    CHECK(ride->action.after.movables[0].cell == cell(4, 1, 2));
+    CHECK(ride->action.after.movables[1].cell == cell(4, 1, 1));
+}
+
+void testLinkedRockCannotPushPadThroughCurrentDuringSkip()
+{
+    TEST("linkedRockCannotPushPadThroughCurrentDuringSkip");
+    const Level level = Level::loadFromDefinition({
+        .layers = { { "..WWWWW.", "WW,WWWWW", "WWWWWWWW" },
+            { "C\\      ", " $      ", "        " } },
+        .objectLinks = { { .cell = cell(1, 0, 1), .color = { .2f, .4f, .8f } },
+            { .cell = cell(1, 1, 1), .color = { .2f, .4f, .8f } } },
+    }, "linked lily pad");
+    const auto initial = rules::initialState(level);
+    const auto shove = plans::planPlayerStep(level, initial,
+        MoveDirection::Right, {}, .2f);
+    CHECK(shove.has_value());
+    if (!shove) return;
+    const auto& pushed = shove->action.after;
+    CHECK(pushed.movables[1].cell == cell(2, 1, 1));
+    const auto skip = plans::planSlides(level, pushed,
+        plans::slidingEntities(pushed), {}, .2f);
+    CHECK(skip.has_value());
+    if (!skip) return;
+    CHECK(skip->action.after.movables[0].cell == cell(7, 0, 1));
+    CHECK(skip->action.after.movables[1] == pushed.movables[1]);
+}
+
 void testWaterStreamPlansReevaluateCornersAndReserveTheirStack()
 {
     TEST("waterStreamPlansReevaluateCornersAndReserveTheirStack");
@@ -1098,6 +1185,9 @@ void testCoastingPadWithoutRockUsesSlowerClockAndStopsInWater()
 
 int main()
 {
+    testLinkedRockCannotPushPadThroughCurrentDuringSkip();
+    testRoundRockBoardsPadWithoutOverridingItsCurrent();
+    testPushedPadStopsAtStreamBeforeCurrentRide();
     testRoundRockPlansSkipThenRideAtQuarterSkippingSpeed();
     testCoastingPadWithoutRockUsesSlowerClockAndStopsInWater();
     testRoundRockWakeJoinsPlanClosureAndReservations();

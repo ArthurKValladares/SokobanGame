@@ -42,20 +42,35 @@ Vec3 toVec3(GridPosition3 position)
     };
 }
 
-Vec3 movableRenderTarget(GridPosition3 position, bool fallen)
+constexpr float voidFallDepthBelowBoard = 1.0f;
+
+bool diedInVoid(const GameState& state, GridPosition3 cell, bool dead)
+{
+    // An unsupported death keeps its lowest in-bounds cell for replay and
+    // undo. A minecart can still hold a dead actor at that layer.
+    return dead && cell.z == 0 &&
+        std::ranges::find(state.minecarts, cell, &GameState::Minecart::cell) ==
+            state.minecarts.end();
+}
+
+Vec3 movableRenderTarget(GridPosition3 position, bool fallen, bool voidDeath)
 {
     Vec3 target = toVec3(position);
     if (fallen) {
         target.z -= config::sunkenMovableDepthBelowGround;
+    } else if (voidDeath) {
+        target.z -= voidFallDepthBelowBoard;
     }
     return target;
 }
 
-Vec3 playerRenderTarget(GridPosition3 position, bool drowned)
+Vec3 playerRenderTarget(GridPosition3 position, bool drowned, bool voidDeath)
 {
     Vec3 target = toVec3(position);
     if (drowned) {
         target.z -= config::drownedPlayerDepthBelowGround;
+    } else if (voidDeath) {
+        target.z -= voidFallDepthBelowBoard;
     }
     return target;
 }
@@ -1227,7 +1242,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
     const auto addRide = [&](EntityTarget target,
                              GridPosition3 before,
                              GridPosition3 after,
-                             bool fallen) {
+                             bool fallen,
+                             bool voidDeath) {
         const ElevatorMove* ride = rideOf(elevators, before, after);
         if (ride == nullptr) {
             return after;
@@ -1237,8 +1253,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
             builder,
             target,
             *ride,
-            movableRenderTarget(boarded, fallen),
-            movableRenderTarget(after, fallen));
+            movableRenderTarget(boarded, fallen, voidDeath),
+            movableRenderTarget(after, fallen, voidDeath));
         return boarded;
     };
 
@@ -1248,6 +1264,19 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
                                    Vec3 from,
                                    Vec3 to,
                                    float arcHeight = 0.0f) {
+        const auto addSegment = [&](Vec3 start, Vec3 end, float startSeconds, float duration) {
+            builder.addMotion({ .target = target,
+                                .from = start,
+                                .to = end,
+                                .startSeconds = startSeconds,
+                                .durationSeconds = duration,
+                                .arcHeight = arcHeight });
+            // The sampler moves horizontally before descending. Return
+            // the moment this segment leaves the level of the ledge.
+            const float drop = std::max(start.z - end.z, 0.0f);
+            const float distance = gridDistance(start, end);
+            return startSeconds + duration * (1.0f - drop / std::max(distance, 0.001f));
+        };
         if (level && transits) {
             std::vector<std::pair<Vec3, Vec3>> physicalLegs;
             Vec3 current = from;
@@ -1270,18 +1299,14 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
                 for (const auto& [start, end] : physicalLegs)
                     distance += length(end - start);
                 float startSeconds = 0.0f;
+                float fallStartSeconds = 0.0f;
                 for (const auto& [start, end] : physicalLegs) {
                     const float duration = motionDuration *
                         length(end - start) / std::max(distance, 0.001f);
-                    builder.addMotion({ .target = target,
-                                        .from = start,
-                                        .to = end,
-                                        .startSeconds = startSeconds,
-                                        .durationSeconds = duration,
-                                        .arcHeight = arcHeight });
+                    fallStartSeconds = addSegment(start, end, startSeconds, duration);
                     startSeconds += duration;
                 }
-                return;
+                return fallStartSeconds;
             }
         }
         if (level && !transits) {
@@ -1296,25 +1321,11 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
                     Vec3 { static_cast<float>(entryEdge.x) * 0.5f, static_cast<float>(entryEdge.y) * 0.5f, 0 };
                 const Vec3 emerged = toVec3(*exit) +
                     Vec3 { static_cast<float>(exitEdge.x) * 0.5f, static_cast<float>(exitEdge.y) * 0.5f, 0 };
-                builder.addMotion({ .target = target,
-                                    .from = from,
-                                    .to = mouth,
-                                    .durationSeconds = motionDuration * 0.5f,
-                                    .arcHeight = arcHeight });
-                builder.addMotion({ .target = target,
-                                    .from = emerged,
-                                    .to = to,
-                                    .startSeconds = motionDuration * 0.5f,
-                                    .durationSeconds = motionDuration * 0.5f,
-                                    .arcHeight = arcHeight });
-                return;
+                addSegment(from, mouth, 0.0f, motionDuration * 0.5f);
+                return addSegment(emerged, to, motionDuration * 0.5f, motionDuration * 0.5f);
             }
         }
-        builder.addMotion({ .target = target,
-                            .from = from,
-                            .to = to,
-                            .durationSeconds = motionDuration,
-                            .arcHeight = arcHeight });
+        return addSegment(from, to, 0.0f, motionDuration);
     };
 
     const std::size_t playerCount = action.before.players.size();
@@ -1345,15 +1356,17 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
         const ElevatorMove* ride = rideOf(elevators, before.cell, after.cell);
         const GridPosition3 walkedTo =
             ride != nullptr ? boardingCell(*ride, after.cell) : after.cell;
-        const Vec3 from = playerRenderTarget(before.cell, before.drowned);
-        const Vec3 to = playerRenderTarget(walkedTo, after.drowned);
+        const bool voidDeath = !after.drowned && diedInVoid(action.after, after.cell, after.dead);
+        const Vec3 from = playerRenderTarget(before.cell, before.drowned,
+            diedInVoid(action.before, before.cell, before.dead));
+        const Vec3 to = playerRenderTarget(walkedTo, after.drowned, voidDeath);
         if (ride != nullptr) {
             addPlatformPathMotion(
                 builder,
                 target,
                 *ride,
                 to,
-                playerRenderTarget(after.cell, after.drowned));
+                playerRenderTarget(after.cell, after.drowned, voidDeath));
         }
         const bool moved = gridDistance(from, to) > 0.0001f;
         const bool transformed = std::ranges::find(
@@ -1370,9 +1383,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
             if (visual != players_.end()) {
                 movementClipTime = visual->clipTimeFor(movementUse);
             }
-            if (moved) {
-                addUnitMotion(target, before.cell, walkedTo, from, to);
-            }
+            const float fallStart = moved
+                ? addUnitMotion(target, before.cell, walkedTo, from, to) : 0.0f;
             static_cast<void>(builder.addAnimation({
                 .target = target,
                 .use = movementUse,
@@ -1381,6 +1393,16 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
                 .durationSeconds = motionDuration,
                 .loops = true,
             }));
+            if (voidDeath && !before.dead) {
+                static_cast<void>(builder.addAnimation({
+                    .target = target,
+                    .use = AnimationUse::PlayerDeath,
+                    .completionUse = AnimationUse::PlayerDeadIdle,
+                    .fallbackUse = AnimationUse::PlayerDeadIdle,
+                    .earliestStartSeconds = fallStart,
+                    .durationSeconds = motionDuration - fallStart,
+                }));
+            }
         }
     }
 
@@ -1391,10 +1413,12 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
             action.before.movables, index, action.after.movables);
         if (!afterIndex) continue;
         const GameState::Movable& after = action.after.movables[*afterIndex];
+        const bool voidDeath = diedInVoid(action.after, after.cell, after.dead);
         const GridPosition3 walkedTo = addRide(
-            movableTarget(before, index), before.cell, after.cell, after.fallen);
-        const Vec3 from = movableRenderTarget(before.cell, before.fallen);
-        const Vec3 to = movableRenderTarget(walkedTo, after.fallen);
+            movableTarget(before, index), before.cell, after.cell, after.fallen, voidDeath);
+        const Vec3 from = movableRenderTarget(before.cell, before.fallen,
+            diedInVoid(action.before, before.cell, before.dead));
+        const Vec3 to = movableRenderTarget(walkedTo, after.fallen, voidDeath);
         if (gridDistance(from, to) > 0.0001f) {
             const bool onPad = std::ranges::any_of(action.before.movables,
                 [&](const auto& pad) {
@@ -1403,7 +1427,7 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
                         pad.cell.z + 1 == before.cell.z;
                 });
             const bool skips = level && tileTypeIsSkippingStone(before.type) &&
-                !before.fallen && !after.fallen && !onPad &&
+                !before.fallen && !after.fallen && !voidDeath && !onPad &&
                 (before.cell.x != walkedTo.x || before.cell.y != walkedTo.y) &&
                 (tileTypeIsWater(level->supportingTileAt(before.cell).value_or(TileType::Air)) ||
                  tileTypeIsWater(level->supportingTileAt(walkedTo).value_or(TileType::Air)));
@@ -1451,10 +1475,12 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
             target,
             AnimationUse::EnemyIdle,
             initialClipTime);
+        const bool voidDeath = diedInVoid(action.after, after.cell, after.dead);
         const GridPosition3 walkedTo =
-            addRide(target, before.cell, after.cell, after.fallen);
-        const Vec3 from = movableRenderTarget(before.cell, before.fallen);
-        const Vec3 to = movableRenderTarget(walkedTo, after.fallen);
+            addRide(target, before.cell, after.cell, after.fallen, voidDeath);
+        const Vec3 from = movableRenderTarget(before.cell, before.fallen,
+            diedInVoid(action.before, before.cell, before.dead));
+        const Vec3 to = movableRenderTarget(walkedTo, after.fallen, voidDeath);
         if (gridDistance(from, to) > 0.0001f) {
             addUnitMotion(target, before.cell, walkedTo, from, to);
         }
@@ -1473,6 +1499,7 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
                         .has(CharacterAbility::AttackImmunity)) &&
                 (playerBefore.cell != playerAfter.cell || before.cell != after.cell);
             if (playerBefore.dead || (!playerAfter.dead && !protectedSurvivor) || playerAfter.drowned ||
+                diedInVoid(action.after, playerAfter.cell, playerAfter.dead) ||
                 after.fallen || after.dead ||
                 playerAfter.cell.z != after.cell.z) {
                 continue;
@@ -1502,7 +1529,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
             action.before.players, playerIndex, action.after.players);
         if (!afterIndex) continue;
         const GameState::Player& after = action.after.players[*afterIndex];
-        if (before.dead || !after.dead) {
+        if (before.dead || !after.dead ||
+            (!after.drowned && diedInVoid(action.after, after.cell, after.dead))) {
             continue;
         }
         const IntentId deathIntent = builder.addAnimation({
@@ -1971,7 +1999,7 @@ void GameplayPresentation::syncToGameState(const GameState& state)
         visual.motion.target = target;
         setImmediatePosition(
             visual.motion,
-            playerRenderTarget(player.cell, player.drowned));
+            playerRenderTarget(player.cell, player.drowned, diedInVoid(state, player.cell, player.dead)));
         setRestAnimation(visual, playerRestAnimation(player));
         players_.push_back(visual);
     }
@@ -1993,7 +2021,7 @@ void GameplayPresentation::syncToGameState(const GameState& state)
         visual.target = target;
         setImmediatePosition(
             visual,
-            movableRenderTarget(movable.cell, movable.fallen));
+            movableRenderTarget(movable.cell, movable.fallen, diedInVoid(state, movable.cell, movable.dead)));
         movables_.push_back(visual);
     }
 
@@ -2018,7 +2046,7 @@ void GameplayPresentation::syncToGameState(const GameState& state)
         visual.motion.target = target;
         setImmediatePosition(
             visual.motion,
-            movableRenderTarget(enemy.cell, enemy.fallen));
+            movableRenderTarget(enemy.cell, enemy.fallen, diedInVoid(state, enemy.cell, enemy.dead)));
         setRestAnimation(visual, AnimationUse::EnemyIdle);
         enemies_.push_back(visual);
     }

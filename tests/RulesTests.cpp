@@ -176,9 +176,11 @@ void testClericWalksOverWaterAndAirOnlyWhileAttacked()
 
         auto noAttack = before;
         noAttack.movables[0].dead = true;
-        const auto blocked = rules::step(level, noAttack, MoveDirection::Down);
-        CHECK(blocked.players[0].cell == before.players[0].cell);
-        CHECK(!rules::clericGravityProtection(level, blocked)[0]);
+        const auto fell = rules::step(level, noAttack, MoveDirection::Down);
+        CHECK(fell.players[0].cell == cell(1, 1, floor[1] == 'W' ? 1 : 0));
+        CHECK(fell.players[0].dead);
+        CHECK(fell.players[0].drowned == (floor[1] == 'W'));
+        CHECK(!rules::clericGravityProtection(level, fell)[0]);
     }
 }
 
@@ -259,8 +261,11 @@ void testClericAlliesCrossWaterAndLoseProtectionWhenLeaving()
     CHECK(!rules::clericGravityProtection(level, leaving)[1]);
     auto noAttack = before;
     noAttack.enemies[0].dead = true;
-    CHECK(rules::scopedStep(level, noAttack, MoveDirection::Up,
-        {}, { .actors = { allyId } }).players[1].cell == cell(1, 2, 1));
+    const auto fell = rules::scopedStep(level, noAttack, MoveDirection::Up,
+        {}, { .actors = { allyId } });
+    CHECK(fell.players[1].cell == cell(1, 1, 1));
+    CHECK(fell.players[1].dead);
+    CHECK(fell.players[1].drowned);
 }
 
 void testIdleClericProtectsKnightWhoEntersTurretFire()
@@ -310,9 +315,11 @@ void testIdleClericProtectsKnightWhoEntersTurretFire()
         } else {
             auto noAttack = before;
             noAttack.movables[0].dead = true;
-            const auto blocked = rules::scopedStep(level, noAttack,
+            const auto fell = rules::scopedStep(level, noAttack,
                 MoveDirection::Up, {}, knight);
-            CHECK(blocked.players[1].cell == before.players[1].cell);
+            CHECK(fell.players[1].cell == cell(2, 3, support == 'W' ? 1 : 0));
+            CHECK(fell.players[1].dead);
+            CHECK(fell.players[1].drowned == (support == 'W'));
         }
         auto restored = entered.state;
         StateDelta::between(before, entered.state).inverted().applyTo(restored);
@@ -422,13 +429,11 @@ void testKnightPushesSharingClericAcrossAirAndWater()
         auto noAttack = initial;
         noAttack.movables[0].dead = true;
         const auto unprotected = rules::scopedStep(level, noAttack, MoveDirection::Right, {}, knight);
-        if (gap == "   ") {
-            CHECK(unprotected == noAttack);
-        } else {
-            CHECK(unprotected.players[1].cell == cell(4, 0, 1));
-            CHECK(unprotected.players[1].drowned);
-            CHECK(unprotected.players[1].dead);
-        }
+        CHECK(unprotected.players[0].cell == cell(3, 0, 1));
+        CHECK(!unprotected.players[0].dead);
+        CHECK(unprotected.players[1].cell == cell(4, 0, gap == "WWW" ? 1 : 0));
+        CHECK(unprotected.players[1].drowned == (gap == "WWW"));
+        CHECK(unprotected.players[1].dead);
         rules::StepRates fast;
         fast.playerMove = 2;
         const auto twice = rules::scopedStep(level, initial, MoveDirection::Right, fast, knight);
@@ -441,17 +446,153 @@ void testKnightPushesSharingClericAcrossAirAndWater()
     }
 }
 
+void testPaladinShovesClericFromBankToBank()
+{
+    TEST("Paladin shoves the Cleric from solid ground across a void to the far bank");
+    const auto level = makeLevel({ { ".....   ..." }, { "e QC       " } },
+        CharacterType::Cleric);
+    const auto initial = rules::initialState(level);
+    auto state = initial;
+    const rules::StepScope pusher { .actors = { initial.players[0].id } };
+    for (int step = 1; step <= 6; ++step) {
+        const auto after = rules::scopedStepWithEvents(level, state, MoveDirection::Right, {}, pusher);
+        CHECK(after.playerPushedAlly);
+        CHECK(after.state.players[0].cell == cell(2 + step, 0, 1));
+        CHECK(after.state.players[1].cell == cell(3 + step, 0, 1));
+        CHECK(!rules::anyPlayerDead(after.state));
+        CHECK(rules::clericGravityProtection(level, after.state)[0]);
+        CHECK(rules::clericGravityProtection(level, after.state)[1]);
+        CHECK(after.turretShots.size() == 1);
+        state = after.state;
+    }
+    StateDelta::between(initial, state).inverted().applyTo(state);
+    CHECK(state == initial);
+}
+
+void testPushPowerCanShoveProtectedClericAcrossLethalTerrain()
+{
+    TEST("ordinary push power shoves a protected Cleric across water and air");
+    for (const std::string gap : { "WWW", "   " }) {
+        for (const bool attacksCleric : { false, true }) {
+            const auto level = makeLevel({ { "...." + gap + "..." },
+                { attacksCleric ? "  QC    w " : "e QC      " } }, CharacterType::Cleric);
+            const auto initial = rules::initialState(level);
+            const rules::StepScope pusher { .actors = { initial.players[0].id } };
+            const auto after = rules::scopedStepWithEvents(
+                level, initial, MoveDirection::Right, {}, pusher);
+            CHECK(after.playerPushedAlly);
+            CHECK(after.state.players[0].cell == cell(3, 0, 1));
+            CHECK(after.state.players[1].cell == cell(4, 0, 1));
+            CHECK(!after.state.players[0].dead);
+            CHECK(!after.state.players[1].dead);
+            CHECK(rules::clericGravityProtection(level, after.state)[1]);
+            CHECK(after.turretShots.size() == 1);
+            if (!after.turretShots.empty()) {
+                const std::size_t target = attacksCleric ? 1 : 0;
+                CHECK(after.turretShots.front().target.id == initial.players[target].id);
+            }
+
+            auto thief = initial;
+            thief.players[0].character = CharacterType::Druid;
+            const auto blocked = rules::scopedStepWithEvents(
+                level, thief, MoveDirection::Right, {}, pusher);
+            CHECK(!blocked.playerPushedAlly);
+            CHECK(blocked.state == thief);
+
+            const auto shared = rules::scopedStepWithEvents(level, initial, MoveDirection::Right, {},
+                { .actors = { initial.players[0].id, initial.players[1].id } });
+            CHECK(shared.state.players[0].cell == after.state.players[0].cell);
+            CHECK(shared.state.players[1].cell == cell(4, 0, attacksCleric || gap == "WWW" ? 1 : 0));
+            CHECK(shared.state.players[1].dead == !attacksCleric);
+            CHECK(!shared.playerPushedAlly);
+        }
+    }
+}
+
+void testClericShoveChecksThreatAtLanding()
+{
+    TEST("a shove can enter an attack but cannot carry the aura away from one");
+    for (const bool entersAttack : { false, true }) {
+        const auto level = makeLevel({ { "......", "....W." },
+            { entersAttack ? "    N " : "  N   ", "  QC  " } }, CharacterType::Cleric);
+        const auto initial = rules::initialState(level);
+        CHECK(rules::clericGravityProtection(level, initial)[1] == !entersAttack);
+        const auto after = rules::scopedStepWithEvents(level, initial, MoveDirection::Right, {},
+            { .actors = { initial.players[0].id } });
+        CHECK(after.playerPushedAlly);
+        CHECK(after.state.players[1].cell == cell(4, 1, 1));
+        CHECK(after.state.players[1].dead == !entersAttack);
+        CHECK(after.state.players[1].drowned == !entersAttack);
+    }
+}
+
+void testPusherCanFallAfterShovingClericToSafety()
+{
+    TEST("Paladin can lose protection while shoving the Cleric onto solid ground");
+    for (const char terrain : { ' ', 'W' }) {
+        const auto level = makeLevel({ { "......", std::string("..") + terrain + "..." },
+            { " N    ", " QC   " }, { "      ", " R    " } }, CharacterType::Cleric);
+        const auto initial = rules::initialState(level);
+        CHECK(rules::clericGravityProtection(level, initial)[0]);
+        const auto after = rules::scopedStepWithEvents(level, initial, MoveDirection::Right, {},
+            { .actors = { initial.players[0].id } });
+        CHECK(after.playerPushedAlly);
+        CHECK(after.state.players[0].cell == cell(2, 1, terrain == 'W' ? 1 : 0));
+        CHECK(after.state.players[0].dead);
+        CHECK(after.state.players[0].drowned == (terrain == 'W'));
+        CHECK(after.state.players[1].cell == cell(3, 1, 1));
+        CHECK(!after.state.players[1].dead);
+        CHECK(after.state.movables[0].cell == after.state.players[0].cell);
+        CHECK(after.state.movables[0].fallen == (terrain == 'W'));
+        CHECK(after.state.movables[0].dead == (terrain == ' '));
+    }
+}
+
+void testLinkedRockCanRemoveProtectionGainedDuringClericShove()
+{
+    TEST("a linked rock can remove newly gained gravity protection before the shove settles");
+    const Vec3 red { 1, 0, 0 };
+    const auto level = Level::loadFromDefinition({
+        .layers = {
+            { ".......", "...WW..", ".......", ".......", "......." },
+            { "       ", "  QC   ", "   R   ", "    n  ", " QR    " },
+        },
+        .objectLinks = {
+            { .cell = cell(3, 2, 1), .color = red },
+            { .cell = cell(2, 4, 1), .color = red },
+        },
+        .character = CharacterType::Cleric,
+    }, "linked rock cuts off shove protection");
+    const auto initial = rules::initialState(level);
+    CHECK(!rules::clericGravityProtection(level, initial)[1]);
+    const auto after = rules::scopedStepWithEvents(level, initial, MoveDirection::Right, {},
+        { .actors = { initial.players[0].id, initial.players[2].id } });
+    CHECK(after.playerPushedAlly);
+    CHECK(after.state.movables[0].cell == cell(4, 2, 1));
+    CHECK(after.state.players[0].cell == cell(3, 1, 1));
+    CHECK(after.state.players[1].cell == cell(4, 1, 1));
+    CHECK(after.state.players[0].dead);
+    CHECK(after.state.players[0].drowned);
+    CHECK(after.state.players[1].dead);
+    CHECK(after.state.players[1].drowned);
+    CHECK(!rules::clericGravityProtection(level, after.state)[1]);
+}
+
 void testClericShoveStaysAtomicAndSharingRequiresAnAttack()
 {
     TEST("Cleric shoves stay atomic and an idle group cannot float");
-    const auto blocked = makeLevel({ { "....." }, { "e KC#" } }, CharacterType::Cleric);
-    const auto initial = rules::initialState(blocked);
-    CHECK(rules::scopedStep(blocked, initial, MoveDirection::Right,
-        {}, { .actors = { initial.players[0].id } }) == initial);
-    const auto rogue = makeLevel({ { "....." }, { "e QC " } }, CharacterType::Cleric);
-    const auto rogueBefore = rules::initialState(rogue);
-    CHECK(rules::scopedStep(rogue, rogueBefore, MoveDirection::Right,
-        {}, { .actors = { rogueBefore.players[0].id } }) == rogueBefore);
+    for (const auto& layers : {
+             Level::LayerRows { { "....." }, { "e QC#" } },
+             Level::LayerRows { { "....." }, { "e QCR" } },
+             Level::LayerRows { { "....." }, { "e QC " }, { "  R# " } },
+         }) {
+        const auto blocked = makeLevel(layers, CharacterType::Cleric);
+        const auto initial = rules::initialState(blocked);
+        const auto after = rules::scopedStepWithEvents(blocked, initial, MoveDirection::Right,
+            {}, { .actors = { initial.players[0].id } });
+        CHECK(!after.playerPushedAlly);
+        CHECK(after.state == initial);
+    }
 
     const auto level = makeLevel({ { "....    ", "........" },
         { "e KC    ", " ^      " } }, CharacterType::Cleric);
@@ -3258,9 +3399,9 @@ void testStateDeltaCarriesMinecarts()
     CHECK(applied == before);
 }
 
-void testPlayerCannotWalkIntoWater()
+void testPlayerCanWalkIntoWaterAndDrown()
 {
-    TEST("playerCannotWalkIntoWater");
+    TEST("playerCanWalkIntoWaterAndDrown");
     const Level level = Level::loadFromLayers(
         {
             { ". " },
@@ -3271,11 +3412,12 @@ void testPlayerCannotWalkIntoWater()
     const GameState state = rules::initialState(level);
     CHECK(rules::isUnfilledWater(level, state, cell(1, 0, 1)));
 
-    const GameState blocked = rules::step(level, state, MoveDirection::Right);
-    CHECK(blocked == state);
-    CHECK(blocked.players[0].cell == cell(0, 0, 1));
-    CHECK(!blocked.players[0].dead);
-    CHECK(rules::isUnfilledWater(level, blocked, cell(1, 0, 1)));
+    const GameState drowned = rules::step(level, state, MoveDirection::Right);
+    CHECK(drowned.players[0].cell == cell(1, 0, 1));
+    CHECK(drowned.players[0].dead);
+    CHECK(drowned.players[0].drowned);
+    CHECK(!drowned.players[0].sliding);
+    CHECK(rules::isUnfilledWater(level, drowned, cell(1, 0, 1)));
 }
 
 void testPlayerCanSlideIntoWater()
@@ -3357,18 +3499,19 @@ void testLadderClimbBlockedByMovable()
     CHECK(rules::step(level, state, MoveDirection::Left) == state);
 }
 
-void testUnsupportedMovesAreBlocked()
+void testPlayerCanFallIntoVoidInsideTheBoard()
 {
-    TEST("unsupportedMovesAreBlocked");
-    // Walking into a column with nothing that can hold an entity is refused
-    // outright; entities never rest on air.
+    TEST("playerCanFallIntoVoidInsideTheBoard");
     const Level level = makeLevel({
         { ".  " },
         { "C  " },
     });
-    const GameState blocked = rules::step(level, rules::initialState(level), MoveDirection::Right);
-    CHECK(blocked.players[0].cell == cell(0, 0, 1));
-    CHECK(!blocked.players[0].dead);
+    const GameState initial = rules::initialState(level);
+    const GameState fallen = rules::step(level, initial, MoveDirection::Right);
+    CHECK(fallen.players[0].cell == cell(1, 0, 0));
+    CHECK(fallen.players[0].dead);
+    CHECK(!fallen.players[0].drowned);
+    CHECK(rules::step(level, initial, MoveDirection::Left) == initial);
 }
 
 void testSupportedDropIsStillAllowed()
@@ -3388,28 +3531,50 @@ void testSupportedDropIsStillAllowed()
     CHECK(!state.players[0].dead);
 }
 
-void testPushIntoVoidIsBlocked()
+void testPushIntoVoidRespectsCapacity()
 {
-    TEST("pushIntoVoidIsBlocked");
-    const Level level = makeLevel({
-        { "..  " },
-        { "CR  " },
-    });
-    const GameState after = rules::step(level, rules::initialState(level), MoveDirection::Right);
-    CHECK(after.players[0].cell == cell(0, 0, 1));
-    CHECK(after.movables[0].cell == cell(1, 0, 1));
-    CHECK(!after.movables[0].fallen);
+    TEST("pushIntoVoidRespectsCapacity");
+    const Level rock = makeLevel({ { "..  " }, { "CR  " } });
+    const GameState shovedRock = rules::step(rock, rules::initialState(rock), MoveDirection::Right);
+    CHECK(shovedRock.players[0].cell == cell(1, 0, 1));
+    CHECK(shovedRock.movables[0].cell == cell(2, 0, 0));
+    CHECK(shovedRock.movables[0].dead);
+    CHECK(!shovedRock.movables[0].fallen);
+
+    const Level enemy = makeLevel({ { "..  " }, { "CN  " } });
+    const GameState shovedEnemy = rules::step(enemy, rules::initialState(enemy), MoveDirection::Right);
+    CHECK(shovedEnemy.players[0].cell == cell(1, 0, 1));
+    CHECK(shovedEnemy.enemies[0].cell == cell(2, 0, 0));
+    CHECK(shovedEnemy.enemies[0].dead);
+    CHECK(!shovedEnemy.enemies[0].fallen);
+
+    for (const auto hero : { CharacterType::Rogue, CharacterType::Knight }) {
+        const Level chain = makeLevel({ { "... " }, { "CRR " } }, hero);
+        const GameState before = rules::initialState(chain);
+        const GameState after = rules::step(chain, before, MoveDirection::Right);
+        if (hero == CharacterType::Rogue) {
+            CHECK(after == before);
+        } else {
+            CHECK(after.players[0].cell == cell(1, 0, 1));
+            CHECK(after.movables[0].cell == cell(2, 0, 1));
+            CHECK(after.movables[1].cell == cell(3, 0, 0));
+            CHECK(after.movables[1].dead);
+        }
+    }
 }
 
-void testConveyorHoldsRiderAtVoidEdge()
+void testConveyorCanCarryRiderIntoVoid()
 {
-    TEST("conveyorHoldsRiderAtVoidEdge");
+    TEST("conveyorCanCarryRiderIntoVoid");
     const Level level = makeLevel({
         { "...  " },
-        { "C>R  " },
+        { "C>>  " },
     });
-    const GameState after = rules::step(level, rules::initialState(level), std::nullopt);
-    CHECK(after.movables[0].cell == cell(2, 0, 1));
+    auto before = rules::initialState(level);
+    before.movables.push_back({ .id = 30, .type = TileType::Rock, .cell = cell(2, 0, 1) });
+    const GameState after = rules::step(level, before);
+    CHECK(after.movables[0].cell == cell(3, 0, 0));
+    CHECK(after.movables[0].dead);
     CHECK(!after.movables[0].fallen);
 }
 
@@ -5271,18 +5436,22 @@ void testEveryHeroBoardsFloatingPadsFromShoreAndDismounts()
         CHECK(!dismounted.players[0].dead);
         CHECK(dismounted.movables == initial.movables);
     }
-    // A blocked boarding top falls back to ordinary collision and push
-    // rules, which reject a shove that would leave the walking hero in water.
+    // A blocked boarding top falls back to a shove. The rider travels with
+    // the pad, and the hero who pushed it steps into the water.
     const Level occupied = makeLevel({ { ".WW." }, { "C$  " }, { " C  " } });
     const auto occupiedBefore = rules::initialState(occupied);
     const auto pushed = rules::scopedStep(occupied, occupiedBefore, MoveDirection::Right, {},
         { .actors = { occupiedBefore.players[0].id } });
-    CHECK(pushed == occupiedBefore);
+    CHECK(pushed.movables[0].cell == cell(2, 0, 1));
+    CHECK(pushed.players[1].cell == cell(2, 0, 2));
+    CHECK(!pushed.players[1].dead);
+    CHECK(pushed.players[0].drowned);
     const Level ceiling = makeLevel({ { ".WW." }, { "C$  " }, { " #  " } });
     const auto ceilingBefore = rules::initialState(ceiling);
     const auto under = rules::scopedStep(ceiling, ceilingBefore, MoveDirection::Right, {},
         { .actors = { ceilingBefore.players[0].id } });
-    CHECK(under == ceilingBefore);
+    CHECK(under.movables[0].cell == cell(2, 0, 1));
+    CHECK(under.players[0].drowned);
 }
 
 void testWaterStreamsStopPadsAtBanksButExternalMovementCanBeachThem()
@@ -5340,7 +5509,9 @@ void testWaterStreamsKeepDrowningAndFilledWaterBehavior()
         const Level bare = makeLevel({ { floor }, { " C  " } });
         const auto initial = rules::initialState(bare);
         CHECK(rules::isUnfilledWater(bare, initial, cell(2, 0, 1)));
-        CHECK(rules::step(bare, initial, MoveDirection::Right) == initial);
+        const auto walked = rules::step(bare, initial, MoveDirection::Right);
+        CHECK(walked.players[0].cell == cell(2, 0, 1));
+        CHECK(walked.players[0].drowned);
         auto sliding = initial;
         sliding.players[0].sliding = MoveDirection::Right;
         const auto drowned = rules::step(bare, sliding);
@@ -5592,7 +5763,9 @@ void testRoundRockSkipsToShoreAndSinksAtBlockers()
     for (const char blocker : { 'R', 'N', 'C' }) {
         const Level occupied = makeLevel({ { "..WWWW" },
             { std::string("C\\  ") + blocker + " " } });
-        auto hit = rules::step(occupied, rules::initialState(occupied), MoveDirection::Right);
+        const auto occupiedBefore = rules::initialState(occupied);
+        auto hit = rules::scopedStep(occupied, occupiedBefore, MoveDirection::Right, {},
+            { .actors = { occupiedBefore.players[0].id } });
         hit = rules::step(occupied, hit);
         hit = rules::step(occupied, hit);
         CHECK(hit.movables[0].cell == cell(3, 0, 1));
@@ -5837,6 +6010,11 @@ int main()
     testIdleClericSharesAttackImmunityWithAllFourNeighbours();
     testMovingClericExposesStationaryAllyToAttacks();
     testKnightPushesSharingClericAcrossAirAndWater();
+    testPaladinShovesClericFromBankToBank();
+    testPushPowerCanShoveProtectedClericAcrossLethalTerrain();
+    testClericShoveChecksThreatAtLanding();
+    testPusherCanFallAfterShovingClericToSafety();
+    testLinkedRockCanRemoveProtectionGainedDuringClericShove();
     testClericShoveStaysAtomicAndSharingRequiresAnAttack();
     testRoundRockDefinitionsAndGroundBehavior();
     testRoundRockSkipsToShoreAndSinksAtBlockers();
@@ -5947,15 +6125,15 @@ int main()
     testScopedHeroActivatesAuthoredMinecartLoop();
     testStateDeltaCarriesMinecarts();
     testMinecartGateAdmitsCartsAndCharactersAndRejectsBlocks();
-    testPlayerCannotWalkIntoWater();
+    testPlayerCanWalkIntoWaterAndDrown();
     testPlayerCanSlideIntoWater();
     testRockFillsWater();
     testLadderClimb();
     testLadderClimbBlockedByMovable();
-    testUnsupportedMovesAreBlocked();
+    testPlayerCanFallIntoVoidInsideTheBoard();
     testSupportedDropIsStillAllowed();
-    testPushIntoVoidIsBlocked();
-    testConveyorHoldsRiderAtVoidEdge();
+    testPushIntoVoidRespectsCapacity();
+    testConveyorCanCarryRiderIntoVoid();
     testConveyorCarriesPlayer();
     testFastConveyorRate();
     testFastPlayerRate();

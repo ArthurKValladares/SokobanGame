@@ -347,6 +347,43 @@ void testKnightPushesProtectedClericOverGapWithUndoAndRestore()
     CHECK(session.state() == before);
 }
 
+void testPaladinPushesFloatingClericOverWater()
+{
+    TEST("Paladin pushes a directly threatened Cleric over water through planning and undo");
+    const auto level = Level::loadFromDefinition({
+        .layers = { { "....W....." }, { "  QC     w" } },
+        .character = CharacterType::Cleric,
+    }, "Cleric water shove session");
+    GameplaySession session;
+    session.reset(level);
+    CHECK(session.activeHeroCharacter() == CharacterType::Rogue);
+    const auto before = session.state();
+    CHECK(rules::clericGravityProtection(level, before)[1]);
+
+    session.queueMove(MoveDirection::Right);
+    const bool started = session.tryStartNextAction(level, {});
+    CHECK(started);
+    if (!started) return;
+    const auto& action = session.activeAction();
+    CHECK(action.playerPushing);
+    CHECK(action.after.players[0].cell == cell(3, 0, 1));
+    CHECK(action.after.players[1].cell == cell(4, 0, 1));
+    CHECK(!action.after.players[1].dead);
+    CHECK(!action.after.players[1].drowned);
+    CHECK(rules::clericGravityProtection(level, action.after)[1]);
+    finishAction(session);
+
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == session.state());
+    restored.queueUndo();
+    const bool undoStarted = restored.tryStartNextAction(level, {});
+    CHECK(undoStarted);
+    if (!undoStarted) return;
+    finishAction(restored);
+    CHECK(restored.state() == before);
+}
+
 void testPushMetadata()
 {
     TEST("pushMetadata");
@@ -362,6 +399,43 @@ void testPushMetadata()
     CHECK(session.activeAction().playerPushing);
     CHECK(session.activeAction().after.players[0].cell == cell(2, 0, 1));
     CHECK(session.activeAction().after.movables[0].cell == cell(3, 0, 1));
+}
+
+void testPaladinCanShoveClericFromBankToBank()
+{
+    TEST("Paladin can shove a protected Cleric from solid ground across a gap");
+    const auto level = Level::loadFromDefinition({
+        .layers = { { ".....   .." }, { "e QC      " } },
+        .character = CharacterType::Cleric,
+    }, "Cleric bank to bank");
+    GameplaySession session;
+    session.reset(level);
+    const auto before = session.state();
+    CHECK(session.activeHeroCharacter() == CharacterType::Rogue);
+
+    for (int step = 1; step <= 6; ++step) {
+        session.queueMove(MoveDirection::Right);
+        const bool started = session.tryStartNextAction(level, {});
+        CHECK(started);
+        if (!started) return;
+        CHECK(session.activeAction().playerPushing);
+        finishAction(session);
+        CHECK(session.state().players[0].cell == cell(2 + step, 0, 1));
+        CHECK(session.state().players[1].cell == cell(3 + step, 0, 1));
+        CHECK(!rules::anyPlayerDead(session.state()));
+    }
+
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == session.state());
+    for (int step = 0; step < 6; ++step) {
+        restored.queueUndo();
+        const bool started = restored.tryStartNextAction(level, {});
+        CHECK(started);
+        if (!started) return;
+        finishAction(restored);
+    }
+    CHECK(restored.state() == before);
 }
 
 void testUndoRoundTrip()
@@ -634,8 +708,7 @@ void testDeadPlayerDiscardsCommandsUntilUndo()
     CHECK(session.state().players[0].cell == cell(1, 0, 1));
     CHECK(!session.state().players[0].dead);
 
-    // The conveyor ride is secondary movement, so it can carry the player
-    // into water even though walking into that same cell would be blocked.
+    // The conveyor carries the player into water as a separate action.
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
     CHECK(session.state().players[0].cell == cell(2, 0, 1));
@@ -649,6 +722,37 @@ void testDeadPlayerDiscardsCommandsUntilUndo()
     finishAction(session);
     CHECK(!session.state().players[0].dead);
     CHECK(session.state().players[0].cell == cell(1, 0, 1));
+}
+
+void testLethalWalkCountsAndCanBeUndoneAfterRestore()
+{
+    TEST("walking into water or the void commits an undoable move");
+    for (const bool water : { false, true }) {
+        const auto level = makeLevel({ { water ? ".W." : ". ." }, { "C  " } });
+        GameplaySession session;
+        session.reset(level);
+        const auto before = session.state();
+        session.queueMove(MoveDirection::Right);
+        const bool started = session.tryStartNextAction(level, {});
+        CHECK(started);
+        if (!started) return;
+        finishAction(session);
+        CHECK(session.playerMoveCount() == 1);
+        CHECK(session.state().players[0].cell == cell(1, 0, water ? 1 : 0));
+        CHECK(session.state().players[0].dead);
+        CHECK(session.state().players[0].drowned == water);
+
+        GameplaySession restored;
+        CHECK(restored.restore(level, session.snapshot()));
+        CHECK(restored.state() == session.state());
+        restored.queueUndo();
+        const bool undoStarted = restored.tryStartNextAction(level, {});
+        CHECK(undoStarted);
+        if (!undoStarted) return;
+        finishAction(restored);
+        CHECK(restored.state() == before);
+        CHECK(restored.playerMoveCount() == 0);
+    }
 }
 
 void testRestartCanBeUndone()
@@ -2359,6 +2463,47 @@ void testFollowingStreamPadsShareTheSlowerMovementClock()
     CHECK(session.state().movables[1].cell == cell(3, 0, 1));
 }
 
+void testRockWakeHandsPadToTheStreamClock()
+{
+    TEST("rockWakeHandsPadToTheStreamClock");
+    const Level level = makeLevel({
+        { "WWWWWWWW", "WWW\"WWWW", "WWWWWWWW", "..WWWWW." },
+        { "        ", "        ", "   $    ", "C\\      " },
+        { "        ", "        ", "   R    ", "        " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(.25f);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 2);
+    if (session.inFlight().size() != 2) return;
+    const auto& travel = session.inFlight().back();
+    CHECK(travel.legs.size() > 1);
+    if (travel.legs.size() < 2) return;
+    CHECK(travel.legs.front().movables[0].cell == cell(3, 1, 1));
+    CHECK(!travel.legs.front().movables[0].sliding);
+    CHECK(travel.legDurationsSeconds.front() == .5f);
+    CHECK(travel.plan.after.movables[0].cell == cell(3, 1, 1));
+    CHECK(travel.plan.after.movables[1].cell == cell(7, 3, 1));
+    CHECK(travel.plan.after.movables[2].cell == cell(3, 1, 2));
+
+    finishAction(session);
+    finishAction(session);
+    CHECK(session.state().movables[0].cell == cell(3, 1, 1));
+    CHECK(session.playerMoveCount() == 1);
+    CHECK(session.undoCount() == 1);
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == session.state());
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeActionDuration() == .5f);
+    CHECK(session.activeAction().after.movables[0].cell == cell(4, 1, 1));
+    CHECK(session.activeAction().after.movables[2].cell == cell(4, 1, 2));
+    finishAction(session);
+    CHECK(session.playerMoveCount() == 1);
+}
+
 void testBoardingCannotUseTheOldTopOfAMovingLilyPad()
 {
     TEST("boardingCannotUseTheOldTopOfAMovingLilyPad");
@@ -2534,11 +2679,14 @@ int main()
 {
     testKnightInterceptsTurretWithClericProtectionThroughUndoAndRestore();
     testKnightPushesProtectedClericOverGapWithUndoAndRestore();
+    testPaladinPushesFloatingClericOverWater();
+    testPaladinCanShoveClericFromBankToBank();
     testPadCoastAndOrdinarySlideKeepTheirLegClocksWithoutRoundRock();
     testFreeRoundRockReservesPathAlongsideSlowerPadRider();
     testRoundRockMixedSkipAndPadRideUseActualLegTimes();
     testRoundRockTurretReactionFiresAtFastLegBoundary();
     testChainedSlideCannotLandOnAMovingPadsOldTop();
+    testRockWakeHandsPadToTheStreamClock();
     testStreamCarriesPadAndRiderThroughRestoreAndUndo();
     testFollowingStreamPadsShareTheSlowerMovementClock();
     testBoardingCannotUseTheOldTopOfAMovingLilyPad();
@@ -2583,6 +2731,7 @@ int main()
     testQueuedCommandsWaitForActiveAction();
     testBlockedQueuedCommandDoesNotStarveNextCommand();
     testDeadPlayerDiscardsCommandsUntilUndo();
+    testLethalWalkCountsAndCanBeUndoneAfterRestore();
     testRestartCanBeUndone();
     testNewMoveAfterUndoCreatesCleanHistoryBranch();
     testPlayerMoveCountTracksUndoAndRestart();

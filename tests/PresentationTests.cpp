@@ -5845,6 +5845,127 @@ void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
     }
 }
 
+void testVoidDeathWalksOffTheEdgeAndRewindsFromBelowTheBoard()
+{
+    TEST("voidDeathWalksOffTheEdgeAndRewindsFromBelowTheBoard");
+    const Level level = Level::loadFromLayers({ { ".. ." }, { " C  " } }, "void fall");
+    const GameState before = rules::initialState(level);
+    const auto planned = plans::planPlayerStep(level, before, MoveDirection::Right, {}, 1.0f);
+    CHECK(planned.has_value());
+    if (!planned) return;
+    GameplaySession::Action action = planned->action;
+    CHECK(action.after.players[0].cell == GridPosition3({ 2, 0, 0 }));
+    CHECK(action.after.players[0].dead);
+    CHECK(!action.after.players[0].drowned);
+
+    AnimationCatalog animations = testAnimationCatalog();
+    GameplayPresentation presentation;
+    presentation.setAnimationCatalog(&animations);
+    presentation.resetEntities(before);
+    action.presentation = presentation.buildActionPresentation(action, &level);
+    CHECK(near(action.presentation.durationSeconds, 1.0f));
+    presentation.beginAction(action, before);
+
+    presentation.seekAction(action, .2f);
+    CHECK(near(presentation.players()[0].motion.renderPosition.x, 1.6f));
+    CHECK(near(presentation.players()[0].motion.renderPosition.z, 1.0f));
+    CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerMove);
+    presentation.seekAction(action, .9f);
+    CHECK(near(presentation.players()[0].motion.renderPosition.x, 2.0f));
+    CHECK(near(presentation.players()[0].motion.renderPosition.z, -.7f));
+    CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerDeath);
+
+    const PresentationSettings settings;
+    const auto heroDrawn = [&](const GameState& state, const GameState& projected, bool moving) {
+        auto frame = RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(),
+            .level = level,
+            .state = state,
+            .moving = moving,
+            .projectedState = projected,
+            .presentation = presentation,
+            .settings = settings,
+        });
+        return std::ranges::any_of(frame.tiles, [](const auto& tile) {
+            return tile.model == testManifest().playerModel();
+        });
+    };
+    CHECK(heroDrawn(before, action.after, true));
+    presentation.finishAction(action.after);
+    CHECK(!heroDrawn(action.after, action.after, false));
+
+    const auto undo = plans::inverted(action);
+    presentation.beginAction(undo, action.after);
+    presentation.seekAction(undo, .5f);
+    CHECK(near(presentation.players()[0].motion.renderPosition.x, 2.0f));
+    CHECK(near(presentation.players()[0].motion.renderPosition.z, .5f));
+    CHECK(heroDrawn(action.after, before, true));
+    presentation.finishAction(before);
+    CHECK(near(presentation.players()[0].motion.renderPosition.z, 1.0f));
+    CHECK(heroDrawn(before, before, false));
+
+    auto onMinecart = action.after;
+    onMinecart.minecarts.push_back({ .cell = onMinecart.players[0].cell });
+    presentation.resetEntities(onMinecart);
+    CHECK(near(presentation.players()[0].motion.renderPosition.z, 0.0f));
+}
+
+void testPushedActorsFallThroughTheBoardAndReappearOnUndo()
+{
+    TEST("pushedActorsFallThroughTheBoardAndReappearOnUndo");
+    for (const bool enemy : { false, true }) {
+        const Level level = Level::loadFromLayers(
+            { { ".. ." }, { enemy ? "KN  " : "KR  " } }, "pushed into void");
+        const GameState before = rules::initialState(level);
+        const auto planned = plans::planPlayerStep(level, before, MoveDirection::Right, {}, 1.0f);
+        CHECK(planned.has_value());
+        if (!planned) continue;
+        GameplaySession::Action action = planned->action;
+        CHECK(action.playerPushing);
+        const auto fellIntoVoid = [&](const auto& actor) {
+            CHECK(actor.dead && !actor.fallen);
+            CHECK(actor.cell == GridPosition3({ 2, 0, 0 }));
+        };
+        if (enemy) fellIntoVoid(action.after.enemies[0]);
+        else fellIntoVoid(action.after.movables[0]);
+
+        GameplayPresentation presentation;
+        presentation.resetEntities(before);
+        action.presentation = presentation.buildActionPresentation(action, &level);
+        presentation.beginAction(action, before);
+        presentation.seekAction(action, .9f);
+        const auto visual = [&]() -> const GameplayPresentation::EntityVisual& {
+            return enemy ? presentation.enemies()[0].motion : presentation.movables()[0];
+        };
+        CHECK(near(visual().renderPosition.z, -.7f));
+
+        const PresentationSettings settings;
+        const auto rendered = [&](const GameState& state, const GameState& projected, bool moving) {
+            const auto frame = RenderFrameBuilder::buildGameplay({
+                .manifest = testManifest(),
+                .level = level,
+                .state = state,
+                .moving = moving,
+                .projectedState = projected,
+                .presentation = presentation,
+                .settings = settings,
+            });
+            return std::ranges::any_of(frame.tiles, [&](const auto& tile) {
+                return tile.renderableId == visual().target.id;
+            });
+        };
+        CHECK(rendered(before, action.after, true));
+        presentation.finishAction(action.after);
+        CHECK(!rendered(action.after, action.after, false));
+
+        const auto undo = plans::inverted(action);
+        presentation.beginAction(undo, action.after);
+        presentation.seekAction(undo, .5f);
+        CHECK(near(visual().renderPosition.z, .5f));
+        CHECK(rendered(action.after, before, true));
+    }
+}
+
 void testTileDecorationHoverPreviewMatchesRaisedSurfacePlacement()
 {
     TEST("tileDecorationHoverPreviewMatchesRaisedSurfacePlacement");
@@ -7179,6 +7300,8 @@ int main()
     testTransparentIceContactsFollowTheirRenderedWaterline();
     testSunkenRocksKeepASmallCapAndTheirSinkPoseAfterCommit();
     testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition();
+    testVoidDeathWalksOffTheEdgeAndRewindsFromBelowTheBoard();
+    testPushedActorsFallThroughTheBoardAndReappearOnUndo();
     testWaterRipplesFollowPlayerAndEnemySurfaceContact();
     testWaterRippleScheduleHasAFixedBudget();
     testRoundRockSkipsArcAndLilyPadRidesTakeFourTimesAsLong();

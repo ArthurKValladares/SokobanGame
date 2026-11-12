@@ -255,6 +255,8 @@ struct StepResult {
     // Includes activity that changes and returns to its starting value within
     // one world step. Transient planning metadata, never part of GameState.
     bool pressurePlateActivityChanged = false;
+    // An input-driven move actually displaced another player.
+    bool playerPushedAlly = false;
 
     bool operator==(const StepResult&) const = default;
 };
@@ -532,6 +534,9 @@ struct StepScope {
     // Entities permitted to act. Empty means every entity, which is the
     // whole-world step this game has always taken.
     std::vector<EntityId> actors;
+    // A slide can end on a stream while other members of its action are
+    // still sliding. The current gets a separate action and clock.
+    bool deferLilyPadStreamRides = false;
 
     [[nodiscard]] bool wholeWorld() const { return actors.empty(); }
 };

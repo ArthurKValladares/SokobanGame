@@ -301,8 +301,20 @@ bool matchesForwardTransition(
         // tried; an action that changed nothing is not a transition anyway.
         return false;
     }
-    return replayMatches(
-        level, action, rates, rules::StepScope { .actors = std::move(changed) });
+    rules::StepScope scope { .actors = std::move(changed) };
+    if (replayMatches(level, action, rates, scope)) {
+        return true;
+    }
+    // A rock can continue skipping after its wake hands a pad off to the
+    // stream. The slide planner leaves that current motion to a later action.
+    if (!std::ranges::any_of(action.before.movables, [](const auto& movable) {
+            return movable.type == TileType::LilyPad && !movable.fallen &&
+                !movable.dead;
+        })) {
+        return false;
+    }
+    scope.deferLilyPadStreamRides = true;
+    return replayMatches(level, action, rates, scope);
 }
 
 void normalizeLegacyPlayers(GameState& state, const Level& level)

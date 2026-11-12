@@ -1621,11 +1621,13 @@ void appendGameplayEntities(
          playerIndex < state.players.size() &&
          playerIndex < playerVisuals.size();
          ++playerIndex) {
-        if (input.visibleCell &&
-            !input.visibleCell(state.players[playerIndex].cell)) {
+        const GameState::Player& player = state.players[playerIndex];
+        const GameplayPresentation::PlayerVisual& visual = playerVisuals[playerIndex];
+        if ((input.visibleCell && !input.visibleCell(player.cell)) ||
+            (player.dead && !player.drowned && !visual.motion.moving &&
+                visual.motion.renderPosition.z < 0.0f)) {
             continue;
         }
-        const GameplayPresentation::PlayerVisual& visual = playerVisuals[playerIndex];
         const auto carrier = playerIndex < input.projectedState.players.size()
             ? movingCarrier(input, state.players[playerIndex].cell,
                 input.projectedState.players[playerIndex].cell) : std::nullopt;
@@ -1717,7 +1719,11 @@ void appendGameplayEntities(
             carriedYaw = static_cast<float>(input.projectedState.enemies[enemyIndex].quarterTurns) *
                 quarterTurnRadians + carrierFacingOffset(input, *carrier, turnProgress);
         }
-        if (enemy.dead || (enemy.fallen && !visual.motion.moving)) {
+        const bool returningFromVoid = enemy.dead && !enemy.fallen && enemy.cell.z == 0 &&
+            input.moving && enemyIndex < input.projectedState.enemies.size() &&
+            !input.projectedState.enemies[enemyIndex].dead &&
+            !rules::minecartPlatformAt(input.level, state, enemy.cell);
+        if ((enemy.dead && !returningFromVoid) || (enemy.fallen && !visual.motion.moving)) {
             continue;
         }
         if (input.visibleCell && !input.visibleCell(enemy.cell)) {

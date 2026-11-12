@@ -65,8 +65,9 @@ Cleric also ignores gravity and can cross water or air. Allies in the four
 immediately adjacent cells on the same layer always share its attack immunity.
 An attack on any of them activates gravity immunity for the Cleric and its
 adjacent allies together, with golden rings and sparks on each protected hero.
-The Knight can push the Cleric, including over water or air while this shared
-protection is active.
+A hero with push power can shove the Cleric on solid terrain or over a gap.
+Walking and shoving into water or the void are valid moves. Gravity immunity
+keeps protected heroes afloat, and unprotected heroes drown or fall.
 The effect does not extend diagonally or relay through allies.
 Gravity immunity ends immediately when its attack or adjacency ends; unsupported
 heroes then fall normally. A golden ring and rising sparks mark actively
@@ -730,6 +731,7 @@ side, supporting all four corners in both directions. At junctions with
 multiple incoming directions the stream keeps its authored straight exit.
 Streams carry floating pads at half the conveyor movement speed, stop when the pad
 or a rider is blocked, and leave ordinary water's sinking rules intact.
+A pushed or drifting pad caught by a stream follows the current from that tile.
 The current's moving foam strokes and wavelets blend into the surrounding water shader;
 pad leaves and their riders gently bob together. Undo and checkpoints retain
 the pad and rider state through the normal movement system.

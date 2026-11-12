@@ -47,9 +47,8 @@ struct PressurePlateActivityTracker {
 struct FallResult {
     GridPosition3 cell {};
     bool fallen = false;
-    // False when the fall ran out of layers without hitting anything that can
-    // hold an entity (an all-air column). Moves that would land unsupported
-    // are rejected instead of leaving the entity standing on nothing.
+    // False when the fall ran out of layers in an all-air column. The cell
+    // stays within the board so deaths can be saved and undone normally.
     bool supported = true;
     std::optional<std::size_t> impactVictim = std::nullopt;
 };
@@ -181,7 +180,7 @@ std::optional<MoveDirection>& playerSliding(
     return state.players.at(playerIndex).sliding;
 }
 
-bool playerBlocksAt(
+std::optional<std::size_t> blockingPlayerAt(
     const GameState& state,
     GridPosition3 position,
     std::optional<std::size_t> ignoredPlayer = std::nullopt)
@@ -189,10 +188,18 @@ bool playerBlocksAt(
     for (std::size_t i = 0; i < state.players.size(); ++i) {
         if ((!ignoredPlayer || i != *ignoredPlayer) &&
             !playerDead(state, i) && playerCell(state, i) == position) {
-            return true;
+            return i;
         }
     }
-    return false;
+    return std::nullopt;
+}
+
+bool playerBlocksAt(
+    const GameState& state,
+    GridPosition3 position,
+    std::optional<std::size_t> ignoredPlayer = std::nullopt)
+{
+    return blockingPlayerAt(state, position, ignoredPlayer).has_value();
 }
 
 // Walks an entity down from `position` until something can hold it. The
@@ -239,6 +246,21 @@ FallResult fallTarget(
     return { .cell = current, .fallen = false, .supported = false };
 }
 
+FallResult unprotectedPlayerFallTarget(
+    const Level& level,
+    const GameState& state,
+    std::size_t playerIndex,
+    GridPosition3 position)
+{
+    return fallTarget(level, state, position, [&](GridPosition3 below) {
+        return movableAt(state, below) != nullptr ||
+            fallenMovableAt(state, below) != nullptr ||
+            enemyAt(state, below) != nullptr ||
+            fallenEnemyAt(state, below) != nullptr ||
+            playerBlocksAt(state, below, playerIndex);
+    });
+}
+
 FallResult playerFallTarget(
     const Level& level,
     const GameState& state,
@@ -262,13 +284,7 @@ FallResult playerFallTarget(
             }
         }
     }
-    return fallTarget(level, state, position, [&](GridPosition3 below) {
-        return movableAt(state, below) != nullptr ||
-            fallenMovableAt(state, below) != nullptr ||
-            enemyAt(state, below) != nullptr ||
-            fallenEnemyAt(state, below) != nullptr ||
-            playerBlocksAt(state, below, playerIndex);
-    });
+    return unprotectedPlayerFallTarget(level, state, playerIndex, position);
 }
 
 FallResult movableFallTarget(const Level& level, const GameState& state, size_t movableIndex, GridPosition3 position)
@@ -956,6 +972,13 @@ bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 p
         fallenMovableAt(state, position) == nullptr;
 }
 
+static bool isUnfilledStream(const Level& level, const GameState& state, GridPosition3 cell)
+{
+    return waterStreamDirectionAt(level, cell).has_value() &&
+        fallenMovableAt(state, cell) == nullptr &&
+        !conveyorDirectionForTile(tileAt(level, cell));
+}
+
 bool lilyPadDrivenByRock(const Level& level,
     const GameState& before, const GameState& after, std::size_t padIndex)
 {
@@ -968,13 +991,14 @@ bool lilyPadDrivenByRock(const Level& level,
         fromPad.dead || fromPad.fallen || toPad.dead || toPad.fallen) {
         return false;
     }
-    const bool moved = fromPad.cell != toPad.cell;
-    const bool stopped = fromPad.sliding && !toPad.sliding;
-    if (isUnfilledWater(level, before, fromPad.cell) &&
-        ((moved && (fromPad.sliding || toPad.sliding)) || (!moved && stopped))) {
+    const bool fromWater = isUnfilledWater(level, before, fromPad.cell);
+    if (fromPad.cell == toPad.cell) {
+        return fromWater && fromPad.sliding && !toPad.sliding &&
+            !isUnfilledStream(level, before, fromPad.cell);
+    }
+    if (fromWater && (fromPad.sliding || toPad.sliding)) {
         return true;
     }
-    if (!moved) return false;
 
     // Keep entry and exit directions distinct for a shove crossing a portal.
     const auto directions = [&](GridPosition3 from, GridPosition3 to)
@@ -1012,6 +1036,27 @@ bool lilyPadDrivenByRock(const Level& level,
     for (std::size_t index = 0; index < before.movables.size(); ++index) {
         if (movedRock(index, padDirections->second) &&
             level.movablesAreLinked(index, padIndex)) return true;
+    }
+
+    // A wake may start and spend its momentum in the same step when the pad
+    // lands in a current. Its source is the skipping stone beside the old pad.
+    if (fromWater && isUnfilledStream(level, after, toPad.cell) &&
+        !isUnfilledStream(level, before, fromPad.cell)) {
+        const auto wakeSource = movementTarget(
+            fromPad.cell, oppositeDirection(padDirections->first));
+        const auto padTravel = directionOffset(padDirections->first);
+        const std::size_t count = std::min(before.movables.size(), after.movables.size());
+        for (std::size_t index = 0; index < count; ++index) {
+            const auto& rock = after.movables[index];
+            if (!tileTypeIsSkippingStone(rock.type) || rock.dead || rock.fallen || !rock.sliding ||
+                rock.cell != wakeSource || rock.cell == before.movables[index].cell) {
+                continue;
+            }
+            const auto travel = directionOffset(*rock.sliding);
+            if (travel.x * padTravel.x + travel.y * padTravel.y == 0) {
+                return true;
+            }
+        }
     }
 
     // A Knight chain or a Bard shove can transmit a rock's force through
@@ -1479,9 +1524,7 @@ struct SupportChanges {
 };
 
 // Lets one live unit fall from where it stands, as though it had just
-// stepped there. Returns false when it stays put: something still holds it,
-// or nothing below can (an all-air column), the same case in which a move is
-// rejected rather than leaving a unit standing on nothing.
+// stepped there. Returns false when something still holds it in place.
 bool dropUnit(const Level& level, GameState& state, LiveUnitAt unit, FallImpacts& impacts)
 {
     if (isUnitLocked(level, state, unitCell(state, unit))) {
@@ -1492,12 +1535,12 @@ bool dropUnit(const Level& level, GameState& state, LiveUnitAt unit, FallImpacts
         GameState::Player& player = state.players[unit.index];
         const FallResult fall =
             playerFallTarget(level, state, unit.index, player.cell);
-        if (!fall.supported || (fall.cell == player.cell && !fall.fallen)) {
+        if (fall.supported && fall.cell == player.cell && !fall.fallen) {
             return false;
         }
         impacts.record(fall);
         player.cell = fall.cell;
-        player.dead = fall.fallen;
+        player.dead = fall.fallen || !fall.supported;
         player.drowned = fall.fallen;
         player.sliding.reset();
         return true;
@@ -1506,12 +1549,13 @@ bool dropUnit(const Level& level, GameState& state, LiveUnitAt unit, FallImpacts
         GameState::Movable& movable = state.movables[unit.index];
         const FallResult fall =
             movableFallTarget(level, state, unit.index, movable.cell);
-        if (!fall.supported || (fall.cell == movable.cell && !fall.fallen)) {
+        if (fall.supported && fall.cell == movable.cell && !fall.fallen) {
             return false;
         }
         impacts.record(fall);
         movable.cell = fall.cell;
         movable.fallen = fall.fallen;
+        movable.dead = !fall.supported;
         movable.sliding.reset();
         return true;
     }
@@ -1519,12 +1563,13 @@ bool dropUnit(const Level& level, GameState& state, LiveUnitAt unit, FallImpacts
         GameState::Enemy& enemy = state.enemies[unit.index];
         const FallResult fall =
             enemyFallTarget(level, state, unit.index, enemy.cell);
-        if (!fall.supported || (fall.cell == enemy.cell && !fall.fallen)) {
+        if (fall.supported && fall.cell == enemy.cell && !fall.fallen) {
             return false;
         }
         impacts.record(fall);
         enemy.cell = fall.cell;
         enemy.fallen = fall.fallen;
+        enemy.dead = !fall.supported;
         enemy.sliding.reset();
         return true;
     }
@@ -3169,6 +3214,7 @@ public:
         , plateActivity_ { level, before, pressurePlateActivityChanged }
         , playerInput_(playerInput)
         , rates_(rates)
+        , deferLilyPadStreamRides_(scope.deferLilyPadStreamRides && !playerInput)
         , originalMovableCount_(after.movables.size())
         , movableCount_(allocateCrystalSlots(after, level, playerInput, scope))
         , playerCount_(after.players.size())
@@ -3231,6 +3277,7 @@ public:
                 crystalChanges_ ? crystalChanges_->size() : 0;
             const std::size_t impactCount = fallImpacts_.victims.size();
             const std::size_t lostSupportCount = fallImpacts_.lostSupports.size();
+            const bool pushedAllyBeforeBardPulse = playerPushedAlly_;
             deriveIntents();
             const bool hasBardPulse = std::ranges::any_of(
                 status_,
@@ -3251,6 +3298,7 @@ public:
                 after_ = beforeBardPulse;
                 status_ = statusesBeforeBardPulse;
                 enemyMoved_ = enemiesBeforeBardPulse;
+                playerPushedAlly_ = pushedAllyBeforeBardPulse;
                 suppressBardInfluences_ = true;
                 deriveIntents();
                 markContested();
@@ -3261,6 +3309,15 @@ public:
             }
             anyMovement = resolveSupportChanges() || anyMovement;
             if (anyMovement) {
+                // A shove can first use the aura and then lose it to linked
+                // movement before reactions sample the board.
+                if (playerPushedAlly_) {
+                    for (std::size_t i = 0; i < playerCount_; ++i) {
+                        if (status_[entityIndexForPlayer(i)].usedProjectedClericProtection) {
+                            clericProtection_[i] = true;
+                        }
+                    }
+                }
                 resolveReactions();
             }
         }
@@ -3289,6 +3346,8 @@ public:
         finishCrystalChanges();
     }
 
+    [[nodiscard]] bool playerPushedAlly() const { return playerPushedAlly_; }
+
 private:
     // Rocks, ice, turrets, and enemies all participate in forced movement.
     // The storage stays separate because enemies retain attack/death state.
@@ -3303,6 +3362,8 @@ private:
         int consumed = 0;
         std::optional<MoveDirection> inputDirection;
         bool done = false;
+        // Yield the rest of this step to the next stream ride.
+        bool interceptedByStream = false;
         // Whether this entity may act at all. Deliberately not folded into
         // `done`, which means "has finished acting": an entity that gets pushed
         // joins the causal closure part-way through and has to start acting,
@@ -3317,6 +3378,7 @@ private:
         bool movedThisMicro = false;
         bool turnedTurretThisMicro = false;
         bool inputDriven = false; // player only
+        bool usedProjectedClericProtection = false;
         bool crystallized = false;
         EntityId crystalRestorer = invalidEntityId;
         // A live bard moving within range overrides this movable unit's
@@ -3846,6 +3908,7 @@ private:
             status.movedThisMicro = false;
             status.turnedTurretThisMicro = false;
             status.inputDriven = false;
+            status.usedProjectedClericProtection = false;
             status.bardDirection.reset();
             status.bardMoveBudget = 0;
             status.bardDirectionContested = false;
@@ -3865,7 +3928,7 @@ private:
 
             // Out of scope means scenery: still an obstacle to everyone else,
             // but it wants nothing and will not be written.
-            if (status.done || !status.active) {
+            if (status.done || status.interceptedByStream || !status.active) {
                 continue;
             }
             if (isUnitLocked(level_, after_, cellOf(i))) {
@@ -3905,6 +3968,13 @@ private:
                 if (after_.movables[i].fallen || after_.movables[i].dead) {
                     continue;
                 }
+                if (after_.movables[i].type == TileType::LilyPad &&
+                    after_.movables[i].sliding && floatingPadStreamAt(cellOf(i))) {
+                    // Older saves could keep an impulse on a current tile.
+                    after_.movables[i].sliding.reset();
+                    status.interceptedByStream = true;
+                    continue;
+                }
                 if (status.bardDirection &&
                     !status.bardDirectionContested &&
                     status.consumed < status.bardMoveBudget) {
@@ -3916,7 +3986,10 @@ private:
                     }
                 } else if (const std::optional<MoveDirection> belt =
                                conveyorDirectionAt(level_, after_, after_.movables[i].cell)) {
-                    if (status.consumed < rates_.conveyor) {
+                    if (status.consumed < rates_.conveyor &&
+                        !(deferLilyPadStreamRides_ &&
+                            after_.movables[i].type == TileType::LilyPad &&
+                            floatingPadStreamAt(cellOf(i)))) {
                         status.intent = belt;
                     }
                 } else if (const auto patrol = robotDirection(after_.movables[i]);
@@ -3999,6 +4072,19 @@ private:
         }
     }
 
+    [[nodiscard]] bool canDisplaceThisMicro(std::size_t index) const
+    {
+        return !status_[index].movedThisMicro && !status_[index].interceptedByStream &&
+            !(deferLilyPadStreamRides_ && index < movableCount_ &&
+                after_.movables[index].type == TileType::LilyPad &&
+                floatingPadStreamAt(cellOf(index)));
+    }
+
+    [[nodiscard]] bool floatingPadStreamAt(GridPosition3 cell) const
+    {
+        return isUnfilledStream(level_, after_, cell);
+    }
+
     [[nodiscard]] std::optional<std::size_t> roundRockPadAt(
         std::size_t index, GridPosition3 target) const
     {
@@ -4034,7 +4120,8 @@ private:
             const auto* pad = movableAt(after_, neighbor);
             if (pad == nullptr || pad->type != TileType::LilyPad ||
                 !isUnfilledWater(level_, after_, neighbor) ||
-                isUnitLocked(level_, after_, neighbor)) {
+                isUnitLocked(level_, after_, neighbor) ||
+                floatingPadStreamAt(neighbor)) {
                 continue;
             }
             const auto padIndex = static_cast<std::size_t>(
@@ -4055,7 +4142,7 @@ private:
         bool pushedByRock = false)
     {
         Status& blockerStatus = status_[blockerIndex];
-        if (blockerStatus.movedThisMicro ||
+        if (!canDisplaceThisMicro(blockerIndex) ||
             isUnitLocked(level_, after_, after_.movables[blockerIndex].cell)) {
             return false;
         }
@@ -4073,11 +4160,7 @@ private:
                 !roundRockPadAt(blockerIndex, destination)) ||
             playerBlocksAt(after_, destination) ||
             enemyBlocksAt(after_, destination) ||
-            !canCarryPlatformRiders(blockerIndex, destination, blockerStatus.bardDriven) ||
-            (!blockerStatus.bardDriven &&
-                !movableFallTarget(
-                    level_, after_, blockerIndex, destination)
-                     .supported)) {
+            !canCarryPlatformRiders(blockerIndex, destination, blockerStatus.bardDriven)) {
             return false;
         }
 
@@ -4163,7 +4246,7 @@ private:
             for (const std::size_t index : members) {
                 GameState::Movable& movable = after_.movables[index];
                 Status& status = status_[index];
-                if (status.movedThisMicro || movable.fallen || movable.dead ||
+                if (!canDisplaceThisMicro(index) || movable.fallen || movable.dead ||
                     isUnitLocked(level_, after_, movable.cell)) {
                     continue;
                 }
@@ -4179,9 +4262,7 @@ private:
                     movableBlocksAt(after_, destination, index) ||
                     playerBlocksAt(after_, destination) ||
                     enemyBlocksAt(after_, destination) ||
-                    !canCarryPlatformRiders(index, destination) ||
-                    !movableFallTarget(level_, after_, index, destination)
-                         .supported) {
+                    !canCarryPlatformRiders(index, destination)) {
                     continue;
                 }
                 applyMovableMove(index, direction, destination);
@@ -4221,9 +4302,7 @@ private:
         if (status.robotDriven) {
             return resolveRobot(index, anyMovement);
         }
-        if (!cellAllowsEntity(level_, after_, target) ||
-            (!status.bardDriven &&
-                !movableFallTarget(level_, after_, index, target).supported)) {
+        if (!cellAllowsEntity(level_, after_, target)) {
             cancelAndFinish(index, false);
             status.resolved = true;
             return true;
@@ -4249,8 +4328,7 @@ private:
         // bank. A hero's ordinary shove can still beach an idle leaf.
         const bool padCurrent = after_.movables[index].type == TileType::LilyPad &&
             !status.bardDriven && !after_.movables[index].sliding &&
-            !conveyorDirectionForTile(tileAt(level_, cellOf(index))) &&
-            waterStreamDirectionAt(level_, cellOf(index)).has_value();
+            floatingPadStreamAt(cellOf(index));
         if ((padCurrent || coasting) && !isUnfilledWater(level_, after_,
                 movableFallTarget(level_, after_, index, target).cell)) {
             cancelAndFinish(index, false);
@@ -4293,7 +4371,7 @@ private:
                 return true;
             }
         }
-        applyMovableMove(index, direction, target, status.bardDriven);
+        applyMovableMove(index, direction, target, status.bardDriven, padCurrent);
         status.resolved = true;
         status.movedThisMicro = true;
         anyMovement = true;
@@ -4360,9 +4438,6 @@ private:
         } else {
             fall = movableFallTarget(level_, trial, unit.index, target);
         }
-        if (!fall.supported) {
-            return false;
-        }
         if (unit.kind == EntityKind::Player) {
             if (!canCarryPlayerRiders(trial, unit.index, fall.cell, target.z)) {
                 return false;
@@ -4385,6 +4460,9 @@ private:
             }
         }
         setUnitCell(trial, unit, fall.cell);
+        if (!fall.supported || (unit.kind == EntityKind::Player && fall.fallen)) {
+            killUnit(trial, unit);
+        }
         return true;
     }
 
@@ -4409,7 +4487,7 @@ private:
         }
         GameState trial = after_;
         if (blocker &&
-            (status_[entityIndexForUnit(*blocker)].movedThisMicro ||
+            (!canDisplaceThisMicro(entityIndexForUnit(*blocker)) ||
                 !previewRobotPush(trial, *blocker, direction))) {
             status.resolved = true;
             return true;
@@ -4477,9 +4555,7 @@ private:
             status.resolved = true;
             return true;
         }
-        if (!cellAllowsEntity(level_, after_, target) ||
-            (!status.bardDriven &&
-                !enemyFallTarget(level_, after_, enemyIndex, target).supported)) {
+        if (!cellAllowsEntity(level_, after_, target)) {
             after_.enemies[enemyIndex].sliding.reset();
             status.done = true;
             status.resolved = true;
@@ -4569,7 +4645,7 @@ private:
                 if (!status_[swap.index].resolved) {
                     return false;
                 }
-                if (status_[swap.index].movedThisMicro ||
+                if (!canDisplaceThisMicro(swap.index) ||
                     !(after_.movables[swap.index].cell == target)) {
                     status.resolved = true;
                     return true;
@@ -4661,25 +4737,15 @@ private:
                 return true;
             }
         }
-        if (status.inputDriven &&
-            abilities.pushPower != 0 &&
-            abilities.has(CharacterAbility::PushAlly) &&
-            playerBlocksAt(after_, target, playerIndex)) {
-            return resolveAllyPush(entityIndex, direction, target, anyMovement);
+        const auto blockingPlayer = blockingPlayerAt(after_, target, playerIndex);
+        if (blockingPlayer && status.inputDriven && abilities.pushPower != 0 &&
+            after_.players[*blockingPlayer].abilities(level_.character()).has(CharacterAbility::PushableAlly)) {
+            return resolveAllyPush(entityIndex, *blockingPlayer, direction, target, anyMovement);
         }
-        const FallResult fall =
-            playerFallTarget(level_, after_, playerIndex, target);
-        // A deliberate walk stops at unfilled water. Forced motion keeps the
-        // ordinary fall result, so slides and conveyor rides can still drown.
-        if (!fall.supported || (status.inputDriven && fall.fallen)) {
-            playerSliding(after_, playerIndex) = std::nullopt;
-            status.done = true;
-            status.resolved = true;
-            return true;
-        }
-        if (playerBlocksAt(after_, target, playerIndex)) {
+        if (blockingPlayer) {
             return false;
         }
+        const FallResult fall = playerFallTarget(level_, after_, playerIndex, target);
         if (!canCarryPlayerRiders(after_, playerIndex, fall.cell, target.z)) {
             return false;
         }
@@ -4766,17 +4832,14 @@ private:
                 occupied(pushTarget);
             if (status.inputDriven && abilities.pushPower != 0 &&
                 !isUnitLocked(level_, after_, target) &&
-                !status_[blockerIndex].movedThisMicro &&
+                canDisplaceThisMicro(blockerIndex) &&
                 !occupiedPortalExit &&
                 portalEntryClear(target, direction, after_) &&
                 cellAllowsEntity(level_, after_, pushTarget) &&
                 (!movableBlocksAt(after_, pushTarget, blockerIndex) ||
                     roundRockPadAt(blockerIndex, pushTarget)) &&
                 !playerBlocksAt(after_, pushTarget, playerIndex) &&
-                enemyCanMove &&
-                canCarryPlatformRiders(blockerIndex, pushTarget) &&
-                movableFallTarget(level_, after_, blockerIndex, pushTarget)
-                    .supported) {
+                enemyCanMove && canCarryPlatformRiders(blockerIndex, pushTarget)) {
                 if (pushedEnemy != nullptr) {
                     (void)pushEnemy(
                         static_cast<std::size_t>(pushedEnemy - after_.enemies.data()),
@@ -4807,58 +4870,59 @@ private:
         return true;
     }
 
-    // Evaluate the complete shove before either hero falls. The attacked
-    // Knight and its Cleric must remain adjacent on the landing board, even
-    // though moving the Cleric first would briefly separate them by two cells.
+    // Evaluate the complete shove before either hero falls. The attack can
+    // transfer from the Cleric to the pusher when it enters the vacated cell.
     [[nodiscard]] bool resolveAllyPush(
-        std::size_t knightEntity, MoveDirection direction,
+        std::size_t pusherEntity, std::size_t clericIndex, MoveDirection direction,
         GridPosition3 target, bool& anyMovement)
     {
-        const auto blocker = liveUnitAt(after_, target);
-        if (!blocker || blocker->kind != EntityKind::Player ||
-            !after_.players[blocker->index].abilities(level_.character()).has(CharacterAbility::PushableAlly)) {
-            return false;
-        }
-        const std::size_t clericIndex = blocker->index;
         const std::size_t clericEntity = entityIndexForPlayer(clericIndex);
         if (!status_[clericEntity].resolved) {
             return false;
         }
-        Status& knightStatus = status_[knightEntity];
-        knightStatus.resolved = true;
+        Status& pusherStatus = status_[pusherEntity];
+        pusherStatus.resolved = true;
         if (status_[clericEntity].movedThisMicro ||
             isUnitLocked(level_, after_, target) ||
             !portalEntryClear(target, direction, after_)) {
             return true;
         }
-        const std::size_t knightIndex = playerIndexForEntity(knightEntity);
-        const GridPosition3 destination = transportedLanding(
-            target, direction, movementDestination(target, direction));
+        const std::size_t pusherIndex = playerIndexForEntity(pusherEntity);
+        const GridPosition3 destination = movementDestination(target, direction);
         GameState trial = after_;
-        trial.players[knightIndex].cell = target;
+        trial.players[pusherIndex].cell = target;
         trial.players[clericIndex].cell = destination;
         if (!cellAllowsEntity(level_, trial, destination) ||
             playerBlocksAt(trial, destination, clericIndex) ||
             movableAt(trial, destination) || enemyAt(trial, destination)) {
             return true;
         }
-        const auto clericFall = playerFallTarget(level_, trial, clericIndex, destination);
-        if (!clericFall.supported ||
-            !canCarryPlayerRiders(trial, clericIndex, clericFall.cell, destination.z)) {
+        const auto previewLanding = [&](std::size_t playerIndex, const FallResult& fall, int entryZ) {
+            auto& player = trial.players[playerIndex];
+            player.cell = fall.cell;
+            player.dead = fall.fallen || !fall.supported;
+            if (!canCarryPlayerRiders(trial, playerIndex, fall.cell, entryZ)) {
+                return false;
+            }
+            const GridPosition3 from = playerCell(after_, playerIndex);
+            for (const auto rider : stackAbove(after_, from)) {
+                setUnitCell(trial, rider, riderLanding(from, fall.cell, unitCell(trial, rider)));
+            }
+            return true;
+        };
+        const bool clericProtected = clericGravityProtection(level_, trial)[clericIndex];
+        const auto normalClericFall =
+            unprotectedPlayerFallTarget(level_, trial, clericIndex, destination);
+        const auto clericFall = clericProtected
+            ? FallResult { .cell = destination } : normalClericFall;
+        if (!previewLanding(clericIndex, clericFall, destination.z)) {
             return true;
         }
-        trial.players[clericIndex].cell = clericFall.cell;
-        trial.players[clericIndex].dead = clericFall.fallen;
-        for (const auto rider : stackAbove(after_, target)) {
-            setUnitCell(trial, rider, riderLanding(target, clericFall.cell, unitCell(trial, rider)));
-        }
-        const auto knightFall = playerFallTarget(level_, trial, knightIndex, target);
-        if (!knightFall.supported || knightFall.fallen ||
-            !canCarryPlayerRiders(trial, knightIndex, knightFall.cell, target.z)) {
-            return true;
-        }
-        trial.players[knightIndex].cell = knightFall.cell;
-        if (!liveCellsAreUnique(trial)) {
+        const bool pusherProtected = clericGravityProtection(level_, trial)[pusherIndex];
+        const auto normalPusherFall = unprotectedPlayerFallTarget(level_, trial, pusherIndex, target);
+        const auto pusherFall = pusherProtected
+            ? FallResult { .cell = target } : normalPusherFall;
+        if (!previewLanding(pusherIndex, pusherFall, target.z) || !liveCellsAreUnique(trial)) {
             return true;
         }
         applyPlayerMove(clericEntity, direction, destination, &clericFall);
@@ -4866,9 +4930,14 @@ private:
         clericStatus.active = true;
         clericStatus.resolved = true;
         clericStatus.movedThisMicro = true;
-        clericStatus.done = true; // A passive shove cannot pick up the Knight's input.
-        applyPlayerMoveAndPull(knightEntity, direction, target, &knightFall);
-        knightStatus.movedThisMicro = true;
+        clericStatus.done = true; // A passive shove does not spend another input.
+        clericStatus.usedProjectedClericProtection = clericProtected &&
+            (!normalClericFall.supported || normalClericFall.fallen || normalClericFall.cell != destination);
+        applyPlayerMoveAndPull(pusherEntity, direction, target, &pusherFall);
+        pusherStatus.movedThisMicro = true;
+        pusherStatus.usedProjectedClericProtection = pusherProtected &&
+            (!normalPusherFall.supported || normalPusherFall.fallen || normalPusherFall.cell != target);
+        playerPushedAlly_ = true;
         anyMovement = true;
         return true;
     }
@@ -4940,7 +5009,7 @@ private:
                 return false;
             }
             if (entity.movable) {
-                if (status_[entity.index].movedThisMicro) {
+                if (!canDisplaceThisMicro(entity.index)) {
                     return false;
                 }
                 GridPosition3 destination = movementDestination(
@@ -4968,8 +5037,7 @@ private:
                 if (rockDrivenPad && !isUnfilledWater(level_, trial, fall.cell)) {
                     return false;
                 }
-                if (!fall.supported ||
-                    !platformRidersCanMove(level_, trial, entity.index, fall.cell,
+                if (!platformRidersCanMove(level_, trial, entity.index, fall.cell,
                         destination.z)) {
                     return false;
                 }
@@ -4983,6 +5051,7 @@ private:
                 }
                 trial.movables[entity.index].cell = fall.cell;
                 trial.movables[entity.index].fallen = fall.fallen;
+                trial.movables[entity.index].dead = !fall.supported;
             } else {
                 const GridPosition3 destination = movementDestination(
                     trial.enemies[entity.index].cell, direction);
@@ -4997,11 +5066,9 @@ private:
                 }
                 const FallResult fall = enemyFallTarget(
                     level_, trial, entity.index, destination);
-                if (!fall.supported) {
-                    return false;
-                }
                 trial.enemies[entity.index].cell = fall.cell;
                 trial.enemies[entity.index].fallen = fall.fallen;
+                trial.enemies[entity.index].dead = !fall.supported;
             }
         }
 
@@ -5033,8 +5100,7 @@ private:
             cellAllowsEntity(level_, after_, destination) &&
             !movableBlocksAt(after_, destination, after_.movables.size()) &&
             !playerBlocksAt(after_, destination) &&
-            !enemyBlocksAt(after_, destination, enemyIndex) &&
-            enemyFallTarget(level_, after_, enemyIndex, destination).supported;
+            !enemyBlocksAt(after_, destination, enemyIndex);
     }
 
     [[nodiscard]] bool pushEnemy(
@@ -5076,7 +5142,8 @@ private:
         fallImpacts_.record(fall);
         after_.enemies[enemyIndex].cell = fall.cell;
         after_.enemies[enemyIndex].fallen = fall.fallen;
-        const bool fell = fall.cell != destination || fall.fallen;
+        after_.enemies[enemyIndex].dead = !fall.supported;
+        const bool fell = fall.cell != destination || fall.fallen || !fall.supported;
         after_.enemies[enemyIndex].sliding =
             (!fell &&
              (portalMomentum || isIceFloor(level_, after_, fall.cell)) &&
@@ -5089,7 +5156,7 @@ private:
         status.active = true;
         status.resolved = true;
         status.movedThisMicro = true;
-        status.done = fall.fallen;
+        status.done = fall.fallen || !fall.supported;
         // Shoved, therefore written, therefore this action's responsibility -
         // including for whoever it has just been parked next to.
         enemyMoved_[enemyIndex] = true;
@@ -5587,13 +5654,14 @@ private:
 
     // Moves one tile, resolves the fall, and updates slide momentum.
     // Water momentum uses the same state and action legs as ice slides.
-    // A leaf only coasts after an impulse and remains in water; an ordinary
-    // hero shove keeps its existing one-tile behavior and may beach the leaf.
+    // An impulse carries a leaf through open water until a current takes
+    // over. An ordinary hero shove may also beach an idle leaf.
     void applyMovableMove(
         std::size_t index,
         MoveDirection direction,
         GridPosition3 target,
-        bool preserveElevation = false)
+        bool preserveElevation = false,
+        bool ridingStream = false)
     {
         const GridPosition3 from = after_.movables[index].cell;
         const bool padCoasting = after_.movables[index].type == TileType::LilyPad &&
@@ -5634,16 +5702,22 @@ private:
         fallImpacts_.record(fall);
         const bool skipping = tileTypeIsSkippingStone(after_.movables[index].type) &&
             !boardingPad && isUnfilledWater(level_, after_, fall.cell);
-        const bool fell = fall.cell.z != target.z || (fall.fallen && !skipping);
+        const bool fell = fall.cell.z != target.z || !fall.supported || (fall.fallen && !skipping);
         after_.movables[index].cell = fall.cell;
         after_.movables[index].fallen = fall.fallen && !skipping;
+        after_.movables[index].dead = !fall.supported;
+        const bool padInStream = after_.movables[index].type == TileType::LilyPad &&
+            floatingPadStreamAt(fall.cell);
+        // Finish the push at the first current tile even if either source
+        // has movement budget left. Later stream motion is ambient.
+        status_[index].interceptedByStream = padInStream && !ridingStream;
         const bool coasting = padCoasting &&
             isUnfilledWater(level_, after_, fall.cell);
         const bool slippery = portalMomentum ||
             after_.movables[index].type == TileType::Ice ||
             isIceFloor(level_, after_, fall.cell);
         after_.movables[index].sliding =
-            (skipping || coasting || (!fell && slippery &&
+            !padInStream && (skipping || coasting || (!fell && slippery &&
              cellAllowsEntity(
                  level_, after_, movementDestination(fall.cell, direction))))
             ? std::optional<MoveDirection>(direction)
@@ -5652,8 +5726,10 @@ private:
             auto& pad = after_.movables[*boardingPad];
             after_.movables[index].sliding.reset();
             if (isUnfilledWater(level_, after_, pad.cell)) {
-                pad.sliding = direction;
+                const bool boardingOnStream = floatingPadStreamAt(pad.cell);
+                pad.sliding = boardingOnStream ? std::nullopt : std::optional(direction);
                 auto& padStatus = status_[*boardingPad];
+                padStatus.interceptedByStream = boardingOnStream;
                 padStatus.active = true;
                 padStatus.done = false;
                 padStatus.resolved = true;
@@ -5666,6 +5742,9 @@ private:
         }
         ++status_[index].consumed;
         applyRiderMoves(riders, from, fall.cell, riderTurns);
+        if (!fall.supported) {
+            queueUnsupportedRiders(after_, fall.cell, fallImpacts_);
+        }
     }
 
     int facePlayer(std::size_t index, MoveDirection direction)
@@ -5778,9 +5857,10 @@ private:
             ? *simultaneousLanding
             : playerFallTarget(level_, after_, playerIndex, target);
         fallImpacts_.record(fall);
-        const bool fell = fall.cell.z != target.z || fall.fallen;
+        const bool died = fall.fallen || !fall.supported;
+        const bool fell = fall.cell.z != target.z || died;
         playerCell(after_, playerIndex) = fall.cell;
-        playerDead(after_, playerIndex) = fall.fallen;
+        playerDead(after_, playerIndex) = died;
         after_.players[playerIndex].drowned = fall.fallen;
         playerSliding(after_, playerIndex) =
             (!fell && !playerDead(after_, playerIndex) &&
@@ -5794,7 +5874,7 @@ private:
         }
         ++status_[entityIndex].consumed;
         applyRiderMoves(riders, from, fall.cell, facePlayer(playerIndex, direction));
-        if (fall.fallen) {
+        if (died) {
             queueUnsupportedRiders(after_, fall.cell, fallImpacts_);
         }
     }
@@ -5832,10 +5912,10 @@ private:
                 movementTarget(vacated, oppositeDirection(direction));
             if (const std::optional<ChainEntity> entity =
                     pushableAt(after_, pullSource)) {
-                const bool alreadyMoved = entity->movable
-                    ? status_[entity->index].movedThisMicro
-                    : enemyMovedThisMicro_[entity->index];
-                if (!alreadyMoved && !isUnitLocked(level_, after_, pullSource)) {
+                const bool canDisplace = entity->movable
+                    ? canDisplaceThisMicro(entity->index)
+                    : !enemyMovedThisMicro_[entity->index];
+                if (canDisplace && !isUnitLocked(level_, after_, pullSource)) {
                     pulled = entity;
                 }
             }
@@ -5854,12 +5934,7 @@ private:
         const GridPosition3 landing =
             movementDestination(pulledFrom, direction);
         if (!cellAllowsEntity(level_, after_, landing) || occupied(landing) ||
-            (pulled->movable && !canCarryPlatformRiders(pulled->index, landing)) ||
-            (pulled->movable
-                 ? !movableFallTarget(level_, after_, pulled->index, landing)
-                        .supported
-                 : !enemyFallTarget(level_, after_, pulled->index, landing)
-                        .supported)) {
+            (pulled->movable && !canCarryPlatformRiders(pulled->index, landing))) {
             return;
         }
         if (pulled->movable) {
@@ -5892,6 +5967,7 @@ private:
     const PressurePlateActivityTracker plateActivity_;
     const std::optional<MoveDirection> playerInput_;
     const StepRates& rates_;
+    const bool deferLilyPadStreamRides_;
     const std::size_t originalMovableCount_;
     const std::size_t movableCount_;
     const std::size_t playerCount_;
@@ -5916,6 +5992,7 @@ private:
     std::vector<CrystalChange>* crystalChanges_ = nullptr;
     FallImpacts fallImpacts_;
     bool suppressBardInfluences_ = false;
+    bool playerPushedAlly_ = false;
     // Which rotators had every linked plate pressed when the step began. A
     // rotator activates on the step that presses its last plate, never on a
     // step that merely leaves it pressed.
@@ -5985,6 +6062,7 @@ StepResult scopedStepWithEvents(
         &result.pressurePlateActivityChanged,
         &result.crystalChanges);
     resolver.run();
+    result.playerPushedAlly = resolver.playerPushedAlly();
     return result;
 }
 
