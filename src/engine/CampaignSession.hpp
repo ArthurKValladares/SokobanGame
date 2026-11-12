@@ -34,7 +34,7 @@ public:
 
     void setLevelScreenCounts(std::vector<int> screenCounts);
     void setOverworldTargets(std::vector<LevelLocation> targets);
-    void setOverworldSelectors(std::vector<Level::ScreenSelector> selectors);
+    void setOverworldSelectors(const std::vector<Level::ScreenSelector>& selectors);
     void setOverworldTopology(
         uint64_t fingerprint,
         std::vector<OverworldScreenId> screens,
@@ -76,7 +76,8 @@ public:
 
     [[nodiscard]] PuzzleCompleted completePuzzle(
         PlayerProfile& profile,
-        int moveCount);
+        int moveCount,
+        const Level* overworld = nullptr);
 
     void addElapsedTime(float dt);
     void writeCheckpoint(
@@ -128,7 +129,7 @@ private:
 
     void clearRunState();
     [[nodiscard]] std::optional<LevelLocation> resolvePuzzleExit(
-        PlayerProfile& profile) const;
+        PlayerProfile& profile, const Level& overworld) const;
     void validateOverworldTargets(
         const std::vector<LevelLocation>& targets) const;
     [[nodiscard]] bool overworldScreenExists(
@@ -142,7 +143,6 @@ private:
 
     std::vector<int> levelScreenCounts_;
     std::vector<LevelLocation> overworldTargets_;
-    std::vector<Level::ScreenSelector> overworldSelectors_;
     // Screen 1/fingerprint 0 is the temporary identity of the legacy
     // levels/overworld.scr path. Application replaces this with map metadata
     // when runtime integration switches to OverworldMap.

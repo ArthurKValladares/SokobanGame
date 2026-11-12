@@ -53,9 +53,11 @@ struct FallResult {
     std::optional<std::size_t> impactVictim = std::nullopt;
 };
 
-// Fall queries also run on preview boards. Only committed falls queue impacts.
+// Fall queries also run on preview boards. Queue consequences only when the
+// caller applies a fall or removes a unit that was supporting riders.
 struct FallImpacts {
     std::vector<std::size_t> victims;
+    std::vector<GridPosition3> lostSupports;
 
     void record(const FallResult& fall)
     {
@@ -73,6 +75,15 @@ struct LiveUnitAt {
 std::optional<LiveUnitAt> liveUnitAt(const GameState& state, GridPosition3 cell);
 std::vector<LiveUnitAt> stackAbove(const GameState& state, GridPosition3 cell);
 void rotateUnit(GameState& state, LiveUnitAt unit, int turns);
+void killUnitAndQueueDrop(GameState& state, LiveUnitAt unit, FallImpacts& impacts);
+
+void queueUnsupportedRiders(
+    const GameState& state, GridPosition3 support, FallImpacts& impacts)
+{
+    if (liveUnitAt(state, { support.x, support.y, support.z + 1 })) {
+        impacts.lostSupports.push_back(support);
+    }
+}
 
 std::optional<std::size_t> supportingHero(
     const Level& level, const GameState& state, GridPosition3 cell);
@@ -291,10 +302,14 @@ std::vector<std::size_t> dropLostClericProtection(
                 continue;
             }
             impacts.record(fall);
+            const GridPosition3 support = player.cell;
             player.cell = fall.cell;
             player.dead = fall.fallen || !fall.supported;
             player.drowned = fall.fallen;
             player.sliding.reset();
+            if (player.dead) {
+                queueUnsupportedRiders(state, support, impacts);
+            }
             dropped.push_back(i);
             changed = true;
         }
@@ -322,7 +337,7 @@ FallResult enemyFallTarget(
     });
 }
 
-void resolveEnemyAttacks(const Level& level, GameState& state)
+void resolveEnemyAttacks(const Level& level, GameState& state, FallImpacts& impacts)
 {
     const auto protectedPlayers = clericAttackProtection(level, state);
     for (std::size_t playerIndex = 0;
@@ -344,9 +359,7 @@ void resolveEnemyAttacks(const Level& level, GameState& state)
                     1;
             });
         if (threatened) {
-            player.dead = true;
-            player.drowned = false;
-            player.sliding.reset();
+            killUnitAndQueueDrop(state, { EntityKind::Player, playerIndex }, impacts);
         }
     }
 }
@@ -879,6 +892,14 @@ bool cellAllowsEntity(
     }
     const Level::Gate* gate = level.gateAt(position);
     return gate != nullptr && isGateOpen(level, state, *gate);
+}
+
+bool playerHasSupport(
+    const Level& level, const GameState& state, std::size_t playerIndex)
+{
+    const GridPosition3 cell = state.players[playerIndex].cell;
+    const FallResult fall = playerFallTarget(level, state, playerIndex, cell);
+    return fall.supported && !fall.fallen && fall.cell == cell;
 }
 
 const GameState::Movable* movableAt(const GameState& state, GridPosition3 position)
@@ -1445,7 +1466,7 @@ struct UnitIndices {
 };
 
 struct SupportChanges {
-    // Fell after a gate opened or a supporting hero was crushed.
+    // Fell after a gate opened or the unit below stopped supporting it.
     UnitIndices dropped;
     // Killed by a closing gate, an excessive load, or a falling unit.
     UnitIndices crushed;
@@ -1511,14 +1532,14 @@ bool dropUnit(const Level& level, GameState& state, LiveUnitAt unit, FallImpacts
     }
 }
 
-// Kills a hero, enemy or turret. The body stays where
-// it is: a dead hero is left on the board like one an enemy struck, and dead
-// enemies and turrets stop blocking and rendering.
-void crushUnit(GameState& state, LiveUnitAt unit)
+// Bodies stay in their cells. Dead enemies and turrets stop blocking and
+// rendering, and dead heroes stop supporting other units.
+void killUnit(GameState& state, LiveUnitAt unit)
 {
     switch (unit.kind) {
     case EntityKind::Player:
         state.players[unit.index].dead = true;
+        state.players[unit.index].drowned = false;
         state.players[unit.index].sliding.reset();
         break;
     case EntityKind::Movable:
@@ -1534,25 +1555,48 @@ void crushUnit(GameState& state, LiveUnitAt unit)
     }
 }
 
-void crushHeroAndDropStack(
-    const Level& level, GameState& state, std::size_t index,
-    SupportChanges& changes, FallImpacts& impacts)
+void killUnitAndQueueDrop(GameState& state, LiveUnitAt unit, FallImpacts& impacts)
 {
-    const LiveUnitAt hero { EntityKind::Player, index };
-    const auto riders = stackAbove(state, unitCell(state, hero));
-    crushUnit(state, hero);
-    changes.crushed.add(hero);
-    for (const LiveUnitAt rider : riders) {
-        if (dropUnit(level, state, rider, impacts)) {
-            changes.dropped.add(rider);
+    killUnit(state, unit);
+    queueUnsupportedRiders(state, unitCell(state, unit), impacts);
+}
+
+bool dropStackAbove(
+    const Level& level, GameState& state, GridPosition3 support,
+    const PressurePlateActivityTracker& plateActivity, SupportChanges& changes,
+    FallImpacts& impacts)
+{
+    bool dropped = false;
+    // Visit the original column bottom first. Higher units can land on a
+    // rider that just fell, including one that now fills a water cell.
+    for (++support.z; auto rider = liveUnitAt(state, support); ++support.z) {
+        if (dropUnit(level, state, *rider, impacts)) {
+            plateActivity.observe(state);
+            changes.dropped.add(*rider);
+            dropped = true;
         }
     }
+    return dropped;
+}
+
+void crushHeroAndDropStack(
+    const Level& level, GameState& state, std::size_t index,
+    const PressurePlateActivityTracker& plateActivity, SupportChanges& changes,
+    FallImpacts& impacts)
+{
+    const LiveUnitAt hero { EntityKind::Player, index };
+    killUnit(state, hero);
+    changes.crushed.add(hero);
+    plateActivity.observe(state);
+    dropStackAbove(level, state, unitCell(state, hero), plateActivity, changes, impacts);
 }
 
 // Resolve an overloaded hero from the top down so the falling stack can
 // settle on the next support before checking the load on heroes below it.
 bool crushOverloadedHero(
-    const Level& level, GameState& state, SupportChanges& changes, FallImpacts& impacts)
+    const Level& level, GameState& state,
+    const PressurePlateActivityTracker& plateActivity, SupportChanges& changes,
+    FallImpacts& impacts)
 {
     std::optional<std::size_t> overloaded;
     for (std::size_t i = 0; i < state.players.size(); ++i) {
@@ -1577,7 +1621,7 @@ bool crushOverloadedHero(
     if (!overloaded) {
         return false;
     }
-    crushHeroAndDropStack(level, state, *overloaded, changes, impacts);
+    crushHeroAndDropStack(level, state, *overloaded, plateActivity, changes, impacts);
     return true;
 }
 
@@ -1605,6 +1649,10 @@ SupportChanges applySupportChanges(
 {
     plateActivity.observe(state);
     SupportChanges changes;
+    for (const GridPosition3 support : impacts.lostSupports) {
+        dropStackAbove(level, state, support, plateActivity, changes, impacts);
+    }
+    impacts.lostSupports.clear();
     const std::vector<Level::Gate>& gates = level.gates();
     openBefore.resize(gates.size(), 0);
     bool changed = true;
@@ -1615,7 +1663,7 @@ SupportChanges applySupportChanges(
             if (!openNow[g]) {
                 if (const std::optional<LiveUnitAt> occupant =
                         liveUnitAt(state, gates[g].cell)) {
-                    crushUnit(state, *occupant);
+                    killUnit(state, *occupant);
                     plateActivity.observe(state);
                     changes.crushed.add(*occupant);
                     changed = true;
@@ -1625,30 +1673,19 @@ SupportChanges applySupportChanges(
             if (openBefore[g]) {
                 continue;
             }
-            GridPosition3 cell = gates[g].cell;
-            ++cell.z;
-            for (std::optional<LiveUnitAt> unit = liveUnitAt(state, cell);
-                 unit;
-                 ++cell.z, unit = liveUnitAt(state, cell)) {
-                if (dropUnit(level, state, *unit, impacts)) {
-                    plateActivity.observe(state);
-                    changes.dropped.add(*unit);
-                    changed = true;
-                }
-            }
+            changed = dropStackAbove(
+                level, state, gates[g].cell, plateActivity, changes, impacts) || changed;
         }
         openBefore = std::move(openNow);
         while (!impacts.victims.empty()) {
             const std::size_t victim = impacts.victims.back();
             impacts.victims.pop_back();
             if (!playerDead(state, victim)) {
-                crushHeroAndDropStack(level, state, victim, changes, impacts);
-                plateActivity.observe(state);
+                crushHeroAndDropStack(level, state, victim, plateActivity, changes, impacts);
                 changed = true;
             }
         }
-        if (crushOverloadedHero(level, state, changes, impacts)) {
-            plateActivity.observe(state);
+        if (crushOverloadedHero(level, state, plateActivity, changes, impacts)) {
             changed = true;
         }
     }
@@ -2892,7 +2929,7 @@ std::optional<MirrorActivationPreview> previewActivationImpl(
     if (!dropLostClericProtection(level, after, clericProtection, impacts).empty()) {
         (void)applySupportChanges(level, after, gatesOpen, plateActivity, impacts);
     }
-    resolveEnemyAttacks(level, after);
+    resolveEnemyAttacks(level, after, impacts);
     // An attack can empty a plate, opening or closing its gates.
     (void)applySupportChanges(level, after, gatesOpen, plateActivity, impacts);
     if (!dropLostClericProtection(level, after, clericProtection, impacts).empty()) {
@@ -3178,6 +3215,7 @@ public:
             const std::size_t crystalCount =
                 crystalChanges_ ? crystalChanges_->size() : 0;
             const std::size_t impactCount = fallImpacts_.victims.size();
+            const std::size_t lostSupportCount = fallImpacts_.lostSupports.size();
             deriveIntents();
             const bool hasBardPulse = std::ranges::any_of(
                 status_,
@@ -3194,6 +3232,7 @@ public:
                     crystalChanges_->resize(crystalCount);
                 }
                 fallImpacts_.victims.resize(impactCount);
+                fallImpacts_.lostSupports.resize(lostSupportCount);
                 after_ = beforeBardPulse;
                 status_ = statusesBeforeBardPulse;
                 enemyMoved_ = enemiesBeforeBardPulse;
@@ -3261,6 +3300,7 @@ private:
         bool contested = false;
         bool resolved = false;
         bool movedThisMicro = false;
+        bool turnedTurretThisMicro = false;
         bool inputDriven = false; // player only
         bool crystallized = false;
         EntityId crystalRestorer = invalidEntityId;
@@ -3789,6 +3829,7 @@ private:
             status.contested = false;
             status.resolved = false;
             status.movedThisMicro = false;
+            status.turnedTurretThisMicro = false;
             status.inputDriven = false;
             status.bardDirection.reset();
             status.bardMoveBudget = 0;
@@ -5232,6 +5273,9 @@ private:
             }
             changed = resolveTurretShots(sweepingTurrets) || changed;
             changed = resolveAttacks() || changed;
+            if (!fallImpacts_.lostSupports.empty()) {
+                (void)resolveSupportChanges();
+            }
             sweepingTurrets = nullptr;
         } while (changed);
         markDeadEntitiesDone();
@@ -5258,7 +5302,9 @@ private:
             if (turret.fallen || turret.dead || !direction) {
                 continue;
             }
-            const bool sweeping = status_[turretIndex].movedThisMicro ||
+            auto& status = status_[turretIndex];
+            const bool turned = std::exchange(status.turnedTurretThisMicro, false);
+            const bool sweeping = status.movedThisMicro || turned ||
                 (sweepingTurrets != nullptr &&
                     (*sweepingTurrets)[turretIndex] != 0);
             const auto newlyVisible = [&](std::size_t target) {
@@ -5403,16 +5449,13 @@ private:
             if (!killedPlayers[playerIndex]) {
                 continue;
             }
-            GameState::Player& player = after_.players[playerIndex];
-            player.dead = true;
-            player.drowned = false;
-            player.sliding.reset();
+            killUnitAndQueueDrop(after_, { EntityKind::Player, playerIndex }, fallImpacts_);
         }
         for (std::size_t enemyIndex = 0;
              enemyIndex < after_.enemies.size();
              ++enemyIndex) {
             if (killedEnemies[enemyIndex]) {
-                after_.enemies[enemyIndex].dead = true;
+                killUnitAndQueueDrop(after_, { EntityKind::Enemy, enemyIndex }, fallImpacts_);
             }
         }
         for (std::size_t movableIndex = 0;
@@ -5421,9 +5464,7 @@ private:
             if (!killedMovables[movableIndex]) {
                 continue;
             }
-            GameState::Movable& movable = after_.movables[movableIndex];
-            movable.dead = true;
-            movable.sliding.reset();
+            killUnitAndQueueDrop(after_, { EntityKind::Movable, movableIndex }, fallImpacts_);
         }
         plateActivity_.observe(after_);
         return anyKilled;
@@ -5497,9 +5538,7 @@ private:
                 continue;
             }
             status_[entityIndex].active = true;
-            player.dead = true;
-            player.drowned = false;
-            player.sliding.reset();
+            killUnitAndQueueDrop(after_, { EntityKind::Player, playerIndex }, fallImpacts_);
             anyKilled = true;
         }
         plateActivity_.observe(after_);
@@ -5624,19 +5663,22 @@ private:
         return turns;
     }
 
-    void turnPlayerInPlace(std::size_t index, MoveDirection direction)
+    bool turnPlayerInPlace(std::size_t index, MoveDirection direction)
     {
-        const auto cell = after_.players[index].cell;
-        const auto riders = stackAbove(after_, cell);
-        applyRiderMoves(riders, cell, cell, facePlayer(index, direction));
         status_[entityIndexForPlayer(index)].inputDirection = direction;
-        status_[entityIndexForPlayer(index)].active = true;
+        const int turns = facePlayer(index, direction);
+        if (turns == 0) {
+            return false;
+        }
+        const auto cell = after_.players[index].cell;
+        applyRiderMoves(stackAbove(after_, cell), cell, cell, turns);
+        return true;
     }
 
     bool faceBlockedCopies()
     {
         if (!playerInput_) return false;
-        bool changed = false;
+        bool turned = false;
         for (std::size_t index = 0; index < playerCount_; ++index) {
             if (playerDead(after_, index) || status_[entityIndexForPlayer(index)].inputDirection) continue;
             const auto controller = playerControllerId(after_, index);
@@ -5646,18 +5688,32 @@ private:
                     status_[entityIndexForPlayer(other)].inputDirection.has_value();
             });
             if (!groupActed) continue;
-            turnPlayerInPlace(index, *playerInput_);
-            changed = true;
+            turned = turnPlayerInPlace(index, *playerInput_) || turned;
         }
-        return changed;
+        return turned;
     }
 
     void applyRiderMoves(
         const std::vector<LiveUnitAt>& riders, GridPosition3 from, GridPosition3 to,
         int turns = 0)
     {
+        const bool translated = from != to;
+        if (!translated && turns == 0) {
+            return;
+        }
         for (const LiveUnitAt rider : riders) {
-            rotateUnit(after_, rider, turns);
+            if (turns != 0) {
+                rotateUnit(after_, rider, turns);
+            }
+            if (!translated) {
+                // Turning in place leaves momentum and tile occupancy intact.
+                // A carried turret still sweeps its new direction once.
+                if (rider.kind == EntityKind::Movable &&
+                    turretDirection(after_.movables[rider.index])) {
+                    status_[rider.index].turnedTurretThisMicro = true;
+                }
+                continue;
+            }
             setUnitCell(after_, rider, riderLanding(from, to, unitCell(after_, rider)));
             const std::size_t riderIndex = entityIndexForUnit(rider);
             slidingOf(riderIndex).reset();
@@ -5723,6 +5779,9 @@ private:
         }
         ++status_[entityIndex].consumed;
         applyRiderMoves(riders, from, fall.cell, facePlayer(playerIndex, direction));
+        if (fall.fallen) {
+            queueUnsupportedRiders(after_, fall.cell, fallImpacts_);
+        }
     }
 
     void applyWardrobeSwap(std::size_t playerIndex)

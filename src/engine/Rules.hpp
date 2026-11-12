@@ -365,6 +365,10 @@ void setMirrorQuarterTurns(
     const GameState& state,
     GridPosition3 position);
 
+// Whether a living player would remain at its current cell after gravity.
+[[nodiscard]] bool playerHasSupport(
+    const Level& level, const GameState& state, std::size_t playerIndex);
+
 [[nodiscard]] const GameState::Movable* movableAt(const GameState& state, GridPosition3 position);
 [[nodiscard]] const GameState::Movable* fallenMovableAt(const GameState& state, GridPosition3 position);
 [[nodiscard]] const GameState::Enemy* enemyAt(const GameState& state, GridPosition3 position);

@@ -22,11 +22,10 @@ void CampaignSession::setOverworldTargets(std::vector<LevelLocation> targets)
     targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
     validateOverworldTargets(targets);
     overworldTargets_ = std::move(targets);
-    overworldSelectors_.clear();
 }
 
 void CampaignSession::setOverworldSelectors(
-    std::vector<Level::ScreenSelector> selectors)
+    const std::vector<Level::ScreenSelector>& selectors)
 {
     std::vector<LevelLocation> targets;
     for (const Level::ScreenSelector& selector : selectors) {
@@ -35,7 +34,6 @@ void CampaignSession::setOverworldSelectors(
         }
     }
     setOverworldTargets(std::move(targets));
-    overworldSelectors_ = std::move(selectors);
 }
 
 void CampaignSession::setOverworldTopology(
@@ -259,7 +257,7 @@ void CampaignSession::finishWorldLoad(PlayerProfile& profile)
 }
 
 std::optional<LevelLocation> CampaignSession::resolvePuzzleExit(
-    PlayerProfile& profile) const
+    PlayerProfile& profile, const Level& overworld) const
 {
     auto& checkpoint = profile.overworldCheckpoint;
     if (!checkpoint || checkpoint->topologyFingerprint != overworldFingerprint_) {
@@ -275,18 +273,19 @@ std::optional<LevelLocation> CampaignSession::resolvePuzzleExit(
         })) {
         return std::nullopt;
     }
+    const auto& selectors = overworld.selectors();
     auto selector = std::ranges::find(
-        overworldSelectors_, entryCell, &Level::ScreenSelector::cell);
-    if (selector == overworldSelectors_.end() || !selector->target ||
+        selectors, entryCell, &Level::ScreenSelector::cell);
+    if (selector == selectors.end() || !selector->target ||
         selector->target->level != current_.level ||
         selector->target->screen > current_.screen) {
         return std::nullopt;
     }
 
-    const auto findNext = [this](const Level::ScreenSelector& flag) {
+    const auto findNext = [this, &selectors](const Level::ScreenSelector& flag) {
         const GridPosition3 cell = flag.cell;
         const LevelLocation next { current_.level, flag.target->screen + 1 };
-        return std::ranges::find_if(overworldSelectors_,
+        return std::ranges::find_if(selectors,
             [cell, next](const Level::ScreenSelector& candidate) {
                 return candidate.target == next && candidate.cell.z == cell.z &&
                     std::abs(candidate.cell.x - cell.x) +
@@ -298,20 +297,20 @@ std::optional<LevelLocation> CampaignSession::resolvePuzzleExit(
     std::vector<const Level::ScreenSelector*> route { &*selector };
     while (selector->target->screen < current_.screen) {
         selector = findNext(*selector);
-        if (selector == overworldSelectors_.end()) {
+        if (selector == selectors.end()) {
             return std::nullopt;
         }
         route.push_back(&*selector);
     }
     if (const auto next = findNext(*selector);
-        next != overworldSelectors_.end() &&
+        next != selectors.end() &&
         screenExists(next->target->level, next->target->screen)) {
         return next->target;
     }
 
     for (std::size_t i = 1; i < route.size(); ++i) {
         if (!GameplaySession::appendOverworldReturnStep(
-                checkpoint->session, *route[i - 1], *route[i])) {
+                overworld, checkpoint->session, *route[i - 1], *route[i])) {
             break;
         }
     }
@@ -320,7 +319,8 @@ std::optional<LevelLocation> CampaignSession::resolvePuzzleExit(
 
 CampaignSession::PuzzleCompleted CampaignSession::completePuzzle(
     PlayerProfile& profile,
-    int moveCount)
+    int moveCount,
+    const Level* overworld)
 {
     const PlayerProfile::ScreenProgress* progress =
         profile.progressForScreen(current_);
@@ -347,7 +347,8 @@ CampaignSession::PuzzleCompleted CampaignSession::completePuzzle(
         .newBestTime = !previousBestTime ||
             puzzleElapsedSeconds_ < *previousBestTime,
         .gameCompleted = allTargetsCompleted(profile),
-        .nextPuzzle = resolvePuzzleExit(profile),
+        .nextPuzzle = overworld
+            ? resolvePuzzleExit(profile, *overworld) : std::nullopt,
     };
     puzzleElapsedSeconds_ = 0.0;
     return completed;

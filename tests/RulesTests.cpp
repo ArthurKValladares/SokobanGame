@@ -1338,6 +1338,57 @@ void testFallingUnitsCrushHeroesThroughTheirLoad()
     }
 }
 
+void testCarrierDeathDropsRiders()
+{
+    TEST("carrierDeathDropsRiders");
+    {
+        const Level level = makeLevel({
+            { ".....", "....." },
+            { "e    ", "   C " },
+            { "     ", "   R " },
+            { "     ", "   R " },
+        }, CharacterType::Knight);
+        const auto initial = rules::initialState(level);
+        const auto result = rules::scopedStepWithEvents(
+            level, initial, MoveDirection::Up, {},
+            { .actors = { initial.players[0].id } });
+        CHECK(result.turretShots.size() == 1);
+        CHECK(result.state.players[0].dead);
+        CHECK(!result.state.players[0].drowned);
+        CHECK(result.state.movables[1].cell == cell(3, 0, 1));
+        CHECK(result.state.movables[2].cell == cell(3, 0, 2));
+        CHECK(rules::step(level, result.state) == result.state);
+    }
+    {
+        const Level level = makeLevel({
+            { "...." },
+            { "C N " },
+            { "R   " },
+        }, CharacterType::Knight);
+        const auto state = rules::step(
+            level, rules::initialState(level), MoveDirection::Right);
+        CHECK(state.players[0].dead);
+        CHECK(!state.players[0].drowned);
+        CHECK(state.movables[0].cell == cell(1, 0, 1));
+    }
+    {
+        const Level level = makeLevel({
+            { ".W." },
+            { "C  " },
+            { "R  " },
+            { "R  " },
+        }, CharacterType::Knight);
+        auto initial = rules::initialState(level);
+        initial.players[0].sliding = MoveDirection::Right;
+        const auto state = rules::step(level, initial);
+        CHECK(state.players[0].drowned);
+        CHECK(state.movables[0].fallen);
+        CHECK(state.movables[0].cell == cell(1, 0, 1));
+        CHECK(!state.movables[1].fallen);
+        CHECK(state.movables[1].cell == cell(1, 0, 2));
+    }
+}
+
 void testCarriedStackTurnsWithHero()
 {
     TEST("carriedStackTurnsWithHero");
@@ -1372,6 +1423,59 @@ void testCarriedStackTurnsWithHero()
     CHECK(turned.players[1].cell == mirrored.players[1].cell);
     CHECK(rules::playerFacing(turned.players[1]) == MoveDirection::Right);
     CHECK(turned.movables[0].quarterTurns == 3);
+}
+
+void testStationaryCarryTurnLeavesRiderOnWardrobe()
+{
+    TEST("stationaryCarryTurnLeavesRiderOnWardrobe");
+    const Level level = makeLevel({
+        { ".....", ".....", "....." },
+        { "C    ", "     ", " #C#C" },
+        { "     ", "     ", " N9  " },
+    }, CharacterType::Knight);
+    auto before = rules::initialState(level);
+    before.players[1].controller = before.players[0].controller;
+    before.players[2].cell = cell(2, 2, 2);
+    before.players[2].sliding = MoveDirection::Left;
+    const rules::StepScope copies { .actors = { before.players[0].id, before.players[1].id } };
+
+    const auto after = rules::scopedStep(level, before, MoveDirection::Right, {}, copies);
+    CHECK(after.players[0].cell == cell(1, 0, 1));
+    CHECK(after.players[1].cell == before.players[1].cell);
+    auto expectedRider = before.players[2];
+    expectedRider.quarterTurns = 3;
+    CHECK(after.players[2] == expectedRider);
+    CHECK(after.wardrobes == before.wardrobes);
+}
+
+void testStationaryCarriedTurretSweepsOnlyOnTurn()
+{
+    TEST("stationaryCarriedTurretSweepsOnlyOnTurn");
+    const Level level = makeLevel({
+        { ".....", ".....", "....." },
+        { "C    ", "     ", "# C# " },
+        { "     ", "     ", "N n  " },
+    }, CharacterType::Knight);
+    auto before = rules::initialState(level);
+    before.players[1].controller = before.players[0].controller;
+
+    const auto turned = rules::stepWithEvents(level, before, MoveDirection::Right);
+    CHECK(turned.state.players[1].cell == before.players[1].cell);
+    CHECK(turned.state.movables[0].cell == before.movables[0].cell);
+    CHECK(rules::turretDirection(turned.state.movables[0]) == MoveDirection::Left);
+    CHECK(turned.state.enemies[0].dead);
+    CHECK(turned.turretShots.size() == 1);
+
+    before.players[1].quarterTurns = 3; // The implicit heading is already right.
+    before.movables[0].quarterTurns = 3;
+    const auto sameHeading = rules::stepWithEvents(level, before, MoveDirection::Right);
+    CHECK(sameHeading.state.players[0].cell == cell(1, 0, 1));
+    auto expectedCarrier = before.players[1];
+    expectedCarrier.facing = MoveDirection::Right;
+    CHECK(sameHeading.state.players[1] == expectedCarrier);
+    CHECK(sameHeading.state.movables[0] == before.movables[0]);
+    CHECK(!sameHeading.state.enemies[0].dead);
+    CHECK(sameHeading.turretShots.empty());
 }
 
 void testRotatorTurnsCarriedStack()
@@ -5787,8 +5891,11 @@ int main()
     testRangerUsesSinglePushAndCanGainAbilities();
     testKnightPushesAnUnlimitedMixedChain();
     testHeroCarryCapacityAndCrushing();
+    testCarrierDeathDropsRiders();
     testFallingUnitsCrushHeroesThroughTheirLoad();
     testCarriedStackTurnsWithHero();
+    testStationaryCarryTurnLeavesRiderOnWardrobe();
+    testStationaryCarriedTurretSweepsOnlyOnTurn();
     testRotatorTurnsCarriedStack();
     testOpeningGateDropsRockOntoKnight();
     testKnightChainPushIsAtomicWhenItsTailIsBlocked();

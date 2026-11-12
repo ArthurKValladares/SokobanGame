@@ -115,11 +115,49 @@ float turretShotTriggerSeconds(
 // movementDirection, anyPlayerMoved and firstPlayerMovementDirection now live
 // in plans:: alongside the planners that need them.
 
+// A checkpoint written before facing was saved leaves the field unset.
+// Recover it from the validated transition and keep all recorded values exact.
+bool reconcileLegacyFacing(GameState& saved, const GameState& replayed)
+{
+    if (saved == replayed) {
+        return true;
+    }
+    const auto matchingPlayer = [](
+        GameState::Player recorded, const GameState::Player& actual) {
+        if (!recorded.facing) {
+            recorded.facing = actual.facing;
+        }
+        return recorded == actual;
+    };
+    const auto matchingMovable = [](
+        GameState::Movable recorded, const GameState::Movable& actual) {
+        if (recorded.crystalOrigin && actual.crystalOrigin &&
+            !recorded.crystalOrigin->facing) {
+            recorded.crystalOrigin->facing = actual.crystalOrigin->facing;
+        }
+        return recorded == actual;
+    };
+    if (!std::ranges::equal(saved.players, replayed.players, matchingPlayer) ||
+        !std::ranges::equal(saved.movables, replayed.movables, matchingMovable)) {
+        return false;
+    }
+
+    // Compare the rest of GameState through its exact equality operator.
+    GameState upgraded = saved;
+    upgraded.players = replayed.players;
+    upgraded.movables = replayed.movables;
+    if (upgraded != replayed) {
+        return false;
+    }
+    saved = std::move(upgraded);
+    return true;
+}
+
 // Replays the entry forward under `scope` and reports whether it lands exactly
 // where it claims to, for some input the player could have given.
 bool replayMatches(
     const Level& level,
-    const GameplaySession::Action& action,
+    GameplaySession::Action& action,
     const rules::StepRates& rates,
     const rules::StepScope& scope)
 {
@@ -146,7 +184,7 @@ bool replayMatches(
         // Saves written before slides were chained hold one step per action,
         // so a single step still has to be accepted. Newer saves hold the whole
         // chain, which is what replaying the plan produces.
-        if (current == action.after) {
+        if (reconcileLegacyFacing(action.after, current)) {
             return true;
         }
         if (!plans::anySlideMomentum(current)) {
@@ -167,7 +205,7 @@ bool replayMatches(
              ++steps) {
             GameState next =
                 rules::scopedStep(level, current, std::nullopt, rates, scope);
-            if (next == action.after) {
+            if (reconcileLegacyFacing(action.after, next)) {
                 return true;
             }
             if (next == current || next == checkpoint) {
@@ -186,7 +224,7 @@ bool replayMatches(
 
 bool matchesForwardTransition(
     const Level& level,
-    const GameplaySession::Action& action,
+    GameplaySession::Action& action,
     const rules::StepRates& rates)
 {
     const GameState initial = rules::initialState(level);
@@ -197,8 +235,8 @@ bool matchesForwardTransition(
 
     if (const std::optional<GameState> reflected =
             rules::activate(level, action.before)) {
-        if (*reflected == action.after &&
-            action.playerMoveCountAfter == action.playerMoveCountBefore) {
+        if (action.playerMoveCountAfter == action.playerMoveCountBefore &&
+            reconcileLegacyFacing(action.after, *reflected)) {
             return true;
         }
     }
@@ -700,7 +738,7 @@ GameplaySession::Snapshot GameplaySession::snapshot() const
 namespace {
 
 bool moveBetweenOverworldSelectors(
-    GameState& state, const Level::ScreenSelector& from,
+    const Level& level, GameState& state, const Level::ScreenSelector& from,
     const Level::ScreenSelector& to)
 {
     if (!from.target || !to.target || from.target->level != to.target->level ||
@@ -714,13 +752,23 @@ bool moveBetweenOverworldSelectors(
         })) {
         return false;
     }
+    if (!rules::cellAllowsEntity(level, state, to.cell) ||
+        rules::movableAt(state, to.cell) || rules::enemyAt(state, to.cell)) {
+        return false;
+    }
+    // A selector moves the whole party together. Evaluate support on the
+    // resulting board so the check includes any shared Cleric protection.
     for (GameState::Player& player : state.players) {
         player.cell = to.cell;
     }
-    return true;
+    return std::ranges::all_of(
+        std::views::iota(std::size_t { 0 }, state.players.size()),
+        [&](std::size_t index) {
+            return rules::playerHasSupport(level, state, index);
+        });
 }
 
-bool matchesOverworldReturn(const Level& level, const ActionPlan& action)
+bool matchesOverworldReturn(const Level& level, ActionPlan& action)
 {
     if (action.playerMoveCountBefore != action.playerMoveCountAfter ||
         action.before.players.empty() || action.after.players.empty()) {
@@ -732,18 +780,18 @@ bool matchesOverworldReturn(const Level& level, const ActionPlan& action)
         return false;
     }
     GameState expected = action.before;
-    return moveBetweenOverworldSelectors(expected, *from, *to) &&
-        expected == action.after;
+    return moveBetweenOverworldSelectors(level, expected, *from, *to) &&
+        reconcileLegacyFacing(action.after, expected);
 }
 
 } // namespace
 
 bool GameplaySession::appendOverworldReturnStep(
-    Snapshot& snapshot, const Level::ScreenSelector& from,
+    const Level& level, Snapshot& snapshot, const Level::ScreenSelector& from,
     const Level::ScreenSelector& to)
 {
     GameState next = snapshot.state;
-    if (!moveBetweenOverworldSelectors(next, from, to)) {
+    if (!moveBetweenOverworldSelectors(level, next, from, to)) {
         return false;
     }
     snapshot.undoStack.push_back({
@@ -768,11 +816,11 @@ bool GameplaySession::restore(
 
     GameState expectedState = rules::initialState(level);
     int expectedMoveCount = 0;
-    for (const Action& action : normalized.undoStack) {
+    for (Action& action : normalized.undoStack) {
         if (action.reversed ||
             action.playerMoveCountBefore < 0 ||
             action.playerMoveCountAfter < 0 ||
-            !(action.before == expectedState) ||
+            !reconcileLegacyFacing(action.before, expectedState) ||
             action.playerMoveCountBefore != expectedMoveCount ||
             (!(allowOverworldReturns && matchesOverworldReturn(level, action)) &&
              !matchesForwardTransition(level, action, stepRates_))) {
@@ -781,7 +829,7 @@ bool GameplaySession::restore(
         expectedState = action.after;
         expectedMoveCount = action.playerMoveCountAfter;
     }
-    if (!(normalized.state == expectedState) ||
+    if (!reconcileLegacyFacing(normalized.state, expectedState) ||
         normalized.playerMoveCount != expectedMoveCount) {
         return false;
     }

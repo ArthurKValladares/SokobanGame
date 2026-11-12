@@ -75,7 +75,7 @@ public:
         const Level& level, const Snapshot& snapshot,
         bool allowOverworldReturns = false);
     [[nodiscard]] static bool appendOverworldReturnStep(
-        Snapshot& snapshot, const Level::ScreenSelector& from,
+        const Level& level, Snapshot& snapshot, const Level::ScreenSelector& from,
         const Level::ScreenSelector& to);
 
     void queueMove(MoveDirection direction);

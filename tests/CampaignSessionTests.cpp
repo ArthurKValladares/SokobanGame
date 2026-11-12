@@ -2,6 +2,7 @@
 
 #include "engine/CampaignSession.hpp"
 
+#include <array>
 #include <iostream>
 #include <utility>
 
@@ -287,7 +288,7 @@ void testAdjacentPuzzlesChainFromSavedSelector()
 
     for (int screen = 0; screen < 4; ++screen) {
         CHECK(campaign.location() == (LevelLocation { 0, screen }));
-        const auto completed = campaign.completePuzzle(profile, 2);
+        const auto completed = campaign.completePuzzle(profile, 2, &map);
         CHECK(profile.screenCompleted({ 0, screen }));
         if (screen < 3) {
             const LevelLocation next { 0, screen + 1 };
@@ -309,6 +310,86 @@ void testAdjacentPuzzlesChainFromSavedSelector()
     CHECK(session.state().players.front().cell == (GridPosition3 { 2, 1, 1 }));
     CHECK(session.playerMoveCount() == overworld.playerMoveCount);
     CHECK(session.undoCount() == 3);
+}
+
+void testChainedReturnStopsBeforeBlockedSelector()
+{
+    TEST("chainedReturnStopsBeforeBlockedSelector");
+    constexpr GridPosition3 start { 0, 0, 1 };
+    constexpr GridPosition3 safe { 1, 0, 1 };
+    constexpr GridPosition3 blocked { 2, 0, 1 };
+    for (const auto& [terrain, actors] : std::array {
+             std::pair { "...", "C R" },
+             std::pair { "...", "C N" },
+             std::pair { "..W", "C  " },
+         }) {
+        const Level map = Level::loadFromLayers(
+            { { terrain }, { actors } }, "blocked return selector", std::nullopt, {},
+            {
+                { 1, start, LevelLocation { 0, 0 } },
+                { 2, safe, LevelLocation { 0, 1 } },
+                { 3, blocked, LevelLocation { 0, 2 } },
+            });
+        CampaignSession campaign;
+        campaign.setLevelScreenCounts({ 3 });
+        campaign.setOverworldSelectors(map.selectors());
+        PlayerProfile profile;
+        GameplaySession session;
+        session.reset(map);
+        const auto original = session.snapshot();
+        CHECK(campaign.enterSelector(profile, { 0, 0 }, original));
+        for (int screen = 1; screen <= 2; ++screen) {
+            const auto completed = campaign.completePuzzle(profile, 2, &map);
+            const LevelLocation next { 0, screen };
+            CHECK(completed.nextPuzzle == next);
+            CHECK(campaign.startPuzzle(profile, next));
+        }
+        CHECK(!campaign.completePuzzle(profile, 2, &map).nextPuzzle);
+
+        const auto returned = campaign.prepareWorldLoad(profile).snapshot;
+        CHECK(returned.has_value());
+        if (!returned) continue;
+        CHECK(returned->state.players.front().cell == safe);
+        CHECK(returned->state.movables == original.state.movables);
+        CHECK(returned->state.enemies == original.state.enemies);
+        CHECK(returned->playerMoveCount == original.playerMoveCount);
+        CHECK(returned->undoStack.size() == 1);
+        CHECK(session.restore(map, *returned, true));
+
+        auto invalid = *returned;
+        invalid.state.players.front().cell = blocked;
+        invalid.undoStack.push_back({
+            .before = returned->state,
+            .after = invalid.state,
+            .playerMoveCountBefore = returned->playerMoveCount,
+            .playerMoveCountAfter = returned->playerMoveCount,
+        });
+        CHECK(!session.restore(map, invalid, true));
+        CHECK(session.snapshot() == *returned);
+    }
+}
+
+void testOverworldReturnMovesSharedParty()
+{
+    TEST("overworldReturnMovesSharedParty");
+    constexpr GridPosition3 start { 0, 0, 1 };
+    constexpr GridPosition3 destination { 1, 0, 1 };
+    const Level map = Level::loadFromLayers(
+        { { ".." }, { "C " } }, "party return", std::nullopt, {},
+        {
+            { 1, start, LevelLocation { 0, 0 } },
+            { 2, destination, LevelLocation { 0, 1 } },
+        });
+    GameplaySession session;
+    session.reset(map);
+    auto party = session.snapshot();
+    auto companion = party.state.players.front();
+    ++companion.id;
+    party.state.players.push_back(companion);
+    CHECK(GameplaySession::appendOverworldReturnStep(
+        map, party, map.selectors()[0], map.selectors()[1]));
+    CHECK(party.state.players[0].cell == destination);
+    CHECK(party.state.players[1].cell == destination);
 }
 
 void testPuzzleOnlyTimingAndDeferredCheckpoint()
@@ -341,6 +422,8 @@ int main()
     testOverworldTopologyCheckpointValidation();
     testIndependentCompletionAndAllTargets();
     testAdjacentPuzzlesChainFromSavedSelector();
+    testChainedReturnStopsBeforeBlockedSelector();
+    testOverworldReturnMovesSharedParty();
     testPuzzleOnlyTimingAndDeferredCheckpoint();
     } catch (const std::exception& error) {
         std::cerr << "UNCAUGHT: " << error.what() << '\n';

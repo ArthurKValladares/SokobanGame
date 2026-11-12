@@ -1626,8 +1626,14 @@ void Application::advanceScreen()
     }
     const int moveCount = gameplaySession_.playerMoveCount();
     beginLevelTransition([this, moveCount] {
+        std::optional<Level> legacyOverworld;
+        const Level* overworld = overworldMap_ ? &overworldMap_->level() : nullptr;
+        if (!overworld && playerProfile_.overworldCheckpoint) {
+            legacyOverworld.emplace(Level::loadFromFile(overworldPath()));
+            overworld = &*legacyOverworld;
+        }
         handlePuzzleCompleted(campaign_.completePuzzle(
-            playerProfile_, moveCount));
+            playerProfile_, moveCount, overworld));
     });
 }
 
@@ -2277,7 +2283,7 @@ void Application::buildLevelCatalog()
         selectors = Level::loadFromFile(overworldPath()).selectors();
     }
     campaign_.setLevelScreenCounts(std::move(screenCounts));
-    campaign_.setOverworldSelectors(std::move(selectors));
+    campaign_.setOverworldSelectors(selectors);
 }
 
 void Application::restoreProfileLocation()

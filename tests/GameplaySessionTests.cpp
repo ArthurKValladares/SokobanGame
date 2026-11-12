@@ -4,6 +4,7 @@
 #include "TestHarness.hpp"
 
 #include "engine/GameplaySession.hpp"
+#include "engine/PlayerProfile.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -786,6 +787,86 @@ void testSnapshotRestoresExactStateAndUndoStack()
     CHECK(restored.playerMoveCount() == 1);
     CHECK(restored.undoCount() == 1);
     CHECK(restored.completedActionCount() == 1);
+}
+
+void testPreFacingCheckpointRecoversHeroAndCrystalHistory()
+{
+    TEST("preFacingCheckpointRecoversHeroAndCrystalHistory");
+    const Level level = Level::loadFromLines({
+        "@ranger {\"cell\":[0,0,1]}",
+        "@druid {\"cell\":[2,0,1]}",
+        "@layer 0", ".....",
+        "@layer 1", "C C  ",
+    }, "pre-facing checkpoint");
+    GameplaySession original;
+    original.reset(level);
+    original.queueMove(MoveDirection::Right);
+    CHECK(original.tryStartNextAction(level, {}));
+    finishAction(original);
+    original.cycleActiveHero();
+    for (int i = 0; i < 2; ++i) {
+        original.queueMove(MoveDirection::Left);
+        CHECK(original.tryStartNextAction(level, {}));
+        finishAction(original);
+    }
+
+    const auto saved = original.snapshot();
+    CHECK(saved.undoStack.size() == 3);
+    if (saved.undoStack.size() != 3) return;
+    const auto& crystals = saved.undoStack[1].after.movables;
+    CHECK(crystals.size() == 1 && crystals.front().crystalOrigin.has_value());
+    if (crystals.size() != 1 || !crystals.front().crystalOrigin) return;
+    CHECK(crystals.front().crystalOrigin->facing == MoveDirection::Right);
+
+    const auto omitFacing = [](GameState& state) {
+        for (auto& player : state.players) {
+            player.facing.reset();
+        }
+        for (auto& movable : state.movables) {
+            if (movable.crystalOrigin) {
+                movable.crystalOrigin->facing.reset();
+            }
+        }
+    };
+    auto legacy = saved;
+    omitFacing(legacy.state);
+    for (auto& action : legacy.undoStack) {
+        omitFacing(action.before);
+        omitFacing(action.after);
+    }
+    PlayerProfile profile;
+    profile.overworldCheckpoint = PlayerProfile::OverworldCheckpoint {
+        .activeScreen = 1,
+        .session = legacy,
+    };
+    const auto encoded = profile.serialize(ProfileSections::ProgressOnly);
+    CHECK(encoded.find("\"facing\"") == std::string::npos);
+    const auto decoded = decodePlayerProfile(encoded);
+    CHECK(decoded.profile.overworldCheckpoint.has_value());
+    if (!decoded.profile.overworldCheckpoint) return;
+
+    GameplaySession restored;
+    CHECK(restored.restore(level, decoded.profile.overworldCheckpoint->session));
+    CHECK(restored.snapshot() == saved);
+
+    auto corrupted = legacy;
+    corrupted.undoStack[0].after.players.front().facing = MoveDirection::Left;
+    CHECK(!restored.restore(level, corrupted));
+    corrupted = legacy;
+    corrupted.undoStack[1].after.movables.front().crystalOrigin->facing = MoveDirection::Up;
+    CHECK(!restored.restore(level, corrupted));
+    corrupted = legacy;
+    corrupted.undoStack[1].after.movables.front().quarterTurns = 1;
+    CHECK(!restored.restore(level, corrupted));
+    CHECK(restored.snapshot() == saved);
+
+    for (auto action = saved.undoStack.rbegin(); action != saved.undoStack.rend(); ++action) {
+        restored.queueUndo();
+        CHECK(restored.tryStartNextAction(level, {}));
+        finishAction(restored);
+        CHECK(restored.state() == action->before);
+        CHECK(restored.playerMoveCount() == action->playerMoveCountBefore);
+    }
 }
 
 void testResetClearsUndoStackForNewScreen()
@@ -2506,6 +2587,7 @@ int main()
     testNewMoveAfterUndoCreatesCleanHistoryBranch();
     testPlayerMoveCountTracksUndoAndRestart();
     testSnapshotRestoresExactStateAndUndoStack();
+    testPreFacingCheckpointRecoversHeroAndCrystalHistory();
     testResetClearsUndoStackForNewScreen();
     testSnapshotRestoreAcceptsRestartHistory();
     testInvalidSnapshotIsRejectedWithoutMutation();
