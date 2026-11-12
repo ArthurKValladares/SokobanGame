@@ -17,6 +17,8 @@ public:
     struct ButtonState {
         bool pressed = false;
         bool down = false;
+
+        bool operator==(const ButtonState&) const = default;
     };
 
     struct InputFrame {
@@ -33,6 +35,8 @@ public:
         // selector.
         bool interactPressed = false;
         bool dismissPressed = false;
+
+        bool operator==(const InputFrame&) const = default;
     };
 
     struct UpdateResult {

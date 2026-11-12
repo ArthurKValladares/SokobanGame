@@ -145,10 +145,14 @@ constexpr std::array<VkVertexInputAttributeDescription, 4> skinnedPositionAttrib
     VkVertexInputAttributeDescription { 7, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, attachmentNodeIndex) },
 };
 
-constexpr std::array meshOutlineAttributes { meshAttributes[0], meshAttributes[1], meshAttributes[6] };
+constexpr std::array meshOutlineAttributes {
+    meshAttributes[0], meshAttributes[1], meshAttributes[6],
+    VkVertexInputAttributeDescription { 12, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, outlineNormal) },
+};
 constexpr std::array skinnedOutlineAttributes {
     skinnedAttributes[0], skinnedAttributes[1], skinnedAttributes[3],
     skinnedAttributes[4], skinnedAttributes[5],
+    VkVertexInputAttributeDescription { 12, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, outlineNormal) },
 };
 
 } // namespace

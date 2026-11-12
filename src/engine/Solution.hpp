@@ -1,7 +1,8 @@
 #pragma once
 
+#include "engine/AnimationCatalog.hpp"
 #include "engine/EntityId.hpp"
-#include "engine/GameplaySession.hpp"
+#include "engine/GameplayLoop.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelLocation.hpp"
 #include "engine/Math.hpp"
@@ -64,12 +65,38 @@ struct Step {
     bool operator==(const Step&) const = default;
 };
 
+struct TimedFrame {
+    GameplayLoop::InputFrame input;
+    float elapsedSeconds = 0.0f;
+
+    bool operator==(const TimedFrame&) const = default;
+};
+
+struct TimedRun {
+    std::vector<TimedFrame> frames;
+    std::size_t inputCount = 0;
+    GameState finalState;
+    EntityId activeHeroController = invalidEntityId;
+    bool automaticMotionPaused = false;
+    // Older timed recordings came from editor drafts, which finish the frame.
+    // Campaign play ends the frame at the winning commit.
+    bool playingDraft = true;
+
+    bool operator==(const TimedRun&) const = default;
+};
+
 struct Solution {
     std::uint64_t levelDigest = 0;
     // Where it was recorded, for people reading the file. Lookup uses the
     // digest.
     std::string recordedFor;
     std::vector<Step> steps;
+    std::optional<TimedRun> timed;
+
+    [[nodiscard]] std::size_t stepCount() const
+    {
+        return timed ? timed->inputCount : steps.size();
+    }
 
     bool operator==(const Solution&) const = default;
 };
@@ -88,12 +115,9 @@ struct Solution {
 // `solutions/level<L>-screen<S>.solution` style name for a new recording.
 [[nodiscard]] std::string fileNameFor(LevelLocation location);
 
-// Drives one screen through the same GameplaySession action planner and
-// scheduler used by GameplayLoop, one input at a time. It advances directly
-// between mechanical completion boundaries because tools have no animation to
-// render. Waiting until idle is what makes a recording replayable: a player
-// pressing keys mid-slide depends on timing, a replay must not. Repeating
-// robot motors advance to the next completion boundary for each input.
+// Replays legacy format-2 recordings, whose discrete inputs have no timing
+// information. It advances between mechanical completion boundaries and waits
+// for each step to settle. New recordings use the timed GameplayLoop instead.
 class Driver {
 public:
     explicit Driver(const Level& level);
@@ -132,14 +156,28 @@ struct Recording {
     std::string error;
 };
 
-// Plays `inputs` from the level's opening state and records what each one
-// changed. `solved` only when the final input solves the screen; stopping
-// short or solving early is reported in `error`.
+// Builds legacy format-2 fixtures from discrete inputs. The final input must
+// solve the screen. New gameplay recordings use recordTimed.
 [[nodiscard]] Recording record(
     const Level& level,
     const Level::Definition& definition,
     std::span<const Input> inputs,
     std::string recordedFor);
+
+// Replays the controls and simulation deltas from the authored start through
+// the first winning frame, including inputs during concurrent board motion.
+[[nodiscard]] Recording recordTimed(
+    const Level& level,
+    const Level::Definition& definition,
+    std::span<const TimedFrame> frames,
+    std::string recordedFor,
+    const AnimationCatalog* animations = nullptr,
+    bool playingDraft = true);
+
+// Timing of some actions depends on the authored animation catalog. Headless
+// fixtures without an assets directory use default presentation timings.
+[[nodiscard]] std::optional<AnimationCatalog> loadReplayAnimationCatalog(
+    const std::filesystem::path& assetsRoot);
 
 struct ReplayReport {
     bool passed = false;
@@ -147,6 +185,7 @@ struct ReplayReport {
     std::string message;
 };
 
-[[nodiscard]] ReplayReport replay(const Level& level, const Solution& solution);
+[[nodiscard]] ReplayReport replay(const Level& level, const Solution& solution,
+    const AnimationCatalog* animations = nullptr);
 
 } // namespace sokoban::solution

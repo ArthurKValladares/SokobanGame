@@ -793,6 +793,31 @@ void testSolvedScreenAndDraftOutcomesDiffer()
     CHECK(result.draftSolved);
 }
 
+void testRestoredKnightOnEndWithCarriedRocksCompletesScreen()
+{
+    TEST("restoredKnightOnEndWithCarriedRocksCompletesScreen");
+    const Level oldLevel = makeLevel({ { "...." }, { "KE E" }, { "R   " }, { "R   " } });
+    const Level level = makeLevel({ { "...." }, { "KE  " }, { "R   " }, { "R   " } });
+    GameplaySession session;
+    session.reset(oldLevel);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+
+    const auto incomplete = GameplayLoop::update(
+        oldLevel, session, presentation, { .right = { .pressed = true } }, 1.0f, false);
+    CHECK(!incomplete.screenSolved);
+    CHECK(!session.moving());
+    CHECK(session.state().players.at(0).cell == (GridPosition3 { 1, 0, 1 }));
+    CHECK(session.state().movables.at(0).cell == (GridPosition3 { 1, 0, 2 }));
+    CHECK(session.state().movables.at(1).cell == (GridPosition3 { 1, 0, 3 }));
+
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    presentation.resetEntities(restored.state());
+    const auto complete = GameplayLoop::update(level, restored, presentation, {}, 0.01f, false);
+    CHECK(complete.screenSolved);
+}
+
 void testMirrorDuplicationRequiresEveryPlayerOnAnEnd()
 {
     TEST("mirrorDuplicationRequiresEveryPlayerOnAnEnd");
@@ -1998,6 +2023,7 @@ int main()
     testDruidPushAnimationAndSmokeOnCrystalChanges();
     testWitchSwapEmitsBothParticleEndpointsOnce();
     testSolvedScreenAndDraftOutcomesDiffer();
+    testRestoredKnightOnEndWithCarriedRocksCompletesScreen();
     testMirrorDuplicationRequiresEveryPlayerOnAnEnd();
     testTurretShotCueWaitsForMovementToFinish();
     testPushedTurretWaitsUntilItLandsBeforeVolleyStarts();

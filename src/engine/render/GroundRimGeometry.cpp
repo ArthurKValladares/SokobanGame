@@ -229,6 +229,10 @@ uint64_t ordinarySceneDrawInstanceReserve(
     reserve = saturatedAdd(reserve, scene.particles.size());
     reserve = saturatedAdd(reserve, frame.waterSurfaces.size());
 #if SOKOBAN_ENABLE_DEBUG_UI
+    if (frame.showOccludedEntities && frame.viewMode == RenderViewMode::Isometric3D) {
+        reserve = saturatedAdd(reserve, static_cast<uint64_t>(
+            std::ranges::count(frame.tiles, true, &RenderFrameData::Tile::interactionOutline)));
+    }
     reserve = saturatedAdd(reserve, frame.debugItemOutlines.size());
     reserve = saturatedAdd(reserve, frame.debugItemLinks.size());
     reserve = saturatedAdd(reserve, saturatedMultiply(frame.debugItemLabels.size(),

@@ -120,6 +120,7 @@ struct ApplicationTimingEventWatchState {
 
 #if SOKOBAN_ENABLE_DEBUG_UI
 class ApplicationTools;
+namespace solution { struct SolveToStore; }
 #endif
 
 class Application {
@@ -163,13 +164,15 @@ private:
         bool composedOverworld = false);
     void advanceScreen();
 #if SOKOBAN_ENABLE_DEBUG_UI
+    void resumeCampaign();
     // Level editor draft playback: the Play Draft button, F5 and Shift+F5.
-    void startEditorDraft(Level level);
+    void startEditorDraft(Level level, bool fromAuthoredStart);
     void playEditorDraft(std::optional<GridPosition3> heroStart);
     void handleDraftPlaybackShortcuts(const InputRouter::Frame& input);
     // Reloads source levels, textures, the manifest and the animation
     // catalog edited outside the game (DI-10). Called between frames.
     void serviceSourceWatcher();
+    void observeEditorLevelSaves();
     void observeEditorLevelPublications();
     void invalidateLevelCatalog();
     // False for smoke and evidence runs, which must not write into the
@@ -190,7 +193,8 @@ private:
     void handlePuzzleCompleted(const CampaignSession::PuzzleCompleted& completed);
     void beginLevelTransition(std::function<void()> midpointAction);
     void updateLevelTransition(float dt);
-    void tryEnterSelector();
+    [[nodiscard]] const Level::ScreenSelector* currentOverworldSelector() const;
+    [[nodiscard]] bool tryEnterSelector();
     [[nodiscard]] bool updateScreenPreview(bool requested, float dt);
     [[nodiscard]] std::optional<RenderFrameData>
         buildScreenPreviewRenderFrame(FrameArena& arena) const;
@@ -281,6 +285,7 @@ private:
     std::optional<Level> legacyOverworld_;
     bool levelCatalogStale_ = true;
 #if SOKOBAN_ENABLE_DEBUG_UI
+    uint64_t editorSourceLevelSaveRevision_ = 0;
     uint64_t editorLevelPublicationRevision_ = 0;
     uint64_t editorOverworldPublicationRevision_ = 0;
 #endif
@@ -310,6 +315,10 @@ private:
     std::function<void()> levelTransitionMidpointAction_;
 #if SOKOBAN_ENABLE_DEBUG_UI
     std::unique_ptr<ApplicationTools> tools_;
+    // The gameplay session still contains the draft after F5 returns to editing.
+    bool draftWorldLoaded_ = false;
+    // Captures a campaign or draft puzzle from authored start to its first solve.
+    std::unique_ptr<solution::SolveToStore> solveCapture_;
 #endif
     // Two arenas, alternating. The previous frame's PreparedFrame still holds
     // a RenderFrameData whose arrays point into the arena it was built from,

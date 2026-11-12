@@ -184,6 +184,12 @@ GameplayLoop::UpdateResult GameplayLoop::update(
     bool playingDraft)
 {
     UpdateResult result;
+    // A restored checkpoint can already satisfy the current End layout.
+    if (!playingDraft && !session.moving() && rules::isAtUnlockedEnd(level, session.state())) {
+        result.screenSolved = true;
+        return result;
+    }
+
     const bool readingLectern = session.readingLectern().has_value();
     if (readingLectern && (input.interactPressed || input.dismissPressed)) {
         session.dismissLectern();

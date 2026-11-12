@@ -94,6 +94,7 @@ PackedGpuSkinnedMesh packGpuSkinnedMesh(
             .materialIndex = vertex.materialIndex,
             .joints = vertex.joints,
             .weights = vertex.weights,
+            .outlineNormal = vertex.outlineNormal,
         });
     }
     for (const SkinnedAttachment& attachment : mesh.attachments) {
@@ -109,6 +110,8 @@ PackedGpuSkinnedMesh packGpuSkinnedMesh(
                 .uv1 = vertex.uv1,
                 .materialIndex = vertex.materialIndex,
                 .attachmentNodeIndex = attachment.nodeIndex,
+                .outlineNormal = { vertex.outlineNormal.x, vertex.outlineNormal.z,
+                    -vertex.outlineNormal.y },
             });
         }
     }

@@ -8,6 +8,7 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 5) in uvec4 inJoints;
 layout(location = 6) in vec4 inWeights;
 layout(location = 7) in uint inAttachmentNode;
+layout(location = 12) in vec3 inOutlineNormal;
 layout(location = 1) out float outFaceCoordU;
 layout(location = 2) out float outFaceCoordV;
 layout(location = 7) flat out uint outDrawInstance;
@@ -21,23 +22,25 @@ void main()
 {
     vec4 position = vec4(0.0);
     vec3 normal = vec3(0.0);
+    vec3 sourceNormal = usesSurfaceContour() || usesOccludedSilhouette()
+        ? inNormal : inOutlineNormal;
     if (inAttachmentNode != 0xffffffffu) {
         mat4 matrix = skinning.instances[gl_InstanceIndex]
             .palette[MAX_SKIN_JOINTS + inAttachmentNode];
         position = matrix * vec4(inPosition, 1.0);
-        normal = mat3(matrix) * inNormal;
+        normal = mat3(matrix) * sourceNormal;
     } else {
         for (uint i = 0; i < 4; ++i) {
             if (inWeights[i] > 0.0 && inJoints[i] < MAX_SKIN_JOINTS) {
                 mat4 matrix = skinning.instances[gl_InstanceIndex].palette[inJoints[i]];
                 position += matrix * vec4(inPosition, 1.0) * inWeights[i];
-                normal += mat3(matrix) * inNormal * inWeights[i];
+                normal += mat3(matrix) * sourceNormal * inWeights[i];
             }
         }
     }
-    if (length(normal) < 0.000001) { normal = inNormal; }
+    if (length(normal) < 0.000001) { normal = sourceNormal; }
     outDrawInstance = pc.drawInstance;
     outlinePosition(
         (skinning.instances[gl_InstanceIndex].modelFromSource * position).xyz,
-        normalize(mat3(skinning.instances[gl_InstanceIndex].normalFromSource) * normal));
+        mat3(skinning.instances[gl_InstanceIndex].normalFromSource) * normal);
 }

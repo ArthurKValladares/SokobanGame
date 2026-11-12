@@ -762,6 +762,7 @@ struct RenderFrameData {
     FrameArray<Particle> particles;
     FrameArray<OverworldFogVolume> overworldFogVolumes;
 #if SOKOBAN_ENABLE_DEBUG_UI
+    bool showOccludedEntities = false;
     // Separate draw-only geometry: it never participates in picking, camera
     // fitting, shadows or gameplay. Allocated only when the visualizer is on.
     FrameArray<Tile> debugItemOutlines;

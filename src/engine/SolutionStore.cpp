@@ -1,5 +1,6 @@
 #include "engine/SolutionStore.hpp"
 
+#include "engine/AnimationCatalog.hpp"
 #include "engine/AtomicFile.hpp"
 #include "engine/LevelCatalog.hpp"
 
@@ -106,17 +107,18 @@ std::vector<Stored> readRecordings(const std::filesystem::path& directory)
 
 const Stored* bestRecording(
     const std::vector<Stored>& stored, std::uint64_t digest, const Level& level,
-    const std::filesystem::path& preferredPath)
+    const std::filesystem::path& preferredPath, const AnimationCatalog* animations)
 {
     const Stored* best = nullptr;
     for (const Stored& entry : stored) {
         if (entry.solution.levelDigest != digest) {
             continue;
         }
-        if ((best == nullptr || entry.solution.steps.size() < best->solution.steps.size() ||
-                (entry.solution.steps.size() == best->solution.steps.size() &&
+        const std::size_t steps = entry.solution.stepCount();
+        if ((best == nullptr || steps < best->solution.stepCount() ||
+                (steps == best->solution.stepCount() &&
                     entry.path == preferredPath)) &&
-            replay(level, entry.solution).passed) {
+            replay(level, entry.solution, animations).passed) {
             best = &entry;
         }
     }
@@ -249,6 +251,11 @@ std::vector<StoreChange> reconcileStore(
     for (Stored& draft : readRecordings(draftsDir)) {
         stored.push_back(std::move(draft));
     }
+    const bool needsAnimations = (solve && !solve->frames.empty()) || std::ranges::any_of(stored, [](const Stored& entry) {
+        return entry.solution.timed.has_value();
+    });
+    const auto animations = needsAnimations
+        ? loadReplayAnimationCatalog(levelsRoot.parent_path() / "assets") : std::nullopt;
 
     std::vector<StoreChange> changes;
     std::optional<Solution> candidate;
@@ -259,17 +266,17 @@ std::vector<StoreChange> reconcileStore(
         if (screen == screens.end()) {
             draftLevel.emplace(Level::loadFromDefinition(solve->definition, solve->name));
         }
-        Recording recording = record(
-            draftLevel ? *draftLevel : screen->second.level,
-            solve->definition,
-            solve->inputs,
-            draftLevel ? solve->name : locationName(screen->second.location));
+        const Level& level = draftLevel ? *draftLevel : screen->second.level;
+        const std::string recordedFor = draftLevel
+            ? solve->name : locationName(screen->second.location);
+        Recording recording = recordTimed(level, solve->definition, solve->frames,
+            recordedFor, animations ? &*animations : nullptr, solve->playingDraft);
         if (recording.solved) {
             candidate = std::move(recording.solution);
         } else {
             changes.push_back({
                 .kind = StoreChange::Kind::NotRecorded,
-                .message = recording.error,
+                .message = "Timed replay failed (" + recording.error + ").",
             });
         }
     }
@@ -290,7 +297,7 @@ std::vector<StoreChange> reconcileStore(
         }
         verifiedDigests.insert(digest);
         if (hasCandidate && (best == nullptr ||
-                candidate->steps.size() < best->solution.steps.size())) {
+                candidate->stepCount() < best->solution.stepCount())) {
             layout[target] = { .solution = *candidate, .source = {} };
             return;
         }
@@ -304,19 +311,22 @@ std::vector<StoreChange> reconcileStore(
             changes.push_back({
                 .kind = StoreChange::Kind::KeptExisting,
                 .file = target,
-                .steps = best->solution.steps.size(),
+                .steps = best->solution.stepCount(),
             });
         }
     };
+    const AnimationCatalog* replayAnimations = animations ? &*animations : nullptr;
     for (const auto& [digest, screen] : screens) {
         const auto target = solutionsDir / fileNameFor(screen.location);
-        placeVerified(digest, bestRecording(stored, digest, screen.level, target),
-            target, locationName(screen.location));
+        const Stored* best = bestRecording(
+            stored, digest, screen.level, target, replayAnimations);
+        placeVerified(digest, best, target, locationName(screen.location));
     }
     if (candidate && draftLevel) {
         const auto digest = candidate->levelDigest;
         const auto preferred = draftPath(digest);
-        const Stored* best = bestRecording(stored, digest, *draftLevel, preferred);
+        const Stored* best = bestRecording(
+            stored, digest, *draftLevel, preferred, replayAnimations);
         const auto& target = best && !layout.contains(best->path) ? best->path : preferred;
         placeVerified(digest, best, target, {});
     }
@@ -359,7 +369,7 @@ std::vector<StoreChange> reconcileStore(
             .kind = placed.source.empty() ? StoreChange::Kind::Saved
                                           : StoreChange::Kind::Moved,
             .file = path,
-            .steps = placed.solution.steps.size(),
+            .steps = placed.solution.stepCount(),
             .message = placed.source.empty()
                 ? std::string {}
                 : "from " + placed.source.filename().string(),

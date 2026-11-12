@@ -34,6 +34,7 @@ struct ShellFacts {
     bool optionsOpen = false;
     bool titleOpen = false;
     bool titleAtMainPage = false;
+    bool editorActive = false;
 };
 
 // ---- Commands: effects for the caller to execute, in order. ----------------
@@ -41,6 +42,7 @@ struct ShellFacts {
 namespace shell {
 
 struct LoadCurrentScreen {};
+struct ResumeCampaign {};
 struct CloseTitle {};
 struct OpenTitle {};
 struct TitleBack {};
@@ -68,6 +70,7 @@ struct Quit {};
 
 using ShellCommand = std::variant<
     shell::LoadCurrentScreen,
+    shell::ResumeCampaign,
     shell::CloseTitle,
     shell::OpenTitle,
     shell::TitleBack,

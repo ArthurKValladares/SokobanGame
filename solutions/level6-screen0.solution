@@ -1,0 +1,349 @@
+# Sokoban 3D recorded solution. Replayed by the solution_replay test;
+# see README.md > Solutions. Simulation time and controls per frame, then the winning state.
+format 3
+level-digest c895139834598603
+recorded-for level6/screen0
+frame 0.0957536
+frame 0.0514746
+frame 0.0678508
+frame 0.0627638
+frame 0.0592466
+frame 0.0557165
+frame 0.0623122
+frame 0.0237992
+frame 0.0510398
+frame 0.07512169
+frame 0.0293777
+frame 0.0555142
+frame 0.0587144
+frame 0.0647892
+frame 0.0675586
+frame 0.071169
+frame 0.0608947
+frame 0.0542848
+frame 0.06952631
+frame 0.0513592
+frame 0.0586608
+frame 0.0194814
+frame 0.0223592
+frame 0.0226696
+frame 0.021098
+frame 0.0204542
+frame 0.0197279
+frame 0.0210335
+frame 0.0219532
+frame 0.0194981
+frame 0.0241558
+frame 0.0206301
+frame 0.020924
+frame 0.0223953
+frame 0.0230701
+frame 0.0218373
+frame 0.0223718
+frame 0.0213069
+frame 0.0386534
+frame 0.0213449
+frame 0.0196417
+frame 0.0237121
+frame 0.0216511
+frame 0.0205401
+frame 0.020723
+frame 0.0197763
+frame 0.0202375
+frame 0.020106
+frame 0.0201032
+frame 0.0201099
+frame 0.0207279
+frame 0.0205521 Rr
+frame 0.0231806 r
+frame 0.0229355 r
+frame 0.0218079 r
+frame 0.0204429 r
+frame 0.0214424 r
+frame 0.0205227 r
+frame 0.0204869 r
+frame 0.0206162 r
+frame 0.0208444
+frame 0.0398946
+frame 0.0204713
+frame 0.0204981
+frame 0.0225001
+frame 0.0215658
+frame 0.0207896
+frame 0.0213087 Uu
+frame 0.0225588 u
+frame 0.0204422 u
+frame 0.0214508 u
+frame 0.0200195 u
+frame 0.0205279 u
+frame 0.0219243
+frame 0.020308
+frame 0.0203192
+frame 0.0238243
+frame 0.0199134
+frame 0.0233698
+frame 0.0247687 Ll
+frame 0.0233801 l
+frame 0.02039 l
+frame 0.0201879 l
+frame 0.0205183 l
+frame 0.0380781 l
+frame 0.018851 l
+frame 0.0195198 l
+frame 0.0236791 l
+frame 0.022706 l
+frame 0.0203918 l
+frame 0.0232864 l
+frame 0.0203226 l
+frame 0.0209832 l
+frame 0.0198046 l
+frame 0.0213402 l
+frame 0.0199949 l
+frame 0.0205219 l
+frame 0.0194888
+frame 0.0196923
+frame 0.0237748
+frame 0.0205226
+frame 0.021308
+frame 0.0220831
+frame 0.0210842
+frame 0.020243
+frame 0.0208256
+frame 0.019986
+frame 0.0198563
+frame 0.0365652
+frame 0.0182816
+frame 0.018899
+frame 0.0231846
+frame 0.0207485
+frame 0.0195085
+frame 0.0203156
+frame 0.0202511 Dd
+frame 0.0243579 d
+frame 0.0226283 d
+frame 0.0230437 d
+frame 0.0211453 d
+frame 0.0201206 d
+frame 0.0190784 d
+frame 0.02095 d
+frame 0.0231741 d
+frame 0.0202724 d
+frame 0.0193314 d
+frame 0.0198656 d
+frame 0.0234582 d
+frame 0.0190047 d
+frame 0.0190633 d
+frame 0.019821 d
+frame 0.0193265 d
+frame 0.0398304
+frame 0.0184759
+frame 0.0172037
+frame 0.0238528
+frame 0.0209206
+frame 0.0193591
+frame 0.0211005
+frame 0.0208161
+frame 0.0198863
+frame 0.0201737
+frame 0.0222578
+frame 0.0171153
+frame 0.0208118
+frame 0.0192474
+frame 0.0221674
+frame 0.0190177
+frame 0.0233464
+frame 0.0214523
+frame 0.0189005
+frame 0.0212381
+frame 0.0195924
+frame 0.0194902 Rr
+frame 0.0220424 r
+frame 0.0225231 r
+frame 0.0408276 r
+frame 0.0209614
+frame 0.0191023
+frame 0.019446
+frame 0.0205524
+frame 0.02054
+frame 0.0182169
+frame 0.0164001
+frame 0.019327
+frame 0.018703
+frame 0.0230763
+frame 0.0202971
+frame 0.0193983
+frame 0.0231905
+frame 0.0195324
+frame 0.0209622
+frame 0.0187135
+frame 0.0208658 Dd
+frame 0.0217131 d
+frame 0.0184021 d
+frame 0.0191183 d
+frame 0.0226668
+frame 0.0209684
+frame 0.0194416
+frame 0.0221507
+frame 0.0353657
+frame 0.0198867
+frame 0.0173035
+frame 0.0227027
+frame 0.0241918
+frame 0.0192767
+frame 0.0203731
+frame 0.0194201
+frame 0.0188154
+frame 0.0202955
+frame 0.0192102
+frame 0.0193699
+frame 0.0192125
+frame 0.0226992
+frame 0.0201196
+frame 0.0236511
+frame 0.019623
+frame 0.0239066
+frame 0.0225224
+frame 0.0209822
+frame 0.0204653
+frame 0.0196711
+frame 0.0184932
+frame 0.0244917
+frame 0.031849
+frame 0.0205231
+frame 0.017914
+frame 0.0201731
+frame 0.0171459
+frame 0.0203223
+frame 0.021778
+frame 0.0197488
+frame 0.018196
+frame 0.0190506
+frame 0.0183412
+frame 0.0184714
+frame 0.0181171
+frame 0.0177327
+frame 0.0159347
+frame 0.0157675
+frame 0.017659
+frame 0.0154643
+frame 0.0155107
+frame 0.0182267
+frame 0.0163718
+frame 0.0161779
+frame 0.0156843
+frame 0.0159551
+frame 0.0159417
+frame 0.0161159
+frame 0.0173554
+frame 0.0216482
+frame 0.0290454
+frame 0.0166497
+frame 0.0147088
+frame 0.0175078
+frame 0.0180189
+frame 0.0195899
+frame 0.0168568
+frame 0.0161195
+frame 0.0170849
+frame 0.0182842
+frame 0.0192838
+frame 0.0183436
+frame 0.0169189
+frame 0.015658
+frame 0.0167631
+frame 0.0160255
+frame 0.015709
+frame 0.0168281
+frame 0.0164127
+frame 0.0181325
+frame 0.0186141
+frame 0.0172541
+frame 0.0170104
+frame 0.0174209
+frame 0.0183612
+frame 0.0188703
+frame 0.0200663
+frame 0.0208403
+frame 0.0302426
+frame 0.0190962
+frame 0.0155946
+frame 0.0177279
+frame 0.017674
+frame 0.0218958
+frame 0.0181321
+frame 0.015549
+frame 0.0196216
+frame 0.0180408
+frame 0.0165195
+frame 0.0177218
+frame 0.0189466
+frame 0.0194601
+frame 0.0163665
+frame 0.016413
+frame 0.0167379
+frame 0.0172188
+frame 0.0161498
+frame 0.0172527
+frame 0.0209085
+frame 0.0190196
+frame 0.0153579
+frame 0.0160371
+frame 0.0174515
+frame 0.0169774
+frame 0.0194435
+frame 0.0214553
+frame 0.0319221
+frame 0.0196555
+frame 0.0166023
+frame 0.0178625
+frame 0.0177241
+frame 0.0174506
+frame 0.0194142
+frame 0.0164215
+frame 0.0154206
+frame 0.0181211
+frame 0.0181865
+frame 0.0188537
+frame 0.0161965 Dd
+frame 0.0165688 d
+frame 0.0159422 d
+frame 0.0158993 d
+frame 0.017956 d
+frame 0.0168114 d
+frame 0.0167372 d
+frame 0.017607 d
+frame 0.0164485 d
+frame 0.0184089 d
+frame 0.0178017 d
+frame 0.0181212 d
+frame 0.0177651 d
+frame 0.0203046 d
+frame 0.0161541 d
+frame 0.0187696 d
+frame 0.0309109 d
+frame 0.0178164 d
+frame 0.0174288 d
+frame 0.0178719 d
+frame 0.0178103 d
+frame 0.0179904 d
+frame 0.0180007 d
+frame 0.0197359 d
+frame 0.01755 d
+frame 0.0195838 d
+frame 0.0200134 d
+frame 0.0181616 d
+frame 0.0168448 d
+frame 0.0176012 d
+frame 0.0170295 d
+frame 0.0160747 d
+frame 0.0165886 d
+frame 0.0160033 d
+frame 0.0173788 d
+frame 0.0162427 d
+frame 0.0165785 d
+frame 0.0161795 d
+frame 0.018271 d
+frame 0.0170314 d
+frame 0.0180996
+win 9
+state {"activeButtons":[],"activeHeroController":1,"activeLevers":[],"automaticMotionPaused":false,"elevators":[],"enemies":[],"minecarts":[],"movables":[{"cell":[5,8,2],"dead":false,"fallen":false,"id":2,"quarterTurns":0,"sliding":null,"type":"Round Rock"},{"cell":[6,3,2],"dead":false,"fallen":false,"id":3,"quarterTurns":0,"sliding":null,"type":"Lily Pad"}],"players":[{"cell":[6,4,2],"character":"rogue","controller":1,"dead":false,"drowned":false,"facing":1,"id":1,"quarterTurns":0,"sliding":null}],"turnedMirrors":[],"wardrobes":[]}

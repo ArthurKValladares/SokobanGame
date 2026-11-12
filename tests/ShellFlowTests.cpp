@@ -77,7 +77,7 @@ void testTitleResults()
 {
     ShellFlow flow;
 
-    // Continue: loads only when the world is not already loaded.
+    // Continue loads a fresh world, resumes from the editor, or closes the title.
     {
         const std::vector<ShellCommand> commands = flow.handle(
             sokoban::ShellTitleAction { sokoban::title::Continue {} },
@@ -89,6 +89,14 @@ void testTitleResults()
     CHECK(only<sokoban::shell::CloseTitle>(flow.handle(
         sokoban::ShellTitleAction { sokoban::title::Continue {} },
         { .gameLoaded = true, .titleOpen = true })));
+    {
+        const std::vector<ShellCommand> commands = flow.handle(
+            sokoban::ShellTitleAction { sokoban::title::Continue {} },
+            { .gameLoaded = true, .titleOpen = true, .editorActive = true });
+        CHECK(commands.size() == 2);
+        CHECK(commandAt<sokoban::shell::ResumeCampaign>(commands, 0) != nullptr);
+        CHECK(commandAt<sokoban::shell::CloseTitle>(commands, 1) != nullptr);
+    }
 
     // New game on the active slot, and the no-saves slot-pick operation.
     CHECK(only<sokoban::shell::StartNewGame>(flow.handle(

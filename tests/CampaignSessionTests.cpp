@@ -112,6 +112,85 @@ void testSelectorInteractionRequiresAllLivingPlayersTogether()
     CHECK(CampaignSession::selectorForInteraction(level, state) == nullptr);
 }
 
+void testSelectorWorksDuringAnUnrelatedPatrol()
+{
+    TEST("selectorWorksDuringAnUnrelatedPatrol");
+    const Level level = Level::loadFromLayers(
+        { { ".......", ".......", "......." },
+            { " }     ", "       ", " C     " } },
+        "selector with robot patrol", std::nullopt, {},
+        {
+            { 1, { 1, 2, 1 }, LevelLocation { 1, 0 } },
+            { 2, { 2, 2, 1 }, LevelLocation { 0, 0 } },
+            { 3, { 3, 2, 1 }, LevelLocation { 0, 1 } },
+        });
+
+    GameplaySession gameplay;
+    gameplay.reset(level);
+    CHECK(rules::hasPendingMotion(level, gameplay.state()));
+    CHECK(CampaignSession::selectorForInteraction(level, gameplay) ==
+        &level.selectors()[0]);
+    CHECK(gameplay.tryStartNextAction(level, {}));
+    CHECK(gameplay.moving());
+    CHECK(CampaignSession::selectorForInteraction(level, gameplay) ==
+        &level.selectors()[0]);
+
+    gameplay.queueMove(MoveDirection::Right);
+    CHECK(gameplay.tryStartNextAction(level, {}));
+    CHECK(CampaignSession::selectorForInteraction(level, gameplay) == nullptr);
+    gameplay.advanceActiveAction(gameplay.stepDurationSeconds());
+    gameplay.completeActiveAction();
+    CHECK(gameplay.moving());
+    CHECK(CampaignSession::selectorForInteraction(level, gameplay) ==
+        &level.selectors()[1]);
+
+    CampaignSession campaign = configuredCampaign();
+    PlayerProfile profile;
+    campaign.startNewGame(profile);
+    campaign.finishWorldLoad(profile);
+    CHECK(campaign.enterSelector(profile, { 0, 0 }, gameplay.snapshot()));
+    CHECK(campaign.location() == (LevelLocation { 0, 0 }));
+    const auto completed = campaign.completePuzzle(profile, 3, &level);
+    CHECK(completed.nextPuzzle == (LevelLocation { 0, 1 }));
+    CHECK(campaign.startPuzzle(profile, { 0, 1 }));
+    const auto last = campaign.completePuzzle(profile, 3, &level);
+    CHECK(!last.nextPuzzle);
+    const auto returned = campaign.prepareWorldLoad(profile).snapshot;
+    CHECK(returned.has_value());
+    if (returned) {
+        GameplaySession restored;
+        CHECK(restored.restore(level, *returned, true));
+        CHECK(CampaignSession::selectorForInteraction(level, restored) ==
+            &level.selectors()[2]);
+    }
+}
+
+void testSelectorWaitsForPartyMotion()
+{
+    TEST("selectorWaitsForPartyMotion");
+    const Level conveyor = Level::loadFromLayers(
+        { { "..." }, { "C> " } }, "selector on conveyor", std::nullopt, {},
+        { { 1, { 1, 0, 1 }, LevelLocation { 0, 0 } } });
+    GameplaySession gameplay;
+    gameplay.reset(conveyor);
+    gameplay.queueMove(MoveDirection::Right);
+    CHECK(gameplay.tryStartNextAction(conveyor, {}));
+    gameplay.advanceActiveAction(gameplay.activeActionRemainingSeconds());
+    gameplay.completeActiveAction();
+    CHECK(CampaignSession::selectorForInteraction(conveyor, gameplay.state()) ==
+        &conveyor.selectors()[0]);
+    CHECK(rules::hasPendingMotion(conveyor, gameplay.state()));
+    CHECK(CampaignSession::selectorForInteraction(conveyor, gameplay) == nullptr);
+
+    const Level platform = Level::loadFromLayers(
+        { { "......" }, { "  }   " }, { "  C   " } },
+        "robot carrying a hero");
+    gameplay.reset(platform);
+    CHECK(gameplay.readyForScreenSelection(platform));
+    CHECK(gameplay.tryStartNextAction(platform, {}));
+    CHECK(!gameplay.readyForScreenSelection(platform));
+}
+
 void testSelectorEntryAndBothCheckpointKinds()
 {
     TEST("selectorEntryAndBothCheckpointKinds");
@@ -418,6 +497,8 @@ int main()
     testCatalogAndProfileRestore();
     testIncompleteOverworldTargetsRemainRepairable();
     testSelectorInteractionRequiresAllLivingPlayersTogether();
+    testSelectorWorksDuringAnUnrelatedPatrol();
+    testSelectorWaitsForPartyMotion();
     testSelectorEntryAndBothCheckpointKinds();
     testOverworldTopologyCheckpointValidation();
     testIndependentCompletionAndAllTargets();

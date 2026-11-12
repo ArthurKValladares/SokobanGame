@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <exception>
 #include <fstream>
@@ -114,6 +115,14 @@ CoverageReport auditCoverage(
             }
         }
     }
+    std::optional<AnimationCatalog> animations;
+    if (std::ranges::any_of(recordings, [](const auto& entry) { return entry.second.timed.has_value(); })) {
+        try {
+            animations = loadReplayAnimationCatalog(levelsRoot.parent_path() / "assets");
+        } catch (const std::exception& error) {
+            report.errors.push_back("Could not load animations for timed solutions: " + std::string(error.what()));
+        }
+    }
     // Enumerate instead of stopping at the first gap: a missing directory or
     // screen must not silently remove everything after it from coverage.
     std::map<LocationKey, std::filesystem::path> screens;
@@ -172,7 +181,8 @@ CoverageReport auditCoverage(
                 matched = true;
                 used.insert(file);
                 const auto result = replay(
-                    Level::loadFromDefinition(definition, name), recording);
+                    Level::loadFromDefinition(definition, name), recording,
+                    animations ? &*animations : nullptr);
                 if (!result.passed) {
                     allPassed = false;
                     report.errors.push_back(

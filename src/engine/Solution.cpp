@@ -1,8 +1,11 @@
 #include "engine/Solution.hpp"
 
+#include "engine/AssetManifest.hpp"
 #include "engine/Character.hpp"
 #include "engine/CrystalOriginJson.hpp"
 #include "engine/Rules.hpp"
+#include "engine/Time.hpp"
+#include "engine/UserSettingsConfig.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -35,6 +38,30 @@ constexpr std::array inputNames {
 constexpr float maximumSettleSeconds = 120.0f;
 // Also guard zero-duration or otherwise non-advancing action cycles.
 constexpr int maximumSettleTransitions = 10'000;
+
+constexpr float maximumTimedFrameSeconds = SimulationTiming::maximumDeltaSeconds *
+    config::simulationSpeedSliderMaximum;
+
+bool validFrameDuration(float elapsedSeconds)
+{
+    return std::isfinite(elapsedSeconds) && elapsedSeconds >= 0.0f &&
+        elapsedSeconds <= maximumTimedFrameSeconds;
+}
+
+// Uppercase letters press a control. Lowercase letters hold it for the frame.
+template <typename Frame>
+auto frameControls(Frame& input)
+{
+    return std::array {
+        std::pair { 'U', &input.up.pressed }, std::pair { 'u', &input.up.down },
+        std::pair { 'D', &input.down.pressed }, std::pair { 'd', &input.down.down },
+        std::pair { 'L', &input.left.pressed }, std::pair { 'l', &input.left.down },
+        std::pair { 'R', &input.right.pressed }, std::pair { 'r', &input.right.down },
+        std::pair { 'Z', &input.undoPressed }, std::pair { 'z', &input.undoDown },
+        std::pair { 'S', &input.restartPressed }, std::pair { 'C', &input.cycleHeroPressed },
+        std::pair { 'I', &input.interactPressed }, std::pair { 'X', &input.dismissPressed },
+    };
+}
 
 void hashBytes(std::uint64_t& hash, std::string_view bytes)
 {
@@ -223,12 +250,13 @@ Json stateJson(
     return result;
 }
 
-void parseState(const Json& value, Step& step)
+void parseState(const Json& value, GameState& output,
+    EntityId& activeHeroController, bool& automaticMotionPaused)
 {
     GameState state;
-    step.activeHeroController =
+    activeHeroController =
         exactInteger<EntityId>(value.at("activeHeroController"));
-    step.automaticMotionPaused = value.at("automaticMotionPaused").get<bool>();
+    automaticMotionPaused = value.at("automaticMotionPaused").get<bool>();
     const auto array = [&](const char* name) -> const Json& {
         const auto& items = value.at(name);
         if (!items.is_array()) {
@@ -337,7 +365,7 @@ void parseState(const Json& value, Step& step)
     }
     // Reject unknown fields and coercions, rather than silently losing state.
     Json canonical = stateJson(
-        state, step.activeHeroController, step.automaticMotionPaused);
+        state, activeHeroController, automaticMotionPaused);
     // Recorded solutions created before wardrobes existed have no such key.
     // Preserve that canonical legacy form while still rejecting every other
     // unknown field or coercion.
@@ -351,7 +379,7 @@ void parseState(const Json& value, Step& step)
         throw std::runtime_error(
             "state contains unknown or noncanonical fields");
     }
-    step.state = std::move(state);
+    output = std::move(state);
 }
 
 char kindLetter(EntityChange::Kind kind)
@@ -754,12 +782,36 @@ std::string serialize(const Solution& solution)
 {
     std::string text =
         "# Sokoban 3D recorded solution. Replayed by the solution_replay "
-        "test;\n# see README.md > Solutions. One input per step, then "
-        "what it changed and its complete settled state.\n";
-    text += "format 2\n";
+        "test;\n# see README.md > Solutions. ";
+    text += solution.timed
+        ? "Simulation time and controls per frame, then the winning state.\nformat 3\n"
+        : "One input per step, then what it changed and its complete settled state.\nformat 2\n";
     text += "level-digest " + digestText(solution.levelDigest) + "\n";
     if (!solution.recordedFor.empty()) {
         text += "recorded-for " + solution.recordedFor + "\n";
+    }
+    if (const auto& run = solution.timed) {
+        if (!run->playingDraft) text += "mode campaign\n";
+        for (const TimedFrame& frame : run->frames) {
+            std::array<char, 32> seconds;
+            const auto [end, error] = std::to_chars(
+                seconds.data(), seconds.data() + seconds.size(), frame.elapsedSeconds);
+            if (error != std::errc {}) {
+                throw std::runtime_error("cannot write the timed frame duration");
+            }
+            text += "frame ";
+            text.append(seconds.data(), end);
+            std::string controls;
+            for (const auto& [code, active] : frameControls(frame.input)) {
+                if (*active) controls += code;
+            }
+            if (!controls.empty()) text += " " + controls;
+            text += '\n';
+        }
+        text += "win " + std::to_string(run->inputCount) + "\nstate " +
+            stateJson(run->finalState, run->activeHeroController, run->automaticMotionPaused).dump() +
+            '\n';
+        return text;
     }
     for (const Step& step : solution.steps) {
         text += "step ";
@@ -785,6 +837,8 @@ Solution parse(std::string_view text)
     bool sawFormat = false;
     bool sawDigest = false;
     bool needsState = false;
+    bool sawWin = false;
+    bool sawMode = false;
     std::size_t lineNumber = 0;
     std::istringstream stream { std::string(text) };
     std::string line;
@@ -804,17 +858,21 @@ Solution parse(std::string_view text)
                 "solution line " + std::to_string(lineNumber) + ": " + why);
         };
         if (needsState && keyword != "state") {
-            fail("each step must be followed by its state line");
+            fail("expected a state line");
+        }
+        if (sawWin && !needsState) {
+            fail("the winning state must end the timed recording");
         }
         if (keyword == "format") {
             std::string version;
             words >> version;
-            if (version != "2") {
-                fail(
-                    "unsupported format '" + version +
-                    "'; re-record with format 2");
-            }
             if (sawFormat) fail("duplicate format line");
+            if (version == "3") {
+                if (!solution.steps.empty()) fail("timed recordings use frame lines");
+                solution.timed.emplace();
+            } else if (version != "2") {
+                fail("unsupported format '" + version + "'; expected 2 or 3");
+            }
             sawFormat = true;
         } else if (keyword == "level-digest") {
             if (sawDigest) fail("duplicate level-digest line");
@@ -831,7 +889,20 @@ Solution parse(std::string_view text)
             sawDigest = true;
         } else if (keyword == "recorded-for") {
             std::getline(words >> std::ws, solution.recordedFor);
+        } else if (keyword == "mode") {
+            if (!solution.timed || sawMode || !solution.timed->frames.empty()) {
+                fail("mode may appear once before the first timed frame");
+            }
+            std::string mode;
+            std::string extra;
+            words >> mode;
+            if ((mode != "campaign" && mode != "draft") || (words >> extra)) {
+                fail("expected campaign or draft mode");
+            }
+            solution.timed->playingDraft = mode == "draft";
+            sawMode = true;
         } else if (keyword == "step") {
+            if (solution.timed) fail("timed recordings use frame lines");
             std::string name;
             words >> name;
             const std::optional<Input> input = inputFromName(name);
@@ -845,12 +916,57 @@ Solution parse(std::string_view text)
             }
             solution.steps.push_back(std::move(step));
             needsState = true;
+        } else if (keyword == "frame") {
+            if (!solution.timed) fail("frame requires format 3");
+            TimedFrame frame;
+            std::string seconds;
+            words >> seconds;
+            const auto [end, error] = std::from_chars(
+                seconds.data(), seconds.data() + seconds.size(), frame.elapsedSeconds);
+            if (error != std::errc {} || end != seconds.data() + seconds.size() ||
+                !validFrameDuration(frame.elapsedSeconds)) {
+                fail("invalid frame duration");
+            }
+            std::string codes;
+            words >> codes;
+            const auto controls = frameControls(frame.input);
+            for (char code : codes) {
+                const auto control = std::ranges::find_if(controls,
+                    [code](const auto& control) { return control.first == code; });
+                if (control == controls.end() || *control->second) {
+                    fail("unknown or repeated frame control '" + std::string(1, code) + "'");
+                }
+                *control->second = true;
+            }
+            std::string extra;
+            if (words >> extra) fail("unexpected frame data");
+            solution.timed->frames.push_back(frame);
+        } else if (keyword == "win") {
+            if (!solution.timed || solution.timed->frames.empty()) {
+                fail("win must follow at least one timed frame");
+            }
+            std::string count;
+            words >> count;
+            const auto [end, error] = std::from_chars(
+                count.data(), count.data() + count.size(), solution.timed->inputCount);
+            std::string extra;
+            if (error != std::errc {} || end != count.data() + count.size() || (words >> extra)) {
+                fail("invalid winning input count");
+            }
+            sawWin = true;
+            needsState = true;
         } else if (keyword == "state") {
-            if (!needsState) fail("state must immediately follow a step");
+            if (!needsState) fail("state must immediately follow a step or win line");
             std::string payload;
             std::getline(words >> std::ws, payload);
             try {
-                parseState(Json::parse(payload), solution.steps.back());
+                const Json state = Json::parse(payload);
+                if (auto& run = solution.timed) {
+                    parseState(state, run->finalState, run->activeHeroController, run->automaticMotionPaused);
+                } else {
+                    Step& step = solution.steps.back();
+                    parseState(state, step.state, step.activeHeroController, step.automaticMotionPaused);
+                }
             } catch (const std::exception& error) {
                 fail(std::string("invalid state: ") + error.what());
             }
@@ -865,7 +981,10 @@ Solution parse(std::string_view text)
     }
     if (needsState) {
         throw std::runtime_error(
-            "solution's final step is missing its state line");
+            "solution is missing its final state line");
+    }
+    if (solution.timed && !sawWin) {
+        throw std::runtime_error("timed solution is missing its win line");
     }
     return solution;
 }
@@ -1048,8 +1167,118 @@ Recording record(
     return recording;
 }
 
-ReplayReport replay(const Level& level, const Solution& solution)
+namespace {
+
+struct TimedResult {
+    std::size_t winningFrame = 0;
+    TimedRun run;
+    std::string error;
+};
+
+TimedResult playTimed(const Level& level, std::span<const TimedFrame> frames,
+    const AnimationCatalog* animations, bool playingDraft)
 {
+    GameplaySession session;
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.setAnimationCatalog(animations);
+    presentation.resetEntities(session.state());
+    for (std::size_t index = 0; index < frames.size(); ++index) {
+        const TimedFrame& frame = frames[index];
+        if (!validFrameDuration(frame.elapsedSeconds)) {
+            return { .error = "frame " + std::to_string(index + 1) + ": invalid duration" };
+        }
+        const auto result = GameplayLoop::update(
+            level, session, presentation, frame.input, frame.elapsedSeconds, playingDraft);
+        if (result.screenSolved || result.draftSolved) {
+            return {
+                .winningFrame = index + 1,
+                .run = {
+                    .inputCount = session.inputLog().size(),
+                    .finalState = session.state(),
+                    .activeHeroController = session.activeHeroController(),
+                    .automaticMotionPaused = session.automaticMotionPaused(),
+                    .playingDraft = playingDraft,
+                },
+            };
+        }
+    }
+    return { .error = "the timed inputs do not solve the screen" };
+}
+
+std::string describeStateMismatch(const Json& expected, const Json& actual)
+{
+    const Json differences = Json::diff(expected, actual);
+    if (differences.empty()) {
+        return "gameplay state differs in a field absent from the recording codec";
+    }
+    const std::string path = differences.at(0).at("path").get<std::string>();
+    const Json::json_pointer pointer(path);
+    const auto valueAt = [&](const Json& state) {
+        return state.contains(pointer) ? state.at(pointer).dump() : "<missing>";
+    };
+    return "state " + path + " should be " + valueAt(expected) + " but is " + valueAt(actual);
+}
+
+ReplayReport replayTimed(const Level& level, const TimedRun& expected,
+    const AnimationCatalog* animations)
+{
+    const auto result = playTimed(level, expected.frames, animations, expected.playingDraft);
+    if (!result.error.empty()) return { .message = result.error };
+    const std::string where = "frame " + std::to_string(result.winningFrame) + " of " +
+        std::to_string(expected.frames.size());
+    if (result.winningFrame != expected.frames.size()) {
+        return { .message = where + ": the screen is already solved" };
+    }
+    const TimedRun& actual = result.run;
+    if (actual.inputCount != expected.inputCount) {
+        return { .message = where + ": winning input count should be " +
+            std::to_string(expected.inputCount) + " but is " + std::to_string(actual.inputCount) };
+    }
+    if (actual.finalState != expected.finalState ||
+        actual.activeHeroController != expected.activeHeroController ||
+        actual.automaticMotionPaused != expected.automaticMotionPaused) {
+        return { .message = where + ": " + describeStateMismatch(
+            stateJson(expected.finalState, expected.activeHeroController, expected.automaticMotionPaused),
+            stateJson(actual.finalState, actual.activeHeroController, actual.automaticMotionPaused)) };
+    }
+    return { .passed = true, .message = "solved in " + std::to_string(expected.inputCount) + " inputs" };
+}
+
+} // namespace
+
+Recording recordTimed(
+    const Level& level,
+    const Level::Definition& definition,
+    std::span<const TimedFrame> frames,
+    std::string recordedFor,
+    const AnimationCatalog* animations,
+    bool playingDraft)
+{
+    auto result = playTimed(level, frames, animations, playingDraft);
+    if (!result.error.empty()) return { .error = std::move(result.error) };
+    const auto usedFrames = frames.first(result.winningFrame);
+    result.run.frames.assign(usedFrames.begin(), usedFrames.end());
+    return {
+        .solved = true,
+        .solution = {
+            .levelDigest = levelDigest(definition),
+            .recordedFor = std::move(recordedFor),
+            .timed = std::move(result.run),
+        },
+    };
+}
+
+std::optional<AnimationCatalog> loadReplayAnimationCatalog(const std::filesystem::path& assetsRoot)
+{
+    if (!std::filesystem::exists(assetsRoot)) return std::nullopt;
+    const AssetManifest manifest = AssetManifest::loadFromFile(assetsRoot / "manifest.json");
+    return AnimationCatalog::loadFromFile(assetsRoot / "animation_catalog.json", manifest);
+}
+
+ReplayReport replay(const Level& level, const Solution& solution, const AnimationCatalog* animations)
+{
+    if (solution.timed) return replayTimed(level, *solution.timed, animations);
     Driver driver(level);
     for (std::size_t index = 0; index < solution.steps.size(); ++index) {
         const Step& step = solution.steps[index];
@@ -1119,27 +1348,7 @@ ReplayReport replay(const Level& level, const Solution& solution)
                 driver.state(),
                 driver.activeHeroController(),
                 driver.automaticMotionPaused());
-            const Json differences = Json::diff(expectedState, currentState);
-            if (differences.empty()) {
-                return { .message = where +
-                             ": gameplay state differs in a field absent from "
-                             "the recording codec" };
-            }
-            const Json& difference = differences.at(0);
-            const std::string path = difference.at("path").get<std::string>();
-            const Json::json_pointer pointer(path);
-            const auto valueAt = [&](const Json& state) {
-                return state.contains(pointer) ? state.at(pointer).dump()
-                                               : "<missing>";
-            };
-            std::string message = where;
-            message += ": state ";
-            message += path;
-            message += " should be ";
-            message += valueAt(expectedState);
-            message += " but is ";
-            message += valueAt(currentState);
-            return { .message = std::move(message) };
+            return { .message = where + ": " + describeStateMismatch(expectedState, currentState) };
         }
         if (driver.solved() && index + 1 < solution.steps.size()) {
             return {

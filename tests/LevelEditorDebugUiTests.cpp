@@ -105,6 +105,11 @@ public:
             return 0;
         };
         callbacks_.assetManifest = [this]() -> const AssetManifest& { return manifest_; };
+        callbacks_.resumeCampaign = [this] {
+            ++resumeCampaignCalls;
+            editor.setPlayingDraft(false);
+            editor.setEditingDocument(false);
+        };
         callbacks_.prepareGroundBlendMask = [this](std::string_view name) -> std::optional<std::string> {
             ++prepareMaskCalls;
             preparedMask = name;
@@ -306,6 +311,7 @@ public:
 
     LevelEditor editor;
     SplatPainter painter;
+    int resumeCampaignCalls = 0;
     int addCalls = 0;
     int paintCalls = 0;
     int newMaskCalls = 0;
@@ -339,6 +345,21 @@ private:
     std::vector<Icon> icons_;
     ImGuiID paletteScope_ = 0;
 };
+
+void resumeCampaignIsAvailableFromEditorAndDraft()
+{
+    TEST("resumeCampaignIsAvailableFromEditorAndDraft");
+    EditorPanel panel;
+    panel.editor.setEditingDocument(true);
+    panel.click("Resume Campaign");
+    CHECK(panel.resumeCampaignCalls == 1);
+    CHECK(!panel.shows("Resume Campaign"));
+
+    panel.editor.setPlayingDraft(true);
+    panel.click("Resume Campaign");
+    CHECK(panel.resumeCampaignCalls == 2);
+    CHECK(!panel.shows("Resume Campaign"));
+}
 
 void addSplatKeepsMaskPaintingAvailable()
 {
@@ -1011,6 +1032,7 @@ int main()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     try {
+        resumeCampaignIsAvailableFromEditorAndDraft();
         addSplatKeepsMaskPaintingAvailable();
         brushSelectsEveryRgbaTextureLayer();
         selectingCustomMaskUsesPreparedCopy();

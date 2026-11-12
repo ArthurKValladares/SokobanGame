@@ -21,6 +21,8 @@
 namespace sokoban {
 namespace {
 
+constexpr char gameViewportName[] = "Game Viewport";
+
 struct DebugTab {
     std::string name;
     DebugUi::DrawCallback callback;
@@ -1345,7 +1347,7 @@ void buildDefaultLayout(ImGuiID dockspaceId)
         0.32f,
         &toolsNode,
         &gameNode);
-    ImGui::DockBuilderDockWindow("Game Viewport", gameNode);
+    ImGui::DockBuilderDockWindow(gameViewportName, gameNode);
     for (const DebugTab& tab : debugTabs()) {
         ImGui::DockBuilderDockWindow(tab.name.c_str(), toolsNode);
     }
@@ -1465,7 +1467,7 @@ void drawWorkspaceMenu()
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Panels")) {
-            ImGui::MenuItem("Game Viewport", nullptr, &state.gameViewportOpen);
+            ImGui::MenuItem(gameViewportName, nullptr, &state.gameViewportOpen);
             for (DebugTab& tab : debugTabs()) {
                 ImGui::MenuItem(tab.name.c_str(), nullptr, &tab.open);
             }
@@ -1510,7 +1512,11 @@ DebugUi::DrawResult drawGameViewport(DebugUi::GameViewport viewport)
     constexpr ImGuiWindowFlags flags =
         ImGuiWindowFlags_NoScrollbar |
         ImGuiWindowFlags_NoScrollWithMouse;
-    if (ImGui::Begin("Game Viewport", &state.gameViewportOpen, flags)) {
+    if (requestedTabFocus() == gameViewportName) {
+        ImGui::SetNextWindowFocus();
+        requestedTabFocus().clear();
+    }
+    if (ImGui::Begin(gameViewportName, &state.gameViewportOpen, flags)) {
         result.viewportFocused = ImGui::IsWindowFocused(
             ImGuiFocusedFlags_RootAndChildWindows);
         const ImVec2 available = ImGui::GetContentRegionAvail();
@@ -1642,6 +1648,12 @@ void DebugUi::addTab(std::string name, DrawCallback callback)
 void DebugUi::requestTabFocus(std::string name)
 {
     requestedTabFocus() = std::move(name);
+}
+
+void DebugUi::requestGameViewportFocus()
+{
+    workspaceState().gameViewportOpen = true;
+    requestTabFocus(gameViewportName);
 }
 
 void DebugUi::addMenu(std::string name, DrawCallback callback)

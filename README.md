@@ -927,6 +927,11 @@ surface angles to suppress shadow acne without erasing distant shadows.
 Developer builds expose the headless `LevelEditor` through ImGui. The UI invokes
 editor commands but does not own document or filesystem policy.
 
+Choose **Resume Campaign** at the top of the Level Editor or in the **Session**
+menu to return to the campaign. Press `F11` to toggle the full-window game view.
+Enable **Show Debug View** to reveal hidden heroes, objects, and plates as amber
+silhouettes through solid geometry in the 3D editor.
+
 - **Terrain tiles:** open **Tiles > Terrain** for the **Ground** and **Cliff
   Wall** groups. **Randomize Ground** and **Randomize Walls** sit directly
   below these groups.
@@ -1433,19 +1438,18 @@ Play each finished campaign screen or editor draft from its authored start.
 Developer builds record the inputs from a successful playthrough automatically.
 
 1. For a campaign screen, open it through the campaign or launch a developer
-   build with `--level` and `--screen`. Use **Restart** if you resumed from a
-   checkpoint. For a draft, use **Play Draft** or `F5` to start at the authored
-   hero positions.
+   build with `--level` and `--screen` to start a fresh attempt. For a draft,
+   use **Play Draft** or `F5` to start at the authored hero positions.
 
    ```powershell
    .\out\dev\Debug\sokoban.exe --level 3 --screen 2
    ```
 
-2. Beat the screen, allowing slides, conveyors and enemy reactions to settle
-   between inputs. A worker replays your inputs one at a time and saves the run
-   if it verifies and is the first or shorter than the stored run for that
-   content. Check the Log or **Level Editor > Solutions** for the result. Wait
-   for **Saving...** to clear before closing the game.
+2. Beat the screen. Campaign play and **Play Draft** capture the controls and
+   simulation timing through the first winning frame. A worker replays the
+   run and keeps the shortest passing recording, even on boards with
+   continuous movement.
+   Check **Level Editor > Solutions** or the Log for the result.
 3. Review the recorded file in `solutions/` and run the coverage audit before
    merging.
 
@@ -1454,8 +1458,9 @@ Developer builds record the inputs from a successful playthrough automatically.
    ctest --preset dev -R '^solution_replay$' --output-on-failure
    ```
 
-Finished screens use `solutions/level<L>-screen<S>.solution`. A solved draft
-that has yet to be saved goes to `solutions/drafts/<digest>.solution`, which Git
+Finished screens use `solutions/level<L>-screen<S>.solution`. A Play Draft win
+with the same gameplay content goes straight to that screen's recording. A win
+on an unsaved layout goes to `solutions/drafts/<digest>.solution`, which Git
 ignores. Saving a screen with that content promotes the draft recording.
 The store matches by gameplay digest, so it can move recordings when screens
 are renumbered. When a new recording takes the filename of an older layout,
@@ -1464,9 +1469,9 @@ restored. Smoke and evidence runs leave the store untouched.
 
 The `solution_replay` audit is read-only and runs in the required CI test
 configurations. It fails for missing, stale, malformed, or failing recordings.
-Each replay compares the changes and complete settled state after every input
-and checks that the recording ends at the first solve. A replay mismatch
-identifies the screen, input step, and first differing entity or state field.
+Existing format 2 recordings compare the changes and settled state after each
+input. New recordings use format 3, which replays the controls and elapsed
+simulation time frame by frame and compares the state on the first winning frame.
 
 For an unfinished screen, `solutions/coverage.json` can exempt missing
 coverage. Each exception names the level and screen, the current gameplay

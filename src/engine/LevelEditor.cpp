@@ -4377,6 +4377,7 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
 
     const std::filesystem::path mirrorPath = runtimeMirrorPath(sourcePath);
     if (!mirrorPath.empty()) {
+        ++sourceLevelSaveRevision_;
         saved.publicationPending = true;
         if (mirrorPath.has_parent_path()) {
             std::filesystem::create_directories(mirrorPath.parent_path(), error);

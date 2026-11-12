@@ -64,6 +64,25 @@ void renamePath(
 {
     std::error_code error;
     std::filesystem::rename(source, destination, error);
+#ifdef _WIN32
+    // A short-lived handle without delete sharing can block a Windows rename.
+    // Retry only before the destination has appeared, while holding the
+    // publication lock.
+    for (const unsigned delayMilliseconds : { 10U, 20U, 40U, 80U }) {
+        if (error.category() != std::system_category() ||
+            (error.value() != ERROR_ACCESS_DENIED &&
+                error.value() != ERROR_SHARING_VIOLATION)) {
+            break;
+        }
+        Sleep(delayMilliseconds);
+        std::error_code statusError;
+        if (std::filesystem::symlink_status(destination, statusError).type() !=
+            std::filesystem::file_type::not_found) {
+            break;
+        }
+        std::filesystem::rename(source, destination, error);
+    }
+#endif
     if (error) {
         throw std::runtime_error(
             "cannot rename " + source.string() + " to " +

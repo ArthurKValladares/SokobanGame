@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <memory>
@@ -33,6 +34,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace sokoban {
@@ -738,6 +740,8 @@ MeshVertex normalizedVertex(
     vertex.normal = normalizeOr(
         transformVector(sourceTransform.normalFromSource, source.normal),
         Vec3 { 0.0f, 0.0f, 1.0f });
+    vertex.outlineNormal = normalize(
+        transformVector(sourceTransform.normalFromSource, source.outlineNormal));
     Vec3 tangent = transformVector(
         sourceTransform.modelFromSource,
         Vec3 { source.tangent.x, source.tangent.y, source.tangent.z });
@@ -749,6 +753,37 @@ MeshVertex normalizedVertex(
     vertex.tangent = {
         tangent.x, tangent.y, tangent.z, source.tangent.w };
     return vertex;
+}
+
+template <typename Vertex, typename WeldKey>
+void deriveOutlineNormals(std::vector<Vertex>& vertices, WeldKey weldKey)
+{
+    const auto normalKey = [](const Vertex& vertex) {
+        return std::tie(vertex.normal.x, vertex.normal.y, vertex.normal.z);
+    };
+    std::vector<std::size_t> order(vertices.size());
+    std::iota(order.begin(), order.end(), std::size_t { 0 });
+    std::ranges::sort(order, [&](std::size_t left, std::size_t right) {
+        return std::tuple { weldKey(vertices[left]), normalKey(vertices[left]) } <
+            std::tuple { weldKey(vertices[right]), normalKey(vertices[right]) };
+    });
+    for (std::size_t begin = 0; begin < order.size();) {
+        const Vertex& first = vertices[order[begin]];
+        const auto key = weldKey(first);
+        Vec3 sum = normalize(first.normal);
+        std::size_t end = begin + 1;
+        for (; end < order.size() && weldKey(vertices[order[end]]) == key; ++end) {
+            const Vertex& vertex = vertices[order[end]];
+            // Duplicated coplanar faces and UV splits contribute the same direction once.
+            if (normalKey(vertex) != normalKey(vertices[order[end - 1]])) {
+                sum += normalize(vertex.normal);
+            }
+        }
+        const Vec3 outlineNormal = normalize(sum);
+        for (; begin < end; ++begin) {
+            vertices[order[begin]].outlineNormal = outlineNormal;
+        }
+    }
 }
 
 // Derives a tangent frame from the UVs for every vertex that has no usable
@@ -1377,6 +1412,10 @@ MeshData loadGltfMesh(
     // position and basis conversion.
     const GltfSourceTransform sourceTransform = makeGltfSourceTransform(
         bounds.minimum, bounds.maximum, options);
+    deriveOutlineNormals(mesh.vertices, [](const MeshVertex& vertex) {
+        return std::tie(vertex.position.x, vertex.position.y, vertex.position.z,
+            vertex.groundDebris);
+    });
     for (MeshVertex& vertex : mesh.vertices) {
         vertex = normalizedVertex(vertex, sourceTransform);
     }
@@ -1554,6 +1593,11 @@ SkinnedMeshData loadGltfSkinnedMesh(
     // In source space here, unlike the static path: these vertices are posed
     // before they are normalized, so their tangents have to travel with them.
     deriveMissingTangents(mesh.vertices, mesh.indices);
+    // Group only vertices that also move together when posed.
+    deriveOutlineNormals(mesh.vertices, [](const SkinnedVertex& vertex) {
+        return std::tie(vertex.position.x, vertex.position.y, vertex.position.z,
+            vertex.joints, vertex.weights);
+    });
     mesh.sourceMinimum = bounds.minimum;
     mesh.sourceMaximum = bounds.maximum;
     return mesh;
@@ -1835,6 +1879,7 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
             Vec3 skinnedPosition {};
             Vec3 skinnedNormal {};
             Vec3 skinnedTangent {};
+            Vec3 skinnedOutlineNormal {};
             for (size_t i = 0; i < 4; ++i) {
                 const float weight = source.weights[i];
                 const uint16_t joint = source.joints[i];
@@ -1845,6 +1890,8 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                     transformPoint(pose.jointMatrices[joint], source.position) * weight;
                 skinnedNormal +=
                     transformVector(pose.jointMatrices[joint], source.normal) * weight;
+                skinnedOutlineNormal += transformVector(
+                    pose.jointMatrices[joint], source.outlineNormal) * weight;
                 skinnedTangent += transformVector(
                     pose.jointMatrices[joint],
                     Vec3 { source.tangent.x, source.tangent.y,
@@ -1864,6 +1911,7 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                     .uv = source.uv,
                     .uv1 = source.uv1,
                     .materialIndex = source.materialIndex,
+                    .outlineNormal = skinnedOutlineNormal,
                 },
                 sourceTransform);
         }
@@ -1895,6 +1943,9 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                 vertex.tangent.z,
                 -vertex.tangent.y,
             };
+            const Vec3 sourceOutlineNormal {
+                vertex.outlineNormal.x, vertex.outlineNormal.z, -vertex.outlineNormal.y,
+            };
             const Vec3 posedTangent = normalizeOr(
                 transformVector(
                     pose.nodeMatrices[attachment.nodeIndex], sourceTangent),
@@ -1916,6 +1967,8 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                     // Carried explicitly, where it used to be patched back on
                     // after the fact because the old signature dropped it.
                     .materialIndex = vertex.materialIndex,
+                    .outlineNormal = transformVector(
+                        pose.nodeMatrices[attachment.nodeIndex], sourceOutlineNormal),
                 },
                 sourceTransform));
         }

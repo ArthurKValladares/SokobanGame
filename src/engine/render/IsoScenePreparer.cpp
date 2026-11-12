@@ -2201,6 +2201,7 @@ void IsoScenePreparer::prepare(
         !scene.particles.empty()
 #if SOKOBAN_ENABLE_DEBUG_UI
         || !frameData.debugItemOutlines.empty() || !frameData.debugItemLinks.empty()
+        || (frameData.showOccludedEntities && frameData.viewMode == RenderViewMode::Isometric3D)
 #endif
         ;
 }

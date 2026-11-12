@@ -1354,16 +1354,6 @@ void ApplicationTools::drawDraftExitConfirmation()
 
 void ApplicationTools::saveSolve(solution::SolveToStore solve)
 {
-    // Draft playback reports a solve again on every action that ends on the
-    // Ends (cycling heroes, say); the run is the same, so store it once.
-    LastSolve key {
-        .digest = solution::levelDigest(solve.definition),
-        .inputs = solve.inputs,
-    };
-    if (lastSolve_ == key) {
-        return;
-    }
-    lastSolve_ = std::move(key);
     solutionJobs_.emplace_back(std::move(solve));
 }
 
@@ -1394,13 +1384,33 @@ void ApplicationTools::reportSolutionStatus(
 
 void ApplicationTools::serviceSolutionStore()
 {
+    serviceSolutionStore(false);
+}
+
+void ApplicationTools::flushSolutionStore() noexcept
+{
+    while (solutionJob_.valid() || !solutionJobs_.empty()) {
+        try {
+            serviceSolutionStore(true);
+        } catch (const std::exception& error) {
+            try {
+                log::error(log::Category::Editor)
+                    << "Could not finish a queued solution job (" << error.what() << ").";
+            } catch (...) {
+                // Logging must not prevent shutdown if resources are exhausted.
+            }
+        }
+    }
+}
+
+void ApplicationTools::serviceSolutionStore(bool draining)
+{
     if (solutionJob_.valid()) {
-        if (solutionJob_.wait_for(std::chrono::seconds(0)) !=
+        if (!draining && solutionJob_.wait_for(std::chrono::seconds(0)) !=
             std::future_status::ready) {
             return;
         }
         const std::string name = std::move(solutionJobName_);
-        const std::size_t inputs = solutionJobInputs_;
         try {
             for (const solution::StoreChange& change : solutionJob_.get()) {
                 const std::string file = change.file.filename().string();
@@ -1409,16 +1419,16 @@ void ApplicationTools::serviceSolutionStore()
                 using Kind = solution::StoreChange::Kind;
                 switch (change.kind) {
                 case Kind::Saved:
-                    line += "Saved the ";
+                    line += "Verified and saved the ";
                     line += std::to_string(change.steps);
-                    line += "-step solution of ";
+                    line += "-input solution of ";
                     line += name;
                     if (change.file.parent_path().filename() == "drafts") {
-                        line += " as drafts/";
+                        line += " as solutions/drafts/";
                         line += file;
-                        line += " until the draft is saved.";
+                        line += ". Save this draft to publish its solution.";
                     } else {
-                        line += " as ";
+                        line += " as solutions/";
                         line += file;
                         line += '.';
                     }
@@ -1426,11 +1436,9 @@ void ApplicationTools::serviceSolutionStore()
                 case Kind::KeptExisting:
                     line += "Solved ";
                     line += name;
-                    line += " in ";
-                    line += std::to_string(inputs);
-                    line += " inputs; kept the stored ";
+                    line += ". Kept the stored ";
                     line += std::to_string(change.steps);
-                    line += "-step ";
+                    line += "-input solution in ";
                     line += file;
                     line += '.';
                     break;
@@ -1443,12 +1451,10 @@ void ApplicationTools::serviceSolutionStore()
                     break;
                 case Kind::NotRecorded:
                     warning = true;
-                    line += "Did not save the solve of ";
+                    line += "Could not verify the solve of ";
                     line += name;
-                    line += ": ";
+                    line += ". ";
                     line += change.message;
-                    line += ". Solutions replay one input at a time, so a "
-                            "run that moved during a slide may not repeat.";
                     break;
                 }
                 reportSolutionStatus(std::move(line), warning);
@@ -1466,12 +1472,12 @@ void ApplicationTools::serviceSolutionStore()
         std::move(solutionJobs_.front());
     solutionJobs_.pop_front();
     solutionJobName_ = job ? job->name : std::string {};
-    solutionJobInputs_ = job ? job->inputs.size() : 0;
     const std::filesystem::path root = SOKOBAN_SOURCE_ROOT_DIR;
     // Recording replays the whole solve, so it runs off the main thread. The
-    // job owns copies of everything it reads.
+    // job owns copies of everything it reads. During shutdown, get() runs
+    // the remaining jobs in order without launching more threads.
     solutionJob_ = std::async(
-        std::launch::async,
+        draining ? std::launch::deferred : std::launch::async,
         [levels = root / "levels",
             solutions = root / "solutions",
             job = std::move(job)] {
@@ -1482,15 +1488,14 @@ void ApplicationTools::serviceSolutionStore()
 void ApplicationTools::drawSolutionPanel()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    if (!ImGui::CollapsingHeader("Solutions")) {
+    if (!ImGui::CollapsingHeader("Solutions", ImGuiTreeNodeFlags_DefaultOpen)) {
         return;
     }
     ImGui::TextWrapped(
-        "Every solve is recorded to solutions/ automatically, keeping the "
-        "shortest run for each screen. The solution_replay test replays "
-        "them after rule changes.");
+        "Campaign and draft solves are verified and saved automatically. "
+        "Save an edited screen to publish its recorded solution.");
     if (solutionJob_.valid() || !solutionJobs_.empty()) {
-        ImGui::TextDisabled("Saving...");
+        ImGui::TextDisabled("Checking solutions...");
     }
     for (const std::string& line : solutionStatus_) {
         ImGui::Bullet();

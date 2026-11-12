@@ -673,6 +673,21 @@ bool GameplaySession::anyActionComplete() const
         });
 }
 
+bool GameplaySession::readyForScreenSelection(const Level& level) const
+{
+    // A patrol elsewhere in the overworld can run indefinitely. The return
+    // checkpoint can keep its last committed position, but the party must
+    // finish any action that moves it, including riding a patrol robot.
+    const bool blockingAction = std::ranges::any_of(
+        scheduler_.inFlight(), [&](const ActionScheduler::InFlight& action) {
+            return action.plan.before.players != action.plan.after.players ||
+                std::ranges::find(robotPatrolActions_, action.id,
+                    &RobotPatrolAction::actionId) == robotPatrolActions_.end();
+        });
+    return !blockingAction &&
+        !rules::hasPendingMotion(level, state(), /*includeRobots=*/false);
+}
+
 GameplaySession::Snapshot GameplaySession::snapshot() const
 {
     Snapshot result {

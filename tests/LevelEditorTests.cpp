@@ -1059,7 +1059,9 @@ void testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness()
         project.runtime / "level0" / "screen0.scr";
     CHECK(editor.saveDocument(sourcePath));
     const auto initialRevision = editor.runtimePublicationRevision();
+    const auto initialSourceRevision = editor.sourceLevelSaveRevision();
     CHECK(initialRevision > 0);
+    CHECK(initialSourceRevision > 0);
     const std::string originalSource = readFile(sourcePath);
     const std::string originalMirror = readFile(runtimePath);
 
@@ -1077,13 +1079,16 @@ void testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness()
     CHECK(readFile(sourcePath) == originalSource);
     CHECK(readFile(runtimePath) == originalMirror);
     CHECK(editor.runtimePublicationRevision() == initialRevision);
+    CHECK(editor.sourceLevelSaveRevision() == initialSourceRevision);
     CHECK(editor.dirty());
     CHECK(editor.status().find("Failed to save") != std::string::npos);
 
     std::filesystem::remove_all(sourceTemporary);
     CHECK(editor.saveDocument(sourcePath));
     const auto revisionBeforeMirrorFailure = editor.runtimePublicationRevision();
+    const auto sourceRevisionBeforeMirrorFailure = editor.sourceLevelSaveRevision();
     CHECK(revisionBeforeMirrorFailure == initialRevision + 1);
+    CHECK(sourceRevisionBeforeMirrorFailure == initialSourceRevision + 1);
     const std::string sourceBeforeMirrorFailure = readFile(sourcePath);
     const std::string mirrorBeforeMirrorFailure = readFile(runtimePath);
 
@@ -1103,6 +1108,7 @@ void testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness()
     CHECK(readFile(sourcePath) != sourceBeforeMirrorFailure);
     CHECK(readFile(runtimePath) == mirrorBeforeMirrorFailure);
     CHECK(editor.runtimePublicationRevision() == revisionBeforeMirrorFailure);
+    CHECK(editor.sourceLevelSaveRevision() == sourceRevisionBeforeMirrorFailure + 1);
     CHECK(editor.loadedDocumentPath() == sourcePath);
     CHECK(editor.dirty());
     CHECK(editor.status().find("Saved source") != std::string::npos);
@@ -1728,9 +1734,13 @@ void testProjectRenumberDeleteAndRestore()
     editor.setRequestedSize(4, 3);
 
     editor.addLevelAt(0);
-    editor.addLevelAt(0);
     std::vector<LevelEditor::LevelDirectory> levels = editor.collectLevelDirectories();
-    CHECK(levels.size() == 2);
+    CHECK_MESSAGE(levels.size() == 1, editor.status().c_str());
+    if (levels.size() != 1) return;
+    editor.addLevelAt(0);
+    levels = editor.collectLevelDirectories();
+    CHECK_MESSAGE(levels.size() == 2, editor.status().c_str());
+    if (levels.size() != 2) return;
     CHECK(levels[0].index == 0);
     CHECK(levels[1].index == 1);
     CHECK(std::filesystem::exists(project.runtime / "level0" / "screen0.scr"));
@@ -1739,6 +1749,8 @@ void testProjectRenumberDeleteAndRestore()
     editor.renameLevel(levels[0], "Clockwork Garden");
     editor.renameScreen(levels[0], 0, "First Steps");
     levels = editor.collectLevelDirectories();
+    CHECK(!levels.empty() && !levels[0].screens.empty());
+    if (levels.empty() || levels[0].screens.empty()) return;
     CHECK(levels[0].name == "Clockwork Garden");
     CHECK(levels[0].screens[0].name == "First Steps");
     CHECK(std::filesystem::exists(
@@ -1746,17 +1758,21 @@ void testProjectRenumberDeleteAndRestore()
 
     editor.addScreenAt(levels[0], 1);
     levels = editor.collectLevelDirectories();
-    CHECK(levels[0].screens.size() == 2);
+    CHECK_MESSAGE(!levels.empty() && levels[0].screens.size() == 2, editor.status().c_str());
+    if (levels.empty() || levels[0].screens.size() != 2) return;
     CHECK(levels[0].screens[0].index == 0);
     CHECK(levels[0].screens[1].index == 1);
     CHECK(levels[0].screens[0].name == "First Steps");
     CHECK(levels[0].screens[1].name.empty());
     editor.renameScreen(levels[0], 1, "The Long Hall");
     levels = editor.collectLevelDirectories();
+    CHECK(!levels.empty());
+    if (levels.empty()) return;
 
     editor.deleteScreen(levels[0], 0);
     levels = editor.collectLevelDirectories();
-    CHECK(levels[0].screens.size() == 1);
+    CHECK_MESSAGE(!levels.empty() && levels[0].screens.size() == 1, editor.status().c_str());
+    if (levels.empty() || levels[0].screens.size() != 1) return;
     CHECK(levels[0].screens[0].index == 0);
     CHECK(levels[0].screens[0].name == "The Long Hall");
     CHECK(!std::filesystem::exists(levels[0].path / "screen1.scr"));
@@ -1766,29 +1782,37 @@ void testProjectRenumberDeleteAndRestore()
     editor.deleteLevel(levels[0]);
     levels = editor.collectLevelDirectories();
     std::vector<LevelEditor::LevelDirectory> deleted = editor.collectDeletedLevels();
-    CHECK(levels.size() == 1);
+    CHECK_MESSAGE(levels.size() == 1 && deleted.size() == 1, editor.status().c_str());
+    if (levels.size() != 1 || deleted.size() != 1) return;
     CHECK(levels[0].index == 0);
-    CHECK(deleted.size() == 1);
+    CHECK(deleted[0].screens.size() == 1);
+    if (deleted[0].screens.size() != 1) return;
     CHECK(deleted[0].name == "Clockwork Garden");
     CHECK(deleted[0].screens[0].name == "The Long Hall");
     CHECK(editor.hasInProgressDraft(deleted[0].screens[0].path));
-    CHECK(editor.openDocument(deleted[0].screens[0].path));
+    const bool openedDeleted = editor.openDocument(deleted[0].screens[0].path);
+    CHECK_MESSAGE(openedDeleted, editor.status().c_str());
+    if (!openedDeleted) return;
     CHECK(editor.documentLayers()[1][1][1] ==
         tileTypeToChar(TileType::Wall));
 
     editor.restoreDeletedLevel(deleted[0].path);
     levels = editor.collectLevelDirectories();
-    CHECK(levels.size() == 2);
+    CHECK_MESSAGE(levels.size() == 2, editor.status().c_str());
+    if (levels.size() != 2) return;
     CHECK(levels[1].index == 1);
     CHECK(levels[1].name == "Clockwork Garden");
     CHECK(editor.collectDeletedLevels().empty());
+    CHECK(levels[1].screens.size() == 1);
+    if (levels[1].screens.size() != 1) return;
     CHECK(editor.loadedDocumentPath() == levels[1].screens[0].path);
     CHECK(editor.documentLayers()[1][1][1] ==
         tileTypeToChar(TileType::Wall));
 
     editor.deleteLevel(levels[1]);
     deleted = editor.collectDeletedLevels();
-    CHECK(deleted.size() == 1);
+    CHECK_MESSAGE(deleted.size() == 1 && deleted[0].screens.size() == 1, editor.status().c_str());
+    if (deleted.size() != 1 || deleted[0].screens.size() != 1) return;
     const std::filesystem::path permanentlyDeletedScreen =
         deleted[0].screens[0].path;
     CHECK(editor.hasInProgressDraft(permanentlyDeletedScreen));
@@ -5709,12 +5733,17 @@ void testHistoryAccountingFollowsScreenRemapsAndReloads()
         }
         const auto levels = editor.collectLevelDirectories();
         CHECK(levels.size() == 1);
-        if (levels.empty()) continue;
+        if (levels.size() != 1) continue;
         editor.addScreenAt(levels.front(), 0); // screen9 -> screen10 lengthens every snapshot path.
+        const auto shifted = levelRoot / "screen10.scr";
+        const bool shiftedExists = std::filesystem::exists(shifted);
+        CHECK_MESSAGE(shiftedExists, editor.status().c_str());
+        if (!shiftedExists) continue;
         checkHistoryBudget(editor, tightBytes ? 0 : 1, 1);
         if (!tightBytes) CHECK(editor.historyStats().retainedBytes > beforeRemap.retainedBytes);
-        const auto shifted = levelRoot / "screen10.scr";
-        CHECK(editor.openDocument(shifted));
+        const bool openedShifted = editor.openDocument(shifted);
+        CHECK_MESSAGE(openedShifted, editor.status().c_str());
+        if (!openedShifted) continue;
         CHECK(editor.loadedDocumentPath() == shifted);
         CHECK(editor.documentLayers()[1][1] == " #  ");
         CHECK(editor.tryRedoEdit());

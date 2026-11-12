@@ -5,18 +5,22 @@
 #include "TestHarness.hpp"
 
 #include "engine/AtomicFile.hpp"
+#include "engine/GameplayLoop.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
+#include "engine/LevelEditor.hpp"
 #include "engine/Solution.hpp"
 #include "engine/SolutionCoverage.hpp"
 #include "engine/SolutionStore.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -42,6 +46,13 @@ const Level::Definition walkAndPushDefinition {
 
 const Level::Definition coverageWalkDefinition {
     .layers = { { "..." }, { "C E" } },
+};
+
+const Level::Definition circlingPadDefinition {
+    .layers = {
+        { "......", "\",....", "'`...." },
+        { "Q E   ", "$     ", "      " },
+    },
 };
 
 void testDruidTransformationAndUndoPreserveHeroOrder()
@@ -414,7 +425,7 @@ std::string readText(const std::filesystem::path& path)
 
 std::size_t stepsIn(const std::filesystem::path& path)
 {
-    return solution::parse(readText(path)).steps.size();
+    return solution::parse(readText(path)).stepCount();
 }
 
 bool hasKind(
@@ -424,6 +435,249 @@ bool hasKind(
     return std::ranges::any_of(changes, [kind](const auto& change) {
         return change.kind == kind;
     });
+}
+
+std::vector<solution::TimedFrame> timedMoves(std::span<const Input> inputs)
+{
+    std::vector<solution::TimedFrame> frames;
+    frames.reserve(inputs.size());
+    for (const Input input : inputs) {
+        solution::TimedFrame frame { .elapsedSeconds = config::stepDurationSeconds };
+        switch (input) {
+        case Input::Up: frame.input.up.pressed = true; break;
+        case Input::Down: frame.input.down.pressed = true; break;
+        case Input::Left: frame.input.left.pressed = true; break;
+        case Input::Right: frame.input.right.pressed = true; break;
+        default: throw std::runtime_error("test fixture expects movement inputs");
+        }
+        frames.push_back(frame);
+    }
+    return frames;
+}
+
+void testTimedSolveReplaysAndStoresWhileCurrentKeepsMoving()
+{
+    TEST("timed solve verifies and stores a win while a lily pad is still circling");
+    ScopedTestDirectory temp("sokoban-solution-timed-store");
+    const auto levels = temp.path() / "levels";
+    const auto solutions = temp.path() / "solutions";
+    const auto screen = screenFilePath(levelDirectoryPath(levels, 0), 0);
+    writeScreen(screen, circlingPadDefinition);
+    LevelEditor editor;
+    editor.initialize(levels, temp.path() / "runtime", 0, 0);
+    const bool opened = editor.openDocument(screen);
+    CHECK_MESSAGE(opened, editor.status().c_str());
+    if (!opened) return;
+    const auto playable = editor.beginDraftPlayback();
+    CHECK_MESSAGE(playable.has_value(), editor.status().c_str());
+    if (!playable) return;
+    const Level& level = *playable;
+    const auto definition = editor.documentDefinition();
+    CHECK(solution::levelDigest(definition) == solution::levelDigest(circlingPadDefinition));
+    const std::vector<Input> inputs { Input::Right, Input::Right };
+    const auto legacy = solution::record(level, definition, inputs, "circling lily pad");
+    CHECK(!legacy.solved);
+    CHECK(legacy.error.find("step 1 never came to rest") != std::string::npos);
+
+    constexpr std::size_t winningFrameCount = 18;
+    std::vector<solution::TimedFrame> frames(winningFrameCount + 1);
+    for (auto& frame : frames) {
+        frame.elapsedSeconds = 1.0f / 32.0f;
+    }
+    frames[2].input.right.pressed = true;
+    // The second press queues while the hero's first move and the pad's ride
+    // are both in flight.
+    frames[6].input.right.pressed = true;
+    frames.back().input.left.pressed = true;
+
+    GameplaySession session;
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+    for (std::size_t frame = 0; frame < winningFrameCount; ++frame) {
+        const auto update = GameplayLoop::update(level, session, presentation,
+            frames[frame].input, frames[frame].elapsedSeconds, true);
+        CHECK(update.draftSolved == (frame + 1 == winningFrameCount));
+        if (frame == 6) {
+            CHECK(session.inFlight().size() == 2);
+        }
+    }
+    CHECK(session.state().players[0].cell == GridPosition3({ 2, 0, 1 }));
+    CHECK(session.state().movables[0].cell == GridPosition3({ 1, 1, 1 }));
+    CHECK(session.inFlight().size() == 1);
+
+    const auto recorded = solution::recordTimed(level, definition, frames, "screen0.scr (draft)");
+    CHECK_MESSAGE(recorded.solved, recorded.error.c_str());
+    CHECK(recorded.solution.timed.has_value());
+    if (!recorded.solution.timed) return;
+    CHECK(recorded.solution.stepCount() == inputs.size());
+    CHECK(recorded.solution.timed->frames.size() == winningFrameCount);
+    CHECK(recorded.solution.timed->finalState == session.state());
+
+    const std::string text = solution::serialize(recorded.solution);
+    CHECK(text.find("format 3\n") != std::string::npos);
+    const auto parsed = solution::parse(text);
+    CHECK(parsed == recorded.solution);
+    CHECK(solution::replay(level, parsed).passed);
+    if (!parsed.timed) return;
+
+    auto changed = parsed;
+    changed.timed->finalState.movables[0].cell = { 0, 1, 1 };
+    const auto wrongState = solution::replay(level, changed);
+    CHECK(!wrongState.passed);
+    CHECK(wrongState.message.find("frame 18") != std::string::npos);
+    changed = parsed;
+    changed.timed->frames[6].input.right.pressed = false;
+    CHECK(!solution::replay(level, changed).passed);
+    changed = parsed;
+    ++changed.timed->inputCount;
+    CHECK(!solution::replay(level, changed).passed);
+
+    const auto changes = solution::reconcileStore(levels, solutions,
+        solution::SolveToStore { "screen0.scr (draft)", definition, frames });
+    CHECK(std::ranges::any_of(changes, [&](const auto& change) {
+        return change.kind == solution::StoreChange::Kind::Saved && change.steps == inputs.size();
+    }));
+    const auto file = solutions / solution::fileNameFor({ 0, 0 });
+    CHECK(std::filesystem::is_regular_file(file));
+    if (!std::filesystem::is_regular_file(file)) return;
+    const auto stored = solution::parse(readText(file));
+    CHECK(stored.recordedFor == "level0/screen0");
+    CHECK(stored.timed == parsed.timed);
+    const auto coverage = solution::auditCoverage(levels, solutions);
+    CHECK(coverage.passed());
+    CHECK(coverage.screens == 1 && coverage.replayed == 1);
+
+    auto draft = definition;
+    draft.layers[0][0].back() = 'W';
+    const auto draftLevel = Level::loadFromDefinition(draft, "edited circling lily pad");
+    const auto draftDigest = solution::levelDigest(draft);
+    CHECK(draftDigest != stored.levelDigest);
+    CHECK(hasKind(solution::reconcileStore(levels, solutions,
+        solution::SolveToStore { "screen0.scr (draft)", draft, frames }),
+        solution::StoreChange::Kind::Saved));
+    const auto draftFile = solutions / "drafts" / (solution::digestText(draftDigest) + ".solution");
+    CHECK(std::filesystem::is_regular_file(draftFile));
+    if (!std::filesystem::is_regular_file(draftFile)) return;
+    const std::string draftText = readText(draftFile);
+    const auto draftProof = solution::parse(draftText);
+    CHECK(solution::replay(draftLevel, draftProof).passed);
+    CHECK(solution::parse(readText(file)) == stored);
+    if (!draftProof.timed) return;
+
+    auto invalidDraft = draftProof;
+    ++invalidDraft.timed->inputCount;
+    writeText(draftFile, solution::serialize(invalidDraft));
+    writeScreen(screen, draft);
+    CHECK(!hasKind(solution::reconcileStore(levels, solutions), solution::StoreChange::Kind::Moved));
+    CHECK(solution::parse(readText(file)) == stored);
+    CHECK(!solution::auditCoverage(levels, solutions).passed());
+
+    writeText(draftFile, draftText);
+    CHECK(hasKind(solution::reconcileStore(levels, solutions), solution::StoreChange::Kind::Moved));
+    CHECK(!std::filesystem::exists(draftFile));
+    const auto promoted = solution::parse(readText(file));
+    CHECK(promoted.recordedFor == "level0/screen0");
+    CHECK(promoted.levelDigest == draftDigest);
+    CHECK(promoted.timed == draftProof.timed);
+    CHECK(solution::auditCoverage(levels, solutions).passed());
+}
+
+void testCampaignTimedSolveStopsOnWinningCommit()
+{
+    TEST("campaign timed replay stops at the winning commit during continuous motion");
+    const auto level = Level::loadFromDefinition(circlingPadDefinition, "campaign current");
+    constexpr std::size_t winningFrameCount = 31;
+    std::vector<solution::TimedFrame> frames(winningFrameCount + 1);
+    for (auto& frame : frames) {
+        frame.elapsedSeconds = 1.0f / 32.0f;
+    }
+    frames[15].input.right.pressed = true;
+    frames[19].input.right.pressed = true;
+    // The hero reaches the End at 31/32 second. The pad's next leg ends
+    // at one second, also within the last frame.
+    frames[winningFrameCount - 1].elapsedSeconds *= 2.0f;
+    frames.back().input.left.pressed = true;
+
+    const auto play = [&](bool playingDraft) {
+        GameplaySession session;
+        session.reset(level);
+        GameplayPresentation presentation;
+        presentation.resetEntities(session.state());
+        for (std::size_t frame = 0; frame < winningFrameCount; ++frame) {
+            const auto update = GameplayLoop::update(level, session, presentation,
+                frames[frame].input, frames[frame].elapsedSeconds, playingDraft);
+            const bool winningFrame = frame + 1 == winningFrameCount;
+            CHECK(update.screenSolved == (winningFrame && !playingDraft));
+            CHECK(update.draftSolved == (winningFrame && playingDraft));
+        }
+        CHECK(session.playerMoveCount() == 2);
+        return session.state();
+    };
+    const auto campaign = play(false);
+    CHECK(campaign.players[0].cell == GridPosition3({ 2, 0, 1 }));
+    CHECK(campaign.movables[0].cell == GridPosition3({ 1, 1, 1 }));
+    CHECK(play(true).movables[0].cell == GridPosition3({ 1, 2, 1 }));
+
+    ScopedTestDirectory temp("sokoban-solution-campaign-timing");
+    const auto levels = temp.path() / "levels";
+    const auto solutions = temp.path() / "solutions";
+    writeScreen(screenFilePath(levelDirectoryPath(levels, 0), 0), circlingPadDefinition);
+    const auto changes = solution::reconcileStore(levels, solutions, solution::SolveToStore {
+        .name = "level0/screen0",
+        .definition = circlingPadDefinition,
+        .frames = frames,
+        .playingDraft = false,
+    });
+    CHECK(hasKind(changes, solution::StoreChange::Kind::Saved));
+    const auto file = solutions / solution::fileNameFor({ 0, 0 });
+    CHECK(std::filesystem::is_regular_file(file));
+    if (!std::filesystem::is_regular_file(file)) return;
+    const auto stored = solution::parse(readText(file));
+    CHECK(stored.timed.has_value());
+    if (!stored.timed) return;
+    CHECK(stored.stepCount() == 2);
+    CHECK(stored.timed->frames.size() == winningFrameCount);
+    CHECK(stored.timed->finalState == campaign);
+    CHECK(!stored.timed->playingDraft);
+    CHECK(solution::replay(level, stored).passed);
+    auto wrongMode = stored;
+    wrongMode.timed->playingDraft = true;
+    CHECK(!solution::replay(level, wrongMode).passed);
+    CHECK(solution::auditCoverage(levels, solutions).passed());
+}
+
+void testStoreRejectsIncompleteTimedCapture()
+{
+    TEST("the store only publishes a complete timed capture");
+    const auto level = Level::loadFromDefinition(coverageWalkDefinition, "timed walk");
+    ScopedTestDirectory temp("sokoban-solution-timed-first");
+    const auto levels = temp.path() / "levels";
+    const auto solutions = temp.path() / "solutions";
+    writeScreen(screenFilePath(levelDirectoryPath(levels, 0), 0), coverageWalkDefinition);
+    solution::SolveToStore solve {
+        .name = "level0/screen0",
+        .definition = coverageWalkDefinition,
+        .playingDraft = false,
+    };
+    const auto file = solutions / solution::fileNameFor({ 0, 0 });
+    CHECK(hasKind(solution::reconcileStore(levels, solutions, solve),
+        solution::StoreChange::Kind::NotRecorded));
+    CHECK(!std::filesystem::exists(file));
+    solve.frames = timedMoves(std::array { Input::Right });
+    CHECK(hasKind(solution::reconcileStore(levels, solutions, solve),
+        solution::StoreChange::Kind::NotRecorded));
+    CHECK(!std::filesystem::exists(file));
+
+    solve.frames = timedMoves(std::array { Input::Right, Input::Right });
+    CHECK(hasKind(solution::reconcileStore(levels, solutions, solve),
+        solution::StoreChange::Kind::Saved));
+    CHECK(std::filesystem::is_regular_file(file));
+    if (!std::filesystem::is_regular_file(file)) return;
+    const auto stored = solution::parse(readText(file));
+    CHECK(stored.timed.has_value());
+    CHECK(stored.stepCount() == 2);
+    CHECK(solution::replay(level, stored).passed);
 }
 
 void testStoreKeepsOneShortestRecordingPerScreen()
@@ -443,21 +697,21 @@ void testStoreKeepsOneShortestRecordingPerScreen()
         Input::Right, Input::Right, Input::Down, Input::Up,
         Input::Right, Input::Right, Input::Right,
     };
-    std::vector<Input> longer { Input::Left };
+    std::vector<Input> longer { Input::Right, Input::Left };
     longer.insert(longer.end(), shortest.begin(), shortest.end());
 
     // A longer solve is saved when nothing is stored yet...
     auto changes = solution::reconcileStore(levels, solutions,
-        solution::SolveToStore { "screen0.scr", walkAndPushDefinition, longer });
+        solution::SolveToStore { "screen0.scr", walkAndPushDefinition, timedMoves(longer) });
     CHECK(hasKind(changes, Kind::Saved));
     CHECK(stepsIn(screenFile) == longer.size());
     // ...replaced by a shorter one, which is then kept over a longer one.
     changes = solution::reconcileStore(levels, solutions,
-        solution::SolveToStore { "screen0.scr", walkAndPushDefinition, shortest });
+        solution::SolveToStore { "screen0.scr", walkAndPushDefinition, timedMoves(shortest) });
     CHECK(hasKind(changes, Kind::Saved));
     CHECK(stepsIn(screenFile) == shortest.size());
     changes = solution::reconcileStore(levels, solutions,
-        solution::SolveToStore { "screen0.scr", walkAndPushDefinition, longer });
+        solution::SolveToStore { "screen0.scr", walkAndPushDefinition, timedMoves(longer) });
     CHECK(hasKind(changes, Kind::KeptExisting));
     CHECK(!hasKind(changes, Kind::Saved));
     CHECK(stepsIn(screenFile) == shortest.size());
@@ -465,7 +719,7 @@ void testStoreKeepsOneShortestRecordingPerScreen()
     // A solve that does not replay is reported and stores nothing.
     changes = solution::reconcileStore(levels, solutions,
         solution::SolveToStore { "screen0.scr", walkAndPushDefinition,
-            { Input::Right } });
+            timedMoves(std::array { Input::Right }) });
     CHECK(hasKind(changes, Kind::NotRecorded));
 
     // A draft that is not on disk waits in drafts/...
@@ -477,7 +731,7 @@ void testStoreKeepsOneShortestRecordingPerScreen()
         Input::Right, Input::Right, Input::Right,
     };
     changes = solution::reconcileStore(levels, solutions,
-        solution::SolveToStore { "screen0.scr (draft)", draft, draftInputs });
+        solution::SolveToStore { "screen0.scr (draft)", draft, timedMoves(draftInputs) });
     CHECK(hasKind(changes, Kind::Saved));
     const std::filesystem::path draftFile = solutions / "drafts" /
         (solution::digestText(solution::levelDigest(draft)) + ".solution");
@@ -516,7 +770,7 @@ void testStorePrefersPassingRecordingsOverShorterInvalidOnes()
     invalid.steps.front().changes.clear();
     CHECK(!solution::replay(level, invalid).passed);
     const auto invalidText = solution::serialize(invalid);
-    const std::vector<Input> longer { Input::Left, Input::Right, Input::Right };
+    const std::vector<Input> longer { Input::Right, Input::Left, Input::Right, Input::Right };
 
     for (const bool savedScreen : { false, true }) {
         ScopedTestDirectory temp("sokoban-solution-store-verify");
@@ -535,7 +789,7 @@ void testStorePrefersPassingRecordingsOverShorterInvalidOnes()
         CHECK(readText(path) == invalidText);
 
         const auto changes = solution::reconcileStore(levels, solutions,
-            solution::SolveToStore { "coverage walk", coverageWalkDefinition, longer });
+            solution::SolveToStore { "coverage walk", coverageWalkDefinition, timedMoves(longer) });
         CHECK(hasKind(changes, Kind::Saved));
         CHECK(!hasKind(changes, Kind::KeptExisting));
         const auto passing = readText(path);
@@ -813,6 +1067,9 @@ int main()
         testDigestTracksGameplayContentOnly();
         testLegacyCoveredButtonKeepsRecordedSolutionDigest();
         testReplayFailuresNameTheStepAndEntity();
+        testTimedSolveReplaysAndStoresWhileCurrentKeepsMoving();
+        testCampaignTimedSolveStopsOnWinningCommit();
+        testStoreRejectsIncompleteTimedCapture();
         testStoreKeepsOneShortestRecordingPerScreen();
         testStorePrefersPassingRecordingsOverShorterInvalidOnes();
         testStoreRestoresOriginalsWhenPublicationFails();

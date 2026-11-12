@@ -11,6 +11,7 @@
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/PngWriter.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
+#include "engine/render/SceneConfig.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanRenderer.hpp"
 #include "engine/render/WaterGeometry.hpp"
@@ -449,6 +450,59 @@ double verifyInteractionOutlineImage(const ImageData& baseline,
     return weight / (double(baseline.width) * baseline.height);
 }
 
+bool verifyOpaqueModelOutlineImage(const ImageData& background, const ImageData& baseline,
+    const ImageData& outlined, std::string_view label)
+{
+    verify(baseline.width == background.width && baseline.height == background.height &&
+            baseline.width == outlined.width && baseline.height == outlined.height,
+        "Opaque model outline fixture changed the capture extent");
+    const auto peakDelta = [](const ImageData& first, const ImageData& second, std::size_t pixel) {
+        int peak = 0;
+        for (unsigned channel = 0; channel < 3; ++channel) {
+            const std::size_t offset = pixel * 4 + channel;
+            peak = std::max(peak, std::abs(std::to_integer<int>(first.rgba[offset]) -
+                std::to_integer<int>(second.rgba[offset])));
+        }
+        return peak;
+    };
+    const std::size_t width = baseline.width;
+    std::vector<uint8_t> footprint(width * baseline.height);
+    for (std::size_t pixel = 0; pixel < footprint.size(); ++pixel) {
+        footprint[pixel] = peakDelta(background, baseline, pixel) > 6;
+    }
+    std::size_t interiorPixels = 0;
+    std::size_t changedInterior = 0;
+    std::size_t changedExterior = 0;
+    // Edge samples and post-processing can legitimately mix the silhouette
+    // with its outline. Check a footprint inset from that boundary.
+    constexpr std::size_t margin = 3;
+    for (std::size_t y = margin; y + margin < baseline.height; ++y) {
+        for (std::size_t x = margin; x + margin < width; ++x) {
+            const std::size_t pixel = y * width + x;
+            const int delta = peakDelta(baseline, outlined, pixel);
+            if (!footprint[pixel]) {
+                changedExterior += delta > 6;
+                continue;
+            }
+            bool interior = true;
+            for (std::size_t row = y - margin; interior && row <= y + margin; ++row) {
+                const uint8_t* start = footprint.data() + row * width + x - margin;
+                interior = std::all_of(start, start + 2 * margin + 1,
+                    [](uint8_t covered) { return covered != 0; });
+            }
+            if (interior) {
+                ++interiorPixels;
+                changedInterior += delta > 3;
+            }
+        }
+    }
+    std::cout << label << ": changed interior=" << changedInterior << '/' << interiorPixels
+              << ", changed exterior=" << changedExterior << '\n';
+    verify(interiorPixels > 400, "Opaque model outline fixture did not draw a recognizable model");
+    verify(changedExterior > 20, "Opaque model outline did not visibly extend the silhouette");
+    return changedInterior == 0;
+}
+
 void verifyInteractionOutlines(SDL_Window* window, const std::filesystem::path& root,
     FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
 {
@@ -539,8 +593,52 @@ void verifyInteractionOutlines(SDL_Window* window, const std::filesystem::path& 
                 "Interaction outline showed through an opaque occluder");
         }
     }
-    renderer.setAntiAliasingMode(AntiAliasingMode::Msaa4x);
     renderer.setRenderScalePercent(100);
+    RenderFrameData opaqueFrame = scene({ 0.18f, 0.18f, 0.18f, 1.0f }, false);
+    opaqueFrame.skyCloudsEnabled = false;
+    opaqueFrame.cameraOverride = RenderFrameData::CameraOverride {
+        .position = { 2.4f, 5.0f, 5.8f },
+        .forward = { -0.4f, -3.0f, -4.5f },
+        .verticalFovDegrees = 28.0f,
+    };
+    bool opaqueInteriorsUnchanged = true;
+    for (const auto samples : { AntiAliasingMode::None, AntiAliasingMode::Msaa4x }) {
+        renderer.setAntiAliasingMode(samples);
+        const ImageData background = captureFrame(opaqueFrame);
+        for (const auto name : { "Knight", "EndPlate" }) {
+            const auto model = manifest.findModelIdByName(name);
+            verify(model.has_value(), "Opaque model outline fixture is missing a production model");
+            const bool knight = std::string_view(name) == "Knight";
+            opaqueFrame.tiles.push_back({
+                .position = { 1.5f, 1.5f },
+                .size = { 1.0f, 1.0f },
+                .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+                .baseElevation = 1.0f,
+                .height = knight ? 1.0f : config::surfaceEntityHeight,
+                .showGrid = false,
+                .model = *model,
+                .animation = knight ? manifest.animationIdByName("RogueIdle") : noAnimation,
+                .animationInstanceId = knight ? 1U : 0U,
+                .animationTimeSeconds = 0.25f,
+                .effect = knight ? RenderSurfaceEffect::Standard : RenderSurfaceEffect::PlateEnergy,
+            });
+            renderer.waitForAssets(renderAssetRequirementsForFrame(opaqueFrame));
+            const ImageData baseline = captureFrame(opaqueFrame);
+            verify(renderer.renderStats().unavailableModels == 0,
+                "Opaque model outline fixture did not finish loading its model");
+            opaqueFrame.tiles.back().interactionOutline = true;
+            const ImageData outlined = captureFrame(opaqueFrame);
+            const std::string label = std::string(name) +
+                (samples == AntiAliasingMode::None ? "-1x" : "-msaa4x");
+            saveRippleEvidence(evidence / (label + "-background.png"), background);
+            saveRippleEvidence(evidence / (label + "-baseline.png"), baseline);
+            saveRippleEvidence(evidence / (label + "-outlined.png"), outlined);
+            opaqueInteriorsUnchanged &= verifyOpaqueModelOutlineImage(background, baseline, outlined, label);
+            opaqueFrame.tiles.erase(opaqueFrame.tiles.end() - 1);
+        }
+    }
+    verify(opaqueInteriorsUnchanged, "Opaque model outline repainted a model's interior");
+
     RenderFrameData transparentCube = makeFrame(false);
     transparentCube.tiles.back().blurBehind = true;
     transparentCube.tiles.back().color = { 1.0f, 0.30f, 0.03f, 0.65f };
@@ -605,6 +703,80 @@ void verifyInteractionOutlines(SDL_Window* window, const std::filesystem::path& 
                 "Interaction outline filled a crystal model's interior");
         }
     }
+
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const auto verifyDebugSilhouette = [&](TileType type, const std::string& label) {
+        RenderFrameData debugFrame = makeFrame(false);
+        debugFrame.tiles.erase(debugFrame.tiles.end() - 1);
+        debugFrame.cameraOverride->position = { 1.5f, 1.5f, 10.0f };
+        debugFrame.lighting.shadows.enabled = false;
+        const ImageData floor = captureFrame(debugFrame);
+        auto tile = tileVisual(type, { 1, 1, 1 }, manifest, {});
+        verify(!tile.model.isCube(), "Debug silhouette fixture is missing its production model");
+        tile.animationTimeSeconds = 0.25f;
+        tile.animationCrossfades = false;
+        debugFrame.tiles.push_back(tile);
+        renderer.waitForAssets(renderAssetRequirementsForFrame(debugFrame));
+        const ImageData visible = captureFrame(debugFrame);
+        debugFrame.showOccludedEntities = true;
+        const ImageData visibleDebug = captureFrame(debugFrame);
+
+        debugFrame.tiles.push_back({
+            .position = { 0.0f, 0.0f },
+            .size = { 3.0f, 3.0f },
+            .color = { 0.55f, 0.55f, 0.55f, 1.0f },
+            .baseElevation = 3.0f,
+            .height = 0.3f,
+            .showGrid = false,
+        });
+        debugFrame.showOccludedEntities = false;
+        const ImageData occluded = captureFrame(debugFrame);
+        debugFrame.showOccludedEntities = true;
+        const ImageData occludedDebug = captureFrame(debugFrame);
+        debugFrame.tiles.erase(debugFrame.tiles.begin() + 1);
+        debugFrame.showOccludedEntities = false;
+        const ImageData wallOnly = captureFrame(debugFrame);
+        saveRippleEvidence(evidence / (label + "-visible-baseline.png"), visible);
+        saveRippleEvidence(evidence / (label + "-visible-debug.png"), visibleDebug);
+        saveRippleEvidence(evidence / (label + "-hidden-baseline.png"), occluded);
+        saveRippleEvidence(evidence / (label + "-hidden-debug.png"), occludedDebug);
+        std::cout << "Checking debug silhouette " << label << '\n';
+        verify(difference(visible, visibleDebug, 0, 0, visible.width, visible.height) == 0.0,
+            "Debug silhouette changed a fully visible entity");
+        verify(difference(wallOnly, occluded, 0, 0, occluded.width, occluded.height) == 0.0,
+            "Debug silhouette fixture did not fully cover its entity");
+
+        const auto visiblyChanged = [](const ImageData& first, const ImageData& second,
+                                         std::size_t offset) {
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                if (std::abs(std::to_integer<int>(first.rgba[offset + channel]) -
+                        std::to_integer<int>(second.rgba[offset + channel])) > 6) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        std::size_t entityPixels = 0;
+        std::size_t silhouettePixels = 0;
+        std::size_t overlappingPixels = 0;
+        for (std::size_t offset = 0; offset < visible.rgba.size(); offset += 4) {
+            const bool showsEntity = visiblyChanged(floor, visible, offset);
+            const bool showsSilhouette = visiblyChanged(occluded, occludedDebug, offset);
+            entityPixels += showsEntity;
+            silhouettePixels += showsSilhouette;
+            overlappingPixels += showsEntity && showsSilhouette;
+        }
+        verify(entityPixels > 50, "Debug silhouette fixture did not draw its visible entity");
+        verify(overlappingPixels > 20 && silhouettePixels < entityPixels * 3,
+            "Debug view did not draw a localized silhouette of the hidden entity");
+    };
+    for (const auto samples : { AntiAliasingMode::None, AntiAliasingMode::Msaa4x }) {
+        renderer.setAntiAliasingMode(samples);
+        const std::string suffix = samples == AntiAliasingMode::None ? "-1x" : "-msaa4x";
+        verifyDebugSilhouette(TileType::End, "occluded-end" + suffix);
+        verifyDebugSilhouette(TileType::Knight, "occluded-knight" + suffix);
+    }
+#endif
     verify(vulkanDebug::validationErrorCount() == 0,
         "Vulkan validation reported an interaction outline rendering error");
 }

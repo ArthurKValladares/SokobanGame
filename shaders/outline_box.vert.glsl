@@ -22,7 +22,7 @@ void main()
     int corner = indices[gl_VertexIndex % 6];
     vec3 position = corners[(gl_VertexIndex / 6) * 4 + corner];
     outDrawInstance = uint(gl_InstanceIndex);
-    if (draw.passData[0].w < 0.5) {
+    if (draw.passData[0].w < 0.5 || usesOccludedSilhouette()) {
         // Procedural gameplay blocks use the same expanded silhouette as
         // models. Debug bounds retain their original per-face edge overlay.
         outlinePosition(position, normalize(position - vec3(0.5)));

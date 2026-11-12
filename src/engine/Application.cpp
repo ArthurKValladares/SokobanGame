@@ -8,6 +8,7 @@
 #include "engine/DebugUi.hpp"
 #include "engine/DevSession.hpp"
 #include "engine/LevelProjectStore.hpp"
+#include "engine/SolutionStore.hpp"
 #include <imgui.h>
 #endif
 
@@ -21,6 +22,7 @@
 #include "engine/render/WaterGeometry.hpp"
 
 #include "engine/Log.hpp"
+#include "engine/PathText.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/Rules.hpp"
 #include "engine/RuntimeContent.hpp"
@@ -398,7 +400,14 @@ Application::Application(ApplicationOptions options)
             loadDevSession(devSessionPath_)) {
         tools_->resumeOnLaunch = session->resumeOnLaunch;
     }
-    DebugUi::addMenu("Session", [this] { tools_->drawSessionMenu(); });
+    DebugUi::addMenu("Session", [this] {
+        const LevelEditor& editor = tools_->levelEditor;
+        if ((editor.editingDocument() || editor.playingDraft()) &&
+            ImGui::MenuItem("Resume Campaign")) {
+            resumeCampaign();
+        }
+        tools_->drawSessionMenu();
+    });
     DebugUi::addMenu("Camera", [this] {
         tools_->drawDetachedCameraMenu(
             window_.nativeHandle(),
@@ -449,12 +458,9 @@ Application::Application(ApplicationOptions options)
             settingsCoordinator_.userSettings().input,
             {
             .playDraft = [this](Level level) {
-                startEditorDraft(std::move(level));
+                startEditorDraft(std::move(level), true);
             },
-            .returnToCurrentScreen = [this] {
-                tools_->splatPainter.close();
-                loadCurrentScreen();
-            },
+            .resumeCampaign = [this] { resumeCampaign(); },
             .openGroundPainting = [this] {
                 return tools_->openGroundPainting(
                     SOKOBAN_SOURCE_ASSET_DIR,
@@ -558,13 +564,7 @@ Application::~Application()
     // saves quietly became rare exactly when there was most to lose. The one
     // Restored slide momentum recovers the completed action that caused it, so
     // the continuation still folds into the same undo entry.
-    const bool editorDraftPlaying =
-#if SOKOBAN_ENABLE_DEBUG_UI
-        tools_->levelEditor.playingDraft();
-#else
-        false;
-#endif
-    if (campaign_.gameLoaded() && !editorDraftPlaying) {
+    if (campaign_.gameLoaded()) {
         checkpointCurrentScreen(false);
     } else if (!playerProfile_.progressEmpty()) {
         persistProfile(true);
@@ -581,7 +581,8 @@ Application::~Application()
             << persistence.settings.message;
     }
 #if SOKOBAN_ENABLE_DEBUG_UI
-    if (smokeFrames_ == 0 && evidenceOutputDirectory_.empty()) {
+    if (developerFilesWritable()) {
+        tools_->flushSolutionStore();
         saveDevSession();
     }
     tools_->shutdownDetachedCamera(window_.nativeHandle());
@@ -1238,6 +1239,9 @@ bool Application::run()
                     std::chrono::steady_clock::now() - pacingStart).count());
         }
     }
+#if SOKOBAN_ENABLE_DEBUG_UI
+    observeEditorLevelSaves();
+#endif
     return !renderer_.hasFatalFailure();
 }
 
@@ -1255,11 +1259,13 @@ void Application::update(
         gameplaySession_.moving() &&
         gameplaySession_.activeAction().reversed;
     presentation_.advanceClocks(dt, reversed);
-    const bool editorDraftPlaying =
 #if SOKOBAN_ENABLE_DEBUG_UI
-        tools_->levelEditor.playingDraft();
+    const bool editorDraftPlaying = tools_->levelEditor.playingDraft();
+    if (!editorDraftPlaying && solveCapture_ && solveCapture_->playingDraft) {
+        solveCapture_.reset();
+    }
 #else
-        false;
+    constexpr bool editorDraftPlaying = false;
 #endif
     const bool detachedCameraActive =
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -1346,30 +1352,45 @@ void Application::update(
     }
 
     const auto readingBeforeUpdate = gameplaySession_.readingLectern();
-    if (readingBeforeUpdate && (input.gameplay.interactPressed || input.gameplay.dismissPressed)) {
-        gameplaySession_.dismissLectern();
+    if (!readingBeforeUpdate && input.gameplay.interactPressed &&
+        tryEnterSelector()) {
         audioSystem_->update(dt, false, false);
         return;
     }
+    const bool dismissingLectern = readingBeforeUpdate &&
+        (input.gameplay.interactPressed || input.gameplay.dismissPressed);
+    const GameplayLoop::InputFrame gameplayInput = detachedCameraActive && !dismissingLectern
+        ? GameplayLoop::InputFrame {} : input.gameplay;
     if (!readingBeforeUpdate) {
-        campaign_.addElapsedTime(dt);
+        if (!editorDraftPlaying) {
+            campaign_.addElapsedTime(dt);
+        }
         particleSystem_.update(dt);
     }
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (solveCapture_) {
+        solveCapture_->frames.push_back({ .input = gameplayInput, .elapsedSeconds = dt });
+    }
+#endif
     const GameplayLoop::UpdateResult gameplayResult = GameplayLoop::update(
         level_,
         gameplaySession_,
         presentation_,
-        detachedCameraActive
-            ? GameplayLoop::InputFrame {}
-            : input.gameplay,
+        gameplayInput,
         dt,
         editorDraftPlaying);
+    if (dismissingLectern) {
+        audioSystem_->update(dt, false, false);
+        return;
+    }
     if (const auto reading = gameplaySession_.readingLectern(); reading && reading != readingBeforeUpdate) {
         lecternDialog_.reset();
     }
     if (readingBeforeUpdate && (!gameplaySession_.readingLectern() ||
         gameplaySession_.moving() || gameplayResult.stateCommitted)) {
-        campaign_.addElapsedTime(dt);
+        if (!editorDraftPlaying) {
+            campaign_.addElapsedTime(dt);
+        }
         particleSystem_.update(dt);
     }
     if (gameplayResult.stateCommitted && campaign_.inOverworld() &&
@@ -1451,49 +1472,24 @@ void Application::update(
     for (const auto sound : gameplayResult.sounds) {
         audioSystem_->playOneShot(soundSetName(sound));
     }
+#if SOKOBAN_ENABLE_DEBUG_UI
     if (gameplayResult.draftSolved) {
-#if SOKOBAN_ENABLE_DEBUG_UI
         tools_->levelEditor.markDraftSolved();
-        const std::filesystem::path& draftPath =
-            tools_->levelEditor.loadedDocumentPath();
-        if (developerFilesWritable()) {
-            tools_->saveSolve({
-                .name = draftPath.empty() ? std::string("the editor draft")
-                                          : draftPath.filename().string() +
-                        " (draft)",
-                .definition = tools_->levelEditor.documentDefinition(),
-                .inputs = gameplaySession_.inputLog(),
-            });
-        }
-#endif
     }
-    if (gameplayResult.screenSolved) {
-#if SOKOBAN_ENABLE_DEBUG_UI
-        if (!campaign_.inOverworld() && developerFilesWritable()) {
-            const LevelLocation location {
-                .level = campaign_.currentLevel(),
-                .screen = campaign_.currentScreen(),
-            };
-            try {
-                tools_->saveSolve({
-                    .name = "level" + std::to_string(location.level) +
-                        "/screen" + std::to_string(location.screen),
-                    .definition = Level::loadDefinitionFromFile(
-                        screenPath(location.level, location.screen)),
-                    .inputs = gameplaySession_.inputLog(),
-                });
-            } catch (const std::exception& error) {
-                log::warning(log::Category::Editor)
-                    << "Could not record the solve: " << error.what();
-            }
-        }
+    if (solveCapture_ && (solveCapture_->playingDraft ? gameplayResult.draftSolved
+                                                    : gameplayResult.screenSolved)) {
+        auto solve = std::move(solveCapture_);
+        tools_->saveSolve(std::move(*solve));
+    } else if (gameplayResult.screenSolved && !campaign_.inOverworld() && developerFilesWritable()) {
+        log::info(log::Category::Editor)
+            << "Campaign solve of level" << campaign_.currentLevel()
+            << "/screen" << campaign_.currentScreen() << " resumed from a checkpoint. "
+               "Play Draft starts the screen at its authored state and captures the full solve.";
+    }
 #endif
+    if (gameplayResult.screenSolved) {
         advanceScreen();
-    } else if (!detachedCameraActive && input.gameplay.interactPressed &&
-        campaign_.inOverworld() && !gameplaySession_.moving() &&
-        !rules::hasPendingMotion(level_, gameplaySession_.state())) {
-        tryEnterSelector();
-    } else if (gameplayResult.stateCommitted &&
+    } else if (!editorDraftPlaying && gameplayResult.stateCommitted &&
         campaign_.deferCheckpoint()) {
         checkpointCurrentScreen(true);
     }
@@ -1543,9 +1539,11 @@ void Application::loadCurrentScreen()
         ? (overworldMap_ ? overworldRoot() : overworldPath())
         : screenPath(campaign_.currentLevel(), campaign_.currentScreen());
 
-    Level loadedLevel = campaign_.inOverworld()
-        ? catalogOverworldLevel()
-        : Level::loadFromFile(path);
+    auto puzzleDefinition = location
+        ? std::optional { Level::loadDefinitionFromFile(path) } : std::nullopt;
+    Level loadedLevel = puzzleDefinition
+        ? Level::loadFromDefinition(*puzzleDefinition, pathText(path))
+        : catalogOverworldLevel();
 
     const bool restored = applyLevel(
         std::move(loadedLevel),
@@ -1565,13 +1563,33 @@ void Application::loadCurrentScreen()
         }
     }
     campaign_.finishWorldLoad(playerProfile_);
-    checkpointCurrentScreen(true);
-    upcomingAssetPrefetchPending_ = true;
 #if SOKOBAN_ENABLE_DEBUG_UI
+    draftWorldLoaded_ = false;
+    if (location && developerFilesWritable()) {
+        const auto& state = gameplaySession_.state();
+        const EntityId firstController = state.players.empty()
+            ? invalidEntityId : rules::playerControllerId(state, 0);
+        // A validated empty history starts on the authored board. The
+        // controller and ambient-motion flag are independent of that history.
+        const bool atAuthoredStart = !restored ||
+            (restore.snapshot->undoStack.empty() && !gameplaySession_.automaticMotionPaused() &&
+                gameplaySession_.activeHeroController() == firstController);
+        if (atAuthoredStart) {
+            solveCapture_ = std::make_unique<solution::SolveToStore>(solution::SolveToStore {
+                .name = "level" + std::to_string(location->level) +
+                    "/screen" + std::to_string(location->screen),
+                .definition = std::move(*puzzleDefinition),
+                .playingDraft = false,
+            });
+        }
+    }
     tools_->levelEditor.setPlayingDraft(false);
     tools_->levelEditor.setEditingDocument(false);
     tools_->hoverCell.reset();
+    tools_->pickedCell.reset();
 #endif
+    checkpointCurrentScreen(true);
+    upcomingAssetPrefetchPending_ = true;
 
     log::debug(log::Category::Gameplay)
         << "player entered "
@@ -1584,6 +1602,9 @@ bool Application::applyLevel(
     std::optional<LevelLocation> location,
     bool composedOverworld)
 {
+#if SOKOBAN_ENABLE_DEBUG_UI
+    solveCapture_.reset();
+#endif
     // A level change makes speculative work for the prior world irrelevant.
     // Running tasks may finish, but queued disk work is discarded before it
     // competes with the assets the player is about to see.
@@ -1692,18 +1713,31 @@ void Application::updateLevelTransition(float dt)
     action();
 }
 
-void Application::tryEnterSelector()
+const Level::ScreenSelector* Application::currentOverworldSelector() const
 {
-    const GameState& state = gameplaySession_.state();
+    if (!campaign_.gameLoaded() || !campaign_.inOverworld() ||
+        levelTransition_.active() || shellMenuOpen()
+#if SOKOBAN_ENABLE_DEBUG_UI
+        || tools_->levelEditor.editingDocument() ||
+        tools_->levelEditor.playingDraft() || tools_->detachedCameraActive()
+#endif
+    ) {
+        return nullptr;
+    }
+    return CampaignSession::selectorForInteraction(level_, gameplaySession_);
+}
+
+bool Application::tryEnterSelector()
+{
     const Level::ScreenSelector* sharedSelector =
-        CampaignSession::selectorForInteraction(level_, state);
+        currentOverworldSelector();
     if (!sharedSelector || !sharedSelector->target) {
         if (sharedSelector) {
             log::warning(log::Category::Gameplay)
                 << "Selector " << sharedSelector->id
                 << " has no assigned screen";
         }
-        return;
+        return false;
     }
     if (!campaign_.screenExists(
             sharedSelector->target->level,
@@ -1712,7 +1746,7 @@ void Application::tryEnterSelector()
             << "Selector " << sharedSelector->id
             << " targets missing screen " << sharedSelector->target->level
             << ':' << sharedSelector->target->screen;
-        return;
+        return false;
     }
     if (campaign_.selectorViewState(
             playerProfile_, *sharedSelector->target).status ==
@@ -1720,7 +1754,7 @@ void Application::tryEnterSelector()
         log::debug(log::Category::Gameplay)
             << "Selector " << sharedSelector->id
             << " is not playable until the previous screen is solved";
-        return;
+        return false;
     }
 
     // Queue the current return point before changing the profile context.
@@ -1731,19 +1765,17 @@ void Application::tryEnterSelector()
         (void)campaign_.startPuzzle(playerProfile_, target);
         loadCurrentScreen();
     });
+    return true;
 }
 
 bool Application::updateScreenPreview(bool requested, float dt)
 {
-    if (!requested || !campaign_.gameLoaded() || !campaign_.inOverworld() ||
-        gameplaySession_.moving() ||
-        rules::hasPendingMotion(level_, gameplaySession_.state())) {
+    if (!requested) {
         return false;
     }
 
     const Level::ScreenSelector* selector =
-        CampaignSession::selectorForInteraction(
-            level_, gameplaySession_.state());
+        currentOverworldSelector();
     if (!selector || !selector->target ||
         !campaign_.screenExists(
             selector->target->level, selector->target->screen) ||
@@ -1839,21 +1871,12 @@ Application::buildScreenPreviewRenderFrame(FrameArena& arena) const
 void Application::drawSelectorPrompt(
     const VulkanRenderer::PreparedFrame* frame)
 {
-    if (!frame || levelTransition_.active() ||
-        !campaign_.gameLoaded() || !campaign_.inOverworld() ||
-        shellMenuOpen()
-#if SOKOBAN_ENABLE_DEBUG_UI
-        || tools_->levelEditor.editingDocument()
-#endif
-        ||
-        gameplaySession_.moving() ||
-        rules::hasPendingMotion(level_, gameplaySession_.state())) {
+    if (!frame) {
         return;
     }
 
-    const GameState& state = gameplaySession_.state();
     const Level::ScreenSelector* selector =
-        CampaignSession::selectorForInteraction(level_, state);
+        currentOverworldSelector();
     if (!selector || !selector->target ||
         !campaign_.screenExists(
             selector->target->level, selector->target->screen) ||
@@ -2005,13 +2028,7 @@ bool Application::switchSaveSlot(int slot)
 
     // Settle the outgoing slot on disk first. Not gated on the world being
     // idle - see the destructor for why that gate was wrong under concurrency.
-    const bool editorDraftPlaying =
-#if SOKOBAN_ENABLE_DEBUG_UI
-        tools_->levelEditor.playingDraft();
-#else
-        false;
-#endif
-    if (campaign_.gameLoaded() && !editorDraftPlaying) {
+    if (campaign_.gameLoaded()) {
         checkpointCurrentScreen(true);
     } else {
         persistProfile(true);
@@ -2091,6 +2108,9 @@ ShellFacts Application::shellFacts() const
         .optionsOpen = optionsMenu_.isOpen(),
         .titleOpen = titleScreen_.isOpen(),
         .titleAtMainPage = titleScreen_.page() == TitleScreen::Page::Main,
+#if SOKOBAN_ENABLE_DEBUG_UI
+        .editorActive = tools_->levelEditor.editingDocument() || draftWorldLoaded_,
+#endif
     };
 }
 
@@ -2107,6 +2127,11 @@ void Application::executeShellCommand(const ShellCommand& command)
         [&](const shell::LoadCurrentScreen&) {
             restoreProfileLocation();
             loadCurrentScreen();
+        },
+        [&](const shell::ResumeCampaign&) {
+#if SOKOBAN_ENABLE_DEBUG_UI
+            resumeCampaign();
+#endif
         },
         [&](const shell::CloseTitle&) { titleScreen_.close(); },
         [&](const shell::OpenTitle&) { openTitleScreen(); },
@@ -2157,6 +2182,12 @@ void Application::startNewGame()
 
 void Application::checkpointCurrentScreen(bool immediateSave)
 {
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (draftWorldLoaded_) {
+        persistProfile(immediateSave);
+        return;
+    }
+#endif
     campaign_.writeCheckpoint(playerProfile_, gameplaySession_.snapshot());
     persistProfile(immediateSave);
 }
@@ -2388,8 +2419,32 @@ FrameArena& Application::beginRenderFrameArena()
 }
 
 #if SOKOBAN_ENABLE_DEBUG_UI
-void Application::startEditorDraft(Level level)
+void Application::resumeCampaign()
 {
+    tools_->splatPainter.close();
+    tools_->draftExitConfirmationOpen = false;
+    if (draftWorldLoaded_ || levelCatalogStale_) {
+        if (!draftWorldLoaded_) {
+            checkpointCurrentScreen(false);
+        }
+        loadCurrentScreen();
+    } else {
+        tools_->levelEditor.setEditingDocument(false);
+        tools_->hoverCell.reset();
+        tools_->pickedCell.reset();
+        upcomingAssetPrefetchPending_ = true;
+    }
+    DebugUi::requestGameViewportFocus();
+}
+
+void Application::startEditorDraft(Level level, bool fromAuthoredStart)
+{
+    // F5 can return to the editor while the draft still owns the gameplay
+    // session. Save the campaign before the first draft replaces that session.
+    if (!draftWorldLoaded_) {
+        checkpointCurrentScreen(true);
+        draftWorldLoaded_ = true;
+    }
     // A puzzle draft keeps the campaign wherever it currently is,
     // so derive its render assets from the edited document rather
     // than from the unrelated campaign location. Composed
@@ -2414,6 +2469,25 @@ void Application::startEditorDraft(Level level)
                 return map &&
                     overworldActionStateAllowed(*map, state);
             });
+    } else if (fromAuthoredStart && !tools_->levelEditor.editingOverworld() &&
+        developerFilesWritable()) {
+        const LevelEditor& editor = tools_->levelEditor;
+        const auto& path = editor.loadedDocumentPath();
+        std::string name = "the editor draft";
+        if (!path.empty()) {
+            const auto absolute = std::filesystem::absolute(path).lexically_normal();
+            const auto sourceRoot = std::filesystem::absolute(editor.sourceLevelRoot()).lexically_normal();
+            const auto relative = absolute.lexically_relative(sourceRoot);
+            const auto display = (!relative.empty() && *relative.begin() != ".."
+                    ? relative : absolute).generic_u8string();
+            name.assign(display.begin(), display.end());
+            name += " (draft)";
+        }
+        solveCapture_ = std::make_unique<solution::SolveToStore>(solution::SolveToStore {
+            .name = std::move(name),
+            .definition = editor.documentDefinition(),
+            .playingDraft = true,
+        });
     }
 }
 
@@ -2422,7 +2496,7 @@ void Application::playEditorDraft(std::optional<GridPosition3> heroStart)
     if (std::optional<Level> level =
             tools_->levelEditor.beginDraftPlayback(
                 &tools_->overworldMapEditor, heroStart)) {
-        startEditorDraft(std::move(*level));
+        startEditorDraft(std::move(*level), !heroStart);
     }
 }
 
@@ -2465,8 +2539,18 @@ void Application::configureSourceWatcher()
         << " source files for edits made outside the game.";
 }
 
+void Application::observeEditorLevelSaves()
+{
+    const auto revision = tools_->levelEditor.sourceLevelSaveRevision();
+    if (developerFilesWritable() && revision != editorSourceLevelSaveRevision_) {
+        editorSourceLevelSaveRevision_ = revision;
+        tools_->requestSolutionReconcile();
+    }
+}
+
 void Application::observeEditorLevelPublications()
 {
+    observeEditorLevelSaves();
     const auto levelRevision = tools_->levelEditor.runtimePublicationRevision();
     const auto overworldRevision = tools_->overworldMapEditor.runtimePublicationRevision();
     if (levelRevision == editorLevelPublicationRevision_ &&

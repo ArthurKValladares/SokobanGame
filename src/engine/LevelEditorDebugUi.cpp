@@ -174,6 +174,11 @@ void LevelEditorDebugUi::draw(
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     SOKOBAN_PROFILE_SCOPE("Editor.Draw panel");
+    if (callbacks.resumeCampaign &&
+        (editor.editingDocument() || editor.playingDraft()) &&
+        ImGui::Button("Resume Campaign")) {
+        callbacks.resumeCampaign();
+    }
     ImGui::Text("Document");
     ImGui::SameLine();
     ImGui::TextUnformatted(editor.dirty() ? "modified" : "clean");
@@ -212,14 +217,6 @@ void LevelEditorDebugUi::draw(
             actionBindingsDisplay(
                 bindings, InputAction::EditorPlayFromCursor).c_str());
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Return To Current Screen")) {
-        editor.setEditingDocument(false);
-        if (callbacks.returnToCurrentScreen) {
-            callbacks.returnToCurrentScreen();
-        }
-    }
-
     ImGui::BeginDisabled(!editor.canUndo());
     if (ImGui::Button("Undo")) {
         (void)editor.tryUndoEdit();

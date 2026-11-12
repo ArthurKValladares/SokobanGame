@@ -452,6 +452,12 @@ public:
     [[nodiscard]] const std::filesystem::path& browserRoot() const;
     [[nodiscard]] const std::filesystem::path& sourceLevelRoot() const;
     [[nodiscard]] const std::filesystem::path& runtimeLevelRoot() const;
+    // Advances once a standalone source level is saved, even if its runtime
+    // mirror cannot be updated.
+    [[nodiscard]] uint64_t sourceLevelSaveRevision() const
+    {
+        return sourceLevelSaveRevision_;
+    }
     [[nodiscard]] uint64_t runtimePublicationRevision() const
     {
         return runtimePublicationRevision_;
@@ -592,6 +598,7 @@ private:
     HistoryLimits historyLimits_;
     uint64_t historySequence_ = 0;
     uint64_t documentSequence_ = 0;
+    uint64_t sourceLevelSaveRevision_ = 0;
     uint64_t runtimePublicationRevision_ = 0;
     std::map<std::filesystem::path, SavedDocument> savedDocuments_;
     // Open stroke: the snapshot from before its first change, plus how many

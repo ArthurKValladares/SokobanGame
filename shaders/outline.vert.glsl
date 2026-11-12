@@ -3,6 +3,7 @@
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 11) in float inGroundDebris;
+layout(location = 12) in vec3 inOutlineNormal;
 layout(location = 1) out float outFaceCoordU;
 layout(location = 2) out float outFaceCoordV;
 layout(location = 7) flat out uint outDrawInstance;
@@ -14,5 +15,6 @@ layout(location = 7) flat out uint outDrawInstance;
 void main()
 {
     outDrawInstance = uint(gl_InstanceIndex);
-    outlinePosition(inPosition + groundDebrisOffset(inGroundDebris, draw.passData[1]), inNormal);
+    outlinePosition(inPosition + groundDebrisOffset(inGroundDebris, draw.passData[1]),
+        usesSurfaceContour() || usesOccludedSilhouette() ? inNormal : inOutlineNormal);
 }

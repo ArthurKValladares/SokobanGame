@@ -26,7 +26,7 @@ class LevelEditorDebugUi {
 public:
     struct Callbacks {
         std::function<void(Level)> playDraft;
-        std::function<void()> returnToCurrentScreen;
+        std::function<void()> resumeCampaign;
         // Opens the splat map for the document being edited. Returns false
         // when it has none; the painter's status says why.
         std::function<bool()> openGroundPainting;

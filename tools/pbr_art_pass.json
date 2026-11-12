@@ -70,6 +70,18 @@
       "skip": "artist-authored painted round rock"
     },
     {
+      "name": "Crystal",
+      "ownership": "retained",
+      "source": "custom/models/crystal.glb",
+      "skip": "Blender-authored crystal silhouette with a custom atlas from tools/make_crystals.py."
+    },
+    {
+      "name": "SkippingCrystal",
+      "ownership": "retained",
+      "source": "custom/models/skipping_crystal.glb",
+      "skip": "Blender-authored skipping crystal silhouette with a custom atlas from tools/make_crystals.py."
+    },
+    {
       "name": "Glass",
       "ownership": "generated",
       "source": "KayKit Block Bits 1.0/Assets/gltf/glass.gltf",
@@ -127,6 +139,12 @@
       "surface_rule": "metal"
     },
     {
+      "name": "Robot",
+      "ownership": "retained",
+      "source": "custom/models/robot.glb",
+      "skip": "Custom robot geometry, rig, and drive animation authored by tools/make_robot_model.py."
+    },
+    {
       "name": "Lorekeeper",
       "ownership": "retained",
       "source": "KayKit Lorekeeper/characters/Lorekeeper.glb",
@@ -155,6 +173,12 @@
       "name": "Ranger",
       "ownership": "retained",
       "source": "KayKit Adventurers 2.0/Characters/gltf/Ranger.glb",
+      "skip": "Vendor-authored skinned character with embedded materials."
+    },
+    {
+      "name": "Cleric",
+      "ownership": "retained",
+      "source": "KeyKit Cleric/characters/Cleric.glb",
       "skip": "Vendor-authored skinned character with embedded materials."
     },
     {
@@ -2317,6 +2341,54 @@
       "ownership": "retained",
       "source": "custom/models/tile_decorations/tile_moss_end_04.glb",
       "skip": "Native Blender geometry and embedded palette; owned by tile_decorations.blend and update_tile_decorations.py."
+    },
+    {
+      "name": "TileDecorationFenceSlats01",
+      "ownership": "retained",
+      "source": "custom/models/fences/fence_slats_01.glb",
+      "skip": "Native modular fence geometry and materials authored by tools/make_fence_models.py."
+    },
+    {
+      "name": "TileDecorationFenceSlats02",
+      "ownership": "retained",
+      "source": "custom/models/fences/fence_slats_02.glb",
+      "skip": "Native modular fence geometry and materials authored by tools/make_fence_models.py."
+    },
+    {
+      "name": "TileDecorationFenceSlats03",
+      "ownership": "retained",
+      "source": "custom/models/fences/fence_slats_03.glb",
+      "skip": "Native modular fence geometry and materials authored by tools/make_fence_models.py."
+    },
+    {
+      "name": "TileDecorationFenceSlats04",
+      "ownership": "retained",
+      "source": "custom/models/fences/fence_slats_04.glb",
+      "skip": "Native modular fence geometry and materials authored by tools/make_fence_models.py."
+    },
+    {
+      "name": "TileDecorationFencePost01",
+      "ownership": "retained",
+      "source": "custom/models/fences/fence_post_01.glb",
+      "skip": "Native modular fence geometry and materials authored by tools/make_fence_models.py."
+    },
+    {
+      "name": "TileDecorationFencePost02",
+      "ownership": "retained",
+      "source": "custom/models/fences/fence_post_02.glb",
+      "skip": "Native modular fence geometry and materials authored by tools/make_fence_models.py."
+    },
+    {
+      "name": "TileDecorationFencePost03",
+      "ownership": "retained",
+      "source": "custom/models/fences/fence_post_03.glb",
+      "skip": "Native modular fence geometry and materials authored by tools/make_fence_models.py."
+    },
+    {
+      "name": "TileDecorationFencePost04",
+      "ownership": "retained",
+      "source": "custom/models/fences/fence_post_04.glb",
+      "skip": "Native modular fence geometry and materials authored by tools/make_fence_models.py."
     }
   ],
   "attachments": [

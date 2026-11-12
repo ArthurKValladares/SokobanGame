@@ -159,6 +159,8 @@ public:
     void requestSolutionReconcile();
     // Every frame: reports a finished job and starts the next one.
     void serviceSolutionStore();
+    // Finishes active and queued recordings before the developer app exits.
+    void flushSolutionStore() noexcept;
     // Level Editor panel section: what the store did recently.
     void drawSolutionPanel();
     void drawManifestReloadStatus();
@@ -290,19 +292,13 @@ public:
     std::string manifestReloadStatus;
 
 private:
+    void serviceSolutionStore(bool draining);
     void reportSolutionStatus(std::string line, bool warning);
 
     // A queued solve, or nullopt for a reconcile-only pass.
     std::deque<std::optional<solution::SolveToStore>> solutionJobs_;
     std::future<std::vector<solution::StoreChange>> solutionJob_;
     std::string solutionJobName_;
-    std::size_t solutionJobInputs_ = 0;
-    struct LastSolve {
-        std::uint64_t digest = 0;
-        std::vector<solution::Input> inputs;
-        bool operator==(const LastSolve&) const = default;
-    };
-    std::optional<LastSolve> lastSolve_;
     std::vector<std::string> solutionStatus_;
     std::unique_ptr<ShaderHotReload> shaderHotReload_;
     std::string shaderReloadStatus_;

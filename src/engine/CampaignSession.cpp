@@ -170,6 +170,15 @@ const Level::ScreenSelector* CampaignSession::selectorForInteraction(
     return sharedSelector;
 }
 
+const Level::ScreenSelector* CampaignSession::selectorForInteraction(
+    const Level& level,
+    const GameplaySession& gameplay)
+{
+    const Level::ScreenSelector* selector =
+        selectorForInteraction(level, gameplay.state());
+    return selector && gameplay.readyForScreenSelection(level) ? selector : nullptr;
+}
+
 std::optional<OverworldScreenId> CampaignSession::sharedPlayerScreen(
     const OverworldMap& map,
     const GameState& state)

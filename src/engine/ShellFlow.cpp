@@ -29,6 +29,8 @@ void reduceTitle(
         [&](const title::Continue&) {
             if (!facts.gameLoaded) {
                 commands.push_back(shell::LoadCurrentScreen {});
+            } else if (facts.editorActive) {
+                commands.push_back(shell::ResumeCampaign {});
             }
             commands.push_back(shell::CloseTitle {});
         },

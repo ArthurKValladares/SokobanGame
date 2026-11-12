@@ -10,7 +10,9 @@ void main()
 {
     float coverage = 1.0;
     float mode = draw.passData[0].w;
-    if (mode > 1.5 && mode < 2.5) {
+    if (mode > 3.5) {
+        coverage = mix(1.0, 0.45, smoothstep(0.0, 0.65, abs(inFaceCoordU)));
+    } else if (mode > 1.5 && mode < 2.5) {
         float width = max(fwidth(inFaceCoordU) * draw.passData[0].z, 0.00001);
         coverage = 1.0 - smoothstep(0.0, width, abs(inFaceCoordU));
         if (coverage <= 0.0) { discard; }

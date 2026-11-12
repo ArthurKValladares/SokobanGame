@@ -786,6 +786,9 @@ else()
 endif()
 
 target_link_libraries(sokoban_content_tool PRIVATE sokoban_core)
+if(WIN32 AND MSVC)
+    target_sources(sokoban_content_tool PRIVATE resources/WindowsLongPaths.manifest)
+endif()
 
 set(SOKOBAN_APPLICATION_SOURCES
     src/main.cpp
@@ -1736,6 +1739,15 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/ContentPipelineTests.cpp
     )
+    if(WIN32 AND MSVC)
+        # The staged package includes nested asset names below the system temp
+        # directory, which can put the full filename past the legacy path limit.
+        if(SOKOBAN_TEST_RUNNERS)
+            target_sources(sokoban_tests PRIVATE resources/WindowsLongPaths.manifest)
+        else()
+            target_sources(sokoban_content_pipeline_tests PRIVATE resources/WindowsLongPaths.manifest)
+        endif()
+    endif()
     sokoban_add_test(NAME dev_session
         LIBS sokoban_core
         SOURCES tests/DevSessionTests.cpp

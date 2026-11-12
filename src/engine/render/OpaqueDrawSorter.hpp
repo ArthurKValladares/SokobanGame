@@ -12,6 +12,8 @@ namespace sokoban {
 // transforms and normal rotations deliberately live outside this key in the
 // model-instance buffer.
 struct OpaqueDrawSortKey {
+    // Outlined opaque surfaces draw after their hulls.
+    bool outlined = false;
     uint32_t pipeline = 0;
     uint32_t material = 0;
     uint32_t mesh = 0;

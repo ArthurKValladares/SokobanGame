@@ -104,6 +104,7 @@ public:
 
     [[nodiscard]] const GameState& state() const { return scheduler_.state(); }
     [[nodiscard]] bool moving() const { return !scheduler_.idle(); }
+    [[nodiscard]] bool readyForScreenSelection(const Level& level) const;
     // The world as it will stand once everything in flight has committed.
     //
     // What rendering needs when it wants to know where an action is going: no

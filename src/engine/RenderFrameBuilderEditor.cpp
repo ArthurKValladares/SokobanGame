@@ -124,6 +124,7 @@ private:
         if (!input_.showDebugView) {
             return;
         }
+        frame.showOccludedEntities = true;
         if (arena_) {
             frame.debugItemOutlines = FrameArray<RenderFrameData::Tile>(
                 *arena_, RenderFrameData::tileCapacity);

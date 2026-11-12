@@ -39,6 +39,8 @@ struct MeshVertex {
     // Optional _GROUND_DEBRIS scalar: zero for the fixed island, otherwise
     // one constant normalized seed across every vertex of a detached rock.
     float groundDebris = 0.0f;
+    // Shared across vertices split for lighting or UVs so the hull stays closed.
+    Vec3 outlineNormal {};
 };
 
 enum PrimitiveMaterialFlag : uint8_t {
@@ -122,6 +124,7 @@ struct SkinnedVertex {
     uint32_t materialIndex = 0;
     std::array<uint16_t, 4> joints {};
     std::array<float, 4> weights {};
+    Vec3 outlineNormal {};
 };
 
 struct SkeletonNode {
@@ -164,6 +167,7 @@ struct GpuSkinnedVertex {
     std::array<uint16_t, 4> joints {};
     std::array<float, 4> weights {};
     uint32_t attachmentNodeIndex = UINT32_MAX;
+    Vec3 outlineNormal {};
 };
 
 struct SkinnedPoseMatrices {

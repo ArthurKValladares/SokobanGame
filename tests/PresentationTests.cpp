@@ -106,32 +106,32 @@ const AssetManifest& testManifest()
         },
         {
           "name": "ScreenSelectorAPlayable",
-          "path": "flag-a-blue.gltf",
+          "path": "ScreenSelectorAPlayable.glb",
           "preserveSourceScale": true
         },
         {
           "name": "ScreenSelectorASolved",
-          "path": "flag-a-green.gltf",
+          "path": "ScreenSelectorASolved.glb",
           "preserveSourceScale": true
         },
         {
           "name": "ScreenSelectorAUnavailable",
-          "path": "flag-a-red.gltf",
+          "path": "ScreenSelectorAUnavailable.glb",
           "preserveSourceScale": true
         },
         {
           "name": "ScreenSelectorBPlayable",
-          "path": "flag-b-blue.gltf",
+          "path": "ScreenSelectorBPlayable.glb",
           "preserveSourceScale": true
         },
         {
           "name": "ScreenSelectorBSolved",
-          "path": "flag-b-green.gltf",
+          "path": "ScreenSelectorBSolved.glb",
           "preserveSourceScale": true
         },
         {
           "name": "ScreenSelectorBUnavailable",
-          "path": "flag-b-red.gltf",
+          "path": "ScreenSelectorBUnavailable.glb",
           "preserveSourceScale": true
         },
         {
@@ -1351,20 +1351,21 @@ void testBardFrameBuildsAnimatedMusicalAura()
     }
 }
 
-void testSelectorFlagReflectsTargetCompletion()
+void testSelectorReflectsTargetCompletion()
 {
-    TEST("selectorFlagReflectsTargetCompletion");
+    TEST("selectorReflectsTargetCompletion");
+    constexpr GridPosition3 selectorCell { 1, 0, 1 };
     const Level level = Level::loadFromLayers(
         {
             { ".." },
             { "C " },
         },
-        "selector flag",
+        "screen selector",
         std::nullopt,
         {},
         { Level::ScreenSelector {
             .id = 1,
-            .cell = { 1, 0, 1 },
+            .cell = selectorCell,
             .target = LevelLocation { 0, 0 },
         } });
     GameState state;
@@ -1387,51 +1388,50 @@ void testSelectorFlagReflectsTargetCompletion()
         });
     };
 
-    auto checkState = [&](ScreenSelectorViewState state, std::string_view name) {
-        const RenderFrameData frame = build(state);
-        CHECK(std::ranges::count_if(
-            frame.tiles,
-            [&](const RenderFrameData::Tile& tile) {
-                return tile.model == testManifest().modelIdByName(name);
-            }) == 1);
-        return frame;
+    const auto checkState = [&](ScreenSelectorViewState view, std::string_view name) {
+        const RenderFrameData frame = build(view);
+        const RenderModel model = testManifest().modelIdByName(name);
+        const auto matchesModel = [model](const auto& tile) { return tile.model == model; };
+        CHECK(std::ranges::count_if(frame.tiles, matchesModel) == 1);
+        const auto tile = std::ranges::find_if(frame.tiles, matchesModel);
+        if (tile == frame.tiles.end()) return;
+        CHECK(tile->modelTransform.has_value());
+        if (!tile->modelTransform) return;
+
+        // The star meshes are centered at (0.5, 0.5) in local tile units.
+        // The transform anchors them at the tile origin at authored scale.
+        const auto& transform = *tile->modelTransform;
+        CHECK(near(transform.translation.x, static_cast<float>(selectorCell.x)));
+        CHECK(near(transform.translation.y, static_cast<float>(selectorCell.y)));
+        CHECK(near(transform.translation.z, static_cast<float>(selectorCell.z)));
+        CHECK(near(transform.scale.x, 1.0f));
+        CHECK(near(transform.scale.y, 1.0f));
+        CHECK(near(transform.scale.z, 1.0f));
+        const float diameter = view.lastScreenInLevel ? .94f : .70f;
+        CHECK(near(tile->size.x, diameter));
+        CHECK(near(tile->size.y, diameter));
+        CHECK(near(tile->position.x + tile->size.x * .5f, transform.translation.x + .5f));
+        CHECK(near(tile->position.y + tile->size.y * .5f, transform.translation.y + .5f));
     };
 
-    const RenderFrameData playable = checkState(
+    checkState(
         { .status = ScreenSelectorStatus::Playable },
         "ScreenSelectorAPlayable");
-    (void)checkState(
+    checkState(
         { .status = ScreenSelectorStatus::Solved },
         "ScreenSelectorASolved");
-    (void)checkState(
+    checkState(
         { .status = ScreenSelectorStatus::Unavailable },
         "ScreenSelectorAUnavailable");
-    (void)checkState(
+    checkState(
         { .status = ScreenSelectorStatus::Playable, .lastScreenInLevel = true },
         "ScreenSelectorBPlayable");
-    (void)checkState(
+    checkState(
         { .status = ScreenSelectorStatus::Solved, .lastScreenInLevel = true },
         "ScreenSelectorBSolved");
-    (void)checkState(
+    checkState(
         { .status = ScreenSelectorStatus::Unavailable, .lastScreenInLevel = true },
         "ScreenSelectorBUnavailable");
-    const auto centeredFlag = std::ranges::find_if(
-        playable.tiles,
-        [](const RenderFrameData::Tile& tile) {
-            return tile.model == testManifest().modelIdByName(
-                "ScreenSelectorAPlayable");
-        });
-    CHECK(centeredFlag != playable.tiles.end());
-    if (centeredFlag != playable.tiles.end() && centeredFlag->modelTransform) {
-        CHECK(near(centeredFlag->modelTransform->translation.x, 1.5f));
-        CHECK(near(centeredFlag->modelTransform->translation.y, 0.5f));
-        CHECK(near(
-            centeredFlag->position.x + centeredFlag->size.x * 0.5f,
-            centeredFlag->modelTransform->translation.x));
-        CHECK(near(
-            centeredFlag->position.y + centeredFlag->size.y * 0.5f,
-            centeredFlag->modelTransform->translation.y));
-    }
 }
 
 void testDecorativeTileRendersWithoutChangingCameraExtent()
@@ -2550,6 +2550,44 @@ void testEditorDrawsPlatesBeneathTheirOccupants()
 }
 
 #if SOKOBAN_ENABLE_DEBUG_UI
+void testEditorOccludedEntityVisualization()
+{
+    TEST("editorOccludedEntityVisualization");
+    LevelEditor editor;
+    editor.newDocument(3, 2, false);
+    editor.addLayerAbove();
+    editor.setLayerLocked(false);
+    const GridPosition3 end { 0, 0, 1 };
+    const GridPosition3 wall { 1, 0, 1 };
+    CHECK(editor.setCell(end, TileType::End));
+    CHECK(editor.setCell(end, TileType::Knight));
+    CHECK(editor.setCell(wall, TileType::Ground));
+
+    const auto build = [&](bool enabled) {
+        return RenderFrameBuilder::buildEditor({
+            .manifest = testManifest(), .editor = editor, .settings = {},
+            .showDebugView = enabled,
+        });
+    };
+    const auto disabled = build(false);
+    const auto enabled = build(true);
+    CHECK(!disabled.showOccludedEntities);
+    CHECK(enabled.showOccludedEntities);
+    CHECK(std::ranges::equal(disabled.tiles, enabled.tiles));
+    CHECK(std::ranges::count_if(enabled.tiles, [&](const auto& tile) {
+        return tile.cell == end && tile.interactionOutline;
+    }) == 2);
+    CHECK(std::ranges::none_of(enabled.tiles, [&](const auto& tile) {
+        return tile.cell == wall && tile.interactionOutline;
+    }));
+
+    editor.setActiveLayer(2);
+    editor.setLayerLocked(true);
+    CHECK(std::ranges::none_of(build(true).tiles, [&](const auto& tile) {
+        return tile.cell == end;
+    }));
+}
+
 void testEditorLinkedItemVisualization()
 {
     TEST("editorLinkedItemVisualization");
@@ -5723,35 +5761,41 @@ void testFallingRockScratchesStopAtDepartureGroundEdge()
 void testRockScratchBudgetUsesDepositionOrder()
 {
     TEST("rockScratchBudgetUsesDepositionOrder");
-    const Level level = Level::loadFromLayers({ { "..." }, { "C  " } },
+    constexpr float scratchDuration = .1f;
+    constexpr float scratchLength = .1f;
+    constexpr float offsetPerScratch = .25f / static_cast<float>(RenderFrameData::rockScratchCapacity);
+    constexpr float scratchExpiry = config::rockScratchLifetimeSeconds + scratchDuration;
+    constexpr float deferredStart = scratchExpiry + 1.0f;
+    const Level level = Level::loadFromLayers({ { "." }, { "C" } },
         "bounded ground scratches");
     GameState before = stateWithPlayer({ 0, 0, 1 });
     before.movables.push_back({ .id = 7, .type = TileType::Rock,
         .cell = { 0, 0, 1 } });
     GameplaySession::Action action { .before = before, .after = before,
-        .durationSeconds = 0.1f, .playerPushing = true };
+        .durationSeconds = scratchDuration, .playerPushing = true };
     action.presentation.motions.push_back({
         .target = { EntityKind::Movable, 7 }, .from = { 0, 0, 1 },
-        .to = { 0.1f, 0, 1 }, .durationSeconds = 0.1f,
+        .to = { scratchLength, 0, 1 }, .durationSeconds = scratchDuration,
     });
     GameplayPresentation presentation;
     presentation.resetEntities(before);
     // This action is admitted first but deposits last. A full queue must not
     // discard it merely because it was admitted before the immediate pushes.
-    presentation.scheduleRockScratches(level, action, -10.0f);
+    presentation.scheduleRockScratches(level, action, -deferredStart);
+    // Keep each motion inside one tile so it deposits exactly one scratch.
     for (std::size_t index = 0; index < RenderFrameData::rockScratchCapacity; ++index) {
-        const float offset = 0.005f * static_cast<float>(index);
+        const float offset = offsetPerScratch * static_cast<float>(index);
         action.presentation.motions[0].from.x = offset;
-        action.presentation.motions[0].to.x = offset + 0.1f;
+        action.presentation.motions[0].to.x = offset + scratchLength;
         presentation.scheduleRockScratches(level, action, 0.0f);
     }
     RenderFrameData frame;
     presentation.appendRockScratchRenderData(frame);
     CHECK(frame.rockScratchCount == RenderFrameData::rockScratchCapacity - 1);
     if (frame.rockScratchCount > 0) {
-        CHECK(near(frame.rockScratches[0].start.x, 0.505f));
+        CHECK(near(frame.rockScratches[0].start.x, .5f + offsetPerScratch));
     }
-    presentation.advanceRockScratches(10.0f);
+    presentation.advanceRockScratches(deferredStart);
     frame = {};
     presentation.appendRockScratchRenderData(frame);
     CHECK(frame.rockScratchCount == 1);
@@ -5759,7 +5803,7 @@ void testRockScratchBudgetUsesDepositionOrder()
         CHECK(near(frame.rockScratches[0].start.x, 0.5f));
         CHECK(near(frame.rockScratches[0].ageSeconds, 0.0f));
     }
-    presentation.advanceRockScratches(config::rockScratchLifetimeSeconds + 0.1f);
+    presentation.advanceRockScratches(scratchExpiry);
     frame = {};
     presentation.appendRockScratchRenderData(frame);
     CHECK(frame.rockScratchCount == 0);
@@ -7250,7 +7294,7 @@ int main()
     testBardFrameBuildsAnimatedMusicalAura();
     testClericFrameShowsActiveImmunityOnClericAndAllies();
     testAttackedAllyActivatesClericAura();
-    testSelectorFlagReflectsTargetCompletion();
+    testSelectorReflectsTargetCompletion();
     testDecorativeTileRendersWithoutChangingCameraExtent();
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();
     testConfigurableGroundSplats();
@@ -7267,6 +7311,7 @@ int main()
     testGameplayEndsStayActiveAcrossPressurePlateChanges();
     testEditorDrawsPlatesBeneathTheirOccupants();
 #if SOKOBAN_ENABLE_DEBUG_UI
+    testEditorOccludedEntityVisualization();
     testEditorLinkedItemVisualization();
     testEditorDebugCoordinateLabels();
     testEditorDebugRoutesAndSightlines();

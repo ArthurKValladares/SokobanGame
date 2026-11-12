@@ -1908,7 +1908,9 @@ private:
         VkImageView outlineDepth = VK_NULL_HANDLE;
     };
 
-    enum class FacetedOutlinePass { None, DepthMask, Contour };
+    enum class InteractionOutlinePass {
+        OpaqueMeshes, OpaqueBoxes, Translucent, FacetedDepthMask, FacetedContour,
+    };
 
     bool hasFacetedInteractionOutlines(const RenderFrameData& frameData) const
     {
@@ -2121,16 +2123,17 @@ private:
 
         if (options.outlineDepth) {
             const Vec2 viewportExtent { viewport.width, -viewport.height };
-            drawInteractionOutlines(commandBuffer, scene, frameData, true,
-                viewportExtent, FacetedOutlinePass::DepthMask);
-            drawInteractionOutlines(commandBuffer, scene, frameData, true,
-                viewportExtent, FacetedOutlinePass::Contour);
+            drawInteractionOutlines(commandBuffer, scene, frameData, viewportExtent,
+                InteractionOutlinePass::FacetedDepthMask);
+            drawInteractionOutlines(commandBuffer, scene, frameData, viewportExtent,
+                InteractionOutlinePass::FacetedContour);
         } else if (frameData.viewMode == RenderViewMode::Isometric3D) {
             drawIsoFrame(
                 commandBuffer,
                 scene,
                 frameData,
                 translucentPass,
+                writeDepth,
                 options.content,
                 options.profileOpaqueGeometry,
                 options.profileParticles,
@@ -2171,39 +2174,47 @@ private:
         vkCmdEndRendering(commandBuffer);
     }
 
-    void drawInteractionOutlines(
+    static bool hasInteractionOutline(const RenderFrameData::Tile& tile)
+    {
+        return tile.interactionOutline && (!tile.pickOnly || tile.interactionOutlineOnly) &&
+            !tile.isEditorPreview && tile.color.w > 0.0f && tile.height > 0.0f &&
+            (tile.effect == RenderSurfaceEffect::Standard ||
+                tile.effect == RenderSurfaceEffect::PlateEnergy);
+    }
+
+    bool drawInteractionOutlines(
         VkCommandBuffer commandBuffer,
         const PreparedRenderScene& scene,
         const RenderFrameData& frameData,
-        bool translucentPass,
         Vec2 viewportExtent,
-        FacetedOutlinePass facetedPass = FacetedOutlinePass::None)
+        InteractionOutlinePass pass)
     {
         if (configuration_.wireframeEnabled || !swapchain_.depthView()) {
-            return;
+            return false;
         }
         const float renderScale = static_cast<float>(swapchain_.renderExtent().width) /
             static_cast<float>(std::max(1U, swapchain_.displayExtent().width));
-        const bool depthMask = facetedPass == FacetedOutlinePass::DepthMask;
+        const bool depthMask = pass == InteractionOutlinePass::FacetedDepthMask;
+        const bool facetedPass = depthMask || pass == InteractionOutlinePass::FacetedContour;
+        const bool translucentPass = facetedPass || pass == InteractionOutlinePass::Translucent;
         VkPipeline boundPipeline = VK_NULL_HANDLE;
         for (std::size_t tileIndex = 0; tileIndex < frameData.tiles.size(); ++tileIndex) {
             const auto& tile = frameData.tiles[tileIndex];
-            if (!tile.interactionOutline || (tile.pickOnly && !tile.interactionOutlineOnly) ||
-                tile.isEditorPreview ||
-                tile.color.w <= 0.0f || tile.height <= 0.0f ||
-                (tile.effect != RenderSurfaceEffect::Standard &&
-                    tile.effect != RenderSurfaceEffect::PlateEnergy) ||
+            if (!hasInteractionOutline(tile) ||
                 !scene.renderables[tileIndex].mainSceneVisible) {
                 continue;
             }
             const bool box = tile.model.isCube();
+            if (!translucentPass && box != (pass == InteractionOutlinePass::OpaqueBoxes)) {
+                continue;
+            }
             if (!box && !models_.tileReadyForDraw(tile, configuration_.descriptorFrameIndex)) {
                 continue;
             }
-            const bool transparent = tile.blurBehind || (!box &&
+            const bool transparent = tile.blurBehind || tile.color.w < 1.0f || (!box &&
                 !models_.materialForModel(tile.model).policy.hasOpaqueOrMask);
             const bool facetedHull = transparent && !box && tile.facetedInteractionOutline;
-            if (transparent != translucentPass || facetedHull != (facetedPass != FacetedOutlinePass::None)) {
+            if (transparent != translucentPass || facetedHull != facetedPass) {
                 continue;
             }
             const bool skinned = !box && models_.modelUsesGpuSkinning(tile.model);
@@ -2250,14 +2261,107 @@ private:
             vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
             vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
         }
+        return boundPipeline != VK_NULL_HANDLE;
     }
 
 #if SOKOBAN_ENABLE_DEBUG_UI
+    void drawDebugOutlineTile(
+        VkCommandBuffer commandBuffer,
+        const RenderFrameData::Tile& tile,
+        const GpuDrawInstance& draw,
+        VkPipeline& boundPipeline)
+    {
+        const bool box = tile.model.isCube();
+        const bool skinned = !box && models_.modelUsesGpuSkinning(tile.model);
+        const VkPipeline pipeline = box ? pipelines_.outlineBox()
+            : skinned ? pipelines_.outlineSkinned() : pipelines_.outline();
+        if (pipeline != boundPipeline) {
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+            ++stats_.pipelineBinds;
+            boundPipeline = pipeline;
+        }
+        const uint32_t instance = writeDrawInstance(draw);
+        if (box) {
+            vkCmdDraw(commandBuffer, 36, 1, 0, instance);
+            ++stats_.drawCalls;
+            stats_.vertices += 36;
+            stats_.triangles += 12;
+            stats_.visibleFaces += 6;
+        } else {
+            const auto mesh = models_.meshForTile(tile, configuration_.descriptorFrameIndex);
+            drawModel(commandBuffer, mesh, 1, skinned ? mesh.firstInstance : instance, instance);
+        }
+    }
+
+    void drawOccludedEntities(
+        VkCommandBuffer commandBuffer,
+        const PreparedRenderScene& scene,
+        const RenderFrameData& frameData)
+    {
+        if (!swapchain_.depthView() || configuration_.wireframeEnabled) {
+            return;
+        }
+        constexpr float silhouetteMode = 4.0f;
+        constexpr float depthBias = 0.00001f;
+        constexpr Vec4 highlightColor { 1.0f, 0.63f, 0.12f, 0.8f };
+        const Mat4 clipFromWorld = isoClipFromWorld(scene.isoLayout, scene.renderExtent);
+        vkCmdSetDepthTestEnable(commandBuffer, VK_TRUE);
+        vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+        vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_GREATER);
+        vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_CLOCKWISE);
+        vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_BACK_BIT);
+
+        VkPipeline boundPipeline = VK_NULL_HANDLE;
+        for (std::size_t tileIndex = 0; tileIndex < frameData.tiles.size(); ++tileIndex) {
+            const auto& tile = frameData.tiles[tileIndex];
+            const auto& renderable = scene.renderables[tileIndex];
+            if (!hasInteractionOutline(tile) || !renderable.mainSceneVisible ||
+                (!tile.model.isCube() && !models_.tileReadyForDraw(tile, configuration_.descriptorFrameIndex))) {
+                continue;
+            }
+            Aabb bounds = renderable.worldBounds;
+            if (!tile.model.isCube() && !models_.modelUsesGpuSkinning(tile.model)) {
+                // Authored models such as the End plate can extend beyond the
+                // grid proxy used for picking and scene preparation.
+                bounds = merge(bounds, modelWorldBounds(tile, models_.boundsForModel(tile.model)));
+            }
+            if (!bounds.valid()) {
+                continue;
+            }
+            // Compare at the near side of the entity's bounds so overlapping
+            // parts of its own mesh cannot trigger the highlight.
+            float nearestDepth = 1.0f;
+            for (Vec3 corner : corners(bounds)) {
+                const Vec4 clip = transform(clipFromWorld, toVec4(corner, 1.0f));
+                if (clip.w <= 0.0f) {
+                    nearestDepth = 0.0f;
+                    break;
+                }
+                nearestDepth = std::min(nearestDepth, clip.z / clip.w);
+            }
+            if (nearestDepth <= depthBias || nearestDepth >= 1.0f) {
+                continue;
+            }
+            drawDebugOutlineTile(commandBuffer, tile, {
+                .vertices = IsoScenePreparer::modelWorldTransform(tile),
+                .passData = { Vec4 { 0.0f, 0.0f, nearestDepth - depthBias, silhouetteMode },
+                    groundDebrisAnimationData(tile, frameData.effectAnimationTimeSeconds), Vec4 {}, Vec4 {} },
+                .color = highlightColor,
+            }, boundPipeline);
+        }
+        vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_LESS_OR_EQUAL);
+        vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
+        vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    }
+
     void drawDebugView(
         VkCommandBuffer commandBuffer,
         const PreparedRenderScene& scene,
         const RenderFrameData& frameData)
     {
+        if (frameData.showOccludedEntities) {
+            drawOccludedEntities(commandBuffer, scene, frameData);
+        }
         if (frameData.debugItemOutlines.empty() && frameData.debugItemLinks.empty()) {
             return;
         }
@@ -2269,32 +2373,14 @@ private:
             if (!box && !models_.tileReadyForDraw(tile, configuration_.descriptorFrameIndex)) {
                 continue;
             }
-            const bool skinned = !box && models_.modelUsesGpuSkinning(tile.model);
-            const VkPipeline pipeline = box ? pipelines_.outlineBox()
-                : skinned ? pipelines_.outlineSkinned() : pipelines_.outline();
-            if (pipeline != boundPipeline) {
-                vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-                ++stats_.pipelineBinds;
-                boundPipeline = pipeline;
-            }
             vkCmdSetCullMode(commandBuffer, box ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_FRONT_BIT);
-            const uint32_t instance = writeDrawInstance(GpuDrawInstance {
+            drawDebugOutlineTile(commandBuffer, tile, {
                 .vertices = IsoScenePreparer::modelWorldTransform(tile),
                 .passData = { Vec4 {
                     scene.renderExtent.x, scene.renderExtent.y, 2.0f, box ? 1.0f : 0.0f,
                 }, groundDebrisAnimationData(tile, frameData.effectAnimationTimeSeconds), Vec4 {}, Vec4 {} },
                 .color = tile.color,
-            });
-            if (box) {
-                vkCmdDraw(commandBuffer, 36, 1, 0, instance);
-                ++stats_.drawCalls;
-                stats_.vertices += 36;
-                stats_.triangles += 12;
-                stats_.visibleFaces += 6;
-            } else {
-                const auto mesh = models_.meshForTile(tile, configuration_.descriptorFrameIndex);
-                drawModel(commandBuffer, mesh, 1, skinned ? mesh.firstInstance : instance, instance);
-            }
+            }, boundPipeline);
         }
         vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
         vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
@@ -2631,6 +2717,7 @@ private:
         const PreparedRenderScene& scene,
         const RenderFrameData& frameData,
         bool translucentPass,
+        bool writeDepth,
         SceneContent content,
         bool profileOpaqueGeometry,
         bool profileParticles,
@@ -3039,6 +3126,8 @@ private:
             const RecorderModelDraw& draw = draws[drawIndex];
             orderedDraws.push_back({
                 .key = {
+                    .outlined = opaquePass && !configuration_.wireframeEnabled &&
+                        hasInteractionOutline(*draw.tile),
                     .pipeline = draw.pipelineRank,
                     .material = std::bit_cast<uint32_t>(
                         draw.constants.textureOptions.x),
@@ -3098,9 +3187,23 @@ private:
         VkFrontFace boundFrontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
         VkPipeline boundModelPipeline = VK_NULL_HANDLE;
         bool mirrorGhostState = false;
+        bool opaqueMeshOutlinesDrawn = false;
         for (const OpaqueDrawBatch& batch : batches) {
-            const RecorderModelDraw& draw =
-                draws[orderedDraws[batch.firstItem].drawIndex];
+            const OpaqueDrawSortItem& item = orderedDraws[batch.firstItem];
+            const RecorderModelDraw& draw = draws[item.drawIndex];
+            if (item.key.outlined && !opaqueMeshOutlinesDrawn) {
+                // Opaque scenery already occludes the hulls. Draw the outlined
+                // surfaces over them so thin or overlapping faces cover any
+                // fragments that the expanded hull projects into the interior.
+                if (drawInteractionOutlines(commandBuffer, scene, frameData, viewportExtent,
+                        InteractionOutlinePass::OpaqueMeshes)) {
+                    vkCmdSetDepthWriteEnable(commandBuffer, writeDepth ? VK_TRUE : VK_FALSE);
+                    boundCullMode = VK_CULL_MODE_NONE;
+                    boundFrontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+                    boundModelPipeline = VK_NULL_HANDLE;
+                }
+                opaqueMeshOutlinesDrawn = true;
+            }
             if (draw.mirrorGhost != mirrorGhostState) {
                 const bool writesMirrorDepth = draw.mirrorGhost &&
                     content != SceneContent::MirrorPreviewOnly &&
@@ -3188,10 +3291,14 @@ private:
                 commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
         }
         if (content != SceneContent::MirrorPreviewOnly) {
-            // Opaque contours enter the color source used by water/ice;
-            // translucent pieces receive theirs before particles are drawn.
-            drawInteractionOutlines(
-                commandBuffer, scene, frameData, translucentPass, viewportExtent);
+            // Pick-only hulls can be present without a matching surface draw.
+            if (opaquePass && !opaqueMeshOutlinesDrawn) {
+                drawInteractionOutlines(commandBuffer, scene, frameData, viewportExtent,
+                    InteractionOutlinePass::OpaqueMeshes);
+            }
+            drawInteractionOutlines(commandBuffer, scene, frameData, viewportExtent,
+                translucentPass ? InteractionOutlinePass::Translucent :
+                    InteractionOutlinePass::OpaqueBoxes);
         }
         if (translucentPass &&
             content != SceneContent::MirrorPreviewOnly &&

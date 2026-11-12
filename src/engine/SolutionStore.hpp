@@ -40,7 +40,8 @@ struct SolveToStore {
     // For the file's `recorded-for` line when no screen matches.
     std::string name;
     Level::Definition definition;
-    std::vector<Input> inputs;
+    std::vector<TimedFrame> frames;
+    bool playingDraft = true;
 };
 
 // Brings the directory in line with the rules above. With a solve, records

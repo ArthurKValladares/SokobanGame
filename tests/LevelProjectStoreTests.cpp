@@ -14,6 +14,11 @@
 #include <string>
 #include <utility>
 
+#ifdef _WIN32
+#include <thread>
+#include <windows.h>
+#endif
+
 namespace {
 
 struct TemporaryProject {
@@ -84,6 +89,54 @@ void testSuccessfulTransactionCommitsProjectAndRuntimeMirror()
     CHECK(!std::filesystem::exists(project.runtime / "notes.txt"));
     checkNoWorkingTrees(project);
 }
+
+#ifdef _WIN32
+void testPublicationWaitsForTransientWindowsRenameDenial()
+{
+    TEST("publicationWaitsForTransientWindowsRenameDenial");
+    TemporaryProject project;
+    const HANDLE directory = CreateFileW(project.project.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    CHECK(directory != INVALID_HANDLE_VALUE);
+    if (directory == INVALID_HANDLE_VALUE) return;
+
+    const auto backup = project.root / "project.editor-backup";
+    std::error_code renameError;
+    std::filesystem::rename(project.project, backup, renameError);
+    const bool locked = renameError.value() == ERROR_ACCESS_DENIED ||
+        renameError.value() == ERROR_SHARING_VIOLATION;
+    CHECK_MESSAGE(locked, "the open directory handle must deny renames");
+    if (!locked) {
+        CloseHandle(directory);
+        return;
+    }
+
+    const auto journal = project.root / "project.editor-transaction.json";
+    std::jthread releaseHandle([&](std::stop_token stop) {
+        while (!stop.stop_requested() &&
+            GetFileAttributesW(journal.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            Sleep(1);
+        }
+        // Keep the denial in place until publication has begun.
+        if (!stop.stop_requested()) Sleep(40);
+        CloseHandle(directory);
+    });
+    const auto result = sokoban::LevelProjectStore::transact(
+        project.project,
+        project.runtime,
+        [](const std::filesystem::path& stage) {
+            TemporaryProject::write(stage / "notes.txt", "changed-note");
+        });
+    releaseHandle.request_stop();
+    releaseHandle.join();
+    CHECK_MESSAGE(result.succeeded, result.message.c_str());
+    CHECK(TemporaryProject::read(project.project / "notes.txt") == "changed-note");
+    CHECK(std::filesystem::exists(project.runtime / "level0/screen0.scr"));
+    CHECK(!std::filesystem::exists(journal));
+    checkNoWorkingTrees(project);
+}
+#endif
 
 void testRejectedMutationPreservesBothOriginalTrees()
 {
@@ -362,6 +415,9 @@ void testRuntimeIndexFailureRollsBackCompanionManifests()
 int main()
 {
     testSuccessfulTransactionCommitsProjectAndRuntimeMirror();
+#ifdef _WIN32
+    testPublicationWaitsForTransientWindowsRenameDenial();
+#endif
     testRejectedMutationPreservesBothOriginalTrees();
     testPaddedPuzzlePathsCannotBePublished();
     testThrowingMutationIsContainedAndCleanedUp();

@@ -55,6 +55,9 @@ public:
     [[nodiscard]] static const Level::ScreenSelector* selectorForInteraction(
         const Level& level,
         const GameState& state);
+    [[nodiscard]] static const Level::ScreenSelector* selectorForInteraction(
+        const Level& level,
+        const GameplaySession& gameplay);
     // Returns one deterministic owner only when every player is alive and all
     // occupy the same authored overworld screen. Used for transition admission
     // and checkpoint validation in the composed-map runtime.
