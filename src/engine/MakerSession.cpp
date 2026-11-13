@@ -9,9 +9,21 @@
 #include <utility>
 
 namespace sokoban {
+namespace {
+
+LevelEditor::LinkEndpointKind connectionTargetKind(LevelEditor::LinkEndpointKind kind)
+{
+    using Kind = LevelEditor::LinkEndpointKind;
+    if (kind == Kind::Source) return Kind::Device;
+    if (kind == Kind::Device) return Kind::Source;
+    return kind;
+}
+
+} // namespace
 
 MakerSession::MakerSession()
 {
+    editor_.enableExplicitLinkEditing();
     editor_.newDocument(defaultDraftWidth, defaultDraftHeight, false);
     const auto historyLimits = editor_.historyLimits();
     editor_.setHistoryLimits({ .maxRecords = 0 });
@@ -34,6 +46,7 @@ void MakerSession::setTool(Tool tool)
 {
     endStroke();
     status_.clear();
+    if (tool != tool_) clearLinkSelection();
     tool_ = tool;
 }
 
@@ -77,6 +90,125 @@ bool MakerSession::redo()
     if (!editor_.tryRedoEdit()) return false;
     updateUnsavedChanges();
     return true;
+}
+
+std::optional<LevelEditor::LinkEndpoint> MakerSession::selectedLinkEndpoint() const
+{
+    if (selectedLinkEndpoint_ && editor_.hasLinkEndpoint(*selectedLinkEndpoint_)) {
+        return selectedLinkEndpoint_;
+    }
+    return std::nullopt;
+}
+
+bool MakerSession::selectLinkEndpoint(LevelEditor::LinkEndpoint endpoint)
+{
+    if (!editor_.hasLinkEndpoint(endpoint)) return false;
+    endStroke();
+    status_.clear();
+    selectedLinkEndpoint_ = endpoint;
+    return true;
+}
+
+void MakerSession::clearLinkSelection()
+{
+    selectedLinkEndpoint_.reset();
+}
+
+bool MakerSession::connectCell(GridPosition3 cell)
+{
+    if (tool_ != Tool::Connect) return false;
+    const auto clicked = linkTargetAt(cell);
+    if (!clicked) {
+        clearLinkSelection();
+        status_ = "Select a source, device, portal, or movable object.";
+        return false;
+    }
+    const auto selected = selectedLinkEndpoint();
+    if (clicked == selected) return true;
+    if (!selected || clicked->kind != connectionTargetKind(selected->kind)) return selectLinkEndpoint(*clicked);
+
+    editor_.clearStatus();
+    if (editor_.connectLinkEndpoints(*selected, *clicked)) {
+        updateUnsavedChanges();
+        // Keep the device selected so adding another source is one click.
+        if (clicked->kind == LevelEditor::LinkEndpointKind::Device) selectedLinkEndpoint_ = *clicked;
+    }
+    status_ = editor_.status();
+    return true;
+}
+
+std::optional<LevelEditor::LinkEndpoint> MakerSession::linkTargetAt(GridPosition3 cell) const
+{
+    if (const auto selected = selectedLinkEndpoint()) {
+        const LevelEditor::LinkEndpoint target { cell, connectionTargetKind(selected->kind) };
+        if (editor_.hasLinkEndpoint(target)) return target;
+    }
+    return editor_.linkEndpointAt(cell);
+}
+
+void MakerSession::toggleLinkLayer()
+{
+    linkLayerIsolated_ = !linkLayerIsolated_;
+}
+
+bool MakerSession::assignSelectedLinkGroup(Vec3 color)
+{
+    const auto endpoint = selectedLinkEndpoint();
+    if (!endpoint) return false;
+    editor_.clearStatus();
+    const bool changed = editor_.assignLinkEndpoint(*endpoint, color);
+    status_ = editor_.status();
+    if (changed) updateUnsavedChanges();
+    return changed;
+}
+
+bool MakerSession::disconnectSelectedLink()
+{
+    const auto endpoint = selectedLinkEndpoint();
+    if (!endpoint) return false;
+    editor_.clearStatus();
+    const bool changed = editor_.disconnectLinkEndpoint(*endpoint);
+    status_ = editor_.status();
+    if (changed) updateUnsavedChanges();
+    return changed;
+}
+
+bool MakerSession::createSelectedLinkGroup(std::string name)
+{
+    const auto endpoint = selectedLinkEndpoint();
+    if (!endpoint) return false;
+    editor_.clearStatus();
+    const bool changed = editor_.createLinkGroup(*endpoint, std::move(name));
+    status_ = editor_.status();
+    if (changed) updateUnsavedChanges();
+    return changed;
+}
+
+bool MakerSession::renameLinkGroup(Level::LinkGroupKind kind, Vec3 color, std::string name)
+{
+    editor_.clearStatus();
+    const bool changed = editor_.setLinkGroupName(kind, color, std::move(name));
+    status_ = editor_.status();
+    if (changed) updateUnsavedChanges();
+    return changed;
+}
+
+bool MakerSession::toggleSelectedElevatorStop()
+{
+    const auto selected = selectedLinkEndpoint();
+    if (!selected || selected->kind != LevelEditor::LinkEndpointKind::Device) return false;
+    const auto& elevators = editor_.elevators();
+    const auto elevator = std::ranges::find(elevators, selected->cell, &Level::Elevator::cell);
+    const auto layer = static_cast<int>(editor_.activeLayer());
+    if (elevator == elevators.end() || elevator->cell.z == layer) return false;
+
+    auto stops = elevator->levels;
+    if (std::erase(stops, layer) == 0) stops.push_back(layer);
+    editor_.clearStatus();
+    const bool changed = editor_.setElevatorLevels(static_cast<std::size_t>(elevator - elevators.begin()), std::move(stops));
+    status_ = editor_.status();
+    if (changed) updateUnsavedChanges();
+    return changed;
 }
 
 bool MakerSession::newDraft(uint32_t width, uint32_t height)
@@ -188,6 +320,8 @@ void MakerSession::replaceDraft(Level::Definition definition, std::string name)
     draftName_ = std::move(name);
     unsavedChanges_ = false;
     strokeChanged_ = false;
+    clearLinkSelection();
+    linkLayerIsolated_ = false;
     lastCell_.reset();
     visited_.clear();
 }
@@ -216,7 +350,7 @@ std::optional<GridPosition3> MakerSession::previewCell(GridPosition cell) const
 
 bool MakerSession::beginStroke(GridPosition cell)
 {
-    if (!previewCell(cell) || !editor_.beginStroke()) {
+    if (tool_ == Tool::Connect || !previewCell(cell) || !editor_.beginStroke()) {
         return false;
     }
     visited_.assign(static_cast<std::size_t>(editor_.documentWidth()) *

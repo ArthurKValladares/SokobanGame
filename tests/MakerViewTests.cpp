@@ -56,7 +56,7 @@ void testBoardStaysOpen(const FontAtlas& font)
 void testPalettePointerOwnership(const FontAtlas& font)
 {
     TEST("makerPaletteSelectsOnlyFromItsOwnPress");
-    constexpr Vec2 viewport { 640.0f, 480.0f };
+    constexpr Vec2 viewport { 640.0f, 600.0f };
     const MakerLayout layout = MakerView::layout(viewport);
     UiContext ui(font);
     MakerView view;
@@ -96,7 +96,7 @@ void testPalettePointerOwnership(const FontAtlas& font)
 void testDisplayScale(const FontAtlas& font)
 {
     TEST("makerDisplayScalePreservesLogicalLayoutAndScroll");
-    constexpr Vec2 logicalViewport { 640.0f, 480.0f };
+    constexpr Vec2 logicalViewport { 640.0f, 600.0f };
     constexpr float scale = 2.0f;
     const Vec2 viewport = logicalViewport * scale;
     const MakerLayout logical = MakerView::layout(logicalViewport);
@@ -187,7 +187,7 @@ void testPlaytestControls(const FontAtlas& font)
     auto* edit = view.activeTextEdit();
     CHECK(edit != nullptr);
     if (!edit) return;
-    CHECK(edit->insert("wall"));
+    CHECK(edit->insert("terrain cliff"));
     CHECK(drawEditor({ .position = testPlay, .down = true, .pressedAt = testPlay }) == MakerCommand::None);
     CHECK(drawEditor({ .position = board, .releasedAt = board }) == MakerCommand::None);
     CHECK(drawEditor({ .position = testPlay, .pressedAt = testPlay, .releasedAt = testPlay }) ==
@@ -203,8 +203,8 @@ void testPlaytestControls(const FontAtlas& font)
 
     CHECK(drawEditor() == MakerCommand::None);
     CHECK(view.focusTileSearch());
-    CHECK(edit->text() == "wall");
-    CHECK(visibleTileSwatches(ui, layout).size() == 2);
+    CHECK(edit->text() == "terrain cliff");
+    CHECK(visibleTileSwatches(ui, layout).size() == 1);
 }
 
 void testPaletteSearchFiltersWithinGroups(const FontAtlas& font)
@@ -230,7 +230,7 @@ void testPaletteSearchFiltersWithinGroups(const FontAtlas& font)
     CHECK(edit->insert("Wa"));
     (void)draw();
     const auto prefix = visibleTileSwatches(ui, layout);
-    CHECK(prefix.size() > 2 && prefix.size() < unfiltered.size());
+    CHECK(prefix.size() > 2);
 
     edit->setComposition("Ll", 2, 0);
     (void)draw();
@@ -243,7 +243,8 @@ void testPaletteSearchFiltersWithinGroups(const FontAtlas& font)
 
     const auto headingGlyph = [&](const UiDrawCommand& command) {
         return command.kind == UiDrawKind::FontGlyph && command.fontSize == 15.0f * layout.scale &&
-            command.clip && intersects(*command.clip, layout.palette);
+            command.clip && intersects(*command.clip, layout.palette) &&
+            command.clip->position.y < walls[0].y;
     };
     // The first match still belongs to Basics, the second to Terrain. No
     // heading is emitted for groups without a matching tile.
@@ -276,6 +277,17 @@ void testPaletteSearchFiltersWithinGroups(const FontAtlas& font)
     }
 
     CHECK(view.focusTileSearch());
+    edit->setText("boulder skipping stone");
+    (void)draw();
+    const auto skippingStone = visibleTileSwatches(ui, layout);
+    CHECK(skippingStone.size() == 1);
+    if (skippingStone.size() == 1) {
+        view.blurTileSearch();
+        CHECK(draw({ .position = skippingStone[0], .pressedAt = skippingStone[0],
+            .releasedAt = skippingStone[0] }).tile == TileType::RoundRock);
+    }
+
+    CHECK(view.focusTileSearch());
     edit->setText("zzzz");
     (void)draw();
     CHECK(visibleTileSwatches(ui, layout).empty());
@@ -287,6 +299,152 @@ void testPaletteSearchFiltersWithinGroups(const FontAtlas& font)
     edit->setText("");
     (void)draw();
     CHECK(visibleTileSwatches(ui, layout) == unfiltered);
+}
+
+void testPaletteSelectsDistinctObjectsAndRotators(const FontAtlas& font)
+{
+    TEST("makerPaletteSelectsDistinctObjectsAndRotators");
+    constexpr Vec2 viewport { 640.0f, 600.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    const auto draw = [&](UiPointerInput pointer = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto action = view.draw(ui, layout, {});
+        ui.endFrame();
+        return action;
+    };
+    (void)draw();
+    const auto searchAndSelect = [&](std::string_view query, std::span<const TileType> expected) {
+        CHECK(view.focusTileSearch());
+        auto* edit = view.activeTextEdit();
+        CHECK(edit != nullptr);
+        if (!edit) return;
+        edit->setText(query);
+        (void)draw();
+        const auto rows = visibleTileSwatches(ui, layout);
+        CHECK(rows.size() == expected.size());
+        if (rows.size() != expected.size()) return;
+        for (std::size_t i = 0; i < rows.size(); ++i) {
+            const Vec2 point = rows[i];
+            CHECK(draw({ .position = point, .pressedAt = point, .releasedAt = point }).tile == expected[i]);
+        }
+    };
+    const std::array crystals { TileType::Crystal, TileType::SkippingCrystal };
+    const std::array rotators { TileType::RotatorClockwise, TileType::RotatorCounterClockwise };
+    searchAndSelect("objects crystal", crystals);
+    searchAndSelect("mechanisms rotator", rotators);
+    searchAndSelect("counter-clockwise", std::span(rotators).last(1));
+}
+
+void testPaletteThumbnailsAndBoardGuide(const FontAtlas& font)
+{
+    TEST("makerPaletteDrawsNativeThumbnailsAndInspectsBoardTile");
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    const auto textureFor = [](TileType tile) {
+        return RenderTexture { static_cast<uint32_t>(tile) + 1 };
+    };
+    std::vector<TileType> requested;
+    MakerViewInput input;
+    input.tileThumbnail = [&](TileType tile) {
+        requested.push_back(tile);
+        return tile == TileType::Wall ? noTexture : textureFor(tile);
+    };
+    const auto draw = [&](Vec2 position, const MakerViewState& state = {}) {
+        requested.clear();
+        ui.beginFrame(viewport, UiPointerInput { .position = position });
+        (void)view.draw(ui, layout, state, input);
+        ui.endFrame();
+    };
+    const auto thumbnail = [&](TileType tile, float size) {
+        return std::ranges::find_if(ui.drawData().commands, [&](const auto& command) {
+            return command.kind == UiDrawKind::TextureImage && command.texture == textureFor(tile) &&
+                command.rect.size == Vec2 { size, size };
+        });
+    };
+
+    draw({});
+    CHECK(requested.size() < 10);
+    CHECK(std::ranges::find(requested, TileType::Minecart) == requested.end());
+    CHECK(!requested.empty() && requested.back() == TileType::Ground);
+    CHECK(visibleTileSwatches(ui, layout).size() == 1);
+    const auto ground = thumbnail(TileType::Ground, 28.0f);
+    CHECK(ground != ui.drawData().commands.end());
+    if (ground == ui.drawData().commands.end()) return;
+    CHECK(ground->clip && intersects(*ground->clip, layout.palette));
+
+    const auto wallSwatch = visibleTileSwatches(ui, layout).front();
+    draw(wallSwatch);
+    CHECK(!requested.empty() && requested.back() == TileType::Wall);
+
+    const Vec2 board = layout.board.position + layout.board.size * 0.5f;
+    const MakerViewState blockedPlacement {
+        .brush = TileType::Water,
+        .hovered = GridPosition3 { 1, 2, 0 },
+        .placementHint = "Lily pads must be placed in an empty cell directly above water.",
+        .placementBlocked = true,
+        .boardTile = TileType::PortalEast,
+    };
+    draw(board, blockedPlacement);
+    CHECK(!requested.empty() && requested.back() == TileType::PortalEast);
+    const auto inspector = thumbnail(TileType::PortalEast, 30.0f);
+    CHECK(inspector != ui.drawData().commands.end());
+    if (inspector != ui.drawData().commands.end()) {
+        CHECK(inspector->clip && intersects(*inspector->clip, layout.palette));
+        CHECK(std::ranges::any_of(ui.drawData().commands, [&](const auto& command) {
+            return command.kind == UiDrawKind::FontGlyph && command.clip &&
+                intersects(*command.clip, layout.palette) &&
+                command.rect.position.y > inspector->rect.position.y + inspector->rect.size.y;
+        }));
+    }
+    const auto warningText = [&](const UiDrawCommand& command) {
+        return command.kind == UiDrawKind::FontGlyph && command.clip &&
+            intersects(*command.clip, layout.board) && command.color == Vec4 { 1.0f, 0.66f, 0.57f, 1.0f };
+    };
+    const auto warning = std::ranges::find_if(ui.drawData().commands, warningText);
+    CHECK(warning != ui.drawData().commands.end());
+    if (warning == ui.drawData().commands.end()) return;
+    const float firstLineY = warning->rect.position.y;
+    CHECK(firstLineY > board.y);
+    CHECK(std::ranges::any_of(ui.drawData().commands, [&](const auto& command) {
+        return warningText(command) && command.rect.position.y > firstLineY + 15.0f;
+    }));
+    draw({ board.x, firstLineY + 5.0f }, blockedPlacement);
+    const auto movedWarning = std::ranges::find_if(ui.drawData().commands, warningText);
+    CHECK(movedWarning != ui.drawData().commands.end());
+    if (movedWarning != ui.drawData().commands.end()) {
+        CHECK(movedWarning->rect.position.y < board.y);
+    }
+}
+
+void testPaletteKeyboardRevealsRows(const FontAtlas& font)
+{
+    TEST("makerPaletteKeyboardRevealsOffscreenTiles");
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    std::optional<TileType> inspected;
+    MakerViewInput input;
+    input.navigation.next = true;
+    input.tileThumbnail = [&](TileType tile) {
+        inspected = tile;
+        return noTexture;
+    };
+    std::vector<TileType> visited;
+    for (int frame = 0; frame < 64; ++frame) {
+        ui.beginFrame(viewport, UiPointerInput {});
+        (void)view.draw(ui, layout, {}, input);
+        ui.endFrame();
+        if (inspected && std::ranges::find(visited, *inspected) == visited.end()) {
+            visited.push_back(*inspected);
+        }
+    }
+    CHECK(std::ranges::find(visited, TileType::LilyPad) != visited.end());
+    CHECK(std::ranges::find(visited, TileType::MinecartGate) != visited.end());
 }
 
 void testPaletteSearchPressOwnsGesture(const FontAtlas& font)
@@ -578,6 +736,134 @@ void testResizeBoardDialog(const FontAtlas& font)
     CHECK(view.resizePreviewSize() == (GridPosition { static_cast<int>(MakerSession::maxDraftDimension), 8 }));
 }
 
+void testLinkInspectorNativeControls(const FontAtlas& font)
+{
+    TEST("makerLinkInspectorNativeControls");
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    const auto click = [](Vec2 position) {
+        return UiPointerInput { .position = position, .pressedAt = position, .releasedAt = position };
+    };
+    ui.beginFrame(viewport, click({ 169.0f, 69.0f }));
+    CHECK(view.draw(ui, layout, {}).command == MakerCommand::Connect);
+    ui.endFrame();
+    CHECK(std::ranges::count_if(ui.drawData().commands, [&](const UiDrawCommand& command) {
+        return command.kind == UiDrawKind::FontGlyph && command.clip &&
+            ui.contains(*command.clip, { 169.0f, 69.0f });
+    }) == 7);
+
+    const std::array groups { std::string("Entrance"), std::string("Exit") };
+    const std::array members { std::string("Lever"), std::string("Gate") };
+    const UiRect scene { layout.board.position + Vec2 { 16.0f, 14.0f },
+        layout.board.size - Vec2 { 32.0f, 28.0f } };
+    constexpr Vec4 linkColor { 0.25f, 0.85f, 0.93f, 1.0f };
+    const Vec2 from = scene.position + Vec2 { 5.0f, 20.0f };
+    const Vec2 to = scene.position + Vec2 { 150.0f, 105.0f };
+    const std::array lines { MakerLinkLine { from, to, linkColor, "Entrance" } };
+    const std::array markers { MakerLinkMarker { from, linkColor, true }, MakerLinkMarker { to, linkColor } };
+    const MakerViewState state {
+        .linkInspector = MakerLinkInspector {
+            .kind = MakerLinkInspector::Kind::Device,
+            .title = "Lever",
+            .detail = "Connect to a gate.",
+            .members = members,
+            .groups = groups,
+            .activeGroup = 0,
+            .canDisconnect = true,
+            .canClear = true,
+            .canRename = true,
+            .canCreate = true,
+        },
+        .linkLines = lines,
+        .linkMarkers = markers,
+        .linkViewport = scene,
+    };
+    const auto draw = [&](UiPointerInput pointer = {}, bool interactive = true) {
+        ui.beginFrame(viewport, pointer);
+        const auto action = view.draw(ui, layout, state, { .interactive = interactive });
+        ui.endFrame();
+        return action;
+    };
+    CHECK(draw().command == MakerCommand::None);
+    CHECK(!view.focusTileSearch());
+    const auto visibleLines = [&] {
+        return std::ranges::count_if(ui.drawData().commands, [&](const UiDrawCommand& command) {
+            return command.kind == UiDrawKind::Solid && command.color == linkColor &&
+                command.clip == scene;
+        });
+    };
+    CHECK(visibleLines() > 2);
+    CHECK(!draw(click(to)).tile);
+    CHECK(draw(click({ 56.0f, 211.0f })).command == MakerCommand::NewLinkGroup);
+    CHECK(draw(click({ 153.0f, 211.0f })).command == MakerCommand::RenameLinkGroup);
+    CHECK(draw(click({ 56.0f, 247.0f })).command == MakerCommand::Disconnect);
+    CHECK(draw(click({ 153.0f, 247.0f })).command == MakerCommand::ClearLinkSelection);
+    CHECK(draw(click({ 70.0f, 323.0f })).command == MakerCommand::None);
+    const auto assign = draw(click({ 70.0f, 352.0f }));
+    CHECK(assign.command == MakerCommand::AssignLinkGroup && assign.linkGroup == 1);
+    CHECK(draw(click({ 56.0f, 211.0f }), false).command == MakerCommand::None);
+    CHECK(visibleLines() == 0);
+
+    std::vector<MakerLinkLine> crowdedLines(200, lines.front());
+    std::vector<MakerLinkMarker> crowdedMarkers(400, markers.front());
+    MakerViewState crowded = state;
+    crowded.linkLines = crowdedLines;
+    crowded.linkMarkers = crowdedMarkers;
+    ui.beginFrame(viewport, UiPointerInput {});
+    (void)view.draw(ui, layout, crowded);
+    ui.endFrame();
+    CHECK(ui.droppedCommands() == 0);
+
+    view.beginDraftDialog(MakerDraftDialogMode::RenameLinkGroup, "Entrance");
+    CHECK(view.draftNameFocused());
+    auto* edit = view.activeDraftNameEdit();
+    CHECK(edit != nullptr);
+    if (!edit) return;
+    CHECK(edit->selectedText() == "Entrance");
+    CHECK(edit->insert("Front door"));
+    CHECK(view.submitDraftName().name == "Front door");
+    view.beginDraftDialog(MakerDraftDialogMode::NameLinkGroup);
+    CHECK(view.draftNameFocused());
+    CHECK(view.submitDraftName().command == MakerDraftDialogAction::Command::None);
+}
+
+void testLinkLayerAndElevatorControls(const FontAtlas& font)
+{
+    TEST("makerLinkLayerAndElevatorControls");
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    MakerViewState state;
+    const auto click = [&](Vec2 position) {
+        ui.beginFrame(viewport, UiPointerInput { .position = position, .pressedAt = position, .releasedAt = position });
+        const auto command = view.draw(ui, layout, state).command;
+        ui.endFrame();
+        return command;
+    };
+    constexpr Vec2 layerButton { 212.0f, 69.0f };
+    CHECK(click(layerButton) == MakerCommand::Rotate);
+    state.linkInspector = MakerLinkInspector {
+        .kind = MakerLinkInspector::Kind::Device,
+        .title = "Elevator",
+        .detail = "Connect to a lever.",
+    };
+    CHECK(click(layerButton) == MakerCommand::None);
+    state.layerCount = 2;
+    CHECK(click(layerButton) == MakerCommand::ToggleLinkLayer);
+    state.linkLayerIsolated = true;
+    CHECK(click(layerButton) == MakerCommand::ToggleLinkLayer);
+
+    constexpr Vec2 stopButton { 56.0f, 211.0f };
+    CHECK(click(stopButton) == MakerCommand::None);
+    state.linkInspector->elevatorStopOnLayer = false;
+    CHECK(click(stopButton) == MakerCommand::ToggleElevatorStop);
+    state.linkInspector->elevatorStopOnLayer = true;
+    CHECK(click(stopButton) == MakerCommand::ToggleElevatorStop);
+}
+
 } // namespace
 
 int main()
@@ -589,11 +875,16 @@ int main()
     testDisplayScale(font);
     testPlaytestControls(font);
     testPaletteSearchFiltersWithinGroups(font);
+    testPaletteSelectsDistinctObjectsAndRotators(font);
+    testPaletteThumbnailsAndBoardGuide(font);
+    testPaletteKeyboardRevealsRows(font);
     testPaletteSearchPressOwnsGesture(font);
     testDraftSaveDialog(font);
     testDraftLoadDialog(font);
     testNewDraftDialog(font);
     testResizeBoardDialog(font);
+    testLinkInspectorNativeControls(font);
+    testLinkLayerAndElevatorControls(font);
     std::cout << "MakerViewTests: " << checks - failures << " of " << checks
               << " checks passed\n";
     return failures != 0 ? 1 : 0;

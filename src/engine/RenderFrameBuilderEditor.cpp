@@ -57,7 +57,7 @@ public:
         , activeLayer_(input.editor.activeLayer())
         , layerCount_(static_cast<uint32_t>(layers_.size()))
         , waterLayer_(input.editor.waterLayer())
-        , layerLocked_(input.editor.layerLocked() && !input.resizePreviewSize)
+        , layerLocked_((input.editor.layerLocked() || input.isolateActiveLayer) && !input.resizePreviewSize)
     {
     }
 

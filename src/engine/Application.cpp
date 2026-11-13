@@ -27,6 +27,7 @@
 #include "engine/Rules.hpp"
 #include "engine/RuntimeContent.hpp"
 #include "engine/UserSettingsConfig.hpp"
+#include "engine/ui/MakerTileGuide.hpp"
 #include "engine/ui/SelectorPrompt.hpp"
 #include "engine/ui/UiConfig.hpp"
 
@@ -80,6 +81,151 @@ UiRect fitSceneViewport(UiRect bounds, Vec2 source)
 bool showsMakerResizePreview(MakerDraftDialogMode mode)
 {
     return mode == MakerDraftDialogMode::ResizeBoard || mode == MakerDraftDialogMode::ConfirmCrop;
+}
+
+using LinkEndpoint = LevelEditor::LinkEndpoint;
+using LinkKind = LevelEditor::LinkEndpointKind;
+
+Level::LinkGroupKind makerGroupKind(LinkKind kind)
+{
+    return kind == LinkKind::Object ? Level::LinkGroupKind::Object : Level::LinkGroupKind::Device;
+}
+
+TileType makerTileAt(const LevelEditor& editor, GridPosition3 cell)
+{
+    if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+        std::cmp_greater_equal(cell.x, editor.documentWidth()) ||
+        std::cmp_greater_equal(cell.y, editor.documentHeight()) ||
+        std::cmp_greater_equal(cell.z, editor.documentDepth())) {
+        return TileType::Air;
+    }
+    const auto& row = editor.documentLayers()[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)];
+    const auto tile = charToTileType(row[static_cast<std::size_t>(cell.x)]).value_or(TileType::Air);
+    return tile == TileType::Air && editor.waterLayer() == static_cast<uint32_t>(cell.z)
+        ? TileType::Water : tile;
+}
+
+TileType makerLinkTile(const LevelEditor& editor, LinkEndpoint endpoint)
+{
+    const auto tile = makerTileAt(editor, endpoint.cell);
+    const auto plate = editor.documentPlateAt(endpoint.cell).value_or(TileType::Air);
+    if (endpoint.kind == LinkKind::Source || endpoint.kind == LinkKind::Portal) return plate;
+    if (endpoint.kind == LinkKind::Device && (tileTypeIsRotator(plate) || tileTypeIsLockPlate(plate))) return plate;
+    return tile;
+}
+
+std::optional<LinkEndpoint> otherMakerLinkEndpoint(const LevelEditor& editor, LinkEndpoint current)
+{
+    for (const auto kind : { LinkKind::Object, LinkKind::Source, LinkKind::Device, LinkKind::Portal }) {
+        LinkEndpoint endpoint { current.cell, kind };
+        if (endpoint != current && editor.hasLinkEndpoint(endpoint)) return endpoint;
+    }
+    return std::nullopt;
+}
+
+struct MakerLinkPresentation {
+    MakerLinkInspector inspector;
+    std::string title;
+    std::string connectionLabel;
+    std::vector<std::string> groupNames;
+    std::vector<Vec3> groupColors;
+    std::vector<std::string> members;
+    std::vector<LinkEndpoint> peers;
+    std::vector<MakerLinkLine> lines;
+    std::vector<MakerLinkMarker> markers;
+};
+
+void populateMakerLinkInspector(MakerLinkPresentation& view, const LevelEditor& editor,
+    LinkEndpoint endpoint)
+{
+    using Kind = MakerLinkInspector::Kind;
+    const auto color = editor.linkEndpointColor(endpoint);
+    const auto& groups = editor.linkGroupsView();
+    view.title = makerTileGuide::name(makerLinkTile(editor, endpoint));
+    view.inspector.canClear = true;
+    view.inspector.canSelectOther = otherMakerLinkEndpoint(editor, endpoint).has_value();
+    const auto addPeers = [&](const auto& cells, LinkKind kind) {
+        for (const auto cell : cells) {
+            if (LinkEndpoint peer { cell, kind }; peer != endpoint) view.peers.push_back(peer);
+        }
+    };
+    if (endpoint.kind == LinkKind::Portal) {
+        view.inspector.kind = Kind::Portal;
+        std::size_t pairNumber = 0;
+        for (const auto& group : groups) {
+            if (group.portals.size() == 2) ++pairNumber;
+            if (!color || !LevelEditor::sameLinkColor(*color, group.color)) continue;
+            if (group.portals.size() == 2) {
+                addPeers(group.portals, LinkKind::Portal);
+                view.connectionLabel = "Portal pair " + std::to_string(pairNumber);
+                view.title = view.connectionLabel;
+            }
+            view.inspector.canDisconnect = group.portals.size() > 1;
+            break;
+        }
+        view.inspector.detail = !view.peers.empty() ? "These two portals lead to each other." :
+            view.inspector.canDisconnect ? "More than two portals share this pair. Unpair this portal to change its exit." :
+            "Click another unpaired portal to set its exit.";
+        return;
+    }
+
+    const bool object = endpoint.kind == LinkKind::Object;
+    const bool source = endpoint.kind == LinkKind::Source;
+    const auto linkedCells = object ? std::vector<GridPosition3> {} :
+        source ? editor.devicesDrivenBy(endpoint.cell) : editor.linkSourcesForDevice(endpoint.cell);
+    view.inspector.kind = object ? Kind::Object : Kind::Device;
+    view.inspector.canCreate = true;
+    const auto groupKind = makerGroupKind(endpoint.kind);
+    const auto addGroup = [&](Vec3 groupColor, std::string_view name) {
+        view.groupColors.push_back(groupColor);
+        view.groupNames.push_back(name.empty()
+            ? (object ? "Existing sync group " : "Existing device group ") + std::to_string(view.groupColors.size())
+            : std::string(name));
+    };
+    for (const auto& group : groups) {
+        const auto name = editor.linkGroupName(groupKind, group.color);
+        const auto deviceCount = group.gates.size() + group.rotators.size() + group.lockPlates.size() +
+            group.elevators.size() + group.minecarts.size();
+        const bool active = color && LevelEditor::sameLinkColor(*color, group.color);
+        const bool legacyGroup = object ? !group.objects.empty() : group.pressurePlates.size() + deviceCount > 1;
+        const bool explicitlyWired = active && !linkedCells.empty();
+        if (name.empty() && !legacyGroup && !explicitlyWired) continue;
+        if (active) {
+            view.inspector.activeGroup = view.groupColors.size();
+            if (object) addPeers(group.objects, LinkKind::Object);
+        }
+        addGroup(group.color, name);
+    }
+    for (const auto& named : editor.linkGroupNames()) {
+        if (named.kind == groupKind && std::ranges::none_of(view.groupColors,
+                [&](Vec3 existing) { return LevelEditor::sameLinkColor(existing, named.color); })) {
+            addGroup(named.color, named.name);
+        }
+    }
+    if (!object) {
+        addPeers(linkedCells, source ? LinkKind::Device : LinkKind::Source);
+    }
+    view.inspector.canRename = view.inspector.activeGroup.has_value();
+    view.inspector.canDisconnect = !view.peers.empty() || view.inspector.activeGroup.has_value();
+    view.inspector.detail = object ? "Click another movable object or choose a group. Group members copy successful moves." :
+        source ? "Click a device to connect it to this signal source." :
+        "Click a pressure plate, button, or lever to drive this device.";
+    if (endpoint.kind == LinkKind::Device && makerLinkTile(editor, endpoint) == TileType::Elevator) {
+        const auto& elevators = editor.elevators();
+        const auto elevator = std::ranges::find(elevators, endpoint.cell, &Level::Elevator::cell);
+        const auto layer = static_cast<int>(editor.activeLayer());
+        if (elevator != elevators.end() && layer != elevator->cell.z) {
+            view.inspector.elevatorStopOnLayer = std::ranges::find(elevator->levels, layer) != elevator->levels.end();
+        }
+        if (elevator != elevators.end() && elevator->levels.size() < 2) {
+            view.inspector.detail = "Connect an activator, then choose another layer and add a stop.";
+        }
+    }
+    if (view.inspector.activeGroup) {
+        view.connectionLabel = view.groupNames[*view.inspector.activeGroup];
+    } else if (!view.peers.empty()) {
+        view.connectionLabel = "Signal connection";
+    }
 }
 
 template<class Load>
@@ -955,6 +1101,23 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
         return;
     }
 
+    if (dialog.mode == MakerDraftDialogMode::NameLinkGroup ||
+        dialog.mode == MakerDraftDialogMode::RenameLinkGroup) {
+        const auto endpoint = maker.selectedLinkEndpoint();
+        const auto color = endpoint ? maker.editor().linkEndpointColor(*endpoint) : std::nullopt;
+        bool saved = false;
+        if (dialog.mode == MakerDraftDialogMode::NameLinkGroup) {
+            saved = maker.createSelectedLinkGroup(action.name);
+        } else if (endpoint && color) {
+            const auto kind = makerGroupKind(endpoint->kind);
+            saved = maker.editor().linkGroupName(kind, *color) == action.name ||
+                maker.renameLinkGroup(kind, *color, action.name);
+        }
+        if (saved) closeMakerDraftDialog();
+        else dialog.error = maker.status().empty() ? "Select a link endpoint first." : maker.status();
+        return;
+    }
+
     const std::string_view name = dialog.mode == MakerDraftDialogMode::Overwrite ||
         dialog.mode == MakerDraftDialogMode::Discard ? dialog.pendingName : action.name;
     if (dialog.mode == MakerDraftDialogMode::Save || dialog.mode == MakerDraftDialogMode::Overwrite) {
@@ -1062,18 +1225,80 @@ void Application::drawMakerWorkspace(
         makerHover_.reset();
         return;
     }
-    const auto pick = [&](Vec2 position) -> std::optional<GridPosition> {
+    const auto pick = [&](Vec2 position) -> std::optional<GridPosition3> {
         if (canPick) {
-            if (const auto cell = renderer_.pickIsoGridCell(
-                    *preparedRenderFrame_, position, scene)) {
-                return GridPosition { cell->x, cell->y };
-            }
+            return renderer_.pickIsoGridCell(*preparedRenderFrame_, position, scene);
         }
         return std::nullopt;
     };
     const auto hovered = makerDraftDialog_ ? std::nullopt : pick(ui_.mousePosition());
     const LevelEditor& editor = maker.editor();
-    makerHover_ = hovered ? maker.previewCell(*hovered) : std::nullopt;
+    makerHover_ = hovered ? maker.previewCell(xy(*hovered)) : std::nullopt;
+    const TileType boardTile = hovered ? makerTileAt(editor, *hovered) : TileType::Air;
+    const bool painting = maker.tool() == MakerSession::Tool::Paint;
+    const bool connecting = maker.tool() == MakerSession::Tool::Connect;
+    const auto selectedLink = connecting ? maker.selectedLinkEndpoint() : std::nullopt;
+    MakerLinkPresentation wiring;
+    std::string coveredLinkHint;
+    if (connecting) {
+        wiring.inspector.detail = "Select a device, signal source, portal, or movable object on the board.";
+        if (selectedLink) {
+            populateMakerLinkInspector(wiring, editor, *selectedLink);
+        }
+        const auto project = [&](LinkEndpoint endpoint) -> std::optional<Vec2> {
+            if (!canPick || (maker.linkLayerIsolated() &&
+                    std::cmp_not_equal(endpoint.cell.z, editor.activeLayer()))) return std::nullopt;
+            const auto tile = makerLinkTile(editor, endpoint);
+            const auto visual = tileVisual(tile, endpoint.cell, assetManifest_, presentationSettings_);
+            Vec3 anchor {
+                visual.position.x + visual.size.x * 0.5f,
+                visual.position.y + visual.size.y * 0.5f,
+                visual.baseElevation + (tileTypeIsGate(tile) ? 0.55f : visual.height * 0.65f),
+            };
+            if (tileTypeIsPortal(tile)) {
+                const auto edge = portalEdgeOffset(tile);
+                anchor.x += static_cast<float>(edge.x) * 0.5f;
+                anchor.y += static_cast<float>(edge.y) * 0.5f;
+                anchor.z = visual.baseElevation + 0.8f;
+            }
+            return renderer_.projectToPixels(*preparedRenderFrame_, anchor, scene);
+        };
+        const auto highlight = [](LinkKind kind) -> Vec4 {
+            if (kind == LinkKind::Portal) return { 0.68f, 0.79f, 1.0f, 1.0f };
+            if (kind == LinkKind::Object) return { 1.0f, 0.76f, 0.45f, 1.0f };
+            return { 0.54f, 0.86f, 0.77f, 1.0f };
+        };
+        if (selectedLink) {
+            const auto from = project(*selectedLink);
+            const auto color = highlight(selectedLink->kind);
+            if (from) wiring.markers.push_back({ *from, color, true });
+            for (const auto peer : wiring.peers) {
+                const auto cell = peer.cell;
+                wiring.members.push_back(std::string(makerTileGuide::name(makerLinkTile(editor, peer))) + "  " +
+                    std::to_string(cell.x) + ", " + std::to_string(cell.y) + "  \xc2\xb7  Layer " + std::to_string(cell.z + 1));
+                const auto to = project(peer);
+                if (!to) continue;
+                wiring.markers.push_back({ *to, color, false });
+                if (!from) continue;
+                wiring.lines.push_back({ *from, *to, color,
+                    wiring.lines.empty() ? std::string_view(wiring.connectionLabel) : std::string_view {} });
+            }
+        }
+        if (const auto endpoint = hovered ? maker.linkTargetAt(*hovered) : std::nullopt;
+            endpoint && endpoint != selectedLink && std::ranges::find(wiring.peers, *endpoint) == wiring.peers.end()) {
+            if (const auto marker = project(*endpoint)) wiring.markers.push_back({ *marker, highlight(endpoint->kind), false });
+            if (const auto target = makerLinkTile(editor, *endpoint); target != boardTile) {
+                coveredLinkHint = "Connect to " + std::string(makerTileGuide::name(target)) + " under this tile";
+            }
+        }
+        wiring.inspector.title = wiring.title;
+        wiring.inspector.members = wiring.members;
+        wiring.inspector.groups = wiring.groupNames;
+    }
+    const TileType brush = editor.selectedTile();
+    const bool showPlacementHint = painting && makerHover_ && !makerView_.tileSearchFocused();
+    const std::string_view placementError = showPlacementHint
+        ? editor.tilePlacementError(*makerHover_, brush) : std::string_view {};
     const auto assets = renderer_.assetLoadingStats();
     const MakerViewInput viewInput {
         .wheelY = input.pointer.wheel.y,
@@ -1081,20 +1306,31 @@ void Application::drawMakerWorkspace(
         .navigation = input.maker,
         .extendTextSelection = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0,
         .interactive = !makerDraftDialog_,
+        .tileThumbnail = [this](TileType tile) { return renderer_.makerTileThumbnail(tile); },
     };
     const MakerViewAction action = makerView_.draw(ui_, layout, {
-        .brush = editor.selectedTile(),
+        .brush = brush,
         .quarterTurns = editor.selectedTileQuarterTurns(),
         .layer = editor.activeLayer(),
         .layerCount = editor.documentDepth(),
         .erasing = maker.tool() == MakerSession::Tool::Erase,
         .canUndo = editor.canUndo(),
         .canRedo = editor.canRedo(),
-        .hovered = makerHover_,
+        .hovered = connecting ? hovered : makerHover_,
         .status = maker.status().empty() && (assets.pendingModels || assets.pendingTextures)
             ? "Loading board assets" : maker.status(),
         .draftName = maker.draftName(),
         .unsavedChanges = maker.hasUnsavedChanges(),
+        .placementHint = showPlacementHint
+            ? (placementError.empty() ? makerTileGuide::forTile(brush).placementHint : placementError)
+            : std::string_view(coveredLinkHint),
+        .placementBlocked = !placementError.empty(),
+        .boardTile = boardTile == TileType::Air ? std::nullopt : std::optional { boardTile },
+        .linkInspector = connecting ? std::optional { wiring.inspector } : std::nullopt,
+        .linkLines = wiring.lines,
+        .linkMarkers = wiring.markers,
+        .linkViewport = scene,
+        .linkLayerIsolated = maker.linkLayerIsolated(),
     }, viewInput);
     if (auto& dialog = makerDraftDialog_) {
         MakerViewInput dialogInput = viewInput;
@@ -1124,11 +1360,49 @@ void Application::drawMakerWorkspace(
     case MakerCommand::Back:
         handleShellEvent(ShellBackPressed {});
         return;
-    case MakerCommand::Paint: maker.setTool(MakerSession::Tool::Paint); break;
-    case MakerCommand::Erase: maker.setTool(MakerSession::Tool::Erase); break;
+    case MakerCommand::Paint:
+    case MakerCommand::Erase:
+    case MakerCommand::Connect: {
+        const auto tool = action.command == MakerCommand::Paint ? MakerSession::Tool::Paint :
+            action.command == MakerCommand::Erase ? MakerSession::Tool::Erase : MakerSession::Tool::Connect;
+        if (tool != maker.tool() && maker.linkLayerIsolated()) makerViewport_.reset();
+        maker.setTool(tool);
+        break;
+    }
+    case MakerCommand::Disconnect: (void)maker.disconnectSelectedLink(); break;
+    case MakerCommand::ClearLinkSelection: maker.clearLinkSelection(); break;
+    case MakerCommand::NewLinkGroup:
+        openMakerDraftDialog(MakerDraftDialogMode::NameLinkGroup);
+        return;
+    case MakerCommand::RenameLinkGroup:
+        if (wiring.inspector.activeGroup) {
+            openMakerDraftDialog(MakerDraftDialogMode::RenameLinkGroup,
+                wiring.groupNames[*wiring.inspector.activeGroup]);
+        }
+        return;
+    case MakerCommand::AssignLinkGroup:
+        if (action.linkGroup && *action.linkGroup < wiring.groupColors.size()) {
+            (void)maker.assignSelectedLinkGroup(wiring.groupColors[*action.linkGroup]);
+        }
+        break;
+    case MakerCommand::SelectOtherLinkEndpoint:
+        if (selectedLink) {
+            if (const auto other = otherMakerLinkEndpoint(editor, *selectedLink)) {
+                (void)maker.selectLinkEndpoint(*other);
+            }
+        }
+        break;
     case MakerCommand::Rotate: maker.rotateTile(); break;
-    case MakerCommand::LayerDown: maker.stepLayer(-1); break;
-    case MakerCommand::LayerUp: maker.stepLayer(1); break;
+    case MakerCommand::LayerDown:
+    case MakerCommand::LayerUp:
+        maker.stepLayer(action.command == MakerCommand::LayerDown ? -1 : 1);
+        if (connecting && maker.linkLayerIsolated()) makerViewport_.reset();
+        break;
+    case MakerCommand::ToggleLinkLayer:
+        maker.toggleLinkLayer();
+        makerViewport_.reset();
+        break;
+    case MakerCommand::ToggleElevatorStop: (void)maker.toggleSelectedElevatorStop(); break;
     case MakerCommand::Undo:
     case MakerCommand::Redo: {
         const auto width = editor.documentWidth();
@@ -1163,19 +1437,29 @@ void Application::drawMakerWorkspace(
         maker.selectTile(*action.tile);
     }
 
+    if (maker.tool() == MakerSession::Tool::Connect) {
+        if (ui_.clicked(scene)) {
+            if (const auto cell = pick(*ui_.mousePressPosition())) {
+                (void)maker.connectCell(*cell);
+            }
+        }
+        return;
+    }
+
     const auto drag = makerView_.tileSearchFocused()
         ? std::nullopt : ui_.dragPosition("maker.board", scene);
     if (drag) {
         if (const auto press = ui_.mousePressPosition()) {
             maker.endStroke();
-            if (const auto cell = pick(*press)) maker.beginStroke(*cell);
+            if (const auto cell = pick(*press)) maker.beginStroke(xy(*cell));
         }
-        maker.continueStroke(pick(*drag));
+        const auto cell = pick(*drag);
+        maker.continueStroke(cell ? std::optional { xy(*cell) } : std::nullopt);
     }
     if (maker.strokeActive() && (!drag || !ui_.mouseDown())) {
         maker.endStroke();
     }
-    makerHover_ = hovered ? maker.previewCell(*hovered) : std::nullopt;
+    makerHover_ = hovered ? maker.previewCell(xy(*hovered)) : std::nullopt;
 }
 
 // One UI frame: sizes, the pointer mapping, every panel and overlay that can
@@ -1576,6 +1860,8 @@ bool Application::run()
                 blurNativeTextInput();
             } else if (makerPlaytest_ && !optionsMenu_.isOpen()) {
                 returnToMaker();
+            } else if (makerOpen_ && !optionsMenu_.isOpen() && makerSession_->selectedLinkEndpoint()) {
+                makerSession_->clearLinkSelection();
             } else {
                 handleShellEvent(ShellBackPressed {});
             }
@@ -3632,20 +3918,28 @@ RenderFrameData Application::buildRenderFrame(
         return buildMakerPlaytestFrame(arena);
     }
     if (ui_.drawData().sceneViewport && makerSession_) {
+        const auto& editor = makerSession_->editor();
+        const bool erasing = makerSession_->tool() == MakerSession::Tool::Erase;
+        auto hoverCell = makerView_.tileSearchFocused() || makerSession_->tool() == MakerSession::Tool::Connect
+            ? std::nullopt : makerHover_;
+        if (hoverCell && !erasing && !editor.tilePlacementError(*hoverCell, editor.selectedTile()).empty()) {
+            hoverCell.reset();
+        }
         const auto resizePreviewSize = makerDraftDialog_ && showsMakerResizePreview(makerDraftDialog_->mode)
             ? std::optional { makerView_.resizePreviewSize() } : std::nullopt;
         RenderFrameData frame = RenderFrameBuilder::buildEditor({
             .manifest = assetManifest_,
-            .editor = makerSession_->editor(),
+            .editor = editor,
             .settings = presentationSettings_,
             .animations = &animationCatalog_,
-            .hoverCell = makerHover_,
-            .deleting = makerSession_->tool() == MakerSession::Tool::Erase,
+            .hoverCell = hoverCell,
+            .deleting = erasing,
             .allowBoardExpansion = false,
             .worldAnimationTimeSeconds = presentation_.worldAnimationTimeSeconds(),
             .animationTransitionTimeSeconds = presentation_.animationTransitionTimeSeconds(),
             .groundGeometryCache = &editorGroundGeometryCache_,
             .resizePreviewSize = resizePreviewSize,
+            .isolateActiveLayer = makerSession_->tool() == MakerSession::Tool::Connect && makerSession_->linkLayerIsolated(),
         }, arena);
         frame.cameraPitchDegrees = 55.0f;
         frame.cameraYawDegrees = 24.0f;

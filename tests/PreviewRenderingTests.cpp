@@ -166,6 +166,97 @@ ImageData verifyPreview(SDL_Window* window, const std::filesystem::path& root,
     return capture(red, blue, true, false);
 }
 
+void verifyMakerThumbnail(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    UiContext ui(font);
+    const VkExtent2D extent = renderer.renderExtent();
+    const Vec2 viewport { static_cast<float>(extent.width), static_cast<float>(extent.height) };
+    constexpr UiRect picture { { 32.0f, 32.0f }, { 100.0f, 100.0f } };
+    const auto draw = [&](RenderTexture texture) {
+        ui.beginFrame(viewport, {}, false, false);
+        ui.rect(picture, { 0.1f, 0.2f, 0.3f, 1.0f });
+        ui.textureImage(picture, texture);
+        ui.endFrame();
+        renderer.beginDebugUiFrame();
+        // Capture reads the display image before the shipping swapchain's UI pass.
+        renderer.drawFrame(renderer.prepareFrame(RenderFrameData {}), ui.drawData(), true);
+        verify(!renderer.hasFatalFailure(), "Native thumbnail frame failed to render");
+    };
+
+    verify(renderer.makerTileThumbnail(TileType::Air).isNone(), "Air has a native thumbnail");
+    draw(noTexture);
+    const auto fallback = renderer.captureRenderedFrame();
+
+    const auto loadThumbnail = [&](TileType tile) {
+        verify(renderer.makerTileThumbnail(tile).isNone(), "A thumbnail was loaded synchronously");
+        RenderTexture texture;
+        for (int frame = 0; frame < 100 && texture.isNone(); ++frame) {
+            texture = renderer.makerTileThumbnail(tile);
+            draw(texture);
+            SDL_Delay(5);
+        }
+        verify(!texture.isNone(), "The staged thumbnail never became available");
+        verify(renderer.makerTileThumbnail(tile) == texture,
+            "Repeated thumbnail requests did not preserve the texture handle");
+        auto image = renderer.captureRenderedFrame();
+        verify(difference(fallback, image, 44, 44, 120, 120) > 10.0,
+            "The native UI did not sample the uploaded thumbnail");
+        return image;
+    };
+    const auto wall = loadThumbnail(TileType::Wall);
+    const auto water = loadThumbnail(TileType::Water);
+    verify(difference(wall, water, 44, 44, 120, 120) > 5.0,
+        "Wall and water sampled the same thumbnail");
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a native thumbnail error");
+}
+
+void verifyMakerWiringProjection(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    LevelEditor editor;
+    editor.newDocument(9, 8, false);
+    const GridPosition3 gate { 6, 2, 1 };
+    const GridPosition3 plate { 4, 4, 1 };
+    const GridPosition3 portal { 2, 5, 1 };
+    verify(editor.setCell(gate, TileType::Gate), "Could not place the fixture gate");
+    verify(editor.setCell(plate, TileType::PressurePlate), "Could not place the fixture plate");
+    verify(editor.setCell(portal, TileType::PortalSouth), "Could not place the fixture portal");
+    const PresentationSettings settings;
+    const auto prepared = renderer.prepareFrame(RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = settings, .allowBoardExpansion = false,
+    }));
+    constexpr UiRect nativeViewport { { 228.0f, 74.0f }, { 400.0f, 225.0f } };
+    const auto check = [&](Vec3 anchor, GridPosition3 cell) {
+        const auto pixel = renderer.projectToPixels(prepared, anchor, nativeViewport);
+        verify(pixel.has_value(), "Could not project a Maker link endpoint");
+        verify(renderer.pickIsoGridCell(prepared, *pixel, nativeViewport) == cell,
+            "The link marker misses its native board pick target");
+    };
+    check({ 6.5f, 2.5f, 1.55f }, gate);
+    check({ 4.5f, 4.5f, 1.01f }, plate);
+    check({ 2.5f, 6.0f, 1.80f }, portal);
+
+    const GridPosition3 lower { 4, 3, 1 };
+    const GridPosition3 upper { 4, 3, 2 };
+    verify(editor.setCell(lower, TileType::RotatorCounterClockwise), "Could not place a lower endpoint");
+    verify(editor.setCell(upper, TileType::Wall), "Could not place an occluding upper tile");
+    editor.setActiveLayer(lower.z);
+    const auto isolated = renderer.prepareFrame(RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = editor, .settings = settings, .allowBoardExpansion = false,
+        .isolateActiveLayer = true,
+    }));
+    const auto lowerMarker = renderer.projectToPixels(isolated, { 4.5f, 3.5f, 1.04f }, nativeViewport);
+    verify(lowerMarker && renderer.pickIsoGridCell(isolated, *lowerMarker, nativeViewport) == lower,
+        "Layer isolation did not expose the lower endpoint");
+    verify(!editor.layerLocked(), "Layer isolation modified the editor document");
+}
+
 ImageData verifyResizePreview(SDL_Window* window, const std::filesystem::path& root,
     FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
 {
@@ -2030,6 +2121,16 @@ int main(int argc, char** argv)
         auto font = FontAtlas::loadDefault(root);
         const auto manifest = AssetManifest::loadFromFile(root / "manifest.json");
         ScopedTestDirectory temp("preview-rendering");
+        if (argc > 1 && std::string_view(argv[1]) == "--maker-thumbnail") {
+            verifyMakerThumbnail(window.get(), root, font, manifest, temp.path() / "cache.bin");
+            std::cout << "Maker thumbnail GPU regression passed\n";
+            return 0;
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--maker-wiring") {
+            verifyMakerWiringProjection(window.get(), root, font, manifest, temp.path() / "cache.bin");
+            std::cout << "Maker wiring projection regression passed\n";
+            return 0;
+        }
         if (argc > 1 && std::string_view(argv[1]) == "--resize-preview") {
             const auto image = verifyResizePreview(window.get(), root, font, manifest, temp.path() / "cache.bin");
             if (argc > 2) saveRippleEvidence(argv[2], image);

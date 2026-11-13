@@ -455,7 +455,7 @@ void VulkanModelResources::requestAssets(
             queueAnimation(animation, priority);
         }
     }
-    for (uint32_t i = 0; i < textureSpace_.manifestCount(); ++i) {
+    for (uint32_t i : textureSpace_.active()) {
         if (requirements.contains(RenderTexture { i + 1 })) {
             queueTexture(i, priority);
         }
@@ -1358,7 +1358,7 @@ std::vector<bool> VulkanModelResources::requiredTextures(
     const RenderAssetRequirements& requirements) const
 {
     std::vector<bool> result(textures_.size(), false);
-    for (uint32_t i = 0; i < textureSpace_.manifestCount(); ++i) {
+    for (uint32_t i : textureSpace_.active()) {
         result[i] = requirements.contains(RenderTexture { i + 1 });
     }
     for (uint32_t i = 0; i < models_.size(); ++i) {
@@ -1611,8 +1611,8 @@ VulkanModelResources::MaterialBinding VulkanModelResources::materialForModel(
 
 bool VulkanModelResources::textureReady(RenderTexture texture) const noexcept
 {
-    if (texture.isNone() || texture.index() >= textures_.size() ||
-        !textureSpace_.isManifestTexture(static_cast<uint32_t>(texture.index()))) {
+    if (texture.isNone() || texture.index() >= textureDefinitions_.size() ||
+        !textureDefinitions_[texture.index()]) {
         return false;
     }
     const TextureSlot& slot = textures_[texture.index()];
@@ -2167,6 +2167,54 @@ bool VulkanModelResources::syncManifestTextures()
     }
     textureSpace_.growManifestRange(wanted);
     return true;
+}
+
+RenderTexture VulkanModelResources::registerOptionalTexture(AssetManifest::Texture texture)
+{
+    const uint64_t sourceBytes = sourceFileBytes(assetRoot_ / texture.path);
+    if (sourceBytes == 0) {
+        return noTexture;
+    }
+    auto definition = runtimeTextureDefinitionFor(texture);
+    definition.manifestOwned = false;
+    uint64_t estimatedPreparedBytes = 0;
+    try {
+        estimatedPreparedBytes = inspectPreparedTextureSourceBytes(
+            assetRoot_, definition.identity, supportsBc7_);
+    } catch (const std::runtime_error& error) {
+        log::warning(log::Category::Assets)
+            << "Skipping optional " << definition.label << ": " << error.what();
+        return noTexture;
+    }
+    const auto index = textureSpace_.claimDiscoveredSlot();
+    if (!index) return noTexture;
+    textureDefinitions_[*index] = std::move(definition);
+    auto& slot = textures_[*index];
+    slot.sourceBytes = sourceBytes;
+    slot.estimatedPreparedBytes = estimatedPreparedBytes;
+    return RenderTexture { *index + 1 };
+}
+
+void VulkanModelResources::invalidateOptionalTexture(RenderTexture texture)
+{
+    if (texture.isNone() || texture.index() >= textureDefinitions_.size() ||
+        !textureDefinitions_[texture.index()] || textureDefinitions_[texture.index()]->manifestOwned) {
+        return;
+    }
+    auto& slot = textures_[texture.index()];
+    const LoadState state = slot.publication.state();
+    if (state == LoadState::Ready) {
+        retireTexture(slot);
+    } else if (state == LoadState::Failed || state == LoadState::CpuReady) {
+        slot.publication = {};
+    }
+    try {
+        slot.estimatedPreparedBytes = inspectPreparedTextureSourceBytes(
+            assetRoot_, textureDefinitions_[texture.index()]->identity, supportsBc7_);
+    } catch (const std::runtime_error&) {
+        // Decode failures remain a fallback swatch. Reuse the previous
+        // reservation if rebaking did not produce a usable replacement.
+    }
 }
 
 bool VulkanModelResources::syncManifestModels()

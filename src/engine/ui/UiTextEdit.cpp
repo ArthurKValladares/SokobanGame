@@ -110,6 +110,11 @@ std::size_t byteOffset(
 
 bool matchesSearchTerms(std::string_view label, std::string_view query)
 {
+    return matchesSearchTerms(std::span(&label, 1), query);
+}
+
+bool matchesSearchTerms(std::span<const std::string_view> fields, std::string_view query)
+{
     const auto caseInsensitive = [](unsigned char left, unsigned char right) {
         return std::tolower(left) == std::tolower(right);
     };
@@ -120,7 +125,9 @@ bool matchesSearchTerms(std::string_view label, std::string_view query)
         }
         query.remove_prefix(first);
         const std::string_view term = query.substr(0, query.find_first_of(" \t"));
-        if (std::ranges::search(label, term, caseInsensitive).empty()) {
+        if (std::ranges::none_of(fields, [&](std::string_view field) {
+                return !std::ranges::search(field, term, caseInsensitive).empty();
+            })) {
             return false;
         }
         query.remove_prefix(term.size());

@@ -219,6 +219,8 @@ public:
     bool paintCell(GridPosition3 position);
     bool eraseCell(GridPosition3 position);
     bool setCell(GridPosition3 position, TileType tile);
+    // Returns the placement rule that would reject a paint operation, if any.
+    [[nodiscard]] std::string_view tilePlacementError(GridPosition3 position, TileType tile) const;
     // Streams replace an existing water surface; lily pads occupy the empty
     // cell immediately above one. Includes implicit water-layer cells and
     // rejects horizontal expansion. Other tiles have no water placement restriction.
@@ -418,6 +420,25 @@ public:
     [[nodiscard]] std::vector<LinkGroup> linkGroups() const;
     // Derived document data retained until its exact source records change.
     [[nodiscard]] const std::vector<LinkGroup>& linkGroupsView() const;
+    enum class LinkEndpointKind : uint8_t { Source, Device, Portal, Object };
+    struct LinkEndpoint {
+        GridPosition3 cell;
+        LinkEndpointKind kind;
+        bool operator==(const LinkEndpoint&) const = default;
+    };
+    [[nodiscard]] std::optional<LinkEndpoint> linkEndpointAt(GridPosition3 cell) const;
+    [[nodiscard]] bool hasLinkEndpoint(LinkEndpoint endpoint) const;
+    [[nodiscard]] std::optional<Vec3> linkEndpointColor(LinkEndpoint endpoint) const;
+    [[nodiscard]] std::vector<GridPosition3> linkSourcesForDevice(GridPosition3 cell) const;
+    [[nodiscard]] std::vector<GridPosition3> devicesDrivenBy(GridPosition3 source) const;
+    [[nodiscard]] const std::vector<Level::LinkGroupName>& linkGroupNames() const;
+    [[nodiscard]] std::string_view linkGroupName(Level::LinkGroupKind kind, Vec3 color) const;
+    void enableExplicitLinkEditing();
+    [[nodiscard]] bool connectLinkEndpoints(LinkEndpoint first, LinkEndpoint second);
+    [[nodiscard]] bool disconnectLinkEndpoint(LinkEndpoint endpoint);
+    [[nodiscard]] bool assignLinkEndpoint(LinkEndpoint endpoint, Vec3 color);
+    [[nodiscard]] bool createLinkGroup(LinkEndpoint endpoint, std::string name);
+    [[nodiscard]] bool setLinkGroupName(Level::LinkGroupKind kind, Vec3 color, std::string name);
     [[nodiscard]] const std::vector<std::optional<Level::MinecartRoute>>&
         minecartRoutesView() const;
     // Recolors the linkable thing at `cell`, one undoable command.
@@ -541,6 +562,12 @@ private:
     static void clearHistory(EditHistory& history);
     void trimHistory();
     bool setCellWithRotation(GridPosition3 position, TileType tile, uint32_t quarterTurns);
+    [[nodiscard]] TileType authoredTileAt(GridPosition3 cell) const;
+    [[nodiscard]] Vec3 unusedLinkColor() const;
+    [[nodiscard]] bool hasLinkGroup(Level::LinkGroupKind kind, Vec3 color) const;
+    [[nodiscard]] bool portalIsPaired(LinkEndpoint endpoint) const;
+    void updateLinkEndpoint(LinkEndpoint endpoint, Vec3 color);
+    void nameNewLinkGroup(Level::LinkGroupKind kind, Vec3 color);
     [[nodiscard]] bool documentHasWater(GridPosition3 position) const;
     void setTileRotation(GridPosition3 cell, uint32_t quarterTurns);
     // The document as a level definition, with each device's plate list
@@ -548,8 +575,8 @@ private:
     // nothing kept as editor-only link colors.
     [[nodiscard]] Level::Definition linkedDefinition(
         std::optional<CharacterType> character) const;
-    [[nodiscard]] static Level::Definition linkedDefinition(
-        const Level::Definition& authored, std::optional<CharacterType> character);
+    [[nodiscard]] Level::Definition linkedDefinition(
+        const Level::Definition& authored, std::optional<CharacterType> character) const;
     [[nodiscard]] bool documentDirty(const Document& document) const;
     SavedDocument& noteSavedDocument(const std::filesystem::path& path);
     void cacheActiveDraft();
@@ -618,6 +645,7 @@ private:
     // Set while a compound command (moveObject) makes intermediate changes
     // that it records itself.
     bool historySuppressed_ = false;
+    bool explicitLinkEditing_ = false;
     Vec3 activeLinkColor_ { 1.0f, 0.72f, 0.12f };
     std::vector<TileType> recentTiles_;
     std::mt19937 tileDecorationRandom_ { std::random_device {}() };

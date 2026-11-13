@@ -16,7 +16,7 @@ class MakerDraftStore;
 // Owns the active Maker draft and its edit history independently of the campaign.
 class MakerSession {
 public:
-    enum class Tool { Paint, Erase };
+    enum class Tool { Paint, Erase, Connect };
     enum class SaveDraftResult { Saved, NameExists, Failed };
 
     static constexpr uint32_t minDraftDimension = 1;
@@ -43,6 +43,18 @@ public:
     void stepLayer(int delta);
     bool undo();
     bool redo();
+    [[nodiscard]] std::optional<LevelEditor::LinkEndpoint> selectedLinkEndpoint() const;
+    [[nodiscard]] std::optional<LevelEditor::LinkEndpoint> linkTargetAt(GridPosition3 cell) const;
+    [[nodiscard]] bool linkLayerIsolated() const { return linkLayerIsolated_; }
+    void toggleLinkLayer();
+    bool connectCell(GridPosition3 cell);
+    bool selectLinkEndpoint(LevelEditor::LinkEndpoint endpoint);
+    void clearLinkSelection();
+    bool assignSelectedLinkGroup(Vec3 color);
+    bool disconnectSelectedLink();
+    bool createSelectedLinkGroup(std::string name);
+    bool renameLinkGroup(Level::LinkGroupKind kind, Vec3 color, std::string name);
+    bool toggleSelectedElevatorStop();
 
     // Finish an open edit stroke and compile a separate runtime level for Test
     // Play. Invalid drafts stay editable and report the loader's explanation.
@@ -67,6 +79,8 @@ private:
     std::string draftName_;
     bool unsavedChanges_ = false;
     bool strokeChanged_ = false;
+    std::optional<LevelEditor::LinkEndpoint> selectedLinkEndpoint_;
+    bool linkLayerIsolated_ = false;
     std::optional<GridPosition> lastCell_;
     std::vector<bool> visited_;
 };

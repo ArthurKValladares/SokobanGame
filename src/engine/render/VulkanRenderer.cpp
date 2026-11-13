@@ -4,6 +4,7 @@
 #include "engine/Log.hpp"
 #include "engine/ProcessMemory.hpp"
 #include "engine/Profiler.hpp"
+#include "engine/TileThumbnailBake.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/GroundRimGeometry.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
@@ -799,6 +800,8 @@ void VulkanRenderer::drawFrame(
     for (const UiDrawCommand& command : uiDrawData.commands) {
         frameAssetRequirements_.requireTexture(command.texture);
     }
+    frameAssetRequirements_.merge(makerThumbnailRequirements_);
+    makerThumbnailRequirements_.clear();
     ensureAssets(frameAssetRequirements_);
     assetSchedulingTimeTelemetry_.record(
         elapsedMilliseconds(assetSchedulingStart));
@@ -1090,10 +1093,37 @@ VkDescriptorSet VulkanRenderer::tileThumbnail(TileType tile)
 #endif
 }
 
+RenderTexture VulkanRenderer::makerTileThumbnail(TileType tile)
+{
+    const auto index = static_cast<std::size_t>(tile);
+    if (index >= makerTileThumbnails_.size() || !tileThumbnails::shouldBake(tile)) {
+        return noTexture;
+    }
+    auto& entry = makerTileThumbnails_[index];
+    if (!entry) {
+        entry = modelResources_.registerOptionalTexture({
+            .name = std::string(tileTypeName(tile)),
+            .path = tileThumbnails::assetPathFor(tile),
+            .filter = TextureFilter::Linear,
+        });
+    }
+    if (modelResources_.textureReady(*entry)) {
+        return *entry;
+    }
+    makerThumbnailRequirements_.requireTexture(*entry);
+    return noTexture;
+}
+
 void VulkanRenderer::invalidateTileThumbnails()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     thumbnailPass_.invalidate();
+    modelResources_.retireCompletedUploads();
+    for (auto& entry : makerTileThumbnails_) {
+        if (!entry) continue;
+        if (entry->isNone()) entry.reset();
+        else modelResources_.invalidateOptionalTexture(*entry);
+    }
 #endif
 }
 
@@ -1467,31 +1497,30 @@ std::optional<Vec2> VulkanRenderer::projectToPixels(
     const PreparedFrame& frame,
     Vec3 worldPoint) const
 {
-    const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
-    if (prepared.frameData.viewMode != RenderViewMode::Isometric3D) {
-        return std::nullopt;
+    if (gameViewportDisplay_) {
+        return projectToPixels(frame, worldPoint,
+            { gameViewportDisplay_->position, gameViewportDisplay_->size });
     }
-    const VkExtent2D outputExtent = activeResources_.swapchain->extent();
-    if (outputExtent.width == 0 || outputExtent.height == 0) {
+    const auto extent = activeResources_.swapchain->extent();
+    return projectToPixels(frame, worldPoint,
+        { {}, { static_cast<float>(extent.width), static_cast<float>(extent.height) } });
+}
+
+std::optional<Vec2> VulkanRenderer::projectToPixels(
+    const PreparedFrame& frame,
+    Vec3 worldPoint,
+    UiRect viewport) const
+{
+    const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
+    if (prepared.frameData.viewMode != RenderViewMode::Isometric3D ||
+        viewport.size.x <= 0.0f || viewport.size.y <= 0.0f) {
         return std::nullopt;
     }
     const Vec3 clip = IsoScenePreparer::projectIsoPoint(
         prepared.scene.isoLayout, prepared.scene.renderExtent, worldPoint);
-    const Vec2 normalized {
-        (clip.x + 1.0f) * 0.5f,
-        (1.0f - clip.y) * 0.5f,
-    };
-    if (gameViewportDisplay_) {
-        return Vec2 {
-            gameViewportDisplay_->position.x +
-                normalized.x * gameViewportDisplay_->size.x,
-            gameViewportDisplay_->position.y +
-                normalized.y * gameViewportDisplay_->size.y,
-        };
-    }
-    return Vec2 {
-        normalized.x * static_cast<float>(outputExtent.width),
-        normalized.y * static_cast<float>(outputExtent.height),
+    return viewport.position + Vec2 {
+        (clip.x + 1.0f) * 0.5f * viewport.size.x,
+        (1.0f - clip.y) * 0.5f * viewport.size.y,
     };
 }
 

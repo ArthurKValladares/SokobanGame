@@ -3,7 +3,9 @@
 #include "engine/GameplayLoop.hpp"
 #include "engine/MakerDraftStore.hpp"
 #include "engine/MakerSession.hpp"
+#include "engine/Rules.hpp"
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -150,6 +152,53 @@ void testRejectedPaintReportsPlacementRule()
     CHECK(session.beginStroke({ 0, 5 }));
     CHECK(!session.endStroke());
     CHECK(session.status().empty());
+}
+
+void testPlacementHintsMatchPainting()
+{
+    TEST("makerPlacementHintsMatchPainting");
+    MakerSession maker;
+    const GridPosition cell { 0, 5 };
+    const auto checkRejected = [&](TileType tile) {
+        maker.selectTile(tile);
+        const auto target = maker.previewCell(cell);
+        CHECK(target.has_value());
+        const auto before = maker.editor().documentDefinition();
+        const std::string_view hint = maker.editor().tilePlacementError(*target, tile);
+        CHECK(!hint.empty());
+        CHECK(maker.editor().documentDefinition() == before);
+        CHECK(maker.beginStroke(cell));
+        CHECK(!maker.endStroke());
+        CHECK(maker.status() == hint);
+        CHECK(!maker.editor().canUndo());
+    };
+    checkRejected(TileType::StreamUp);
+    checkRejected(TileType::LilyPad);
+    checkRejected(TileType::Ladder);
+    checkRejected(TileType::Minecart);
+
+    const auto paint = [&](TileType tile) {
+        maker.selectTile(tile);
+        CHECK(maker.editor().tilePlacementError(*maker.previewCell(cell), tile).empty());
+        CHECK(maker.beginStroke(cell));
+        CHECK(maker.endStroke());
+    };
+    paint(TileType::RailStopNorthSouth);
+    paint(TileType::Minecart);
+    CHECK(maker.editor().documentPlateAt(*maker.previewCell(cell)) == TileType::RailStopNorthSouth);
+
+    maker.stepLayer(-1);
+    paint(TileType::Ladder);
+    paint(TileType::Water);
+    paint(TileType::StreamRight);
+    CHECK(!maker.editor().tilePlacementError({ cell.x, cell.y, 1 }, TileType::LilyPad).empty());
+    maker.stepLayer(1);
+    maker.setTool(MakerSession::Tool::Erase);
+    CHECK(maker.beginStroke(cell));
+    CHECK(maker.endStroke());
+    CHECK(maker.beginStroke(cell));
+    CHECK(maker.endStroke());
+    paint(TileType::LilyPad);
 }
 
 void testPlaytestSnapshotsUnsavedDraft()
@@ -511,6 +560,474 @@ void testResizeDraftReportsAndRestoresCroppedTiles()
     CHECK(maker.editor().documentDefinition() == original);
     CHECK(maker.redo());
     CHECK(maker.editor().documentDefinition() == resized);
+    CHECK(maker.saveDraft(store, "Cropped") == MakerSession::SaveDraftResult::Saved);
+    CHECK(store.load("Cropped").gates.at(0).pressurePlates == std::vector<GridPosition3> { keptPlate });
+}
+
+void paintLinkTile(MakerSession& maker, GridPosition3 cell, TileType tile)
+{
+    maker.selectTile(tile);
+    CHECK(maker.beginStroke({ cell.x, cell.y }));
+    CHECK(maker.endStroke());
+}
+
+void testConnectDeviceAndPreserveExistingDrivers()
+{
+    TEST("makerConnectDeviceAndPreserveExistingDrivers");
+    using Kind = LevelEditor::LinkEndpointKind;
+    using Group = Level::LinkGroupKind;
+    MakerSession maker;
+    TemporaryDraftDirectory directory;
+    MakerDraftStore store(directory.root);
+    const GridPosition3 gate { 0, 4, 1 }, otherGate { 1, 4, 1 };
+    const GridPosition3 source { 0, 5, 1 }, extraSource { 1, 5, 1 }, otherSource { 2, 5, 1 };
+    paintLinkTile(maker, gate, TileType::Gate);
+    paintLinkTile(maker, otherGate, TileType::Gate);
+    paintLinkTile(maker, source, TileType::PressurePlate);
+    paintLinkTile(maker, source, TileType::Rock);
+    paintLinkTile(maker, extraSource, TileType::ButtonNorth);
+    paintLinkTile(maker, otherSource, TileType::LeverNorth);
+    const auto& editor = maker.editor();
+    CHECK(editor.linkEndpointAt(source)->kind == Kind::Object);
+    CHECK(editor.linkSourcesForDevice(gate).empty());
+    CHECK(editor.linkSourcesForDevice(otherGate).empty());
+    CHECK(!LevelEditor::sameLinkColor(*editor.linkEndpointColor({ gate, Kind::Device }),
+        *editor.linkEndpointColor({ source, Kind::Source })));
+    CHECK(maker.saveDraft(store, "Wiring") == MakerSession::SaveDraftResult::Saved);
+    maker.setTool(MakerSession::Tool::Connect);
+    CHECK(!maker.beginStroke({ gate.x, gate.y }));
+    CHECK(maker.connectCell(gate));
+    CHECK(!maker.hasUnsavedChanges());
+    CHECK(maker.connectCell(source));
+    CHECK(editor.linkSourcesForDevice(gate) == std::vector<GridPosition3> { source });
+    CHECK(maker.hasUnsavedChanges());
+    const Vec3 group = *editor.linkEndpointColor({ gate, Kind::Device });
+    CHECK(editor.linkGroupName(Group::Device, group) == "Device group 1");
+    CHECK(maker.undo());
+    CHECK(editor.linkSourcesForDevice(gate).empty());
+    CHECK(editor.linkGroupName(Group::Device, group).empty());
+    CHECK(!maker.hasUnsavedChanges());
+    CHECK(maker.redo());
+    CHECK(editor.linkSourcesForDevice(gate) == std::vector<GridPosition3> { source });
+
+    CHECK(maker.connectCell(extraSource));
+    const std::vector<GridPosition3> twoSources { source, extraSource };
+    CHECK(editor.linkSourcesForDevice(gate) == twoSources);
+    maker.clearLinkSelection();
+    CHECK(maker.connectCell(otherGate));
+    CHECK(maker.connectCell(otherSource));
+    maker.clearLinkSelection();
+    CHECK(maker.connectCell(gate));
+    CHECK(maker.connectCell(otherSource));
+    const std::vector<GridPosition3> threeSources { source, extraSource, otherSource };
+    CHECK(editor.linkSourcesForDevice(gate) == threeSources);
+    CHECK(editor.linkSourcesForDevice(otherGate) == std::vector<GridPosition3> { otherSource });
+    CHECK(LevelEditor::sameLinkColor(group, *editor.linkEndpointColor({ gate, Kind::Device })));
+    CHECK(maker.renameLinkGroup(Group::Device, group, "North gate"));
+    CHECK(!maker.createSelectedLinkGroup("north gate"));
+    CHECK(!maker.createSelectedLinkGroup("bad\nname"));
+    CHECK(maker.saveDraft(store, "Wiring", true) == MakerSession::SaveDraftResult::Saved);
+    MakerSession loaded;
+    CHECK(loaded.loadDraft(store, "Wiring"));
+    CHECK(loaded.editor().linkGroupName(Group::Device, group) == "North gate");
+    CHECK(loaded.editor().linkSourcesForDevice(gate) == threeSources);
+    CHECK(loaded.editor().linkSourcesForDevice(otherGate) == std::vector<GridPosition3> { otherSource });
+    CHECK(loaded.buildPlaytestLevel()->gateAt(gate)->pressurePlates == threeSources);
+    CHECK(maker.disconnectSelectedLink());
+    CHECK(editor.linkSourcesForDevice(gate).empty());
+    CHECK(editor.linkSourcesForDevice(otherGate) == std::vector<GridPosition3> { otherSource });
+    CHECK(maker.assignSelectedLinkGroup(group));
+    CHECK(editor.linkSourcesForDevice(gate) == twoSources);
+}
+
+void testConnectPortalsAndMovableObjects()
+{
+    TEST("makerConnectPortalsAndMovableObjects");
+    using Kind = LevelEditor::LinkEndpointKind;
+    using Group = Level::LinkGroupKind;
+    MakerSession maker;
+    const GridPosition3 first { 0, 4, 1 }, second { 1, 4, 1 }, third { 2, 4, 1 };
+    const GridPosition3 rock { 0, 5, 1 }, ice { 1, 5, 1 }, lastRock { 2, 5, 1 };
+    paintLinkTile(maker, first, TileType::PortalNorth);
+    paintLinkTile(maker, second, TileType::PortalSouth);
+    paintLinkTile(maker, third, TileType::PortalWest);
+    paintLinkTile(maker, rock, TileType::Rock);
+    paintLinkTile(maker, ice, TileType::Ice);
+    paintLinkTile(maker, lastRock, TileType::Rock);
+    CHECK(!maker.buildPlaytestLevel()->portalExit(first));
+    maker.setTool(MakerSession::Tool::Connect);
+    CHECK(maker.connectCell(first));
+    CHECK(maker.connectCell(second));
+    CHECK(maker.buildPlaytestLevel()->portalExit(first) == second);
+    CHECK(maker.connectCell(third));
+    CHECK(!maker.status().empty());
+    CHECK(maker.buildPlaytestLevel()->portalExit(first) == second);
+    CHECK(maker.disconnectSelectedLink());
+    CHECK(!maker.buildPlaytestLevel()->portalExit(second));
+    CHECK(maker.connectCell(third));
+    CHECK(maker.buildPlaytestLevel()->portalExit(first) == third);
+    CHECK(maker.undo());
+    CHECK(!maker.buildPlaytestLevel()->portalExit(first));
+
+    maker.clearLinkSelection();
+    CHECK(maker.connectCell(rock));
+    CHECK(maker.connectCell(ice));
+    const auto& editor = maker.editor();
+    CHECK(editor.objectLinks().size() == 2);
+    const Vec3 group = *editor.linkEndpointColor({ rock, Kind::Object });
+    CHECK(editor.linkGroupName(Group::Object, group) == "Sync group 1");
+    CHECK(maker.selectLinkEndpoint({ lastRock, Kind::Object }));
+    CHECK(maker.assignSelectedLinkGroup(group));
+    CHECK(editor.objectLinks().size() == 3);
+    CHECK(maker.createSelectedLinkGroup("Spare rocks"));
+    const Vec3 spare = *editor.linkEndpointColor({ lastRock, Kind::Object });
+    CHECK(!LevelEditor::sameLinkColor(group, spare));
+    CHECK(maker.disconnectSelectedLink());
+    CHECK(!editor.linkEndpointColor({ lastRock, Kind::Object }));
+    CHECK(editor.linkGroupName(Group::Object, spare) == "Spare rocks");
+    CHECK(maker.assignSelectedLinkGroup(spare));
+    CHECK(editor.linkEndpointColor({ lastRock, Kind::Object }) == spare);
+}
+
+void testConnectKeepsLegacyExplicitEdges()
+{
+    TEST("makerConnectKeepsLegacyExplicitEdges");
+    using Kind = LevelEditor::LinkEndpointKind;
+    using Group = Level::LinkGroupKind;
+    MakerSession maker;
+    TemporaryDraftDirectory directory;
+    MakerDraftStore store(directory.root);
+    auto definition = maker.editor().documentDefinition();
+    const GridPosition3 first { 0, 4, 1 }, second { 1, 4, 1 };
+    const GridPosition3 shared { 0, 5, 1 }, a { 1, 5, 1 }, b { 2, 5, 1 };
+    const Vec3 color { 0.3f, 0.2f, 0.9f };
+    const auto setTile = [&](GridPosition3 cell, TileType tile) {
+        definition.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)]
+            [static_cast<std::size_t>(cell.x)] = tileTypeToChar(tile);
+    };
+    for (const auto gate : { first, second }) setTile(gate, TileType::Gate);
+    for (const auto source : { shared, a, b }) {
+        setTile(source, TileType::PressurePlate);
+    }
+    const std::vector<GridPosition3> firstSources { shared, a };
+    const std::vector<GridPosition3> secondSources { shared, b };
+    definition.gates = { { .cell = first, .pressurePlates = firstSources, .color = color },
+        { .cell = second, .pressurePlates = secondSources, .color = color } };
+    store.save("Legacy", definition);
+    CHECK(maker.loadDraft(store, "Legacy"));
+    CHECK(maker.editor().linkSourcesForDevice(first) == firstSources);
+    CHECK(maker.editor().linkSourcesForDevice(second) == secondSources);
+    CHECK(maker.renameLinkGroup(Group::Device, color, "Legacy wiring"));
+    CHECK(maker.saveDraft(store, "Legacy", true) == MakerSession::SaveDraftResult::Saved);
+    CHECK(store.load("Legacy").gates.at(0).pressurePlates == firstSources);
+    CHECK(store.load("Legacy").gates.at(1).pressurePlates == secondSources);
+    CHECK(maker.selectLinkEndpoint({ shared, Kind::Source }));
+    CHECK(maker.disconnectSelectedLink());
+    CHECK(maker.editor().linkSourcesForDevice(first) == std::vector<GridPosition3> { a });
+    CHECK(maker.editor().linkSourcesForDevice(second) == std::vector<GridPosition3> { b });
+    CHECK(maker.undo());
+    CHECK(maker.editor().linkSourcesForDevice(first) == firstSources);
+    CHECK(maker.editor().linkSourcesForDevice(second) == secondSources);
+}
+
+template <auto FindDevice>
+const std::vector<GridPosition3>* compiledLinkSources(const Level& level, GridPosition3 cell)
+{
+    const auto* device = (level.*FindDevice)(cell);
+    return device ? &device->pressurePlates : nullptr;
+}
+
+void testEverySignalSourceConnectsToEveryDeviceInEitherOrder()
+{
+    TEST("makerEverySignalSourceConnectsToEveryDeviceInEitherOrder");
+    constexpr std::array sources {
+        TileType::PressurePlate,
+        TileType::ButtonNorth, TileType::ButtonEast, TileType::ButtonSouth, TileType::ButtonWest,
+        TileType::LeverNorth, TileType::LeverEast, TileType::LeverSouth, TileType::LeverWest,
+    };
+    struct DeviceCase {
+        TileType tile;
+        const std::vector<GridPosition3>* (*compiledSources)(const Level&, GridPosition3);
+    };
+    constexpr std::array devices {
+        DeviceCase { TileType::Gate, compiledLinkSources<&Level::gateAt> },
+        DeviceCase { TileType::RotatorClockwise, compiledLinkSources<&Level::rotatorAt> },
+        DeviceCase { TileType::RotatorCounterClockwise, compiledLinkSources<&Level::rotatorAt> },
+        DeviceCase { TileType::LockPlate, compiledLinkSources<&Level::lockPlateAt> },
+        DeviceCase { TileType::Elevator, compiledLinkSources<&Level::elevatorAt> },
+        DeviceCase { TileType::Minecart, compiledLinkSources<&Level::minecartAt> },
+    };
+    constexpr GridPosition3 sourceCell { 1, 5, 1 };
+    constexpr GridPosition3 deviceCell { 4, 5, 1 };
+    const std::vector<GridPosition3> expectedSources { sourceCell };
+    const std::vector<GridPosition3> expectedDevices { deviceCell };
+
+    for (const auto source : sources) {
+        for (const auto& device : devices) {
+            for (bool sourceFirst : { true, false }) {
+                const auto context = std::string(tileTypeName(source)) + " / " +
+                    std::string(tileTypeName(device.tile)) +
+                    (sourceFirst ? " (source first)" : " (device first)");
+                MakerSession maker;
+                paintLinkTile(maker, sourceCell, source);
+                if (device.tile == TileType::Minecart) {
+                    paintLinkTile(maker, deviceCell, TileType::RailStopEastWest);
+                    paintLinkTile(maker, { deviceCell.x + 1, deviceCell.y, deviceCell.z },
+                        TileType::RailStopEastWest);
+                }
+                paintLinkTile(maker, deviceCell, device.tile);
+                const auto& editor = maker.editor();
+                CHECK_MESSAGE(editor.linkSourcesForDevice(deviceCell).empty(), context.c_str());
+                maker.setTool(MakerSession::Tool::Connect);
+                CHECK_MESSAGE(maker.connectCell(sourceFirst ? sourceCell : deviceCell), context.c_str());
+                CHECK_MESSAGE(editor.linkSourcesForDevice(deviceCell).empty(), context.c_str());
+                CHECK_MESSAGE(maker.connectCell(sourceFirst ? deviceCell : sourceCell), context.c_str());
+                CHECK_MESSAGE(editor.linkSourcesForDevice(deviceCell) == expectedSources, context.c_str());
+                CHECK_MESSAGE(editor.devicesDrivenBy(sourceCell) == expectedDevices, context.c_str());
+
+                const auto level = maker.buildPlaytestLevel();
+                CHECK_MESSAGE(level.has_value(), context.c_str());
+                if (level) {
+                    const auto* compiled = device.compiledSources(*level, deviceCell);
+                    CHECK_MESSAGE(compiled && *compiled == expectedSources, context.c_str());
+                    CHECK_MESSAGE(level->plateAt(sourceCell) == source, context.c_str());
+                    if (device.tile == TileType::Minecart) {
+                        CHECK_MESSAGE(level->minecartRoutes().front().stops.size() == 2, context.c_str());
+                    }
+                }
+            }
+        }
+    }
+}
+
+void testCoveredConnectionUsesTheRequestedEndpoint()
+{
+    TEST("makerCoveredConnectionUsesTheRequestedEndpoint");
+    using Kind = LevelEditor::LinkEndpointKind;
+    using Endpoint = LevelEditor::LinkEndpoint;
+    constexpr GridPosition3 sourceCell { 1, 5, 1 };
+    constexpr GridPosition3 deviceCell { 4, 5, 1 };
+    constexpr Endpoint source { sourceCell, Kind::Source };
+    constexpr Endpoint device { deviceCell, Kind::Device };
+    constexpr Endpoint sourceRock { sourceCell, Kind::Object };
+    const std::vector<GridPosition3> expectedSources { sourceCell };
+
+    for (const auto sourceTile : { TileType::PressurePlate, TileType::ButtonEast, TileType::LeverWest }) {
+        for (const auto deviceTile : { TileType::RotatorClockwise, TileType::LockPlate }) {
+            for (bool sourceFirst : { true, false }) {
+                MakerSession maker;
+                paintLinkTile(maker, sourceCell, sourceTile);
+                paintLinkTile(maker, sourceCell, TileType::RoundRock);
+                paintLinkTile(maker, deviceCell, deviceTile);
+                paintLinkTile(maker, deviceCell, TileType::Rock);
+                maker.setTool(MakerSession::Tool::Connect);
+                const auto& editor = maker.editor();
+
+                CHECK(maker.connectCell(sourceCell));
+                CHECK(maker.selectedLinkEndpoint() == sourceRock);
+                CHECK(maker.connectCell(deviceCell));
+                CHECK(editor.objectLinks().size() == 2);
+                CHECK(editor.linkSourcesForDevice(deviceCell).empty());
+                const auto objectsBefore = editor.objectLinks();
+                maker.clearLinkSelection();
+
+                CHECK(maker.selectLinkEndpoint(sourceFirst ? source : device));
+                CHECK(maker.linkTargetAt(sourceFirst ? deviceCell : sourceCell) ==
+                    (sourceFirst ? device : source));
+                CHECK(maker.connectCell(sourceFirst ? deviceCell : sourceCell));
+                CHECK(editor.linkSourcesForDevice(deviceCell) == expectedSources);
+                CHECK(maker.selectedLinkEndpoint() == device);
+                CHECK(editor.objectLinks() == objectsBefore);
+                const auto level = maker.buildPlaytestLevel();
+                CHECK(level.has_value());
+                if (level) {
+                    CHECK(level->plateAt(sourceCell) == sourceTile);
+                    CHECK(level->plateAt(deviceCell) == deviceTile);
+                    const auto* compiled = deviceTile == TileType::LockPlate
+                        ? compiledLinkSources<&Level::lockPlateAt>(*level, deviceCell)
+                        : compiledLinkSources<&Level::rotatorAt>(*level, deviceCell);
+                    CHECK(compiled && *compiled == expectedSources);
+                }
+            }
+        }
+    }
+
+    for (const auto deviceTile : { TileType::RotatorCounterClockwise, TileType::LockPlate }) {
+        for (const auto occupant : { TileType::Knight, TileType::Enemy }) {
+            MakerSession maker;
+            paintLinkTile(maker, sourceCell, TileType::PressurePlate);
+            paintLinkTile(maker, deviceCell, deviceTile);
+            paintLinkTile(maker, deviceCell, occupant);
+            maker.setTool(MakerSession::Tool::Connect);
+            CHECK(maker.connectCell(deviceCell));
+            CHECK(maker.selectedLinkEndpoint() == device);
+            CHECK(maker.connectCell(sourceCell));
+            CHECK(maker.editor().linkSourcesForDevice(deviceCell) == expectedSources);
+        }
+    }
+}
+
+void testConnectedStoneCombinationsMoveInPlaytest()
+{
+    TEST("makerConnectedStoneCombinationsMoveInPlaytest");
+    using Kind = LevelEditor::LinkEndpointKind;
+    using Endpoint = LevelEditor::LinkEndpoint;
+    constexpr std::array stones {
+        TileType::Rock, TileType::RoundRock, TileType::Crystal, TileType::SkippingCrystal,
+        TileType::Ice,
+    };
+    constexpr GridPosition3 hero { 1, 0, 1 };
+    constexpr GridPosition3 leader { 2, 0, 1 };
+    constexpr GridPosition3 follower { 2, 1, 1 };
+    constexpr GridPosition3 unrelated { 2, 2, 1 };
+
+    for (const auto pushedTile : stones) {
+        for (const auto followingTile : stones) {
+            for (bool leaderFirst : { true, false }) {
+                const auto context = std::string(tileTypeName(pushedTile)) + " / " +
+                    std::string(tileTypeName(followingTile)) +
+                    (leaderFirst ? " (leader first)" : " (follower first)");
+                MakerSession maker;
+                CHECK(maker.newDraft(8, 3));
+                paintLinkTile(maker, hero, TileType::Rogue);
+                paintLinkTile(maker, leader, pushedTile);
+                paintLinkTile(maker, follower, followingTile);
+                paintLinkTile(maker, unrelated, TileType::Rock);
+                maker.setTool(MakerSession::Tool::Connect);
+                const auto first = leaderFirst ? leader : follower;
+                const auto second = leaderFirst ? follower : leader;
+                CHECK_MESSAGE(maker.connectCell(first), context.c_str());
+                CHECK_MESSAGE((maker.selectedLinkEndpoint() == Endpoint { first, Kind::Object }), context.c_str());
+                CHECK_MESSAGE(maker.editor().objectLinks().empty(), context.c_str());
+                CHECK_MESSAGE(maker.connectCell(second), context.c_str());
+
+                const auto level = maker.buildPlaytestLevel();
+                CHECK_MESSAGE(level.has_value(), context.c_str());
+                if (!level) continue;
+                CHECK_MESSAGE(level->movablesAreLinked(0, 1), context.c_str());
+                CHECK_MESSAGE(!level->movablesAreLinked(0, 2), context.c_str());
+                const auto initial = rules::initialState(*level);
+                const auto after = rules::step(*level, initial, MoveDirection::Right);
+                CHECK_MESSAGE(after.players.at(0).cell == leader, context.c_str());
+                CHECK_MESSAGE(after.movables.at(0).cell.x > leader.x, context.c_str());
+                CHECK_MESSAGE(after.movables.at(1).cell.x > follower.x, context.c_str());
+                CHECK_MESSAGE(after.movables.at(2).cell == unrelated, context.c_str());
+            }
+        }
+    }
+}
+
+void testWiredElevatorMovesBetweenMakerStops()
+{
+    TEST("makerWiredElevatorMovesBetweenMakerStops");
+    MakerSession maker;
+    CHECK(maker.newDraft(6, 4));
+    constexpr GridPosition3 hero { 1, 1, 1 };
+    constexpr GridPosition3 elevator { 4, 1, 0 };
+    constexpr GridPosition3 upperStop { 4, 1, 1 };
+    paintLinkTile(maker, hero, TileType::ButtonNorth);
+    paintLinkTile(maker, hero, TileType::Rogue);
+    maker.stepLayer(-1);
+    paintLinkTile(maker, elevator, TileType::Elevator);
+
+    maker.setTool(MakerSession::Tool::Connect);
+    CHECK(maker.connectCell(elevator));
+    CHECK(!maker.toggleSelectedElevatorStop());
+    maker.toggleLinkLayer();
+    CHECK(maker.linkLayerIsolated());
+    maker.stepLayer(1);
+    CHECK(maker.connectCell(hero));
+    CHECK(maker.toggleSelectedElevatorStop());
+    CHECK(maker.editor().elevators().front().levels == (std::vector<int> { 0, 1 }));
+    CHECK(maker.undo());
+    CHECK(maker.editor().elevators().front().levels == std::vector<int> { 0 });
+    CHECK(maker.redo());
+    const auto level = maker.buildPlaytestLevel();
+    CHECK(level.has_value());
+    if (!level) return;
+    const auto moved = rules::activate(*level, rules::initialState(*level));
+    CHECK(moved.has_value());
+    if (moved) CHECK(moved->elevators.front().cell == upperStop);
+    CHECK(maker.toggleSelectedElevatorStop());
+    CHECK(maker.editor().elevators().front().levels == std::vector<int> { 0 });
+}
+
+void testRemainingMovablesFollowConnectedRock()
+{
+    TEST("makerRemainingMovablesFollowConnectedRock");
+    using Endpoint = LevelEditor::LinkEndpoint;
+    using Kind = LevelEditor::LinkEndpointKind;
+    constexpr GridPosition3 hero { 0, 0, 1 };
+    constexpr GridPosition3 rock { 1, 0, 1 };
+    constexpr GridPosition3 follower { 3, 2, 1 };
+    constexpr GridPosition3 rockDestination { 2, 0, 1 };
+    constexpr GridPosition3 followerDestination { 4, 2, 1 };
+    constexpr std::array followers {
+        TileType::RobotNorth, TileType::RobotEast, TileType::RobotSouth, TileType::RobotWest,
+        TileType::TurretNorth, TileType::TurretEast, TileType::TurretSouth, TileType::TurretWest,
+        TileType::MirrorNorthWest, TileType::MirrorNorthEast,
+        TileType::MirrorSouthEast, TileType::MirrorSouthWest, TileType::LilyPad,
+    };
+    for (const auto tile : followers) {
+        const std::string context(tileTypeName(tile));
+        MakerSession maker;
+        CHECK(maker.newDraft(6, 3));
+        if (tile == TileType::LilyPad) {
+            maker.stepLayer(-1);
+            paintLinkTile(maker, { 3, 2, 0 }, TileType::Water);
+            paintLinkTile(maker, { 4, 2, 0 }, TileType::Water);
+            maker.stepLayer(1);
+        }
+        paintLinkTile(maker, hero, TileType::Rogue);
+        paintLinkTile(maker, rock, TileType::Rock);
+        paintLinkTile(maker, follower, tile);
+        maker.setTool(MakerSession::Tool::Connect);
+        CHECK(maker.connectCell(follower));
+        CHECK((maker.selectedLinkEndpoint() == Endpoint { follower, Kind::Object }));
+        CHECK(maker.connectCell(rock));
+        const auto level = maker.buildPlaytestLevel();
+        CHECK_MESSAGE(level.has_value(), context.c_str());
+        if (!level) continue;
+        CHECK_MESSAGE(level->movablesAreLinked(0, 1), context.c_str());
+        const auto moved = rules::step(*level, rules::initialState(*level), MoveDirection::Right, { .robot = 0 });
+        CHECK_MESSAGE(moved.movables.at(0).cell == rockDestination, context.c_str());
+        CHECK_MESSAGE(moved.movables.at(1).cell == followerDestination, context.c_str());
+    }
+}
+
+void testPortalFacingsPairAndCrossInEitherOrder()
+{
+    TEST("makerPortalFacingsPairAndCrossInEitherOrder");
+    constexpr std::array facings {
+        TileType::PortalNorth, TileType::PortalEast, TileType::PortalSouth, TileType::PortalWest,
+    };
+    constexpr GridPosition3 entrance { 1, 1, 1 };
+    constexpr GridPosition3 exit { 4, 2, 1 };
+    for (const auto entranceTile : facings) {
+        for (const auto exitTile : facings) {
+            for (const bool entranceFirst : { true, false }) {
+                MakerSession maker;
+                CHECK(maker.newDraft(6, 4));
+                paintLinkTile(maker, { 0, 0, 1 }, TileType::Rogue);
+                paintLinkTile(maker, entrance, entranceTile);
+                paintLinkTile(maker, exit, exitTile);
+                maker.setTool(MakerSession::Tool::Connect);
+                CHECK(maker.connectCell(entranceFirst ? entrance : exit));
+                CHECK(maker.connectCell(entranceFirst ? exit : entrance));
+                const auto level = maker.buildPlaytestLevel();
+                CHECK(level.has_value());
+                if (!level) continue;
+                const auto entranceEdge = portalEdgeOffset(entranceTile);
+                const auto exitEdge = portalEdgeOffset(exitTile);
+                const auto forward = level->portalCrossing(entrance, entranceEdge);
+                const auto reverse = level->portalCrossing(exit, exitEdge);
+                const GridPosition forwardDirection { -exitEdge.x, -exitEdge.y };
+                const GridPosition reverseDirection { -entranceEdge.x, -entranceEdge.y };
+                CHECK(forward && forward->exit == exit && forward->direction == forwardDirection);
+                CHECK(reverse && reverse->exit == entrance && reverse->direction == reverseDirection);
+            }
+        }
+    }
 }
 
 void testResizeDraftAcceptsEmptyEdgesAndExistingLargeBoards()
@@ -547,6 +1064,7 @@ int main()
     testBrushAndLayerChanges();
     testEraseVisitsCoveredCellOnce();
     testRejectedPaintReportsPlacementRule();
+    testPlacementHintsMatchPainting();
     testPlaytestSnapshotsUnsavedDraft();
     testPlaytestSolveKeepsEditorHistory();
     testPlaytestReportsInvalidDraft();
@@ -557,6 +1075,15 @@ int main()
     testResizeDraftPreservesTilesAndHistory();
     testResizeDraftReportsAndRestoresCroppedTiles();
     testResizeDraftAcceptsEmptyEdgesAndExistingLargeBoards();
+    testConnectDeviceAndPreserveExistingDrivers();
+    testConnectPortalsAndMovableObjects();
+    testConnectKeepsLegacyExplicitEdges();
+    testEverySignalSourceConnectsToEveryDeviceInEitherOrder();
+    testCoveredConnectionUsesTheRequestedEndpoint();
+    testConnectedStoneCombinationsMoveInPlaytest();
+    testWiredElevatorMovesBetweenMakerStops();
+    testRemainingMovablesFollowConnectedRock();
+    testPortalFacingsPairAndCrossInEitherOrder();
     if (failures != 0) {
         std::cerr << "MakerSessionTests: " << failures << " failures of " << checks << " checks\n";
         return 1;

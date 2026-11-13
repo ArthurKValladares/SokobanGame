@@ -18,6 +18,7 @@
 #include <fstream>
 #include <limits>
 #include <random>
+#include <set>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
@@ -393,6 +394,21 @@ bool sameColor(Vec3 left, Vec3 right)
     return linkColorKey(left) == linkColorKey(right);
 }
 
+bool sameGroupName(std::string_view left, std::string_view right)
+{
+    const auto lower = [](unsigned char value) {
+        return value >= 'A' && value <= 'Z' ? value + ('a' - 'A') : value;
+    };
+    return std::ranges::equal(left, right,
+        [&](char a, char b) { return lower(static_cast<unsigned char>(a)) == lower(static_cast<unsigned char>(b)); });
+}
+
+bool validLinkColor(Vec3 color)
+{
+    return std::ranges::all_of(std::array { color.x, color.y, color.z },
+        [](float channel) { return std::isfinite(channel) && channel >= 0.0f && channel <= 1.0f; });
+}
+
 std::array<int, 3> cellOrder(GridPosition3 cell)
 {
     return { cell.z, cell.y, cell.x };
@@ -409,9 +425,9 @@ void sortLinkColors(std::vector<Level::LinkColor>& colors)
 // this, unless a device already uses it.
 constexpr Vec3 unlinkedPlateColor { 0.55f, 0.55f, 0.55f };
 
-// A color no group uses yet: hues spread by the golden ratio, so successive
-// picks stay far apart.
-Vec3 freshLinkColor(const std::vector<std::array<long, 3>>& used)
+// Spread early picks around the hue circle. Continue through the rest of the
+// RGB space when a large board has already used those colors.
+Vec3 freshLinkColor(const auto& used)
 {
     for (int attempt = 0; attempt < 1024; ++attempt) {
         const float hue = std::fmod(
@@ -431,11 +447,18 @@ Vec3 freshLinkColor(const std::vector<std::array<long, 3>>& used)
         case 4: color = { rising, low, value }; break;
         default: color = { value, low, falling }; break;
         }
-        if (std::ranges::find(used, linkColorKey(color)) == used.end()) {
+        if (!used(linkColorKey(color))) {
             return color;
         }
     }
-    return unlinkedPlateColor;
+    for (long rgb = 0; rgb < 0x1000000; ++rgb) {
+        const std::array<long, 3> key { rgb >> 16, (rgb >> 8) & 255, rgb & 255 };
+        if (!used(key)) {
+            return { static_cast<float>(key[0]) / 255.0f,
+                static_cast<float>(key[1]) / 255.0f, static_cast<float>(key[2]) / 255.0f };
+        }
+    }
+    throw std::runtime_error("No unused link colors remain.");
 }
 
 // Every signal source in a definition, uncovered or beneath an occupant, in
@@ -473,7 +496,7 @@ struct LinkedDevice {
     std::vector<GridPosition3> plates;
 };
 
-void forEachLinkedDevice(Level::Definition& definition, const auto& visit)
+void forEachLinkedDevice(auto& definition, const auto& visit)
 {
     const auto visitRecords = [&](auto& records) {
         for (auto& record : records) {
@@ -490,6 +513,43 @@ void forEachLinkedDevice(Level::Definition& definition, const auto& visit)
     visitRecords(definition.lockPlates);
     visitRecords(definition.elevators);
     visitRecords(definition.minecarts);
+}
+
+using LinkColorKeys = std::set<std::array<long, 3>>;
+
+LinkColorKeys usedLinkColors(const Level::Definition& definition)
+{
+    LinkColorKeys used;
+    const auto add = [&](const auto& record) { used.insert(linkColorKey(record.color)); };
+    forEachLinkedDevice(definition, add);
+    std::ranges::for_each(definition.linkColors, add);
+    std::ranges::for_each(definition.linkGroupNames, add);
+    std::ranges::for_each(definition.portals, add);
+    std::ranges::for_each(definition.objectLinks, add);
+    return used;
+}
+
+void keepExplicitLinks(Level::Definition& definition)
+{
+    LinkColorKeys used = usedLinkColors(definition);
+    for (const GridPosition3 cell : pressurePlateCells(definition)) {
+        if (std::ranges::find(definition.linkColors, cell, &Level::LinkColor::cell) !=
+            definition.linkColors.end()) {
+            continue;
+        }
+        std::optional<Vec3> color;
+        forEachLinkedDevice(definition, [&](const auto& device) {
+            if (!color && std::ranges::find(device.pressurePlates, cell) != device.pressurePlates.end()) {
+                color = device.color;
+            }
+        });
+        if (!color) {
+            color = freshLinkColor([&](const auto& key) { return used.contains(key); });
+            used.insert(linkColorKey(*color));
+        }
+        definition.linkColors.push_back({ .cell = cell, .color = *color });
+    }
+    sortLinkColors(definition.linkColors);
 }
 
 struct LinkColoring {
@@ -563,7 +623,8 @@ LinkColoring colorLinks(Level::Definition& definition)
         // device, and every plate that drives nothing, gets a color of its
         // own.
         result.recolored = true;
-        std::vector<std::array<long, 3>> used;
+        LinkColorKeys used;
+        const auto isUsed = [&](const auto& key) { return used.contains(key); };
         std::vector<std::pair<std::vector<GridPosition3>, Vec3>> groups;
         for (LinkedDevice& device : devices) {
             const auto group = std::ranges::find_if(groups, [&](const auto& entry) {
@@ -573,10 +634,10 @@ LinkColoring colorLinks(Level::Definition& definition)
                 *device.color = group->second;
                 continue;
             }
-            if (std::ranges::find(used, linkColorKey(*device.color)) != used.end()) {
-                *device.color = freshLinkColor(used);
+            if (isUsed(linkColorKey(*device.color))) {
+                *device.color = freshLinkColor(isUsed);
             }
-            used.push_back(linkColorKey(*device.color));
+            used.insert(linkColorKey(*device.color));
             if (!device.plates.empty()) {
                 groups.emplace_back(device.plates, *device.color);
             }
@@ -588,8 +649,8 @@ LinkColoring colorLinks(Level::Definition& definition)
             const auto stored = std::ranges::find(
                 definition.linkColors, cell, &Level::LinkColor::cell);
             const Vec3 color = storedColor(cell).value_or(unlinkedPlateColor);
-            if (std::ranges::find(used, linkColorKey(color)) != used.end()) {
-                const Vec3 replacement = freshLinkColor(used);
+            if (isUsed(linkColorKey(color))) {
+                const Vec3 replacement = freshLinkColor(isUsed);
                 if (stored != definition.linkColors.end()) {
                     stored->color = replacement;
                 } else {
@@ -2176,6 +2237,46 @@ bool LevelEditor::canPlaceWaterTile(GridPosition3 position, TileType tile) const
     return current == TileType::Air || current == TileType::LilyPad;
 }
 
+std::string_view LevelEditor::tilePlacementError(GridPosition3 position, TileType tile) const
+{
+    if (!canPlaceWaterTile(position, tile)) {
+        return tile == TileType::LilyPad
+            ? "Lily pads must be placed in an empty cell directly above water."
+            : "Water streams must be placed on existing water.";
+    }
+
+    const int width = static_cast<int>(documentWidth());
+    const int height = static_cast<int>(documentHeight());
+    if (editingOverworld()) {
+        if (tile == TileType::End) return "End tiles are not allowed in overworld screens.";
+        if (position.x < 0 || position.y < 0 || position.x >= width || position.y >= height) {
+            return "Overworld screen dimensions are fixed by layout.json.";
+        }
+    }
+    if (tile == TileType::Ladder) {
+        constexpr std::array<GridPosition, 4> offsets {{ { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } }};
+        const auto depth = static_cast<int>(documentDepth());
+        const bool adjacentGround = std::ranges::any_of(offsets, [&](GridPosition offset) {
+            const auto x = static_cast<int64_t>(position.x) + offset.x;
+            const auto y = static_cast<int64_t>(position.y) + offset.y;
+            if (position.z < 0 || position.z >= depth) return false;
+            if (x >= 0 && x < width && y >= 0 && y < height) {
+                const char authored = document_.layers[static_cast<std::size_t>(position.z)]
+                    [static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
+                return tileTypeIsGround(charToTileType(authored).value_or(TileType::Air));
+            }
+            // The paint path considers ground on the base layer within its expanded bounds.
+            return position.z == 0 && x >= std::min(0, position.x) && x <= std::max(width - 1, position.x) &&
+                y >= std::min(0, position.y) && y <= std::max(height - 1, position.y);
+        });
+        if (!adjacentGround) return "Ladders must be next to ground on the same layer.";
+    }
+    if (tileTypeIsMinecart(tile) && !tileTypeIsRailStop(documentPlateAt(position).value_or(TileType::Air))) {
+        return "Minecarts must be painted on top of a Rail Stop.";
+    }
+    return {};
+}
+
 bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uint32_t quarterTurns)
 {
     if (editingOverworld() && tileTypeIsPlayerStart(tile)) {
@@ -2188,23 +2289,8 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
     if (document_.layers.empty() || position.z < 0) {
         return false;
     }
-    if (!canPlaceWaterTile(position, tile)) {
-        document_.status = tile == TileType::LilyPad
-            ? "Lily pads must be placed in an empty cell directly above water."
-            : "Water streams must be placed on existing water.";
-        return false;
-    }
-    if (editingOverworld() && tile == TileType::End) {
-        document_.status =
-            "End tiles are not allowed in overworld screens.";
-        return false;
-    }
-    if (editingOverworld() &&
-        (position.x < 0 || position.y < 0 ||
-         position.x >= static_cast<int>(documentWidth()) ||
-         position.y >= static_cast<int>(documentHeight()))) {
-        document_.status =
-            "Overworld screen dimensions are fixed by layout.json.";
+    if (const auto error = tilePlacementError(position, tile); !error.empty()) {
+        document_.status = error;
         return false;
     }
     const int oldHeight = static_cast<int>(documentHeight());
@@ -2227,46 +2313,6 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
         position.z,
     };
 
-    auto documentTileAt = [&](GridPosition3 cell) {
-        if (cell.x < 0 ||
-            cell.y < 0 ||
-            cell.z < 0 ||
-            cell.y >= height ||
-            cell.x >= width ||
-            cell.z >= static_cast<int>(document_.layers.size())) {
-            return TileType::Air;
-        }
-        const int oldX = cell.x - prependColumns;
-        const int oldY = cell.y - prependRows;
-        if (oldX < 0 || oldY < 0 || oldX >= oldWidth || oldY >= oldHeight) {
-            return cell.z == 0 ? TileType::Ground : TileType::Air;
-        }
-        return charToTileType(
-            document_.layers[static_cast<size_t>(cell.z)]
-                [static_cast<size_t>(oldY)]
-                [static_cast<size_t>(oldX)]).value_or(TileType::Air);
-    };
-
-    if (tile == TileType::Ladder) {
-        constexpr std::array<GridPosition, 4> offsets {
-            GridPosition { 0, -1 },
-            GridPosition { 1, 0 },
-            GridPosition { 0, 1 },
-            GridPosition { -1, 0 },
-        };
-        const bool adjacentGround = std::ranges::any_of(offsets, [&](GridPosition offset) {
-            return tileTypeIsGround(documentTileAt({
-                translatedPosition.x + offset.x,
-                translatedPosition.y + offset.y,
-                translatedPosition.z,
-            }));
-        });
-        if (!adjacentGround) {
-            document_.status = "Ladders must be next to ground on the same layer.";
-            return false;
-        }
-    }
-
     if (tile == TileType::Air &&
         translatedPosition.z >= static_cast<int>(document_.layers.size())) {
         return false;
@@ -2286,17 +2332,6 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
                 : std::nullopt,
         };
     };
-    if (tileTypeIsMinecart(tile)) {
-        if (expandsDocument ||
-            translatedPosition.z >= static_cast<int>(document_.layers.size()) ||
-            !tileTypeIsRailStop(
-                paintedCellAt(translatedPosition).plate().value_or(
-                    TileType::Air))) {
-            document_.status =
-                "Minecarts must be painted on top of a Rail Stop.";
-            return false;
-        }
-    }
     if (!expandsDocument &&
         translatedPosition.z < static_cast<int>(document_.layers.size())) {
         const PaintedCell current = paintedCellAt(translatedPosition);
@@ -2315,7 +2350,7 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
             const std::optional<Vec3> color = tileTypeIsMovableObject(tile)
                 ? objectLinkColorAt(translatedPosition)
                 : linkColorAt(translatedPosition);
-            if (linkable &&
+            if (!explicitLinkEditing_ && linkable &&
                 (!color || !sameColor(*color, activeLinkColor_))) {
                 return setLinkColor(translatedPosition, activeLinkColor_);
             }
@@ -2393,6 +2428,9 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
     const TileType previousPlate =
         previous.plate().value_or(TileType::Air);
     const TileType paintedPlate = painted.plate().value_or(TileType::Air);
+    const auto placedLinkColor = [&] {
+        return explicitLinkEditing_ ? unusedLinkColor() : activeLinkColor_;
+    };
     if (tileTypeIsMovableObject(previous.top) &&
         !tileTypeIsMovableObject(painted.top)) {
         std::erase_if(
@@ -2432,7 +2470,7 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
     }
     if (tileTypeIsPortal(paintedPlate) && !tileTypeIsPortal(previousPlate)) {
         document_.portals.push_back(
-            { .cell = translatedPosition, .color = activeLinkColor_ });
+            { .cell = translatedPosition, .color = placedLinkColor() });
         std::ranges::sort(document_.portals, {}, [](const auto& portal) {
             return std::array { portal.cell.z, portal.cell.y, portal.cell.x };
         });
@@ -2444,32 +2482,37 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
         std::erase_if(document_.linkColors, [&](const Level::LinkColor& plate) {
             return plate.cell == translatedPosition;
         });
+        if (explicitLinkEditing_) {
+            forEachLinkedDevice(document_, [&](auto& device) {
+                std::erase(device.pressurePlates, translatedPosition);
+            });
+        }
     }
     if (tileTypeIsSignalSource(paintedPlate) &&
         !tileTypeIsSignalSource(previousPlate)) {
         document_.linkColors.push_back({
             .cell = translatedPosition,
-            .color = activeLinkColor_,
+            .color = placedLinkColor(),
         });
         sortLinkColors(document_.linkColors);
     }
     if (tileTypeIsGate(painted.top) && previous.top != painted.top) {
         document_.gates.push_back({
             .cell = translatedPosition,
-            .color = painted.top == TileType::EnemyGate ? enemyGateColor : activeLinkColor_,
+            .color = painted.top == TileType::EnemyGate ? enemyGateColor : placedLinkColor(),
             .enemyGate = painted.top == TileType::EnemyGate,
         });
     }
     if (tileTypeIsRotator(paintedPlate) && !tileTypeIsRotator(previousPlate)) {
         document_.rotators.push_back({
             .cell = translatedPosition,
-            .color = activeLinkColor_,
+            .color = placedLinkColor(),
         });
     }
     if (tileTypeIsLockPlate(paintedPlate) && !tileTypeIsLockPlate(previousPlate)) {
         document_.lockPlates.push_back({
             .cell = translatedPosition,
-            .color = activeLinkColor_,
+            .color = placedLinkColor(),
         });
     }
     if (previous.top == TileType::Elevator &&
@@ -2484,7 +2527,7 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
         // move until the editor gives it more.
         document_.elevators.push_back({
             .cell = translatedPosition,
-            .color = activeLinkColor_,
+            .color = placedLinkColor(),
             .levels = { translatedPosition.z },
         });
     }
@@ -2504,7 +2547,7 @@ bool LevelEditor::setCellWithRotation(GridPosition3 position, TileType tile, uin
         }
         document_.minecarts.push_back({
             .cell = translatedPosition,
-            .color = activeLinkColor_,
+            .color = placedLinkColor(),
             .initialDirection = direction < 4 ? direction : uint8_t { 0 },
         });
     } else if (tileTypeIsMinecart(painted.top)) {
@@ -3147,6 +3190,401 @@ const std::vector<Level::LinkColor>& LevelEditor::pressurePlateColors() const
     return document_.linkColors;
 }
 
+TileType LevelEditor::authoredTileAt(GridPosition3 cell) const
+{
+    if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+        cell.x >= static_cast<int>(documentWidth()) ||
+        cell.y >= static_cast<int>(documentHeight()) ||
+        cell.z >= static_cast<int>(documentDepth())) {
+        return TileType::Air;
+    }
+    return charToTileType(document_.layers[static_cast<std::size_t>(cell.z)]
+        [static_cast<std::size_t>(cell.y)][static_cast<std::size_t>(cell.x)]).value_or(TileType::Air);
+}
+
+std::optional<LevelEditor::LinkEndpoint> LevelEditor::linkEndpointAt(GridPosition3 cell) const
+{
+    if (tileTypeIsMinecart(authoredTileAt(cell))) {
+        return LinkEndpoint { cell, LinkEndpointKind::Device };
+    }
+    for (const auto kind : { LinkEndpointKind::Object, LinkEndpointKind::Source,
+             LinkEndpointKind::Device, LinkEndpointKind::Portal }) {
+        if (hasLinkEndpoint({ cell, kind })) return LinkEndpoint { cell, kind };
+    }
+    return std::nullopt;
+}
+
+bool LevelEditor::hasLinkEndpoint(LinkEndpoint endpoint) const
+{
+    const auto top = authoredTileAt(endpoint.cell);
+    const auto plate = documentPlateAt(endpoint.cell).value_or(TileType::Air);
+    switch (endpoint.kind) {
+    case LinkEndpointKind::Source: return tileTypeIsSignalSource(plate);
+    case LinkEndpointKind::Device:
+        return top == TileType::Gate || top == TileType::Elevator || tileTypeIsMinecart(top) ||
+            tileTypeIsRotator(plate) || tileTypeIsLockPlate(plate);
+    case LinkEndpointKind::Portal: return tileTypeIsPortal(plate);
+    case LinkEndpointKind::Object: return tileTypeIsMovableObject(top);
+    }
+    return false;
+}
+
+std::optional<Vec3> LevelEditor::linkEndpointColor(LinkEndpoint endpoint) const
+{
+    const auto colorOf = [&](const auto& records) -> std::optional<Vec3> {
+        const auto found = std::ranges::find_if(records, [&](const auto& record) {
+            if constexpr (requires { record.enemyGate; }) {
+                if (record.enemyGate) return false;
+            }
+            return record.cell == endpoint.cell;
+        });
+        return found == records.end() ? std::nullopt : std::optional { found->color };
+    };
+    switch (endpoint.kind) {
+    case LinkEndpointKind::Source: return colorOf(document_.linkColors);
+    case LinkEndpointKind::Device:
+        if (const auto color = colorOf(document_.gates)) return color;
+        if (const auto color = colorOf(document_.rotators)) return color;
+        if (const auto color = colorOf(document_.lockPlates)) return color;
+        if (const auto color = colorOf(document_.elevators)) return color;
+        return colorOf(document_.minecarts);
+    case LinkEndpointKind::Portal: return colorOf(document_.portals);
+    case LinkEndpointKind::Object: return objectLinkColorAt(endpoint.cell);
+    }
+    return std::nullopt;
+}
+
+std::vector<GridPosition3> LevelEditor::linkSourcesForDevice(GridPosition3 cell) const
+{
+    if (!explicitLinkEditing_) {
+        const auto color = linkEndpointColor({ cell, LinkEndpointKind::Device });
+        return color ? linkedPressurePlates(*color) : std::vector<GridPosition3> {};
+    }
+    std::vector<GridPosition3> sources;
+    forEachLinkedDevice(document_, [&](const auto& device) {
+        if (device.cell == cell) sources = device.pressurePlates;
+    });
+    return sources;
+}
+
+std::vector<GridPosition3> LevelEditor::devicesDrivenBy(GridPosition3 source) const
+{
+    std::vector<GridPosition3> devices;
+    const auto color = linkEndpointColor({ source, LinkEndpointKind::Source });
+    forEachLinkedDevice(document_, [&](const auto& device) {
+        const bool driven = explicitLinkEditing_
+            ? std::ranges::find(device.pressurePlates, source) != device.pressurePlates.end()
+            : color && sameColor(device.color, *color);
+        if (driven) devices.push_back(device.cell);
+    });
+    return devices;
+}
+
+const std::vector<Level::LinkGroupName>& LevelEditor::linkGroupNames() const
+{
+    return document_.linkGroupNames;
+}
+
+std::string_view LevelEditor::linkGroupName(Level::LinkGroupKind kind, Vec3 color) const
+{
+    const auto found = std::ranges::find_if(document_.linkGroupNames, [&](const auto& group) {
+        return group.kind == kind && sameColor(group.color, color);
+    });
+    return found == document_.linkGroupNames.end() ? std::string_view {} : found->name;
+}
+
+void LevelEditor::enableExplicitLinkEditing()
+{
+    if (!document_.layers.empty()) {
+        throw std::logic_error("Enable explicit links before opening a document.");
+    }
+    explicitLinkEditing_ = true;
+}
+
+Vec3 LevelEditor::unusedLinkColor() const
+{
+    const auto used = usedLinkColors(document_);
+    return freshLinkColor([&](const auto& key) { return used.contains(key); });
+}
+
+bool LevelEditor::hasLinkGroup(Level::LinkGroupKind kind, Vec3 color) const
+{
+    if (!linkGroupName(kind, color).empty()) return true;
+    return std::ranges::any_of(linkGroupsView(), [&](const auto& group) {
+        return sameColor(group.color, color) && (kind == Level::LinkGroupKind::Object
+            ? !group.objects.empty() : group.hasDevice() || !group.pressurePlates.empty());
+    });
+}
+
+bool LevelEditor::portalIsPaired(LinkEndpoint endpoint) const
+{
+    const auto portal = std::ranges::find(document_.portals, endpoint.cell, &Level::Portal::cell);
+    return portal != document_.portals.end() &&
+        std::ranges::any_of(document_.portals, [&](const auto& other) {
+            return other.cell != endpoint.cell && other.scope == portal->scope &&
+                sameColor(other.color, portal->color);
+        });
+}
+
+void LevelEditor::updateLinkEndpoint(LinkEndpoint endpoint, Vec3 color)
+{
+    const auto recolorOrInsert = [&](auto& records) {
+        const auto found = std::ranges::find_if(records,
+            [&](const auto& record) { return record.cell == endpoint.cell; });
+        if (found != records.end()) {
+            found->color = color;
+        } else {
+            records.push_back({ .cell = endpoint.cell, .color = color });
+            std::ranges::sort(records, {}, [](const auto& record) { return cellOrder(record.cell); });
+        }
+    };
+    switch (endpoint.kind) {
+    case LinkEndpointKind::Source:
+        recolorOrInsert(document_.linkColors);
+        forEachLinkedDevice(document_, [&](auto& device) {
+            std::erase(device.pressurePlates, endpoint.cell);
+            if (sameColor(device.color, color)) {
+                device.pressurePlates.push_back(endpoint.cell);
+                std::ranges::sort(device.pressurePlates, {}, cellOrder);
+            }
+        });
+        break;
+    case LinkEndpointKind::Device: {
+        const auto top = authoredTileAt(endpoint.cell);
+        const auto plate = documentPlateAt(endpoint.cell).value_or(TileType::Air);
+        if (top == TileType::Gate) recolorOrInsert(document_.gates);
+        else if (top == TileType::Elevator) {
+            const auto found = std::ranges::find(document_.elevators, endpoint.cell, &Level::Elevator::cell);
+            if (found != document_.elevators.end()) found->color = color;
+            else document_.elevators.push_back({ .cell = endpoint.cell, .color = color,
+                .levels = { endpoint.cell.z } });
+        } else if (tileTypeIsMinecart(top)) {
+            const auto found = std::ranges::find(document_.minecarts, endpoint.cell, &Level::Minecart::cell);
+            if (found != document_.minecarts.end()) found->color = color;
+            else {
+                const uint8_t mask = railConnectionMask(plate);
+                uint8_t direction = 0;
+                while (direction < 3 && (mask & static_cast<uint8_t>(1U << direction)) == 0) ++direction;
+                document_.minecarts.push_back({ .cell = endpoint.cell, .color = color, .initialDirection = direction });
+            }
+        } else if (tileTypeIsRotator(plate)) recolorOrInsert(document_.rotators);
+        else if (tileTypeIsLockPlate(plate)) recolorOrInsert(document_.lockPlates);
+        forEachLinkedDevice(document_, [&](auto& device) {
+            if (device.cell == endpoint.cell) device.pressurePlates = linkedPressurePlates(color);
+        });
+        break;
+    }
+    case LinkEndpointKind::Portal: recolorOrInsert(document_.portals); break;
+    case LinkEndpointKind::Object: recolorOrInsert(document_.objectLinks); break;
+    }
+}
+
+void LevelEditor::nameNewLinkGroup(Level::LinkGroupKind kind, Vec3 color)
+{
+    if (!linkGroupName(kind, color).empty()) return;
+    const std::string_view prefix = kind == Level::LinkGroupKind::Object
+        ? "Sync group " : "Device group ";
+    for (std::size_t index = 1;; ++index) {
+        std::string name = std::string(prefix) + std::to_string(index);
+        const bool exists = std::ranges::any_of(document_.linkGroupNames, [&](const auto& group) {
+            return group.kind == kind && sameGroupName(group.name, name);
+        });
+        if (!exists) {
+            document_.linkGroupNames.push_back({ .kind = kind, .color = color, .name = std::move(name) });
+            return;
+        }
+    }
+}
+
+bool LevelEditor::connectLinkEndpoints(LinkEndpoint first, LinkEndpoint second)
+{
+    using Kind = LinkEndpointKind;
+    using Group = Level::LinkGroupKind;
+    if (!explicitLinkEditing_ || !hasLinkEndpoint(first) || !hasLinkEndpoint(second) || first == second) {
+        return false;
+    }
+    const auto firstColor = linkEndpointColor(first);
+    const auto secondColor = linkEndpointColor(second);
+    auto before = captureBeforeDocumentChange();
+    if (first.kind == Kind::Portal && second.kind == Kind::Portal) {
+        if (portalIsPaired(first) || portalIsPaired(second)) {
+            document_.status = "Disconnect an assigned portal before making a new pair.";
+            return false;
+        }
+        const Vec3 color = firstColor ? *firstColor : unusedLinkColor();
+        updateLinkEndpoint(first, color);
+        updateLinkEndpoint(second, color);
+        document_.status = "Paired portals.";
+    } else if (first.kind == Kind::Object && second.kind == Kind::Object) {
+        if (firstColor && secondColor && sameColor(*firstColor, *secondColor)) {
+            document_.status = "These objects already share a sync group.";
+            return false;
+        }
+        const Vec3 color = secondColor ? *secondColor : firstColor ? *firstColor : unusedLinkColor();
+        updateLinkEndpoint(first, color);
+        updateLinkEndpoint(second, color);
+        nameNewLinkGroup(Group::Object, color);
+        document_.status = "Linked objects.";
+    } else {
+        const auto source = first.kind == Kind::Source ? first : second;
+        const auto device = first.kind == Kind::Device ? first : second;
+        if (source.kind != Kind::Source || device.kind != Kind::Device) {
+            document_.status = "Connect a source to a device, two portals, or two movable objects.";
+            return false;
+        }
+        const auto sourceColor = linkEndpointColor(source);
+        const auto deviceColor = linkEndpointColor(device);
+        if (!sourceColor) return false;
+
+        const auto sources = linkSourcesForDevice(device.cell);
+        if (std::ranges::find(sources, source.cell) != sources.end()) {
+            document_.status = "This source already drives the device.";
+            return false;
+        }
+        bool sourceIsAssigned = !linkGroupName(Group::Device, *sourceColor).empty() ||
+            linkedPressurePlates(*sourceColor).size() > 1;
+        forEachLinkedDevice(document_, [&](const auto& linkedDevice) {
+            sourceIsAssigned |= sameColor(linkedDevice.color, *sourceColor) ||
+                std::ranges::find(linkedDevice.pressurePlates, source.cell) != linkedDevice.pressurePlates.end();
+        });
+
+        if (deviceColor && (!sources.empty() ||
+                !linkGroupName(Group::Device, *deviceColor).empty() ||
+                sameColor(*sourceColor, *deviceColor))) {
+            const auto groupSources = linkedPressurePlates(*deviceColor);
+            if (!sourceIsAssigned) {
+                const auto found = std::ranges::find(document_.linkColors, source.cell, &Level::LinkColor::cell);
+                found->color = *deviceColor;
+            }
+            // Older levels can wire same-colored devices to different sources.
+            // Include regular group members and preserve explicit legacy peers.
+            forEachLinkedDevice(document_, [&](auto& linkedDevice) {
+                if (linkedDevice.cell == device.cell ||
+                    (!sourceIsAssigned && sameColor(linkedDevice.color, *deviceColor) &&
+                        linkedDevice.pressurePlates == groupSources)) {
+                    linkedDevice.pressurePlates.push_back(source.cell);
+                    std::ranges::sort(linkedDevice.pressurePlates, {}, cellOrder);
+                }
+            });
+            nameNewLinkGroup(Group::Device, *deviceColor);
+        } else {
+            updateLinkEndpoint(device, *sourceColor);
+            nameNewLinkGroup(Group::Device, *sourceColor);
+        }
+        document_.status = "Connected source and device.";
+    }
+    recordDocumentChange(std::move(before));
+    return true;
+}
+
+bool LevelEditor::disconnectLinkEndpoint(LinkEndpoint endpoint)
+{
+    if (!explicitLinkEditing_ || !hasLinkEndpoint(endpoint)) return false;
+    const auto color = linkEndpointColor(endpoint);
+    if (!color) return false;
+    auto before = captureBeforeDocumentChange();
+    switch (endpoint.kind) {
+    case LinkEndpointKind::Object:
+        std::erase_if(document_.objectLinks, [&](const auto& object) { return object.cell == endpoint.cell; });
+        break;
+    case LinkEndpointKind::Portal:
+        if (!portalIsPaired(endpoint)) return false;
+        updateLinkEndpoint(endpoint, unusedLinkColor());
+        break;
+    case LinkEndpointKind::Source:
+    case LinkEndpointKind::Device:
+        if (linkGroupName(Level::LinkGroupKind::Device, *color).empty() &&
+            linkedPressurePlates(*color).size() <= 1) {
+            bool assigned = false;
+            forEachLinkedDevice(document_, [&](const auto& device) {
+                assigned |= endpoint.kind == LinkEndpointKind::Device
+                    ? device.cell == endpoint.cell && !device.pressurePlates.empty()
+                    : std::ranges::find(device.pressurePlates, endpoint.cell) != device.pressurePlates.end();
+                assigned |= sameColor(device.color, *color) && device.cell != endpoint.cell;
+            });
+            if (!assigned) return false;
+        }
+        updateLinkEndpoint(endpoint, unusedLinkColor());
+        break;
+    }
+    document_.status = "Disconnected.";
+    recordDocumentChange(std::move(before));
+    return true;
+}
+
+bool LevelEditor::assignLinkEndpoint(LinkEndpoint endpoint, Vec3 color)
+{
+    if (!explicitLinkEditing_ || !hasLinkEndpoint(endpoint) || endpoint.kind == LinkEndpointKind::Portal ||
+        !validLinkColor(color)) return false;
+    const auto kind = endpoint.kind == LinkEndpointKind::Object
+        ? Level::LinkGroupKind::Object : Level::LinkGroupKind::Device;
+    if (!hasLinkGroup(kind, color)) {
+        document_.status = "Choose an existing group.";
+        return false;
+    }
+    const auto current = linkEndpointColor(endpoint);
+    if (current && sameColor(*current, color)) return false;
+    auto before = captureBeforeDocumentChange();
+    updateLinkEndpoint(endpoint, color);
+    document_.status = "Assigned to group.";
+    recordDocumentChange(std::move(before));
+    return true;
+}
+
+bool LevelEditor::createLinkGroup(LinkEndpoint endpoint, std::string name)
+{
+    if (!explicitLinkEditing_ || !hasLinkEndpoint(endpoint) || endpoint.kind == LinkEndpointKind::Portal) return false;
+    const auto kind = endpoint.kind == LinkEndpointKind::Object
+        ? Level::LinkGroupKind::Object : Level::LinkGroupKind::Device;
+    if (!Level::isValidLinkGroupName(name)) {
+        document_.status = "Enter a valid group name.";
+        return false;
+    }
+    if (std::ranges::any_of(document_.linkGroupNames, [&](const auto& group) {
+            return group.kind == kind && sameGroupName(group.name, name);
+        })) {
+        document_.status = "A group with that name already exists.";
+        return false;
+    }
+    auto before = captureBeforeDocumentChange();
+    const Vec3 color = unusedLinkColor();
+    updateLinkEndpoint(endpoint, color);
+    document_.linkGroupNames.push_back({ .kind = kind, .color = color, .name = std::move(name) });
+    document_.status = "Created link group.";
+    recordDocumentChange(std::move(before));
+    return true;
+}
+
+bool LevelEditor::setLinkGroupName(Level::LinkGroupKind kind, Vec3 color, std::string name)
+{
+    if (!validLinkColor(color) || !hasLinkGroup(kind, color)) return false;
+    if (!name.empty() && !Level::isValidLinkGroupName(name)) {
+        document_.status = "Enter a valid group name.";
+        return false;
+    }
+    if (!name.empty() && std::ranges::any_of(document_.linkGroupNames, [&](const auto& group) {
+            return group.kind == kind && !sameColor(group.color, color) && sameGroupName(group.name, name);
+        })) {
+        document_.status = "A group with that name already exists.";
+        return false;
+    }
+    const auto found = std::ranges::find_if(document_.linkGroupNames, [&](const auto& group) {
+        return group.kind == kind && sameColor(group.color, color);
+    });
+    if (linkGroupName(kind, color) == name) return false;
+    auto before = captureBeforeDocumentChange();
+    if (found == document_.linkGroupNames.end()) {
+        document_.linkGroupNames.push_back({ .kind = kind, .color = color, .name = std::move(name) });
+    } else if (name.empty()) {
+        document_.linkGroupNames.erase(found);
+    } else {
+        found->name = std::move(name);
+    }
+    document_.status = "Updated link group name.";
+    recordDocumentChange(std::move(before));
+    return true;
+}
+
 std::optional<Vec3> LevelEditor::objectLinkColorAt(GridPosition3 cell) const
 {
     const auto object = std::ranges::find(
@@ -3603,10 +4041,13 @@ Level::Definition LevelEditor::linkedDefinition(
 }
 
 Level::Definition LevelEditor::linkedDefinition(
-    const Level::Definition& authored, std::optional<CharacterType> character)
+    const Level::Definition& authored, std::optional<CharacterType> character) const
 {
     Level::Definition definition = authored;
     definition.character = character;
+    if (explicitLinkEditing_) {
+        return definition;
+    }
     // The export contains explicit device links. Link colors are only saved
     // for signal sources that still have no device to supply their color.
     std::size_t unlinkedCount = 0;
@@ -4205,7 +4646,12 @@ void LevelEditor::markDraftSaved()
 void LevelEditor::installDocument(Level::Definition definition, const std::filesystem::path& path)
 {
     const auto [width, height] = padToRectangle(definition);
-    const LinkColoring coloring = colorLinks(definition);
+    LinkColoring coloring;
+    if (explicitLinkEditing_) {
+        keepExplicitLinks(definition);
+    } else {
+        coloring = colorLinks(definition);
+    }
 
     std::ranges::sort(definition.tileRotations, {}, [](const Level::TileRotation& rotation) {
         return std::array { rotation.cell.z, rotation.cell.y, rotation.cell.x };
@@ -5040,6 +5486,8 @@ std::size_t LevelEditor::snapshotStorageBytes(const DocumentVersion& snapshot)
     vector(snapshot.objectLinks);
     vector(snapshot.portals);
     vector(snapshot.linkColors);
+    vector(snapshot.linkGroupNames);
+    for (const auto& group : snapshot.linkGroupNames) string(group.name);
     string(snapshot.filePath.native());
     string(snapshot.loadedPath.native());
     return bytes;

@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace sokoban {
 namespace {
@@ -35,6 +36,7 @@ constexpr std::string_view minecartPrefix = "@minecart ";
 constexpr std::string_view portalPrefix = "@portal ";
 constexpr std::string_view objectLinkPrefix = "@objectlink ";
 constexpr std::string_view linkColorPrefix = "@linkcolor ";
+constexpr std::string_view linkGroupNamePrefix = "@linkname ";
 // Far more stops than any board has layers; it keeps an elevator's cycle
 // phase (2 * stops - 2 values) inside GameState's 8-bit field.
 constexpr std::size_t maximumElevatorStops = 64;
@@ -1057,6 +1059,73 @@ std::array<int, 3> objectLinkColorKey(Vec3 color)
     return { channel(color.x), channel(color.y), channel(color.z) };
 }
 
+Level::LinkGroupName parseLinkGroupName(
+    std::string_view payload, std::string_view sourceName)
+{
+    try {
+        const Json object = Json::parse(payload);
+        const auto kind = object.value("kind", std::string("device"));
+        if (kind != "device" && kind != "object") {
+            throw std::runtime_error("'kind' must be 'device' or 'object'");
+        }
+        const auto& color = object.at("color");
+        if (!color.is_array() || color.size() != 3 ||
+            !std::ranges::all_of(color, &Json::is_number)) {
+            throw std::runtime_error("'color' must be an array of three numbers");
+        }
+        return {
+            .kind = kind == "device" ? Level::LinkGroupKind::Device
+                                     : Level::LinkGroupKind::Object,
+            .color = { color[0].get<float>(), color[1].get<float>(),
+                color[2].get<float>() },
+            .name = object.at("name").get<std::string>(),
+        };
+    } catch (const Json::exception& error) {
+        throw std::runtime_error(
+            "Invalid link group name in " + std::string(sourceName) +
+            ": " + error.what());
+    } catch (const std::runtime_error& error) {
+        throw std::runtime_error(
+            "Invalid link group name in " + std::string(sourceName) +
+            ": " + error.what());
+    }
+}
+
+void canonicalizeLinkGroupNames(
+    std::vector<Level::LinkGroupName>& records, std::string_view sourceName)
+{
+    for (const auto& record : records) {
+        if (record.kind != Level::LinkGroupKind::Device &&
+            record.kind != Level::LinkGroupKind::Object) {
+            throw std::runtime_error(
+                "Invalid link group kind: " + std::string(sourceName));
+        }
+        for (float component : { record.color.x, record.color.y, record.color.z }) {
+            if (!std::isfinite(component) || component < 0.0f || component > 1.0f) {
+                throw std::runtime_error(
+                    "Link group color components must be finite values from zero to one: " +
+                    std::string(sourceName));
+            }
+        }
+        if (!Level::isValidLinkGroupName(record.name)) {
+            throw std::runtime_error(
+                "Link group name must be nonblank single-line UTF-8 text within " +
+                std::to_string(Level::maxLinkGroupNameBytes) + " bytes: " +
+                std::string(sourceName));
+        }
+    }
+
+    const auto key = [](const Level::LinkGroupName& record) {
+        return std::pair(record.kind, objectLinkColorKey(record.color));
+    };
+    std::ranges::sort(records, {}, key);
+    if (std::ranges::adjacent_find(records, {}, key) != records.end()) {
+        throw std::runtime_error(
+            "Level contains duplicate names for the same link group: " +
+            std::string(sourceName));
+    }
+}
+
 size_t tileIndex(uint32_t x, uint32_t y, uint32_t z, uint32_t width, uint32_t height)
 {
     return (static_cast<size_t>(z) * height + y) * width + x;
@@ -1222,6 +1291,26 @@ Level::MinecartRoute Level::buildMinecartRoute(
     return route;
 }
 
+bool Level::isValidLinkGroupName(std::string_view name)
+{
+    if (name.size() > maxLinkGroupNameBytes ||
+        name.find_first_not_of(' ') == std::string_view::npos ||
+        std::ranges::any_of(name, [](unsigned char byte) {
+            return byte < 32 || byte == 127;
+        }) ||
+        name.find("\xc2\x85") != std::string_view::npos ||
+        name.find("\xe2\x80\xa8") != std::string_view::npos ||
+        name.find("\xe2\x80\xa9") != std::string_view::npos) {
+        return false;
+    }
+    try {
+        (void)Json(name).dump();
+        return true;
+    } catch (const Json::type_error&) {
+        return false;
+    }
+}
+
 Level Level::loadFromFile(const std::filesystem::path& path)
 {
     return loadFromDefinition(loadDefinitionFromFile(path), pathText(path));
@@ -1367,6 +1456,7 @@ Level::Definition Level::parseDefinition(
                     line.starts_with(minecartPrefix) ||
                     line.starts_with(objectLinkPrefix) ||
                     line.starts_with(linkColorPrefix) ||
+                    line.starts_with(linkGroupNamePrefix) ||
                     line.starts_with(platePrefix) ||
                     line.starts_with(groundSplatPrefix) ||
                     line.starts_with(groundPaintPrefix) ||
@@ -1593,6 +1683,17 @@ Level::Definition Level::parseDefinition(
             continue;
         }
 
+        if (line.starts_with(linkGroupNamePrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Link group name metadata must appear before '@layer 0': " + source);
+            }
+            definition.linkGroupNames.push_back(parseLinkGroupName(
+                std::string_view(line).substr(linkGroupNamePrefix.size()),
+                sourceName));
+            continue;
+        }
+
         if (line.starts_with(waterPrefix)) {
             if (currentLayer) {
                 throw std::runtime_error(
@@ -1708,6 +1809,7 @@ Level::Definition Level::parseDefinition(
     canonicalizeObjectLinks(definition.portals, sourceName);
     canonicalizePlates(definition.plates, sourceName);
     canonicalizeLinkColors(definition.linkColors, sourceName);
+    canonicalizeLinkGroupNames(definition.linkGroupNames, sourceName);
     validateGroundSplats(definition, sourceName);
     validateTileRotations(definition, sourceName);
     std::ranges::sort(definition.tileRotations, {}, [](const TileRotation& rotation) {
@@ -1781,6 +1883,7 @@ std::vector<std::string> Level::serializeDefinition(
         definition.elevators.empty() &&
         definition.minecarts.empty() && definition.objectLinks.empty() &&
         definition.portals.empty() && definition.linkColors.empty() &&
+        definition.linkGroupNames.empty() &&
         definition.plates.empty() && definition.groundSplats.empty() &&
         definition.groundPaint.empty() && definition.tileRotations.empty()) {
         return definition.layers.front();
@@ -1920,6 +2023,18 @@ std::vector<std::string> Level::serializeDefinition(
     for (const LinkColor& record : linkColors) {
         lines.push_back(serializeLinkColor(record));
     }
+    std::vector<LinkGroupName> linkGroupNames = definition.linkGroupNames;
+    canonicalizeLinkGroupNames(linkGroupNames, "serialized level");
+    for (const auto& record : linkGroupNames) {
+        Json object {
+            { "color", { record.color.x, record.color.y, record.color.z } },
+            { "name", record.name },
+        };
+        if (record.kind == LinkGroupKind::Object) {
+            object["kind"] = "object";
+        }
+        lines.push_back(std::string(linkGroupNamePrefix) + object.dump());
+    }
     for (const Decoration& decoration : definition.decorations) {
         lines.push_back(serializeDecoration(decoration));
     }
@@ -1931,7 +2046,8 @@ std::vector<std::string> Level::serializeDefinition(
         !definition.lockPlates.empty() ||
         !definition.elevators.empty() || !definition.minecarts.empty() ||
         !definition.objectLinks.empty() || !definition.portals.empty() ||
-        !definition.linkColors.empty() || !definition.plates.empty() ||
+        !definition.linkColors.empty() || !definition.linkGroupNames.empty() ||
+        !definition.plates.empty() ||
         !definition.groundSplats.empty() || !definition.groundPaint.empty() ||
         !definition.tileRotations.empty()) {
         lines.emplace_back();

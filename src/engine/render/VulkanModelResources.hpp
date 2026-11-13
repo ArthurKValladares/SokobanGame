@@ -223,6 +223,12 @@ public:
     // ensureAssets; existing slots and their ids are untouched, because ids
     // are indices and the manifest only ever appends.
     bool syncManifestTextures();
+    // Adds an optional UI texture without changing manifest ids or the GPU
+    // requirements at startup. The returned handle uses the normal loader.
+    [[nodiscard]] RenderTexture registerOptionalTexture(AssetManifest::Texture texture);
+    // Called after rebaking and waiting for the device. The next request
+    // loads the new file through the same optional texture descriptor.
+    void invalidateOptionalTexture(RenderTexture texture);
     // Grows static model slots after the Debug decoration authoring path
     // appends manifest models. Existing slots and ids remain untouched.
     bool syncManifestModels();
@@ -300,7 +306,7 @@ public:
     [[nodiscard]] const AssetManifest& manifest() const { return *manifest_; }
     // Matches descriptor publication: uploads already submitted to the
     // graphics queue and completed images can both be sampled by later draws.
-    // None, unpublished, and non-manifest handles return false without
+    // None, unpublished, and undefined handles return false without
     // allocating the descriptor snapshot returned by textures().
     [[nodiscard]] bool textureReady(RenderTexture texture) const noexcept;
     [[nodiscard]] std::vector<TextureView> textures() const;

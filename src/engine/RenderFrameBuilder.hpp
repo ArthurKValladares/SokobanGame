@@ -131,6 +131,7 @@ public:
         // Drafts resize from the origin. Preview both footprints while the
         // current editor document remains available for undo and cancellation.
         std::optional<GridPosition> resizePreviewSize;
+        bool isolateActiveLayer = false;
     };
 
     [[nodiscard]] static RenderFrameData buildGameplay(const GameplayInput& input);

@@ -3,6 +3,7 @@
 #include "TestHarness.hpp"
 
 #include "engine/Level.hpp"
+#include "engine/Solution.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -1030,6 +1031,90 @@ void testEditorLinkColorsRoundTripAndDoNotAffectGameplay()
     }, "before '@layer 0'");
 }
 
+void testLinkGroupNamesRoundTripWithoutChangingGameplay()
+{
+    TEST("linkGroupNamesRoundTripWithoutChangingGameplay");
+    const Vec3 color { 0.25f, 0.5f, 0.75f };
+    const Level::Definition legacy {
+        .layers = { { "...." }, { "CPRG" } },
+        .gates = { Level::Gate {
+            .cell = { 3, 0, 1 },
+            .pressurePlates = { { 1, 0, 1 } },
+            .color = color,
+        } },
+        .objectLinks = { Level::ObjectLink {
+            .cell = { 2, 0, 1 },
+            .color = color,
+        } },
+    };
+    CHECK(Level::parseDefinition(Level::serializeDefinition(legacy), "legacy links")
+        .linkGroupNames.empty());
+    Level::Definition named = legacy;
+    const Level::LinkGroupName device { .color = color, .name = "Porte \xc3\xa9troite" };
+    const Level::LinkGroupName object {
+        .kind = Level::LinkGroupKind::Object,
+        .color = color,
+        .name = "Counterweight",
+    };
+    named.linkGroupNames = { object, device };
+    const auto serialized = Level::serializeDefinition(named);
+    const auto parsed = Level::parseDefinition(serialized, "named links");
+    CHECK(parsed.linkGroupNames == (std::vector { device, object }));
+    CHECK(Level::serializeDefinition(parsed) == serialized);
+    CHECK(parsed.gates == legacy.gates);
+    CHECK(parsed.objectLinks == legacy.objectLinks);
+    CHECK(solution::levelDigest(parsed) == solution::levelDigest(legacy));
+    const Level level = Level::loadFromDefinition(parsed, "named links");
+    CHECK(level.gateAt({ 3, 0, 1 })->pressurePlates ==
+        (std::vector<GridPosition3> { { 1, 0, 1 } }));
+    CHECK(level.movableLinkColor(0) == std::optional(color));
+
+    Level::Definition flat = Level::parseDefinition({ "C." }, "flat screen");
+    flat.linkGroupNames.push_back(device);
+    CHECK(Level::parseDefinition(Level::serializeDefinition(flat), "flat named screen") == flat);
+}
+
+void testLinkGroupNameValidation()
+{
+    TEST("linkGroupNameValidation");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition({
+            R"(@linkname {"color":[0.25,0.5,0.75],"name":"First"})",
+            R"(@linkname {"color":[0.251,0.5,0.75],"kind":"device","name":"Second"})",
+            "@layer 0",
+            "C.",
+        }, "duplicate names");
+    }, "duplicate names");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition({
+            "@layer 0",
+            "C.",
+            R"(@linkname {"color":[0,0,0],"name":"Late"})",
+        }, "late name");
+    }, "before '@layer 0'");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition({
+            R"(@linkname {"color":[0,0,0],"kind":"portal","name":"Wrong kind"})",
+            "@layer 0",
+            "C.",
+        }, "wrong kind");
+    }, "'kind'");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition({
+            R"(@linkname {"color":[-0.5,0,0],"name":"Wrong color"})",
+            "@layer 0",
+            "C.",
+        }, "wrong color");
+    }, "from zero to one");
+    CHECK(!Level::isValidLinkGroupName(""));
+    CHECK(!Level::isValidLinkGroupName("   "));
+    CHECK(!Level::isValidLinkGroupName("First\nSecond"));
+    CHECK(!Level::isValidLinkGroupName("First\xe2\x80\xa8Second"));
+    CHECK(!Level::isValidLinkGroupName("Invalid \xc0"));
+    CHECK(!Level::isValidLinkGroupName(std::string(Level::maxLinkGroupNameBytes + 1, 'a')));
+    CHECK(Level::isValidLinkGroupName(std::string(Level::maxLinkGroupNameBytes, 'a')));
+}
+
 void testObjectLinksRoundTripAndValidateMovableCells()
 {
     TEST("objectLinksRoundTripAndValidateMovableCells");
@@ -1935,6 +2020,8 @@ int main()
     testRotatorMetadataRoundTripAndValidation();
     testElevatorMetadataRoundTripAndValidation();
     testEditorLinkColorsRoundTripAndDoNotAffectGameplay();
+    testLinkGroupNamesRoundTripWithoutChangingGameplay();
+    testLinkGroupNameValidation();
     testGateStartOpenRoundTrips();
     testObjectLinksRoundTripAndValidateMovableCells();
     testPlatePropertyAndCoveredPlateRecords();

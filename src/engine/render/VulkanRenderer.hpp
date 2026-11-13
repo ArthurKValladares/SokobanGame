@@ -213,6 +213,8 @@ public:
     // thumbnails are unavailable or the tile has no model of its own (the
     // caller should fall back to a swatch).
     [[nodiscard]] VkDescriptorSet tileThumbnail(TileType tile);
+    // Native UI picture for the tile, or noTexture while loading/unavailable.
+    [[nodiscard]] RenderTexture makerTileThumbnail(TileType tile);
     // Drops loaded thumbnails so a re-bake is picked up without restarting.
     void invalidateTileThumbnails();
 #ifdef SOKOBAN_ENABLE_TEST_HOOKS
@@ -225,6 +227,10 @@ public:
     [[nodiscard]] std::optional<Vec2> projectToPixels(
         const PreparedFrame& frame,
         Vec3 worldPoint) const;
+    [[nodiscard]] std::optional<Vec2> projectToPixels(
+        const PreparedFrame& frame,
+        Vec3 worldPoint,
+        UiRect viewport) const;
     // Pixel bounds of the primary player tile as it appears in this prepared
     // frame, including its presentation position, scale and current camera.
     [[nodiscard]] std::optional<UiRect> primaryPlayerBoundsToPixels(
@@ -443,6 +449,8 @@ private:
         preparedFrameScratch_;
     RenderAssetRequirements frameAssetRequirements_;
     RenderAssetRequirements previewAssetRequirements_;
+    RenderAssetRequirements makerThumbnailRequirements_;
+    std::array<std::optional<RenderTexture>, tileTypeCount> makerTileThumbnails_ {};
     // Kept separate from asset loading: frame preparation waits for this
     // worker every frame and must not sit behind texture/model jobs.
     TaskSystem framePreparationTasks_ { 1 };

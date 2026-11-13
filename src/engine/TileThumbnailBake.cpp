@@ -60,9 +60,7 @@ std::string assetPathFor(TileType tile)
 
 bool shouldBake(TileType tile)
 {
-    // Air is the eraser and has nothing to draw; Water is excluded from the
-    // palette entirely because it is a layer property rather than a brush.
-    return tile != TileType::Air && tile != TileType::Water;
+    return tile != TileType::Air;
 }
 
 RenderFrameData buildBakeFrame(
@@ -152,9 +150,8 @@ RenderFrameData buildBakeFrame(
         subject.animation = animations->animation(use);
         subject.animationTimeSeconds = 0.0f;
     }
-    if (tileTypeIsWaterStream(tile) || tile == TileType::LilyPad) {
-        // Show water mechanics on the same surface used in the game. A
-        // current has no solid block/model of its own.
+    if (tileTypeIsWater(tile) || tile == TileType::LilyPad) {
+        // Show water mechanics on the same surface used in the game.
         frame.waterGridBounds = { 0, 0, bedSize, bedSize };
         frame.waterSurfaces.push_back({
             .cell = subject.cell,

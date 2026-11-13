@@ -150,6 +150,23 @@ public:
         }
     };
 
+    enum class LinkGroupKind : uint8_t {
+        Device,
+        Object,
+    };
+
+    // A screen-local editor label for a group, keyed by kind and 8-bit RGB.
+    struct LinkGroupName {
+        LinkGroupKind kind = LinkGroupKind::Device;
+        Vec3 color;
+        std::string name;
+
+        bool operator==(const LinkGroupName&) const = default;
+    };
+
+    static constexpr std::size_t maxLinkGroupNameBytes = 256;
+    [[nodiscard]] static bool isValidLinkGroupName(std::string_view name);
+
     // A movable object participating in a color-linked group. Objects in the
     // same authored screen with the same 8-bit editor color repeat one
     // another's successful moves when their own destination is available.
@@ -283,6 +300,7 @@ public:
         std::vector<Portal> portals;
         // Editor-only (see LinkColor); Level::loadFromDefinition ignores it.
         std::vector<LinkColor> linkColors;
+        std::vector<LinkGroupName> linkGroupNames;
         // Missing only for backwards-compatible legacy documents. Runtime
         // levels always resolve it to Rogue.
         std::optional<CharacterType> character;

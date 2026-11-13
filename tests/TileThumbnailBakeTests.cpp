@@ -152,13 +152,11 @@ void testAssetPathsAreUniqueAndTidy()
         "custom/thumbnails/tile_mirror_north_west.png");
 }
 
-void testAirAndWaterAreNotBaked()
+void testDrawablePaletteTilesAreBaked()
 {
-    TEST("airAndWaterAreNotBaked");
-    // Air is the eraser and Water is a layer property, so neither appears in
-    // the palette as a drawable brush.
+    TEST("drawablePaletteTilesAreBaked");
     CHECK(!tileThumbnails::shouldBake(TileType::Air));
-    CHECK(!tileThumbnails::shouldBake(TileType::Water));
+    CHECK(tileThumbnails::shouldBake(TileType::Water));
     CHECK(tileThumbnails::shouldBake(TileType::Wall));
     CHECK(tileThumbnails::shouldBake(TileType::Ground));
     CHECK(tileThumbnails::shouldBake(TileType::Player));
@@ -607,12 +605,12 @@ void testBakeFrameStandsTheTileOnAGroundBed()
             definition.type, testManifest(), testSettings());
         CHECK(frame.viewMode == RenderViewMode::Isometric3D);
 
-        // A bed of neutral ground plus the subject. Ground replaces its centre
-        // cell rather than stacking on it, so it is one fewer.
+        // Ground replaces the centre cell and water draws as a surface, so
+        // neither adds a tile to the bed.
         const std::size_t bedCells =
             tileThumbnails::bedSize * tileThumbnails::bedSize;
         const std::size_t expected = tileTypeIsGround(definition.type) ||
-                tileTypeIsWaterStream(definition.type)
+                tileTypeIsWater(definition.type)
             ? bedCells
             : bedCells + (tileTypeIsGate(definition.type)
                           ? config::gateEnergyTileCount
@@ -668,7 +666,7 @@ void testBakeFrameStandsTheTileOnAGroundBed()
             }
             continue;
         }
-        if (tileTypeIsWaterStream(definition.type)) {
+        if (tileTypeIsWater(definition.type)) {
             CHECK(frame.waterSurfaces.size() == 1);
             CHECK(frame.waterSurfaces.front().position ==
                 Vec2({ static_cast<float>(tileThumbnails::bedCentre),
@@ -892,10 +890,11 @@ void testSubjectMatchesTheTileTheEditorDraws()
         }
         const RenderFrameData frame = tileThumbnails::buildBakeFrame(
             definition.type, testManifest(), testSettings());
-        if (tileTypeIsWaterStream(definition.type)) {
+        if (tileTypeIsWater(definition.type)) {
             CHECK(frame.waterSurfaces.size() == 1);
             CHECK(frame.waterSurfaces.front().streamDirection ==
-                renderFrameParts::waterStreamDirectionForTile(definition.type));
+                (definition.type == TileType::Water ? 0U :
+                    renderFrameParts::waterStreamDirectionForTile(definition.type)));
             continue;
         }
         const RenderFrameData::Tile& subject = frame.tiles.back();
@@ -1308,7 +1307,7 @@ int main()
 {
     testRobotEditorAndThumbnailUseFrozenDrivePose();
     testAssetPathsAreUniqueAndTidy();
-    testAirAndWaterAreNotBaked();
+    testDrawablePaletteTilesAreBaked();
     testEdgeControlsRetainAuthoredPlacementAndEnergyMaterials();
     testEdgeControlsMatchAcrossGameplayEditorPreviewAndCoveredCells();
     testRigidControlComponentsFollowPresentation();

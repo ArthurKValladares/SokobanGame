@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -28,6 +29,8 @@ enum class UiTextOffsetUnit : uint8_t { Codepoints, Utf16 };
 
 // Match every whitespace-delimited term against an English display label.
 [[nodiscard]] bool matchesSearchTerms(std::string_view label, std::string_view query);
+// Each term may match a different field.
+[[nodiscard]] bool matchesSearchTerms(std::span<const std::string_view> fields, std::string_view query);
 
 // Single-line UTF-8 buffer. Caret, anchor, and selection offsets are bytes at
 // grapheme boundaries. The byte limit applies to whole graphemes, including

@@ -6,6 +6,7 @@
 #include "engine/ui/UiTextEdit.hpp"
 #include "engine/ui/UiTextField.hpp"
 
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -23,6 +24,36 @@ struct MakerLayout {
     float scale = 1.0f;
 };
 
+struct MakerLinkInspector {
+    enum class Kind : uint8_t { Device, Portal, Object };
+
+    std::optional<Kind> kind;
+    std::string_view title;
+    std::string_view detail;
+    std::span<const std::string> members;
+    std::span<const std::string> groups;
+    std::optional<std::size_t> activeGroup;
+    bool canDisconnect = false;
+    bool canClear = false;
+    bool canRename = false;
+    bool canCreate = false;
+    bool canSelectOther = false;
+    std::optional<bool> elevatorStopOnLayer;
+};
+
+struct MakerLinkLine {
+    Vec2 from;
+    Vec2 to;
+    Vec4 color;
+    std::string_view label;
+};
+
+struct MakerLinkMarker {
+    Vec2 position;
+    Vec4 color;
+    bool selected = false;
+};
+
 struct MakerViewState {
     TileType brush = TileType::Ground;
     uint32_t quarterTurns = 0;
@@ -35,6 +66,14 @@ struct MakerViewState {
     std::string_view status;
     std::string_view draftName;
     bool unsavedChanges = false;
+    std::string_view placementHint;
+    bool placementBlocked = false;
+    std::optional<TileType> boardTile;
+    std::optional<MakerLinkInspector> linkInspector;
+    std::span<const MakerLinkLine> linkLines;
+    std::span<const MakerLinkMarker> linkMarkers;
+    std::optional<UiRect> linkViewport;
+    bool linkLayerIsolated = false;
 };
 
 struct MakerViewInput {
@@ -43,6 +82,7 @@ struct MakerViewInput {
     UiNavigation navigation;
     bool extendTextSelection = false;
     bool interactive = true;
+    std::function<RenderTexture(TileType)> tileThumbnail;
 };
 
 enum class MakerCommand : uint8_t {
@@ -61,15 +101,26 @@ enum class MakerCommand : uint8_t {
     Load,
     NewDraft,
     ResizeBoard,
+    Connect,
+    Disconnect,
+    ClearLinkSelection,
+    NewLinkGroup,
+    RenameLinkGroup,
+    AssignLinkGroup,
+    SelectOtherLinkEndpoint,
+    ToggleLinkLayer,
+    ToggleElevatorStop,
 };
 
 struct MakerViewAction {
     std::optional<TileType> tile;
     MakerCommand command = MakerCommand::None;
+    std::optional<std::size_t> linkGroup;
 };
 
 enum class MakerDraftDialogMode : uint8_t {
     Save, Load, Overwrite, Discard, NewDraft, DiscardNew, ResizeBoard, ConfirmCrop,
+    NameLinkGroup, RenameLinkGroup,
 };
 
 struct MakerDraftDialogState {
@@ -124,9 +175,14 @@ public:
 
 private:
     void drawTileSearch(UiContext& ui, const MakerLayout& layout, const MakerViewInput& input);
+    [[nodiscard]] MakerViewAction drawEditorControls(UiContext& ui, const MakerLayout& layout,
+        const MakerViewState& state, const MakerViewInput& input);
 
     UiScroll paletteScroll_;
+    UiScroll linkScroll_;
     UiControlId focus_ = 0;
+    Vec2 palettePointer_;
+    bool paletteKeyboardFocus_ = false;
     UiTextField searchField_;
     UiTextEdit searchEdit_ { 128 };
     std::string renderedQuery_;

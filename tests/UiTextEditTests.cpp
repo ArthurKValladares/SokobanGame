@@ -1,5 +1,6 @@
 #include "TestHarness.hpp"
 
+#include "engine/ui/MakerTileGuide.hpp"
 #include "engine/ui/UiTextEdit.hpp"
 
 #include <limits>
@@ -152,6 +153,29 @@ void testCompositionKeepsCommittedTextAndSelection()
     CHECK(edit.composition().text.empty());
 }
 
+void testMakerTileGuideSearch()
+{
+    TEST("makerTileGuideSearch");
+    using namespace makerTileGuide;
+    CHECK(name(TileType::Rogue) == "Paladin");
+    CHECK(name(TileType::StreamRight) == "Water Stream");
+    CHECK(forTile(TileType::StreamRight).placementHint == forTile(TileType::StreamUp).placementHint);
+    CHECK(matches(TileType::LilyPad, "Terrain", " TERRAIN\tfloat WATER "));
+    CHECK(matches(TileType::Rogue, "Characters", "rogue push"));
+    CHECK(matches(TileType::ConveyorUp, "Mechanisms", "belt carries"));
+    CHECK(matches(TileType::Minecart, "Rails", "wagon connected stop"));
+    CHECK(!matches(TileType::LilyPad, "Terrain", "water signal"));
+    CHECK(matches(TileType::Water, "Terrain", " \t"));
+    CHECK(matchesSearchTerms("Horizontal Flip", "flip hor"));
+    CHECK(!matchesSearchTerms("Horizontal Flip", "flip hor unrelated"));
+
+    for (const auto& tile : tileTypeDefinitions()) {
+        const auto entry = forTile(tile.type);
+        CHECK(!entry.description.empty());
+        CHECK(!entry.placementHint.empty());
+    }
+}
+
 } // namespace
 
 int main()
@@ -161,5 +185,6 @@ int main()
     testEditsThatJoinGraphemes();
     testSingleLineUtf8InputAndLimits();
     testCompositionKeepsCommittedTextAndSelection();
+    testMakerTileGuideSearch();
     return failures == 0 ? 0 : 1;
 }
