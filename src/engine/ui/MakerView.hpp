@@ -6,6 +6,7 @@
 #include "engine/ui/UiTextEdit.hpp"
 #include "engine/ui/UiTextField.hpp"
 
+#include <array>
 #include <functional>
 #include <optional>
 #include <span>
@@ -182,6 +183,9 @@ private:
         const MakerViewState& state, const MakerViewInput& input);
 
     UiScroll paletteScroll_;
+    using PaletteSections = std::array<bool, 6>;
+    PaletteSections collapsedPaletteSections_ {};
+    PaletteSections collapsedSearchSections_ {};
     UiScroll linkScroll_;
     UiControlId focus_ = 0;
     Vec2 palettePointer_;

@@ -302,6 +302,92 @@ void testPaletteSearchFiltersWithinGroups(const FontAtlas& font)
     CHECK(visibleTileSwatches(ui, layout) == unfiltered);
 }
 
+void testPaletteGroupCollapse(const FontAtlas& font)
+{
+    TEST("makerPaletteGroupCollapseSeparatesNormalAndSearchState");
+    constexpr Vec2 viewport { 1280.0f, 900.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    const auto textureFor = [](TileType tile) { return RenderTexture { static_cast<uint32_t>(tile) + 1 }; };
+    const auto draw = [&](UiPointerInput pointer = {}, UiNavigation navigation = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto action = view.draw(ui, layout, {}, { .navigation = navigation, .tileThumbnail = textureFor });
+        ui.endFrame();
+        return action;
+    };
+    const auto row = [&](TileType tile) -> std::optional<Vec2> {
+        const auto command = std::ranges::find_if(ui.drawData().commands, [&](const UiDrawCommand& candidate) {
+            const Vec2 center = candidate.rect.position + candidate.rect.size * 0.5f;
+            return candidate.kind == UiDrawKind::TextureImage && candidate.texture == textureFor(tile) &&
+                candidate.rect.size == Vec2 { 28.0f, 28.0f } && candidate.clip && ui.contains(*candidate.clip, center);
+        });
+        return command != ui.drawData().commands.end()
+            ? std::optional { command->rect.position + command->rect.size * 0.5f } : std::nullopt;
+    };
+    const auto click = [](Vec2 position) {
+        return UiPointerInput { .position = position, .pressedAt = position, .releasedAt = position };
+    };
+    const auto noAction = [](const MakerViewAction& action) {
+        return !action.tile && action.command == MakerCommand::None;
+    };
+    const auto search = [&](std::string_view query) {
+        CHECK(view.focusTileSearch());
+        auto* edit = view.activeTextEdit();
+        CHECK(edit != nullptr);
+        if (edit) edit->setText(query);
+        (void)draw();
+    };
+
+    (void)draw();
+    CHECK(row(TileType::Wall) && row(TileType::CliffWall));
+    constexpr float centerYInFirstHeader = 88.0f + 14.0f;
+    // Click near the right edge to exercise the full-width header hit area.
+    const Vec2 basics = layout.palette.position + Vec2 { layout.palette.size.x - 23.0f, centerYInFirstHeader };
+    const Vec2 terrainBelowClosedBasics = basics + Vec2 { 0.0f, 28.0f + 9.0f };
+    const Vec2 board = layout.board.position + layout.board.size * 0.5f;
+    CHECK(noAction(draw({ .position = basics, .down = true, .pressedAt = basics })));
+    CHECK(noAction(draw({ .position = board, .releasedAt = board })));
+    CHECK(row(TileType::Wall).has_value());
+
+    CHECK(noAction(draw(click(basics))));
+    (void)draw();
+    CHECK(!row(TileType::Ground) && !row(TileType::Wall) && row(TileType::CliffWall));
+    // The next keyboard stop after a collapsed header is the next section.
+    CHECK(noAction(draw({}, { .next = true })));
+    CHECK(noAction(draw({}, { .activate = true })));
+    (void)draw();
+    CHECK(!row(TileType::Wall) && !row(TileType::CliffWall) && row(TileType::Rogue));
+    CHECK(noAction(draw({}, { .activate = true })));
+    (void)draw();
+    CHECK(!row(TileType::Wall) && row(TileType::CliffWall));
+
+    CHECK(noAction(draw(click(terrainBelowClosedBasics))));
+    (void)draw();
+    CHECK(!row(TileType::Wall) && !row(TileType::CliffWall));
+
+    search("wall");
+    CHECK(row(TileType::Wall) && row(TileType::CliffWall));
+    CHECK(noAction(draw(click(basics))));
+    (void)draw();
+    CHECK(!row(TileType::Wall) && row(TileType::CliffWall));
+    search("barrier wall");
+    CHECK(row(TileType::Wall) && !row(TileType::CliffWall));
+    search("   ");
+    CHECK(!row(TileType::Wall) && !row(TileType::CliffWall) && row(TileType::Rogue));
+    search("wall");
+    CHECK(row(TileType::Wall) && row(TileType::CliffWall));
+    search("");
+    CHECK(!row(TileType::Wall) && !row(TileType::CliffWall));
+
+    CHECK(draw(click({ viewport.x - 166.0f, 31.0f })).command == MakerCommand::TestPlay);
+    ui.beginFrame(viewport, click({ viewport.x - 100.0f, 31.0f }));
+    CHECK(view.drawPlaytest(ui, layout, false) == MakerCommand::ReturnToMaker);
+    ui.endFrame();
+    (void)draw();
+    CHECK(!row(TileType::Wall) && !row(TileType::CliffWall));
+}
+
 void testPaletteSelectsDistinctObjectsAndRotators(const FontAtlas& font)
 {
     TEST("makerPaletteSelectsDistinctObjectsAndRotators");
@@ -890,6 +976,7 @@ int main()
     testDisplayScale(font);
     testPlaytestControls(font);
     testPaletteSearchFiltersWithinGroups(font);
+    testPaletteGroupCollapse(font);
     testPaletteSelectsDistinctObjectsAndRotators(font);
     testPaletteThumbnailsAndBoardGuide(font);
     testPaletteKeyboardRevealsRows(font);

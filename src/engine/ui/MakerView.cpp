@@ -93,6 +93,8 @@ constexpr std::array groups {
 constexpr std::size_t paletteTileCount = basics.size() + terrain.size() + characters.size() +
     objects.size() + mechanisms.size() + rail.size();
 constexpr UiControlId firstTileId = 100;
+constexpr UiControlId firstPaletteSectionId = firstTileId - groups.size();
+constexpr std::size_t paletteRowCapacity = paletteTileCount + groups.size();
 constexpr UiControlId firstLinkGroupId = 100;
 
 UiControlId commandId(MakerCommand command)
@@ -272,9 +274,11 @@ void drawTitle(UiContext& ui, const MakerLayout& layout, float right, std::strin
     ui.popClip();
 }
 
-struct TileControl {
-    TileType tile;
+struct PaletteRow {
+    UiControlId id;
     UiRect bounds;
+    std::size_t section;
+    std::optional<TileType> tile;
 };
 
 struct DraftDialogCopy {
@@ -808,70 +812,63 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
     if (renderedQuery_ != query) {
         paletteScroll_ = {};
         renderedQuery_ = query;
+        collapsedSearchSections_ = {};
     }
-    std::array<TileControl, paletteTileCount> tiles;
-    std::array<std::size_t, groups.size()> groupTileCounts {};
-    std::size_t tileCount = 0;
-    std::size_t groupCount = 0;
+    const bool searching = query.find_first_not_of(" \t") != std::string::npos;
+    static_assert(std::tuple_size_v<PaletteSections> == groups.size());
+    auto& collapsedSections = searching ? collapsedSearchSections_ : collapsedPaletteSections_;
+    std::array<PaletteRow, paletteRowCapacity> rows;
+    std::size_t rowCount = 0;
+    float y = list.position.y;
     for (std::size_t index = 0; index < groups.size(); ++index) {
+        bool hasMatches = false;
         for (TileType tile : groups[index].tiles) {
-            if (query.empty() || makerTileGuide::matches(tile, groups[index].label, query)) {
-                tiles[tileCount++].tile = tile;
-                ++groupTileCounts[index];
+            if (searching && !makerTileGuide::matches(tile, groups[index].label, query)) continue;
+            if (!hasMatches) {
+                rows[rowCount++] = { firstPaletteSectionId + index,
+                    { { list.position.x, y }, { list.size.x, groupHeight * scale } }, index, std::nullopt };
+                y += groupHeight * scale;
+                hasMatches = true;
             }
+            if (collapsedSections[index]) break;
+            rows[rowCount++] = { tileId(tile),
+                { { list.position.x, y }, { list.size.x, tileHeight * scale } }, index, tile };
+            y += (tileHeight + tileGap) * scale;
         }
-        groupCount += groupTileCounts[index] > 0 ? 1U : 0U;
+        if (hasMatches) y += groupGap * scale;
     }
     // Keep the scroll offset in logical units across monitor scale changes.
-    const float contentHeight = static_cast<float>(groupCount) * (groupHeight + groupGap) +
-        static_cast<float>(tileCount) * (tileHeight + tileGap);
-    paletteScroll_.setExtents(list.size.y / scale, contentHeight);
+    paletteScroll_.setExtents(list.size.y / scale, (y - list.position.y) / scale);
     if (input.interactive) {
         paletteScroll_.scrollWheel(ui, layout.palette, input.wheelY, input.wheelPosition);
     }
 
-    std::array<UiControlRegion, controls.size() + paletteTileCount> regions;
+    std::array<UiControlRegion, controls.size() + paletteRowCapacity> regions;
     std::size_t regionCount = 0;
     for (const auto& control : controls) {
         regions[regionCount++] = { commandId(control.command), control.bounds, control.enabled };
     }
-    std::array<UiRect, groups.size()> labels;
-    std::size_t tileIndex = 0;
-    float y = list.position.y;
-    for (std::size_t index = 0; index < groups.size(); ++index) {
-        if (groupTileCounts[index] == 0) continue;
-        labels[index] = { { list.position.x, y }, { list.size.x, groupHeight * scale } };
-        y += groupHeight * scale;
-        const std::size_t end = tileIndex + groupTileCounts[index];
-        for (; tileIndex < end; ++tileIndex) {
-            const UiRect bounds { { list.position.x, y }, { list.size.x, tileHeight * scale } };
-            tiles[tileIndex].bounds = bounds;
-            y += (tileHeight + tileGap) * scale;
-        }
-        y += groupGap * scale;
-    }
     UiNavigation navigation = searchFocused_ ? UiNavigation {} : input.navigation;
-    const auto tileControls = std::span(tiles).first(tileCount);
+    const auto paletteRows = std::span(rows).first(rowCount);
     const bool navigationMoved = navigation.previous != navigation.next;
     if (input.interactive && navigationMoved && !ui.mousePressPosition() && !ui.mouseDown()) {
         // Resolve the complete palette's navigation before its clipped
         // pointer regions are submitted, so offscreen rows can receive focus.
-        std::array<UiControlId, controls.size() + paletteTileCount> focusOrder;
+        std::array<UiControlId, controls.size() + paletteRowCapacity> focusOrder;
         std::size_t focusCount = 0;
         for (const auto& control : controls) {
             if (control.enabled && control.bounds.size.x > 0.0f) focusOrder[focusCount++] = commandId(control.command);
         }
-        for (const auto& tile : tileControls) focusOrder[focusCount++] = tileId(tile.tile);
+        for (const auto& row : paletteRows) focusOrder[focusCount++] = row.id;
         const auto order = std::span(focusOrder).first(focusCount);
         const auto current = std::ranges::find(order, focus_);
         if (!order.empty()) {
             const auto index = current == order.end() ? std::size_t { 0 } : static_cast<std::size_t>(current - order.begin());
             const auto next = navigation.next ? (index + 1) % order.size() : (index + order.size() - 1) % order.size();
-            const auto target = std::ranges::find_if(tileControls,
-                [&](const TileControl& tile) { return tileId(tile.tile) == order[next]; });
-            if (target != tileControls.end()) {
+            const auto target = std::ranges::find(paletteRows, order[next], &PaletteRow::id);
+            if (target != paletteRows.end()) {
                 const float top = (target->bounds.position.y - list.position.y) / scale;
-                paletteScroll_.reveal(top, top + tileHeight);
+                paletteScroll_.reveal(top, top + target->bounds.size.y / scale);
             }
             focus_ = order[next];
         }
@@ -880,9 +877,9 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
     if (input.interactive) paletteScroll_.drawScrollbar(ui, "maker.palette.scroll", scrollbar);
     const float scroll = paletteScroll_.offset() * scale;
     ui.pushClip(list);
-    for (auto& tile : tileControls) {
-        tile.bounds.position.y -= scroll;
-        regions[regionCount++] = { tileId(tile.tile), ui.visibleRect(tile.bounds) };
+    for (auto& row : paletteRows) {
+        row.bounds.position.y -= scroll;
+        regions[regionCount++] = { row.id, ui.visibleRect(row.bounds) };
     }
     ui.popClip();
 
@@ -899,29 +896,35 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
     MakerViewAction result { .command = drawToolbar(ui, layout, state, controls, interaction, !searchFocused_) };
 
     ui.pushClip(list);
-    if (tileCount == 0) {
+    if (paletteRows.empty()) {
         ui.text(list.position + Vec2 { 2.0f, 6.0f } * scale, "No matching tiles", mutedInk, 15.0f * scale);
     }
-    for (std::size_t index = 0; index < groups.size(); ++index) {
-        if (groupTileCounts[index] == 0) continue;
-        ui.text(labels[index].position + Vec2 { 2.0f * scale, 4.0f * scale - scroll },
-            groups[index].label, mutedInk, 15.0f * scale);
-    }
-    for (const auto& [tile, bounds] : tileControls) {
+    for (const auto& [id, bounds, section, tile] : paletteRows) {
         const auto visible = ui.visibleRect(bounds);
         if (visible.size.y <= 0.0f) continue;
-        const bool selected = !state.erasing && selectedTile(tile, state.brush);
+        if (!tile) {
+            const bool collapsed = collapsedSections[section];
+            const bool toggled = uiControls::button(ui, interaction, id, bounds, "",
+                uiControls::ButtonTone::Normal);
+            ui.text(bounds.position + Vec2 { 9.0f, 4.0f } * scale,
+                groups[section].label, ink, 15.0f * scale);
+            ui.text(bounds.position + Vec2 { bounds.size.x - 20.0f * scale, 4.0f * scale },
+                collapsed ? "\xe2\x96\xb8" : "\xe2\x96\xbe", accentInk, 13.0f * scale);
+            if (toggled) collapsedSections[section] = !collapsed;
+            continue;
+        }
+        const bool selected = !state.erasing && selectedTile(*tile, state.brush);
         if (uiControls::button(ui, bounds, "", {
                 .tone = selected ? uiControls::ButtonTone::Accent : uiControls::ButtonTone::Normal,
-                .focused = input.interactive && paletteKeyboardFocus_ && focus_ == tileId(tile),
-                .activate = interaction.activated == tileId(tile),
+                .focused = input.interactive && paletteKeyboardFocus_ && focus_ == id,
+                .activate = interaction.activated == id,
                 .contentScale = 0.72f * scale,
             })) {
             result.tile = tile;
         }
         drawTileThumbnail(ui, { bounds.position + Vec2 { 4.0f, 2.0f } * scale,
-            Vec2 { 28.0f, 28.0f } * scale }, tile, 16.0f * scale, input);
-        const auto label = makerTileGuide::name(tile);
+            Vec2 { 28.0f, 28.0f } * scale }, *tile, 16.0f * scale, input);
+        const auto label = makerTileGuide::name(*tile);
         ui.text(bounds.position + Vec2 { 37.0f, 6.0f } * scale, label, ink,
             fitLabel(ui, label, 16.0f * scale, std::max(0.0f, bounds.size.x - 40.0f * scale)));
     }
@@ -932,9 +935,8 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
         inspected = state.boardTile.value_or(inspected);
     } else if (input.interactive && !searchFocused_) {
         const UiControlId inspectId = paletteKeyboardFocus_ ? interaction.focused : interaction.hovered;
-        const auto inspectedRow = std::ranges::find_if(tileControls,
-            [&](const TileControl& tile) { return tileId(tile.tile) == inspectId; });
-        if (inspectedRow != tileControls.end()) inspected = inspectedRow->tile;
+        const auto inspectedRow = std::ranges::find(paletteRows, inspectId, &PaletteRow::id);
+        if (inspectedRow != paletteRows.end() && inspectedRow->tile) inspected = *inspectedRow->tile;
     }
     if (guideSize > 0.0f) {
         drawTileGuide(ui, { { list.position.x, list.position.y + list.size.y },
