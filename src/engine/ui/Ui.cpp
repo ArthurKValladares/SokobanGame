@@ -270,6 +270,17 @@ void UiContext::rect(UiRect rectValue, Vec4 color)
     });
 }
 
+void UiContext::colorGradient(UiRect rectValue, std::array<Vec3, 4> corners)
+{
+    if (rectValue.size.x <= 0.0f || rectValue.size.y <= 0.0f) return;
+    pushCommand({
+        .kind = UiDrawKind::ColorGradient,
+        .rect = rectValue,
+        .uvRect = { {}, { 1.0f, 1.0f } },
+        .gradientColors = corners,
+    });
+}
+
 void UiContext::image(UiRect rectValue, UiRect uvRectValue, Vec4 color)
 {
     if (rectValue.size.x <= 0.0f || rectValue.size.y <= 0.0f || color.w <= 0.0f) {

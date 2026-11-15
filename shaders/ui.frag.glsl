@@ -57,6 +57,15 @@ float sceneImageCutoutOpacity()
         log(1.0 + logarithmicStrength);
 }
 
+vec3 colorGradient(vec2 uv)
+{
+    vec3 top = mix(draw.passData[0].rgb, draw.passData[1].rgb, uv.x);
+    vec3 bottom = mix(draw.passData[2].rgb, draw.passData[3].rgb, uv.x);
+    vec3 srgb = clamp(mix(top, bottom, uv.y), 0.0, 1.0);
+    return mix(pow((srgb + 0.055) / 1.055, vec3(2.4)), srgb / 12.92,
+        lessThanEqual(srgb, vec3(0.04045)));
+}
+
 void main()
 {
     vec4 color = draw.color;
@@ -87,6 +96,8 @@ void main()
         uv = draw.gridColor.xy + localUv * uvSpan;
         color *= texture(
             modelTextures[nonuniformEXT(textureIndex)], uv);
+    } else if (mode == DRAW_MODE_UI_COLOR_GRADIENT) {
+        color = vec4(colorGradient(uv), 1.0);
     } else if (mode != DRAW_MODE_UNTEXTURED) {
         // UiDrawKind is a closed CPU enum. Make a future unmapped kind
         // conspicuous instead of accidentally rendering it as a solid quad.

@@ -1282,6 +1282,8 @@ if(SOKOBAN_BUILD_TESTS)
         set_tests_properties(maker_thumbnail_gpu PROPERTIES LABELS "vulkan;render;ui" TIMEOUT 60)
         add_test(NAME maker_wiring_projection COMMAND sokoban_preview_rendering_tests --maker-wiring)
         set_tests_properties(maker_wiring_projection PROPERTIES LABELS "vulkan;render;ui" TIMEOUT 60)
+        add_test(NAME ui_color_gradient_gpu COMMAND sokoban_preview_rendering_tests --ui-color-gradient)
+        set_tests_properties(ui_color_gradient_gpu PROPERTIES LABELS "vulkan;render;ui" TIMEOUT 60)
         add_test(NAME resize_preview_gpu
             COMMAND sokoban_preview_rendering_tests --resize-preview
         )
@@ -1335,7 +1337,7 @@ if(SOKOBAN_BUILD_TESTS)
         if(SOKOBAN_ENABLE_SANITIZERS)
             # These tests initialize SDL/X11 and Vulkan. The application child
             # inherits this environment from the CMake teardown verifier.
-            set_property(TEST vulkan_smoke vulkan_geometry_arena renderer_frame_ownership sky_clouds ground_debris application_validation_teardown preview_rendering maker_thumbnail_gpu maker_wiring_projection resize_preview_gpu interaction_outlines water_entry_ripples rock_scratches four_layer_splat robot_animation
+            set_property(TEST vulkan_smoke vulkan_geometry_arena renderer_frame_ownership sky_clouds ground_debris application_validation_teardown preview_rendering maker_thumbnail_gpu maker_wiring_projection ui_color_gradient_gpu resize_preview_gpu interaction_outlines water_entry_ripples rock_scratches four_layer_splat robot_animation
                 APPEND PROPERTY ENVIRONMENT
                 "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
         endif()
@@ -1418,6 +1420,11 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_ui
         ASSET_DIR
         SOURCES tests/UiTextFieldTests.cpp
+    )
+    sokoban_add_test(NAME ui_color_picker
+        LIBS sokoban_ui
+        ASSET_DIR
+        SOURCES tests/UiColorPickerTests.cpp
     )
     sokoban_add_test(NAME sdl_text_input
         LIBS sokoban_ui

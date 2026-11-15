@@ -16,7 +16,7 @@ struct UiColorPickerInput {
     UiNavigation navigation;
     bool extendTextSelection = false;
     int horizontalStep = 0;
-    int verticalStep = 0;
+    int verticalStep = 0; // Positive for up.
 };
 
 struct UiColorPickerAction {

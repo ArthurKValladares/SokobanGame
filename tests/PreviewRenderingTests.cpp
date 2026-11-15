@@ -257,6 +257,40 @@ void verifyMakerWiringProjection(SDL_Window* window, const std::filesystem::path
     verify(!editor.layerLocked(), "Layer isolation modified the editor document");
 }
 
+void verifyUiColorGradient(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    UiContext ui(font);
+    const VkExtent2D extent = renderer.renderExtent();
+    ui.beginFrame({ static_cast<float>(extent.width), static_cast<float>(extent.height) }, {}, false, false);
+    constexpr UiRect gradient { { 32.0f, 32.0f }, { 180.0f, 180.0f } };
+    ui.colorGradient(gradient, {
+        Vec3 { 1.0f, 1.0f, 1.0f }, Vec3 { 0.0f, 1.0f, 0.0f }, Vec3 {}, Vec3 {},
+    });
+    ui.endFrame();
+    renderer.beginDebugUiFrame();
+    renderer.drawFrame(renderer.prepareFrame(RenderFrameData {}), ui.drawData(), true);
+    verify(!renderer.hasFatalFailure(), "UI color gradient frame failed to render");
+    const auto image = renderer.captureRenderedFrame();
+    const auto checkSample = [&](uint32_t x, uint32_t y) {
+        const float saturation = (static_cast<float>(x) + 0.5f - gradient.position.x) / gradient.size.x;
+        const float value = 1.0f - (static_cast<float>(y) + 0.5f - gradient.position.y) / gradient.size.y;
+        const std::size_t index = (static_cast<std::size_t>(y) * image.width + x) * 4;
+        const int green = static_cast<int>(std::lround(value * 255.0f));
+        const int redBlue = static_cast<int>(std::lround((1.0f - saturation) * value * 255.0f));
+        verify(std::abs(std::to_integer<int>(image.rgba.at(index)) - redBlue) <= 2 &&
+            std::abs(std::to_integer<int>(image.rgba.at(index + 1)) - green) <= 2 &&
+            std::abs(std::to_integer<int>(image.rgba.at(index + 2)) - redBlue) <= 2,
+            "The UI gradient sample differs from its sRGB value");
+    };
+    checkSample(55, 55);
+    checkSample(125, 125);
+    checkSample(184, 102);
+    verify(vulkanDebug::validationErrorCount() == 0, "Vulkan validation reported a UI gradient error");
+}
+
 ImageData verifyResizePreview(SDL_Window* window, const std::filesystem::path& root,
     FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
 {
@@ -2129,6 +2163,11 @@ int main(int argc, char** argv)
         if (argc > 1 && std::string_view(argv[1]) == "--maker-wiring") {
             verifyMakerWiringProjection(window.get(), root, font, manifest, temp.path() / "cache.bin");
             std::cout << "Maker wiring projection regression passed\n";
+            return 0;
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--ui-color-gradient") {
+            verifyUiColorGradient(window.get(), root, font, manifest, temp.path() / "cache.bin");
+            std::cout << "UI color gradient GPU regression passed\n";
             return 0;
         }
         if (argc > 1 && std::string_view(argv[1]) == "--resize-preview") {

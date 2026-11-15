@@ -85,6 +85,8 @@ static_assert(static_cast<uint32_t>(DrawMaterialMode::GltfMaterial)
         return DrawMaterialMode::TextureImage;
     case UiDrawKind::Image:
         return DrawMaterialMode::TitleBackground;
+    case UiDrawKind::ColorGradient:
+        return DrawMaterialMode::UiColorGradient;
     case UiDrawKind::Solid:
         break;
     }
@@ -4394,6 +4396,12 @@ private:
             shaderValue(uiDrawMaterialMode(command.kind));
         const NineSliceDrawData nineSlice = nineSliceDrawData(
             command.nineSlice, command.rect.size);
+        std::array<Vec4, 4> passData { nineSlice.sourceBorders, nineSlice.targetExtentAndSourcePixelScale };
+        if (command.kind == UiDrawKind::ColorGradient) {
+            std::ranges::transform(command.gradientColors, passData.begin(), [](Vec3 color) {
+                return Vec4 { color.x, color.y, color.z, 1.0f };
+            });
+        }
         const GpuDrawInstance constants {
             .vertices = {
                 Vec4 { left, top, 0.0f, clipSpaceQuad },
@@ -4401,10 +4409,7 @@ private:
                 Vec4 { right, bottom, 0.0f, clipSpaceQuad },
                 Vec4 { left, bottom, 0.0f, clipSpaceQuad },
             },
-            .passData = {
-                nineSlice.sourceBorders,
-                nineSlice.targetExtentAndSourcePixelScale,
-            },
+            .passData = passData,
             .color = command.color,
             .shadowOptions = command.effectOptions,
             .materialOptions = {

@@ -1082,13 +1082,17 @@ void Application::drawMakerColorDialog(Vec2 viewport, float scale, const MakerVi
     auto navigation = input.navigation;
     const auto tab = std::exchange(makerColorDialog_->tabNavigation, {});
     if (tab.previous || tab.next) navigation = tab;
+    const bool gamepad = input_.activeDevice() == ActiveInputDevice::Gamepad;
+    const auto pressed = [&](InputAction action, SDL_Scancode key) {
+        return static_cast<int>(gamepad ? input_.actionPressed(action) : input_.keyPressed(key));
+    };
     const UiColorPickerAction action = makerColorPicker_.draw(ui_, viewport, scale, {
         .navigation = navigation,
         .extendTextSelection = input.extendTextSelection,
-        .horizontalStep = static_cast<int>(input_.keyPressed(SDL_SCANCODE_RIGHT)) -
-            static_cast<int>(input_.keyPressed(SDL_SCANCODE_LEFT)),
-        .verticalStep = static_cast<int>(input_.keyPressed(SDL_SCANCODE_UP)) -
-            static_cast<int>(input_.keyPressed(SDL_SCANCODE_DOWN)),
+        .horizontalStep = pressed(InputAction::MoveRight, SDL_SCANCODE_RIGHT) -
+            pressed(InputAction::MoveLeft, SDL_SCANCODE_LEFT),
+        .verticalStep = pressed(InputAction::MoveUp, SDL_SCANCODE_UP) -
+            pressed(InputAction::MoveDown, SDL_SCANCODE_DOWN),
     });
     using Command = UiColorPickerAction::Command;
     if (makerColorDialog_->cancelRequested || action.command == Command::Cancel) {

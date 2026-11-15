@@ -59,19 +59,8 @@ void drawFocus(UiContext& ui, UiRect bounds, float scale)
 
 void drawColorField(UiContext& ui, UiRect bounds, Vec3 hueColor, Vec2 indicator, float scale)
 {
-    const Vec2 step = { bounds.size.x / 48.0f, bounds.size.y / 32.0f };
     constexpr Vec3 white { 1.0f, 1.0f, 1.0f };
-    ui.pushClip(bounds);
-    for (int row = 0; row < 32; ++row) {
-        const float value = 1.0f - static_cast<float>(row) / 31.0f;
-        for (int column = 0; column < 48; ++column) {
-            const float saturation = static_cast<float>(column) / 47.0f;
-            const Vec2 offset { step.x * static_cast<float>(column), step.y * static_cast<float>(row) };
-            ui.rect({ bounds.position + offset, step + Vec2 { 0.34f, 0.34f } },
-                opaque(lerp(white, hueColor, saturation) * value));
-        }
-    }
-    ui.popClip();
+    ui.colorGradient(bounds, { white, hueColor, {}, {} });
     const Vec2 point = bounds.position + Vec2 { bounds.size.x * indicator.x, bounds.size.y * indicator.y };
     for (float radius : { 6.0f, 4.0f, 2.0f }) {
         const Vec2 inset = Vec2 { radius, radius } * scale;
@@ -81,14 +70,14 @@ void drawColorField(UiContext& ui, UiRect bounds, Vec3 hueColor, Vec2 indicator,
 
 void drawHueBar(UiContext& ui, UiRect bounds, float hue, float scale)
 {
-    const float step = bounds.size.x / 90.0f;
-    ui.pushClip(bounds);
-    for (int sample = 0; sample < 90; ++sample) {
-        const float offset = step * static_cast<float>(sample);
-        ui.rect({ bounds.position + Vec2 { offset, 0.0f }, { step + 0.34f, bounds.size.y } },
-            opaque(colorValues::fromHsv({ static_cast<float>(sample) * 4.0f, 1.0f, 1.0f })));
+    const float step = bounds.size.x / 6.0f;
+    for (int segment = 0; segment < 6; ++segment) {
+        const float start = static_cast<float>(segment);
+        const Vec3 left = colorValues::fromHsv({ start * 60.0f, 1.0f, 1.0f });
+        const Vec3 right = colorValues::fromHsv({ (start + 1.0f) * 60.0f, 1.0f, 1.0f });
+        ui.colorGradient({ bounds.position + Vec2 { step * start, 0.0f }, { step, bounds.size.y } },
+            { left, right, left, right });
     }
-    ui.popClip();
     const Vec2 center = bounds.position + Vec2 { bounds.size.x * hue / 360.0f, 0.0f };
     ui.rect({ center - Vec2 { 4.0f, 3.0f } * scale, { 8.0f * scale, bounds.size.y + 6.0f * scale } }, dark);
     ui.rect({ center - Vec2 { 2.0f, 1.0f } * scale, { 4.0f * scale, bounds.size.y + 2.0f * scale } }, ink);
@@ -290,9 +279,9 @@ UiColorPickerAction UiColorPicker::draw(UiContext& ui, Vec2 viewport, float scal
             const float dx = static_cast<float>(input.horizontalStep);
             const float dy = static_cast<float>(input.verticalStep);
             if (focus_ == hueId) {
-                setHsv(std::fmod(hue_ + (dx - dy) * 3.0f + 360.0f, 360.0f), saturation_, value_);
+                setHsv(std::fmod(hue_ + (dx + dy) * 3.0f + 360.0f, 360.0f), saturation_, value_);
             } else {
-                setHsv(hue_, saturation_ + dx * 0.02f, value_ - dy * 0.02f);
+                setHsv(hue_, saturation_ + dx * 0.02f, value_ + dy * 0.02f);
             }
         }
     } else if (activeField_ && (navigation.previous || navigation.next)) {

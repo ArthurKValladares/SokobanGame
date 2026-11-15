@@ -7,6 +7,7 @@
 #include "engine/ui/UiConfig.hpp"
 #include "engine/ui/TextLayout.hpp"
 
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -64,6 +65,7 @@ enum class UiDrawKind : uint8_t {
     Image,
     TextureImage,
     SceneImage,
+    ColorGradient,
 };
 
 struct UiDrawCommand {
@@ -78,6 +80,7 @@ struct UiDrawCommand {
     bool outlineGlyph = false;
     float fontSize = 0.0f; // Requested display size, for UI diagnostics.
     std::optional<UiRect> clip {}; // In UI viewport coordinates.
+    std::array<Vec3, 4> gradientColors {};
 };
 
 // A mixed line uses the same advance, baseline and draw order for text and
@@ -167,6 +170,8 @@ public:
     void setSceneViewport(UiRect rect);
 
     void rect(UiRect rect, Vec4 color);
+    // Interpolates the sRGB corners in reading order before display conversion.
+    void colorGradient(UiRect rect, std::array<Vec3, 4> corners);
     void image(
         UiRect rect,
         UiRect uvRect = { {}, { 1.0f, 1.0f } },
