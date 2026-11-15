@@ -1,8 +1,10 @@
 #include "TestHarness.hpp"
 
 #include "engine/ui/MakerTileGuide.hpp"
+#include "engine/ui/UiColorValues.hpp"
 #include "engine/ui/UiTextEdit.hpp"
 
+#include <array>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -176,6 +178,75 @@ void testMakerTileGuideSearch()
     }
 }
 
+void testColorValueFormats()
+{
+    TEST("colorValueFormats");
+    using namespace sokoban::ui::color;
+    const Vec3 color { 0.2f, 0.4f, 0.8f };
+    CHECK(format(color, Format::Hex) == "#3366CC");
+    CHECK(format(color, Format::Rgb) == "51, 102, 204");
+    CHECK(format(color, Format::Cmyk) == "75%, 50%, 0%, 20%");
+    CHECK(format(color, Format::Hsv) == "220\xc2\xb0, 75%, 80%");
+    CHECK(format(color, Format::Hsl) == "220\xc2\xb0, 60%, 50%");
+    CHECK(format({}, Format::Cmyk) == "0%, 0%, 0%, 100%");
+    CHECK(format({ 1.0f, 1.0f, 1.0f }, Format::Hsl) == "0\xc2\xb0, 0%, 100%");
+
+    CHECK(parse(" 3366cc ", Format::Hex) == color);
+    CHECK(parse("#36c", Format::Hex) == color);
+    CHECK(parse("51 102 204", Format::Rgb) == color);
+    CHECK(parse("51,102 , 204", Format::Rgb) == color);
+    CHECK(parse("0 0 0 100", Format::Cmyk) == Vec3 {});
+    const Vec3 red { 1.0f, 0.0f, 0.0f };
+    CHECK(parse("360deg 100% 100%", Format::Hsv) == red);
+    CHECK(parse("360, 100, 50", Format::Hsl) == red);
+    CHECK(fromHsv({ -120.0f, 1.0f, 1.0f }) == (Vec3 { 0.0f, 0.0f, 1.0f }));
+    const Hsv gray = toHsv({ 0.5f, 0.5f, 0.5f });
+    CHECK(gray.hue == 0.0f && gray.saturation == 0.0f && gray.value == 0.5f);
+}
+
+void testColorValueRoundTripsPreserveRgbBytes()
+{
+    TEST("colorValueRoundTripsPreserveRgbBytes");
+    using namespace sokoban::ui::color;
+    constexpr std::array values { 0, 1, 51, 127, 128, 204, 254, 255 };
+    constexpr std::array formats { Format::Hex, Format::Rgb, Format::Cmyk, Format::Hsv, Format::Hsl };
+    for (int red : values) {
+        for (int green : values) {
+            for (int blue : values) {
+                const Vec3 rgb { static_cast<float>(red) / 255.0f,
+                    static_cast<float>(green) / 255.0f,
+                    static_cast<float>(blue) / 255.0f };
+                const std::string expected = format(rgb, Format::Hex);
+                for (Format mode : formats) {
+                    const auto parsed = parse(format(rgb, mode), mode);
+                    CHECK(parsed && format(*parsed, Format::Hex) == expected);
+                }
+            }
+        }
+    }
+}
+
+void testColorValueValidation()
+{
+    TEST("colorValueValidation");
+    using namespace sokoban::ui::color;
+    for (const auto text : { "", "#", "#1234", "#001122FF", "#xyz", "0x12ab", "12 345" }) {
+        CHECK_MESSAGE(!parse(text, Format::Hex), text);
+    }
+    for (const auto text : { "1,2", "1,,2,3", "1,2,3,", "1 2 3 4", "256 0 0",
+             "-1,0,0", "1,2.5,3", "1%,2,3", "2e2,0,0", "255.000001,0,0",
+             "1-0 0", "1,0,nan" }) {
+        CHECK_MESSAGE(!parse(text, Format::Rgb), text);
+    }
+    CHECK(!parse("0, 0, 0, 100.001%", Format::Cmyk));
+    CHECK(!parse("0 0 0", Format::Cmyk));
+    CHECK(!parse("361, 50%, 50%", Format::Hsv));
+    CHECK(!parse("1%, 50%, 50%", Format::Hsv));
+    CHECK(!parse("1, 50deg, 50", Format::Hsl));
+    CHECK(!parse("1, 50, 101", Format::Hsl));
+    CHECK(!parse("1, inf, 0", Format::Hsl));
+}
+
 } // namespace
 
 int main()
@@ -186,5 +257,8 @@ int main()
     testSingleLineUtf8InputAndLimits();
     testCompositionKeepsCommittedTextAndSelection();
     testMakerTileGuideSearch();
+    testColorValueFormats();
+    testColorValueRoundTripsPreserveRgbBytes();
+    testColorValueValidation();
     return failures == 0 ? 0 : 1;
 }

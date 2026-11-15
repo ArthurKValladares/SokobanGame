@@ -29,6 +29,7 @@
 #include "engine/UserSettingsConfig.hpp"
 #include "engine/ui/MakerTileGuide.hpp"
 #include "engine/ui/SelectorPrompt.hpp"
+#include "engine/ui/UiColorValues.hpp"
 #include "engine/ui/UiConfig.hpp"
 
 #include <SDL3/SDL.h>
@@ -159,6 +160,7 @@ void populateMakerLinkInspector(MakerLinkPresentation& view, const LevelEditor& 
                 addPeers(group.portals, LinkKind::Portal);
                 view.connectionLabel = "Portal pair " + std::to_string(pairNumber);
                 view.title = view.connectionLabel;
+                view.inspector.groupColor = color;
             }
             view.inspector.canDisconnect = group.portals.size() > 1;
             break;
@@ -223,13 +225,26 @@ void populateMakerLinkInspector(MakerLinkPresentation& view, const LevelEditor& 
     }
     if (view.inspector.activeGroup) {
         view.connectionLabel = view.groupNames[*view.inspector.activeGroup];
+        view.inspector.groupColor = color;
     } else if (!view.peers.empty()) {
         view.connectionLabel = "Signal connection";
     }
 }
 
+void checkStartupClose(const Window& window)
+{
+    // There is only one window during startup. Leave the other queued
+    // events for the main loop once the application is ready.
+    SDL_PumpEvents();
+    if (SDL_HasEvent(SDL_EVENT_WINDOW_CLOSE_REQUESTED) ||
+        SDL_HasEvent(SDL_EVENT_QUIT)) {
+        SDL_HideWindow(window.nativeHandle());
+        throw ApplicationStartupCancelled {};
+    }
+}
+
 template<class Load>
-auto timedAssetStartup(std::string_view phase, Load&& load)
+auto timedAssetStartup(const Window& window, std::string_view phase, Load&& load)
 {
     const auto started = std::chrono::steady_clock::now();
     auto result = std::forward<Load>(load)();
@@ -237,6 +252,7 @@ auto timedAssetStartup(std::string_view phase, Load&& load)
         << "Asset startup phase (us): " << phase << '='
         << std::chrono::duration_cast<std::chrono::microseconds>(
                std::chrono::steady_clock::now() - started).count();
+    checkStartupClose(window);
     return result;
 }
 
@@ -268,6 +284,7 @@ AssetLoadingBudget assetLoadingBudgetFor(const ApplicationOptions& options)
 bool configureStartupWindow(
     Window& window, PlayerProfile& profile, bool smokeRun)
 {
+    checkStartupClose(window);
     // Apply the persisted mode before Vulkan creates its surface and
     // swapchain. Creating a default window first and changing it after the
     // renderer exists forces an otherwise redundant swapchain generation
@@ -287,6 +304,7 @@ bool configureStartupWindow(
     } else {
         window.setWindowedSize(video.windowWidth, video.windowHeight);
     }
+    checkStartupClose(window);
     return true;
 }
 
@@ -369,18 +387,15 @@ bool SDLCALL simulationTimingEventWatch(void* userdata, SDL_Event* event)
 } // namespace
 
 Application::Application(ApplicationOptions options)
-    : window_(
-          "Sokoban 3D",
-          config::windowWidth,
-          config::windowHeight)
-    , saveSlots_(
+    : saveSlots_(
           options.saveDirectoryOverride.empty()
               ? SaveStore::preferencePath("Sokoban3D", "Sokoban3D")
               : options.saveDirectoryOverride)
     , playerProfile_(saveSlots_.loadActiveProfile())
+    , window_("Sokoban 3D", config::windowWidth, config::windowHeight)
     , startupWindowConfigured_(
           configureStartupWindow(window_, playerProfile_, options.smokeFrames != 0))
-    , assetRoot_(timedAssetStartup("content-validation",
+    , assetRoot_(timedAssetStartup(window_, "content-validation",
 #if SOKOBAN_ENABLE_DEBUG_UI
           [&options] {
               if (options.smokeFrames == 0 && options.evidenceOutputDirectory.empty()) {
@@ -391,20 +406,20 @@ Application::Application(ApplicationOptions options)
 #else
           [] { return runtimeContentRoot(); }))
 #endif
-    , assetManifest_(timedAssetStartup("manifest", [this] {
+    , assetManifest_(timedAssetStartup(window_, "manifest", [this] {
           return AssetManifest::loadFromFile(assetRoot_ / "manifest.json");
       }))
     , audioStartup_(std::async(std::launch::async, [this] {
           return std::make_unique<AudioSystem>(assetRoot_, assetManifest_);
       }))
-    , animationCatalog_(timedAssetStartup("animation-catalog", [this] {
+    , animationCatalog_(timedAssetStartup(window_, "animation-catalog", [this] {
           return AnimationCatalog::loadFromFile(
               assetRoot_ / "animation_catalog.json", assetManifest_);
       }))
-    , uiFont_(timedAssetStartup("font-atlas", [this] {
+    , uiFont_(timedAssetStartup(window_, "font-atlas", [this] {
           return FontAtlas::loadDefault(assetRoot_);
       }))
-    , inputPrompts_(timedAssetStartup("input-prompts", [this] {
+    , inputPrompts_(timedAssetStartup(window_, "input-prompts", [this] {
           return InputPromptCatalog(assetRoot_, assetManifest_);
       }))
     , renderer_(
@@ -477,6 +492,7 @@ Application::Application(ApplicationOptions options)
     , evidenceWaterDisabled_(options.evidenceWaterDisabled)
     , evidenceWaterReflectionsDisabled_(options.evidenceWaterReflectionsDisabled)
 {
+    checkStartupClose(window_);
     log::info(log::Category::Persistence)
         << saveSlots_.progressStatus();
     const auto levelCatalogStart = std::chrono::steady_clock::now();
@@ -526,6 +542,7 @@ Application::Application(ApplicationOptions options)
     presentationSettings_.normalize();
     presentation_.setAnimationCatalog(&animationCatalog_);
     screenPreviewPresentation_.setAnimationCatalog(&animationCatalog_);
+    checkStartupClose(window_);
     // The title needs no world assets. Speculative work starts after the first
     // draw, using the saved screen or the nearby selectable puzzles only.
     openTitleScreen();
@@ -545,6 +562,7 @@ Application::Application(ApplicationOptions options)
         << "Asset startup phase (us): developer-tools="
         << std::chrono::duration_cast<std::chrono::microseconds>(
                std::chrono::steady_clock::now() - toolsStartupStart).count();
+    checkStartupClose(window_);
 
     DebugUi::addTab("Engine", [this] {
         int completedTargets = 0;
@@ -925,6 +943,7 @@ bool Application::bakeTileThumbnails()
 bool Application::nativeTextFocused() const
 {
     if (makerOpen_ && !makerPlaytest_ && !optionsMenu_.isOpen()) {
+        if (makerColorDialog_) return makerColorPicker_.textFocused();
         return makerDraftDialog_ ? makerView_.draftNameFocused() : makerView_.tileSearchFocused();
     }
     return optionsMenuView_.controlsSearchFocused(optionsMenu_.state());
@@ -932,6 +951,7 @@ bool Application::nativeTextFocused() const
 
 void Application::blurNativeTextInput()
 {
+    makerColorPicker_.blurText();
     makerView_.blurTileSearch();
     makerView_.blurDraftName();
     optionsMenuView_.blurControlsSearch();
@@ -942,7 +962,8 @@ void Application::updateNativeTextInput()
 {
     const bool makerInteractive = makerOpen_ && !makerPlaytest_ && !optionsMenu_.isOpen();
     const bool draftNameInteractive = makerInteractive && makerDraftDialog_.has_value();
-    auto* target = makerInteractive
+    const bool colorInteractive = makerInteractive && makerColorDialog_.has_value();
+    auto* target = colorInteractive ? makerColorPicker_.activeTextEdit() : makerInteractive
         ? (draftNameInteractive ? makerView_.activeDraftNameEdit() : makerView_.activeTextEdit())
         : optionsMenuView_.activeTextEdit(optionsMenu_.state());
     SDL_Rect area {};
@@ -950,7 +971,7 @@ void Application::updateNativeTextInput()
         const Vec2 size = window_.size();
         const Vec2 pixels = window_.sizeInPixels();
         if (pixels.x > 0.0f && pixels.y > 0.0f) {
-            const UiRect caret = makerInteractive
+            const UiRect caret = colorInteractive ? makerColorPicker_.textCaret() : makerInteractive
                 ? (draftNameInteractive ? makerView_.draftNameCaret() : makerView_.textCaret())
                 : optionsMenuView_.textCaret();
             const Vec2 position = scaleUiPosition(caret.position, pixels, size);
@@ -971,13 +992,14 @@ bool Application::handleNativeTextInputEvent(const SDL_Event& event)
     const auto& options = optionsMenu_.state();
     const bool makerInteractive = makerOpen_ && !makerPlaytest_ && !options.open;
     const bool makerDialogInteractive = makerInteractive && makerDraftDialog_.has_value();
+    const bool colorInteractive = makerInteractive && makerColorDialog_.has_value();
     if ((options.open || makerInteractive) && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
         event.button.button == SDL_BUTTON_LEFT &&
         event.button.windowID == SDL_GetWindowID(window_.nativeHandle())) {
         const Vec2 position = scaleUiPosition({ event.button.x, event.button.y },
             window_.size(), window_.sizeInPixels());
         const bool extend = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
-        const bool focusChanged = makerInteractive
+        const bool focusChanged = colorInteractive ? makerColorPicker_.handleTextPress(ui_, position, extend) : makerInteractive
             ? (makerDialogInteractive ? makerView_.handleDraftNamePress(ui_, position, extend)
                                       : makerView_.handleTileSearchPress(ui_, position, extend))
             : optionsMenuView_.handleControlsSearchPress(ui_, options, position, extend);
@@ -985,7 +1007,7 @@ bool Application::handleNativeTextInputEvent(const SDL_Event& event)
             updateNativeTextInput();
         }
     }
-    if (!makerDialogInteractive && event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+    if (!makerDialogInteractive && !colorInteractive && event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
         event.key.scancode == SDL_SCANCODE_F &&
         (event.key.mod & SDL_KMOD_CTRL) != 0 &&
         (event.key.mod & (SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0) {
@@ -1001,6 +1023,30 @@ bool Application::handleNativeTextInputEvent(const SDL_Event& event)
         }
     }
     const auto result = nativeTextInput_.handleEvent(event);
+    if (colorInteractive) {
+        const bool keyDown = event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+            event.key.windowID == SDL_GetWindowID(window_.nativeHandle());
+        if (keyDown && event.key.key == SDLK_TAB && result != SdlTextInputResult::Consumed) {
+            if (makerColorPicker_.textFocused()) makerColorPicker_.submitText();
+            makerColorPicker_.endAdjustment();
+            if (!makerColorPicker_.textFocused()) {
+                const bool previous = (event.key.mod & SDL_KMOD_SHIFT) != 0;
+                makerColorDialog_->tabNavigation = { .previous = previous, .next = !previous };
+            }
+            updateNativeTextInput();
+            return true;
+        }
+        if (result == SdlTextInputResult::Submit) {
+            makerColorPicker_.submitText();
+            updateNativeTextInput();
+        } else if (keyDown && event.key.key == SDLK_ESCAPE && result == SdlTextInputResult::Blur) {
+            makerColorDialog_->cancelRequested = true;
+        } else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+            blurNativeTextInput();
+            makerColorPicker_.endAdjustment();
+        }
+        return result != SdlTextInputResult::Ignored;
+    }
     if (makerDialogInteractive && result == SdlTextInputResult::Submit) {
         makerDraftDialog_->inputAction = makerView_.submitDraftName();
     } else if (makerDialogInteractive && result == SdlTextInputResult::Blur &&
@@ -1011,6 +1057,53 @@ bool Application::handleNativeTextInputEvent(const SDL_Event& event)
         blurNativeTextInput();
     }
     return result != SdlTextInputResult::Ignored;
+}
+
+void Application::openMakerColorDialog(Vec3 color, std::string_view groupName)
+{
+    makerSession_->endStroke();
+    blurNativeTextInput();
+    ui_.cancelPointerInteraction();
+    makerHover_.reset();
+    const std::string title = groupName.empty() ? "Group Color" : std::string(groupName) + " Color";
+    makerColorPicker_.open(color, title);
+    makerColorDialog_ = MakerColorDialog { .initial = color };
+}
+
+void Application::closeMakerColorDialog()
+{
+    blurNativeTextInput();
+    ui_.cancelPointerInteraction();
+    makerColorDialog_.reset();
+}
+
+void Application::drawMakerColorDialog(Vec2 viewport, float scale, const MakerViewInput& input)
+{
+    auto navigation = input.navigation;
+    const auto tab = std::exchange(makerColorDialog_->tabNavigation, {});
+    if (tab.previous || tab.next) navigation = tab;
+    const UiColorPickerAction action = makerColorPicker_.draw(ui_, viewport, scale, {
+        .navigation = navigation,
+        .extendTextSelection = input.extendTextSelection,
+        .horizontalStep = static_cast<int>(input_.keyPressed(SDL_SCANCODE_RIGHT)) -
+            static_cast<int>(input_.keyPressed(SDL_SCANCODE_LEFT)),
+        .verticalStep = static_cast<int>(input_.keyPressed(SDL_SCANCODE_UP)) -
+            static_cast<int>(input_.keyPressed(SDL_SCANCODE_DOWN)),
+    });
+    using Command = UiColorPickerAction::Command;
+    if (makerColorDialog_->cancelRequested || action.command == Command::Cancel) {
+        closeMakerColorDialog();
+    } else if (action.command == Command::Apply) {
+        if (LevelEditor::sameLinkColor(action.color, makerColorDialog_->initial) ||
+            makerSession_->recolorSelectedLinkGroup(action.color)) {
+            closeMakerColorDialog();
+        } else {
+            const auto status = makerSession_->status();
+            makerColorPicker_.setError(status.empty() ? "The selected group is unavailable." : status);
+        }
+    } else if (action.command == Command::CopyHex && !SDL_SetClipboardText(action.hex.c_str())) {
+        makerColorPicker_.setError("Could not copy the color to the clipboard.");
+    }
 }
 
 void Application::openMakerDraftDialog(MakerDraftDialogMode mode, std::string_view name)
@@ -1231,7 +1324,8 @@ void Application::drawMakerWorkspace(
         }
         return std::nullopt;
     };
-    const auto hovered = makerDraftDialog_ ? std::nullopt : pick(ui_.mousePosition());
+    const bool modalOpen = makerDraftDialog_ || makerColorDialog_;
+    const auto hovered = modalOpen ? std::nullopt : pick(ui_.mousePosition());
     const LevelEditor& editor = maker.editor();
     makerHover_ = hovered ? maker.previewCell(xy(*hovered)) : std::nullopt;
     const TileType boardTile = hovered ? makerTileAt(editor, *hovered) : TileType::Air;
@@ -1270,7 +1364,11 @@ void Application::drawMakerWorkspace(
         };
         if (selectedLink) {
             const auto from = project(*selectedLink);
-            const auto color = highlight(selectedLink->kind);
+            auto color = highlight(selectedLink->kind);
+            if (wiring.inspector.groupColor) {
+                const auto linear = ui::color::displayLinear(*wiring.inspector.groupColor);
+                color = { linear.x, linear.y, linear.z, 1.0f };
+            }
             if (from) wiring.markers.push_back({ *from, color, true });
             for (const auto peer : wiring.peers) {
                 const auto cell = peer.cell;
@@ -1294,6 +1392,7 @@ void Application::drawMakerWorkspace(
         wiring.inspector.title = wiring.title;
         wiring.inspector.members = wiring.members;
         wiring.inspector.groups = wiring.groupNames;
+        wiring.inspector.groupColors = wiring.groupColors;
     }
     const TileType brush = editor.selectedTile();
     const bool showPlacementHint = painting && makerHover_ && !makerView_.tileSearchFocused();
@@ -1305,7 +1404,7 @@ void Application::drawMakerWorkspace(
         .wheelPosition = wheelPosition,
         .navigation = input.maker,
         .extendTextSelection = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0,
-        .interactive = !makerDraftDialog_,
+        .interactive = !modalOpen,
         .tileThumbnail = [this](TileType tile) { return renderer_.makerTileThumbnail(tile); },
     };
     const MakerViewAction action = makerView_.draw(ui_, layout, {
@@ -1332,6 +1431,10 @@ void Application::drawMakerWorkspace(
         .linkViewport = scene,
         .linkLayerIsolated = maker.linkLayerIsolated(),
     }, viewInput);
+    if (makerColorDialog_) {
+        drawMakerColorDialog(viewport, scale, viewInput);
+        return;
+    }
     if (auto& dialog = makerDraftDialog_) {
         MakerViewInput dialogInput = viewInput;
         const bool resizePreview = showsMakerResizePreview(dialog->mode);
@@ -1378,6 +1481,11 @@ void Application::drawMakerWorkspace(
         if (wiring.inspector.activeGroup) {
             openMakerDraftDialog(MakerDraftDialogMode::RenameLinkGroup,
                 wiring.groupNames[*wiring.inspector.activeGroup]);
+        }
+        return;
+    case MakerCommand::EditLinkGroupColor:
+        if (wiring.inspector.groupColor) {
+            openMakerColorDialog(*wiring.inspector.groupColor, wiring.connectionLabel);
         }
         return;
     case MakerCommand::AssignLinkGroup:
@@ -1720,6 +1828,7 @@ void Application::finishSmokeRunIfDue(std::uint64_t renderedFrames)
 
 bool Application::run()
 {
+    checkStartupClose(window_);
     startupConstructionMicroseconds_ =
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - startupStarted_).count();
@@ -1743,6 +1852,7 @@ bool Application::run()
     } else if (evidenceOutputDirectory_.empty()) {
         applyLaunchRequest();
     }
+    checkStartupClose(window_);
     const auto launchFinished = std::chrono::steady_clock::now();
     std::uint64_t renderedFrames = 0;
     CpuProfiler::instance().setCurrentThreadName("Main");
@@ -1854,7 +1964,9 @@ bool Application::run()
 #endif
             break;
         case InputRouter::BackAction::ShellBack:
-            if (makerDraftDialog_ && !optionsMenu_.isOpen()) {
+            if (makerColorDialog_ && !optionsMenu_.isOpen()) {
+                makerColorDialog_->cancelRequested = true;
+            } else if (makerDraftDialog_ && !optionsMenu_.isOpen()) {
                 makerDraftDialog_->inputAction = { .command = MakerDraftDialogAction::Command::Cancel };
             } else if (nativeTextFocused()) {
                 blurNativeTextInput();
@@ -1903,6 +2015,12 @@ bool Application::run()
             // Menus and developer tools remain responsive in wall-clock time,
             // independent of the selected gameplay simulation speed.
             developerWorkspaceVisible = drawUiFrame(routedInput, wallClockDt);
+        }
+        if (!running_) {
+            renderer_.discardDebugUiFrame();
+            (void)SDL_HideWindow(window_.nativeHandle());
+            CpuProfiler::instance().endFrame();
+            break;
         }
         const auto buildStart = std::chrono::steady_clock::now();
         if (!evidenceSceneCaptured_) {
@@ -2949,6 +3067,7 @@ void Application::executeShellCommand(const ShellCommand& command)
         [&](const shell::CloseMaker&) {
             if (makerPlaytest_) returnToMaker();
             if (makerDraftDialog_) closeMakerDraftDialog();
+            if (makerColorDialog_) closeMakerColorDialog();
             blurNativeTextInput();
             makerSession_->endStroke();
             makerOpen_ = false;
@@ -2980,6 +3099,11 @@ void Application::executeShellCommand(const ShellCommand& command)
         },
         [&](const shell::RequestQuitConfirmation&) {
             if (makerDraftDialog_) makerDraftDialog_->inputAction = {};
+            if (makerColorDialog_) {
+                makerColorDialog_->tabNavigation = {};
+                makerColorDialog_->cancelRequested = false;
+                makerColorPicker_.endAdjustment();
+            }
             blurNativeTextInput();
             optionsMenu_.requestQuitConfirmation();
         },
@@ -3077,7 +3201,7 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
         .keyboardCaptured = renderer_.wantsKeyboardCapture(),
         .mouseCaptured = renderer_.wantsMouseCapture(),
         .nativeTextEditing = nativeTextFocused(),
-        .makerDialogOpen = makerDraftDialog_.has_value(),
+        .makerDialogOpen = makerDraftDialog_.has_value() || makerColorDialog_.has_value(),
     };
 #if SOKOBAN_ENABLE_DEBUG_UI
     context.editorEditing = tools_->levelEditor.editingDocument();

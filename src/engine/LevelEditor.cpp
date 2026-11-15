@@ -3585,6 +3585,60 @@ bool LevelEditor::setLinkGroupName(Level::LinkGroupKind kind, Vec3 color, std::s
     return true;
 }
 
+bool LevelEditor::recolorLinkGroup(LinkEndpoint endpoint, Vec3 color)
+{
+    if (!explicitLinkEditing_ || !hasLinkEndpoint(endpoint)) return false;
+    if (!validLinkColor(color)) {
+        document_.status = "Enter a valid group color.";
+        return false;
+    }
+    const auto from = linkEndpointColor(endpoint);
+    if (!from || sameColor(*from, color)) return false;
+
+    if (endpoint.kind == LinkEndpointKind::Portal) {
+        const auto selected = std::ranges::find(document_.portals, endpoint.cell, &Level::Portal::cell);
+        const auto scope = selected->scope;
+        if (std::ranges::any_of(document_.portals, [&](const Level::Portal& portal) {
+                return portal.scope == scope && sameColor(portal.color, color);
+            })) {
+            document_.status = "That color is already used by other portals.";
+            return false;
+        }
+        auto before = captureBeforeDocumentChange();
+        for (auto& portal : document_.portals) {
+            if (portal.scope == scope && sameColor(portal.color, *from)) portal.color = color;
+        }
+        document_.status = "Updated portal color.";
+        recordDocumentChange(std::move(before));
+        return true;
+    }
+
+    const bool objects = endpoint.kind == LinkEndpointKind::Object;
+    const auto kind = objects ? Level::LinkGroupKind::Object : Level::LinkGroupKind::Device;
+    if (hasLinkGroup(kind, color)) {
+        document_.status = "That color is already used by another group of this type.";
+        return false;
+    }
+    auto before = captureBeforeDocumentChange();
+    const auto recolor = [&](auto& record) {
+        if (sameColor(record.color, *from)) record.color = color;
+    };
+    for (auto& group : document_.linkGroupNames) {
+        if (group.kind == kind) recolor(group);
+    }
+    if (objects) {
+        std::ranges::for_each(document_.objectLinks, recolor);
+    } else {
+        // RGB identifies the group in the editor. The existing source lists
+        // express the actual connections, including cross-group wires.
+        std::ranges::for_each(document_.linkColors, recolor);
+        forEachLinkedDevice(document_, recolor);
+    }
+    document_.status = "Updated link group color.";
+    recordDocumentChange(std::move(before));
+    return true;
+}
+
 std::optional<Vec3> LevelEditor::objectLinkColorAt(GridPosition3 cell) const
 {
     const auto object = std::ranges::find(

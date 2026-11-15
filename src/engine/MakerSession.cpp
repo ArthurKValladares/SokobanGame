@@ -193,6 +193,18 @@ bool MakerSession::renameLinkGroup(Level::LinkGroupKind kind, Vec3 color, std::s
     return changed;
 }
 
+bool MakerSession::recolorSelectedLinkGroup(Vec3 color)
+{
+    const auto endpoint = selectedLinkEndpoint();
+    if (!endpoint) return false;
+    endStroke();
+    editor_.clearStatus();
+    const bool changed = editor_.recolorLinkGroup(*endpoint, color);
+    status_ = editor_.status();
+    if (changed) updateUnsavedChanges();
+    return changed;
+}
+
 bool MakerSession::toggleSelectedElevatorStop()
 {
     const auto selected = selectedLinkEndpoint();

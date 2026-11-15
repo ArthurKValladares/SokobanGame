@@ -39,6 +39,8 @@ struct MakerLinkInspector {
     bool canCreate = false;
     bool canSelectOther = false;
     std::optional<bool> elevatorStopOnLayer;
+    std::optional<Vec3> groupColor;
+    std::span<const Vec3> groupColors;
 };
 
 struct MakerLinkLine {
@@ -110,6 +112,7 @@ enum class MakerCommand : uint8_t {
     SelectOtherLinkEndpoint,
     ToggleLinkLayer,
     ToggleElevatorStop,
+    EditLinkGroupColor,
 };
 
 struct MakerViewAction {

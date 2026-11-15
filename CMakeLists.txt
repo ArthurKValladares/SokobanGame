@@ -684,6 +684,7 @@ add_library(sokoban_ui STATIC
     src/engine/ui/LecternDialog.cpp
     src/engine/ui/TitleScreen.cpp
     src/engine/ui/Ui.cpp
+    src/engine/ui/UiColorPicker.cpp
     src/engine/ui/UiControls.cpp
     src/engine/ui/UiLayout.cpp
     src/engine/ui/UiScroll.cpp

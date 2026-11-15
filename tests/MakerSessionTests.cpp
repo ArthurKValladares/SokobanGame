@@ -730,6 +730,135 @@ void testConnectKeepsLegacyExplicitEdges()
     CHECK(maker.editor().linkSourcesForDevice(second) == secondSources);
 }
 
+void testRecolorLinkGroupsPreservesNamespacesAndExplicitWires()
+{
+    TEST("makerRecolorLinkGroupsPreservesNamespacesAndExplicitWires");
+    using Kind = LevelEditor::LinkEndpointKind;
+    using Group = Level::LinkGroupKind;
+    MakerSession maker;
+    TemporaryDraftDirectory directory;
+    MakerDraftStore store(directory.root);
+    auto definition = maker.editor().documentDefinition();
+    constexpr Vec3 originalColor { 0.1f, 0.2f, 0.3f };
+    constexpr Vec3 deviceColor { 0.3f, 0.4f, 0.5f };
+    constexpr Vec3 otherColor { 0.5f, 0.6f, 0.7f };
+    constexpr Vec3 reservedColor { 0.7f, 0.8f, 0.9f };
+    const GridPosition3 firstGate { 0, 4, 1 }, secondGate { 1, 4, 1 }, enemyGate { 2, 4, 1 };
+    const GridPosition3 shared { 0, 5, 1 }, firstPlate { 1, 5, 1 }, secondPlate { 2, 5, 1 };
+    const GridPosition3 rock = shared;
+    const GridPosition3 ice { 1, 6, 1 }, otherRock { 2, 6, 1 };
+    const GridPosition3 firstPortal { 0, 7, 1 }, secondPortal { 1, 7, 1 }, otherPortal { 2, 7, 1 };
+    const auto setTile = [&](GridPosition3 cell, TileType tile) {
+        definition.layers[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)]
+            [static_cast<std::size_t>(cell.x)] = tileTypeToChar(tile);
+    };
+    for (const auto cell : { firstGate, secondGate }) setTile(cell, TileType::Gate);
+    setTile(enemyGate, TileType::EnemyGate);
+    for (const auto cell : { firstPlate, secondPlate }) setTile(cell, TileType::PressurePlate);
+    setTile(rock, TileType::Rock);
+    setTile(ice, TileType::Ice);
+    setTile(otherRock, TileType::Rock);
+    for (const auto cell : { firstPortal, secondPortal, otherPortal }) setTile(cell, TileType::PortalNorth);
+
+    const std::vector<GridPosition3> firstSources { shared, firstPlate };
+    const std::vector<GridPosition3> secondSources { shared, secondPlate };
+    definition.gates = {
+        { .cell = firstGate, .pressurePlates = firstSources, .color = originalColor },
+        { .cell = secondGate, .pressurePlates = secondSources, .color = originalColor },
+        { .cell = enemyGate, .color = originalColor, .enemyGate = true },
+    };
+    definition.plates = { { .cell = shared, .tile = TileType::PressurePlate } };
+    definition.linkColors = {
+        { .cell = shared, .color = originalColor },
+        { .cell = firstPlate, .color = originalColor },
+        { .cell = secondPlate, .color = otherColor },
+    };
+    definition.objectLinks = {
+        { .cell = rock, .color = originalColor },
+        { .cell = ice, .color = originalColor },
+        { .cell = otherRock, .color = deviceColor },
+    };
+    definition.portals = {
+        { .cell = firstPortal, .color = originalColor },
+        { .cell = secondPortal, .color = originalColor },
+        { .cell = otherPortal, .color = deviceColor },
+    };
+    definition.linkGroupNames = {
+        { .kind = Group::Device, .color = originalColor, .name = "Shared gates" },
+        { .kind = Group::Device, .color = otherColor, .name = "Other signal" },
+        { .kind = Group::Object, .color = originalColor, .name = "Moving together" },
+        { .kind = Group::Object, .color = reservedColor, .name = "Empty sync group" },
+    };
+    store.save("Group colors", definition);
+    CHECK(maker.loadDraft(store, "Group colors"));
+    const auto& editor = maker.editor();
+    const auto before = editor.documentDefinition();
+    CHECK(maker.selectLinkEndpoint({ shared, Kind::Source }));
+    CHECK(!maker.recolorSelectedLinkGroup(otherColor));
+    CHECK(maker.status().find("already used") != std::string_view::npos);
+    CHECK(!maker.recolorSelectedLinkGroup({ -1.0f, 0.0f, 0.0f }));
+    CHECK(!maker.recolorSelectedLinkGroup({ 0.101f, 0.2f, 0.3f }));
+    CHECK(!maker.hasUnsavedChanges());
+    CHECK(!editor.canUndo());
+    CHECK(editor.documentDefinition() == before);
+
+    CHECK(maker.recolorSelectedLinkGroup(deviceColor));
+    CHECK(maker.hasUnsavedChanges());
+    CHECK(editor.linkEndpointColor({ firstGate, Kind::Device }) == deviceColor);
+    CHECK(editor.linkEndpointColor({ secondGate, Kind::Device }) == deviceColor);
+    CHECK(editor.linkEndpointColor({ shared, Kind::Source }) == deviceColor);
+    CHECK(editor.linkEndpointColor({ firstPlate, Kind::Source }) == deviceColor);
+    CHECK(editor.linkEndpointColor({ secondPlate, Kind::Source }) == otherColor);
+    CHECK(editor.linkSourcesForDevice(firstGate) == firstSources);
+    CHECK(editor.linkSourcesForDevice(secondGate) == secondSources);
+    CHECK(editor.gates().at(2) == before.gates.at(2));
+    CHECK(editor.linkGroupName(Group::Device, deviceColor) == "Shared gates");
+    CHECK(editor.linkGroupName(Group::Device, originalColor).empty());
+    CHECK(editor.linkGroupName(Group::Object, originalColor) == "Moving together");
+    const auto afterDevice = editor.documentDefinition();
+    CHECK(afterDevice.objectLinks == before.objectLinks);
+    CHECK(afterDevice.portals == before.portals);
+    CHECK(maker.undo());
+    CHECK(editor.documentDefinition() == before);
+    CHECK(!maker.hasUnsavedChanges());
+    CHECK(maker.redo());
+    CHECK(editor.documentDefinition() == afterDevice);
+
+    CHECK(maker.selectLinkEndpoint({ rock, Kind::Object }));
+    CHECK(!maker.recolorSelectedLinkGroup(deviceColor));
+    CHECK(!maker.recolorSelectedLinkGroup(reservedColor));
+    CHECK(editor.documentDefinition() == afterDevice);
+    CHECK(maker.recolorSelectedLinkGroup(otherColor));
+    CHECK(editor.linkEndpointColor({ rock, Kind::Object }) == otherColor);
+    CHECK(editor.linkEndpointColor({ ice, Kind::Object }) == otherColor);
+    CHECK(editor.linkEndpointColor({ otherRock, Kind::Object }) == deviceColor);
+    CHECK(editor.linkGroupName(Group::Object, otherColor) == "Moving together");
+    CHECK(editor.linkGroupName(Group::Device, otherColor) == "Other signal");
+
+    CHECK(maker.selectLinkEndpoint({ firstPortal, Kind::Portal }));
+    const auto beforePortals = editor.documentDefinition();
+    CHECK(!maker.recolorSelectedLinkGroup(deviceColor));
+    CHECK(editor.documentDefinition() == beforePortals);
+    CHECK(maker.recolorSelectedLinkGroup(otherColor));
+    CHECK(editor.linkEndpointColor({ firstPortal, Kind::Portal }) == otherColor);
+    CHECK(editor.linkEndpointColor({ secondPortal, Kind::Portal }) == otherColor);
+    CHECK(editor.linkEndpointColor({ otherPortal, Kind::Portal }) == deviceColor);
+    CHECK(maker.undo());
+    CHECK(editor.documentDefinition() == beforePortals);
+    CHECK(maker.redo());
+
+    CHECK(maker.saveDraft(store, "Group colors", true) == MakerSession::SaveDraftResult::Saved);
+    MakerSession reopened;
+    CHECK(reopened.loadDraft(store, "Group colors"));
+    CHECK(reopened.editor().linkGroupName(Group::Device, deviceColor) == "Shared gates");
+    CHECK(reopened.editor().linkGroupName(Group::Object, otherColor) == "Moving together");
+    CHECK(reopened.editor().linkSourcesForDevice(firstGate) == firstSources);
+    CHECK(reopened.editor().linkSourcesForDevice(secondGate) == secondSources);
+    const auto level = reopened.buildPlaytestLevel();
+    CHECK(level && level->portalExit(firstPortal) == secondPortal);
+    CHECK(level && !level->portalExit(otherPortal));
+}
+
 template <auto FindDevice>
 const std::vector<GridPosition3>* compiledLinkSources(const Level& level, GridPosition3 cell)
 {
@@ -1078,6 +1207,7 @@ int main()
     testConnectDeviceAndPreserveExistingDrivers();
     testConnectPortalsAndMovableObjects();
     testConnectKeepsLegacyExplicitEdges();
+    testRecolorLinkGroupsPreservesNamespacesAndExplicitWires();
     testEverySignalSourceConnectsToEveryDeviceInEitherOrder();
     testCoveredConnectionUsesTheRequestedEndpoint();
     testConnectedStoneCombinationsMoveInPlaytest();

@@ -54,6 +54,7 @@ public:
     bool disconnectSelectedLink();
     bool createSelectedLinkGroup(std::string name);
     bool renameLinkGroup(Level::LinkGroupKind kind, Vec3 color, std::string name);
+    bool recolorSelectedLinkGroup(Vec3 color);
     bool toggleSelectedElevatorStop();
 
     // Finish an open edit stroke and compile a separate runtime level for Test

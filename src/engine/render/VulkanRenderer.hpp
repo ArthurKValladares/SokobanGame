@@ -162,6 +162,7 @@ public:
     void waitForAssets(const RenderAssetRequirements& requirements);
     void handleEvent(const SDL_Event& event);
     void beginDebugUiFrame();
+    void discardDebugUiFrame();
     [[nodiscard]] bool wantsKeyboardCapture() const;
     [[nodiscard]] bool wantsMouseCapture() const;
     // Palette focus alone should not swallow a brush shortcut before the

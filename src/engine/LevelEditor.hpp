@@ -439,6 +439,9 @@ public:
     [[nodiscard]] bool assignLinkEndpoint(LinkEndpoint endpoint, Vec3 color);
     [[nodiscard]] bool createLinkGroup(LinkEndpoint endpoint, std::string name);
     [[nodiscard]] bool setLinkGroupName(Level::LinkGroupKind kind, Vec3 color, std::string name);
+    // Recolors the endpoint's group within its link namespace, preserving
+    // explicit signal wiring. A color in use in that namespace is rejected.
+    [[nodiscard]] bool recolorLinkGroup(LinkEndpoint endpoint, Vec3 color);
     [[nodiscard]] const std::vector<std::optional<Level::MinecartRoute>>&
         minecartRoutesView() const;
     // Recolors the linkable thing at `cell`, one undoable command.

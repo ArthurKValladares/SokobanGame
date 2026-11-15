@@ -5,6 +5,7 @@
 #include "engine/ui/LecternDialog.hpp"
 #include "engine/ui/MakerTileGuide.hpp"
 #include "engine/ui/UiControls.hpp"
+#include "engine/ui/UiColorValues.hpp"
 
 #include <algorithm>
 #include <array>
@@ -116,10 +117,20 @@ struct ToolbarControl {
     std::string_view label;
     bool enabled = true;
     bool accented = false;
+    std::optional<Vec3> swatch;
 };
 
 constexpr std::size_t toolbarControlCount = 14;
-constexpr std::size_t linkActionCapacity = 6;
+constexpr std::size_t linkActionCapacity = 7;
+
+void drawColorSwatch(UiContext& ui, UiRect bounds, Vec3 color, float scale)
+{
+    const Vec2 inset { scale, scale };
+    const Vec3 linear = ui::color::displayLinear(color);
+    ui.rect(bounds, ink);
+    ui.rect({ bounds.position + inset, bounds.size - inset * 2.0f },
+        { linear.x, linear.y, linear.z, 1.0f });
+}
 
 float fitLabel(UiContext& ui, std::string_view label, float textSize, float availableWidth)
 {
@@ -139,8 +150,17 @@ bool drawToolbarControl(UiContext& ui, const ToolbarControl& control,
         .contentScale = 0.72f * scale,
     });
     const float normalTextSize = 24.0f * 0.72f * scale;
-    const float innerWidth = std::max(0.0f, control.bounds.size.x - 8.0f * scale);
-    ui.centeredText(control.bounds, control.label,
+    UiRect labelBounds = control.bounds;
+    if (control.swatch && control.bounds.size.x >= 45.0f * scale) {
+        const Vec2 swatchSize { 12.0f * scale, 12.0f * scale };
+        const Vec2 swatchPosition = control.bounds.position +
+            Vec2 { 7.0f * scale, (control.bounds.size.y - swatchSize.y) * 0.5f };
+        drawColorSwatch(ui, { swatchPosition, swatchSize }, *control.swatch, scale);
+        labelBounds.position.x += 21.0f * scale;
+        labelBounds.size.x -= 21.0f * scale;
+    }
+    const float innerWidth = std::max(0.0f, labelBounds.size.x - 8.0f * scale);
+    ui.centeredText(labelBounds, control.label,
         control.enabled ? buttonInk : disabledButtonInk, fitLabel(ui, control.label, normalTextSize, innerWidth));
     ui.popClip();
     return activated;
@@ -389,7 +409,7 @@ void drawLinkOverlay(UiContext& ui, UiRect viewport, float scale,
         for (int step = 1; step < steps; ++step) {
             const Vec2 point = line.from + delta * (static_cast<float>(step) / static_cast<float>(steps));
             const Vec2 radius = Vec2 { 2.0f, 2.0f } * scale;
-            ui.rect({ point - radius, radius * 2.0f }, background);
+            ui.rect({ point - radius, radius * 2.0f }, ink);
             ui.rect({ point - radius * 0.65f, radius * 1.3f }, line.color);
         }
         if (!line.label.empty() && labels < 8) {
@@ -402,7 +422,7 @@ void drawLinkOverlay(UiContext& ui, UiRect viewport, float scale,
             const UiRect label { position, size };
             ui.rect(label, background);
             ui.pushClip(label);
-            ui.centeredText(label, line.label, line.color, textSize);
+            ui.centeredText(label, line.label, ink, textSize);
             ui.popClip();
         }
     }
@@ -410,7 +430,7 @@ void drawLinkOverlay(UiContext& ui, UiRect viewport, float scale,
         if (!std::isfinite(marker.position.x) || !std::isfinite(marker.position.y)) continue;
         const float size = (marker.selected ? 12.0f : 8.0f) * scale;
         const Vec2 radius { size * 0.5f, size * 0.5f };
-        ui.rect({ marker.position - radius, radius * 2.0f }, marker.selected ? ink : background);
+        ui.rect({ marker.position - radius, radius * 2.0f }, ink);
         ui.rect({ marker.position - radius * 0.58f, radius * 1.16f }, marker.color);
     }
     ui.popClip();
@@ -462,6 +482,10 @@ MakerViewAction drawLinkInspector(UiContext& ui, const MakerLayout& layout,
     };
     addAction(MakerCommand::NewLinkGroup, "New Group", inspector.canCreate);
     addAction(MakerCommand::RenameLinkGroup, "Rename", inspector.canRename);
+    if (inspector.groupColor) {
+        actions[actionCount++] = { .command = MakerCommand::EditLinkGroupColor, .label = "Color",
+            .swatch = inspector.groupColor };
+    }
     addAction(MakerCommand::Disconnect,
         inspector.kind == MakerLinkInspector::Kind::Portal ? "Unpair" : "Disconnect", inspector.canDisconnect);
     addAction(MakerCommand::ClearLinkSelection, "Clear", inspector.canClear);
@@ -573,7 +597,14 @@ MakerViewAction drawLinkInspector(UiContext& ui, const MakerLayout& layout,
             result.command = MakerCommand::AssignLinkGroup;
             result.linkGroup = i;
         }
-        ui.text(row.position + Vec2 { 7.0f, 3.0f } * scale, inspector.groups[i], ink, 14.0f * scale);
+        float textInset = 7.0f * scale;
+        if (i < inspector.groupColors.size()) {
+            const Vec2 size { 11.0f * scale, 11.0f * scale };
+            drawColorSwatch(ui, { row.position + Vec2 { textInset, (row.size.y - size.y) * 0.5f }, size },
+                inspector.groupColors[i], scale);
+            textInset += 17.0f * scale;
+        }
+        ui.text(row.position + Vec2 { textInset, 3.0f * scale }, inspector.groups[i], ink, 14.0f * scale);
     }
     if (!inspector.members.empty()) {
         float memberY = listY + groupRowsHeight * scale;

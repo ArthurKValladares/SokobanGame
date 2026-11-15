@@ -3,6 +3,7 @@
 #include "engine/MakerSession.hpp"
 #include "engine/ui/FontAtlas.hpp"
 #include "engine/ui/MakerView.hpp"
+#include "engine/ui/UiColorValues.hpp"
 #include "engine/ui/UiTextEdit.hpp"
 
 #include <algorithm>
@@ -805,6 +806,20 @@ void testLinkInspectorNativeControls(const FontAtlas& font)
     CHECK(assign.command == MakerCommand::AssignLinkGroup && assign.linkGroup == 1);
     CHECK(draw(click({ 56.0f, 211.0f }), false).command == MakerCommand::None);
     CHECK(visibleLines() == 0);
+
+    const std::array colors { Vec3 { 0.14f, 0.46f, 0.22f }, Vec3 { 0.9f, 0.21f, 0.31f } };
+    auto colored = state;
+    colored.linkInspector->groupColor = colors.front();
+    colored.linkInspector->groupColors = colors;
+    ui.beginFrame(viewport, click({ 56.0f, 247.0f }));
+    CHECK(view.draw(ui, layout, colored).command == MakerCommand::EditLinkGroupColor);
+    ui.endFrame();
+    const auto linear = ui::color::displayLinear(colors.front());
+    CHECK(std::ranges::any_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
+        return command.kind == UiDrawKind::Solid &&
+            command.color == Vec4 { linear.x, linear.y, linear.z, 1.0f } &&
+            command.clip && ui.contains(*command.clip, { 56.0f, 247.0f });
+    }));
 
     std::vector<MakerLinkLine> crowdedLines(200, lines.front());
     std::vector<MakerLinkMarker> crowdedMarkers(400, markers.front());

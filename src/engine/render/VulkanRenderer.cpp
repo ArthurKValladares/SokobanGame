@@ -1248,6 +1248,13 @@ void VulkanRenderer::beginDebugUiFrame()
 #endif
 }
 
+void VulkanRenderer::discardDebugUiFrame()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui::EndFrame();
+#endif
+}
+
 bool VulkanRenderer::wantsKeyboardCapture() const
 {
 #if SOKOBAN_ENABLE_DEBUG_UI

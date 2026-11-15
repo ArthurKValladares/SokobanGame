@@ -163,6 +163,9 @@ int main(int argc, char** argv)
         }
 #endif
         exitCode = runApplication(options);
+    } catch (const sokoban::ApplicationStartupCancelled&) {
+        sokoban::log::info(sokoban::log::Category::Application)
+            << "Startup cancelled by a window close request.";
     } catch (const std::exception& error) {
         sokoban::log::error(sokoban::log::Category::Application)
             << "Fatal error: " << error.what();

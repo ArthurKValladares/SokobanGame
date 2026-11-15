@@ -37,6 +37,7 @@
 #include "engine/ui/SdlTextInput.hpp"
 #include "engine/ui/TitleScreen.hpp"
 #include "engine/ui/LecternDialog.hpp"
+#include "engine/ui/UiColorPicker.hpp"
 
 #include <array>
 #include <chrono>
@@ -124,6 +125,8 @@ struct ApplicationTimingEventWatchState {
     SimulationTiming* simulation = nullptr;
     FramePacer* framePacer = nullptr;
 };
+
+struct ApplicationStartupCancelled {};
 
 #if SOKOBAN_ENABLE_DEBUG_UI
 class ApplicationTools;
@@ -240,6 +243,9 @@ private:
     void openMakerDraftDialog(MakerDraftDialogMode mode, std::string_view name = {});
     void closeMakerDraftDialog();
     void handleMakerDraftDialogAction(const MakerDraftDialogAction& action);
+    void openMakerColorDialog(Vec3 color, std::string_view groupName);
+    void closeMakerColorDialog();
+    void drawMakerColorDialog(Vec2 viewport, float scale, const MakerViewInput& input);
     void startMakerPlaytest();
     void returnToMaker();
     void updateMakerPlaytest(float dt, const InputRouter::Frame& input);
@@ -276,12 +282,12 @@ private:
     // construction, including the platform window and renderer.
     std::chrono::steady_clock::time_point startupStarted_ =
         std::chrono::steady_clock::now();
-    Window window_;
     // Owns slot stores, the shared settings store, the marker, and every
     // other disk decision; Application owns the live profile and the
     // gameplay consequences.
     SaveSlotManager saveSlots_;
     PlayerProfile playerProfile_;
+    Window window_;
     // Initialization barrier: applies the profile's window mode before the
     // renderer member constructs its first swapchain.
     bool startupWindowConfigured_ = false;
@@ -406,6 +412,13 @@ private:
         std::size_t removedTileCount = 0;
     };
     std::optional<MakerDraftDialog> makerDraftDialog_;
+    UiColorPicker makerColorPicker_;
+    struct MakerColorDialog {
+        Vec3 initial;
+        UiNavigation tabNavigation;
+        bool cancelRequested = false;
+    };
+    std::optional<MakerColorDialog> makerColorDialog_;
     struct MakerPlaytest {
         Level level;
         GameplaySession session;
