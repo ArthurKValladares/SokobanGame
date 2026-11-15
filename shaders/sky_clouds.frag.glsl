@@ -14,7 +14,7 @@ layout(push_constant) uniform PushConstants
     layout(offset = 80) vec4 animation;
 } pc;
 
-float hashCloud(ivec2 cell)
+float hashCell(ivec2 cell)
 {
     // Adjacent cells must agree exactly on their shared corners. Floating
     // hashes can round (cell + 1) * constant differently after GPU multiply-add
@@ -30,16 +30,44 @@ float hashCloud(ivec2 cell)
     return float(h >> 8) * (1.0 / 16777216.0);
 }
 
+vec3 nightStars(vec3 ray)
+{
+    // Project world directions so stars stay fixed as the camera translates
+    // and clouds drift. The projection has no seams across the horizon.
+    vec2 p = ray.xy * (148.0 / max(1.0 - ray.z, 0.001));
+    float pixelWidth = max(length(dFdx(p)), length(dFdy(p)));
+    ivec2 cell = ivec2(floor(p));
+    float chance = hashCell(cell + ivec2(341, -173));
+    const float density = 0.20;
+    if (chance >= density || pixelWidth >= 0.20) {
+        return vec3(0.0);
+    }
+
+    vec2 offset = vec2(hashCell(cell + ivec2(-207, 127)),
+        hashCell(cell + ivec2(113, 281)));
+    vec2 center = mix(vec2(0.18), vec2(0.82), offset);
+    float distanceToStar = length(fract(p) - center);
+    float brilliance = pow(chance / density, 3.0);
+    float radius = mix(0.027, 0.053, brilliance);
+    float edge = clamp(pixelWidth * 0.55, 0.001, 0.07);
+    float core = 1.0 - smoothstep(max(radius - edge, 0.0),
+        radius + edge, distanceToStar);
+    float halo = 1.0 - smoothstep(radius, 0.16, distanceToStar);
+    float visibility = 1.0 - smoothstep(0.08, 0.20, pixelWidth);
+    return vec3(0.66, 0.64, 0.95) * visibility *
+        (mix(0.075, 0.49, brilliance) * core + 0.065 * brilliance * halo);
+}
+
 // Very broad value noise for the smooth atmosphere below the cloud banks.
 float atmosphereNoise(vec2 p)
 {
     ivec2 cell = ivec2(floor(p));
     vec2 f = fract(p);
     vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-    float a = hashCloud(cell);
-    float b = hashCloud(cell + ivec2(1, 0));
-    float c = hashCloud(cell + ivec2(0, 1));
-    float d = hashCloud(cell + ivec2(1));
+    float a = hashCell(cell);
+    float b = hashCell(cell + ivec2(1, 0));
+    float c = hashCell(cell + ivec2(0, 1));
+    float d = hashCell(cell + ivec2(1));
     float k = a - b - c + d;
     return a + (b - a) * u.x + (c - a) * u.y + k * u.x * u.y;
 }
@@ -52,7 +80,7 @@ vec3 cloudSimplexCorner(ivec2 cell, vec2 offset)
         vec2(0.0, 1.0), vec2(0.0, -1.0),
         vec2(diagonal, diagonal), vec2(-diagonal, diagonal),
         vec2(diagonal, -diagonal), vec2(-diagonal, -diagonal));
-    vec2 gradient = gradients[int(hashCloud(cell) * 8.0)];
+    vec2 gradient = gradients[int(hashCell(cell) * 8.0)];
     float radius = max(0.5 - dot(offset, offset), 0.0);
     float radius2 = radius * radius;
     float radius3 = radius2 * radius;
@@ -125,7 +153,7 @@ vec3 compositeCloudLayer(vec3 below, vec3 camera, vec3 ray,
     vec2 slope = field.yz;
     field.yz += warpStrength * warpFrequency *
         (slope.x * warpX.yz + slope.y * warpY.yz);
-    float body = smoothstep(coverage, coverage + 0.25, field.x);
+    float body = smoothstep(coverage, coverage + 0.18, field.x);
     float alpha = (1.0 - exp(-body * opacity)) * visibility;
 
     vec3 normal = normalize(vec3(-field.yz * 1.35, 1.0));
@@ -185,19 +213,19 @@ void main()
     vec3 ray = normalize(farPoint.xyz / farPoint.w - camera);
     float horizon = pow(1.0 - abs(ray.z), 3.0);
     vec3 sky = mix(vec3(0.25, 0.29, 0.53), vec3(0.68, 0.52, 0.61), horizon);
-    sky = lowerAtmosphere(sky, camera, ray);
+    sky = lowerAtmosphere(sky, camera, ray) * 0.43 + nightStars(ray);
     // A muted distant bank, darker blue-violet middle clouds, and peach-lit
     // nearer wisps. Broken coverage leaves the deep atmosphere visible.
     // Fixed world heights give genuine parallax during orbit,
     // top-down view and overworld zoom, without attaching clouds to the camera.
-    sky = compositeCloudLayer(sky, camera, ray, -90.0, 0.040,
-        vec2(0.004, -0.002), vec2(38.1, 7.4), 0.35, 1.8, 0.55,
+    sky = compositeCloudLayer(sky, camera, ray, -90.0, 0.052,
+        vec2(0.004, -0.002), vec2(38.1, 7.4), 0.52, 1.0, 0.55,
         vec3(0.27, 0.28, 0.49), vec3(0.66, 0.56, 0.61));
-    sky = compositeCloudLayer(sky, camera, ray, -52.0, 0.065,
-        vec2(0.007, 0.003), vec2(-19.3, 31.8), 0.42, 2.2, 0.18,
+    sky = compositeCloudLayer(sky, camera, ray, -52.0, 0.084,
+        vec2(0.007, 0.003), vec2(-19.3, 31.8), 0.54, 1.55, 0.18,
         vec3(0.18, 0.20, 0.42), vec3(0.54, 0.44, 0.53));
-    sky = compositeCloudLayer(sky, camera, ray, -26.0, 0.090,
-        vec2(0.011, -0.004), vec2(4.7, -23.6), 0.50, 2.0, 0.05,
+    sky = compositeCloudLayer(sky, camera, ray, -26.0, 0.115,
+        vec2(0.011, -0.004), vec2(4.7, -23.6), 0.55, 2.0, 0.05,
         vec3(0.34, 0.32, 0.55), vec3(0.95, 0.71, 0.58));
     // Scene alpha is the ambient-occlusion mask, never background opacity.
     outColor = vec4(sky, 0.0);

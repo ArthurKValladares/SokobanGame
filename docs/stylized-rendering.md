@@ -48,13 +48,12 @@ retain a new default. Water is tuned independently in
 [`WaterConfig.hpp`](../src/engine/render/WaterConfig.hpp); the procedural sky
 palette lives in [`sky_clouds.frag.glsl`](../shaders/sky_clouds.frag.glsl).
 
-The sky uses three broken cloud banks above a smooth layer of deep air. The
-distant bank is muted lavender, the middle bank is darker blue-violet, and the
-near wisps catch peach sunlight. Reduced coverage and opacity leave openings
-onto a darker lower atmosphere. Three broad haze strata below the clouds blend
-subdued peach light near the top into deeper blue-violet tones farther down.
-Downward views reveal more of the dark air, with smooth transitions between
-depths and independent world-space parallax in the broad color variation.
+The sky uses three broken cloud banks above a star field. The distant bank is
+muted lavender, the middle bank is darker blue-violet, and the near wisps catch
+peach light. Gaps between the banks reveal stars throughout the view. Stars are
+fixed to world directions and fade behind denser clouds. Three broad haze strata
+blend subdued peach light into deeper blue-violet tones as the camera looks
+farther down.
 Cloud colors are mildly desaturated to stand apart from the islands. Rounded
 simplex billows, rotated detail octaves and broad domain warping prevent square
 formations; analytic gradients keep their lighting smooth during motion.
