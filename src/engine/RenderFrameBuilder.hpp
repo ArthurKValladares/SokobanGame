@@ -94,6 +94,14 @@ public:
     };
 
     struct EditorInput {
+        struct LinkColorPreview {
+            enum class Kind { Device, Object, Portal };
+            Kind kind;
+            Vec3 original;
+            Vec3 color;
+            uint32_t portalScope = 0;
+        };
+
         struct OverworldNeighbor {
             OverworldScreenId screen = 0;
             GridPosition origin {};
@@ -132,6 +140,7 @@ public:
         // current editor document remains available for undo and cancellation.
         std::optional<GridPosition> resizePreviewSize;
         bool isolateActiveLayer = false;
+        std::optional<LinkColorPreview> linkColorPreview;
     };
 
     [[nodiscard]] static RenderFrameData buildGameplay(const GameplayInput& input);

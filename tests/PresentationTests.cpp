@@ -2549,6 +2549,107 @@ void testEditorDrawsPlatesBeneathTheirOccupants()
     CHECK(end != frame.tiles.end() && end->effect == RenderSurfaceEffect::PlateEnergy);
 }
 
+void testEditorLinkColorPreviewTintsSceneByGroupAndScope()
+{
+    TEST("editorLinkColorPreviewTintsSceneByGroupAndScope");
+    using Preview = RenderFrameBuilder::EditorInput::LinkColorPreview;
+    using Kind = Preview::Kind;
+    using Effect = RenderSurfaceEffect;
+    constexpr Vec3 original { 0.2f, 0.6f, 0.9f };
+    constexpr Vec3 previewColor { 0.8f, 0.25f, 0.4f };
+    constexpr Vec3 otherColor { 0.4f, 0.8f, 0.25f };
+    constexpr GridPosition3 coveredPlate { 0, 1, 1 };
+    constexpr GridPosition3 linkedRock { 1, 1, 1 };
+    constexpr GridPosition3 gate { 2, 1, 1 };
+    constexpr GridPosition3 otherGate { 3, 1, 1 };
+    constexpr GridPosition3 rotator { 4, 1, 1 };
+    constexpr uint32_t selectedScope = 9;
+    constexpr uint32_t otherScope = 3;
+    constexpr std::array portalCells {
+        GridPosition3 { 5, 0, 1 }, GridPosition3 { 5, 1, 1 },
+        GridPosition3 { 8, 0, 1 }, GridPosition3 { 8, 1, 1 },
+    };
+    Level::Definition definition {
+        .layers = { { ".........", "........." }, { "C        ", "         " } },
+        .gates = {
+            { .cell = gate, .pressurePlates = { coveredPlate }, .color = original },
+            { .cell = otherGate, .color = otherColor },
+        },
+        .rotators = {
+            { .cell = rotator, .pressurePlates = { coveredPlate }, .color = original },
+        },
+        .plates = { { .cell = coveredPlate, .tile = TileType::PressurePlate } },
+        .objectLinks = {
+            { .cell = coveredPlate, .color = original },
+            { .cell = linkedRock, .color = original },
+        },
+        .portals = {
+            { .cell = portalCells[0], .color = original, .scope = selectedScope },
+            { .cell = portalCells[1], .color = original, .scope = selectedScope },
+            { .cell = portalCells[2], .color = original, .scope = otherScope },
+            { .cell = portalCells[3], .color = original, .scope = otherScope },
+        },
+        .linkColors = { { .cell = coveredPlate, .color = original } },
+    };
+    const auto setTile = [&](GridPosition3 cell, TileType tile) {
+        definition.layers[1][static_cast<std::size_t>(cell.y)]
+            [static_cast<std::size_t>(cell.x)] = tileTypeToChar(tile);
+    };
+    for (auto cell : { coveredPlate, linkedRock }) setTile(cell, TileType::Rock);
+    for (auto cell : { gate, otherGate }) setTile(cell, TileType::Gate);
+    setTile(rotator, TileType::RotatorClockwise);
+    for (auto cell : portalCells) setTile(cell, TileType::PortalEast);
+
+    LevelEditor editor;
+    editor.enableExplicitLinkEditing();
+    editor.loadDraft(std::move(definition));
+    editor.setLayerLocked(false);
+    const auto saved = editor.documentDefinition();
+    const AssetManifest& manifest = testManifest();
+    const auto checkFrame = [&](std::optional<Preview> preview, Vec3 deviceColor, Vec3 objectColor, Vec3 portalColor) {
+        const auto frame = RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = editor, .settings = {},
+            .allowBoardExpansion = false, .linkColorPreview = preview,
+        });
+        const auto checkTiles = [&](GridPosition3 cell, Effect effect, Vec3 color) {
+            const auto matching = [&](const auto& tile) {
+                return tile.cell == cell && tile.effect == effect && !tile.pickOnly;
+            };
+            CHECK(std::ranges::any_of(frame.tiles, matching));
+            for (const auto& tile : frame.tiles | std::views::filter(matching)) {
+                CHECK(xyz(tile.color) == color);
+            }
+        };
+        checkTiles(coveredPlate, Effect::PlateEnergy, deviceColor);
+        checkTiles(coveredPlate, Effect::LinkedObjectAura, objectColor);
+        checkTiles(linkedRock, Effect::LinkedObjectAura, objectColor);
+        checkTiles(gate, Effect::GateEnergy, deviceColor);
+        checkTiles(otherGate, Effect::GateEnergy, otherColor);
+        checkTiles(rotator, Effect::Standard, deviceColor);
+
+        const auto gateSpark = [](const auto& particle) {
+            return particle.position.x > 2.0f && particle.position.x < 3.0f;
+        };
+        CHECK(std::ranges::any_of(frame.particles, gateSpark));
+        for (const auto& particle : frame.particles | std::views::filter(gateSpark)) {
+            CHECK(xyz(particle.color) == deviceColor);
+        }
+        CHECK(std::ranges::count(frame.isoFaces, Effect::PortalEnergy, &RenderFrameData::IsoFace::effect) == 4);
+        for (const auto& face : frame.isoFaces) {
+            if (face.effect == Effect::PortalEnergy || face.effect == Effect::PortalBeam) {
+                CHECK(xyz(face.color) == (face.vertices[0].x < 7.0f ? portalColor : original));
+            }
+        }
+        CHECK(editor.documentDefinition() == saved);
+    };
+    checkFrame(std::nullopt, original, original, original);
+    checkFrame(Preview { Kind::Device, original, previewColor }, previewColor, original, original);
+    checkFrame(Preview { Kind::Object, original, previewColor }, original, previewColor, original);
+    checkFrame(Preview { Kind::Portal, original, previewColor, selectedScope }, original, original, previewColor);
+    checkFrame(std::nullopt, original, original, original);
+    CHECK(!editor.canUndo());
+}
+
 #if SOKOBAN_ENABLE_DEBUG_UI
 void testEditorOccludedEntityVisualization()
 {
@@ -7408,6 +7509,7 @@ int main()
     testMirrorOnPlatesDrawsPlateAndTurns();
     testGameplayEndsStayActiveAcrossPressurePlateChanges();
     testEditorDrawsPlatesBeneathTheirOccupants();
+    testEditorLinkColorPreviewTintsSceneByGroupAndScope();
 #if SOKOBAN_ENABLE_DEBUG_UI
     testEditorOccludedEntityVisualization();
     testEditorLinkedItemVisualization();

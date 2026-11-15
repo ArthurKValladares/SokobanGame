@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
 
 namespace sokoban {
 
@@ -16,7 +17,8 @@ inline void appendGateEffect(
     const Level::Gate& gate,
     const AssetManifest& manifest,
     float opacity,
-    float animationTimeSeconds)
+    float animationTimeSeconds,
+    std::optional<Vec3> previewColor = std::nullopt)
 {
     opacity = std::clamp(opacity, 0.0f, 1.0f);
     if (opacity <= 0.001f) {
@@ -26,7 +28,7 @@ inline void appendGateEffect(
     const float x = static_cast<float>(gate.cell.x);
     const float y = static_cast<float>(gate.cell.y);
     const float z = static_cast<float>(gate.cell.z);
-    const Vec3 tint = gate.enemyGate ? enemyGateColor : gate.color;
+    const Vec3 tint = gate.enemyGate ? enemyGateColor : previewColor.value_or(gate.color);
     bool drawingFrame = false;
     const auto appendEnergyBox = [&](
                                      Vec2 position,

@@ -33,12 +33,15 @@ constexpr UiControlId firstFieldId = 3;
 constexpr UiControlId copyId = firstFieldId + fieldInfo.size();
 constexpr UiControlId cancelId = copyId + 1;
 constexpr UiControlId applyId = cancelId + 1;
+constexpr UiControlId headerId = applyId + 1;
 
 constexpr Vec4 ink { 0.94f, 0.95f, 0.90f, 1.0f };
 constexpr Vec4 mutedInk { 0.68f, 0.75f, 0.72f, 1.0f };
 constexpr Vec4 accentInk { 0.54f, 0.86f, 0.77f, 1.0f };
 constexpr Vec4 errorInk { 1.0f, 0.66f, 0.57f, 1.0f };
 constexpr Vec4 dark { 0.02f, 0.027f, 0.028f, 1.0f };
+constexpr Vec4 titleBar { 0.10f, 0.14f, 0.14f, 1.0f };
+constexpr Vec4 activeTitleBar { 0.15f, 0.21f, 0.20f, 1.0f };
 
 Vec4 opaque(Vec3 color)
 {
@@ -102,6 +105,8 @@ void UiColorPicker::open(Vec3 initial, std::string_view title)
     focus_ = svId;
     adjusting_ = false;
     pressHandled_ = false;
+    panelPosition_.reset();
+    headerGrab_.reset();
     fieldBounds_ = {};
     fields_ = {};
     error_.clear();
@@ -232,7 +237,34 @@ UiColorPickerAction UiColorPicker::draw(UiContext& ui, Vec2 viewport, float scal
     scale = std::min({ scale, viewport.x / (logicalSize.x + 24.0f), viewport.y / (logicalSize.y + 24.0f) });
     if (!std::isfinite(scale) || scale <= 0.0f) return {};
     const Vec2 panelSize = logicalSize * scale;
-    const UiRect panel { (viewport - panelSize) * 0.5f, panelSize };
+    const float margin = 12.0f * scale;
+    const float headerHeight = 49.0f * scale;
+    const bool resized = viewport != previousViewport_ || panelSize != previousPanelSize_;
+    previousViewport_ = viewport;
+    previousPanelSize_ = panelSize;
+    Vec2 position = panelPosition_.value_or((viewport - panelSize) * 0.5f);
+    if (resized) {
+        position.x = std::clamp(position.x, margin, std::max(margin, viewport.x - panelSize.x - margin));
+        position.y = std::clamp(position.y, margin, std::max(margin, viewport.y - panelSize.y - margin));
+    }
+
+    const UiRect headerBeforeDrag { position, { panelSize.x, headerHeight } };
+    const bool grabbedHeader = ui.clicked(headerBeforeDrag);
+    if (grabbedHeader) headerGrab_ = *ui.mousePressPosition() - position;
+    const auto pointer = ui.dragPosition("color.window-header", headerBeforeDrag);
+    if (pointer && headerGrab_) {
+        if (resized && !grabbedHeader) *headerGrab_ = *pointer - position;
+        const Vec2 target = *pointer - *headerGrab_;
+        // The panel can be moved aside even in a compact viewport. Keep the
+        // header reachable, and fit the whole panel again when the viewport changes.
+        const float gripWidth = 128.0f * scale;
+        position.x = std::clamp(target.x, margin + gripWidth - panelSize.x, viewport.x - margin - gripWidth);
+        position.y = std::clamp(target.y, margin, viewport.y - margin - headerHeight);
+    }
+    if (!pointer || !ui.mouseDown()) headerGrab_.reset();
+    panelPosition_ = position;
+
+    const UiRect panel { position, panelSize };
     const auto boundsAt = [&](float x, float y, float w, float h) -> UiRect {
         return { panel.position + Vec2 { x, y } * scale, Vec2 { w, h } * scale };
     };
@@ -255,12 +287,15 @@ UiColorPickerAction UiColorPicker::draw(UiContext& ui, Vec2 viewport, float scal
     bool handled = std::exchange(pressHandled_, false);
     if (!handled) {
         if (const auto press = ui.mousePressPosition()) {
-            (void)handleTextPress(ui, *press, input.extendTextSelection);
-            handled = std::exchange(pressHandled_, false);
+            if (grabbedHeader) submitText();
+            else (void)handleTextPress(ui, *press, input.extendTextSelection);
+            pressHandled_ = false;
+            handled = true;
         }
     }
 
     (void)updateField(false);
+    if (pointer) adjusting_ = false;
     if (const auto point = ui.dragPosition("color.saturation-value", sv)) {
         adjusting_ = false;
         setHsv(hue_, normalized(point->x, sv.position.x, sv.size.x),
@@ -272,7 +307,7 @@ UiColorPickerAction UiColorPicker::draw(UiContext& ui, Vec2 viewport, float scal
     }
 
     const bool wasAdjusting = adjusting_;
-    UiNavigation navigation = input.navigation;
+    UiNavigation navigation = pointer ? UiNavigation {} : input.navigation;
     if (adjusting_) {
         navigation.previous = navigation.next = false;
         if (input.horizontalStep || input.verticalStep) {
@@ -289,12 +324,16 @@ UiColorPickerAction UiColorPicker::draw(UiContext& ui, Vec2 viewport, float scal
         if (activeField_) navigation.previous = navigation.next = false;
     }
 
-    ui.rect({ {}, viewport }, { 0.012f, 0.016f, 0.017f, 0.68f });
     ui.panel(panel);
-    const UiRect title = boundsAt(20.0f, 12.0f, logicalSize.x - 40.0f, 32.0f);
+    const UiRect header { panel.position, { panelSize.x, headerHeight } };
+    ui.rect(header, headerGrab_ || ui.hovered(header) ? activeTitleBar : titleBar);
+    const UiRect title = boundsAt(20.0f, 12.0f, logicalSize.x - 69.0f, 32.0f);
     ui.pushClip(title);
     ui.text(title.position, title_, ink, 25.0f * scale);
     ui.popClip();
+    for (float top : { 19.0f, 24.0f, 29.0f }) {
+        ui.rect(boundsAt(logicalSize.x - 34.0f, top, 14.0f, 1.0f), mutedInk);
+    }
     ui.divider(boundsAt(20.0f, 49.0f, logicalSize.x - 40.0f, 1.0f));
     if (focus_ == svId) drawFocus(ui, sv, scale);
     if (focus_ == hueId) drawFocus(ui, hue, scale);
@@ -308,7 +347,7 @@ UiColorPickerAction UiColorPicker::draw(UiContext& ui, Vec2 viewport, float scal
         ui.text(swatch.position + Vec2 { 130.0f, 4.0f } * scale, "Arrow keys adjust color", mutedInk, 13.0f * scale);
     }
 
-    std::array<UiControlRegion, 2 + fieldInfo.size() + 3> regions;
+    std::array<UiControlRegion, 2 + fieldInfo.size() + 4> regions;
     regions[0] = { svId, sv };
     regions[1] = { hueId, hue };
     for (std::size_t i = 0; i < fieldInfo.size(); ++i) {
@@ -325,9 +364,10 @@ UiColorPickerAction UiColorPicker::draw(UiContext& ui, Vec2 viewport, float scal
         if (activeField_ == i) caret_ = result.caret;
         regions[i + 2] = { firstFieldId + i, fieldBounds };
     }
-    regions[regions.size() - 3] = { copyId, copy };
-    regions[regions.size() - 2] = { cancelId, cancel };
-    regions.back() = { applyId, apply };
+    regions[regions.size() - 4] = { copyId, copy };
+    regions[regions.size() - 3] = { cancelId, cancel };
+    regions[regions.size() - 2] = { applyId, apply };
+    regions.back() = { headerId, grabbedHeader ? headerBeforeDrag : header, true, false };
     const auto interaction = ui.resolveControls("Color picker", regions, focus_, navigation);
     const UiControlId previousFocus = std::exchange(focus_, interaction.focused);
     if (!isColorControl(focus_)) adjusting_ = false;

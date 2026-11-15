@@ -220,6 +220,7 @@ void verifyMakerWiringProjection(SDL_Window* window, const std::filesystem::path
     VulkanRenderer renderer(window, root, cache, manifest, font,
         AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
     LevelEditor editor;
+    editor.enableExplicitLinkEditing();
     editor.newDocument(9, 8, false);
     const GridPosition3 gate { 6, 2, 1 };
     const GridPosition3 plate { 4, 4, 1 };
@@ -227,6 +228,15 @@ void verifyMakerWiringProjection(SDL_Window* window, const std::filesystem::path
     verify(editor.setCell(gate, TileType::Gate), "Could not place the fixture gate");
     verify(editor.setCell(plate, TileType::PressurePlate), "Could not place the fixture plate");
     verify(editor.setCell(portal, TileType::PortalSouth), "Could not place the fixture portal");
+    using Endpoint = LevelEditor::LinkEndpoint;
+    using Kind = LevelEditor::LinkEndpointKind;
+    const Endpoint gateEndpoint { gate, Kind::Device };
+    verify(editor.connectLinkEndpoints({ plate, Kind::Source }, gateEndpoint),
+        "Could not wire the fixture plate to the gate");
+    constexpr Vec3 committedColor { 0.04f, 0.12f, 0.9f };
+    constexpr Vec3 candidateColor { 0.93f, 0.08f, 0.04f };
+    verify(editor.recolorLinkGroup(gateEndpoint, committedColor),
+        "Could not set the fixture's committed link color");
     const PresentationSettings settings;
     const auto prepared = renderer.prepareFrame(RenderFrameBuilder::buildEditor({
         .manifest = manifest, .editor = editor, .settings = settings, .allowBoardExpansion = false,
@@ -255,6 +265,71 @@ void verifyMakerWiringProjection(SDL_Window* window, const std::filesystem::path
     verify(lowerMarker && renderer.pickIsoGridCell(isolated, *lowerMarker, nativeViewport) == lower,
         "Layer isolation did not expose the lower endpoint");
     verify(!editor.layerLocked(), "Layer isolation modified the editor document");
+
+    // Draw the board itself without labels or swatches. Fix the camera above
+    // the two endpoints so a pixel check can isolate each visible surface.
+    editor.markDraftSaved();
+    const auto committed = editor.documentDefinition();
+    const auto history = editor.historyStats();
+    using Preview = RenderFrameBuilder::EditorInput::LinkColorPreview;
+    const VkExtent2D extent = renderer.renderExtent();
+    const UiRect viewport { {}, { static_cast<float>(extent.width), static_cast<float>(extent.height) } };
+    UiDrawData ui;
+    ui.viewportSize = viewport.size;
+    std::optional<Vec2> gateCenter;
+    std::optional<Vec2> plateCenter;
+    const auto render = [&](std::optional<Preview> preview) {
+        auto frame = RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = editor, .settings = settings,
+            .allowBoardExpansion = false, .linkColorPreview = preview,
+        });
+        frame.skyCloudsEnabled = false;
+        frame.cameraOverride = RenderFrameData::CameraOverride {
+            .position = { 4.5f, 4.0f, 10.0f }, .forward = { 0.0f, 0.0f, -1.0f },
+            .verticalFovDegrees = 48.0f,
+        };
+        renderer.waitForAssets(renderAssetRequirementsForFrame(frame));
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            const auto preparedFrame = renderer.prepareFrame(frame);
+            gateCenter = renderer.projectToPixels(preparedFrame, { 6.5f, 2.5f, 1.97f }, viewport);
+            plateCenter = renderer.projectToPixels(preparedFrame, { 4.5f, 4.5f, 1.05f }, viewport);
+            renderer.beginDebugUiFrame();
+            renderer.drawFrame(preparedFrame, ui);
+            verify(!renderer.hasFatalFailure(), "Link color preview frame failed to render");
+        }
+        return renderer.captureRenderedFrame();
+    };
+    const auto baseline = render(std::nullopt);
+    const auto preview = render(Preview {
+        .kind = Preview::Kind::Device, .original = committedColor, .color = candidateColor,
+    });
+    const auto restored = render(std::nullopt);
+    const auto localDifference = [&](const ImageData& right, std::optional<Vec2> center) {
+        constexpr uint32_t radius = 8;
+        constexpr float radiusPixels = static_cast<float>(radius);
+        verify(center && center->x >= radiusPixels && center->y >= radiusPixels &&
+                center->x + radiusPixels <= static_cast<float>(baseline.width) &&
+                center->y + radiusPixels <= static_cast<float>(baseline.height) &&
+                baseline.width == right.width && baseline.height == right.height,
+            "Link color pixel sample fell outside the rendered board");
+        const auto x = static_cast<uint32_t>(center->x);
+        const auto y = static_cast<uint32_t>(center->y);
+        return difference(baseline, right, x - radius, y - radius, x + radius, y + radius);
+    };
+    const double gateChange = localDifference(preview, gateCenter);
+    const double plateChange = localDifference(preview, plateCenter);
+    std::cout << "Maker link color preview: gate change=" << gateChange
+              << ", plate change=" << plateChange << '\n';
+    verify(gateChange > 2.0, "Live preview did not recolor the displayed gate");
+    verify(plateChange > 2.0, "Live preview did not recolor the displayed pressure plate");
+    verify(localDifference(restored, gateCenter) < 0.1 && localDifference(restored, plateCenter) < 0.1,
+        "Clearing the live preview did not restore the displayed link colors");
+    const auto afterPreview = editor.historyStats();
+    verify(!editor.dirty() && editor.documentDefinition() == committed &&
+            afterPreview.undoRecords == history.undoRecords && afterPreview.redoRecords == history.redoRecords,
+        "Live preview changed the Maker document or its edit history");
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a Maker link rendering error");
 }
 
 void verifyUiColorGradient(SDL_Window* window, const std::filesystem::path& root,

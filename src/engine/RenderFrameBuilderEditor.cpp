@@ -128,6 +128,18 @@ public:
     }
 
 private:
+    using LinkColorKind = RenderFrameBuilder::EditorInput::LinkColorPreview::Kind;
+
+    [[nodiscard]] Vec3 previewLinkColor(Vec3 authored, LinkColorKind kind, uint32_t scope = 0) const
+    {
+        const auto& preview = input_.linkColorPreview;
+        if (preview && preview->kind == kind && preview->portalScope == scope &&
+            LevelEditor::sameLinkColor(authored, preview->original)) {
+            return preview->color;
+        }
+        return authored;
+    }
+
     [[nodiscard]] bool removedByResize(GridPosition3 cell) const
     {
         return input_.resizePreviewSize &&
@@ -1158,7 +1170,10 @@ private:
                         (gate.startOpen
                                 ? config::gateStartOpenEditorOpacity
                                 : 1.0f),
-                    input_.worldAnimationTimeSeconds);
+                    input_.worldAnimationTimeSeconds,
+                    found != input_.editor.gates().end()
+                        ? std::optional { previewLinkColor(gate.color, LinkColorKind::Device) }
+                        : std::nullopt);
                 if (removedByResize(cell) && frame.particles.size() > firstParticle) {
                     frame.particles.erase(frame.particles.begin() + firstParticle, frame.particles.end());
                 }
@@ -1189,9 +1204,8 @@ private:
                 GridPosition3 { x, y, z },
                 &Level::Portal::cell);
             if (portal != input_.editor.portals().end()) {
-                renderTile.color = {
-                    portal->color.x, portal->color.y, portal->color.z, 1.0f
-                };
+                const auto tint = previewLinkColor(portal->color, LinkColorKind::Portal, portal->scope);
+                renderTile.color = { tint.x, tint.y, tint.z, 1.0f };
             }
         }
         if (tileTypeIsSignalSource(tile)) {
@@ -1202,12 +1216,8 @@ private:
                 GridPosition3 { x, y, z },
                 &Level::LinkColor::cell);
             if (color != input_.editor.pressurePlateColors().end()) {
-                renderTile.color = {
-                    color->color.x,
-                    color->color.y,
-                    color->color.z,
-                    1.0f,
-                };
+                const auto tint = previewLinkColor(color->color, LinkColorKind::Device);
+                renderTile.color = { tint.x, tint.y, tint.z, 1.0f };
             }
         }
         if (tileTypeIsElevator(tile)) {
@@ -1216,7 +1226,7 @@ private:
                 input_.editor.elevators(), cell, &Level::Elevator::cell);
             renderTile.color = elevatorPlatformColor(
                 found != input_.editor.elevators().end()
-                    ? found->color
+                    ? previewLinkColor(found->color, LinkColorKind::Device)
                     : Level::Elevator {}.color,
                 1.0f);
         }
@@ -1225,7 +1235,7 @@ private:
             const auto found = std::ranges::find(
                 input_.editor.minecarts(), cell, &Level::Minecart::cell);
             const Vec3 color = found != input_.editor.minecarts().end()
-                ? found->color
+                ? previewLinkColor(found->color, LinkColorKind::Device)
                 : Level::Minecart {}.color;
             renderTile.color = { color.x, color.y, color.z, 1.0f };
             renderTile.modelRotationQuarterTurns = railOrientationQuarterTurns(
@@ -1237,7 +1247,7 @@ private:
             const auto found = std::ranges::find(
                 input_.editor.rotators(), cell, &Level::Rotator::cell);
             const Vec3 color = found != input_.editor.rotators().end()
-                ? found->color
+                ? previewLinkColor(found->color, LinkColorKind::Device)
                 : Level::Rotator {}.color;
             renderTile.color = { color.x, color.y, color.z, 1.0f };
         }
@@ -1246,7 +1256,7 @@ private:
             const auto found = std::ranges::find(
                 input_.editor.lockPlates(), cell, &Level::LockPlate::cell);
             const Vec3 color = found != input_.editor.lockPlates().end()
-                ? found->color
+                ? previewLinkColor(found->color, LinkColorKind::Device)
                 : Level::LockPlate {}.color;
             renderTile.color = { color.x, color.y, color.z, 1.0f };
         }
@@ -1281,7 +1291,7 @@ private:
         if (!preview && !pickOnly && !removedByResize(renderTile.cell) && tileTypeIsMovableObject(tile)) {
             if (const std::optional<Vec3> linkColor =
                     input_.editor.objectLinkColorAt({ x, y, z })) {
-                appendLinkedObjectAura(frame, renderTile, *linkColor);
+                appendLinkedObjectAura(frame, renderTile, previewLinkColor(*linkColor, LinkColorKind::Object));
             }
         }
         if (tileTypeIsPortal(tile)) {
@@ -1459,7 +1469,7 @@ private:
                 { cell.x, cell.y, stop },
                 input_.manifest,
                 input_.settings);
-            ghost.color = elevatorPlatformColor(found->color, 1.0f);
+            ghost.color = elevatorPlatformColor(previewLinkColor(found->color, LinkColorKind::Device), 1.0f);
             ghost.isEditorPreview = true;
             ghost.pickable = false;
             ghost.showGrid = false;

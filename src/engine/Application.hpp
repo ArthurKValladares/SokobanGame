@@ -243,7 +243,7 @@ private:
     void openMakerDraftDialog(MakerDraftDialogMode mode, std::string_view name = {});
     void closeMakerDraftDialog();
     void handleMakerDraftDialogAction(const MakerDraftDialogAction& action);
-    void openMakerColorDialog(Vec3 color, std::string_view groupName);
+    void openMakerColorDialog(LevelEditor::LinkEndpoint endpoint, Vec3 color, std::string_view groupName);
     void closeMakerColorDialog();
     void drawMakerColorDialog(Vec2 viewport, float scale, const MakerViewInput& input);
     void startMakerPlaytest();
@@ -414,6 +414,7 @@ private:
     std::optional<MakerDraftDialog> makerDraftDialog_;
     UiColorPicker makerColorPicker_;
     struct MakerColorDialog {
+        LevelEditor::LinkEndpoint endpoint;
         Vec3 initial;
         UiNavigation tabNavigation;
         bool cancelRequested = false;

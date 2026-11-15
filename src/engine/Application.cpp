@@ -1059,7 +1059,7 @@ bool Application::handleNativeTextInputEvent(const SDL_Event& event)
     return result != SdlTextInputResult::Ignored;
 }
 
-void Application::openMakerColorDialog(Vec3 color, std::string_view groupName)
+void Application::openMakerColorDialog(LinkEndpoint endpoint, Vec3 color, std::string_view groupName)
 {
     makerSession_->endStroke();
     blurNativeTextInput();
@@ -1067,7 +1067,7 @@ void Application::openMakerColorDialog(Vec3 color, std::string_view groupName)
     makerHover_.reset();
     const std::string title = groupName.empty() ? "Group Color" : std::string(groupName) + " Color";
     makerColorPicker_.open(color, title);
-    makerColorDialog_ = MakerColorDialog { .initial = color };
+    makerColorDialog_ = MakerColorDialog { .endpoint = endpoint, .initial = color };
 }
 
 void Application::closeMakerColorDialog()
@@ -1098,12 +1098,13 @@ void Application::drawMakerColorDialog(Vec2 viewport, float scale, const MakerVi
     if (makerColorDialog_->cancelRequested || action.command == Command::Cancel) {
         closeMakerColorDialog();
     } else if (action.command == Command::Apply) {
-        if (LevelEditor::sameLinkColor(action.color, makerColorDialog_->initial) ||
-            makerSession_->recolorSelectedLinkGroup(action.color)) {
+        const bool sameGroup = makerSession_->selectedLinkEndpoint() == makerColorDialog_->endpoint;
+        if (sameGroup && (LevelEditor::sameLinkColor(action.color, makerColorDialog_->initial) ||
+                makerSession_->recolorSelectedLinkGroup(action.color))) {
             closeMakerColorDialog();
         } else {
             const auto status = makerSession_->status();
-            makerColorPicker_.setError(status.empty() ? "The selected group is unavailable." : status);
+            makerColorPicker_.setError(!sameGroup || status.empty() ? "The selected group is unavailable." : status);
         }
     } else if (action.command == Command::CopyHex && !SDL_SetClipboardText(action.hex.c_str())) {
         makerColorPicker_.setError("Could not copy the color to the clipboard.");
@@ -1488,8 +1489,8 @@ void Application::drawMakerWorkspace(
         }
         return;
     case MakerCommand::EditLinkGroupColor:
-        if (wiring.inspector.groupColor) {
-            openMakerColorDialog(*wiring.inspector.groupColor, wiring.connectionLabel);
+        if (selectedLink && wiring.inspector.groupColor) {
+            openMakerColorDialog(*selectedLink, *wiring.inspector.groupColor, wiring.connectionLabel);
         }
         return;
     case MakerCommand::AssignLinkGroup:
@@ -4055,6 +4056,28 @@ RenderFrameData Application::buildRenderFrame(
         }
         const auto resizePreviewSize = makerDraftDialog_ && showsMakerResizePreview(makerDraftDialog_->mode)
             ? std::optional { makerView_.resizePreviewSize() } : std::nullopt;
+        using LinkColorPreview = RenderFrameBuilder::EditorInput::LinkColorPreview;
+        using ColorKind = LinkColorPreview::Kind;
+        std::optional<LinkColorPreview> linkColorPreview;
+        // UI input is processed before this frame is built, so a drag or
+        // valid text edit reaches the scene on the same frame as the picker.
+        if (const auto& dialog = makerColorDialog_;
+            dialog && !LevelEditor::sameLinkColor(dialog->initial, makerColorPicker_.color())) {
+            const auto endpoint = dialog->endpoint;
+            const auto color = makerColorPicker_.color();
+            if (endpoint.kind == LinkKind::Portal) {
+                const auto& portals = editor.portals();
+                const auto portal = std::ranges::find(portals, endpoint.cell, &Level::Portal::cell);
+                if (portal != portals.end()) {
+                    linkColorPreview = LinkColorPreview { ColorKind::Portal, dialog->initial, color, portal->scope };
+                }
+            } else {
+                linkColorPreview = LinkColorPreview {
+                    endpoint.kind == LinkKind::Object ? ColorKind::Object : ColorKind::Device,
+                    dialog->initial, color,
+                };
+            }
+        }
         RenderFrameData frame = RenderFrameBuilder::buildEditor({
             .manifest = assetManifest_,
             .editor = editor,
@@ -4068,6 +4091,7 @@ RenderFrameData Application::buildRenderFrame(
             .groundGeometryCache = &editorGroundGeometryCache_,
             .resizePreviewSize = resizePreviewSize,
             .isolateActiveLayer = makerSession_->tool() == MakerSession::Tool::Connect && makerSession_->linkLayerIsolated(),
+            .linkColorPreview = linkColorPreview,
         }, arena);
         frame.cameraPitchDegrees = 55.0f;
         frame.cameraYawDegrees = 24.0f;

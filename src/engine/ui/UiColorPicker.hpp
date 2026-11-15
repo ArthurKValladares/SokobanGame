@@ -32,6 +32,7 @@ class UiColorPicker {
 public:
     void open(Vec3 initial, std::string_view title = "Group Color");
     void setError(std::string_view error);
+    [[nodiscard]] Vec3 color() const { return color_; }
     [[nodiscard]] UiColorPickerAction draw(UiContext& ui, Vec2 viewport, float scale,
         const UiColorPickerInput& input = {});
 
@@ -66,6 +67,10 @@ private:
     std::string parsedText_;
     std::string title_;
     std::string error_;
+    std::optional<Vec2> panelPosition_;
+    std::optional<Vec2> headerGrab_;
+    Vec2 previousViewport_ {};
+    Vec2 previousPanelSize_ {};
     UiControlId focus_ = 0;
     UiRect caret_ {};
     float textSize_ = 16.0f;

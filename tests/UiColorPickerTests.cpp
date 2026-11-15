@@ -54,6 +54,7 @@ void testColorFieldEditing(const FontAtlas& font)
     edit->setText("#112233");
     CHECK(draw(ui, picker, click(hexField)).command == Command::None);
     CHECK(picker.textFocused());
+    CHECK(ui::color::format(picker.color(), Format::Hex) == "#112233");
     picker.submitText();
     CHECK(!picker.textFocused());
 
@@ -65,6 +66,7 @@ void testColorFieldEditing(const FontAtlas& font)
     picker.submitText();
     CHECK(picker.textFocused());
     CHECK(draw(ui, picker, click(applyButton)).command == Command::None);
+    CHECK(ui::color::format(picker.color(), Format::Hex) == "#112233");
     edit->setText("0, 128, 255");
     const auto copy = draw(ui, picker, click(copyButton));
     CHECK(copy.command == Command::CopyHex && copy.hex == "#0080FF");
@@ -136,6 +138,47 @@ void testCompactColorPanel(const FontAtlas& font)
     CHECK(ui.droppedCommands() == 0);
 }
 
+void testWindowHeaderDrag(const FontAtlas& font)
+{
+    TEST("pickerHeaderDragCapturesPointerAndRefitsAfterResize");
+    UiContext ui(font);
+    UiColorPicker picker;
+    constexpr Vec2 large { 1024.0f, 780.0f };
+    constexpr Vec3 initial { 1.0f, 0.0f, 0.0f };
+    constexpr Vec2 headerSize { 608.0f, 49.0f };
+    picker.open(initial);
+    const auto headerPosition = [&] {
+        const auto header = std::ranges::find_if(ui.drawData().commands, [&](const UiDrawCommand& command) {
+            return command.kind == UiDrawKind::Solid && command.rect.size == headerSize;
+        });
+        CHECK(header != ui.drawData().commands.end());
+        return header != ui.drawData().commands.end() ? header->rect.position : Vec2 {};
+    };
+    (void)draw(ui, picker, {}, {}, large);
+    const Vec2 centered = headerPosition();
+    CHECK(std::ranges::none_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
+        return command.rect == UiRect { {}, large };
+    }));
+
+    const Vec2 press { 300.0f, 190.0f };
+    CHECK(draw(ui, picker, { .position = press, .down = true, .pressedAt = press }, {}, large).command == Command::None);
+    const Vec2 move { 540.0f, 420.0f };
+    CHECK(draw(ui, picker, { .position = move, .down = true }, {}, large).command == Command::None);
+    CHECK(headerPosition() == centered + move - press);
+    CHECK(draw(ui, picker, { .position = large, .releasedAt = large }, {}, large).command == Command::None);
+    const Vec2 parked = headerPosition();
+    CHECK(parked.y > centered.y + move.y - press.y);
+    CHECK(parked.x < large.x);
+    CHECK(parked.y + headerSize.y <= large.y);
+    CHECK(!picker.textFocused() && picker.color() == initial);
+
+    CHECK(draw(ui, picker, click(applyButton)).command == Command::Apply);
+    CHECK(headerPosition() == (Vec2 { 20.0f, 18.0f }));
+    picker.open(initial);
+    (void)draw(ui, picker, {}, {}, large);
+    CHECK(headerPosition() == centered);
+}
+
 } // namespace
 
 int main()
@@ -144,6 +187,7 @@ int main()
     testColorFieldEditing(font);
     testColorPanelDrag(font);
     testCompactColorPanel(font);
+    testWindowHeaderDrag(font);
     std::cout << "UiColorPickerTests: " << checks - failures << " of " << checks << " checks passed\n";
     return failures != 0 ? 1 : 0;
 }
